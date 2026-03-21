@@ -58,3 +58,6 @@ Thumbs.db
 /test_*
 
 dev_docs/
+AGENTS.md
+TASK_BREAKDOWN.md
+dev_progress.md
