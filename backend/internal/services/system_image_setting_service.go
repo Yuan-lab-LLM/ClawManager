@@ -28,7 +28,7 @@ var supportedSystemImageTypes = map[string]string{
 }
 
 var defaultSystemImageSettings = map[string]string{
-	"openclaw": "docker.io/clawreef/openclaw-desktop:latest",
+	"openclaw": "ericpearlee/openclaw:v2026.3.13",
 	"ubuntu":   "lscr.io/linuxserver/webtop:ubuntu-xfce",
 	"webtop":   "lscr.io/linuxserver/webtop:ubuntu-xfce",
 	"debian":   "docker.io/clawreef/debian-desktop:12",

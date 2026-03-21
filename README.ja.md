@@ -87,7 +87,6 @@ ClawManager は次のような環境を想定しています：
 - [Installation](#installation)
 - [Quick Start](#quick-start)
 - [Configuration](#configuration)
-- [Documentation](#documentation)
 - [License](#license)
 
 ## 🆕 ClawManager New Features
@@ -234,31 +233,10 @@ kubectl cluster-info
 
 インストール前に以下を確認してください：
 
-- MySQL が利用可能
 - Kubernetes が利用可能
 - `kubectl get nodes` が正常に動作する
 
-MySQL を起動し、データベースマイグレーションを実行します：
-
-```bash
-cd backend
-make docker-up
-make migrate
-```
-
-依存関係をインストールします：
-
-```bash
-cd frontend
-npm install
-
-cd ../backend
-go mod tidy
-```
-
-### Kubernetes デプロイ例
-
-同梱マニフェストをそのまま適用します：
+同梱の Kubernetes YAML をそのまま適用します：
 
 ```bash
 kubectl apply -f deployments/k8s/clawmanager.yaml
@@ -267,28 +245,6 @@ kubectl get svc -A
 ```
 
 ## ⚡ Quick Start
-
-### Backend
-
-```bash
-cd backend
-make run
-```
-
-既定のバックエンドアドレス：
-
-- `http://localhost:9001`
-
-### Frontend
-
-```bash
-cd frontend
-npm run dev
-```
-
-既定のフロントエンドアドレス：
-
-- `http://localhost:9002`
 
 ### Default Accounts
 
@@ -339,16 +295,6 @@ Username,Email,Role,Max Instances,Max CPU Cores,Max Memory (GB),Max Storage (GB)
 - `Max GPU Count (optional)` は任意
 - それ以外の列は必須
 - quota 値はクラスタの容量計画と整合している必要があります
-
-## 📘 Documentation
-
-- [TASK_BREAKDOWN.md](./TASK_BREAKDOWN.md)
-- [dev_progress.md](./dev_progress.md)
-- [dev_docs/README_DOCS.md](./dev_docs/README_DOCS.md)
-- [dev_docs/ARCHITECTURE_SIMPLE.md](./dev_docs/ARCHITECTURE_SIMPLE.md)
-- [dev_docs/MONITORING_DASHBOARD.md](./dev_docs/MONITORING_DASHBOARD.md)
-- [backend/README.md](./backend/README.md)
-- [frontend/README.md](./frontend/README.md)
 
 ## 📄 License
 

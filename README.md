@@ -87,7 +87,6 @@ In short, ClawManager is:
 - [Installation](#installation)
 - [Quick Start](#quick-start)
 - [Configuration](#configuration)
-- [Documentation](#documentation)
 - [License](#license)
 
 ## 🆕 ClawManager New Features
@@ -234,31 +233,10 @@ If you plan to run multiple desktop instances simultaneously, allocate more CPU,
 
 Before installation, make sure:
 
-- MySQL is available
 - Kubernetes is available
 - `kubectl get nodes` works
 
-Start MySQL and run database migrations:
-
-```bash
-cd backend
-make docker-up
-make migrate
-```
-
-Install dependencies:
-
-```bash
-cd frontend
-npm install
-
-cd ../backend
-go mod tidy
-```
-
-### Kubernetes Deployment Example
-
-Apply the bundled manifest:
+Deploy with the bundled Kubernetes manifest:
 
 ```bash
 kubectl apply -f deployments/k8s/clawmanager.yaml
@@ -267,28 +245,6 @@ kubectl get svc -A
 ```
 
 ## ⚡ Quick Start
-
-### Backend
-
-```bash
-cd backend
-make run
-```
-
-Default backend address:
-
-- `http://localhost:9001`
-
-### Frontend
-
-```bash
-cd frontend
-npm run dev
-```
-
-Default frontend address:
-
-- `http://localhost:9002`
 
 ### Default Accounts
 
@@ -339,16 +295,6 @@ Notes:
 - `Max GPU Count (optional)` is optional
 - all other columns are required
 - quota values should match your cluster capacity planning
-
-## 📘 Documentation
-
-- [TASK_BREAKDOWN.md](./TASK_BREAKDOWN.md)
-- [dev_progress.md](./dev_progress.md)
-- [dev_docs/README_DOCS.md](./dev_docs/README_DOCS.md)
-- [dev_docs/ARCHITECTURE_SIMPLE.md](./dev_docs/ARCHITECTURE_SIMPLE.md)
-- [dev_docs/MONITORING_DASHBOARD.md](./dev_docs/MONITORING_DASHBOARD.md)
-- [backend/README.md](./backend/README.md)
-- [frontend/README.md](./frontend/README.md)
 
 ## 📄 License
 

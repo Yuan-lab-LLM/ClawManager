@@ -87,7 +87,6 @@ ClawManager는 다음과 같은 환경을 위해 설계되었습니다:
 - [Installation](#installation)
 - [Quick Start](#quick-start)
 - [Configuration](#configuration)
-- [Documentation](#documentation)
 - [License](#license)
 
 ## 🆕 ClawManager New Features
@@ -234,31 +233,10 @@ kubectl cluster-info
 
 설치 전에 다음을 확인하세요:
 
-- MySQL 사용 가능
 - Kubernetes 사용 가능
 - `kubectl get nodes` 정상 동작
 
-MySQL을 시작하고 데이터베이스 마이그레이션을 실행합니다:
-
-```bash
-cd backend
-make docker-up
-make migrate
-```
-
-의존성을 설치합니다:
-
-```bash
-cd frontend
-npm install
-
-cd ../backend
-go mod tidy
-```
-
-### Kubernetes 배포 예시
-
-저장소에 포함된 매니페스트를 바로 적용합니다:
+저장소에 포함된 Kubernetes YAML로 바로 배포합니다:
 
 ```bash
 kubectl apply -f deployments/k8s/clawmanager.yaml
@@ -267,28 +245,6 @@ kubectl get svc -A
 ```
 
 ## ⚡ Quick Start
-
-### Backend
-
-```bash
-cd backend
-make run
-```
-
-기본 백엔드 주소:
-
-- `http://localhost:9001`
-
-### Frontend
-
-```bash
-cd frontend
-npm run dev
-```
-
-기본 프론트엔드 주소:
-
-- `http://localhost:9002`
 
 ### Default Accounts
 
@@ -339,16 +295,6 @@ Username,Email,Role,Max Instances,Max CPU Cores,Max Memory (GB),Max Storage (GB)
 - `Max GPU Count (optional)`은 선택 사항입니다
 - 그 외 모든 열은 필수입니다
 - quota 값은 클러스터 용량 계획과 맞아야 합니다
-
-## 📘 Documentation
-
-- [TASK_BREAKDOWN.md](./TASK_BREAKDOWN.md)
-- [dev_progress.md](./dev_progress.md)
-- [dev_docs/README_DOCS.md](./dev_docs/README_DOCS.md)
-- [dev_docs/ARCHITECTURE_SIMPLE.md](./dev_docs/ARCHITECTURE_SIMPLE.md)
-- [dev_docs/MONITORING_DASHBOARD.md](./dev_docs/MONITORING_DASHBOARD.md)
-- [backend/README.md](./backend/README.md)
-- [frontend/README.md](./frontend/README.md)
 
 ## 📄 License
 

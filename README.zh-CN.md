@@ -87,7 +87,6 @@ ClawManager 适用于这些环境：
 - [Installation](#installation)
 - [Quick Start](#quick-start)
 - [Configuration](#configuration)
-- [Documentation](#documentation)
 - [License](#license)
 
 ## 🆕 ClawManager New Features
@@ -234,31 +233,10 @@ kubectl cluster-info
 
 安装前请确认：
 
-- MySQL 可用
 - Kubernetes 可用
 - `kubectl get nodes` 正常工作
 
-启动 MySQL 并执行数据库迁移：
-
-```bash
-cd backend
-make docker-up
-make migrate
-```
-
-安装依赖：
-
-```bash
-cd frontend
-npm install
-
-cd ../backend
-go mod tidy
-```
-
-### Kubernetes 部署示例
-
-使用仓库内置清单直接部署：
+直接使用仓库内置的 Kubernetes YAML 部署：
 
 ```bash
 kubectl apply -f deployments/k8s/clawmanager.yaml
@@ -267,28 +245,6 @@ kubectl get svc -A
 ```
 
 ## ⚡ Quick Start
-
-### Backend
-
-```bash
-cd backend
-make run
-```
-
-默认后端地址：
-
-- `http://localhost:9001`
-
-### Frontend
-
-```bash
-cd frontend
-npm run dev
-```
-
-默认前端地址：
-
-- `http://localhost:9002`
 
 ### Default Accounts
 
@@ -339,16 +295,6 @@ Username,Email,Role,Max Instances,Max CPU Cores,Max Memory (GB),Max Storage (GB)
 - `Max GPU Count (optional)` 是可选项
 - 其他列都是必填
 - quota 数值应与你的集群容量规划保持一致
-
-## 📘 Documentation
-
-- [TASK_BREAKDOWN.md](./TASK_BREAKDOWN.md)
-- [dev_progress.md](./dev_progress.md)
-- [dev_docs/README_DOCS.md](./dev_docs/README_DOCS.md)
-- [dev_docs/ARCHITECTURE_SIMPLE.md](./dev_docs/ARCHITECTURE_SIMPLE.md)
-- [dev_docs/MONITORING_DASHBOARD.md](./dev_docs/MONITORING_DASHBOARD.md)
-- [backend/README.md](./backend/README.md)
-- [frontend/README.md](./frontend/README.md)
 
 ## 📄 License
 
