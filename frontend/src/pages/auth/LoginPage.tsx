@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useI18n } from '../../contexts/I18nContext';
@@ -10,6 +10,7 @@ const LoginPage: React.FC = () => {
   const { login, isLoading, error, clearError } = useAuth();
   const { t } = useI18n();
   const navigate = useNavigate();
+  const formRef = useRef<HTMLFormElement | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -21,6 +22,34 @@ const LoginPage: React.FC = () => {
     } catch (err) {
       // Error is handled by auth context
     }
+  };
+
+  const handlePasswordKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== 'Enter' || e.nativeEvent.isComposing) {
+      return;
+    }
+
+    e.preventDefault();
+    formRef.current?.requestSubmit();
+  };
+
+  const handleFormKeyDownCapture = (e: React.KeyboardEvent<HTMLFormElement>) => {
+    if (e.key !== 'Enter' || e.nativeEvent.isComposing) {
+      return;
+    }
+
+    const target = e.target as HTMLElement | null;
+    if (!target) {
+      return;
+    }
+
+    const tagName = target.tagName.toLowerCase();
+    if (tagName === 'textarea') {
+      return;
+    }
+
+    e.preventDefault();
+    formRef.current?.requestSubmit();
   };
 
   return (
@@ -44,7 +73,12 @@ const LoginPage: React.FC = () => {
           </div>
         )}
         
-        <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
+        <form
+          ref={formRef}
+          className="mt-8 space-y-6"
+          onSubmit={handleSubmit}
+          onKeyDownCapture={handleFormKeyDownCapture}
+        >
           <div className="space-y-4">
             <div>
               <label htmlFor="username" className="block text-sm font-medium text-gray-700">
@@ -57,6 +91,7 @@ const LoginPage: React.FC = () => {
                 required
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
+                autoComplete="username"
                 className="app-input mt-1 block w-full"
                 placeholder={t('auth.usernamePlaceholder')}
               />
@@ -73,6 +108,8 @@ const LoginPage: React.FC = () => {
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
+                onKeyDown={handlePasswordKeyDown}
+                autoComplete="current-password"
                 className="app-input mt-1 block w-full"
                 placeholder={t('auth.passwordPlaceholder')}
               />
