@@ -160,17 +160,10 @@ jobs:
             ${{ env.IMAGE_URI }}:${{ env.TAG_NAME }}
             ${{ env.IMAGE_URI }}:latest
 
-      - name: Build release highlights
+      - name: Build release asset notes
         shell: bash
         run: |
-          cat <<EOF > /tmp/release-highlights.md
-          ## Highlights
-
-          - Added automated release flow for scheduled checks and \`v*\` tag publishing.
-          - Added in-app delete confirmation dialogs instead of browser-native prompts.
-          - Fixed WebSocket authentication so real-time status updates can connect in browser environments.
-          - Fixed Linux container startup script handling and enforced LF line endings for shell scripts.
-
+          cat <<EOF > /tmp/release-assets.md
           ## Release Assets
 
           Image: \`${IMAGE_URI}:${TAG_NAME}\`
@@ -184,4 +177,5 @@ jobs:
         with:
           tag_name: ${{ env.TAG_NAME }}
           generate_release_notes: true
-          body_path: /tmp/release-highlights.md
+          append_body: true
+          body_path: /tmp/release-assets.md
