@@ -55,7 +55,11 @@ func buildRuntimeConfig(instanceType, osType, osVersion string, registry, tag *s
 			"SUBFOLDER":   "/",
 		}
 	case "openclaw":
-		config.Image = fmt.Sprintf("%s/%s:%s", defaultRegistry, "openclaw-desktop", defaultTag)
+		if (registry == nil || strings.TrimSpace(*registry) == "") && (tag == nil || strings.TrimSpace(*tag) == "") {
+			config.Image = defaultSystemImageSettings["openclaw"]
+		} else {
+			config.Image = fmt.Sprintf("%s/%s:%s", defaultRegistry, "openclaw-desktop", defaultTag)
+		}
 	case "debian":
 		config.Image = fmt.Sprintf("%s/%s:%s", defaultRegistry, "debian-desktop", defaultTag)
 	case "centos":
