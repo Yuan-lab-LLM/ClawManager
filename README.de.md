@@ -11,7 +11,7 @@
 <p align="center">
   <strong>Sprachen:</strong>
   <a href="./README.md">English</a> |
-  <a href="./README.zh-CN.md">中文</a> |
+  <a href="./README.zh-CN.md">简体中文</a> |
   <a href="./README.ja.md">日本語</a> |
   <a href="./README.ko.md">한국어</a> |
   Deutsch
@@ -23,6 +23,16 @@
   <img src="https://img.shields.io/badge/React-19-20232A?style=for-the-badge&logo=react&logoColor=61DAFB" alt="React 19" />
   <img src="https://img.shields.io/badge/Kubernetes-Native-326CE5?style=for-the-badge&logo=kubernetes&logoColor=white" alt="Kubernetes Native" />
   <img src="https://img.shields.io/badge/License-MIT-2ea44f?style=for-the-badge" alt="MIT License" />
+</p>
+
+## News
+
+- `2026-03-26`: Die AI-Gateway-Dokumentation und Uebersicht wurden aktualisiert, inklusive Modell-Governance, Audit-Trace, Kostenrechnung und Risikokontrolle. Siehe [AI Gateway](#ai-gateway).
+
+<p align="center">
+  <img src="./docs/main/admin.png" alt="ClawManager Admin" width="32%" />
+  <img src="./docs/main/portal.png" alt="ClawManager Portal" width="32%" />
+  <img src="./docs/main/aigateway.png" alt="ClawManager AI Gateway" width="32%" />
 </p>
 
 ## Was Es Ist
@@ -41,12 +51,9 @@ Es ist fuer Umgebungen gedacht, in denen:
 - Ein Admin-Panel fuer Benutzer, Quotas, Instanzen und Runtime-Images
 - OpenClaw-Unterstuetzung mit Import und Export von Speicher und Einstellungen
 - Sicherer Desktop-Zugriff ueber die Plattform statt direkter Service-Freigabe
+- AI Gateway fuer kontrollierten Modellzugriff, Audit-Trails, Kostenanalyse und Risikokontrolle
 - Kubernetes-naher Deployment- und Betriebsablauf
 - Geeignet sowohl fuer zentral gesteuerte Rollouts als auch fuer Self-Service-Erstellung
-
-<p align="center">
-  <img src="frontend/public/clawmanager_overview.png" alt="ClawManager Overview" width="100%" />
-</p>
 
 ## Schnellstart
 
@@ -115,8 +122,20 @@ docker build -t clawmanager:latest .
 - Benutzerbezogene Quota-Kontrolle fuer CPU, Speicher, Storage, GPU und Instanzanzahl
 - Cluster-Ressourcenuebersicht fuer Nodes, CPU, Speicher und Storage
 - Tokenbasierter Desktop-Zugriff mit WebSocket-Weiterleitung
+- AI Gateway fuer Modellverwaltung, nachvollziehbare Audit-Logs, Kostenrechnung und Risikokontrolle
 - CSV-basierter Massenimport von Benutzern
 - Mehrsprachige Oberflaeche
+
+## AI Gateway
+
+AI Gateway ist die Governance-Ebene fuer den Modellzugriff in ClawManager. Es bietet OpenClaw-Instanzen einen einheitlichen OpenAI-kompatiblen Einstiegspunkt und ergaenzt Upstream-Provider um Richtlinien, Audit und Kostenkontrolle.
+
+- Modellverwaltung fuer regulaere und sichere Modelle sowie Provider-Anbindung, Aktivierung, Endpoint-Konfiguration und Preisrichtlinien
+- End-to-End-Audit- und Trace-Aufzeichnungen fuer Requests, Responses, Routing-Entscheidungen und Risiko-Treffer
+- Eingebaute Kostenrechnung mit Token-Erfassung und Nutzungsschaetzung
+- Risikokontrolle ueber konfigurierbare Regeln mit automatischen Aktionen wie `block` und `route_secure_model`
+
+Screenshots, die komplette Funktionsaufstellung und den Ablauf der Modellwahl und des Routings findest du in [docs/aigateway.md](./docs/aigateway.md).
 
 ## Produktablauf
 

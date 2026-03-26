@@ -58,6 +58,7 @@ Thumbs.db
 /test_*
 
 dev_docs/
+devplan.md
 AGENTS.md
 TASK_BREAKDOWN.md
 dev_progress.md

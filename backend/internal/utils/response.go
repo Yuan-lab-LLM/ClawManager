@@ -4,6 +4,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
@@ -39,16 +40,33 @@ func HandleError(c *gin.Context, err error) {
 
 	// Handle known errors
 	errStr := err.Error()
+	if strings.HasPrefix(errStr, "provider discovery failed:") || strings.HasPrefix(errStr, "failed to call provider discovery endpoint:") || strings.HasPrefix(errStr, "failed to decode provider discovery response:") {
+		Error(c, http.StatusBadGateway, errStr)
+		return
+	}
+	if strings.HasPrefix(errStr, "failed to get secret ") || strings.HasPrefix(errStr, "secret key ") || strings.HasPrefix(errStr, "secret value is empty") {
+		Error(c, http.StatusBadGateway, errStr)
+		return
+	}
+
 	switch errStr {
 	case "username already exists", "email already exists", "instance name already exists":
 		Error(c, http.StatusConflict, errStr)
-	case "unsupported instance type", "image is required":
+	case "display name already exists":
+		Error(c, http.StatusConflict, errStr)
+	case "unsupported instance type", "image is required", "display name is required", "provider type is required", "base URL is required", "provider model name is required", "input price must be non-negative", "output price must be non-negative", "base URL is invalid", "automatic model discovery for azure-openai is not supported yet", "provider discovery is not supported", "model is required", "messages are required", "streaming is not supported yet", "provider type is not supported yet", "trace id is required", "event type is required", "message is required", "risk hit record is incomplete", "rule id is required", "rule display name is required", "rule pattern is required", "rule pattern is invalid", "risk severity is invalid", "risk action is invalid", "sample text is required", "secret ref format is invalid", "secret namespace is required in secret ref":
 		Error(c, http.StatusBadRequest, errStr)
+	case "model is not active or does not exist":
+		Error(c, http.StatusNotFound, errStr)
+	case "risk rule not found":
+		Error(c, http.StatusNotFound, errStr)
+	case "sensitive content requires an active secure model", "request was blocked by risk policy":
+		Error(c, http.StatusForbidden, errStr)
 	case "invalid username or password", "account is disabled":
 		Error(c, http.StatusUnauthorized, errStr)
 	case "current password is incorrect":
 		Error(c, http.StatusBadRequest, errStr)
-	case "user not found":
+	case "user not found", "model not found":
 		Error(c, http.StatusNotFound, errStr)
 	default:
 		// For development, show actual error; for production, hide details

@@ -2,7 +2,10 @@ package services
 
 import (
 	"fmt"
+	"os"
 	"strings"
+
+	"clawreef/internal/services/k8s"
 )
 
 // InstanceRuntimeConfig describes how a given instance type runs inside Kubernetes.
@@ -104,6 +107,16 @@ func withInstanceProxyEnv(instanceType string, instanceID int, env map[string]st
 		merged[key] = value
 	}
 
+	if proxyURL, ok := defaultEgressProxyURL(); ok {
+		noProxy := defaultNoProxyList()
+		merged["HTTP_PROXY"] = proxyURL
+		merged["HTTPS_PROXY"] = proxyURL
+		merged["http_proxy"] = proxyURL
+		merged["https_proxy"] = proxyURL
+		merged["NO_PROXY"] = noProxy
+		merged["no_proxy"] = noProxy
+	}
+
 	if usesWebtopImage(instanceType) {
 		merged["SUBFOLDER"] = fmt.Sprintf("/api/v1/instances/%d/proxy/", instanceID)
 	}
@@ -118,4 +131,136 @@ func usesWebtopImage(instanceType string) bool {
 	default:
 		return false
 	}
+}
+
+func defaultEgressProxyURL() (string, bool) {
+	if override := strings.TrimSpace(os.Getenv("CLAWMANAGER_EGRESS_PROXY_URL")); override != "" {
+		return override, true
+	}
+
+	client := k8s.GetClient()
+	var systemNamespace string
+	if overrideNamespace := strings.TrimSpace(os.Getenv("CLAWMANAGER_SYSTEM_NAMESPACE")); overrideNamespace != "" {
+		systemNamespace = overrideNamespace
+	} else if client != nil {
+		systemNamespace = fmt.Sprintf("%s-system", client.Namespace)
+	} else if baseNamespace := strings.TrimSpace(os.Getenv("K8S_NAMESPACE")); baseNamespace != "" {
+		systemNamespace = fmt.Sprintf("%s-system", baseNamespace)
+	}
+
+	if strings.TrimSpace(systemNamespace) == "" {
+		return "", false
+	}
+
+	serviceName := strings.TrimSpace(os.Getenv("CLAWMANAGER_EGRESS_PROXY_SERVICE_NAME"))
+	if serviceName == "" {
+		serviceName = strings.TrimSpace(os.Getenv("CLAWMANAGER_EGRESS_PROXY_SERVICE"))
+	}
+	if serviceName == "" {
+		serviceName = "clawmanager-egress-proxy"
+	}
+
+	port := normalizePortValue(
+		strings.TrimSpace(os.Getenv("CLAWMANAGER_EGRESS_PROXY_SERVICE_PORT")),
+		strings.TrimSpace(os.Getenv("CLAWMANAGER_EGRESS_PROXY_PORT")),
+	)
+	if port == "" {
+		port = "3128"
+	}
+
+	return fmt.Sprintf("http://%s.%s.svc.cluster.local:%s", serviceName, systemNamespace, port), true
+}
+
+func defaultGatewayBaseURL() (string, bool) {
+	if override := strings.TrimSpace(os.Getenv("CLAWMANAGER_LLM_GATEWAY_BASE_URL")); override != "" {
+		return override, true
+	}
+
+	systemNamespace := strings.TrimSpace(os.Getenv("CLAWMANAGER_SYSTEM_NAMESPACE"))
+	if systemNamespace == "" {
+		if client := k8s.GetClient(); client != nil {
+			systemNamespace = client.GetSystemNamespace()
+		} else if baseNamespace := strings.TrimSpace(os.Getenv("K8S_NAMESPACE")); baseNamespace != "" {
+			systemNamespace = fmt.Sprintf("%s-system", baseNamespace)
+		}
+	}
+	if systemNamespace == "" {
+		return "", false
+	}
+
+	serviceName := strings.TrimSpace(os.Getenv("CLAWMANAGER_LLM_GATEWAY_SERVICE_NAME"))
+	if serviceName == "" {
+		serviceName = strings.TrimSpace(os.Getenv("CLAWMANAGER_LLM_GATEWAY_SERVICE"))
+	}
+	if serviceName == "" {
+		serviceName = "clawmanager-gateway"
+	}
+
+	port := normalizePortValue(
+		strings.TrimSpace(os.Getenv("CLAWMANAGER_LLM_GATEWAY_SERVICE_PORT")),
+		strings.TrimSpace(os.Getenv("CLAWMANAGER_LLM_GATEWAY_PORT")),
+	)
+	if port == "" {
+		port = "9001"
+	}
+
+	return fmt.Sprintf("http://%s.%s.svc.cluster.local:%s/api/v1/gateway/llm", serviceName, systemNamespace, port), true
+}
+
+func defaultNoProxyList() string {
+	if override := strings.TrimSpace(os.Getenv("CLAWMANAGER_NO_PROXY")); override != "" {
+		return override
+	}
+
+	systemNamespace := strings.TrimSpace(os.Getenv("CLAWMANAGER_SYSTEM_NAMESPACE"))
+	if systemNamespace == "" {
+		if client := k8s.GetClient(); client != nil {
+			systemNamespace = fmt.Sprintf("%s-system", client.Namespace)
+		} else if baseNamespace := strings.TrimSpace(os.Getenv("K8S_NAMESPACE")); baseNamespace != "" {
+			systemNamespace = fmt.Sprintf("%s-system", baseNamespace)
+		}
+	}
+
+	serviceNames := []string{
+		"localhost",
+		"127.0.0.1",
+		"clawmanager-frontend",
+		"clawmanager-gateway",
+		"clawmanager-egress-proxy",
+	}
+
+	if systemNamespace != "" {
+		serviceNames = append(serviceNames,
+			fmt.Sprintf("clawmanager-frontend.%s", systemNamespace),
+			fmt.Sprintf("clawmanager-frontend.%s.svc", systemNamespace),
+			fmt.Sprintf("clawmanager-frontend.%s.svc.cluster.local", systemNamespace),
+			fmt.Sprintf("clawmanager-gateway.%s", systemNamespace),
+			fmt.Sprintf("clawmanager-gateway.%s.svc", systemNamespace),
+			fmt.Sprintf("clawmanager-gateway.%s.svc.cluster.local", systemNamespace),
+			fmt.Sprintf("clawmanager-egress-proxy.%s", systemNamespace),
+			fmt.Sprintf("clawmanager-egress-proxy.%s.svc", systemNamespace),
+			fmt.Sprintf("clawmanager-egress-proxy.%s.svc.cluster.local", systemNamespace),
+		)
+	}
+
+	return strings.Join(serviceNames, ",")
+}
+
+func normalizePortValue(values ...string) string {
+	for _, raw := range values {
+		value := strings.TrimSpace(raw)
+		if value == "" {
+			continue
+		}
+		if !strings.Contains(value, "://") {
+			return value
+		}
+
+		lastColon := strings.LastIndex(value, ":")
+		if lastColon >= 0 && lastColon < len(value)-1 {
+			return value[lastColon+1:]
+		}
+	}
+
+	return ""
 }

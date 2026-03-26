@@ -14,6 +14,11 @@ import AdminDashboard from '../pages/admin/AdminDashboard';
 // Admin Pages
 import UserManagementPage from '../pages/admin/UserManagementPage';
 import InstanceManagementPage from '../pages/admin/InstanceManagementPage';
+import AIGatewayPage from '../pages/admin/AIGatewayPage';
+import AIAuditPage from '../pages/admin/AIAuditPage';
+import CostsPage from '../pages/admin/CostsPage';
+import RiskRulesPage from '../pages/admin/RiskRulesPage';
+import ModelManagementPage from '../pages/admin/ModelManagementPage';
 import SystemSettingsPage from '../pages/admin/SystemSettingsPage';
 import UserSettingsPage from '../pages/settings/UserSettingsPage';
 
@@ -205,6 +210,46 @@ function AppRoutes() {
         element={
           <AdminRoute>
             <InstanceManagementPage />
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/admin/ai-gateway"
+        element={
+          <AdminRoute>
+            <AIGatewayPage />
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/admin/ai-audit"
+        element={
+          <AdminRoute>
+            <AIAuditPage />
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/admin/costs"
+        element={
+          <AdminRoute>
+            <CostsPage />
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/admin/risk-rules"
+        element={
+          <AdminRoute>
+            <RiskRulesPage />
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/admin/models"
+        element={
+          <AdminRoute>
+            <ModelManagementPage />
           </AdminRoute>
         }
       />

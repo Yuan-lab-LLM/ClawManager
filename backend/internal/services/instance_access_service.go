@@ -1,35 +1,49 @@
 package services
 
 import (
-	"crypto/rand"
-	"encoding/hex"
+	"errors"
 	"fmt"
+	"os"
 	"sync"
 	"time"
+
+	"github.com/golang-jwt/jwt/v5"
 )
 
 // AccessToken represents a temporary access token for instance
 type AccessToken struct {
-	Token      string    `json:"token"`
-	InstanceID int       `json:"instance_id"`
-	UserID     int       `json:"user_id"`
-	InstanceType string  `json:"instance_type"`
-	TargetPort int32     `json:"target_port"`
-	AccessURL  string    `json:"access_url"`
-	ExpiresAt  time.Time `json:"expires_at"`
-	CreatedAt  time.Time `json:"created_at"`
+	Token        string    `json:"token"`
+	InstanceID   int       `json:"instance_id"`
+	UserID       int       `json:"user_id"`
+	InstanceType string    `json:"instance_type"`
+	TargetPort   int32     `json:"target_port"`
+	AccessURL    string    `json:"access_url"`
+	ExpiresAt    time.Time `json:"expires_at"`
+	CreatedAt    time.Time `json:"created_at"`
 }
 
 // InstanceAccessService manages instance access tokens
 type InstanceAccessService struct {
 	tokens map[string]*AccessToken
 	mu     sync.RWMutex
+	secret string
+}
+
+type instanceAccessClaims struct {
+	InstanceID   int    `json:"instance_id"`
+	UserID       int    `json:"user_id"`
+	InstanceType string `json:"instance_type"`
+	TargetPort   int32  `json:"target_port"`
+	AccessURL    string `json:"access_url"`
+	TokenType    string `json:"token_type"`
+	jwt.RegisteredClaims
 }
 
 // NewInstanceAccessService creates a new instance access service
 func NewInstanceAccessService() *InstanceAccessService {
 	service := &InstanceAccessService{
 		tokens: make(map[string]*AccessToken),
+		secret: getInstanceAccessTokenSecret(),
 	}
 
 	// Start cleanup goroutine
@@ -40,35 +54,102 @@ func NewInstanceAccessService() *InstanceAccessService {
 
 // GenerateToken generates a new access token for an instance
 func (s *InstanceAccessService) GenerateToken(userID, instanceID int, instanceType string, accessURL string, targetPort int32, duration time.Duration) (*AccessToken, error) {
-	// Generate random token
-	tokenBytes := make([]byte, 32)
-	if _, err := rand.Read(tokenBytes); err != nil {
-		return nil, fmt.Errorf("failed to generate token: %w", err)
-	}
-
-	token := hex.EncodeToString(tokenBytes)
 	now := time.Now()
+	expiresAt := now.Add(duration)
 
-	accessToken := &AccessToken{
-		Token:        token,
+	claims := instanceAccessClaims{
 		InstanceID:   instanceID,
 		UserID:       userID,
 		InstanceType: instanceType,
 		TargetPort:   targetPort,
 		AccessURL:    accessURL,
-		ExpiresAt:    now.Add(duration),
-		CreatedAt:    now,
+		TokenType:    "instance_access",
+		RegisteredClaims: jwt.RegisteredClaims{
+			IssuedAt:  jwt.NewNumericDate(now),
+			ExpiresAt: jwt.NewNumericDate(expiresAt),
+		},
 	}
 
-	s.mu.Lock()
-	s.tokens[token] = accessToken
-	s.mu.Unlock()
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	tokenString, err := token.SignedString([]byte(s.secret))
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate token: %w", err)
+	}
+
+	accessToken := &AccessToken{
+		Token:        tokenString,
+		InstanceID:   instanceID,
+		UserID:       userID,
+		InstanceType: instanceType,
+		TargetPort:   targetPort,
+		AccessURL:    accessURL,
+		ExpiresAt:    expiresAt,
+		CreatedAt:    now,
+	}
 
 	return accessToken, nil
 }
 
 // ValidateToken validates an access token
 func (s *InstanceAccessService) ValidateToken(token string) (*AccessToken, error) {
+	accessToken, err := s.validateSignedToken(token)
+	if err == nil {
+		return accessToken, nil
+	}
+
+	legacyToken, legacyErr := s.validateLegacyToken(token)
+	if legacyErr == nil {
+		return legacyToken, nil
+	}
+
+	return nil, err
+}
+
+func (s *InstanceAccessService) validateSignedToken(token string) (*AccessToken, error) {
+	parsed, err := jwt.ParseWithClaims(token, &instanceAccessClaims{}, func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, errors.New("unexpected signing method")
+		}
+		return []byte(s.secret), nil
+	})
+	if err != nil {
+		if errors.Is(err, jwt.ErrTokenExpired) {
+			return nil, fmt.Errorf("token expired")
+		}
+		return nil, fmt.Errorf("invalid token")
+	}
+
+	claims, ok := parsed.Claims.(*instanceAccessClaims)
+	if !ok || !parsed.Valid {
+		return nil, fmt.Errorf("invalid token")
+	}
+
+	if claims.TokenType != "instance_access" || claims.AccessURL == "" {
+		return nil, fmt.Errorf("invalid token")
+	}
+
+	expiresAt := time.Time{}
+	if claims.ExpiresAt != nil {
+		expiresAt = claims.ExpiresAt.Time
+	}
+	createdAt := time.Time{}
+	if claims.IssuedAt != nil {
+		createdAt = claims.IssuedAt.Time
+	}
+
+	return &AccessToken{
+		Token:        token,
+		InstanceID:   claims.InstanceID,
+		UserID:       claims.UserID,
+		InstanceType: claims.InstanceType,
+		TargetPort:   claims.TargetPort,
+		AccessURL:    claims.AccessURL,
+		ExpiresAt:    expiresAt,
+		CreatedAt:    createdAt,
+	}, nil
+}
+
+func (s *InstanceAccessService) validateLegacyToken(token string) (*AccessToken, error) {
 	s.mu.RLock()
 	accessToken, exists := s.tokens[token]
 	s.mu.RUnlock()
@@ -170,4 +251,14 @@ func (s *InstanceAccessService) GetActiveTokenCount() int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return len(s.tokens)
+}
+
+func getInstanceAccessTokenSecret() string {
+	if secret := os.Getenv("INSTANCE_ACCESS_TOKEN_SECRET"); secret != "" {
+		return secret
+	}
+	if secret := os.Getenv("JWT_SECRET"); secret != "" {
+		return secret
+	}
+	return "clawreef-instance-access-secret-change-in-production"
 }

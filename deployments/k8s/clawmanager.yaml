@@ -310,6 +310,8 @@ spec:
           ports:
             - name: https
               containerPort: 8443
+            - name: proxy
+              containerPort: 9001
           env:
             - name: SERVER_ADDRESS
               value: ":9001"
@@ -377,3 +379,31 @@ spec:
       port: 443
       targetPort: https
       nodePort: 39443
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: clawmanager-gateway
+  namespace: clawmanager-system
+spec:
+  type: ClusterIP
+  selector:
+    app: clawmanager-app
+  ports:
+    - name: api
+      port: 9001
+      targetPort: 9001
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: clawmanager-egress-proxy
+  namespace: clawmanager-system
+spec:
+  type: ClusterIP
+  selector:
+    app: clawmanager-app
+  ports:
+    - name: proxy
+      port: 3128
+      targetPort: 9001

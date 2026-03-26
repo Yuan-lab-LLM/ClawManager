@@ -38,7 +38,7 @@ type Client struct {
 
 var (
 	// globalClient is the global K8s client instance
-	globalClient *Client
+	globalClient        *Client
 	k8sNameInvalidChars = regexp.MustCompile(`[^a-z0-9-]+`)
 	k8sNameExtraDashes  = regexp.MustCompile(`-+`)
 )
@@ -223,6 +223,11 @@ func (c *Client) GetNamespace(userID int) string {
 	return sanitizeK8sName(fmt.Sprintf("%s-user-%d", c.Namespace, userID))
 }
 
+// GetSystemNamespace returns the control-plane namespace used by ClawManager itself.
+func (c *Client) GetSystemNamespace() string {
+	return sanitizeK8sName(fmt.Sprintf("%s-system", c.Namespace))
+}
+
 // GetPodName returns the pod name for an instance
 func (c *Client) GetPodName(instanceID int, instanceName string) string {
 	return sanitizeK8sName(fmt.Sprintf("clawreef-%d-%s", instanceID, instanceName))
@@ -236,6 +241,11 @@ func (c *Client) GetPVCName(instanceID int) string {
 // GetServiceName returns the service name for an instance
 func (c *Client) GetServiceName(instanceID int, instanceName string) string {
 	return sanitizeK8sName(fmt.Sprintf("clawreef-%d-%s-svc", instanceID, instanceName))
+}
+
+// GetNetworkPolicyName returns the default network policy name for an instance.
+func (c *Client) GetNetworkPolicyName(instanceID int, instanceName string) string {
+	return sanitizeK8sName(fmt.Sprintf("clawreef-%d-%s-netpol", instanceID, instanceName))
 }
 
 func sanitizeK8sName(name string) string {

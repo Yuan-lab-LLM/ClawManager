@@ -1,10 +1,12 @@
 package middleware
 
 import (
+	"errors"
 	"net/http"
 	"os"
 	"strings"
 
+	"clawreef/internal/repository"
 	"clawreef/internal/utils"
 	"github.com/gin-gonic/gin"
 )
@@ -22,11 +24,7 @@ func Auth() gin.HandlerFunc {
 			return
 		}
 
-		// Get JWT secret from config (in production, should be from env)
-		jwtSecret := getJWTSecret()
-
-		// Validate token
-		claims, err := utils.ValidateToken(tokenString, jwtSecret)
+		claims, err := validateUserAccessToken(tokenString)
 		if err != nil {
 			c.JSON(http.StatusUnauthorized, gin.H{
 				"success": false,
@@ -48,6 +46,51 @@ func Auth() gin.HandlerFunc {
 
 		// Set user ID in context
 		c.Set("userID", claims.UserID)
+		c.Next()
+	}
+}
+
+// GatewayAuth accepts either a normal user access JWT or an instance lifecycle gateway token.
+func GatewayAuth(instanceRepo repository.InstanceRepository) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		tokenString, ok := extractToken(c)
+		if !ok {
+			c.JSON(http.StatusUnauthorized, gin.H{
+				"success": false,
+				"error":   "Authorization header required",
+			})
+			c.Abort()
+			return
+		}
+
+		if claims, err := validateUserAccessToken(tokenString); err == nil {
+			c.Set("userID", claims.UserID)
+			c.Set("gatewayAuthType", "user")
+			c.Next()
+			return
+		}
+
+		instance, err := instanceRepo.GetByAccessToken(tokenString)
+		if err != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{
+				"success": false,
+				"error":   "Invalid gateway token",
+			})
+			c.Abort()
+			return
+		}
+		if instance == nil || instance.AccessToken == nil || strings.TrimSpace(*instance.AccessToken) == "" {
+			c.JSON(http.StatusUnauthorized, gin.H{
+				"success": false,
+				"error":   "Invalid gateway token",
+			})
+			c.Abort()
+			return
+		}
+
+		c.Set("userID", instance.UserID)
+		c.Set("instanceID", instance.ID)
+		c.Set("gatewayAuthType", "instance")
 		c.Next()
 	}
 }
@@ -81,4 +124,16 @@ func getJWTSecret() string {
 		return secret
 	}
 	return "clawreef-dev-secret-key-change-in-production"
+}
+
+func validateUserAccessToken(tokenString string) (*utils.TokenClaims, error) {
+	jwtSecret := getJWTSecret()
+	claims, err := utils.ValidateToken(tokenString, jwtSecret)
+	if err != nil {
+		return nil, err
+	}
+	if claims.TokenType != "access" {
+		return nil, errors.New("invalid token type")
+	}
+	return claims, nil
 }

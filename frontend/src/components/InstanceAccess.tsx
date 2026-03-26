@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { instanceService } from '../services/instanceService';
 import { useI18n } from '../contexts/I18nContext';
+import { useInstanceDesktopAccess } from '../hooks/useInstanceDesktopAccess';
 
 interface InstanceAccessProps {
   instanceId: number;
@@ -10,13 +10,7 @@ interface InstanceAccessProps {
 
 export function InstanceAccess({ instanceId, instanceName, isRunning }: InstanceAccessProps) {
   const { t } = useI18n();
-  const [accessToken, setAccessToken] = useState<string | null>(null);
-  const [accessUrl, setAccessUrl] = useState<string | null>(null);
-  const [proxyUrl, setProxyUrl] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [expiresAt, setExpiresAt] = useState<Date | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
 
@@ -41,50 +35,21 @@ export function InstanceAccess({ instanceId, instanceName, isRunning }: Instance
     return url;
   }, []);
 
-  const generateAccess = useCallback(async () => {
-    if (!isRunning) {
-      setError(t('instances.instanceMustBeRunning'));
-      return;
-    }
-
-    setLoading(true);
-    setError(null);
-
-    try {
-      const data = await instanceService.generateAccessToken(instanceId);
-      setAccessToken(data.token);
-      setAccessUrl(data.access_url);
-      setProxyUrl(data.proxy_url);
-      setExpiresAt(new Date(data.expires_at));
-    } catch (err: any) {
-      setError(err.response?.data?.error || t('instances.failedToGenerateAccessToken'));
-    } finally {
-      setLoading(false);
-    }
-  }, [instanceId, isRunning]);
-
-  // Auto-generate access on mount if running
-  useEffect(() => {
-    if (isRunning && !accessToken) {
-      generateAccess();
-    }
-  }, [isRunning, accessToken, generateAccess]);
-
-  // Check token expiration
-  useEffect(() => {
-    if (!expiresAt) return;
-
-    const checkExpiration = setInterval(() => {
-      if (new Date() >= expiresAt) {
-        setAccessToken(null);
-        setAccessUrl(null);
-        setProxyUrl(null);
-        setExpiresAt(null);
-      }
-    }, 30000); // Check every 30 seconds
-
-    return () => clearInterval(checkExpiration);
-  }, [expiresAt]);
+  const {
+    embedUrl,
+    expiresAt,
+    loading,
+    error,
+    frameKey,
+    reconnecting,
+    refreshAccess,
+    handleFrameLoad,
+  } = useInstanceDesktopAccess({
+    instanceId,
+    isRunning,
+    resolveEmbedUrl,
+    failedMessage: t('instances.failedToGenerateAccessToken'),
+  });
 
   useEffect(() => {
     const handleFullscreenChange = () => {
@@ -115,7 +80,6 @@ export function InstanceAccess({ instanceId, instanceName, isRunning }: Instance
     }
   };
 
-  const embedUrl = resolveEmbedUrl(proxyUrl || accessUrl);
   const frameHeightClass = 'h-[calc(100vh-180px)] min-h-[780px] max-h-[1280px] md:h-[calc(100vh-160px)]';
 
   const formatTimeRemaining = () => {
@@ -152,7 +116,7 @@ export function InstanceAccess({ instanceId, instanceName, isRunning }: Instance
     );
   }
 
-  if (loading) {
+  if (loading && !embedUrl) {
     return (
       <div className="app-panel flex h-96 items-center justify-center">
         <div className="text-center">
@@ -163,7 +127,7 @@ export function InstanceAccess({ instanceId, instanceName, isRunning }: Instance
     );
   }
 
-  if (error) {
+  if (error && !embedUrl) {
     return (
       <div className="rounded-[28px] border border-red-200 bg-red-50 p-8 text-center shadow-[0_24px_70px_-52px_rgba(72,44,24,0.4)]">
         <svg 
@@ -182,7 +146,7 @@ export function InstanceAccess({ instanceId, instanceName, isRunning }: Instance
         <h3 className="mt-2 text-sm font-medium text-red-800">{t('instances.accessError')}</h3>
         <p className="mt-1 text-sm text-red-600">{error}</p>
         <button
-          onClick={generateAccess}
+          onClick={() => refreshAccess({ forceReload: true })}
           className="mt-4 inline-flex items-center rounded-2xl border border-red-200 bg-red-100 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-200"
         >
           {t('common.retry')}
@@ -191,7 +155,7 @@ export function InstanceAccess({ instanceId, instanceName, isRunning }: Instance
     );
   }
 
-  if (!accessUrl) {
+  if (!embedUrl) {
     return (
       <div className="app-panel border-dashed p-12 text-center">
         <svg 
@@ -212,7 +176,7 @@ export function InstanceAccess({ instanceId, instanceName, isRunning }: Instance
           {t('instances.generateAccessPrompt', { name: instanceName })}
         </p>
         <button
-          onClick={generateAccess}
+          onClick={() => refreshAccess({ forceReload: true })}
           className="app-button-primary mt-4 inline-flex"
         >
           {t('instances.generateAccess')}
@@ -232,13 +196,13 @@ export function InstanceAccess({ instanceId, instanceName, isRunning }: Instance
           <span className="text-sm font-medium">{instanceName}</span>
           {expiresAt && (
             <span className="text-xs text-gray-400">
-              {t('instances.expiresIn')}: {formatTimeRemaining()}
+              {reconnecting ? t('instances.generatingToken') : `${t('instances.expiresIn')}: ${formatTimeRemaining()}`}
             </span>
           )}
         </div>
         <div className="flex items-center space-x-2">
           <button
-            onClick={generateAccess}
+            onClick={() => refreshAccess({ forceReload: true })}
             className="rounded-xl bg-[#243041] px-3 py-1 text-xs font-medium text-gray-300 hover:bg-[#31415a] hover:text-white"
           >
             {t('instances.refreshToken')}
@@ -263,42 +227,17 @@ export function InstanceAccess({ instanceId, instanceName, isRunning }: Instance
       {/* iframe */}
       <div className={frameHeightClass}>
         <iframe
+          key={frameKey}
           ref={iframeRef}
           src={embedUrl || undefined}
           title={`${instanceName} Desktop`}
           className="w-full h-full border-0"
           allow="clipboard-read; clipboard-write; fullscreen; autoplay"
           allowFullScreen
+          onLoad={() => handleFrameLoad(iframeRef.current)}
+          onError={() => refreshAccess({ forceReload: true, silent: true })}
         />
       </div>
-
-      {/* Overlay when token expired */}
-      {!accessToken && (
-        <div className="absolute inset-0 bg-gray-900 bg-opacity-90 flex items-center justify-center">
-          <div className="text-center text-white">
-            <svg 
-              className="mx-auto h-12 w-12 text-gray-400 mb-4" 
-              fill="none" 
-              viewBox="0 0 24 24" 
-              stroke="currentColor"
-            >
-              <path 
-                strokeLinecap="round" 
-                strokeLinejoin="round" 
-                strokeWidth={2} 
-                d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" 
-              />
-            </svg>
-            <p className="text-lg mb-4">{t('instances.accessTokenExpired')}</p>
-            <button
-              onClick={generateAccess}
-            className="app-button-primary inline-flex"
-            >
-              {t('instances.regenerateToken')}
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

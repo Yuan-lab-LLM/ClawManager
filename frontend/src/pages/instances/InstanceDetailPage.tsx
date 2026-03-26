@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import ConfirmDialog from '../../components/ConfirmDialog';
 import { InstanceAccess } from '../../components/InstanceAccess';
+import UserLayout from '../../components/UserLayout';
 import { instanceService } from '../../services/instanceService';
 import type { Instance, InstanceStatus } from '../../types/instance';
 import { useI18n } from '../../contexts/I18nContext';
@@ -163,29 +164,32 @@ const InstanceDetailPage: React.FC = () => {
 
   if (loading) {
     return (
-      <div className="app-shell flex min-h-screen items-center justify-center">
-        <div className="text-lg text-gray-600">{t('instances.loadingInstance')}</div>
-      </div>
+      <UserLayout>
+        <div className="flex min-h-[60vh] items-center justify-center">
+          <div className="text-lg text-gray-600">{t('instances.loadingInstance')}</div>
+        </div>
+      </UserLayout>
     );
   }
 
   if (error || !instance) {
     return (
-      <div className="app-shell flex min-h-screen items-center justify-center">
-        <div className="text-center">
-          <p className="text-red-600 mb-4">{error || t('instances.instanceNotFound')}</p>
-          <button
-            onClick={() => navigate('/instances')}
-            className="text-indigo-600 hover:text-indigo-800"
-          >
-            {t('instances.backToInstances')}
-          </button>
+      <UserLayout>
+        <div className="flex min-h-[60vh] items-center justify-center">
+          <div className="text-center">
+            <p className="mb-4 text-red-600">{error || t('instances.instanceNotFound')}</p>
+            <button
+              onClick={() => navigate('/instances')}
+              className="text-indigo-600 hover:text-indigo-800"
+            >
+              {t('instances.backToInstances')}
+            </button>
+          </div>
         </div>
-      </div>
+      </UserLayout>
     );
   }
 
-  const isAccessTab = activeTab === 'access';
   const currentStatusStyle = statusStyle(instance.status);
   const timelineItems = [
     {
@@ -206,7 +210,7 @@ const InstanceDetailPage: React.FC = () => {
   ].filter(Boolean) as Array<{ label: string; value: string; dot: string }>;
 
   return (
-    <div className="app-shell">
+    <UserLayout>
       <ConfirmDialog
         open={showDeleteDialog}
         title={t('common.delete')}
@@ -219,19 +223,10 @@ const InstanceDetailPage: React.FC = () => {
         onConfirm={() => handleAction('delete')}
       />
 
-      {/* Header */}
-      <header className="app-topbar">
-        <div className={`${isAccessTab ? 'max-w-[min(1960px,calc(100vw-1rem))]' : 'max-w-7xl'} mx-auto px-4 sm:px-6 lg:px-8 py-4`}>
+      <div className="space-y-6">
+        <section className="app-panel px-5 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center">
-              <button
-                onClick={() => navigate('/instances')}
-                className="mr-4 text-gray-500 hover:text-gray-700"
-              >
-                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-                </svg>
-              </button>
               <div>
                 <h1 className="text-2xl font-bold text-gray-900">{instance.name}</h1>
                 <div className="mt-1 flex items-center">
@@ -261,7 +256,7 @@ const InstanceDetailPage: React.FC = () => {
                   {actionLoading === 'start' ? `${t('common.start')}...` : t('common.start')}
                 </button>
               )}
-              
+
               <button
                 onClick={() => handleAction('restart')}
                 disabled={actionLoading === 'restart'}
@@ -269,7 +264,7 @@ const InstanceDetailPage: React.FC = () => {
               >
                 {actionLoading === 'restart' ? `${t('common.restart')}...` : t('common.restart')}
               </button>
-              
+
               <button
                 onClick={() => setShowDeleteDialog(true)}
                 disabled={actionLoading === 'delete'}
@@ -279,11 +274,8 @@ const InstanceDetailPage: React.FC = () => {
               </button>
             </div>
           </div>
-        </div>
-      </header>
+        </section>
 
-      {/* Main Content */}
-      <main className={`${isAccessTab ? 'max-w-[min(1960px,calc(100vw-1rem))] py-3 lg:py-4' : 'max-w-7xl py-8'} mx-auto px-3 sm:px-4 lg:px-6`}>
         {/* Tabs */}
         <div className="mb-6 border-b border-[#eadfd8]">
           <nav className="-mb-px flex space-x-8">
@@ -343,12 +335,9 @@ const InstanceDetailPage: React.FC = () => {
                   <h2 className="text-[2rem] font-semibold leading-[1.02] tracking-[-0.045em] text-[#1d1713] sm:text-[2.4rem]">
                     {instance.os_type} {instance.os_version}
                   </h2>
-                  <p className="mt-3 max-w-2xl text-[15px] leading-7 text-[#7a6d66]">
-                    {instance.description || t('instances.heroFallbackDescription')}
-                  </p>
                 </div>
 
-                <div className="mt-6 grid gap-4 sm:grid-cols-3">
+                <div className="mt-5 grid gap-4 sm:grid-cols-3">
                   <MetricTile label={t('instances.cpuCores')} value={`${instance.cpu_cores}`} hint={t('instances.allocatedCompute')} />
                   <MetricTile label={t('common.memory')} value={`${instance.memory_gb} GB`} hint={t('instances.reservedRam')} />
                   <MetricTile label={t('common.disk')} value={`${instance.disk_gb} GB`} hint={t('instances.persistentDisk')} />
@@ -419,7 +408,7 @@ const InstanceDetailPage: React.FC = () => {
                 </div>
                 <dl className="mt-6 grid gap-x-6 gap-y-5 sm:grid-cols-2">
                   <DetailItem label={t('common.type')} value={instance.type} />
-                  <DetailItem label={t('instances.operatingSystem')} value={`${instance.os_type} ${instance.os_version}`} />
+                  <DetailItem label={t('instances.instanceImage')} value={instance.image_registry ? `${instance.image_registry}${instance.image_tag ? `:${instance.image_tag}` : ''}` : `${instance.os_type} ${instance.os_version}`} />
                   <DetailItem label={t('common.createdAt')} value={new Date(instance.created_at).toLocaleString()} />
                   <DetailItem label={t('common.lastUpdated')} value={new Date(instance.updated_at).toLocaleString()} />
                   {instance.description && (
@@ -512,8 +501,8 @@ const InstanceDetailPage: React.FC = () => {
           </div>
         </div>
         )}
-      </main>
-    </div>
+      </div>
+    </UserLayout>
   );
 };
 

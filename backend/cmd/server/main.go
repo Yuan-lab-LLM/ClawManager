@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 
+	"clawreef/internal/aigateway"
 	"clawreef/internal/config"
 	"clawreef/internal/db"
 	"clawreef/internal/handlers"
@@ -44,22 +45,46 @@ func main() {
 	quotaRepo := repository.NewQuotaRepository(database)
 	instanceRepo := repository.NewInstanceRepository(database)
 	systemImageSettingRepo := repository.NewSystemImageSettingRepository(database)
+	llmModelRepo := repository.NewLLMModelRepository(database)
+	modelInvocationRepo := repository.NewModelInvocationRepository(database)
+	auditEventRepo := repository.NewAuditEventRepository(database)
+	costRecordRepo := repository.NewCostRecordRepository(database)
+	chatSessionRepo := repository.NewChatSessionRepository(database)
+	chatMessageRepo := repository.NewChatMessageRepository(database)
+	riskRuleRepo := repository.NewRiskRuleRepository(database)
+	riskHitRepo := repository.NewRiskHitRepository(database)
 
 	// Initialize services
 	authService := services.NewAuthService(userRepo, cfg.JWT)
 	quotaService := services.NewQuotaService(quotaRepo)
 	userService := services.NewUserService(userRepo, quotaRepo)
 	systemImageSettingService := services.NewSystemImageSettingService(systemImageSettingRepo)
+	llmModelService := services.NewLLMModelService(llmModelRepo)
+	modelInvocationService := services.NewModelInvocationService(modelInvocationRepo)
+	auditEventService := services.NewAuditEventService(auditEventRepo)
+	costRecordService := services.NewCostRecordService(costRecordRepo)
+	chatSessionService := services.NewChatSessionService(chatSessionRepo)
+	chatMessageService := services.NewChatMessageService(chatMessageRepo)
+	riskDetectionService := services.NewRiskDetectionService(riskRuleRepo)
+	riskHitService := services.NewRiskHitService(riskHitRepo)
+	riskRuleService := services.NewRiskRuleService(riskRuleRepo)
+	aiObservabilityService := services.NewAIObservabilityService(modelInvocationRepo, auditEventRepo, costRecordRepo, riskHitRepo, chatMessageRepo, llmModelRepo, instanceRepo, userRepo)
 	clusterResourceService := services.NewClusterResourceService(instanceRepo)
 	services.SetRuntimeImageSettingsProvider(systemImageSettingService)
-	instanceService := services.NewInstanceService(instanceRepo, quotaRepo)
+	instanceService := services.NewInstanceService(instanceRepo, quotaRepo, llmModelRepo)
+	aiGatewayService := aigateway.NewService(llmModelRepo, modelInvocationService, auditEventService, costRecordService, riskDetectionService, riskHitService, chatSessionService, chatMessageService)
 
 	// Initialize handlers
 	authHandler := handlers.NewAuthHandler(authService)
 	userHandler := handlers.NewUserHandler(userService, quotaService)
 	instanceHandler := handlers.NewInstanceHandler(instanceService)
 	systemSettingsHandler := handlers.NewSystemSettingsHandler(systemImageSettingService)
+	llmModelHandler := handlers.NewLLMModelHandler(llmModelService)
+	aiGatewayHandler := handlers.NewAIGatewayHandler(aiGatewayService)
+	aiObservabilityHandler := handlers.NewAIObservabilityHandler(aiObservabilityService)
+	riskRuleHandler := handlers.NewRiskRuleHandler(riskRuleService)
 	clusterResourceHandler := handlers.NewClusterResourceHandler(clusterResourceService)
+	egressProxyHandler := handlers.NewEgressProxyHandler()
 
 	// Initialize WebSocket hub and handler
 	wsHub := services.GetHub()
@@ -76,6 +101,8 @@ func main() {
 	// Middleware
 	r.Use(middleware.CORS())
 	r.Use(middleware.ErrorHandler())
+	r.NoRoute(egressProxyHandler.Handle)
+	r.NoMethod(egressProxyHandler.Handle)
 
 	// Routes
 	api := r.Group("/api/v1")
@@ -150,6 +177,53 @@ func main() {
 			adminSystemSettings.PUT("/images", systemSettingsHandler.UpsertSystemImageSetting)
 			adminSystemSettings.DELETE("/images/:instanceType", systemSettingsHandler.DeleteSystemImageSetting)
 			adminSystemSettings.GET("/cluster-resources", clusterResourceHandler.GetOverview)
+		}
+
+		adminModels := api.Group("/admin/models")
+		adminModels.Use(middleware.Auth())
+		adminModels.Use(middleware.SetUserInfo(userRepo))
+		adminModels.Use(middleware.NewAdminAuth(userRepo))
+		{
+			adminModels.GET("", llmModelHandler.ListModels)
+			adminModels.POST("/discover", llmModelHandler.DiscoverModels)
+			adminModels.PUT("", llmModelHandler.UpsertModel)
+			adminModels.DELETE("/:id", llmModelHandler.DeleteModel)
+		}
+
+		adminAIAudit := api.Group("/admin/ai-audit")
+		adminAIAudit.Use(middleware.Auth())
+		adminAIAudit.Use(middleware.SetUserInfo(userRepo))
+		adminAIAudit.Use(middleware.NewAdminAuth(userRepo))
+		{
+			adminAIAudit.GET("", aiObservabilityHandler.ListAuditItems)
+			adminAIAudit.GET("/:traceId", aiObservabilityHandler.GetTraceDetail)
+		}
+
+		adminCosts := api.Group("/admin/costs")
+		adminCosts.Use(middleware.Auth())
+		adminCosts.Use(middleware.SetUserInfo(userRepo))
+		adminCosts.Use(middleware.NewAdminAuth(userRepo))
+		{
+			adminCosts.GET("", aiObservabilityHandler.GetCostOverview)
+		}
+
+		adminRiskRules := api.Group("/admin/risk-rules")
+		adminRiskRules.Use(middleware.Auth())
+		adminRiskRules.Use(middleware.SetUserInfo(userRepo))
+		adminRiskRules.Use(middleware.NewAdminAuth(userRepo))
+		{
+		adminRiskRules.GET("", riskRuleHandler.ListRules)
+		adminRiskRules.POST("/test", riskRuleHandler.TestRules)
+		adminRiskRules.POST("/bulk-status", riskRuleHandler.BulkUpdateStatus)
+		adminRiskRules.PUT("", riskRuleHandler.UpsertRule)
+		adminRiskRules.DELETE("/:ruleId", riskRuleHandler.DeleteRule)
+	}
+
+		gatewayLLM := api.Group("/gateway/llm")
+		gatewayLLM.Use(middleware.GatewayAuth(instanceRepo))
+		{
+			gatewayLLM.GET("/models", aiGatewayHandler.ListModels)
+			gatewayLLM.POST("/chat/completions", aiGatewayHandler.ChatCompletions)
 		}
 
 		// Instance proxy routes (token-based auth, no session required)

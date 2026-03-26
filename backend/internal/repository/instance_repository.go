@@ -12,6 +12,7 @@ import (
 type InstanceRepository interface {
 	Create(instance *models.Instance) error
 	GetByID(id int) (*models.Instance, error)
+	GetByAccessToken(accessToken string) (*models.Instance, error)
 	GetByUserID(userID int, offset, limit int) ([]models.Instance, error)
 	CountByUserID(userID int) (int, error)
 	ExistsByUserIDAndName(userID int, name string) (bool, error)
@@ -52,6 +53,19 @@ func (r *instanceRepository) GetByID(id int) (*models.Instance, error) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("failed to get instance: %w", err)
+	}
+	return &instance, nil
+}
+
+// GetByAccessToken gets an instance by its lifecycle gateway token.
+func (r *instanceRepository) GetByAccessToken(accessToken string) (*models.Instance, error) {
+	var instance models.Instance
+	err := r.sess.Collection("instances").Find(db.Cond{"access_token": accessToken}).One(&instance)
+	if err != nil {
+		if err == db.ErrNoMoreRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to get instance by access token: %w", err)
 	}
 	return &instance, nil
 }

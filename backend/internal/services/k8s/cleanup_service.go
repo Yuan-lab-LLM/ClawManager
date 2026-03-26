@@ -62,12 +62,17 @@ func (s *CleanupService) DeleteAllInstanceResources(ctx context.Context, userID,
 			fmt.Printf("Warning: error deleting services: %v\n", err)
 		}
 
-		// 5. Delete all ConfigMaps with matching instance-id label
+		// 5. Delete all NetworkPolicies with matching instance-id label
+		if err := s.deleteAllNetworkPolicies(ctx, namespace, instanceLabel); err != nil {
+			fmt.Printf("Warning: error deleting network policies: %v\n", err)
+		}
+
+		// 6. Delete all ConfigMaps with matching instance-id label
 		if err := s.deleteAllConfigMaps(ctx, namespace, instanceLabel); err != nil {
 			fmt.Printf("Warning: error deleting configmaps: %v\n", err)
 		}
 
-		// 6. Delete all Secrets with matching instance-id label
+		// 7. Delete all Secrets with matching instance-id label
 		if err := s.deleteAllSecrets(ctx, namespace, instanceLabel); err != nil {
 			fmt.Printf("Warning: error deleting secrets: %v\n", err)
 		}
@@ -112,6 +117,14 @@ func (s *CleanupService) findNamespacesWithInstance(ctx context.Context, instanc
 			LabelSelector: fmt.Sprintf("instance-id=%s,managed-by=clawreef", instanceLabel),
 		})
 		if err == nil && len(pvcs.Items) > 0 {
+			result = append(result, ns.Name)
+			continue
+		}
+
+		networkPolicies, err := s.client.Clientset.NetworkingV1().NetworkPolicies(ns.Name).List(ctx, metav1.ListOptions{
+			LabelSelector: fmt.Sprintf("instance-id=%s,managed-by=clawreef", instanceLabel),
+		})
+		if err == nil && len(networkPolicies.Items) > 0 {
 			result = append(result, ns.Name)
 		}
 	}
@@ -220,6 +233,25 @@ func (s *CleanupService) deleteAllServices(ctx context.Context, namespace, insta
 	return nil
 }
 
+// deleteAllNetworkPolicies deletes all network policies with matching instance-id label.
+func (s *CleanupService) deleteAllNetworkPolicies(ctx context.Context, namespace, instanceLabel string) error {
+	networkPolicies, err := s.client.Clientset.NetworkingV1().NetworkPolicies(namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: fmt.Sprintf("instance-id=%s,managed-by=clawreef", instanceLabel),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to list network policies: %w", err)
+	}
+
+	for _, policy := range networkPolicies.Items {
+		fmt.Printf("Deleting network policy: %s\n", policy.Name)
+		if err := s.client.Clientset.NetworkingV1().NetworkPolicies(namespace).Delete(ctx, policy.Name, metav1.DeleteOptions{}); err != nil {
+			fmt.Printf("Warning: failed to delete network policy %s: %v\n", policy.Name, err)
+		}
+	}
+
+	return nil
+}
+
 // deleteAllConfigMaps deletes all configmaps with matching instance-id label
 func (s *CleanupService) deleteAllConfigMaps(ctx context.Context, namespace, instanceLabel string) error {
 	configMaps, err := s.client.Clientset.CoreV1().ConfigMaps(namespace).List(ctx, metav1.ListOptions{
@@ -290,6 +322,14 @@ func (s *CleanupService) WaitForResourceDeletion(ctx context.Context, namespaces
 				if err == nil && len(pvcs.Items) > 0 {
 					allDeleted = false
 					fmt.Printf("  Still waiting: %d PVC(s) in %s\n", len(pvcs.Items), namespace)
+				}
+
+				networkPolicies, err := s.client.Clientset.NetworkingV1().NetworkPolicies(namespace).List(ctx, metav1.ListOptions{
+					LabelSelector: fmt.Sprintf("instance-id=%s,managed-by=clawreef", instanceLabel),
+				})
+				if err == nil && len(networkPolicies.Items) > 0 {
+					allDeleted = false
+					fmt.Printf("  Still waiting: %d network policy(s) in %s\n", len(networkPolicies.Items), namespace)
 				}
 			}
 

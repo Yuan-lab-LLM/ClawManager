@@ -1,4 +1,5 @@
 import { Component, type ReactNode } from 'react';
+import { DEFAULT_LOCALE, translate, type Locale } from '../lib/i18n';
 
 interface Props {
   children: ReactNode;
@@ -25,9 +26,10 @@ class ErrorBoundary extends Component<Props, State> {
 
   render() {
     if (this.state.hasError) {
+      const locale = (window.localStorage.getItem('clawmanager_locale') as Locale | null) ?? DEFAULT_LOCALE;
       return (
         <div style={{ padding: '20px', fontFamily: 'sans-serif' }}>
-          <h1>Something went wrong</h1>
+          <h1>{translate(locale, 'errorBoundary.title') ?? translate(DEFAULT_LOCALE, 'errorBoundary.title') ?? 'Something went wrong'}</h1>
           <pre style={{ background: '#f5f5f5', padding: '10px', overflow: 'auto' }}>
             {this.state.error?.toString()}
           </pre>

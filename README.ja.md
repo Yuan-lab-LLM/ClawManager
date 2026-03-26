@@ -5,13 +5,13 @@
 </p>
 
 <p align="center">
-  チーム規模からクラスタ規模まで、OpenClaw と Linux デスクトップランタイムを一元管理するための Kubernetes-first コントロールプレーンです。
+  チーム規模からクラスター規模まで、OpenClaw と Linux デスクトップランタイムを一元管理するための Kubernetes-first コントロールプレーンです。
 </p>
 
 <p align="center">
   <strong>言語:</strong>
   <a href="./README.md">English</a> |
-  <a href="./README.zh-CN.md">中文</a> |
+  <a href="./README.zh-CN.md">简体中文</a> |
   日本語 |
   <a href="./README.ko.md">한국어</a> |
   <a href="./README.de.md">Deutsch</a>
@@ -25,39 +25,46 @@
   <img src="https://img.shields.io/badge/License-MIT-2ea44f?style=for-the-badge" alt="MIT License" />
 </p>
 
+## News
+
+- `2026-03-26`: AI Gateway のドキュメントと概要を更新し、モデルガバナンス、監査トレース、コスト計算、リスク制御を整理しました。詳しくは [AI Gateway](#ai-gateway) を参照してください。
+
 ## これは何か
 
-ClawManager は、Kubernetes 上でデスクトップランタイムの配備、運用、アクセスを一か所で管理できるようにします。
+ClawManager は、Kubernetes 上でデスクトップランタイムのデプロイ、運用、アクセスを一元化します。
 
-次のような環境に向いています：
+<p align="center">
+  <img src="./docs/main/admin.png" alt="ClawManager Admin" width="32%" />
+  <img src="./docs/main/portal.png" alt="ClawManager Portal" width="32%" />
+  <img src="./docs/main/aigateway.png" alt="ClawManager AI Gateway" width="32%" />
+</p>
+
+次のような環境に向いています。
 
 - 複数ユーザー向けにデスクトップインスタンスを作成したい
 - quota、イメージ、ライフサイクルを集中管理したい
-- デスクトップサービスをクラスタ内部に保持したい
-- Pod を直接公開せず、安全なブラウザアクセスを提供したい
+- デスクトップサービスをクラスター内部に閉じ込めたい
+- Pod を直接公開せず、安全なブラウザーアクセスを提供したい
 
 ## 選ばれる理由
 
-- ユーザー、quota、インスタンス、ランタイムイメージを一つの管理画面で運用
-- OpenClaw の記憶や設定のインポート／エクスポートに対応
+- ユーザー、quota、インスタンス、ランタイムイメージをまとめて管理できる単一の管理画面
+- OpenClaw のメモリや設定のインポート/エクスポートをサポート
 - サービスを直接公開せず、プラットフォーム経由で安全にデスクトップへアクセス
-- Kubernetes に自然に合う配備・運用フロー
-- 管理者による配布運用とユーザーのセルフサービス作成の両方に対応
-
-<p align="center">
-  <img src="frontend/public/clawmanager_overview.png" alt="ClawManager Overview" width="100%" />
-</p>
+- AI Gateway による制御されたモデルアクセス、監査トレース、コスト分析、リスク制御
+- Kubernetes に自然に馴染むデプロイと運用フロー
+- 管理者主導の展開にもセルフサービス型の利用にも対応
 
 ## クイックスタート
 
 ### 前提条件
 
-- 利用可能な Kubernetes クラスタ
-- `kubectl get nodes` が正常に動作する
+- 利用可能な Kubernetes クラスター
+- `kubectl get nodes` が正常に動作すること
 
 ### デプロイ
 
-同梱のマニフェストをそのまま適用します：
+同梱のマニフェストをそのまま適用します。
 
 ```bash
 kubectl apply -f deployments/k8s/clawmanager.yaml
@@ -67,7 +74,7 @@ kubectl get svc -A
 
 ## ソースコードからビルド
 
-同梱の Kubernetes マニフェストを使わず、ソースコードから ClawManager を実行またはパッケージしたい場合：
+同梱の Kubernetes マニフェストではなく、ソースコードから ClawManager を実行またはパッケージ化したい場合:
 
 ### フロントエンド
 
@@ -87,7 +94,7 @@ go build -o bin/clawreef cmd/server/main.go
 
 ### Docker イメージ
 
-リポジトリのルートでアプリ全体のイメージをビルドします：
+リポジトリルートでアプリ全体のイメージをビルドします。
 
 ```bash
 docker build -t clawmanager:latest .
@@ -95,11 +102,11 @@ docker build -t clawmanager:latest .
 
 ### デフォルトアカウント
 
-- デフォルトの管理者アカウント: `admin / admin123`
+- デフォルト管理者アカウント: `admin / admin123`
 - インポートした管理者ユーザーのデフォルトパスワード: `admin123`
 - インポートした一般ユーザーのデフォルトパスワード: `user123`
 
-### 最初の利用手順
+### 最初の使い方
 
 1. 管理者としてログインします。
 2. ユーザーを作成またはインポートし、quota を割り当てます。
@@ -110,21 +117,33 @@ docker build -t clawmanager:latest .
 ## 主な機能
 
 - インスタンスのライフサイクル管理: 作成、起動、停止、再起動、削除、参照、同期
-- 対応ランタイム: `openclaw`, `webtop`, `ubuntu`, `debian`, `centos`, `custom`
+- 対応ランタイム: `openclaw`、`webtop`、`ubuntu`、`debian`、`centos`、`custom`
 - 管理画面からのランタイムイメージカード管理
 - CPU、メモリ、ストレージ、GPU、インスタンス数に対するユーザー単位の quota 制御
-- ノード、CPU、メモリ、ストレージを対象にしたクラスタ資源概要
+- ノード、CPU、メモリ、ストレージを対象にしたクラスターリソース概要
 - トークンベースのデスクトップアクセスと WebSocket 転送
-- CSV による一括ユーザー導入
+- AI Gateway によるモデル管理、追跡可能な監査ログ、コスト計算、リスク制御
+- CSV ベースの一括ユーザーインポート
 - 多言語インターフェース
+
+## AI Gateway
+
+AI Gateway は、ClawManager におけるモデルアクセスのガバナンスプレーンです。OpenClaw インスタンスに単一の OpenAI 互換エントリーポイントを提供し、上流 Provider の上にポリシー、監査、コスト制御を追加します。
+
+- 通常モデルとセキュアモデルの管理、Provider 接続、有効化、エンドポイント設定、価格ポリシー
+- リクエスト、レスポンス、ルーティング判断、リスクヒットを対象にしたエンドツーエンドの監査/トレース記録
+- トークン集計と利用見積もりを含む組み込みのコスト計算
+- 設定可能なルールに基づくリスク制御と、`block` や `route_secure_model` などの自動アクション
+
+スクリーンショット、詳細な機能説明、モデル選択とルーティングの流れについては [docs/aigateway.md](./docs/aigateway.md) を参照してください。
 
 ## 利用の流れ
 
-1. 管理者がユーザー、quota、ランタイムイメージ方針を設定します。
+1. 管理者がユーザー、quota、ランタイムイメージ方針を定義します。
 2. ユーザーが OpenClaw または Linux デスクトップインスタンスを作成します。
 3. ClawManager が Kubernetes リソースを作成し、状態を追跡します。
 4. ユーザーがプラットフォーム経由でデスクトップにアクセスします。
-5. 管理者がダッシュボードから健全性と容量を確認します。
+5. 管理者がダッシュボードから健全性と容量を監視します。
 
 ## アーキテクチャ
 
@@ -143,9 +162,9 @@ Browser
 - インスタンスサービスは Kubernetes の内部ネットワーク上で動作します
 - デスクトップアクセスは認証済みバックエンドプロキシを経由します
 - ランタイムイメージはシステム設定から上書きできます
-- バックエンドはクラスタ内部に配置するのが最適です
+- バックエンドはクラスター内部に配置するのが理想です
 
-主なバックエンド環境変数：
+主なバックエンド環境変数:
 
 - `SERVER_ADDRESS`
 - `SERVER_MODE`
@@ -162,7 +181,7 @@ Browser
 Username,Email,Role,Max Instances,Max CPU Cores,Max Memory (GB),Max Storage (GB),Max GPU Count (optional)
 ```
 
-メモ：
+メモ:
 
 - `Email` は任意です
 - `Max GPU Count (optional)` は任意です
@@ -170,7 +189,7 @@ Username,Email,Role,Max Instances,Max CPU Cores,Max Memory (GB),Max Storage (GB)
 
 ## ライセンス
 
-本プロジェクトは MIT License の下で公開されています。
+このプロジェクトは MIT License の下で公開されています。
 
 ## オープンソース
 

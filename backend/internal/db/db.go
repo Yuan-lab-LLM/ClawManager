@@ -20,11 +20,20 @@ func Initialize(cfg config.DatabaseConfig) (db.Session, error) {
 		User:     cfg.User,
 		Password: cfg.Password,
 		Database: cfg.Database,
+		Options: map[string]string{
+			"charset":   "utf8mb4",
+			"collation": "utf8mb4_unicode_ci",
+			"parseTime": "true",
+		},
 	}
 
 	session, err := mysql.Open(settings)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
+	}
+	if _, err := session.SQL().Exec("SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci"); err != nil {
+		_ = session.Close()
+		return nil, fmt.Errorf("failed to configure database connection charset: %w", err)
 	}
 
 	Session = session

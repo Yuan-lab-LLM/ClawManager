@@ -46,7 +46,7 @@ const SystemSettingsPage: React.FC = () => {
           error: null,
         })));
       } catch (error: any) {
-        setPageError(error.response?.data?.error || 'Failed to load image settings');
+        setPageError(error.response?.data?.error || t('systemSettingsPage.loadFailed'));
       } finally {
         setLoading(false);
       }
@@ -93,13 +93,13 @@ const SystemSettingsPage: React.FC = () => {
 
   const saveCard = async (card: EditableImageCard) => {
     if (!card.instance_type || !card.image.trim()) {
-      updateCard(card.local_id, { error: 'Instance type and image are required.' });
+      updateCard(card.local_id, { error: t('systemSettingsPage.requiredFields') });
       return;
     }
 
     const duplicate = cards.some((item) => item.local_id !== card.local_id && item.instance_type === card.instance_type);
     if (duplicate) {
-      updateCard(card.local_id, { error: 'This instance type already has a card.' });
+      updateCard(card.local_id, { error: t('systemSettingsPage.duplicateType') });
       return;
     }
 
@@ -123,7 +123,7 @@ const SystemSettingsPage: React.FC = () => {
     } catch (error: any) {
       updateCard(card.local_id, {
         saving: false,
-        error: error.response?.data?.error || 'Failed to save image setting',
+        error: error.response?.data?.error || t('systemSettingsPage.saveFailed'),
       });
     }
   };
@@ -141,7 +141,7 @@ const SystemSettingsPage: React.FC = () => {
     } catch (error: any) {
       updateCard(card.local_id, {
         saving: false,
-        error: error.response?.data?.error || 'Failed to delete image setting',
+        error: error.response?.data?.error || t('systemSettingsPage.deleteFailed'),
       });
     }
   };
@@ -153,9 +153,9 @@ const SystemSettingsPage: React.FC = () => {
         <section className="app-panel p-6">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <h2 className="text-xl font-semibold text-gray-900">Runtime Image Cards</h2>
+              <h2 className="text-xl font-semibold text-gray-900">{t('systemSettingsPage.runtimeImageCards')}</h2>
               <p className="mt-1 text-sm text-gray-500">
-                Configure the image address used by each supported desktop runtime. Saved cards override the built-in defaults.
+                {t('systemSettingsPage.runtimeImageCardsSubtitle')}
               </p>
             </div>
             <button
@@ -163,7 +163,7 @@ const SystemSettingsPage: React.FC = () => {
               onClick={addCard}
               className="app-button-primary"
             >
-              Add Card
+              {t('systemSettingsPage.addCard')}
             </button>
           </div>
 
@@ -188,7 +188,7 @@ const SystemSettingsPage: React.FC = () => {
                   <div key={card.local_id} className="rounded-[26px] border border-[#ead8cf] bg-[rgba(255,248,245,0.84)] p-5 shadow-[0_18px_42px_-34px_rgba(72,44,24,0.42)]">
                     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                       <div>
-                        <label className="block text-sm font-medium text-gray-700">Instance Type</label>
+                        <label className="block text-sm font-medium text-gray-700">{t('systemSettingsPage.instanceType')}</label>
                         <select
                           value={card.instance_type}
                           onChange={(event) => updateCard(card.local_id, { instance_type: event.target.value })}
@@ -202,7 +202,7 @@ const SystemSettingsPage: React.FC = () => {
                         </select>
                       </div>
                       <div>
-                        <label className="block text-sm font-medium text-gray-700">Card Title</label>
+                        <label className="block text-sm font-medium text-gray-700">{t('systemSettingsPage.cardTitle')}</label>
                         <input
                           type="text"
                           value={card.display_name}
@@ -213,7 +213,7 @@ const SystemSettingsPage: React.FC = () => {
                     </div>
 
                     <div className="mt-4">
-                      <label className="block text-sm font-medium text-gray-700">Image Address</label>
+                      <label className="block text-sm font-medium text-gray-700">{t('systemSettingsPage.imageAddress')}</label>
                       <input
                         type="text"
                         value={card.image}
@@ -224,7 +224,7 @@ const SystemSettingsPage: React.FC = () => {
                     </div>
 
                     <p className="mt-3 text-xs text-gray-500">
-                      Default image: <span className="font-mono">{defaultImage}</span>
+                      {t('systemSettingsPage.defaultImage')}: <span className="font-mono">{defaultImage}</span>
                     </p>
 
                     {card.error && (
@@ -248,7 +248,7 @@ const SystemSettingsPage: React.FC = () => {
                         disabled={card.saving}
                         className="app-button-primary disabled:cursor-not-allowed disabled:opacity-50"
                       >
-                        {card.saving ? 'Saving...' : t('common.save')}
+                        {card.saving ? t('modelManagementPage.saving') : t('common.save')}
                       </button>
                     </div>
                   </div>
@@ -259,19 +259,11 @@ const SystemSettingsPage: React.FC = () => {
 
           {!loading && cards.length === 0 && (
             <div className="mt-6 rounded-[24px] border border-dashed border-[#ead8cf] bg-[rgba(255,248,245,0.72)] px-6 py-10 text-center text-sm text-gray-500">
-              No runtime image cards yet. Add one to override the default image for a desktop type.
+              {t('systemSettingsPage.empty')}
             </div>
           )}
         </section>
 
-        <section className="app-panel p-6">
-          <h2 className="text-lg font-semibold text-gray-900">How It Works</h2>
-          <div className="mt-3 space-y-2 text-sm text-gray-600">
-            <p>Saved cards override the runtime image used when new instances are created or restarted.</p>
-            <p>Deleting a card removes the override and falls back to the built-in default image for that type.</p>
-            <p>Current built-in Ubuntu default: <span className="font-mono">lscr.io/linuxserver/webtop:ubuntu-xfce</span></p>
-          </div>
-        </section>
       </div>
     </AdminLayout>
   );

@@ -25,6 +25,16 @@
   <img src="https://img.shields.io/badge/License-MIT-2ea44f?style=for-the-badge" alt="MIT License" />
 </p>
 
+## News
+
+- `2026-03-26`: AI Gateway documentation and overview were refreshed, including model governance, audit and trace, cost accounting, and risk control. See [AI Gateway](#ai-gateway).
+
+<p align="center">
+  <img src="./docs/main/admin.png" alt="ClawManager Admin" width="32%" />
+  <img src="./docs/main/portal.png" alt="ClawManager Portal" width="32%" />
+  <img src="./docs/main/aigateway.png" alt="ClawManager AI Gateway" width="32%" />
+</p>
+
 ## What It Is
 
 ClawManager helps teams deploy, operate, and access desktop runtimes on Kubernetes from one place.
@@ -41,12 +51,10 @@ It is built for environments where you need to:
 - One admin panel for users, quotas, instances, and runtime images
 - OpenClaw support with import/export for memory and preferences
 - Secure desktop access through the platform instead of direct pod exposure
+- AI Gateway governance for controlled model access, audit trails, cost analysis, and risk controls
 - Kubernetes-native deployment and operations flow
 - Works for both admin-managed rollout and self-service instance creation
 
-<p align="center">
-  <img src="frontend/public/clawmanager_overview.png" alt="ClawManager Overview" width="100%" />
-</p>
 
 ## Quick Start
 
@@ -115,8 +123,20 @@ docker build -t clawmanager:latest .
 - User quota control for CPU, memory, storage, GPU, and instance count
 - Cluster resource overview for nodes, CPU, memory, and storage
 - Token-based desktop access with WebSocket forwarding
+- AI Gateway for model management, traceable audit logs, cost accounting, and risk control
 - CSV-based bulk user import
 - Multilingual interface
+
+## AI Gateway
+
+AI Gateway is the governance plane for model access inside ClawManager. It gives OpenClaw instances a single OpenAI-compatible entry point while adding policy, audit, and cost controls on top of upstream providers.
+
+- Model management for regular and secure models, provider onboarding, activation, endpoint configuration, and pricing policy
+- End-to-end audit and trace records for requests, responses, routing decisions, and risk hits
+- Built-in cost accounting with token tracking and estimated usage analysis
+- Risk control with configurable rules and automated actions such as `block` and `route_secure_model`
+
+For screenshots, the full feature breakdown, and the model selection and routing flow, see [docs/aigateway.md](./docs/aigateway.md).
 
 ## Product Flow
 

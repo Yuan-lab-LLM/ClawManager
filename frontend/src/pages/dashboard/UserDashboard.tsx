@@ -37,21 +37,13 @@ const UserDashboard: React.FC = () => {
 
   const runningCount = instances.filter(i => i.status === 'running').length;
   const totalStorage = instances.reduce((sum, i) => sum + i.disk_gb, 0);
+  const recentInstances = [...instances].sort((a, b) => {
+    return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+  });
 
   return (
-    <UserLayout>
+    <UserLayout title={t('nav.userDashboard')}>
       <div className="space-y-8">
-        {/* Welcome Section */}
-        <div className="app-panel-warm p-6">
-          <div className="inline-flex items-center rounded-full border border-[#f0d4c6] bg-white/75 px-3 py-1 text-xs font-semibold uppercase tracking-[0.22em] text-[#b46c50]">
-            {t('nav.userDashboard')}
-          </div>
-          <h2 className="text-2xl font-bold mb-2">{t('userDashboard.welcome', { username: user?.username || '' })}</h2>
-          <p className="text-[#7a6d66]">
-            {t('userDashboard.subtitle')}
-          </p>
-        </div>
-
         {/* Stats Cards */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <Link to="/instances" className="app-panel transition-all hover:-translate-y-0.5 hover:shadow-[0_30px_80px_-52px_rgba(72,44,24,0.62)]">
@@ -144,7 +136,7 @@ const UserDashboard: React.FC = () => {
             </div>
             <div className="app-panel">
               <ul className="divide-y divide-[#f1e7e1]">
-                {instances.slice(0, 5).map((instance) => (
+                {recentInstances.slice(0, 5).map((instance) => (
                   <li key={instance.id} className="px-4 py-4 hover:bg-[#fff8f5]">
                     <Link to={`/instances/${instance.id}`} className="flex items-center justify-between">
                       <div>

@@ -2,6 +2,8 @@ package services
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"strings"
 	"time"
@@ -64,21 +66,25 @@ type InstanceStatus struct {
 
 // instanceService implements InstanceService
 type instanceService struct {
-	instanceRepo   repository.InstanceRepository
-	quotaRepo      repository.QuotaRepository
-	podService     *k8s.PodService
-	pvcService     *k8s.PVCService
-	serviceService *k8s.ServiceService
+	instanceRepo         repository.InstanceRepository
+	quotaRepo            repository.QuotaRepository
+	llmModelRepo         repository.LLMModelRepository
+	podService           *k8s.PodService
+	pvcService           *k8s.PVCService
+	serviceService       *k8s.ServiceService
+	networkPolicyService *k8s.NetworkPolicyService
 }
 
 // NewInstanceService creates a new instance service
-func NewInstanceService(instanceRepo repository.InstanceRepository, quotaRepo repository.QuotaRepository) InstanceService {
+func NewInstanceService(instanceRepo repository.InstanceRepository, quotaRepo repository.QuotaRepository, llmModelRepo repository.LLMModelRepository) InstanceService {
 	return &instanceService{
-		instanceRepo:   instanceRepo,
-		quotaRepo:      quotaRepo,
-		podService:     k8s.NewPodService(),
-		pvcService:     k8s.NewPVCService(),
-		serviceService: k8s.NewServiceService(),
+		instanceRepo:         instanceRepo,
+		quotaRepo:            quotaRepo,
+		llmModelRepo:         llmModelRepo,
+		podService:           k8s.NewPodService(),
+		pvcService:           k8s.NewPVCService(),
+		serviceService:       k8s.NewServiceService(),
+		networkPolicyService: k8s.NewNetworkPolicyService(),
 	}
 }
 
@@ -197,6 +203,17 @@ func (s *instanceService) Create(userID int, req CreateInstanceRequest) (*models
 		return nil, fmt.Errorf("failed to create instance record: %w", err)
 	}
 
+	if _, err := s.ensureGatewayToken(instance); err != nil {
+		s.instanceRepo.Delete(instance.ID)
+		return nil, fmt.Errorf("failed to provision instance gateway token: %w", err)
+	}
+
+	gatewayEnv, err := s.buildGatewayEnv(instance)
+	if err != nil {
+		s.instanceRepo.Delete(instance.ID)
+		return nil, fmt.Errorf("failed to build instance gateway config: %w", err)
+	}
+
 	// Create PVC
 	// If storage class is not specified in request, use empty string
 	// PVCService will use the default from K8s client config
@@ -207,6 +224,14 @@ func (s *instanceService) Create(userID int, req CreateInstanceRequest) (*models
 		// Rollback: delete instance record
 		s.instanceRepo.Delete(instance.ID)
 		return nil, fmt.Errorf("failed to create PVC: %w", err)
+	}
+
+	if requiresRestrictedNetwork(instance.Type) {
+		if err := s.networkPolicyService.EnsureDefaultPolicy(ctx, userID, instance.ID, instance.Name); err != nil {
+			s.pvcService.DeletePVC(ctx, userID, instance.ID)
+			s.instanceRepo.Delete(instance.ID)
+			return nil, fmt.Errorf("failed to create network policy: %w", err)
+		}
 	}
 
 	// Create Pod
@@ -222,12 +247,15 @@ func (s *instanceService) Create(userID int, req CreateInstanceRequest) (*models
 		Image:         runtimeConfig.Image,
 		MountPath:     runtimeConfig.MountPath,
 		ContainerPort: runtimeConfig.Port,
-		ExtraEnv:      withInstanceProxyEnv(instance.Type, instance.ID, runtimeConfig.Env),
+		ExtraEnv:      withInstanceProxyEnv(instance.Type, instance.ID, mergeEnvMaps(runtimeConfig.Env, gatewayEnv)),
 	}
 
 	pod, err := s.podService.CreatePod(ctx, podConfig)
 	if err != nil {
 		// Rollback: delete PVC and instance record
+		if requiresRestrictedNetwork(instance.Type) {
+			s.networkPolicyService.DeletePolicy(ctx, userID, instance.ID, instance.Name)
+		}
 		s.pvcService.DeletePVC(ctx, userID, instance.ID)
 		s.instanceRepo.Delete(instance.ID)
 		return nil, fmt.Errorf("failed to create pod: %w", err)
@@ -246,6 +274,9 @@ func (s *instanceService) Create(userID int, req CreateInstanceRequest) (*models
 	if err != nil {
 		// Rollback: delete pod, PVC and instance record
 		s.podService.DeletePod(ctx, userID, instance.ID)
+		if requiresRestrictedNetwork(instance.Type) {
+			s.networkPolicyService.DeletePolicy(ctx, userID, instance.ID, instance.Name)
+		}
 		s.pvcService.DeletePVC(ctx, userID, instance.ID)
 		s.instanceRepo.Delete(instance.ID)
 		return nil, fmt.Errorf("failed to create service: %w", err)
@@ -313,8 +344,23 @@ func (s *instanceService) Start(instanceID int) error {
 		return fmt.Errorf("instance is already running")
 	}
 
+	if _, err := s.ensureGatewayToken(instance); err != nil {
+		return fmt.Errorf("failed to provision instance gateway token: %w", err)
+	}
+
+	gatewayEnv, err := s.buildGatewayEnv(instance)
+	if err != nil {
+		return fmt.Errorf("failed to build instance gateway config: %w", err)
+	}
+
 	// Create new pod
 	runtimeConfig := buildRuntimeConfig(instance.Type, instance.OSType, instance.OSVersion, instance.ImageRegistry, instance.ImageTag)
+	if requiresRestrictedNetwork(instance.Type) {
+		if err := s.networkPolicyService.EnsureDefaultPolicy(ctx, instance.UserID, instance.ID, instance.Name); err != nil {
+			return fmt.Errorf("failed to create network policy: %w", err)
+		}
+	}
+
 	podConfig := k8s.PodConfig{
 		InstanceID:    instance.ID,
 		InstanceName:  instance.Name,
@@ -327,7 +373,7 @@ func (s *instanceService) Start(instanceID int) error {
 		Image:         runtimeConfig.Image,
 		MountPath:     instance.MountPath,
 		ContainerPort: runtimeConfig.Port,
-		ExtraEnv:      withInstanceProxyEnv(instance.Type, instance.ID, runtimeConfig.Env),
+		ExtraEnv:      withInstanceProxyEnv(instance.Type, instance.ID, mergeEnvMaps(runtimeConfig.Env, gatewayEnv)),
 	}
 
 	pod, err := s.podService.CreatePod(ctx, podConfig)
@@ -370,6 +416,88 @@ func (s *instanceService) Start(instanceID int) error {
 	GetHub().BroadcastInstanceStatus(instance.UserID, instance)
 
 	return nil
+}
+
+func requiresRestrictedNetwork(instanceType string) bool {
+	return strings.TrimSpace(instanceType) != ""
+}
+
+func (s *instanceService) ensureGatewayToken(instance *models.Instance) (string, error) {
+	if instance.AccessToken != nil && strings.TrimSpace(*instance.AccessToken) != "" {
+		return strings.TrimSpace(*instance.AccessToken), nil
+	}
+
+	tokenBytes := make([]byte, 32)
+	if _, err := rand.Read(tokenBytes); err != nil {
+		return "", fmt.Errorf("failed to generate instance gateway token: %w", err)
+	}
+
+	token := "igt_" + hex.EncodeToString(tokenBytes)
+	instance.AccessToken = &token
+	instance.UpdatedAt = time.Now()
+	if err := s.instanceRepo.Update(instance); err != nil {
+		return "", fmt.Errorf("failed to persist instance gateway token: %w", err)
+	}
+
+	return token, nil
+}
+
+func (s *instanceService) buildGatewayEnv(instance *models.Instance) (map[string]string, error) {
+	if instance == nil || instance.AccessToken == nil || strings.TrimSpace(*instance.AccessToken) == "" {
+		return map[string]string{}, nil
+	}
+	if !strings.EqualFold(strings.TrimSpace(instance.Type), "openclaw") {
+		return map[string]string{}, nil
+	}
+
+	baseURL, ok := defaultGatewayBaseURL()
+	if !ok {
+		return nil, fmt.Errorf("gateway base URL is not configured")
+	}
+
+	modelName, err := s.resolveDefaultGatewayModel()
+	if err != nil {
+		return nil, err
+	}
+
+	token := strings.TrimSpace(*instance.AccessToken)
+	return map[string]string{
+		"CLAWMANAGER_LLM_BASE_URL":   baseURL,
+		"CLAWMANAGER_LLM_API_KEY":    token,
+		"CLAWMANAGER_LLM_MODEL":      modelName,
+		"CLAWMANAGER_LLM_PROVIDER":   "openai-compatible",
+		"CLAWMANAGER_INSTANCE_TOKEN": token,
+		"OPENAI_BASE_URL":            baseURL,
+		"OPENAI_API_BASE":            baseURL,
+		"OPENAI_API_KEY":             token,
+		"OPENAI_MODEL":               modelName,
+	}, nil
+}
+
+func (s *instanceService) resolveDefaultGatewayModel() (string, error) {
+	if s.llmModelRepo == nil {
+		return "", fmt.Errorf("llm model repository not configured")
+	}
+
+	items, err := s.llmModelRepo.ListActive()
+	if err != nil {
+		return "", fmt.Errorf("failed to list active models: %w", err)
+	}
+	if len(items) == 0 {
+		return "", fmt.Errorf("no active models are configured")
+	}
+	return "auto", nil
+}
+
+func mergeEnvMaps(base map[string]string, overlay map[string]string) map[string]string {
+	merged := map[string]string{}
+	for key, value := range base {
+		merged[key] = value
+	}
+	for key, value := range overlay {
+		merged[key] = value
+	}
+	return merged
 }
 
 // Stop stops an instance
@@ -582,6 +710,32 @@ func (s *instanceService) cleanupOrphanedResourcesByUser(ctx context.Context, us
 			// Also try to delete the associated PV
 			if pvc.Spec.VolumeName != "" {
 				client.CoreV1().PersistentVolumes().Delete(ctx, pvc.Spec.VolumeName, metav1.DeleteOptions{})
+			}
+		}
+	}
+
+	networkPolicies, err := client.NetworkingV1().NetworkPolicies(namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: "managed-by=clawreef",
+	})
+	if err != nil {
+		fmt.Printf("Warning: failed to list network policies in namespace %s: %v\n", namespace, err)
+		return
+	}
+
+	for _, policy := range networkPolicies.Items {
+		instanceIDStr := policy.Labels["instance-id"]
+		if instanceIDStr == "" {
+			continue
+		}
+
+		instanceID := 0
+		fmt.Sscanf(instanceIDStr, "%d", &instanceID)
+
+		instance, err := s.instanceRepo.GetByID(instanceID)
+		if err != nil || instance == nil {
+			fmt.Printf("Found orphaned NetworkPolicy %s (instance-id: %s), deleting...\n", policy.Name, instanceIDStr)
+			if err := client.NetworkingV1().NetworkPolicies(namespace).Delete(ctx, policy.Name, metav1.DeleteOptions{}); err != nil {
+				fmt.Printf("Warning: failed to delete orphaned NetworkPolicy %s: %v\n", policy.Name, err)
 			}
 		}
 	}
