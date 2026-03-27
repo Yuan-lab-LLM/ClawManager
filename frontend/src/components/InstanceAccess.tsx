@@ -11,6 +11,7 @@ interface InstanceAccessProps {
 export function InstanceAccess({ instanceId, instanceName, isRunning }: InstanceAccessProps) {
   const { t } = useI18n();
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [shouldConnect, setShouldConnect] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
 
@@ -46,10 +47,20 @@ export function InstanceAccess({ instanceId, instanceName, isRunning }: Instance
     handleFrameLoad,
   } = useInstanceDesktopAccess({
     instanceId,
-    isRunning,
+    isRunning: isRunning && shouldConnect,
     resolveEmbedUrl,
     failedMessage: t('instances.failedToGenerateAccessToken'),
   });
+
+  useEffect(() => {
+    setShouldConnect(false);
+  }, [instanceId]);
+
+  useEffect(() => {
+    if (!isRunning) {
+      setShouldConnect(false);
+    }
+  }, [isRunning]);
 
   useEffect(() => {
     const handleFullscreenChange = () => {
@@ -95,17 +106,17 @@ export function InstanceAccess({ instanceId, instanceName, isRunning }: Instance
   if (!isRunning) {
     return (
       <div className="app-panel border-dashed p-12 text-center">
-        <svg 
-          className="mx-auto h-12 w-12 text-gray-400" 
-          fill="none" 
-          viewBox="0 0 24 24" 
+        <svg
+          className="mx-auto h-12 w-12 text-gray-400"
+          fill="none"
+          viewBox="0 0 24 24"
           stroke="currentColor"
         >
-          <path 
-            strokeLinecap="round" 
-            strokeLinejoin="round" 
-            strokeWidth={2} 
-            d="M13 10V3L4 14h7v7l9-11h-7z" 
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M13 10V3L4 14h7v7l9-11h-7z"
           />
         </svg>
         <h3 className="mt-2 text-sm font-medium text-gray-900">{t('instances.startTheInstance')}</h3>
@@ -116,7 +127,7 @@ export function InstanceAccess({ instanceId, instanceName, isRunning }: Instance
     );
   }
 
-  if (loading && !embedUrl) {
+  if (loading && shouldConnect && !embedUrl) {
     return (
       <div className="app-panel flex h-96 items-center justify-center">
         <div className="text-center">
@@ -127,20 +138,20 @@ export function InstanceAccess({ instanceId, instanceName, isRunning }: Instance
     );
   }
 
-  if (error && !embedUrl) {
+  if (error && shouldConnect && !embedUrl) {
     return (
       <div className="rounded-[28px] border border-red-200 bg-red-50 p-8 text-center shadow-[0_24px_70px_-52px_rgba(72,44,24,0.4)]">
-        <svg 
-          className="mx-auto h-12 w-12 text-red-400" 
-          fill="none" 
-          viewBox="0 0 24 24" 
+        <svg
+          className="mx-auto h-12 w-12 text-red-400"
+          fill="none"
+          viewBox="0 0 24 24"
           stroke="currentColor"
         >
-          <path 
-            strokeLinecap="round" 
-            strokeLinejoin="round" 
-            strokeWidth={2} 
-            d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" 
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
           />
         </svg>
         <h3 className="mt-2 text-sm font-medium text-red-800">{t('instances.accessError')}</h3>
@@ -158,17 +169,17 @@ export function InstanceAccess({ instanceId, instanceName, isRunning }: Instance
   if (!embedUrl) {
     return (
       <div className="app-panel border-dashed p-12 text-center">
-        <svg 
-          className="mx-auto h-12 w-12 text-gray-400" 
-          fill="none" 
-          viewBox="0 0 24 24" 
+        <svg
+          className="mx-auto h-12 w-12 text-gray-400"
+          fill="none"
+          viewBox="0 0 24 24"
           stroke="currentColor"
         >
-          <path 
-            strokeLinecap="round" 
-            strokeLinejoin="round" 
-            strokeWidth={2} 
-            d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" 
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"
           />
         </svg>
         <h3 className="mt-2 text-sm font-medium text-gray-900">{t('instances.readyToAccess')}</h3>
@@ -176,7 +187,7 @@ export function InstanceAccess({ instanceId, instanceName, isRunning }: Instance
           {t('instances.generateAccessPrompt', { name: instanceName })}
         </p>
         <button
-          onClick={() => refreshAccess({ forceReload: true })}
+          onClick={() => setShouldConnect(true)}
           className="app-button-primary mt-4 inline-flex"
         >
           {t('instances.generateAccess')}
@@ -190,7 +201,6 @@ export function InstanceAccess({ instanceId, instanceName, isRunning }: Instance
       ref={containerRef}
       className={`relative overflow-hidden bg-[#111827] ${isFullscreen ? 'rounded-none' : 'rounded-[28px] border border-[#1f2937] shadow-[0_30px_90px_-56px_rgba(17,24,39,0.9)]'}`}
     >
-      {/* Toolbar */}
       <div className="flex items-center justify-between px-4 py-3 bg-gray-800 text-white">
         <div className="flex items-center space-x-4">
           <span className="text-sm font-medium">{instanceName}</span>
@@ -224,7 +234,6 @@ export function InstanceAccess({ instanceId, instanceName, isRunning }: Instance
         </div>
       </div>
 
-      {/* iframe */}
       <div className={frameHeightClass}>
         <iframe
           key={frameKey}

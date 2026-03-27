@@ -12,6 +12,7 @@ const InstancePortalPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [shouldConnect, setShouldConnect] = useState(false);
   const frameShellRef = useRef<HTMLElement | null>(null);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
 
@@ -88,10 +89,20 @@ const InstancePortalPage: React.FC = () => {
     handleFrameLoad,
   } = useInstanceDesktopAccess({
     instanceId: selectedInstance?.id ?? null,
-    isRunning: selectedInstance?.status === 'running',
+    isRunning: selectedInstance?.status === 'running' && shouldConnect,
     resolveEmbedUrl,
     failedMessage: t('instances.failedToGenerateAccessToken'),
   });
+
+  useEffect(() => {
+    setShouldConnect(false);
+  }, [selectedId]);
+
+  useEffect(() => {
+    if (selectedInstance?.status !== 'running') {
+      setShouldConnect(false);
+    }
+  }, [selectedInstance?.status]);
 
   const formatRemaining = () => {
     if (!expiresAt) {
@@ -135,6 +146,12 @@ const InstancePortalPage: React.FC = () => {
       }
     } catch (fullscreenError) {
       console.error('Failed to toggle portal fullscreen', fullscreenError);
+    }
+  };
+
+  const requestAccess = () => {
+    if (selectedInstance?.status === 'running') {
+      setShouldConnect(true);
     }
   };
 
@@ -207,19 +224,31 @@ const InstancePortalPage: React.FC = () => {
                 </p>
                 <p className="mt-1 text-xs text-[#aab4c4]">
                   {selectedInstance
-                    ? accessLoading || reconnecting || !expiresAt
-                      ? t('instances.generatingToken')
-                      : `${t('instances.expiresIn')}: ${formatRemaining()}`
+                    ? embedUrl
+                      ? accessLoading || reconnecting || !expiresAt
+                        ? t('instances.generatingToken')
+                        : `${t('instances.expiresIn')}: ${formatRemaining()}`
+                      : shouldConnect && accessLoading
+                        ? t('instances.generatingToken')
+                        : selectedInstance.status === 'running'
+                          ? t('instances.readyToAccess')
+                          : t('instances.instanceMustBeRunning')
                     : t('instances.portalSelectInstanceSubtitle')}
                 </p>
               </div>
               <div className="flex items-center gap-2">
                 {selectedInstance && selectedInstance.status === 'running' && (
                   <button
-                    onClick={() => refreshAccess({ forceReload: true })}
+                    onClick={() => {
+                      if (!shouldConnect || !embedUrl) {
+                        requestAccess();
+                        return;
+                      }
+                      refreshAccess({ forceReload: true });
+                    }}
                     className="rounded-lg bg-[#243041] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#31415a]"
                   >
-                    {t('instances.refreshToken')}
+                    {embedUrl ? t('instances.refreshToken') : t('instances.generateAccess')}
                   </button>
                 )}
                 <button
@@ -241,7 +270,7 @@ const InstancePortalPage: React.FC = () => {
             </div>
 
             <div className="min-h-0 flex-1">
-              {accessLoading && !embedUrl ? (
+              {accessLoading && shouldConnect && !embedUrl ? (
                 <div className="flex h-full items-center justify-center text-sm text-[#d8dee8]">
                   {t('instances.generatingToken')}
                 </div>
@@ -261,11 +290,28 @@ const InstancePortalPage: React.FC = () => {
                 <div className="flex h-full items-center justify-center px-8 text-center">
                   <div>
                     <h3 className="text-lg font-semibold text-white">
-                      {selectedInstance ? t('instances.portalUnavailable') : t('instances.portalSelectInstance')}
+                      {selectedInstance
+                        ? selectedInstance.status === 'running'
+                          ? t('instances.readyToAccess')
+                          : t('instances.portalUnavailable')
+                        : t('instances.portalSelectInstance')}
                     </h3>
                     <p className="mt-2 text-sm text-[#b7c1cf]">
-                      {accessError || (selectedInstance ? t('instances.portalUnavailableSubtitle') : t('instances.portalSelectInstanceSubtitle'))}
+                      {selectedInstance
+                        ? selectedInstance.status === 'running'
+                          ? accessError || t('instances.generateAccessPrompt', { name: selectedInstance.name })
+                          : accessError || t('instances.portalUnavailableSubtitle')
+                        : t('instances.portalSelectInstanceSubtitle')}
                     </p>
+                    {selectedInstance && selectedInstance.status === 'running' && (
+                      <button
+                        type="button"
+                        onClick={requestAccess}
+                        className="app-button-primary mt-5 inline-flex"
+                      >
+                        {t('instances.generateAccess')}
+                      </button>
+                    )}
                   </div>
                 </div>
               )}
