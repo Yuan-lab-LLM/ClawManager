@@ -50,7 +50,7 @@ jobs:
                 repo: context.repo.repo,
               });
               const body = release.data.body || "";
-              const match = body.match(/Build-Fingerprint:\s*(\S+)/);
+              const match = body.match(/Build-Fingerprint:\s*`?([^\s`]+)`?/);
               core.setOutput("tag", release.data.tag_name || "");
               core.setOutput("fingerprint", match ? match[1] : "");
             } catch (error) {
@@ -65,11 +65,15 @@ jobs:
       - name: Decide whether to create a new release tag
         id: decision
         shell: bash
+        env:
+          FORCE_RELEASE: ${{ github.event.inputs.force_release || 'false' }}
+          LAST_FINGERPRINT: ${{ steps.latest-release.outputs.fingerprint }}
         run: |
-          FORCE_RELEASE="${{ github.event.inputs.force_release || 'false' }}"
-          LAST_FINGERPRINT="${{ steps.latest-release.outputs.fingerprint }}"
           CURRENT_FINGERPRINT="${IMAGE_FINGERPRINT}"
           TAG_NAME="v$(date -u +'%Y.%-m.%-d')"
+
+          LAST_FINGERPRINT="${LAST_FINGERPRINT//\`/}"
+          CURRENT_FINGERPRINT="${CURRENT_FINGERPRINT//\`/}"
 
           if [ "$FORCE_RELEASE" = "true" ]; then
             echo "should_release=true" >> "$GITHUB_OUTPUT"

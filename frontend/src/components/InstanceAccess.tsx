@@ -92,6 +92,7 @@ export function InstanceAccess({ instanceId, instanceName, isRunning }: Instance
   };
 
   const frameHeightClass = 'h-[calc(100vh-180px)] min-h-[780px] max-h-[1280px] md:h-[calc(100vh-160px)]';
+  const showStartScreen = !embedUrl;
 
   const formatTimeRemaining = () => {
     if (!expiresAt) return '';
@@ -101,6 +102,15 @@ export function InstanceAccess({ instanceId, instanceName, isRunning }: Instance
     const minutes = Math.floor(diff / 60000);
     const seconds = Math.floor((diff % 60000) / 1000);
     return `${minutes}m ${seconds}s`;
+  };
+
+  const handleConnect = () => {
+    if (shouldConnect) {
+      void refreshAccess({ forceReload: true });
+      return;
+    }
+
+    setShouldConnect(true);
   };
 
   if (!isRunning) {
@@ -127,71 +137,42 @@ export function InstanceAccess({ instanceId, instanceName, isRunning }: Instance
     );
   }
 
-  if (loading && shouldConnect && !embedUrl) {
+  if (showStartScreen) {
     return (
-      <div className="app-panel flex h-96 items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mx-auto"></div>
-          <p className="mt-4 text-gray-600">{t('instances.generatingToken')}</p>
+      <div className="relative overflow-hidden rounded-[28px] border border-[#1f2937] bg-[radial-gradient(circle_at_top,rgba(59,130,246,0.2),transparent_28%),linear-gradient(180deg,#111827_0%,#0f172a_100%)] shadow-[0_30px_90px_-56px_rgba(17,24,39,0.9)]">
+        <div className={`${frameHeightClass} flex flex-col items-center justify-center px-8 text-center`}>
+          <button
+            type="button"
+            onClick={handleConnect}
+            disabled={loading}
+            aria-label={t('instances.generateAccess')}
+            className="group flex h-24 w-24 items-center justify-center rounded-full border border-white/20 bg-white/10 text-white backdrop-blur transition hover:scale-[1.03] hover:bg-white/16 disabled:cursor-wait disabled:opacity-70"
+          >
+            {loading ? (
+              <span className="h-10 w-10 animate-spin rounded-full border-2 border-white/20 border-t-white" />
+            ) : (
+              <svg
+                className="ml-1 h-11 w-11 transition-transform group-hover:translate-x-0.5"
+                viewBox="0 0 24 24"
+                fill="currentColor"
+                aria-hidden="true"
+              >
+                <path d="M8 5.14v13.72L19 12 8 5.14z" />
+              </svg>
+            )}
+          </button>
+
+          <h3 className="mt-6 text-xl font-semibold text-white">{t('instances.readyToAccess')}</h3>
+          <p className="mt-2 max-w-md text-sm leading-6 text-slate-300">
+            {loading ? t('instances.generatingToken') : t('instances.generateAccessPrompt', { name: instanceName })}
+          </p>
+          {error && shouldConnect && (
+            <p className="mt-4 max-w-md text-sm text-red-300">{error}</p>
+          )}
+          <p className="mt-4 text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">
+            {loading ? t('instances.generatingToken') : t('instances.generateAccess')}
+          </p>
         </div>
-      </div>
-    );
-  }
-
-  if (error && shouldConnect && !embedUrl) {
-    return (
-      <div className="rounded-[28px] border border-red-200 bg-red-50 p-8 text-center shadow-[0_24px_70px_-52px_rgba(72,44,24,0.4)]">
-        <svg
-          className="mx-auto h-12 w-12 text-red-400"
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-          />
-        </svg>
-        <h3 className="mt-2 text-sm font-medium text-red-800">{t('instances.accessError')}</h3>
-        <p className="mt-1 text-sm text-red-600">{error}</p>
-        <button
-          onClick={() => refreshAccess({ forceReload: true })}
-          className="mt-4 inline-flex items-center rounded-2xl border border-red-200 bg-red-100 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-200"
-        >
-          {t('common.retry')}
-        </button>
-      </div>
-    );
-  }
-
-  if (!embedUrl) {
-    return (
-      <div className="app-panel border-dashed p-12 text-center">
-        <svg
-          className="mx-auto h-12 w-12 text-gray-400"
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"
-          />
-        </svg>
-        <h3 className="mt-2 text-sm font-medium text-gray-900">{t('instances.readyToAccess')}</h3>
-        <p className="mt-1 text-sm text-gray-500">
-          {t('instances.generateAccessPrompt', { name: instanceName })}
-        </p>
-        <button
-          onClick={() => setShouldConnect(true)}
-          className="app-button-primary mt-4 inline-flex"
-        >
-          {t('instances.generateAccess')}
-        </button>
       </div>
     );
   }
