@@ -27,7 +27,8 @@
 
 ## News
 
-- `2026-03-26`: AI Gateway 문서와 개요를 업데이트했습니다. 모델 거버넌스, 감사 추적, 비용 정산, 위험 제어를 정리했습니다. 자세한 내용은 [AI Gateway](#ai-gateway)를 참고하세요.
+- [2026-03-26]: 🚀🚀 AI Gateway 문서와 개요를 업데이트했습니다. 모델 거버넌스, 감사 추적, 비용 정산, 위험 제어를 정리했습니다. 자세한 내용은 [AI Gateway](#ai-gateway)를 참고하세요.
+- [2026-03-20]: 🎉🎉 ClawManager 릴리스 —— ClawManager는 현재 가상 데스크톱 관리 플랫폼으로 제공되며, 일괄 배포, Webtop 지원, 데스크톱 포털 접근, 런타임 이미지 설정, OpenClaw 메모리/환경설정 Markdown 백업 및 마이그레이션, 클러스터 리소스 개요, 다국어 문서를 지원합니다.
 
 <p align="center">
   <img src="./docs/main/admin.png" alt="ClawManager Admin" width="32%" />
