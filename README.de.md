@@ -27,7 +27,8 @@
 
 ## News
 
-- `2026-03-26`: Die AI-Gateway-Dokumentation und Uebersicht wurden aktualisiert, inklusive Modell-Governance, Audit-Trace, Kostenrechnung und Risikokontrolle. Siehe [AI Gateway](#ai-gateway).
+- [2026-03-26]: 🚀🚀 Die AI-Gateway-Dokumentation und Uebersicht wurden aktualisiert, inklusive Modell-Governance, Audit-Trace, Kostenrechnung und Risikokontrolle. Siehe [AI Gateway](#ai-gateway).
+- [2026-03-20]: 🎉🎉 ClawManager Release — ClawManager ist jetzt eine Plattform zur Verwaltung virtueller Desktops und bietet Funktionen wie Batch-Bereitstellung, Webtop-Unterstützung, Zugriff über ein Desktop-Portal, Laufzeit-Image-Konfiguration, Markdown-Backup und Migration von OpenClaw-Speicher/Einstellungen, Cluster-Ressourcenübersicht sowie mehrsprachige Dokumentation.
 
 <p align="center">
   <img src="./docs/main/admin.png" alt="ClawManager Admin" width="32%" />
