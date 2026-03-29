@@ -27,7 +27,9 @@
 
 ## 新闻
 
-- `2026-03-26`: AI Gateway 文档与总览已更新，涵盖模型治理、审计追踪、成本核算和风险控制。参见 [AI Gateway](#ai-gateway)。
+- [2026-03-26]: 🚀🚀 AI Gateway 文档与总览已更新，涵盖模型治理、审计追踪、成本核算和风险控制。参见 [AI Gateway](#ai-gateway)。
+- [2026-03-20]: 🎉🎉 ClawManager 发布 —— ClawManager 现已成为一款虚拟桌面管理平台，支持批量部署、Webtop 支持、桌面门户访问、运行时镜像配置、OpenClaw 记忆/偏好 Markdown 备份与迁移、集群资源总览以及多语言文档。
+
 
 <p align="center">
   <img src="./docs/main/admin.png" alt="ClawManager Admin" width="32%" />
