@@ -137,6 +137,29 @@ AI Gateway is the governance plane for model access inside ClawManager. It gives
 - Built-in cost accounting with token tracking and estimated usage analysis
 - Risk control with configurable rules and automated actions such as `block` and `route_secure_model`
 
+### Supported Model Service Platforms
+
+ClawManager includes built-in vendor templates for:
+
+- OpenAI
+- OpenRouter
+- DeepSeek
+- SiliconFlow
+- Moonshot AI
+- Zhipu AI
+- Alibaba DashScope
+- Volcengine Ark
+- Groq
+- Together AI
+- Fireworks AI
+- xAI
+- Perplexity
+- 01.AI
+- MiniMax
+- Local / Internal endpoints
+
+`Local / Internal` can also be used for self-hosted OpenAI-compatible gateways, Ollama, One API, and other private model endpoints.
+
 For screenshots, the full feature breakdown, and the model selection and routing flow, see [docs/aigateway.md](./docs/aigateway.md).
 
 ## Product Flow

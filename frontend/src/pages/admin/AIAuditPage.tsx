@@ -110,8 +110,231 @@ function flowKindTone(kind: string) {
   }
 }
 
+function parseTimestamp(value?: string) {
+  if (!value) {
+    return null;
+  }
+
+  const parsed = new Date(value);
+  const timestamp = parsed.getTime();
+  return Number.isNaN(timestamp) ? null : timestamp;
+}
+
+function formatAbsoluteTimestamp(value: string | undefined, locale: string) {
+  const timestamp = parseTimestamp(value);
+  if (timestamp === null) {
+    return '-';
+  }
+
+  return new Intl.DateTimeFormat(locale, {
+    dateStyle: 'medium',
+    timeStyle: 'medium',
+  }).format(timestamp);
+}
+
+function formatRelativeTimestamp(value: string | undefined, locale: string) {
+  const timestamp = parseTimestamp(value);
+  if (timestamp === null) {
+    return '-';
+  }
+
+  const diff = timestamp - Date.now();
+  const absDiff = Math.abs(diff);
+  const formatter = new Intl.RelativeTimeFormat(locale, { numeric: 'auto' });
+  const ranges: Array<{ limit: number; divisor: number; unit: Intl.RelativeTimeFormatUnit }> = [
+    { limit: 60_000, divisor: 1_000, unit: 'second' },
+    { limit: 3_600_000, divisor: 60_000, unit: 'minute' },
+    { limit: 86_400_000, divisor: 3_600_000, unit: 'hour' },
+    { limit: 604_800_000, divisor: 86_400_000, unit: 'day' },
+    { limit: 2_592_000_000, divisor: 604_800_000, unit: 'week' },
+    { limit: 31_536_000_000, divisor: 2_592_000_000, unit: 'month' },
+    { limit: Number.POSITIVE_INFINITY, divisor: 31_536_000_000, unit: 'year' },
+  ];
+
+  for (const range of ranges) {
+    if (absDiff < range.limit) {
+      return formatter.format(Math.round(diff / range.divisor), range.unit);
+    }
+  }
+
+  return formatter.format(0, 'second');
+}
+
+function formatDuration(durationMs?: number | null) {
+  if (durationMs == null || Number.isNaN(durationMs) || durationMs < 0) {
+    return '-';
+  }
+
+  if (durationMs < 1_000) {
+    return `${Math.round(durationMs)} ms`;
+  }
+
+  if (durationMs < 60_000) {
+    const seconds = durationMs / 1_000;
+    return `${seconds.toFixed(seconds < 10 ? 1 : 0)} s`;
+  }
+
+  if (durationMs < 3_600_000) {
+    const minutes = Math.floor(durationMs / 60_000);
+    const seconds = Math.round((durationMs % 60_000) / 1_000);
+    return `${minutes}m ${seconds}s`;
+  }
+
+  if (durationMs < 86_400_000) {
+    const hours = Math.floor(durationMs / 3_600_000);
+    const minutes = Math.round((durationMs % 3_600_000) / 60_000);
+    return `${hours}h ${minutes}m`;
+  }
+
+  const days = Math.floor(durationMs / 86_400_000);
+  const hours = Math.round((durationMs % 86_400_000) / 3_600_000);
+  return `${days}d ${hours}h`;
+}
+
+function formatDurationBetween(start?: string, end?: string) {
+  const startTimestamp = parseTimestamp(start);
+  const endTimestamp = parseTimestamp(end);
+  if (startTimestamp === null || endTimestamp === null) {
+    return '-';
+  }
+
+  return formatDuration(endTimestamp - startTimestamp);
+}
+
+function formatNumberValue(value: number, locale: string) {
+  return new Intl.NumberFormat(locale).format(value);
+}
+
+function formatCurrencyValue(value: number, currency: string, locale: string) {
+  const absolute = Math.abs(value);
+  const maximumFractionDigits = absolute !== 0 && absolute < 0.01 ? 8 : absolute !== 0 && absolute < 1 ? 4 : 2;
+  const minimumFractionDigits = absolute !== 0 && absolute < 0.01 ? 4 : 2;
+
+  try {
+    return new Intl.NumberFormat(locale, {
+      style: 'currency',
+      currency,
+      currencyDisplay: 'narrowSymbol',
+      minimumFractionDigits,
+      maximumFractionDigits,
+    }).format(value);
+  } catch {
+    return `${currency} ${new Intl.NumberFormat(locale, {
+      minimumFractionDigits,
+      maximumFractionDigits,
+    }).format(value)}`;
+  }
+}
+
+function statusTone(status?: string) {
+  switch ((status ?? '').toLowerCase()) {
+    case 'completed':
+    case 'success':
+    case 'succeeded':
+      return 'border-[#cfe6d8] bg-[#eefaf2] text-[#246b3f]';
+    case 'failed':
+    case 'error':
+      return 'border-[#f2c8c5] bg-[#fff1f0] text-[#b23b32]';
+    case 'blocked':
+      return 'border-[#f4ddbf] bg-[#fff7e9] text-[#9f5e16]';
+    default:
+      return 'border-[#d9e8f8] bg-[#eef7ff] text-[#356a9f]';
+  }
+}
+
+function normalizeAuditStatus(status?: string) {
+  const normalized = (status ?? '').trim().toLowerCase();
+  if (
+    normalized === 'completed' ||
+    normalized === 'success' ||
+    normalized === 'succeeded' ||
+    normalized.includes('complete') ||
+    normalized.includes('success')
+  ) {
+    return 'completed';
+  }
+
+  if (normalized === 'blocked' || normalized.includes('block')) {
+    return 'blocked';
+  }
+
+  if (
+    normalized === 'failed' ||
+    normalized === 'error' ||
+    normalized.includes('fail') ||
+    normalized.includes('error')
+  ) {
+    return 'failed';
+  }
+
+  return 'pending';
+}
+
+function auditStatusLabel(status: string, t: (key: string, variables?: Record<string, string | number>) => string) {
+  switch (normalizeAuditStatus(status)) {
+    case 'completed':
+      return t('aiAuditPage.completed');
+    case 'blocked':
+      return t('aiAuditPage.blocked');
+    case 'failed':
+      return t('aiAuditPage.failed');
+    default:
+      return t('aiAuditPage.pending');
+  }
+}
+
+function unwrapAuditErrorMessage(errorMessage?: string) {
+  const trimmed = (errorMessage ?? '').trim();
+  if (!trimmed) {
+    return '';
+  }
+
+  const prefix = 'provider returned non-success status:';
+  const payload = trimmed.toLowerCase().startsWith(prefix)
+    ? trimmed.slice(prefix.length).trim()
+    : trimmed;
+
+  let resolved = payload;
+  try {
+    const parsed = JSON.parse(payload);
+    if (typeof parsed === 'string') {
+      resolved = parsed;
+    } else if (parsed && typeof parsed === 'object') {
+      const record = parsed as {
+        message?: unknown;
+        error?: {
+          message?: unknown;
+        };
+      };
+      if (typeof record.error?.message === 'string' && record.error.message.trim()) {
+        resolved = record.error.message.trim();
+      } else if (typeof record.message === 'string' && record.message.trim()) {
+        resolved = record.message.trim();
+      }
+    }
+  } catch {
+    resolved = payload;
+  }
+
+  return resolved.replace(/^do request failed:\s*/i, '').trim();
+}
+
+function severityTone(severity?: string) {
+  switch ((severity ?? '').toLowerCase()) {
+    case 'critical':
+    case 'high':
+      return 'border-[#f2c8c5] bg-[#fff1f0] text-[#b23b32]';
+    case 'medium':
+      return 'border-[#f4ddbf] bg-[#fff7e9] text-[#9f5e16]';
+    case 'low':
+      return 'border-[#cfe6d8] bg-[#eefaf2] text-[#246b3f]';
+    default:
+      return 'border-[#d9e8f8] bg-[#eef7ff] text-[#356a9f]';
+  }
+}
+
 const AIAuditPage: React.FC = () => {
-  const { t } = useI18n();
+  const { locale, t } = useI18n();
   const [searchParams, setSearchParams] = useSearchParams();
   const [listState, setListState] = useState<AIAuditListResponse>({
     items: [],
@@ -131,9 +354,13 @@ const AIAuditPage: React.FC = () => {
   const [copyState, setCopyState] = useState<string | null>(null);
   const [loadingTraceId, setLoadingTraceId] = useState<string | null>(null);
   const [detailPanelMounted, setDetailPanelMounted] = useState(false);
+  const [activeFlowNodeId, setActiveFlowNodeId] = useState('');
   const syncedTraceRef = useRef<string | null>(null);
   const closingTraceRef = useRef(false);
   const detailRequestRef = useRef(0);
+  const flowNodeRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const minimapScrollRef = useRef<HTMLDivElement | null>(null);
+  const minimapItemRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const selectedTraceId = selectedTrace?.trace_id ?? '';
   const selectedSessionId = useMemo(() => {
     if (!selectedTrace) {
@@ -263,12 +490,56 @@ const AIAuditPage: React.FC = () => {
 
   const listSummary = useMemo(() => {
     return {
-      completed: listState.items.filter((item) => item.status === 'completed').length,
-      blocked: listState.items.filter((item) => item.status === 'blocked').length,
-      failed: listState.items.filter((item) => item.status === 'failed').length,
+      completed: listState.items.filter((item) => normalizeAuditStatus(item.status) === 'completed').length,
+      blocked: listState.items.filter((item) => normalizeAuditStatus(item.status) === 'blocked').length,
+      failed: listState.items.filter((item) => normalizeAuditStatus(item.status) === 'failed').length,
       tokens: listState.items.reduce((sum, item) => sum + item.total_tokens, 0),
     };
   }, [listState.items]);
+
+  const traceSummary = useMemo(() => {
+    if (!selectedTrace) {
+      return null;
+    }
+
+    const activityEntries = [
+      ...selectedTrace.flow_nodes.map((node) => node.created_at),
+      ...selectedTrace.invocations.flatMap((item) => [item.created_at, item.completed_at].filter(Boolean) as string[]),
+      ...selectedTrace.audit_events.map((event) => event.created_at),
+      ...selectedTrace.cost_records.map((record) => record.recorded_at),
+      ...selectedTrace.risk_hits.map((hit) => hit.created_at),
+      ...selectedTrace.messages.map((message) => message.created_at),
+    ]
+      .map((value) => {
+        const parsed = parseTimestamp(value);
+        return parsed === null ? null : { value, parsed };
+      })
+      .filter((entry): entry is { value: string; parsed: number } => entry !== null)
+      .sort((a, b) => a.parsed - b.parsed);
+
+    const completedEntries = selectedTrace.invocations
+      .map((item) => {
+        const value = item.completed_at;
+        const parsed = parseTimestamp(value);
+        return value && parsed !== null ? { value, parsed } : null;
+      })
+      .filter((entry): entry is { value: string; parsed: number } => entry !== null)
+      .sort((a, b) => a.parsed - b.parsed);
+
+    const tokenSource = selectedTrace.invocations.length > 0 ? selectedTrace.invocations : selectedTrace.cost_records;
+
+    return {
+      startedAt: activityEntries[0]?.value,
+      latestAt: activityEntries[activityEntries.length - 1]?.value,
+      completedAt: completedEntries[completedEntries.length - 1]?.value,
+      totalTokens: tokenSource.reduce((sum, item) => sum + item.total_tokens, 0),
+      promptTokens: tokenSource.reduce((sum, item) => sum + item.prompt_tokens, 0),
+      completionTokens: tokenSource.reduce((sum, item) => sum + item.completion_tokens, 0),
+      totalEstimatedCost: selectedTrace.cost_records.reduce((sum, item) => sum + item.estimated_cost, 0),
+      totalInternalCost: selectedTrace.cost_records.reduce((sum, item) => sum + item.internal_cost, 0),
+      currency: selectedTrace.cost_records[0]?.currency ?? 'USD',
+    };
+  }, [selectedTrace]);
 
   const copyTrace = async (traceId: string) => {
     try {
@@ -309,7 +580,86 @@ const AIAuditPage: React.FC = () => {
     return () => window.clearTimeout(timeoutId);
   }, [isDetailVisible]);
 
+  useEffect(() => {
+    if (!selectedTrace || selectedTrace.flow_nodes.length === 0) {
+      setActiveFlowNodeId('');
+      return;
+    }
+
+    const nodes = selectedTrace.flow_nodes
+      .map((node) => flowNodeRefs.current[node.id])
+      .filter((node): node is HTMLDivElement => Boolean(node));
+
+    if (nodes.length === 0) {
+      setActiveFlowNodeId(selectedTrace.flow_nodes[0]?.id ?? '');
+      return;
+    }
+
+    setActiveFlowNodeId((current) => current || selectedTrace.flow_nodes[0]?.id || '');
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const visibleEntries = entries
+          .filter((entry) => entry.isIntersecting)
+          .sort((left, right) => {
+            if (right.intersectionRatio !== left.intersectionRatio) {
+              return right.intersectionRatio - left.intersectionRatio;
+            }
+
+            return left.boundingClientRect.top - right.boundingClientRect.top;
+          });
+
+        const nextActiveNode = visibleEntries[0]?.target.getAttribute('data-flow-node-id') ?? '';
+        if (nextActiveNode) {
+          setActiveFlowNodeId(nextActiveNode);
+        }
+      },
+      {
+        rootMargin: '-14% 0px -56% 0px',
+        threshold: [0.2, 0.45, 0.7],
+      },
+    );
+
+    nodes.forEach((node) => observer.observe(node));
+
+    return () => observer.disconnect();
+  }, [detailPanelMounted, selectedTrace]);
+
+  useEffect(() => {
+    if (!activeFlowNodeId) {
+      return;
+    }
+
+    const container = minimapScrollRef.current;
+    const item = minimapItemRefs.current[activeFlowNodeId];
+    if (!container || !item) {
+      return;
+    }
+
+    const itemTop = item.offsetTop;
+    const itemBottom = itemTop + item.offsetHeight;
+    const viewportTop = container.scrollTop;
+    const viewportBottom = viewportTop + container.clientHeight;
+
+    if (itemTop >= viewportTop && itemBottom <= viewportBottom) {
+      return;
+    }
+
+    const nextTop = Math.max(0, itemTop - container.clientHeight / 2 + item.offsetHeight / 2);
+    container.scrollTo({ top: nextTop, behavior: 'smooth' });
+  }, [activeFlowNodeId]);
+
   const isSplitView = detailPanelMounted || isDetailVisible;
+
+  const jumpToFlowNode = (nodeId: string) => {
+    const target = flowNodeRefs.current[nodeId];
+    if (!target) {
+      return;
+    }
+
+    setActiveFlowNodeId(nodeId);
+    target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  };
 
   const renderPagination = () => (
     !loading && listState.total > 0 && (
@@ -340,91 +690,217 @@ const AIAuditPage: React.FC = () => {
   );
 
   const renderTraceDetailContent = () => {
-    if (!selectedTrace) {
+    if (!selectedTrace || !traceSummary) {
       return null;
     }
 
     return (
       <div className="mt-6 space-y-6 transition-all duration-300 ease-out">
-        <div className="rounded-2xl border border-[#eadfd8] bg-[#fffaf7] p-4">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-            <div>
-              <div className="text-sm text-[#8f8681]">{t('aiAuditPage.trace')}</div>
-              <div className="mt-1 font-medium text-[#171212]">{selectedTrace.trace_id}</div>
-              <div className="mt-2 text-sm text-[#8f8681]">{t('aiAuditPage.userLabel', { user: selectedTrace.username || '-' })}</div>
-              {selectedSessionId && (
-                <div className="mt-1 text-sm text-[#8f8681]">{t('aiAuditPage.sessionLabel', { session: selectedSessionId })}</div>
-              )}
+        <div className="overflow-hidden rounded-[28px] border border-[#eadfd8] bg-[linear-gradient(135deg,#fff7f1_0%,#fffdfb_55%,#fffaf5_100%)] shadow-[0_34px_90px_-70px_rgba(96,58,24,0.55)]">
+          <div className="border-b border-[#efe3db] px-5 py-5 sm:px-6">
+            <div className="flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
+              <div className="min-w-0 flex-1">
+                <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#b46c50]">{t('aiAuditPage.trace')}</div>
+                <div className="mt-3 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="min-w-0">
+                    <div className="break-all text-[1.55rem] font-semibold tracking-[-0.04em] text-[#171212]">
+                      {selectedTrace.trace_id}
+                    </div>
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      <MetaPill>{t('aiAuditPage.userLabel', { user: selectedTrace.username || '-' })}</MetaPill>
+                      {selectedSessionId && (
+                        <MetaPill tone="info">{t('aiAuditPage.sessionLabel', { session: selectedSessionId })}</MetaPill>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => void copyTrace(selectedTrace.trace_id)}
+                      className="app-button-secondary shrink-0 border-[#d9ccc4] bg-white/90 text-[#171212] shadow-sm"
+                    >
+                      {copyState === selectedTrace.trace_id ? t('aiAuditPage.copied') : t('aiAuditPage.copyTraceId')}
+                    </button>
+                  </div>
+                </div>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2 xl:w-[380px]">
+                <div className="rounded-2xl border border-[#eadfd8] bg-white/88 p-4">
+                  <TimestampStack label={t('common.createdAt')} value={traceSummary.startedAt} locale={locale} />
+                </div>
+                <div className="rounded-2xl border border-[#eadfd8] bg-white/88 p-4">
+                  <TimestampStack label={t('common.lastUpdated')} value={traceSummary.latestAt} locale={locale} />
+                </div>
+              </div>
             </div>
-            <div className="flex items-center gap-3">
-              <button
-                type="button"
-                onClick={() => void copyTrace(selectedTrace.trace_id)}
-                className="app-button-secondary"
-              >
-                {copyState === selectedTrace.trace_id ? t('aiAuditPage.copied') : t('aiAuditPage.copyTraceId')}
-              </button>
-            </div>
+          </div>
+
+          <div className="grid gap-3 px-5 py-5 sm:px-6 md:grid-cols-2 xl:grid-cols-5">
+            <DetailMetricCard
+              label={t('aiAuditPage.auditEvents')}
+              value={formatNumberValue(selectedTrace.audit_events.length, locale)}
+              hint={`${formatNumberValue(selectedTrace.risk_hits.length, locale)} ${t('aiAuditPage.riskHits')}`}
+              tone="warm"
+            />
+            <DetailMetricCard
+              label={t('aiAuditPage.executionFlow')}
+              value={formatNumberValue(selectedTrace.flow_nodes.length, locale)}
+              hint={selectedSessionId || '-'}
+              tone="slate"
+            />
+            <DetailMetricCard
+              label={t('costsPage.tokens')}
+              value={formatNumberValue(traceSummary.totalTokens, locale)}
+              hint={`${formatNumberValue(traceSummary.promptTokens, locale)} / ${formatNumberValue(traceSummary.completionTokens, locale)}`}
+              tone="sunset"
+            />
+            <DetailMetricCard
+              label={t('costsPage.estimatedSpend')}
+              value={formatCurrencyValue(traceSummary.totalEstimatedCost, traceSummary.currency, locale)}
+              hint={traceSummary.currency}
+              tone="gold"
+            />
+            <DetailMetricCard
+              label={t('costsPage.internalCost')}
+              value={formatCurrencyValue(traceSummary.totalInternalCost, traceSummary.currency, locale)}
+              hint={traceSummary.completedAt ? formatDurationBetween(traceSummary.startedAt, traceSummary.completedAt) : '-'}
+              tone="emerald"
+            />
           </div>
         </div>
 
-        <div className="rounded-2xl border border-[#eadfd8] bg-white p-4">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <h3 className="text-lg font-semibold text-[#171212]">{t('aiAuditPage.executionFlow')}</h3>
-              <p className="mt-1 text-sm text-[#8f8681]">
-                {t('aiAuditPage.executionFlowSubtitle')}
-              </p>
-            </div>
-          </div>
-          <div className="mt-4">
-            {selectedTrace.flow_nodes.length === 0 ? (
-              <div className="text-sm text-[#8f8681]">{t('aiAuditPage.noFlowNodes')}</div>
-            ) : (
+        <TraceSection
+          title={t('aiAuditPage.executionFlow')}
+          subtitle={t('aiAuditPage.executionFlowSubtitle')}
+          badge={formatNumberValue(selectedTrace.flow_nodes.length, locale)}
+          stickyFriendly
+        >
+          {selectedTrace.flow_nodes.length === 0 ? (
+            <div className="text-sm text-[#8f8681]">{t('aiAuditPage.noFlowNodes')}</div>
+          ) : (
+            <div className="grid gap-5 xl:grid-cols-[260px_minmax(0,1fr)]">
+              <aside className="self-start xl:sticky xl:top-6">
+                <div className="overflow-hidden rounded-[24px] border border-[#efe3db] bg-[#fcfaf8] shadow-[0_24px_60px_-52px_rgba(88,54,24,0.4)]">
+                  <div className="border-b border-[#f1e7e1] px-4 py-4">
+                    <div className="text-sm font-semibold text-[#171212]">{t('aiAuditPage.flowMinimap')}</div>
+                    <p className="mt-1 text-xs leading-5 text-[#8f8681]">{t('aiAuditPage.flowMinimapSubtitle')}</p>
+                  </div>
+                  <div ref={minimapScrollRef} className="max-h-[70vh] overflow-auto p-3">
+                    <div className="space-y-2">
+                      {selectedTrace.flow_nodes.map((node, index) => {
+                        const isActive = node.id === activeFlowNodeId;
+
+                        return (
+                          <button
+                            key={node.id}
+                            ref={(element) => {
+                              if (element) {
+                                minimapItemRefs.current[node.id] = element;
+                                return;
+                              }
+
+                              delete minimapItemRefs.current[node.id];
+                            }}
+                            type="button"
+                            onClick={() => jumpToFlowNode(node.id)}
+                            className={`w-full rounded-2xl border px-3 py-3 text-left transition ${
+                              isActive
+                                ? 'border-[#ef6b4a] bg-[#fff3ec] shadow-[0_18px_42px_-32px_rgba(180,108,80,0.55)]'
+                                : 'border-transparent bg-white hover:border-[#eadfd8] hover:bg-[#fffaf7]'
+                            }`}
+                          >
+                            <div className="flex items-start gap-3">
+                              <span className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full border text-[11px] font-semibold ${flowKindTone(node.kind)}`}>
+                                {index + 1}
+                              </span>
+                              <div className="min-w-0">
+                                <div className="truncate text-sm font-semibold text-[#171212]">
+                                  {node.title || flowKindLabel(node.kind, t)}
+                                </div>
+                                <div className="mt-1 text-[11px] text-[#7a6d66]">{flowKindLabel(node.kind, t)}</div>
+                                <div className="mt-1 text-[11px] text-[#9a8f89]">{formatRelativeTimestamp(node.created_at, locale)}</div>
+                              </div>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              </aside>
+
               <div className="space-y-4">
                 {selectedTrace.flow_nodes.map((node, index) => (
-                  <div key={node.id} className="relative pl-8">
+                  <div
+                    key={node.id}
+                    ref={(element) => {
+                      if (element) {
+                        flowNodeRefs.current[node.id] = element;
+                        return;
+                      }
+
+                      delete flowNodeRefs.current[node.id];
+                    }}
+                    data-flow-node-id={node.id}
+                    className="relative scroll-mt-28 pl-8"
+                  >
                     {index < selectedTrace.flow_nodes.length - 1 && (
-                      <div className="absolute left-[11px] top-7 h-[calc(100%-0.5rem)] w-px bg-[#eadfd8]" />
+                      <div className="absolute left-[13px] top-8 h-[calc(100%-0.75rem)] w-px bg-[#eadfd8]" />
                     )}
-                    <div className={`absolute left-0 top-4 h-6 w-6 rounded-full border ${flowKindTone(node.kind)}`} />
-                    <div className="rounded-2xl border border-[#f1e7e1] bg-[#fffaf7] p-4">
-                      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                        <div>
-                          <div className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${flowKindTone(node.kind)}`}>
-                            {flowKindLabel(node.kind, t)}
+                    <div className={`absolute left-0 top-4 h-7 w-7 rounded-full border shadow-sm ${flowKindTone(node.kind)}`} />
+                    <div className={`rounded-[24px] border bg-[#fffaf7] p-4 shadow-[0_24px_60px_-52px_rgba(88,54,24,0.45)] transition ${
+                      node.id === activeFlowNodeId ? 'border-[#ef6b4a]' : 'border-[#efe3db]'
+                    }`}>
+                      <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <div className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${flowKindTone(node.kind)}`}>
+                              {flowKindLabel(node.kind, t)}
+                            </div>
+                            {node.status && (
+                              <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${statusTone(node.status)}`}>
+                                {node.status}
+                              </span>
+                            )}
                           </div>
-                          <div className="mt-3 text-base font-semibold text-[#171212]">{node.title || flowKindLabel(node.kind, t)}</div>
+                          <div className="mt-3 text-base font-semibold text-[#171212]">
+                            {node.title || flowKindLabel(node.kind, t)}
+                          </div>
                           {node.summary && (
-                            <div className="mt-2 text-sm text-[#5f5957]">{node.summary}</div>
+                            <div className="mt-2 text-sm leading-6 text-[#5f5957]">{node.summary}</div>
                           )}
-                          <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2 text-xs text-[#8f8681]">
-                            {node.request_id && <span>{t('aiAuditPage.requestIdLabel')}: {node.request_id}</span>}
-                            {node.model && <span>{t('aiAuditPage.modelLabel')}: {node.model}</span>}
-                            {node.status && <span>{t('common.status')}: {node.status}</span>}
+                          <div className="mt-4 flex flex-wrap gap-2 text-xs text-[#7a6d66]">
+                            {node.request_id && (
+                              <MetaPill tone="soft">{`${t('aiAuditPage.requestIdLabel')}: ${node.request_id}`}</MetaPill>
+                            )}
+                            {node.model && (
+                              <MetaPill tone="info">{`${t('aiAuditPage.modelLabel')}: ${node.model}`}</MetaPill>
+                            )}
                           </div>
                         </div>
-                        <div className="text-xs text-[#8f8681]">{new Date(node.created_at).toLocaleString()}</div>
+                        <div className="xl:w-[220px]">
+                          <TimestampStack value={node.created_at} locale={locale} align="right" />
+                        </div>
                       </div>
 
                       {(node.input_payload || node.output_payload) && (
                         <div className="mt-4 grid gap-4 xl:grid-cols-2">
                           {node.input_payload && (
-                            <div>
-                              <div className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-[#8f8681]">
+                            <div className="rounded-2xl border border-[#eadfd8] bg-white p-4">
+                              <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#8f8681]">
                                 {t('aiAuditPage.nodeInput')}
                               </div>
-                              <pre className="max-h-72 overflow-auto rounded-lg bg-[#171212] p-3 text-[11px] leading-5">
+                              <pre className="max-h-80 overflow-auto rounded-xl bg-[#171212] p-3 text-[11px] leading-5">
                                 {renderCodeBlock(node.input_payload)}
                               </pre>
                             </div>
                           )}
                           {node.output_payload && (
-                            <div>
-                              <div className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-[#8f8681]">
+                            <div className="rounded-2xl border border-[#eadfd8] bg-white p-4">
+                              <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#8f8681]">
                                 {t('aiAuditPage.nodeOutput')}
                               </div>
-                              <pre className="max-h-72 overflow-auto rounded-lg bg-[#171212] p-3 text-[11px] leading-5">
+                              <pre className="max-h-80 overflow-auto rounded-xl bg-[#171212] p-3 text-[11px] leading-5">
                                 {renderCodeBlock(node.output_payload)}
                               </pre>
                             </div>
@@ -435,140 +911,106 @@ const AIAuditPage: React.FC = () => {
                   </div>
                 ))}
               </div>
-            )}
-          </div>
-        </div>
-
-        <div className="grid gap-6 xl:grid-cols-3">
-          <div className="rounded-2xl border border-[#eadfd8] bg-white p-4">
-            <h3 className="text-lg font-semibold text-[#171212]">{t('aiAuditPage.invocations')}</h3>
-            <div className="mt-4 space-y-4">
-              {selectedTrace.invocations.length === 0 ? (
-                <div className="text-sm text-[#8f8681]">
-                  {t('aiAuditPage.noInvocation')}
-                </div>
-              ) : (
-                selectedTrace.invocations.map((invocation) => (
-                  <div key={`${invocation.id || invocation.trace_id}-${invocation.request_id}`} className="rounded-xl border border-[#f1e7e1] bg-[#fffaf7] p-3">
-                    <div className="font-medium text-[#171212]">{invocation.requested_model}</div>
-                    <div className="mt-1 text-xs text-[#8f8681]">{invocation.actual_provider_model}</div>
-                    <div className="mt-2 text-xs text-[#8f8681]">Status: {invocation.status}</div>
-                    <div className="mt-2 text-xs text-[#8f8681]">Tokens: {invocation.total_tokens}</div>
-                    <details className="mt-3">
-                      <summary className="cursor-pointer text-xs font-medium text-[#b46c50]">{t('aiAuditPage.payloads')}</summary>
-                      <pre className="mt-2 max-h-56 overflow-auto rounded-lg bg-[#171212] p-3 text-[11px] leading-5">{renderCodeBlock(invocation.request_payload)}</pre>
-                      <pre className="mt-2 max-h-56 overflow-auto rounded-lg bg-[#171212] p-3 text-[11px] leading-5">{renderCodeBlock(invocation.response_payload)}</pre>
-                    </details>
-                  </div>
-                ))
-              )}
             </div>
-          </div>
+          )}
+        </TraceSection>
 
-          <div className="rounded-2xl border border-[#eadfd8] bg-white p-4">
-            <h3 className="text-lg font-semibold text-[#171212]">{t('aiAuditPage.auditEvents')}</h3>
-            <div className="mt-4 space-y-3">
-              {selectedTrace.audit_events.map((event) => (
-                <div key={event.id} className="rounded-xl border border-[#f1e7e1] bg-[#fffaf7] p-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="font-medium text-[#171212]">{event.event_type}</div>
-                    <span className="rounded-full bg-[#fff1ea] px-2.5 py-1 text-xs font-medium text-[#b46c50]">
-                      {event.severity}
-                    </span>
+        <TraceSection
+          title={t('aiAuditPage.costRecords')}
+          badge={formatNumberValue(selectedTrace.cost_records.length, locale)}
+        >
+          {selectedTrace.cost_records.length === 0 ? (
+            <div className="text-sm text-[#8f8681]">{t('aiAuditPage.noCostRecords')}</div>
+          ) : (
+            <div className="space-y-4">
+              {selectedTrace.cost_records.map((record) => (
+                <div key={record.id} className="rounded-[24px] border border-[#efe3db] bg-[#fffaf7] p-4 shadow-[0_24px_60px_-52px_rgba(88,54,24,0.45)]">
+                  <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <MetaPill tone="info">{record.provider_type}</MetaPill>
+                        {record.username && <MetaPill>{record.username}</MetaPill>}
+                        {record.instance_name && <MetaPill tone="soft">{record.instance_name}</MetaPill>}
+                      </div>
+                      <div className="mt-3 text-lg font-semibold text-[#171212]">{record.model_name}</div>
+                      <div className="mt-2 text-sm text-[#7a6d66]">{selectedTrace.trace_id}</div>
+                    </div>
+                    <div className="xl:w-[220px]">
+                      <TimestampStack value={record.recorded_at} locale={locale} align="right" />
+                    </div>
                   </div>
-                  <div className="mt-2 text-sm text-[#5f5957]">{event.message}</div>
-                  {event.details && (
-                    <pre className="mt-3 max-h-40 overflow-auto rounded-lg bg-[#171212] p-3 text-[11px] leading-5">{renderCodeBlock(event.details)}</pre>
-                  )}
-                  <div className="mt-2 text-xs text-[#8f8681]">{new Date(event.created_at).toLocaleString()}</div>
+
+                  <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                    <DetailMetricCard
+                      label={t('costsPage.estimated')}
+                      value={formatCurrencyValue(record.estimated_cost, record.currency, locale)}
+                      hint={record.currency}
+                      tone="gold"
+                    />
+                    <DetailMetricCard
+                      label={t('costsPage.internal')}
+                      value={formatCurrencyValue(record.internal_cost, record.currency, locale)}
+                      hint={record.currency}
+                      tone="emerald"
+                    />
+                    <DetailMetricCard
+                      label={t('costsPage.tokens')}
+                      value={formatNumberValue(record.total_tokens, locale)}
+                      hint={`${formatNumberValue(record.prompt_tokens, locale)} in / ${formatNumberValue(record.completion_tokens, locale)} out`}
+                      tone="neutral"
+                    />
+                    <DetailMetricCard
+                      label={t('costsPage.recorded')}
+                      value={formatRelativeTimestamp(record.recorded_at, locale)}
+                      hint={formatAbsoluteTimestamp(record.recorded_at, locale)}
+                      tone="slate"
+                    />
+                  </div>
                 </div>
               ))}
             </div>
-          </div>
+          )}
+        </TraceSection>
 
-          <div className="rounded-2xl border border-[#eadfd8] bg-white p-4">
-            <h3 className="text-lg font-semibold text-[#171212]">{t('aiAuditPage.costRecords')}</h3>
-            <div className="mt-4 space-y-3">
-              {selectedTrace.cost_records.length === 0 ? (
-                <div className="text-sm text-[#8f8681]">
-                  {t('aiAuditPage.noCostRecords')}
-                </div>
-              ) : (
-                selectedTrace.cost_records.map((record) => (
-                  <div key={record.id} className="rounded-xl border border-[#f1e7e1] bg-[#fffaf7] p-3">
-                    <div className="font-medium text-[#171212]">{record.model_name}</div>
-                    <div className="mt-1 text-xs text-[#8f8681]">{record.provider_type}</div>
-                    <div className="mt-2 text-sm text-[#5f5957]">
-                      {record.total_tokens} tokens
+        <TraceSection
+          title={t('aiAuditPage.riskHits')}
+          badge={formatNumberValue(selectedTrace.risk_hits.length, locale)}
+        >
+          {selectedTrace.risk_hits.length === 0 ? (
+            <div className="text-sm text-[#8f8681]">{t('aiAuditPage.noRiskHits')}</div>
+          ) : (
+            <div className="space-y-3">
+              {selectedTrace.risk_hits.map((hit) => (
+                <div key={hit.id} className="rounded-2xl border border-[#f1e7e1] bg-[#fffaf7] p-4">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${severityTone(hit.severity)}`}>
+                          {hit.severity}
+                        </span>
+                        <MetaPill tone="info">{hit.action}</MetaPill>
+                      </div>
+                      <div className="mt-3 text-base font-semibold text-[#171212]">{hit.rule_name}</div>
+                      <div className="mt-2 text-sm leading-6 text-[#5f5957]">{hit.match_summary}</div>
                     </div>
-                    <div className="mt-1 text-sm text-[#5f5957]">
-                      Estimated: {record.estimated_cost.toFixed(8)} {record.currency}
+                    <div className="sm:w-[220px]">
+                      <TimestampStack value={hit.created_at} locale={locale} align="right" />
                     </div>
-                    <div className="mt-1 text-sm text-[#5f5957]">
-                      Internal: {record.internal_cost.toFixed(8)} {record.currency}
-                    </div>
-                    <div className="mt-2 text-xs text-[#8f8681]">{new Date(record.recorded_at).toLocaleString()}</div>
                   </div>
-                ))
-              )}
+                </div>
+              ))}
             </div>
-          </div>
-        </div>
-
-        <div className="rounded-2xl border border-[#eadfd8] bg-white p-4">
-          <h3 className="text-lg font-semibold text-[#171212]">{t('aiAuditPage.riskHits')}</h3>
-          <div className="mt-4 space-y-3">
-            {selectedTrace.risk_hits.length === 0 ? (
-              <div className="text-sm text-[#8f8681]">{t('aiAuditPage.noRiskHits')}</div>
-            ) : (
-              selectedTrace.risk_hits.map((hit) => (
-                <div key={hit.id} className="rounded-xl border border-[#f1e7e1] bg-[#fffaf7] p-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="font-medium text-[#171212]">{hit.rule_name}</div>
-                    <div className="flex items-center gap-2">
-                      <span className="rounded-full bg-[#fff1ea] px-2.5 py-1 text-xs font-medium text-[#b46c50]">
-                        {hit.severity}
-                      </span>
-                      <span className="rounded-full bg-[#eef7ff] px-2.5 py-1 text-xs font-medium text-[#356a9f]">
-                        {hit.action}
-                      </span>
-                    </div>
-                  </div>
-                  <div className="mt-2 text-sm text-[#5f5957]">{hit.match_summary}</div>
-                  <div className="mt-2 text-xs text-[#8f8681]">{new Date(hit.created_at).toLocaleString()}</div>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-
-        <div className="rounded-2xl border border-[#eadfd8] bg-white p-4">
-          <h3 className="text-lg font-semibold text-[#171212]">{t('aiAuditPage.messages')}</h3>
-          <div className="mt-4 space-y-3">
-            {selectedTrace.messages.length === 0 ? (
-              <div className="text-sm text-[#8f8681]">{t('aiAuditPage.noMessages')}</div>
-            ) : (
-              selectedTrace.messages.map((message) => (
-                <div key={message.id} className="rounded-xl border border-[#f1e7e1] bg-[#fffaf7] p-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="font-medium capitalize text-[#171212]">{message.role}</div>
-                    <div className="text-xs text-[#8f8681]">#{message.sequence_no}</div>
-                  </div>
-                  <pre className="mt-3 whitespace-pre-wrap break-words rounded-lg bg-white p-3 text-sm text-[#5f5957]">{message.content}</pre>
-                  <div className="mt-2 text-xs text-[#8f8681]">{new Date(message.created_at).toLocaleString()}</div>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
+          )}
+        </TraceSection>
       </div>
     );
   };
 
+
   return (
     <AdminLayout title={t('nav.aiAudit')}>
       <div className="space-y-6">
-        <section className="app-panel p-6">
+        <section className={`app-panel p-6 ${isSplitView ? 'overflow-visible' : ''}`}>
           <div>
             <h2 className="text-xl font-semibold text-[#171212]">{t('aiAuditPage.title')}</h2>
             <p className="mt-1 text-sm text-[#8f8681]">
@@ -591,7 +1033,7 @@ const AIAuditPage: React.FC = () => {
             </div>
           )}
 
-          <div className="mt-6 overflow-hidden rounded-2xl border border-[#eadfd8] bg-white">
+          <div className={`mt-6 rounded-2xl border border-[#eadfd8] bg-white ${isSplitView ? 'overflow-visible' : 'overflow-hidden'}`}>
             <div className="border-b border-[#f1e7e1] px-4 py-4 sm:px-5">
               <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
                 <div>
@@ -666,7 +1108,8 @@ const AIAuditPage: React.FC = () => {
                           }`}
                         >
                           <div className="truncate text-sm font-medium text-[#171212]">{item.trace_id}</div>
-                          <div className="text-xs text-[#8f8681]">{new Date(item.created_at).toLocaleString()}</div>
+                          <div className="text-xs font-medium text-[#5f5957]">{formatRelativeTimestamp(item.created_at, locale)}</div>
+                          <div className="text-[11px] text-[#9a8f89]">{formatAbsoluteTimestamp(item.created_at, locale)}</div>
                         </button>
                       );
                     })}
@@ -676,7 +1119,7 @@ const AIAuditPage: React.FC = () => {
 
                 <div
                   className={`min-w-0 bg-[#fffdfb] px-4 py-5 transition-all duration-300 ease-out sm:px-5 xl:px-6 ${
-                    isDetailVisible ? 'translate-x-0 opacity-100' : 'pointer-events-none translate-x-4 opacity-0'
+                    isDetailVisible ? 'opacity-100' : 'pointer-events-none translate-x-4 opacity-0'
                   }`}
                 >
                   <div className="flex items-center justify-between gap-3 border-b border-[#f1e7e1] pb-4">
@@ -724,65 +1167,72 @@ const AIAuditPage: React.FC = () => {
                     </thead>
                     <tbody className="divide-y divide-[#f7efe9]">
                       {listState.items.map((item) => (
-                        <tr
-                          key={`${item.trace_id}-${item.request_id}`}
-                          className={`${selectedTraceId === item.trace_id ? 'bg-[#fff3ec]' : 'hover:bg-[#fffaf7]'}`}
-                        >
-                          <td className="px-4 py-4 align-top">
-                            <div className="flex items-center gap-2">
-                              <div className="font-medium text-[#171212]">{item.trace_id}</div>
-                              <button
-                                type="button"
-                                onClick={() => void copyTrace(item.trace_id)}
-                                className="rounded-full border border-[#eadfd8] bg-white px-2 py-1 text-[11px] text-[#8f8681] hover:text-[#171212]"
-                              >
-                                {copyState === item.trace_id ? t('aiAuditPage.copied') : t('aiAuditPage.copy')}
-                              </button>
-                            </div>
-                            <div className="mt-1 text-xs text-[#8f8681]">{new Date(item.created_at).toLocaleString()}</div>
-                          </td>
-                          <td className="px-4 py-4 align-top">
-                            <div className="font-medium text-[#171212]">{item.username || '-'}</div>
-                            <div className="mt-1 text-xs text-[#8f8681]">{item.request_id}</div>
-                          </td>
-                          <td className="px-4 py-4 align-top">
-                            <div className="font-medium text-[#171212]">{item.requested_model}</div>
-                            <div className="mt-1 text-xs text-[#8f8681]">{item.provider_type}</div>
-                          </td>
-                          <td className="px-4 py-4 align-top">
-                            <div className="font-medium text-[#171212]">{item.actual_provider_model}</div>
-                            <div className="mt-1 text-xs text-[#8f8681]">{item.latency_ms ? `${item.latency_ms} ms` : t('aiAuditPage.noLatency')}</div>
-                          </td>
-                          <td className="px-4 py-4 align-top">
-                            <div className="font-medium text-[#171212]">{item.total_tokens} tokens</div>
-                            <div className="mt-1 text-xs text-[#8f8681]">
-                              {item.prompt_tokens} in / {item.completion_tokens} out
-                            </div>
-                          </td>
-                          <td className="px-4 py-4 align-top">
-                            <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${
-                              item.status === 'completed'
-                                ? 'bg-green-100 text-green-800'
-                                : item.status === 'failed'
-                                  ? 'bg-red-100 text-red-700'
-                                  : 'bg-yellow-100 text-yellow-800'
-                            }`}>
-                              {item.status}
-                            </span>
-                            {item.error_message && (
-                              <div className="mt-2 max-w-[280px] text-xs text-red-600">{item.error_message}</div>
-                            )}
-                          </td>
-                          <td className="px-4 py-4 text-right align-top">
-                            <button
-                              type="button"
-                              onClick={() => void loadTraceDetail(item.trace_id)}
-                              className="app-button-secondary"
+                        (() => {
+                          const normalizedStatus = normalizeAuditStatus(item.status);
+                          const errorSummary = unwrapAuditErrorMessage(item.error_message);
+
+                          return (
+                            <tr
+                              key={`${item.trace_id}-${item.request_id}`}
+                              className={`${selectedTraceId === item.trace_id ? 'bg-[#fff3ec]' : 'hover:bg-[#fffaf7]'}`}
                             >
-                              {t('admin.inspect')}
-                            </button>
-                          </td>
-                        </tr>
+                              <td className="px-4 py-4 align-top">
+                                <div className="flex items-center gap-2">
+                                  <div className="font-medium text-[#171212]">{item.trace_id}</div>
+                                  <button
+                                    type="button"
+                                    onClick={() => void copyTrace(item.trace_id)}
+                                    className="rounded-full border border-[#eadfd8] bg-white px-2 py-1 text-[11px] text-[#8f8681] hover:text-[#171212]"
+                                  >
+                                    {copyState === item.trace_id ? t('aiAuditPage.copied') : t('aiAuditPage.copy')}
+                                  </button>
+                                </div>
+                                <div className="mt-1 text-xs font-medium text-[#5f5957]">{formatRelativeTimestamp(item.created_at, locale)}</div>
+                                <div className="mt-1 text-[11px] text-[#9a8f89]">{formatAbsoluteTimestamp(item.created_at, locale)}</div>
+                              </td>
+                              <td className="px-4 py-4 align-top">
+                                <div className="font-medium text-[#171212]">{item.username || '-'}</div>
+                                <div className="mt-1 text-xs text-[#8f8681]">{item.request_id}</div>
+                              </td>
+                              <td className="px-4 py-4 align-top">
+                                <div className="font-medium text-[#171212]">{item.requested_model}</div>
+                                <div className="mt-1 text-xs text-[#8f8681]">{item.provider_type}</div>
+                              </td>
+                              <td className="px-4 py-4 align-top">
+                                <div className="font-medium text-[#171212]">{item.actual_provider_model}</div>
+                                <div className="mt-1 text-xs text-[#8f8681]">{item.latency_ms ? `${item.latency_ms} ms` : t('aiAuditPage.noLatency')}</div>
+                                {errorSummary && (
+                                  <div
+                                    className="mt-2 max-w-[320px] break-words text-xs text-red-600"
+                                    title={item.error_message}
+                                  >
+                                    {t('aiAuditPage.failureReason')}: {errorSummary}
+                                  </div>
+                                )}
+                              </td>
+                              <td className="px-4 py-4 align-top">
+                                <div className="font-medium text-[#171212]">{item.total_tokens} tokens</div>
+                                <div className="mt-1 text-xs text-[#8f8681]">
+                                  {item.prompt_tokens} in / {item.completion_tokens} out
+                                </div>
+                              </td>
+                              <td className="px-4 py-4 align-top">
+                                <span className={`rounded-full border px-2.5 py-1 text-xs font-medium ${statusTone(normalizedStatus)}`}>
+                                  {auditStatusLabel(normalizedStatus, t)}
+                                </span>
+                              </td>
+                              <td className="px-4 py-4 text-right align-top">
+                                <button
+                                  type="button"
+                                  onClick={() => void loadTraceDetail(item.trace_id)}
+                                  className="app-button-secondary"
+                                >
+                                  {t('admin.inspect')}
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })()
                       ))}
                     </tbody>
                   </table>
@@ -797,6 +1247,95 @@ const AIAuditPage: React.FC = () => {
   );
 };
 
+const TimestampStack: React.FC<{
+  value?: string;
+  locale: string;
+  label?: string;
+  align?: 'left' | 'right';
+}> = ({ value, locale, label, align = 'left' }) => {
+  const isRightAligned = align === 'right';
+
+  return (
+    <div className={isRightAligned ? 'text-left sm:text-right' : 'text-left'}>
+      {label && (
+        <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#b09d93]">{label}</div>
+      )}
+      <div className={label ? 'mt-2 text-sm font-semibold text-[#171212]' : 'text-sm font-semibold text-[#171212]'}>
+        {formatRelativeTimestamp(value, locale)}
+      </div>
+      <div className="mt-1 text-xs text-[#8f8681]">{formatAbsoluteTimestamp(value, locale)}</div>
+    </div>
+  );
+};
+
+const TraceSection: React.FC<{
+  title: string;
+  subtitle?: string;
+  badge?: string;
+  stickyFriendly?: boolean;
+  children: React.ReactNode;
+}> = ({ title, subtitle, badge, stickyFriendly = false, children }) => {
+  return (
+    <section className={`${stickyFriendly ? 'overflow-visible' : 'overflow-hidden'} rounded-[28px] border border-[#eadfd8] bg-white shadow-[0_26px_72px_-60px_rgba(85,52,26,0.45)]`}>
+      <div className="flex flex-col gap-3 border-b border-[#f1e7e1] px-5 py-5 sm:flex-row sm:items-start sm:justify-between sm:px-6">
+        <div>
+          <h3 className="text-lg font-semibold text-[#171212]">{title}</h3>
+          {subtitle && <p className="mt-1 text-sm text-[#8f8681]">{subtitle}</p>}
+        </div>
+        {badge && (
+          <span className="inline-flex items-center rounded-full border border-[#eadfd8] bg-[#fffaf7] px-3 py-1 text-xs font-semibold text-[#7a6d66]">
+            {badge}
+          </span>
+        )}
+      </div>
+      <div className={`${stickyFriendly ? 'overflow-visible' : ''} px-5 py-5 sm:px-6`}>{children}</div>
+    </section>
+  );
+};
+
+const MetaPill: React.FC<{
+  children: React.ReactNode;
+  tone?: 'neutral' | 'soft' | 'info';
+}> = ({ children, tone = 'neutral' }) => {
+  const toneClass = tone === 'info'
+    ? 'border-[#d9e8f8] bg-[#eef7ff] text-[#356a9f]'
+    : tone === 'soft'
+      ? 'border-[#eadfd8] bg-white text-[#7a6d66]'
+      : 'border-[#f4ddbf] bg-[#fff7e9] text-[#9f5e16]';
+
+  return (
+    <span className={`inline-flex max-w-full items-center rounded-full border px-2.5 py-1 text-xs font-medium ${toneClass}`}>
+      <span className="truncate">{children}</span>
+    </span>
+  );
+};
+
+const DetailMetricCard: React.FC<{
+  label: string;
+  value: string;
+  hint?: string;
+  tone?: 'neutral' | 'warm' | 'slate' | 'sunset' | 'gold' | 'emerald';
+}> = ({ label, value, hint, tone = 'neutral' }) => {
+  const toneClass = tone === 'warm'
+    ? 'border-[#f4ddbf] bg-[#fff8ee]'
+    : tone === 'slate'
+      ? 'border-[#d9e8f8] bg-[#f5fafe]'
+      : tone === 'sunset'
+        ? 'border-[#f0d8cc] bg-[#fff3ec]'
+        : tone === 'gold'
+          ? 'border-[#f1e0b6] bg-[#fff9e9]'
+          : tone === 'emerald'
+            ? 'border-[#d3ead8] bg-[#f3fff6]'
+            : 'border-[#eadfd8] bg-white';
+
+  return (
+    <div className={`rounded-2xl border px-4 py-4 ${toneClass}`}>
+      <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#8f8681]">{label}</div>
+      <div className="mt-3 break-words text-xl font-semibold tracking-[-0.03em] text-[#171212]">{value}</div>
+      {hint && <div className="mt-2 text-xs text-[#7a6d66]">{hint}</div>}
+    </div>
+  );
+};
 const SummaryCard: React.FC<{
   label: string;
   value: string;

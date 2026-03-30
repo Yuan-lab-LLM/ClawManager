@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -60,6 +61,8 @@ type llmModelService struct {
 	httpClient       *http.Client
 	secretRefService SecretRefService
 }
+
+var versionSegmentPattern = regexp.MustCompile(`(?i)^v\d+(?:[a-z0-9._-]*)?$`)
 
 // NewLLMModelService creates a new LLM model service.
 func NewLLMModelService(repo repository.LLMModelRepository) LLMModelService {
@@ -417,6 +420,15 @@ func buildProviderEndpoint(baseURL, versionPrefix, resource string) (string, err
 	versionPath := "/" + strings.Trim(versionPrefix, "/")
 	resourcePath := strings.Trim(resource, "/")
 	if strings.HasSuffix(strings.ToLower(parsed.Path), strings.ToLower(versionPath)) {
+		return trimmed + "/" + resourcePath, nil
+	}
+
+	pathSegments := strings.Split(strings.Trim(parsed.Path, "/"), "/")
+	lastSegment := ""
+	if len(pathSegments) > 0 {
+		lastSegment = pathSegments[len(pathSegments)-1]
+	}
+	if versionSegmentPattern.MatchString(lastSegment) {
 		return trimmed + "/" + resourcePath, nil
 	}
 

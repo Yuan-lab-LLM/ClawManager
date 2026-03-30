@@ -138,6 +138,29 @@ AI Gateway 是 ClawManager 中负责模型访问治理的控制平面。它为 O
 - 内置 Token 统计与估算分析的成本核算能力
 - 基于可配置规则的风险控制，并支持 `block` 与 `route_secure_model` 等自动动作
 
+### 支持的模型服务平台
+
+ClawManager 当前内置了以下模型服务平台模板：
+
+- OpenAI
+- OpenRouter
+- DeepSeek
+- SiliconFlow
+- Moonshot AI
+- 智谱 AI
+- 阿里云 DashScope
+- 火山引擎 Ark
+- Groq
+- Together AI
+- Fireworks AI
+- xAI
+- Perplexity
+- 01.AI
+- MiniMax
+- Local / Internal 本地或内网端点
+
+其中 `Local / Internal` 模式也可用于接入自建 OpenAI-compatible 网关、Ollama、One API 以及其他内网模型服务。
+
 如需查看截图、完整功能拆解以及模型选择与路由流程，请参阅 [docs/aigateway.md](./docs/aigateway.md)。
 
 ## 产品流程

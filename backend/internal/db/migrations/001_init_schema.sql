@@ -147,7 +147,7 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 
 -- Insert default admin user (password: admin123)
 INSERT INTO users (username, email, password_hash, role, is_active) VALUES 
-  ('admin', 'admin@clawreef.local', '$2a$10$N9qo8uLOickgx2ZMRZoMy.MqrzL9wGC3qD3Q.ZHqQH6t3q7l1L5uG', 'admin', TRUE);
+  ('admin', 'admin@clawreef.local', '$2a$10$pbenze514mwv3pvQySQBVOsF5J4DBXL2kVo1hLa8JFhQu5x3AKvBi', 'admin', TRUE);
 
 -- Insert default quota for admin
 INSERT INTO user_quotas (user_id, max_instances, max_cpu_cores, max_memory_gb, max_storage_gb, max_gpu_count)

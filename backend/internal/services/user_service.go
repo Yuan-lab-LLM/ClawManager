@@ -24,10 +24,7 @@ type UserService interface {
 }
 
 func defaultPasswordForRole(role string) string {
-	if role == "admin" {
-		return "admin123"
-	}
-	return "user123"
+	return DefaultPasswordForRole(role)
 }
 
 // userService implements UserService

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import AdminLayout from '../../components/AdminLayout';
 import {
   modelService,
@@ -6,15 +6,21 @@ import {
   type LLMModel,
 } from '../../services/modelService';
 import { useI18n } from '../../contexts/I18nContext';
+import {
+  BUILTIN_PROVIDER_TEMPLATES,
+  findProviderTemplate,
+  normalizeBaseUrl,
+  type ProviderTemplate,
+} from '../../lib/modelProviderTemplates';
 
-const PROVIDER_OPTIONS = [
-  { value: 'openai-compatible', label: 'OpenAI Compatible' },
-  { value: 'openai', label: 'OpenAI' },
-  { value: 'anthropic', label: 'Anthropic' },
-  { value: 'google', label: 'Google' },
-  { value: 'azure-openai', label: 'Azure OpenAI' },
-  { value: 'local', label: 'Local / Internal' },
-];
+const PROVIDER_TYPE_LABELS: Record<string, string> = {
+  'openai-compatible': 'OpenAI Compatible',
+  openai: 'OpenAI',
+  anthropic: 'Anthropic',
+  google: 'Google',
+  'azure-openai': 'Azure OpenAI',
+  local: 'Local / Internal',
+};
 
 interface EditableModel extends LLMModel {
   local_id: string;
@@ -70,7 +76,7 @@ const createEmptyModel = (): EditableModel => ({
   local_id: `new-${Date.now()}-${Math.random().toString(16).slice(2)}`,
   display_name: '',
   description: '',
-  provider_type: 'openai-compatible',
+  provider_type: '',
   base_url: '',
   provider_model_name: '',
   api_key: '',
@@ -113,8 +119,349 @@ function canDiscover(card: EditableModel) {
     return false;
   }
 
+  const matchedTemplate = findProviderTemplate(card.provider_type, card.base_url);
+  if (
+    matchedTemplate?.requiresApiKey &&
+    !card.api_key?.trim() &&
+    !card.api_key_secret_ref?.trim()
+  ) {
+    return false;
+  }
+
   return true;
 }
+
+function getProviderTypeLabel(providerType: string) {
+  return PROVIDER_TYPE_LABELS[providerType] ?? providerType;
+}
+
+function buildCurrentTemplate(card: Pick<EditableModel, 'provider_type' | 'base_url'>, label: string): ProviderTemplate | undefined {
+  const providerType = card.provider_type.trim().toLowerCase();
+  const baseUrl = card.base_url.trim();
+  if (!providerType || !baseUrl) {
+    return undefined;
+  }
+
+  return {
+    id: `current-${providerType}-${normalizeBaseUrl(baseUrl)}`,
+    label,
+    providerType,
+    baseUrl,
+    allowCustomBaseUrl: providerType === 'local',
+    keywords: ['current', 'custom', 'existing', providerType, baseUrl],
+  };
+}
+
+function getTemplateOptions(card: EditableModel, currentLabel: string) {
+  const matchedTemplate = findProviderTemplate(card.provider_type, card.base_url);
+  if (matchedTemplate) {
+    return BUILTIN_PROVIDER_TEMPLATES;
+  }
+
+  const currentTemplate = buildCurrentTemplate(card, currentLabel);
+  return currentTemplate ? [currentTemplate, ...BUILTIN_PROVIDER_TEMPLATES] : BUILTIN_PROVIDER_TEMPLATES;
+}
+
+function getSelectedTemplate(card: EditableModel, currentLabel: string) {
+  return (
+    findProviderTemplate(card.provider_type, card.base_url) ??
+    buildCurrentTemplate(card, currentLabel)
+  );
+}
+
+const TEMPLATE_ICON_META: Record<string, { src: string; glyph: string; className: string }> = {
+  openai: {
+    src: '/vendor-icons/openai.png',
+    glyph: 'OA',
+    className: 'border-[#cfe7dc] bg-[#eff8f3] text-[#0f7a5c]',
+  },
+  openrouter: {
+    src: '/vendor-icons/openrouter.ico',
+    glyph: 'OR',
+    className: 'border-[#d9d7f5] bg-[#f3f1ff] text-[#5847b7]',
+  },
+  deepseek: {
+    src: '/vendor-icons/deepseek.ico',
+    glyph: 'DS',
+    className: 'border-[#cfe1fb] bg-[#eff6ff] text-[#2f6bb2]',
+  },
+  siliconflow: {
+    src: '/vendor-icons/siliconflow.ico',
+    glyph: 'SF',
+    className: 'border-[#d4ebef] bg-[#eefbfd] text-[#21708a]',
+  },
+  moonshot: {
+    src: '/vendor-icons/moonshot.ico',
+    glyph: 'KM',
+    className: 'border-[#e3d7f7] bg-[#f7f1ff] text-[#7148b0]',
+  },
+  zhipu: {
+    src: '/vendor-icons/zhipu.png',
+    glyph: 'GL',
+    className: 'border-[#d4e6df] bg-[#eef8f4] text-[#1e7a5e]',
+  },
+  dashscope: {
+    src: '/vendor-icons/dashscope.png',
+    glyph: 'QW',
+    className: 'border-[#f0ddbf] bg-[#fff8ea] text-[#9b6a11]',
+  },
+  ark: {
+    src: '/vendor-icons/ark.png',
+    glyph: 'DB',
+    className: 'border-[#f5d5cc] bg-[#fff3ef] text-[#b14d2c]',
+  },
+  groq: {
+    src: '/vendor-icons/groq.ico',
+    glyph: 'GQ',
+    className: 'border-[#d9d9d9] bg-[#f4f4f4] text-[#3e3e3e]',
+  },
+  together: {
+    src: '/vendor-icons/together.png',
+    glyph: 'TG',
+    className: 'border-[#d4e6ff] bg-[#eef6ff] text-[#2a5fa6]',
+  },
+  fireworks: {
+    src: '/vendor-icons/fireworks.ico',
+    glyph: 'FW',
+    className: 'border-[#f6d6c4] bg-[#fff2ea] text-[#c05621]',
+  },
+  xai: {
+    src: '/vendor-icons/xai.ico',
+    glyph: 'xA',
+    className: 'border-[#ddd7f3] bg-[#f3f0ff] text-[#5b4bb4]',
+  },
+  perplexity: {
+    src: '/vendor-icons/perplexity.ico',
+    glyph: 'PX',
+    className: 'border-[#d4eee7] bg-[#ecfaf5] text-[#0d8265]',
+  },
+  lingyiwanwu: {
+    src: '/vendor-icons/lingyiwanwu.ico',
+    glyph: '01',
+    className: 'border-[#ebd3f4] bg-[#faf0ff] text-[#9244b5]',
+  },
+  minimax: {
+    src: '/vendor-icons/minimax.ico',
+    glyph: 'MM',
+    className: 'border-[#f1ddd4] bg-[#fff5f0] text-[#af5f3d]',
+  },
+  ollama: {
+    src: '/vendor-icons/local-internal.svg',
+    glyph: 'LC',
+    className: 'border-[#d9dfef] bg-[#f2f5fb] text-[#49618d]',
+  },
+};
+
+function resolveTemplateIconMeta(template?: ProviderTemplate) {
+  if (!template) {
+    return {
+      src: '/vendor-icons/custom-endpoint.svg',
+      glyph: 'AI',
+      className: 'border-[#eadfd8] bg-white text-[#7c5a4d]',
+    };
+  }
+
+  if (template.id.startsWith('current-')) {
+    return {
+      src: '/vendor-icons/custom-endpoint.svg',
+      glyph: 'CU',
+      className: 'border-[#eadfd8] bg-[#fff7f3] text-[#7c5a4d]',
+    };
+  }
+
+  return TEMPLATE_ICON_META[template.id] ?? {
+    src: '/vendor-icons/custom-endpoint.svg',
+    glyph: template.label.slice(0, 2).toUpperCase(),
+    className: 'border-[#eadfd8] bg-white text-[#7c5a4d]',
+  };
+}
+
+interface VendorTemplateIconProps {
+  template?: ProviderTemplate;
+  size?: 'sm' | 'md';
+}
+
+const VendorTemplateIcon: React.FC<VendorTemplateIconProps> = ({ template, size = 'md' }) => {
+  const meta = resolveTemplateIconMeta(template);
+  const [imageFailed, setImageFailed] = useState(false);
+  const sizeClass = size === 'sm'
+    ? 'h-9 w-9 rounded-xl text-[11px]'
+    : 'h-11 w-11 rounded-2xl text-xs';
+
+  useEffect(() => {
+    setImageFailed(false);
+  }, [meta.src]);
+
+  return (
+    <span
+      className={`inline-flex shrink-0 items-center justify-center border font-semibold uppercase tracking-[0.12em] ${sizeClass} ${meta.className}`}
+      aria-hidden="true"
+    >
+      {!imageFailed ? (
+        <img
+          src={meta.src}
+          alt=""
+          className="h-[72%] w-[72%] object-contain"
+          onError={() => setImageFailed(true)}
+        />
+      ) : (
+        meta.glyph
+      )}
+    </span>
+  );
+};
+
+interface ProviderTemplatePickerProps {
+  selectedTemplate?: ProviderTemplate;
+  options: ProviderTemplate[];
+  placeholder: string;
+  searchPlaceholder: string;
+  emptyText: string;
+  getTypeLabel: (providerType: string) => string;
+  onSelect: (template: ProviderTemplate) => void;
+}
+
+const ProviderTemplatePicker: React.FC<ProviderTemplatePickerProps> = ({
+  selectedTemplate,
+  options,
+  placeholder,
+  searchPlaceholder,
+  emptyText,
+  getTypeLabel,
+  onSelect,
+}) => {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const containerRef = useRef<HTMLDivElement | null>(null);
+
+  const filteredOptions = useMemo(() => {
+    const normalizedQuery = query.trim().toLowerCase();
+    if (!normalizedQuery) {
+      return options;
+    }
+
+    return options.filter((template) => {
+      const haystack = [
+        template.label,
+        template.providerType,
+        template.baseUrl,
+        ...(template.keywords ?? []),
+      ].join(' ').toLowerCase();
+      return haystack.includes(normalizedQuery);
+    });
+  }, [options, query]);
+
+  useEffect(() => {
+    if (!open) {
+      setQuery('');
+      return undefined;
+    }
+
+    const handlePointerDown = (event: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [open]);
+
+  return (
+    <div ref={containerRef} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((current) => !current)}
+        className="app-input mt-1 flex min-h-[56px] w-full items-center justify-between gap-4 text-left hover:border-[#ef6b4a]"
+      >
+        <div className="flex min-w-0 flex-1 items-center gap-3">
+          <VendorTemplateIcon template={selectedTemplate} size="sm" />
+          {selectedTemplate ? (
+            <div className="min-w-0 flex flex-wrap items-center gap-2">
+              <span className="text-sm font-semibold text-gray-900">{selectedTemplate.label}</span>
+              <span className="rounded-full border border-[#eadfd8] bg-[#fff7f3] px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.12em] text-[#8f5a47]">
+                {getTypeLabel(selectedTemplate.providerType)}
+              </span>
+            </div>
+          ) : (
+            <span className="text-sm text-gray-400">{placeholder}</span>
+          )}
+        </div>
+        <svg
+          viewBox="0 0 20 20"
+          fill="none"
+          aria-hidden="true"
+          className={`h-5 w-5 shrink-0 text-[#8f5a47] transition-transform ${open ? 'rotate-180' : ''}`}
+        >
+          <path d="M5 7.5 10 12.5 15 7.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>
+
+      {open && (
+        <div className="absolute left-0 right-0 z-20 mt-2 overflow-hidden rounded-[26px] border border-[#ead8cf] bg-white shadow-[0_30px_60px_-36px_rgba(72,44,24,0.45)]">
+          <div className="border-b border-[#f1e3db] p-3">
+            <input
+              type="text"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              className="app-input block w-full"
+              placeholder={searchPlaceholder}
+              autoFocus
+            />
+          </div>
+
+          <div className="max-h-80 overflow-y-auto p-2">
+            {filteredOptions.length === 0 ? (
+              <div className="px-4 py-6 text-sm text-gray-500">{emptyText}</div>
+            ) : (
+              filteredOptions.map((template) => {
+                const isActive = selectedTemplate?.id === template.id;
+                return (
+                  <button
+                    key={template.id}
+                    type="button"
+                    onClick={() => {
+                      onSelect(template);
+                      setOpen(false);
+                    }}
+                    className={`w-full rounded-[22px] px-4 py-3 text-left transition-colors ${
+                      isActive
+                        ? 'bg-[#fff2eb] text-[#7c3f28]'
+                        : 'text-gray-700 hover:bg-[#fff8f4]'
+                    }`}
+                  >
+                    <div className="flex items-start gap-3">
+                      <VendorTemplateIcon template={template} />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="text-sm font-semibold">{template.label}</span>
+                          <span className="rounded-full border border-[#eadfd8] bg-white px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.12em] text-[#8f5a47]">
+                            {getTypeLabel(template.providerType)}
+                          </span>
+                        </div>
+                        <div className="mt-2 break-all text-xs text-gray-500">{template.baseUrl}</div>
+                      </div>
+                    </div>
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
 
 const ModelManagementPage: React.FC = () => {
   const { t } = useI18n();
@@ -122,6 +469,7 @@ const ModelManagementPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [pageError, setPageError] = useState<string | null>(null);
   const discoveryTimersRef = useRef<Record<string, number>>({});
+  const newCardRef = useRef<HTMLDivElement | null>(null);
   const editingCard = models.find((item) => item.isEditing);
   const hasEditingCard = Boolean(editingCard);
 
@@ -178,11 +526,24 @@ const ModelManagementPage: React.FC = () => {
     };
   }, [models]);
 
+  useEffect(() => {
+    if (!editingCard?.isNew || !newCardRef.current) {
+      return;
+    }
+
+    newCardRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    const firstInput = newCardRef.current.querySelector('input[type="text"]');
+    if (firstInput instanceof HTMLInputElement) {
+      firstInput.focus();
+    }
+  }, [editingCard?.isNew, editingCard?.local_id]);
+
   const addCard = () => {
     if (hasEditingCard) {
       return;
     }
-    setModels((current) => [...current, createEmptyModel()]);
+    const nextCard = createEmptyModel();
+    setModels((current) => [nextCard, ...current]);
   };
 
   const updateCard = (localId: string, patch: Partial<EditableModel>) => {
@@ -201,6 +562,7 @@ const ModelManagementPage: React.FC = () => {
         next.discovery_error = null;
         next.discovery_key = undefined;
         next.discovered_models = [];
+        next.discovering = false;
         if (
           Object.prototype.hasOwnProperty.call(patch, 'provider_type') ||
           Object.prototype.hasOwnProperty.call(patch, 'base_url')
@@ -266,15 +628,18 @@ const ModelManagementPage: React.FC = () => {
           return item;
         }
 
-        const shouldKeepSelection = discovered.some((model) => model.id === item.provider_model_name);
-        const nextProviderModelName = shouldKeepSelection
+        if (buildDiscoveryKey(item) !== nextKey) {
+          return item;
+        }
+
+        const nextProviderModelName = item.provider_model_name.trim()
           ? item.provider_model_name
           : discovered[0]?.id ?? '';
 
         return {
           ...item,
           discovering: false,
-              discovery_error: discovered.length === 0 ? t('modelManagementPage.noProviderModels') : null,
+          discovery_error: discovered.length === 0 ? t('modelManagementPage.noProviderModels') : null,
           discovered_models: discovered,
           discovery_key: nextKey,
           provider_model_name: nextProviderModelName,
@@ -283,13 +648,15 @@ const ModelManagementPage: React.FC = () => {
     } catch (error: any) {
       setModels((current) => current.map((item) => (
         item.local_id === localId
-          ? {
-              ...item,
-              discovering: false,
-              discovery_error: error.response?.data?.error || t('modelManagementPage.discoverFailed'),
-              discovered_models: [],
-              discovery_key: nextKey,
-            }
+          ? buildDiscoveryKey(item) === nextKey
+            ? {
+                ...item,
+                discovering: false,
+                discovery_error: error.response?.data?.error || t('modelManagementPage.discoverFailed'),
+                discovered_models: [],
+                discovery_key: nextKey,
+              }
+            : item
           : item
       )));
     }
@@ -402,6 +769,23 @@ const ModelManagementPage: React.FC = () => {
               {models.map((card) => {
                 const autoDiscoverySupported = AUTO_DISCOVERY_PROVIDERS.has(card.provider_type);
                 const discoveredModels = card.discovered_models ?? [];
+                const currentTemplate = getSelectedTemplate(card, t('modelManagementPage.currentVendorTemplate'));
+                const templateOptions = getTemplateOptions(card, t('modelManagementPage.currentVendorTemplate'));
+                const providerHeadline = currentTemplate?.label || getProviderTypeLabel(card.provider_type);
+                const providerTypeLabel = getProviderTypeLabel(card.provider_type || currentTemplate?.providerType || '');
+                const allowBaseUrlEditing = Boolean(currentTemplate?.allowCustomBaseUrl);
+                const providerModelListId = `provider-model-options-${card.local_id}`;
+                const providerModelHelpText = card.discovering
+                  ? t('modelManagementPage.loadingProviderModels')
+                  : autoDiscoverySupported
+                    ? discoveredModels.length > 0
+                      ? t('modelManagementPage.discoveryHelp')
+                      : card.discovery_error
+                        ? t('modelManagementPage.manualFallbackHelp')
+                        : canDiscover(card)
+                          ? t('modelManagementPage.waitingDiscovery')
+                          : t('modelManagementPage.discoveryCredentialsHelp')
+                    : t('modelManagementPage.manualEntryHelp');
 
                 if (!card.isEditing) {
                   return (
@@ -410,11 +794,17 @@ const ModelManagementPage: React.FC = () => {
                       className="self-start rounded-[26px] border border-[#ead8cf] bg-[rgba(255,248,245,0.84)] p-5 shadow-[0_18px_42px_-34px_rgba(72,44,24,0.42)]"
                     >
                       <div className="flex items-start justify-between gap-4">
-                        <div>
-                          <h3 className="text-lg font-semibold text-gray-900">{card.display_name}</h3>
-                          <p className="mt-1 text-sm text-gray-500">
-                            {PROVIDER_OPTIONS.find((option) => option.value === card.provider_type)?.label ?? card.provider_type}
-                          </p>
+                        <div className="flex min-w-0 items-start gap-3">
+                          <VendorTemplateIcon template={currentTemplate} />
+                          <div className="min-w-0">
+                            <h3 className="text-lg font-semibold text-gray-900">{card.display_name}</h3>
+                            <p className="mt-1 text-sm text-gray-500">{providerHeadline || '-'}</p>
+                            {providerTypeLabel && providerTypeLabel !== providerHeadline && (
+                              <p className="mt-1 text-xs uppercase tracking-[0.16em] text-[#a78374]">
+                                {providerTypeLabel}
+                              </p>
+                            )}
+                          </div>
                         </div>
                         <div className="flex items-center gap-2 text-xs text-gray-500">
                           {card.is_secure && (
@@ -480,6 +870,7 @@ const ModelManagementPage: React.FC = () => {
                 return (
                   <div
                     key={card.local_id}
+                    ref={card.isNew ? newCardRef : undefined}
                     className="self-start rounded-[26px] border border-[#ead8cf] bg-[rgba(255,248,245,0.84)] p-5 shadow-[0_18px_42px_-34px_rgba(72,44,24,0.42)]"
                   >
                     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -489,36 +880,60 @@ const ModelManagementPage: React.FC = () => {
                           type="text"
                           value={card.display_name}
                           onChange={(event) => updateCard(card.local_id, { display_name: event.target.value })}
-                          className="app-input mt-1 block w-full"
+                          className="app-input mt-1 block min-h-[56px] w-full"
                           placeholder={t('modelManagementPage.displayNamePlaceholder')}
                         />
                       </div>
 
                       <div>
-                        <label className="block text-sm font-medium text-gray-700">{t('modelManagementPage.providerType')}</label>
-                        <select
-                          value={card.provider_type}
-                          onChange={(event) => updateCard(card.local_id, { provider_type: event.target.value })}
-                          className="app-input mt-1 block w-full"
-                        >
-                          {PROVIDER_OPTIONS.map((option) => (
-                            <option key={option.value} value={option.value}>
-                              {option.label}
-                            </option>
-                          ))}
-                        </select>
+                        <label className="block text-sm font-medium text-gray-700">{t('modelManagementPage.vendorTemplate')}</label>
+                        <ProviderTemplatePicker
+                          selectedTemplate={currentTemplate}
+                          options={templateOptions}
+                          placeholder={t('modelManagementPage.vendorTemplatePlaceholder')}
+                          searchPlaceholder={t('modelManagementPage.vendorTemplateSearchPlaceholder')}
+                          emptyText={t('modelManagementPage.vendorTemplateEmpty')}
+                          getTypeLabel={getProviderTypeLabel}
+                          onSelect={(template) => updateCard(card.local_id, {
+                            provider_type: template.providerType,
+                            base_url: template.baseUrl,
+                          })}
+                        />
                       </div>
                     </div>
 
                     <div className="mt-4">
-                      <label className="block text-sm font-medium text-gray-700">{t('modelManagementPage.baseUrl')}</label>
-                      <input
-                        type="text"
-                        value={card.base_url}
-                        onChange={(event) => updateCard(card.local_id, { base_url: event.target.value })}
-                        className="app-input mt-1 block w-full"
-                        placeholder={t('modelManagementPage.baseUrlPlaceholder')}
-                      />
+                      <div className="flex items-center justify-between gap-3">
+                        <label className="block text-sm font-medium text-gray-700">{t('modelManagementPage.baseUrl')}</label>
+                        {currentTemplate && (
+                          <span className="rounded-full border border-[#eadfd8] bg-[#fff7f3] px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.12em] text-[#8f5a47]">
+                            {getProviderTypeLabel(currentTemplate.providerType)}
+                          </span>
+                        )}
+                      </div>
+                      {allowBaseUrlEditing ? (
+                        <>
+                          <input
+                            type="text"
+                            value={card.base_url}
+                            onChange={(event) => updateCard(card.local_id, { base_url: event.target.value })}
+                            className="app-input mt-1 block w-full"
+                            placeholder={currentTemplate?.baseUrl || t('modelManagementPage.baseUrlPlaceholder')}
+                          />
+                          <p className="mt-2 text-xs text-gray-500">{t('modelManagementPage.editableBaseUrlHelp')}</p>
+                        </>
+                      ) : (
+                        <>
+                          <div className="mt-1 rounded-[22px] border border-[#e5d9d1] bg-white/90 px-4 py-4 text-sm text-[#171212] shadow-[0_10px_24px_-20px_rgba(72,44,24,0.45)]">
+                            {currentTemplate ? (
+                              <span className="break-all">{currentTemplate.baseUrl}</span>
+                            ) : (
+                              <span className="text-gray-400">{t('modelManagementPage.fixedBaseUrlPlaceholder')}</span>
+                            )}
+                          </div>
+                          <p className="mt-2 text-xs text-gray-500">{t('modelManagementPage.fixedBaseUrlHelp')}</p>
+                        </>
+                      )}
                     </div>
 
                     <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -534,15 +949,15 @@ const ModelManagementPage: React.FC = () => {
                       </div>
                       <div>
                         <label className="block text-sm font-medium text-gray-700">{t('modelManagementPage.secretRef')}</label>
-                      <input
-                        type="text"
-                        value={card.api_key_secret_ref}
-                        onChange={(event) => updateCard(card.local_id, { api_key_secret_ref: event.target.value })}
-                        className="app-input mt-1 block w-full"
-                        placeholder={t('modelManagementPage.secretRefPlaceholder')}
-                      />
+                        <input
+                          type="text"
+                          value={card.api_key_secret_ref}
+                          onChange={(event) => updateCard(card.local_id, { api_key_secret_ref: event.target.value })}
+                          className="app-input mt-1 block w-full"
+                          placeholder={t('modelManagementPage.secretRefPlaceholder')}
+                        />
+                      </div>
                     </div>
-                  </div>
 
                     <div className="mt-4">
                       <div className="flex items-center justify-between gap-3">
@@ -557,40 +972,29 @@ const ModelManagementPage: React.FC = () => {
                         </button>
                       </div>
 
-                      {autoDiscoverySupported ? (
-                        <select
-                          value={card.provider_model_name}
-                          onChange={(event) => updateCard(card.local_id, { provider_model_name: event.target.value })}
-                          className="app-input mt-1 block w-full"
-                          disabled={card.discovering || discoveredModels.length === 0}
-                        >
-                          <option value="">
-                            {card.discovering
-                              ? t('modelManagementPage.loadingProviderModels')
-                              : discoveredModels.length > 0
-                                ? t('modelManagementPage.selectProviderModel')
-                                : t('modelManagementPage.waitingDiscovery')}
-                          </option>
+                      <input
+                        type="text"
+                        list={autoDiscoverySupported && discoveredModels.length > 0 ? providerModelListId : undefined}
+                        value={card.provider_model_name}
+                        onChange={(event) => updateCard(card.local_id, { provider_model_name: event.target.value })}
+                        className="app-input mt-1 block w-full"
+                        placeholder={discoveredModels.length > 0
+                          ? t('modelManagementPage.selectProviderModel')
+                          : t('modelManagementPage.manualProviderModelPlaceholder')}
+                      />
+
+                      {autoDiscoverySupported && discoveredModels.length > 0 && (
+                        <datalist id={providerModelListId}>
                           {discoveredModels.map((model) => (
                             <option key={model.id} value={model.id}>
                               {model.display_name}
                             </option>
                           ))}
-                        </select>
-                      ) : (
-                        <input
-                          type="text"
-                          value={card.provider_model_name}
-                          onChange={(event) => updateCard(card.local_id, { provider_model_name: event.target.value })}
-                          className="app-input mt-1 block w-full"
-                          placeholder={t('modelManagementPage.manualProviderModelPlaceholder')}
-                        />
+                        </datalist>
                       )}
 
                       <div className="mt-2 text-xs text-gray-500">
-                        {autoDiscoverySupported
-                          ? t('modelManagementPage.discoveryHelp')
-                          : t('modelManagementPage.manualEntryHelp')}
+                        {providerModelHelpText}
                       </div>
 
                       {card.discovery_error && (

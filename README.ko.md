@@ -128,6 +128,29 @@ docker build -t clawmanager:latest .
 - 다국어 인터페이스
 
 ## AI Gateway
+### 지원되는 모델 서비스 플랫폼
+
+ClawManager에는 다음 모델 서비스 플랫폼용 템플릿이 내장되어 있습니다.
+
+- OpenAI
+- OpenRouter
+- DeepSeek
+- SiliconFlow
+- Moonshot AI
+- Zhipu AI
+- Alibaba DashScope
+- Volcengine Ark
+- Groq
+- Together AI
+- Fireworks AI
+- xAI
+- Perplexity
+- 01.AI
+- MiniMax
+- Local / Internal 엔드포인트
+
+`Local / Internal` 모드는 자체 호스팅 OpenAI-compatible 게이트웨이, Ollama, One API, 기타 내부 모델 엔드포인트 연결에도 사용할 수 있습니다.
+
 
 AI Gateway는 ClawManager에서 모델 접근을 다루는 거버넌스 평면입니다. OpenClaw 인스턴스에 단일 OpenAI 호환 진입점을 제공하고, 상위 Provider 위에 정책, 감사, 비용 제어를 추가합니다.
 

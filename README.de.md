@@ -128,6 +128,29 @@ docker build -t clawmanager:latest .
 - Mehrsprachige Oberflaeche
 
 ## AI Gateway
+### Unterstuetzte Modellservice-Plattformen
+
+ClawManager bringt integrierte Anbieter-Templates fuer folgende Plattformen mit:
+
+- OpenAI
+- OpenRouter
+- DeepSeek
+- SiliconFlow
+- Moonshot AI
+- Zhipu AI
+- Alibaba DashScope
+- Volcengine Ark
+- Groq
+- Together AI
+- Fireworks AI
+- xAI
+- Perplexity
+- 01.AI
+- MiniMax
+- Local / Internal Endpunkte
+
+`Local / Internal` kann auch fuer selbst gehostete OpenAI-kompatible Gateways, Ollama, One API und andere private Modell-Endpunkte verwendet werden.
+
 
 AI Gateway ist die Governance-Ebene fuer den Modellzugriff in ClawManager. Es bietet OpenClaw-Instanzen einen einheitlichen OpenAI-kompatiblen Einstiegspunkt und ergaenzt Upstream-Provider um Richtlinien, Audit und Kostenkontrolle.
 

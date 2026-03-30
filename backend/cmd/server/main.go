@@ -54,6 +54,12 @@ func main() {
 	riskRuleRepo := repository.NewRiskRuleRepository(database)
 	riskHitRepo := repository.NewRiskHitRepository(database)
 
+	if repaired, repairErr := services.RepairSeededAdminPassword(userRepo); repairErr != nil {
+		log.Printf("Warning: failed to repair seeded admin password: %v", repairErr)
+	} else if repaired {
+		log.Printf("Repaired seeded admin password hash for default admin account")
+	}
+
 	// Initialize services
 	authService := services.NewAuthService(userRepo, cfg.JWT)
 	quotaService := services.NewQuotaService(quotaRepo)
@@ -212,12 +218,12 @@ func main() {
 		adminRiskRules.Use(middleware.SetUserInfo(userRepo))
 		adminRiskRules.Use(middleware.NewAdminAuth(userRepo))
 		{
-		adminRiskRules.GET("", riskRuleHandler.ListRules)
-		adminRiskRules.POST("/test", riskRuleHandler.TestRules)
-		adminRiskRules.POST("/bulk-status", riskRuleHandler.BulkUpdateStatus)
-		adminRiskRules.PUT("", riskRuleHandler.UpsertRule)
-		adminRiskRules.DELETE("/:ruleId", riskRuleHandler.DeleteRule)
-	}
+			adminRiskRules.GET("", riskRuleHandler.ListRules)
+			adminRiskRules.POST("/test", riskRuleHandler.TestRules)
+			adminRiskRules.POST("/bulk-status", riskRuleHandler.BulkUpdateStatus)
+			adminRiskRules.PUT("", riskRuleHandler.UpsertRule)
+			adminRiskRules.DELETE("/:ruleId", riskRuleHandler.DeleteRule)
+		}
 
 		gatewayLLM := api.Group("/gateway/llm")
 		gatewayLLM.Use(middleware.GatewayAuth(instanceRepo))

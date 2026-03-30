@@ -70,15 +70,15 @@ type importUserResult struct {
 }
 
 type importedUserCredential struct {
-	Username          string `json:"username"`
-	Email             string `json:"email"`
-	Role              string `json:"role"`
-	MaxInstances      int    `json:"max_instances"`
-	MaxCPUCores       int    `json:"max_cpu_cores"`
-	MaxMemoryGB       int    `json:"max_memory_gb"`
-	MaxStorageGB      int    `json:"max_storage_gb"`
-	MaxGPUCount       int    `json:"max_gpu_count"`
-	InitialPassword   string `json:"initial_password"`
+	Username        string `json:"username"`
+	Email           string `json:"email"`
+	Role            string `json:"role"`
+	MaxInstances    int    `json:"max_instances"`
+	MaxCPUCores     int    `json:"max_cpu_cores"`
+	MaxMemoryGB     int    `json:"max_memory_gb"`
+	MaxStorageGB    int    `json:"max_storage_gb"`
+	MaxGPUCount     int    `json:"max_gpu_count"`
+	InitialPassword string `json:"initial_password"`
 }
 
 var importUsernamePattern = regexp.MustCompile(`^[a-zA-Z0-9]+$`)
@@ -264,15 +264,15 @@ func (h *UserHandler) ImportUsers(c *gin.Context) {
 		}
 
 		createdUsers = append(createdUsers, importedUserCredential{
-			Username:          user.Username,
-			Email:             user.Email,
-			Role:              user.Role,
-			MaxInstances:      maxInstances,
-			MaxCPUCores:       maxCPUCores,
-			MaxMemoryGB:       maxMemoryGB,
-			MaxStorageGB:      maxStorageGB,
-			MaxGPUCount:       maxGPUCount,
-			InitialPassword:   password,
+			Username:        user.Username,
+			Email:           user.Email,
+			Role:            user.Role,
+			MaxInstances:    maxInstances,
+			MaxCPUCores:     maxCPUCores,
+			MaxMemoryGB:     maxMemoryGB,
+			MaxStorageGB:    maxStorageGB,
+			MaxGPUCount:     maxGPUCount,
+			InitialPassword: password,
 		})
 	}
 
@@ -379,10 +379,7 @@ func headerLabel(key string) string {
 }
 
 func servicesDefaultPasswordForRole(role string) string {
-	if role == "admin" {
-		return "admin123"
-	}
-	return "user123"
+	return services.DefaultPasswordForRole(role)
 }
 
 // GetUser gets a user by ID
