@@ -18,7 +18,7 @@ COPY backend/go.mod backend/go.sum ./
 RUN go mod download
 
 COPY backend/ ./
-RUN CGO_ENABLED=0 GOOS=linux go build -o /out/clawreef-server ./cmd/server
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -buildvcs=false -ldflags="-s -w -buildid=" -o /out/clawreef-server ./cmd/server
 
 FROM nginx:1.27-alpine
 

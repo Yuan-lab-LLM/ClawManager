@@ -33,30 +33,16 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Build candidate image
+        shell: bash
+        run: |
+          docker build --pull -t clawmanager:release-candidate .
+
       - name: Compute release fingerprint
         shell: bash
         run: |
-          set -euo pipefail
-
-          mapfile -t release_files < <(git ls-files -- \
-            Dockerfile \
-            .dockerignore \
-            frontend \
-            backend \
-            deployments/container/start.sh \
-            deployments/nginx/nginx.conf)
-
-          mapfile -t base_images < <(awk 'toupper($1)=="FROM" { print $2 }' Dockerfile)
-
-          {
-            for image in "${base_images[@]}"; do
-              printf 'base-image %s\n' "$image"
-            done
-
-            for file in "${release_files[@]}"; do
-              sha256sum "$file"
-            done
-          } | sha256sum | awk '{print "IMAGE_FINGERPRINT="$1}' >> "$GITHUB_ENV"
+          IMAGE_FINGERPRINT="$(python3 .github/scripts/compute_image_fingerprint.py clawmanager:release-candidate)"
+          echo "IMAGE_FINGERPRINT=${IMAGE_FINGERPRINT}" >> "$GITHUB_ENV"
 
       - name: Read latest release fingerprint
         id: latest-release
@@ -94,6 +80,12 @@ jobs:
           LAST_FINGERPRINT="${LAST_FINGERPRINT//\`/}"
           CURRENT_FINGERPRINT="${CURRENT_FINGERPRINT//\`/}"
 
+          if git rev-parse "$TAG_NAME" >/dev/null 2>&1; then
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+            echo "tag_name=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
           if [ "$FORCE_RELEASE" = "true" ]; then
             echo "should_release=true" >> "$GITHUB_OUTPUT"
             echo "tag_name=$TAG_NAME" >> "$GITHUB_OUTPUT"
@@ -101,12 +93,6 @@ jobs:
           fi
 
           if [ -n "$LAST_FINGERPRINT" ] && [ "$LAST_FINGERPRINT" = "$CURRENT_FINGERPRINT" ]; then
-            echo "should_release=false" >> "$GITHUB_OUTPUT"
-            echo "tag_name=" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          if git rev-parse "$TAG_NAME" >/dev/null 2>&1; then
             echo "should_release=false" >> "$GITHUB_OUTPUT"
             echo "tag_name=" >> "$GITHUB_OUTPUT"
             exit 0
@@ -152,34 +138,26 @@ jobs:
           fi
           echo "IMAGE_URI=ghcr.io/${REPOSITORY_OWNER_LOWER}/clawmanager" >> "$GITHUB_ENV"
 
-      - name: Compute release fingerprint
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          mapfile -t release_files < <(git ls-files -- \
-            Dockerfile \
-            .dockerignore \
-            frontend \
-            backend \
-            deployments/container/start.sh \
-            deployments/nginx/nginx.conf)
-
-          mapfile -t base_images < <(awk 'toupper($1)=="FROM" { print $2 }' Dockerfile)
-
-          {
-            for image in "${base_images[@]}"; do
-              printf 'base-image %s\n' "$image"
-            done
-
-            for file in "${release_files[@]}"; do
-              sha256sum "$file"
-            done
-          } | sha256sum | awk '{print "IMAGE_FINGERPRINT="$1}' >> "$GITHUB_ENV"
-
       - name: Checkout release tag
         if: github.event_name != 'push'
         run: git checkout "${TAG_NAME}"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build release image
+        shell: bash
+        run: |
+          docker build --pull \
+            -t "${IMAGE_URI}:${TAG_NAME}" \
+            -t "${IMAGE_URI}:latest" \
+            .
+
+      - name: Compute release fingerprint
+        shell: bash
+        run: |
+          IMAGE_FINGERPRINT="$(python3 .github/scripts/compute_image_fingerprint.py "${IMAGE_URI}:${TAG_NAME}")"
+          echo "IMAGE_FINGERPRINT=${IMAGE_FINGERPRINT}" >> "$GITHUB_ENV"
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -188,21 +166,23 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      - name: Push release image
+        shell: bash
+        run: |
+          docker push "${IMAGE_URI}:${TAG_NAME}"
+          docker push "${IMAGE_URI}:latest"
 
-      - name: Build and push release image
-        id: docker-build
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: ./Dockerfile
-          push: true
-          tags: |
-            ${{ env.IMAGE_URI }}:${{ env.TAG_NAME }}
-            ${{ env.IMAGE_URI }}:latest
+      - name: Read pushed image digest
+        shell: bash
+        run: |
+          IMAGE_DIGEST="$(docker buildx imagetools inspect "${IMAGE_URI}:${TAG_NAME}" | sed -n 's/^Digest:[[:space:]]*//p' | head -n1)"
+          if [ -z "${IMAGE_DIGEST}" ]; then
+            echo "Failed to resolve image digest for ${IMAGE_URI}:${TAG_NAME}" >&2
+            exit 1
+          fi
+          echo "IMAGE_DIGEST=${IMAGE_DIGEST}" >> "$GITHUB_ENV"
 
-      - name: Build release highlights
+      - name: Build release notes
         shell: bash
         run: |
           cat <<EOF > /tmp/release-highlights.md
@@ -217,7 +197,7 @@ jobs:
 
           Image: \`${IMAGE_URI}:${TAG_NAME}\`
           Latest: \`${IMAGE_URI}:latest\`
-          Image-Digest: \`${{ steps.docker-build.outputs.digest }}\`
+          Image-Digest: \`${IMAGE_DIGEST}\`
           Build-Fingerprint: \`${IMAGE_FINGERPRINT}\`
           EOF
 
