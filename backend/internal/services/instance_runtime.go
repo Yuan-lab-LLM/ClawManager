@@ -58,6 +58,7 @@ func buildRuntimeConfig(instanceType, osType, osVersion string, registry, tag *s
 			"SUBFOLDER":   "/",
 		}
 	case "openclaw":
+		config.MountPath = "/config"
 		if (registry == nil || strings.TrimSpace(*registry) == "") && (tag == nil || strings.TrimSpace(*tag) == "") {
 			config.Image = defaultSystemImageSettings["openclaw"]
 		} else {
@@ -84,7 +85,7 @@ func defaultPortForInstanceType(instanceType string) int32 {
 
 func defaultMountPathForInstanceType(instanceType string) string {
 	switch instanceType {
-	case "ubuntu", "webtop":
+	case "ubuntu", "webtop", "openclaw":
 		return "/config"
 	default:
 		return "/home/user/data"
