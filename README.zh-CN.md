@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  一个面向团队与集群规模场景的 Kubernetes-first 控制平面，用于统一管理 OpenClaw 和 Linux 桌面运行时。
+  一个面向 AI Agent 实例管理的 Kubernetes 原生控制平面，提供受治理的 AI 访问、运行时编排，以及适用于多种 Agent Runtime 的可复用资源管理能力。
 </p>
 
 <p align="center">
@@ -18,7 +18,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/ClawManager-Virtual%20Desktop%20Platform-e25544?style=for-the-badge" alt="ClawManager Platform" />
+  <img src="https://img.shields.io/badge/ClawManager-Control%20Plane-e25544?style=for-the-badge" alt="ClawManager Control Plane" />
   <img src="https://img.shields.io/badge/Go-1.21%2B-00ADD8?style=for-the-badge&logo=go&logoColor=white" alt="Go 1.21+" />
   <img src="https://img.shields.io/badge/React-19-20232A?style=for-the-badge&logo=react&logoColor=61DAFB" alt="React 19" />
   <img src="https://img.shields.io/badge/Kubernetes-Native-326CE5?style=for-the-badge&logo=kubernetes&logoColor=white" alt="Kubernetes Native" />
@@ -26,205 +26,172 @@
 </p>
 
 <p align="center">
-  <img src="./docs/main/clawmanager_features.jpg" alt="ClawManager Admin" width="100%" />
+  <a href="#product-tour">了解产品</a> |
+  <a href="#ai-gateway">AI Gateway</a> |
+  <a href="#agent-control-plane">Agent Control Plane</a> |
+  <a href="#resource-management">资源管理</a> |
+  <a href="#get-started">快速开始</a>
 </p>
-
-
-## 新闻
-
-- [2026-03-26]: 🚀🚀 AI Gateway 文档与总览已更新，涵盖模型治理、审计追踪、成本核算和风险控制。参见 [AI Gateway](#ai-gateway)。
-- [2026-03-20]: 🎉🎉 ClawManager 发布 —— ClawManager 现已成为一款虚拟桌面管理平台，支持批量部署、Webtop 支持、桌面门户访问、运行时镜像配置、OpenClaw 记忆/偏好 Markdown 备份与迁移、集群资源总览以及多语言文档。
-
 
 <p align="center">
-  <img src="./docs/main/admin.png" alt="ClawManager Admin" width="32%" />
-  <img src="./docs/main/portal.png" alt="ClawManager Portal" width="32%" />
-  <img src="./docs/main/aigateway.png" alt="ClawManager AI Gateway" width="32%" />
+  <a href="https://github.com/Yuan-lab-LLM/ClawManager/stargazers">
+    <img src="https://img.shields.io/github/stars/Yuan-lab-LLM/ClawManager?style=for-the-badge&logo=github&label=Star%20ClawManager" alt="Star ClawManager on GitHub" />
+  </a>
 </p>
 
-## 它是什么
+<h2 align="center">60 秒认识 ClawManager</h2>
 
-ClawManager 帮助团队在 Kubernetes 上统一部署、运维并访问桌面运行时。
+<p align="center">
+<img src="https://raw.githubusercontent.com/Yuan-lab-LLM/ClawManager-Assets/main/gif/clawmanager-launch-60s-hd.gif" alt="ClawManager 产品演示" width="100%" />
+</p>
 
-它适合这些场景：
+<p align="center">
+  快速了解 Agent 实例创建、Skill 管理与扫描，以及 AI Gateway 治理能力。
+</p>
 
-- 需要为多个用户创建桌面实例
-- 需要集中管理配额、镜像和生命周期
-- 希望桌面服务始终保留在集群内部
-- 希望通过安全的浏览器访问方式，而不是直接暴露 Pod
+## 最新动态
 
-## 为什么选择它
+这里展示最近的重要产品与文档更新。
 
-- 一个管理后台统一管理用户、配额、实例和运行时镜像
-- 支持 OpenClaw，并提供记忆与偏好设置的导入导出
-- 通过平台提供安全桌面访问，而不是直接暴露服务
-- AI Gateway 提供受控模型访问、审计追踪、成本分析和风险控制
-- 天然适配 Kubernetes 的部署与运维方式
-- 同时支持管理员统一发放和用户自助创建
+- [2026-04-08] 平台新增了 Skill 管理与 Skill 扫描工作流，见 [Merged PR #52](https://github.com/Yuan-lab-LLM/ClawManager/pull/52)。
+- [2026-03-26] AI Gateway 文档已更新，补充了模型治理、审计追踪、成本核算与风险控制能力，见 [AI Gateway Guide](./docs/aigateway.md)。
+- [2026-03-20] ClawManager 进一步演进为面向 AI Agent 工作空间的控制平面，强化了运行时控制、可复用资源与安全扫描工作流。
 
+> 如果 ClawManager 对你的团队有帮助，欢迎为项目点一个 Star，帮助更多用户和开发者发现它。
 
+<p align="center">
+  <a href="https://github.com/Yuan-lab-LLM/ClawManager/stargazers">
+<img src="https://raw.githubusercontent.com/Yuan-lab-LLM/ClawManager-Assets/main/gif/clawmanager-star.gif" alt="Star ClawManager on GitHub" width="100%" />
+  </a>
+</p>
+
+<a id="product-tour"></a>
+## 产品介绍
+
+ClawManager 将 AI Agent 实例的运行、治理与运维能力带到 Kubernetes，并在运行时基础之上叠加三层更高阶的控制平面。团队可以用它治理 AI 访问、通过 Agent 编排运行时行为，并通过可扫描、可复用的 channel 与 skill 资源交付工作空间能力。
+
+它适合以下场景：
+
+- 面向多用户运行 AI Agent 实例的平台团队
+- 需要运行时可观测性、命令下发与期望态控制的运维团队
+- 希望以可复用资源而不是手工配置方式交付 Agent 工作空间的开发团队
+
+<a id="get-started"></a>
 ## 快速开始
 
-### 前置条件
+ClawManager 现在同时提供标准 Kubernetes 与轻量级集群的清晰入口。如果你想快速评估产品，可以先从匹配你环境的部署路径开始，再进入首次登录与上手流程。
 
-- 一个可用的 Kubernetes 集群
-- `kubectl get nodes` 可以正常执行
+- 标准 Kubernetes 部署: [deployments/k8s/clawmanager.yaml](./deployments/k8s/clawmanager.yaml)
+- K3s / 轻量集群部署: [deployments/k3s/clawmanager.yaml](./deployments/k3s/clawmanager.yaml)
+- 首次登录与操作流程: [用户指南](./docs/use_guide_cn.md)
+- 部署说明与架构背景: [Deployment Guide（英文）](./docs/deployment.md)
 
-### 部署
+## 三大控制平面
 
-直接应用仓库自带清单：
+<a id="ai-gateway"></a>
+### AI Gateway
 
-```bash
-kubectl apply -f deployments/k8s/clawmanager.yaml
-kubectl get pods -A
-kubectl get svc -A
-```
+AI Gateway 是 ClawManager 中负责模型访问治理的控制平面。它为受管 Agent Runtime 提供统一的 OpenAI 兼容入口，同时在上游模型服务之上叠加策略、审计与成本控制能力。
 
-## 从源码构建
+- 统一的模型访问入口
+- 安全模型路由与策略驱动的模型选择
+- 端到端审计与追踪记录
+- 内建成本核算与使用分析
+- 可阻断或改道路由的风险控制规则
 
-如果你想从源码运行或打包 ClawManager，而不是直接使用仓库自带的 Kubernetes 清单：
+参见 [AI Gateway Guide（英文）](./docs/aigateway.md)。
 
-### 前端
+<a id="agent-control-plane"></a>
+### Agent Control Plane
 
-```bash
-cd frontend
-npm install
-npm run build
-```
+Agent Control Plane 是受管 AI Agent 实例的运行时编排层。它让每一个实例都成为可注册、可汇报状态、可接收命令，并持续对齐平台期望态的受管运行时。
 
-### 后端
+- 基于安全引导与会话生命周期的 Agent 注册
+- 依靠心跳机制进行运行时状态与健康上报
+- 控制平面与实例之间的期望态同步
+- 支持启动、停止、配置应用、健康检查与 Skill 操作的命令下发
+- 在实例维度查看 Agent 状态、channel、skill 与命令历史
 
-```bash
-cd backend
-go mod tidy
-go build -o bin/clawreef cmd/server/main.go
-```
+参见 [Agent Control Plane Guide（英文）](./docs/agent-control-plane.md)。
 
-### Docker 镜像
+<a id="resource-management"></a>
+### 资源管理
 
-在仓库根目录构建完整应用镜像：
+资源管理是 AI Agent 工作空间的可复用资产层。团队可以先准备好 channel 和 skill，再通过 bundle 进行组合、注入到实例中，并把安全审查纳入整个交付流程。
 
-```bash
-docker build -t clawmanager:latest .
-```
+- `Channel` 管理，用于工作空间连接与集成模板
+- `Skill` 管理，用于可复用能力包
+- `Skill Scanner` 工作流，用于风险审查与扫描任务
+- 基于 bundle 的资源组合，用于可重复交付
+- 通过注入快照追踪实际下发到实例的内容
 
-### 默认账户
+参见 [Resource Management Guide（英文）](./docs/resource-management.md) 与 [Security / Skill Scanner Guide（英文）](./docs/security-skill-scanner.md)。
 
-- 默认管理员账户：`admin / admin123`
-- 导入管理员用户时的默认密码：`admin123`
-- 导入普通用户时的默认密码：`user123`
+## 产品界面
 
-### 首次使用
+ClawManager 的设计目标，是让管理、访问与 AI 治理体验形成统一的产品界面，而不是分散在多个孤立工具中。
 
-1. 使用管理员账户登录。
-2. 创建或导入用户，并分配配额。
-3. 在系统设置中查看或更新运行时镜像卡片。
-4. 使用普通用户登录并创建实例。
-5. 通过 Portal View 或 Desktop Access 访问桌面。
+### 管理控制台
 
-## 核心能力
+管理控制台将用户、配额、运行时操作、安全控制与平台级策略集中到一起，是团队管理 AI Agent 基础设施的核心工作台。
 
-- 实例生命周期管理：创建、启动、停止、重启、删除、查看和同步
-- 支持的运行时类型：`openclaw`、`webtop`、`ubuntu`、`debian`、`centos`、`custom`
-- 后台运行时镜像卡片管理
-- 用户级 CPU、内存、存储、GPU 和实例数量配额控制
-- 节点、CPU、内存和存储的集群资源总览
-- 基于令牌的桌面访问与 WebSocket 转发
-- AI Gateway：模型管理、可追溯审计、成本核算与风险控制
-- 基于 CSV 的批量用户导入
-- 多语言界面
+<p align="center">
+  <img src="./docs/main/admin.png" alt="ClawManager 管理控制台" width="100%" />
+</p>
 
-## AI Gateway
+### Portal 访问
 
-AI Gateway 是 ClawManager 中负责模型访问治理的控制平面。它为 OpenClaw 实例提供统一的 OpenAI 兼容入口，并在上游 Provider 之上增加策略、审计和成本控制。
+Portal 为用户提供统一的工作空间入口。用户可以通过浏览器访问实例，并查看与控制平面保持一致的运行时状态，而不需要直接面对底层基础设施细节。
 
-- 面向普通模型与安全模型的模型管理，以及 Provider 接入、启停、端点配置和价格策略
-- 面向请求、响应、路由决策和风险命中的全链路审计与追踪记录
-- 内置 Token 统计与估算分析的成本核算能力
-- 基于可配置规则的风险控制，并支持 `block` 与 `route_secure_model` 等自动动作
+<p align="center">
+  <img src="./docs/main/portal.png" alt="ClawManager Portal 访问" width="100%" />
+</p>
 
-### 支持的模型服务平台
+### AI Gateway
 
-ClawManager 当前内置了以下模型服务平台模板：
+AI Gateway 将模型访问治理纳入工作空间体验本身，提供审计记录、成本可见性与风险路由能力，让 AI 使用成为平台能力的一部分，而不是零散接入。
 
-- OpenAI
-- OpenRouter
-- DeepSeek
-- SiliconFlow
-- Moonshot AI
-- 智谱 AI
-- 阿里云 DashScope
-- 火山引擎 Ark
-- Groq
-- Together AI
-- Fireworks AI
-- xAI
-- Perplexity
-- 01.AI
-- MiniMax
-- Local / Internal 本地或内网端点
+<p align="center">
+  <img src="./docs/main/aigateway.png" alt="ClawManager AI Gateway" width="100%" />
+</p>
 
-其中 `Local / Internal` 模式也可用于接入自建 OpenAI-compatible 网关、Ollama、One API 以及其他内网模型服务。
+## 工作方式
 
-如需查看截图、完整功能拆解以及模型选择与路由流程，请参阅 [docs/aigateway.md](./docs/aigateway.md)。
+1. 管理员先定义治理策略与可复用资源。
+2. 用户在 Kubernetes 上创建或进入受管 AI Agent 工作空间。
+3. Agent 回连控制平面并上报运行时状态。
+4. Channel、skill 与 bundle 被编译并应用到实例中。
+5. AI 流量通过 AI Gateway 进入上游服务，并附带审计、风险与成本控制。
 
-## 产品流程
+## 开发者概览
 
-1. 管理员定义用户、配额和运行时镜像策略。
-2. 用户创建 OpenClaw 或 Linux 桌面实例。
-3. ClawManager 创建并跟踪 Kubernetes 资源。
-4. 用户通过平台访问桌面。
-5. 管理员通过仪表盘监控健康状态和容量。
+ClawManager 是一个 Kubernetes 原生平台，包含 React 前端、Go 后端、MySQL 状态存储，以及 `skill-scanner` 与对象存储等支撑组件。代码库按产品子系统组织，因此更适合从对应能力的指南切入，再进入代码实现。
 
-## 架构
+- 前端管理界面与用户界面位于 `frontend/`
+- 后端服务、handler、repository 与 migration 位于 `backend/`
+- 部署资产位于 `deployments/`
+- 产品文档与素材位于 `docs/`
 
-```text
-Browser
-  -> ClawManager Frontend
-  -> ClawManager Backend
-  -> MySQL
-  -> Kubernetes API
-  -> Pod / PVC / Service
-  -> OpenClaw / Webtop / Linux Desktop Runtime
-```
+参见 [Developer Guide（英文）](./docs/developer-guide.md)。
 
-## 配置说明
+## 文档
 
-- 实例服务保留在 Kubernetes 集群内部网络
-- 桌面访问通过已认证的后端代理转发
-- 运行时镜像可以在系统设置中覆盖
-- 后端最好部署在集群内部
-
-常用后端环境变量：
-
-- `SERVER_ADDRESS`
-- `SERVER_MODE`
-- `DB_HOST`
-- `DB_PORT`
-- `DB_USER`
-- `DB_PASSWORD`
-- `DB_NAME`
-- `JWT_SECRET`
-
-### CSV 导入模板
-
-```csv
-Username,Email,Role,Max Instances,Max CPU Cores,Max Memory (GB),Max Storage (GB),Max GPU Count (optional)
-```
-
-说明：
-
-- `Email` 为可选项
-- `Max GPU Count (optional)` 为可选项
-- 其他列均为必填项
+- [用户指南](./docs/use_guide_cn.md)
+- [Deployment Guide（英文）](./docs/deployment.md)
+- [Admin and User Guide（英文）](./docs/admin-user-guide.md)
+- [Agent Control Plane Guide（英文）](./docs/agent-control-plane.md)
+- [AI Gateway Guide（英文）](./docs/aigateway.md)
+- [Security / Skill Scanner Guide（英文）](./docs/security-skill-scanner.md)
+- [Resource Management Guide（英文）](./docs/resource-management.md)
+- [Developer Guide（英文）](./docs/developer-guide.md)
 
 ## 许可证
 
-本项目基于 MIT License 发布。
+本项目基于 MIT License 开源。
 
-## 开源
+## 开源协作
 
-欢迎提交 issue 和 pull request。
+欢迎提交 Issue 与 Pull Request。
 
 ## Star History
 

@@ -1,0 +1,782 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: clawmanager-system
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: clawmanager-secrets
+  namespace: clawmanager-system
+type: Opaque
+stringData:
+  mysql-root-password: root123
+  mysql-password: clawreef123
+  jwt-secret: change-me-in-production
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: clawmanager-mysql-init
+  namespace: clawmanager-system
+data:
+  001_init_schema.sql: |
+    CREATE DATABASE IF NOT EXISTS clawmanager CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+    USE clawmanager;
+
+    CREATE TABLE IF NOT EXISTS users (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      username VARCHAR(255) UNIQUE NOT NULL,
+      email VARCHAR(320) UNIQUE NOT NULL,
+      password_hash VARCHAR(255) NOT NULL,
+      role ENUM('admin', 'user') DEFAULT 'user',
+      is_active BOOLEAN DEFAULT TRUE,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      last_login TIMESTAMP,
+      INDEX idx_username (username),
+      INDEX idx_role (role)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+    CREATE TABLE IF NOT EXISTS instances (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      user_id INT NOT NULL,
+      name VARCHAR(255) NOT NULL,
+      description TEXT,
+      type ENUM('openclaw', 'ubuntu', 'debian', 'centos', 'custom', 'webtop') DEFAULT 'ubuntu',
+      status ENUM('creating', 'running', 'stopped', 'error', 'deleting') DEFAULT 'creating',
+      cpu_cores INT NOT NULL,
+      memory_gb INT NOT NULL,
+      disk_gb INT NOT NULL,
+      gpu_enabled BOOLEAN DEFAULT FALSE,
+      gpu_type VARCHAR(100),
+      gpu_count INT DEFAULT 0,
+      os_type VARCHAR(50) NOT NULL,
+      os_version VARCHAR(50) NOT NULL,
+      image_registry VARCHAR(255),
+      image_tag VARCHAR(100),
+      storage_class VARCHAR(50) DEFAULT 'standard',
+      mount_path VARCHAR(255) DEFAULT '/data',
+      pod_name VARCHAR(255),
+      pod_namespace VARCHAR(255),
+      pod_ip VARCHAR(45),
+      access_url VARCHAR(500),
+      access_token VARCHAR(255),
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      started_at TIMESTAMP,
+      stopped_at TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+      INDEX idx_user_id (user_id),
+      INDEX idx_status (status),
+      INDEX idx_type (type)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+    CREATE TABLE IF NOT EXISTS persistent_volumes (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      instance_id INT NOT NULL,
+      pvc_name VARCHAR(255) UNIQUE NOT NULL,
+      pvc_namespace VARCHAR(255) NOT NULL,
+      storage_size_gb INT NOT NULL,
+      storage_class VARCHAR(50),
+      mount_path VARCHAR(255),
+      status ENUM('pending', 'bound', 'released', 'failed') DEFAULT 'pending',
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      FOREIGN KEY (instance_id) REFERENCES instances(id) ON DELETE CASCADE,
+      INDEX idx_instance_id (instance_id),
+      UNIQUE KEY uk_pvc_name_namespace (pvc_name, pvc_namespace)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+    CREATE TABLE IF NOT EXISTS backups (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      instance_id INT NOT NULL,
+      backup_name VARCHAR(255) NOT NULL,
+      backup_size_gb INT,
+      backup_path VARCHAR(500),
+      status ENUM('creating', 'completed', 'failed', 'deleted') DEFAULT 'creating',
+      backup_type ENUM('manual', 'scheduled') DEFAULT 'manual',
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      completed_at TIMESTAMP,
+      expires_at TIMESTAMP,
+      FOREIGN KEY (instance_id) REFERENCES instances(id) ON DELETE CASCADE,
+      INDEX idx_instance_id (instance_id),
+      INDEX idx_created_at (created_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+    CREATE TABLE IF NOT EXISTS backup_schedules (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      instance_id INT NOT NULL,
+      schedule_name VARCHAR(255),
+      cron_expression VARCHAR(100) NOT NULL,
+      retention_days INT DEFAULT 30,
+      is_active BOOLEAN DEFAULT TRUE,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      FOREIGN KEY (instance_id) REFERENCES instances(id) ON DELETE CASCADE,
+      INDEX idx_instance_id (instance_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+    CREATE TABLE IF NOT EXISTS user_quotas (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      user_id INT NOT NULL UNIQUE,
+      max_instances INT DEFAULT 10,
+      max_cpu_cores INT DEFAULT 40,
+      max_memory_gb INT DEFAULT 100,
+      max_storage_gb INT DEFAULT 500,
+      max_gpu_count INT DEFAULT 2,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+      INDEX idx_user_id (user_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+    CREATE TABLE IF NOT EXISTS instance_usage (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      instance_id INT NOT NULL,
+      cpu_usage_percent DECIMAL(5,2),
+      memory_usage_gb DECIMAL(10,2),
+      disk_usage_gb DECIMAL(10,2),
+      gpu_usage_percent DECIMAL(5,2),
+      uptime_seconds INT,
+      recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (instance_id) REFERENCES instances(id) ON DELETE CASCADE,
+      INDEX idx_instance_recorded (instance_id, recorded_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+    CREATE TABLE IF NOT EXISTS audit_logs (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      user_id INT,
+      action VARCHAR(100) NOT NULL,
+      resource_type VARCHAR(50) NOT NULL,
+      resource_id INT,
+      details JSON,
+      ip_address VARCHAR(45),
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
+      INDEX idx_user_id (user_id),
+      INDEX idx_action (action),
+      INDEX idx_created_at (created_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+    INSERT INTO users (username, email, password_hash, role, is_active)
+    SELECT 'admin', 'admin@clawmanager.local', '$2a$10$pbenze514mwv3pvQySQBVOsF5J4DBXL2kVo1hLa8JFhQu5x3AKvBi', 'admin', TRUE
+    WHERE NOT EXISTS (SELECT 1 FROM users WHERE username = 'admin');
+
+    INSERT INTO user_quotas (user_id, max_instances, max_cpu_cores, max_memory_gb, max_storage_gb, max_gpu_count)
+    SELECT id, 100, 200, 1000, 5000, 10 FROM users
+    WHERE username = 'admin'
+      AND NOT EXISTS (SELECT 1 FROM user_quotas WHERE user_id = users.id);
+  002_add_webtop_instance_type.sql: |
+    USE clawmanager;
+    ALTER TABLE instances
+    MODIFY COLUMN type ENUM('openclaw', 'ubuntu', 'debian', 'centos', 'custom', 'webtop') DEFAULT 'ubuntu';
+  003_add_system_image_settings.sql: |
+    USE clawmanager;
+    CREATE TABLE IF NOT EXISTS system_image_settings (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      instance_type VARCHAR(50) NOT NULL UNIQUE,
+      display_name VARCHAR(255) NOT NULL,
+      image VARCHAR(500) NOT NULL,
+      is_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_instance_type (instance_type)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+  004_fix_seeded_admin_password.sql: |
+    USE clawmanager;
+    UPDATE users
+    SET password_hash = '$2a$10$pbenze514mwv3pvQySQBVOsF5J4DBXL2kVo1hLa8JFhQu5x3AKvBi'
+    WHERE username = 'admin'
+      AND password_hash = '$2a$10$N9qo8uLOickgx2ZMRZoMy.MqrzL9wGC3qD3Q.ZHqQH6t3q7l1L5uG';
+  005_update_openclaw_default_image.sql: |
+    USE clawmanager;
+    UPDATE system_image_settings
+    SET image = 'ghcr.io/yuan-lab-llm/clawmanager-openclaw-image/openclaw:latest'
+    WHERE instance_type = 'openclaw'
+      AND image = 'ericpearlee/openclaw:v2026.3.24';
+  006_add_openclaw_config_center.sql: |
+    USE clawmanager;
+    SET @openclaw_snapshot_column_exists = (
+      SELECT COUNT(*)
+      FROM information_schema.COLUMNS
+      WHERE TABLE_SCHEMA = DATABASE()
+        AND TABLE_NAME = 'instances'
+        AND COLUMN_NAME = 'openclaw_config_snapshot_id'
+    );
+    SET @openclaw_snapshot_column_sql = IF(
+      @openclaw_snapshot_column_exists = 0,
+      'ALTER TABLE instances ADD COLUMN openclaw_config_snapshot_id INT NULL AFTER access_token',
+      'SELECT 1'
+    );
+    PREPARE openclaw_snapshot_column_stmt FROM @openclaw_snapshot_column_sql;
+    EXECUTE openclaw_snapshot_column_stmt;
+    DEALLOCATE PREPARE openclaw_snapshot_column_stmt;
+
+    CREATE TABLE IF NOT EXISTS openclaw_config_resources (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      user_id INT NOT NULL,
+      resource_type VARCHAR(50) NOT NULL,
+      resource_key VARCHAR(100) NOT NULL,
+      name VARCHAR(255) NOT NULL,
+      description TEXT NULL,
+      enabled BOOLEAN NOT NULL DEFAULT TRUE,
+      version INT NOT NULL DEFAULT 1,
+      tags_json LONGTEXT NOT NULL,
+      content_json LONGTEXT NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+      UNIQUE KEY uk_openclaw_resource_key (user_id, resource_type, resource_key),
+      INDEX idx_openclaw_resource_user_type (user_id, resource_type),
+      INDEX idx_openclaw_resource_user_enabled (user_id, enabled)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+    CREATE TABLE IF NOT EXISTS openclaw_config_bundles (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      user_id INT NOT NULL,
+      name VARCHAR(255) NOT NULL,
+      description TEXT NULL,
+      enabled BOOLEAN NOT NULL DEFAULT TRUE,
+      version INT NOT NULL DEFAULT 1,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+      INDEX idx_openclaw_bundle_user (user_id),
+      INDEX idx_openclaw_bundle_user_enabled (user_id, enabled)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+    CREATE TABLE IF NOT EXISTS openclaw_config_bundle_items (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      bundle_id INT NOT NULL,
+      resource_id INT NOT NULL,
+      sort_order INT NOT NULL DEFAULT 0,
+      required BOOLEAN NOT NULL DEFAULT TRUE,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (bundle_id) REFERENCES openclaw_config_bundles(id) ON DELETE CASCADE,
+      FOREIGN KEY (resource_id) REFERENCES openclaw_config_resources(id) ON DELETE CASCADE,
+      UNIQUE KEY uk_openclaw_bundle_resource (bundle_id, resource_id),
+      INDEX idx_openclaw_bundle_item_bundle (bundle_id, sort_order)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+    CREATE TABLE IF NOT EXISTS openclaw_injection_snapshots (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      instance_id INT NULL,
+      user_id INT NOT NULL,
+      mode VARCHAR(20) NOT NULL,
+      bundle_id INT NULL,
+      selected_resource_ids_json LONGTEXT NOT NULL,
+      resolved_resources_json LONGTEXT NOT NULL,
+      rendered_manifest_json LONGTEXT NOT NULL,
+      rendered_env_json LONGTEXT NOT NULL,
+      secret_name VARCHAR(255) NULL,
+      status VARCHAR(30) NOT NULL DEFAULT 'pending',
+      error_message TEXT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      activated_at TIMESTAMP NULL,
+      INDEX idx_openclaw_snapshot_user_created (user_id, created_at),
+      INDEX idx_openclaw_snapshot_instance (instance_id),
+      INDEX idx_openclaw_snapshot_bundle (bundle_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+  007_add_instance_agent_control_plane.sql: |
+    USE clawmanager;
+    SET @instance_agent_bootstrap_token_column_exists = (
+      SELECT COUNT(*)
+      FROM information_schema.COLUMNS
+      WHERE TABLE_SCHEMA = DATABASE()
+        AND TABLE_NAME = 'instances'
+        AND COLUMN_NAME = 'agent_bootstrap_token'
+    );
+    SET @instance_agent_bootstrap_token_column_sql = IF(
+      @instance_agent_bootstrap_token_column_exists = 0,
+      'ALTER TABLE instances ADD COLUMN agent_bootstrap_token VARCHAR(255) NULL AFTER access_token',
+      'SELECT 1'
+    );
+    PREPARE instance_agent_bootstrap_token_column_stmt FROM @instance_agent_bootstrap_token_column_sql;
+    EXECUTE instance_agent_bootstrap_token_column_stmt;
+    DEALLOCATE PREPARE instance_agent_bootstrap_token_column_stmt;
+
+    CREATE TABLE IF NOT EXISTS instance_agents (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      instance_id INT NOT NULL,
+      agent_id VARCHAR(255) NOT NULL,
+      agent_version VARCHAR(50) NOT NULL,
+      protocol_version VARCHAR(50) NOT NULL,
+      status VARCHAR(30) NOT NULL DEFAULT 'online',
+      capabilities_json LONGTEXT NOT NULL,
+      host_info_json LONGTEXT NULL,
+      session_token VARCHAR(255) NULL,
+      session_expires_at TIMESTAMP NULL,
+      last_heartbeat_at TIMESTAMP NULL,
+      last_reported_at TIMESTAMP NULL,
+      last_seen_ip VARCHAR(45) NULL,
+      registered_at TIMESTAMP NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      FOREIGN KEY (instance_id) REFERENCES instances(id) ON DELETE CASCADE,
+      UNIQUE KEY uk_instance_agents_instance (instance_id),
+      UNIQUE KEY uk_instance_agents_session_token (session_token),
+      INDEX idx_instance_agents_agent_id (agent_id),
+      INDEX idx_instance_agents_status (status),
+      INDEX idx_instance_agents_last_heartbeat (last_heartbeat_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+    CREATE TABLE IF NOT EXISTS instance_runtime_status (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      instance_id INT NOT NULL,
+      infra_status VARCHAR(30) NOT NULL DEFAULT 'creating',
+      agent_status VARCHAR(30) NOT NULL DEFAULT 'offline',
+      openclaw_status VARCHAR(30) NOT NULL DEFAULT 'unknown',
+      openclaw_pid INT NULL,
+      openclaw_version VARCHAR(100) NULL,
+      current_config_revision_id INT NULL,
+      desired_config_revision_id INT NULL,
+      summary_json LONGTEXT NULL,
+      system_info_json LONGTEXT NULL,
+      health_json LONGTEXT NULL,
+      last_reported_at TIMESTAMP NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      FOREIGN KEY (instance_id) REFERENCES instances(id) ON DELETE CASCADE,
+      UNIQUE KEY uk_instance_runtime_status_instance (instance_id),
+      INDEX idx_instance_runtime_status_agent_status (agent_status),
+      INDEX idx_instance_runtime_status_openclaw_status (openclaw_status)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+    CREATE TABLE IF NOT EXISTS instance_desired_state (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      instance_id INT NOT NULL,
+      desired_power_state VARCHAR(30) NOT NULL DEFAULT 'running',
+      desired_config_revision_id INT NULL,
+      desired_runtime_action VARCHAR(50) NULL,
+      updated_by INT NULL,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (instance_id) REFERENCES instances(id) ON DELETE CASCADE,
+      FOREIGN KEY (updated_by) REFERENCES users(id) ON DELETE SET NULL,
+      UNIQUE KEY uk_instance_desired_state_instance (instance_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+    CREATE TABLE IF NOT EXISTS instance_commands (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      instance_id INT NOT NULL,
+      agent_id VARCHAR(255) NULL,
+      command_type VARCHAR(50) NOT NULL,
+      payload_json LONGTEXT NULL,
+      status VARCHAR(30) NOT NULL DEFAULT 'pending',
+      idempotency_key VARCHAR(255) NOT NULL,
+      issued_by INT NULL,
+      issued_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      dispatched_at TIMESTAMP NULL,
+      started_at TIMESTAMP NULL,
+      finished_at TIMESTAMP NULL,
+      timeout_seconds INT NOT NULL DEFAULT 300,
+      result_json LONGTEXT NULL,
+      error_message TEXT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      FOREIGN KEY (instance_id) REFERENCES instances(id) ON DELETE CASCADE,
+      FOREIGN KEY (issued_by) REFERENCES users(id) ON DELETE SET NULL,
+      UNIQUE KEY uk_instance_commands_idempotency (instance_id, idempotency_key),
+      INDEX idx_instance_commands_instance_status (instance_id, status),
+      INDEX idx_instance_commands_agent_status (agent_id, status),
+      INDEX idx_instance_commands_issued_at (issued_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+    CREATE TABLE IF NOT EXISTS instance_config_revisions (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      instance_id INT NOT NULL,
+      source_snapshot_id INT NULL,
+      source_bundle_id INT NULL,
+      revision_no INT NOT NULL,
+      content_json LONGTEXT NOT NULL,
+      checksum VARCHAR(255) NOT NULL,
+      status VARCHAR(30) NOT NULL DEFAULT 'published',
+      published_by INT NULL,
+      published_at TIMESTAMP NULL,
+      activated_at TIMESTAMP NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      FOREIGN KEY (instance_id) REFERENCES instances(id) ON DELETE CASCADE,
+      FOREIGN KEY (published_by) REFERENCES users(id) ON DELETE SET NULL,
+      UNIQUE KEY uk_instance_config_revision_unique (instance_id, revision_no),
+      INDEX idx_instance_config_revision_instance (instance_id, revision_no),
+      INDEX idx_instance_config_revision_status (status)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+  008_add_skill_management.sql: |
+    USE clawmanager;
+    CREATE TABLE IF NOT EXISTS skill_blobs (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      content_hash VARCHAR(128) NOT NULL,
+      archive_hash VARCHAR(128) NOT NULL,
+      object_key VARCHAR(512) NOT NULL,
+      file_name VARCHAR(255) NOT NULL,
+      media_type VARCHAR(100) NOT NULL DEFAULT 'application/gzip',
+      size_bytes BIGINT NOT NULL DEFAULT 0,
+      scan_status VARCHAR(30) NOT NULL DEFAULT 'pending',
+      risk_level VARCHAR(30) NOT NULL DEFAULT 'unknown',
+      last_scanned_at TIMESTAMP NULL,
+      last_scan_result_id INT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY uk_skill_blobs_content_hash (content_hash),
+      INDEX idx_skill_blobs_scan_status (scan_status),
+      INDEX idx_skill_blobs_risk_level (risk_level)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+    CREATE TABLE IF NOT EXISTS skills (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      user_id INT NOT NULL,
+      skill_key VARCHAR(120) NOT NULL,
+      name VARCHAR(255) NOT NULL,
+      description TEXT NULL,
+      current_version_id INT NULL,
+      source_type VARCHAR(30) NOT NULL DEFAULT 'uploaded',
+      status VARCHAR(30) NOT NULL DEFAULT 'active',
+      risk_level VARCHAR(30) NOT NULL DEFAULT 'unknown',
+      last_scanned_at TIMESTAMP NULL,
+      last_scan_result_id INT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+      UNIQUE KEY uk_skills_user_key (user_id, skill_key),
+      INDEX idx_skills_user_status (user_id, status),
+      INDEX idx_skills_risk_level (risk_level)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+    CREATE TABLE IF NOT EXISTS skill_versions (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      skill_id INT NOT NULL,
+      blob_id INT NOT NULL,
+      version_no INT NOT NULL,
+      manifest_json LONGTEXT NULL,
+      source_type VARCHAR(30) NOT NULL DEFAULT 'uploaded',
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      FOREIGN KEY (skill_id) REFERENCES skills(id) ON DELETE CASCADE,
+      FOREIGN KEY (blob_id) REFERENCES skill_blobs(id) ON DELETE RESTRICT,
+      UNIQUE KEY uk_skill_versions_skill_version (skill_id, version_no),
+      UNIQUE KEY uk_skill_versions_skill_blob (skill_id, blob_id),
+      INDEX idx_skill_versions_skill_id (skill_id, version_no)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+    CREATE TABLE IF NOT EXISTS instance_skills (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      instance_id INT NOT NULL,
+      skill_id INT NOT NULL,
+      skill_version_id INT NULL,
+      source_type VARCHAR(40) NOT NULL DEFAULT 'discovered_in_instance',
+      install_path VARCHAR(1024) NULL,
+      observed_hash VARCHAR(128) NULL,
+      status VARCHAR(30) NOT NULL DEFAULT 'active',
+      last_seen_at TIMESTAMP NULL,
+      removed_at TIMESTAMP NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      FOREIGN KEY (instance_id) REFERENCES instances(id) ON DELETE CASCADE,
+      FOREIGN KEY (skill_id) REFERENCES skills(id) ON DELETE CASCADE,
+      FOREIGN KEY (skill_version_id) REFERENCES skill_versions(id) ON DELETE SET NULL,
+      UNIQUE KEY uk_instance_skills_instance_skill (instance_id, skill_id),
+      INDEX idx_instance_skills_instance (instance_id, status),
+      INDEX idx_instance_skills_skill (skill_id, status)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+    CREATE TABLE IF NOT EXISTS skill_scan_results (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      blob_id INT NOT NULL,
+      engine VARCHAR(60) NOT NULL,
+      risk_level VARCHAR(30) NOT NULL DEFAULT 'unknown',
+      status VARCHAR(30) NOT NULL DEFAULT 'completed',
+      summary TEXT NULL,
+      findings_json LONGTEXT NULL,
+      scanned_at TIMESTAMP NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      FOREIGN KEY (blob_id) REFERENCES skill_blobs(id) ON DELETE CASCADE,
+      INDEX idx_skill_scan_results_blob (blob_id, scanned_at),
+      INDEX idx_skill_scan_results_risk (risk_level, scanned_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mysql-data
+  namespace: clawmanager-system
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+  storageClassName: local-path
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mysql
+  namespace: clawmanager-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mysql
+  template:
+    metadata:
+      labels:
+        app: mysql
+    spec:
+      containers:
+        - name: mysql
+          image: mysql:8.4.8
+          ports:
+            - containerPort: 3306
+          env:
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: clawmanager-secrets
+                  key: mysql-root-password
+            - name: MYSQL_DATABASE
+              value: clawmanager
+            - name: MYSQL_USER
+              value: clawmanager
+            - name: MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: clawmanager-secrets
+                  key: mysql-password
+          volumeMounts:
+            - name: mysql-data
+              mountPath: /var/lib/mysql
+            - name: mysql-init
+              mountPath: /docker-entrypoint-initdb.d
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "mysqladmin ping -h 127.0.0.1 -uroot -p$MYSQL_ROOT_PASSWORD"]
+            initialDelaySeconds: 20
+            periodSeconds: 10
+      volumes:
+        - name: mysql-data
+          persistentVolumeClaim:
+            claimName: mysql-data
+        - name: mysql-init
+          configMap:
+            name: clawmanager-mysql-init
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql
+  namespace: clawmanager-system
+spec:
+  selector:
+    app: mysql
+  ports:
+    - name: mysql
+      port: 3306
+      targetPort: 3306
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: clawmanager-app
+  namespace: clawmanager-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: clawmanager-app-cluster-admin
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+  - kind: ServiceAccount
+    name: clawmanager-app
+    namespace: clawmanager-system
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: clawmanager-app
+  namespace: clawmanager-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: clawmanager-app
+  template:
+    metadata:
+      labels:
+        app: clawmanager-app
+    spec:
+      serviceAccountName: clawmanager-app
+      containers:
+        - name: clawmanager-app
+          image: ghcr.io/yuan-lab-llm/clawmanager:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8443
+          env:
+            - name: SERVER_ADDRESS
+              value: ":9001"
+            - name: SERVER_MODE
+              value: "release"
+            - name: DB_HOST
+              value: "mysql"
+            - name: DB_PORT
+              value: "3306"
+            - name: DB_USER
+              value: "clawmanager"
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: clawmanager-secrets
+                  key: mysql-password
+            - name: DB_NAME
+              value: "clawmanager"
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: clawmanager-secrets
+                  key: jwt-secret
+            - name: K8S_MODE
+              value: "incluster"
+            - name: K8S_NAMESPACE
+              value: "clawmanager"
+            - name: K8S_STORAGE_CLASS
+              value: "local-path"
+            - name: SKILL_SCANNER_ENABLED
+              value: "true"
+            - name: SKILL_SCANNER_BASE_URL
+              value: "http://skill-scanner.clawmanager-system.svc.cluster.local:8000"
+            - name: SKILL_SCANNER_TIMEOUT_SECONDS
+              value: "120"
+            - name: SKILL_SCANNER_NAMESPACE
+              value: "clawmanager-system"
+            - name: SKILL_SCANNER_DEPLOYMENT
+              value: "skill-scanner"
+            - name: OBJECT_STORAGE_LOCAL_FALLBACK
+              value: "/data/object-storage"
+          volumeMounts:
+            - name: object-storage
+              mountPath: /data/object-storage
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8443
+              scheme: HTTPS
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8443
+              scheme: HTTPS
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            timeoutSeconds: 5
+      volumes:
+        - name: object-storage
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: clawmanager-frontend
+  namespace: clawmanager-system
+spec:
+  type: NodePort
+  selector:
+    app: clawmanager-app
+  ports:
+    - name: https
+      port: 443
+      targetPort: 8443
+      nodePort: 30443
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: clawmanager-gateway
+  namespace: clawmanager-system
+spec:
+  type: ClusterIP
+  selector:
+    app: clawmanager-app
+  ports:
+    - name: api
+      port: 8443
+      targetPort: 8443
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: clawmanager-egress-proxy
+  namespace: clawmanager-system
+spec:
+  type: ClusterIP
+  selector:
+    app: clawmanager-app
+  ports:
+    - name: proxy
+      port: 3128
+      targetPort: 8443
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: skill-scanner
+  namespace: clawmanager-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: skill-scanner
+  template:
+    metadata:
+      labels:
+        app: skill-scanner
+    spec:
+      containers:
+        - name: skill-scanner
+          image: ghcr.io/yuan-lab-llm/skill-scanner:latest
+          imagePullPolicy: IfNotPresent
+          command:
+            - /opt/skill-scanner-venv/bin/skill-scanner-api
+            - --host
+            - 0.0.0.0
+            - --port
+            - "8000"
+          env:
+            - name: SKILL_SCANNER_LLM_API_KEY
+              value: ""
+            - name: SKILL_SCANNER_LLM_MODEL
+              value: ""
+            - name: SKILL_SCANNER_LLM_BASE_URL
+              value: ""
+            - name: SKILL_SCANNER_META_LLM_API_KEY
+              value: ""
+            - name: SKILL_SCANNER_META_LLM_MODEL
+              value: ""
+            - name: SKILL_SCANNER_META_LLM_BASE_URL
+              value: ""
+          ports:
+            - name: http
+              containerPort: 8000
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: skill-scanner
+  namespace: clawmanager-system
+spec:
+  selector:
+    app: skill-scanner
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
