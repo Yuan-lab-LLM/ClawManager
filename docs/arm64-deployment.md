@@ -4,6 +4,12 @@
 
 本项目支持在 ARM64 (aarch64) 架构上部署，如树莓派、ARM开发板等设备。
 
+## 手动 Skill 导入
+
+默认发布路径可以不启用 `skill-scanner`，但这不影响手动上传 Skill `.zip` 并挂载到实例。
+
+操作说明见：[manual-skill-import.md](./manual-skill-import.md)
+
 ## 预构建 ARM64 镜像
 
 以下镜像已构建并发布到 GitHub Container Registry：

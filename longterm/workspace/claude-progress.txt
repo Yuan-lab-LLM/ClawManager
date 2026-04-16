@@ -1,0 +1,319 @@
+ClawManager — Session Progress Log
+====================================
+Project Start: 2026-04-14
+Last Updated:  2026-04-16
+
+Current Phase: A1 core-chain release implementation
+Current Status: default Mac/ARM release path is narrowed to A1 core-chain; external-test bundle and live demo packet are being added; FastSkill/U3 remains deferred
+
+---
+
+[2026-04-16] Session 8 — dumb-proof external test entry
+-------------------------------------------------------
+What was done:
+- Added root `00-START-HERE.md`
+  - explains the difference between:
+    - `ClawManager-full-workspace-*.tar.gz`
+    - Skill `*.zip`
+    - OpenClaw `*.openclaw`
+  - freezes one foolproof path from zero:
+    unpack -> Docker -> k3d -> deploy -> admin login -> runtime bootstrap -> model bootstrap -> one instance -> direct QA
+  - explicitly says the full workspace tarball must be unpacked locally and must not be uploaded into `OpenClaw 导入`
+- Updated A1 packet docs and package metadata so the new single-file entry is now the first thing external testers should read
+- Updated `scripts/release/package-a1-core-release.sh` and `scripts/release/package-full-workspace.sh`
+  - package output now points readers to `00-START-HERE.md`
+  - full-workspace script now reminds operators to extract into an empty directory
+
+What was NOT done yet:
+- no backend/frontend product logic changed in this packet
+- no scanner/FastSkill/U3 work was resumed
+- no deploy manifest change was made
+
+Next session should:
+1. Regenerate the external-test package and full-workspace package
+2. Send testers the new archive built after `00-START-HERE.md` was added
+3. Use `00-START-HERE.md` as the only first-read document in chat handoff
+
+---
+
+[2026-04-16] Session 7 — A1 external-test packaging
+---------------------------------------------------
+What was done:
+- Added `docs/superpowers/releases/2026-04-16-a1-core-release/05-external-test-guide.md`
+  - defines the tester-facing step-by-step A1 chain:
+    deploy -> admin login -> ARM runtime bootstrap -> model bootstrap -> one instance -> runtime ready -> direct QA
+- Added `docs/superpowers/releases/2026-04-16-a1-core-release/06-live-demo-record.md`
+  - records the current live baseline for health, model bootstrap, instance runtime state, and optional manual Skill validation
+- Updated `README.md`, `01-release-package.md`, `02-release-checklist.md`, and `docs/k3s-local-setup.md`
+  - package and tutorial now point directly to the external-test guide and live demo record
+- Updated `docs/manual-skill-import.md`
+  - clarifies that Skill upload and attach are user-side operations
+  - adds the narrow `skill md5 mismatch` troubleshooting note
+- Added `scripts/release/package-a1-core-release.sh`
+  - builds a `dist/` bundle containing the manifest, A1 docs, optional manual Skill doc, and any copied live evidence files from `/tmp`
+
+What was NOT done yet:
+- no new backend/frontend business logic was changed in this packet
+- no scanner/FastSkill/U3 work was resumed
+- no provider keys were written into repo files
+- no new deploy manifest change was made
+
+Next session should:
+1. Run `./scripts/release/package-a1-core-release.sh`
+2. Verify the bundle contains the expected docs and copied evidence files
+3. Hand the resulting tarball to testers together with operator-owned model credentials supplied out-of-band
+
+---
+
+[2026-04-16] Session 6 — A1 bootstrap and acceptance contract freeze
+-------------------------------------------------------------------
+What was done:
+- Added `docs/superpowers/releases/2026-04-16-a1-core-release/03-bootstrap-contract.md`
+  - freezes the exact admin session bootstrap, ARM runtime image bootstrap, and normal + secure model upsert contract
+- Added `docs/superpowers/releases/2026-04-16-a1-core-release/04-acceptance-path.md`
+  - freezes the A1 single-instance acceptance path:
+    deploy -> healthz -> admin login -> bootstrap -> create one instance -> runtime ready -> one direct-QA proof
+  - freezes the local first-instance profile at `cpu_cores=2`, `memory_gb=3`, `disk_gb=20`
+- Updated the A1 release packet docs so `README.md`, `01-release-package.md`, and `02-release-checklist.md` all point to the new bootstrap and acceptance contracts
+- Updated `docs/k3s-local-setup.md`
+  - removed the old multi-instance-default wording from the A1 path
+  - points operators to the A1-owned bootstrap and acceptance docs instead of stopping at the old model boundary
+
+What was NOT done yet:
+- no backend/frontend logic was changed
+- no fresh cluster replay was run
+- no direct-QA evidence artifact was captured in this packet
+- no scanner/FastSkill/U3 work was resumed
+
+Next session should:
+1. Decide whether to stop at docs freeze or run one narrow A1 formal-release evidence packet
+2. If running the evidence packet, use exactly `03-bootstrap-contract.md` and `04-acceptance-path.md`
+3. Keep scanner/FastSkill/U3, `/api/v1/admin/skills`, and `https://...:8443` out of the A1 gate
+
+[2026-04-16] Session 5 — A1 release material closeout
+----------------------------------------------------
+What was done:
+- Added `docs/superpowers/releases/2026-04-16-a1-core-release/01-release-package.md`
+  - defines the smallest honest operator handoff bundle
+  - enumerates required images, operator-owned inputs, and release boundary statements
+- Added `docs/superpowers/releases/2026-04-16-a1-core-release/02-release-checklist.md`
+  - freezes a narrow publish checklist for scope, package contents, secrets, and deferred-scope guards
+- Updated `docs/superpowers/releases/2026-04-16-a1-core-release/README.md`
+  - linked the new canonical A1 artifacts
+- Updated `docs/k3s-local-setup.md`
+  - points external handoff readers to the full A1 release packet instead of the tutorial alone
+
+What was NOT done yet:
+- no backend/frontend logic was changed
+- no new cluster replay was run
+- no scanner/FastSkill/U3 work was resumed
+- no model bootstrap inputs were added to the repo
+
+Next session should:
+1. Decide whether to keep A1 as an internal handoff packet or turn it into external publish notes
+2. If publishing externally, add the exact commit/tag or archive naming convention to the handoff bundle
+3. Only revisit runtime-default image/tag hardening if release ownership explicitly asks for it
+
+[2026-04-16] Session 4 — Scheme A / A1 core-chain release
+---------------------------------------------------------
+What was done:
+- Adopted scheme A: current shippable release scope excludes `skill-scanner`, FastSkill, and frozen `U3`
+- Changed `deployments/k3s/clawmanager.yaml` so the default K3S release path keeps:
+  - `SKILL_SCANNER_ENABLED=false`
+  - `skill-scanner` deployment `replicas=0`
+- Preserved the validated `clawmanager-gateway` `9001 -> 9001` control path
+- Rewrote `docs/k3s-local-setup.md` so the default Mac/ARM tutorial now targets:
+  - manager deploy
+  - admin login
+  - OpenClaw ARM runtime bootstrap
+  - operator model bootstrap
+- Added `docs/superpowers/releases/2026-04-16-a1-core-release/README.md` as the release-scope summary for what is actually shippable now
+
+What was NOT done yet:
+- no backend/frontend business logic code was changed
+- no scanner/FastSkill productization work was done
+- no claim was made that `/api/v1/admin/skills` is populated
+- no new formal PASS was written for the archived blocked U3 packet
+
+Next session should:
+1. Decide whether to publish A1 exactly as documented or continue productizing ARM runtime defaults before external release
+2. If publishing A1, package the repo, K3S manifest, tutorial, release summary, and required runtime image references together
+3. If resuming deferred work, treat scanner/FastSkill/U3 as a separate productization track rather than reopening the A1 release path
+
+[2026-04-16] Session 3 — F-002 Internal RC packet freeze (P1)
+-------------------------------------------------------------
+What was done:
+- Carried F-002 from live ARM bring-up into the `R3-A-U3-F2-P1` internal RC packet
+- Froze the validated OpenClaw ARM runtime bootstrap truth:
+  - `ghcr.io/yuan-lab-llm/clawmanager-openclaw-image/openclaw:dev-arm64-pkt09-20260414170434`
+- Verified the control-plane registration fix is the K3S Service `9001 -> 9001` path, not `https://...:8443`
+- Replayed live instance bring-up to a healthy stopping point:
+  - instance `6`
+  - `infra_status=ready`
+  - `agent_status=online`
+  - `openclaw_status=running`
+- Froze Source A as the manager-side `GET /api/v1/instances/:id/skills` snapshot
+- Verified Source A currently returns `0` rows for the selected validation instance
+- Re-enabled `skill-scanner` validation on the local K3S path and proved the repo-default ARM boundary:
+  - official `ghcr.io/yuan-lab-llm/skill-scanner:latest` has no `linux/arm64` manifest
+- Built and validated a local ARM64 `skill-scanner` dev candidate:
+  - `docker.io/library/skill-scanner:dev-arm64-pkt16a-20260415160730`
+- Proved that a live-only ARM override can bring `skill-scanner` to `Running`, but `/api/v1/admin/skills` still returns `[]`
+- Traced `/api/v1/admin/skills` to the DB-backed `skills` table and froze the legal row-creation paths:
+  - `POST /api/v1/skills/import`
+  - `POST /api/v1/agent/skills/inventory`
+  - `POST /api/v1/agent/skills/upload`
+- Exercised the real agent inventory route on live instance `6` via `POST /api/v1/agent/skills/inventory`
+- Verified the runtime inventory is genuinely empty:
+  - `managed_skills={}`
+  - `openclaw_skills_path` empty
+  - `skills / instance_skills / skill_blobs / skill_versions / security_scan_jobs` all remain `0`
+- Ran a fresh Mac/ARM `k3d` replay from zero:
+  - repo-default earliest boundary reproduced cleanly at `skill-scanner` image pull
+  - live-only ARM overrides then brought `mysql` / `clawmanager-app` / `skill-scanner` to `Running`
+  - `https://localhost:30443/healthz` returned `200`
+  - admin login worked
+  - replay stopped honestly at operator model bootstrap because no active normal / secure model records were provided
+- Wrote the fresh replay truth back into:
+  - `docs/k3s-local-setup.md`
+  - `01-deploy-preflight.md`
+  - `05-gate-record.md`
+  - `06-evidence-index.md`
+  - `07-known-issues.md`
+  - `08-operator-runbook.md`
+  - `10-troubleshooting.md`
+  - `11-release-checklist.md`
+
+What was NOT done yet:
+- F-002 is still not passed in `feature_list.json`
+- Gate 1 is still blocked because repo-default Mac/ARM deploy does not yet have an ARM64-capable `skill-scanner` path
+- Gate 2 is still blocked at the documented operator model-bootstrap prerequisite
+- Gate 3 is still blocked because Source B does not surface non-empty skill rows under the currently observed product path
+- Task 7 full U3 validation was not started
+- No backend/frontend feature code was changed
+- No fresh replay with operator-provided model material was attempted
+
+Next session should:
+1. Decide whether to close P1 as a blocked internal RC packet or continue only if the operator intentionally supplies model material
+2. If closing:
+   - keep `F-002` as `passes: false`
+   - use the current packet docs as the canonical blocked tutorial / runbook truth
+3. If continuing:
+   - bootstrap one active normal model and one active secure model through the documented operator path
+   - replay validation-instance bring-up from the fresh cluster stopping point
+   - do not reopen the old `8443` hypothesis
+
+Blockers/Risks:
+- Repo-default Mac/ARM deploy still fails at `ghcr.io/yuan-lab-llm/skill-scanner:latest` due to missing `linux/arm64` manifest
+- The local ARM `skill-scanner` path is documented as a live-only validation override, not productized deploy truth
+- Source B remains blocked because the runtime reports an empty skill inventory even when the real agent inventory route succeeds
+- Full direct QA remains gated by operator-provided normal + secure model records
+
+[2026-04-14] Session 2 — F-001 K3S Local Deployment Verification
+---------------------------------------------------------------
+What was done:
+- Verified local prerequisites: Docker Desktop running, `kubectl` available, `k3d` installed
+- Created `k3d` cluster `clawmanager` with port mapping `30443:30443@loadbalancer`
+- Updated `deployments/k3s/clawmanager.yaml` for the local verification profile:
+  - Disabled `SKILL_SCANNER_ENABLED` in the app
+  - Scaled `skill-scanner` deployment to `0` replicas for local bring-up
+- Updated `docs/k3s-local-setup.md` to match the actual K3S local flow:
+  - Corrected MySQL Secret name and initialization guidance
+  - Documented that local K3S verification uses `emptyDir` object storage fallback
+  - Documented that local verification keeps `skill-scanner` disabled by default
+- Deployed ClawManager with `kubectl apply -f deployments/k3s/clawmanager.yaml`
+- Imported `mysql:8.4.8` directly into the `k3d` node container after initial image pull stalled
+- Verified `kubectl get pods -n clawmanager-system` shows all active pods Running
+- Verified `https://localhost:30443/healthz` returns `200 OK`
+- Verified `https://localhost:30443` serves the ClawManager frontend
+- Verified default admin credentials can log in via `POST /api/v1/auth/login` using `admin / admin123`
+
+What was NOT done yet:
+- F-002 multi-instance scheduling not started
+- Local K3S profile does not yet run `skill-scanner`; later features that need scanner functionality must re-enable it with an accessible image
+- `backend/AGENTS.md` and `frontend/AGENTS.md` are still missing
+
+Next session should:
+1. Start with F-002: Multi-instance scheduling verification
+   - Log in as `admin`
+   - Create a regular user
+   - Provision two OpenClaw instances
+   - Verify both instance pods are Running simultaneously
+
+Blockers/Risks:
+- macOS local verification depends on Docker Desktop + k3d
+- Local K3S verification profile currently disables `skill-scanner`; enabling it later requires a publicly pullable compatible image (especially on ARM64)
+- First MySQL image pull may stall; importing `mysql:8.4.8` into the `k3d` node is a proven recovery path
+
+[2026-04-14] Session 1 — Project Setup
+---------------------------------------
+What was done:
+- Cloned ClawManager from GitHub (Yuan-lab-LLM/ClawManager, shallow clone --depth 1)
+- Analyzed project structure: Go backend + React frontend + K3S/K8S deployments
+- Confirmed K3S deployment file exists at deployments/k3s/clawmanager.yaml
+- Integrated codeSPEC framework:
+  - Copied .specify/ (feature delivery: spec→plan→tasks scaffolding)
+  - Copied .codex/ (Codex /speckit.* commands)
+  - Copied scripts/codex (Codex launcher)
+  - Copied AgentTeam/ (multi-agent collaboration SOPs)
+  - Created longterm/ (project memory layer)
+  - Created docs/spec-kit/ (workflow documentation)
+- Created AGENTS.md (project rules entry point)
+- Filled .specify/memory/constitution.md (ClawManager-specific constraints)
+- Created longterm/workspace/app_spec.md (project stable facts)
+- Created longterm/workspace/feature_list.json (initial backlog, 5 features)
+- Created docs/k3s-local-setup.md (macOS local K3S deployment guide)
+
+What was NOT done yet:
+- K3S cluster not created (k3d not yet installed)
+- ClawManager not deployed
+- No features implemented (all passes: false)
+- backend/AGENTS.md and frontend/AGENTS.md not yet created
+
+Next session should:
+1. Start with F-001: K3S local deployment verification
+   - Install k3d: `brew install k3d`
+   - Create cluster: `k3d cluster create clawmanager --port "30443:30443@loadbalancer"`
+   - Deploy: `kubectl apply -f deployments/k3s/clawmanager.yaml`
+   - Wait for pods and verify access at https://localhost:30443
+
+Blockers/Risks:
+- macOS does not run K3S natively; using k3d (K3S in Docker) requires Docker Desktop running
+- ARM64 users may need to use ghcr.io/xty00/clawmanager:latest instead of ghcr.io/yuan-lab-llm/clawmanager:latest
+- First login credentials unknown — check deployments/k3s/clawmanager.yaml for default admin setup
+
+---
+Feature Progress:
+  F-001 K3S local deployment         passes: true
+  F-002 Multi-instance scheduling     passes: false
+  F-003 User authentication chain     passes: false
+  F-004 Instance lifecycle mgmt       passes: false
+  F-005 AI Gateway basic config       passes: false
+
+[2026-04-14] Packet Closeout — F002-PKT-01-VERIFY-DUAL-INSTANCE
+----------------------------------------------------------------
+Type:
+- Non-authoritative memory entry
+- Status: verified stopped packet
+
+Blocker boundary:
+- Verified blocker boundary: ordinary-user `POST /api/v1/instances`
+- Result: `500 Internal Server Error`
+- Error evidence: `failed to build instance gateway config: no active models are configured`
+
+Commands/evidence summary:
+- Packet evidence shows an ordinary-user create-instance request to `POST /api/v1/instances` returned `500 Internal Server Error`
+- Error payload included `failed to build instance gateway config: no active models are configured`
+- No code/config/manifest changes happened in this packet
+
+Side effects summary:
+- Verified side effect: packet user exists
+- Verified side effect: no instance namespace created
+- Verified side effect: no instance resources created
+
+Feature status guard:
+- F-002 remains not passed
+- This entry is a verified stopped packet note only and does not change feature truth or acceptance state by implication
+
+Next packet boundary:
+- candidate blocker boundary: establish at least one active model configuration, then re-run ordinary-user `POST /api/v1/instances` and re-check namespace/resource creation behavior

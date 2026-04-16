@@ -4,6 +4,12 @@
 
 This project supports deployment on ARM64 (aarch64) architecture devices such as Raspberry Pi and ARM development boards.
 
+## Manual Skill Import
+
+The default release path can run without `skill-scanner`, but manual Skill `.zip` upload and attach-to-instance are still supported.
+
+See: [manual-skill-import_en.md](./manual-skill-import_en.md)
+
 ## Pre-built ARM64 Images
 
 The following images have been built and published to GitHub Container Registry:

@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+SCRIPT_DIR="$(CDPATH="" cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(CDPATH="" cd "$SCRIPT_DIR/.." && pwd)"
+
+if ! command -v codex >/dev/null 2>&1; then
+  echo "ERROR: 'codex' not found in PATH. Please install Codex CLI first." >&2
+  exit 127
+fi
+
+export CODEX_HOME="$REPO_ROOT/.codex"
+cd "$REPO_ROOT"
+
+exec codex "$@"
+

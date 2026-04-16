@@ -2,7 +2,10 @@ package repository
 
 import (
 	"fmt"
+	"math"
+	"strconv"
 	"strings"
+	"time"
 
 	"clawreef/internal/models"
 	"github.com/upper/db/v4"
@@ -29,6 +32,95 @@ type instanceRepository struct {
 	sess db.Session
 }
 
+type instanceRow struct {
+	ID                       int        `db:"id"`
+	UserID                   int        `db:"user_id"`
+	Name                     string     `db:"name"`
+	Description              *string    `db:"description"`
+	Type                     string     `db:"type"`
+	Status                   string     `db:"status"`
+	CPUCores                 string     `db:"cpu_cores"`
+	MemoryGB                 int        `db:"memory_gb"`
+	DiskGB                   int        `db:"disk_gb"`
+	GPUEnabled               bool       `db:"gpu_enabled"`
+	GPUType                  *string    `db:"gpu_type"`
+	GPUCount                 int        `db:"gpu_count"`
+	OSType                   string     `db:"os_type"`
+	OSVersion                string     `db:"os_version"`
+	ImageRegistry            *string    `db:"image_registry"`
+	ImageTag                 *string    `db:"image_tag"`
+	StorageClass             string     `db:"storage_class"`
+	MountPath                string     `db:"mount_path"`
+	PodName                  *string    `db:"pod_name"`
+	PodNamespace             *string    `db:"pod_namespace"`
+	PodIP                    *string    `db:"pod_ip"`
+	AccessURL                *string    `db:"access_url"`
+	AccessToken              *string    `db:"access_token"`
+	AgentBootstrapToken      *string    `db:"agent_bootstrap_token"`
+	OpenClawConfigSnapshotID *int       `db:"openclaw_config_snapshot_id"`
+	CreatedAt                time.Time  `db:"created_at"`
+	UpdatedAt                time.Time  `db:"updated_at"`
+	StartedAt                *time.Time `db:"started_at"`
+	StoppedAt                *time.Time `db:"stopped_at"`
+}
+
+func (r instanceRow) toModel() (*models.Instance, error) {
+	cpuCores, err := decimalStringToInt(r.CPUCores)
+	if err != nil {
+		return nil, err
+	}
+	instance := &models.Instance{
+		ID:                       r.ID,
+		UserID:                   r.UserID,
+		Name:                     r.Name,
+		Description:              r.Description,
+		Type:                     r.Type,
+		Status:                   r.Status,
+		CPUCores:                 cpuCores,
+		MemoryGB:                 r.MemoryGB,
+		DiskGB:                   r.DiskGB,
+		GPUEnabled:               r.GPUEnabled,
+		GPUType:                  r.GPUType,
+		GPUCount:                 r.GPUCount,
+		OSType:                   r.OSType,
+		OSVersion:                r.OSVersion,
+		ImageRegistry:            r.ImageRegistry,
+		ImageTag:                 r.ImageTag,
+		StorageClass:             r.StorageClass,
+		MountPath:                r.MountPath,
+		PodName:                  r.PodName,
+		PodNamespace:             r.PodNamespace,
+		PodIP:                    r.PodIP,
+		AccessURL:                r.AccessURL,
+		AccessToken:              r.AccessToken,
+		AgentBootstrapToken:      r.AgentBootstrapToken,
+		OpenClawConfigSnapshotID: r.OpenClawConfigSnapshotID,
+		CreatedAt:                r.CreatedAt,
+		UpdatedAt:                r.UpdatedAt,
+	}
+	if r.StartedAt != nil {
+		startedAt := *r.StartedAt
+		instance.StartedAt = &startedAt
+	}
+	if r.StoppedAt != nil {
+		stoppedAt := *r.StoppedAt
+		instance.StoppedAt = &stoppedAt
+	}
+	return instance, nil
+}
+
+func decimalStringToInt(raw string) (int, error) {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return 0, nil
+	}
+	parsed, err := strconv.ParseFloat(value, 64)
+	if err != nil {
+		return 0, fmt.Errorf("failed to parse decimal instance value %q: %w", raw, err)
+	}
+	return int(math.Round(parsed)), nil
+}
+
 // NewInstanceRepository creates a new instance repository
 func NewInstanceRepository(sess db.Session) InstanceRepository {
 	return &instanceRepository{sess: sess}
@@ -49,49 +141,49 @@ func (r *instanceRepository) Create(instance *models.Instance) error {
 
 // GetByID gets an instance by ID
 func (r *instanceRepository) GetByID(id int) (*models.Instance, error) {
-	var instance models.Instance
-	err := r.sess.Collection("instances").Find(db.Cond{"id": id}).One(&instance)
+	var row instanceRow
+	err := r.sess.Collection("instances").Find(db.Cond{"id": id}).One(&row)
 	if err != nil {
 		if err == db.ErrNoMoreRows {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("failed to get instance: %w", err)
 	}
-	return &instance, nil
+	return row.toModel()
 }
 
 // GetByAccessToken gets an instance by its lifecycle gateway token.
 func (r *instanceRepository) GetByAccessToken(accessToken string) (*models.Instance, error) {
-	var instance models.Instance
-	err := r.sess.Collection("instances").Find(db.Cond{"access_token": accessToken}).One(&instance)
+	var row instanceRow
+	err := r.sess.Collection("instances").Find(db.Cond{"access_token": accessToken}).One(&row)
 	if err != nil {
 		if err == db.ErrNoMoreRows {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("failed to get instance by access token: %w", err)
 	}
-	return &instance, nil
+	return row.toModel()
 }
 
 func (r *instanceRepository) GetByAgentBootstrapToken(bootstrapToken string) (*models.Instance, error) {
-	var instance models.Instance
-	err := r.sess.Collection("instances").Find(db.Cond{"agent_bootstrap_token": bootstrapToken}).One(&instance)
+	var row instanceRow
+	err := r.sess.Collection("instances").Find(db.Cond{"agent_bootstrap_token": bootstrapToken}).One(&row)
 	if err != nil {
 		if err == db.ErrNoMoreRows {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("failed to get instance by agent bootstrap token: %w", err)
 	}
-	return &instance, nil
+	return row.toModel()
 }
 
 func (r *instanceRepository) GetAll(offset, limit int) ([]models.Instance, error) {
-	var instances []models.Instance
-	err := r.sess.Collection("instances").Find().Offset(offset).Limit(limit).All(&instances)
+	var rows []instanceRow
+	err := r.sess.Collection("instances").Find().Offset(offset).Limit(limit).All(&rows)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get all instances: %w", err)
 	}
-	return instances, nil
+	return instanceRowsToModels(rows)
 }
 
 func (r *instanceRepository) CountAll() (int, error) {
@@ -104,12 +196,12 @@ func (r *instanceRepository) CountAll() (int, error) {
 
 // GetByUserID gets instances by user ID with pagination
 func (r *instanceRepository) GetByUserID(userID int, offset, limit int) ([]models.Instance, error) {
-	var instances []models.Instance
-	err := r.sess.Collection("instances").Find(db.Cond{"user_id": userID}).Offset(offset).Limit(limit).All(&instances)
+	var rows []instanceRow
+	err := r.sess.Collection("instances").Find(db.Cond{"user_id": userID}).Offset(offset).Limit(limit).All(&rows)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get instances: %w", err)
 	}
-	return instances, nil
+	return instanceRowsToModels(rows)
 }
 
 // CountByUserID counts instances by user ID
@@ -140,7 +232,7 @@ func (r *instanceRepository) ExistsByUserIDAndName(userID int, name string) (boo
 
 // GetAllRunning gets all instances that are not in stopped or error state (for sync)
 func (r *instanceRepository) GetAllRunning() ([]models.Instance, error) {
-	var instances []models.Instance
+	var rows []instanceRow
 	err := r.sess.Collection("instances").Find(
 		db.Or(
 			db.Cond{"status": "running"},
@@ -148,11 +240,23 @@ func (r *instanceRepository) GetAllRunning() ([]models.Instance, error) {
 			db.Cond{"status": "stopped"},
 			db.Cond{"status": "error"},
 		),
-	).All(&instances)
+	).All(&rows)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get running instances: %w", err)
 	}
-	return instances, nil
+	return instanceRowsToModels(rows)
+}
+
+func instanceRowsToModels(rows []instanceRow) ([]models.Instance, error) {
+	items := make([]models.Instance, 0, len(rows))
+	for _, row := range rows {
+		instance, err := row.toModel()
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, *instance)
+	}
+	return items, nil
 }
 
 // Update updates an instance

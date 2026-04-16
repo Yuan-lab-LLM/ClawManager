@@ -712,10 +712,12 @@ func (s *skillService) UploadAgentSkillPackage(ctx context.Context, instanceID i
 
 	if blob.LastScanResultID == nil || blob.ScanStatus != "completed" {
 		if err := s.recordScan(blob, &dir); err != nil {
-			blob.ScanStatus = "failed"
-			blob.UpdatedAt = time.Now().UTC()
-			_ = s.repo.UpdateBlob(blob)
-			return nil, err
+			if !isScannerUnavailableError(err) {
+				blob.ScanStatus = "failed"
+				blob.UpdatedAt = time.Now().UTC()
+				_ = s.repo.UpdateBlob(blob)
+				return nil, err
+			}
 		}
 	}
 
@@ -940,7 +942,9 @@ func (s *skillService) importDirectory(ctx context.Context, userID int, dir extr
 			return nil, err
 		}
 		if err := s.recordScan(blob, &dir); err != nil {
-			return nil, err
+			if !isScannerUnavailableError(err) {
+				return nil, err
+			}
 		}
 	}
 
@@ -1027,6 +1031,14 @@ func (s *skillService) recordScan(blob *models.SkillBlob, dir *extractedSkillDir
 		return err
 	}
 	return nil
+}
+
+func isScannerUnavailableError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(strings.TrimSpace(err.Error()))
+	return strings.Contains(message, "skill scanner is disabled") || strings.Contains(message, "skill scanner is not configured")
 }
 
 func buildNormalizedZip(dir extractedSkillDirectory) ([]byte, string, error) {
@@ -1244,11 +1256,11 @@ func (s *skillService) toSkillPayload(item models.Skill) (*SkillPayload, error) 
 		payload.TopFindings = topRiskFindings(findings, 3)
 		payload.RiskReason = summarizeRiskReason(payload.TopFindings)
 	}
-	instanceSkills, err := s.findInstanceRefs(item.ID)
-	if err != nil {
-		return nil, err
+	// InstanceCount is informational only. A stale or non-conforming instance row
+	// must not block skill import/attach flows that otherwise succeeded.
+	if instanceSkills, err := s.findInstanceRefs(item.ID); err == nil {
+		payload.InstanceCount = instanceSkills
 	}
-	payload.InstanceCount = instanceSkills
 	return payload, nil
 }
 

@@ -1,0 +1,121 @@
+[
+  {
+    "id": "F-001",
+    "priority": 1,
+    "category": "infrastructure",
+    "component": "deployments/k3s",
+    "description": "K3S local deployment verification — deploy ClawManager to a local k3d cluster on macOS and verify the admin portal is accessible at https://localhost:30443",
+    "depends_on": [],
+    "acceptance_criteria": [
+      "k3d cluster created successfully",
+      "All pods in clawmanager-system namespace are Running",
+      "Admin portal accessible at https://localhost:30443",
+      "Admin can log in with default credentials"
+    ],
+    "steps": [
+      "Install k3d via brew",
+      "Create k3d cluster with port mapping 30443",
+      "Apply deployments/k3s/clawmanager.yaml",
+      "Wait for all pods to be Running",
+      "Access https://localhost:30443 and verify login"
+    ],
+    "evidence_hint": "kubectl get pods -n clawmanager-system (all Running) + screenshot of admin login page",
+    "risk": "low",
+    "passes": true
+  },
+  {
+    "id": "F-002",
+    "priority": 1,
+    "category": "functional",
+    "component": "backend/internal/services/k8s",
+    "description": "Multi-OpenClaw instance scheduling — use ClawManager to create 2 OpenClaw instances on the local K3S cluster and verify both are accessible simultaneously",
+    "depends_on": ["F-001"],
+    "acceptance_criteria": [
+      "Can create instance from admin portal",
+      "K3S schedules a Pod within 30 seconds",
+      "Both instances are Running at the same time",
+      "Each instance has a unique access URL/token",
+      "User can connect to both instances via browser"
+    ],
+    "steps": [
+      "Log in to admin portal",
+      "Create user account",
+      "Create instance 1 for the user",
+      "Create instance 2 for the user",
+      "Verify both pods Running in K3S",
+      "Connect to both instances"
+    ],
+    "evidence_hint": "kubectl get pods -n clawmanager-<user-id> (2 pods Running) + screenshots of both desktop sessions",
+    "risk": "medium",
+    "passes": false
+  },
+  {
+    "id": "F-003",
+    "priority": 2,
+    "category": "functional",
+    "component": "backend/internal/services",
+    "description": "User authentication full chain — verify admin and user login, JWT token flow, role-based access control (admin vs regular user), and session expiry",
+    "depends_on": ["F-001"],
+    "acceptance_criteria": [
+      "Admin can log in and access admin-only pages",
+      "Regular user can log in and only see their own instances",
+      "JWT token expires after configured duration",
+      "Invalid credentials return 401"
+    ],
+    "steps": [
+      "Create admin account and regular user account",
+      "Test admin login and verify admin-only routes accessible",
+      "Test user login and verify user-only sees own instances",
+      "Test token expiry behavior"
+    ],
+    "evidence_hint": "API test results showing 401/403 on unauthorized access",
+    "risk": "low",
+    "passes": false
+  },
+  {
+    "id": "F-004",
+    "priority": 2,
+    "category": "functional",
+    "component": "backend/internal/services/k8s",
+    "description": "Instance lifecycle management — start, stop, and delete instances through the ClawManager UI and verify K3S Pod state changes accordingly",
+    "depends_on": ["F-002"],
+    "acceptance_criteria": [
+      "Stop instance → Pod is terminated/suspended",
+      "Start stopped instance → Pod is recreated and Running",
+      "Delete instance → Pod and PVC are cleaned up",
+      "Instance status in UI reflects actual K3S state"
+    ],
+    "steps": [
+      "Create an instance",
+      "Stop it via UI, verify pod state",
+      "Start it via UI, verify pod Running again",
+      "Delete it via UI, verify pod and PVC gone"
+    ],
+    "evidence_hint": "kubectl get pods/pvc before and after each operation",
+    "risk": "medium",
+    "passes": false
+  },
+  {
+    "id": "F-005",
+    "priority": 3,
+    "category": "operational",
+    "component": "backend/internal/aigateway",
+    "description": "AI Gateway basic configuration — configure at least one LLM provider (e.g., local Ollama or OpenAI-compatible endpoint) and verify AI features work through the gateway",
+    "depends_on": ["F-003"],
+    "acceptance_criteria": [
+      "AI Gateway config page accessible in admin portal",
+      "Can add an LLM provider with API key",
+      "Test request routes through gateway successfully",
+      "Audit log records the request"
+    ],
+    "steps": [
+      "Navigate to AI Gateway in admin portal",
+      "Add LLM provider configuration",
+      "Send test request through gateway",
+      "Verify audit log entry"
+    ],
+    "evidence_hint": "Screenshot of successful gateway test response + audit_logs table entry",
+    "risk": "medium",
+    "passes": false
+  }
+]

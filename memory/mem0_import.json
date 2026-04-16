@@ -1,0 +1,182 @@
+[
+  {
+    "memory": "ClawManager is a Kubernetes-first control plane for managing OpenClaw and Linux desktop runtimes at team and cluster scale.",
+    "metadata": {
+      "type": "convention",
+      "source": "legacy_file",
+      "source_file": "longterm/workspace/app_spec.md",
+      "status": "active",
+      "import_batch": "initial_migration"
+    }
+  },
+  {
+    "memory": "The stable repo layout is Go backend in backend/, React 19 + TypeScript frontend in frontend/, primary deployment manifests in deployments/k3s/, and longterm/workspace as the legacy project-memory layer.",
+    "metadata": {
+      "type": "convention",
+      "source": "legacy_file",
+      "source_file": "AGENTS.md",
+      "status": "active",
+      "import_batch": "initial_migration"
+    }
+  },
+  {
+    "memory": "Primary deployment target is K3S, with deployments/k3s/clawmanager.yaml as the main deployment artifact; k8s manifests are secondary alignment targets.",
+    "metadata": {
+      "type": "environmental",
+      "source": "legacy_file",
+      "source_file": "longterm/workspace/app_spec.md",
+      "status": "active",
+      "import_batch": "initial_migration"
+    }
+  },
+  {
+    "memory": "Do not hardcode secrets or provider keys in the repo; use Kubernetes Secrets or environment variables.",
+    "metadata": {
+      "type": "convention",
+      "source": "legacy_file",
+      "source_file": ".specify/memory/constitution.md",
+      "status": "active",
+      "import_batch": "initial_migration"
+    }
+  },
+  {
+    "memory": "ClawManager development follows Spec-Kit: spec -> plan -> tasks before implementation, and dynamic status should stay outside constitution files.",
+    "metadata": {
+      "type": "convention",
+      "source": "legacy_file",
+      "source_file": ".specify/memory/constitution.md",
+      "status": "active",
+      "import_batch": "initial_migration"
+    }
+  },
+  {
+    "memory": "Prefer Chinese for project communication and operator-facing memory notes unless a conflicting requirement is explicit.",
+    "metadata": {
+      "type": "user_preference",
+      "source": "legacy_file",
+      "source_file": "longterm/METHOD.zh-CN.md",
+      "status": "active",
+      "import_batch": "initial_migration"
+    }
+  },
+  {
+    "memory": "Use commander-style packetized execution: keep tasks bounded, define ownership and stop conditions, and require evidence before declaring completion.",
+    "metadata": {
+      "type": "user_preference",
+      "source": "legacy_file",
+      "source_file": "AgentTeam/01-Commander-SOP.md",
+      "status": "active",
+      "import_batch": "initial_migration"
+    }
+  },
+  {
+    "memory": "Prefer minimum viable correction and light-weight delivery; avoid broad refactors unless a smaller boundary cannot fix the defect.",
+    "metadata": {
+      "type": "user_preference",
+      "source": "legacy_file",
+      "source_file": "docs/superpowers/specs/2026-04-15-p1-internal-release-design.md",
+      "status": "active",
+      "import_batch": "initial_migration"
+    }
+  },
+  {
+    "memory": "For the local K3S runtime path, the validated control-plane registration route is HTTP clawmanager-gateway:9001, backed by 9001 -> 9001 gateway service exposure.",
+    "metadata": {
+      "type": "decision",
+      "source": "legacy_file",
+      "source_file": "docs/superpowers/specs/2026-04-15-p1-internal-release-design.md",
+      "status": "active",
+      "import_batch": "initial_migration"
+    }
+  },
+  {
+    "memory": "Do not reopen the disproven https://...:8443 URL-builder route as the primary runtime registration fix unless new evidence disproves the validated 9001 -> 9001 chain.",
+    "metadata": {
+      "type": "anti_pattern",
+      "source": "legacy_file",
+      "source_file": "docs/superpowers/plans/2026-04-15-agent-control-base-url-fix.md",
+      "status": "active",
+      "import_batch": "initial_migration"
+    }
+  },
+  {
+    "memory": "As of the 2026-04-15 P1 internal RC effort, live ARM runtime bring-up is proven but still depends on the dev runtime image ghcr.io/yuan-lab-llm/clawmanager-openclaw-image/openclaw:dev-arm64-pkt09-20260414170434, so it is not yet a fresh-deploy productized default.",
+    "metadata": {
+      "type": "session_state",
+      "source": "legacy_file",
+      "source_file": "docs/superpowers/specs/2026-04-15-p1-internal-release-design.md",
+      "status": "active",
+      "import_batch": "initial_migration"
+    }
+  },
+  {
+    "memory": "As of the 2026-04-15 P1 internal RC effort, the live chain is working but U3 cannot be treated as passed because skill-scanner remains disabled by default on local K3S and the final task inventory is not yet frozen.",
+    "metadata": {
+      "type": "session_state",
+      "source": "legacy_file",
+      "source_file": "docs/superpowers/specs/2026-04-15-p1-internal-release-design.md",
+      "status": "active",
+      "import_batch": "initial_migration"
+    }
+  },
+  {
+    "memory": "For P1 replay and fresh deploy work, do not rely on residual cluster state, residual MySQL data, residual PVCs, undocumented manual DB edits, or other hidden live-state reuse.",
+    "metadata": {
+      "type": "anti_pattern",
+      "source": "legacy_file",
+      "source_file": "docs/superpowers/releases/2026-04-15-p1-internal-rc/01-deploy-preflight.md",
+      "status": "active",
+      "import_batch": "initial_migration"
+    }
+  },
+  {
+    "memory": "P1 model bootstrap requires at least one active non-secure model and one active secure model, both supplied by operator-provided values rather than repo defaults.",
+    "metadata": {
+      "type": "decision",
+      "source": "legacy_file",
+      "source_file": "docs/superpowers/releases/2026-04-15-p1-internal-rc/02-model-bootstrap.md",
+      "status": "active",
+      "import_batch": "initial_migration"
+    }
+  },
+  {
+    "memory": "If direct QA fails only because active model records or provider credentials are missing, classify it as a model-bootstrap blocker rather than a runtime bring-up failure.",
+    "metadata": {
+      "type": "task_learning",
+      "source": "legacy_file",
+      "source_file": "docs/superpowers/releases/2026-04-15-p1-internal-rc/02-model-bootstrap.md",
+      "status": "active",
+      "import_batch": "initial_migration"
+    }
+  },
+  {
+    "memory": "As of the stopped F-002 verification packet, ordinary-user POST /api/v1/instances can fail with 500 'failed to build instance gateway config: no active models are configured' when no active model records exist.",
+    "metadata": {
+      "type": "session_state",
+      "source": "legacy_file",
+      "source_file": "longterm/workspace/claude-progress.txt",
+      "status": "active",
+      "import_batch": "initial_migration"
+    }
+  },
+  {
+    "memory": "Future architecture direction: ClawManager should evolve toward a central control plane that connects to external standalone hosts or Claw boxes and dispatches work from one center. This is a durable direction, not current packet scope.",
+    "metadata": {
+      "type": "decision",
+      "source": "legacy_file",
+      "source_file": "docs/memory-setup.md",
+      "status": "active",
+      "import_batch": "initial_migration"
+    }
+  },
+  {
+    "memory": "Do not mirror longterm/, AgentTeam/, or docs/superpowers/ into Mem0 as full text; treat them as source material and import only distilled durable facts.",
+    "metadata": {
+      "type": "convention",
+      "source": "legacy_file",
+      "source_file": "AGENTS.md",
+      "status": "active",
+      "import_batch": "initial_migration"
+    }
+  }
+]

@@ -615,7 +615,7 @@ const CreateInstancePage: React.FC = () => {
                       <div>
                         <h2 className="text-lg font-medium text-gray-900">Skill Injection</h2>
                         <p className="mt-1 text-sm text-gray-500">
-                          Select one or more reusable skills to install into this OpenClaw instance.
+                          Select one or more uploaded skills to attach to this OpenClaw instance.
                         </p>
                       </div>
                       <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700">
@@ -627,7 +627,7 @@ const CreateInstancePage: React.FC = () => {
                         <div className="text-sm text-gray-500">Loading skills...</div>
                       ) : availableSkills.length === 0 ? (
                         <div className="rounded-2xl border border-dashed border-gray-300 px-4 py-5 text-sm text-gray-500">
-                          No available skills. Import skills from the resource center first.
+                          No available skills. Upload a skill zip in OpenClaw Resource Management first, then return here to attach it to this instance.
                         </div>
                       ) : availableSkills.map((skill) => {
                         const checked = selectedSkillIds.includes(skill.id);

@@ -59,7 +59,10 @@ Thumbs.db
 
 dev_docs/
 devplan.md
-AGENTS.md
 TASK_BREAKDOWN.md
 dev_progress.md
 CLAUDE.md
+
+# Spec-Kit / Codex credentials (never commit)
+.codex/auth.json
+.codex/config.toml

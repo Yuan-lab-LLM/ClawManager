@@ -649,7 +649,7 @@ spec:
             - name: K8S_STORAGE_CLASS
               value: "local-path"
             - name: SKILL_SCANNER_ENABLED
-              value: "true"
+              value: "false"
             - name: SKILL_SCANNER_BASE_URL
               value: "http://skill-scanner.clawmanager-system.svc.cluster.local:8000"
             - name: SKILL_SCANNER_TIMEOUT_SECONDS
@@ -711,6 +711,9 @@ spec:
     - name: api
       port: 8443
       targetPort: 8443
+    - name: agent
+      port: 9001
+      targetPort: 9001
 ---
 apiVersion: v1
 kind: Service
@@ -732,7 +735,7 @@ metadata:
   name: skill-scanner
   namespace: clawmanager-system
 spec:
-  replicas: 1
+  replicas: 0
   selector:
     matchLabels:
       app: skill-scanner
