@@ -108,9 +108,9 @@ func (s *PVCService) CreatePVC(ctx context.Context, userID, instanceID int, stor
 		return nil, fmt.Errorf("failed to create PVC %s: %w", pvcName, err)
 	}
 
-	// Wait for PVC to be bound, if not bound within timeout, create PV manually
+	// Wait for PVC to be bound by the dynamic provisioner
 	fmt.Printf("PVC %s created, scheduling async binding monitor...\n", pvcName)
-	go s.monitorPVCBinding(context.Background(), namespace, pvcName, userID, instanceID, storageSizeGB, storageClass, 15*time.Second)
+	go s.monitorPVCBinding(context.Background(), namespace, pvcName, userID, instanceID, storageSizeGB, storageClass, 60*time.Second)
 
 	return createdPVC, nil
 }
@@ -142,9 +142,12 @@ func (s *PVCService) waitForPVCBinding(ctx context.Context, namespace, pvcName s
 	for {
 		select {
 		case <-timeoutChan:
-			// Timeout, try to create PV manually
-			fmt.Printf("PVC %s binding timeout, creating PV manually\n", pvcName)
-			return s.createPVForPVC(ctx, namespace, pvcName, userID, instanceID, storageSizeGB, storageClass)
+			fmt.Printf("PVC %s binding timeout after waiting, returning current PVC (dynamic provisioner should bind it eventually)\n", pvcName)
+			pvc, err = s.client.Clientset.CoreV1().PersistentVolumeClaims(namespace).Get(ctx, pvcName, metav1.GetOptions{})
+			if err != nil {
+				return nil, fmt.Errorf("failed to get PVC %s after timeout: %w", pvcName, err)
+			}
+			return pvc, nil
 		case <-ticker.C:
 			pvc, err := s.client.Clientset.CoreV1().PersistentVolumeClaims(namespace).Get(ctx, pvcName, metav1.GetOptions{})
 			if err != nil {
