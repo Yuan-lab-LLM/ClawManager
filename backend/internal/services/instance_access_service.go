@@ -14,7 +14,12 @@ import (
 type AccessToken struct {
 	Token        string    `json:"token"`
 	InstanceID   int       `json:"instance_id"`
+	// UserID is the caller that requested the token (admin or owner). Used for
+	// audit and access control. MUST NOT be used to resolve k8s namespaces.
 	UserID       int       `json:"user_id"`
+	// OwnerID is the user that owns the instance. Used to resolve k8s namespaces.
+	// Normally equal to UserID; differs when an admin proxies another user's instance.
+	OwnerID      int       `json:"owner_id"`
 	InstanceType string    `json:"instance_type"`
 	TargetPort   int32     `json:"target_port"`
 	AccessURL    string    `json:"access_url"`
@@ -32,6 +37,7 @@ type InstanceAccessService struct {
 type instanceAccessClaims struct {
 	InstanceID   int    `json:"instance_id"`
 	UserID       int    `json:"user_id"`
+	OwnerID      int    `json:"owner_id"`
 	InstanceType string `json:"instance_type"`
 	TargetPort   int32  `json:"target_port"`
 	AccessURL    string `json:"access_url"`
@@ -52,14 +58,17 @@ func NewInstanceAccessService() *InstanceAccessService {
 	return service
 }
 
-// GenerateToken generates a new access token for an instance
-func (s *InstanceAccessService) GenerateToken(userID, instanceID int, instanceType string, accessURL string, targetPort int32, duration time.Duration) (*AccessToken, error) {
+// GenerateToken generates a new access token for an instance.
+// callerID is the user requesting the token (for audit); ownerID is the
+// instance owner (for k8s namespace routing).
+func (s *InstanceAccessService) GenerateToken(callerID, ownerID, instanceID int, instanceType string, accessURL string, targetPort int32, duration time.Duration) (*AccessToken, error) {
 	now := time.Now()
 	expiresAt := now.Add(duration)
 
 	claims := instanceAccessClaims{
 		InstanceID:   instanceID,
-		UserID:       userID,
+		UserID:       callerID,
+		OwnerID:      ownerID,
 		InstanceType: instanceType,
 		TargetPort:   targetPort,
 		AccessURL:    accessURL,
@@ -79,7 +88,8 @@ func (s *InstanceAccessService) GenerateToken(userID, instanceID int, instanceTy
 	accessToken := &AccessToken{
 		Token:        tokenString,
 		InstanceID:   instanceID,
-		UserID:       userID,
+		UserID:       callerID,
+		OwnerID:      ownerID,
 		InstanceType: instanceType,
 		TargetPort:   targetPort,
 		AccessURL:    accessURL,
@@ -141,6 +151,7 @@ func (s *InstanceAccessService) validateSignedToken(token string) (*AccessToken,
 		Token:        token,
 		InstanceID:   claims.InstanceID,
 		UserID:       claims.UserID,
+		OwnerID:      claims.OwnerID,
 		InstanceType: claims.InstanceType,
 		TargetPort:   claims.TargetPort,
 		AccessURL:    claims.AccessURL,

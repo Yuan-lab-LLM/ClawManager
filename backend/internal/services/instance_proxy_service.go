@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"clawreef/internal/models"
@@ -18,15 +20,73 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+// Sentinel errors for proxy namespace routing.
+var (
+	ErrInstanceNotFound = errors.New("instance not found")
+	ErrOwnerMismatch    = errors.New("access token owner does not match current instance owner")
+)
+
+// instanceOwnerLookup is the minimal interface the proxy needs to verify
+// instance ownership. Defined at the consumer (proxy) per Go idiom.
+type instanceOwnerLookup interface {
+	GetByID(id int) (*models.Instance, error)
+}
+
+// ownerCacheEntry stores a cached owner lookup result.
+type ownerCacheEntry struct {
+	ownerID   int
+	expiresAt time.Time
+}
+
+// ownerCache is a small TTL cache for instance→ownerID lookups.
+type ownerCache struct {
+	entries sync.Map
+	ttl     time.Duration
+	now     func() time.Time // injectable clock for testing
+	lookup  instanceOwnerLookup
+}
+
+func newOwnerCache(lookup instanceOwnerLookup, ttl time.Duration, clock func() time.Time) *ownerCache {
+	return &ownerCache{
+		ttl:    ttl,
+		now:    clock,
+		lookup: lookup,
+	}
+}
+
+func (c *ownerCache) Get(ctx context.Context, instanceID int) (int, error) {
+	if entry, ok := c.entries.Load(instanceID); ok {
+		e := entry.(ownerCacheEntry)
+		if c.now().Before(e.expiresAt) {
+			return e.ownerID, nil
+		}
+	}
+
+	instance, err := c.lookup.GetByID(instanceID)
+	if err != nil {
+		return 0, fmt.Errorf("%w: %v", ErrInstanceNotFound, err)
+	}
+	if instance == nil {
+		return 0, ErrInstanceNotFound
+	}
+
+	c.entries.Store(instanceID, ownerCacheEntry{
+		ownerID:   instance.UserID,
+		expiresAt: c.now().Add(c.ttl),
+	})
+	return instance.UserID, nil
+}
+
 // InstanceProxyService handles proxying requests to instance pods
 type InstanceProxyService struct {
 	serviceService *k8s.ServiceService
 	accessService  *InstanceAccessService
 	httpClient     *http.Client
+	cache          *ownerCache
 }
 
 // NewInstanceProxyService creates a new instance proxy service
-func NewInstanceProxyService(accessService *InstanceAccessService) *InstanceProxyService {
+func NewInstanceProxyService(accessService *InstanceAccessService, instanceLookup instanceOwnerLookup) *InstanceProxyService {
 	return &InstanceProxyService{
 		serviceService: k8s.NewServiceService(),
 		accessService:  accessService,
@@ -40,7 +100,21 @@ func NewInstanceProxyService(accessService *InstanceAccessService) *InstanceProx
 				return http.ErrUseLastResponse
 			},
 		},
+		cache: newOwnerCache(instanceLookup, 30*time.Second, time.Now),
 	}
+}
+
+// resolveOwnerID is the sole path from access token to k8s namespace.
+func (s *InstanceProxyService) resolveOwnerID(ctx context.Context, t *AccessToken) (int, error) {
+	dbOwner, err := s.cache.Get(ctx, t.InstanceID)
+	if err != nil {
+		return 0, err
+	}
+	// Legacy tokens (pre-fix) have OwnerID == 0 — trust DB, no mismatch check.
+	if t.OwnerID != 0 && t.OwnerID != dbOwner {
+		return 0, ErrOwnerMismatch
+	}
+	return dbOwner, nil
 }
 
 // ProxyRequest proxies a request to an instance
@@ -70,8 +144,14 @@ func (s *InstanceProxyService) ProxyRequest(ctx context.Context, instanceID int,
 	targetPath := s.extractTargetPath(r.URL.Path, instanceID, accessToken.InstanceType)
 	targetPort := s.resolveTargetPort(accessToken.InstanceType, accessToken.TargetPort, targetPath)
 
+	// Resolve the instance owner for namespace routing.
+	ownerID, err := s.resolveOwnerID(ctx, accessToken)
+	if err != nil {
+		return fmt.Errorf("failed to resolve instance owner: %w", err)
+	}
+
 	// Get service info for the instance (create if not exists)
-	serviceInfo, err := s.getOrCreateService(ctx, accessToken.UserID, instanceID, targetPort)
+	serviceInfo, err := s.getOrCreateService(ctx, ownerID, instanceID, targetPort)
 	if err != nil {
 		return fmt.Errorf("failed to get or create service: %w", err)
 	}
@@ -79,7 +159,7 @@ func (s *InstanceProxyService) ProxyRequest(ctx context.Context, instanceID int,
 	// Build target URL
 	targetURL := &url.URL{
 		Scheme: s.resolveTargetScheme(accessToken.InstanceType, false),
-		Host:   s.resolveProxyHost(ctx, accessToken.UserID, instanceID, serviceInfo),
+		Host:   s.resolveProxyHost(ctx, ownerID, instanceID, serviceInfo),
 		Path:   targetPath,
 	}
 
@@ -199,8 +279,14 @@ func (s *InstanceProxyService) ProxyWebSocket(ctx context.Context, instanceID in
 	targetPath := s.extractTargetPath(r.URL.Path, instanceID, accessToken.InstanceType)
 	targetPort := s.resolveTargetPort(accessToken.InstanceType, accessToken.TargetPort, targetPath)
 
+	// Resolve the instance owner for namespace routing.
+	ownerID, err := s.resolveOwnerID(ctx, accessToken)
+	if err != nil {
+		return fmt.Errorf("failed to resolve instance owner: %w", err)
+	}
+
 	// Get service info for the instance
-	serviceInfo, err := s.getOrCreateService(ctx, accessToken.UserID, instanceID, targetPort)
+	serviceInfo, err := s.getOrCreateService(ctx, ownerID, instanceID, targetPort)
 	if err != nil {
 		return fmt.Errorf("failed to get or create service: %w", err)
 	}
@@ -208,7 +294,7 @@ func (s *InstanceProxyService) ProxyWebSocket(ctx context.Context, instanceID in
 	// WebSocket upstream uses ws/wss explicitly.
 	targetURL := &url.URL{
 		Scheme: s.resolveTargetScheme(accessToken.InstanceType, true),
-		Host:   s.resolveProxyHost(ctx, accessToken.UserID, instanceID, serviceInfo),
+		Host:   s.resolveProxyHost(ctx, ownerID, instanceID, serviceInfo),
 		Path:   targetPath,
 	}
 
@@ -441,7 +527,7 @@ func usesHTTPSUpstream(instanceType string) bool {
 	}
 }
 
-func (s *InstanceProxyService) resolveProxyHost(ctx context.Context, userID, instanceID int, serviceInfo *k8s.ServiceInfo) string {
+func (s *InstanceProxyService) resolveProxyHost(ctx context.Context, ownerID, instanceID int, serviceInfo *k8s.ServiceInfo) string {
 	return fmt.Sprintf("%s:%d", serviceInfo.ClusterIP, serviceInfo.TargetPort)
 }
 

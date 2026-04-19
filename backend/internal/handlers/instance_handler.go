@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -39,7 +40,7 @@ func NewInstanceHandler(instanceService services.InstanceService, instanceAgentS
 		instanceCommandService:        instanceCommandService,
 		instanceConfigRevisionService: instanceConfigRevisionService,
 		accessService:                 accessService,
-		proxyService:                  services.NewInstanceProxyService(accessService),
+		proxyService:                  services.NewInstanceProxyService(accessService, instanceService),
 		openClawTransferService:       services.NewOpenClawTransferService(),
 		openClawConfigService:         openClawConfigService,
 		skillService:                  skillService,
@@ -671,7 +672,8 @@ func (h *InstanceHandler) GenerateAccessToken(c *gin.Context) {
 	// Generate access token (valid for 1 hour)
 	maxAgeSeconds := int(time.Hour.Seconds())
 	token, err := h.accessService.GenerateToken(
-		userID.(int),
+		userID.(int),        // caller
+		instance.UserID,     // owner
 		instance.ID,
 		instance.Type,
 		accessURL,
@@ -813,7 +815,14 @@ func (h *InstanceHandler) ProxyInstance(c *gin.Context) {
 	if strings.EqualFold(c.GetHeader("Upgrade"), "websocket") {
 		err = h.proxyService.ProxyWebSocket(c.Request.Context(), id, token, c.Writer, c.Request)
 		if err != nil {
-			http.Error(c.Writer, err.Error(), http.StatusBadGateway)
+			switch {
+			case errors.Is(err, services.ErrInstanceNotFound):
+				http.Error(c.Writer, "Instance not found", http.StatusNotFound)
+			case errors.Is(err, services.ErrOwnerMismatch):
+				http.Error(c.Writer, "Access token no longer valid — please reconnect", http.StatusForbidden)
+			default:
+				http.Error(c.Writer, err.Error(), http.StatusBadGateway)
+			}
 		}
 		return
 	}
@@ -825,12 +834,17 @@ func (h *InstanceHandler) ProxyInstance(c *gin.Context) {
 		fmt.Printf("Proxy error for instance %d: %v\n", id, err)
 
 		// Return appropriate error response
-		if err.Error() == "invalid token: token expired" ||
-			err.Error() == "invalid token: invalid token" {
+		switch {
+		case errors.Is(err, services.ErrInstanceNotFound):
+			http.Error(c.Writer, "Instance not found", http.StatusNotFound)
+		case errors.Is(err, services.ErrOwnerMismatch):
+			http.Error(c.Writer, "Access token no longer valid — please reconnect", http.StatusForbidden)
+		case err.Error() == "invalid token: token expired" ||
+			err.Error() == "invalid token: invalid token":
 			http.Error(c.Writer, "Access token expired or invalid", http.StatusUnauthorized)
-		} else if err.Error() == "token does not match instance" {
+		case err.Error() == "token does not match instance":
 			http.Error(c.Writer, "Token does not match instance", http.StatusForbidden)
-		} else {
+		default:
 			http.Error(c.Writer, fmt.Sprintf("Failed to proxy request: %v", err), http.StatusBadGateway)
 		}
 	}
