@@ -6,18 +6,18 @@ This project supports deployment on ARM64 (aarch64) architecture devices such as
 
 ## Pre-built ARM64 Images
 
-The following images have been built and published to GitHub Container Registry:
+The following images can be used for ARM64 deployments:
 
 | Image | Address | Description |
 |-------|---------|-------------|
-| ClawManager Main App | `ghcr.io/xty00/clawmanager:latest` | ARM64 version |
+| ClawManager Main App | `ghcr.io/yuan-lab-llm/clawmanager:latest` | Official multi-platform image with ARM64 support |
 | Skill Scanner | `ghcr.io/xty00/skill-scanner:latest` | ARM64 version (official repo has no ARM64 support) |
 
 ### Using Pre-built Images
 
 ```bash
 # Pull ARM64 images
-docker pull ghcr.io/xty00/clawmanager:latest --platform linux/arm64
+docker pull ghcr.io/yuan-lab-llm/clawmanager:latest --platform linux/arm64
 docker pull ghcr.io/xty00/skill-scanner:latest --platform linux/arm64
 ```
 
@@ -62,11 +62,11 @@ docker buildx build --platform linux/arm64 \
 
 ### Modify Image Addresses
 
-In `clawmanager.yaml`, replace image addresses with ARM64 versions:
+In `clawmanager.yaml`, make sure the image addresses support ARM64:
 
 ```yaml
 # Main app
-image: ghcr.io/xty00/clawmanager:latest
+image: ghcr.io/yuan-lab-llm/clawmanager:latest
 
 # skill-scanner (if needed)
 image: ghcr.io/xty00/skill-scanner:latest
@@ -87,6 +87,12 @@ FLUSH PRIVILEGES;
 ```
 
 ## Known Issues
+
+### ClawManager Official Image Supports ARM64
+
+- **Status**: `ghcr.io/yuan-lab-llm/clawmanager:latest` is published as a multi-platform image
+- **Platforms**: `linux/amd64`, `linux/arm64`
+- **Deployment impact**: ARM64 nodes automatically pull the matching main app image without a separate ARM-only tag
 
 ### skill-scanner Official Image Has No ARM64 Support
 
