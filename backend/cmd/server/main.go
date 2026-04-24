@@ -67,6 +67,7 @@ func main() {
 	instanceConfigRevisionRepo := repository.NewInstanceConfigRevisionRepository(database)
 	skillRepo := repository.NewSkillRepository(database)
 	securityScanRepo := repository.NewSecurityScanRepository(database)
+	backupRepo := repository.NewBackupRepository(database)
 
 	if repaired, repairErr := services.RepairSeededAdminPassword(userRepo); repairErr != nil {
 		log.Printf("Warning: failed to repair seeded admin password: %v", repairErr)
@@ -105,6 +106,7 @@ func main() {
 	skillService := services.NewSkillService(skillRepo, instanceRepo, instanceCommandService, objectStorageService, skillScannerClient)
 	securityScanService := services.NewSecurityScanService(securityScanRepo, skillRepo, objectStorageService, skillScannerClient)
 	aiGatewayService := aigateway.NewService(llmModelRepo, modelInvocationService, auditEventService, costRecordService, riskDetectionService, riskHitService, chatSessionService, chatMessageService)
+	backupService := services.NewBackupService(backupRepo, instanceRepo)
 
 	// Initialize handlers
 	authHandler := handlers.NewAuthHandler(authService)
@@ -121,6 +123,7 @@ func main() {
 	skillHandler := handlers.NewSkillHandler(skillService, instanceService)
 	securityHandler := handlers.NewSecurityHandler(securityScanService)
 	agentHandler := handlers.NewAgentHandler(instanceAgentService, instanceCommandService, instanceRuntimeStatusService, instanceConfigRevisionService, skillService)
+	backupHandler := handlers.NewBackupHandler(backupService)
 
 	// Initialize WebSocket hub and handler
 	wsHub := services.GetHub()
@@ -202,6 +205,11 @@ func main() {
 			instances.GET("/:id/skills", skillHandler.ListInstanceSkills)
 			instances.POST("/:id/skills", skillHandler.AttachSkillToInstance)
 			instances.DELETE("/:id/skills/:skillId", skillHandler.RemoveSkillFromInstance)
+			instances.POST("/:id/backups", backupHandler.CreateBackup)
+			instances.GET("/:id/backups", backupHandler.ListBackups)
+			instances.GET("/:id/backups/:backupId", backupHandler.GetBackup)
+			instances.DELETE("/:id/backups/:backupId", backupHandler.DeleteBackup)
+			instances.POST("/:id/backups/:backupId/restore", backupHandler.RestoreBackup)
 		}
 
 		// Admin console: cross-user instance listing. Gated by admin
