@@ -3,6 +3,7 @@ import AdminLayout from '../../components/AdminLayout';
 import ConfirmDialog from '../../components/ConfirmDialog';
 import { useI18n } from '../../contexts/I18nContext';
 import { instanceService } from '../../services/instanceService';
+import { adminInstanceService } from '../../services/adminInstanceService';
 import { userService } from '../../services/userService';
 import type { Instance } from '../../types/instance';
 import type { User } from '../../types/user';
@@ -28,7 +29,7 @@ const InstanceManagementPage: React.FC = () => {
       setLoading(true);
       setError(null);
       const [instancesData, usersData] = await Promise.all([
-        instanceService.getInstances(1, 1000),
+        adminInstanceService.getInstances(1, 1000),
         userService.getUsers(1, 1000),
       ]);
       setInstances(instancesData.instances || []);

@@ -199,6 +199,18 @@ func main() {
 			instances.DELETE("/:id/skills/:skillId", skillHandler.RemoveSkillFromInstance)
 		}
 
+		// Admin console: cross-user instance listing. Gated by admin
+		// middleware — non-admin callers get 403. The workspace
+		// /instances endpoint above stays caller-scoped regardless of
+		// role; admin status only unlocks this dedicated surface.
+		adminInstances := api.Group("/admin/instances")
+		adminInstances.Use(middleware.Auth())
+		adminInstances.Use(middleware.SetUserInfo(userRepo))
+		adminInstances.Use(middleware.NewAdminAuth(userRepo))
+		{
+			adminInstances.GET("", instanceHandler.ListAllInstances)
+		}
+
 		openClawConfigs := api.Group("/openclaw-configs")
 		openClawConfigs.Use(middleware.Auth())
 		openClawConfigs.Use(middleware.SetUserInfo(userRepo))

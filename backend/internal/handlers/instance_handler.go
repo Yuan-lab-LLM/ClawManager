@@ -93,10 +93,14 @@ type ListInstancesRequest struct {
 	Status string `form:"status,omitempty"`
 }
 
-// ListInstances lists instances for the current user
+// ListInstances lists instances owned by the current user (workspace view).
+//
+// This endpoint is always caller-scoped — the caller's role is intentionally
+// not consulted. An admin using /instances sees only instances they personally
+// own. Admin-scoped cross-user listing lives on /admin/instances and is gated
+// by the admin middleware; see ListAllInstances below.
 func (h *InstanceHandler) ListInstances(c *gin.Context) {
 	userID, _ := c.Get("userID")
-	userRole, _ := c.Get("userRole")
 
 	var req ListInstancesRequest
 	if err := c.ShouldBindQuery(&req); err != nil {
@@ -107,7 +111,37 @@ func (h *InstanceHandler) ListInstances(c *gin.Context) {
 	// Calculate offset
 	offset := (req.Page - 1) * req.Limit
 
-	instances, total, err := h.instanceService.GetVisibleInstances(userID.(int), fmt.Sprintf("%v", userRole), offset, req.Limit)
+	instances, total, err := h.instanceService.GetByUserID(userID.(int), offset, req.Limit)
+	if err != nil {
+		utils.HandleError(c, err)
+		return
+	}
+
+	response := map[string]interface{}{
+		"instances": instances,
+		"total":     total,
+		"page":      req.Page,
+		"limit":     req.Limit,
+	}
+
+	utils.Success(c, http.StatusOK, "Instances retrieved successfully", response)
+}
+
+// ListAllInstances lists every instance across all users (admin console view).
+//
+// Gated by the admin middleware on the /admin/instances route group. The
+// admin role badge only controls which API surface is reachable — it does
+// not widen the caller-scoped /instances endpoint.
+func (h *InstanceHandler) ListAllInstances(c *gin.Context) {
+	var req ListInstancesRequest
+	if err := c.ShouldBindQuery(&req); err != nil {
+		utils.ValidationError(c, err)
+		return
+	}
+
+	offset := (req.Page - 1) * req.Limit
+
+	instances, total, err := h.instanceService.GetAllInstances(offset, req.Limit)
 	if err != nil {
 		utils.HandleError(c, err)
 		return

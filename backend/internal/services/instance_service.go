@@ -22,7 +22,7 @@ type InstanceService interface {
 	Create(userID int, req CreateInstanceRequest) (*models.Instance, error)
 	GetByID(id int) (*models.Instance, error)
 	GetByUserID(userID int, offset, limit int) ([]models.Instance, int, error)
-	GetVisibleInstances(userID int, userRole string, offset, limit int) ([]models.Instance, int, error)
+	GetAllInstances(offset, limit int) ([]models.Instance, int, error)
 	Start(instanceID int) error
 	Stop(instanceID int) error
 	Restart(instanceID int) error
@@ -409,22 +409,18 @@ func (s *instanceService) GetByUserID(userID int, offset, limit int) ([]models.I
 	return instances, total, nil
 }
 
-func (s *instanceService) GetVisibleInstances(userID int, userRole string, offset, limit int) ([]models.Instance, int, error) {
-	if strings.EqualFold(strings.TrimSpace(userRole), "admin") {
-		instances, err := s.instanceRepo.GetAll(offset, limit)
-		if err != nil {
-			return nil, 0, err
-		}
-
-		total, err := s.instanceRepo.CountAll()
-		if err != nil {
-			return nil, 0, err
-		}
-
-		return instances, total, nil
+func (s *instanceService) GetAllInstances(offset, limit int) ([]models.Instance, int, error) {
+	instances, err := s.instanceRepo.GetAll(offset, limit)
+	if err != nil {
+		return nil, 0, err
 	}
 
-	return s.GetByUserID(userID, offset, limit)
+	total, err := s.instanceRepo.CountAll()
+	if err != nil {
+		return nil, 0, err
+	}
+
+	return instances, total, nil
 }
 
 // Start starts an instance
