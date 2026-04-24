@@ -228,6 +228,20 @@ const readStringArray = (value: unknown): string[] | null =>
 const stringifyChannelContentText = (config: Record<string, unknown>): string =>
   JSON.stringify(config, null, 2);
 
+// mergeChannelConfig overlays the form-owned, allowlisted fields onto the
+// existing parsed config so tenant-authored keys (webhook, custom capabilities,
+// extra feishu accounts, etc.) survive a Save. Allowlisted keys win on
+// conflict. Every channel editor's update*ChannelContentText must route its
+// output through this helper — building the saved config from the allowlist
+// alone silently drops unknown fields.
+const mergeChannelConfig = (
+  existing: Record<string, unknown>,
+  allowlisted: Record<string, unknown>,
+): Record<string, unknown> => ({
+  ...existing,
+  ...allowlisted,
+});
+
 const channelFormatForResourceKey = (resourceKey: string): string => {
   const trimmed = resourceKey.trim();
   return trimmed ? `channel/${trimmed}@v1` : "channel/custom@v1";
@@ -284,18 +298,17 @@ const updateTelegramChannelContentText = (
     ...patch,
   };
 
-  const existingConfig = parsed;
-  const config = {
+  const allowlisted = {
     enabled: true,
     botToken: nextForm.botToken,
     dmPolicy:
-      typeof existingConfig.dmPolicy === "string" && existingConfig.dmPolicy
-        ? existingConfig.dmPolicy
+      typeof parsed.dmPolicy === "string" && parsed.dmPolicy
+        ? parsed.dmPolicy
         : "open",
-    allowFrom: readStringArray(existingConfig.allowFrom) || ["*"],
+    allowFrom: readStringArray(parsed.allowFrom) || ["*"],
   };
 
-  return stringifyChannelContentText(config);
+  return stringifyChannelContentText(mergeChannelConfig(parsed, allowlisted));
 };
 
 const readDingTalkChannelFormState = (
@@ -332,15 +345,14 @@ const updateDingTalkChannelContentText = (
     ...patch,
   };
 
-  const existingConfig = parsed;
-  const config = {
+  const allowlisted = {
     enabled: true,
     clientId: nextForm.clientId,
     clientSecret: nextForm.clientSecret,
-    allowFrom: readStringArray(existingConfig.allowFrom) || ["*"],
+    allowFrom: readStringArray(parsed.allowFrom) || ["*"],
   };
 
-  return stringifyChannelContentText(config);
+  return stringifyChannelContentText(mergeChannelConfig(parsed, allowlisted));
 };
 
 const readSlackChannelFormState = (
@@ -376,31 +388,29 @@ const updateSlackChannelContentText = (
     ...patch,
   };
 
-  const existingConfig = parsed;
-  const config = {
+  const allowlisted = {
     enabled: true,
     botToken: nextForm.botToken,
     appToken: nextForm.appToken,
     groupPolicy:
-      typeof existingConfig.groupPolicy === "string" &&
-      existingConfig.groupPolicy
-        ? existingConfig.groupPolicy
+      typeof parsed.groupPolicy === "string" && parsed.groupPolicy
+        ? parsed.groupPolicy
         : "allowlist",
-    channels: isRecord(existingConfig.channels)
-      ? existingConfig.channels
+    channels: isRecord(parsed.channels)
+      ? parsed.channels
       : {
           "#general": {
             allow: true,
           },
         },
-    capabilities: isRecord(existingConfig.capabilities)
-      ? existingConfig.capabilities
+    capabilities: isRecord(parsed.capabilities)
+      ? parsed.capabilities
       : {
           interactiveReplies: true,
         },
   };
 
-  return stringifyChannelContentText(config);
+  return stringifyChannelContentText(mergeChannelConfig(parsed, allowlisted));
 };
 
 const readFeishuChannelFormState = (
@@ -454,17 +464,23 @@ const updateFeishuChannelContentText = (
     ...patch,
   };
 
-  const config = {
+  const existingAccounts = isRecord(parsed.accounts) ? parsed.accounts : {};
+  const existingMain = isRecord(existingAccounts.main)
+    ? existingAccounts.main
+    : {};
+  const allowlisted = {
     enabled: true,
     accounts: {
+      ...existingAccounts,
       main: {
+        ...existingMain,
         appId: nextForm.appId,
         appSecret: nextForm.appSecret,
       },
     },
   };
 
-  return stringifyChannelContentText(config);
+  return stringifyChannelContentText(mergeChannelConfig(parsed, allowlisted));
 };
 
 const detectSupportedChannelEditor = (
