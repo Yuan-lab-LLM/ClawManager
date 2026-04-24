@@ -1296,6 +1296,57 @@ func normalizeOpenClawChannelConfigForEnv(resourceKey string, configPayload inte
 	return configPayload
 }
 
+// mergeOpenClawChannelConfigForStorage combines the allowlist-normalized config
+// with the original parsed payload so storage retains keys the env-render path
+// does not surface (e.g. webhook, custom capabilities, additional feishu
+// accounts). Normalized keys always override the original; unknown keys pass
+// through untouched. For feishu the accounts map is merged member-wise so
+// accounts other than main, and sibling fields inside main, both survive.
+func mergeOpenClawChannelConfigForStorage(resourceKey string, original, normalized interface{}) interface{} {
+	normalizedMap, normalizedOk := normalized.(map[string]interface{})
+	originalMap, originalOk := original.(map[string]interface{})
+	if !normalizedOk {
+		return normalized
+	}
+	if !originalOk {
+		return normalizedMap
+	}
+
+	merged := make(map[string]interface{}, len(originalMap)+len(normalizedMap))
+	for k, v := range originalMap {
+		merged[k] = v
+	}
+	for k, v := range normalizedMap {
+		merged[k] = v
+	}
+
+	if strings.ToLower(strings.TrimSpace(resourceKey)) == "feishu" {
+		originalAccounts, _ := originalMap["accounts"].(map[string]interface{})
+		normalizedAccounts, _ := normalizedMap["accounts"].(map[string]interface{})
+		if originalAccounts != nil || normalizedAccounts != nil {
+			mergedAccounts := make(map[string]interface{})
+			for k, v := range originalAccounts {
+				mergedAccounts[k] = v
+			}
+			if normalizedMain, ok := normalizedAccounts["main"].(map[string]interface{}); ok {
+				mergedMain := make(map[string]interface{})
+				if existingMain, ok := originalAccounts["main"].(map[string]interface{}); ok {
+					for k, v := range existingMain {
+						mergedMain[k] = v
+					}
+				}
+				for k, v := range normalizedMain {
+					mergedMain[k] = v
+				}
+				mergedAccounts["main"] = mergedMain
+			}
+			merged["accounts"] = mergedAccounts
+		}
+	}
+
+	return merged
+}
+
 func normalizeFeishuChannelConfigForEnv(configPayload interface{}) map[string]interface{} {
 	config, ok := configPayload.(map[string]interface{})
 	if !ok {
@@ -1461,8 +1512,15 @@ func normalizeOpenClawResourceContent(resourceType, resourceKey string, raw json
 	}
 
 	normalizedConfig := normalizeOpenClawChannelConfigForEnv(resourceKey, configPayload)
+	// Preserve unknown fields at storage time: the *ForEnv helpers rebuild the
+	// config from a known-field allowlist, which is correct for rendering runtime
+	// env but would silently drop tenant-authored keys (e.g. webhook, custom
+	// capabilities, additional feishu accounts) if applied verbatim to stored
+	// content. Merge the allowlist output back over the original payload so
+	// storage is a superset of the normalized render.
+	mergedConfig := mergeOpenClawChannelConfigForStorage(resourceKey, configPayload, normalizedConfig)
 	envelope.Format = openClawChannelFormat(resourceKey)
-	envelope.Config, err = json.Marshal(normalizedConfig)
+	envelope.Config, err = json.Marshal(mergedConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal normalized openclaw channel config")
 	}
