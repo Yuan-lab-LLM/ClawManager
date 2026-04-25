@@ -188,3 +188,166 @@ func TestResourcePayloadFromModelNormalizesStoredDingTalkChannelJSON(t *testing.
 		t.Fatalf("unexpected normalized resource content:\nwant: %s\ngot:  %s", want, got)
 	}
 }
+
+func intPtr(v int) *int { return &v }
+
+func TestSnapshotReferencesResource(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		snap       models.OpenClawInjectionSnapshot
+		resourceID int
+		want       bool
+	}{
+		{
+			name:       "matching ID in SelectedResourceIDsJSON",
+			snap:       models.OpenClawInjectionSnapshot{SelectedResourceIDsJSON: `[8, 15, 22]`},
+			resourceID: 15,
+			want:       true,
+		},
+		{
+			name:       "single matching ID",
+			snap:       models.OpenClawInjectionSnapshot{SelectedResourceIDsJSON: `[8]`},
+			resourceID: 8,
+			want:       true,
+		},
+		{
+			name:       "no match",
+			snap:       models.OpenClawInjectionSnapshot{SelectedResourceIDsJSON: `[8, 15, 22]`},
+			resourceID: 99,
+			want:       false,
+		},
+		{
+			name:       "empty JSON",
+			snap:       models.OpenClawInjectionSnapshot{SelectedResourceIDsJSON: ""},
+			resourceID: 1,
+			want:       false,
+		},
+		{
+			name:       "whitespace only",
+			snap:       models.OpenClawInjectionSnapshot{SelectedResourceIDsJSON: "   "},
+			resourceID: 1,
+			want:       false,
+		},
+		{
+			name:       "invalid JSON",
+			snap:       models.OpenClawInjectionSnapshot{SelectedResourceIDsJSON: `broken`},
+			resourceID: 1,
+			want:       false,
+		},
+		// v2: ResolvedResourcesJSON cases
+		{
+			name: "matching ID only in ResolvedResourcesJSON (indirect dependency)",
+			snap: models.OpenClawInjectionSnapshot{
+				SelectedResourceIDsJSON: `[10]`,
+				ResolvedResourcesJSON:   `[{"id":10,"type":"agent","key":"bot","name":"Bot","version":1},{"id":20,"type":"skill","key":"helper","name":"Helper","version":1}]`,
+			},
+			resourceID: 20,
+			want:       true,
+		},
+		{
+			name: "no match in ResolvedResourcesJSON",
+			snap: models.OpenClawInjectionSnapshot{
+				SelectedResourceIDsJSON: `[10]`,
+				ResolvedResourcesJSON:   `[{"id":10,"type":"agent","key":"bot","name":"Bot","version":1}]`,
+			},
+			resourceID: 99,
+			want:       false,
+		},
+		{
+			name: "ResolvedResourcesJSON malformed — fallback to SelectedResourceIDsJSON succeeds",
+			snap: models.OpenClawInjectionSnapshot{
+				SelectedResourceIDsJSON: `[5, 10]`,
+				ResolvedResourcesJSON:   `not-valid-json`,
+			},
+			resourceID: 10,
+			want:       true,
+		},
+		{
+			name: "ResolvedResourcesJSON malformed — fallback to SelectedResourceIDsJSON no match",
+			snap: models.OpenClawInjectionSnapshot{
+				SelectedResourceIDsJSON: `[5, 10]`,
+				ResolvedResourcesJSON:   `not-valid-json`,
+			},
+			resourceID: 99,
+			want:       false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := snapshotReferencesResource(tt.snap, tt.resourceID)
+			if got != tt.want {
+				t.Errorf("snapshotReferencesResource() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestPlanFromSnapshot(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		snap    models.OpenClawInjectionSnapshot
+		want    OpenClawConfigPlan
+		wantErr bool
+	}{
+		{
+			name: "bundle mode",
+			snap: models.OpenClawInjectionSnapshot{
+				Mode:                    "bundle",
+				BundleID:                intPtr(5),
+				SelectedResourceIDsJSON: `[8, 15]`,
+			},
+			want: OpenClawConfigPlan{
+				Mode:     "bundle",
+				BundleID: intPtr(5),
+			},
+		},
+		{
+			name: "manual mode",
+			snap: models.OpenClawInjectionSnapshot{
+				Mode:                    "manual",
+				SelectedResourceIDsJSON: `[8, 15, 22]`,
+			},
+			want: OpenClawConfigPlan{
+				Mode:        "manual",
+				ResourceIDs: []int{8, 15, 22},
+			},
+		},
+		{
+			name: "manual mode with invalid JSON",
+			snap: models.OpenClawInjectionSnapshot{
+				Mode:                    "manual",
+				SelectedResourceIDsJSON: `broken`,
+			},
+			wantErr: true,
+		},
+		{
+			name: "none mode",
+			snap: models.OpenClawInjectionSnapshot{
+				Mode: "none",
+			},
+			want: OpenClawConfigPlan{
+				Mode: "none",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := planFromSnapshot(tt.snap)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("planFromSnapshot() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if err != nil {
+				return
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("planFromSnapshot() = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}

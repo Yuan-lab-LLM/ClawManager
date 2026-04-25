@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"regexp"
 	"sort"
 	"strings"
@@ -363,6 +364,10 @@ func (s *openClawConfigService) UpdateResource(userID, id int, req UpsertOpenCla
 	if err := s.repo.UpdateResource(item); err != nil {
 		return nil, err
 	}
+
+	// Cascade: recompile active snapshots that reference this resource.
+	// Non-blocking — errors are logged but do not fail the update.
+	go s.cascadeSnapshotsForResource(userID, id)
 
 	payload, err := resourcePayloadFromModel(*item)
 	if err != nil {
@@ -1666,4 +1671,122 @@ func errorString(err error) string {
 		return ""
 	}
 	return err.Error()
+}
+
+// cascadeSnapshotsForResource recompiles all active snapshots that reference
+// the given resource ID, so that their rendered_env_json reflects the latest
+// resource content. It does NOT restart instances — the new env takes effect
+// on the next instance restart.
+func (s *openClawConfigService) cascadeSnapshotsForResource(userID, resourceID int) {
+	snapshots, err := s.repo.ListActiveSnapshots(userID)
+	if err != nil {
+		log.Printf("[cascade] failed to list active snapshots for user %d: %v", userID, err)
+		return
+	}
+
+	for _, snap := range snapshots {
+		if !snapshotReferencesResource(snap, resourceID) {
+			continue
+		}
+
+		// Record the version stamp at read time for CAS.
+		readVersion := snap.UpdatedAt
+
+		plan, err := planFromSnapshot(snap)
+		if err != nil {
+			log.Printf("[cascade] snapshot %d: failed to reconstruct plan: %v", snap.ID, err)
+			continue
+		}
+
+		compiled, err := s.compilePlan(userID, plan)
+		if err != nil {
+			log.Printf("[cascade] snapshot %d: recompile failed: %v", snap.ID, err)
+			continue
+		}
+
+		envJSON, err := marshalJSONString(compiled.renderedEnv)
+		if err != nil {
+			log.Printf("[cascade] snapshot %d: marshal env failed: %v", snap.ID, err)
+			continue
+		}
+
+		resolvedSummaries := make([]OpenClawConfigResourceSummary, 0, len(compiled.resolved))
+		for _, r := range compiled.resolved {
+			resolvedSummaries = append(resolvedSummaries, resourceSummaryFromModel(r.model))
+		}
+		resolvedJSON, err := marshalJSONString(resolvedSummaries)
+		if err != nil {
+			log.Printf("[cascade] snapshot %d: marshal resolved failed: %v", snap.ID, err)
+			continue
+		}
+
+		snap.RenderedEnvJSON = envJSON
+		snap.ResolvedResourcesJSON = resolvedJSON
+		snap.RenderedManifestJSON = compiled.manifest
+		snap.UpdatedAt = time.Now()
+
+		// CAS write: only succeeds if updated_at has not changed since our read.
+		ok, err := s.repo.UpdateSnapshotIfUnchanged(&snap, readVersion)
+		if err != nil {
+			log.Printf("[cascade] snapshot %d: update failed: %v", snap.ID, err)
+		} else if !ok {
+			log.Printf("[cascade] snapshot %d: skipped — already updated by a newer cascade", snap.ID)
+		} else {
+			log.Printf("[cascade] snapshot %d: refreshed successfully", snap.ID)
+		}
+	}
+}
+
+// snapshotReferencesResource checks whether a snapshot references the given
+// resource ID. It checks ResolvedResourcesJSON first (which contains the full
+// set of selected + dependsOn resources), falling back to SelectedResourceIDsJSON
+// for backward compatibility with older snapshots.
+func snapshotReferencesResource(snap models.OpenClawInjectionSnapshot, resourceID int) bool {
+	// Primary: check ResolvedResourcesJSON (contains selected + dependsOn full set).
+	if strings.TrimSpace(snap.ResolvedResourcesJSON) != "" {
+		var summaries []struct {
+			ID int `json:"id"`
+		}
+		if err := json.Unmarshal([]byte(snap.ResolvedResourcesJSON), &summaries); err == nil {
+			for _, s := range summaries {
+				if s.ID == resourceID {
+					return true
+				}
+			}
+			return false
+		}
+		// If ResolvedResourcesJSON is present but malformed, fall through to fallback.
+	}
+
+	// Fallback: check SelectedResourceIDsJSON for older snapshots.
+	if strings.TrimSpace(snap.SelectedResourceIDsJSON) == "" {
+		return false
+	}
+	var ids []int
+	if err := json.Unmarshal([]byte(snap.SelectedResourceIDsJSON), &ids); err != nil {
+		return false
+	}
+	for _, id := range ids {
+		if id == resourceID {
+			return true
+		}
+	}
+	return false
+}
+
+// planFromSnapshot reconstructs an OpenClawConfigPlan from a snapshot's stored
+// mode, bundle_id, and selected_resource_ids_json.
+func planFromSnapshot(snap models.OpenClawInjectionSnapshot) (OpenClawConfigPlan, error) {
+	plan := OpenClawConfigPlan{
+		Mode:     snap.Mode,
+		BundleID: snap.BundleID,
+	}
+	if snap.Mode == OpenClawConfigPlanModeManual {
+		var ids []int
+		if err := json.Unmarshal([]byte(snap.SelectedResourceIDsJSON), &ids); err != nil {
+			return plan, fmt.Errorf("failed to parse selected resource ids: %w", err)
+		}
+		plan.ResourceIDs = ids
+	}
+	return plan, nil
 }
