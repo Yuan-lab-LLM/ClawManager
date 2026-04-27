@@ -479,3 +479,130 @@ func TestNormalizeOpenClawResourceContentPreservesFeishuSiblingAccounts(t *testi
 		t.Fatalf("expected accounts.main.appSecret normalized to main_sec, got %v", main["appSecret"])
 	}
 }
+
+// TestNormalizeOpenClawResourceContentPreservesUnknownChannelFields asserts
+// that write-time normalization keeps tenant-authored keys that the runtime
+// env-render allowlist does not surface, for every supported channel editor.
+// Regression guard for the "save drops unknown fields" data-loss bug.
+func TestNormalizeOpenClawResourceContentPreservesUnknownChannelFields(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name        string
+		resourceKey string
+		content     string
+		wantKeep    map[string]interface{}
+	}{
+		{
+			name:        "telegram preserves webhook and custom capabilities",
+			resourceKey: "telegram",
+			content:     `{"schemaVersion":1,"kind":"channel","format":"channel/telegram@v1","dependsOn":[],"config":{"enabled":true,"botToken":"123:abc","dmPolicy":"open","allowFrom":["*"],"webhook":"https://example.com/hook","capabilities":{"interactiveReplies":true}}}`,
+			wantKeep: map[string]interface{}{
+				"webhook":      "https://example.com/hook",
+				"capabilities": map[string]interface{}{"interactiveReplies": true},
+			},
+		},
+		{
+			name:        "dingtalk-connector preserves dmPolicy and webhook",
+			resourceKey: "dingtalk-connector",
+			content:     `{"schemaVersion":1,"kind":"channel","format":"channel/dingtalk-connector@v1","dependsOn":[],"config":{"enabled":true,"clientId":"ding-x","clientSecret":"sec","allowFrom":["*"],"dmPolicy":"closed","webhook":"https://example.com/hook"}}`,
+			wantKeep: map[string]interface{}{
+				"dmPolicy": "closed",
+				"webhook":  "https://example.com/hook",
+			},
+		},
+		{
+			name:        "slack preserves allowFrom and dmPolicy",
+			resourceKey: "slack",
+			content:     `{"schemaVersion":1,"kind":"channel","format":"channel/slack@v1","dependsOn":[],"config":{"enabled":true,"botToken":"xoxb-x","appToken":"xapp-x","groupPolicy":"allowlist","channels":{"#general":{"allow":true}},"capabilities":{"interactiveReplies":true},"allowFrom":["C123","C456"],"dmPolicy":"closed"}}`,
+			wantKeep: map[string]interface{}{
+				"allowFrom": []interface{}{"C123", "C456"},
+				"dmPolicy":  "closed",
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			normalized, err := normalizeOpenClawResourceContent(OpenClawConfigResourceTypeChannel, tc.resourceKey, json.RawMessage(tc.content))
+			if err != nil {
+				t.Fatalf("normalizeOpenClawResourceContent returned error: %v", err)
+			}
+			var env OpenClawConfigEnvelope
+			if err := json.Unmarshal(normalized, &env); err != nil {
+				t.Fatalf("failed to unmarshal normalized envelope: %v", err)
+			}
+			var config map[string]interface{}
+			if err := json.Unmarshal(env.Config, &config); err != nil {
+				t.Fatalf("failed to unmarshal normalized config: %v", err)
+			}
+			for k, want := range tc.wantKeep {
+				got, ok := config[k]
+				if !ok {
+					t.Fatalf("expected key %q to survive normalization, got dropped; full config: %s", k, env.Config)
+				}
+				if !reflect.DeepEqual(got, want) {
+					t.Fatalf("key %q mismatched after normalization:\nwant: %v\ngot:  %v", k, want, got)
+				}
+			}
+		})
+	}
+}
+
+// TestNormalizeOpenClawResourceContentPreservesFeishuSiblingAccounts asserts
+// the deep-merge behavior of the feishu accounts map: accounts other than
+// "main" survive, and sibling fields inside accounts.main survive too. The
+// main account's allowlisted fields (appId, appSecret) are still normalized.
+func TestNormalizeOpenClawResourceContentPreservesFeishuSiblingAccounts(t *testing.T) {
+	t.Parallel()
+
+	input := `{"schemaVersion":1,"kind":"channel","format":"channel/feishu@v1","dependsOn":[],"config":{"enabled":true,"accounts":{"main":{"appId":"cli_main","appSecret":"main_sec","verificationToken":"vt_keep"},"default":{"appId":"cli_default","appSecret":"default_sec"},"acme":{"appId":"cli_acme","appSecret":"acme_sec","botName":"acme-bot"}},"requireMention":true}}`
+
+	normalized, err := normalizeOpenClawResourceContent(OpenClawConfigResourceTypeChannel, "feishu", json.RawMessage(input))
+	if err != nil {
+		t.Fatalf("normalizeOpenClawResourceContent returned error: %v", err)
+	}
+
+	var env OpenClawConfigEnvelope
+	if err := json.Unmarshal(normalized, &env); err != nil {
+		t.Fatalf("failed to unmarshal envelope: %v", err)
+	}
+	var config map[string]interface{}
+	if err := json.Unmarshal(env.Config, &config); err != nil {
+		t.Fatalf("failed to unmarshal config: %v", err)
+	}
+
+	if got := config["requireMention"]; got != true {
+		t.Fatalf("expected top-level requireMention=true to survive, got %v", got)
+	}
+
+	accounts, ok := config["accounts"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected accounts map, got %T", config["accounts"])
+	}
+
+	wantDefault := map[string]interface{}{"appId": "cli_default", "appSecret": "default_sec"}
+	if !reflect.DeepEqual(accounts["default"], wantDefault) {
+		t.Fatalf("default account not preserved:\nwant: %v\ngot:  %v", wantDefault, accounts["default"])
+	}
+	wantAcme := map[string]interface{}{"appId": "cli_acme", "appSecret": "acme_sec", "botName": "acme-bot"}
+	if !reflect.DeepEqual(accounts["acme"], wantAcme) {
+		t.Fatalf("acme account not preserved:\nwant: %v\ngot:  %v", wantAcme, accounts["acme"])
+	}
+
+	main, ok := accounts["main"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected accounts.main map, got %T", accounts["main"])
+	}
+	if main["verificationToken"] != "vt_keep" {
+		t.Fatalf("expected accounts.main.verificationToken to survive, got %v", main["verificationToken"])
+	}
+	if main["appId"] != "cli_main" {
+		t.Fatalf("expected accounts.main.appId normalized to cli_main, got %v", main["appId"])
+	}
+	if main["appSecret"] != "main_sec" {
+		t.Fatalf("expected accounts.main.appSecret normalized to main_sec, got %v", main["appSecret"])
+	}
+}
