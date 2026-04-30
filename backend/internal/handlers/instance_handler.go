@@ -342,7 +342,7 @@ func (h *InstanceHandler) DeleteInstance(c *gin.Context) {
 		return
 	}
 
-	utils.Success(c, http.StatusOK, "Instance deleted successfully", nil)
+	utils.Success(c, http.StatusAccepted, "Instance deletion started", nil)
 }
 
 // StartInstance starts an instance

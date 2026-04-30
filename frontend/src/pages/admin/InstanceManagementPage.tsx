@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useMemo, useState } from 'react';
+﻿import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import AdminLayout from '../../components/AdminLayout';
 import ConfirmDialog from '../../components/ConfirmDialog';
 import { useI18n } from '../../contexts/I18nContext';
@@ -20,13 +20,11 @@ const InstanceManagementPage: React.FC = () => {
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [pendingDeleteInstance, setPendingDeleteInstance] = useState<Instance | null>(null);
 
-  useEffect(() => {
-    loadData();
-  }, []);
-
-  const loadData = async () => {
+  const loadData = useCallback(async (options?: { silent?: boolean }) => {
     try {
-      setLoading(true);
+      if (!options?.silent) {
+        setLoading(true);
+      }
       setError(null);
       const [instancesData, usersData] = await Promise.all([
         adminInstanceService.getInstances(1, 1000),
@@ -37,9 +35,29 @@ const InstanceManagementPage: React.FC = () => {
     } catch (err: any) {
       setError(err.response?.data?.error || t('admin.failedToLoadInstances'));
     } finally {
-      setLoading(false);
+      if (!options?.silent) {
+        setLoading(false);
+      }
     }
-  };
+  }, [t]);
+
+  useEffect(() => {
+    void loadData();
+  }, [loadData]);
+
+  useEffect(() => {
+    if (!instances.some((instance) => instance.status === 'creating' || instance.status === 'deleting')) {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      void loadData({ silent: true });
+    }, 5000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [instances, loadData]);
 
   const userMap = useMemo(() => {
     return new Map(users.map((user) => [user.id, user.username]));
@@ -196,7 +214,7 @@ const InstanceManagementPage: React.FC = () => {
               ))}
             </select>
             <button
-              onClick={loadData}
+              onClick={() => void loadData()}
               className="app-button-secondary"
             >
               {t('common.refresh')}
@@ -299,14 +317,14 @@ const InstanceManagementPage: React.FC = () => {
                           )}
                           <button
                             onClick={() => handleAction(instance, 'sync')}
-                            disabled={actionLoading === `sync-${instance.id}`}
+                            disabled={actionLoading === `sync-${instance.id}` || instance.status === 'deleting'}
                             className="rounded-md bg-[#f3f0ed] px-3 py-1.5 text-xs font-medium text-[#5f5957] hover:bg-[#ebe3dd] disabled:opacity-50"
                           >
                             {t('common.refresh')}
                           </button>
                           <button
                             onClick={() => setPendingDeleteInstance(instance)}
-                            disabled={actionLoading === `delete-${instance.id}`}
+                            disabled={actionLoading === `delete-${instance.id}` || instance.status === 'deleting'}
                             className="rounded-md bg-red-50 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-100 disabled:opacity-50"
                           >
                             {t('common.delete')}

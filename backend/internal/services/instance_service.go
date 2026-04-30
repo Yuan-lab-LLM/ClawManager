@@ -766,40 +766,53 @@ func (s *instanceService) Restart(instanceID int) error {
 	return nil
 }
 
-// Delete deletes an instance and all associated K8s resources
+// Delete starts deleting an instance and all associated K8s resources.
 func (s *instanceService) Delete(instanceID int) error {
-	ctx := context.Background()
-
 	instance, err := s.instanceRepo.GetByID(instanceID)
 	if err != nil {
 		return fmt.Errorf("failed to get instance: %w", err)
 	}
 
 	if instance == nil {
-		// Instance not in DB, but we should still try to clean up K8s resources
-		fmt.Printf("Instance %d not found in database, attempting to clean up any orphaned K8s resources\n", instanceID)
-		// Try to clean up with userID=0 (will need to scan all namespaces)
-		cleanupService := k8s.NewCleanupService()
-		cleanupService.DeleteAllInstanceResources(ctx, 0, instanceID)
 		return fmt.Errorf("instance not found")
 	}
 
-	fmt.Printf("Starting deletion of instance %d (user %d)\n", instanceID, instance.UserID)
+	if instance.Status != "deleting" {
+		now := time.Now()
+		instance.Status = "deleting"
+		instance.UpdatedAt = now
+
+		if err := s.instanceRepo.Update(instance); err != nil {
+			return fmt.Errorf("failed to mark instance as deleting: %w", err)
+		}
+
+		GetHub().BroadcastInstanceStatus(instance.UserID, instance)
+	}
+
+	go s.completeDeletion(instance.UserID, instance.ID)
+
+	return nil
+}
+
+func (s *instanceService) completeDeletion(userID, instanceID int) {
+	ctx := context.Background()
+
+	fmt.Printf("Starting background deletion of instance %d (user %d)\n", instanceID, userID)
 
 	// Use CleanupService to delete ALL resources for this instance (including duplicates)
 	cleanupService := k8s.NewCleanupService()
-	if err := cleanupService.DeleteAllInstanceResources(ctx, instance.UserID, instance.ID); err != nil {
+	if err := cleanupService.DeleteAllInstanceResources(ctx, userID, instanceID); err != nil {
 		fmt.Printf("Warning: error during resource cleanup for instance %d: %v\n", instanceID, err)
 	}
 
-	// 4. Delete instance record from database
+	// Delete instance record from database after background cleanup finishes.
 	fmt.Printf("Deleting instance %d from database...\n", instanceID)
 	if err := s.instanceRepo.Delete(instanceID); err != nil {
-		return fmt.Errorf("failed to delete instance record: %w", err)
+		fmt.Printf("Error: failed to delete instance %d record: %v\n", instanceID, err)
+		return
 	}
 
 	fmt.Printf("Instance %d deleted successfully\n", instanceID)
-	return nil
 }
 
 // cleanupOrphanedResources cleans up any orphaned K8s resources for an instance
