@@ -15,6 +15,7 @@ type LLMModel struct {
 	APIKeySecretRef   *string   `db:"api_key_secret_ref" json:"api_key_secret_ref,omitempty"`
 	IsSecure          bool      `db:"is_secure" json:"is_secure"`
 	IsActive          bool      `db:"is_active" json:"is_active"`
+	Priority          int       `db:"priority" json:"priority"`
 	InputPrice        float64   `db:"input_price" json:"input_price"`
 	OutputPrice       float64   `db:"output_price" json:"output_price"`
 	Currency          string    `db:"currency" json:"currency"`
