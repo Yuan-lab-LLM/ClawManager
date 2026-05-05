@@ -140,6 +140,8 @@ export interface InstanceType {
   id: string;
   name: string;
   description: string;
+  nameKey: string;
+  descriptionKey: string;
   icon: string;
   defaultOs: string;
   defaultVersion: string;
@@ -150,6 +152,8 @@ export const INSTANCE_TYPES: InstanceType[] = [
     id: "ubuntu",
     name: "Ubuntu Desktop",
     description: "Popular Linux distribution with GNOME desktop",
+    nameKey: "instances.instanceTypes.ubuntu.name",
+    descriptionKey: "instances.instanceTypes.ubuntu.description",
     icon: "ubuntu",
     defaultOs: "ubuntu",
     defaultVersion: "22.04",
@@ -158,6 +162,8 @@ export const INSTANCE_TYPES: InstanceType[] = [
     id: "debian",
     name: "Debian Desktop",
     description: "Stable and secure Linux distribution",
+    nameKey: "instances.instanceTypes.debian.name",
+    descriptionKey: "instances.instanceTypes.debian.description",
     icon: "debian",
     defaultOs: "debian",
     defaultVersion: "12",
@@ -166,14 +172,18 @@ export const INSTANCE_TYPES: InstanceType[] = [
     id: "centos",
     name: "CentOS Desktop",
     description: "Enterprise-class Linux distribution",
+    nameKey: "instances.instanceTypes.centos.name",
+    descriptionKey: "instances.instanceTypes.centos.description",
     icon: "centos",
     defaultOs: "centos",
     defaultVersion: "9",
   },
   {
     id: "openclaw",
-    name: "OpenClaw Desktop",
+    name: "GTClaw Desktop",
     description: "Optimized desktop environment",
+    nameKey: "instances.instanceTypes.openclaw.name",
+    descriptionKey: "instances.instanceTypes.openclaw.description",
     icon: "openclaw",
     defaultOs: "openclaw",
     defaultVersion: "latest",
@@ -181,7 +191,9 @@ export const INSTANCE_TYPES: InstanceType[] = [
   {
     id: "webtop",
     name: "Webtop Desktop",
-    description: "Browser-based Linux desktop proxied through ClawManager",
+    description: "Browser-based Linux desktop proxied through GTManager",
+    nameKey: "instances.instanceTypes.webtop.name",
+    descriptionKey: "instances.instanceTypes.webtop.description",
     icon: "webtop",
     defaultOs: "ubuntu",
     defaultVersion: "xfce",
@@ -190,6 +202,8 @@ export const INSTANCE_TYPES: InstanceType[] = [
     id: "custom",
     name: "Custom Image",
     description: "Use your own custom image",
+    nameKey: "instances.instanceTypes.custom.name",
+    descriptionKey: "instances.instanceTypes.custom.description",
     icon: "custom",
     defaultOs: "custom",
     defaultVersion: "latest",
@@ -199,23 +213,29 @@ export const INSTANCE_TYPES: InstanceType[] = [
 export const PRESET_CONFIGS = {
   small: {
     name: "Small",
+    nameKey: "instances.presets.small.name",
     cpu_cores: 2,
     memory_gb: 4,
     disk_gb: 20,
     description: "Suitable for light tasks",
+    descriptionKey: "instances.presets.small.description",
   },
   medium: {
     name: "Medium",
+    nameKey: "instances.presets.medium.name",
     cpu_cores: 4,
     memory_gb: 8,
     disk_gb: 50,
     description: "Good for development",
+    descriptionKey: "instances.presets.medium.description",
   },
   large: {
     name: "Large",
+    nameKey: "instances.presets.large.name",
     cpu_cores: 8,
     memory_gb: 16,
     disk_gb: 100,
     description: "For heavy workloads",
+    descriptionKey: "instances.presets.large.description",
   },
 };

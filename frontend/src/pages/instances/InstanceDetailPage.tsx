@@ -775,6 +775,7 @@ const InstanceDetailPage: React.FC = () => {
                   instanceId={instance.id}
                   instanceName={instance.name}
                   isRunning={effectiveInstanceStatus === "running"}
+                  showControlUiEntry={instance.type === "openclaw"}
                   overlay={
                     instance.type === "openclaw"
                       ? {

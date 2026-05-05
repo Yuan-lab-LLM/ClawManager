@@ -1,7 +1,7 @@
-# ClawManager
+# GTManager
 
 <p align="center">
-  <img src="frontend/public/openclaw_github_logo.png" alt="ClawManager" width="100%" />
+  <img src="frontend/public/openclaw_github_logo.png" alt="GTManager" width="100%" />
 </p>
 
 <p align="center">
@@ -18,7 +18,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/ClawManager-Virtual%20Desktop%20Platform-e25544?style=for-the-badge" alt="ClawManager Platform" />
+  <img src="https://img.shields.io/badge/GTManager-Virtual%20Desktop%20Platform-e25544?style=for-the-badge" alt="GTManager Platform" />
   <img src="https://img.shields.io/badge/Go-1.21%2B-00ADD8?style=for-the-badge&logo=go&logoColor=white" alt="Go 1.21+" />
   <img src="https://img.shields.io/badge/React-19-20232A?style=for-the-badge&logo=react&logoColor=61DAFB" alt="React 19" />
   <img src="https://img.shields.io/badge/Kubernetes-Native-326CE5?style=for-the-badge&logo=kubernetes&logoColor=white" alt="Kubernetes Native" />
@@ -26,7 +26,7 @@
 </p>
 
 <p align="center">
-  <img src="./docs/main/clawmanager_features.jpg" alt="ClawManager Admin" width="100%" />
+  <img src="./docs/main/clawmanager_features.jpg" alt="GTManager Admin" width="100%" />
 </p>
 
 ## News
@@ -35,14 +35,14 @@
 - [2026-03-20]: 🎉🎉 ClawManager Release — ClawManager is now a virtual desktop management platform featuring batch deployment, Webtop support, desktop portal access, runtime image settings, OpenClaw memory/preferences Markdown backup and migration, cluster resource overview, and multilingual documentation.
 
 <p align="center">
-  <img src="./docs/main/admin.png" alt="ClawManager Admin" width="32%" />
-  <img src="./docs/main/portal.png" alt="ClawManager Portal" width="32%" />
-  <img src="./docs/main/aigateway.png" alt="ClawManager AI Gateway" width="32%" />
+  <img src="./docs/main/admin.png" alt="GTManager Admin" width="32%" />
+  <img src="./docs/main/portal.png" alt="GTManager Portal" width="32%" />
+  <img src="./docs/main/aigateway.png" alt="GTManager AI Gateway" width="32%" />
 </p>
 
 ## What It Is
 
-ClawManager helps teams deploy, operate, and access desktop runtimes on Kubernetes from one place.
+GTManager helps teams deploy, operate, and access desktop runtimes on Kubernetes from one place.
 
 It is built for environments where you need to:
 
@@ -84,7 +84,7 @@ kubectl get svc -A
 
 ## Build From Source
 
-If you want to run or package ClawManager from source instead of using the bundled Kubernetes manifest:
+If you want to run or package GTManager from source instead of using the bundled Kubernetes manifest:
 
 ### Frontend
 
@@ -138,7 +138,7 @@ docker build -t clawmanager:latest .
 
 ## AI Gateway
 
-AI Gateway is the governance plane for model access inside ClawManager. It gives OpenClaw instances a single OpenAI-compatible entry point while adding policy, audit, and cost controls on top of upstream providers.
+AI Gateway is the governance plane for model access inside GTManager. It gives OpenClaw instances a single OpenAI-compatible entry point while adding policy, audit, and cost controls on top of upstream providers.
 
 - Model management for regular and secure models, provider onboarding, activation, endpoint configuration, and pricing policy
 - End-to-end audit and trace records for requests, responses, routing decisions, and risk hits
@@ -147,7 +147,7 @@ AI Gateway is the governance plane for model access inside ClawManager. It gives
 
 ### Supported Model Service Platforms
 
-ClawManager includes built-in vendor templates for:
+GTManager includes built-in vendor templates for:
 
 - OpenAI
 - OpenRouter
@@ -173,7 +173,7 @@ For screenshots, the full feature breakdown, and the model selection and routing
 
 1. An admin defines users, quotas, and runtime image policies.
 2. A user creates an OpenClaw or Linux desktop instance.
-3. ClawManager creates and tracks the Kubernetes resources.
+3. GTManager creates and tracks the Kubernetes resources.
 4. The user accesses the desktop through the platform.
 5. Admins monitor health and capacity from the dashboard.
 
@@ -181,8 +181,8 @@ For screenshots, the full feature breakdown, and the model selection and routing
 
 ```text
 Browser
-  -> ClawManager Frontend
-  -> ClawManager Backend
+  -> GTManager Frontend
+  -> GTManager Backend
   -> MySQL
   -> Kubernetes API
   -> Pod / PVC / Service

@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
-import { DEFAULT_LOCALE, type Locale, interpolate, localeOptions, translate } from '../lib/i18n';
+import { DEFAULT_LOCALE, FALLBACK_LOCALE, type Locale, interpolate, isSupportedLocale, localeOptions, translate } from '../lib/i18n';
 
 const STORAGE_KEY = 'clawmanager_locale';
 
@@ -14,20 +14,21 @@ const I18nContext = createContext<I18nContextValue | undefined>(undefined);
 
 export const I18nProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [locale, setLocaleState] = useState<Locale>(() => {
-    const stored = window.localStorage.getItem(STORAGE_KEY) as Locale | null;
-    return stored ?? DEFAULT_LOCALE;
+    const stored = window.localStorage.getItem(STORAGE_KEY);
+    return isSupportedLocale(stored) ? stored : DEFAULT_LOCALE;
   });
 
   useEffect(() => {
     window.localStorage.setItem(STORAGE_KEY, locale);
     document.documentElement.lang = locale;
+    document.title = translate(locale, 'app.name') ?? translate(FALLBACK_LOCALE, 'app.name') ?? 'GTManager';
   }, [locale]);
 
   const value = useMemo<I18nContextValue>(() => ({
     locale,
     setLocale: (nextLocale) => setLocaleState(nextLocale),
     t: (key, variables) => {
-      const text = translate(locale, key) ?? translate(DEFAULT_LOCALE, key) ?? key;
+      const text = translate(locale, key) ?? translate(FALLBACK_LOCALE, key) ?? key;
       return interpolate(text, variables);
     },
     localeOptions,

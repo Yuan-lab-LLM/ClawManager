@@ -1,6 +1,6 @@
 # K3S 本机部署指南（macOS）
 
-> **目标**：在 macOS 本机用 k3d 运行 K3S，部署 ClawManager，并完成 A1 core-chain 的单实例 + direct QA 最小验收链。
+> **目标**：在 macOS 本机用 k3d 运行 K3S，部署 GTManager，并完成 A1 core-chain 的单实例 + direct QA 最小验收链。
 
 如果你是第一次拿到交付包，不要先看这份。先看仓库根目录的：
 
@@ -12,7 +12,7 @@
 
 The current release path is the **A1 core-chain release**:
 
-- default Mac/ARM deploy path targets ClawManager control plane, one documented OpenClaw ARM bootstrap, and one single-instance + direct-QA acceptance chain
+- default Mac/ARM deploy path targets GTManager control plane, one documented OpenClaw ARM bootstrap, and one single-instance + direct-QA acceptance chain
 - `skill-scanner` / FastSkill / frozen `U3` validation are **not** part of the default release claim
 - the blocked `R3-A-U3-F2-P1` investigation packet remains archived under `docs/superpowers/releases/2026-04-15-p1-internal-rc/`
 - use `docs/superpowers/releases/2026-04-16-a1-core-release/README.md` as the release-scope summary
@@ -77,7 +77,7 @@ k3d-clawmanager-server-0  Ready    control-plane,master   30s   v1.31.x+k3s1
 
 ---
 
-## 第二步：部署 ClawManager
+## 第二步：部署 GTManager
 
 ```bash
 # 进入项目根目录
@@ -109,7 +109,7 @@ clawmanager-app-xxx                1/1     Running   0
 
 ## 第三步：确认数据库初始化
 
-ClawManager 首次启动时会通过 MySQL 容器环境变量和 `clawmanager-mysql-init` ConfigMap 自动创建数据库、应用用户和基础表结构。
+GTManager 首次启动时会通过 MySQL 容器环境变量和 `clawmanager-mysql-init` ConfigMap 自动创建数据库、应用用户和基础表结构。
 只有在 **复用旧 PVC** 或 **初始化脚本未执行成功** 时，才需要人工进入 MySQL 复核。
 
 ```bash
@@ -133,7 +133,7 @@ kubectl exec -it -n clawmanager-system $MYSQL_POD -- \
 
 ---
 
-## 第四步：访问 ClawManager
+## 第四步：访问 GTManager
 
 ```bash
 # 访问管理员门户
@@ -165,7 +165,7 @@ curl -k https://localhost:30443/healthz
 - wait until runtime ready
 - capture one direct-QA proof
 
-可以通过 ClawManager UI 创建实例，也可以直接按 `docs/superpowers/releases/2026-04-16-a1-core-release/04-acceptance-path.md` 中的 API 命令创建。
+可以通过 GTManager UI 创建实例，也可以直接按 `docs/superpowers/releases/2026-04-16-a1-core-release/04-acceptance-path.md` 中的 API 命令创建。
 
 如果你只是照着本教程操作，至少遵守这两个边界：
 
@@ -190,13 +190,13 @@ kubectl get pods -A | grep clawreef
 ## 常用管理命令
 
 ```bash
-# 查看所有 ClawManager 相关 Pod
+# 查看所有 GTManager 相关 Pod
 kubectl get pods -n clawmanager-system
 
 # 查看日志
 kubectl logs -n clawmanager-system deployment/clawmanager-app -f
 
-# 重启 ClawManager app（不影响数据库）
+# 重启 GTManager app（不影响数据库）
 kubectl rollout restart -n clawmanager-system deployment/clawmanager-app
 
 # 停止集群（保留数据）

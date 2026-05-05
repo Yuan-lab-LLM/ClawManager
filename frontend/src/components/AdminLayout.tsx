@@ -62,8 +62,8 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children, title }) => {
                 className="flex items-center text-[#171212] transition-colors hover:text-[#dc2626]"
               >
                 <img
-                  src="/lobster_transparent.png"
-                  alt="ClawManager logo"
+                  src="/gtmanager-logo.png"
+                  alt={t('app.logoAlt')}
                   className="mr-2 h-10 w-10 object-contain"
                 />
                 <span className="font-bold text-xl">{t('app.name')}</span>
@@ -148,8 +148,8 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children, title }) => {
                 className="flex items-center text-[#171212] transition-colors hover:text-[#dc2626]"
               >
                 <img
-                  src="/lobster_transparent.png"
-                  alt="ClawManager logo"
+                  src="/gtmanager-logo.png"
+                  alt={t('app.logoAlt')}
                   className="mr-3 h-9 w-9 object-contain"
                 />
                 <div>
@@ -276,7 +276,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children, title }) => {
             <div className={`${shellContainerClass} flex h-[104px] items-center`}>
               <div>
                 <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#b46c50]">
-                  Admin Workspace
+                  {t('adminLayout.workspace')}
                 </div>
                 <h1 className="mt-1 text-[1.8rem] font-bold tracking-[-0.04em] text-[#171212]">{title}</h1>
               </div>

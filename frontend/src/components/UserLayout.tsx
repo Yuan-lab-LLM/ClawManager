@@ -56,8 +56,8 @@ const UserLayout: React.FC<UserLayoutProps> = ({ children, title }) => {
                 className="flex items-center text-[#171212] transition-colors hover:text-[#dc2626]"
               >
                 <img
-                  src="/lobster_transparent.png"
-                  alt="ClawManager logo"
+                  src="/gtmanager-logo.png"
+                  alt={t('app.logoAlt')}
                   className="mr-2 h-10 w-10 object-contain"
                 />
                 <span className="font-bold text-xl">{t('app.name')}</span>
@@ -142,13 +142,13 @@ const UserLayout: React.FC<UserLayoutProps> = ({ children, title }) => {
                 className="flex items-center text-[#171212] transition-colors hover:text-[#dc2626]"
               >
                 <img
-                  src="/lobster_transparent.png"
-                  alt="ClawManager logo"
+                  src="/gtmanager-logo.png"
+                  alt={t('app.logoAlt')}
                   className="mr-3 h-9 w-9 object-contain"
                 />
                 <div>
                   <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-[#b46c50]">
-                    User
+                    {t('userLayout.user')}
                   </div>
                   <div className="mt-0.5 text-[1.45rem] font-bold leading-none">{t('app.name')}</div>
                 </div>
@@ -157,7 +157,7 @@ const UserLayout: React.FC<UserLayoutProps> = ({ children, title }) => {
 
             <nav className="flex-1 overflow-y-auto px-3 pb-6">
               <div className="px-3 pb-3 text-xs font-semibold uppercase tracking-[0.18em] text-[#b46c50]">
-                Navigation
+                {t('userLayout.navigation')}
               </div>
               <div className="space-y-1.5">
                 {visibleNavItems.map((item) => (
@@ -273,7 +273,7 @@ const UserLayout: React.FC<UserLayoutProps> = ({ children, title }) => {
               <div className={`${shellContainerClass} flex h-[104px] items-center`}>
                 <div>
                   <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#b46c50]">
-                    Workspace
+                    {t('userLayout.workspace')}
                   </div>
                   <h1 className="mt-1 text-[2rem] font-bold tracking-[-0.04em] text-[#171212]">{title}</h1>
                 </div>

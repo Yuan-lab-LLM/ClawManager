@@ -76,6 +76,12 @@ const InstanceManagementPage: React.FC = () => {
     return Array.from(new Set(instances.map((instance) => instance.type))).sort();
   }, [instances]);
 
+  const getInstanceTypeLabel = (type: Instance['type']) => {
+    const translationKey = `instances.instanceTypes.${type}.name`;
+    const translated = t(translationKey);
+    return translated === translationKey ? type : translated;
+  };
+
   const handleAction = async (instance: Instance, action: 'start' | 'stop' | 'restart' | 'delete' | 'sync') => {
     const actionKey = `${action}-${instance.id}`;
     try {
@@ -190,7 +196,7 @@ const InstanceManagementPage: React.FC = () => {
               <option value="all">{t('admin.allTypes')}</option>
               {typeOptions.map((type) => (
                 <option key={type} value={type}>
-                  {type}
+                  {getInstanceTypeLabel(type)}
                 </option>
               ))}
             </select>
@@ -248,7 +254,7 @@ const InstanceManagementPage: React.FC = () => {
                         <div className="mt-1 text-xs text-[#8f8681]">{t('admin.userIdLabel')}: {instance.user_id}</div>
                       </td>
                       <td className="px-5 py-4 align-top">
-                        <div className="font-medium capitalize text-[#171212]">{instance.type}</div>
+                        <div className="font-medium text-[#171212]">{getInstanceTypeLabel(instance.type)}</div>
                         <div className="mt-1 text-xs text-[#8f8681]">{instance.os_type} {instance.os_version}</div>
                       </td>
                       <td className="px-5 py-4 align-top">

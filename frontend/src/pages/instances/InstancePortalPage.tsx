@@ -16,6 +16,18 @@ const PORTAL_RUNTIME_POLL_INTERVAL_MS = 5000;
 const PORTAL_RUNTIME_BURST_POLL_INTERVAL_MS = 1000;
 const PORTAL_RUNTIME_BURST_WINDOW_MS = 15000;
 
+function accessErrorMessage(error: unknown, fallback: string): string {
+  if (typeof error === "object" && error !== null && "response" in error) {
+    const response = (error as { response?: { data?: { error?: unknown } } })
+      .response;
+    if (typeof response?.data?.error === "string") {
+      return response.data.error;
+    }
+  }
+
+  return fallback;
+}
+
 const InstancePortalPage: React.FC = () => {
   const { t } = useI18n();
   const [instances, setInstances] = useState<Instance[]>([]);
@@ -29,6 +41,8 @@ const InstancePortalPage: React.FC = () => {
   const [runtimeActionLoading, setRuntimeActionLoading] = useState<
     string | null
   >(null);
+  const [controlUiOpening, setControlUiOpening] = useState(false);
+  const [controlUiError, setControlUiError] = useState<string | null>(null);
   const [runtimeBurstUntil, setRuntimeBurstUntil] = useState<number>(0);
   const frameShellRef = useRef<HTMLElement | null>(null);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
@@ -75,8 +89,8 @@ const InstancePortalPage: React.FC = () => {
         );
         return firstRunning?.id ?? data.instances[0]?.id ?? null;
       });
-    } catch (err: any) {
-      setError(err.response?.data?.error || t("instances.failedToLoad"));
+    } catch (error: unknown) {
+      setError(accessErrorMessage(error, t("instances.failedToLoad")));
     } finally {
       setLoading(false);
     }
@@ -114,6 +128,7 @@ const InstancePortalPage: React.FC = () => {
   } = useInstanceDesktopAccess({
     instanceId: selectedInstance?.id ?? null,
     isRunning: selectedInstance?.status === "running" && shouldConnect,
+    accessMode: "desktop",
     retainSessionOnStop: shouldConnect,
     resolveEmbedUrl,
     failedMessage: t("instances.failedToGenerateAccessToken"),
@@ -121,6 +136,8 @@ const InstancePortalPage: React.FC = () => {
 
   useEffect(() => {
     setShouldConnect(false);
+    setControlUiError(null);
+    setControlUiOpening(false);
   }, [selectedId]);
 
   const loadRuntimeDetails = useCallback(async (instanceId: number) => {
@@ -236,6 +253,41 @@ const InstancePortalPage: React.FC = () => {
     requestAccess();
   };
 
+  const openControlUi = async () => {
+    if (
+      !selectedInstance ||
+      selectedInstance.status !== "running" ||
+      selectedInstance.type !== "openclaw" ||
+      controlUiOpening
+    ) {
+      return;
+    }
+
+    try {
+      setControlUiOpening(true);
+      setControlUiError(null);
+      const data = await instanceService.generateAccessToken(
+        selectedInstance.id,
+        "control-ui",
+      );
+      const controlUiUrl = instanceService.getControlUiChatUrl(
+        data.proxy_url || data.access_url,
+      );
+      const resolvedControlUiUrl = resolveEmbedUrl(controlUiUrl);
+      if (!resolvedControlUiUrl) {
+        setControlUiError(t("instances.failedToOpenControlUi"));
+        return;
+      }
+      window.open(resolvedControlUiUrl, "_blank", "noopener,noreferrer");
+    } catch (error: unknown) {
+      setControlUiError(
+        accessErrorMessage(error, t("instances.failedToOpenControlUi")),
+      );
+    } finally {
+      setControlUiOpening(false);
+    }
+  };
+
   const handleRuntimeCommand = async (
     command:
       | "start"
@@ -280,6 +332,9 @@ const InstancePortalPage: React.FC = () => {
           ? t("instances.generatingToken")
           : t("instances.readyToAccess")
         : t("instances.instanceMustBeRunning");
+  const canOpenControlUi =
+    selectedInstance?.type === "openclaw" &&
+    selectedInstance.status === "running";
 
   return (
     <UserLayout title={t("instances.portalTitle")}>
@@ -367,8 +422,23 @@ const InstancePortalPage: React.FC = () => {
                 <p className="mt-1 text-xs text-[#aab4c4]">
                   {playerStatusText}
                 </p>
+                {controlUiError ? (
+                  <p className="mt-1 text-xs text-red-300">{controlUiError}</p>
+                ) : null}
               </div>
               <div className="flex items-center gap-2">
+                {canOpenControlUi && (
+                  <button
+                    type="button"
+                    onClick={openControlUi}
+                    disabled={controlUiOpening}
+                    className="rounded-lg bg-[#243041] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#31415a] disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {controlUiOpening
+                      ? t("instances.openingControlUi")
+                      : t("instances.openControlUi")}
+                  </button>
+                )}
                 {selectedInstance &&
                   selectedInstance.status === "running" &&
                   embedUrl && (

@@ -1,6 +1,6 @@
 # Manual Skill Import Path
 
-This path is intentionally narrow: an operator downloads a Skill `.zip` locally, imports it into ClawManager, and then attaches it to a specific OpenClaw instance.
+This path is intentionally narrow: an operator downloads a Skill `.zip` locally, imports it into GTManager, and then attaches it to a specific OpenClaw instance.
 
 This path does not require:
 
@@ -16,7 +16,7 @@ Keep the Skill `.zip` on the operator machine in any local directory, for exampl
 /Users/<you>/Downloads/my-skill-pack.zip
 ```
 
-Do not copy the archive into the repo, Pod filesystem, or Kubernetes manifests. The supported path is to upload it through the platform so ClawManager stores it in object storage.
+Do not copy the archive into the repo, Pod filesystem, or Kubernetes manifests. The supported path is to upload it through the platform so GTManager stores it in object storage.
 
 ## Archive format
 
@@ -42,7 +42,7 @@ The archive above imports two skills: `hello-skill` and `weather-skill`.
 
 ### UI path
 
-1. Sign in to ClawManager
+1. Sign in to GTManager
 2. Open `OpenClaw Resource Management`
 3. Upload the `.zip` in the Skill section
 4. After upload, the platform creates one or more `uploaded skill` records
@@ -92,11 +92,11 @@ curl -k \
 
 The chain is:
 
-1. ClawManager receives the local `.zip`
+1. GTManager receives the local `.zip`
 2. Each top-level directory becomes one `uploaded skill`
 3. The platform writes `skill_blobs` and `skill_versions`
 4. Attach writes `instance_skills`
-5. ClawManager emits an `install_skill` command
+5. GTManager emits an `install_skill` command
 6. The runtime agent downloads that exact skill version from the platform and installs it into the instance
 
 The only manual actions are:

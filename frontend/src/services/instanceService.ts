@@ -10,6 +10,17 @@ import type {
 } from "../types/instance";
 import type { InstanceSkill } from "../types/skill";
 
+export type InstanceAccessMode = "desktop" | "control-ui";
+
+export interface InstanceAccessTokenResponse {
+  token: string;
+  access_url: string;
+  proxy_url: string;
+  access_mode: InstanceAccessMode;
+  target_port?: number;
+  expires_at: string;
+}
+
 export const instanceService = {
   // Get instance list
   getInstances: async (
@@ -123,19 +134,34 @@ export const instanceService = {
   // Generate access token
   generateAccessToken: async (
     id: number,
-  ): Promise<{
-    token: string;
-    access_url: string;
-    proxy_url: string;
-    expires_at: string;
-  }> => {
-    const response = await api.post(`/instances/${id}/access`);
+    mode: InstanceAccessMode = "desktop",
+  ): Promise<InstanceAccessTokenResponse> => {
+    const response = await api.post(`/instances/${id}/access`, undefined, {
+      params: { mode },
+    });
     return response.data.data;
   },
 
   // Access instance with token
-  getAccessUrl: (id: number, token: string): string => {
-    return `/api/v1/instances/${id}/access?token=${token}`;
+  getAccessUrl: (
+    id: number,
+    token: string,
+    mode: InstanceAccessMode = "desktop",
+  ): string => {
+    const params = new URLSearchParams({ token, mode });
+    return `/api/v1/instances/${id}/access?${params.toString()}`;
+  },
+
+  getControlUiChatUrl: (accessUrl: string): string => {
+    if (!accessUrl) {
+      return "";
+    }
+    const [urlWithoutHash, hash] = accessUrl.split("#", 2);
+    const [pathWithoutQuery] = urlWithoutHash.split("?", 1);
+    const basePath = pathWithoutQuery.endsWith("/")
+      ? pathWithoutQuery
+      : `${pathWithoutQuery}/`;
+    return `${basePath}chat?session=main${hash ? `#${hash}` : ""}`;
   },
 
   exportOpenClawWorkspace: async (id: number): Promise<Blob> => {

@@ -1,6 +1,15 @@
 import { create } from 'zustand';
 import type { User } from '../types/auth';
 import { authService } from '../services/authService';
+import { DEFAULT_LOCALE, FALLBACK_LOCALE, isSupportedLocale, translate } from '../lib/i18n';
+
+const LOCALE_STORAGE_KEY = 'clawmanager_locale';
+
+const authFallbackMessage = (key: string) => {
+  const storedLocale = localStorage.getItem(LOCALE_STORAGE_KEY);
+  const locale = isSupportedLocale(storedLocale) ? storedLocale : DEFAULT_LOCALE;
+  return translate(locale, key) ?? translate(FALLBACK_LOCALE, key) ?? key;
+};
 
 interface AuthState {
   user: User | null;
@@ -46,7 +55,7 @@ export const useAuthStore = create<AuthState>((set) => {
         set({ user, isAuthenticated: true, isLoading: false });
       } catch (err: any) {
         set({ 
-          error: err.response?.data?.error || 'Login failed', 
+          error: err.response?.data?.error || authFallbackMessage('auth.loginFailed'),
           isLoading: false,
           isAuthenticated: false 
         });
@@ -64,7 +73,7 @@ export const useAuthStore = create<AuthState>((set) => {
         set({ user, isAuthenticated: true, isLoading: false });
       } catch (err: any) {
         set({ 
-          error: err.response?.data?.error || 'Registration failed', 
+          error: err.response?.data?.error || authFallbackMessage('auth.registrationFailed'),
           isLoading: false 
         });
         throw err;

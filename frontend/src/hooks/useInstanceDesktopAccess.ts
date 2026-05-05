@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { instanceService } from "../services/instanceService";
+import type { InstanceAccessMode } from "../services/instanceService";
 
 interface RefreshAccessOptions {
   forceReload?: boolean;
@@ -9,6 +10,7 @@ interface RefreshAccessOptions {
 interface UseInstanceDesktopAccessOptions {
   instanceId: number | null;
   isRunning: boolean;
+  accessMode?: InstanceAccessMode;
   retainSessionOnStop?: boolean;
   resolveEmbedUrl: (url: string | null) => string | null;
   failedMessage: string;
@@ -27,11 +29,28 @@ type DesktopSessionSnapshot = {
   hasEstablishedSession: boolean;
 };
 
-const desktopSessionStore = new Map<number, DesktopSessionSnapshot>();
+const desktopSessionStore = new Map<string, DesktopSessionSnapshot>();
+const accessSessionStoreKey = (
+  instanceId: number,
+  accessMode: InstanceAccessMode,
+) => `${accessMode}:${instanceId}`;
+
+function accessErrorMessage(error: unknown, fallback: string): string {
+  if (typeof error === "object" && error !== null && "response" in error) {
+    const response = (error as { response?: { data?: { error?: unknown } } })
+      .response;
+    if (typeof response?.data?.error === "string") {
+      return response.data.error;
+    }
+  }
+
+  return fallback;
+}
 
 export function useInstanceDesktopAccess({
   instanceId,
   isRunning,
+  accessMode = "desktop",
   retainSessionOnStop = false,
   resolveEmbedUrl,
   failedMessage,
@@ -39,7 +58,7 @@ export function useInstanceDesktopAccess({
   retryDelayMs = DEFAULT_RETRY_DELAY_MS,
 }: UseInstanceDesktopAccessOptions) {
   const initialCachedSession = instanceId
-    ? desktopSessionStore.get(instanceId)
+    ? desktopSessionStore.get(accessSessionStoreKey(instanceId, accessMode))
     : null;
 
   const [embedUrl, setEmbedUrl] = useState<string | null>(
@@ -76,13 +95,14 @@ export function useInstanceDesktopAccess({
         return;
       }
 
-      const current = desktopSessionStore.get(instanceId) ?? {
+      const storeKey = accessSessionStoreKey(instanceId, accessMode);
+      const current = desktopSessionStore.get(storeKey) ?? {
         embedUrl: embedUrlRef.current,
         expiresAt: expiresAtRef.current?.getTime() ?? null,
         hasEstablishedSession: hasEstablishedSessionRef.current,
       };
 
-      desktopSessionStore.set(instanceId, {
+      desktopSessionStore.set(storeKey, {
         embedUrl:
           patch.embedUrl !== undefined ? patch.embedUrl : current.embedUrl,
         expiresAt:
@@ -93,7 +113,7 @@ export function useInstanceDesktopAccess({
             : current.hasEstablishedSession,
       });
     },
-    [instanceId],
+    [accessMode, instanceId],
   );
 
   useEffect(() => {
@@ -128,14 +148,14 @@ export function useInstanceDesktopAccess({
     expiresAtRef.current = null;
     hasEstablishedSessionRef.current = false;
     if (instanceId) {
-      desktopSessionStore.delete(instanceId);
+      desktopSessionStore.delete(accessSessionStoreKey(instanceId, accessMode));
     }
     setEmbedUrl(null);
     setExpiresAt(null);
     setError(null);
     setLoading(false);
     setReconnecting(false);
-  }, [clearRefreshTimeout, clearRetryTimeout, instanceId]);
+  }, [accessMode, clearRefreshTimeout, clearRetryTimeout, instanceId]);
 
   const shouldPreserveSession = useCallback(() => {
     return (
@@ -183,7 +203,10 @@ export function useInstanceDesktopAccess({
       }
 
       try {
-        const data = await instanceService.generateAccessToken(instanceId);
+        const data = await instanceService.generateAccessToken(
+          instanceId,
+          accessMode,
+        );
         if (requestId !== requestIdRef.current) {
           return;
         }
@@ -207,12 +230,12 @@ export function useInstanceDesktopAccess({
           embedUrl: !previousEmbedUrl || forceReload ? nextEmbedUrl : previousEmbedUrl,
           expiresAt: nextExpiresAt.getTime(),
         });
-      } catch (err: any) {
+      } catch (error: unknown) {
         if (requestId !== requestIdRef.current) {
           return;
         }
 
-        setError(err.response?.data?.error || failedMessage);
+        setError(accessErrorMessage(error, failedMessage));
         if (!embedUrlRef.current) {
           setEmbedUrl(null);
           setExpiresAt(null);
@@ -228,6 +251,7 @@ export function useInstanceDesktopAccess({
     [
       clearAccessState,
       clearRetryTimeout,
+      accessMode,
       failedMessage,
       instanceId,
       isRunning,

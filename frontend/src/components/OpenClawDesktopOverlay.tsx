@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import { useI18n } from "../contexts/I18nContext";
 
 type OverlayCommand =
   | "start"
@@ -18,6 +19,7 @@ export function OpenClawDesktopOverlay({
   actionLoading: string | null;
   onCommand: (command: OverlayCommand) => void;
 }) {
+  const { t } = useI18n();
   const rootRef = useRef<HTMLDivElement | null>(null);
   const orbRef = useRef<HTMLButtonElement | null>(null);
   const dragOffsetRef = useRef({ x: 0, y: 0 });
@@ -162,7 +164,7 @@ export function OpenClawDesktopOverlay({
   const actions = [
     {
       key: "start",
-      label: "Start",
+      label: t("common.start"),
       icon: <StartIcon />,
       vector: actionVectors[0],
       disabled:
@@ -177,7 +179,7 @@ export function OpenClawDesktopOverlay({
     },
     {
       key: "stop",
-      label: "Stop",
+      label: t("common.stop"),
       icon: <StopIcon />,
       vector: actionVectors[1],
       disabled:
@@ -192,7 +194,7 @@ export function OpenClawDesktopOverlay({
     },
     {
       key: "restart",
-      label: "Restart",
+      label: t("common.restart"),
       icon: <RestartIcon />,
       vector: actionVectors[2],
       disabled: !canControl || actionLoading === "runtime-restart",
@@ -209,7 +211,7 @@ export function OpenClawDesktopOverlay({
       <button
         ref={orbRef}
         type="button"
-        aria-label="Open OpenClaw gateway controls"
+        aria-label={t("instances.openClawGatewayControls")}
         onMouseEnter={cancelHide}
         onMouseLeave={scheduleHide}
         onPointerDown={handlePointerDown}

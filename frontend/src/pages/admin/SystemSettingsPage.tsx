@@ -8,12 +8,12 @@ import {
 } from '../../services/systemSettingsService';
 
 const IMAGE_TYPE_OPTIONS = [
-  { value: 'openclaw', label: 'OpenClaw Desktop', defaultImage: 'ghcr.io/yuan-lab-llm/clawmanager-openclaw-image/openclaw:latest' },
-  { value: 'ubuntu', label: 'Ubuntu Desktop', defaultImage: 'lscr.io/linuxserver/webtop:ubuntu-xfce' },
-  { value: 'webtop', label: 'Webtop Desktop', defaultImage: 'lscr.io/linuxserver/webtop:ubuntu-xfce' },
-  { value: 'debian', label: 'Debian Desktop', defaultImage: 'docker.io/clawreef/debian-desktop:12' },
-  { value: 'centos', label: 'CentOS Desktop', defaultImage: 'docker.io/clawreef/centos-desktop:9' },
-  { value: 'custom', label: 'Custom Image', defaultImage: 'registry.example.com/your-custom-image:latest' },
+  { value: 'openclaw', labelKey: 'instances.instanceTypes.openclaw.name', fallbackLabel: 'OpenClaw Desktop', defaultImage: 'ghcr.io/yuan-lab-llm/clawmanager-openclaw-image/openclaw:latest' },
+  { value: 'ubuntu', labelKey: 'instances.instanceTypes.ubuntu.name', fallbackLabel: 'Ubuntu Desktop', defaultImage: 'lscr.io/linuxserver/webtop:ubuntu-xfce' },
+  { value: 'webtop', labelKey: 'instances.instanceTypes.webtop.name', fallbackLabel: 'Webtop Desktop', defaultImage: 'lscr.io/linuxserver/webtop:ubuntu-xfce' },
+  { value: 'debian', labelKey: 'instances.instanceTypes.debian.name', fallbackLabel: 'Debian Desktop', defaultImage: 'docker.io/clawreef/debian-desktop:12' },
+  { value: 'centos', labelKey: 'instances.instanceTypes.centos.name', fallbackLabel: 'CentOS Desktop', defaultImage: 'docker.io/clawreef/centos-desktop:9' },
+  { value: 'custom', labelKey: 'instances.instanceTypes.custom.name', fallbackLabel: 'Custom Image', defaultImage: 'registry.example.com/your-custom-image:latest' },
 ];
 
 interface EditableImageCard extends SystemImageSetting {
@@ -23,11 +23,29 @@ interface EditableImageCard extends SystemImageSetting {
   error?: string | null;
 }
 
+const getApiErrorText = (error: unknown) => {
+  if (typeof error !== 'object' || error === null || !('response' in error)) {
+    return undefined;
+  }
+
+  const response = (error as { response?: { data?: { error?: unknown } } }).response;
+  return typeof response?.data?.error === 'string' ? response.data.error : undefined;
+};
+
 const SystemSettingsPage: React.FC = () => {
   const { t } = useI18n();
   const [cards, setCards] = useState<EditableImageCard[]>([]);
   const [loading, setLoading] = useState(true);
   const [pageError, setPageError] = useState<string | null>(null);
+
+  const getImageTypeLabel = (option?: (typeof IMAGE_TYPE_OPTIONS)[number]) => {
+    if (!option) {
+      return 'Ubuntu Desktop';
+    }
+
+    const label = t(option.labelKey);
+    return label === option.labelKey ? option.fallbackLabel : label;
+  };
 
   const usedTypes = useMemo(
     () => cards.map((card) => card.instance_type).filter(Boolean),
@@ -45,15 +63,15 @@ const SystemSettingsPage: React.FC = () => {
           local_id: `${item.instance_type}-${index}`,
           error: null,
         })));
-      } catch (error: any) {
-        setPageError(error.response?.data?.error || t('systemSettingsPage.loadFailed'));
+      } catch (error: unknown) {
+        setPageError(getApiErrorText(error) || t('systemSettingsPage.loadFailed'));
       } finally {
         setLoading(false);
       }
     };
 
     loadSettings();
-  }, []);
+  }, [t]);
 
   const addCard = () => {
     const nextType = IMAGE_TYPE_OPTIONS.find((option) => !usedTypes.includes(option.value));
@@ -62,7 +80,7 @@ const SystemSettingsPage: React.FC = () => {
       {
         local_id: `new-${Date.now()}`,
         instance_type: nextType?.value ?? 'ubuntu',
-        display_name: nextType?.label ?? 'Ubuntu Desktop',
+        display_name: getImageTypeLabel(nextType),
         image: nextType?.defaultImage ?? '',
         isNew: true,
         is_enabled: true,
@@ -81,7 +99,7 @@ const SystemSettingsPage: React.FC = () => {
       if (patch.instance_type) {
         const option = IMAGE_TYPE_OPTIONS.find((item) => item.value === patch.instance_type);
         if (option) {
-          next.display_name = option.label;
+          next.display_name = getImageTypeLabel(option);
           if (card.isNew && (!card.image || card.image === card.display_name)) {
             next.image = option.defaultImage;
           }
@@ -120,10 +138,10 @@ const SystemSettingsPage: React.FC = () => {
         saving: false,
         error: null,
       } : item));
-    } catch (error: any) {
+    } catch (error: unknown) {
       updateCard(card.local_id, {
         saving: false,
-        error: error.response?.data?.error || t('systemSettingsPage.saveFailed'),
+        error: getApiErrorText(error) || t('systemSettingsPage.saveFailed'),
       });
     }
   };
@@ -138,10 +156,10 @@ const SystemSettingsPage: React.FC = () => {
     try {
       await systemSettingsService.deleteImageSetting(card.instance_type);
       setCards((current) => current.filter((item) => item.local_id !== card.local_id));
-    } catch (error: any) {
+    } catch (error: unknown) {
       updateCard(card.local_id, {
         saving: false,
-        error: error.response?.data?.error || t('systemSettingsPage.deleteFailed'),
+        error: getApiErrorText(error) || t('systemSettingsPage.deleteFailed'),
       });
     }
   };
@@ -196,7 +214,7 @@ const SystemSettingsPage: React.FC = () => {
                         >
                           {selectableTypes.map((option) => (
                             <option key={option.value} value={option.value}>
-                              {option.label}
+                              {getImageTypeLabel(option)}
                             </option>
                           ))}
                         </select>

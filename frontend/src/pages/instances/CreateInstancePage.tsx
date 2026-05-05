@@ -7,13 +7,22 @@ import { instanceService } from '../../services/instanceService';
 import { skillService } from '../../services/skillService';
 import { userService } from '../../services/userService';
 import { INSTANCE_TYPES, PRESET_CONFIGS } from '../../types/instance';
-import type { CreateInstanceRequest } from '../../types/instance';
+import type { CreateInstanceRequest, InstanceType } from '../../types/instance';
 import type { Instance } from '../../types/instance';
 import type { OpenClawConfigCompilePreview } from '../../types/openclawConfig';
 import type { Skill } from '../../types/skill';
 import type { UserQuota } from '../../types/user';
 import { useI18n } from '../../contexts/I18nContext';
 import { systemSettingsService } from '../../services/systemSettingsService';
+
+const getApiErrorText = (error: unknown) => {
+  if (typeof error !== 'object' || error === null || !('response' in error)) {
+    return undefined;
+  }
+
+  const response = (error as { response?: { data?: { error?: unknown } } }).response;
+  return typeof response?.data?.error === 'string' ? response.data.error : undefined;
+};
 
 const CreateInstancePage: React.FC = () => {
   const { user } = useAuth();
@@ -150,7 +159,7 @@ const CreateInstancePage: React.FC = () => {
       }
       setFormData({
         ...formData,
-        type: typeId as any,
+        type: typeId as CreateInstanceRequest['type'],
         os_type: instanceType.defaultOs,
         os_version: instanceType.defaultVersion,
         // Auto-set storage class for Ubuntu instances
@@ -198,8 +207,8 @@ const CreateInstancePage: React.FC = () => {
       }
 
       navigate('/instances');
-    } catch (err: any) {
-      setError(getCreateErrorMessage(err.response?.data?.error));
+    } catch (err: unknown) {
+      setError(getCreateErrorMessage(getApiErrorText(err)));
     } finally {
       setLoading(false);
     }
@@ -281,7 +290,7 @@ const CreateInstancePage: React.FC = () => {
         },
         {
           key: 'gpu',
-          label: 'GPU',
+          label: t('common.gpu'),
           next: usedResources.gpu + (formData.gpu_enabled ? formData.gpu_count || 0 : 0),
           max: quota.max_gpu_count,
           exceeded: usedResources.gpu + (formData.gpu_enabled ? formData.gpu_count || 0 : 0) > quota.max_gpu_count,
@@ -309,7 +318,7 @@ const CreateInstancePage: React.FC = () => {
       return (
         <img
           src="/openclaw.png"
-          alt="OpenClaw"
+          alt={translatedText('instances.instanceTypes.openclaw.name', 'OpenClaw Desktop')}
           className="h-10 w-10 object-contain"
         />
       );
@@ -320,6 +329,19 @@ const CreateInstancePage: React.FC = () => {
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
       </svg>
     );
+  };
+
+  const translatedText = (key: string, fallback: string) => {
+    const value = t(key);
+    return value === key ? fallback : value;
+  };
+
+  const getInstanceTypeName = (type?: InstanceType) => {
+    return type ? translatedText(type.nameKey, type.name) : '';
+  };
+
+  const getInstanceTypeDescription = (type: InstanceType) => {
+    return translatedText(type.descriptionKey, type.description);
   };
 
   return (
@@ -436,8 +458,8 @@ const CreateInstancePage: React.FC = () => {
                         </div>
                       </div>
                       <div className="ml-4">
-                        <h3 className="text-sm font-medium text-gray-900">{type.name}</h3>
-                        <p className="mt-1 text-xs text-gray-500">{type.description}</p>
+                        <h3 className="text-sm font-medium text-gray-900">{getInstanceTypeName(type)}</h3>
+                        <p className="mt-1 text-xs text-gray-500">{getInstanceTypeDescription(type)}</p>
                       </div>
                     </div>
                     {formData.type === type.id && (
@@ -473,10 +495,10 @@ const CreateInstancePage: React.FC = () => {
                           : 'border-gray-300'
                       }`}
                     >
-                      <h3 className="font-medium text-gray-900">{config.name}</h3>
-                      <p className="text-sm text-gray-500 mt-1">{config.description}</p>
+                      <h3 className="font-medium text-gray-900">{translatedText(config.nameKey, config.name)}</h3>
+                      <p className="text-sm text-gray-500 mt-1">{translatedText(config.descriptionKey, config.description)}</p>
                       <div className="mt-2 text-sm text-gray-600">
-                        {config.cpu_cores} CPU • {config.memory_gb} GB RAM • {config.disk_gb} GB Disk
+                        {t('instances.presetResourceSummary', { cpu: config.cpu_cores, memory: config.memory_gb, disk: config.disk_gb })}
                       </div>
                     </button>
                   ))}
@@ -613,21 +635,21 @@ const CreateInstancePage: React.FC = () => {
                   <div className="app-panel p-6">
                     <div className="flex items-start justify-between gap-4">
                       <div>
-                        <h2 className="text-lg font-medium text-gray-900">Skill Injection</h2>
+                        <h2 className="text-lg font-medium text-gray-900">{t('instances.skillInjection')}</h2>
                         <p className="mt-1 text-sm text-gray-500">
-                          Select one or more uploaded skills to attach to this OpenClaw instance.
+                          {t('instances.skillInjectionDesc')}
                         </p>
                       </div>
                       <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700">
-                        {selectedSkillIds.length} selected
+                        {t('instances.selectedCount', { count: selectedSkillIds.length })}
                       </span>
                     </div>
                     <div className="mt-5 grid grid-cols-1 gap-3 md:grid-cols-2">
                       {skillLoading ? (
-                        <div className="text-sm text-gray-500">Loading skills...</div>
+                        <div className="text-sm text-gray-500">{t('instances.loadingSkills')}</div>
                       ) : availableSkills.length === 0 ? (
                         <div className="rounded-2xl border border-dashed border-gray-300 px-4 py-5 text-sm text-gray-500">
-                          No available skills. Upload a skill zip in OpenClaw Resource Management first, then return here to attach it to this instance.
+                          {t('instances.noAvailableSkills')}
                         </div>
                       ) : availableSkills.map((skill) => {
                         const checked = selectedSkillIds.includes(skill.id);
@@ -650,7 +672,7 @@ const CreateInstancePage: React.FC = () => {
                             <span className="min-w-0">
                               <span className="block font-medium text-gray-900">{skill.name}</span>
                               <span className="mt-1 block text-xs text-gray-500">
-                                {skill.skill_key} · risk {skill.risk_level} · v{skill.current_version_no || 1}
+                                {t('instances.skillRiskVersion', { key: skill.skill_key, risk: skill.risk_level, version: skill.current_version_no || 1 })}
                               </span>
                               {skill.description && <span className="mt-2 block text-sm text-gray-600">{skill.description}</span>}
                             </span>
@@ -670,7 +692,7 @@ const CreateInstancePage: React.FC = () => {
                           </p>
                         </div>
                         <span className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-600">
-                          Required for archive mode
+                          {t('instances.archiveModeRequired')}
                         </span>
                       </div>
 
@@ -718,14 +740,14 @@ const CreateInstancePage: React.FC = () => {
                     <div className="app-panel p-6">
                       <div className="flex items-start justify-between gap-4">
                         <div>
-                          <h2 className="text-lg font-medium text-gray-900">Config Preview</h2>
+                          <h2 className="text-lg font-medium text-gray-900">{t('instances.configPreview')}</h2>
                           <p className="mt-1 text-sm text-gray-500">
-                            We compile your selected config assets before instance creation so dependency and payload issues show up early.
+                            {t('instances.configPreviewDesc')}
                           </p>
                         </div>
                         {openClawPreviewLoading && (
                           <span className="rounded-full bg-amber-50 px-3 py-1 text-xs font-medium text-amber-700">
-                            Compiling...
+                            {t('instances.compiling')}
                           </span>
                         )}
                       </div>
@@ -740,22 +762,22 @@ const CreateInstancePage: React.FC = () => {
                         <div className="mt-4 space-y-4">
                           <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                             <div className="rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3">
-                              <div className="text-xs uppercase tracking-[0.18em] text-gray-500">Resolved Resources</div>
+                              <div className="text-xs uppercase tracking-[0.18em] text-gray-500">{t('instances.resolvedResources')}</div>
                               <div className="mt-2 text-2xl font-semibold text-gray-900">{openClawPreview.resolved_resources.length}</div>
                             </div>
                             <div className="rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3">
-                              <div className="text-xs uppercase tracking-[0.18em] text-gray-500">Env Variables</div>
+                              <div className="text-xs uppercase tracking-[0.18em] text-gray-500">{t('instances.envVariables')}</div>
                               <div className="mt-2 text-2xl font-semibold text-gray-900">{openClawPreview.env_names.length}</div>
                             </div>
                             <div className="rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3">
-                              <div className="text-xs uppercase tracking-[0.18em] text-gray-500">Payload Size</div>
+                              <div className="text-xs uppercase tracking-[0.18em] text-gray-500">{t('instances.payloadSize')}</div>
                               <div className="mt-2 text-2xl font-semibold text-gray-900">{openClawPreview.total_payload_bytes} B</div>
                             </div>
                           </div>
 
                           {openClawPreview.auto_included.length > 0 && (
                             <div className="rounded-2xl border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-700">
-                              Auto included dependencies: {openClawPreview.auto_included.map((item) => item.name).join(', ')}
+                              {t('instances.autoIncludedDependencies', { names: openClawPreview.auto_included.map((item) => item.name).join(', ') })}
                             </div>
                           )}
 
@@ -815,11 +837,11 @@ const CreateInstancePage: React.FC = () => {
                   </div>
                   <div>
                     <dt className="text-sm font-medium text-gray-500">{t('common.type')}</dt>
-                    <dd className="mt-1 text-sm text-gray-900">{availableTypes.find(t => t.id === formData.type)?.name}</dd>
+                    <dd className="mt-1 text-sm text-gray-900">{getInstanceTypeName(availableTypes.find((type) => type.id === formData.type))}</dd>
                   </div>
                   <div>
                     <dt className="text-sm font-medium text-gray-500">{t('common.cpu')}</dt>
-                    <dd className="mt-1 text-sm text-gray-900">{formData.cpu_cores} cores</dd>
+                    <dd className="mt-1 text-sm text-gray-900">{t('instances.cpuCoreCount', { count: formData.cpu_cores })}</dd>
                   </div>
                   <div>
                     <dt className="text-sm font-medium text-gray-500">{t('instances.memoryLabel')}</dt>
@@ -830,19 +852,19 @@ const CreateInstancePage: React.FC = () => {
                     <dd className="mt-1 text-sm text-gray-900">{formData.disk_gb} GB</dd>
                   </div>
                   <div>
-                    <dt className="text-sm font-medium text-gray-500">GPU</dt>
-                    <dd className="mt-1 text-sm text-gray-900">{formData.gpu_enabled ? `${formData.gpu_count} GPU(s)` : 'Disabled'}</dd>
+                    <dt className="text-sm font-medium text-gray-500">{t('common.gpu')}</dt>
+                    <dd className="mt-1 text-sm text-gray-900">{formData.gpu_enabled ? t('instances.gpuSummary', { count: formData.gpu_count || 0 }) : t('instances.gpuDisabled')}</dd>
                   </div>
                   {formData.type === 'openclaw' && (
                     <div className="sm:col-span-2">
-                      <dt className="text-sm font-medium text-gray-500">OpenClaw Bootstrap</dt>
+                      <dt className="text-sm font-medium text-gray-500">{t('instances.openClawBootstrap')}</dt>
                       <dd className="mt-1 space-y-1 text-sm text-gray-900">
-                        <div>Mode: {openClawInjectionMode}</div>
+                        <div>{t('instances.modeLabel')}: {openClawInjectionMode}</div>
                         {openClawInjectionMode === 'archive' && (
                           <div>{openClawImportFile ? openClawImportFile.name : t('instances.noOpenClawArchiveSelected')}</div>
                         )}
                         {(openClawInjectionMode === 'bundle' || openClawInjectionMode === 'manual') && openClawPreview && (
-                          <div>{openClawPreview.resolved_resources.length} resource(s), {openClawPreview.env_names.length} env payload(s)</div>
+                          <div>{t('instances.resourceEnvPayloadSummary', { resources: openClawPreview.resolved_resources.length, envs: openClawPreview.env_names.length })}</div>
                         )}
                       </dd>
                     </div>

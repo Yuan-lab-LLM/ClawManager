@@ -2,11 +2,13 @@ import { memo, useState, useEffect, useCallback, useRef } from "react";
 import { OpenClawDesktopOverlay } from "./OpenClawDesktopOverlay";
 import { useI18n } from "../contexts/I18nContext";
 import { useInstanceDesktopAccess } from "../hooks/useInstanceDesktopAccess";
+import { instanceService } from "../services/instanceService";
 
 interface InstanceAccessProps {
   instanceId: number;
   instanceName: string;
   isRunning: boolean;
+  showControlUiEntry?: boolean;
   overlay?: {
     gatewayStatus: string;
     canControl: boolean;
@@ -17,27 +19,39 @@ interface InstanceAccessProps {
 
 const desktopConnectPreferenceStore = new Map<number, boolean>();
 
+function accessErrorMessage(error: unknown, fallback: string): string {
+  if (typeof error === "object" && error !== null && "response" in error) {
+    const response = (error as { response?: { data?: { error?: unknown } } })
+      .response;
+    if (typeof response?.data?.error === "string") {
+      return response.data.error;
+    }
+  }
+
+  return fallback;
+}
+
 const DesktopIframeSurface = memo(function DesktopIframeSurface({
   frameHeightClass,
   iframeRef,
   embedUrl,
-  instanceName,
   handleFrameLoad,
   handleFrameError,
+  frameTitle,
 }: {
   frameHeightClass: string;
   iframeRef: React.RefObject<HTMLIFrameElement | null>;
   embedUrl: string;
-  instanceName: string;
   handleFrameLoad: (frame: HTMLIFrameElement | null) => void;
   handleFrameError: () => void;
+  frameTitle: string;
 }) {
   return (
     <div className={frameHeightClass}>
       <iframe
         ref={iframeRef}
         src={embedUrl}
-        title={`${instanceName} Desktop`}
+        title={frameTitle}
         className="w-full h-full border-0"
         allow="clipboard-read; clipboard-write; fullscreen; autoplay"
         onLoad={() => handleFrameLoad(iframeRef.current)}
@@ -51,6 +65,7 @@ export function InstanceAccess({
   instanceId,
   instanceName,
   isRunning,
+  showControlUiEntry = false,
   overlay,
 }: InstanceAccessProps) {
   const { t } = useI18n();
@@ -58,6 +73,8 @@ export function InstanceAccess({
   const [shouldConnect, setShouldConnect] = useState(
     () => desktopConnectPreferenceStore.get(instanceId) ?? false,
   );
+  const [controlUiOpening, setControlUiOpening] = useState(false);
+  const [controlUiError, setControlUiError] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
 
@@ -96,6 +113,7 @@ export function InstanceAccess({
   } = useInstanceDesktopAccess({
     instanceId,
     isRunning: isRunning && shouldConnect,
+    accessMode: "desktop",
     retainSessionOnStop: shouldConnect,
     resolveEmbedUrl,
     failedMessage: t("instances.failedToGenerateAccessToken"),
@@ -103,6 +121,8 @@ export function InstanceAccess({
 
   useEffect(() => {
     setShouldConnect(desktopConnectPreferenceStore.get(instanceId) ?? false);
+    setControlUiError(null);
+    setControlUiOpening(false);
   }, [instanceId]);
 
   useEffect(() => {
@@ -162,6 +182,36 @@ export function InstanceAccess({
     }
 
     setShouldConnect(true);
+  };
+
+  const handleOpenControlUi = async () => {
+    if (!showControlUiEntry || !isRunning || controlUiOpening) {
+      return;
+    }
+
+    try {
+      setControlUiOpening(true);
+      setControlUiError(null);
+      const data = await instanceService.generateAccessToken(
+        instanceId,
+        "control-ui",
+      );
+      const controlUiUrl = instanceService.getControlUiChatUrl(
+        data.proxy_url || data.access_url,
+      );
+      const resolvedControlUiUrl = resolveEmbedUrl(controlUiUrl);
+      if (!resolvedControlUiUrl) {
+        setControlUiError(t("instances.failedToOpenControlUi"));
+        return;
+      }
+      window.open(resolvedControlUiUrl, "_blank", "noopener,noreferrer");
+    } catch (error: unknown) {
+      setControlUiError(
+        accessErrorMessage(error, t("instances.failedToOpenControlUi")),
+      );
+    } finally {
+      setControlUiOpening(false);
+    }
   };
 
   if (!isRunning && !hasDesktopSession) {
@@ -239,11 +289,28 @@ export function InstanceAccess({
           {error && shouldConnect && (
             <p className="mt-4 max-w-md text-sm text-red-300">{error}</p>
           )}
+          {controlUiError && (
+            <p className="mt-3 max-w-md text-sm text-red-300">
+              {controlUiError}
+            </p>
+          )}
           <p className="mt-4 text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">
             {loading
               ? t("instances.generatingToken")
               : t("instances.generateAccess")}
           </p>
+          {showControlUiEntry ? (
+            <button
+              type="button"
+              onClick={handleOpenControlUi}
+              disabled={!isRunning || controlUiOpening}
+              className="mt-5 rounded-xl border border-white/15 bg-white/10 px-4 py-2 text-sm font-medium text-white transition hover:bg-white/16 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {controlUiOpening
+                ? t("instances.openingControlUi")
+                : t("instances.openControlUi")}
+            </button>
+          ) : null}
         </div>
       </div>
     );
@@ -274,6 +341,18 @@ export function InstanceAccess({
           )}
         </div>
         <div className="flex items-center space-x-2">
+          {showControlUiEntry ? (
+            <button
+              type="button"
+              onClick={handleOpenControlUi}
+              disabled={!isRunning || controlUiOpening}
+              className="rounded-xl bg-[#243041] px-3 py-1 text-xs font-medium text-gray-300 hover:bg-[#31415a] hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {controlUiOpening
+                ? t("instances.openingControlUi")
+                : t("instances.openControlUi")}
+            </button>
+          ) : null}
           <button
             onClick={() => refreshAccess({ forceReload: true })}
             className="rounded-xl bg-[#243041] px-3 py-1 text-xs font-medium text-gray-300 hover:bg-[#31415a] hover:text-white"
@@ -321,9 +400,9 @@ export function InstanceAccess({
         frameHeightClass={frameHeightClass}
         iframeRef={iframeRef}
         embedUrl={embedUrl}
-        instanceName={instanceName}
         handleFrameLoad={handleFrameLoad}
         handleFrameError={handleFrameError}
+        frameTitle={t("instances.desktopFrameTitle", { name: instanceName })}
       />
     </div>
   );

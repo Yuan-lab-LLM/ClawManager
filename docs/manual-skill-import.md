@@ -1,6 +1,6 @@
 # 手动 Skill 导入链路
 
-这条链路的目标很窄：允许操作者在本地拿到一个 Skill `.zip` 包后，把它导入 ClawManager，再挂载到指定 OpenClaw 实例。
+这条链路的目标很窄：允许操作者在本地拿到一个 Skill `.zip` 包后，把它导入 GTManager，再挂载到指定 OpenClaw 实例。
 
 这条链路不依赖下列能力：
 
@@ -16,7 +16,7 @@ Skill `.zip` 包先放在操作者自己的本地机器任意目录即可，例�
 /Users/<you>/Downloads/my-skill-pack.zip
 ```
 
-不要把 Skill 包手工拷进 repo、Pod 文件系统或 Kubernetes manifest。正确入口是由平台上传接口接收，ClawManager 会自己存到对象存储。
+不要把 Skill 包手工拷进 repo、Pod 文件系统或 Kubernetes manifest。正确入口是由平台上传接口接收，GTManager 会自己存到对象存储。
 
 也不要把 `ClawManager-full-workspace-*.tar.gz` 这种完整工程包当成 Skill 包上传。那个文件应该先在本地解压，然后按 `00-START-HERE.md` 部署平台。
 
@@ -44,7 +44,7 @@ my-skill-pack.zip
 
 ### UI 路径
 
-1. 登录 ClawManager 的 `User` 界面
+1. 登录 GTManager 的 `User` 界面
 2. 进入 `OpenClaw Resource Management`
 3. 在 Skill 区域上传 `.zip`
 4. 上传完成后，平台会生成 `uploaded skill`
@@ -99,11 +99,11 @@ curl -k \
 
 链路会按下面顺序推进：
 
-1. ClawManager 接收本地 `.zip`
+1. GTManager 接收本地 `.zip`
 2. 为每个一级目录生成一个 `uploaded skill`
 3. 写入 `skill_blobs` 和 `skill_versions`
 4. attach 到实例时写入 `instance_skills`
-5. ClawManager 下发 `install_skill` 命令
+5. GTManager 下发 `install_skill` 命令
 6. runtime agent 再从平台下载对应 skill version 并安装到实例
 
 所以，Skill 包的唯一人工动作只有两步：
