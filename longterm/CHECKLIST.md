@@ -17,7 +17,7 @@
 - [ ] If regression appears, fix regression first.
 
 ## End-of-session
-- [ ] Update only `passes` field for completed feature(s).
+- [ ] Update only `passes` field for E2E-evidenced feature(s).
 - [ ] Update `claude-progress.txt` (done, issues, next feature).
 - [ ] Confirm no migration constraints were violated.
 - [ ] Ensure no known critical breakage remains.

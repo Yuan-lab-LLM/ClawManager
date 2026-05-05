@@ -5,7 +5,7 @@
 **Repo**: /Users/eduardogan/Desktop/GHJProject/ClawManager
 **Upstream**: https://github.com/Yuan-lab-LLM/ClawManager
 **Owner**: eduardogan
-**Last Updated**: 2026-04-14
+**Last Updated**: 2026-04-29
 
 ---
 
@@ -74,8 +74,10 @@ ClawManager is a Kubernetes-first control plane that lets teams deploy, manage, 
 cd backend && go build ./...
 cd backend && go test ./...
 
-# Frontend: install and run
-cd frontend && npm install
+# Frontend: install, check, and run
+cd frontend && npm ci
+cd frontend && npm run lint
+cd frontend && npm run build
 cd frontend && npm run dev
 
 # K3S local cluster (k3d)
@@ -84,6 +86,10 @@ k3d cluster delete clawmanager
 
 # Deploy ClawManager to K3S
 kubectl apply -f deployments/k3s/clawmanager.yaml
+
+# Validate deployment manifests without applying
+kubectl apply --dry-run=client -f deployments/k3s/clawmanager.yaml
+kubectl apply --dry-run=client -f deployments/k8s/clawmanager.yaml
 
 # Check deployment
 kubectl get pods -n clawmanager-system
@@ -118,7 +124,8 @@ kubectl get svc -n clawmanager-system
 - [ ] spec.md written and reviewed
 - [ ] plan.md written with technical approach
 - [ ] tasks.md created and all tasks checked off
-- [ ] Tests run and pass (`go test ./...` or `npm test`)
-- [ ] Deployment verified (`kubectl apply --dry-run=client`)
-- [ ] `feature_list.json` updated with `passes: true` and evidence
+- [ ] Prerequisite checks run and recorded (`go test ./...`, `npm run lint`, `npm run build`, and relevant dry-runs)
+- [ ] Deployment manifests verified when touched or deployment behavior is in scope (`kubectl apply --dry-run=client`)
+- [ ] End-to-end evidence recorded through Playwright or explicit human test feedback
+- [ ] `feature_list.json` updated with `passes: true` only after E2E evidence exists
 - [ ] `claude-progress.txt` updated
