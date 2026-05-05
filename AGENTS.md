@@ -64,9 +64,10 @@ go test ./...
 
 # Frontend (React)
 cd frontend
-npm install
+npm ci
 npm run dev
-npm test
+npm run lint
+npm run build
 
 # K3S local deployment (via k3d)
 k3d cluster create clawmanager --port "30443:30443@loadbalancer"
@@ -87,8 +88,8 @@ Short version:
 2. Pick an unfinished feature (`passes: false`)
 3. Run `./.specify/scripts/bash/create-new-feature.sh`
 4. Fill `specs/<feature>/spec.md` → `plan.md` → `tasks.md`
-5. Implement step-by-step, run tests, commit
-6. Update `longterm/workspace/feature_list.json` (`passes: true`) and `claude-progress.txt`
+5. Implement step-by-step, run prerequisite checks, review, and capture E2E evidence
+6. Update `longterm/workspace/feature_list.json` (`passes: true`) and `claude-progress.txt` only after E2E evidence exists
 
 ## Forbidden Actions
 
@@ -112,3 +113,10 @@ Short version:
 - When a new fact replaces an old memory, prefer `update_memory` over adding a duplicate.
 - Do not paste `longterm/`, `AgentTeam/`, or `docs/superpowers/` files into Mem0 verbatim; extract the most specific actionable memory instead.
 - When context is about to be lost, a packet closes with active blockers, or a session stops mid-stream, write `session_state`.
+
+## External Expert Escalation Rules
+
+- When the Commander has meaningful uncertainty, suspects an architecture/design risk, or hits a stubborn bug that is not closing through normal repo-local investigation, proactively package the question for external expert review instead of guessing.
+- The escalation packet must include the exact code/file scope, relevant paths, confirmed facts, current hypotheses, constraints, prohibited actions, and the specific decision or fix needed.
+- Provide the packet as a ready-to-forward prompt for the user to send to a senior engineer or GPT-Pro. Do not contact external tools or agents directly unless the user explicitly authorizes it.
+- Keep the package focused: include only the files and snippets needed to answer the question, and preserve secrets/tokens by omission or redaction.
