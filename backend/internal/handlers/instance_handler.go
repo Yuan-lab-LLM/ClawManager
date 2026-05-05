@@ -1,6 +1,9 @@
 package handlers
 
 import (
+	"bytes"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -658,22 +661,40 @@ func (h *InstanceHandler) GenerateAccessToken(c *gin.Context) {
 		return
 	}
 
-	// Generate proxy entry URL. The actual Service remains internal-only.
-	accessURL := h.proxyService.GetProxyURL(instance.ID, "")
+	requestedMode, err := accessModeFromRequest(c)
+	if err != nil {
+		utils.Error(c, http.StatusBadRequest, err.Error())
+		return
+	}
 
-	if accessURL == "" {
+	scope, err := services.ResolveInstanceAccessScope(
+		instance.ID,
+		instance.Type,
+		requestedMode,
+		h.proxyService.GetTargetPortForInstance(instance),
+	)
+	if err != nil {
+		switch {
+		case errors.Is(err, services.ErrInvalidAccessMode), errors.Is(err, services.ErrUnsupportedAccessMode):
+			utils.Error(c, http.StatusBadRequest, err.Error())
+		default:
+			utils.HandleError(c, err)
+		}
+		return
+	}
+
+	if scope.AccessURL == "" {
 		utils.Error(c, http.StatusServiceUnavailable, "Unable to generate access URL")
 		return
 	}
 
 	// Generate access token (valid for 1 hour)
 	maxAgeSeconds := int(time.Hour.Seconds())
-	token, err := h.accessService.GenerateToken(
+	token, err := h.accessService.GenerateTokenForScope(
 		userID.(int),
 		instance.ID,
 		instance.Type,
-		accessURL,
-		h.proxyService.GetTargetPortForInstance(instance),
+		scope,
 		1*time.Hour,
 	)
 	if err != nil {
@@ -684,24 +705,62 @@ func (h *InstanceHandler) GenerateAccessToken(c *gin.Context) {
 	// Store the short-lived access token in an HttpOnly cookie so iframe subresources
 	// and websocket requests can reuse it without leaking the token in URLs.
 	c.SetCookie(
-		fmt.Sprintf("instance_access_%d", instance.ID),
+		scope.CookieName,
 		token.Token,
 		maxAgeSeconds,
-		fmt.Sprintf("/api/v1/instances/%d/proxy", instance.ID),
+		scope.CookiePath,
 		"",
-		false,
+		requestIsSecure(c.Request),
 		true,
 	)
 
 	// Return token and URLs
 	response := map[string]interface{}{
-		"token":      token.Token,
-		"access_url": accessURL,
-		"proxy_url":  h.proxyService.GetProxyURL(instance.ID, token.Token),
-		"expires_at": token.ExpiresAt,
+		"token":       token.Token,
+		"access_url":  scope.AccessURL,
+		"proxy_url":   scope.AccessURL,
+		"access_mode": scope.AccessMode,
+		"target_port": scope.TargetPort,
+		"expires_at":  token.ExpiresAt,
 	}
 
 	utils.Success(c, http.StatusOK, "Access token generated successfully", response)
+}
+
+func accessModeFromRequest(c *gin.Context) (string, error) {
+	hasBodyMode, err := requestBodyHasMode(c)
+	if err != nil {
+		return "", err
+	}
+	if hasBodyMode {
+		return "", fmt.Errorf("mode must be provided as a query parameter")
+	}
+	return c.Query("mode"), nil
+}
+
+func requestBodyHasMode(c *gin.Context) (bool, error) {
+	if c.Request == nil || c.Request.Body == nil {
+		return false, nil
+	}
+	raw, err := c.GetRawData()
+	if err != nil {
+		return false, fmt.Errorf("failed to read request body")
+	}
+	c.Request.Body = io.NopCloser(bytes.NewReader(raw))
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 {
+		return false, nil
+	}
+	if !strings.Contains(c.GetHeader("Content-Type"), "application/json") && !bytes.HasPrefix(trimmed, []byte("{")) {
+		return false, nil
+	}
+
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return false, fmt.Errorf("invalid JSON body")
+	}
+	_, ok := payload["mode"]
+	return ok, nil
 }
 
 // AccessInstance handles instance access via token
@@ -777,6 +836,15 @@ func (h *InstanceHandler) ForceSync(c *gin.Context) {
 
 // ProxyInstance proxies requests to an instance
 func (h *InstanceHandler) ProxyInstance(c *gin.Context) {
+	h.proxyInstanceWithMode(c, services.AccessModeDesktop)
+}
+
+// ProxyControlUIInstance proxies requests to an instance control UI.
+func (h *InstanceHandler) ProxyControlUIInstance(c *gin.Context) {
+	h.proxyInstanceWithMode(c, services.AccessModeControlUI)
+}
+
+func (h *InstanceHandler) proxyInstanceWithMode(c *gin.Context, accessMode string) {
 	idStr := c.Param("id")
 	id, err := strconv.Atoi(idStr)
 	if err != nil {
@@ -784,32 +852,75 @@ func (h *InstanceHandler) ProxyInstance(c *gin.Context) {
 		return
 	}
 
-	// Get token from query parameter
+	instance, err := h.instanceService.GetByID(id)
+	if err != nil {
+		utils.HandleError(c, err)
+		return
+	}
+	if instance == nil {
+		utils.Error(c, http.StatusNotFound, "Instance not found")
+		return
+	}
+	scope, err := services.ResolveInstanceAccessScope(
+		id,
+		instance.Type,
+		accessMode,
+		h.proxyService.GetTargetPortForInstance(instance),
+	)
+	if err != nil {
+		if errors.Is(err, services.ErrInvalidAccessMode) || errors.Is(err, services.ErrUnsupportedAccessMode) {
+			utils.Error(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		utils.HandleError(c, err)
+		return
+	}
+
+	// Get token from query parameter or the route-scoped cookie. Cookie path is
+	// only browser routing help; ValidateTokenForScope below is the boundary.
 	token := c.Query("token")
 	if token == "" {
-		cookieToken, err := c.Cookie(fmt.Sprintf("instance_access_%d", id))
+		cookieToken, err := c.Cookie(scope.CookieName)
 		if err != nil || cookieToken == "" {
 			utils.Error(c, http.StatusBadRequest, "Access token required")
 			return
 		}
 		token = cookieToken
-	} else {
+	}
+
+	if _, err := h.accessService.ValidateTokenForScope(token, scope); err != nil {
+		if errors.Is(err, services.ErrAccessScopeMismatch) {
+			utils.Error(c, http.StatusForbidden, "Access token scope does not match route")
+			return
+		}
+		utils.Error(c, http.StatusUnauthorized, err.Error())
+		return
+	}
+
+	if c.Query("token") != "" {
 		// Promote the one-time query token into a cookie so iframe subresources and
 		// websocket requests can reuse it without appending the token everywhere.
 		c.SetCookie(
-			fmt.Sprintf("instance_access_%d", id),
+			scope.CookieName,
 			token,
 			int(time.Hour.Seconds()),
-			fmt.Sprintf("/api/v1/instances/%d/proxy", id),
+			scope.CookiePath,
 			"",
-			false,
+			requestIsSecure(c.Request),
 			true,
 		)
 	}
 
+	upstreamAuth, err := services.ControlUIUpstreamAuthForInstance(instance, scope)
+	if err != nil {
+		fmt.Printf("Proxy error for instance %d: %v\n", id, err)
+		http.Error(c.Writer, fmt.Sprintf("Failed to proxy request: %v", err), http.StatusBadGateway)
+		return
+	}
+
 	// Check if it's a WebSocket upgrade request
 	if strings.EqualFold(c.GetHeader("Upgrade"), "websocket") {
-		err = h.proxyService.ProxyWebSocket(c.Request.Context(), id, token, c.Writer, c.Request)
+		err = h.proxyService.ProxyWebSocketWithScopeAndUpstreamAuth(c.Request.Context(), scope, token, upstreamAuth, c.Writer, c.Request)
 		if err != nil {
 			http.Error(c.Writer, err.Error(), http.StatusBadGateway)
 		}
@@ -817,7 +928,7 @@ func (h *InstanceHandler) ProxyInstance(c *gin.Context) {
 	}
 
 	// Proxy regular HTTP request
-	err = h.proxyService.ProxyRequest(c.Request.Context(), id, token, c.Writer, c.Request)
+	err = h.proxyService.ProxyRequestWithScopeAndUpstreamAuth(c.Request.Context(), scope, token, upstreamAuth, c.Writer, c.Request)
 	if err != nil {
 		// Log the error
 		fmt.Printf("Proxy error for instance %d: %v\n", id, err)
@@ -832,6 +943,16 @@ func (h *InstanceHandler) ProxyInstance(c *gin.Context) {
 			http.Error(c.Writer, fmt.Sprintf("Failed to proxy request: %v", err), http.StatusBadGateway)
 		}
 	}
+}
+
+func requestIsSecure(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
+	if strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
+		return true
+	}
+	return r.TLS != nil
 }
 
 func (h *InstanceHandler) ExportOpenClaw(c *gin.Context) {

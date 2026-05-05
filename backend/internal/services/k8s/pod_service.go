@@ -3,6 +3,7 @@ package k8s
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -53,6 +54,7 @@ func (s *PodService) CreatePod(ctx context.Context, config PodConfig) (*corev1.P
 	}
 
 	podName := s.client.GetPodName(config.InstanceID, config.InstanceName)
+	hostname := runtimeHostnameForPod(config)
 	namespace := s.client.GetNamespace(config.UserID)
 	pvcName := s.client.GetPVCName(config.InstanceID)
 
@@ -93,6 +95,7 @@ func (s *PodService) CreatePod(ctx context.Context, config PodConfig) (*corev1.P
 			},
 		},
 		Spec: corev1.PodSpec{
+			Hostname:      hostname,
 			RestartPolicy: corev1.RestartPolicyNever,
 			Containers: []corev1.Container{
 				{
@@ -214,6 +217,14 @@ func (s *PodService) CreatePod(ctx context.Context, config PodConfig) (*corev1.P
 	}
 
 	return createdPod, nil
+}
+
+func runtimeHostnameForPod(config PodConfig) string {
+	if !strings.EqualFold(strings.TrimSpace(config.Type), "openclaw") {
+		return ""
+	}
+
+	return sanitizeK8sName(fmt.Sprintf("clawreef-%d", config.InstanceID))
 }
 
 func intstrFromInt32(port int32) intstr.IntOrString {

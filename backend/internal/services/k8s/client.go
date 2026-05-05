@@ -29,7 +29,7 @@ const (
 
 // Client wraps the Kubernetes client
 type Client struct {
-	Clientset    *kubernetes.Clientset
+	Clientset    kubernetes.Interface
 	Config       *rest.Config
 	Namespace    string
 	StorageClass string

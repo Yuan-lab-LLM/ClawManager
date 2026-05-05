@@ -340,6 +340,8 @@ func main() {
 		// These routes proxy requests to the actual instance pods
 		api.Any("/instances/:id/proxy", instanceHandler.ProxyInstance)
 		api.Any("/instances/:id/proxy/*path", instanceHandler.ProxyInstance)
+		api.Any("/instances/:id/control-ui", instanceHandler.ProxyControlUIInstance)
+		api.Any("/instances/:id/control-ui/*path", instanceHandler.ProxyControlUIInstance)
 
 		// WebSocket routes
 		ws := api.Group("/ws")

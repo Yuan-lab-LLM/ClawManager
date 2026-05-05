@@ -317,3 +317,82 @@ Feature status guard:
 
 Next packet boundary:
 - candidate blocker boundary: establish at least one active model configuration, then re-run ordinary-user `POST /api/v1/instances` and re-check namespace/resource creation behavior
+
+---
+
+[2026-05-03 Asia/Shanghai] Close/write-back — gtmanager-gtclaw-m1-runtime-localization
+------------------------------------------------------------------------------------
+Type:
+- Close/write-back record for feature `gtmanager-gtclaw-m1-runtime-localization`
+- Scope: longterm state only
+
+Close basis:
+- T8I evidence path: `specs/gtmanager-gtclaw-m1-runtime-localization/evidence/20260502-t8i-e2e-rerun-after-runtime-body-fix.md`
+- Patch manifest addendum path: `specs/gtmanager-gtclaw-m1-runtime-localization/evidence/20260503-runtime-controlui-body-repair-manifest-addendum.md`
+- User-approved lint waiver: `cd frontend && npm run lint` still exits `1` with `126 problems (107 errors, 19 warnings)`. This waiver applies only to this Close decision. It is not a claim that frontend lint is clean and does not waive later lint cleanup.
+- Commander gate reported no T8I blocker and no manifest blocker before this write-back.
+
+Images and runtime environment:
+- App image: `clawmanager:backend-proxy-icon-rewrite-20260502231228`
+- Runtime pod: `clawmanager-user-1/clawreef-3-gtclaw-t8-dev-20260501001159`
+- Runtime image: `k3d-clawmanager-registry:5000/clawmanager-openclaw/openclaw:gtclaw-resources-dev-20260430192029`
+- Runtime imageID digest: `sha256:b5cef803f8eda8b3e0d3dc99d04147249a5c6354805501dfae2ae555484a4d45`
+
+Validation summary:
+- Authorized `/control-ui/` root, `/control-ui/chat?session=main`, and history fallback browser DOM passed T8I criteria.
+- `/proxy/` desktop regression was preserved.
+- Wrapper route matrix met the corrected GTClaw criteria.
+- Deployed bundle hash matched the temp build.
+- Runtime body used `lang=zh-CN`; visible DOM contained GTClaw and Chinese markers.
+- Favicon/history fallback nested 404 was fixed.
+- Loopback, PodIP, and ClusterIP `18789` root/chat probes were reachable.
+- Protected OpenClaw technical literals were preserved.
+- Backend tests, frontend temp build, K3S/K8S dry-runs, and git diff check were recorded in the evidence packet.
+
+Residual risks carried forward:
+- Frontend lint debt remains: `126 problems (107 errors, 19 warnings)`. It was waived for this Close only and was not cleaned.
+- Runtime control-ui body repair is disposable pod patch evidence, not a persistent runtime image rebuild.
+- Static English strings remain in JS/source dictionaries but were not visible DOM blockers under T8I.
+- Runtime bridge/process supervision remains future hardening if still applicable.
+- Query-token proxy URL/security hardening remains a future task if still applicable.
+
+Rollback reference:
+- `/tmp/gtclaw-controlui-repair-backup-20260502233047`
+
+Feature state:
+- `longterm/workspace/feature_list.json` now records `gtmanager-gtclaw-m1-runtime-localization` with `passes: true` and references the T8I evidence, manifest addendum, lint waiver, and disposable-pod persistence risk.
+
+---
+
+[2026-05-05 Asia/Shanghai] Close/write-back - gtclaw-runtime-controlui-persistent-image
+--------------------------------------------------------------------------------------
+Type:
+- Final Close / Longterm Write-back record for feature `gtclaw-runtime-controlui-persistent-image`
+- Scope: longterm state plus final close/write-back evidence only
+
+Close basis:
+- Final approval packet: `specs/gtclaw-runtime-controlui-persistent-image/evidence/20260505-final-close-writeback-approval-packet.md`
+- Browser E2E evidence: `specs/gtclaw-runtime-controlui-persistent-image/evidence/20260505-browser-e2e.md`
+- Fresh instance rerun evidence: `specs/gtclaw-runtime-controlui-persistent-image/evidence/20260505-isolated-2gi-fresh-instance-rerun-after-backend-deploy.md`
+- Browser E2E verdict: `BROWSER_E2E_DONE`
+- Fresh instance: `10` / `oc2gi-185707`
+- Pod: `clawmanager-user-1/clawreef-10-oc2gi-185707`
+- Backend image: `clawmanager:control-plane-backend-gtclaw-20260505183733`
+- Runtime digest: `sha256:db1cdb2a48fc74440fde12fa0c89bb808bf35bb09c38d0e90cc669d89f78c1f9`
+
+Validation summary:
+- GTManager `/control-ui` route returned HTTP `200`, non-502, and was not connection refused.
+- Control-ui browser evidence loaded through GTManager-mediated routes only.
+- WebSocket/session bootstrap reached authenticated-ready equivalent with HTTP `101` plus frame traffic through the backend bridge.
+- Desktop `/proxy` route returned HTTP `200` and remained a desktop regression pass; it was not replaced by control-ui.
+- Browser evidence recorded no token exposure and no token, cookie, credential, or access URL plaintext.
+
+Feature state:
+- `longterm/workspace/feature_list.json` now records `gtclaw-runtime-controlui-persistent-image` as `F-007` with `passes: true`.
+- Final evidence path: `specs/gtclaw-runtime-controlui-persistent-image/evidence/20260505-final-close-writeback.md`
+
+Explicit non-actions:
+- No backend/frontend/runtime/deployments/docs/AgentTeam/spec/plan/tasks files were modified.
+- No existing evidence was modified.
+- No build/tag/push/pull, fresh instance creation/deletion/modification, K8S/runtime/database/registry/browser mutation, manual pod/service patch, or `kubectl cp` write was executed.
+- No Mem0 write, commit, stage, or revert was executed.

@@ -759,7 +759,7 @@ func upsertEnvVar(container *corev1.Container, name, value string) {
 	container.Env = append(container.Env, corev1.EnvVar{Name: name, Value: value})
 }
 
-func waitForSkillScannerRollout(ctx context.Context, clientset *kubernetes.Clientset, namespace, deploymentName string, generation int64, timeout time.Duration) error {
+func waitForSkillScannerRollout(ctx context.Context, clientset kubernetes.Interface, namespace, deploymentName string, generation int64, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		deployment, err := clientset.AppsV1().Deployments(namespace).Get(ctx, deploymentName, metav1.GetOptions{})

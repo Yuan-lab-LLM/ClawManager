@@ -117,5 +117,73 @@
     "evidence_hint": "Screenshot of successful gateway test response + audit_logs table entry",
     "risk": "medium",
     "passes": false
+  },
+  {
+    "id": "F-006",
+    "priority": 1,
+    "category": "localization",
+    "component": "GTManager wrapper + OpenClaw runtime control-ui proxy",
+    "feature": "gtmanager-gtclaw-m1-runtime-localization",
+    "description": "GTManager-facing runtime localization and GTClaw branding for the authorized OpenClaw runtime control-ui path, preserving OpenClaw technical identifiers.",
+    "depends_on": ["F-001"],
+    "acceptance_criteria": [
+      "Authorized /control-ui/ root, chat, and history fallback routes render GTClaw Chinese UI",
+      "Existing /proxy/ desktop route behavior remains preserved",
+      "Wrapper routes meet the corrected GTClaw display criteria",
+      "Protected OpenClaw technical literals remain preserved"
+    ],
+    "steps": [
+      "Review T8I E2E evidence",
+      "Review runtime control-ui body repair manifest addendum",
+      "Record user-approved lint waiver and residual runtime persistence risk",
+      "Write Close state only after Commander review and explicit user Close approval"
+    ],
+    "evidence_hint": "T8I evidence: specs/gtmanager-gtclaw-m1-runtime-localization/evidence/20260502-t8i-e2e-rerun-after-runtime-body-fix.md; patch manifest addendum: specs/gtmanager-gtclaw-m1-runtime-localization/evidence/20260503-runtime-controlui-body-repair-manifest-addendum.md",
+    "evidence": {
+      "t8i": "specs/gtmanager-gtclaw-m1-runtime-localization/evidence/20260502-t8i-e2e-rerun-after-runtime-body-fix.md",
+      "patch_manifest_addendum": "specs/gtmanager-gtclaw-m1-runtime-localization/evidence/20260503-runtime-controlui-body-repair-manifest-addendum.md",
+      "lint_waiver": "frontend npm run lint still exits 1 with 126 problems (107 errors, 19 warnings), waived only for this Close decision; this is not frontend lint clean and does not waive future lint cleanup.",
+      "runtime_persistence_risk": "Runtime control-ui body repair is disposable pod patch evidence, not a persistent runtime image rebuild."
+    },
+    "risk": "medium",
+    "passes": true
+  },
+  {
+    "id": "F-007",
+    "priority": 1,
+    "category": "runtime-delivery",
+    "component": "OpenClaw runtime image + GTManager control-ui route",
+    "feature": "gtclaw-runtime-controlui-persistent-image",
+    "description": "Persistent GTClaw runtime control-ui delivery with GTManager /control-ui routing, backend WebSocket auth bridge, OpenClaw control-ui listener on 18789, and preserved desktop /proxy regression behavior.",
+    "depends_on": ["F-006"],
+    "acceptance_criteria": [
+      "Fresh instance 10 / oc2gi-185707 uses the approved persistent runtime digest without manual pod patch evidence",
+      "GTManager /control-ui route returns HTTP 200, non-502, and is not connection refused",
+      "WebSocket/session bootstrap reaches authenticated-ready equivalent with HTTP 101 plus frame traffic through the backend bridge",
+      "Desktop /proxy route remains usable at regression-smoke level and is not replaced by control-ui",
+      "Browser evidence records no token exposure and no token, cookie, credential, or access URL plaintext"
+    ],
+    "steps": [
+      "Review final Browser E2E evidence",
+      "Review isolated fresh 2Gi instance rerun after backend deploy evidence",
+      "Record backend image, runtime digest, control-ui route, WebSocket, desktop regression, and secret-hygiene evidence",
+      "Write Close state only after Commander review and explicit user Final Close / Longterm Write-back approval"
+    ],
+    "evidence_hint": "Fresh E2E evidence: specs/gtclaw-runtime-controlui-persistent-image/evidence/20260505-browser-e2e.md; fresh instance rerun evidence: specs/gtclaw-runtime-controlui-persistent-image/evidence/20260505-isolated-2gi-fresh-instance-rerun-after-backend-deploy.md",
+    "evidence": {
+      "browser_e2e": "specs/gtclaw-runtime-controlui-persistent-image/evidence/20260505-browser-e2e.md",
+      "fresh_instance_rerun": "specs/gtclaw-runtime-controlui-persistent-image/evidence/20260505-isolated-2gi-fresh-instance-rerun-after-backend-deploy.md",
+      "final_close_writeback": "specs/gtclaw-runtime-controlui-persistent-image/evidence/20260505-final-close-writeback.md",
+      "instance": "10 / oc2gi-185707",
+      "pod": "clawmanager-user-1/clawreef-10-oc2gi-185707",
+      "backend_image": "clawmanager:control-plane-backend-gtclaw-20260505183733",
+      "runtime_digest": "sha256:db1cdb2a48fc74440fde12fa0c89bb808bf35bb09c38d0e90cc669d89f78c1f9",
+      "control_ui": "GTManager /control-ui HTTP 200, non-502",
+      "websocket": "WebSocket HTTP 101 plus frame traffic through backend bridge",
+      "desktop_regression": "GTManager /proxy HTTP 200 desktop regression pass",
+      "secret_hygiene": "no token exposure; no token, cookie, credential, or access URL plaintext in evidence"
+    },
+    "risk": "medium",
+    "passes": true
   }
 ]

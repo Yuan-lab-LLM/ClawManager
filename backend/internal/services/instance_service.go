@@ -316,7 +316,7 @@ func (s *instanceService) Create(userID int, req CreateInstanceRequest) (*models
 		InstanceName:    instance.Name,
 		UserID:          userID,
 		ContainerPort:   runtimeConfig.Port,
-		AdditionalPorts: additionalServicePorts(runtimeConfig.Port),
+		AdditionalPorts: additionalServicePortsForInstance(instance.Type, runtimeConfig.Port),
 	}
 
 	serviceInfo, err := s.serviceService.CreateService(ctx, serviceConfig)
@@ -484,7 +484,7 @@ func (s *instanceService) Start(instanceID int) error {
 			InstanceName:    instance.Name,
 			UserID:          instance.UserID,
 			ContainerPort:   runtimeConfig.Port,
-			AdditionalPorts: additionalServicePorts(runtimeConfig.Port),
+			AdditionalPorts: additionalServicePortsForInstance(instance.Type, runtimeConfig.Port),
 		}
 		_, err = s.serviceService.CreateService(ctx, serviceConfig)
 		if err != nil {
@@ -562,6 +562,7 @@ func (s *instanceService) buildGatewayEnv(instance *models.Instance) (map[string
 		"CLAWMANAGER_LLM_MODEL":      modelName,
 		"CLAWMANAGER_LLM_PROVIDER":   "openai-compatible",
 		"CLAWMANAGER_INSTANCE_TOKEN": token,
+		"OPENCLAW_GATEWAY_TOKEN":     token,
 		"OPENAI_BASE_URL":            baseURL,
 		"OPENAI_API_BASE":            baseURL,
 		"OPENAI_API_KEY":             token,
@@ -1050,7 +1051,11 @@ func (s *instanceService) ForceSyncInstance(instanceID int) error {
 	return nil
 }
 
-func additionalServicePorts(primaryPort int32) []int32 {
+func additionalServicePortsForInstance(instanceType string, primaryPort int32) []int32 {
+	if strings.EqualFold(strings.TrimSpace(instanceType), "openclaw") && primaryPort == DefaultDesktopTargetPort {
+		return []int32{DefaultControlUITargetPort}
+	}
+
 	if primaryPort == 3000 || primaryPort == 8082 {
 		return []int32{3000, 8082}
 	}
