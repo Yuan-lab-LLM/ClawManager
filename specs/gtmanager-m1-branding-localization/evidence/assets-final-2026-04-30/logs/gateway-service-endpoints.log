@@ -1,0 +1,6 @@
+Warning: v1 Endpoints is deprecated in v1.33+; use discovery.k8s.io/v1 EndpointSlice
+NAME                          TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)             AGE
+service/clawmanager-gateway   ClusterIP   10.43.244.223   <none>        8443/TCP,9001/TCP   14d
+
+NAME                            ENDPOINTS                         AGE
+endpoints/clawmanager-gateway   10.42.0.44:9001,10.42.0.44:8443   14d

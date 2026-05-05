@@ -1,0 +1,20 @@
+Command: kubectl apply --dry-run=client -f deployments/k3s/clawmanager.yaml
+Started: 2026-04-30T01:32:52Z
+
+namespace/clawmanager-system configured (dry run)
+secret/clawmanager-secrets configured (dry run)
+configmap/clawmanager-mysql-init configured (dry run)
+persistentvolumeclaim/mysql-data configured (dry run)
+deployment.apps/mysql configured (dry run)
+service/mysql configured (dry run)
+serviceaccount/clawmanager-app configured (dry run)
+clusterrolebinding.rbac.authorization.k8s.io/clawmanager-app-cluster-admin configured (dry run)
+deployment.apps/clawmanager-app configured (dry run)
+service/clawmanager-frontend configured (dry run)
+service/clawmanager-gateway configured (dry run)
+service/clawmanager-egress-proxy configured (dry run)
+deployment.apps/skill-scanner configured (dry run)
+service/skill-scanner configured (dry run)
+
+Finished: 2026-04-30T01:32:52Z
+Exit code: 0

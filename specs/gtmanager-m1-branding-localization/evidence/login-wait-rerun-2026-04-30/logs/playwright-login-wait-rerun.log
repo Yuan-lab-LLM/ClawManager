@@ -1,0 +1,207 @@
+{
+  "verdict": "E2E text/localization/auth-flow passed; final M1 close remains blocked by Assets C unless user explicitly re-scopes assets.",
+  "summary": {
+    "loginBeforeSubmitPassed": true,
+    "loginFlowPassed": true,
+    "adminRoutesCovered": 6,
+    "adminRoutesPassed": 6,
+    "userRoutesCovered": 5,
+    "userRoutesPassed": 5,
+    "routeFailures": [],
+    "consoleErrors": 0,
+    "pageErrors": 0,
+    "requestFailures": 0,
+    "issues": 2,
+    "failures": 0,
+    "blockers": 0
+  },
+  "loginTimings": {
+    "submitAt": "2026-04-30T03:25:35.503Z",
+    "firstTokenObservedAt": "2026-04-30T03:25:35.607Z",
+    "firstTokenObservedMs": 104,
+    "routeChangedAt": "2026-04-30T03:25:35.590Z",
+    "routeChangedMs": 87,
+    "finalStableBodyAt": "2026-04-30T03:25:36.226Z",
+    "finalStableBodyMs": 723
+  },
+  "authEndpointStatuses": [
+    {
+      "event": "request",
+      "method": "POST",
+      "url": "https://localhost:30443/api/v1/auth/login",
+      "atMs": 1133
+    },
+    {
+      "event": "response",
+      "url": "https://localhost:30443/api/v1/auth/login",
+      "status": 200,
+      "ok": true,
+      "atMs": 1189
+    },
+    {
+      "event": "request",
+      "method": "GET",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "atMs": 1189
+    },
+    {
+      "event": "response",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "status": 200,
+      "ok": true,
+      "atMs": 1191
+    },
+    {
+      "event": "request",
+      "method": "GET",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "atMs": 1895
+    },
+    {
+      "event": "response",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "status": 200,
+      "ok": true,
+      "atMs": 1903
+    },
+    {
+      "event": "request",
+      "method": "GET",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "atMs": 2670
+    },
+    {
+      "event": "response",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "status": 200,
+      "ok": true,
+      "atMs": 2675
+    },
+    {
+      "event": "request",
+      "method": "GET",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "atMs": 3346
+    },
+    {
+      "event": "response",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "status": 200,
+      "ok": true,
+      "atMs": 3352
+    },
+    {
+      "event": "request",
+      "method": "GET",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "atMs": 4021
+    },
+    {
+      "event": "response",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "status": 200,
+      "ok": true,
+      "atMs": 4025
+    },
+    {
+      "event": "request",
+      "method": "GET",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "atMs": 4709
+    },
+    {
+      "event": "response",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "status": 200,
+      "ok": true,
+      "atMs": 4714
+    },
+    {
+      "event": "request",
+      "method": "GET",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "atMs": 5445
+    },
+    {
+      "event": "response",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "status": 200,
+      "ok": true,
+      "atMs": 5452
+    },
+    {
+      "event": "request",
+      "method": "GET",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "atMs": 6130
+    },
+    {
+      "event": "response",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "status": 200,
+      "ok": true,
+      "atMs": 6135
+    },
+    {
+      "event": "request",
+      "method": "GET",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "atMs": 6805
+    },
+    {
+      "event": "response",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "status": 200,
+      "ok": true,
+      "atMs": 6810
+    },
+    {
+      "event": "request",
+      "method": "GET",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "atMs": 7480
+    },
+    {
+      "event": "response",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "status": 200,
+      "ok": true,
+      "atMs": 7487
+    },
+    {
+      "event": "request",
+      "method": "GET",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "atMs": 8152
+    },
+    {
+      "event": "response",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "status": 200,
+      "ok": true,
+      "atMs": 8158
+    },
+    {
+      "event": "request",
+      "method": "GET",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "atMs": 8820
+    },
+    {
+      "event": "response",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "status": 200,
+      "ok": true,
+      "atMs": 8827
+    }
+  ],
+  "blockers": [],
+  "failures": [],
+  "issues": [
+    "Favicon still references lobster_transparent.png; Assets C remains blocked and this is not counted as text/localization pass.",
+    "No separate regular-user credentials were provided; user route surfaces were covered under admin authenticated context as a coverage limitation."
+  ],
+  "resultJson": "/Users/eduardogan/Desktop/GHJProject/ClawManager/specs/gtmanager-m1-branding-localization/evidence/login-wait-rerun-2026-04-30/playwright-login-wait-rerun-result.json",
+  "screenshotsDir": "/Users/eduardogan/Desktop/GHJProject/ClawManager/specs/gtmanager-m1-branding-localization/evidence/login-wait-rerun-2026-04-30/screenshots",
+  "logsDir": "/Users/eduardogan/Desktop/GHJProject/ClawManager/specs/gtmanager-m1-branding-localization/evidence/login-wait-rerun-2026-04-30/logs"
+}

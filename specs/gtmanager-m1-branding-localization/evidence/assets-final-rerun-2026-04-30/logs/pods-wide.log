@@ -1,0 +1,2 @@
+NAME                              READY   STATUS    RESTARTS   AGE   IP           NODE                       NOMINATED NODE   READINESS GATES
+clawmanager-app-8558899f4-jv4w7   1/1     Running   0          54m   10.42.0.44   k3d-clawmanager-server-0   <none>           <none>

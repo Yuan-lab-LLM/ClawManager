@@ -1,0 +1,312 @@
+Command: cd frontend && npm run lint
+Started: 2026-04-30T01:32:21Z
+
+
+> frontend@0.0.0 lint
+> eslint .
+
+
+/Users/eduardogan/Desktop/GHJProject/ClawManager/frontend/src/components/ChangePasswordModal.tsx
+  59:19  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/Users/eduardogan/Desktop/GHJProject/ClawManager/frontend/src/components/InstanceAccess.tsx
+  105:5  error  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/Users/eduardogan/Desktop/GHJProject/ClawManager/frontend/src/components/InstanceAccess.tsx:105:5
+  103 |
+  104 |   useEffect(() => {
+> 105 |     setShouldConnect(desktopConnectPreferenceStore.get(instanceId) ?? false);
+      |     ^^^^^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  106 |   }, [instanceId]);
+  107 |
+  108 |   useEffect(() => {  react-hooks/set-state-in-effect
+
+/Users/eduardogan/Desktop/GHJProject/ClawManager/frontend/src/components/OpenClawConfigPlanSection.tsx
+  84:21  error    Unexpected any. Specify a different type                                                              @typescript-eslint/no-explicit-any
+  95:6   warning  React Hook useEffect has a missing dependency: 't'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+/Users/eduardogan/Desktop/GHJProject/ClawManager/frontend/src/contexts/AuthContext.tsx
+   7:9   error    Unexpected any. Specify a different type                                                                                        @typescript-eslint/no-explicit-any
+  27:6   warning  React Hook useEffect has a missing dependency: 'store'. Either include it or remove the dependency array                        react-hooks/exhaustive-deps
+  47:17  error    Fast refresh only works when a file only exports components. Use a new file to share constants or functions between components  react-refresh/only-export-components
+
+/Users/eduardogan/Desktop/GHJProject/ClawManager/frontend/src/contexts/I18nContext.tsx
+  40:17  error  Fast refresh only works when a file only exports components. Use a new file to share constants or functions between components  react-refresh/only-export-components
+
+/Users/eduardogan/Desktop/GHJProject/ClawManager/frontend/src/hooks/useInstanceDesktopAccess.ts
+  210:21  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/Users/eduardogan/Desktop/GHJProject/ClawManager/frontend/src/hooks/useWebSocket.ts
+    7:9   error  Unexpected any. Specify a different type                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             @typescript-eslint/no-explicit-any
+   80:13  error  Error: Cannot access variable before it is declared
+
+`connect` is accessed before it is declared, which prevents the earlier access from updating when this value changes over time.
+
+/Users/eduardogan/Desktop/GHJProject/ClawManager/frontend/src/hooks/useWebSocket.ts:80:13
+  78 |           reconnectTimeout.current = setTimeout(() => {
+  79 |             reconnectTimeout.current = null;
+> 80 |             connect();
+     |             ^^^^^^^ `connect` accessed before it is declared
+  81 |           }, 3000);
+  82 |         }
+  83 |       };
+
+/Users/eduardogan/Desktop/GHJProject/ClawManager/frontend/src/hooks/useWebSocket.ts:29:3
+  27 |   const token = localStorage.getItem('access_token');
+  28 |
+> 29 |   const connect = useCallback(() => {
+     |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 30 |     if (!token || ws.current?.readyState === WebSocket.OPEN) {
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 31 |       return;
+     …
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 90 |     }
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 91 |   }, [token]);
+     | ^^^^^^^^^^^^^^^ `connect` is declared here
+  92 |
+  93 |   const disconnect = useCallback(() => {
+  94 |     if (reconnectTimeout.current) {  react-hooks/immutability
+  106:42  error  Unexpected any. Specify a different type                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             @typescript-eslint/no-explicit-any
+
+/Users/eduardogan/Desktop/GHJProject/ClawManager/frontend/src/pages/admin/AIAuditPage.tsx
+   51:115  error    Unnecessary escape character: \[                                                                                    no-useless-escape
+   85:62   error    Unexpected any. Specify a different type                                                                            @typescript-eslint/no-explicit-any
+  389:6    warning  React Hook useEffect has a missing dependency: 'loadAudit'. Either include it or remove the dependency array        react-hooks/exhaustive-deps
+  408:6    warning  React Hook useEffect has a missing dependency: 'loadTraceDetail'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+  428:19   error    Unexpected any. Specify a different type                                                                            @typescript-eslint/no-explicit-any
+  448:19   error    Unexpected any. Specify a different type                                                                            @typescript-eslint/no-explicit-any
+  481:19   error    Unexpected any. Specify a different type                                                                            @typescript-eslint/no-explicit-any
+
+/Users/eduardogan/Desktop/GHJProject/ClawManager/frontend/src/pages/admin/AdminDashboard.tsx
+   99:21  error    Unexpected any. Specify a different type                                                              @typescript-eslint/no-explicit-any
+  107:6   warning  React Hook useEffect has a missing dependency: 't'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+/Users/eduardogan/Desktop/GHJProject/ClawManager/frontend/src/pages/admin/AdminSkillsPage.tsx
+   60:19  error    Unexpected any. Specify a different type                                                                    @typescript-eslint/no-explicit-any
+   70:6   warning  React Hook useEffect has a missing dependency: 'loadAll'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+   85:6   warning  React Hook useEffect has a missing dependency: 'loadAll'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+  124:19  error    Unexpected any. Specify a different type                                                                    @typescript-eslint/no-explicit-any
+  140:19  error    Unexpected any. Specify a different type                                                                    @typescript-eslint/no-explicit-any
+  152:19  error    Unexpected any. Specify a different type                                                                    @typescript-eslint/no-explicit-any
+
+/Users/eduardogan/Desktop/GHJProject/ClawManager/frontend/src/pages/admin/CostsPage.tsx
+  21:6   warning  React Hook useEffect has a missing dependency: 'loadOverview'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+  33:19  error    Unexpected any. Specify a different type                                                                         @typescript-eslint/no-explicit-any
+  51:19  error    Unexpected any. Specify a different type                                                                         @typescript-eslint/no-explicit-any
+
+/Users/eduardogan/Desktop/GHJProject/ClawManager/frontend/src/pages/admin/InstanceManagementPage.tsx
+  24:6   warning  React Hook useEffect has a missing dependency: 'loadData'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+  36:19  error    Unexpected any. Specify a different type                                                                     @typescript-eslint/no-explicit-any
+  97:19  error    Unexpected any. Specify a different type                                                                     @typescript-eslint/no-explicit-any
+
+/Users/eduardogan/Desktop/GHJProject/ClawManager/frontend/src/pages/admin/ModelManagementPage.tsx
+  315:5   error    Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/Users/eduardogan/Desktop/GHJProject/ClawManager/frontend/src/pages/admin/ModelManagementPage.tsx:315:5
+  313 |
+  314 |   useEffect(() => {
+> 315 |     setImageFailed(false);
+      |     ^^^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  316 |   }, [meta.src]);
+  317 |
+  318 |   return (         react-hooks/set-state-in-effect
+  379:7   error    Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/Users/eduardogan/Desktop/GHJProject/ClawManager/frontend/src/pages/admin/ModelManagementPage.tsx:379:7
+  377 |   useEffect(() => {
+  378 |     if (!open) {
+> 379 |       setQuery('');
+      |       ^^^^^^^^ Avoid calling setState() directly within an effect
+  380 |       return undefined;
+  381 |     }
+  382 |  react-hooks/set-state-in-effect
+  518:23  error    Unexpected any. Specify a different type                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     @typescript-eslint/no-explicit-any
+  526:6   warning  React Hook useEffect has a missing dependency: 't'. Either include it or remove the dependency array                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         react-hooks/exhaustive-deps
+  551:6   warning  React Hook useEffect has a missing dependency: 'discoverModels'. Either include it or remove the dependency array                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            react-hooks/exhaustive-deps
+  675:21  error    Unexpected any. Specify a different type                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     @typescript-eslint/no-explicit-any
+  734:21  error    Unexpected any. Specify a different type                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     @typescript-eslint/no-explicit-any
+  752:21  error    Unexpected any. Specify a different type                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     @typescript-eslint/no-explicit-any
+
+/Users/eduardogan/Desktop/GHJProject/ClawManager/frontend/src/pages/admin/RiskRulesPage.tsx
+  421:23  error    Unexpected any. Specify a different type                                                              @typescript-eslint/no-explicit-any
+  429:6   warning  React Hook useEffect has a missing dependency: 't'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+  512:21  error    Unexpected any. Specify a different type                                                              @typescript-eslint/no-explicit-any
+  534:21  error    Unexpected any. Specify a different type                                                              @typescript-eslint/no-explicit-any
+  571:21  error    Unexpected any. Specify a different type                                                              @typescript-eslint/no-explicit-any
+  613:21  error    Unexpected any. Specify a different type                                                              @typescript-eslint/no-explicit-any
+  650:21  error    Unexpected any. Specify a different type                                                              @typescript-eslint/no-explicit-any
+
+/Users/eduardogan/Desktop/GHJProject/ClawManager/frontend/src/pages/admin/SystemSettingsPage.tsx
+   48:23  error    Unexpected any. Specify a different type                                                              @typescript-eslint/no-explicit-any
+   56:6   warning  React Hook useEffect has a missing dependency: 't'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+  123:21  error    Unexpected any. Specify a different type                                                              @typescript-eslint/no-explicit-any
+  141:21  error    Unexpected any. Specify a different type                                                              @typescript-eslint/no-explicit-any
+
+/Users/eduardogan/Desktop/GHJProject/ClawManager/frontend/src/pages/admin/UserManagementPage.tsx
+   34:6   warning  React Hook useEffect has a missing dependency: 'loadUsers'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+   42:19  error    Unexpected any. Specify a different type                                                                      @typescript-eslint/no-explicit-any
+   63:19  error    Unexpected any. Specify a different type                                                                      @typescript-eslint/no-explicit-any
+   79:19  error    Unexpected any. Specify a different type                                                                      @typescript-eslint/no-explicit-any
+   98:19  error    Unexpected any. Specify a different type                                                                      @typescript-eslint/no-explicit-any
+  118:19  error    Unexpected any. Specify a different type                                                                      @typescript-eslint/no-explicit-any
+  129:19  error    Unexpected any. Specify a different type                                                                      @typescript-eslint/no-explicit-any
+  148:19  error    Unexpected any. Specify a different type                                                                      @typescript-eslint/no-explicit-any
+
+/Users/eduardogan/Desktop/GHJProject/ClawManager/frontend/src/pages/admin/security/AdminSecurityDashboardPage.tsx
+  74:19  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/Users/eduardogan/Desktop/GHJProject/ClawManager/frontend/src/pages/admin/security/AdminSecurityReportsPage.tsx
+   25:50  error  Unexpected any. Specify a different type                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   @typescript-eslint/no-explicit-any
+   28:5   error  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/Users/eduardogan/Desktop/GHJProject/ClawManager/frontend/src/pages/admin/security/AdminSecurityReportsPage.tsx:28:5
+  26 |
+  27 |   useEffect(() => {
+> 28 |     setSelectedJobId((current) => current ?? jobs[0]?.id ?? null);
+     |     ^^^^^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  29 |   }, [jobs]);
+  30 |
+  31 |   useEffect(() => {  react-hooks/set-state-in-effect
+   33:7   error  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/Users/eduardogan/Desktop/GHJProject/ClawManager/frontend/src/pages/admin/security/AdminSecurityReportsPage.tsx:33:7
+  31 |   useEffect(() => {
+  32 |     if (!selectedJobId) {
+> 33 |       setSelectedJob(null);
+     |       ^^^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  34 |       return;
+  35 |     }
+  36 |     let cancelled = false;  react-hooks/set-state-in-effect
+   43:21  error  Unexpected any. Specify a different type                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   @typescript-eslint/no-explicit-any
+  181:70  error  Unexpected any. Specify a different type                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   @typescript-eslint/no-explicit-any
+  204:66  error  Unexpected any. Specify a different type                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   @typescript-eslint/no-explicit-any
+
+/Users/eduardogan/Desktop/GHJProject/ClawManager/frontend/src/pages/admin/security/AdminSecurityScannerConfigPage.tsx
+  73:19  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/Users/eduardogan/Desktop/GHJProject/ClawManager/frontend/src/pages/admin/security/securityCenterShared.tsx
+   16:17  error    Fast refresh only works when a file only exports components. Use a new file to share constants or functions between components  react-refresh/only-export-components
+   41:19  error    Unexpected any. Specify a different type                                                                                        @typescript-eslint/no-explicit-any
+   51:6   warning  React Hook useEffect has a missing dependency: 'loadAll'. Either include it or remove the dependency array                      react-hooks/exhaustive-deps
+   62:6   warning  React Hook useEffect has a missing dependency: 'loadAll'. Either include it or remove the dependency array                      react-hooks/exhaustive-deps
+   88:12  error    '_summary' is defined but never used                                                                                            @typescript-eslint/no-unused-vars
+  202:17  error    Fast refresh only works when a file only exports components. Use a new file to share constants or functions between components  react-refresh/only-export-components
+  209:17  error    Fast refresh only works when a file only exports components. Use a new file to share constants or functions between components  react-refresh/only-export-components
+  216:17  error    Fast refresh only works when a file only exports components. Use a new file to share constants or functions between components  react-refresh/only-export-components
+  226:17  error    Fast refresh only works when a file only exports components. Use a new file to share constants or functions between components  react-refresh/only-export-components
+  251:17  error    Fast refresh only works when a file only exports components. Use a new file to share constants or functions between components  react-refresh/only-export-components
+  268:17  error    Fast refresh only works when a file only exports components. Use a new file to share constants or functions between components  react-refresh/only-export-components
+  272:17  error    Fast refresh only works when a file only exports components. Use a new file to share constants or functions between components  react-refresh/only-export-components
+  276:17  error    Fast refresh only works when a file only exports components. Use a new file to share constants or functions between components  react-refresh/only-export-components
+  292:17  error    Fast refresh only works when a file only exports components. Use a new file to share constants or functions between components  react-refresh/only-export-components
+  309:17  error    Fast refresh only works when a file only exports components. Use a new file to share constants or functions between components  react-refresh/only-export-components
+  328:17  error    Fast refresh only works when a file only exports components. Use a new file to share constants or functions between components  react-refresh/only-export-components
+  347:17  error    Fast refresh only works when a file only exports components. Use a new file to share constants or functions between components  react-refresh/only-export-components
+  362:17  error    Fast refresh only works when a file only exports components. Use a new file to share constants or functions between components  react-refresh/only-export-components
+
+/Users/eduardogan/Desktop/GHJProject/ClawManager/frontend/src/pages/auth/LoginPage.tsx
+  22:14  error  'err' is defined but never used  @typescript-eslint/no-unused-vars
+
+/Users/eduardogan/Desktop/GHJProject/ClawManager/frontend/src/pages/auth/RegisterPage.tsx
+  44:14  error  'err' is defined but never used  @typescript-eslint/no-unused-vars
+
+/Users/eduardogan/Desktop/GHJProject/ClawManager/frontend/src/pages/dashboard/UserDashboard.tsx
+  20:6  warning  React Hook useEffect has a missing dependency: 'loadData'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+/Users/eduardogan/Desktop/GHJProject/ClawManager/frontend/src/pages/instances/CreateInstancePage.tsx
+  153:25  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  201:19  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/Users/eduardogan/Desktop/GHJProject/ClawManager/frontend/src/pages/instances/InstanceDetailPage.tsx
+   185:21  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   212:21  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   268:21  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   460:19  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   496:19  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   520:19  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   535:19  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   563:19  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   579:19  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  1752:51  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  1756:34  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  1772:36  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  1799:28  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  1800:31  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  1801:29  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  1802:32  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  1972:31  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  1973:15  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/Users/eduardogan/Desktop/GHJProject/ClawManager/frontend/src/pages/instances/InstanceListPage.tsx
+  258:19  error    Unexpected any. Specify a different type                                                                          @typescript-eslint/no-explicit-any
+  283:6   warning  React Hook useEffect has a missing dependency: 'loadInstances'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+  335:19  error    Unexpected any. Specify a different type                                                                          @typescript-eslint/no-explicit-any
+  347:19  error    Unexpected any. Specify a different type                                                                          @typescript-eslint/no-explicit-any
+  359:19  error    Unexpected any. Specify a different type                                                                          @typescript-eslint/no-explicit-any
+
+/Users/eduardogan/Desktop/GHJProject/ClawManager/frontend/src/pages/instances/InstancePortalPage.tsx
+  78:19  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/Users/eduardogan/Desktop/GHJProject/ClawManager/frontend/src/pages/openclaw/OpenClawConfigCenterPage.tsx
+   634:19  error    Unexpected any. Specify a different type                                                                               @typescript-eslint/no-explicit-any
+   643:6   warning  React Hook useEffect has a missing dependency: 'loadAll'. Either include it or remove the dependency array             react-hooks/exhaustive-deps
+   723:6   warning  React Hook useMemo has a missing dependency: 'getResourceTypeLabel'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+   852:19  error    Unexpected any. Specify a different type                                                                               @typescript-eslint/no-explicit-any
+   876:19  error    Unexpected any. Specify a different type                                                                               @typescript-eslint/no-explicit-any
+   897:19  error    Unexpected any. Specify a different type                                                                               @typescript-eslint/no-explicit-any
+   918:19  error    Unexpected any. Specify a different type                                                                               @typescript-eslint/no-explicit-any
+   938:19  error    Unexpected any. Specify a different type                                                                               @typescript-eslint/no-explicit-any
+   953:19  error    Unexpected any. Specify a different type                                                                               @typescript-eslint/no-explicit-any
+   971:19  error    Unexpected any. Specify a different type                                                                               @typescript-eslint/no-explicit-any
+  1026:19  error    Unexpected any. Specify a different type                                                                               @typescript-eslint/no-explicit-any
+  1046:19  error    Unexpected any. Specify a different type                                                                               @typescript-eslint/no-explicit-any
+  1065:19  error    Unexpected any. Specify a different type                                                                               @typescript-eslint/no-explicit-any
+
+/Users/eduardogan/Desktop/GHJProject/ClawManager/frontend/src/services/adminService.ts
+  117:46  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  145:45  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  153:46  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  167:40  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/Users/eduardogan/Desktop/GHJProject/ClawManager/frontend/src/stores/authStore.ts
+   56:21  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   74:21  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  108:16  error  'err' is defined but never used           @typescript-eslint/no-unused-vars
+
+✖ 135 problems (115 errors, 20 warnings)
+
+
+Finished: 2026-04-30T01:32:24Z
+Exit code: 1

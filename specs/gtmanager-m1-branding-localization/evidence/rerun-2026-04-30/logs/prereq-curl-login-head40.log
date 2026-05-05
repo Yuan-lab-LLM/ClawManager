@@ -1,0 +1,15 @@
+$ set -o pipefail; curl -sk https://localhost:30443/login | head -40
+<!doctype html>
+<html lang="zh">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/png" href="/lobster_transparent.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>GTManager</title>
+    <script type="module" crossorigin src="/assets/index-yeoXoo5V.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-CzLDf9Yi.css">
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>

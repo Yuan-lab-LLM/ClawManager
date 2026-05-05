@@ -1,0 +1,352 @@
+{
+  "baseURL": "https://localhost:30443",
+  "startedAt": "2026-04-30T01:39:13.127Z",
+  "tool": "playwright",
+  "credentials": {
+    "adminProvided": true,
+    "userProvided": false
+  },
+  "healthz": {
+    "status": 200,
+    "ok": true,
+    "text": "ok"
+  },
+  "login": {
+    "route": "/login",
+    "url": "https://localhost:30443/login",
+    "title": "ClawManager",
+    "htmlLang": "en",
+    "screenshot": "screenshots/login-clean-profile.png",
+    "bodyExcerpt": "Language English 中文 日本語 한국어 Deutsch Sign in to ClawManager Virtual Desktop Management Platform Username Password Sign in",
+    "bodyHasChinese": true,
+    "bodyHasGTManager": false,
+    "bodyHasClawManager": true,
+    "bodyHasOpenClaw": false,
+    "redirectedToLogin": false,
+    "languageSelectValue": "en",
+    "languageSelectedText": "English",
+    "faviconHref": "/lobster_transparent.png",
+    "faviconStatus": {
+      "url": "https://localhost:30443/lobster_transparent.png",
+      "status": 200,
+      "ok": true
+    },
+    "requestEvents": [
+      {
+        "type": "request",
+        "url": "https://localhost:30443/lobster_transparent.png"
+      },
+      {
+        "type": "response",
+        "url": "https://localhost:30443/lobster_transparent.png",
+        "status": 200
+      },
+      {
+        "type": "request",
+        "url": "https://localhost:30443/lobster_transparent.png"
+      },
+      {
+        "type": "response",
+        "url": "https://localhost:30443/lobster_transparent.png",
+        "status": 200
+      },
+      {
+        "type": "request",
+        "url": "https://localhost:30443/lobster_transparent.png"
+      },
+      {
+        "type": "response",
+        "url": "https://localhost:30443/lobster_transparent.png",
+        "status": 200
+      },
+      {
+        "type": "request",
+        "url": "https://localhost:30443/lobster_transparent.png"
+      },
+      {
+        "type": "response",
+        "url": "https://localhost:30443/lobster_transparent.png",
+        "status": 200
+      },
+      {
+        "type": "request",
+        "url": "https://localhost:30443/lobster_transparent.png"
+      },
+      {
+        "type": "response",
+        "url": "https://localhost:30443/lobster_transparent.png",
+        "status": 200
+      },
+      {
+        "type": "request",
+        "url": "https://localhost:30443/lobster_transparent.png"
+      },
+      {
+        "type": "response",
+        "url": "https://localhost:30443/lobster_transparent.png",
+        "status": 200
+      },
+      {
+        "type": "request",
+        "url": "https://localhost:30443/lobster_transparent.png"
+      },
+      {
+        "type": "response",
+        "url": "https://localhost:30443/lobster_transparent.png",
+        "status": 200
+      },
+      {
+        "type": "request",
+        "url": "https://localhost:30443/lobster_transparent.png"
+      },
+      {
+        "type": "response",
+        "url": "https://localhost:30443/lobster_transparent.png",
+        "status": 200
+      },
+      {
+        "type": "request",
+        "url": "https://localhost:30443/lobster_transparent.png"
+      },
+      {
+        "type": "response",
+        "url": "https://localhost:30443/lobster_transparent.png",
+        "status": 200
+      },
+      {
+        "type": "request",
+        "url": "https://localhost:30443/openclaw-configs"
+      },
+      {
+        "type": "response",
+        "url": "https://localhost:30443/openclaw-configs",
+        "status": 200
+      },
+      {
+        "type": "request",
+        "url": "https://localhost:30443/lobster_transparent.png"
+      },
+      {
+        "type": "response",
+        "url": "https://localhost:30443/lobster_transparent.png",
+        "status": 200
+      },
+      {
+        "type": "request",
+        "url": "https://localhost:30443/api/v1/openclaw-configs/resources"
+      },
+      {
+        "type": "request",
+        "url": "https://localhost:30443/api/v1/openclaw-configs/bundles"
+      },
+      {
+        "type": "request",
+        "url": "https://localhost:30443/api/v1/openclaw-configs/injections?limit=50"
+      },
+      {
+        "type": "response",
+        "url": "https://localhost:30443/api/v1/openclaw-configs/bundles",
+        "status": 200
+      },
+      {
+        "type": "response",
+        "url": "https://localhost:30443/api/v1/openclaw-configs/injections?limit=50",
+        "status": 200
+      },
+      {
+        "type": "response",
+        "url": "https://localhost:30443/api/v1/openclaw-configs/resources",
+        "status": 200
+      },
+      {
+        "type": "request",
+        "url": "https://localhost:30443/lobster_transparent.png"
+      },
+      {
+        "type": "response",
+        "url": "https://localhost:30443/lobster_transparent.png",
+        "status": 200
+      },
+      {
+        "type": "request",
+        "url": "https://localhost:30443/lobster_transparent.png"
+      },
+      {
+        "type": "response",
+        "url": "https://localhost:30443/lobster_transparent.png",
+        "status": 200
+      }
+    ]
+  },
+  "auth": {
+    "route": "login-submit",
+    "url": "https://localhost:30443/login",
+    "title": "ClawManager",
+    "htmlLang": "en",
+    "screenshot": "screenshots/after-admin-login.png",
+    "bodyExcerpt": "Loading...",
+    "bodyHasChinese": false,
+    "bodyHasGTManager": false,
+    "bodyHasClawManager": true,
+    "bodyHasOpenClaw": false,
+    "redirectedToLogin": true,
+    "authenticated": true,
+    "apiTokenBootstrap": true,
+    "apiLoginStatus": 200
+  },
+  "adminRoutes": [
+    {
+      "route": "/admin",
+      "url": "https://localhost:30443/admin",
+      "title": "ClawManager",
+      "htmlLang": "en",
+      "screenshot": "screenshots/admin-dashboard.png",
+      "bodyExcerpt": "ADMIN ClawManager NAVIGATION Console Users Instances Security Center AI Gateway Settings A admin ADMIN WORKSPACE Console CLUSTER COMMAND Cluster infrastructure overview This dashboard should read like an operations cockpit, not a settings page. The key signals are surfaced first, and node pressure is one click away. Total Users 1 ACCOUNTS WITH ACCESS Total Instances 2 PROVISIONED DESKTOPS Running Instances 1 CURRENTLY ONLINE Total Storage 40 GB ALLOCATED TO INSTANCES READINESS 1/1 100% of nodes are healthy and schedulable. HOT NODE k3d-clawmanager-server-0 CPU REQUESTED 2.2 cores MEMORY REQUES",
+      "bodyHasChinese": false,
+      "bodyHasGTManager": false,
+      "bodyHasClawManager": true,
+      "bodyHasOpenClaw": false,
+      "redirectedToLogin": false
+    },
+    {
+      "route": "/admin/users",
+      "url": "https://localhost:30443/admin/users",
+      "title": "ClawManager",
+      "htmlLang": "en",
+      "screenshot": "screenshots/admin-users.png",
+      "bodyExcerpt": "ADMIN ClawManager NAVIGATION Console Users Instances Security Center AI Gateway Settings A admin ADMIN WORKSPACE User Management Import Users Add User USERNAME EMAIL ROLE STATUS CREATED AT ACTION admin admin@clawmanager.local Admin Active 4/16/2026 QuotaRoleDelete",
+      "bodyHasChinese": false,
+      "bodyHasGTManager": false,
+      "bodyHasClawManager": true,
+      "bodyHasOpenClaw": false,
+      "redirectedToLogin": false
+    },
+    {
+      "route": "/admin/instances",
+      "url": "https://localhost:30443/admin/instances",
+      "title": "ClawManager",
+      "htmlLang": "en",
+      "screenshot": "screenshots/admin-instances.png",
+      "bodyExcerpt": "ADMIN ClawManager NAVIGATION Console Users Instances Security Center AI Gateway Settings A admin ADMIN WORKSPACE Instance Management Global Instances Search, filter, and operate all user instances from one place. All Statuses Running Stopped Creating Error Deleting All Types openclaw Refresh Showing 2 of 2 instances INSTANCE USER TYPE / OS RESOURCES K8S STATUS ACTIONS a1-arm64-132858 Instance ID: 1 / Updated 4/28/2026, 12:14:14 AM admin user_id: 1 Openclaw openclaw latest 2 CPU / 3 GB / 20 GB GPU: 0 - - - Stopped Start Restart Refresh Delete a1-local-registry-004259 Instance ID: 2 / Updated 4/",
+      "bodyHasChinese": false,
+      "bodyHasGTManager": false,
+      "bodyHasClawManager": true,
+      "bodyHasOpenClaw": false,
+      "redirectedToLogin": false
+    },
+    {
+      "route": "/admin/ai-gateway",
+      "url": "https://localhost:30443/admin/ai-gateway",
+      "title": "ClawManager",
+      "htmlLang": "en",
+      "screenshot": "screenshots/admin-ai-gateway.png",
+      "bodyExcerpt": "ADMIN ClawManager NAVIGATION Console Users Instances Security Center AI Gateway Settings A admin ADMIN WORKSPACE AI Gateway OPEN Models Manage normal and secure models, provider endpoints, prices, and activation state. OPEN AI Audit Inspect trace IDs, request and response payloads, risk hits, routing decisions, and invocation details. OPEN Costs Review token usage, estimated spend, internal secure-model cost, and trace-linked billing details. OPEN Risk Rules Tune regex-based sensitive detection rules, severities, actions, and execution order.",
+      "bodyHasChinese": false,
+      "bodyHasGTManager": false,
+      "bodyHasClawManager": true,
+      "bodyHasOpenClaw": false,
+      "redirectedToLogin": false
+    },
+    {
+      "route": "/admin/security",
+      "url": "https://localhost:30443/admin/security",
+      "title": "ClawManager",
+      "htmlLang": "en",
+      "screenshot": "screenshots/admin-security-center.png",
+      "bodyExcerpt": "ADMIN ClawManager NAVIGATION Console Users Instances Security Center AI Gateway Settings A admin ADMIN WORKSPACE Security Center Dashboard Reports Scanner Config DASHBOARD Runtime Overview This dashboard summarizes the current security posture. Incremental scans only process new or changed assets, while full scans ignore cache and rescan everything. Active mode: Quick Incremental Scan Full Scan TOTAL ASSETS 4 COMPLETED SCANS 0 HIGH RISK 0 MEDIUM RISK 0 SCAN COVERAGE 0% 0/4 The number of assets that have completed a real scan, as a share of all platform assets. SAFE 0 Passed scan HIGH RISK 0 Re",
+      "bodyHasChinese": true,
+      "bodyHasGTManager": false,
+      "bodyHasClawManager": true,
+      "bodyHasOpenClaw": false,
+      "redirectedToLogin": false
+    },
+    {
+      "route": "/admin/settings",
+      "url": "https://localhost:30443/admin/settings",
+      "title": "ClawManager",
+      "htmlLang": "en",
+      "screenshot": "screenshots/admin-settings.png",
+      "bodyExcerpt": "ADMIN ClawManager NAVIGATION Console Users Instances Security Center AI Gateway Settings A admin ADMIN WORKSPACE System Settings Change Password Update your account password from Settings. Update Password Runtime Image Cards Configure the image address used by each supported desktop runtime. Saved cards override the built-in defaults. Add Card Instance Type OpenClaw Desktop Webtop Desktop Debian Desktop CentOS Desktop Custom Image Card Title Image Address Default image: ghcr.io/yuan-lab-llm/clawmanager-openclaw-image/openclaw:latest Delete Save Instance Type Ubuntu Desktop Webtop Desktop Debia",
+      "bodyHasChinese": false,
+      "bodyHasGTManager": false,
+      "bodyHasClawManager": true,
+      "bodyHasOpenClaw": true,
+      "redirectedToLogin": false
+    }
+  ],
+  "userRoutes": [
+    {
+      "route": "/dashboard",
+      "url": "https://localhost:30443/dashboard",
+      "title": "ClawManager",
+      "htmlLang": "en",
+      "screenshot": "screenshots/user-dashboard.png",
+      "bodyExcerpt": "USER ClawManager NAVIGATION Workspace My Instances Resources Settings A admin WORKSPACE Workspace My Instances 2 Running 1 Storage Used 40 GB My Resource Quota 2 / 100 Instances 200 Max CPU Cores 1000 GB Max Memory 5000 GB Max Storage 10 Max GPUs Recent Instances View All → a1-local-registry-004259 openclaw • 2 CPU • 3 GB RAM Running a1-arm64-132858 openclaw • 2 CPU • 3 GB RAM Stopped Quick Actions Create New Instance View All Instances",
+      "bodyHasChinese": false,
+      "bodyHasGTManager": false,
+      "bodyHasClawManager": true,
+      "bodyHasOpenClaw": false,
+      "redirectedToLogin": false
+    },
+    {
+      "route": "/instances",
+      "url": "https://localhost:30443/instances",
+      "title": "ClawManager",
+      "htmlLang": "en",
+      "screenshot": "screenshots/user-instances.png",
+      "bodyExcerpt": "USER ClawManager NAVIGATION Workspace My Instances Resources Settings A admin WORKSPACE My Instances Manage your virtual desktop instances and resources from your dashboard. Real-time updates: Connected Create Instance Portal View All Running Stopped Creating Error OC a1-arm64-132858 Stopped openclaw openclaw latest 2 CPU 3 GB Memory 20 GB Disk Start Details Delete OC a1-local-registry-004259 Running openclaw openclaw latest 2 CPU 3 GB Memory 20 GB Disk Stop Details Delete",
+      "bodyHasChinese": false,
+      "bodyHasGTManager": false,
+      "bodyHasClawManager": true,
+      "bodyHasOpenClaw": false,
+      "redirectedToLogin": false
+    },
+    {
+      "route": "/openclaw-configs",
+      "url": "https://localhost:30443/openclaw-configs",
+      "title": "ClawManager",
+      "htmlLang": "en",
+      "screenshot": "screenshots/user-openclaw-resource-management.png",
+      "bodyExcerpt": "USER ClawManager NAVIGATION Workspace My Instances Resources Settings A admin WORKSPACE OpenClaw Resource Management Resources Bundles Injection Records Refresh RESOURCE TYPES ChannelSkillAgentScheduled Task New Click a resource card to edit it in a popup instead of editing inline. No resources in this type yet. Click \"New\" to create one.",
+      "bodyHasChinese": false,
+      "bodyHasGTManager": false,
+      "bodyHasClawManager": true,
+      "bodyHasOpenClaw": true,
+      "redirectedToLogin": false
+    },
+    {
+      "route": "/settings",
+      "url": "https://localhost:30443/settings",
+      "title": "ClawManager",
+      "htmlLang": "en",
+      "screenshot": "screenshots/user-settings.png",
+      "bodyExcerpt": "USER ClawManager NAVIGATION Workspace My Instances Resources Settings A admin WORKSPACE Settings Change Password Update your account password from Settings. Update Password",
+      "bodyHasChinese": false,
+      "bodyHasGTManager": false,
+      "bodyHasClawManager": true,
+      "bodyHasOpenClaw": false,
+      "redirectedToLogin": false
+    },
+    {
+      "route": "/portal",
+      "url": "https://localhost:30443/portal",
+      "title": "ClawManager",
+      "htmlLang": "en",
+      "screenshot": "screenshots/user-instance-access-surface.png",
+      "bodyExcerpt": "USER ClawManager NAVIGATION Workspace My Instances Resources Settings A admin WORKSPACE Desktop Portal INSTANCES a1-arm64-132858 Stopped openclaw latest 2 CPU / 3 GB / 20 GB a1-local-registry-004259 Running openclaw latest 2 CPU / 3 GB / 20 GB a1-local-registry-004259 Ready to Access Ready to Access Generate an access token to connect to a1-local-registry-004259. GENERATE ACCESS",
+      "bodyHasChinese": false,
+      "bodyHasGTManager": false,
+      "bodyHasClawManager": true,
+      "bodyHasOpenClaw": false,
+      "redirectedToLogin": false
+    }
+  ],
+  "failures": [
+    "Clean-profile /login does not show GTManager in visible body or browser title.",
+    "Clean-profile /login does not default to Chinese (html lang / selected language are not zh/中文).",
+    "Clean-profile /login still shows ClawManager."
+  ],
+  "blockers": [],
+  "finishedAt": "2026-04-30T01:39:20.910Z",
+  "verdict": "E2E blocked"
+}

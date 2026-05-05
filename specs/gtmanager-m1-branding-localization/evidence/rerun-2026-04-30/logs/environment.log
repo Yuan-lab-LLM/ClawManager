@@ -1,0 +1,9 @@
+Repo: /Users/eduardogan/Desktop/GHJProject/ClawManager
+Recorded at: 2026-04-30T02:57:42Z UTC
+Local time: 2026-04-30T10:57:42+0800
+OS: Darwin 24.6.0 arm64
+Node: v23.11.0
+npm: 10.9.2
+kubectl client: Client Version: v1.32.2
+Kustomize Version: v5.5.0
+kubectl context: k3d-clawmanager

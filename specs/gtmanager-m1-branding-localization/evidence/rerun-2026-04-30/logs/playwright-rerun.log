@@ -1,0 +1,39 @@
+Temporary root: /tmp/clawmanager-e2e-rerun.lusuW7
+Started: 2026-04-30T03:01:37Z
+
+Setup command: npm init -y >/dev/null && npm install --no-save playwright@1.59.1
+
+added 2 packages, and audited 3 packages in 1s
+
+found 0 vulnerabilities
+Setup exit code: 0
+
+E2E command: node e2e-playwright-rerun.mjs (E2E_ADMIN_USER=admin; E2E_ADMIN_PASSWORD redacted; E2E_BASE_URL=https://localhost:30443)
+{
+  "verdict": "E2E partial / blocked",
+  "summary": {
+    "loginPassed": true,
+    "adminRoutesCovered": 8,
+    "adminRoutesPassed": 8,
+    "userRoutesCovered": 5,
+    "userRoutesPassed": 5,
+    "routeFailures": [],
+    "issues": 3,
+    "failures": 1,
+    "blockers": 0
+  },
+  "issues": [
+    "Favicon still references lobster_transparent.png; recorded under Assets C blocked, not as an M1 text failure.",
+    "UI login did not complete and remained on a Loading surface.",
+    "No separate regular-user credentials were provided; user route surfaces were covered under the authenticated admin context."
+  ],
+  "failures": [
+    "UI login did not complete and remained on a Loading surface. API token bootstrap was used to continue route coverage."
+  ],
+  "blockers": [],
+  "screenshotsDir": "../../../Users/eduardogan/Desktop/GHJProject/ClawManager/specs/gtmanager-m1-branding-localization/evidence/rerun-2026-04-30/screenshots",
+  "resultJson": "/Users/eduardogan/Desktop/GHJProject/ClawManager/specs/gtmanager-m1-branding-localization/evidence/rerun-2026-04-30/playwright-rerun-result.json"
+}
+E2E script exit code: 0
+Finished: 2026-04-30T03:01:47Z
+Wrapper exit code: 0

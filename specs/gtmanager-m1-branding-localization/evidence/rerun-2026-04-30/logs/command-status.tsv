@@ -1,0 +1,24 @@
+command	exit_code	log
+environment capture	0	logs/environment.log
+curl -sk https://localhost:30443/healthz	0	logs/prereq-curl-healthz.log
+kubectl get deploy -n clawmanager-system clawmanager-app -o jsonpath='{.spec.template.spec.containers[?(@.name=="clawmanager-app")].image}{"\n"}'	0	logs/prereq-kubectl-deploy-image.log
+set -o pipefail; curl -sk https://localhost:30443/login | head -40	0	logs/prereq-curl-login-head40.log
+curl -sk https://localhost:30443/login -o specs/gtmanager-m1-branding-localization/evidence/rerun-2026-04-30/logs/login.html	0	logs/prereq-curl-login-save.log
+rg -o '/assets/[^"[:space:]]+\.js' logs/login.html | head -1	0	logs/deployed-js-path.txt
+curl -sk https://localhost:30443/assets/index-yeoXoo5V.js -o specs/gtmanager-m1-branding-localization/evidence/rerun-2026-04-30/logs/deployed-app.js	0	logs/prereq-curl-js-save.log
+grep -n 'GTManager' specs/gtmanager-m1-branding-localization/evidence/rerun-2026-04-30/logs/deployed-app.js | head -20	0	logs/grep-GTManager.log
+grep -n 'ClawManager' specs/gtmanager-m1-branding-localization/evidence/rerun-2026-04-30/logs/deployed-app.js | head -20	0	logs/grep-ClawManager.log
+grep -n 'clawmanager_locale' specs/gtmanager-m1-branding-localization/evidence/rerun-2026-04-30/logs/deployed-app.js | head -20	0	logs/grep-clawmanager_locale.log
+grep -n '登录 GTManager' specs/gtmanager-m1-branding-localization/evidence/rerun-2026-04-30/logs/deployed-app.js | head -20	0	logs/grep-login-zh-GTManager.log
+grep -n 'Sign in to GTManager' specs/gtmanager-m1-branding-localization/evidence/rerun-2026-04-30/logs/deployed-app.js | head -20	0	logs/grep-signin-GTManager.log
+grep -n 'Sign in to ClawManager' specs/gtmanager-m1-branding-localization/evidence/rerun-2026-04-30/logs/deployed-app.js | head -20	0	logs/grep-signin-ClawManager.log
+grep -q 'GTManager' specs/gtmanager-m1-branding-localization/evidence/rerun-2026-04-30/logs/deployed-app.js	0	logs/grep-q-GTManager.log
+grep -q 'ClawManager' specs/gtmanager-m1-branding-localization/evidence/rerun-2026-04-30/logs/deployed-app.js	1	logs/grep-q-ClawManager.log
+grep -q 'clawmanager_locale' specs/gtmanager-m1-branding-localization/evidence/rerun-2026-04-30/logs/deployed-app.js	0	logs/grep-q-clawmanager_locale.log
+grep -q '登录 GTManager' specs/gtmanager-m1-branding-localization/evidence/rerun-2026-04-30/logs/deployed-app.js	0	logs/grep-q-login-zh-GTManager.log
+grep -q 'Sign in to GTManager' specs/gtmanager-m1-branding-localization/evidence/rerun-2026-04-30/logs/deployed-app.js	0	logs/grep-q-signin-GTManager.log
+grep -q 'Sign in to ClawManager' specs/gtmanager-m1-branding-localization/evidence/rerun-2026-04-30/logs/deployed-app.js	1	logs/grep-q-signin-ClawManager.log
+tmp npm init && npm install --no-save playwright@1.59.1	0	logs/playwright-rerun.log
+Playwright E2E rerun against https://localhost:30443 (admin password redacted)	0	logs/playwright-rerun.log
+tmp npm init && npm install --no-save playwright@1.59.1 (rerun after favicon/logging fix)	0	logs/playwright-rerun.log
+Playwright E2E rerun against https://localhost:30443 (after favicon/logging fix; admin password redacted)	0	logs/playwright-rerun.log

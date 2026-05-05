@@ -1,0 +1,9 @@
+HTTP/2 200 
+server: nginx
+date: Thu, 30 Apr 2026 05:03:16 GMT
+content-type: image/png
+content-length: 3099
+last-modified: Thu, 30 Apr 2026 04:08:29 GMT
+etag: "69f2d5bd-c1b"
+accept-ranges: bytes
+

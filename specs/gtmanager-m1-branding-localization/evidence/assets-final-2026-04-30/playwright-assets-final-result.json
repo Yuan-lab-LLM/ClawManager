@@ -1,0 +1,796 @@
+{
+  "baseURL": "https://localhost:30443",
+  "startedAt": "2026-04-30T04:31:00.330Z",
+  "tool": "playwright",
+  "playwrightPackage": "/tmp/clawmanager-e2e-assets-final-2026-04-30/node_modules/playwright",
+  "browser": "chromium",
+  "context": {
+    "cleanContext": true,
+    "locale": "en-US",
+    "ignoreHTTPSErrors": true
+  },
+  "credentials": {
+    "adminProvided": true,
+    "userProvided": false,
+    "routeCoverageCredentialMode": "admin-authenticated-context"
+  },
+  "healthz": {
+    "status": 200,
+    "ok": true,
+    "text": "ok"
+  },
+  "logo": {
+    "url": "https://localhost:30443/gtmanager-logo.png",
+    "httpStatus": 200,
+    "contentType": "image/png",
+    "expectedSha256": "0d738a0371f3fac37bd71ff21d0027bc46958d98e5f5ff1c3e2bc36e93f8e7c0",
+    "browserLoad": {
+      "complete": true,
+      "naturalWidth": 115,
+      "naturalHeight": 120,
+      "currentSrc": "https://localhost:30443/gtmanager-logo.png"
+    },
+    "screenshot": "screenshots/gtmanager-logo-browser-load.png",
+    "strictDecoderCaveat": "Still unresolved per deployment-refresh-assets evidence; browser load is the acceptance signal recorded here.",
+    "passed": true
+  },
+  "loginBeforeSubmit": {
+    "route": "/login",
+    "url": "https://localhost:30443/login",
+    "title": "GTManager",
+    "htmlLang": "zh",
+    "runtimeDocumentLang": "zh",
+    "screenshot": "screenshots/login-clean-profile-before-submit.png",
+    "bodyExcerpt": "语言 English 中文 日本語 한국어 Deutsch 登录 GTManager 虚拟桌面管理平台 用户名 密码 登录",
+    "bodyHasChinese": true,
+    "bodyHasGTManager": true,
+    "bodyHasVisibleLoginGTManager": true,
+    "bodyHasProductClawManager": false,
+    "bodyHasGTClaw": false,
+    "bodyHasOpenClaw": false,
+    "bodyHasLoadingPrimary": false,
+    "redirectedToLogin": false,
+    "localStorageKeys": [
+      "clawmanager_locale"
+    ],
+    "languageSelectValue": "zh",
+    "languageSelectedText": "中文",
+    "faviconHref": "/gtmanager-logo.png",
+    "logoImages": [],
+    "passed": false
+  },
+  "loginFlow": {
+    "route": "login-submit",
+    "timings": {
+      "submitAt": "2026-04-30T04:31:01.527Z",
+      "routeChangedAt": "2026-04-30T04:31:01.627Z",
+      "routeChangedMs": 100,
+      "firstTokenObservedAt": "2026-04-30T04:31:01.642Z",
+      "firstTokenObservedMs": 115,
+      "finalStableBodyAt": "2026-04-30T04:31:02.256Z",
+      "finalStableBodyMs": 729
+    },
+    "tokenWait": {
+      "ok": true,
+      "observedAt": "2026-04-30T04:31:01.642Z",
+      "msSinceSubmit": 115,
+      "hasAccessToken": true,
+      "hasRefreshToken": true,
+      "hasLocaleKey": true
+    },
+    "routeWait": {
+      "ok": true,
+      "url": "https://localhost:30443/admin"
+    },
+    "stableBodyWait": {
+      "ok": true,
+      "observedAt": "2026-04-30T04:31:02.256Z",
+      "stableForMs": 510,
+      "textExcerpt": "用户 GTManager 导航 工作台 我的实例 资源管理 设置 A admin 工作台 工作台 我的实例 2 运行中 1 已用存储 40 GB 我的资源配额 2 / 100 实例 200 最大 CPU 核数 1000 GB 最大内存 5000 GB 最大存储 10 最大 GPU 数 最近实例 查看全部 → a1-local-registry-004259 openclaw • 2 CPU • 3 GB RAM 运行中 a1-arm64-132858 openclaw • 2 CPU • 3 GB RAM 已停止 快捷操作 创建新实例 查看全部实例"
+    },
+    "apiMeStatus": {
+      "ok": true,
+      "status": 200
+    },
+    "finalPage": {
+      "route": "login-submit",
+      "url": "https://localhost:30443/dashboard",
+      "title": "GTManager",
+      "htmlLang": "zh",
+      "runtimeDocumentLang": "zh",
+      "screenshot": "screenshots/after-admin-login-strong-wait.png",
+      "bodyExcerpt": "用户 GTManager 导航 工作台 我的实例 资源管理 设置 A admin 工作台 工作台 我的实例 2 运行中 1 已用存储 40 GB 我的资源配额 2 / 100 实例 200 最大 CPU 核数 1000 GB 最大内存 5000 GB 最大存储 10 最大 GPU 数 最近实例 查看全部 → a1-local-registry-004259 openclaw • 2 CPU • 3 GB RAM 运行中 a1-arm64-132858 openclaw • 2 CPU • 3 GB RAM 已停止 快捷操作 创建新实例 查看全部实例",
+      "bodyHasChinese": true,
+      "bodyHasGTManager": true,
+      "bodyHasVisibleLoginGTManager": false,
+      "bodyHasProductClawManager": false,
+      "bodyHasGTClaw": false,
+      "bodyHasOpenClaw": false,
+      "bodyHasLoadingPrimary": false,
+      "redirectedToLogin": false,
+      "localStorageKeys": [
+        "clawmanager_locale",
+        "refresh_token",
+        "access_token"
+      ]
+    },
+    "authenticated": true,
+    "usedApiTokenBootstrap": false,
+    "passed": true
+  },
+  "adminRoutes": [
+    {
+      "route": "/admin",
+      "url": "https://localhost:30443/admin",
+      "title": "GTManager",
+      "htmlLang": "zh",
+      "runtimeDocumentLang": "zh",
+      "screenshot": "screenshots/admin-dashboard.png",
+      "bodyExcerpt": "管理后台 GTManager 导航 控制台 用户 实例 安全中心 AI 网关 设置 A admin 管理工作台 控制台 集群指挥台 集群基础信息概览 这个仪表盘应该像运维驾驶舱，而不是设置页。关键指标需要优先呈现，节点压力应一键可见。 用户总数 1 可访问账户 实例总数 2 已创建桌面 运行中实例 1 当前在线 总存储 40 GB 已分配给实例 就绪度 1/1 100% 的节点健康且可调度。 高压节点 k3d-clawmanager-server-0 CPU 已申请 2.2 cores 内存已申请 3.1 GiB 磁盘已分配 40 GiB 压力焦点 内存 41% 用户管理 管理用户、角色和配额 进入模块 实例管理 管理虚拟桌面实例 进入模块 系统设置 配置系统设置 进入模块 集群资源 容量看板 1/1 个节点就绪 节点舰队 节点 100% 1/1 可用于调度的健康节点 使用率 算力压力 CPU 16% 2.2 / 14 cores 总容量 14 核 使用率 内存压力 内存 41% 3.1 / 7.7 GiB 总容量 7.7 GiB 使用率 持久化分配 磁盘 5% 40 / 865.2 GiB 总容量 910.7 GiB 使用率 节点矩阵 基础设施表 一屏扫描整个集群。展开任意节点即可查看 CPU、内存、磁盘和 kubelet 详情，无需离开当前页面。 节点 健康 角色 内网 IP POD 数 CPU 负载 内存负载 查看 k3d-clawmanager-server-0 节点 就绪 control-plane, master 172.18.0.4 9 2.2 / 14 cores 3.1 / 7.7 GiB 详情 显示第 1-1 项，共 1 个节点 上一页 第 1 / 1 页 下一页",
+      "bodyHasChinese": true,
+      "bodyHasGTManager": true,
+      "bodyHasVisibleLoginGTManager": false,
+      "bodyHasProductClawManager": false,
+      "bodyHasGTClaw": false,
+      "bodyHasOpenClaw": false,
+      "bodyHasLoadingPrimary": false,
+      "redirectedToLogin": false,
+      "localStorageKeys": [
+        "clawmanager_locale",
+        "refresh_token",
+        "access_token"
+      ],
+      "passed": true
+    },
+    {
+      "route": "/admin/users",
+      "url": "https://localhost:30443/admin/users",
+      "title": "GTManager",
+      "htmlLang": "zh",
+      "runtimeDocumentLang": "zh",
+      "screenshot": "screenshots/admin-users.png",
+      "bodyExcerpt": "管理后台 GTManager 导航 控制台 用户 实例 安全中心 AI 网关 设置 A admin 管理工作台 用户管理 导入用户 添加用户 用户名 邮箱 角色 状态 创建时间 操作 admin admin@clawmanager.local 管理员 启用 4/16/2026 配额角色删除",
+      "bodyHasChinese": true,
+      "bodyHasGTManager": true,
+      "bodyHasVisibleLoginGTManager": false,
+      "bodyHasProductClawManager": false,
+      "bodyHasGTClaw": false,
+      "bodyHasOpenClaw": false,
+      "bodyHasLoadingPrimary": false,
+      "redirectedToLogin": false,
+      "localStorageKeys": [
+        "clawmanager_locale",
+        "refresh_token",
+        "access_token"
+      ],
+      "passed": true
+    },
+    {
+      "route": "/admin/instances",
+      "url": "https://localhost:30443/admin/instances",
+      "title": "GTManager",
+      "htmlLang": "zh",
+      "runtimeDocumentLang": "zh",
+      "screenshot": "screenshots/admin-instances.png",
+      "bodyExcerpt": "管理后台 GTManager 导航 控制台 用户 实例 安全中心 AI 网关 设置 A admin 管理工作台 实例管理 全局实例 在一个页面中搜索、筛选并操作所有用户实例。 全部状态 运行中 已停止 创建中 错误 删除中 全部类型 openclaw 刷新 显示 2 / 2 个实例 实例 用户 类型 / 系统 资源 K8S 状态 操作 a1-arm64-132858 实例 ID: 1 / 更新时间 4/28/2026, 12:14:14 AM admin 用户 ID: 1 Openclaw openclaw latest 2 CPU / 3 GB / 20 GB GPU: 0 - - - 已停止 启动 重启 刷新 删除 a1-local-registry-004259 实例 ID: 2 / 更新时间 4/28/2026, 12:43:14 AM admin 用户 ID: 1 Openclaw openclaw latest 2 CPU / 3 GB / 20 GB GPU: 0 clawreef-2-a1-local-registry-004259 clawmanager-user-1 10.42.0.42 运行中 停止 重启 刷新 删除",
+      "bodyHasChinese": true,
+      "bodyHasGTManager": true,
+      "bodyHasVisibleLoginGTManager": false,
+      "bodyHasProductClawManager": false,
+      "bodyHasGTClaw": false,
+      "bodyHasOpenClaw": false,
+      "bodyHasLoadingPrimary": false,
+      "redirectedToLogin": false,
+      "localStorageKeys": [
+        "clawmanager_locale",
+        "refresh_token",
+        "access_token"
+      ],
+      "passed": true
+    },
+    {
+      "route": "/admin/ai-gateway",
+      "url": "https://localhost:30443/admin/ai-gateway",
+      "title": "GTManager",
+      "htmlLang": "zh",
+      "runtimeDocumentLang": "zh",
+      "screenshot": "screenshots/admin-ai-gateway.png",
+      "bodyExcerpt": "管理后台 GTManager 导航 控制台 用户 实例 安全中心 AI 网关 设置 A admin 管理工作台 AI 网关 打开 模型 管理普通模型和安全模型、Provider 地址、价格以及启停状态。 打开 AI 审计 查看 trace、请求与响应负载、风险命中、路由决策和调用明细。 打开 成本 查看 token 用量、预估费用、内部安全模型成本以及关联账单明细。 打开 风控规则 调整正则敏感规则、严重级别、动作和执行顺序。",
+      "bodyHasChinese": true,
+      "bodyHasGTManager": true,
+      "bodyHasVisibleLoginGTManager": false,
+      "bodyHasProductClawManager": false,
+      "bodyHasGTClaw": false,
+      "bodyHasOpenClaw": false,
+      "bodyHasLoadingPrimary": false,
+      "redirectedToLogin": false,
+      "localStorageKeys": [
+        "clawmanager_locale",
+        "refresh_token",
+        "access_token"
+      ],
+      "passed": true
+    },
+    {
+      "route": "/admin/security",
+      "url": "https://localhost:30443/admin/security",
+      "title": "GTManager",
+      "htmlLang": "zh",
+      "runtimeDocumentLang": "zh",
+      "screenshot": "screenshots/admin-security-center.png",
+      "bodyExcerpt": "管理后台 GTManager 导航 控制台 用户 实例 安全中心 AI 网关 设置 A admin 管理工作台 安全中心 运行总览 报告历史 扫描器配置 运行总览 运行总览 Dashboard 负责总览当前安全态势。快速扫描只处理新增或变更资产；全量扫描会忽略缓存重扫全部资产。 当前生效模式：快速 快速扫描 全量扫描 资产总数 4 已完成扫描 0 高风险 0 中风险 0 扫描覆盖率 0% 0/4 已完成真实扫描的资产数，占平台总资产的当前比例。 SAFE 0 通过扫描 高风险 0 需立即处置 等待中 4 等待取证或排队 失败 0 需重新执行 风险分布 平台资产风险态势 按风险等级聚合 SAFE 0 低风险 0 中风险 0 高风险 0 等待中 4 热点资产 使用最频繁的技能 Top 5 1 skill-live-144609 skill-live-144609 1 实例数 2 hello-skill hello-skill 0 实例数 3 skill-live-143936 skill-live-143936 0 实例数 4 skill-live-144139 skill-live-144139 0 实例数 平台资产列表 聚合展示平台已管理的 skill，包括实例中正在使用和用户上传的资产。 资产 用户 来源 扫描状态 风险 最近扫描 实例数 hello-skill hello-skill #1 用户上传 待扫描 未知 未扫描 0 skill-live-144609 skill-live-144609 #1 用户上传 待扫描 未知 未扫描 1 skill-live-144139 skill-live-144139 #1 用户上传 待扫描 未知 未扫描 0 skill-live-143936 skill-live-143936 #1 用户上传 待扫描 未知 未扫描 0 每页 8 条，本页显示 1-4 上一页 1 / 1 下一页 扫描器状态 skill-scanner 可用性 未启用 未连接 当前 skill-scanner 未配置 LLM，仅支持静态扫描。 告警区域 风险提醒与处置建议 当前没有高风险或中风险资产，安全面处于稳定状态。 最近扫描 最近的扫描任务 还没有扫描任务记录。",
+      "bodyHasChinese": true,
+      "bodyHasGTManager": true,
+      "bodyHasVisibleLoginGTManager": false,
+      "bodyHasProductClawManager": false,
+      "bodyHasGTClaw": false,
+      "bodyHasOpenClaw": false,
+      "bodyHasLoadingPrimary": false,
+      "redirectedToLogin": false,
+      "localStorageKeys": [
+        "clawmanager_locale",
+        "refresh_token",
+        "access_token"
+      ],
+      "passed": true
+    },
+    {
+      "route": "/admin/settings",
+      "url": "https://localhost:30443/admin/settings",
+      "title": "GTManager",
+      "htmlLang": "zh",
+      "runtimeDocumentLang": "zh",
+      "screenshot": "screenshots/admin-settings.png",
+      "bodyExcerpt": "管理后台 GTManager 导航 控制台 用户 实例 安全中心 AI 网关 设置 A admin 管理工作台 系统设置 修改密码 在设置中更新你的账户密码。 更新密码 运行时镜像卡片 为每种桌面运行时配置镜像地址。保存后的卡片会覆盖内置默认值。 添加卡片 实例类型 OpenClaw Desktop Webtop Desktop Debian Desktop CentOS Desktop Custom Image 卡片标题 镜像地址 默认镜像: ghcr.io/yuan-lab-llm/clawmanager-openclaw-image/openclaw:latest 删除 保存 实例类型 Ubuntu Desktop Webtop Desktop Debian Desktop CentOS Desktop Custom Image 卡片标题 镜像地址 默认镜像: lscr.io/linuxserver/webtop:ubuntu-xfce 删除 保存",
+      "bodyHasChinese": true,
+      "bodyHasGTManager": true,
+      "bodyHasVisibleLoginGTManager": false,
+      "bodyHasProductClawManager": false,
+      "bodyHasGTClaw": false,
+      "bodyHasOpenClaw": true,
+      "bodyHasLoadingPrimary": false,
+      "redirectedToLogin": false,
+      "localStorageKeys": [
+        "clawmanager_locale",
+        "refresh_token",
+        "access_token"
+      ],
+      "passed": true
+    }
+  ],
+  "userRoutes": [
+    {
+      "route": "/dashboard",
+      "url": "https://localhost:30443/dashboard",
+      "title": "GTManager",
+      "htmlLang": "zh",
+      "runtimeDocumentLang": "zh",
+      "screenshot": "screenshots/user-dashboard.png",
+      "bodyExcerpt": "用户 GTManager 导航 工作台 我的实例 资源管理 设置 A admin 工作台 工作台 我的实例 2 运行中 1 已用存储 40 GB 我的资源配额 2 / 100 实例 200 最大 CPU 核数 1000 GB 最大内存 5000 GB 最大存储 10 最大 GPU 数 最近实例 查看全部 → a1-local-registry-004259 openclaw • 2 CPU • 3 GB RAM 运行中 a1-arm64-132858 openclaw • 2 CPU • 3 GB RAM 已停止 快捷操作 创建新实例 查看全部实例",
+      "bodyHasChinese": true,
+      "bodyHasGTManager": true,
+      "bodyHasVisibleLoginGTManager": false,
+      "bodyHasProductClawManager": false,
+      "bodyHasGTClaw": false,
+      "bodyHasOpenClaw": false,
+      "bodyHasLoadingPrimary": false,
+      "redirectedToLogin": false,
+      "localStorageKeys": [
+        "clawmanager_locale",
+        "refresh_token",
+        "access_token"
+      ],
+      "passed": true
+    },
+    {
+      "route": "/instances",
+      "url": "https://localhost:30443/instances",
+      "title": "GTManager",
+      "htmlLang": "zh",
+      "runtimeDocumentLang": "zh",
+      "screenshot": "screenshots/user-instances.png",
+      "bodyExcerpt": "用户 GTManager 导航 工作台 我的实例 资源管理 设置 A admin 工作台 我的实例 在仪表盘中管理你的虚拟桌面实例和资源。 实时更新: 已连接 创建实例 门户视图 全部 运行中 已停止 创建中 错误 OC a1-arm64-132858 已停止 openclaw openclaw latest 2 CPU 3 GB 内存 20 GB 磁盘 启动 详情 删除 OC a1-local-registry-004259 运行中 openclaw openclaw latest 2 CPU 3 GB 内存 20 GB 磁盘 停止 详情 删除",
+      "bodyHasChinese": true,
+      "bodyHasGTManager": true,
+      "bodyHasVisibleLoginGTManager": false,
+      "bodyHasProductClawManager": false,
+      "bodyHasGTClaw": false,
+      "bodyHasOpenClaw": false,
+      "bodyHasLoadingPrimary": false,
+      "redirectedToLogin": false,
+      "localStorageKeys": [
+        "clawmanager_locale",
+        "refresh_token",
+        "access_token"
+      ],
+      "passed": true
+    },
+    {
+      "route": "/openclaw-configs",
+      "url": "https://localhost:30443/openclaw-configs",
+      "title": "GTManager",
+      "htmlLang": "zh",
+      "runtimeDocumentLang": "zh",
+      "screenshot": "screenshots/user-openclaw-resource-management.png",
+      "bodyExcerpt": "用户 GTManager 导航 工作台 我的实例 资源管理 设置 A admin 工作台 OpenClaw 资源管理 资源 资源包 注入记录 刷新 资源类型 通道技能智能体定时任务 新建 点击资源卡片后会以弹窗方式编辑，不再在页面右侧直接展开。 当前类型下还没有资源，点击“新建”开始创建。",
+      "bodyHasChinese": true,
+      "bodyHasGTManager": true,
+      "bodyHasVisibleLoginGTManager": false,
+      "bodyHasProductClawManager": false,
+      "bodyHasGTClaw": false,
+      "bodyHasOpenClaw": true,
+      "bodyHasLoadingPrimary": false,
+      "redirectedToLogin": false,
+      "localStorageKeys": [
+        "clawmanager_locale",
+        "refresh_token",
+        "access_token"
+      ],
+      "passed": true
+    },
+    {
+      "route": "/settings",
+      "url": "https://localhost:30443/settings",
+      "title": "GTManager",
+      "htmlLang": "zh",
+      "runtimeDocumentLang": "zh",
+      "screenshot": "screenshots/user-settings.png",
+      "bodyExcerpt": "用户 GTManager 导航 工作台 我的实例 资源管理 设置 A admin 工作台 设置 修改密码 在设置中更新你的账户密码。 更新密码",
+      "bodyHasChinese": true,
+      "bodyHasGTManager": true,
+      "bodyHasVisibleLoginGTManager": false,
+      "bodyHasProductClawManager": false,
+      "bodyHasGTClaw": false,
+      "bodyHasOpenClaw": false,
+      "bodyHasLoadingPrimary": false,
+      "redirectedToLogin": false,
+      "localStorageKeys": [
+        "clawmanager_locale",
+        "refresh_token",
+        "access_token"
+      ],
+      "passed": true
+    },
+    {
+      "route": "/portal",
+      "url": "https://localhost:30443/portal",
+      "title": "GTManager",
+      "htmlLang": "zh",
+      "runtimeDocumentLang": "zh",
+      "screenshot": "screenshots/user-instance-access-surface.png",
+      "bodyExcerpt": "用户 GTManager 导航 工作台 我的实例 资源管理 设置 A admin 工作台 桌面门户 实例 a1-arm64-132858 已停止 openclaw latest 2 CPU / 3 GB / 20 GB a1-local-registry-004259 运行中 openclaw latest 2 CPU / 3 GB / 20 GB a1-local-registry-004259 准备访问 准备访问 生成访问令牌以连接到 a1-local-registry-004259。 生成访问令牌",
+      "bodyHasChinese": true,
+      "bodyHasGTManager": true,
+      "bodyHasVisibleLoginGTManager": false,
+      "bodyHasProductClawManager": false,
+      "bodyHasGTClaw": false,
+      "bodyHasOpenClaw": false,
+      "bodyHasLoadingPrimary": false,
+      "redirectedToLogin": false,
+      "localStorageKeys": [
+        "clawmanager_locale",
+        "refresh_token",
+        "access_token"
+      ],
+      "passed": true
+    }
+  ],
+  "openClawRuntimeWording": {
+    "observed": true,
+    "routes": [
+      "/admin/settings",
+      "/openclaw-configs"
+    ]
+  },
+  "protectedIdentifiers": {
+    "apiHealthzChecked": true,
+    "apiV1LoginObserved": true,
+    "apiV1MeObserved": true,
+    "localeStorageKeyObserved": true,
+    "kubernetesIdentifiersObservedInUi": [],
+    "imageIdentifiersObservedInUi": [
+      "clawmanager-openclaw-image",
+      "clawmanager-user-1"
+    ]
+  },
+  "authEndpointStatuses": [
+    {
+      "event": "request",
+      "method": "POST",
+      "url": "https://localhost:30443/api/v1/auth/login",
+      "atMs": 1225
+    },
+    {
+      "event": "response",
+      "url": "https://localhost:30443/api/v1/auth/login",
+      "status": 200,
+      "ok": true,
+      "contentType": "application/json; charset=utf-8",
+      "atMs": 1295
+    },
+    {
+      "event": "request",
+      "method": "GET",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "atMs": 1295
+    },
+    {
+      "event": "response",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "status": 200,
+      "ok": true,
+      "contentType": "application/json; charset=utf-8",
+      "atMs": 1297
+    },
+    {
+      "event": "request",
+      "method": "GET",
+      "url": "https://localhost:30443/gtmanager-logo.png",
+      "atMs": 1301
+    },
+    {
+      "event": "response",
+      "url": "https://localhost:30443/gtmanager-logo.png",
+      "status": 200,
+      "ok": true,
+      "contentType": "image/png",
+      "atMs": 1311
+    },
+    {
+      "event": "explicit-api-probe",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "status": 200,
+      "ok": true,
+      "atMs": 1968
+    },
+    {
+      "event": "request",
+      "method": "GET",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "atMs": 1980
+    },
+    {
+      "event": "response",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "status": 200,
+      "ok": true,
+      "contentType": "application/json; charset=utf-8",
+      "atMs": 1988
+    },
+    {
+      "event": "request",
+      "method": "GET",
+      "url": "https://localhost:30443/gtmanager-logo.png",
+      "atMs": 1988
+    },
+    {
+      "event": "response",
+      "url": "https://localhost:30443/gtmanager-logo.png",
+      "status": 200,
+      "ok": true,
+      "contentType": "image/png",
+      "atMs": 1988
+    },
+    {
+      "event": "request",
+      "method": "GET",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "atMs": 2759
+    },
+    {
+      "event": "response",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "status": 200,
+      "ok": true,
+      "contentType": "application/json; charset=utf-8",
+      "atMs": 2765
+    },
+    {
+      "event": "request",
+      "method": "GET",
+      "url": "https://localhost:30443/gtmanager-logo.png",
+      "atMs": 2781
+    },
+    {
+      "event": "response",
+      "url": "https://localhost:30443/gtmanager-logo.png",
+      "status": 200,
+      "ok": true,
+      "contentType": "image/png",
+      "atMs": 2782
+    },
+    {
+      "event": "request",
+      "method": "GET",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "atMs": 3416
+    },
+    {
+      "event": "response",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "status": 200,
+      "ok": true,
+      "contentType": "application/json; charset=utf-8",
+      "atMs": 3421
+    },
+    {
+      "event": "request",
+      "method": "GET",
+      "url": "https://localhost:30443/gtmanager-logo.png",
+      "atMs": 3421
+    },
+    {
+      "event": "response",
+      "url": "https://localhost:30443/gtmanager-logo.png",
+      "status": 200,
+      "ok": true,
+      "contentType": "image/png",
+      "atMs": 3421
+    },
+    {
+      "event": "request",
+      "method": "GET",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "atMs": 4096
+    },
+    {
+      "event": "response",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "status": 200,
+      "ok": true,
+      "contentType": "application/json; charset=utf-8",
+      "atMs": 4102
+    },
+    {
+      "event": "request",
+      "method": "GET",
+      "url": "https://localhost:30443/gtmanager-logo.png",
+      "atMs": 4102
+    },
+    {
+      "event": "response",
+      "url": "https://localhost:30443/gtmanager-logo.png",
+      "status": 200,
+      "ok": true,
+      "contentType": "image/png",
+      "atMs": 4102
+    },
+    {
+      "event": "request",
+      "method": "GET",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "atMs": 4770
+    },
+    {
+      "event": "response",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "status": 200,
+      "ok": true,
+      "contentType": "application/json; charset=utf-8",
+      "atMs": 4777
+    },
+    {
+      "event": "request",
+      "method": "GET",
+      "url": "https://localhost:30443/gtmanager-logo.png",
+      "atMs": 4777
+    },
+    {
+      "event": "response",
+      "url": "https://localhost:30443/gtmanager-logo.png",
+      "status": 200,
+      "ok": true,
+      "contentType": "image/png",
+      "atMs": 4777
+    },
+    {
+      "event": "request",
+      "method": "GET",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "atMs": 5492
+    },
+    {
+      "event": "response",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "status": 200,
+      "ok": true,
+      "contentType": "application/json; charset=utf-8",
+      "atMs": 5498
+    },
+    {
+      "event": "request",
+      "method": "GET",
+      "url": "https://localhost:30443/gtmanager-logo.png",
+      "atMs": 5498
+    },
+    {
+      "event": "response",
+      "url": "https://localhost:30443/gtmanager-logo.png",
+      "status": 200,
+      "ok": true,
+      "contentType": "image/png",
+      "atMs": 5499
+    },
+    {
+      "event": "request",
+      "method": "GET",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "atMs": 6163
+    },
+    {
+      "event": "response",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "status": 200,
+      "ok": true,
+      "contentType": "application/json; charset=utf-8",
+      "atMs": 6169
+    },
+    {
+      "event": "request",
+      "method": "GET",
+      "url": "https://localhost:30443/gtmanager-logo.png",
+      "atMs": 6169
+    },
+    {
+      "event": "response",
+      "url": "https://localhost:30443/gtmanager-logo.png",
+      "status": 200,
+      "ok": true,
+      "contentType": "image/png",
+      "atMs": 6169
+    },
+    {
+      "event": "request",
+      "method": "GET",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "atMs": 6835
+    },
+    {
+      "event": "response",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "status": 200,
+      "ok": true,
+      "contentType": "application/json; charset=utf-8",
+      "atMs": 6845
+    },
+    {
+      "event": "request",
+      "method": "GET",
+      "url": "https://localhost:30443/gtmanager-logo.png",
+      "atMs": 6845
+    },
+    {
+      "event": "response",
+      "url": "https://localhost:30443/gtmanager-logo.png",
+      "status": 200,
+      "ok": true,
+      "contentType": "image/png",
+      "atMs": 6845
+    },
+    {
+      "event": "request",
+      "method": "GET",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "atMs": 7503
+    },
+    {
+      "event": "response",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "status": 200,
+      "ok": true,
+      "contentType": "application/json; charset=utf-8",
+      "atMs": 7508
+    },
+    {
+      "event": "request",
+      "method": "GET",
+      "url": "https://localhost:30443/gtmanager-logo.png",
+      "atMs": 7508
+    },
+    {
+      "event": "response",
+      "url": "https://localhost:30443/gtmanager-logo.png",
+      "status": 200,
+      "ok": true,
+      "contentType": "image/png",
+      "atMs": 7508
+    },
+    {
+      "event": "request",
+      "method": "GET",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "atMs": 8182
+    },
+    {
+      "event": "response",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "status": 200,
+      "ok": true,
+      "contentType": "application/json; charset=utf-8",
+      "atMs": 8187
+    },
+    {
+      "event": "request",
+      "method": "GET",
+      "url": "https://localhost:30443/gtmanager-logo.png",
+      "atMs": 8187
+    },
+    {
+      "event": "response",
+      "url": "https://localhost:30443/gtmanager-logo.png",
+      "status": 200,
+      "ok": true,
+      "contentType": "image/png",
+      "atMs": 8187
+    },
+    {
+      "event": "request",
+      "method": "GET",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "atMs": 8847
+    },
+    {
+      "event": "response",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "status": 200,
+      "ok": true,
+      "contentType": "application/json; charset=utf-8",
+      "atMs": 8851
+    },
+    {
+      "event": "request",
+      "method": "GET",
+      "url": "https://localhost:30443/gtmanager-logo.png",
+      "atMs": 8851
+    },
+    {
+      "event": "response",
+      "url": "https://localhost:30443/gtmanager-logo.png",
+      "status": 200,
+      "ok": true,
+      "contentType": "image/png",
+      "atMs": 8851
+    }
+  ],
+  "consoleEvents": [
+    {
+      "type": "log",
+      "text": "WebSocket connected",
+      "location": {
+        "url": "https://localhost:30443/assets/index-BcCrhHyr.js",
+        "lineNumber": 17,
+        "columnNumber": 202582
+      },
+      "atMs": 6869
+    }
+  ],
+  "pageErrors": [],
+  "requestFailures": [],
+  "issues": [
+    "No separate regular-user credentials were provided; user routes were covered under admin authenticated context as a coverage limitation."
+  ],
+  "failures": [
+    "Clean-context /login did not expose an img logo using /gtmanager-logo.png."
+  ],
+  "blockers": [],
+  "finishedAt": "2026-04-30T04:31:09.889Z",
+  "summary": {
+    "healthzOk": true,
+    "logoPassed": true,
+    "loginBeforeSubmitPassed": false,
+    "loginFlowPassed": true,
+    "adminRoutesCovered": 6,
+    "adminRoutesPassed": 6,
+    "userRoutesCovered": 5,
+    "userRoutesPassed": 5,
+    "routeFailures": [],
+    "consoleEvents": 1,
+    "consoleErrors": 0,
+    "pageErrors": 0,
+    "requestFailures": 0,
+    "issues": 1,
+    "failures": 1,
+    "blockers": 0
+  },
+  "verdict": "E2E failed"
+}

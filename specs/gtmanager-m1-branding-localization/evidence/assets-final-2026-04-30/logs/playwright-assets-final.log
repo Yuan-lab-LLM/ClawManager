@@ -1,0 +1,231 @@
+{
+  "verdict": "E2E failed",
+  "summary": {
+    "healthzOk": true,
+    "logoPassed": true,
+    "loginBeforeSubmitPassed": false,
+    "loginFlowPassed": true,
+    "adminRoutesCovered": 6,
+    "adminRoutesPassed": 6,
+    "userRoutesCovered": 5,
+    "userRoutesPassed": 5,
+    "routeFailures": [],
+    "consoleEvents": 1,
+    "consoleErrors": 0,
+    "pageErrors": 0,
+    "requestFailures": 0,
+    "issues": 1,
+    "failures": 1,
+    "blockers": 0
+  },
+  "loginTimings": {
+    "submitAt": "2026-04-30T04:31:01.527Z",
+    "routeChangedAt": "2026-04-30T04:31:01.627Z",
+    "routeChangedMs": 100,
+    "firstTokenObservedAt": "2026-04-30T04:31:01.642Z",
+    "firstTokenObservedMs": 115,
+    "finalStableBodyAt": "2026-04-30T04:31:02.256Z",
+    "finalStableBodyMs": 729
+  },
+  "authEndpointStatuses": [
+    {
+      "event": "request",
+      "method": "POST",
+      "url": "https://localhost:30443/api/v1/auth/login",
+      "atMs": 1225
+    },
+    {
+      "event": "response",
+      "url": "https://localhost:30443/api/v1/auth/login",
+      "status": 200,
+      "ok": true,
+      "contentType": "application/json; charset=utf-8",
+      "atMs": 1295
+    },
+    {
+      "event": "request",
+      "method": "GET",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "atMs": 1295
+    },
+    {
+      "event": "response",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "status": 200,
+      "ok": true,
+      "contentType": "application/json; charset=utf-8",
+      "atMs": 1297
+    },
+    {
+      "event": "explicit-api-probe",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "status": 200,
+      "ok": true,
+      "atMs": 1968
+    },
+    {
+      "event": "request",
+      "method": "GET",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "atMs": 1980
+    },
+    {
+      "event": "response",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "status": 200,
+      "ok": true,
+      "contentType": "application/json; charset=utf-8",
+      "atMs": 1988
+    },
+    {
+      "event": "request",
+      "method": "GET",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "atMs": 2759
+    },
+    {
+      "event": "response",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "status": 200,
+      "ok": true,
+      "contentType": "application/json; charset=utf-8",
+      "atMs": 2765
+    },
+    {
+      "event": "request",
+      "method": "GET",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "atMs": 3416
+    },
+    {
+      "event": "response",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "status": 200,
+      "ok": true,
+      "contentType": "application/json; charset=utf-8",
+      "atMs": 3421
+    },
+    {
+      "event": "request",
+      "method": "GET",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "atMs": 4096
+    },
+    {
+      "event": "response",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "status": 200,
+      "ok": true,
+      "contentType": "application/json; charset=utf-8",
+      "atMs": 4102
+    },
+    {
+      "event": "request",
+      "method": "GET",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "atMs": 4770
+    },
+    {
+      "event": "response",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "status": 200,
+      "ok": true,
+      "contentType": "application/json; charset=utf-8",
+      "atMs": 4777
+    },
+    {
+      "event": "request",
+      "method": "GET",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "atMs": 5492
+    },
+    {
+      "event": "response",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "status": 200,
+      "ok": true,
+      "contentType": "application/json; charset=utf-8",
+      "atMs": 5498
+    },
+    {
+      "event": "request",
+      "method": "GET",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "atMs": 6163
+    },
+    {
+      "event": "response",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "status": 200,
+      "ok": true,
+      "contentType": "application/json; charset=utf-8",
+      "atMs": 6169
+    },
+    {
+      "event": "request",
+      "method": "GET",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "atMs": 6835
+    },
+    {
+      "event": "response",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "status": 200,
+      "ok": true,
+      "contentType": "application/json; charset=utf-8",
+      "atMs": 6845
+    },
+    {
+      "event": "request",
+      "method": "GET",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "atMs": 7503
+    },
+    {
+      "event": "response",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "status": 200,
+      "ok": true,
+      "contentType": "application/json; charset=utf-8",
+      "atMs": 7508
+    },
+    {
+      "event": "request",
+      "method": "GET",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "atMs": 8182
+    },
+    {
+      "event": "response",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "status": 200,
+      "ok": true,
+      "contentType": "application/json; charset=utf-8",
+      "atMs": 8187
+    },
+    {
+      "event": "request",
+      "method": "GET",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "atMs": 8847
+    },
+    {
+      "event": "response",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "status": 200,
+      "ok": true,
+      "contentType": "application/json; charset=utf-8",
+      "atMs": 8851
+    }
+  ],
+  "blockers": [],
+  "failures": [
+    "Clean-context /login did not expose an img logo using /gtmanager-logo.png."
+  ],
+  "issues": [
+    "No separate regular-user credentials were provided; user routes were covered under admin authenticated context as a coverage limitation."
+  ],
+  "resultJson": "/Users/eduardogan/Desktop/GHJProject/ClawManager/specs/gtmanager-m1-branding-localization/evidence/assets-final-2026-04-30/playwright-assets-final-result.json",
+  "screenshotsDir": "/Users/eduardogan/Desktop/GHJProject/ClawManager/specs/gtmanager-m1-branding-localization/evidence/assets-final-2026-04-30/screenshots",
+  "logsDir": "/Users/eduardogan/Desktop/GHJProject/ClawManager/specs/gtmanager-m1-branding-localization/evidence/assets-final-2026-04-30/logs"
+}

@@ -1,0 +1,2 @@
+$ kubectl get deploy -n clawmanager-system clawmanager-app -o jsonpath='{.spec.template.spec.containers[?(@.name=="clawmanager-app")].image}{"\n"}'
+clawmanager:m1-gtmanager-local-20260430102258

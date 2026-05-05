@@ -1,0 +1,359 @@
+[
+  {
+    "event": "request",
+    "method": "POST",
+    "url": "https://localhost:30443/api/v1/auth/login",
+    "atMs": 1225
+  },
+  {
+    "event": "response",
+    "url": "https://localhost:30443/api/v1/auth/login",
+    "status": 200,
+    "ok": true,
+    "contentType": "application/json; charset=utf-8",
+    "atMs": 1295
+  },
+  {
+    "event": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/api/v1/auth/me",
+    "atMs": 1295
+  },
+  {
+    "event": "response",
+    "url": "https://localhost:30443/api/v1/auth/me",
+    "status": 200,
+    "ok": true,
+    "contentType": "application/json; charset=utf-8",
+    "atMs": 1297
+  },
+  {
+    "event": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/gtmanager-logo.png",
+    "atMs": 1301
+  },
+  {
+    "event": "response",
+    "url": "https://localhost:30443/gtmanager-logo.png",
+    "status": 200,
+    "ok": true,
+    "contentType": "image/png",
+    "atMs": 1311
+  },
+  {
+    "event": "explicit-api-probe",
+    "url": "https://localhost:30443/api/v1/auth/me",
+    "status": 200,
+    "ok": true,
+    "atMs": 1968
+  },
+  {
+    "event": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/api/v1/auth/me",
+    "atMs": 1980
+  },
+  {
+    "event": "response",
+    "url": "https://localhost:30443/api/v1/auth/me",
+    "status": 200,
+    "ok": true,
+    "contentType": "application/json; charset=utf-8",
+    "atMs": 1988
+  },
+  {
+    "event": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/gtmanager-logo.png",
+    "atMs": 1988
+  },
+  {
+    "event": "response",
+    "url": "https://localhost:30443/gtmanager-logo.png",
+    "status": 200,
+    "ok": true,
+    "contentType": "image/png",
+    "atMs": 1988
+  },
+  {
+    "event": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/api/v1/auth/me",
+    "atMs": 2759
+  },
+  {
+    "event": "response",
+    "url": "https://localhost:30443/api/v1/auth/me",
+    "status": 200,
+    "ok": true,
+    "contentType": "application/json; charset=utf-8",
+    "atMs": 2765
+  },
+  {
+    "event": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/gtmanager-logo.png",
+    "atMs": 2781
+  },
+  {
+    "event": "response",
+    "url": "https://localhost:30443/gtmanager-logo.png",
+    "status": 200,
+    "ok": true,
+    "contentType": "image/png",
+    "atMs": 2782
+  },
+  {
+    "event": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/api/v1/auth/me",
+    "atMs": 3416
+  },
+  {
+    "event": "response",
+    "url": "https://localhost:30443/api/v1/auth/me",
+    "status": 200,
+    "ok": true,
+    "contentType": "application/json; charset=utf-8",
+    "atMs": 3421
+  },
+  {
+    "event": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/gtmanager-logo.png",
+    "atMs": 3421
+  },
+  {
+    "event": "response",
+    "url": "https://localhost:30443/gtmanager-logo.png",
+    "status": 200,
+    "ok": true,
+    "contentType": "image/png",
+    "atMs": 3421
+  },
+  {
+    "event": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/api/v1/auth/me",
+    "atMs": 4096
+  },
+  {
+    "event": "response",
+    "url": "https://localhost:30443/api/v1/auth/me",
+    "status": 200,
+    "ok": true,
+    "contentType": "application/json; charset=utf-8",
+    "atMs": 4102
+  },
+  {
+    "event": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/gtmanager-logo.png",
+    "atMs": 4102
+  },
+  {
+    "event": "response",
+    "url": "https://localhost:30443/gtmanager-logo.png",
+    "status": 200,
+    "ok": true,
+    "contentType": "image/png",
+    "atMs": 4102
+  },
+  {
+    "event": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/api/v1/auth/me",
+    "atMs": 4770
+  },
+  {
+    "event": "response",
+    "url": "https://localhost:30443/api/v1/auth/me",
+    "status": 200,
+    "ok": true,
+    "contentType": "application/json; charset=utf-8",
+    "atMs": 4777
+  },
+  {
+    "event": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/gtmanager-logo.png",
+    "atMs": 4777
+  },
+  {
+    "event": "response",
+    "url": "https://localhost:30443/gtmanager-logo.png",
+    "status": 200,
+    "ok": true,
+    "contentType": "image/png",
+    "atMs": 4777
+  },
+  {
+    "event": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/api/v1/auth/me",
+    "atMs": 5492
+  },
+  {
+    "event": "response",
+    "url": "https://localhost:30443/api/v1/auth/me",
+    "status": 200,
+    "ok": true,
+    "contentType": "application/json; charset=utf-8",
+    "atMs": 5498
+  },
+  {
+    "event": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/gtmanager-logo.png",
+    "atMs": 5498
+  },
+  {
+    "event": "response",
+    "url": "https://localhost:30443/gtmanager-logo.png",
+    "status": 200,
+    "ok": true,
+    "contentType": "image/png",
+    "atMs": 5499
+  },
+  {
+    "event": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/api/v1/auth/me",
+    "atMs": 6163
+  },
+  {
+    "event": "response",
+    "url": "https://localhost:30443/api/v1/auth/me",
+    "status": 200,
+    "ok": true,
+    "contentType": "application/json; charset=utf-8",
+    "atMs": 6169
+  },
+  {
+    "event": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/gtmanager-logo.png",
+    "atMs": 6169
+  },
+  {
+    "event": "response",
+    "url": "https://localhost:30443/gtmanager-logo.png",
+    "status": 200,
+    "ok": true,
+    "contentType": "image/png",
+    "atMs": 6169
+  },
+  {
+    "event": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/api/v1/auth/me",
+    "atMs": 6835
+  },
+  {
+    "event": "response",
+    "url": "https://localhost:30443/api/v1/auth/me",
+    "status": 200,
+    "ok": true,
+    "contentType": "application/json; charset=utf-8",
+    "atMs": 6845
+  },
+  {
+    "event": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/gtmanager-logo.png",
+    "atMs": 6845
+  },
+  {
+    "event": "response",
+    "url": "https://localhost:30443/gtmanager-logo.png",
+    "status": 200,
+    "ok": true,
+    "contentType": "image/png",
+    "atMs": 6845
+  },
+  {
+    "event": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/api/v1/auth/me",
+    "atMs": 7503
+  },
+  {
+    "event": "response",
+    "url": "https://localhost:30443/api/v1/auth/me",
+    "status": 200,
+    "ok": true,
+    "contentType": "application/json; charset=utf-8",
+    "atMs": 7508
+  },
+  {
+    "event": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/gtmanager-logo.png",
+    "atMs": 7508
+  },
+  {
+    "event": "response",
+    "url": "https://localhost:30443/gtmanager-logo.png",
+    "status": 200,
+    "ok": true,
+    "contentType": "image/png",
+    "atMs": 7508
+  },
+  {
+    "event": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/api/v1/auth/me",
+    "atMs": 8182
+  },
+  {
+    "event": "response",
+    "url": "https://localhost:30443/api/v1/auth/me",
+    "status": 200,
+    "ok": true,
+    "contentType": "application/json; charset=utf-8",
+    "atMs": 8187
+  },
+  {
+    "event": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/gtmanager-logo.png",
+    "atMs": 8187
+  },
+  {
+    "event": "response",
+    "url": "https://localhost:30443/gtmanager-logo.png",
+    "status": 200,
+    "ok": true,
+    "contentType": "image/png",
+    "atMs": 8187
+  },
+  {
+    "event": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/api/v1/auth/me",
+    "atMs": 8847
+  },
+  {
+    "event": "response",
+    "url": "https://localhost:30443/api/v1/auth/me",
+    "status": 200,
+    "ok": true,
+    "contentType": "application/json; charset=utf-8",
+    "atMs": 8851
+  },
+  {
+    "event": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/gtmanager-logo.png",
+    "atMs": 8851
+  },
+  {
+    "event": "response",
+    "url": "https://localhost:30443/gtmanager-logo.png",
+    "status": 200,
+    "ok": true,
+    "contentType": "image/png",
+    "atMs": 8851
+  }
+]

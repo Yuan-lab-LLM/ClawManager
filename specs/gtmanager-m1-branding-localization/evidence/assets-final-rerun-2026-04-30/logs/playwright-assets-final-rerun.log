@@ -1,0 +1,332 @@
+{
+  "verdict": "E2E passed; Close/write-back still requires explicit user approval",
+  "summary": {
+    "healthzOk": true,
+    "logoPassed": true,
+    "loginBeforeSubmitPassed": true,
+    "loginImgRequired": false,
+    "adminShellLogoPassed": true,
+    "userShellLogoPassed": true,
+    "loginFlowPassed": true,
+    "adminRoutesCovered": 6,
+    "adminRoutesPassed": 6,
+    "userRoutesCovered": 5,
+    "userRoutesPassed": 5,
+    "routeFailures": [],
+    "consoleEvents": 1,
+    "consoleErrors": 0,
+    "pageErrors": 0,
+    "requestFailures": 0,
+    "issues": 1,
+    "failures": 0,
+    "blockers": 0
+  },
+  "loginTimings": {
+    "submitAt": "2026-04-30T05:05:57.002Z",
+    "routeChangedAt": "2026-04-30T05:05:57.105Z",
+    "routeChangedMs": 103,
+    "firstTokenObservedAt": "2026-04-30T05:05:57.117Z",
+    "firstTokenObservedMs": 115,
+    "finalStableBodyAt": "2026-04-30T05:05:57.735Z",
+    "finalStableBodyMs": 733
+  },
+  "authEndpointStatuses": [
+    {
+      "event": "request",
+      "method": "POST",
+      "url": "https://localhost:30443/api/v1/auth/login",
+      "atMs": 1202
+    },
+    {
+      "event": "response",
+      "url": "https://localhost:30443/api/v1/auth/login",
+      "status": 200,
+      "ok": true,
+      "contentType": "application/json; charset=utf-8",
+      "atMs": 1267
+    },
+    {
+      "event": "request",
+      "method": "GET",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "atMs": 1268
+    },
+    {
+      "event": "response",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "status": 200,
+      "ok": true,
+      "contentType": "application/json; charset=utf-8",
+      "atMs": 1270
+    },
+    {
+      "event": "explicit-api-probe",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "status": 200,
+      "ok": true,
+      "atMs": 1949
+    },
+    {
+      "event": "request",
+      "method": "GET",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "atMs": 1962
+    },
+    {
+      "event": "response",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "status": 200,
+      "ok": true,
+      "contentType": "application/json; charset=utf-8",
+      "atMs": 1971
+    },
+    {
+      "event": "request",
+      "method": "GET",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "atMs": 2731
+    },
+    {
+      "event": "response",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "status": 200,
+      "ok": true,
+      "contentType": "application/json; charset=utf-8",
+      "atMs": 2738
+    },
+    {
+      "event": "request",
+      "method": "GET",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "atMs": 3505
+    },
+    {
+      "event": "response",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "status": 200,
+      "ok": true,
+      "contentType": "application/json; charset=utf-8",
+      "atMs": 3510
+    },
+    {
+      "event": "request",
+      "method": "GET",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "atMs": 4174
+    },
+    {
+      "event": "response",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "status": 200,
+      "ok": true,
+      "contentType": "application/json; charset=utf-8",
+      "atMs": 4183
+    },
+    {
+      "event": "request",
+      "method": "GET",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "atMs": 4853
+    },
+    {
+      "event": "response",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "status": 200,
+      "ok": true,
+      "contentType": "application/json; charset=utf-8",
+      "atMs": 4859
+    },
+    {
+      "event": "request",
+      "method": "GET",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "atMs": 5549
+    },
+    {
+      "event": "response",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "status": 200,
+      "ok": true,
+      "contentType": "application/json; charset=utf-8",
+      "atMs": 5556
+    },
+    {
+      "event": "request",
+      "method": "GET",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "atMs": 6285
+    },
+    {
+      "event": "response",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "status": 200,
+      "ok": true,
+      "contentType": "application/json; charset=utf-8",
+      "atMs": 6306
+    },
+    {
+      "event": "request",
+      "method": "GET",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "atMs": 6970
+    },
+    {
+      "event": "response",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "status": 200,
+      "ok": true,
+      "contentType": "application/json; charset=utf-8",
+      "atMs": 6976
+    },
+    {
+      "event": "request",
+      "method": "GET",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "atMs": 7663
+    },
+    {
+      "event": "response",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "status": 200,
+      "ok": true,
+      "contentType": "application/json; charset=utf-8",
+      "atMs": 7668
+    },
+    {
+      "event": "request",
+      "method": "GET",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "atMs": 8391
+    },
+    {
+      "event": "response",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "status": 200,
+      "ok": true,
+      "contentType": "application/json; charset=utf-8",
+      "atMs": 8400
+    },
+    {
+      "event": "request",
+      "method": "GET",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "atMs": 9070
+    },
+    {
+      "event": "response",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "status": 200,
+      "ok": true,
+      "contentType": "application/json; charset=utf-8",
+      "atMs": 9077
+    },
+    {
+      "event": "request",
+      "method": "GET",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "atMs": 9742
+    },
+    {
+      "event": "response",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "status": 200,
+      "ok": true,
+      "contentType": "application/json; charset=utf-8",
+      "atMs": 9747
+    },
+    {
+      "event": "request",
+      "method": "GET",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "atMs": 10406
+    },
+    {
+      "event": "response",
+      "url": "https://localhost:30443/api/v1/auth/me",
+      "status": 200,
+      "ok": true,
+      "contentType": "application/json; charset=utf-8",
+      "atMs": 10412
+    }
+  ],
+  "shellLogo": {
+    "admin": {
+      "passed": true,
+      "images": [
+        {
+          "src": "/gtmanager-logo.png",
+          "alt": "GTManager 标志",
+          "currentSrc": "https://localhost:30443/gtmanager-logo.png",
+          "complete": true,
+          "naturalWidth": 115,
+          "naturalHeight": 120,
+          "visible": false,
+          "boundingBox": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          }
+        },
+        {
+          "src": "/gtmanager-logo.png",
+          "alt": "GTManager 标志",
+          "currentSrc": "https://localhost:30443/gtmanager-logo.png",
+          "complete": true,
+          "naturalWidth": 115,
+          "naturalHeight": 120,
+          "visible": true,
+          "boundingBox": {
+            "x": 20,
+            "y": 33,
+            "width": 36,
+            "height": 36
+          }
+        }
+      ]
+    },
+    "user": {
+      "passed": true,
+      "images": [
+        {
+          "src": "/gtmanager-logo.png",
+          "alt": "GTManager 标志",
+          "currentSrc": "https://localhost:30443/gtmanager-logo.png",
+          "complete": true,
+          "naturalWidth": 115,
+          "naturalHeight": 120,
+          "visible": false,
+          "boundingBox": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          }
+        },
+        {
+          "src": "/gtmanager-logo.png",
+          "alt": "GTManager 标志",
+          "currentSrc": "https://localhost:30443/gtmanager-logo.png",
+          "complete": true,
+          "naturalWidth": 115,
+          "naturalHeight": 120,
+          "visible": true,
+          "boundingBox": {
+            "x": 20,
+            "y": 33,
+            "width": 36,
+            "height": 36
+          }
+        }
+      ]
+    }
+  },
+  "blockers": [],
+  "failures": [],
+  "issues": [
+    "No separate regular-user credentials were provided; user routes were covered under admin authenticated context as a coverage limitation."
+  ],
+  "resultJson": "/Users/eduardogan/Desktop/GHJProject/ClawManager/specs/gtmanager-m1-branding-localization/evidence/assets-final-rerun-2026-04-30/playwright-assets-final-rerun-result.json",
+  "screenshotsDir": "/Users/eduardogan/Desktop/GHJProject/ClawManager/specs/gtmanager-m1-branding-localization/evidence/assets-final-rerun-2026-04-30/screenshots",
+  "logsDir": "/Users/eduardogan/Desktop/GHJProject/ClawManager/specs/gtmanager-m1-branding-localization/evidence/assets-final-rerun-2026-04-30/logs"
+}

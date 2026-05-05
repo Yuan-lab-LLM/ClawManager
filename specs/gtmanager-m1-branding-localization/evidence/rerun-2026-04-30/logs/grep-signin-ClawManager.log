@@ -1,0 +1,1 @@
+$ grep -n 'Sign in to ClawManager' specs/gtmanager-m1-branding-localization/evidence/rerun-2026-04-30/logs/deployed-app.js | head -20

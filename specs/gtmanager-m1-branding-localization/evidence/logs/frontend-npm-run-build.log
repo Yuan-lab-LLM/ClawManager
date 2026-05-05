@@ -1,0 +1,51 @@
+Command requested: cd frontend && npm run build
+Execution note: run in temporary frontend copy to honor target repository write limit (no writes to frontend/** or dist/** in target repo).
+Temporary root: /tmp/clawmanager-evidence-build.8ejgKz
+Started: 2026-04-30T01:33:16Z
+
+
+Setup command: npm ci
+npm warn EBADENGINE Unsupported engine {
+npm warn EBADENGINE   package: 'eslint-visitor-keys@5.0.1',
+npm warn EBADENGINE   required: { node: '^20.19.0 || ^22.13.0 || >=24' },
+npm warn EBADENGINE   current: { node: 'v23.11.0', npm: '10.9.2' }
+npm warn EBADENGINE }
+
+added 264 packages, and audited 265 packages in 5s
+
+73 packages are looking for funding
+  run `npm fund` for details
+
+7 vulnerabilities (4 moderate, 3 high)
+
+To address all issues, run:
+  npm audit fix
+
+Run `npm audit` for details.
+
+Setup exit code: 0
+
+Prerequisite command: cd frontend && npm run build
+
+> frontend@0.0.0 build
+> tsc -b && vite build
+
+vite v8.0.0 building client environment for production...
+[2Ktransforming...✓ 130 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                   0.46 kB │ gzip:   0.30 kB
+dist/assets/index-CzLDf9Yi.css   92.80 kB │ gzip:  15.01 kB
+dist/assets/index-yeoXoo5V.js   904.02 kB │ gzip: 245.57 kB
+
+✓ built in 768ms
+[plugin builtin:vite-reporter] 
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rolldownOptions.output.codeSplitting to improve chunking: https://rolldown.rs/reference/OutputOptions.codeSplitting
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+
+Build command exit code: 0
+
+Finished: 2026-04-30T01:33:25Z
+Script exit code: 0

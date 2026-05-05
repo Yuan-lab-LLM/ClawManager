@@ -1,0 +1,2 @@
+NAME              READY   UP-TO-DATE   AVAILABLE   AGE   CONTAINERS        IMAGES                                                 SELECTOR
+clawmanager-app   1/1     1            1           14d   clawmanager-app   clawmanager:m1-gtmanager-assets-local-20260430120731   app=clawmanager-app

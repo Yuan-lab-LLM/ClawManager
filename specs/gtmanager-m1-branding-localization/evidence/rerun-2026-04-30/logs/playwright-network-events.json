@@ -1,0 +1,592 @@
+[
+  {
+    "type": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/lobster_transparent.png"
+  },
+  {
+    "type": "response",
+    "url": "https://localhost:30443/lobster_transparent.png",
+    "status": 200
+  },
+  {
+    "type": "request",
+    "method": "POST",
+    "url": "https://localhost:30443/api/v1/auth/login"
+  },
+  {
+    "type": "response",
+    "url": "https://localhost:30443/api/v1/auth/login",
+    "status": 200
+  },
+  {
+    "type": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/api/v1/auth/me"
+  },
+  {
+    "type": "response",
+    "url": "https://localhost:30443/api/v1/auth/me",
+    "status": 200
+  },
+  {
+    "type": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/lobster_transparent.png"
+  },
+  {
+    "type": "response",
+    "url": "https://localhost:30443/lobster_transparent.png",
+    "status": 200
+  },
+  {
+    "type": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/api/v1/users/1/quota"
+  },
+  {
+    "type": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/api/v1/instances?page=1&limit=100"
+  },
+  {
+    "type": "response",
+    "url": "https://localhost:30443/api/v1/users/1/quota",
+    "status": 200
+  },
+  {
+    "type": "response",
+    "url": "https://localhost:30443/api/v1/instances?page=1&limit=100",
+    "status": 200
+  },
+  {
+    "type": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/api/v1/auth/me"
+  },
+  {
+    "type": "response",
+    "url": "https://localhost:30443/api/v1/auth/me",
+    "status": 200
+  },
+  {
+    "type": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/lobster_transparent.png"
+  },
+  {
+    "type": "response",
+    "url": "https://localhost:30443/lobster_transparent.png",
+    "status": 200
+  },
+  {
+    "type": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/api/v1/users?page=1&limit=1000"
+  },
+  {
+    "type": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/api/v1/instances?page=1&limit=1000"
+  },
+  {
+    "type": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/api/v1/system-settings/cluster-resources"
+  },
+  {
+    "type": "response",
+    "url": "https://localhost:30443/api/v1/users?page=1&limit=1000",
+    "status": 200
+  },
+  {
+    "type": "response",
+    "url": "https://localhost:30443/api/v1/instances?page=1&limit=1000",
+    "status": 200
+  },
+  {
+    "type": "response",
+    "url": "https://localhost:30443/api/v1/system-settings/cluster-resources",
+    "status": 200
+  },
+  {
+    "type": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/api/v1/auth/me"
+  },
+  {
+    "type": "response",
+    "url": "https://localhost:30443/api/v1/auth/me",
+    "status": 200
+  },
+  {
+    "type": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/api/v1/users?page=1&limit=20"
+  },
+  {
+    "type": "response",
+    "url": "https://localhost:30443/api/v1/users?page=1&limit=20",
+    "status": 200
+  },
+  {
+    "type": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/lobster_transparent.png"
+  },
+  {
+    "type": "response",
+    "url": "https://localhost:30443/lobster_transparent.png",
+    "status": 200
+  },
+  {
+    "type": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/api/v1/auth/me"
+  },
+  {
+    "type": "response",
+    "url": "https://localhost:30443/api/v1/auth/me",
+    "status": 200
+  },
+  {
+    "type": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/lobster_transparent.png"
+  },
+  {
+    "type": "response",
+    "url": "https://localhost:30443/lobster_transparent.png",
+    "status": 200
+  },
+  {
+    "type": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/api/v1/instances?page=1&limit=1000"
+  },
+  {
+    "type": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/api/v1/users?page=1&limit=1000"
+  },
+  {
+    "type": "response",
+    "url": "https://localhost:30443/api/v1/instances?page=1&limit=1000",
+    "status": 200
+  },
+  {
+    "type": "response",
+    "url": "https://localhost:30443/api/v1/users?page=1&limit=1000",
+    "status": 200
+  },
+  {
+    "type": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/api/v1/auth/me"
+  },
+  {
+    "type": "response",
+    "url": "https://localhost:30443/api/v1/auth/me",
+    "status": 200
+  },
+  {
+    "type": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/lobster_transparent.png"
+  },
+  {
+    "type": "response",
+    "url": "https://localhost:30443/lobster_transparent.png",
+    "status": 200
+  },
+  {
+    "type": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/api/v1/auth/me"
+  },
+  {
+    "type": "response",
+    "url": "https://localhost:30443/api/v1/auth/me",
+    "status": 200
+  },
+  {
+    "type": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/lobster_transparent.png"
+  },
+  {
+    "type": "response",
+    "url": "https://localhost:30443/lobster_transparent.png",
+    "status": 200
+  },
+  {
+    "type": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/api/v1/admin/skills"
+  },
+  {
+    "type": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/api/v1/admin/security/scan-jobs?limit=20"
+  },
+  {
+    "type": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/api/v1/admin/security/config"
+  },
+  {
+    "type": "response",
+    "url": "https://localhost:30443/api/v1/admin/security/scan-jobs?limit=20",
+    "status": 200
+  },
+  {
+    "type": "response",
+    "url": "https://localhost:30443/api/v1/admin/security/config",
+    "status": 200
+  },
+  {
+    "type": "response",
+    "url": "https://localhost:30443/api/v1/admin/skills",
+    "status": 200
+  },
+  {
+    "type": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/api/v1/auth/me"
+  },
+  {
+    "type": "response",
+    "url": "https://localhost:30443/api/v1/auth/me",
+    "status": 200
+  },
+  {
+    "type": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/lobster_transparent.png"
+  },
+  {
+    "type": "response",
+    "url": "https://localhost:30443/lobster_transparent.png",
+    "status": 200
+  },
+  {
+    "type": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/api/v1/admin/skills"
+  },
+  {
+    "type": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/api/v1/admin/security/scan-jobs?limit=20"
+  },
+  {
+    "type": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/api/v1/admin/security/config"
+  },
+  {
+    "type": "response",
+    "url": "https://localhost:30443/api/v1/admin/security/scan-jobs?limit=20",
+    "status": 200
+  },
+  {
+    "type": "response",
+    "url": "https://localhost:30443/api/v1/admin/security/config",
+    "status": 200
+  },
+  {
+    "type": "response",
+    "url": "https://localhost:30443/api/v1/admin/skills",
+    "status": 200
+  },
+  {
+    "type": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/api/v1/auth/me"
+  },
+  {
+    "type": "response",
+    "url": "https://localhost:30443/api/v1/auth/me",
+    "status": 200
+  },
+  {
+    "type": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/lobster_transparent.png"
+  },
+  {
+    "type": "response",
+    "url": "https://localhost:30443/lobster_transparent.png",
+    "status": 200
+  },
+  {
+    "type": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/api/v1/admin/skills"
+  },
+  {
+    "type": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/api/v1/admin/security/scan-jobs?limit=20"
+  },
+  {
+    "type": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/api/v1/admin/security/config"
+  },
+  {
+    "type": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/api/v1/admin/models"
+  },
+  {
+    "type": "response",
+    "url": "https://localhost:30443/api/v1/admin/security/scan-jobs?limit=20",
+    "status": 200
+  },
+  {
+    "type": "response",
+    "url": "https://localhost:30443/api/v1/admin/models",
+    "status": 200
+  },
+  {
+    "type": "response",
+    "url": "https://localhost:30443/api/v1/admin/security/config",
+    "status": 200
+  },
+  {
+    "type": "response",
+    "url": "https://localhost:30443/api/v1/admin/skills",
+    "status": 200
+  },
+  {
+    "type": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/api/v1/auth/me"
+  },
+  {
+    "type": "response",
+    "url": "https://localhost:30443/api/v1/auth/me",
+    "status": 200
+  },
+  {
+    "type": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/lobster_transparent.png"
+  },
+  {
+    "type": "response",
+    "url": "https://localhost:30443/lobster_transparent.png",
+    "status": 200
+  },
+  {
+    "type": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/api/v1/system-settings/images"
+  },
+  {
+    "type": "response",
+    "url": "https://localhost:30443/api/v1/system-settings/images",
+    "status": 200
+  },
+  {
+    "type": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/api/v1/auth/me"
+  },
+  {
+    "type": "response",
+    "url": "https://localhost:30443/api/v1/auth/me",
+    "status": 200
+  },
+  {
+    "type": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/lobster_transparent.png"
+  },
+  {
+    "type": "response",
+    "url": "https://localhost:30443/lobster_transparent.png",
+    "status": 200
+  },
+  {
+    "type": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/api/v1/users/1/quota"
+  },
+  {
+    "type": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/api/v1/instances?page=1&limit=100"
+  },
+  {
+    "type": "response",
+    "url": "https://localhost:30443/api/v1/users/1/quota",
+    "status": 200
+  },
+  {
+    "type": "response",
+    "url": "https://localhost:30443/api/v1/instances?page=1&limit=100",
+    "status": 200
+  },
+  {
+    "type": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/api/v1/auth/me"
+  },
+  {
+    "type": "response",
+    "url": "https://localhost:30443/api/v1/auth/me",
+    "status": 200
+  },
+  {
+    "type": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/lobster_transparent.png"
+  },
+  {
+    "type": "response",
+    "url": "https://localhost:30443/lobster_transparent.png",
+    "status": 200
+  },
+  {
+    "type": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/api/v1/instances?page=1&limit=20"
+  },
+  {
+    "type": "response",
+    "url": "https://localhost:30443/api/v1/instances?page=1&limit=20",
+    "status": 200
+  },
+  {
+    "type": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/openclaw-configs"
+  },
+  {
+    "type": "response",
+    "url": "https://localhost:30443/openclaw-configs",
+    "status": 200
+  },
+  {
+    "type": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/api/v1/auth/me"
+  },
+  {
+    "type": "response",
+    "url": "https://localhost:30443/api/v1/auth/me",
+    "status": 200
+  },
+  {
+    "type": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/lobster_transparent.png"
+  },
+  {
+    "type": "response",
+    "url": "https://localhost:30443/lobster_transparent.png",
+    "status": 200
+  },
+  {
+    "type": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/api/v1/openclaw-configs/resources"
+  },
+  {
+    "type": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/api/v1/skills"
+  },
+  {
+    "type": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/api/v1/openclaw-configs/bundles"
+  },
+  {
+    "type": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/api/v1/openclaw-configs/injections?limit=50"
+  },
+  {
+    "type": "response",
+    "url": "https://localhost:30443/api/v1/openclaw-configs/bundles",
+    "status": 200
+  },
+  {
+    "type": "response",
+    "url": "https://localhost:30443/api/v1/openclaw-configs/injections?limit=50",
+    "status": 200
+  },
+  {
+    "type": "response",
+    "url": "https://localhost:30443/api/v1/openclaw-configs/resources",
+    "status": 200
+  },
+  {
+    "type": "response",
+    "url": "https://localhost:30443/api/v1/skills",
+    "status": 200
+  },
+  {
+    "type": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/api/v1/auth/me"
+  },
+  {
+    "type": "response",
+    "url": "https://localhost:30443/api/v1/auth/me",
+    "status": 200
+  },
+  {
+    "type": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/lobster_transparent.png"
+  },
+  {
+    "type": "response",
+    "url": "https://localhost:30443/lobster_transparent.png",
+    "status": 200
+  },
+  {
+    "type": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/api/v1/auth/me"
+  },
+  {
+    "type": "response",
+    "url": "https://localhost:30443/api/v1/auth/me",
+    "status": 200
+  },
+  {
+    "type": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/lobster_transparent.png"
+  },
+  {
+    "type": "response",
+    "url": "https://localhost:30443/lobster_transparent.png",
+    "status": 200
+  },
+  {
+    "type": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/api/v1/instances?page=1&limit=100"
+  },
+  {
+    "type": "response",
+    "url": "https://localhost:30443/api/v1/instances?page=1&limit=100",
+    "status": 200
+  },
+  {
+    "type": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/api/v1/instances/2/runtime"
+  },
+  {
+    "type": "response",
+    "url": "https://localhost:30443/api/v1/instances/2/runtime",
+    "status": 200
+  }
+]

@@ -1,0 +1,340 @@
+[
+  {
+    "event": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/lobster_transparent.png",
+    "atMs": 1002
+  },
+  {
+    "event": "response",
+    "url": "https://localhost:30443/lobster_transparent.png",
+    "status": 200,
+    "ok": true,
+    "atMs": 1004
+  },
+  {
+    "event": "request",
+    "method": "POST",
+    "url": "https://localhost:30443/api/v1/auth/login",
+    "atMs": 1133
+  },
+  {
+    "event": "response",
+    "url": "https://localhost:30443/api/v1/auth/login",
+    "status": 200,
+    "ok": true,
+    "atMs": 1189
+  },
+  {
+    "event": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/api/v1/auth/me",
+    "atMs": 1189
+  },
+  {
+    "event": "response",
+    "url": "https://localhost:30443/api/v1/auth/me",
+    "status": 200,
+    "ok": true,
+    "atMs": 1191
+  },
+  {
+    "event": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/lobster_transparent.png",
+    "atMs": 1195
+  },
+  {
+    "event": "response",
+    "url": "https://localhost:30443/lobster_transparent.png",
+    "status": 200,
+    "ok": true,
+    "atMs": 1203
+  },
+  {
+    "event": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/api/v1/auth/me",
+    "atMs": 1895
+  },
+  {
+    "event": "response",
+    "url": "https://localhost:30443/api/v1/auth/me",
+    "status": 200,
+    "ok": true,
+    "atMs": 1903
+  },
+  {
+    "event": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/lobster_transparent.png",
+    "atMs": 1903
+  },
+  {
+    "event": "response",
+    "url": "https://localhost:30443/lobster_transparent.png",
+    "status": 200,
+    "ok": true,
+    "atMs": 1903
+  },
+  {
+    "event": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/api/v1/auth/me",
+    "atMs": 2670
+  },
+  {
+    "event": "response",
+    "url": "https://localhost:30443/api/v1/auth/me",
+    "status": 200,
+    "ok": true,
+    "atMs": 2675
+  },
+  {
+    "event": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/lobster_transparent.png",
+    "atMs": 2689
+  },
+  {
+    "event": "response",
+    "url": "https://localhost:30443/lobster_transparent.png",
+    "status": 200,
+    "ok": true,
+    "atMs": 2689
+  },
+  {
+    "event": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/api/v1/auth/me",
+    "atMs": 3346
+  },
+  {
+    "event": "response",
+    "url": "https://localhost:30443/api/v1/auth/me",
+    "status": 200,
+    "ok": true,
+    "atMs": 3352
+  },
+  {
+    "event": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/lobster_transparent.png",
+    "atMs": 3352
+  },
+  {
+    "event": "response",
+    "url": "https://localhost:30443/lobster_transparent.png",
+    "status": 200,
+    "ok": true,
+    "atMs": 3353
+  },
+  {
+    "event": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/api/v1/auth/me",
+    "atMs": 4021
+  },
+  {
+    "event": "response",
+    "url": "https://localhost:30443/api/v1/auth/me",
+    "status": 200,
+    "ok": true,
+    "atMs": 4025
+  },
+  {
+    "event": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/lobster_transparent.png",
+    "atMs": 4027
+  },
+  {
+    "event": "response",
+    "url": "https://localhost:30443/lobster_transparent.png",
+    "status": 200,
+    "ok": true,
+    "atMs": 4027
+  },
+  {
+    "event": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/api/v1/auth/me",
+    "atMs": 4709
+  },
+  {
+    "event": "response",
+    "url": "https://localhost:30443/api/v1/auth/me",
+    "status": 200,
+    "ok": true,
+    "atMs": 4714
+  },
+  {
+    "event": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/lobster_transparent.png",
+    "atMs": 4715
+  },
+  {
+    "event": "response",
+    "url": "https://localhost:30443/lobster_transparent.png",
+    "status": 200,
+    "ok": true,
+    "atMs": 4715
+  },
+  {
+    "event": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/api/v1/auth/me",
+    "atMs": 5445
+  },
+  {
+    "event": "response",
+    "url": "https://localhost:30443/api/v1/auth/me",
+    "status": 200,
+    "ok": true,
+    "atMs": 5452
+  },
+  {
+    "event": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/lobster_transparent.png",
+    "atMs": 5452
+  },
+  {
+    "event": "response",
+    "url": "https://localhost:30443/lobster_transparent.png",
+    "status": 200,
+    "ok": true,
+    "atMs": 5452
+  },
+  {
+    "event": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/api/v1/auth/me",
+    "atMs": 6130
+  },
+  {
+    "event": "response",
+    "url": "https://localhost:30443/api/v1/auth/me",
+    "status": 200,
+    "ok": true,
+    "atMs": 6135
+  },
+  {
+    "event": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/lobster_transparent.png",
+    "atMs": 6135
+  },
+  {
+    "event": "response",
+    "url": "https://localhost:30443/lobster_transparent.png",
+    "status": 200,
+    "ok": true,
+    "atMs": 6135
+  },
+  {
+    "event": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/api/v1/auth/me",
+    "atMs": 6805
+  },
+  {
+    "event": "response",
+    "url": "https://localhost:30443/api/v1/auth/me",
+    "status": 200,
+    "ok": true,
+    "atMs": 6810
+  },
+  {
+    "event": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/lobster_transparent.png",
+    "atMs": 6814
+  },
+  {
+    "event": "response",
+    "url": "https://localhost:30443/lobster_transparent.png",
+    "status": 200,
+    "ok": true,
+    "atMs": 6814
+  },
+  {
+    "event": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/api/v1/auth/me",
+    "atMs": 7480
+  },
+  {
+    "event": "response",
+    "url": "https://localhost:30443/api/v1/auth/me",
+    "status": 200,
+    "ok": true,
+    "atMs": 7487
+  },
+  {
+    "event": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/lobster_transparent.png",
+    "atMs": 7487
+  },
+  {
+    "event": "response",
+    "url": "https://localhost:30443/lobster_transparent.png",
+    "status": 200,
+    "ok": true,
+    "atMs": 7487
+  },
+  {
+    "event": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/api/v1/auth/me",
+    "atMs": 8152
+  },
+  {
+    "event": "response",
+    "url": "https://localhost:30443/api/v1/auth/me",
+    "status": 200,
+    "ok": true,
+    "atMs": 8158
+  },
+  {
+    "event": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/lobster_transparent.png",
+    "atMs": 8158
+  },
+  {
+    "event": "response",
+    "url": "https://localhost:30443/lobster_transparent.png",
+    "status": 200,
+    "ok": true,
+    "atMs": 8158
+  },
+  {
+    "event": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/api/v1/auth/me",
+    "atMs": 8820
+  },
+  {
+    "event": "response",
+    "url": "https://localhost:30443/api/v1/auth/me",
+    "status": 200,
+    "ok": true,
+    "atMs": 8827
+  },
+  {
+    "event": "request",
+    "method": "GET",
+    "url": "https://localhost:30443/lobster_transparent.png",
+    "atMs": 8827
+  },
+  {
+    "event": "response",
+    "url": "https://localhost:30443/lobster_transparent.png",
+    "status": 200,
+    "ok": true,
+    "atMs": 8827
+  }
+]

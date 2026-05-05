@@ -1,0 +1,4 @@
+Command	Exit	Evidence
+curl -sk https://localhost:30443/healthz	0	logs/healthz.log
+kubectl get deploy image	0	logs/deployment-image.log
+Playwright clean-context login wait rerun	0	logs/playwright-login-wait-rerun.log, playwright-login-wait-rerun-result.json

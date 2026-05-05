@@ -1,0 +1,22 @@
+area	assertion	observed	result
+healthz	/healthz returns ok	HTTP 200 body ok	PASS
+deployment	image tag matches	clawmanager:m1-gtmanager-assets-local-20260430120731	PASS
+login	html lang zh	zh	PASS
+login	title GTManager	GTManager	PASS
+login	visible login text	登录 GTManager	PASS
+login	language selector default Chinese	value zh text 中文	PASS
+login	favicon href	/gtmanager-logo.png	PASS
+login	visible img logo uses /gtmanager-logo.png	no img elements on /login	FAIL
+login	no product-facing ClawManager	absent	PASS
+login	no GTClaw	absent	PASS
+bundle	GTManager present	MATCH	PASS
+bundle	登录 GTManager present	MATCH	PASS
+bundle	Sign in to GTManager present	MATCH	PASS
+bundle	clawmanager_locale protected key present	MATCH	PASS
+bundle	ClawManager absent	NO_MATCH	PASS
+bundle	Sign in to ClawManager absent	NO_MATCH	PASS
+logo	HTTP 200 PNG SHA and browser dimensions	200 image/png SHA match 115x120 complete	PASS
+auth	UI login strong wait	route 100ms tokens 115ms stable body 729ms	PASS
+routes	admin routes	6/6 passed	PASS
+routes	user routes	5/5 passed under admin context	PASS_WITH_CAVEAT
+wording	OpenClaw wording preserved	/admin/settings /openclaw-configs	PASS

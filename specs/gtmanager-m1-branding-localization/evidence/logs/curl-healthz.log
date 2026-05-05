@@ -1,0 +1,6 @@
+Command: curl -sk https://localhost:30443/healthz
+Started: 2026-04-30T01:33:00Z
+
+ok
+Finished: 2026-04-30T01:33:00Z
+Exit code: 0

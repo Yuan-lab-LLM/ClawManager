@@ -1,0 +1,1 @@
+$ curl -sk https://localhost:30443/login -o specs/gtmanager-m1-branding-localization/evidence/rerun-2026-04-30/logs/login.html

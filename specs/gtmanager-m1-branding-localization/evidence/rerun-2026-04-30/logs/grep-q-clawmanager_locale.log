@@ -1,0 +1,2 @@
+$ grep -q 'clawmanager_locale' specs/gtmanager-m1-branding-localization/evidence/rerun-2026-04-30/logs/deployed-app.js
+MATCH: clawmanager_locale

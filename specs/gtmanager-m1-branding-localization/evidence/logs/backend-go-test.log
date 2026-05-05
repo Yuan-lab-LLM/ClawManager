@@ -1,0 +1,19 @@
+Command: cd backend && go test ./...
+Started: 2026-04-30T01:32:39Z
+
+?   	clawreef/cmd/fixpassword	[no test files]
+?   	clawreef/cmd/initdb	[no test files]
+?   	clawreef/cmd/server	[no test files]
+ok  	clawreef/internal/aigateway	(cached)
+?   	clawreef/internal/config	[no test files]
+ok  	clawreef/internal/db	(cached)
+ok  	clawreef/internal/handlers	(cached)
+?   	clawreef/internal/middleware	[no test files]
+ok  	clawreef/internal/models	(cached)
+ok  	clawreef/internal/repository	(cached)
+ok  	clawreef/internal/services	(cached)
+?   	clawreef/internal/services/k8s	[no test files]
+?   	clawreef/internal/utils	[no test files]
+
+Finished: 2026-04-30T01:32:40Z
+Exit code: 0

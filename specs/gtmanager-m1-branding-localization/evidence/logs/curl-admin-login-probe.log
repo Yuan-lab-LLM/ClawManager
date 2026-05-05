@@ -1,0 +1,5 @@
+Command: curl -sk -X POST https://localhost:30443/api/v1/auth/login -H Content-Type:application/json -d {username,password}
+Credential source: longterm/workspace/app_spec.md default local admin credentials; password not recorded
+
+{"data":{"access_token":"<redacted>","refresh_token":"<redacted>","expires_in":3600},"message":"Login successful","success":true}
+Exit code: 0

@@ -1,0 +1,30 @@
+Command: curl -skI https://localhost:30443/login
+
+HTTP/2 200 
+server: nginx
+date: Thu, 30 Apr 2026 01:34:39 GMT
+content-type: text/html
+content-length: 469
+last-modified: Thu, 16 Apr 2026 06:36:04 GMT
+etag: "69e08354-1d5"
+accept-ranges: bytes
+
+
+Command: curl -sk https://localhost:30443/login | head -n 40
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/png" href="/lobster_transparent.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ClawManager</title>
+    <script type="module" crossorigin src="/assets/index-5ikfSU1Q.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-CzLDf9Yi.css">
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>
+
+Exit code: 0

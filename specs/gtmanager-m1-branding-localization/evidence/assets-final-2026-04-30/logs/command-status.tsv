@@ -1,0 +1,33 @@
+command	exit	log
+curl -skS healthz with HTTP status	0	specs/gtmanager-m1-branding-localization/evidence/assets-final-2026-04-30/logs/healthz.log
+kubectl deployment image	0	specs/gtmanager-m1-branding-localization/evidence/assets-final-2026-04-30/logs/deployment-image.log
+kubectl deployment wide	0	specs/gtmanager-m1-branding-localization/evidence/assets-final-2026-04-30/logs/deployment-wide.log
+kubectl pods app wide	0	specs/gtmanager-m1-branding-localization/evidence/assets-final-2026-04-30/logs/pods-wide.log
+kubectl gateway svc endpoints	0	specs/gtmanager-m1-branding-localization/evidence/assets-final-2026-04-30/logs/gateway-service-endpoints.log
+curl login html save	0	specs/gtmanager-m1-branding-localization/evidence/assets-final-2026-04-30/logs/curl-login-save.log
+login html first 80 lines	0	specs/gtmanager-m1-branding-localization/evidence/assets-final-2026-04-30/logs/login-head80.log
+extract deployed JS path	0	specs/gtmanager-m1-branding-localization/evidence/assets-final-2026-04-30/logs/deployed-js-path.txt
+curl deployed JS save	0	specs/gtmanager-m1-branding-localization/evidence/assets-final-2026-04-30/logs/curl-js-save.log
+grep GTManager present	0	specs/gtmanager-m1-branding-localization/evidence/assets-final-2026-04-30/logs/grep-GTManager.log
+grep login zh GTManager present	0	specs/gtmanager-m1-branding-localization/evidence/assets-final-2026-04-30/logs/grep-login-zh-GTManager.log
+grep sign in GTManager present	0	specs/gtmanager-m1-branding-localization/evidence/assets-final-2026-04-30/logs/grep-signin-GTManager.log
+grep protected locale key present	0	specs/gtmanager-m1-branding-localization/evidence/assets-final-2026-04-30/logs/grep-clawmanager_locale.log
+grep product ClawManager absent	0	specs/gtmanager-m1-branding-localization/evidence/assets-final-2026-04-30/logs/grep-ClawManager.log
+grep old sign in ClawManager absent	0	specs/gtmanager-m1-branding-localization/evidence/assets-final-2026-04-30/logs/grep-signin-ClawManager.log
+grep protected openclaw image identifier	0	specs/gtmanager-m1-branding-localization/evidence/assets-final-2026-04-30/logs/grep-clawmanager-openclaw-image.log
+grep protected namespace identifier	0	specs/gtmanager-m1-branding-localization/evidence/assets-final-2026-04-30/logs/grep-clawmanager-system.log
+grep protected gateway identifier	0	specs/gtmanager-m1-branding-localization/evidence/assets-final-2026-04-30/logs/grep-clawmanager-gateway.log
+grep protected app identifier	0	specs/gtmanager-m1-branding-localization/evidence/assets-final-2026-04-30/logs/grep-clawmanager-app.log
+curl gtmanager logo HEAD	0	specs/gtmanager-m1-branding-localization/evidence/assets-final-2026-04-30/logs/logo-head.log
+curl gtmanager logo download	0	specs/gtmanager-m1-branding-localization/evidence/assets-final-2026-04-30/logs/curl-logo-save.log
+logo file metadata	0	specs/gtmanager-m1-branding-localization/evidence/assets-final-2026-04-30/logs/logo-file.log
+logo sha256	0	specs/gtmanager-m1-branding-localization/evidence/assets-final-2026-04-30/logs/logo-sha256.log
+check JS has GTManager	0	specs/gtmanager-m1-branding-localization/evidence/assets-final-2026-04-30/logs/check-js-has-GTManager.log
+check JS has login zh GTManager	0	specs/gtmanager-m1-branding-localization/evidence/assets-final-2026-04-30/logs/check-js-has-login-zh-GTManager.log
+check JS has Sign in to GTManager	0	specs/gtmanager-m1-branding-localization/evidence/assets-final-2026-04-30/logs/check-js-has-signin-GTManager.log
+check JS has clawmanager_locale	0	specs/gtmanager-m1-branding-localization/evidence/assets-final-2026-04-30/logs/check-js-has-clawmanager_locale.log
+check JS has product ClawManager (expected absent)	1	specs/gtmanager-m1-branding-localization/evidence/assets-final-2026-04-30/logs/check-js-has-ClawManager.log
+check JS has Sign in to ClawManager (expected absent)	1	specs/gtmanager-m1-branding-localization/evidence/assets-final-2026-04-30/logs/check-js-has-signin-ClawManager.log
+npm install playwright@1.59.1 in /tmp	0	specs/gtmanager-m1-branding-localization/evidence/assets-final-2026-04-30/logs/npm-install-playwright.log
+node e2e-assets-final.mjs	0	specs/gtmanager-m1-branding-localization/evidence/assets-final-2026-04-30/logs/playwright-assets-final.log
+write assertion-status.tsv	0	specs/gtmanager-m1-branding-localization/evidence/assets-final-2026-04-30/logs/assertion-status.tsv

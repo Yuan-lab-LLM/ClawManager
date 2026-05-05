@@ -1,0 +1,21 @@
+date -u: 2026-04-30T01:40:25Z
+pwd: /Users/eduardogan/Desktop/GHJProject/ClawManager
+uname -a: Darwin MacBook-Pro.local 24.6.0 Darwin Kernel Version 24.6.0: Wed Nov  5 21:30:44 PST 2025; root:xnu-11417.140.69.705.2~1/RELEASE_ARM64_T6041 arm64
+node: v23.11.0
+npm: 10.9.2
+go: go version go1.25.0 darwin/arm64
+kubectl client:
+clientVersion:
+  buildDate: "2025-02-12T21:26:09Z"
+  compiler: gc
+  gitCommit: 67a30c0adcf52bd3f56ff0893ce19966be12991f
+  gitTreeState: clean
+  gitVersion: v1.32.2
+  goVersion: go1.23.6
+  major: "1"
+  minor: "32"
+  platform: darwin/arm64
+kustomizeVersion: v5.5.0
+
+
+kubectl current-context: k3d-clawmanager

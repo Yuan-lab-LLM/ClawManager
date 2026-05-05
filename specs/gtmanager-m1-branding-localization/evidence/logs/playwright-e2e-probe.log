@@ -1,0 +1,29 @@
+Command: Playwright E2E probe against https://localhost:30443 (temporary npm package; credentials provided through env, not printed)
+Browser skill note: in-app browser bootstrap was attempted first and failed because js_repl cannot import browser-client static builtin imports; local Playwright fallback used.
+Temporary root: /tmp/clawmanager-evidence-playwright.79dIO2
+Started: 2026-04-30T01:39:11Z
+
+Setup command: npm install --no-save playwright@1.59.1
+
+added 2 packages, and audited 3 packages in 974ms
+
+found 0 vulnerabilities
+
+Setup exit code: 0
+
+E2E command: node e2e-playwright-probe.mjs
+{
+  "verdict": "E2E blocked",
+  "failures": [
+    "Clean-profile /login does not show GTManager in visible body or browser title.",
+    "Clean-profile /login does not default to Chinese (html lang / selected language are not zh/中文).",
+    "Clean-profile /login still shows ClawManager."
+  ],
+  "blockers": [],
+  "screenshotsDir": "../../../Users/eduardogan/Desktop/GHJProject/ClawManager/specs/gtmanager-m1-branding-localization/evidence/screenshots"
+}
+
+E2E script exit code: 0
+
+Finished: 2026-04-30T01:39:20Z
+Wrapper exit code: 0

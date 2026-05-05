@@ -1,0 +1,77 @@
+{
+  "admin": {
+    "route": "/admin",
+    "screenshot": "screenshots/admin-shell-logo-check.png",
+    "images": [
+      {
+        "src": "/gtmanager-logo.png",
+        "alt": "GTManager 标志",
+        "currentSrc": "https://localhost:30443/gtmanager-logo.png",
+        "complete": true,
+        "naturalWidth": 115,
+        "naturalHeight": 120,
+        "visible": false,
+        "boundingBox": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        }
+      },
+      {
+        "src": "/gtmanager-logo.png",
+        "alt": "GTManager 标志",
+        "currentSrc": "https://localhost:30443/gtmanager-logo.png",
+        "complete": true,
+        "naturalWidth": 115,
+        "naturalHeight": 120,
+        "visible": true,
+        "boundingBox": {
+          "x": 20,
+          "y": 33,
+          "width": 36,
+          "height": 36
+        }
+      }
+    ],
+    "passed": true
+  },
+  "user": {
+    "route": "/dashboard",
+    "credentialMode": "admin-authenticated-context",
+    "screenshot": "screenshots/user-shell-logo-check.png",
+    "images": [
+      {
+        "src": "/gtmanager-logo.png",
+        "alt": "GTManager 标志",
+        "currentSrc": "https://localhost:30443/gtmanager-logo.png",
+        "complete": true,
+        "naturalWidth": 115,
+        "naturalHeight": 120,
+        "visible": false,
+        "boundingBox": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        }
+      },
+      {
+        "src": "/gtmanager-logo.png",
+        "alt": "GTManager 标志",
+        "currentSrc": "https://localhost:30443/gtmanager-logo.png",
+        "complete": true,
+        "naturalWidth": 115,
+        "naturalHeight": 120,
+        "visible": true,
+        "boundingBox": {
+          "x": 20,
+          "y": 33,
+          "width": 36,
+          "height": 36
+        }
+      }
+    ],
+    "passed": true
+  }
+}

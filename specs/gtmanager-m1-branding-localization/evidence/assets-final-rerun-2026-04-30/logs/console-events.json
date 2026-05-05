@@ -1,0 +1,12 @@
+[
+  {
+    "type": "log",
+    "text": "WebSocket connected",
+    "location": {
+      "url": "https://localhost:30443/assets/index-BcCrhHyr.js",
+      "lineNumber": 17,
+      "columnNumber": 202582
+    },
+    "atMs": 8423
+  }
+]

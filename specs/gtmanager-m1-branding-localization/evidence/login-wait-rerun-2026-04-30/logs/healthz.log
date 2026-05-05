@@ -1,0 +1,4 @@
+command: curl -sk https://localhost:30443/healthz
+stdout:
+ok
+exit=0

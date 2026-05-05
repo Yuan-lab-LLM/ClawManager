@@ -1,0 +1,2 @@
+$ curl -sk https://localhost:30443/healthz
+ok

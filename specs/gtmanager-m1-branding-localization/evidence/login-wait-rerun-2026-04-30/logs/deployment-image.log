@@ -1,0 +1,4 @@
+command: kubectl get deploy -n clawmanager-system clawmanager-app -o jsonpath=...image...
+stdout:
+clawmanager:m1-gtmanager-local-20260430102258
+exit=0
