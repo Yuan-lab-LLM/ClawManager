@@ -50,6 +50,7 @@ type PodConfig struct {
 	ImagePullPolicy    corev1.PullPolicy
 	ExtraEnv           map[string]string
 	EnvFromSecretNames []string
+	NodeName           string // If set, pod is pinned to this node via NodeSelector
 }
 
 // CreatePod creates a new pod for an instance
@@ -108,6 +109,7 @@ func (s *PodService) CreatePod(ctx context.Context, config PodConfig) (*corev1.P
 		},
 		Spec: corev1.PodSpec{
 			RestartPolicy: corev1.RestartPolicyNever,
+			NodeSelector:  buildNodeSelector(config.NodeName),
 			Containers: []corev1.Container{
 				{
 					Name:            "desktop",
@@ -235,6 +237,17 @@ func (s *PodService) CreatePod(ctx context.Context, config PodConfig) (*corev1.P
 
 func intstrFromInt32(port int32) intstr.IntOrString {
 	return intstr.FromInt32(port)
+}
+
+// buildNodeSelector returns a NodeSelector map that pins the pod to the given
+// node. If nodeName is empty, returns nil (no scheduling constraint).
+func buildNodeSelector(nodeName string) map[string]string {
+	if nodeName == "" {
+		return nil
+	}
+	return map[string]string{
+		"kubernetes.io/hostname": nodeName,
+	}
 }
 
 // GetPod gets a pod by instance ID

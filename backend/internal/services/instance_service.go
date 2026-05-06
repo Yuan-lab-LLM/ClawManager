@@ -50,6 +50,7 @@ type CreateInstanceRequest struct {
 	EnvironmentOverrides map[string]string   `json:"environment_overrides,omitempty"`
 	StorageClass         string              `json:"storage_class"`
 	OpenClawConfigPlan   *OpenClawConfigPlan `json:"openclaw_config_plan,omitempty"`
+	NodeName             *string             `json:"node_name,omitempty"`
 }
 
 // UpdateInstanceRequest holds data for updating an instance
@@ -217,6 +218,7 @@ func (s *instanceService) Create(userID int, req CreateInstanceRequest) (*models
 		EnvironmentOverridesJSON: environmentOverridesJSON,
 		StorageClass:             req.StorageClass,
 		MountPath:                runtimeConfig.MountPath,
+		NodeName:                 req.NodeName,
 		CreatedAt:                now,
 		UpdatedAt:                now,
 	}
@@ -317,6 +319,7 @@ func (s *instanceService) Create(userID int, req CreateInstanceRequest) (*models
 		ImagePullPolicy:    corev1.PullPolicy(defaultImagePullPolicy()),
 		ExtraEnv:           extraEnv,
 		EnvFromSecretNames: []string{bootstrapSecretName},
+		NodeName:           derefString(instance.NodeName),
 	}
 
 	pod, err := s.podService.CreatePod(ctx, podConfig)
@@ -485,6 +488,7 @@ func (s *instanceService) Start(instanceID int) error {
 		ImagePullPolicy:    corev1.PullPolicy(defaultImagePullPolicy()),
 		ExtraEnv:           extraEnv,
 		EnvFromSecretNames: []string{bootstrapSecretName},
+		NodeName:           derefString(instance.NodeName),
 	}
 
 	pod, err := s.podService.CreatePod(ctx, podConfig)
@@ -1143,4 +1147,12 @@ func additionalServicePorts(primaryPort int32) []int32 {
 	}
 
 	return nil
+}
+
+// derefString safely dereferences a *string, returning "" if nil.
+func derefString(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }

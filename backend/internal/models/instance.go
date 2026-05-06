@@ -28,6 +28,7 @@ type Instance struct {
 	PodName                  *string    `db:"pod_name" json:"pod_name,omitempty"`
 	PodNamespace             *string    `db:"pod_namespace" json:"pod_namespace,omitempty"`
 	PodIP                    *string    `db:"pod_ip" json:"pod_ip,omitempty"`
+	NodeName                 *string    `db:"node_name" json:"node_name,omitempty"`
 	AccessURL                *string    `db:"access_url" json:"access_url,omitempty"`
 	AccessToken              *string    `db:"access_token" json:"-"`
 	AgentBootstrapToken      *string    `db:"agent_bootstrap_token" json:"-"`
