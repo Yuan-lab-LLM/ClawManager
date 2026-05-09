@@ -8,6 +8,8 @@ Boundary notes:
 - Feature definition still belongs to `spec规范` (`spec -> plan -> tasks`)
 - Runtime execution behavior still belongs to `superpower skill`
 - The prompt templates in `templates/` should be treated as compatibility scaffolds, not as the long-term Execution Layer authority
+- `UnifiedFramework/` defines layer boundaries and a non-authoritative ledger; it does not replace this project memory layer
+- `UnifiedFramework/ledger/` may be referenced for current stop points, but it cannot mark acceptance, `passes:true`, or Close
 
 ## Quick start
 1. Bootstrap a workspace:
@@ -71,6 +73,6 @@ Every coding session must:
 - run environment startup from `init.sh`,
 - re-verify previously passing behavior,
 - complete one unpassed feature end-to-end,
-- update `passes`, notes, and commit.
+- update `passes`, notes, and commit only when the current project gate authorizes those actions.
 
 This session contract defines the minimum project-memory handshake. It does not replace the feature-delivery authority (`spec规范`) or the runtime execution authority (`superpower skill`).

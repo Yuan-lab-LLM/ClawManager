@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>GTClaw 控制台</title>
+    <meta name="color-scheme" content="dark light" />
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <link rel="icon" type="image/png" sizes="32x32" href="./favicon-32.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="./apple-touch-icon.png" />
+    <script>
+      (function () {
+        var THEMES = { claw: 1, knot: 1, dash: 1 };
+        var MODES = { system: 1, light: 1, dark: 1 };
+        var LEGACY = {
+          dark: "claw:dark",
+          light: "claw:light",
+          openknot: "knot:dark",
+          fieldmanual: "dash:dark",
+          clawdash: "dash:light",
+          system: "claw:system",
+        };
+        try {
+          var keys = Object.keys(localStorage);
+          var raw;
+          for (var i = 0; i < keys.length; i++) {
+            if (keys[i].indexOf("openclaw.control.settings.v1") === 0) {
+              raw = localStorage.getItem(keys[i]);
+              if (raw) break;
+            }
+          }
+          if (!raw) return;
+          var s = JSON.parse(raw);
+          var t = s && s.theme;
+          var m = s && s.themeMode;
+          if (typeof t !== "string") t = "";
+          if (typeof m !== "string") m = "";
+          var legacy = LEGACY[t];
+          var theme = THEMES[t] ? t : legacy ? legacy.split(":")[0] : "claw";
+          var mode = MODES[m] ? m : legacy ? legacy.split(":")[1] : "system";
+          if (mode === "system") {
+            mode = window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+          }
+          var resolved =
+            theme === "knot"
+              ? mode === "light"
+                ? "openknot-light"
+                : "openknot"
+              : theme === "dash"
+                ? mode === "light"
+                  ? "dash-light"
+                  : "dash"
+                : mode === "light"
+                  ? "light"
+                  : "dark";
+          document.documentElement.setAttribute("data-theme", resolved);
+          document.documentElement.setAttribute(
+            "data-theme-mode",
+            resolved.indexOf("light") !== -1 ? "light" : "dark",
+          );
+        } catch (e) {}
+      })();
+    </script>
+    <script type="module" crossorigin src="./assets/index-M4TNVXB3.js"></script>
+    <link rel="modulepreload" crossorigin href="./assets/i18n-B06L7jQN.js">
+    <link rel="modulepreload" crossorigin href="./assets/directive--_7q5XUp.js">
+    <link rel="modulepreload" crossorigin href="./assets/format-Dg6tFpW6.js">
+    <link rel="modulepreload" crossorigin href="./assets/string-coerce-BcFtIWA_.js">
+    <link rel="modulepreload" crossorigin href="./assets/agents-utils-2iiM6XOJ.js">
+    <link rel="modulepreload" crossorigin href="./assets/open-external-url-DHNx0AO6.js">
+    <link rel="modulepreload" crossorigin href="./assets/icons-CRpuKbeA.js">
+    <link rel="modulepreload" crossorigin href="./assets/navigation-NToY3MGK.js">
+    <link rel="modulepreload" crossorigin href="./assets/presenter-D7XZZO4i.js">
+    <link rel="modulepreload" crossorigin href="./assets/config-form-x_UhxUYO.js">
+    <link rel="stylesheet" crossorigin href="./assets/index-DfTb2bb1.css">
+  </head>
+  <body>
+    <openclaw-app></openclaw-app>
+  </body>
+</html>

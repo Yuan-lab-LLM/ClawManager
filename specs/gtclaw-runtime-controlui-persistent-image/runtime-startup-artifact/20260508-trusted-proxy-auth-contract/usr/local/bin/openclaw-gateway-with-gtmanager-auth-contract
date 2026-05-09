@@ -1,0 +1,10 @@
+#!/usr/bin/with-contenv bash
+set -euo pipefail
+
+if [ "$#" -eq 0 ]; then
+  echo "openclaw gateway auth-contract wrapper requires a command" >&2
+  exit 64
+fi
+
+/usr/local/bin/openclaw-ensure-controlui-origin
+exec "$@"

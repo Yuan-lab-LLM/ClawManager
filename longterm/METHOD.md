@@ -24,6 +24,17 @@ Each workspace must contain:
 - `init.sh`: repeatable environment bootstrap/start script.
 - `claude-progress.txt`: handoff notes between sessions.
 
+## Unified Framework boundary
+
+ClawManager now uses a codeSPEC-aligned minimum kernel:
+
+`Project Rules -> longterm -> specs -> execution -> evidence -> write-back`
+
+In this kernel, `longterm` owns durable project facts and progress. It does not own
+feature implementation details, execution behavior, or acceptance by itself.
+`UnifiedFramework/ledger/` may point to current stop points, but it is
+non-authoritative and cannot mark `passes:true` or Close.
+
 ## Migration into an existing project
 1. Copy `longrun/` into the target repository root.
 2. Run `./longrun/scripts/bootstrap.sh <project_key>`.
@@ -66,8 +77,8 @@ Mandatory order:
 4. If regressions exist, fix regressions first.
 5. Pick one unblocked `passes: false` feature.
 6. Implement + end-to-end test.
-7. Only then set `passes` to `true`.
-8. Update `claude-progress.txt` and commit.
+7. Only then request approval to set `passes` to `true` if the current project gate requires explicit approval.
+8. Update `claude-progress.txt` and commit only when explicitly authorized by the current gate.
 
 ## Quality gates
 A feature can be marked done only if:
@@ -79,7 +90,7 @@ A feature can be marked done only if:
 ## Failure modes and controls
 - Premature "done": controlled by explicit `feature_list.json` and one-feature-per-session rule.
 - Lost context across windows: controlled by `claude-progress.txt` + git history.
-- Dirty handoff state: controlled by end-session checklist and commit requirement.
+- Dirty handoff state: controlled by end-session checklist and approval-gated commit/write-back.
 - False-positive completion: controlled by mandatory e2e verification before `passes: true`.
 
 ## Decision record for this localization

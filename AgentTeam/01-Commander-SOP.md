@@ -29,6 +29,17 @@
 - 在没有拆解前直接让多个 Agent 改同一块区域
 - 在没有验证证据前宣布“完成”
 
+### ClawManager 角色限制
+在 ClawManager 中，AgentTeam 只是 `UnifiedFramework` 最小内核上的可选 overlay。
+默认只使用四个通用角色：
+
+- `Worker`
+- `Verifier`
+- `Reviewer`
+- `Closer`
+
+不要为每个 gate 创建长名字 agent。gate 名称写入 `任务类型`。
+
 ## 3. 一次标准任务循环
 ### 阶段 A：确认当前状态
 总司令先回答 5 个问题：
@@ -48,10 +59,10 @@
 
 ### 阶段 C：派工
 总司令根据任务类型发出派单：
-- 规划任务 → 规划型 Agent
-- 实现任务 → 实现型 Agent
-- 验证任务 → 验证型 Agent
-- 文档 / 收口任务 → 文档型 Agent
+- 规划 / 实现 / 文档草拟任务 → `Worker`
+- 独立证据检查 / 命令复核任务 → `Verifier`
+- 架构 / 代码 / evidence 风险判断 → `Reviewer`
+- Close / write-back / commit 收口任务 → `Closer`（仅 fresh evidence + 用户批准后）
 
 ### 阶段 D：回收结果
 每个子 Agent 返回时，总司令要检查：
@@ -75,9 +86,8 @@
 - 通常 1 条实现线就够
 
 推荐编队：
-- 1 个规划/拆解 Agent
-- 1 个实现 Agent
-- 1 个验证 Agent
+- 1 个 `Worker`
+- 1 个 `Verifier`（需要独立复核时）
 
 ### 中任务
 特征：
@@ -86,10 +96,9 @@
 - 存在明显接口边界
 
 推荐编队：
-- 1 个规划 Agent
-- 2 个实现 Agent
-- 1 个验证 Agent
-- 1 个文档/收口 Agent
+- 1-2 个 `Worker`
+- 1 个 `Reviewer`
+- 1 个 `Verifier`
 
 ### 多线战役
 特征：
@@ -100,29 +109,25 @@
 
 推荐编队：
 - 1 个总司令
-- 1 个主规划 Agent
-- 多个实现 Agent
-- 1 个专门验证 Agent
-- 1 个文档/收口 Agent
-- 按需临时增加侦察 / reviewer / verifier / fixer 类 Agent
+- 少量 `Worker`
+- 1 个 `Reviewer`
+- 1 个 `Verifier`
+- 1 个 `Closer`（仅收口 gate 批准后）
 
 ## 5. Agent 选型原则
-### 规划型 Agent
+### `Worker`
 适合：
 - 理清问题
 - 写 spec / plan / tasks
 - 梳理上下文
 - 做方案比较
 - 统一文档口径
-
-### 实现型 Agent
-适合：
 - 修改代码
 - 写脚本
 - 修 bug
 - 做具体逻辑实现
 
-### 验证型 Agent
+### `Verifier`
 适合：
 - 复现 bug
 - 跑测试
@@ -130,18 +135,25 @@
 - smoke test
 - 回归验证
 
-### 文档/收口型 Agent
+### `Reviewer`
 适合：
-- 更新文档
-- 生成交付说明
-- 记录 longrun / changelog / handoff
+- 审查实现与证据
+- 判断架构风险
+- 判断是否越界
+- 判断是否建议进入下一 gate
+
+### `Closer`
+适合：
+- 记录 approved close / write-back / handoff
+- 执行批准过的 commit / push
+- 更新批准过的 longterm 状态
 - 收束最终输出
 
 ## 6. 并行规则
 总司令必须默认遵守：
 - 两个实现 Agent 不同时改同一文件集
-- 验证 Agent 不擅自扩大实现范围
-- 文档 Agent 不重写实现逻辑
+- `Verifier` 不擅自扩大实现范围
+- `Closer` 不重写实现逻辑
 - 任何并行都要先声明所有权
 - 如果边界不清，宁可串行，不要强行并行
 

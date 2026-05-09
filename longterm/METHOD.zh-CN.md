@@ -17,6 +17,8 @@
 - feature 交付仍应走 `spec规范` 的 `spec -> plan -> tasks`。
 - 运行时执行方法仍应由 `superpower skill` 主导。
 - `longterm` 中的 checklist / prompt templates 应理解为项目接手与兼容性 scaffold，不应扩张为第二套执行框架。
+- `UnifiedFramework/` 只定义层间边界与非权威 ledger；不替代 `longterm`、`specs/<feature>` 或验收证据。
+- `UnifiedFramework/ledger/` 可以记录当前停点，但不能裁决 `passes:true`、Close 或 durable truth promotion。
 
 ## 本仓库落地约定
 每个项目工作区放在：`longrun/workspaces/<project>/`
@@ -60,8 +62,8 @@
 - 回归验证 1-2 个已通过核心特性
 - 若发现回归，先修回归
 - 选一个未通过且未被依赖阻塞的最高优先级特性完成
-- 端到端验证通过后再改为 `passes: true`
-- 更新进度并提交
+- 端到端验证通过后，再按当前项目 gate 请求是否允许改为 `passes: true`
+- 只有在当前 gate 明确授权时，才更新长期进度并提交
 
 ## 现成工具
 - 初始化工作区：`./longrun/scripts/bootstrap.sh <name>`

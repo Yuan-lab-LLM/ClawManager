@@ -35,6 +35,7 @@ ClawManager/
 ├── scripts/
 │   └── codex           # One-line Codex launcher
 ├── AgentTeam/          # Multi-agent collaboration SOPs
+├── UnifiedFramework/   # codeSPEC-aligned layer boundaries + non-authoritative ledger
 ├── longterm/           # Project memory layer
 │   ├── workspace/
 │   │   ├── app_spec.md         # Project stable facts
@@ -91,6 +92,38 @@ Short version:
 5. Implement step-by-step, run prerequisite checks, review, and capture E2E evidence
 6. Update `longterm/workspace/feature_list.json` (`passes: true`) and `claude-progress.txt` only after E2E evidence exists
 
+## Unified Framework Operating Model
+
+ClawManager uses the `codeSPEC` minimum kernel as its short-term operating framework:
+
+```text
+Project Rules -> longterm -> specs -> execution -> evidence -> write-back
+```
+
+Layer ownership:
+- **Project Rules**: this `AGENTS.md`, `.specify/memory/constitution.md`, and deeper `AGENTS.md` files
+- **Project Memory**: `longterm/workspace/`
+- **Feature Delivery**: `specs/<feature>/`
+- **Execution Method**: current-session execution discipline and skills
+- **Orchestration Overlay**: `AgentTeam/`, only when explicitly useful
+- **Recovery Ledger**: `UnifiedFramework/ledger/`, non-authoritative
+
+Short-term migration target: Scheme A, the minimum kernel above.
+Long-term migration target: Scheme B, gradually adding tested process contracts when repeated risks justify them.
+
+`UnifiedFramework/` defines boundaries and recovery surfaces. It is not a second project rule source, not a feature spec source, not acceptance evidence, and not a durable truth store.
+
+## Agent Role Vocabulary
+
+Use only these generic roles unless the user explicitly approves a specialized role:
+
+- `Worker` — executes one bounded approved task
+- `Verifier` — performs verification and evidence checks
+- `Reviewer` — reviews code, architecture, risks, or evidence
+- `Closer` — performs approved close/write-back/commit work
+
+The Commander is the hub. Default topology is star topology. Put the gate name in `任务类型`; do not create a new agent name for each small gate.
+
 ## Forbidden Actions
 
 - Do NOT commit `.codex/auth.json` or `.codex/config.toml`
@@ -101,14 +134,17 @@ Short version:
 
 1. This `AGENTS.md` — project entry rules
 2. `.specify/memory/constitution.md` — engineering quality gates
-3. `longterm/workspace/app_spec.md` — project stable facts (what, why, scope)
-4. `longterm/workspace/feature_list.json` — backlog truth source
-5. `specs/<feature>/` — current feature delivery artifacts
+3. `UnifiedFramework/` — layer boundaries and non-authoritative recovery surfaces
+4. `longterm/workspace/app_spec.md` — project stable facts (what, why, scope)
+5. `longterm/workspace/feature_list.json` — backlog truth source
+6. `specs/<feature>/` — current feature delivery artifacts
+7. `AgentTeam/` — optional orchestration overlay only
 
 ## Memory Operating Rules
 
 - Before starting any new task, run `search_memories` for project facts, active decisions, and relevant `session_state`.
 - After important work completes, write or update durable memory for validated facts, decisions, anti-patterns, preferences, or environment findings.
+- If the current user explicitly forbids memory writes, perform only read-only memory search and do not write memory.
 - Write only distilled durable facts; do not store chat, long logs, command echo, or full legacy files.
 - When a new fact replaces an old memory, prefer `update_memory` over adding a duplicate.
 - Do not paste `longterm/`, `AgentTeam/`, or `docs/superpowers/` files into Mem0 verbatim; extract the most specific actionable memory instead.

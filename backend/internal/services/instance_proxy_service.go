@@ -8,9 +8,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
+	"os"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -31,6 +34,25 @@ type InstanceProxyService struct {
 
 type InstanceProxyUpstreamAuth struct {
 	OpenClawGatewayToken string
+}
+
+type controlUIWebSocketFrame struct {
+	messageType int
+	payload     []byte
+	err         error
+}
+
+type controlUIWebSocketConnectRewriteSummary struct {
+	MessageType              string
+	JSONValid                bool
+	Method                   string
+	HasParams                bool
+	BrowserAuthPresent       bool
+	BrowserDevicePresent     bool
+	RewrittenAuthToken       bool
+	RewrittenDevicePresent   bool
+	PreservedKnownParamKeys  []string
+	PreservedExtraParamCount int
 }
 
 var errControlUIWebSocketConnectFailed = errors.New("control-ui websocket connect failed")
@@ -351,6 +373,23 @@ func (s *InstanceProxyService) proxyWebSocket(ctx context.Context, scope Instanc
 	if err := s.applyControlUIUpstreamAuth(upstreamHeader, scope, upstreamAuth); err != nil {
 		return err
 	}
+	if scope.AccessMode == AccessModeControlUI {
+		logControlUIWebSocketDiagnostic("ws_upstream_shape", []string{
+			fmt.Sprintf("instance_id=%d", scope.InstanceID),
+			fmt.Sprintf("target_port=%d", targetPort),
+			fmt.Sprintf("upstream_path=%s", sanitizeControlUIPathShape(targetURL.Path)),
+			fmt.Sprintf("upstream_query_shape=%s", sanitizedControlUIQueryShape(targetURL.Query())),
+			fmt.Sprintf("source_query_had_token=%t", r.URL.Query().Has("token")),
+			fmt.Sprintf("source_query_had_password=%t", r.URL.Query().Has("password")),
+			fmt.Sprintf("forwarded_prefix_shape=%s", controlUIForwardedPrefixShape(scope.RoutePrefix)),
+			fmt.Sprintf("browser_auth_header_seen=%t", r.Header.Get("Authorization") != ""),
+			fmt.Sprintf("browser_cookie_seen=%t", r.Header.Get("Cookie") != ""),
+			fmt.Sprintf("browser_x_openclaw_token_seen=%t", r.Header.Get("X-OpenClaw-Token") != ""),
+			fmt.Sprintf("upstream_auth_header_present=%t", upstreamHeader.Get("Authorization") != ""),
+			fmt.Sprintf("upstream_cookie_present=%t", upstreamHeader.Get("Cookie") != ""),
+			fmt.Sprintf("upstream_x_openclaw_token_present=%t", upstreamHeader.Get("X-OpenClaw-Token") != ""),
+		})
+	}
 
 	dialer := websocket.Dialer{
 		Proxy:            http.ProxyFromEnvironment,
@@ -382,20 +421,16 @@ func (s *InstanceProxyService) proxyWebSocket(ctx context.Context, scope Instanc
 	}
 	defer clientConn.Close()
 
-	if scope.AccessMode == AccessModeControlUI {
-		if err := s.bridgeControlUIFirstConnect(clientConn, upstreamConn, upstreamAuth); err != nil {
-			closeControlUIWebSocketConnectFailure(clientConn, upstreamConn)
-			return nil
-		}
-	}
-
 	errCh := make(chan error, 2)
-	pipe := func(dst, src *websocket.Conn) {
+	pipe := func(dst, src *websocket.Conn, errCh chan<- error, observe func(messageType int, payload []byte)) {
 		for {
 			messageType, payload, readErr := src.ReadMessage()
 			if readErr != nil {
 				errCh <- readErr
 				return
+			}
+			if observe != nil {
+				observe(messageType, payload)
 			}
 			if writeErr := dst.WriteMessage(messageType, payload); writeErr != nil {
 				errCh <- writeErr
@@ -404,8 +439,41 @@ func (s *InstanceProxyService) proxyWebSocket(ctx context.Context, scope Instanc
 		}
 	}
 
-	go pipe(upstreamConn, clientConn)
-	go pipe(clientConn, upstreamConn)
+	if scope.AccessMode == AccessModeControlUI {
+		upstreamErrCh := make(chan error, 1)
+		firstUpstreamFrameObserved := false
+		observeFirstUpstreamFrame := func(messageType int, payload []byte) {
+			if firstUpstreamFrameObserved {
+				return
+			}
+			firstUpstreamFrameObserved = true
+			logControlUIWebSocketDiagnostic("ws_first_upstream_frame", []string{
+				fmt.Sprintf("instance_id=%d", scope.InstanceID),
+				fmt.Sprintf("message_type=%s", controlUIWebSocketMessageTypeName(messageType)),
+				fmt.Sprintf("first_upstream_error_code=%s", extractControlUIErrorCode(payload)),
+			})
+		}
+		go pipe(clientConn, upstreamConn, upstreamErrCh, observeFirstUpstreamFrame)
+
+		if err := s.bridgeControlUIFirstConnect(ctx, scope, clientConn, upstreamConn, upstreamAuth, upstreamErrCh); err != nil {
+			closeControlUIWebSocketConnectFailure(clientConn, upstreamConn)
+			return nil
+		}
+
+		go pipe(upstreamConn, clientConn, errCh, nil)
+
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-upstreamErrCh:
+			return nil
+		case <-errCh:
+			return nil
+		}
+	}
+
+	go pipe(upstreamConn, clientConn, errCh, nil)
+	go pipe(clientConn, upstreamConn, errCh, nil)
 
 	select {
 	case <-ctx.Done():
@@ -415,26 +483,74 @@ func (s *InstanceProxyService) proxyWebSocket(ctx context.Context, scope Instanc
 	}
 }
 
-func (s *InstanceProxyService) bridgeControlUIFirstConnect(clientConn, upstreamConn *websocket.Conn, upstreamAuth InstanceProxyUpstreamAuth) error {
+func (s *InstanceProxyService) bridgeControlUIFirstConnect(ctx context.Context, scope InstanceAccessScope, clientConn, upstreamConn *websocket.Conn, upstreamAuth InstanceProxyUpstreamAuth, upstreamErrCh <-chan error) error {
 	token := strings.TrimSpace(upstreamAuth.OpenClawGatewayToken)
 	if token == "" {
+		logControlUIWebSocketDiagnostic("ws_first_connect", []string{
+			fmt.Sprintf("instance_id=%d", scope.InstanceID),
+			"bridge_result=missing_upstream_runtime_credential",
+		})
 		return errControlUIWebSocketConnectFailed
 	}
 
-	if err := clientConn.SetReadDeadline(time.Now().Add(controlUIWebSocketFirstFrameTimeout)); err != nil {
+	firstFrameCh := make(chan controlUIWebSocketFrame, 1)
+	go func() {
+		if err := clientConn.SetReadDeadline(time.Now().Add(controlUIWebSocketFirstFrameTimeout)); err != nil {
+			firstFrameCh <- controlUIWebSocketFrame{err: err}
+			return
+		}
+		messageType, payload, err := clientConn.ReadMessage()
+		_ = clientConn.SetReadDeadline(time.Time{})
+		firstFrameCh <- controlUIWebSocketFrame{messageType: messageType, payload: payload, err: err}
+	}()
+
+	var firstFrame controlUIWebSocketFrame
+	select {
+	case firstFrame = <-firstFrameCh:
+	case <-upstreamErrCh:
+		logControlUIWebSocketDiagnostic("ws_first_connect", []string{
+			fmt.Sprintf("instance_id=%d", scope.InstanceID),
+			"bridge_result=upstream_closed_before_first_frame",
+		})
+		return errControlUIWebSocketConnectFailed
+	case <-ctx.Done():
+		logControlUIWebSocketDiagnostic("ws_first_connect", []string{
+			fmt.Sprintf("instance_id=%d", scope.InstanceID),
+			"bridge_result=context_done_before_first_frame",
+		})
 		return errControlUIWebSocketConnectFailed
 	}
-	messageType, payload, err := clientConn.ReadMessage()
-	_ = clientConn.SetReadDeadline(time.Time{})
-	if err != nil {
+	if firstFrame.err != nil {
+		logControlUIWebSocketDiagnostic("ws_first_connect", []string{
+			fmt.Sprintf("instance_id=%d", scope.InstanceID),
+			fmt.Sprintf("message_type=%s", controlUIWebSocketMessageTypeName(firstFrame.messageType)),
+			"bridge_result=client_read_failed",
+		})
 		return errControlUIWebSocketConnectFailed
 	}
 
-	rewrittenPayload, err := rewriteControlUIWebSocketConnectPayload(messageType, payload, token)
+	rewrittenPayload, summary, err := rewriteControlUIWebSocketConnectPayloadWithSummary(firstFrame.messageType, firstFrame.payload, token)
+	logControlUIWebSocketDiagnostic("ws_first_connect", append([]string{
+		fmt.Sprintf("instance_id=%d", scope.InstanceID),
+		fmt.Sprintf("message_type=%s", summary.MessageType),
+		fmt.Sprintf("json_valid=%t", summary.JSONValid),
+		fmt.Sprintf("method=%s", summary.Method),
+		fmt.Sprintf("has_params=%t", summary.HasParams),
+		fmt.Sprintf("browser_auth_present=%t", summary.BrowserAuthPresent),
+		fmt.Sprintf("browser_device_present=%t", summary.BrowserDevicePresent),
+		fmt.Sprintf("rewritten_auth_token_present=%t", summary.RewrittenAuthToken),
+		fmt.Sprintf("rewritten_device_present=%t", summary.RewrittenDevicePresent),
+		fmt.Sprintf("preserved_known_param_keys=%s", strings.Join(summary.PreservedKnownParamKeys, ",")),
+		fmt.Sprintf("preserved_extra_param_count=%d", summary.PreservedExtraParamCount),
+	}, controlUIWebSocketBridgeResultField(err)...))
 	if err != nil {
 		return err
 	}
 	if err := upstreamConn.WriteMessage(websocket.TextMessage, rewrittenPayload); err != nil {
+		logControlUIWebSocketDiagnostic("ws_first_connect", []string{
+			fmt.Sprintf("instance_id=%d", scope.InstanceID),
+			"bridge_result=upstream_write_failed",
+		})
 		return errControlUIWebSocketConnectFailed
 	}
 
@@ -442,53 +558,234 @@ func (s *InstanceProxyService) bridgeControlUIFirstConnect(clientConn, upstreamC
 }
 
 func rewriteControlUIWebSocketConnectPayload(messageType int, payload []byte, token string) ([]byte, error) {
+	rewrittenPayload, _, err := rewriteControlUIWebSocketConnectPayloadWithSummary(messageType, payload, token)
+	return rewrittenPayload, err
+}
+
+func rewriteControlUIWebSocketConnectPayloadWithSummary(messageType int, payload []byte, token string) ([]byte, controlUIWebSocketConnectRewriteSummary, error) {
+	summary := controlUIWebSocketConnectRewriteSummary{MessageType: controlUIWebSocketMessageTypeName(messageType), Method: "missing"}
 	if messageType != websocket.TextMessage {
-		return nil, errControlUIWebSocketConnectFailed
+		return nil, summary, errControlUIWebSocketConnectFailed
 	}
 	token = strings.TrimSpace(token)
 	if token == "" {
-		return nil, errControlUIWebSocketConnectFailed
+		return nil, summary, errControlUIWebSocketConnectFailed
 	}
 
 	decoder := json.NewDecoder(bytes.NewReader(payload))
 	decoder.UseNumber()
 	var decoded any
 	if err := decoder.Decode(&decoded); err != nil {
-		return nil, errControlUIWebSocketConnectFailed
+		return nil, summary, errControlUIWebSocketConnectFailed
 	}
+	summary.JSONValid = true
 	var trailing any
 	if err := decoder.Decode(&trailing); err != io.EOF {
-		return nil, errControlUIWebSocketConnectFailed
+		return nil, summary, errControlUIWebSocketConnectFailed
 	}
 
 	request, ok := decoded.(map[string]any)
 	if !ok {
-		return nil, errControlUIWebSocketConnectFailed
+		return nil, summary, errControlUIWebSocketConnectFailed
 	}
 	method, ok := request["method"].(string)
+	if ok {
+		summary.Method = sanitizeControlUIWebSocketMethod(method)
+	}
 	if !ok || method != "connect" {
-		return nil, errControlUIWebSocketConnectFailed
+		return nil, summary, errControlUIWebSocketConnectFailed
 	}
 	params, ok := request["params"].(map[string]any)
+	summary.HasParams = ok
 	if !ok {
-		return nil, errControlUIWebSocketConnectFailed
+		return nil, summary, errControlUIWebSocketConnectFailed
 	}
 
 	rewrittenParams := make(map[string]any, len(params)+1)
 	for key, value := range params {
 		if key == "auth" {
+			summary.BrowserAuthPresent = true
 			continue
+		}
+		if key == "device" {
+			summary.BrowserDevicePresent = true
+			continue
+		}
+		if isKnownControlUIConnectParam(key) {
+			summary.PreservedKnownParamKeys = append(summary.PreservedKnownParamKeys, key)
+		} else {
+			summary.PreservedExtraParamCount++
 		}
 		rewrittenParams[key] = value
 	}
+	sort.Strings(summary.PreservedKnownParamKeys)
 	rewrittenParams["auth"] = map[string]any{"token": token}
+	summary.RewrittenAuthToken = true
+	summary.RewrittenDevicePresent = false
 	request["params"] = rewrittenParams
 
 	rewrittenPayload, err := json.Marshal(request)
 	if err != nil {
-		return nil, errControlUIWebSocketConnectFailed
+		return nil, summary, errControlUIWebSocketConnectFailed
 	}
-	return rewrittenPayload, nil
+	return rewrittenPayload, summary, nil
+}
+
+func controlUIWebSocketBridgeResultField(err error) []string {
+	if err != nil {
+		return []string{"bridge_result=malformed_closed"}
+	}
+	return []string{"bridge_result=rewritten_forwarded"}
+}
+
+func controlUIProxyDiagnosticsEnabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("CONTROLUI_PROXY_AUTH_DIAGNOSTICS"))) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
+func logControlUIWebSocketDiagnostic(event string, fields []string) {
+	if !controlUIProxyDiagnosticsEnabled() {
+		return
+	}
+	log.Printf("control-ui-websocket-diagnostic event=%s %s", event, strings.Join(fields, " "))
+}
+
+func controlUIWebSocketMessageTypeName(messageType int) string {
+	switch messageType {
+	case websocket.TextMessage:
+		return "text"
+	case websocket.BinaryMessage:
+		return "binary"
+	case websocket.CloseMessage:
+		return "close"
+	case websocket.PingMessage:
+		return "ping"
+	case websocket.PongMessage:
+		return "pong"
+	default:
+		return "unknown"
+	}
+}
+
+func sanitizeControlUIWebSocketMethod(method string) string {
+	switch method {
+	case "connect":
+		return "connect"
+	case "":
+		return "missing"
+	default:
+		return "other"
+	}
+}
+
+func isKnownControlUIConnectParam(key string) bool {
+	switch key {
+	case "type", "id", "minProtocol", "maxProtocol", "client", "role", "scopes", "caps", "userAgent", "locale", "future":
+		return true
+	default:
+		return false
+	}
+}
+
+func sanitizeControlUIPathShape(path string) string {
+	if path == "" || path == "/" {
+		return "/"
+	}
+	if strings.ContainsAny(path, " \t\r\n") {
+		return "invalid_path_shape"
+	}
+	switch {
+	case path == "/ws":
+		return "/ws"
+	case path == "/chat":
+		return "/chat"
+	case strings.HasPrefix(path, "/assets/"):
+		return "/assets/<asset>"
+	case strings.HasPrefix(path, "/api/v1/instances/"):
+		return regexp.MustCompile(`/api/v1/instances/[0-9]+`).ReplaceAllString(path, "/api/v1/instances/<id>")
+	default:
+		return "other"
+	}
+}
+
+func sanitizedControlUIQueryShape(query url.Values) string {
+	known := make([]string, 0, len(query))
+	unknown := 0
+	for key := range query {
+		switch key {
+		case "session", "channel", "locale":
+			known = append(known, key)
+		default:
+			unknown++
+		}
+	}
+	sort.Strings(known)
+	knownShape := "none"
+	if len(known) > 0 {
+		knownShape = strings.Join(known, ",")
+	}
+	return fmt.Sprintf("known:%s,unknown:%d", knownShape, unknown)
+}
+
+func controlUIForwardedPrefixShape(prefix string) string {
+	prefix = strings.TrimSpace(prefix)
+	switch {
+	case prefix == "":
+		return "missing"
+	case regexp.MustCompile(`^/api/v1/instances/[0-9]+/control-ui/?$`).MatchString(prefix):
+		return "backend_control_ui_prefix_match"
+	default:
+		return "other"
+	}
+}
+
+func extractControlUIErrorCode(payload []byte) string {
+	decoder := json.NewDecoder(bytes.NewReader(payload))
+	decoder.UseNumber()
+	var decoded any
+	if err := decoder.Decode(&decoded); err != nil {
+		return "not_json"
+	}
+	if code := findControlUIErrorCode(decoded, 0); code != "" {
+		return code
+	}
+	return "none"
+}
+
+func findControlUIErrorCode(value any, depth int) string {
+	if depth > 4 {
+		return ""
+	}
+	object, ok := value.(map[string]any)
+	if !ok {
+		return ""
+	}
+	for _, key := range []string{"code", "errorCode"} {
+		if code, ok := object[key].(string); ok {
+			return sanitizeControlUIErrorCode(code)
+		}
+	}
+	for _, key := range []string{"error", "payload", "result", "data"} {
+		if code := findControlUIErrorCode(object[key], depth+1); code != "" {
+			return code
+		}
+	}
+	return ""
+}
+
+func sanitizeControlUIErrorCode(code string) string {
+	code = strings.TrimSpace(code)
+	if code == "" {
+		return "present_redacted"
+	}
+	if regexp.MustCompile(`^[A-Z0-9_.:-]{1,96}$`).MatchString(code) {
+		return code
+	}
+	return "present_redacted"
 }
 
 func closeControlUIWebSocketConnectFailure(clientConn, upstreamConn *websocket.Conn) {

@@ -6,7 +6,7 @@ Reviewed startup source/build-context artifact:
 
 `specs/gtclaw-runtime-controlui-persistent-image/runtime-startup-artifact/20260505-bind-lan-auth`
 
-This artifact prepares a minimal OpenClaw gateway startup change for a later image build gate. No image was built from this artifact in this gate.
+This artifact prepares minimal OpenClaw gateway startup changes for later image build gates. No image was built from this artifact in this gate.
 
 ## Parent Image
 
@@ -28,12 +28,14 @@ This artifact prepares a minimal OpenClaw gateway startup change for a later ima
 
 | Output path | Target image path | mode | size | sha256 |
 | --- | --- | --- | ---: | --- |
-| `defaults/openclaw-agent/config.yaml` | `/defaults/openclaw-agent/config.yaml` | `0644` | `785` | `347af8dcfa73cb0938f00413d28d0fb4a3c409916d794aaf43e47e9a1fafe30e` |
+| `defaults/openclaw-agent/config.yaml` | `/defaults/openclaw-agent/config.yaml` | `0644` | `843` | `bdc8bf155539762c02f37ffbeb27e2dcec48bc5c3badaf4a17ec2edd6cd221c9` |
+| `usr/local/bin/openclaw-ensure-controlui-origin` | `/usr/local/bin/openclaw-ensure-controlui-origin` | `0755` | `2009` | `c4151fa9a08ee04c41b212a9b30838f1f19d474fe50b6d2fdc848994d8fba071` |
+| `usr/local/bin/openclaw-gateway-with-origin-allowlist` | `/usr/local/bin/openclaw-gateway-with-origin-allowlist` | `0755` | `201` | `79910c9dc6a0dcd0d809af1fc21a45052afeae66732d7a0ff4185089e8c3995c` |
 | `etc/services.d/openclaw-agent/run` | `/etc/services.d/openclaw-agent/run` | `0755` | `289` | `53d33bd3d3f66be2b9e67346dcd6f45115439c9816a2397d6f55696b3fb9ddda` |
 
 ## Minimal Diff Summary
 
-`defaults/openclaw-agent/config.yaml` changes only `openclaw_command` by adding pod-facing gateway listen/auth flags:
+`defaults/openclaw-agent/config.yaml` first changed `openclaw_command` by adding pod-facing gateway listen/auth flags:
 
 ```yaml
 openclaw_command:
@@ -46,11 +48,28 @@ openclaw_command:
   - token
 ```
 
+The origin-allowlist rerun keeps `openclaw gateway run --bind lan --auth token` and prepends a command wrapper that materializes `/config/.openclaw/openclaw.json` before the gateway command runs:
+
+```yaml
+openclaw_command:
+  - /usr/local/bin/openclaw-gateway-with-origin-allowlist
+  - openclaw
+  - gateway
+  - run
+  - --bind
+  - lan
+  - --auth
+  - token
+openclaw_config_path: /config/.openclaw/openclaw.json
+```
+
+The helper `openclaw-ensure-controlui-origin` preserves any existing valid object JSON config, merges `gateway.controlUi.allowedOrigins`, and adds `https://localhost:30443` idempotently. It refuses to overwrite invalid JSON or incompatible non-object/non-array shapes.
+
 `etc/services.d/openclaw-agent/run` is unchanged byte-for-byte from the recovered input.
 
 ## Build Context Notes
 
-`Dockerfile` is included only as a later build gate input. It contains a digest-pinned parent `FROM` and exactly two `COPY` instructions for the startup files, preserving modes through `COPY --chmod`.
+`Dockerfile` is included only as a later build gate input. It contains a digest-pinned parent `FROM` and `COPY` instructions for the reviewed startup files and helper scripts, preserving modes through `COPY --chmod`.
 
 No build/tag/push/pull was executed in this gate.
 

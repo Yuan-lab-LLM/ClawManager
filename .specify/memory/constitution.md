@@ -8,6 +8,7 @@
 > - 项目当前状态、backlog、当前阶段与近期进度应落在项目记忆层（如 `longterm`），不要写在本文件中；
 > - 当前 feature 的需求、方案、任务与验收应落在 `specs/<feature>/spec.md`、`plan.md`、`tasks.md`；不要把 feature 内容主定义写进本文件；
 > - 运行时执行方法与会话行为属于 `superpower` 等 execution layer，不由本文件主定义；
+> - `UnifiedFramework/` 只定义层间边界、恢复入口与非权威 ledger；它不是第二套项目规则、不是 feature 真源、不是验收证据；
 > - 本文件可作为公司级“基础宪法”复用到不同项目；
 > - 第 2 节为“项目补充约束”（Project Addendum），每个项目必须按自身情况填写/替换。
 
@@ -53,6 +54,7 @@
    - 本宪法只定义稳定规则、质量门槛与流程边界，不承载 backlog、progress、当前状态、阶段推进或长期 `passes` 真值。
    - 项目动态事实应写入项目记忆层（如 `longterm`）；当前 feature 的交付工件应写入 `specs/<feature>/`。
    - 宪法不能替代项目事实层，也不能替代 feature delivery 或 execution layer。
+   - `UnifiedFramework/ledger/` 可以记录恢复锚点，但不能替代 acceptance evidence、`passes:true` 判定、Close 或 durable truth promotion。
 
 ## 2) 项目补充约束（Project Addendum / 必填）
 

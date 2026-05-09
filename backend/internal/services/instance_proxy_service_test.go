@@ -1,10 +1,12 @@
 package services
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -29,6 +31,7 @@ type proxyUpstreamRequest struct {
 
 type wsUpstreamObservation struct {
 	requestURI      string
+	forwardedPrefix string
 	authorization   string
 	cookie          string
 	openClawToken   string
@@ -157,6 +160,20 @@ func requireNoSensitiveSubstring(t *testing.T, value string, sensitive ...string
 			t.Fatalf("string contains sensitive value %q: %q", item, value)
 		}
 	}
+}
+
+func requireWebSocketReadFailureForTest(t *testing.T, conn *websocket.Conn, description string, sensitive ...string) error {
+	t.Helper()
+	if err := conn.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
+		t.Fatalf("%s SetReadDeadline() error = %v", description, err)
+	}
+	_, _, err := conn.ReadMessage()
+	_ = conn.SetReadDeadline(time.Time{})
+	if err == nil {
+		t.Fatalf("%s ReadMessage() succeeded, want closed or failed websocket", description)
+	}
+	requireNoSensitiveSubstring(t, err.Error(), sensitive...)
+	return err
 }
 
 func TestProxyRequestWithControlUIScopeStripsPrefixAndPreservesQuery(t *testing.T) {
@@ -375,7 +392,7 @@ func TestControlUIUpstreamAuthHelperAppliesSameRuleForWebSocketHeaders(t *testin
 	}
 }
 
-func TestProxyWebSocketWithControlUIScopeInjectsConnectAuthAndPreservesParams(t *testing.T) {
+func TestProxyWebSocketWithControlUIScopeInjectsConnectAuthAndDropsStaleDevice(t *testing.T) {
 	seen := make(chan wsUpstreamObservation, 1)
 	upgrader := websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -387,10 +404,11 @@ func TestProxyWebSocketWithControlUIScopeInjectsConnectAuthAndPreservesParams(t 
 
 		messageType, payload, readErr := conn.ReadMessage()
 		obs := wsUpstreamObservation{
-			requestURI:    r.URL.RequestURI(),
-			authorization: r.Header.Get("Authorization"),
-			cookie:        r.Header.Get("Cookie"),
-			openClawToken: r.Header.Get("X-OpenClaw-Token"),
+			requestURI:      r.URL.RequestURI(),
+			forwardedPrefix: r.Header.Get("X-Forwarded-Prefix"),
+			authorization:   r.Header.Get("Authorization"),
+			cookie:          r.Header.Get("Cookie"),
+			openClawToken:   r.Header.Get("X-OpenClaw-Token"),
 		}
 		if readErr == nil {
 			obs.messageType = messageType
@@ -428,7 +446,151 @@ func TestProxyWebSocketWithControlUIScopeInjectsConnectAuthAndPreservesParams(t 
 			},
 			"role":      "operator",
 			"scopes":    []any{"operator.read", "operator.write"},
-			"device":    map[string]any{"id": "device-1", "nonce": "nonce-1"},
+			"device":    map[string]any{"id": "device-1", "nonce": "nonce-1", "signature": "stale-browser-device-signature"},
+			"caps":      []any{"tool-events"},
+			"userAgent": "test-agent",
+			"locale":    "zh-CN",
+			"future":    map[string]any{"keep": true},
+			"auth": map[string]any{
+				"token":       "fake-browser-auth-token",
+				"password":    "fake-browser-password",
+				"deviceToken": "fake-browser-device-token",
+			},
+		},
+	}
+	payload, err := json.Marshal(firstConnect)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	if err := client.WriteMessage(websocket.TextMessage, payload); err != nil {
+		t.Fatalf("WriteMessage() error = %v", err)
+	}
+
+	got := <-seen
+	if got.requestURI != "/ws?session=main" {
+		t.Fatalf("upstream RequestURI = %q, want token stripped and session preserved", got.requestURI)
+	}
+	if got.forwardedPrefix != "/api/v1/instances/42/control-ui" {
+		t.Fatalf("upstream X-Forwarded-Prefix = %q, want control-ui route prefix", got.forwardedPrefix)
+	}
+	if got.authorization != "Bearer test-openclaw-upstream-token" {
+		t.Fatalf("upstream Authorization = %q, want fake server-side bearer token", got.authorization)
+	}
+	if got.cookie != "" {
+		t.Fatalf("upstream Cookie = %q, want stripped", got.cookie)
+	}
+	if got.openClawToken != "" {
+		t.Fatalf("upstream X-OpenClaw-Token = %q, want stripped", got.openClawToken)
+	}
+	if !got.receivedMessage || got.messageType != websocket.TextMessage {
+		t.Fatalf("upstream first message type = %d received=%v, want text message", got.messageType, got.receivedMessage)
+	}
+
+	rewritten := decodeJSONMapForTest(t, got.payload)
+	if rewritten["type"] != "req" || rewritten["id"] != "req-1" || rewritten["method"] != "connect" {
+		t.Fatalf("rewritten envelope = %#v", rewritten)
+	}
+	params, ok := rewritten["params"].(map[string]any)
+	if !ok {
+		t.Fatalf("rewritten params = %T, want object", rewritten["params"])
+	}
+	for _, key := range []string{"minProtocol", "maxProtocol", "client", "role", "scopes", "caps", "userAgent", "locale", "future"} {
+		if _, ok := params[key]; !ok {
+			t.Fatalf("rewritten params missing non-auth key %q: %#v", key, params)
+		}
+	}
+	if _, ok := params["device"]; ok {
+		t.Fatalf("rewritten params retained stale browser device identity: %#v", params["device"])
+	}
+	auth, ok := params["auth"].(map[string]any)
+	if !ok {
+		t.Fatalf("rewritten auth = %T, want object", params["auth"])
+	}
+	if gotToken := auth["token"]; gotToken != "test-openclaw-upstream-token" {
+		t.Fatalf("rewritten auth token = %q, want fake server-side token", gotToken)
+	}
+	for _, rejectedKey := range []string{"password", "deviceToken"} {
+		if _, ok := auth[rejectedKey]; ok {
+			t.Fatalf("rewritten auth retained browser field %q: %#v", rejectedKey, auth)
+		}
+	}
+	if strings.Contains(string(got.payload), "fake-browser-auth-token") ||
+		strings.Contains(string(got.payload), "fake-browser-password") ||
+		strings.Contains(string(got.payload), "fake-browser-device-token") ||
+		strings.Contains(string(got.payload), "stale-browser-device-signature") ||
+		strings.Contains(string(got.payload), "device-1") {
+		t.Fatalf("rewritten first connect retained browser auth or stale device material: %s", string(got.payload))
+	}
+}
+
+func TestProxyWebSocketWithControlUIScopeForwardsChallengeBeforeRewrittenConnect(t *testing.T) {
+	seen := make(chan wsUpstreamObservation, 1)
+	upgrader := websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
+	const challengePayload = `{"type":"event","event":"connect.challenge","payload":{"nonce":"nonce-1"}}`
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+
+		if err := conn.WriteMessage(websocket.TextMessage, []byte(challengePayload)); err != nil {
+			return
+		}
+		_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+		messageType, payload, readErr := conn.ReadMessage()
+		obs := wsUpstreamObservation{
+			requestURI:    r.URL.RequestURI(),
+			authorization: r.Header.Get("Authorization"),
+			cookie:        r.Header.Get("Cookie"),
+			openClawToken: r.Header.Get("X-OpenClaw-Token"),
+		}
+		if readErr == nil {
+			obs.messageType = messageType
+			obs.payload = append([]byte(nil), payload...)
+			obs.receivedMessage = true
+		}
+		seen <- obs
+	}))
+	defer upstream.Close()
+
+	proxy, _ := newControlUIWebSocketProxyForTest(t, upstream)
+	defer proxy.Close()
+
+	header := http.Header{}
+	header.Set("Authorization", "Bearer fake-browser-route-token")
+	header.Set("Cookie", "cm_ui=fb")
+	header.Set("X-OpenClaw-Token", "fake-browser-openclaw-token")
+	client, _, err := websocket.DefaultDialer.Dial(wsURLForTestServer(t, proxy, "/api/v1/instances/42/control-ui/ws?token=fq&password=pw&session=main"), header)
+	if err != nil {
+		t.Fatalf("Dial() error = %v", err)
+	}
+	defer client.Close()
+
+	_ = client.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
+	messageType, challenge, err := client.ReadMessage()
+	_ = client.SetReadDeadline(time.Time{})
+	if err != nil {
+		t.Fatalf("client did not receive upstream connect.challenge before first connect: %v", err)
+	}
+	if messageType != websocket.TextMessage || string(challenge) != challengePayload {
+		t.Fatalf("client challenge frame = type %d payload %q", messageType, string(challenge))
+	}
+
+	firstConnect := map[string]any{
+		"type":   "req",
+		"id":     "req-1",
+		"method": "connect",
+		"params": map[string]any{
+			"minProtocol": 3,
+			"maxProtocol": 3,
+			"client": map[string]any{
+				"id":   "client-1",
+				"mode": "webchat",
+			},
+			"role":      "operator",
+			"scopes":    []any{"operator.read", "operator.write"},
+			"device":    map[string]any{"id": "device-1", "nonce": "nonce-1", "signature": "stale-browser-device-signature"},
 			"caps":      []any{"tool-events"},
 			"userAgent": "test-agent",
 			"locale":    "zh-CN",
@@ -466,17 +628,17 @@ func TestProxyWebSocketWithControlUIScopeInjectsConnectAuthAndPreservesParams(t 
 	}
 
 	rewritten := decodeJSONMapForTest(t, got.payload)
-	if rewritten["type"] != "req" || rewritten["id"] != "req-1" || rewritten["method"] != "connect" {
-		t.Fatalf("rewritten envelope = %#v", rewritten)
-	}
 	params, ok := rewritten["params"].(map[string]any)
 	if !ok {
 		t.Fatalf("rewritten params = %T, want object", rewritten["params"])
 	}
-	for _, key := range []string{"minProtocol", "maxProtocol", "client", "role", "scopes", "device", "caps", "userAgent", "locale", "future"} {
+	for _, key := range []string{"minProtocol", "maxProtocol", "client", "role", "scopes", "caps", "userAgent", "locale", "future"} {
 		if _, ok := params[key]; !ok {
 			t.Fatalf("rewritten params missing non-auth key %q: %#v", key, params)
 		}
+	}
+	if _, ok := params["device"]; ok {
+		t.Fatalf("rewritten params retained stale browser device identity: %#v", params["device"])
 	}
 	auth, ok := params["auth"].(map[string]any)
 	if !ok {
@@ -492,9 +654,123 @@ func TestProxyWebSocketWithControlUIScopeInjectsConnectAuthAndPreservesParams(t 
 	}
 	if strings.Contains(string(got.payload), "fake-browser-auth-token") ||
 		strings.Contains(string(got.payload), "fake-browser-password") ||
-		strings.Contains(string(got.payload), "fake-browser-device-token") {
-		t.Fatalf("rewritten first connect retained browser auth material: %s", string(got.payload))
+		strings.Contains(string(got.payload), "fake-browser-device-token") ||
+		strings.Contains(string(got.payload), "stale-browser-device-signature") ||
+		strings.Contains(string(got.payload), "device-1") {
+		t.Fatalf("rewritten first connect retained browser auth or stale device material: %s", string(got.payload))
 	}
+}
+
+func TestProxyWebSocketWithControlUIScopeDiagnosticsAreSanitized(t *testing.T) {
+	t.Setenv("CONTROLUI_PROXY_AUTH_DIAGNOSTICS", "1")
+	var logBuffer bytes.Buffer
+	previousOutput := log.Writer()
+	previousFlags := log.Flags()
+	log.SetOutput(&logBuffer)
+	log.SetFlags(0)
+	defer func() {
+		log.SetOutput(previousOutput)
+		log.SetFlags(previousFlags)
+	}()
+
+	upgrader := websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		if _, _, err := conn.ReadMessage(); err != nil {
+			return
+		}
+		_ = conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"res","id":"req-1","error":{"code":"CONTROL_UI_DEVICE_IDENTITY_REQUIRED","message":"redacted by diagnostic observer"}}`))
+	}))
+	defer upstream.Close()
+
+	proxy, routeToken := newControlUIWebSocketProxyForTest(t, upstream)
+	defer proxy.Close()
+
+	header := http.Header{}
+	header.Set("Authorization", "Bearer fake-browser-route-token")
+	header.Set("Cookie", "cm_ui=fake-browser-cookie")
+	header.Set("X-OpenClaw-Token", "fake-browser-openclaw-token")
+	client, _, err := websocket.DefaultDialer.Dial(wsURLForTestServer(t, proxy, "/api/v1/instances/42/control-ui/ws?token=fake-query-token&password=fake-query-password&session=main"), header)
+	if err != nil {
+		t.Fatalf("Dial() error = %v", err)
+	}
+	defer client.Close()
+
+	firstConnect := map[string]any{
+		"type":   "req",
+		"id":     "req-1",
+		"method": "connect",
+		"params": map[string]any{
+			"minProtocol": 3,
+			"maxProtocol": 3,
+			"client":      map[string]any{"id": "client-1", "mode": "webchat"},
+			"role":        "operator",
+			"scopes":      []any{"operator.read", "operator.write"},
+			"caps":        []any{"tool-events"},
+			"userAgent":   "test-agent",
+			"locale":      "zh-CN",
+			"device":      map[string]any{"id": "device-1", "nonce": "nonce-1", "signature": "fake-browser-device-signature"},
+			"auth": map[string]any{
+				"token":       "fake-browser-auth-token",
+				"password":    "fake-browser-password",
+				"deviceToken": "fake-browser-device-token",
+			},
+		},
+	}
+	payload, err := json.Marshal(firstConnect)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	if err := client.WriteMessage(websocket.TextMessage, payload); err != nil {
+		t.Fatalf("WriteMessage() error = %v", err)
+	}
+	if _, _, err := client.ReadMessage(); err != nil {
+		t.Fatalf("ReadMessage() error = %v", err)
+	}
+
+	logs := logBuffer.String()
+	for _, want := range []string{
+		"control-ui-websocket-diagnostic event=ws_upstream_shape",
+		"forwarded_prefix_shape=backend_control_ui_prefix_match",
+		"upstream_query_shape=known:session,unknown:0",
+		"source_query_had_token=true",
+		"source_query_had_password=true",
+		"browser_auth_header_seen=true",
+		"upstream_auth_header_present=true",
+		"upstream_cookie_present=false",
+		"event=ws_first_connect",
+		"method=connect",
+		"browser_auth_present=true",
+		"browser_device_present=true",
+		"rewritten_auth_token_present=true",
+		"rewritten_device_present=false",
+		"bridge_result=rewritten_forwarded",
+		"event=ws_first_upstream_frame",
+		"first_upstream_error_code=CONTROL_UI_DEVICE_IDENTITY_REQUIRED",
+	} {
+		if !strings.Contains(logs, want) {
+			t.Fatalf("diagnostic logs missing %q; logs=%s", want, logs)
+		}
+	}
+	requireNoSensitiveSubstring(t, logs,
+		routeToken,
+		"test-openclaw-upstream-token",
+		"fake-browser-route-token",
+		"fake-browser-cookie",
+		"fake-browser-openclaw-token",
+		"fake-query-token",
+		"fake-query-password",
+		"fake-browser-auth-token",
+		"fake-browser-password",
+		"fake-browser-device-token",
+		"fake-browser-device-signature",
+		"device-1",
+		"nonce-1",
+	)
 }
 
 func TestProxyWebSocketWithDesktopScopePassesThroughFirstFrameAndHeaders(t *testing.T) {
@@ -583,6 +859,7 @@ func TestProxyWebSocketWithControlUIScopeRejectsMalformedFirstFrameWithoutForwar
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			forwarded := make(chan wsUpstreamObservation, 1)
+			upstreamReadErr := make(chan error, 1)
 			done := make(chan struct{})
 			upgrader := websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
 			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -600,12 +877,14 @@ func TestProxyWebSocketWithControlUIScopeRejectsMalformedFirstFrameWithoutForwar
 						payload:         append([]byte(nil), payload...),
 						receivedMessage: true,
 					}
+				} else {
+					upstreamReadErr <- readErr
 				}
 				close(done)
 			}))
 			defer upstream.Close()
 
-			proxy, _ := newControlUIWebSocketProxyForTest(t, upstream)
+			proxy, routeToken := newControlUIWebSocketProxyForTest(t, upstream)
 			defer proxy.Close()
 
 			client, _, err := websocket.DefaultDialer.Dial(wsURLForTestServer(t, proxy, "/api/v1/instances/42/control-ui/ws"), nil)
@@ -617,7 +896,8 @@ func TestProxyWebSocketWithControlUIScopeRejectsMalformedFirstFrameWithoutForwar
 			if err := client.WriteMessage(tt.messageType, tt.payload); err != nil {
 				t.Fatalf("WriteMessage() error = %v", err)
 			}
-			_, _, _ = client.ReadMessage()
+			clientErr := requireWebSocketReadFailureForTest(t, client, "browser after malformed first connect", routeToken, "test-openclaw-upstream-token")
+			requireNoSensitiveSubstring(t, clientErr.Error(), routeToken, "test-openclaw-upstream-token")
 
 			select {
 			case got := <-forwarded:
@@ -631,7 +911,167 @@ func TestProxyWebSocketWithControlUIScopeRejectsMalformedFirstFrameWithoutForwar
 			case <-time.After(time.Second):
 				t.Fatalf("upstream did not finish waiting for malformed first frame")
 			}
+			select {
+			case err := <-upstreamReadErr:
+				requireNoSensitiveSubstring(t, err.Error(), routeToken, "test-openclaw-upstream-token")
+			default:
+				t.Fatalf("upstream websocket did not close after malformed first frame")
+			}
 		})
+	}
+}
+
+func TestProxyWebSocketWithControlUIScopeUpstreamCloseBeforeFirstConnectFailsClosed(t *testing.T) {
+	upstreamClosed := make(chan struct{}, 1)
+	upgrader := websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		deadline := time.Now().Add(time.Second)
+		closeMessage := websocket.FormatCloseMessage(websocket.CloseTryAgainLater, "upstream unavailable before connect")
+		_ = conn.WriteControl(websocket.CloseMessage, closeMessage, deadline)
+		_ = conn.Close()
+		upstreamClosed <- struct{}{}
+	}))
+	defer upstream.Close()
+
+	proxy, routeToken := newControlUIWebSocketProxyForTest(t, upstream)
+	defer proxy.Close()
+
+	header := http.Header{}
+	header.Set("Authorization", "Bearer fake-browser-route-token")
+	header.Set("Cookie", "cm_ui=fb")
+	header.Set("X-OpenClaw-Token", "fake-browser-openclaw-token")
+	client, _, err := websocket.DefaultDialer.Dial(wsURLForTestServer(t, proxy, "/api/v1/instances/42/control-ui/ws?token=fq&password=pw"), header)
+	if err != nil {
+		t.Fatalf("Dial() error = %v", err)
+	}
+	defer client.Close()
+
+	select {
+	case <-upstreamClosed:
+	case <-time.After(time.Second):
+		t.Fatalf("upstream did not close before first browser connect")
+	}
+	readErr := requireWebSocketReadFailureForTest(t, client, "browser after upstream pre-connect close", routeToken, "test-openclaw-upstream-token", "fake-browser-route-token", "fake-browser-openclaw-token")
+	requireNoSensitiveSubstring(t, readErr.Error(), routeToken, "test-openclaw-upstream-token", "fake-browser-route-token", "fake-browser-openclaw-token")
+}
+
+func TestProxyWebSocketWithControlUIScopeBrowserDisconnectBeforeFirstConnectDoesNotHang(t *testing.T) {
+	upstreamReadErr := make(chan error, 1)
+	forwarded := make(chan wsUpstreamObservation, 1)
+	upgrader := websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+		messageType, payload, readErr := conn.ReadMessage()
+		if readErr == nil {
+			forwarded <- wsUpstreamObservation{
+				messageType:     messageType,
+				payload:         append([]byte(nil), payload...),
+				receivedMessage: true,
+			}
+			return
+		}
+		upstreamReadErr <- readErr
+	}))
+	defer upstream.Close()
+
+	proxy, routeToken := newControlUIWebSocketProxyForTest(t, upstream)
+	defer proxy.Close()
+
+	client, _, err := websocket.DefaultDialer.Dial(wsURLForTestServer(t, proxy, "/api/v1/instances/42/control-ui/ws"), nil)
+	if err != nil {
+		t.Fatalf("Dial() error = %v", err)
+	}
+	closeMessage := websocket.FormatCloseMessage(websocket.CloseNormalClosure, "browser closed before connect")
+	if err := client.WriteControl(websocket.CloseMessage, closeMessage, time.Now().Add(time.Second)); err != nil {
+		t.Fatalf("client close before first connect error = %v", err)
+	}
+	_ = client.Close()
+
+	select {
+	case got := <-forwarded:
+		t.Fatalf("browser disconnect before first connect forwarded upstream message: type=%d payload=%q", got.messageType, string(got.payload))
+	case err := <-upstreamReadErr:
+		requireNoSensitiveSubstring(t, err.Error(), routeToken, "test-openclaw-upstream-token")
+	case <-time.After(time.Second):
+		t.Fatalf("upstream did not observe browser disconnect before first connect")
+	}
+}
+
+func TestProxyWebSocketWithControlUIScopeContextCancelBeforeFirstConnectDoesNotHang(t *testing.T) {
+	upstreamAccepted := make(chan struct{}, 1)
+	upstreamReadErr := make(chan error, 1)
+	handlerReturned := make(chan error, 1)
+	upgrader := websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		upstreamAccepted <- struct{}{}
+		_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+		_, _, readErr := conn.ReadMessage()
+		upstreamReadErr <- readErr
+	}))
+	defer upstream.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	scope, err := ResolveInstanceAccessScope(42, "openclaw", AccessModeControlUI, DefaultDesktopTargetPort)
+	if err != nil {
+		t.Fatalf("ResolveInstanceAccessScope() error = %v", err)
+	}
+	proxyService, accessService := newProxyServiceForUpstream(t, upstream, scope.TargetPort)
+	routeToken := generateScopedProxyToken(t, accessService, scope)
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handlerReturned <- proxyService.ProxyWebSocketWithScopeAndUpstreamAuth(ctx, scope, routeToken, InstanceProxyUpstreamAuth{
+			OpenClawGatewayToken: "test-openclaw-upstream-token",
+		}, w, r)
+	}))
+	defer proxy.Close()
+
+	client, _, err := websocket.DefaultDialer.Dial(wsURLForTestServer(t, proxy, "/api/v1/instances/42/control-ui/ws"), nil)
+	if err != nil {
+		t.Fatalf("Dial() error = %v", err)
+	}
+	defer client.Close()
+
+	select {
+	case <-upstreamAccepted:
+	case <-time.After(time.Second):
+		t.Fatalf("upstream did not accept websocket before context cancel")
+	}
+	cancel()
+
+	readErr := requireWebSocketReadFailureForTest(t, client, "browser after context cancel before first connect", routeToken, "test-openclaw-upstream-token")
+	requireNoSensitiveSubstring(t, readErr.Error(), routeToken, "test-openclaw-upstream-token")
+
+	select {
+	case err := <-handlerReturned:
+		if err != nil {
+			t.Fatalf("ProxyWebSocketWithScopeAndUpstreamAuth() error after context cancel = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatalf("proxy handler did not return after context cancel before first connect")
+	}
+	select {
+	case err := <-upstreamReadErr:
+		if err == nil {
+			t.Fatalf("upstream read succeeded after context cancel before first connect")
+		}
+		requireNoSensitiveSubstring(t, err.Error(), routeToken, "test-openclaw-upstream-token")
+	case <-time.After(time.Second):
+		t.Fatalf("upstream did not close after context cancel before first connect")
 	}
 }
 

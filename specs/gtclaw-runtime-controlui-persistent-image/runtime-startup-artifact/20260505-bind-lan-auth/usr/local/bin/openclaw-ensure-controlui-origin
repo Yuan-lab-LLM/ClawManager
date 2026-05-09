@@ -1,0 +1,62 @@
+#!/usr/bin/with-contenv bash
+set -euo pipefail
+
+config_path="${OPENCLAW_AGENT_OPENCLAW_CONFIG_PATH:-/config/.openclaw/openclaw.json}"
+origin="${OPENCLAW_GATEWAY_CONTROLUI_ALLOWED_ORIGIN:-https://localhost:30443}"
+
+OPENCLAW_CONFIG_PATH="$config_path" OPENCLAW_CONTROLUI_ORIGIN="$origin" node <<'NODE'
+const fs = require('fs');
+const path = require('path');
+
+const configPath = process.env.OPENCLAW_CONFIG_PATH || '/config/.openclaw/openclaw.json';
+const origin = process.env.OPENCLAW_CONTROLUI_ORIGIN || 'https://localhost:30443';
+const configDir = path.dirname(configPath);
+let config = {};
+let mode = 0o600;
+
+fs.mkdirSync(configDir, { recursive: true });
+
+if (fs.existsSync(configPath)) {
+  const stat = fs.statSync(configPath);
+  mode = stat.mode & 0o777;
+  const raw = fs.readFileSync(configPath, 'utf8');
+
+  try {
+    config = JSON.parse(raw);
+  } catch (error) {
+    throw new Error(`refusing to modify invalid JSON config at ${configPath}: ${error.message}`);
+  }
+
+  if (!config || typeof config !== 'object' || Array.isArray(config)) {
+    throw new Error(`refusing to modify non-object JSON config at ${configPath}`);
+  }
+}
+
+function ensureObject(parent, key) {
+  if (parent[key] == null) {
+    parent[key] = {};
+  }
+  if (typeof parent[key] !== 'object' || Array.isArray(parent[key])) {
+    throw new Error(`refusing to overwrite non-object config key ${key}`);
+  }
+  return parent[key];
+}
+
+const gateway = ensureObject(config, 'gateway');
+const controlUi = ensureObject(gateway, 'controlUi');
+
+if (controlUi.allowedOrigins == null) {
+  controlUi.allowedOrigins = [];
+}
+if (!Array.isArray(controlUi.allowedOrigins)) {
+  throw new Error('refusing to overwrite non-array gateway.controlUi.allowedOrigins');
+}
+if (!controlUi.allowedOrigins.includes(origin)) {
+  controlUi.allowedOrigins.push(origin);
+}
+
+const tmpPath = `${configPath}.tmp-${process.pid}`;
+fs.writeFileSync(tmpPath, `${JSON.stringify(config, null, 2)}\n`, { mode });
+fs.chmodSync(tmpPath, mode);
+fs.renameSync(tmpPath, configPath);
+NODE

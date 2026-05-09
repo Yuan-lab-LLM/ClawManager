@@ -1,0 +1,10 @@
+#!/usr/bin/with-contenv bash
+set -euo pipefail
+
+mkdir -p /var/lib/openclaw-agent /var/log/openclaw-agent /etc/openclaw-agent
+
+if [ ! -f /etc/openclaw-agent/config.yaml ]; then
+  cp /defaults/openclaw-agent/config.yaml /etc/openclaw-agent/config.yaml
+fi
+
+exec /usr/local/bin/openclaw-agent
