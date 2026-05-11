@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"clawreef/internal/models"
 )
@@ -42,6 +43,60 @@ func (s *stubChatSessionService) GetSession(sessionID string) (*models.ChatSessi
 
 func (s *stubChatSessionService) EnsureSession(sessionID string, userID, instanceID *int, traceID *string, title *string) (*models.ChatSession, error) {
 	return s.session, nil
+}
+
+func TestResolveGatewayHTTPTimeoutDefaultsLongerThanRuntimeIdle(t *testing.T) {
+	t.Setenv(gatewayHTTPTimeoutEnv, "")
+
+	got := resolveGatewayHTTPTimeout()
+	if got != defaultGatewayHTTPTimeout {
+		t.Fatalf("expected default timeout %s, got %s", defaultGatewayHTTPTimeout, got)
+	}
+	if got < 120*time.Second {
+		t.Fatalf("expected gateway timeout not to be shorter than OpenClaw runtime idle timeout, got %s", got)
+	}
+}
+
+func TestResolveGatewayHTTPTimeoutReadsEnvSeconds(t *testing.T) {
+	t.Setenv(gatewayHTTPTimeoutEnv, "240")
+
+	if got := resolveGatewayHTTPTimeout(); got != 240*time.Second {
+		t.Fatalf("expected env timeout 240s, got %s", got)
+	}
+}
+
+func TestResolveGatewayHTTPTimeoutRejectsInvalidEnv(t *testing.T) {
+	for _, value := range []string{"0", "-5", "not-a-number"} {
+		t.Run(value, func(t *testing.T) {
+			t.Setenv(gatewayHTTPTimeoutEnv, value)
+			if got := resolveGatewayHTTPTimeout(); got != defaultGatewayHTTPTimeout {
+				t.Fatalf("expected invalid env %q to fall back to %s, got %s", value, defaultGatewayHTTPTimeout, got)
+			}
+		})
+	}
+}
+
+func TestResolveGatewayHTTPTimeoutClampsEnv(t *testing.T) {
+	t.Setenv(gatewayHTTPTimeoutEnv, "9999")
+
+	if got := resolveGatewayHTTPTimeout(); got != maxGatewayHTTPTimeout {
+		t.Fatalf("expected timeout to clamp to %s, got %s", maxGatewayHTTPTimeout, got)
+	}
+}
+
+func TestNewServiceUsesResolvedGatewayHTTPTimeout(t *testing.T) {
+	t.Setenv(gatewayHTTPTimeoutEnv, "210")
+
+	svc, ok := NewService(nil, nil, nil, nil, nil, nil, nil, nil).(*service)
+	if !ok {
+		t.Fatalf("expected concrete gateway service")
+	}
+	if svc.httpClient == nil {
+		t.Fatalf("expected http client")
+	}
+	if svc.httpClient.Timeout != 210*time.Second {
+		t.Fatalf("expected http client timeout 210s, got %s", svc.httpClient.Timeout)
+	}
 }
 
 func TestBuildProviderRequestPreservesToolConfiguration(t *testing.T) {

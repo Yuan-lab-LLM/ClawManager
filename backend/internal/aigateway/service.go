@@ -14,8 +14,10 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"os"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -119,6 +121,9 @@ const autoModelID = "auto"
 const maxStoredIdentifierLength = 100
 const anthropicVersionHeader = "2023-06-01"
 const defaultAnthropicMaxTokens = 4096
+const defaultGatewayHTTPTimeout = 180 * time.Second
+const maxGatewayHTTPTimeout = 600 * time.Second
+const gatewayHTTPTimeoutEnv = "CLAWMANAGER_AI_GATEWAY_HTTP_TIMEOUT_SECONDS"
 
 var providerVersionSegmentPattern = regexp.MustCompile(`(?i)^v\d+(?:[a-z0-9._-]*)?$`)
 
@@ -310,9 +315,25 @@ func NewService(
 		chatMessageService: chatMessageService,
 		secretRefService:   services.NewSecretRefService(),
 		httpClient: &http.Client{
-			Timeout: 90 * time.Second,
+			Timeout: resolveGatewayHTTPTimeout(),
 		},
 	}
+}
+
+func resolveGatewayHTTPTimeout() time.Duration {
+	raw := strings.TrimSpace(os.Getenv(gatewayHTTPTimeoutEnv))
+	if raw == "" {
+		return defaultGatewayHTTPTimeout
+	}
+
+	seconds, err := strconv.Atoi(raw)
+	if err != nil || seconds <= 0 {
+		return defaultGatewayHTTPTimeout
+	}
+	if seconds > int(maxGatewayHTTPTimeout/time.Second) {
+		return maxGatewayHTTPTimeout
+	}
+	return time.Duration(seconds) * time.Second
 }
 
 func (s *service) ListAvailableModels() ([]AvailableModel, error) {
