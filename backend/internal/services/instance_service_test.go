@@ -224,3 +224,19 @@ func TestResolveGatewayModelInjectionRequiresActiveModels(t *testing.T) {
 		t.Fatalf("expected resolveGatewayModelInjection to fail when no active models exist, got %#v", injection)
 	}
 }
+
+func TestSecurityModeForInstance(t *testing.T) {
+	service := &instanceService{}
+
+	if got := service.securityModeForInstance("openclaw"); got != "chromium-compat" {
+		t.Fatalf("expected openclaw to use chromium compat mode, got %q", got)
+	}
+	if got := service.securityModeForInstance("ubuntu"); got != "default" {
+		t.Fatalf("expected ubuntu to use default security mode, got %q", got)
+	}
+
+	service.allowPrivilegedPods = true
+	if got := service.securityModeForInstance("openclaw"); got != "privileged" {
+		t.Fatalf("expected explicit privileged override to win, got %q", got)
+	}
+}

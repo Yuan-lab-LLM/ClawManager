@@ -18,9 +18,15 @@ type PodService struct {
 	client *Client
 }
 
+type PodSecurityMode string
+
 const (
 	podDeletionPollInterval = 500 * time.Millisecond
 	podDeletionTimeout      = 60 * time.Second
+
+	PodSecurityDefault        PodSecurityMode = "default"
+	PodSecurityChromiumCompat PodSecurityMode = "chromium-compat"
+	PodSecurityPrivileged     PodSecurityMode = "privileged"
 )
 
 // NewPodService creates a new Pod service
@@ -51,6 +57,8 @@ type PodConfig struct {
 	ImagePullPolicy    corev1.PullPolicy
 	ExtraEnv           map[string]string
 	EnvFromSecretNames []string
+	SHMSizeGB          int
+	SecurityMode       PodSecurityMode
 }
 
 // CreatePod creates a new pod for an instance
@@ -95,10 +103,16 @@ func (s *PodService) CreatePod(ctx context.Context, config PodConfig) (*corev1.P
 		pullPolicy = corev1.PullIfNotPresent
 	}
 
+	annotations := map[string]string{}
+	if config.SecurityMode == PodSecurityChromiumCompat {
+		annotations["container.apparmor.security.beta.kubernetes.io/desktop"] = "unconfined"
+	}
+
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      podName,
-			Namespace: namespace,
+			Name:        podName,
+			Namespace:   namespace,
+			Annotations: annotations,
 			Labels: map[string]string{
 				"app":           "clawreef",
 				"instance-id":   fmt.Sprintf("%d", config.InstanceID),
@@ -154,7 +168,8 @@ func (s *PodService) CreatePod(ctx context.Context, config PodConfig) (*corev1.P
 						TimeoutSeconds:      2,
 						FailureThreshold:    3,
 					},
-					Resources: resources,
+					SecurityContext: buildContainerSecurityContext(config.SecurityMode),
+					Resources:       resources,
 					VolumeMounts: []corev1.VolumeMount{
 						{
 							Name:      "data",
@@ -190,6 +205,23 @@ func (s *PodService) CreatePod(ctx context.Context, config PodConfig) (*corev1.P
 		pod.Spec.Containers[0].Env = append(pod.Spec.Containers[0].Env, corev1.EnvVar{
 			Name:  key,
 			Value: value,
+		})
+	}
+
+	if config.SHMSizeGB > 0 {
+		shmLimit := resource.MustParse(fmt.Sprintf("%dGi", config.SHMSizeGB))
+		pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
+			Name: "shm",
+			VolumeSource: corev1.VolumeSource{
+				EmptyDir: &corev1.EmptyDirVolumeSource{
+					Medium:    corev1.StorageMediumMemory,
+					SizeLimit: &shmLimit,
+				},
+			},
+		})
+		pod.Spec.Containers[0].VolumeMounts = append(pod.Spec.Containers[0].VolumeMounts, corev1.VolumeMount{
+			Name:      "shm",
+			MountPath: "/dev/shm",
 		})
 	}
 
@@ -242,6 +274,26 @@ func runtimeHostnameForPod(config PodConfig) string {
 	}
 
 	return sanitizeK8sName(fmt.Sprintf("clawreef-%d", config.InstanceID))
+}
+
+func buildContainerSecurityContext(mode PodSecurityMode) *corev1.SecurityContext {
+	switch mode {
+	case PodSecurityChromiumCompat:
+		allowPrivilegeEscalation := true
+		return &corev1.SecurityContext{
+			AllowPrivilegeEscalation: &allowPrivilegeEscalation,
+			SeccompProfile: &corev1.SeccompProfile{
+				Type: corev1.SeccompProfileTypeUnconfined,
+			},
+		}
+	case PodSecurityPrivileged:
+		privileged := true
+		return &corev1.SecurityContext{
+			Privileged: &privileged,
+		}
+	default:
+		return nil
+	}
 }
 
 func intstrFromInt32(port int32) intstr.IntOrString {

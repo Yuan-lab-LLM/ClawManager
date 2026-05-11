@@ -97,7 +97,13 @@ func main() {
 	aiObservabilityService := services.NewAIObservabilityService(modelInvocationRepo, auditEventRepo, costRecordRepo, riskHitRepo, chatMessageRepo, llmModelRepo, instanceRepo, userRepo)
 	clusterResourceService := services.NewClusterResourceService(instanceRepo)
 	services.SetRuntimeImageSettingsProvider(systemImageSettingService)
-	instanceService := services.NewInstanceService(instanceRepo, quotaRepo, llmModelRepo, openClawConfigService)
+	instanceService := services.NewInstanceService(
+		instanceRepo,
+		quotaRepo,
+		llmModelRepo,
+		openClawConfigService,
+		services.WithPrivilegedInstancePods(cfg.Kubernetes.Runtime.Pod.Privileged),
+	)
 	instanceAgentService := services.NewInstanceAgentService(instanceRepo, instanceAgentRepo, instanceDesiredStateRepo, instanceRuntimeStatusRepo, instanceCommandRepo)
 	instanceRuntimeStatusService := services.NewInstanceRuntimeStatusService(instanceRuntimeStatusRepo, instanceAgentRepo, instanceDesiredStateRepo)
 	instanceCommandService := services.NewInstanceCommandService(instanceCommandRepo, instanceRuntimeStatusRepo, instanceDesiredStateRepo)

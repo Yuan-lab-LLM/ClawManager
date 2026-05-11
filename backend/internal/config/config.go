@@ -113,6 +113,7 @@ type RuntimePVCConfig struct {
 	VolumeMode           string `yaml:"volumeMode"`
 	AllowVolumeExpansion bool   `yaml:"allowVolumeExpansion"`
 	ReclaimPolicy        string `yaml:"reclaimPolicy"`
+	HostPathPrefix       string `yaml:"hostPathPrefix"`
 }
 
 // LoggingConfig holds logging configuration
@@ -190,6 +191,7 @@ func Load() (*Config, error) {
 					VolumeMode:           "Filesystem",
 					AllowVolumeExpansion: true,
 					ReclaimPolicy:        "Delete",
+					HostPathPrefix:       getEnv("K8S_PV_HOST_PATH_PREFIX", "/data/clawreef"),
 				},
 			},
 			Logging: LoggingConfig{
@@ -302,6 +304,9 @@ func applyEnvOverrides(config *Config) {
 	if storageClass := os.Getenv("K8S_STORAGE_CLASS"); storageClass != "" {
 		config.Kubernetes.Common.StorageClass = storageClass
 	}
+	if hostPathPrefix := os.Getenv("K8S_PV_HOST_PATH_PREFIX"); hostPathPrefix != "" {
+		config.Kubernetes.Runtime.PVC.HostPathPrefix = hostPathPrefix
+	}
 
 	if endpoint := os.Getenv("OBJECT_STORAGE_ENDPOINT"); endpoint != "" {
 		config.ObjectStorage.Endpoint = endpoint
@@ -364,6 +369,14 @@ func (c *Config) GetNamespace() string {
 // GetStorageClass returns the storage class
 func (c *Config) GetStorageClass() string {
 	return c.Kubernetes.Common.StorageClass
+}
+
+// GetHostPathPrefix returns the host path prefix for PV creation
+func (c *Config) GetHostPathPrefix() string {
+	if c.Kubernetes.Runtime.PVC.HostPathPrefix != "" {
+		return c.Kubernetes.Runtime.PVC.HostPathPrefix
+	}
+	return "/data/clawreef"
 }
 
 // GetMode returns the K8s connection mode

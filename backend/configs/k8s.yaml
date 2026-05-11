@@ -114,6 +114,11 @@ runtime:
     # 保留策略: Retain | Delete | Recycle
     reclaimPolicy: "Delete"
 
+    # HostPath 前缀（用于手动创建 PV 时的主机路径）
+    # 注意：不要使用 /tmp/ 等临时目录，节点重启可能导致数据丢失
+    # 环境变量覆盖: K8S_PV_HOST_PATH_PREFIX
+    hostPathPrefix: "/data/clawreef"
+
 # 日志配置
 logging:
   # 日志级别: debug | info | warn | error

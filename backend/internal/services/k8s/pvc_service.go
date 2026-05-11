@@ -162,8 +162,12 @@ func (s *PVCService) waitForPVCBinding(ctx context.Context, namespace, pvcName s
 // createPVForPVC creates a PV manually to bind to the PVC
 func (s *PVCService) createPVForPVC(ctx context.Context, namespace, pvcName string, userID, instanceID, storageSizeGB int, storageClass string) (*corev1.PersistentVolumeClaim, error) {
 	pvName := fmt.Sprintf("clawreef-pv-user-%d-instance-%d", userID, instanceID)
-	// Use /tmp path to comply with host_path provisioner requirements
-	hostPath := fmt.Sprintf("/tmp/clawreef/user-%d/instance-%d", userID, instanceID)
+	// Use configurable host path prefix for persistent storage
+	hostPathPrefix := "/data/clawreef"
+	if s.client != nil && s.client.HostPathPrefix != "" {
+		hostPathPrefix = s.client.HostPathPrefix
+	}
+	hostPath := fmt.Sprintf("%s/user-%d/instance-%d", hostPathPrefix, userID, instanceID)
 
 	fmt.Printf("Creating PV %s with hostPath %s for PVC %s\n", pvName, hostPath, pvcName)
 

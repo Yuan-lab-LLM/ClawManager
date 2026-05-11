@@ -4,10 +4,37 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"clawreef/internal/models"
 )
+
+const (
+	defaultInstanceSHMSizeGB = 1
+	maxInstanceSHMSizeGB     = 8
+)
+
+// popSHMSizeGB removes SHM_SIZE_GB from extraEnv and returns /dev/shm size in GiB.
+// Default is 1 when unset. SHM_SIZE_GB=0 disables the custom emptyDir /dev/shm mount.
+// Values above maxInstanceSHMSizeGB are clamped to protect node memory.
+func popSHMSizeGB(extraEnv map[string]string) int {
+	shmSizeGB := defaultInstanceSHMSizeGB
+	if shmVal, ok := extraEnv["SHM_SIZE_GB"]; ok {
+		if parsed, err := strconv.Atoi(strings.TrimSpace(shmVal)); err == nil {
+			if parsed == 0 {
+				shmSizeGB = 0
+			} else if parsed > 0 {
+				shmSizeGB = parsed
+				if shmSizeGB > maxInstanceSHMSizeGB {
+					shmSizeGB = maxInstanceSHMSizeGB
+				}
+			}
+		}
+		delete(extraEnv, "SHM_SIZE_GB")
+	}
+	return shmSizeGB
+}
 
 var envNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 

@@ -76,6 +76,7 @@ type instanceService struct {
 	quotaRepo             repository.QuotaRepository
 	llmModelRepo          repository.LLMModelRepository
 	openClawConfigService OpenClawConfigService
+	allowPrivilegedPods   bool
 	podService            *k8s.PodService
 	pvcService            *k8s.PVCService
 	serviceService        *k8s.ServiceService
@@ -87,9 +88,17 @@ type gatewayModelInjection struct {
 	modelsJSON   string
 }
 
+type InstanceServiceOption func(*instanceService)
+
+func WithPrivilegedInstancePods(allowed bool) InstanceServiceOption {
+	return func(s *instanceService) {
+		s.allowPrivilegedPods = allowed
+	}
+}
+
 // NewInstanceService creates a new instance service
-func NewInstanceService(instanceRepo repository.InstanceRepository, quotaRepo repository.QuotaRepository, llmModelRepo repository.LLMModelRepository, openClawConfigService OpenClawConfigService) InstanceService {
-	return &instanceService{
+func NewInstanceService(instanceRepo repository.InstanceRepository, quotaRepo repository.QuotaRepository, llmModelRepo repository.LLMModelRepository, openClawConfigService OpenClawConfigService, options ...InstanceServiceOption) InstanceService {
+	service := &instanceService{
 		instanceRepo:          instanceRepo,
 		quotaRepo:             quotaRepo,
 		llmModelRepo:          llmModelRepo,
@@ -99,6 +108,12 @@ func NewInstanceService(instanceRepo repository.InstanceRepository, quotaRepo re
 		serviceService:        k8s.NewServiceService(),
 		networkPolicyService:  k8s.NewNetworkPolicyService(),
 	}
+	for _, option := range options {
+		if option != nil {
+			option(service)
+		}
+	}
+	return service
 }
 
 // Create creates a new instance
@@ -302,6 +317,7 @@ func (s *instanceService) Create(userID int, req CreateInstanceRequest) (*models
 	}
 
 	// Create Pod
+	shmSizeGB := popSHMSizeGB(extraEnv)
 	podConfig := k8s.PodConfig{
 		InstanceID:         instance.ID,
 		InstanceName:       instance.Name,
@@ -317,6 +333,8 @@ func (s *instanceService) Create(userID int, req CreateInstanceRequest) (*models
 		ImagePullPolicy:    corev1.PullPolicy(defaultImagePullPolicy()),
 		ExtraEnv:           extraEnv,
 		EnvFromSecretNames: []string{bootstrapSecretName},
+		SHMSizeGB:          shmSizeGB,
+		SecurityMode:       s.securityModeForInstance(instance.Type),
 	}
 
 	pod, err := s.podService.CreatePod(ctx, podConfig)
@@ -470,6 +488,7 @@ func (s *instanceService) Start(instanceID int) error {
 		return fmt.Errorf("failed to delete network policy: %w", err)
 	}
 
+	shmSizeGB := popSHMSizeGB(extraEnv)
 	podConfig := k8s.PodConfig{
 		InstanceID:         instance.ID,
 		InstanceName:       instance.Name,
@@ -485,6 +504,8 @@ func (s *instanceService) Start(instanceID int) error {
 		ImagePullPolicy:    corev1.PullPolicy(defaultImagePullPolicy()),
 		ExtraEnv:           extraEnv,
 		EnvFromSecretNames: []string{bootstrapSecretName},
+		SHMSizeGB:          shmSizeGB,
+		SecurityMode:       s.securityModeForInstance(instance.Type),
 	}
 
 	pod, err := s.podService.CreatePod(ctx, podConfig)
@@ -527,6 +548,16 @@ func (s *instanceService) Start(instanceID int) error {
 	GetHub().BroadcastInstanceStatus(instance.UserID, instance)
 
 	return nil
+}
+
+func (s *instanceService) securityModeForInstance(instanceType string) k8s.PodSecurityMode {
+	if s != nil && s.allowPrivilegedPods {
+		return k8s.PodSecurityPrivileged
+	}
+	if strings.EqualFold(strings.TrimSpace(instanceType), "openclaw") {
+		return k8s.PodSecurityChromiumCompat
+	}
+	return k8s.PodSecurityDefault
 }
 
 func (s *instanceService) ensureGatewayToken(instance *models.Instance) (string, error) {

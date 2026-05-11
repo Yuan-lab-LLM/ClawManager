@@ -552,7 +552,7 @@ spec:
   persistentVolumeReclaimPolicy: Retain
   storageClassName: manual
   hostPath:
-    path: /tmp/clawmanager/system/mysql
+    path: /data/clawmanager/system/mysql
     type: DirectoryOrCreate
 ---
 apiVersion: v1
@@ -582,7 +582,7 @@ spec:
   persistentVolumeReclaimPolicy: Retain
   storageClassName: manual
   hostPath:
-    path: /tmp/clawmanager/system/minio
+    path: /data/clawmanager/system/minio
     type: DirectoryOrCreate
 ---
 apiVersion: v1
@@ -885,6 +885,8 @@ spec:
               value: "clawmanager"
             - name: K8S_STORAGE_CLASS
               value: "manual"
+            - name: K8S_PV_HOST_PATH_PREFIX
+              value: "/data/clawreef"
             - name: SKILL_SCANNER_ENABLED
               value: "true"
             - name: SKILL_SCANNER_BASE_URL
