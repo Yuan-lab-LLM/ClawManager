@@ -24,6 +24,7 @@ This build context:
 - installs the runtime proof scripts under a `0755` proof directory;
 - re-copies the reviewed localized Control UI files to preserve zh-CN output and patch hardcoded internal UI copy.
 - adds the recovered `agents-_34Q844e.js` lazy chunk and copies it into the proven runtime Control UI assets path.
+- does not overlay Control UI root favicon assets; subsequent images inherit the parent runtime OpenClaw favicon/logo.
 
 ## Runtime Target Proofs Expected After Build
 

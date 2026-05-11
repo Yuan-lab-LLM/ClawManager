@@ -13,6 +13,7 @@ Source artifact path:
 This artifact is a repo-owned static control-ui artifact overlay for GTClaw control-ui localization.
 
 It preserves the existing persistence fix by carrying forward the source artifact's control-ui runtime files. It carries forward the existing i18n loader chunk `assets/i18n-B06L7jQN.js` unchanged. It changes the Simplified Chinese locale chunk and the minimal compiled control-ui chunks needed for hardcoded internal UI copy that bypasses the locale bundle.
+It does not carry Control UI root favicon assets; subsequent runtime image assembly inherits the parent runtime OpenClaw favicon/logo.
 
 No trustedProxy patch was performed. No runtime auth contract patch was performed. No plugin work was performed. No skill distribution work was performed. No build/tag/push was performed.
 
