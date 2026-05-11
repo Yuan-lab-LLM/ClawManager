@@ -53,7 +53,7 @@ const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
         }
       }}
     >
-      <div className="w-full max-w-md rounded-[28px] border border-[#eadfd8] bg-white p-6 shadow-[0_36px_100px_-48px_rgba(72,44,24,0.56)]">
+      <div className="w-full max-w-md rounded-[28px] border border-[#dbe4f0] bg-white p-6 shadow-[0_36px_100px_-48px_rgba(30,64,175,0.56)]">
         <h3 className="text-xl font-semibold tracking-[-0.02em] text-[#171212]">{title}</h3>
         <p className="mt-3 text-sm leading-6 text-[#5f5957]">{message}</p>
         <div className="mt-6 flex justify-end gap-3">
@@ -61,7 +61,7 @@ const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
             type="button"
             onClick={onCancel}
             disabled={loading}
-            className="rounded-xl border border-[#eadfd8] bg-[#f7f1ed] px-4 py-2 text-sm font-medium text-[#5f5957] hover:bg-[#efe5df] disabled:cursor-not-allowed disabled:opacity-50"
+            className="rounded-xl border border-[#dbe4f0] bg-[#f7f1ed] px-4 py-2 text-sm font-medium text-[#5f5957] hover:bg-[#efe5df] disabled:cursor-not-allowed disabled:opacity-50"
           >
             {cancelLabel}
           </button>
@@ -70,7 +70,7 @@ const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
             onClick={onConfirm}
             disabled={loading}
             className={`rounded-xl px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50 ${
-              destructive ? 'bg-red-600 hover:bg-red-700' : 'bg-[#ef4444] hover:bg-[#dc2626]'
+              destructive ? 'bg-red-600 hover:bg-red-700' : 'bg-[#2563eb] hover:bg-[#1d4ed8]'
             }`}
           >
             {loading ? `${confirmLabel}...` : confirmLabel}

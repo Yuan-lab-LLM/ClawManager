@@ -37,24 +37,24 @@ interface NodeSummaryRowProps {
 
 const toneStyles: Record<ClusterMetricCardProps['tone'], { shell: string; line: string; glow: string }> = {
   coral: {
-    shell: 'from-[rgba(255,255,255,0.96)] via-[rgba(255,251,247,0.96)] to-[rgba(255,255,255,0.92)] border-[#ead8cf]',
-    line: 'bg-[#ef6b4a]',
-    glow: 'shadow-[0_24px_70px_-52px_rgba(72,44,24,0.5)]',
+    shell: 'from-[rgba(255,255,255,0.96)] via-[rgba(239,246,255,0.9)] to-[rgba(255,255,255,0.92)] border-[#bfdbfe]',
+    line: 'bg-[#2563eb]',
+    glow: 'shadow-[0_24px_70px_-52px_rgba(30,64,175,0.36)]',
   },
   amber: {
-    shell: 'from-[rgba(255,255,255,0.96)] via-[rgba(255,251,247,0.96)] to-[rgba(255,255,255,0.92)] border-[#ead8cf]',
+    shell: 'from-[rgba(255,255,255,0.96)] via-[rgba(255,251,235,0.7)] to-[rgba(255,255,255,0.92)] border-[#fde68a]',
     line: 'bg-[#d59a22]',
-    glow: 'shadow-[0_24px_70px_-52px_rgba(72,44,24,0.5)]',
+    glow: 'shadow-[0_24px_70px_-52px_rgba(146,64,14,0.24)]',
   },
   blue: {
-    shell: 'from-[rgba(255,255,255,0.96)] via-[rgba(255,251,247,0.96)] to-[rgba(255,255,255,0.92)] border-[#ead8cf]',
+    shell: 'from-[rgba(255,255,255,0.96)] via-[rgba(239,246,255,0.9)] to-[rgba(255,255,255,0.92)] border-[#bfdbfe]',
     line: 'bg-[#3b82f6]',
-    glow: 'shadow-[0_24px_70px_-52px_rgba(72,44,24,0.5)]',
+    glow: 'shadow-[0_24px_70px_-52px_rgba(30,64,175,0.36)]',
   },
   slate: {
-    shell: 'from-[rgba(255,255,255,0.96)] via-[rgba(255,251,247,0.96)] to-[rgba(255,255,255,0.92)] border-[#ead8cf]',
+    shell: 'from-[rgba(255,255,255,0.96)] via-[rgba(248,250,252,0.95)] to-[rgba(255,255,255,0.92)] border-[#dbe4f0]',
     line: 'bg-[#5b6478]',
-    glow: 'shadow-[0_24px_70px_-52px_rgba(72,44,24,0.5)]',
+    glow: 'shadow-[0_24px_70px_-52px_rgba(30,41,59,0.26)]',
   },
 };
 
@@ -144,13 +144,13 @@ const AdminDashboard: React.FC = () => {
         </div>
       )}
 
-      <section className="relative overflow-hidden rounded-[32px] border border-[#ead8cf] bg-[radial-gradient(circle_at_top_left,#fff8f0_0%,#fff6f0_22%,#fbf4ef_45%,#f5efe9_100%)] px-6 py-6 shadow-[0_30px_90px_-48px_rgba(132,85,52,0.45)] sm:px-8">
-        <div className="pointer-events-none absolute inset-y-0 right-0 w-[40%] bg-[radial-gradient(circle_at_center,rgba(239,107,74,0.16),transparent_58%)]" />
-        <div className="pointer-events-none absolute left-0 top-0 h-36 w-36 rounded-full bg-[radial-gradient(circle,rgba(213,154,34,0.18),transparent_70%)] blur-2xl" />
+      <section className="relative overflow-hidden rounded-[32px] border border-[#bfdbfe] bg-[radial-gradient(circle_at_top_left,#eff6ff_0%,#f8fbff_36%,#f7f9fc_68%,#f3f6fb_100%)] px-6 py-6 shadow-[0_30px_90px_-48px_rgba(30,64,175,0.34)] sm:px-8">
+        <div className="pointer-events-none absolute inset-y-0 right-0 w-[40%] bg-[radial-gradient(circle_at_center,rgba(37,99,235,0.14),transparent_58%)]" />
+        <div className="pointer-events-none absolute left-0 top-0 h-36 w-36 rounded-full bg-[radial-gradient(circle,rgba(14,165,233,0.16),transparent_70%)] blur-2xl" />
 
         <div className="relative grid gap-6 xl:grid-cols-[1.3fr_0.9fr]">
           <div>
-            <div className="inline-flex items-center rounded-full border border-[#f0d4c6] bg-white/75 px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em] text-[#b46c50] backdrop-blur">
+            <div className="inline-flex items-center rounded-full border border-[#bfdbfe] bg-white/75 px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em] text-[#2563eb] backdrop-blur">
               {t('admin.clusterCommand')}
             </div>
             <div className="mt-4 max-w-3xl">
@@ -188,10 +188,10 @@ const AdminDashboard: React.FC = () => {
           </div>
 
           <div className="relative">
-            <div className="rounded-[28px] border border-[#ead8cf] bg-white/80 p-5 shadow-[0_24px_70px_-48px_rgba(72,44,24,0.6)] backdrop-blur">
+            <div className="rounded-[28px] border border-[#dbe4f0] bg-white/82 p-5 shadow-[0_24px_70px_-48px_rgba(30,64,175,0.34)] backdrop-blur">
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#b46c50]">{t('admin.readiness')}</p>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#2563eb]">{t('admin.readiness')}</p>
                   <h3 className="mt-2 text-[2.35rem] font-semibold leading-none tracking-[-0.05em] text-[#1d1713] tabular-nums">
                     {loading || !clusterResources ? '--' : `${clusterResources.ready_nodes}/${clusterResources.node_count}`}
                   </h3>
@@ -199,15 +199,15 @@ const AdminDashboard: React.FC = () => {
                     {loading || !clusterResources ? t('admin.clusterStatusPending') : t('admin.nodesHealthySchedulable', { percent: readyRatio })}
                   </p>
                 </div>
-                <div className="rounded-2xl bg-[#fff4ee] px-3 py-2 text-right">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#c27252]">{t('admin.hotNode')}</p>
+                <div className="rounded-2xl bg-[#eff6ff] px-3 py-2 text-right">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#1d4ed8]">{t('admin.hotNode')}</p>
                   <p className="mt-1 text-sm font-semibold text-[#1d1713]">{highestPressureNode?.name || '--'}</p>
                 </div>
               </div>
 
-              <div className="mt-5 h-3 overflow-hidden rounded-full bg-[#efe7e1]">
+              <div className="mt-5 h-3 overflow-hidden rounded-full bg-[#dbeafe]">
                 <div
-                  className="h-full rounded-full bg-[linear-gradient(90deg,#ef6b4a_0%,#d59a22_100%)] transition-all"
+                  className="h-full rounded-full bg-[linear-gradient(90deg,#2563eb_0%,#38bdf8_100%)] transition-all"
                   style={{ width: `${readyRatio}%` }}
                 />
               </div>
@@ -265,10 +265,10 @@ const AdminDashboard: React.FC = () => {
       <section className="mt-10">
         <div className="mb-5 flex flex-wrap items-end justify-between gap-4">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[#b46c50]">{t('admin.clusterResources')}</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[#2563eb]">{t('admin.clusterResources')}</p>
             <h2 className="mt-2 text-2xl font-semibold text-[#1d1713]">{t('admin.capacityBoard')}</h2>
           </div>
-          <div className="rounded-full border border-[#ead8cf] bg-white/80 px-4 py-2 text-sm text-[#7a6d66] shadow-sm">
+          <div className="rounded-full border border-[#dbe4f0] bg-white/80 px-4 py-2 text-sm text-[#7a6d66] shadow-sm">
             {loading || !clusterResources ? t('admin.waitingForClusterData') : t('admin.nodesReadySummary', { ready: clusterResources.ready_nodes, total: clusterResources.node_count })}
           </div>
         </div>
@@ -309,11 +309,11 @@ const AdminDashboard: React.FC = () => {
         </div>
       </section>
 
-      <section className="mt-10 overflow-hidden rounded-[30px] border border-[#ead8cf] bg-[linear-gradient(180deg,rgba(255,255,255,0.88)_0%,rgba(255,250,246,0.96)_100%)] shadow-[0_30px_80px_-52px_rgba(60,42,28,0.6)]">
-        <div className="border-b border-[#efe2da] px-6 py-5">
+      <section className="mt-10 overflow-hidden rounded-[30px] border border-[#dbe4f0] bg-[linear-gradient(180deg,rgba(255,255,255,0.9)_0%,rgba(248,251,255,0.96)_100%)] shadow-[0_30px_80px_-52px_rgba(30,64,175,0.3)]">
+        <div className="border-b border-[#dbe4f0] px-6 py-5">
           <div className="flex flex-wrap items-end justify-between gap-4">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[#b46c50]">{t('admin.nodeMatrix')}</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[#2563eb]">{t('admin.nodeMatrix')}</p>
               <h2 className="mt-2 text-2xl font-semibold text-[#1d1713]">{t('admin.infrastructureTable')}</h2>
             </div>
             <p className="max-w-xl text-[13px] leading-5 text-[#7a6d66]">
@@ -325,7 +325,7 @@ const AdminDashboard: React.FC = () => {
         <div className="overflow-x-auto">
           <table className="min-w-full">
             <thead>
-              <tr className="border-b border-[#f0e3db] bg-[linear-gradient(180deg,#fffaf6_0%,#fff6f1_100%)] text-left text-[11px] font-semibold uppercase tracking-[0.18em] text-[#9d7d6e]">
+              <tr className="border-b border-[#dbe4f0] bg-[linear-gradient(180deg,#f8fbff_0%,#eff6ff_100%)] text-left text-[11px] font-semibold uppercase tracking-[0.18em] text-[#64748b]">
                 <th className="px-6 py-4">{t('admin.node')}</th>
                 <th className="px-6 py-4">{t('admin.health')}</th>
                 <th className="px-6 py-4">{t('admin.role')}</th>
@@ -346,11 +346,11 @@ const AdminDashboard: React.FC = () => {
                     format={formatValue}
                   />
                   {expandedNode === node.name && (
-                    <tr className="border-b border-[#f2e8e2] bg-[linear-gradient(180deg,#fffdfb_0%,#fff7f2_100%)]">
+                    <tr className="border-b border-[#dbe4f0] bg-[linear-gradient(180deg,#ffffff_0%,#f8fbff_100%)]">
                       <td colSpan={8} className="px-6 py-6">
                         <div className="grid items-start gap-4 xl:grid-cols-[0.95fr_1.8fr]">
-                          <div className="rounded-[24px] border border-[#ebdad0] bg-white/85 p-5 shadow-[0_18px_50px_-42px_rgba(72,44,24,0.7)]">
-                            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#b46c50]">{t('admin.nodeDossier')}</p>
+                          <div className="rounded-[24px] border border-[#dbe4f0] bg-white/85 p-5 shadow-[0_18px_50px_-42px_rgba(30,64,175,0.28)]">
+                            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#2563eb]">{t('admin.nodeDossier')}</p>
                             <dl className="mt-4 space-y-4">
                               <DetailRow label={t('admin.kubeletVersion')} value={node.kubelet_version || '--'} />
                               <DetailRow label={t('admin.roles')} value={node.roles.join(', ')} />
@@ -359,8 +359,8 @@ const AdminDashboard: React.FC = () => {
                             </dl>
                           </div>
 
-                          <div className="self-start rounded-[24px] border border-[#ebdad0] bg-white/75 p-5 shadow-[0_18px_50px_-42px_rgba(72,44,24,0.58)]">
-                            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#b46c50]">{t('admin.resourceProfile')}</p>
+                          <div className="self-start rounded-[24px] border border-[#dbe4f0] bg-white/75 p-5 shadow-[0_18px_50px_-42px_rgba(30,64,175,0.24)]">
+                            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#2563eb]">{t('admin.resourceProfile')}</p>
                             <div className="mt-5 grid items-start gap-5 lg:grid-cols-3">
                               <NodeResourceBar label="CPU" summary={node.cpu} format={formatValue} />
                               <NodeResourceBar label="Memory" summary={node.memory} format={formatValue} />
@@ -384,7 +384,7 @@ const AdminDashboard: React.FC = () => {
         )}
 
         {!loading && allNodes.length > 0 && (
-          <div className="flex flex-col gap-4 border-t border-[#f0e3db] px-6 py-5 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-col gap-4 border-t border-[#dbe4f0] px-6 py-5 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-sm text-[#7a6d66]">
               {t('admin.showingNodes', { from: (currentPage - 1) * pageSize + 1, to: Math.min(currentPage * pageSize, allNodes.length), total: allNodes.length })}
             </p>
@@ -393,18 +393,18 @@ const AdminDashboard: React.FC = () => {
                 type="button"
                 onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
                 disabled={currentPage === 1}
-                className="rounded-full border border-[#ead7cd] bg-white px-4 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-[#a05f46] transition-all hover:border-[#ef6b4a] hover:text-[#ef6b4a] disabled:cursor-not-allowed disabled:opacity-40"
+                className="rounded-full border border-[#bfdbfe] bg-white px-4 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-[#2563eb] transition-all hover:border-[#2563eb] hover:text-[#1d4ed8] disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {t('admin.prev')}
               </button>
-              <div className="rounded-full border border-[#ead7cd] bg-[#fff8f3] px-4 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-[#a05f46]">
+              <div className="rounded-full border border-[#bfdbfe] bg-[#eff6ff] px-4 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-[#2563eb]">
                 {t('admin.pageSummary', { page: currentPage, total: totalPages })}
               </div>
               <button
                 type="button"
                 onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
                 disabled={currentPage === totalPages}
-                className="rounded-full border border-[#ead7cd] bg-white px-4 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-[#a05f46] transition-all hover:border-[#ef6b4a] hover:text-[#ef6b4a] disabled:cursor-not-allowed disabled:opacity-40"
+                className="rounded-full border border-[#bfdbfe] bg-white px-4 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-[#2563eb] transition-all hover:border-[#2563eb] hover:text-[#1d4ed8] disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {t('admin.nextPage')}
               </button>
@@ -429,17 +429,17 @@ function HeroStat({
 }) {
   return (
     <div
-      className={`rounded-[24px] border p-4 shadow-[0_24px_60px_-44px_rgba(72,44,24,0.55)] backdrop-blur ${
+      className={`rounded-[24px] border p-4 shadow-[0_24px_60px_-44px_rgba(30,64,175,0.32)] backdrop-blur ${
         highlight
-          ? 'border-[#f3c7b7] bg-[linear-gradient(135deg,rgba(255,241,235,0.98)_0%,rgba(255,255,255,0.95)_100%)]'
-          : 'border-[#ead8cf] bg-white/78'
+          ? 'border-[#93c5fd] bg-[linear-gradient(135deg,rgba(219,234,254,0.98)_0%,rgba(255,255,255,0.95)_100%)]'
+          : 'border-[#dbe4f0] bg-white/78'
       }`}
     >
       <div className="grid min-h-[122px] grid-rows-[40px_minmax(0,1fr)_32px]">
         <p className="text-[13px] leading-5 text-[#8c7b72]">{label}</p>
         <p
           className={`self-center whitespace-nowrap text-[2rem] font-semibold leading-none tracking-[-0.05em] tabular-nums ${
-            highlight ? 'text-[#dc2626]' : 'text-[#1d1713]'
+            highlight ? 'text-[#2563eb]' : 'text-[#1d1713]'
           }`}
         >
           {value}
@@ -452,7 +452,7 @@ function HeroStat({
 
 function MiniSignal({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-2xl border border-[#eee1d8] bg-[#fffaf7] px-4 py-3">
+    <div className="rounded-2xl border border-[#dbe4f0] bg-[#f8fbff] px-4 py-3">
       <div className="grid min-h-[92px] grid-rows-[28px_minmax(0,1fr)]">
         <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#b09d93]">{label}</p>
         <p className="self-end whitespace-nowrap text-[1.75rem] font-semibold leading-none tracking-[-0.04em] text-[#1d1713] tabular-nums">{value}</p>
@@ -477,18 +477,18 @@ function CommandTile({
   openLabel: string;
 }) {
   const accents = {
-    coral: 'border-[#ead8cf] text-[#ef6b4a] after:bg-[radial-gradient(circle,rgba(239,107,74,0.14),transparent_66%)]',
-    amber: 'border-[#ead8cf] text-[#d59a22] after:bg-[radial-gradient(circle,rgba(213,154,34,0.14),transparent_66%)]',
-    blue: 'border-[#ead8cf] text-[#3b82f6] after:bg-[radial-gradient(circle,rgba(59,130,246,0.14),transparent_66%)]',
+    coral: 'border-[#bfdbfe] text-[#2563eb] after:bg-[radial-gradient(circle,rgba(37,99,235,0.14),transparent_66%)]',
+    amber: 'border-[#fde68a] text-[#b45309] after:bg-[radial-gradient(circle,rgba(245,158,11,0.12),transparent_66%)]',
+    blue: 'border-[#bfdbfe] text-[#3b82f6] after:bg-[radial-gradient(circle,rgba(59,130,246,0.14),transparent_66%)]',
   }[tone];
 
   return (
     <Link
       to={to}
-      className={`group relative overflow-hidden rounded-[28px] border bg-[linear-gradient(180deg,rgba(255,255,255,0.98)_0%,rgba(255,249,245,0.94)_100%)] p-6 shadow-[0_24px_70px_-52px_rgba(72,44,24,0.5)] transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_30px_80px_-52px_rgba(72,44,24,0.64)] after:absolute after:-right-8 after:top-[-24px] after:h-24 after:w-24 after:rounded-full ${accents}`}
+      className={`group relative overflow-hidden rounded-[28px] border bg-[linear-gradient(180deg,rgba(255,255,255,0.98)_0%,rgba(248,251,255,0.94)_100%)] p-6 shadow-[0_24px_70px_-52px_rgba(30,64,175,0.32)] transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_30px_80px_-52px_rgba(30,64,175,0.42)] after:absolute after:-right-8 after:top-[-24px] after:h-24 after:w-24 after:rounded-full ${accents}`}
     >
       <div className="relative flex items-start gap-4">
-        <div className="rounded-2xl border border-[#f1e2d9] bg-white/90 p-3 shadow-[0_12px_30px_-24px_rgba(72,44,24,0.5)]">
+        <div className="rounded-2xl border border-[#dbe4f0] bg-white/90 p-3 shadow-[0_12px_30px_-24px_rgba(30,64,175,0.28)]">
           <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={iconPath} />
           </svg>
@@ -496,7 +496,7 @@ function CommandTile({
         <div>
           <h3 className="text-[1.15rem] font-semibold leading-6 text-[#1d1713]">{title}</h3>
           <p className="mt-1 text-[13px] leading-5 text-[#7a6d66]">{description}</p>
-          <p className="mt-4 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#b46c50]">{openLabel}</p>
+          <p className="mt-4 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#2563eb]">{openLabel}</p>
         </div>
       </div>
     </Link>
@@ -514,11 +514,11 @@ function ClusterMetricCard({ title, eyebrow, value, subtitle, progress, tone }: 
           <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[#ad8f80]">{eyebrow}</p>
           <h3 className="mt-2 text-[1.35rem] font-semibold leading-6 text-[#1d1713]">{title}</h3>
         </div>
-        <div className="rounded-full border border-[#efe2d9] bg-white/85 px-3 py-1 text-xs font-semibold text-[#7a6d66] shadow-[0_10px_24px_-20px_rgba(72,44,24,0.55)]">
+        <div className="rounded-full border border-[#dbe4f0] bg-white/85 px-3 py-1 text-xs font-semibold text-[#7a6d66] shadow-[0_10px_24px_-20px_rgba(30,64,175,0.3)]">
           {Math.round(progress)}%
         </div>
       </div>
-      <div className="mt-4 rounded-[22px] border border-[#f1e2d8] bg-[linear-gradient(180deg,rgba(255,255,255,0.92)_0%,rgba(255,249,245,0.88)_100%)] px-4 py-4">
+      <div className="mt-4 rounded-[22px] border border-[#dbe4f0] bg-[linear-gradient(180deg,rgba(255,255,255,0.92)_0%,rgba(248,251,255,0.88)_100%)] px-4 py-4">
         <p className="whitespace-nowrap text-[1.5rem] font-semibold leading-none tracking-[-0.04em] text-[#111827] tabular-nums sm:text-[1.65rem]">
           {value}
         </p>
@@ -539,7 +539,7 @@ function NodeResourceBar({ label, summary, format }: NodeResourceBarProps) {
   const percent = summary.allocatable > 0 ? Math.min((summary.requested / summary.allocatable) * 100, 100) : 0;
 
   return (
-    <div className="rounded-[22px] border border-[#efe1d8] bg-[#fffaf7] p-4">
+    <div className="rounded-[22px] border border-[#dbe4f0] bg-[#f8fbff] p-4">
       <div className="flex items-center justify-between gap-3">
         <span className="text-sm font-semibold text-[#1d1713]">{label}</span>
         <span className="rounded-full bg-white px-2.5 py-1 text-[11px] font-semibold text-[#8a766a]">
@@ -550,9 +550,9 @@ function NodeResourceBar({ label, summary, format }: NodeResourceBarProps) {
         {format(summary.requested)} / {format(summary.allocatable)} {summary.unit}
       </p>
       <p className="mt-2 text-[13px] leading-5 text-[#8c7b72]">{t('admin.capacityGiB', { value: format(summary.capacity) }).replace('GiB', summary.unit)}</p>
-      <div className="mt-4 h-2.5 overflow-hidden rounded-full bg-[#eadfd8]">
+      <div className="mt-4 h-2.5 overflow-hidden rounded-full bg-[#dbeafe]">
         <div
-          className="h-full rounded-full bg-[linear-gradient(90deg,#ef6b4a_0%,#d59a22_100%)]"
+          className="h-full rounded-full bg-[linear-gradient(90deg,#2563eb_0%,#38bdf8_100%)]"
           style={{ width: `${percent}%` }}
         />
       </div>
@@ -572,7 +572,7 @@ function DetailRow({ label, value }: { label: string; value: string }) {
 function NodeSummaryRow({ node, expanded, onToggle, format }: NodeSummaryRowProps) {
   const { t } = useI18n();
   return (
-    <tr className="border-b border-[#f2e8e2] text-sm transition-colors hover:bg-[#fffaf6]">
+    <tr className="border-b border-[#dbe4f0] text-sm transition-colors hover:bg-[#f8fbff]">
       <td className="px-6 py-5">
         <div>
           <p className="font-semibold text-[#1d1713]">{node.name}</p>
@@ -603,8 +603,8 @@ function NodeSummaryRow({ node, expanded, onToggle, format }: NodeSummaryRowProp
           onClick={onToggle}
           className={`rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-[0.14em] transition-all ${
             expanded
-              ? 'border-[#ef6b4a] bg-[#ef6b4a] text-white'
-              : 'border-[#ead7cd] bg-white text-[#a05f46] hover:border-[#ef6b4a] hover:text-[#ef6b4a]'
+              ? 'border-[#2563eb] bg-[#2563eb] text-white'
+              : 'border-[#bfdbfe] bg-white text-[#2563eb] hover:border-[#2563eb] hover:text-[#1d4ed8]'
           }`}
         >
           {expanded ? t('admin.collapse') : t('admin.viewDetails')}

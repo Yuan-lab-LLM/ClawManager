@@ -240,7 +240,7 @@ const UserManagementPage: React.FC = () => {
               </button>
             </div>
             {importResult.errors.length > 0 && (
-              <div className="mt-3 max-h-48 overflow-y-auto rounded-lg border border-[#eadfd8] bg-white p-3">
+              <div className="mt-3 max-h-48 overflow-y-auto rounded-lg border border-[#dbe4f0] bg-white p-3">
                 <ul className="space-y-2">
                   {importResult.errors.map((item, index) => (
                     <li key={`${item.line}-${index}`} className="text-sm text-[#5f5957]">
@@ -254,11 +254,11 @@ const UserManagementPage: React.FC = () => {
               </div>
             )}
             {importResult.created_users.length > 0 && (
-              <div className="mt-3 max-h-56 overflow-y-auto rounded-lg border border-[#eadfd8] bg-white p-3">
+              <div className="mt-3 max-h-56 overflow-y-auto rounded-lg border border-[#dbe4f0] bg-white p-3">
                 <div className="mb-2 text-sm font-medium text-[#171212]">{t('userManagementPage.createdAccounts')}</div>
                 <ul className="space-y-2">
                   {importResult.created_users.map((item, index) => (
-                    <li key={`${item.username}-${index}`} className="rounded-md bg-[#fff8f5] px-3 py-2 text-sm text-[#5f5957]">
+                    <li key={`${item.username}-${index}`} className="rounded-md bg-[#f8fbff] px-3 py-2 text-sm text-[#5f5957]">
                       <div><span className="font-medium text-[#171212]">{item.username}</span> · {item.role}</div>
                       <div>{t('auth.email')}: {item.email}</div>
                       <div>
@@ -364,7 +364,7 @@ const UserManagementPage: React.FC = () => {
               {t('userManagementPage.importUsers')}
             </h3>
             <div className="space-y-4">
-              <div className="rounded-lg border border-[#eadfd8] bg-[#fff8f5] p-3 text-sm text-[#5f5957]">
+              <div className="rounded-lg border border-[#dbe4f0] bg-[#f8fbff] p-3 text-sm text-[#5f5957]">
                 <div className="font-medium text-[#171212]">{t('userManagementPage.supportedFormat')}</div>
                 <div className="mt-1">{t('userManagementPage.csvHeaders')}</div>
                 <code className="mt-2 block rounded bg-white px-2 py-1 text-xs">Username,Email,Role,Password (optional),Max Instances,Max CPU Cores,Max Memory (GB),Max Storage (GB),Max GPU Count (optional)</code>
@@ -374,7 +374,7 @@ const UserManagementPage: React.FC = () => {
                 <button
                   type="button"
                   onClick={handleDownloadTemplate}
-                  className="mt-3 inline-flex items-center rounded-md border border-[#eadfd8] bg-white px-3 py-2 text-sm font-medium text-[#5f5957] hover:bg-[#fff2ea]"
+                  className="mt-3 inline-flex items-center rounded-md border border-[#dbe4f0] bg-white px-3 py-2 text-sm font-medium text-[#5f5957] hover:bg-[#eff6ff]"
                 >
                   {t('userManagementPage.downloadTemplate')}
                 </button>
@@ -394,7 +394,7 @@ const UserManagementPage: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => importInputRef.current?.click()}
-                    className="rounded-md bg-[#ef4444] px-4 py-2 text-sm font-medium text-white hover:bg-[#dc2626]"
+                    className="rounded-md bg-[#2563eb] px-4 py-2 text-sm font-medium text-white hover:bg-[#1d4ed8]"
                   >
                     {t('userManagementPage.chooseFile')}
                   </button>
@@ -417,7 +417,7 @@ const UserManagementPage: React.FC = () => {
               <button
                 onClick={handleImportUsers}
                 disabled={!importFile || importing}
-                className="rounded-md bg-[#ef4444] px-4 py-2 text-white hover:bg-[#dc2626] disabled:cursor-not-allowed disabled:opacity-50"
+                className="rounded-md bg-[#2563eb] px-4 py-2 text-white hover:bg-[#1d4ed8] disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {importing ? t('userManagementPage.importing') : t('userManagementPage.startImport')}
               </button>
@@ -473,7 +473,7 @@ const UserManagementPage: React.FC = () => {
                   <option value="admin">{t('common.admin')}</option>
                 </select>
               </div>
-              <div className="rounded-md border border-[#eadfd8] bg-[#fff8f5] px-3 py-2 text-sm text-[#5f5957]">
+              <div className="rounded-md border border-[#dbe4f0] bg-[#f8fbff] px-3 py-2 text-sm text-[#5f5957]">
                 {t('userManagementPage.initialPassword')}: <span className="font-medium">{newUser.role === 'admin' ? 'admin123' : 'user123'}</span>
               </div>
             </div>

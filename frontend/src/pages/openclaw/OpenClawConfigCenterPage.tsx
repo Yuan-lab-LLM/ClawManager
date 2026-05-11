@@ -529,7 +529,7 @@ const EditorModal: React.FC<EditorModalProps> = ({
       }}
     >
       <div
-        className={`w-full rounded-[30px] border border-[#eadfd8] bg-white shadow-[0_36px_100px_-48px_rgba(72,44,24,0.56)] ${panelClassName}`}
+        className={`w-full rounded-[30px] border border-[#dbe4f0] bg-white shadow-[0_36px_100px_-48px_rgba(30,64,175,0.56)] ${panelClassName}`}
         onClick={(event) => event.stopPropagation()}
       >
         <div className="flex items-start justify-between gap-4 border-b border-[#f1e3db] px-6 py-5">
@@ -541,7 +541,7 @@ const EditorModal: React.FC<EditorModalProps> = ({
             type="button"
             onClick={onClose}
             disabled={busy}
-            className="rounded-full border border-[#eadfd8] bg-[#f8f2ef] px-3 py-2 text-sm font-medium text-[#6e6460] hover:bg-[#f1e7e1] disabled:cursor-not-allowed disabled:opacity-50"
+            className="rounded-full border border-[#dbe4f0] bg-[#f8f2ef] px-3 py-2 text-sm font-medium text-[#6e6460] hover:bg-[#f1e7e1] disabled:cursor-not-allowed disabled:opacity-50"
           >
             {t('common.close')}
           </button>
@@ -1105,7 +1105,7 @@ const OpenClawConfigCenterPage: React.FC = () => {
         {tab === 'resources' && (
           <div className="grid grid-cols-1 gap-6 xl:grid-cols-[220px_minmax(0,1fr)]">
             <div className="app-panel p-4">
-              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[#b46c50]">{t('openClawResourcesPage.resourceTypesTitle')}</div>
+              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[#2563eb]">{t('openClawResourcesPage.resourceTypesTitle')}</div>
               <div className="mt-4 space-y-2">
                 {resourceTypeOptions.map((item) => (
                   <button
@@ -1113,7 +1113,7 @@ const OpenClawConfigCenterPage: React.FC = () => {
                     type="button"
                     onClick={() => setResourceType(item.value)}
                     className={`w-full rounded-2xl px-4 py-3 text-left text-sm font-medium transition ${
-                      resourceType === item.value ? 'bg-[#fff1eb] text-red-600' : 'bg-gray-50 text-gray-700 hover:bg-gray-100'
+                      resourceType === item.value ? 'bg-[#dbeafe] text-blue-700' : 'bg-gray-50 text-gray-700 hover:bg-gray-100'
                     }`}
                   >
                     {item.label}
@@ -1308,8 +1308,8 @@ const OpenClawConfigCenterPage: React.FC = () => {
               </div>
             ) : (
               <div className="app-panel flex min-h-[420px] items-center justify-center p-6 sm:p-8">
-                <div className="max-w-xl rounded-[28px] border border-dashed border-[#eadfd8] bg-[#fffaf7] px-8 py-10 text-center shadow-[0_26px_80px_-56px_rgba(72,44,24,0.45)]">
-                  <div className="text-xs font-semibold uppercase tracking-[0.22em] text-[#b46c50]">{t('common.comingSoon')}</div>
+                <div className="max-w-xl rounded-[28px] border border-dashed border-[#dbe4f0] bg-[#f8fbff] px-8 py-10 text-center shadow-[0_26px_80px_-56px_rgba(30,64,175,0.45)]">
+                  <div className="text-xs font-semibold uppercase tracking-[0.22em] text-[#2563eb]">{t('common.comingSoon')}</div>
                   <h3 className="mt-4 text-2xl font-semibold tracking-[-0.03em] text-[#171212]">
                     {t('openClawResourcesPage.notConfigurableYet', { type: selectedResourceTypeOption?.label || t('openClawResourcesPage.thisResourceType') })}
                   </h3>
@@ -1479,7 +1479,7 @@ const OpenClawConfigCenterPage: React.FC = () => {
           {resourceEditorIsConfigurable ? (
             <>
               {resourceForm.resource_type === 'channel' && (
-                <div className="rounded-2xl border border-[#f4d5c6] bg-[#fff7f3] p-4">
+                <div className="rounded-2xl border border-[#f4d5c6] bg-[#f8fbff] p-4">
                   <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
                     <div className="flex-1">
                       <label className="block text-sm font-medium text-gray-700">{t('openClawResourcesPage.channelTemplate')}</label>
@@ -1530,7 +1530,7 @@ const OpenClawConfigCenterPage: React.FC = () => {
               )}
 
               {supportedChannelEditor ? (
-                <div className="rounded-2xl border border-[#eadfd8] bg-[#fffaf7] p-4">
+                <div className="rounded-2xl border border-[#dbe4f0] bg-[#f8fbff] p-4">
                   <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                     <div>
                       <div className="text-sm font-medium text-gray-700">{t(supportedChannelEditor.titleKey)}</div>
@@ -1538,7 +1538,7 @@ const OpenClawConfigCenterPage: React.FC = () => {
                         {t(supportedChannelEditor.descriptionKey)}
                       </p>
                     </div>
-                    <div className="inline-flex rounded-full border border-[#eadfd8] bg-white p-1">
+                    <div className="inline-flex rounded-full border border-[#dbe4f0] bg-white p-1">
                       {(['form', 'json'] as const).map((mode) => (
                         <button
                           key={mode}
@@ -1614,8 +1614,8 @@ const OpenClawConfigCenterPage: React.FC = () => {
               </div>
             </>
           ) : (
-            <div className="rounded-[28px] border border-dashed border-[#eadfd8] bg-[#fffaf7] px-8 py-10 text-center shadow-[0_26px_80px_-56px_rgba(72,44,24,0.45)]">
-              <div className="text-xs font-semibold uppercase tracking-[0.22em] text-[#b46c50]">{t('common.comingSoon')}</div>
+            <div className="rounded-[28px] border border-dashed border-[#dbe4f0] bg-[#f8fbff] px-8 py-10 text-center shadow-[0_26px_80px_-56px_rgba(30,64,175,0.45)]">
+              <div className="text-xs font-semibold uppercase tracking-[0.22em] text-[#2563eb]">{t('common.comingSoon')}</div>
               <h4 className="mt-4 text-2xl font-semibold tracking-[-0.03em] text-[#171212]">
                 {t('openClawResourcesPage.notConfigurableYet', { type: selectedEditorTypeOption?.label || t('openClawResourcesPage.thisResourceType') })}
               </h4>
@@ -1660,7 +1660,7 @@ const OpenClawConfigCenterPage: React.FC = () => {
             <div className="mt-3 space-y-5">
               {groupedResources.map((group) => (
                 <div key={group.value}>
-                  <div className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-[#b46c50]">{group.label}</div>
+                  <div className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-[#2563eb]">{group.label}</div>
                   <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
                     {group.items.map((item) => {
                       const checked = bundleForm.itemIds.includes(item.id);

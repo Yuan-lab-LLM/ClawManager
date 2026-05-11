@@ -152,13 +152,13 @@ const CostsPage: React.FC = () => {
                     {overview.recent_records.map((record) => (
                       <tr
                         key={record.id}
-                        className="cursor-pointer transition-colors hover:bg-[#fffaf7]"
+                        className="cursor-pointer transition-colors hover:bg-[#f8fbff]"
                         onClick={() => navigate(`/admin/ai-audit?trace=${encodeURIComponent(record.trace_id)}`)}
                       >
                         <td className="px-4 py-4 text-sm text-[#171212]">
                           <Link
                             to={`/admin/ai-audit?trace=${encodeURIComponent(record.trace_id)}`}
-                            className="font-medium text-[#b46c50] hover:text-[#171212] hover:underline"
+                            className="font-medium text-[#2563eb] hover:text-[#171212] hover:underline"
                             onClick={(event: React.MouseEvent) => event.stopPropagation()}
                           >
                             {record.trace_id}
@@ -184,7 +184,7 @@ const CostsPage: React.FC = () => {
                           <div>{new Date(record.recorded_at).toLocaleString()}</div>
                           <Link
                             to={`/admin/ai-audit?trace=${encodeURIComponent(record.trace_id)}`}
-                            className="mt-1 inline-flex text-xs font-medium text-[#b46c50] hover:text-[#171212] hover:underline"
+                            className="mt-1 inline-flex text-xs font-medium text-[#2563eb] hover:text-[#171212] hover:underline"
                             onClick={(event: React.MouseEvent) => event.stopPropagation()}
                           >
                             {t('costsPage.openInAudit')}
@@ -267,7 +267,7 @@ const AggregateTableCard: React.FC<{
         </thead>
         <tbody className="divide-y divide-[#f7efe9]">
           {safeRows.map((row) => (
-            <tr key={`${row.label}-${row.meta || ''}`} className="hover:bg-[#fffaf7]">
+            <tr key={`${row.label}-${row.meta || ''}`} className="hover:bg-[#f8fbff]">
               <td className="px-4 py-4 text-sm text-[#171212]">
                 <div className="font-medium">{row.label}</div>
                 {row.meta && <div className="mt-1 text-xs text-[#8f8681]">{row.meta}</div>}
@@ -290,7 +290,7 @@ const MetricCard: React.FC<{
   note: string;
   highlight?: boolean;
 }> = ({ label, value, note, highlight }) => (
-  <div className={`rounded-2xl border px-5 py-5 ${highlight ? 'border-[#f0c9bc] bg-[linear-gradient(135deg,#fff4ee_0%,#fffaf8_100%)]' : 'border-[#eadfd8] bg-white'}`}>
+  <div className={`rounded-2xl border px-5 py-5 ${highlight ? 'border-[#bfdbfe] bg-[linear-gradient(135deg,#eff6ff_0%,#fffaf8_100%)]' : 'border-[#dbe4f0] bg-white'}`}>
     <div className="text-xs font-semibold uppercase tracking-[0.14em] text-[#8f8681]">{label}</div>
     <div className="mt-4 text-3xl font-semibold tracking-[-0.05em] text-[#171212]">{value}</div>
     <div className="mt-2 text-sm text-[#8f8681]">{note}</div>
@@ -331,12 +331,12 @@ const TrendCard: React.FC<{
           <h3 className="mt-2 text-xl font-semibold text-[#171212]">{t('costsPage.lastSevenDays')}</h3>
           <p className="mt-1 text-sm text-[#8f8681]">{t('costsPage.dailyTrendSubtitle')}</p>
         </div>
-        <div className="rounded-full border border-[#eadfd8] bg-[#fffaf7] px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-[#b46c50]">
+        <div className="rounded-full border border-[#dbe4f0] bg-[#f8fbff] px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-[#2563eb]">
           {t('costsPage.sevenDayView')}
         </div>
       </div>
 
-      <div className="mt-5 rounded-2xl border border-[#f1e7e1] bg-[#fffaf7] p-4">
+      <div className="mt-5 rounded-2xl border border-[#f1e7e1] bg-[#f8fbff] p-4">
         {safePoints.length === 0 ? (
           <div className="text-sm text-[#8f8681]">{t('costsPage.noTrendData')}</div>
         ) : (
@@ -344,15 +344,15 @@ const TrendCard: React.FC<{
             <svg viewBox={`0 0 ${chartWidth} ${chartHeight}`} className="h-64 w-full">
               <defs>
                 <linearGradient id="dailySpendFill" x1="0" x2="0" y1="0" y2="1">
-                  <stop offset="0%" stopColor="#ef6b4a" stopOpacity="0.30" />
-                  <stop offset="100%" stopColor="#ef6b4a" stopOpacity="0.03" />
+                  <stop offset="0%" stopColor="#2563eb" stopOpacity="0.30" />
+                  <stop offset="100%" stopColor="#2563eb" stopOpacity="0.03" />
                 </linearGradient>
               </defs>
               <path d={areaPath} fill="url(#dailySpendFill)" />
-              <path d={linePath} fill="none" stroke="#ef6b4a" strokeWidth="3.2" strokeLinecap="round" strokeLinejoin="round" />
+              <path d={linePath} fill="none" stroke="#2563eb" strokeWidth="3.2" strokeLinecap="round" strokeLinejoin="round" />
               {coordinates.map(({ x, y, point }) => (
                 <g key={point.day}>
-                  <circle cx={x} cy={y} r="4.5" fill="#fff" stroke="#ef6b4a" strokeWidth="2" />
+                  <circle cx={x} cy={y} r="4.5" fill="#fff" stroke="#2563eb" strokeWidth="2" />
                 </g>
               ))}
             </svg>

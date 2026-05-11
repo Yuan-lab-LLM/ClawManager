@@ -242,7 +242,7 @@ const InstanceManagementPage: React.FC = () => {
                 </thead>
                 <tbody className="divide-y divide-[#f7efe9]">
                   {filteredInstances.map((instance) => (
-                    <tr key={instance.id} className="hover:bg-[#fffaf7]">
+                    <tr key={instance.id} className="hover:bg-[#f8fbff]">
                       <td className="px-5 py-4 align-top">
                         <div className="font-medium text-[#171212]">{instance.name}</div>
                         <div className="mt-1 text-xs text-[#8f8681]">
@@ -297,7 +297,7 @@ const InstanceManagementPage: React.FC = () => {
                             <button
                               onClick={() => handleAction(instance, 'restart')}
                               disabled={actionLoading === `restart-${instance.id}`}
-                              className="rounded-md bg-[#fff2ea] px-3 py-1.5 text-xs font-medium text-[#ef6b4a] hover:bg-[#fde5db] disabled:opacity-50"
+                              className="rounded-md bg-[#eff6ff] px-3 py-1.5 text-xs font-medium text-[#2563eb] hover:bg-[#dbeafe] disabled:opacity-50"
                             >
                               {t('common.restart')}
                             </button>

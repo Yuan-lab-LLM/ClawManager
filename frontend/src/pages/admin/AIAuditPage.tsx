@@ -100,13 +100,13 @@ function flowKindTone(kind: string) {
     case 'user_message':
       return 'bg-[#eef7ff] text-[#356a9f] border-[#d9e8f8]';
     case 'llm_call':
-      return 'bg-[#fff3ec] text-[#b46c50] border-[#f3d7ca]';
+      return 'bg-[#eff6ff] text-[#2563eb] border-[#f3d7ca]';
     case 'tool_call':
       return 'bg-[#f6f0ff] text-[#6f4ea5] border-[#e3d7f4]';
     case 'tool_output':
       return 'bg-[#eefbf2] text-[#2f7a45] border-[#d2ecd9]';
     default:
-      return 'bg-[#f5f1ec] text-[#6d645f] border-[#eadfd8]';
+      return 'bg-[#f5f1ec] text-[#6d645f] border-[#dbe4f0]';
   }
 }
 
@@ -758,11 +758,11 @@ const AIAuditPage: React.FC = () => {
 
     return (
       <div className="mt-6 space-y-6 transition-all duration-300 ease-out">
-        <div className="overflow-hidden rounded-[28px] border border-[#eadfd8] bg-[linear-gradient(135deg,#fff7f1_0%,#fffdfb_55%,#fffaf5_100%)] shadow-[0_34px_90px_-70px_rgba(96,58,24,0.55)]">
+        <div className="overflow-hidden rounded-[28px] border border-[#dbe4f0] bg-[linear-gradient(135deg,#fff7f1_0%,#fffdfb_55%,#fffaf5_100%)] shadow-[0_34px_90px_-70px_rgba(96,58,24,0.55)]">
           <div className="border-b border-[#efe3db] px-5 py-5 sm:px-6">
             <div className="flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
               <div className="min-w-0 flex-1">
-                <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#b46c50]">{t('aiAuditPage.trace')}</div>
+                <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#2563eb]">{t('aiAuditPage.trace')}</div>
                 <div className="mt-3 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                   <div className="min-w-0">
                     <div className="break-all text-[1.55rem] font-semibold tracking-[-0.04em] text-[#171212]">
@@ -787,10 +787,10 @@ const AIAuditPage: React.FC = () => {
                 </div>
               </div>
               <div className="grid gap-3 sm:grid-cols-2 xl:w-[380px]">
-                <div className="rounded-2xl border border-[#eadfd8] bg-white/88 p-4">
+                <div className="rounded-2xl border border-[#dbe4f0] bg-white/88 p-4">
                   <TimestampStack label={t('common.createdAt')} value={traceSummary.startedAt} locale={locale} />
                 </div>
-                <div className="rounded-2xl border border-[#eadfd8] bg-white/88 p-4">
+                <div className="rounded-2xl border border-[#dbe4f0] bg-white/88 p-4">
                   <TimestampStack label={t('common.lastUpdated')} value={traceSummary.latestAt} locale={locale} />
                 </div>
               </div>
@@ -868,8 +868,8 @@ const AIAuditPage: React.FC = () => {
                             onClick={() => jumpToFlowNode(node.id)}
                             className={`w-full rounded-[18px] border px-2.5 py-2 text-left transition ${
                               isActive
-                                ? 'border-[#ef6b4a] bg-[#fff3ec] shadow-[0_18px_42px_-32px_rgba(180,108,80,0.55)]'
-                                : 'border-transparent bg-white hover:border-[#eadfd8] hover:bg-[#fffaf7]'
+                                ? 'border-[#2563eb] bg-[#eff6ff] shadow-[0_18px_42px_-32px_rgba(37,99,235,0.32)]'
+                                : 'border-transparent bg-white hover:border-[#dbe4f0] hover:bg-[#f8fbff]'
                             }`}
                           >
                             <div className="flex items-start gap-2.5">
@@ -911,11 +911,11 @@ const AIAuditPage: React.FC = () => {
                     className="relative scroll-mt-28 pl-8"
                   >
                     {index < selectedTrace.flow_nodes.length - 1 && (
-                      <div className="absolute left-[13px] top-8 h-[calc(100%-0.75rem)] w-px bg-[#eadfd8]" />
+                      <div className="absolute left-[13px] top-8 h-[calc(100%-0.75rem)] w-px bg-[#dbe4f0]" />
                     )}
                     <div className={`absolute left-0 top-4 h-7 w-7 rounded-full border shadow-sm ${flowKindTone(node.kind)}`} />
-                    <div className={`rounded-[24px] border bg-[#fffaf7] p-4 shadow-[0_24px_60px_-52px_rgba(88,54,24,0.45)] transition ${
-                      node.id === activeFlowNodeId ? 'border-[#ef6b4a]' : 'border-[#efe3db]'
+                    <div className={`rounded-[24px] border bg-[#f8fbff] p-4 shadow-[0_24px_60px_-52px_rgba(88,54,24,0.45)] transition ${
+                      node.id === activeFlowNodeId ? 'border-[#2563eb]' : 'border-[#efe3db]'
                     }`}>
                       <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
                         <div className="min-w-0 flex-1">
@@ -955,7 +955,7 @@ const AIAuditPage: React.FC = () => {
                       {(node.input_payload || node.output_payload) && (
                         <div className="mt-4 grid gap-4 xl:grid-cols-2">
                           {node.input_payload && (
-                            <div className="rounded-2xl border border-[#eadfd8] bg-white p-4">
+                            <div className="rounded-2xl border border-[#dbe4f0] bg-white p-4">
                               <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#8f8681]">
                                 {t('aiAuditPage.nodeInput')}
                               </div>
@@ -965,7 +965,7 @@ const AIAuditPage: React.FC = () => {
                             </div>
                           )}
                           {node.output_payload && (
-                            <div className="rounded-2xl border border-[#eadfd8] bg-white p-4">
+                            <div className="rounded-2xl border border-[#dbe4f0] bg-white p-4">
                               <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#8f8681]">
                                 {t('aiAuditPage.nodeOutput')}
                               </div>
@@ -993,7 +993,7 @@ const AIAuditPage: React.FC = () => {
           ) : (
             <div className="space-y-4">
               {selectedTrace.cost_records.map((record) => (
-                <div key={record.id} className="rounded-[24px] border border-[#efe3db] bg-[#fffaf7] p-4 shadow-[0_24px_60px_-52px_rgba(88,54,24,0.45)]">
+                <div key={record.id} className="rounded-[24px] border border-[#efe3db] bg-[#f8fbff] p-4 shadow-[0_24px_60px_-52px_rgba(88,54,24,0.45)]">
                   <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
@@ -1050,7 +1050,7 @@ const AIAuditPage: React.FC = () => {
           ) : (
             <div className="space-y-3">
               {selectedTrace.risk_hits.map((hit) => (
-                <div key={hit.id} className="rounded-2xl border border-[#f1e7e1] bg-[#fffaf7] p-4">
+                <div key={hit.id} className="rounded-2xl border border-[#f1e7e1] bg-[#f8fbff] p-4">
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
@@ -1102,7 +1102,7 @@ const AIAuditPage: React.FC = () => {
             </div>
           )}
 
-          <div className={`mt-6 rounded-2xl border border-[#eadfd8] bg-white ${isSplitView ? 'overflow-visible' : 'overflow-hidden'}`}>
+          <div className={`mt-6 rounded-2xl border border-[#dbe4f0] bg-white ${isSplitView ? 'overflow-visible' : 'overflow-hidden'}`}>
             <div className="border-b border-[#f1e7e1] px-4 py-4 sm:px-5">
               <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
                 <div>
@@ -1173,7 +1173,7 @@ const AIAuditPage: React.FC = () => {
                           type="button"
                           onClick={() => void loadTraceDetail(item.trace_id)}
                           className={`flex w-full flex-col gap-2 px-5 py-4 text-left transition ${
-                            isActive ? 'bg-[#fff3ec]' : 'hover:bg-[#fffaf7]'
+                            isActive ? 'bg-[#eff6ff]' : 'hover:bg-[#f8fbff]'
                           }`}
                         >
                           <div className="truncate text-sm font-medium text-[#171212]">{item.trace_id}</div>
@@ -1213,7 +1213,7 @@ const AIAuditPage: React.FC = () => {
                   {selectedTrace ? (
                     renderTraceDetailContent()
                   ) : (
-                    <div className="mt-6 rounded-2xl border border-dashed border-[#eadfd8] bg-white px-5 py-8 text-sm text-[#8f8681]">
+                    <div className="mt-6 rounded-2xl border border-dashed border-[#dbe4f0] bg-white px-5 py-8 text-sm text-[#8f8681]">
                       {t('aiAuditPage.detailLoading')}
                     </div>
                   )}
@@ -1243,7 +1243,7 @@ const AIAuditPage: React.FC = () => {
                           return (
                             <tr
                               key={`${item.trace_id}-${item.request_id}`}
-                              className={`${selectedTraceId === item.trace_id ? 'bg-[#fff3ec]' : 'hover:bg-[#fffaf7]'}`}
+                              className={`${selectedTraceId === item.trace_id ? 'bg-[#eff6ff]' : 'hover:bg-[#f8fbff]'}`}
                             >
                               <td className="px-4 py-4 align-top">
                                 <div className="flex items-center gap-2">
@@ -1251,7 +1251,7 @@ const AIAuditPage: React.FC = () => {
                                   <button
                                     type="button"
                                     onClick={() => void copyTrace(item.trace_id)}
-                                    className="rounded-full border border-[#eadfd8] bg-white px-2 py-1 text-[11px] text-[#8f8681] hover:text-[#171212]"
+                                    className="rounded-full border border-[#dbe4f0] bg-white px-2 py-1 text-[11px] text-[#8f8681] hover:text-[#171212]"
                                   >
                                     {copyState === item.trace_id ? t('aiAuditPage.copied') : t('aiAuditPage.copy')}
                                   </button>
@@ -1345,14 +1345,14 @@ const TraceSection: React.FC<{
   children: React.ReactNode;
 }> = ({ title, subtitle, badge, stickyFriendly = false, children }) => {
   return (
-    <section className={`${stickyFriendly ? 'overflow-visible' : 'overflow-hidden'} rounded-[28px] border border-[#eadfd8] bg-white shadow-[0_26px_72px_-60px_rgba(85,52,26,0.45)]`}>
+    <section className={`${stickyFriendly ? 'overflow-visible' : 'overflow-hidden'} rounded-[28px] border border-[#dbe4f0] bg-white shadow-[0_26px_72px_-60px_rgba(85,52,26,0.45)]`}>
       <div className="flex flex-col gap-3 border-b border-[#f1e7e1] px-5 py-5 sm:flex-row sm:items-start sm:justify-between sm:px-6">
         <div>
           <h3 className="text-lg font-semibold text-[#171212]">{title}</h3>
           {subtitle && <p className="mt-1 text-sm text-[#8f8681]">{subtitle}</p>}
         </div>
         {badge && (
-          <span className="inline-flex items-center rounded-full border border-[#eadfd8] bg-[#fffaf7] px-3 py-1 text-xs font-semibold text-[#7a6d66]">
+          <span className="inline-flex items-center rounded-full border border-[#dbe4f0] bg-[#f8fbff] px-3 py-1 text-xs font-semibold text-[#7a6d66]">
             {badge}
           </span>
         )}
@@ -1369,7 +1369,7 @@ const MetaPill: React.FC<{
   const toneClass = tone === 'info'
     ? 'border-[#d9e8f8] bg-[#eef7ff] text-[#356a9f]'
     : tone === 'soft'
-      ? 'border-[#eadfd8] bg-white text-[#7a6d66]'
+      ? 'border-[#dbe4f0] bg-white text-[#7a6d66]'
       : 'border-[#f4ddbf] bg-[#fff7e9] text-[#9f5e16]';
 
   return (
@@ -1390,12 +1390,12 @@ const DetailMetricCard: React.FC<{
     : tone === 'slate'
       ? 'border-[#d9e8f8] bg-[#f5fafe]'
       : tone === 'sunset'
-        ? 'border-[#f0d8cc] bg-[#fff3ec]'
+        ? 'border-[#f0d8cc] bg-[#eff6ff]'
         : tone === 'gold'
           ? 'border-[#f1e0b6] bg-[#fff9e9]'
           : tone === 'emerald'
             ? 'border-[#d3ead8] bg-[#f3fff6]'
-            : 'border-[#eadfd8] bg-white';
+            : 'border-[#dbe4f0] bg-white';
 
   return (
     <div className={`rounded-2xl border px-4 py-4 ${toneClass}`}>
@@ -1416,7 +1416,7 @@ const SummaryCard: React.FC<{
       ? 'border-amber-200 bg-amber-50'
       : tone === 'red'
         ? 'border-red-200 bg-red-50'
-        : 'border-[#eadfd8] bg-white';
+        : 'border-[#dbe4f0] bg-white';
 
   return (
     <div className={`rounded-2xl border px-4 py-4 ${toneClass}`}>

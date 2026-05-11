@@ -8,7 +8,7 @@ const gatewaySections = [
     titleKey: 'nav.models',
     descriptionKey: 'aiGatewayPage.modelsDescription',
     path: '/admin/models',
-    accent: 'from-[#fff4ee] to-[#fffaf8]',
+    accent: 'from-[#eff6ff] to-[#fffaf8]',
     icon: 'M12 2l8 4.5v5c0 5.8-3.6 10.8-8 12.5-4.4-1.7-8-6.7-8-12.5v-5L12 2zm0 6.5v3m0 4h.01',
   },
   {
@@ -45,15 +45,15 @@ const AIGatewayPage: React.FC = () => {
             <Link
               key={section.path}
               to={section.path}
-              className={`rounded-[28px] border border-[#ead8cf] bg-gradient-to-br ${section.accent} p-6 shadow-[0_24px_60px_-42px_rgba(72,44,24,0.42)] transition-transform duration-200 hover:-translate-y-0.5 hover:shadow-[0_28px_70px_-40px_rgba(72,44,24,0.48)]`}
+              className={`rounded-[28px] border border-[#dbe4f0] bg-gradient-to-br ${section.accent} p-6 shadow-[0_24px_60px_-42px_rgba(30,64,175,0.42)] transition-transform duration-200 hover:-translate-y-0.5 hover:shadow-[0_28px_70px_-40px_rgba(30,64,175,0.48)]`}
             >
               <div className="flex items-start justify-between gap-4">
-                <div className="rounded-2xl border border-[#ead8cf] bg-white/80 p-3 text-[#b46c50] shadow-sm">
+                <div className="rounded-2xl border border-[#dbe4f0] bg-white/80 p-3 text-[#2563eb] shadow-sm">
                   <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d={section.icon} />
                   </svg>
                 </div>
-                <span className="rounded-full border border-[#ead8cf] bg-white/85 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-[#b46c50]">
+                <span className="rounded-full border border-[#dbe4f0] bg-white/85 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-[#2563eb]">
                   {t('common.open')}
                 </span>
               </div>

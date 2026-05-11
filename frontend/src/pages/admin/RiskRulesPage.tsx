@@ -33,22 +33,22 @@ const RULE_VISUALS: Record<string, RuleVisualMeta> = {
     category: 'security',
     icon: 'M15 7a3 3 0 10-5.196 2.018L3 16v5h5l6.982-6.804A3 3 0 0015 7z',
     panelClass: 'border-[#f5dfcb] bg-[rgba(255,249,244,0.94)]',
-    badgeClass: 'border-[#f5d5c2] bg-[#fff5ef] text-[#b46c50]',
-    iconShellClass: 'border-[#f5d5c2] bg-[#fff5ef] text-[#b46c50]',
+    badgeClass: 'border-[#bfdbfe] bg-[#eff6ff] text-[#2563eb]',
+    iconShellClass: 'border-[#bfdbfe] bg-[#eff6ff] text-[#2563eb]',
   },
   api_key_like: {
     category: 'security',
     icon: 'M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2h-1V9a5 5 0 00-10 0v2H6a2 2 0 00-2 2v6a2 2 0 002 2z',
     panelClass: 'border-[#f5dfcb] bg-[rgba(255,249,244,0.94)]',
-    badgeClass: 'border-[#f5d5c2] bg-[#fff5ef] text-[#b46c50]',
-    iconShellClass: 'border-[#f5d5c2] bg-[#fff5ef] text-[#b46c50]',
+    badgeClass: 'border-[#bfdbfe] bg-[#eff6ff] text-[#2563eb]',
+    iconShellClass: 'border-[#bfdbfe] bg-[#eff6ff] text-[#2563eb]',
   },
   credential_assignment: {
     category: 'security',
     icon: 'M4 7h16M4 12h8m-8 5h16',
     panelClass: 'border-[#f5dfcb] bg-[rgba(255,249,244,0.94)]',
-    badgeClass: 'border-[#f5d5c2] bg-[#fff5ef] text-[#b46c50]',
-    iconShellClass: 'border-[#f5d5c2] bg-[#fff5ef] text-[#b46c50]',
+    badgeClass: 'border-[#bfdbfe] bg-[#eff6ff] text-[#2563eb]',
+    iconShellClass: 'border-[#bfdbfe] bg-[#eff6ff] text-[#2563eb]',
   },
   private_ip: {
     category: 'company',
@@ -180,36 +180,36 @@ const RULE_VISUALS: Record<string, RuleVisualMeta> = {
     category: 'security',
     icon: 'M12 2l7 4v5c0 5-3.5 9.5-7 11-3.5-1.5-7-6-7-11V6l7-4zm0 7v3m0 4h.01',
     panelClass: 'border-[#f5dfcb] bg-[rgba(255,249,244,0.94)]',
-    badgeClass: 'border-[#f5d5c2] bg-[#fff5ef] text-[#b46c50]',
-    iconShellClass: 'border-[#f5d5c2] bg-[#fff5ef] text-[#b46c50]',
+    badgeClass: 'border-[#bfdbfe] bg-[#eff6ff] text-[#2563eb]',
+    iconShellClass: 'border-[#bfdbfe] bg-[#eff6ff] text-[#2563eb]',
   },
   cookie_session_like: {
     category: 'security',
     icon: 'M7 3a2 2 0 104 0 2 2 0 104 0 2 2 0 104 0v4a7 7 0 11-12 7V3z',
     panelClass: 'border-[#f5dfcb] bg-[rgba(255,249,244,0.94)]',
-    badgeClass: 'border-[#f5d5c2] bg-[#fff5ef] text-[#b46c50]',
-    iconShellClass: 'border-[#f5d5c2] bg-[#fff5ef] text-[#b46c50]',
+    badgeClass: 'border-[#bfdbfe] bg-[#eff6ff] text-[#2563eb]',
+    iconShellClass: 'border-[#bfdbfe] bg-[#eff6ff] text-[#2563eb]',
   },
   db_connection_string: {
     category: 'security',
     icon: 'M12 4c4.418 0 8 1.12 8 2.5S16.418 9 12 9 4 7.88 4 6.5 7.582 4 12 4zm8 6v3.5C20 14.88 16.418 16 12 16s-8-1.12-8-2.5V10',
     panelClass: 'border-[#f5dfcb] bg-[rgba(255,249,244,0.94)]',
-    badgeClass: 'border-[#f5d5c2] bg-[#fff5ef] text-[#b46c50]',
-    iconShellClass: 'border-[#f5d5c2] bg-[#fff5ef] text-[#b46c50]',
+    badgeClass: 'border-[#bfdbfe] bg-[#eff6ff] text-[#2563eb]',
+    iconShellClass: 'border-[#bfdbfe] bg-[#eff6ff] text-[#2563eb]',
   },
   kubeconfig_content: {
     category: 'security',
     icon: 'M12 3l7 4v10l-7 4-7-4V7l7-4zm0 5l3 1.5v3L12 14l-3-1.5v-3L12 8z',
     panelClass: 'border-[#f5dfcb] bg-[rgba(255,249,244,0.94)]',
-    badgeClass: 'border-[#f5d5c2] bg-[#fff5ef] text-[#b46c50]',
-    iconShellClass: 'border-[#f5d5c2] bg-[#fff5ef] text-[#b46c50]',
+    badgeClass: 'border-[#bfdbfe] bg-[#eff6ff] text-[#2563eb]',
+    iconShellClass: 'border-[#bfdbfe] bg-[#eff6ff] text-[#2563eb]',
   },
   env_file_secret: {
     category: 'security',
     icon: 'M8 4h8l4 4v12H4V4h4zm1 5h6m-6 4h6m-6 4h4',
     panelClass: 'border-[#f5dfcb] bg-[rgba(255,249,244,0.94)]',
-    badgeClass: 'border-[#f5d5c2] bg-[#fff5ef] text-[#b46c50]',
-    iconShellClass: 'border-[#f5d5c2] bg-[#fff5ef] text-[#b46c50]',
+    badgeClass: 'border-[#bfdbfe] bg-[#eff6ff] text-[#2563eb]',
+    iconShellClass: 'border-[#bfdbfe] bg-[#eff6ff] text-[#2563eb]',
   },
   financial_metrics_keywords: {
     category: 'financeLegal',
@@ -263,9 +263,9 @@ const CATEGORY_OPTIONS: RuleCategory[] = ['personal', 'company', 'customer', 'se
 const DEFAULT_RULE_VISUAL: RuleVisualMeta = {
   category: 'custom',
   icon: 'M12 4v16m8-8H4',
-  panelClass: 'border-[#ead8cf] bg-[rgba(255,248,245,0.84)]',
-  badgeClass: 'border-[#ead8cf] bg-white text-[#7c5a4d]',
-  iconShellClass: 'border-[#ead8cf] bg-white text-[#7c5a4d]',
+  panelClass: 'border-[#dbe4f0] bg-[rgba(255,248,245,0.84)]',
+  badgeClass: 'border-[#dbe4f0] bg-white text-[#7c5a4d]',
+  iconShellClass: 'border-[#dbe4f0] bg-white text-[#7c5a4d]',
 };
 
 function getRuleVisual(ruleId: string): RuleVisualMeta {
@@ -798,7 +798,7 @@ const RiskRulesPage: React.FC = () => {
                         return (
                           <div
                             key={rule.local_id}
-                            className={`flex h-[340px] flex-col self-start rounded-[22px] p-4 shadow-[0_18px_42px_-34px_rgba(72,44,24,0.42)] ${visual.panelClass}`}
+                            className={`flex h-[340px] flex-col self-start rounded-[22px] p-4 shadow-[0_18px_42px_-34px_rgba(30,64,175,0.42)] ${visual.panelClass}`}
                           >
                             <div className="flex items-start justify-between gap-3">
                               <div className="flex min-w-0 flex-1 gap-3">
@@ -834,7 +834,7 @@ const RiskRulesPage: React.FC = () => {
                                 }`}>
                                   {rule.severity}
                                 </span>
-                                <span className={`rounded-full px-2.5 py-1 ${rule.is_enabled ? 'border border-[#d9ead3] bg-[#f3fff0] text-[#2f6b2f]' : 'border border-[#eadfd8] bg-white text-[#7b6f6a]'}`}>
+                                <span className={`rounded-full px-2.5 py-1 ${rule.is_enabled ? 'border border-[#d9ead3] bg-[#f3fff0] text-[#2f6b2f]' : 'border border-[#dbe4f0] bg-white text-[#7b6f6a]'}`}>
                                   {rule.is_enabled ? t('riskRulesPage.enabled') : t('riskRulesPage.disabled')}
                                 </span>
                               </div>
@@ -847,7 +847,7 @@ const RiskRulesPage: React.FC = () => {
                               </div>
                               <div>
                                 <dt className="font-medium text-gray-700">{t('riskRulesPage.pattern')}</dt>
-                                <dd className="mt-1 line-clamp-3 overflow-hidden rounded-lg bg-[#fffaf7] px-3 py-2 font-mono text-[11px] leading-5 text-gray-600 break-all">
+                                <dd className="mt-1 line-clamp-3 overflow-hidden rounded-lg bg-[#f8fbff] px-3 py-2 font-mono text-[11px] leading-5 text-gray-600 break-all">
                                   {rule.pattern}
                                 </dd>
                               </div>
@@ -882,7 +882,7 @@ const RiskRulesPage: React.FC = () => {
                       return (
                         <div
                           key={rule.local_id}
-                          className="self-start rounded-[24px] border border-[#ead8cf] bg-[rgba(255,248,245,0.84)] p-5 shadow-[0_18px_42px_-34px_rgba(72,44,24,0.42)] md:col-span-2 xl:col-span-2"
+                          className="self-start rounded-[24px] border border-[#dbe4f0] bg-[rgba(255,248,245,0.84)] p-5 shadow-[0_18px_42px_-34px_rgba(30,64,175,0.42)] md:col-span-2 xl:col-span-2"
                         >
                     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                       <div>
@@ -1029,7 +1029,7 @@ const RiskRulesPage: React.FC = () => {
           )}
 
           {!loading && filteredRules.length === 0 && (
-            <div className="mt-6 rounded-xl border border-dashed border-[#eadfd8] bg-[#fffaf7] px-4 py-8 text-center text-sm text-[#8f8681]">
+            <div className="mt-6 rounded-xl border border-dashed border-[#dbe4f0] bg-[#f8fbff] px-4 py-8 text-center text-sm text-[#8f8681]">
               {t('riskRulesPage.noRules')}
             </div>
           )}
@@ -1090,29 +1090,29 @@ const RiskRulesPage: React.FC = () => {
                 }`}>
                   {testResult.is_sensitive ? t('riskRulesPage.sensitive') : t('riskRulesPage.noMatch')}
                 </span>
-                <span className="rounded-full border border-[#eadfd8] bg-white px-3 py-1 text-sm text-[#5f5957]">
+                <span className="rounded-full border border-[#dbe4f0] bg-white px-3 py-1 text-sm text-[#5f5957]">
                   {t('riskRulesPage.highestSeverity', { value: testResult.highest_severity })}
                 </span>
-                <span className="rounded-full border border-[#eadfd8] bg-white px-3 py-1 text-sm text-[#5f5957]">
+                <span className="rounded-full border border-[#dbe4f0] bg-white px-3 py-1 text-sm text-[#5f5957]">
                   {t('riskRulesPage.highestAction', { value: testResult.highest_action })}
                 </span>
               </div>
 
               <div className="grid gap-4 xl:grid-cols-2">
                 {testResult.hits.length === 0 ? (
-                  <div className="rounded-xl border border-[#eadfd8] bg-[#fffaf7] px-4 py-3 text-sm text-[#8f8681]">
+                  <div className="rounded-xl border border-[#dbe4f0] bg-[#f8fbff] px-4 py-3 text-sm text-[#8f8681]">
                     {t('riskRulesPage.noMatchesForSample')}
                   </div>
                 ) : (
                   testResult.hits.map((hit, index) => (
-                    <div key={`${hit.rule_id}-${index}`} className="rounded-xl border border-[#eadfd8] bg-[#fffaf7] p-4">
+                    <div key={`${hit.rule_id}-${index}`} className="rounded-xl border border-[#dbe4f0] bg-[#f8fbff] p-4">
                       <div className="flex items-center justify-between gap-3">
                         <div className="font-medium text-[#171212]">{hit.rule_name}</div>
                         <div className="flex items-center gap-2">
-                          <span className="rounded-full border border-[#eadfd8] bg-white px-2.5 py-1 text-xs text-[#5f5957]">
+                          <span className="rounded-full border border-[#dbe4f0] bg-white px-2.5 py-1 text-xs text-[#5f5957]">
                             {hit.severity}
                           </span>
-                          <span className="rounded-full border border-[#eadfd8] bg-white px-2.5 py-1 text-xs text-[#5f5957]">
+                          <span className="rounded-full border border-[#dbe4f0] bg-white px-2.5 py-1 text-xs text-[#5f5957]">
                             {hit.action}
                           </span>
                         </div>
@@ -1142,7 +1142,7 @@ const SummaryCard: React.FC<{
       ? 'border-red-200 bg-red-50'
       : highlight === 'amber'
         ? 'border-amber-200 bg-amber-50'
-        : 'border-[#eadfd8] bg-white';
+        : 'border-[#dbe4f0] bg-white';
 
   return (
     <div className={`rounded-2xl border px-4 py-4 ${toneClass}`}>

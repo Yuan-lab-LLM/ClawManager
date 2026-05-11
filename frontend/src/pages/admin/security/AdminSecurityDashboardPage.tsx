@@ -85,10 +85,10 @@ const AdminSecurityDashboardPage: React.FC = () => {
           <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
         ) : null}
 
-        <section className="rounded-[28px] border border-[#eadfd8] bg-white p-6 shadow-[0_24px_60px_-42px_rgba(72,44,24,0.35)]">
+        <section className="rounded-[28px] border border-[#dbe4f0] bg-white p-6 shadow-[0_24px_60px_-42px_rgba(30,64,175,0.35)]">
           <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[#b46c50]">{t('securityCenter.nav.dashboard')}</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[#2563eb]">{t('securityCenter.nav.dashboard')}</p>
               <h1 className="mt-2 text-3xl font-semibold text-[#171212]">{t('securityCenter.dashboard.title')}</h1>
               <p className="mt-2 max-w-3xl text-sm leading-6 text-[#6f6661]">
                 {t('securityCenter.dashboard.subtitle')}
@@ -129,7 +129,7 @@ const AdminSecurityDashboardPage: React.FC = () => {
 
         <section className="grid grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
           <div className="space-y-6">
-            <div className="rounded-[28px] border border-[#eadfd8] bg-white p-6 shadow-[0_24px_60px_-42px_rgba(72,44,24,0.35)]">
+            <div className="rounded-[28px] border border-[#dbe4f0] bg-white p-6 shadow-[0_24px_60px_-42px_rgba(30,64,175,0.35)]">
               <div className="grid grid-cols-1 gap-4 lg:grid-cols-[220px_repeat(4,minmax(0,1fr))]">
                 <div className="rounded-[24px] border border-[#d9edf3] bg-[radial-gradient(circle_at_top,#e8f8ff_0%,#f6fcff_62%,#ffffff_100%)] p-5">
                   <div className="text-xs font-semibold uppercase tracking-[0.16em] text-[#1980a1]">{t('securityCenter.dashboard.coverage')}</div>
@@ -148,10 +148,10 @@ const AdminSecurityDashboardPage: React.FC = () => {
                 <MiniMetric title={t('securityCenter.status.failed')} value={failedCount} subtitle={t('securityCenter.dashboard.failedSubtitle')} tone="orange" />
               </div>
               <div className="mt-5 grid grid-cols-1 items-start gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
-                <div className="rounded-[24px] border border-[#efe1d8] bg-[#fffaf7] p-5">
+                <div className="rounded-[24px] border border-[#efe1d8] bg-[#f8fbff] p-5">
                   <div className="flex items-center justify-between gap-3">
                     <div>
-                      <div className="text-xs font-semibold uppercase tracking-[0.16em] text-[#b46c50]">{t('securityCenter.dashboard.riskDistribution')}</div>
+                      <div className="text-xs font-semibold uppercase tracking-[0.16em] text-[#2563eb]">{t('securityCenter.dashboard.riskDistribution')}</div>
                       <div className="mt-2 text-base font-semibold text-[#171212]">{t('securityCenter.dashboard.riskDistributionTitle')}</div>
                     </div>
                     <div className="text-xs text-[#8f8681]">{t('securityCenter.dashboard.groupedByRisk')}</div>
@@ -175,10 +175,10 @@ const AdminSecurityDashboardPage: React.FC = () => {
                     })}
                   </div>
                 </div>
-                <div className="rounded-[24px] border border-[#efe1d8] bg-[#fffaf7] p-5">
+                <div className="rounded-[24px] border border-[#efe1d8] bg-[#f8fbff] p-5">
                   <div className="flex items-center justify-between gap-3">
                     <div>
-                      <div className="text-xs font-semibold uppercase tracking-[0.16em] text-[#b46c50]">{t('securityCenter.dashboard.hotAssets')}</div>
+                      <div className="text-xs font-semibold uppercase tracking-[0.16em] text-[#2563eb]">{t('securityCenter.dashboard.hotAssets')}</div>
                       <div className="mt-2 text-base font-semibold text-[#171212]">{t('securityCenter.dashboard.hotAssetsTitle')}</div>
                     </div>
                     <div className="text-xs text-[#8f8681]">Top 5</div>
@@ -188,7 +188,7 @@ const AdminSecurityDashboardPage: React.FC = () => {
                       <div className="text-sm text-[#8f8681]">{t('securityCenter.dashboard.noAssetUsage')}</div>
                     ) : (
                       hotAssets.map((item, index) => (
-                        <div key={`compact-hot-${item.id}`} className="flex items-center gap-4 rounded-2xl border border-[#eadfd8] bg-white px-4 py-3">
+                        <div key={`compact-hot-${item.id}`} className="flex items-center gap-4 rounded-2xl border border-[#dbe4f0] bg-white px-4 py-3">
                           <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-[#f3e7df] text-sm font-semibold text-[#7d5744]">
                             {index + 1}
                           </div>
@@ -208,7 +208,7 @@ const AdminSecurityDashboardPage: React.FC = () => {
               </div>
             </div>
 
-            <section className="rounded-[28px] border border-[#eadfd8] bg-white p-6 shadow-[0_24px_60px_-42px_rgba(72,44,24,0.35)]">
+            <section className="rounded-[28px] border border-[#dbe4f0] bg-white p-6 shadow-[0_24px_60px_-42px_rgba(30,64,175,0.35)]">
               <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                 <div>
                   <h2 className="text-lg font-semibold text-[#171212]">{t('securityCenter.dashboard.assetListTitle')}</h2>
@@ -233,7 +233,7 @@ const AdminSecurityDashboardPage: React.FC = () => {
                 ) : (
                   <>
                     <table className="min-w-full divide-y divide-[#f3e7df] text-sm">
-                      <thead className="bg-[#fff8f5] text-left text-xs font-semibold uppercase tracking-[0.14em] text-[#8f8681]">
+                      <thead className="bg-[#f8fbff] text-left text-xs font-semibold uppercase tracking-[0.14em] text-[#8f8681]">
                         <tr>
                           <th className="px-4 py-3">{t('securityCenter.dashboard.columns.asset')}</th>
                           <th className="px-4 py-3">{t('securityCenter.dashboard.columns.user')}</th>
@@ -246,7 +246,7 @@ const AdminSecurityDashboardPage: React.FC = () => {
                       </thead>
                       <tbody className="divide-y divide-[#f5ebe5]">
                         {paginatedSkills.map((item) => (
-                          <tr key={item.id} className="transition hover:bg-[#fffaf7]">
+                          <tr key={item.id} className="transition hover:bg-[#f8fbff]">
                             <td className="px-4 py-3">
                               <div className="font-medium text-[#171212]">{item.name}</div>
                               <div className="mt-1 text-xs text-[#8f8681]">{item.skill_key}</div>
@@ -297,10 +297,10 @@ const AdminSecurityDashboardPage: React.FC = () => {
             </section>
           </div>
 
-          <div className="rounded-[28px] border border-[#eadfd8] bg-white p-6 shadow-[0_24px_60px_-42px_rgba(72,44,24,0.35)]">
-            <div className="text-xs font-semibold uppercase tracking-[0.16em] text-[#b46c50]">{t('securityCenter.dashboard.scannerStatus')}</div>
+          <div className="rounded-[28px] border border-[#dbe4f0] bg-white p-6 shadow-[0_24px_60px_-42px_rgba(30,64,175,0.35)]">
+            <div className="text-xs font-semibold uppercase tracking-[0.16em] text-[#2563eb]">{t('securityCenter.dashboard.scannerStatus')}</div>
             <div className="mt-2 text-lg font-semibold text-[#171212]">{t('securityCenter.dashboard.scannerAvailability')}</div>
-            <div className="mt-4 rounded-2xl border border-[#efe1d8] bg-[#fffaf7] p-4">
+            <div className="mt-4 rounded-2xl border border-[#efe1d8] bg-[#f8fbff] p-4">
               <div className="flex items-center justify-between gap-3">
                 <div className="font-medium text-[#171212]">{config?.scanner_status.status_label || t('securityCenter.dashboard.notEnabled')}</div>
                 <Badge tone={config?.scanner_status.connected ? 'green' : 'slate'}>
@@ -324,7 +324,7 @@ const AdminSecurityDashboardPage: React.FC = () => {
               </div>
             </div>
 
-            <div className="mt-6 text-xs font-semibold uppercase tracking-[0.16em] text-[#b46c50]">{t('securityCenter.dashboard.alertZone')}</div>
+            <div className="mt-6 text-xs font-semibold uppercase tracking-[0.16em] text-[#2563eb]">{t('securityCenter.dashboard.alertZone')}</div>
             <div className="mt-2 text-lg font-semibold text-[#171212]">{t('securityCenter.dashboard.alertTitle')}</div>
             <div className="mt-4 space-y-3">
               {warningAssets.length === 0 ? (
@@ -346,16 +346,16 @@ const AdminSecurityDashboardPage: React.FC = () => {
               )}
             </div>
 
-            <div className="mt-6 text-xs font-semibold uppercase tracking-[0.16em] text-[#b46c50]">{t('securityCenter.dashboard.recentScans')}</div>
+            <div className="mt-6 text-xs font-semibold uppercase tracking-[0.16em] text-[#2563eb]">{t('securityCenter.dashboard.recentScans')}</div>
             <div className="mt-2 text-lg font-semibold text-[#171212]">{t('securityCenter.dashboard.recentScansTitle')}</div>
             <div className="mt-4 space-y-3">
               {recentJobs.length === 0 ? (
-                <div className="rounded-2xl border border-dashed border-[#eadfd8] px-4 py-5 text-sm text-[#8f8681]">
+                <div className="rounded-2xl border border-dashed border-[#dbe4f0] px-4 py-5 text-sm text-[#8f8681]">
                   {t('securityCenter.dashboard.noScanJobs')}
                 </div>
               ) : (
                 recentJobs.map((job) => (
-                  <div key={job.id} className="rounded-2xl border border-[#efe1d8] bg-[#fffaf7] px-4 py-4">
+                  <div key={job.id} className="rounded-2xl border border-[#efe1d8] bg-[#f8fbff] px-4 py-4">
                     <div className="flex items-center justify-between gap-3">
                       <div className="min-w-0">
                         <div className="truncate font-medium text-[#171212]">
@@ -447,7 +447,7 @@ function CoverageDonut({ ratio, progress }: { ratio: number; progress: number })
 function StatCard({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-2xl border border-[#f1e2d9] bg-white px-4 py-3">
-      <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#b46c50]">{label}</div>
+      <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#2563eb]">{label}</div>
       <div className="mt-2 text-2xl font-semibold text-[#171212]">{value}</div>
     </div>
   );

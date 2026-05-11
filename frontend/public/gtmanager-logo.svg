@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="115" height="120" viewBox="0 0 115 120" role="img" aria-label="GTManager logo">
+  <defs>
+    <linearGradient id="gtmanager-logo-bg" x1="16" y1="18" x2="99" y2="102" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#1677FF"/>
+      <stop offset="1" stop-color="#0958D9"/>
+    </linearGradient>
+    <filter id="gtmanager-logo-shadow" x="-20%" y="-20%" width="140%" height="150%" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="8" stdDeviation="7" flood-color="#1677FF" flood-opacity="0.22"/>
+    </filter>
+  </defs>
+  <rect width="115" height="120" fill="none"/>
+  <rect x="14" y="17" width="87" height="87" rx="25" fill="url(#gtmanager-logo-bg)" filter="url(#gtmanager-logo-shadow)"/>
+  <path d="M77.6 32.4h23.1a8.2 8.2 0 0 1 0 16.4H77.6a8.2 8.2 0 0 1 0-16.4Z" fill="#FFFFFF" opacity="0.88" transform="rotate(-35 89.15 40.6)"/>
+  <text x="57.5" y="70.5" text-anchor="middle" dominant-baseline="middle" font-family="Inter, Arial, Helvetica, sans-serif" font-size="35" font-weight="800" letter-spacing="-1" fill="#FFFFFF">GT</text>
+</svg>

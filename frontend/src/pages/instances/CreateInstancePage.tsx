@@ -445,7 +445,7 @@ const CreateInstancePage: React.FC = () => {
                   <div
                     key={type.id}
                     onClick={() => handleTypeSelect(type.id)}
-                    className={`relative cursor-pointer rounded-[24px] border p-4 transition-all hover:-translate-y-0.5 hover:shadow-[0_24px_56px_-42px_rgba(72,44,24,0.55)] ${
+                    className={`relative cursor-pointer rounded-[24px] border p-4 transition-all hover:-translate-y-0.5 hover:shadow-[0_24px_56px_-42px_rgba(30,64,175,0.55)] ${
                       formData.type === type.id 
                         ? 'border-indigo-500 ring-2 ring-indigo-500' 
                         : 'border-gray-300'
@@ -487,7 +487,7 @@ const CreateInstancePage: React.FC = () => {
                       key={key}
                       type="button"
                       onClick={() => handlePresetSelect(key as keyof typeof PRESET_CONFIGS)}
-                      className={`rounded-[22px] border p-4 text-left transition-all hover:-translate-y-0.5 hover:shadow-[0_24px_56px_-42px_rgba(72,44,24,0.55)] ${
+                      className={`rounded-[22px] border p-4 text-left transition-all hover:-translate-y-0.5 hover:shadow-[0_24px_56px_-42px_rgba(30,64,175,0.55)] ${
                         formData.cpu_cores === config.cpu_cores && 
                         formData.memory_gb === config.memory_gb && 
                         formData.disk_gb === config.disk_gb

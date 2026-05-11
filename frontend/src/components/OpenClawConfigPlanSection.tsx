@@ -148,7 +148,7 @@ const OpenClawConfigPlanSection: React.FC<OpenClawConfigPlanSectionProps> = ({
       {!loading && mode === 'manual' && (
         <div className="mt-5 space-y-5">
           <div>
-            <div className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-[#b46c50]">{t('openClawInjectionSection.channel')}</div>
+            <div className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-[#2563eb]">{t('openClawInjectionSection.channel')}</div>
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
               {channelResources.map((item) => {
                 const checked = resourceIds.includes(item.id);

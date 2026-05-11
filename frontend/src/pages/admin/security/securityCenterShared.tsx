@@ -111,7 +111,7 @@ export function SecurityCenterShell({
       <div className="space-y-6">
         <section className="grid grid-cols-1 gap-6 xl:grid-cols-[176px_minmax(0,1fr)]">
           <div className="xl:sticky xl:top-6 xl:self-start">
-            <div className="rounded-[24px] border border-[#eadfd8] bg-[linear-gradient(180deg,#fffaf7_0%,#ffffff_100%)] p-3 shadow-[0_18px_44px_-36px_rgba(72,44,24,0.35)]">
+            <div className="rounded-[24px] border border-[#dbe4f0] bg-[linear-gradient(180deg,#f8fbff_0%,#ffffff_100%)] p-3 shadow-[0_18px_44px_-36px_rgba(30,64,175,0.35)]">
               <div className="flex flex-col gap-2">
                 {navItems.map((item) => (
                 <Link
@@ -120,7 +120,7 @@ export function SecurityCenterShell({
                   className={`group rounded-[18px] border px-3 py-3 text-left transition ${
                     isActive(item.path)
                       ? 'border-[#9fc7ee] bg-[#eef7ff] shadow-[inset_0_0_0_1px_rgba(116,173,223,0.35)]'
-                      : 'border-[#eadfd8] bg-[#fffaf7] hover:border-[#d6c7be] hover:bg-white'
+                      : 'border-[#dbe4f0] bg-[#f8fbff] hover:border-[#d6c7be] hover:bg-white'
                   }`}
                 >
                   <div className="min-w-0">
@@ -144,7 +144,7 @@ export function AnalyzerGroup({ title, items, emptyLabel }: { title: string; ite
   const safeItems = Array.isArray(items) ? items : [];
   return (
     <div className="rounded-2xl border border-[#f1e2d9] bg-white p-4">
-      <div className="text-xs font-semibold uppercase tracking-[0.16em] text-[#b46c50]">{title}</div>
+      <div className="text-xs font-semibold uppercase tracking-[0.16em] text-[#2563eb]">{title}</div>
       {safeItems.length === 0 ? (
         <div className="mt-3 text-sm text-[#8f8681]">{emptyLabel || t('securityCenter.common.noneYet')}</div>
       ) : (
@@ -166,7 +166,7 @@ export function AnalyzerGroup({ title, items, emptyLabel }: { title: string; ite
 export function StatCard({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-2xl border border-[#f1e2d9] bg-white px-4 py-3">
-      <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#b46c50]">{label}</div>
+      <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#2563eb]">{label}</div>
       <div className="mt-2 text-2xl font-semibold text-[#171212]">{value}</div>
     </div>
   );
@@ -189,7 +189,7 @@ export function Badge({
           : tone === 'red'
             ? 'border-[#f2c2c2] bg-[#fff0f0] text-[#b42318]'
             : tone === 'amber'
-              ? 'border-[#f1d9c7] bg-[#fff6f0] text-[#b46c50]'
+              ? 'border-[#f5df9f] bg-[#fffbeb] text-[#9a6a00]'
               : 'border-[#d9e0e7] bg-[#f6f8fb] text-[#556070]';
 
   return (

@@ -157,10 +157,10 @@ const AdminSkillsPage: React.FC = () => {
   return (
     <AdminLayout title="安全中心">
       <div className="space-y-6">
-        <section className="rounded-[28px] border border-[#eadfd8] bg-[rgba(255,250,247,0.96)] p-6 shadow-[0_20px_50px_-36px_rgba(72,44,24,0.42)]">
+        <section className="rounded-[28px] border border-[#dbe4f0] bg-[rgba(255,250,247,0.96)] p-6 shadow-[0_20px_50px_-36px_rgba(30,64,175,0.42)]">
           <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[#b46c50]">Security Center</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[#2563eb]">Security Center</p>
               <h1 className="mt-2 text-3xl font-semibold text-[#171212]">安全中心</h1>
               <p className="mt-2 max-w-3xl text-sm leading-6 text-[#6f6661]">
                 类杀毒软件式的运行时安全中心，支持快速扫描、深度扫描、实时进度、扫描报告和规则配置。当前首个资产类型为 skills。
@@ -182,7 +182,7 @@ const AdminSkillsPage: React.FC = () => {
         ) : null}
 
         <section className="grid grid-cols-1 gap-6 xl:grid-cols-[1.1fr_0.9fr]">
-          <div className="rounded-[28px] border border-[#eadfd8] bg-white p-6 shadow-[0_24px_60px_-42px_rgba(72,44,24,0.35)]">
+          <div className="rounded-[28px] border border-[#dbe4f0] bg-white p-6 shadow-[0_24px_60px_-42px_rgba(30,64,175,0.35)]">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
               <div>
                 <h2 className="text-lg font-semibold text-[#171212]">扫描控制台</h2>
@@ -217,21 +217,21 @@ const AdminSkillsPage: React.FC = () => {
             </div>
 
             <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-3">
-              <div className="rounded-2xl border border-[#efe1d8] bg-[#fffaf7] p-4">
-                <div className="text-xs font-semibold uppercase tracking-[0.16em] text-[#b46c50]">默认模式</div>
+              <div className="rounded-2xl border border-[#efe1d8] bg-[#f8fbff] p-4">
+                <div className="text-xs font-semibold uppercase tracking-[0.16em] text-[#2563eb]">默认模式</div>
                 <div className="mt-2 text-lg font-semibold text-[#171212]">{config?.default_mode === 'deep' ? '深度扫描' : config?.default_mode === 'quick' ? '快速扫描' : '--'}</div>
               </div>
-              <div className="rounded-2xl border border-[#efe1d8] bg-[#fffaf7] p-4">
-                <div className="text-xs font-semibold uppercase tracking-[0.16em] text-[#b46c50]">快速扫描超时</div>
+              <div className="rounded-2xl border border-[#efe1d8] bg-[#f8fbff] p-4">
+                <div className="text-xs font-semibold uppercase tracking-[0.16em] text-[#2563eb]">快速扫描超时</div>
                 <div className="mt-2 text-lg font-semibold text-[#171212]">{config?.quick_timeout_seconds ?? '--'}s</div>
               </div>
-              <div className="rounded-2xl border border-[#efe1d8] bg-[#fffaf7] p-4">
-                <div className="text-xs font-semibold uppercase tracking-[0.16em] text-[#b46c50]">深度扫描超时</div>
+              <div className="rounded-2xl border border-[#efe1d8] bg-[#f8fbff] p-4">
+                <div className="text-xs font-semibold uppercase tracking-[0.16em] text-[#2563eb]">深度扫描超时</div>
                 <div className="mt-2 text-lg font-semibold text-[#171212]">{config?.deep_timeout_seconds ?? '--'}s</div>
               </div>
             </div>
 
-            <div className="mt-6 rounded-2xl border border-[#efe1d8] bg-[#fffaf7] p-5">
+            <div className="mt-6 rounded-2xl border border-[#efe1d8] bg-[#f8fbff] p-5">
               <div className="text-sm font-semibold text-[#171212]">最近任务</div>
               <div className="mt-4 space-y-3">
                 {loading ? (
@@ -245,7 +245,7 @@ const AdminSkillsPage: React.FC = () => {
                       type="button"
                       onClick={() => void handleSelectJob(job.id)}
                       className={`w-full rounded-2xl border px-4 py-4 text-left transition ${
-                        selectedJobId === job.id ? 'border-[#f2b7a0] bg-[#fff1eb]' : 'border-[#eadfd8] bg-white hover:border-[#dcc6b8]'
+                        selectedJobId === job.id ? 'border-[#93c5fd] bg-[#dbeafe]' : 'border-[#dbe4f0] bg-white hover:border-[#dcc6b8]'
                       }`}
                     >
                       <div className="flex items-start justify-between gap-3">
@@ -263,7 +263,7 @@ const AdminSkillsPage: React.FC = () => {
                         </Badge>
                       </div>
                       <div className="mt-3 h-2 overflow-hidden rounded-full bg-[#f3e7df]">
-                        <div className="h-full rounded-full bg-[#dc2626]" style={{ width: `${job.progress_pct}%` }} />
+                        <div className="h-full rounded-full bg-[#2563eb]" style={{ width: `${job.progress_pct}%` }} />
                       </div>
                     </button>
                   ))
@@ -272,7 +272,7 @@ const AdminSkillsPage: React.FC = () => {
             </div>
           </div>
 
-          <div className="rounded-[28px] border border-[#eadfd8] bg-white p-6 shadow-[0_24px_60px_-42px_rgba(72,44,24,0.35)]">
+          <div className="rounded-[28px] border border-[#dbe4f0] bg-white p-6 shadow-[0_24px_60px_-42px_rgba(30,64,175,0.35)]">
             <div className="flex items-center justify-between gap-4">
               <div>
                 <h2 className="text-lg font-semibold text-[#171212]">扫描规则配置</h2>
@@ -339,7 +339,7 @@ const AdminSkillsPage: React.FC = () => {
                     className="app-input mt-1 w-full"
                   />
                 </div>
-                <div className="rounded-2xl border border-[#efe1d8] bg-[#fffaf7] px-4 py-3 text-sm text-[#6f6661]">
+                <div className="rounded-2xl border border-[#efe1d8] bg-[#f8fbff] px-4 py-3 text-sm text-[#6f6661]">
                   当前策略：仅允许使用外部 <span className="font-semibold text-[#171212]">skill-scanner</span>。
                   若扫描服务不可用或返回错误，任务会直接失败，不会回退到内置启发式扫描。
                 </div>
@@ -351,7 +351,7 @@ const AdminSkillsPage: React.FC = () => {
         </section>
 
         <section className="grid grid-cols-1 gap-6 xl:grid-cols-[1.1fr_0.9fr]">
-          <div className="rounded-[28px] border border-[#eadfd8] bg-white p-6 shadow-[0_24px_60px_-42px_rgba(72,44,24,0.35)]">
+          <div className="rounded-[28px] border border-[#dbe4f0] bg-white p-6 shadow-[0_24px_60px_-42px_rgba(30,64,175,0.35)]">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <div>
                 <h2 className="text-lg font-semibold text-[#171212]">资产列表</h2>
@@ -375,7 +375,7 @@ const AdminSkillsPage: React.FC = () => {
               ) : (
                 <>
                   <table className="min-w-full divide-y divide-[#f3e7df] text-sm">
-                    <thead className="bg-[#fff8f5] text-left text-xs font-semibold uppercase tracking-[0.14em] text-[#8f8681]">
+                    <thead className="bg-[#f8fbff] text-left text-xs font-semibold uppercase tracking-[0.14em] text-[#8f8681]">
                       <tr>
                         <th className="px-4 py-3">资产</th>
                         <th className="px-4 py-3">用户</th>
@@ -391,7 +391,7 @@ const AdminSkillsPage: React.FC = () => {
                         <tr
                           key={item.id}
                           onClick={() => setSelectedAssetId(item.id)}
-                          className={`cursor-pointer transition hover:bg-[#fffaf7] ${selectedAssetId === item.id ? 'bg-[#fff6f2]' : ''}`}
+                          className={`cursor-pointer transition hover:bg-[#f8fbff] ${selectedAssetId === item.id ? 'bg-[#fff6f2]' : ''}`}
                         >
                           <td className="px-4 py-3">
                             <div className="font-medium text-[#171212]">{item.name}</div>
@@ -439,7 +439,7 @@ const AdminSkillsPage: React.FC = () => {
                     </div>
                   </div>
                   {selectedAsset ? (
-                    <div className="mt-5 rounded-2xl border border-[#efe1d8] bg-[#fffaf7] p-5">
+                    <div className="mt-5 rounded-2xl border border-[#efe1d8] bg-[#f8fbff] p-5">
                       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                         <div>
                           <div className="text-sm font-semibold text-[#171212]">资产详情</div>
@@ -453,13 +453,13 @@ const AdminSkillsPage: React.FC = () => {
                       </div>
                       <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
                         <div className="rounded-2xl border border-[#f1e2d9] bg-white p-4">
-                          <div className="text-xs font-semibold uppercase tracking-[0.16em] text-[#b46c50]">判定原因</div>
+                          <div className="text-xs font-semibold uppercase tracking-[0.16em] text-[#2563eb]">判定原因</div>
                           <div className="mt-3 text-sm leading-6 text-[#6f6661]">
                             {selectedAsset.risk_reason || '当前没有摘要原因，可查看下方具体依据。'}
                           </div>
                         </div>
                         <div className="rounded-2xl border border-[#f1e2d9] bg-white p-4">
-                          <div className="text-xs font-semibold uppercase tracking-[0.16em] text-[#b46c50]">处置建议</div>
+                          <div className="text-xs font-semibold uppercase tracking-[0.16em] text-[#2563eb]">处置建议</div>
                           <div className="mt-3 text-sm leading-6 text-[#6f6661]">
                             {selectedAsset.risk_level === 'high'
                               ? '立即禁用该资产在实例中的继续使用，并根据命中项移除高风险文件或功能后重新扫描。'
@@ -475,7 +475,7 @@ const AdminSkillsPage: React.FC = () => {
                         <div className="text-sm font-medium text-[#171212]">判定依据</div>
                         <div className="mt-3 space-y-3">
                           {(selectedAsset.top_findings ?? []).length === 0 ? (
-                            <div className="rounded-2xl border border-dashed border-[#eadfd8] bg-white px-4 py-5 text-sm text-[#8f8681]">
+                            <div className="rounded-2xl border border-dashed border-[#dbe4f0] bg-white px-4 py-5 text-sm text-[#8f8681]">
                               当前没有可展示的 findings。
                             </div>
                           ) : (
@@ -494,7 +494,7 @@ const AdminSkillsPage: React.FC = () => {
                                   </div>
                                 ) : null}
                                 {finding.snippet ? (
-                                  <pre className="mt-2 overflow-x-auto rounded-lg bg-[#fff8f5] px-3 py-2 text-xs text-[#7a4b34]">{finding.snippet}</pre>
+                                  <pre className="mt-2 overflow-x-auto rounded-lg bg-[#f8fbff] px-3 py-2 text-xs text-[#7a4b34]">{finding.snippet}</pre>
                                 ) : null}
                                 {finding.remediation ? (
                                   <div className="mt-2 text-xs leading-5 text-[#8f8681]">建议：{finding.remediation}</div>
@@ -511,19 +511,19 @@ const AdminSkillsPage: React.FC = () => {
             </div>
           </div>
 
-          <div className="rounded-[28px] border border-[#eadfd8] bg-white p-6 shadow-[0_24px_60px_-42px_rgba(72,44,24,0.35)]">
+          <div className="rounded-[28px] border border-[#dbe4f0] bg-white p-6 shadow-[0_24px_60px_-42px_rgba(30,64,175,0.35)]">
             <div>
               <h2 className="text-lg font-semibold text-[#171212]">扫描报告</h2>
               <p className="mt-1 text-sm text-[#8f8681]">每次扫描都会生成独立报告，支持查看风险分布、命中摘要和逐项结果。</p>
             </div>
 
             {!selectedJob ? (
-              <div className="mt-6 rounded-2xl border border-dashed border-[#eadfd8] px-4 py-10 text-center text-sm text-[#8f8681]">
+              <div className="mt-6 rounded-2xl border border-dashed border-[#dbe4f0] px-4 py-10 text-center text-sm text-[#8f8681]">
                 选择一个扫描任务查看报告。
               </div>
             ) : (
               <div className="mt-6 space-y-5">
-                <div className="rounded-2xl border border-[#efe1d8] bg-[#fffaf7] p-4">
+                <div className="rounded-2xl border border-[#efe1d8] bg-[#f8fbff] p-4">
                   <div className="flex items-center justify-between gap-3">
                     <div className="font-medium text-[#171212]">
                       {selectedJob.scan_mode === 'deep' ? '深度扫描' : '快速扫描'} #{selectedJob.id}
@@ -533,7 +533,7 @@ const AdminSkillsPage: React.FC = () => {
                     </Badge>
                   </div>
                   <div className="mt-3 h-2 overflow-hidden rounded-full bg-[#f3e7df]">
-                    <div className="h-full rounded-full bg-[#dc2626]" style={{ width: `${selectedJob.progress_pct}%` }} />
+                    <div className="h-full rounded-full bg-[#2563eb]" style={{ width: `${selectedJob.progress_pct}%` }} />
                   </div>
                   <div className="mt-3 text-xs text-[#8f8681]">
                     已完成 {selectedJob.completed_items}/{selectedJob.total_items}
@@ -552,7 +552,7 @@ const AdminSkillsPage: React.FC = () => {
                         <StatCard key={level} label={riskLabel(level)} value={String(count)} />
                       ))}
                     </div>
-                    <div className="rounded-2xl border border-[#efe1d8] bg-[#fffaf7] p-4">
+                    <div className="rounded-2xl border border-[#efe1d8] bg-[#f8fbff] p-4">
                       <div className="text-sm font-medium text-[#171212]">Analyzer 视图</div>
                       <p className="mt-1 text-xs leading-5 text-[#8f8681]">
                         配置项表示本次请求给 skill-scanner 的 analyzer；可用项来自 scanner 当前 /health；实际命中项来自本次扫描结果里的 findings。
@@ -571,7 +571,7 @@ const AdminSkillsPage: React.FC = () => {
                           <div className="text-sm text-[#8f8681]">当前没有命中摘要。</div>
                         ) : (
                           (selectedJob.report.findings_summary ?? []).slice(0, 8).map((entry, index) => (
-                            <div key={`${entry.asset_name}-${index}`} className="rounded-2xl border border-[#efe1d8] bg-[#fffaf7] px-4 py-3">
+                            <div key={`${entry.asset_name}-${index}`} className="rounded-2xl border border-[#efe1d8] bg-[#f8fbff] px-4 py-3">
                               <div className="font-medium text-[#171212]">{entry.asset_name}</div>
                               <div className="mt-1 text-sm text-[#6f6661]">{entry.summary}</div>
                             </div>
@@ -583,7 +583,7 @@ const AdminSkillsPage: React.FC = () => {
                       <div className="text-sm font-medium text-[#171212]">逐项结果</div>
                       <div className="mt-3 max-h-[420px] space-y-3 overflow-y-auto pr-1">
                         {(selectedJob.report.items ?? []).map((item) => (
-                          <div key={item.id} className="rounded-2xl border border-[#efe1d8] bg-[#fffaf7] px-4 py-3">
+                          <div key={item.id} className="rounded-2xl border border-[#efe1d8] bg-[#f8fbff] px-4 py-3">
                             <div className="flex items-start justify-between gap-3">
                               <div>
                                 <div className="font-medium text-[#171212]">{item.asset_name}</div>
@@ -620,7 +620,7 @@ const AdminSkillsPage: React.FC = () => {
                                           </div>
                                         ) : null}
                                         {finding.snippet ? (
-                                          <pre className="mt-2 overflow-x-auto rounded-lg bg-[#fff8f5] px-3 py-2 text-xs text-[#7a4b34]">{finding.snippet}</pre>
+                                          <pre className="mt-2 overflow-x-auto rounded-lg bg-[#f8fbff] px-3 py-2 text-xs text-[#7a4b34]">{finding.snippet}</pre>
                                         ) : null}
                                         {finding.remediation ? (
                                           <div className="mt-2 text-xs leading-5 text-[#8f8681]">建议：{finding.remediation}</div>
@@ -654,7 +654,7 @@ function AnalyzerGroup({ title, items, emptyLabel }: { title: string; items: str
   const safeItems = Array.isArray(items) ? items : [];
   return (
     <div className="rounded-2xl border border-[#f1e2d9] bg-white p-4">
-      <div className="text-xs font-semibold uppercase tracking-[0.16em] text-[#b46c50]">{title}</div>
+      <div className="text-xs font-semibold uppercase tracking-[0.16em] text-[#2563eb]">{title}</div>
       {safeItems.length === 0 ? (
         <div className="mt-3 text-sm text-[#8f8681]">{emptyLabel || '暂无'}</div>
       ) : (
@@ -676,7 +676,7 @@ function AnalyzerGroup({ title, items, emptyLabel }: { title: string; items: str
 function StatCard({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-2xl border border-[#f1e2d9] bg-white px-4 py-3">
-      <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#b46c50]">{label}</div>
+      <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#2563eb]">{label}</div>
       <div className="mt-2 text-2xl font-semibold text-[#171212]">{value}</div>
     </div>
   );
@@ -699,7 +699,7 @@ function Badge({
           : tone === 'red'
             ? 'border-[#f2c2c2] bg-[#fff0f0] text-[#b42318]'
             : tone === 'amber'
-              ? 'border-[#f1d9c7] bg-[#fff6f0] text-[#b46c50]'
+              ? 'border-[#f1d9c7] bg-[#eff6ff] text-[#2563eb]'
               : 'border-[#d9e0e7] bg-[#f6f8fb] text-[#556070]';
 
   return (

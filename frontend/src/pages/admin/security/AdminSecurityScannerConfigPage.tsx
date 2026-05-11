@@ -84,7 +84,7 @@ const AdminSecurityScannerConfigPage: React.FC = () => {
           <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
         ) : null}
 
-        <section className="rounded-[28px] border border-[#eadfd8] bg-white p-6 shadow-[0_24px_60px_-42px_rgba(72,44,24,0.35)]">
+        <section className="rounded-[28px] border border-[#dbe4f0] bg-white p-6 shadow-[0_24px_60px_-42px_rgba(30,64,175,0.35)]">
             <div className="flex items-center justify-between gap-4">
               <div>
                 <h2 className="text-lg font-semibold text-[#171212]">{t('securityCenter.scanner.title')}</h2>
@@ -102,7 +102,7 @@ const AdminSecurityScannerConfigPage: React.FC = () => {
 
             {draftConfig ? (
               <div className="mt-6 space-y-5">
-                <div className="rounded-2xl border border-[#efe1d8] bg-[#fffaf7] p-4">
+                <div className="rounded-2xl border border-[#efe1d8] bg-[#f8fbff] p-4">
                   <div className="flex items-center justify-between gap-3">
                     <div>
                       <div className="text-sm font-semibold text-[#171212]">{t('securityCenter.scanner.serviceStatus')}</div>
@@ -130,7 +130,7 @@ const AdminSecurityScannerConfigPage: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="rounded-2xl border border-[#efe1d8] bg-[#fffaf7] p-4">
+                <div className="rounded-2xl border border-[#efe1d8] bg-[#f8fbff] p-4">
                   <div className="text-sm font-semibold text-[#171212]">{t('securityCenter.scanner.llmConfig')}</div>
                   <p className="mt-1 text-xs leading-5 text-[#8f8681]">
                     {t('securityCenter.scanner.llmConfigDesc')}
@@ -267,7 +267,7 @@ const AdminSecurityScannerConfigPage: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="rounded-2xl border border-[#efe1d8] bg-[#fffaf7] p-4">
+                <div className="rounded-2xl border border-[#efe1d8] bg-[#f8fbff] p-4">
                   <div className="text-sm font-semibold text-[#171212]">{t('securityCenter.scanner.currentMode')}</div>
                   <p className="mt-1 text-xs leading-5 text-[#8f8681]">
                     {t('securityCenter.scanner.currentModeDesc')}
@@ -282,7 +282,7 @@ const AdminSecurityScannerConfigPage: React.FC = () => {
                         <label
                           key={option.value}
                           className={`flex cursor-pointer items-start gap-3 rounded-2xl border px-4 py-4 transition ${
-                            checked ? 'border-[#9fc7ee] bg-[#eef7ff]' : 'border-[#eadfd8] bg-white'
+                            checked ? 'border-[#9fc7ee] bg-[#eef7ff]' : 'border-[#dbe4f0] bg-white'
                           }`}
                         >
                           <input
@@ -295,7 +295,7 @@ const AdminSecurityScannerConfigPage: React.FC = () => {
                                 current ? { ...current, active_mode: option.value, default_mode: option.value } : current,
                               );
                             }}
-                            className="mt-1 h-4 w-4 border-[#d7c9bf] text-[#dc2626] focus:ring-[#ef6b4a]"
+                            className="mt-1 h-4 w-4 border-[#bfdbfe] text-[#2563eb] focus:ring-[#2563eb]"
                           />
                           <div>
                             <div className="text-sm font-semibold text-[#171212]">{option.label}</div>
@@ -351,7 +351,7 @@ const AdminSecurityScannerConfigPage: React.FC = () => {
                     }}
                   />
                 </div>
-                <div className="rounded-2xl border border-[#efe1d8] bg-[#fffaf7] px-4 py-4 text-sm leading-6 text-[#6f6661]">
+                <div className="rounded-2xl border border-[#efe1d8] bg-[#f8fbff] px-4 py-4 text-sm leading-6 text-[#6f6661]">
                   {t('securityCenter.scanner.applySummary')}
                 </div>
               </div>
@@ -382,7 +382,7 @@ function ScanMethodCard({
   const { t } = useI18n();
   const quickLabel = t('securityCenter.scanModes.quick');
   return (
-    <div className="rounded-2xl border border-[#efe1d8] bg-[#fffaf7] p-4">
+    <div className="rounded-2xl border border-[#efe1d8] bg-[#f8fbff] p-4">
       <div className="text-sm font-semibold text-[#171212]">{title}</div>
       <div className="mt-4">
         <label className="block text-sm font-medium text-gray-700">{t('securityCenter.scanner.timeoutSeconds')}</label>
@@ -402,13 +402,13 @@ function ScanMethodCard({
             return (
               <label
                 key={`${title}-${option.value}`}
-                className="flex cursor-pointer items-start gap-3 rounded-2xl border border-[#eadfd8] bg-white px-4 py-3"
+                className="flex cursor-pointer items-start gap-3 rounded-2xl border border-[#dbe4f0] bg-white px-4 py-3"
               >
                 <input
                   type="checkbox"
                   checked={checked}
                   onChange={() => onToggleAnalyzer(option.value)}
-                  className="mt-1 h-4 w-4 rounded border-[#d7c9bf] text-[#dc2626] focus:ring-[#ef6b4a]"
+                  className="mt-1 h-4 w-4 rounded border-[#bfdbfe] text-[#2563eb] focus:ring-[#2563eb]"
                 />
                 <div>
                   <div className="text-sm font-semibold text-[#171212]">{option.label}</div>
@@ -458,7 +458,7 @@ function ConfigField({
           <button
             type="button"
             onClick={onToggleReveal}
-            className="inline-flex min-w-[68px] justify-center rounded-xl border border-[#eadfd8] bg-white px-3 py-2 text-sm font-medium text-[#6f6661] transition hover:border-[#d6c7be] hover:bg-[#fffaf7]"
+            className="inline-flex min-w-[68px] justify-center rounded-xl border border-[#dbe4f0] bg-white px-3 py-2 text-sm font-medium text-[#6f6661] transition hover:border-[#d6c7be] hover:bg-[#f8fbff]"
           >
             {revealed ? t('securityCenter.scanner.hide') : t('securityCenter.scanner.reveal')}
           </button>

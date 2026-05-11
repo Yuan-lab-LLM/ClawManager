@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useI18n } from '../contexts/I18nContext';
+import BrandLogo from './BrandLogo';
 import LanguageSwitcher from './LanguageSwitcher';
 
 interface AdminLayoutProps {
@@ -59,10 +60,9 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children, title }) => {
             <div className="flex min-h-16 items-center justify-between gap-4 py-3">
               <Link
                 to="/admin"
-                className="flex items-center text-[#171212] transition-colors hover:text-[#dc2626]"
+                className="flex items-center text-[#171212] transition-colors hover:text-[#2563eb]"
               >
-                <img
-                  src="/gtmanager-logo.png"
+                <BrandLogo
                   alt={t('app.logoAlt')}
                   className="mr-2 h-10 w-10 object-contain"
                 />
@@ -73,7 +73,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children, title }) => {
                 <LanguageSwitcher />
                 <button
                   onClick={handleLogout}
-                  className="text-[#696363] transition-colors hover:text-[#dc2626]"
+                  className="text-[#696363] transition-colors hover:text-[#2563eb]"
                   title={t('common.logout')}
                 >
                   <svg
@@ -94,7 +94,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children, title }) => {
             </div>
           </div>
 
-          <div className="border-t border-[#eee5df]">
+          <div className="border-t border-[#dbe4f0]">
             <div className="px-2 py-3 space-y-1">
               {navItems.map((item) => (
                 <Link
@@ -140,20 +140,19 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children, title }) => {
       </div>
 
       <div className="hidden min-h-screen md:flex">
-        <aside className="w-[248px] shrink-0 border-r border-[#eadfd8] bg-[linear-gradient(180deg,rgba(255,255,255,0.94)_0%,rgba(255,248,244,0.92)_100%)] shadow-[18px_0_50px_-44px_rgba(72,44,24,0.45)]">
+        <aside className="w-[248px] shrink-0 border-r border-[#dbe4f0] bg-[linear-gradient(180deg,rgba(255,255,255,0.95)_0%,rgba(248,251,255,0.94)_100%)] shadow-[18px_0_50px_-44px_rgba(30,64,175,0.32)]">
           <div className="sticky top-0 flex h-screen flex-col">
-            <div className="flex h-[104px] items-center border-b border-[#efe2da] px-5">
+            <div className="flex h-[104px] items-center border-b border-[#dbe4f0] px-5">
               <Link
                 to="/admin"
-                className="flex items-center text-[#171212] transition-colors hover:text-[#dc2626]"
+                className="flex items-center text-[#171212] transition-colors hover:text-[#2563eb]"
               >
-                <img
-                  src="/gtmanager-logo.png"
+                <BrandLogo
                   alt={t('app.logoAlt')}
                   className="mr-3 h-9 w-9 object-contain"
                 />
                 <div>
-                  <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-[#b46c50]">
+                  <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-[#2563eb]">
                     {t('adminLayout.admin')}
                   </div>
                   <div className="mt-0.5 text-[1.45rem] font-bold leading-none">{t('app.name')}</div>
@@ -162,7 +161,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children, title }) => {
             </div>
 
             <nav className="flex-1 overflow-y-auto px-3 pb-6">
-              <div className="px-3 pb-3 text-xs font-semibold uppercase tracking-[0.18em] text-[#b46c50]">
+              <div className="px-3 pb-3 text-xs font-semibold uppercase tracking-[0.18em] text-[#2563eb]">
                 {t('adminLayout.navigation')}
               </div>
               <div className="space-y-1.5">
@@ -172,8 +171,8 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children, title }) => {
                     to={item.path}
                     className={`flex items-center rounded-2xl px-4 py-3 text-sm font-medium transition-all duration-200 ${
                       isActive(item)
-                        ? 'bg-[#fff1eb] text-red-600 shadow-[inset_0_0_0_1px_rgba(243,199,183,0.8),0_16px_30px_-24px_rgba(220,38,38,0.45)]'
-                        : 'text-[#6e6763] hover:bg-[rgba(247,236,230,0.82)] hover:text-[#171212]'
+                        ? 'bg-[#dbeafe] text-blue-700 shadow-[inset_0_0_0_1px_rgba(147,197,253,0.82),0_16px_30px_-24px_rgba(37,99,235,0.45)]'
+                        : 'text-[#6e6763] hover:bg-[rgba(239,246,255,0.92)] hover:text-[#171212]'
                     }`}
                   >
                     <svg
@@ -195,14 +194,14 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children, title }) => {
               </div>
             </nav>
 
-            <div className="border-t border-[#efe2da] px-4 py-5">
-              <div className="rounded-[26px] border border-[#eadfd8] bg-[rgba(255,250,247,0.95)] p-4 shadow-[0_18px_42px_-34px_rgba(72,44,24,0.42)]">
+            <div className="border-t border-[#dbe4f0] px-4 py-5">
+              <div className="rounded-[26px] border border-[#dbe4f0] bg-[rgba(248,251,255,0.95)] p-4 shadow-[0_18px_42px_-34px_rgba(30,64,175,0.3)]">
                 <button
                   type="button"
                   onClick={() => setProfileExpanded((current) => !current)}
-                  className="flex w-full items-center gap-3 rounded-2xl text-left transition-colors hover:bg-[rgba(255,243,237,0.8)] focus:outline-none"
+                  className="flex w-full items-center gap-3 rounded-2xl text-left transition-colors hover:bg-[rgba(239,246,255,0.88)] focus:outline-none"
                 >
-                  <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[linear-gradient(135deg,#ef6b4a_0%,#dc2626_100%)] text-base font-bold text-white shadow-[0_16px_28px_-22px_rgba(220,38,38,0.65)]">
+                  <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[linear-gradient(135deg,#3b82f6_0%,#1d4ed8_100%)] text-base font-bold text-white shadow-[0_16px_28px_-22px_rgba(37,99,235,0.65)]">
                     {(user?.username?.[0] || 'A').toUpperCase()}
                   </div>
                   <div className="min-w-0 flex-1">
@@ -220,13 +219,13 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children, title }) => {
 
                 {profileExpanded && (
                   <div className="mt-4 space-y-3">
-                    <div className="col-span-2 rounded-2xl border border-[#eadfd8] bg-white/92 px-3 py-3 shadow-[0_12px_28px_-24px_rgba(72,44,24,0.35)]">
+                    <div className="col-span-2 rounded-2xl border border-[#dbe4f0] bg-white/92 px-3 py-3 shadow-[0_12px_28px_-24px_rgba(30,64,175,0.28)]">
                       <LanguageSwitcher />
                     </div>
 
                     <Link
                       to="/dashboard"
-                      className="flex items-center justify-center rounded-2xl border border-[#eadfd8] bg-white/92 px-3 py-3 text-sm font-semibold text-[#5f5957] shadow-[0_14px_28px_-24px_rgba(72,44,24,0.45)] transition-all duration-200 hover:border-[#ef6b4a] hover:bg-[rgba(255,248,245,0.95)] hover:text-[#171212]"
+                      className="flex items-center justify-center rounded-2xl border border-[#dbe4f0] bg-white/92 px-3 py-3 text-sm font-semibold text-[#5f5957] shadow-[0_14px_28px_-24px_rgba(30,64,175,0.34)] transition-all duration-200 hover:border-[#3b82f6] hover:bg-[rgba(239,246,255,0.95)] hover:text-[#171212]"
                     >
                       <svg
                         className="mr-2 h-5 w-5"
@@ -246,8 +245,8 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children, title }) => {
 
                     <button
                       onClick={handleLogout}
-                      className="flex w-full items-center justify-center rounded-2xl border border-transparent px-4 py-3 text-sm font-semibold text-white shadow-[0_18px_32px_-24px_rgba(220,38,38,0.6)] transition-all duration-200 hover:translate-y-[-1px] hover:shadow-[0_24px_36px_-24px_rgba(220,38,38,0.75)]"
-                      style={{ background: 'linear-gradient(135deg, #ef6b4a 0%, #dc2626 100%)' }}
+                      className="flex w-full items-center justify-center rounded-2xl border border-transparent px-4 py-3 text-sm font-semibold text-white shadow-[0_18px_32px_-24px_rgba(37,99,235,0.62)] transition-all duration-200 hover:translate-y-[-1px] hover:shadow-[0_24px_36px_-24px_rgba(37,99,235,0.78)]"
+                      style={{ background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)' }}
                     >
                       <svg
                         className="mr-2 h-5 w-5"
@@ -275,7 +274,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children, title }) => {
           <div className="app-subheader">
             <div className={`${shellContainerClass} flex h-[104px] items-center`}>
               <div>
-                <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#b46c50]">
+                <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#2563eb]">
                   {t('adminLayout.workspace')}
                 </div>
                 <h1 className="mt-1 text-[1.8rem] font-bold tracking-[-0.04em] text-[#171212]">{title}</h1>

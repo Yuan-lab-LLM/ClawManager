@@ -5,22 +5,23 @@
 :root {
   --text: #696363;
   --text-h: #171212;
-  --bg: #f8f5f2;
+  --bg: #f8fafc;
   --surface: #ffffff;
-  --border: #eee5df;
-  --accent: #ef4444;
-  --accent-strong: #dc2626;
-  --accent-bg: rgba(239, 68, 68, 0.1);
-  --shell: linear-gradient(180deg, rgba(255, 255, 255, 0.96) 0%, rgba(255, 249, 245, 0.92) 100%);
-  --shell-warm: radial-gradient(circle at top left, #fff8f0 0%, #fff6f0 22%, #fbf4ef 45%, #f5efe9 100%);
-  --shadow-soft: 0 24px 70px -52px rgba(72, 44, 24, 0.5);
-  --shadow-strong: 0 30px 90px -54px rgba(72, 44, 24, 0.58);
+  --border: #dbe4f0;
+  --accent: #2563eb;
+  --accent-strong: #1d4ed8;
+  --accent-border: #93c5fd;
+  --accent-bg: rgba(37, 99, 235, 0.1);
+  --shell: linear-gradient(180deg, rgba(255, 255, 255, 0.97) 0%, rgba(248, 251, 255, 0.93) 100%);
+  --shell-warm: radial-gradient(circle at top left, #eff6ff 0%, #f8fbff 34%, #f7f9fc 68%, #f3f6fb 100%);
+  --shadow-soft: 0 24px 70px -52px rgba(30, 64, 175, 0.36);
+  --shadow-strong: 0 30px 90px -54px rgba(30, 64, 175, 0.42);
 }
 
 body {
   margin: 0;
   font-family: "Segoe UI Variable", "Segoe UI", "SF Pro Text", system-ui, sans-serif;
-  background: linear-gradient(180deg, #fbf8f5 0%, #f5f1ed 100%);
+  background: linear-gradient(180deg, #f8fbff 0%, #f3f6fb 100%);
   color: var(--text);
 }
 
@@ -32,20 +33,20 @@ body {
   .app-shell {
     @apply min-h-screen text-[#171212];
     background:
-      radial-gradient(circle at top, rgba(239, 107, 74, 0.06), transparent 34%),
-      linear-gradient(180deg, #fcf8f4 0%, #f5efea 100%);
+      radial-gradient(circle at top, rgba(37, 99, 235, 0.07), transparent 34%),
+      linear-gradient(180deg, #f8fbff 0%, #f3f6fb 100%);
   }
 
   .app-topbar {
-    @apply border-b border-[#eee5df] backdrop-blur;
+    @apply border-b border-[#dbe4f0] backdrop-blur;
     background: rgba(255, 255, 255, 0.9);
-    box-shadow: 0 12px 28px -28px rgba(72, 44, 24, 0.5);
+    box-shadow: 0 12px 28px -28px rgba(30, 64, 175, 0.35);
   }
 
   .app-subheader {
-    @apply border-b border-[#eee5df] backdrop-blur;
+    @apply border-b border-[#dbe4f0] backdrop-blur;
     background: rgba(255, 255, 255, 0.72);
-    box-shadow: 0 12px 24px -28px rgba(72, 44, 24, 0.45);
+    box-shadow: 0 12px 24px -28px rgba(30, 64, 175, 0.32);
   }
 
   .app-nav-link {
@@ -54,55 +55,55 @@ body {
 
   .app-nav-link:hover {
     @apply text-[#171212];
-    background: rgba(247, 236, 230, 0.82);
+    background: rgba(239, 246, 255, 0.9);
   }
 
   .app-nav-link-active {
-    @apply text-red-600;
-    background: rgba(255, 241, 235, 0.95);
-    box-shadow: inset 0 0 0 1px rgba(243, 199, 183, 0.8), 0 14px 28px -24px rgba(220, 38, 38, 0.5);
+    @apply text-blue-700;
+    background: rgba(219, 234, 254, 0.95);
+    box-shadow: inset 0 0 0 1px rgba(147, 197, 253, 0.82), 0 14px 28px -24px rgba(37, 99, 235, 0.5);
   }
 
   .app-panel {
-    @apply overflow-hidden rounded-[28px] border border-[#ead8cf];
+    @apply overflow-hidden rounded-[28px] border border-[#dbe4f0];
     background: var(--shell);
     box-shadow: var(--shadow-soft);
   }
 
   .app-panel-warm {
-    @apply overflow-hidden rounded-[32px] border border-[#ead8cf];
+    @apply overflow-hidden rounded-[32px] border border-[#dbe4f0];
     background: var(--shell-warm);
     box-shadow: var(--shadow-strong);
   }
 
   .app-input {
-    @apply rounded-2xl border border-[#e5d9d1] bg-white/95 px-4 py-3 text-sm text-[#171212] shadow-[0_10px_24px_-20px_rgba(72,44,24,0.45)] outline-none transition-all;
+    @apply rounded-2xl border border-[#d7e2ef] bg-white/95 px-4 py-3 text-sm text-[#171212] shadow-[0_10px_24px_-20px_rgba(30,64,175,0.3)] outline-none transition-all;
   }
 
   .app-input:focus {
-    @apply border-[#ef6b4a];
-    box-shadow: 0 0 0 4px rgba(239, 107, 74, 0.14), 0 10px 24px -20px rgba(72, 44, 24, 0.45);
+    @apply border-[#2563eb];
+    box-shadow: 0 0 0 4px rgba(96, 165, 250, 0.2), 0 10px 24px -20px rgba(30, 64, 175, 0.32);
   }
 
   .app-button-primary {
     @apply inline-flex items-center justify-center rounded-2xl border border-transparent px-5 py-3 text-sm font-semibold text-white transition-all duration-200;
-    background: linear-gradient(135deg, #ef6b4a 0%, #dc2626 100%);
-    box-shadow: 0 18px 32px -24px rgba(220, 38, 38, 0.6);
+    background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+    box-shadow: 0 18px 32px -24px rgba(37, 99, 235, 0.62);
   }
 
   .app-button-primary:hover {
     transform: translateY(-1px);
-    box-shadow: 0 24px 36px -24px rgba(220, 38, 38, 0.75);
+    box-shadow: 0 24px 36px -24px rgba(37, 99, 235, 0.78);
   }
 
   .app-button-secondary {
-    @apply inline-flex items-center justify-center rounded-2xl border border-[#eadfd8] px-5 py-3 text-sm font-semibold text-[#5f5957] transition-all duration-200;
+    @apply inline-flex items-center justify-center rounded-2xl border border-[#dbe4f0] px-5 py-3 text-sm font-semibold text-[#5f5957] transition-all duration-200;
     background: rgba(255, 255, 255, 0.92);
-    box-shadow: 0 14px 28px -24px rgba(72, 44, 24, 0.45);
+    box-shadow: 0 14px 28px -24px rgba(30, 64, 175, 0.34);
   }
 
   .app-button-secondary:hover {
-    @apply border-[#ef6b4a] text-[#171212];
-    background: rgba(255, 248, 245, 0.95);
+    @apply border-[#3b82f6] text-[#171212];
+    background: rgba(239, 246, 255, 0.95);
   }
 }

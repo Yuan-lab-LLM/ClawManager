@@ -78,7 +78,7 @@ const InstanceCardItem = React.memo(({
   getTypeIcon,
   t,
 }: InstanceItemProps) => (
-  <div className="app-panel transition-shadow duration-200 hover:shadow-[0_30px_80px_-52px_rgba(72,44,24,0.62)]">
+  <div className="app-panel transition-shadow duration-200 hover:shadow-[0_30px_80px_-52px_rgba(30,64,175,0.62)]">
     <div className="p-6">
       <div className="flex items-start justify-between">
         <div className="flex items-center">
@@ -176,7 +176,7 @@ const InstanceListItem = React.memo(({
       <div className="flex-1 min-w-0">
         <div className="flex items-center">
           <span className="text-xl mr-2">{getTypeIcon(instance.type)}</span>
-          <h3 className="text-lg font-medium text-[#dc2626] truncate">
+          <h3 className="text-lg font-medium text-[#2563eb] truncate">
             {instance.name}
           </h3>
           <span className={`ml-3 inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(instance.status)}`}>
@@ -516,7 +516,7 @@ const InstanceListPage: React.FC = () => {
           </Link>
           <Link
             to="/portal"
-            className="inline-flex items-center px-4 py-2 rounded-xl border border-[#eadfd8] bg-white text-sm font-medium text-[#5f5957] shadow-sm hover:bg-[#fff8f5]"
+            className="inline-flex items-center px-4 py-2 rounded-xl border border-[#dbe4f0] bg-white text-sm font-medium text-[#5f5957] shadow-sm hover:bg-[#f8fbff]"
           >
             <svg className="mr-2 h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L6 20.75V17H4a2 2 0 01-2-2V5a2 2 0 012-2h16a2 2 0 012 2v10a2 2 0 01-2 2h-2v3.75L14.25 17h-4.5z" />
@@ -539,7 +539,7 @@ const InstanceListPage: React.FC = () => {
               placeholder={t('instances.searchPlaceholder')}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="block w-full sm:w-64 pl-10 pr-3 py-2 border border-[#eadfd8] rounded-xl leading-5 bg-white placeholder-[#9c938e] focus:outline-none focus:placeholder-[#9c938e] focus:ring-1 focus:ring-[#f3d2c2] focus:border-[#ef4444] sm:text-sm"
+              className="block w-full sm:w-64 pl-10 pr-3 py-2 border border-[#dbe4f0] rounded-xl leading-5 bg-white placeholder-[#9c938e] focus:outline-none focus:placeholder-[#9c938e] focus:ring-1 focus:ring-[#93c5fd] focus:border-[#2563eb] sm:text-sm"
             />
           </div>
 
@@ -547,7 +547,7 @@ const InstanceListPage: React.FC = () => {
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
-            className="block w-full sm:w-auto pl-3 pr-10 py-2 text-base border-[#eadfd8] focus:outline-none focus:ring-[#f3d2c2] focus:border-[#ef4444] sm:text-sm rounded-xl"
+            className="block w-full sm:w-auto pl-3 pr-10 py-2 text-base border-[#dbe4f0] focus:outline-none focus:ring-[#93c5fd] focus:border-[#2563eb] sm:text-sm rounded-xl"
           >
             <option value="all">{t('status.all')}</option>
             <option value="running">{t('status.running')}</option>
@@ -562,8 +562,8 @@ const InstanceListPage: React.FC = () => {
               onClick={() => setViewMode('list')}
               className={`relative inline-flex items-center px-4 py-2 rounded-l-xl border text-sm font-medium focus:outline-none ${
                 viewMode === 'list'
-                  ? 'bg-[#ef4444] text-white border-[#ef4444]'
-                  : 'bg-white text-gray-700 border-[#eadfd8] hover:bg-[#fff8f5]'
+                  ? 'bg-[#2563eb] text-white border-[#2563eb]'
+                  : 'bg-white text-gray-700 border-[#dbe4f0] hover:bg-[#eff6ff]'
               }`}
             >
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -574,8 +574,8 @@ const InstanceListPage: React.FC = () => {
               onClick={() => setViewMode('card')}
               className={`relative inline-flex items-center px-4 py-2 rounded-r-xl border text-sm font-medium focus:outline-none ${
                 viewMode === 'card'
-                  ? 'bg-[#ef4444] text-white border-[#ef4444]'
-                  : 'bg-white text-gray-700 border-[#eadfd8] hover:bg-[#fff8f5]'
+                  ? 'bg-[#2563eb] text-white border-[#2563eb]'
+                  : 'bg-white text-gray-700 border-[#dbe4f0] hover:bg-[#eff6ff]'
               }`}
             >
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -631,7 +631,7 @@ const InstanceListPage: React.FC = () => {
           <div className="mt-6">
             <Link
               to="/instances/new"
-              className="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-xl text-white bg-[#ef4444] hover:bg-[#dc2626]"
+              className="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-xl text-white bg-[#2563eb] hover:bg-[#1d4ed8]"
             >
               {t('instances.createInstance')}
             </Link>

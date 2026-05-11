@@ -46,7 +46,7 @@ const UserDashboard: React.FC = () => {
       <div className="space-y-8">
         {/* Stats Cards */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <Link to="/instances" className="app-panel transition-all hover:-translate-y-0.5 hover:shadow-[0_30px_80px_-52px_rgba(72,44,24,0.62)]">
+          <Link to="/instances" className="app-panel transition-all hover:-translate-y-0.5 hover:shadow-[0_30px_80px_-52px_rgba(30,64,175,0.42)]">
             <div className="px-4 py-5 sm:p-6">
               <dt className="truncate text-sm font-medium text-[#8f8681]">
                 {t('userDashboard.myInstances')}
@@ -57,12 +57,12 @@ const UserDashboard: React.FC = () => {
             </div>
           </Link>
 
-          <Link to="/instances" className="app-panel transition-all hover:-translate-y-0.5 hover:shadow-[0_30px_80px_-52px_rgba(72,44,24,0.62)]">
+          <Link to="/instances" className="app-panel transition-all hover:-translate-y-0.5 hover:shadow-[0_30px_80px_-52px_rgba(30,64,175,0.42)]">
             <div className="px-4 py-5 sm:p-6">
-              <dt className="truncate text-sm font-medium text-[#8f5b4b]">
+              <dt className="truncate text-sm font-medium text-[#2563eb]">
                 {t('userDashboard.running')}
               </dt>
-              <dd className="mt-1 text-3xl font-semibold text-[#dc2626]">
+              <dd className="mt-1 text-3xl font-semibold text-[#2563eb]">
                 {runningCount}
               </dd>
             </div>
@@ -89,31 +89,31 @@ const UserDashboard: React.FC = () => {
             ) : quota ? (
               <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
                 <div className="text-center">
-                    <div className="text-2xl font-bold text-[#dc2626]">
+                    <div className="text-2xl font-bold text-[#2563eb]">
                     {instances.length} / {quota.max_instances}
                   </div>
                   <div className="text-sm text-gray-500">{t('userDashboard.instances')}</div>
                 </div>
                 <div className="text-center">
-                    <div className="text-2xl font-bold text-[#dc2626]">
+                    <div className="text-2xl font-bold text-[#2563eb]">
                     {quota.max_cpu_cores}
                   </div>
                   <div className="text-sm text-gray-500">{t('userDashboard.maxCpuCores')}</div>
                 </div>
                 <div className="text-center">
-                    <div className="text-2xl font-bold text-[#dc2626]">
+                    <div className="text-2xl font-bold text-[#2563eb]">
                     {quota.max_memory_gb} GB
                   </div>
                   <div className="text-sm text-gray-500">{t('userDashboard.maxMemory')}</div>
                 </div>
                 <div className="text-center">
-                    <div className="text-2xl font-bold text-[#dc2626]">
+                    <div className="text-2xl font-bold text-[#2563eb]">
                     {quota.max_storage_gb} GB
                   </div>
                   <div className="text-sm text-gray-500">{t('userDashboard.maxStorage')}</div>
                 </div>
                 <div className="text-center">
-                    <div className="text-2xl font-bold text-[#dc2626]">
+                    <div className="text-2xl font-bold text-[#2563eb]">
                     {quota.max_gpu_count}
                   </div>
                   <div className="text-sm text-gray-500">{t('userDashboard.maxGpus')}</div>
@@ -130,17 +130,17 @@ const UserDashboard: React.FC = () => {
           <div>
             <div className="flex justify-between items-center mb-4">
               <h2 className="text-lg font-medium text-gray-900">{t('userDashboard.recentInstances')}</h2>
-              <Link to="/instances" className="text-sm font-medium text-[#dc2626] hover:text-[#b91c1c]">
+              <Link to="/instances" className="text-sm font-medium text-[#2563eb] hover:text-[#1d4ed8]">
                 {t('userDashboard.viewAll')} →
               </Link>
             </div>
             <div className="app-panel">
-              <ul className="divide-y divide-[#f1e7e1]">
+              <ul className="divide-y divide-[#dbe4f0]">
                 {recentInstances.slice(0, 5).map((instance) => (
-                  <li key={instance.id} className="px-4 py-4 hover:bg-[#fff8f5]">
+                  <li key={instance.id} className="px-4 py-4 hover:bg-[#eff6ff]">
                     <Link to={`/instances/${instance.id}`} className="flex items-center justify-between">
                       <div>
-                        <h3 className="text-sm font-medium text-[#dc2626]">{instance.name}</h3>
+                        <h3 className="text-sm font-medium text-[#2563eb]">{instance.name}</h3>
                         <p className="text-sm text-gray-500">
                           {instance.type} • {instance.cpu_cores} CPU • {instance.memory_gb} GB RAM
                         </p>
@@ -217,6 +217,5 @@ const UserDashboard: React.FC = () => {
 };
 
 export default UserDashboard;
-
 
 

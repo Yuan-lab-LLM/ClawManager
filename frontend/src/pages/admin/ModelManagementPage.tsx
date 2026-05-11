@@ -246,7 +246,7 @@ const TEMPLATE_ICON_META: Record<string, { src: string; glyph: string; className
   fireworks: {
     src: '/vendor-icons/fireworks.ico',
     glyph: 'FW',
-    className: 'border-[#f6d6c4] bg-[#fff2ea] text-[#c05621]',
+    className: 'border-[#f6d6c4] bg-[#eff6ff] text-[#c05621]',
   },
   xai: {
     src: '/vendor-icons/xai.ico',
@@ -280,7 +280,7 @@ function resolveTemplateIconMeta(template?: ProviderTemplate) {
     return {
       src: '/vendor-icons/custom-endpoint.svg',
       glyph: 'AI',
-      className: 'border-[#eadfd8] bg-white text-[#7c5a4d]',
+      className: 'border-[#dbe4f0] bg-white text-[#7c5a4d]',
     };
   }
 
@@ -288,14 +288,14 @@ function resolveTemplateIconMeta(template?: ProviderTemplate) {
     return {
       src: '/vendor-icons/custom-endpoint.svg',
       glyph: 'CU',
-      className: 'border-[#eadfd8] bg-[#fff7f3] text-[#7c5a4d]',
+      className: 'border-[#dbe4f0] bg-[#f8fbff] text-[#7c5a4d]',
     };
   }
 
   return TEMPLATE_ICON_META[template.id] ?? {
     src: '/vendor-icons/custom-endpoint.svg',
     glyph: template.label.slice(0, 2).toUpperCase(),
-    className: 'border-[#eadfd8] bg-white text-[#7c5a4d]',
+    className: 'border-[#dbe4f0] bg-white text-[#7c5a4d]',
   };
 }
 
@@ -405,14 +405,14 @@ const ProviderTemplatePicker: React.FC<ProviderTemplatePickerProps> = ({
       <button
         type="button"
         onClick={() => setOpen((current) => !current)}
-        className="app-input mt-1 flex min-h-[56px] w-full items-center justify-between gap-4 text-left hover:border-[#ef6b4a]"
+        className="app-input mt-1 flex min-h-[56px] w-full items-center justify-between gap-4 text-left hover:border-[#2563eb]"
       >
         <div className="flex min-w-0 flex-1 items-center gap-3">
           <VendorTemplateIcon template={selectedTemplate} size="sm" />
           {selectedTemplate ? (
             <div className="min-w-0 flex flex-wrap items-center gap-2">
               <span className="text-sm font-semibold text-gray-900">{selectedTemplate.label}</span>
-              <span className="rounded-full border border-[#eadfd8] bg-[#fff7f3] px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.12em] text-[#8f5a47]">
+              <span className="rounded-full border border-[#dbe4f0] bg-[#f8fbff] px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.12em] text-[#8f5a47]">
                 {getTypeLabel(selectedTemplate.providerType)}
               </span>
             </div>
@@ -431,7 +431,7 @@ const ProviderTemplatePicker: React.FC<ProviderTemplatePickerProps> = ({
       </button>
 
       {open && (
-        <div className="absolute left-0 right-0 z-20 mt-2 overflow-hidden rounded-[26px] border border-[#ead8cf] bg-white shadow-[0_30px_60px_-36px_rgba(72,44,24,0.45)]">
+        <div className="absolute left-0 right-0 z-20 mt-2 overflow-hidden rounded-[26px] border border-[#dbe4f0] bg-white shadow-[0_30px_60px_-36px_rgba(30,64,175,0.45)]">
           <div className="border-b border-[#f1e3db] p-3">
             <input
               type="text"
@@ -468,7 +468,7 @@ const ProviderTemplatePicker: React.FC<ProviderTemplatePickerProps> = ({
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center justify-between gap-3">
                           <span className="text-sm font-semibold">{template.label}</span>
-                          <span className="rounded-full border border-[#eadfd8] bg-white px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.12em] text-[#8f5a47]">
+                          <span className="rounded-full border border-[#dbe4f0] bg-white px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.12em] text-[#8f5a47]">
                             {getTypeLabel(template.providerType)}
                           </span>
                         </div>
@@ -822,7 +822,7 @@ const ModelManagementPage: React.FC = () => {
                   return (
                     <div
                       key={card.local_id}
-                      className="flex h-full flex-col rounded-[26px] border border-[#ead8cf] bg-[rgba(255,248,245,0.84)] p-5 shadow-[0_18px_42px_-34px_rgba(72,44,24,0.42)]"
+                      className="flex h-full flex-col rounded-[26px] border border-[#dbe4f0] bg-[rgba(255,248,245,0.84)] p-5 shadow-[0_18px_42px_-34px_rgba(30,64,175,0.42)]"
                     >
                       <div className="flex items-start justify-between gap-4">
                         <div className="flex min-w-0 items-start gap-3">
@@ -843,7 +843,7 @@ const ModelManagementPage: React.FC = () => {
                               {t('modelManagementPage.secure')}
                             </span>
                           )}
-                          <span className={`rounded-full px-2.5 py-1 ${card.is_active ? 'border border-[#d9ead3] bg-[#f3fff0] text-[#2f6b2f]' : 'border border-[#eadfd8] bg-white text-[#7b6f6a]'}`}>
+                          <span className={`rounded-full px-2.5 py-1 ${card.is_active ? 'border border-[#d9ead3] bg-[#f3fff0] text-[#2f6b2f]' : 'border border-[#dbe4f0] bg-white text-[#7b6f6a]'}`}>
                             {card.is_active ? t('modelManagementPage.active') : t('modelManagementPage.inactive')}
                           </span>
                         </div>
@@ -908,7 +908,7 @@ const ModelManagementPage: React.FC = () => {
                   <div
                     key={card.local_id}
                     ref={card.isNew ? newCardRef : undefined}
-                    className="self-start rounded-[26px] border border-[#ead8cf] bg-[rgba(255,248,245,0.84)] p-5 shadow-[0_18px_42px_-34px_rgba(72,44,24,0.42)]"
+                    className="self-start rounded-[26px] border border-[#dbe4f0] bg-[rgba(255,248,245,0.84)] p-5 shadow-[0_18px_42px_-34px_rgba(30,64,175,0.42)]"
                   >
                     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                       <div>
@@ -961,7 +961,7 @@ const ModelManagementPage: React.FC = () => {
                       <div className="flex items-center justify-between gap-3">
                         <label className="block text-sm font-medium text-gray-700">{t('modelManagementPage.baseUrl')}</label>
                         {currentTemplate && (
-                          <span className="rounded-full border border-[#eadfd8] bg-[#fff7f3] px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.12em] text-[#8f5a47]">
+                          <span className="rounded-full border border-[#dbe4f0] bg-[#f8fbff] px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.12em] text-[#8f5a47]">
                             {getProviderTypeLabel(currentTemplate.providerType)}
                           </span>
                         )}
@@ -979,7 +979,7 @@ const ModelManagementPage: React.FC = () => {
                         </>
                       ) : (
                         <>
-                          <div className="mt-1 rounded-[22px] border border-[#e5d9d1] bg-white/90 px-4 py-4 text-sm text-[#171212] shadow-[0_10px_24px_-20px_rgba(72,44,24,0.45)]">
+                          <div className="mt-1 rounded-[22px] border border-[#e5d9d1] bg-white/90 px-4 py-4 text-sm text-[#171212] shadow-[0_10px_24px_-20px_rgba(30,64,175,0.45)]">
                             {currentTemplate ? (
                               <span className="break-all">{currentTemplate.baseUrl}</span>
                             ) : (
@@ -1021,7 +1021,7 @@ const ModelManagementPage: React.FC = () => {
                           type="button"
                           onClick={() => void discoverModels(card.local_id, true)}
                           disabled={!canDiscover(card) || card.discovering}
-                          className="rounded-xl border border-[#ead8cf] bg-white px-3 py-1 text-xs font-medium text-[#7c5a4d] hover:bg-[#fff5f0] disabled:cursor-not-allowed disabled:opacity-50"
+                          className="rounded-xl border border-[#dbe4f0] bg-white px-3 py-1 text-xs font-medium text-[#7c5a4d] hover:bg-[#fff5f0] disabled:cursor-not-allowed disabled:opacity-50"
                         >
                           {card.discovering ? t('common.loading') : t('common.refresh')}
                         </button>
@@ -1143,7 +1143,7 @@ const ModelManagementPage: React.FC = () => {
                             {t('modelManagementPage.secure')}
                           </span>
                         )}
-                        <span className={`rounded-full px-2.5 py-1 ${card.is_active ? 'border border-[#d9ead3] bg-[#f3fff0] text-[#2f6b2f]' : 'border border-[#eadfd8] bg-white text-[#7b6f6a]'}`}>
+                        <span className={`rounded-full px-2.5 py-1 ${card.is_active ? 'border border-[#d9ead3] bg-[#f3fff0] text-[#2f6b2f]' : 'border border-[#dbe4f0] bg-white text-[#7b6f6a]'}`}>
                           {card.is_active ? t('modelManagementPage.active') : t('modelManagementPage.inactive')}
                         </span>
                       </div>
@@ -1182,7 +1182,7 @@ const ModelManagementPage: React.FC = () => {
           )}
 
           {!loading && models.length === 0 && (
-            <div className="mt-6 rounded-[24px] border border-dashed border-[#ead8cf] bg-[rgba(255,248,245,0.72)] px-6 py-10 text-center text-sm text-gray-500">
+            <div className="mt-6 rounded-[24px] border border-dashed border-[#dbe4f0] bg-[rgba(255,248,245,0.72)] px-6 py-10 text-center text-sm text-gray-500">
               {t('modelManagementPage.empty')}
             </div>
           )}

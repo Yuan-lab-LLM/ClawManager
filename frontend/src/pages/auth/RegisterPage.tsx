@@ -148,7 +148,7 @@ const RegisterPage: React.FC = () => {
         <div className="mt-6 text-center">
           <p className="text-sm text-gray-600">
             {t('auth.alreadyHaveAccount')}{' '}
-            <Link to="/login" className="font-medium text-[#dc2626] hover:text-[#b91c1c]">
+            <Link to="/login" className="font-medium text-[#2563eb] hover:text-[#1d4ed8]">
               {t('auth.signIn')}
             </Link>
           </p>

@@ -369,7 +369,7 @@ const InstancePortalPage: React.FC = () => {
                           type="button"
                           onClick={() => setSelectedId(instance.id)}
                           className={`flex w-full items-start gap-3 px-5 py-4 text-left transition-colors ${
-                            isSelected ? "bg-[#fff7f3]" : "hover:bg-[#fffaf7]"
+                            isSelected ? "bg-[#f8fbff]" : "hover:bg-[#f8fbff]"
                           }`}
                         >
                           <span
@@ -378,7 +378,7 @@ const InstancePortalPage: React.FC = () => {
                           <div className="min-w-0 flex-1">
                             <div className="flex items-center justify-between gap-3">
                               <p
-                                className={`truncate text-sm font-semibold ${isSelected ? "text-[#dc2626]" : "text-[#171212]"}`}
+                                className={`truncate text-sm font-semibold ${isSelected ? "text-[#2563eb]" : "text-[#171212]"}`}
                               >
                                 {instance.name}
                               </p>

@@ -203,7 +203,7 @@ const SystemSettingsPage: React.FC = () => {
                 const defaultImage = IMAGE_TYPE_OPTIONS.find((option) => option.value === card.instance_type)?.defaultImage ?? '-';
 
                 return (
-                  <div key={card.local_id} className="rounded-[26px] border border-[#ead8cf] bg-[rgba(255,248,245,0.84)] p-5 shadow-[0_18px_42px_-34px_rgba(72,44,24,0.42)]">
+                  <div key={card.local_id} className="rounded-[26px] border border-[#dbe4f0] bg-[rgba(255,248,245,0.84)] p-5 shadow-[0_18px_42px_-34px_rgba(30,64,175,0.42)]">
                     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                       <div>
                         <label className="block text-sm font-medium text-gray-700">{t('systemSettingsPage.instanceType')}</label>
@@ -276,7 +276,7 @@ const SystemSettingsPage: React.FC = () => {
           )}
 
           {!loading && cards.length === 0 && (
-            <div className="mt-6 rounded-[24px] border border-dashed border-[#ead8cf] bg-[rgba(255,248,245,0.72)] px-6 py-10 text-center text-sm text-gray-500">
+            <div className="mt-6 rounded-[24px] border border-dashed border-[#dbe4f0] bg-[rgba(255,248,245,0.72)] px-6 py-10 text-center text-sm text-gray-500">
               {t('systemSettingsPage.empty')}
             </div>
           )}

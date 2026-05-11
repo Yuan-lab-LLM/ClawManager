@@ -62,14 +62,14 @@ const AdminSecurityReportsPage: React.FC = () => {
         ) : null}
 
         <section className="grid grid-cols-1 gap-6 xl:grid-cols-[380px_minmax(0,1fr)]">
-          <div className="rounded-[28px] border border-[#eadfd8] bg-white p-6 shadow-[0_24px_60px_-42px_rgba(72,44,24,0.35)]">
+          <div className="rounded-[28px] border border-[#dbe4f0] bg-white p-6 shadow-[0_24px_60px_-42px_rgba(30,64,175,0.35)]">
             <div>
               <h2 className="text-lg font-semibold text-[#171212]">{t('securityCenter.reports.title')}</h2>
               <p className="mt-1 text-sm text-[#8f8681]">{t('securityCenter.reports.subtitle')}</p>
             </div>
             <div className="mt-5 space-y-3">
               {jobs.length === 0 ? (
-                <div className="rounded-2xl border border-dashed border-[#eadfd8] px-4 py-8 text-sm text-[#8f8681]">{t('securityCenter.reports.noJobs')}</div>
+                <div className="rounded-2xl border border-dashed border-[#dbe4f0] px-4 py-8 text-sm text-[#8f8681]">{t('securityCenter.reports.noJobs')}</div>
               ) : (
                 jobs.map((job) => (
                   <button
@@ -77,7 +77,7 @@ const AdminSecurityReportsPage: React.FC = () => {
                     type="button"
                     onClick={() => setSelectedJobId(job.id)}
                     className={`w-full rounded-2xl border px-4 py-4 text-left transition ${
-                      selectedJobId === job.id ? 'border-[#f2b7a0] bg-[#fff1eb]' : 'border-[#eadfd8] bg-[#fffaf7] hover:border-[#dcc6b8]'
+                      selectedJobId === job.id ? 'border-[#93c5fd] bg-[#dbeafe]' : 'border-[#dbe4f0] bg-[#f8fbff] hover:border-[#dcc6b8]'
                     }`}
                   >
                     <div className="flex items-start justify-between gap-3">
@@ -105,7 +105,7 @@ const AdminSecurityReportsPage: React.FC = () => {
                       </Badge>
                     </div>
                     <div className="mt-3 h-2 overflow-hidden rounded-full bg-[#f3e7df]">
-                      <div className="h-full rounded-full bg-[#dc2626]" style={{ width: `${job.progress_pct}%` }} />
+                      <div className="h-full rounded-full bg-[#2563eb]" style={{ width: `${job.progress_pct}%` }} />
                     </div>
                   </button>
                 ))
@@ -113,14 +113,14 @@ const AdminSecurityReportsPage: React.FC = () => {
             </div>
           </div>
 
-          <div className="rounded-[28px] border border-[#eadfd8] bg-white p-6 shadow-[0_24px_60px_-42px_rgba(72,44,24,0.35)]">
+          <div className="rounded-[28px] border border-[#dbe4f0] bg-white p-6 shadow-[0_24px_60px_-42px_rgba(30,64,175,0.35)]">
             {!selectedJob ? (
-              <div className="rounded-2xl border border-dashed border-[#eadfd8] px-4 py-10 text-center text-sm text-[#8f8681]">
+              <div className="rounded-2xl border border-dashed border-[#dbe4f0] px-4 py-10 text-center text-sm text-[#8f8681]">
                 {t('securityCenter.reports.selectJob')}
               </div>
             ) : (
               <div className="space-y-5">
-                <div className="rounded-2xl border border-[#efe1d8] bg-[#fffaf7] p-4">
+                <div className="rounded-2xl border border-[#efe1d8] bg-[#f8fbff] p-4">
                   <div className="flex items-center justify-between gap-3">
                     <div className="font-medium text-[#171212]">
                       {t('securityCenter.reports.jobTitle', {
@@ -134,7 +134,7 @@ const AdminSecurityReportsPage: React.FC = () => {
                     </Badge>
                   </div>
                   <div className="mt-3 h-2 overflow-hidden rounded-full bg-[#f3e7df]">
-                    <div className="h-full rounded-full bg-[#dc2626]" style={{ width: `${selectedJob.progress_pct}%` }} />
+                    <div className="h-full rounded-full bg-[#2563eb]" style={{ width: `${selectedJob.progress_pct}%` }} />
                   </div>
                   <div className="mt-3 text-xs text-[#8f8681]">
                     {t('securityCenter.reports.completedProgress', {
@@ -163,7 +163,7 @@ const AdminSecurityReportsPage: React.FC = () => {
                       ))}
                     </div>
 
-                    <div className="rounded-2xl border border-[#efe1d8] bg-[#fffaf7] p-4">
+                    <div className="rounded-2xl border border-[#efe1d8] bg-[#f8fbff] p-4">
                       <div className="text-sm font-medium text-[#171212]">{t('securityCenter.reports.analyzerView')}</div>
                       <p className="mt-1 text-xs leading-5 text-[#8f8681]">
                         {t('securityCenter.reports.analyzerViewDesc')}
@@ -179,7 +179,7 @@ const AdminSecurityReportsPage: React.FC = () => {
                       <div className="text-sm font-medium text-[#171212]">{t('securityCenter.reports.itemResults')}</div>
                       <div className="mt-3 max-h-[720px] space-y-3 overflow-y-auto pr-1">
                         {(selectedJob.report.items ?? []).map((item: any) => (
-                          <div key={item.id} className="rounded-2xl border border-[#efe1d8] bg-[#fffaf7] px-4 py-3">
+                          <div key={item.id} className="rounded-2xl border border-[#efe1d8] bg-[#f8fbff] px-4 py-3">
                             <div className="flex items-start justify-between gap-3">
                               <div className="min-w-0 flex-1">
                                 <div className="font-medium text-[#171212]">{item.asset_name}</div>
@@ -216,7 +216,7 @@ const AdminSecurityReportsPage: React.FC = () => {
                                           </div>
                                         ) : null}
                                         {finding.snippet ? (
-                                          <pre className="mt-2 overflow-x-auto rounded-lg bg-[#fff8f5] px-3 py-2 text-xs text-[#7a4b34]">{finding.snippet}</pre>
+                                          <pre className="mt-2 overflow-x-auto rounded-lg bg-[#f8fbff] px-3 py-2 text-xs text-[#7a4b34]">{finding.snippet}</pre>
                                         ) : null}
                                         {finding.remediation ? (
                                           <div className="mt-2 text-xs leading-5 text-[#8f8681]">{t('securityCenter.reports.remediation', { value: finding.remediation })}</div>
