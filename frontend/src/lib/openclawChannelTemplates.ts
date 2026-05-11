@@ -37,6 +37,12 @@ export const OPENCLAW_CHANNEL_TEMPLATES: OpenClawChannelTemplate[] = [
     dmPolicy: 'open',
     allowFrom: ['*'],
   }),
+  createChannelTemplate('dingtalk-connector', 'DingTalk', 'DingTalk channel with client credentials and sender allowlist controls.', 'builtin', {
+    enabled: true,
+    clientId: '',
+    clientSecret: '',
+    allowFrom: ['*'],
+  }),
   createChannelTemplate('slack', 'Slack', 'Slack workspace app powered by Bolt.', 'builtin', {
     enabled: true,
     appToken: '',

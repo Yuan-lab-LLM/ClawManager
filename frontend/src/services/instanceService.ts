@@ -181,6 +181,23 @@ export const instanceService = {
     });
   },
 
+  exportHermesWorkspace: async (id: number): Promise<Blob> => {
+    const response = await api.get(`/instances/${id}/hermes/export`, {
+      responseType: "blob",
+    });
+    return response.data;
+  },
+
+  importHermesWorkspace: async (id: number, file: File): Promise<void> => {
+    const formData = new FormData();
+    formData.append("file", file);
+    await api.post(`/instances/${id}/hermes/import`, formData, {
+      headers: {
+        "Content-Type": "multipart/form-data",
+      },
+    });
+  },
+
   listSkills: async (id: number): Promise<InstanceSkill[]> => {
     const response = await api.get(`/instances/${id}/skills`);
     return response.data.data;

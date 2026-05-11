@@ -36,6 +36,7 @@ type Hub struct {
 	register   chan *Client
 	unregister chan *Client
 	mu         sync.RWMutex
+	stop       chan struct{}
 }
 
 // Message represents a WebSocket message
@@ -56,14 +57,17 @@ type InstanceStatusUpdate struct {
 	UpdatedAt  string `json:"updated_at"`
 }
 
-var hub *Hub
+var (
+	hub     *Hub
+	hubOnce sync.Once
+)
 
 // GetHub returns the global hub instance
 func GetHub() *Hub {
-	if hub == nil {
+	hubOnce.Do(func() {
 		hub = NewHub()
 		go hub.Run()
-	}
+	})
 	return hub
 }
 
@@ -74,6 +78,7 @@ func NewHub() *Hub {
 		broadcast:  make(chan *Message),
 		register:   make(chan *Client),
 		unregister: make(chan *Client),
+		stop:       make(chan struct{}),
 	}
 }
 
@@ -81,6 +86,16 @@ func NewHub() *Hub {
 func (h *Hub) Run() {
 	for {
 		select {
+		case <-h.stop:
+			h.mu.Lock()
+			for client := range h.clients {
+				close(client.Send)
+				delete(h.clients, client)
+			}
+			h.mu.Unlock()
+			log.Println("WebSocket hub stopped")
+			return
+
 		case client := <-h.register:
 			h.mu.Lock()
 			h.clients[client] = true
@@ -261,4 +276,10 @@ func (h *Hub) GetClientCount() int {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	return len(h.clients)
+}
+
+
+// Stop gracefully shuts down the hub, closing all client connections.
+func (h *Hub) Stop() {
+	close(h.stop)
 }

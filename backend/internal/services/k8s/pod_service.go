@@ -18,6 +18,11 @@ type PodService struct {
 	client *Client
 }
 
+const (
+	podDeletionPollInterval = 500 * time.Millisecond
+	podDeletionTimeout      = 60 * time.Second
+)
+
 // NewPodService creates a new Pod service
 func NewPodService() *PodService {
 	return &PodService{
@@ -36,13 +41,14 @@ type PodConfig struct {
 	InstanceName       string
 	UserID             int
 	Type               string
-	CPUCores           int
+	CPUCores           float64
 	MemoryGB           int
 	GPUEnabled         bool
 	GPUCount           int
 	Image              string
 	MountPath          string
 	ContainerPort      int32
+	ImagePullPolicy    corev1.PullPolicy
 	ExtraEnv           map[string]string
 	EnvFromSecretNames []string
 }
@@ -61,11 +67,11 @@ func (s *PodService) CreatePod(ctx context.Context, config PodConfig) (*corev1.P
 	// Build resource requirements
 	resources := corev1.ResourceRequirements{
 		Requests: corev1.ResourceList{
-			corev1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", config.CPUCores)),
+			corev1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%g", config.CPUCores)),
 			corev1.ResourceMemory: resource.MustParse(fmt.Sprintf("%dGi", config.MemoryGB)),
 		},
 		Limits: corev1.ResourceList{
-			corev1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", config.CPUCores)),
+			corev1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%g", config.CPUCores)),
 			corev1.ResourceMemory: resource.MustParse(fmt.Sprintf("%dGi", config.MemoryGB)),
 		},
 	}
@@ -79,6 +85,14 @@ func (s *PodService) CreatePod(ctx context.Context, config PodConfig) (*corev1.P
 	// Default container port
 	if config.ContainerPort == 0 {
 		config.ContainerPort = 3001
+	}
+
+	// Default image pull policy to IfNotPresent so that air-gapped and
+	// enterprise environments can use locally cached images without being
+	// forced to pull from a remote registry (fixes #94).
+	pullPolicy := config.ImagePullPolicy
+	if pullPolicy == "" {
+		pullPolicy = corev1.PullIfNotPresent
 	}
 
 	pod := &corev1.Pod{
@@ -99,8 +113,9 @@ func (s *PodService) CreatePod(ctx context.Context, config PodConfig) (*corev1.P
 			RestartPolicy: corev1.RestartPolicyNever,
 			Containers: []corev1.Container{
 				{
-					Name:  "desktop",
-					Image: config.Image,
+					Name:            "desktop",
+					Image:           config.Image,
+					ImagePullPolicy: pullPolicy,
 					Ports: []corev1.ContainerPort{
 						{
 							ContainerPort: config.ContainerPort,
@@ -193,18 +208,20 @@ func (s *PodService) CreatePod(ctx context.Context, config PodConfig) (*corev1.P
 	if err != nil {
 		// Check if pod already exists
 		if errors.IsAlreadyExists(err) {
-			// Try to get the existing pod
-			existingPod, getErr := s.GetPod(ctx, config.UserID, config.InstanceID)
+			// Try to get the existing pod with the same name. It may still be terminating.
+			existingPod, getErr := s.client.Clientset.CoreV1().Pods(namespace).Get(ctx, podName, metav1.GetOptions{})
 			if getErr == nil && existingPod != nil {
-				// Pod exists, delete it and recreate
-				deleteErr := s.client.Clientset.CoreV1().Pods(namespace).Delete(ctx, existingPod.Name, metav1.DeleteOptions{})
-				if deleteErr != nil && !errors.IsNotFound(deleteErr) {
-					return nil, fmt.Errorf("failed to delete existing pod %s: %w", existingPod.Name, deleteErr)
+				if existingPod.DeletionTimestamp == nil {
+					deleteErr := s.client.Clientset.CoreV1().Pods(namespace).Delete(ctx, existingPod.Name, metav1.DeleteOptions{})
+					if deleteErr != nil && !errors.IsNotFound(deleteErr) {
+						return nil, fmt.Errorf("failed to delete existing pod %s: %w", existingPod.Name, deleteErr)
+					}
 				}
-				// Wait for pod to be deleted
-				select {
-				case <-time.After(5 * time.Second):
+
+				if waitErr := s.waitForPodDeletion(ctx, namespace, existingPod.Name); waitErr != nil {
+					return nil, fmt.Errorf("failed waiting for pod deletion %s: %w", existingPod.Name, waitErr)
 				}
+
 				// Retry creation
 				createdPod, err = s.client.Clientset.CoreV1().Pods(namespace).Create(ctx, pod, metav1.CreateOptions{})
 				if err != nil {
@@ -271,8 +288,12 @@ func (s *PodService) DeletePod(ctx context.Context, userID, instanceID int) erro
 	}
 
 	err = s.client.Clientset.CoreV1().Pods(pod.Namespace).Delete(ctx, pod.Name, metav1.DeleteOptions{})
-	if err != nil {
+	if err != nil && !errors.IsNotFound(err) {
 		return fmt.Errorf("failed to delete pod %s: %w", pod.Name, err)
+	}
+
+	if err := s.waitForPodDeletion(ctx, pod.Namespace, pod.Name); err != nil {
+		return fmt.Errorf("failed waiting for pod %s to be deleted: %w", pod.Name, err)
 	}
 
 	return nil
@@ -324,4 +345,31 @@ func containsSubstring(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+func (s *PodService) waitForPodDeletion(ctx context.Context, namespace, podName string) error {
+	waitCtx, cancel := context.WithTimeout(ctx, podDeletionTimeout)
+	defer cancel()
+
+	ticker := time.NewTicker(podDeletionPollInterval)
+	defer ticker.Stop()
+
+	for {
+		_, err := s.client.Clientset.CoreV1().Pods(namespace).Get(waitCtx, podName, metav1.GetOptions{})
+		if errors.IsNotFound(err) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("failed to check pod %s: %w", podName, err)
+		}
+
+		select {
+		case <-waitCtx.Done():
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			return fmt.Errorf("timed out waiting for pod %s deletion", podName)
+		case <-ticker.C:
+		}
+	}
 }

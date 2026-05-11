@@ -1,7 +1,13 @@
 package main
 
 import (
+	"context"
 	"log"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"clawreef/internal/aigateway"
 	"clawreef/internal/config"
@@ -123,7 +129,6 @@ func main() {
 	// Start sync service to keep instance status in sync with K8s
 	syncService := services.NewSyncService(instanceRepo, instanceRuntimeStatusService)
 	syncService.Start()
-	defer syncService.Stop()
 
 	// Setup router
 	r := gin.Default()
@@ -194,9 +199,23 @@ func main() {
 			instances.POST("/:id/sync", instanceHandler.ForceSync)
 			instances.GET("/:id/openclaw/export", instanceHandler.ExportOpenClaw)
 			instances.POST("/:id/openclaw/import", instanceHandler.ImportOpenClaw)
+			instances.GET("/:id/hermes/export", instanceHandler.ExportHermes)
+			instances.POST("/:id/hermes/import", instanceHandler.ImportHermes)
 			instances.GET("/:id/skills", skillHandler.ListInstanceSkills)
 			instances.POST("/:id/skills", skillHandler.AttachSkillToInstance)
 			instances.DELETE("/:id/skills/:skillId", skillHandler.RemoveSkillFromInstance)
+		}
+
+		// Admin console: cross-user instance listing. Gated by admin
+		// middleware — non-admin callers get 403. The workspace
+		// /instances endpoint above stays caller-scoped regardless of
+		// role; admin status only unlocks this dedicated surface.
+		adminInstances := api.Group("/admin/instances")
+		adminInstances.Use(middleware.Auth())
+		adminInstances.Use(middleware.SetUserInfo(userRepo))
+		adminInstances.Use(middleware.NewAdminAuth(userRepo))
+		{
+			adminInstances.GET("", instanceHandler.ListAllInstances)
 		}
 
 		openClawConfigs := api.Group("/openclaw-configs")
@@ -353,9 +372,37 @@ func main() {
 		}
 	}
 
-	// Start server
-	log.Printf("Server starting on %s", cfg.Server.Address)
-	if err := r.Run(cfg.Server.Address); err != nil {
-		log.Fatalf("Failed to start server: %v", err)
+	// Start server with graceful shutdown
+	srv := &http.Server{
+		Addr:    cfg.Server.Address,
+		Handler: r,
 	}
+
+	go func() {
+		log.Printf("Server starting on %s", cfg.Server.Address)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Failed to start server: %v", err)
+		}
+	}()
+
+	// Wait for interrupt signal
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	sig := <-quit
+	log.Printf("Received signal %v, shutting down gracefully...", sig)
+
+	// Give active requests up to 10 seconds to finish
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Printf("HTTP server forced to shutdown: %v", err)
+	}
+
+	// Stop background services
+	syncService.Stop()
+	wsHub.Stop()
+	instanceHandler.Shutdown()
+
+	log.Println("Server exited cleanly")
 }

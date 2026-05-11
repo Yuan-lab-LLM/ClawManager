@@ -13,7 +13,7 @@ type QuotaService interface {
 	GetUserQuota(userID int) (*models.UserQuota, error)
 	UpdateUserQuota(userID int, quota *models.UserQuota) error
 	CreateDefaultQuota(userID int) (*models.UserQuota, error)
-	CheckUserQuota(userID int, requiredCPU, requiredMemory, requiredStorage int) error
+	CheckUserQuota(userID int, requiredCPU float64, requiredMemory, requiredStorage int) error
 }
 
 // quotaService implements QuotaService
@@ -75,7 +75,7 @@ func (s *quotaService) CreateDefaultQuota(userID int) (*models.UserQuota, error)
 }
 
 // CheckUserQuota checks if user has enough quota for new instance
-func (s *quotaService) CheckUserQuota(userID int, requiredCPU, requiredMemory, requiredStorage int) error {
+func (s *quotaService) CheckUserQuota(userID int, requiredCPU float64, requiredMemory, requiredStorage int) error {
 	quota, err := s.GetUserQuota(userID)
 	if err != nil {
 		return fmt.Errorf("failed to get user quota: %w", err)

@@ -1,13 +1,13 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { createPortal } from 'react-dom';
-import UserLayout from '../../components/UserLayout';
-import { useI18n } from '../../contexts/I18nContext';
+import React, { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
+import UserLayout from "../../components/UserLayout";
+import { useI18n } from "../../contexts/I18nContext";
 import {
   findOpenClawChannelTemplate,
   OPENCLAW_CHANNEL_TEMPLATES,
-} from '../../lib/openclawChannelTemplates';
-import { openclawConfigService } from '../../services/openclawConfigService';
-import { skillService } from '../../services/skillService';
+} from "../../lib/openclawChannelTemplates";
+import { openclawConfigService } from "../../services/openclawConfigService";
+import { skillService } from "../../services/skillService";
 import type {
   OpenClawConfigBundle,
   OpenClawConfigBundleItem,
@@ -17,123 +17,158 @@ import type {
   OpenClawResourceType,
   UpsertOpenClawConfigBundleRequest,
   UpsertOpenClawConfigResourceRequest,
-} from '../../types/openclawConfig';
-import { OPENCLAW_RESOURCE_TYPES } from '../../types/openclawConfig';
-import type { Skill } from '../../types/skill';
+} from "../../types/openclawConfig";
+import { OPENCLAW_RESOURCE_TYPES } from "../../types/openclawConfig";
+import type { Skill } from "../../types/skill";
 
-type ConfigCenterTab = 'resources' | 'bundles' | 'injections';
+type ConfigCenterTab = "resources" | "bundles" | "injections";
 
-const CONFIG_CENTER_HIDDEN_RESOURCE_TYPES: OpenClawResourceType[] = ['session_template', 'log_policy'];
+const CONFIG_CENTER_HIDDEN_RESOURCE_TYPES: OpenClawResourceType[] = [
+  "session_template",
+  "log_policy",
+];
 const CONFIG_CENTER_RESOURCE_TYPES = OPENCLAW_RESOURCE_TYPES.filter(
   (item) => !CONFIG_CENTER_HIDDEN_RESOURCE_TYPES.includes(item.value),
 );
-const CONFIG_CENTER_CONFIGURABLE_RESOURCE_TYPES: OpenClawResourceType[] = ['channel', 'skill'];
+const CONFIG_CENTER_CONFIGURABLE_RESOURCE_TYPES: OpenClawResourceType[] = [
+  "channel",
+  "skill",
+];
 const CONFIG_CENTER_PAGE_SIZE = 8;
 
 const RESOURCE_TYPE_I18N_KEYS: Record<OpenClawResourceType, string> = {
-  channel: 'openClawResourcesPage.resourceTypes.channel',
-  skill: 'openClawResourcesPage.resourceTypes.skill',
-  session_template: 'openClawResourcesPage.resourceTypes.session_template',
-  log_policy: 'openClawResourcesPage.resourceTypes.log_policy',
-  agent: 'openClawResourcesPage.resourceTypes.agent',
-  scheduled_task: 'openClawResourcesPage.resourceTypes.scheduled_task',
+  channel: "openClawResourcesPage.resourceTypes.channel",
+  skill: "openClawResourcesPage.resourceTypes.skill",
+  session_template: "openClawResourcesPage.resourceTypes.session_template",
+  log_policy: "openClawResourcesPage.resourceTypes.log_policy",
+  agent: "openClawResourcesPage.resourceTypes.agent",
+  scheduled_task: "openClawResourcesPage.resourceTypes.scheduled_task",
 };
 
-const INJECTION_MODE_I18N_KEYS: Record<OpenClawConfigMode | 'archive', string> = {
-  none: 'openClawResourcesPage.recordModes.none',
-  manual: 'openClawResourcesPage.recordModes.manual',
-  bundle: 'openClawResourcesPage.recordModes.bundle',
-  archive: 'openClawResourcesPage.recordModes.archive',
-};
+const INJECTION_MODE_I18N_KEYS: Record<OpenClawConfigMode | "archive", string> =
+  {
+    none: "openClawResourcesPage.recordModes.none",
+    manual: "openClawResourcesPage.recordModes.manual",
+    bundle: "openClawResourcesPage.recordModes.bundle",
+    archive: "openClawResourcesPage.recordModes.archive",
+  };
 
 const SNAPSHOT_STATUS_I18N_KEYS: Record<string, string> = {
-  compiled: 'openClawResourcesPage.recordStatuses.compiled',
-  active: 'openClawResourcesPage.recordStatuses.active',
-  failed: 'openClawResourcesPage.recordStatuses.failed',
+  compiled: "openClawResourcesPage.recordStatuses.compiled",
+  active: "openClawResourcesPage.recordStatuses.active",
+  failed: "openClawResourcesPage.recordStatuses.failed",
 };
 
 const CHANNEL_TEMPLATE_LABEL_I18N_KEYS: Record<string, string> = {
-  telegram: 'openClawResourcesPage.templates.telegram.label',
-  slack: 'openClawResourcesPage.templates.slack.label',
-  feishu: 'openClawResourcesPage.templates.feishu.label',
+  telegram: "openClawResourcesPage.templates.telegram.label",
+  "dingtalk-connector":
+    "openClawResourcesPage.templates.dingtalkConnector.label",
+  slack: "openClawResourcesPage.templates.slack.label",
+  feishu: "openClawResourcesPage.templates.feishu.label",
 };
 
 const CHANNEL_TEMPLATE_DESCRIPTION_I18N_KEYS: Record<string, string> = {
-  telegram: 'openClawResourcesPage.templates.telegram.description',
-  slack: 'openClawResourcesPage.templates.slack.description',
-  feishu: 'openClawResourcesPage.templates.feishu.description',
+  telegram: "openClawResourcesPage.templates.telegram.description",
+  "dingtalk-connector":
+    "openClawResourcesPage.templates.dingtalkConnector.description",
+  slack: "openClawResourcesPage.templates.slack.description",
+  feishu: "openClawResourcesPage.templates.feishu.description",
 };
 
 const defaultContentByType: Record<OpenClawResourceType, string> = {
   channel: JSON.stringify({}, null, 2),
-  skill: JSON.stringify({
-    schemaVersion: 1,
-    kind: 'skill',
-    format: 'skill/custom@v1',
-    dependsOn: [],
-    config: {},
-  }, null, 2),
-  session_template: JSON.stringify({
-    schemaVersion: 1,
-    kind: 'session_template',
-    format: 'session/default@v1',
-    dependsOn: [],
-    config: {},
-  }, null, 2),
-  log_policy: JSON.stringify({
-    schemaVersion: 1,
-    kind: 'log_policy',
-    format: 'log/policy@v1',
-    dependsOn: [],
-    config: {},
-  }, null, 2),
-  agent: JSON.stringify({
-    schemaVersion: 1,
-    kind: 'agent',
-    format: 'agent/default@v1',
-    dependsOn: [],
-    config: {},
-  }, null, 2),
-  scheduled_task: JSON.stringify({
-    schemaVersion: 1,
-    kind: 'scheduled_task',
-    format: 'task/default@v1',
-    dependsOn: [],
-    config: {},
-  }, null, 2),
+  skill: JSON.stringify(
+    {
+      schemaVersion: 1,
+      kind: "skill",
+      format: "skill/custom@v1",
+      dependsOn: [],
+      config: {},
+    },
+    null,
+    2,
+  ),
+  session_template: JSON.stringify(
+    {
+      schemaVersion: 1,
+      kind: "session_template",
+      format: "session/default@v1",
+      dependsOn: [],
+      config: {},
+    },
+    null,
+    2,
+  ),
+  log_policy: JSON.stringify(
+    {
+      schemaVersion: 1,
+      kind: "log_policy",
+      format: "log/policy@v1",
+      dependsOn: [],
+      config: {},
+    },
+    null,
+    2,
+  ),
+  agent: JSON.stringify(
+    {
+      schemaVersion: 1,
+      kind: "agent",
+      format: "agent/default@v1",
+      dependsOn: [],
+      config: {},
+    },
+    null,
+    2,
+  ),
+  scheduled_task: JSON.stringify(
+    {
+      schemaVersion: 1,
+      kind: "scheduled_task",
+      format: "task/default@v1",
+      dependsOn: [],
+      config: {},
+    },
+    null,
+    2,
+  ),
 };
 
 const newResourceForm = (resourceType: OpenClawResourceType) => ({
   id: undefined as number | undefined,
   resource_type: resourceType,
-  resource_key: '',
-  name: '',
-  description: '',
+  resource_key: "",
+  name: "",
+  description: "",
   enabled: true,
-  tagsText: '',
+  tagsText: "",
   contentText: defaultContentByType[resourceType],
 });
 
 const newBundleForm = () => ({
   id: undefined as number | undefined,
-  name: '',
-  description: '',
+  name: "",
+  description: "",
   enabled: true,
   itemIds: [] as number[],
 });
 
 const splitTagText = (value: string): string[] =>
   value
-    .split(',')
+    .split(",")
     .map((item) => item.trim())
     .filter(Boolean);
 
 const mergeTagText = (current: string, additions: string[]): string =>
-  Array.from(new Set([...splitTagText(current), ...additions])).join(', ');
+  Array.from(new Set([...splitTagText(current), ...additions])).join(", ");
 
-type ChannelEditorMode = 'form' | 'json';
+type ChannelEditorMode = "form" | "json";
 
-type SupportedChannelEditorId = 'feishu' | 'slack' | 'telegram';
+type SupportedChannelEditorId =
+  | "dingtalk-connector"
+  | "feishu"
+  | "slack"
+  | "telegram";
 
 interface SupportedChannelEditorField {
   key: string;
@@ -147,11 +182,14 @@ interface SupportedChannelEditorDefinition {
   descriptionKey: string;
   fields: SupportedChannelEditorField[];
   readFormState: (contentText: string) => Record<string, string> | null;
-  updateContentText: (contentText: string, patch: Record<string, string>) => string;
+  updateContentText: (
+    contentText: string,
+    patch: Record<string, string>,
+  ) => string;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
+  typeof value === "object" && value !== null && !Array.isArray(value);
 
 const parseResourceContentText = (contentText: string): unknown | null => {
   try {
@@ -161,18 +199,19 @@ const parseResourceContentText = (contentText: string): unknown | null => {
   }
 };
 
-const parseChannelContentText = (contentText: string): Record<string, unknown> | null => {
+const parseChannelContentText = (
+  contentText: string,
+): Record<string, unknown> | null => {
   const parsed = parseResourceContentText(contentText);
   if (!isRecord(parsed)) {
     return null;
   }
 
-  const isEnvelope = (
-    ('schemaVersion' in parsed)
-    || ('kind' in parsed)
-    || ('format' in parsed)
-    || ('dependsOn' in parsed)
-  );
+  const isEnvelope =
+    "schemaVersion" in parsed ||
+    "kind" in parsed ||
+    "format" in parsed ||
+    "dependsOn" in parsed;
 
   if (isEnvelope && isRecord(parsed.config)) {
     return parsed.config;
@@ -181,47 +220,62 @@ const parseChannelContentText = (contentText: string): Record<string, unknown> |
   return parsed;
 };
 
-const readStringArray = (value: unknown): string[] | null => (
-  Array.isArray(value) && value.every((item) => typeof item === 'string')
+const readStringArray = (value: unknown): string[] | null =>
+  Array.isArray(value) && value.every((item) => typeof item === "string")
     ? [...value]
-    : null
-);
+    : null;
 
-const stringifyChannelContentText = (config: Record<string, unknown>): string => (
-  JSON.stringify(config, null, 2)
-);
+const stringifyChannelContentText = (config: Record<string, unknown>): string =>
+  JSON.stringify(config, null, 2);
+
+// mergeChannelConfig overlays the form-owned, allowlisted fields onto the
+// existing parsed config so tenant-authored keys (webhook, custom capabilities,
+// extra feishu accounts, etc.) survive a Save. Allowlisted keys win on
+// conflict. Every channel editor's update*ChannelContentText must route its
+// output through this helper — building the saved config from the allowlist
+// alone silently drops unknown fields.
+const mergeChannelConfig = (
+  existing: Record<string, unknown>,
+  allowlisted: Record<string, unknown>,
+): Record<string, unknown> => ({
+  ...existing,
+  ...allowlisted,
+});
 
 const channelFormatForResourceKey = (resourceKey: string): string => {
   const trimmed = resourceKey.trim();
-  return trimmed ? `channel/${trimmed}@v1` : 'channel/custom@v1';
+  return trimmed ? `channel/${trimmed}@v1` : "channel/custom@v1";
 };
 
 const buildChannelEnvelopeForRequest = (
   resourceKey: string,
   contentText: string,
+  invalidJsonMessage: string,
 ): Record<string, unknown> => {
   const config = parseChannelContentText(contentText);
   if (!config) {
-    throw new Error('Channel JSON must be a valid JSON object.');
+    throw new Error(invalidJsonMessage);
   }
 
   return {
     schemaVersion: 1,
-    kind: 'channel',
+    kind: "channel",
     format: channelFormatForResourceKey(resourceKey),
     dependsOn: [],
     config,
   };
 };
 
-const readTelegramChannelFormState = (contentText: string): Record<string, string> | null => {
+const readTelegramChannelFormState = (
+  contentText: string,
+): Record<string, string> | null => {
   const config = parseChannelContentText(contentText);
   if (!config) {
     return null;
   }
 
   return {
-    botToken: typeof config.botToken === 'string' ? config.botToken : '',
+    botToken: typeof config.botToken === "string" ? config.botToken : "",
   };
 };
 
@@ -244,28 +298,74 @@ const updateTelegramChannelContentText = (
     ...patch,
   };
 
-  const existingConfig = parsed;
-  const config = {
+  const allowlisted = {
     enabled: true,
     botToken: nextForm.botToken,
-    dmPolicy: typeof existingConfig.dmPolicy === 'string' && existingConfig.dmPolicy
-      ? existingConfig.dmPolicy
-      : 'open',
-    allowFrom: readStringArray(existingConfig.allowFrom) || ['*'],
+    dmPolicy:
+      typeof parsed.dmPolicy === "string" && parsed.dmPolicy
+        ? parsed.dmPolicy
+        : "open",
+    allowFrom: readStringArray(parsed.allowFrom) || ["*"],
   };
 
-  return stringifyChannelContentText(config);
+  return stringifyChannelContentText(mergeChannelConfig(parsed, allowlisted));
 };
 
-const readSlackChannelFormState = (contentText: string): Record<string, string> | null => {
+const readDingTalkChannelFormState = (
+  contentText: string,
+): Record<string, string> | null => {
   const config = parseChannelContentText(contentText);
   if (!config) {
     return null;
   }
 
   return {
-    botToken: typeof config.botToken === 'string' ? config.botToken : '',
-    appToken: typeof config.appToken === 'string' ? config.appToken : '',
+    clientId: typeof config.clientId === "string" ? config.clientId : "",
+    clientSecret:
+      typeof config.clientSecret === "string" ? config.clientSecret : "",
+  };
+};
+
+const updateDingTalkChannelContentText = (
+  contentText: string,
+  patch: Record<string, string>,
+): string => {
+  const parsed = parseChannelContentText(contentText);
+  if (!parsed) {
+    return contentText;
+  }
+
+  const currentForm = readDingTalkChannelFormState(contentText);
+  if (!currentForm) {
+    return contentText;
+  }
+
+  const nextForm = {
+    ...currentForm,
+    ...patch,
+  };
+
+  const allowlisted = {
+    enabled: true,
+    clientId: nextForm.clientId,
+    clientSecret: nextForm.clientSecret,
+    allowFrom: readStringArray(parsed.allowFrom) || ["*"],
+  };
+
+  return stringifyChannelContentText(mergeChannelConfig(parsed, allowlisted));
+};
+
+const readSlackChannelFormState = (
+  contentText: string,
+): Record<string, string> | null => {
+  const config = parseChannelContentText(contentText);
+  if (!config) {
+    return null;
+  }
+
+  return {
+    botToken: typeof config.botToken === "string" ? config.botToken : "",
+    appToken: typeof config.appToken === "string" ? config.appToken : "",
   };
 };
 
@@ -288,49 +388,60 @@ const updateSlackChannelContentText = (
     ...patch,
   };
 
-  const existingConfig = parsed;
-  const config = {
+  const allowlisted = {
     enabled: true,
     botToken: nextForm.botToken,
     appToken: nextForm.appToken,
-    groupPolicy: typeof existingConfig.groupPolicy === 'string' && existingConfig.groupPolicy
-      ? existingConfig.groupPolicy
-      : 'allowlist',
-    channels: isRecord(existingConfig.channels)
-      ? existingConfig.channels
+    groupPolicy:
+      typeof parsed.groupPolicy === "string" && parsed.groupPolicy
+        ? parsed.groupPolicy
+        : "allowlist",
+    channels: isRecord(parsed.channels)
+      ? parsed.channels
       : {
-        '#general': {
-          allow: true,
+          "#general": {
+            allow: true,
+          },
         },
-      },
-    capabilities: isRecord(existingConfig.capabilities)
-      ? existingConfig.capabilities
+    capabilities: isRecord(parsed.capabilities)
+      ? parsed.capabilities
       : {
-        interactiveReplies: true,
-      },
+          interactiveReplies: true,
+        },
   };
 
-  return stringifyChannelContentText(config);
+  return stringifyChannelContentText(mergeChannelConfig(parsed, allowlisted));
 };
 
-const readFeishuChannelFormState = (contentText: string): Record<string, string> | null => {
+const readFeishuChannelFormState = (
+  contentText: string,
+): Record<string, string> | null => {
   const config = parseChannelContentText(contentText);
   if (!config) {
     return null;
   }
 
   const accounts = isRecord(config.accounts) ? config.accounts : null;
-  const mainAccount = accounts && isRecord(accounts.main)
-    ? accounts.main
-    : accounts && isRecord(accounts.default) ? accounts.default : null;
+  const mainAccount =
+    accounts && isRecord(accounts.main)
+      ? accounts.main
+      : accounts && isRecord(accounts.default)
+        ? accounts.default
+        : null;
 
   return {
-    appId: mainAccount && typeof mainAccount.appId === 'string'
-      ? mainAccount.appId
-      : typeof config.appId === 'string' ? config.appId : '',
-    appSecret: mainAccount && typeof mainAccount.appSecret === 'string'
-      ? mainAccount.appSecret
-      : typeof config.appSecret === 'string' ? config.appSecret : '',
+    appId:
+      mainAccount && typeof mainAccount.appId === "string"
+        ? mainAccount.appId
+        : typeof config.appId === "string"
+          ? config.appId
+          : "",
+    appSecret:
+      mainAccount && typeof mainAccount.appSecret === "string"
+        ? mainAccount.appSecret
+        : typeof config.appSecret === "string"
+          ? config.appSecret
+          : "",
   };
 };
 
@@ -353,17 +464,23 @@ const updateFeishuChannelContentText = (
     ...patch,
   };
 
-  const config = {
+  const existingAccounts = isRecord(parsed.accounts) ? parsed.accounts : {};
+  const existingMain = isRecord(existingAccounts.main)
+    ? existingAccounts.main
+    : {};
+  const allowlisted = {
     enabled: true,
     accounts: {
+      ...existingAccounts,
       main: {
+        ...existingMain,
         appId: nextForm.appId,
         appSecret: nextForm.appSecret,
       },
     },
   };
 
-  return stringifyChannelContentText(config);
+  return stringifyChannelContentText(mergeChannelConfig(parsed, allowlisted));
 };
 
 const detectSupportedChannelEditor = (
@@ -373,18 +490,30 @@ const detectSupportedChannelEditor = (
   const config = parseChannelContentText(contentText);
   const normalizedResourceKey = resourceKey.trim().toLowerCase();
   const accounts = config && isRecord(config.accounts) ? config.accounts : null;
-  const domain = config && typeof config.domain === 'string' ? config.domain.toLowerCase() : '';
-  const hasAppToken = config && typeof config.appToken === 'string';
-  const hasBotToken = config && typeof config.botToken === 'string';
+  const domain =
+    config && typeof config.domain === "string"
+      ? config.domain.toLowerCase()
+      : "";
+  const hasClientId = config && typeof config.clientId === "string";
+  const hasClientSecret = config && typeof config.clientSecret === "string";
+  const hasAppToken = config && typeof config.appToken === "string";
+  const hasBotToken = config && typeof config.botToken === "string";
 
-  if (normalizedResourceKey === 'feishu' || domain === 'feishu' || !!accounts) {
-    return 'feishu';
+  if (normalizedResourceKey === "feishu" || domain === "feishu" || !!accounts) {
+    return "feishu";
   }
-  if (normalizedResourceKey === 'slack' || hasAppToken) {
-    return 'slack';
+  if (
+    normalizedResourceKey === "dingtalk-connector" ||
+    hasClientId ||
+    hasClientSecret
+  ) {
+    return "dingtalk-connector";
   }
-  if (normalizedResourceKey === 'telegram' || hasBotToken) {
-    return 'telegram';
+  if (normalizedResourceKey === "slack" || hasAppToken) {
+    return "slack";
+  }
+  if (normalizedResourceKey === "telegram" || hasBotToken) {
+    return "telegram";
   }
 
   return null;
@@ -395,7 +524,7 @@ const normalizeResourceContentTextForEditor = (
   resourceKey: string,
   contentText: string,
 ): string => {
-  if (resourceType !== 'channel') {
+  if (resourceType !== "channel") {
     return contentText;
   }
 
@@ -405,71 +534,123 @@ const normalizeResourceContentTextForEditor = (
   }
 
   const normalizedContentText = stringifyChannelContentText(channelConfig);
-  const editorId = detectSupportedChannelEditor(resourceKey, normalizedContentText);
-  if (editorId === 'feishu') {
+  const editorId = detectSupportedChannelEditor(
+    resourceKey,
+    normalizedContentText,
+  );
+  if (editorId === "feishu") {
     const currentForm = readFeishuChannelFormState(normalizedContentText);
-    return currentForm ? updateFeishuChannelContentText(normalizedContentText, currentForm) : normalizedContentText;
+    return currentForm
+      ? updateFeishuChannelContentText(normalizedContentText, currentForm)
+      : normalizedContentText;
   }
-  if (editorId === 'slack') {
+  if (editorId === "dingtalk-connector") {
+    const currentForm = readDingTalkChannelFormState(normalizedContentText);
+    return currentForm
+      ? updateDingTalkChannelContentText(normalizedContentText, currentForm)
+      : normalizedContentText;
+  }
+  if (editorId === "slack") {
     const currentForm = readSlackChannelFormState(normalizedContentText);
-    return currentForm ? updateSlackChannelContentText(normalizedContentText, currentForm) : normalizedContentText;
+    return currentForm
+      ? updateSlackChannelContentText(normalizedContentText, currentForm)
+      : normalizedContentText;
   }
-  if (editorId === 'telegram') {
+  if (editorId === "telegram") {
     const currentForm = readTelegramChannelFormState(normalizedContentText);
-    return currentForm ? updateTelegramChannelContentText(normalizedContentText, currentForm) : normalizedContentText;
+    return currentForm
+      ? updateTelegramChannelContentText(normalizedContentText, currentForm)
+      : normalizedContentText;
   }
 
   return normalizedContentText;
 };
 
-const SUPPORTED_CHANNEL_EDITORS: Record<SupportedChannelEditorId, SupportedChannelEditorDefinition> = {
-  feishu: {
-    id: 'feishu',
-    titleKey: 'openClawResourcesPage.channelEditors.feishu.title',
-    descriptionKey: 'openClawResourcesPage.channelEditors.feishu.description',
+const SUPPORTED_CHANNEL_EDITORS: Record<
+  SupportedChannelEditorId,
+  SupportedChannelEditorDefinition
+> = {
+  "dingtalk-connector": {
+    id: "dingtalk-connector",
+    titleKey: "openClawResourcesPage.channelEditors.dingtalkConnector.title",
+    descriptionKey:
+      "openClawResourcesPage.channelEditors.dingtalkConnector.description",
     fields: [
       {
-        key: 'appId',
-        labelKey: 'openClawResourcesPage.channelEditors.feishu.fields.appId.label',
-        placeholderKey: 'openClawResourcesPage.channelEditors.feishu.fields.appId.placeholder',
+        key: "clientId",
+        labelKey:
+          "openClawResourcesPage.channelEditors.dingtalkConnector.fields.clientId.label",
+        placeholderKey:
+          "openClawResourcesPage.channelEditors.dingtalkConnector.fields.clientId.placeholder",
       },
       {
-        key: 'appSecret',
-        labelKey: 'openClawResourcesPage.channelEditors.feishu.fields.appSecret.label',
-        placeholderKey: 'openClawResourcesPage.channelEditors.feishu.fields.appSecret.placeholder',
+        key: "clientSecret",
+        labelKey:
+          "openClawResourcesPage.channelEditors.dingtalkConnector.fields.clientSecret.label",
+        placeholderKey:
+          "openClawResourcesPage.channelEditors.dingtalkConnector.fields.clientSecret.placeholder",
+      },
+    ],
+    readFormState: readDingTalkChannelFormState,
+    updateContentText: updateDingTalkChannelContentText,
+  },
+  feishu: {
+    id: "feishu",
+    titleKey: "openClawResourcesPage.channelEditors.feishu.title",
+    descriptionKey: "openClawResourcesPage.channelEditors.feishu.description",
+    fields: [
+      {
+        key: "appId",
+        labelKey:
+          "openClawResourcesPage.channelEditors.feishu.fields.appId.label",
+        placeholderKey:
+          "openClawResourcesPage.channelEditors.feishu.fields.appId.placeholder",
+      },
+      {
+        key: "appSecret",
+        labelKey:
+          "openClawResourcesPage.channelEditors.feishu.fields.appSecret.label",
+        placeholderKey:
+          "openClawResourcesPage.channelEditors.feishu.fields.appSecret.placeholder",
       },
     ],
     readFormState: readFeishuChannelFormState,
     updateContentText: updateFeishuChannelContentText,
   },
   slack: {
-    id: 'slack',
-    titleKey: 'openClawResourcesPage.channelEditors.slack.title',
-    descriptionKey: 'openClawResourcesPage.channelEditors.slack.description',
+    id: "slack",
+    titleKey: "openClawResourcesPage.channelEditors.slack.title",
+    descriptionKey: "openClawResourcesPage.channelEditors.slack.description",
     fields: [
       {
-        key: 'botToken',
-        labelKey: 'openClawResourcesPage.channelEditors.slack.fields.botToken.label',
-        placeholderKey: 'openClawResourcesPage.channelEditors.slack.fields.botToken.placeholder',
+        key: "botToken",
+        labelKey:
+          "openClawResourcesPage.channelEditors.slack.fields.botToken.label",
+        placeholderKey:
+          "openClawResourcesPage.channelEditors.slack.fields.botToken.placeholder",
       },
       {
-        key: 'appToken',
-        labelKey: 'openClawResourcesPage.channelEditors.slack.fields.appToken.label',
-        placeholderKey: 'openClawResourcesPage.channelEditors.slack.fields.appToken.placeholder',
+        key: "appToken",
+        labelKey:
+          "openClawResourcesPage.channelEditors.slack.fields.appToken.label",
+        placeholderKey:
+          "openClawResourcesPage.channelEditors.slack.fields.appToken.placeholder",
       },
     ],
     readFormState: readSlackChannelFormState,
     updateContentText: updateSlackChannelContentText,
   },
   telegram: {
-    id: 'telegram',
-    titleKey: 'openClawResourcesPage.channelEditors.telegram.title',
-    descriptionKey: 'openClawResourcesPage.channelEditors.telegram.description',
+    id: "telegram",
+    titleKey: "openClawResourcesPage.channelEditors.telegram.title",
+    descriptionKey: "openClawResourcesPage.channelEditors.telegram.description",
     fields: [
       {
-        key: 'botToken',
-        labelKey: 'openClawResourcesPage.channelEditors.telegram.fields.botToken.label',
-        placeholderKey: 'openClawResourcesPage.channelEditors.telegram.fields.botToken.placeholder',
+        key: "botToken",
+        labelKey:
+          "openClawResourcesPage.channelEditors.telegram.fields.botToken.label",
+        placeholderKey:
+          "openClawResourcesPage.channelEditors.telegram.fields.botToken.placeholder",
       },
     ],
     readFormState: readTelegramChannelFormState,
@@ -493,7 +674,7 @@ const EditorModal: React.FC<EditorModalProps> = ({
   subtitle,
   onClose,
   busy = false,
-  panelClassName = 'max-w-5xl',
+  panelClassName = "max-w-5xl",
   children,
 }) => {
   const { t } = useI18n();
@@ -504,18 +685,18 @@ const EditorModal: React.FC<EditorModalProps> = ({
     }
 
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && !busy) {
+      if (event.key === "Escape" && !busy) {
         onClose();
       }
     };
 
-    document.addEventListener('keydown', handleKeyDown);
+    document.addEventListener("keydown", handleKeyDown);
     return () => {
-      document.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener("keydown", handleKeyDown);
     };
   }, [busy, onClose, open]);
 
-  if (!open || typeof document === 'undefined') {
+  if (!open || typeof document === "undefined") {
     return null;
   }
 
@@ -534,7 +715,9 @@ const EditorModal: React.FC<EditorModalProps> = ({
       >
         <div className="flex items-start justify-between gap-4 border-b border-[#f1e3db] px-6 py-5">
           <div>
-            <h3 className="text-2xl font-semibold tracking-[-0.02em] text-[#171212]">{title}</h3>
+            <h3 className="text-2xl font-semibold tracking-[-0.02em] text-[#171212]">
+              {title}
+            </h3>
             <p className="mt-1 text-sm leading-6 text-[#6e6460]">{subtitle}</p>
           </div>
           <button
@@ -543,7 +726,7 @@ const EditorModal: React.FC<EditorModalProps> = ({
             disabled={busy}
             className="rounded-full border border-[#dbe4f0] bg-[#f8f2ef] px-3 py-2 text-sm font-medium text-[#6e6460] hover:bg-[#f1e7e1] disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {t('common.close')}
+            {t("common.close")}
           </button>
         </div>
         <div className="max-h-[calc(100vh-8rem)] overflow-y-auto px-6 py-5">
@@ -560,9 +743,9 @@ const resourceFormFromItem = (item: OpenClawConfigResource) => ({
   resource_type: item.resource_type,
   resource_key: item.resource_key,
   name: item.name,
-  description: item.description || '',
+  description: item.description || "",
   enabled: item.enabled,
-  tagsText: item.tags.join(', '),
+  tagsText: item.tags.join(", "),
   contentText: normalizeResourceContentTextForEditor(
     item.resource_type,
     item.resource_key,
@@ -573,39 +756,46 @@ const resourceFormFromItem = (item: OpenClawConfigResource) => ({
 const bundleFormFromItem = (item: OpenClawConfigBundle) => ({
   id: item.id,
   name: item.name,
-  description: item.description || '',
+  description: item.description || "",
   enabled: item.enabled,
   itemIds: item.items.map((bundleItem) => bundleItem.resource_id),
 });
 
 const skillRiskKey = (riskLevel?: string | null) => {
-  switch ((riskLevel || '').toLowerCase()) {
-    case 'none':
-      return 'none';
-    case 'low':
-      return 'low';
-    case 'medium':
-      return 'medium';
-    case 'high':
-      return 'high';
+  switch ((riskLevel || "").toLowerCase()) {
+    case "none":
+      return "none";
+    case "low":
+      return "low";
+    case "medium":
+      return "medium";
+    case "high":
+      return "high";
     default:
-      return 'unknown';
+      return "unknown";
   }
 };
 
 const OpenClawConfigCenterPage: React.FC = () => {
   const { t } = useI18n();
-  const [tab, setTab] = useState<ConfigCenterTab>('resources');
-  const [resourceType, setResourceType] = useState<OpenClawResourceType>('channel');
-  const [resourceSearch, setResourceSearch] = useState('');
+  const [tab, setTab] = useState<ConfigCenterTab>("resources");
+  const [resourceType, setResourceType] =
+    useState<OpenClawResourceType>("channel");
+  const [resourceSearch, setResourceSearch] = useState("");
   const [resources, setResources] = useState<OpenClawConfigResource[]>([]);
   const [skills, setSkills] = useState<Skill[]>([]);
   const [bundles, setBundles] = useState<OpenClawConfigBundle[]>([]);
   const [snapshots, setSnapshots] = useState<OpenClawInjectionSnapshot[]>([]);
-  const [resourceForm, setResourceForm] = useState(() => newResourceForm('channel'));
+  const [resourceForm, setResourceForm] = useState(() =>
+    newResourceForm("channel"),
+  );
   const [bundleForm, setBundleForm] = useState(() => newBundleForm());
-  const [selectedResourceId, setSelectedResourceId] = useState<number | undefined>();
-  const [selectedBundleId, setSelectedBundleId] = useState<number | undefined>();
+  const [selectedResourceId, setSelectedResourceId] = useState<
+    number | undefined
+  >();
+  const [selectedBundleId, setSelectedBundleId] = useState<
+    number | undefined
+  >();
   const [resourceEditorOpen, setResourceEditorOpen] = useState(false);
   const [bundleEditorOpen, setBundleEditorOpen] = useState(false);
   const [resourcePage, setResourcePage] = useState(1);
@@ -613,26 +803,32 @@ const OpenClawConfigCenterPage: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [selectedChannelTemplateId, setSelectedChannelTemplateId] = useState('');
-  const [channelEditorMode, setChannelEditorMode] = useState<ChannelEditorMode>('form');
+  const [selectedChannelTemplateId, setSelectedChannelTemplateId] =
+    useState("");
+  const [channelEditorMode, setChannelEditorMode] =
+    useState<ChannelEditorMode>("form");
   const [skillUploadFile, setSkillUploadFile] = useState<File | null>(null);
 
   const loadAll = async () => {
     try {
       setLoading(true);
       setError(null);
-      const [resourceItems, skillItems, bundleItems, injectionItems] = await Promise.all([
-        openclawConfigService.listResources(),
-        skillService.listSkills(),
-        openclawConfigService.listBundles(),
-        openclawConfigService.listInjections(50),
-      ]);
+      const [resourceItems, skillItems, bundleItems, injectionItems] =
+        await Promise.all([
+          openclawConfigService.listResources(),
+          skillService.listSkills(),
+          openclawConfigService.listBundles(),
+          openclawConfigService.listInjections(50),
+        ]);
       setResources(resourceItems);
       setSkills(skillItems);
       setBundles(bundleItems);
       setSnapshots(injectionItems);
     } catch (err: any) {
-      setError(err.response?.data?.error || t('openClawResourcesPage.errors.loadFailed'));
+      setError(
+        err.response?.data?.error ||
+          t("openClawResourcesPage.errors.loadFailed"),
+      );
     } finally {
       setLoading(false);
     }
@@ -655,9 +851,12 @@ const OpenClawConfigCenterPage: React.FC = () => {
       if (!keyword) {
         return true;
       }
-      return [item.name, item.resource_key, item.description || '', item.tags.join(' ')].some((value) =>
-        value.toLowerCase().includes(keyword),
-      );
+      return [
+        item.name,
+        item.resource_key,
+        item.description || "",
+        item.tags.join(" "),
+      ].some((value) => value.toLowerCase().includes(keyword));
     });
   }, [resourceSearch, resourceType, resources]);
 
@@ -667,14 +866,18 @@ const OpenClawConfigCenterPage: React.FC = () => {
       return skills;
     }
     return skills.filter((item) =>
-      [item.name, item.skill_key, item.description || '', item.risk_level].some((value) =>
-        value.toLowerCase().includes(keyword),
+      [item.name, item.skill_key, item.description || "", item.risk_level].some(
+        (value) => value.toLowerCase().includes(keyword),
       ),
     );
   }, [resourceSearch, skills]);
 
-  const resourceItemTotal = resourceType === 'skill' ? filteredSkills.length : filteredResources.length;
-  const resourcePageTotal = Math.max(1, Math.ceil(resourceItemTotal / CONFIG_CENTER_PAGE_SIZE));
+  const resourceItemTotal =
+    resourceType === "skill" ? filteredSkills.length : filteredResources.length;
+  const resourcePageTotal = Math.max(
+    1,
+    Math.ceil(resourceItemTotal / CONFIG_CENTER_PAGE_SIZE),
+  );
   const currentResourcePage = Math.min(resourcePage, resourcePageTotal);
   const paginatedSkills = useMemo(() => {
     const start = (currentResourcePage - 1) * CONFIG_CENTER_PAGE_SIZE;
@@ -691,59 +894,75 @@ const OpenClawConfigCenterPage: React.FC = () => {
     }
   }, [resourcePage, resourcePageTotal]);
 
-  const getResourceTypeLabel = (value: OpenClawResourceType) => t(RESOURCE_TYPE_I18N_KEYS[value]);
-  const getChannelTemplateLabel = (templateId: string) => (
+  const getResourceTypeLabel = (value: OpenClawResourceType) =>
+    t(RESOURCE_TYPE_I18N_KEYS[value]);
+  const getChannelTemplateLabel = (templateId: string) =>
     CHANNEL_TEMPLATE_LABEL_I18N_KEYS[templateId]
       ? t(CHANNEL_TEMPLATE_LABEL_I18N_KEYS[templateId])
-      : templateId
-  );
-  const getChannelTemplateDescription = (templateId: string, fallback: string) => (
+      : templateId;
+  const getChannelTemplateDescription = (
+    templateId: string,
+    fallback: string,
+  ) =>
     CHANNEL_TEMPLATE_DESCRIPTION_I18N_KEYS[templateId]
       ? t(CHANNEL_TEMPLATE_DESCRIPTION_I18N_KEYS[templateId])
-      : fallback
-  );
-  const getInjectionModeLabel = (mode: OpenClawConfigMode | 'archive') => (
-    INJECTION_MODE_I18N_KEYS[mode]
-      ? t(INJECTION_MODE_I18N_KEYS[mode])
-      : mode
-  );
-  const getSnapshotStatusLabel = (status: string) => (
+      : fallback;
+  const getInjectionModeLabel = (mode: OpenClawConfigMode | "archive") =>
+    INJECTION_MODE_I18N_KEYS[mode] ? t(INJECTION_MODE_I18N_KEYS[mode]) : mode;
+  const getSnapshotStatusLabel = (status: string) =>
     SNAPSHOT_STATUS_I18N_KEYS[status]
       ? t(SNAPSHOT_STATUS_I18N_KEYS[status])
-      : status
+      : status;
+  const getSkillRiskLabel = (riskLevel?: string | null) =>
+    t(`openClawResourcesPage.risks.${skillRiskKey(riskLevel)}`);
+  const resourceTypeOptions = useMemo(
+    () =>
+      CONFIG_CENTER_RESOURCE_TYPES.map((item) => ({
+        ...item,
+        label: getResourceTypeLabel(item.value),
+      })),
+    [t],
   );
-  const getSkillRiskLabel = (riskLevel?: string | null) => (
-    t(`openClawResourcesPage.risks.${skillRiskKey(riskLevel)}`)
+  const groupedResources = useMemo(
+    () =>
+      resourceTypeOptions.map(({ value, label }) => ({
+        value,
+        label,
+        items: resources.filter((item) => item.resource_type === value),
+      })),
+    [resourceTypeOptions, resources],
   );
-  const resourceTypeOptions = useMemo(() => (
-    CONFIG_CENTER_RESOURCE_TYPES.map((item) => ({
-      ...item,
-      label: getResourceTypeLabel(item.value),
-    }))
-  ), [t]);
-  const groupedResources = useMemo(() => (
-    resourceTypeOptions.map(({ value, label }) => ({
-      value,
-      label,
-      items: resources.filter((item) => item.resource_type === value),
-    }))
-  ), [resourceTypeOptions, resources]);
 
   const selectedChannelTemplate = useMemo(
     () => findOpenClawChannelTemplate(selectedChannelTemplateId),
     [selectedChannelTemplateId],
   );
-  const supportedChannelEditorId = useMemo(() => (
-    resourceForm.resource_type === 'channel'
-      ? detectSupportedChannelEditor(resourceForm.resource_key, resourceForm.contentText)
-      : null
-  ), [resourceForm.contentText, resourceForm.resource_key, resourceForm.resource_type]);
+  const supportedChannelEditorId = useMemo(
+    () =>
+      resourceForm.resource_type === "channel"
+        ? detectSupportedChannelEditor(
+            resourceForm.resource_key,
+            resourceForm.contentText,
+          )
+        : null,
+    [
+      resourceForm.contentText,
+      resourceForm.resource_key,
+      resourceForm.resource_type,
+    ],
+  );
   const supportedChannelEditor = useMemo(
-    () => (supportedChannelEditorId ? SUPPORTED_CHANNEL_EDITORS[supportedChannelEditorId] : null),
+    () =>
+      supportedChannelEditorId
+        ? SUPPORTED_CHANNEL_EDITORS[supportedChannelEditorId]
+        : null,
     [supportedChannelEditorId],
   );
   const supportedChannelForm = useMemo(
-    () => (supportedChannelEditor ? supportedChannelEditor.readFormState(resourceForm.contentText) : null),
+    () =>
+      supportedChannelEditor
+        ? supportedChannelEditor.readFormState(resourceForm.contentText)
+        : null,
     [resourceForm.contentText, supportedChannelEditor],
   );
   const selectedResourceTypeOption = useMemo(
@@ -751,23 +970,37 @@ const OpenClawConfigCenterPage: React.FC = () => {
     [resourceType, resourceTypeOptions],
   );
   const selectedEditorTypeOption = useMemo(
-    () => resourceTypeOptions.find((item) => item.value === resourceForm.resource_type),
+    () =>
+      resourceTypeOptions.find(
+        (item) => item.value === resourceForm.resource_type,
+      ),
     [resourceForm.resource_type, resourceTypeOptions],
   );
-  const resourceTypeIsConfigurable = CONFIG_CENTER_CONFIGURABLE_RESOURCE_TYPES.includes(resourceType);
-  const resourceEditorIsConfigurable = CONFIG_CENTER_CONFIGURABLE_RESOURCE_TYPES.includes(resourceForm.resource_type);
+  const resourceTypeIsConfigurable =
+    CONFIG_CENTER_CONFIGURABLE_RESOURCE_TYPES.includes(resourceType);
+  const resourceEditorIsConfigurable =
+    CONFIG_CENTER_CONFIGURABLE_RESOURCE_TYPES.includes(
+      resourceForm.resource_type,
+    );
 
-  const channelTemplatesByCategory = useMemo(() => ({
-    builtin: OPENCLAW_CHANNEL_TEMPLATES.filter((item) => item.category === 'builtin'),
-    plugin: OPENCLAW_CHANNEL_TEMPLATES.filter((item) => item.category === 'plugin'),
-  }), []);
+  const channelTemplatesByCategory = useMemo(
+    () => ({
+      builtin: OPENCLAW_CHANNEL_TEMPLATES.filter(
+        (item) => item.category === "builtin",
+      ),
+      plugin: OPENCLAW_CHANNEL_TEMPLATES.filter(
+        (item) => item.category === "plugin",
+      ),
+    }),
+    [],
+  );
 
   const openNewResourceEditor = () => {
     setError(null);
     setNotice(null);
     setSelectedResourceId(undefined);
-    setSelectedChannelTemplateId('');
-    setChannelEditorMode('form');
+    setSelectedChannelTemplateId("");
+    setChannelEditorMode("form");
     setResourceForm(newResourceForm(resourceType));
     setResourceEditorOpen(true);
   };
@@ -776,8 +1009,8 @@ const OpenClawConfigCenterPage: React.FC = () => {
     setError(null);
     setNotice(null);
     setSelectedResourceId(item.id);
-    setSelectedChannelTemplateId('');
-    setChannelEditorMode('form');
+    setSelectedChannelTemplateId("");
+    setChannelEditorMode("form");
     setResourceType(item.resource_type);
     setResourceForm(resourceFormFromItem(item));
     setResourceEditorOpen(true);
@@ -789,7 +1022,7 @@ const OpenClawConfigCenterPage: React.FC = () => {
     }
     setResourceEditorOpen(false);
     if (!selectedResourceId) {
-      setSelectedChannelTemplateId('');
+      setSelectedChannelTemplateId("");
       setResourceForm(newResourceForm(resourceType));
     }
   };
@@ -833,9 +1066,14 @@ const OpenClawConfigCenterPage: React.FC = () => {
         description: resourceForm.description.trim() || undefined,
         enabled: resourceForm.enabled,
         tags: splitTagText(resourceForm.tagsText),
-        content: resourceForm.resource_type === 'channel'
-          ? buildChannelEnvelopeForRequest(resourceForm.resource_key, resourceForm.contentText)
-          : JSON.parse(resourceForm.contentText),
+        content:
+          resourceForm.resource_type === "channel"
+            ? buildChannelEnvelopeForRequest(
+                resourceForm.resource_key,
+                resourceForm.contentText,
+                t("openClawResourcesPage.invalidChannelJson"),
+              )
+            : JSON.parse(resourceForm.contentText),
       };
 
       const saved = resourceForm.id
@@ -845,12 +1083,20 @@ const OpenClawConfigCenterPage: React.FC = () => {
       await loadAll();
       setSelectedResourceId(saved.id);
       setResourceType(saved.resource_type);
-      setSelectedChannelTemplateId('');
+      setSelectedChannelTemplateId("");
       setResourceForm(resourceFormFromItem(saved));
       setResourceEditorOpen(false);
-      setNotice(resourceForm.id ? t('openClawResourcesPage.notices.resourceUpdated') : t('openClawResourcesPage.notices.resourceCreated'));
+      setNotice(
+        resourceForm.id
+          ? t("openClawResourcesPage.notices.resourceUpdated")
+          : t("openClawResourcesPage.notices.resourceCreated"),
+      );
     } catch (err: any) {
-      setError(err.response?.data?.error || err.message || t('openClawResourcesPage.errors.saveResource'));
+      setError(
+        err.response?.data?.error ||
+          err.message ||
+          t("openClawResourcesPage.errors.saveResource"),
+      );
     } finally {
       setSaving(false);
     }
@@ -868,20 +1114,36 @@ const OpenClawConfigCenterPage: React.FC = () => {
         description: resourceForm.description.trim() || undefined,
         enabled: resourceForm.enabled,
         tags: splitTagText(resourceForm.tagsText),
-        content: resourceForm.resource_type === 'channel'
-          ? buildChannelEnvelopeForRequest(resourceForm.resource_key, resourceForm.contentText)
-          : JSON.parse(resourceForm.contentText),
+        content:
+          resourceForm.resource_type === "channel"
+            ? buildChannelEnvelopeForRequest(
+                resourceForm.resource_key,
+                resourceForm.contentText,
+                t("openClawResourcesPage.invalidChannelJson"),
+              )
+            : JSON.parse(resourceForm.contentText),
       });
-      setNotice(t('openClawResourcesPage.notices.resourceJsonValid'));
+      setNotice(t("openClawResourcesPage.notices.resourceJsonValid"));
     } catch (err: any) {
-      setError(err.response?.data?.error || err.message || t('openClawResourcesPage.errors.validationFailed'));
+      setError(
+        err.response?.data?.error ||
+          err.message ||
+          t("openClawResourcesPage.errors.validationFailed"),
+      );
     } finally {
       setSaving(false);
     }
   };
 
   const removeResource = async () => {
-    if (!resourceForm.id || !window.confirm(t('openClawResourcesPage.confirms.deleteResource', { name: resourceForm.name }))) {
+    if (
+      !resourceForm.id ||
+      !window.confirm(
+        t("openClawResourcesPage.confirms.deleteResource", {
+          name: resourceForm.name,
+        }),
+      )
+    ) {
       return;
     }
 
@@ -890,12 +1152,15 @@ const OpenClawConfigCenterPage: React.FC = () => {
       await openclawConfigService.deleteResource(resourceForm.id);
       await loadAll();
       setSelectedResourceId(undefined);
-      setSelectedChannelTemplateId('');
+      setSelectedChannelTemplateId("");
       setResourceForm(newResourceForm(resourceType));
       setResourceEditorOpen(false);
-      setNotice(t('openClawResourcesPage.notices.resourceDeleted'));
+      setNotice(t("openClawResourcesPage.notices.resourceDeleted"));
     } catch (err: any) {
-      setError(err.response?.data?.error || t('openClawResourcesPage.errors.deleteResource'));
+      setError(
+        err.response?.data?.error ||
+          t("openClawResourcesPage.errors.deleteResource"),
+      );
     } finally {
       setSaving(false);
     }
@@ -912,11 +1177,14 @@ const OpenClawConfigCenterPage: React.FC = () => {
       await loadAll();
       setSelectedResourceId(cloned.id);
       setResourceType(cloned.resource_type);
-      setSelectedChannelTemplateId('');
+      setSelectedChannelTemplateId("");
       setResourceForm(resourceFormFromItem(cloned));
-      setNotice(t('openClawResourcesPage.notices.resourceCloned'));
+      setNotice(t("openClawResourcesPage.notices.resourceCloned"));
     } catch (err: any) {
-      setError(err.response?.data?.error || t('openClawResourcesPage.errors.cloneResource'));
+      setError(
+        err.response?.data?.error ||
+          t("openClawResourcesPage.errors.cloneResource"),
+      );
     } finally {
       setSaving(false);
     }
@@ -934,9 +1202,12 @@ const OpenClawConfigCenterPage: React.FC = () => {
       await skillService.importSkills(skillUploadFile);
       setSkillUploadFile(null);
       await loadAll();
-      setNotice(t('openClawResourcesPage.notices.skillArchiveImported'));
+      setNotice(t("openClawResourcesPage.notices.skillArchiveImported"));
     } catch (err: any) {
-      setError(err.response?.data?.error || t('openClawResourcesPage.errors.importSkillArchive'));
+      setError(
+        err.response?.data?.error ||
+          t("openClawResourcesPage.errors.importSkillArchive"),
+      );
     } finally {
       setSaving(false);
     }
@@ -949,9 +1220,12 @@ const OpenClawConfigCenterPage: React.FC = () => {
       setNotice(null);
       await skillService.deleteSkill(skillId);
       await loadAll();
-      setNotice(t('openClawResourcesPage.notices.skillDeleted'));
+      setNotice(t("openClawResourcesPage.notices.skillDeleted"));
     } catch (err: any) {
-      setError(err.response?.data?.error || t('openClawResourcesPage.errors.deleteSkill'));
+      setError(
+        err.response?.data?.error ||
+          t("openClawResourcesPage.errors.deleteSkill"),
+      );
     } finally {
       setSaving(false);
     }
@@ -961,15 +1235,18 @@ const OpenClawConfigCenterPage: React.FC = () => {
     try {
       const blob = await skillService.downloadSkill(skillId);
       const url = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
+      const link = document.createElement("a");
       link.href = url;
-      link.download = `${name || 'skill'}.zip`;
+      link.download = `${name || "skill"}.zip`;
       document.body.appendChild(link);
       link.click();
       link.remove();
       window.URL.revokeObjectURL(url);
     } catch (err: any) {
-      setError(err.response?.data?.error || t('openClawResourcesPage.errors.downloadSkill'));
+      setError(
+        err.response?.data?.error ||
+          t("openClawResourcesPage.errors.downloadSkill"),
+      );
     }
   };
 
@@ -979,16 +1256,23 @@ const OpenClawConfigCenterPage: React.FC = () => {
       return;
     }
 
-    setResourceType('channel');
+    setResourceType("channel");
     setSelectedChannelTemplateId(template.id);
-    setChannelEditorMode('form');
+    setChannelEditorMode("form");
     setError(null);
     const templateLabel = getChannelTemplateLabel(template.id);
-    const templateDescription = getChannelTemplateDescription(template.id, template.description);
-    setNotice(t('openClawResourcesPage.notices.templateLoaded', { name: templateLabel }));
+    const templateDescription = getChannelTemplateDescription(
+      template.id,
+      template.description,
+    );
+    setNotice(
+      t("openClawResourcesPage.notices.templateLoaded", {
+        name: templateLabel,
+      }),
+    );
     setResourceForm((current) => ({
       ...current,
-      resource_type: 'channel',
+      resource_type: "channel",
       resource_key: current.resource_key.trim() || template.resourceKey,
       name: current.name.trim() || templateLabel,
       description: current.description.trim() || templateDescription,
@@ -1007,11 +1291,13 @@ const OpenClawConfigCenterPage: React.FC = () => {
         name: bundleForm.name.trim(),
         description: bundleForm.description.trim() || undefined,
         enabled: bundleForm.enabled,
-        items: bundleForm.itemIds.map((resourceId, index): OpenClawConfigBundleItem => ({
-          resource_id: resourceId,
-          sort_order: index + 1,
-          required: true,
-        })),
+        items: bundleForm.itemIds.map(
+          (resourceId, index): OpenClawConfigBundleItem => ({
+            resource_id: resourceId,
+            sort_order: index + 1,
+            required: true,
+          }),
+        ),
       };
 
       const saved = bundleForm.id
@@ -1022,16 +1308,30 @@ const OpenClawConfigCenterPage: React.FC = () => {
       setSelectedBundleId(saved.id);
       setBundleForm(bundleFormFromItem(saved));
       setBundleEditorOpen(false);
-      setNotice(bundleForm.id ? t('openClawResourcesPage.notices.bundleUpdated') : t('openClawResourcesPage.notices.bundleCreated'));
+      setNotice(
+        bundleForm.id
+          ? t("openClawResourcesPage.notices.bundleUpdated")
+          : t("openClawResourcesPage.notices.bundleCreated"),
+      );
     } catch (err: any) {
-      setError(err.response?.data?.error || t('openClawResourcesPage.errors.saveBundle'));
+      setError(
+        err.response?.data?.error ||
+          t("openClawResourcesPage.errors.saveBundle"),
+      );
     } finally {
       setSaving(false);
     }
   };
 
   const removeBundle = async () => {
-    if (!bundleForm.id || !window.confirm(t('openClawResourcesPage.confirms.deleteBundle', { name: bundleForm.name }))) {
+    if (
+      !bundleForm.id ||
+      !window.confirm(
+        t("openClawResourcesPage.confirms.deleteBundle", {
+          name: bundleForm.name,
+        }),
+      )
+    ) {
       return;
     }
 
@@ -1042,9 +1342,12 @@ const OpenClawConfigCenterPage: React.FC = () => {
       setSelectedBundleId(undefined);
       setBundleForm(newBundleForm());
       setBundleEditorOpen(false);
-      setNotice(t('openClawResourcesPage.notices.bundleDeleted'));
+      setNotice(t("openClawResourcesPage.notices.bundleDeleted"));
     } catch (err: any) {
-      setError(err.response?.data?.error || t('openClawResourcesPage.errors.deleteBundle'));
+      setError(
+        err.response?.data?.error ||
+          t("openClawResourcesPage.errors.deleteBundle"),
+      );
     } finally {
       setSaving(false);
     }
@@ -1061,23 +1364,35 @@ const OpenClawConfigCenterPage: React.FC = () => {
       await loadAll();
       setSelectedBundleId(cloned.id);
       setBundleForm(bundleFormFromItem(cloned));
-      setNotice(t('openClawResourcesPage.notices.bundleCloned'));
+      setNotice(t("openClawResourcesPage.notices.bundleCloned"));
     } catch (err: any) {
-      setError(err.response?.data?.error || t('openClawResourcesPage.errors.cloneBundle'));
+      setError(
+        err.response?.data?.error ||
+          t("openClawResourcesPage.errors.cloneBundle"),
+      );
     } finally {
       setSaving(false);
     }
   };
 
   return (
-    <UserLayout title={t('openClawResourcesPage.title')}>
+    <UserLayout title={t("openClawResourcesPage.title")}>
       <div className="space-y-6">
         <div className="app-panel p-4 sm:p-6">
           <div className="flex flex-wrap gap-3">
             {[
-              { key: 'resources', label: t('openClawResourcesPage.tabs.resources') },
-              { key: 'bundles', label: t('openClawResourcesPage.tabs.bundles') },
-              { key: 'injections', label: t('openClawResourcesPage.tabs.injections') },
+              {
+                key: "resources",
+                label: t("openClawResourcesPage.tabs.resources"),
+              },
+              {
+                key: "bundles",
+                label: t("openClawResourcesPage.tabs.bundles"),
+              },
+              {
+                key: "injections",
+                label: t("openClawResourcesPage.tabs.injections"),
+              },
             ].map((item) => (
               <button
                 key={item.key}
@@ -1088,21 +1403,35 @@ const OpenClawConfigCenterPage: React.FC = () => {
                   setBundleEditorOpen(false);
                 }}
                 className={`rounded-xl px-4 py-2 text-sm font-medium transition ${
-                  tab === item.key ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  tab === item.key
+                    ? "bg-indigo-600 text-white"
+                    : "bg-gray-100 text-gray-700 hover:bg-gray-200"
                 }`}
               >
                 {item.label}
               </button>
             ))}
-            <button type="button" onClick={loadAll} className="app-button-secondary ml-auto">
-              {t('common.refresh')}
+            <button
+              type="button"
+              onClick={loadAll}
+              className="app-button-secondary ml-auto"
+            >
+              {t("common.refresh")}
             </button>
           </div>
-          {error && <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
-          {notice && <div className="mt-4 rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">{notice}</div>}
+          {error && (
+            <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {error}
+            </div>
+          )}
+          {notice && (
+            <div className="mt-4 rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">
+              {notice}
+            </div>
+          )}
         </div>
 
-        {tab === 'resources' && (
+        {tab === "resources" && (
           <div className="grid grid-cols-1 gap-6 xl:grid-cols-[220px_minmax(0,1fr)]">
             <div className="app-panel p-4">
               <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[#2563eb]">{t('openClawResourcesPage.resourceTypesTitle')}</div>
@@ -1124,7 +1453,7 @@ const OpenClawConfigCenterPage: React.FC = () => {
 
             {resourceTypeIsConfigurable ? (
               <div className="app-panel p-4 sm:p-5">
-                {resourceType === 'skill' ? (
+                {resourceType === "skill" ? (
                   <>
                     <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
                       <label
@@ -1132,16 +1461,19 @@ const OpenClawConfigCenterPage: React.FC = () => {
                         className="flex w-full cursor-pointer items-center gap-3 rounded-2xl border border-[#dfd6cf] bg-white px-4 py-3 text-sm text-[#3f3a36] transition hover:border-[#cfc3ba] hover:bg-[#fcfaf8]"
                       >
                         <span className="rounded-xl border border-[#d8d0ca] bg-[#f6f3f0] px-3 py-2 text-sm font-medium text-[#2f2a27]">
-                          {t('openClawResourcesPage.skillActions.chooseFile')}
+                          {t("openClawResourcesPage.skillActions.chooseFile")}
                         </span>
                         <span className="min-w-0 truncate text-[#6d655f]">
-                          {skillUploadFile?.name || t('openClawResourcesPage.noFileSelected')}
+                          {skillUploadFile?.name ||
+                            t("openClawResourcesPage.noFileSelected")}
                         </span>
                         <input
                           id="skill-archive-upload"
                           type="file"
                           accept=".zip,application/zip,application/x-zip-compressed"
-                          onChange={(e) => setSkillUploadFile(e.target.files?.[0] || null)}
+                          onChange={(e) =>
+                            setSkillUploadFile(e.target.files?.[0] || null)
+                          }
                           className="hidden"
                         />
                       </label>
@@ -1151,18 +1483,20 @@ const OpenClawConfigCenterPage: React.FC = () => {
                         disabled={!skillUploadFile || saving}
                         className="app-button-primary whitespace-nowrap disabled:cursor-not-allowed disabled:opacity-50"
                       >
-                        {t('openClawResourcesPage.skillActions.uploadArchive')}
+                        {t("openClawResourcesPage.skillActions.uploadArchive")}
                       </button>
                     </div>
                     <div className="mt-3 text-sm text-gray-500">
-                      {t('openClawResourcesPage.skillUploadHint')}
+                      {t("openClawResourcesPage.skillUploadHint")}
                     </div>
                     <div className="mt-4 space-y-3">
                       {loading ? (
-                        <div className="text-sm text-gray-500">{t('openClawResourcesPage.loadingSkills')}</div>
+                        <div className="text-sm text-gray-500">
+                          {t("openClawResourcesPage.loadingSkills")}
+                        </div>
                       ) : filteredSkills.length === 0 ? (
                         <div className="rounded-2xl border border-dashed border-gray-300 px-4 py-8 text-sm text-gray-500">
-                          {t('openClawResourcesPage.noSkills')}
+                          {t("openClawResourcesPage.noSkills")}
                         </div>
                       ) : (
                         paginatedSkills.map((item) => (
@@ -1172,19 +1506,41 @@ const OpenClawConfigCenterPage: React.FC = () => {
                           >
                             <div className="flex items-start justify-between gap-3">
                               <div>
-                                <div className="font-medium text-gray-900">{item.name}</div>
+                                <div className="font-medium text-gray-900">
+                                  {item.name}
+                                </div>
                                 <div className="mt-1 text-xs text-gray-500">
-                                  {t('openClawResourcesPage.skillMeta', {
+                                  {t("openClawResourcesPage.skillMeta", {
                                     key: item.skill_key,
                                     risk: getSkillRiskLabel(item.risk_level),
                                     count: item.instance_count,
                                   })}
                                 </div>
-                                {item.description && <div className="mt-2 line-clamp-2 text-sm text-gray-600">{item.description}</div>}
+                                {item.description && (
+                                  <div className="mt-2 line-clamp-2 text-sm text-gray-600">
+                                    {item.description}
+                                  </div>
+                                )}
                               </div>
                               <div className="flex flex-wrap gap-2">
-                                <button type="button" onClick={() => downloadSkillAsset(item.id, item.name)} className="app-button-secondary">{t('openClawResourcesPage.skillActions.download')}</button>
-                                <button type="button" onClick={() => removeSkillAsset(item.id)} className="rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-100">{t('common.delete')}</button>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    downloadSkillAsset(item.id, item.name)
+                                  }
+                                  className="app-button-secondary"
+                                >
+                                  {t(
+                                    "openClawResourcesPage.skillActions.download",
+                                  )}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => removeSkillAsset(item.id)}
+                                  className="rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-100"
+                                >
+                                  {t("common.delete")}
+                                </button>
                               </div>
                             </div>
                           </div>
@@ -1194,31 +1550,45 @@ const OpenClawConfigCenterPage: React.FC = () => {
                     {!loading && filteredSkills.length > 0 ? (
                       <div className="mt-4 flex flex-col gap-3 border-t border-[#f3e7df] pt-4 sm:flex-row sm:items-center sm:justify-between">
                         <div className="text-sm text-[#8f8681]">
-                          {t('openClawResourcesPage.paginationSummary', {
+                          {t("openClawResourcesPage.paginationSummary", {
                             pageSize: CONFIG_CENTER_PAGE_SIZE,
-                            from: (currentResourcePage - 1) * CONFIG_CENTER_PAGE_SIZE + 1,
-                            to: Math.min(currentResourcePage * CONFIG_CENTER_PAGE_SIZE, filteredSkills.length),
+                            from:
+                              (currentResourcePage - 1) *
+                                CONFIG_CENTER_PAGE_SIZE +
+                              1,
+                            to: Math.min(
+                              currentResourcePage * CONFIG_CENTER_PAGE_SIZE,
+                              filteredSkills.length,
+                            ),
                           })}
                         </div>
                         <div className="flex items-center gap-2">
                           <button
                             type="button"
-                            onClick={() => setResourcePage((current) => Math.max(1, current - 1))}
+                            onClick={() =>
+                              setResourcePage((current) =>
+                                Math.max(1, current - 1),
+                              )
+                            }
                             disabled={currentResourcePage <= 1}
                             className="app-button-secondary disabled:cursor-not-allowed disabled:opacity-50"
                           >
-                            {t('openClawResourcesPage.paginationPrev')}
+                            {t("openClawResourcesPage.paginationPrev")}
                           </button>
                           <div className="min-w-[88px] text-center text-sm font-medium text-[#5f5957]">
                             {currentResourcePage} / {resourcePageTotal}
                           </div>
                           <button
                             type="button"
-                            onClick={() => setResourcePage((current) => Math.min(resourcePageTotal, current + 1))}
+                            onClick={() =>
+                              setResourcePage((current) =>
+                                Math.min(resourcePageTotal, current + 1),
+                              )
+                            }
                             disabled={currentResourcePage >= resourcePageTotal}
                             className="app-button-secondary disabled:cursor-not-allowed disabled:opacity-50"
                           >
-                            {t('openClawResourcesPage.paginationNext')}
+                            {t("openClawResourcesPage.paginationNext")}
                           </button>
                         </div>
                       </div>
@@ -1230,22 +1600,30 @@ const OpenClawConfigCenterPage: React.FC = () => {
                       <input
                         value={resourceSearch}
                         onChange={(e) => setResourceSearch(e.target.value)}
-                        placeholder={t('openClawResourcesPage.searchPlaceholder')}
+                        placeholder={t(
+                          "openClawResourcesPage.searchPlaceholder",
+                        )}
                         className="app-input w-full"
                       />
-                      <button type="button" onClick={openNewResourceEditor} className="app-button-primary whitespace-nowrap">
-                        {t('openClawResourcesPage.actions.new')}
+                      <button
+                        type="button"
+                        onClick={openNewResourceEditor}
+                        className="app-button-primary whitespace-nowrap"
+                      >
+                        {t("openClawResourcesPage.actions.new")}
                       </button>
                     </div>
                     <div className="mt-3 text-sm text-gray-500">
-                      {t('openClawResourcesPage.resourceListHint')}
+                      {t("openClawResourcesPage.resourceListHint")}
                     </div>
                     <div className="mt-4 space-y-3">
                       {loading ? (
-                        <div className="text-sm text-gray-500">{t('openClawResourcesPage.loadingResources')}</div>
+                        <div className="text-sm text-gray-500">
+                          {t("openClawResourcesPage.loadingResources")}
+                        </div>
                       ) : filteredResources.length === 0 ? (
                         <div className="rounded-2xl border border-dashed border-gray-300 px-4 py-8 text-sm text-gray-500">
-                          {t('openClawResourcesPage.noResources')}
+                          {t("openClawResourcesPage.noResources")}
                         </div>
                       ) : (
                         paginatedResources.map((item) => (
@@ -1254,17 +1632,31 @@ const OpenClawConfigCenterPage: React.FC = () => {
                             type="button"
                             onClick={() => openResourceEditor(item)}
                             className={`w-full rounded-2xl border px-4 py-4 text-left transition ${
-                              selectedResourceId === item.id ? 'border-indigo-300 bg-indigo-50' : 'border-gray-200 bg-white hover:border-gray-300'
+                              selectedResourceId === item.id
+                                ? "border-indigo-300 bg-indigo-50"
+                                : "border-gray-200 bg-white hover:border-gray-300"
                             }`}
                           >
                             <div className="flex items-center justify-between gap-3">
                               <div>
-                                <div className="font-medium text-gray-900">{item.name}</div>
-                                <div className="mt-1 text-xs text-gray-500">{item.resource_key}</div>
-                                {item.description && <div className="mt-2 line-clamp-2 text-sm text-gray-600">{item.description}</div>}
+                                <div className="font-medium text-gray-900">
+                                  {item.name}
+                                </div>
+                                <div className="mt-1 text-xs text-gray-500">
+                                  {item.resource_key}
+                                </div>
+                                {item.description && (
+                                  <div className="mt-2 line-clamp-2 text-sm text-gray-600">
+                                    {item.description}
+                                  </div>
+                                )}
                               </div>
-                              <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${item.enabled ? 'bg-green-50 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
-                                {item.enabled ? t('openClawResourcesPage.enabled') : t('openClawResourcesPage.disabled')}
+                              <span
+                                className={`rounded-full px-2.5 py-1 text-xs font-medium ${item.enabled ? "bg-green-50 text-green-700" : "bg-gray-100 text-gray-500"}`}
+                              >
+                                {item.enabled
+                                  ? t("openClawResourcesPage.enabled")
+                                  : t("openClawResourcesPage.disabled")}
                               </span>
                             </div>
                           </button>
@@ -1274,31 +1666,45 @@ const OpenClawConfigCenterPage: React.FC = () => {
                     {!loading && filteredResources.length > 0 ? (
                       <div className="mt-4 flex flex-col gap-3 border-t border-[#f3e7df] pt-4 sm:flex-row sm:items-center sm:justify-between">
                         <div className="text-sm text-[#8f8681]">
-                          {t('openClawResourcesPage.paginationSummary', {
+                          {t("openClawResourcesPage.paginationSummary", {
                             pageSize: CONFIG_CENTER_PAGE_SIZE,
-                            from: (currentResourcePage - 1) * CONFIG_CENTER_PAGE_SIZE + 1,
-                            to: Math.min(currentResourcePage * CONFIG_CENTER_PAGE_SIZE, filteredResources.length),
+                            from:
+                              (currentResourcePage - 1) *
+                                CONFIG_CENTER_PAGE_SIZE +
+                              1,
+                            to: Math.min(
+                              currentResourcePage * CONFIG_CENTER_PAGE_SIZE,
+                              filteredResources.length,
+                            ),
                           })}
                         </div>
                         <div className="flex items-center gap-2">
                           <button
                             type="button"
-                            onClick={() => setResourcePage((current) => Math.max(1, current - 1))}
+                            onClick={() =>
+                              setResourcePage((current) =>
+                                Math.max(1, current - 1),
+                              )
+                            }
                             disabled={currentResourcePage <= 1}
                             className="app-button-secondary disabled:cursor-not-allowed disabled:opacity-50"
                           >
-                            {t('openClawResourcesPage.paginationPrev')}
+                            {t("openClawResourcesPage.paginationPrev")}
                           </button>
                           <div className="min-w-[88px] text-center text-sm font-medium text-[#5f5957]">
                             {currentResourcePage} / {resourcePageTotal}
                           </div>
                           <button
                             type="button"
-                            onClick={() => setResourcePage((current) => Math.min(resourcePageTotal, current + 1))}
+                            onClick={() =>
+                              setResourcePage((current) =>
+                                Math.min(resourcePageTotal, current + 1),
+                              )
+                            }
                             disabled={currentResourcePage >= resourcePageTotal}
                             className="app-button-secondary disabled:cursor-not-allowed disabled:opacity-50"
                           >
-                            {t('openClawResourcesPage.paginationNext')}
+                            {t("openClawResourcesPage.paginationNext")}
                           </button>
                         </div>
                       </div>
@@ -1311,10 +1717,14 @@ const OpenClawConfigCenterPage: React.FC = () => {
                 <div className="max-w-xl rounded-[28px] border border-dashed border-[#dbe4f0] bg-[#f8fbff] px-8 py-10 text-center shadow-[0_26px_80px_-56px_rgba(30,64,175,0.45)]">
                   <div className="text-xs font-semibold uppercase tracking-[0.22em] text-[#2563eb]">{t('common.comingSoon')}</div>
                   <h3 className="mt-4 text-2xl font-semibold tracking-[-0.03em] text-[#171212]">
-                    {t('openClawResourcesPage.notConfigurableYet', { type: selectedResourceTypeOption?.label || t('openClawResourcesPage.thisResourceType') })}
+                    {t("openClawResourcesPage.notConfigurableYet", {
+                      type:
+                        selectedResourceTypeOption?.label ||
+                        t("openClawResourcesPage.thisResourceType"),
+                    })}
                   </h3>
                   <p className="mt-3 text-sm leading-7 text-[#6e6460]">
-                    {t('openClawResourcesPage.onlyChannelConfigurable')}
+                    {t("openClawResourcesPage.onlyChannelConfigurable")}
                   </p>
                 </div>
               </div>
@@ -1322,24 +1732,34 @@ const OpenClawConfigCenterPage: React.FC = () => {
           </div>
         )}
 
-        {tab === 'bundles' && (
+        {tab === "bundles" && (
           <div className="app-panel p-4 sm:p-6">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <div>
-                <div className="text-lg font-semibold text-gray-900">{t('openClawResourcesPage.tabs.bundles')}</div>
-                <div className="text-sm text-gray-500">{t('openClawResourcesPage.bundlesSubtitle')}</div>
+                <div className="text-lg font-semibold text-gray-900">
+                  {t("openClawResourcesPage.tabs.bundles")}
+                </div>
+                <div className="text-sm text-gray-500">
+                  {t("openClawResourcesPage.bundlesSubtitle")}
+                </div>
               </div>
-              <button type="button" onClick={openNewBundleEditor} className="app-button-primary">
-                {t('openClawResourcesPage.actions.newBundle')}
+              <button
+                type="button"
+                onClick={openNewBundleEditor}
+                className="app-button-primary"
+              >
+                {t("openClawResourcesPage.actions.newBundle")}
               </button>
             </div>
 
             <div className="mt-5 space-y-3">
               {loading ? (
-                <div className="text-sm text-gray-500">{t('openClawResourcesPage.loadingBundles')}</div>
+                <div className="text-sm text-gray-500">
+                  {t("openClawResourcesPage.loadingBundles")}
+                </div>
               ) : bundles.length === 0 ? (
                 <div className="rounded-2xl border border-dashed border-gray-300 px-4 py-8 text-sm text-gray-500">
-                  {t('openClawResourcesPage.noBundles')}
+                  {t("openClawResourcesPage.noBundles")}
                 </div>
               ) : (
                 bundles.map((item) => (
@@ -1348,17 +1768,33 @@ const OpenClawConfigCenterPage: React.FC = () => {
                     type="button"
                     onClick={() => openBundleEditor(item)}
                     className={`w-full rounded-2xl border px-4 py-4 text-left transition ${
-                      selectedBundleId === item.id ? 'border-indigo-300 bg-indigo-50' : 'border-gray-200 bg-white hover:border-gray-300'
+                      selectedBundleId === item.id
+                        ? "border-indigo-300 bg-indigo-50"
+                        : "border-gray-200 bg-white hover:border-gray-300"
                     }`}
                   >
                     <div className="flex items-center justify-between gap-3">
                       <div>
-                        <div className="font-medium text-gray-900">{item.name}</div>
-                        <div className="mt-1 text-xs text-gray-500">{t('openClawResourcesPage.bundleResourceCount', { count: item.items.length })}</div>
-                        {item.description && <div className="mt-2 line-clamp-2 text-sm text-gray-600">{item.description}</div>}
+                        <div className="font-medium text-gray-900">
+                          {item.name}
+                        </div>
+                        <div className="mt-1 text-xs text-gray-500">
+                          {t("openClawResourcesPage.bundleResourceCount", {
+                            count: item.items.length,
+                          })}
+                        </div>
+                        {item.description && (
+                          <div className="mt-2 line-clamp-2 text-sm text-gray-600">
+                            {item.description}
+                          </div>
+                        )}
                       </div>
-                      <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${item.enabled ? 'bg-green-50 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
-                        {item.enabled ? t('openClawResourcesPage.enabled') : t('openClawResourcesPage.disabled')}
+                      <span
+                        className={`rounded-full px-2.5 py-1 text-xs font-medium ${item.enabled ? "bg-green-50 text-green-700" : "bg-gray-100 text-gray-500"}`}
+                      >
+                        {item.enabled
+                          ? t("openClawResourcesPage.enabled")
+                          : t("openClawResourcesPage.disabled")}
                       </span>
                     </div>
                   </button>
@@ -1368,12 +1804,16 @@ const OpenClawConfigCenterPage: React.FC = () => {
           </div>
         )}
 
-        {tab === 'injections' && (
+        {tab === "injections" && (
           <div className="app-panel p-6">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <div className="text-lg font-semibold text-gray-900">{t('openClawResourcesPage.tabs.injections')}</div>
-                <div className="text-sm text-gray-500">{t('openClawResourcesPage.injectionsSubtitle')}</div>
+                <div className="text-lg font-semibold text-gray-900">
+                  {t("openClawResourcesPage.tabs.injections")}
+                </div>
+                <div className="text-sm text-gray-500">
+                  {t("openClawResourcesPage.injectionsSubtitle")}
+                </div>
               </div>
             </div>
 
@@ -1381,33 +1821,73 @@ const OpenClawConfigCenterPage: React.FC = () => {
               <table className="min-w-full divide-y divide-gray-200 text-sm">
                 <thead>
                   <tr className="text-left text-xs uppercase tracking-[0.18em] text-gray-500">
-                    <th className="py-3 pr-4">{t('openClawResourcesPage.snapshot')}</th>
-                    <th className="py-3 pr-4">{t('openClawResourcesPage.mode')}</th>
-                    <th className="py-3 pr-4">{t('openClawResourcesPage.resources')}</th>
-                    <th className="py-3 pr-4">{t('openClawResourcesPage.envCount')}</th>
-                    <th className="py-3 pr-4">{t('common.status')}</th>
-                    <th className="py-3">{t('openClawResourcesPage.created')}</th>
+                    <th className="py-3 pr-4">
+                      {t("openClawResourcesPage.snapshot")}
+                    </th>
+                    <th className="py-3 pr-4">
+                      {t("openClawResourcesPage.mode")}
+                    </th>
+                    <th className="py-3 pr-4">
+                      {t("openClawResourcesPage.resources")}
+                    </th>
+                    <th className="py-3 pr-4">
+                      {t("openClawResourcesPage.envCount")}
+                    </th>
+                    <th className="py-3 pr-4">{t("common.status")}</th>
+                    <th className="py-3">
+                      {t("openClawResourcesPage.created")}
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
                   {loading ? (
-                    <tr><td colSpan={6} className="py-8 text-center text-gray-500">{t('openClawResourcesPage.loadingSnapshots')}</td></tr>
+                    <tr>
+                      <td
+                        colSpan={6}
+                        className="py-8 text-center text-gray-500"
+                      >
+                        {t("openClawResourcesPage.loadingSnapshots")}
+                      </td>
+                    </tr>
                   ) : snapshots.length === 0 ? (
-                    <tr><td colSpan={6} className="py-8 text-center text-gray-500">{t('openClawResourcesPage.noInjectionRecords')}</td></tr>
+                    <tr>
+                      <td
+                        colSpan={6}
+                        className="py-8 text-center text-gray-500"
+                      >
+                        {t("openClawResourcesPage.noInjectionRecords")}
+                      </td>
+                    </tr>
                   ) : (
                     snapshots.map((item) => (
                       <tr key={item.id}>
-                        <td className="py-4 pr-4 font-medium text-gray-900">#{item.id}</td>
-                        <td className="py-4 pr-4 text-gray-600">{getInjectionModeLabel(item.mode)}</td>
-                        <td className="py-4 pr-4 text-gray-600">{item.resolved_resources.length}</td>
-                        <td className="py-4 pr-4 text-gray-600">{item.env_names.length}</td>
+                        <td className="py-4 pr-4 font-medium text-gray-900">
+                          #{item.id}
+                        </td>
+                        <td className="py-4 pr-4 text-gray-600">
+                          {getInjectionModeLabel(item.mode)}
+                        </td>
+                        <td className="py-4 pr-4 text-gray-600">
+                          {item.resolved_resources.length}
+                        </td>
+                        <td className="py-4 pr-4 text-gray-600">
+                          {item.env_names.length}
+                        </td>
                         <td className="py-4 pr-4">
-                          <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${item.status === 'active' ? 'bg-green-50 text-green-700' : item.status === 'failed' ? 'bg-red-50 text-red-700' : 'bg-amber-50 text-amber-700'}`}>
+                          <span
+                            className={`rounded-full px-2.5 py-1 text-xs font-medium ${item.status === "active" ? "bg-green-50 text-green-700" : item.status === "failed" ? "bg-red-50 text-red-700" : "bg-amber-50 text-amber-700"}`}
+                          >
                             {getSnapshotStatusLabel(item.status)}
                           </span>
-                          {item.error_message && <div className="mt-1 text-xs text-red-600">{item.error_message}</div>}
+                          {item.error_message && (
+                            <div className="mt-1 text-xs text-red-600">
+                              {item.error_message}
+                            </div>
+                          )}
                         </td>
-                        <td className="py-4 text-gray-600">{new Date(item.created_at).toLocaleString()}</td>
+                        <td className="py-4 text-gray-600">
+                          {new Date(item.created_at).toLocaleString()}
+                        </td>
                       </tr>
                     ))
                   )}
@@ -1420,60 +1900,138 @@ const OpenClawConfigCenterPage: React.FC = () => {
 
       <EditorModal
         open={resourceEditorOpen}
-        title={resourceForm.id ? t('openClawResourcesPage.editResourceTitle') : t('openClawResourcesPage.newResourceTitle')}
-        subtitle={resourceForm.id ? t('openClawResourcesPage.editResourceSubtitle') : t('openClawResourcesPage.newResourceSubtitle')}
+        title={
+          resourceForm.id
+            ? t("openClawResourcesPage.editResourceTitle")
+            : t("openClawResourcesPage.newResourceTitle")
+        }
+        subtitle={
+          resourceForm.id
+            ? t("openClawResourcesPage.editResourceSubtitle")
+            : t("openClawResourcesPage.newResourceSubtitle")
+        }
         onClose={closeResourceEditor}
         busy={saving}
         panelClassName="max-w-5xl"
       >
         <div className="space-y-4">
-          {error && <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
-          {notice && <div className="rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">{notice}</div>}
+          {error && (
+            <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {error}
+            </div>
+          )}
+          {notice && (
+            <div className="rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">
+              {notice}
+            </div>
+          )}
 
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <div>
-              <label className="block text-sm font-medium text-gray-700">{t('common.type')}</label>
+              <label className="block text-sm font-medium text-gray-700">
+                {t("common.type")}
+              </label>
               <select
                 value={resourceForm.resource_type}
                 onChange={(e) => {
                   const nextType = e.target.value as OpenClawResourceType;
                   setResourceType(nextType);
-                  if (nextType !== 'channel') {
-                    setSelectedChannelTemplateId('');
+                  if (nextType !== "channel") {
+                    setSelectedChannelTemplateId("");
                   }
                   setResourceForm((current) => ({
                     ...current,
                     resource_type: nextType,
-                    contentText: current.id ? current.contentText : defaultContentByType[nextType],
+                    contentText: current.id
+                      ? current.contentText
+                      : defaultContentByType[nextType],
                   }));
                 }}
                 className="app-input mt-1 w-full"
               >
-                {resourceTypeOptions.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+                {resourceTypeOptions.map((item) => (
+                  <option key={item.value} value={item.value}>
+                    {item.label}
+                  </option>
+                ))}
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700">{t('openClawResourcesPage.resourceKey')}</label>
-              <input value={resourceForm.resource_key} onChange={(e) => setResourceForm((current) => ({ ...current, resource_key: e.target.value }))} className="app-input mt-1 w-full" />
+              <label className="block text-sm font-medium text-gray-700">
+                {t("openClawResourcesPage.resourceKey")}
+              </label>
+              <input
+                value={resourceForm.resource_key}
+                onChange={(e) =>
+                  setResourceForm((current) => ({
+                    ...current,
+                    resource_key: e.target.value,
+                  }))
+                }
+                className="app-input mt-1 w-full"
+              />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700">{t('openClawResourcesPage.name')}</label>
-              <input value={resourceForm.name} onChange={(e) => setResourceForm((current) => ({ ...current, name: e.target.value }))} className="app-input mt-1 w-full" />
+              <label className="block text-sm font-medium text-gray-700">
+                {t("openClawResourcesPage.name")}
+              </label>
+              <input
+                value={resourceForm.name}
+                onChange={(e) =>
+                  setResourceForm((current) => ({
+                    ...current,
+                    name: e.target.value,
+                  }))
+                }
+                className="app-input mt-1 w-full"
+              />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700">{t('openClawResourcesPage.tags')}</label>
-              <input value={resourceForm.tagsText} onChange={(e) => setResourceForm((current) => ({ ...current, tagsText: e.target.value }))} className="app-input mt-1 w-full" placeholder={t('openClawResourcesPage.tagsPlaceholder')} />
+              <label className="block text-sm font-medium text-gray-700">
+                {t("openClawResourcesPage.tags")}
+              </label>
+              <input
+                value={resourceForm.tagsText}
+                onChange={(e) =>
+                  setResourceForm((current) => ({
+                    ...current,
+                    tagsText: e.target.value,
+                  }))
+                }
+                className="app-input mt-1 w-full"
+                placeholder={t("openClawResourcesPage.tagsPlaceholder")}
+              />
             </div>
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700">{t('common.description')}</label>
-            <textarea value={resourceForm.description} onChange={(e) => setResourceForm((current) => ({ ...current, description: e.target.value }))} className="app-input mt-1 min-h-24 w-full" />
+            <label className="block text-sm font-medium text-gray-700">
+              {t("common.description")}
+            </label>
+            <textarea
+              value={resourceForm.description}
+              onChange={(e) =>
+                setResourceForm((current) => ({
+                  ...current,
+                  description: e.target.value,
+                }))
+              }
+              className="app-input mt-1 min-h-24 w-full"
+            />
           </div>
 
           <label className="flex items-center gap-3 text-sm font-medium text-gray-700">
-            <input type="checkbox" checked={resourceForm.enabled} onChange={(e) => setResourceForm((current) => ({ ...current, enabled: e.target.checked }))} />
-            {t('openClawResourcesPage.enabled')}
+            <input
+              type="checkbox"
+              checked={resourceForm.enabled}
+              onChange={(e) =>
+                setResourceForm((current) => ({
+                  ...current,
+                  enabled: e.target.checked,
+                }))
+              }
+            />
+            {t("openClawResourcesPage.enabled")}
           </label>
 
           {resourceEditorIsConfigurable ? (
@@ -1482,48 +2040,76 @@ const OpenClawConfigCenterPage: React.FC = () => {
                 <div className="rounded-2xl border border-[#f4d5c6] bg-[#f8fbff] p-4">
                   <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
                     <div className="flex-1">
-                      <label className="block text-sm font-medium text-gray-700">{t('openClawResourcesPage.channelTemplate')}</label>
+                      <label className="block text-sm font-medium text-gray-700">
+                        {t("openClawResourcesPage.channelTemplate")}
+                      </label>
                       <select
                         value={selectedChannelTemplateId}
-                        onChange={(e) => setSelectedChannelTemplateId(e.target.value)}
+                        onChange={(e) =>
+                          setSelectedChannelTemplateId(e.target.value)
+                        }
                         className="app-input mt-1 w-full"
                       >
-                        <option value="">{t('openClawResourcesPage.chooseStarterTemplate')}</option>
-                        {(['builtin', 'plugin'] as const).map((category) => (
-                          <optgroup key={category} label={t(`openClawResourcesPage.templateCategories.${category}`)}>
-                            {channelTemplatesByCategory[category].map((template) => (
-                              <option key={template.id} value={template.id}>
-                                {getChannelTemplateLabel(template.id)}
-                              </option>
-                            ))}
+                        <option value="">
+                          {t("openClawResourcesPage.chooseStarterTemplate")}
+                        </option>
+                        {(["builtin", "plugin"] as const).map((category) => (
+                          <optgroup
+                            key={category}
+                            label={t(
+                              `openClawResourcesPage.templateCategories.${category}`,
+                            )}
+                          >
+                            {channelTemplatesByCategory[category].map(
+                              (template) => (
+                                <option key={template.id} value={template.id}>
+                                  {getChannelTemplateLabel(template.id)}
+                                </option>
+                              ),
+                            )}
                           </optgroup>
                         ))}
                       </select>
                     </div>
                     <button
                       type="button"
-                      onClick={() => applyChannelTemplate(selectedChannelTemplateId)}
+                      onClick={() =>
+                        applyChannelTemplate(selectedChannelTemplateId)
+                      }
                       disabled={!selectedChannelTemplateId}
                       className="app-button-secondary disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                      {t('openClawResourcesPage.actions.loadTemplate')}
+                      {t("openClawResourcesPage.actions.loadTemplate")}
                     </button>
                   </div>
                   <p className="mt-3 text-xs leading-5 text-gray-600">
-                    {t('openClawResourcesPage.channelTemplateHint')}
+                    {t("openClawResourcesPage.channelTemplateHint")}
                   </p>
                   {selectedChannelTemplate && (
                     <div className="mt-3 rounded-2xl border border-white/80 bg-white/80 px-4 py-3">
                       <div className="flex flex-wrap items-center gap-2">
-                        <div className="text-sm font-semibold text-gray-900">{getChannelTemplateLabel(selectedChannelTemplate.id)}</div>
-                        <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${selectedChannelTemplate.category === 'plugin' ? 'bg-indigo-50 text-indigo-700' : 'bg-emerald-50 text-emerald-700'}`}>
-                          {t(`openClawResourcesPage.templateCategories.${selectedChannelTemplate.category}`)}
+                        <div className="text-sm font-semibold text-gray-900">
+                          {getChannelTemplateLabel(selectedChannelTemplate.id)}
+                        </div>
+                        <span
+                          className={`rounded-full px-2.5 py-1 text-xs font-medium ${selectedChannelTemplate.category === "plugin" ? "bg-indigo-50 text-indigo-700" : "bg-emerald-50 text-emerald-700"}`}
+                        >
+                          {t(
+                            `openClawResourcesPage.templateCategories.${selectedChannelTemplate.category}`,
+                          )}
                         </span>
                         <span className="rounded-full bg-gray-100 px-2.5 py-1 text-xs font-medium text-gray-600">
-                          {t('openClawResourcesPage.templateKey', { key: selectedChannelTemplate.resourceKey })}
+                          {t("openClawResourcesPage.templateKey", {
+                            key: selectedChannelTemplate.resourceKey,
+                          })}
                         </span>
                       </div>
-                      <p className="mt-2 text-sm text-gray-600">{getChannelTemplateDescription(selectedChannelTemplate.id, selectedChannelTemplate.description)}</p>
+                      <p className="mt-2 text-sm text-gray-600">
+                        {getChannelTemplateDescription(
+                          selectedChannelTemplate.id,
+                          selectedChannelTemplate.description,
+                        )}
+                      </p>
                     </div>
                   )}
                 </div>
@@ -1533,7 +2119,9 @@ const OpenClawConfigCenterPage: React.FC = () => {
                 <div className="rounded-2xl border border-[#dbe4f0] bg-[#f8fbff] p-4">
                   <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                     <div>
-                      <div className="text-sm font-medium text-gray-700">{t(supportedChannelEditor.titleKey)}</div>
+                      <div className="text-sm font-medium text-gray-700">
+                        {t(supportedChannelEditor.titleKey)}
+                      </div>
                       <p className="mt-1 text-xs leading-5 text-gray-600">
                         {t(supportedChannelEditor.descriptionKey)}
                       </p>
@@ -1544,41 +2132,53 @@ const OpenClawConfigCenterPage: React.FC = () => {
                           key={mode}
                           type="button"
                           onClick={() => setChannelEditorMode(mode)}
-                          disabled={mode === 'form' && !supportedChannelForm}
+                          disabled={mode === "form" && !supportedChannelForm}
                           className={`rounded-full px-4 py-2 text-sm font-medium transition ${
                             channelEditorMode === mode
-                              ? 'bg-[#171212] text-white'
-                              : 'text-[#6e6460] hover:bg-[#f5ece7]'
+                              ? "bg-[#171212] text-white"
+                              : "text-[#6e6460] hover:bg-[#f5ece7]"
                           } disabled:cursor-not-allowed disabled:opacity-50`}
                         >
-                          {mode === 'form' ? t('openClawResourcesPage.editorModes.form') : t('openClawResourcesPage.editorModes.json')}
+                          {mode === "form"
+                            ? t("openClawResourcesPage.editorModes.form")
+                            : t("openClawResourcesPage.editorModes.json")}
                         </button>
                       ))}
                     </div>
                   </div>
 
-                  {channelEditorMode === 'form' ? (
+                  {channelEditorMode === "form" ? (
                     supportedChannelForm ? (
                       <div
                         className={`mt-4 grid grid-cols-1 gap-4 ${
                           supportedChannelEditor.fields.length >= 3
-                            ? 'md:grid-cols-3'
+                            ? "md:grid-cols-3"
                             : supportedChannelEditor.fields.length === 2
-                              ? 'md:grid-cols-2'
-                              : ''
+                              ? "md:grid-cols-2"
+                              : ""
                         }`}
                       >
                         {supportedChannelEditor.fields.map((field) => (
-                          <div key={`${supportedChannelEditor.id}-${field.key}`}>
-                            <label className="block text-sm font-medium text-gray-700">{t(field.labelKey)}</label>
+                          <div
+                            key={`${supportedChannelEditor.id}-${field.key}`}
+                          >
+                            <label className="block text-sm font-medium text-gray-700">
+                              {t(field.labelKey)}
+                            </label>
                             <input
-                              value={supportedChannelForm[field.key] || ''}
-                              onChange={(e) => setResourceForm((current) => ({
-                                ...current,
-                                contentText: supportedChannelEditor.updateContentText(current.contentText, {
-                                  [field.key]: e.target.value,
-                                }),
-                              }))}
+                              value={supportedChannelForm[field.key] || ""}
+                              onChange={(e) =>
+                                setResourceForm((current) => ({
+                                  ...current,
+                                  contentText:
+                                    supportedChannelEditor.updateContentText(
+                                      current.contentText,
+                                      {
+                                        [field.key]: e.target.value,
+                                      },
+                                    ),
+                                }))
+                              }
                               className="app-input mt-1 w-full"
                               placeholder={t(field.placeholderKey)}
                             />
@@ -1587,40 +2187,100 @@ const OpenClawConfigCenterPage: React.FC = () => {
                       </div>
                     ) : (
                       <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
-                        {t('openClawResourcesPage.invalidChannelJson')}
+                        {t("openClawResourcesPage.invalidChannelJson")}
                       </div>
                     )
                   ) : (
                     <div className="mt-4">
-                      <label className="block text-sm font-medium text-gray-700">{t('openClawResourcesPage.contentJson')}</label>
-                      <textarea value={resourceForm.contentText} onChange={(e) => setResourceForm((current) => ({ ...current, contentText: e.target.value }))} className="app-input mt-1 min-h-[280px] w-full font-mono text-xs" spellCheck={false} />
+                      <label className="block text-sm font-medium text-gray-700">
+                        {t("openClawResourcesPage.contentJson")}
+                      </label>
+                      <textarea
+                        value={resourceForm.contentText}
+                        onChange={(e) =>
+                          setResourceForm((current) => ({
+                            ...current,
+                            contentText: e.target.value,
+                          }))
+                        }
+                        className="app-input mt-1 min-h-[280px] w-full font-mono text-xs"
+                        spellCheck={false}
+                      />
                     </div>
                   )}
                 </div>
               ) : (
                 <div>
-                  <label className="block text-sm font-medium text-gray-700">{t('openClawResourcesPage.contentJson')}</label>
-                  <textarea value={resourceForm.contentText} onChange={(e) => setResourceForm((current) => ({ ...current, contentText: e.target.value }))} className="app-input mt-1 min-h-[280px] w-full font-mono text-xs" spellCheck={false} />
+                  <label className="block text-sm font-medium text-gray-700">
+                    {t("openClawResourcesPage.contentJson")}
+                  </label>
+                  <textarea
+                    value={resourceForm.contentText}
+                    onChange={(e) =>
+                      setResourceForm((current) => ({
+                        ...current,
+                        contentText: e.target.value,
+                      }))
+                    }
+                    className="app-input mt-1 min-h-[280px] w-full font-mono text-xs"
+                    spellCheck={false}
+                  />
                 </div>
               )}
 
               <div className="flex flex-wrap gap-3 border-t border-[#f1e3db] pt-4">
-                <button type="button" onClick={persistResource} disabled={saving} className="app-button-primary">
-                  {resourceForm.id ? t('openClawResourcesPage.actions.saveResource') : t('openClawResourcesPage.actions.createResource')}
+                <button
+                  type="button"
+                  onClick={persistResource}
+                  disabled={saving}
+                  className="app-button-primary"
+                >
+                  {resourceForm.id
+                    ? t("openClawResourcesPage.actions.saveResource")
+                    : t("openClawResourcesPage.actions.createResource")}
                 </button>
-                <button type="button" onClick={validateResource} disabled={saving} className="app-button-secondary">{t('openClawResourcesPage.actions.validateJson')}</button>
-                {resourceForm.id && <button type="button" onClick={cloneResource} disabled={saving} className="app-button-secondary">{t('openClawResourcesPage.actions.clone')}</button>}
-                {resourceForm.id && <button type="button" onClick={removeResource} disabled={saving} className="rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-sm font-medium text-red-700 hover:bg-red-100">{t('common.delete')}</button>}
+                <button
+                  type="button"
+                  onClick={validateResource}
+                  disabled={saving}
+                  className="app-button-secondary"
+                >
+                  {t("openClawResourcesPage.actions.validateJson")}
+                </button>
+                {resourceForm.id && (
+                  <button
+                    type="button"
+                    onClick={cloneResource}
+                    disabled={saving}
+                    className="app-button-secondary"
+                  >
+                    {t("openClawResourcesPage.actions.clone")}
+                  </button>
+                )}
+                {resourceForm.id && (
+                  <button
+                    type="button"
+                    onClick={removeResource}
+                    disabled={saving}
+                    className="rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-sm font-medium text-red-700 hover:bg-red-100"
+                  >
+                    {t("common.delete")}
+                  </button>
+                )}
               </div>
             </>
           ) : (
             <div className="rounded-[28px] border border-dashed border-[#dbe4f0] bg-[#f8fbff] px-8 py-10 text-center shadow-[0_26px_80px_-56px_rgba(30,64,175,0.45)]">
               <div className="text-xs font-semibold uppercase tracking-[0.22em] text-[#2563eb]">{t('common.comingSoon')}</div>
               <h4 className="mt-4 text-2xl font-semibold tracking-[-0.03em] text-[#171212]">
-                {t('openClawResourcesPage.notConfigurableYet', { type: selectedEditorTypeOption?.label || t('openClawResourcesPage.thisResourceType') })}
+                {t("openClawResourcesPage.notConfigurableYet", {
+                  type:
+                    selectedEditorTypeOption?.label ||
+                    t("openClawResourcesPage.thisResourceType"),
+                })}
               </h4>
               <p className="mt-3 text-sm leading-7 text-[#6e6460]">
-                {t('openClawResourcesPage.onlyChannelConfigurable')}
+                {t("openClawResourcesPage.onlyChannelConfigurable")}
               </p>
             </div>
           )}
@@ -1629,34 +2289,83 @@ const OpenClawConfigCenterPage: React.FC = () => {
 
       <EditorModal
         open={bundleEditorOpen}
-        title={bundleForm.id ? t('openClawResourcesPage.editBundleTitle') : t('openClawResourcesPage.newBundleTitle')}
-        subtitle={bundleForm.id ? t('openClawResourcesPage.editBundleSubtitle') : t('openClawResourcesPage.newBundleSubtitle')}
+        title={
+          bundleForm.id
+            ? t("openClawResourcesPage.editBundleTitle")
+            : t("openClawResourcesPage.newBundleTitle")
+        }
+        subtitle={
+          bundleForm.id
+            ? t("openClawResourcesPage.editBundleSubtitle")
+            : t("openClawResourcesPage.newBundleSubtitle")
+        }
         onClose={closeBundleEditor}
         busy={saving}
         panelClassName="max-w-4xl"
       >
         <div className="space-y-4">
-          {error && <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
-          {notice && <div className="rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">{notice}</div>}
+          {error && (
+            <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {error}
+            </div>
+          )}
+          {notice && (
+            <div className="rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">
+              {notice}
+            </div>
+          )}
 
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <div>
-              <label className="block text-sm font-medium text-gray-700">{t('openClawResourcesPage.bundleName')}</label>
-              <input value={bundleForm.name} onChange={(e) => setBundleForm((current) => ({ ...current, name: e.target.value }))} className="app-input mt-1 w-full" />
+              <label className="block text-sm font-medium text-gray-700">
+                {t("openClawResourcesPage.bundleName")}
+              </label>
+              <input
+                value={bundleForm.name}
+                onChange={(e) =>
+                  setBundleForm((current) => ({
+                    ...current,
+                    name: e.target.value,
+                  }))
+                }
+                className="app-input mt-1 w-full"
+              />
             </div>
             <label className="flex items-center gap-3 pt-7 text-sm font-medium text-gray-700">
-              <input type="checkbox" checked={bundleForm.enabled} onChange={(e) => setBundleForm((current) => ({ ...current, enabled: e.target.checked }))} />
-              {t('openClawResourcesPage.enabled')}
+              <input
+                type="checkbox"
+                checked={bundleForm.enabled}
+                onChange={(e) =>
+                  setBundleForm((current) => ({
+                    ...current,
+                    enabled: e.target.checked,
+                  }))
+                }
+              />
+              {t("openClawResourcesPage.enabled")}
             </label>
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700">{t('common.description')}</label>
-            <textarea value={bundleForm.description} onChange={(e) => setBundleForm((current) => ({ ...current, description: e.target.value }))} className="app-input mt-1 min-h-24 w-full" />
+            <label className="block text-sm font-medium text-gray-700">
+              {t("common.description")}
+            </label>
+            <textarea
+              value={bundleForm.description}
+              onChange={(e) =>
+                setBundleForm((current) => ({
+                  ...current,
+                  description: e.target.value,
+                }))
+              }
+              className="app-input mt-1 min-h-24 w-full"
+            />
           </div>
 
           <div>
-            <div className="text-sm font-medium text-gray-700">{t('openClawResourcesPage.bundleResources')}</div>
+            <div className="text-sm font-medium text-gray-700">
+              {t("openClawResourcesPage.bundleResources")}
+            </div>
             <div className="mt-3 space-y-5">
               {groupedResources.map((group) => (
                 <div key={group.value}>
@@ -1665,27 +2374,40 @@ const OpenClawConfigCenterPage: React.FC = () => {
                     {group.items.map((item) => {
                       const checked = bundleForm.itemIds.includes(item.id);
                       return (
-                        <label key={item.id} className={`flex cursor-pointer items-start gap-3 rounded-2xl border px-4 py-3 ${checked ? 'border-indigo-300 bg-indigo-50' : 'border-gray-200 bg-white'}`}>
+                        <label
+                          key={item.id}
+                          className={`flex cursor-pointer items-start gap-3 rounded-2xl border px-4 py-3 ${checked ? "border-indigo-300 bg-indigo-50" : "border-gray-200 bg-white"}`}
+                        >
                           <input
                             type="checkbox"
                             checked={checked}
-                            onChange={(e) => setBundleForm((current) => ({
-                              ...current,
-                              itemIds: e.target.checked
-                                ? [...current.itemIds, item.id]
-                                : current.itemIds.filter((value) => value !== item.id),
-                            }))}
+                            onChange={(e) =>
+                              setBundleForm((current) => ({
+                                ...current,
+                                itemIds: e.target.checked
+                                  ? [...current.itemIds, item.id]
+                                  : current.itemIds.filter(
+                                      (value) => value !== item.id,
+                                    ),
+                              }))
+                            }
                           />
                           <span>
-                            <span className="block font-medium text-gray-900">{item.name}</span>
-                            <span className="mt-1 block text-xs text-gray-500">{item.resource_key}</span>
+                            <span className="block font-medium text-gray-900">
+                              {item.name}
+                            </span>
+                            <span className="mt-1 block text-xs text-gray-500">
+                              {item.resource_key}
+                            </span>
                           </span>
                         </label>
                       );
                     })}
                     {group.items.length === 0 && (
                       <div className="rounded-2xl border border-dashed border-gray-300 px-4 py-3 text-sm text-gray-500">
-                        {t('openClawResourcesPage.noResourcesForGroup', { type: group.label })}
+                        {t("openClawResourcesPage.noResourcesForGroup", {
+                          type: group.label,
+                        })}
                       </div>
                     )}
                   </div>
@@ -1695,11 +2417,36 @@ const OpenClawConfigCenterPage: React.FC = () => {
           </div>
 
           <div className="flex flex-wrap gap-3 border-t border-[#f1e3db] pt-4">
-            <button type="button" onClick={persistBundle} disabled={saving} className="app-button-primary">
-              {bundleForm.id ? t('openClawResourcesPage.actions.saveBundle') : t('openClawResourcesPage.actions.createBundle')}
+            <button
+              type="button"
+              onClick={persistBundle}
+              disabled={saving}
+              className="app-button-primary"
+            >
+              {bundleForm.id
+                ? t("openClawResourcesPage.actions.saveBundle")
+                : t("openClawResourcesPage.actions.createBundle")}
             </button>
-            {bundleForm.id && <button type="button" onClick={cloneBundle} disabled={saving} className="app-button-secondary">{t('openClawResourcesPage.actions.clone')}</button>}
-            {bundleForm.id && <button type="button" onClick={removeBundle} disabled={saving} className="rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-sm font-medium text-red-700 hover:bg-red-100">{t('common.delete')}</button>}
+            {bundleForm.id && (
+              <button
+                type="button"
+                onClick={cloneBundle}
+                disabled={saving}
+                className="app-button-secondary"
+              >
+                {t("openClawResourcesPage.actions.clone")}
+              </button>
+            )}
+            {bundleForm.id && (
+              <button
+                type="button"
+                onClick={removeBundle}
+                disabled={saving}
+                className="rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-sm font-medium text-red-700 hover:bg-red-100"
+              >
+                {t("common.delete")}
+              </button>
+            )}
           </div>
         </div>
       </EditorModal>

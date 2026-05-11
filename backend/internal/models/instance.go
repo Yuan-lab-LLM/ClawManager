@@ -12,7 +12,7 @@ type Instance struct {
 	Description              *string    `db:"description" json:"description,omitempty"`
 	Type                     string     `db:"type" json:"type"`
 	Status                   string     `db:"status" json:"status"`
-	CPUCores                 int        `db:"cpu_cores" json:"cpu_cores"`
+	CPUCores                 float64    `db:"cpu_cores" json:"cpu_cores"`
 	MemoryGB                 int        `db:"memory_gb" json:"memory_gb"`
 	DiskGB                   int        `db:"disk_gb" json:"disk_gb"`
 	GPUEnabled               bool       `db:"gpu_enabled" json:"gpu_enabled"`
@@ -22,6 +22,7 @@ type Instance struct {
 	OSVersion                string     `db:"os_version" json:"os_version"`
 	ImageRegistry            *string    `db:"image_registry" json:"image_registry,omitempty"`
 	ImageTag                 *string    `db:"image_tag" json:"image_tag,omitempty"`
+	EnvironmentOverridesJSON *string    `db:"environment_overrides_json" json:"-"`
 	StorageClass             string     `db:"storage_class" json:"storage_class"`
 	MountPath                string     `db:"mount_path" json:"mount_path"`
 	PodName                  *string    `db:"pod_name" json:"pod_name,omitempty"`

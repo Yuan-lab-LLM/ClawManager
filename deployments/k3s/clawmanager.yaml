@@ -43,9 +43,9 @@ data:
       user_id INT NOT NULL,
       name VARCHAR(255) NOT NULL,
       description TEXT,
-      type ENUM('openclaw', 'ubuntu', 'debian', 'centos', 'custom', 'webtop') DEFAULT 'ubuntu',
+      type ENUM('openclaw', 'ubuntu', 'debian', 'centos', 'custom', 'webtop', 'hermes') DEFAULT 'ubuntu',
       status ENUM('creating', 'running', 'stopped', 'error', 'deleting') DEFAULT 'creating',
-      cpu_cores INT NOT NULL,
+      cpu_cores DECIMAL(10,2) NOT NULL,
       memory_gb INT NOT NULL,
       disk_gb INT NOT NULL,
       gpu_enabled BOOLEAN DEFAULT FALSE,
@@ -121,7 +121,7 @@ data:
       id INT AUTO_INCREMENT PRIMARY KEY,
       user_id INT NOT NULL UNIQUE,
       max_instances INT DEFAULT 10,
-      max_cpu_cores INT DEFAULT 40,
+      max_cpu_cores DECIMAL(10,2) DEFAULT 40,
       max_memory_gb INT DEFAULT 100,
       max_storage_gb INT DEFAULT 500,
       max_gpu_count INT DEFAULT 2,
@@ -170,7 +170,7 @@ data:
   002_add_webtop_instance_type.sql: |
     USE clawmanager;
     ALTER TABLE instances
-    MODIFY COLUMN type ENUM('openclaw', 'ubuntu', 'debian', 'centos', 'custom', 'webtop') DEFAULT 'ubuntu';
+    MODIFY COLUMN type ENUM('openclaw', 'ubuntu', 'debian', 'centos', 'custom', 'webtop', 'hermes') DEFAULT 'ubuntu';
   003_add_system_image_settings.sql: |
     USE clawmanager;
     CREATE TABLE IF NOT EXISTS system_image_settings (
@@ -192,9 +192,12 @@ data:
   005_update_openclaw_default_image.sql: |
     USE clawmanager;
     UPDATE system_image_settings
-    SET image = 'ghcr.io/yuan-lab-llm/clawmanager-openclaw-image/openclaw:latest'
+    SET image = 'ghcr.io/yuan-lab-llm/agentsruntime/openclaw:latest'
     WHERE instance_type = 'openclaw'
-      AND image = 'ericpearlee/openclaw:v2026.3.24';
+      AND image IN (
+        'ericpearlee/openclaw:v2026.3.24',
+        'ghcr.io/yuan-lab-llm/clawmanager-openclaw-image/openclaw:latest'
+      );
   006_add_openclaw_config_center.sql: |
     USE clawmanager;
     SET @openclaw_snapshot_column_exists = (
@@ -497,6 +500,40 @@ data:
       INDEX idx_skill_scan_results_blob (blob_id, scanned_at),
       INDEX idx_skill_scan_results_risk (risk_level, scanned_at)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+  009_cpu_cores_decimal.sql: |
+    USE clawmanager;
+    ALTER TABLE instances MODIFY COLUMN cpu_cores DECIMAL(10,2) NOT NULL;
+    ALTER TABLE user_quotas MODIFY COLUMN max_cpu_cores DECIMAL(10,2) DEFAULT 40;
+  011_add_hermes_instance_type.sql: |
+    USE clawmanager;
+    ALTER TABLE instances
+    MODIFY COLUMN type ENUM('openclaw', 'ubuntu', 'debian', 'centos', 'custom', 'webtop', 'hermes') DEFAULT 'ubuntu';
+  012_update_agents_runtime_default_images.sql: |
+    USE clawmanager;
+    UPDATE system_image_settings
+    SET image = 'ghcr.io/yuan-lab-llm/agentsruntime/openclaw:latest'
+    WHERE instance_type = 'openclaw'
+      AND image IN (
+        'ericpearlee/openclaw:v2026.3.24',
+        'ghcr.io/yuan-lab-llm/clawmanager-openclaw-image/openclaw:latest'
+      );
+
+    UPDATE system_image_settings
+    SET image = 'ghcr.io/yuan-lab-llm/agentsruntime/hermes:latest'
+    WHERE instance_type = 'hermes'
+      AND image IN (
+        'registry.example.com/hermes-webtop:latest',
+        'lscr.io/linuxserver/webtop:ubuntu-xfce'
+      );
+  013_normalize_agents_runtime_image_names.sql: |
+    USE clawmanager;
+    UPDATE system_image_settings
+    SET image = 'ghcr.io/yuan-lab-llm/agentsruntime/openclaw:latest'
+    WHERE image = 'ghcr.io/Yuan-lab-LLM/AgentsRuntime/openclaw:latest';
+
+    UPDATE system_image_settings
+    SET image = 'ghcr.io/yuan-lab-llm/agentsruntime/hermes:latest'
+    WHERE image = 'ghcr.io/Yuan-lab-LLM/AgentsRuntime/hermes:latest';
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -529,6 +566,7 @@ spec:
       containers:
         - name: mysql
           image: mysql:8.4.8
+          imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 3306
           env:

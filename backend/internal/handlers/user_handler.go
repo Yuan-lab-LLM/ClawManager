@@ -48,9 +48,9 @@ type UpdateRoleRequest struct {
 
 // UpdateQuotaRequest represents an update quota request
 type UpdateQuotaRequest struct {
-	MaxInstances int `json:"max_instances" binding:"min=0"`
-	MaxCPUCores  int `json:"max_cpu_cores" binding:"min=0"`
-	MaxMemoryGB  int `json:"max_memory_gb" binding:"min=0"`
+	MaxInstances int     `json:"max_instances" binding:"min=0"`
+	MaxCPUCores  float64 `json:"max_cpu_cores" binding:"min=0"`
+	MaxMemoryGB  int     `json:"max_memory_gb" binding:"min=0"`
 	MaxStorageGB int `json:"max_storage_gb" binding:"min=0"`
 	MaxGPUCount  int `json:"max_gpu_count" binding:"min=0"`
 }
@@ -73,9 +73,9 @@ type importedUserCredential struct {
 	Username        string `json:"username"`
 	Email           string `json:"email"`
 	Role            string `json:"role"`
-	MaxInstances    int    `json:"max_instances"`
-	MaxCPUCores     int    `json:"max_cpu_cores"`
-	MaxMemoryGB     int    `json:"max_memory_gb"`
+	MaxInstances    int     `json:"max_instances"`
+	MaxCPUCores     float64 `json:"max_cpu_cores"`
+	MaxMemoryGB     int     `json:"max_memory_gb"`
 	MaxStorageGB    int    `json:"max_storage_gb"`
 	MaxGPUCount     int    `json:"max_gpu_count"`
 	InitialPassword string `json:"initial_password"`
@@ -201,7 +201,7 @@ func (h *UserHandler) ImportUsers(c *gin.Context) {
 			results = append(results, importUserResult{Line: lineNumber, Username: username, Error: parseErr})
 			continue
 		}
-		maxCPUCores, parseErr := parseImportInt(fields, headerMap, "maxcpucores", true)
+		maxCPUCores, parseErr := parseImportFloat(fields, headerMap, "maxcpucores", true)
 		if parseErr != "" {
 			results = append(results, importUserResult{Line: lineNumber, Username: username, Error: parseErr})
 			continue
@@ -354,6 +354,21 @@ func parseImportInt(fields []string, headerMap map[string]int, key string, requi
 	parsed, err := strconv.Atoi(value)
 	if err != nil || parsed < 0 {
 		return 0, fmt.Sprintf("%s must be a non-negative integer", headerLabel(key))
+	}
+	return parsed, ""
+}
+
+func parseImportFloat(fields []string, headerMap map[string]int, key string, required bool) (float64, string) {
+	value := importFieldValue(fields, headerMap, key)
+	if value == "" {
+		if required {
+			return 0, fmt.Sprintf("%s is required", headerLabel(key))
+		}
+		return 0, ""
+	}
+	parsed, err := strconv.ParseFloat(value, 64)
+	if err != nil || parsed < 0 {
+		return 0, fmt.Sprintf("%s must be a non-negative number", headerLabel(key))
 	}
 	return parsed, ""
 }

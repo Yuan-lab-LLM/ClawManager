@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"net/http"
+	"strconv"
 	"strings"
 
 	"clawreef/internal/models"
@@ -16,6 +17,7 @@ type SystemSettingsHandler struct {
 }
 
 type UpsertSystemImageSettingRequest struct {
+	ID           int    `json:"id,omitempty"`
 	InstanceType string `json:"instance_type" binding:"required"`
 	DisplayName  string `json:"display_name"`
 	Image        string `json:"image" binding:"required"`
@@ -45,24 +47,33 @@ func (h *SystemSettingsHandler) UpsertSystemImageSetting(c *gin.Context) {
 	}
 
 	setting := &models.SystemImageSetting{
+		ID:           req.ID,
 		InstanceType: strings.TrimSpace(req.InstanceType),
 		DisplayName:  strings.TrimSpace(req.DisplayName),
 		Image:        strings.TrimSpace(req.Image),
 	}
 
-	if err := h.systemImageSettingService.Save(setting); err != nil {
+	saved, err := h.systemImageSettingService.Save(setting)
+	if err != nil {
 		utils.HandleError(c, err)
 		return
 	}
 
-	utils.Success(c, http.StatusOK, "System image setting saved successfully", setting)
+	utils.Success(c, http.StatusOK, "System image setting saved successfully", saved)
 }
 
 func (h *SystemSettingsHandler) DeleteSystemImageSetting(c *gin.Context) {
-	instanceType := c.Param("instanceType")
-	if err := h.systemImageSettingService.Delete(instanceType); err != nil {
-		utils.HandleError(c, err)
-		return
+	target := strings.TrimSpace(c.Param("instanceType"))
+	if id, err := strconv.Atoi(target); err == nil {
+		if err := h.systemImageSettingService.DeleteByID(id); err != nil {
+			utils.HandleError(c, err)
+			return
+		}
+	} else {
+		if err := h.systemImageSettingService.DisableType(target); err != nil {
+			utils.HandleError(c, err)
+			return
+		}
 	}
 
 	utils.Success(c, http.StatusOK, "System image setting deleted successfully", nil)

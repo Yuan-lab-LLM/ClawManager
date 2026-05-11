@@ -9,7 +9,7 @@ type UserQuota struct {
 	ID           int       `db:"id,primarykey,autoincrement" json:"id"`
 	UserID       int       `db:"user_id" json:"user_id"`
 	MaxInstances int       `db:"max_instances" json:"max_instances"`
-	MaxCPUCores  int       `db:"max_cpu_cores" json:"max_cpu_cores"`
+	MaxCPUCores  float64   `db:"max_cpu_cores" json:"max_cpu_cores"`
 	MaxMemoryGB  int       `db:"max_memory_gb" json:"max_memory_gb"`
 	MaxStorageGB int       `db:"max_storage_gb" json:"max_storage_gb"`
 	MaxGPUCount  int       `db:"max_gpu_count" json:"max_gpu_count"`

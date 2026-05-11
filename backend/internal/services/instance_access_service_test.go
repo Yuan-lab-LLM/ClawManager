@@ -229,3 +229,22 @@ func TestInstanceAccessServiceLegacySignedTokenIsDesktopOnly(t *testing.T) {
 		t.Fatalf("legacy token against control-ui scope error = %v, want ErrAccessScopeMismatch", err)
 	}
 }
+
+func TestInstanceAccessServiceStopTerminatesCleanup(t *testing.T) {
+	t.Setenv("INSTANCE_ACCESS_TOKEN_SECRET", "cluster-shared-secret")
+
+	service := NewInstanceAccessService()
+
+	// Stop should not panic and should be idempotent-safe (only called once).
+	service.Stop()
+
+	// After Stop, the service should still be usable for token operations
+	// (only the background cleanup goroutine is stopped).
+	token, err := service.GenerateToken(1, 1, "openclaw", "/proxy", 3001, time.Minute)
+	if err != nil {
+		t.Fatalf("GenerateToken after Stop() error = %v", err)
+	}
+	if _, err := service.ValidateToken(token.Token); err != nil {
+		t.Fatalf("ValidateToken after Stop() error = %v", err)
+	}
+}

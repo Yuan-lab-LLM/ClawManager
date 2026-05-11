@@ -52,9 +52,10 @@ type InstanceAccessScope struct {
 
 // InstanceAccessService manages instance access tokens
 type InstanceAccessService struct {
-	tokens map[string]*AccessToken
-	mu     sync.RWMutex
-	secret string
+	tokens   map[string]*AccessToken
+	mu       sync.RWMutex
+	secret   string
+	stopChan chan struct{}
 }
 
 type instanceAccessClaims struct {
@@ -115,8 +116,9 @@ func ResolveInstanceAccessScope(instanceID int, instanceType string, mode string
 // NewInstanceAccessService creates a new instance access service
 func NewInstanceAccessService() *InstanceAccessService {
 	service := &InstanceAccessService{
-		tokens: make(map[string]*AccessToken),
-		secret: getInstanceAccessTokenSecret(),
+		tokens:   make(map[string]*AccessToken),
+		secret:   getInstanceAccessTokenSecret(),
+		stopChan: make(chan struct{}),
 	}
 
 	// Start cleanup goroutine
@@ -412,16 +414,26 @@ func (s *InstanceAccessService) cleanupExpiredTokens() {
 	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		now := time.Now()
-		s.mu.Lock()
-		for token, accessToken := range s.tokens {
-			if now.After(accessToken.ExpiresAt) {
-				delete(s.tokens, token)
+	for {
+		select {
+		case <-s.stopChan:
+			return
+		case <-ticker.C:
+			now := time.Now()
+			s.mu.Lock()
+			for token, accessToken := range s.tokens {
+				if now.After(accessToken.ExpiresAt) {
+					delete(s.tokens, token)
+				}
 			}
+			s.mu.Unlock()
 		}
-		s.mu.Unlock()
 	}
+}
+
+// Stop terminates the background cleanup goroutine.
+func (s *InstanceAccessService) Stop() {
+	close(s.stopChan)
 }
 
 // GetActiveTokenCount returns the number of active tokens

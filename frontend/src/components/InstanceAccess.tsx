@@ -103,7 +103,6 @@ export function InstanceAccess({
 
   const {
     embedUrl,
-    expiresAt,
     loading,
     error,
     reconnecting,
@@ -164,16 +163,6 @@ export function InstanceAccess({
   const showStartScreen = !embedUrl;
   const hasDesktopSession =
     shouldConnect || Boolean(embedUrl) || loading || reconnecting;
-
-  const formatTimeRemaining = () => {
-    if (!expiresAt) return "";
-    const now = new Date();
-    const diff = expiresAt.getTime() - now.getTime();
-    if (diff <= 0) return t("instances.expired");
-    const minutes = Math.floor(diff / 60000);
-    const seconds = Math.floor((diff % 60000) / 1000);
-    return `${minutes}m ${seconds}s`;
-  };
 
   const handleConnect = () => {
     if (shouldConnect) {
@@ -332,13 +321,6 @@ export function InstanceAccess({
       <div className="flex items-center justify-between px-4 py-3 bg-gray-800 text-white">
         <div className="flex items-center space-x-4">
           <span className="text-sm font-medium">{instanceName}</span>
-          {expiresAt && (
-            <span className="text-xs text-gray-400">
-              {reconnecting
-                ? t("instances.generatingToken")
-                : `${t("instances.expiresIn")}: ${formatTimeRemaining()}`}
-            </span>
-          )}
         </div>
         <div className="flex items-center space-x-2">
           {showControlUiEntry ? (

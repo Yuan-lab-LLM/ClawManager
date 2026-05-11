@@ -59,6 +59,14 @@ func buildRuntimeConfig(instanceType, osType, osVersion string, registry, tag *s
 			"TITLE":     "ClawManager Webtop",
 			"SUBFOLDER": "/",
 		}
+	case "hermes":
+		config.Image = defaultSystemImageSettings["hermes"]
+		config.Port = 3001
+		config.MountPath = "/config/.hermes"
+		config.Env = map[string]string{
+			"TITLE":     "Hermes Runtime",
+			"SUBFOLDER": "/",
+		}
 	case "openclaw":
 		config.MountPath = "/config"
 		if (registry == nil || strings.TrimSpace(*registry) == "") && (tag == nil || strings.TrimSpace(*tag) == "") {
@@ -82,7 +90,7 @@ func buildRuntimeConfig(instanceType, osType, osVersion string, registry, tag *s
 
 func defaultPortForInstanceType(instanceType string) int32 {
 	switch instanceType {
-	case "ubuntu", "webtop":
+	case "ubuntu", "webtop", "hermes":
 		return 3001
 	default:
 		return 3001
@@ -93,6 +101,8 @@ func defaultMountPathForInstanceType(instanceType string) string {
 	switch instanceType {
 	case "ubuntu", "webtop", "openclaw":
 		return "/config"
+	case "hermes":
+		return "/config/.hermes"
 	default:
 		return "/home/user/data"
 	}
@@ -103,6 +113,11 @@ func defaultEnvForInstanceType(instanceType string) map[string]string {
 	case "ubuntu", "webtop", "openclaw":
 		return map[string]string{
 			"TITLE":     "ClawManager Desktop",
+			"SUBFOLDER": "/",
+		}
+	case "hermes":
+		return map[string]string{
+			"TITLE":     "Hermes Runtime",
 			"SUBFOLDER": "/",
 		}
 	default:
@@ -135,11 +150,18 @@ func withInstanceProxyEnv(instanceType string, instanceID int, env map[string]st
 
 func usesWebtopImage(instanceType string) bool {
 	switch instanceType {
-	case "ubuntu", "webtop", "openclaw":
+	case "ubuntu", "webtop", "hermes", "openclaw":
 		return true
 	default:
 		return false
 	}
+}
+
+// defaultImagePullPolicy returns the image pull policy to use for instance
+// pods. Managed runtime instances always use IfNotPresent so local caches can
+// be reused without forcing a remote registry pull during create/start flows.
+func defaultImagePullPolicy() string {
+	return "IfNotPresent"
 }
 
 func defaultEgressProxyURL() (string, bool) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"regexp"
 	"sort"
 	"strings"
@@ -33,6 +34,20 @@ const (
 	OpenClawLogPoliciesEnv           = "CLAWMANAGER_OPENCLAW_LOG_POLICIES_JSON"
 	OpenClawAgentsEnv                = "CLAWMANAGER_OPENCLAW_AGENTS_JSON"
 	OpenClawScheduledTasksEnv        = "CLAWMANAGER_OPENCLAW_SCHEDULED_TASKS_JSON"
+	HermesBootstrapManifestEnv       = "CLAWMANAGER_HERMES_BOOTSTRAP_MANIFEST_JSON"
+	HermesChannelsEnv                = "CLAWMANAGER_HERMES_CHANNELS_JSON"
+	HermesSkillsEnv                  = "CLAWMANAGER_HERMES_SKILLS_JSON"
+	HermesSessionTemplatesEnv        = "CLAWMANAGER_HERMES_SESSION_TEMPLATES_JSON"
+	HermesLogPoliciesEnv             = "CLAWMANAGER_HERMES_LOG_POLICIES_JSON"
+	HermesAgentsEnv                  = "CLAWMANAGER_HERMES_AGENTS_JSON"
+	HermesScheduledTasksEnv          = "CLAWMANAGER_HERMES_SCHEDULED_TASKS_JSON"
+	RuntimeBootstrapManifestEnv      = "CLAWMANAGER_RUNTIME_BOOTSTRAP_MANIFEST_JSON"
+	RuntimeChannelsEnv               = "CLAWMANAGER_RUNTIME_CHANNELS_JSON"
+	RuntimeSkillsEnv                 = "CLAWMANAGER_RUNTIME_SKILLS_JSON"
+	RuntimeSessionTemplatesEnv       = "CLAWMANAGER_RUNTIME_SESSION_TEMPLATES_JSON"
+	RuntimeLogPoliciesEnv            = "CLAWMANAGER_RUNTIME_LOG_POLICIES_JSON"
+	RuntimeAgentsEnv                 = "CLAWMANAGER_RUNTIME_AGENTS_JSON"
+	RuntimeScheduledTasksEnv         = "CLAWMANAGER_RUNTIME_SCHEDULED_TASKS_JSON"
 	openClawBootstrapPayloadMaxBytes = 64 * 1024
 
 	openClawCompiledSnapshotStatus = "compiled"
@@ -70,6 +85,24 @@ var (
 		OpenClawConfigResourceTypeLogPolicy:       OpenClawLogPoliciesEnv,
 		OpenClawConfigResourceTypeAgent:           OpenClawAgentsEnv,
 		OpenClawConfigResourceTypeScheduledTask:   OpenClawScheduledTasksEnv,
+	}
+	hermesBootstrapEnvAliases = map[string]string{
+		OpenClawBootstrapManifestEnv: HermesBootstrapManifestEnv,
+		OpenClawChannelsEnv:          HermesChannelsEnv,
+		OpenClawSkillsEnv:            HermesSkillsEnv,
+		OpenClawSessionTemplatesEnv:  HermesSessionTemplatesEnv,
+		OpenClawLogPoliciesEnv:       HermesLogPoliciesEnv,
+		OpenClawAgentsEnv:            HermesAgentsEnv,
+		OpenClawScheduledTasksEnv:    HermesScheduledTasksEnv,
+	}
+	runtimeBootstrapEnvAliases = map[string]string{
+		OpenClawBootstrapManifestEnv: RuntimeBootstrapManifestEnv,
+		OpenClawChannelsEnv:          RuntimeChannelsEnv,
+		OpenClawSkillsEnv:            RuntimeSkillsEnv,
+		OpenClawSessionTemplatesEnv:  RuntimeSessionTemplatesEnv,
+		OpenClawLogPoliciesEnv:       RuntimeLogPoliciesEnv,
+		OpenClawAgentsEnv:            RuntimeAgentsEnv,
+		OpenClawScheduledTasksEnv:    RuntimeScheduledTasksEnv,
 	}
 	openClawResourceKeyPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{1,99}$`)
 )
@@ -363,6 +396,10 @@ func (s *openClawConfigService) UpdateResource(userID, id int, req UpsertOpenCla
 	if err := s.repo.UpdateResource(item); err != nil {
 		return nil, err
 	}
+
+	// Cascade: recompile active snapshots that reference this resource.
+	// Non-blocking — errors are logged but do not fail the update.
+	go s.cascadeSnapshotsForResource(userID, id)
 
 	payload, err := resourcePayloadFromModel(*item)
 	if err != nil {
@@ -693,6 +730,7 @@ func (s *openClawConfigService) EnsureSnapshotSecret(ctx context.Context, userID
 	if err := json.Unmarshal([]byte(snapshot.RenderedEnvJSON), &envValues); err != nil {
 		return "", fmt.Errorf("openclaw injection snapshot env payload is invalid")
 	}
+	envValues = runtimeBootstrapEnvValues(instance.Type, envValues)
 
 	secretName := snapshot.SecretName
 	if secretName == nil || strings.TrimSpace(*secretName) == "" {
@@ -724,6 +762,62 @@ func (s *openClawConfigService) EnsureSnapshotSecret(ctx context.Context, userID
 	}
 
 	return *secretName, nil
+}
+
+func runtimeBootstrapEnvValues(instanceType string, envValues map[string]string) map[string]string {
+	result := map[string]string{}
+	for key, value := range envValues {
+		result[key] = value
+	}
+
+	if !strings.EqualFold(instanceType, "hermes") {
+		return result
+	}
+
+	addBootstrapEnvAliases(result, hermesBootstrapEnvAliases)
+	addBootstrapEnvAliases(result, runtimeBootstrapEnvAliases)
+	return result
+}
+
+func addBootstrapEnvAliases(envValues map[string]string, aliases map[string]string) {
+	for source, target := range aliases {
+		value, ok := envValues[source]
+		if !ok {
+			continue
+		}
+		if source == OpenClawBootstrapManifestEnv {
+			if aliasedManifest, err := aliasBootstrapManifestEnvNames(value, aliases); err == nil {
+				value = aliasedManifest
+			}
+		}
+		envValues[target] = value
+	}
+}
+
+func aliasBootstrapManifestEnvNames(raw string, aliases map[string]string) (string, error) {
+	var manifest map[string]interface{}
+	if err := json.Unmarshal([]byte(raw), &manifest); err != nil {
+		return "", err
+	}
+
+	payloads, ok := manifest["payloads"].([]interface{})
+	if !ok {
+		return marshalJSONString(manifest)
+	}
+	for _, item := range payloads {
+		payload, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		envName, ok := payload["env"].(string)
+		if !ok {
+			continue
+		}
+		if alias, exists := aliases[envName]; exists {
+			payload["env"] = alias
+		}
+	}
+	return marshalJSONString(manifest)
 }
 
 func (s *openClawConfigService) ListSnapshots(userID int, limit int) ([]OpenClawInjectionSnapshotPayload, error) {
@@ -1278,6 +1372,8 @@ func appendCompiledOpenClawEnvPayload(payload interface{}, resource compiledOpen
 
 func normalizeOpenClawChannelConfigForEnv(resourceKey string, configPayload interface{}) interface{} {
 	switch strings.ToLower(strings.TrimSpace(resourceKey)) {
+	case "dingtalk-connector":
+		return normalizeDingTalkChannelConfigForEnv(configPayload)
 	case "feishu":
 		return normalizeFeishuChannelConfigForEnv(configPayload)
 	case "slack":
@@ -1287,6 +1383,57 @@ func normalizeOpenClawChannelConfigForEnv(resourceKey string, configPayload inte
 	}
 
 	return configPayload
+}
+
+// mergeOpenClawChannelConfigForStorage combines the allowlist-normalized config
+// with the original parsed payload so storage retains keys the env-render path
+// does not surface (e.g. webhook, custom capabilities, additional feishu
+// accounts). Normalized keys always override the original; unknown keys pass
+// through untouched. For feishu the accounts map is merged member-wise so
+// accounts other than main, and sibling fields inside main, both survive.
+func mergeOpenClawChannelConfigForStorage(resourceKey string, original, normalized interface{}) interface{} {
+	normalizedMap, normalizedOk := normalized.(map[string]interface{})
+	originalMap, originalOk := original.(map[string]interface{})
+	if !normalizedOk {
+		return normalized
+	}
+	if !originalOk {
+		return normalizedMap
+	}
+
+	merged := make(map[string]interface{}, len(originalMap)+len(normalizedMap))
+	for k, v := range originalMap {
+		merged[k] = v
+	}
+	for k, v := range normalizedMap {
+		merged[k] = v
+	}
+
+	if strings.ToLower(strings.TrimSpace(resourceKey)) == "feishu" {
+		originalAccounts, _ := originalMap["accounts"].(map[string]interface{})
+		normalizedAccounts, _ := normalizedMap["accounts"].(map[string]interface{})
+		if originalAccounts != nil || normalizedAccounts != nil {
+			mergedAccounts := make(map[string]interface{})
+			for k, v := range originalAccounts {
+				mergedAccounts[k] = v
+			}
+			if normalizedMain, ok := normalizedAccounts["main"].(map[string]interface{}); ok {
+				mergedMain := make(map[string]interface{})
+				if existingMain, ok := originalAccounts["main"].(map[string]interface{}); ok {
+					for k, v := range existingMain {
+						mergedMain[k] = v
+					}
+				}
+				for k, v := range normalizedMain {
+					mergedMain[k] = v
+				}
+				mergedAccounts["main"] = mergedMain
+			}
+			merged["accounts"] = mergedAccounts
+		}
+	}
+
+	return merged
 }
 
 func normalizeFeishuChannelConfigForEnv(configPayload interface{}) map[string]interface{} {
@@ -1399,6 +1546,28 @@ func normalizeTelegramChannelConfigForEnv(configPayload interface{}) map[string]
 	}
 }
 
+func normalizeDingTalkChannelConfigForEnv(configPayload interface{}) map[string]interface{} {
+	config, ok := configPayload.(map[string]interface{})
+	if !ok {
+		config = map[string]interface{}{}
+	}
+
+	clientID, _ := config["clientId"].(string)
+	clientSecret, _ := config["clientSecret"].(string)
+
+	allowFrom := normalizeStringArrayForEnv(config["allowFrom"])
+	if len(allowFrom) == 0 {
+		allowFrom = []string{"*"}
+	}
+
+	return map[string]interface{}{
+		"enabled":      true,
+		"clientId":     clientID,
+		"clientSecret": clientSecret,
+		"allowFrom":    allowFrom,
+	}
+}
+
 func normalizeStringArrayForEnv(value interface{}) []string {
 	items, ok := value.([]interface{})
 	if !ok {
@@ -1432,7 +1601,15 @@ func normalizeOpenClawResourceContent(resourceType, resourceKey string, raw json
 	}
 
 	normalizedConfig := normalizeOpenClawChannelConfigForEnv(resourceKey, configPayload)
-	envelope.Config, err = json.Marshal(normalizedConfig)
+	// Preserve unknown fields at storage time: the *ForEnv helpers rebuild the
+	// config from a known-field allowlist, which is correct for rendering runtime
+	// env but would silently drop tenant-authored keys (e.g. webhook, custom
+	// capabilities, additional feishu accounts) if applied verbatim to stored
+	// content. Merge the allowlist output back over the original payload so
+	// storage is a superset of the normalized render.
+	mergedConfig := mergeOpenClawChannelConfigForStorage(resourceKey, configPayload, normalizedConfig)
+	envelope.Format = openClawChannelFormat(resourceKey)
+	envelope.Config, err = json.Marshal(mergedConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal normalized openclaw channel config")
 	}
@@ -1511,6 +1688,14 @@ func normalizeResourceType(resourceType string) string {
 
 func normalizeResourceKey(resourceKey string) string {
 	return strings.TrimSpace(resourceKey)
+}
+
+func openClawChannelFormat(resourceKey string) string {
+	key := normalizeResourceKey(resourceKey)
+	if key == "" {
+		return "channel/custom@v1"
+	}
+	return fmt.Sprintf("channel/%s@v1", key)
 }
 
 func canonicalizeOpenClawKind(kind string) string {
@@ -1633,4 +1818,122 @@ func errorString(err error) string {
 		return ""
 	}
 	return err.Error()
+}
+
+// cascadeSnapshotsForResource recompiles all active snapshots that reference
+// the given resource ID, so that their rendered_env_json reflects the latest
+// resource content. It does NOT restart instances — the new env takes effect
+// on the next instance restart.
+func (s *openClawConfigService) cascadeSnapshotsForResource(userID, resourceID int) {
+	snapshots, err := s.repo.ListActiveSnapshots(userID)
+	if err != nil {
+		log.Printf("[cascade] failed to list active snapshots for user %d: %v", userID, err)
+		return
+	}
+
+	for _, snap := range snapshots {
+		if !snapshotReferencesResource(snap, resourceID) {
+			continue
+		}
+
+		// Record the version stamp at read time for CAS.
+		readVersion := snap.UpdatedAt
+
+		plan, err := planFromSnapshot(snap)
+		if err != nil {
+			log.Printf("[cascade] snapshot %d: failed to reconstruct plan: %v", snap.ID, err)
+			continue
+		}
+
+		compiled, err := s.compilePlan(userID, plan)
+		if err != nil {
+			log.Printf("[cascade] snapshot %d: recompile failed: %v", snap.ID, err)
+			continue
+		}
+
+		envJSON, err := marshalJSONString(compiled.renderedEnv)
+		if err != nil {
+			log.Printf("[cascade] snapshot %d: marshal env failed: %v", snap.ID, err)
+			continue
+		}
+
+		resolvedSummaries := make([]OpenClawConfigResourceSummary, 0, len(compiled.resolved))
+		for _, r := range compiled.resolved {
+			resolvedSummaries = append(resolvedSummaries, resourceSummaryFromModel(r.model))
+		}
+		resolvedJSON, err := marshalJSONString(resolvedSummaries)
+		if err != nil {
+			log.Printf("[cascade] snapshot %d: marshal resolved failed: %v", snap.ID, err)
+			continue
+		}
+
+		snap.RenderedEnvJSON = envJSON
+		snap.ResolvedResourcesJSON = resolvedJSON
+		snap.RenderedManifestJSON = compiled.manifest
+		snap.UpdatedAt = time.Now()
+
+		// CAS write: only succeeds if updated_at has not changed since our read.
+		ok, err := s.repo.UpdateSnapshotIfUnchanged(&snap, readVersion)
+		if err != nil {
+			log.Printf("[cascade] snapshot %d: update failed: %v", snap.ID, err)
+		} else if !ok {
+			log.Printf("[cascade] snapshot %d: skipped — already updated by a newer cascade", snap.ID)
+		} else {
+			log.Printf("[cascade] snapshot %d: refreshed successfully", snap.ID)
+		}
+	}
+}
+
+// snapshotReferencesResource checks whether a snapshot references the given
+// resource ID. It checks ResolvedResourcesJSON first (which contains the full
+// set of selected + dependsOn resources), falling back to SelectedResourceIDsJSON
+// for backward compatibility with older snapshots.
+func snapshotReferencesResource(snap models.OpenClawInjectionSnapshot, resourceID int) bool {
+	// Primary: check ResolvedResourcesJSON (contains selected + dependsOn full set).
+	if strings.TrimSpace(snap.ResolvedResourcesJSON) != "" {
+		var summaries []struct {
+			ID int `json:"id"`
+		}
+		if err := json.Unmarshal([]byte(snap.ResolvedResourcesJSON), &summaries); err == nil {
+			for _, s := range summaries {
+				if s.ID == resourceID {
+					return true
+				}
+			}
+			return false
+		}
+		// If ResolvedResourcesJSON is present but malformed, fall through to fallback.
+	}
+
+	// Fallback: check SelectedResourceIDsJSON for older snapshots.
+	if strings.TrimSpace(snap.SelectedResourceIDsJSON) == "" {
+		return false
+	}
+	var ids []int
+	if err := json.Unmarshal([]byte(snap.SelectedResourceIDsJSON), &ids); err != nil {
+		return false
+	}
+	for _, id := range ids {
+		if id == resourceID {
+			return true
+		}
+	}
+	return false
+}
+
+// planFromSnapshot reconstructs an OpenClawConfigPlan from a snapshot's stored
+// mode, bundle_id, and selected_resource_ids_json.
+func planFromSnapshot(snap models.OpenClawInjectionSnapshot) (OpenClawConfigPlan, error) {
+	plan := OpenClawConfigPlan{
+		Mode:     snap.Mode,
+		BundleID: snap.BundleID,
+	}
+	if snap.Mode == OpenClawConfigPlanModeManual {
+		var ids []int
+		if err := json.Unmarshal([]byte(snap.SelectedResourceIDsJSON), &ids); err != nil {
+			return plan, fmt.Errorf("failed to parse selected resource ids: %w", err)
+		}
+		plan.ResourceIDs = ids
+	}
+	return plan, nil
 }

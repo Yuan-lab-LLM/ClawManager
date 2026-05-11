@@ -18,6 +18,19 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// openclawMinArchiveBytes is the minimum acceptable size of an .openclaw
+// export archive. A correctly-compressed tar.gz of a single empty file is
+// already ~125 bytes, so anything smaller indicates a malformed or empty
+// stream from the exec pipeline rather than a real workspace dump.
+const openclawMinArchiveBytes = 100
+
+// openclawMaxUploadBytes caps the size of an .openclaw import upload.
+// Must align with the edge nginx client_max_body_size so that oversize
+// uploads produce a structured JSON 413 here instead of an opaque HTML
+// 413 from nginx. See ClawManager/deployments/nginx/nginx.conf and
+// deployment/nginx-conf.yaml.
+const openclawMaxUploadBytes = 50 << 20 // 50 MiB
+
 // InstanceHandler handles instance management requests
 type InstanceHandler struct {
 	instanceService               services.InstanceService
@@ -49,6 +62,13 @@ func NewInstanceHandler(instanceService services.InstanceService, instanceAgentS
 	}
 }
 
+// Shutdown releases resources held by the handler (e.g. background goroutines).
+func (h *InstanceHandler) Shutdown() {
+	if h.accessService != nil {
+		h.accessService.Stop()
+	}
+}
+
 type InstanceRuntimeDetailsResponse struct {
 	Runtime  *services.InstanceRuntimeStatusPayload `json:"runtime,omitempty"`
 	Agent    *services.InstanceAgentPayload         `json:"agent,omitempty"`
@@ -65,21 +85,22 @@ type PublishConfigRevisionRequest struct {
 
 // CreateInstanceRequest represents a create instance request
 type CreateInstanceRequest struct {
-	Name               string                       `json:"name" binding:"required,min=3,max=50"`
-	Description        *string                      `json:"description,omitempty"`
-	Type               string                       `json:"type" binding:"required,oneof=openclaw ubuntu debian centos custom webtop"`
-	CPUCores           int                          `json:"cpu_cores" binding:"required,min=1,max=32"`
-	MemoryGB           int                          `json:"memory_gb" binding:"required,min=1,max=128"`
-	DiskGB             int                          `json:"disk_gb" binding:"required,min=10,max=1000"`
-	GPUEnabled         bool                         `json:"gpu_enabled"`
-	GPUCount           int                          `json:"gpu_count" binding:"min=0,max=4"`
-	OSType             string                       `json:"os_type" binding:"required"`
-	OSVersion          string                       `json:"os_version" binding:"required"`
-	ImageRegistry      *string                      `json:"image_registry,omitempty"`
-	ImageTag           *string                      `json:"image_tag,omitempty"`
-	StorageClass       string                       `json:"storage_class"`
-	OpenClawConfigPlan *services.OpenClawConfigPlan `json:"openclaw_config_plan,omitempty"`
-	SkillIDs           []int                        `json:"skill_ids,omitempty"`
+	Name                 string                       `json:"name" binding:"required,min=3,max=50"`
+	Description          *string                      `json:"description,omitempty"`
+	Type                 string                       `json:"type" binding:"required,oneof=openclaw ubuntu debian centos custom webtop hermes"`
+	CPUCores             float64                      `json:"cpu_cores" binding:"required,min=0.1,max=32"`
+	MemoryGB             int                          `json:"memory_gb" binding:"required,min=1,max=128"`
+	DiskGB               int                          `json:"disk_gb" binding:"required,min=10,max=1000"`
+	GPUEnabled           bool                         `json:"gpu_enabled"`
+	GPUCount             int                          `json:"gpu_count" binding:"min=0,max=4"`
+	OSType               string                       `json:"os_type" binding:"required"`
+	OSVersion            string                       `json:"os_version" binding:"required"`
+	ImageRegistry        *string                      `json:"image_registry,omitempty"`
+	ImageTag             *string                      `json:"image_tag,omitempty"`
+	EnvironmentOverrides map[string]string            `json:"environment_overrides,omitempty"`
+	StorageClass         string                       `json:"storage_class"`
+	OpenClawConfigPlan   *services.OpenClawConfigPlan `json:"openclaw_config_plan,omitempty"`
+	SkillIDs             []int                        `json:"skill_ids,omitempty"`
 }
 
 // UpdateInstanceRequest represents an update instance request
@@ -95,10 +116,14 @@ type ListInstancesRequest struct {
 	Status string `form:"status,omitempty"`
 }
 
-// ListInstances lists instances for the current user
+// ListInstances lists instances owned by the current user (workspace view).
+//
+// This endpoint is always caller-scoped — the caller's role is intentionally
+// not consulted. An admin using /instances sees only instances they personally
+// own. Admin-scoped cross-user listing lives on /admin/instances and is gated
+// by the admin middleware; see ListAllInstances below.
 func (h *InstanceHandler) ListInstances(c *gin.Context) {
 	userID, _ := c.Get("userID")
-	userRole, _ := c.Get("userRole")
 
 	var req ListInstancesRequest
 	if err := c.ShouldBindQuery(&req); err != nil {
@@ -109,7 +134,37 @@ func (h *InstanceHandler) ListInstances(c *gin.Context) {
 	// Calculate offset
 	offset := (req.Page - 1) * req.Limit
 
-	instances, total, err := h.instanceService.GetVisibleInstances(userID.(int), fmt.Sprintf("%v", userRole), offset, req.Limit)
+	instances, total, err := h.instanceService.GetByUserID(userID.(int), offset, req.Limit)
+	if err != nil {
+		utils.HandleError(c, err)
+		return
+	}
+
+	response := map[string]interface{}{
+		"instances": instances,
+		"total":     total,
+		"page":      req.Page,
+		"limit":     req.Limit,
+	}
+
+	utils.Success(c, http.StatusOK, "Instances retrieved successfully", response)
+}
+
+// ListAllInstances lists every instance across all users (admin console view).
+//
+// Gated by the admin middleware on the /admin/instances route group. The
+// admin role badge only controls which API surface is reachable — it does
+// not widen the caller-scoped /instances endpoint.
+func (h *InstanceHandler) ListAllInstances(c *gin.Context) {
+	var req ListInstancesRequest
+	if err := c.ShouldBindQuery(&req); err != nil {
+		utils.ValidationError(c, err)
+		return
+	}
+
+	offset := (req.Page - 1) * req.Limit
+
+	instances, total, err := h.instanceService.GetAllInstances(offset, req.Limit)
 	if err != nil {
 		utils.HandleError(c, err)
 		return
@@ -136,20 +191,21 @@ func (h *InstanceHandler) CreateInstance(c *gin.Context) {
 	}
 
 	createReq := services.CreateInstanceRequest{
-		Name:               req.Name,
-		Description:        req.Description,
-		Type:               req.Type,
-		CPUCores:           req.CPUCores,
-		MemoryGB:           req.MemoryGB,
-		DiskGB:             req.DiskGB,
-		GPUEnabled:         req.GPUEnabled,
-		GPUCount:           req.GPUCount,
-		OSType:             req.OSType,
-		OSVersion:          req.OSVersion,
-		ImageRegistry:      req.ImageRegistry,
-		ImageTag:           req.ImageTag,
-		StorageClass:       req.StorageClass,
-		OpenClawConfigPlan: req.OpenClawConfigPlan,
+		Name:                 req.Name,
+		Description:          req.Description,
+		Type:                 req.Type,
+		CPUCores:             req.CPUCores,
+		MemoryGB:             req.MemoryGB,
+		DiskGB:               req.DiskGB,
+		GPUEnabled:           req.GPUEnabled,
+		GPUCount:             req.GPUCount,
+		OSType:               req.OSType,
+		OSVersion:            req.OSVersion,
+		ImageRegistry:        req.ImageRegistry,
+		ImageTag:             req.ImageTag,
+		EnvironmentOverrides: req.EnvironmentOverrides,
+		StorageClass:         req.StorageClass,
+		OpenClawConfigPlan:   req.OpenClawConfigPlan,
 	}
 
 	instance, err := h.instanceService.Create(userID.(int), createReq)
@@ -288,7 +344,7 @@ func (h *InstanceHandler) DeleteInstance(c *gin.Context) {
 		return
 	}
 
-	utils.Success(c, http.StatusOK, "Instance deleted successfully", nil)
+	utils.Success(c, http.StatusAccepted, "Instance deletion started", nil)
 }
 
 // StartInstance starts an instance
@@ -541,8 +597,8 @@ func (h *InstanceHandler) PublishConfigRevision(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if !strings.EqualFold(instance.Type, "openclaw") {
-		utils.Error(c, http.StatusBadRequest, "Only openclaw instances support config revisions")
+	if !strings.EqualFold(instance.Type, "openclaw") && !strings.EqualFold(instance.Type, "hermes") {
+		utils.Error(c, http.StatusBadRequest, "Only managed runtime instances support config revisions")
 		return
 	}
 
@@ -973,11 +1029,58 @@ func (h *InstanceHandler) ExportOpenClaw(c *gin.Context) {
 
 	archive, err := h.openClawTransferService.Export(c.Request.Context(), instance.UserID, instance.ID)
 	if err != nil {
+		if errors.Is(err, services.ErrOpenClawWorkspaceMissing) {
+			utils.Error(c, http.StatusNotFound, "openclaw workspace is empty or missing")
+			return
+		}
 		utils.HandleError(c, err)
 		return
 	}
 
+	if len(archive) < openclawMinArchiveBytes {
+		utils.Error(c, http.StatusInternalServerError, "export produced an empty archive")
+		return
+	}
+
 	filename := fmt.Sprintf("%s.openclaw.tar.gz", sanitizeDownloadName(instance.Name))
+	c.Header("Content-Type", "application/gzip")
+	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filename))
+	c.Header("Content-Length", strconv.Itoa(len(archive)))
+	c.Data(http.StatusOK, "application/gzip", archive)
+}
+
+func (h *InstanceHandler) ExportHermes(c *gin.Context) {
+	instance, ok := h.requireOwnedInstance(c)
+	if !ok {
+		return
+	}
+
+	if instance.Type != "hermes" {
+		utils.Error(c, http.StatusBadRequest, "hermes import/export is only available for hermes instances")
+		return
+	}
+
+	if instance.Status != "running" {
+		utils.Error(c, http.StatusBadRequest, "instance must be running to export .hermes")
+		return
+	}
+
+	archive, err := h.openClawTransferService.ExportHermes(c.Request.Context(), instance.UserID, instance.ID)
+	if err != nil {
+		if errors.Is(err, services.ErrHermesWorkspaceMissing) {
+			utils.Error(c, http.StatusNotFound, "hermes workspace is empty or missing")
+			return
+		}
+		utils.HandleError(c, err)
+		return
+	}
+
+	if len(archive) < openclawMinArchiveBytes {
+		utils.Error(c, http.StatusInternalServerError, "export produced an empty archive")
+		return
+	}
+
+	filename := fmt.Sprintf("%s.hermes.tar.gz", sanitizeDownloadName(instance.Name, "hermes-workspace"))
 	c.Header("Content-Type", "application/gzip")
 	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filename))
 	c.Header("Content-Length", strconv.Itoa(len(archive)))
@@ -1000,9 +1103,27 @@ func (h *InstanceHandler) ImportOpenClaw(c *gin.Context) {
 		return
 	}
 
+	// Cap the request body early so oversize uploads fail with a structured
+	// JSON 413 instead of nginx's opaque HTML 413 or a surprise ENOSPC deep
+	// inside multipart parsing. MaxBytesReader trips ParseMultipartForm
+	// (invoked by c.FormFile) with a typed *http.MaxBytesError.
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, openclawMaxUploadBytes)
+
 	fileHeader, err := c.FormFile("file")
 	if err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			utils.Error(c, http.StatusRequestEntityTooLarge,
+				fmt.Sprintf("archive too large; maximum upload size is %d MiB", openclawMaxUploadBytes>>20))
+			return
+		}
 		utils.Error(c, http.StatusBadRequest, "file is required")
+		return
+	}
+
+	if fileHeader.Size > openclawMaxUploadBytes {
+		utils.Error(c, http.StatusRequestEntityTooLarge,
+			fmt.Sprintf("archive too large; maximum upload size is %d MiB", openclawMaxUploadBytes>>20))
 		return
 	}
 
@@ -1013,12 +1134,63 @@ func (h *InstanceHandler) ImportOpenClaw(c *gin.Context) {
 	}
 	defer file.Close()
 
-	if err := h.openClawTransferService.Import(c.Request.Context(), instance.UserID, instance.ID, io.LimitReader(file, 512<<20)); err != nil {
+	if err := h.openClawTransferService.Import(c.Request.Context(), instance.UserID, instance.ID, io.LimitReader(file, openclawMaxUploadBytes)); err != nil {
 		utils.HandleError(c, err)
 		return
 	}
 
 	utils.Success(c, http.StatusOK, "OpenClaw workspace imported successfully", nil)
+}
+
+func (h *InstanceHandler) ImportHermes(c *gin.Context) {
+	instance, ok := h.requireOwnedInstance(c)
+	if !ok {
+		return
+	}
+
+	if instance.Type != "hermes" {
+		utils.Error(c, http.StatusBadRequest, "hermes import/export is only available for hermes instances")
+		return
+	}
+
+	if instance.Status != "running" {
+		utils.Error(c, http.StatusBadRequest, "instance must be running to import .hermes")
+		return
+	}
+
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, openclawMaxUploadBytes)
+
+	fileHeader, err := c.FormFile("file")
+	if err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			utils.Error(c, http.StatusRequestEntityTooLarge,
+				fmt.Sprintf("archive too large; maximum upload size is %d MiB", openclawMaxUploadBytes>>20))
+			return
+		}
+		utils.Error(c, http.StatusBadRequest, "file is required")
+		return
+	}
+
+	if fileHeader.Size > openclawMaxUploadBytes {
+		utils.Error(c, http.StatusRequestEntityTooLarge,
+			fmt.Sprintf("archive too large; maximum upload size is %d MiB", openclawMaxUploadBytes>>20))
+		return
+	}
+
+	file, err := fileHeader.Open()
+	if err != nil {
+		utils.HandleError(c, err)
+		return
+	}
+	defer file.Close()
+
+	if err := h.openClawTransferService.ImportHermes(c.Request.Context(), instance.UserID, instance.ID, io.LimitReader(file, openclawMaxUploadBytes)); err != nil {
+		utils.HandleError(c, err)
+		return
+	}
+
+	utils.Success(c, http.StatusOK, "Hermes workspace imported successfully", nil)
 }
 
 func (h *InstanceHandler) requireOwnedInstance(c *gin.Context) (*models.Instance, bool) {
@@ -1050,9 +1222,12 @@ func (h *InstanceHandler) requireOwnedInstance(c *gin.Context) (*models.Instance
 	return instance, true
 }
 
-func sanitizeDownloadName(name string) string {
+func sanitizeDownloadName(name string, fallback ...string) string {
 	name = strings.TrimSpace(name)
 	if name == "" {
+		if len(fallback) > 0 && strings.TrimSpace(fallback[0]) != "" {
+			return strings.TrimSpace(fallback[0])
+		}
 		return "openclaw-workspace"
 	}
 

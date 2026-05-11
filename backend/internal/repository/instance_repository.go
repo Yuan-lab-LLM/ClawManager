@@ -2,7 +2,6 @@ package repository
 
 import (
 	"fmt"
-	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -65,7 +64,7 @@ type instanceRow struct {
 }
 
 func (r instanceRow) toModel() (*models.Instance, error) {
-	cpuCores, err := decimalStringToInt(r.CPUCores)
+	cpuCores, err := decimalStringToFloat(r.CPUCores)
 	if err != nil {
 		return nil, err
 	}
@@ -109,7 +108,7 @@ func (r instanceRow) toModel() (*models.Instance, error) {
 	return instance, nil
 }
 
-func decimalStringToInt(raw string) (int, error) {
+func decimalStringToFloat(raw string) (float64, error) {
 	value := strings.TrimSpace(raw)
 	if value == "" {
 		return 0, nil
@@ -118,7 +117,7 @@ func decimalStringToInt(raw string) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("failed to parse decimal instance value %q: %w", raw, err)
 	}
-	return int(math.Round(parsed)), nil
+	return parsed, nil
 }
 
 // NewInstanceRepository creates a new instance repository

@@ -36,6 +36,10 @@ func (s *stubInstanceService) GetByUserID(userID int, offset, limit int) ([]mode
 	return nil, 0, nil
 }
 
+func (s *stubInstanceService) GetAllInstances(offset, limit int) ([]models.Instance, int, error) {
+	return nil, 0, nil
+}
+
 func (s *stubInstanceService) GetVisibleInstances(userID int, userRole string, offset, limit int) ([]models.Instance, int, error) {
 	return nil, 0, nil
 }

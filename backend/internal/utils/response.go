@@ -68,7 +68,7 @@ func HandleError(c *gin.Context, err error) {
 		Error(c, http.StatusForbidden, errStr)
 	case "invalid username or password", "account is disabled", "invalid or expired agent session token":
 		Error(c, http.StatusUnauthorized, errStr)
-	case "agent registration is only supported for openclaw instances", "agent id does not match session", "access denied":
+	case "agent registration is only supported for openclaw instances", "agent registration is only supported for openclaw or hermes instances", "agent id does not match session", "access denied":
 		Error(c, http.StatusForbidden, errStr)
 	case "current password is incorrect":
 		Error(c, http.StatusBadRequest, errStr)

@@ -23,6 +23,45 @@ const RUNTIME_BURST_WINDOW_MS = 15000;
 const METRIC_WINDOW_MS = 5 * 60 * 1000;
 const INSTANCE_SKILL_PAGE_SIZE = 5;
 
+const supportsRuntimeWorkspace = (type: string) =>
+  type === "openclaw" || type === "hermes";
+
+const supportsRuntimeSkillManagement = (type: string) =>
+  type === "openclaw" || type === "hermes";
+
+const runtimeWorkspaceDirectory = (type: string) =>
+  type === "hermes" ? ".hermes" : ".openclaw";
+
+const runtimeProductName = (type: string) =>
+  type === "hermes" ? "Hermes" : "OpenClaw";
+
+// describeOpenClawError extracts a user-facing message from an axios error.
+// When the server returned a structured JSON body it surfaces the `error`
+// field; otherwise it falls back to the HTTP status (e.g. plain-HTML 413
+// from nginx) or the raw error message.
+function describeOpenClawError(
+  err: any,
+  t: (key: string, variables?: Record<string, string | number>) => string,
+): string {
+  const data = err?.response?.data;
+  if (typeof data === "string" && data.trim() !== "") {
+    // Strip HTML tags so nginx's default error page is not dumped verbatim.
+    const stripped = data.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+    if (stripped !== "") return stripped;
+  }
+  if (data && typeof data === "object" && typeof data.error === "string") {
+    return data.error;
+  }
+  const status = err?.response?.status;
+  if (status === 413) {
+    return t("instances.openClawArchiveTooLarge");
+  }
+  if (typeof status === "number") {
+    return `HTTP ${status}`;
+  }
+  return err?.message || "unknown error";
+}
+
 type TimelineItem = {
   id: string;
   title: string;
@@ -503,37 +542,67 @@ const InstanceDetailPage: React.FC = () => {
     }
   };
 
-  const handleExportOpenClaw = async () => {
+  const handleExportWorkspace = async () => {
     if (!instance) return;
 
+    const directory = runtimeWorkspaceDirectory(instance.type);
+    const runtime = runtimeProductName(instance.type);
+
     try {
-      setActionLoading("export-openclaw");
-      const blob = await instanceService.exportOpenClawWorkspace(instance.id);
+      setActionLoading("export-workspace");
+      const blob =
+        instance.type === "hermes"
+          ? await instanceService.exportHermesWorkspace(instance.id)
+          : await instanceService.exportOpenClawWorkspace(instance.id);
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = `${instance.name || "openclaw-workspace"}.openclaw.tar.gz`;
+      link.download = `${instance.name || `${instance.type}-workspace`}${directory}.tar.gz`;
       document.body.appendChild(link);
       link.click();
       link.remove();
       window.URL.revokeObjectURL(url);
     } catch (err: any) {
-      alert(err.response?.data?.error || t("instances.exportOpenClaw"));
+      alert(
+        t("instances.exportRuntimeWorkspaceFailed", {
+          runtime,
+          directory,
+          message: describeOpenClawError(err, t),
+        }),
+      );
     } finally {
       setActionLoading(null);
     }
   };
 
-  const handleImportOpenClaw = async (file?: File | null) => {
+  const handleImportWorkspace = async (file?: File | null) => {
     if (!instance || !file) return;
 
+    const directory = runtimeWorkspaceDirectory(instance.type);
+    const runtime = runtimeProductName(instance.type);
+
     try {
-      setActionLoading("import-openclaw");
-      await instanceService.importOpenClawWorkspace(instance.id, file);
+      setActionLoading("import-workspace");
+      if (instance.type === "hermes") {
+        await instanceService.importHermesWorkspace(instance.id, file);
+      } else {
+        await instanceService.importOpenClawWorkspace(instance.id, file);
+      }
       await fetchRuntime(instance.id, { background: true });
-      alert(t("instances.importOpenClaw"));
+      alert(
+        t("instances.importRuntimeWorkspaceSuccess", {
+          runtime,
+          directory,
+        }),
+      );
     } catch (err: any) {
-      alert(err.response?.data?.error || t("instances.importOpenClaw"));
+      alert(
+        t("instances.importRuntimeWorkspaceFailed", {
+          runtime,
+          directory,
+          message: describeOpenClawError(err, t),
+        }),
+      );
     } finally {
       if (importInputRef.current) {
         importInputRef.current.value = "";
@@ -790,7 +859,7 @@ const InstanceDetailPage: React.FC = () => {
               </div>
             </section>
 
-            {instance.type === "openclaw" && (
+            {supportsRuntimeWorkspace(instance.type) && (
               <section className="app-panel px-5 py-5">
                 <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                   <div className="max-w-xl">
@@ -798,27 +867,33 @@ const InstanceDetailPage: React.FC = () => {
                       {t("instances.workspaceSection")}
                     </p>
                     <h2 className="mt-2 text-[1.35rem] font-semibold tracking-[-0.03em] text-[#1d1713]">
-                      {t("instances.openClawWorkspace")}
+                      {t("instances.runtimeWorkspace", {
+                        runtime: runtimeProductName(instance.type),
+                      })}
                     </h2>
                     <p className="mt-2 text-sm leading-6 text-[#7a6d66]">
-                      {t("instances.openClawWorkspaceDesc")}
+                      {t("instances.runtimeWorkspaceDesc", {
+                        directory: runtimeWorkspaceDirectory(instance.type),
+                      })}
                     </p>
                   </div>
 
                   <div className="grid w-full gap-3 lg:max-w-[320px]">
                     <button
                       type="button"
-                      onClick={handleExportOpenClaw}
+                      onClick={handleExportWorkspace}
                       disabled={
                         effectiveInstanceStatus !== "running" ||
-                        actionLoading === "export-openclaw" ||
-                        actionLoading === "import-openclaw"
+                        actionLoading === "export-workspace" ||
+                        actionLoading === "import-workspace"
                       }
                       className="app-button-primary disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                      {actionLoading === "export-openclaw"
-                        ? t("instances.exportingOpenClaw")
-                        : t("instances.exportOpenClaw")}
+                      {actionLoading === "export-workspace"
+                        ? t("instances.exportingRuntimeWorkspace")
+                        : t("instances.exportRuntimeWorkspace", {
+                            directory: runtimeWorkspaceDirectory(instance.type),
+                          })}
                     </button>
                     <input
                       ref={importInputRef}
@@ -826,7 +901,7 @@ const InstanceDetailPage: React.FC = () => {
                       accept=".tar.gz,.tgz,application/gzip,application/x-gzip,application/octet-stream"
                       className="hidden"
                       onChange={(e) =>
-                        handleImportOpenClaw(e.target.files?.[0] || null)
+                        handleImportWorkspace(e.target.files?.[0] || null)
                       }
                     />
                     <button
@@ -834,14 +909,16 @@ const InstanceDetailPage: React.FC = () => {
                       onClick={() => importInputRef.current?.click()}
                       disabled={
                         effectiveInstanceStatus !== "running" ||
-                        actionLoading === "export-openclaw" ||
-                        actionLoading === "import-openclaw"
+                        actionLoading === "export-workspace" ||
+                        actionLoading === "import-workspace"
                       }
                       className="app-button-secondary disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                      {actionLoading === "import-openclaw"
-                        ? t("instances.importingOpenClaw")
-                        : t("instances.importOpenClaw")}
+                      {actionLoading === "import-workspace"
+                        ? t("instances.importingRuntimeWorkspace")
+                        : t("instances.importRuntimeWorkspace", {
+                            directory: runtimeWorkspaceDirectory(instance.type),
+                          })}
                     </button>
                   </div>
                 </div>
@@ -901,7 +978,7 @@ const InstanceDetailPage: React.FC = () => {
               </div>
             </section>
 
-            {instance.type === "openclaw" && (
+            {supportsRuntimeSkillManagement(instance.type) && (
               <section className="app-panel px-6 py-6">
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
                   <div>

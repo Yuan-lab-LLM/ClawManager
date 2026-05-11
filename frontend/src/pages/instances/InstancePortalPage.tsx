@@ -12,9 +12,9 @@ import { instanceService } from "../../services/instanceService";
 import type { Instance, InstanceRuntimeDetails } from "../../types/instance";
 import { useI18n } from "../../contexts/I18nContext";
 
-const PORTAL_RUNTIME_POLL_INTERVAL_MS = 5000;
-const PORTAL_RUNTIME_BURST_POLL_INTERVAL_MS = 1000;
-const PORTAL_RUNTIME_BURST_WINDOW_MS = 15000;
+const PORTAL_RUNTIME_POLL_INTERVAL_MS = 10000;
+const PORTAL_RUNTIME_BURST_POLL_INTERVAL_MS = 2500;
+const PORTAL_RUNTIME_BURST_WINDOW_MS = 12000;
 
 function accessErrorMessage(error: unknown, fallback: string): string {
   if (typeof error === "object" && error !== null && "response" in error) {
@@ -118,10 +118,8 @@ const InstancePortalPage: React.FC = () => {
 
   const {
     embedUrl,
-    expiresAt,
     loading: accessLoading,
     error: accessError,
-    reconnecting,
     refreshAccess,
     handleFrameLoad,
     handleFrameError,
@@ -188,21 +186,6 @@ const InstancePortalPage: React.FC = () => {
       window.clearTimeout(timeout);
     };
   }, [runtimeBurstUntil]);
-
-  const formatRemaining = () => {
-    if (!expiresAt) {
-      return "";
-    }
-
-    const diff = expiresAt.getTime() - Date.now();
-    if (diff <= 0) {
-      return t("instances.expired");
-    }
-
-    const minutes = Math.floor(diff / 60000);
-    const seconds = Math.floor((diff % 60000) / 1000);
-    return `${minutes}m ${seconds}s`;
-  };
 
   const getStatusDot = (status: Instance["status"]) => {
     switch (status) {
@@ -324,9 +307,7 @@ const InstancePortalPage: React.FC = () => {
   const playerStatusText = !selectedInstance
     ? t("instances.portalSelectInstanceSubtitle")
     : embedUrl
-      ? accessLoading || reconnecting || !expiresAt
-        ? t("instances.generatingToken")
-        : `${t("instances.expiresIn")}: ${formatRemaining()}`
+      ? t("instances.readyToAccess")
       : selectedInstance.status === "running"
         ? accessLoading && shouldConnect
           ? t("instances.generatingToken")

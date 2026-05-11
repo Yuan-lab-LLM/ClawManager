@@ -57,6 +57,8 @@ Thumbs.db
 *.temp
 /test_*
 
+
+.codex-logs/
 dev_docs/
 devplan.md
 TASK_BREAKDOWN.md

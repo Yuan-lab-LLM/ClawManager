@@ -2,6 +2,7 @@ package repository
 
 import (
 	"fmt"
+	"time"
 
 	"clawreef/internal/models"
 
@@ -29,6 +30,8 @@ type OpenClawConfigRepository interface {
 	UpdateSnapshot(snapshot *models.OpenClawInjectionSnapshot) error
 	GetSnapshotByID(id int) (*models.OpenClawInjectionSnapshot, error)
 	ListSnapshotsByUser(userID int, limit int) ([]models.OpenClawInjectionSnapshot, error)
+	ListActiveSnapshots(userID int) ([]models.OpenClawInjectionSnapshot, error)
+	UpdateSnapshotIfUnchanged(snapshot *models.OpenClawInjectionSnapshot, expectedUpdatedAt time.Time) (bool, error)
 }
 
 type openClawConfigRepository struct {
@@ -210,4 +213,40 @@ func (r *openClawConfigRepository) ListSnapshotsByUser(userID int, limit int) ([
 		return nil, fmt.Errorf("failed to list openclaw injection snapshots: %w", err)
 	}
 	return items, nil
+}
+
+func (r *openClawConfigRepository) ListActiveSnapshots(userID int) ([]models.OpenClawInjectionSnapshot, error) {
+	var items []models.OpenClawInjectionSnapshot
+	if err := r.sess.Collection("openclaw_injection_snapshots").Find(db.Cond{
+		"user_id":   userID,
+		"status IN": []string{"compiled", "active"},
+	}).All(&items); err != nil {
+		return nil, fmt.Errorf("failed to list active openclaw injection snapshots: %w", err)
+	}
+	return items, nil
+}
+
+func (r *openClawConfigRepository) UpdateSnapshotIfUnchanged(
+	snapshot *models.OpenClawInjectionSnapshot,
+	expectedUpdatedAt time.Time,
+) (bool, error) {
+	result, err := r.sess.SQL().Exec(
+		`UPDATE openclaw_injection_snapshots
+		 SET resolved_resources_json = ?,
+		     rendered_env_json = ?,
+		     rendered_manifest_json = ?,
+		     updated_at = ?
+		 WHERE id = ? AND updated_at = ?`,
+		snapshot.ResolvedResourcesJSON,
+		snapshot.RenderedEnvJSON,
+		snapshot.RenderedManifestJSON,
+		snapshot.UpdatedAt,
+		snapshot.ID,
+		expectedUpdatedAt,
+	)
+	if err != nil {
+		return false, fmt.Errorf("failed to cas-update openclaw injection snapshot: %w", err)
+	}
+	rows, _ := result.RowsAffected()
+	return rows > 0, nil
 }

@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import AdminLayout from '../../components/AdminLayout';
 import { userService } from '../../services/userService';
-import { instanceService } from '../../services/instanceService';
+import { adminInstanceService } from '../../services/adminInstanceService';
 import { adminService, type ClusterResourceOverview, type ResourceSummary } from '../../services/adminService';
 import { useI18n } from '../../contexts/I18nContext';
 
@@ -81,7 +81,7 @@ const AdminDashboard: React.FC = () => {
 
         const [usersData, instancesData, clusterData] = await Promise.all([
           userService.getUsers(1, 1000),
-          instanceService.getInstances(1, 1000),
+          adminInstanceService.getInstances(1, 1000),
           adminService.getClusterResources(),
         ]);
 

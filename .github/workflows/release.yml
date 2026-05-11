@@ -27,22 +27,38 @@ jobs:
     outputs:
       should_release: ${{ steps.decision.outputs.should_release }}
       tag_name: ${{ steps.decision.outputs.tag_name }}
+      image_fingerprint: ${{ steps.compute-fingerprint.outputs.image_fingerprint }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Build candidate image
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build amd64 candidate image
         shell: bash
         run: |
-          docker build --pull -t clawmanager:release-candidate .
+          docker buildx build --pull --platform linux/amd64 --load -t clawmanager:release-candidate-amd64 .
+
+      - name: Build arm64 candidate image
+        shell: bash
+        run: |
+          docker buildx build --pull --platform linux/arm64 --load -t clawmanager:release-candidate-arm64 .
 
       - name: Compute release fingerprint
+        id: compute-fingerprint
         shell: bash
         run: |
-          IMAGE_FINGERPRINT="$(python3 .github/scripts/compute_image_fingerprint.py clawmanager:release-candidate)"
+          AMD64_FINGERPRINT="$(python3 .github/scripts/compute_image_fingerprint.py clawmanager:release-candidate-amd64)"
+          ARM64_FINGERPRINT="$(python3 .github/scripts/compute_image_fingerprint.py clawmanager:release-candidate-arm64)"
+          IMAGE_FINGERPRINT="$(printf '%s\n%s\n' "${AMD64_FINGERPRINT}" "${ARM64_FINGERPRINT}" | sha256sum | cut -d' ' -f1)"
           echo "IMAGE_FINGERPRINT=${IMAGE_FINGERPRINT}" >> "$GITHUB_ENV"
+          echo "image_fingerprint=${IMAGE_FINGERPRINT}" >> "$GITHUB_OUTPUT"
 
       - name: Read latest release fingerprint
         id: latest-release
@@ -142,21 +158,33 @@ jobs:
         if: github.event_name != 'push'
         run: git checkout "${TAG_NAME}"
 
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build release image
+      - name: Build amd64 release candidate
         shell: bash
         run: |
-          docker build --pull \
-            -t "${IMAGE_URI}:${TAG_NAME}" \
-            -t "${IMAGE_URI}:latest" \
-            .
+          docker buildx build --pull --platform linux/amd64 --load -t clawmanager:release-candidate-amd64 .
+
+      - name: Build arm64 release candidate
+        shell: bash
+        run: |
+          docker buildx build --pull --platform linux/arm64 --load -t clawmanager:release-candidate-arm64 .
 
       - name: Compute release fingerprint
         shell: bash
         run: |
-          IMAGE_FINGERPRINT="$(python3 .github/scripts/compute_image_fingerprint.py "${IMAGE_URI}:${TAG_NAME}")"
+          if [ -n "${{ needs.prepare-scheduled-release.outputs.image_fingerprint }}" ]; then
+            echo "IMAGE_FINGERPRINT=${{ needs.prepare-scheduled-release.outputs.image_fingerprint }}" >> "$GITHUB_ENV"
+            exit 0
+          fi
+
+          AMD64_FINGERPRINT="$(python3 .github/scripts/compute_image_fingerprint.py clawmanager:release-candidate-amd64)"
+          ARM64_FINGERPRINT="$(python3 .github/scripts/compute_image_fingerprint.py clawmanager:release-candidate-arm64)"
+          IMAGE_FINGERPRINT="$(printf '%s\n%s\n' "${AMD64_FINGERPRINT}" "${ARM64_FINGERPRINT}" | sha256sum | cut -d' ' -f1)"
           echo "IMAGE_FINGERPRINT=${IMAGE_FINGERPRINT}" >> "$GITHUB_ENV"
 
       - name: Log in to GHCR
@@ -166,11 +194,16 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Push release image
-        shell: bash
-        run: |
-          docker push "${IMAGE_URI}:${TAG_NAME}"
-          docker push "${IMAGE_URI}:latest"
+      - name: Push multi-platform release image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: |
+            ${{ env.IMAGE_URI }}:${{ env.TAG_NAME }}
+            ${{ env.IMAGE_URI }}:latest
 
       - name: Read pushed image digest
         shell: bash
@@ -197,6 +230,7 @@ jobs:
 
           Image: \`${IMAGE_URI}:${TAG_NAME}\`
           Latest: \`${IMAGE_URI}:latest\`
+          Platforms: \`linux/amd64\`, \`linux/arm64\`
           Image-Digest: \`${IMAGE_DIGEST}\`
           Build-Fingerprint: \`${IMAGE_FINGERPRINT}\`
           EOF

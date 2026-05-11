@@ -6,7 +6,14 @@ export interface Instance {
   user_id: number;
   name: string;
   description?: string;
-  type: "openclaw" | "ubuntu" | "debian" | "centos" | "custom" | "webtop";
+  type:
+    | "openclaw"
+    | "ubuntu"
+    | "debian"
+    | "centos"
+    | "custom"
+    | "webtop"
+    | "hermes";
   status: "creating" | "running" | "stopped" | "error" | "deleting";
   cpu_cores: number;
   memory_gb: number;
@@ -109,7 +116,14 @@ export interface InstanceConfigRevision {
 export interface CreateInstanceRequest {
   name: string;
   description?: string;
-  type: "openclaw" | "ubuntu" | "debian" | "centos" | "custom" | "webtop";
+  type:
+    | "openclaw"
+    | "ubuntu"
+    | "debian"
+    | "centos"
+    | "custom"
+    | "webtop"
+    | "hermes";
   cpu_cores: number;
   memory_gb: number;
   disk_gb: number;
@@ -119,6 +133,7 @@ export interface CreateInstanceRequest {
   os_version: string;
   image_registry?: string;
   image_tag?: string;
+  environment_overrides?: Record<string, string>;
   storage_class?: string;
   openclaw_config_plan?: OpenClawConfigPlan;
   skill_ids?: number[];
@@ -197,6 +212,16 @@ export const INSTANCE_TYPES: InstanceType[] = [
     icon: "webtop",
     defaultOs: "ubuntu",
     defaultVersion: "xfce",
+  },
+  {
+    id: "hermes",
+    name: "Hermes Runtime",
+    description: "Hermes runtime built on the webtop desktop base",
+    nameKey: "instances.instanceTypes.hermes.name",
+    descriptionKey: "instances.instanceTypes.hermes.description",
+    icon: "hermes",
+    defaultOs: "hermes",
+    defaultVersion: "latest",
   },
   {
     id: "custom",

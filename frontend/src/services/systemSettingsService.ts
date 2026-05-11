@@ -13,7 +13,10 @@ export interface SystemImageSetting {
 export const systemSettingsService = {
   getImageSettings: async (): Promise<SystemImageSetting[]> => {
     const response = await api.get('/system-settings/images');
-    return response.data.data?.items ?? [];
+    return (response.data.data?.items ?? []).map((item: SystemImageSetting) => ({
+      ...item,
+      id: item.id && item.id > 0 ? item.id : undefined,
+    }));
   },
 
   saveImageSetting: async (setting: SystemImageSetting): Promise<SystemImageSetting> => {
@@ -21,7 +24,7 @@ export const systemSettingsService = {
     return response.data.data;
   },
 
-  deleteImageSetting: async (instanceType: string): Promise<void> => {
-    await api.delete(`/system-settings/images/${instanceType}`);
+  deleteImageSetting: async (target: number | string): Promise<void> => {
+    await api.delete(`/system-settings/images/${target}`);
   },
 };

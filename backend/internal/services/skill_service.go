@@ -1067,11 +1067,10 @@ func buildNormalizedZip(dir extractedSkillDirectory) ([]byte, string, error) {
 }
 
 func hashDirectory(files map[string][]byte) string {
-	flattened := flattenSingleTopLevelDir(files)
 	digest := md5.New()
 	entryKinds := map[string]string{}
 	fileMap := map[string][]byte{}
-	for key, body := range flattened {
+	for key, body := range files {
 		clean := normalizeSkillRelPath(key)
 		if clean == "" || hasHiddenPathSegment(clean) {
 			continue
@@ -1121,7 +1120,7 @@ func (s *skillService) resolveContentMD5(blob *models.SkillBlob) string {
 		sum := md5.Sum(content)
 		return hex.EncodeToString(sum[:])
 	}
-	return hashDirectory(files)
+	return hashDirectory(flattenSingleTopLevelDir(files))
 }
 
 func normalizeSkillRelPath(value string) string {

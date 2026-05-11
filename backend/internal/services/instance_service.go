@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"clawreef/internal/repository"
 	"clawreef/internal/services/k8s"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -21,7 +23,7 @@ type InstanceService interface {
 	Create(userID int, req CreateInstanceRequest) (*models.Instance, error)
 	GetByID(id int) (*models.Instance, error)
 	GetByUserID(userID int, offset, limit int) ([]models.Instance, int, error)
-	GetVisibleInstances(userID int, userRole string, offset, limit int) ([]models.Instance, int, error)
+	GetAllInstances(offset, limit int) ([]models.Instance, int, error)
 	Start(instanceID int) error
 	Stop(instanceID int) error
 	Restart(instanceID int) error
@@ -33,20 +35,21 @@ type InstanceService interface {
 
 // CreateInstanceRequest holds data for creating an instance
 type CreateInstanceRequest struct {
-	Name               string              `json:"name" validate:"required,min=3,max=50"`
-	Description        *string             `json:"description,omitempty"`
-	Type               string              `json:"type" validate:"required,oneof=openclaw ubuntu debian centos custom webtop"`
-	CPUCores           int                 `json:"cpu_cores" validate:"required,min=1,max=32"`
-	MemoryGB           int                 `json:"memory_gb" validate:"required,min=1,max=128"`
-	DiskGB             int                 `json:"disk_gb" validate:"required,min=10,max=1000"`
-	GPUEnabled         bool                `json:"gpu_enabled"`
-	GPUCount           int                 `json:"gpu_count" validate:"min=0,max=4"`
-	OSType             string              `json:"os_type" validate:"required"`
-	OSVersion          string              `json:"os_version" validate:"required"`
-	ImageRegistry      *string             `json:"image_registry,omitempty"`
-	ImageTag           *string             `json:"image_tag,omitempty"`
-	StorageClass       string              `json:"storage_class"`
-	OpenClawConfigPlan *OpenClawConfigPlan `json:"openclaw_config_plan,omitempty"`
+	Name                 string              `json:"name" validate:"required,min=3,max=50"`
+	Description          *string             `json:"description,omitempty"`
+	Type                 string              `json:"type" validate:"required,oneof=openclaw ubuntu debian centos custom webtop hermes"`
+	CPUCores             float64             `json:"cpu_cores" validate:"required,min=0.1,max=32"`
+	MemoryGB             int                 `json:"memory_gb" validate:"required,min=1,max=128"`
+	DiskGB               int                 `json:"disk_gb" validate:"required,min=10,max=1000"`
+	GPUEnabled           bool                `json:"gpu_enabled"`
+	GPUCount             int                 `json:"gpu_count" validate:"min=0,max=4"`
+	OSType               string              `json:"os_type" validate:"required"`
+	OSVersion            string              `json:"os_version" validate:"required"`
+	ImageRegistry        *string             `json:"image_registry,omitempty"`
+	ImageTag             *string             `json:"image_tag,omitempty"`
+	EnvironmentOverrides map[string]string   `json:"environment_overrides,omitempty"`
+	StorageClass         string              `json:"storage_class"`
+	OpenClawConfigPlan   *OpenClawConfigPlan `json:"openclaw_config_plan,omitempty"`
 }
 
 // UpdateInstanceRequest holds data for updating an instance
@@ -79,6 +82,11 @@ type instanceService struct {
 	networkPolicyService  *k8s.NetworkPolicyService
 }
 
+type gatewayModelInjection struct {
+	defaultModel string
+	modelsJSON   string
+}
+
 // NewInstanceService creates a new instance service
 func NewInstanceService(instanceRepo repository.InstanceRepository, quotaRepo repository.QuotaRepository, llmModelRepo repository.LLMModelRepository, openClawConfigService OpenClawConfigService) InstanceService {
 	return &instanceService{
@@ -97,6 +105,14 @@ func NewInstanceService(instanceRepo repository.InstanceRepository, quotaRepo re
 func (s *instanceService) Create(userID int, req CreateInstanceRequest) (*models.Instance, error) {
 	ctx := context.Background()
 	req.Name = strings.TrimSpace(req.Name)
+	environmentOverrides, err := normalizeEnvironmentOverrides(req.EnvironmentOverrides)
+	if err != nil {
+		return nil, err
+	}
+	environmentOverridesJSON, err := marshalEnvironmentOverrides(environmentOverrides)
+	if err != nil {
+		return nil, err
+	}
 
 	// Check user quota
 	quota, err := s.quotaRepo.GetByUserID(userID)
@@ -123,7 +139,7 @@ func (s *instanceService) Create(userID int, req CreateInstanceRequest) (*models
 		return nil, fmt.Errorf("failed to list user instances for quota validation: %w", err)
 	}
 
-	currentCPU := 0
+	currentCPU := 0.0
 	currentMemory := 0
 	currentStorage := 0
 	currentGPU := 0
@@ -146,7 +162,7 @@ func (s *instanceService) Create(userID int, req CreateInstanceRequest) (*models
 
 	// Check CPU limit
 	if currentCPU+req.CPUCores > quota.MaxCPUCores {
-		return nil, fmt.Errorf("CPU cores exceed quota: current %d, requested %d, max %d", currentCPU, req.CPUCores, quota.MaxCPUCores)
+		return nil, fmt.Errorf("CPU cores exceed quota: current %v, requested %v, max %v", currentCPU, req.CPUCores, quota.MaxCPUCores)
 	}
 
 	// Check memory limit
@@ -184,24 +200,25 @@ func (s *instanceService) Create(userID int, req CreateInstanceRequest) (*models
 	// Create instance record
 	now := time.Now()
 	instance := &models.Instance{
-		UserID:        userID,
-		Name:          req.Name,
-		Description:   req.Description,
-		Type:          req.Type,
-		Status:        "creating",
-		CPUCores:      req.CPUCores,
-		MemoryGB:      req.MemoryGB,
-		DiskGB:        req.DiskGB,
-		GPUEnabled:    req.GPUEnabled,
-		GPUCount:      req.GPUCount,
-		OSType:        req.OSType,
-		OSVersion:     req.OSVersion,
-		ImageRegistry: req.ImageRegistry,
-		ImageTag:      req.ImageTag,
-		StorageClass:  req.StorageClass,
-		MountPath:     runtimeConfig.MountPath,
-		CreatedAt:     now,
-		UpdatedAt:     now,
+		UserID:                   userID,
+		Name:                     req.Name,
+		Description:              req.Description,
+		Type:                     req.Type,
+		Status:                   "creating",
+		CPUCores:                 req.CPUCores,
+		MemoryGB:                 req.MemoryGB,
+		DiskGB:                   req.DiskGB,
+		GPUEnabled:               req.GPUEnabled,
+		GPUCount:                 req.GPUCount,
+		OSType:                   req.OSType,
+		OSVersion:                req.OSVersion,
+		ImageRegistry:            req.ImageRegistry,
+		ImageTag:                 req.ImageTag,
+		EnvironmentOverridesJSON: environmentOverridesJSON,
+		StorageClass:             req.StorageClass,
+		MountPath:                runtimeConfig.MountPath,
+		CreatedAt:                now,
+		UpdatedAt:                now,
 	}
 
 	if err := s.instanceRepo.Create(instance); err != nil {
@@ -227,28 +244,33 @@ func (s *instanceService) Create(userID int, req CreateInstanceRequest) (*models
 		s.instanceRepo.Delete(instance.ID)
 		return nil, fmt.Errorf("failed to build instance agent config: %w", err)
 	}
+	extraEnv, err := buildInstancePodEnv(instance, runtimeConfig.Env, gatewayEnv, agentEnv)
+	if err != nil {
+		s.instanceRepo.Delete(instance.ID)
+		return nil, fmt.Errorf("failed to resolve instance environment: %w", err)
+	}
 
 	var bootstrapSnapshot *models.OpenClawInjectionSnapshot
 	var bootstrapSecretName string
-	if strings.EqualFold(instance.Type, "openclaw") && s.openClawConfigService != nil && req.OpenClawConfigPlan != nil && hasOpenClawConfigSelections(*req.OpenClawConfigPlan) {
+	if supportsRuntimeConfigInjection(instance.Type) && s.openClawConfigService != nil && req.OpenClawConfigPlan != nil && hasOpenClawConfigSelections(*req.OpenClawConfigPlan) {
 		bootstrapSnapshot, err = s.openClawConfigService.CreateSnapshotForInstance(userID, instance, req.OpenClawConfigPlan)
 		if err != nil {
 			s.instanceRepo.Delete(instance.ID)
-			return nil, fmt.Errorf("failed to compile openclaw bootstrap config: %w", err)
+			return nil, fmt.Errorf("failed to compile runtime bootstrap config: %w", err)
 		}
 		if bootstrapSnapshot != nil {
 			instance.OpenClawConfigSnapshotID = &bootstrapSnapshot.ID
 			instance.UpdatedAt = time.Now()
 			if err := s.instanceRepo.Update(instance); err != nil {
 				s.instanceRepo.Delete(instance.ID)
-				return nil, fmt.Errorf("failed to persist openclaw snapshot reference: %w", err)
+				return nil, fmt.Errorf("failed to persist runtime snapshot reference: %w", err)
 			}
 
 			bootstrapSecretName, err = s.openClawConfigService.EnsureSnapshotSecret(ctx, userID, instance, bootstrapSnapshot.ID)
 			if err != nil {
 				_ = s.openClawConfigService.MarkSnapshotFailed(bootstrapSnapshot, err)
 				s.instanceRepo.Delete(instance.ID)
-				return nil, fmt.Errorf("failed to provision openclaw bootstrap secret: %w", err)
+				return nil, fmt.Errorf("failed to provision runtime bootstrap secret: %w", err)
 			}
 		}
 	}
@@ -268,15 +290,15 @@ func (s *instanceService) Create(userID int, req CreateInstanceRequest) (*models
 		return nil, fmt.Errorf("failed to create PVC: %w", err)
 	}
 
-	if requiresRestrictedNetwork(instance.Type) {
-		if err := s.networkPolicyService.EnsureDefaultPolicy(ctx, userID, instance.ID, instance.Name); err != nil {
-			s.pvcService.DeletePVC(ctx, userID, instance.ID)
-			if bootstrapSnapshot != nil {
-				_ = s.openClawConfigService.MarkSnapshotFailed(bootstrapSnapshot, err)
-			}
-			s.instanceRepo.Delete(instance.ID)
-			return nil, fmt.Errorf("failed to create network policy: %w", err)
+	// Ensure any legacy per-instance network policy is removed before creating pod.
+	// This keeps new pods unrestricted even if older versions created netpols.
+	if err := s.networkPolicyService.DeletePolicy(ctx, userID, instance.ID, instance.Name); err != nil {
+		s.pvcService.DeletePVC(ctx, userID, instance.ID)
+		if bootstrapSnapshot != nil {
+			_ = s.openClawConfigService.MarkSnapshotFailed(bootstrapSnapshot, err)
 		}
+		s.instanceRepo.Delete(instance.ID)
+		return nil, fmt.Errorf("failed to delete network policy: %w", err)
 	}
 
 	// Create Pod
@@ -292,16 +314,14 @@ func (s *instanceService) Create(userID int, req CreateInstanceRequest) (*models
 		Image:              runtimeConfig.Image,
 		MountPath:          runtimeConfig.MountPath,
 		ContainerPort:      runtimeConfig.Port,
-		ExtraEnv:           withInstanceProxyEnv(instance.Type, instance.ID, mergeEnvMaps(runtimeConfig.Env, mergeEnvMaps(gatewayEnv, agentEnv))),
+		ImagePullPolicy:    corev1.PullPolicy(defaultImagePullPolicy()),
+		ExtraEnv:           extraEnv,
 		EnvFromSecretNames: []string{bootstrapSecretName},
 	}
 
 	pod, err := s.podService.CreatePod(ctx, podConfig)
 	if err != nil {
 		// Rollback: delete PVC and instance record
-		if requiresRestrictedNetwork(instance.Type) {
-			s.networkPolicyService.DeletePolicy(ctx, userID, instance.ID, instance.Name)
-		}
 		s.pvcService.DeletePVC(ctx, userID, instance.ID)
 		if bootstrapSnapshot != nil {
 			_ = s.openClawConfigService.MarkSnapshotFailed(bootstrapSnapshot, err)
@@ -323,9 +343,6 @@ func (s *instanceService) Create(userID int, req CreateInstanceRequest) (*models
 	if err != nil {
 		// Rollback: delete pod, PVC and instance record
 		s.podService.DeletePod(ctx, userID, instance.ID)
-		if requiresRestrictedNetwork(instance.Type) {
-			s.networkPolicyService.DeletePolicy(ctx, userID, instance.ID, instance.Name)
-		}
 		s.pvcService.DeletePVC(ctx, userID, instance.ID)
 		if bootstrapSnapshot != nil {
 			_ = s.openClawConfigService.MarkSnapshotFailed(bootstrapSnapshot, err)
@@ -356,7 +373,7 @@ func (s *instanceService) Create(userID int, req CreateInstanceRequest) (*models
 
 	if bootstrapSnapshot != nil {
 		if err := s.openClawConfigService.MarkSnapshotActive(bootstrapSnapshot); err != nil {
-			return nil, fmt.Errorf("failed to activate openclaw bootstrap snapshot: %w", err)
+			return nil, fmt.Errorf("failed to activate runtime bootstrap snapshot: %w", err)
 		}
 	}
 
@@ -388,22 +405,18 @@ func (s *instanceService) GetByUserID(userID int, offset, limit int) ([]models.I
 	return instances, total, nil
 }
 
-func (s *instanceService) GetVisibleInstances(userID int, userRole string, offset, limit int) ([]models.Instance, int, error) {
-	if strings.EqualFold(strings.TrimSpace(userRole), "admin") {
-		instances, err := s.instanceRepo.GetAll(offset, limit)
-		if err != nil {
-			return nil, 0, err
-		}
-
-		total, err := s.instanceRepo.CountAll()
-		if err != nil {
-			return nil, 0, err
-		}
-
-		return instances, total, nil
+func (s *instanceService) GetAllInstances(offset, limit int) ([]models.Instance, int, error) {
+	instances, err := s.instanceRepo.GetAll(offset, limit)
+	if err != nil {
+		return nil, 0, err
 	}
 
-	return s.GetByUserID(userID, offset, limit)
+	total, err := s.instanceRepo.CountAll()
+	if err != nil {
+		return nil, 0, err
+	}
+
+	return instances, total, nil
 }
 
 // Start starts an instance
@@ -438,21 +451,23 @@ func (s *instanceService) Start(instanceID int) error {
 	if err != nil {
 		return fmt.Errorf("failed to build instance agent config: %w", err)
 	}
+	runtimeConfig := buildRuntimeConfig(instance.Type, instance.OSType, instance.OSVersion, instance.ImageRegistry, instance.ImageTag)
+	extraEnv, err := buildInstancePodEnv(instance, runtimeConfig.Env, gatewayEnv, agentEnv)
+	if err != nil {
+		return fmt.Errorf("failed to resolve instance environment: %w", err)
+	}
 
 	bootstrapSecretName := ""
-	if strings.EqualFold(instance.Type, "openclaw") && s.openClawConfigService != nil && instance.OpenClawConfigSnapshotID != nil && *instance.OpenClawConfigSnapshotID > 0 {
+	if supportsRuntimeConfigInjection(instance.Type) && s.openClawConfigService != nil && instance.OpenClawConfigSnapshotID != nil && *instance.OpenClawConfigSnapshotID > 0 {
 		bootstrapSecretName, err = s.openClawConfigService.EnsureSnapshotSecret(ctx, instance.UserID, instance, *instance.OpenClawConfigSnapshotID)
 		if err != nil {
-			return fmt.Errorf("failed to restore openclaw bootstrap secret: %w", err)
+			return fmt.Errorf("failed to restore runtime bootstrap secret: %w", err)
 		}
 	}
 
-	// Create new pod
-	runtimeConfig := buildRuntimeConfig(instance.Type, instance.OSType, instance.OSVersion, instance.ImageRegistry, instance.ImageTag)
-	if requiresRestrictedNetwork(instance.Type) {
-		if err := s.networkPolicyService.EnsureDefaultPolicy(ctx, instance.UserID, instance.ID, instance.Name); err != nil {
-			return fmt.Errorf("failed to create network policy: %w", err)
-		}
+	// Remove legacy per-instance network policy before starting pod.
+	if err := s.networkPolicyService.DeletePolicy(ctx, instance.UserID, instance.ID, instance.Name); err != nil {
+		return fmt.Errorf("failed to delete network policy: %w", err)
 	}
 
 	podConfig := k8s.PodConfig{
@@ -467,7 +482,8 @@ func (s *instanceService) Start(instanceID int) error {
 		Image:              runtimeConfig.Image,
 		MountPath:          instance.MountPath,
 		ContainerPort:      runtimeConfig.Port,
-		ExtraEnv:           withInstanceProxyEnv(instance.Type, instance.ID, mergeEnvMaps(runtimeConfig.Env, mergeEnvMaps(gatewayEnv, agentEnv))),
+		ImagePullPolicy:    corev1.PullPolicy(defaultImagePullPolicy()),
+		ExtraEnv:           extraEnv,
 		EnvFromSecretNames: []string{bootstrapSecretName},
 	}
 
@@ -513,10 +529,6 @@ func (s *instanceService) Start(instanceID int) error {
 	return nil
 }
 
-func requiresRestrictedNetwork(instanceType string) bool {
-	return strings.TrimSpace(instanceType) != ""
-}
-
 func (s *instanceService) ensureGatewayToken(instance *models.Instance) (string, error) {
 	if instance.AccessToken != nil && strings.TrimSpace(*instance.AccessToken) != "" {
 		return strings.TrimSpace(*instance.AccessToken), nil
@@ -541,7 +553,7 @@ func (s *instanceService) buildGatewayEnv(instance *models.Instance) (map[string
 	if instance == nil || instance.AccessToken == nil || strings.TrimSpace(*instance.AccessToken) == "" {
 		return map[string]string{}, nil
 	}
-	if !strings.EqualFold(strings.TrimSpace(instance.Type), "openclaw") {
+	if !supportsManagedRuntimeIntegration(instance.Type) {
 		return map[string]string{}, nil
 	}
 
@@ -550,7 +562,7 @@ func (s *instanceService) buildGatewayEnv(instance *models.Instance) (map[string
 		return nil, fmt.Errorf("gateway base URL is not configured")
 	}
 
-	modelName, err := s.resolveDefaultGatewayModel()
+	modelInjection, err := s.resolveGatewayModelInjection()
 	if err != nil {
 		return nil, err
 	}
@@ -559,14 +571,14 @@ func (s *instanceService) buildGatewayEnv(instance *models.Instance) (map[string
 	return map[string]string{
 		"CLAWMANAGER_LLM_BASE_URL":   baseURL,
 		"CLAWMANAGER_LLM_API_KEY":    token,
-		"CLAWMANAGER_LLM_MODEL":      modelName,
+		"CLAWMANAGER_LLM_MODEL":      modelInjection.modelsJSON,
 		"CLAWMANAGER_LLM_PROVIDER":   "openai-compatible",
 		"CLAWMANAGER_INSTANCE_TOKEN": token,
 		"OPENCLAW_GATEWAY_TOKEN":     token,
 		"OPENAI_BASE_URL":            baseURL,
 		"OPENAI_API_BASE":            baseURL,
 		"OPENAI_API_KEY":             token,
-		"OPENAI_MODEL":               modelName,
+		"OPENAI_MODEL":               modelInjection.defaultModel,
 	}, nil
 }
 
@@ -588,7 +600,7 @@ func (s *instanceService) ensureAgentBootstrapToken(instance *models.Instance) (
 }
 
 func (s *instanceService) buildAgentEnv(instance *models.Instance) (map[string]string, error) {
-	if instance == nil || !strings.EqualFold(strings.TrimSpace(instance.Type), "openclaw") {
+	if instance == nil || !supportsManagedRuntimeIntegration(instance.Type) {
 		return map[string]string{}, nil
 	}
 	if instance.AgentBootstrapToken == nil || strings.TrimSpace(*instance.AgentBootstrapToken) == "" {
@@ -608,24 +620,86 @@ func (s *instanceService) buildAgentEnv(instance *models.Instance) (map[string]s
 		"CLAWMANAGER_AGENT_BOOTSTRAP_TOKEN":  strings.TrimSpace(*instance.AgentBootstrapToken),
 		"CLAWMANAGER_AGENT_DISK_LIMIT_BYTES": strconv.FormatInt(diskLimitBytes, 10),
 		"CLAWMANAGER_AGENT_INSTANCE_ID":      fmt.Sprintf("%d", instance.ID),
-		"CLAWMANAGER_AGENT_PERSISTENT_DIR":   "/config",
+		"CLAWMANAGER_AGENT_PERSISTENT_DIR":   managedRuntimePersistentDir(instance),
 		"CLAWMANAGER_AGENT_PROTOCOL_VERSION": AgentProtocolVersionV1,
 	}, nil
 }
 
-func (s *instanceService) resolveDefaultGatewayModel() (string, error) {
+func supportsManagedRuntimeIntegration(instanceType string) bool {
+	switch strings.ToLower(strings.TrimSpace(instanceType)) {
+	case "openclaw", "hermes":
+		return true
+	default:
+		return false
+	}
+}
+
+func supportsRuntimeConfigInjection(instanceType string) bool {
+	switch strings.ToLower(strings.TrimSpace(instanceType)) {
+	case "openclaw", "hermes":
+		return true
+	default:
+		return false
+	}
+}
+
+func managedRuntimePersistentDir(instance *models.Instance) string {
+	if instance == nil {
+		return "/config"
+	}
+	if strings.EqualFold(instance.Type, "hermes") {
+		return "/config/.hermes"
+	}
+	if strings.TrimSpace(instance.MountPath) != "" {
+		return strings.TrimSpace(instance.MountPath)
+	}
+	return defaultMountPathForInstanceType(instance.Type)
+}
+
+func (s *instanceService) resolveGatewayModelInjection() (*gatewayModelInjection, error) {
 	if s.llmModelRepo == nil {
-		return "", fmt.Errorf("llm model repository not configured")
+		return nil, fmt.Errorf("llm model repository not configured")
 	}
 
 	items, err := s.llmModelRepo.ListActive()
 	if err != nil {
-		return "", fmt.Errorf("failed to list active models: %w", err)
+		return nil, fmt.Errorf("failed to list active models: %w", err)
 	}
 	if len(items) == 0 {
-		return "", fmt.Errorf("no active models are configured")
+		return nil, fmt.Errorf("no active models are configured")
 	}
-	return "auto", nil
+
+	modelsForInjection := []string{"auto"}
+	seen := map[string]struct{}{
+		"auto": {},
+	}
+
+	for _, item := range items {
+		displayName := strings.TrimSpace(item.DisplayName)
+		if displayName == "" {
+			displayName = strings.TrimSpace(item.ProviderModelName)
+		}
+		if displayName == "" {
+			continue
+		}
+
+		normalizedName := strings.ToLower(displayName)
+		if _, exists := seen[normalizedName]; exists {
+			continue
+		}
+		seen[normalizedName] = struct{}{}
+		modelsForInjection = append(modelsForInjection, displayName)
+	}
+
+	rawModels, err := json.Marshal(modelsForInjection)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode gateway model list: %w", err)
+	}
+
+	return &gatewayModelInjection{
+		defaultModel: "auto",
+		modelsJSON:   string(rawModels),
+	}, nil
 }
 
 func mergeEnvMaps(base map[string]string, overlay map[string]string) map[string]string {
@@ -693,40 +767,53 @@ func (s *instanceService) Restart(instanceID int) error {
 	return nil
 }
 
-// Delete deletes an instance and all associated K8s resources
+// Delete starts deleting an instance and all associated K8s resources.
 func (s *instanceService) Delete(instanceID int) error {
-	ctx := context.Background()
-
 	instance, err := s.instanceRepo.GetByID(instanceID)
 	if err != nil {
 		return fmt.Errorf("failed to get instance: %w", err)
 	}
 
 	if instance == nil {
-		// Instance not in DB, but we should still try to clean up K8s resources
-		fmt.Printf("Instance %d not found in database, attempting to clean up any orphaned K8s resources\n", instanceID)
-		// Try to clean up with userID=0 (will need to scan all namespaces)
-		cleanupService := k8s.NewCleanupService()
-		cleanupService.DeleteAllInstanceResources(ctx, 0, instanceID)
 		return fmt.Errorf("instance not found")
 	}
 
-	fmt.Printf("Starting deletion of instance %d (user %d)\n", instanceID, instance.UserID)
+	if instance.Status != "deleting" {
+		now := time.Now()
+		instance.Status = "deleting"
+		instance.UpdatedAt = now
+
+		if err := s.instanceRepo.Update(instance); err != nil {
+			return fmt.Errorf("failed to mark instance as deleting: %w", err)
+		}
+
+		GetHub().BroadcastInstanceStatus(instance.UserID, instance)
+	}
+
+	go s.completeDeletion(instance.UserID, instance.ID)
+
+	return nil
+}
+
+func (s *instanceService) completeDeletion(userID, instanceID int) {
+	ctx := context.Background()
+
+	fmt.Printf("Starting background deletion of instance %d (user %d)\n", instanceID, userID)
 
 	// Use CleanupService to delete ALL resources for this instance (including duplicates)
 	cleanupService := k8s.NewCleanupService()
-	if err := cleanupService.DeleteAllInstanceResources(ctx, instance.UserID, instance.ID); err != nil {
+	if err := cleanupService.DeleteAllInstanceResources(ctx, userID, instanceID); err != nil {
 		fmt.Printf("Warning: error during resource cleanup for instance %d: %v\n", instanceID, err)
 	}
 
-	// 4. Delete instance record from database
+	// Delete instance record from database after background cleanup finishes.
 	fmt.Printf("Deleting instance %d from database...\n", instanceID)
 	if err := s.instanceRepo.Delete(instanceID); err != nil {
-		return fmt.Errorf("failed to delete instance record: %w", err)
+		fmt.Printf("Error: failed to delete instance %d record: %v\n", instanceID, err)
+		return
 	}
 
 	fmt.Printf("Instance %d deleted successfully\n", instanceID)
-	return nil
 }
 
 // cleanupOrphanedResources cleans up any orphaned K8s resources for an instance
