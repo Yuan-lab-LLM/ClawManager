@@ -48,7 +48,7 @@ func HandleError(c *gin.Context, err error) {
 		Error(c, http.StatusBadGateway, errStr)
 		return
 	}
-	if strings.HasPrefix(errStr, "missing required openclaw config dependency:") || strings.HasPrefix(errStr, "required openclaw config dependency is disabled:") {
+	if strings.HasPrefix(errStr, "missing required openclaw config dependency:") || strings.HasPrefix(errStr, "required openclaw config dependency is disabled:") || strings.HasPrefix(errStr, "backup limit reached:") {
 		Error(c, http.StatusBadRequest, errStr)
 		return
 	}
@@ -60,7 +60,9 @@ func HandleError(c *gin.Context, err error) {
 		Error(c, http.StatusConflict, errStr)
 	case "unsupported instance type", "image is required", "display name is required", "provider type is required", "base URL is required", "provider model name is required", "input price must be non-negative", "output price must be non-negative", "base URL is invalid", "automatic model discovery for azure-openai is not supported yet", "provider discovery is not supported", "model is required", "messages are required", "streaming is not supported yet", "provider type is not supported yet", "trace id is required", "event type is required", "message is required", "risk hit record is incomplete", "rule id is required", "rule display name is required", "rule pattern is required", "rule pattern is invalid", "risk severity is invalid", "risk action is invalid", "sample text is required", "secret ref format is invalid", "secret namespace is required in secret ref", "invalid openclaw resource type", "invalid openclaw config plan mode", "openclaw config resource name is required", "openclaw config resource key is invalid", "openclaw config schemaVersion is required", "openclaw config kind does not match resource type", "openclaw config format is required", "openclaw config content is required", "openclaw config content must be valid JSON", "openclaw config config payload is required", "openclaw config dependency type is invalid", "openclaw config dependency key is required", "openclaw config dependency is invalid", "openclaw config bundle name is required", "openclaw config bundle must include at least one resource", "openclaw config bundle resource id is required", "openclaw config bundle contains duplicate resources", "openclaw config bundle is required", "openclaw config bundle is disabled", "openclaw config bundle is empty", "at least one openclaw config resource must be selected", "openclaw config resource id is invalid", "openclaw config resource is disabled", "openclaw config bundle contains a disabled resource", "openclaw bootstrap payload is too large", "agent bootstrap token is required", "agent id is required", "unsupported agent protocol version", "invalid agent bootstrap token", "invalid instance command type", "invalid instance command finish status":
 		Error(c, http.StatusBadRequest, errStr)
-	case "model is not active or does not exist", "openclaw config resource not found", "openclaw config bundle not found", "openclaw injection snapshot not found", "instance command not found", "instance config revision not found":
+	case "backup name is required", "backup name is too long", "only completed backups can be restored", "instance must be stopped before restoring a backup":
+		Error(c, http.StatusBadRequest, errStr)
+	case "model is not active or does not exist", "openclaw config resource not found", "openclaw config bundle not found", "openclaw injection snapshot not found", "instance command not found", "instance config revision not found", "backup not found", "instance not found":
 		Error(c, http.StatusNotFound, errStr)
 	case "risk rule not found":
 		Error(c, http.StatusNotFound, errStr)
