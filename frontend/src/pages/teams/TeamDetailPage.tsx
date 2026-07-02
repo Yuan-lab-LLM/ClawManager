@@ -8,6 +8,7 @@ import type {
   TeamEvent,
   TeamMember,
   TeamTask,
+  TeamWorkItem,
   TeamWorkspaceFileEntry,
 } from "../../types/team";
 
@@ -410,8 +411,9 @@ const isUserQuestionAnchorGroup = (group: CollaborationGroup) => {
   return true;
 };
 
-const eventTimeValue = (event: TeamEvent) =>
-  event.occurred_at || event.created_at;
+// Server ingestion order is authoritative. Runtime clocks can drift and Redis
+// replay can deliver old occurred_at values after a newer user query.
+const eventTimeValue = (event: TeamEvent) => event.created_at;
 
 const eventTimeMs = (event: TeamEvent) => {
   const value = eventTimeValue(event);
@@ -1162,6 +1164,7 @@ const TeamDetailPage: React.FC = () => {
             ) : (
               <InteractionProcessPanel
                 group={activeProcessGroup}
+                workItems={details.work_items || []}
                 memberById={memberById}
                 leaderMemberId={details.leader_member_id}
                 communicationMode={details.team.communication_mode}
@@ -2207,6 +2210,7 @@ function CollaborationPanel({
 
 function InteractionProcessPanel({
   group,
+  workItems = [],
   memberById,
   leaderMemberId,
   compact = false,
@@ -2219,6 +2223,7 @@ function InteractionProcessPanel({
   communicationMode,
 }: {
   group?: CollaborationGroup;
+  workItems?: TeamWorkItem[];
   memberById: Map<number, TeamMember>;
   leaderMemberId?: string;
   communicationMode?: string;
@@ -2240,14 +2245,24 @@ function InteractionProcessPanel({
   const peerRoot = peerMode && isRootTaskTargetLeader(group, memberById, leaderMemberId);
   const finalResult = group ? processFinalResult(group, steps, peerRoot) : "";
   const visualStatus = group ? processVisualStatus(group, finalResult, steps, peerRoot) : "idle";
-  const progress = group ? processProgress(group, steps, visualStatus, peerRoot) : 0;
+  const rootWorkItems = group?.task
+    ? workItems.filter((item) => item.root_task_id === group.task?.id)
+    : [];
+  const authoritativeLeaderFlow = !peerRoot && rootWorkItems.length > 0;
+  const progress = group
+    ? authoritativeLeaderFlow
+      ? workItemProgress(rootWorkItems, group.task?.status)
+      : processProgress(group, steps, visualStatus, peerRoot)
+    : 0;
   const isTerminal = ["succeeded", "failed", "stale"].includes(visualStatus);
   const statusText = processStatusText(visualStatus);
   const title = group?.task ? taskTitleText(group.task) : group?.title || "等待任务";
   const queryText = group?.task
     ? taskPromptText(group.task) || group.title
     : group?.items.find((item) => item.content)?.content || "";
-  const columns = buildKanbanColumns(group, steps, finalResult, visualStatus);
+  const columns = authoritativeLeaderFlow
+    ? buildWorkItemKanbanColumns(rootWorkItems, memberById)
+    : buildKanbanColumns(group, steps, finalResult, visualStatus);
   const peerModel = peerRoot
     ? buildPeerCollaborationModel(group, steps, memberById, leaderMemberId)
     : undefined;
@@ -3021,6 +3036,79 @@ function kanbanColumnForStep(step: ProcessStep, visualStatus: string, steps: Pro
     return "doing";
   }
   return "todo";
+}
+
+function buildWorkItemKanbanColumns(
+  workItems: TeamWorkItem[],
+  memberById: Map<number, TeamMember>,
+): KanbanColumns {
+  const columns: KanbanColumns = { todo: [], doing: [], done: [] };
+  for (const item of workItems) {
+    const column: KanbanColumnKey =
+      item.status === "succeeded" || item.status === "failed" || item.status === "stale"
+        ? "done"
+        : item.status === "running"
+          ? "doing"
+          : "todo";
+    const owner = item.owner_member_id
+      ? memberById.get(item.owner_member_id)?.display_name || memberById.get(item.owner_member_id)?.member_key || "未分配"
+      : "未分配";
+    const resultSummary = item.result
+      ? payloadText(item.result, ["summary", "resultMarkdown", "result_markdown", "result", "text"])
+      : "";
+    columns[column].push({
+      id: `work-item-${item.id}`,
+      column,
+      title: item.title,
+      summary: resultSummary || (item.depends_on?.length ? `等待：${item.depends_on.join("、")}` : item.title),
+      owner,
+      eventType:
+        item.status === "succeeded"
+          ? "task_completed"
+          : item.status === "failed" || item.status === "stale"
+            ? "task_failed"
+            : item.status === "running"
+              ? "task_progress"
+              : "task_assigned",
+      time: new Date(item.updated_at).getTime(),
+      progress: item.status === "succeeded" ? 100 : item.status === "running" ? 50 : undefined,
+      statusLabel:
+        item.status === "succeeded"
+          ? "已完成"
+          : item.status === "failed"
+            ? "失败"
+            : item.status === "stale"
+              ? "超时"
+              : item.status === "running"
+                ? "执行中"
+                : item.status === "dispatched"
+                  ? "已分派"
+                  : "待分派",
+    });
+  }
+  (Object.keys(columns) as KanbanColumnKey[]).forEach((key) => {
+    columns[key].sort((a, b) => a.time - b.time || a.id.localeCompare(b.id));
+  });
+  return columns;
+}
+
+function workItemProgress(workItems: TeamWorkItem[], rootStatus?: TeamTask["status"]) {
+  if (rootStatus === "succeeded") {
+    return 100;
+  }
+  if (rootStatus === "failed" || rootStatus === "stale") {
+    return 100;
+  }
+  if (workItems.length === 0) {
+    return 0;
+  }
+  const completed = workItems.filter((item) =>
+    ["succeeded", "failed", "stale"].includes(item.status),
+  ).length;
+  const running = workItems.filter((item) => item.status === "running").length;
+  const dispatched = workItems.filter((item) => item.status === "dispatched").length;
+  const weighted = ((completed + running * 0.55 + dispatched * 0.2) / workItems.length) * 92;
+  return Math.max(5, Math.min(92, Math.round(weighted)));
 }
 
 function buildPeerCollaborationModel(
@@ -4328,7 +4416,7 @@ function chatMessageFromItem(
     senderKey,
     content,
     time: item.timeMs,
-    sequence: item.timeMs * 1000 + item.event.id / 1000000,
+    sequence: item.timeMs * 1000 + (item.event.sequence_no || item.event.id) / 1000000,
     tone:
       isAssignmentEvent && hasContent
         ? isFeedbackEvent

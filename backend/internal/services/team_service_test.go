@@ -284,8 +284,9 @@ func TestProjectTeamTaskRuntimeStateUsesExplicitCompletionSignals(t *testing.T) 
 	task := &models.TeamTask{Status: models.TeamTaskStatusFailed}
 
 	projection := projectTeamTaskRuntimeState(task, map[string]interface{}{
-		"status":         "done",
-		"resultMarkdown": "finished",
+		"status":             "done",
+		"resultMarkdown":     "finished",
+		"explicitCompletion": true,
 	}, "completion", &resultJSON, now)
 
 	if !projection.changed || projection.status != models.TeamTaskStatusSucceeded {
@@ -836,7 +837,7 @@ func TestProjectTeamEventDoesNotTreatPlainFinalReplyAsTaskCompleted(t *testing.T
 	}
 }
 
-func TestProjectTeamEventTreatsSubstantialDirectTargetReplyAsTaskCompleted(t *testing.T) {
+func TestProjectTeamEventKeepsSubstantialDirectTargetReplyNonTerminal(t *testing.T) {
 	taskID := 68
 	messageID := "team-31-bootstrap-introduction"
 	task := &models.TeamTask{
@@ -885,14 +886,14 @@ func TestProjectTeamEventTreatsSubstantialDirectTargetReplyAsTaskCompleted(t *te
 		t.Fatalf("projectTeamEvent returned error: %v", err)
 	}
 
-	if repo.updatedTask == nil || repo.updatedTask.Status != models.TeamTaskStatusSucceeded {
-		t.Fatalf("expected substantial direct target reply to mark task succeeded, got %#v", repo.updatedTask)
+	if repo.updatedTask != nil && (repo.updatedTask.Status == models.TeamTaskStatusSucceeded || repo.updatedTask.FinishedAt != nil) {
+		t.Fatalf("substantial reply without an explicit completion tool must stay non-terminal, got %#v", repo.updatedTask)
 	}
-	if repo.updatedMember == nil || repo.updatedMember.Status != models.TeamMemberStatusIdle || repo.updatedMember.Progress != 100 {
-		t.Fatalf("expected member to become completed, got %#v", repo.updatedMember)
+	if repo.updatedMember != nil && repo.updatedMember.Progress == 100 {
+		t.Fatalf("substantial reply without explicit completion must not complete the member, got %#v", repo.updatedMember)
 	}
-	if len(repo.createdEvents) != 1 || repo.createdEvents[0].EventType != "task_completed" {
-		t.Fatalf("expected stored event type task_completed, got %#v", repo.createdEvents)
+	if len(repo.createdEvents) != 1 || repo.createdEvents[0].EventType != "reply" {
+		t.Fatalf("expected stored event type reply, got %#v", repo.createdEvents)
 	}
 	var stored map[string]interface{}
 	if err := json.Unmarshal([]byte(*repo.createdEvents[0].PayloadJSON), &stored); err != nil {
@@ -1223,7 +1224,7 @@ func TestProjectTeamEventDowngradesLiteDispatchWrapperFailure(t *testing.T) {
 	}
 }
 
-func TestProjectTeamEventTreatsSuccessfulFailedEventAsCompletion(t *testing.T) {
+func TestProjectTeamEventDoesNotTreatSuccessfulFailedWrapperAsCompletion(t *testing.T) {
 	taskID := 74
 	messageID := "team-31-task-74"
 	task := &models.TeamTask{
@@ -1269,8 +1270,8 @@ func TestProjectTeamEventTreatsSuccessfulFailedEventAsCompletion(t *testing.T) {
 		t.Fatalf("projectTeamEvent returned error: %v", err)
 	}
 
-	if repo.updatedTask == nil || repo.updatedTask.Status != models.TeamTaskStatusSucceeded {
-		t.Fatalf("successful task_failed wrapper should complete task, got %#v", repo.updatedTask)
+	if repo.updatedTask != nil && repo.updatedTask.Status == models.TeamTaskStatusSucceeded {
+		t.Fatalf("a contradictory task_failed wrapper must not complete the task, got %#v", repo.updatedTask)
 	}
 	if repo.updatedMember == nil || repo.updatedMember.Availability == models.TeamMemberAvailabilityBlocked {
 		t.Fatalf("successful task_failed wrapper must not block member, got %#v", repo.updatedMember)
@@ -1283,8 +1284,8 @@ func TestProjectTeamEventTreatsSuccessfulFailedEventAsCompletion(t *testing.T) {
 		t.Fatalf("decode stored payload: %v", err)
 	}
 	step, ok := stored["collaborationStep"].(map[string]interface{})
-	if !ok || step["type"] != "result" || step["status"] != models.TeamTaskStatusSucceeded {
-		t.Fatalf("expected result collaboration step, got %#v", stored)
+	if !ok || step["type"] == "result" || step["status"] == models.TeamTaskStatusSucceeded {
+		t.Fatalf("expected contradictory wrapper to remain non-terminal, got %#v", stored)
 	}
 }
 
@@ -1400,13 +1401,14 @@ func TestProjectTeamEventDoesNotCompleteRootTaskFromPeerMemberTerminal(t *testin
 	}
 	service := &teamService{repo: repo}
 	payload := map[string]interface{}{
-		"event":          "task_completed",
-		"memberId":       "worker",
-		"messageId":      messageID,
-		"taskId":         messageID,
-		"status":         "succeeded",
-		"summary":        "Worker delivery ready",
-		"resultMarkdown": "Worker completed the assigned research and produced a report for leader synthesis.",
+		"event":              "task_completed",
+		"memberId":           "worker",
+		"messageId":          messageID,
+		"taskId":             messageID,
+		"status":             "succeeded",
+		"summary":            "Worker delivery ready",
+		"resultMarkdown":     "Worker completed the assigned research and produced a report for leader synthesis.",
+		"explicitCompletion": true,
 	}
 	payloadJSON, err := json.Marshal(payload)
 	if err != nil {
@@ -1653,13 +1655,14 @@ func TestProjectTeamEventLeaderMediatedPrematureLeaderCompletionWaitsForAssignme
 		}},
 	}
 	payloadJSON, err := json.Marshal(map[string]interface{}{
-		"event":          "task_completed",
-		"memberId":       "leader",
-		"messageId":      messageID,
-		"taskId":         messageID,
-		"status":         "succeeded",
-		"summary":        "Final result ready too early",
-		"resultMarkdown": "Designer result is pending.",
+		"event":              "task_completed",
+		"memberId":           "leader",
+		"messageId":          messageID,
+		"taskId":             messageID,
+		"status":             "succeeded",
+		"summary":            "Final result ready too early",
+		"resultMarkdown":     "Designer result is pending.",
+		"explicitCompletion": true,
 	})
 	if err != nil {
 		t.Fatalf("marshal payload: %v", err)
@@ -1715,13 +1718,14 @@ func TestProjectTeamEventLeaderMediatedLeaderCompletionAfterAssignmentResultsClo
 		},
 	}
 	payloadJSON, err := json.Marshal(map[string]interface{}{
-		"event":          "task_completed",
-		"memberId":       "leader",
-		"messageId":      messageID,
-		"taskId":         messageID,
-		"status":         "succeeded",
-		"summary":        "Designer returned 1; final synthesis complete.",
-		"resultMarkdown": "Final result: designer=1.",
+		"event":              "task_completed",
+		"memberId":           "leader",
+		"messageId":          messageID,
+		"taskId":             messageID,
+		"status":             "succeeded",
+		"summary":            "Designer returned 1; final synthesis complete.",
+		"resultMarkdown":     "Final result: designer=1.",
+		"explicitCompletion": true,
 	})
 	if err != nil {
 		t.Fatalf("marshal payload: %v", err)
@@ -1741,7 +1745,7 @@ func TestProjectTeamEventLeaderMediatedLeaderCompletionAfterAssignmentResultsClo
 	}
 }
 
-func TestProjectTeamEventAssociatesCurrentTaskReplyWithoutMessageID(t *testing.T) {
+func TestProjectTeamEventAssociatesCurrentTaskReplyWithoutCompletingIt(t *testing.T) {
 	taskID := 72
 	task := &models.TeamTask{
 		ID:             taskID,
@@ -1787,14 +1791,14 @@ func TestProjectTeamEventAssociatesCurrentTaskReplyWithoutMessageID(t *testing.T
 		t.Fatalf("projectTeamEvent returned error: %v", err)
 	}
 
-	if repo.updatedTask == nil || repo.updatedTask.Status != models.TeamTaskStatusSucceeded {
-		t.Fatalf("expected current task reply to complete worker task, got %#v", repo.updatedTask)
+	if repo.updatedTask != nil && (repo.updatedTask.Status == models.TeamTaskStatusSucceeded || repo.updatedTask.FinishedAt != nil) {
+		t.Fatalf("current task reply must be associated but remain non-terminal, got %#v", repo.updatedTask)
 	}
-	if repo.updatedMember == nil || repo.updatedMember.Availability != models.TeamMemberAvailabilityIdle || repo.updatedMember.Progress != 100 {
-		t.Fatalf("expected worker to become idle after current task reply, got %#v", repo.updatedMember)
+	if repo.updatedMember != nil && repo.updatedMember.Progress == 100 {
+		t.Fatalf("reply without explicit completion must not complete worker state, got %#v", repo.updatedMember)
 	}
-	if len(repo.createdEvents) != 1 || repo.createdEvents[0].EventType != "task_completed" || repo.createdEvents[0].TaskID == nil || *repo.createdEvents[0].TaskID != taskID {
-		t.Fatalf("expected task_completed event linked to current task, got %#v", repo.createdEvents)
+	if len(repo.createdEvents) != 1 || repo.createdEvents[0].EventType != "reply" || repo.createdEvents[0].TaskID == nil || *repo.createdEvents[0].TaskID != taskID {
+		t.Fatalf("expected reply event linked to current task, got %#v", repo.createdEvents)
 	}
 }
 
@@ -1909,13 +1913,14 @@ func TestProjectTeamEventCompletionReportMentioningDispatchStillClosesTask(t *te
 		"Task dispatch is part of this completed report, not a dispatch-only acknowledgement.",
 	}, "\n")
 	payload := map[string]interface{}{
-		"event":          "task_completed",
-		"messageId":      messageID,
-		"memberId":       "leader",
-		"taskId":         "team-31-task-69",
-		"status":         "succeeded",
-		"summary":        "Completed team introduction.",
-		"resultMarkdown": report,
+		"event":              "task_completed",
+		"messageId":          messageID,
+		"memberId":           "leader",
+		"taskId":             "team-31-task-69",
+		"status":             "succeeded",
+		"summary":            "Completed team introduction.",
+		"resultMarkdown":     report,
+		"explicitCompletion": true,
 	}
 	payloadJSON, err := json.Marshal(payload)
 	if err != nil {
@@ -2100,13 +2105,14 @@ func TestProjectTeamEventAcceptsExistingMarkdownArtifactReference(t *testing.T) 
 	}
 	service := &teamService{repo: repo, runtimeWorkspaceRoot: workspaceRoot}
 	payloadJSON, err := json.Marshal(map[string]interface{}{
-		"event":          "task_completed",
-		"memberId":       "leader",
-		"messageId":      messageID,
-		"status":         "succeeded",
-		"summary":        "Team introduction complete.",
-		"resultMarkdown": "Full report: `/team/results/team-22-task-40/team-introduction-report.md`.",
-		"artifactRefs":   []string{"/team/results/team-22-task-40/team-introduction-report.md"},
+		"event":              "task_completed",
+		"memberId":           "leader",
+		"messageId":          messageID,
+		"status":             "succeeded",
+		"summary":            "Team introduction complete.",
+		"resultMarkdown":     "Full report: `/team/results/team-22-task-40/team-introduction-report.md`.",
+		"artifactRefs":       []string{"/team/results/team-22-task-40/team-introduction-report.md"},
+		"explicitCompletion": true,
 	})
 	if err != nil {
 		t.Fatalf("marshal payload: %v", err)
@@ -2140,13 +2146,14 @@ func TestProjectTeamEventMissingArtifactKeepsFinalAnswerInWarning(t *testing.T) 
 	service := &teamService{repo: repo, runtimeWorkspaceRoot: t.TempDir()}
 	finalBody := "# Delivery Team\n\nDetailed final answer."
 	payloadJSON, err := json.Marshal(map[string]interface{}{
-		"event":          "task_completed",
-		"memberId":       "leader",
-		"messageId":      messageID,
-		"status":         "succeeded",
-		"summary":        "Team introduction complete.",
-		"resultMarkdown": finalBody,
-		"artifactRefs":   []string{"/team/results/team-22-task-40/missing.md"},
+		"event":              "task_completed",
+		"memberId":           "leader",
+		"messageId":          messageID,
+		"status":             "succeeded",
+		"summary":            "Team introduction complete.",
+		"resultMarkdown":     finalBody,
+		"artifactRefs":       []string{"/team/results/team-22-task-40/missing.md"},
+		"explicitCompletion": true,
 	})
 	if err != nil {
 		t.Fatalf("marshal payload: %v", err)
@@ -2187,6 +2194,176 @@ func TestNormalizeTeamArtifactReferencesDoesNotCorruptSerializedJSON(t *testing.
 	}
 }
 
+func TestTeamTaskCompletionSignalsRemainBackwardCompatibleAcrossProtocolVersions(t *testing.T) {
+	v1 := map[string]interface{}{
+		"status":             "succeeded",
+		"resultMarkdown":     "Legacy runtime final answer",
+		"explicitCompletion": true,
+	}
+	if !isTeamTaskCompletionSignal("task_completed", "succeeded", v1) {
+		t.Fatal("expected explicit legacy v1 task_completed event to remain supported")
+	}
+	plainV1 := cloneStringInterfaceMap(v1)
+	delete(plainV1, "explicitCompletion")
+	if isTeamTaskCompletionSignal("task_completed", "succeeded", plainV1) {
+		t.Fatal("legacy task_completed without an explicit completion marker must remain non-terminal")
+	}
+
+	v2 := map[string]interface{}{
+		"protocolVersion":    2,
+		"eventId":            "evt-70",
+		"status":             "succeeded",
+		"completionId":       "completion:31:task-70:leader",
+		"completionSource":   teamTaskCompletionTool,
+		"explicitCompletion": true,
+		"taskId":             "team-31-task-70",
+		"rootTaskId":         "team-31-task-70",
+		"memberId":           "leader",
+		"summary":            "Protocol v2 final answer",
+		"resultMarkdown":     "Protocol v2 final answer",
+		"artifactRefs":       []interface{}{"/team/results/team-31-task-70/result.md"},
+	}
+	if isTeamTaskCompletionSignal("reply", "succeeded", v2) {
+		t.Fatal("expected a v2 reply to remain non-terminal")
+	}
+	if !isTeamTaskCompletionSignal("task_completed", "succeeded", v2) {
+		t.Fatal("expected an explicit v2 task_completed event to be terminal")
+	}
+
+	missingBody := cloneStringInterfaceMap(v2)
+	delete(missingBody, "resultMarkdown")
+	if isTeamTaskCompletionSignal("task_completed", "succeeded", missingBody) {
+		t.Fatal("expected v2 completion without a result body to remain open")
+	}
+
+	automatic := cloneStringInterfaceMap(v2)
+	automatic["explicitCompletion"] = false
+	automatic["completionSource"] = "runtime_processing"
+	if isTeamTaskCompletionSignal("task_completed", "succeeded", automatic) {
+		t.Fatal("expected automatic runtime success to remain non-terminal")
+	}
+}
+
+func TestTeamTaskFailureSignalsRemainBackwardCompatibleAcrossProtocolVersions(t *testing.T) {
+	if !isTeamTaskFailureSignal("task_failed", "failed", map[string]interface{}{}) {
+		t.Fatal("expected legacy task_failed event to remain supported")
+	}
+
+	v2RuntimeFailure := map[string]interface{}{
+		"protocolVersion":  2,
+		"eventId":          "evt-71",
+		"status":           "failed",
+		"completionId":     "completion:31:task-71:worker",
+		"completionSource": "runtime_error",
+		"taskId":           "team-31-task-71",
+		"rootTaskId":       "team-31-task-71",
+		"memberId":         "worker",
+		"summary":          "runtime failed",
+		"artifactRefs":     []interface{}{"/team/results/team-31-task-71/result.md"},
+	}
+	if !isTeamTaskFailureSignal("task_failed", "failed", v2RuntimeFailure) {
+		t.Fatal("expected structured v2 runtime failure to be terminal")
+	}
+	if isTeamTaskFailureSignal("reply", "failed", v2RuntimeFailure) {
+		t.Fatal("expected failed v2 reply to remain non-terminal")
+	}
+}
+
+func TestAcceptedTeamCompletionIDOnlyDeduplicatesAcceptedTerminalEvents(t *testing.T) {
+	completionID := "completion:31:task-72:leader"
+	terminalPayload, err := json.Marshal(map[string]interface{}{
+		"protocolVersion":    2,
+		"eventId":            "evt-72",
+		"status":             "succeeded",
+		"completionId":       completionID,
+		"completionSource":   teamTaskCompletionTool,
+		"explicitCompletion": true,
+		"taskId":             "team-31-task-72",
+		"rootTaskId":         "team-31-task-72",
+		"memberId":           "leader",
+		"summary":            "Final answer",
+		"resultMarkdown":     "Final answer",
+		"artifactRefs":       []interface{}{"/team/results/team-31-task-72/result.md"},
+	})
+	if err != nil {
+		t.Fatalf("marshal terminal payload: %v", err)
+	}
+	warningPayload, err := json.Marshal(map[string]interface{}{
+		"protocolVersion":  2,
+		"status":           "blocked",
+		"completionId":     completionID,
+		"completionSource": teamTaskCompletionTool,
+	})
+	if err != nil {
+		t.Fatalf("marshal warning payload: %v", err)
+	}
+
+	repo := &teamRepositoryStub{createdEvents: []models.TeamEvent{{
+		TeamID:      31,
+		EventType:   "message_warning",
+		PayloadJSON: stringPtr(string(warningPayload)),
+	}}}
+	service := &teamService{repo: repo}
+	duplicate, err := service.hasAcceptedTeamCompletionID(31, completionID)
+	if err != nil {
+		t.Fatalf("check warning completion ID: %v", err)
+	}
+	if duplicate {
+		t.Fatal("expected rejected artifact completion to remain retryable")
+	}
+
+	repo.createdEvents = append(repo.createdEvents, models.TeamEvent{
+		TeamID:      31,
+		EventType:   "task_completed",
+		PayloadJSON: stringPtr(string(terminalPayload)),
+	})
+	duplicate, err = service.hasAcceptedTeamCompletionID(31, completionID)
+	if err != nil {
+		t.Fatalf("check terminal completion ID: %v", err)
+	}
+	if !duplicate {
+		t.Fatal("expected accepted terminal completion ID to be deduplicated")
+	}
+}
+
+func cloneStringInterfaceMap(source map[string]interface{}) map[string]interface{} {
+	clone := make(map[string]interface{}, len(source))
+	for key, value := range source {
+		clone[key] = value
+	}
+	return clone
+}
+
+func stringPtr(value string) *string { return &value }
+
+func TestTaskHasRecentActivityUsesBusinessWorkItems(t *testing.T) {
+	now := time.Now().UTC()
+	task := &models.TeamTask{
+		ID:        88,
+		TeamID:    42,
+		MessageID: "team-42-task-root",
+		Status:    models.TeamTaskStatusRunning,
+		UpdatedAt: now.Add(-time.Hour),
+	}
+	repo := &teamRepositoryStub{
+		workItems: []models.TeamWorkItem{{
+			TeamID:     42,
+			RootTaskID: 88,
+			WorkID:     "collect-paper",
+			Status:     models.TeamTaskStatusRunning,
+			UpdatedAt:  now.Add(-time.Minute),
+		}},
+	}
+	service := &teamService{repo: repo}
+	active, err := service.taskHasRecentActivity(&models.Team{ID: 42}, task, now.Add(-5*time.Minute))
+	if err != nil {
+		t.Fatalf("taskHasRecentActivity returned error: %v", err)
+	}
+	if !active {
+		t.Fatal("expected a recently updated running work item to keep the root task active")
+	}
+}
+
 type teamRepositoryStub struct {
 	teamsByID        map[int]*models.Team
 	membersByID      map[int]*models.TeamMember
@@ -2194,6 +2371,7 @@ type teamRepositoryStub struct {
 	tasksByID        map[int]*models.TeamTask
 	tasksByMessageID map[string]*models.TeamTask
 	createdEvents    []models.TeamEvent
+	workItems        []models.TeamWorkItem
 	updatedTask      *models.TeamTask
 	updatedMember    *models.TeamMember
 	updatedTeam      *models.Team
@@ -2288,6 +2466,27 @@ func (s *teamRepositoryStub) CreateEvent(event *models.TeamEvent) error {
 func (s *teamRepositoryStub) EventExistsByStreamID(teamID int, streamID string) (bool, error) {
 	return false, nil
 }
+func (s *teamRepositoryStub) EventExistsByEventID(teamID int, eventID string) (bool, error) {
+	for _, event := range s.createdEvents {
+		if event.TeamID == teamID && event.EventID != nil && *event.EventID == eventID {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+func (s *teamRepositoryStub) EventExistsByCompletionID(teamID int, completionID string) (bool, error) {
+	for _, event := range s.createdEvents {
+		if event.TeamID == teamID {
+			payload := teamEventPayloadMap(event)
+			if eventString(payload, "completionId", "completion_id") == completionID &&
+				(isTeamTaskCompletionSignal(event.EventType, normalizedTeamTaskEventStatus(payload), payload) ||
+					isTeamTaskFailureSignal(event.EventType, normalizedTeamTaskEventStatus(payload), payload)) {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
 func (s *teamRepositoryStub) ListEventsByTeamID(teamID int, limit int) ([]models.TeamEvent, error) {
 	events := make([]models.TeamEvent, 0, len(s.createdEvents))
 	for _, event := range s.createdEvents {
@@ -2302,4 +2501,32 @@ func (s *teamRepositoryStub) ListEventsByTeamID(teamID int, limit int) ([]models
 }
 func (s *teamRepositoryStub) ListEventsBeforeID(teamID, beforeID, limit int) ([]models.TeamEvent, error) {
 	return nil, nil
+}
+func (s *teamRepositoryStub) UpsertWorkItem(item *models.TeamWorkItem) error {
+	for idx := range s.workItems {
+		if s.workItems[idx].TeamID == item.TeamID && s.workItems[idx].RootTaskID == item.RootTaskID && s.workItems[idx].WorkID == item.WorkID {
+			s.workItems[idx] = *item
+			return nil
+		}
+	}
+	s.workItems = append(s.workItems, *item)
+	return nil
+}
+func (s *teamRepositoryStub) ListWorkItemsByRootTaskID(rootTaskID int) ([]models.TeamWorkItem, error) {
+	result := make([]models.TeamWorkItem, 0)
+	for _, item := range s.workItems {
+		if item.RootTaskID == rootTaskID {
+			result = append(result, item)
+		}
+	}
+	return result, nil
+}
+func (s *teamRepositoryStub) ListWorkItemsByTeamID(teamID int, limit int) ([]models.TeamWorkItem, error) {
+	result := make([]models.TeamWorkItem, 0)
+	for _, item := range s.workItems {
+		if item.TeamID == teamID {
+			result = append(result, item)
+		}
+	}
+	return result, nil
 }

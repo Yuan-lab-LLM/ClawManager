@@ -84,10 +84,30 @@ export interface TeamEvent {
   task_id?: number;
   message_id?: string;
   event_type: string;
+  event_id?: string;
+  completion_id?: string;
+  sequence_no: number;
   redis_stream_id?: string;
   occurred_at?: string;
   created_at: string;
   payload?: Record<string, unknown>;
+}
+
+export interface TeamWorkItem {
+  id: number;
+  team_id: number;
+  root_task_id: number;
+  work_id: string;
+  owner_member_id?: number;
+  title: string;
+  status: "pending" | "dispatched" | "running" | "succeeded" | "failed" | "stale";
+  depends_on?: string[];
+  result?: Record<string, unknown>;
+  artifact_refs?: string[];
+  created_at: string;
+  started_at?: string;
+  finished_at?: string;
+  updated_at: string;
 }
 
 export interface CreateTeamMemberRequest {
@@ -126,6 +146,7 @@ export interface TeamDetails {
   members: TeamMember[];
   tasks?: TeamTask[];
   events?: TeamEvent[];
+  work_items?: TeamWorkItem[];
 }
 
 export interface TeamTasksHistoryResponse {

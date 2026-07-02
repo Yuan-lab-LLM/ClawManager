@@ -109,6 +109,9 @@ func (TeamTask) TableName() string {
 
 type TeamEvent struct {
 	ID            int        `db:"id,primarykey,autoincrement" json:"id"`
+	EventID       *string    `db:"event_id" json:"event_id,omitempty"`
+	CompletionID  *string    `db:"completion_id" json:"completion_id,omitempty"`
+	SequenceNo    int64      `db:"sequence_no" json:"sequence_no"`
 	TeamID        int        `db:"team_id" json:"team_id"`
 	MemberID      *int       `db:"member_id" json:"member_id,omitempty"`
 	TaskID        *int       `db:"task_id" json:"task_id,omitempty"`
@@ -122,4 +125,25 @@ type TeamEvent struct {
 
 func (TeamEvent) TableName() string {
 	return "team_events"
+}
+
+type TeamWorkItem struct {
+	ID               int        `db:"id,primarykey,autoincrement" json:"id"`
+	TeamID           int        `db:"team_id" json:"team_id"`
+	RootTaskID       int        `db:"root_task_id" json:"root_task_id"`
+	WorkID           string     `db:"work_id" json:"work_id"`
+	OwnerMemberID    *int       `db:"owner_member_id" json:"owner_member_id,omitempty"`
+	Title            string     `db:"title" json:"title"`
+	Status           string     `db:"status" json:"status"`
+	DependsOnJSON    *string    `db:"depends_on_json" json:"-"`
+	ResultJSON       *string    `db:"result_json" json:"-"`
+	ArtifactRefsJSON *string    `db:"artifact_refs_json" json:"-"`
+	CreatedAt        time.Time  `db:"created_at" json:"created_at"`
+	StartedAt        *time.Time `db:"started_at" json:"started_at,omitempty"`
+	FinishedAt       *time.Time `db:"finished_at" json:"finished_at,omitempty"`
+	UpdatedAt        time.Time  `db:"updated_at" json:"updated_at"`
+}
+
+func (TeamWorkItem) TableName() string {
+	return "team_work_items"
 }

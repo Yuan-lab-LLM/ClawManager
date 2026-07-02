@@ -96,3 +96,24 @@ func TestMigration023IsRetrySafe(t *testing.T) {
 		}
 	}
 }
+
+func TestMigration035HardensTeamEventProtocol(t *testing.T) {
+	raw, err := embeddedMigrations.ReadFile("migrations/035_harden_team_event_protocol.sql")
+	if err != nil {
+		t.Fatalf("read migration 035: %v", err)
+	}
+	sql := string(raw)
+	for _, required := range []string{
+		"event_id",
+		"completion_id",
+		"sequence_no",
+		"uk_team_events_event_id",
+		"uk_team_events_completion_id",
+		"CREATE TABLE IF NOT EXISTS team_work_items",
+		"uk_team_work_items_work",
+	} {
+		if !strings.Contains(sql, required) {
+			t.Fatalf("migration 035 must contain %s", required)
+		}
+	}
+}

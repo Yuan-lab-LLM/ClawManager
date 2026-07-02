@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -124,12 +125,13 @@ type TeamListPayload struct {
 }
 
 type TeamDetailsPayload struct {
-	Team           *models.Team        `json:"team"`
-	LeaderMemberID string              `json:"leader_member_id,omitempty"`
-	Leader         *models.TeamMember  `json:"leader,omitempty"`
-	Members        []models.TeamMember `json:"members"`
-	Tasks          []TeamTaskPayload   `json:"tasks,omitempty"`
-	Events         []TeamEventPayload  `json:"events,omitempty"`
+	Team           *models.Team          `json:"team"`
+	LeaderMemberID string                `json:"leader_member_id,omitempty"`
+	Leader         *models.TeamMember    `json:"leader,omitempty"`
+	Members        []models.TeamMember   `json:"members"`
+	Tasks          []TeamTaskPayload     `json:"tasks,omitempty"`
+	Events         []TeamEventPayload    `json:"events,omitempty"`
+	WorkItems      []TeamWorkItemPayload `json:"work_items,omitempty"`
 }
 
 type TeamTasksHistoryPayload struct {
@@ -191,6 +193,13 @@ type TeamTaskPayload struct {
 type TeamEventPayload struct {
 	models.TeamEvent
 	Payload map[string]interface{} `json:"payload,omitempty"`
+}
+
+type TeamWorkItemPayload struct {
+	models.TeamWorkItem
+	DependsOn    []string               `json:"depends_on,omitempty"`
+	Result       map[string]interface{} `json:"result,omitempty"`
+	ArtifactRefs []string               `json:"artifact_refs,omitempty"`
 }
 
 type teamService struct {
@@ -936,6 +945,10 @@ func (s *teamService) GetTeam(userID, teamID int) (*TeamDetailsPayload, error) {
 	if err != nil {
 		return nil, err
 	}
+	workItems, err := s.repo.ListWorkItemsByTeamID(teamID, 200)
+	if err != nil {
+		return nil, err
+	}
 	leader := findTeamLeader(members)
 	return &TeamDetailsPayload{
 		Team:           team,
@@ -944,6 +957,7 @@ func (s *teamService) GetTeam(userID, teamID int) (*TeamDetailsPayload, error) {
 		Members:        members,
 		Tasks:          teamTaskPayloads(tasks),
 		Events:         teamEventPayloads(events),
+		WorkItems:      teamWorkItemPayloads(workItems),
 	}, nil
 }
 
@@ -1710,7 +1724,7 @@ func teamCollaborationGuidance(communicationMode string) string {
 	case teamCommunicationModeFullMesh:
 		return "Collaboration mode: full_mesh. Team members coordinate directly with each other while preserving rootTaskId/rootMessageId context, shared artifacts under CLAWMANAGER_TEAM_SHARED_DIR, and final user-facing synthesis. If a downstream owner is named, hand off to that exact member before completing your own step. Use direct member-to-member messages for parallel research, design, implementation, review, and verification. Wait for real addressed-member replies before continuing dependent work; do not simulate peer answers or label peer messages as user replies. Keep each peer exchange bounded, evidence based, and visible in the Team channel."
 	default:
-		return "Collaboration mode: leader_mediated. This is a strict hub-and-spoke workflow isolated from worker-direct flow. User root tasks enter through the Leader. If the user names a non-Leader member or role, the Leader must delegate to that exact member with team_send, wait for that member's real result, then synthesize the final answer. If the user gives a broad task without naming one member, the Leader must create a compact plan, decompose work by owner/member_id, send assignments, wait for required member results, verify them, and produce final synthesis. The Leader may answer directly only for self-contained control-plane or simple tasks that do not require a named worker or multi-member evidence. A dispatch, plan, or handoff is not a final result and must not close the root task. Workers execute only assignments addressed to them, preserve rootTaskId/rootMessageId and artifact paths, and report results or blockers back to the Leader. Workers must not hand off directly to other workers. A worker completion never closes the user root task; only the Leader may finalize it after all required outputs are reconciled."
+		return "Collaboration mode: leader_mediated. This is a strict hub-and-spoke workflow isolated from worker-direct flow. User root tasks enter through the Leader. If the user names a non-Leader member or role, the Leader must delegate to that exact member with team_send, wait for that member's real result, then synthesize the final answer. If the user gives a broad task without naming one member, the Leader must create a compact plan, decompose work by owner/member_id, send assignments, wait for required member results, verify them, and produce final synthesis. Every delegated assignment must carry a stable workId and assignmentId; reuse that workId for all progress, result, and review messages belonging to the assignment. The Leader may answer directly only for self-contained control-plane or simple tasks that do not require a named worker or multi-member evidence. A dispatch, plan, or handoff is not a final result and must not close the root task. Workers execute only assignments addressed to them, preserve rootTaskId/rootMessageId/workId and artifact paths, and report results or blockers back to the Leader. Workers must not hand off directly to other workers. A worker completion never closes the user root task; only the Leader may finalize it after all required outputs are reconciled."
 	}
 }
 
@@ -2286,15 +2300,28 @@ func (s *teamService) taskHasRecentActivity(team *models.Team, task *models.Team
 	}
 	for idx := range events {
 		event := events[idx]
+		// CreatedAt is assigned by ClawManager when the event is accepted. Runtime
+		// clocks can drift and must not keep a dead task alive or mark an active
+		// task stale merely because occurredAt arrived out of order.
 		eventTime := event.CreatedAt
-		if event.OccurredAt != nil && event.OccurredAt.After(eventTime) {
-			eventTime = *event.OccurredAt
-		}
 		if !eventTime.After(cutoff) {
 			continue
 		}
 		payload := teamEventPayloadMap(event)
 		if teamEventMatchesRootTask(event, payload, task) {
+			return true, nil
+		}
+	}
+	workItems, err := s.repo.ListWorkItemsByRootTaskID(task.ID)
+	if err != nil {
+		return false, err
+	}
+	for idx := range workItems {
+		item := workItems[idx]
+		if item.Status != models.TeamTaskStatusDispatched && item.Status != models.TeamTaskStatusRunning {
+			continue
+		}
+		if item.UpdatedAt.After(cutoff) {
 			return true, nil
 		}
 	}
@@ -2304,7 +2331,9 @@ func (s *teamService) taskHasRecentActivity(team *models.Team, task *models.Team
 	}
 	for idx := range members {
 		member := members[idx]
-		if member.CurrentTaskID == nil || *member.CurrentTaskID != task.ID {
+		ownsRootTask := member.CurrentTaskID != nil && *member.CurrentTaskID == task.ID
+		runtimeTracksRoot := member.RuntimeTaskID != nil && strings.TrimSpace(*member.RuntimeTaskID) == task.MessageID
+		if !ownsRootTask && !runtimeTracksRoot {
 			continue
 		}
 		if member.UpdatedAt.After(cutoff) {
@@ -2455,6 +2484,12 @@ func isTeamTaskCompletionSignal(eventType, status string, payload map[string]int
 	if isFailedTeamTaskEventStatus(status) || isDispatchOnlyCompletionPayload(payload) {
 		return false
 	}
+	if teamRedisProtocolVersion(payload) >= 2 {
+		return eventType == "task_completed" &&
+			isSuccessfulTeamTaskEventStatus(status) &&
+			isExplicitTeamTaskCompletion(payload) &&
+			hasStrictTeamCompletionEnvelope(payload)
+	}
 	if !hasAuthoritativeTeamCompletionPayload(eventType, status, payload) {
 		return false
 	}
@@ -2472,12 +2507,18 @@ func hasAuthoritativeTeamCompletionPayload(eventType, status string, payload map
 	if isDispatchOnlyCompletionPayload(payload) {
 		return false
 	}
-	if hasTeamTaskCompletionToolCall(payload) {
-		if !hasTeamCompletionResultBody(payload) {
+	source := strings.ToLower(strings.TrimSpace(eventString(payload, "completionSource", "completion_source")))
+	explicitCompletion := hasTeamTaskCompletionToolCall(payload) ||
+		source == teamTaskCompletionTool ||
+		eventBool(payload, "explicitCompletion", "explicit_completion", "rootTaskTerminal")
+	if !explicitCompletion {
+		return false
+	}
+	if step, ok := payload["collaborationStep"].(map[string]interface{}); ok {
+		switch strings.ToLower(strings.TrimSpace(eventString(step, "type"))) {
+		case "assignment", "progress", "ack", "peer_request":
 			return false
 		}
-		return isSuccessfulTeamTaskEventStatus(status) ||
-			eventBool(payload, "final", "isFinal", "complete", "completed", "taskCompleted", "rootTaskTerminal", "finalSynthesis")
 	}
 	if eventType != "task_completed" && eventType != "completion" && eventType != "task_failed" && eventType != "message_failed" {
 		return false
@@ -2485,10 +2526,7 @@ func hasAuthoritativeTeamCompletionPayload(eventType, status string, payload map
 	if !hasTeamCompletionResultBody(payload) {
 		return false
 	}
-	if status == "" {
-		return true
-	}
-	return isSuccessfulTeamTaskEventStatus(status)
+	return status == "" || isSuccessfulTeamTaskEventStatus(status)
 }
 
 func hasTeamCompletionResultBody(payload map[string]interface{}) bool {
@@ -2498,14 +2536,14 @@ func hasTeamCompletionResultBody(payload map[string]interface{}) bool {
 	if body := eventString(payload, "resultMarkdown", "result_markdown", "result", "answer"); body != "" {
 		return true
 	}
-	if summary := eventString(payload, "summary"); summary != "" && looksLikeFinalResultText(summary) {
+	if summary := eventString(payload, "summary"); summary != "" {
 		return true
 	}
 	if step, ok := payload["collaborationStep"].(map[string]interface{}); ok {
 		if body := eventString(step, "resultMarkdown", "result_markdown", "result", "answer"); body != "" {
 			return true
 		}
-		if summary := eventString(step, "summary"); summary != "" && looksLikeFinalResultText(summary) {
+		if summary := eventString(step, "summary"); summary != "" {
 			return true
 		}
 	}
@@ -2513,7 +2551,7 @@ func hasTeamCompletionResultBody(payload map[string]interface{}) bool {
 		if body := eventString(record, "resultMarkdown", "result_markdown", "result", "answer"); body != "" {
 			return true
 		}
-		if summary := eventString(record, "summary"); summary != "" && looksLikeFinalResultText(summary) {
+		if summary := eventString(record, "summary"); summary != "" {
 			return true
 		}
 	}
@@ -2523,6 +2561,16 @@ func hasTeamCompletionResultBody(payload map[string]interface{}) bool {
 func isTeamTaskFailureSignal(eventType, status string, payload map[string]interface{}) bool {
 	if isSuccessfulTeamTaskEventStatus(status) || isNonAuthoritativeDispatchFailure(eventType, payload) {
 		return false
+	}
+	if teamRedisProtocolVersion(payload) >= 2 {
+		if eventType != "task_failed" {
+			return false
+		}
+		source := strings.ToLower(strings.TrimSpace(eventString(payload, "completionSource", "completion_source")))
+		if source != teamTaskCompletionTool && source != "runtime_error" && source != "runtime_processing" {
+			return false
+		}
+		return hasStrictTeamFailureEnvelope(payload)
 	}
 	switch eventType {
 	case "task_failed", "message_failed":
@@ -2537,6 +2585,80 @@ func isTeamTaskFailureSignal(eventType, status string, payload map[string]interf
 	default:
 		return false
 	}
+}
+
+func hasStrictTeamFailureEnvelope(payload map[string]interface{}) bool {
+	if payload == nil {
+		return false
+	}
+	for _, keys := range [][]string{
+		{"eventId", "event_id"},
+		{"completionId", "completion_id"},
+		{"taskId", "task_id"},
+		{"rootTaskId", "root_task_id"},
+		{"memberId", "member_id"},
+		{"summary"},
+	} {
+		if eventString(payload, keys...) == "" {
+			return false
+		}
+	}
+	return len(explicitTeamArtifactReferences(payload)) > 0
+}
+
+func teamRedisProtocolVersion(payload map[string]interface{}) int {
+	if payload == nil {
+		return 1
+	}
+	if version := eventInt(payload, "protocolVersion"); version > 0 {
+		return version
+	}
+	if version := eventInt(payload, "protocol_version"); version > 0 {
+		return version
+	}
+	return 1
+}
+
+func isExplicitTeamTaskCompletion(payload map[string]interface{}) bool {
+	if payload == nil || eventString(payload, "completionId", "completion_id") == "" {
+		return false
+	}
+	if !eventBool(payload, "explicitCompletion", "explicit_completion") {
+		return false
+	}
+	return strings.EqualFold(
+		strings.TrimSpace(eventString(payload, "completionSource", "completion_source")),
+		teamTaskCompletionTool,
+	)
+}
+
+func hasStrictTeamCompletionEnvelope(payload map[string]interface{}) bool {
+	if payload == nil || !hasTeamCompletionResultBody(payload) {
+		return false
+	}
+	for _, keys := range [][]string{
+		{"eventId", "event_id"},
+		{"completionId", "completion_id"},
+		{"taskId", "task_id"},
+		{"rootTaskId", "root_task_id"},
+		{"memberId", "member_id"},
+		{"summary"},
+		{"resultMarkdown", "result_markdown"},
+	} {
+		if eventString(payload, keys...) == "" {
+			return false
+		}
+	}
+	refs := explicitTeamArtifactReferences(payload)
+	return len(refs) > 0
+}
+
+func (s *teamService) hasAcceptedTeamCompletionID(teamID int, completionID string) (bool, error) {
+	completionID = strings.TrimSpace(completionID)
+	if s == nil || completionID == "" {
+		return false, nil
+	}
+	return s.repo.EventExistsByCompletionID(teamID, completionID)
 }
 
 func isUnauthoritativeCompletionEvent(eventType string, completion, failure bool) bool {
@@ -2695,6 +2817,24 @@ func isLeaderMediatedLeaderDispatchOnlyMessage(team *models.Team, eventType stri
 
 func (s *teamService) leaderMediatedRootCompletionReady(team *models.Team, task *models.TeamTask, member *models.TeamMember) (bool, error) {
 	if !isLeaderMediatedTeam(team) || task == nil || member == nil || member.ID != task.TargetMemberID || !isLeaderTeamMember(member) {
+		return true, nil
+	}
+	workItems, err := s.repo.ListWorkItemsByRootTaskID(task.ID)
+	if err != nil {
+		return false, err
+	}
+	hasAssignments := false
+	for idx := range workItems {
+		item := workItems[idx]
+		if item.OwnerMemberID == nil || *item.OwnerMemberID == member.ID || item.WorkID == "leader-final-synthesis" {
+			continue
+		}
+		hasAssignments = true
+		if item.Status != models.TeamTaskStatusSucceeded {
+			return false, nil
+		}
+	}
+	if hasAssignments {
 		return true, nil
 	}
 	events, err := s.repo.ListEventsByTeamID(team.ID, 500)
@@ -3055,6 +3195,12 @@ func (s *teamService) projectTeamEvent(team *models.Team, bus *redisBus, message
 		return err
 	}
 	payload := mergeRedisEventPayload(message.Fields)
+	eventID := eventString(payload, "eventId", "event_id")
+	if eventID != "" {
+		if exists, err := s.repo.EventExistsByEventID(team.ID, eventID); err != nil || exists {
+			return err
+		}
+	}
 	eventType := eventString(payload, "event_type", "event", "type")
 	if eventType == "" {
 		eventType = "message"
@@ -3217,6 +3363,18 @@ func (s *teamService) projectTeamEvent(team *models.Team, bus *redisBus, message
 			eventSignalsFailure = false
 		}
 	}
+	if (eventSignalsCompletion || eventSignalsFailure) && teamRedisProtocolVersion(payload) >= 2 {
+		duplicate, err := s.hasAcceptedTeamCompletionID(
+			team.ID,
+			eventString(payload, "completionId", "completion_id"),
+		)
+		if err != nil {
+			return err
+		}
+		if duplicate {
+			return nil
+		}
+	}
 	memberTerminalOnly := task != nil &&
 		member != nil &&
 		member.ID != task.TargetMemberID &&
@@ -3239,6 +3397,15 @@ func (s *teamService) projectTeamEvent(team *models.Team, bus *redisBus, message
 		RedisStreamID: &streamID,
 		OccurredAt:    eventTime(payload),
 	}
+	if eventID != "" {
+		event.EventID = &eventID
+	}
+	if eventSignalsCompletion || eventSignalsFailure {
+		completionID := eventString(payload, "completionId", "completion_id")
+		if completionID != "" {
+			event.CompletionID = &completionID
+		}
+	}
 	if member != nil {
 		event.MemberID = &member.ID
 	}
@@ -3249,6 +3416,12 @@ func (s *teamService) projectTeamEvent(team *models.Team, bus *redisBus, message
 		event.MessageID = &messageID
 	}
 	if err := s.repo.CreateEvent(event); err != nil {
+		if errors.Is(err, repository.ErrDuplicateTeamEvent) {
+			return nil
+		}
+		return err
+	}
+	if err := s.projectTeamWorkItem(team, task, member, eventType, payload, event); err != nil {
 		return err
 	}
 
@@ -3585,6 +3758,124 @@ func enrichTeamCollaborationStep(team *models.Team, eventType string, payload ma
 	}
 }
 
+func (s *teamService) projectTeamWorkItem(
+	team *models.Team,
+	task *models.TeamTask,
+	member *models.TeamMember,
+	eventType string,
+	payload map[string]interface{},
+	event *models.TeamEvent,
+) error {
+	if s == nil || team == nil || task == nil || payload == nil || event == nil {
+		return nil
+	}
+	step, _ := payload["collaborationStep"].(map[string]interface{})
+	stepType := eventString(step, "type")
+	if stepType == "" {
+		stepType = collaborationStepTypeForEvent(eventType, payload)
+	}
+	if stepType == "" || stepType == "warning" {
+		return nil
+	}
+	explicitWorkID := eventString(payload, "workId", "work_id", "assignmentId", "assignment_id", "subtaskId", "subtask_id")
+	// Transport acknowledgements and unscoped heartbeats are useful in the
+	// event log, but they are not business work and must not become Kanban
+	// cards. A progress event is materialized only when the orchestrator gave
+	// it a stable work identifier.
+	if stepType == "ack" || (stepType == "progress" && explicitWorkID == "") {
+		return nil
+	}
+	actor := eventString(step, "actor")
+	target := eventString(step, "target")
+	if actor == "" {
+		actor = collaborationActorKey(payload, member)
+	}
+	if target == "" {
+		target = leaderMediatedRouteTarget(payload)
+	}
+	ownerKey := actor
+	if stepType == "assignment" && target != "" {
+		ownerKey = target
+	}
+	rootCompletion := isLeaderTeamMember(member) && isTeamTaskCompletionSignal(eventType, normalizedTeamTaskEventStatus(payload), payload)
+	if rootCompletion {
+		ownerKey = member.MemberKey
+		stepType = "final_synthesis"
+	}
+	ownerKey = normalizeTeamMemberRouteKey(ownerKey)
+	if ownerKey == "" || ownerKey == "system" || ownerKey == "clawmanager" {
+		return nil
+	}
+	owner := member
+	if owner == nil || !teamMemberRouteEquivalent(owner.MemberKey, ownerKey) {
+		found, err := s.repo.GetMemberByTeamKey(team.ID, ownerKey)
+		if err != nil {
+			return err
+		}
+		owner = found
+	}
+	workID := explicitWorkID
+	if workID == "" {
+		if rootCompletion {
+			workID = "leader-final-synthesis"
+		} else {
+			workID = "member-" + normalizeTeamMemberRouteKey(ownerKey)
+		}
+	}
+	status := models.TeamTaskStatusRunning
+	switch stepType {
+	case "assignment":
+		status = models.TeamTaskStatusDispatched
+	case "ack", "progress", "peer_request", "peer_reply":
+		status = models.TeamTaskStatusRunning
+	case "result", "final_synthesis":
+		status = models.TeamTaskStatusSucceeded
+	case "blocker":
+		status = models.TeamTaskStatusFailed
+	}
+	now := event.CreatedAt
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	title := eventString(step, "title")
+	if title == "" {
+		title = collaborationStepTitle(stepType, actor, target, payload)
+	}
+	item := &models.TeamWorkItem{
+		TeamID:     team.ID,
+		RootTaskID: task.ID,
+		WorkID:     workID,
+		Title:      title,
+		Status:     status,
+		UpdatedAt:  now,
+	}
+	if owner != nil {
+		item.OwnerMemberID = &owner.ID
+	}
+	if status == models.TeamTaskStatusRunning {
+		item.StartedAt = &now
+	}
+	if status == models.TeamTaskStatusSucceeded || status == models.TeamTaskStatusFailed {
+		item.FinishedAt = &now
+		if encoded, err := marshalOptionalJSON(payload); err == nil {
+			item.ResultJSON = encoded
+		}
+		if refs := explicitTeamArtifactReferences(payload); len(refs) > 0 {
+			if encoded, err := json.Marshal(refs); err == nil {
+				value := string(encoded)
+				item.ArtifactRefsJSON = &value
+			}
+		}
+	}
+	if dependencies := normalizeContextRefs(step["dependsOn"]); len(dependencies) > 0 {
+		if encoded, err := json.Marshal(dependencies); err == nil {
+			value := string(encoded)
+			item.DependsOnJSON = &value
+		}
+	}
+	return s.repo.UpsertWorkItem(item)
+}
+
 func normalizeExistingCollaborationStep(step map[string]interface{}, team *models.Team, eventType string, payload map[string]interface{}, member *models.TeamMember, task *models.TeamTask) {
 	if eventBool(payload, "leaderMediatedRouteViolation", "leader_mediated_route_violation") {
 		step["type"] = "warning"
@@ -3669,7 +3960,7 @@ func collaborationStepTypeForEvent(eventType string, payload map[string]interfac
 	if eventBool(payload, "leaderDispatchOnly", "leader_dispatch_only") {
 		return "assignment"
 	}
-	if isSuccessfulTeamTaskEventStatus(status) {
+	if isTeamTaskCompletionSignal(eventType, status, payload) {
 		return "result"
 	}
 	if isNonAuthoritativeDispatchFailure(eventType, payload) {
@@ -3689,10 +3980,7 @@ func collaborationStepTypeForEvent(eventType string, payload map[string]interfac
 	case "task_started", "task_progress", "progress":
 		return "progress"
 	case "task_completed", "completion":
-		if !isTeamTaskCompletionSignal(eventType, status, payload) {
-			return "progress"
-		}
-		return "result"
+		return "progress"
 	case "task_failed", "message_failed", "task_stale":
 		if !isTeamTaskFailureSignal(eventType, status, payload) && eventType != "task_stale" {
 			return "warning"
@@ -3749,9 +4037,6 @@ func collaborationStepStatusForEvent(eventType string, payload map[string]interf
 	case "task_received":
 		return "acknowledged"
 	case "task_started", "task_progress", "progress", "reply", "peer_reply":
-		if progress := eventInt(payload, "progress"); progress >= 100 {
-			return models.TeamTaskStatusSucceeded
-		}
 		return models.TeamTaskStatusRunning
 	case "message_warning":
 		return "warning"
@@ -3858,16 +4143,15 @@ func looksLikeOpaqueRuntimeTaskID(value string) bool {
 	return regexp.MustCompile(`^(task[-_][a-z0-9-]+|team-\d+-task-\d+)$`).MatchString(strings.ToLower(normalized))
 }
 
-func normalizeFinalReplyTaskEvent(eventType string, payload map[string]interface{}, task *models.TeamTask, member *models.TeamMember) string {
+func normalizeFinalReplyTaskEvent(eventType string, payload map[string]interface{}, task *models.TeamTask, _ *models.TeamMember) string {
 	if task == nil || !strings.EqualFold(strings.TrimSpace(eventType), "reply") {
 		return eventType
 	}
 	hasCompletionTool := hasTeamTaskCompletionToolCall(payload)
-	hasImplicitDirectCompletion := isImplicitDirectTaskCompletionReply(task, member, payload)
-	if !hasCompletionTool && !hasImplicitDirectCompletion {
+	if !hasCompletionTool {
 		return eventType
 	}
-	if hasCompletionTool && !eventBool(payload, "final", "isFinal", "complete", "completed", "taskCompleted") {
+	if !eventBool(payload, "final", "isFinal", "complete", "completed", "taskCompleted") {
 		return eventType
 	}
 	if !teamEventHasBody(payload) {
@@ -4194,6 +4478,10 @@ func (s *teamService) missingTeamArtifactReferences(team *models.Team, payload m
 	}
 	refs := collectTeamArtifactReferences(payload)
 	invalidRelativeRefs := collectInvalidRelativeTeamArtifactReferences(payload)
+	if teamRedisProtocolVersion(payload) >= 2 {
+		refs = explicitTeamArtifactReferences(payload)
+		invalidRelativeRefs = nil
+	}
 	if len(refs) == 0 && len(invalidRelativeRefs) == 0 {
 		return nil
 	}
@@ -4217,13 +4505,49 @@ func (s *teamService) missingTeamArtifactReferences(team *models.Team, payload m
 			continue
 		}
 		seen[ref] = struct{}{}
-		if _, err := os.Stat(target); err != nil {
+		if info, err := os.Stat(target); err != nil {
 			if os.IsNotExist(err) {
 				missing = append(missing, ref)
 			}
+		} else if !info.Mode().IsRegular() {
+			missing = append(missing, ref)
 		}
 	}
 	return missing
+}
+
+func explicitTeamArtifactReferences(payload map[string]interface{}) []string {
+	if payload == nil {
+		return nil
+	}
+	value, ok := payload["artifactRefs"]
+	if !ok {
+		value = payload["artifact_refs"]
+	}
+	refs := make([]string, 0)
+	seen := map[string]struct{}{}
+	appendRef := func(raw interface{}) {
+		ref := strings.TrimSpace(fmt.Sprintf("%v", raw))
+		if !strings.HasPrefix(ref, teamSharedMountPath+"/") || strings.ContainsAny(ref, "`\"'{}[]") {
+			return
+		}
+		if _, exists := seen[ref]; exists {
+			return
+		}
+		seen[ref] = struct{}{}
+		refs = append(refs, ref)
+	}
+	switch typed := value.(type) {
+	case []interface{}:
+		for _, item := range typed {
+			appendRef(item)
+		}
+	case []string:
+		for _, item := range typed {
+			appendRef(item)
+		}
+	}
+	return refs
 }
 
 func collectTeamArtifactReferences(value interface{}) []string {
@@ -4423,6 +4747,24 @@ func teamEventPayloads(events []models.TeamEvent) []TeamEventPayload {
 		payload := TeamEventPayload{TeamEvent: event}
 		if event.PayloadJSON != nil && strings.TrimSpace(*event.PayloadJSON) != "" {
 			_ = json.Unmarshal([]byte(*event.PayloadJSON), &payload.Payload)
+		}
+		result = append(result, payload)
+	}
+	return result
+}
+
+func teamWorkItemPayloads(items []models.TeamWorkItem) []TeamWorkItemPayload {
+	result := make([]TeamWorkItemPayload, 0, len(items))
+	for _, item := range items {
+		payload := TeamWorkItemPayload{TeamWorkItem: item}
+		if item.DependsOnJSON != nil && strings.TrimSpace(*item.DependsOnJSON) != "" {
+			_ = json.Unmarshal([]byte(*item.DependsOnJSON), &payload.DependsOn)
+		}
+		if item.ResultJSON != nil && strings.TrimSpace(*item.ResultJSON) != "" {
+			_ = json.Unmarshal([]byte(*item.ResultJSON), &payload.Result)
+		}
+		if item.ArtifactRefsJSON != nil && strings.TrimSpace(*item.ArtifactRefsJSON) != "" {
+			_ = json.Unmarshal([]byte(*item.ArtifactRefsJSON), &payload.ArtifactRefs)
 		}
 		result = append(result, payload)
 	}
