@@ -71,7 +71,7 @@ agent 至少支持以下环境变量：
 | `CLAWMANAGER_RUNTIME_TYPE` | runtime 类型，例如 `openclaw`、`hermes`。 |
 | `RUNTIME_WORKSPACE_ROOT` | workspace 根目录，默认 `/workspaces`。 |
 | `RUNTIME_GATEWAY_PORT_START` | gateway 端口起始值，默认 `20000`。 |
-| `RUNTIME_GATEWAY_PORT_END` | gateway 端口结束值，默认 `20099`。 |
+| `RUNTIME_GATEWAY_PORT_END` | gateway 端口结束值，默认 `20299`。 |
 | `RUNTIME_AGENT_CONTROL_TOKEN` | ClawManager 调 agent 控制接口使用。 |
 | `RUNTIME_AGENT_REPORT_TOKEN` | agent 上报 ClawManager 使用。 |
 | `CLAWMANAGER_BACKEND_URL` | ClawManager backend 内部地址，推荐 `http://clawmanager-gateway.clawmanager-system.svc.cluster.local:9001`。 |
@@ -108,7 +108,7 @@ Content-Type: application/json
   "workspace_path": "/workspaces/hermes/user-45/instance-123",
   "port_range": {
     "start": 20000,
-    "end": 20099
+    "end": 20299
   },
   "uid": 200123,
   "gid": 200123,

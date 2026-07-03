@@ -51,7 +51,7 @@ func TestBuildRuntimeDeployment(t *testing.T) {
 	requireEnv(t, container, "CLAWMANAGER_RUNTIME_TYPE", "openclaw")
 	requireEnv(t, container, "CLAWMANAGER_AGENT_PORT", "19090")
 	requireEnv(t, container, "CLAWMANAGER_GATEWAY_PORT_START", "20000")
-	requireEnv(t, container, "CLAWMANAGER_GATEWAY_PORT_END", "20099")
+	requireEnv(t, container, "CLAWMANAGER_GATEWAY_PORT_END", "20299")
 	requireEnv(t, container, "CLAWMANAGER_AGENT_CONTROL_TOKEN", "control-secret")
 	requireEnv(t, container, "CLAWMANAGER_AGENT_REPORT_TOKEN", "report-secret")
 

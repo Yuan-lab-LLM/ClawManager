@@ -435,6 +435,9 @@ func (r *runtimePoolHandlerBindingRepo) DeleteByInstanceID(ctx context.Context, 
 func (r *runtimePoolHandlerBindingRepo) DeleteByInstanceIDAndReleaseSlot(ctx context.Context, instanceID int, runtimePodID int64) error {
 	return nil
 }
+func (r *runtimePoolHandlerBindingRepo) DeleteRunningByInstanceIDGenerationAndReleaseSlot(ctx context.Context, instanceID int, runtimePodID int64, generation int) (bool, error) {
+	return false, nil
+}
 
 type runtimePoolHandlerRolloutRepo struct {
 	created *models.RuntimeRollout

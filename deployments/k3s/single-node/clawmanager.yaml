@@ -1368,7 +1368,7 @@ spec:
             - name: RUNTIME_GATEWAY_PORT_START
               value: "20000"
             - name: RUNTIME_GATEWAY_PORT_END
-              value: "20099"
+              value: "20299"
             - name: RUNTIME_SCHEDULER_ENABLED
               value: "true"
             - name: RUNTIME_HEARTBEAT_TIMEOUT
@@ -1465,7 +1465,7 @@ spec:
             - name: RUNTIME_GATEWAY_PORT_START
               value: "20000"
             - name: RUNTIME_GATEWAY_PORT_END
-              value: "20099"
+              value: "20299"
             - name: RUNTIME_AGENT_LISTEN_ADDR
               value: "0.0.0.0:19090"
             - name: RUNTIME_AGENT_PUBLIC_PORT
@@ -1552,7 +1552,7 @@ spec:
             - name: CLAWMANAGER_GATEWAY_PORT_START
               value: "20000"
             - name: CLAWMANAGER_GATEWAY_PORT_END
-              value: "20099"
+              value: "20299"
             - name: HERMES_TUI_DIR
               value: /usr/local/lib/hermes-agent/ui-tui
             - name: CLAWMANAGER_AGENT_CONTROL_TOKEN
@@ -1574,7 +1574,7 @@ spec:
             - name: RUNTIME_GATEWAY_PORT_START
               value: "20000"
             - name: RUNTIME_GATEWAY_PORT_END
-              value: "20099"
+              value: "20299"
             - name: RUNTIME_AGENT_CONTROL_TOKEN
               valueFrom:
                 secretKeyRef:

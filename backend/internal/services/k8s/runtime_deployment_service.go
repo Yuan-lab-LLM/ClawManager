@@ -25,7 +25,7 @@ const (
 	runtimeWorkspaceVolume        = "workspaces"
 	defaultWorkspaceMount         = "/workspaces"
 	defaultGatewayPortStart       = 20000
-	defaultGatewayPortEnd         = 20099
+	defaultGatewayPortEnd         = 20299
 	hermesTUIDir                  = "/usr/local/lib/hermes-agent/ui-tui"
 )
 

@@ -22,6 +22,7 @@ type InstanceRuntimeBindingRepository interface {
 	UpdateState(ctx context.Context, instanceID int, generation int, state string, message *string) error
 	DeleteByInstanceID(ctx context.Context, instanceID int) error
 	DeleteByInstanceIDAndReleaseSlot(ctx context.Context, instanceID int, runtimePodID int64) error
+	DeleteRunningByInstanceIDGenerationAndReleaseSlot(ctx context.Context, instanceID int, runtimePodID int64, generation int) (bool, error)
 }
 
 type instanceRuntimeBindingRepository struct {
@@ -210,4 +211,37 @@ func (r *instanceRuntimeBindingRepository) DeleteByInstanceIDAndReleaseSlot(ctx 
 		}
 		return nil
 	}, nil)
+}
+
+func (r *instanceRuntimeBindingRepository) DeleteRunningByInstanceIDGenerationAndReleaseSlot(ctx context.Context, instanceID int, runtimePodID int64, generation int) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	deleted := false
+	err := r.sess.TxContext(ctx, func(tx db.Session) error {
+		res, err := tx.SQL().ExecContext(ctx, `
+			DELETE FROM instance_runtime_bindings
+			WHERE instance_id = ? AND runtime_pod_id = ? AND generation = ? AND state = 'running'
+		`, instanceID, runtimePodID, generation)
+		if err != nil {
+			return fmt.Errorf("failed to delete current running instance runtime binding: %w", err)
+		}
+		affected, err := res.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("failed to inspect current running instance runtime binding delete: %w", err)
+		}
+		if affected == 0 {
+			return nil
+		}
+		if _, err := tx.SQL().ExecContext(ctx, `
+			UPDATE runtime_pods
+			SET used_slots = CASE WHEN used_slots > 0 THEN used_slots - 1 ELSE 0 END, updated_at = ?
+			WHERE id = ?
+		`, time.Now().UTC(), runtimePodID); err != nil {
+			return fmt.Errorf("failed to release runtime pod slot: %w", err)
+		}
+		deleted = true
+		return nil
+	}, nil)
+	return deleted, err
 }

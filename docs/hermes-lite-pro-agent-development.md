@@ -24,7 +24,7 @@
 | ClawManager 调 agent | `GET /v1/health`、`POST /v1/gateways`、`DELETE /v1/gateways/{id}`、`POST /v1/drain` | 不适用 |
 | agent 上报 ClawManager | `/api/v1/runtime-agent/*` | `/api/v1/agent/*` |
 | 用户实例进程 | 每个 Lite 实例是一个 gateway 子进程 | 整个桌面容器就是实例 |
-| 用户访问端口 | agent 分配 `20000-20099` 中的 gateway 端口 | Webtop/KasmVNC `3001` |
+| 用户访问端口 | agent 分配 `20000-20299` 中的 gateway 端口 | Webtop/KasmVNC `3001` |
 | workspace | `/workspaces/hermes/user-{user_id}/instance-{instance_id}` | `/config/.hermes` |
 | 典型实现参考 | 按 OpenClaw Lite 的 Runtime Pod Agent V2 做 | 按当前 Hermes Webtop guide 做 |
 
@@ -56,7 +56,7 @@ Lite agent 是共享 Pod 内的控制进程，不是某个用户实例内部的 
 - 校验 `X-ClawManager-Control-Token: ${CLAWMANAGER_AGENT_CONTROL_TOKEN}`。
 - 实现 `GET /v1/health`、`POST /v1/gateways`、`DELETE /v1/gateways/{gateway_id}`、`POST /v1/drain`。
 - 向 `${CLAWMANAGER_BACKEND_URL}/api/v1/runtime-agent/*` 注册、heartbeat、metrics、gateway 状态和 skill inventory。
-- 管理本 Pod 内多个 Hermes gateway 子进程，端口默认从 `20000-20099` 分配。
+- 管理本 Pod 内多个 Hermes gateway 子进程，端口默认从 `20000-20299` 分配。
 - 按 `instance_id + generation` 做幂等创建，重复请求不能启动多个进程。
 - `POST /v1/gateways` 必须快速返回 `starting`，后台继续启动和健康检查。
 - gateway 健康后再上报 `running`；缺少 LLM token、workspace 越权、端口冲突或 Hermes 配置失败时上报 `error`。
@@ -96,7 +96,7 @@ Content-Type: application/json
   "agent_type": "hermes",
   "workspace_path": "/workspaces/hermes/user-45/instance-123",
   "gateway_port_start": 20000,
-  "gateway_port_end": 20099,
+  "gateway_port_end": 20299,
   "uid": 200123,
   "gid": 200123,
   "environment": {
@@ -217,7 +217,7 @@ Hermes Pro 验收：
 | 错误 | 正确做法 |
 | --- | --- |
 | 只实现 Pro instance agent，然后期望 Lite 可用 | Lite 必须实现 Runtime Pod Agent V2 |
-| Lite agent 监听 `3001` | Lite agent 监听 `19090`，gateway 子进程监听 `20000-20099` |
+| Lite agent 监听 `3001` | Lite agent 监听 `19090`，gateway 子进程监听 `20000-20299` |
 | Lite 所有实例共用 `/config/.hermes` | Lite 每个实例使用自己的 `/workspaces/hermes/user-{uid}/instance-{id}` |
 | `POST /v1/gateways` 阻塞到 Hermes gateway 完全启动 | 快速返回 `starting`，后台健康检查后上报 `running` |
 | 重试 create 时启动多个 gateway | 按 `instance_id + generation` 幂等 |

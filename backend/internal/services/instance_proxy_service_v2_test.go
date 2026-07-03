@@ -94,6 +94,12 @@ func TestInstanceProxyServiceInjectsInstanceTokenForHermesLite(t *testing.T) {
 		if got := r.Header.Get("Authorization"); got != "Bearer "+instanceToken {
 			t.Fatalf("Authorization = %q", got)
 		}
+		if got := r.Header.Get("X-Api-Key"); got != instanceToken {
+			t.Fatalf("X-Api-Key = %q", got)
+		}
+		if got := r.Header.Get("X-ClawManager-Instance-Token"); got != instanceToken {
+			t.Fatalf("X-ClawManager-Instance-Token = %q", got)
+		}
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	}))
@@ -139,6 +145,7 @@ func TestInstanceProxyServiceInjectsInstanceTokenForHermesLite(t *testing.T) {
 	service.httpClient = upstream.Client()
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/instances/127/proxy/chat?token="+url.QueryEscape(token.Token), nil)
+	req.Header.Set("X-Api-Key", "stale-session-key")
 	rec := httptest.NewRecorder()
 
 	if err := service.ProxyRequest(req.Context(), 127, token.Token, rec, req); err != nil {
@@ -284,6 +291,94 @@ func TestInstanceProxyServicePreservesHermesRuntimeQueryToken(t *testing.T) {
 	}
 }
 
+func TestInstanceProxyServiceStripsStaleHermesGatewayQueryToken(t *testing.T) {
+	instanceToken := "igt_hermes_instance"
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/ws" {
+			t.Fatalf("unexpected upstream path %s", r.URL.Path)
+		}
+		if got := r.URL.RawQuery; got != "" {
+			t.Fatalf("upstream query = %q, want empty", got)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer "+instanceToken {
+			t.Fatalf("Authorization = %q", got)
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer upstream.Close()
+
+	podIP, gatewayPort := splitURLHostPortForProxyTest(t, upstream.URL)
+	workspacePath := "/workspaces/hermes/user-45/instance-132"
+	instanceRepo := newV2LifecycleInstanceRepo()
+	instanceRepo.byID[132] = &models.Instance{
+		ID:                132,
+		UserID:            45,
+		Type:              "hermes",
+		RuntimeType:       "gateway",
+		InstanceMode:      InstanceModeLite,
+		Status:            "running",
+		AccessToken:       &instanceToken,
+		WorkspacePath:     &workspacePath,
+		RuntimeGeneration: 5,
+	}
+	bindingRepo := newFakeRuntimeBindingRepo()
+	bindingRepo.bindings[132] = &models.InstanceRuntimeBinding{
+		InstanceID:   132,
+		RuntimePodID: 15,
+		GatewayPort:  gatewayPort,
+		State:        "running",
+		Generation:   5,
+	}
+	podRepo := &fakeRuntimePodRepo{
+		pods: map[int64]*models.RuntimePod{
+			15: {ID: 15, PodIP: &podIP, State: "ready"},
+		},
+	}
+	accessService := NewInstanceAccessService()
+	defer accessService.Stop()
+	accessToken, err := accessService.GenerateToken(45, 132, "hermes", "/api/v1/instances/132/proxy/chat/", "", 3000, time.Hour)
+	if err != nil {
+		t.Fatalf("GenerateToken returned error: %v", err)
+	}
+	service := NewInstanceProxyService(accessService)
+	service.instanceRepo = instanceRepo
+	service.bindingRepo = bindingRepo
+	service.runtimePodRepo = podRepo
+	service.httpClient = upstream.Client()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/instances/132/proxy/api/ws?token=igt_stale_gateway", nil)
+	rec := httptest.NewRecorder()
+
+	if err := service.ProxyRequest(req.Context(), 132, accessToken.Token, rec, req); err != nil {
+		t.Fatalf("ProxyRequest returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK || rec.Body.String() != "ok" {
+		t.Fatalf("unexpected proxy response %d %q", rec.Code, rec.Body.String())
+	}
+}
+
+func TestInstanceProxyServiceStripsStaleProxyAccessTokenQuery(t *testing.T) {
+	accessService := NewInstanceAccessService()
+	defer accessService.Stop()
+	currentToken, err := accessService.GenerateToken(45, 133, "hermes", "/api/v1/instances/133/proxy/chat/", "", 3000, time.Hour)
+	if err != nil {
+		t.Fatalf("GenerateToken current returned error: %v", err)
+	}
+	oldToken, err := accessService.GenerateToken(45, 133, "hermes", "/api/v1/instances/133/proxy/chat/", "", 3000, time.Hour)
+	if err != nil {
+		t.Fatalf("GenerateToken old returned error: %v", err)
+	}
+	service := NewInstanceProxyService(accessService)
+	query := url.Values{"token": []string{oldToken.Token, "hermes-session-token"}}
+
+	service.removeProxyAccessTokenQuery(query, currentToken.Token, "igt_hermes_instance")
+
+	got := query["token"]
+	if len(got) != 1 || got[0] != "hermes-session-token" {
+		t.Fatalf("token query = %#v, want only Hermes session token", got)
+	}
+}
 func TestInstanceProxyServiceRewritesHermesLiteHTMLBase(t *testing.T) {
 	instanceToken := "igt_hermes_instance"
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

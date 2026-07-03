@@ -18,9 +18,12 @@ const (
 	RuntimeBackendShell   = "shell"
 
 	RuntimeGatewayPortStart = 20000
-	RuntimeGatewayPortEnd   = 20099
 	RuntimePodCapacity      = 100
-	RuntimeLinuxIDBase      = 200000
+	// OpenClaw gateway slots reserve adjacent service ports in addition to the
+	// public gateway port. Capacity is instance count, not raw port count.
+	RuntimeGatewayPortsPerInstance = 3
+	RuntimeGatewayPortEnd          = RuntimeGatewayPortStart + RuntimePodCapacity*RuntimeGatewayPortsPerInstance - 1
+	RuntimeLinuxIDBase             = 200000
 )
 
 func NormalizeV2RuntimeType(instanceType string) (string, bool) {

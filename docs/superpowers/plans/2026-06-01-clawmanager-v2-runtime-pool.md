@@ -115,7 +115,7 @@ Gateway create request:
   "user_id": 45,
   "agent_type": "openclaw",
   "workspace_path": "/workspaces/openclaw/user-45/instance-123",
-  "port_range": { "start": 20000, "end": 20099 },
+  "port_range": { "start": 20000, "end": 20299 },
   "uid": 200123,
   "gid": 200123,
   "cpu_cores": 2,
@@ -136,7 +136,7 @@ Gateway create response:
 }
 ```
 
-The agent must allocate a free port inside `20000-20099`, enforce one Linux UID/GID per instance using `200000 + instance_id`, apply cgroup CPU/memory limits, enforce workspace quota, reject symlink escapes inside workspaces, report gateway health, and survive backend replica changes. During gray upgrade, `POST /v1/drain` must reject new gateways and continue reporting existing gateway health until ClawManager migrates them away.
+The agent must allocate a free port inside `20000-20299`, enforce one Linux UID/GID per instance using `200000 + instance_id`, apply cgroup CPU/memory limits, enforce workspace quota, reject symlink escapes inside workspaces, report gateway health, and survive backend replica changes. During gray upgrade, `POST /v1/drain` must reject new gateways and continue reporting existing gateway health until ClawManager migrates them away.
 
 ## Task 1: Schema, Models, And Repository Interfaces
 
@@ -670,7 +670,7 @@ func TestRuntimeAgentClientCreateGateway(t *testing.T) {
 		UserID:        8,
 		AgentType:     "openclaw",
 		WorkspacePath: "/workspaces/openclaw/user-8/instance-7",
-		PortRange:    RuntimeAgentPortRange{Start: 20000, End: 20099},
+		PortRange:    RuntimeAgentPortRange{Start: 20000, End: 20299},
 		UID:           200007,
 		GID:           200007,
 		CPUCores:      2,
@@ -931,7 +931,7 @@ const (
 	RuntimeTypeHermes   = "hermes"
 
 	RuntimeGatewayPortStart = 20000
-	RuntimeGatewayPortEnd   = 20099
+	RuntimeGatewayPortEnd   = 20299
 	RuntimePodCapacity      = 100
 	RuntimeLinuxIDBase      = 200000
 )
@@ -1133,7 +1133,7 @@ func BuildRuntimeDeployment(spec RuntimeDeploymentSpec) *appsv1.Deployment {
 							{Name: "CLAWMANAGER_RUNTIME_TYPE", Value: spec.RuntimeType},
 							{Name: "CLAWMANAGER_AGENT_PORT", Value: "19090"},
 							{Name: "CLAWMANAGER_GATEWAY_PORT_START", Value: "20000"},
-							{Name: "CLAWMANAGER_GATEWAY_PORT_END", Value: "20099"},
+							{Name: "CLAWMANAGER_GATEWAY_PORT_END", Value: "20299"},
 							{Name: "CLAWMANAGER_AGENT_CONTROL_TOKEN", Value: spec.AgentControlToken},
 							{Name: "CLAWMANAGER_AGENT_REPORT_TOKEN", Value: spec.AgentReportToken},
 						},
@@ -2867,7 +2867,7 @@ Add env:
 - name: RUNTIME_GATEWAY_PORT_START
   value: "20000"
 - name: RUNTIME_GATEWAY_PORT_END
-  value: "20099"
+  value: "20299"
 - name: RUNTIME_SCHEDULER_ENABLED
   value: "true"
 - name: RUNTIME_AGENT_CONTROL_TOKEN
@@ -2926,7 +2926,7 @@ spec:
             - name: CLAWMANAGER_GATEWAY_PORT_START
               value: "20000"
             - name: CLAWMANAGER_GATEWAY_PORT_END
-              value: "20099"
+              value: "20299"
           volumeMounts:
             - name: workspaces
               mountPath: /workspaces
@@ -3075,6 +3075,6 @@ Placeholder scan:
 Type consistency:
 - Runtime types are consistently `openclaw` and `hermes`.
 - Runtime Pod capacity is consistently 100.
-- Gateway port range is consistently `20000-20099`.
+- Gateway port range is consistently `20000-20299`.
 - Workspace paths are consistently `/workspaces/{runtime}/user-{user_id}/instance-{instance_id}`.
 - Runtime user and group IDs are consistently `200000 + instance_id`.
