@@ -47,6 +47,10 @@ export const skillService = {
     return response.data.data;
   },
 
+  listAvailableInstanceSkills: async (instanceId: number): Promise<Skill[]> => {
+    const response = await api.get(`/instances/${instanceId}/skills/available`);
+    return response.data.data;
+  },
   attachSkillToInstance: async (instanceId: number, skillId: number): Promise<InstanceSkill> => {
     const response = await api.post(`/instances/${instanceId}/skills`, { skill_id: skillId });
     return response.data.data;

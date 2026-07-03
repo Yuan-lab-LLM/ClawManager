@@ -125,6 +125,9 @@ func (s *workspaceFileService) List(ctx context.Context, scope WorkspaceFileScop
 	}
 	entries := make([]WorkspaceEntry, 0, len(items))
 	for _, item := range items {
+		if isWorkspaceTransientEntry(item.Name()) {
+			continue
+		}
 		itemInfo, infoErr := item.Info()
 		if infoErr != nil {
 			return nil, infoErr
@@ -468,6 +471,10 @@ func buildWorkspaceEntry(relativePath string, info os.FileInfo) WorkspaceEntry {
 		Previewable:  workspaceEntryPreviewable(info.Name(), info.Size(), isDir),
 		Downloadable: !isDir,
 	}
+}
+
+func isWorkspaceTransientEntry(name string) bool {
+	return name == ".tmp" || strings.HasPrefix(name, ".tmp-skill-")
 }
 
 func workspaceEntryPreviewable(name string, size int64, isDir bool) bool {

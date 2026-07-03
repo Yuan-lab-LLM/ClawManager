@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"clawreef/internal/models"
 )
@@ -639,4 +640,146 @@ func TestNormalizeOpenClawResourceContentPreservesFeishuSiblingAccounts(t *testi
 	if main["appSecret"] != "main_sec" {
 		t.Fatalf("expected accounts.main.appSecret normalized to main_sec, got %v", main["appSecret"])
 	}
+}
+
+func TestPlanWithoutTeamMemberLeaderOnlyChannelsFiltersAllChannels(t *testing.T) {
+	service := &openClawConfigService{
+		repo: &openClawConfigRepositoryStub{
+			resourcesByID: map[int]*models.OpenClawConfigResource{
+				1: openClawConfigTestResource(1, 9, OpenClawConfigResourceTypeChannel, "dingtalk-connector"),
+				2: openClawConfigTestResource(2, 9, OpenClawConfigResourceTypeChannel, "wecom"),
+				3: openClawConfigTestResource(3, 9, OpenClawConfigResourceTypeChannel, "feishu"),
+				4: openClawConfigTestResource(4, 9, OpenClawConfigResourceTypeSkill, "review-skill"),
+			},
+		},
+	}
+
+	plan := &OpenClawConfigPlan{
+		Mode:        OpenClawConfigPlanModeManual,
+		ResourceIDs: []int{1, 2, 3, 4},
+	}
+	filtered, err := service.PlanWithoutTeamMemberLeaderOnlyChannels(9, plan)
+	if err != nil {
+		t.Fatalf("PlanWithoutTeamMemberLeaderOnlyChannels returned error: %v", err)
+	}
+	if filtered == nil {
+		t.Fatalf("expected non-channel resources to remain")
+	}
+	if filtered.Mode != OpenClawConfigPlanModeManual || !reflect.DeepEqual(filtered.ResourceIDs, []int{4}) {
+		t.Fatalf("unexpected filtered plan: %#v", filtered)
+	}
+	if !reflect.DeepEqual(plan.ResourceIDs, []int{1, 2, 3, 4}) {
+		t.Fatalf("expected original plan to remain unchanged, got %#v", plan.ResourceIDs)
+	}
+
+	channelsOnly, err := service.PlanWithoutTeamMemberLeaderOnlyChannels(9, &OpenClawConfigPlan{
+		Mode:        OpenClawConfigPlanModeManual,
+		ResourceIDs: []int{1, 2, 3},
+	})
+	if err != nil {
+		t.Fatalf("channels-only filtering returned error: %v", err)
+	}
+	if channelsOnly != nil {
+		t.Fatalf("expected channels-only worker plan to be nil, got %#v", channelsOnly)
+	}
+}
+
+func openClawConfigTestResource(id, userID int, resourceType, resourceKey string) *models.OpenClawConfigResource {
+	return &models.OpenClawConfigResource{
+		ID:           id,
+		UserID:       userID,
+		ResourceType: resourceType,
+		ResourceKey:  resourceKey,
+		Name:         resourceKey,
+		Enabled:      true,
+		Version:      1,
+		ContentJSON:  `{"schemaVersion":1,"kind":"` + resourceType + `","format":"test@v1","dependsOn":[],"config":{}}`,
+	}
+}
+
+type openClawConfigRepositoryStub struct {
+	resourcesByID map[int]*models.OpenClawConfigResource
+}
+
+func (s *openClawConfigRepositoryStub) ListResources(userID int, resourceType string) ([]models.OpenClawConfigResource, error) {
+	return nil, nil
+}
+
+func (s *openClawConfigRepositoryStub) GetResourceByID(id int) (*models.OpenClawConfigResource, error) {
+	if s.resourcesByID == nil {
+		return nil, nil
+	}
+	return s.resourcesByID[id], nil
+}
+
+func (s *openClawConfigRepositoryStub) GetResourceByUserTypeKey(userID int, resourceType, resourceKey string) (*models.OpenClawConfigResource, error) {
+	return nil, nil
+}
+
+func (s *openClawConfigRepositoryStub) CreateResource(resource *models.OpenClawConfigResource) error {
+	return nil
+}
+
+func (s *openClawConfigRepositoryStub) UpdateResource(resource *models.OpenClawConfigResource) error {
+	return nil
+}
+
+func (s *openClawConfigRepositoryStub) DeleteResource(id int) error { return nil }
+
+func (s *openClawConfigRepositoryStub) ListBundles(userID int) ([]models.OpenClawConfigBundle, error) {
+	return nil, nil
+}
+
+func (s *openClawConfigRepositoryStub) GetBundleByID(id int) (*models.OpenClawConfigBundle, error) {
+	return nil, nil
+}
+
+func (s *openClawConfigRepositoryStub) CreateBundle(bundle *models.OpenClawConfigBundle) error {
+	return nil
+}
+
+func (s *openClawConfigRepositoryStub) UpdateBundle(bundle *models.OpenClawConfigBundle) error {
+	return nil
+}
+
+func (s *openClawConfigRepositoryStub) DeleteBundle(id int) error { return nil }
+
+func (s *openClawConfigRepositoryStub) ListBundleItems(bundleID int) ([]models.OpenClawConfigBundleItem, error) {
+	return nil, nil
+}
+
+func (s *openClawConfigRepositoryStub) ReplaceBundleItems(bundleID int, items []models.OpenClawConfigBundleItem) error {
+	return nil
+}
+
+func (s *openClawConfigRepositoryStub) ListBundleSkills(bundleID int) ([]models.OpenClawConfigBundleSkill, error) {
+	return nil, nil
+}
+
+func (s *openClawConfigRepositoryStub) ReplaceBundleSkills(bundleID int, items []models.OpenClawConfigBundleSkill) error {
+	return nil
+}
+
+func (s *openClawConfigRepositoryStub) CreateSnapshot(snapshot *models.OpenClawInjectionSnapshot) error {
+	return nil
+}
+
+func (s *openClawConfigRepositoryStub) UpdateSnapshot(snapshot *models.OpenClawInjectionSnapshot) error {
+	return nil
+}
+
+func (s *openClawConfigRepositoryStub) GetSnapshotByID(id int) (*models.OpenClawInjectionSnapshot, error) {
+	return nil, nil
+}
+
+func (s *openClawConfigRepositoryStub) ListSnapshotsByUser(userID int, limit int) ([]models.OpenClawInjectionSnapshot, error) {
+	return nil, nil
+}
+
+func (s *openClawConfigRepositoryStub) ListActiveSnapshots(userID int) ([]models.OpenClawInjectionSnapshot, error) {
+	return nil, nil
+}
+
+func (s *openClawConfigRepositoryStub) UpdateSnapshotIfUnchanged(snapshot *models.OpenClawInjectionSnapshot, expectedUpdatedAt time.Time) (bool, error) {
+	return true, nil
 }

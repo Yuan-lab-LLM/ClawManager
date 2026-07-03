@@ -119,9 +119,14 @@ func main() {
 	)
 	instanceAgentService := services.NewInstanceAgentService(instanceRepo, instanceAgentRepo, instanceDesiredStateRepo, instanceRuntimeStatusRepo, instanceCommandRepo)
 	instanceRuntimeStatusService := services.NewInstanceRuntimeStatusService(instanceRuntimeStatusRepo, instanceAgentRepo, instanceDesiredStateRepo)
-	instanceCommandService := services.NewInstanceCommandService(instanceCommandRepo, instanceRuntimeStatusRepo, instanceDesiredStateRepo)
+	instanceCommandService := services.NewInstanceCommandService(instanceCommandRepo, instanceRuntimeStatusRepo, instanceDesiredStateRepo, skillRepo)
 	instanceConfigRevisionService := services.NewInstanceConfigRevisionService(instanceConfigRevisionRepo)
-	teamService := services.NewTeamService(teamRepo, instanceService, services.WithTeamRuntimeWorkspaceRoot(cfg.Runtime.WorkspaceRoot))
+	teamService := services.NewTeamService(
+		teamRepo,
+		instanceService,
+		services.WithTeamRuntimeWorkspaceRoot(cfg.Runtime.WorkspaceRoot),
+		services.WithTeamOpenClawConfigService(openClawConfigService),
+	)
 	var platformRedis services.PlatformRedisClient
 	if redisURL := strings.TrimSpace(cfg.Runtime.RedisURL); redisURL != "" {
 		var redisErr error
@@ -167,6 +172,7 @@ func main() {
 	agentHandler := handlers.NewAgentHandler(instanceAgentService, instanceCommandService, instanceRuntimeStatusService, instanceConfigRevisionService, skillService)
 	teamHandler := handlers.NewTeamHandler(teamService)
 	workspaceFileHandler := handlers.NewWorkspaceFileHandler(instanceService, workspaceFileService, runtimeWorkspaceFileService)
+	workspaceFileHandler.SetSkillRepository(skillRepo)
 	runtimeAgentHandler := handlers.NewRuntimeAgentHandler(cfg.Runtime, runtimePodRepo, bindingRepo, runtimeEvents)
 
 	// Initialize WebSocket hub and handler
@@ -338,6 +344,8 @@ func main() {
 		{
 			instances.GET("", instanceHandler.ListInstances)
 			instances.POST("", instanceHandler.CreateInstance)
+			instances.POST("/batch/lite", instanceHandler.BatchCreateLiteInstances)
+			instances.POST("/batch/delete", instanceHandler.BatchDeleteLiteInstances)
 			instances.GET("/:id", instanceHandler.GetInstance)
 			instances.PUT("/:id", instanceHandler.UpdateInstance)
 			instances.DELETE("/:id", instanceHandler.DeleteInstance)
@@ -369,6 +377,7 @@ func main() {
 			instances.PATCH("/:id/workspace/entries", workspaceFileHandler.Rename)
 			instances.DELETE("/:id/workspace/entries", workspaceFileHandler.Delete)
 			instances.GET("/:id/skills", skillHandler.ListInstanceSkills)
+			instances.GET("/:id/skills/available", skillHandler.ListAvailableInstanceSkills)
 			instances.POST("/:id/skills", skillHandler.AttachSkillToInstance)
 			instances.DELETE("/:id/skills/:skillId", skillHandler.RemoveSkillFromInstance)
 		}

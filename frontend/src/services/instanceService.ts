@@ -11,6 +11,9 @@ import type {
   EnableShareLinkResult,
   PasswordExternalAccessResult,
   ExternalAccessRequest,
+  BatchCreateLiteInstancesRequest,
+  BatchCreateLiteInstancesResponse,
+  BatchDeleteLiteInstancesResponse,
 } from "../types/instance";
 import type { InstanceSkill } from "../types/skill";
 
@@ -32,6 +35,21 @@ export const instanceService = {
     return response.data.data;
   },
 
+  batchCreateLiteInstances: async (
+    data: BatchCreateLiteInstancesRequest,
+  ): Promise<BatchCreateLiteInstancesResponse> => {
+    const response = await api.post("/instances/batch/lite", data);
+    return response.data.data;
+  },
+
+  batchDeleteLiteInstances: async (
+    instanceIds: number[],
+  ): Promise<BatchDeleteLiteInstancesResponse> => {
+    const response = await api.post("/instances/batch/delete", {
+      instance_ids: instanceIds,
+    });
+    return response.data.data;
+  },
   // Get instance by ID
   getInstance: async (id: number): Promise<Instance> => {
     const response = await api.get(`/instances/${id}`);

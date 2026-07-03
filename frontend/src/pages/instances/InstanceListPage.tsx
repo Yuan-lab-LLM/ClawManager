@@ -1,10 +1,14 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Monitor, MonitorPlay, Play, Search, Square, Trash2 } from "lucide-react";
+import { Monitor, MonitorPlay, Play, Plus, Search, Square, Trash2 } from "lucide-react";
 import ConfirmDialog from "../../components/ConfirmDialog";
 import UserLayout from "../../components/UserLayout";
 import { useI18n } from "../../contexts/I18nContext";
 import { instanceService } from "../../services/instanceService";
+import {
+  systemSettingsService,
+  type SystemImageSetting,
+} from "../../services/systemSettingsService";
 import { teamService } from "../../services/teamService";
 import type { Instance, InstanceAvailability } from "../../types/instance";
 import type { Team, TeamMember } from "../../types/team";
@@ -21,6 +25,11 @@ type LoadInstancesOptions = {
 
 const INSTANCE_LIST_PAGE_SIZE = 100;
 const TEAM_LIST_PAGE_SIZE = 100;
+
+const runtimeImageKey = (item: SystemImageSetting) =>
+  item.id
+    ? "runtime-image-id:" + item.id
+    : ["runtime-image", item.instance_type, item.runtime_type ?? "gateway", item.image].join(":");
 
 const instanceTimeValue = (instance: Instance) => {
   const value = Date.parse(instance.updated_at || instance.created_at || "");
@@ -135,6 +144,10 @@ function modeClass(mode: Instance["instance_mode"]) {
     : "border-sky-200 bg-sky-50 text-sky-700";
 }
 
+function isLiteInstance(instance: Instance) {
+  return instance.instance_mode === "lite" || instance.runtime_type === "gateway";
+}
+
 function formatBytes(value?: number) {
   if (!value || value <= 0) {
     return "0 B";
@@ -171,6 +184,18 @@ const InstanceListPage: React.FC = () => {
   const [pendingDeleteId, setPendingDeleteId] = useState<number | null>(null);
   const [availabilityFilter, setAvailabilityFilter] = useState<AvailabilityFilter>("all");
   const [searchQuery, setSearchQuery] = useState("");
+  const [selectedLiteIds, setSelectedLiteIds] = useState<number[]>([]);
+  const [batchCreateOpen, setBatchCreateOpen] = useState(false);
+  const [batchCreatePrefix, setBatchCreatePrefix] = useState("lite-openclaw");
+  const [batchCreateCount, setBatchCreateCount] = useState(3);
+  const [batchCreateStartIndex, setBatchCreateStartIndex] = useState(1);
+  const [batchCreateType, setBatchCreateType] = useState<"openclaw" | "hermes">("openclaw");
+  const [batchCreateImageKey, setBatchCreateImageKey] = useState("");
+  const [runtimeImageSettings, setRuntimeImageSettings] = useState<SystemImageSetting[]>([]);
+  const [batchCreateLoading, setBatchCreateLoading] = useState(false);
+  const [batchCreateSummary, setBatchCreateSummary] = useState<string | null>(null);
+  const [batchDeleteLoading, setBatchDeleteLoading] = useState(false);
+  const [pendingBatchDelete, setPendingBatchDelete] = useState(false);
 
   const refreshTeamMemberships = useCallback(async () => {
     try {
@@ -207,6 +232,22 @@ const InstanceListPage: React.FC = () => {
   useEffect(() => {
     void loadInstances();
   }, [loadInstances]);
+  useEffect(() => {
+    let cancelled = false;
+    systemSettingsService
+      .getImageSettings()
+      .then((items) => {
+        if (!cancelled) {
+          setRuntimeImageSettings(items.filter((item) => item.is_enabled !== false));
+        }
+      })
+      .catch((imageError) => {
+        console.error("Failed to load runtime images", imageError);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (!instances.some((instance) => instance.status === "creating" || instance.status === "deleting")) {
@@ -250,6 +291,119 @@ const InstanceListPage: React.FC = () => {
     });
   }, [availabilityFilter, instances, searchQuery, teamMemberships]);
 
+  const batchRuntimeImageOptions = useMemo(
+    () =>
+      runtimeImageSettings.filter(
+        (item) =>
+          item.instance_type === batchCreateType &&
+          (item.runtime_type ?? "gateway") === "gateway",
+      ),
+    [batchCreateType, runtimeImageSettings],
+  );
+  const selectedBatchRuntimeImage =
+    batchRuntimeImageOptions.find((item) => runtimeImageKey(item) === batchCreateImageKey) ?? null;
+  const selectableLiteIds = useMemo(
+    () =>
+      filteredInstances
+        .filter((instance) => isLiteInstance(instance) && instance.status !== "deleting")
+        .map((instance) => instance.id),
+    [filteredInstances],
+  );
+
+  useEffect(() => {
+    if (
+      batchCreateImageKey &&
+      !batchRuntimeImageOptions.some((item) => runtimeImageKey(item) === batchCreateImageKey)
+    ) {
+      setBatchCreateImageKey("");
+    }
+  }, [batchCreateImageKey, batchRuntimeImageOptions]);
+  const selectedLiteSet = useMemo(() => new Set(selectedLiteIds), [selectedLiteIds]);
+  const selectedLiteCount = selectedLiteIds.length;
+  const allVisibleLiteSelected =
+    selectableLiteIds.length > 0 && selectableLiteIds.every((id) => selectedLiteSet.has(id));
+
+  useEffect(() => {
+    setSelectedLiteIds((ids) => ids.filter((id) => instances.some((instance) => instance.id === id && isLiteInstance(instance))));
+  }, [instances]);
+
+  const toggleLiteSelection = useCallback((id: number) => {
+    setSelectedLiteIds((ids) =>
+      ids.includes(id) ? ids.filter((selectedId) => selectedId !== id) : [...ids, id],
+    );
+  }, []);
+
+  const toggleAllVisibleLite = useCallback(() => {
+    setSelectedLiteIds((ids) => {
+      const visible = new Set(selectableLiteIds);
+      if (selectableLiteIds.length > 0 && selectableLiteIds.every((id) => ids.includes(id))) {
+        return ids.filter((id) => !visible.has(id));
+      }
+      return Array.from(new Set([...ids, ...selectableLiteIds]));
+    });
+  }, [selectableLiteIds]);
+
+  const handleBatchCreateLite = useCallback(async () => {
+    try {
+      setBatchCreateLoading(true);
+      setBatchCreateSummary(null);
+      const result = await instanceService.batchCreateLiteInstances({
+        name_prefix: batchCreatePrefix.trim(),
+        count: batchCreateCount,
+        start_index: batchCreateStartIndex,
+        template: {
+          type: batchCreateType,
+          mode: "lite",
+          instance_mode: "lite",
+          runtime_type: "gateway",
+          os_type: batchCreateType,
+          os_version: "latest",
+          image_registry: selectedBatchRuntimeImage?.image,
+          gpu_enabled: false,
+          gpu_count: 0,
+        },
+      });
+      setBatchCreateSummary(
+        t("instances.batchCreateSummary", {
+          created: result.created,
+          failed: result.failed,
+        }),
+      );
+      await loadInstances({ silent: true });
+      if (result.failed === 0) {
+        setBatchCreateOpen(false);
+      }
+    } catch (err: unknown) {
+      setBatchCreateSummary(getErrorMessage(err, t("instances.batchCreateFailed")));
+    } finally {
+      setBatchCreateLoading(false);
+    }
+  }, [
+    batchCreateCount,
+    batchCreatePrefix,
+    batchCreateStartIndex,
+    batchCreateType,
+    selectedBatchRuntimeImage,
+    loadInstances,
+    t,
+  ]);
+
+  const handleBatchDeleteLite = useCallback(async () => {
+    try {
+      setBatchDeleteLoading(true);
+      const result = await instanceService.batchDeleteLiteInstances(selectedLiteIds);
+      if (result.failed > 0) {
+        alert(t("instances.batchDeletePartial", { deleted: result.deleted, failed: result.failed }));
+      }
+      setSelectedLiteIds([]);
+      setPendingBatchDelete(false);
+      await loadInstances({ silent: true });
+    } catch (err: unknown) {
+      alert(getErrorMessage(err, t("instances.batchDeleteFailed")));
+    } finally {
+      setBatchDeleteLoading(false);
+    }
+  }, [loadInstances, selectedLiteIds, t]);
   const handleDelete = useCallback(
     async (id: number) => {
       try {
@@ -314,12 +468,190 @@ const InstanceListPage: React.FC = () => {
         }}
       />
 
+      <ConfirmDialog
+        open={pendingBatchDelete}
+        title={t("instances.batchDeleteLite")}
+        message={t("instances.batchDeleteConfirm", { count: selectedLiteCount })}
+        confirmLabel={t("instances.batchDeleteLite")}
+        cancelLabel={t("common.cancel")}
+        destructive
+        loading={batchDeleteLoading}
+        onCancel={() => setPendingBatchDelete(false)}
+        onConfirm={() => void handleBatchDeleteLite()}
+      />
+
+      {batchCreateOpen ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(15,23,42,0.45)] px-4"
+          onClick={(event) => {
+            if (event.target === event.currentTarget && !batchCreateLoading) {
+              setBatchCreateOpen(false);
+            }
+          }}
+        >
+          <div className="w-full max-w-lg rounded-lg border border-slate-200 bg-white p-6 shadow-xl">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h3 className="text-lg font-semibold text-slate-950">
+                  {t("instances.batchCreateLite")}
+                </h3>
+                <p className="mt-1 text-sm text-slate-500">
+                  {t("instances.batchCreateLiteSubtitle")}
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-5 space-y-4">
+              <div>
+                <div className="mb-2 text-sm font-medium text-slate-700">
+                  {t("instances.batchMode")}
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    className="rounded-md border border-sky-300 bg-sky-50 px-3 py-2 text-left text-sm font-medium text-sky-700"
+                  >
+                    {t("instances.batchModeLite")}
+                  </button>
+                  <button
+                    type="button"
+                    disabled
+                    className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-left text-sm font-medium text-slate-400 disabled:cursor-not-allowed"
+                    title={t("instances.batchModeProDisabled")}
+                  >
+                    {t("instances.batchModePro")}
+                  </button>
+                </div>
+              </div>
+
+              <label className="block text-sm font-medium text-slate-700">
+                {t("instances.batchNamePrefix")}
+                <input
+                  type="text"
+                  value={batchCreatePrefix}
+                  onChange={(event) => setBatchCreatePrefix(event.target.value)}
+                  className="app-input mt-1 w-full"
+                  placeholder="lite-openclaw"
+                />
+              </label>
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <label className="block text-sm font-medium text-slate-700">
+                  {t("instances.batchCount")}
+                  <input
+                    type="number"
+                    min={1}
+                    max={20}
+                    value={batchCreateCount}
+                    onChange={(event) => setBatchCreateCount(Number(event.target.value))}
+                    className="app-input mt-1 w-full"
+                  />
+                </label>
+                <label className="block text-sm font-medium text-slate-700">
+                  {t("instances.batchStartIndex")}
+                  <input
+                    type="number"
+                    min={1}
+                    max={9999}
+                    value={batchCreateStartIndex}
+                    onChange={(event) => setBatchCreateStartIndex(Number(event.target.value))}
+                    className="app-input mt-1 w-full"
+                  />
+                </label>
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <label className="block text-sm font-medium text-slate-700">
+                  {t("instances.type")}
+                  <select
+                    value={batchCreateType}
+                    onChange={(event) => setBatchCreateType(event.target.value as "openclaw" | "hermes")}
+                    className="app-input mt-1 w-full"
+                  >
+                    <option value="openclaw">OpenClaw</option>
+                    <option value="hermes">Hermes</option>
+                  </select>
+                </label>
+                <label className="block text-sm font-medium text-slate-700">
+                  {t("instances.batchImage")}
+                  <select
+                    value={batchCreateImageKey}
+                    onChange={(event) => setBatchCreateImageKey(event.target.value)}
+                    className="app-input mt-1 w-full"
+                  >
+                    <option value="">{t("instances.batchDefaultImage")}</option>
+                    {batchRuntimeImageOptions.map((item) => (
+                      <option key={runtimeImageKey(item)} value={runtimeImageKey(item)}>
+                        {item.display_name || item.image}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+            </div>
+            <div className="mt-4 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
+              {t("instances.batchCreatePreview", {
+                first: `${batchCreatePrefix || "lite"}-${String(batchCreateStartIndex || 1).padStart(3, "0")}`,
+                last: `${batchCreatePrefix || "lite"}-${String((batchCreateStartIndex || 1) + Math.max(batchCreateCount - 1, 0)).padStart(3, "0")}`,
+              })}
+            </div>
+
+            {batchCreateSummary ? (
+              <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
+                {batchCreateSummary}
+              </div>
+            ) : null}
+
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setBatchCreateOpen(false)}
+                disabled={batchCreateLoading}
+                className="app-button-secondary"
+              >
+                {t("common.cancel")}
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleBatchCreateLite()}
+                disabled={batchCreateLoading}
+                className="app-button-primary"
+              >
+                <Plus className="h-4 w-4" />
+                {batchCreateLoading ? t("instances.batchCreating") : t("instances.batchCreateLite")}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex flex-wrap gap-2">
           <Link to="/instances/new" className="app-button-primary self-start">
             <Monitor className="h-4 w-4" />
             {t("instances.createInstance")}
           </Link>
+          <button
+            type="button"
+            onClick={() => {
+              setBatchCreateSummary(null);
+              setBatchCreateOpen(true);
+            }}
+            className="app-button-secondary self-start"
+          >
+            <Plus className="h-4 w-4" />
+            {t("instances.batchCreateLite")}
+          </button>
+          <button
+            type="button"
+            onClick={() => setPendingBatchDelete(true)}
+            disabled={selectedLiteCount === 0 || batchDeleteLoading}
+            className="app-button-secondary self-start border-red-200 text-red-600 hover:border-red-300 hover:bg-red-50 hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Trash2 className="h-4 w-4" />
+            {selectedLiteCount > 0
+              ? t("instances.batchDeleteLiteWithCount", { count: selectedLiteCount })
+              : t("instances.batchDeleteLite")}
+          </button>
           <Link to="/portal" className="app-button-secondary self-start">
             <MonitorPlay className="h-4 w-4" />
             {t("instances.portalView")}
@@ -373,11 +705,21 @@ const InstanceListPage: React.FC = () => {
         </div>
       ) : (
         <div className="cm-surface overflow-x-auto">
-          <table className="w-full min-w-[760px] table-fixed divide-y divide-slate-200 text-sm">
+          <table className="w-full min-w-[820px] table-fixed divide-y divide-slate-200 text-sm">
             <thead className="bg-slate-50 text-left text-xs font-medium uppercase tracking-normal text-slate-500">
               <tr>
-                <th className="w-[30%] px-4 py-3">Instance</th>
-                <th className="w-[14%] px-4 py-3">Type</th>
+                <th className="w-[5%] px-4 py-3">
+                  <input
+                    type="checkbox"
+                    checked={allVisibleLiteSelected}
+                    disabled={selectableLiteIds.length === 0}
+                    onChange={toggleAllVisibleLite}
+                    className="h-4 w-4 rounded border-slate-300 text-red-600 focus:ring-red-500 disabled:opacity-40"
+                    aria-label={t("instances.selectVisibleLite")}
+                  />
+                </th>
+                <th className="w-[28%] px-4 py-3">Instance</th>
+                <th className="w-[13%] px-4 py-3">Type</th>
                 <th className="w-[20%] px-4 py-3">Team</th>
                 <th className="w-[16%] px-4 py-3">Availability</th>
                 <th className="w-[10%] px-4 py-3">Workspace</th>
@@ -389,6 +731,8 @@ const InstanceListPage: React.FC = () => {
                 const availability = availabilityForStatus(instance.status);
                 const memberships = teamMemberships.get(instance.id) || [];
                 const primaryMembership = memberships[0];
+                const canSelectLite = isLiteInstance(instance) && instance.status !== "deleting";
+                const selected = selectedLiteSet.has(instance.id);
                 return (
                   <tr
                     key={instance.id}
@@ -405,6 +749,20 @@ const InstanceListPage: React.FC = () => {
                       primaryMembership ? "bg-sky-50/30 hover:bg-sky-50/60" : "hover:bg-slate-50"
                     }`}
                   >
+                    <td
+                      className="px-4 py-3"
+                      onClick={(event) => event.stopPropagation()}
+                      onKeyDown={(event) => event.stopPropagation()}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selected}
+                        disabled={!canSelectLite}
+                        onChange={() => toggleLiteSelection(instance.id)}
+                        className="h-4 w-4 rounded border-slate-300 text-red-600 focus:ring-red-500 disabled:opacity-30"
+                        aria-label={t("instances.selectLiteInstance", { name: instance.name })}
+                      />
+                    </td>
                     <td className="max-w-[280px] px-4 py-3">
                       <Link
                         to={`/instances/${instance.id}`}

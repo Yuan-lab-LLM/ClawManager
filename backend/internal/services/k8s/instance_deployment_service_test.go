@@ -3,6 +3,7 @@ package k8s
 import (
 	"context"
 	"testing"
+	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -119,6 +120,36 @@ func TestInstanceDeploymentServiceEnsureAndScale(t *testing.T) {
 	}
 	if scaled.Spec.Replicas == nil || *scaled.Spec.Replicas != 0 {
 		t.Fatalf("scaled replicas = %#v, want 0", scaled.Spec.Replicas)
+	}
+}
+
+func TestInstanceDeploymentServiceWaitForDeploymentPodsDeleted(t *testing.T) {
+	client := &Client{Clientset: fake.NewSimpleClientset(), Namespace: "clawreef"}
+	service := &InstanceDeploymentService{
+		client:           client,
+		namespaceService: &NamespaceService{client: client},
+	}
+	ctx := context.Background()
+
+	if err := service.waitForDeploymentPodsDeleted(ctx, 8, 43, 10*time.Millisecond); err != nil {
+		t.Fatalf("wait with no pods returned error: %v", err)
+	}
+
+	if _, err := client.Clientset.CoreV1().Pods("clawreef-user-8").Create(ctx, &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "clawreef-43-desktop",
+			Namespace: "clawreef-user-8",
+			Labels: map[string]string{
+				"app":         "clawreef",
+				"instance-id": "43",
+			},
+		},
+	}, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("create pod: %v", err)
+	}
+
+	if err := service.waitForDeploymentPodsDeleted(ctx, 8, 43, 10*time.Millisecond); err == nil {
+		t.Fatalf("expected timeout while pod still exists")
 	}
 }
 

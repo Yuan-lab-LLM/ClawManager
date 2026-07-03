@@ -30,6 +30,9 @@ type SkillRepository interface {
 	ListInstanceSkills(instanceID int) ([]models.InstanceSkill, error)
 	GetInstanceSkill(instanceID, skillID int) (*models.InstanceSkill, error)
 	UpsertInstanceSkill(item *models.InstanceSkill) error
+	MarkInstanceSkillRemoved(instanceID int, skillID int, observedAt time.Time) error
+	MarkInstanceSkillRemovedBySkillKey(instanceID int, skillKey string, observedAt time.Time) error
+	MarkInstanceSkillsRemovedByWorkspacePath(instanceID int, workspacePath string, observedAt time.Time) error
 	MarkMissingInstanceSkills(instanceID int, activeSkillIDs []int, observedAt time.Time) error
 	CreateScanResult(result *models.SkillScanResult) error
 	GetScanResultByID(id int) (*models.SkillScanResult, error)
@@ -84,6 +87,16 @@ func (r *skillRepository) CreateSkill(skill *models.Skill) error {
 	ensureTimestamps(&skill.CreatedAt, &skill.UpdatedAt)
 	res, err := r.sess.Collection("skills").Insert(skill)
 	if err != nil {
+		if isDuplicateEntryError(err) {
+			existing, findErr := r.GetSkillByUserKey(skill.UserID, skill.SkillKey)
+			if findErr != nil {
+				return findErr
+			}
+			if existing != nil {
+				*skill = *existing
+				return nil
+			}
+		}
 		return fmt.Errorf("failed to create skill: %w", err)
 	}
 	if id, ok := res.ID().(int64); ok {
@@ -275,6 +288,138 @@ func isDuplicateEntryError(err error) bool {
 		return false
 	}
 	return strings.Contains(strings.ToLower(err.Error()), "duplicate entry")
+}
+
+func (r *skillRepository) MarkInstanceSkillRemoved(instanceID int, skillID int, observedAt time.Time) error {
+	item, err := r.GetInstanceSkill(instanceID, skillID)
+	if err != nil {
+		return err
+	}
+	if item == nil {
+		return nil
+	}
+	if item.UpdatedAt.After(observedAt) {
+		return nil
+	}
+	item.Status = "removed"
+	item.RemovedAt = &observedAt
+	item.UpdatedAt = observedAt
+	if err := r.sess.Collection("instance_skills").Find(db.Cond{"id": item.ID}).Update(item); err != nil {
+		return fmt.Errorf("failed to mark instance skill removed: %w", err)
+	}
+	return nil
+}
+
+func (r *skillRepository) MarkInstanceSkillRemovedBySkillKey(instanceID int, skillKey string, observedAt time.Time) error {
+	skillKey = strings.TrimSpace(skillKey)
+	if skillKey == "" {
+		return nil
+	}
+	var skills []models.Skill
+	if err := r.sess.Collection("skills").Find(db.Cond{"skill_key": skillKey}).All(&skills); err != nil && err != db.ErrNoMoreRows {
+		return fmt.Errorf("failed to find skills by key for removal: %w", err)
+	}
+	for _, skill := range skills {
+		if err := r.MarkInstanceSkillRemoved(instanceID, skill.ID, observedAt); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (r *skillRepository) MarkInstanceSkillsRemovedByWorkspacePath(instanceID int, workspacePath string, observedAt time.Time) error {
+	deletedPath := normalizeInstanceSkillWorkspacePath(workspacePath)
+	if deletedPath == "" {
+		return nil
+	}
+	var items []models.InstanceSkill
+	if err := r.sess.Collection("instance_skills").Find(db.Cond{"instance_id": instanceID}).All(&items); err != nil && err != db.ErrNoMoreRows {
+		return fmt.Errorf("failed to list instance skills for workspace deletion: %w", err)
+	}
+	for _, item := range items {
+		if isRemovedInstanceSkillRecord(item) {
+			continue
+		}
+		matches := instanceSkillInstallPathMatchesDelete(item, deletedPath)
+		if !matches {
+			skill, err := r.GetSkillByID(item.SkillID)
+			if err != nil {
+				return err
+			}
+			matches = skill != nil && workspaceDeleteTargetsSkillKey(deletedPath, skill.SkillKey)
+		}
+		if !matches {
+			continue
+		}
+		item.Status = "removed"
+		item.RemovedAt = &observedAt
+		item.UpdatedAt = observedAt
+		if err := r.sess.Collection("instance_skills").Find(db.Cond{"id": item.ID}).Update(&item); err != nil {
+			return fmt.Errorf("failed to mark instance skill removed after workspace deletion: %w", err)
+		}
+	}
+	return nil
+}
+
+func normalizeInstanceSkillWorkspacePath(value string) string {
+	value = strings.TrimSpace(strings.ReplaceAll(value, "\\", "/"))
+	value = strings.TrimPrefix(value, "/")
+	parts := strings.Split(value, "/")
+	clean := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" || part == "." {
+			continue
+		}
+		clean = append(clean, part)
+	}
+	if len(clean) > 0 && strings.EqualFold(clean[0], "config") {
+		clean = clean[1:]
+	}
+	return strings.Join(clean, "/")
+}
+
+func instanceSkillInstallPathMatchesDelete(item models.InstanceSkill, deletedPath string) bool {
+	if item.InstallPath == nil {
+		return false
+	}
+	installPath := normalizeInstanceSkillWorkspacePath(*item.InstallPath)
+	if installPath == "" || deletedPath == "" {
+		return false
+	}
+	return installPath == deletedPath ||
+		strings.HasPrefix(installPath, deletedPath+"/") ||
+		strings.HasPrefix(deletedPath, installPath+"/") ||
+		strings.HasSuffix(installPath, "/"+deletedPath) ||
+		strings.HasSuffix(deletedPath, "/"+installPath)
+}
+
+func workspaceDeleteTargetsSkillKey(deletedPath string, skillKey string) bool {
+	key := strings.ToLower(strings.TrimSpace(skillKey))
+	if key == "" || deletedPath == "" {
+		return false
+	}
+	segments := strings.Split(strings.ToLower(deletedPath), "/")
+	last := segments[len(segments)-1]
+	if last != key {
+		return false
+	}
+	if len(segments) <= 2 {
+		return true
+	}
+	for i, segment := range segments {
+		if segment == "skills" && i+1 < len(segments) && segments[i+1] == key {
+			return true
+		}
+		if segment == ".openclaw" || segment == "openclaw" {
+			return true
+		}
+	}
+	return false
+}
+
+func isRemovedInstanceSkillRecord(item models.InstanceSkill) bool {
+	return strings.EqualFold(strings.TrimSpace(item.Status), "removed") || item.RemovedAt != nil
 }
 
 func (r *skillRepository) MarkMissingInstanceSkills(instanceID int, activeSkillIDs []int, observedAt time.Time) error {

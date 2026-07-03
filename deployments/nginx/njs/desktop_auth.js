@@ -36,11 +36,7 @@ function b64urlToString(s) {
     return Buffer.from(std, 'base64').toString();
 }
 
-function readToken(r) {
-    if (r.args && r.args.token) {
-        return r.args.token;
-    }
-
+function readCookieToken(r) {
     var cookie = r.headersIn['Cookie'];
     if (!cookie) {
         return '';
@@ -56,6 +52,21 @@ function readToken(r) {
         }
     }
     return '';
+}
+
+function readQueryToken(r) {
+    if (r.args && r.args.token) {
+        return r.args.token;
+    }
+    return '';
+}
+
+function readToken(r) {
+    var cookieToken = readCookieToken(r);
+    if (cookieToken) {
+        return cookieToken;
+    }
+    return readQueryToken(r);
 }
 
 function resolveTarget(r) {
@@ -107,16 +118,24 @@ function resolveTarget(r) {
     return CONTROL_PLANE_FALLBACK;
 }
 
-// cleanUri returns the original request URI (path + query) with the "token"
-// query parameter stripped, so the instance-access JWT is never forwarded to
-// the upstream desktop (it would otherwise land in webtop/KasmVNC access logs).
-// njs validation in resolveTarget still reads the original token from the
-// request, so authentication is unaffected. Subresource / WebSocket requests
-// carry no token and are returned unchanged.
+// cleanUri returns the original request URI (path + query) with only the
+// ClawManager instance-access JWT stripped. Runtime apps such as Hermes may use
+// their own "token" query parameter for websocket/session auth; when the
+// ClawManager token came from the HttpOnly cookie, that runtime token must be
+// preserved and forwarded to the upstream gateway.
 function cleanUri(r) {
     var uri = r.variables.request_uri || r.uri || '/';
     var q = uri.indexOf('?');
     if (q < 0) {
+        return uri;
+    }
+
+    var queryToken = readQueryToken(r);
+    if (!queryToken) {
+        return uri;
+    }
+    var cookieToken = readCookieToken(r);
+    if (cookieToken && cookieToken !== queryToken) {
         return uri;
     }
 
@@ -130,7 +149,8 @@ function cleanUri(r) {
         }
         var eq = parts[i].indexOf('=');
         var name = eq < 0 ? parts[i] : parts[i].substring(0, eq);
-        if (name === 'token') {
+        var value = eq < 0 ? '' : parts[i].substring(eq + 1);
+        if (name === 'token' && queryValueEquals(value, queryToken)) {
             continue;
         }
         kept.push(parts[i]);
@@ -140,6 +160,17 @@ function cleanUri(r) {
         return path;
     }
     return path + '?' + kept.join('&');
+}
+
+function queryValueEquals(rawValue, expected) {
+    if (rawValue === expected) {
+        return true;
+    }
+    try {
+        return decodeURIComponent(rawValue.replace(/\+/g, ' ')) === expected;
+    } catch (e) {
+        return false;
+    }
 }
 
 export default { resolveTarget, cleanUri };

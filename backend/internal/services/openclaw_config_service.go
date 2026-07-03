@@ -261,6 +261,7 @@ type OpenClawConfigService interface {
 	ResolveBundleSkillIDs(userID int, plan *OpenClawConfigPlan) ([]int, error)
 
 	CompilePreview(userID int, plan OpenClawConfigPlan) (*OpenClawConfigCompilePreview, error)
+	PlanWithoutTeamMemberLeaderOnlyChannels(userID int, plan *OpenClawConfigPlan) (*OpenClawConfigPlan, error)
 	CreateSnapshotForInstance(userID int, instance *models.Instance, plan *OpenClawConfigPlan) (*models.OpenClawInjectionSnapshot, error)
 	MarkSnapshotActive(snapshot *models.OpenClawInjectionSnapshot) error
 	MarkSnapshotFailed(snapshot *models.OpenClawInjectionSnapshot, err error) error
@@ -425,7 +426,7 @@ func (s *openClawConfigService) UpdateResource(userID, id int, req UpsertOpenCla
 	}
 
 	// Cascade: recompile active snapshots that reference this resource.
-	// Non-blocking — errors are logged but do not fail the update.
+	// Non-blocking: errors are logged but do not fail the update.
 	go s.cascadeSnapshotsForResource(userID, id)
 
 	payload, err := resourcePayloadFromModel(*item)
@@ -716,6 +717,47 @@ func (s *openClawConfigService) CompilePreview(userID int, plan OpenClawConfigPl
 	return s.previewFromCompiled(compiled)
 }
 
+func (s *openClawConfigService) PlanWithoutTeamMemberLeaderOnlyChannels(userID int, plan *OpenClawConfigPlan) (*OpenClawConfigPlan, error) {
+	if plan == nil || !hasOpenClawConfigSelections(*plan) {
+		return nil, nil
+	}
+
+	normalizedPlan := *plan
+	normalizedPlan.Mode = normalizePlanMode(normalizedPlan.Mode)
+	if normalizedPlan.Mode == "" {
+		normalizedPlan.Mode = OpenClawConfigPlanModeNone
+	}
+	if normalizedPlan.Mode == OpenClawConfigPlanModeNone {
+		return nil, nil
+	}
+
+	selected, _, err := s.loadSelectedResources(userID, normalizedPlan)
+	if err != nil {
+		return nil, err
+	}
+
+	keptResourceIDs := make([]int, 0, len(selected))
+	removed := false
+	for _, resource := range selected {
+		if isTeamMemberLeaderOnlyOpenClawChannel(resource) {
+			removed = true
+			continue
+		}
+		keptResourceIDs = append(keptResourceIDs, resource.ID)
+	}
+	if !removed {
+		return cloneOpenClawConfigPlan(plan), nil
+	}
+	if len(keptResourceIDs) == 0 {
+		return nil, nil
+	}
+
+	return &OpenClawConfigPlan{
+		Mode:        OpenClawConfigPlanModeManual,
+		ResourceIDs: keptResourceIDs,
+	}, nil
+}
+
 func (s *openClawConfigService) CreateSnapshotForInstance(userID int, instance *models.Instance, plan *OpenClawConfigPlan) (*models.OpenClawInjectionSnapshot, error) {
 	if instance == nil || plan == nil || !hasOpenClawConfigSelections(*plan) {
 		return nil, nil
@@ -801,6 +843,11 @@ func (s *openClawConfigService) EnsureSnapshotSecret(ctx context.Context, userID
 		return "", nil
 	}
 
+	envValues, err := s.RuntimeEnvForSnapshot(userID, instance.Type, snapshotID)
+	if err != nil {
+		return "", err
+	}
+
 	snapshot, err := s.repo.GetSnapshotByID(snapshotID)
 	if err != nil {
 		return "", err
@@ -808,12 +855,6 @@ func (s *openClawConfigService) EnsureSnapshotSecret(ctx context.Context, userID
 	if snapshot == nil || snapshot.UserID != userID {
 		return "", fmt.Errorf("openclaw injection snapshot not found")
 	}
-
-	var envValues map[string]string
-	if err := json.Unmarshal([]byte(snapshot.RenderedEnvJSON), &envValues); err != nil {
-		return "", fmt.Errorf("openclaw injection snapshot env payload is invalid")
-	}
-	envValues = runtimeBootstrapEnvValues(instance.Type, envValues)
 
 	secretName := snapshot.SecretName
 	if secretName == nil || strings.TrimSpace(*secretName) == "" {
@@ -847,6 +888,25 @@ func (s *openClawConfigService) EnsureSnapshotSecret(ctx context.Context, userID
 	return *secretName, nil
 }
 
+func (s *openClawConfigService) RuntimeEnvForSnapshot(userID int, instanceType string, snapshotID int) (map[string]string, error) {
+	if s == nil || s.repo == nil || snapshotID <= 0 {
+		return map[string]string{}, nil
+	}
+
+	snapshot, err := s.repo.GetSnapshotByID(snapshotID)
+	if err != nil {
+		return nil, err
+	}
+	if snapshot == nil || snapshot.UserID != userID {
+		return nil, fmt.Errorf("openclaw injection snapshot not found")
+	}
+
+	var envValues map[string]string
+	if err := json.Unmarshal([]byte(snapshot.RenderedEnvJSON), &envValues); err != nil {
+		return nil, fmt.Errorf("openclaw injection snapshot env payload is invalid")
+	}
+	return runtimeBootstrapEnvValues(instanceType, envValues), nil
+}
 func runtimeBootstrapEnvValues(instanceType string, envValues map[string]string) map[string]string {
 	result := map[string]string{}
 	for key, value := range envValues {
@@ -1668,6 +1728,21 @@ func detectOpenClawChannelProvider(resourceKey string, configPayload interface{}
 	return key
 }
 
+func isTeamMemberLeaderOnlyOpenClawChannel(resource models.OpenClawConfigResource) bool {
+	return normalizeResourceType(resource.ResourceType) == OpenClawConfigResourceTypeChannel
+}
+
+func cloneOpenClawConfigPlan(plan *OpenClawConfigPlan) *OpenClawConfigPlan {
+	if plan == nil {
+		return nil
+	}
+	clone := *plan
+	if plan.ResourceIDs != nil {
+		clone.ResourceIDs = append([]int(nil), plan.ResourceIDs...)
+	}
+	return &clone
+}
+
 // mergeOpenClawChannelConfigForStorage combines the allowlist-normalized config
 // with the original parsed payload so storage retains keys the env-render path
 // does not surface (e.g. webhook, custom capabilities, additional feishu
@@ -2155,7 +2230,7 @@ func errorString(err error) string {
 
 // cascadeSnapshotsForResource recompiles all active snapshots that reference
 // the given resource ID, so that their rendered_env_json reflects the latest
-// resource content. It does NOT restart instances — the new env takes effect
+// resource content. It does NOT restart instances; the new env takes effect
 // on the next instance restart.
 func (s *openClawConfigService) cascadeSnapshotsForResource(userID, resourceID int) {
 	snapshots, err := s.repo.ListActiveSnapshots(userID)
@@ -2210,7 +2285,7 @@ func (s *openClawConfigService) cascadeSnapshotsForResource(userID, resourceID i
 		if err != nil {
 			log.Printf("[cascade] snapshot %d: update failed: %v", snap.ID, err)
 		} else if !ok {
-			log.Printf("[cascade] snapshot %d: skipped — already updated by a newer cascade", snap.ID)
+			log.Printf("[cascade] snapshot %d: skipped; already updated by a newer cascade", snap.ID)
 		} else {
 			log.Printf("[cascade] snapshot %d: refreshed successfully", snap.ID)
 		}

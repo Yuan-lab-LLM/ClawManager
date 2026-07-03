@@ -68,6 +68,129 @@ func TestInstanceServiceCreateV2CreatesWorkspaceOnly(t *testing.T) {
 	}
 }
 
+func TestInstanceServiceCreateV2PersistsAgentTokensAndSnapshot(t *testing.T) {
+	workspaceRoot := strings.ReplaceAll(t.TempDir(), "\\", "/")
+	instanceRepo := newV2LifecycleInstanceRepo()
+	configService := &liteOpenClawConfigStub{
+		snapshot: &models.OpenClawInjectionSnapshot{ID: 99, UserID: 45},
+	}
+	service := &instanceService{
+		instanceRepo:          instanceRepo,
+		quotaRepo:             v2LifecycleQuotaRepo{},
+		workspaceRoot:         workspaceRoot,
+		openClawConfigService: configService,
+	}
+
+	instance, err := service.Create(45, CreateInstanceRequest{
+		Name:      "Lite With Skills",
+		Type:      "openclaw",
+		Mode:      InstanceModeLite,
+		CPUCores:  2,
+		MemoryGB:  4,
+		DiskGB:    20,
+		OSType:    "openclaw",
+		OSVersion: "latest",
+		OpenClawConfigPlan: &OpenClawConfigPlan{
+			Mode:        OpenClawConfigPlanModeManual,
+			ResourceIDs: []int{7},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+
+	if instance.AccessToken == nil || strings.TrimSpace(*instance.AccessToken) == "" {
+		t.Fatalf("expected lite instance gateway token to be provisioned")
+	}
+	if instance.AgentBootstrapToken == nil || strings.TrimSpace(*instance.AgentBootstrapToken) == "" {
+		t.Fatalf("expected lite instance agent bootstrap token to be provisioned")
+	}
+	if instance.OpenClawConfigSnapshotID == nil || *instance.OpenClawConfigSnapshotID != 99 {
+		t.Fatalf("snapshot id = %v, want 99", instance.OpenClawConfigSnapshotID)
+	}
+	if !configService.activated {
+		t.Fatalf("expected lite bootstrap snapshot to be marked active")
+	}
+	persisted := instanceRepo.byID[instance.ID]
+	if persisted == nil || persisted.AgentBootstrapToken == nil || persisted.OpenClawConfigSnapshotID == nil {
+		t.Fatalf("expected token and snapshot reference to be persisted, got %#v", persisted)
+	}
+}
+
+func TestBuildGatewayEnvInjectsLiteAgentAndBootstrapEnv(t *testing.T) {
+	t.Setenv("CLAWMANAGER_LLM_GATEWAY_BASE_URL", "http://gateway.example/api/v1/gateway/llm")
+	t.Setenv("CLAWMANAGER_AGENT_CONTROL_BASE_URL", "http://agent-control.example")
+
+	accessToken := "igt_test_token"
+	agentToken := "agt_boot_test_token"
+	snapshotID := 12
+	workspacePath := "/workspaces/openclaw/user-45/instance-88"
+	service := &instanceService{
+		llmModelRepo: &stubLLMModelRepository{active: []models.LLMModel{{DisplayName: "auto"}}},
+		openClawConfigService: &liteOpenClawConfigStub{runtimeEnv: map[string]string{
+			OpenClawSkillsEnv: `{"schemaVersion":1,"items":[{"key":"paper-ranker"}]}`,
+		}},
+	}
+
+	env, err := service.BuildGatewayEnv(&models.Instance{
+		ID:                       88,
+		UserID:                   45,
+		Type:                     "openclaw",
+		RuntimeType:              RuntimeBackendGateway,
+		InstanceMode:             InstanceModeLite,
+		AccessToken:              &accessToken,
+		AgentBootstrapToken:      &agentToken,
+		OpenClawConfigSnapshotID: &snapshotID,
+		WorkspacePath:            &workspacePath,
+		DiskGB:                   20,
+	})
+	if err != nil {
+		t.Fatalf("BuildGatewayEnv returned error: %v", err)
+	}
+
+	if env["CLAWMANAGER_AGENT_ENABLED"] != "true" || env["CLAWMANAGER_AGENT_BOOTSTRAP_TOKEN"] != agentToken {
+		t.Fatalf("expected lite agent env to be injected, got %#v", env)
+	}
+	wantPersistentDir := path.Join(workspacePath, "home", ".openclaw")
+	if env["CLAWMANAGER_AGENT_PERSISTENT_DIR"] != wantPersistentDir {
+		t.Fatalf("persistent dir = %q, want %q", env["CLAWMANAGER_AGENT_PERSISTENT_DIR"], wantPersistentDir)
+	}
+	if !strings.Contains(env[OpenClawSkillsEnv], "paper-ranker") {
+		t.Fatalf("expected bootstrap skill env to be injected, got %q", env[OpenClawSkillsEnv])
+	}
+}
+func TestBuildGatewayEnvInjectsHermesLitePersistentDir(t *testing.T) {
+	t.Setenv("CLAWMANAGER_LLM_GATEWAY_BASE_URL", "http://gateway.example/api/v1/gateway/llm")
+	t.Setenv("CLAWMANAGER_AGENT_CONTROL_BASE_URL", "http://agent-control.example")
+
+	accessToken := "igt_test_token"
+	agentToken := "agt_boot_test_token"
+	workspacePath := "/workspaces/hermes/user-45/instance-90"
+	service := &instanceService{
+		llmModelRepo:          &stubLLMModelRepository{active: []models.LLMModel{{DisplayName: "auto"}}},
+		openClawConfigService: &liteOpenClawConfigStub{},
+	}
+
+	env, err := service.BuildGatewayEnv(&models.Instance{
+		ID:                  90,
+		UserID:              45,
+		Type:                "hermes",
+		RuntimeType:         RuntimeBackendGateway,
+		InstanceMode:        InstanceModeLite,
+		AccessToken:         &accessToken,
+		AgentBootstrapToken: &agentToken,
+		WorkspacePath:       &workspacePath,
+		DiskGB:              20,
+	})
+	if err != nil {
+		t.Fatalf("BuildGatewayEnv returned error: %v", err)
+	}
+
+	wantPersistentDir := path.Join(workspacePath, "home", ".hermes")
+	if env["CLAWMANAGER_AGENT_PERSISTENT_DIR"] != wantPersistentDir {
+		t.Fatalf("persistent dir = %q, want %q", env["CLAWMANAGER_AGENT_PERSISTENT_DIR"], wantPersistentDir)
+	}
+}
 func TestInstanceServiceCreateLiteSkipsPerInstanceResourceQuota(t *testing.T) {
 	workspaceRoot := strings.ReplaceAll(t.TempDir(), "\\", "/")
 	instanceRepo := newV2LifecycleInstanceRepo()
@@ -558,6 +681,42 @@ func TestInstanceModeResourceLimitAllowsOversizedLite(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resource limit error = %v, want lite to skip dedicated resource limits", err)
 	}
+}
+
+type liteOpenClawConfigStub struct {
+	OpenClawConfigService
+	snapshot   *models.OpenClawInjectionSnapshot
+	runtimeEnv map[string]string
+	activated  bool
+	failed     bool
+}
+
+func (s *liteOpenClawConfigStub) CreateSnapshotForInstance(userID int, instance *models.Instance, plan *OpenClawConfigPlan) (*models.OpenClawInjectionSnapshot, error) {
+	if s.snapshot == nil {
+		return nil, nil
+	}
+	return s.snapshot, nil
+}
+
+func (s *liteOpenClawConfigStub) MarkSnapshotActive(snapshot *models.OpenClawInjectionSnapshot) error {
+	s.activated = true
+	if snapshot != nil {
+		snapshot.Status = openClawActiveSnapshotStatus
+	}
+	return nil
+}
+
+func (s *liteOpenClawConfigStub) MarkSnapshotFailed(snapshot *models.OpenClawInjectionSnapshot, err error) error {
+	s.failed = true
+	return nil
+}
+
+func (s *liteOpenClawConfigStub) RuntimeEnvForSnapshot(userID int, instanceType string, snapshotID int) (map[string]string, error) {
+	result := map[string]string{}
+	for key, value := range s.runtimeEnv {
+		result[key] = value
+	}
+	return result, nil
 }
 
 type v2LifecycleInstanceRepo struct {

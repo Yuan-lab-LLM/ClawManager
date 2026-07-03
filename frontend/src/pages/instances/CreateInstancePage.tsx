@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import type { AxiosError } from "axios";
 import OpenClawConfigPlanSection, {
@@ -428,7 +428,7 @@ const normalizeRuntimeImageType = (
 
 const CreateInstancePage: React.FC = () => {
   const { user } = useAuth();
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [quotaLoading, setQuotaLoading] = useState(true);
@@ -458,6 +458,7 @@ const CreateInstancePage: React.FC = () => {
     string | null
   >(null);
   const [availableSkills, setAvailableSkills] = useState<Skill[]>([]);
+  const [skillInventorySummary, setSkillInventorySummary] = useState({ total: 0, hiddenByRisk: 0 });
   const [skillLoading, setSkillLoading] = useState(false);
   const [selectedSkillIds, setSelectedSkillIds] = useState<number[]>([]);
   const [skillPage, setSkillPage] = useState(1);
@@ -612,16 +613,18 @@ const CreateInstancePage: React.FC = () => {
       try {
         setSkillLoading(true);
         const items = await skillService.listSkills();
-        setAvailableSkills(
-          items.filter(
-            (item) =>
-              item.status === "active" &&
-              item.risk_level !== "medium" &&
-              item.risk_level !== "high",
-          ),
+        const activeSkills = items.filter((item) => item.status === "active");
+        const attachableSkills = activeSkills.filter(
+          (item) => !["medium", "high"].includes(item.risk_level.trim().toLowerCase()),
         );
+        setAvailableSkills(attachableSkills);
+        setSkillInventorySummary({
+          total: activeSkills.length,
+          hiddenByRisk: activeSkills.length - attachableSkills.length,
+        });
       } catch {
         setAvailableSkills([]);
+        setSkillInventorySummary({ total: 0, hiddenByRisk: 0 });
       } finally {
         setSkillLoading(false);
       }
@@ -1062,6 +1065,9 @@ const CreateInstancePage: React.FC = () => {
     1,
     Math.ceil(availableSkills.length / SKILLS_PER_PAGE),
   );
+  const skillRiskPolicySummary = locale.startsWith("zh")
+    ? `\u5b89\u5168\u7b56\u7565\u5df2\u9690\u85cf ${skillInventorySummary.hiddenByRisk} \u4e2a\u4e2d/\u9ad8\u98ce\u9669\u6280\u80fd\uff1b\u5f53\u524d\u53ef\u9009 ${availableSkills.length}/${skillInventorySummary.total} \u4e2a\u3002`
+    : `Risk policy hid ${skillInventorySummary.hiddenByRisk} medium/high-risk skills; ${availableSkills.length}/${skillInventorySummary.total} are available.`;
   const paginatedSkills = availableSkills.slice(
     (skillPage - 1) * SKILLS_PER_PAGE,
     skillPage * SKILLS_PER_PAGE,
@@ -1159,7 +1165,7 @@ const CreateInstancePage: React.FC = () => {
                           : "bg-gray-200 text-gray-600"
                     }`}
                   >
-                    {s < step ? "✓" : s}
+                    {s < step ? "\u2713" : s}
                   </div>
                   {s < 3 && (
                     <div
@@ -1194,7 +1200,7 @@ const CreateInstancePage: React.FC = () => {
               onClick={() => setError(null)}
               className="float-right text-red-500 hover:text-red-700"
             >
-              ×
+              \u00d7
             </button>
           </div>
         )}
@@ -1380,9 +1386,7 @@ const CreateInstancePage: React.FC = () => {
                                 </p>
                               </div>
                               {selected && (
-                                <span className="rounded-full bg-indigo-100 px-2.5 py-1 text-xs font-medium text-indigo-700">
-                                  ✓
-                                </span>
+                                <span className="rounded-full bg-indigo-100 px-2.5 py-1 text-xs font-medium text-indigo-700">\u2713</span>
                               )}
                             </div>
                             <p className="mt-3 break-all rounded-2xl bg-[#f8f5f2] px-3 py-2 font-mono text-xs text-[#5f5957]">
@@ -2012,6 +2016,12 @@ const CreateInstancePage: React.FC = () => {
                               t("instances.noReusableSkillsSelected"),
                               "emerald",
                             )}
+                          </div>
+                        )}
+
+                        {skillInventorySummary.hiddenByRisk > 0 && (
+                          <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                            {skillRiskPolicySummary}
                           </div>
                         )}
 

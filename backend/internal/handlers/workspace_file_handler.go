@@ -10,9 +10,11 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 
 	"clawreef/internal/models"
+	"clawreef/internal/repository"
 	"clawreef/internal/services"
 	"clawreef/internal/utils"
 
@@ -23,6 +25,7 @@ type WorkspaceFileHandler struct {
 	instanceService             services.InstanceService
 	fileService                 services.WorkspaceFileService
 	runtimeWorkspaceFileService services.WorkspaceFileService
+	skillRepo                   repository.SkillRepository
 }
 
 type createWorkspaceFolderRequest struct {
@@ -44,6 +47,10 @@ func NewWorkspaceFileHandler(instanceService services.InstanceService, fileServi
 		fileService:                 fileService,
 		runtimeWorkspaceFileService: runtimeFileService,
 	}
+}
+
+func (h *WorkspaceFileHandler) SetSkillRepository(skillRepo repository.SkillRepository) {
+	h.skillRepo = skillRepo
 }
 
 func (h *WorkspaceFileHandler) List(c *gin.Context) {
@@ -178,15 +185,27 @@ func (h *WorkspaceFileHandler) Rename(c *gin.Context) {
 }
 
 func (h *WorkspaceFileHandler) Delete(c *gin.Context) {
-	_, service, scope, ok := h.workspaceScope(c)
+	instance, service, scope, ok := h.workspaceScope(c)
 	if !ok {
 		return
 	}
-	if err := service.Delete(c.Request.Context(), scope, c.Query("path")); err != nil {
+	path := c.Query("path")
+	if err := service.Delete(c.Request.Context(), scope, path); err != nil {
 		handleWorkspaceFileError(c, err)
 		return
 	}
+	if err := h.syncSkillDeletionFromWorkspacePath(instance.ID, path); err != nil {
+		utils.HandleError(c, err)
+		return
+	}
 	utils.Success(c, http.StatusOK, "Workspace entry deleted successfully", nil)
+}
+
+func (h *WorkspaceFileHandler) syncSkillDeletionFromWorkspacePath(instanceID int, path string) error {
+	if h.skillRepo == nil {
+		return nil
+	}
+	return h.skillRepo.MarkInstanceSkillsRemovedByWorkspacePath(instanceID, path, time.Now().UTC())
 }
 
 func (h *WorkspaceFileHandler) workspaceScope(c *gin.Context) (*models.Instance, services.WorkspaceFileService, services.WorkspaceFileScope, bool) {

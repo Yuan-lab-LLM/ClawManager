@@ -33,6 +33,17 @@ function supportsWorkspace(instance: Instance) {
   );
 }
 
+function workspaceInitialPath(instance: Instance, isPro: boolean) {
+  const type = instance.type.trim().toLowerCase();
+  if (type === "hermes") {
+    return isPro ? ".hermes" : "home/.hermes";
+  }
+  if (type === "openclaw" && !isPro) {
+    return "home/.openclaw";
+  }
+  return isPro ? "/config" : undefined;
+}
+
 function typeLabel(type: Instance["type"]) {
   return type === "hermes" ? "Hermes" : type === "openclaw" ? "OpenClaw" : type;
 }
@@ -671,10 +682,13 @@ const InstancePortalPage: React.FC = () => {
                 {isProPortal ? (
                   <WorkspaceFileManager
                     instanceId={selectedInstance.id}
-                    initialPath="/config"
+                    initialPath={workspaceInitialPath(selectedInstance, isProPortal)}
                   />
                 ) : (
-                  <WorkspaceFileManager instanceId={selectedInstance.id} />
+                  <WorkspaceFileManager
+                    instanceId={selectedInstance.id}
+                    initialPath={workspaceInitialPath(selectedInstance, isProPortal)}
+                  />
                 )}
               </div>
             ) : (

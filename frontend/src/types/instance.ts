@@ -196,6 +196,44 @@ export interface CreateInstanceRequest {
   skill_ids?: number[];
 }
 
+export interface BatchCreateLiteInstancesRequest {
+  name_prefix: string;
+  count: number;
+  start_index?: number;
+  template?: Partial<CreateInstanceRequest>;
+}
+
+export interface BatchCreateLiteInstanceResult {
+  name: string;
+  status: "created" | "failed";
+  instance?: Instance;
+  error?: string;
+}
+
+export interface BatchCreateLiteInstancesResponse {
+  requested: number;
+  created: number;
+  failed: number;
+  results: BatchCreateLiteInstanceResult[];
+}
+
+export interface BatchDeleteLiteInstancesRequest {
+  instance_ids: number[];
+}
+
+export interface BatchDeleteLiteInstanceResult {
+  instance_id: number;
+  name?: string;
+  status: "deleting" | "failed";
+  error?: string;
+}
+
+export interface BatchDeleteLiteInstancesResponse {
+  requested: number;
+  deleted: number;
+  failed: number;
+  results: BatchDeleteLiteInstanceResult[];
+}
 export interface UpdateInstanceRequest {
   name?: string;
   description?: string;

@@ -65,6 +65,28 @@ func TestWorkspaceFileServiceListSortsDirectoriesFirstAndMarksCapabilities(t *te
 	}
 }
 
+func TestWorkspaceFileServiceListHidesTransientSkillTempDirs(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, ".tmp"), 0750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(root, ".tmp-skill-paper-ranker-123"), 0750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(root, "paper-ranker"), 0750); err != nil {
+		t.Fatal(err)
+	}
+
+	service := NewWorkspaceFileService(&recordingWorkspaceFileAuditRepo{})
+	entries, err := service.List(context.Background(), workspaceTestScope(root), "")
+	if err != nil {
+		t.Fatalf("List returned error: %v", err)
+	}
+
+	if len(entries) != 1 || entries[0].Name != "paper-ranker" {
+		t.Fatalf("entries = %#v, want only paper-ranker", entries)
+	}
+}
 func TestWorkspaceFileServicePreviewTextAndDoesNotAudit(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "notes.md"), []byte("# hello"), 0640); err != nil {

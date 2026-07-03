@@ -5,6 +5,8 @@ const OPENCLAW_TOKEN_PREFIX = `${OPENCLAW_TOKEN_KEY}:`;
 const OPENCLAW_DEVICE_AUTH_KEY = "openclaw.device.auth.v1";
 const CLAWMANAGER_OPENCLAW_INSTANCE_KEY = "clawmanager.openclaw.instanceId";
 const CLAWMANAGER_OPENCLAW_GATEWAY_KEY = "clawmanager.openclaw.gatewayUrl";
+const CLAWMANAGER_PROXY_STORAGE_KEY_PATTERN =
+  /(?:^https?:\/\/[^/]+)?\/api\/v1\/instances\/\d+\/proxy(?:\/|$)/i;
 
 function storageKeys(storage: Storage) {
   const keys: string[] = [];
@@ -26,6 +28,49 @@ function canonicalOpenClawGatewayUrl(embedUrl: string) {
   return url.toString();
 }
 
+function isProxyScopedRuntimeStorageKey(key: string) {
+  return CLAWMANAGER_PROXY_STORAGE_KEY_PATTERN.test(key);
+}
+
+function removeOpenClawRuntimeStorage(storage: Storage) {
+  for (const key of storageKeys(storage)) {
+    if (
+      key === OPENCLAW_SETTINGS_KEY ||
+      key.startsWith(OPENCLAW_SETTINGS_PREFIX) ||
+      key === OPENCLAW_TOKEN_KEY ||
+      key.startsWith(OPENCLAW_TOKEN_PREFIX) ||
+      isProxyScopedRuntimeStorageKey(key)
+    ) {
+      storage.removeItem(key);
+    }
+  }
+}
+
+function saveOpenClawSettings(
+  storage: Storage,
+  gatewayUrl: string,
+  instanceId: number,
+  serialized: string,
+) {
+  const entries: Array<[string, string]> = [
+    [OPENCLAW_SETTINGS_KEY, serialized],
+    [`${OPENCLAW_SETTINGS_PREFIX}${gatewayUrl}`, serialized],
+    [CLAWMANAGER_OPENCLAW_INSTANCE_KEY, String(instanceId)],
+    [CLAWMANAGER_OPENCLAW_GATEWAY_KEY, gatewayUrl],
+  ];
+
+  try {
+    for (const [key, value] of entries) {
+      storage.setItem(key, value);
+    }
+  } catch {
+    removeOpenClawRuntimeStorage(storage);
+    for (const [key, value] of entries) {
+      storage.setItem(key, value);
+    }
+  }
+}
+
 export function prepareOpenClawControlUIStorage(instanceId: number, embedUrl: string) {
   if (typeof window === "undefined") {
     return embedUrl;
@@ -40,16 +85,7 @@ export function prepareOpenClawControlUIStorage(instanceId: number, embedUrl: st
       previousInstanceId !== null && previousInstanceId !== String(instanceId);
     const gatewayChanged = previousGatewayUrl !== null && previousGatewayUrl !== gatewayUrl;
 
-    for (const key of storageKeys(storage)) {
-      if (
-        key === OPENCLAW_SETTINGS_KEY ||
-        key.startsWith(OPENCLAW_SETTINGS_PREFIX) ||
-        key === OPENCLAW_TOKEN_KEY ||
-        key.startsWith(OPENCLAW_TOKEN_PREFIX)
-      ) {
-        storage.removeItem(key);
-      }
-    }
+    removeOpenClawRuntimeStorage(storage);
 
     if (instanceChanged || gatewayChanged) {
       storage.removeItem(OPENCLAW_DEVICE_AUTH_KEY);
@@ -78,10 +114,7 @@ export function prepareOpenClawControlUIStorage(instanceId: number, embedUrl: st
     };
     const serialized = JSON.stringify(settings);
 
-    storage.setItem(OPENCLAW_SETTINGS_KEY, serialized);
-    storage.setItem(`${OPENCLAW_SETTINGS_PREFIX}${gatewayUrl}`, serialized);
-    storage.setItem(CLAWMANAGER_OPENCLAW_INSTANCE_KEY, String(instanceId));
-    storage.setItem(CLAWMANAGER_OPENCLAW_GATEWAY_KEY, gatewayUrl);
+    saveOpenClawSettings(storage, gatewayUrl, instanceId, serialized);
   } catch {
     return embedUrl;
   }

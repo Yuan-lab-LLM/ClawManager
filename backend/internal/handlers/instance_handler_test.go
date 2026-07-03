@@ -271,3 +271,55 @@ func TestProxyAccessTokenRejectsRuntimeQueryTokenWithoutCookie(t *testing.T) {
 		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusUnauthorized)
 	}
 }
+
+func TestBuildLiteBatchCreateRequestsDefaultsToGatewayLite(t *testing.T) {
+	requests, handlerRequests, err := buildLiteBatchCreateRequests(BatchCreateLiteInstancesRequest{
+		NamePrefix: "batch-lite",
+		Count:      2,
+	})
+	if err != nil {
+		t.Fatalf("buildLiteBatchCreateRequests returned error: %v", err)
+	}
+	if len(requests) != 2 || len(handlerRequests) != 2 {
+		t.Fatalf("request count = %d/%d, want 2/2", len(requests), len(handlerRequests))
+	}
+	for idx, req := range requests {
+		if req.Name == "" || req.Mode != services.InstanceModeLite || req.InstanceMode != services.InstanceModeLite || req.RuntimeType != services.RuntimeBackendGateway {
+			t.Fatalf("request %d was not normalized to lite gateway: %#v", idx, req)
+		}
+		if req.Type != "openclaw" || req.OSType != "openclaw" || req.OSVersion != "latest" {
+			t.Fatalf("request %d defaults = type %q os %q version %q", idx, req.Type, req.OSType, req.OSVersion)
+		}
+	}
+}
+
+func TestBatchDeleteLiteInstancesRejectsProInstance(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/instances/batch/delete", strings.NewReader(`{"instance_ids":[42]}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set("userID", 7)
+	c.Set("userRole", "user")
+
+	handler := &InstanceHandler{
+		instanceService: &fakeWorkspaceHandlerInstanceService{instances: map[int]*models.Instance{
+			42: {
+				ID:           42,
+				UserID:       7,
+				Name:         "pro-openclaw",
+				RuntimeType:  services.RuntimeBackendDesktop,
+				InstanceMode: services.InstanceModePro,
+			},
+		}},
+	}
+
+	handler.BatchDeleteLiteInstances(c)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d, body = %s", recorder.Code, http.StatusBadRequest, recorder.Body.String())
+	}
+	if !strings.Contains(recorder.Body.String(), "not a lite instance") {
+		t.Fatalf("response did not explain lite-only rejection: %s", recorder.Body.String())
+	}
+}

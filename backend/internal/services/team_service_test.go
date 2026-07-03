@@ -248,6 +248,47 @@ func TestBuildTeamMemberInstanceRequestPointsLiteSharedDirAtRuntimeWorkspace(t *
 	}
 }
 
+func TestOpenClawConfigPlanForTeamMemberFiltersOnlyWorkers(t *testing.T) {
+	originalPlan := &OpenClawConfigPlan{
+		Mode:        OpenClawConfigPlanModeManual,
+		ResourceIDs: []int{10, 20},
+	}
+	filteredPlan := &OpenClawConfigPlan{
+		Mode:        OpenClawConfigPlanModeManual,
+		ResourceIDs: []int{20},
+	}
+	planner := &teamOpenClawConfigPlannerStub{nextPlan: filteredPlan}
+	service := &teamService{openClawConfigPlanner: planner}
+
+	leaderPlan, err := service.openClawConfigPlanForTeamMember(7, plannedTeamMember{
+		IsLeader: true,
+		Request:  CreateTeamMemberRequest{OpenClawConfigPlan: originalPlan},
+	})
+	if err != nil {
+		t.Fatalf("leader plan returned error: %v", err)
+	}
+	if leaderPlan != originalPlan {
+		t.Fatalf("expected leader to keep original OpenClaw plan")
+	}
+	if planner.calls != 0 {
+		t.Fatalf("expected leader plan to skip filtering, got %d calls", planner.calls)
+	}
+
+	workerPlan, err := service.openClawConfigPlanForTeamMember(7, plannedTeamMember{
+		IsLeader: false,
+		Request:  CreateTeamMemberRequest{OpenClawConfigPlan: originalPlan},
+	})
+	if err != nil {
+		t.Fatalf("worker plan returned error: %v", err)
+	}
+	if workerPlan != filteredPlan {
+		t.Fatalf("expected worker to use filtered OpenClaw plan")
+	}
+	if planner.calls != 1 || planner.userID != 7 || planner.plan != originalPlan {
+		t.Fatalf("unexpected planner call: %#v", planner)
+	}
+}
+
 func TestNewRedisBusParsesURLWithoutNetwork(t *testing.T) {
 	bus, err := newRedisBus("redis://:pass@redis.example:6380/3")
 	if err != nil {
@@ -2375,6 +2416,21 @@ type teamRepositoryStub struct {
 	updatedTask      *models.TeamTask
 	updatedMember    *models.TeamMember
 	updatedTeam      *models.Team
+}
+
+type teamOpenClawConfigPlannerStub struct {
+	calls    int
+	userID   int
+	plan     *OpenClawConfigPlan
+	nextPlan *OpenClawConfigPlan
+	err      error
+}
+
+func (s *teamOpenClawConfigPlannerStub) PlanWithoutTeamMemberLeaderOnlyChannels(userID int, plan *OpenClawConfigPlan) (*OpenClawConfigPlan, error) {
+	s.calls++
+	s.userID = userID
+	s.plan = plan
+	return s.nextPlan, s.err
 }
 
 func (s *teamRepositoryStub) CreateTeam(team *models.Team) error { return nil }

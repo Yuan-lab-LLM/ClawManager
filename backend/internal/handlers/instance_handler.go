@@ -28,6 +28,8 @@ const openclawMinArchiveBytes = 100
 const (
 	defaultWorkspaceArchiveMaxMiB = int64(500)
 	workspaceArchiveMaxMiBEnv     = "CLAWMANAGER_WORKSPACE_ARCHIVE_MAX_MIB"
+	maxLiteBatchCreateCount       = 20
+	maxLiteBatchDeleteCount       = 100
 )
 
 // desktopDirectProxyEnv toggles embedding the instance Service "host:port" into
@@ -206,6 +208,61 @@ type CreateInstanceRequest struct {
 	SkillIDs             []int                        `json:"skill_ids,omitempty"`
 }
 
+type BatchCreateLiteInstanceTemplate struct {
+	Type                 string                       `json:"type,omitempty"`
+	CPUCores             float64                      `json:"cpu_cores,omitempty"`
+	MemoryGB             int                          `json:"memory_gb,omitempty"`
+	DiskGB               int                          `json:"disk_gb,omitempty"`
+	OSType               string                       `json:"os_type,omitempty"`
+	OSVersion            string                       `json:"os_version,omitempty"`
+	ImageRegistry        *string                      `json:"image_registry,omitempty"`
+	ImageTag             *string                      `json:"image_tag,omitempty"`
+	EnvironmentOverrides map[string]string            `json:"environment_overrides,omitempty"`
+	StorageClass         string                       `json:"storage_class,omitempty"`
+	OpenClawConfigPlan   *services.OpenClawConfigPlan `json:"openclaw_config_plan,omitempty"`
+	SkillIDs             []int                        `json:"skill_ids,omitempty"`
+}
+
+// BatchCreateLiteInstancesRequest represents a lite batch create request
+type BatchCreateLiteInstancesRequest struct {
+	NamePrefix string                           `json:"name_prefix" binding:"required,min=1,max=40"`
+	Count      int                              `json:"count" binding:"required,min=1,max=20"`
+	StartIndex int                              `json:"start_index" binding:"omitempty,min=0,max=9999"`
+	Template   *BatchCreateLiteInstanceTemplate `json:"template,omitempty"`
+}
+
+type BatchCreateLiteInstanceResult struct {
+	Name     string           `json:"name"`
+	Status   string           `json:"status"`
+	Instance *models.Instance `json:"instance,omitempty"`
+	Error    string           `json:"error,omitempty"`
+}
+
+type BatchCreateLiteInstancesResponse struct {
+	Requested int                             `json:"requested"`
+	Created   int                             `json:"created"`
+	Failed    int                             `json:"failed"`
+	Results   []BatchCreateLiteInstanceResult `json:"results"`
+}
+
+type BatchDeleteLiteInstancesRequest struct {
+	InstanceIDs []int `json:"instance_ids" binding:"required,min=1,max=100,dive,min=1"`
+}
+
+type BatchDeleteLiteInstanceResult struct {
+	InstanceID int    `json:"instance_id"`
+	Name       string `json:"name,omitempty"`
+	Status     string `json:"status"`
+	Error      string `json:"error,omitempty"`
+}
+
+type BatchDeleteLiteInstancesResponse struct {
+	Requested int                             `json:"requested"`
+	Deleted   int                             `json:"deleted"`
+	Failed    int                             `json:"failed"`
+	Results   []BatchDeleteLiteInstanceResult `json:"results"`
+}
+
 // UpdateInstanceRequest represents an update instance request
 type UpdateInstanceRequest struct {
 	Name                 *string `json:"name,omitempty" binding:"omitempty,min=3,max=50"`
@@ -294,27 +351,7 @@ func (h *InstanceHandler) CreateInstance(c *gin.Context) {
 		return
 	}
 
-	createReq := services.CreateInstanceRequest{
-		Name:                 req.Name,
-		Description:          req.Description,
-		Type:                 req.Type,
-		Mode:                 req.Mode,
-		InstanceMode:         req.InstanceMode,
-		RuntimeType:          req.RuntimeType,
-		DesktopStreamProfile: req.DesktopStreamProfile,
-		CPUCores:             req.CPUCores,
-		MemoryGB:             req.MemoryGB,
-		DiskGB:               req.DiskGB,
-		GPUEnabled:           req.GPUEnabled,
-		GPUCount:             req.GPUCount,
-		OSType:               req.OSType,
-		OSVersion:            req.OSVersion,
-		ImageRegistry:        req.ImageRegistry,
-		ImageTag:             req.ImageTag,
-		EnvironmentOverrides: req.EnvironmentOverrides,
-		StorageClass:         req.StorageClass,
-		OpenClawConfigPlan:   req.OpenClawConfigPlan,
-	}
+	createReq := instanceCreateRequestToService(req)
 
 	instance, err := h.instanceService.Create(userID.(int), createReq)
 	if err != nil {
@@ -338,6 +375,183 @@ func (h *InstanceHandler) CreateInstance(c *gin.Context) {
 	utils.Success(c, http.StatusCreated, "Instance created successfully", instance)
 }
 
+func instanceCreateRequestToService(req CreateInstanceRequest) services.CreateInstanceRequest {
+	return services.CreateInstanceRequest{
+		Name:                 req.Name,
+		Description:          req.Description,
+		Type:                 req.Type,
+		Mode:                 req.Mode,
+		InstanceMode:         req.InstanceMode,
+		RuntimeType:          req.RuntimeType,
+		DesktopStreamProfile: req.DesktopStreamProfile,
+		CPUCores:             req.CPUCores,
+		MemoryGB:             req.MemoryGB,
+		DiskGB:               req.DiskGB,
+		GPUEnabled:           req.GPUEnabled,
+		GPUCount:             req.GPUCount,
+		OSType:               req.OSType,
+		OSVersion:            req.OSVersion,
+		ImageRegistry:        req.ImageRegistry,
+		ImageTag:             req.ImageTag,
+		EnvironmentOverrides: req.EnvironmentOverrides,
+		StorageClass:         req.StorageClass,
+		OpenClawConfigPlan:   req.OpenClawConfigPlan,
+	}
+}
+
+func (h *InstanceHandler) BatchCreateLiteInstances(c *gin.Context) {
+	userID, _ := c.Get("userID")
+
+	var req BatchCreateLiteInstancesRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		utils.ValidationError(c, err)
+		return
+	}
+
+	createRequests, handlerRequests, err := buildLiteBatchCreateRequests(req)
+	if err != nil {
+		utils.Error(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	if err := h.instanceService.ValidateCreateRequests(userID.(int), createRequests); err != nil {
+		utils.HandleError(c, err)
+		return
+	}
+
+	response := BatchCreateLiteInstancesResponse{
+		Requested: len(createRequests),
+		Results:   make([]BatchCreateLiteInstanceResult, 0, len(createRequests)),
+	}
+
+	for idx, createReq := range createRequests {
+		handlerReq := handlerRequests[idx]
+		result := BatchCreateLiteInstanceResult{
+			Name:   createReq.Name,
+			Status: "created",
+		}
+		instance, err := h.instanceService.Create(userID.(int), createReq)
+		if err != nil {
+			result.Status = "failed"
+			result.Error = err.Error()
+			response.Failed++
+			response.Results = append(response.Results, result)
+			continue
+		}
+		result.Instance = instance
+
+		skillIDs, err := h.resolveCreateInstanceSkillIDs(userID.(int), handlerReq)
+		if err != nil {
+			result.Status = "failed"
+			result.Error = err.Error()
+			response.Failed++
+			response.Results = append(response.Results, result)
+			continue
+		}
+		attachFailed := false
+		for _, skillID := range skillIDs {
+			if _, err := h.skillService.AttachSkillToInstance(instance.ID, skillID); err != nil {
+				result.Status = "failed"
+				result.Error = err.Error()
+				response.Failed++
+				response.Results = append(response.Results, result)
+				attachFailed = true
+				break
+			}
+		}
+		if attachFailed {
+			continue
+		}
+
+		response.Created++
+		response.Results = append(response.Results, result)
+	}
+
+	status := http.StatusCreated
+	if response.Failed > 0 {
+		status = http.StatusMultiStatus
+	}
+	utils.Success(c, status, "Lite instances batch create completed", response)
+}
+
+func buildLiteBatchCreateRequests(req BatchCreateLiteInstancesRequest) ([]services.CreateInstanceRequest, []CreateInstanceRequest, error) {
+	count := req.Count
+	if count <= 0 {
+		return nil, nil, fmt.Errorf("count is required")
+	}
+	if count > maxLiteBatchCreateCount {
+		return nil, nil, fmt.Errorf("count must be at most %d", maxLiteBatchCreateCount)
+	}
+
+	prefix := strings.TrimSpace(req.NamePrefix)
+	if prefix == "" {
+		return nil, nil, fmt.Errorf("name prefix is required")
+	}
+
+	startIndex := req.StartIndex
+	if startIndex <= 0 {
+		startIndex = 1
+	}
+
+	template := CreateInstanceRequest{}
+	if req.Template != nil {
+		template.Type = req.Template.Type
+		template.CPUCores = req.Template.CPUCores
+		template.MemoryGB = req.Template.MemoryGB
+		template.DiskGB = req.Template.DiskGB
+		template.OSType = req.Template.OSType
+		template.OSVersion = req.Template.OSVersion
+		template.ImageRegistry = req.Template.ImageRegistry
+		template.ImageTag = req.Template.ImageTag
+		template.EnvironmentOverrides = req.Template.EnvironmentOverrides
+		template.StorageClass = req.Template.StorageClass
+		template.OpenClawConfigPlan = req.Template.OpenClawConfigPlan
+		template.SkillIDs = req.Template.SkillIDs
+	}
+	template.Type = strings.ToLower(strings.TrimSpace(template.Type))
+	if template.Type == "" {
+		template.Type = "openclaw"
+	}
+	if template.Type != "openclaw" && template.Type != "hermes" {
+		return nil, nil, fmt.Errorf("lite batch create supports openclaw or hermes instances")
+	}
+	if template.CPUCores <= 0 {
+		template.CPUCores = 2
+	}
+	if template.MemoryGB <= 0 {
+		template.MemoryGB = 4
+	}
+	if template.DiskGB <= 0 {
+		template.DiskGB = 20
+	}
+	if strings.TrimSpace(template.OSType) == "" {
+		template.OSType = template.Type
+	}
+	if strings.TrimSpace(template.OSVersion) == "" {
+		template.OSVersion = "latest"
+	}
+	template.Mode = services.InstanceModeLite
+	template.InstanceMode = services.InstanceModeLite
+	template.RuntimeType = services.RuntimeBackendGateway
+	template.GPUEnabled = false
+	template.GPUCount = 0
+	template.DesktopStreamProfile = ""
+
+	createRequests := make([]services.CreateInstanceRequest, 0, count)
+	handlerRequests := make([]CreateInstanceRequest, 0, count)
+	for offset := 0; offset < count; offset++ {
+		index := startIndex + offset
+		item := template
+		item.Name = fmt.Sprintf("%s-%03d", prefix, index)
+		if len(item.Name) > 50 {
+			return nil, nil, fmt.Errorf("generated instance name %q is too long", item.Name)
+		}
+		handlerRequests = append(handlerRequests, item)
+		createRequests = append(createRequests, instanceCreateRequestToService(item))
+	}
+
+	return createRequests, handlerRequests, nil
+}
 func (h *InstanceHandler) resolveCreateInstanceSkillIDs(userID int, req CreateInstanceRequest) ([]int, error) {
 	seen := map[int]struct{}{}
 	result := make([]int, 0, len(req.SkillIDs))
@@ -370,6 +584,85 @@ func (h *InstanceHandler) resolveCreateInstanceSkillIDs(userID int, req CreateIn
 	}
 
 	return result, nil
+}
+
+func (h *InstanceHandler) BatchDeleteLiteInstances(c *gin.Context) {
+	userID, _ := c.Get("userID")
+	userRole, _ := c.Get("userRole")
+
+	var req BatchDeleteLiteInstancesRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		utils.ValidationError(c, err)
+		return
+	}
+	if len(req.InstanceIDs) > maxLiteBatchDeleteCount {
+		utils.Error(c, http.StatusBadRequest, fmt.Sprintf("instance_ids must include at most %d items", maxLiteBatchDeleteCount))
+		return
+	}
+
+	seen := map[int]struct{}{}
+	instances := make([]*models.Instance, 0, len(req.InstanceIDs))
+	for _, id := range req.InstanceIDs {
+		if _, exists := seen[id]; exists {
+			continue
+		}
+		seen[id] = struct{}{}
+
+		instance, err := h.instanceService.GetByID(id)
+		if err != nil {
+			utils.HandleError(c, err)
+			return
+		}
+		if instance == nil {
+			utils.Error(c, http.StatusNotFound, fmt.Sprintf("instance %d not found", id))
+			return
+		}
+		if userRole != "admin" && instance.UserID != userID.(int) {
+			utils.Error(c, http.StatusForbidden, "Access denied")
+			return
+		}
+		if !isLiteInstance(instance) {
+			utils.Error(c, http.StatusBadRequest, fmt.Sprintf("instance %d is not a lite instance", id))
+			return
+		}
+		instances = append(instances, instance)
+	}
+
+	response := BatchDeleteLiteInstancesResponse{
+		Requested: len(instances),
+		Results:   make([]BatchDeleteLiteInstanceResult, 0, len(instances)),
+	}
+	for _, instance := range instances {
+		result := BatchDeleteLiteInstanceResult{
+			InstanceID: instance.ID,
+			Name:       instance.Name,
+			Status:     "deleting",
+		}
+		if err := h.instanceService.Delete(instance.ID); err != nil {
+			result.Status = "failed"
+			result.Error = err.Error()
+			response.Failed++
+		} else {
+			response.Deleted++
+		}
+		response.Results = append(response.Results, result)
+	}
+
+	status := http.StatusAccepted
+	if response.Failed > 0 {
+		status = http.StatusMultiStatus
+	}
+	utils.Success(c, status, "Lite instances batch delete started", response)
+}
+
+func isLiteInstance(instance *models.Instance) bool {
+	if instance == nil {
+		return false
+	}
+	if mode, ok := services.NormalizeInstanceMode(instance.InstanceMode); ok && mode == services.InstanceModeLite {
+		return true
+	}
+	return strings.EqualFold(strings.TrimSpace(instance.RuntimeType), services.RuntimeBackendGateway)
 }
 
 // GetInstance gets an instance by ID

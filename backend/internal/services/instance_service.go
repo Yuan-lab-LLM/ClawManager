@@ -726,6 +726,36 @@ func (s *instanceService) createV2Instance(ctx context.Context, userID int, req 
 		return nil, fmt.Errorf("failed to create instance record: %w", err)
 	}
 
+	if _, err := s.ensureGatewayToken(instance); err != nil {
+		_ = s.instanceRepo.Delete(instance.ID)
+		return nil, fmt.Errorf("failed to provision lite gateway token: %w", err)
+	}
+	if _, err := s.ensureAgentBootstrapToken(instance); err != nil {
+		_ = s.instanceRepo.Delete(instance.ID)
+		return nil, fmt.Errorf("failed to provision lite agent bootstrap token: %w", err)
+	}
+
+	if supportsRuntimeConfigInjection(instance.Type) && s.openClawConfigService != nil && req.OpenClawConfigPlan != nil && hasOpenClawConfigSelections(*req.OpenClawConfigPlan) {
+		bootstrapSnapshot, err := s.openClawConfigService.CreateSnapshotForInstance(userID, instance, req.OpenClawConfigPlan)
+		if err != nil {
+			_ = s.instanceRepo.Delete(instance.ID)
+			return nil, fmt.Errorf("failed to compile lite runtime bootstrap config: %w", err)
+		}
+		if bootstrapSnapshot != nil {
+			instance.OpenClawConfigSnapshotID = &bootstrapSnapshot.ID
+			instance.UpdatedAt = time.Now()
+			if err := s.instanceRepo.Update(instance); err != nil {
+				_ = s.openClawConfigService.MarkSnapshotFailed(bootstrapSnapshot, err)
+				_ = s.instanceRepo.Delete(instance.ID)
+				return nil, fmt.Errorf("failed to persist lite runtime snapshot reference: %w", err)
+			}
+			if err := s.openClawConfigService.MarkSnapshotActive(bootstrapSnapshot); err != nil {
+				_ = s.instanceRepo.Delete(instance.ID)
+				return nil, fmt.Errorf("failed to activate lite runtime bootstrap snapshot: %w", err)
+			}
+		}
+	}
+
 	workspacePath, err := ensureRuntimeWorkspaceDirectories(workspaceRoot, runtimeType, userID, instance.ID)
 	if err != nil {
 		_ = s.instanceRepo.Delete(instance.ID)
@@ -1023,9 +1053,45 @@ func (s *instanceService) BuildGatewayEnv(instance *models.Instance) (map[string
 	if err != nil {
 		return nil, err
 	}
-	return buildInstanceGatewayEnv(instance, gatewayEnv)
+
+	bootstrapEnv, err := s.runtimeBootstrapEnv(instance)
+	if err != nil {
+		return nil, err
+	}
+
+	agentEnv := map[string]string{}
+	if _, ok := defaultAgentControlBaseURL(); ok {
+		if instance.AgentBootstrapToken == nil || strings.TrimSpace(*instance.AgentBootstrapToken) == "" {
+			if s == nil || s.instanceRepo == nil {
+				return nil, fmt.Errorf("instance repository is not configured")
+			}
+			if _, err := s.ensureAgentBootstrapToken(instance); err != nil {
+				return nil, err
+			}
+		}
+		agentEnv, err = s.buildAgentEnv(instance)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	merged := mergeEnvMaps(gatewayEnv, bootstrapEnv)
+	merged = mergeEnvMaps(merged, agentEnv)
+	return buildInstanceGatewayEnv(instance, merged)
 }
 
+func (s *instanceService) runtimeBootstrapEnv(instance *models.Instance) (map[string]string, error) {
+	if instance == nil || s == nil || s.openClawConfigService == nil || instance.OpenClawConfigSnapshotID == nil || *instance.OpenClawConfigSnapshotID <= 0 {
+		return map[string]string{}, nil
+	}
+	provider, ok := s.openClawConfigService.(interface {
+		RuntimeEnvForSnapshot(userID int, instanceType string, snapshotID int) (map[string]string, error)
+	})
+	if !ok {
+		return map[string]string{}, nil
+	}
+	return provider.RuntimeEnvForSnapshot(instance.UserID, instance.Type, *instance.OpenClawConfigSnapshotID)
+}
 func (s *instanceService) ensureAgentBootstrapToken(instance *models.Instance) (string, error) {
 	if instance.AgentBootstrapToken != nil && strings.TrimSpace(*instance.AgentBootstrapToken) != "" {
 		return strings.TrimSpace(*instance.AgentBootstrapToken), nil
@@ -1091,12 +1157,18 @@ func managedRuntimePersistentDir(instance *models.Instance) string {
 	if instance == nil {
 		return "/config"
 	}
+	if isLiteRuntimeInstance(instance) && instance.WorkspacePath != nil && strings.TrimSpace(*instance.WorkspacePath) != "" {
+		workspacePath := strings.TrimSpace(*instance.WorkspacePath)
+		if strings.EqualFold(instance.Type, "hermes") {
+			return path.Join(workspacePath, "home", ".hermes")
+		}
+		return path.Join(workspacePath, "home", ".openclaw")
+	}
 	if strings.EqualFold(instance.Type, "hermes") {
 		return "/config/.hermes"
 	}
 	return persistentVolumeMountPath(instance)
 }
-
 func persistentVolumeMountPath(instance *models.Instance) string {
 	if instance == nil {
 		return "/config"
@@ -1381,8 +1453,29 @@ func (s *instanceService) Stop(instanceID int) error {
 
 // Restart restarts an instance
 func (s *instanceService) Restart(instanceID int) error {
+	ctx := context.Background()
+	instance, err := s.instanceRepo.GetByID(instanceID)
+	if err != nil {
+		return fmt.Errorf("failed to get instance: %w", err)
+	}
+	if instance == nil {
+		return fmt.Errorf("instance not found")
+	}
+
+	_, isV2 := v2RuntimeTypeForInstance(instance)
+	waitForDesktopPods := !isV2 && instanceUsesDesktopRuntime(instance)
+
 	if err := s.Stop(instanceID); err != nil {
 		return fmt.Errorf("failed to stop instance: %w", err)
+	}
+
+	if waitForDesktopPods {
+		if s.deploymentService == nil {
+			return fmt.Errorf("instance deployment service is not configured")
+		}
+		if err := s.deploymentService.WaitForDeploymentPodsDeleted(ctx, instance.UserID, instance.ID); err != nil {
+			return fmt.Errorf("failed waiting for desktop pods to stop: %w", err)
+		}
 	}
 
 	if err := s.Start(instanceID); err != nil {

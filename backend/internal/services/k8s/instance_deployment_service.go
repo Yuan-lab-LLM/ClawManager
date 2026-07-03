@@ -117,6 +117,45 @@ func (s *InstanceDeploymentService) ScaleDeployment(ctx context.Context, userID,
 	return nil
 }
 
+func (s *InstanceDeploymentService) WaitForDeploymentPodsDeleted(ctx context.Context, userID, instanceID int) error {
+	return s.waitForDeploymentPodsDeleted(ctx, userID, instanceID, podDeletionTimeout)
+}
+
+func (s *InstanceDeploymentService) waitForDeploymentPodsDeleted(ctx context.Context, userID, instanceID int, timeout time.Duration) error {
+	if s.client == nil {
+		return fmt.Errorf("k8s client not initialized")
+	}
+	if timeout <= 0 {
+		timeout = podDeletionTimeout
+	}
+
+	namespace := s.client.GetNamespace(userID)
+	selector := fmt.Sprintf("instance-id=%d,app=clawreef", instanceID)
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+
+	ticker := time.NewTicker(podDeletionPollInterval)
+	defer ticker.Stop()
+
+	for {
+		pods, err := s.client.Clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{LabelSelector: selector})
+		if err != nil {
+			return fmt.Errorf("failed to list instance deployment pods: %w", err)
+		}
+		if len(pods.Items) == 0 {
+			return nil
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-deadline.C:
+			return fmt.Errorf("timed out waiting for instance deployment pods to be deleted")
+		case <-ticker.C:
+		}
+	}
+}
+
 func (s *InstanceDeploymentService) RestartDeployment(ctx context.Context, userID, instanceID int) error {
 	if s.client == nil {
 		return fmt.Errorf("k8s client not initialized")

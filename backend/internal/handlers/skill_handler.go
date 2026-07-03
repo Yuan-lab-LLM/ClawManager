@@ -161,6 +161,20 @@ func (h *SkillHandler) ListScanResults(c *gin.Context) {
 	utils.Success(c, http.StatusOK, "Skill scan results retrieved successfully", items)
 }
 
+func (h *SkillHandler) ListAvailableInstanceSkills(c *gin.Context) {
+	instanceID, ok := h.authorizeOwnedInstance(c)
+	if !ok {
+		return
+	}
+	userID, _ := c.Get("userID")
+	userRole, _ := c.Get("userRole")
+	items, err := h.service.ListAvailableSkillsForInstance(instanceID, userID.(int), fmt.Sprint(userRole))
+	if err != nil {
+		utils.HandleError(c, err)
+		return
+	}
+	utils.Success(c, http.StatusOK, "Available instance skills retrieved successfully", items)
+}
 func (h *SkillHandler) ListInstanceSkills(c *gin.Context) {
 	instanceID, ok := h.authorizeOwnedInstance(c)
 	if !ok {
@@ -184,7 +198,9 @@ func (h *SkillHandler) AttachSkillToInstance(c *gin.Context) {
 		utils.ValidationError(c, err)
 		return
 	}
-	item, err := h.service.AttachSkillToInstance(instanceID, req.SkillID)
+	userID, _ := c.Get("userID")
+	userRole, _ := c.Get("userRole")
+	item, err := h.service.AttachSkillToInstanceForActor(instanceID, req.SkillID, userID.(int), fmt.Sprint(userRole))
 	if err != nil {
 		utils.HandleError(c, err)
 		return

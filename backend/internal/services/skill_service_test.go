@@ -3,12 +3,17 @@ package services
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"crypto/md5"
 	"encoding/hex"
+	"os"
 	"path"
+	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
+
+	"clawreef/internal/models"
 )
 
 func TestHashDirectoryPreservesSingleTopLevelSubdirectory(t *testing.T) {
@@ -150,6 +155,257 @@ func TestFlattenSingleTopLevelDirForArchiveRoot(t *testing.T) {
 	})
 	if got != want {
 		t.Fatalf("hashDirectory(flattenSingleTopLevelDir(files)) = %s, want %s", got, want)
+	}
+}
+
+func TestMaterializeLiteInstanceSkillWritesOpenClawWorkspaceSkill(t *testing.T) {
+	archive := buildTestZip(t, map[string][]byte{
+		"paper-ranker/SKILL.md":      []byte("# Paper Ranker\n"),
+		"paper-ranker/src/rank.py":   []byte("print('rank')\n"),
+		"paper-ranker/.ignored-file": []byte("local secret\n"),
+	})
+	workspacePath := filepath.Join(t.TempDir(), "openclaw", "user-45", "instance-77")
+	if err := os.MkdirAll(workspacePath, 0750); err != nil {
+		t.Fatalf("MkdirAll(workspacePath): %v", err)
+	}
+
+	instanceRepo := newV2LifecycleInstanceRepo()
+	instanceRepo.byID[77] = &models.Instance{
+		ID:            0,
+		UserID:        45,
+		Type:          RuntimeTypeOpenClaw,
+		RuntimeType:   RuntimeBackendGateway,
+		InstanceMode:  InstanceModeLite,
+		WorkspacePath: &workspacePath,
+	}
+	service := &skillService{
+		instanceRepo: instanceRepo,
+		storage:      fakeObjectStorage{"skills/paper-ranker.zip": archive},
+	}
+
+	err := service.materializeLiteInstanceSkill(context.Background(), 77, &models.Skill{
+		SkillKey: "paper-ranker",
+	}, &models.SkillBlob{
+		ObjectKey: "skills/paper-ranker.zip",
+		FileName:  "paper-ranker.zip",
+	})
+	if err != nil {
+		t.Fatalf("materializeLiteInstanceSkill() error = %v", err)
+	}
+
+	target := filepath.Join(workspacePath, "home", ".openclaw", "workspace", "skills", "paper-ranker")
+	assertFileEquals(t, filepath.Join(target, "SKILL.md"), "# Paper Ranker\n")
+	assertFileEquals(t, filepath.Join(target, "src", "rank.py"), "print('rank')\n")
+	if _, err := os.Stat(filepath.Join(target, ".ignored-file")); !os.IsNotExist(err) {
+		t.Fatalf("hidden archive entry was materialized, stat err = %v", err)
+	}
+}
+
+func TestMaterializeLiteInstanceSkillWritesHermesHomeSkill(t *testing.T) {
+	archive := buildTestZip(t, map[string][]byte{
+		"paper-ranker/SKILL.md": []byte("# Paper Ranker\n"),
+	})
+	workspacePath := filepath.Join(t.TempDir(), "hermes", "user-45", "instance-90")
+	if err := os.MkdirAll(workspacePath, 0750); err != nil {
+		t.Fatalf("MkdirAll(workspacePath): %v", err)
+	}
+
+	instanceRepo := newV2LifecycleInstanceRepo()
+	instanceRepo.byID[90] = &models.Instance{
+		ID:            90,
+		UserID:        45,
+		Type:          RuntimeTypeHermes,
+		RuntimeType:   RuntimeBackendGateway,
+		InstanceMode:  InstanceModeLite,
+		WorkspacePath: &workspacePath,
+	}
+	service := &skillService{
+		instanceRepo: instanceRepo,
+		storage:      fakeObjectStorage{"skills/paper-ranker.zip": archive},
+	}
+
+	err := service.materializeLiteInstanceSkill(context.Background(), 90, &models.Skill{
+		SkillKey: "paper-ranker",
+	}, &models.SkillBlob{
+		ObjectKey: "skills/paper-ranker.zip",
+		FileName:  "paper-ranker.zip",
+	})
+	if err != nil {
+		t.Fatalf("materializeLiteInstanceSkill() error = %v", err)
+	}
+
+	target := filepath.Join(workspacePath, "home", ".hermes", "skills", "paper-ranker")
+	assertFileEquals(t, filepath.Join(target, "SKILL.md"), "# Paper Ranker\n")
+}
+func TestChownRuntimePathToleratesNonRootPermissionDenied(t *testing.T) {
+	target := filepath.Join(t.TempDir(), "skill-file")
+	if err := os.WriteFile(target, []byte("skill"), 0644); err != nil {
+		t.Fatalf("WriteFile(target): %v", err)
+	}
+
+	oldChown := chownRuntimePathOwner
+	oldEffectiveUID := currentEffectiveUID
+	t.Cleanup(func() {
+		chownRuntimePathOwner = oldChown
+		currentEffectiveUID = oldEffectiveUID
+	})
+	chownRuntimePathOwner = func(string, int, int) error {
+		return os.ErrPermission
+	}
+	currentEffectiveUID = func() int {
+		return 1000
+	}
+
+	if err := chownRuntimePath(target, RuntimeLinuxID(77), RuntimeLinuxID(77), 0600); err != nil {
+		t.Fatalf("chownRuntimePath() error = %v", err)
+	}
+	if os.PathSeparator == '/' {
+		info, err := os.Stat(target)
+		if err != nil {
+			t.Fatalf("Stat(target): %v", err)
+		}
+		if got := info.Mode().Perm(); got != 0600 {
+			t.Fatalf("target mode = %v, want 0600", got)
+		}
+	}
+}
+
+func TestChownRuntimePathReportsRootPermissionDenied(t *testing.T) {
+	target := filepath.Join(t.TempDir(), "skill-file")
+	if err := os.WriteFile(target, []byte("skill"), 0644); err != nil {
+		t.Fatalf("WriteFile(target): %v", err)
+	}
+
+	oldChown := chownRuntimePathOwner
+	oldEffectiveUID := currentEffectiveUID
+	t.Cleanup(func() {
+		chownRuntimePathOwner = oldChown
+		currentEffectiveUID = oldEffectiveUID
+	})
+	chownRuntimePathOwner = func(string, int, int) error {
+		return os.ErrPermission
+	}
+	currentEffectiveUID = func() int {
+		return 0
+	}
+
+	err := chownRuntimePath(target, RuntimeLinuxID(90), RuntimeLinuxID(90), 0600)
+	if err == nil || !strings.Contains(err.Error(), "failed to set lite runtime owner") {
+		t.Fatalf("chownRuntimePath() error = %v, want owner error", err)
+	}
+}
+func TestWriteSkillDirectoryAtomicallyUsesNestedTempRoot(t *testing.T) {
+	targetRoot := t.TempDir()
+	err := writeSkillDirectoryAtomically(targetRoot, "marker-pdf-ingest", map[string][]byte{
+		"SKILL.md":              []byte("# Marker PDF Ingest\n"),
+		"scripts/parse_pdf.py":  []byte("print('parse')\n"),
+		"scripts/helpers/io.py": []byte("print('io')\n"),
+	})
+	if err != nil {
+		t.Fatalf("writeSkillDirectoryAtomically() error = %v", err)
+	}
+
+	target := filepath.Join(targetRoot, "marker-pdf-ingest")
+	assertFileEquals(t, filepath.Join(target, "scripts", "parse_pdf.py"), "print('parse')\n")
+	if _, err := os.Stat(filepath.Join(targetRoot, ".tmp-skill-marker-pdf-ingest")); !os.IsNotExist(err) {
+		t.Fatalf("temporary skill directory leaked at root, stat err = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(targetRoot, ".tmp")); err != nil {
+		t.Fatalf("expected nested temporary root to remain available, stat err = %v", err)
+	}
+}
+func TestRemoveLiteInstanceSkillDeletesOpenClawWorkspaceSkill(t *testing.T) {
+	workspacePath := filepath.Join(t.TempDir(), "openclaw", "user-45", "instance-77")
+	target := filepath.Join(workspacePath, "home", ".openclaw", "workspace", "skills", "paper-ranker")
+	if err := os.MkdirAll(target, 0750); err != nil {
+		t.Fatalf("MkdirAll(target): %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(target, "SKILL.md"), []byte("# Paper Ranker\n"), 0640); err != nil {
+		t.Fatalf("WriteFile(SKILL.md): %v", err)
+	}
+
+	instanceRepo := newV2LifecycleInstanceRepo()
+	instanceRepo.byID[77] = &models.Instance{
+		ID:            77,
+		UserID:        45,
+		Type:          RuntimeTypeOpenClaw,
+		RuntimeType:   RuntimeBackendGateway,
+		InstanceMode:  InstanceModeLite,
+		WorkspacePath: &workspacePath,
+	}
+	installPath := "home/.openclaw/workspace/skills/paper-ranker"
+	service := &skillService{instanceRepo: instanceRepo}
+
+	if err := service.removeLiteInstanceSkillDirectory(77, &models.InstanceSkill{SkillID: 12, InstallPath: &installPath}); err != nil {
+		t.Fatalf("removeLiteInstanceSkillDirectory() error = %v", err)
+	}
+	if _, err := os.Stat(target); !os.IsNotExist(err) {
+		t.Fatalf("expected skill directory to be removed, stat err = %v", err)
+	}
+}
+func TestRemoveLiteInstanceSkillDeletesHermesHomeSkill(t *testing.T) {
+	workspacePath := filepath.Join(t.TempDir(), "hermes", "user-45", "instance-90")
+	target := filepath.Join(workspacePath, "home", ".hermes", "skills", "paper-ranker")
+	if err := os.MkdirAll(target, 0750); err != nil {
+		t.Fatalf("MkdirAll(target): %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(target, "SKILL.md"), []byte("# Paper Ranker\n"), 0640); err != nil {
+		t.Fatalf("WriteFile(SKILL.md): %v", err)
+	}
+
+	instanceRepo := newV2LifecycleInstanceRepo()
+	instanceRepo.byID[90] = &models.Instance{
+		ID:            90,
+		UserID:        45,
+		Type:          RuntimeTypeHermes,
+		RuntimeType:   RuntimeBackendGateway,
+		InstanceMode:  InstanceModeLite,
+		WorkspacePath: &workspacePath,
+	}
+	installPath := "home/.hermes/skills/paper-ranker"
+	service := &skillService{instanceRepo: instanceRepo}
+
+	if err := service.removeLiteInstanceSkillDirectory(90, &models.InstanceSkill{SkillID: 12, InstallPath: &installPath}); err != nil {
+		t.Fatalf("removeLiteInstanceSkillDirectory() error = %v", err)
+	}
+	if _, err := os.Stat(target); !os.IsNotExist(err) {
+		t.Fatalf("expected skill directory to be removed, stat err = %v", err)
+	}
+}
+func TestLiteRuntimePersistentAncestorsIncludeOpenClawHome(t *testing.T) {
+	workspacePath := filepath.Join(t.TempDir(), "openclaw", "user-1", "instance-89")
+	persistentRoot := filepath.Join(workspacePath, "home", ".openclaw")
+
+	got := liteRuntimePersistentAncestors(workspacePath, persistentRoot)
+	want := []string{
+		workspacePath,
+		filepath.Join(workspacePath, "home"),
+		filepath.Join(workspacePath, "home", ".openclaw"),
+	}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("liteRuntimePersistentAncestors() = %#v, want %#v", got, want)
+	}
+}
+
+type fakeObjectStorage map[string][]byte
+
+func (f fakeObjectStorage) PutObject(context.Context, string, []byte, string) error {
+	return nil
+}
+
+func (f fakeObjectStorage) GetObject(_ context.Context, objectKey string) ([]byte, error) {
+	return f[objectKey], nil
+}
+
+func assertFileEquals(t *testing.T, filePath string, want string) {
+	t.Helper()
+
+	body, err := os.ReadFile(filePath)
+	if err != nil {
+		t.Fatalf("ReadFile(%q): %v", filePath, err)
+	}
+	if got := string(body); got != want {
+		t.Fatalf("ReadFile(%q) = %q, want %q", filePath, got, want)
 	}
 }
 

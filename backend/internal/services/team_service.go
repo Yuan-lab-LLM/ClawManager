@@ -203,12 +203,13 @@ type TeamWorkItemPayload struct {
 }
 
 type teamService struct {
-	repo             repository.TeamRepository
-	instanceService  InstanceService
-	pvcService       *k8s.PVCService
-	secretService    *k8s.SecretService
-	configMapService *k8s.ConfigMapService
-	podService       *k8s.PodService
+	repo                  repository.TeamRepository
+	instanceService       InstanceService
+	openClawConfigPlanner teamOpenClawConfigPlanner
+	pvcService            *k8s.PVCService
+	secretService         *k8s.SecretService
+	configMapService      *k8s.ConfigMapService
+	podService            *k8s.PodService
 
 	ctx                  context.Context
 	cancel               context.CancelFunc
@@ -218,6 +219,10 @@ type teamService struct {
 	consumers            map[int]struct{}
 	staleMonitorStarted  bool
 	runtimeWorkspaceRoot string
+}
+
+type teamOpenClawConfigPlanner interface {
+	PlanWithoutTeamMemberLeaderOnlyChannels(userID int, plan *OpenClawConfigPlan) (*OpenClawConfigPlan, error)
 }
 
 type plannedTeamMember struct {
@@ -245,6 +250,12 @@ func WithTeamRuntimeWorkspaceRoot(root string) TeamServiceOption {
 		if strings.TrimSpace(root) != "" {
 			s.runtimeWorkspaceRoot = strings.TrimSpace(root)
 		}
+	}
+}
+
+func WithTeamOpenClawConfigService(service OpenClawConfigService) TeamServiceOption {
+	return func(s *teamService) {
+		s.openClawConfigPlanner = service
 	}
 }
 
@@ -750,6 +761,14 @@ func (s *teamService) createTeamMemberInstance(userID int, team *models.Team, me
 	}
 
 	createReq := s.buildTeamMemberInstanceRequestWithSecrets(team, memberPlan, runtimeSecrets, rosterJSON)
+	memberOpenClawPlan, err := s.openClawConfigPlanForTeamMember(userID, memberPlan)
+	if err != nil {
+		member.Status = models.TeamMemberStatusFailed
+		member.UpdatedAt = time.Now().UTC()
+		_ = s.repo.UpdateMember(member)
+		return nil, err
+	}
+	createReq.OpenClawConfigPlan = memberOpenClawPlan
 	instance, err := s.instanceService.Create(userID, createReq)
 	if err != nil {
 		member.Status = models.TeamMemberStatusFailed
@@ -769,6 +788,14 @@ func (s *teamService) createTeamMemberInstance(userID int, team *models.Team, me
 		return nil, err
 	}
 	return member, nil
+}
+
+func (s *teamService) openClawConfigPlanForTeamMember(userID int, memberPlan plannedTeamMember) (*OpenClawConfigPlan, error) {
+	plan := memberPlan.Request.OpenClawConfigPlan
+	if plan == nil || memberPlan.IsLeader || s.openClawConfigPlanner == nil {
+		return plan, nil
+	}
+	return s.openClawConfigPlanner.PlanWithoutTeamMemberLeaderOnlyChannels(userID, plan)
 }
 
 func (s *teamService) buildTeamMemberInstanceRequests(team *models.Team, memberPlans []plannedTeamMember) []CreateInstanceRequest {

@@ -20,6 +20,8 @@ import type { WorkspaceEntry, WorkspacePreview } from "../types/workspace";
 interface WorkspaceFileManagerProps {
   instanceId: number;
   initialPath?: string;
+  onMutation?: () => void | Promise<void>;
+  refreshKey?: number;
 }
 
 const invalidNamePattern = /[\\/]/;
@@ -167,7 +169,7 @@ function EntryIcon({ entry }: { entry: WorkspaceEntry }) {
   return <File className="h-4 w-4 text-slate-500" />;
 }
 
-export function WorkspaceFileManager({ instanceId, initialPath }: WorkspaceFileManagerProps) {
+export function WorkspaceFileManager({ instanceId, initialPath, onMutation, refreshKey }: WorkspaceFileManagerProps) {
   const queryClient = useQueryClient();
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
   const folderUploadInputRef = useRef<HTMLInputElement | null>(null);
@@ -269,6 +271,19 @@ export function WorkspaceFileManager({ instanceId, initialPath }: WorkspaceFileM
     });
   };
 
+  useEffect(() => {
+    if (refreshKey === undefined) {
+      return;
+    }
+    void queryClient.invalidateQueries({
+      queryKey: ["workspace", instanceId, currentPath],
+    });
+  }, [currentPath, instanceId, queryClient, refreshKey]);
+
+  const notifyMutation = async () => {
+    await onMutation?.();
+  };
+
   const runAction = async (key: string, action: () => Promise<void>) => {
     try {
       setBusyAction(key);
@@ -302,6 +317,7 @@ export function WorkspaceFileManager({ instanceId, initialPath }: WorkspaceFileM
         await workspaceService.upload(instanceId, currentPath, file);
       }
       await invalidateCurrentPath();
+      await notifyMutation();
       clearUploadInputs();
     });
   };
@@ -333,6 +349,7 @@ export function WorkspaceFileManager({ instanceId, initialPath }: WorkspaceFileM
         await workspaceService.upload(instanceId, joinPath(currentPath, parentPath(relativePath)), file);
       }
       await invalidateCurrentPath();
+      await notifyMutation();
       clearUploadInputs();
     });
   };
@@ -355,6 +372,7 @@ export function WorkspaceFileManager({ instanceId, initialPath }: WorkspaceFileM
     void runAction("mkdir", async () => {
       await workspaceService.mkdir(instanceId, joinPath(currentPath, name));
       await invalidateCurrentPath();
+      await notifyMutation();
     });
   };
 
@@ -369,6 +387,7 @@ export function WorkspaceFileManager({ instanceId, initialPath }: WorkspaceFileM
         setPreviewPath(null);
       }
       await invalidateCurrentPath();
+      await notifyMutation();
     });
   };
 
@@ -382,6 +401,7 @@ export function WorkspaceFileManager({ instanceId, initialPath }: WorkspaceFileM
         setPreviewPath(null);
       }
       await invalidateCurrentPath();
+      await notifyMutation();
     });
   };
 
@@ -396,7 +416,7 @@ export function WorkspaceFileManager({ instanceId, initialPath }: WorkspaceFileM
   const entries = entriesQuery.data ?? [];
 
   return (
-    <section className="cm-surface flex h-full min-h-[420px] min-w-0 flex-col overflow-hidden xl:min-h-0">
+    <section className="cm-surface flex h-full max-h-full min-h-[420px] min-w-0 flex-col overflow-hidden xl:min-h-0">
       <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-3 py-2">
         <div className="min-w-0">
           <div className="flex min-w-0 flex-wrap items-center gap-1 text-sm">
@@ -621,20 +641,20 @@ function PreviewPane({
   }
 
   return (
-    <aside className="flex min-h-0 flex-1 flex-col border-t border-slate-200 bg-slate-50">
-      <div className="flex h-11 items-center justify-between gap-3 border-b border-slate-200 px-3">
+    <aside className="flex min-h-0 flex-1 flex-col overflow-hidden border-t border-slate-200 bg-slate-50">
+      <div className="flex h-11 shrink-0 items-center justify-between gap-3 border-b border-slate-200 px-3">
         <div className="min-w-0 truncate text-sm font-medium text-slate-900">{fileName(path)}</div>
         <button type="button" className="cm-icon-button h-8 w-8" title="Close" onClick={onClose}>
           <X className="h-4 w-4" />
         </button>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-3">
+      <div className="min-h-0 flex-1 overflow-auto p-3">
         {loading ? (
           <div className="flex h-full items-center justify-center text-sm text-slate-500">
             Loading
           </div>
         ) : preview?.kind === "text" ? (
-          <pre className="min-h-full max-w-full whitespace-pre-wrap break-words rounded-md border border-slate-200 bg-white p-3 font-mono text-xs leading-5 text-slate-800">
+          <pre className="min-w-0 max-w-full whitespace-pre-wrap break-words rounded-md border border-slate-200 bg-white p-3 font-mono text-xs leading-5 text-slate-800">
             {preview.text}
           </pre>
         ) : preview?.kind === "image" && objectUrl ? (
