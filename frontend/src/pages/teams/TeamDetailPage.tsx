@@ -2266,9 +2266,12 @@ function InteractionProcessPanel({
     : [];
   const rootControlPlaneTask = isControlPlaneTeamTask(group?.task);
   const authoritativeLeaderFlow = !rootControlPlaneTask && !peerRoot && rootWorkItems.length > 0;
+  const leaderLedgerSummary = authoritativeLeaderFlow
+    ? summarizeLeaderWorkItems(rootWorkItems, group?.task?.status)
+    : undefined;
   const progress = group
     ? authoritativeLeaderFlow
-      ? workItemProgress(rootWorkItems, group.task?.status)
+      ? leaderLedgerSummary?.progress || 0
       : processProgress(group, steps, visualStatus, peerRoot)
     : 0;
   const isTerminal = ["succeeded", "failed", "stale"].includes(visualStatus);
@@ -2381,8 +2384,19 @@ function InteractionProcessPanel({
             </div>
           </div>
           <div className="shrink-0 text-right">
-            <div className="text-xl font-semibold leading-none">{progress}%</div>
-            <div className="mt-1 text-[11px] text-slate-300">overall</div>
+            {leaderLedgerSummary ? (
+              <>
+                <div className="max-w-[150px] truncate text-sm font-semibold leading-5">{leaderLedgerSummary.phase}</div>
+                <div className="mt-1 text-[11px] text-slate-300">
+                  成员交付 {leaderLedgerSummary.delivered}/{leaderLedgerSummary.total}
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="text-xl font-semibold leading-none">{progress}%</div>
+                <div className="mt-1 text-[11px] text-slate-300">overall</div>
+              </>
+            )}
             {compact && showToggle && (
               <button
                 type="button"
@@ -2546,8 +2560,19 @@ function InteractionProcessPanel({
               <div className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-medium ${statusStyle(visualStatus)}`}>
                 {statusText}
               </div>
-              <div className="mt-2 text-xl font-semibold leading-none text-slate-900">{progress}%</div>
-              <div className="mt-1 text-[10px] uppercase tracking-[0.14em] text-slate-400">overall</div>
+              {leaderLedgerSummary ? (
+                <>
+                  <div className="mt-2 text-[13px] font-semibold leading-5 text-slate-900">{leaderLedgerSummary.phase}</div>
+                  <div className="mt-1 text-[10px] leading-4 text-slate-400">
+                    交付 {leaderLedgerSummary.delivered}/{leaderLedgerSummary.total} · {leaderLedgerSummary.blockers > 0 ? `${leaderLedgerSummary.blockers} 个阻塞` : "无阻塞"}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="mt-2 text-xl font-semibold leading-none text-slate-900">{progress}%</div>
+                  <div className="mt-1 text-[10px] uppercase tracking-[0.14em] text-slate-400">overall</div>
+                </>
+              )}
               <div className="mt-2 grid grid-cols-3 gap-1 text-center text-[10px]">
                 <KanbanCount label="T" value={kanbanCounts.todo} tone="todo" />
                 <KanbanCount label="D" value={kanbanCounts.doing} tone="doing" />
@@ -2786,6 +2811,14 @@ type KanbanTaskCard = {
 };
 
 type KanbanColumns = Record<KanbanColumnKey, KanbanTaskCard[]>;
+
+type LeaderLedgerSummary = {
+  phase: string;
+  delivered: number;
+  total: number;
+  blockers: number;
+  progress: number;
+};
 
 type PeerLaneStatus = "idle" | "waiting" | "working" | "done" | "blocked";
 
@@ -3122,23 +3155,47 @@ function buildWorkItemKanbanColumns(
   return columns;
 }
 
-function workItemProgress(workItems: TeamWorkItem[], rootStatus?: TeamTask["status"]) {
-  if (rootStatus === "succeeded") {
-    return 100;
+function summarizeLeaderWorkItems(workItems: TeamWorkItem[], rootStatus?: TeamTask["status"]): LeaderLedgerSummary {
+  const memberItems = workItems.filter((item) => item.owner_member_id && item.work_id !== "leader-final-synthesis");
+  const owners = new Map<number, TeamWorkItem[]>();
+  for (const item of memberItems) {
+    if (!item.owner_member_id) {
+      continue;
+    }
+    const list = owners.get(item.owner_member_id) || [];
+    list.push(item);
+    owners.set(item.owner_member_id, list);
   }
-  if (rootStatus === "failed" || rootStatus === "stale") {
-    return 100;
+  let delivered = 0;
+  let blockers = 0;
+  for (const list of owners.values()) {
+    if (list.some((item) => item.status === "failed" || item.status === "stale")) {
+      blockers += 1;
+      continue;
+    }
+    if (list.some((item) => item.status === "succeeded")) {
+      delivered += 1;
+    }
   }
-  if (workItems.length === 0) {
-    return 0;
+  const total = owners.size;
+  const leaderFinal = workItems.some((item) => item.work_id === "leader-final-synthesis" && item.status === "succeeded");
+  let phase = "Leader 规划中";
+  if (rootStatus === "succeeded" || leaderFinal) {
+    phase = "已完成";
+  } else if (blockers > 0) {
+    phase = "需要修复";
+  } else if (total > 0 && delivered >= total) {
+    phase = "等待 Leader 汇总";
+  } else if (total > 0) {
+    phase = "等待成员交付";
   }
-  const completed = workItems.filter((item) =>
-    ["succeeded", "failed", "stale"].includes(item.status),
-  ).length;
-  const running = workItems.filter((item) => item.status === "running").length;
-  const dispatched = workItems.filter((item) => item.status === "dispatched").length;
-  const weighted = ((completed + running * 0.55 + dispatched * 0.2) / workItems.length) * 92;
-  return Math.max(5, Math.min(92, Math.round(weighted)));
+  const progress =
+    rootStatus === "succeeded" || leaderFinal
+      ? 100
+      : total > 0
+        ? Math.max(12, Math.min(90, Math.round(24 + (delivered / total) * 56 + (blockers > 0 ? 10 : 0))))
+        : 12;
+  return { phase, delivered, total, blockers, progress };
 }
 
 function buildPeerCollaborationModel(

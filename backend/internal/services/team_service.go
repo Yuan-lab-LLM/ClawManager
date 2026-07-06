@@ -3258,10 +3258,18 @@ func isLeaderMediatedWorkerToLeaderResult(team *models.Team, eventType string, p
 
 func markLeaderMediatedAssignmentResult(eventType string, payload map[string]interface{}, member *models.TeamMember) {
 	payload["assignmentResultOnly"] = true
+	payload["memberResultConfirmed"] = true
 	payload["rootTaskTerminal"] = false
 	payload["status"] = models.TeamTaskStatusSucceeded
 	payload["runtimeStatus"] = models.TeamTaskStatusSucceeded
 	payload["availability"] = models.TeamMemberAvailabilityIdle
+	if eventString(payload, "normalizedResultSource") == "" {
+		if teamRedisProtocolVersion(payload) >= 2 {
+			payload["normalizedResultSource"] = "explicit_completion"
+		} else {
+			payload["normalizedResultSource"] = "legacy_normalized_reply"
+		}
+	}
 	if eventString(payload, "originalEvent") == "" {
 		payload["originalEvent"] = eventType
 	}
@@ -3626,6 +3634,11 @@ func (s *teamService) projectTeamEvent(team *models.Team, bus *redisBus, message
 	if err := s.projectTeamWorkItem(team, task, member, eventType, payload, event); err != nil {
 		return err
 	}
+	if assignmentResultOnly {
+		if err := s.createLeaderMediatedResultNotification(team, bus, task, member, payload, event); err != nil {
+			return err
+		}
+	}
 
 	now := time.Now().UTC()
 	taskProjection := teamTaskProjectionResult{}
@@ -3692,6 +3705,158 @@ func (s *teamService) projectTeamEvent(team *models.Team, bus *redisBus, message
 		}
 	}
 	return nil
+}
+
+func (s *teamService) createLeaderMediatedResultNotification(team *models.Team, bus *redisBus, task *models.TeamTask, member *models.TeamMember, sourcePayload map[string]interface{}, sourceEvent *models.TeamEvent) error {
+	if s == nil || team == nil || task == nil || member == nil || sourcePayload == nil || sourceEvent == nil {
+		return nil
+	}
+	if !isLeaderMediatedTeam(team) || isLeaderTeamMember(member) {
+		return nil
+	}
+	workID := "member-" + normalizeTeamMemberRouteKey(member.MemberKey)
+	source := eventString(sourcePayload, "normalizedResultSource")
+	if source == "" {
+		source = "legacy_normalized_reply"
+	}
+	summary := eventString(sourcePayload, "summary", "title")
+	resultMarkdown := eventString(sourcePayload, "resultMarkdown", "result_markdown", "result", "answer", "text", "message", "summary")
+	if summary == "" {
+		summary = truncateForSummary(resultMarkdown, 180)
+	}
+	if strings.TrimSpace(summary) == "" && strings.TrimSpace(resultMarkdown) == "" {
+		return nil
+	}
+	streamRef := ""
+	if sourceEvent.RedisStreamID != nil {
+		streamRef = *sourceEvent.RedisStreamID
+	}
+	if streamRef == "" {
+		streamRef = strconv.FormatInt(sourceEvent.CreatedAt.UnixNano(), 10)
+	}
+	eventID := fmt.Sprintf("leader-ledger-result:%d:%d:%s:%s", team.ID, task.ID, member.MemberKey, streamRef)
+	exists, err := s.repo.EventExistsByEventID(team.ID, eventID)
+	if err != nil || exists {
+		return err
+	}
+	rootTaskRef := fmt.Sprintf("team-%d-task-%d", task.TeamID, task.ID)
+	notificationPayload := map[string]interface{}{
+		"event":                  "member_result_confirmed",
+		"type":                   "member_result_confirmed",
+		"protocolVersion":        2,
+		"source":                 "clawmanager_assignment_ledger",
+		"normalizedResultSource": source,
+		"memberResultConfirmed":  true,
+		"assignmentResultOnly":   true,
+		"rootTaskTerminal":       false,
+		"rootTaskId":             rootTaskRef,
+		"rootMessageId":          task.MessageID,
+		"messageId":              task.MessageID,
+		"assignmentId":           workID,
+		"workId":                 workID,
+		"from":                   member.MemberKey,
+		"memberId":               member.MemberKey,
+		"to":                     "leader",
+		"target":                 "leader",
+		"status":                 models.TeamTaskStatusSucceeded,
+		"summary":                summary,
+		"resultMarkdown":         resultMarkdown,
+		"artifactRefs":           explicitTeamArtifactReferences(sourcePayload),
+		"collaborationStep": map[string]interface{}{
+			"type":          "result",
+			"status":        models.TeamTaskStatusSucceeded,
+			"actor":         member.MemberKey,
+			"target":        "leader",
+			"rootTaskId":    rootTaskRef,
+			"rootMessageId": task.MessageID,
+			"workId":        workID,
+			"title":         member.MemberKey + " delivers result",
+			"content":       resultMarkdown,
+			"source":        "clawmanager_assignment_ledger",
+		},
+	}
+	payloadJSON, err := marshalOptionalJSON(notificationPayload)
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	event := &models.TeamEvent{
+		TeamID:      team.ID,
+		TaskID:      &task.ID,
+		MemberID:    &member.ID,
+		MessageID:   &task.MessageID,
+		EventID:     &eventID,
+		EventType:   "member_result_confirmed",
+		PayloadJSON: payloadJSON,
+		OccurredAt:  &now,
+		CreatedAt:   now,
+	}
+	if err := s.repo.CreateEvent(event); err != nil {
+		return err
+	}
+	s.dispatchLeaderMediatedResultNotificationToInbox(team, bus, task, member, notificationPayload, eventID)
+	return nil
+}
+
+func (s *teamService) dispatchLeaderMediatedResultNotificationToInbox(team *models.Team, bus *redisBus, task *models.TeamTask, member *models.TeamMember, notificationPayload map[string]interface{}, eventID string) {
+	if s == nil || team == nil || bus == nil || task == nil || member == nil || notificationPayload == nil {
+		return
+	}
+	leaderKey := "leader"
+	if leader, err := s.repo.GetMemberByID(task.TargetMemberID); err == nil && leader != nil && strings.TrimSpace(leader.MemberKey) != "" {
+		leaderKey = leader.MemberKey
+	}
+	resultMarkdown := eventString(notificationPayload, "resultMarkdown", "summary")
+	prompt := fmt.Sprintf(
+		"Member %s delivered a confirmed assignment result for root task %s.\n\nResult:\n%s\n\nRecord this result in your synthesis context. If every required assignment has delivered, provide the final user-facing synthesis and call %s for the root task. Do not close the root task if any required assignment is still missing or blocked.",
+		member.MemberKey,
+		task.MessageID,
+		resultMarkdown,
+		teamTaskCompletionTool,
+	)
+	envelope := map[string]interface{}{
+		"v":                  1,
+		"messageId":          eventID,
+		"teamId":             strconv.Itoa(team.ID),
+		"from":               "clawmanager",
+		"to":                 leaderKey,
+		"replyTo":            teamTaskReplyTarget,
+		"requiresCompletion": false,
+		"completionTool":     teamTaskCompletionTool,
+		"intent":             "member_result_confirmed",
+		"taskId":             fmt.Sprintf("team-%d-task-%d", task.TeamID, task.ID),
+		"title":              member.MemberKey + " assignment result confirmed",
+		"prompt":             prompt,
+		"rawPrompt":          prompt,
+		"metadata":           notificationPayload,
+		"createdAt":          time.Now().UTC().Format(time.RFC3339Nano),
+	}
+	envelopeJSON, err := marshalJSON(envelope)
+	if err != nil {
+		fmt.Printf("Warning: failed to encode Leader result notification for Team %d task %d: %v\n", team.ID, task.ID, err)
+		return
+	}
+	if _, err := bus.XAdd(context.Background(), teamInboxKey(team.ID, leaderKey), map[string]string{
+		"payload":    envelopeJSON,
+		"team_id":    strconv.Itoa(team.ID),
+		"task_id":    strconv.Itoa(task.ID),
+		"message_id": eventID,
+		"member_id":  leaderKey,
+	}); err != nil {
+		fmt.Printf("Warning: failed to dispatch Leader result notification for Team %d task %d: %v\n", team.ID, task.ID, err)
+	}
+}
+
+func truncateForSummary(text string, max int) string {
+	value := strings.TrimSpace(text)
+	if value == "" || max <= 0 {
+		return value
+	}
+	runes := []rune(value)
+	if len(runes) <= max {
+		return value
+	}
+	return string(runes[:max]) + "..."
 }
 
 func (s *teamService) resolveTeamTaskFromEventReferences(teamID int, payload map[string]interface{}) (*models.TeamTask, error) {
@@ -4011,6 +4176,12 @@ func (s *teamService) projectTeamWorkItem(
 	}
 	if target == "" {
 		target = leaderMediatedRouteTarget(payload)
+	}
+	if isLeaderMediatedTeam(team) && stepType == "assignment" {
+		normalizedTarget := normalizeTeamMemberRouteKey(target)
+		if normalizedTarget == "" || isLeaderRouteTarget(normalizedTarget) {
+			return nil
+		}
 	}
 	ownerKey := actor
 	if stepType == "assignment" && target != "" {

@@ -1157,6 +1157,63 @@ func TestProjectTeamEventLeaderDispatchCompletionDoesNotCloseRootTask(t *testing
 	}
 }
 
+func TestProjectTeamEventLeaderPlanningDoesNotCreateLeaderAssignmentLane(t *testing.T) {
+	taskID := 169
+	messageID := "team-31-task-169"
+	task := &models.TeamTask{
+		ID:             taskID,
+		TeamID:         31,
+		TargetMemberID: 120,
+		MessageID:      messageID,
+		Status:         models.TeamTaskStatusRunning,
+		UpdatedAt:      time.Now().UTC(),
+	}
+	leader := &models.TeamMember{
+		ID:            120,
+		TeamID:        31,
+		MemberKey:     "leader",
+		Role:          "leader",
+		Status:        models.TeamMemberStatusBusy,
+		CurrentTaskID: &taskID,
+		Availability:  models.TeamMemberAvailabilityBusy,
+	}
+	repo := &teamRepositoryStub{
+		tasksByID:        map[int]*models.TeamTask{taskID: task},
+		tasksByMessageID: map[string]*models.TeamTask{messageID: task},
+		membersByKey:     map[string]*models.TeamMember{"leader": leader},
+	}
+	service := &teamService{repo: repo}
+	payloadJSON, err := json.Marshal(map[string]interface{}{
+		"event":              "reply",
+		"memberId":           "leader",
+		"messageId":          messageID,
+		"rootTaskId":         messageID,
+		"status":             "dispatched",
+		"summary":            "Planning: decomposing the task into assignments",
+		"leaderDispatchOnly": true,
+		"collaborationStep": map[string]interface{}{
+			"type":       "assignment",
+			"status":     "dispatched",
+			"actor":      "leader",
+			"target":     "leader",
+			"rootTaskId": messageID,
+			"content":    "Planning: decomposing the task into assignments",
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	if err := service.projectTeamEvent(&models.Team{ID: 31, CommunicationMode: teamCommunicationModeLeaderMediated}, nil, redisStreamMessage{
+		ID:     "1781171178657-1",
+		Fields: map[string]string{"payload": string(payloadJSON)},
+	}); err != nil {
+		t.Fatalf("projectTeamEvent returned error: %v", err)
+	}
+	if len(repo.workItems) != 0 {
+		t.Fatalf("leader planning/dispatch-to-self must not create Kanban work items, got %#v", repo.workItems)
+	}
+}
+
 func TestProjectTeamEventDoesNotTreatNonTargetReplyAsTaskCompleted(t *testing.T) {
 	taskID := 70
 	messageID := "team-31-task-70"
@@ -1205,7 +1262,7 @@ func TestProjectTeamEventDoesNotTreatNonTargetReplyAsTaskCompleted(t *testing.T)
 	if repo.updatedTask != nil && (repo.updatedTask.Status == models.TeamTaskStatusSucceeded || repo.updatedTask.FinishedAt != nil) {
 		t.Fatalf("non-target reply must not mark task succeeded, got %#v", repo.updatedTask)
 	}
-	if len(repo.createdEvents) != 1 || repo.createdEvents[0].EventType != "reply" {
+	if len(repo.createdEvents) != 2 || repo.createdEvents[0].EventType != "reply" || repo.createdEvents[1].EventType != "member_result_confirmed" {
 		t.Fatalf("expected stored event type reply, got %#v", repo.createdEvents)
 	}
 }
@@ -1534,7 +1591,7 @@ func TestProjectTeamEventLeaderMediatedWorkerCompletionDoesNotCloseRootTask(t *t
 	if repo.updatedMember == nil || repo.updatedMember.MemberKey != "worker" || repo.updatedMember.Status != models.TeamMemberStatusIdle || repo.updatedMember.Progress != 100 {
 		t.Fatalf("worker delivery should complete only the worker lane, got %#v", repo.updatedMember)
 	}
-	if len(repo.createdEvents) != 1 || repo.createdEvents[0].TaskID == nil || *repo.createdEvents[0].TaskID != taskID {
+	if len(repo.createdEvents) != 2 || repo.createdEvents[0].TaskID == nil || *repo.createdEvents[0].TaskID != taskID || repo.createdEvents[1].EventType != "member_result_confirmed" {
 		t.Fatalf("worker delivery must remain linked to the Leader root task, got %#v", repo.createdEvents)
 	}
 }
@@ -1596,9 +1653,22 @@ func TestProjectTeamEventLeaderMediatedWorkerReplyToLeaderIsAssignmentResult(t *
 	if stored["assignmentResultOnly"] != true || stored["rootTaskTerminal"] != false {
 		t.Fatalf("expected assignment-result marker, got %#v", stored)
 	}
+	if stored["memberResultConfirmed"] != true || stored["normalizedResultSource"] != "legacy_normalized_reply" {
+		t.Fatalf("expected normalized member result marker, got %#v", stored)
+	}
 	step := stored["collaborationStep"].(map[string]interface{})
 	if step["type"] != "result" || step["status"] != models.TeamTaskStatusSucceeded || step["actor"] != "designer" {
 		t.Fatalf("expected worker result collaboration step, got %#v", step)
+	}
+	if len(repo.createdEvents) != 2 || repo.createdEvents[1].EventType != "member_result_confirmed" {
+		t.Fatalf("expected leader ledger notification after worker result, got %#v", repo.createdEvents)
+	}
+	var notification map[string]interface{}
+	if err := json.Unmarshal([]byte(*repo.createdEvents[1].PayloadJSON), &notification); err != nil {
+		t.Fatalf("decode leader notification: %v", err)
+	}
+	if notification["workId"] != "member-designer" || notification["to"] != "leader" || notification["memberResultConfirmed"] != true {
+		t.Fatalf("expected structured leader notification, got %#v", notification)
 	}
 }
 
@@ -1927,6 +1997,9 @@ func TestProjectTeamEventLeaderDispatchAndWorkerResultShareMemberLane(t *testing
 	}
 	if item.ResultJSON == nil || !strings.Contains(*item.ResultJSON, "洋牡丹") {
 		t.Fatalf("expected full worker result in lane payload, got %#v", item.ResultJSON)
+	}
+	if len(repo.createdEvents) < 3 || repo.createdEvents[len(repo.createdEvents)-1].EventType != "member_result_confirmed" {
+		t.Fatalf("expected a structured leader notification for worker result, got %#v", repo.createdEvents)
 	}
 }
 
