@@ -113,6 +113,9 @@ func TestRuntimeSchedulerAssignsCreatingInstanceToReadyPod(t *testing.T) {
 	if got := len(events.published); got != 1 {
 		t.Fatalf("published events = %d, want 1", got)
 	}
+	if events.published[0].eventType != "runtime.instance.running" {
+		t.Fatalf("published event = %q, want runtime.instance.running", events.published[0].eventType)
+	}
 }
 
 func TestRuntimeSchedulerPassesGatewayEnvironmentToRuntimeAgent(t *testing.T) {
@@ -196,6 +199,10 @@ func TestRuntimeSchedulerPassesGatewayEnvironmentToRuntimeAgent(t *testing.T) {
 	}
 	if env["CLAWMANAGER_LLM_MODEL"] != `["auto","gpt-5.5"]` {
 		t.Fatalf("CLAWMANAGER_LLM_MODEL = %q", env["CLAWMANAGER_LLM_MODEL"])
+	}
+	state := instanceRepo.runtimeStates[68]
+	if state.status != "creating" || state.generation != 4 || state.message == nil || !strings.Contains(*state.message, "gateway starting") {
+		t.Fatalf("runtime state after starting gateway = %+v, want creating with startup message", state)
 	}
 }
 

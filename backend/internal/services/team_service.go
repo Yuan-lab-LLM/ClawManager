@@ -607,7 +607,7 @@ func appendTeamTaskCompletionInstruction(prompt string, communicationMode, inten
 			"Bootstrap completion contract:",
 			"- This is a control-plane Team snapshot assigned only to the Leader. Do not delegate it, create worker assignments, or wait for member replies.",
 			"- Use the injected metadata.bootstrapSnapshot and metadata.workspaceContract first. They are the authoritative roster, runtime, role, and workspace facts for this snapshot.",
-			"- If you need to read the roster file, read $CLAWMANAGER_TEAM_CONFIG_PATH or /etc/clawmanager/team/team.json. Never look for /team/team.json or /team/members; /team is the shared artifact workspace, not the config mount.",
+			"- If you need to read the roster file, read $CLAWMANAGER_TEAM_CONFIG_PATH or /etc/clawmanager/team/team.json first; /team/team.json is a shared read-only roster snapshot fallback. Never look for /team/members.",
 			"- Do not probe member HTTP health endpoints, Redis CLI, or worker desktops for this bootstrap. If a runtime status source is unavailable in the injected snapshot, report that field as unavailable instead of blocking.",
 			"- Summarize every member's identity, role, runtime, responsibilities, capability boundaries, and the configured collaboration mode.",
 			"- Explain task routing, Team Redis event synchronization, shared workspace usage, and the available Team methods without asking other members to restate their own roles.",
@@ -716,7 +716,36 @@ func (s *teamService) upsertTeamRosterConfig(userID int, team *models.Team, memb
 	}); err != nil {
 		return "", err
 	}
+	if err := s.writeSharedTeamRosterConfig(userID, team, rosterJSON); err != nil {
+		return "", err
+	}
 	return rosterJSON, nil
+}
+
+func (s *teamService) writeSharedTeamRosterConfig(userID int, team *models.Team, rosterJSON string) error {
+	if s == nil || team == nil || strings.TrimSpace(rosterJSON) == "" {
+		return nil
+	}
+	root := filepath.Clean(s.teamRuntimeSharedPathFor(userID, team.ID))
+	if root == "." || root == string(filepath.Separator) {
+		return fmt.Errorf("invalid Team shared workspace root for Team %d: %q", team.ID, root)
+	}
+	for _, rel := range []string{"", "results", "tasks", "inbox", "status"} {
+		target := root
+		if rel != "" {
+			target = filepath.Join(root, rel)
+		}
+		if err := os.MkdirAll(target, 0o2775); err != nil {
+			return fmt.Errorf("failed to prepare Team shared workspace %s: %w", target, err)
+		}
+		_ = os.Chmod(target, 0o2775)
+	}
+	path := filepath.Join(root, teamConfigFileName)
+	if err := os.WriteFile(path, []byte(rosterJSON), 0o664); err != nil {
+		return fmt.Errorf("failed to write shared Team roster %s: %w", path, err)
+	}
+	_ = os.Chmod(path, 0o664)
+	return nil
 }
 
 func buildTeamRosterConfigData(rosterJSON string, team *models.Team, members []plannedTeamMember) map[string]string {
@@ -1431,10 +1460,12 @@ func (s *teamService) enrichBootstrapTaskPayload(userID int, team *models.Team, 
 		"sharedDir":               team.SharedMountPath,
 		"sharedDirEnv":            "CLAWMANAGER_TEAM_SHARED_DIR",
 		"physicalSharedDir":       physicalSharedDir,
+		"sharedConfigPath":        "/team/" + teamConfigFileName,
+		"fallbackConfigPaths":     []string{"/team/" + teamConfigFileName},
 		"writeRoot":               "$CLAWMANAGER_TEAM_SHARED_DIR",
 		"canonicalReportPrefix":   "/team",
 		"validReportPathPattern":  "/team/<relative-path>",
-		"invalidConfigPaths":      []string{"/team/team.json", "/team/members"},
+		"invalidConfigPaths":      []string{"/team/members"},
 		"invalidArtifactPrefixes": []string{"team/"},
 	}
 	memberSnapshots := make([]map[string]interface{}, 0, len(activeMembers))
@@ -1462,6 +1493,7 @@ func (s *teamService) enrichBootstrapTaskPayload(userID int, team *models.Team, 
 		"communicationMode": normalizedTeamCommunicationMode(team.CommunicationMode),
 		"sharedDir":         team.SharedMountPath,
 		"configPath":        teamConfigMountPath,
+		"sharedConfigPath":  "/team/" + teamConfigFileName,
 		"roster":            roster,
 		"members":           memberSnapshots,
 	}
@@ -2103,11 +2135,14 @@ func (s *teamService) refreshTeamRosterConfig(userID int, team *models.Team) err
 			IsLeader:     isTeamLeaderRole(member.Role),
 		}, normalizedTeamCommunicationMode(team.CommunicationMode))
 	}
-	return s.configMapService.UpsertConfigMap(context.Background(), userID, s.teamConfigMapName(team.ID), configData, map[string]string{
+	if err := s.configMapService.UpsertConfigMap(context.Background(), userID, s.teamConfigMapName(team.ID), configData, map[string]string{
 		"app":        "clawreef",
 		"managed-by": "clawreef",
 		"team-id":    strconv.Itoa(team.ID),
-	})
+	}); err != nil {
+		return err
+	}
+	return s.writeSharedTeamRosterConfig(userID, team, rosterJSON)
 }
 
 func (s *teamService) requireOwnedTeam(userID, teamID int) (*models.Team, error) {
@@ -2247,6 +2282,35 @@ func (s *teamService) markTaskStale(task *models.TeamTask, timeout time.Duration
 	if team == nil || team.Status == models.TeamStatusDeleted || team.Status == models.TeamStatusDeleting {
 		return nil
 	}
+	if payloadJSON, terminal, err := s.taskHasTerminalCompletionEvidence(team, task); err != nil {
+		return err
+	} else if terminal {
+		now := time.Now().UTC()
+		task.Status = models.TeamTaskStatusSucceeded
+		task.FinishedAt = &now
+		task.UpdatedAt = now
+		task.ErrorMessage = nil
+		if payloadJSON != nil {
+			task.ResultJSON = payloadJSON
+		}
+		if err := s.repo.UpdateTask(task); err != nil {
+			return err
+		}
+		if member, err := s.repo.GetMemberByID(task.TargetMemberID); err != nil {
+			return err
+		} else if member != nil && member.TeamID == task.TeamID && member.CurrentTaskID != nil && *member.CurrentTaskID == task.ID {
+			member.Status = models.TeamMemberStatusIdle
+			member.CurrentTaskID = nil
+			member.Availability = models.TeamMemberAvailabilityIdle
+			member.BlockedReason = nil
+			member.Progress = 100
+			member.UpdatedAt = now
+			if err := s.repo.UpdateMember(member); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
 	cutoff := time.Now().UTC().Add(-timeout)
 	active, err := s.taskHasRecentActivity(team, task, cutoff)
 	if err != nil {
@@ -2371,6 +2435,48 @@ func (s *teamService) taskHasRecentActivity(team *models.Team, task *models.Team
 		}
 	}
 	return false, nil
+}
+
+func (s *teamService) taskHasTerminalCompletionEvidence(team *models.Team, task *models.TeamTask) (*string, bool, error) {
+	if s == nil || team == nil || task == nil {
+		return nil, false, nil
+	}
+	events, err := s.repo.ListEventsByTeamID(team.ID, 1000)
+	if err != nil {
+		return nil, false, err
+	}
+	for idx := range events {
+		event := events[idx]
+		payload := teamEventPayloadMap(event)
+		if !teamEventMatchesRootTask(event, payload, task) {
+			continue
+		}
+		if eventBool(payload, "artifactValidationFailed", "artifact_validation_failed") {
+			continue
+		}
+		member := (*models.TeamMember)(nil)
+		if event.MemberID != nil {
+			found, err := s.repo.GetMemberByID(*event.MemberID)
+			if err != nil {
+				return nil, false, err
+			}
+			if found != nil && found.TeamID == team.ID {
+				member = found
+			}
+		}
+		eventType := event.EventType
+		if markedType := markLegacyRuntimeCompletionCandidate(eventType, payload, task, member); markedType != eventType {
+			eventType = markedType
+		}
+		if isTeamTaskCompletionSignal(eventType, normalizedTeamTaskEventStatus(payload), payload) {
+			payloadJSON, err := marshalOptionalJSON(payload)
+			if err != nil {
+				return nil, false, err
+			}
+			return payloadJSON, true, nil
+		}
+	}
+	return nil, false, nil
 }
 
 func (s *teamService) redisBusForTeam(ctx context.Context, team *models.Team) (*redisBus, error) {
@@ -2516,6 +2622,9 @@ func isTeamTaskCompletionSignal(eventType, status string, payload map[string]int
 			isSuccessfulTeamTaskEventStatus(status) &&
 			isExplicitTeamTaskCompletion(payload) &&
 			hasStrictTeamCompletionEnvelope(payload)
+	}
+	if eventBool(payload, "legacyCompletionCandidate", "legacy_completion_candidate") {
+		return hasTeamCompletionResultBody(payload) && (status == "" || isSuccessfulTeamTaskEventStatus(status))
 	}
 	if !hasAuthoritativeTeamCompletionPayload(eventType, status, payload) {
 		return false
@@ -2676,8 +2785,13 @@ func hasStrictTeamCompletionEnvelope(payload map[string]interface{}) bool {
 			return false
 		}
 	}
-	refs := explicitTeamArtifactReferences(payload)
-	return len(refs) > 0
+	// Artifact references are validated separately when they are present.
+	// Some valid control-plane/bootstrap tasks only return resultMarkdown and
+	// rely on the completion tool/runtime to persist the standard result files.
+	// Requiring artifactRefs here leaves those completed root tasks stuck in a
+	// dispatched/running Kanban state even though the explicit completion
+	// envelope is otherwise authoritative.
+	return true
 }
 
 func (s *teamService) hasAcceptedTeamCompletionID(teamID int, completionID string) (bool, error) {
@@ -2788,6 +2902,24 @@ func isTerminalTeamTaskStatus(status string) bool {
 		status == models.TeamTaskStatusStale
 }
 
+func isLeaderControlPlaneSnapshotTask(task *models.TeamTask, payload map[string]interface{}) bool {
+	if payload != nil {
+		if strings.TrimSpace(eventString(payload, "intent")) == initialLeaderTaskIntent {
+			return true
+		}
+		if strings.EqualFold(strings.TrimSpace(eventString(payload, "origin")), "system_bootstrap") {
+			return true
+		}
+		if strings.EqualFold(strings.TrimSpace(eventString(payload, "executionMode", "execution_mode")), "leader_control_plane_snapshot") {
+			return true
+		}
+	}
+	if task == nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(strings.TrimSpace(task.MessageID)), "bootstrap-introduction")
+}
+
 func shouldAssociateEventWithCurrentMemberTask(eventType string, payload map[string]interface{}) bool {
 	switch eventType {
 	case "reply", "completion", "task_completed", "task_failed", "message_failed", "message_warning", "task_started", "task_progress", "progress":
@@ -2844,6 +2976,9 @@ func isLeaderMediatedLeaderDispatchOnlyMessage(team *models.Team, eventType stri
 
 func (s *teamService) leaderMediatedRootCompletionReady(team *models.Team, task *models.TeamTask, member *models.TeamMember) (bool, error) {
 	if !isLeaderMediatedTeam(team) || task == nil || member == nil || member.ID != task.TargetMemberID || !isLeaderTeamMember(member) {
+		return true, nil
+	}
+	if isLeaderControlPlaneSnapshotTask(task, nil) {
 		return true, nil
 	}
 	workItems, err := s.repo.ListWorkItemsByRootTaskID(task.ID)
@@ -3138,39 +3273,28 @@ func looksLikeLeaderDispatchOnlyText(text string) bool {
 	if normalized == "" {
 		return false
 	}
+	if containsAnyTeamTextMarker(normalized, finalResultTextMarkers()) {
+		return false
+	}
+	if containsAnyTeamTextMarker(normalized, leaderDispatchTextMarkers()) {
+		return true
+	}
 	compact := strings.ToLower(strings.Join(strings.Fields(normalized), ""))
 	lower := strings.ToLower(normalized)
-	for _, marker := range []string{
-		"任务结果反馈", "任务输出", "最终回答", "最终方案", "最终总结", "汇总如下", "结果如下",
-		"已完成并", "已完成，", "已完成:", "已完成：", "产出摘要",
-		"final answer", "final synthesis", "result summary", "task result", "completed with evidence",
-	} {
-		if strings.Contains(compact, strings.ToLower(strings.Join(strings.Fields(marker), ""))) || strings.Contains(lower, strings.ToLower(marker)) {
-			return false
-		}
-	}
-	for _, marker := range []string{
-		"任务分派", "任务下发", "分派给", "派发给", "交给", "请你", "请写", "请完成",
-		"assignment", "assigned to", "handoff",
-	} {
-		if strings.Contains(compact, strings.ToLower(strings.Join(strings.Fields(marker), ""))) || strings.Contains(lower, strings.ToLower(marker)) {
-			return true
-		}
-	}
 	if strings.Contains(normalized, "$CLAWMANAGER_TEAM_SHARED_DIR") ||
-		(strings.Contains(compact, "共享目录") && strings.Contains(compact, "规范路径")) ||
+		(containsTeamTextMarker(normalized, "\u5171\u4eab\u76ee\u5f55") && containsTeamTextMarker(normalized, "\u89c4\u8303\u8def\u5f84")) ||
 		(strings.Contains(lower, "shared directory") && strings.Contains(lower, "canonical path")) {
 		return true
 	}
-	if strings.Contains(compact, "完成后") &&
-		(strings.Contains(compact, "回传") || strings.Contains(compact, "返回给我") || strings.Contains(compact, "通知我") || strings.Contains(compact, "交付给我")) {
+	if containsTeamTextMarker(normalized, "\u5b8c\u6210\u540e") &&
+		(containsTeamTextMarker(normalized, "\u56de\u4f20") || containsTeamTextMarker(normalized, "\u8fd4\u56de\u7ed9\u6211") || containsTeamTextMarker(normalized, "\u901a\u77e5\u6211") || containsTeamTextMarker(normalized, "\u4ea4\u4ed8\u7ed9\u6211")) {
 		return true
 	}
-	if strings.Contains(compact, "用户想让你") && strings.Contains(compact, "请") {
+	if containsTeamTextMarker(normalized, "\u7528\u6237\u60f3\u8ba9\u4f60") && containsTeamTextMarker(normalized, "\u8bf7") {
 		return true
 	}
 	for _, target := range []string{"pm", "designer", "ui-designer", "architect", "worker", "product-manager", "solution-architect"} {
-		if strings.Contains(compact, target+"你好") || strings.Contains(compact, "@"+target) {
+		if strings.Contains(compact, target+"\u4f60\u597d") || strings.Contains(compact, "@"+target) {
 			return true
 		}
 	}
@@ -3187,20 +3311,63 @@ func looksLikeFinalResultText(text string) bool {
 	if normalized == "" {
 		return false
 	}
-	compact := strings.ToLower(strings.Join(strings.Fields(normalized), ""))
-	lower := strings.ToLower(normalized)
-	for _, marker := range []string{
-		"任务结果反馈", "任务输出", "最终回答", "最终方案", "最终总结", "汇总如下", "结果如下",
-		"已完成并", "已完成，", "已完成:", "已完成：", "产出摘要",
-		"final answer", "final synthesis", "result summary", "task result", "completed with evidence",
-	} {
-		if strings.Contains(compact, strings.ToLower(strings.Join(strings.Fields(marker), ""))) || strings.Contains(lower, strings.ToLower(marker)) {
+	return containsAnyTeamTextMarker(normalized, finalResultTextMarkers())
+}
+
+func finalResultTextMarkers() []string {
+	return []string{
+		"\u4efb\u52a1\u7ed3\u679c\u53cd\u9988",
+		"\u4efb\u52a1\u8f93\u51fa",
+		"\u6700\u7ec8\u56de\u7b54",
+		"\u6700\u7ec8\u65b9\u6848",
+		"\u6700\u7ec8\u603b\u7ed3",
+		"\u6c47\u603b\u5982\u4e0b",
+		"\u7ed3\u679c\u5982\u4e0b",
+		"\u5df2\u5b8c\u6210\u5e76",
+		"\u5df2\u5b8c\u6210\uff0c",
+		"\u5df2\u5b8c\u6210",
+		"\u5df2\u5b8c\u6210\uff1a",
+		"\u4ea7\u51fa\u6458\u8981",
+		"final answer",
+		"final synthesis",
+		"result summary",
+		"task result",
+		"completed with evidence",
+	}
+}
+
+func leaderDispatchTextMarkers() []string {
+	return []string{
+		"\u4efb\u52a1\u5206\u6d3e",
+		"\u4efb\u52a1\u4e0b\u53d1",
+		"\u5206\u6d3e\u7ed9",
+		"\u6d3e\u53d1\u7ed9",
+		"\u4ea4\u7ed9",
+		"\u8bf7\u4f60",
+		"\u8bf7\u5199",
+		"\u8bf7\u5b8c\u6210",
+		"assignment",
+		"assigned to",
+		"handoff",
+	}
+}
+
+func containsAnyTeamTextMarker(text string, markers []string) bool {
+	for _, marker := range markers {
+		if containsTeamTextMarker(text, marker) {
 			return true
 		}
 	}
 	return false
 }
 
+func containsTeamTextMarker(text, marker string) bool {
+	lowerText := strings.ToLower(text)
+	lowerMarker := strings.ToLower(marker)
+	compactText := strings.ToLower(strings.Join(strings.Fields(text), ""))
+	compactMarker := strings.ToLower(strings.Join(strings.Fields(marker), ""))
+	return strings.Contains(lowerText, lowerMarker) || strings.Contains(compactText, compactMarker)
+}
 func inferLeaderDispatchTarget(payload map[string]interface{}) string {
 	if payload == nil {
 		return ""
@@ -3315,6 +3482,7 @@ func (s *teamService) projectTeamEvent(team *models.Team, bus *redisBus, message
 		markLeaderMediatedAssignmentResult(eventType, payload, member)
 	}
 	eventType = normalizeFinalReplyTaskEvent(eventType, payload, task, member)
+	eventType = markLegacyRuntimeCompletionCandidate(eventType, payload, task, member)
 	eventStatus := normalizedTeamTaskEventStatus(payload)
 	eventSignalsCompletion := isTeamTaskCompletionSignal(eventType, eventStatus, payload)
 	eventSignalsFailure := isTeamTaskFailureSignal(eventType, eventStatus, payload)
@@ -3523,7 +3691,14 @@ func (s *teamService) resolveTeamTaskFromEventReferences(teamID int, payload map
 	if payload == nil {
 		return nil, nil
 	}
-	for _, key := range []string{"rootMessageId", "root_message_id", "parentMessageId", "parent_message_id", "inReplyTo", "in_reply_to", "replyTo", "reply_to"} {
+	for _, key := range []string{
+		"rootMessageId", "root_message_id",
+		"completionMessageId", "completion_message_id",
+		"messageId", "message_id",
+		"parentMessageId", "parent_message_id",
+		"inReplyTo", "in_reply_to",
+		"replyTo", "reply_to",
+	} {
 		messageID := eventString(payload, key)
 		if messageID == "" {
 			continue
@@ -3534,7 +3709,14 @@ func (s *teamService) resolveTeamTaskFromEventReferences(teamID int, payload map
 			return found, nil
 		}
 	}
-	for _, key := range []string{"rootTaskId", "root_task_id", "parentTaskId", "parent_task_id", "currentTaskId", "current_task_id", "runtimeTaskId", "runtime_task_id"} {
+	for _, key := range []string{
+		"rootTaskId", "root_task_id",
+		"completionTaskId", "completion_task_id",
+		"taskId", "task_id",
+		"parentTaskId", "parent_task_id",
+		"currentTaskId", "current_task_id",
+		"runtimeTaskId", "runtime_task_id",
+	} {
 		if taskID := parseClawManagerTeamTaskRef(teamID, eventString(payload, key)); taskID > 0 {
 			found, err := s.repo.GetTaskByID(taskID)
 			if err != nil {
@@ -3794,6 +3976,9 @@ func (s *teamService) projectTeamWorkItem(
 	event *models.TeamEvent,
 ) error {
 	if s == nil || team == nil || task == nil || payload == nil || event == nil {
+		return nil
+	}
+	if isLeaderControlPlaneSnapshotTask(task, payload) {
 		return nil
 	}
 	step, _ := payload["collaborationStep"].(map[string]interface{})
@@ -4149,7 +4334,7 @@ func inferCollaborationPhase(stepType, title, summary string, payload map[string
 		return "verification"
 	case strings.Contains(text, "design") || strings.Contains(text, "ui") || strings.Contains(text, "prototype"):
 		return "design"
-	case strings.Contains(text, "research") || strings.Contains(text, "调研"):
+	case strings.Contains(text, "research") || strings.Contains(text, "璋冪爺"):
 		return "research"
 	case stepType == "assignment":
 		return "decomposition"
@@ -4203,6 +4388,87 @@ func normalizeFinalReplyTaskEvent(eventType string, payload map[string]interface
 	return "task_completed"
 }
 
+func markLegacyRuntimeCompletionCandidate(eventType string, payload map[string]interface{}, task *models.TeamTask, member *models.TeamMember) string {
+	if task == nil || member == nil || payload == nil || teamRedisProtocolVersion(payload) >= 2 {
+		return eventType
+	}
+	normalizedEvent := strings.ToLower(strings.TrimSpace(eventType))
+	if normalizedEvent != "reply" && normalizedEvent != "message" {
+		return eventType
+	}
+	explicitControlPlaneCompletion := isLeaderControlPlaneSnapshotTask(task, payload) &&
+		hasTeamCompletionResultBody(payload) &&
+		(strings.EqualFold(strings.TrimSpace(eventString(payload, "completionSource", "completion_source")), teamTaskCompletionTool) ||
+			hasTeamTaskCompletionToolCall(payload) ||
+			eventBool(payload, "explicitCompletion", "explicit_completion"))
+	if member.ID != task.TargetMemberID || (isDispatchOnlyCompletionPayload(payload) && !explicitControlPlaneCompletion) {
+		return eventType
+	}
+	resultText := directTaskCompletionReplyText(payload)
+	if resultText == "" {
+		resultText = eventString(payload, "summary")
+	}
+	if resultText == "" {
+		return eventType
+	}
+	if !explicitControlPlaneCompletion {
+		if isInterimOrDelegationReplyText(resultText) || !looksLikeLegacyRuntimeCompletionReport(task, payload, resultText) {
+			return eventType
+		}
+	}
+	payload["legacyCompletionCandidate"] = true
+	payload["completionSource"] = "legacy_runtime_reply"
+	payload["rootTaskTerminal"] = true
+	payload["final"] = true
+	payload["status"] = models.TeamTaskStatusSucceeded
+	payload["availability"] = models.TeamMemberAvailabilityIdle
+	payload["runtimeStatus"] = models.TeamTaskStatusSucceeded
+	if eventString(payload, "resultMarkdown", "result_markdown") == "" {
+		payload["resultMarkdown"] = resultText
+	}
+	if eventString(payload, "summary") == "" {
+		payload["summary"] = compactTeamEventSummary(resultText, 240)
+	}
+	if eventString(payload, "originalEvent") == "" {
+		payload["originalEvent"] = eventType
+	}
+	payload["event"] = "task_completed"
+	payload["type"] = "task_completed"
+	return "task_completed"
+}
+
+func looksLikeLegacyRuntimeCompletionReport(task *models.TeamTask, payload map[string]interface{}, resultText string) bool {
+	text := strings.TrimSpace(resultText)
+	if text == "" {
+		return false
+	}
+	lower := strings.ToLower(text)
+	compact := strings.ToLower(strings.Join(strings.Fields(text), ""))
+	hasCanonicalArtifact := regexp.MustCompile(`/team/(results|tasks)/[^\s)\]<>{},\\\x60"']+\.[A-Za-z0-9]+`).FindString(text) != ""
+	hasCompletionWord := strings.Contains(lower, "completed") ||
+		strings.Contains(lower, "complete") ||
+		strings.Contains(lower, "succeeded") ||
+		strings.Contains(lower, "delivered") ||
+		strings.Contains(text, "\u5b8c\u6210") ||
+		strings.Contains(text, "\u5df2\u5b8c\u6210") ||
+		strings.Contains(text, "\u4ea4\u4ed8")
+	hasBootstrapWord := strings.Contains(lower, "bootstrap") ||
+		strings.Contains(lower, "introduction") ||
+		strings.Contains(text, "\u5f15\u5bfc") ||
+		strings.Contains(text, "\u4ecb\u7ecd") ||
+		strings.Contains(text, "\u56e2\u961f")
+	if hasCanonicalArtifact && (hasCompletionWord || looksLikeFinalResultText(text) || len([]rune(compact)) >= 80) {
+		return true
+	}
+	if strings.Contains(strings.ToLower(task.MessageID), "bootstrap-introduction") && hasBootstrapWord && hasCompletionWord && len([]rune(compact)) >= 80 {
+		return true
+	}
+	if eventBool(payload, "final", "isFinal", "complete", "completed", "taskCompleted") && looksLikeFinalResultText(text) && len([]rune(compact)) >= 120 {
+		return true
+	}
+	return false
+}
+
 func isImplicitDirectTaskCompletionReply(task *models.TeamTask, member *models.TeamMember, payload map[string]interface{}) bool {
 	if task == nil || member == nil || payload == nil {
 		return false
@@ -4242,6 +4508,18 @@ func directTaskCompletionReplyText(payload map[string]interface{}) string {
 	return ""
 }
 
+func compactTeamEventSummary(value string, limit int) string {
+	text := strings.TrimSpace(strings.Join(strings.Fields(value), " "))
+	if text == "" || limit <= 0 {
+		return text
+	}
+	runes := []rune(text)
+	if len(runes) <= limit {
+		return text
+	}
+	return string(runes[:limit]) + "..."
+}
+
 func isInterimOrDelegationReplyText(text string) bool {
 	normalized := strings.TrimSpace(text)
 	if normalized == "" {
@@ -4258,26 +4536,76 @@ func isInterimOrDelegationReplyText(text string) bool {
 	if len([]rune(compact)) <= 12 {
 		return true
 	}
-	for _, prefix := range []string{
-		"收到", "好的", "好，", "好,", "ok", "okay", "处理中", "正在", "准备", "我将", "让我", "先看", "稍等",
-		"let me", "now let me", "i will", "i'll", "checking", "working on", "good, i have", "i have the", "i have all", "i can see",
-	} {
-		if strings.HasPrefix(lower, prefix) || strings.HasPrefix(normalized, prefix) {
+	for _, prefix := range interimReplyPrefixes() {
+		if strings.HasPrefix(lower, strings.ToLower(prefix)) || strings.HasPrefix(normalized, prefix) {
 			return true
 		}
 	}
-	for _, marker := range []string{
-		"正在整理", "现在整理", "稍后", "等待其", "等待他", "等待她", "等待worker", "等待 worker",
-		"派单", "已派发", "派发给", "下发给", "转派给", "交给worker", "交给 worker",
-		"让worker", "让 worker", "请worker", "请 worker", "worker在线空闲",
-		"sent to worker", "assigned to worker", "waiting for worker", "handoff to worker",
-		"now let me write", "then finalize", "and then finalize", "write the comprehensive report",
-	} {
-		if strings.Contains(compact, strings.ReplaceAll(strings.ToLower(marker), " ", "")) || strings.Contains(lower, marker) {
-			return true
-		}
+	if containsAnyTeamTextMarker(normalized, interimReplyMarkers()) {
+		return true
 	}
 	return false
+}
+
+func interimReplyPrefixes() []string {
+	return []string{
+		"\u6536\u5230",
+		"\u597d\u7684",
+		"\u597d\uff0c",
+		"\u597d",
+		"ok",
+		"okay",
+		"\u5904\u7406\u4e2d",
+		"\u6b63\u5728",
+		"\u51c6\u5907",
+		"\u6211\u5c06",
+		"\u8ba9\u6211",
+		"\u5148\u770b",
+		"\u7a0d\u7b49",
+		"let me",
+		"now let me",
+		"i will",
+		"i'll",
+		"checking",
+		"working on",
+		"good, i have",
+		"i have the",
+		"i have all",
+		"i can see",
+	}
+}
+
+func interimReplyMarkers() []string {
+	return []string{
+		"\u6b63\u5728\u6574\u7406",
+		"\u73b0\u5728\u6574\u7406",
+		"\u7a0d\u540e",
+		"\u7b49\u5f85\u5b8c\u6210",
+		"\u7b49\u5f85\u4ed6",
+		"\u7b49\u5f85\u5979",
+		"\u7b49\u5f85worker",
+		"\u7b49\u5f85 worker",
+		"\u6d3e\u5355",
+		"\u5df2\u6d3e\u53d1",
+		"\u6d3e\u53d1\u7ed9",
+		"\u4e0b\u53d1\u7ed9",
+		"\u8f6c\u6d3e\u7ed9",
+		"\u4ea4\u7ed9worker",
+		"\u4ea4\u7ed9 worker",
+		"\u8ba9worker",
+		"\u8ba9 worker",
+		"\u8bf7worker",
+		"\u8bf7 worker",
+		"worker\u5728\u7ebf\u7a7a\u95f2",
+		"sent to worker",
+		"assigned to worker",
+		"waiting for worker",
+		"handoff to worker",
+		"now let me write",
+		"then finalize",
+		"and then finalize",
+		"write the comprehensive report",
+	}
 }
 
 func looksLikeSubstantialFinalReply(text string) bool {
@@ -4288,17 +4616,18 @@ func looksLikeSubstantialFinalReply(text string) bool {
 	if strings.ContainsAny(normalized, "#*>|`") {
 		return true
 	}
-	if strings.ContainsAny(normalized, "。；;：:\n") {
+	if strings.ContainsAny(normalized, ";\n") || strings.Contains(normalized, "\u3002") || strings.Contains(normalized, "\uff1b") || strings.Contains(normalized, "\uff0c") {
 		return true
 	}
-	return strings.Contains(normalized, "完成") ||
-		strings.Contains(normalized, "总结") ||
-		strings.Contains(normalized, "报告") ||
-		strings.Contains(normalized, "结果") ||
-		strings.Contains(strings.ToLower(normalized), "completed") ||
-		strings.Contains(strings.ToLower(normalized), "summary")
+	return containsAnyTeamTextMarker(normalized, []string{
+		"\u5b8c\u6210",
+		"\u603b\u7ed3",
+		"\u62a5\u544a",
+		"\u7ed3\u679c",
+		"completed",
+		"summary",
+	})
 }
-
 func hasTeamTaskCompletionToolCall(payload map[string]interface{}) bool {
 	if payload == nil {
 		return false
@@ -4503,9 +4832,10 @@ func (s *teamService) missingTeamArtifactReferences(team *models.Team, payload m
 	if s == nil || team == nil || payload == nil {
 		return nil
 	}
+	explicitRefsOnly := teamRedisProtocolVersion(payload) >= 2
 	refs := collectTeamArtifactReferences(payload)
 	invalidRelativeRefs := collectInvalidRelativeTeamArtifactReferences(payload)
-	if teamRedisProtocolVersion(payload) >= 2 {
+	if explicitRefsOnly {
 		refs = explicitTeamArtifactReferences(payload)
 		invalidRelativeRefs = nil
 	}
@@ -4536,7 +4866,7 @@ func (s *teamService) missingTeamArtifactReferences(team *models.Team, payload m
 			if os.IsNotExist(err) {
 				missing = append(missing, ref)
 			}
-		} else if !info.Mode().IsRegular() {
+		} else if !info.Mode().IsRegular() && explicitRefsOnly {
 			missing = append(missing, ref)
 		}
 	}
@@ -4554,8 +4884,11 @@ func explicitTeamArtifactReferences(payload map[string]interface{}) []string {
 	refs := make([]string, 0)
 	seen := map[string]struct{}{}
 	appendRef := func(raw interface{}) {
-		ref := strings.TrimSpace(fmt.Sprintf("%v", raw))
+		ref := trimTeamArtifactReferenceToken(fmt.Sprintf("%v", raw))
 		if !strings.HasPrefix(ref, teamSharedMountPath+"/") || strings.ContainsAny(ref, "`\"'{}[]") {
+			return
+		}
+		if strings.HasSuffix(ref, "/") {
 			return
 		}
 		if _, exists := seen[ref]; exists {
@@ -4590,8 +4923,8 @@ func collectTeamArtifactReferences(value interface{}) []string {
 		switch typed := current.(type) {
 		case string:
 			for _, match := range pattern.FindAllString(typed, -1) {
-				ref := strings.TrimRight(match, ".,;:，。；、")
-				if ref == "" {
+				ref := trimTeamArtifactReferenceToken(match)
+				if ref == "" || !looksLikeTeamArtifactFileReference(ref) {
 					continue
 				}
 				if _, exists := seen[ref]; exists {
@@ -4614,6 +4947,28 @@ func collectTeamArtifactReferences(value interface{}) []string {
 	return refs
 }
 
+func trimTeamArtifactReferenceToken(value string) string {
+	ref := strings.TrimSpace(value)
+	if ref == "" {
+		return ""
+	}
+	ref = strings.TrimRight(ref, " \t\r\n.,;:!?。；：，、！？)")
+	ref = strings.TrimRight(ref, "]}>）】》”’")
+	return ref
+}
+
+func looksLikeTeamArtifactFileReference(ref string) bool {
+	ref = strings.TrimSpace(ref)
+	if ref == "" || strings.HasSuffix(ref, "/") {
+		return false
+	}
+	lastSlash := strings.LastIndex(ref, "/")
+	name := ref
+	if lastSlash >= 0 {
+		name = ref[lastSlash+1:]
+	}
+	return strings.Contains(name, ".")
+}
 func collectInvalidRelativeTeamArtifactReferences(value interface{}) []string {
 	refs := make([]string, 0)
 	pattern := regexp.MustCompile(`(^|[\s(\[>])(team/[^\s)\]<>{},\\\x60"']+)`)
@@ -4626,7 +4981,7 @@ func collectInvalidRelativeTeamArtifactReferences(value interface{}) []string {
 				if len(match) < 3 {
 					continue
 				}
-				ref := strings.TrimRight(match[2], ".,;:，。；、")
+				ref := strings.TrimRight(match[2], ".,;:")
 				if strings.HasPrefix(ref, "team/results/") ||
 					strings.HasPrefix(ref, "team/tasks/") ||
 					strings.HasPrefix(ref, "team/inbox/") ||
@@ -4651,6 +5006,22 @@ func collectInvalidRelativeTeamArtifactReferences(value interface{}) []string {
 	}
 	walk(value)
 	return refs
+}
+func buildInitialLeaderTaskPayload(teamName string) map[string]interface{} {
+	normalizedTeamName := strings.TrimSpace(teamName)
+	if normalizedTeamName == "" {
+		normalizedTeamName = "current"
+	}
+	prompt := fmt.Sprintf("\u8bf7\u4ecb\u7ecdteam %s\u5f53\u524d Redis Team\u6210\u5458\u6784\u6210\uff0c\u5305\u62ec\u5404\u89d2\u8272\u7684\u804c\u8d23\u5206\u5de5\u3001\u8fd0\u884c\u72b6\u6001\u4e0e\u6280\u672f\u80fd\u529b\u8fb9\u754c\u3002\u540c\u65f6\u8bf4\u660e\u56e2\u961f\u5185\u90e8\u7684\u534f\u4f5c\u4e0e\u901a\u4fe1\u673a\u5236(team_send)\uff0c\u4f8b\u5982\u4efb\u52a1\u6d41\u8f6c\u65b9\u5f0f\u3001\u6d88\u606f\u540c\u6b65\u65b9\u5f0f\u3001\u4e0a\u4e0b\u6587\u5171\u4eab\u65b9\u5f0f\u4ee5\u53ca\u53ef\u8c03\u7528\u7684\u65b9\u6cd5\u3001\u5de5\u5177\u4e0e\u64cd\u4f5c\u80fd\u529b\uff0c\u4ee5\u4fbf\u540e\u7eed\u80fd\u591f\u66f4\u9ad8\u6548\u5730\u5f00\u5c55\u56e2\u961f\u5de5\u4f5c", normalizedTeamName)
+	return map[string]interface{}{
+		"intent":             initialLeaderTaskIntent,
+		"title":              "\u4ecb\u7ecd\u5f53\u524d Redis Team \u6210\u5458\u4e0e\u534f\u4f5c\u673a\u5236",
+		"prompt":             prompt,
+		"origin":             "system_bootstrap",
+		"executionMode":      "leader_control_plane_snapshot",
+		"requiresDelegation": false,
+		"anchorEligible":     false,
+	}
 }
 
 func (s *teamService) markTeamFailed(team *models.Team, cause error) error {
@@ -4677,7 +5048,6 @@ func (s *teamService) rollbackTeamCreation(userID int, team *models.Team, cause 
 		member.UpdatedAt = time.Now().UTC()
 		_ = s.repo.UpdateMember(&member)
 	}
-
 	ctx := context.Background()
 	if strings.TrimSpace(derefTeamString(team.TeamTokenSecretName)) != "" {
 		if err := s.secretService.DeleteSecret(ctx, userID, derefTeamString(team.TeamTokenSecretName)); err != nil {
@@ -4690,7 +5060,6 @@ func (s *teamService) rollbackTeamCreation(userID int, team *models.Team, cause 
 	if err := s.pvcService.DeleteTeamSharedPVC(ctx, userID, team.ID); err != nil {
 		fmt.Printf("Warning: failed to delete Team %d shared PVC during create rollback: %v\n", team.ID, err)
 	}
-
 	team.Name = deletedTeamName(team.Name, team.ID)
 	team.Status = models.TeamStatusDeleted
 	team.UpdatedAt = time.Now().UTC()
@@ -4703,14 +5072,23 @@ func (s *teamService) rollbackTeamCreation(userID int, team *models.Team, cause 
 func teamTaskPayloads(tasks []models.TeamTask) []TeamTaskPayload {
 	result := make([]TeamTaskPayload, 0, len(tasks))
 	for _, task := range tasks {
-		if payload, err := teamTaskPayload(task); err == nil {
-			result = append(result, *payload)
+		payload, err := teamTaskPayload(task)
+		if err != nil {
+			result = append(result, TeamTaskPayload{TeamTask: task})
+			continue
 		}
+		result = append(result, *payload)
 	}
 	return result
 }
 
 func normalizeTeamHistoryLimit(limit, defaultLimit, maxLimit int) int {
+	if defaultLimit <= 0 {
+		defaultLimit = 50
+	}
+	if maxLimit <= 0 {
+		maxLimit = defaultLimit
+	}
 	if limit <= 0 {
 		return defaultLimit
 	}
@@ -4724,7 +5102,16 @@ func nextTeamTaskBeforeID(tasks []TeamTaskPayload) *int {
 	if len(tasks) == 0 {
 		return nil
 	}
-	next := tasks[len(tasks)-1].ID
+	minID := tasks[0].ID
+	for _, task := range tasks[1:] {
+		if task.ID < minID {
+			minID = task.ID
+		}
+	}
+	if minID <= 0 {
+		return nil
+	}
+	next := minID
 	return &next
 }
 
@@ -4732,12 +5119,21 @@ func nextTeamEventBeforeID(events []TeamEventPayload) *int {
 	if len(events) == 0 {
 		return nil
 	}
-	next := events[len(events)-1].ID
+	minID := events[0].ID
+	for _, event := range events[1:] {
+		if event.ID < minID {
+			minID = event.ID
+		}
+	}
+	if minID <= 0 {
+		return nil
+	}
+	next := minID
 	return &next
 }
 
 func teamTaskPayload(task models.TeamTask) (*TeamTaskPayload, error) {
-	payload := &TeamTaskPayload{TeamTask: task}
+	payload := TeamTaskPayload{TeamTask: task}
 	if strings.TrimSpace(task.PayloadJSON) != "" {
 		if err := json.Unmarshal([]byte(task.PayloadJSON), &payload.Payload); err != nil {
 			return nil, err
@@ -4748,24 +5144,7 @@ func teamTaskPayload(task models.TeamTask) (*TeamTaskPayload, error) {
 			return nil, err
 		}
 	}
-	return payload, nil
-}
-
-func buildInitialLeaderTaskPayload(teamName string) map[string]interface{} {
-	normalizedTeamName := strings.TrimSpace(teamName)
-	if normalizedTeamName == "" {
-		normalizedTeamName = "current"
-	}
-	prompt := fmt.Sprintf("请介绍`team %s`当前 Redis Team成员构成，包括各角色的职责分工、运行状态与技术能力边界。同时说明团队内部的协作与通信机制(team_send)，例如任务流转方式、消息同步方式、上下文共享方式以及可调用的方法、工具与操作能力，以便后续能够更高效地开展团队工作", normalizedTeamName)
-	return map[string]interface{}{
-		"intent":             initialLeaderTaskIntent,
-		"title":              "介绍当前 Redis Team 成员与协作机制",
-		"prompt":             prompt,
-		"origin":             "system_bootstrap",
-		"executionMode":      "leader_control_plane_snapshot",
-		"requiresDelegation": false,
-		"anchorEligible":     false,
-	}
+	return &payload, nil
 }
 
 func teamEventPayloads(events []models.TeamEvent) []TeamEventPayload {

@@ -2248,7 +2248,8 @@ function InteractionProcessPanel({
   const rootWorkItems = group?.task
     ? workItems.filter((item) => item.root_task_id === group.task?.id)
     : [];
-  const authoritativeLeaderFlow = !peerRoot && rootWorkItems.length > 0;
+  const rootTaskTerminal = isTerminalTeamTaskStatus(group?.task?.status);
+  const authoritativeLeaderFlow = !rootTaskTerminal && !peerRoot && rootWorkItems.length > 0;
   const progress = group
     ? authoritativeLeaderFlow
       ? workItemProgress(rootWorkItems, group.task?.status)
@@ -3109,6 +3110,10 @@ function workItemProgress(workItems: TeamWorkItem[], rootStatus?: TeamTask["stat
   const dispatched = workItems.filter((item) => item.status === "dispatched").length;
   const weighted = ((completed + running * 0.55 + dispatched * 0.2) / workItems.length) * 92;
   return Math.max(5, Math.min(92, Math.round(weighted)));
+}
+
+function isTerminalTeamTaskStatus(status?: TeamTask["status"]) {
+  return status === "succeeded" || status === "failed" || status === "stale";
 }
 
 function buildPeerCollaborationModel(

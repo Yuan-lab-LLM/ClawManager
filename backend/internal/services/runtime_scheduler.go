@@ -745,6 +745,7 @@ func (s *RuntimeScheduler) createGatewayOnPod(ctx context.Context, instance mode
 	}
 
 	now := time.Now().UTC()
+	gatewayState := normalizeRuntimeGatewayCreateState(resp.Status)
 	binding := &models.InstanceRuntimeBinding{
 		InstanceID:    instance.ID,
 		RuntimePodID:  pod.ID,
@@ -753,9 +754,11 @@ func (s *RuntimeScheduler) createGatewayOnPod(ctx context.Context, instance mode
 		GatewayPort:   resp.Port,
 		GatewayPID:    resp.PID,
 		WorkspacePath: workspacePath,
-		State:         "running",
+		State:         gatewayState,
 		Generation:    instance.RuntimeGeneration,
-		LastHealthAt:  &now,
+	}
+	if gatewayState == "running" {
+		binding.LastHealthAt = &now
 	}
 	if err := s.bindingRepo.Create(ctx, binding); err != nil {
 		return s.cleanupGatewayAfterAssignFailure(ctx, endpoint, instance.ID, resp.GatewayID, false, err)
@@ -763,16 +766,29 @@ func (s *RuntimeScheduler) createGatewayOnPod(ctx context.Context, instance mode
 	if err := s.instanceRepo.SetWorkspacePath(ctx, instance.ID, workspacePath); err != nil {
 		return s.cleanupGatewayAfterAssignFailure(ctx, endpoint, instance.ID, resp.GatewayID, true, err)
 	}
-	if err := s.instanceRepo.UpdateRuntimeState(ctx, instance.ID, "running", instance.RuntimeGeneration, nil); err != nil {
+	instanceState := "creating"
+	var stateMessage *string
+	if gatewayState == "running" {
+		instanceState = "running"
+	} else {
+		message := "runtime gateway starting"
+		stateMessage = &message
+	}
+	if err := s.instanceRepo.UpdateRuntimeState(ctx, instance.ID, instanceState, instance.RuntimeGeneration, stateMessage); err != nil {
 		return s.cleanupGatewayAfterAssignFailure(ctx, endpoint, instance.ID, resp.GatewayID, true, err)
 	}
 	if s.events != nil {
-		if err := s.events.Publish(ctx, "runtime.instance.running", map[string]any{
+		eventType := "runtime.instance.starting"
+		if gatewayState == "running" {
+			eventType = "runtime.instance.running"
+		}
+		if err := s.events.Publish(ctx, eventType, map[string]any{
 			"instance_id":    instance.ID,
 			"runtime_type":   runtimeType,
 			"runtime_pod_id": pod.ID,
 			"gateway_id":     resp.GatewayID,
 			"gateway_port":   resp.Port,
+			"gateway_state":  gatewayState,
 			"workspace_path": workspacePath,
 			"generation":     instance.RuntimeGeneration,
 		}); err != nil {
@@ -780,6 +796,15 @@ func (s *RuntimeScheduler) createGatewayOnPod(ctx context.Context, instance mode
 		}
 	}
 	return nil
+}
+
+func normalizeRuntimeGatewayCreateState(status string) string {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "running", "ready", "healthy":
+		return "running"
+	default:
+		return "starting"
+	}
 }
 
 func runtimeGatewayLinuxIDs(instanceID int, environment map[string]string) (int, int) {
