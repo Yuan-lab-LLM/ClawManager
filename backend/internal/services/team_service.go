@@ -2985,18 +2985,25 @@ func (s *teamService) leaderMediatedRootCompletionReady(team *models.Team, task 
 	if err != nil {
 		return false, err
 	}
-	hasAssignments := false
+	requiredOwners := map[int]struct{}{}
+	deliveredOwners := map[int]struct{}{}
 	for idx := range workItems {
 		item := workItems[idx]
 		if item.OwnerMemberID == nil || *item.OwnerMemberID == member.ID || item.WorkID == "leader-final-synthesis" {
 			continue
 		}
-		hasAssignments = true
-		if item.Status != models.TeamTaskStatusSucceeded {
-			return false, nil
+		ownerID := *item.OwnerMemberID
+		requiredOwners[ownerID] = struct{}{}
+		if item.Status == models.TeamTaskStatusSucceeded {
+			deliveredOwners[ownerID] = struct{}{}
 		}
 	}
-	if hasAssignments {
+	if len(requiredOwners) > 0 {
+		for ownerID := range requiredOwners {
+			if _, ok := deliveredOwners[ownerID]; !ok {
+				return false, nil
+			}
+		}
 		return true, nil
 	}
 	events, err := s.repo.ListEventsByTeamID(team.ID, 500)
@@ -4033,6 +4040,8 @@ func (s *teamService) projectTeamWorkItem(
 	// worker's Kanban lane and the Leader will wait on the wrong member.
 	if rootCompletion {
 		workID = "leader-final-synthesis"
+	} else if isLeaderMediatedTeam(team) && stepType == "assignment" {
+		workID = "member-" + normalizeTeamMemberRouteKey(ownerKey)
 	} else if eventBool(payload, "assignmentResultOnly", "assignment_result_only") {
 		workID = "member-" + normalizeTeamMemberRouteKey(ownerKey)
 	} else if workID == "" {

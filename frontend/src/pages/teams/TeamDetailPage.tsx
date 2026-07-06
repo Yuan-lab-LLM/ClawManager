@@ -2306,7 +2306,7 @@ function InteractionProcessPanel({
   const selectedCard =
     allCards.find((card) => card.id === selectedCardId) ||
     allCards.find((card) => card.id === defaultCardId);
-  const selectedDetailSize = kanbanDetailSizeForText(selectedCard?.summary || finalResult || "");
+  const selectedDetailSize = kanbanDetailSizeForText(selectedCard?.detail || selectedCard?.summary || finalResult || "");
   const leaderWorkspaceSize = peerMode
     ? "short"
     : leaderKanbanWorkspaceSize(selectedDetailSize, decompositionItems.length, columns);
@@ -2776,6 +2776,7 @@ type KanbanTaskCard = {
   column: KanbanColumnKey;
   title: string;
   summary: string;
+  detail?: string;
   owner: string;
   target?: string;
   eventType: string;
@@ -3071,13 +3072,25 @@ function buildWorkItemKanbanColumns(
       ? memberById.get(item.owner_member_id)?.display_name || memberById.get(item.owner_member_id)?.member_key || "未分配"
       : "未分配";
     const resultSummary = item.result
-      ? payloadText(item.result, ["summary", "resultMarkdown", "result_markdown", "result", "text"])
+      ? payloadTextDeep(item.result, ["summary", "title", "status"])
+      : "";
+    const resultDetail = item.result
+      ? payloadTextDeep(item.result, [
+          "resultMarkdown",
+          "result_markdown",
+          "result",
+          "answer",
+          "text",
+          "message",
+          "summary",
+        ])
       : "";
     columns[column].push({
       id: `work-item-${item.id}`,
       column,
       title: item.title,
-      summary: resultSummary || (item.depends_on?.length ? `等待：${item.depends_on.join("、")}` : item.title),
+      summary: resultSummary || resultDetail || (item.depends_on?.length ? `等待：${item.depends_on.join("、")}` : item.title),
+      detail: resultDetail || resultSummary,
       owner,
       eventType:
         item.status === "succeeded"
@@ -4149,7 +4162,7 @@ function KanbanCardDetail({
       </div>
       <div className={`mt-2 min-h-0 overflow-auto pb-5 pr-1 text-xs leading-5 text-slate-700 ${kanbanDetailBodyMaxHeight(size)}`}>
         <MarkdownContent
-          text={card.summary || "暂无详情。"}
+          text={card.detail || card.summary || "暂无详情。"}
           compact
           onWorkspaceFileOpen={onWorkspaceFileOpen}
         />
