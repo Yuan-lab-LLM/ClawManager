@@ -1787,6 +1787,65 @@ func TestProjectTeamEventLeaderMediatedLeaderCompletionAfterAssignmentResultsClo
 	}
 }
 
+func TestProjectTeamEventAssignmentResultUsesActualMemberLane(t *testing.T) {
+	taskID := 180
+	messageID := "team-31-task-180"
+	task := &models.TeamTask{
+		ID:             taskID,
+		TeamID:         31,
+		TargetMemberID: 120,
+		MessageID:      messageID,
+		Status:         models.TeamTaskStatusRunning,
+		UpdatedAt:      time.Now().UTC(),
+	}
+	leader := &models.TeamMember{ID: 120, TeamID: 31, MemberKey: "leader", Role: "leader", Status: models.TeamMemberStatusBusy, CurrentTaskID: &taskID, Availability: models.TeamMemberAvailabilityBusy}
+	developer := &models.TeamMember{ID: 121, TeamID: 31, MemberKey: "developer", Role: "senior-developer", Status: models.TeamMemberStatusBusy, CurrentTaskID: &taskID, Availability: models.TeamMemberAvailabilityBusy}
+	reviewer := &models.TeamMember{ID: 122, TeamID: 31, MemberKey: "reviewer", Role: "qa-engineer", Status: models.TeamMemberStatusBusy, CurrentTaskID: &taskID, Availability: models.TeamMemberAvailabilityBusy}
+	repo := &teamRepositoryStub{
+		tasksByID:        map[int]*models.TeamTask{taskID: task},
+		tasksByMessageID: map[string]*models.TeamTask{messageID: task},
+		membersByKey:     map[string]*models.TeamMember{"leader": leader, "developer": developer, "reviewer": reviewer},
+	}
+	payloadJSON, err := json.Marshal(map[string]interface{}{
+		"event":                "outbound",
+		"assignmentResultOnly": true,
+		"assignmentId":         "assignment-developer-001",
+		"memberId":             "reviewer",
+		"from":                 "reviewer",
+		"to":                   "leader",
+		"rootTaskId":           messageID,
+		"status":               "succeeded",
+		"text":                 "Reviewer delivered a valid result.",
+		"collaborationStep": map[string]interface{}{
+			"type":       "result",
+			"status":     "succeeded",
+			"actor":      "reviewer",
+			"target":     "leader",
+			"rootTaskId": messageID,
+			"content":    "Reviewer delivered a valid result.",
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	service := &teamService{repo: repo}
+	if err := service.projectTeamEvent(&models.Team{ID: 31, CommunicationMode: teamCommunicationModeLeaderMediated}, nil, redisStreamMessage{
+		ID:     "1781171178680-0",
+		Fields: map[string]string{"payload": string(payloadJSON)},
+	}); err != nil {
+		t.Fatalf("projectTeamEvent returned error: %v", err)
+	}
+	if len(repo.workItems) != 1 {
+		t.Fatalf("expected one work item, got %#v", repo.workItems)
+	}
+	if repo.workItems[0].WorkID != "member-reviewer" {
+		t.Fatalf("assignment result must be stored on actual member lane, got workID %q", repo.workItems[0].WorkID)
+	}
+	if repo.workItems[0].OwnerMemberID == nil || *repo.workItems[0].OwnerMemberID != reviewer.ID {
+		t.Fatalf("expected reviewer owner, got %#v", repo.workItems[0].OwnerMemberID)
+	}
+}
+
 func TestProjectTeamEventAssociatesCurrentTaskReplyWithoutCompletingIt(t *testing.T) {
 	taskID := 72
 	task := &models.TeamTask{

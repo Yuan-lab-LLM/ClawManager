@@ -4027,12 +4027,16 @@ func (s *teamService) projectTeamWorkItem(
 		owner = found
 	}
 	workID := explicitWorkID
-	if workID == "" {
-		if rootCompletion {
-			workID = "leader-final-synthesis"
-		} else {
-			workID = "member-" + normalizeTeamMemberRouteKey(ownerKey)
-		}
+	// The runtime may echo an assignmentId from a prompt or old plugin payload,
+	// but the backend ledger must be owned by the member that actually produced
+	// the result. Otherwise one worker can accidentally overwrite another
+	// worker's Kanban lane and the Leader will wait on the wrong member.
+	if rootCompletion {
+		workID = "leader-final-synthesis"
+	} else if eventBool(payload, "assignmentResultOnly", "assignment_result_only") {
+		workID = "member-" + normalizeTeamMemberRouteKey(ownerKey)
+	} else if workID == "" {
+		workID = "member-" + normalizeTeamMemberRouteKey(ownerKey)
 	}
 	status := models.TeamTaskStatusRunning
 	switch stepType {

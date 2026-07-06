@@ -411,6 +411,22 @@ const isUserQuestionAnchorGroup = (group: CollaborationGroup) => {
   return true;
 };
 
+const isControlPlaneTeamTask = (task?: TeamTask) => {
+  if (!task) {
+    return false;
+  }
+  const messageId = (task.message_id || "").toLowerCase();
+  const origin = payloadText(task.payload, ["origin", "source"]).toLowerCase();
+  const intent = payloadText(task.payload, ["intent"]).toLowerCase();
+  const executionMode = payloadText(task.payload, ["executionMode", "execution_mode"]).toLowerCase();
+  return (
+    messageId.includes("bootstrap-introduction") ||
+    origin === "system_bootstrap" ||
+    intent === "team_bootstrap_introduction" ||
+    executionMode === "leader_control_plane_snapshot"
+  );
+};
+
 // Server ingestion order is authoritative. Runtime clocks can drift and Redis
 // replay can deliver old occurred_at values after a newer user query.
 const eventTimeValue = (event: TeamEvent) => event.created_at;
@@ -2248,8 +2264,8 @@ function InteractionProcessPanel({
   const rootWorkItems = group?.task
     ? workItems.filter((item) => item.root_task_id === group.task?.id)
     : [];
-  const rootTaskTerminal = isTerminalTeamTaskStatus(group?.task?.status);
-  const authoritativeLeaderFlow = !rootTaskTerminal && !peerRoot && rootWorkItems.length > 0;
+  const rootControlPlaneTask = isControlPlaneTeamTask(group?.task);
+  const authoritativeLeaderFlow = !rootControlPlaneTask && !peerRoot && rootWorkItems.length > 0;
   const progress = group
     ? authoritativeLeaderFlow
       ? workItemProgress(rootWorkItems, group.task?.status)
@@ -3110,10 +3126,6 @@ function workItemProgress(workItems: TeamWorkItem[], rootStatus?: TeamTask["stat
   const dispatched = workItems.filter((item) => item.status === "dispatched").length;
   const weighted = ((completed + running * 0.55 + dispatched * 0.2) / workItems.length) * 92;
   return Math.max(5, Math.min(92, Math.round(weighted)));
-}
-
-function isTerminalTeamTaskStatus(status?: TeamTask["status"]) {
-  return status === "succeeded" || status === "failed" || status === "stale";
 }
 
 function buildPeerCollaborationModel(
