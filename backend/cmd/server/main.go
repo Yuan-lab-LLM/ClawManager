@@ -173,7 +173,7 @@ func main() {
 	teamHandler := handlers.NewTeamHandler(teamService)
 	workspaceFileHandler := handlers.NewWorkspaceFileHandler(instanceService, workspaceFileService, runtimeWorkspaceFileService)
 	workspaceFileHandler.SetSkillRepository(skillRepo)
-	runtimeAgentHandler := handlers.NewRuntimeAgentHandler(cfg.Runtime, runtimePodRepo, bindingRepo, runtimeEvents)
+	runtimeAgentHandler := handlers.NewRuntimeAgentHandler(cfg.Runtime, runtimePodRepo, bindingRepo, instanceRepo, runtimeEvents)
 
 	// Initialize WebSocket hub and handler
 	wsHub := services.GetHub()

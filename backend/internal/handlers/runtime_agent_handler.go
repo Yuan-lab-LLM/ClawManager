@@ -23,10 +23,11 @@ type runtimeEventPublisher interface {
 }
 
 type RuntimeAgentHandler struct {
-	cfg         config.RuntimePoolConfig
-	podRepo     repository.RuntimePodRepository
-	bindingRepo repository.InstanceRuntimeBindingRepository
-	events      runtimeEventPublisher
+	cfg          config.RuntimePoolConfig
+	podRepo      repository.RuntimePodRepository
+	bindingRepo  repository.InstanceRuntimeBindingRepository
+	instanceRepo repository.InstanceRepository
+	events       runtimeEventPublisher
 }
 
 type runtimeAgentPodIdentity struct {
@@ -88,12 +89,13 @@ type runtimeAgentGatewayReport struct {
 	HealthAt     *time.Time `json:"health_at,omitempty"`
 }
 
-func NewRuntimeAgentHandler(cfg config.RuntimePoolConfig, podRepo repository.RuntimePodRepository, bindingRepo repository.InstanceRuntimeBindingRepository, events runtimeEventPublisher) *RuntimeAgentHandler {
+func NewRuntimeAgentHandler(cfg config.RuntimePoolConfig, podRepo repository.RuntimePodRepository, bindingRepo repository.InstanceRuntimeBindingRepository, instanceRepo repository.InstanceRepository, events runtimeEventPublisher) *RuntimeAgentHandler {
 	return &RuntimeAgentHandler{
-		cfg:         cfg,
-		podRepo:     podRepo,
-		bindingRepo: bindingRepo,
-		events:      events,
+		cfg:          cfg,
+		podRepo:      podRepo,
+		bindingRepo:  bindingRepo,
+		instanceRepo: instanceRepo,
+		events:       events,
 	}
 }
 
@@ -279,9 +281,9 @@ func (h *RuntimeAgentHandler) ReportGateways(c *gin.Context) {
 		if binding == nil || binding.RuntimePodID != podID || binding.Generation != gateway.Generation {
 			continue
 		}
-		state := strings.TrimSpace(gateway.State)
+		state := strings.ToLower(strings.TrimSpace(gateway.State))
 		switch state {
-		case "running", "healthy":
+		case "running", "ready", "healthy":
 			if err := h.bindingRepo.UpdateRunning(c.Request.Context(), gateway.InstanceID, gateway.Generation, strings.TrimSpace(gateway.GatewayID), gateway.GatewayPort, gateway.GatewayPID); err != nil {
 				utils.HandleError(c, err)
 				return
@@ -292,12 +294,47 @@ func (h *RuntimeAgentHandler) ReportGateways(c *gin.Context) {
 				return
 			}
 		}
+		if err := h.syncInstanceRuntimeState(c.Request.Context(), gateway, state); err != nil {
+			utils.HandleError(c, err)
+			return
+		}
 	}
 	h.publish(c.Request.Context(), "runtime_pod_gateways_reported", map[string]any{
 		"pod_id":        podID,
 		"gateway_count": len(req.Gateways),
 	})
 	utils.Success(c, http.StatusOK, "Runtime gateway report accepted", nil)
+}
+
+func (h *RuntimeAgentHandler) syncInstanceRuntimeState(ctx context.Context, gateway runtimeAgentGatewayReport, state string) error {
+	if h.instanceRepo == nil {
+		return nil
+	}
+	instanceState, message := instanceRuntimeStateFromGatewayReport(state, gateway.ErrorMessage)
+	return h.instanceRepo.UpdateRuntimeState(ctx, gateway.InstanceID, instanceState, gateway.Generation, message)
+}
+
+func instanceRuntimeStateFromGatewayReport(state string, errorMessage *string) (string, *string) {
+	normalized := strings.ToLower(strings.TrimSpace(state))
+	switch normalized {
+	case "running", "ready", "healthy":
+		return "running", nil
+	case "error", "failed", "failure", "errored":
+		if errorMessage != nil && strings.TrimSpace(*errorMessage) != "" {
+			msg := strings.TrimSpace(*errorMessage)
+			return "error", &msg
+		}
+		msg := "runtime gateway reported " + normalized
+		return "error", &msg
+	case "stopped", "deleted":
+		return "stopped", nil
+	default:
+		msg := "runtime gateway starting"
+		if errorMessage != nil && strings.TrimSpace(*errorMessage) != "" {
+			msg = strings.TrimSpace(*errorMessage)
+		}
+		return "creating", &msg
+	}
 }
 
 func (h *RuntimeAgentHandler) ReportSkills(c *gin.Context) {

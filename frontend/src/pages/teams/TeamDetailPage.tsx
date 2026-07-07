@@ -2265,9 +2265,10 @@ function InteractionProcessPanel({
     ? workItems.filter((item) => item.root_task_id === group.task?.id)
     : [];
   const rootControlPlaneTask = isControlPlaneTeamTask(group?.task);
-  const authoritativeLeaderFlow = !rootControlPlaneTask && !peerRoot && rootWorkItems.length > 0;
+  const leaderMediatedMode = isLeaderMediatedCommunicationMode(communicationMode);
+  const authoritativeLeaderFlow = leaderMediatedMode && !peerRoot && !!group?.task;
   const leaderLedgerSummary = authoritativeLeaderFlow
-    ? summarizeLeaderWorkItems(rootWorkItems, group?.task?.status)
+    ? summarizeLeaderWorkItems(rootWorkItems, group?.task?.status, rootControlPlaneTask)
     : undefined;
   const progress = group
     ? authoritativeLeaderFlow
@@ -2281,7 +2282,7 @@ function InteractionProcessPanel({
     ? taskPromptText(group.task) || group.title
     : group?.items.find((item) => item.content)?.content || "";
   const columns = authoritativeLeaderFlow
-    ? buildWorkItemKanbanColumns(rootWorkItems, memberById)
+    ? buildLeaderMediatedKanbanColumns(group, rootWorkItems, memberById, finalResult, rootControlPlaneTask)
     : buildKanbanColumns(group, steps, finalResult, visualStatus);
   const peerModel = peerRoot
     ? buildPeerCollaborationModel(group, steps, memberById, leaderMemberId)
@@ -2388,8 +2389,13 @@ function InteractionProcessPanel({
               <>
                 <div className="max-w-[150px] truncate text-sm font-semibold leading-5">{leaderLedgerSummary.phase}</div>
                 <div className="mt-1 text-[11px] text-slate-300">
-                  成员交付 {leaderLedgerSummary.delivered}/{leaderLedgerSummary.total}
+                  {leaderLedgerSummary.deliveryLabel || `成员交付 ${leaderLedgerSummary.delivered}/${leaderLedgerSummary.total}`}
                 </div>
+                {leaderLedgerSummary.artifactLabel && (
+                  <div className="mt-0.5 text-[11px] text-slate-300">
+                    {leaderLedgerSummary.artifactLabel}
+                  </div>
+                )}
               </>
             ) : (
               <>
@@ -2757,6 +2763,10 @@ function isPeerCommunicationMode(mode?: string) {
   return normalized === "peer_assisted" || normalized === "full_mesh";
 }
 
+function isLeaderMediatedCommunicationMode(mode?: string) {
+  return (mode || "").trim().toLowerCase() === "leader_mediated";
+}
+
 function isRootTaskTargetLeader(
   group: CollaborationGroup | undefined,
   memberById: Map<number, TeamMember>,
@@ -2818,6 +2828,8 @@ type LeaderLedgerSummary = {
   total: number;
   blockers: number;
   progress: number;
+  deliveryLabel?: string;
+  artifactLabel?: string;
 };
 
 type PeerLaneStatus = "idle" | "waiting" | "working" | "done" | "blocked";
@@ -2942,6 +2954,7 @@ function isProtocolNoiseItem(item: CollaborationItem) {
   const compact = normalizedContent.replace(/\s+/g, "");
   return (
     item.eventType === "inbound" ||
+    item.eventType === "member_result_confirmed" ||
     normalizedContent === "inbound" ||
     compact === "teammessage" ||
     compact === "任务下发teammessage" ||
@@ -3155,7 +3168,142 @@ function buildWorkItemKanbanColumns(
   return columns;
 }
 
-function summarizeLeaderWorkItems(workItems: TeamWorkItem[], rootStatus?: TeamTask["status"]): LeaderLedgerSummary {
+function isTerminalWorkItem(item: TeamWorkItem) {
+  return item.status === "succeeded" || item.status === "failed" || item.status === "stale";
+}
+
+function isLeaderWorkItem(item: TeamWorkItem, memberById: Map<number, TeamMember>) {
+  if (item.work_id === "leader-final-synthesis" || item.work_id.startsWith("assignment-leader-")) {
+    return true;
+  }
+  const member = item.owner_member_id ? memberById.get(item.owner_member_id) : undefined;
+  const key = (member?.member_key || "").toLowerCase();
+  const role = (member?.role || "").toLowerCase();
+  return key === "leader" || role === "leader" || role.includes("leader");
+}
+
+function collapseLeaderMediatedWorkItems(
+  workItems: TeamWorkItem[],
+  memberById: Map<number, TeamMember>,
+  rootStatus?: TeamTask["status"],
+) {
+  const completedOwners = new Set<number>();
+  let hasLeaderFinal = rootStatus === "succeeded" || rootStatus === "failed" || rootStatus === "stale";
+  for (const item of workItems) {
+    if (item.work_id === "leader-final-synthesis" && isTerminalWorkItem(item)) {
+      hasLeaderFinal = true;
+    }
+    if (item.owner_member_id && isTerminalWorkItem(item)) {
+      completedOwners.add(item.owner_member_id);
+    }
+  }
+  return workItems.filter((item) => {
+    if (!isTerminalWorkItem(item) && item.owner_member_id && completedOwners.has(item.owner_member_id)) {
+      return false;
+    }
+    if (!isTerminalWorkItem(item) && hasLeaderFinal && isLeaderWorkItem(item, memberById)) {
+      return false;
+    }
+    if (!isTerminalWorkItem(item) && item.work_id.startsWith("assignment-leader-")) {
+      return false;
+    }
+    return true;
+  });
+}
+
+function buildLeaderMediatedKanbanColumns(
+  group: CollaborationGroup | undefined,
+  workItems: TeamWorkItem[],
+  memberById: Map<number, TeamMember>,
+  finalResult: string,
+  controlPlaneTask: boolean,
+): KanbanColumns {
+  if (workItems.length > 0) {
+    return buildWorkItemKanbanColumns(collapseLeaderMediatedWorkItems(workItems, memberById, group?.task?.status), memberById);
+  }
+  const columns: KanbanColumns = { todo: [], doing: [], done: [] };
+  const task = group?.task;
+  if (!task) {
+    return columns;
+  }
+  const terminal = task.status === "succeeded" || task.status === "failed" || task.status === "stale";
+  const column: KanbanColumnKey = terminal ? "done" : task.status === "pending" ? "todo" : "doing";
+  const detail =
+    finalResult ||
+    payloadTextDeep(task.result, ["resultMarkdown", "result_markdown", "result", "answer", "summary"]) ||
+    payloadTextDeep(task.payload, ["resultMarkdown", "result_markdown", "result", "answer", "summary"]);
+  const title = controlPlaneTask
+    ? "控制面快照"
+    : terminal
+      ? "Root 任务终态"
+      : "等待协作台账";
+  const summary = detail ||
+    (controlPlaneTask
+      ? task.status === "succeeded"
+        ? "团队介绍和 bootstrap 快照已生成。"
+        : task.status === "failed" || task.status === "stale"
+          ? task.error_message || "控制面快照未完成。"
+          : "Leader 正在生成团队介绍，不需要派发成员任务。"
+      : task.status === "succeeded"
+        ? "Root 任务已由后端标记完成。"
+        : task.status === "failed" || task.status === "stale"
+          ? task.error_message || "Root 任务未完成。"
+          : "后端尚未收到 assignment ledger；不会根据 raw events 推断进度。");
+  columns[column].push({
+    id: `leader-root-${task.id}`,
+    column,
+    title,
+    summary,
+    detail,
+    owner: "Leader",
+    eventType: task.status === "failed" || task.status === "stale"
+      ? "task_failed"
+      : task.status === "succeeded"
+        ? "task_completed"
+        : "task_progress",
+    time: new Date(task.updated_at || task.created_at).getTime(),
+    progress: task.status === "succeeded" ? 100 : undefined,
+    statusLabel:
+      task.status === "succeeded"
+        ? "已完成"
+        : task.status === "failed"
+          ? "失败"
+          : task.status === "stale"
+            ? "超时"
+            : controlPlaneTask
+              ? "生成中"
+              : "等待台账",
+  });
+  return columns;
+}
+
+function summarizeLeaderWorkItems(workItems: TeamWorkItem[], rootStatus?: TeamTask["status"], controlPlaneTask = false): LeaderLedgerSummary {
+  if (workItems.length === 0) {
+    if (controlPlaneTask) {
+      const completed = rootStatus === "succeeded";
+      const blocked = rootStatus === "failed" || rootStatus === "stale";
+      return {
+        phase: completed ? "已完成" : blocked ? "需要修复" : "Leader 执行中",
+        delivered: completed ? 1 : 0,
+        total: 0,
+        blockers: blocked ? 1 : 0,
+        progress: completed ? 100 : blocked ? 35 : 45,
+        deliveryLabel: "成员交付 无需派发",
+        artifactLabel: completed ? "产物 已生成" : blocked ? "产物 未通过" : "产物 等待生成",
+      };
+    }
+    const completed = rootStatus === "succeeded";
+    const blocked = rootStatus === "failed" || rootStatus === "stale";
+    return {
+      phase: completed ? "已完成" : blocked ? "需要修复" : "等待权威状态",
+      delivered: 0,
+      total: 0,
+      blockers: blocked ? 1 : 0,
+      progress: completed ? 100 : blocked ? 20 : 12,
+      deliveryLabel: "成员交付 等待台账",
+      artifactLabel: completed ? "产物 已记录" : blocked ? "产物 未通过" : "产物 未确认",
+    };
+  }
   const memberItems = workItems.filter((item) => item.owner_member_id && item.work_id !== "leader-final-synthesis");
   const owners = new Map<number, TeamWorkItem[]>();
   for (const item of memberItems) {

@@ -591,6 +591,11 @@ func buildTeamTaskEnvelope(teamID int, memberKey string, task *models.TeamTask, 
 	if bootstrapSnapshot, ok := taskPayload["bootstrapSnapshot"]; ok {
 		envelope["bootstrapSnapshot"] = bootstrapSnapshot
 	}
+	if teamConfigJSON, ok := taskPayload["teamConfigJson"]; ok {
+		envelope["teamConfigJson"] = teamConfigJSON
+	} else if teamConfigJSON, ok := taskPayload["teamConfigJSON"]; ok {
+		envelope["teamConfigJson"] = teamConfigJSON
+	}
 	if envelope["intent"] == "" {
 		envelope["intent"] = "run_task"
 	}
@@ -606,8 +611,8 @@ func appendTeamTaskCompletionInstruction(prompt string, communicationMode, inten
 		instruction := strings.Join([]string{
 			"Bootstrap completion contract:",
 			"- This is a control-plane Team snapshot assigned only to the Leader. Do not delegate it, create worker assignments, or wait for member replies.",
-			"- Use the injected metadata.bootstrapSnapshot and metadata.workspaceContract first. They are the authoritative roster, runtime, role, and workspace facts for this snapshot.",
-			"- If you need to read the roster file, read $CLAWMANAGER_TEAM_CONFIG_PATH or /etc/clawmanager/team/team.json first; /team/team.json is a shared read-only roster snapshot fallback. Never look for /team/members.",
+			"- Use the injected metadata.bootstrapSnapshot, metadata.teamConfigJson, and metadata.workspaceContract first. They are the authoritative roster, runtime, role, and workspace facts for this snapshot.",
+			"- If injected metadata is insufficient, read /team/team.json from the shared workspace. $CLAWMANAGER_TEAM_CONFIG_PATH and /etc/clawmanager/team/team.json are optional system fallbacks and may be blocked by tool sandboxes. Never look for /team/members.",
 			"- Do not probe member HTTP health endpoints, Redis CLI, or worker desktops for this bootstrap. If a runtime status source is unavailable in the injected snapshot, report that field as unavailable instead of blocking.",
 			"- Summarize every member's identity, role, runtime, responsibilities, capability boundaries, and the configured collaboration mode.",
 			"- Explain task routing, Team Redis event synchronization, shared workspace usage, and the available Team methods without asking other members to restate their own roles.",
@@ -1487,6 +1492,7 @@ func (s *teamService) enrichBootstrapTaskPayload(userID int, team *models.Team, 
 		})
 	}
 	payload["workspaceContract"] = workspaceContract
+	payload["teamConfigJson"] = rosterJSON
 	payload["bootstrapSnapshot"] = map[string]interface{}{
 		"teamId":            team.ID,
 		"teamName":          team.Name,
@@ -1494,6 +1500,7 @@ func (s *teamService) enrichBootstrapTaskPayload(userID int, team *models.Team, 
 		"sharedDir":         team.SharedMountPath,
 		"configPath":        teamConfigMountPath,
 		"sharedConfigPath":  "/team/" + teamConfigFileName,
+		"teamConfigJson":    rosterJSON,
 		"roster":            roster,
 		"members":           memberSnapshots,
 	}
@@ -3114,6 +3121,23 @@ func markLeaderMediatedPrematureCompletion(eventType string, payload map[string]
 	return "reply"
 }
 
+func isLeaderMediatedInterimRootCompletion(team *models.Team, task *models.TeamTask, member *models.TeamMember, payload map[string]interface{}) bool {
+	if !isLeaderMediatedTeam(team) || task == nil || member == nil || payload == nil {
+		return false
+	}
+	if member.ID != task.TargetMemberID || !isLeaderTeamMember(member) {
+		return false
+	}
+	if isLeaderControlPlaneSnapshotTask(task, payload) {
+		return false
+	}
+	text := eventString(payload, "resultMarkdown", "result_markdown", "result", "answer", "text", "message", "summary")
+	if text == "" {
+		return false
+	}
+	return isInterimOrDelegationReplyText(text)
+}
+
 func teamEventPayloadMap(event models.TeamEvent) map[string]interface{} {
 	payload := map[string]interface{}{}
 	if event.PayloadJSON != nil && strings.TrimSpace(*event.PayloadJSON) != "" {
@@ -3239,7 +3263,9 @@ func isLeaderMediatedWorkerToLeaderResult(team *models.Team, eventType string, p
 	if !isLeaderMediatedOutboundLikeEvent(eventType) || !teamEventHasBody(payload) {
 		return false
 	}
-	if isNonAuthoritativeDispatchFailure(eventType, payload) || eventBool(payload, "leaderMediatedRouteViolation") {
+	if isNonAuthoritativeDispatchFailure(eventType, payload) ||
+		isDispatchOnlyCompletionPayload(payload) ||
+		eventBool(payload, "leaderMediatedRouteViolation") {
 		return false
 	}
 	target := leaderMediatedRouteTarget(payload)
@@ -3517,7 +3543,10 @@ func (s *teamService) projectTeamEvent(team *models.Team, bus *redisBus, message
 		eventSignalsCompletion = false
 		eventSignalsFailure = false
 	}
-	leaderDispatchOnly := isLeaderMediatedLeaderDispatchOnlyMessage(team, eventType, payload, member, task)
+	leaderDispatchOnly := false
+	if !eventSignalsCompletion && !eventSignalsFailure {
+		leaderDispatchOnly = isLeaderMediatedLeaderDispatchOnlyMessage(team, eventType, payload, member, task)
+	}
 	if leaderDispatchOnly {
 		if eventString(payload, "originalEvent") == "" {
 			payload["originalEvent"] = eventType
@@ -3534,6 +3563,12 @@ func (s *teamService) projectTeamEvent(team *models.Team, bus *redisBus, message
 			payload["to"] = target
 		}
 		eventType = "reply"
+		eventStatus = normalizedTeamTaskEventStatus(payload)
+		eventSignalsCompletion = false
+		eventSignalsFailure = false
+	}
+	if eventSignalsCompletion && !leaderDispatchOnly && !assignmentResultOnly && !leaderMediatedRouteViolation && isLeaderMediatedInterimRootCompletion(team, task, member, payload) {
+		eventType = markLeaderMediatedPrematureCompletion(eventType, payload)
 		eventStatus = normalizedTeamTaskEventStatus(payload)
 		eventSignalsCompletion = false
 		eventSignalsFailure = false
@@ -3727,6 +3762,10 @@ func (s *teamService) createLeaderMediatedResultNotification(team *models.Team, 
 	if strings.TrimSpace(summary) == "" && strings.TrimSpace(resultMarkdown) == "" {
 		return nil
 	}
+	alreadyConfirmed, err := s.hasLeaderMediatedResultConfirmation(team.ID, task.ID, member.MemberKey)
+	if err != nil || alreadyConfirmed {
+		return err
+	}
 	streamRef := ""
 	if sourceEvent.RedisStreamID != nil {
 		streamRef = *sourceEvent.RedisStreamID
@@ -3796,6 +3835,32 @@ func (s *teamService) createLeaderMediatedResultNotification(team *models.Team, 
 	}
 	s.dispatchLeaderMediatedResultNotificationToInbox(team, bus, task, member, notificationPayload, eventID)
 	return nil
+}
+
+func (s *teamService) hasLeaderMediatedResultConfirmation(teamID, taskID int, memberKey string) (bool, error) {
+	if s == nil || s.repo == nil {
+		return false, nil
+	}
+	events, err := s.repo.ListEventsByTeamID(teamID, 500)
+	if err != nil {
+		return false, err
+	}
+	normalizedMember := normalizeTeamMemberRouteKey(memberKey)
+	for idx := range events {
+		event := events[idx]
+		if event.EventType != "member_result_confirmed" {
+			continue
+		}
+		if event.TaskID == nil || *event.TaskID != taskID {
+			continue
+		}
+		payload := teamEventPayloadMap(event)
+		from := normalizeTeamMemberRouteKey(eventString(payload, "from", "memberId", "member_id"))
+		if from != "" && teamMemberRouteEquivalent(from, normalizedMember) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (s *teamService) dispatchLeaderMediatedResultNotificationToInbox(team *models.Team, bus *redisBus, task *models.TeamTask, member *models.TeamMember, notificationPayload map[string]interface{}, eventID string) {
@@ -4196,6 +4261,9 @@ func (s *teamService) projectTeamWorkItem(
 	if ownerKey == "" || ownerKey == "system" || ownerKey == "clawmanager" {
 		return nil
 	}
+	if isLeaderMediatedTeam(team) && stepType == "progress" && isLeaderRouteTarget(ownerKey) {
+		return nil
+	}
 	owner := member
 	if owner == nil || !teamMemberRouteEquivalent(owner.MemberKey, ownerKey) {
 		found, err := s.repo.GetMemberByTeamKey(team.ID, ownerKey)
@@ -4212,6 +4280,8 @@ func (s *teamService) projectTeamWorkItem(
 	if rootCompletion {
 		workID = "leader-final-synthesis"
 	} else if isLeaderMediatedTeam(team) && stepType == "assignment" {
+		workID = "member-" + normalizeTeamMemberRouteKey(ownerKey)
+	} else if isLeaderMediatedTeam(team) && stepType == "progress" && !isLeaderRouteTarget(ownerKey) {
 		workID = "member-" + normalizeTeamMemberRouteKey(ownerKey)
 	} else if eventBool(payload, "assignmentResultOnly", "assignment_result_only") {
 		workID = "member-" + normalizeTeamMemberRouteKey(ownerKey)
@@ -4764,9 +4834,17 @@ func interimReplyMarkers() []string {
 		"\u6b63\u5728\u6574\u7406",
 		"\u73b0\u5728\u6574\u7406",
 		"\u7a0d\u540e",
+		"\u7ee7\u7eed\u7b49\u5f85",
+		"\u4ecd\u5728\u7b49\u5f85",
+		"\u5df2\u6536\u5230\u5e76\u5f52\u6863",
+		"\u5ef6\u8fdf\u9001\u8fbe",
+		"\u91cd\u590d",
 		"\u7b49\u5f85\u5b8c\u6210",
 		"\u7b49\u5f85\u4ed6",
 		"\u7b49\u5f85\u5979",
+		"\u7b49\u5f85 designer",
+		"\u7b49\u5f85 architect",
+		"\u7b49\u5f85 pm",
 		"\u7b49\u5f85worker",
 		"\u7b49\u5f85 worker",
 		"\u6d3e\u5355",
@@ -4784,6 +4862,11 @@ func interimReplyMarkers() []string {
 		"sent to worker",
 		"assigned to worker",
 		"waiting for worker",
+		"still waiting",
+		"continuing to wait",
+		"waiting on ",
+		"duplicate ",
+		"delayed notification",
 		"handoff to worker",
 		"now let me write",
 		"then finalize",
