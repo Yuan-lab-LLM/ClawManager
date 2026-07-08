@@ -23,6 +23,9 @@
   <img src="https://img.shields.io/badge/React-19-20232A?style=for-the-badge&logo=react&logoColor=61DAFB" alt="React 19" />
   <img src="https://img.shields.io/badge/Kubernetes-Native-326CE5?style=for-the-badge&logo=kubernetes&logoColor=white" alt="Kubernetes Native" />
   <img src="https://img.shields.io/badge/License-MIT-2ea44f?style=for-the-badge" alt="MIT License" />
+  <a href="https://discord.gg/9RwgbGJD5R">
+    <img src="https://img.shields.io/badge/Discord-Join%20Us-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="加入 ClawManager Discord 社区" />
+  </a>
 </p>
 
 <p align="center">
@@ -70,13 +73,28 @@
   </a>
 </p>
 
-## 社区微信群
+## 社区交流
 
-欢迎加入 ClawManager 开源社区微信群，获取产品更新、交流使用经验，并与贡献者一起讨论共建。
+欢迎加入 ClawManager 开源社区，可通过微信群或 Discord 获取产品更新、交流使用经验，并与贡献者一起讨论共建。
 
-<p align="center">
-  <img src="./docs/main/clawmanager_group_chat.jpg" alt="ClawManager 微信群二维码" width="300" />
-</p>
+<table align="center">
+  <tr>
+    <td align="center" width="320" valign="top">
+      <img src="./docs/main/clawmanager_group_chat.jpg" alt="ClawManager 微信群二维码" height="300" />
+      <br /><br />
+      <strong>微信群</strong>
+      <br />
+      扫描二维码加入微信群
+    </td>
+    <td align="center" width="320" valign="top">
+      <img src="./docs/main/clawmanager_discord.jpg" alt="ClawManager Discord 邀请二维码" height="300" />
+      <br /><br />
+      <strong>Discord</strong>
+      <br />
+      <a href="https://discord.gg/9RwgbGJD5R">扫描二维码加入 Discord 服务器</a>
+    </td>
+  </tr>
+</table>
 
 <a id="product-tour"></a>
 ## 产品介绍

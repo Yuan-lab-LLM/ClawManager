@@ -23,6 +23,9 @@
   <img src="https://img.shields.io/badge/React-19-20232A?style=for-the-badge&logo=react&logoColor=61DAFB" alt="React 19" />
   <img src="https://img.shields.io/badge/Kubernetes-Native-326CE5?style=for-the-badge&logo=kubernetes&logoColor=white" alt="Kubernetes Native" />
   <img src="https://img.shields.io/badge/License-MIT-2ea44f?style=for-the-badge" alt="MIT License" />
+  <a href="https://discord.gg/9RwgbGJD5R">
+    <img src="https://img.shields.io/badge/Discord-Join%20Us-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="ClawManager Discord-Community beitreten" />
+  </a>
 </p>
 
 <p align="center">
@@ -70,13 +73,28 @@ Wichtige aktuelle Produkt- und Dokumentations-Updates.
   </a>
 </p>
 
-## WeChat-Community-Gruppe
+## Community
 
-Tritt der ClawManager Open-Source-Community auf WeChat bei, um Produkt-Updates zu verfolgen, Nutzungserfahrungen auszutauschen und mit Mitwirkenden ins Gespraech zu kommen.
+Tritt der ClawManager Open-Source-Community auf WeChat oder Discord bei, um Produkt-Updates zu verfolgen, Nutzungserfahrungen auszutauschen und mit Mitwirkenden ins Gespraech zu kommen.
 
-<p align="center">
-  <img src="./docs/main/clawmanager_group_chat.jpg" alt="QR-Code zur ClawManager WeChat-Gruppe" width="300" />
-</p>
+<table align="center">
+  <tr>
+    <td align="center" width="320" valign="top">
+      <img src="./docs/main/clawmanager_group_chat.jpg" alt="QR-Code zur ClawManager WeChat-Gruppe" height="300" />
+      <br /><br />
+      <strong>WeChat</strong>
+      <br />
+      QR-Code scannen, um der WeChat-Gruppe beizutreten
+    </td>
+    <td align="center" width="320" valign="top">
+      <img src="./docs/main/clawmanager_discord.jpg" alt="QR-Code zur ClawManager Discord-Einladung" height="300" />
+      <br /><br />
+      <strong>Discord</strong>
+      <br />
+      <a href="https://discord.gg/9RwgbGJD5R">QR-Code scannen, um unserem Discord-Server beizutreten</a>
+    </td>
+  </tr>
+</table>
 
 <a id="product-tour"></a>
 ## Produktueberblick
