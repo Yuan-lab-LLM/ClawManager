@@ -100,6 +100,54 @@ const mergeByIdDesc = <T extends { id: number }>(...groups: T[][]) => {
   return [...merged.values()].sort((a, b) => b.id - a.id);
 };
 
+const taskStateRank: Record<TeamTask["status"], number> = {
+  pending: 0,
+  dispatched: 1,
+  running: 2,
+  stale: 3,
+  failed: 4,
+  succeeded: 5,
+};
+
+const taskStateTimestamp = (task: TeamTask) => {
+  const values = [
+    task.updated_at,
+    task.finished_at,
+    task.started_at,
+    task.dispatched_at,
+    task.created_at,
+  ];
+  return values.reduce((latest, value) => {
+    if (!value) {
+      return latest;
+    }
+    const timestamp = new Date(value).getTime();
+    return Number.isNaN(timestamp) ? latest : Math.max(latest, timestamp);
+  }, 0);
+};
+
+const shouldReplaceTaskState = (current: TeamTask, candidate: TeamTask) => {
+  const currentTime = taskStateTimestamp(current);
+  const candidateTime = taskStateTimestamp(candidate);
+  if (candidateTime !== currentTime) {
+    return candidateTime > currentTime;
+  }
+  return taskStateRank[candidate.status] >= taskStateRank[current.status];
+};
+
+const mergeTasksByLatestState = (...groups: TeamTask[][]) => {
+  const merged = new Map<number, TeamTask>();
+  for (const group of groups) {
+    for (const task of group) {
+      const current = merged.get(task.id);
+      if (!current || shouldReplaceTaskState(current, task)) {
+        merged.set(task.id, task);
+      }
+    }
+  }
+  return [...merged.values()].sort((a, b) => b.id - a.id);
+};
+
 const oldestID = (items: { id: number }[]) =>
   items.reduce<number | undefined>(
     (current, item) => (current === undefined ? item.id : Math.min(current, item.id)),
@@ -882,7 +930,7 @@ const TeamDetailPage: React.FC = () => {
         }
         const data = await teamService.getTeam(teamId);
         setDetails(data);
-        setLoadedTasks((current) => mergeByIdDesc(data.tasks || [], current));
+        setLoadedTasks((current) => mergeTasksByLatestState(current, data.tasks || []));
         setLoadedEvents((current) => mergeByIdDesc(data.events || [], current));
         setHasMoreTasks((current) =>
           taskHistoryExhausted.current
@@ -1055,7 +1103,7 @@ const TeamDetailPage: React.FC = () => {
           : Promise.resolve(null),
       ]);
       if (taskHistory) {
-        setLoadedTasks((current) => mergeByIdDesc(current, taskHistory.tasks || []));
+        setLoadedTasks((current) => mergeTasksByLatestState(current, taskHistory.tasks || []));
         setHasMoreTasks(taskHistory.has_more);
         taskHistoryExhausted.current = !taskHistory.has_more;
       }

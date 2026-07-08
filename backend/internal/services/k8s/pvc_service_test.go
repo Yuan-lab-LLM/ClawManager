@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -251,7 +252,7 @@ func TestCreateTeamSharedPVCCreatesWritableRuntimeSubdirectories(t *testing.T) {
 		t.Fatalf("CreateTeamSharedPVC returned error: %v", err)
 	}
 
-	for _, name := range []string{"status", "inbox", "results", "tasks"} {
+	for _, name := range []string{"status", "inbox", "results", "tasks", ".openclaw-redis-team", filepath.Join(".openclaw-redis-team", "tasks")} {
 		dir := filepath.Join(workspaceRoot, "teams", "user-1", "team-28-shared", name)
 		info, err := os.Stat(dir)
 		if err != nil {
@@ -259,6 +260,12 @@ func TestCreateTeamSharedPVCCreatesWritableRuntimeSubdirectories(t *testing.T) {
 		}
 		if !info.IsDir() {
 			t.Fatalf("expected %s to be a directory", dir)
+		}
+		if runtime.GOOS != "windows" {
+			mode := info.Mode()
+			if mode&os.ModeSetgid == 0 || mode.Perm()&0o020 == 0 {
+				t.Fatalf("expected %s to preserve shared group-write/setgid permissions, got mode %v", dir, mode)
+			}
 		}
 	}
 }

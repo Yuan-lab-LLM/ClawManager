@@ -538,6 +538,8 @@ func teamSharedRuntimeSubdirectories(root string) []string {
 		filepath.Join(root, "inbox"),
 		filepath.Join(root, "results"),
 		filepath.Join(root, "tasks"),
+		filepath.Join(root, ".openclaw-redis-team"),
+		filepath.Join(root, ".openclaw-redis-team", "tasks"),
 	}
 }
 
