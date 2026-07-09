@@ -10,10 +10,8 @@ import {
 } from "../../services/systemSettingsService";
 import { teamService } from "../../services/teamService";
 import {
-  AGENCY_AGENT_PROFILES,
   buildAgencyAgentEnvironment,
   getAgencyAgentProfile,
-  type AgencyAgentProfileKey,
 } from "../../lib/agencyAgentProfiles";
 import {
   BUILTIN_MEMBER_TEMPLATES,
@@ -40,16 +38,6 @@ type TeamMemberDraft = TeamMemberTemplateMember & {
   instanceMode: InstanceMode;
 };
 
-const RUNTIME_OPTIONS: Array<{ value: RuntimeType; label: string }> = [
-  { value: "openclaw", label: "OpenClaw" },
-  { value: "hermes", label: "Hermes" },
-];
-
-const INSTANCE_MODE_OPTIONS: Array<{ value: InstanceMode; label: string }> = [
-  { value: "lite", label: "Lite" },
-  { value: "pro", label: "Pro" },
-];
-
 const TEAM_COMMUNICATION_MODE_OPTIONS: Array<{
   value: TeamCommunicationMode;
   label: string;
@@ -72,8 +60,49 @@ const RESOURCE_PRESETS: Record<
 };
 
 const ENV_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
-const CUSTOM_MEMBER_TEMPLATES_STORAGE_KEY = "clawmanager.team.memberTemplates.v1";
-const AGENCY_AGENT_PROFILE_OPTIONS = Object.values(AGENCY_AGENT_PROFILES);
+const FIXED_RUNTIME_TYPE: RuntimeType = "openclaw";
+const FIXED_INSTANCE_MODE: InstanceMode = "lite";
+const FIXED_COMMUNICATION_MODE: TeamCommunicationMode = "leader_mediated";
+const EDITABLE_RESOURCE_PRESETS: Array<Exclude<ResourcePresetKey, "custom">> = [
+  "small",
+  "medium",
+  "large",
+];
+
+const TEAM_TEMPLATE_DISPLAY_COPY: Record<
+  string,
+  { name: string; description: string }
+> = {
+  "builtin-leader-worker": {
+    name: "标准双成员团队",
+    description:
+      "Leader 负责任务拆解、成员协调和结果整合，Worker 执行具体任务并回报进度。",
+  },
+  "builtin-dev-qa-docs": {
+    name: "交付三成员团队",
+    description:
+      "Leader 负责拆解和协调，Developer 负责实现与集成，Reviewer 负责验证测试、回归风险和交付质量。",
+  },
+  "builtin-software-engineering-team": {
+    name: "软件工程八成员团队",
+    description:
+      "Leader 统筹目标、协作和最终集成，PM、UI/UX、Frontend、Backend、Architect、QA、Code Reviewer 分别覆盖产品、设计、客户端、服务端、架构、验证和代码审查。",
+  },
+};
+
+const getTemplateDisplayName = (template: TeamMemberTemplate) =>
+  TEAM_TEMPLATE_DISPLAY_COPY[template.id]?.name || template.name;
+
+const getTemplateDisplayDescription = (template: TeamMemberTemplate) =>
+  TEAM_TEMPLATE_DISPLAY_COPY[template.id]?.description ||
+  template.description ||
+  "模板未提供说明。";
+
+const SORTED_BUILTIN_MEMBER_TEMPLATES = [...BUILTIN_MEMBER_TEMPLATES].sort(
+  (left, right) =>
+    left.members.length - right.members.length ||
+    getTemplateDisplayName(left).localeCompare(getTemplateDisplayName(right), "zh-Hans"),
+);
 
 const newDraftId = () =>
   `member-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
@@ -99,10 +128,67 @@ const defaultMember = (
   ...overrides,
 });
 
-const imageOptionKey = (item: SystemImageSetting) =>
-  item.id != null
-    ? `image-${item.id}`
-    : `${item.instance_type}:${item.image}`;
+const normalizedPreset = (
+  preset?: ResourcePresetKey,
+): Exclude<ResourcePresetKey, "custom"> =>
+  preset && preset !== "custom" ? preset : "small";
+
+const draftFromTemplateMember = (
+  templateMember: TeamMemberTemplateMember,
+  usedIds: Set<string>,
+  index: number,
+  isLeader: boolean,
+  image: string,
+): TeamMemberDraft => {
+  const preset = normalizedPreset(templateMember.resourcePreset);
+  const config = RESOURCE_PRESETS[preset];
+  const templateRole =
+    templateMember.role && templateMember.role !== "leader"
+      ? templateMember.role
+      : "member";
+
+  return defaultMember({
+    ...templateMember,
+    memberId: uniqueMemberId(templateMember.memberId, usedIds, index),
+    role: isLeader ? "leader" : templateRole,
+    runtimeType: FIXED_RUNTIME_TYPE,
+    instanceMode: FIXED_INSTANCE_MODE,
+    image,
+    resourcePreset: preset,
+    isLeader,
+    cpuCores: config.cpuCores,
+    memoryGb: config.memoryGb,
+    diskGb: config.diskGb,
+    gpuEnabled: false,
+    gpuCount: 0,
+  });
+};
+
+const buildTemplateMembers = (template: TeamMemberTemplate, image: string) => {
+  const usedIds = new Set<string>();
+  const importedMembers: TeamMemberDraft[] = [];
+  let leaderAssigned = false;
+
+  template.members.forEach((templateMember, index) => {
+    const shouldBeLeader = Boolean(templateMember.isLeader) && !leaderAssigned;
+    if (shouldBeLeader) {
+      leaderAssigned = true;
+    }
+    importedMembers.push(
+      draftFromTemplateMember(templateMember, usedIds, index + 1, shouldBeLeader, image),
+    );
+  });
+
+  if (!leaderAssigned && importedMembers.length > 0) {
+    importedMembers[0] = {
+      ...importedMembers[0],
+      isLeader: true,
+      role: "leader",
+    };
+  }
+
+  return importedMembers;
+};
 
 const imageRuntimeTypeForMode = (
   mode: InstanceMode,
@@ -122,51 +208,6 @@ const normalizeMemberId = (value: string) =>
     .replace(/[^a-z0-9-]/g, "")
     .slice(0, 63);
 
-const loadCustomMemberTemplates = (): TeamMemberTemplate[] => {
-  try {
-    if (typeof window === "undefined") {
-      return [];
-    }
-    const raw = window.localStorage.getItem(CUSTOM_MEMBER_TEMPLATES_STORAGE_KEY);
-    if (!raw) {
-      return [];
-    }
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) {
-      return [];
-    }
-    return parsed
-      .filter((item): item is TeamMemberTemplate => {
-        return (
-          item &&
-          typeof item.id === "string" &&
-          typeof item.name === "string" &&
-          Array.isArray(item.members)
-        );
-      })
-      .map((item) => ({
-        ...item,
-        source: "custom" as const,
-      }));
-  } catch {
-    return [];
-  }
-};
-
-const saveCustomMemberTemplates = (templates: TeamMemberTemplate[]) => {
-  try {
-    if (typeof window === "undefined") {
-      return;
-    }
-    window.localStorage.setItem(
-      CUSTOM_MEMBER_TEMPLATES_STORAGE_KEY,
-      JSON.stringify(templates),
-    );
-  } catch {
-    // localStorage can be unavailable in private browsing or strict webviews.
-  }
-};
-
 const uniqueMemberId = (raw: string, usedIds: Set<string>, fallbackIndex: number) => {
   const fallback = `member-${fallbackIndex}`;
   const base = normalizeMemberId(raw) || fallback;
@@ -185,34 +226,16 @@ const uniqueMemberId = (raw: string, usedIds: Set<string>, fallbackIndex: number
 
 const CreateTeamPage: React.FC = () => {
   const navigate = useNavigate();
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  const [communicationMode] = useState<TeamCommunicationMode>("leader_mediated");
+  const initialTemplate = SORTED_BUILTIN_MEMBER_TEMPLATES[0];
+  const [name, setName] = useState(initialTemplate?.teamName || "");
   const [sharedStorageGb, setSharedStorageGb] = useState(10);
-  const [storageClass, setStorageClass] = useState("");
   const [images, setImages] = useState<SystemImageSetting[]>([]);
-  const [selectedImageKey, setSelectedImageKey] = useState("");
-  const [customMemberTemplates, setCustomMemberTemplates] = useState<
-    TeamMemberTemplate[]
-  >(() => loadCustomMemberTemplates());
   const [selectedTemplateId, setSelectedTemplateId] = useState(
-    BUILTIN_MEMBER_TEMPLATES[0]?.id || "",
+    initialTemplate?.id || "",
   );
-  const [templatePackageName, setTemplatePackageName] = useState("");
-  const [templateNotice, setTemplateNotice] = useState<string | null>(null);
-  const [members, setMembers] = useState<TeamMemberDraft[]>(() => [
-    defaultMember({
-      memberId: "leader",
-      role: "leader",
-      isLeader: true,
-      agentProfileKey: "agency.agents-orchestrator",
-    }),
-    defaultMember({
-      memberId: "worker",
-      role: "developer",
-      agentProfileKey: "agency.senior-developer",
-    }),
-  ]);
+  const [members, setMembers] = useState<TeamMemberDraft[]>(() =>
+    initialTemplate ? buildTemplateMembers(initialTemplate, "") : [],
+  );
   const [loadingImages, setLoadingImages] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -228,52 +251,25 @@ const CreateTeamPage: React.FC = () => {
     null,
   );
 
-  const openClawImages = useMemo(
-    () =>
-      images.filter(
-        (item) => item.instance_type === "openclaw" && item.is_enabled !== false,
-      ),
-    [images],
-  );
-  const hermesImages = useMemo(
-    () =>
-      images.filter(
-        (item) => item.instance_type === "hermes" && item.is_enabled !== false,
-      ),
-    [images],
-  );
-  const memberTemplates = useMemo(
-    () => [...BUILTIN_MEMBER_TEMPLATES, ...customMemberTemplates],
-    [customMemberTemplates],
-  );
+  const memberTemplates = SORTED_BUILTIN_MEMBER_TEMPLATES;
   const selectedTemplate = useMemo(
     () =>
       memberTemplates.find((template) => template.id === selectedTemplateId) ||
       memberTemplates[0],
     [memberTemplates, selectedTemplateId],
   );
-  const imageOptionsForRuntime = useCallback(
-    (runtimeType: RuntimeType) =>
-      runtimeType === "hermes" ? hermesImages : openClawImages,
-    [hermesImages, openClawImages],
-  );
-  const imageOptionsForMember = useCallback(
-    (runtimeType: RuntimeType, instanceMode: InstanceMode) =>
-      imageOptionsForRuntime(runtimeType).filter(
-        (item) =>
-          normalizedImageRuntimeType(item) ===
-          imageRuntimeTypeForMode(instanceMode),
-      ),
-    [imageOptionsForRuntime],
-  );
   const defaultOpenClawMemberImages = useMemo(
-    () => imageOptionsForMember("openclaw", "lite"),
-    [imageOptionsForMember],
+    () =>
+      images.filter(
+        (item) =>
+          item.instance_type === "openclaw" &&
+          item.is_enabled !== false &&
+          normalizedImageRuntimeType(item) === imageRuntimeTypeForMode("lite"),
+      ),
+    [images],
   );
-  const selectedImage =
-    defaultOpenClawMemberImages.find(
-      (item) => imageOptionKey(item) === selectedImageKey,
-    ) || defaultOpenClawMemberImages[0];
+  const selectedImage = defaultOpenClawMemberImages[0];
+  const openClawLiteImage = selectedImage?.image || "";
 
   useEffect(() => {
     const loadImages = async () => {
@@ -289,50 +285,6 @@ const CreateTeamPage: React.FC = () => {
     };
     void loadImages();
   }, []);
-
-  useEffect(() => {
-    if (defaultOpenClawMemberImages.length === 0) {
-      setSelectedImageKey("");
-      return;
-    }
-    setSelectedImageKey((current) =>
-      defaultOpenClawMemberImages.some((item) => imageOptionKey(item) === current)
-        ? current
-        : imageOptionKey(defaultOpenClawMemberImages[0]),
-    );
-  }, [defaultOpenClawMemberImages]);
-
-  useEffect(() => {
-    saveCustomMemberTemplates(customMemberTemplates);
-  }, [customMemberTemplates]);
-
-  useEffect(() => {
-    if (
-      memberTemplates.length > 0 &&
-      !memberTemplates.some((template) => template.id === selectedTemplateId)
-    ) {
-      setSelectedTemplateId(memberTemplates[0].id);
-    }
-  }, [memberTemplates, selectedTemplateId]);
-
-  useEffect(() => {
-    setMembers((current) =>
-      current.map((member) => {
-        const options = imageOptionsForMember(
-          member.runtimeType,
-          member.instanceMode,
-        );
-        const fallbackImage = options[0]?.image || "";
-        const imageMatchesRuntimeAndMode = options.some(
-          (item) => item.image === member.image,
-        );
-        if ((!member.image || !imageMatchesRuntimeAndMode) && fallbackImage) {
-          return { ...member, image: fallbackImage };
-        }
-        return member;
-      }),
-    );
-  }, [imageOptionsForMember]);
 
   const updateMember = (
     id: string,
@@ -351,253 +303,31 @@ const CreateTeamPage: React.FC = () => {
     );
   };
 
-  const setMemberRuntimeType = (id: string, runtimeType: RuntimeType) => {
-    updateMember(id, (current) => ({
-      runtimeType,
-      image:
-        imageOptionsForMember(runtimeType, current.instanceMode)[0]?.image || "",
-    }));
-  };
-
-  const setMemberInstanceMode = (id: string, instanceMode: InstanceMode) => {
-    updateMember(id, (current) => ({
-      instanceMode,
-      image:
-        imageOptionsForMember(current.runtimeType, instanceMode)[0]?.image || "",
-    }));
-  };
-
-  const applyResourcePreset = (id: string, preset: ResourcePresetKey) => {
-    if (preset === "custom") {
-      updateMember(id, { resourcePreset: "custom" });
-      return;
-    }
+  const applyResourcePreset = (
+    id: string,
+    preset: Exclude<ResourcePresetKey, "custom">,
+  ) => {
     const config = RESOURCE_PRESETS[preset];
     updateMember(id, {
       resourcePreset: preset,
       cpuCores: config.cpuCores,
       memoryGb: config.memoryGb,
       diskGb: config.diskGb,
+      gpuEnabled: false,
+      gpuCount: 0,
     });
   };
 
-  const setLeader = (id: string) => {
-    setMembers((current) =>
-      current.map((member) => ({
-        ...member,
-        isLeader: member.id === id,
-        role: member.id === id ? "leader" : member.role === "leader" ? "developer" : member.role,
-      })),
-    );
-  };
-
-  const addMember = () => {
-    const nextIndex = members.length + 1;
-    setMembers((current) => [
-      ...current,
-      defaultMember({
-        memberId: `worker-${nextIndex}`,
-        image: selectedImage?.image || "",
-      }),
-    ]);
-  };
-
-  const removeMember = (id: string) => {
-    setMembers((current) => {
-      const next = current.filter((member) => member.id !== id);
-      if (next.length > 0 && !next.some((member) => member.isLeader)) {
-        return next.map((member, index) =>
-          index === 0
-            ? { ...member, isLeader: true, role: "leader" }
-            : member,
-        );
-      }
-      return next;
-    });
-  };
-
-  const draftFromTemplateMember = (
-    templateMember: TeamMemberTemplateMember,
-    usedIds: Set<string>,
-    index: number,
-    isLeader: boolean,
-  ): TeamMemberDraft => {
-    const runtimeType = templateMember.runtimeType || "openclaw";
-    const instanceMode = templateMember.instanceMode || "lite";
-    const runtimeImages = imageOptionsForMember(runtimeType, instanceMode);
-    const templateImageAvailable = runtimeImages.some(
-      (item) => item.image === templateMember.image,
-    );
-    const image = templateImageAvailable
-      ? templateMember.image
-      : runtimeImages[0]?.image || templateMember.image || "";
-    const role =
-      isLeader || templateMember.role !== "leader"
-        ? templateMember.role
-        : "developer";
-
-    return defaultMember({
-      ...templateMember,
-      memberId: uniqueMemberId(templateMember.memberId, usedIds, index),
-      role: isLeader ? "leader" : role || "member",
-      runtimeType,
-      instanceMode,
-      isLeader,
-      image,
-    });
-  };
-
-  const buildTemplateMembers = (
-    template: TeamMemberTemplate,
-    existingMembers: TeamMemberDraft[],
-  ) => {
-    const usedIds = new Set(
-      existingMembers
-        .map((member) => normalizeMemberId(member.memberId))
-        .filter(Boolean),
-    );
-    const importedMembers: TeamMemberDraft[] = [];
-    let leaderAssigned = existingMembers.some((member) => member.isLeader);
-
-    template.members.forEach((templateMember, index) => {
-      const shouldBeLeader = Boolean(templateMember.isLeader) && !leaderAssigned;
-      if (shouldBeLeader) {
-        leaderAssigned = true;
-      }
-      importedMembers.push(
-        draftFromTemplateMember(templateMember, usedIds, index + 1, shouldBeLeader),
-      );
-    });
-
-    if (!leaderAssigned && importedMembers.length > 0) {
-      importedMembers[0] = {
-        ...importedMembers[0],
-        isLeader: true,
-        role: "leader",
-      };
-    }
-
-    return importedMembers;
-  };
-
-  const importMemberTemplate = (mode: "replace" | "append") => {
-    if (!selectedTemplate) {
-      return;
-    }
-    if (selectedTemplate.teamName) {
-      setName(selectedTemplate.teamName);
-    }
-    if (selectedTemplate.description) {
-      setDescription(selectedTemplate.description);
-    }
-    setMembers((current) => {
-      const existingMembers = mode === "append" ? current : [];
-      const importedMembers = buildTemplateMembers(selectedTemplate, existingMembers);
-      return mode === "append" ? [...current, ...importedMembers] : importedMembers;
-    });
-    setTemplateNotice(
-      mode === "append"
-        ? `已追加模板包：${selectedTemplate.name}`
-        : `已导入模板包：${selectedTemplate.name}`,
-    );
-    setError(null);
-  };
-
-  const buildTemplateFromCurrentMembers = (
-    packageName: string,
-    templateId?: string,
-  ): TeamMemberTemplate | null => {
-    const templateMembers = members.map<TeamMemberTemplateMember>((member, index) => ({
-      memberId: normalizeMemberId(member.memberId) || `member-${index + 1}`,
-      name: member.name.trim(),
-      role: member.isLeader ? "leader" : member.role.trim() || "member",
-      runtimeType: member.runtimeType,
-      instanceMode: member.instanceMode,
-      description: member.description.trim(),
-      agentProfileKey: member.agentProfileKey,
-      resourcePreset: member.resourcePreset,
-      isLeader: member.isLeader,
-      cpuCores: member.cpuCores,
-      memoryGb: member.memoryGb,
-      diskGb: member.diskGb,
-      gpuEnabled: member.gpuEnabled,
-      gpuCount: member.gpuEnabled ? member.gpuCount : 0,
-      image: member.image.trim(),
-    }));
-
-    return {
-      id:
-        templateId ||
-        `custom-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
-      name: packageName,
-      teamName: name.trim() || undefined,
-      description: description.trim() || undefined,
-      communicationMode: "leader_mediated",
-      source: "custom",
-      members: templateMembers,
-    };
-  };
-
-  const saveCurrentMembersAsTemplate = () => {
-    const packageName = templatePackageName.trim();
-    if (!packageName) {
-      setError("模板包名称不能为空");
-      return;
-    }
-    if (members.length === 0) {
-      setError("至少需要一个成员才能保存模板");
-      return;
-    }
-
-    const template = buildTemplateFromCurrentMembers(packageName);
+  const applyTemplate = (templateId: string) => {
+    const template =
+      memberTemplates.find((item) => item.id === templateId) || memberTemplates[0];
     if (!template) {
       return;
     }
-
-    setCustomMemberTemplates((current) => [...current, template]);
     setSelectedTemplateId(template.id);
-    setTemplatePackageName("");
-    setTemplateNotice(`已保存模板包：${packageName}`);
+    setName(template.teamName || "");
+    setMembers(buildTemplateMembers(template, openClawLiteImage));
     setError(null);
-  };
-
-  const updateSelectedTemplate = () => {
-    if (!selectedTemplate || selectedTemplate.source !== "custom") {
-      setError("只能编辑自定义模板，请先把内置模板另存为自定义模板");
-      return;
-    }
-    if (members.length === 0) {
-      setError("至少需要一个成员才能更新模板");
-      return;
-    }
-    const packageName = templatePackageName.trim() || selectedTemplate.name;
-    const updatedTemplate = buildTemplateFromCurrentMembers(
-      packageName,
-      selectedTemplate.id,
-    );
-    if (!updatedTemplate) {
-      return;
-    }
-
-    setCustomMemberTemplates((current) =>
-      current.map((template) =>
-        template.id === selectedTemplate.id ? updatedTemplate : template,
-      ),
-    );
-    setTemplatePackageName("");
-    setTemplateNotice(`已更新模板包：${packageName}`);
-    setError(null);
-  };
-
-  const deleteSelectedTemplate = () => {
-    if (!selectedTemplate || selectedTemplate.source !== "custom") {
-      return;
-    }
-    setCustomMemberTemplates((current) =>
-      current.filter((template) => template.id !== selectedTemplate.id),
-    );
-    setSelectedTemplateId(BUILTIN_MEMBER_TEMPLATES[0]?.id || "");
-    setTemplateNotice(`已删除模板包：${selectedTemplate.name}`);
   };
 
   const addEnvironmentRow = () => {
@@ -686,6 +416,16 @@ const CreateTeamPage: React.FC = () => {
     return profileForMember(member)?.summary || "";
   };
 
+  const displayNameForMember = (member: TeamMemberDraft) => {
+    const normalizedMemberId = normalizeMemberId(member.memberId);
+    return member.name.trim() || `${name.trim() || "team"}-${normalizedMemberId || member.memberId}`;
+  };
+
+  const profileLabelForMember = (member: TeamMemberDraft) => {
+    const profile = profileForMember(member);
+    return profile?.displayName || profile?.name || member.agentProfileKey || "未指定";
+  };
+
   const buildMemberEnvironmentOverrides = (
     member: TeamMemberDraft,
     normalizedMemberId: string,
@@ -695,7 +435,7 @@ const CreateTeamPage: React.FC = () => {
       memberId: normalizedMemberId,
       displayName: member.name.trim() || normalizedMemberId,
       role: effectiveMemberRole(member),
-      runtimeType: member.runtimeType,
+      runtimeType: FIXED_RUNTIME_TYPE,
       isLeader: member.isLeader,
     });
     const merged = {
@@ -721,6 +461,11 @@ const CreateTeamPage: React.FC = () => {
     if (!name.trim()) {
       return "Team 名称不能为空";
     }
+    if (!openClawLiteImage) {
+      return loadingImages
+        ? "正在加载 OpenClaw Lite 镜像"
+        : "没有可用的 OpenClaw Lite 镜像";
+    }
     if (members.length === 0) {
       return "至少需要一个成员";
     }
@@ -737,20 +482,14 @@ const CreateTeamPage: React.FC = () => {
         return `成员 ID 重复：${memberId}`;
       }
       memberIds.add(memberId);
-      if (!member.image.trim()) {
-        return `成员 ${memberId} 未选择镜像`;
-      }
       if (member.cpuCores <= 0 || member.memoryGb <= 0 || member.diskGb <= 0) {
         return `成员 ${memberId} 的资源规格无效`;
       }
     }
     return null;
-  }, [members, name]);
+  }, [loadingImages, members, name, openClawLiteImage]);
 
-  const environmentDraft = useMemo(
-    () => buildEnvironmentOverridesPayload(),
-    [environmentRows],
-  );
+  const environmentDraft = buildEnvironmentOverridesPayload();
   const openClawPlanInvalid =
     (openClawInjectionMode === "bundle" &&
       (!openClawBundleId || Boolean(openClawPreviewError) || openClawPreviewLoading)) ||
@@ -763,6 +502,10 @@ const CreateTeamPage: React.FC = () => {
   const resolvedChannelNames = (openClawPreview?.resolved_resources || [])
     .filter((resource) => resource.resource_type === "channel")
     .map((resource) => resource.name);
+  const communicationModeOption =
+    TEAM_COMMUNICATION_MODE_OPTIONS.find(
+      (option) => option.value === FIXED_COMMUNICATION_MODE,
+    ) || TEAM_COMMUNICATION_MODE_OPTIONS[0];
 
   const submitDisabled =
     submitting ||
@@ -791,28 +534,26 @@ const CreateTeamPage: React.FC = () => {
     const openClawConfigPlan = buildOpenClawConfigPlan();
     const payload: CreateTeamRequest = {
       name: name.trim(),
-      description: description.trim() || undefined,
-      communication_mode: "leader_mediated",
+      communication_mode: FIXED_COMMUNICATION_MODE,
       shared_storage_gb: sharedStorageGb,
-      storage_class: storageClass.trim() || undefined,
       members: members.map((member) => {
         const normalizedMemberId = normalizeMemberId(member.memberId);
         const memberDescription = effectiveMemberDescription(member);
         return {
           member_id: normalizedMemberId,
-          name: member.name.trim() || undefined,
+          name: displayNameForMember(member),
           role: effectiveMemberRole(member),
-          mode: member.instanceMode,
-          instance_mode: member.instanceMode,
-          runtime_type: member.runtimeType,
+          mode: FIXED_INSTANCE_MODE,
+          instance_mode: FIXED_INSTANCE_MODE,
+          runtime_type: FIXED_RUNTIME_TYPE,
           description: memberDescription || undefined,
           is_leader: member.isLeader,
           cpu_cores: member.cpuCores,
           memory_gb: member.memoryGb,
           disk_gb: member.diskGb,
-          gpu_enabled: member.gpuEnabled,
-          gpu_count: member.gpuEnabled ? member.gpuCount : 0,
-          image_registry: member.image.trim(),
+          gpu_enabled: false,
+          gpu_count: 0,
+          image_registry: openClawLiteImage,
           environment_overrides: buildMemberEnvironmentOverrides(
             member,
             normalizedMemberId,
@@ -827,8 +568,9 @@ const CreateTeamPage: React.FC = () => {
       setError(null);
       const created = await teamService.createTeam(payload);
       navigate(`/teams/${created.team.id}`);
-    } catch (err: any) {
-      setError(err.response?.data?.error || "创建 Team 失败");
+    } catch (err: unknown) {
+      const apiError = err as { response?: { data?: { error?: string } } };
+      setError(apiError.response?.data?.error || "创建 Team 失败");
     } finally {
       setSubmitting(false);
     }
@@ -845,86 +587,6 @@ const CreateTeamPage: React.FC = () => {
 
         <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
           <div className="space-y-6">
-            <section className="app-panel p-6">
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                <label className="block">
-                  <span className="text-sm font-medium text-gray-700">
-                    Team 名称
-                  </span>
-                  <input
-                    value={name}
-                    onChange={(event) => setName(event.target.value)}
-                    placeholder="research-team"
-                    className="mt-1 block w-full rounded-xl border border-[#eadfd8] px-3 py-2 text-sm focus:border-[#ef4444] focus:outline-none focus:ring-1 focus:ring-[#f3d2c2]"
-                  />
-                </label>
-                <label className="block">
-                  <span className="text-sm font-medium text-gray-700">
-                    共享存储
-                  </span>
-                  <div className="mt-1 flex rounded-xl border border-[#eadfd8] bg-white">
-                    <input
-                      type="number"
-                      min={1}
-                      value={sharedStorageGb}
-                      onChange={(event) =>
-                        setSharedStorageGb(Math.max(1, Number(event.target.value)))
-                      }
-                      className="min-w-0 flex-1 rounded-l-xl border-0 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-[#f3d2c2]"
-                    />
-                    <span className="flex items-center rounded-r-xl border-l border-[#eadfd8] bg-gray-50 px-3 text-sm text-gray-500">
-                      GiB
-                    </span>
-                  </div>
-                </label>
-                <label className="block md:col-span-2">
-                  <span className="text-sm font-medium text-gray-700">
-                    描述
-                  </span>
-                  <textarea
-                    value={description}
-                    onChange={(event) => setDescription(event.target.value)}
-                    rows={3}
-                    className="mt-1 block w-full rounded-xl border border-[#eadfd8] px-3 py-2 text-sm focus:border-[#ef4444] focus:outline-none focus:ring-1 focus:ring-[#f3d2c2]"
-                  />
-                </label>
-                <label className="block md:col-span-2">
-                  <span className="text-sm font-medium text-gray-700">
-                    协作模式
-                  </span>
-                  <select
-                    value={communicationMode}
-                    disabled
-                    className="mt-1 block w-full cursor-not-allowed rounded-xl border border-[#eadfd8] bg-gray-50 px-3 py-2 text-sm text-gray-700"
-                  >
-                    {TEAM_COMMUNICATION_MODE_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                  <p className="mt-1 text-xs text-gray-500">
-                    {
-                      TEAM_COMMUNICATION_MODE_OPTIONS.find(
-                        (option) => option.value === communicationMode,
-                      )?.description
-                    }
-                  </p>
-                </label>
-                <label className="block md:col-span-2">
-                  <span className="text-sm font-medium text-gray-700">
-                    StorageClass
-                  </span>
-                  <input
-                    value={storageClass}
-                    onChange={(event) => setStorageClass(event.target.value)}
-                    placeholder="留空使用集群默认，或填 manual"
-                    className="mt-1 block w-full rounded-xl border border-[#eadfd8] px-3 py-2 text-sm focus:border-[#ef4444] focus:outline-none focus:ring-1 focus:ring-[#f3d2c2]"
-                  />
-                </label>
-              </div>
-            </section>
-
             <section className="app-panel p-6">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div>
@@ -1055,460 +717,192 @@ const CreateTeamPage: React.FC = () => {
             </section>
 
             <section className="app-panel p-6">
-              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div>
                   <h2 className="text-lg font-semibold text-gray-900">
-                    成员
+                    Team 与成员
                   </h2>
                   <p className="mt-1 text-sm text-gray-500">
                     当前 {members.length} 个成员，{members.filter((member) => member.isLeader).length} 个 Leader
                   </p>
                 </div>
-                <button
-                  type="button"
-                  onClick={addMember}
-                  className="inline-flex items-center justify-center rounded-xl border border-[#eadfd8] bg-white px-4 py-2 text-sm font-medium text-[#5f5957] hover:bg-[#fff8f5]"
-                >
-                  <svg
-                    className="mr-2 h-5 w-5"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M12 4v16m8-8H4"
-                    />
-                  </svg>
-                  添加成员
-                </button>
+                <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700">
+                  OpenClaw Lite
+                </span>
               </div>
 
-              <div className="mt-5 rounded-xl border border-[#eadfd8] bg-[#fffaf6] p-4">
-                <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_auto_auto_auto] lg:items-end">
-                  <label className="block">
-                    <span className="text-sm font-medium text-gray-700">
-                      选择模板包
-                    </span>
-                    <select
-                      value={selectedTemplate?.id || ""}
-                      onChange={(event) => setSelectedTemplateId(event.target.value)}
-                      className="mt-1 block w-full rounded-xl border border-[#eadfd8] bg-white px-3 py-2 text-sm focus:border-[#ef4444] focus:outline-none focus:ring-1 focus:ring-[#f3d2c2]"
-                    >
-                      {memberTemplates.map((template) => (
-                        <option key={template.id} value={template.id}>
-                          {template.name} · {template.members.length} 成员
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <button
-                    type="button"
-                    onClick={() => importMemberTemplate("replace")}
-                    className="inline-flex items-center justify-center rounded-xl border border-[#ef4444] bg-white px-4 py-2 text-sm font-medium text-[#dc2626] hover:bg-[#fff1eb]"
-                  >
-                    替换导入
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => importMemberTemplate("append")}
-                    className="inline-flex items-center justify-center rounded-xl border border-[#eadfd8] bg-white px-4 py-2 text-sm font-medium text-[#5f5957] hover:bg-[#fff8f5]"
-                  >
-                    追加导入
-                  </button>
-                  <button
-                    type="button"
-                    disabled={selectedTemplate?.source !== "custom"}
-                    onClick={deleteSelectedTemplate}
-                    className="inline-flex items-center justify-center rounded-xl border border-red-200 bg-white px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    删除模板
-                  </button>
-                </div>
-
-                {selectedTemplate && (
-                  <>
-                    <div className="mt-3 rounded-lg border border-[#eadfd8] bg-white px-3 py-2 text-sm">
-                      <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
-                        <div>
-                          <div className="text-xs text-gray-500">预设 Team 名称</div>
-                          <div className="mt-1 font-medium text-gray-900">
-                            {selectedTemplate.teamName || "不预设"}
-                          </div>
-                        </div>
-                        <div className="max-w-2xl text-xs leading-5 text-gray-500">
-                          {selectedTemplate.description || "不预设描述"}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-3">
-                      {selectedTemplate.members.map((templateMember, index) => (
-                        <div
-                          key={`${selectedTemplate.id}-${templateMember.memberId}-${index}`}
-                          className="rounded-lg border border-[#eadfd8] bg-white px-3 py-2 text-sm"
-                        >
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="font-medium text-gray-900">
-                              {templateMember.memberId || `member-${index + 1}`}
-                            </span>
-                            <span className="text-xs text-gray-500">
-                              {templateMember.isLeader ? "Leader" : templateMember.role}
-                            </span>
-                          </div>
-                          <div className="mt-1 truncate text-xs text-gray-500">
-                            {templateMember.runtimeType} ·{" "}
-                            {templateMember.instanceMode || "lite"} ·{" "}
-                            {templateMember.image || "默认镜像"} ·{" "}
-                            {templateMember.cpuCores}C/{templateMember.memoryGb}G
-                          </div>
-                          {templateMember.agentProfileKey && (
-                            <div className="mt-1 truncate text-xs text-indigo-600">
-                              {getAgencyAgentProfile(templateMember.agentProfileKey)?.displayName ||
-                                getAgencyAgentProfile(templateMember.agentProfileKey)?.name ||
-                                templateMember.agentProfileKey}
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  </>
-                )}
-
-                <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,1fr)_auto_auto]">
-                  <label className="block">
-                    <span className="text-sm font-medium text-gray-700">
-                      模板包名称
-                    </span>
+              <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-2">
+                <label className="block">
+                  <span className="text-sm font-medium text-gray-700">
+                    Team 名称
+                  </span>
+                  <input
+                    value={name}
+                    onChange={(event) => setName(event.target.value)}
+                    placeholder="research-team"
+                    className="mt-1 block w-full rounded-xl border border-[#eadfd8] px-3 py-2 text-sm focus:border-[#ef4444] focus:outline-none focus:ring-1 focus:ring-[#f3d2c2]"
+                  />
+                </label>
+                <label className="block">
+                  <span className="text-sm font-medium text-gray-700">
+                    共享存储
+                  </span>
+                  <div className="mt-1 flex rounded-xl border border-[#eadfd8] bg-white">
                     <input
-                      value={templatePackageName}
-                      onChange={(event) => setTemplatePackageName(event.target.value)}
-                      placeholder={
-                        selectedTemplate?.source === "custom"
-                          ? selectedTemplate.name
-                          : "例如：研发三人组"
+                      type="number"
+                      min={1}
+                      value={sharedStorageGb}
+                      onChange={(event) =>
+                        setSharedStorageGb(Math.max(1, Number(event.target.value)))
                       }
-                      className="mt-1 block w-full rounded-xl border border-[#eadfd8] bg-white px-3 py-2 text-sm focus:border-[#ef4444] focus:outline-none focus:ring-1 focus:ring-[#f3d2c2]"
+                      className="min-w-0 flex-1 rounded-l-xl border-0 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-[#f3d2c2]"
                     />
-                  </label>
-                  <button
-                    type="button"
-                    onClick={saveCurrentMembersAsTemplate}
-                    className="inline-flex items-center justify-center self-end rounded-xl border border-[#eadfd8] bg-white px-4 py-2 text-sm font-medium text-[#5f5957] hover:bg-[#fff8f5]"
+                    <span className="flex items-center rounded-r-xl border-l border-[#eadfd8] bg-gray-50 px-3 text-sm text-gray-500">
+                      GiB
+                    </span>
+                  </div>
+                </label>
+                <label className="block md:col-span-2">
+                  <span className="text-sm font-medium text-gray-700">
+                    协作模式
+                  </span>
+                  <div className="mt-1 rounded-xl border border-[#eadfd8] bg-gray-50 px-3 py-2 text-sm text-gray-700">
+                    {communicationModeOption.label}
+                  </div>
+                  <p className="mt-1 text-xs text-gray-500">
+                    {communicationModeOption.description}
+                  </p>
+                </label>
+                <label className="block md:col-span-2">
+                  <span className="text-sm font-medium text-gray-700">
+                    选择模板包
+                  </span>
+                  <select
+                    value={selectedTemplate?.id || ""}
+                    onChange={(event) => applyTemplate(event.target.value)}
+                    className="mt-1 block w-full rounded-xl border border-[#eadfd8] bg-white px-3 py-2 text-sm focus:border-[#ef4444] focus:outline-none focus:ring-1 focus:ring-[#f3d2c2]"
                   >
-                    保存当前为模板
-                  </button>
-                  <button
-                    type="button"
-                    disabled={selectedTemplate?.source !== "custom"}
-                    onClick={updateSelectedTemplate}
-                    className="inline-flex items-center justify-center self-end rounded-xl border border-[#ef4444] bg-white px-4 py-2 text-sm font-medium text-[#dc2626] hover:bg-[#fff1eb] disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    更新模板
-                  </button>
-                </div>
-
-                {templateNotice && (
-                  <p className="mt-3 text-sm text-green-700">{templateNotice}</p>
-                )}
+                    {memberTemplates.map((template) => (
+                      <option key={template.id} value={template.id}>
+                        {getTemplateDisplayName(template)} · {template.members.length} 成员
+                      </option>
+                    ))}
+                  </select>
+                </label>
               </div>
 
-              <div className="mt-5 space-y-4">
-                {members.map((member, index) => (
-                  <div
-                    key={member.id}
-                    className="rounded-xl border border-[#eadfd8] bg-white p-4"
-                  >
-                    <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                      <label className="inline-flex items-center gap-2 text-sm font-medium text-gray-700">
-                        <input
-                          type="radio"
-                          checked={member.isLeader}
-                          onChange={() => setLeader(member.id)}
-                        />
-                        Team Leader
-                      </label>
-                      <button
-                        type="button"
-                        disabled={members.length <= 1}
-                        onClick={() => removeMember(member.id)}
-                        className="inline-flex items-center justify-center rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        移除
-                      </button>
-                    </div>
-
-                    <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-6">
-                      <label className="block">
-                        <span className="text-sm font-medium text-gray-700">
-                          成员 ID
-                        </span>
-                        <input
-                          value={member.memberId}
-                          onChange={(event) =>
-                            updateMember(member.id, {
-                              memberId: event.target.value,
-                            })
-                          }
-                          onBlur={() =>
-                            updateMember(member.id, (current) => ({
-                              memberId:
-                                normalizeMemberId(current.memberId) ||
-                                `member-${index + 1}`,
-                            }))
-                          }
-                          className="mt-1 block w-full rounded-xl border border-[#eadfd8] px-3 py-2 text-sm focus:border-[#ef4444] focus:outline-none focus:ring-1 focus:ring-[#f3d2c2]"
-                        />
-                      </label>
-                      <label className="block">
-                        <span className="text-sm font-medium text-gray-700">
-                          显示名称
-                        </span>
-                        <input
-                          value={member.name}
-                          onChange={(event) =>
-                            updateMember(member.id, { name: event.target.value })
-                          }
-                          placeholder={`${name || "team"}-${member.memberId}`}
-                          className="mt-1 block w-full rounded-xl border border-[#eadfd8] px-3 py-2 text-sm focus:border-[#ef4444] focus:outline-none focus:ring-1 focus:ring-[#f3d2c2]"
-                        />
-                      </label>
-                      <label className="block">
-                        <span className="text-sm font-medium text-gray-700">
-                          角色
-                        </span>
-                        <input
-                          value={member.isLeader ? "leader" : member.role}
-                          disabled={member.isLeader}
-                          onChange={(event) =>
-                            updateMember(member.id, { role: event.target.value })
-                          }
-                          className="mt-1 block w-full rounded-xl border border-[#eadfd8] px-3 py-2 text-sm focus:border-[#ef4444] focus:outline-none focus:ring-1 focus:ring-[#f3d2c2] disabled:bg-gray-50"
-                        />
-                      </label>
-                      <label className="block">
-                        <span className="text-sm font-medium text-gray-700">
-                          Runtime
-                        </span>
-                        <select
-                          value={member.runtimeType}
-                          onChange={(event) =>
-                            setMemberRuntimeType(
-                              member.id,
-                              event.target.value as RuntimeType,
-                            )
-                          }
-                          className="mt-1 block w-full rounded-xl border border-[#eadfd8] px-3 py-2 text-sm focus:border-[#ef4444] focus:outline-none focus:ring-1 focus:ring-[#f3d2c2]"
-                        >
-                          {RUNTIME_OPTIONS.map((option) => (
-                            <option key={option.value} value={option.value}>
-                              {option.label}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <label className="block">
-                        <span className="text-sm font-medium text-gray-700">
-                          Mode
-                        </span>
-                        <select
-                          value={member.instanceMode}
-                          onChange={(event) =>
-                            setMemberInstanceMode(
-                              member.id,
-                              event.target.value as InstanceMode,
-                            )
-                          }
-                          className="mt-1 block w-full rounded-xl border border-[#eadfd8] px-3 py-2 text-sm focus:border-[#ef4444] focus:outline-none focus:ring-1 focus:ring-[#f3d2c2]"
-                        >
-                          {INSTANCE_MODE_OPTIONS.map((option) => (
-                            <option key={option.value} value={option.value}>
-                              {option.label}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <label className="block">
-                        <span className="text-sm font-medium text-gray-700">
-                          镜像
-                        </span>
-                        <select
-                          value={member.image}
-                          onChange={(event) =>
-                            updateMember(member.id, { image: event.target.value })
-                          }
-                          className="mt-1 block w-full rounded-xl border border-[#eadfd8] px-3 py-2 text-sm focus:border-[#ef4444] focus:outline-none focus:ring-1 focus:ring-[#f3d2c2]"
-                        >
-                          {loadingImages ? (
-                            <option value="">加载中...</option>
-                          ) : imageOptionsForMember(
-                              member.runtimeType,
-                              member.instanceMode,
-                            ).length === 0 ? (
-                            <option value="">暂无 {member.runtimeType} 镜像</option>
-                          ) : (
-                            imageOptionsForMember(
-                              member.runtimeType,
-                              member.instanceMode,
-                            ).map((item) => (
-                              <option key={imageOptionKey(item)} value={item.image}>
-                                {item.display_name || item.image}
-                              </option>
-                            ))
-                          )}
-                        </select>
-                      </label>
-                      <label className="block">
-                        <span className="text-sm font-medium text-gray-700">
-                          角色模板
-                        </span>
-                        <select
-                          value={member.agentProfileKey || ""}
-                          onChange={(event) => {
-                            const profile = getAgencyAgentProfile(event.target.value);
-                            updateMember(member.id, {
-                              agentProfileKey: event.target.value
-                                ? (event.target.value as AgencyAgentProfileKey)
-                                : undefined,
-                              role:
-                                profile && !member.isLeader && profile.roleHint !== "leader"
-                                  ? profile.roleHint
-                                  : member.role,
-                              description:
-                                profile && !member.description.trim()
-                                  ? profile.summary
-                                  : member.description,
-                            });
-                          }}
-                          className="mt-1 block w-full rounded-xl border border-[#eadfd8] px-3 py-2 text-sm focus:border-[#ef4444] focus:outline-none focus:ring-1 focus:ring-[#f3d2c2]"
-                        >
-                          <option value="">不使用</option>
-                          {AGENCY_AGENT_PROFILE_OPTIONS.map((profile) => (
-                            <option key={profile.key} value={profile.key}>
-                              {profile.displayName}
-                            </option>
-                          ))}
-                        </select>
-                        {member.agentProfileKey && (
-                          <p className="mt-1 truncate text-xs text-gray-500">
-                            {getAgencyAgentProfile(member.agentProfileKey)?.summary}
-                          </p>
-                        )}
-                      </label>
-                    </div>
-
-                    <label className="mt-4 block">
-                      <span className="text-sm font-medium text-gray-700">
-                        职责描述
-                      </span>
-                      <textarea
-                        value={member.description}
-                        onChange={(event) =>
-                          updateMember(member.id, {
-                            description: event.target.value,
-                          })
-                        }
-                        rows={3}
-                        placeholder="说明这个成员负责什么，例如代码实现、测试验证、文档整理。"
-                        className="mt-1 block w-full rounded-xl border border-[#eadfd8] px-3 py-2 text-sm focus:border-[#ef4444] focus:outline-none focus:ring-1 focus:ring-[#f3d2c2]"
-                      />
-                    </label>
-
-                    <div className="mt-4">
-                      <div className="text-sm font-medium text-gray-700">
-                        资源预设
-                      </div>
-                      <div className="mt-2 grid grid-cols-2 gap-2 md:grid-cols-4">
-                        {([
-                          "small",
-                          "medium",
-                          "large",
-                          "custom",
-                        ] as ResourcePresetKey[]).map((preset) => (
-                          <button
-                            key={preset}
-                            type="button"
-                            onClick={() => applyResourcePreset(member.id, preset)}
-                            className={`rounded-xl border px-3 py-2 text-sm font-medium ${
-                              member.resourcePreset === preset
-                                ? "border-[#ef4444] bg-[#fff1eb] text-[#dc2626]"
-                                : "border-[#eadfd8] bg-white text-[#5f5957] hover:bg-[#fff8f5]"
-                            }`}
-                          >
-                            {preset === "custom"
-                              ? "自定义"
-                              : `${RESOURCE_PRESETS[preset].label} · ${RESOURCE_PRESETS[preset].cpuCores}C/${RESOURCE_PRESETS[preset].memoryGb}G`}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div className="mt-4 grid grid-cols-2 gap-4 md:grid-cols-5">
-                      <NumberField
-                        label="CPU"
-                        value={member.cpuCores}
-                        min={0.1}
-                        step={0.1}
-                        onChange={(value) =>
-                          updateMember(member.id, {
-                            cpuCores: value,
-                            resourcePreset: "custom",
-                          })
-                        }
-                      />
-                      <NumberField
-                        label="内存 GiB"
-                        value={member.memoryGb}
-                        min={1}
-                        step={1}
-                        onChange={(value) =>
-                          updateMember(member.id, {
-                            memoryGb: value,
-                            resourcePreset: "custom",
-                          })
-                        }
-                      />
-                      <NumberField
-                        label="磁盘 GiB"
-                        value={member.diskGb}
-                        min={1}
-                        step={1}
-                        onChange={(value) =>
-                          updateMember(member.id, {
-                            diskGb: value,
-                            resourcePreset: "custom",
-                          })
-                        }
-                      />
-                      <label className="flex items-center gap-2 pt-7 text-sm font-medium text-gray-700">
-                        <input
-                          type="checkbox"
-                          checked={member.gpuEnabled}
-                          onChange={(event) =>
-                            updateMember(member.id, {
-                              gpuEnabled: event.target.checked,
-                              gpuCount: event.target.checked
-                                ? Math.max(1, member.gpuCount || 1)
-                                : 0,
-                            })
-                          }
-                        />
-                        GPU
-                      </label>
-                      <NumberField
-                        label="GPU 数"
-                        value={member.gpuCount}
-                        min={0}
-                        step={1}
-                        disabled={!member.gpuEnabled}
-                        onChange={(value) =>
-                          updateMember(member.id, { gpuCount: value })
-                        }
-                      />
-                    </div>
+              {selectedTemplate && (
+                <div className="mt-4 rounded-xl border border-[#eadfd8] bg-[#fffaf6] px-4 py-3 text-sm">
+                  <div className="font-medium text-gray-900">
+                    {getTemplateDisplayName(selectedTemplate)}
                   </div>
-                ))}
+                  <div className="mt-1 text-gray-500">
+                    {getTemplateDisplayDescription(selectedTemplate)}
+                  </div>
+                </div>
+              )}
+
+              <div className="mt-5 overflow-hidden rounded-xl border border-[#eadfd8]">
+                <div className="hidden grid-cols-[minmax(120px,0.9fr)_minmax(140px,1fr)_minmax(150px,1fr)_minmax(220px,1.5fr)_minmax(220px,1.15fr)] gap-3 border-b border-[#eadfd8] bg-gray-50 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 lg:grid">
+                  <div>成员 ID</div>
+                  <div>显示名称</div>
+                  <div>角色模板</div>
+                  <div>角色解释</div>
+                  <div>资源预设</div>
+                </div>
+                <div className="divide-y divide-[#eadfd8] bg-white">
+                  {members.map((member) => {
+                    const preset = normalizedPreset(member.resourcePreset);
+                    return (
+                      <div
+                        key={member.id}
+                        className="grid grid-cols-1 gap-3 px-4 py-4 text-sm lg:grid-cols-[minmax(120px,0.9fr)_minmax(140px,1fr)_minmax(150px,1fr)_minmax(220px,1.5fr)_minmax(220px,1.15fr)] lg:items-center"
+                      >
+                        <div>
+                          <div className="text-xs font-medium text-gray-500 lg:hidden">
+                            成员 ID
+                          </div>
+                          <div className="font-medium text-gray-900">
+                            {normalizeMemberId(member.memberId) || member.memberId}
+                          </div>
+                          <div className="mt-1 text-xs text-gray-500">
+                            {member.isLeader ? "Leader" : effectiveMemberRole(member)}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-xs font-medium text-gray-500 lg:hidden">
+                            显示名称
+                          </div>
+                          <div className="text-gray-900">
+                            {displayNameForMember(member)}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-xs font-medium text-gray-500 lg:hidden">
+                            角色模板
+                          </div>
+                          <div className="font-medium text-indigo-700">
+                            {profileLabelForMember(member)}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-xs font-medium text-gray-500 lg:hidden">
+                            角色解释
+                          </div>
+                          <p className="line-clamp-3 text-gray-600">
+                            {effectiveMemberDescription(member) || "模板未提供职责说明。"}
+                          </p>
+                        </div>
+                        <div>
+                          <div className="text-xs font-medium text-gray-500 lg:hidden">
+                            资源预设
+                          </div>
+                          <div className="grid grid-cols-3 gap-2">
+                            {EDITABLE_RESOURCE_PRESETS.map((resourcePreset) => (
+                              <button
+                                key={resourcePreset}
+                                type="button"
+                                onClick={() =>
+                                  applyResourcePreset(member.id, resourcePreset)
+                                }
+                                className={`min-h-10 rounded-lg border px-2 py-2 text-xs font-medium ${
+                                  preset === resourcePreset
+                                    ? "border-[#ef4444] bg-[#fff1eb] text-[#dc2626]"
+                                    : "border-[#eadfd8] bg-white text-[#5f5957] hover:bg-[#fff8f5]"
+                                }`}
+                              >
+                                {RESOURCE_PRESETS[resourcePreset].label}
+                                <span className="mt-0.5 block text-[11px] font-normal">
+                                  {RESOURCE_PRESETS[resourcePreset].cpuCores}C/
+                                  {RESOURCE_PRESETS[resourcePreset].memoryGb}G
+                                </span>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="mt-4 grid grid-cols-1 gap-3 rounded-xl border border-dashed border-[#eadfd8] bg-gray-50 px-4 py-3 text-sm text-gray-600 md:grid-cols-2">
+                <div>
+                  <span className="font-medium text-gray-700">Runtime</span>
+                  <span className="ml-2">OpenClaw</span>
+                </div>
+                <div>
+                  <span className="font-medium text-gray-700">Mode</span>
+                  <span className="ml-2">Lite</span>
+                </div>
+                <div className="md:col-span-2">
+                  <span className="font-medium text-gray-700">镜像</span>
+                  <span className="ml-2 break-all">
+                    {loadingImages
+                      ? "加载中..."
+                      : selectedImage?.display_name || selectedImage?.image || "无"}
+                  </span>
+                </div>
               </div>
             </section>
           </div>
@@ -1527,12 +921,17 @@ const CreateTeamPage: React.FC = () => {
                 />
                 <SummaryRow label="成员数" value={`${members.length}`} />
                 <SummaryRow
-                  label="Lite / Pro"
-                  value={`${members.filter((member) => member.instanceMode === "lite").length} / ${members.filter((member) => member.instanceMode === "pro").length}`}
-                />
-                <SummaryRow
                   label="成员模板"
-                  value={selectedTemplate?.name || "未选择"}
+                  value={
+                    selectedTemplate
+                      ? getTemplateDisplayName(selectedTemplate)
+                      : "未选择"
+                  }
+                />
+                <SummaryRow label="运行方式" value="OpenClaw Lite" />
+                <SummaryRow
+                  label="协作模式"
+                  value={communicationModeOption.label}
                 />
                 <SummaryRow
                   label="共享存储"
@@ -1596,37 +995,6 @@ const CreateTeamPage: React.FC = () => {
     </UserLayout>
   );
 };
-
-function NumberField({
-  label,
-  value,
-  min,
-  step,
-  disabled,
-  onChange,
-}: {
-  label: string;
-  value: number;
-  min: number;
-  step: number;
-  disabled?: boolean;
-  onChange: (value: number) => void;
-}) {
-  return (
-    <label className="block">
-      <span className="text-sm font-medium text-gray-700">{label}</span>
-      <input
-        type="number"
-        value={value}
-        min={min}
-        step={step}
-        disabled={disabled}
-        onChange={(event) => onChange(Number(event.target.value))}
-        className="mt-1 block w-full rounded-xl border border-[#eadfd8] px-3 py-2 text-sm focus:border-[#ef4444] focus:outline-none focus:ring-1 focus:ring-[#f3d2c2] disabled:bg-gray-50"
-      />
-    </label>
-  );
-}
 
 function SummaryRow({ label, value }: { label: string; value: string }) {
   return (

@@ -45,6 +45,7 @@ const (
 	defaultTeamTaskStaleTimeout = 30 * time.Minute
 	teamTaskStaleSweepInterval  = 30 * time.Second
 	teamConsumerScanInterval    = 10 * time.Second
+	teamAssignmentMonitorEvery  = 3 * time.Minute
 
 	initialLeaderTaskIntent = "team_bootstrap_introduction"
 	teamTaskCompletionTool  = "team_complete_task"
@@ -211,14 +212,15 @@ type teamService struct {
 	configMapService      *k8s.ConfigMapService
 	podService            *k8s.PodService
 
-	ctx                  context.Context
-	cancel               context.CancelFunc
-	mu                   sync.Mutex
-	running              bool
-	wg                   sync.WaitGroup
-	consumers            map[int]struct{}
-	staleMonitorStarted  bool
-	runtimeWorkspaceRoot string
+	ctx                   context.Context
+	cancel                context.CancelFunc
+	mu                    sync.Mutex
+	running               bool
+	wg                    sync.WaitGroup
+	consumers             map[int]struct{}
+	assignmentMonitorLast map[string]time.Time
+	staleMonitorStarted   bool
+	runtimeWorkspaceRoot  string
 }
 
 type teamOpenClawConfigPlanner interface {
@@ -262,16 +264,17 @@ func WithTeamOpenClawConfigService(service OpenClawConfigService) TeamServiceOpt
 func NewTeamService(repo repository.TeamRepository, instanceService InstanceService, opts ...TeamServiceOption) TeamService {
 	ctx, cancel := context.WithCancel(context.Background())
 	service := &teamService{
-		repo:                 repo,
-		instanceService:      instanceService,
-		pvcService:           k8s.NewPVCService(),
-		secretService:        k8s.NewSecretService(),
-		configMapService:     k8s.NewConfigMapService(),
-		podService:           k8s.NewPodService(),
-		ctx:                  ctx,
-		cancel:               cancel,
-		consumers:            map[int]struct{}{},
-		runtimeWorkspaceRoot: "/workspaces",
+		repo:                  repo,
+		instanceService:       instanceService,
+		pvcService:            k8s.NewPVCService(),
+		secretService:         k8s.NewSecretService(),
+		configMapService:      k8s.NewConfigMapService(),
+		podService:            k8s.NewPodService(),
+		ctx:                   ctx,
+		cancel:                cancel,
+		consumers:             map[int]struct{}{},
+		assignmentMonitorLast: map[string]time.Time{},
+		runtimeWorkspaceRoot:  "/workspaces",
 	}
 	for _, opt := range opts {
 		if opt != nil {
@@ -303,6 +306,7 @@ func (s *teamService) StartBackground(parent context.Context) {
 	s.running = true
 	s.staleMonitorStarted = false
 	s.consumers = map[int]struct{}{}
+	s.assignmentMonitorLast = map[string]time.Time{}
 	s.wg.Add(1)
 	go s.consumerScanLoop(ctx)
 	s.mu.Unlock()
@@ -735,7 +739,7 @@ func (s *teamService) writeSharedTeamRosterConfig(userID int, team *models.Team,
 	if root == "." || root == string(filepath.Separator) {
 		return fmt.Errorf("invalid Team shared workspace root for Team %d: %q", team.ID, root)
 	}
-	for _, rel := range []string{"", "results", "tasks", "inbox", "status"} {
+	for _, rel := range []string{"", "results", "tasks", "inbox", "status", "artifacts", "tmp"} {
 		target := root
 		if rel != "" {
 			target = filepath.Join(root, rel)
@@ -1411,6 +1415,7 @@ func (s *teamService) DispatchTask(userID, teamID int, req DispatchTeamTaskReque
 			return nil, fmt.Errorf("failed to decode task payload: %w", err)
 		}
 	}
+	s.enrichTaskWorkspaceContract(userID, team, task, taskPayload)
 	now := time.Now().UTC()
 	memberInstance, _ := s.teamMemberInstance(member)
 	memberContext := buildTeamMemberTaskContext(member, memberInstance)
@@ -1513,16 +1518,39 @@ func (s *teamService) prepareTeamTaskWorkspace(userID, teamID, taskID int) error
 	}
 	root := filepath.Clean(s.teamRuntimeSharedPathFor(userID, teamID))
 	taskRef := fmt.Sprintf("team-%d-task-%d", teamID, taskID)
-	for _, rel := range []string{
+	standardDirs := []string{
 		"",
+		"artifacts",
+		filepath.ToSlash(filepath.Join("artifacts", taskRef)),
+		filepath.ToSlash(filepath.Join("artifacts", taskRef, "members")),
 		"results",
+		filepath.ToSlash(filepath.Join("results", taskRef)),
+		filepath.ToSlash(filepath.Join("results", taskRef, "members")),
 		"tasks",
+		filepath.ToSlash(filepath.Join("tasks", taskRef)),
 		"inbox",
 		"status",
-		filepath.ToSlash(filepath.Join("results", taskRef)),
-		filepath.ToSlash(filepath.Join("tasks", taskRef)),
 		filepath.ToSlash(filepath.Join("status", taskRef)),
-	} {
+		"tmp",
+	}
+	if s.repo != nil {
+		members, err := s.repo.ListMembersByTeamID(teamID)
+		if err != nil {
+			return err
+		}
+		for _, member := range activeTeamMembers(members) {
+			memberKey := normalizeTeamMemberRouteKey(member.MemberKey)
+			if memberKey == "" {
+				continue
+			}
+			standardDirs = append(standardDirs,
+				filepath.ToSlash(filepath.Join("artifacts", taskRef, "members", memberKey)),
+				filepath.ToSlash(filepath.Join("results", taskRef, "members", memberKey)),
+				filepath.ToSlash(filepath.Join("tmp", memberKey)),
+			)
+		}
+	}
+	for _, rel := range standardDirs {
 		target := root
 		if rel != "" {
 			target = filepath.Join(root, filepath.FromSlash(rel))
@@ -1532,6 +1560,52 @@ func (s *teamService) prepareTeamTaskWorkspace(userID, teamID, taskID int) error
 		}
 	}
 	return nil
+}
+
+func (s *teamService) enrichTaskWorkspaceContract(userID int, team *models.Team, task *models.TeamTask, payload map[string]interface{}) {
+	if s == nil || team == nil || task == nil || payload == nil {
+		return
+	}
+	taskRef := fmt.Sprintf("team-%d-task-%d", team.ID, task.ID)
+	physicalSharedDir := s.teamRuntimeSharedPathFor(userID, team.ID)
+	contract := map[string]interface{}{
+		"configPath":              teamConfigMountPath,
+		"configEnv":               "CLAWMANAGER_TEAM_CONFIG_PATH",
+		"sharedDir":               team.SharedMountPath,
+		"sharedDirEnv":            "CLAWMANAGER_TEAM_SHARED_DIR",
+		"physicalSharedDir":       physicalSharedDir,
+		"sharedConfigPath":        "/team/" + teamConfigFileName,
+		"fallbackConfigPaths":     []string{"/team/" + teamConfigFileName},
+		"writeRoot":               "$CLAWMANAGER_TEAM_SHARED_DIR",
+		"canonicalReportPrefix":   "/team",
+		"validReportPathPattern":  "/team/<relative-path>",
+		"invalidConfigPaths":      []string{"/team/members"},
+		"invalidArtifactPrefixes": []string{"team/"},
+		"taskRef":                 taskRef,
+		"artifactRoot":            "/team/artifacts/" + taskRef,
+		"memberArtifactRoot":      "/team/artifacts/" + taskRef + "/members/${memberId}",
+		"memberResultRoot":        "/team/results/" + taskRef + "/members/${memberId}",
+		"leaderResultRoot":        "/team/results/" + taskRef,
+		"statusRoot":              "/team/status/" + taskRef,
+		"tmpRoot":                 "/team/tmp/${memberId}",
+		"statusFilesAreAdvisory":  true,
+		"stateAuthority":          "clawmanager_event_ledger",
+		"rules": []string{
+			"Use /team/artifacts/<rootTaskId>/members/<memberId>/<workId>/ for member deliverables.",
+			"Use /team/results/<rootTaskId>/members/<memberId>/ for member result summaries.",
+			"Only the Leader writes the root final synthesis under /team/results/<rootTaskId>/.",
+			"Shared status JSON files are compatibility snapshots; do not treat them as the task truth source.",
+		},
+	}
+	if existing, ok := payload["workspaceContract"].(map[string]interface{}); ok {
+		for key, value := range contract {
+			if _, exists := existing[key]; !exists {
+				existing[key] = value
+			}
+		}
+		return
+	}
+	payload["workspaceContract"] = contract
 }
 
 func (s *teamService) teamMemberInstance(member *models.TeamMember) (*models.Instance, error) {
@@ -2252,6 +2326,9 @@ func (s *teamService) monitorStaleTasks(ctx context.Context) {
 			if err := s.sweepStaleTasks(); err != nil {
 				fmt.Printf("Warning: failed to sweep stale Team tasks: %v\n", err)
 			}
+			if err := s.sweepAssignmentStatusChecks(); err != nil {
+				fmt.Printf("Warning: failed to sweep Team assignment status checks: %v\n", err)
+			}
 		}
 	}
 }
@@ -2272,6 +2349,160 @@ func (s *teamService) sweepStaleTasks() error {
 		}
 	}
 	return nil
+}
+
+func (s *teamService) sweepAssignmentStatusChecks() error {
+	if s == nil || s.repo == nil {
+		return nil
+	}
+	now := time.Now().UTC()
+	cutoff := now.Add(-teamAssignmentMonitorEvery)
+	teams, err := s.repo.ListActiveTeams()
+	if err != nil {
+		return err
+	}
+	var errs []error
+	for idx := range teams {
+		team := teams[idx]
+		if normalizedTeamCommunicationMode(team.CommunicationMode) != teamCommunicationModeLeaderMediated {
+			continue
+		}
+		items, err := s.repo.ListWorkItemsByTeamID(team.ID, 500)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		var bus *redisBus
+		for itemIdx := range items {
+			item := items[itemIdx]
+			if !shouldMonitorTeamWorkItem(item, cutoff) {
+				continue
+			}
+			task, err := s.repo.GetTaskByID(item.RootTaskID)
+			if err != nil {
+				errs = append(errs, err)
+				continue
+			}
+			if task == nil || task.TeamID != team.ID || isTerminalTeamTaskStatus(task.Status) {
+				continue
+			}
+			owner, err := s.repo.GetMemberByID(*item.OwnerMemberID)
+			if err != nil {
+				errs = append(errs, err)
+				continue
+			}
+			if owner == nil || owner.TeamID != team.ID || isLeaderTeamMember(owner) || !isActiveTeamMember(owner) {
+				continue
+			}
+			monitorKey := fmt.Sprintf("%d:%d:%s:%d", team.ID, item.RootTaskID, item.WorkID, *item.OwnerMemberID)
+			if !s.claimAssignmentMonitorSlot(monitorKey, now) {
+				continue
+			}
+			if bus == nil {
+				bus, err = s.redisBusForTeam(context.Background(), &team)
+				if err != nil {
+					errs = append(errs, err)
+					continue
+				}
+			}
+			if err := s.dispatchAssignmentStatusCheck(&team, bus, task, &item, owner, now); err != nil {
+				errs = append(errs, err)
+			}
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func shouldMonitorTeamWorkItem(item models.TeamWorkItem, cutoff time.Time) bool {
+	if item.OwnerMemberID == nil || strings.TrimSpace(item.WorkID) == "" {
+		return false
+	}
+	switch item.Status {
+	case models.TeamTaskStatusDispatched, models.TeamTaskStatusRunning:
+	default:
+		return false
+	}
+	return item.UpdatedAt.IsZero() || item.UpdatedAt.Before(cutoff)
+}
+
+func (s *teamService) claimAssignmentMonitorSlot(key string, now time.Time) bool {
+	if s == nil || strings.TrimSpace(key) == "" {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.assignmentMonitorLast == nil {
+		s.assignmentMonitorLast = map[string]time.Time{}
+	}
+	if last, ok := s.assignmentMonitorLast[key]; ok && now.Sub(last) < teamAssignmentMonitorEvery {
+		return false
+	}
+	s.assignmentMonitorLast[key] = now
+	return true
+}
+
+func (s *teamService) dispatchAssignmentStatusCheck(team *models.Team, bus *redisBus, task *models.TeamTask, item *models.TeamWorkItem, owner *models.TeamMember, now time.Time) error {
+	if team == nil || bus == nil || task == nil || item == nil || owner == nil {
+		return nil
+	}
+	envelope, messageID := buildAssignmentStatusCheckEnvelope(team, task, item, owner, now)
+	if envelope == nil || strings.TrimSpace(messageID) == "" {
+		return nil
+	}
+	envelopeJSON, err := marshalJSON(envelope)
+	if err != nil {
+		return err
+	}
+	_, err = bus.XAdd(context.Background(), teamInboxKey(team.ID, owner.MemberKey), map[string]string{
+		"payload":    envelopeJSON,
+		"team_id":    strconv.Itoa(team.ID),
+		"task_id":    strconv.Itoa(task.ID),
+		"message_id": messageID,
+		"member_id":  owner.MemberKey,
+	})
+	return err
+}
+
+func buildAssignmentStatusCheckEnvelope(team *models.Team, task *models.TeamTask, item *models.TeamWorkItem, owner *models.TeamMember, now time.Time) (map[string]interface{}, string) {
+	if team == nil || task == nil || item == nil || owner == nil {
+		return nil, ""
+	}
+	taskRef := fmt.Sprintf("team-%d-task-%d", task.TeamID, task.ID)
+	messageID := fmt.Sprintf("monitor:%s:%s:%d", taskRef, item.WorkID, now.Unix())
+	prompt := strings.Join([]string{
+		"[STATUS_CHECK] This is an automatic ClawManager assignment monitor.",
+		fmt.Sprintf("rootTaskId=%s rootMessageId=%s workId=%s assignmentId=%s", taskRef, task.MessageID, item.WorkID, item.WorkID),
+		"Check the current assignment state. If you are still working, call team_update_progress with a concise progress summary and continue the same assignment. If you stopped or lost context, resume from the assignment evidence and report the blocker or needed retry to the Leader. Do not mark the assignment complete unless the deliverable is actually ready.",
+	}, "\n")
+	envelope := map[string]interface{}{
+		"v":                  1,
+		"protocolVersion":    2,
+		"messageId":          messageID,
+		"teamId":             strconv.Itoa(team.ID),
+		"from":               "clawmanager-monitor",
+		"to":                 owner.MemberKey,
+		"replyTo":            teamTaskReplyTarget,
+		"requiresCompletion": false,
+		"completionTool":     teamTaskCompletionTool,
+		"intent":             "assignment_status_check",
+		"taskId":             taskRef,
+		"rootTaskId":         taskRef,
+		"rootMessageId":      task.MessageID,
+		"workId":             item.WorkID,
+		"assignmentId":       item.WorkID,
+		"title":              "Assignment status check",
+		"prompt":             prompt,
+		"rawPrompt":          prompt,
+		"metadata": map[string]interface{}{
+			"monitor":       true,
+			"monitorType":   "assignment_status_check",
+			"workItemId":    item.ID,
+			"workItemTitle": item.Title,
+			"lastUpdatedAt": item.UpdatedAt.Format(time.RFC3339Nano),
+		},
+		"createdAt": now.Format(time.RFC3339Nano),
+	}
+	return envelope, messageID
 }
 
 func (s *teamService) markTaskStale(task *models.TeamTask, timeout time.Duration) error {
@@ -3253,6 +3484,68 @@ func markLeaderMediatedRouteViolation(eventType string, payload map[string]inter
 	return "message_warning"
 }
 
+func isLeaderMediatedMonitorBlockerCandidate(team *models.Team, eventType string, payload map[string]interface{}, member *models.TeamMember, task *models.TeamTask) bool {
+	if !isLeaderMediatedTeam(team) || payload == nil || member == nil || task == nil || member.ID != task.TargetMemberID || !isLeaderTeamMember(member) {
+		return false
+	}
+	if hasTeamTaskCompletionToolCall(payload) ||
+		strings.EqualFold(strings.TrimSpace(eventString(payload, "completionSource", "completion_source")), teamTaskCompletionTool) ||
+		eventBool(payload, "explicitCompletion", "explicit_completion", "rootTaskTerminal") {
+		return false
+	}
+	if eventType != "task_failed" && eventType != "message_failed" {
+		status := normalizedTeamTaskEventStatus(payload)
+		if !isFailedTeamTaskEventStatus(status) {
+			return false
+		}
+	}
+	return looksLikeNonAuthoritativeMonitorBlockerText(eventString(payload, "resultMarkdown", "result_markdown", "result", "answer", "text", "message", "summary", "error_message", "error", "reason", "diagnostic", "lastSummary", "last_summary"))
+}
+
+func markLeaderMediatedMonitorBlockerCandidate(eventType string, payload map[string]interface{}) string {
+	if eventString(payload, "originalEvent") == "" {
+		payload["originalEvent"] = eventType
+	}
+	payload["event"] = "message_warning"
+	payload["type"] = "message_warning"
+	payload["status"] = "attention_required"
+	payload["runtimeStatus"] = models.TeamTaskStatusRunning
+	payload["availability"] = models.TeamMemberAvailabilityBusy
+	payload["rootTaskTerminal"] = false
+	payload["nonAuthoritative"] = true
+	payload["blockerCandidate"] = true
+	payload["monitorBlockerCandidate"] = true
+	if eventString(payload, "summary") == "" {
+		payload["summary"] = "Leader monitor reported a possible blocker; waiting for member result or explicit Leader finalization."
+	}
+	return "message_warning"
+}
+
+func looksLikeNonAuthoritativeMonitorBlockerText(text string) bool {
+	normalized := strings.TrimSpace(text)
+	if normalized == "" {
+		return false
+	}
+	lower := strings.ToLower(normalized)
+	compact := strings.ToLower(strings.Join(strings.Fields(normalized), ""))
+	if strings.Contains(lower, "monitoring agent") ||
+		strings.Contains(lower, "status check") ||
+		strings.Contains(lower, "status checks") ||
+		strings.Contains(lower, "unresponsive") ||
+		strings.Contains(lower, "no summary created") ||
+		strings.Contains(lower, "zero paper files") ||
+		strings.Contains(lower, "artifacts not found") ||
+		strings.Contains(lower, "artifact not found") ||
+		strings.Contains(lower, "blocker report sent") {
+		return true
+	}
+	return strings.Contains(compact, "监控") ||
+		strings.Contains(compact, "状态检查") ||
+		strings.Contains(compact, "无响应") ||
+		strings.Contains(compact, "未找到产物") ||
+		strings.Contains(compact, "找不到产物")
+}
+
 func isLeaderMediatedWorkerToLeaderResult(team *models.Team, eventType string, payload map[string]interface{}, member *models.TeamMember, task *models.TeamTask) bool {
 	if !isLeaderMediatedTeam(team) || payload == nil || member == nil || task == nil || isLeaderTeamMember(member) {
 		return false
@@ -3277,6 +3570,9 @@ func isLeaderMediatedWorkerToLeaderResult(team *models.Team, eventType string, p
 	}
 	body := eventString(payload, "resultMarkdown", "result_markdown", "result", "answer", "text", "message", "summary")
 	if looksLikeLeaderDispatchOnlyText(body) {
+		return false
+	}
+	if looksLikeNonTerminalProgressText(body) {
 		return false
 	}
 	return true
@@ -3307,6 +3603,75 @@ func markLeaderMediatedAssignmentResult(eventType string, payload map[string]int
 		payload["to"] = "leader"
 		payload["target"] = "leader"
 	}
+}
+
+func (s *teamService) reopenLeaderMediatedRootAfterMemberResult(team *models.Team, task *models.TeamTask, payload map[string]interface{}, now time.Time) error {
+	if s == nil || task == nil || !isLeaderMediatedTeam(team) || !isTerminalTeamTaskStatus(task.Status) {
+		return nil
+	}
+	if task.Status == models.TeamTaskStatusSucceeded {
+		return nil
+	}
+	errText := derefTeamString(task.ErrorMessage)
+	if errText == "" {
+		errText = eventString(payload, "previousError", "previous_error")
+	}
+	if !looksLikeNonAuthoritativeMonitorBlockerText(errText) {
+		return nil
+	}
+	task.Status = models.TeamTaskStatusRunning
+	task.FinishedAt = nil
+	task.ErrorMessage = nil
+	task.UpdatedAt = now
+	return s.repo.UpdateTask(task)
+}
+
+func looksLikeNonTerminalProgressText(text string) bool {
+	normalized := strings.TrimSpace(text)
+	if normalized == "" {
+		return false
+	}
+	if looksLikeFinalResultText(normalized) ||
+		containsAnyTeamTextMarker(normalized, []string{
+			"final delivery",
+			"final confirmation",
+			"files are at",
+			"qa verdict",
+			"pass with",
+			"pass:",
+			"needs revision",
+			"ready for review",
+			"delivered",
+			"交付",
+			"最终",
+			"已归档",
+		}) {
+		return false
+	}
+	lower := strings.ToLower(normalized)
+	compact := strings.ToLower(strings.Join(strings.Fields(normalized), ""))
+	if strings.Contains(lower, "progress update") ||
+		strings.Contains(lower, "status update") ||
+		strings.Contains(lower, "phase 1") ||
+		strings.Contains(lower, "phase 2") ||
+		strings.Contains(lower, "starting ") ||
+		strings.Contains(lower, "now extracting") ||
+		strings.Contains(lower, "now processing") ||
+		strings.Contains(lower, "still working") ||
+		strings.Contains(lower, "in progress") ||
+		strings.Contains(lower, "currently ") ||
+		strings.Contains(lower, "processing all") ||
+		strings.Contains(lower, "downloaded successfully") ||
+		strings.Contains(lower, "curating to") {
+		return true
+	}
+	return strings.Contains(compact, "进度更新") ||
+		strings.Contains(compact, "状态更新") ||
+		strings.Contains(compact, "正在") ||
+		strings.Contains(compact, "处理中") ||
+		strings.Contains(compact, "继续执行") ||
+		strings.Contains(compact, "阶段一") ||
+		strings.Contains(compact, "阶段二")
 }
 
 func looksLikeLeaderDispatchOnlyText(text string) bool {
@@ -3522,6 +3887,9 @@ func (s *teamService) projectTeamEvent(team *models.Team, bus *redisBus, message
 	if assignmentResultOnly {
 		markLeaderMediatedAssignmentResult(eventType, payload, member)
 	}
+	if !assignmentResultOnly && isLeaderMediatedMonitorBlockerCandidate(team, eventType, payload, member, task) {
+		eventType = markLeaderMediatedMonitorBlockerCandidate(eventType, payload)
+	}
 	eventType = normalizeFinalReplyTaskEvent(eventType, payload, task, member)
 	eventType = markLegacyRuntimeCompletionCandidate(eventType, payload, task, member)
 	eventStatus := normalizedTeamTaskEventStatus(payload)
@@ -3669,13 +4037,16 @@ func (s *teamService) projectTeamEvent(team *models.Team, bus *redisBus, message
 	if err := s.projectTeamWorkItem(team, task, member, eventType, payload, event); err != nil {
 		return err
 	}
+	now := time.Now().UTC()
 	if assignmentResultOnly {
 		if err := s.createLeaderMediatedResultNotification(team, bus, task, member, payload, event); err != nil {
 			return err
 		}
+		if err := s.reopenLeaderMediatedRootAfterMemberResult(team, task, payload, now); err != nil {
+			return err
+		}
 	}
 
-	now := time.Now().UTC()
 	taskProjection := teamTaskProjectionResult{}
 	if task != nil && !memberTerminalOnly && !assignmentResultOnly && !leaderMediatedRouteViolation {
 		taskProjection = projectTeamTaskRuntimeState(task, payload, eventType, payloadJSON, now)
@@ -4698,7 +5069,7 @@ func looksLikeLegacyRuntimeCompletionReport(task *models.TeamTask, payload map[s
 	}
 	lower := strings.ToLower(text)
 	compact := strings.ToLower(strings.Join(strings.Fields(text), ""))
-	hasCanonicalArtifact := regexp.MustCompile(`/team/(results|tasks)/[^\s)\]<>{},\\\x60"']+\.[A-Za-z0-9]+`).FindString(text) != ""
+	hasCanonicalArtifact := regexp.MustCompile(`/team/(artifacts|results|tasks)/[^\s)\]<>{},\\\x60"']+\.[A-Za-z0-9]+`).FindString(text) != ""
 	hasCompletionWord := strings.Contains(lower, "completed") ||
 		strings.Contains(lower, "complete") ||
 		strings.Contains(lower, "succeeded") ||
@@ -5042,9 +5413,11 @@ func (s *teamService) normalizeTeamArtifactReferences(team *models.Team, payload
 			return teamSharedMountPath + strings.TrimPrefix(value, "$CLAWMANAGER_TEAM_SHARED_DIR")
 		case strings.HasPrefix(value, "CLAWMANAGER_TEAM_SHARED_DIR/"):
 			return teamSharedMountPath + strings.TrimPrefix(value, "CLAWMANAGER_TEAM_SHARED_DIR")
-		case strings.HasPrefix(value, "team/results/") ||
+		case strings.HasPrefix(value, "team/artifacts/") ||
+			strings.HasPrefix(value, "team/results/") ||
 			strings.HasPrefix(value, "team/tasks/") ||
 			strings.HasPrefix(value, "team/inbox/") ||
+			strings.HasPrefix(value, "team/tmp/") ||
 			strings.HasPrefix(value, "team/status/"):
 			return "/" + value
 		default:
@@ -5064,7 +5437,7 @@ func (s *teamService) normalizeTeamArtifactReferences(team *models.Team, payload
 			text = strings.ReplaceAll(text, physicalRoot+"/", teamSharedMountPath+"/")
 		}
 		text = strings.ReplaceAll(text, "$CLAWMANAGER_TEAM_SHARED_DIR/", teamSharedMountPath+"/")
-		text = regexp.MustCompile(`(^|[\s(\[>])team/(results|tasks|inbox|status)/([^\s)\]<>{},\\\x60"']+)`).ReplaceAllString(text, `${1}/team/${2}/${3}`)
+		text = regexp.MustCompile(`(^|[\s(\[>])team/(artifacts|results|tasks|inbox|status|tmp)/([^\s)\]<>{},\\\x60"']+)`).ReplaceAllString(text, `${1}/team/${2}/${3}`)
 		return text
 	}
 	var normalizeValue func(value interface{}) interface{}
@@ -5183,7 +5556,7 @@ func collectTeamArtifactReferences(value interface{}) []string {
 	// the same completion payload as text, Markdown, or serialized JSON; a
 	// greedy token here turns `/team/file.md` into a nonexistent filename such
 	// as `/team/file.md`/n\",\"artifactRefs\"...`.
-	pattern := regexp.MustCompile(`/team/(results|tasks|inbox|status)/[^\s)\]<>{},\\\x60"']+`)
+	pattern := regexp.MustCompile(`/team/(artifacts|results|tasks|inbox|status|tmp)/[^\s)\]<>{},\\\x60"']+`)
 	seen := map[string]struct{}{}
 	var walk func(interface{})
 	walk = func(current interface{}) {
@@ -5249,9 +5622,11 @@ func collectInvalidRelativeTeamArtifactReferences(value interface{}) []string {
 					continue
 				}
 				ref := strings.TrimRight(match[2], ".,;:")
-				if strings.HasPrefix(ref, "team/results/") ||
+				if strings.HasPrefix(ref, "team/artifacts/") ||
+					strings.HasPrefix(ref, "team/results/") ||
 					strings.HasPrefix(ref, "team/tasks/") ||
 					strings.HasPrefix(ref, "team/inbox/") ||
+					strings.HasPrefix(ref, "team/tmp/") ||
 					strings.HasPrefix(ref, "team/status/") {
 					continue
 				}

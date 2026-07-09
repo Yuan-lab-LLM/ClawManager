@@ -746,6 +746,49 @@ func TestRuntimeSchedulerSkipsCreatingInstanceWithExistingBinding(t *testing.T) 
 	}
 }
 
+func TestRuntimeSchedulerSyncsCreatingInstanceFromRunningBinding(t *testing.T) {
+	ctx := context.Background()
+	workspacePath := "/workspaces/openclaw/user-1/instance-25"
+	instanceRepo := newFakeRuntimeInstanceRepo()
+	instanceRepo.creating = []models.Instance{{
+		ID:                25,
+		UserID:            1,
+		Type:              RuntimeTypeOpenClaw,
+		RuntimeType:       RuntimeBackendGateway,
+		InstanceMode:      InstanceModeLite,
+		Status:            "creating",
+		WorkspacePath:     &workspacePath,
+		RuntimeGeneration: 2,
+	}}
+	bindingRepo := newFakeRuntimeBindingRepo()
+	bindingRepo.bindings[25] = &models.InstanceRuntimeBinding{
+		InstanceID:  25,
+		RuntimeType: RuntimeTypeOpenClaw,
+		State:       "running",
+		Generation:  2,
+	}
+	scheduler := NewRuntimeScheduler(
+		instanceRepo,
+		&fakeRuntimePodRepo{},
+		bindingRepo,
+		&fakeRuntimeRolloutRepo{},
+		&fakeRuntimeAgentClient{},
+		NewRuntimeEventService(nil),
+		nil,
+		&fakeRuntimeDeploymentService{},
+		time.Second,
+	)
+
+	if err := scheduler.reconcile(ctx); err != nil {
+		t.Fatalf("reconcile returned error: %v", err)
+	}
+
+	state := instanceRepo.runtimeStates[25]
+	if state.status != "running" || state.generation != 2 || state.message != nil {
+		t.Fatalf("expected instance to sync to running from binding, got %+v", state)
+	}
+}
+
 func TestRuntimeSchedulerCleansUpGatewayAndReleasesSlotWhenBindingCreateFails(t *testing.T) {
 	ctx := context.Background()
 	endpoint := "http://agent.runtime"

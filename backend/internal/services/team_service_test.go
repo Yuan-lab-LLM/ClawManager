@@ -3350,6 +3350,197 @@ func TestTaskHasRecentActivityUsesBusinessWorkItems(t *testing.T) {
 	}
 }
 
+func TestLeaderMediatedWorkerProgressIsNotConfirmedAsResult(t *testing.T) {
+	teamID := 46
+	taskID := 79
+	messageID := "team-46-task-1783559040281180893"
+	task := &models.TeamTask{ID: taskID, TeamID: teamID, TargetMemberID: 169, MessageID: messageID, Status: models.TeamTaskStatusRunning, UpdatedAt: time.Now().UTC()}
+	leader := &models.TeamMember{ID: 169, TeamID: teamID, MemberKey: "delivery-lead", Role: "leader", Status: models.TeamMemberStatusBusy, Availability: models.TeamMemberAvailabilityBusy}
+	developer := &models.TeamMember{ID: 170, TeamID: teamID, MemberKey: "developer", Role: "developer", Status: models.TeamMemberStatusBusy, CurrentTaskID: &taskID, Availability: models.TeamMemberAvailabilityBusy}
+	repo := &teamRepositoryStub{
+		tasksByID:        map[int]*models.TeamTask{taskID: task},
+		tasksByMessageID: map[string]*models.TeamTask{messageID: task},
+		membersByID:      map[int]*models.TeamMember{169: leader, 170: developer},
+		membersByKey:     map[string]*models.TeamMember{"delivery-lead": leader, "leader": leader, "developer": developer},
+	}
+	service := &teamService{repo: repo, runtimeWorkspaceRoot: t.TempDir()}
+	payloadJSON, err := json.Marshal(map[string]interface{}{
+		"event":         "reply",
+		"memberId":      "developer",
+		"messageId":     "msg-progress-1",
+		"rootTaskId":    "team-46-task-79",
+		"rootMessageId": messageID,
+		"status":        "running",
+		"text":          "RAG Papers Task - Progress Update: Starting paper search and crawl. I found candidates and am now processing all PDFs.",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := service.projectTeamEvent(&models.Team{ID: teamID, UserID: 1, SharedMountPath: "/team", CommunicationMode: teamCommunicationModeLeaderMediated}, nil, redisStreamMessage{
+		ID: "1783559160000-0", Fields: map[string]string{"payload": string(payloadJSON)},
+	}); err != nil {
+		t.Fatalf("projectTeamEvent returned error: %v", err)
+	}
+
+	if len(repo.workItems) != 0 {
+		t.Fatalf("progress-only worker reply must not create a completed member result, got %#v", repo.workItems)
+	}
+	for _, event := range repo.createdEvents {
+		if event.EventType == "member_result_confirmed" {
+			t.Fatalf("progress-only worker reply must not emit result confirmation: %#v", event)
+		}
+	}
+}
+
+func TestLeaderMediatedMonitorBlockerDoesNotCloseRootTask(t *testing.T) {
+	teamID := 46
+	taskID := 79
+	messageID := "team-46-task-1783559040281180893"
+	task := &models.TeamTask{ID: taskID, TeamID: teamID, TargetMemberID: 169, MessageID: messageID, Status: models.TeamTaskStatusRunning, UpdatedAt: time.Now().UTC()}
+	leader := &models.TeamMember{ID: 169, TeamID: teamID, MemberKey: "delivery-lead", Role: "leader", Status: models.TeamMemberStatusBusy, CurrentTaskID: &taskID, Availability: models.TeamMemberAvailabilityBusy}
+	repo := &teamRepositoryStub{
+		tasksByID:        map[int]*models.TeamTask{taskID: task},
+		tasksByMessageID: map[string]*models.TeamTask{messageID: task},
+		membersByID:      map[int]*models.TeamMember{169: leader},
+		membersByKey:     map[string]*models.TeamMember{"delivery-lead": leader, "leader": leader},
+	}
+	service := &teamService{repo: repo, runtimeWorkspaceRoot: t.TempDir()}
+	monitorSummary := "Monitoring agent for dev-papers-001 completed. Developer unresponsive after 3 consecutive status checks. Zero paper files found, no summary created. Blocker report sent to leader for investigation."
+	payloadJSON, err := json.Marshal(map[string]interface{}{
+		"event":         "task_failed",
+		"memberId":      "delivery-lead",
+		"messageId":     messageID,
+		"rootTaskId":    "team-46-task-79",
+		"rootMessageId": messageID,
+		"status":        "failed",
+		"summary":       monitorSummary,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := service.projectTeamEvent(&models.Team{ID: teamID, UserID: 1, SharedMountPath: "/team", CommunicationMode: teamCommunicationModeLeaderMediated}, nil, redisStreamMessage{
+		ID: "1783560082000-0", Fields: map[string]string{"payload": string(payloadJSON)},
+	}); err != nil {
+		t.Fatalf("projectTeamEvent returned error: %v", err)
+	}
+
+	if repo.updatedTask != nil && repo.updatedTask.Status == models.TeamTaskStatusFailed {
+		t.Fatalf("monitor blocker candidate must not close root task, got %#v", repo.updatedTask)
+	}
+	if len(repo.createdEvents) != 1 || repo.createdEvents[0].EventType != "message_warning" {
+		t.Fatalf("expected monitor blocker to be stored as warning, got %#v", repo.createdEvents)
+	}
+	stored := teamEventPayloadMap(repo.createdEvents[0])
+	if !eventBool(stored, "monitorBlockerCandidate") || eventString(stored, "status") != "attention_required" {
+		t.Fatalf("expected monitor blocker candidate markers, got %#v", stored)
+	}
+}
+
+func TestLeaderMediatedMemberResultReopensNonAuthoritativeMonitorFailure(t *testing.T) {
+	teamID := 46
+	taskID := 79
+	messageID := "team-46-task-1783559040281180893"
+	finishedAt := time.Now().UTC().Add(-5 * time.Minute)
+	monitorSummary := "Monitoring agent for dev-papers-001 completed. Developer unresponsive after 3 consecutive status checks. Zero paper files found, no summary created."
+	task := &models.TeamTask{ID: taskID, TeamID: teamID, TargetMemberID: 169, MessageID: messageID, Status: models.TeamTaskStatusFailed, FinishedAt: &finishedAt, ErrorMessage: &monitorSummary, UpdatedAt: time.Now().UTC()}
+	leader := &models.TeamMember{ID: 169, TeamID: teamID, MemberKey: "delivery-lead", Role: "leader", Status: models.TeamMemberStatusBusy, Availability: models.TeamMemberAvailabilityBusy}
+	developer := &models.TeamMember{ID: 170, TeamID: teamID, MemberKey: "developer", Role: "developer", Status: models.TeamMemberStatusBusy, CurrentTaskID: &taskID, Availability: models.TeamMemberAvailabilityBusy}
+	repo := &teamRepositoryStub{
+		tasksByID:        map[int]*models.TeamTask{taskID: task},
+		tasksByMessageID: map[string]*models.TeamTask{messageID: task},
+		membersByID:      map[int]*models.TeamMember{169: leader, 170: developer},
+		membersByKey:     map[string]*models.TeamMember{"delivery-lead": leader, "leader": leader, "developer": developer},
+	}
+	service := &teamService{repo: repo, runtimeWorkspaceRoot: t.TempDir()}
+	resultText := "Final Delivery Confirmation - dev-papers-001 COMPLETE\n\nFiles are now at /team/artifacts/team-46-task-79/members/developer/dev-papers-001/report.md."
+	payloadJSON, err := json.Marshal(map[string]interface{}{
+		"event":          "reply",
+		"memberId":       "developer",
+		"messageId":      "msg-final-1",
+		"rootTaskId":     "team-46-task-79",
+		"rootMessageId":  messageID,
+		"status":         "succeeded",
+		"summary":        "Developer delivered the paper report.",
+		"resultMarkdown": resultText,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := service.projectTeamEvent(&models.Team{ID: teamID, UserID: 1, SharedMountPath: "/team", CommunicationMode: teamCommunicationModeLeaderMediated}, nil, redisStreamMessage{
+		ID: "1783560514000-0", Fields: map[string]string{"payload": string(payloadJSON)},
+	}); err != nil {
+		t.Fatalf("projectTeamEvent returned error: %v", err)
+	}
+
+	if repo.updatedTask == nil || repo.updatedTask.Status != models.TeamTaskStatusRunning || repo.updatedTask.FinishedAt != nil || repo.updatedTask.ErrorMessage != nil {
+		t.Fatalf("member result should reopen non-authoritative monitor failure, got %#v", repo.updatedTask)
+	}
+	if len(repo.workItems) != 1 || repo.workItems[0].Status != models.TeamTaskStatusSucceeded || repo.workItems[0].WorkID != "member-developer" {
+		t.Fatalf("expected developer result work item, got %#v", repo.workItems)
+	}
+	if len(repo.createdEvents) < 2 || repo.createdEvents[len(repo.createdEvents)-1].EventType != "member_result_confirmed" {
+		t.Fatalf("expected member result confirmation event, got %#v", repo.createdEvents)
+	}
+}
+
+func TestAssignmentMonitorEnvelopeIsNonTerminalAndAddressedToWorker(t *testing.T) {
+	now := time.Date(2026, 7, 9, 10, 30, 0, 0, time.UTC)
+	team := &models.Team{ID: 46}
+	task := &models.TeamTask{ID: 78, TeamID: 46, MessageID: "team-46-task-1783559040281180893"}
+	item := &models.TeamWorkItem{ID: 9001, WorkID: "dev-papers-001", Title: "Assign to developer", UpdatedAt: now.Add(-4 * time.Minute)}
+	owner := &models.TeamMember{ID: 301, TeamID: 46, MemberKey: "developer"}
+
+	envelope, messageID := buildAssignmentStatusCheckEnvelope(team, task, item, owner, now)
+	if messageID != "monitor:team-46-task-78:dev-papers-001:1783593000" {
+		t.Fatalf("unexpected monitor message id %q", messageID)
+	}
+	if envelope["intent"] != "assignment_status_check" || envelope["to"] != "developer" || envelope["from"] != "clawmanager-monitor" {
+		t.Fatalf("unexpected monitor routing: %#v", envelope)
+	}
+	if envelope["requiresCompletion"] != false || envelope["rootTaskId"] != "team-46-task-78" || envelope["workId"] != "dev-papers-001" {
+		t.Fatalf("monitor envelope should be non-terminal and assignment scoped: %#v", envelope)
+	}
+	prompt, _ := envelope["prompt"].(string)
+	if !strings.Contains(prompt, "call team_update_progress") || strings.Contains(prompt, "call team_complete_task") {
+		t.Fatalf("monitor prompt should request progress without forcing completion: %s", prompt)
+	}
+	metadata, ok := envelope["metadata"].(map[string]interface{})
+	if !ok || metadata["monitor"] != true || metadata["monitorType"] != "assignment_status_check" {
+		t.Fatalf("unexpected monitor metadata: %#v", envelope["metadata"])
+	}
+}
+
+func TestAssignmentMonitorEligibilityAndThrottle(t *testing.T) {
+	cutoff := time.Date(2026, 7, 9, 10, 30, 0, 0, time.UTC)
+	ownerID := 301
+	if !shouldMonitorTeamWorkItem(models.TeamWorkItem{OwnerMemberID: &ownerID, WorkID: "dev-papers-001", Status: models.TeamTaskStatusRunning, UpdatedAt: cutoff.Add(-time.Second)}, cutoff) {
+		t.Fatal("expected stale running worker item to be monitored")
+	}
+	if shouldMonitorTeamWorkItem(models.TeamWorkItem{OwnerMemberID: &ownerID, WorkID: "dev-papers-001", Status: models.TeamTaskStatusRunning, UpdatedAt: cutoff.Add(time.Second)}, cutoff) {
+		t.Fatal("fresh worker item should not be monitored")
+	}
+	if shouldMonitorTeamWorkItem(models.TeamWorkItem{OwnerMemberID: &ownerID, WorkID: "dev-papers-001", Status: models.TeamTaskStatusSucceeded, UpdatedAt: cutoff.Add(-time.Hour)}, cutoff) {
+		t.Fatal("terminal worker item should not be monitored")
+	}
+	if shouldMonitorTeamWorkItem(models.TeamWorkItem{WorkID: "dev-papers-001", Status: models.TeamTaskStatusRunning, UpdatedAt: cutoff.Add(-time.Hour)}, cutoff) {
+		t.Fatal("unowned worker item should not be monitored")
+	}
+
+	service := &teamService{}
+	if !service.claimAssignmentMonitorSlot("46:78:dev-papers-001:301", cutoff) {
+		t.Fatal("expected first monitor slot claim to succeed")
+	}
+	if service.claimAssignmentMonitorSlot("46:78:dev-papers-001:301", cutoff.Add(teamAssignmentMonitorEvery-time.Second)) {
+		t.Fatal("expected monitor slot to be throttled inside interval")
+	}
+	if !service.claimAssignmentMonitorSlot("46:78:dev-papers-001:301", cutoff.Add(teamAssignmentMonitorEvery+time.Second)) {
+		t.Fatal("expected monitor slot to reopen after interval")
+	}
+}
+
 type teamRepositoryStub struct {
 	teamsByID        map[int]*models.Team
 	membersByID      map[int]*models.TeamMember

@@ -507,6 +507,9 @@ func (s *RuntimeScheduler) reconcile(ctx context.Context) error {
 				continue
 			}
 			if binding != nil {
+				if err := s.syncInstanceStateFromBinding(ctx, instance, binding); err != nil {
+					errs = append(errs, fmt.Errorf("sync creating instance %d from binding: %w", instance.ID, err))
+				}
 				continue
 			}
 			if err := s.assignInstance(ctx, instance); err != nil {
@@ -536,6 +539,9 @@ func (s *RuntimeScheduler) reconcile(ctx context.Context) error {
 				continue
 			}
 			if binding != nil {
+				if err := s.syncInstanceStateFromBinding(ctx, instance, binding); err != nil {
+					errs = append(errs, fmt.Errorf("sync desired instance %d from binding: %w", instance.ID, err))
+				}
 				continue
 			}
 			binding, err = s.bindingRepo.GetByInstanceID(ctx, instance.ID)
@@ -544,6 +550,9 @@ func (s *RuntimeScheduler) reconcile(ctx context.Context) error {
 				continue
 			}
 			if binding != nil {
+				if err := s.syncInstanceStateFromBinding(ctx, instance, binding); err != nil {
+					errs = append(errs, fmt.Errorf("sync desired instance %d from binding: %w", instance.ID, err))
+				}
 				continue
 			}
 			if assignErr := s.assignInstance(ctx, instance); assignErr != nil {
@@ -556,6 +565,33 @@ func (s *RuntimeScheduler) reconcile(ctx context.Context) error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+func (s *RuntimeScheduler) syncInstanceStateFromBinding(ctx context.Context, instance models.Instance, binding *models.InstanceRuntimeBinding) error {
+	if s == nil || s.instanceRepo == nil || binding == nil {
+		return nil
+	}
+	state := strings.ToLower(strings.TrimSpace(binding.State))
+	switch state {
+	case "running", "ready", "healthy":
+		if strings.EqualFold(strings.TrimSpace(instance.Status), "running") && instance.RuntimeErrorMessage == nil {
+			return nil
+		}
+		return s.instanceRepo.UpdateRuntimeState(ctx, instance.ID, "running", maxInt(instance.RuntimeGeneration, binding.Generation), nil)
+	case "error", "failed":
+		message := "runtime gateway failed"
+		if binding.ErrorMessage != nil && strings.TrimSpace(*binding.ErrorMessage) != "" {
+			message = strings.TrimSpace(*binding.ErrorMessage)
+		}
+		if strings.EqualFold(strings.TrimSpace(instance.Status), "error") &&
+			instance.RuntimeErrorMessage != nil &&
+			strings.TrimSpace(*instance.RuntimeErrorMessage) == message {
+			return nil
+		}
+		return s.instanceRepo.UpdateRuntimeState(ctx, instance.ID, "error", maxInt(instance.RuntimeGeneration, binding.Generation), &message)
+	default:
+		return nil
+	}
 }
 
 func (s *RuntimeScheduler) failoverStalePods(ctx context.Context) error {
@@ -899,6 +935,13 @@ func isRecoverableRuntimeSchedulingError(instance models.Instance) bool {
 
 func minInt(a, b int) int {
 	if a < b {
+		return a
+	}
+	return b
+}
+
+func maxInt(a, b int) int {
+	if a > b {
 		return a
 	}
 	return b

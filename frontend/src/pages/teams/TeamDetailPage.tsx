@@ -3002,7 +3002,6 @@ function isProtocolNoiseItem(item: CollaborationItem) {
   const compact = normalizedContent.replace(/\s+/g, "");
   return (
     item.eventType === "inbound" ||
-    item.eventType === "member_result_confirmed" ||
     normalizedContent === "inbound" ||
     compact === "teammessage" ||
     compact === "任务下发teammessage" ||
