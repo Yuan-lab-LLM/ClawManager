@@ -160,3 +160,26 @@ func TestMigration037AddsTeamWorkflowLedger(t *testing.T) {
 		}
 	}
 }
+
+func TestMigration038AddsGatewayTokenAliases(t *testing.T) {
+	raw, err := embeddedMigrations.ReadFile("migrations/038_add_instance_gateway_token_aliases.sql")
+	if err != nil {
+		t.Fatalf("read migration 038: %v", err)
+	}
+	sql := string(raw)
+	for _, required := range []string{
+		"CREATE TABLE IF NOT EXISTS instance_gateway_token_aliases",
+		"token_hash CHAR(64)",
+		"expires_at TIMESTAMP NOT NULL",
+		"last_used_at TIMESTAMP NULL",
+		"uk_instance_gateway_token_aliases_hash",
+		"ON DELETE CASCADE",
+	} {
+		if !strings.Contains(sql, required) {
+			t.Fatalf("migration 038 must contain %s", required)
+		}
+	}
+	if strings.Contains(sql, "access_token") {
+		t.Fatalf("migration 038 must not store raw access tokens")
+	}
+}

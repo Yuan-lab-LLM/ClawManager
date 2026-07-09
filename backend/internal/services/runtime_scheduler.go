@@ -975,8 +975,18 @@ func (s *RuntimeScheduler) createGatewayOnPod(ctx context.Context, instance mode
 	if lifecycle.Running {
 		binding.LastHealthAt = &now
 	}
-	if err := s.bindingRepo.Create(ctx, binding); err != nil {
+	if err := s.createRuntimeBindingWithStalePortRecovery(ctx, binding); err != nil {
 		return s.cleanupGatewayAfterAssignFailure(ctx, endpoint, instance.ID, resp.GatewayID, false, err)
+	}
+	if !lifecycle.CreateAccepted() {
+		cause := fmt.Errorf("runtime gateway %s returned status %q", resp.GatewayID, strings.TrimSpace(resp.Status))
+		message := cause.Error()
+		var errs []error
+		if err := s.instanceRepo.UpdateRuntimeState(ctx, instance.ID, "error", instance.RuntimeGeneration, &message); err != nil {
+			errs = append(errs, fmt.Errorf("mark instance %d error: %w", instance.ID, err))
+		}
+		errs = append(errs, s.cleanupGatewayAfterAssignFailure(ctx, endpoint, instance.ID, resp.GatewayID, true, cause))
+		return errors.Join(errs...)
 	}
 	if err := s.instanceRepo.SetWorkspacePath(ctx, instance.ID, workspacePath); err != nil {
 		return s.cleanupGatewayAfterAssignFailure(ctx, endpoint, instance.ID, resp.GatewayID, true, err)
@@ -1001,6 +1011,21 @@ func (s *RuntimeScheduler) createGatewayOnPod(ctx context.Context, instance mode
 	return nil
 }
 
+func (s *RuntimeScheduler) createRuntimeBindingWithStalePortRecovery(ctx context.Context, binding *models.InstanceRuntimeBinding) error {
+	if err := s.bindingRepo.Create(ctx, binding); err != nil {
+		deleted, deleteErr := s.bindingRepo.DeleteErrorByRuntimePodIDAndGatewayPort(ctx, binding.RuntimePodID, binding.GatewayPort)
+		if deleteErr != nil {
+			return errors.Join(err, deleteErr)
+		}
+		if deleted == 0 {
+			return err
+		}
+		if retryErr := s.bindingRepo.Create(ctx, binding); retryErr != nil {
+			return errors.Join(err, retryErr)
+		}
+	}
+	return nil
+}
 func runtimeGatewayLinuxIDs(instanceID int, environment map[string]string) (int, int) {
 	linuxID := RuntimeLinuxID(instanceID)
 	if !strings.EqualFold(strings.TrimSpace(environment["CLAWMANAGER_TEAM_ENABLED"]), "true") {

@@ -2,7 +2,9 @@ package repository
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
@@ -72,19 +74,87 @@ func (r *instanceRepository) GetByID(id int) (*models.Instance, error) {
 	return &instance, nil
 }
 
-// GetByAccessToken gets an instance by its lifecycle gateway token.
+// GetByAccessToken gets an instance by its lifecycle gateway token or a
+// still-valid historical token alias.
 func (r *instanceRepository) GetByAccessToken(accessToken string) (*models.Instance, error) {
+	token := strings.TrimSpace(accessToken)
+	if token == "" {
+		return nil, nil
+	}
+
 	var instance models.Instance
-	err := r.sess.Collection("instances").Find(db.Cond{"access_token": accessToken}).One(&instance)
-	if err != nil {
+	err := r.sess.Collection("instances").Find(db.Cond{"access_token": token}).One(&instance)
+	if err == nil {
+		return &instance, nil
+	}
+	if err != db.ErrNoMoreRows {
+		return nil, fmt.Errorf("failed to get instance by access token: %w", err)
+	}
+
+	return r.getByGatewayTokenAlias(token)
+}
+
+func (r *instanceRepository) getByGatewayTokenAlias(accessToken string) (*models.Instance, error) {
+	tokenHash := gatewayTokenHash(accessToken)
+	if tokenHash == "" {
+		return nil, nil
+	}
+
+	var instance models.Instance
+	now := time.Now().UTC()
+	iter := r.sess.SQL().Iterator(`
+		SELECT i.*
+		FROM instances i
+		JOIN instance_gateway_token_aliases a ON a.instance_id = i.id
+		WHERE a.token_hash = ? AND a.expires_at > ?
+		LIMIT 1
+	`, tokenHash, now)
+	defer iter.Close()
+	if err := iter.One(&instance); err != nil {
 		if err == db.ErrNoMoreRows {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("failed to get instance by access token: %w", err)
+		return nil, fmt.Errorf("failed to get instance by gateway token alias: %w", err)
+	}
+
+	if _, err := r.sess.SQL().Exec(`
+		UPDATE instance_gateway_token_aliases
+		SET last_used_at = ?, updated_at = ?
+		WHERE token_hash = ?
+	`, now, now, tokenHash); err != nil {
+		return nil, fmt.Errorf("failed to mark gateway token alias used: %w", err)
 	}
 	return &instance, nil
 }
 
+func (r *instanceRepository) UpsertGatewayTokenAlias(ctx context.Context, instanceID int, accessToken string, expiresAt time.Time) error {
+	tokenHash := gatewayTokenHash(accessToken)
+	if instanceID <= 0 || tokenHash == "" || expiresAt.IsZero() {
+		return nil
+	}
+	now := time.Now().UTC()
+	_, err := r.sess.SQL().ExecContext(ctx, `
+		INSERT INTO instance_gateway_token_aliases (instance_id, token_hash, expires_at, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?)
+		ON DUPLICATE KEY UPDATE
+			instance_id = VALUES(instance_id),
+			expires_at = GREATEST(expires_at, VALUES(expires_at)),
+			updated_at = VALUES(updated_at)
+	`, instanceID, tokenHash, expiresAt.UTC(), now, now)
+	if err != nil {
+		return fmt.Errorf("failed to upsert gateway token alias: %w", err)
+	}
+	return nil
+}
+
+func gatewayTokenHash(accessToken string) string {
+	token := strings.TrimSpace(accessToken)
+	if token == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(sum[:])
+}
 func (r *instanceRepository) GetByAgentBootstrapToken(bootstrapToken string) (*models.Instance, error) {
 	var instance models.Instance
 	err := r.sess.Collection("instances").Find(db.Cond{"agent_bootstrap_token": bootstrapToken}).One(&instance)

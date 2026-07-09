@@ -20,6 +20,7 @@ type InstanceRuntimeBindingRepository interface {
 	ListByRuntimePodIDs(ctx context.Context, runtimePodIDs []int64) ([]models.InstanceRuntimeBinding, error)
 	UpdateRunning(ctx context.Context, instanceID int, generation int, gatewayID string, port int, pid *int) error
 	UpdateState(ctx context.Context, instanceID int, generation int, state string, message *string) error
+	DeleteErrorByRuntimePodIDAndGatewayPort(ctx context.Context, runtimePodID int64, gatewayPort int) (int64, error)
 	DeleteByInstanceID(ctx context.Context, instanceID int) error
 	DeleteByInstanceIDAndReleaseSlot(ctx context.Context, instanceID int, runtimePodID int64) error
 	DeleteRunningByInstanceIDGenerationAndReleaseSlot(ctx context.Context, instanceID int, runtimePodID int64, generation int) (bool, error)
@@ -153,6 +154,23 @@ func (r *instanceRuntimeBindingRepository) UpdateState(ctx context.Context, inst
 	return nil
 }
 
+func (r *instanceRuntimeBindingRepository) DeleteErrorByRuntimePodIDAndGatewayPort(ctx context.Context, runtimePodID int64, gatewayPort int) (int64, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	res, err := r.sess.SQL().ExecContext(ctx, `
+		DELETE FROM instance_runtime_bindings
+		WHERE runtime_pod_id = ? AND gateway_port = ? AND state = 'error'
+	`, runtimePodID, gatewayPort)
+	if err != nil {
+		return 0, fmt.Errorf("failed to delete stale error instance runtime binding for gateway port: %w", err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("failed to inspect stale error instance runtime binding delete: %w", err)
+	}
+	return affected, nil
+}
 func (r *instanceRuntimeBindingRepository) getGeneration(ctx context.Context, instanceID int) (int, error) {
 	var currentGeneration int
 	row, err := r.sess.SQL().QueryRowContext(ctx, `

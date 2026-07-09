@@ -429,6 +429,9 @@ func (r *runtimePoolHandlerBindingRepo) UpdateRunning(ctx context.Context, insta
 func (r *runtimePoolHandlerBindingRepo) UpdateState(ctx context.Context, instanceID int, generation int, state string, message *string) error {
 	return nil
 }
+func (r *runtimePoolHandlerBindingRepo) DeleteErrorByRuntimePodIDAndGatewayPort(ctx context.Context, runtimePodID int64, gatewayPort int) (int64, error) {
+	return 0, nil
+}
 func (r *runtimePoolHandlerBindingRepo) DeleteByInstanceID(ctx context.Context, instanceID int) error {
 	return nil
 }

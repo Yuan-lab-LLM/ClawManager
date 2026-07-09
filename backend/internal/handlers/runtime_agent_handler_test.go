@@ -443,6 +443,9 @@ func (r *runtimeAgentHandlerBindingRepo) UpdateState(ctx context.Context, instan
 	return nil
 }
 
+func (r *runtimeAgentHandlerBindingRepo) DeleteErrorByRuntimePodIDAndGatewayPort(ctx context.Context, runtimePodID int64, gatewayPort int) (int64, error) {
+	return 0, nil
+}
 func (r *runtimeAgentHandlerBindingRepo) DeleteByInstanceID(ctx context.Context, instanceID int) error {
 	return nil
 }
