@@ -313,6 +313,30 @@ const eventVerb = (eventType: string) => {
       return "开始执行";
     case "task_progress":
       return "进度更新";
+    case "leader_plan":
+      return "执行计划";
+    case "worker_plan":
+      return "成员计划";
+    case "worker_progress":
+      return "成员进度";
+    case "assignment_heartbeat":
+      return "运行心跳";
+    case "assignment_check_requested":
+      return "自动检查";
+    case "assignment_check_result":
+      return "检查反馈";
+    case "leader_synthesis":
+      return "汇总整理";
+    case "completion_candidate":
+      return "候选结果";
+    case "completion_validation_warning":
+      return "产物校验";
+    case "assignment_recovery_started":
+      return "自动恢复";
+    case "assignment_reissued":
+      return "重新派发";
+    case "assignment_recovery_exhausted":
+      return "需要处理";
     case "task_assigned":
       return "任务转派";
     case "peer_request":
@@ -343,8 +367,11 @@ const eventTone = (eventType: string) => {
   if (eventType === "task_failed" || eventType === "message_failed" || eventType === "dlq" || eventType === "blocker") {
     return "border-red-200 bg-red-50 text-red-700";
   }
-  if (eventType === "task_stale") {
+  if (eventType === "task_stale" || eventType === "assignment_check_requested" || eventType === "assignment_recovery_started" || eventType === "assignment_reissued") {
     return "border-yellow-200 bg-yellow-50 text-yellow-700";
+  }
+  if (eventType === "assignment_heartbeat" || eventType === "assignment_check_result" || eventType === "leader_plan" || eventType === "worker_plan" || eventType === "worker_progress" || eventType === "leader_synthesis") {
+    return "border-sky-200 bg-sky-50 text-sky-700";
   }
   if (eventType.startsWith("peer_")) {
     return "border-violet-200 bg-violet-50 text-violet-700";
@@ -2958,7 +2985,7 @@ function buildProcessSteps(
   }
 
   for (const item of group.items) {
-    if (isProtocolNoiseItem(item)) {
+    if (isProtocolNoiseItem(item) || isAssignmentHeartbeatItem(item)) {
       continue;
     }
     const stepMeta = item.collaborationStep;
@@ -3155,6 +3182,9 @@ function buildWorkItemKanbanColumns(
 ): KanbanColumns {
   const columns: KanbanColumns = { todo: [], doing: [], done: [] };
   for (const item of workItems) {
+    if (isHeartbeatWorkItem(item)) {
+      continue;
+    }
     const column: KanbanColumnKey =
       item.status === "succeeded" || item.status === "failed" || item.status === "stale"
         ? "done"
@@ -3217,6 +3247,13 @@ function buildWorkItemKanbanColumns(
 
 function isTerminalWorkItem(item: TeamWorkItem) {
   return item.status === "succeeded" || item.status === "failed" || item.status === "stale";
+}
+
+function isHeartbeatWorkItem(item: TeamWorkItem) {
+  const text = `${item.work_id} ${item.title}`.toLowerCase();
+  return text.includes("assignment_heartbeat") ||
+    text.includes("heartbeat") ||
+    text.includes("运行心跳");
 }
 
 function isLeaderWorkItem(item: TeamWorkItem, memberById: Map<number, TeamMember>) {
@@ -4510,6 +4547,8 @@ type TeamChatMessage = {
   sortPhase?: number;
 };
 
+const TEAM_CHAT_WAIT_DIGEST_MS = 3 * 60 * 1000;
+
 function buildTeamChatMessages(
   groups: CollaborationGroup[],
   memberById: Map<number, TeamMember>,
@@ -4522,6 +4561,7 @@ function buildTeamChatMessages(
     [...memberById.values()].map((member) => [member.member_key, member]),
   );
   for (const group of groups) {
+    const groupMessages: TeamChatMessage[] = [];
     const firstItemTime = group.items.reduce(
       (current, item) => Math.min(current, item.timeMs),
       Number.POSITIVE_INFINITY,
@@ -4547,7 +4587,7 @@ function buildTeamChatMessages(
         assignmentSenderKey === currentUserKey
           ? currentUserLabel
           : displayMemberName(creatorKey, memberByKey, leaderMemberId);
-      messages.push({
+      groupMessages.push({
         id: `task-${group.task.id}`,
         kind: "member",
         sender: assignmentSender,
@@ -4562,7 +4602,7 @@ function buildTeamChatMessages(
       });
       const resultSummary = taskResultText(group.task);
       if (resultSummary && group.items.length === 0) {
-        messages.push({
+        groupMessages.push({
           id: `task-result-${group.task.id}`,
           kind: "member",
           sender: targetLabel,
@@ -4577,7 +4617,7 @@ function buildTeamChatMessages(
         });
       }
       if (group.task.error_message && group.items.length === 0) {
-        messages.push({
+        groupMessages.push({
           id: `task-error-${group.task.id}`,
           kind: "member",
           sender: targetLabel,
@@ -4595,13 +4635,29 @@ function buildTeamChatMessages(
 
     const taskResult = taskResultText(group.task);
     for (const item of group.items) {
-      if (isTaskDispatchEcho(item, group.task) || isProtocolProgressEcho(item) || isProtocolNoiseItem(item)) {
+      if (
+        isTaskDispatchEcho(item, group.task) ||
+        isProtocolProgressEcho(item) ||
+        isProtocolNoiseItem(item) ||
+        isAssignmentHeartbeatItem(item)
+      ) {
         continue;
       }
       const message = chatMessageFromItem(item, memberByKey, leaderMemberId);
       if (message) {
-        messages.push(message);
+        if (group.task) {
+          const minSequence = taskSequenceBase + 0.1 + (message.sortPhase || 1) / 10;
+          message.sequence =
+            typeof message.sequence === "number" && Number.isFinite(message.sequence)
+              ? Math.max(message.sequence, minSequence)
+              : minSequence;
+        }
+        groupMessages.push(message);
       }
+    }
+    const waitDigest = heartbeatWaitDigestMessage(group, groupMessages, memberByKey, leaderMemberId);
+    if (waitDigest) {
+      groupMessages.push(waitDigest);
     }
     if (
       group.task?.status === "succeeded" &&
@@ -4612,7 +4668,7 @@ function buildTeamChatMessages(
       const target =
         memberById.get(group.task.target_member_id)?.member_key ||
         `#${group.task.target_member_id}`;
-      messages.push({
+      groupMessages.push({
         id: `task-result-full-${group.task.id}`,
         kind: "member",
         sender: displayMemberName(target, memberByKey, leaderMemberId),
@@ -4626,6 +4682,7 @@ function buildTeamChatMessages(
         sortPhase: 2,
       });
     }
+    messages.push(...groupMessages);
   }
   return messages
     .filter((message) => Number.isFinite(message.time))
@@ -4657,8 +4714,142 @@ function isTaskDispatchEcho(item: CollaborationItem, task?: TeamTask) {
 }
 
 function isProtocolProgressEcho(item: CollaborationItem) {
+  if (isUserVisibleProcessItem(item)) {
+    return false;
+  }
   return ["task_received", "task_started", "progress", "task_progress"].includes(
     item.eventType,
+  );
+}
+
+function isAssignmentHeartbeatItem(item: CollaborationItem) {
+  const eventKind = payloadText(item.payload, ["eventKind", "event_kind", "kind"]).toLowerCase();
+  return eventKind === "assignment_heartbeat" || item.eventType === "assignment_heartbeat";
+}
+
+function isTerminalGroup(group: CollaborationGroup) {
+  const status = group.task?.status?.toLowerCase();
+  return status === "succeeded" || status === "failed" || status === "stale";
+}
+
+function heartbeatWaitDigestMessage(
+  group: CollaborationGroup,
+  groupMessages: TeamChatMessage[],
+  memberByKey: Map<string, TeamMember>,
+  leaderMemberId?: string,
+): TeamChatMessage | null {
+  if (isTerminalGroup(group)) {
+    return null;
+  }
+  const heartbeatItems = group.items
+    .filter(isAssignmentMonitorDigestItem)
+    .filter((item) => Number.isFinite(item.timeMs))
+    .sort((a, b) => a.timeMs - b.timeMs || a.event.id - b.event.id);
+  if (heartbeatItems.length === 0) {
+    return null;
+  }
+  const latestHeartbeat = heartbeatItems[heartbeatItems.length - 1];
+  const taskCreatedTime = group.task ? new Date(group.task.created_at).getTime() : Number.NEGATIVE_INFINITY;
+  const lastRealMessageTime = groupMessages.reduce(
+    (latest, message) => Math.max(latest, message.time),
+    Number.isFinite(taskCreatedTime) ? taskCreatedTime : Number.NEGATIVE_INFINITY,
+  );
+  if (
+    Number.isFinite(lastRealMessageTime) &&
+    latestHeartbeat.timeMs - lastRealMessageTime < TEAM_CHAT_WAIT_DIGEST_MS
+  ) {
+    return null;
+  }
+  if (groupMessages.some((message) => message.time > latestHeartbeat.timeMs)) {
+    return null;
+  }
+  const activeActors = uniqueRecentHeartbeatActors(heartbeatItems, latestHeartbeat.timeMs, memberByKey, leaderMemberId);
+  const content = activeActors.length > 0
+    ? `${activeActors.join("、")} 仍在执行，Agent 正在继续处理当前回合。系统会继续监控，有新的计划、进度或结果时会自动更新。`
+    : "任务仍在执行，Agent 正在继续处理当前回合。系统会继续监控，有新的计划、进度或结果时会自动更新。";
+  return {
+    id: `heartbeat-digest-${group.key}`,
+    kind: "system",
+    sender: "系统",
+    senderKey: "system",
+    content,
+    time: latestHeartbeat.timeMs,
+    sequence: latestHeartbeat.timeMs * 1000 + 0.6,
+    tone: "normal",
+    dedupeKey: `heartbeat-digest:${group.key}`,
+    threadKey: group.key,
+    sortPhase: 1,
+  };
+}
+
+function uniqueRecentHeartbeatActors(
+  heartbeatItems: CollaborationItem[],
+  latestHeartbeatTime: number,
+  memberByKey: Map<string, TeamMember>,
+  leaderMemberId?: string,
+) {
+  const actors: string[] = [];
+  const seen = new Set<string>();
+  for (const item of heartbeatItems) {
+    if (latestHeartbeatTime - item.timeMs > TEAM_CHAT_WAIT_DIGEST_MS) {
+      continue;
+    }
+    const key = item.actor || item.from || payloadText(item.payload, ["memberId", "member_id"]);
+    if (!key || seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    actors.push(displayMemberName(key, memberByKey, leaderMemberId));
+  }
+  return actors.slice(0, 3);
+}
+
+function isUserVisibleProcessItem(item: CollaborationItem) {
+  const eventKind = payloadText(item.payload, ["eventKind", "event_kind", "kind"]).toLowerCase();
+  const visibleRaw = payloadText(item.payload, ["visibleToChat", "visible_to_chat"]).toLowerCase();
+  const explicitlyHidden = ["false", "0", "no", "off"].includes(visibleRaw);
+  const explicitlyVisible = payloadBool(item.payload, ["visibleToChat", "visible_to_chat"]) === true;
+  if (isAssignmentMonitorDigestItem(item)) {
+    return false;
+  }
+  const processKinds = new Set([
+    "leader_plan",
+    "worker_plan",
+    "worker_progress",
+    "leader_synthesis",
+    "completion_candidate",
+    "completion_validation_warning",
+    "assignment_recovery_started",
+    "assignment_reissued",
+    "assignment_recovery_exhausted",
+  ]);
+  if (processKinds.has(eventKind) || processKinds.has(item.eventType)) {
+    return !explicitlyHidden;
+  }
+  if (isAssignmentHeartbeatItem(item)) {
+    return false;
+  }
+  return explicitlyVisible && Boolean(item.content.trim()) && !isLowValueProtocolContent(item.content);
+}
+
+function isAssignmentMonitorDigestItem(item: CollaborationItem) {
+  const eventKind = payloadText(item.payload, ["eventKind", "event_kind", "kind"]).toLowerCase();
+  return (
+    isAssignmentHeartbeatItem(item) ||
+    eventKind === "assignment_check_requested" ||
+    eventKind === "assignment_check_result" ||
+    item.eventType === "assignment_check_requested" ||
+    item.eventType === "assignment_check_result"
+  );
+}
+
+function isLowValueProtocolContent(content: string) {
+  const normalized = content.trim().toLowerCase();
+  return (
+    normalized === "task_received" ||
+    normalized === "task_started" ||
+    normalized === "redis team task started" ||
+    normalized === "redis team task processing completed"
   );
 }
 
@@ -4684,7 +4875,14 @@ function chatMessageFromItem(
   const isFeedbackEvent =
     isWorkerToLeaderMessage(senderKey, item.to, leaderMemberId) ||
     isWorkerFeedbackEvent(item, senderKey, leaderMemberId, hasContent);
-  const isSystem = item.eventType === "task_stale" || (isAssignmentEvent && !hasContent);
+  const eventKind = payloadText(item.payload, ["eventKind", "event_kind", "kind"]).toLowerCase();
+  const isSystemProcess =
+    senderKey === "clawmanager-monitor" ||
+    eventKind === "assignment_check_requested" ||
+    item.eventType === "assignment_check_requested" ||
+    eventKind === "assignment_recovery_started" ||
+    eventKind === "assignment_reissued";
+  const isSystem = item.eventType === "task_stale" || isSystemProcess || (isAssignmentEvent && !hasContent);
   const fallbackContent =
     isAssignmentEvent && !hasContent
       ? assignmentEventFallback(item, senderLabel, targetLabel, isFeedbackEvent)
@@ -4706,7 +4904,7 @@ function chatMessageFromItem(
           : "assignment"
         : isAssignmentEvent && isFeedbackEvent
           ? "feedback"
-        : item.eventType === "task_failed" || item.eventType === "message_failed"
+        : item.eventType === "task_failed" || item.eventType === "message_failed" || eventKind === "assignment_recovery_exhausted"
           ? "error"
           : item.eventType.startsWith("peer_")
             ? "assignment"
@@ -4778,22 +4976,31 @@ function chatItemDedupeKey(
   isAssignmentEvent: boolean,
   isFeedbackEvent: boolean,
 ) {
+  const eventKind = payloadText(item.payload, ["eventKind", "event_kind", "kind"]).toLowerCase();
   const messageId =
     payloadTextDeep(item.payload, ["messageId", "message_id", "inReplyTo", "in_reply_to"]) ||
     item.event.message_id ||
     "";
   const taskId =
-    payloadTextDeep(item.payload, ["taskId", "task_id", "runtimeTaskId"]) ||
+    payloadTextDeep(item.payload, ["rootTaskId", "root_task_id", "taskId", "task_id", "runtimeTaskId"]) ||
     (item.event.task_id ? canonicalTaskKey(item.event.task_id) : item.taskKey);
+  const resultScope =
+    payloadTextDeep(item.payload, ["completionId", "completion_id"]) ||
+    payloadTextDeep(item.payload, ["sourceMessageId", "source_message_id"]) ||
+    payloadTextDeep(item.payload, ["workId", "work_id", "assignmentId", "assignment_id"]) ||
+    taskId;
   const contentKey = normalizeChatDedupeContent(content);
+  if (isAssignmentMonitorDigestItem(item) || eventKind === "assignment_check_result") {
+    return `monitor:${item.taskKey}:${senderKey}`;
+  }
   if (isAssignmentEvent) {
     return `assignment:${messageId || taskId}:${senderKey}:${item.to || ""}:${contentKey}`;
   }
   if (isFeedbackEvent) {
-    return `feedback:${messageId || taskId}:${senderKey}:${item.to || ""}:${contentKey}`;
+    return `feedback:${resultScope}:${senderKey}:${item.to || ""}:${contentKey}`;
   }
   if (item.eventType === "task_completed" || item.eventType === "completion" || item.eventType === "reply") {
-    return `feedback:${messageId || taskId}:${senderKey}:${item.to || ""}:${contentKey}`;
+    return `feedback:${resultScope}:${senderKey}:${item.to || ""}:${contentKey}`;
   }
   return "";
 }
