@@ -66,6 +66,20 @@ export interface TeamTask {
     | "succeeded"
     | "failed"
     | "stale";
+  workflow_state?:
+    | "planning"
+    | "executing"
+    | "awaiting_phase_results"
+    | "awaiting_leader_decision"
+    | "synthesizing"
+    | "completion_pending"
+    | "completed"
+    | "failed"
+    | string;
+  plan_version?: number;
+  ledger_version?: number;
+  current_phase_id?: string;
+  accepted_completion_id?: string;
   redis_stream_id?: string;
   error_message?: string;
   created_at: string;
@@ -98,6 +112,14 @@ export interface TeamWorkItem {
   team_id: number;
   root_task_id: number;
   work_id: string;
+  assignment_id?: string;
+  canonical_work_id?: string;
+  phase_id?: string;
+  revision?: number;
+  required_for_root?: boolean;
+  superseded_by?: string;
+  review_required?: boolean;
+  validated_revision?: number;
   owner_member_id?: number;
   title: string;
   status: "pending" | "dispatched" | "running" | "succeeded" | "failed" | "stale";

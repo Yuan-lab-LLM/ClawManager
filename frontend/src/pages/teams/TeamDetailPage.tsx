@@ -710,7 +710,7 @@ const eventActorKey = (
 const inferGroupStatus = (items: CollaborationItem[], task?: TeamTask) => {
   if (task?.status) {
     if (task.status === "succeeded" && isDispatchOnlyResult(taskResultText(task))) {
-      return items.some((item) => item.eventType === "outbound" || item.eventType === "task_assigned" || isDispatchOnlyResult(item.content))
+      return items.some((item) => item.eventType === "outbound" || item.eventType === "task_assigned" || item.eventType === "team_send" || isDispatchOnlyResult(item.content))
         ? "dispatched"
         : "running";
     }
@@ -752,7 +752,7 @@ const inferGroupStatus = (items: CollaborationItem[], task?: TeamTask) => {
   ) {
     return "running";
   }
-  if (items.some((item) => item.eventType === "outbound" || item.eventType === "task_assigned")) {
+  if (items.some((item) => item.eventType === "outbound" || item.eventType === "task_assigned" || item.eventType === "team_send")) {
     return "dispatched";
   }
   return "observed";
@@ -1090,6 +1090,7 @@ const TeamDetailPage: React.FC = () => {
         payload: {
           title: taskTitle.trim() || "Team task",
           prompt: taskPrompt.trim(),
+          responseLocale: "zh-CN",
         },
       });
       setTaskPrompt("");
@@ -2310,7 +2311,7 @@ function InteractionProcessPanel({
       : processProgress(group, steps, visualStatus, peerRoot)
     : 0;
   const isTerminal = ["succeeded", "failed", "stale"].includes(visualStatus);
-  const statusText = processStatusText(visualStatus);
+  const statusText = workflowStatusText(group?.task?.workflow_state) || processStatusText(visualStatus);
   const title = group?.task ? taskTitleText(group.task) : group?.title || "等待任务";
   const queryText = group?.task
     ? taskPromptText(group.task) || group.title
@@ -2986,7 +2987,13 @@ function buildProcessSteps(
 function isProtocolNoiseItem(item: CollaborationItem) {
   const normalizedContent = item.content.trim().toLowerCase();
   const compact = normalizedContent.replace(/\s+/g, "");
+  const visibleRaw = payloadText(item.payload, ["visibleToChat", "visible_to_chat"]).toLowerCase();
+  const explicitlyHidden = ["false", "0", "no", "off"].includes(visibleRaw);
+  const chatPolicy = payloadText(item.payload, ["chatPolicy", "chat_policy"]).toLowerCase();
   return (
+    chatPolicy === "hidden" ||
+    (explicitlyHidden && !["visible", "replaceable", "warning"].includes(chatPolicy)) ||
+    item.eventType === "member_result_confirmed" ||
     item.eventType === "inbound" ||
     normalizedContent === "inbound" ||
     compact === "teammessage" ||
@@ -3010,7 +3017,7 @@ function buildKanbanColumns(
   const cardByWorkKey = new Map<string, KanbanTaskCard>();
   const delegatedTargets = steps
     .filter((step) =>
-      (step.eventType === "task_assigned" || step.eventType === "outbound") &&
+      (step.eventType === "task_assigned" || step.eventType === "outbound" || step.eventType === "team_send" || step.eventType === "assignment") &&
       step.to &&
       !isLeaderLikeName(step.to),
     )
@@ -4266,6 +4273,29 @@ function PeerCollaborationMatrix({
   );
 }
 
+function workflowStatusText(state?: string) {
+  switch ((state || "").toLowerCase()) {
+    case "planning":
+      return "Leader 正在规划";
+    case "executing":
+      return "阶段执行中";
+    case "awaiting_phase_results":
+      return "等待本阶段交付";
+    case "awaiting_leader_decision":
+      return "等待 Leader 决定下一阶段";
+    case "synthesizing":
+      return "Leader 正在汇总";
+    case "completion_pending":
+      return "等待完成确认";
+    case "completed":
+      return "已完成";
+    case "failed":
+      return "失败";
+    default:
+      return "";
+  }
+}
+
 function peerLaneStatusClass(status: PeerLaneStatus) {
   switch (status) {
     case "done":
@@ -4643,10 +4673,10 @@ function buildTeamChatMessages(
     }
     messages.push(...groupMessages);
   }
-  return messages
+  const sortedMessages = messages
     .filter((message) => Number.isFinite(message.time))
-    .sort(compareTeamChatMessages)
-    .filter(dedupeTeamChatMessage());
+    .sort(compareTeamChatMessages);
+  return dedupeTeamChatMessages(sortedMessages);
 }
 
 function compareTeamChatMessages(a: TeamChatMessage, b: TeamChatMessage) {
@@ -4667,6 +4697,16 @@ function isTaskDispatchEcho(item: CollaborationItem, task?: TeamTask) {
     return false;
   }
   if (item.eventType !== "outbound" && item.eventType !== "task_assigned") {
+    return false;
+  }
+  if (payloadBool(item.payload, ["leaderDispatchOnly", "leader_dispatch_only"]) === true) {
+    return false;
+  }
+  const rawActor = payloadText(item.payload, ["from", "source"]).toLowerCase();
+  if (rawActor && rawActor !== "clawmanager" && rawActor !== "system") {
+    return false;
+  }
+  if (!rawActor && item.event.member_id) {
     return false;
   }
   return item.event.task_id === task.id || itemMessageID(item) === task.message_id;
@@ -4768,6 +4808,13 @@ function isUserVisibleProcessItem(item: CollaborationItem) {
   const visibleRaw = payloadText(item.payload, ["visibleToChat", "visible_to_chat"]).toLowerCase();
   const explicitlyHidden = ["false", "0", "no", "off"].includes(visibleRaw);
   const explicitlyVisible = payloadBool(item.payload, ["visibleToChat", "visible_to_chat"]) === true;
+  const chatPolicy = payloadText(item.payload, ["chatPolicy", "chat_policy"]).toLowerCase();
+  if (["visible", "replaceable", "warning"].includes(chatPolicy)) {
+    return Boolean(item.content.trim());
+  }
+  if (chatPolicy === "hidden" || chatPolicy === "digest") {
+    return false;
+  }
   if (isAssignmentMonitorDigestItem(item)) {
     return false;
   }
@@ -4793,6 +4840,10 @@ function isUserVisibleProcessItem(item: CollaborationItem) {
 
 function isAssignmentMonitorDigestItem(item: CollaborationItem) {
   const eventKind = payloadText(item.payload, ["eventKind", "event_kind", "kind"]).toLowerCase();
+  const chatPolicy = payloadText(item.payload, ["chatPolicy", "chat_policy"]).toLowerCase();
+  if (["visible", "replaceable", "warning"].includes(chatPolicy)) {
+    return false;
+  }
   return (
     isAssignmentHeartbeatItem(item) ||
     eventKind === "assignment_check_requested" ||
@@ -4827,6 +4878,7 @@ function chatMessageFromItem(
   const isAssignmentEvent =
     item.eventType === "outbound" ||
     item.eventType === "task_assigned" ||
+    item.eventType === "team_send" ||
     item.eventType === "peer_request" ||
     item.eventType === "peer_handoff" ||
     item.eventType === "peer_review_request";
@@ -4914,18 +4966,27 @@ function isTerminalFeedbackItem(
 const finalFeedbackContentPattern =
   /\bDONE\b|team_complete_task|任务核心结果|完整详细产出|结果已反馈|已完成|执行完成|完成任务/;
 
-function dedupeTeamChatMessage() {
+function dedupeTeamChatMessages(messages: TeamChatMessage[]) {
+  const lastReplaceable = new Map<string, number>();
+  messages.forEach((message, index) => {
+    if (message.dedupeKey?.startsWith("replaceable:")) {
+      lastReplaceable.set(message.dedupeKey, index);
+    }
+  });
   const seen = new Set<string>();
-  return (message: TeamChatMessage) => {
+  return messages.filter((message, index) => {
     if (!message.dedupeKey) {
       return true;
+    }
+    if (message.dedupeKey.startsWith("replaceable:")) {
+      return lastReplaceable.get(message.dedupeKey) === index;
     }
     if (seen.has(message.dedupeKey)) {
       return false;
     }
     seen.add(message.dedupeKey);
     return true;
-  };
+  });
 }
 
 function chatItemDedupeKey(
@@ -4943,29 +5004,46 @@ function chatItemDedupeKey(
   const taskId =
     payloadTextDeep(item.payload, ["rootTaskId", "root_task_id", "taskId", "task_id", "runtimeTaskId"]) ||
     (item.event.task_id ? canonicalTaskKey(item.event.task_id) : item.taskKey);
+  const assignmentId =
+    payloadTextDeep(item.payload, ["assignmentId", "assignment_id", "workId", "work_id"]);
+  const displayKey = payloadTextDeep(item.payload, ["displayKey", "display_key"]);
+  const chatPolicy = payloadTextDeep(item.payload, ["chatPolicy", "chat_policy"]).toLowerCase();
+  if (displayKey) {
+    return chatPolicy === "replaceable" ? `replaceable:${displayKey}` : displayKey;
+  }
   const resultScope =
     payloadTextDeep(item.payload, ["completionId", "completion_id"]) ||
+    payloadTextDeep(item.payload, ["sourceCompletionId", "source_completion_id"]) ||
+    payloadTextDeep(item.payload, ["sourceEventId", "source_event_id"]) ||
     payloadTextDeep(item.payload, ["sourceMessageId", "source_message_id"]) ||
-    payloadTextDeep(item.payload, ["workId", "work_id", "assignmentId", "assignment_id"]) ||
-    taskId;
+    payloadTextDeep(item.payload, ["contentHash", "content_hash"]);
   const contentKey = normalizeChatDedupeContent(content);
   if (isAssignmentMonitorDigestItem(item) || eventKind === "assignment_check_result") {
     return `monitor:${item.taskKey}:${senderKey}`;
   }
   if (isAssignmentEvent) {
-    return `assignment:${messageId || taskId}:${senderKey}:${item.to || ""}:${contentKey}`;
+    return `assignment:${messageId || assignmentId || taskId}:${senderKey}:${item.to || ""}`;
   }
   if (isFeedbackEvent) {
-    return `feedback:${resultScope}:${senderKey}:${item.to || ""}:${contentKey}`;
+    return `feedback:${taskId}:${senderKey}:${item.to || ""}:${resultScope || chatContentHash(contentKey)}`;
   }
   if (item.eventType === "task_completed" || item.eventType === "completion" || item.eventType === "reply") {
-    return `feedback:${resultScope}:${senderKey}:${item.to || ""}:${contentKey}`;
+    return `feedback:${taskId}:${senderKey}:${item.to || ""}:${resultScope || chatContentHash(contentKey)}`;
   }
   return "";
 }
 
 function normalizeChatDedupeContent(content: string) {
   return content.trim().replace(/\s+/g, " ").slice(0, 240);
+}
+
+function chatContentHash(content: string) {
+  let hash = 2166136261;
+  for (let index = 0; index < content.length; index++) {
+    hash ^= content.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
 }
 
 function assignmentEventFallback(

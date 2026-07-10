@@ -45,8 +45,17 @@ type TeamRepository interface {
 	ListEventsBeforeID(teamID, beforeID, limit int) ([]models.TeamEvent, error)
 
 	UpsertWorkItem(item *models.TeamWorkItem) error
+	InvalidateWorkItemReview(workItemID int, updatedAt time.Time) error
 	ListWorkItemsByRootTaskID(rootTaskID int) ([]models.TeamWorkItem, error)
 	ListWorkItemsByTeamID(teamID int, limit int) ([]models.TeamWorkItem, error)
+	UpsertWorkflowPhase(phase *models.TeamWorkflowPhase) error
+	ListWorkflowPhasesByRootTaskID(rootTaskID int) ([]models.TeamWorkflowPhase, error)
+	AcceptRootCompletion(task *models.TeamTask, expectedLedgerVersion int64, event *models.TeamEvent, outbox *models.TeamEventOutbox) (bool, error)
+	ConfirmWorkItemResult(item *models.TeamWorkItem, event *models.TeamEvent, outbox *models.TeamEventOutbox) error
+	CreateEventOutbox(outbox *models.TeamEventOutbox) error
+	ListPendingEventOutbox(now time.Time, limit int) ([]models.TeamEventOutbox, error)
+	MarkEventOutboxDelivered(id int, deliveredAt time.Time) error
+	MarkEventOutboxFailed(id int, availableAt time.Time, cause string) error
 }
 
 type teamRepository struct {
@@ -304,6 +313,252 @@ func (r *teamRepository) CreateEvent(event *models.TeamEvent) error {
 	return nil
 }
 
+func (r *teamRepository) ConfirmWorkItemResult(item *models.TeamWorkItem, event *models.TeamEvent, outbox *models.TeamEventOutbox) error {
+	if item == nil || event == nil || outbox == nil {
+		return fmt.Errorf("work item, confirmation event and outbox are required")
+	}
+	return r.sess.Tx(func(sess db.Session) error {
+		txRepo := &teamRepository{sess: sess}
+		if err := txRepo.UpsertWorkItem(item); err != nil {
+			return err
+		}
+		if err := txRepo.CreateEvent(event); err != nil && !errors.Is(err, ErrDuplicateTeamEvent) {
+			return err
+		}
+		if outbox.Status == "" {
+			outbox.Status = "pending"
+		}
+		now := time.Now().UTC()
+		if outbox.AvailableAt.IsZero() {
+			outbox.AvailableAt = now
+		}
+		if outbox.CreatedAt.IsZero() {
+			outbox.CreatedAt = now
+		}
+		if outbox.UpdatedAt.IsZero() {
+			outbox.UpdatedAt = now
+		}
+		res, err := sess.Collection("team_event_outbox").Insert(outbox)
+		if err != nil {
+			if strings.Contains(err.Error(), "uk_team_event_outbox_message") {
+				return nil
+			}
+			return fmt.Errorf("failed to create team event outbox: %w", err)
+		}
+		if id, ok := res.ID().(int64); ok {
+			outbox.ID = int(id)
+		}
+		return nil
+	})
+}
+
+func (r *teamRepository) UpsertWorkflowPhase(phase *models.TeamWorkflowPhase) error {
+	if phase == nil || phase.RootTaskID <= 0 || strings.TrimSpace(phase.PhaseID) == "" {
+		return fmt.Errorf("team workflow phase is required")
+	}
+	if phase.PlanVersion <= 0 {
+		phase.PlanVersion = 1
+	}
+	var existing models.TeamWorkflowPhase
+	err := r.sess.Collection("team_workflow_phases").Find(db.Cond{
+		"root_task_id": phase.RootTaskID,
+		"phase_id":     phase.PhaseID,
+		"plan_version": phase.PlanVersion,
+	}).One(&existing)
+	if err != nil && err != db.ErrNoMoreRows {
+		return fmt.Errorf("failed to get team workflow phase: %w", err)
+	}
+	if err == nil {
+		phase.ID = existing.ID
+		phase.CreatedAt = existing.CreatedAt
+		if phase.DependsOnJSON == nil {
+			phase.DependsOnJSON = existing.DependsOnJSON
+		}
+		if phase.NextPhaseID == nil {
+			phase.NextPhaseID = existing.NextPhaseID
+		}
+		if phase.CompletionPolicy == nil {
+			phase.CompletionPolicy = existing.CompletionPolicy
+		}
+		if phase.CompletedAt == nil {
+			phase.CompletedAt = existing.CompletedAt
+		}
+		if phase.UpdatedAt.IsZero() {
+			phase.UpdatedAt = time.Now().UTC()
+		}
+		if err := r.sess.Collection("team_workflow_phases").Find(db.Cond{"id": existing.ID}).Update(phase); err != nil {
+			return fmt.Errorf("failed to update team workflow phase: %w", err)
+		}
+		return nil
+	}
+	ensureTimestamps(&phase.CreatedAt, &phase.UpdatedAt)
+	res, err := r.sess.Collection("team_workflow_phases").Insert(phase)
+	if err != nil {
+		return fmt.Errorf("failed to create team workflow phase: %w", err)
+	}
+	if id, ok := res.ID().(int64); ok {
+		phase.ID = int(id)
+	}
+	return nil
+}
+
+func (r *teamRepository) ListWorkflowPhasesByRootTaskID(rootTaskID int) ([]models.TeamWorkflowPhase, error) {
+	var phases []models.TeamWorkflowPhase
+	if err := r.sess.Collection("team_workflow_phases").Find(db.Cond{"root_task_id": rootTaskID}).OrderBy("plan_version", "sequence_no", "id").All(&phases); err != nil {
+		return nil, fmt.Errorf("failed to list team workflow phases: %w", err)
+	}
+	return phases, nil
+}
+
+func (r *teamRepository) AcceptRootCompletion(task *models.TeamTask, expectedLedgerVersion int64, event *models.TeamEvent, outbox *models.TeamEventOutbox) (bool, error) {
+	if task == nil || event == nil || outbox == nil || task.ID <= 0 {
+		return false, fmt.Errorf("task, accepted completion event and outbox are required")
+	}
+	accepted := false
+	err := r.sess.Tx(func(sess db.Session) error {
+		result, err := sess.SQL().Exec(`
+UPDATE team_tasks
+SET status = ?, workflow_state = ?, plan_version = ?, ledger_version = ?, current_phase_id = ?,
+    accepted_completion_id = ?, result_json = ?, error_message = ?, finished_at = ?, updated_at = ?
+WHERE id = ? AND ledger_version = ? AND accepted_completion_id IS NULL
+  AND status NOT IN (?, ?, ?)
+`,
+			task.Status,
+			task.WorkflowState,
+			task.PlanVersion,
+			task.LedgerVersion,
+			task.CurrentPhaseID,
+			task.AcceptedCompletionID,
+			task.ResultJSON,
+			task.ErrorMessage,
+			task.FinishedAt,
+			task.UpdatedAt,
+			task.ID,
+			expectedLedgerVersion,
+			models.TeamTaskStatusSucceeded,
+			models.TeamTaskStatusFailed,
+			models.TeamTaskStatusStale,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to atomically accept team completion: %w", err)
+		}
+		affected, err := result.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("failed to inspect accepted team completion: %w", err)
+		}
+		if affected != 1 {
+			return nil
+		}
+		accepted = true
+		if _, err := sess.SQL().Exec(`
+UPDATE team_workflow_phases
+SET status = 'completed', completed_at = ?, updated_at = ?
+WHERE root_task_id = ? AND (? = 0 OR plan_version = ?)
+  AND status NOT IN ('cancelled', 'superseded')
+`, task.UpdatedAt, task.UpdatedAt, task.ID, task.PlanVersion, task.PlanVersion); err != nil {
+			return fmt.Errorf("failed to complete team workflow phases: %w", err)
+		}
+		txRepo := &teamRepository{sess: sess}
+		if err := txRepo.CreateEvent(event); err != nil && !errors.Is(err, ErrDuplicateTeamEvent) {
+			return err
+		}
+		if outbox.Status == "" {
+			outbox.Status = "pending"
+		}
+		now := time.Now().UTC()
+		if outbox.AvailableAt.IsZero() {
+			outbox.AvailableAt = now
+		}
+		if outbox.CreatedAt.IsZero() {
+			outbox.CreatedAt = now
+		}
+		if outbox.UpdatedAt.IsZero() {
+			outbox.UpdatedAt = now
+		}
+		insertResult, err := sess.Collection("team_event_outbox").Insert(outbox)
+		if err != nil {
+			if strings.Contains(err.Error(), "uk_team_event_outbox_message") {
+				return nil
+			}
+			return fmt.Errorf("failed to create completion acknowledgement outbox: %w", err)
+		}
+		if id, ok := insertResult.ID().(int64); ok {
+			outbox.ID = int(id)
+		}
+		return nil
+	})
+	return accepted, err
+}
+
+func (r *teamRepository) ListPendingEventOutbox(now time.Time, limit int) ([]models.TeamEventOutbox, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	var rows []models.TeamEventOutbox
+	if err := r.sess.Collection("team_event_outbox").Find(db.Cond{
+		"status":          "pending",
+		"available_at <=": now,
+	}).OrderBy("available_at", "id").Limit(limit).All(&rows); err != nil {
+		return nil, fmt.Errorf("failed to list pending team event outbox: %w", err)
+	}
+	return rows, nil
+}
+
+func (r *teamRepository) CreateEventOutbox(outbox *models.TeamEventOutbox) error {
+	if outbox == nil {
+		return fmt.Errorf("team event outbox is required")
+	}
+	if outbox.Status == "" {
+		outbox.Status = "pending"
+	}
+	now := time.Now().UTC()
+	if outbox.AvailableAt.IsZero() {
+		outbox.AvailableAt = now
+	}
+	if outbox.CreatedAt.IsZero() {
+		outbox.CreatedAt = now
+	}
+	if outbox.UpdatedAt.IsZero() {
+		outbox.UpdatedAt = now
+	}
+	res, err := r.sess.Collection("team_event_outbox").Insert(outbox)
+	if err != nil {
+		if strings.Contains(err.Error(), "uk_team_event_outbox_message") {
+			return nil
+		}
+		return fmt.Errorf("failed to create team event outbox: %w", err)
+	}
+	if id, ok := res.ID().(int64); ok {
+		outbox.ID = int(id)
+	}
+	return nil
+}
+
+func (r *teamRepository) MarkEventOutboxDelivered(id int, deliveredAt time.Time) error {
+	if id <= 0 {
+		return nil
+	}
+	return r.sess.Collection("team_event_outbox").Find(db.Cond{"id": id}).Update(map[string]interface{}{
+		"status":       "delivered",
+		"delivered_at": deliveredAt,
+		"last_error":   nil,
+		"updated_at":   deliveredAt,
+	})
+}
+
+func (r *teamRepository) MarkEventOutboxFailed(id int, availableAt time.Time, cause string) error {
+	if id <= 0 {
+		return nil
+	}
+	return r.sess.Collection("team_event_outbox").Find(db.Cond{"id": id}).Update(map[string]interface{}{
+		"status":       "pending",
+		"attempts":     db.Raw("attempts + 1"),
+		"available_at": availableAt,
+		"last_error":   cause,
+		"updated_at":   time.Now().UTC(),
+	})
+}
+
 func (r *teamRepository) EventExistsByStreamID(teamID int, streamID string) (bool, error) {
 	if streamID == "" {
 		return false, nil
@@ -375,7 +630,8 @@ func (r *teamRepository) UpsertWorkItem(item *models.TeamWorkItem) error {
 	if err == nil {
 		item.ID = existing.ID
 		item.CreatedAt = existing.CreatedAt
-		if existing.Status == models.TeamTaskStatusSucceeded || existing.Status == models.TeamTaskStatusFailed {
+		newRevision := item.Revision > existing.Revision
+		if !newRevision && (existing.Status == models.TeamTaskStatusSucceeded || existing.Status == models.TeamTaskStatusFailed) {
 			if item.Status != models.TeamTaskStatusSucceeded && item.Status != models.TeamTaskStatusFailed {
 				item.Status = existing.Status
 			}
@@ -386,16 +642,37 @@ func (r *teamRepository) UpsertWorkItem(item *models.TeamWorkItem) error {
 		if item.StartedAt == nil {
 			item.StartedAt = existing.StartedAt
 		}
-		if item.FinishedAt == nil {
+		if item.FinishedAt == nil && !newRevision {
 			item.FinishedAt = existing.FinishedAt
 		}
 		if item.DependsOnJSON == nil {
 			item.DependsOnJSON = existing.DependsOnJSON
 		}
-		if item.ResultJSON == nil {
+		if item.AssignmentID == nil {
+			item.AssignmentID = existing.AssignmentID
+		}
+		if item.CanonicalWorkID == nil {
+			item.CanonicalWorkID = existing.CanonicalWorkID
+		}
+		if item.PhaseID == nil {
+			item.PhaseID = existing.PhaseID
+		}
+		if item.Revision <= 0 {
+			item.Revision = existing.Revision
+		}
+		if item.SupersededBy == nil {
+			item.SupersededBy = existing.SupersededBy
+		}
+		if item.ValidatedRevision == nil && !newRevision {
+			item.ValidatedRevision = existing.ValidatedRevision
+		}
+		if existing.ReviewRequired && !newRevision {
+			item.ReviewRequired = true
+		}
+		if item.ResultJSON == nil && !newRevision {
 			item.ResultJSON = existing.ResultJSON
 		}
-		if item.ArtifactRefsJSON == nil {
+		if item.ArtifactRefsJSON == nil && !newRevision {
 			item.ArtifactRefsJSON = existing.ArtifactRefsJSON
 		}
 		if item.UpdatedAt.IsZero() {
@@ -413,6 +690,23 @@ func (r *teamRepository) UpsertWorkItem(item *models.TeamWorkItem) error {
 	}
 	if id, ok := res.ID().(int64); ok {
 		item.ID = int(id)
+	}
+	return nil
+}
+
+func (r *teamRepository) InvalidateWorkItemReview(workItemID int, updatedAt time.Time) error {
+	if workItemID <= 0 {
+		return fmt.Errorf("team work item id is required")
+	}
+	if updatedAt.IsZero() {
+		updatedAt = time.Now().UTC()
+	}
+	if _, err := r.sess.SQL().Exec(`
+UPDATE team_work_items
+SET validated_revision = NULL, updated_at = ?
+WHERE id = ? AND review_required = TRUE AND validated_revision IS NOT NULL
+`, updatedAt, workItemID); err != nil {
+		return fmt.Errorf("failed to invalidate team work item review: %w", err)
 	}
 	return nil
 }

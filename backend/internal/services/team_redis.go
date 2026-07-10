@@ -84,6 +84,15 @@ func (b *redisBus) SetNX(ctx context.Context, key, value string, ttl time.Durati
 	return reply == "OK", nil
 }
 
+func (b *redisBus) Set(ctx context.Context, key, value string, ttl time.Duration) error {
+	args := []string{"SET", key, value}
+	if ttl > 0 {
+		args = append(args, "PX", fmt.Sprintf("%d", ttl.Milliseconds()))
+	}
+	_, err := b.do(ctx, args...)
+	return err
+}
+
 func (b *redisBus) Del(ctx context.Context, key string) error {
 	_, err := b.do(ctx, "DEL", key)
 	return err

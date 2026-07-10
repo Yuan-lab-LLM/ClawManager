@@ -117,3 +117,46 @@ func TestMigration035HardensTeamEventProtocol(t *testing.T) {
 		}
 	}
 }
+
+func TestMigration036AddsReliableTeamEventOutbox(t *testing.T) {
+	raw, err := embeddedMigrations.ReadFile("migrations/036_add_team_event_outbox.sql")
+	if err != nil {
+		t.Fatalf("read migration 036: %v", err)
+	}
+	sql := string(raw)
+	for _, required := range []string{
+		"CREATE TABLE IF NOT EXISTS team_event_outbox",
+		"uk_team_event_outbox_message",
+		"idx_team_event_outbox_pending",
+		"source_event_id",
+		"available_at",
+	} {
+		if !strings.Contains(sql, required) {
+			t.Fatalf("migration 036 must contain %s", required)
+		}
+	}
+}
+
+func TestMigration037AddsTeamWorkflowLedger(t *testing.T) {
+	raw, err := embeddedMigrations.ReadFile("migrations/037_add_team_workflow_ledger.sql")
+	if err != nil {
+		t.Fatalf("read migration 037: %v", err)
+	}
+	sql := string(raw)
+	for _, required := range []string{
+		"workflow_state",
+		"plan_version",
+		"ledger_version",
+		"accepted_completion_id",
+		"assignment_id",
+		"canonical_work_id",
+		"phase_id",
+		"required_for_root",
+		"CREATE TABLE IF NOT EXISTS team_workflow_phases",
+		"uk_team_workflow_phase",
+	} {
+		if !strings.Contains(sql, required) {
+			t.Fatalf("migration 037 must contain %s", required)
+		}
+	}
+}
