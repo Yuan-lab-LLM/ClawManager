@@ -631,8 +631,13 @@ func (r *teamRepository) UpsertWorkItem(item *models.TeamWorkItem) error {
 		item.ID = existing.ID
 		item.CreatedAt = existing.CreatedAt
 		newRevision := item.Revision > existing.Revision
-		if !newRevision && (existing.Status == models.TeamTaskStatusSucceeded || existing.Status == models.TeamTaskStatusFailed) {
-			if item.Status != models.TeamTaskStatusSucceeded && item.Status != models.TeamTaskStatusFailed {
+		existingTerminal := existing.Status == models.TeamTaskStatusSucceeded || existing.Status == models.TeamTaskStatusFailed || existing.Status == models.TeamTaskStatusStale
+		itemTerminal := item.Status == models.TeamTaskStatusSucceeded || item.Status == models.TeamTaskStatusFailed || item.Status == models.TeamTaskStatusStale
+		reopeningCurrent := !newRevision && existingTerminal && !itemTerminal &&
+			!item.UpdatedAt.IsZero() &&
+			(existing.UpdatedAt.IsZero() || item.UpdatedAt.After(existing.UpdatedAt))
+		if !newRevision && existingTerminal && !reopeningCurrent {
+			if !itemTerminal {
 				item.Status = existing.Status
 			}
 		}
@@ -642,7 +647,7 @@ func (r *teamRepository) UpsertWorkItem(item *models.TeamWorkItem) error {
 		if item.StartedAt == nil {
 			item.StartedAt = existing.StartedAt
 		}
-		if item.FinishedAt == nil && !newRevision {
+		if item.FinishedAt == nil && !newRevision && !reopeningCurrent {
 			item.FinishedAt = existing.FinishedAt
 		}
 		if item.DependsOnJSON == nil {
@@ -660,19 +665,19 @@ func (r *teamRepository) UpsertWorkItem(item *models.TeamWorkItem) error {
 		if item.Revision <= 0 {
 			item.Revision = existing.Revision
 		}
-		if item.SupersededBy == nil {
+		if item.SupersededBy == nil && !reopeningCurrent {
 			item.SupersededBy = existing.SupersededBy
 		}
-		if item.ValidatedRevision == nil && !newRevision {
+		if item.ValidatedRevision == nil && !newRevision && !reopeningCurrent {
 			item.ValidatedRevision = existing.ValidatedRevision
 		}
-		if existing.ReviewRequired && !newRevision {
+		if existing.ReviewRequired && !newRevision && !reopeningCurrent {
 			item.ReviewRequired = true
 		}
-		if item.ResultJSON == nil && !newRevision {
+		if item.ResultJSON == nil && !newRevision && !reopeningCurrent {
 			item.ResultJSON = existing.ResultJSON
 		}
-		if item.ArtifactRefsJSON == nil && !newRevision {
+		if item.ArtifactRefsJSON == nil && !newRevision && !reopeningCurrent {
 			item.ArtifactRefsJSON = existing.ArtifactRefsJSON
 		}
 		if item.UpdatedAt.IsZero() {

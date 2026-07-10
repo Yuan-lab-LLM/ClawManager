@@ -637,7 +637,13 @@ const collaborationContent = (
   payload: Record<string, unknown>,
   eventType = "",
 ) => {
-  if (isTerminalResultEventType(eventType)) {
+  const eventKind = payloadText(payload, ["eventKind", "event_kind", "kind"]).toLowerCase();
+  const isBusinessResult =
+    isTerminalResultEventType(eventType) ||
+    eventType === "completion_deferred" ||
+    eventKind === "completion_deferred" ||
+    payloadBool(payload, ["assignmentResultOnly", "assignment_result_only"]) === true;
+  if (isBusinessResult) {
     const fullResult = terminalResultText(payload);
     if (fullResult) {
       return fullResult;
@@ -3237,20 +3243,30 @@ function collapseLeaderMediatedWorkItems(
   memberById: Map<number, TeamMember>,
   rootStatus?: TeamTask["status"],
 ) {
-  const completedOwners = new Set<number>();
   let hasLeaderFinal = rootStatus === "succeeded" || rootStatus === "failed" || rootStatus === "stale";
+  const latestByCurrentSlot = new Map<string, TeamWorkItem>();
   for (const item of workItems) {
+    if (item.superseded_by) {
+      continue;
+    }
     if (item.work_id === "leader-final-synthesis" && isTerminalWorkItem(item)) {
       hasLeaderFinal = true;
     }
-    if (item.owner_member_id && isTerminalWorkItem(item)) {
-      completedOwners.add(item.owner_member_id);
+    const slotKey = isLeaderWorkItem(item, memberById)
+      ? `leader:${item.work_id}`
+      : item.owner_member_id
+        ? `owner:${item.owner_member_id}`
+        : `work:${item.assignment_id || item.canonical_work_id || item.work_id}`;
+    const previous = latestByCurrentSlot.get(slotKey);
+    if (
+      !previous ||
+      new Date(item.updated_at).getTime() > new Date(previous.updated_at).getTime() ||
+      (item.updated_at === previous.updated_at && item.id > previous.id)
+    ) {
+      latestByCurrentSlot.set(slotKey, item);
     }
   }
-  return workItems.filter((item) => {
-    if (!isTerminalWorkItem(item) && item.owner_member_id && completedOwners.has(item.owner_member_id)) {
-      return false;
-    }
+  return Array.from(latestByCurrentSlot.values()).filter((item) => {
     if (!isTerminalWorkItem(item) && hasLeaderFinal && isLeaderWorkItem(item, memberById)) {
       return false;
     }
@@ -4917,6 +4933,8 @@ function chatMessageFromItem(
           ? "feedback"
         : item.eventType === "task_failed" || item.eventType === "message_failed" || eventKind === "assignment_recovery_exhausted"
           ? "error"
+          : item.eventType === "completion_deferred" || eventKind === "completion_deferred" || eventKind === "completion_rejected" || eventKind === "completion_needs_confirmation"
+            ? "error"
           : item.eventType.startsWith("peer_")
             ? "assignment"
           : senderKey === leaderMemberId || senderKey === "ClawManager"
@@ -5011,12 +5029,14 @@ function chatItemDedupeKey(
   if (displayKey) {
     return chatPolicy === "replaceable" ? `replaceable:${displayKey}` : displayKey;
   }
+  const contentHash =
+    payloadTextDeep(item.payload, ["contentHash", "content_hash"]) ||
+    chatContentHash(normalizeChatDedupeContent(content));
   const resultScope =
     payloadTextDeep(item.payload, ["completionId", "completion_id"]) ||
     payloadTextDeep(item.payload, ["sourceCompletionId", "source_completion_id"]) ||
     payloadTextDeep(item.payload, ["sourceEventId", "source_event_id"]) ||
-    payloadTextDeep(item.payload, ["sourceMessageId", "source_message_id"]) ||
-    payloadTextDeep(item.payload, ["contentHash", "content_hash"]);
+    payloadTextDeep(item.payload, ["sourceMessageId", "source_message_id"]);
   const contentKey = normalizeChatDedupeContent(content);
   if (isAssignmentMonitorDigestItem(item) || eventKind === "assignment_check_result") {
     return `monitor:${item.taskKey}:${senderKey}`;
@@ -5025,10 +5045,13 @@ function chatItemDedupeKey(
     return `assignment:${messageId || assignmentId || taskId}:${senderKey}:${item.to || ""}`;
   }
   if (isFeedbackEvent) {
-    return `feedback:${taskId}:${senderKey}:${item.to || ""}:${resultScope || chatContentHash(contentKey)}`;
+    // Result IDs are transport/audit identifiers. Chat de-duplication is based
+    // on the actual business content, so a corrected second result remains
+    // visible while a re-delivered identical result does not appear twice.
+    return `feedback:${taskId}:${senderKey}:${item.to || ""}:${assignmentId}:${contentHash}`;
   }
   if (item.eventType === "task_completed" || item.eventType === "completion" || item.eventType === "reply") {
-    return `feedback:${taskId}:${senderKey}:${item.to || ""}:${resultScope || chatContentHash(contentKey)}`;
+    return `feedback:${taskId}:${senderKey}:${item.to || ""}:${assignmentId}:${contentHash || resultScope || chatContentHash(contentKey)}`;
   }
   return "";
 }
