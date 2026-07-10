@@ -2,6 +2,44 @@
 @tailwind components;
 @tailwind utilities;
 
+@keyframes cm-silver-sheen {
+  0%,
+  18% {
+    transform: translateX(-180%) skewX(-18deg);
+    opacity: 0;
+  }
+  28% {
+    opacity: 0.55;
+  }
+  58%,
+  100% {
+    transform: translateX(420%) skewX(-18deg);
+    opacity: 0;
+  }
+}
+
+@keyframes cm-tech-progress {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+@keyframes cm-tech-breathe {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(56, 189, 248, 0.12);
+  }
+  50% {
+    box-shadow: 0 0 0 5px rgba(56, 189, 248, 0);
+  }
+}
+
 :root {
   --text: #334155;
   --text-strong: #0f172a;
@@ -92,5 +130,97 @@ body {
 
   .cm-icon-button:hover {
     @apply border-slate-400 bg-slate-50 text-slate-950;
+  }
+
+  .cm-tech-panel {
+    position: relative;
+    isolation: isolate;
+    border-color: #d8dee6;
+    background: #f4f7fa;
+    box-shadow:
+      0 24px 60px -42px rgba(15, 23, 42, 0.46),
+      0 1px 0 rgba(255, 255, 255, 0.95) inset;
+  }
+
+  .cm-tech-header {
+    position: relative;
+    overflow: hidden;
+    border-bottom: 1px solid #d8dee6;
+    background:
+      radial-gradient(circle at 86% 0%, rgba(125, 211, 252, 0.16), transparent 34%),
+      linear-gradient(135deg, #fbfcfd 0%, #e9eef3 48%, #f8fafc 100%);
+  }
+
+  .cm-tech-header::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background-image:
+      linear-gradient(rgba(148, 163, 184, 0.07) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(148, 163, 184, 0.07) 1px, transparent 1px);
+    background-size: 24px 24px;
+    mask-image: linear-gradient(90deg, black, transparent 82%);
+  }
+
+  .cm-tech-header::after {
+    content: "";
+    position: absolute;
+    top: -40%;
+    bottom: -40%;
+    left: 0;
+    width: 18%;
+    pointer-events: none;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.88), transparent);
+    filter: blur(1px);
+    animation: cm-silver-sheen 6s ease-in-out infinite;
+  }
+
+  .cm-tech-workspace {
+    background:
+      radial-gradient(circle at 100% 0%, rgba(186, 230, 253, 0.2), transparent 32%),
+      linear-gradient(180deg, #f8fafc 0%, #edf2f6 52%, #f8fafc 100%);
+  }
+
+  .cm-tech-surface {
+    border: 1px solid rgba(203, 213, 225, 0.92);
+    background: linear-gradient(145deg, rgba(255, 255, 255, 0.94), rgba(239, 243, 247, 0.9));
+    box-shadow:
+      0 14px 30px -25px rgba(15, 23, 42, 0.55),
+      0 1px 0 rgba(255, 255, 255, 0.95) inset;
+    transition:
+      border-color 220ms ease,
+      box-shadow 220ms ease,
+      transform 220ms ease;
+  }
+
+  .cm-tech-surface:hover {
+    border-color: #b9c5d2;
+    box-shadow:
+      0 18px 36px -26px rgba(15, 23, 42, 0.58),
+      0 1px 0 rgba(255, 255, 255, 0.98) inset;
+  }
+
+  .cm-tech-subtle {
+    border: 1px solid rgba(211, 219, 228, 0.9);
+    background: linear-gradient(145deg, rgba(248, 250, 252, 0.94), rgba(231, 237, 243, 0.82));
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.9) inset;
+  }
+
+  .cm-tech-progress {
+    background-size: 220% 220%;
+    animation: cm-tech-progress 3.6s ease-in-out infinite;
+  }
+
+  .cm-tech-breathe {
+    animation: cm-tech-breathe 2.4s ease-in-out infinite;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cm-tech-header::after,
+  .cm-tech-progress,
+  .cm-tech-breathe {
+    animation: none;
   }
 }

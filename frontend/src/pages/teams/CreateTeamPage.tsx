@@ -15,6 +15,7 @@ import {
 } from "../../lib/agencyAgentProfiles";
 import {
   BUILTIN_MEMBER_TEMPLATES,
+  getTeamMemberDisplayDescription,
   type ResourcePresetKey,
   type RuntimeType,
   type TeamMemberTemplate,
@@ -63,12 +64,6 @@ const ENV_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const FIXED_RUNTIME_TYPE: RuntimeType = "openclaw";
 const FIXED_INSTANCE_MODE: InstanceMode = "lite";
 const FIXED_COMMUNICATION_MODE: TeamCommunicationMode = "leader_mediated";
-const EDITABLE_RESOURCE_PRESETS: Array<Exclude<ResourcePresetKey, "custom">> = [
-  "small",
-  "medium",
-  "large",
-];
-
 const TEAM_TEMPLATE_DISPLAY_COPY: Record<
   string,
   { name: string; description: string }
@@ -285,38 +280,6 @@ const CreateTeamPage: React.FC = () => {
     };
     void loadImages();
   }, []);
-
-  const updateMember = (
-    id: string,
-    patch:
-      | Partial<TeamMemberDraft>
-      | ((current: TeamMemberDraft) => Partial<TeamMemberDraft>),
-  ) => {
-    setMembers((current) =>
-      current.map((member) => {
-        if (member.id !== id) {
-          return member;
-        }
-        const nextPatch = typeof patch === "function" ? patch(member) : patch;
-        return { ...member, ...nextPatch };
-      }),
-    );
-  };
-
-  const applyResourcePreset = (
-    id: string,
-    preset: Exclude<ResourcePresetKey, "custom">,
-  ) => {
-    const config = RESOURCE_PRESETS[preset];
-    updateMember(id, {
-      resourcePreset: preset,
-      cpuCores: config.cpuCores,
-      memoryGb: config.memoryGb,
-      diskGb: config.diskGb,
-      gpuEnabled: false,
-      gpuCount: 0,
-    });
-  };
 
   const applyTemplate = (templateId: string) => {
     const template =
@@ -803,105 +766,57 @@ const CreateTeamPage: React.FC = () => {
               )}
 
               <div className="mt-5 overflow-hidden rounded-xl border border-[#eadfd8]">
-                <div className="hidden grid-cols-[minmax(120px,0.9fr)_minmax(140px,1fr)_minmax(150px,1fr)_minmax(220px,1.5fr)_minmax(220px,1.15fr)] gap-3 border-b border-[#eadfd8] bg-gray-50 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 lg:grid">
+                <div className="hidden grid-cols-[minmax(120px,0.9fr)_minmax(140px,1fr)_minmax(150px,1fr)_minmax(280px,1.8fr)] gap-3 border-b border-[#eadfd8] bg-gray-50 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 lg:grid">
                   <div>成员 ID</div>
                   <div>显示名称</div>
                   <div>角色模板</div>
                   <div>角色解释</div>
-                  <div>资源预设</div>
                 </div>
                 <div className="divide-y divide-[#eadfd8] bg-white">
-                  {members.map((member) => {
-                    const preset = normalizedPreset(member.resourcePreset);
-                    return (
-                      <div
-                        key={member.id}
-                        className="grid grid-cols-1 gap-3 px-4 py-4 text-sm lg:grid-cols-[minmax(120px,0.9fr)_minmax(140px,1fr)_minmax(150px,1fr)_minmax(220px,1.5fr)_minmax(220px,1.15fr)] lg:items-center"
-                      >
-                        <div>
-                          <div className="text-xs font-medium text-gray-500 lg:hidden">
-                            成员 ID
-                          </div>
-                          <div className="font-medium text-gray-900">
-                            {normalizeMemberId(member.memberId) || member.memberId}
-                          </div>
-                          <div className="mt-1 text-xs text-gray-500">
-                            {member.isLeader ? "Leader" : effectiveMemberRole(member)}
-                          </div>
+                  {members.map((member) => (
+                    <div
+                      key={member.id}
+                      className="grid grid-cols-1 gap-3 px-4 py-4 text-sm lg:grid-cols-[minmax(120px,0.9fr)_minmax(140px,1fr)_minmax(150px,1fr)_minmax(280px,1.8fr)] lg:items-center"
+                    >
+                      <div>
+                        <div className="text-xs font-medium text-gray-500 lg:hidden">
+                          成员 ID
                         </div>
-                        <div>
-                          <div className="text-xs font-medium text-gray-500 lg:hidden">
-                            显示名称
-                          </div>
-                          <div className="text-gray-900">
-                            {displayNameForMember(member)}
-                          </div>
+                        <div className="font-medium text-gray-900">
+                          {normalizeMemberId(member.memberId) || member.memberId}
                         </div>
-                        <div>
-                          <div className="text-xs font-medium text-gray-500 lg:hidden">
-                            角色模板
-                          </div>
-                          <div className="font-medium text-indigo-700">
-                            {profileLabelForMember(member)}
-                          </div>
-                        </div>
-                        <div>
-                          <div className="text-xs font-medium text-gray-500 lg:hidden">
-                            角色解释
-                          </div>
-                          <p className="line-clamp-3 text-gray-600">
-                            {effectiveMemberDescription(member) || "模板未提供职责说明。"}
-                          </p>
-                        </div>
-                        <div>
-                          <div className="text-xs font-medium text-gray-500 lg:hidden">
-                            资源预设
-                          </div>
-                          <div className="grid grid-cols-3 gap-2">
-                            {EDITABLE_RESOURCE_PRESETS.map((resourcePreset) => (
-                              <button
-                                key={resourcePreset}
-                                type="button"
-                                onClick={() =>
-                                  applyResourcePreset(member.id, resourcePreset)
-                                }
-                                className={`min-h-10 rounded-lg border px-2 py-2 text-xs font-medium ${
-                                  preset === resourcePreset
-                                    ? "border-[#ef4444] bg-[#fff1eb] text-[#dc2626]"
-                                    : "border-[#eadfd8] bg-white text-[#5f5957] hover:bg-[#fff8f5]"
-                                }`}
-                              >
-                                {RESOURCE_PRESETS[resourcePreset].label}
-                                <span className="mt-0.5 block text-[11px] font-normal">
-                                  {RESOURCE_PRESETS[resourcePreset].cpuCores}C/
-                                  {RESOURCE_PRESETS[resourcePreset].memoryGb}G
-                                </span>
-                              </button>
-                            ))}
-                          </div>
+                        <div className="mt-1 text-xs text-gray-500">
+                          {member.isLeader ? "Leader" : effectiveMemberRole(member)}
                         </div>
                       </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div className="mt-4 grid grid-cols-1 gap-3 rounded-xl border border-dashed border-[#eadfd8] bg-gray-50 px-4 py-3 text-sm text-gray-600 md:grid-cols-2">
-                <div>
-                  <span className="font-medium text-gray-700">Runtime</span>
-                  <span className="ml-2">OpenClaw</span>
-                </div>
-                <div>
-                  <span className="font-medium text-gray-700">Mode</span>
-                  <span className="ml-2">Lite</span>
-                </div>
-                <div className="md:col-span-2">
-                  <span className="font-medium text-gray-700">镜像</span>
-                  <span className="ml-2 break-all">
-                    {loadingImages
-                      ? "加载中..."
-                      : selectedImage?.display_name || selectedImage?.image || "无"}
-                  </span>
+                      <div>
+                        <div className="text-xs font-medium text-gray-500 lg:hidden">
+                          显示名称
+                        </div>
+                        <div className="text-gray-900">
+                          {displayNameForMember(member)}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-xs font-medium text-gray-500 lg:hidden">
+                          角色模板
+                        </div>
+                        <div className="font-medium text-indigo-700">
+                          {profileLabelForMember(member)}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-xs font-medium text-gray-500 lg:hidden">
+                          角色解释
+                        </div>
+                        <p className="line-clamp-3 text-gray-600">
+                          {getTeamMemberDisplayDescription(
+                            effectiveMemberDescription(member),
+                          ) || "模板未提供职责说明。"}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
             </section>

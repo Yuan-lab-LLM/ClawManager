@@ -1,7 +1,9 @@
 ﻿import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { MonitorUp } from "lucide-react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import UserLayout from "../../components/UserLayout";
 import { useAuth } from "../../contexts/AuthContext";
+import { getTeamMemberDisplayDescription } from "../../lib/teamTemplates";
 import { teamService } from "../../services/teamService";
 import type {
   TeamDetails,
@@ -1037,21 +1039,6 @@ const TeamDetailPage: React.FC = () => {
     }
   };
 
-  const handleDeleteMember = async (member: TeamMember) => {
-    if (!teamId || !window.confirm(`删除成员「${member.member_key}」？`)) {
-      return;
-    }
-    try {
-      setActionLoading(`delete-member-${member.id}`);
-      await teamService.deleteMember(teamId, member.id);
-      await loadTeam({ background: true });
-    } catch (err: any) {
-      alert(err.response?.data?.error || "删除成员失败");
-    } finally {
-      setActionLoading(null);
-    }
-  };
-
   const handlePreviewWorkspacePath = useCallback(
     async (workspacePath: string) => {
       if (!details?.team.id) {
@@ -1293,7 +1280,7 @@ const TeamDetailPage: React.FC = () => {
                     </th>
                     <th className="px-5 py-3">最后在线</th>
                     <th className="px-5 py-3">实例</th>
-                    <th className="px-5 py-3">操作</th>
+                    <th className="min-w-[140px] px-5 py-3">操作</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#f1e7e1] bg-white">
@@ -1315,7 +1302,9 @@ const TeamDetailPage: React.FC = () => {
                         {member.instance_mode || "lite"}
                       </td>
                       <td className="min-w-[280px] max-w-md px-5 py-4">
-                        <DescriptionPreview text={member.description} />
+                        <DescriptionPreview
+                          text={getTeamMemberDisplayDescription(member.description)}
+                        />
                       </td>
                       <td className="px-5 py-4">
                         <span
@@ -1357,39 +1346,36 @@ const TeamDetailPage: React.FC = () => {
                           "-"
                         )}
                       </td>
-                      <td className="px-5 py-4">
+                      <td className="min-w-[140px] px-5 py-4">
                         <div className="flex flex-wrap gap-2">
                           {member.instance_id ? (
                             <Link
                               to={`/instances/${member.instance_id}`}
                               target="_blank"
                               rel="noreferrer"
-                              className="rounded-lg border border-[#eadfd8] bg-white px-3 py-1.5 text-xs font-medium text-[#5f5957] hover:bg-[#fff8f5]"
+                              className="group/desktop inline-flex min-w-[108px] items-center justify-center gap-1.5 whitespace-nowrap rounded-full border border-slate-300 bg-[linear-gradient(180deg,#ffffff,#e9eef3)] px-3.5 py-2 text-xs font-semibold text-slate-700 shadow-[0_8px_18px_-14px_rgba(15,23,42,0.65)] transition-all duration-200 hover:-translate-y-0.5 hover:border-sky-300 hover:bg-[linear-gradient(180deg,#ffffff,#e1eef7)] hover:text-sky-700 hover:shadow-[0_12px_24px_-15px_rgba(14,116,144,0.55)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300/45"
                             >
+                              <MonitorUp
+                                aria-hidden="true"
+                                className="h-3.5 w-3.5 transition-transform duration-200 group-hover/desktop:-translate-y-0.5"
+                                strokeWidth={1.8}
+                              />
                               访问桌面
                             </Link>
                           ) : (
                             <button
                               type="button"
                               disabled
-                              className="rounded-lg border border-[#eadfd8] bg-gray-50 px-3 py-1.5 text-xs font-medium text-gray-400"
+                              className="inline-flex min-w-[108px] items-center justify-center gap-1.5 whitespace-nowrap rounded-full border border-slate-200 bg-[linear-gradient(180deg,#f8fafc,#edf1f5)] px-3.5 py-2 text-xs font-semibold text-slate-400"
                             >
+                              <MonitorUp
+                                aria-hidden="true"
+                                className="h-3.5 w-3.5"
+                                strokeWidth={1.8}
+                              />
                               访问桌面
                             </button>
                           )}
-                          <button
-                            type="button"
-                            disabled={
-                              member.role === "leader" ||
-                              actionLoading === `delete-member-${member.id}`
-                            }
-                            onClick={() => void handleDeleteMember(member)}
-                            className="rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
-                          >
-                            {actionLoading === `delete-member-${member.id}`
-                              ? "删除中..."
-                              : "删除"}
-                          </button>
                         </div>
                       </td>
                     </tr>
@@ -1397,7 +1383,6 @@ const TeamDetailPage: React.FC = () => {
                 </tbody>
               </table>
             </div>
-            <TeamConfigSummary details={details} />
           </section>
         </div>
 
@@ -1412,32 +1397,6 @@ const TeamDetailPage: React.FC = () => {
     </UserLayout>
   );
 };
-
-function TeamConfigSummary({ details }: { details: TeamDetails }) {
-  return (
-    <div className="border-t border-[#f1e7e1] bg-[#fffaf7] px-5 py-4">
-      <div className="flex items-center justify-between gap-3">
-        <h3 className="text-sm font-semibold text-gray-900">团队配置概览</h3>
-        <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-medium text-slate-500">
-          Runtime
-        </span>
-      </div>
-      <dl className="mt-3 grid gap-2 text-sm sm:grid-cols-2 xl:grid-cols-5">
-        <MetaRow label="通信模式" value={details.team.communication_mode} />
-        <MetaRow label="共享 PVC" value={details.team.shared_pvc_name || "-"} />
-        <MetaRow
-          label="命名空间"
-          value={details.team.shared_pvc_namespace || "-"}
-        />
-        <MetaRow label="StorageClass" value={details.team.storage_class || "-"} />
-        <MetaRow
-          label="Events ID"
-          value={details.team.redis_events_last_id}
-        />
-      </dl>
-    </div>
-  );
-}
 
 function TeamWorkspaceBrowser({
   teamId,
@@ -2405,21 +2364,21 @@ function InteractionProcessPanel({
   }, [leaderWorkspaceSize, onDetailSizeChange, peerMode]);
   const progressStyle =
     visualStatus === "failed" || visualStatus === "stale"
-      ? "from-rose-500 via-orange-400 to-amber-400"
+      ? "from-rose-500 via-orange-400 to-amber-300"
       : isTerminal
-        ? "from-emerald-500 via-teal-400 to-cyan-400"
-        : "from-sky-500 via-indigo-500 to-violet-500";
+        ? "from-slate-400 via-cyan-400 to-emerald-400"
+        : "from-slate-500 via-sky-500 to-cyan-400";
   const routeMembers = group?.route || [];
 
   return (
-    <section className={`app-panel flex flex-col overflow-hidden rounded-[22px] border-slate-200 shadow-[0_24px_56px_-42px_rgba(15,23,42,0.7)] transition-[height] duration-300 ${heightClass || (compact ? (expanded ? "h-[760px]" : "h-[480px]") : "h-[420px]")}`}>
-      <div className={`bg-[linear-gradient(135deg,#111827,#1f2937_48%,#0f766e)] text-white ${compact ? "px-4 py-3" : "px-4 py-3.5"}`}>
-        <div className="flex items-start justify-between gap-3">
+    <section className={`app-panel cm-tech-panel flex flex-col overflow-hidden rounded-[22px] transition-[height] duration-300 ${heightClass || (compact ? (expanded ? "h-[760px]" : "h-[480px]") : "h-[420px]")}`}>
+      <div className={`cm-tech-header text-slate-800 ${compact ? "px-4 py-3" : "px-4 py-3.5"}`}>
+        <div className="relative z-[1] flex items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="flex items-center gap-2">
               <span className="relative flex h-2.5 w-2.5 shrink-0">
                 {group && !isTerminal && (
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-cyan-300 opacity-60" />
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-sky-400 opacity-45" />
                 )}
                 <span
                   className={`relative inline-flex h-2.5 w-2.5 rounded-full ${
@@ -2427,33 +2386,33 @@ function InteractionProcessPanel({
                       ? "bg-slate-400"
                       : isTerminal
                         ? "bg-emerald-300"
-                        : "bg-cyan-300"
+                        : "cm-tech-breathe bg-sky-500"
                   }`}
                 />
               </span>
-              <span className="truncate text-xs font-semibold uppercase tracking-[0.16em] text-cyan-100">
+              <span className="truncate text-xs font-semibold uppercase tracking-[0.18em] text-slate-600">
                 {peerRoot ? "Peer Collaboration" : "Execution Kanban"}
               </span>
-              <span className="shrink-0 rounded-full bg-white/10 px-2 py-0.5 text-[11px] text-slate-200 ring-1 ring-white/15">
+              <span className="shrink-0 rounded-full bg-white/75 px-2 py-0.5 text-[11px] font-medium text-slate-600 shadow-sm ring-1 ring-slate-300/80 backdrop-blur">
                 {statusText}
               </span>
             </div>
             <div className="mt-2 text-sm font-semibold leading-5">{title}</div>
-            <div className="mt-1 line-clamp-2 text-[11px] leading-4 text-slate-300">
+            <div className="mt-1 line-clamp-2 text-[11px] leading-4 text-slate-600">
               {queryText || "用户提交 query 后，这里会展示拆解、执行和汇总。"}
             </div>
-            <div className="mt-1.5 flex max-w-full flex-nowrap items-center gap-1 overflow-hidden text-[10px] leading-4 text-cyan-100/80">
+            <div className="mt-1.5 flex max-w-full flex-nowrap items-center gap-1 overflow-hidden text-[10px] leading-4 text-slate-500">
               {routeMembers.length > 0 ? (
                 routeMembers.map((member, index) => (
                   <React.Fragment key={`${group?.key || "idle"}-header-route-${member}-${index}`}>
-                    {index > 0 && <span className="text-cyan-100/45">→</span>}
-                    <span className="max-w-[128px] truncate rounded-full bg-white/10 px-1.5 py-0.5 text-cyan-50 ring-1 ring-white/10">
+                    {index > 0 && <span className="text-slate-400">→</span>}
+                    <span className="max-w-[128px] truncate rounded-full bg-white/75 px-1.5 py-0.5 text-slate-600 shadow-sm ring-1 ring-slate-300/80 backdrop-blur">
                       {displayMemberName(member, memberByKey, leaderMemberId)}
                     </span>
                   </React.Fragment>
                 ))
               ) : (
-                <span className="rounded-full bg-white/10 px-1.5 py-0.5 text-cyan-50 ring-1 ring-white/10">
+                <span className="rounded-full bg-white/75 px-1.5 py-0.5 text-slate-600 shadow-sm ring-1 ring-slate-300/80 backdrop-blur">
                   Idle
                 </span>
               )}
@@ -2463,11 +2422,11 @@ function InteractionProcessPanel({
             {leaderLedgerSummary ? (
               <>
                 <div className="max-w-[150px] truncate text-sm font-semibold leading-5">{leaderLedgerSummary.phase}</div>
-                <div className="mt-1 text-[11px] text-slate-300">
+                <div className="mt-1 text-[11px] text-slate-500">
                   {leaderLedgerSummary.deliveryLabel || `成员交付 ${leaderLedgerSummary.delivered}/${leaderLedgerSummary.total}`}
                 </div>
                 {leaderLedgerSummary.artifactLabel && (
-                  <div className="mt-0.5 text-[11px] text-slate-300">
+                  <div className="mt-0.5 text-[11px] text-slate-500">
                     {leaderLedgerSummary.artifactLabel}
                   </div>
                 )}
@@ -2475,32 +2434,32 @@ function InteractionProcessPanel({
             ) : (
               <>
                 <div className="text-xl font-semibold leading-none">{progress}%</div>
-                <div className="mt-1 text-[11px] text-slate-300">overall</div>
+                <div className="mt-1 text-[11px] text-slate-500">overall</div>
               </>
             )}
             {compact && showToggle && (
               <button
                 type="button"
                 onClick={() => setExpanded(!expanded)}
-                className="mt-2 rounded-full bg-white/10 px-2 py-0.5 text-[11px] text-slate-100 ring-1 ring-white/15 hover:bg-white/15"
+                className="mt-2 rounded-full bg-white/75 px-2 py-0.5 text-[11px] text-slate-600 shadow-sm ring-1 ring-slate-300/80 transition hover:bg-white hover:text-slate-900"
               >
                 {expanded ? "收起" : "展开"}
               </button>
             )}
           </div>
         </div>
-        <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/15">
+        <div className="relative z-[1] mt-3 h-1.5 overflow-hidden rounded-full bg-slate-300/70 shadow-inner">
           <div
-            className={`h-full rounded-full bg-gradient-to-r ${progressStyle} transition-all duration-700`}
+            className={`cm-tech-progress h-full rounded-full bg-gradient-to-r ${progressStyle} shadow-[0_0_12px_rgba(56,189,248,0.45)] transition-all duration-700`}
             style={{ width: `${progress}%` }}
           />
         </div>
       </div>
 
-      <div className={`min-h-0 flex-1 bg-gradient-to-b from-white via-slate-50 to-white ${expanded ? "flex flex-col gap-2 overflow-hidden px-3 py-2.5" : "space-y-3 overflow-auto px-4 py-3"}`}>
+      <div className={`cm-tech-workspace min-h-0 flex-1 ${expanded ? "flex flex-col gap-2 overflow-hidden px-3 py-2.5" : "space-y-3 overflow-auto px-4 py-3"}`}>
         {compact && !expanded ? (
           <div className="space-y-3">
-            <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+            <div className="cm-tech-surface rounded-2xl p-3">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">
@@ -2518,12 +2477,12 @@ function InteractionProcessPanel({
               </div>
               <div className="mt-3 space-y-2">
                 {decompositionItems.length === 0 ? (
-                  <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-3 py-4 text-center text-xs text-slate-400">
+                  <div className="cm-tech-subtle rounded-xl border-dashed px-3 py-4 text-center text-xs text-slate-400">
                     暂无拆解步骤
                   </div>
                 ) : (
                   decompositionItems.slice(0, 3).map((item) => (
-                    <div key={item.id} className="rounded-xl bg-slate-50 px-3 py-2">
+                    <div key={item.id} className="cm-tech-subtle rounded-xl px-3 py-2 transition duration-200 hover:-translate-y-0.5 hover:border-slate-400/70">
                       <div className="flex items-center justify-between gap-2">
                         <div className="min-w-0 truncate text-xs font-semibold text-slate-800">{item.title}</div>
                         <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${item.badgeClass}`}>
@@ -2556,7 +2515,7 @@ function InteractionProcessPanel({
           onSelect={setSelectedCardId}
         />
 
-        <div className={`flex min-h-[112px] min-w-0 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white p-2.5 shadow-sm ${kanbanDetailPanelMaxHeight(selectedDetailSize)}`}>
+        <div className={`cm-tech-surface flex min-h-[112px] min-w-0 flex-col overflow-hidden rounded-2xl p-2.5 ${kanbanDetailPanelMaxHeight(selectedDetailSize)}`}>
           <div className="mb-1.5 flex shrink-0 items-center justify-between gap-3">
             <div>
               <div className="text-xs font-semibold text-slate-800">
@@ -2595,7 +2554,7 @@ function InteractionProcessPanel({
           </>
         ) : (
           <>
-        <div className="shrink-0 rounded-2xl border border-slate-200 bg-white p-2 shadow-sm">
+        <div className="cm-tech-surface shrink-0 rounded-2xl p-2">
           <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_92px]">
             <div className="min-w-0">
               <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">
@@ -2604,7 +2563,7 @@ function InteractionProcessPanel({
               <div className="mt-1 line-clamp-1 text-xs leading-5 text-slate-700">
                 {queryText || "Idle，等待新的团队任务。"}
               </div>
-              <div className="mt-2 rounded-xl border border-slate-100 bg-slate-50/70 p-1.5">
+              <div className="cm-tech-subtle mt-2 rounded-xl p-1.5">
                 <div className="mb-1 flex items-center justify-between gap-2">
                   <span className="text-[11px] font-semibold text-slate-700">任务拆解</span>
                   <span className="text-[10px] text-slate-400">{decompositionItems.length} 项</span>
@@ -2618,7 +2577,7 @@ function InteractionProcessPanel({
                     {decompositionItems.map((item) => (
                       <div
                         key={item.id}
-                        className="rounded-lg bg-white px-2 py-1"
+                        className="rounded-lg border border-white/80 bg-white/75 px-2 py-1 shadow-[0_1px_4px_rgba(15,23,42,0.05)] transition duration-200 hover:border-sky-200/80 hover:bg-white"
                       >
                         <div className="flex items-center justify-between gap-2">
                           <div className="min-w-0 truncate text-[11px] font-medium text-slate-700">
@@ -2637,7 +2596,7 @@ function InteractionProcessPanel({
                 )}
               </div>
             </div>
-            <div className="rounded-xl border border-slate-100 bg-slate-50 px-2.5 py-2">
+            <div className="cm-tech-subtle rounded-xl px-2.5 py-2">
               <div className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-medium ${statusStyle(visualStatus)}`}>
                 {statusText}
               </div>
@@ -2692,7 +2651,7 @@ function InteractionProcessPanel({
           </div>
         </div>
 
-        <div className={`flex min-h-[112px] min-w-0 shrink-0 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white p-2.5 shadow-sm ${kanbanDetailPanelMaxHeight(selectedDetailSize)}`}>
+        <div className={`cm-tech-surface flex min-h-[112px] min-w-0 shrink-0 flex-col overflow-hidden rounded-2xl p-2.5 ${kanbanDetailPanelMaxHeight(selectedDetailSize)}`}>
           <div className="mb-1.5 flex shrink-0 items-center justify-between gap-3">
             <div>
               <div className="text-xs font-semibold text-slate-800">
@@ -4339,11 +4298,11 @@ function KanbanColumn({
 }) {
   const style = kanbanColumnStyle(tone);
   return (
-    <div className={`min-h-[138px] rounded-xl border p-1.5 ${style.shell}`}>
+    <div className={`min-h-[138px] rounded-xl border p-1.5 shadow-[0_10px_26px_-22px_rgba(15,23,42,0.5)] transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_16px_32px_-22px_rgba(15,23,42,0.48)] ${style.shell}`}>
       <div className="mb-1 flex items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="flex items-center gap-1.5">
-            <span className={`h-1.5 w-1.5 rounded-full ${style.dot}`} />
+            <span className={`h-1.5 w-1.5 rounded-full shadow-[0_0_8px_currentColor] ${style.dot}`} />
             <h3 className="text-[11px] font-semibold text-slate-900">{title}</h3>
           </div>
           <p className="mt-0.5 text-[10px] leading-3 text-slate-500">{subtitle}</p>
@@ -4355,7 +4314,7 @@ function KanbanColumn({
 
       <div className="max-h-[230px] space-y-1 overflow-y-auto pr-1">
         {cards.length === 0 ? (
-          <div className="rounded-lg border border-dashed border-slate-200 bg-white/70 px-2 py-2.5 text-center text-[11px] leading-5 text-slate-400">
+          <div className="rounded-lg border border-dashed border-slate-300/80 bg-white/55 px-2 py-2.5 text-center text-[11px] leading-5 text-slate-400 backdrop-blur-sm">
             暂无卡片
           </div>
         ) : (
@@ -4387,8 +4346,8 @@ function KanbanCard({
     <button
       type="button"
       onClick={onSelect}
-      className={`group w-full rounded-lg border bg-white px-1.5 py-1 text-left text-xs shadow-sm transition duration-200 hover:-translate-y-0.5 hover:shadow-md ${
-        selected ? "border-slate-400 ring-2 ring-slate-200" : style.border
+      className={`group w-full rounded-lg border bg-[linear-gradient(145deg,rgba(255,255,255,0.96),rgba(241,245,249,0.9))] px-1.5 py-1 text-left text-xs shadow-[0_5px_14px_-12px_rgba(15,23,42,0.7)] transition duration-200 hover:-translate-y-0.5 hover:border-sky-300/80 hover:shadow-[0_10px_22px_-14px_rgba(14,116,144,0.5)] ${
+        selected ? "border-sky-400/80 ring-2 ring-sky-200/70" : style.border
       }`}
     >
       <div className="flex items-start gap-1.5">
@@ -4430,7 +4389,7 @@ function KanbanCardDetail({
 }) {
   const style = kanbanCardStyle(card);
   return (
-    <div className="flex min-h-0 flex-col rounded-xl border border-slate-100 bg-slate-50/80 p-2.5">
+    <div className="cm-tech-subtle flex min-h-0 flex-col rounded-xl p-2.5">
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
           <div className="truncate text-xs font-semibold leading-5 text-slate-900">{card.title}</div>
@@ -4471,7 +4430,7 @@ function KanbanCount({
 }) {
   const style = kanbanColumnStyle(tone);
   return (
-    <div className={`rounded-lg px-1.5 py-1 ${style.count}`}>
+    <div className={`rounded-lg border px-1.5 py-1 shadow-[0_1px_0_rgba(255,255,255,0.9)_inset] ${style.count}`}>
       <div className="font-semibold leading-none">{value}</div>
       <div className="mt-0.5 opacity-75">{label}</div>
     </div>
@@ -4482,21 +4441,21 @@ function kanbanColumnStyle(tone: KanbanColumnKey) {
   switch (tone) {
     case "todo":
       return {
-        shell: "border-amber-100 bg-amber-50/55",
-        dot: "bg-amber-400",
-        count: "bg-amber-100 text-amber-700",
+        shell: "border-slate-300/80 bg-[linear-gradient(145deg,rgba(250,251,252,0.96),rgba(232,237,242,0.88))]",
+        dot: "bg-slate-400 text-slate-400",
+        count: "border-slate-300/80 bg-white/65 text-slate-600",
       };
     case "doing":
       return {
-        shell: "border-sky-100 bg-sky-50/60",
-        dot: "bg-sky-500",
-        count: "bg-sky-100 text-sky-700",
+        shell: "border-sky-200/80 bg-[linear-gradient(145deg,rgba(248,251,253,0.97),rgba(225,235,244,0.9))]",
+        dot: "cm-tech-breathe bg-sky-500 text-sky-500",
+        count: "border-sky-200/80 bg-sky-50/80 text-sky-700",
       };
     case "done":
       return {
-        shell: "border-emerald-100 bg-emerald-50/55",
-        dot: "bg-emerald-500",
-        count: "bg-emerald-100 text-emerald-700",
+        shell: "border-emerald-200/70 bg-[linear-gradient(145deg,rgba(249,252,251,0.97),rgba(226,239,236,0.88))]",
+        dot: "bg-emerald-500 text-emerald-500",
+        count: "border-emerald-200/80 bg-emerald-50/80 text-emerald-700",
       };
   }
 }
@@ -5711,25 +5670,6 @@ function MemberPill({ label, value }: { label: string; value: string }) {
       <span className="text-gray-400">{label}</span>
       <span className="font-medium text-gray-800">{value}</span>
     </span>
-  );
-}
-
-function MetaRow({
-  label,
-  value,
-  className = "",
-}: {
-  label: string;
-  value: string;
-  className?: string;
-}) {
-  return (
-    <div className={`rounded-xl border border-[#f1e7e1] bg-white/80 px-3 py-2 ${className}`}>
-      <dt className="text-[11px] leading-4 text-gray-500">{label}</dt>
-      <dd className="mt-0.5 truncate font-medium leading-5 text-gray-900" title={value}>
-        {value}
-      </dd>
-    </div>
   );
 }
 

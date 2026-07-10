@@ -33,6 +33,43 @@ export type TeamMemberTemplate = {
   members: TeamMemberTemplateMember[];
 };
 
+const BUILTIN_MEMBER_DESCRIPTION_ZH: Record<string, string> = {
+  "Team Leader / Agents Orchestrator: decomposes goals, coordinates members, maintains context, validates member outputs, and reports externally.":
+    "团队负责人 / 智能体编排官：拆解目标、协调成员、维护上下文、验证成员产出，并向用户汇报最终结果。",
+  "Senior Developer: executes implementation tasks assigned by the Leader, reports progress, lists changes, and escalates blockers.":
+    "资深开发工程师：执行 Leader 分派的实现任务，汇报进度和变更，并及时上报阻塞问题。",
+  "Agents Orchestrator: decomposes requirements, sets priorities, dispatches tasks, manages risks, and integrates results.":
+    "智能体编排官：拆解需求、设定优先级、分派任务、管理风险，并整合成员结果。",
+  "Senior Developer: implements code, integrates interfaces, adds necessary tests, and provides reproducible delivery notes.":
+    "资深开发工程师：负责代码实现和接口集成，补充必要测试，并提供可复现的交付说明。",
+  "Evidence Collector / Reviewer: verifies behavior, checks regressions, gathers evidence, reviews delivery items, and gives a PASS/FAIL verdict.":
+    "验收验证员 / 评审员：验证功能行为和回归风险，收集证据、审查交付内容，并给出通过或不通过的结论。",
+  "Agents Orchestrator: owns goals, definition of done, task breakdown, dependency coordination, risk management, acceptance, and final decisions.":
+    "智能体编排官：负责目标和完成标准，统筹任务拆解、依赖协调、风险管理、验收与最终决策。",
+  "Product Manager: owns requirements, product direction, PRD, user flows, feature boundaries, priorities, and acceptance criteria.":
+    "产品经理：负责需求、产品方向、PRD、用户流程、功能边界、优先级和验收标准。",
+  "UI Designer: owns visual direction, UX, interaction states, component guidance, and implementable design handoff.":
+    "UI 设计师：负责视觉方向、用户体验、交互状态和组件规范，并提供可落地的设计交付。",
+  "Frontend Developer: owns frontend UI implementation, API integration, state management, interaction behavior, responsiveness, and accessibility.":
+    "前端开发工程师：负责前端界面实现、API 对接、状态管理、交互行为、响应式适配和无障碍体验。",
+  "Backend Architect: owns APIs, databases, permissions, queues, business logic, and server-side system capabilities.":
+    "后端架构师：负责 API、数据库、权限、队列、业务逻辑和服务端系统能力。",
+  "Software Architect: owns technical choices, system boundaries, availability, extensibility, technical standards, and evolution plans.":
+    "软件架构师：负责技术选型、系统边界、可用性、可扩展性、技术标准和演进规划。",
+  "Evidence Collector: owns functional validation, regression checks, evidence gathering, reproduction notes, and acceptance verdicts.":
+    "验收验证员：负责功能验证、回归检查、证据收集、复现说明和验收结论。",
+  "Code Reviewer: owns code review, architecture consistency, maintainability, test coverage, risk findings, and pre-merge quality gates.":
+    "代码审查员：负责代码评审、架构一致性、可维护性、测试覆盖、风险识别和合并前质量把关。",
+};
+
+export const getTeamMemberDisplayDescription = (description?: string) => {
+  const normalized = description?.trim();
+  if (!normalized) {
+    return description;
+  }
+  return BUILTIN_MEMBER_DESCRIPTION_ZH[normalized] || description;
+};
+
 const baseMember = (
   overrides: Partial<TeamMemberTemplateMember>,
 ): TeamMemberTemplateMember => ({
