@@ -80,3 +80,6 @@ CLAUDE.md
 TEAM_IMAGE_DEPLOY_STEPS.md
 TEAM_PROFILES_LOCAL_TESTING.md
 /team-optimization-docs/
+/clawmanager-apply.sh
+/clawmanager-team-profiles-test.yaml
+/clawmanager-tenant.yaml
