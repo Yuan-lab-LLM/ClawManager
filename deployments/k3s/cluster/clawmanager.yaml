@@ -6193,6 +6193,8 @@ spec:
               value: "redis://clawmanager-redis.clawmanager-system.svc.cluster.local:6379/0"
             - name: TEAM_REDIS_URL
               value: "redis://clawmanager-redis.clawmanager-system.svc.cluster.local:6379/0"
+            - name: CLAWMANAGER_DESKTOP_DIRECT_PROXY
+              value: "true"
             - name: CLAWMANAGER_TEAM_REDIS_URL
               value: "redis://clawmanager-redis.clawmanager-system.svc.cluster.local:6379/0"
             - name: CLAWMANAGER_TEAM_MANAGER_BASE_URL

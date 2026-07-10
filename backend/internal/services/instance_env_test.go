@@ -37,9 +37,12 @@ func TestBuildInstancePodEnvAppliesOverridesAfterDefaults(t *testing.T) {
 	t.Setenv("K8S_NAMESPACE", "")
 
 	raw, err := marshalEnvironmentOverrides(map[string]string{
-		"SUBFOLDER":                "/custom-proxy",
-		"KASM_SVC_ACCEPT_CUT_TEXT": "-AcceptCutText 1",
-		"CUSTOM":                   "enabled",
+		"SUBFOLDER":                     "/custom-proxy",
+		"KASM_SVC_ACCEPT_CUT_TEXT":      "-AcceptCutText 1",
+		"SELKIES_CLIPBOARD_ENABLED":     "true|locked",
+		"SELKIES_CLIPBOARD_IN_ENABLED":  "true|locked",
+		"SELKIES_CLIPBOARD_OUT_ENABLED": "true|locked",
+		"CUSTOM":                        "enabled",
 	})
 	if err != nil {
 		t.Fatalf("marshalEnvironmentOverrides returned error: %v", err)
@@ -51,10 +54,7 @@ func TestBuildInstancePodEnvAppliesOverridesAfterDefaults(t *testing.T) {
 		EnvironmentOverridesJSON: raw,
 	}
 
-	env, err := buildInstancePodEnv(instance, map[string]string{
-		"TITLE":     "ClawManager Webtop",
-		"SUBFOLDER": "/",
-	}, nil, nil)
+	env, err := buildInstancePodEnv(instance, defaultWebtopDesktopEnv("ClawManager Webtop"), nil, nil)
 	if err != nil {
 		t.Fatalf("buildInstancePodEnv returned error: %v", err)
 	}
@@ -64,6 +64,15 @@ func TestBuildInstancePodEnvAppliesOverridesAfterDefaults(t *testing.T) {
 	}
 	if env["KASM_SVC_ACCEPT_CUT_TEXT"] != "-AcceptCutText 1" {
 		t.Fatalf("expected clipboard policy override to win, got %q", env["KASM_SVC_ACCEPT_CUT_TEXT"])
+	}
+	for _, key := range []string{
+		"SELKIES_CLIPBOARD_ENABLED",
+		"SELKIES_CLIPBOARD_IN_ENABLED",
+		"SELKIES_CLIPBOARD_OUT_ENABLED",
+	} {
+		if got := env[key]; got != "true|locked" {
+			t.Fatalf("expected %s override to win, got %q", key, got)
+		}
 	}
 	if env["CUSTOM"] != "enabled" {
 		t.Fatalf("expected custom environment variable to be merged")
