@@ -13,6 +13,7 @@
 - [VIII. Quick Start Guide (Initialize and Create an OpenClaw Instance After Login)](#sec-09)
 - [IX. Console and Other AI Gateway Features](#sec-12)
 - [X. Workspace Module Guide](#sec-13)
+- [10.4 Team Collaboration](#sec-13-team)
 - [XI. Quick Troubleshooting Reference](#sec-14)
 - [XII. Recommended Final Check Sequence (Use as a Self-Check)](#sec-15)
 
@@ -683,6 +684,15 @@ To upload skills, follow these steps:
 > - Each first-level directory will be recognized as an independent skill;
 > - If the list is not refreshed immediately after upload, you can manually click **Refresh** in the upper-right corner of the page to reload it.
 ---
+
+<a id="sec-13-team"></a>
+### 10.4 Team Collaboration
+
+Teams let multiple OpenClaw Lite members work toward a shared goal. Open **Teams**, choose a member template, enter a Team name, and create it; individual member runtime and resource-preset setup is not required.
+
+After creation, describe the goal to the Leader in Team chat. The Leader coordinates planning, execution, review, and final synthesis. Use **Execution Kanban** to follow the current stage and completed deliveries, and use **Files** to browse shared artifacts.
+
+See the [Team Workspace Quick Guide](./team-workspaces-guide_en.md).
 
 <a id="sec-14"></a>
 ## XI. Quick Troubleshooting Reference

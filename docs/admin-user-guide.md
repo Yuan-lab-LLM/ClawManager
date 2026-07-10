@@ -17,6 +17,7 @@ Administrators use ClawManager to:
 End users use ClawManager to:
 
 - create or access OpenClaw workspaces
+- create a template-based Team and describe a shared goal in the Team chat
 - open workspaces through the portal experience
 - inspect runtime status, agent signals, and recent command activity
 - attach or remove skills from an instance when permitted
@@ -28,9 +29,11 @@ End users use ClawManager to:
 - [Agent Control Plane Guide](./agent-control-plane.md)
 - [Resource Management Guide](./resource-management.md)
 - [Security / Skill Scanner Guide](./security-skill-scanner.md)
+- [Team Workspace Quick Guide](./team-workspaces-guide_en.md)
 
 ## Suggested Walkthrough
 
 1. Start with the AI Gateway overview if your team cares most about model governance.
 2. Review Agent Control Plane if your focus is runtime visibility and operations.
 3. Review Resource Management and Security Center if you want reusable channels, skills, and scan-backed workflows.
+4. Create a Team from a role template when a task benefits from coordinated planning, delivery, and review.

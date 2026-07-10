@@ -13,6 +13,7 @@
 - [VIII. Schnellstartanleitung (nach dem Login initialisieren und eine OpenClaw-Instanz erstellen)](#sec-09)
 - [IX. Konsole und weitere Funktionen des AI Gateway](#sec-12)
 - [X. Beschreibung des Workspace-Moduls](#sec-13)
+- [10.4 Team-Zusammenarbeit](#sec-13-team)
 - [XI. Schnelle Referenz für Probleme und Gegenmaßnahmen](#sec-14)
 - [XII. Empfohlene abschließende Prüfreihenfolge (zur Selbstprüfung)](#sec-15)
 
@@ -658,6 +659,15 @@ Gehe beim Hochladen von Skills wie folgt vor:
 > - Jedes Verzeichnis der ersten Ebene wird als eigenständiger Skill erkannt；
 > - Falls die Liste nach dem Upload nicht sofort aktualisiert wird, kannst du oben rechts auf der Seite manuell auf **Aktualisieren** klicken, um neu zu laden。
 ---
+
+<a id="sec-13-team"></a>
+### 10.4 Team-Zusammenarbeit
+
+Teams lassen mehrere OpenClaw-Lite-Mitglieder an einem gemeinsamen Ziel arbeiten. Oeffne **Teams**, waehle eine Mitgliedervorlage, gib einen Teamnamen ein und erstelle das Team; Runtime- und Ressourcenprofile je Mitglied sind nicht erforderlich.
+
+Beschreibe nach der Erstellung das Ziel im Team-Chat fuer den Leader. Der Leader koordiniert Planung, Ausfuehrung, Review und finale Zusammenfassung. Mit **Execution Kanban** siehst du die aktuelle Phase und abgeschlossene Lieferungen; unter **Files** findest du gemeinsame Artefakte.
+
+Siehe [Team Workspace Quick Guide](./team-workspaces-guide_de.md).
 
 <a id="sec-14"></a>
 ## XI. Schnelle Referenz für Probleme und Gegenmaßnahmen

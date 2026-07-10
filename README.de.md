@@ -110,16 +110,14 @@ Es eignet sich besonders fuer:
 <a id="team-workspaces"></a>
 ## Team Workspaces
 
-Team Workspaces erweitern ClawManager von Einzelinstanz-Betrieb zu koordinierter Multi-Agent-Runtime-Verwaltung. Nutzer koennen ein Team erstellen, einen Leader und mehrere Member zuweisen und ClawManager die Bereitstellung der Member-Runtimes, die Injection der Kollaborationskonfiguration und die Sichtbarkeit von Tasks und Events in der Control Plane ueberlassen.
+Team Workspaces bieten einen vereinfachten OpenClaw-Lite-Kollaborationsablauf: Rollenvorlage auswaehlen, Team erstellen und das Ziel im Team-Chat beschreiben. Der Leader plant, koordiniert die Mitglieder, sammelt Ergebnisse und liefert die finale Zusammenfassung.
 
-Das aktuelle MVP konzentriert sich auf OpenClaw-Member-Orchestrierung und den Redis-Team-Bus-Loop:
+- feste Leader-vermittelte Zusammenarbeit ohne Runtime- oder Ressourcenprofil je Mitglied
+- integrierte Vorlagen fuer Auslieferung, Produkterkundung und Softwareentwicklung
+- Team-Chat fuer Plan, Zuweisung, Fortschritt, Review, Lieferung und Zusammenfassung
+- Execution Kanban fuer Gesamtaufgabe und aktuelle Mitgliederlieferungen
 
-- One-Click-Team-Erstellung mit validiertem Leader/Member-Roster
-- Member-Runtime-Pods mit Team-Rolle, Member-ID, Control-Plane-URL und Shared-Mount-Konfiguration
-- Redis-basierte inbox-, events-, presence- und DLQ-Keys ueber kontrollierte Umgebungsvariablen und Secret-Referenzen
-- Shared PVC unter `/team` fuer Kontext, Artefakte, Snapshots und Task-Ergebnisse
-- Team-Detailansicht mit Leader-Desktop, Team-Chat, Member-Liste, Dispatch-Panel, Task-Fortschritt und Event-/Ergebnis-Historie
-- DB-gestuetzte Team-, Member-, Task- und Event-Datensaetze, sodass Redis Message Bus bleibt und nicht zur Source of Truth wird
+Siehe [Team Workspace Quick Guide](./docs/team-workspaces-guide_de.md) fuer Erstellung, Kollaborationsphasen und Ergebnisansicht.
 
 <a id="runtime-integrations"></a>
 ## Runtime-Integrationen
@@ -263,6 +261,7 @@ Siehe [Developer Guide (English)](./docs/developer-guide.md).
 ## Dokumentation
 
 - [Benutzerhandbuch](./docs/use_guide_de.md)
+- [Team Workspace Quick Guide](./docs/team-workspaces-guide_de.md)
 - [Deployment Guide (English)](./docs/deployment.md)
 - [Admin and User Guide (English)](./docs/admin-user-guide.md)
 - [Agent Control Plane Guide (English)](./docs/agent-control-plane.md)
