@@ -4987,16 +4987,39 @@ func markStructuredCompletionDecision(eventType string, payload map[string]inter
 }
 
 func applyTeamChatPolicy(eventType string, payload map[string]interface{}, task *models.TeamTask, member *models.TeamMember) {
-	if payload == nil || eventString(payload, "chatPolicy", "chat_policy") != "" {
+	if payload == nil {
 		return
 	}
 	normalizedEvent := strings.ToLower(strings.TrimSpace(eventType))
 	eventKind := strings.ToLower(strings.TrimSpace(eventString(payload, "eventKind", "event_kind", "kind")))
+	// Runtime-provided visibility is advisory. A real plan, assignment,
+	// narrative, delivery, review, or synthesis must not be hidden simply
+	// because an older adapter labelled it as transport traffic.
+	if teamChatEventIsBusinessContent(normalizedEvent, eventKind, payload) {
+		payload["chatPolicy"] = "visible"
+		payload["visibleToChat"] = true
+		payload["visible_to_chat"] = true
+		if eventKind == "assignment_check_result" {
+			payload["chatBusinessKind"] = "worker_progress"
+		}
+		if eventString(payload, "chatKind", "chat_kind") != "final_delivery" &&
+			eventString(payload, "completionDecision", "completion_decision") != teamCompletionDecisionAccepted {
+			// Legacy display keys can be shared by multiple workers when the
+			// assignment id was absent. Let content-based dedupe handle business
+			// messages instead of suppressing a different worker's narrative.
+			delete(payload, "displayKey")
+			delete(payload, "display_key")
+		}
+		return
+	}
+	if eventString(payload, "chatPolicy", "chat_policy") != "" {
+		return
+	}
 	rootKey := eventString(payload, "rootTaskId", "root_task_id")
 	if rootKey == "" && task != nil {
 		rootKey = fmt.Sprintf("team-%d-task-%d", task.TeamID, task.ID)
 	}
-	assignmentID := eventString(payload, "assignmentId", "assignment_id", "workId", "work_id")
+	assignmentID := teamChatAssignmentIdentity(payload)
 	actor := eventString(payload, "from", "memberId", "member_id")
 	if actor == "" && member != nil {
 		actor = member.MemberKey
@@ -5013,10 +5036,9 @@ func applyTeamChatPolicy(eventType string, payload map[string]interface{}, task 
 		return
 	case eventKind == "assignment_check_result" || normalizedEvent == "assignment_check_result":
 		if teamMonitorEventHasBusinessChange(payload) {
-			payload["chatPolicy"] = "replaceable"
+			payload["chatPolicy"] = "visible"
 			payload["chatBusinessKind"] = "worker_progress"
 			payload["visibleToChat"] = true
-			displayKey = "worker-progress:" + rootKey + ":" + assignmentID
 		} else {
 			payload["chatPolicy"] = "digest"
 			payload["visibleToChat"] = false
@@ -5029,16 +5051,13 @@ func applyTeamChatPolicy(eventType string, payload map[string]interface{}, task 
 	case eventKind == "worker_plan" || normalizedEvent == "worker_plan":
 		payload["chatPolicy"] = "visible"
 		payload["visibleToChat"] = true
-		displayKey = "worker-plan:" + rootKey + ":" + assignmentID
 	case eventKind == "worker_progress" || normalizedEvent == "worker_progress":
-		payload["chatPolicy"] = "replaceable"
+		payload["chatPolicy"] = "visible"
 		payload["visibleToChat"] = true
-		displayKey = "worker-progress:" + rootKey + ":" + assignmentID
 	case eventKind == "artifact_changed" || normalizedEvent == "artifact_changed":
-		payload["chatPolicy"] = "replaceable"
+		payload["chatPolicy"] = "visible"
 		payload["chatBusinessKind"] = "worker_progress"
 		payload["visibleToChat"] = true
-		displayKey = "artifact-change:" + rootKey + ":" + assignmentID
 	case eventBool(payload, "leaderDispatchOnly", "leader_dispatch_only") || normalizedEvent == "team_send" || normalizedEvent == "task_assigned" || normalizedEvent == "outbound":
 		payload["chatPolicy"] = "visible"
 		payload["visibleToChat"] = true
@@ -5061,6 +5080,90 @@ func applyTeamChatPolicy(eventType string, payload map[string]interface{}, task 
 	if displayKey != "" {
 		payload["displayKey"] = displayKey
 	}
+}
+
+func teamChatAssignmentIdentity(payload map[string]interface{}) string {
+	if payload == nil {
+		return ""
+	}
+	if identity := eventString(payload, "assignmentId", "assignment_id", "canonicalWorkId", "canonical_work_id", "workId", "work_id"); identity != "" {
+		return identity
+	}
+	if step, ok := payload["collaborationStep"].(map[string]interface{}); ok {
+		if identity := eventString(step, "assignmentId", "assignment_id", "workId", "work_id", "id"); identity != "" {
+			return identity
+		}
+	}
+	actor := eventString(payload, "from", "memberId", "member_id")
+	phase := eventString(payload, "phaseId", "phase_id", "phase", "stage")
+	if actor != "" || phase != "" {
+		return "member:" + normalizeTeamMemberRouteKey(actor) + ":phase:" + normalizeTeamRedisKeyPart(phase)
+	}
+	return ""
+}
+
+func teamChatEventIsBusinessContent(eventType, eventKind string, payload map[string]interface{}) bool {
+	if payload == nil || teamChatEventIsTransportNoise(eventType, eventKind, payload) {
+		return false
+	}
+	switch eventKind {
+	case "leader_plan", "worker_plan", "worker_progress", "leader_synthesis", "leader_synthesis_reminder", "leader_decision_reminder",
+		"agent_narrative", "agent_plan", "agent_assignment", "agent_handoff", "agent_progress", "agent_delivery", "agent_review", "agent_synthesis",
+		"completion_deferred", "completion_candidate", "completion_validation_warning", "assignment_recovery_started", "assignment_reissued", "assignment_recovery_exhausted":
+		return teamChatHasMeaningfulBody(payload)
+	}
+	if eventBool(payload, "leaderDispatchOnly", "leader_dispatch_only", "assignmentResultOnly", "assignment_result_only") {
+		return teamChatHasMeaningfulBody(payload)
+	}
+	switch eventType {
+	case "outbound", "team_send", "task_assigned", "peer_request", "peer_handoff", "peer_review_request", "peer_reply", "reply", "completion_proposed", "task_completed", "completion", "message_warning":
+		return teamChatHasMeaningfulBody(payload)
+	case "task_progress", "progress":
+		return teamChatHasMeaningfulBody(payload)
+	default:
+		return false
+	}
+}
+
+func teamChatEventIsTransportNoise(eventType, eventKind string, payload map[string]interface{}) bool {
+	if eventType == "member_result_confirmed" || eventType == "inbound" {
+		return true
+	}
+	switch eventKind {
+	case "assignment_heartbeat", "assignment_check_requested":
+		return true
+	case "assignment_check_result":
+		return !teamMonitorEventHasBusinessChange(payload)
+	}
+	switch eventType {
+	case "assignment_heartbeat", "assignment_check_requested", "task_received", "task_started", "presence":
+		return true
+	}
+	return false
+}
+
+func teamChatHasMeaningfulBody(payload map[string]interface{}) bool {
+	if payload == nil {
+		return false
+	}
+	values := []string{
+		eventString(payload, "content", "detail", "resultMarkdown", "result_markdown", "result", "answer", "text", "message", "summary"),
+	}
+	if step, ok := payload["collaborationStep"].(map[string]interface{}); ok {
+		values = append(values, eventString(step, "content", "detail", "resultMarkdown", "result_markdown", "result", "answer", "text", "message", "summary"))
+	}
+	for _, value := range values {
+		normalized := strings.ToLower(strings.TrimSpace(strings.Join(strings.Fields(value), " ")))
+		if normalized == "" {
+			continue
+		}
+		switch normalized {
+		case "task_received", "task_started", "redis team task received", "redis team task started", "redis team task processing completed", "agent turn is still running", "still running", "status unchanged", "no change":
+			continue
+		}
+		return true
+	}
+	return false
 }
 
 func teamMonitorEventHasBusinessChange(payload map[string]interface{}) bool {
@@ -7557,7 +7660,7 @@ func collaborationStepTypeForEvent(eventType string, payload map[string]interfac
 	status := normalizedTeamTaskEventStatus(payload)
 	eventKind := strings.ToLower(strings.TrimSpace(eventString(payload, "eventKind", "event_kind", "kind")))
 	switch eventKind {
-	case "leader_plan", "worker_plan", "worker_progress", "artifact_changed", "assignment_check_requested", "assignment_check_result", "assignment_heartbeat", "leader_synthesis", "leader_synthesis_reminder", "leader_decision_reminder", "completion_deferred", "assignment_recovery_started", "assignment_reissued":
+	case "leader_plan", "worker_plan", "worker_progress", "artifact_changed", "assignment_check_requested", "assignment_check_result", "assignment_heartbeat", "leader_synthesis", "leader_synthesis_reminder", "leader_decision_reminder", "completion_deferred", "assignment_recovery_started", "assignment_reissued", "agent_narrative", "agent_plan", "agent_assignment", "agent_handoff", "agent_progress", "agent_delivery", "agent_review", "agent_synthesis":
 		return "progress"
 	case "completion_candidate":
 		return "progress"
@@ -7580,7 +7683,7 @@ func collaborationStepTypeForEvent(eventType string, payload map[string]interfac
 		return "warning"
 	}
 	switch eventType {
-	case "leader_plan", "worker_plan", "worker_progress", "artifact_changed", "assignment_check_requested", "assignment_check_result", "assignment_heartbeat", "leader_synthesis", "leader_synthesis_reminder", "leader_decision_reminder", "completion_candidate", "completion_deferred", "assignment_recovery_started", "assignment_reissued":
+	case "leader_plan", "worker_plan", "worker_progress", "artifact_changed", "assignment_check_requested", "assignment_check_result", "assignment_heartbeat", "leader_synthesis", "leader_synthesis_reminder", "leader_decision_reminder", "completion_candidate", "completion_deferred", "assignment_recovery_started", "assignment_reissued", "agent_narrative", "agent_plan", "agent_assignment", "agent_handoff", "agent_progress", "agent_delivery", "agent_review", "agent_synthesis":
 		return "progress"
 	case "completion_validation_warning", "completion_needs_confirmation", "completion_rejected", "assignment_recovery_exhausted":
 		return "warning"
@@ -7712,6 +7815,8 @@ func collaborationStepTitle(stepType, actor, target string, payload map[string]i
 		return actor + " heartbeat"
 	case "leader_synthesis":
 		return "Leader synthesizes results"
+	case "agent_narrative", "agent_plan", "agent_assignment", "agent_handoff", "agent_progress", "agent_delivery", "agent_review", "agent_synthesis":
+		return actor + " collaboration update"
 	case "leader_synthesis_reminder":
 		return "Leader final synthesis requested"
 	case "completion_candidate":
@@ -8628,7 +8733,9 @@ func teamEventPayloads(events []models.TeamEvent) []TeamEventPayload {
 		}
 		chatPolicy := strings.ToLower(strings.TrimSpace(eventString(payload.Payload, "chatPolicy", "chat_policy")))
 		hidden, hiddenDefined := teamEventBoolValue(payload.Payload, "visibleToChat", "visible_to_chat")
-		if event.EventType == "member_result_confirmed" || chatPolicy == "hidden" || (hiddenDefined && !hidden && chatPolicy == "") {
+		eventKind := strings.ToLower(strings.TrimSpace(eventString(payload.Payload, "eventKind", "event_kind", "kind")))
+		business := teamChatEventIsBusinessContent(strings.ToLower(strings.TrimSpace(event.EventType)), eventKind, payload.Payload)
+		if event.EventType == "member_result_confirmed" || (!business && (chatPolicy == "hidden" || (hiddenDefined && !hidden && chatPolicy == ""))) {
 			continue
 		}
 		result = append(result, payload)

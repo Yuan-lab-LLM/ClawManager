@@ -2501,7 +2501,7 @@ func TestTeamChatPolicyPreservesMeaningfulCheckProgress(t *testing.T) {
 		"summary": "已完成核心模块，正在进行集成验证。",
 	}
 	applyTeamChatPolicy("task_progress", payload, nil, &models.TeamMember{MemberKey: "developer"})
-	if payload["chatPolicy"] != "replaceable" || payload["visibleToChat"] != true || payload["chatBusinessKind"] != "worker_progress" {
+	if payload["chatPolicy"] != "visible" || payload["visibleToChat"] != true || payload["chatBusinessKind"] != "worker_progress" {
 		t.Fatalf("meaningful check progress must remain visible: %#v", payload)
 	}
 	quiet := map[string]interface{}{
@@ -2511,6 +2511,29 @@ func TestTeamChatPolicyPreservesMeaningfulCheckProgress(t *testing.T) {
 	applyTeamChatPolicy("task_progress", quiet, nil, &models.TeamMember{MemberKey: "developer"})
 	if quiet["chatPolicy"] != "digest" || quiet["visibleToChat"] != false {
 		t.Fatalf("unchanged transport check should be digested: %#v", quiet)
+	}
+}
+
+func TestTeamChatPolicyBusinessNarrativeOverridesLegacyHiddenPolicy(t *testing.T) {
+	payload := map[string]interface{}{
+		"eventKind": "worker_plan", "chatPolicy": "hidden", "visibleToChat": false,
+		"memberId": "developer", "phaseId": "implementation",
+		"text":       "I will implement the calculator UI and report the deliverable to the Leader.",
+		"displayKey": "worker-plan:team-31-task-1:",
+	}
+	applyTeamChatPolicy("task_progress", payload, nil, &models.TeamMember{MemberKey: "developer"})
+	if payload["chatPolicy"] != "visible" || payload["visibleToChat"] != true || eventString(payload, "displayKey") != "" {
+		t.Fatalf("business narrative must override stale hidden policy and empty worker display key: %#v", payload)
+	}
+}
+
+func TestTeamChatPolicyKeepsTransportAcknowledgementHidden(t *testing.T) {
+	payload := map[string]interface{}{
+		"eventKind": "assignment_heartbeat", "summary": "still running", "visibleToChat": true,
+	}
+	applyTeamChatPolicy("assignment_heartbeat", payload, nil, &models.TeamMember{MemberKey: "developer"})
+	if payload["chatPolicy"] != "digest" || payload["visibleToChat"] != false {
+		t.Fatalf("heartbeat without business content must remain digest-only: %#v", payload)
 	}
 }
 
@@ -2536,6 +2559,19 @@ func containsTeamString(values []string, expected string) bool {
 		}
 	}
 	return false
+}
+
+func TestTeamEventPayloadsRestoreLegacyHiddenBusinessNarrative(t *testing.T) {
+	workerPlanJSON := `{"event":"task_progress","eventKind":"worker_plan","chatPolicy":"hidden","visibleToChat":false,"text":"Worker plan: implement the core module and report to Leader."}`
+	transportJSON := `{"event":"task_received","chatPolicy":"hidden","visibleToChat":false,"summary":"task_received"}`
+	events := []models.TeamEvent{
+		{ID: 31, EventType: "task_progress", PayloadJSON: &workerPlanJSON},
+		{ID: 32, EventType: "task_received", PayloadJSON: &transportJSON},
+	}
+	payloads := teamEventPayloads(events)
+	if len(payloads) != 1 || payloads[0].ID != 31 {
+		t.Fatalf("legacy hidden business narrative must be returned while transport acknowledgement stays hidden: %#v", payloads)
+	}
 }
 
 func TestProjectTeamEventAssignmentResultUsesActualMemberLane(t *testing.T) {

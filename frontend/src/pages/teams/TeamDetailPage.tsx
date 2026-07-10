@@ -650,6 +650,17 @@ const collaborationContent = (
     }
   }
   const step = payloadCollaborationStep(payload);
+  const fullBusinessBody = payloadText(step, ["content", "detail", "resultMarkdown", "result", "answer", "text", "message"]);
+  const businessNarrativeKinds = new Set([
+    "leader_plan", "worker_plan", "worker_progress", "leader_synthesis", "leader_synthesis_reminder", "leader_decision_reminder",
+    "agent_narrative", "agent_plan", "agent_assignment", "agent_handoff", "agent_progress", "agent_delivery", "agent_review", "agent_synthesis",
+  ]);
+  if (
+    fullBusinessBody &&
+    (businessNarrativeKinds.has(eventKind) || ["outbound", "team_send", "task_assigned", "peer_handoff", "peer_request", "peer_review_request"].includes(eventType))
+  ) {
+    return fullBusinessBody;
+  }
   const stepSummary = payloadText(step, isTerminalResultEventType(eventType) ? ["content", "detail", "summary"] : ["summary", "detail", "content"]);
   if (stepSummary) {
     return stepSummary;
@@ -2425,15 +2436,17 @@ function InteractionProcessPanel({
               )}
             </div>
           </div>
-          <div className="shrink-0 text-right">
+          <div className="min-w-[150px] max-w-[176px] shrink-0 text-right">
             {leaderLedgerSummary ? (
               <>
-                <div className="max-w-[150px] truncate text-sm font-semibold leading-5">{leaderLedgerSummary.phase}</div>
-                <div className="mt-1 text-[11px] text-slate-500">
+                <div title={leaderLedgerSummary.phase} className="truncate whitespace-nowrap text-sm font-semibold leading-5">
+                  {leaderLedgerSummary.phase}
+                </div>
+                <div title={leaderLedgerSummary.deliveryLabel || `成员交付 ${leaderLedgerSummary.delivered}/${leaderLedgerSummary.total}`} className="mt-1 truncate whitespace-nowrap text-[11px] text-slate-500">
                   {leaderLedgerSummary.deliveryLabel || `成员交付 ${leaderLedgerSummary.delivered}/${leaderLedgerSummary.total}`}
                 </div>
                 {leaderLedgerSummary.artifactLabel && (
-                  <div className="mt-0.5 text-[11px] text-slate-500">
+                  <div title={leaderLedgerSummary.artifactLabel} className="mt-0.5 truncate whitespace-nowrap text-[11px] text-slate-500">
                     {leaderLedgerSummary.artifactLabel}
                   </div>
                 )}
@@ -2562,7 +2575,7 @@ function InteractionProcessPanel({
         ) : (
           <>
         <div className="cm-tech-surface shrink-0 rounded-2xl p-2">
-          <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_92px]">
+          <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(144px,172px)]">
             <div className="min-w-0">
               <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">
                 总任务 Query
@@ -2603,14 +2616,16 @@ function InteractionProcessPanel({
                 )}
               </div>
             </div>
-            <div className="cm-tech-subtle rounded-xl px-2.5 py-2">
-              <div className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-medium ${statusStyle(visualStatus)}`}>
+            <div className="cm-tech-subtle min-w-0 rounded-xl px-3 py-2">
+              <div title={statusText} className={`max-w-full truncate whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] font-medium ${statusStyle(visualStatus)}`}>
                 {statusText}
               </div>
               {leaderLedgerSummary ? (
                 <>
-                  <div className="mt-2 text-[13px] font-semibold leading-5 text-slate-900">{leaderLedgerSummary.phase}</div>
-                  <div className="mt-1 text-[10px] leading-4 text-slate-400">
+                  <div title={leaderLedgerSummary.phase} className="mt-2 truncate whitespace-nowrap text-[13px] font-semibold leading-5 text-slate-900">
+                    {leaderLedgerSummary.phase}
+                  </div>
+                  <div title={`交付 ${leaderLedgerSummary.delivered}/${leaderLedgerSummary.total} · ${leaderLedgerSummary.blockers > 0 ? `${leaderLedgerSummary.blockers} 个阻塞` : "无阻塞"}`} className="mt-1 truncate whitespace-nowrap text-[10px] leading-4 text-slate-400">
                     交付 {leaderLedgerSummary.delivered}/{leaderLedgerSummary.total} · {leaderLedgerSummary.blockers > 0 ? `${leaderLedgerSummary.blockers} 个阻塞` : "无阻塞"}
                   </div>
                 </>
@@ -2996,6 +3011,9 @@ function isProtocolNoiseItem(item: CollaborationItem) {
   const visibleRaw = payloadText(item.payload, ["visibleToChat", "visible_to_chat"]).toLowerCase();
   const explicitlyHidden = ["false", "0", "no", "off"].includes(visibleRaw);
   const chatPolicy = payloadText(item.payload, ["chatPolicy", "chat_policy"]).toLowerCase();
+  if (isBusinessChatItem(item)) {
+    return false;
+  }
   return (
     chatPolicy === "hidden" ||
     (explicitlyHidden && !["visible", "replaceable", "warning"].includes(chatPolicy)) ||
@@ -3008,6 +3026,40 @@ function isProtocolNoiseItem(item: CollaborationItem) {
     normalizedContent === "redis team task processing completed" ||
     normalizedContent === "redis team task failed"
   );
+}
+
+function hasMeaningfulChatBody(item: CollaborationItem) {
+  const body = item.content.trim().toLowerCase().replace(/\s+/g, " ");
+  return Boolean(body) && ![
+    "inbound",
+    "task_received",
+    "task_started",
+    "redis team task received",
+    "redis team task started",
+    "redis team task processing completed",
+    "agent turn is still running",
+    "still running",
+    "status unchanged",
+    "no change",
+  ].includes(body);
+}
+
+function isBusinessChatItem(item: CollaborationItem) {
+  const eventKind = payloadText(item.payload, ["eventKind", "event_kind", "kind"]).toLowerCase();
+  const businessKinds = new Set([
+    "leader_plan", "worker_plan", "worker_progress", "leader_synthesis", "leader_synthesis_reminder", "leader_decision_reminder",
+    "agent_narrative", "agent_plan", "agent_assignment", "agent_handoff", "agent_progress", "agent_delivery", "agent_review", "agent_synthesis",
+    "completion_deferred", "completion_candidate", "completion_validation_warning", "assignment_recovery_started", "assignment_reissued", "assignment_recovery_exhausted",
+  ]);
+  if (businessKinds.has(eventKind)) {
+    return hasMeaningfulChatBody(item);
+  }
+  if (payloadBool(item.payload, ["leaderDispatchOnly", "leader_dispatch_only", "assignmentResultOnly", "assignment_result_only"]) === true) {
+    return hasMeaningfulChatBody(item);
+  }
+  return [
+    "outbound", "team_send", "task_assigned", "peer_request", "peer_handoff", "peer_review_request", "peer_reply", "reply", "completion_proposed", "task_completed", "completion", "message_warning", "task_progress", "progress",
+  ].includes(item.eventType) && hasMeaningfulChatBody(item);
 }
 
 function buildKanbanColumns(
@@ -4725,11 +4777,16 @@ function isTaskDispatchEcho(item: CollaborationItem, task?: TeamTask) {
   if (!rawActor && item.event.member_id) {
     return false;
   }
+  const stepActor = payloadText(item.collaborationStep, ["actor", "from", "sourceMemberId"]).toLowerCase();
+  const stepContent = payloadText(item.collaborationStep, ["content", "detail", "text"]);
+  if (stepContent && stepActor && stepActor !== "clawmanager" && stepActor !== "system") {
+    return false;
+  }
   return item.event.task_id === task.id || itemMessageID(item) === task.message_id;
 }
 
 function isProtocolProgressEcho(item: CollaborationItem) {
-  if (isUserVisibleProcessItem(item)) {
+  if (isUserVisibleProcessItem(item) || isBusinessChatItem(item)) {
     return false;
   }
   return ["task_received", "task_started", "progress", "task_progress"].includes(
@@ -4834,6 +4891,9 @@ function isUserVisibleProcessItem(item: CollaborationItem) {
   if (isAssignmentMonitorDigestItem(item)) {
     return false;
   }
+  if (isBusinessChatItem(item)) {
+    return true;
+  }
   const processKinds = new Set([
     "leader_plan",
     "worker_plan",
@@ -4851,7 +4911,7 @@ function isUserVisibleProcessItem(item: CollaborationItem) {
   if (isAssignmentHeartbeatItem(item)) {
     return false;
   }
-  return explicitlyVisible && Boolean(item.content.trim()) && !isLowValueProtocolContent(item.content);
+  return (explicitlyVisible || !explicitlyHidden) && hasMeaningfulChatBody(item) && !isLowValueProtocolContent(item.content);
 }
 
 function isAssignmentMonitorDigestItem(item: CollaborationItem) {
@@ -5025,9 +5085,11 @@ function chatItemDedupeKey(
   const assignmentId =
     payloadTextDeep(item.payload, ["assignmentId", "assignment_id", "workId", "work_id"]);
   const displayKey = payloadTextDeep(item.payload, ["displayKey", "display_key"]);
-  const chatPolicy = payloadTextDeep(item.payload, ["chatPolicy", "chat_policy"]).toLowerCase();
-  if (displayKey) {
-    return chatPolicy === "replaceable" ? `replaceable:${displayKey}` : displayKey;
+  // Only root-final/completion display keys represent a singleton business
+  // fact. Older worker-plan/progress keys can be shared by different workers
+  // when assignmentId was absent, so content identity must win for them.
+  if (displayKey.startsWith("root-final:") || displayKey.startsWith("completion:")) {
+    return displayKey;
   }
   const contentHash =
     payloadTextDeep(item.payload, ["contentHash", "content_hash"]) ||
@@ -5042,7 +5104,7 @@ function chatItemDedupeKey(
     return `monitor:${item.taskKey}:${senderKey}`;
   }
   if (isAssignmentEvent) {
-    return `assignment:${messageId || assignmentId || taskId}:${senderKey}:${item.to || ""}`;
+    return `assignment:${taskId}:${senderKey}:${item.to || ""}:${assignmentId || messageId}:${contentHash}`;
   }
   if (isFeedbackEvent) {
     // Result IDs are transport/audit identifiers. Chat de-duplication is based
@@ -5052,6 +5114,9 @@ function chatItemDedupeKey(
   }
   if (item.eventType === "task_completed" || item.eventType === "completion" || item.eventType === "reply") {
     return `feedback:${taskId}:${senderKey}:${item.to || ""}:${assignmentId}:${contentHash || resultScope || chatContentHash(contentKey)}`;
+  }
+  if (isBusinessChatItem(item)) {
+    return `narrative:${taskId}:${senderKey}:${item.to || ""}:${assignmentId}:${eventKind}:${contentHash}`;
   }
   return "";
 }
