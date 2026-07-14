@@ -2,8 +2,8 @@
 
 export const DEFAULT_LOCALE: Locale = "en";
 
-interface TranslationTree {
-  [key: string]: string | TranslationTree;
+export interface TranslationTree {
+  [key: string]: string | TranslationTree | string[];
 }
 
 export const localeOptions: Array<{ value: Locale; label: string }> = [
@@ -15,11 +15,11 @@ export const localeOptions: Array<{ value: Locale; label: string }> = [
 ];
 
 const adminLayoutTranslations: Record<Locale, TranslationTree> = {
-  en: { admin: "Admin", navigation: "Navigation" },
-  zh: { admin: "管理后台", navigation: "导航" },
-  ja: { admin: "管理", navigation: "ナビゲーション" },
-  ko: { admin: "관리", navigation: "탐색" },
-  de: { admin: "Admin", navigation: "Navigation" },
+  en: { admin: "Admin", navigation: "Navigation", adminWorkspace: "Admin Workspace", protectionCats: "7 Categories", planned: "Planned", sceneCount: "{count} Scenarios" },
+  zh: { admin: "管理后台", navigation: "导航", adminWorkspace: "管理工作区", protectionCats: "7 大类别", planned: "规划中", sceneCount: "{count} 场景" },
+  ja: { admin: "管理", navigation: "ナビゲーション", adminWorkspace: "管理ワークスペース", protectionCats: "7 カテゴリ", planned: "計画中", sceneCount: "{count} シナリオ" },
+  ko: { admin: "관리", navigation: "탐색", adminWorkspace: "관리 워크스페이스", protectionCats: "7 카테고리", planned: "계획 중", sceneCount: "{count} 시나리오" },
+  de: { admin: "Admin", navigation: "Navigation", adminWorkspace: "Admin-Arbeitsbereich", protectionCats: "7 Kategorien", planned: "Geplant", sceneCount: "{count} Szenarien" },
 };
 
 const securityCenterTranslations: Record<Locale, TranslationTree> = {
@@ -998,6 +998,8 @@ const securityCenterTranslations: Record<Locale, TranslationTree> = {
   },
 };
 
+import { secplaneTranslations } from './secplane';
+
 export const translations: Record<Locale, TranslationTree> = {
   en: {
     app: {
@@ -1062,9 +1064,11 @@ export const translations: Record<Locale, TranslationTree> = {
       backToUserDashboard: "Workspace",
       securityCenter: "Security Center",
       adminPanel: "Admin Panel",
+      secplane: "Security Protection",
     },
     adminLayout: adminLayoutTranslations.en,
     securityCenter: securityCenterTranslations.en,
+    secplane: secplaneTranslations.en,
     auth: {
       signInTitle: "Sign in to ClawManager",
       subtitle: "Virtual Desktop Management Platform",
@@ -2422,9 +2426,11 @@ export const translations: Record<Locale, TranslationTree> = {
       backToUserDashboard: "工作台",
       securityCenter: "安全中心",
       adminPanel: "管理后台",
+      secplane: "安全防护",
     },
     adminLayout: adminLayoutTranslations.zh,
     securityCenter: securityCenterTranslations.zh,
+    secplane: secplaneTranslations.zh,
     auth: {
       signInTitle: "登录 ClawManager",
       subtitle: "虚拟桌面管理平台",
@@ -3704,9 +3710,11 @@ export const translations: Record<Locale, TranslationTree> = {
       backToUserDashboard: "ワークスペース",
       securityCenter: "セキュリティセンター",
       adminPanel: "管理パネル",
+      secplane: "セキュリティ保護",
     },
     adminLayout: adminLayoutTranslations.ja,
     securityCenter: securityCenterTranslations.ja,
+    secplane: secplaneTranslations.ja,
     auth: {
       signInTitle: "ClawManager にサインイン",
       subtitle: "仮想デスクトップ管理プラットフォーム",
@@ -5004,9 +5012,11 @@ export const translations: Record<Locale, TranslationTree> = {
       backToUserDashboard: "워크스페이스",
       securityCenter: "보안 센터",
       adminPanel: "관리 패널",
+      secplane: "보안 방어",
     },
     adminLayout: adminLayoutTranslations.ko,
     securityCenter: securityCenterTranslations.ko,
+    secplane: secplaneTranslations.ko,
     auth: {
       signInTitle: "ClawManager 로그인",
       subtitle: "가상 데스크톱 관리 플랫폼",
@@ -6285,9 +6295,11 @@ export const translations: Record<Locale, TranslationTree> = {
       backToUserDashboard: "Arbeitsbereich",
       securityCenter: "Sicherheitszentrum",
       adminPanel: "Admin-Bereich",
+      secplane: "Sicherheitsschutz",
     },
     adminLayout: adminLayoutTranslations.de,
     securityCenter: securityCenterTranslations.de,
+    secplane: secplaneTranslations.de,
     auth: {
       signInTitle: "Bei ClawManager anmelden",
       subtitle: "Plattform zur Verwaltung virtueller Desktops",
@@ -7543,10 +7555,10 @@ export const translations: Record<Locale, TranslationTree> = {
 
 export function translate(locale: Locale, key: string): string | undefined {
   const segments = key.split(".");
-  let current: string | TranslationTree | undefined = translations[locale];
+  let current: string | TranslationTree | string[] | undefined = translations[locale];
 
   for (const segment of segments) {
-    if (!current || typeof current === "string") {
+    if (!current || typeof current === "string" || Array.isArray(current)) {
       return undefined;
     }
     current = current[segment];

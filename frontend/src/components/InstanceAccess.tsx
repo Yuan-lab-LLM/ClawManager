@@ -100,10 +100,11 @@ function DesktopInstanceAccess({
       return new URL(url, explicitOrigin).toString();
     }
 
-    if (window.location.port === "9002" && url.startsWith("/api/")) {
-      return `${window.location.protocol}//${window.location.hostname}:9001${url}`;
-    }
-
+    // Keep relative /api/* URLs alone — Vite's dev proxy (vite.config.ts)
+    // forwards them to the in-cluster ClawManager backend. The legacy branch
+    // that rewrote port 9002 -> 9001 only applied when the backend ran
+    // directly on the host on 9001; with the in-cluster deployment that
+    // would point at nothing.
     return url;
   }, []);
 

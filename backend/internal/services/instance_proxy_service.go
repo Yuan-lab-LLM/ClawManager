@@ -144,9 +144,11 @@ func (s *InstanceProxyService) ProxyRequest(ctx context.Context, instanceID int,
 		return err
 	}
 
-	// Copy query parameters (excluding token)
+	managedGatewayToken := s.managedRuntimeGatewayBearerToken(ctx, instanceID, accessToken.InstanceType)
+
+	// Copy query parameters, excluding ClawManager-owned proxy/gateway tokens.
 	queryParams := r.URL.Query()
-	removeProxyAccessTokenQuery(queryParams, token)
+	s.removeProxyAccessTokenQuery(queryParams, token, managedGatewayToken)
 	if len(queryParams) > 0 {
 		targetURL.RawQuery = queryParams.Encode()
 	}
@@ -172,9 +174,7 @@ func (s *InstanceProxyService) ProxyRequest(ctx context.Context, instanceID int,
 	proxyReq.Header.Set("X-Forwarded-Host", r.Host)
 	proxyReq.Header.Set("X-Forwarded-Proto", requestScheme(r))
 	proxyReq.Header.Set("X-Forwarded-Prefix", fmt.Sprintf("/api/v1/instances/%d/proxy", instanceID))
-	if token := s.managedRuntimeGatewayBearerToken(ctx, instanceID, accessToken.InstanceType); token != "" {
-		proxyReq.Header.Set("Authorization", "Bearer "+token)
-	}
+	setManagedRuntimeGatewayAuthHeaders(proxyReq.Header, managedGatewayToken)
 	if shouldRewriteHTML {
 		proxyReq.Header.Del("Accept-Encoding")
 	}
@@ -270,9 +270,11 @@ func (s *InstanceProxyService) ProxyWebSocket(ctx context.Context, instanceID in
 		return err
 	}
 
-	// Copy query parameters (excluding token)
+	managedGatewayToken := s.managedRuntimeGatewayBearerToken(ctx, instanceID, accessToken.InstanceType)
+
+	// Copy query parameters, excluding ClawManager-owned proxy/gateway tokens.
 	queryParams := r.URL.Query()
-	removeProxyAccessTokenQuery(queryParams, token)
+	s.removeProxyAccessTokenQuery(queryParams, token, managedGatewayToken)
 	if len(queryParams) > 0 {
 		targetURL.RawQuery = queryParams.Encode()
 	}
@@ -293,8 +295,8 @@ func (s *InstanceProxyService) ProxyWebSocket(ctx context.Context, instanceID in
 	upstreamHeader.Set("X-Forwarded-Host", r.Host)
 	upstreamHeader.Set("X-Forwarded-Proto", requestScheme(r))
 	upstreamHeader.Set("X-Forwarded-Prefix", fmt.Sprintf("/api/v1/instances/%d/proxy", instanceID))
-	if token := s.managedRuntimeGatewayBearerToken(ctx, instanceID, accessToken.InstanceType); token != "" {
-		upstreamHeader.Set("Authorization", "Bearer "+token)
+	setManagedRuntimeGatewayAuthHeaders(upstreamHeader, managedGatewayToken)
+	if managedGatewayToken != "" {
 		upstreamHeader.Set("Origin", s.openClawWebSocketOrigin(targetURL))
 	}
 
@@ -389,6 +391,18 @@ func (s *InstanceProxyService) removeHopByHopHeaders(header http.Header) {
 	}
 }
 
+func setManagedRuntimeGatewayAuthHeaders(header http.Header, token string) {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return
+	}
+	header.Set("Authorization", "Bearer "+token)
+	header.Set("X-Api-Key", token)
+	header.Set("X-OpenAI-Api-Key", token)
+	header.Set("OpenAI-Api-Key", token)
+	header.Set("X-ClawManager-Instance-Token", token)
+	header.Set("X-ClawManager-LLM-API-Key", token)
+}
 func (s *InstanceProxyService) managedRuntimeGatewayBearerToken(ctx context.Context, instanceID int, instanceType string) string {
 	if s == nil || s.instanceRepo == nil {
 		return ""
@@ -838,14 +852,14 @@ func proxyURLWithPath(instanceID int, targetPath, token string) string {
 	return fmt.Sprintf("%s?token=%s", raw, url.QueryEscape(token))
 }
 
-func removeProxyAccessTokenQuery(query url.Values, accessToken string) {
+func (s *InstanceProxyService) removeProxyAccessTokenQuery(query url.Values, accessToken, managedGatewayToken string) {
 	values := query["token"]
 	if len(values) == 0 {
 		return
 	}
 	filtered := values[:0]
 	for _, value := range values {
-		if value != accessToken {
+		if !s.shouldRemoveProxyTokenQueryValue(value, accessToken, managedGatewayToken) {
 			filtered = append(filtered, value)
 		}
 	}
@@ -856,6 +870,23 @@ func removeProxyAccessTokenQuery(query url.Values, accessToken string) {
 	query["token"] = filtered
 }
 
+func (s *InstanceProxyService) shouldRemoveProxyTokenQueryValue(value, accessToken, managedGatewayToken string) bool {
+	candidate := strings.TrimSpace(value)
+	if candidate == "" {
+		return false
+	}
+	if candidate == accessToken || (managedGatewayToken != "" && candidate == managedGatewayToken) {
+		return true
+	}
+	if s != nil && s.accessService != nil && s.accessService.IsInstanceAccessToken(candidate) {
+		return true
+	}
+	return managedGatewayToken != "" && looksLikeManagedInstanceGatewayToken(candidate)
+}
+
+func looksLikeManagedInstanceGatewayToken(value string) bool {
+	return strings.HasPrefix(strings.TrimSpace(value), "igt_")
+}
 func proxyBaseForRequestPath(requestPath string, instanceID int) string {
 	prefix := fmt.Sprintf("/api/v1/instances/%d/proxy", instanceID)
 	path := strings.TrimSpace(requestPath)

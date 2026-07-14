@@ -36,6 +36,19 @@ func TestRuntimeLinuxID(t *testing.T) {
 	}
 }
 
+func TestRuntimeGatewayPortRangeMatchesInstanceCapacity(t *testing.T) {
+	if got, want := RuntimeGatewayPortsPerInstance, 3; got != want {
+		t.Fatalf("expected %d ports per gateway instance, got %d", want, got)
+	}
+	wantEnd := RuntimeGatewayPortStart + RuntimePodCapacity*RuntimeGatewayPortsPerInstance - 1
+	if RuntimeGatewayPortEnd != wantEnd {
+		t.Fatalf("gateway port end = %d, want %d", RuntimeGatewayPortEnd, wantEnd)
+	}
+	if got := (RuntimeGatewayPortEnd - RuntimeGatewayPortStart + 1) / RuntimeGatewayPortsPerInstance; got != RuntimePodCapacity {
+		t.Fatalf("gateway port range supports %d instances, want %d", got, RuntimePodCapacity)
+	}
+}
+
 func TestInstanceModeRuntimeTypeMapping(t *testing.T) {
 	if got, ok := RuntimeTypeForInstanceMode(" lite "); !ok || got != RuntimeBackendGateway {
 		t.Fatalf("lite runtime type = %q/%v, want gateway/true", got, ok)

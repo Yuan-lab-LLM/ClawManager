@@ -37,7 +37,7 @@ func TestRuntimeAgentClientCreateGateway(t *testing.T) {
 		UserID:        8,
 		AgentType:     "openclaw",
 		WorkspacePath: "/workspaces/openclaw/user-8/instance-7",
-		PortRange:     RuntimeAgentPortRange{Start: 20000, End: 20099},
+		PortRange:     RuntimeAgentPortRange{Start: RuntimeGatewayPortStart, End: RuntimeGatewayPortEnd},
 		UID:           200007,
 		GID:           200007,
 		CPUCores:      2,

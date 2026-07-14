@@ -53,6 +53,21 @@ func TestBuildV2SchedulerInstanceQueryDefaultsLimit(t *testing.T) {
 	}
 }
 
+func TestGatewayTokenHashTrimsAndDoesNotExposeToken(t *testing.T) {
+	hash := gatewayTokenHash(" igt_secret ")
+	if len(hash) != 64 {
+		t.Fatalf("hash length = %d, want 64", len(hash))
+	}
+	if strings.Contains(hash, "igt_secret") {
+		t.Fatalf("hash must not contain raw token")
+	}
+	if hash != gatewayTokenHash("igt_secret") {
+		t.Fatalf("hash should trim surrounding whitespace")
+	}
+	if hash == gatewayTokenHash("igt_other") {
+		t.Fatalf("different tokens should produce different hashes")
+	}
+}
 func normalizeSQLForTest(query string) string {
 	return strings.Join(strings.Fields(query), " ")
 }

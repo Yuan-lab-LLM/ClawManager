@@ -541,7 +541,6 @@ const InstanceListPage: React.FC = () => {
                   <input
                     type="number"
                     min={1}
-                    max={20}
                     value={batchCreateCount}
                     onChange={(event) => setBatchCreateCount(Number(event.target.value))}
                     className="app-input mt-1 w-full"

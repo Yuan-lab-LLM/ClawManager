@@ -37,24 +37,39 @@ func TestBuildRuntimeConfig_HermesUsesWebtopDefaults(t *testing.T) {
 	if config.Env["SUBFOLDER"] != "/" {
 		t.Fatalf("expected Hermes default SUBFOLDER /, got %q", config.Env["SUBFOLDER"])
 	}
-	if config.Env["KASM_SVC_SEND_CUT_TEXT"] != kasmClipboardSendDisabled {
-		t.Fatalf("expected Hermes to disable outbound clipboard sync, got %q", config.Env["KASM_SVC_SEND_CUT_TEXT"])
+	if config.Env["KASM_SVC_SEND_CUT_TEXT"] != kasmClipboardSendEnabled {
+		t.Fatalf("expected Hermes to enable outbound clipboard sync, got %q", config.Env["KASM_SVC_SEND_CUT_TEXT"])
 	}
-	if config.Env["KASM_SVC_ACCEPT_CUT_TEXT"] != kasmClipboardAcceptDisabled {
-		t.Fatalf("expected Hermes to disable inbound clipboard sync, got %q", config.Env["KASM_SVC_ACCEPT_CUT_TEXT"])
+	if config.Env["KASM_SVC_ACCEPT_CUT_TEXT"] != kasmClipboardAcceptEnabled {
+		t.Fatalf("expected Hermes to enable inbound clipboard sync, got %q", config.Env["KASM_SVC_ACCEPT_CUT_TEXT"])
 	}
+	assertSelkiesClipboardEnabled(t, config.Env)
 	if !usesWebtopImage("hermes") {
 		t.Fatalf("expected Hermes to use webtop proxy behavior")
 	}
 }
 
-func TestBuildRuntimeConfig_OpenClawDisablesKasmClipboardSync(t *testing.T) {
+func TestBuildRuntimeConfig_OpenClawEnablesDesktopClipboardSync(t *testing.T) {
 	config := buildRuntimeConfig("openclaw", "openclaw", "latest", nil, nil)
 
-	if config.Env["KASM_SVC_SEND_CUT_TEXT"] != kasmClipboardSendDisabled {
-		t.Fatalf("expected OpenClaw to disable outbound clipboard sync, got %q", config.Env["KASM_SVC_SEND_CUT_TEXT"])
+	if config.Env["KASM_SVC_SEND_CUT_TEXT"] != kasmClipboardSendEnabled {
+		t.Fatalf("expected OpenClaw to enable outbound clipboard sync, got %q", config.Env["KASM_SVC_SEND_CUT_TEXT"])
 	}
-	if config.Env["KASM_SVC_ACCEPT_CUT_TEXT"] != kasmClipboardAcceptDisabled {
-		t.Fatalf("expected OpenClaw to disable inbound clipboard sync, got %q", config.Env["KASM_SVC_ACCEPT_CUT_TEXT"])
+	if config.Env["KASM_SVC_ACCEPT_CUT_TEXT"] != kasmClipboardAcceptEnabled {
+		t.Fatalf("expected OpenClaw to enable inbound clipboard sync, got %q", config.Env["KASM_SVC_ACCEPT_CUT_TEXT"])
+	}
+	assertSelkiesClipboardEnabled(t, config.Env)
+}
+
+func assertSelkiesClipboardEnabled(t *testing.T, env map[string]string) {
+	t.Helper()
+	for _, key := range []string{
+		"SELKIES_CLIPBOARD_ENABLED",
+		"SELKIES_CLIPBOARD_IN_ENABLED",
+		"SELKIES_CLIPBOARD_OUT_ENABLED",
+	} {
+		if got := env[key]; got != selkiesClipboardEnabled {
+			t.Fatalf("expected %s=%q, got %q", key, selkiesClipboardEnabled, got)
+		}
 	}
 }

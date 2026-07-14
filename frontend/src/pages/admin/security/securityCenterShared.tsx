@@ -109,6 +109,13 @@ export function SecurityCenterShell({
   return (
     <AdminLayout title={t('securityCenter.title')}>
       <div className="space-y-6">
+        <div className="crumb">
+          <Link to="/admin/secplane">{t('nav.secplane')}</Link>
+          <span>/</span>
+          <Link to="/admin/secplane/cat-trust">{t('secplane.protection.category.trust')}</Link>
+          <span>/</span>
+          <span className="crumb-current">{t('secplane.protection.category.scenarioSK')}</span>
+        </div>
         <section className="grid grid-cols-1 gap-6 xl:grid-cols-[176px_minmax(0,1fr)]">
           <div className="xl:sticky xl:top-6 xl:self-start">
             <div className="rounded-[24px] border border-[#eadfd8] bg-[linear-gradient(180deg,#fffaf7_0%,#ffffff_100%)] p-3 shadow-[0_18px_44px_-36px_rgba(72,44,24,0.35)]">

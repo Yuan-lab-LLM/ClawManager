@@ -26,6 +26,26 @@ import SystemSettingsPage from '../pages/admin/SystemSettingsPage';
 import RuntimePodsPage from '../pages/admin/RuntimePodsPage';
 import UserSettingsPage from '../pages/settings/UserSettingsPage';
 import OpenClawConfigCenterPage from '../pages/openclaw/OpenClawConfigCenterPage';
+import SecplaneInputDetectionPage from '../pages/admin/secplane/InputDetectionPage';
+import SecplaneSecureClawPage from '../pages/admin/secplane/SecureClawPage';
+import SecurityProtectionPage from '../pages/admin/secplane/SecurityProtectionPage';
+import SecurityEventsPage from '../pages/admin/secplane/SecurityEventsPage';
+import RuntimeSecurityCategoryPage from '../pages/admin/secplane/runtime/RuntimeSecurityCategoryPage';
+import InputSurfacePage from '../pages/admin/secplane/runtime/InputSurfacePage';
+import StateSurfacePage from '../pages/admin/secplane/runtime/StateSurfacePage';
+import DecisionSurfacePage from '../pages/admin/secplane/runtime/DecisionSurfacePage';
+import OutputSurfacePage from '../pages/admin/secplane/runtime/OutputSurfacePage';
+import AssetProtectionPage from '../pages/admin/secplane/runtime/AssetProtectionPage';
+import CategoryPage from '../pages/admin/protection/CategoryPage';
+import AuditPage from '../pages/admin/protection/scenarios/AuditPage';
+import ApprovalPage from '../pages/admin/protection/scenarios/ApprovalPage';
+import OutboundPage from '../pages/admin/protection/scenarios/OutboundPage';
+import ContainerPage from '../pages/admin/protection/scenarios/ContainerPage';
+import PolicyPage from '../pages/admin/protection/scenarios/PolicyPage';
+import BreakerPage from '../pages/admin/protection/scenarios/BreakerPage';
+import HostHardeningPage from '../pages/admin/protection/scenarios/HostHardeningPage';
+import CollaborationGovernancePage from '../pages/admin/protection/scenarios/CollaborationGovernancePage';
+import CollaborationQuotaPage from '../pages/admin/protection/scenarios/CollaborationQuotaPage';
 
 // Instance Pages
 import InstanceListPage from '../pages/instances/InstanceListPage';
@@ -325,6 +345,107 @@ function AppRoutes() {
           </AdminRoute>
         }
       />
+
+      {/* Secplane (Security Protection Platform) Routes */}
+      <Route
+        path="/admin/secplane/input-detection"
+        element={
+          <AdminRoute>
+            <SecplaneInputDetectionPage />
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/admin/secplane/secureclaw"
+        element={
+          <AdminRoute>
+            <SecplaneSecureClawPage />
+          </AdminRoute>
+        }
+      />
+      {/* New runtime-security pages (prototype-aligned). Default secplane
+          landing is now the protection overview hub. Legacy input-detection
+          and secureclaw routes remain reachable from the sidebar nav. */}
+      <Route
+        path="/admin/secplane"
+        element={
+          <AdminRoute>
+            <SecurityProtectionPage />
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/admin/secplane/events"
+        element={
+          <AdminRoute>
+            <SecurityEventsPage />
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/admin/secplane/runtime"
+        element={
+          <AdminRoute>
+            <RuntimeSecurityCategoryPage />
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/admin/secplane/runtime/input"
+        element={
+          <AdminRoute>
+            <InputSurfacePage />
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/admin/secplane/runtime/state"
+        element={
+          <AdminRoute>
+            <StateSurfacePage />
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/admin/secplane/runtime/decision"
+        element={
+          <AdminRoute>
+            <DecisionSurfacePage />
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/admin/secplane/runtime/output"
+        element={
+          <AdminRoute>
+            <OutputSurfacePage />
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/admin/secplane/runtime/asset"
+        element={
+          <AdminRoute>
+            <AssetProtectionPage />
+          </AdminRoute>
+        }
+      />
+      {/* === KSecForAIDemo 原型对齐：6 个新类目入口（cat-2~7）+ 8 个新 scenario 占位 === */}
+      <Route path="/admin/secplane/cat-trust" element={<AdminRoute><CategoryPage catId="cat-4" /></AdminRoute>} />
+      <Route path="/admin/secplane/cat-identity" element={<AdminRoute><CategoryPage catId="cat-2" /></AdminRoute>} />
+      <Route path="/admin/secplane/cat-isolate" element={<AdminRoute><CategoryPage catId="cat-6" /></AdminRoute>} />
+      <Route path="/admin/secplane/cat-govern" element={<AdminRoute><CategoryPage catId="cat-5" /></AdminRoute>} />
+      <Route path="/admin/secplane/cat-policy" element={<AdminRoute><CategoryPage catId="cat-7" /></AdminRoute>} />
+      <Route path="/admin/secplane/cat-comm" element={<AdminRoute><CategoryPage catId="cat-3" /></AdminRoute>} />
+      <Route path="/admin/secplane/runtime/approval" element={<AdminRoute><ApprovalPage /></AdminRoute>} />
+      <Route path="/admin/secplane/trust/outbound" element={<AdminRoute><OutboundPage /></AdminRoute>} />
+      <Route path="/admin/secplane/govern/breaker" element={<AdminRoute><BreakerPage /></AdminRoute>} />
+      <Route path="/admin/secplane/govern/audit" element={<AdminRoute><AuditPage /></AdminRoute>} />
+      <Route path="/admin/secplane/isolate/container" element={<AdminRoute><ContainerPage /></AdminRoute>} />
+      <Route path="/admin/secplane/isolate/host" element={<AdminRoute><HostHardeningPage /></AdminRoute>} />
+      <Route path="/admin/secplane/policy/governance" element={<AdminRoute><PolicyPage /></AdminRoute>} />
+      <Route path="/admin/secplane/comm/governance" element={<AdminRoute><CollaborationGovernancePage /></AdminRoute>} />
+      <Route path="/admin/secplane/comm/quota" element={<AdminRoute><CollaborationQuotaPage /></AdminRoute>} />
       <Route
         path="/admin/models"
         element={

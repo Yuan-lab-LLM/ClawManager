@@ -58,6 +58,7 @@
 
 这里展示最近的重要产品与文档更新。
 
+- [2026-07-07] 新增安全防护平台（secplane）前端控制台——覆盖运行时防御（输入面/状态面/决策面/输出面、资产防篡改、人因审批）、主机加固与容器隔离、出站可信端点治理、策略治理、应急熔断、全链路审计、SecureClaw 数据与组件可信审计、协同接入治理及输入检测，4 层防护统一管理界面，5 语言 i18n 完整支持。
 - [2026-06-14] 新增 Lite / Pro 运行时模式与滚动升级支持，Lite 实例可通过共享 gateway 运行时池运行，Pro 实例保留专属 desktop deployment 以获得更强隔离。
 - [2026-05-18] 新增 Team 工作空间 MVP 介绍与界面预览，覆盖一键创建 Team、OpenClaw 成员编排、Redis Team Bus 配置注入、共享存储、成员状态、任务派发，以及事件和结果查看。
 - [2026-04-29] 新增 Hermes Runtime 接入支持，覆盖基于 Webtop 的实例创建、Agent Control Plane 注册、AI Gateway 注入、channel 与 skill 引导注入，以及 `.hermes` 导入导出流程。见 [Hermes Runtime Guide](./docs/hermes-runtime-agent-development.md)。

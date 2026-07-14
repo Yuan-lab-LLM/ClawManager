@@ -122,10 +122,9 @@ const InstancePortalPage: React.FC = () => {
       return new URL(url, explicitOrigin).toString();
     }
 
-    if (window.location.port === "9002" && url.startsWith("/api/")) {
-      return `${window.location.protocol}//${window.location.hostname}:9001${url}`;
-    }
-
+    // Keep relative /api/* URLs alone — Vite's dev proxy (vite.config.ts)
+    // forwards them to the in-cluster ClawManager backend. The legacy 9002
+    // -> 9001 rewrite only applied when the backend ran directly on the host.
     return url;
   }, []);
 

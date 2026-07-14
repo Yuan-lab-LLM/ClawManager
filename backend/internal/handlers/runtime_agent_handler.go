@@ -272,7 +272,9 @@ func (h *RuntimeAgentHandler) ReportGateways(c *gin.Context) {
 	if !ok {
 		return
 	}
+	reported := make(map[int]int, len(req.Gateways))
 	for _, gateway := range req.Gateways {
+		reported[gateway.InstanceID] = gateway.Generation
 		binding, err := h.bindingRepo.GetByInstanceID(c.Request.Context(), gateway.InstanceID)
 		if err != nil {
 			utils.HandleError(c, err)
@@ -281,20 +283,37 @@ func (h *RuntimeAgentHandler) ReportGateways(c *gin.Context) {
 		if binding == nil || binding.RuntimePodID != podID || binding.Generation != gateway.Generation {
 			continue
 		}
-		state := strings.ToLower(strings.TrimSpace(gateway.State))
-		switch state {
-		case "running", "ready", "healthy":
+		lifecycle := services.NormalizeRuntimeGatewayLifecycle(gateway.State, gateway.ErrorMessage)
+		if lifecycle.Running {
 			if err := h.bindingRepo.UpdateRunning(c.Request.Context(), gateway.InstanceID, gateway.Generation, strings.TrimSpace(gateway.GatewayID), gateway.GatewayPort, gateway.GatewayPID); err != nil {
 				utils.HandleError(c, err)
 				return
 			}
-		default:
-			if err := h.bindingRepo.UpdateState(c.Request.Context(), gateway.InstanceID, gateway.Generation, state, gateway.ErrorMessage); err != nil {
+		} else {
+			if err := h.bindingRepo.UpdateState(c.Request.Context(), gateway.InstanceID, gateway.Generation, lifecycle.BindingState, lifecycle.Message); err != nil {
 				utils.HandleError(c, err)
 				return
 			}
 		}
-		if err := h.syncInstanceRuntimeState(c.Request.Context(), gateway, state); err != nil {
+		if err := h.syncInstanceRuntimeState(c.Request.Context(), gateway, lifecycle); err != nil {
+			utils.HandleError(c, err)
+			return
+		}
+	}
+	bindings, err := h.bindingRepo.ListByRuntimePodID(c.Request.Context(), podID)
+	if err != nil {
+		utils.HandleError(c, err)
+		return
+	}
+	now := time.Now().UTC()
+	for _, binding := range bindings {
+		if _, reportedByInstance := reported[binding.InstanceID]; reportedByInstance {
+			continue
+		}
+		if !h.missingGatewayCleanupEligible(binding, now) {
+			continue
+		}
+		if _, err := h.bindingRepo.DeleteRunningByInstanceIDGenerationAndReleaseSlot(c.Request.Context(), binding.InstanceID, podID, binding.Generation); err != nil {
 			utils.HandleError(c, err)
 			return
 		}
@@ -306,35 +325,21 @@ func (h *RuntimeAgentHandler) ReportGateways(c *gin.Context) {
 	utils.Success(c, http.StatusOK, "Runtime gateway report accepted", nil)
 }
 
-func (h *RuntimeAgentHandler) syncInstanceRuntimeState(ctx context.Context, gateway runtimeAgentGatewayReport, state string) error {
+func (h *RuntimeAgentHandler) missingGatewayCleanupEligible(binding models.InstanceRuntimeBinding, now time.Time) bool {
+	if h == nil || h.cfg.HeartbeatTimeout <= 0 || binding.LastHealthAt == nil {
+		return false
+	}
+	if !strings.EqualFold(strings.TrimSpace(binding.State), services.RuntimeGatewayBindingRunning) {
+		return false
+	}
+	return !binding.LastHealthAt.After(now.Add(-h.cfg.HeartbeatTimeout))
+}
+
+func (h *RuntimeAgentHandler) syncInstanceRuntimeState(ctx context.Context, gateway runtimeAgentGatewayReport, lifecycle services.RuntimeGatewayLifecycleState) error {
 	if h.instanceRepo == nil {
 		return nil
 	}
-	instanceState, message := instanceRuntimeStateFromGatewayReport(state, gateway.ErrorMessage)
-	return h.instanceRepo.UpdateRuntimeState(ctx, gateway.InstanceID, instanceState, gateway.Generation, message)
-}
-
-func instanceRuntimeStateFromGatewayReport(state string, errorMessage *string) (string, *string) {
-	normalized := strings.ToLower(strings.TrimSpace(state))
-	switch normalized {
-	case "running", "ready", "healthy":
-		return "running", nil
-	case "error", "failed", "failure", "errored":
-		if errorMessage != nil && strings.TrimSpace(*errorMessage) != "" {
-			msg := strings.TrimSpace(*errorMessage)
-			return "error", &msg
-		}
-		msg := "runtime gateway reported " + normalized
-		return "error", &msg
-	case "stopped", "deleted":
-		return "stopped", nil
-	default:
-		msg := "runtime gateway starting"
-		if errorMessage != nil && strings.TrimSpace(*errorMessage) != "" {
-			msg = strings.TrimSpace(*errorMessage)
-		}
-		return "creating", &msg
-	}
+	return h.instanceRepo.UpdateRuntimeState(ctx, gateway.InstanceID, lifecycle.InstanceState, gateway.Generation, lifecycle.Message)
 }
 
 func (h *RuntimeAgentHandler) ReportSkills(c *gin.Context) {

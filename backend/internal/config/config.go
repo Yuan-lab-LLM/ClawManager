@@ -286,7 +286,7 @@ func Load() (*Config, error) {
 			HermesImage:           getEnv("HERMES_RUNTIME_IMAGE", "ghcr.io/yuan-lab-llm/agentsruntime/hermes-lite:latest"),
 			MaxGatewaysPerPod:     getEnvInt("RUNTIME_MAX_GATEWAYS_PER_POD", 100),
 			GatewayPortStart:      getEnvInt("RUNTIME_GATEWAY_PORT_START", 20000),
-			GatewayPortEnd:        getEnvInt("RUNTIME_GATEWAY_PORT_END", 20099),
+			GatewayPortEnd:        getEnvInt("RUNTIME_GATEWAY_PORT_END", 20299),
 		},
 		ObjectStorage: ObjectStorageConfig{
 			Endpoint:       getEnv("OBJECT_STORAGE_ENDPOINT", ""),

@@ -65,7 +65,7 @@ backend replicas: 3
 openclaw runtime replicas: 1
 hermes runtime replicas: 1
 gateways per runtime pod: 100
-gateway port range per pod: 20000-20099
+gateway port range per pod: 20000-20299
 scheduler lease renew: 2s
 scheduler failover: 6-8s
 agent heartbeat interval: 2s
@@ -337,7 +337,7 @@ Reporting expands from one instance to Pod plus many gateways:
   "pod_ip": "10.42.1.83",
   "capacity": 100,
   "used": 37,
-  "port_range": { "start": 20000, "end": 20099 },
+  "port_range": { "start": 20000, "end": 20299 },
   "version": "openclaw:2.1.0",
   "gateways": [
     {
@@ -386,7 +386,7 @@ Create gateway request:
   "user_id": 7,
   "agent_type": "openclaw",
   "workspace_path": "/workspaces/openclaw/user-7/instance-42",
-  "port_range": { "start": 20000, "end": 20099 },
+  "port_range": { "start": 20000, "end": 20299 },
   "env": {
     "CLAWMANAGER_INSTANCE_ID": "42",
     "CLAWMANAGER_LLM_BASE_URL": "http://clawmanager-gateway.clawmanager-system.svc.cluster.local:9001/api/v1/gateway/llm"
@@ -413,7 +413,7 @@ Create gateway response:
 
 Agent port requirements:
 
-- Pod-local gateway range is `20000-20099`.
+- Pod-local gateway range is `20000-20299`.
 - Agent assigns the actual port.
 - Agent skips conflicts or returns structured errors.
 - Agent persists enough state to recover the port occupation map after restart.

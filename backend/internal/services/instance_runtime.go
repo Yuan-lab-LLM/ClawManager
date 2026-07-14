@@ -17,8 +17,9 @@ type InstanceRuntimeConfig struct {
 }
 
 const (
-	kasmClipboardSendDisabled   = "-SendCutText 0"
-	kasmClipboardAcceptDisabled = "-AcceptCutText 0"
+	kasmClipboardSendEnabled   = "-SendCutText 1"
+	kasmClipboardAcceptEnabled = "-AcceptCutText 1"
+	selkiesClipboardEnabled    = "true|locked"
 )
 
 func buildRuntimeConfig(instanceType, osType, osVersion string, registry, tag *string) InstanceRuntimeConfig {
@@ -117,10 +118,13 @@ func defaultEnvForInstanceType(instanceType string) map[string]string {
 
 func defaultWebtopDesktopEnv(title string) map[string]string {
 	return map[string]string{
-		"TITLE":                    title,
-		"SUBFOLDER":                "/",
-		"KASM_SVC_SEND_CUT_TEXT":   kasmClipboardSendDisabled,
-		"KASM_SVC_ACCEPT_CUT_TEXT": kasmClipboardAcceptDisabled,
+		"TITLE":                         title,
+		"SUBFOLDER":                     "/",
+		"KASM_SVC_SEND_CUT_TEXT":        kasmClipboardSendEnabled,
+		"KASM_SVC_ACCEPT_CUT_TEXT":      kasmClipboardAcceptEnabled,
+		"SELKIES_CLIPBOARD_ENABLED":     selkiesClipboardEnabled,
+		"SELKIES_CLIPBOARD_IN_ENABLED":  selkiesClipboardEnabled,
+		"SELKIES_CLIPBOARD_OUT_ENABLED": selkiesClipboardEnabled,
 	}
 }
 

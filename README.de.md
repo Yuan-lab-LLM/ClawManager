@@ -58,6 +58,7 @@
 
 Wichtige aktuelle Produkt- und Dokumentations-Updates.
 
+- [2026-07-07] Security Protection Platform (secplane) Frontend-Konsole hinzugefuegt — umfassende Sicherheitskonsole mit Runtime-Abwehr (Eingabe-/Zustands-/Entscheidungs-/Ausgabeoberflaeche, Asset-Schutz, menschliche Freigabe), Host-Haertung und Container-Isolierung, Outbound-Vertrauens-Governance, Richtlinien-Governance, Kill-Switch/Circuit-Breaker, Full-Chain-Audit, SecureClaw-Daten- und Komponentenvertrauens-Audit, Kollaborations-Governance und Eingabeerkennung. 4 Verteidigungsschichten in einer einheitlichen Admin-UI mit vollstaendiger i18n fuer 5 Sprachen.
 - [2026-06-14] Lite-/Pro-Runtime-Modi und Rollout-Support hinzugefuegt: Lite-Instanzen laufen ueber gemeinsame Gateway-Runtime-Pools, waehrend Pro-Instanzen dedizierte Desktop-Deployments fuer staerkere Isolation behalten.
 - [2026-05-18] Team-Workspace-MVP mit Einfuehrung und Vorschau hinzugefuegt, inklusive One-Click-Team-Erstellung, OpenClaw-Member-Orchestrierung, Redis-Team-Bus-Injection, Shared Storage, Member-Status, Task-Dispatch sowie Event- und Ergebnisansichten.
 - [2026-04-29] Hermes-Runtime-Integration hinzugefuegt, inklusive Webtop-basierter Instanzbereitstellung, Agent-Control-Plane-Registrierung, AI-Gateway-Injection, channel- und skill-Bootstrap sowie `.hermes` Import/Export. Siehe [Hermes Runtime Guide](./docs/hermes-runtime-agent-development.md).

@@ -5,6 +5,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 	"time"
 
@@ -211,6 +212,9 @@ func TestRuntimeAgentHandlerGatewayReportOnlyUpdatesCurrentPodBinding(t *testing
 	if bindingRepo.updateRunningCalls != 1 {
 		t.Fatalf("UpdateRunning calls = %d, want 1", bindingRepo.updateRunningCalls)
 	}
+	if len(bindingRepo.deletedInstanceIDs) != 0 {
+		t.Fatalf("stale generation report deleted instances %v", bindingRepo.deletedInstanceIDs)
+	}
 }
 
 func TestRuntimeAgentHandlerGatewayReportSyncsInstanceRuntimeState(t *testing.T) {
@@ -257,6 +261,67 @@ func TestRuntimeAgentHandlerGatewayReportSyncsInstanceRuntimeState(t *testing.T)
 	}
 	if instanceRepo.messageByID[11] == nil || *instanceRepo.messageByID[11] != message {
 		t.Fatalf("error message = %#v, want %q", instanceRepo.messageByID[11], message)
+	}
+}
+
+func TestRuntimeAgentHandlerGatewayReportDeletesMissingCurrentPodBinding(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	lastHealthAt := time.Now().UTC().Add(-time.Minute)
+	bindingRepo := &runtimeAgentHandlerBindingRepo{
+		bindings: map[int]*models.InstanceRuntimeBinding{
+			10: {InstanceID: 10, RuntimePodID: 9, Generation: 2, State: "running", LastHealthAt: &lastHealthAt},
+			11: {InstanceID: 11, RuntimePodID: 99, Generation: 2, State: "running"},
+			12: {InstanceID: 12, RuntimePodID: 9, Generation: 2, State: "error"},
+		},
+	}
+	handler := NewRuntimeAgentHandler(config.RuntimePoolConfig{AgentReportToken: "secret", HeartbeatTimeout: 10 * time.Second}, &runtimeAgentHandlerPodRepo{}, bindingRepo, nil, &runtimeAgentHandlerEvents{})
+
+	router := gin.New()
+	router.POST("/api/v1/runtime-agent/gateways/report", handler.ReportGateways)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/runtime-agent/gateways/report", bytes.NewBufferString(`{"pod_id":9,"gateways":[]}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-ClawManager-Agent-Token", "secret")
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s, want 200", rec.Code, rec.Body.String())
+	}
+	if got, want := bindingRepo.deletedInstanceIDs, []int{10}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("deleted instance IDs = %v, want %v", got, want)
+	}
+	if got, want := bindingRepo.deletedRuntimePodIDs, []int64{9}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("released runtime pod IDs = %v, want %v", got, want)
+	}
+}
+
+func TestRuntimeAgentHandlerGatewayReportDoesNotDeleteFreshBindingFromFirstEmptySnapshot(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	lastHealthAt := time.Now().UTC()
+	bindingRepo := &runtimeAgentHandlerBindingRepo{
+		bindings: map[int]*models.InstanceRuntimeBinding{
+			10: {InstanceID: 10, RuntimePodID: 9, Generation: 3, State: "running", LastHealthAt: &lastHealthAt},
+		},
+	}
+	handler := NewRuntimeAgentHandler(config.RuntimePoolConfig{AgentReportToken: "secret", HeartbeatTimeout: 10 * time.Second}, &runtimeAgentHandlerPodRepo{}, bindingRepo, nil, &runtimeAgentHandlerEvents{})
+
+	router := gin.New()
+	router.POST("/api/v1/runtime-agent/gateways/report", handler.ReportGateways)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/runtime-agent/gateways/report", bytes.NewBufferString(`{"pod_id":9,"gateways":[]}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-ClawManager-Agent-Token", "secret")
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s, want 200", rec.Code, rec.Body.String())
+	}
+	if len(bindingRepo.deletedInstanceIDs) != 0 {
+		t.Fatalf("fresh binding deleted by first empty snapshot: %v", bindingRepo.deletedInstanceIDs)
+	}
+	if bindingRepo.bindings[10] == nil {
+		t.Fatal("fresh binding was removed")
 	}
 }
 
@@ -334,9 +399,11 @@ func (r *runtimeAgentHandlerPodRepo) UpdateMetrics(ctx context.Context, podID in
 }
 
 type runtimeAgentHandlerBindingRepo struct {
-	updateRunningCalls int
-	updateStateCalls   int
-	bindings           map[int]*models.InstanceRuntimeBinding
+	updateRunningCalls   int
+	updateStateCalls     int
+	bindings             map[int]*models.InstanceRuntimeBinding
+	deletedInstanceIDs   []int
+	deletedRuntimePodIDs []int64
 }
 
 func (r *runtimeAgentHandlerBindingRepo) Create(ctx context.Context, binding *models.InstanceRuntimeBinding) error {
@@ -352,7 +419,14 @@ func (r *runtimeAgentHandlerBindingRepo) GetRunningByInstanceID(ctx context.Cont
 }
 
 func (r *runtimeAgentHandlerBindingRepo) ListByRuntimePodID(ctx context.Context, runtimePodID int64) ([]models.InstanceRuntimeBinding, error) {
-	return nil, nil
+	bindings := make([]models.InstanceRuntimeBinding, 0, len(r.bindings))
+	for _, binding := range r.bindings {
+		if binding.RuntimePodID != runtimePodID {
+			continue
+		}
+		bindings = append(bindings, *binding)
+	}
+	return bindings, nil
 }
 
 func (r *runtimeAgentHandlerBindingRepo) ListByRuntimePodIDs(ctx context.Context, runtimePodIDs []int64) ([]models.InstanceRuntimeBinding, error) {
@@ -369,12 +443,29 @@ func (r *runtimeAgentHandlerBindingRepo) UpdateState(ctx context.Context, instan
 	return nil
 }
 
+func (r *runtimeAgentHandlerBindingRepo) DeleteErrorByRuntimePodIDAndGatewayPort(ctx context.Context, runtimePodID int64, gatewayPort int) (int64, error) {
+	return 0, nil
+}
 func (r *runtimeAgentHandlerBindingRepo) DeleteByInstanceID(ctx context.Context, instanceID int) error {
 	return nil
 }
 
 func (r *runtimeAgentHandlerBindingRepo) DeleteByInstanceIDAndReleaseSlot(ctx context.Context, instanceID int, runtimePodID int64) error {
+	r.deletedInstanceIDs = append(r.deletedInstanceIDs, instanceID)
+	r.deletedRuntimePodIDs = append(r.deletedRuntimePodIDs, runtimePodID)
+	delete(r.bindings, instanceID)
 	return nil
+}
+
+func (r *runtimeAgentHandlerBindingRepo) DeleteRunningByInstanceIDGenerationAndReleaseSlot(ctx context.Context, instanceID int, runtimePodID int64, generation int) (bool, error) {
+	binding := r.bindings[instanceID]
+	if binding == nil || binding.RuntimePodID != runtimePodID || binding.Generation != generation || binding.State != "running" {
+		return false, nil
+	}
+	r.deletedInstanceIDs = append(r.deletedInstanceIDs, instanceID)
+	r.deletedRuntimePodIDs = append(r.deletedRuntimePodIDs, runtimePodID)
+	delete(r.bindings, instanceID)
+	return true, nil
 }
 
 type runtimeAgentHandlerInstanceRepo struct {

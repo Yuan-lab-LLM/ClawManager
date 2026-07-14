@@ -29,7 +29,7 @@
 | --- | --- |
 | workspace root | `/workspaces` |
 | workspace path | `/workspaces/{runtime}/user-{user_id}/instance-{instance_id}` |
-| gateway 端口范围 | `20000-20099` |
+| gateway 端口范围 | `20000-20299` |
 | 单 Runtime Pod 容量 | `100` |
 | 实例 UID/GID | `200000 + instance_id` |
 | agent 控制端口 | `19090` |
@@ -338,7 +338,7 @@ POST /v1/gateways
   "workspace_path": "/workspaces/openclaw/user-45/instance-123",
   "port_range": {
     "start": 20000,
-    "end": 20099
+    "end": 20299
   },
   "uid": 200123,
   "gid": 200123,

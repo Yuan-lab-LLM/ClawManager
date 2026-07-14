@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -111,6 +112,19 @@ func (s *InstanceAccessService) ValidateToken(token string) (*AccessToken, error
 	return nil, err
 }
 
+func (s *InstanceAccessService) IsInstanceAccessToken(token string) bool {
+	value := strings.TrimSpace(token)
+	if value == "" || strings.Count(value, ".") != 2 {
+		return false
+	}
+
+	parsed, _, err := jwt.NewParser().ParseUnverified(value, &instanceAccessClaims{})
+	if err != nil {
+		return false
+	}
+	claims, ok := parsed.Claims.(*instanceAccessClaims)
+	return ok && claims.TokenType == "instance_access" && strings.TrimSpace(claims.AccessURL) != ""
+}
 func (s *InstanceAccessService) validateSignedToken(token string) (*AccessToken, error) {
 	parsed, err := jwt.ParseWithClaims(token, &instanceAccessClaims{}, func(token *jwt.Token) (interface{}, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {

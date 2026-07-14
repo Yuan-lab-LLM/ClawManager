@@ -58,6 +58,7 @@
 
 최근의 중요한 제품 및 문서 업데이트입니다.
 
+- [2026-07-07] 보안 방어 플랫폼(secplane) 프론트엔드 콘솔을 추가했습니다. 런타임 방어(입력/상태/의사결정/출력 표면, 자산 변조 방지, 휴먼 승인), 호스트 강화 및 컨테이너 격리, 아웃바운드 신뢰 엔드포인트 거버넌스, 정책 거버넌스, 킬스위치/서킷브레이커, 전체 체인 감사, SecureClaw 데이터 및 컴포넌트 신뢰 감사, 협업 거버넌스, 입력 탐지를 포괄하는 4계층 방어 통합 관리 UI를 5개 언어 i18n으로 제공합니다.
 - [2026-06-14] Lite / Pro 런타임 모드와 롤아웃 지원을 추가했습니다. Lite 인스턴스는 공유 gateway runtime pool에서 실행되고, Pro 인스턴스는 더 강한 격리를 위해 전용 desktop deployment를 유지합니다.
 - [2026-05-18] Team 워크스페이스 MVP 소개와 미리보기를 추가했습니다. 원클릭 Team 생성, OpenClaw 멤버 오케스트레이션, Redis Team Bus 주입, 공유 스토리지, 멤버 상태, 작업 배포, 이벤트/결과 보기를 포함합니다.
 - [2026-04-29] Hermes Runtime 연동을 추가했습니다. Webtop 기반 인스턴스 생성, Agent Control Plane 등록, AI Gateway 주입, channel 및 skill 부트스트랩, `.hermes` 가져오기/내보내기 흐름을 지원합니다. 자세한 내용은 [Hermes Runtime Guide](./docs/hermes-runtime-agent-development.md)를 참고하세요.

@@ -1,0 +1,688 @@
+#入侵检测规则文件
+#==============================【1、全局白名单】====================================================
+#全局白名单中的程序不被识别为入侵检测行为
+#根据实际需要，将业务程序、可信程序的全路径配置到whitelist_program_path中
+
+# 全局进程白名单列表
+# 范例：items: [/usr/sbin/sshd,/usr/sbin/mv,/usr/sbin/cp]
+- list: whitelist_program_path
+  items: []
+
+
+#==============================【2、入侵检测规则】====================================================
+#请勿修改或删除入侵检测规则相关内容，如有需要请联系技术支持工程师
+#入侵检测规则包含公共定义和入侵规则两部分内容
+
+#2.1 公共定义
+#公共定义：是可以被多个规则使用的公共部分
+- macro: never_true
+  condition: (evt.num=0)
+- macro: open_write
+  condition: (evt.type in (open,openat,openat2) and evt.is_open_write=true and fd.typechar='f' and fd.num>=0)
+- macro: open_read
+  condition: (evt.type in (open,openat,openat2) and evt.is_open_read=true and fd.typechar='f' and fd.num>=0)
+- macro: rename
+  condition: (evt.type in (rename, renameat, renameat2) and evt.res=SUCCESS)
+- macro: create_hardlink
+  condition: (evt.type in (link, linkat) and evt.dir=<)
+- macro: create_symlink
+  condition: (evt.type in (symlink, symlinkat) and evt.dir=<)
+- macro: chmod
+  condition: (evt.type in (chmod, fchmod, fchmodat) and evt.dir=<)
+- macro: proc_name_exists
+  condition: (proc.name!="<NA>")  
+- macro: spawned_process
+  condition: (evt.type in (execve, execveat) and evt.dir=<)
+- macro: container
+  condition: (never_true)
+# 默认白名单程序过滤条件为判断进程全路径、父进程全路径、祖先进程全路径是否包含在whitelist_program_path，
+- macro: global_whitelist_program
+  condition: (proc.exepath in (whitelist_program_path) or
+    proc.aexepath[1] in (whitelist_program_path) or
+    proc.aexepath[2] in (whitelist_program_path) or
+    proc.aexepath[3] in (whitelist_program_path))
+# 内置全局白名单：包括KSec自身、docker、K8s,openstack相关程序
+- list: openstatck_programs
+  items: [/opt/cni/bin/install,/opt/cni/bin/calico,/opt/cni/bin/calico-ipam]
+- list: k8s_programs
+  items: [/csi-resizer,/csi-attacher,/csi-snapshotter,/usr/local/bin/csi-provisioner]
+- list: docker_programs
+  items: [/usr/bin/dockerd,/usr/bin/containerd-shim-runc-v2,/usr/bin/containerd,/usr/bin/containerd-shim]
+- list: ksec_self_programs
+  items: [/opt/KSec/bin/KSecMain,/opt/KSec/bin/KSec]
+- list: built_in_whitelist_programs
+  items: [ksec_self_programs,k8s_programs,openstatck_programs]
+
+- macro: built_in_whitelist
+  condition: (proc.exepath in (built_in_whitelist_programs) or
+    proc.aexepath[1] in (built_in_whitelist_programs) or
+    proc.aexepath[2] in (built_in_whitelist_programs) or
+    proc.aexepath[3] in (built_in_whitelist_programs))
+
+# dpkg -L login | grep bin | xargs ls -ld | grep -v '^d' | awk '{print $9}' | xargs -L 1 basename | tr "\\n" ","
+- list: login_binaries
+  items: [
+    login, systemd, '"(systemd)"', systemd-logind, su,
+    nologin, faillog, lastlog, newgrp, sg
+    ]
+# dpkg -L passwd | grep bin | xargs ls -ld | grep -v '^d' | awk '{print $9}' | xargs -L 1 basename | tr "\\n" ","
+- list: passwd_binaries
+  items: [
+    shadowconfig, grpck, pwunconv, grpconv, pwck,
+    groupmod, vipw, pwconv, useradd, newusers, cppw, chpasswd, usermod,
+    groupadd, groupdel, grpunconv, chgpasswd, userdel, chage, chsh,
+    gpasswd, chfn, expiry, passwd, vigr, cpgr, adduser, addgroup, deluser, delgroup
+    ]
+# repoquery -l shadow-utils | grep bin | xargs ls -ld | grep -v '^d' |
+#     awk '{print $9}' | xargs -L 1 basename | tr "\\n" ","
+- list: shadowutils_binaries
+  items: [
+    chage, gpasswd, lastlog, newgrp, sg, adduser, deluser, chpasswd,
+    groupadd, groupdel, addgroup, delgroup, groupmems, groupmod, grpck, grpconv, grpunconv,
+    newusers, pwck, pwconv, pwunconv, useradd, userdel, usermod, vigr, vipw, unix_chkpwd
+    ]
+- list: user_mgmt_binaries
+  items: [login_binaries, passwd_binaries, shadowutils_binaries]
+# 一组典型的进程，以不同的权限或不同的用户身份运行其他程序
+- list: userexec_binaries
+  items: [sudo, su, suexec, critical-stack, dzdo]
+- list: rpm_binaries
+  items: [dnf, dnf-automatic, rpm, rpmkey, yum, '"75-system-updat"', rhsmcertd-worke, rhsmcertd, subscription-ma,
+          repoquery, rpmkeys, rpmq, yum-cron, yum-config-mana, yum-debug-dump,
+          abrt-action-sav, rpmdb_stat, microdnf, rhn_check, yumdb]
+- list: deb_binaries
+  items: [dpkg, dpkg-preconfigu, dpkg-reconfigur, dpkg-divert, apt, apt-get, aptitude,
+    frontend, preinst, add-apt-reposit, apt-auto-remova, apt-key,
+    apt-listchanges, unattended-upgr, apt-add-reposit, apt-cache, apt.systemd.dai
+    ]
+- list: python_package_managers
+  items: [pip, pip3, conda]
+- list: package_mgmt_binaries
+  items: [rpm_binaries, deb_binaries, update-alternat, gem, npm, python_package_managers, sane-utils.post, alternatives, chef-client, apk, snapd]
+- macro: package_mgmt_procs
+  condition: (proc.name in (package_mgmt_binaries))    
+- list: cron_binaries
+  items: [anacron, cron, crond, crontab]  
+- list: shell_binaries
+  items: [ash, bash, csh, ksh, sh, tcsh, zsh, dash]
+- macro: shell_procs
+  condition: (proc.name in (shell_binaries))
+- list: reverse_shell_binaries
+  items: [ash, csh, ksh, sh, tcsh, zsh, dash, perl]
+- list: hids_binaries
+  items: [aide, aide.wrapper, update-aide.con, logcheck, syslog-summary, osqueryd, ossec-syscheckd]
+- list: vpn_binaries
+  items: [openvpn]
+- list: nomachine_binaries
+  items: [nxexec, nxnode.bin, nxserver.bin, nxclient.bin]
+- list: mail_config_binaries
+  items: [
+    update_conf, parse_mc, makemap_hash, newaliases, update_mk, update_tlsm4,
+    update_db, update_mc, ssmtp.postinst, mailq, postalias, postfix.config.,
+    postfix.config, postfix-script, postconf
+    ]
+# sshkit可能运行的脚本
+- list: sshkit_script_binaries
+  items: [10_etc_sudoers., 10_passwd_group]
+- list: postgres_mgmt_binaries
+  items: [pg_dumpall, pg_ctl, pg_lsclusters, pg_ctlcluster]
+- macro: ansible_running_python
+  condition: (proc.name in (python, pypy, python3) and proc.cmdline contains ansible)
+# qualys似乎在不同级别上运行各种shell子进程。下面的做法可以在几个级别上检测，而不会对完整的proc.aname产生开销，这会遍历整个进程树的父级结构
+- macro: run_by_qualys
+  condition: >
+    (proc.pname=qualys-cloud-ag or
+     proc.aname[2]=qualys-cloud-ag or
+     proc.aname[3]=qualys-cloud-ag or
+     proc.aname[4]=qualys-cloud-ag)
+- macro: run_by_chef
+  condition: (proc.aname[2]=chef_command_wr or proc.aname[3]=chef_command_wr or
+              proc.aname[2]=chef-client or proc.aname[3]=chef-client or
+              proc.name=chef-client)
+- macro: run_by_google_accounts_daemon
+  condition: >
+    (proc.aname[1] startswith google_accounts or
+     proc.aname[2] startswith google_accounts or
+     proc.aname[3] startswith google_accounts)
+- macro: cmp_cp_by_passwd
+  condition: (proc.name in (cmp, cp) and proc.pname in (passwd, run-parts))
+- macro: user_read_sensitive_file_conditions
+  condition: cmp_cp_by_passwd
+- macro: mandb_postinst
+  condition: >
+    (proc.name=perl and proc.args startswith "-e" and
+    proc.args contains "@pwd = getpwnam(" and
+    proc.args contains "exec " and
+    proc.args contains "/usr/bin/mandb")
+- macro: perl_running_plesk
+  condition: (proc.cmdline startswith "perl /opt/psa/admin/bin/plesk_agent_manager" or
+              proc.pcmdline startswith "perl /opt/psa/admin/bin/plesk_agent_manager")
+- macro: perl_running_updmap
+  condition: (proc.cmdline startswith "perl /usr/bin/updmap")
+- macro: veritas_driver_script
+  condition: (proc.cmdline startswith "perl /opt/VRTSsfmh/bin/mh_driver.pl")
+- macro: perl_running_centrifydc
+  condition: (proc.cmdline startswith "perl /usr/share/centrifydc")
+- macro: runuser_reading_pam
+  condition: (proc.name=runuser and fd.directory=/etc/pam.d)
+# CIS Linux 基准测试程序
+- macro: linux_bench_reading_etc_shadow
+  condition: ((proc.aname[2]=linux-bench and
+               proc.name in (awk,cut,grep)) and
+              (fd.name=/etc/shadow or
+               fd.directory=/etc/pam.d))
+- macro: mandb_postinst
+  condition: >
+    (proc.name=perl and proc.args startswith "-e" and
+    proc.args contains "@pwd = getpwnam(" and
+    proc.args contains "exec " and
+    proc.args contains "/usr/bin/mandb")
+- list: read_sensitive_file_binaries
+  items: [
+    iptables, ps, lsb_release, check-new-relea, dumpe2fs, accounts-daemon, sshd,
+    vsftpd, systemd, mysql_install_d, psql, screen, debconf-show, sa-update,
+    pam-auth-update, pam-config, /usr/sbin/spamd, polkit-agent-he, lsattr, file, sosreport,
+    scxcimservera, adclient, rtvscand, cockpit-session, userhelper, ossec-syscheckd
+    ]
+- list: sensitive_directory_names
+  items: [/, /etc, /etc/, /root, /root/]  
+- list: dev_creation_binaries
+  items: [blkid, rename_device, update_engine, sgdisk]
+- list: allowed_dev_files
+  items: [
+    /dev/null, /dev/stdin, /dev/stdout, /dev/stderr,
+    /dev/random, /dev/urandom, /dev/console, /dev/kmsg, /dev/termination-log
+    ]
+- macro: bin_dir
+  condition: (fd.directory in (/bin, /sbin, /usr/bin, /usr/sbin))
+- macro: exe_running_docker_save
+  condition: >
+    (proc.name = "exe"
+    and (proc.cmdline contains "/var/lib/docker"
+    or proc.cmdline contains "/var/run/docker")
+    and proc.pname in (dockerd, docker, dockerd-current, docker-current))
+- macro: python_running_get_pip
+  condition: (proc.cmdline startswith "python get-pip.py")
+- macro: python_running_ms_oms
+  condition: (proc.cmdline startswith "python /var/lib/waagent/")	
+- macro: kernel_module_load
+  condition: (evt.type in (init_module, finit_module) and evt.dir=<)
+- macro: ptrace_attach_or_injection
+  condition: >
+    (evt.type=ptrace and evt.dir=> and
+    (evt.arg.request contains PTRACE_POKETEXT or
+    evt.arg.request contains PTRACE_POKEDATA or
+    evt.arg.request contains PTRACE_ATTACH or
+    evt.arg.request contains PTRACE_SEIZE or
+    evt.arg.request contains PTRACE_SETREGS))
+- list: process_cron_jobs
+  items: ["crontab", "at"]
+- list: sensitive_file_names
+  items: [/etc/shadow, /etc/sudoers, /etc/pam.conf, /etc/security/pwquality.conf]
+- macro: sensitive_files
+  condition: >
+    ((fd.name startswith /etc and fd.name in (sensitive_file_names)) or
+      fd.directory in (/etc/sudoers.d, /etc/pam.d))
+- macro: known_user_in_container
+  condition: (container and user.name != "N/A")
+- macro: somebody_becoming_themselves
+  condition: ((user.name=nobody and evt.arg.uid=nobody) or
+              (user.name=www-data and evt.arg.uid=www-data) or
+              (user.name=_apt and evt.arg.uid=_apt) or
+              (user.name=postfix and evt.arg.uid=postfix) or
+              (user.name=pki-agent and evt.arg.uid=pki-agent) or
+              (user.name=pki-acme and evt.arg.uid=pki-acme) or
+              (user.name=nfsnobody and evt.arg.uid=nfsnobody) or
+              (user.name=postgres and evt.arg.uid=postgres))
+- list: known_setuid_binaries
+  items: [
+    sshd, dbus-daemon-lau, ping, ping6, critical-stack-, pmmcli,
+    filemng, PassengerAgent, bwrap, osdetect, nginxmng, sw-engine-fpm,
+    start-stop-daem
+    ]
+- list: mail_binaries
+  items: [
+    sendmail, sendmail-msp, postfix, procmail, exim4,
+    pickup, showq, mailq, dovecot, imap-login, imap,
+    mailmng-core, pop3-login, dovecot-lda, pop3
+    ]
+- list: docker_binaries
+  items: [docker, dockerd, containerd-shim, "runc:[1:CHILD]", pause, exe, docker-compose, docker-entrypoi, docker-runc-cur, docker-current, dockerd-current]
+- macro: java_running_sdjagent
+  condition: (proc.exe endswith java and proc.cmdline contains sdjagent.jar)
+- macro: nrpe_becoming_nagios
+  condition: (proc.name=nrpe and evt.arg.uid=nagios)
+- list: user_known_chmod_applications
+  items: [hyperkube, kubelet, k3s-agent]
+- list: sudoer_files
+  items: ["/etc/sudoers", "/private/etc/sudoers"]
+- list: sudoer_dirs
+  items: ["/etc/sudoers.d", "/private/etc/sudoers.d"]
+- list: coreutils_binaries
+  items: [
+    truncate, sha1sum, numfmt, fmt, fold, uniq, cut, who,
+    groups, csplit, sort, expand, printf, printenv, unlink, tee, chcon, stat,
+    basename, split, nice, "yes", whoami, sha224sum, hostid, users, stdbuf,
+    base64, unexpand, cksum, od, paste, nproc, pathchk, sha256sum, wc, test,
+    comm, arch, du, factor, sha512sum, md5sum, tr, runcon, env, dirname,
+    tsort, join, shuf, install, logname, pinky, nohup, expr, pr, tty, timeout,
+    tail, "[", seq, sha384sum, nl, head, id, mkfifo, sum, dircolors, ptx, shred,
+    tac, link, chroot, vdir, chown, touch, ls, dd, uname, "true", pwd, date,
+    chgrp, chmod, mktemp, cat, mknod, sync, ln, "false", rm, mv, cp, echo,
+    readlink, sleep, stty, mkdir, df, dir, rmdir, touch
+    ]
+- macro: inbound_outbound
+  condition: >
+    ((((evt.type in (accept,accept4,listen,connect) and evt.dir=<)) and
+     (fd.typechar = 4 or fd.typechar = 6)) and
+     (fd.ip != "0.0.0.0" and fd.net != "127.0.0.0/8") and
+     (evt.rawres >= 0 or evt.res = EINPROGRESS))
+- macro: reverse_shell_outbound
+  condition: >
+    ((((evt.type in (dup, dup2, dup3) and evt.dir=<)) and
+     (fd.typechar = 4 or fd.typechar = 6)) and
+     (fd.ip != "0.0.0.0" and fd.net != "127.0.0.0/8") and
+     (evt.rawres = 1 or evt.res = EINPROGRESS))
+- macro: system_procs
+  condition: (proc.name in (coreutils_binaries, user_mgmt_binaries))
+# 这个列表可以很容易的将预期在网络上通信的系统进程名称列入白名单
+- list: known_system_procs_network_activity_binaries
+  items: [systemd, hostid, id]
+- macro: login_doing_dns_lookup
+  condition: (proc.name=login and fd.l4proto=udp and fd.sport=53)
+- macro: trusted_logging_images
+  condition: (never_true)
+- list: log_directories
+  items: [/var/log, /dev/log]
+- list: log_files
+  items: [syslog, auth.log, secure, kern.log, cron, user.log, dpkg.log, last.log, yum.log, access_log, mysql.log, mysqld.log]
+- macro: access_log_files
+  condition: (fd.directory in (log_directories) or fd.filename in (log_files))
+- list: falco_privileged_images
+  items: [
+    falco_containers,
+    docker.io/calico/node,
+    calico/node,
+    docker.io/cloudnativelabs/kube-router,
+    docker.io/docker/ucp-agent,
+    docker.io/mesosphere/mesos-slave,
+    docker.io/rook/toolbox,
+    docker.io/sysdig/sysdig,
+    gcr.io/google_containers/kube-proxy,
+    gcr.io/google-containers/startup-script,
+    gcr.io/projectcalico-org/node,
+    gke.gcr.io/kube-proxy,
+    gke.gcr.io/gke-metadata-server,
+    gke.gcr.io/netd-amd64,
+    gke.gcr.io/watcher-daemonset,
+    gcr.io/google-containers/prometheus-to-sd,
+    k8s.gcr.io/ip-masq-agent-amd64,
+    k8s.gcr.io/kube-proxy,
+    k8s.gcr.io/prometheus-to-sd,
+    registry.k8s.io/ip-masq-agent-amd64,
+    registry.k8s.io/kube-proxy,
+    registry.k8s.io/prometheus-to-sd,
+    quay.io/calico/node,
+    sysdig/sysdig,
+    sematext_images,
+    k8s.gcr.io/dns/k8s-dns-node-cache,
+    registry.k8s.io/dns/k8s-dns-node-cache,
+    mcr.microsoft.com/oss/kubernetes/kube-proxy
+  ]
+- list: network_tool_binaries
+  items: [nc, ncat, netcat, nmap, dig, tcpdump, tshark, ngrep, telnet, mitmproxy, socat, zmap]
+- macro: network_tool_procs
+  condition: (proc.name in (network_tool_binaries))
+- list: trusted_images
+  items: []
+
+
+
+
+
+#2.2 入侵规则
+# 规则结构如下
+# list:      列表，可以被规则(rule),macros(宏定义)和其他列表使用的集合
+# macro:     宏定义，可重用的规则条件片段。在规则的判断条件和其他宏定义中使用
+# rule:      规则名
+# desc:      规则描述
+# condition: 规则判断条件,这里定义了这条规则在什么条件可以被匹配到
+# output:    规则匹配后，输出的日志内容
+# priority:  规则优先级别从高到底为-emergency(紧急),alert(警报),critical(关键),error(错误),warning(警告),notice(通知),informational(信息),debug(调试)
+# tags:      标签
+
+# 规则-1：【rootkit检测】检测/dev目录下文件创建
+- macro: user_known_create_files_below_dev_activities
+  condition: (never_true)  
+- rule: Create files below dev
+  desc: > 
+    检测除授权的设备管理程序外/dev目录下文件的创建,这可以揭示rootkits隐藏在/dev目录下的文件。某些rootkit通过/dev目录创建文件实现隐藏自身的目的。
+  condition: >
+    (evt.type = creat or (evt.type in (open,openat,openat2)))
+    and evt.arg.flags contains O_CREAT
+    and fd.directory = /dev
+    and not built_in_whitelist
+    and not global_whitelist_program
+    and not proc.name in (dev_creation_binaries)
+    and not fd.name in (allowed_dev_files)
+    and not fd.name startswith /dev/tty
+    and not user_known_create_files_below_dev_activities
+  output: File created below /dev by untrusted program (proc.pid=%proc.pid file=%fd.name evt_type=%evt.type user=%user.name user_uid=%user.uid user_loginuid=%user.loginuid  process=%proc.name command=%proc.cmdline process_chain=[%proc.aexepath[3]->%proc.aexepath[2]->%proc.aexepath[1]->%proc.aexepath[0]]  terminal=%proc.tty exe_flags=%evt.arg.flags )
+  priority: ERROR
+  tags: [maturity_incubating, host, filesystem,rootkit, mitre_persistence, T1543]
+
+
+# 规则-2：【rootkit检测】检测二进制目录下创建文件
+- macro: user_known_write_below_binary_dir_activities
+  condition: (never_true)
+- rule: Write below binary dir
+  desc: > 
+    尝试写入特定二进制目录下的任何文件，可以作为跟踪一般系统更改的审计规则。这样的规则可能是噪杂的，特别是您的系统经常进行更新时。然而， 谨慎分析
+    环境可以将此规则转换为检测与系统相关的异常行为的有效规则。比如rootkit的一种实现方式就是替换ls、cat等常用的二进制文件达到隐藏文件进程等目的
+  condition: >
+    open_write and evt.dir=< 
+    and bin_dir
+    and not built_in_whitelist
+    and not global_whitelist_program
+    and not package_mgmt_procs
+    and not exe_running_docker_save
+    and not python_running_get_pip
+    and not python_running_ms_oms
+    and not user_known_write_below_binary_dir_activities
+  output: File below a known binary directory opened for writing (proc.pid=%proc.pid file=%fd.name evt_type=%evt.type user=%user.name user_uid=%user.uid user_loginuid=%user.loginuid process=%proc.name command=%proc.cmdline process_chain=[%proc.aexepath[3]->%proc.aexepath[2]->%proc.aexepath[1]->%proc.aexepath[0]] terminal=%proc.tty exe_flags=%evt.arg.flags)
+  priority: ERROR
+  tags: [maturity_sandbox, host, container, filesystem,rootkit, mitre_persistence, T1543]
+
+
+# 规则-3：【内核模块加载】检测加载内核模块的行为
+- rule: Linux Kernel Module Injection Detected
+  desc: >
+    使用insmod或modprobe实现注入Linux内核模块，这将调用init_module和finit_module系统调用。这个规则需要sys_module具备有效能力。
+  condition: > 
+    kernel_module_load 
+    and thread.cap_effective icontains sys_module
+    and not built_in_whitelist
+    and not global_whitelist_program
+
+  output: Linux Kernel Module injection (module=%proc.args res=%evt.res evt_type=%evt.type user=%user.name user_uid=%user.uid user_loginuid=%user.loginuid process=%proc.name command=%proc.cmdline process_chain=[%proc.aexepath[3]->%proc.aexepath[2]->%proc.aexepath[1]->%proc.aexepath[0]] terminal=%proc.tty)
+  priority: ERROR
+  tags: [maturity_stable, host, container, process, rootkit,mitre_persistence, T1547]
+
+
+# 规则-4：【劫持执行流】检测/etc/ld.so.preload文件的写入行为
+- macro: write_ld_preload
+  condition: (open_write  and fd.name = "/etc/ld.so.preload" and evt.dir=<)
+- macro: rename_ld_preload
+  condition: (rename and evt.arg.newpath = "/etc/ld.so.preload" and evt.dir=<) 
+- rule: Modify Ld preload file
+  desc: >
+    检测到LD_PRELOAD的使用. LD_PRELOAD允许您在任何其他库加载之前加载您的库，从而允许您在进程中挂钩函数。对手可能会使用这种技术来改变应用程序的行为
+    或加载他们自己的程序
+  condition: >
+    (write_ld_preload or rename_ld_preload)
+    and not built_in_whitelist
+    and not global_whitelist_program
+  output: Modify Ld preload file (file=%fd.name evt_type=%evt.type user=%user.name user_uid=%user.uid user_loginuid=%user.loginuid process=%proc.name command=%proc.cmdline process_chain=[%proc.aexepath[3]->%proc.aexepath[2]->%proc.aexepath[1]->%proc.aexepath[0]] terminal=%proc.tty exe_flags=%evt.arg.flags)
+  priority: ERROR
+  tags: [maturity_stable, host, rootkit, mitre_persistence, T1574]
+
+
+# 规则-5：【无文件执行】检测二进制文件从内存中执行
+- list: known_memfd_execution_binaries
+  items: []
+- macro: known_memfd_execution_processes
+  condition: (proc.name in (known_memfd_execution_binaries))
+- rule: Fileless execution via memfd_create
+  desc: >
+    使用memfd_create技术检测二进制文件是否从内存执行。这是众所周知的在受害者机器上执行恶意软件的技术，而不将有效荷载存储在磁盘上，并避免留下关于执行
+    了什么的痕迹。通过向known_memfd_execution_processes添加项，可以将可能出于良性目的使用无文件执行的进程列入白名单。
+  condition: >
+    spawned_process
+    and proc.is_exe_from_memfd=true
+    and not built_in_whitelist
+    and not global_whitelist_program
+    and not known_memfd_execution_processes
+  output: Fileless execution via memfd_create (proc_cwd=%proc.cwd evt_res=%evt.res proc_sname=%proc.sname gparent=%proc.aname[2] evt_type=%evt.type user=%user.name user_uid=%user.uid user_loginuid=%user.loginuid process=%proc.name command=%proc.cmdline process_chain=[%proc.aexepath[3]->%proc.aexepath[2]->%proc.aexepath[1]->%proc.aexepath[0]] terminal=%proc.tty exe_flags=%evt.arg.flags)
+  priority: CRITICAL
+  tags: [maturity_stable, host, container, process, mitre_defense_evasion, T1620]
+
+
+# 规则-6：【进程注入】检测利用ptrace的进程注入
+- list: known_ptrace_binaries
+  items: []
+- macro: known_ptrace_procs
+  condition: (proc.name in (known_ptrace_binaries))
+- rule: PTRACE attached to process
+  desc: > 
+    检测使用PTRACE向进程注入潜在恶意代码以逃避基于进程的防御或者提升权限的尝试。通过known_ptrace_procs减少噪音。一个成功的ptrace系统调用会同
+    时生成多条日志
+  condition: > 
+    ptrace_attach_or_injection 
+    and proc_name_exists 
+    and not built_in_whitelist
+    and not global_whitelist_program
+    and not known_ptrace_procs
+  output: Detected ptrace PTRACE_ATTACH attempt (proc.pid=%proc.pid  proc_pcmdline=%proc.pcmdline evt_type=%evt.type user=%user.name user_uid=%user.uid user_loginuid=%user.loginuid process=%proc.name command=%proc.cmdline process_chain=[%proc.aexepath[3]->%proc.aexepath[2]->%proc.aexepath[1]->%proc.aexepath[0]] terminal=%proc.tty)
+  priority: WARNING
+  tags: [maturity_stable, host, container, process, mitre_privilege_escalation, T1055.008] 
+
+
+# 规则-7:【进程注入】检测Proc Memory类型进程注入
+- list: known_proc_mem_binaries
+  items: []
+- macro: known_proc_mem_procs
+  condition: (proc.name in (known_proc_mem_binaries))
+
+- rule: Proc Memory attached to process
+  desc: > 
+    检测到可能向另一个进程注入代码。代码注入时一种用于运行恶意代码的漏洞攻击技术，攻击者可能会使用它来执行他们的恶意代码
+  condition: > 
+    open_write and fd.name glob '/proc/*/mem' and evt.dir=< 
+    and proc_name_exists 
+    and not built_in_whitelist
+    and not global_whitelist_program
+    and not known_proc_mem_procs
+  output: Proc mem code injection (proc_pcmdline=%proc.pcmdline evt_type=%evt.type user=%user.name user_uid=%user.uid user_loginuid=%user.loginuid process=%proc.name command=%proc.cmdline process_chain=[%proc.aexepath[3]->%proc.aexepath[2]->%proc.aexepath[1]->%proc.aexepath[0]] terminal=%proc.tty exe_flags=%evt.arg.flags)
+  priority: WARNING
+  tags: [maturity_stable, host, container, process, mitre_privilege_escalation, T1055.009]
+
+
+# 规则-8：【计划任务】检测创建或修改计划任务
+- macro: user_known_cron_jobs
+  condition: (never_true)
+- rule: Schedule Cron Jobs
+  desc: >
+    定时cron任务检测，这是一个高度通用的检测。利用cron的功能是入侵者使用的最古老的TTPs(战术,技术,程序)之一。通过使用user_known_cron_jobs设置
+    白名单。
+  condition: >
+    ((open_write and (fd.name startswith "/etc/cron" or fd.name startswith "/var/spool/cron/crontabs")) or 
+     (rename and evt.dir=< and (evt.arg.newpath startswith "/etc/cron" or evt.arg.newpath startswith "/var/spool/cron/crontabs")) or
+     (spawned_process and proc.name in (process_cron_jobs)))
+    and not built_in_whitelist
+    and not global_whitelist_program
+    and not user_known_cron_jobs
+  output: Cron jobs were scheduled to run (proc.pid=%proc.pid file=%fd.name evt_type=%evt.type user=%user.name user_uid=%user.uid user_loginuid=%user.loginuid process=%proc.name command=%proc.cmdline process_chain=[%proc.aexepath[3]->%proc.aexepath[2]->%proc.aexepath[1]->%proc.aexepath[0]] terminal=%proc.tty exe_flags=%evt.arg.flags)
+  priority:
+    NOTICE
+  tags: [maturity_incubating, host, container, filesystem, mitre_execution, T1053.003]
+
+# 规则-10：【敏感文件】检测为敏感文件创建硬链接
+- rule: Create Hardlink Over Sensitive Files
+  desc: >
+    检测在/etc或根目录下铭感文件或子目录上创建硬链接。可以参考规则“Read sensitive file untrusted”
+  condition: >
+    create_hardlink 
+    and (evt.arg.oldpath in (sensitive_file_names))
+    and not built_in_whitelist
+    and not global_whitelist_program
+  output: Hardlinks created over sensitive files (evt_type=%evt.type user=%user.name user_uid=%user.uid user_loginuid=%user.loginuid process=%proc.name command=%proc.cmdline process_chain=[%proc.aexepath[3]->%proc.aexepath[2]->%proc.aexepath[1]->%proc.aexepath[0]] terminal=%proc.tty exe_flags=%evt.arg.flags)
+  priority: WARNING
+  tags: [maturity_stable, host, container, filesystem, mitre_credential_access, T1555]
+
+
+# 规则-11：【敏感文件】检测为敏感文件创建软连接
+- rule: Create Symlink Over Sensitive Files
+  desc: > 
+    检测在/etc或根目录下铭感文件或子目录上创建符号链接。可以参考规则“Read sensitive file untrusted”
+  condition: >
+    create_symlink 
+    and (evt.arg.target in (sensitive_file_names) or evt.arg.target in (sensitive_directory_names))
+    and not built_in_whitelist
+    and not global_whitelist_program
+  output: Symlinks created over sensitive files (target=%evt.arg.target linkpath=%evt.arg.linkpath evt_type=%evt.type user=%user.name user_uid=%user.uid user_loginuid=%user.loginuid process=%proc.name command=%proc.cmdline  process_chain=[%proc.aexepath[3]->%proc.aexepath[2]->%proc.aexepath[1]->%proc.aexepath[0]] terminal=%proc.tty )
+  priority: WARNING
+  tags: [maturity_stable, host, container, filesystem, mitre_credential_access, T1555]
+
+
+# 规则-12：【本地提权】检测通过使用setuid更改用户的提权
+- macro: user_known_non_sudo_setuid_conditions
+  condition: (user.name=root)
+- rule: Non sudo setuid
+  desc: >
+    检测通过使用setuid改变用户的尝试，sudo/su除外。对自己使用setuid的用户"root"和"nobody"也被排除在外，因为在这些情况下setuid调用通常涉及减
+    少特权。通过设置setuid位，攻击者可以在不同用户的上下文中执行代码，而且可能具有更高的权限。一个缺点是存在潜在的噪声，因为许多应用程序使用这种方法
+    是合理的。通过user_known_non_sudo_setuid_conditions微调此规则，避免产生大量合法的日志。
+  condition: >
+    evt.type=setuid and evt.dir=>
+    and (known_user_in_container or not container)
+    and not (user.name=root or user.uid=0)
+    and not somebody_becoming_themselves
+    and not built_in_whitelist
+    and not global_whitelist_program
+    and not proc.name in (known_setuid_binaries, userexec_binaries, mail_binaries, docker_binaries,
+                          nomachine_binaries)
+    and not proc.name startswith "runc:"
+    and not java_running_sdjagent
+    and not nrpe_becoming_nagios
+    and not user_known_non_sudo_setuid_conditions
+  output: Unexpected setuid call by non-sudo, non-root program (arg_uid=%evt.arg.uid evt_type=%evt.type user=%user.name user_uid=%user.uid user_loginuid=%user.loginuid process=%proc.name command=%proc.cmdline  process_chain=[%proc.aexepath[3]->%proc.aexepath[2]->%proc.aexepath[1]->%proc.aexepath[0]] terminal=%proc.tty)
+  priority: NOTICE
+  tags: [maturity_incubating, host, container, users, mitre_privilege_escalation, T1548.001]
+
+
+#规则-13：【本地提权】检测通过使用chmod设置setgid或setuid位的提权
+- macro: user_known_set_setuid_or_setgid_bit_conditions
+  condition: (evt.arg.filename=/var/log/kolla/skyline)   #默认过滤：OpenStack中Skyline服务的日志文件目录，在使用时该目录会被赋予755权限
+- rule: Set Setuid or Setgid bit
+  desc: >
+    检测使用chmod设置setuid或setgid位。当对程序做这样的操作时，程序将以所属用户或组的权限运行，也就是说非root账号可以以root权限执行该程序。此外，
+    攻击者可以再不同用户上下文中运行代码，而且可以获取更高的权限。然而，考虑到需要应用程序都在正常的运行chmod，这需要与噪声权衡，并通过
+    user_known_set_setuid_or_setgid_bit_conditions微调此规则，避免产生大量合法的日志。这条规则和“Non sudo setuid”时有关的。
+  condition: >
+    chmod 
+    and (evt.arg.mode contains "S_ISUID" or evt.arg.mode contains "S_ISGID")
+    and not built_in_whitelist
+    and not global_whitelist_program
+    and not proc.name in (user_known_chmod_applications)
+    and not exe_running_docker_save
+    and not user_known_set_setuid_or_setgid_bit_conditions
+  output: Setuid or setgid bit is set via chmod (fd=%evt.arg.fd filename=%evt.arg.filename mode=%evt.arg.mode evt_type=%evt.type user=%user.name user_uid=%user.uid user_loginuid=%user.loginuid process=%proc.name  command=%proc.cmdline  process_chain=[%proc.aexepath[3]->%proc.aexepath[2]->%proc.aexepath[1]->%proc.aexepath[0]] terminal=%proc.tty)
+  priority:
+    NOTICE
+  tags: [maturity_incubating, host, container, process, users, mitre_privilege_escalation, T1548.001]
+
+
+#规则-14：【本地提权】检测通过修改sudoers file获取权限的尝试
+- macro: check_write_suoder
+  condition: (open_write and evt.dir=< and (fd.name in (sudoer_files) or fd.directory in (sudoer_dirs)))
+- macro: check_rename_suoder
+  condition: >
+     rename and evt.dir=< and (evt.arg.newpath in (sudoer_files) or
+     evt.arg.newpath startswith "/etc/sudoers.d" or
+     evt.arg.newpath startswith "/private/etc/sudoers.d")
+
+- rule: Sudoers file modification detected
+  desc: >
+    检测sudoers文件被修改。sudoers文件是一个配置文件，它控制sudo特性的权限和选项。入侵者可以修改sudoers文件来提升权限，以其他用户的身份执行命令
+    或产生具有更高权限的进程。
+  condition: (check_write_suoder or check_rename_suoder) 
+             and not built_in_whitelist
+             and not global_whitelist_program
+  output: Sudoers file modification detected (proc.pid=%proc.pid file=%fd.name fd.directory=%fd.directory filename=%fd.filename evt_type=%evt.type user=%user.name user_uid=%user.uid user_loginuid=%user.loginuid process=%proc.name command=%proc.cmdline  process_chain=[%proc.aexepath[3]->%proc.aexepath[2]->%proc.aexepath[1]->%proc.aexepath[0]] terminal=%proc.tty exe_flags=%evt.arg.flags)
+  priority: NOTICE
+  tags: [maturity_stable, host, rootkit, mitre_persistence, T1548.003]
+
+
+#规则-15：【反弹shell】检测可能是反弹shell的网络链接
+- macro: user_expected_system_procs_network_activity_conditions
+  condition: (never_true)
+- macro: reverse_shell_binaries_check
+  condition: (proc.name in (reverse_shell_binaries) or (proc.name = bash and (proc.cmdline=bash or proc.cmdline contains
+    "/dev/tcp/" or proc.cmdline contains "/dev/dup") and not proc.cmdline contains "/dev/null") or (proc.name in (python, pypy, python3)
+    and proc.cmdline contains "socket.socket" and (proc.cmdline contains "/bin/sh" or proc.cmdline contains "/bin/bash" )))    
+
+- rule: System procs network activity
+  desc: >
+    检测反弹shell，这是入侵者常用的技术手段之一。由于这条规则是基于网络活动的检测，所以可能需要使用user_expected_system_procs_network_activity_conditions
+    调整此规则，避免产生大量合法的日志。
+  condition: >
+    reverse_shell_outbound
+    and fd.sockfamily = ip 
+    and reverse_shell_binaries_check
+    and not built_in_whitelist
+    and not global_whitelist_program
+    and not proc.name in (known_system_procs_network_activity_binaries)
+    and not login_doing_dns_lookup
+    and not user_expected_system_procs_network_activity_conditions
+  output: Known system binary sent/received network traffic (proc.pid=%proc.pid proc.pname=%proc.pname proc.pid=%proc.pid fd.num=%fd.num proc.name=%proc.name fd.l4proto=%fd.l4proto connection=%fd.name lport=%fd.lport rport=%fd.rport fd_type=%fd.type fd_proto=fd.l4proto evt_type=%evt.type user=%user.name user_uid=%user.uid user_loginuid=%user.loginuid process=%proc.name command=%proc.cmdline  process_chain=[%proc.aexepath[3]->%proc.aexepath[2]->%proc.aexepath[1]->%proc.aexepath[0]] terminal=%proc.tty)
+  priority: NOTICE
+  tags: [maturity_incubating, host, network, process, mitre_execution, T1059]
+
+
+#规则-16：【痕迹擦除】检测清理日志
+- macro: allowed_clear_log_files
+  condition: (never_true)
+- rule: Clear Log Activities
+  desc: > 
+    检测关键访问日志文件的清除，通常是为了清除可归因于攻击者行为的证据。通过allowed_clear_log_files调整此规则，避免产生大量合法的日志。
+  condition: >
+    open_write 
+    and access_log_files 
+    and evt.arg.flags contains "O_TRUNC"
+    and not built_in_whitelist
+    and not global_whitelist_program
+    and not trusted_logging_images 
+    and not allowed_clear_log_files
+  output: Log files were tampered (file=%fd.name evt_type=%evt.type user=%user.name user_uid=%user.uid user_loginuid=%user.loginuid process=%proc.name command=%proc.cmdline  process_chain=[%proc.aexepath[3]->%proc.aexepath[2]->%proc.aexepath[1]->%proc.aexepath[0]] terminal=%proc.tty exe_flags=%evt.arg.flags)
+  priority:
+    WARNING
+  tags: [maturity_stable, host, container, filesystem, mitre_defense_evasion, T1070, NIST_800-53_AU-10]
+
+
+#规则-17：【非法执行脚本/程序】检测从/dev/shm目录执行
+- rule: Execution from /dev/shm
+  desc: > 
+    该规则检测/dev/shm目录下的文件执行情况，这是入侵者经常使用的一种策略，用于存储可读、可写和偶尔可执行的文件。/dev/shm充当到主机或其他容器的链接，
+    也为入侵创建了漏洞。值得注意的是，即使容器重启，/dev/shm仍然保持不变。
+  condition: >
+    spawned_process 
+    and (proc.exe startswith "/dev/shm/" or 
+        (proc.cwd startswith "/dev/shm/" and proc.exe startswith "./" ) or 
+        (shell_procs and proc.args startswith "-c /dev/shm") or 
+        (shell_procs and proc.args startswith "-i /dev/shm") or 
+        (shell_procs and proc.args startswith "/dev/shm") or 
+        (proc.cwd startswith "/dev/shm/" and proc.args startswith "./" ))
+    and not built_in_whitelist
+    and not global_whitelist_program
+
+  output: File execution detected from /dev/shm (evt_res=%evt.res file=%fd.name proc_cwd=%proc.cwd proc_pcmdline=%proc.pcmdline user_loginname=%user.loginname group_gid=%group.gid group_name=%group.name evt_type=%evt.type user=%user.name user_uid=%user.uid user_loginuid=%user.loginuid process=%proc.name command=%proc.cmdline  process_chain=[%proc.aexepath[3]->%proc.aexepath[2]->%proc.aexepath[1]->%proc.aexepath[0]] terminal=%proc.tty exe_flags=%evt.arg.flags)
+  priority: WARNING
+  tags: [maturity_stable, host, container, mitre_execution, T1059.004]
+
+
+#规则-18：【非法执行脚本/程序】检测在主机上启动可疑的网络工具
+- macro: user_known_network_tool_activities
+  condition: (never_true)
+- rule: Launch Suspicious Network Tool on Host
+  desc: >
+    检测在主机上启动网络工具(如netcat、nmap、tcpdump、socat等)。这是一个有价值的一般性检测，但建议通过user_known_network_tool_activities
+    设置白名单对其微调，以避免产生大量合法的日志。
+  condition: >
+    spawned_process 
+    and not built_in_whitelist
+    and not global_whitelist_program
+    and network_tool_procs 
+    and not user_known_network_tool_activities
+  output: Network tool launched on host (evt_type=%evt.type user=%user.name user_uid=%user.uid user_loginuid=%user.loginuid process=%proc.name command=%proc.cmdline process_chain=[%proc.aexepath[3]->%proc.aexepath[2]->%proc.aexepath[1]->%proc.aexepath[0]] terminal=%proc.tty exe_flags=%evt.arg.flags)
+  priority: NOTICE
+  tags: [maturity_incubating, host, network, process, mitre_execution, T1059]

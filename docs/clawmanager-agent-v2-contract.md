@@ -101,7 +101,7 @@ Request body:
   "workspace_path": "/workspaces/openclaw/user-45/instance-123",
   "port_range": {
     "start": 20000,
-    "end": 20099
+    "end": 20299
   },
   "uid": 200123,
   "gid": 200123,

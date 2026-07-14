@@ -4,6 +4,7 @@ import {
   ArrowLeft,
   Bot,
   ChevronDown,
+  ChevronRight,
   Gauge,
   Home,
   LogOut,
@@ -16,10 +17,11 @@ import {
 import { useAuth } from '../contexts/AuthContext';
 import { useI18n } from '../contexts/I18nContext';
 import LanguageSwitcher from './LanguageSwitcher';
+import { CATEGORIES } from '../pages/admin/protection/_data';
 
 interface AdminLayoutProps {
   children: React.ReactNode;
-  title: string;
+  title?: string;
 }
 
 interface NavItem {
@@ -28,16 +30,21 @@ interface NavItem {
   icon: React.ComponentType<{ className?: string }>;
   matchPaths?: string[];
   exact?: boolean;
+  hasPopup?: boolean;
 }
 
 const shellContainerClass = 'w-full px-3 sm:px-4 lg:px-5 2xl:px-6';
 const appLogoSrc = '/lobster_logo.png';
 
-const AdminLayout: React.FC<AdminLayoutProps> = ({ children, title }) => {
+const AdminLayout: React.FC<AdminLayoutProps> = ({ children, title = '' }) => {
   const location = useLocation();
   const { user, logout } = useAuth();
   const { t } = useI18n();
   const [profileExpanded, setProfileExpanded] = useState(false);
+  const [popoverItemPath, setPopoverItemPath] = useState<string | null>(null);
+
+  // 安全防护 popup 用 7 类别（移除总览 + events，跟主入口和侧边其他 nav 重复）
+  const PROTECTION_POPUP_CATS = CATEGORIES.filter((c) => c.id !== 'overview' && c.id !== 'events');
 
   const navItems: NavItem[] = [
     { path: '/admin', label: t('nav.adminDashboard'), icon: Home, exact: true },
@@ -45,10 +52,23 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children, title }) => {
     { path: '/admin/instances', label: t('nav.instances'), icon: Monitor },
     { path: '/admin/runtime-pods', label: t('nav.runtime'), icon: Server },
     {
-      path: '/admin/security',
-      label: t('nav.securityCenter'),
+      path: '/admin/secplane',
+      label: t('nav.secplane'),
       icon: Shield,
-      matchPaths: ['/admin/assets', '/admin/skills'],
+      matchPaths: [
+        '/admin/secplane/runtime',
+        '/admin/secplane/events',
+        '/admin/secplane/cat-trust',
+        '/admin/secplane/cat-identity',
+        '/admin/secplane/cat-isolate',
+        '/admin/secplane/cat-govern',
+        '/admin/secplane/cat-policy',
+        '/admin/secplane/cat-comm',
+        '/admin/security',
+        '/admin/assets',
+        '/admin/skills',
+      ],
+      hasPopup: true,
     },
     {
       path: '/admin/ai-gateway',
@@ -83,6 +103,75 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children, title }) => {
         <Icon className="h-4 w-4 shrink-0" />
         <span className="truncate">{item.label}</span>
       </Link>
+    );
+  };
+
+  const renderNavItemWithPopup = (item: NavItem) => {
+    const Icon = item.icon;
+    if (!item.hasPopup) {
+      return (
+        <div key={item.path} className="relative">
+          <Link
+            to={item.path}
+            className={`app-nav-link ${isActive(item) ? 'app-nav-link-active' : ''}`}
+          >
+            <Icon className="h-4 w-4 shrink-0" />
+            <span className="truncate">{item.label}</span>
+          </Link>
+        </div>
+      );
+    }
+    return (
+      <div
+        key={item.path}
+        className="relative"
+        onMouseEnter={() => setPopoverItemPath(item.path)}
+        onMouseLeave={() => setPopoverItemPath(null)}
+      >
+        <Link
+          to={item.path}
+          className={`app-nav-link ${isActive(item) ? 'app-nav-link-active' : ''}`}
+        >
+          <Icon className="h-4 w-4 shrink-0" />
+          <span className="truncate">{item.label}</span>
+          <ChevronRight className="ml-auto h-3.5 w-3.5 shrink-0 opacity-60" />
+        </Link>
+        {popoverItemPath === item.path && (
+          <div className="absolute left-full top-0 z-40 ml-3 w-64 rounded-md border border-slate-200 bg-white p-2 shadow-lg">
+            <div className="px-3 pb-2 pt-1 text-xs font-semibold uppercase tracking-wider text-slate-500">
+              {t('adminLayout.protectionCats')}
+            </div>
+            {PROTECTION_POPUP_CATS.map((cat) => (
+              <Link
+                key={cat.id}
+                to={cat.path}
+                className={`flex items-center gap-2 rounded-md px-3 py-2 text-sm transition ${
+                  cat.disabled
+                    ? 'cursor-not-allowed opacity-50'
+                    : 'text-slate-950 hover:bg-slate-100'
+                }`}
+                onClick={() => setPopoverItemPath(null)}
+              >
+                <span
+                  className="inline-block h-1.5 w-1.5 shrink-0 rounded-full"
+                  style={{ background: cat.color }}
+                />
+                <span className="flex-1 truncate font-medium">
+                  {cat.labelKey ? t(cat.labelKey) : cat.label}
+                </span>
+                {cat.count !== undefined && !cat.disabled && (
+                  <span className="text-[10px] text-slate-500">
+                    {t('adminLayout.sceneCount', { count: cat.count })}
+                  </span>
+                )}
+                {cat.disabled && (
+                  <span className="badge badge-slate text-[10px]">{t('adminLayout.planned')}</span>
+                )}
+              </Link>
+            ))}
+          </div>
+        )}
+      </div>
     );
   };
 
@@ -150,7 +239,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children, title }) => {
             </div>
 
             <nav className="flex-1 overflow-y-auto p-3">
-              <div className="space-y-1">{navItems.map(renderNavItem)}</div>
+              <div className="space-y-1">{navItems.map(renderNavItemWithPopup)}</div>
             </nav>
 
             <div className="border-t border-slate-200 p-3">

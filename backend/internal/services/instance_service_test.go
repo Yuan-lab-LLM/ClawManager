@@ -1,11 +1,30 @@
 package services
 
 import (
+	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"clawreef/internal/models"
 )
+
+func TestGatewayTokenAliasTTLConfig(t *testing.T) {
+	t.Setenv(gatewayTokenAliasTTLEnv, "")
+	if got := gatewayTokenAliasTTL(); got != defaultGatewayTokenAliasTTL {
+		t.Fatalf("default gateway token alias TTL = %v, want %v", got, defaultGatewayTokenAliasTTL)
+	}
+
+	t.Setenv(gatewayTokenAliasTTLEnv, "2")
+	if got := gatewayTokenAliasTTL(); got != 2*time.Hour {
+		t.Fatalf("configured gateway token alias TTL = %v, want 2h", got)
+	}
+
+	t.Setenv(gatewayTokenAliasTTLEnv, "0")
+	if got := gatewayTokenAliasTTL(); got != 0 {
+		t.Fatalf("disabled gateway token alias TTL = %v, want 0", got)
+	}
+}
 
 type stubLLMModelRepository struct {
 	active []models.LLMModel
@@ -109,8 +128,50 @@ func TestBuildGatewayEnvEnsuresMissingGatewayToken(t *testing.T) {
 	if got := instanceRepo.updated[68]; got == nil || got.AccessToken == nil || *got.AccessToken != *instance.AccessToken {
 		t.Fatalf("repository update did not persist provisioned token: %#v", instanceRepo.updated[68])
 	}
+	alias, ok := instanceRepo.aliases[68]
+	if !ok {
+		t.Fatal("repository did not record provisioned token as a gateway alias")
+	}
+	if alias.token != *instance.AccessToken {
+		t.Fatalf("gateway alias token = %q, want provisioned token %q", alias.token, *instance.AccessToken)
+	}
+	if alias.expiresAt.Before(time.Now().Add(6 * 24 * time.Hour)) {
+		t.Fatalf("gateway alias expiry = %v, want roughly the default compatibility window", alias.expiresAt)
+	}
 }
 
+func TestBuildGatewayEnvRecordsExistingGatewayTokenAlias(t *testing.T) {
+	t.Setenv("CLAWMANAGER_LLM_GATEWAY_BASE_URL", "http://gateway.example/api/v1/gateway/llm")
+
+	token := "igt_existing_token"
+	instanceRepo := &stubGatewayEnvInstanceRepository{fakeRuntimeInstanceRepo: newFakeRuntimeInstanceRepo()}
+	service := &instanceService{
+		instanceRepo: instanceRepo,
+		llmModelRepo: &stubLLMModelRepository{
+			active: []models.LLMModel{{DisplayName: "auto"}},
+		},
+	}
+
+	env, err := service.BuildGatewayEnv(&models.Instance{
+		ID:          69,
+		UserID:      1,
+		Type:        "hermes",
+		AccessToken: &token,
+	})
+	if err != nil {
+		t.Fatalf("BuildGatewayEnv returned error: %v", err)
+	}
+	if env["CLAWMANAGER_LLM_API_KEY"] != token {
+		t.Fatalf("CLAWMANAGER_LLM_API_KEY = %q, want existing token", env["CLAWMANAGER_LLM_API_KEY"])
+	}
+	alias, ok := instanceRepo.aliases[69]
+	if !ok {
+		t.Fatal("repository did not record existing token as a gateway alias")
+	}
+	if alias.token != token {
+		t.Fatalf("gateway alias token = %q, want existing token %q", alias.token, token)
+	}
+}
 func TestBuildGatewayEnvMergesEnvironmentOverrides(t *testing.T) {
 	t.Setenv("CLAWMANAGER_LLM_GATEWAY_BASE_URL", "http://gateway.example/api/v1/gateway/llm")
 	token := "igt_test_token"
@@ -169,9 +230,15 @@ func TestBuildGatewayEnvSkipsUnmanagedRuntime(t *testing.T) {
 	}
 }
 
+type gatewayTokenAliasRecord struct {
+	token     string
+	expiresAt time.Time
+}
+
 type stubGatewayEnvInstanceRepository struct {
 	*fakeRuntimeInstanceRepo
 	updated map[int]*models.Instance
+	aliases map[int]gatewayTokenAliasRecord
 }
 
 func (r *stubGatewayEnvInstanceRepository) Update(instance *models.Instance) error {
@@ -183,6 +250,13 @@ func (r *stubGatewayEnvInstanceRepository) Update(instance *models.Instance) err
 	return nil
 }
 
+func (r *stubGatewayEnvInstanceRepository) UpsertGatewayTokenAlias(ctx context.Context, instanceID int, accessToken string, expiresAt time.Time) error {
+	if r.aliases == nil {
+		r.aliases = map[int]gatewayTokenAliasRecord{}
+	}
+	r.aliases[instanceID] = gatewayTokenAliasRecord{token: accessToken, expiresAt: expiresAt}
+	return nil
+}
 func TestBuildAgentEnvInjectsHermesAgentConfig(t *testing.T) {
 	t.Setenv("CLAWMANAGER_AGENT_CONTROL_BASE_URL", "http://agent-control.example")
 

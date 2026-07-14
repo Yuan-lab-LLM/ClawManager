@@ -58,6 +58,7 @@
 
 Recent highlights from the latest product and documentation updates.
 
+- [2026-07-07] Added the Security Protection Platform (secplane) frontend — a comprehensive security console covering runtime defense (input/state/decision/output surface, asset tamper-proofing, human approval), host hardening & container isolation, outbound trusted-endpoint governance, policy governance, kill-switch/circuit-breaker, full-chain audit, SecureClaw data-and-component trust auditing, collaboration governance, and input detection. All 4 defense layers are accessible from a unified admin UI with full i18n for 5 languages.
 - [2026-06-14] Added Lite / Pro runtime modes and rollout support, so Lite instances can run through shared gateway runtime pools while Pro instances keep dedicated desktop deployments for stronger isolation.
 - [2026-05-18] Added the Team workspace MVP introduction and preview, covering one-click Team creation, OpenClaw member orchestration, Redis Team Bus injection, shared storage, member status, task dispatch, and event/result views.
 - [2026-04-29] Added Hermes runtime integration support, including Webtop-based instance provisioning, Agent Control Plane registration, AI Gateway injection, channel and skill bootstrap, and `.hermes` import/export workflows. See the [Hermes Runtime Guide](./docs/hermes-runtime-agent-development.md).
