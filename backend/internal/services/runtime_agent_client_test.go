@@ -37,6 +37,7 @@ func TestRuntimeAgentClientCreateGateway(t *testing.T) {
 		UserID:        8,
 		AgentType:     "openclaw",
 		WorkspacePath: "/workspaces/openclaw/user-8/instance-7",
+		GatewayPort:   20015,
 		PortRange:     RuntimeAgentPortRange{Start: RuntimeGatewayPortStart, End: RuntimeGatewayPortEnd},
 		UID:           200007,
 		GID:           200007,
@@ -51,7 +52,7 @@ func TestRuntimeAgentClientCreateGateway(t *testing.T) {
 	if gotToken != "secret" {
 		t.Fatalf("unexpected token %q", gotToken)
 	}
-	if gotReq.InstanceID != 7 || gotReq.PortRange.Start != 20000 {
+	if gotReq.InstanceID != 7 || gotReq.GatewayPort != 20015 || gotReq.PortRange.Start != 20000 {
 		t.Fatalf("unexpected request %#v", gotReq)
 	}
 	if resp.GatewayID != "gw-7-3" || resp.Port != 20017 {

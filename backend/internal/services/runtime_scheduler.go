@@ -935,11 +935,16 @@ func (s *RuntimeScheduler) createGatewayOnPod(ctx context.Context, instance mode
 		return fmt.Errorf("build runtime gateway environment: %w", err)
 	}
 	uid, gid := runtimeGatewayLinuxIDs(instance.ID, environment)
+	reservedBinding, err := s.reserveGatewayPort(ctx, instance, runtimeType, pod, workspacePath)
+	if err != nil {
+		return err
+	}
 	resp, err := s.agentClient.CreateGateway(ctx, endpoint, RuntimeAgentCreateGatewayRequest{
 		InstanceID:    instance.ID,
 		UserID:        instance.UserID,
 		AgentType:     runtimeType,
 		WorkspacePath: workspacePath,
+		GatewayPort:   reservedBinding.GatewayPort,
 		PortRange: RuntimeAgentPortRange{
 			Start: s.gatewayPortStart,
 			End:   s.gatewayPortEnd,
@@ -953,30 +958,24 @@ func (s *RuntimeScheduler) createGatewayOnPod(ctx context.Context, instance mode
 		Environment: environment,
 	})
 	if err != nil {
-		return err
+		return s.cleanupGatewayAfterAssignFailure(ctx, endpoint, instance.ID, "", true, err)
 	}
 	if resp == nil {
-		return fmt.Errorf("runtime agent returned empty gateway response")
+		return s.cleanupGatewayAfterAssignFailure(ctx, endpoint, instance.ID, "", true, fmt.Errorf("runtime agent returned empty gateway response"))
+	}
+	if resp.Port != reservedBinding.GatewayPort {
+		cause := fmt.Errorf("runtime agent returned gateway port %d, want control-plane allocation %d", resp.Port, reservedBinding.GatewayPort)
+		return s.cleanupGatewayAfterAssignFailure(ctx, endpoint, instance.ID, resp.GatewayID, true, cause)
 	}
 
 	now := time.Now().UTC()
 	lifecycle := NormalizeRuntimeGatewayLifecycle(resp.Status, nil)
-	binding := &models.InstanceRuntimeBinding{
-		InstanceID:    instance.ID,
-		RuntimePodID:  pod.ID,
-		RuntimeType:   runtimeType,
-		GatewayID:     resp.GatewayID,
-		GatewayPort:   resp.Port,
-		GatewayPID:    resp.PID,
-		WorkspacePath: workspacePath,
-		State:         lifecycle.BindingState,
-		Generation:    instance.RuntimeGeneration,
-	}
+	var lastHealthAt *time.Time
 	if lifecycle.Running {
-		binding.LastHealthAt = &now
+		lastHealthAt = &now
 	}
-	if err := s.createRuntimeBindingWithStalePortRecovery(ctx, binding); err != nil {
-		return s.cleanupGatewayAfterAssignFailure(ctx, endpoint, instance.ID, resp.GatewayID, false, err)
+	if err := s.bindingRepo.UpdateGatewayAssignment(ctx, instance.ID, instance.RuntimeGeneration, resp.GatewayID, resp.PID, lifecycle.BindingState, lastHealthAt); err != nil {
+		return s.cleanupGatewayAfterAssignFailure(ctx, endpoint, instance.ID, resp.GatewayID, true, err)
 	}
 	if !lifecycle.CreateAccepted() {
 		cause := fmt.Errorf("runtime gateway %s returned status %q", resp.GatewayID, strings.TrimSpace(resp.Status))
@@ -1009,6 +1008,57 @@ func (s *RuntimeScheduler) createGatewayOnPod(ctx context.Context, instance mode
 		}
 	}
 	return nil
+}
+
+func (s *RuntimeScheduler) reserveGatewayPort(ctx context.Context, instance models.Instance, runtimeType string, pod models.RuntimePod, workspacePath string) (*models.InstanceRuntimeBinding, error) {
+	if s == nil || s.bindingRepo == nil {
+		return nil, fmt.Errorf("runtime scheduler binding repository is not configured")
+	}
+	blockSize := RuntimeGatewayPortsPerInstance
+	if blockSize <= 0 {
+		blockSize = 1
+	}
+	existingBindings, err := s.bindingRepo.ListByRuntimePodID(ctx, pod.ID)
+	if err != nil {
+		return nil, fmt.Errorf("list runtime pod %d bindings for gateway port allocation: %w", pod.ID, err)
+	}
+	for port := s.gatewayPortStart; port+blockSize-1 <= s.gatewayPortEnd; port += blockSize {
+		if runtimeGatewayPortBlockOccupied(existingBindings, port, blockSize) {
+			deleted, err := s.bindingRepo.DeleteErrorByRuntimePodIDAndGatewayPort(ctx, pod.ID, port)
+			if err != nil {
+				return nil, fmt.Errorf("clear stale gateway port %d on runtime pod %d: %w", port, pod.ID, err)
+			}
+			if deleted == 0 {
+				continue
+			}
+		}
+		binding := &models.InstanceRuntimeBinding{
+			InstanceID:    instance.ID,
+			RuntimePodID:  pod.ID,
+			RuntimeType:   runtimeType,
+			GatewayID:     fmt.Sprintf("pending-%d-%d", instance.ID, instance.RuntimeGeneration),
+			GatewayPort:   port,
+			WorkspacePath: workspacePath,
+			State:         "creating",
+			Generation:    instance.RuntimeGeneration,
+		}
+		if err := s.createRuntimeBindingWithStalePortRecovery(ctx, binding); err != nil {
+			return nil, fmt.Errorf("reserve gateway port %d on runtime pod %d: %w", port, pod.ID, err)
+		}
+		return binding, nil
+	}
+	return nil, fmt.Errorf("no free gateway port block on runtime pod %d in range %d-%d", pod.ID, s.gatewayPortStart, s.gatewayPortEnd)
+}
+
+func runtimeGatewayPortBlockOccupied(bindings []models.InstanceRuntimeBinding, requestedPort, blockSize int) bool {
+	requestedEnd := requestedPort + blockSize - 1
+	for _, binding := range bindings {
+		existingEnd := binding.GatewayPort + blockSize - 1
+		if requestedPort <= existingEnd && binding.GatewayPort <= requestedEnd {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *RuntimeScheduler) createRuntimeBindingWithStalePortRecovery(ctx context.Context, binding *models.InstanceRuntimeBinding) error {

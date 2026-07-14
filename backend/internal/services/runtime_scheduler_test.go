@@ -89,6 +89,9 @@ func TestRuntimeSchedulerAssignsCreatingInstanceToReadyPod(t *testing.T) {
 	if req.req.PortRange.Start != RuntimeGatewayPortStart || req.req.PortRange.End != RuntimeGatewayPortEnd {
 		t.Fatalf("port range = %+v", req.req.PortRange)
 	}
+	if req.req.GatewayPort != RuntimeGatewayPortStart {
+		t.Fatalf("gateway port = %d, want %d", req.req.GatewayPort, RuntimeGatewayPortStart)
+	}
 	if req.req.UID != RuntimeLinuxID(17) || req.req.GID != RuntimeLinuxID(17) {
 		t.Fatalf("linux IDs = %d/%d", req.req.UID, req.req.GID)
 	}
@@ -100,7 +103,7 @@ func TestRuntimeSchedulerAssignsCreatingInstanceToReadyPod(t *testing.T) {
 	if binding == nil {
 		t.Fatal("binding was not created")
 	}
-	if binding.RuntimePodID != 9 || binding.GatewayPort != 20017 {
+	if binding.RuntimePodID != 9 || binding.GatewayPort != RuntimeGatewayPortStart {
 		t.Fatalf("binding pod/port = %d/%d", binding.RuntimePodID, binding.GatewayPort)
 	}
 	if instanceRepo.workspacePaths[17] != "/workspaces/openclaw/user-45/instance-17" {
@@ -1248,11 +1251,11 @@ func TestRuntimeSchedulerCleansUpGatewayAndReleasesSlotWhenBindingCreateFails(t 
 	if !errors.Is(err, createErr) {
 		t.Fatalf("assignInstance error = %v, want binding create error", err)
 	}
-	if got := len(agent.deleteRequests); got != 1 {
-		t.Fatalf("DeleteGateway calls = %d, want 1", got)
+	if got := len(agent.createRequests); got != 0 {
+		t.Fatalf("CreateGateway calls = %d, want 0 because port reservation failed", got)
 	}
-	if agent.deleteRequests[0].gatewayID != "gw-22" {
-		t.Fatalf("deleted gateway = %q, want gw-22", agent.deleteRequests[0].gatewayID)
+	if got := len(agent.deleteRequests); got != 0 {
+		t.Fatalf("DeleteGateway calls = %d, want 0 because gateway was not created", got)
 	}
 	if podRepo.releases[9] != 1 {
 		t.Fatalf("pod releases = %d, want 1", podRepo.releases[9])
@@ -2227,6 +2230,19 @@ func (r *fakeRuntimeBindingRepo) ListByRuntimePodIDs(ctx context.Context, runtim
 func (r *fakeRuntimeBindingRepo) UpdateRunning(ctx context.Context, instanceID int, generation int, gatewayID string, port int, pid *int) error {
 	return nil
 }
+func (r *fakeRuntimeBindingRepo) UpdateGatewayAssignment(ctx context.Context, instanceID int, generation int, gatewayID string, pid *int, state string, lastHealthAt *time.Time) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	binding := r.bindings[instanceID]
+	if binding == nil {
+		return repository.ErrStaleRuntimeGeneration
+	}
+	binding.GatewayID = gatewayID
+	binding.GatewayPID = pid
+	binding.State = state
+	binding.LastHealthAt = lastHealthAt
+	return nil
+}
 func (r *fakeRuntimeBindingRepo) UpdateState(ctx context.Context, instanceID int, generation int, state string, message *string) error {
 	return nil
 }
@@ -2357,7 +2373,11 @@ func (c *fakeRuntimeAgentClient) CreateGateway(ctx context.Context, endpoint str
 	if c.createResponse == nil {
 		return nil, errors.New("missing create response")
 	}
-	return c.createResponse, nil
+	response := *c.createResponse
+	if req.GatewayPort > 0 {
+		response.Port = req.GatewayPort
+	}
+	return &response, nil
 }
 func (c *fakeRuntimeAgentClient) DeleteGateway(ctx context.Context, endpoint, gatewayID string) error {
 	c.deleteRequests = append(c.deleteRequests, fakeDeleteGatewayRequest{endpoint: endpoint, gatewayID: gatewayID})

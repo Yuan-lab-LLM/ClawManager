@@ -26,6 +26,10 @@ type RuntimeAgentPortRange struct {
 }
 
 type RuntimeAgentCreateGatewayRequest struct {
+	// GatewayPort is the exact primary port allocated by ClawManager. Runtime
+	// agents use PortRange only for backwards-compatible callers that have not
+	// yet been upgraded to control-plane port assignment.
+	GatewayPort   int                   `json:"gateway_port,omitempty"`
 	InstanceID    int                   `json:"instance_id"`
 	UserID        int                   `json:"user_id"`
 	AgentType     string                `json:"agent_type"`

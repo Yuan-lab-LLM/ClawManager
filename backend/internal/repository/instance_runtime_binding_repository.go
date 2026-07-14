@@ -19,6 +19,7 @@ type InstanceRuntimeBindingRepository interface {
 	ListByRuntimePodID(ctx context.Context, runtimePodID int64) ([]models.InstanceRuntimeBinding, error)
 	ListByRuntimePodIDs(ctx context.Context, runtimePodIDs []int64) ([]models.InstanceRuntimeBinding, error)
 	UpdateRunning(ctx context.Context, instanceID int, generation int, gatewayID string, port int, pid *int) error
+	UpdateGatewayAssignment(ctx context.Context, instanceID int, generation int, gatewayID string, pid *int, state string, lastHealthAt *time.Time) error
 	UpdateState(ctx context.Context, instanceID int, generation int, state string, message *string) error
 	DeleteErrorByRuntimePodIDAndGatewayPort(ctx context.Context, runtimePodID int64, gatewayPort int) (int64, error)
 	DeleteByInstanceID(ctx context.Context, instanceID int) error
@@ -102,6 +103,33 @@ func (r *instanceRuntimeBindingRepository) ListByRuntimePodIDs(ctx context.Conte
 	return bindings, nil
 }
 
+// UpdateGatewayAssignment fills a binding that was reserved by the control
+// plane before the runtime agent was asked to start the gateway. The port is
+// intentionally not updated here: it is the reservation being confirmed.
+func (r *instanceRuntimeBindingRepository) UpdateGatewayAssignment(ctx context.Context, instanceID int, generation int, gatewayID string, pid *int, state string, lastHealthAt *time.Time) error {
+	res, err := r.sess.SQL().ExecContext(ctx, `
+		UPDATE instance_runtime_bindings
+		SET gateway_id = ?, gateway_pid = ?, state = ?, last_health_at = ?, error_message = NULL, updated_at = ?
+		WHERE instance_id = ? AND generation <= ?
+	`, gatewayID, pid, state, lastHealthAt, time.Now().UTC(), instanceID, generation)
+	if err != nil {
+		return fmt.Errorf("failed to update gateway assignment: %w", err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to inspect gateway assignment update: %w", err)
+	}
+	if affected == 0 {
+		currentGeneration, err := r.getGeneration(ctx, instanceID)
+		if err != nil {
+			return err
+		}
+		if currentGeneration > generation {
+			return ErrStaleRuntimeGeneration
+		}
+	}
+	return nil
+}
 func (r *instanceRuntimeBindingRepository) UpdateRunning(ctx context.Context, instanceID int, generation int, gatewayID string, port int, pid *int) error {
 	now := time.Now().UTC()
 	res, err := r.sess.SQL().ExecContext(ctx, `
