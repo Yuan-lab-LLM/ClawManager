@@ -714,7 +714,12 @@ func TestWriteLiteTeamMemberIdentityFiles(t *testing.T) {
 	if err := (&teamService{}).writeLiteTeamMemberIdentityFiles(instance, team, member, roster); err != nil {
 		t.Fatalf("writeLiteTeamMemberIdentityFiles returned error: %v", err)
 	}
-	for _, name := range []string{teamAgentsFileName, teamSoulFileName, teamConfigFileName, filepath.Join(".hermes", teamSoulFileName)} {
+	for _, name := range []string{
+		teamAgentsFileName,
+		teamSoulFileName,
+		teamConfigFileName,
+		filepath.Join(".hermes", teamSoulFileName),
+	} {
 		if _, err := os.Stat(filepath.Join(workspace, name)); err != nil {
 			t.Fatalf("expected Lite identity file %s: %v", name, err)
 		}
@@ -2175,8 +2180,9 @@ func TestMarkStructuredCompletionDeferredRemainsVisibleInChat(t *testing.T) {
 	markStructuredCompletionDecision("completion_proposed", payload, teamCompletionEvaluation{
 		Decision: teamCompletionDecisionDeferred, Reason: "open_workflow_phases", LedgerVersion: 9,
 	})
-	if !eventBool(payload, "visibleToChat") || eventString(payload, "chatPolicy") != "warning" || eventString(payload, "chatKind") != "completion_deferred" {
-		t.Fatalf("deferred completion must retain visible report and diagnostic: %#v", payload)
+	if !eventBool(payload, "visibleToChat") || eventString(payload, "chatPolicy") != "warning" || eventString(payload, "chatKind") != "completion_deferred" ||
+		eventString(payload, "resultMarkdown", "result") != "" || payload["completionDraftStored"] != true {
+		t.Fatalf("deferred completion must retain only a visible diagnostic, not a final-looking delivery: %#v", payload)
 	}
 }
 

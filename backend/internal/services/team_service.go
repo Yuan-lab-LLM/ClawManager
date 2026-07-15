@@ -34,6 +34,8 @@ const (
 	teamConfigFileName      = "team.json"
 	teamAgentsFileName      = "AGENTS.md"
 	teamSoulFileName        = "SOUL.md"
+	teamManagedOverlayStart = "<!-- CLAWMANAGER TEAM OVERLAY: START -->"
+	teamManagedOverlayEnd   = "<!-- CLAWMANAGER TEAM OVERLAY: END -->"
 	teamConfigMountDirPath  = "/etc/clawmanager/team"
 	teamConfigMountPath     = teamConfigMountDirPath + "/" + teamConfigFileName
 	teamHermesSoulMountPath = "/config/.hermes/SOUL.md"
@@ -604,6 +606,9 @@ func buildTeamTaskEnvelope(teamID int, memberKey string, task *models.TeamTask, 
 		"teamId":             strconv.Itoa(teamID),
 		"from":               "clawmanager",
 		"to":                 memberKey,
+		"memberId":           memberKey,
+		"role":               memberContext["role"],
+		"displayName":        memberContext["displayName"],
 		"replyTo":            teamTaskReplyTarget,
 		"requiresCompletion": true,
 		"completionTool":     teamTaskCompletionTool,
@@ -789,13 +794,13 @@ func appendTeamTaskCompletionInstruction(prompt string, communicationMode, inten
 	}
 	instruction := strings.Join([]string{
 		"Completion contract:",
-		"- For multi-member Teams, first write a compact collaboration plan: subtasks, owner member_id, dependency, expected artifact, and verification rule.",
+		"- For multi-member Teams, first write a compact collaboration plan: subtasks, owner member_id, dependency, expected artifact, and verification rule. The Leader must use team_artifact_write with scope=\"team\", kind=\"plan\", path=\"collaboration-plan.md\" and then publish only the canonical /team path returned by that tool.",
 		"- Publish that plan to ClawManager with team_update_progress status=\"running\" and eventKind=\"leader_plan\" before dispatching worker assignments. Plans are process visibility, not completion.",
 	}, "\n")
 	instruction += "\n" + strings.Join(modeInstructions, "\n")
 	instruction += "\n" + strings.Join([]string{
 		"- Publish meaningful process updates with team_update_progress. Use eventKind=\"worker_plan\" for worker execution plans, \"worker_progress\" for milestones, and \"leader_synthesis\" while reconciling member outputs. Use \"assignment_check_result\" only when replying to a ClawManager Monitor envelope carrying a monitor checkId; ordinary progress must remain worker_progress.",
-		"- Prefer team_artifact_write, team_artifact_read, team_artifact_list, and team_artifact_mkdir for shared artifacts. These tools enforce current-Team path isolation and cooperative permissions.",
+		"- Prefer team_artifact_write, team_artifact_read, team_artifact_list, and team_artifact_mkdir for shared artifacts. Member work is written under a root-task/member/assignment path. Team-scoped writes must declare kind=plan, kind=review, or kind=final and always use the canonical path returned by the tool; never invent /team links.",
 		"- If a worker is still executing a long step, report concise progress and continue. If context was lost or an artifact path is wrong, report a recoverable blocker to the Leader instead of treating the root task as failed.",
 		"- Every Team message must preserve rootTaskId/messageId context when available and must clearly state whether it is an assignment, peer request, progress update, result, review, blocker, or final synthesis.",
 		"- For multi-stage work, publish a structured leader_plan with planVersion and phases. Every team_send must carry a stable phaseId, assignmentId, workId, revision, required flag, and dependencies. Completing one phase never completes the user root task.",
@@ -1932,8 +1937,10 @@ func (s *teamService) enrichTaskWorkspaceContract(userID int, team *models.Team,
 		"invalidArtifactPrefixes":    []string{"team/"},
 		"taskRef":                    taskRef,
 		"artifactRoot":               "/team/artifacts/" + taskRef,
-		"memberArtifactRoot":         "/team/artifacts/" + taskRef + "/members/${memberId}",
-		"memberArtifactPhysicalRoot": filepath.ToSlash(filepath.Join(physicalSharedDir, "artifacts", taskRef, "members", "${memberId}")),
+		"memberArtifactRoot":         "/team/artifacts/" + taskRef + "/members/${memberId}/${assignmentId}",
+		"memberArtifactPhysicalRoot": filepath.ToSlash(filepath.Join(physicalSharedDir, "artifacts", taskRef, "members", "${memberId}", "${assignmentId}")),
+		"leaderPlanRoot":             "/team/results/" + taskRef + "/plan",
+		"reviewResultRoot":           "/team/results/" + taskRef + "/reviews/${assignmentId}",
 		"memberResultRoot":           "/team/results/" + taskRef + "/members/${memberId}",
 		"leaderResultRoot":           "/team/results/" + taskRef,
 		"statusRoot":                 "/team/status/" + taskRef,
@@ -1941,8 +1948,9 @@ func (s *teamService) enrichTaskWorkspaceContract(userID int, team *models.Team,
 		"statusFilesAreAdvisory":     true,
 		"stateAuthority":             "clawmanager_event_ledger",
 		"rules": []string{
-			"Use /team/artifacts/<rootTaskId>/members/<memberId>/<workId>/ for member deliverables.",
+			"Use /team/artifacts/<rootTaskId>/members/<memberId>/<assignmentId>/ for member deliverables.",
 			"Use /team/results/<rootTaskId>/members/<memberId>/ for member result summaries.",
+			"The Leader publishes plans through the artifact tool under /team/results/<rootTaskId>/plan/. Reviewers publish review reports under /team/results/<rootTaskId>/reviews/<assignmentId>/.",
 			"Only the Leader writes the root final synthesis under /team/results/<rootTaskId>/.",
 			"Shared status JSON files are compatibility snapshots; do not treat them as the task truth source.",
 		},
@@ -2162,9 +2170,31 @@ func (s *teamService) writeLiteTeamMemberIdentityFiles(instance *models.Instance
 	if err := os.MkdirAll(workspacePath, 0755); err != nil {
 		return fmt.Errorf("failed to prepare Lite Team identity workspace: %w", err)
 	}
-	files := map[string]string{
+	identityFiles := map[string]string{
 		teamAgentsFileName: buildTeamMemberAgentsMarkdown(team, member),
 		teamSoulFileName:   buildTeamMemberSoulMarkdown(member, normalizedTeamCommunicationMode(team.CommunicationMode)),
+	}
+	if strings.EqualFold(instance.Type, "openclaw") {
+		// OpenClaw injects AGENTS.md and SOUL.md from home/.openclaw/workspace,
+		// not from the instance workspace root. Merge Team guidance into the
+		// real prompt workspace without replacing user/default instructions.
+		openClawWorkspace := filepath.Join(workspacePath, "home", ".openclaw", "workspace")
+		if err := os.MkdirAll(openClawWorkspace, 0755); err != nil {
+			return fmt.Errorf("failed to prepare Lite Team OpenClaw workspace: %w", err)
+		}
+		chownTeamWorkspacePath(openClawWorkspace)
+		for name, content := range identityFiles {
+			if err := writeManagedTeamWorkspaceOverlay(filepath.Join(openClawWorkspace, name), content); err != nil {
+				return fmt.Errorf("failed to write Lite Team OpenClaw identity file %s: %w", name, err)
+			}
+			chownTeamWorkspacePath(filepath.Join(openClawWorkspace, name))
+		}
+	}
+	files := map[string]string{}
+	if !strings.EqualFold(instance.Type, "openclaw") {
+		for name, content := range identityFiles {
+			files[name] = content
+		}
 	}
 	if strings.TrimSpace(rosterJSON) != "" {
 		files[teamConfigFileName] = rosterJSON
@@ -2189,6 +2219,29 @@ func (s *teamService) writeLiteTeamMemberIdentityFiles(instance *models.Instance
 		chownTeamWorkspacePath(target)
 	}
 	return nil
+}
+
+func writeManagedTeamWorkspaceOverlay(path, content string) error {
+	existing, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	base := string(existing)
+	if start := strings.Index(base, teamManagedOverlayStart); start >= 0 {
+		if endOffset := strings.Index(base[start:], teamManagedOverlayEnd); endOffset >= 0 {
+			end := start + endOffset + len(teamManagedOverlayEnd)
+			base = strings.TrimRight(base[:start]+base[end:], " \t\r\n")
+		}
+	}
+	overlay := strings.Join([]string{
+		teamManagedOverlayStart,
+		strings.TrimSpace(content),
+		teamManagedOverlayEnd,
+	}, "\n")
+	if strings.TrimSpace(base) != "" {
+		base = strings.TrimRight(base, " \t\r\n") + "\n\n"
+	}
+	return os.WriteFile(path, []byte(base+overlay+"\n"), 0644)
 }
 
 func appendTeamCollaborationGuidance(systemPrompt, communicationMode string) string {
@@ -4973,9 +5026,21 @@ func markStructuredCompletionDecision(eventType string, payload map[string]inter
 	payload["availability"] = models.TeamMemberAvailabilityBusy
 	payload["rootTaskTerminal"] = false
 	payload["completionProposalPreserved"] = true
-	// A deferred completion is business information: it contains the Leader's
-	// delivery proposal plus the exact reason the system did not accept it.
-	// Keep it in the group chat; only the transport ACK is hidden.
+	// A deferred completion is business information, but its delivery draft is
+	// not a final result.  Showing that full draft in the group chat makes a
+	// still-running task look complete. Preserve an explicit diagnostic only;
+	// the complete result remains visible when a completion is accepted.
+	if draft := eventString(payload, "resultMarkdown", "result_markdown", "result", "answer"); draft != "" {
+		payload["completionDraftStored"] = true
+		payload["completionDraftLength"] = len(draft)
+		delete(payload, "resultMarkdown")
+		delete(payload, "result_markdown")
+		delete(payload, "result")
+		delete(payload, "answer")
+	}
+	if reason := completionDecisionMessage(evaluation); reason != "" {
+		payload["summary"] = reason
+	}
 	payload["visibleToChat"] = true
 	payload["visible_to_chat"] = true
 	payload["chatPolicy"] = "warning"
@@ -4984,6 +5049,28 @@ func markStructuredCompletionDecision(eventType string, payload map[string]inter
 		payload["displayKey"] = fmt.Sprintf("completion:%s:%d", completionID, evaluation.LedgerVersion)
 	}
 	return decisionType
+}
+
+func completionDecisionMessage(evaluation teamCompletionEvaluation) string {
+	if len(evaluation.PendingAssignments) > 0 {
+		return "最终交付暂未接受：仍等待 " + strings.Join(evaluation.PendingAssignments, "、") + "。"
+	}
+	if len(evaluation.PendingPhases) > 0 {
+		return "最终交付暂未接受：仍有未完成阶段 " + strings.Join(evaluation.PendingPhases, "、") + "。"
+	}
+	switch evaluation.Reason {
+	case "stale_ledger":
+		return "最终交付暂未接受：任务账本已更新，系统会按最新状态重新核对。"
+	case "missing_artifacts":
+		return "最终交付暂未接受：引用的团队产物尚不可读取。"
+	case "workflow_not_sealed":
+		return "最终交付暂未接受：Leader 仍可继续派发或封闭工作流。"
+	case "strong_narrative_contradiction":
+		return "最终交付需要 Leader 确认：报告包含明确的后续动作。"
+	case "invalid_completion_envelope":
+		return "最终交付未被接受：完成请求缺少必要的结构化上下文。"
+	}
+	return "最终交付暂未接受，ClawManager 正在等待可验证的工作流状态。"
 }
 
 func applyTeamChatPolicy(eventType string, payload map[string]interface{}, task *models.TeamTask, member *models.TeamMember) {
@@ -6144,6 +6231,18 @@ func (s *teamService) projectTeamEvent(team *models.Team, bus *redisBus, message
 		task.ErrorMessage = nil
 		task.FinishedAt = &now
 		task.UpdatedAt = now
+		// Persist the terminal workflow snapshot together with the final report.
+		// Otherwise a valid final delivery can carry the pre-completion state
+		// (for example planning) even though the task itself is succeeded.
+		payload["workflowState"] = teamWorkflowStateCompleted
+		payload["ledgerVersion"] = task.LedgerVersion
+		payload["currentPhaseId"] = nil
+		payloadJSON, err = marshalOptionalJSON(payload)
+		if err != nil {
+			return err
+		}
+		event.PayloadJSON = payloadJSON
+		task.ResultJSON = payloadJSON
 		sourceEventID := eventID
 		if sourceEventID == "" {
 			sourceEventID = message.ID
