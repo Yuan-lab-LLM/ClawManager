@@ -1948,7 +1948,7 @@ function downloadBlob(blob: Blob, filename: string) {
 }
 
 function workspaceLinkToRelativePath(raw: string) {
-  const normalized = raw.trim().replace(/\\/g, "/").replace(/[，。；;,.、)）\]}]+$/g, "");
+  const normalized = raw.trim().replace(/\\/g, "/").replace(/[，。；：;,:.、)）\]}】》]+$/g, "");
   if (normalized === "/team") {
     return "";
   }
@@ -1977,6 +1977,32 @@ function isTeamWorkspaceLink(path: string) {
     /^\.?\/?team\/.+/i.test(normalized) ||
     /^\/workspaces\/teams\/user-\d+\/team-\d+-shared\//i.test(normalized)
   );
+}
+
+function teamArtifactRefsFromPayload(payload: Record<string, unknown>, step?: Record<string, unknown>) {
+  const candidates = [
+    payload.artifactRefs,
+    payload.artifact_refs,
+    step?.artifactRefs,
+    step?.artifact_refs,
+  ];
+  const refs: string[] = [];
+  for (const candidate of candidates) {
+    if (!Array.isArray(candidate)) {
+      continue;
+    }
+    for (const raw of candidate) {
+      if (typeof raw !== "string") {
+        continue;
+      }
+      const value = raw.trim();
+      if (!value || !isTeamWorkspaceLink(value) || refs.includes(value)) {
+        continue;
+      }
+      refs.push(value);
+    }
+  }
+  return refs;
 }
 
 function formatWorkspaceSize(size: number) {
@@ -4602,6 +4628,7 @@ type TeamChatMessage = {
   dedupeKey?: string;
   threadKey?: string;
   sortPhase?: number;
+  artifactRefs?: string[];
 };
 
 const TEAM_CHAT_WAIT_DIGEST_MS = 3 * 60 * 1000;
@@ -5003,6 +5030,7 @@ function chatMessageFromItem(
     dedupeKey: chatItemDedupeKey(item, senderKey, content, isAssignmentEvent, isFeedbackEvent),
     threadKey: item.taskKey,
     sortPhase: chatItemSortPhase(item, isAssignmentEvent, isTerminalFeedback),
+    artifactRefs: teamArtifactRefsFromPayload(item.payload, item.collaborationStep),
   };
 }
 
@@ -5289,6 +5317,30 @@ function TeamChatMessageRow({
             compact
             onWorkspaceFileOpen={onWorkspaceFileOpen}
           />
+          {message.artifactRefs && message.artifactRefs.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-1.5 border-t border-slate-100 pt-2">
+              {message.artifactRefs.map((artifactRef) => {
+                const relativePath = workspaceLinkToRelativePath(artifactRef);
+                const previewable = isPreviewableWorkspacePath(relativePath);
+                return (
+                  <button
+                    key={artifactRef}
+                    type="button"
+                    disabled={!previewable || !onWorkspaceFileOpen}
+                    onClick={() => onWorkspaceFileOpen?.(artifactRef)}
+                    title={previewable ? `打开 ${artifactRef}` : `${artifactRef}（请在文件面板查看或下载）`}
+                    className={`max-w-full truncate rounded-md border px-2 py-1 font-mono text-[11px] font-medium transition ${
+                      previewable && onWorkspaceFileOpen
+                        ? "border-cyan-200 bg-cyan-50 text-cyan-700 hover:bg-cyan-100"
+                        : "cursor-default border-slate-200 bg-slate-50 text-slate-500"
+                    }`}
+                  >
+                    {artifactRef}
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -5547,7 +5599,7 @@ function renderInlineMarkdown(
   onWorkspaceFileOpen?: (path: string) => void,
 ) {
   const nodes: React.ReactNode[] = [];
-  const pattern = /(`[^`]+`|\/workspaces\/teams\/user-\d+\/team-\d+-shared\/[^\s`<>"')\]}]+|\/team\/[^\s`<>"')\]}]+|\.?\/?team\/[^\s`<>"')\]}]+|\*\*[^*]+\*\*|\*[^*]+\*)/g;
+  const pattern = /(`[^`]+`|\/workspaces\/teams\/user-\d+\/team-\d+-shared\/[^\s`<>"')\]}，。；：、】【》]+|\/team\/[^\s`<>"')\]}，。；：、】【》]+|\.?\/?team\/[^\s`<>"')\]}，。；：、】【》]+|\*\*[^*]+\*\*|\*[^*]+\*)/g;
   let lastIndex = 0;
   let match: RegExpExecArray | null;
   while ((match = pattern.exec(text)) !== null) {
@@ -5582,7 +5634,7 @@ function renderInlineMarkdown(
         );
       }
     } else if (isTeamWorkspaceLink(token)) {
-      const displayToken = token.replace(/[，。；;,.、)）\]}]+$/g, "");
+      const displayToken = token.replace(/[，。；：;,:.、)）\]}】》]+$/g, "");
       const suffix = token.slice(displayToken.length);
       const workspacePath = workspaceLinkToRelativePath(displayToken);
       if (onWorkspaceFileOpen && isPreviewableWorkspacePath(workspacePath)) {

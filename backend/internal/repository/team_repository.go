@@ -632,14 +632,13 @@ func (r *teamRepository) UpsertWorkItem(item *models.TeamWorkItem) error {
 		item.CreatedAt = existing.CreatedAt
 		newRevision := item.Revision > existing.Revision
 		existingTerminal := existing.Status == models.TeamTaskStatusSucceeded || existing.Status == models.TeamTaskStatusFailed || existing.Status == models.TeamTaskStatusStale
-		itemTerminal := item.Status == models.TeamTaskStatusSucceeded || item.Status == models.TeamTaskStatusFailed || item.Status == models.TeamTaskStatusStale
-		reopeningCurrent := !newRevision && existingTerminal && !itemTerminal &&
-			!item.UpdatedAt.IsZero() &&
-			(existing.UpdatedAt.IsZero() || item.UpdatedAt.After(existing.UpdatedAt))
+		// Terminal state is monotonic for one work_id/revision. A delayed
+		// progress event or duplicate dispatch must not reopen accepted work.
+		// Legitimate rework is represented by a newer revision (and therefore a
+		// distinct projected work_id), never by a newer timestamp alone.
+		reopeningCurrent := false
 		if !newRevision && existingTerminal && !reopeningCurrent {
-			if !itemTerminal {
-				item.Status = existing.Status
-			}
+			item.Status = existing.Status
 		}
 		if item.OwnerMemberID == nil {
 			item.OwnerMemberID = existing.OwnerMemberID
