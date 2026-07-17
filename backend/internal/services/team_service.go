@@ -4421,6 +4421,26 @@ func isPassiveAssignmentMonitorEvent(eventType string, payload map[string]interf
 	return monitorType == "assignment_status_check" && eventBool(payload, "nonAuthoritative", "non_authoritative")
 }
 
+func isPostTerminalMutableTeamEvent(eventType string, payload map[string]interface{}) bool {
+	eventType = strings.ToLower(strings.TrimSpace(eventType))
+	eventKind := strings.ToLower(strings.TrimSpace(eventString(payload, "eventKind", "event_kind", "kind")))
+	switch eventType {
+	case "task_received", "task_started", "task_progress", "progress", "assignment_heartbeat",
+		"assignment_check_requested", "completion_proposed", "completion_deferred",
+		"completion_rejected", "completion_needs_confirmation", "leader_decision_reminder",
+		"leader_synthesis_reminder":
+		return true
+	}
+	switch eventKind {
+	case "leader_plan", "worker_plan", "worker_progress", "leader_synthesis",
+		"agent_narrative", "agent_plan", "agent_progress", "agent_synthesis",
+		"assignment_heartbeat", "assignment_check_requested", "assignment_check_result",
+		"leader_decision_reminder", "leader_synthesis_reminder", "completion_deferred":
+		return true
+	}
+	return false
+}
+
 func isTeamPresenceEvent(eventType string) bool {
 	switch strings.ToLower(strings.TrimSpace(eventType)) {
 	case "presence", "member_presence", "status", "member_status":
@@ -6236,6 +6256,25 @@ func (s *teamService) projectTeamEvent(team *models.Team, bus *redisBus, message
 	// This deliberately runs after task/member resolution and before any
 	// terminal decision, so it cannot make an unrelated reply terminal.
 	hydrateExplicitCompletionEnvelope(payload, team, task, member, message.ID)
+	// Root terminal state is an immutable business boundary. Runtime retries can
+	// arrive after the accepted event (Team75 emitted a late leader_synthesis and
+	// stale completion), but they may not create a new warning, reopen a member,
+	// or replace the accepted summary. A completion proposal still receives an
+	// ACK so a compatible Runtime can stop retrying.
+	if task != nil && isTerminalTeamTaskStatus(task.Status) && isPostTerminalMutableTeamEvent(eventType, payload) {
+		if isCompletionProposal {
+			decision := teamCompletionDecisionAccepted
+			reason := "root_already_completed"
+			if task.Status != models.TeamTaskStatusSucceeded {
+				decision = teamCompletionDecisionRejected
+				reason = "root_already_terminal"
+			}
+			if err := s.emitCompletionAcknowledgement(team, bus, task, member, payload, decision, reason); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
 	normalizeUnauthorizedAssignmentCheckResult(payload)
 	passiveMonitorEvent := isPassiveAssignmentMonitorEvent(eventType, payload)
 	if isAssignmentHeartbeatEvent(eventType, payload) {
@@ -7794,7 +7833,11 @@ func (s *teamService) projectTeamWorkItem(
 		revision = 1
 	}
 	canonicalWorkID := eventString(payload, "canonicalWorkId", "canonical_work_id")
-	if canonicalWorkID == "" {
+	if rootCompletion {
+		// Final synthesis is its own Leader-owned lane. Never inherit the last
+		// Worker/Reviewer canonical id carried by a stale envelope.
+		canonicalWorkID = workID
+	} else if canonicalWorkID == "" {
 		canonicalWorkID = assignmentID
 	}
 	if revision > 1 && !strings.HasSuffix(workID, fmt.Sprintf(":r%d", revision)) {

@@ -4555,6 +4555,84 @@ func TestProjectTeamEventDropsHeartbeatAfterTerminalTask(t *testing.T) {
 	}
 }
 
+func TestProjectTeamEventDropsLeaderProgressAfterTerminalTask(t *testing.T) {
+	finishedAt := time.Now().UTC().Add(-time.Minute)
+	task := &models.TeamTask{
+		ID: 150, TeamID: 75, TargetMemberID: 256,
+		MessageID: "team-75-task-1784165223585610285",
+		Status:    models.TeamTaskStatusSucceeded, WorkflowState: teamWorkflowStateCompleted,
+		FinishedAt: &finishedAt, UpdatedAt: finishedAt,
+	}
+	leader := &models.TeamMember{
+		ID: 256, TeamID: 75, MemberKey: "leader", Role: "leader",
+		Status: models.TeamMemberStatusIdle, Availability: models.TeamMemberAvailabilityIdle,
+	}
+	repo := &teamRepositoryStub{
+		tasksByID:    map[int]*models.TeamTask{task.ID: task},
+		membersByKey: map[string]*models.TeamMember{"leader": leader},
+	}
+	service := &teamService{repo: repo}
+	payloadJSON, err := json.Marshal(map[string]interface{}{
+		"event": "task_progress", "eventKind": "leader_synthesis",
+		"memberId": "leader", "taskId": "team-75-task-150",
+		"rootTaskId": "team-75-task-150", "status": "running",
+		"runtimeStatus": "running", "summary": "准备再次提交最终结果",
+	})
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	if err := service.projectTeamEvent(&models.Team{ID: 75, CommunicationMode: teamCommunicationModeLeaderMediated}, nil, redisStreamMessage{
+		ID: "1784165677000-0", Fields: map[string]string{"payload": string(payloadJSON)},
+	}); err != nil {
+		t.Fatalf("projectTeamEvent returned error: %v", err)
+	}
+	if len(repo.createdEvents) != 0 || repo.updatedTask != nil || repo.updatedMember != nil {
+		t.Fatalf("post-terminal synthesis must be ignored, events=%#v task=%#v member=%#v", repo.createdEvents, repo.updatedTask, repo.updatedMember)
+	}
+}
+
+func TestProjectTeamEventDropsStaleCompletionAfterAcceptedRoot(t *testing.T) {
+	finishedAt := time.Now().UTC().Add(-time.Minute)
+	acceptedID := "completion:75:team-75-task-150:leader:root:1"
+	task := &models.TeamTask{
+		ID: 150, TeamID: 75, TargetMemberID: 256,
+		MessageID: "team-75-task-1784165223585610285",
+		Status:    models.TeamTaskStatusSucceeded, WorkflowState: teamWorkflowStateCompleted,
+		LedgerVersion: 9, AcceptedCompletionID: &acceptedID,
+		FinishedAt: &finishedAt, UpdatedAt: finishedAt,
+	}
+	leader := &models.TeamMember{
+		ID: 256, TeamID: 75, MemberKey: "leader", Role: "leader",
+		Status: models.TeamMemberStatusIdle, Availability: models.TeamMemberAvailabilityIdle,
+	}
+	repo := &teamRepositoryStub{
+		tasksByID:    map[int]*models.TeamTask{task.ID: task},
+		membersByKey: map[string]*models.TeamMember{"leader": leader},
+	}
+	service := &teamService{repo: repo}
+	payloadJSON, err := json.Marshal(map[string]interface{}{
+		"protocolVersion": 3, "event": "completion_proposed",
+		"completionId": acceptedID, "attemptId": "late-attempt",
+		"completionSource": teamTaskCompletionTool, "explicitCompletion": true,
+		"rootTaskTerminal": true, "workflowFinal": true, "finalAnswerReady": true,
+		"remainingActions": []string{}, "memberId": "leader",
+		"taskId": "team-75-task-150", "rootTaskId": "team-75-task-150",
+		"ledgerVersion": 7, "status": "succeeded", "runtimeStatus": "succeeded",
+		"summary": "迟到的最终提交", "resultMarkdown": "迟到的最终提交",
+	})
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	if err := service.projectTeamEvent(&models.Team{ID: 75, CommunicationMode: teamCommunicationModeLeaderMediated}, nil, redisStreamMessage{
+		ID: "1784165682000-0", Fields: map[string]string{"payload": string(payloadJSON)},
+	}); err != nil {
+		t.Fatalf("projectTeamEvent returned error: %v", err)
+	}
+	if len(repo.createdEvents) != 0 || repo.updatedTask != nil || repo.updatedMember != nil {
+		t.Fatalf("stale completion must not create a deferred event or mutate terminal state, events=%#v task=%#v member=%#v", repo.createdEvents, repo.updatedTask, repo.updatedMember)
+	}
+}
+
 func TestProjectTeamEventDropsHeartbeatAfterTerminalWorkItem(t *testing.T) {
 	rootTaskID := 95
 	memberID := 701
@@ -4925,6 +5003,36 @@ func TestLeaderSynthesisProgressExplicitlySealsWorkflow(t *testing.T) {
 	}
 	if task.WorkflowState != teamWorkflowStateSynthesizing || task.LedgerVersion != 5 {
 		t.Fatalf("expected structured leader seal to update workflow ledger, task=%#v", task)
+	}
+}
+
+func TestLeaderFinalWorkItemDoesNotInheritReviewerCanonicalIdentity(t *testing.T) {
+	task := &models.TeamTask{
+		ID: 150, TeamID: 75, TargetMemberID: 256,
+		MessageID: "team-75-task-1784165223585610285",
+		Status:    models.TeamTaskStatusRunning,
+	}
+	team := &models.Team{ID: 75, CommunicationMode: teamCommunicationModeLeaderMediated}
+	leader := &models.TeamMember{ID: 256, TeamID: 75, MemberKey: "leader", Role: "leader"}
+	repo := &teamRepositoryStub{membersByKey: map[string]*models.TeamMember{"leader": leader}}
+	service := &teamService{repo: repo}
+	payload := map[string]interface{}{
+		"event": "task_completed", "status": "succeeded",
+		"completionSource": teamTaskCompletionTool, "explicitCompletion": true,
+		"rootTaskTerminal": true, "assignmentId": "leader-final-synthesis",
+		"canonicalWorkId": "review-01", "memberId": "leader",
+		"summary": "最终交付完成", "resultMarkdown": "最终交付完成",
+	}
+	enrichTeamCollaborationStep(team, "task_completed", payload, leader, task)
+	if err := service.projectTeamWorkItem(team, task, leader, "task_completed", payload, &models.TeamEvent{CreatedAt: time.Now().UTC()}); err != nil {
+		t.Fatalf("projectTeamWorkItem returned error: %v", err)
+	}
+	if len(repo.workItems) != 1 {
+		t.Fatalf("expected one Leader final item, got %#v", repo.workItems)
+	}
+	item := repo.workItems[0]
+	if item.WorkID != "leader-final-synthesis" || derefTeamString(item.AssignmentID) != "leader-final-synthesis" || derefTeamString(item.CanonicalWorkID) != "leader-final-synthesis" {
+		t.Fatalf("Leader final item inherited stale Reviewer identity: %#v", item)
 	}
 }
 
