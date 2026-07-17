@@ -2367,6 +2367,9 @@ func (c *fakeRuntimeAgentClient) Drain(ctx context.Context, endpoint string) err
 	c.drainEndpoints = append(c.drainEndpoints, endpoint)
 	return nil
 }
+func (c *fakeRuntimeAgentClient) ResyncInstanceSkills(ctx context.Context, endpoint string, instanceID int, mode string) error {
+	return nil
+}
 
 type fakeRuntimeEventService struct {
 	published []fakeRuntimeEvent

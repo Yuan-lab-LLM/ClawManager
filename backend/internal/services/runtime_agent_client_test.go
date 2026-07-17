@@ -192,6 +192,30 @@ func TestRuntimeAgentClientDrainSendsJSONBody(t *testing.T) {
 	}
 }
 
+func TestRuntimeAgentClientResyncInstanceSkills(t *testing.T) {
+	var gotMethod, gotPath, gotToken string
+	var body map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotPath = r.URL.Path
+		gotToken = r.Header.Get("X-ClawManager-Control-Token")
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer server.Close()
+
+	client := NewRuntimeAgentClient("secret")
+	if err := client.ResyncInstanceSkills(context.Background(), server.URL, 12, "full"); err != nil {
+		t.Fatalf("ResyncInstanceSkills returned error: %v", err)
+	}
+	if gotMethod != http.MethodPost || gotPath != "/v1/skills/resync" || gotToken != "secret" {
+		t.Fatalf("unexpected request: %s %s token=%q", gotMethod, gotPath, gotToken)
+	}
+	if body["instance_id"] != float64(12) || body["mode"] != "full" {
+		t.Fatalf("unexpected body: %#v", body)
+	}
+}
+
 func TestRuntimeAgentClientConflict(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "no free port", http.StatusConflict)

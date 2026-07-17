@@ -14,6 +14,7 @@ type AuditEventRepository interface {
 	Create(event *models.AuditEvent) error
 	ListByTraceID(traceID string) ([]models.AuditEvent, error)
 	ListRecent(limit int) ([]models.AuditEvent, error)
+	CountRecentByInstanceAndEventType(instanceID int, eventType string, since time.Time) (int, error)
 }
 
 type auditEventRepository struct {
@@ -91,4 +92,22 @@ func (r *auditEventRepository) ListRecent(limit int) ([]models.AuditEvent, error
 		return nil, fmt.Errorf("failed to list recent audit events: %w", err)
 	}
 	return items, nil
+}
+
+func (r *auditEventRepository) CountRecentByInstanceAndEventType(instanceID int, eventType string, since time.Time) (int, error) {
+	row, err := r.sess.SQL().QueryRow(`
+SELECT COUNT(*)
+FROM audit_events
+WHERE instance_id = ?
+  AND event_type = ?
+  AND created_at >= ?
+`, instanceID, eventType, since)
+	if err != nil {
+		return 0, fmt.Errorf("failed to count audit events by instance and type: %w", err)
+	}
+	var count int
+	if err := row.Scan(&count); err != nil {
+		return 0, fmt.Errorf("failed to scan audit event count: %w", err)
+	}
+	return count, nil
 }

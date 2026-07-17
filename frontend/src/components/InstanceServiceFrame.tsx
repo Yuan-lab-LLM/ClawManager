@@ -105,7 +105,7 @@ export function InstanceServiceFrame({
   const renderFrameShell = (content: ReactNode) => (
     <section
       ref={frameContainerRef}
-      className="cm-surface flex h-full min-h-[420px] min-w-0 flex-col overflow-hidden bg-white xl:min-h-0"
+      className="cm-surface flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-white max-xl:min-h-[360px]"
       style={isFullscreen ? { height: "100vh", width: "100vw", borderRadius: 0 } : undefined}
     >
       <div className="flex h-12 items-center justify-between border-b border-slate-200 px-3">

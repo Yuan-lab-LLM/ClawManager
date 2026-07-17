@@ -132,3 +132,13 @@ weather/
 Hermes agent 在本地计算 MD5 时应对目录 `/config/.hermes/skills/weather` 调用 `skill_content_md5()`。不要对 zip 文件调用 MD5。
 
 如果 agent 需要在上传前自检，可以先把 zip 解开，确认去掉 `weather/` 后得到的文件列表与本地计算使用的相对路径一致。
+
+## 常见 MD5 不匹配排查
+
+| 现象 | 可能原因 | 处理 |
+|------|----------|------|
+| `expected abc got def` 且 expected 来自 inventory | Agent inventory 与 collect 使用了不同目录快照 | 确保 collect 前目录未变化，且两次调用同一 `skill_content_md5()` |
+| got 值每次不同 | 对 zip 文件 bytes 做 MD5，或 zip 内文件顺序/元数据参与计算 | 只对 skill 目录内容做规范化 MD5，见上文算法 |
+| expected 含顶层目录名 | inventory 多剥了一层 skill 根目录 | 基准目录应为 `/config/.openclaw/workspace/skills/{name}/` 内部 |
+| 隐藏文件导致偏差 | `.git`、`.cache` 等被计入或遗漏不一致 | 跳过任意以 `.` 开头的路径段 |
+| collect 命令 succeeded 但 Hub 仍 unknown | skill-scanner 未部署或扫描失败 | 检查 `skill-scanner` Pod 与 blob `scan_status` |

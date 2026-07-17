@@ -156,6 +156,7 @@ func (s *PodService) CreatePod(ctx context.Context, config PodConfig) (*corev1.P
 		"runtime-type":  runtimeType,
 		"managed-by":    "clawreef",
 	}
+	appendManagedRuntimeLabels(config.Type, labels)
 
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{

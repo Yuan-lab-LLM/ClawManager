@@ -391,6 +391,38 @@ export interface CostOverview {
   limit: number;
 }
 
+export interface SessionUsageOverviewSummary {
+  total_prompt_tokens: number;
+  total_completion_tokens: number;
+  total_tokens: number;
+  total_estimated_cost: number;
+  currency: string;
+  session_count: number;
+}
+
+export interface SessionUsageOverviewCompliance {
+  fallback_session_count: number;
+  has_fallback_sessions: boolean;
+  recent_fallback_audit_count: number;
+}
+
+export interface SessionUsageOverviewItem {
+  instance_id: number;
+  instance_name: string;
+  instance_type: string;
+  user_id: number;
+  summary: SessionUsageOverviewSummary;
+  compliance: SessionUsageOverviewCompliance;
+}
+
+export interface SessionUsageOverview {
+  summary: SessionUsageOverviewSummary;
+  items: SessionUsageOverviewItem[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
 export const adminService = {
   listSkills: async (): Promise<AdminSkillRecord[]> => {
     const response = await api.get('/admin/skills');
@@ -476,6 +508,31 @@ export const adminService = {
       user_trends: data.user_trends ?? [],
       recent_records: data.recent_records ?? [],
       total_recent_records: data.total_recent_records ?? 0,
+      page: data.page ?? params?.page ?? 1,
+      limit: data.limit ?? params?.limit ?? 20,
+    };
+  },
+
+  getSessionUsageOverview: async (params?: {
+    page?: number;
+    limit?: number;
+    search?: string;
+    since?: string;
+    until?: string;
+  }): Promise<SessionUsageOverview> => {
+    const response = await api.get("/admin/session-usage/overview", { params });
+    const data = response.data.data ?? {};
+    return {
+      summary: data.summary ?? {
+        total_prompt_tokens: 0,
+        total_completion_tokens: 0,
+        total_tokens: 0,
+        total_estimated_cost: 0,
+        currency: "USD",
+        session_count: 0,
+      },
+      items: data.items ?? [],
+      total: data.total ?? 0,
       page: data.page ?? params?.page ?? 1,
       limit: data.limit ?? params?.limit ?? 20,
     };

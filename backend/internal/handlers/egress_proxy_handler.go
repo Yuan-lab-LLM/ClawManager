@@ -1,11 +1,18 @@
 package handlers
 
 import (
+	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
+
+	"clawreef/internal/egresspolicy"
+	"clawreef/internal/models"
+	"clawreef/internal/services"
 
 	"github.com/gin-gonic/gin"
 )
@@ -13,10 +20,12 @@ import (
 // EgressProxyHandler provides a minimal forward proxy for ordinary HTTP/HTTPS traffic.
 type EgressProxyHandler struct {
 	transport *http.Transport
+	policy    egresspolicy.Policy
+	audit     services.AuditEventService
 }
 
 // NewEgressProxyHandler creates a new egress proxy handler.
-func NewEgressProxyHandler() *EgressProxyHandler {
+func NewEgressProxyHandler(audit services.AuditEventService) *EgressProxyHandler {
 	return &EgressProxyHandler{
 		transport: &http.Transport{
 			Proxy:                 nil,
@@ -27,6 +36,8 @@ func NewEgressProxyHandler() *EgressProxyHandler {
 			TLSHandshakeTimeout:   10 * time.Second,
 			ExpectContinueTimeout: 1 * time.Second,
 		},
+		policy: egresspolicy.LoadFromEnv(),
+		audit:  audit,
 	}
 }
 
@@ -39,6 +50,12 @@ func (h *EgressProxyHandler) Handle(c *gin.Context) {
 
 	if c.Request.URL == nil || c.Request.URL.Scheme == "" || c.Request.URL.Host == "" {
 		c.Status(http.StatusNotFound)
+		return
+	}
+
+	if allowed, reason := h.policy.AllowHost(c.Request.URL.Host); !allowed {
+		h.recordBlockedEgress(c, c.Request.URL.Host, reason)
+		c.String(http.StatusForbidden, "egress blocked: %s (%s)", c.Request.URL.Host, reason)
 		return
 	}
 
@@ -66,6 +83,12 @@ func (h *EgressProxyHandler) handleConnect(c *gin.Context) {
 		return
 	}
 
+	if allowed, reason := h.policy.AllowHost(target); !allowed {
+		h.recordBlockedEgress(c, target, reason)
+		c.String(http.StatusForbidden, "egress blocked: %s (%s)", target, reason)
+		return
+	}
+
 	upstreamConn, err := net.DialTimeout("tcp", target, 30*time.Second)
 	if err != nil {
 		c.String(http.StatusBadGateway, "proxy connect error: %v", err)
@@ -89,6 +112,41 @@ func (h *EgressProxyHandler) handleConnect(c *gin.Context) {
 
 	go tunnelConns(upstreamConn, clientConn)
 	go tunnelConns(clientConn, upstreamConn)
+}
+
+func (h *EgressProxyHandler) recordBlockedEgress(c *gin.Context, host, reason string) {
+	if h.audit == nil {
+		return
+	}
+	instanceID := resolveEgressInstanceID(c)
+	remoteAddr := strings.TrimSpace(c.Request.RemoteAddr)
+	message := fmt.Sprintf("Blocked egress to %s (%s) from %s", host, reason, remoteAddr)
+	if err := h.audit.RecordEvent(&models.AuditEvent{
+		TraceID:      fmt.Sprintf("egress_%d", time.Now().UnixNano()),
+		InstanceID:   instanceID,
+		EventType:    "egress.llm.blocked",
+		TrafficClass: models.TrafficClassGenericEgress,
+		Severity:     models.AuditSeverityWarn,
+		Message:      message,
+	}); err != nil {
+		log.Printf("failed to record egress block audit event: %v", err)
+	}
+}
+
+func resolveEgressInstanceID(c *gin.Context) *int {
+	for _, headerName := range []string{
+		"X-ClawManager-Instance-Id",
+		"X-ClawManager-Egress-Instance-Id",
+	} {
+		raw := strings.TrimSpace(c.GetHeader(headerName))
+		if raw == "" {
+			continue
+		}
+		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 {
+			return &parsed
+		}
+	}
+	return nil
 }
 
 func tunnelConns(dst net.Conn, src net.Conn) {

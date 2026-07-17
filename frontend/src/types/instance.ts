@@ -150,6 +150,7 @@ export interface InstanceRuntimeDetails {
   agent?: AgentInfo;
   commands: InstanceRuntimeCommand[];
   skills?: InstanceSkill[];
+  llm_governance?: InstanceLLMGovernanceStatus;
 }
 
 export interface InstanceConfigRevision {
@@ -316,6 +317,83 @@ export const INSTANCE_TYPES: InstanceType[] = [
     defaultVersion: "latest",
   },
 ];
+
+export interface InstanceSessionUsageSummary {
+  total_prompt_tokens: number;
+  total_completion_tokens: number;
+  total_tokens: number;
+  total_estimated_cost: number;
+  currency: string;
+  session_count: number;
+}
+
+export interface InstanceSessionUsageCompliance {
+  fallback_session_count: number;
+  has_fallback_sessions: boolean;
+  recent_fallback_audit_count: number;
+}
+
+export interface InstanceSessionUsageItem {
+  session_id: string;
+  session_key: string;
+  title?: string;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  estimated_cost: number;
+  currency: string;
+  invocation_count: number;
+  first_seen_at: string;
+  last_seen_at: string;
+}
+
+export interface InstanceSessionUsageResult {
+  summary: InstanceSessionUsageSummary;
+  compliance: InstanceSessionUsageCompliance;
+  items: InstanceSessionUsageItem[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
+export interface InstanceSessionTrace {
+  trace_id: string;
+  requested_model: string;
+  status: string;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  created_at: string;
+}
+
+export interface InstanceSessionUsageDetail {
+  session_id: string;
+  session_key: string;
+  title?: string;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  estimated_cost: number;
+  currency: string;
+  invocation_count: number;
+  first_seen_at: string;
+  last_seen_at: string;
+  model_breakdown: Array<{
+    label: string;
+    prompt_tokens: number;
+    completion_tokens: number;
+    total_tokens: number;
+    estimated_cost: number;
+  }>;
+  recent_traces: InstanceSessionTrace[];
+}
+
+export interface InstanceLLMGovernanceStatus {
+  config_status: string;
+  session_fallback_rate: number;
+  recent_egress_block_count: number;
+  is_compliant: boolean;
+}
 
 export const PRESET_CONFIGS = {
   small: {

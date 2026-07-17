@@ -1,11 +1,10 @@
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+﻿import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   ArrowLeft,
   Ban,
   BarChart3,
   Clock3,
-  ChevronDown,
   Copy,
   Cpu,
   Eye,
@@ -16,14 +15,14 @@ import {
   MemoryStick,
   Network,
   Play,
-  Plus,
   RotateCw,
   Square,
   Trash2,
-  Upload,
   X,
 } from "lucide-react";
 import ConfirmDialog from "../../components/ConfirmDialog";
+import InstanceSkillHubPanel from "../../components/InstanceSkillHubPanel";
+import InstanceSessionUsagePanel from "../../components/InstanceSessionUsagePanel";
 import { InstanceServiceFrame } from "../../components/InstanceServiceFrame";
 import UserLayout from "../../components/UserLayout";
 import { WorkspaceFileManager } from "../../components/WorkspaceFileManager";
@@ -31,7 +30,6 @@ import { useI18n } from "../../contexts/I18nContext";
 import { useInstanceStatusWebSocket } from "../../hooks/useWebSocket";
 import type { InstanceStatusUpdate } from "../../hooks/useWebSocket";
 import { instanceService } from "../../services/instanceService";
-import { skillService } from "../../services/skillService";
 import type {
   ExternalAccessExpirationMode,
   ExternalAccessExpirationPreset,
@@ -44,7 +42,6 @@ import type {
   InstanceStatus,
   DesktopStreamProfile,
 } from "../../types/instance";
-import type { InstanceSkill, Skill } from "../../types/skill";
 
 const META_POLL_INTERVAL_MS = 5000;
 const RUNTIME_POLL_INTERVAL_MS = 5000;
@@ -110,25 +107,6 @@ function formatBytes(value?: number) {
 
 function supportsWorkspace(instance: Instance) {
   return instance.type === "openclaw" || instance.type === "hermes" || Boolean(instance.workspace_path);
-}
-
-function workspaceInitialPath(instance: Instance, isDedicated: boolean) {
-  const type = instance.type.trim().toLowerCase();
-  if (type === "hermes") {
-    return isDedicated ? ".hermes" : "home/.hermes";
-  }
-  if (type === "openclaw" && !isDedicated) {
-    return "home/.openclaw";
-  }
-  return isDedicated ? "/config" : undefined;
-}
-
-function isUsableSkillStatus(skill: Skill) {
-  const status = skill.status.trim().toLowerCase();
-  return status === "" || status === "active" || status === "enabled";
-}
-function isAttachedInstanceSkill(item: InstanceSkill) {
-  return item.status.trim().toLowerCase() !== "removed" && !item.removed_at;
 }
 
 function getErrorMessage(err: unknown, fallback: string) {
@@ -330,25 +308,16 @@ const InstanceDetailPage: React.FC = () => {
   const [externalCustomExpiresAt, setExternalCustomExpiresAt] = useState("");
   const [runtimeDetails, setRuntimeDetails] = useState<InstanceRuntimeDetails | null>(null);
   const [runtimeError, setRuntimeError] = useState<string | null>(null);
-  const [instanceSkills, setInstanceSkills] = useState<InstanceSkill[]>([]);
-  const [availableSkills, setAvailableSkills] = useState<Skill[]>([]);
-  const [skillInventorySummary, setSkillInventorySummary] = useState({ total: 0, hiddenByRisk: 0 });
-  const [selectedSkillIds, setSelectedSkillIds] = useState<number[]>([]);
-  const [skillPickerOpen, setSkillPickerOpen] = useState(false);
-  const skillPickerRef = useRef<HTMLDivElement | null>(null);
-  const skillUploadInputRef = useRef<HTMLInputElement | null>(null);
-  const desktopFrameRef = useRef<HTMLDivElement | null>(null);
-  const [skillLoading, setSkillLoading] = useState(false);
-  const [skillError, setSkillError] = useState<string | null>(null);
-  const [skillNotice, setSkillNotice] = useState<string | null>(null);
-  const [workspaceRefreshKey, setWorkspaceRefreshKey] = useState(0);
-  const [desktopFrameHeight, setDesktopFrameHeight] = useState<number | null>(null);
   const [desktopStreamProfile, setDesktopStreamProfile] =
     useState<DesktopStreamProfile>("standard");
   const [desktopStreamSavedProfile, setDesktopStreamSavedProfile] =
     useState<DesktopStreamProfile | "">("");
   const [desktopStreamMessage, setDesktopStreamMessage] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
+  const [skillPanelExpanded, setSkillPanelExpanded] = useState(false);
+  const [sessionPanelExpanded, setSessionPanelExpanded] = useState(false);
+  const [workspaceHeightPx, setWorkspaceHeightPx] = useState<number | null>(null);
+  const workspaceSectionRef = useRef<HTMLElement>(null);
 
   const fetchMeta = useCallback(
     async (targetInstanceId: number, options?: { background?: boolean }) => {
@@ -398,44 +367,6 @@ const InstanceDetailPage: React.FC = () => {
     }
   }, []);
 
-  const fetchSkills = useCallback(async (targetInstanceId: number) => {
-    try {
-      setSkillLoading(true);
-      const attached = await skillService.listInstanceSkills(targetInstanceId);
-      let reusable: Skill[] = [];
-      try {
-        reusable = await skillService.listAvailableInstanceSkills(targetInstanceId);
-      } catch {
-        reusable = [];
-      }
-      if (reusable.length === 0) {
-        reusable = await skillService.listSkills();
-      }
-      const activeAttached = attached.filter(isAttachedInstanceSkill);
-      const attachedIds = new Set(activeAttached.map((item) => item.skill_id));
-      const activeReusableSkills = reusable.filter(isUsableSkillStatus);
-      const riskAllowedSkills = activeReusableSkills.filter(
-        (skill) => !["medium", "high"].includes(skill.risk_level.trim().toLowerCase()),
-      );
-      setInstanceSkills(activeAttached);
-      setSkillInventorySummary({
-        total: activeReusableSkills.length,
-        hiddenByRisk: activeReusableSkills.length - riskAllowedSkills.length,
-      });
-      const attachableSkills = riskAllowedSkills.filter((skill) => !attachedIds.has(skill.id));
-      const attachableSkillIds = new Set(attachableSkills.map((skill) => skill.id));
-      setAvailableSkills(attachableSkills);
-      setSelectedSkillIds((current) => current.filter((skillId) => attachableSkillIds.has(skillId)));
-      if (attachableSkills.length === 0) {
-        setSkillPickerOpen(false);
-      }
-      setSkillError(null);
-    } catch (err: unknown) {
-      setSkillError(getErrorMessage(err, "Failed to load skills"));
-    } finally {
-      setSkillLoading(false);
-    }
-  }, []);
   useEffect(() => {
     const savedProfile = instance?.desktop_stream_profile || "";
     setDesktopStreamProfile(savedProfile || "standard");
@@ -495,61 +426,14 @@ const InstanceDetailPage: React.FC = () => {
   );
 
   useEffect(() => {
-    if (!skillPickerOpen) {
-      return undefined;
-    }
-    const handlePointerDown = (event: MouseEvent) => {
-      if (!skillPickerRef.current?.contains(event.target as Node)) {
-        setSkillPickerOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handlePointerDown);
-    return () => document.removeEventListener("mousedown", handlePointerDown);
-  }, [skillPickerOpen]);
-
-  useLayoutEffect(() => {
-    const element = desktopFrameRef.current;
-    if (!element) {
-      setDesktopFrameHeight(null);
-      return undefined;
-    }
-
-    const updateDesktopFrameHeight = () => {
-      const nextHeight = Math.round(element.getBoundingClientRect().height);
-      setDesktopFrameHeight((current) => (nextHeight > 0 && current !== nextHeight ? nextHeight : current));
-    };
-
-    updateDesktopFrameHeight();
-
-    if (typeof ResizeObserver === "undefined") {
-      window.addEventListener("resize", updateDesktopFrameHeight);
-      return () => window.removeEventListener("resize", updateDesktopFrameHeight);
-    }
-
-    const observer = new ResizeObserver(updateDesktopFrameHeight);
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, [instance?.id, isDedicatedInstance]);
-  useEffect(() => {
-    if (!instanceId || Number.isNaN(instanceId)) {
+    if (!instanceId || Number.isNaN(instanceId) || !isDedicatedInstance) {
       setRuntimeDetails(null);
       setRuntimeError(null);
-      setInstanceSkills([]);
-      setAvailableSkills([]);
-      setSkillInventorySummary({ total: 0, hiddenByRisk: 0 });
-      setSelectedSkillIds([]);
-      setSkillPickerOpen(false);
-      setSkillNotice(null);
       return;
     }
-    void fetchSkills(instanceId);
-    if (isDedicatedInstance) {
-      void fetchRuntimeDetails(instanceId);
-    } else {
-      setRuntimeDetails(null);
-      setRuntimeError(null);
-    }
-  }, [fetchRuntimeDetails, fetchSkills, instanceId, isDedicatedInstance]);
+    void fetchRuntimeDetails(instanceId);
+  }, [fetchRuntimeDetails, instanceId, isDedicatedInstance]);
+
   useEffect(() => {
     if (!instanceId || Number.isNaN(instanceId) || !isDedicatedInstance) {
       return;
@@ -562,6 +446,72 @@ const InstanceDetailPage: React.FC = () => {
 
     return () => window.clearInterval(timer);
   }, [fetchRuntimeDetails, instanceId, isDedicatedInstance]);
+
+  useEffect(() => {
+    if (isDedicatedInstance) {
+      return;
+    }
+    const section = workspaceSectionRef.current;
+    if (!section) {
+      return;
+    }
+
+    const syncWorkspaceHeight = () => {
+      if (skillPanelExpanded || sessionPanelExpanded) {
+        return;
+      }
+      const nextHeight = section.getBoundingClientRect().height;
+      if (nextHeight > 0) {
+        setWorkspaceHeightPx(nextHeight);
+      }
+    };
+
+    syncWorkspaceHeight();
+    const observer = new ResizeObserver(syncWorkspaceHeight);
+    observer.observe(section);
+    window.addEventListener("resize", syncWorkspaceHeight);
+
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", syncWorkspaceHeight);
+    };
+  }, [isDedicatedInstance, sessionPanelExpanded, skillPanelExpanded]);
+
+  const bottomPanelExpanded = skillPanelExpanded || sessionPanelExpanded;
+
+  useLayoutEffect(() => {
+    if (isDedicatedInstance || !bottomPanelExpanded || workspaceHeightPx !== null) {
+      return;
+    }
+    const section = workspaceSectionRef.current;
+    if (!section) {
+      return;
+    }
+    const nextHeight = section.getBoundingClientRect().height;
+    if (nextHeight > 0) {
+      setWorkspaceHeightPx(nextHeight);
+    }
+  }, [bottomPanelExpanded, isDedicatedInstance, workspaceHeightPx]);
+
+  const handleSkillPanelExpandedChange = useCallback((expanded: boolean) => {
+    if (expanded && workspaceSectionRef.current) {
+      const nextHeight = workspaceSectionRef.current.getBoundingClientRect().height;
+      if (nextHeight > 0) {
+        setWorkspaceHeightPx(nextHeight);
+      }
+    }
+    setSkillPanelExpanded(expanded);
+  }, []);
+
+  const handleSessionPanelExpandedChange = useCallback((expanded: boolean) => {
+    if (expanded && workspaceSectionRef.current) {
+      const nextHeight = workspaceSectionRef.current.getBoundingClientRect().height;
+      if (nextHeight > 0) {
+        setWorkspaceHeightPx(nextHeight);
+      }
+    }
+    setSessionPanelExpanded(expanded);
+  }, []);
 
   const availability = useMemo<InstanceAvailability>(() => {
     if (status?.availability) {
@@ -742,110 +692,6 @@ const InstanceDetailPage: React.FC = () => {
       window.setTimeout(() => setCopyState((current) => (current === key ? null : current)), 1800);
     } catch (err: unknown) {
       setExternalError(getErrorMessage(err, "Copy failed"));
-    }
-  };
-
-  const attachSelectedSkills = async () => {
-    if (!instance || selectedSkillIds.length === 0) {
-      return;
-    }
-    const skillOptionIds = new Set(skillOptions.map((skill) => skill.id));
-    const skillIds = selectedSkillIds.filter((skillId) => skillOptionIds.has(skillId));
-    if (skillIds.length === 0) {
-      setSelectedSkillIds([]);
-      return;
-    }
-    try {
-      setSkillLoading(true);
-      setSkillError(null);
-      await Promise.all(skillIds.map((skillId) => skillService.attachSkillToInstance(instance.id, skillId)));
-      setSelectedSkillIds([]);
-      setSkillPickerOpen(false);
-      setSkillNotice(`Attached ${skillIds.length} skill${skillIds.length === 1 ? "" : "s"}.`);
-      await fetchSkills(instance.id);
-      refreshWorkspaceFiles();
-    } catch (err: unknown) {
-      setSkillError(getErrorMessage(err, "Failed to attach skill"));
-    } finally {
-      setSkillLoading(false);
-    }
-  };
-
-  const refreshWorkspaceFiles = () => {
-    setWorkspaceRefreshKey((current) => current + 1);
-  };
-
-  const handleSkillArchiveUpload = async (fileList?: FileList | null) => {
-    const file = fileList?.[0];
-    if (skillUploadInputRef.current) {
-      skillUploadInputRef.current.value = "";
-    }
-    if (!instance || !file) {
-      return;
-    }
-    if (!file.name.toLowerCase().endsWith(".zip")) {
-      setSkillError("Only .zip skill archives are supported.");
-      setSkillNotice(null);
-      return;
-    }
-
-    try {
-      setSkillLoading(true);
-      setSkillError(null);
-      setSkillNotice(null);
-      const importedSkills = await skillService.importSkills(file);
-      let attachedCount = 0;
-      const failures: string[] = [];
-      for (const importedSkill of importedSkills) {
-        try {
-          await skillService.attachSkillToInstance(instance.id, importedSkill.id);
-          attachedCount += 1;
-        } catch (err: unknown) {
-          failures.push(`${importedSkill.name || importedSkill.skill_key}: ${getErrorMessage(err, "attach failed")}`);
-        }
-      }
-      setSelectedSkillIds([]);
-      setSkillPickerOpen(false);
-      await fetchSkills(instance.id);
-      refreshWorkspaceFiles();
-      const importedCount = importedSkills.length;
-      if (failures.length > 0) {
-        setSkillError(failures.join("; "));
-      }
-      if (attachedCount > 0) {
-        setSkillNotice(`Imported ${importedCount} skill${importedCount === 1 ? "" : "s"}; attached ${attachedCount}.`);
-      } else {
-        setSkillNotice(`Imported ${importedCount} skill${importedCount === 1 ? "" : "s"}; none attached.`);
-      }
-    } catch (err: unknown) {
-      setSkillError(getErrorMessage(err, "Failed to upload skill archive"));
-      setSkillNotice(null);
-    } finally {
-      setSkillLoading(false);
-    }
-  };
-  const toggleSelectedSkill = (skillId: number) => {
-    setSelectedSkillIds((current) =>
-      current.includes(skillId) ? current.filter((item) => item !== skillId) : [...current, skillId],
-    );
-  };
-
-  const removeInstanceSkill = async (skillId: number) => {
-    if (!instance) {
-      return;
-    }
-    try {
-      setSkillLoading(true);
-      setSkillError(null);
-      await skillService.removeSkillFromInstance(instance.id, skillId);
-      setInstanceSkills((current) => current.filter((item) => item.skill_id !== skillId));
-      setSkillNotice("Skill removed.");
-      await fetchSkills(instance.id);
-      refreshWorkspaceFiles();
-    } catch (err: unknown) {
-      setSkillError(getErrorMessage(err, "Failed to remove skill"));
-    } finally {
-      setSkillLoading(false);
     }
   };
 
@@ -1157,128 +1003,29 @@ const InstanceDetailPage: React.FC = () => {
     </div>
   );
 
-  const renderSkillPanel = () => (
-    <section className="cm-surface px-4 py-4">
-      <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <div className="flex items-center gap-2">
-            <KeyRound className="h-4 w-4 text-indigo-600" />
-            <h2 className="text-sm font-semibold text-slate-950">Instance Skills</h2>
-          </div>
-          <div className="mt-1 text-xs text-slate-500">{instanceSkills.length} attached</div>
-        </div>
-        <button
-          type="button"
-          className="app-button-secondary shrink-0 disabled:cursor-not-allowed disabled:opacity-50"
-          disabled={skillLoading}
-          onClick={() => skillUploadInputRef.current?.click()}
-          title="Upload skill archive"
-        >
-          <Upload className="h-4 w-4" />
-          <span>Upload ZIP</span>
-        </button>
-        <input
-          ref={skillUploadInputRef}
-          type="file"
-          accept=".zip,application/zip,application/x-zip-compressed"
-          className="hidden"
-          onChange={(event) => void handleSkillArchiveUpload(event.target.files)}
-        />
-      </div>
-      {skillNotice && <div className="mb-3 text-xs text-emerald-700">{skillNotice}</div>}
-      {skillError && <div className="mb-3 text-xs text-red-600">{skillError}</div>}
-      {skillInventorySummary.hiddenByRisk > 0 && (
-        <div className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-          {skillRiskPolicySummary}
-        </div>
-      )}
-      <div ref={skillPickerRef} className="mb-3 flex gap-2">
-        <div className="relative min-w-0 flex-1">
-          <button
-            type="button"
-            className="flex w-full items-center justify-between gap-3 rounded-md border border-slate-200 bg-white px-3 py-2 text-left text-sm text-slate-700 outline-none transition hover:border-indigo-200 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400"
-            disabled={skillLoading || skillOptions.length === 0}
-            aria-haspopup="listbox"
-            aria-expanded={skillPickerOpen}
-            data-skill-picker="multi-select"
-            onClick={() => setSkillPickerOpen((open) => !open)}
-          >
-            <span className="min-w-0 truncate">{skillOptions.length === 0 ? "No available skills" : skillPickerLabel}</span>
-            <ChevronDown className={`h-4 w-4 shrink-0 text-slate-400 transition ${skillPickerOpen ? "rotate-180" : ""}`} />
-          </button>
-          {skillPickerOpen && (
-            <div className="absolute left-0 right-0 z-30 mt-1 overflow-hidden rounded-md border border-slate-200 bg-white shadow-lg">
-              <div className="max-h-64 divide-y divide-slate-100 overflow-y-auto py-1" role="listbox" aria-multiselectable="true">
-                {skillOptions.map((skill) => (
-                  <label
-                    key={skill.id}
-                    className="flex min-h-10 cursor-pointer items-center gap-3 px-3 py-2 text-sm text-slate-800 transition hover:bg-slate-50"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={selectedSkillIdSet.has(skill.id)}
-                      onChange={() => toggleSelectedSkill(skill.id)}
-                      disabled={skillLoading}
-                      className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
-                    />
-                    <span className="min-w-0 truncate">{skill.name}</span>
-                  </label>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-        <button
-          type="button"
-          className="app-button-secondary"
-          disabled={skillLoading || selectedSkillIds.length === 0}
-          onClick={() => void attachSelectedSkills()}
-          title={selectedSkillIds.length > 0 ? `Attach ${selectedSkillIds.length} skills` : "Attach selected skills"}
-        >
-          <Plus className="h-4 w-4" />
-          {selectedSkillIds.length > 0 && <span className="text-xs">{selectedSkillIds.length}</span>}
-        </button>
-      </div>
-      {skillEmptyMessage && <div className="mb-3 text-xs text-slate-500">{skillEmptyMessage}</div>}
-      <div className="max-h-[260px] overflow-y-auto pr-1">
-        {instanceSkills.length === 0 ? (
-          <div className="rounded-md border border-dashed border-slate-200 px-3 py-6 text-center text-sm text-slate-500">
-            No skills attached.
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {instanceSkills.map((item) => (
-              <div key={item.id} className="flex items-center justify-between gap-3 rounded-md border border-slate-200 px-3 py-2">
-                <div className="min-w-0">
-                  <div className="truncate text-sm font-medium text-slate-900">
-                    {item.skill?.name || `Skill #${item.skill_id}`}
-                  </div>
-                  <div className="mt-1 text-xs text-slate-500">
-                    {item.status}{item.last_seen_at ? ` - ${formatDateTime(item.last_seen_at, locale)}` : ""}
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  className="cm-icon-button h-7 w-7 shrink-0"
-                  disabled={skillLoading}
-                  title="Remove skill"
-                  onClick={() => void removeInstanceSkill(item.skill_id)}
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    </section>
-  );
-  const renderLiteWorkspace = () => (
-    <div className="flex min-h-0 flex-col gap-4">
+  const renderLiteWorkspace = () => {
+    const pinnedWorkspaceHeight = workspaceHeightPx ?? 360;
+
+    return (
+    <div
+      className={`flex flex-col gap-2 ${
+        bottomPanelExpanded ? "min-h-0" : "min-h-0 flex-1 overflow-hidden"
+      }`}
+    >
       {renderHeaderSection(shareLinkControl)}
       {renderActionMessage()}
-      <section className="grid min-h-0 items-stretch gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(360px,28rem)]">
-        <div ref={desktopFrameRef} className="aspect-video min-h-[420px] min-w-0 overflow-hidden">
+      <section
+        ref={workspaceSectionRef}
+        style={
+          bottomPanelExpanded
+            ? { height: pinnedWorkspaceHeight, minHeight: pinnedWorkspaceHeight, flexShrink: 0 }
+            : undefined
+        }
+        className={`grid shrink-0 gap-4 overflow-hidden max-xl:h-auto max-xl:min-h-[420px] max-xl:overflow-y-auto xl:grid-cols-[minmax(0,1fr)_minmax(360px,28rem)] xl:grid-rows-[minmax(0,1fr)] ${
+          bottomPanelExpanded ? "" : "min-h-0 flex-1"
+        }`}
+      >
+        <div className="h-full min-h-0 min-w-0">
           <InstanceServiceFrame
             instanceId={instance.id}
             instanceName={instance.name}
@@ -1287,23 +1034,31 @@ const InstanceDetailPage: React.FC = () => {
           />
         </div>
         {supportsWorkspace(instance) ? (
-          <div className="min-h-[420px] min-w-0 overflow-hidden xl:min-h-0" style={desktopFrameHeight ? { height: desktopFrameHeight } : undefined}>
-            <WorkspaceFileManager
-              instanceId={instance.id}
-              initialPath={workspaceInitialPath(instance, isDedicatedInstance)}
-              onMutation={() => fetchSkills(instance.id)}
-              refreshKey={workspaceRefreshKey}
-            />
+          <div className="h-full min-h-0 min-w-0">
+            <WorkspaceFileManager instanceId={instance.id} />
           </div>
         ) : (
-          <div className="cm-surface flex min-h-[420px] items-center justify-center overflow-hidden text-sm text-slate-500 xl:min-h-0" style={desktopFrameHeight ? { height: desktopFrameHeight } : undefined}>
+          <div className="cm-surface flex h-full min-h-[420px] items-center justify-center text-sm text-slate-500">
             No workspace
           </div>
         )}
       </section>
-      {renderSkillPanel()}
+      <div className="flex shrink-0 flex-col gap-2">
+        <InstanceSkillHubPanel
+          instance={instance}
+          onRuntimeDetailsChange={setRuntimeDetails}
+          onPanelExpandedChange={handleSkillPanelExpandedChange}
+        />
+        <InstanceSessionUsagePanel
+          instanceId={instance.id}
+          instanceType={instance.type}
+          onPanelExpandedChange={handleSessionPanelExpandedChange}
+        />
+      </div>
     </div>
-  );
+    );
+  };
+
   const runtime = runtimeDetails?.runtime;
   const agent = runtimeDetails?.agent;
   const commands = [...(runtimeDetails?.commands ?? [])].sort((left, right) => {
@@ -1311,30 +1066,6 @@ const InstanceDetailPage: React.FC = () => {
     const rightTime = new Date(eventTime(right)).getTime();
     return (Number.isFinite(rightTime) ? rightTime : 0) - (Number.isFinite(leftTime) ? leftTime : 0);
   });
-  const attachedSkillIds = new Set(instanceSkills.map((item) => item.skill_id));
-  const skillOptions = availableSkills.filter((skill) => !attachedSkillIds.has(skill.id));
-  const selectedSkillIdSet = new Set(selectedSkillIds);
-  const skillPickerLabel = selectedSkillIds.length > 0 ? `${selectedSkillIds.length} selected` : "Select skills";
-  const skillRiskPolicySummary = locale.startsWith("zh")
-    ? `\u5b89\u5168\u7b56\u7565\u5df2\u9690\u85cf ${skillInventorySummary.hiddenByRisk} \u4e2a\u4e2d/\u9ad8\u98ce\u9669\u6280\u80fd\uff1b\u5f53\u524d\u53ef\u6dfb\u52a0 ${skillOptions.length} \u4e2a\u3002`
-    : `Risk policy hid ${skillInventorySummary.hiddenByRisk} medium/high-risk skills; ${skillOptions.length} can still be added.`;
-  const skillEmptyMessage =
-    skillOptions.length > 0
-      ? null
-      : skillInventorySummary.total === 0
-        ? "No skills loaded from the resource pool."
-        : skillInventorySummary.hiddenByRisk > 0
-          ? "All loaded skills are hidden by risk policy or already attached."
-          : "All loaded skills are already attached.";  const desktopStreamDirty = desktopStreamProfile !== desktopStreamSavedProfile;
-  const restartActionActive = actionLoading === "restart" || actionLoading === "desktop-stream-restart";
-
-  const renderActionMessage = () =>
-    actionMessage ? (
-      <div className="flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-        <RotateCw className={`h-4 w-4 ${restartActionActive ? "animate-spin" : ""}`} />
-        <span>{actionMessage}</span>
-      </div>
-    ) : null;
   const overviewResourceRows = resourceRows(runtimeDetails, instance).filter((row) =>
     ["CPU", "Memory", "Disk"].includes(row.label),
   );
@@ -1344,6 +1075,16 @@ const InstanceDetailPage: React.FC = () => {
     { label: "OpenClaw", value: runtime?.openclaw_status || "-", detail: "Process", percent: null },
     ...overviewResourceRows,
   ];
+  const desktopStreamDirty = desktopStreamProfile !== desktopStreamSavedProfile;
+  const restartActionActive = actionLoading === "restart" || actionLoading === "desktop-stream-restart";
+
+  const renderActionMessage = () =>
+    actionMessage ? (
+      <div className="flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+        <RotateCw className={`h-4 w-4 ${restartActionActive ? "animate-spin" : ""}`} />
+        <span>{actionMessage}</span>
+      </div>
+    ) : null;
 
   const renderProWorkspace = () => (
     <div className="flex flex-col gap-4">
@@ -1353,7 +1094,7 @@ const InstanceDetailPage: React.FC = () => {
         data-layout="pro-desktop-workspace"
         className="grid items-stretch gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(360px,28rem)]"
       >
-        <div ref={desktopFrameRef} className="aspect-video min-h-[420px] min-w-0 overflow-hidden xl:min-h-0">
+        <div className="aspect-video min-h-[420px] min-w-0 overflow-hidden xl:min-h-0">
           <InstanceServiceFrame
             instanceId={instance.id}
             instanceName={instance.name}
@@ -1363,16 +1104,11 @@ const InstanceDetailPage: React.FC = () => {
         </div>
 
         {supportsWorkspace(instance) ? (
-          <div className="min-h-[420px] min-w-0 overflow-hidden xl:min-h-0" style={desktopFrameHeight ? { height: desktopFrameHeight } : undefined}>
-            <WorkspaceFileManager
-              instanceId={instance.id}
-              initialPath={workspaceInitialPath(instance, isDedicatedInstance)}
-              onMutation={() => fetchSkills(instance.id)}
-              refreshKey={workspaceRefreshKey}
-            />
+          <div className="min-h-[420px] min-w-0 xl:h-full xl:min-h-0">
+            <WorkspaceFileManager instanceId={instance.id} initialPath="/config" />
           </div>
         ) : (
-          <div className="cm-surface flex min-h-[420px] items-center justify-center overflow-hidden text-sm text-slate-500 xl:min-h-0" style={desktopFrameHeight ? { height: desktopFrameHeight } : undefined}>
+          <div className="cm-surface flex min-h-[420px] items-center justify-center text-sm text-slate-500 xl:min-h-0">
             No workspace
           </div>
         )}
@@ -1444,7 +1180,10 @@ const InstanceDetailPage: React.FC = () => {
       )}
 
       <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(280px,22rem)]">
-        {renderSkillPanel()}
+        <InstanceSkillHubPanel
+          instance={instance}
+          onRuntimeDetailsChange={setRuntimeDetails}
+        />
 
         <section data-section="runtime-overview" className="cm-surface px-3 py-3">
           <div className="mb-2 flex items-center justify-between gap-3">
@@ -1457,6 +1196,25 @@ const InstanceDetailPage: React.FC = () => {
             </span>
           </div>
           {runtimeError && <div className="mb-2 text-xs text-red-600">{runtimeError}</div>}
+          {runtimeDetails?.llm_governance && (
+            <div className="mb-2">
+              <span
+                className={`inline-flex rounded-md border px-2 py-0.5 text-xs font-medium ${
+                  runtimeDetails.llm_governance.is_compliant
+                    ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                    : runtimeDetails.llm_governance.config_status === "external"
+                      ? "border-red-200 bg-red-50 text-red-700"
+                      : "border-amber-200 bg-amber-50 text-amber-700"
+                }`}
+              >
+                {runtimeDetails.llm_governance.is_compliant
+                  ? t("instances.governanceGatewayOk")
+                  : runtimeDetails.llm_governance.config_status === "external"
+                    ? t("instances.governanceExternalLLM")
+                    : t("instances.governanceSessionKeyMissing")}
+              </span>
+            </div>
+          )}
           <div className="grid gap-1.5">
             {runtimeOverviewRows.map((row) => (
               <Metric key={row.label} label={row.label} value={row.value} detail={row.detail} percent={row.percent} />
@@ -1464,6 +1222,8 @@ const InstanceDetailPage: React.FC = () => {
           </div>
         </section>
       </section>
+
+      <InstanceSessionUsagePanel instanceId={instance.id} instanceType={instance.type} />
 
       <section className="cm-surface px-4 py-4">
         <div className="mb-3 flex items-center justify-between gap-3">
@@ -1504,7 +1264,11 @@ const InstanceDetailPage: React.FC = () => {
   );
 
   return (
-    <UserLayout title={instance.name}>
+    <UserLayout
+      title={isDedicatedInstance ? instance.name : undefined}
+      fillHeight={!isDedicatedInstance}
+      scrollableMain={!isDedicatedInstance && (skillPanelExpanded || sessionPanelExpanded)}
+    >
       <ConfirmDialog
         open={showDeleteDialog}
         title={t("common.delete")}

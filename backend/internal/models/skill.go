@@ -11,6 +11,9 @@ type Skill struct {
 	CurrentVersionID *int       `db:"current_version_id" json:"current_version_id,omitempty"`
 	SourceType       string     `db:"source_type" json:"source_type"`
 	Status           string     `db:"status" json:"status"`
+	Visibility       string     `db:"visibility" json:"visibility"`
+	PublishedAt      *time.Time `db:"published_at" json:"published_at,omitempty"`
+	PublishedBy      *int       `db:"published_by" json:"published_by,omitempty"`
 	RiskLevel        string     `db:"risk_level" json:"risk_level"`
 	LastScannedAt    *time.Time `db:"last_scanned_at" json:"last_scanned_at,omitempty"`
 	LastScanResultID *int       `db:"last_scan_result_id" json:"last_scan_result_id,omitempty"`
@@ -58,6 +61,7 @@ type InstanceSkill struct {
 	SkillVersionID *int       `db:"skill_version_id" json:"skill_version_id,omitempty"`
 	SourceType     string     `db:"source_type" json:"source_type"`
 	InstallPath    *string    `db:"install_path" json:"install_path,omitempty"`
+	WorkspaceDir   *string    `db:"workspace_dir" json:"workspace_dir,omitempty"`
 	ObservedHash   *string    `db:"observed_hash" json:"observed_hash,omitempty"`
 	Status         string     `db:"status" json:"status"`
 	LastSeenAt     *time.Time `db:"last_seen_at" json:"last_seen_at,omitempty"`

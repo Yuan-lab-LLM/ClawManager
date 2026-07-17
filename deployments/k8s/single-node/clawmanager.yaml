@@ -22,9 +22,9 @@ stringData:
   runtime-agent-report-token: change-me-runtime-report-token
   openclaw-gateway-token: change-me-openclaw-gateway-token
   minio-root-user: minioadmin
-  minio-root-password: minioadmin123
+  minio-root-password: minioadmin@123
   minio-access-key: minioadmin
-  minio-secret-key: minioadmin123
+  minio-secret-key: minioadmin@123
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -906,6 +906,7 @@ spec:
     spec:
       containers:
         - name: mysql
+          #image: mysql:8.4.8
           image: mysql:8.4.8
           imagePullPolicy: IfNotPresent
           args:
@@ -1157,6 +1158,7 @@ subjects:
   - kind: ServiceAccount
     name: clawmanager-app
     namespace: clawmanager-system
+---
 ---
 # Explicit lease permissions for control-plane leader election. The
 # cluster-admin binding above already covers this; this Role documents the

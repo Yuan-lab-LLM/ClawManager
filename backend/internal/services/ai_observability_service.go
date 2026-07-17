@@ -4,11 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	"clawreef/internal/models"
 	"clawreef/internal/repository"
+	"clawreef/internal/utils"
 )
 
 // AuditQuery contains query options for AI audit list views.
@@ -160,11 +162,152 @@ type CostRecordView struct {
 	RecordedAt       time.Time `json:"recorded_at"`
 }
 
+// InstanceSessionUsageQuery contains query options for instance session usage views.
+type InstanceSessionUsageQuery struct {
+	Page   int
+	Limit  int
+	Search string
+	Since  *time.Time
+	Until  *time.Time
+}
+
+// InstanceSessionUsageSummary summarizes token usage across all sessions on an instance.
+type InstanceSessionUsageSummary struct {
+	TotalPromptTokens     int     `json:"total_prompt_tokens"`
+	TotalCompletionTokens int     `json:"total_completion_tokens"`
+	TotalTokens           int     `json:"total_tokens"`
+	TotalEstimatedCost    float64 `json:"total_estimated_cost"`
+	Currency              string  `json:"currency"`
+	SessionCount          int     `json:"session_count"`
+}
+
+// InstanceSessionUsageCompliance reports session attribution quality for an instance.
+type InstanceSessionUsageCompliance struct {
+	FallbackSessionCount     int  `json:"fallback_session_count"`
+	HasFallbackSessions      bool `json:"has_fallback_sessions"`
+	RecentFallbackAuditCount int  `json:"recent_fallback_audit_count"`
+}
+
+// InstanceSessionUsageItem is one session row for instance usage reporting.
+type InstanceSessionUsageItem struct {
+	SessionID        string    `json:"session_id"`
+	SessionKey       string    `json:"session_key"`
+	Title            *string   `json:"title,omitempty"`
+	PromptTokens     int       `json:"prompt_tokens"`
+	CompletionTokens int       `json:"completion_tokens"`
+	TotalTokens      int       `json:"total_tokens"`
+	EstimatedCost    float64   `json:"estimated_cost"`
+	Currency         string    `json:"currency"`
+	InvocationCount  int       `json:"invocation_count"`
+	FirstSeenAt      time.Time `json:"first_seen_at"`
+	LastSeenAt       time.Time `json:"last_seen_at"`
+}
+
+// InstanceSessionUsageResult is the paginated instance session usage response.
+type InstanceSessionUsageResult struct {
+	Summary    InstanceSessionUsageSummary    `json:"summary"`
+	Compliance InstanceSessionUsageCompliance `json:"compliance"`
+	Items      []InstanceSessionUsageItem     `json:"items"`
+	Total      int                            `json:"total"`
+	Page       int                            `json:"page"`
+	Limit      int                            `json:"limit"`
+}
+
+// InstanceSessionTrace is a recent trace row within one session.
+type InstanceSessionTrace struct {
+	TraceID          string    `json:"trace_id"`
+	RequestedModel   string    `json:"requested_model"`
+	Status           string    `json:"status"`
+	PromptTokens     int       `json:"prompt_tokens"`
+	CompletionTokens int       `json:"completion_tokens"`
+	TotalTokens      int       `json:"total_tokens"`
+	CreatedAt        time.Time `json:"created_at"`
+}
+
+// InstanceSessionUsageDetail is the drill-down payload for one session on an instance.
+type InstanceSessionUsageDetail struct {
+	SessionID        string               `json:"session_id"`
+	SessionKey       string               `json:"session_key"`
+	Title            *string              `json:"title,omitempty"`
+	PromptTokens     int                  `json:"prompt_tokens"`
+	CompletionTokens int                  `json:"completion_tokens"`
+	TotalTokens      int                  `json:"total_tokens"`
+	EstimatedCost    float64              `json:"estimated_cost"`
+	Currency         string               `json:"currency"`
+	InvocationCount  int                  `json:"invocation_count"`
+	FirstSeenAt      time.Time            `json:"first_seen_at"`
+	LastSeenAt       time.Time            `json:"last_seen_at"`
+	ModelBreakdown   []CostBreakdownItem  `json:"model_breakdown"`
+	RecentTraces     []InstanceSessionTrace `json:"recent_traces"`
+}
+
+// InstanceLLMGovernanceStatus summarizes LLM governance health for one instance.
+type InstanceLLMGovernanceStatus struct {
+	ConfigStatus           string  `json:"config_status"`
+	SessionFallbackRate    float64 `json:"session_fallback_rate"`
+	RecentEgressBlockCount int     `json:"recent_egress_block_count"`
+	IsCompliant            bool    `json:"is_compliant"`
+}
+
+// LLMGovernanceOverviewItem summarizes governance for one managed runtime instance.
+type LLMGovernanceOverviewItem struct {
+	InstanceID             int     `json:"instance_id"`
+	InstanceName           string  `json:"instance_name"`
+	InstanceType           string  `json:"instance_type"`
+	UserID                 int     `json:"user_id"`
+	ConfigStatus           string  `json:"config_status"`
+	SessionFallbackRate    float64 `json:"session_fallback_rate"`
+	RecentEgressBlockCount int     `json:"recent_egress_block_count"`
+	IsCompliant            bool    `json:"is_compliant"`
+}
+
+// LLMGovernanceOverview aggregates governance signals across managed runtime instances.
+type LLMGovernanceOverview struct {
+	TotalManagedInstances int                         `json:"total_managed_instances"`
+	NonCompliantCount     int                         `json:"non_compliant_count"`
+	ExternalConfigCount   int                         `json:"external_config_count"`
+	HighFallbackCount     int                         `json:"high_fallback_count"`
+	Items                 []LLMGovernanceOverviewItem `json:"items"`
+}
+
+// InstanceSessionUsageOverviewQuery contains query options for admin session usage overview.
+type InstanceSessionUsageOverviewQuery struct {
+	Page   int
+	Limit  int
+	Search string
+	Since  *time.Time
+	Until  *time.Time
+}
+
+// InstanceSessionUsageOverviewItem summarizes session usage for one managed runtime instance.
+type InstanceSessionUsageOverviewItem struct {
+	InstanceID   int                            `json:"instance_id"`
+	InstanceName string                         `json:"instance_name"`
+	InstanceType string                         `json:"instance_type"`
+	UserID       int                            `json:"user_id"`
+	Summary      InstanceSessionUsageSummary    `json:"summary"`
+	Compliance   InstanceSessionUsageCompliance `json:"compliance"`
+}
+
+// InstanceSessionUsageOverview aggregates session usage across managed runtime instances.
+type InstanceSessionUsageOverview struct {
+	Summary InstanceSessionUsageSummary          `json:"summary"`
+	Items   []InstanceSessionUsageOverviewItem   `json:"items"`
+	Total   int                                  `json:"total"`
+	Page    int                                  `json:"page"`
+	Limit   int                                  `json:"limit"`
+}
+
 // AIObservabilityService provides read APIs for audit and cost reporting.
 type AIObservabilityService interface {
 	ListAuditItems(query AuditQuery) (*AuditListResult, error)
 	GetTraceDetail(traceID string) (*AuditTraceDetail, error)
 	GetCostOverview(query CostQuery) (*CostOverview, error)
+	GetInstanceSessionUsage(instanceID int, query InstanceSessionUsageQuery) (*InstanceSessionUsageResult, error)
+	GetInstanceSessionUsageDetail(instanceID int, sessionID string, filter repository.SessionUsageFilter) (*InstanceSessionUsageDetail, error)
+	GetInstanceLLMGovernanceStatus(instanceID int, runtimeSystemInfo map[string]interface{}) (*InstanceLLMGovernanceStatus, error)
+	GetLLMGovernanceOverview() (*LLMGovernanceOverview, error)
+	GetAdminSessionUsageOverview(query InstanceSessionUsageOverviewQuery) (*InstanceSessionUsageOverview, error)
 }
 
 type aiObservabilityService struct {
@@ -173,9 +316,11 @@ type aiObservabilityService struct {
 	costRepo        repository.CostRecordRepository
 	riskHitRepo     repository.RiskHitRepository
 	chatMessageRepo repository.ChatMessageRepository
+	chatSessionRepo repository.ChatSessionRepository
 	llmModelRepo    repository.LLMModelRepository
-	instanceRepo    repository.InstanceRepository
-	userRepo        repository.UserRepository
+	instanceRepo        repository.InstanceRepository
+	userRepo            repository.UserRepository
+	runtimeStatusRepo   repository.InstanceRuntimeStatusRepository
 }
 
 // NewAIObservabilityService creates a new observability reporting service.
@@ -185,19 +330,23 @@ func NewAIObservabilityService(
 	costRepo repository.CostRecordRepository,
 	riskHitRepo repository.RiskHitRepository,
 	chatMessageRepo repository.ChatMessageRepository,
+	chatSessionRepo repository.ChatSessionRepository,
 	llmModelRepo repository.LLMModelRepository,
 	instanceRepo repository.InstanceRepository,
 	userRepo repository.UserRepository,
+	runtimeStatusRepo repository.InstanceRuntimeStatusRepository,
 ) AIObservabilityService {
 	return &aiObservabilityService{
-		invocationRepo:  invocationRepo,
-		auditRepo:       auditRepo,
-		costRepo:        costRepo,
-		riskHitRepo:     riskHitRepo,
-		chatMessageRepo: chatMessageRepo,
-		llmModelRepo:    llmModelRepo,
-		instanceRepo:    instanceRepo,
-		userRepo:        userRepo,
+		invocationRepo:    invocationRepo,
+		auditRepo:         auditRepo,
+		costRepo:          costRepo,
+		riskHitRepo:       riskHitRepo,
+		chatMessageRepo:   chatMessageRepo,
+		chatSessionRepo:   chatSessionRepo,
+		llmModelRepo:      llmModelRepo,
+		instanceRepo:      instanceRepo,
+		userRepo:          userRepo,
+		runtimeStatusRepo: runtimeStatusRepo,
 	}
 }
 
@@ -1846,4 +1995,475 @@ func valueOrCostTotalTokens(cost *models.CostRecord) int {
 
 func pointerToInt(value int) *int {
 	return &value
+}
+
+func (s *aiObservabilityService) GetInstanceSessionUsage(instanceID int, query InstanceSessionUsageQuery) (*InstanceSessionUsageResult, error) {
+	page, limit := normalizePageLimit(query.Page, query.Limit, 20, 100)
+	filter := repository.SessionUsageFilter{Since: query.Since, Until: query.Until}
+	allItems, err := s.mergeInstanceSessionUsageItems(instanceID, filter)
+	if err != nil {
+		return nil, err
+	}
+	items := filterSessionUsageItems(allItems, query.Search)
+
+	summary, compliance := summarizeSessionUsageItems(allItems, filter, instanceID, s.invocationRepo, s.auditRepo)
+
+	total := len(items)
+	start := (page - 1) * limit
+	if start > total {
+		start = total
+	}
+	end := start + limit
+	if end > total {
+		end = total
+	}
+	paged := make([]InstanceSessionUsageItem, 0, end-start)
+	if start < end {
+		paged = append(paged, items[start:end]...)
+	}
+
+	return &InstanceSessionUsageResult{
+		Summary:    summary,
+		Compliance: compliance,
+		Items:      paged,
+		Total:      total,
+		Page:       page,
+		Limit:      limit,
+	}, nil
+}
+
+func (s *aiObservabilityService) GetInstanceSessionUsageDetail(instanceID int, sessionID string, filter repository.SessionUsageFilter) (*InstanceSessionUsageDetail, error) {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return nil, fmt.Errorf("session id is required")
+	}
+
+	items, err := s.mergeInstanceSessionUsageItems(instanceID, filter)
+	if err != nil {
+		return nil, err
+	}
+	var matched *InstanceSessionUsageItem
+	for index := range items {
+		if items[index].SessionID == sessionID {
+			matched = &items[index]
+			break
+		}
+	}
+	if matched == nil {
+		return nil, fmt.Errorf("session usage not found")
+	}
+
+	invocations, err := s.invocationRepo.ListRecentByInstanceSession(instanceID, sessionID, 20, filter)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list recent invocations for session: %w", err)
+	}
+
+	modelTotals := map[string]*CostBreakdownItem{}
+	recentTraces := make([]InstanceSessionTrace, 0, len(invocations))
+	for _, invocation := range invocations {
+		modelRow := modelTotals[invocation.RequestedModel]
+		if modelRow == nil {
+			modelRow = &CostBreakdownItem{Label: invocation.RequestedModel}
+			modelTotals[invocation.RequestedModel] = modelRow
+		}
+		modelRow.PromptTokens += invocation.PromptTokens
+		modelRow.CompletionTokens += invocation.CompletionTokens
+		modelRow.TotalTokens += invocation.TotalTokens
+		if s.costRepo != nil {
+			if costs, costErr := s.costRepo.ListByTraceID(invocation.TraceID); costErr == nil {
+				for _, cost := range costs {
+					modelRow.EstimatedCost += cost.EstimatedCost
+				}
+			}
+		}
+
+		recentTraces = append(recentTraces, InstanceSessionTrace{
+			TraceID:          invocation.TraceID,
+			RequestedModel:   invocation.RequestedModel,
+			Status:           invocation.Status,
+			PromptTokens:     invocation.PromptTokens,
+			CompletionTokens: invocation.CompletionTokens,
+			TotalTokens:      invocation.TotalTokens,
+			CreatedAt:        invocation.CreatedAt,
+		})
+	}
+
+	return &InstanceSessionUsageDetail{
+		SessionID:        matched.SessionID,
+		SessionKey:       matched.SessionKey,
+		Title:            matched.Title,
+		PromptTokens:     matched.PromptTokens,
+		CompletionTokens: matched.CompletionTokens,
+		TotalTokens:      matched.TotalTokens,
+		EstimatedCost:    matched.EstimatedCost,
+		Currency:         matched.Currency,
+		InvocationCount:  matched.InvocationCount,
+		FirstSeenAt:      matched.FirstSeenAt,
+		LastSeenAt:       matched.LastSeenAt,
+		ModelBreakdown:   s.completeModelBreakdowns(modelTotals),
+		RecentTraces:     recentTraces,
+	}, nil
+}
+
+func (s *aiObservabilityService) GetInstanceLLMGovernanceStatus(instanceID int, runtimeSystemInfo map[string]interface{}) (*InstanceLLMGovernanceStatus, error) {
+	items, err := s.mergeInstanceSessionUsageItems(instanceID, repository.SessionUsageFilter{})
+	if err != nil {
+		return nil, err
+	}
+
+	fallbackCount := 0
+	for _, item := range items {
+		if utils.IsTraceFallbackSessionID(item.SessionID) {
+			fallbackCount++
+		}
+	}
+
+	fallbackRate := 0.0
+	if len(items) > 0 {
+		fallbackRate = float64(fallbackCount) / float64(len(items))
+	}
+
+	configStatus := classifyLLMConfigStatusFromSystemInfo(runtimeSystemInfo)
+	since := time.Now().UTC().Add(-24 * time.Hour)
+	egressBlockCount := 0
+	if s.auditRepo != nil {
+		if count, err := s.auditRepo.CountRecentByInstanceAndEventType(instanceID, "egress.llm.blocked", since); err == nil {
+			egressBlockCount = count
+		}
+	}
+
+	isCompliant := fallbackRate == 0 && configStatus != "external"
+	if configStatus == "gateway" {
+		isCompliant = fallbackRate == 0
+	}
+
+	status := &InstanceLLMGovernanceStatus{
+		ConfigStatus:           configStatus,
+		SessionFallbackRate:    fallbackRate,
+		RecentEgressBlockCount: egressBlockCount,
+		IsCompliant:            isCompliant,
+	}
+	return status, nil
+}
+
+func (s *aiObservabilityService) GetLLMGovernanceOverview() (*LLMGovernanceOverview, error) {
+	if s.instanceRepo == nil {
+		return &LLMGovernanceOverview{Items: []LLMGovernanceOverviewItem{}}, nil
+	}
+
+	instances, err := s.instanceRepo.GetAllRunning()
+	if err != nil {
+		return nil, fmt.Errorf("failed to list running instances: %w", err)
+	}
+
+	overview := &LLMGovernanceOverview{
+		Items: make([]LLMGovernanceOverviewItem, 0),
+	}
+	for _, instance := range instances {
+		if !supportsManagedRuntimeIntegration(instance.Type) {
+			continue
+		}
+		systemInfo := decodeRuntimeSystemInfo(s.runtimeStatusRepo, instance.ID)
+		status, err := s.GetInstanceLLMGovernanceStatus(instance.ID, systemInfo)
+		if err != nil {
+			return nil, err
+		}
+		if status == nil {
+			continue
+		}
+
+		item := LLMGovernanceOverviewItem{
+			InstanceID:             instance.ID,
+			InstanceName:           instance.Name,
+			InstanceType:           instance.Type,
+			UserID:                 instance.UserID,
+			ConfigStatus:           status.ConfigStatus,
+			SessionFallbackRate:    status.SessionFallbackRate,
+			RecentEgressBlockCount: status.RecentEgressBlockCount,
+			IsCompliant:            status.IsCompliant,
+		}
+		overview.TotalManagedInstances++
+		overview.Items = append(overview.Items, item)
+		if !status.IsCompliant {
+			overview.NonCompliantCount++
+		}
+		if status.ConfigStatus == "external" {
+			overview.ExternalConfigCount++
+		}
+		if status.SessionFallbackRate > 0 {
+			overview.HighFallbackCount++
+		}
+	}
+
+	return overview, nil
+}
+
+func (s *aiObservabilityService) GetAdminSessionUsageOverview(query InstanceSessionUsageOverviewQuery) (*InstanceSessionUsageOverview, error) {
+	if s.instanceRepo == nil {
+		return &InstanceSessionUsageOverview{Items: []InstanceSessionUsageOverviewItem{}}, nil
+	}
+
+	page, limit := normalizePageLimit(query.Page, query.Limit, 20, 100)
+	filter := repository.SessionUsageFilter{Since: query.Since, Until: query.Until}
+	search := strings.ToLower(strings.TrimSpace(query.Search))
+
+	instances, err := s.instanceRepo.GetAllRunning()
+	if err != nil {
+		return nil, fmt.Errorf("failed to list running instances: %w", err)
+	}
+
+	allItems := make([]InstanceSessionUsageOverviewItem, 0)
+	globalSummary := InstanceSessionUsageSummary{Currency: "USD"}
+	globalCurrencyCounts := map[string]int{}
+	for _, instance := range instances {
+		if !supportsManagedRuntimeIntegration(instance.Type) {
+			continue
+		}
+		if search != "" {
+			nameMatch := strings.Contains(strings.ToLower(instance.Name), search)
+			idMatch := strings.Contains(strconv.Itoa(instance.ID), search)
+			typeMatch := strings.Contains(strings.ToLower(instance.Type), search)
+			if !nameMatch && !idMatch && !typeMatch {
+				continue
+			}
+		}
+		sessionItems, mergeErr := s.mergeInstanceSessionUsageItems(instance.ID, filter)
+		if mergeErr != nil {
+			return nil, mergeErr
+		}
+		summary, compliance := summarizeSessionUsageItems(sessionItems, filter, instance.ID, s.invocationRepo, s.auditRepo)
+		item := InstanceSessionUsageOverviewItem{
+			InstanceID:   instance.ID,
+			InstanceName: instance.Name,
+			InstanceType: instance.Type,
+			UserID:       instance.UserID,
+			Summary:      summary,
+			Compliance:   compliance,
+		}
+		allItems = append(allItems, item)
+
+		globalSummary.TotalPromptTokens += summary.TotalPromptTokens
+		globalSummary.TotalCompletionTokens += summary.TotalCompletionTokens
+		globalSummary.TotalTokens += summary.TotalTokens
+		globalSummary.TotalEstimatedCost += summary.TotalEstimatedCost
+		globalSummary.SessionCount += summary.SessionCount
+		if strings.TrimSpace(summary.Currency) != "" {
+			globalCurrencyCounts[summary.Currency]++
+		}
+	}
+	if len(globalCurrencyCounts) > 0 {
+		globalSummary.Currency = pickDominantCurrency(globalCurrencyCounts)
+	}
+
+	sort.Slice(allItems, func(i, j int) bool {
+		if allItems[i].Summary.TotalTokens == allItems[j].Summary.TotalTokens {
+			return allItems[i].InstanceID > allItems[j].InstanceID
+		}
+		return allItems[i].Summary.TotalTokens > allItems[j].Summary.TotalTokens
+	})
+
+	total := len(allItems)
+	start := (page - 1) * limit
+	if start > total {
+		start = total
+	}
+	end := start + limit
+	if end > total {
+		end = total
+	}
+	paged := make([]InstanceSessionUsageOverviewItem, 0, end-start)
+	if start < end {
+		paged = append(paged, allItems[start:end]...)
+	}
+
+	return &InstanceSessionUsageOverview{
+		Summary: globalSummary,
+		Items:   paged,
+		Total:   total,
+		Page:    page,
+		Limit:   limit,
+	}, nil
+}
+
+func summarizeSessionUsageItems(
+	allItems []InstanceSessionUsageItem,
+	filter repository.SessionUsageFilter,
+	instanceID int,
+	invocationRepo repository.ModelInvocationRepository,
+	auditRepo repository.AuditEventRepository,
+) (InstanceSessionUsageSummary, InstanceSessionUsageCompliance) {
+	summary := InstanceSessionUsageSummary{Currency: "USD"}
+	compliance := InstanceSessionUsageCompliance{}
+	currencyCounts := map[string]int{}
+	for _, item := range allItems {
+		summary.TotalPromptTokens += item.PromptTokens
+		summary.TotalCompletionTokens += item.CompletionTokens
+		summary.TotalTokens += item.TotalTokens
+		summary.TotalEstimatedCost += item.EstimatedCost
+		if strings.TrimSpace(item.Currency) != "" {
+			currencyCounts[item.Currency]++
+		}
+		if utils.IsTraceFallbackSessionID(item.SessionID) {
+			compliance.FallbackSessionCount++
+		}
+	}
+	summary.SessionCount = len(allItems)
+	if invocationRepo != nil {
+		if count, countErr := invocationRepo.CountDistinctSessionsByInstance(instanceID, filter); countErr == nil {
+			summary.SessionCount = count
+		}
+	}
+	compliance.HasFallbackSessions = compliance.FallbackSessionCount > 0
+	if auditRepo != nil {
+		since := time.Now().UTC().Add(-24 * time.Hour)
+		if filter.Since != nil && filter.Since.After(since) {
+			since = *filter.Since
+		}
+		if count, err := auditRepo.CountRecentByInstanceAndEventType(instanceID, "gateway.session.fallback", since); err == nil {
+			compliance.RecentFallbackAuditCount = count
+		}
+	}
+	if len(currencyCounts) > 0 {
+		summary.Currency = pickDominantCurrency(currencyCounts)
+	}
+	return summary, compliance
+}
+
+func pickDominantCurrency(currencyCounts map[string]int) string {
+	bestCurrency := "USD"
+	bestCount := 0
+	for currency, count := range currencyCounts {
+		if count > bestCount {
+			bestCurrency = currency
+			bestCount = count
+		}
+	}
+	return bestCurrency
+}
+
+func decodeRuntimeSystemInfo(runtimeRepo repository.InstanceRuntimeStatusRepository, instanceID int) map[string]interface{} {
+	if runtimeRepo == nil {
+		return nil
+	}
+	status, err := runtimeRepo.GetByInstanceID(instanceID)
+	if err != nil || status == nil || status.SystemInfoJSON == nil {
+		return nil
+	}
+	raw := strings.TrimSpace(*status.SystemInfoJSON)
+	if raw == "" {
+		return nil
+	}
+	systemInfo := map[string]interface{}{}
+	if err := json.Unmarshal([]byte(raw), &systemInfo); err != nil {
+		return nil
+	}
+	return systemInfo
+}
+
+func (s *aiObservabilityService) mergeInstanceSessionUsageItems(instanceID int, filter repository.SessionUsageFilter) ([]InstanceSessionUsageItem, error) {
+	tokenAggs, err := s.invocationRepo.AggregateByInstanceSession(instanceID, filter)
+	if err != nil {
+		return nil, fmt.Errorf("failed to aggregate session tokens: %w", err)
+	}
+	costAggs, err := s.costRepo.AggregateCostByInstanceSession(instanceID, filter)
+	if err != nil {
+		return nil, fmt.Errorf("failed to aggregate session costs: %w", err)
+	}
+
+	sessionMeta := map[string]models.ChatSession{}
+	if s.chatSessionRepo != nil {
+		sessions, listErr := s.chatSessionRepo.ListByInstanceID(instanceID)
+		if listErr != nil {
+			return nil, fmt.Errorf("failed to list chat sessions: %w", listErr)
+		}
+		for _, session := range sessions {
+			sessionMeta[session.SessionID] = session
+		}
+	}
+
+	costBySession := map[string]repository.InstanceSessionCostAggregate{}
+	for _, cost := range costAggs {
+		costBySession[cost.SessionID] = cost
+	}
+
+	items := make([]InstanceSessionUsageItem, 0, len(tokenAggs))
+	for _, token := range tokenAggs {
+		item := InstanceSessionUsageItem{
+			SessionID:        token.SessionID,
+			SessionKey:       utils.FormatOpenClawSessionKey(token.SessionID),
+			PromptTokens:     token.PromptTokens,
+			CompletionTokens: token.CompletionTokens,
+			TotalTokens:      token.TotalTokens,
+			InvocationCount:  token.InvocationCount,
+			FirstSeenAt:      token.FirstSeenAt,
+			LastSeenAt:       token.LastSeenAt,
+			Currency:         "USD",
+		}
+		if cost, ok := costBySession[token.SessionID]; ok {
+			item.EstimatedCost = cost.EstimatedCost
+			if strings.TrimSpace(cost.Currency) != "" {
+				item.Currency = cost.Currency
+			}
+		}
+		if session, ok := sessionMeta[token.SessionID]; ok && session.Title != nil {
+			item.Title = session.Title
+		}
+		items = append(items, item)
+	}
+
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].LastSeenAt.After(items[j].LastSeenAt)
+	})
+	return items, nil
+}
+
+func filterSessionUsageItems(items []InstanceSessionUsageItem, search string) []InstanceSessionUsageItem {
+	search = strings.ToLower(strings.TrimSpace(search))
+	if search == "" {
+		return items
+	}
+	filtered := make([]InstanceSessionUsageItem, 0, len(items))
+	for _, item := range items {
+		haystacks := []string{
+			strings.ToLower(item.SessionID),
+			strings.ToLower(item.SessionKey),
+		}
+		if item.Title != nil {
+			haystacks = append(haystacks, strings.ToLower(*item.Title))
+		}
+		matched := false
+		for _, candidate := range haystacks {
+			if strings.Contains(candidate, search) {
+				matched = true
+				break
+			}
+		}
+		if matched {
+			filtered = append(filtered, item)
+		}
+	}
+	return filtered
+}
+
+func classifyLLMConfigStatusFromSystemInfo(systemInfo map[string]interface{}) string {
+	if len(systemInfo) == 0 {
+		return "unknown"
+	}
+	if raw, ok := systemInfo["llm_config_status"]; ok {
+		if value, ok := raw.(string); ok && strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	if raw, ok := systemInfo["llm_provider_base_url"]; ok {
+		if value, ok := raw.(string); ok {
+			lower := strings.ToLower(strings.TrimSpace(value))
+			switch {
+			case strings.Contains(lower, "gateway/llm"), strings.Contains(lower, "clawmanager"):
+				return "gateway"
+			case strings.Contains(lower, "openai.com"), strings.Contains(lower, "anthropic.com"):
+				return "external"
+			}
+		}
+	}
+	return "unknown"
 }

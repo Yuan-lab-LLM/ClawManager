@@ -55,9 +55,10 @@ func (s *NetworkPolicyService) EnsureDefaultPolicy(ctx context.Context, userID, 
 		Spec: networkingv1.NetworkPolicySpec{
 			PodSelector: metav1.LabelSelector{
 				MatchLabels: map[string]string{
-					"app":         "clawreef",
-					"instance-id": instanceLabel,
-					"managed-by":  "clawreef",
+					"app":                              "clawreef",
+					"instance-id":                      instanceLabel,
+					"managed-by":                       "clawreef",
+					"clawmanager.io/managed-runtime":   "true",
 				},
 			},
 			PolicyTypes: []networkingv1.PolicyType{

@@ -49,8 +49,9 @@ func (h *AIGatewayHandler) ChatCompletions(c *gin.Context) {
 		return
 	}
 	req.RawBody = rawBody
-	if req.SessionID == nil {
-		if sessionKey := strings.TrimSpace(c.GetHeader("x-openclaw-session-key")); sessionKey != "" {
+	if sessionKey := strings.TrimSpace(c.GetHeader("x-openclaw-session-key")); sessionKey != "" {
+		req.OpenClawSessionKey = &sessionKey
+		if req.SessionID == nil {
 			req.SessionID = &sessionKey
 		}
 	}
@@ -59,6 +60,13 @@ func (h *AIGatewayHandler) ChatCompletions(c *gin.Context) {
 			req.TraceID = &runID
 		}
 	}
+	gatewayAuthType, _ := c.Get("gatewayAuthType")
+	instanceType, _ := c.Get("instanceType")
+	aigateway.ApplyManagedInstanceSessionDefaults(
+		&req,
+		stringValue(gatewayAuthType),
+		stringValue(instanceType),
+	)
 
 	userID, exists := c.Get("userID")
 	if !exists {
@@ -157,4 +165,12 @@ func setInt64Metadata(c *gin.Context, field **int64, key string) bool {
 		return true
 	}
 	return **field == value
+}
+
+func stringValue(raw interface{}) string {
+	value, ok := raw.(string)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(value)
 }

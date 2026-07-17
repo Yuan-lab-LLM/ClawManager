@@ -74,7 +74,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children, title = '' }) => {
       path: '/admin/ai-gateway',
       label: t('nav.aiGateway'),
       icon: Bot,
-      matchPaths: ['/admin/models', '/admin/ai-audit', '/admin/costs', '/admin/risk-rules'],
+      matchPaths: ['/admin/models', '/admin/ai-audit', '/admin/costs', '/admin/risk-rules', '/admin/session-usage'],
     },
     { path: '/admin/settings', label: t('nav.settings'), icon: Settings },
   ];

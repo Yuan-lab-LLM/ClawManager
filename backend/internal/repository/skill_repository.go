@@ -27,7 +27,9 @@ type SkillRepository interface {
 	GetVersionBySkillAndBlob(skillID, blobID int) (*models.SkillVersion, error)
 	GetLatestVersionBySkillID(skillID int) (*models.SkillVersion, error)
 	CreateVersion(version *models.SkillVersion) error
+	UpdateVersion(version *models.SkillVersion) error
 	ListInstanceSkills(instanceID int) ([]models.InstanceSkill, error)
+	ListActiveInstanceSkillsBySkillID(skillID int) ([]models.InstanceSkill, error)
 	GetInstanceSkill(instanceID, skillID int) (*models.InstanceSkill, error)
 	UpsertInstanceSkill(item *models.InstanceSkill) error
 	MarkInstanceSkillRemoved(instanceID int, skillID int, observedAt time.Time) error
@@ -39,6 +41,12 @@ type SkillRepository interface {
 	ListScanResultsByBlobID(blobID int) ([]models.SkillScanResult, error)
 	GetLatestScanResultByBlobID(blobID int) (*models.SkillScanResult, error)
 	GetLatestScanResultBySkillID(skillID int) (*models.SkillScanResult, error)
+	ListHubTags(includeAdminOnly bool) ([]models.SkillHubTag, error)
+	GetHubTagByID(id int) (*models.SkillHubTag, error)
+	ListHubTagsBySkillID(skillID int) ([]models.SkillHubTag, error)
+	ReplaceSkillTagAssignments(skillID int, tagIDs []int) error
+	ListPublicHubSkills() ([]models.Skill, error)
+	ListSkillsForHubAdmin() ([]models.Skill, error)
 }
 
 type skillRepository struct{ sess db.Session }
@@ -74,7 +82,7 @@ func (r *skillRepository) GetSkillByID(id int) (*models.Skill, error) {
 
 func (r *skillRepository) GetSkillByUserKey(userID int, skillKey string) (*models.Skill, error) {
 	var item models.Skill
-	if err := r.sess.Collection("skills").Find(db.Cond{"user_id": userID, "skill_key": skillKey}).One(&item); err != nil {
+	if err := r.sess.Collection("skills").Find(db.Cond{"user_id": userID, "skill_key": skillKey, "status": "active"}).One(&item); err != nil {
 		if err == db.ErrNoMoreRows {
 			return nil, nil
 		}
@@ -84,6 +92,9 @@ func (r *skillRepository) GetSkillByUserKey(userID int, skillKey string) (*model
 }
 
 func (r *skillRepository) CreateSkill(skill *models.Skill) error {
+	if strings.TrimSpace(skill.Visibility) == "" {
+		skill.Visibility = "private"
+	}
 	ensureTimestamps(&skill.CreatedAt, &skill.UpdatedAt)
 	res, err := r.sess.Collection("skills").Insert(skill)
 	if err != nil {
@@ -219,10 +230,31 @@ func (r *skillRepository) CreateVersion(version *models.SkillVersion) error {
 	return nil
 }
 
+func (r *skillRepository) UpdateVersion(version *models.SkillVersion) error {
+	if version.UpdatedAt.IsZero() {
+		version.UpdatedAt = time.Now().UTC()
+	}
+	if err := r.sess.Collection("skill_versions").Find(db.Cond{"id": version.ID}).Update(version); err != nil {
+		return fmt.Errorf("failed to update skill version: %w", err)
+	}
+	return nil
+}
+
 func (r *skillRepository) ListInstanceSkills(instanceID int) ([]models.InstanceSkill, error) {
 	var items []models.InstanceSkill
 	if err := r.sess.Collection("instance_skills").Find(db.Cond{"instance_id": instanceID}).OrderBy("-updated_at", "-id").All(&items); err != nil {
 		return nil, fmt.Errorf("failed to list instance skills: %w", err)
+	}
+	return items, nil
+}
+
+func (r *skillRepository) ListActiveInstanceSkillsBySkillID(skillID int) ([]models.InstanceSkill, error) {
+	var items []models.InstanceSkill
+	if err := r.sess.Collection("instance_skills").Find(db.Cond{
+		"skill_id": skillID,
+		"status NOT IN": []string{"removed", "missing"},
+	}).OrderBy("-updated_at", "-id").All(&items); err != nil {
+		return nil, fmt.Errorf("failed to list active instance skills by skill id: %w", err)
 	}
 	return items, nil
 }
@@ -262,6 +294,9 @@ func (r *skillRepository) UpsertInstanceSkill(item *models.InstanceSkill) error 
 			if item.UpdatedAt.IsZero() {
 				item.UpdatedAt = time.Now().UTC()
 			}
+			if existing.SourceType == "injected_by_clawmanager" && item.SourceType == "discovered_in_instance" {
+				item.SourceType = existing.SourceType
+			}
 			if err := r.sess.Collection("instance_skills").Find(db.Cond{"id": existing.ID}).Update(item); err != nil {
 				return fmt.Errorf("failed to update instance skill after duplicate insert: %w", err)
 			}
@@ -276,6 +311,9 @@ func (r *skillRepository) UpsertInstanceSkill(item *models.InstanceSkill) error 
 	item.CreatedAt = existing.CreatedAt
 	if item.UpdatedAt.IsZero() {
 		item.UpdatedAt = time.Now().UTC()
+	}
+	if existing.SourceType == "injected_by_clawmanager" && item.SourceType == "discovered_in_instance" {
+		item.SourceType = existing.SourceType
 	}
 	if err := r.sess.Collection("instance_skills").Find(db.Cond{"id": existing.ID}).Update(item); err != nil {
 		return fmt.Errorf("failed to update instance skill: %w", err)
@@ -407,11 +445,9 @@ func workspaceDeleteTargetsSkillKey(deletedPath string, skillKey string) bool {
 	if len(segments) <= 2 {
 		return true
 	}
-	for i, segment := range segments {
-		if segment == "skills" && i+1 < len(segments) && segments[i+1] == key {
-			return true
-		}
-		if segment == ".openclaw" || segment == "openclaw" {
+	for _, segment := range segments {
+		switch segment {
+		case "skills", ".hermes", "hermes", ".openclaw", "openclaw":
 			return true
 		}
 	}
@@ -419,7 +455,8 @@ func workspaceDeleteTargetsSkillKey(deletedPath string, skillKey string) bool {
 }
 
 func isRemovedInstanceSkillRecord(item models.InstanceSkill) bool {
-	return strings.EqualFold(strings.TrimSpace(item.Status), "removed") || item.RemovedAt != nil
+	status := strings.ToLower(strings.TrimSpace(item.Status))
+	return status == "removed" || status == "missing"
 }
 
 func (r *skillRepository) MarkMissingInstanceSkills(instanceID int, activeSkillIDs []int, observedAt time.Time) error {
@@ -432,11 +469,14 @@ func (r *skillRepository) MarkMissingInstanceSkills(instanceID int, activeSkillI
 		return fmt.Errorf("failed to list stale instance skills: %w", err)
 	}
 	for _, item := range items {
-		item.Status = "removed"
+		if strings.EqualFold(strings.TrimSpace(item.Status), "removed") {
+			continue
+		}
+		item.Status = "missing"
 		item.RemovedAt = &observedAt
 		item.UpdatedAt = observedAt
 		if err := r.sess.Collection("instance_skills").Find(db.Cond{"id": item.ID}).Update(item); err != nil {
-			return fmt.Errorf("failed to mark instance skill removed: %w", err)
+			return fmt.Errorf("failed to mark instance skill missing: %w", err)
 		}
 	}
 	return nil
@@ -490,4 +530,80 @@ func (r *skillRepository) GetLatestScanResultBySkillID(skillID int) (*models.Ski
 		return nil, err
 	}
 	return r.GetScanResultByID(*skill.LastScanResultID)
+}
+
+func (r *skillRepository) ListHubTags(includeAdminOnly bool) ([]models.SkillHubTag, error) {
+	var items []models.SkillHubTag
+	query := r.sess.Collection("skill_hub_tags").Find()
+	if !includeAdminOnly {
+		query = query.And(db.Cond{"admin_only": false})
+	}
+	if err := query.OrderBy("sort_order", "id").All(&items); err != nil {
+		return nil, fmt.Errorf("failed to list skill hub tags: %w", err)
+	}
+	return items, nil
+}
+
+func (r *skillRepository) GetHubTagByID(id int) (*models.SkillHubTag, error) {
+	var item models.SkillHubTag
+	if err := r.sess.Collection("skill_hub_tags").Find(db.Cond{"id": id}).One(&item); err != nil {
+		if err == db.ErrNoMoreRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to get skill hub tag: %w", err)
+	}
+	return &item, nil
+}
+
+func (r *skillRepository) ListHubTagsBySkillID(skillID int) ([]models.SkillHubTag, error) {
+	var assignments []models.SkillHubTagAssignment
+	if err := r.sess.Collection("skill_hub_tag_assignments").Find(db.Cond{"skill_id": skillID}).All(&assignments); err != nil {
+		return nil, fmt.Errorf("failed to list skill hub tag assignments: %w", err)
+	}
+	if len(assignments) == 0 {
+		return []models.SkillHubTag{}, nil
+	}
+	tagIDs := make([]interface{}, 0, len(assignments))
+	for _, item := range assignments {
+		tagIDs = append(tagIDs, item.TagID)
+	}
+	var tags []models.SkillHubTag
+	if err := r.sess.Collection("skill_hub_tags").Find(db.Cond{"id IN": tagIDs}).OrderBy("sort_order", "id").All(&tags); err != nil {
+		return nil, fmt.Errorf("failed to list skill hub tags by skill id: %w", err)
+	}
+	return tags, nil
+}
+
+func (r *skillRepository) ReplaceSkillTagAssignments(skillID int, tagIDs []int) error {
+	if err := r.sess.Collection("skill_hub_tag_assignments").Find(db.Cond{"skill_id": skillID}).Delete(); err != nil {
+		return fmt.Errorf("failed to clear skill hub tag assignments: %w", err)
+	}
+	for _, tagID := range tagIDs {
+		assignment := &models.SkillHubTagAssignment{SkillID: skillID, TagID: tagID}
+		ensureTimestamps(&assignment.CreatedAt, nil)
+		if _, err := r.sess.Collection("skill_hub_tag_assignments").Insert(assignment); err != nil {
+			return fmt.Errorf("failed to create skill hub tag assignment: %w", err)
+		}
+	}
+	return nil
+}
+
+func (r *skillRepository) ListPublicHubSkills() ([]models.Skill, error) {
+	var items []models.Skill
+	if err := r.sess.Collection("skills").Find(db.Cond{
+		"visibility":  "public",
+		"source_type": "uploaded",
+		"status":      "active",
+	}).OrderBy("-published_at", "-updated_at", "-id").All(&items); err != nil {
+		return nil, fmt.Errorf("failed to list public hub skills: %w", err)
+	}
+	return items, nil
+}
+
+func (r *skillRepository) ListSkillsForHubAdmin() ([]models.Skill, error) {
+	var items []models.Skill
+	if err := r.sess.Collection("skills").Find(db.Cond{"source_type": "uploaded"}).OrderBy("-updated_at", "-id").All(&items); err != nil {
+		return nil, fmt.Errorf("failed to list skills for hub admin: %w", err)
+	}
+	return items, nil
 }

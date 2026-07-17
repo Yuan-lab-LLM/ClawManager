@@ -263,6 +263,8 @@ type OpenClawConfigService interface {
 	CompilePreview(userID int, plan OpenClawConfigPlan) (*OpenClawConfigCompilePreview, error)
 	PlanWithoutTeamMemberLeaderOnlyChannels(userID int, plan *OpenClawConfigPlan) (*OpenClawConfigPlan, error)
 	CreateSnapshotForInstance(userID int, instance *models.Instance, plan *OpenClawConfigPlan) (*models.OpenClawInjectionSnapshot, error)
+	CreateDefaultLLMGovernanceSnapshot(userID int, instance *models.Instance) (*models.OpenClawInjectionSnapshot, error)
+	EnsurePlatformLLMGatewayResource(userID int) (*models.OpenClawConfigResource, error)
 	MarkSnapshotActive(snapshot *models.OpenClawInjectionSnapshot) error
 	MarkSnapshotFailed(snapshot *models.OpenClawInjectionSnapshot, err error) error
 	EnsureSnapshotSecret(ctx context.Context, userID int, instance *models.Instance, snapshotID int) (string, error)

@@ -166,6 +166,12 @@ jobs:
               text,
           )
 
+          text = re.sub(
+              r"(\n\s+- name: workspaces\s+)persistentVolumeClaim:\s+claimName: clawmanager-workspaces",
+              r"\1emptyDir: {}",
+              text,
+          )
+
           path.write_text(text, encoding="utf-8")
           PY
 

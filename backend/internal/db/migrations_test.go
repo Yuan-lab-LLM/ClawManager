@@ -183,3 +183,20 @@ func TestMigration038AddsGatewayTokenAliases(t *testing.T) {
 		t.Fatalf("migration 038 must not store raw access tokens")
 	}
 }
+
+func TestMigration041AddsSessionUsageIndexes(t *testing.T) {
+	raw, err := embeddedMigrations.ReadFile("migrations/041_add_session_usage_indexes.sql")
+	if err != nil {
+		t.Fatalf("read migration 041: %v", err)
+	}
+	sql := string(raw)
+	for _, required := range []string{
+		"idx_cost_records_instance_id",
+		"idx_cost_records_session_id",
+		"idx_model_invocations_instance_session",
+	} {
+		if !strings.Contains(sql, required) {
+			t.Fatalf("migration 041 must contain %s", required)
+		}
+	}
+}

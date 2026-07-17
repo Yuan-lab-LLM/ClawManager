@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -8,6 +9,7 @@ import (
 	"time"
 
 	"clawreef/internal/models"
+	"clawreef/internal/repository"
 	"clawreef/internal/services"
 
 	"github.com/gin-gonic/gin"
@@ -321,5 +323,168 @@ func TestBatchDeleteLiteInstancesRejectsProInstance(t *testing.T) {
 	}
 	if !strings.Contains(recorder.Body.String(), "not a lite instance") {
 		t.Fatalf("response did not explain lite-only rejection: %s", recorder.Body.String())
+	}
+}
+
+type stubSessionUsageObservabilityService struct {
+	usage  *services.InstanceSessionUsageResult
+	detail *services.InstanceSessionUsageDetail
+	err    error
+}
+
+func (s *stubSessionUsageObservabilityService) ListAuditItems(services.AuditQuery) (*services.AuditListResult, error) {
+	return nil, nil
+}
+func (s *stubSessionUsageObservabilityService) GetTraceDetail(string) (*services.AuditTraceDetail, error) {
+	return nil, nil
+}
+func (s *stubSessionUsageObservabilityService) GetCostOverview(services.CostQuery) (*services.CostOverview, error) {
+	return nil, nil
+}
+func (s *stubSessionUsageObservabilityService) GetInstanceSessionUsage(int, services.InstanceSessionUsageQuery) (*services.InstanceSessionUsageResult, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	return s.usage, nil
+}
+func (s *stubSessionUsageObservabilityService) GetInstanceSessionUsageDetail(int, string, repository.SessionUsageFilter) (*services.InstanceSessionUsageDetail, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	if s.detail == nil {
+		return nil, fmt.Errorf("session usage not found")
+	}
+	return s.detail, nil
+}
+func (s *stubSessionUsageObservabilityService) GetInstanceLLMGovernanceStatus(int, map[string]interface{}) (*services.InstanceLLMGovernanceStatus, error) {
+	return nil, nil
+}
+func (s *stubSessionUsageObservabilityService) GetLLMGovernanceOverview() (*services.LLMGovernanceOverview, error) {
+	return nil, nil
+}
+func (s *stubSessionUsageObservabilityService) GetAdminSessionUsageOverview(services.InstanceSessionUsageOverviewQuery) (*services.InstanceSessionUsageOverview, error) {
+	return nil, nil
+}
+
+func TestGetInstanceSessionUsageReturns200(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/v1/instances/9/session-usage?page=1&limit=10", nil)
+	c.Params = gin.Params{{Key: "id", Value: "9"}}
+	c.Set("userID", 7)
+	c.Set("userRole", "user")
+
+	handler := &InstanceHandler{
+		instanceService: &fakeWorkspaceHandlerInstanceService{instances: map[int]*models.Instance{
+			9: {ID: 9, UserID: 7, Name: "openclaw-lite", Type: "openclaw"},
+		}},
+		aiObservabilityService: &stubSessionUsageObservabilityService{
+			usage: &services.InstanceSessionUsageResult{
+				Summary: services.InstanceSessionUsageSummary{Currency: "USD"},
+				Items:   []services.InstanceSessionUsageItem{},
+			},
+		},
+	}
+
+	handler.GetInstanceSessionUsage(c)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body = %s", recorder.Code, http.StatusOK, recorder.Body.String())
+	}
+	if !strings.Contains(recorder.Body.String(), "Instance session usage retrieved successfully") {
+		t.Fatalf("unexpected body: %s", recorder.Body.String())
+	}
+}
+
+func TestGetInstanceSessionUsageInvalidSince(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/v1/instances/9/session-usage?since=bad-timestamp", nil)
+	c.Params = gin.Params{{Key: "id", Value: "9"}}
+	c.Set("userID", 7)
+	c.Set("userRole", "user")
+
+	handler := &InstanceHandler{
+		instanceService: &fakeWorkspaceHandlerInstanceService{instances: map[int]*models.Instance{
+			9: {ID: 9, UserID: 7, Name: "openclaw-lite", Type: "openclaw"},
+		}},
+		aiObservabilityService: &stubSessionUsageObservabilityService{},
+	}
+
+	handler.GetInstanceSessionUsage(c)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d, body = %s", recorder.Code, http.StatusBadRequest, recorder.Body.String())
+	}
+}
+
+func TestGetInstanceSessionUsageRejectsUntilBeforeSince(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/v1/instances/9/session-usage?since=2026-07-10T00:00:00Z&until=2026-07-01T00:00:00Z", nil)
+	c.Params = gin.Params{{Key: "id", Value: "9"}}
+	c.Set("userID", 7)
+	c.Set("userRole", "user")
+
+	handler := &InstanceHandler{
+		instanceService: &fakeWorkspaceHandlerInstanceService{instances: map[int]*models.Instance{
+			9: {ID: 9, UserID: 7, Name: "openclaw-lite", Type: "openclaw"},
+		}},
+		aiObservabilityService: &stubSessionUsageObservabilityService{},
+	}
+
+	handler.GetInstanceSessionUsage(c)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d, body = %s", recorder.Code, http.StatusBadRequest, recorder.Body.String())
+	}
+}
+
+func TestGetInstanceSessionUsageDetailRequiresSessionID(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/v1/instances/9/session-usage/detail", nil)
+	c.Params = gin.Params{{Key: "id", Value: "9"}}
+	c.Set("userID", 7)
+	c.Set("userRole", "user")
+
+	handler := &InstanceHandler{
+		instanceService: &fakeWorkspaceHandlerInstanceService{instances: map[int]*models.Instance{
+			9: {ID: 9, UserID: 7, Name: "openclaw-lite", Type: "openclaw"},
+		}},
+		aiObservabilityService: &stubSessionUsageObservabilityService{},
+	}
+
+	handler.GetInstanceSessionUsageDetail(c)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d, body = %s", recorder.Code, http.StatusBadRequest, recorder.Body.String())
+	}
+}
+
+func TestGetInstanceSessionUsageDetailNotFound(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/v1/instances/9/session-usage/detail?session_id=missing", nil)
+	c.Params = gin.Params{{Key: "id", Value: "9"}}
+	c.Set("userID", 7)
+	c.Set("userRole", "user")
+
+	handler := &InstanceHandler{
+		instanceService: &fakeWorkspaceHandlerInstanceService{instances: map[int]*models.Instance{
+			9: {ID: 9, UserID: 7, Name: "openclaw-lite", Type: "openclaw"},
+		}},
+		aiObservabilityService: &stubSessionUsageObservabilityService{},
+	}
+
+	handler.GetInstanceSessionUsageDetail(c)
+
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d, body = %s", recorder.Code, http.StatusNotFound, recorder.Body.String())
 	}
 }

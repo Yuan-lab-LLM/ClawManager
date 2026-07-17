@@ -12,6 +12,7 @@ import (
 // ChatSessionRepository defines repository operations for chat sessions.
 type ChatSessionRepository interface {
 	GetBySessionID(sessionID string) (*models.ChatSession, error)
+	ListByInstanceID(instanceID int) ([]models.ChatSession, error)
 	Save(session *models.ChatSession) error
 }
 
@@ -58,6 +59,14 @@ func (r *chatSessionRepository) GetBySessionID(sessionID string) (*models.ChatSe
 		return nil, fmt.Errorf("failed to get chat session by session id: %w", err)
 	}
 	return &item, nil
+}
+
+func (r *chatSessionRepository) ListByInstanceID(instanceID int) ([]models.ChatSession, error) {
+	var items []models.ChatSession
+	if err := r.sess.Collection("chat_sessions").Find(db.Cond{"instance_id": instanceID}).OrderBy("-last_activity_at").All(&items); err != nil {
+		return nil, fmt.Errorf("failed to list chat sessions by instance id: %w", err)
+	}
+	return items, nil
 }
 
 func (r *chatSessionRepository) Save(session *models.ChatSession) error {

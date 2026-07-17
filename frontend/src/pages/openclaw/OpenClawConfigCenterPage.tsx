@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
+import SkillImportConflictDialog from "../../components/SkillImportConflictDialog";
 import UserLayout from "../../components/UserLayout";
 import { useI18n } from "../../contexts/I18nContext";
 import {
@@ -8,6 +9,7 @@ import {
 } from "../../lib/openclawChannelTemplates";
 import { openclawConfigService } from "../../services/openclawConfigService";
 import { skillService } from "../../services/skillService";
+import { skillHubService } from "../../services/skillHubService";
 import type {
   OpenClawConfigBundle,
   OpenClawConfigBundleItem,
@@ -20,7 +22,7 @@ import type {
   UpsertOpenClawConfigResourceRequest,
 } from "../../types/openclawConfig";
 import { OPENCLAW_RESOURCE_TYPES } from "../../types/openclawConfig";
-import type { Skill } from "../../types/skill";
+import type { Skill, SkillImportDecision, SkillImportPreviewItem } from "../../types/skill";
 
 type ConfigCenterTab = "resources" | "bundles" | "injections";
 
@@ -894,6 +896,9 @@ const OpenClawConfigCenterPage: React.FC = () => {
   const [channelEditorMode, setChannelEditorMode] =
     useState<ChannelEditorMode>("form");
   const [skillUploadFile, setSkillUploadFile] = useState<File | null>(null);
+  const [importPreviewItems, setImportPreviewItems] = useState<SkillImportPreviewItem[]>([]);
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const [pendingUploadFile, setPendingUploadFile] = useState<File | null>(null);
 
   const loadAll = async () => {
     try {
@@ -1325,7 +1330,19 @@ const OpenClawConfigCenterPage: React.FC = () => {
       setSaving(true);
       setError(null);
       setNotice(null);
-      await skillService.importSkills(skillUploadFile);
+      const preview = await skillHubService.previewImportSkills(skillUploadFile);
+      const conflicts = preview.filter((item) => item.conflict_type === "content_changed");
+      if (conflicts.length > 0) {
+        setPendingUploadFile(skillUploadFile);
+        setImportPreviewItems(preview);
+        setImportDialogOpen(true);
+        return;
+      }
+      const decisions: SkillImportDecision[] = preview.map((item) => ({
+        directory_name: item.directory_name,
+        action: item.conflict_type === "unchanged" ? "skip" : "new_version",
+      }));
+      await skillHubService.importSkills(skillUploadFile, decisions);
       setSkillUploadFile(null);
       await loadAll();
       setNotice(t("openClawResourcesPage.notices.skillArchiveImported"));
@@ -1337,6 +1354,36 @@ const OpenClawConfigCenterPage: React.FC = () => {
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleImportConflictConfirm = async (decisions: SkillImportDecision[]) => {
+    if (!pendingUploadFile) {
+      return;
+    }
+    try {
+      setSaving(true);
+      setError(null);
+      await skillHubService.importSkills(pendingUploadFile, decisions);
+      setSkillUploadFile(null);
+      setPendingUploadFile(null);
+      setImportPreviewItems([]);
+      setImportDialogOpen(false);
+      await loadAll();
+      setNotice(t("openClawResourcesPage.notices.skillArchiveImported"));
+    } catch (err: any) {
+      setError(
+        err.response?.data?.error ||
+          t("openClawResourcesPage.errors.importSkillArchive"),
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleImportConflictCancel = () => {
+    setImportDialogOpen(false);
+    setPendingUploadFile(null);
+    setImportPreviewItems([]);
   };
 
   const removeSkillAsset = async (skillId: number) => {
@@ -1627,6 +1674,12 @@ const OpenClawConfigCenterPage: React.FC = () => {
                     </div>
                     <div className="mt-3 text-sm text-gray-500">
                       {t("openClawResourcesPage.skillUploadHint")}
+                    </div>
+                    <div className="mt-2 text-sm text-[#8f776b]">
+                      {t("skillHubPage.configCenterHint")}{" "}
+                      <a href="/skill-hub" className="font-medium text-[#c45a43] hover:text-[#a94734]">
+                        {t("skillHubPage.goToHub")}
+                      </a>
                     </div>
                     <div className="mt-4 space-y-3">
                       {loading ? (
@@ -2644,6 +2697,13 @@ const OpenClawConfigCenterPage: React.FC = () => {
           </div>
         </div>
       </EditorModal>
+      <SkillImportConflictDialog
+        open={importDialogOpen}
+        items={importPreviewItems}
+        loading={saving}
+        onConfirm={(decisions) => void handleImportConflictConfirm(decisions)}
+        onCancel={handleImportConflictCancel}
+      />
     </UserLayout>
   );
 };

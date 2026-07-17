@@ -142,6 +142,7 @@ func withInstanceProxyEnv(instanceType string, instanceID int, env map[string]st
 		merged["https_proxy"] = proxyURL
 		merged["NO_PROXY"] = noProxy
 		merged["no_proxy"] = noProxy
+		merged["CLAWMANAGER_EGRESS_INSTANCE_ID"] = fmt.Sprintf("%d", instanceID)
 	}
 
 	if usesWebtopImage(instanceType) {

@@ -244,6 +244,7 @@ func BuildInstanceDeployment(client *Client, config PodConfig, replicas int32) *
 		"runtime-type":  runtimeType,
 		"managed-by":    "clawreef",
 	}
+	appendManagedRuntimeLabels(config.Type, labels)
 
 	return &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{

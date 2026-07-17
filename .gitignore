@@ -6,6 +6,7 @@
 *.dylib
 /backend/bin/
 /backend/tmp/
+/runtimeagent/
 
 # Test binary, built with `go test -c`
 *.test
@@ -60,6 +61,14 @@ Thumbs.db
 /test.tar
 /fix-install-plan.md
 /docs/deployment-storage-remediation-plan.zh-CN.md
+
+# Local API / debug artifacts (do not commit)
+/_*.json
+/_*.txt
+/_test_*.js
+/_pr*.md
+.clawmanager-last-image
+/pr138.patch
 
 # Team runtime config snapshots
 /team-*.json

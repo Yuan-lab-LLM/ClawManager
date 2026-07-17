@@ -5,6 +5,7 @@ import {
   Home,
   LogOut,
   Monitor,
+  Package,
   Settings,
   SlidersHorizontal,
   Users,
@@ -17,6 +18,8 @@ interface UserLayoutProps {
   children: React.ReactNode;
   title?: string;
   titleAccessory?: React.ReactNode;
+  fillHeight?: boolean;
+  scrollableMain?: boolean;
 }
 
 interface UserNavItem {
@@ -29,7 +32,13 @@ interface UserNavItem {
 const shellContainerClass = 'w-full px-3 sm:px-4 lg:px-5 2xl:px-6';
 const appLogoSrc = '/lobster_logo.png';
 
-const UserLayout: React.FC<UserLayoutProps> = ({ children, title, titleAccessory }) => {
+const UserLayout: React.FC<UserLayoutProps> = ({
+  children,
+  title,
+  titleAccessory,
+  fillHeight = false,
+  scrollableMain = false,
+}) => {
   const location = useLocation();
   const navigate = useNavigate();
   const { user, logout } = useAuth();
@@ -41,6 +50,7 @@ const UserLayout: React.FC<UserLayoutProps> = ({ children, title, titleAccessory
     { path: '/instances', label: t('nav.myInstances'), icon: Monitor },
     { path: '/teams', label: 'Teams', icon: Users },
     { path: '/openclaw-configs', label: t('nav.openClawConfigs'), icon: SlidersHorizontal },
+    { path: '/skill-hub', label: t('nav.skillHub'), icon: Package },
     { path: '/settings', label: t('nav.settings'), icon: Settings },
   ];
 
@@ -116,7 +126,7 @@ const UserLayout: React.FC<UserLayoutProps> = ({ children, title, titleAccessory
         <main className={`${shellContainerClass} py-6`}>{children}</main>
       </div>
 
-      <div className="hidden min-h-screen md:flex">
+      <div className={`hidden md:flex ${fillHeight ? "h-screen overflow-hidden" : "min-h-screen"}`}>
         <aside className="w-64 shrink-0 border-r border-slate-200 bg-white">
           <div className="sticky top-0 flex h-screen flex-col">
             <div className="flex h-20 items-center border-b border-slate-200 px-5">
@@ -175,7 +185,7 @@ const UserLayout: React.FC<UserLayoutProps> = ({ children, title, titleAccessory
           </div>
         </aside>
 
-        <div className="flex min-w-0 flex-1 flex-col">
+        <div className={`flex min-w-0 flex-1 flex-col ${fillHeight ? "min-h-0 overflow-hidden" : ""}`}>
           {title && (
             <div className="app-subheader">
               <div className={`${shellContainerClass} flex min-h-20 items-center justify-between gap-6 py-4`}>
@@ -194,7 +204,15 @@ const UserLayout: React.FC<UserLayoutProps> = ({ children, title, titleAccessory
             </div>
           )}
 
-          <main className={`${shellContainerClass} flex-1 py-6`}>{children}</main>
+          <main
+            className={`${shellContainerClass} flex-1 py-6 ${
+              fillHeight
+                ? `flex min-h-0 flex-col ${scrollableMain ? "overflow-y-auto" : "overflow-hidden"}`
+                : ""
+            }`}
+          >
+            {children}
+          </main>
         </div>
       </div>
     </div>

@@ -17,6 +17,7 @@ type RuntimeAgentClient interface {
 	CreateGateway(ctx context.Context, endpoint string, req RuntimeAgentCreateGatewayRequest) (*RuntimeAgentCreateGatewayResponse, error)
 	DeleteGateway(ctx context.Context, endpoint, gatewayID string) error
 	Drain(ctx context.Context, endpoint string) error
+	ResyncInstanceSkills(ctx context.Context, endpoint string, instanceID int, mode string) error
 }
 
 type RuntimeAgentPortRange struct {
@@ -89,6 +90,19 @@ func (c *runtimeAgentHTTPClient) DeleteGateway(ctx context.Context, endpoint, ga
 
 func (c *runtimeAgentHTTPClient) Drain(ctx context.Context, endpoint string) error {
 	return c.do(ctx, http.MethodPost, endpoint, "/v1/drain", map[string]bool{"draining": true}, nil)
+}
+
+func (c *runtimeAgentHTTPClient) ResyncInstanceSkills(ctx context.Context, endpoint string, instanceID int, mode string) error {
+	mode = strings.TrimSpace(mode)
+	if mode == "" {
+		mode = "full"
+	}
+	body := map[string]any{
+		"instance_id": instanceID,
+		"mode":        mode,
+		"trigger":     "manual",
+	}
+	return c.do(ctx, http.MethodPost, endpoint, "/v1/skills/resync", body, nil)
 }
 
 func (c *runtimeAgentHTTPClient) do(ctx context.Context, method, endpoint, path string, body any, out any) error {

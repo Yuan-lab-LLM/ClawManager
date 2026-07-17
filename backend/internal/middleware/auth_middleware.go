@@ -94,6 +94,7 @@ func GatewayAuth(instanceRepo repository.InstanceRepository, bindingRepos ...rep
 
 		c.Set("userID", instance.UserID)
 		c.Set("instanceID", instance.ID)
+		c.Set("instanceType", strings.TrimSpace(instance.Type))
 		c.Set("instanceMode", gatewayInstanceMode(instance.InstanceMode, instance.RuntimeType))
 		c.Set("runtimeType", strings.TrimSpace(instance.RuntimeType))
 		if bindingRepo != nil {

@@ -396,3 +396,139 @@ export async function disableExternalAccess(
   });
   await expectOkEnvelope<null>(response);
 }
+
+export interface GatewayModelSummary {
+  id: number | string;
+  display_name?: string;
+}
+
+export async function listGatewayModels(
+  request: APIRequestContext,
+  accessToken: string,
+): Promise<GatewayModelSummary[]> {
+  const response = await request.get(`${env.backendUrl}/gateway/llm/models`, {
+    headers: bearer(accessToken),
+  });
+  const body = await expectOkEnvelope<{ items: GatewayModelSummary[] }>(response);
+  return body.items ?? [];
+}
+
+export async function gatewayChatCompletion(
+  request: APIRequestContext,
+  accessToken: string,
+  payload: {
+    model: string;
+    instance_id?: number;
+    messages: Array<{ role: string; content: string }>;
+    stream?: boolean;
+  },
+  extraHeaders: Record<string, string> = {},
+) {
+  return request.post(`${env.backendUrl}/gateway/llm/chat/completions`, {
+    headers: {
+      ...bearer(accessToken),
+      ...extraHeaders,
+    },
+    data: payload,
+  });
+}
+
+export interface LLMGovernanceOverview {
+  total_managed_instances: number;
+  non_compliant_count: number;
+  external_config_count: number;
+  high_fallback_count: number;
+  items: Array<{
+    instance_id: number;
+    instance_name: string;
+    is_compliant: boolean;
+  }>;
+}
+
+export async function getLLMGovernanceOverview(
+  request: APIRequestContext,
+  accessToken: string,
+): Promise<LLMGovernanceOverview> {
+  const response = await request.get(`${env.backendUrl}/admin/llm-governance/overview`, {
+    headers: bearer(accessToken),
+  });
+  return expectOkEnvelope<LLMGovernanceOverview>(response);
+}
+
+export interface InstanceSessionUsageResult {
+  summary: {
+    total_prompt_tokens: number;
+    total_completion_tokens: number;
+    total_tokens: number;
+    total_estimated_cost: number;
+    currency: string;
+    session_count: number;
+  };
+  compliance: {
+    fallback_session_count: number;
+    has_fallback_sessions: boolean;
+    recent_fallback_audit_count: number;
+  };
+  items: Array<{
+    session_id: string;
+    session_key: string;
+    total_tokens: number;
+    invocation_count: number;
+  }>;
+  total: number;
+  page: number;
+  limit: number;
+}
+
+export interface SessionUsageOverviewResult {
+  summary: {
+    total_tokens: number;
+    total_estimated_cost: number;
+    currency: string;
+    session_count: number;
+  };
+  items: Array<{
+    instance_id: number;
+    instance_name: string;
+    instance_type: string;
+    user_id: number;
+    summary: {
+      total_tokens: number;
+      session_count: number;
+      total_estimated_cost: number;
+      currency: string;
+    };
+    compliance: {
+      fallback_session_count: number;
+      has_fallback_sessions: boolean;
+    };
+  }>;
+  total: number;
+  page: number;
+  limit: number;
+}
+
+export async function getInstanceSessionUsage(
+  request: APIRequestContext,
+  accessToken: string,
+  instanceId: number,
+  params?: { page?: number; limit?: number; search?: string; since?: string; until?: string },
+): Promise<InstanceSessionUsageResult> {
+  const response = await request.get(`${env.backendUrl}/instances/${instanceId}/session-usage`, {
+    headers: bearer(accessToken),
+    params,
+  });
+  return expectOkEnvelope<InstanceSessionUsageResult>(response);
+}
+
+export async function getAdminSessionUsageOverview(
+  request: APIRequestContext,
+  accessToken: string,
+  params?: { page?: number; limit?: number; search?: string; since?: string; until?: string },
+): Promise<SessionUsageOverviewResult> {
+  const response = await request.get(`${env.backendUrl}/admin/session-usage/overview`, {
+    headers: bearer(accessToken),
+    params,
+  });
+  return expectOkEnvelope<SessionUsageOverviewResult>(response);
+}

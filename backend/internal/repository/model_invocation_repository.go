@@ -10,6 +10,17 @@ import (
 	"github.com/upper/db/v4"
 )
 
+// InstanceSessionTokenAggregate summarizes token usage for one session on an instance.
+type InstanceSessionTokenAggregate struct {
+	SessionID        string
+	PromptTokens     int
+	CompletionTokens int
+	TotalTokens      int
+	InvocationCount  int
+	FirstSeenAt      time.Time
+	LastSeenAt       time.Time
+}
+
 // ModelInvocationRepository defines repository operations for governed model calls.
 type ModelInvocationRepository interface {
 	Create(invocation *models.ModelInvocation) error
@@ -18,6 +29,9 @@ type ModelInvocationRepository interface {
 	ListBySessionID(sessionID string, limit int) ([]models.ModelInvocation, error)
 	ListByUserID(userID, limit int) ([]models.ModelInvocation, error)
 	ListRecent(limit int) ([]models.ModelInvocation, error)
+	AggregateByInstanceSession(instanceID int, filter SessionUsageFilter) ([]InstanceSessionTokenAggregate, error)
+	ListRecentByInstanceSession(instanceID int, sessionID string, limit int, filter SessionUsageFilter) ([]models.ModelInvocation, error)
+	CountDistinctSessionsByInstance(instanceID int, filter SessionUsageFilter) (int, error)
 }
 
 type modelInvocationRepository struct {
@@ -145,6 +159,139 @@ func (r *modelInvocationRepository) ListRecent(limit int) ([]models.ModelInvocat
 		return nil, fmt.Errorf("failed to list recent model invocations: %w", err)
 	}
 	return items, nil
+}
+
+func (r *modelInvocationRepository) AggregateByInstanceSession(instanceID int, filter SessionUsageFilter) ([]InstanceSessionTokenAggregate, error) {
+	query := `
+SELECT session_id,
+       COALESCE(SUM(prompt_tokens), 0),
+       COALESCE(SUM(completion_tokens), 0),
+       COALESCE(SUM(total_tokens), 0),
+       COUNT(*),
+       MIN(created_at),
+       MAX(created_at)
+FROM model_invocations
+WHERE instance_id = ?
+  AND session_id IS NOT NULL
+  AND session_id != ''
+  AND status != ?`
+	args := []interface{}{instanceID, models.ModelInvocationStatusBlocked}
+	query, args = appendTimeFilter(query, args, filter, "created_at")
+	query += `
+GROUP BY session_id`
+	rows, err := r.sess.SQL().Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to aggregate model invocations by instance session: %w", err)
+	}
+	defer rows.Close()
+
+	items := make([]InstanceSessionTokenAggregate, 0)
+	for rows.Next() {
+		var item InstanceSessionTokenAggregate
+		if err := rows.Scan(
+			&item.SessionID,
+			&item.PromptTokens,
+			&item.CompletionTokens,
+			&item.TotalTokens,
+			&item.InvocationCount,
+			&item.FirstSeenAt,
+			&item.LastSeenAt,
+		); err != nil {
+			return nil, fmt.Errorf("failed to scan session token aggregate: %w", err)
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to iterate session token aggregates: %w", err)
+	}
+	return items, nil
+}
+
+func (r *modelInvocationRepository) ListRecentByInstanceSession(instanceID int, sessionID string, limit int, filter SessionUsageFilter) ([]models.ModelInvocation, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	query := `
+SELECT id, trace_id, session_id, request_id, user_id, instance_id, instance_mode, runtime_type, gateway_id, runtime_pod_id, model_id, provider_type, requested_model, actual_provider_model, traffic_class, request_payload, response_payload, prompt_tokens, completion_tokens, total_tokens, cached_tokens, reasoning_tokens, latency_ms, is_streaming, status, error_message, created_at, completed_at
+FROM model_invocations
+WHERE instance_id = ?
+  AND session_id = ?
+  AND status != ?`
+	args := []interface{}{instanceID, sessionID, models.ModelInvocationStatusBlocked}
+	query, args = appendTimeFilter(query, args, filter, "created_at")
+	query += `
+ORDER BY created_at DESC
+LIMIT ?`
+	args = append(args, limit)
+
+	rows, err := r.sess.SQL().Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list model invocations by instance session: %w", err)
+	}
+	defer rows.Close()
+
+	items := make([]models.ModelInvocation, 0, limit)
+	for rows.Next() {
+		var item models.ModelInvocation
+		if err := rows.Scan(
+			&item.ID,
+			&item.TraceID,
+			&item.SessionID,
+			&item.RequestID,
+			&item.UserID,
+			&item.InstanceID,
+			&item.InstanceMode,
+			&item.RuntimeType,
+			&item.GatewayID,
+			&item.RuntimePodID,
+			&item.ModelID,
+			&item.ProviderType,
+			&item.RequestedModel,
+			&item.ActualProviderModel,
+			&item.TrafficClass,
+			&item.RequestPayload,
+			&item.ResponsePayload,
+			&item.PromptTokens,
+			&item.CompletionTokens,
+			&item.TotalTokens,
+			&item.CachedTokens,
+			&item.ReasoningTokens,
+			&item.LatencyMs,
+			&item.IsStreaming,
+			&item.Status,
+			&item.ErrorMessage,
+			&item.CreatedAt,
+			&item.CompletedAt,
+		); err != nil {
+			return nil, fmt.Errorf("failed to scan model invocation by instance session: %w", err)
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to iterate model invocations by instance session: %w", err)
+	}
+	return items, nil
+}
+
+func (r *modelInvocationRepository) CountDistinctSessionsByInstance(instanceID int, filter SessionUsageFilter) (int, error) {
+	query := `
+SELECT COUNT(DISTINCT session_id)
+FROM model_invocations
+WHERE instance_id = ?
+  AND session_id IS NOT NULL
+  AND session_id != ''
+  AND status != ?`
+	args := []interface{}{instanceID, models.ModelInvocationStatusBlocked}
+	query, args = appendTimeFilter(query, args, filter, "created_at")
+	row, err := r.sess.SQL().QueryRow(query, args...)
+	if err != nil {
+		return 0, fmt.Errorf("failed to count distinct sessions by instance: %w", err)
+	}
+	var count int
+	if err := row.Scan(&count); err != nil {
+		return 0, fmt.Errorf("failed to scan distinct session count: %w", err)
+	}
+	return count, nil
 }
 
 func isDuplicateIndexError(err error) bool {

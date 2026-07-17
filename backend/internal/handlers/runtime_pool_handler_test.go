@@ -536,3 +536,6 @@ func (c *runtimePoolHandlerAgentClient) DeleteGateway(ctx context.Context, endpo
 	return nil
 }
 func (c *runtimePoolHandlerAgentClient) Drain(ctx context.Context, endpoint string) error { return nil }
+func (c *runtimePoolHandlerAgentClient) ResyncInstanceSkills(ctx context.Context, endpoint string, instanceID int, mode string) error {
+	return nil
+}

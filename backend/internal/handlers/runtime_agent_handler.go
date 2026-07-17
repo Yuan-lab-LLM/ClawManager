@@ -28,6 +28,7 @@ type RuntimeAgentHandler struct {
 	bindingRepo  repository.InstanceRuntimeBindingRepository
 	instanceRepo repository.InstanceRepository
 	events       runtimeEventPublisher
+	skillService services.SkillService
 }
 
 type runtimeAgentPodIdentity struct {
@@ -89,13 +90,14 @@ type runtimeAgentGatewayReport struct {
 	HealthAt     *time.Time `json:"health_at,omitempty"`
 }
 
-func NewRuntimeAgentHandler(cfg config.RuntimePoolConfig, podRepo repository.RuntimePodRepository, bindingRepo repository.InstanceRuntimeBindingRepository, instanceRepo repository.InstanceRepository, events runtimeEventPublisher) *RuntimeAgentHandler {
+func NewRuntimeAgentHandler(cfg config.RuntimePoolConfig, podRepo repository.RuntimePodRepository, bindingRepo repository.InstanceRuntimeBindingRepository, instanceRepo repository.InstanceRepository, events runtimeEventPublisher, skillService services.SkillService) *RuntimeAgentHandler {
 	return &RuntimeAgentHandler{
 		cfg:          cfg,
 		podRepo:      podRepo,
 		bindingRepo:  bindingRepo,
 		instanceRepo: instanceRepo,
 		events:       events,
+		skillService: skillService,
 	}
 }
 
@@ -350,6 +352,12 @@ func (h *RuntimeAgentHandler) ReportSkills(c *gin.Context) {
 	if err := c.ShouldBindJSON(&payload); err != nil {
 		utils.ValidationError(c, err)
 		return
+	}
+	if h.skillService != nil {
+		if err := h.skillService.SyncRuntimeAgentSkillsReport(payload); err != nil {
+			utils.HandleError(c, err)
+			return
+		}
 	}
 	h.publish(c.Request.Context(), "runtime_agent_skills_reported", payload)
 	utils.Success(c, http.StatusOK, "Runtime agent skills report accepted", nil)

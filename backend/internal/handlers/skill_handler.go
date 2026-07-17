@@ -56,12 +56,13 @@ func (h *SkillHandler) ListAllSkills(c *gin.Context) {
 
 func (h *SkillHandler) GetSkill(c *gin.Context) {
 	userID, _ := c.Get("userID")
+	userRole, _ := c.Get("userRole")
 	skillID, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
 		utils.Error(c, http.StatusBadRequest, "invalid skill ID")
 		return
 	}
-	item, err := h.service.GetSkill(userID.(int), skillID)
+	item, err := h.service.GetSkill(userID.(int), userRole.(string), skillID)
 	if err != nil {
 		utils.HandleError(c, err)
 		return
@@ -91,12 +92,13 @@ func (h *SkillHandler) UpdateSkill(c *gin.Context) {
 
 func (h *SkillHandler) DeleteSkill(c *gin.Context) {
 	userID, _ := c.Get("userID")
+	userRole, _ := c.Get("userRole")
 	skillID, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
 		utils.Error(c, http.StatusBadRequest, "invalid skill ID")
 		return
 	}
-	if err := h.service.DeleteSkill(userID.(int), skillID); err != nil {
+	if err := h.service.DeleteSkill(userID.(int), userRole.(string), skillID); err != nil {
 		utils.HandleError(c, err)
 		return
 	}
@@ -105,12 +107,13 @@ func (h *SkillHandler) DeleteSkill(c *gin.Context) {
 
 func (h *SkillHandler) DownloadSkill(c *gin.Context) {
 	userID, _ := c.Get("userID")
+	userRole, _ := c.Get("userRole")
 	skillID, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
 		utils.Error(c, http.StatusBadRequest, "invalid skill ID")
 		return
 	}
-	content, fileName, err := h.service.DownloadSkill(userID.(int), skillID)
+	content, fileName, err := h.service.DownloadSkill(userID.(int), userRole.(string), skillID)
 	if err != nil {
 		utils.HandleError(c, err)
 		return
@@ -120,25 +123,15 @@ func (h *SkillHandler) DownloadSkill(c *gin.Context) {
 	c.Data(http.StatusOK, "application/zip", content)
 }
 
-func (h *SkillHandler) DownloadSkillVersionForAgent(c *gin.Context) {
-	content, fileName, err := h.service.DownloadSkillVersionByExternalID(c.Param("skillVersion"))
-	if err != nil {
-		utils.HandleError(c, err)
-		return
-	}
-	c.Header("Content-Type", "application/octet-stream")
-	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", fileName))
-	c.Data(http.StatusOK, "application/octet-stream", content)
-}
-
 func (h *SkillHandler) ListVersions(c *gin.Context) {
 	userID, _ := c.Get("userID")
+	userRole, _ := c.Get("userRole")
 	skillID, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
 		utils.Error(c, http.StatusBadRequest, "invalid skill ID")
 		return
 	}
-	items, err := h.service.ListVersions(userID.(int), skillID)
+	items, err := h.service.ListVersions(userID.(int), userRole.(string), skillID)
 	if err != nil {
 		utils.HandleError(c, err)
 		return
@@ -148,12 +141,13 @@ func (h *SkillHandler) ListVersions(c *gin.Context) {
 
 func (h *SkillHandler) ListScanResults(c *gin.Context) {
 	userID, _ := c.Get("userID")
+	userRole, _ := c.Get("userRole")
 	skillID, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
 		utils.Error(c, http.StatusBadRequest, "invalid skill ID")
 		return
 	}
-	items, err := h.service.ListScanResults(userID.(int), skillID)
+	items, err := h.service.ListScanResults(userID.(int), userRole.(string), skillID)
 	if err != nil {
 		utils.HandleError(c, err)
 		return
@@ -200,9 +194,9 @@ func (h *SkillHandler) AttachSkillToInstance(c *gin.Context) {
 	}
 	userID, _ := c.Get("userID")
 	userRole, _ := c.Get("userRole")
-	item, err := h.service.AttachSkillToInstanceForActor(instanceID, req.SkillID, userID.(int), fmt.Sprint(userRole))
+	item, err := h.service.AttachSkillToInstance(userID.(int), userRole.(string), instanceID, req.SkillID)
 	if err != nil {
-		utils.HandleError(c, err)
+		utils.HandleHubError(c, err)
 		return
 	}
 	utils.Success(c, http.StatusCreated, "Skill attached to instance successfully", item)

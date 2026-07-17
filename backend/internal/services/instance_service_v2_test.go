@@ -698,6 +698,14 @@ func (s *liteOpenClawConfigStub) CreateSnapshotForInstance(userID int, instance 
 	return s.snapshot, nil
 }
 
+func (s *liteOpenClawConfigStub) CreateDefaultLLMGovernanceSnapshot(userID int, instance *models.Instance) (*models.OpenClawInjectionSnapshot, error) {
+	return s.CreateSnapshotForInstance(userID, instance, nil)
+}
+
+func (s *liteOpenClawConfigStub) EnsurePlatformLLMGatewayResource(userID int) (*models.OpenClawConfigResource, error) {
+	return nil, nil
+}
+
 func (s *liteOpenClawConfigStub) MarkSnapshotActive(snapshot *models.OpenClawInjectionSnapshot) error {
 	s.activated = true
 	if snapshot != nil {

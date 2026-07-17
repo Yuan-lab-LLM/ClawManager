@@ -2,6 +2,7 @@ package repository
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"clawreef/internal/models"
@@ -16,6 +17,7 @@ type InstanceCommandRepository interface {
 	GetByInstanceIdempotencyKey(instanceID int, idempotencyKey string) (*models.InstanceCommand, error)
 	GetNextPendingByInstance(instanceID int) (*models.InstanceCommand, error)
 	ListByInstanceID(instanceID int, limit int) ([]models.InstanceCommand, error)
+	FindLatestFailedCollectSkillPackage(skillExternalID string) (*models.InstanceCommand, error)
 }
 
 type instanceCommandRepository struct {
@@ -94,4 +96,23 @@ func (r *instanceCommandRepository) ListByInstanceID(instanceID int, limit int) 
 		return nil, fmt.Errorf("failed to list instance commands: %w", err)
 	}
 	return items, nil
+}
+
+func (r *instanceCommandRepository) FindLatestFailedCollectSkillPackage(skillExternalID string) (*models.InstanceCommand, error) {
+	skillExternalID = strings.TrimSpace(skillExternalID)
+	if skillExternalID == "" {
+		return nil, nil
+	}
+	pattern := fmt.Sprintf("%%\"skill_id\":\"%s\"%%", skillExternalID)
+	var item models.InstanceCommand
+	if err := r.sess.Collection("instance_commands").Find(db.Cond{
+		"command_type": "collect_skill_package",
+		"status":       "failed",
+	}).And("payload_json LIKE ?", pattern).OrderBy("-finished_at", "-id").One(&item); err != nil {
+		if err == db.ErrNoMoreRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to find failed collect skill package command: %w", err)
+	}
+	return &item, nil
 }

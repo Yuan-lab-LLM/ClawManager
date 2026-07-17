@@ -1,0 +1,43 @@
+# Optional cluster-wide reference policy for managed OpenClaw/Hermes runtimes.
+# Enable per-instance enforcement by setting CLAWMANAGER_INSTANCE_NETWORK_LOCK=true
+# on the ClawManager backend deployment.
+#
+# Per-instance policies are created automatically for managed runtimes when the
+# lock is enabled. This manifest documents the intended egress shape.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: clawmanager-managed-runtime-egress
+  namespace: clawmanager-system
+  labels:
+    app: clawmanager
+    policy-role: managed-runtime-egress-reference
+spec:
+  podSelector:
+    matchLabels:
+      clawmanager.io/managed-runtime: "true"
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: clawmanager-system
+      ports:
+        - protocol: TCP
+          port: 80
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 9001
+        - protocol: TCP
+          port: 3128

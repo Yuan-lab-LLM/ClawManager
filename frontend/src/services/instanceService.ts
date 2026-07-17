@@ -6,6 +6,7 @@ import type {
   UpdateInstanceRequest,
   InstanceStatus,
   InstanceRuntimeDetails,
+  InstanceRuntimeCommand,
   InstanceConfigRevision,
   ExternalAccessStatusResult,
   EnableShareLinkResult,
@@ -14,6 +15,8 @@ import type {
   BatchCreateLiteInstancesRequest,
   BatchCreateLiteInstancesResponse,
   BatchDeleteLiteInstancesResponse,
+  InstanceSessionUsageDetail,
+  InstanceSessionUsageResult,
 } from "../types/instance";
 import type { InstanceSkill } from "../types/skill";
 
@@ -229,6 +232,30 @@ export const instanceService = {
 
   listSkills: async (id: number): Promise<InstanceSkill[]> => {
     const response = await api.get(`/instances/${id}/skills`);
+    return response.data.data;
+  },
+
+  syncInstanceSkills: async (id: number): Promise<InstanceRuntimeCommand> => {
+    const response = await api.post(`/instances/${id}/skills/sync`);
+    return response.data.data;
+  },
+
+  getInstanceSessionUsage: async (
+    id: number,
+    params?: { page?: number; limit?: number; search?: string; since?: string; until?: string },
+  ): Promise<InstanceSessionUsageResult> => {
+    const response = await api.get(`/instances/${id}/session-usage`, { params });
+    return response.data.data;
+  },
+
+  getInstanceSessionUsageDetail: async (
+    id: number,
+    sessionId: string,
+    params?: { since?: string; until?: string },
+  ): Promise<InstanceSessionUsageDetail> => {
+    const response = await api.get(`/instances/${id}/session-usage/detail`, {
+      params: { session_id: sessionId, ...params },
+    });
     return response.data.data;
   },
 };

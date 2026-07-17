@@ -294,6 +294,19 @@ func TestChownRuntimePathReportsRootPermissionDenied(t *testing.T) {
 		t.Fatalf("chownRuntimePath() error = %v, want owner error", err)
 	}
 }
+func TestWriteSkillDirectoryAtomicallyNestedCategoryPath(t *testing.T) {
+	targetRoot := t.TempDir()
+	err := writeSkillDirectoryAtomically(targetRoot, "productivity/my-skill", map[string][]byte{
+		"SKILL.md": []byte("# Nested Skill\n"),
+	})
+	if err != nil {
+		t.Fatalf("writeSkillDirectoryAtomically() error = %v", err)
+	}
+	target := filepath.Join(targetRoot, "productivity", "my-skill", "SKILL.md")
+	if _, err := os.Stat(target); err != nil {
+		t.Fatalf("expected nested skill directory, stat err = %v", err)
+	}
+}
 func TestWriteSkillDirectoryAtomicallyUsesNestedTempRoot(t *testing.T) {
 	targetRoot := t.TempDir()
 	err := writeSkillDirectoryAtomically(targetRoot, "marker-pdf-ingest", map[string][]byte{

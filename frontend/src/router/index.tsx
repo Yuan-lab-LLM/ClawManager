@@ -17,6 +17,7 @@ import InstanceManagementPage from '../pages/admin/InstanceManagementPage';
 import AIGatewayPage from '../pages/admin/AIGatewayPage';
 import AIAuditPage from '../pages/admin/AIAuditPage';
 import CostsPage from '../pages/admin/CostsPage';
+import SessionUsageOverviewPage from '../pages/admin/SessionUsageOverviewPage';
 import AdminSecurityDashboardPage from '../pages/admin/security/AdminSecurityDashboardPage';
 import AdminSecurityReportsPage from '../pages/admin/security/AdminSecurityReportsPage';
 import AdminSecurityScannerConfigPage from '../pages/admin/security/AdminSecurityScannerConfigPage';
@@ -55,6 +56,7 @@ import InstancePortalPage from '../pages/instances/InstancePortalPage';
 import TeamListPage from '../pages/teams/TeamListPage';
 import CreateTeamPage from '../pages/teams/CreateTeamPage';
 import TeamDetailPage from '../pages/teams/TeamDetailPage';
+import SkillHubPage from '../pages/skill-hub/SkillHubPage';
 
 // Protected Route Component
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -240,6 +242,14 @@ function AppRoutes() {
         }
       />
       <Route
+        path="/skill-hub"
+        element={
+          <ProtectedRoute>
+            <SkillHubPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
         path="/settings"
         element={
           <ProtectedRoute>
@@ -334,6 +344,14 @@ function AppRoutes() {
         element={
           <AdminRoute>
             <CostsPage />
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/admin/session-usage"
+        element={
+          <AdminRoute>
+            <SessionUsageOverviewPage />
           </AdminRoute>
         }
       />

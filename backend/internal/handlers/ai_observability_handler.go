@@ -30,6 +30,15 @@ type CostQueryRequest struct {
 	Search string `form:"search"`
 }
 
+// SessionUsageOverviewQueryRequest binds admin session usage overview filters.
+type SessionUsageOverviewQueryRequest struct {
+	Page   int    `form:"page,default=1"`
+	Limit  int    `form:"limit,default=20"`
+	Search string `form:"search"`
+	Since  string `form:"since"`
+	Until  string `form:"until"`
+}
+
 // NewAIObservabilityHandler creates a new observability handler.
 func NewAIObservabilityHandler(service services.AIObservabilityService) *AIObservabilityHandler {
 	return &AIObservabilityHandler{service: service}
@@ -89,4 +98,52 @@ func (h *AIObservabilityHandler) GetCostOverview(c *gin.Context) {
 	}
 
 	utils.Success(c, http.StatusOK, "AI cost overview retrieved successfully", overview)
+}
+
+// GetLLMGovernanceOverview returns managed-runtime LLM governance summary for admins.
+func (h *AIObservabilityHandler) GetLLMGovernanceOverview(c *gin.Context) {
+	overview, err := h.service.GetLLMGovernanceOverview()
+	if err != nil {
+		utils.HandleError(c, err)
+		return
+	}
+
+	utils.Success(c, http.StatusOK, "LLM governance overview retrieved successfully", overview)
+}
+
+// GetSessionUsageOverview returns cross-instance session token usage for admins.
+func (h *AIObservabilityHandler) GetSessionUsageOverview(c *gin.Context) {
+	var req SessionUsageOverviewQueryRequest
+	if err := c.ShouldBindQuery(&req); err != nil {
+		utils.ValidationError(c, err)
+		return
+	}
+	since, err := parseOptionalRFC3339(req.Since)
+	if err != nil {
+		utils.Error(c, http.StatusBadRequest, "Invalid since timestamp")
+		return
+	}
+	until, parseUntilErr := parseOptionalRFC3339(req.Until)
+	if parseUntilErr != nil {
+		utils.Error(c, http.StatusBadRequest, "Invalid until timestamp")
+		return
+	}
+	if err := validateSessionUsageTimeRange(since, until); err != nil {
+		utils.Error(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	overview, err := h.service.GetAdminSessionUsageOverview(services.InstanceSessionUsageOverviewQuery{
+		Page:   req.Page,
+		Limit:  req.Limit,
+		Search: req.Search,
+		Since:  since,
+		Until:  until,
+	})
+	if err != nil {
+		utils.HandleError(c, err)
+		return
+	}
+
+	utils.Success(c, http.StatusOK, "Session usage overview retrieved successfully", overview)
 }

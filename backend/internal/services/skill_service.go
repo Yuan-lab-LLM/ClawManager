@@ -21,6 +21,7 @@ import (
 
 	"clawreef/internal/models"
 	"clawreef/internal/repository"
+	"clawreef/internal/utils"
 )
 
 var (
@@ -37,6 +38,9 @@ const (
 
 	skillSourceUploaded   = "uploaded"
 	skillSourceDiscovered = "discovered"
+
+	skillStatusActive  = "active"
+	skillStatusDeleted = "deleted"
 )
 
 type SkillPayload struct {
@@ -59,6 +63,16 @@ type SkillPayload struct {
 	RiskReason       *string               `json:"risk_reason,omitempty"`
 	TopFindings      []SkillFindingPayload `json:"top_findings,omitempty"`
 	InstanceCount    int                   `json:"instance_count"`
+	Visibility       string                `json:"visibility"`
+	PublishedAt      *time.Time            `json:"published_at,omitempty"`
+	PublishedBy      *int                  `json:"published_by,omitempty"`
+	Tags             []SkillHubTagPayload  `json:"tags,omitempty"`
+	Publishable              bool                  `json:"publishable"`
+	PublishBlockedReason     *string               `json:"publish_blocked_reason,omitempty"`
+	PackageCollectError      *string               `json:"package_collect_error,omitempty"`
+	PackageMaterializeStatus *string               `json:"package_materialize_status,omitempty"`
+	PackageMaterializeError  *string               `json:"package_materialize_error,omitempty"`
+	OwnerUsername            *string               `json:"owner_username,omitempty"`
 	CreatedAt        time.Time             `json:"created_at"`
 	UpdatedAt        time.Time             `json:"updated_at"`
 }
@@ -99,6 +113,7 @@ type InstanceSkillPayload struct {
 	SkillVersionID *int          `json:"skill_version_id,omitempty"`
 	SourceType     string        `json:"source_type"`
 	InstallPath    *string       `json:"install_path,omitempty"`
+	WorkspaceDir   *string       `json:"workspace_dir,omitempty"`
 	ObservedHash   *string       `json:"observed_hash,omitempty"`
 	ContentMD5     *string       `json:"content_md5,omitempty"`
 	Status         string        `json:"status"`
@@ -165,58 +180,70 @@ type SkillService interface {
 	ListSkills(userID int) ([]SkillPayload, error)
 	ListAllSkills() ([]SkillPayload, error)
 	ListAvailableSkillsForInstance(instanceID int, userID int, userRole string) ([]SkillPayload, error)
-	GetSkill(userID, skillID int) (*SkillPayload, error)
+	GetSkill(actorUserID int, actorRole string, skillID int) (*SkillPayload, error)
 	UpdateSkill(userID, skillID int, req UpdateSkillRequest) (*SkillPayload, error)
-	DeleteSkill(userID, skillID int) error
-	DownloadSkill(userID, skillID int) ([]byte, string, error)
+	DeleteSkill(actorUserID int, actorRole string, skillID int) error
+	DownloadSkill(actorUserID int, actorRole string, skillID int) ([]byte, string, error)
 	DownloadSkillVersionByExternalID(externalVersionID string) ([]byte, string, error)
-	ListVersions(userID, skillID int) ([]SkillVersionPayload, error)
+	ListVersions(actorUserID int, actorRole string, skillID int) ([]SkillVersionPayload, error)
 	ListInstanceSkills(instanceID int) ([]InstanceSkillPayload, error)
-	AttachSkillToInstance(instanceID int, skillID int) (*InstanceSkillPayload, error)
-	AttachSkillToInstanceForActor(instanceID int, skillID int, userID int, userRole string) (*InstanceSkillPayload, error)
+	AttachSkillToInstance(actorUserID int, actorRole string, instanceID int, skillID int) (*InstanceSkillPayload, error)
 	RemoveSkillFromInstance(instanceID int, skillID int) error
 	SyncAgentSkills(instanceID int, req AgentSkillInventoryReportRequest) error
 	UploadAgentSkillPackage(ctx context.Context, instanceID int, req AgentSkillPackageUploadRequest, fileHeader *multipart.FileHeader) (*SkillPayload, error)
-	ListScanResults(userID, skillID int) ([]SkillScanResultPayload, error)
+	ListScanResults(actorUserID int, actorRole string, skillID int) ([]SkillScanResultPayload, error)
+	ListHubTags(actorRole string) ([]SkillHubTagPayload, error)
+	ListHubCatalog(actorUserID int, actorRole string, query SkillHubCatalogQuery) (*SkillHubCatalogResponse, error)
+	ListMyHubSkills(userID int) ([]SkillPayload, error)
+	ListAllHubSkillsAdmin() ([]SkillPayload, error)
+	GetSkillHubDetail(actorUserID int, actorRole string, skillID int) (*SkillPayload, error)
+	PublishToHub(actorUserID int, actorRole string, skillID int, tagIDs []int) (*SkillPayload, error)
+	UnpublishFromHub(actorUserID int, actorRole string, skillID int) (*SkillPayload, error)
+	UpdateHubTags(actorUserID int, actorRole string, skillID int, tagIDs []int) (*SkillPayload, error)
+	InstallHubSkill(actorUserID int, actorRole string, skillID, instanceID int) (*InstanceSkillPayload, error)
+	PublishFromInstance(actorUserID int, actorRole string, instanceID, skillID int, tagIDs []int) (*SkillPayload, error)
+	ImportInstanceSkillToLibrary(actorUserID int, actorRole string, instanceID, skillID int) (*SkillPayload, error)
+	RetrySkillPackageCollection(actorUserID int, actorRole string, instanceID, skillID int) error
+	ListAttachableSkills(actorUserID int, actorRole string) ([]SkillPayload, error)
+	ImportHubArchive(ctx context.Context, userID int, fileHeader *multipart.FileHeader) ([]SkillPayload, error)
+	PreviewHubImport(ctx context.Context, userID int, fileHeader *multipart.FileHeader) ([]SkillImportPreviewItem, error)
+	ImportHubArchiveWithDecisions(ctx context.Context, userID int, fileHeader *multipart.FileHeader, decisions []SkillImportDecision) ([]SkillImportResultItem, error)
+	SyncRuntimeAgentSkillsReport(payload map[string]any) error
+	RequestLiteSkillInventorySync(instanceID int) error
+	CompletePendingSkillInventorySync(instanceID int)
 }
 
 type skillService struct {
-	repo           repository.SkillRepository
-	instanceRepo   repository.InstanceRepository
-	commandService InstanceCommandService
-	storage        ObjectStorageService
-	scanner        SkillScannerClient
+	repo               repository.SkillRepository
+	instanceRepo       repository.InstanceRepository
+	userRepo           repository.UserRepository
+	commandService     InstanceCommandService
+	commandRepo        repository.InstanceCommandRepository
+	storage            ObjectStorageService
+	scanner            SkillScannerClient
+	runtimeSkillSync   *runtimeSkillSyncDeps
+	materializeService *SkillPackageMaterializeService
 }
 
-func NewSkillService(repo repository.SkillRepository, instanceRepo repository.InstanceRepository, commandService InstanceCommandService, storage ObjectStorageService, scanner SkillScannerClient) SkillService {
-	return &skillService{repo: repo, instanceRepo: instanceRepo, commandService: commandService, storage: storage, scanner: scanner}
+func NewSkillService(repo repository.SkillRepository, instanceRepo repository.InstanceRepository, userRepo repository.UserRepository, commandService InstanceCommandService, commandRepo repository.InstanceCommandRepository, storage ObjectStorageService, scanner SkillScannerClient) SkillService {
+	return &skillService{repo: repo, instanceRepo: instanceRepo, userRepo: userRepo, commandService: commandService, commandRepo: commandRepo, storage: storage, scanner: scanner}
+}
+
+func ConfigureSkillPackageMaterialize(service SkillService, materialize *SkillPackageMaterializeService) {
+	if impl, ok := service.(*skillService); ok {
+		impl.materializeService = materialize
+	}
 }
 
 func (s *skillService) ImportArchive(ctx context.Context, userID int, fileHeader *multipart.FileHeader) ([]SkillPayload, error) {
-	if !strings.HasSuffix(strings.ToLower(strings.TrimSpace(fileHeader.Filename)), ".zip") {
-		return nil, fmt.Errorf("only .zip skill archives are supported")
-	}
-	file, err := fileHeader.Open()
-	if err != nil {
-		return nil, fmt.Errorf("failed to open uploaded archive: %w", err)
-	}
-	defer file.Close()
-
-	raw, err := io.ReadAll(file)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read uploaded archive: %w", err)
-	}
-	directories, err := extractSkillDirectories(fileHeader.Filename, raw)
+	directories, filename, err := readSkillArchiveDirectories(fileHeader)
 	if err != nil {
 		return nil, err
-	}
-	if len(directories) == 0 {
-		return nil, fmt.Errorf("no skill directories found in archive")
 	}
 
 	results := make([]SkillPayload, 0, len(directories))
 	for _, dir := range directories {
-		payload, err := s.importDirectory(ctx, userID, dir, fileHeader.Filename)
+		payload, err := s.importDirectory(ctx, userID, dir, filename)
 		if err != nil {
 			return nil, err
 		}
@@ -232,11 +259,14 @@ func (s *skillService) ListSkills(userID int) ([]SkillPayload, error) {
 	}
 	filtered := make([]models.Skill, 0, len(items))
 	for _, item := range items {
+		if isDeletedSkill(&item) {
+			continue
+		}
 		if isUserManagedSkill(item) {
 			filtered = append(filtered, item)
 		}
 	}
-	return s.toSkillPayloads(filtered)
+	return s.toSkillPayloads(filtered, userID, "")
 }
 
 func (s *skillService) ListAllSkills() ([]SkillPayload, error) {
@@ -244,7 +274,7 @@ func (s *skillService) ListAllSkills() ([]SkillPayload, error) {
 	if err != nil {
 		return nil, err
 	}
-	return s.toSkillPayloads(items)
+	return s.toSkillPayloads(items, 0, "admin")
 }
 
 func (s *skillService) ListAvailableSkillsForInstance(instanceID int, userID int, userRole string) ([]SkillPayload, error) {
@@ -274,20 +304,28 @@ func (s *skillService) ListAvailableSkillsForInstance(instanceID int, userID int
 		}
 		filtered = append(filtered, item)
 	}
-	return s.toSkillPayloads(filtered)
+	return s.toSkillPayloads(filtered, userID, userRole)
 }
-func (s *skillService) GetSkill(userID, skillID int) (*SkillPayload, error) {
+
+func (s *skillService) GetSkill(actorUserID int, actorRole string, skillID int) (*SkillPayload, error) {
 	item, err := s.repo.GetSkillByID(skillID)
 	if err != nil {
 		return nil, err
 	}
-	if item == nil || item.UserID != userID {
+	if item == nil || !s.CanViewSkill(actorUserID, actorRole, item) {
 		return nil, fmt.Errorf("skill not found")
 	}
-	if !isUserManagedSkill(*item) {
+	if !isUserManagedSkill(*item) && !isAdminRole(actorRole) && item.UserID != actorUserID {
 		return nil, fmt.Errorf("skill not found")
 	}
-	return s.toSkillPayload(*item)
+	payload, err := s.toSkillPayload(*item)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.enrichSkillPayload(payload, *item, nil); err != nil {
+		return nil, err
+	}
+	return payload, nil
 }
 
 func (s *skillService) UpdateSkill(userID, skillID int, req UpdateSkillRequest) (*SkillPayload, error) {
@@ -313,29 +351,39 @@ func (s *skillService) UpdateSkill(userID, skillID int, req UpdateSkillRequest) 
 	return s.toSkillPayload(*item)
 }
 
-func (s *skillService) DeleteSkill(userID, skillID int) error {
+func (s *skillService) DeleteSkill(actorUserID int, actorRole string, skillID int) error {
 	item, err := s.repo.GetSkillByID(skillID)
 	if err != nil {
 		return err
 	}
-	if item == nil || item.UserID != userID {
+	if item == nil || isDeletedSkill(item) {
+		return fmt.Errorf("skill not found")
+	}
+	if !isAdminRole(actorRole) && item.UserID != actorUserID {
 		return fmt.Errorf("skill not found")
 	}
 	if !isUserManagedSkill(*item) {
 		return fmt.Errorf("skill not found")
 	}
-	return s.repo.DeleteSkill(skillID)
+	now := time.Now().UTC()
+	item.Status = skillStatusDeleted
+	item.Visibility = skillVisibilityPrivate
+	item.PublishedAt = nil
+	item.PublishedBy = nil
+	item.SkillKey = deletedSkillKey(item.SkillKey, item.ID)
+	item.UpdatedAt = now
+	if err := s.repo.ReplaceSkillTagAssignments(skillID, []int{}); err != nil {
+		return err
+	}
+	return s.repo.UpdateSkill(item)
 }
 
-func (s *skillService) DownloadSkill(userID, skillID int) ([]byte, string, error) {
+func (s *skillService) DownloadSkill(actorUserID int, actorRole string, skillID int) ([]byte, string, error) {
 	item, err := s.repo.GetSkillByID(skillID)
 	if err != nil {
 		return nil, "", err
 	}
-	if item == nil || item.UserID != userID {
-		return nil, "", fmt.Errorf("skill not found")
-	}
-	if !isUserManagedSkill(*item) {
+	if item == nil || !s.CanDownloadSkill(actorUserID, actorRole, item) {
 		return nil, "", fmt.Errorf("skill not found")
 	}
 	if item.CurrentVersionID == nil {
@@ -345,9 +393,15 @@ func (s *skillService) DownloadSkill(userID, skillID int) ([]byte, string, error
 	if err != nil {
 		return nil, "", err
 	}
+	if version == nil {
+		return nil, "", fmt.Errorf("skill version not found")
+	}
 	blob, err := s.repo.GetBlobByID(version.BlobID)
 	if err != nil {
 		return nil, "", err
+	}
+	if blob == nil || strings.TrimSpace(blob.ObjectKey) == "" {
+		return nil, "", fmt.Errorf("skill blob not found")
 	}
 	content, err := s.storage.GetObject(context.Background(), blob.ObjectKey)
 	if err != nil {
@@ -382,15 +436,12 @@ func (s *skillService) DownloadSkillVersionByExternalID(externalVersionID string
 	return content, blob.FileName, nil
 }
 
-func (s *skillService) ListVersions(userID, skillID int) ([]SkillVersionPayload, error) {
+func (s *skillService) ListVersions(actorUserID int, actorRole string, skillID int) ([]SkillVersionPayload, error) {
 	skill, err := s.repo.GetSkillByID(skillID)
 	if err != nil {
 		return nil, err
 	}
-	if skill == nil || skill.UserID != userID {
-		return nil, fmt.Errorf("skill not found")
-	}
-	if !isUserManagedSkill(*skill) {
+	if skill == nil || !s.CanViewSkill(actorUserID, actorRole, skill) || !isUserManagedSkill(*skill) {
 		return nil, fmt.Errorf("skill not found")
 	}
 	items, err := s.repo.ListVersionsBySkillID(skillID)
@@ -416,6 +467,10 @@ func (s *skillService) ListInstanceSkills(instanceID int) ([]InstanceSkillPayloa
 	if err := s.reconcileRemovedInstanceSkillsFromCommands(instanceID); err != nil {
 		return nil, err
 	}
+	instance, err := s.instanceRepo.GetByID(instanceID)
+	if err != nil {
+		return nil, err
+	}
 	items, err := s.repo.ListInstanceSkills(instanceID)
 	if err != nil {
 		return nil, err
@@ -427,7 +482,7 @@ func (s *skillService) ListInstanceSkills(instanceID int) ([]InstanceSkillPayloa
 		}
 		payload := InstanceSkillPayload{
 			ID: item.ID, InstanceID: item.InstanceID, SkillID: item.SkillID, SkillVersionID: item.SkillVersionID,
-			SourceType: item.SourceType, InstallPath: item.InstallPath, ObservedHash: item.ObservedHash,
+			SourceType: item.SourceType, InstallPath: item.InstallPath, WorkspaceDir: item.WorkspaceDir, ObservedHash: item.ObservedHash,
 			Status: item.Status, LastSeenAt: item.LastSeenAt, RemovedAt: item.RemovedAt,
 		}
 		skill, err := s.repo.GetSkillByID(item.SkillID)
@@ -437,6 +492,9 @@ func (s *skillService) ListInstanceSkills(instanceID int) ([]InstanceSkillPayloa
 		if skill != nil {
 			skillPayload, err := s.toSkillPayload(*skill)
 			if err != nil {
+				return nil, err
+			}
+			if err := s.enrichSkillPayload(skillPayload, *skill, instance); err != nil {
 				return nil, err
 			}
 			payload.Skill = skillPayload
@@ -482,7 +540,7 @@ func commandFinishedAt(command InstanceCommandPayload) time.Time {
 	return time.Time{}
 }
 
-func (s *skillService) AttachSkillToInstanceForActor(instanceID int, skillID int, userID int, userRole string) (*InstanceSkillPayload, error) {
+func (s *skillService) AttachSkillToInstance(actorUserID int, actorRole string, instanceID int, skillID int) (*InstanceSkillPayload, error) {
 	instance, err := s.instanceRepo.GetByID(instanceID)
 	if err != nil {
 		return nil, err
@@ -490,17 +548,9 @@ func (s *skillService) AttachSkillToInstanceForActor(instanceID int, skillID int
 	if instance == nil {
 		return nil, fmt.Errorf("instance not found")
 	}
-	skill, err := s.repo.GetSkillByID(skillID)
-	if err != nil {
+	if err := EnsureInstanceWorkspacePathForServerScan(context.Background(), s.instanceRepo, instance); err != nil {
 		return nil, err
 	}
-	if skill == nil || !canActorAttachSkillToInstance(instance, *skill, userID, userRole) {
-		return nil, fmt.Errorf("skill not found")
-	}
-	return s.attachSkillModelToInstance(instanceID, skill)
-}
-
-func (s *skillService) AttachSkillToInstance(instanceID int, skillID int) (*InstanceSkillPayload, error) {
 	skill, err := s.repo.GetSkillByID(skillID)
 	if err != nil {
 		return nil, err
@@ -508,10 +558,9 @@ func (s *skillService) AttachSkillToInstance(instanceID int, skillID int) (*Inst
 	if skill == nil {
 		return nil, fmt.Errorf("skill not found")
 	}
-	return s.attachSkillModelToInstance(instanceID, skill)
-}
-
-func (s *skillService) attachSkillModelToInstance(instanceID int, skill *models.Skill) (*InstanceSkillPayload, error) {
+	if !s.CanAttachSkill(actorUserID, actorRole, skill, instance) {
+		return nil, fmt.Errorf("skill_attach_forbidden")
+	}
 	if !isUserManagedSkill(*skill) {
 		return nil, fmt.Errorf("skill not found")
 	}
@@ -522,7 +571,6 @@ func (s *skillService) attachSkillModelToInstance(instanceID int, skill *models.
 		return nil, fmt.Errorf("skill is blocked by risk policy")
 	}
 
-	skillID := skill.ID
 	versionID := skill.CurrentVersionID
 	var blob *models.SkillBlob
 	if versionID != nil {
@@ -606,7 +654,7 @@ func (s *skillService) materializeLiteInstanceSkill(ctx context.Context, instanc
 		return fmt.Errorf("lite skill materialization target is invalid")
 	}
 
-	targetRoot := liteSkillInstallRoot(instance)
+	targetRoot := runtimeSkillInstallRoot(instance)
 	if targetRoot == "" {
 		return nil
 	}
@@ -616,15 +664,23 @@ func (s *skillService) materializeLiteInstanceSkill(ctx context.Context, instanc
 	return ensureLiteRuntimePersistentOwnership(instance)
 }
 
-func liteSkillInstallRoot(instance *models.Instance) string {
-	if instance == nil || instance.WorkspacePath == nil || strings.TrimSpace(*instance.WorkspacePath) == "" {
-		return ""
+func resolveInstanceSkillSourceType(existing *models.InstanceSkill, incoming string, skill *models.Skill) string {
+	incoming = normalizeSkillSource(incoming)
+	if existing != nil && strings.EqualFold(strings.TrimSpace(existing.SourceType), "injected_by_clawmanager") {
+		return "injected_by_clawmanager"
 	}
-	workspacePath := filepath.Clean(strings.TrimSpace(*instance.WorkspacePath))
-	if strings.EqualFold(strings.TrimSpace(instance.Type), RuntimeTypeHermes) {
-		return filepath.Join(workspacePath, "home", ".hermes", "skills")
+	if incoming == "injected_by_clawmanager" {
+		return incoming
 	}
-	return filepath.Join(workspacePath, "home", ".openclaw", "workspace", "skills")
+	if existing != nil && skill != nil && strings.EqualFold(strings.TrimSpace(skill.SourceType), skillSourceUploaded) {
+		if strings.EqualFold(strings.TrimSpace(existing.SourceType), "injected_by_clawmanager") {
+			return existing.SourceType
+		}
+		if incoming == "discovered_in_instance" && strings.TrimSpace(existing.SourceType) != "" {
+			return existing.SourceType
+		}
+	}
+	return incoming
 }
 
 func liteRuntimePersistentRoot(instance *models.Instance) string {
@@ -712,21 +768,26 @@ func chownRuntimePath(targetPath string, uid, gid int, mode os.FileMode) error {
 	return nil
 }
 
-func writeSkillDirectoryAtomically(targetRoot, targetName string, files map[string][]byte) error {
+func writeSkillDirectoryAtomically(targetRoot, relativePath string, files map[string][]byte) error {
 	targetRoot = filepath.Clean(strings.TrimSpace(targetRoot))
-	targetName = strings.TrimSpace(targetName)
-	if targetRoot == "." || targetRoot == "" || targetName == "" || strings.ContainsAny(targetName, `/\\`) {
-		return fmt.Errorf("invalid lite skill target")
+	relativePath = sanitizeWorkspaceRelativePath(relativePath)
+	if targetRoot == "." || targetRoot == "" || relativePath == "" {
+		return fmt.Errorf("invalid runtime skill target")
+	}
+	targetPath, err := joinRuntimeSkillPath(targetRoot, relativePath)
+	if err != nil {
+		return fmt.Errorf("invalid runtime skill target")
 	}
 	if err := os.MkdirAll(targetRoot, 0750); err != nil {
-		return fmt.Errorf("failed to prepare lite skill root: %w", err)
+		return fmt.Errorf("failed to prepare runtime skill root: %w", err)
 	}
 	tmpRoot := filepath.Join(targetRoot, ".tmp")
 	if err := os.MkdirAll(tmpRoot, 0750); err != nil {
-		return fmt.Errorf("failed to prepare lite skill temp root: %w", err)
+		return fmt.Errorf("failed to prepare runtime skill temp root: %w", err)
 	}
 
-	tmpDir, err := os.MkdirTemp(tmpRoot, ".tmp-skill-"+targetName+"-")
+	tmpNameSafe := strings.ReplaceAll(relativePath, "/", "-")
+	tmpDir, err := os.MkdirTemp(tmpRoot, ".tmp-skill-"+tmpNameSafe+"-")
 	if err != nil {
 		return fmt.Errorf("failed to create lite skill temp dir: %w", err)
 	}
@@ -758,9 +819,11 @@ func writeSkillDirectoryAtomically(targetRoot, targetName string, files map[stri
 		}
 	}
 
-	targetPath := filepath.Join(targetRoot, targetName)
 	if !isPathWithin(targetRoot, targetPath) {
-		return fmt.Errorf("lite skill target escapes root")
+		return fmt.Errorf("runtime skill target escapes root")
+	}
+	if err := os.MkdirAll(filepath.Dir(targetPath), 0750); err != nil {
+		return fmt.Errorf("failed to prepare lite skill target parent: %w", err)
 	}
 	backupPath := targetPath + ".old"
 	_ = os.RemoveAll(backupPath)
@@ -797,7 +860,7 @@ func (s *skillService) RemoveSkillFromInstance(instanceID int, skillID int) erro
 	if item == nil {
 		return nil
 	}
-	if err := s.removeLiteInstanceSkillDirectory(instanceID, item); err != nil {
+	if err := s.removeRuntimeInstanceSkillDirectory(instanceID, item); err != nil {
 		return err
 	}
 	now := time.Now().UTC()
@@ -818,7 +881,7 @@ func (s *skillService) RemoveSkillFromInstance(instanceID int, skillID int) erro
 	return nil
 }
 
-func (s *skillService) removeLiteInstanceSkillDirectory(instanceID int, item *models.InstanceSkill) error {
+func (s *skillService) removeRuntimeInstanceSkillDirectory(instanceID int, item *models.InstanceSkill) error {
 	if s == nil || s.instanceRepo == nil || item == nil {
 		return nil
 	}
@@ -826,35 +889,45 @@ func (s *skillService) removeLiteInstanceSkillDirectory(instanceID int, item *mo
 	if err != nil {
 		return err
 	}
-	if !isLiteRuntimeInstance(instance) {
+	if !isLiteRuntimeInstance(instance) && !SupportsServerWorkspaceSkillScan(instance) {
 		return nil
 	}
-	skillKey := strings.TrimSpace(skillKeyForRemoval(item))
-	if skillKey == "" || strings.HasPrefix(skillKey, "skill-") {
-		skill, err := s.repo.GetSkillByID(item.SkillID)
-		if err != nil {
-			return err
-		}
-		if skill != nil {
-			skillKey = strings.TrimSpace(skill.SkillKey)
-		}
+	relativePath := ""
+	if item.WorkspaceDir != nil {
+		relativePath = sanitizeWorkspaceRelativePath(strings.TrimSpace(*item.WorkspaceDir))
 	}
-	targetName := sanitizeSkillKey(skillKey)
-	if targetName == "" {
+	if relativePath == "" {
+		skillKey := strings.TrimSpace(skillKeyForRemoval(item))
+		if skillKey == "" || strings.HasPrefix(skillKey, "skill-") {
+			skill, err := s.repo.GetSkillByID(item.SkillID)
+			if err != nil {
+				return err
+			}
+			if skill != nil {
+				skillKey = strings.TrimSpace(skill.SkillKey)
+			}
+		}
+		relativePath = sanitizeWorkspaceRelativePath(skillKey)
+	}
+	if relativePath == "" {
 		return nil
 	}
-	targetRoot := liteSkillInstallRoot(instance)
+	targetRoot := runtimeSkillInstallRoot(instance)
 	if targetRoot == "" {
 		return nil
 	}
-	targetPath := filepath.Join(targetRoot, targetName)
-	if !isPathWithin(targetRoot, targetPath) {
-		return fmt.Errorf("lite skill removal target escapes root")
+	targetPath, err := joinRuntimeSkillPath(targetRoot, relativePath)
+	if err != nil {
+		return fmt.Errorf("runtime skill removal target is invalid")
 	}
 	if err := os.RemoveAll(targetPath); err != nil {
-		return fmt.Errorf("failed to remove lite skill directory: %w", err)
+		return fmt.Errorf("failed to remove runtime skill directory: %w", err)
 	}
 	return ensureLiteRuntimePersistentOwnership(instance)
+}
+
+func (s *skillService) removeLiteInstanceSkillDirectory(instanceID int, item *models.InstanceSkill) error {
+	return s.removeRuntimeInstanceSkillDirectory(instanceID, item)
 }
 func isBlockedSkillRisk(value string) bool {
 	value = strings.TrimSpace(value)
@@ -862,7 +935,15 @@ func isBlockedSkillRisk(value string) bool {
 }
 
 func isRemovedInstanceSkill(item *models.InstanceSkill) bool {
-	return item != nil && (strings.EqualFold(strings.TrimSpace(item.Status), "removed") || item.RemovedAt != nil)
+	if item == nil {
+		return false
+	}
+	status := strings.ToLower(strings.TrimSpace(item.Status))
+	return status == "removed" || status == "missing"
+}
+
+func isUserRemovedInstanceSkill(item *models.InstanceSkill) bool {
+	return item != nil && strings.EqualFold(strings.TrimSpace(item.Status), "removed")
 }
 
 func (s *skillService) SyncAgentSkills(instanceID int, req AgentSkillInventoryReportRequest) error {
@@ -881,13 +962,14 @@ func (s *skillService) SyncAgentSkills(instanceID int, req AgentSkillInventoryRe
 	}
 	active := make([]int, 0, len(req.Skills))
 	for _, record := range req.Skills {
-		hash := strings.TrimSpace(record.ContentMD5)
+		hash := workspaceContentHashForRecord(instance, record)
 		if hash == "" {
 			continue
 		}
 		normalizedSource := normalizeSkillSource(record.Source)
 		var skill *models.Skill
 		var version *models.SkillVersion
+		var blob *models.SkillBlob
 
 		if normalizedSource == "injected_by_clawmanager" {
 			if skillID, err := parseExternalSkillID(record.SkillID); err == nil {
@@ -901,7 +983,10 @@ func (s *skillService) SyncAgentSkills(instanceID int, req AgentSkillInventoryRe
 			}
 		}
 
-		skillKey := sanitizeSkillKey(record.Identifier)
+		skillKey := skillKeyFromRelativePath(record.Identifier)
+		if skillKey == "" {
+			skillKey = sanitizeSkillKey(record.Identifier)
+		}
 		if skillKey == "" {
 			skillKey = hash[:skillMin(16, len(hash))]
 		}
@@ -910,49 +995,62 @@ func (s *skillService) SyncAgentSkills(instanceID int, req AgentSkillInventoryRe
 			if err != nil {
 				return err
 			}
-			if item != nil && (normalizedSource != "discovered_in_instance" || strings.EqualFold(item.SourceType, skillSourceDiscovered)) {
+			if item != nil && (normalizedSource != "discovered_in_instance" ||
+				strings.EqualFold(item.SourceType, skillSourceDiscovered) ||
+				strings.EqualFold(item.SourceType, skillSourceUploaded)) {
 				skill = item
 			}
 		}
 
-		blob, err := s.repo.GetBlobByContentHash(hash)
-		if err != nil {
-			return err
+		if skill != nil && liteInventoryUsesWorkspaceHash(instance) {
+			reconciledBlob, reconciledVersion, reconcileErr := s.reconcileLiteDiscoveredBlob(skill, hash)
+			if reconcileErr != nil {
+				return reconcileErr
+			}
+			if reconciledBlob != nil {
+				blob = reconciledBlob
+				version = reconciledVersion
+			}
 		}
-		if blob == nil && skill != nil {
-			version, blob, err = s.findVersionByContentMD5(skill.ID, hash)
+
+		if blob == nil {
+			var err error
+			blob, err = s.repo.GetBlobByContentHash(hash)
 			if err != nil {
 				return err
 			}
-		}
-		if blob == nil {
-			blob = &models.SkillBlob{
-				ContentHash: hash,
-				ArchiveHash: hash,
-				ObjectKey:   "",
-				FileName:    sanitizeSkillKey(record.Identifier) + ".zip",
-				MediaType:   "application/zip",
-				SizeBytes:   0,
-				ScanStatus:  "pending",
-				RiskLevel:   skillRiskUnknown,
+			if blob == nil && skill != nil {
+				version, blob, err = s.findVersionByContentMD5(skill.ID, hash)
+				if err != nil {
+					return err
+				}
 			}
-			if err := s.repo.CreateBlob(blob); err != nil {
-				return err
+			if blob == nil {
+				blob = &models.SkillBlob{
+					ContentHash: hash,
+					ArchiveHash: hash,
+					ObjectKey:   "",
+					FileName:    sanitizeSkillKey(record.Identifier) + ".zip",
+					MediaType:   "application/zip",
+					SizeBytes:   0,
+					ScanStatus:  "pending",
+					RiskLevel:   skillRiskUnknown,
+				}
+				if err := s.repo.CreateBlob(blob); err != nil {
+					return err
+				}
 			}
 		}
 		if strings.TrimSpace(blob.ObjectKey) == "" {
-			_, _ = s.commandService.Create(instanceID, nil, CreateInstanceCommandRequest{
-				CommandType: InstanceCommandTypeCollectSkillPackage,
-				Payload: map[string]interface{}{
+			if !isLiteRuntimeInstance(instance) {
+				_ = s.enqueueCollectSkillPackage(instanceID, map[string]interface{}{
 					"skill_id":      record.SkillID,
 					"skill_version": record.SkillVersion,
 					"identifier":    record.Identifier,
 					"content_md5":   hash,
 					"source":        normalizedSource,
-				},
-				IdempotencyKey: fmt.Sprintf("collect-skill-package-%d-%s", instanceID, hash),
-				TimeoutSeconds: 600,
-			})
+				}, fmt.Sprintf("collect-skill-package-%d-%s", instanceID, hash))
+			}
 		}
 		if skill == nil {
 			if normalizedSource == "discovered_in_instance" {
@@ -960,7 +1058,7 @@ func (s *skillService) SyncAgentSkills(instanceID int, req AgentSkillInventoryRe
 			}
 			skill = &models.Skill{
 				UserID: ownerUserID, SkillKey: skillKey, Name: strings.TrimSpace(record.Identifier),
-				SourceType: skillSourceDiscovered, Status: "active", RiskLevel: blob.RiskLevel,
+				SourceType: skillSourceDiscovered, Status: "active", Visibility: skillVisibilityPrivate, RiskLevel: blob.RiskLevel,
 				LastScannedAt: blob.LastScannedAt, LastScanResultID: blob.LastScanResultID,
 			}
 			if skill.Name == "" {
@@ -1003,21 +1101,40 @@ func (s *skillService) SyncAgentSkills(instanceID int, req AgentSkillInventoryRe
 		if err != nil {
 			return err
 		}
-		if isRemovedInstanceSkill(existingInstanceSkill) {
+		if isUserRemovedInstanceSkill(existingInstanceSkill) {
 			continue
 		}
 
 		active = append(active, skill.ID)
+		workspaceDir := sanitizeWorkspaceRelativePath(strings.TrimSpace(record.Identifier))
+		resolvedSource := resolveInstanceSkillSourceType(existingInstanceSkill, normalizedSource, skill)
 		instanceSkill := &models.InstanceSkill{
-			InstanceID: instanceID, SkillID: skill.ID, SkillVersionID: optionalVersionID(version), SourceType: normalizedSource,
+			InstanceID: instanceID, SkillID: skill.ID, SkillVersionID: optionalVersionID(version), SourceType: resolvedSource,
 			InstallPath: optionalString(strings.TrimSpace(record.InstallPath)), ObservedHash: optionalString(hash),
-			Status: "active", LastSeenAt: &reportedAt, UpdatedAt: reportedAt,
+			Status: "active", LastSeenAt: &reportedAt, UpdatedAt: reportedAt, RemovedAt: nil,
+		}
+		if workspaceDir != "" {
+			instanceSkill.WorkspaceDir = optionalString(workspaceDir)
 		}
 		if err := s.repo.UpsertInstanceSkill(instanceSkill); err != nil {
 			return err
 		}
+		if liteInventoryUsesWorkspaceHash(instance) && strings.TrimSpace(blob.ObjectKey) == "" && workspaceDir != "" && s.materializeService != nil {
+			if refreshedBlob, blobErr := s.repo.GetBlobByContentHash(hash); blobErr == nil && refreshedBlob != nil {
+				blob = refreshedBlob
+			}
+			_, _ = s.materializeService.Enqueue(context.Background(), EnqueueMaterializeRequest{
+				InstanceID:     instanceID,
+				SkillID:        skill.ID,
+				BlobID:         blob.ID,
+				WorkspaceDir:   workspaceDir,
+				ContentHash:    hash,
+				TriggerSource:  MaterializeTriggerSync,
+				IdempotencyKey: fmt.Sprintf("materialize-%d-%s", instanceID, hash),
+			})
+		}
 	}
-	if strings.EqualFold(strings.TrimSpace(req.Mode), "full") || !strings.EqualFold(strings.TrimSpace(req.Mode), "incremental") {
+	if strings.EqualFold(strings.TrimSpace(req.Mode), "full") {
 		if err := s.repo.MarkMissingInstanceSkills(instanceID, active, reportedAt); err != nil {
 			return err
 		}
@@ -1057,55 +1174,19 @@ func (s *skillService) UploadAgentSkillPackage(ctx context.Context, instanceID i
 	contentMD5 := hashDirectory(dir.Files)
 	expectedMD5 := strings.TrimSpace(req.ContentMD5)
 	if expectedMD5 != "" && !strings.EqualFold(contentMD5, expectedMD5) {
-		return nil, fmt.Errorf("skill package md5 mismatch: expected %s got %s", expectedMD5, contentMD5)
+		return nil, utils.NewHubError(
+			"skill_package_md5_mismatch",
+			fmt.Sprintf("skill package md5 mismatch: expected %s got %s", expectedMD5, contentMD5),
+			map[string]string{"expected": expectedMD5, "computed": contentMD5},
+		)
 	}
 
-	archiveBytes, archiveHash, err := buildNormalizedZip(dir)
+	blob, err := s.persistDiscoveredSkillPackage(ctx, instanceID, dir, contentMD5, nil)
 	if err != nil {
 		return nil, err
 	}
-
-	blob, err := s.repo.GetBlobByContentHash(contentMD5)
-	if err != nil {
-		return nil, err
-	}
-	if blob == nil {
-		blob = &models.SkillBlob{
-			ContentHash: contentMD5,
-			ArchiveHash: archiveHash,
-			ObjectKey:   fmt.Sprintf("discovered/%d/%s/%s.zip", instanceID, sanitizeSkillKey(dir.Name), contentMD5),
-			FileName:    fmt.Sprintf("%s.zip", sanitizeSkillKey(dir.Name)),
-			MediaType:   "application/zip",
-			SizeBytes:   int64(len(archiveBytes)),
-			ScanStatus:  "pending",
-			RiskLevel:   skillRiskUnknown,
-		}
-		if err := s.storage.PutObject(ctx, blob.ObjectKey, archiveBytes, blob.MediaType); err != nil {
-			return nil, err
-		}
-		if err := s.repo.CreateBlob(blob); err != nil {
-			return nil, err
-		}
-	} else if strings.TrimSpace(blob.ObjectKey) == "" {
-		blob.ObjectKey = fmt.Sprintf("discovered/%d/%s/%s.zip", instanceID, sanitizeSkillKey(dir.Name), contentMD5)
-		blob.FileName = fmt.Sprintf("%s.zip", sanitizeSkillKey(dir.Name))
-		blob.MediaType = "application/zip"
-		blob.SizeBytes = int64(len(archiveBytes))
-		if err := s.storage.PutObject(ctx, blob.ObjectKey, archiveBytes, blob.MediaType); err != nil {
-			return nil, err
-		}
-		if err := s.repo.UpdateBlob(blob); err != nil {
-			return nil, err
-		}
-	}
-
-	if blob.LastScanResultID == nil || blob.ScanStatus != "completed" {
-		if err := s.recordScan(blob, &dir); err != nil {
-			blob.ScanStatus = "failed"
-			blob.UpdatedAt = time.Now().UTC()
-			_ = s.repo.UpdateBlob(blob)
-			return nil, err
-		}
+	if !strings.EqualFold(strings.TrimSpace(blob.ScanStatus), "completed") {
+		return nil, fmt.Errorf("skill package scan failed")
 	}
 
 	normalizedSource := normalizeSkillSource(req.Source)
@@ -1139,7 +1220,7 @@ func (s *skillService) UploadAgentSkillPackage(ctx context.Context, instanceID i
 	if skill == nil {
 		skill = &models.Skill{
 			UserID: instance.UserID, SkillKey: skillKey, Name: strings.TrimSpace(req.Identifier),
-			SourceType: skillSourceDiscovered, Status: "active", RiskLevel: blob.RiskLevel,
+			SourceType: skillSourceDiscovered, Status: "active", Visibility: skillVisibilityPrivate, RiskLevel: blob.RiskLevel,
 			LastScannedAt: blob.LastScannedAt, LastScanResultID: blob.LastScanResultID,
 		}
 		if strings.TrimSpace(skill.Name) == "" {
@@ -1196,12 +1277,12 @@ func (s *skillService) UploadAgentSkillPackage(ctx context.Context, instanceID i
 	return s.toSkillPayload(*skill)
 }
 
-func (s *skillService) ListScanResults(userID, skillID int) ([]SkillScanResultPayload, error) {
+func (s *skillService) ListScanResults(actorUserID int, actorRole string, skillID int) ([]SkillScanResultPayload, error) {
 	skill, err := s.repo.GetSkillByID(skillID)
 	if err != nil {
 		return nil, err
 	}
-	if skill == nil || (skill.UserID != userID && userID != 0) {
+	if skill == nil || !s.CanViewSkill(actorUserID, actorRole, skill) {
 		return nil, fmt.Errorf("skill not found")
 	}
 	if skill.CurrentVersionID == nil {
@@ -1360,86 +1441,144 @@ func extractArchiveFileMap(filename string, raw []byte) (map[string][]byte, erro
 	return fileMap, nil
 }
 
-func (s *skillService) importDirectory(ctx context.Context, userID int, dir extractedSkillDirectory, originalName string) (*SkillPayload, error) {
-	skillKey := sanitizeSkillKey(dir.Name)
-	if skillKey == "" {
-		return nil, fmt.Errorf("skill directory name %q is invalid", dir.Name)
+func (s *skillService) ensureBlobObject(ctx context.Context, blob *models.SkillBlob, archiveBytes []byte) error {
+	if strings.TrimSpace(blob.ObjectKey) == "" {
+		return fmt.Errorf("skill blob has no object key")
 	}
-	contentHash := hashDirectory(dir.Files)
-	archiveBytes, archiveHash, err := buildNormalizedZip(dir)
-	if err != nil {
-		return nil, err
+	if _, err := s.storage.GetObject(ctx, blob.ObjectKey); err == nil {
+		return nil
 	}
+	mediaType := strings.TrimSpace(blob.MediaType)
+	if mediaType == "" {
+		mediaType = "application/zip"
+	}
+	if err := s.storage.PutObject(ctx, blob.ObjectKey, archiveBytes, mediaType); err != nil {
+		return fmt.Errorf("failed to restore skill blob object: %w", err)
+	}
+	blob.SizeBytes = int64(len(archiveBytes))
+	blob.MediaType = mediaType
+	blob.UpdatedAt = time.Now().UTC()
+	return s.repo.UpdateBlob(blob)
+}
 
-	blob, err := s.repo.GetBlobByContentHash(contentHash)
-	if err != nil {
-		return nil, err
-	}
-	if blob == nil {
-		blob = &models.SkillBlob{
-			ContentHash: contentHash, ArchiveHash: archiveHash,
-			ObjectKey: fmt.Sprintf("%d/%s/%s.zip", userID, skillKey, contentHash),
-			FileName:  fmt.Sprintf("%s.zip", skillKey),
-			MediaType: "application/zip", SizeBytes: int64(len(archiveBytes)),
-			ScanStatus: "pending", RiskLevel: skillRiskUnknown,
-		}
-		if err := s.storage.PutObject(ctx, blob.ObjectKey, archiveBytes, blob.MediaType); err != nil {
-			return nil, err
-		}
-		if err := s.repo.CreateBlob(blob); err != nil {
-			return nil, err
-		}
-		if err := s.recordScan(blob, &dir); err != nil {
-			return nil, err
-		}
-	}
+func (s *skillService) enqueueCollectSkillPackage(instanceID int, payload map[string]interface{}, idempotencyKey string) error {
+	_, err := s.commandService.Create(instanceID, nil, CreateInstanceCommandRequest{
+		CommandType:    InstanceCommandTypeCollectSkillPackage,
+		Payload:        payload,
+		IdempotencyKey: idempotencyKey,
+		TimeoutSeconds: 600,
+	})
+	return err
+}
 
-	skill, err := s.repo.GetSkillByUserKey(userID, skillKey)
+func (s *skillService) requestSkillPackageCollection(instanceID int, skill *models.Skill, instanceSkill *models.InstanceSkill, idempotencySuffix string) error {
+	blob, err := s.skillBlobForPublish(skill)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	if skill == nil {
-		description := fmt.Sprintf("Imported from %s", originalName)
-		skill = &models.Skill{
-			UserID: userID, SkillKey: skillKey, Name: dir.Name, Description: &description,
-			SourceType: skillSourceUploaded, Status: "active", RiskLevel: blob.RiskLevel,
-			LastScannedAt: blob.LastScannedAt, LastScanResultID: blob.LastScanResultID,
-		}
-		if err := s.repo.CreateSkill(skill); err != nil {
-			return nil, err
-		}
+	if strings.TrimSpace(blob.ObjectKey) != "" {
+		return nil
 	}
-	version, err := s.repo.GetVersionBySkillAndBlob(skill.ID, blob.ID)
+	instance, err := s.instanceRepo.GetByID(instanceID)
 	if err != nil {
-		return nil, err
+		return err
+	}
+	if instance != nil && isLiteRuntimeInstance(instance) {
+		if s.materializeService == nil {
+			return fmt.Errorf("skill_package_pending")
+		}
+		workspaceDir := resolveLiteWorkspaceDir(instanceSkill, skill)
+		if workspaceDir == "" {
+			return fmt.Errorf("skill_package_pending")
+		}
+		trigger := MaterializeTriggerRetry
+		if strings.HasPrefix(strings.TrimSpace(idempotencySuffix), "import-") {
+			trigger = MaterializeTriggerImport
+		} else if strings.HasPrefix(strings.TrimSpace(idempotencySuffix), "publish-") {
+			trigger = MaterializeTriggerPublish
+		}
+		if strings.TrimSpace(idempotencySuffix) == "" {
+			idempotencySuffix = fmt.Sprintf("%d-%d", instanceID, skill.ID)
+		}
+		job, err := s.materializeService.Enqueue(context.Background(), EnqueueMaterializeRequest{
+			InstanceID:     instanceID,
+			SkillID:        skill.ID,
+			BlobID:         blob.ID,
+			WorkspaceDir:   workspaceDir,
+			ContentHash:    s.resolveContentMD5(blob),
+			TriggerSource:  trigger,
+			IdempotencyKey: fmt.Sprintf("materialize-%d-%s", instanceID, s.resolveContentMD5(blob)),
+		})
+		if err != nil {
+			return err
+		}
+		if trigger != MaterializeTriggerSync && job != nil {
+			_ = s.materializeService.ProcessJob(context.Background(), job.ID)
+			latest, latestErr := s.materializeService.FindLatestBySkillID(skill.ID)
+			if latestErr == nil && latest != nil && strings.EqualFold(strings.TrimSpace(latest.Status), MaterializeJobStatusFailed) {
+				return fmt.Errorf("skill_package_materialize_failed")
+			}
+		}
+		refreshedBlob, blobErr := s.repo.GetBlobByID(blob.ID)
+		if blobErr == nil && refreshedBlob != nil && strings.TrimSpace(refreshedBlob.ObjectKey) != "" {
+			return nil
+		}
+		return fmt.Errorf("skill_package_pending")
+	}
+	payload := map[string]interface{}{
+		"skill_id":    formatExternalSkillID(skill.ID),
+		"identifier":  skill.SkillKey,
+		"content_md5": s.resolveContentMD5(blob),
+		"source":      instanceSkill.SourceType,
+	}
+	if skill.CurrentVersionID != nil {
+		payload["skill_version"] = formatExternalVersionID(*skill.CurrentVersionID)
+	}
+	if strings.TrimSpace(idempotencySuffix) == "" {
+		idempotencySuffix = fmt.Sprintf("%d-%d", instanceID, skill.ID)
+	}
+	_ = s.enqueueCollectSkillPackage(instanceID, payload, fmt.Sprintf("collect-skill-package-%s", idempotencySuffix))
+	return fmt.Errorf("skill_package_pending")
+}
+
+func (s *skillService) recordScanFromStoredBlob(blob *models.SkillBlob) error {
+	content, err := s.storage.GetObject(context.Background(), blob.ObjectKey)
+	if err != nil {
+		return fmt.Errorf("failed to read stored skill package: %w", err)
+	}
+	directories, err := extractSkillDirectories(blob.FileName, content)
+	if err != nil {
+		return err
+	}
+	if len(directories) == 0 {
+		return fmt.Errorf("no skill directories found in stored package")
+	}
+	return s.recordScan(blob, &directories[0])
+}
+
+func (s *skillService) promoteSkillToUploadedLibrary(skill *models.Skill) error {
+	if skill.CurrentVersionID == nil {
+		return fmt.Errorf("skill has no version")
+	}
+	version, err := s.repo.GetVersionByID(*skill.CurrentVersionID)
+	if err != nil {
+		return err
 	}
 	if version == nil {
-		latest, err := s.repo.GetLatestVersionBySkillID(skill.ID)
-		if err != nil {
-			return nil, err
-		}
-		versionNo := 1
-		if latest != nil {
-			versionNo = latest.VersionNo + 1
-		}
-		manifest, _ := json.Marshal(map[string]interface{}{"root_dir": dir.Name, "files": len(dir.Files)})
-		manifestJSON := string(manifest)
-		version = &models.SkillVersion{
-			SkillID: skill.ID, BlobID: blob.ID, VersionNo: versionNo, ManifestJSON: &manifestJSON, SourceType: skillSourceUploaded,
-		}
-		if err := s.repo.CreateVersion(version); err != nil {
-			return nil, err
-		}
+		return fmt.Errorf("skill has no version")
 	}
-	skill.CurrentVersionID = &version.ID
-	skill.RiskLevel = blob.RiskLevel
-	skill.LastScannedAt = blob.LastScannedAt
-	skill.LastScanResultID = blob.LastScanResultID
-	skill.UpdatedAt = time.Now().UTC()
+	now := time.Now().UTC()
+	skill.SourceType = skillSourceUploaded
+	if strings.TrimSpace(skill.Visibility) == "" {
+		skill.Visibility = skillVisibilityPrivate
+	}
+	skill.UpdatedAt = now
+	version.SourceType = skillSourceUploaded
+	version.UpdatedAt = now
 	if err := s.repo.UpdateSkill(skill); err != nil {
-		return nil, err
+		return err
 	}
-	return s.toSkillPayload(*skill)
+	return s.repo.UpdateVersion(version)
 }
 
 func (s *skillService) recordScan(blob *models.SkillBlob, dir *extractedSkillDirectory) error {
@@ -1549,6 +1688,9 @@ func (s *skillService) resolveContentMD5(blob *models.SkillBlob) string {
 	if len(contentHash) == 32 {
 		return contentHash
 	}
+	if s.storage == nil || strings.TrimSpace(blob.ObjectKey) == "" {
+		return contentHash
+	}
 	content, err := s.storage.GetObject(context.Background(), blob.ObjectKey)
 	if err != nil {
 		return contentHash
@@ -1645,12 +1787,17 @@ func sanitizeSkillKey(value string) string {
 	return result
 }
 
-func (s *skillService) toSkillPayloads(items []models.Skill) ([]SkillPayload, error) {
+func (s *skillService) toSkillPayloads(items []models.Skill, actorUserID int, actorRole string) ([]SkillPayload, error) {
 	result := make([]SkillPayload, 0, len(items))
 	for _, item := range items {
 		payload, err := s.toSkillPayload(item)
 		if err != nil {
 			return nil, err
+		}
+		if actorUserID > 0 || isAdminRole(actorRole) {
+			if err := s.enrichSkillPayload(payload, item, nil); err != nil {
+				return nil, err
+			}
 		}
 		result = append(result, *payload)
 	}
@@ -1661,7 +1808,11 @@ func (s *skillService) toSkillPayload(item models.Skill) (*SkillPayload, error) 
 	payload := &SkillPayload{
 		ID: item.ID, ExternalSkillID: formatExternalSkillID(item.ID), UserID: item.UserID, SkillKey: item.SkillKey, Name: item.Name, Description: item.Description,
 		Status: item.Status, SourceType: item.SourceType, RiskLevel: item.RiskLevel, ScanStatus: "pending",
+		Visibility: skillVisibilityPrivate,
 		LastScannedAt: item.LastScannedAt, CurrentVersionID: item.CurrentVersionID, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt,
+	}
+	if strings.TrimSpace(item.Visibility) != "" {
+		payload.Visibility = item.Visibility
 	}
 	if item.CurrentVersionID != nil {
 		version, err := s.repo.GetVersionByID(*item.CurrentVersionID)
@@ -1789,31 +1940,14 @@ func severityRank(value string) int {
 }
 
 func (s *skillService) findInstanceRefs(skillID int) (int, error) {
-	all, err := s.repo.ListAllSkills()
+	if s.repo == nil {
+		return 0, nil
+	}
+	items, err := s.repo.ListActiveInstanceSkillsBySkillID(skillID)
 	if err != nil {
 		return 0, err
 	}
-	_ = all
-	count := 0
-	for instanceID := 1; instanceID <= 0; instanceID++ {
-		_ = instanceID
-	}
-	instances, err := s.instanceRepo.GetAll(0, 100000)
-	if err != nil {
-		return 0, err
-	}
-	for _, instance := range instances {
-		items, err := s.repo.ListInstanceSkills(instance.ID)
-		if err != nil {
-			return 0, err
-		}
-		for _, item := range items {
-			if item.SkillID == skillID && item.Status != "removed" {
-				count++
-			}
-		}
-	}
-	return count, nil
+	return len(items), nil
 }
 
 func normalizeSkillSource(value string) string {
@@ -1836,6 +1970,34 @@ func canActorAttachSkillToInstance(instance *models.Instance, skill models.Skill
 
 func isUserManagedSkill(skill models.Skill) bool {
 	return strings.EqualFold(strings.TrimSpace(skill.SourceType), skillSourceUploaded)
+}
+
+func isDeletedSkill(skill *models.Skill) bool {
+	if skill == nil {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(skill.Status), skillStatusDeleted)
+}
+
+func deletedSkillKey(skillKey string, skillID int) string {
+	const maxSkillKeyLength = 120
+	suffix := fmt.Sprintf("__deleted_%d", skillID)
+	trimmed := strings.TrimSpace(skillKey)
+	if trimmed == "" {
+		trimmed = "skill"
+	}
+	if strings.HasSuffix(trimmed, suffix) {
+		return trimmed
+	}
+	if len(trimmed)+len(suffix) <= maxSkillKeyLength {
+		return trimmed + suffix
+	}
+	runes := []rune(trimmed)
+	maxPrefixLength := maxSkillKeyLength - len(suffix)
+	if len(runes) > maxPrefixLength {
+		runes = runes[:maxPrefixLength]
+	}
+	return string(runes) + suffix
 }
 
 func optionalVersionID(version *models.SkillVersion) *int {

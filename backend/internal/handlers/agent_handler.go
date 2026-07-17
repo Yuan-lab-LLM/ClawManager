@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -198,6 +199,7 @@ func (h *AgentHandler) ReportSkillInventory(c *gin.Context) {
 		utils.HandleError(c, err)
 		return
 	}
+	h.skillService.CompletePendingSkillInventorySync(session.Instance.ID)
 	utils.Success(c, http.StatusOK, "Agent skill inventory reported successfully", nil)
 }
 
@@ -225,10 +227,24 @@ func (h *AgentHandler) UploadSkillPackage(c *gin.Context) {
 	}
 	item, err := h.skillService.UploadAgentSkillPackage(c.Request.Context(), session.Instance.ID, req, fileHeader)
 	if err != nil {
-		utils.HandleError(c, err)
+		utils.HandleHubError(c, err)
 		return
 	}
 	utils.Success(c, http.StatusCreated, "Agent skill package uploaded successfully", item)
+}
+
+func (h *AgentHandler) DownloadSkillVersion(c *gin.Context) {
+	if _, ok := h.authenticateAgentSession(c); !ok {
+		return
+	}
+	content, fileName, err := h.skillService.DownloadSkillVersionByExternalID(c.Param("skillVersion"))
+	if err != nil {
+		utils.HandleError(c, err)
+		return
+	}
+	c.Header("Content-Type", "application/octet-stream")
+	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", fileName))
+	c.Data(http.StatusOK, "application/octet-stream", content)
 }
 
 func (h *AgentHandler) authenticateAgentSession(c *gin.Context) (*services.AgentSession, bool) {

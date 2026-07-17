@@ -26,6 +26,13 @@ const gatewaySections = [
     icon: 'M12 8c-2.761 0-5 1.343-5 3s2.239 3 5 3 5 1.343 5 3-2.239 3-5 3m0-15c2.761 0 5 1.343 5 3m-5-3V4m0 16v-2m0-6c-2.761 0-5-1.343-5-3s2.239-3 5-3',
   },
   {
+    titleKey: 'nav.sessionUsage',
+    descriptionKey: 'aiGatewayPage.sessionUsageDescription',
+    path: '/admin/session-usage',
+    accent: 'from-[#eef8f3] to-[#fffaf8]',
+    icon: 'M4 19h16M7 16V8m5 8V5m5 11v-6',
+  },
+  {
     titleKey: 'nav.riskRules',
     descriptionKey: 'aiGatewayPage.riskRulesDescription',
     path: '/admin/risk-rules',

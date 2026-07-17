@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"clawreef/internal/models"
+	"clawreef/internal/repository"
 	"clawreef/internal/services"
 	"clawreef/internal/utils"
 
@@ -135,10 +136,11 @@ type InstanceHandler struct {
 	openClawConfigService         services.OpenClawConfigService
 	skillService                  services.SkillService
 	externalAccessService         services.InstanceExternalAccessService
+	aiObservabilityService        services.AIObservabilityService
 }
 
 // NewInstanceHandler creates a new instance handler
-func NewInstanceHandler(instanceService services.InstanceService, instanceAgentService services.InstanceAgentService, runtimeStatusService services.InstanceRuntimeStatusService, instanceCommandService services.InstanceCommandService, instanceConfigRevisionService services.InstanceConfigRevisionService, openClawConfigService services.OpenClawConfigService, skillService services.SkillService, externalAccessService services.InstanceExternalAccessService, proxyOptions ...services.InstanceProxyServiceOption) *InstanceHandler {
+func NewInstanceHandler(instanceService services.InstanceService, instanceAgentService services.InstanceAgentService, runtimeStatusService services.InstanceRuntimeStatusService, instanceCommandService services.InstanceCommandService, instanceConfigRevisionService services.InstanceConfigRevisionService, openClawConfigService services.OpenClawConfigService, skillService services.SkillService, externalAccessService services.InstanceExternalAccessService, aiObservabilityService services.AIObservabilityService, proxyOptions ...services.InstanceProxyServiceOption) *InstanceHandler {
 	accessService := services.NewInstanceAccessService()
 	return &InstanceHandler{
 		instanceService:               instanceService,
@@ -153,6 +155,7 @@ func NewInstanceHandler(instanceService services.InstanceService, instanceAgentS
 		openClawConfigService:         openClawConfigService,
 		skillService:                  skillService,
 		externalAccessService:         externalAccessService,
+		aiObservabilityService:        aiObservabilityService,
 	}
 }
 
@@ -164,9 +167,10 @@ func (h *InstanceHandler) Shutdown() {
 }
 
 type InstanceRuntimeDetailsResponse struct {
-	Runtime  *services.InstanceRuntimeStatusPayload `json:"runtime,omitempty"`
-	Agent    *services.InstanceAgentPayload         `json:"agent,omitempty"`
-	Commands []services.InstanceCommandPayload      `json:"commands,omitempty"`
+	Runtime        *services.InstanceRuntimeStatusPayload `json:"runtime,omitempty"`
+	Agent          *services.InstanceAgentPayload         `json:"agent,omitempty"`
+	Commands       []services.InstanceCommandPayload      `json:"commands,omitempty"`
+	LLMGovernance  *services.InstanceLLMGovernanceStatus  `json:"llm_governance,omitempty"`
 }
 
 type CreateRuntimeCommandRequest struct {
@@ -364,9 +368,10 @@ func (h *InstanceHandler) CreateInstance(c *gin.Context) {
 		return
 	}
 
+	userRole, _ := c.Get("userRole")
 	for _, skillID := range skillIDs {
-		if _, err := h.skillService.AttachSkillToInstance(instance.ID, skillID); err != nil {
-			utils.HandleError(c, err)
+		if _, err := h.skillService.AttachSkillToInstance(userID.(int), userRole.(string), instance.ID, skillID); err != nil {
+			utils.HandleHubError(c, err)
 			return
 		}
 	}
@@ -400,6 +405,7 @@ func instanceCreateRequestToService(req CreateInstanceRequest) services.CreateIn
 
 func (h *InstanceHandler) BatchCreateLiteInstances(c *gin.Context) {
 	userID, _ := c.Get("userID")
+	userRole, _ := c.Get("userRole")
 
 	var req BatchCreateLiteInstancesRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -449,7 +455,7 @@ func (h *InstanceHandler) BatchCreateLiteInstances(c *gin.Context) {
 		}
 		attachFailed := false
 		for _, skillID := range skillIDs {
-			if _, err := h.skillService.AttachSkillToInstance(instance.ID, skillID); err != nil {
+			if _, err := h.skillService.AttachSkillToInstance(userID.(int), userRole.(string), instance.ID, skillID); err != nil {
 				result.Status = "failed"
 				result.Error = err.Error()
 				response.Failed++
@@ -986,7 +992,7 @@ func availabilityForInstanceStatus(status string) string {
 }
 
 func (h *InstanceHandler) GetRuntimeDetails(c *gin.Context) {
-	id, _, ok := h.resolveOwnedInstance(c)
+	id, instance, ok := h.resolveOwnedInstance(c)
 	if !ok {
 		return
 	}
@@ -1007,11 +1013,128 @@ func (h *InstanceHandler) GetRuntimeDetails(c *gin.Context) {
 		return
 	}
 
-	utils.Success(c, http.StatusOK, "Instance runtime details retrieved successfully", InstanceRuntimeDetailsResponse{
+	response := InstanceRuntimeDetailsResponse{
 		Runtime:  runtime,
 		Agent:    agent,
 		Commands: commands,
+	}
+	if h.aiObservabilityService != nil && instance != nil &&
+		(instance.Type == "openclaw" || instance.Type == "hermes") {
+		var systemInfo map[string]interface{}
+		if runtime != nil {
+			systemInfo = runtime.SystemInfo
+		}
+		if governance, govErr := h.aiObservabilityService.GetInstanceLLMGovernanceStatus(id, systemInfo); govErr == nil {
+			response.LLMGovernance = governance
+		}
+	}
+
+	utils.Success(c, http.StatusOK, "Instance runtime details retrieved successfully", response)
+}
+
+type SessionUsageQueryRequest struct {
+	Page   int    `form:"page,default=1"`
+	Limit  int    `form:"limit,default=20"`
+	Search string `form:"search"`
+	Since  string `form:"since"`
+	Until  string `form:"until"`
+}
+
+type SessionUsageDetailQueryRequest struct {
+	SessionID string `form:"session_id" binding:"required"`
+	Since     string `form:"since"`
+	Until     string `form:"until"`
+}
+
+func (h *InstanceHandler) GetInstanceSessionUsage(c *gin.Context) {
+	id, _, ok := h.resolveOwnedInstance(c)
+	if !ok {
+		return
+	}
+	if h.aiObservabilityService == nil {
+		utils.Error(c, http.StatusInternalServerError, "Session usage service is not configured")
+		return
+	}
+
+	var req SessionUsageQueryRequest
+	if err := c.ShouldBindQuery(&req); err != nil {
+		utils.ValidationError(c, err)
+		return
+	}
+	since, err := parseOptionalRFC3339(req.Since)
+	if err != nil {
+		utils.Error(c, http.StatusBadRequest, "Invalid since timestamp")
+		return
+	}
+	until, parseUntilErr := parseOptionalRFC3339(req.Until)
+	if parseUntilErr != nil {
+		utils.Error(c, http.StatusBadRequest, "Invalid until timestamp")
+		return
+	}
+	if err := validateSessionUsageTimeRange(since, until); err != nil {
+		utils.Error(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	result, err := h.aiObservabilityService.GetInstanceSessionUsage(id, services.InstanceSessionUsageQuery{
+		Page:   req.Page,
+		Limit:  req.Limit,
+		Search: req.Search,
+		Since:  since,
+		Until:  until,
 	})
+	if err != nil {
+		utils.HandleError(c, err)
+		return
+	}
+
+	utils.Success(c, http.StatusOK, "Instance session usage retrieved successfully", result)
+}
+
+func (h *InstanceHandler) GetInstanceSessionUsageDetail(c *gin.Context) {
+	id, _, ok := h.resolveOwnedInstance(c)
+	if !ok {
+		return
+	}
+	if h.aiObservabilityService == nil {
+		utils.Error(c, http.StatusInternalServerError, "Session usage service is not configured")
+		return
+	}
+
+	var req SessionUsageDetailQueryRequest
+	if err := c.ShouldBindQuery(&req); err != nil {
+		utils.ValidationError(c, err)
+		return
+	}
+	since, err := parseOptionalRFC3339(req.Since)
+	if err != nil {
+		utils.Error(c, http.StatusBadRequest, "Invalid since timestamp")
+		return
+	}
+	until, parseUntilErr := parseOptionalRFC3339(req.Until)
+	if parseUntilErr != nil {
+		utils.Error(c, http.StatusBadRequest, "Invalid until timestamp")
+		return
+	}
+	if err := validateSessionUsageTimeRange(since, until); err != nil {
+		utils.Error(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	detail, err := h.aiObservabilityService.GetInstanceSessionUsageDetail(id, req.SessionID, repository.SessionUsageFilter{
+		Since: since,
+		Until: until,
+	})
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "not found") {
+			utils.Error(c, http.StatusNotFound, "Session usage not found")
+			return
+		}
+		utils.HandleError(c, err)
+		return
+	}
+
+	utils.Success(c, http.StatusOK, "Instance session usage detail retrieved successfully", detail)
 }
 
 func (h *InstanceHandler) CreateRuntimeCommand(c *gin.Context) {
@@ -1143,25 +1266,37 @@ func (h *InstanceHandler) resolveOwnedInstance(c *gin.Context) (int, *models.Ins
 		utils.Error(c, http.StatusBadRequest, "Invalid instance ID")
 		return 0, nil, false
 	}
+	instance, ok := h.authorizeInstanceAccess(c, id)
+	if !ok {
+		return 0, nil, false
+	}
+	return id, instance, true
+}
 
-	instance, err := h.instanceService.GetByID(id)
+func (h *InstanceHandler) authorizeInstanceAccess(c *gin.Context, instanceID int) (*models.Instance, bool) {
+	if instanceID <= 0 {
+		utils.Error(c, http.StatusBadRequest, "Invalid instance ID")
+		return nil, false
+	}
+
+	instance, err := h.instanceService.GetByID(instanceID)
 	if err != nil {
 		utils.HandleError(c, err)
-		return 0, nil, false
+		return nil, false
 	}
 	if instance == nil {
 		utils.Error(c, http.StatusNotFound, "Instance not found")
-		return 0, nil, false
+		return nil, false
 	}
 
 	userID, _ := c.Get("userID")
 	userRole, _ := c.Get("userRole")
 	if userRole != "admin" && instance.UserID != userID.(int) {
 		utils.Error(c, http.StatusForbidden, "Access denied")
-		return 0, nil, false
+		return nil, false
 	}
 
-	return id, instance, true
+	return instance, true
 }
 
 // GenerateAccessToken generates an access token for an instance
@@ -1632,6 +1767,110 @@ func (h *InstanceHandler) ImportHermes(c *gin.Context) {
 	}
 
 	utils.Success(c, http.StatusOK, "Hermes workspace imported successfully", nil)
+}
+
+func (h *InstanceHandler) RefreshInstanceSkills(c *gin.Context) {
+	instance, ok := h.requireOwnedInstance(c)
+	if !ok {
+		return
+	}
+	if instance.Type != "openclaw" && instance.Type != "hermes" {
+		utils.Error(c, http.StatusBadRequest, "skill inventory sync is only available for openclaw and hermes instances")
+		return
+	}
+	userID, _ := c.Get("userID")
+	issuedBy := userID.(int)
+	command, err := h.createSkillInventorySyncCommand(instance, issuedBy)
+	if err != nil {
+		utils.HandleError(c, err)
+		return
+	}
+	utils.Success(c, http.StatusOK, "Skill inventory sync requested", command)
+}
+
+func (h *InstanceHandler) createSkillInventorySyncCommand(instance *models.Instance, issuedBy int) (*services.InstanceCommandPayload, error) {
+	command, err := h.instanceCommandService.Create(instance.ID, &issuedBy, services.CreateInstanceCommandRequest{
+		CommandType: services.InstanceCommandTypeSyncSkillInventory,
+		Payload: map[string]interface{}{
+			"trigger": "manual",
+			"mode":    "full",
+		},
+		IdempotencyKey: fmt.Sprintf("sync-skill-inventory-%d-%d", instance.ID, time.Now().Unix()),
+		TimeoutSeconds: 300,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if services.IsLiteRuntimeInstance(instance) || services.SupportsServerWorkspaceSkillScan(instance) {
+		if err := h.skillService.RequestLiteSkillInventorySync(instance.ID); err != nil {
+			return nil, err
+		}
+	}
+	return command, nil
+}
+
+func (h *InstanceHandler) ImportInstanceSkillToLibrary(c *gin.Context) {
+	instance, ok := h.requireOwnedInstance(c)
+	if !ok {
+		return
+	}
+	skillID, err := strconv.Atoi(c.Param("skillId"))
+	if err != nil {
+		utils.Error(c, http.StatusBadRequest, "invalid skill ID")
+		return
+	}
+	userID, _ := c.Get("userID")
+	userRole, _ := c.Get("userRole")
+	item, err := h.skillService.ImportInstanceSkillToLibrary(userID.(int), userRole.(string), instance.ID, skillID)
+	if err != nil {
+		utils.HandleHubError(c, err)
+		return
+	}
+	utils.Success(c, http.StatusOK, "Skill imported to library successfully", item)
+}
+
+func (h *InstanceHandler) RetrySkillPackageCollect(c *gin.Context) {
+	instance, ok := h.requireOwnedInstance(c)
+	if !ok {
+		return
+	}
+	skillID, err := strconv.Atoi(c.Param("skillId"))
+	if err != nil {
+		utils.Error(c, http.StatusBadRequest, "invalid skill ID")
+		return
+	}
+	userID, _ := c.Get("userID")
+	userRole, _ := c.Get("userRole")
+	if err := h.skillService.RetrySkillPackageCollection(userID.(int), userRole.(string), instance.ID, skillID); err != nil {
+		utils.HandleHubError(c, err)
+		return
+	}
+	utils.Success(c, http.StatusAccepted, "Skill package collection requested", gin.H{"status": "pending"})
+}
+
+func (h *InstanceHandler) PublishInstanceSkillToHub(c *gin.Context) {
+	instance, ok := h.requireOwnedInstance(c)
+	if !ok {
+		return
+	}
+	skillID, err := strconv.Atoi(c.Param("skillId"))
+	if err != nil {
+		utils.Error(c, http.StatusBadRequest, "invalid skill ID")
+		return
+	}
+	var req services.PublishSkillHubRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		utils.ValidationError(c, err)
+		return
+	}
+	userID, _ := c.Get("userID")
+	userRole, _ := c.Get("userRole")
+	item, err := h.skillService.PublishFromInstance(userID.(int), userRole.(string), instance.ID, skillID, req.TagIDs)
+	if err != nil {
+		utils.HandleHubError(c, err)
+		return
+	}
+	utils.Success(c, http.StatusOK, "Skill published to hub successfully", item)
 }
 
 func (h *InstanceHandler) requireOwnedInstance(c *gin.Context) (*models.Instance, bool) {

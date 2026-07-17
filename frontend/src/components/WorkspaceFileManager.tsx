@@ -416,7 +416,7 @@ export function WorkspaceFileManager({ instanceId, initialPath, onMutation, refr
   const entries = entriesQuery.data ?? [];
 
   return (
-    <section className="cm-surface flex h-full max-h-full min-h-[420px] min-w-0 flex-col overflow-hidden xl:min-h-0">
+    <section className="cm-surface flex h-full min-h-0 min-w-0 flex-col overflow-hidden max-xl:min-h-[360px]">
       <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-3 py-2">
         <div className="min-w-0">
           <div className="flex min-w-0 flex-wrap items-center gap-1 text-sm">

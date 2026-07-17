@@ -7,7 +7,7 @@ import OpenClawConfigPlanSection, {
 import UserLayout from "../../components/UserLayout";
 import { useAuth } from "../../contexts/AuthContext";
 import { instanceService } from "../../services/instanceService";
-import { skillService } from "../../services/skillService";
+import { skillHubService } from "../../services/skillHubService";
 import { userService } from "../../services/userService";
 import { INSTANCE_TYPES, PRESET_CONFIGS } from "../../types/instance";
 import type { CreateInstanceRequest, InstanceMode } from "../../types/instance";
@@ -612,10 +612,12 @@ const CreateInstancePage: React.FC = () => {
     const loadSkills = async () => {
       try {
         setSkillLoading(true);
-        const items = await skillService.listSkills();
+        const items = await skillHubService.listAttachable();
         const activeSkills = items.filter((item) => item.status === "active");
         const attachableSkills = activeSkills.filter(
-          (item) => !["medium", "high"].includes(item.risk_level.trim().toLowerCase()),
+          (item) =>
+            item.risk_level !== "medium" &&
+            item.risk_level !== "high",
         );
         setAvailableSkills(attachableSkills);
         setSkillInventorySummary({

@@ -19,10 +19,13 @@ type AgentStateReportRequest struct {
 }
 
 type AgentRuntimePayload struct {
-	OpenClawStatus          string `json:"openclaw_status"`
-	OpenClawPID             *int   `json:"openclaw_pid,omitempty"`
-	OpenClawVersion         string `json:"openclaw_version"`
-	CurrentConfigRevisionID *int   `json:"current_config_revision_id,omitempty"`
+	OpenClawStatus          string  `json:"openclaw_status"`
+	OpenClawPID             *int    `json:"openclaw_pid,omitempty"`
+	OpenClawVersion         string  `json:"openclaw_version"`
+	CurrentConfigRevisionID *int    `json:"current_config_revision_id,omitempty"`
+	LLMConfigFingerprint    *string `json:"llm_config_fingerprint,omitempty"`
+	LLMConfigStatus         *string `json:"llm_config_status,omitempty"`
+	LLMProviderBaseURL      *string `json:"llm_provider_base_url,omitempty"`
 }
 
 type InstanceRuntimeStatusPayload struct {
@@ -90,7 +93,7 @@ func (s *instanceRuntimeStatusService) Report(session *AgentSession, req AgentSt
 	status.CurrentConfigRevisionID = req.Runtime.CurrentConfigRevisionID
 	status.LastReportedAt = reportedAt
 
-	systemInfoJSON, err := marshalOptionalJSON(req.SystemInfo)
+	systemInfoJSON, err := marshalOptionalJSON(mergeLLMConfigIntoSystemInfo(req.SystemInfo, req.Runtime))
 	if err != nil {
 		return fmt.Errorf("failed to encode system info: %w", err)
 	}
@@ -150,6 +153,26 @@ func (s *instanceRuntimeStatusService) GetByInstanceID(instanceID int) (*Instanc
 		}
 	}
 	return payload, nil
+}
+
+func mergeLLMConfigIntoSystemInfo(systemInfo map[string]interface{}, runtime AgentRuntimePayload) map[string]interface{} {
+	merged := map[string]interface{}{}
+	for key, value := range systemInfo {
+		merged[key] = value
+	}
+	if runtime.LLMConfigFingerprint != nil && strings.TrimSpace(*runtime.LLMConfigFingerprint) != "" {
+		merged["llm_config_fingerprint"] = strings.TrimSpace(*runtime.LLMConfigFingerprint)
+	}
+	if runtime.LLMConfigStatus != nil && strings.TrimSpace(*runtime.LLMConfigStatus) != "" {
+		merged["llm_config_status"] = strings.TrimSpace(*runtime.LLMConfigStatus)
+	}
+	if runtime.LLMProviderBaseURL != nil && strings.TrimSpace(*runtime.LLMProviderBaseURL) != "" {
+		merged["llm_provider_base_url"] = strings.TrimSpace(*runtime.LLMProviderBaseURL)
+	}
+	if len(merged) == 0 {
+		return nil
+	}
+	return merged
 }
 
 func (s *instanceRuntimeStatusService) UpsertInfraStatus(instanceID int, infraStatus string) error {

@@ -23,6 +23,7 @@ import (
 	"clawreef/internal/models"
 	"clawreef/internal/repository"
 	"clawreef/internal/services"
+	"clawreef/internal/utils"
 )
 
 // ToolCallFunction represents a tool/function call payload.
@@ -71,6 +72,8 @@ type ChatCompletionRequest struct {
 	StreamOptions     json.RawMessage `json:"stream_options,omitempty"`
 	User              *string         `json:"user,omitempty"`
 	SessionID         *string         `json:"session_id,omitempty"`
+	OpenClawSessionKey *string        `json:"-"`
+	ManagedAgentType   *string         `json:"-"`
 	InstanceID        *int            `json:"instance_id,omitempty"`
 	InstanceMode      *string         `json:"instance_mode,omitempty"`
 	RuntimeType       *string         `json:"runtime_type,omitempty"`
@@ -429,15 +432,42 @@ func (s *service) prepareChatRequest(userID int, req ChatCompletionRequest) (*pr
 		selectedModel: selectedModel,
 		req:           req,
 	}
-	prepared.sessionID = resolveSessionID(req)
+	sessionSource, sessionID := resolveSessionIdentity(req)
+	prepared.sessionID = sessionID
+	if prepared.sessionID != "" && sessionSource != "openclaw_header" {
+		if runtimeType := strings.TrimSpace(sessionNormalizationRuntimeType(req)); runtimeType != "" {
+			prepared.sessionID = utils.NormalizeOpenClawSessionID(prepared.sessionID, runtimeType)
+		}
+	}
 	prepared.traceID = s.resolveTraceID(userID, req, prepared.sessionID)
 	if prepared.sessionID == "" {
 		prepared.sessionID = normalizeSessionID(nil, prepared.traceID)
+		sessionSource = "trace_fallback"
 	}
 	prepared.sessionIDPtr = stringPtr(prepared.sessionID)
 	prepared.req.SessionID = prepared.sessionIDPtr
 	prepared.requestID = normalizeOrCreateID(req.RequestID, "req")
 	prepared.requestIDPtr = stringPtr(prepared.requestID)
+
+	if sessionSource == "trace_fallback" && req.InstanceID != nil {
+		if err := s.auditEventService.RecordEvent(&models.AuditEvent{
+			TraceID:      prepared.traceID,
+			SessionID:    prepared.sessionIDPtr,
+			RequestID:    prepared.requestIDPtr,
+			UserID:       prepared.userIDPtr,
+			InstanceID:   req.InstanceID,
+			InstanceMode: runtimeAttributionString(req.InstanceMode),
+			RuntimeType:  runtimeAttributionString(req.RuntimeType),
+			GatewayID:    runtimeAttributionString(req.GatewayID),
+			RuntimePodID: runtimeAttributionInt64(req.RuntimePodID),
+			EventType:    "gateway.session.fallback",
+			TrafficClass: models.TrafficClassLLM,
+			Severity:     models.AuditSeverityWarn,
+			Message:      fmt.Sprintf("LLM request missing stable session key for instance %d", *req.InstanceID),
+		}); err != nil {
+			logPersistenceError("record gateway.session.fallback", prepared.traceID, err)
+		}
+	}
 
 	sessionTitle := deriveSessionTitle(prepared.req.Messages)
 	if _, err := s.chatSessionService.EnsureSession(prepared.sessionID, prepared.userIDPtr, prepared.req.InstanceID, stringPtr(prepared.traceID), sessionTitle); err != nil {
@@ -2231,13 +2261,23 @@ func fallbackCurrency(currency string) string {
 }
 
 func resolveSessionID(req ChatCompletionRequest) string {
+	_, sessionID := resolveSessionIdentity(req)
+	return sessionID
+}
+
+func resolveSessionIdentity(req ChatCompletionRequest) (source string, sessionID string) {
+	if req.OpenClawSessionKey != nil {
+		if key := strings.TrimSpace(*req.OpenClawSessionKey); key != "" {
+			return "openclaw_header", utils.NormalizeOpenClawSessionID(key, sessionNormalizationRuntimeType(req))
+		}
+	}
 	if normalized := normalizeOptionalString(req.SessionID); normalized != "" {
-		return normalizeExistingIdentifier(normalized, "sess")
+		return "explicit", normalizeExistingIdentifier(normalized, "sess")
 	}
 	if normalized := normalizeOptionalString(req.User); normalized != "" {
-		return normalizeExistingIdentifier(normalized, "sess")
+		return "openai_user", normalizeExistingIdentifier(normalized, "sess")
 	}
-	return ""
+	return "", ""
 }
 
 func normalizeSessionID(value *string, traceID string) string {

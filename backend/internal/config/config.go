@@ -20,6 +20,7 @@ type Config struct {
 	Runtime        RuntimePoolConfig    `yaml:"runtime"`
 	ObjectStorage  ObjectStorageConfig  `yaml:"objectStorage"`
 	SkillScanner   SkillScannerConfig   `yaml:"skillScanner"`
+	SkillMaterialize SkillMaterializeConfig `yaml:"skillMaterialize"`
 	LeaderElection LeaderElectionConfig `yaml:"leaderElection"`
 }
 
@@ -200,6 +201,14 @@ type SkillScannerConfig struct {
 	Enabled        bool   `yaml:"enabled"`
 }
 
+type SkillMaterializeConfig struct {
+	Enabled              bool `yaml:"enabled"`
+	TickMS               int  `yaml:"tickMs"`
+	BatchSize            int  `yaml:"batchSize"`
+	Concurrency          int  `yaml:"concurrency"`
+	PerInstanceConcurrency int `yaml:"perInstanceConcurrency"`
+}
+
 // Load loads configuration from file and environment variables
 func Load() (*Config, error) {
 	runtimeNamespace := getEnv("RUNTIME_NAMESPACE", getEnv("K8S_NAMESPACE", "clawmanager-system"))
@@ -304,6 +313,13 @@ func Load() (*Config, error) {
 			APIKey:         getEnv("SKILL_SCANNER_API_KEY", ""),
 			TimeoutSeconds: 30,
 			Enabled:        strings.EqualFold(getEnv("SKILL_SCANNER_ENABLED", "false"), "true"),
+		},
+		SkillMaterialize: SkillMaterializeConfig{
+			Enabled:                strings.EqualFold(getEnv("SKILL_MATERIALIZE_WORKER_ENABLED", "true"), "true"),
+			TickMS:                 2000,
+			BatchSize:              5,
+			Concurrency:            5,
+			PerInstanceConcurrency: 2,
 		},
 		LeaderElection: LeaderElectionConfig{
 			Enabled:       strings.EqualFold(getEnv("CLAWMANAGER_LEADER_ELECTION", "true"), "true"),
@@ -496,6 +512,21 @@ func applyEnvOverrides(config *Config) {
 	}
 	if timeoutSeconds := os.Getenv("SKILL_SCANNER_TIMEOUT_SECONDS"); timeoutSeconds != "" {
 		fmt.Sscanf(timeoutSeconds, "%d", &config.SkillScanner.TimeoutSeconds)
+	}
+	if enabled := os.Getenv("SKILL_MATERIALIZE_WORKER_ENABLED"); enabled != "" {
+		config.SkillMaterialize.Enabled = strings.EqualFold(enabled, "true")
+	}
+	if tickMS := os.Getenv("SKILL_MATERIALIZE_TICK_MS"); tickMS != "" {
+		fmt.Sscanf(tickMS, "%d", &config.SkillMaterialize.TickMS)
+	}
+	if batchSize := os.Getenv("SKILL_MATERIALIZE_BATCH_SIZE"); batchSize != "" {
+		fmt.Sscanf(batchSize, "%d", &config.SkillMaterialize.BatchSize)
+	}
+	if concurrency := os.Getenv("SKILL_MATERIALIZE_CONCURRENCY"); concurrency != "" {
+		fmt.Sscanf(concurrency, "%d", &config.SkillMaterialize.Concurrency)
+	}
+	if perInstance := os.Getenv("SKILL_MATERIALIZE_PER_INSTANCE_CONCURRENCY"); perInstance != "" {
+		fmt.Sscanf(perInstance, "%d", &config.SkillMaterialize.PerInstanceConcurrency)
 	}
 }
 

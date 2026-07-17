@@ -72,12 +72,16 @@ func HandleError(c *gin.Context, err error) {
 		Error(c, http.StatusForbidden, errStr)
 	case "invalid username or password", "account is disabled", "invalid or expired agent session token":
 		Error(c, http.StatusUnauthorized, errStr)
-	case "agent registration is only supported for openclaw instances", "agent registration is only supported for openclaw or hermes instances", "agent id does not match session", "access denied":
+	case "agent registration is only supported for openclaw instances", "agent registration is only supported for openclaw or hermes instances", "agent id does not match session", "access denied", "skill_attach_forbidden":
 		Error(c, http.StatusForbidden, errStr)
 	case "current password is incorrect":
 		Error(c, http.StatusBadRequest, errStr)
-	case "user not found", "model not found":
+	case "user not found", "model not found", "skill not found", "skill hub tag not found":
 		Error(c, http.StatusNotFound, errStr)
+	case "skill_not_scanned", "skill_risk_blocked", "skill_tags_required", "skill is not published to hub":
+		Error(c, http.StatusBadRequest, errStr)
+	case "skill_package_pending", "skill_package_materialize_failed", "skill_package_materializing":
+		Error(c, http.StatusConflict, err.Error())
 	default:
 		// For development, show actual error; for production, hide details
 		Error(c, http.StatusInternalServerError, errStr)

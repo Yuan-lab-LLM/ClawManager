@@ -49,6 +49,9 @@ func (s *instanceService) ValidateCreateRequests(userID int, requests []CreateIn
 		if err != nil {
 			return err
 		}
+		if err := validateManagedRuntimeEnvironmentOverrides(requests[idx].Type, environmentOverrides); err != nil {
+			return err
+		}
 		if _, err := marshalEnvironmentOverrides(environmentOverrides); err != nil {
 			return err
 		}
@@ -283,6 +286,9 @@ func (s *instanceService) Create(userID int, req CreateInstanceRequest) (*models
 	if err != nil {
 		return nil, err
 	}
+	if err := validateManagedRuntimeEnvironmentOverrides(req.Type, environmentOverrides); err != nil {
+		return nil, err
+	}
 	if profile, ok := normalizeDesktopStreamProfile(req.DesktopStreamProfile); !ok {
 		return nil, fmt.Errorf("invalid desktop stream profile")
 	} else if profile != "" {
@@ -465,26 +471,23 @@ func (s *instanceService) Create(userID int, req CreateInstanceRequest) (*models
 
 	var bootstrapSnapshot *models.OpenClawInjectionSnapshot
 	var bootstrapSecretName string
-	if supportsRuntimeConfigInjection(instance.Type) && s.openClawConfigService != nil && req.OpenClawConfigPlan != nil && hasOpenClawConfigSelections(*req.OpenClawConfigPlan) {
-		bootstrapSnapshot, err = s.openClawConfigService.CreateSnapshotForInstance(userID, instance, req.OpenClawConfigPlan)
-		if err != nil {
+	if snapshot, snapshotErr := s.createRuntimeBootstrapSnapshot(userID, instance, req.OpenClawConfigPlan); snapshotErr != nil {
+		s.instanceRepo.Delete(instance.ID)
+		return nil, fmt.Errorf("failed to compile runtime bootstrap config: %w", snapshotErr)
+	} else if snapshot != nil {
+		bootstrapSnapshot = snapshot
+		instance.OpenClawConfigSnapshotID = &bootstrapSnapshot.ID
+		instance.UpdatedAt = time.Now()
+		if err := s.instanceRepo.Update(instance); err != nil {
 			s.instanceRepo.Delete(instance.ID)
-			return nil, fmt.Errorf("failed to compile runtime bootstrap config: %w", err)
+			return nil, fmt.Errorf("failed to persist runtime snapshot reference: %w", err)
 		}
-		if bootstrapSnapshot != nil {
-			instance.OpenClawConfigSnapshotID = &bootstrapSnapshot.ID
-			instance.UpdatedAt = time.Now()
-			if err := s.instanceRepo.Update(instance); err != nil {
-				s.instanceRepo.Delete(instance.ID)
-				return nil, fmt.Errorf("failed to persist runtime snapshot reference: %w", err)
-			}
 
-			bootstrapSecretName, err = s.openClawConfigService.EnsureSnapshotSecret(ctx, userID, instance, bootstrapSnapshot.ID)
-			if err != nil {
-				_ = s.openClawConfigService.MarkSnapshotFailed(bootstrapSnapshot, err)
-				s.instanceRepo.Delete(instance.ID)
-				return nil, fmt.Errorf("failed to provision runtime bootstrap secret: %w", err)
-			}
+		bootstrapSecretName, err = s.openClawConfigService.EnsureSnapshotSecret(ctx, userID, instance, bootstrapSnapshot.ID)
+		if err != nil {
+			_ = s.openClawConfigService.MarkSnapshotFailed(bootstrapSnapshot, err)
+			s.instanceRepo.Delete(instance.ID)
+			return nil, fmt.Errorf("failed to provision runtime bootstrap secret: %w", err)
 		}
 	}
 
@@ -502,6 +505,14 @@ func (s *instanceService) Create(userID int, req CreateInstanceRequest) (*models
 		s.instanceRepo.Delete(instance.ID)
 		return nil, fmt.Errorf("failed to create PVC: %w", err)
 	}
+	if err := EnsureInstanceWorkspacePathForServerScan(ctx, s.instanceRepo, instance); err != nil {
+		s.pvcService.DeletePVC(ctx, userID, instance.ID)
+		if bootstrapSnapshot != nil {
+			_ = s.openClawConfigService.MarkSnapshotFailed(bootstrapSnapshot, err)
+		}
+		s.instanceRepo.Delete(instance.ID)
+		return nil, err
+	}
 
 	nodeSelector, err := s.pvcService.NodeSelectorForPVC(ctx, userID, instance.ID, storageClass)
 	if err != nil {
@@ -513,15 +524,14 @@ func (s *instanceService) Create(userID int, req CreateInstanceRequest) (*models
 		return nil, fmt.Errorf("failed to resolve PVC node selector: %w", err)
 	}
 
-	// Ensure any legacy per-instance network policy is removed before creating pod.
-	// This keeps new pods unrestricted even if older versions created netpols.
-	if err := s.networkPolicyService.DeletePolicy(ctx, userID, instance.ID, instance.Name); err != nil {
+	// Managed runtime network policy: optional egress lock when enabled.
+	if err := s.syncInstanceNetworkPolicy(ctx, userID, instance); err != nil {
 		s.pvcService.DeletePVC(ctx, userID, instance.ID)
 		if bootstrapSnapshot != nil {
 			_ = s.openClawConfigService.MarkSnapshotFailed(bootstrapSnapshot, err)
 		}
 		s.instanceRepo.Delete(instance.ID)
-		return nil, fmt.Errorf("failed to delete network policy: %w", err)
+		return nil, err
 	}
 
 	// Create Pod
@@ -743,24 +753,20 @@ func (s *instanceService) createV2Instance(ctx context.Context, userID int, req 
 		return nil, fmt.Errorf("failed to provision lite agent bootstrap token: %w", err)
 	}
 
-	if supportsRuntimeConfigInjection(instance.Type) && s.openClawConfigService != nil && req.OpenClawConfigPlan != nil && hasOpenClawConfigSelections(*req.OpenClawConfigPlan) {
-		bootstrapSnapshot, err := s.openClawConfigService.CreateSnapshotForInstance(userID, instance, req.OpenClawConfigPlan)
-		if err != nil {
+	if snapshot, snapshotErr := s.createRuntimeBootstrapSnapshot(userID, instance, req.OpenClawConfigPlan); snapshotErr != nil {
+		_ = s.instanceRepo.Delete(instance.ID)
+		return nil, fmt.Errorf("failed to compile lite runtime bootstrap config: %w", snapshotErr)
+	} else if snapshot != nil {
+		instance.OpenClawConfigSnapshotID = &snapshot.ID
+		instance.UpdatedAt = time.Now()
+		if err := s.instanceRepo.Update(instance); err != nil {
+			_ = s.openClawConfigService.MarkSnapshotFailed(snapshot, err)
 			_ = s.instanceRepo.Delete(instance.ID)
-			return nil, fmt.Errorf("failed to compile lite runtime bootstrap config: %w", err)
+			return nil, fmt.Errorf("failed to persist lite runtime snapshot reference: %w", err)
 		}
-		if bootstrapSnapshot != nil {
-			instance.OpenClawConfigSnapshotID = &bootstrapSnapshot.ID
-			instance.UpdatedAt = time.Now()
-			if err := s.instanceRepo.Update(instance); err != nil {
-				_ = s.openClawConfigService.MarkSnapshotFailed(bootstrapSnapshot, err)
-				_ = s.instanceRepo.Delete(instance.ID)
-				return nil, fmt.Errorf("failed to persist lite runtime snapshot reference: %w", err)
-			}
-			if err := s.openClawConfigService.MarkSnapshotActive(bootstrapSnapshot); err != nil {
-				_ = s.instanceRepo.Delete(instance.ID)
-				return nil, fmt.Errorf("failed to activate lite runtime bootstrap snapshot: %w", err)
-			}
+		if err := s.openClawConfigService.MarkSnapshotActive(snapshot); err != nil {
+			_ = s.instanceRepo.Delete(instance.ID)
+			return nil, fmt.Errorf("failed to activate lite runtime bootstrap snapshot: %w", err)
 		}
 	}
 
@@ -882,6 +888,9 @@ func (s *instanceService) Start(instanceID int) error {
 	extraEnv, err := buildInstancePodEnv(instance, runtimeConfig.Env, gatewayEnv, agentEnv)
 	if err != nil {
 		return fmt.Errorf("failed to resolve instance environment: %w", err)
+	}
+	if err := EnsureInstanceWorkspacePathForServerScan(ctx, s.instanceRepo, instance); err != nil {
+		return err
 	}
 
 	bootstrapSecretName := ""
@@ -1168,6 +1177,7 @@ func (s *instanceService) buildAgentEnv(instance *models.Instance) (map[string]s
 		"CLAWMANAGER_AGENT_INSTANCE_ID":      fmt.Sprintf("%d", instance.ID),
 		"CLAWMANAGER_AGENT_PERSISTENT_DIR":   managedRuntimePersistentDir(instance),
 		"CLAWMANAGER_AGENT_PROTOCOL_VERSION": AgentProtocolVersionV1,
+		"CLAWMANAGER_AGENT_RUNTIME_TYPE":     strings.ToLower(strings.TrimSpace(instance.Type)),
 	}, nil
 }
 
@@ -1178,6 +1188,42 @@ func supportsManagedRuntimeIntegration(instanceType string) bool {
 	default:
 		return false
 	}
+}
+
+func (s *instanceService) createRuntimeBootstrapSnapshot(userID int, instance *models.Instance, plan *OpenClawConfigPlan) (*models.OpenClawInjectionSnapshot, error) {
+	if !supportsRuntimeConfigInjection(instance.Type) || s.openClawConfigService == nil {
+		return nil, nil
+	}
+	if plan != nil && hasOpenClawConfigSelections(*plan) {
+		return s.openClawConfigService.CreateSnapshotForInstance(userID, instance, plan)
+	}
+	if supportsManagedRuntimeIntegration(instance.Type) {
+		return s.openClawConfigService.CreateDefaultLLMGovernanceSnapshot(userID, instance)
+	}
+	return nil, nil
+}
+
+func (s *instanceService) syncInstanceNetworkPolicy(ctx context.Context, userID int, instance *models.Instance) error {
+	if instance == nil {
+		return nil
+	}
+	if isLiteRuntimeInstance(instance) {
+		// Lite/gateway-pool instances share runtime pods; per-instance NetworkPolicy does not apply.
+		if err := s.networkPolicyService.DeletePolicy(ctx, userID, instance.ID, instance.Name); err != nil {
+			return fmt.Errorf("failed to delete network policy: %w", err)
+		}
+		return nil
+	}
+	if isInstanceNetworkLockEnabled() && supportsManagedRuntimeIntegration(instance.Type) {
+		if err := s.networkPolicyService.EnsureDefaultPolicy(ctx, userID, instance.ID, instance.Name); err != nil {
+			return fmt.Errorf("failed to ensure network policy: %w", err)
+		}
+		return nil
+	}
+	if err := s.networkPolicyService.DeletePolicy(ctx, userID, instance.ID, instance.Name); err != nil {
+		return fmt.Errorf("failed to delete network policy: %w", err)
+	}
+	return nil
 }
 
 func supportsRuntimeConfigInjection(instanceType string) bool {
@@ -1794,6 +1840,9 @@ func (s *instanceService) Update(instanceID int, req UpdateInstanceRequest) erro
 			return err
 		}
 		environmentOverrides = applyDesktopStreamProfileEnv(environmentOverrides, profile)
+		if err := validateManagedRuntimeEnvironmentOverrides(instance.Type, environmentOverrides); err != nil {
+			return err
+		}
 		environmentOverridesJSON, err := marshalEnvironmentOverrides(environmentOverrides)
 		if err != nil {
 			return err
