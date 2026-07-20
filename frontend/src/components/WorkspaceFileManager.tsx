@@ -89,6 +89,43 @@ function formatBytes(value: number) {
   return `${size.toFixed(size >= 10 || unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
 }
 
+function WorkspaceEntryName({ name }: { name: string }) {
+  const nameRef = useRef<HTMLSpanElement>(null);
+  const [isTruncated, setIsTruncated] = useState(false);
+
+  useEffect(() => {
+    const element = nameRef.current;
+    if (!element) {
+      return;
+    }
+
+    const updateTruncation = () => {
+      setIsTruncated(element.scrollWidth > element.clientWidth);
+    };
+
+    updateTruncation();
+    const observer = new ResizeObserver(updateTruncation);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [name]);
+
+  return (
+    <span className="group relative min-w-0">
+      <span ref={nameRef} className="block truncate font-medium text-slate-900">
+        {name}
+      </span>
+      {isTruncated && (
+        <span
+          role="tooltip"
+          className="pointer-events-none absolute left-0 top-full z-30 mt-1 w-max max-w-[24rem] whitespace-normal rounded-md bg-slate-800 px-2 py-1 text-xs font-normal text-white opacity-0 shadow-lg transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+        >
+          {name}
+        </span>
+      )}
+    </span>
+  );
+}
+
 function downloadBlob(blob: Blob, name: string) {
   const url = window.URL.createObjectURL(blob);
   const link = document.createElement("a");
@@ -548,7 +585,7 @@ export function WorkspaceFileManager({ instanceId, initialPath, onMutation, refr
                         <span className="shrink-0">
                           <EntryIcon entry={entry} />
                         </span>
-                        <span className="min-w-0 truncate font-medium text-slate-900">{entry.name}</span>
+                        <WorkspaceEntryName name={entry.name} />
                       </button>
                     </td>
                     <td className="truncate px-2 py-2 text-slate-500">
