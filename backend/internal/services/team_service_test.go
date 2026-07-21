@@ -681,6 +681,57 @@ func TestBuildTeamMemberSoulMarkdownIncludesProfileGuidance(t *testing.T) {
 	}
 }
 
+func TestBuildTeamMemberSoulMarkdownAddsBoundedVerificationPolicies(t *testing.T) {
+	tests := []struct {
+		name      string
+		member    plannedTeamMember
+		expected  []string
+		forbidden []string
+	}{
+		{
+			name:     "evidence reviewer",
+			member:   plannedTeamMember{MemberKey: "reviewer", Role: "reviewer", ProfileKey: "agency.evidence-collector"},
+			expected: []string{"## Verification Policy", "at most twice", "at most 45 seconds", "browserVerification=unavailable", "do not invent or target a fixed number of issues"},
+		},
+		{
+			name:     "code reviewer alias",
+			member:   plannedTeamMember{MemberKey: "reviewer", Role: "code-reviewer"},
+			expected: []string{"## Verification Policy", "existing test evidence first", "normally unnecessary", "do not invent or target a fixed issue count"},
+		},
+		{
+			name:     "api tester",
+			member:   plannedTeamMember{MemberKey: "api-tester", Role: "member", EffectiveRole: "api-tester"},
+			expected: []string{"## Verification Policy", "existing HTTP tools", "Browser verification is not required", "static contract checks"},
+		},
+		{
+			name:      "leader remains unchanged",
+			member:    plannedTeamMember{MemberKey: "leader", Role: "leader", ProfileKey: "agency.agents-orchestrator", IsLeader: true},
+			forbidden: []string{"## Verification Policy", "at most twice", "at most 45 seconds"},
+		},
+		{
+			name:      "ordinary developer remains unchanged",
+			member:    plannedTeamMember{MemberKey: "worker", Role: "developer", ProfileKey: "agency.senior-developer"},
+			forbidden: []string{"## Verification Policy", "at most twice", "at most 45 seconds"},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			soul := buildTeamMemberSoulMarkdown(test.member, teamCommunicationModeLeaderMediated)
+			for _, expected := range test.expected {
+				if !strings.Contains(soul, expected) {
+					t.Fatalf("SOUL.md missing %q: %s", expected, soul)
+				}
+			}
+			for _, forbidden := range test.forbidden {
+				if strings.Contains(soul, forbidden) {
+					t.Fatalf("SOUL.md unexpectedly contains %q: %s", forbidden, soul)
+				}
+			}
+		})
+	}
+}
+
 func TestWriteLiteTeamMemberIdentityFiles(t *testing.T) {
 	workspace := t.TempDir()
 	profileEnv := map[string]string{

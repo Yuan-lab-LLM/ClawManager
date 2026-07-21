@@ -268,6 +268,15 @@ type plannedTeamMember struct {
 	IsLeader      bool
 }
 
+type teamVerificationRole string
+
+const (
+	teamVerificationRoleNone       teamVerificationRole = ""
+	teamVerificationRoleEvidence   teamVerificationRole = "evidence"
+	teamVerificationRoleCodeReview teamVerificationRole = "code-review"
+	teamVerificationRoleAPITest    teamVerificationRole = "api-test"
+)
+
 type teamRuntimeSecrets struct {
 	RedisURL string
 	Token    string
@@ -2073,6 +2082,12 @@ func buildTeamMemberSoulMarkdown(member plannedTeamMember, communicationMode str
 		"",
 		"## Role Instructions",
 		strings.TrimSpace(context["systemPrompt"]),
+	)
+	if verificationGuidance := teamMemberVerificationGuidance(member); len(verificationGuidance) > 0 {
+		lines = append(lines, "", "## Verification Policy")
+		lines = append(lines, verificationGuidance...)
+	}
+	lines = append(lines,
 		"",
 		"## Collaboration Rules",
 		teamCollaborationGuidance(communicationMode),
@@ -2086,6 +2101,58 @@ func buildTeamMemberSoulMarkdown(member plannedTeamMember, communicationMode str
 		"",
 	)
 	return strings.Join(lines, "\n")
+}
+
+func classifyTeamVerificationRole(member plannedTeamMember) teamVerificationRole {
+	switch strings.ToLower(strings.TrimSpace(member.ProfileKey)) {
+	case "agency.evidence-collector":
+		return teamVerificationRoleEvidence
+	case "agency.code-reviewer":
+		return teamVerificationRoleCodeReview
+	case "agency.api-tester":
+		return teamVerificationRoleAPITest
+	}
+
+	for _, candidate := range []string{member.EffectiveRole, member.Role} {
+		switch strings.ToLower(strings.TrimSpace(candidate)) {
+		case "reviewer", "qa", "qa-engineer", "evidence-collector":
+			return teamVerificationRoleEvidence
+		case "code-reviewer":
+			return teamVerificationRoleCodeReview
+		case "api-tester":
+			return teamVerificationRoleAPITest
+		}
+	}
+	return teamVerificationRoleNone
+}
+
+func teamMemberVerificationGuidance(member plannedTeamMember) []string {
+	switch classifyTeamVerificationRole(member) {
+	case teamVerificationRoleEvidence:
+		return []string{
+			"- Use proportionate, static-first validation with the source, artifacts, and tools already available in the runtime.",
+			"- Browser verification is optional unless the assignment explicitly requires it. Attempt Browser startup at most twice and spend at most 45 seconds total on Browser setup.",
+			"- Never install or download browsers, browser drivers, test frameworks, package dependencies, or system packages just to perform verification.",
+			"- If Browser remains unavailable, record browserVerification=unavailable, continue with static/manual checks, and do not treat that environment limitation as a product defect.",
+			"- Report only actual findings; do not invent or target a fixed number of issues. Give a concise PASS/FAIL verdict with verification limits.",
+		}
+	case teamVerificationRoleCodeReview:
+		return []string{
+			"- Review the source, diff, architecture boundaries, and existing test evidence first; keep validation proportional to the assigned change.",
+			"- Do not create a new test environment or install/download browsers, drivers, frameworks, package dependencies, or system packages for the review.",
+			"- Browser verification is normally unnecessary. If the assignment explicitly benefits from it and Browser is ready, attempt startup at most twice and spend at most 45 seconds total before falling back to source review.",
+			"- Report only concrete findings and residual risks; do not invent or target a fixed issue count.",
+		}
+	case teamVerificationRoleAPITest:
+		return []string{
+			"- Validate with existing HTTP tools, available service endpoints, artifacts, and static API-contract review.",
+			"- Browser verification is not required for API testing. Do not install/download Postman, Newman, browsers, test frameworks, package dependencies, or system packages.",
+			"- If a runnable service or network target is unavailable, record that verification limit and continue with static contract checks; do not classify environment unavailability as a product defect.",
+			"- Report reproducible endpoint failures only when directly observed, and keep the verdict proportional to the available evidence.",
+		}
+	default:
+		return nil
+	}
 }
 
 func buildTeamMemberAgentsMarkdown(team *models.Team, member plannedTeamMember) string {

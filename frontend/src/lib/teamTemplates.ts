@@ -42,6 +42,8 @@ const BUILTIN_MEMBER_DESCRIPTION_ZH: Record<string, string> = {
     "智能体编排官：拆解需求、设定优先级、分派任务、管理风险，并整合成员结果。",
   "Senior Developer: implements code, integrates interfaces, adds necessary tests, and provides reproducible delivery notes.":
     "资深开发工程师：负责代码实现和接口集成，补充必要测试，并提供可复现的交付说明。",
+  "Evidence Collector / Reviewer: performs proportionate static-first validation with available tools, records actual findings and verification limits, and gives a concise PASS/FAIL verdict.":
+    "验收验证员 / 评审员：优先使用现有工具进行适度的静态验收，记录实际问题和验证限制，并给出简洁的 PASS/FAIL 结论。",
   "Evidence Collector / Reviewer: verifies behavior, checks regressions, gathers evidence, reviews delivery items, and gives a PASS/FAIL verdict.":
     "验收验证员 / 评审员：验证功能行为和回归风险，收集证据、审查交付内容，并给出通过或不通过的结论。",
   "Agents Orchestrator: owns goals, definition of done, task breakdown, dependency coordination, risk management, acceptance, and final decisions.":
@@ -56,8 +58,12 @@ const BUILTIN_MEMBER_DESCRIPTION_ZH: Record<string, string> = {
     "后端架构师：负责 API、数据库、权限、队列、业务逻辑和服务端系统能力。",
   "Software Architect: owns technical choices, system boundaries, availability, extensibility, technical standards, and evolution plans.":
     "软件架构师：负责技术选型、系统边界、可用性、可扩展性、技术标准和演进规划。",
+  "Evidence Collector: performs proportionate static-first validation, records actual evidence and limitations, and provides an acceptance verdict without installing extra tooling.":
+    "验收验证员：进行适度的静态优先验证，记录实际证据和限制，在不安装额外工具的情况下给出验收结论。",
   "Evidence Collector: owns functional validation, regression checks, evidence gathering, reproduction notes, and acceptance verdicts.":
     "验收验证员：负责功能验证、回归检查、证据收集、复现说明和验收结论。",
+  "Code Reviewer: reviews source correctness, architecture consistency, maintainability, security, and regression risk using existing evidence and tests.":
+    "代码审查员：基于现有证据和测试审查源码正确性、架构一致性、可维护性、安全性和回归风险。",
   "Code Reviewer: owns code review, architecture consistency, maintainability, test coverage, risk findings, and pre-merge quality gates.":
     "代码审查员：负责代码评审、架构一致性、可维护性、测试覆盖、风险识别和合并前质量把关。",
 };
@@ -158,7 +164,7 @@ export const BUILTIN_MEMBER_TEMPLATES: TeamMemberTemplate[] = [
         name: "reviewer",
         role: "reviewer",
         description:
-          "Evidence Collector / Reviewer: verifies behavior, checks regressions, gathers evidence, reviews delivery items, and gives a PASS/FAIL verdict.",
+          "Evidence Collector / Reviewer: performs proportionate static-first validation with available tools, records actual findings and verification limits, and gives a concise PASS/FAIL verdict.",
         agentProfileKey: "agency.evidence-collector",
       }),
     ],
@@ -242,7 +248,7 @@ export const BUILTIN_MEMBER_TEMPLATES: TeamMemberTemplate[] = [
         name: "qa-engineer",
         role: "qa-engineer",
         description:
-          "Evidence Collector: owns functional validation, regression checks, evidence gathering, reproduction notes, and acceptance verdicts.",
+          "Evidence Collector: performs proportionate static-first validation, records actual evidence and limitations, and provides an acceptance verdict without installing extra tooling.",
         agentProfileKey: "agency.evidence-collector",
       }),
       baseMember({
@@ -250,7 +256,7 @@ export const BUILTIN_MEMBER_TEMPLATES: TeamMemberTemplate[] = [
         name: "code-reviewer",
         role: "code-reviewer",
         description:
-          "Code Reviewer: owns code review, architecture consistency, maintainability, test coverage, risk findings, and pre-merge quality gates.",
+          "Code Reviewer: reviews source correctness, architecture consistency, maintainability, security, and regression risk using existing evidence and tests.",
         agentProfileKey: "agency.code-reviewer",
       }),
     ],
@@ -358,7 +364,7 @@ export const BUILTIN_MEMBER_TEMPLATES: TeamMemberTemplate[] = [
         name: "code-reviewer",
         role: "code-reviewer",
         description:
-          "Code Reviewer：在最终验收前检查正确性、可维护性、安全性、回归风险和测试覆盖。",
+          "Code Reviewer：基于源码、变更和现有测试进行适度评审，检查正确性、可维护性、安全性和回归风险，不额外安装测试环境。",
         agentProfileKey: "agency.code-reviewer",
       }),
       baseMember({
@@ -366,7 +372,7 @@ export const BUILTIN_MEMBER_TEMPLATES: TeamMemberTemplate[] = [
         name: "qa-engineer",
         role: "qa-engineer",
         description:
-          "Evidence Collector：用可复现步骤、截图或命令输出验证交付行为，并给出明确验收结论。",
+          "Evidence Collector：优先用现有源码、产物和工具进行适度验证；浏览器不可用时记录限制并继续静态验收，不下载额外依赖。",
         agentProfileKey: "agency.evidence-collector",
       }),
     ],
@@ -398,7 +404,7 @@ export const BUILTIN_MEMBER_TEMPLATES: TeamMemberTemplate[] = [
         name: "code-reviewer",
         role: "code-reviewer",
         description:
-          "Code Reviewer：识别正确性缺陷、边界条件、可维护性风险、安全问题和缺失测试。",
+          "Code Reviewer：基于源码、变更和现有测试识别实际的正确性、边界条件、可维护性与安全风险，不追求固定问题数量。",
         agentProfileKey: "agency.code-reviewer",
       }),
       baseMember({
@@ -406,7 +412,7 @@ export const BUILTIN_MEMBER_TEMPLATES: TeamMemberTemplate[] = [
         name: "api-tester",
         role: "api-tester",
         description:
-          "API Tester：验证接口行为、响应结构、鉴权失败、非法输入、不存在资源和延迟预期。",
+          "API Tester：使用现有 HTTP 工具和可用服务验证接口行为与契约；环境不可用时转为静态契约检查，不安装额外测试工具。",
         agentProfileKey: "agency.api-tester",
       }),
       baseMember({
@@ -414,7 +420,7 @@ export const BUILTIN_MEMBER_TEMPLATES: TeamMemberTemplate[] = [
         name: "evidence-collector",
         role: "qa-engineer",
         description:
-          "Evidence Collector：收集直接验证证据，记录复现说明，并给出 PASS/FAIL 结论和必要修复建议。",
+          "Evidence Collector：优先进行适度的静态验证，记录实际证据、验证限制和 PASS/FAIL 结论，不为验收下载额外工具。",
         agentProfileKey: "agency.evidence-collector",
       }),
     ],
@@ -470,7 +476,7 @@ export const BUILTIN_MEMBER_TEMPLATES: TeamMemberTemplate[] = [
         name: "api-tester",
         role: "api-tester",
         description:
-          "API Tester：验证正常路径、参数错误、鉴权、响应结构，并提供可复现的 API 命令证据。",
+          "API Tester：使用现有 HTTP 工具验证正常路径、参数错误、鉴权和响应结构；服务不可用时记录限制并完成静态契约审查。",
         agentProfileKey: "agency.api-tester",
       }),
       baseMember({
@@ -478,7 +484,7 @@ export const BUILTIN_MEMBER_TEMPLATES: TeamMemberTemplate[] = [
         name: "code-reviewer",
         role: "code-reviewer",
         description:
-          "Code Reviewer：检查集成改动的回归风险、可维护性、安全性、边界条件和缺失测试。",
+          "Code Reviewer：基于源码、集成改动和现有测试检查回归风险、可维护性、安全性与边界条件，不创建新的测试环境。",
         agentProfileKey: "agency.code-reviewer",
       }),
     ],
