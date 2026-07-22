@@ -235,6 +235,29 @@ func (h *SkillHubHandler) InstallSkill(c *gin.Context) {
 	utils.Success(c, http.StatusCreated, "Skill installed to instance successfully", item)
 }
 
+func (h *SkillHubHandler) BatchInstallSkill(c *gin.Context) {
+	userID, _ := c.Get("userID")
+	userRole, _ := c.Get("userRole")
+	skillID, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		utils.Error(c, http.StatusBadRequest, "invalid skill ID")
+		return
+	}
+	var req services.BatchInstallHubSkillRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		utils.ValidationError(c, err)
+		return
+	}
+	items := h.service.BatchInstallHubSkill(userID.(int), userRole.(string), skillID, req.InstanceIDs)
+	status := http.StatusCreated
+	for _, item := range items {
+		if item.Error != "" {
+			status = http.StatusMultiStatus
+			break
+		}
+	}
+	utils.Success(c, status, "Skill batch installation completed", items)
+}
 func (h *SkillHubHandler) ListAdminSkills(c *gin.Context) {
 	items, err := h.service.ListAllHubSkillsAdmin()
 	if err != nil {

@@ -51,6 +51,18 @@ type InstallHubSkillRequest struct {
 	InstanceID int `json:"instance_id" binding:"required,min=1"`
 }
 
+type BatchInstallHubSkillRequest struct {
+	InstanceIDs []int `json:"instance_ids" binding:"required,min=1,max=100,dive,min=1"`
+}
+
+// BatchInstallHubSkillResult intentionally reports each target independently:
+// a missing or inaccessible instance must not prevent other selected instances
+// from receiving the skill.
+type BatchInstallHubSkillResult struct {
+	InstanceID    int                   `json:"instance_id"`
+	InstanceSkill *InstanceSkillPayload `json:"instance_skill,omitempty"`
+	Error         string                `json:"error,omitempty"`
+}
 func isAdminRole(role string) bool {
 	return strings.EqualFold(strings.TrimSpace(role), "admin")
 }
@@ -613,6 +625,24 @@ func (s *skillService) InstallHubSkill(actorUserID int, actorRole string, skillI
 	return s.AttachSkillToInstance(actorUserID, actorRole, instanceID, skillID)
 }
 
+func (s *skillService) BatchInstallHubSkill(actorUserID int, actorRole string, skillID int, instanceIDs []int) []BatchInstallHubSkillResult {
+	results := make([]BatchInstallHubSkillResult, 0, len(instanceIDs))
+	seen := make(map[int]struct{}, len(instanceIDs))
+	for _, instanceID := range instanceIDs {
+		if _, duplicate := seen[instanceID]; duplicate {
+			continue
+		}
+		seen[instanceID] = struct{}{}
+		item, err := s.InstallHubSkill(actorUserID, actorRole, skillID, instanceID)
+		result := BatchInstallHubSkillResult{InstanceID: instanceID, InstanceSkill: item}
+		if err != nil {
+			result.Error = err.Error()
+			result.InstanceSkill = nil
+		}
+		results = append(results, result)
+	}
+	return results
+}
 func (s *skillService) ImportInstanceSkillToLibrary(actorUserID int, actorRole string, instanceID, skillID int) (*SkillPayload, error) {
 	instance, err := s.instanceRepo.GetByID(instanceID)
 	if err != nil {

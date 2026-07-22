@@ -503,6 +503,7 @@ func main() {
 			skillHub.DELETE("/skills/:id", skillHubHandler.DeleteSkill)
 			skillHub.GET("/skills/:id/download", skillHubHandler.DownloadSkill)
 			skillHub.POST("/skills/:id/install", skillHubHandler.InstallSkill)
+			skillHub.POST("/skills/:id/install-batch", skillHubHandler.BatchInstallSkill)
 		}
 
 		adminSkillHub := api.Group("/admin/skill-hub")

@@ -18,6 +18,7 @@ const SKILL_SYNC_TIMEOUT_MS = 60000;
 const INSTANCE_SKILL_PAGE_SIZE = 5;
 
 type TranslateFn = (key: string, variables?: Record<string, string | number>) => string;
+type HubBatchInstallProgress = { total: number; completed: number; failed: number };
 
 function isHubInstalledSkill(item: InstanceSkill): boolean {
   return (item.source_type || "").toLowerCase() === "injected_by_clawmanager";
@@ -284,6 +285,8 @@ const InstanceSkillHubPanel: React.FC<InstanceSkillHubPanelProps> = ({
   const [instanceSkillPage, setInstanceSkillPage] = useState(1);
   const [nativeSkillSearch, setNativeSkillSearch] = useState("");
   const [hubCatalogSearch, setHubCatalogSearch] = useState("");
+  const [selectedHubSkillIds, setSelectedHubSkillIds] = useState<number[]>([]);
+  const [hubBatchInstallProgress, setHubBatchInstallProgress] = useState<HubBatchInstallProgress | null>(null);
   const [panelExpanded, setPanelExpanded] = useState(false);
 
   const handlePanelExpandedChange = useCallback(
@@ -473,6 +476,53 @@ const InstanceSkillHubPanel: React.FC<InstanceSkillHubPanelProps> = ({
     }
   };
 
+  const handleBatchInstallHubSkills = async () => {
+    if (selectedHubSkillIds.length === 0) {
+      return;
+    }
+    const skillIDs = [...selectedHubSkillIds];
+    const failures: Array<{ skillID: number; detail: string }> = [];
+    try {
+      if (!usesWorkspaceSkillSync) {
+        const runtimeSnapshot = await instanceService.getRuntimeDetails(instanceId);
+        const agentStatus = runtimeSnapshot.agent?.status || runtimeSnapshot.runtime?.agent_status || "offline";
+        if (agentStatus === "offline") {
+          setSkillError(t("instances.installSkillRequiresAgent"));
+          return;
+        }
+      }
+      setActionLoading("install-hub-batch");
+      setSkillError(null);
+      setHubBatchInstallProgress({ total: skillIDs.length, completed: 0, failed: 0 });
+      for (const skillID of skillIDs) {
+        try {
+          await skillService.attachSkillToInstance(instanceId, skillID);
+        } catch (err: unknown) {
+          const skillName = availableSkills.find((skill) => skill.id === skillID)?.name || `#${skillID}`;
+          failures.push({
+            skillID,
+            detail: `${skillName}: ${hubErrorMessage(err, t("instances.failedToAttachSkill"))}`,
+          });
+        } finally {
+          setHubBatchInstallProgress((current) => current ? {
+            ...current,
+            completed: current.completed + 1,
+            failed: failures.length,
+          } : current);
+        }
+      }
+      setSkillsBurstUntil(Date.now() + SKILLS_BURST_WINDOW_MS);
+      await reloadSkillSection();
+      setSelectedHubSkillIds(failures.map((failure) => failure.skillID));
+      if (failures.length > 0) {
+        setSkillError(`${t("instances.bulkInstallFailed")}: ${failures.map((failure) => failure.detail).join("; ")}`);
+      }
+    } catch (err: unknown) {
+      setSkillError(hubErrorMessage(err, t("instances.failedToAttachSkill")));
+    } finally {
+      setActionLoading(null);
+    }
+  };
   const handleRemoveSkill = async (skillId: number) => {
     try {
       setActionLoading(`remove-skill-${skillId}`);
@@ -825,9 +875,19 @@ const InstanceSkillHubPanel: React.FC<InstanceSkillHubPanelProps> = ({
           </div>
 
           <div className="border-t border-slate-200 pt-4">
-            <div>
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
               <h3 className="text-sm font-semibold text-slate-900">{t("instances.hubCatalogTitle")}</h3>
               <p className="mt-1 text-xs text-slate-500">{t("instances.hubCatalogDesc")}</p>
+              </div>
+              <button
+                type="button"
+                className="app-button-primary disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={selectedHubSkillIds.length === 0 || actionLoading !== null || instance.status !== "running"}
+                onClick={() => void handleBatchInstallHubSkills()}
+              >
+                {actionLoading === "install-hub-batch" ? t("instances.bulkInstallInProgress") : t("instances.bulkInstallAction", { count: selectedHubSkillIds.length })}
+              </button>
             </div>
             <input
               type="search"
@@ -836,6 +896,16 @@ const InstanceSkillHubPanel: React.FC<InstanceSkillHubPanelProps> = ({
               value={hubCatalogSearch}
               onChange={(event) => setHubCatalogSearch(event.target.value)}
             />
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs">
+              <span className="text-slate-500">{t("instances.bulkInstallSelected", { count: selectedHubSkillIds.length })}</span>
+              <div className="flex gap-3">
+                <button type="button" className="font-medium text-indigo-600 hover:text-indigo-800 disabled:opacity-50" disabled={actionLoading !== null} onClick={() => setSelectedHubSkillIds(filteredHubCatalogRows.filter((row) => !row.installed).map((row) => row.skill.id))}>{t("skillHubPage.selectAll")}</button>
+                <button type="button" className="font-medium text-slate-600 hover:text-slate-900 disabled:opacity-50" disabled={actionLoading !== null} onClick={() => setSelectedHubSkillIds([])}>{t("skillHubPage.clearSelection")}</button>
+              </div>
+            </div>
+            {hubBatchInstallProgress ? (
+              <p className="mt-2 text-xs text-slate-600">{t("instances.bulkInstallProgress", hubBatchInstallProgress)}</p>
+            ) : null}
             <div className="mt-3 space-y-2">
               {hubCatalogRows.length === 0 ? (
                 <div className="rounded-md border border-dashed border-slate-200 px-3 py-4 text-sm text-slate-500">
@@ -854,6 +924,15 @@ const InstanceSkillHubPanel: React.FC<InstanceSkillHubPanelProps> = ({
                     <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
+                          {!installed ? (
+                            <input
+                              type="checkbox"
+                              aria-label={t("instances.bulkInstallSelectSkill", { name: skill.name })}
+                              disabled={actionLoading !== null}
+                              checked={selectedHubSkillIds.includes(skill.id)}
+                              onChange={() => setSelectedHubSkillIds((current) => current.includes(skill.id) ? current.filter((id) => id !== skill.id) : [...current, skill.id])}
+                            />
+                          ) : null}
                           <span className="text-sm font-medium text-slate-900">{skill.name}</span>
                           <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-600">
                             {skillRiskLabel(t, skill.risk_level)}
@@ -882,7 +961,7 @@ const InstanceSkillHubPanel: React.FC<InstanceSkillHubPanelProps> = ({
                           <button
                             type="button"
                             onClick={() => void handleRemoveSkill(skill.id)}
-                            disabled={actionLoading === `remove-skill-${skill.id}`}
+                            disabled={actionLoading !== null}
                             className="app-button-secondary disabled:cursor-not-allowed disabled:opacity-50"
                           >
                             {t("instances.removeSkill")}
@@ -894,7 +973,7 @@ const InstanceSkillHubPanel: React.FC<InstanceSkillHubPanelProps> = ({
                             disabled={
                               skillLoading ||
                               instance.status !== "running" ||
-                              actionLoading === `install-hub-${skill.id}`
+                              actionLoading !== null
                             }
                             onClick={() => void handleInstallHubSkill(skill.id)}
                           >

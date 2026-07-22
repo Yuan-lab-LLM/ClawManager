@@ -201,6 +201,7 @@ type SkillService interface {
 	UnpublishFromHub(actorUserID int, actorRole string, skillID int) (*SkillPayload, error)
 	UpdateHubTags(actorUserID int, actorRole string, skillID int, tagIDs []int) (*SkillPayload, error)
 	InstallHubSkill(actorUserID int, actorRole string, skillID, instanceID int) (*InstanceSkillPayload, error)
+	BatchInstallHubSkill(actorUserID int, actorRole string, skillID int, instanceIDs []int) []BatchInstallHubSkillResult
 	PublishFromInstance(actorUserID int, actorRole string, instanceID, skillID int, tagIDs []int) (*SkillPayload, error)
 	ImportInstanceSkillToLibrary(actorUserID int, actorRole string, instanceID, skillID int) (*SkillPayload, error)
 	RetrySkillPackageCollection(actorUserID int, actorRole string, instanceID, skillID int) error
@@ -1312,8 +1313,9 @@ func (s *skillService) ListScanResults(actorUserID int, actorRole string, skillI
 }
 
 type extractedSkillDirectory struct {
-	Name  string
-	Files map[string][]byte
+	Name        string
+	ArchivePath string
+	Files       map[string][]byte
 }
 
 func extractSkillDirectories(filename string, raw []byte) ([]extractedSkillDirectory, error) {
@@ -1336,8 +1338,9 @@ func extractSkillDirectories(filename string, raw []byte) ([]extractedSkillDirec
 
 	if hasSkillManifest(normalized) {
 		return []extractedSkillDirectory{{
-			Name:  archiveSkillName(filename),
-			Files: normalized,
+			Name:        archiveSkillName(filename),
+			ArchivePath: archiveSkillName(filename),
+			Files:       normalized,
 		}}, nil
 	}
 
@@ -1355,18 +1358,116 @@ func extractSkillDirectories(filename string, raw []byte) ([]extractedSkillDirec
 	}
 
 	keys := make([]string, 0, len(grouped))
-	for key, files := range grouped {
-		if !hasSkillManifest(files) {
-			return nil, fmt.Errorf("skill directory %s must contain SKILL.md", key)
-		}
+	for key := range grouped {
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
 	result := make([]extractedSkillDirectory, 0, len(keys))
 	for _, key := range keys {
-		result = append(result, extractedSkillDirectory{Name: key, Files: grouped[key]})
+		files := grouped[key]
+		if hasSkillManifest(files) {
+			result = append(result, extractedSkillDirectory{Name: key, ArchivePath: key, Files: files})
+			continue
+		}
+
+		// Hermes stores some skills below a category directory, for example
+		// software-development/systematic-debugging/SKILL.md. Treat that
+		// category as archive organization rather than part of the skill itself.
+		nested, ok := extractCategorySkillDirectories(files)
+		if !ok {
+			return nil, fmt.Errorf("skill directory %s must contain SKILL.md", key)
+		}
+		for index := range nested {
+			nested[index].ArchivePath = path.Join(key, nested[index].ArchivePath)
+		}
+		result = append(result, nested...)
 	}
-	return result, nil
+	return ensureUniqueSkillDirectoryNames(result), nil
+}
+
+// extractCategorySkillDirectories accepts Hermes category paths above standard
+// skill directories, such as mlops/evaluation/weights-and-biases/SKILL.md.
+// Every file must still belong to a directory containing a SKILL.md manifest.
+func extractCategorySkillDirectories(files map[string][]byte) ([]extractedSkillDirectory, bool) {
+	roots := make([]string, 0)
+	for name := range files {
+		clean := normalizeArchiveEntryPath(name)
+		if strings.EqualFold(path.Base(clean), "SKILL.md") && path.Dir(clean) != "." {
+			roots = append(roots, path.Dir(clean))
+		}
+	}
+	if len(roots) == 0 {
+		return nil, false
+	}
+	// Match the deepest manifest root first in case a skill legitimately
+	// contains another skill package as an asset.
+	sort.Slice(roots, func(i, j int) bool {
+		if len(roots[i]) == len(roots[j]) {
+			return roots[i] < roots[j]
+		}
+		return len(roots[i]) > len(roots[j])
+	})
+
+	grouped := make(map[string]map[string][]byte, len(roots))
+	for _, root := range roots {
+		grouped[root] = map[string][]byte{}
+	}
+	for name, content := range files {
+		clean := normalizeArchiveEntryPath(name)
+		matchedRoot := ""
+		for _, root := range roots {
+			if clean == root || strings.HasPrefix(clean, root+"/") {
+				matchedRoot = root
+				break
+			}
+		}
+		if matchedRoot == "" {
+			return nil, false
+		}
+		relative := strings.TrimPrefix(clean, matchedRoot+"/")
+		if relative == "" {
+			return nil, false
+		}
+		grouped[matchedRoot][relative] = content
+	}
+
+	sort.Strings(roots)
+	result := make([]extractedSkillDirectory, 0, len(roots))
+	for _, root := range roots {
+		if !hasSkillManifest(grouped[root]) {
+			return nil, false
+		}
+		result = append(result, extractedSkillDirectory{Name: path.Base(root), ArchivePath: root, Files: grouped[root]})
+	}
+	return result, true
+}
+
+// ensureUniqueSkillDirectoryNames keeps the familiar leaf name when possible,
+// but incorporates the Hermes category path when two skills share a leaf name.
+func ensureUniqueSkillDirectoryNames(directories []extractedSkillDirectory) []extractedSkillDirectory {
+	counts := make(map[string]int, len(directories))
+	for _, directory := range directories {
+		counts[directory.Name]++
+	}
+	used := make(map[string]int, len(directories))
+	for index := range directories {
+		directory := &directories[index]
+		if counts[directory.Name] == 1 || directory.ArchivePath == directory.Name {
+			used[directory.Name]++
+			continue
+		}
+		base := strings.ReplaceAll(directory.ArchivePath, "/", "-")
+		if base == "" {
+			base = directory.Name
+		}
+		candidate := base
+		for suffix := 2; used[candidate] > 0; suffix++ {
+			candidate = fmt.Sprintf("%s-%d", base, suffix)
+		}
+		directory.Name = candidate
+		used[candidate]++
+	}
+	return directories
 }
 
 func normalizeArchiveEntryPath(value string) string {

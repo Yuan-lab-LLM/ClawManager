@@ -115,6 +115,54 @@ func TestExtractSkillDirectoriesImportsMultipleManifestDirs(t *testing.T) {
 	}
 }
 
+func TestExtractSkillDirectoriesImportsHermesCategorySkills(t *testing.T) {
+	archive := buildTestZip(t, map[string][]byte{
+		"software-development/systematic-debugging/SKILL.md":         []byte("# Systematic debugging\n"),
+		"software-development/systematic-debugging/scripts/check.sh": []byte("echo check\n"),
+		"software-development/simplify-code/SKILL.md":                []byte("# Simplify code\n"),
+		"mlops/evaluation/weights-and-biases/SKILL.md":               []byte("# Weights and Biases\n"),
+	})
+
+	dirs, err := extractSkillDirectories("hermes-skills.zip", archive)
+	if err != nil {
+		t.Fatalf("extractSkillDirectories() error = %v", err)
+	}
+	if len(dirs) != 3 {
+		t.Fatalf("extractSkillDirectories() returned %d dirs, want 3", len(dirs))
+	}
+	byName := map[string]extractedSkillDirectory{}
+	for _, dir := range dirs {
+		byName[dir.Name] = dir
+	}
+	if _, ok := byName["systematic-debugging"].Files["scripts/check.sh"]; !ok {
+		t.Fatalf("expected nested skill files to be preserved: %#v", byName["systematic-debugging"].Files)
+	}
+	if _, ok := byName["weights-and-biases"].Files["SKILL.md"]; !ok {
+		t.Fatalf("expected deep Hermes skill path to be recognized: %#v", byName)
+	}
+}
+
+func TestExtractSkillDirectoriesDisambiguatesSameSkillNameAcrossHermesCategories(t *testing.T) {
+	archive := buildTestZip(t, map[string][]byte{
+		"creative/review/SKILL.md":             []byte("# Creative review\n"),
+		"software-development/review/SKILL.md": []byte("# Development review\n"),
+	})
+
+	dirs, err := extractSkillDirectories("hermes-skills.zip", archive)
+	if err != nil {
+		t.Fatalf("extractSkillDirectories() error = %v", err)
+	}
+	if len(dirs) != 2 {
+		t.Fatalf("extractSkillDirectories() returned %d dirs, want 2", len(dirs))
+	}
+	if dirs[0].Name == dirs[1].Name {
+		t.Fatalf("same-name skills must be disambiguated: %#v", dirs)
+	}
+	if dirs[0].Name != "creative-review" || dirs[1].Name != "software-development-review" {
+		t.Fatalf("disambiguated names = %q, %q", dirs[0].Name, dirs[1].Name)
+	}
+}
+
 func TestExtractSkillDirectoriesRejectsTopLevelDirWithoutManifest(t *testing.T) {
 	archive := buildTestZip(t, map[string][]byte{
 		"weather/src/main.py": []byte("print('weather')\n"),

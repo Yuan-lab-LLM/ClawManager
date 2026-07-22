@@ -15,6 +15,7 @@ import type {
 } from '../../types/skill';
 
 type HubTab = 'catalog' | 'mine' | 'admin';
+type InstallProgress = { instanceId: number; status: 'pending' | 'success' | 'failed'; error?: string };
 
 const SkillHubPage: React.FC = () => {
   const { user } = useAuth();
@@ -35,7 +36,8 @@ const SkillHubPage: React.FC = () => {
   const [editTagsSkillId, setEditTagsSkillId] = useState<number | null>(null);
   const [selectedTagIds, setSelectedTagIds] = useState<number[]>([]);
   const [installSkillId, setInstallSkillId] = useState<number | null>(null);
-  const [selectedInstanceId, setSelectedInstanceId] = useState<number | ''>('');
+  const [selectedInstanceIds, setSelectedInstanceIds] = useState<number[]>([]);
+  const [installProgress, setInstallProgress] = useState<InstallProgress[]>([]);
   const [actionLoading, setActionLoading] = useState('');
   const [importPreviewItems, setImportPreviewItems] = useState<SkillImportPreviewItem[]>([]);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
@@ -350,15 +352,39 @@ const SkillHubPage: React.FC = () => {
   };
 
   const handleInstall = async () => {
-    if (!installSkillId || selectedInstanceId === '') {
+    if (!installSkillId || selectedInstanceIds.length === 0) {
       return;
     }
     try {
       setActionLoading(`install-${installSkillId}`);
-      await skillHubService.installSkill(installSkillId, Number(selectedInstanceId));
-      setInstallSkillId(null);
-      setSelectedInstanceId('');
-      setNotice(t('skillHubPage.notices.installed'));
+      setError(null);
+      setNotice(null);
+      const targetInstanceIds = [...selectedInstanceIds];
+      setInstallProgress(targetInstanceIds.map((instanceId) => ({ instanceId, status: 'pending' })));
+      const failed: Array<{ instance_id: number; error: string }> = [];
+      let succeeded = 0;
+      for (const instanceId of targetInstanceIds) {
+        try {
+          await skillHubService.installSkill(installSkillId, instanceId);
+          succeeded += 1;
+          setInstallProgress((current) => current.map((item) => item.instanceId === instanceId ? { ...item, status: 'success' } : item));
+        } catch (err: unknown) {
+          const message = (err as { response?: { data?: { error?: string } } })?.response?.data?.error || t('skillHubPage.errors.install');
+          failed.push({ instance_id: instanceId, error: message });
+          setInstallProgress((current) => current.map((item) => item.instanceId === instanceId ? { ...item, status: 'failed', error: message } : item));
+        }
+      }
+      if (failed.length > 0) {
+        const details = failed.map((item) => {
+          const name = instances.find((instance) => instance.id === item.instance_id)?.name || `#${item.instance_id}`;
+          return `${name}: ${item.error}`;
+        });
+        setError(`${t('skillHubPage.errors.install')}: ${details.join('; ')}`);
+      }
+      setSelectedInstanceIds(failed.map((item) => item.instance_id));
+      if (succeeded > 0) {
+        setNotice(t('skillHubPage.notices.installed'));
+      }
     } catch (err: unknown) {
       setError((err as { response?: { data?: { error?: string } } })?.response?.data?.error || t('skillHubPage.errors.install'));
     } finally {
@@ -437,7 +463,7 @@ const SkillHubPage: React.FC = () => {
             {tab === 'catalog' ? (
               <>
                 <button type="button" className="app-button-primary" onClick={() => setInstallSkillId(skill.id)}>
-                  {t('skillHubPage.install')}
+                  {t('skillHubPage.installBatch')}
                 </button>
                 <button
                   type="button"
@@ -646,16 +672,43 @@ const SkillHubPage: React.FC = () => {
       {installSkillId !== null ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
           <div className="w-full max-w-lg rounded-[24px] bg-white p-6 shadow-xl">
-            <h2 className="text-lg font-semibold text-[#1d1713]">{t('skillHubPage.install')}</h2>
-            <select className="app-input mt-4 w-full" value={selectedInstanceId} onChange={(event) => setSelectedInstanceId(event.target.value ? Number(event.target.value) : '')}>
-              <option value="">{t('skillHubPage.selectInstance')}</option>
+            <h2 className="text-lg font-semibold text-[#1d1713]">{t('skillHubPage.installBatch')}</h2>
+            <p className="mt-2 text-sm text-[#6f6158]">{t('skillHubPage.selectInstances')}</p>
+            <div className="mt-4 flex items-center justify-between gap-3 text-sm">
+              <span className="text-[#6f6158]">{selectedInstanceIds.length}/{instances.length}</span>
+              <div className="flex gap-2">
+                <button type="button" className="text-[#c45a43] hover:text-[#a94734] disabled:cursor-not-allowed disabled:opacity-50" disabled={actionLoading === `install-${installSkillId}`} onClick={() => setSelectedInstanceIds(instances.map((instance) => instance.id))}>{t('skillHubPage.selectAll')}</button>
+                <button type="button" className="text-[#6f6158] hover:text-[#1d1713] disabled:cursor-not-allowed disabled:opacity-50" disabled={actionLoading === `install-${installSkillId}`} onClick={() => setSelectedInstanceIds([])}>{t('skillHubPage.clearSelection')}</button>
+              </div>
+            </div>
+            <div className="mt-4 max-h-72 space-y-2 overflow-y-auto rounded-xl border border-[#ead8cf] p-3">
               {instances.map((instance) => (
-                <option key={instance.id} value={instance.id}>{instance.name}</option>
+                <label key={instance.id} className="flex cursor-pointer items-center gap-3 rounded-lg px-2 py-2 hover:bg-[#fffaf7]">
+                  <input
+                    type="checkbox"
+                    checked={selectedInstanceIds.includes(instance.id)}
+                    disabled={actionLoading === `install-${installSkillId}`}
+                    onChange={() => setSelectedInstanceIds((current) => current.includes(instance.id) ? current.filter((id) => id !== instance.id) : [...current, instance.id])}
+                  />
+                  <span className="text-sm text-[#1d1713]">{instance.name}</span>
+                </label>
               ))}
-            </select>
+            </div>
+            {installProgress.length > 0 ? (
+              <div className="mt-4 rounded-xl border border-[#ead8cf] bg-[#fffaf7] p-3 text-sm">
+                <p className="font-medium text-[#1d1713]">{t('skillHubPage.installProgress.summary', { completed: installProgress.filter((item) => item.status !== 'pending').length, total: installProgress.length })}</p>
+                <div className="mt-2 space-y-1.5">
+                  {installProgress.map((item) => (
+                    <p key={item.instanceId} className={item.status === 'failed' ? 'text-red-700' : item.status === 'success' ? 'text-emerald-700' : 'text-[#6f6158]'}>
+                      {instances.find((instance) => instance.id === item.instanceId)?.name || `#${item.instanceId}`}: {t(`skillHubPage.installProgress.${item.status}`)}{item.error ? ` — ${item.error}` : ''}
+                    </p>
+                  ))}
+                </div>
+              </div>
+            ) : null}
             <div className="mt-6 flex justify-end gap-2">
-              <button type="button" className="app-button-secondary" onClick={() => setInstallSkillId(null)}>{t('common.cancel')}</button>
-              <button type="button" className="app-button-primary" onClick={() => void handleInstall()}>{t('skillHubPage.install')}</button>
+              <button type="button" className="app-button-secondary" disabled={actionLoading === `install-${installSkillId}`} onClick={() => { setInstallSkillId(null); setSelectedInstanceIds([]); setInstallProgress([]); }}>{t('common.cancel')}</button>
+              <button type="button" className="app-button-primary" disabled={selectedInstanceIds.length === 0 || actionLoading === `install-${installSkillId}`} onClick={() => void handleInstall()}>{t('skillHubPage.install')}</button>
             </div>
           </div>
         </div>
