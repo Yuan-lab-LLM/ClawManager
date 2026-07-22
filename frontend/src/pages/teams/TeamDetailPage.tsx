@@ -1,5 +1,5 @@
 ﻿import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { MonitorUp } from "lucide-react";
+import { Download, MonitorUp } from "lucide-react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import UserLayout from "../../components/UserLayout";
 import { useAuth } from "../../contexts/AuthContext";
@@ -1056,25 +1056,32 @@ const TeamDetailPage: React.FC = () => {
     }
   };
 
-  const handlePreviewWorkspacePath = useCallback(
+  const handleOpenWorkspacePath = useCallback(
     async (workspacePath: string) => {
       if (!details?.team.id) {
         return;
       }
       const relPath = workspaceLinkToRelativePath(workspacePath);
-      if (!relPath || !isPreviewableWorkspacePath(relPath)) {
-        window.alert("当前文件不支持在线预览");
+      if (!relPath) {
         return;
       }
       try {
-        const result = await teamService.previewWorkspaceFile(details.team.id, relPath);
-        setWorkspacePreview({
-          path: result.path,
-          name: result.name,
-          content: result.content,
-        });
+        if (isPreviewableWorkspacePath(relPath)) {
+          const result = await teamService.previewWorkspaceFile(details.team.id, relPath);
+          setWorkspacePreview({
+            path: result.path,
+            name: result.name,
+            content: result.content,
+          });
+          return;
+        }
+        const blob = await teamService.downloadWorkspaceFile(details.team.id, relPath);
+        downloadBlob(blob, workspacePathDownloadName(relPath));
       } catch (err: any) {
-        window.alert(err.response?.data?.error || "预览文件失败");
+        window.alert(
+          err.response?.data?.error ||
+            (isPreviewableWorkspacePath(relPath) ? "预览文件失败" : "下载文件失败"),
+        );
       }
     },
     [details?.team.id],
@@ -1242,7 +1249,7 @@ const TeamDetailPage: React.FC = () => {
                 onSelectGroup={setSelectedGroupKey}
                 sidePanelView={sidePanelView}
                 onSidePanelViewChange={setSidePanelView}
-                onWorkspaceFileOpen={handlePreviewWorkspacePath}
+                onWorkspaceFileOpen={handleOpenWorkspacePath}
               />
             </div>
           </div>
@@ -1269,7 +1276,7 @@ const TeamDetailPage: React.FC = () => {
                 heightClass="h-full"
                 showToggle={false}
                 onDetailSizeChange={setKanbanDetailSize}
-                onWorkspaceFileOpen={handlePreviewWorkspacePath}
+                onWorkspaceFileOpen={handleOpenWorkspacePath}
               />
             )}
           </aside>
@@ -1934,6 +1941,10 @@ function workspaceBreadcrumbs(path: string) {
 
 function workspaceDownloadName(entry: TeamWorkspaceFileEntry) {
   return entry.type === "directory" ? `${entry.name}.zip` : entry.name;
+}
+
+function workspacePathDownloadName(path: string) {
+  return path.split("/").filter(Boolean).pop() || "team-file";
 }
 
 function downloadBlob(blob: Blob, filename: string) {
@@ -5326,16 +5337,17 @@ function TeamChatMessageRow({
                   <button
                     key={artifactRef}
                     type="button"
-                    disabled={!previewable || !onWorkspaceFileOpen}
+                    disabled={!onWorkspaceFileOpen}
                     onClick={() => onWorkspaceFileOpen?.(artifactRef)}
-                    title={previewable ? `打开 ${artifactRef}` : `${artifactRef}（请在文件面板查看或下载）`}
-                    className={`max-w-full truncate rounded-md border px-2 py-1 font-mono text-[11px] font-medium transition ${
-                      previewable && onWorkspaceFileOpen
+                    title={previewable ? `预览 ${artifactRef}` : `下载 ${artifactRef}`}
+                    className={`inline-flex max-w-full items-center gap-1.5 rounded-md border px-2 py-1 font-mono text-[11px] font-medium transition disabled:cursor-default disabled:opacity-60 ${
+                      previewable
                         ? "border-cyan-200 bg-cyan-50 text-cyan-700 hover:bg-cyan-100"
-                        : "cursor-default border-slate-200 bg-slate-50 text-slate-500"
+                        : "border-slate-300 bg-white text-slate-700 hover:border-slate-400 hover:bg-slate-50"
                     }`}
                   >
-                    {artifactRef}
+                    <span className="truncate">{artifactRef}</span>
+                    {!previewable && <Download className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />}
                   </button>
                 );
               })}
@@ -5611,19 +5623,22 @@ function renderInlineMarkdown(
     if (token.startsWith("`")) {
       const codeValue = token.slice(1, -1);
       const workspacePath = workspaceLinkToRelativePath(codeValue);
-      if (
-        onWorkspaceFileOpen &&
-        isTeamWorkspaceLink(codeValue) &&
-        isPreviewableWorkspacePath(workspacePath)
-      ) {
+      if (onWorkspaceFileOpen && isTeamWorkspaceLink(codeValue)) {
+        const previewable = isPreviewableWorkspacePath(workspacePath);
         nodes.push(
           <button
             key={key}
             type="button"
             onClick={() => onWorkspaceFileOpen(codeValue)}
-            className="rounded bg-cyan-50 px-1 py-0.5 font-mono text-xs font-semibold text-cyan-700 underline decoration-cyan-300 underline-offset-2 hover:bg-cyan-100"
+            title={previewable ? `预览 ${codeValue}` : `下载 ${codeValue}`}
+            className={`inline-flex max-w-full items-center gap-1 rounded px-1 py-0.5 align-middle font-mono text-xs font-semibold underline underline-offset-2 transition ${
+              previewable
+                ? "bg-cyan-50 text-cyan-700 decoration-cyan-300 hover:bg-cyan-100"
+                : "bg-slate-100 text-slate-700 decoration-slate-300 hover:bg-slate-200"
+            }`}
           >
-            {codeValue}
+            <span className="break-all">{codeValue}</span>
+            {!previewable && <Download className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />}
           </button>,
         );
       } else {
@@ -5637,15 +5652,22 @@ function renderInlineMarkdown(
       const displayToken = token.replace(/[，。；：;,:.、)）\]}】》]+$/g, "");
       const suffix = token.slice(displayToken.length);
       const workspacePath = workspaceLinkToRelativePath(displayToken);
-      if (onWorkspaceFileOpen && isPreviewableWorkspacePath(workspacePath)) {
+      if (onWorkspaceFileOpen) {
+        const previewable = isPreviewableWorkspacePath(workspacePath);
         nodes.push(
           <button
             key={key}
             type="button"
             onClick={() => onWorkspaceFileOpen(displayToken)}
-            className="rounded-md bg-cyan-50 px-1.5 py-0.5 font-mono text-xs font-semibold text-cyan-700 underline decoration-cyan-300 underline-offset-2 hover:bg-cyan-100"
+            title={previewable ? `预览 ${displayToken}` : `下载 ${displayToken}`}
+            className={`inline-flex max-w-full items-center gap-1 rounded-md px-1.5 py-0.5 align-middle font-mono text-xs font-semibold underline underline-offset-2 transition ${
+              previewable
+                ? "bg-cyan-50 text-cyan-700 decoration-cyan-300 hover:bg-cyan-100"
+                : "bg-slate-100 text-slate-700 decoration-slate-300 hover:bg-slate-200"
+            }`}
           >
-            {displayToken}
+            <span className="break-all">{displayToken}</span>
+            {!previewable && <Download className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />}
           </button>,
         );
         if (suffix) {
