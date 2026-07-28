@@ -268,6 +268,21 @@ const TEMPLATE_ICON_META: Record<string, { src: string; glyph: string; className
     glyph: 'MM',
     className: 'border-[#f1ddd4] bg-[#fff5f0] text-[#af5f3d]',
   },
+  'minimax-anthropic': {
+    src: '/vendor-icons/minimax.ico',
+    glyph: 'MM',
+    className: 'border-[#f1ddd4] bg-[#fff5f0] text-[#af5f3d]',
+  },
+  'minimax-cn': {
+    src: '/vendor-icons/minimax.ico',
+    glyph: 'MM',
+    className: 'border-[#f1ddd4] bg-[#fff5f0] text-[#af5f3d]',
+  },
+  'minimax-cn-anthropic': {
+    src: '/vendor-icons/minimax.ico',
+    glyph: 'MM',
+    className: 'border-[#f1ddd4] bg-[#fff5f0] text-[#af5f3d]',
+  },
   ollama: {
     src: '/vendor-icons/local-internal.svg',
     glyph: 'LC',
