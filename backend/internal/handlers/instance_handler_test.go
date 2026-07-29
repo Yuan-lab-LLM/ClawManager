@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -20,6 +21,29 @@ type blockingBatchInstanceService struct {
 	fakeWorkspaceHandlerInstanceService
 	started chan string
 	release <-chan struct{}
+}
+
+type restartRecordingInstanceService struct {
+	fakeWorkspaceHandlerInstanceService
+	restartCalls        int
+	restartedInstanceID int
+	environment         map[string]string
+	removals            []string
+	restartErr          error
+	environmentNames    []string
+	environmentNamesErr error
+}
+
+func (s *restartRecordingInstanceService) GetEnvironmentOverrideNames(instanceID int) ([]string, error) {
+	return s.environmentNames, s.environmentNamesErr
+}
+
+func (s *restartRecordingInstanceService) RestartWithEnvironment(instanceID int, environmentOverrides map[string]string, environmentOverrideRemovals []string) error {
+	s.restartCalls++
+	s.restartedInstanceID = instanceID
+	s.environment = environmentOverrides
+	s.removals = environmentOverrideRemovals
+	return s.restartErr
 }
 
 func (s *blockingBatchInstanceService) CreatePrevalidated(userID int, req services.CreateInstanceRequest) (*models.Instance, error) {
@@ -94,6 +118,206 @@ func TestBatchCreateLiteInstancesUsesBoundedConcurrencyAndPreservesOrder(t *test
 		if result.Name != want {
 			t.Fatalf("result %d name = %q, want %q", idx, result.Name, want)
 		}
+	}
+}
+
+func TestRestartInstanceAcceptsOptionalEnvironmentOverrides(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	tests := []struct {
+		name            string
+		body            string
+		userID          int
+		userRole        string
+		wantStatus      int
+		wantCalls       int
+		wantEnvironment map[string]string
+		wantRemovals    []string
+		restartErr      error
+	}{
+		{
+			name:            "merge environment and restart",
+			body:            `{"environment_overrides":{"SKILL_CACHE_PATH":"/workspace/cache","LOG_LEVEL":"debug"}}`,
+			userID:          7,
+			userRole:        "user",
+			wantStatus:      http.StatusOK,
+			wantCalls:       1,
+			wantEnvironment: map[string]string{"SKILL_CACHE_PATH": "/workspace/cache", "LOG_LEVEL": "debug"},
+		},
+		{
+			name:         "remove environment and restart",
+			body:         `{"environment_override_removals":["OLD_SKILL_TOKEN","LEGACY_MODE"]}`,
+			userID:       7,
+			userRole:     "user",
+			wantStatus:   http.StatusOK,
+			wantCalls:    1,
+			wantRemovals: []string{"OLD_SKILL_TOKEN", "LEGACY_MODE"},
+		},
+		{
+			name:       "empty body keeps plain restart compatible",
+			userID:     7,
+			userRole:   "user",
+			wantStatus: http.StatusOK,
+			wantCalls:  1,
+		},
+		{
+			name:       "other user cannot restart",
+			body:       `{"environment_overrides":{"LOG_LEVEL":"debug"}}`,
+			userID:     8,
+			userRole:   "user",
+			wantStatus: http.StatusForbidden,
+			wantCalls:  0,
+		},
+		{
+			name:       "invalid json is rejected",
+			body:       `{"environment_overrides":`,
+			userID:     7,
+			userRole:   "user",
+			wantStatus: http.StatusBadRequest,
+			wantCalls:  0,
+		},
+		{
+			name:       "service validation is a bad request",
+			body:       `{"environment_overrides":{"INVALID-NAME":"value"}}`,
+			userID:     7,
+			userRole:   "user",
+			wantStatus: http.StatusBadRequest,
+			wantCalls:  1,
+			wantEnvironment: map[string]string{
+				"INVALID-NAME": "value",
+			},
+			restartErr: fmt.Errorf(
+				"%w: invalid environment variable name: INVALID-NAME",
+				services.ErrInvalidEnvironmentOverrides,
+			),
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			instanceService := &restartRecordingInstanceService{
+				fakeWorkspaceHandlerInstanceService: fakeWorkspaceHandlerInstanceService{
+					instances: map[int]*models.Instance{
+						42: {ID: 42, UserID: 7, Name: "skill-runtime"},
+					},
+				},
+				restartErr: test.restartErr,
+			}
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			c.Params = gin.Params{{Key: "id", Value: "42"}}
+			c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/instances/42/restart", strings.NewReader(test.body))
+			c.Request.Header.Set("Content-Type", "application/json")
+			c.Set("userID", test.userID)
+			c.Set("userRole", test.userRole)
+
+			handler := &InstanceHandler{instanceService: instanceService}
+			handler.RestartInstance(c)
+
+			if recorder.Code != test.wantStatus {
+				t.Fatalf("status = %d, want %d: %s", recorder.Code, test.wantStatus, recorder.Body.String())
+			}
+			if instanceService.restartCalls != test.wantCalls {
+				t.Fatalf("restart calls = %d, want %d", instanceService.restartCalls, test.wantCalls)
+			}
+			if test.wantCalls == 1 && instanceService.restartedInstanceID != 42 {
+				t.Fatalf("restarted instance id = %d, want 42", instanceService.restartedInstanceID)
+			}
+			if !reflect.DeepEqual(instanceService.environment, test.wantEnvironment) {
+				t.Fatalf("environment = %#v, want %#v", instanceService.environment, test.wantEnvironment)
+			}
+			if !reflect.DeepEqual(instanceService.removals, test.wantRemovals) {
+				t.Fatalf("removals = %#v, want %#v", instanceService.removals, test.wantRemovals)
+			}
+		})
+	}
+}
+
+func TestGetInstanceEnvironmentOverridesReturnsNamesOnly(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	tests := []struct {
+		name       string
+		id         string
+		userID     int
+		userRole   string
+		names      []string
+		serviceErr error
+		wantStatus int
+	}{
+		{
+			name:       "owner receives configured names",
+			id:         "42",
+			userID:     7,
+			userRole:   "user",
+			names:      []string{"LOG_LEVEL", "SKILL_CACHE_PATH"},
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "other user is forbidden",
+			id:         "42",
+			userID:     8,
+			userRole:   "user",
+			wantStatus: http.StatusForbidden,
+		},
+		{
+			name:       "invalid instance id",
+			id:         "bad",
+			userID:     7,
+			userRole:   "user",
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "service failure",
+			id:         "42",
+			userID:     7,
+			userRole:   "user",
+			serviceErr: fmt.Errorf("failed to decode environment overrides"),
+			wantStatus: http.StatusInternalServerError,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			instanceService := &restartRecordingInstanceService{
+				fakeWorkspaceHandlerInstanceService: fakeWorkspaceHandlerInstanceService{
+					instances: map[int]*models.Instance{
+						42: {ID: 42, UserID: 7, Name: "skill-runtime"},
+					},
+				},
+				environmentNames:    test.names,
+				environmentNamesErr: test.serviceErr,
+			}
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			c.Params = gin.Params{{Key: "id", Value: test.id}}
+			c.Request = httptest.NewRequest(http.MethodGet, "/api/v1/instances/"+test.id+"/environment-overrides", nil)
+			c.Set("userID", test.userID)
+			c.Set("userRole", test.userRole)
+
+			handler := &InstanceHandler{instanceService: instanceService}
+			handler.GetInstanceEnvironmentOverrides(c)
+
+			if recorder.Code != test.wantStatus {
+				t.Fatalf("status = %d, want %d: %s", recorder.Code, test.wantStatus, recorder.Body.String())
+			}
+			if test.wantStatus == http.StatusOK {
+				var payload struct {
+					Data struct {
+						Names []string `json:"names"`
+					} `json:"data"`
+				}
+				if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+					t.Fatalf("decode response: %v", err)
+				}
+				if !reflect.DeepEqual(payload.Data.Names, test.names) {
+					t.Fatalf("names = %#v, want %#v", payload.Data.Names, test.names)
+				}
+				if strings.Contains(recorder.Body.String(), "secret-value") {
+					t.Fatal("response must not expose environment values")
+				}
+			}
+		})
 	}
 }
 

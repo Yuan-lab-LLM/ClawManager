@@ -276,6 +276,13 @@ type UpdateInstanceRequest struct {
 	DesktopStreamProfile *string `json:"desktop_stream_profile,omitempty" binding:"omitempty,oneof=low standard high"`
 }
 
+// RestartInstanceRequest represents optional desired-state changes applied
+// immediately before an instance restart.
+type RestartInstanceRequest struct {
+	EnvironmentOverrides        map[string]string `json:"environment_overrides,omitempty"`
+	EnvironmentOverrideRemovals []string          `json:"environment_override_removals,omitempty"`
+}
+
 // ListInstancesRequest represents a list instances request
 type ListInstancesRequest struct {
 	Page   int    `form:"page,default=1"`
@@ -944,12 +951,59 @@ func (h *InstanceHandler) RestartInstance(c *gin.Context) {
 		return
 	}
 
-	if err := h.instanceService.Restart(id); err != nil {
+	var req RestartInstanceRequest
+	if err := c.ShouldBindJSON(&req); err != nil && !errors.Is(err, io.EOF) {
+		utils.ValidationError(c, err)
+		return
+	}
+
+	if err := h.instanceService.RestartWithEnvironment(id, req.EnvironmentOverrides, req.EnvironmentOverrideRemovals); err != nil {
+		if errors.Is(err, services.ErrInvalidEnvironmentOverrides) {
+			utils.Error(c, http.StatusBadRequest, err.Error())
+			return
+		}
 		utils.HandleError(c, err)
 		return
 	}
 
 	utils.Success(c, http.StatusOK, "Instance restarted successfully", nil)
+}
+
+// GetInstanceEnvironmentOverrides returns only configured variable names.
+// Values remain server-side because overrides may contain sensitive data.
+func (h *InstanceHandler) GetInstanceEnvironmentOverrides(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		utils.Error(c, http.StatusBadRequest, "Invalid instance ID")
+		return
+	}
+
+	instance, err := h.instanceService.GetByID(id)
+	if err != nil {
+		utils.HandleError(c, err)
+		return
+	}
+	if instance == nil {
+		utils.Error(c, http.StatusNotFound, "Instance not found")
+		return
+	}
+
+	userID, _ := c.Get("userID")
+	userRole, _ := c.Get("userRole")
+	if userRole != "admin" && instance.UserID != userID.(int) {
+		utils.Error(c, http.StatusForbidden, "Access denied")
+		return
+	}
+
+	names, err := h.instanceService.GetEnvironmentOverrideNames(id)
+	if err != nil {
+		utils.HandleError(c, err)
+		return
+	}
+
+	utils.Success(c, http.StatusOK, "Instance environment overrides retrieved successfully", gin.H{
+		"names": names,
+	})
 }
 
 // GetInstanceStatus gets the detailed status of an instance

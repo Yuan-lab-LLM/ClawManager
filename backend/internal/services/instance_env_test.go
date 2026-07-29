@@ -50,6 +50,31 @@ func TestNormalizeEnvironmentOverridesRejectsInvalidNames(t *testing.T) {
 	}
 }
 
+func TestNormalizeEnvironmentOverrideRemovals(t *testing.T) {
+	removals, err := normalizeEnvironmentOverrideRemovals([]string{" OLD_FLAG ", "SKILL_MODE"})
+	if err != nil {
+		t.Fatalf("normalize removals returned error: %v", err)
+	}
+	if len(removals) != 2 || removals[0] != "OLD_FLAG" || removals[1] != "SKILL_MODE" {
+		t.Fatalf("removals = %#v, want normalized names", removals)
+	}
+
+	for _, test := range []struct {
+		name     string
+		removals []string
+	}{
+		{name: "invalid name", removals: []string{"INVALID-NAME"}},
+		{name: "empty name", removals: []string{" "}},
+		{name: "duplicate after trim", removals: []string{"OLD_FLAG", " OLD_FLAG "}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := normalizeEnvironmentOverrideRemovals(test.removals); err == nil {
+				t.Fatalf("expected removals %#v to fail validation", test.removals)
+			}
+		})
+	}
+}
+
 func TestBuildInstancePodEnvAppliesOverridesAfterDefaults(t *testing.T) {
 	t.Setenv("CLAWMANAGER_EGRESS_PROXY_URL", "")
 	t.Setenv("CLAWMANAGER_SYSTEM_NAMESPACE", "")

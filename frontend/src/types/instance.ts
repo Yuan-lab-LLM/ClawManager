@@ -241,6 +241,15 @@ export interface UpdateInstanceRequest {
   desktop_stream_profile?: DesktopStreamProfile;
 }
 
+export interface RestartInstanceRequest {
+  environment_overrides?: Record<string, string>;
+  environment_override_removals?: string[];
+}
+
+export interface InstanceEnvironmentOverrides {
+  names: string[];
+}
+
 export type DesktopStreamProfile = "low" | "standard" | "high";
 
 export interface InstanceListResponse {

@@ -41,7 +41,18 @@ func (s *fakeWorkspaceHandlerInstanceService) GetAllInstances(offset, limit int)
 func (s *fakeWorkspaceHandlerInstanceService) Start(instanceID int) error   { return nil }
 func (s *fakeWorkspaceHandlerInstanceService) Stop(instanceID int) error    { return nil }
 func (s *fakeWorkspaceHandlerInstanceService) Restart(instanceID int) error { return nil }
-func (s *fakeWorkspaceHandlerInstanceService) Delete(instanceID int) error  { return nil }
+func (s *fakeWorkspaceHandlerInstanceService) GetEnvironmentOverrideNames(instanceID int) ([]string, error) {
+	instance, ok := s.instances[instanceID]
+	if !ok || instance == nil || instance.EnvironmentOverridesJSON == nil {
+		return []string{}, nil
+	}
+	return []string{"CONFIGURED_VARIABLE"}, nil
+}
+
+func (s *fakeWorkspaceHandlerInstanceService) RestartWithEnvironment(instanceID int, environmentOverrides map[string]string, environmentOverrideRemovals []string) error {
+	return nil
+}
+func (s *fakeWorkspaceHandlerInstanceService) Delete(instanceID int) error { return nil }
 func (s *fakeWorkspaceHandlerInstanceService) Update(instanceID int, req services.UpdateInstanceRequest) error {
 	return nil
 }

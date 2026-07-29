@@ -4,6 +4,8 @@ import type {
   InstanceListResponse,
   CreateInstanceRequest,
   UpdateInstanceRequest,
+  RestartInstanceRequest,
+  InstanceEnvironmentOverrides,
   InstanceStatus,
   InstanceRuntimeDetails,
   InstanceRuntimeCommand,
@@ -83,8 +85,18 @@ export const instanceService = {
   },
 
   // Restart instance
-  restartInstance: async (id: number): Promise<void> => {
-    await api.post(`/instances/${id}/restart`);
+  restartInstance: async (
+    id: number,
+    data?: RestartInstanceRequest,
+  ): Promise<void> => {
+    await api.post(`/instances/${id}/restart`, data);
+  },
+
+  getEnvironmentOverrides: async (
+    id: number,
+  ): Promise<InstanceEnvironmentOverrides> => {
+    const response = await api.get(`/instances/${id}/environment-overrides`);
+    return response.data.data;
   },
 
   // Force sync instance status

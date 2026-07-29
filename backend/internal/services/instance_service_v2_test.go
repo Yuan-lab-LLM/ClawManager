@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -480,6 +481,202 @@ func TestInstanceServiceRestartV2RecreatesGatewayViaScheduler(t *testing.T) {
 	state := instanceRepo.runtimeStates[89]
 	if state.status != "creating" || state.generation != 9 {
 		t.Fatalf("runtime state = %#v, want creating generation 9", state)
+	}
+}
+
+func TestInstanceServiceRestartWithEnvironmentMergesDesiredState(t *testing.T) {
+	workspacePath := "/workspaces/openclaw/user-45/instance-191"
+	existing, err := marshalEnvironmentOverrides(map[string]string{
+		"LOG_LEVEL":  "info",
+		"SKILL_MODE": "safe",
+	})
+	if err != nil {
+		t.Fatalf("marshal existing environment: %v", err)
+	}
+	instanceRepo := newV2LifecycleInstanceRepo()
+	instanceRepo.byID[191] = &models.Instance{
+		ID:                       191,
+		UserID:                   45,
+		Type:                     "openclaw",
+		RuntimeType:              "gateway",
+		Status:                   "running",
+		WorkspacePath:            &workspacePath,
+		RuntimeGeneration:        3,
+		EnvironmentOverridesJSON: existing,
+	}
+	service := &instanceService{instanceRepo: instanceRepo}
+
+	err = service.RestartWithEnvironment(191, map[string]string{
+		"LOG_LEVEL":        "debug",
+		"SKILL_CACHE_PATH": "/workspace/cache",
+	}, nil)
+	if err != nil {
+		t.Fatalf("RestartWithEnvironment returned error: %v", err)
+	}
+
+	persisted := instanceRepo.byID[191]
+	environment, err := parseEnvironmentOverridesJSON(persisted.EnvironmentOverridesJSON)
+	if err != nil {
+		t.Fatalf("parse persisted environment: %v", err)
+	}
+	if environment["LOG_LEVEL"] != "debug" {
+		t.Fatalf("LOG_LEVEL = %q, want debug", environment["LOG_LEVEL"])
+	}
+	if environment["SKILL_MODE"] != "safe" {
+		t.Fatalf("SKILL_MODE = %q, want existing value safe", environment["SKILL_MODE"])
+	}
+	if environment["SKILL_CACHE_PATH"] != "/workspace/cache" {
+		t.Fatalf("SKILL_CACHE_PATH = %q, want /workspace/cache", environment["SKILL_CACHE_PATH"])
+	}
+	state := instanceRepo.runtimeStates[191]
+	if state.status != "creating" || state.generation != 4 {
+		t.Fatalf("runtime state = %#v, want creating generation 4", state)
+	}
+}
+
+func TestInstanceServiceRestartWithEnvironmentRejectsProtectedManagedVariables(t *testing.T) {
+	workspacePath := "/workspaces/openclaw/user-45/instance-192"
+	instanceRepo := newV2LifecycleInstanceRepo()
+	instanceRepo.byID[192] = &models.Instance{
+		ID:                192,
+		UserID:            45,
+		Type:              "openclaw",
+		RuntimeType:       "gateway",
+		Status:            "running",
+		WorkspacePath:     &workspacePath,
+		RuntimeGeneration: 2,
+	}
+	service := &instanceService{instanceRepo: instanceRepo}
+
+	err := service.RestartWithEnvironment(192, map[string]string{
+		"OPENAI_API_KEY": "must-not-be-stored",
+	}, nil)
+	if err == nil || !strings.Contains(err.Error(), "managed by the platform") {
+		t.Fatalf("error = %v, want protected environment variable rejection", err)
+	}
+	if len(instanceRepo.updated) != 0 {
+		t.Fatalf("updated records = %d, want 0", len(instanceRepo.updated))
+	}
+	if instanceRepo.byID[192].Status != "running" {
+		t.Fatalf("status = %q, want running", instanceRepo.byID[192].Status)
+	}
+}
+
+func TestInstanceServiceRestartWithEnvironmentRejectsInvalidVariableName(t *testing.T) {
+	instanceRepo := newV2LifecycleInstanceRepo()
+	instanceRepo.byID[193] = &models.Instance{
+		ID:          193,
+		UserID:      45,
+		Type:        "hermes",
+		RuntimeType: "gateway",
+		Status:      "running",
+	}
+	service := &instanceService{instanceRepo: instanceRepo}
+
+	err := service.RestartWithEnvironment(193, map[string]string{
+		"INVALID-NAME": "value",
+	}, nil)
+	if err == nil || !strings.Contains(err.Error(), "invalid environment variable name") {
+		t.Fatalf("error = %v, want invalid environment variable name", err)
+	}
+	if len(instanceRepo.updated) != 0 {
+		t.Fatalf("updated records = %d, want 0", len(instanceRepo.updated))
+	}
+}
+
+func TestInstanceServiceEnvironmentOverrideNamesAreSortedWithoutValues(t *testing.T) {
+	existing, err := marshalEnvironmentOverrides(map[string]string{
+		"SKILL_TOKEN": "secret-value",
+		"LOG_LEVEL":   "debug",
+	})
+	if err != nil {
+		t.Fatalf("marshal existing environment: %v", err)
+	}
+	instanceRepo := newV2LifecycleInstanceRepo()
+	instanceRepo.byID[194] = &models.Instance{
+		ID:                       194,
+		UserID:                   45,
+		EnvironmentOverridesJSON: existing,
+	}
+	service := &instanceService{instanceRepo: instanceRepo}
+
+	names, err := service.GetEnvironmentOverrideNames(194)
+	if err != nil {
+		t.Fatalf("GetEnvironmentOverrideNames returned error: %v", err)
+	}
+	want := []string{"LOG_LEVEL", "SKILL_TOKEN"}
+	if !reflect.DeepEqual(names, want) {
+		t.Fatalf("names = %#v, want %#v", names, want)
+	}
+	for _, name := range names {
+		if name == "secret-value" {
+			t.Fatal("environment value was exposed as a name")
+		}
+	}
+}
+
+func TestInstanceServiceRestartWithEnvironmentRemovesDesiredState(t *testing.T) {
+	workspacePath := "/workspaces/openclaw/user-45/instance-195"
+	existing, err := marshalEnvironmentOverrides(map[string]string{
+		"KEEP_ME":   "preserved",
+		"REMOVE_ME": "old-value",
+		"RESET_ME":  "old-value",
+	})
+	if err != nil {
+		t.Fatalf("marshal existing environment: %v", err)
+	}
+	instanceRepo := newV2LifecycleInstanceRepo()
+	instanceRepo.byID[195] = &models.Instance{
+		ID:                       195,
+		UserID:                   45,
+		Type:                     "openclaw",
+		RuntimeType:              "gateway",
+		Status:                   "running",
+		WorkspacePath:            &workspacePath,
+		RuntimeGeneration:        5,
+		EnvironmentOverridesJSON: existing,
+	}
+	service := &instanceService{instanceRepo: instanceRepo}
+
+	err = service.RestartWithEnvironment(
+		195,
+		map[string]string{"RESET_ME": "new-value"},
+		[]string{"REMOVE_ME"},
+	)
+	if err != nil {
+		t.Fatalf("RestartWithEnvironment returned error: %v", err)
+	}
+
+	environment, err := parseEnvironmentOverridesJSON(instanceRepo.byID[195].EnvironmentOverridesJSON)
+	if err != nil {
+		t.Fatalf("parse persisted environment: %v", err)
+	}
+	if _, exists := environment["REMOVE_ME"]; exists {
+		t.Fatal("REMOVE_ME still exists after explicit removal")
+	}
+	if environment["KEEP_ME"] != "preserved" {
+		t.Fatalf("KEEP_ME = %q, want preserved", environment["KEEP_ME"])
+	}
+	if environment["RESET_ME"] != "new-value" {
+		t.Fatalf("RESET_ME = %q, want new-value", environment["RESET_ME"])
+	}
+	state := instanceRepo.runtimeStates[195]
+	if state.status != "creating" || state.generation != 6 {
+		t.Fatalf("runtime state = %#v, want creating generation 6", state)
+	}
+}
+
+func TestInstanceServiceRestartWithEnvironmentRejectsConflictingChange(t *testing.T) {
+	instanceRepo := newV2LifecycleInstanceRepo()
+	service := &instanceService{instanceRepo: instanceRepo}
+
+	err := service.RestartWithEnvironment(
+		196,
+		map[string]string{"DUPLICATE": "value"},
+		[]string{"DUPLICATE"},
+	)
+	if err == nil || !strings.Contains(err.Error(), "cannot be both set and removed") {
+		t.Fatalf("error = %v, want conflicting environment change rejection", err)
 	}
 }
 

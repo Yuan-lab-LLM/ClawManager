@@ -2418,6 +2418,36 @@ export const translations: Record<Locale, TranslationTree> = {
         "Restarting the instance. The desktop may disconnect briefly while the new stream settings apply.",
       restartSubmitted:
         "Restart requested. The desktop will reconnect when the instance is available again.",
+      restartMenuLabel: "Restart options",
+      restartWithEnvironment: "Configure environment variables and restart...",
+      restartWithEnvironmentHint: "Add optional variables required by a skill.",
+      restartWithEnvironmentTitle:
+        "Configure environment variables and restart",
+      restartWithEnvironmentDescription:
+        "New values are merged with the instance configuration and apply to this and future restarts. Existing variables are preserved.",
+      restartWithEnvironmentSecurityNote:
+        "Use this for non-sensitive configuration only. Do not enter passwords, API keys, tokens, or other secrets.",
+      configuredEnvironmentVariables: "Configured variables",
+      configuredEnvironmentVariablesCount: "{{count}} configured",
+      configuredEnvironmentLoading: "Loading configured variables...",
+      configuredEnvironmentLoadFailed:
+        "Failed to load configured environment variables.",
+      configuredEnvironmentEmpty: "No custom environment variables configured.",
+      configuredEnvironmentValueHidden: "Configured · value hidden",
+      resetEnvironmentVariable: "Reset value",
+      resetEnvironmentVariablePending: "New value pending",
+      removeEnvironmentVariable: "Remove {{name}}",
+      environmentVariableWillBeRemoved: "Will be removed when saved",
+      undoEnvironmentVariableRemoval: "Undo",
+      newOrUpdatedEnvironmentVariables: "New or updated variables",
+      restartEnvironmentChangeConflict:
+        "{{name}} cannot be updated and removed at the same time.",
+      restartEnvironmentAtLeastOne:
+        "Add, update, or remove at least one environment variable before restarting.",
+      restartEnvironmentSaved:
+        "Environment variables were saved and the restart was requested.",
+      restartEnvironmentFailed:
+        "Failed to save environment variables and restart the instance.",
       governanceGatewayOk: "Gateway OK",
       governanceExternalLLM: "External LLM config",
       governanceSessionKeyMissing: "Session key missing",
@@ -3839,6 +3869,30 @@ export const translations: Record<Locale, TranslationTree> = {
       restartInProgress:
         "正在重启实例，桌面会短暂断开，新桌面流设置会在重连后生效。",
       restartSubmitted: "已发起重启，实例可用后桌面会自动重新连接。",
+      restartMenuLabel: "重启选项",
+      restartWithEnvironment: "配置环境变量并重启…",
+      restartWithEnvironmentHint: "添加 Skill 运行所需的可选变量。",
+      restartWithEnvironmentTitle: "配置环境变量并重启",
+      restartWithEnvironmentDescription:
+        "新变量会与实例现有配置合并，并在本次及后续重启中生效；未填写的现有变量不会被删除。",
+      restartWithEnvironmentSecurityNote:
+        "这里只用于非敏感配置，请勿填写密码、API Key、Token 或其他密钥。",
+      configuredEnvironmentVariables: "已配置变量",
+      configuredEnvironmentVariablesCount: "共 {{count}} 个",
+      configuredEnvironmentLoading: "正在加载已配置变量…",
+      configuredEnvironmentLoadFailed: "加载已配置环境变量失败。",
+      configuredEnvironmentEmpty: "当前没有自定义环境变量。",
+      configuredEnvironmentValueHidden: "已配置 · 值已隐藏",
+      resetEnvironmentVariable: "重新设置",
+      resetEnvironmentVariablePending: "等待填写新值",
+      removeEnvironmentVariable: "移除 {{name}}",
+      environmentVariableWillBeRemoved: "保存后将移除",
+      undoEnvironmentVariableRemoval: "撤销",
+      newOrUpdatedEnvironmentVariables: "新增或重新设置",
+      restartEnvironmentChangeConflict: "{{name}} 不能同时重新设置和移除。",
+      restartEnvironmentAtLeastOne: "请至少新增、修改或移除一个环境变量后再重启。",
+      restartEnvironmentSaved: "环境变量已保存，并已发起实例重启。",
+      restartEnvironmentFailed: "保存环境变量并重启实例失败。",
       governanceGatewayOk: "Gateway 正常",
       governanceExternalLLM: "检测到外部 LLM 配置",
       governanceSessionKeyMissing: "缺少 Session Key",
@@ -5224,6 +5278,34 @@ export const translations: Record<Locale, TranslationTree> = {
         "Restarting the instance. The desktop may disconnect briefly while the new stream settings apply.",
       restartSubmitted:
         "Restart requested. The desktop will reconnect when the instance is available again.",
+      restartMenuLabel: "再起動オプション",
+      restartWithEnvironment: "環境変数を設定して再起動…",
+      restartWithEnvironmentHint: "Skill に必要な任意の変数を追加します。",
+      restartWithEnvironmentTitle: "環境変数を設定して再起動",
+      restartWithEnvironmentDescription:
+        "新しい値はインスタンス設定にマージされ、今回および今後の再起動に適用されます。既存の変数は保持されます。",
+      restartWithEnvironmentSecurityNote:
+        "機密ではない設定にのみ使用してください。パスワード、API キー、トークンなどの秘密情報は入力しないでください。",
+      configuredEnvironmentVariables: "設定済みの変数",
+      configuredEnvironmentVariablesCount: "{{count}} 件設定済み",
+      configuredEnvironmentLoading: "設定済み変数を読み込み中…",
+      configuredEnvironmentLoadFailed: "設定済み環境変数を読み込めませんでした。",
+      configuredEnvironmentEmpty: "カスタム環境変数は設定されていません。",
+      configuredEnvironmentValueHidden: "設定済み · 値は非表示",
+      resetEnvironmentVariable: "値を再設定",
+      resetEnvironmentVariablePending: "新しい値を入力待ち",
+      removeEnvironmentVariable: "{{name}} を削除",
+      environmentVariableWillBeRemoved: "保存時に削除されます",
+      undoEnvironmentVariableRemoval: "元に戻す",
+      newOrUpdatedEnvironmentVariables: "新規または更新する変数",
+      restartEnvironmentChangeConflict:
+        "{{name}} を同時に更新および削除することはできません。",
+      restartEnvironmentAtLeastOne:
+        "再起動する前に、環境変数を1つ以上追加、更新、または削除してください。",
+      restartEnvironmentSaved:
+        "環境変数を保存し、再起動をリクエストしました。",
+      restartEnvironmentFailed:
+        "環境変数の保存とインスタンスの再起動に失敗しました。",
       governanceGatewayOk: "Gateway OK",
       governanceExternalLLM: "外部 LLM 設定",
       governanceSessionKeyMissing: "Session key 未設定",
@@ -6619,6 +6701,35 @@ export const translations: Record<Locale, TranslationTree> = {
         "Restarting the instance. The desktop may disconnect briefly while the new stream settings apply.",
       restartSubmitted:
         "Restart requested. The desktop will reconnect when the instance is available again.",
+      restartMenuLabel: "재시작 옵션",
+      restartWithEnvironment: "환경 변수를 설정하고 재시작…",
+      restartWithEnvironmentHint: "Skill에 필요한 선택적 변수를 추가합니다.",
+      restartWithEnvironmentTitle: "환경 변수를 설정하고 재시작",
+      restartWithEnvironmentDescription:
+        "새 값은 인스턴스 설정에 병합되어 이번 재시작과 이후 재시작에 적용됩니다. 기존 변수는 유지됩니다.",
+      restartWithEnvironmentSecurityNote:
+        "민감하지 않은 설정에만 사용하세요. 비밀번호, API 키, 토큰 또는 기타 비밀 정보는 입력하지 마세요.",
+      configuredEnvironmentVariables: "설정된 변수",
+      configuredEnvironmentVariablesCount: "{{count}}개 설정됨",
+      configuredEnvironmentLoading: "설정된 변수를 불러오는 중…",
+      configuredEnvironmentLoadFailed:
+        "설정된 환경 변수를 불러오지 못했습니다.",
+      configuredEnvironmentEmpty: "사용자 지정 환경 변수가 없습니다.",
+      configuredEnvironmentValueHidden: "설정됨 · 값 숨김",
+      resetEnvironmentVariable: "값 다시 설정",
+      resetEnvironmentVariablePending: "새 값 입력 대기",
+      removeEnvironmentVariable: "{{name}} 제거",
+      environmentVariableWillBeRemoved: "저장 시 제거됩니다",
+      undoEnvironmentVariableRemoval: "실행 취소",
+      newOrUpdatedEnvironmentVariables: "새 변수 또는 업데이트할 변수",
+      restartEnvironmentChangeConflict:
+        "{{name}}을(를) 동시에 업데이트하고 제거할 수 없습니다.",
+      restartEnvironmentAtLeastOne:
+        "재시작하기 전에 환경 변수를 하나 이상 추가, 업데이트 또는 제거하세요.",
+      restartEnvironmentSaved:
+        "환경 변수가 저장되었으며 재시작을 요청했습니다.",
+      restartEnvironmentFailed:
+        "환경 변수를 저장하고 인스턴스를 재시작하지 못했습니다.",
       governanceGatewayOk: "Gateway OK",
       governanceExternalLLM: "외부 LLM 설정",
       governanceSessionKeyMissing: "Session key 누락",
@@ -8039,6 +8150,38 @@ export const translations: Record<Locale, TranslationTree> = {
         "Restarting the instance. The desktop may disconnect briefly while the new stream settings apply.",
       restartSubmitted:
         "Restart requested. The desktop will reconnect when the instance is available again.",
+      restartMenuLabel: "Neustartoptionen",
+      restartWithEnvironment: "Umgebungsvariablen konfigurieren und neu starten…",
+      restartWithEnvironmentHint:
+        "Optionale Variablen hinzufügen, die ein Skill benötigt.",
+      restartWithEnvironmentTitle:
+        "Umgebungsvariablen konfigurieren und neu starten",
+      restartWithEnvironmentDescription:
+        "Neue Werte werden mit der Instanzkonfiguration zusammengeführt und gelten für diesen und zukünftige Neustarts. Bestehende Variablen bleiben erhalten.",
+      restartWithEnvironmentSecurityNote:
+        "Nur für nicht vertrauliche Konfiguration verwenden. Keine Passwörter, API-Schlüssel, Token oder andere Geheimnisse eingeben.",
+      configuredEnvironmentVariables: "Konfigurierte Variablen",
+      configuredEnvironmentVariablesCount: "{{count}} konfiguriert",
+      configuredEnvironmentLoading: "Konfigurierte Variablen werden geladen…",
+      configuredEnvironmentLoadFailed:
+        "Konfigurierte Umgebungsvariablen konnten nicht geladen werden.",
+      configuredEnvironmentEmpty:
+        "Keine benutzerdefinierten Umgebungsvariablen konfiguriert.",
+      configuredEnvironmentValueHidden: "Konfiguriert · Wert ausgeblendet",
+      resetEnvironmentVariable: "Wert neu setzen",
+      resetEnvironmentVariablePending: "Neuer Wert ausstehend",
+      removeEnvironmentVariable: "{{name}} entfernen",
+      environmentVariableWillBeRemoved: "Wird beim Speichern entfernt",
+      undoEnvironmentVariableRemoval: "Rückgängig",
+      newOrUpdatedEnvironmentVariables: "Neue oder aktualisierte Variablen",
+      restartEnvironmentChangeConflict:
+        "{{name}} kann nicht gleichzeitig aktualisiert und entfernt werden.",
+      restartEnvironmentAtLeastOne:
+        "Vor dem Neustart mindestens eine Umgebungsvariable hinzufügen, aktualisieren oder entfernen.",
+      restartEnvironmentSaved:
+        "Die Umgebungsvariablen wurden gespeichert und der Neustart wurde angefordert.",
+      restartEnvironmentFailed:
+        "Umgebungsvariablen konnten nicht gespeichert und die Instanz nicht neu gestartet werden.",
       governanceGatewayOk: "Gateway OK",
       governanceExternalLLM: "Externe LLM-Konfiguration",
       governanceSessionKeyMissing: "Session-Key fehlt",

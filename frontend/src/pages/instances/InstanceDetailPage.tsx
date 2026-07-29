@@ -4,6 +4,7 @@ import {
   ArrowLeft,
   Ban,
   BarChart3,
+  ChevronDown,
   Clock3,
   Copy,
   Cpu,
@@ -24,6 +25,7 @@ import ConfirmDialog from "../../components/ConfirmDialog";
 import InstanceSkillHubPanel from "../../components/InstanceSkillHubPanel";
 import InstanceSessionUsagePanel from "../../components/InstanceSessionUsagePanel";
 import { InstanceServiceFrame } from "../../components/InstanceServiceFrame";
+import RestartWithEnvironmentDialog from "../../components/RestartWithEnvironmentDialog";
 import UserLayout from "../../components/UserLayout";
 import { WorkspaceFileManager } from "../../components/WorkspaceFileManager";
 import { useI18n } from "../../contexts/I18nContext";
@@ -293,6 +295,19 @@ const InstanceDetailPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [restartMenuOpen, setRestartMenuOpen] = useState(false);
+  const [showRestartEnvironmentDialog, setShowRestartEnvironmentDialog] =
+    useState(false);
+  const [restartEnvironmentError, setRestartEnvironmentError] = useState<
+    string | null
+  >(null);
+  const [restartEnvironmentNames, setRestartEnvironmentNames] = useState<
+    string[]
+  >([]);
+  const [restartEnvironmentNamesLoading, setRestartEnvironmentNamesLoading] =
+    useState(false);
+  const [restartEnvironmentNamesError, setRestartEnvironmentNamesError] =
+    useState<string | null>(null);
   const [externalAccess, setExternalAccess] = useState<InstanceExternalAccess | null>(null);
   const [externalShareURL, setExternalShareURL] = useState("");
   const [externalPassword, setExternalPassword] = useState("");
@@ -318,6 +333,7 @@ const InstanceDetailPage: React.FC = () => {
   const [sessionPanelExpanded, setSessionPanelExpanded] = useState(false);
   const [workspaceHeightPx, setWorkspaceHeightPx] = useState<number | null>(null);
   const workspaceSectionRef = useRef<HTMLElement>(null);
+  const restartMenuRef = useRef<HTMLDivElement>(null);
 
   const fetchMeta = useCallback(
     async (targetInstanceId: number, options?: { background?: boolean }) => {
@@ -415,6 +431,31 @@ const InstanceDetailPage: React.FC = () => {
       [instanceId],
     ),
   );
+
+  useEffect(() => {
+    if (!restartMenuOpen) {
+      return;
+    }
+    const handlePointerDown = (event: MouseEvent) => {
+      if (
+        restartMenuRef.current &&
+        !restartMenuRef.current.contains(event.target as Node)
+      ) {
+        setRestartMenuOpen(false);
+      }
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setRestartMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [restartMenuOpen]);
 
   const isDedicatedInstance = useMemo(
     () =>
@@ -558,6 +599,77 @@ const InstanceDetailPage: React.FC = () => {
     } finally {
       setActionLoading(null);
     }
+  };
+
+  const handleRestartWithEnvironment = async (
+    environmentOverrides: Record<string, string>,
+    environmentOverrideRemovals: string[],
+  ) => {
+    if (!instance) {
+      return;
+    }
+
+    try {
+      setActionLoading("restart-environment");
+      setRestartEnvironmentError(null);
+      setActionMessage(t("instances.restartInProgress"));
+      await instanceService.restartInstance(instance.id, {
+        environment_overrides: environmentOverrides,
+        environment_override_removals: environmentOverrideRemovals,
+      });
+      setRestartEnvironmentNames((current) => {
+        const next = new Set(current);
+        environmentOverrideRemovals.forEach((name) => next.delete(name));
+        Object.keys(environmentOverrides).forEach((name) => next.add(name));
+        return Array.from(next).sort((left, right) => left.localeCompare(right));
+      });
+      setShowRestartEnvironmentDialog(false);
+      setActionMessage(t("instances.restartEnvironmentSaved"));
+      await fetchMeta(instance.id, { background: true });
+    } catch (restartError) {
+      setActionMessage(null);
+      setRestartEnvironmentError(
+        getErrorMessage(
+          restartError,
+          t("instances.restartEnvironmentFailed"),
+        ),
+      );
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const loadRestartEnvironmentNames = useCallback(
+    async (targetInstanceID: number) => {
+      try {
+        setRestartEnvironmentNamesLoading(true);
+        setRestartEnvironmentNamesError(null);
+        const result =
+          await instanceService.getEnvironmentOverrides(targetInstanceID);
+        setRestartEnvironmentNames(result.names ?? []);
+      } catch (loadError) {
+        setRestartEnvironmentNamesError(
+          getErrorMessage(
+            loadError,
+            t("instances.configuredEnvironmentLoadFailed"),
+          ),
+        );
+      } finally {
+        setRestartEnvironmentNamesLoading(false);
+      }
+    },
+    [t],
+  );
+
+  const openRestartEnvironmentDialog = () => {
+    if (!instance) {
+      return;
+    }
+    setRestartMenuOpen(false);
+    setRestartEnvironmentError(null);
+    setRestartEnvironmentNames([]);
+    setShowRestartEnvironmentDialog(true);
+    void loadRestartEnvironmentNames(instance.id);
   };
 
   const buildExternalAccessRequest = (): ExternalAccessRequest | null => {
@@ -768,15 +880,66 @@ const InstanceDetailPage: React.FC = () => {
               {t("common.start")}
             </button>
           ) : null}
-          <button
-            type="button"
-            className="app-button-secondary"
-            onClick={() => void handleAction("restart")}
-            disabled={actionLoading === "restart" || instance.status === "deleting"}
-          >
-            <RotateCw className="h-4 w-4" />
-            {t("common.restart")}
-          </button>
+          <div ref={restartMenuRef} className="relative inline-flex">
+            <button
+              type="button"
+              className="app-button-secondary rounded-r-none"
+              onClick={() => {
+                setRestartMenuOpen(false);
+                void handleAction("restart");
+              }}
+              disabled={
+                actionLoading === "restart" ||
+                actionLoading === "restart-environment" ||
+                instance.status === "deleting"
+              }
+            >
+              <RotateCw className="h-4 w-4" />
+              {t("common.restart")}
+            </button>
+            <button
+              type="button"
+              aria-label={t("instances.restartMenuLabel")}
+              aria-haspopup="menu"
+              aria-expanded={restartMenuOpen}
+              className="app-button-secondary -ml-px rounded-l-none px-2"
+              onClick={() => setRestartMenuOpen((open) => !open)}
+              disabled={
+                actionLoading === "restart" ||
+                actionLoading === "restart-environment" ||
+                instance.status === "deleting"
+              }
+            >
+              <ChevronDown
+                className={`h-4 w-4 transition-transform ${
+                  restartMenuOpen ? "rotate-180" : ""
+                }`}
+              />
+            </button>
+            {restartMenuOpen && (
+              <div
+                role="menu"
+                className="absolute right-0 top-full z-30 mt-2 w-72 rounded-lg border border-slate-200 bg-white p-1.5 shadow-lg"
+              >
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="flex w-full items-start gap-3 rounded-md px-3 py-2.5 text-left transition hover:bg-slate-50"
+                  onClick={openRestartEnvironmentDialog}
+                >
+                  <RotateCw className="mt-0.5 h-4 w-4 shrink-0 text-indigo-600" />
+                  <span>
+                    <span className="block text-sm font-medium text-slate-900">
+                      {t("instances.restartWithEnvironment")}
+                    </span>
+                    <span className="mt-0.5 block text-xs leading-5 text-slate-500">
+                      {t("instances.restartWithEnvironmentHint")}
+                    </span>
+                  </span>
+                </button>
+              </div>
+            )}
+          </div>
           <button
             type="button"
             className="app-button-secondary border-red-200 text-red-700 hover:border-red-300 hover:bg-red-50 hover:text-red-800"
@@ -1076,7 +1239,10 @@ const InstanceDetailPage: React.FC = () => {
     ...overviewResourceRows,
   ];
   const desktopStreamDirty = desktopStreamProfile !== desktopStreamSavedProfile;
-  const restartActionActive = actionLoading === "restart" || actionLoading === "desktop-stream-restart";
+  const restartActionActive =
+    actionLoading === "restart" ||
+    actionLoading === "restart-environment" ||
+    actionLoading === "desktop-stream-restart";
 
   const renderActionMessage = () =>
     actionMessage ? (
@@ -1279,6 +1445,29 @@ const InstanceDetailPage: React.FC = () => {
         loading={actionLoading === "delete"}
         onCancel={() => setShowDeleteDialog(false)}
         onConfirm={() => void handleAction("delete")}
+      />
+      <RestartWithEnvironmentDialog
+        key={showRestartEnvironmentDialog ? "open" : "closed"}
+        open={showRestartEnvironmentDialog}
+        instanceName={instance.name}
+        loading={actionLoading === "restart-environment"}
+        existingNames={restartEnvironmentNames}
+        existingLoading={restartEnvironmentNamesLoading}
+        existingError={restartEnvironmentNamesError}
+        serverError={restartEnvironmentError}
+        onRetryExisting={() => void loadRestartEnvironmentNames(instance.id)}
+        onCancel={() => {
+          if (actionLoading !== "restart-environment") {
+            setShowRestartEnvironmentDialog(false);
+            setRestartEnvironmentError(null);
+          }
+        }}
+        onConfirm={(environmentOverrides, environmentOverrideRemovals) =>
+          void handleRestartWithEnvironment(
+            environmentOverrides,
+            environmentOverrideRemovals,
+          )
+        }
       />
 
       {isDedicatedInstance ? renderProWorkspace() : renderLiteWorkspace()}

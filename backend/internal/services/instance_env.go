@@ -2,6 +2,7 @@ package services
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"regexp"
@@ -10,6 +11,8 @@ import (
 
 	"clawreef/internal/models"
 )
+
+var ErrInvalidEnvironmentOverrides = errors.New("invalid environment overrides")
 
 var protectedManagedRuntimeEnvKeys = map[string]struct{}{
 	"CLAWMANAGER_LLM_BASE_URL":   {},
@@ -52,7 +55,7 @@ func validateManagedRuntimeEnvironmentOverrides(instanceType string, overrides m
 	}
 	for key := range overrides {
 		if isProtectedManagedRuntimeEnvKey(key) {
-			return fmt.Errorf("environment override %s is managed by the platform", strings.ToUpper(strings.TrimSpace(key)))
+			return fmt.Errorf("%w: environment override %s is managed by the platform", ErrInvalidEnvironmentOverrides, strings.ToUpper(strings.TrimSpace(key)))
 		}
 	}
 	return nil
@@ -123,15 +126,40 @@ func normalizeEnvironmentOverrides(overrides map[string]string) (map[string]stri
 	for rawKey, value := range overrides {
 		key := strings.TrimSpace(rawKey)
 		if key == "" {
-			return nil, fmt.Errorf("environment variable name cannot be empty")
+			return nil, fmt.Errorf("%w: environment variable name cannot be empty", ErrInvalidEnvironmentOverrides)
 		}
 		if !envNamePattern.MatchString(key) {
-			return nil, fmt.Errorf("invalid environment variable name: %s", key)
+			return nil, fmt.Errorf("%w: invalid environment variable name: %s", ErrInvalidEnvironmentOverrides, key)
 		}
 		if _, exists := normalized[key]; exists {
-			return nil, fmt.Errorf("duplicate environment variable name: %s", key)
+			return nil, fmt.Errorf("%w: duplicate environment variable name: %s", ErrInvalidEnvironmentOverrides, key)
 		}
 		normalized[key] = value
+	}
+
+	return normalized, nil
+}
+
+func normalizeEnvironmentOverrideRemovals(removals []string) ([]string, error) {
+	if len(removals) == 0 {
+		return nil, nil
+	}
+
+	normalized := make([]string, 0, len(removals))
+	seen := make(map[string]struct{}, len(removals))
+	for _, rawName := range removals {
+		name := strings.TrimSpace(rawName)
+		if name == "" {
+			return nil, fmt.Errorf("%w: environment variable name cannot be empty", ErrInvalidEnvironmentOverrides)
+		}
+		if !envNamePattern.MatchString(name) {
+			return nil, fmt.Errorf("%w: invalid environment variable name: %s", ErrInvalidEnvironmentOverrides, name)
+		}
+		if _, exists := seen[name]; exists {
+			return nil, fmt.Errorf("%w: duplicate environment variable removal: %s", ErrInvalidEnvironmentOverrides, name)
+		}
+		seen[name] = struct{}{}
+		normalized = append(normalized, name)
 	}
 
 	return normalized, nil

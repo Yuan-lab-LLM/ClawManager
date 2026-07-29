@@ -368,6 +368,7 @@ func main() {
 			instances.POST("/:id/start", instanceHandler.StartInstance)
 			instances.POST("/:id/stop", instanceHandler.StopInstance)
 			instances.POST("/:id/restart", instanceHandler.RestartInstance)
+			instances.GET("/:id/environment-overrides", instanceHandler.GetInstanceEnvironmentOverrides)
 			instances.GET("/:id/status", instanceHandler.GetInstanceStatus)
 			instances.GET("/:id/runtime", instanceHandler.GetRuntimeDetails)
 			instances.GET("/:id/session-usage", instanceHandler.GetInstanceSessionUsage)

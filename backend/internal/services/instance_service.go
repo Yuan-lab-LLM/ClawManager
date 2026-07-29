@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -31,6 +32,8 @@ type InstanceService interface {
 	Start(instanceID int) error
 	Stop(instanceID int) error
 	Restart(instanceID int) error
+	GetEnvironmentOverrideNames(instanceID int) ([]string, error)
+	RestartWithEnvironment(instanceID int, environmentOverrides map[string]string, environmentOverrideRemovals []string) error
 	Delete(instanceID int) error
 	Update(instanceID int, req UpdateInstanceRequest) error
 	GetInstanceStatus(instanceID int) (*InstanceStatus, error)
@@ -1601,6 +1604,86 @@ func (s *instanceService) Restart(instanceID int) error {
 	}
 
 	return nil
+}
+
+// GetEnvironmentOverrideNames returns sorted configured names without exposing
+// stored values.
+func (s *instanceService) GetEnvironmentOverrideNames(instanceID int) ([]string, error) {
+	instance, err := s.instanceRepo.GetByID(instanceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get instance: %w", err)
+	}
+	if instance == nil {
+		return nil, fmt.Errorf("instance not found")
+	}
+
+	overrides, err := parseEnvironmentOverridesJSON(instance.EnvironmentOverridesJSON)
+	if err != nil {
+		return nil, err
+	}
+
+	names := make([]string, 0, len(overrides))
+	for name := range overrides {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names, nil
+}
+
+// RestartWithEnvironment merges additions and explicit removals into the
+// instance desired state before restarting it. Persisting first keeps the DB as
+// the source of truth and allows a failed restart to be retried with the same
+// desired configuration.
+func (s *instanceService) RestartWithEnvironment(instanceID int, environmentOverrides map[string]string, environmentOverrideRemovals []string) error {
+	if len(environmentOverrides) == 0 && len(environmentOverrideRemovals) == 0 {
+		return s.Restart(instanceID)
+	}
+
+	additions, err := normalizeEnvironmentOverrides(environmentOverrides)
+	if err != nil {
+		return err
+	}
+	removals, err := normalizeEnvironmentOverrideRemovals(environmentOverrideRemovals)
+	if err != nil {
+		return err
+	}
+	for _, name := range removals {
+		if _, exists := additions[name]; exists {
+			return fmt.Errorf("%w: environment variable %s cannot be both set and removed", ErrInvalidEnvironmentOverrides, name)
+		}
+	}
+
+	instance, err := s.instanceRepo.GetByID(instanceID)
+	if err != nil {
+		return fmt.Errorf("failed to get instance: %w", err)
+	}
+	if instance == nil {
+		return fmt.Errorf("instance not found")
+	}
+
+	current, err := parseEnvironmentOverridesJSON(instance.EnvironmentOverridesJSON)
+	if err != nil {
+		return err
+	}
+	for _, name := range removals {
+		delete(current, name)
+	}
+	merged := mergeEnvMaps(current, additions)
+	if err := validateManagedRuntimeEnvironmentOverrides(instance.Type, merged); err != nil {
+		return err
+	}
+	encoded, err := marshalEnvironmentOverrides(merged)
+	if err != nil {
+		return err
+	}
+
+	instance.EnvironmentOverridesJSON = encoded
+	instance.UpdatedAt = time.Now()
+	if err := s.instanceRepo.Update(instance); err != nil {
+		return fmt.Errorf("failed to persist instance environment overrides: %w", err)
+	}
+
+	return s.Restart(instanceID)
 }
 
 // Delete starts deleting an instance and all associated K8s resources.
