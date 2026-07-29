@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +15,87 @@ import (
 
 	"github.com/gin-gonic/gin"
 )
+
+type blockingBatchInstanceService struct {
+	fakeWorkspaceHandlerInstanceService
+	started chan string
+	release <-chan struct{}
+}
+
+func (s *blockingBatchInstanceService) CreatePrevalidated(userID int, req services.CreateInstanceRequest) (*models.Instance, error) {
+	s.started <- req.Name
+	<-s.release
+	return &models.Instance{
+		ID:     len(req.Name),
+		UserID: userID,
+		Name:   req.Name,
+	}, nil
+}
+
+func TestBatchCreateLiteInstancesUsesBoundedConcurrencyAndPreservesOrder(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	release := make(chan struct{})
+	instanceService := &blockingBatchInstanceService{
+		started: make(chan string, 10),
+		release: release,
+	}
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/instances/batch/lite",
+		strings.NewReader(`{"name_prefix":"batch-lite","count":6}`),
+	)
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set("userID", 7)
+	c.Set("userRole", "user")
+
+	handler := &InstanceHandler{instanceService: instanceService}
+	done := make(chan struct{})
+	go func() {
+		handler.BatchCreateLiteInstances(c)
+		close(done)
+	}()
+
+	for idx := 0; idx < liteBatchCreateConcurrency; idx++ {
+		select {
+		case <-instanceService.started:
+		case <-time.After(time.Second):
+			t.Fatalf("only %d batch workers started", idx)
+		}
+	}
+	select {
+	case name := <-instanceService.started:
+		t.Fatalf("batch concurrency exceeded %d; unexpected start for %q", liteBatchCreateConcurrency, name)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	close(release)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("batch handler did not finish")
+	}
+
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d: %s", recorder.Code, http.StatusCreated, recorder.Body.String())
+	}
+	var payload struct {
+		Data BatchCreateLiteInstancesResponse `json:"data"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode batch response: %v", err)
+	}
+	if payload.Data.Created != 6 || payload.Data.Failed != 0 || len(payload.Data.Results) != 6 {
+		t.Fatalf("unexpected batch response: %#v", payload.Data)
+	}
+	for idx, result := range payload.Data.Results {
+		want := fmt.Sprintf("batch-lite-%03d", idx+1)
+		if result.Name != want {
+			t.Fatalf("result %d name = %q, want %q", idx, result.Name, want)
+		}
+	}
+}
 
 func TestWorkspaceArchiveMaxMiB(t *testing.T) {
 	t.Setenv(workspaceArchiveMaxMiBEnv, "")

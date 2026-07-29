@@ -10,6 +10,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"clawreef/internal/models"
@@ -29,6 +30,8 @@ const openclawMinArchiveBytes = 100
 const (
 	defaultWorkspaceArchiveMaxMiB = int64(500)
 	workspaceArchiveMaxMiBEnv     = "CLAWMANAGER_WORKSPACE_ARCHIVE_MAX_MIB"
+	maxLiteBatchCreateCount       = 100
+	liteBatchCreateConcurrency    = 4
 	maxLiteBatchDeleteCount       = 100
 )
 
@@ -167,10 +170,10 @@ func (h *InstanceHandler) Shutdown() {
 }
 
 type InstanceRuntimeDetailsResponse struct {
-	Runtime        *services.InstanceRuntimeStatusPayload `json:"runtime,omitempty"`
-	Agent          *services.InstanceAgentPayload         `json:"agent,omitempty"`
-	Commands       []services.InstanceCommandPayload      `json:"commands,omitempty"`
-	LLMGovernance  *services.InstanceLLMGovernanceStatus  `json:"llm_governance,omitempty"`
+	Runtime       *services.InstanceRuntimeStatusPayload `json:"runtime,omitempty"`
+	Agent         *services.InstanceAgentPayload         `json:"agent,omitempty"`
+	Commands      []services.InstanceCommandPayload      `json:"commands,omitempty"`
+	LLMGovernance *services.InstanceLLMGovernanceStatus  `json:"llm_governance,omitempty"`
 }
 
 type CreateRuntimeCommandRequest struct {
@@ -229,7 +232,7 @@ type BatchCreateLiteInstanceTemplate struct {
 // BatchCreateLiteInstancesRequest represents a lite batch create request
 type BatchCreateLiteInstancesRequest struct {
 	NamePrefix string                           `json:"name_prefix" binding:"required,min=1,max=40"`
-	Count      int                              `json:"count" binding:"required,min=1"`
+	Count      int                              `json:"count" binding:"required,min=1,max=100"`
 	StartIndex int                              `json:"start_index" binding:"omitempty,min=0,max=9999"`
 	Template   *BatchCreateLiteInstanceTemplate `json:"template,omitempty"`
 }
@@ -426,50 +429,20 @@ func (h *InstanceHandler) BatchCreateLiteInstances(c *gin.Context) {
 
 	response := BatchCreateLiteInstancesResponse{
 		Requested: len(createRequests),
-		Results:   make([]BatchCreateLiteInstanceResult, 0, len(createRequests)),
+		Results: h.createLiteBatchInstances(
+			userID.(int),
+			userRole.(string),
+			createRequests,
+			handlerRequests,
+		),
 	}
 
-	for idx, createReq := range createRequests {
-		handlerReq := handlerRequests[idx]
-		result := BatchCreateLiteInstanceResult{
-			Name:   createReq.Name,
-			Status: "created",
-		}
-		instance, err := h.instanceService.Create(userID.(int), createReq)
-		if err != nil {
-			result.Status = "failed"
-			result.Error = err.Error()
+	for _, result := range response.Results {
+		if result.Status == "failed" {
 			response.Failed++
-			response.Results = append(response.Results, result)
 			continue
 		}
-		result.Instance = instance
-
-		skillIDs, err := h.resolveCreateInstanceSkillIDs(userID.(int), handlerReq)
-		if err != nil {
-			result.Status = "failed"
-			result.Error = err.Error()
-			response.Failed++
-			response.Results = append(response.Results, result)
-			continue
-		}
-		attachFailed := false
-		for _, skillID := range skillIDs {
-			if _, err := h.skillService.AttachSkillToInstance(userID.(int), userRole.(string), instance.ID, skillID); err != nil {
-				result.Status = "failed"
-				result.Error = err.Error()
-				response.Failed++
-				response.Results = append(response.Results, result)
-				attachFailed = true
-				break
-			}
-		}
-		if attachFailed {
-			continue
-		}
-
 		response.Created++
-		response.Results = append(response.Results, result)
 	}
 
 	status := http.StatusCreated
@@ -479,10 +452,87 @@ func (h *InstanceHandler) BatchCreateLiteInstances(c *gin.Context) {
 	utils.Success(c, status, "Lite instances batch create completed", response)
 }
 
+func (h *InstanceHandler) createLiteBatchInstances(
+	userID int,
+	userRole string,
+	createRequests []services.CreateInstanceRequest,
+	handlerRequests []CreateInstanceRequest,
+) []BatchCreateLiteInstanceResult {
+	results := make([]BatchCreateLiteInstanceResult, len(createRequests))
+	if len(createRequests) == 0 {
+		return results
+	}
+
+	workerCount := liteBatchCreateConcurrency
+	if workerCount > len(createRequests) {
+		workerCount = len(createRequests)
+	}
+	jobs := make(chan int, len(createRequests))
+	for idx := range createRequests {
+		jobs <- idx
+	}
+	close(jobs)
+
+	var workers sync.WaitGroup
+	workers.Add(workerCount)
+	for range workerCount {
+		go func() {
+			defer workers.Done()
+			for idx := range jobs {
+				results[idx] = h.createLiteBatchInstance(
+					userID,
+					userRole,
+					createRequests[idx],
+					handlerRequests[idx],
+				)
+			}
+		}()
+	}
+	workers.Wait()
+	return results
+}
+
+func (h *InstanceHandler) createLiteBatchInstance(
+	userID int,
+	userRole string,
+	createReq services.CreateInstanceRequest,
+	handlerReq CreateInstanceRequest,
+) BatchCreateLiteInstanceResult {
+	result := BatchCreateLiteInstanceResult{
+		Name:   createReq.Name,
+		Status: "created",
+	}
+	instance, err := h.instanceService.CreatePrevalidated(userID, createReq)
+	if err != nil {
+		result.Status = "failed"
+		result.Error = err.Error()
+		return result
+	}
+	result.Instance = instance
+
+	skillIDs, err := h.resolveCreateInstanceSkillIDs(userID, handlerReq)
+	if err != nil {
+		result.Status = "failed"
+		result.Error = err.Error()
+		return result
+	}
+	for _, skillID := range skillIDs {
+		if _, err := h.skillService.AttachSkillToInstance(userID, userRole, instance.ID, skillID); err != nil {
+			result.Status = "failed"
+			result.Error = err.Error()
+			return result
+		}
+	}
+	return result
+}
+
 func buildLiteBatchCreateRequests(req BatchCreateLiteInstancesRequest) ([]services.CreateInstanceRequest, []CreateInstanceRequest, error) {
 	count := req.Count
 	if count <= 0 {
 		return nil, nil, fmt.Errorf("count is required")
+	}
+	if count > maxLiteBatchCreateCount {
+		return nil, nil, fmt.Errorf("count must not exceed %d", maxLiteBatchCreateCount)
 	}
 
 	prefix := strings.TrimSpace(req.NamePrefix)

@@ -23,6 +23,7 @@ import (
 // InstanceService defines the interface for instance operations
 type InstanceService interface {
 	Create(userID int, req CreateInstanceRequest) (*models.Instance, error)
+	CreatePrevalidated(userID int, req CreateInstanceRequest) (*models.Instance, error)
 	ValidateCreateRequests(userID int, requests []CreateInstanceRequest) error
 	GetByID(id int) (*models.Instance, error)
 	GetByUserID(userID int, offset, limit int) ([]models.Instance, int, error)
@@ -103,6 +104,7 @@ func (s *instanceService) ValidateCreateRequests(userID int, requests []CreateIn
 	requestedStorage := 0
 	requestedGPU := 0
 	requestNames := map[string]struct{}{}
+	requestedModes := map[string]int{}
 	for _, req := range requests {
 		normalizedName := strings.TrimSpace(strings.ToLower(req.Name))
 		if _, exists := existingNames[normalizedName]; exists {
@@ -120,6 +122,7 @@ func (s *instanceService) ValidateCreateRequests(userID int, requests []CreateIn
 				requestedGPU += req.GPUCount
 			}
 		}
+		requestedModes[resolveCreateInstanceMode(req)]++
 	}
 
 	if currentCPU+requestedCPU > quota.MaxCPUCores {
@@ -133,6 +136,26 @@ func (s *instanceService) ValidateCreateRequests(userID int, requests []CreateIn
 	}
 	if currentGPU+requestedGPU > quota.MaxGPUCount {
 		return fmt.Errorf("GPU count exceed quota: current %d, requested %d, max %d", currentGPU, requestedGPU, quota.MaxGPUCount)
+	}
+	for _, mode := range []string{InstanceModeLite, InstanceModePro} {
+		requested := requestedModes[mode]
+		if requested == 0 {
+			continue
+		}
+		capacity := loadInstanceModeLimitConfig(mode).Capacity
+		if capacity == nil {
+			continue
+		}
+		if *capacity <= 0 {
+			return fmt.Errorf("%s instance mode is disabled", mode)
+		}
+		active, err := s.instanceRepo.CountActiveByMode(context.Background(), mode)
+		if err != nil {
+			return err
+		}
+		if active+requested > *capacity {
+			return fmt.Errorf("%s instance capacity reached: %d/%d", mode, active+requested, *capacity)
+		}
 	}
 
 	return nil
@@ -279,6 +302,16 @@ func NewInstanceService(instanceRepo repository.InstanceRepository, quotaRepo re
 
 // Create creates a new instance
 func (s *instanceService) Create(userID int, req CreateInstanceRequest) (*models.Instance, error) {
+	return s.create(userID, req, true)
+}
+
+// CreatePrevalidated creates a new instance after the caller has already
+// validated the full batch request with ValidateCreateRequests.
+func (s *instanceService) CreatePrevalidated(userID int, req CreateInstanceRequest) (*models.Instance, error) {
+	return s.create(userID, req, false)
+}
+
+func (s *instanceService) create(userID int, req CreateInstanceRequest, validateQuotaAndName bool) (*models.Instance, error) {
 	ctx := context.Background()
 	req.Name = strings.TrimSpace(req.Name)
 	req.Type = strings.ToLower(strings.TrimSpace(req.Type))
@@ -299,82 +332,85 @@ func (s *instanceService) Create(userID int, req CreateInstanceRequest) (*models
 		return nil, err
 	}
 
-	// Check user quota
-	quota, err := s.quotaRepo.GetByUserID(userID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get user quota: %w", err)
-	}
-
-	if quota == nil {
-		return nil, fmt.Errorf("user quota not found")
-	}
 	instanceMode := resolveCreateInstanceMode(req)
 	modeRuntimeType, _ := RuntimeTypeForInstanceMode(instanceMode)
 	if !hasExplicitCreateInstanceMode(req) && normalizeInstanceRuntimeType(req.RuntimeType) == RuntimeBackendShell {
 		modeRuntimeType = RuntimeBackendShell
 	}
 
-	// Check instance count limit
-	currentCount, err := s.instanceRepo.CountByUserID(userID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to count instances: %w", err)
-	}
-
-	if currentCount >= quota.MaxInstances {
-		return nil, fmt.Errorf("instance limit reached: %d/%d", currentCount, quota.MaxInstances)
-	}
-
-	existingInstances, err := s.instanceRepo.GetByUserID(userID, 0, 1000)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list user instances for quota validation: %w", err)
-	}
-
-	currentCPU := 0.0
-	currentMemory := 0
-	currentStorage := 0
-	currentGPU := 0
-	for _, existing := range existingInstances {
-		if instanceModeUsesDedicatedResources(modeForExistingInstance(&existing)) {
-			currentCPU += existing.CPUCores
-			currentMemory += existing.MemoryGB
-			currentStorage += existing.DiskGB
-			if existing.GPUEnabled {
-				currentGPU += existing.GPUCount
-			}
-		}
-	}
-
-	nameExists, err := s.instanceRepo.ExistsByUserIDAndName(userID, req.Name)
-	if err != nil {
-		return nil, fmt.Errorf("failed to validate instance name: %w", err)
-	}
-	if nameExists {
-		return nil, fmt.Errorf("instance name already exists")
-	}
-
 	requestedGPU := 0
 	if req.GPUEnabled {
 		requestedGPU = req.GPUCount
 	}
-	if instanceModeUsesDedicatedResources(instanceMode) {
-		// Check CPU limit
-		if currentCPU+req.CPUCores > quota.MaxCPUCores {
-			return nil, fmt.Errorf("CPU cores exceed quota: current %v, requested %v, max %v", currentCPU, req.CPUCores, quota.MaxCPUCores)
+	if validateQuotaAndName {
+		// Check user quota
+		quota, err := s.quotaRepo.GetByUserID(userID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get user quota: %w", err)
 		}
 
-		// Check memory limit
-		if currentMemory+req.MemoryGB > quota.MaxMemoryGB {
-			return nil, fmt.Errorf("memory exceed quota: current %dGB, requested %dGB, max %dGB", currentMemory, req.MemoryGB, quota.MaxMemoryGB)
+		if quota == nil {
+			return nil, fmt.Errorf("user quota not found")
 		}
 
-		// Check storage limit
-		if currentStorage+req.DiskGB > quota.MaxStorageGB {
-			return nil, fmt.Errorf("storage exceed quota: current %dGB, requested %dGB, max %dGB", currentStorage, req.DiskGB, quota.MaxStorageGB)
+		// Check instance count limit
+		currentCount, err := s.instanceRepo.CountByUserID(userID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to count instances: %w", err)
 		}
 
-		// Check GPU limit
-		if currentGPU+requestedGPU > quota.MaxGPUCount {
-			return nil, fmt.Errorf("GPU count exceed quota: current %d, requested %d, max %d", currentGPU, requestedGPU, quota.MaxGPUCount)
+		if currentCount >= quota.MaxInstances {
+			return nil, fmt.Errorf("instance limit reached: %d/%d", currentCount, quota.MaxInstances)
+		}
+
+		existingInstances, err := s.instanceRepo.GetByUserID(userID, 0, 1000)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list user instances for quota validation: %w", err)
+		}
+
+		currentCPU := 0.0
+		currentMemory := 0
+		currentStorage := 0
+		currentGPU := 0
+		for _, existing := range existingInstances {
+			if instanceModeUsesDedicatedResources(modeForExistingInstance(&existing)) {
+				currentCPU += existing.CPUCores
+				currentMemory += existing.MemoryGB
+				currentStorage += existing.DiskGB
+				if existing.GPUEnabled {
+					currentGPU += existing.GPUCount
+				}
+			}
+		}
+
+		nameExists, err := s.instanceRepo.ExistsByUserIDAndName(userID, req.Name)
+		if err != nil {
+			return nil, fmt.Errorf("failed to validate instance name: %w", err)
+		}
+		if nameExists {
+			return nil, fmt.Errorf("instance name already exists")
+		}
+
+		if instanceModeUsesDedicatedResources(instanceMode) {
+			// Check CPU limit
+			if currentCPU+req.CPUCores > quota.MaxCPUCores {
+				return nil, fmt.Errorf("CPU cores exceed quota: current %v, requested %v, max %v", currentCPU, req.CPUCores, quota.MaxCPUCores)
+			}
+
+			// Check memory limit
+			if currentMemory+req.MemoryGB > quota.MaxMemoryGB {
+				return nil, fmt.Errorf("memory exceed quota: current %dGB, requested %dGB, max %dGB", currentMemory, req.MemoryGB, quota.MaxMemoryGB)
+			}
+
+			// Check storage limit
+			if currentStorage+req.DiskGB > quota.MaxStorageGB {
+				return nil, fmt.Errorf("storage exceed quota: current %dGB, requested %dGB, max %dGB", currentStorage, req.DiskGB, quota.MaxStorageGB)
+			}
+
+			// Check GPU limit
+			if currentGPU+requestedGPU > quota.MaxGPUCount {
+				return nil, fmt.Errorf("GPU count exceed quota: current %d, requested %d, max %d", currentGPU, requestedGPU, quota.MaxGPUCount)
+			}
 		}
 	}
 	if err := s.enforceInstanceModeLimits(ctx, instanceMode, req.CPUCores, req.MemoryGB, req.DiskGB, requestedGPU); err != nil {

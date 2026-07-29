@@ -489,4 +489,76 @@ export const BUILTIN_MEMBER_TEMPLATES: TeamMemberTemplate[] = [
       }),
     ],
   },
+  {
+    id: "builtin-research-publication-team",
+    name: "科研成果六成员团队",
+    teamName: "research-publication-team",
+    communicationMode: "leader_mediated",
+    description:
+      "科研成果 Team：Leader 统筹研究目标和交付节奏，文献调研员梳理证据，实验设计师制定可复现方案，数据处理员完成分析，文章润色员完善论文表达，成果展示师组织最终汇报。",
+    source: "builtin",
+    members: [
+      baseMember({
+        memberId: "leader",
+        name: "research-lead",
+        role: "leader",
+        description:
+          "智能体编排官：明确研究目标和完成标准，协调文献、实验、数据、写作与展示之间的依赖，核验成员产出并整合最终成果。",
+        resourcePreset: "medium",
+        isLeader: true,
+        cpuCores: 4,
+        memoryGb: 8,
+        diskGb: 50,
+        agentProfileKey: "agency.agents-orchestrator",
+      }),
+      baseMember({
+        memberId: "literature",
+        name: "literature-researcher",
+        role: "literature-researcher",
+        description:
+          "文献调研员：界定检索范围，查找和评估可信文献，整理可追溯证据、研究脉络、争议与待解决问题，不编造引用。",
+        agentProfileKey: "agency.literature-researcher",
+      }),
+      baseMember({
+        memberId: "experiment",
+        name: "experiment-designer",
+        role: "experiment-designer",
+        description:
+          "实验设计师：把研究问题转化为假设、变量、对照、样本、步骤、测量和分析计划，并识别混杂因素、复现要求及伦理风险。",
+        resourcePreset: "medium",
+        cpuCores: 4,
+        memoryGb: 8,
+        diskGb: 50,
+        agentProfileKey: "agency.experiment-designer",
+      }),
+      baseMember({
+        memberId: "data",
+        name: "data-analyst",
+        role: "data-analyst",
+        description:
+          "数据处理员：检查数据来源与质量，记录清洗和转换过程，执行与实验设计一致的分析，量化不确定性并生成可复现图表。",
+        resourcePreset: "medium",
+        cpuCores: 4,
+        memoryGb: 8,
+        diskGb: 50,
+        agentProfileKey: "agency.data-analyst",
+      }),
+      baseMember({
+        memberId: "editor",
+        name: "academic-editor",
+        role: "academic-editor",
+        description:
+          "文章润色员：在不改变证据强度和作者原意的前提下，完善论文结构、论证、语言、术语及引用一致性，并标记缺失或无依据内容。",
+        agentProfileKey: "agency.academic-editor",
+      }),
+      baseMember({
+        memberId: "presenter",
+        name: "research-presenter",
+        role: "research-presenter",
+        description:
+          "成果展示师：面向目标受众组织研究叙事、图表、幻灯片或海报，准确呈现已验证结论、方法和局限，避免夸大成果。",
+        agentProfileKey: "agency.research-presenter",
+      }),
+    ],
+  },
 ];

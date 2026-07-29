@@ -663,6 +663,31 @@ func TestInstanceModeCapacityCanDisablePro(t *testing.T) {
 	}
 }
 
+func TestValidateCreateRequestsChecksAggregateModeCapacity(t *testing.T) {
+	t.Setenv("CLAWMANAGER_LITE_CAPACITY", "3")
+	instanceRepo := newV2LifecycleInstanceRepo()
+	instanceRepo.byID[1] = &models.Instance{
+		ID:           1,
+		UserID:       45,
+		Name:         "existing-lite",
+		InstanceMode: InstanceModeLite,
+		Status:       "running",
+	}
+	service := &instanceService{
+		instanceRepo: instanceRepo,
+		quotaRepo:    v2LifecycleQuotaRepo{},
+	}
+
+	err := service.ValidateCreateRequests(45, []CreateInstanceRequest{
+		{Name: "batch-lite-001", Mode: InstanceModeLite},
+		{Name: "batch-lite-002", Mode: InstanceModeLite},
+		{Name: "batch-lite-003", Mode: InstanceModeLite},
+	})
+	if err == nil || !strings.Contains(err.Error(), "lite instance capacity reached: 4/3") {
+		t.Fatalf("aggregate capacity error = %v", err)
+	}
+}
+
 func TestInstanceModeResourceLimitRejectsOversizedPro(t *testing.T) {
 	t.Setenv("CLAWMANAGER_PRO_MAX_CPU_CORES", "1.5")
 	service := &instanceService{instanceRepo: newV2LifecycleInstanceRepo()}

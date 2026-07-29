@@ -23,6 +23,9 @@ type fakeWorkspaceHandlerInstanceService struct {
 func (s *fakeWorkspaceHandlerInstanceService) Create(userID int, req services.CreateInstanceRequest) (*models.Instance, error) {
 	return nil, nil
 }
+func (s *fakeWorkspaceHandlerInstanceService) CreatePrevalidated(userID int, req services.CreateInstanceRequest) (*models.Instance, error) {
+	return nil, nil
+}
 func (s *fakeWorkspaceHandlerInstanceService) ValidateCreateRequests(userID int, requests []services.CreateInstanceRequest) error {
 	return nil
 }

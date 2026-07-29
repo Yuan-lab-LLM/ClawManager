@@ -963,7 +963,7 @@ func (s *teamService) createTeamMemberInstance(userID int, team *models.Team, me
 		return nil, err
 	}
 	createReq.OpenClawConfigPlan = memberOpenClawPlan
-	instance, err := s.instanceService.Create(userID, createReq)
+	instance, err := s.instanceService.CreatePrevalidated(userID, createReq)
 	if err != nil {
 		member.Status = models.TeamMemberStatusFailed
 		member.UpdatedAt = time.Now().UTC()

@@ -32,7 +32,7 @@ const runtimeImageKey = (item: SystemImageSetting) =>
     : ["runtime-image", item.instance_type, item.runtime_type ?? "gateway", item.image].join(":");
 
 const instanceTimeValue = (instance: Instance) => {
-  const value = Date.parse(instance.updated_at || instance.created_at || "");
+  const value = Date.parse(instance.created_at || "");
   return Number.isFinite(value) ? value : 0;
 };
 
@@ -541,6 +541,7 @@ const InstanceListPage: React.FC = () => {
                   <input
                     type="number"
                     min={1}
+                    max={100}
                     value={batchCreateCount}
                     onChange={(event) => setBatchCreateCount(Number(event.target.value))}
                     className="app-input mt-1 w-full"
