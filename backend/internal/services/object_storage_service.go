@@ -44,13 +44,20 @@ func NewObjectStorageService(cfg config.ObjectStorageConfig) (ObjectStorageServi
 		Creds:        credentials.NewStaticV4(cfg.AccessKey, cfg.SecretKey, ""),
 		Secure:       cfg.UseSSL,
 		Region:       cfg.Region,
-		BucketLookup: minio.BucketLookupPath,
+		BucketLookup: bucketLookupType(cfg.ForcePathStyle),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize object storage client: %w", err)
 	}
 	service.minioClient = client
 	return service, nil
+}
+
+func bucketLookupType(forcePathStyle bool) minio.BucketLookupType {
+	if forcePathStyle {
+		return minio.BucketLookupPath
+	}
+	return minio.BucketLookupAuto
 }
 
 func (s *objectStorageService) PutObject(ctx context.Context, objectKey string, body []byte, contentType string) error {
