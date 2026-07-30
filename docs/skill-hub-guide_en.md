@@ -56,4 +56,5 @@ When workspace files differ from the installed version, the instance panel repor
 
 - [Resource Management Guide](./resource-management.md)
 - [Security Protection Platform Guide](./security-platform.md)
+- [Xquik TweetClaw Social Workflow](./tweetclaw-social-workflow.md)
 - [User Guide](./use_guide_en.md)

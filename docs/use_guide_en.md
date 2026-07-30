@@ -96,6 +96,8 @@ OpenClaw and Hermes preserve their own native conversation/session behavior. Ope
 
 OpenClaw, Hermes, OpenCode, and DeepSeek Harness are all supported. Runtime-specific storage paths, reload behavior, and image capabilities can still differ. See the [Resource Management Guide](./resource-management.md) and [Skill Hub Guide](./skill-hub-guide_en.md).
 
+For a governed OpenClaw example with a reviewed skill, config resource, Resource Pack, and runtime verification, see the [Xquik TweetClaw Social Workflow](./tweetclaw-social-workflow.md).
+
 <a id="team-collaboration"></a>
 ## 7. Use Team collaboration
 
@@ -184,4 +186,5 @@ Final acceptance should prove: core workloads and PVCs are healthy; an ordinary 
 - [Security Protection Guide](./security-platform.md)
 - [Resource Management Guide](./resource-management.md)
 - [Skill Hub Guide](./skill-hub-guide_en.md)
+- [Xquik TweetClaw Social Workflow](./tweetclaw-social-workflow.md)
 - [OpenCode Workspace Guide](./opencode-lite-pro-agent-development_en.md)

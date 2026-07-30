@@ -69,5 +69,6 @@ Each card is an entry point to the corresponding page. Available enforcement and
 
 - [Skill Hub Guide](./skill-hub-guide_en.md)
 - [Resource Management Guide](./resource-management.md)
+- [Xquik TweetClaw Social Workflow](./tweetclaw-social-workflow.md)
 - [AI Gateway User Guide](./aigateway.md)
 - [User Manual](./use_guide_en.md)

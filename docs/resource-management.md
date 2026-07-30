@@ -41,10 +41,11 @@ Injection records help answer “what was delivered?” They are not security ev
 - **Instance creation** selects archives, resource packs, manual resources, or skills when the chosen runtime supports them.
 - **Instance Skill Management** shows the materialized skill version in a running workspace.
 - **Security Protection** is a separate administrator feature for runtime defense, isolation, policy, emergency response, and audit. Skill Scanner is one scenario inside that platform, not a Resource Management tab.
+- The [Xquik TweetClaw Social Workflow](./tweetclaw-social-workflow.md) demonstrates a reviewed OpenClaw skill, config resource, Resource Pack, and Injection Record.
 
 ## Related Guides
 
 - [Skill Hub Guide](./skill-hub-guide_en.md)
 - [Security Protection Platform Guide](./security-platform.md)
-- [Security Protection Platform Guide](./security-platform.md)
+- [Xquik TweetClaw Social Workflow](./tweetclaw-social-workflow.md)
 - [User Guide](./use_guide_en.md)

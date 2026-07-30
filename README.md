@@ -309,6 +309,7 @@ Runtime and protocol implementation references remain under `docs/` for contribu
 - [Security Platform Guide](./docs/security-platform.md)
 - [Resource Management Guide](./docs/resource-management.md)
 - [Skill Hub Guide](./docs/skill-hub-guide_en.md)
+- [Xquik TweetClaw Social Workflow](./docs/tweetclaw-social-workflow.md)
 - [OpenCode Workspace Guide](./docs/opencode-lite-pro-agent-development_en.md)
 
 ## License
