@@ -14,7 +14,7 @@ type ImageRuntimeType = 'desktop' | 'gateway';
 type RuntimeGroup = 'lite' | 'pro';
 
 interface RuntimeCardDefinition {
-  instance_type: RuntimeType;
+  instance_type: string;
   runtime_type: ImageRuntimeType;
   display_name: string;
   image: string;
@@ -47,6 +47,12 @@ const PRO_BASE_RUNTIME_CARDS: RuntimeCardDefinition[] = [
     runtime_type: 'desktop',
     display_name: 'Hermes Pro',
     image: 'ghcr.io/yuan-lab-llm/agentsruntime/hermes:latest',
+  },
+  {
+    instance_type: 'workbuddy',
+    runtime_type: 'desktop',
+    display_name: 'Workbuddy Pro',
+    image: 'ghcr.io/yuan-lab-llm/agentsruntime/workbuddy-linux:latest',
   },
 ];
 

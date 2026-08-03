@@ -168,7 +168,7 @@ func (s *instanceService) ValidateCreateRequests(userID int, requests []CreateIn
 type CreateInstanceRequest struct {
 	Name                 string              `json:"name" validate:"required,min=3,max=50"`
 	Description          *string             `json:"description,omitempty"`
-	Type                 string              `json:"type" validate:"required,oneof=openclaw ubuntu debian centos custom webtop hermes"`
+	Type                 string              `json:"type" validate:"required,oneof=openclaw ubuntu debian centos custom webtop hermes workbuddy"`
 	Mode                 string              `json:"mode" validate:"omitempty,oneof=lite pro"`
 	InstanceMode         string              `json:"instance_mode" validate:"omitempty,oneof=lite pro"`
 	RuntimeType          string              `json:"runtime_type" validate:"omitempty,oneof=gateway desktop shell"`
@@ -1222,7 +1222,7 @@ func (s *instanceService) buildAgentEnv(instance *models.Instance) (map[string]s
 
 func supportsManagedRuntimeIntegration(instanceType string) bool {
 	switch strings.ToLower(strings.TrimSpace(instanceType)) {
-	case "openclaw", "hermes":
+	case "openclaw", "hermes", "workbuddy":
 		return true
 	default:
 		return false
@@ -1267,7 +1267,7 @@ func (s *instanceService) syncInstanceNetworkPolicy(ctx context.Context, userID 
 
 func supportsRuntimeConfigInjection(instanceType string) bool {
 	switch strings.ToLower(strings.TrimSpace(instanceType)) {
-	case "openclaw", "hermes":
+	case "openclaw", "hermes", "workbuddy":
 		return true
 	default:
 		return false

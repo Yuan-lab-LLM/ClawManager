@@ -204,7 +204,7 @@ type ExternalAccessRequest struct {
 type CreateInstanceRequest struct {
 	Name                 string                       `json:"name" binding:"required,min=3,max=50"`
 	Description          *string                      `json:"description,omitempty"`
-	Type                 string                       `json:"type" binding:"required,oneof=openclaw ubuntu debian centos custom webtop hermes"`
+	Type                 string                       `json:"type" binding:"required,oneof=openclaw ubuntu debian centos custom webtop hermes workbuddy"`
 	Mode                 string                       `json:"mode" binding:"omitempty,oneof=lite pro"`
 	InstanceMode         string                       `json:"instance_mode" binding:"omitempty,oneof=lite pro"`
 	RuntimeType          string                       `json:"runtime_type" binding:"omitempty,oneof=gateway desktop shell"`

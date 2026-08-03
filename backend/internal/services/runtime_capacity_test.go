@@ -37,6 +37,15 @@ func TestRuntimeLinuxID(t *testing.T) {
 }
 
 func TestRuntimeGatewayPortRangeMatchesInstanceCapacity(t *testing.T) {
+	if got, want := RuntimeGatewayPortOffset, 0; got != want {
+		t.Fatalf("gateway port offset = %d, want %d", got, want)
+	}
+	if got, want := RuntimeBrowserCDPPortOffset, 1; got != want {
+		t.Fatalf("browser CDP port offset = %d, want %d", got, want)
+	}
+	if got, want := RuntimeBrowserControlPortOffset, 2; got != want {
+		t.Fatalf("browser control port offset = %d, want %d", got, want)
+	}
 	if got, want := RuntimeGatewayPortsPerInstance, 3; got != want {
 		t.Fatalf("expected %d ports per gateway instance, got %d", want, got)
 	}

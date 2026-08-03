@@ -27,12 +27,13 @@ type RuntimeScheduler struct {
 	envBuilder   RuntimeGatewayEnvBuilder
 	tick         time.Duration
 
-	workspaceRoot     string
-	runtimeNamespace  string
-	gatewayPortStart  int
-	gatewayPortEnd    int
-	heartbeatTimeout  time.Duration
-	maxGatewaysPerPod int
+	workspaceRoot             string
+	runtimeNamespace          string
+	gatewayPortStart          int
+	gatewayPortEnd            int
+	heartbeatTimeout          time.Duration
+	maxGatewaysPerPod         int
+	gatewayStartInFlightLimit int
 
 	gatewayCreateLocksMu sync.Mutex
 	gatewayCreateLocks   map[int64]*sync.Mutex
@@ -44,9 +45,9 @@ var (
 )
 
 const (
-	runtimeRolloutStaleWindowMultiplier = 3
-	runtimeGatewayStartInFlightLimit    = 1
-	runtimeSchedulerBatchLimit          = 1000
+	runtimeRolloutStaleWindowMultiplier     = 3
+	defaultRuntimeGatewayStartInFlightLimit = 32
+	runtimeSchedulerBatchLimit              = 1000
 )
 
 type RuntimeGatewayEnvBuilder func(*models.Instance) (map[string]string, error)
@@ -97,6 +98,14 @@ func WithRuntimeSchedulerMaxGatewaysPerPod(capacity int) RuntimeSchedulerOption 
 	}
 }
 
+func WithRuntimeSchedulerGatewayStartInFlightLimit(limit int) RuntimeSchedulerOption {
+	return func(s *RuntimeScheduler) {
+		if limit > 0 {
+			s.gatewayStartInFlightLimit = limit
+		}
+	}
+}
+
 func WithRuntimeSchedulerGatewayEnvBuilder(builder RuntimeGatewayEnvBuilder) RuntimeSchedulerOption {
 	return func(s *RuntimeScheduler) {
 		s.envBuilder = builder
@@ -119,22 +128,23 @@ func NewRuntimeScheduler(
 		tick = 2 * time.Second
 	}
 	s := &RuntimeScheduler{
-		instanceRepo:       instanceRepo,
-		podRepo:            podRepo,
-		bindingRepo:        bindingRepo,
-		rolloutRepo:        rolloutRepo,
-		agentClient:        agentClient,
-		events:             events,
-		leader:             leader,
-		deployments:        deployments,
-		tick:               tick,
-		workspaceRoot:      "/workspaces",
-		runtimeNamespace:   "clawmanager-system",
-		gatewayPortStart:   RuntimeGatewayPortStart,
-		gatewayPortEnd:     RuntimeGatewayPortEnd,
-		heartbeatTimeout:   10 * time.Second,
-		maxGatewaysPerPod:  RuntimePodCapacity,
-		gatewayCreateLocks: map[int64]*sync.Mutex{},
+		instanceRepo:              instanceRepo,
+		podRepo:                   podRepo,
+		bindingRepo:               bindingRepo,
+		rolloutRepo:               rolloutRepo,
+		agentClient:               agentClient,
+		events:                    events,
+		leader:                    leader,
+		deployments:               deployments,
+		tick:                      tick,
+		workspaceRoot:             "/workspaces",
+		runtimeNamespace:          "clawmanager-system",
+		gatewayPortStart:          RuntimeGatewayPortStart,
+		gatewayPortEnd:            RuntimeGatewayPortEnd,
+		heartbeatTimeout:          10 * time.Second,
+		maxGatewaysPerPod:         RuntimePodCapacity,
+		gatewayStartInFlightLimit: defaultRuntimeGatewayStartInFlightLimit,
+		gatewayCreateLocks:        map[int64]*sync.Mutex{},
 	}
 	for _, opt := range opts {
 		opt(s)
@@ -509,29 +519,7 @@ func (s *RuntimeScheduler) reconcile(ctx context.Context) error {
 	if err != nil {
 		errs = append(errs, err)
 	} else {
-		for _, instance := range creating {
-			if !isSchedulerManagedV2Instance(instance) {
-				continue
-			}
-			binding, err := s.bindingRepo.GetByInstanceID(ctx, instance.ID)
-			if err != nil {
-				errs = append(errs, fmt.Errorf("get binding for creating instance %d: %w", instance.ID, err))
-				continue
-			}
-			if binding != nil {
-				if err := s.syncInstanceStateFromBinding(ctx, instance, binding); err != nil {
-					errs = append(errs, fmt.Errorf("sync creating instance %d from binding: %w", instance.ID, err))
-				}
-				continue
-			}
-			if err := s.assignInstance(ctx, instance); err != nil {
-				if errors.Is(err, errRuntimeScaleOutPending) || errors.Is(err, errRuntimeGatewayStartPending) {
-					continue
-				}
-				errs = append(errs, fmt.Errorf("assign creating instance %d: %w", instance.ID, err))
-				s.markInstanceError(ctx, instance, err, &errs)
-			}
-		}
+		errs = append(errs, s.reconcileCreatingInstances(ctx, creating)...)
 	}
 
 	desired, err := s.instanceRepo.GetV2DesiredRunning(ctx, runtimeSchedulerBatchLimit)
@@ -580,6 +568,67 @@ func (s *RuntimeScheduler) reconcile(ctx context.Context) error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+func (s *RuntimeScheduler) reconcileCreatingInstances(ctx context.Context, instances []models.Instance) []error {
+	if len(instances) == 0 {
+		return nil
+	}
+	concurrency := s.gatewayStartInFlightLimit
+	if concurrency <= 0 {
+		concurrency = 1
+	}
+	concurrency = minInt(concurrency, len(instances))
+
+	jobs := make(chan models.Instance)
+	var wg sync.WaitGroup
+	var errsMu sync.Mutex
+	var errs []error
+	for range concurrency {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for instance := range jobs {
+				instanceErrs := s.reconcileCreatingInstance(ctx, instance)
+				if len(instanceErrs) == 0 {
+					continue
+				}
+				errsMu.Lock()
+				errs = append(errs, instanceErrs...)
+				errsMu.Unlock()
+			}
+		}()
+	}
+	for _, instance := range instances {
+		if isSchedulerManagedV2Instance(instance) {
+			jobs <- instance
+		}
+	}
+	close(jobs)
+	wg.Wait()
+	return errs
+}
+
+func (s *RuntimeScheduler) reconcileCreatingInstance(ctx context.Context, instance models.Instance) []error {
+	binding, err := s.bindingRepo.GetByInstanceID(ctx, instance.ID)
+	if err != nil {
+		return []error{fmt.Errorf("get binding for creating instance %d: %w", instance.ID, err)}
+	}
+	if binding != nil {
+		if err := s.syncInstanceStateFromBinding(ctx, instance, binding); err != nil {
+			return []error{fmt.Errorf("sync creating instance %d from binding: %w", instance.ID, err)}
+		}
+		return nil
+	}
+	if err := s.assignInstance(ctx, instance); err != nil {
+		if errors.Is(err, errRuntimeScaleOutPending) || errors.Is(err, errRuntimeGatewayStartPending) {
+			return nil
+		}
+		errs := []error{fmt.Errorf("assign creating instance %d: %w", instance.ID, err)}
+		s.markInstanceError(ctx, instance, err, &errs)
+		return errs
+	}
+	return nil
 }
 
 func (s *RuntimeScheduler) syncInstanceStateFromBinding(ctx context.Context, instance models.Instance, binding *models.InstanceRuntimeBinding) error {
@@ -654,7 +703,7 @@ func (s *RuntimeScheduler) lockGatewayCreateForPod(podID int64) func() {
 }
 
 func (s *RuntimeScheduler) podCanStartGateway(ctx context.Context, podID int64) (bool, error) {
-	if s == nil || s.bindingRepo == nil || runtimeGatewayStartInFlightLimit <= 0 {
+	if s == nil || s.bindingRepo == nil || s.gatewayStartInFlightLimit <= 0 {
 		return true, nil
 	}
 	bindings, err := s.bindingRepo.ListByRuntimePodID(ctx, podID)
@@ -668,7 +717,7 @@ func (s *RuntimeScheduler) podCanStartGateway(ctx context.Context, podID int64) 
 			starting++
 		}
 	}
-	return starting < runtimeGatewayStartInFlightLimit, nil
+	return starting < s.gatewayStartInFlightLimit, nil
 }
 
 func (s *RuntimeScheduler) scaleOutForPendingBacklog(ctx context.Context, instances []models.Instance) error {
@@ -840,9 +889,16 @@ func (s *RuntimeScheduler) assignInstance(ctx context.Context, instance models.I
 			unlock()
 			continue
 		}
-		err = s.createGatewayOnPod(ctx, instance, runtimeType, pod)
+		start, err := s.prepareGatewayStart(ctx, instance, runtimeType, pod)
 		unlock()
 		if err != nil {
+			if releaseErr := s.podRepo.ReleaseSlot(ctx, pod.ID); releaseErr != nil {
+				return errors.Join(err, releaseErr)
+			}
+			lastErr = err
+			continue
+		}
+		if err := s.createGatewayOnPodWithPortFallback(ctx, instance, runtimeType, pod, start); err != nil {
 			if releaseErr := s.podRepo.ReleaseSlot(ctx, pod.ID); releaseErr != nil {
 				return errors.Join(err, releaseErr)
 			}
@@ -924,48 +980,81 @@ func (s *RuntimeScheduler) scaleOutIfAtCapacity(ctx context.Context, runtimeType
 	return true, nil
 }
 
-func (s *RuntimeScheduler) createGatewayOnPod(ctx context.Context, instance models.Instance, runtimeType string, pod models.RuntimePod) error {
+type runtimeGatewayStart struct {
+	endpoint        string
+	workspacePath   string
+	environment     map[string]string
+	uid             int
+	gid             int
+	reservedBinding *models.InstanceRuntimeBinding
+}
+
+func (s *RuntimeScheduler) prepareGatewayStart(ctx context.Context, instance models.Instance, runtimeType string, pod models.RuntimePod) (*runtimeGatewayStart, error) {
+	return s.prepareGatewayStartExcludingPorts(ctx, instance, runtimeType, pod, nil)
+}
+
+func (s *RuntimeScheduler) prepareGatewayStartExcludingPorts(
+	ctx context.Context,
+	instance models.Instance,
+	runtimeType string,
+	pod models.RuntimePod,
+	excludedPorts map[int]struct{},
+) (*runtimeGatewayStart, error) {
 	if s.agentClient == nil || s.bindingRepo == nil || s.instanceRepo == nil {
-		return fmt.Errorf("runtime scheduler gateway dependencies are not configured")
+		return nil, fmt.Errorf("runtime scheduler gateway dependencies are not configured")
 	}
 	endpoint := strings.TrimSpace(*pod.AgentEndpoint)
 	workspacePath := RuntimeWorkspacePathWithRoot(s.workspaceRoot, runtimeType, instance.UserID, instance.ID)
 	environment, err := s.gatewayEnvironment(&instance)
 	if err != nil {
-		return fmt.Errorf("build runtime gateway environment: %w", err)
+		return nil, fmt.Errorf("build runtime gateway environment: %w", err)
 	}
 	uid, gid := runtimeGatewayLinuxIDs(instance.ID, environment)
-	reservedBinding, err := s.reserveGatewayPort(ctx, instance, runtimeType, pod, workspacePath)
+	reservedBinding, err := s.reserveGatewayPortExcludingPorts(ctx, instance, runtimeType, pod, workspacePath, excludedPorts)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	resp, err := s.agentClient.CreateGateway(ctx, endpoint, RuntimeAgentCreateGatewayRequest{
+	return &runtimeGatewayStart{
+		endpoint:        endpoint,
+		workspacePath:   workspacePath,
+		environment:     environment,
+		uid:             uid,
+		gid:             gid,
+		reservedBinding: reservedBinding,
+	}, nil
+}
+
+func (s *RuntimeScheduler) createGatewayOnPod(ctx context.Context, instance models.Instance, runtimeType string, pod models.RuntimePod, start *runtimeGatewayStart) error {
+	if start == nil || start.reservedBinding == nil {
+		return fmt.Errorf("runtime gateway start is not prepared")
+	}
+	resp, err := s.agentClient.CreateGateway(ctx, start.endpoint, RuntimeAgentCreateGatewayRequest{
 		InstanceID:    instance.ID,
 		UserID:        instance.UserID,
 		AgentType:     runtimeType,
-		WorkspacePath: workspacePath,
-		GatewayPort:   reservedBinding.GatewayPort,
+		WorkspacePath: start.workspacePath,
+		GatewayPort:   start.reservedBinding.GatewayPort,
 		PortRange: RuntimeAgentPortRange{
 			Start: s.gatewayPortStart,
 			End:   s.gatewayPortEnd,
 		},
-		UID:         uid,
-		GID:         gid,
+		UID:         start.uid,
+		GID:         start.gid,
 		CPUCores:    instance.CPUCores,
 		MemoryMB:    instance.MemoryGB * 1024,
 		DiskQuotaMB: instance.DiskGB * 1024,
 		Generation:  instance.RuntimeGeneration,
-		Environment: environment,
+		Environment: start.environment,
 	})
 	if err != nil {
-		return s.cleanupGatewayAfterAssignFailure(ctx, endpoint, instance.ID, "", true, err)
+		return s.cleanupGatewayAfterAssignFailure(ctx, start.endpoint, instance.ID, "", true, err)
 	}
 	if resp == nil {
-		return s.cleanupGatewayAfterAssignFailure(ctx, endpoint, instance.ID, "", true, fmt.Errorf("runtime agent returned empty gateway response"))
+		return s.cleanupGatewayAfterAssignFailure(ctx, start.endpoint, instance.ID, "", true, fmt.Errorf("runtime agent returned empty gateway response"))
 	}
-	if resp.Port != reservedBinding.GatewayPort {
-		cause := fmt.Errorf("runtime agent returned gateway port %d, want control-plane allocation %d", resp.Port, reservedBinding.GatewayPort)
-		return s.cleanupGatewayAfterAssignFailure(ctx, endpoint, instance.ID, resp.GatewayID, true, cause)
+	if resp.Port != start.reservedBinding.GatewayPort {
+		cause := fmt.Errorf("runtime agent returned gateway port %d, want control-plane allocation %d", resp.Port, start.reservedBinding.GatewayPort)
+		return s.cleanupGatewayAfterAssignFailure(ctx, start.endpoint, instance.ID, resp.GatewayID, true, cause)
 	}
 
 	now := time.Now().UTC()
@@ -975,7 +1064,7 @@ func (s *RuntimeScheduler) createGatewayOnPod(ctx context.Context, instance mode
 		lastHealthAt = &now
 	}
 	if err := s.bindingRepo.UpdateGatewayAssignment(ctx, instance.ID, instance.RuntimeGeneration, resp.GatewayID, resp.PID, lifecycle.BindingState, lastHealthAt); err != nil {
-		return s.cleanupGatewayAfterAssignFailure(ctx, endpoint, instance.ID, resp.GatewayID, true, err)
+		return s.cleanupGatewayAfterAssignFailure(ctx, start.endpoint, instance.ID, resp.GatewayID, true, err)
 	}
 	if !lifecycle.CreateAccepted() {
 		cause := fmt.Errorf("runtime gateway %s returned status %q", resp.GatewayID, strings.TrimSpace(resp.Status))
@@ -984,14 +1073,14 @@ func (s *RuntimeScheduler) createGatewayOnPod(ctx context.Context, instance mode
 		if err := s.instanceRepo.UpdateRuntimeState(ctx, instance.ID, "error", instance.RuntimeGeneration, &message); err != nil {
 			errs = append(errs, fmt.Errorf("mark instance %d error: %w", instance.ID, err))
 		}
-		errs = append(errs, s.cleanupGatewayAfterAssignFailure(ctx, endpoint, instance.ID, resp.GatewayID, true, cause))
+		errs = append(errs, s.cleanupGatewayAfterAssignFailure(ctx, start.endpoint, instance.ID, resp.GatewayID, true, cause))
 		return errors.Join(errs...)
 	}
-	if err := s.instanceRepo.SetWorkspacePath(ctx, instance.ID, workspacePath); err != nil {
-		return s.cleanupGatewayAfterAssignFailure(ctx, endpoint, instance.ID, resp.GatewayID, true, err)
+	if err := s.instanceRepo.SetWorkspacePath(ctx, instance.ID, start.workspacePath); err != nil {
+		return s.cleanupGatewayAfterAssignFailure(ctx, start.endpoint, instance.ID, resp.GatewayID, true, err)
 	}
 	if err := s.instanceRepo.UpdateRuntimeState(ctx, instance.ID, lifecycle.InstanceState, instance.RuntimeGeneration, lifecycle.Message); err != nil {
-		return s.cleanupGatewayAfterAssignFailure(ctx, endpoint, instance.ID, resp.GatewayID, true, err)
+		return s.cleanupGatewayAfterAssignFailure(ctx, start.endpoint, instance.ID, resp.GatewayID, true, err)
 	}
 	if s.events != nil {
 		if err := s.events.Publish(ctx, lifecycle.EventType, map[string]any{
@@ -1001,7 +1090,7 @@ func (s *RuntimeScheduler) createGatewayOnPod(ctx context.Context, instance mode
 			"gateway_id":     resp.GatewayID,
 			"gateway_port":   resp.Port,
 			"gateway_state":  lifecycle.BindingState,
-			"workspace_path": workspacePath,
+			"workspace_path": start.workspacePath,
 			"generation":     instance.RuntimeGeneration,
 		}); err != nil {
 			log.Printf("runtime scheduler publish event failed: %v", err)
@@ -1010,7 +1099,69 @@ func (s *RuntimeScheduler) createGatewayOnPod(ctx context.Context, instance mode
 	return nil
 }
 
+func (s *RuntimeScheduler) createGatewayOnPodWithPortFallback(
+	ctx context.Context,
+	instance models.Instance,
+	runtimeType string,
+	pod models.RuntimePod,
+	start *runtimeGatewayStart,
+) error {
+	if start == nil || start.reservedBinding == nil {
+		return fmt.Errorf("runtime gateway start is not prepared")
+	}
+	excludedPorts := map[int]struct{}{}
+	maxAttempts := (s.gatewayPortEnd - s.gatewayPortStart + 1) / maxInt(RuntimeGatewayPortsPerInstance, 1)
+	if maxAttempts <= 0 {
+		maxAttempts = 1
+	}
+
+	var lastErr error
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		err := s.createGatewayOnPod(ctx, instance, runtimeType, pod, start)
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+		if !isRuntimeAgentGatewayPortConflict(err) {
+			return err
+		}
+		excludedPorts[start.reservedBinding.GatewayPort] = struct{}{}
+		if attempt+1 >= maxAttempts {
+			break
+		}
+
+		unlock := s.lockGatewayCreateForPod(pod.ID)
+		nextStart, prepareErr := s.prepareGatewayStartExcludingPorts(ctx, instance, runtimeType, pod, excludedPorts)
+		unlock()
+		if prepareErr != nil {
+			return errors.Join(lastErr, prepareErr)
+		}
+		start = nextStart
+	}
+	return lastErr
+}
+
+func isRuntimeAgentGatewayPortConflict(err error) bool {
+	if !errors.Is(err, ErrRuntimeAgentConflict) {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "requested gateway port") &&
+		(strings.Contains(message, "unavailable") || strings.Contains(message, "no free port"))
+}
+
 func (s *RuntimeScheduler) reserveGatewayPort(ctx context.Context, instance models.Instance, runtimeType string, pod models.RuntimePod, workspacePath string) (*models.InstanceRuntimeBinding, error) {
+	return s.reserveGatewayPortExcludingPorts(ctx, instance, runtimeType, pod, workspacePath, nil)
+}
+
+func (s *RuntimeScheduler) reserveGatewayPortExcludingPorts(
+	ctx context.Context,
+	instance models.Instance,
+	runtimeType string,
+	pod models.RuntimePod,
+	workspacePath string,
+	excludedPorts map[int]struct{},
+) (*models.InstanceRuntimeBinding, error) {
 	if s == nil || s.bindingRepo == nil {
 		return nil, fmt.Errorf("runtime scheduler binding repository is not configured")
 	}
@@ -1023,6 +1174,9 @@ func (s *RuntimeScheduler) reserveGatewayPort(ctx context.Context, instance mode
 		return nil, fmt.Errorf("list runtime pod %d bindings for gateway port allocation: %w", pod.ID, err)
 	}
 	for port := s.gatewayPortStart; port+blockSize-1 <= s.gatewayPortEnd; port += blockSize {
+		if _, excluded := excludedPorts[port]; excluded {
+			continue
+		}
 		if runtimeGatewayPortBlockOccupied(existingBindings, port, blockSize) {
 			deleted, err := s.bindingRepo.DeleteErrorByRuntimePodIDAndGatewayPort(ctx, pod.ID, port)
 			if err != nil {

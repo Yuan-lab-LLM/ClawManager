@@ -46,7 +46,9 @@ const AGENT_PROTOCOL_VERSION = "v1";
 const CUSTOM_RESOURCE_PRESET = "custom";
 const SKILLS_PER_PAGE = 6;
 const supportsRuntimeInjection = (type: string) =>
-  type === "openclaw" || type === "hermes";
+  type === "openclaw" || type === "hermes" || type === "workbuddy";
+const isProOnlyInstanceType = (type: string) =>
+  type === "custom" || type === "workbuddy";
 const DESKTOP_STREAM_PROFILES: Array<{
   id: DesktopStreamProfile;
   labelKey: string;
@@ -107,14 +109,21 @@ const INSTANCE_TYPE_I18N_KEYS: Record<
     label: "instances.typeOptions.hermes.label",
     description: "instances.typeOptions.hermes.description",
   },
+  workbuddy: {
+    label: "instances.typeOptions.workbuddy.label",
+    description: "instances.typeOptions.workbuddy.description",
+  },
   custom: {
     label: "instances.typeOptions.custom.label",
     description: "instances.typeOptions.custom.description",
   },
 };
 
-const CREATE_INSTANCE_TYPES = INSTANCE_TYPES.filter((type) =>
-  ["openclaw", "hermes"].includes(type.id),
+const FALLBACK_CREATE_INSTANCE_TYPES = INSTANCE_TYPES.filter((type) =>
+  ["openclaw", "hermes", "workbuddy"].includes(type.id),
+);
+const CONFIGURED_CREATE_INSTANCE_TYPES = INSTANCE_TYPES.filter((type) =>
+  ["openclaw", "hermes", "workbuddy", "custom"].includes(type.id),
 );
 
 const INSTANCE_MODE_OPTIONS: {
@@ -283,12 +292,13 @@ const getBuiltInEnvTemplates = (
     );
   }
 
-  if (type === "openclaw") {
+  if (type === "openclaw" || type === "workbuddy") {
     templates.push(
       {
         key: "TITLE",
         description: t("instances.envDescDesktopTitleOpenClaw"),
-        defaultValue: "ClawManager Desktop",
+        defaultValue:
+          type === "workbuddy" ? "Workbuddy" : "ClawManager Desktop",
       },
       {
         key: "SUBFOLDER",
@@ -435,7 +445,9 @@ const CreateInstancePage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [step, setStep] = useState(1);
   const [submitArmed, setSubmitArmed] = useState(false);
-  const [availableTypes, setAvailableTypes] = useState(CREATE_INSTANCE_TYPES);
+  const [availableTypes, setAvailableTypes] = useState(
+    FALLBACK_CREATE_INSTANCE_TYPES,
+  );
   const [runtimeImageSettings, setRuntimeImageSettings] = useState<
     SystemImageSetting[]
   >([]);
@@ -500,10 +512,15 @@ const CreateInstancePage: React.FC = () => {
     (template) =>
       !Object.prototype.hasOwnProperty.call(builtinEnvOverrides, template.key),
   );
-  const selectedType = availableTypes.find((item) => item.id === formData.type);
   const selectedMode = formData.mode ?? "lite";
   const selectedRuntimeType =
     selectedMode === "lite" ? "gateway" : "desktop";
+  const availableTypesForMode = availableTypes.filter(
+    (item) => selectedMode === "pro" || !isProOnlyInstanceType(item.id),
+  );
+  const selectedType = availableTypesForMode.find(
+    (item) => item.id === formData.type,
+  );
   const runtimeImageOptions = runtimeImageSettings.filter(
     (item) =>
       item.is_enabled !== false &&
@@ -514,6 +531,13 @@ const CreateInstancePage: React.FC = () => {
     runtimeImageOptions.find(
       (item) => getRuntimeImageOptionKey(item) === selectedRuntimeImageKey,
     ) ?? runtimeImageOptions[0] ?? null;
+  const primaryCustomProRuntimeImage =
+    runtimeImageSettings.find(
+      (item) =>
+        item.is_enabled !== false &&
+        item.instance_type === "custom" &&
+        normalizeRuntimeImageType(item.runtime_type) === "desktop",
+    ) ?? null;
   const usesDedicatedResources = selectedMode === "pro";
   const showRuntimeImageSelector = selectedMode === "pro";
   const instanceUsesDedicatedResources = (instance: Instance) => {
@@ -536,11 +560,29 @@ const CreateInstancePage: React.FC = () => {
               key={mode.id}
               type="button"
               onClick={() =>
-                setFormData((current) => ({
-                  ...current,
-                  mode: mode.id,
-                  instance_mode: mode.id,
-                }))
+                setFormData((current) => {
+                  const fallbackType =
+                    mode.id === "lite" && isProOnlyInstanceType(current.type)
+                      ? availableTypes.find(
+                          (type) => !isProOnlyInstanceType(type.id),
+                        )
+                      : undefined;
+
+                  return {
+                    ...current,
+                    mode: mode.id,
+                    instance_mode: mode.id,
+                    ...(fallbackType
+                      ? {
+                          type:
+                            fallbackType.id as CreateInstanceRequest["type"],
+                          os_type: fallbackType.defaultOs,
+                          os_version: fallbackType.defaultVersion,
+                          storage_class: "",
+                        }
+                      : {}),
+                  };
+                })
               }
               className={`rounded-[20px] border p-4 text-left transition-all ${
                 selected
@@ -578,7 +620,7 @@ const CreateInstancePage: React.FC = () => {
           enabledItems.map((item) => item.instance_type),
         );
 
-        const filtered = CREATE_INSTANCE_TYPES.filter((type) =>
+        const filtered = CONFIGURED_CREATE_INSTANCE_TYPES.filter((type) =>
           enabledTypes.has(type.id),
         );
         if (filtered.length > 0) {
@@ -601,7 +643,7 @@ const CreateInstancePage: React.FC = () => {
         }
       } catch {
         setRuntimeImageSettings([]);
-        setAvailableTypes(CREATE_INSTANCE_TYPES);
+        setAvailableTypes(FALLBACK_CREATE_INSTANCE_TYPES);
       }
     };
 
@@ -685,7 +727,7 @@ const CreateInstancePage: React.FC = () => {
   }, [user]);
 
   const handleTypeSelect = (typeId: string) => {
-    const instanceType = availableTypes.find((t) => t.id === typeId);
+    const instanceType = availableTypesForMode.find((t) => t.id === typeId);
     if (instanceType) {
       if (!supportsRuntimeInjection(typeId)) {
         setOpenClawImportFile(null);
@@ -907,7 +949,7 @@ const CreateInstancePage: React.FC = () => {
 
   const canProceed = () => {
     if (step === 1) return formData.name.length >= 3;
-    if (step === 2) return availableTypes.length > 0;
+    if (step === 2) return availableTypesForMode.length > 0;
     return true;
   };
 
@@ -1099,6 +1141,16 @@ const CreateInstancePage: React.FC = () => {
       );
     }
 
+    if (typeId === "workbuddy") {
+      return (
+        <img
+          src="/workbuddy.png"
+          alt="Workbuddy"
+          className="h-10 w-10 object-contain"
+        />
+      );
+    }
+
     return (
       <svg
         className="h-6 w-6 text-indigo-600"
@@ -1114,6 +1166,24 @@ const CreateInstancePage: React.FC = () => {
         />
       </svg>
     );
+  };
+
+  const getCreateTypeLabel = (
+    type: (typeof CONFIGURED_CREATE_INSTANCE_TYPES)[number],
+  ) => {
+    if (type.id === "custom" && primaryCustomProRuntimeImage?.display_name) {
+      return primaryCustomProRuntimeImage.display_name;
+    }
+    return getInstanceTypeLabel(t, type.id, type.name);
+  };
+
+  const getCreateTypeDescription = (
+    type: (typeof CONFIGURED_CREATE_INSTANCE_TYPES)[number],
+  ) => {
+    if (type.id === "custom") {
+      return t("systemSettingsPage.customProBadge");
+    }
+    return getInstanceTypeDescription(t, type.id, type.description);
   };
 
   const renderSummaryTagList = (
@@ -1281,7 +1351,7 @@ const CreateInstancePage: React.FC = () => {
                 {t("instances.selectInstanceType")}
               </h2>
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {availableTypes.map((type) => (
+                {availableTypesForMode.map((type) => (
                   <div
                     key={type.id}
                     onClick={() => handleTypeSelect(type.id)}
@@ -1299,14 +1369,10 @@ const CreateInstancePage: React.FC = () => {
                       </div>
                       <div className="ml-4">
                         <h3 className="text-sm font-medium text-gray-900">
-                          {getInstanceTypeLabel(t, type.id, type.name)}
+                          {getCreateTypeLabel(type)}
                         </h3>
                         <p className="mt-1 text-xs text-gray-500">
-                          {getInstanceTypeDescription(
-                            t,
-                            type.id,
-                            type.description,
-                          )}
+                          {getCreateTypeDescription(type)}
                         </p>
                       </div>
                     </div>
@@ -2261,11 +2327,7 @@ const CreateInstancePage: React.FC = () => {
                       </dt>
                       <dd className="mt-1 text-sm text-gray-900">
                         {selectedType
-                          ? getInstanceTypeLabel(
-                              t,
-                              selectedType.id,
-                              selectedType.name,
-                            )
+                          ? getCreateTypeLabel(selectedType)
                           : formData.type}
                       </dd>
                     </div>

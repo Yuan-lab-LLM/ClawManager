@@ -13,7 +13,8 @@ export interface Instance {
     | "centos"
     | "custom"
     | "webtop"
-    | "hermes";
+    | "hermes"
+    | "workbuddy";
   runtime_type: "desktop" | "shell" | "gateway";
   instance_mode: "lite" | "pro";
   status: "creating" | "running" | "stopped" | "error" | "deleting";
@@ -179,7 +180,8 @@ export interface CreateInstanceRequest {
     | "centos"
     | "custom"
     | "webtop"
-    | "hermes";
+    | "hermes"
+    | "workbuddy";
   mode?: InstanceMode;
   instance_mode?: InstanceMode;
   runtime_type?: "desktop" | "shell" | "gateway";
@@ -317,6 +319,14 @@ export const INSTANCE_TYPES: InstanceType[] = [
     description: "Hermes runtime built on the webtop desktop base",
     icon: "hermes",
     defaultOs: "hermes",
+    defaultVersion: "latest",
+  },
+  {
+    id: "workbuddy",
+    name: "Workbuddy",
+    description: "Managed Workbuddy runtime on a webtop desktop base",
+    icon: "workbuddy",
+    defaultOs: "workbuddy",
     defaultVersion: "latest",
   },
   {

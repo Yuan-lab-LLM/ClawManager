@@ -29,6 +29,7 @@ function supportsWorkspace(instance: Instance) {
   return (
     instance.type === "openclaw" ||
     instance.type === "hermes" ||
+    instance.type === "workbuddy" ||
     Boolean(instance.workspace_path)
   );
 }

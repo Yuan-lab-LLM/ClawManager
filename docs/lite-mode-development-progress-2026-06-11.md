@@ -80,6 +80,7 @@ flowchart LR
 - Share Link 访问已统一走 ClawManager 代理，能够兼容 Lite gateway 和 Pro service 两种后端形态。
 - 相关改动已部署到 172.16.1.12 环境，并完成一轮自动化回归。
 - 当前自动化测试已覆盖普通实例 Lite / Pro 模式、Share Link 基础行为、管理端模式展示以及 Team Lite 创建链路。
+- Lite 批量创建调度已改为可配置并发，容量为 100 的部署允许单 Pod 同时接收 100 个异步 gateway 创建请求；控制面会先原子预留三端口组，再调用 runtime agent，并在端口冲突时改用下一组。
 - 联调中发现，部分 Lite runtime / agent 能力仍需补齐，主要集中在 Team 任务消费和 Hermes Lite 会话稳定性上。
 
 ## 计划

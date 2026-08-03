@@ -217,3 +217,20 @@ func TestMigration042AddsImmutableReviewContractTarget(t *testing.T) {
 		}
 	}
 }
+
+func TestMigration044AddsWorkbuddyRuntime(t *testing.T) {
+	raw, err := embeddedMigrations.ReadFile("migrations/044_add_workbuddy_instance_type.sql")
+	if err != nil {
+		t.Fatalf("read migration 044: %v", err)
+	}
+	sql := string(raw)
+	for _, required := range []string{
+		"'workbuddy'",
+		"instance_type = 'workbuddy'",
+		"LOWER(TRIM(display_name)) = 'workbuddy'",
+	} {
+		if !strings.Contains(sql, required) {
+			t.Fatalf("migration 044 must contain %s", required)
+		}
+	}
+}

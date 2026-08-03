@@ -122,7 +122,12 @@ function formatBytes(value?: number) {
 }
 
 function supportsWorkspace(instance: Instance) {
-  return instance.type === "openclaw" || instance.type === "hermes" || Boolean(instance.workspace_path);
+  return (
+    instance.type === "openclaw" ||
+    instance.type === "hermes" ||
+    instance.type === "workbuddy" ||
+    Boolean(instance.workspace_path)
+  );
 }
 
 function getErrorMessage(err: unknown, fallback: string) {

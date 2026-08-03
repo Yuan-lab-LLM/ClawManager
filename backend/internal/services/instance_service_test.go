@@ -62,7 +62,7 @@ func TestBuildGatewayEnvInjectsGatewayModelCatalog(t *testing.T) {
 	t.Setenv("CLAWMANAGER_LLM_GATEWAY_BASE_URL", "http://gateway.example/api/v1/gateway/llm")
 
 	token := "igt_test_token"
-	for _, instanceType := range []string{"openclaw", "hermes"} {
+	for _, instanceType := range []string{"openclaw", "hermes", "workbuddy"} {
 		t.Run(instanceType, func(t *testing.T) {
 			service := &instanceService{
 				llmModelRepo: &stubLLMModelRepository{
@@ -294,7 +294,7 @@ func TestBuildAgentEnvInjectsHermesAgentConfig(t *testing.T) {
 }
 
 func TestPersistentVolumeMountPathNormalizesManagedDesktopRuntimes(t *testing.T) {
-	for _, instanceType := range []string{"openclaw", "ubuntu", "webtop", "hermes"} {
+	for _, instanceType := range []string{"openclaw", "ubuntu", "webtop", "hermes", "workbuddy"} {
 		t.Run(instanceType, func(t *testing.T) {
 			got := persistentVolumeMountPath(&models.Instance{
 				Type:      instanceType,
@@ -314,6 +314,34 @@ func TestManagedRuntimePersistentDirKeepsHermesSubdirectory(t *testing.T) {
 	})
 	if got != "/config/.hermes" {
 		t.Fatalf("expected Hermes persistent dir /config/.hermes, got %q", got)
+	}
+}
+
+func TestWorkbuddySupportsManagedRuntimeInjection(t *testing.T) {
+	if !supportsManagedRuntimeIntegration("workbuddy") {
+		t.Fatal("expected Workbuddy to support managed runtime integration")
+	}
+	if !supportsRuntimeConfigInjection("workbuddy") {
+		t.Fatal("expected Workbuddy to support runtime config injection")
+	}
+
+	t.Setenv("CLAWMANAGER_AGENT_CONTROL_BASE_URL", "http://agent-control.example")
+	token := "agt_boot_workbuddy"
+	env, err := (&instanceService{}).buildAgentEnv(&models.Instance{
+		ID:                  923,
+		Type:                "workbuddy",
+		DiskGB:              20,
+		MountPath:           "/config",
+		AgentBootstrapToken: &token,
+	})
+	if err != nil {
+		t.Fatalf("buildAgentEnv returned error: %v", err)
+	}
+	if env["CLAWMANAGER_AGENT_RUNTIME_TYPE"] != "workbuddy" {
+		t.Fatalf("expected Workbuddy agent runtime type, got %q", env["CLAWMANAGER_AGENT_RUNTIME_TYPE"])
+	}
+	if env["CLAWMANAGER_AGENT_PERSISTENT_DIR"] != "/config" {
+		t.Fatalf("expected Workbuddy agent persistent dir /config, got %q", env["CLAWMANAGER_AGENT_PERSISTENT_DIR"])
 	}
 }
 

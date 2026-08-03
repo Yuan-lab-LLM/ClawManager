@@ -344,7 +344,7 @@ func SupportsServerWorkspaceSkillScan(instance *models.Instance) bool {
 		return false
 	}
 	switch strings.ToLower(strings.TrimSpace(instance.Type)) {
-	case "hermes", "openclaw":
+	case "hermes", "openclaw", "workbuddy":
 		return true
 	default:
 		return false

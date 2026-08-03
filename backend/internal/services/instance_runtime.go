@@ -65,6 +65,11 @@ func buildRuntimeConfig(instanceType, osType, osVersion string, registry, tag *s
 		config.MountPath = "/config"
 		config.Env = defaultWebtopDesktopEnv("Hermes Runtime")
 		config.Env["HERMES_HOME"] = "/config/.hermes"
+	case "workbuddy":
+		config.Image = defaultSystemImageSettings["workbuddy"]
+		config.Port = 3001
+		config.MountPath = "/config"
+		config.Env = defaultWebtopDesktopEnv("Workbuddy")
 	case "openclaw":
 		config.MountPath = "/config"
 		if (registry == nil || strings.TrimSpace(*registry) == "") && (tag == nil || strings.TrimSpace(*tag) == "") {
@@ -94,7 +99,7 @@ func defaultPortForInstanceType(instanceType string) int32 {
 
 func defaultMountPathForInstanceType(instanceType string) string {
 	switch instanceType {
-	case "ubuntu", "webtop", "openclaw":
+	case "ubuntu", "webtop", "openclaw", "workbuddy":
 		return "/config"
 	case "hermes":
 		return "/config"
@@ -107,6 +112,8 @@ func defaultEnvForInstanceType(instanceType string) map[string]string {
 	switch instanceType {
 	case "ubuntu", "webtop", "openclaw":
 		return defaultWebtopDesktopEnv("ClawManager Desktop")
+	case "workbuddy":
+		return defaultWebtopDesktopEnv("Workbuddy")
 	case "hermes":
 		env := defaultWebtopDesktopEnv("Hermes Runtime")
 		env["HERMES_HOME"] = "/config/.hermes"
@@ -154,7 +161,7 @@ func withInstanceProxyEnv(instanceType string, instanceID int, env map[string]st
 
 func usesWebtopImage(instanceType string) bool {
 	switch instanceType {
-	case "ubuntu", "webtop", "hermes", "openclaw":
+	case "ubuntu", "webtop", "hermes", "openclaw", "workbuddy":
 		return true
 	default:
 		return false

@@ -215,6 +215,33 @@ func TestSystemImageSettingServiceListIncludesHermesLiteDefault(t *testing.T) {
 	}
 }
 
+func TestSystemImageSettingServiceListIncludesWorkbuddyProDefault(t *testing.T) {
+	service := NewSystemImageSettingService(&stubSystemImageSettingRepository{})
+
+	items, err := service.List()
+	if err != nil {
+		t.Fatalf("List returned error: %v", err)
+	}
+
+	for _, item := range items {
+		if item.InstanceType != "workbuddy" || item.RuntimeType != "desktop" {
+			continue
+		}
+		if item.DisplayName != "Workbuddy Pro" {
+			t.Fatalf("expected Workbuddy Pro display name, got %q", item.DisplayName)
+		}
+		if item.Image != defaultSystemImageSettings["workbuddy"] {
+			t.Fatalf("expected Workbuddy image %q, got %q", defaultSystemImageSettings["workbuddy"], item.Image)
+		}
+		if !item.IsEnabled {
+			t.Fatalf("expected Workbuddy Pro default to be enabled")
+		}
+		return
+	}
+
+	t.Fatalf("expected Workbuddy Pro runtime image")
+}
+
 func TestSystemImageSettingServiceListBackfillsHermesProDefaultWhenLiteStored(t *testing.T) {
 	repo := &stubSystemImageSettingRepository{
 		items: []models.SystemImageSetting{

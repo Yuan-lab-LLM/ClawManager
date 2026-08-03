@@ -239,6 +239,7 @@ func main() {
 				services.WithRuntimeSchedulerGatewayPortRange(cfg.Runtime.GatewayPortStart, cfg.Runtime.GatewayPortEnd),
 				services.WithRuntimeSchedulerHeartbeatTimeout(cfg.Runtime.HeartbeatTimeout),
 				services.WithRuntimeSchedulerMaxGatewaysPerPod(cfg.Runtime.MaxGatewaysPerPod),
+				services.WithRuntimeSchedulerGatewayStartInFlightLimit(cfg.Runtime.GatewayStartInFlightLimit),
 			}
 			if gatewayEnvProvider, ok := instanceService.(interface {
 				BuildGatewayEnv(*models.Instance) (map[string]string, error)

@@ -70,5 +70,14 @@ assert(
   source.includes("...(usesDedicatedResources"),
   "Quota validation must include CPU/memory/storage/GPU only for Pro mode.",
 );
+assert(
+  source.includes('type === "workbuddy"') &&
+    source.includes('type === "custom" || type === "workbuddy"'),
+  "Create page must expose Workbuddy as a managed Pro-only runtime.",
+);
+assert(
+  source.includes('src="/workbuddy.png"') && source.includes('alt="Workbuddy"'),
+  "Create page must render the Workbuddy runtime icon.",
+);
 
 console.log("Create instance mode selector placement is valid.");

@@ -51,6 +51,12 @@ assert(
   "System settings page must keep custom Pro runtime card creation.",
 );
 assert(
+  pageSource.includes("instance_type: 'workbuddy'") &&
+    pageSource.includes("display_name: 'Workbuddy Pro'") &&
+    pageSource.includes("agentsruntime/workbuddy-linux:latest"),
+  "System settings page must expose Workbuddy as a fixed Pro runtime card.",
+);
+assert(
   pageSource.includes("systemSettingsPage.liteRolloutTitle") &&
     pageSource.includes("systemSettingsPage.proRuntimeTitle") &&
     i18nSource.includes("Lite runtime rolling upgrade") &&

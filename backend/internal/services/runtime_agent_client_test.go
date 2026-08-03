@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -227,6 +228,9 @@ func TestRuntimeAgentClientConflict(t *testing.T) {
 	_, err := client.CreateGateway(context.Background(), server.URL, RuntimeAgentCreateGatewayRequest{})
 	if err == nil || !strings.Contains(err.Error(), "runtime agent conflict") || !strings.Contains(err.Error(), "no free port") {
 		t.Fatalf("unexpected error %v", err)
+	}
+	if !errors.Is(err, ErrRuntimeAgentConflict) {
+		t.Fatalf("error %v does not wrap ErrRuntimeAgentConflict", err)
 	}
 }
 

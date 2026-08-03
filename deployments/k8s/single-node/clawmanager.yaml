@@ -1367,6 +1367,8 @@ spec:
               value: "clawmanager-workspaces"
             - name: RUNTIME_MAX_GATEWAYS_PER_POD
               value: "100"
+            - name: RUNTIME_GATEWAY_START_IN_FLIGHT_LIMIT
+              value: "100"
             - name: RUNTIME_GATEWAY_PORT_START
               value: "20000"
             - name: RUNTIME_GATEWAY_PORT_END

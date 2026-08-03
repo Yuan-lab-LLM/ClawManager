@@ -24,12 +24,18 @@ assert(
 );
 
 assert(
+  portalSource.includes('instance.type === "workbuddy"'),
+  "Portal must expose the Workbuddy Pro /config workspace.",
+);
+
+assert(
   portalSource.includes('selectedInstance.instance_mode === "pro"'),
   "Portal must branch rendering by instance_mode so Lite instances are not shown as Pro.",
 );
 
 assert(
-  portalSource.includes('initialPath="/config"'),
+  portalSource.includes('return isPro ? "/config" : undefined;') &&
+    portalSource.includes("initialPath={workspaceInitialPath(selectedInstance, isProPortal)}"),
   "Portal Pro workspace file manager must match detail page config-root behavior.",
 );
 

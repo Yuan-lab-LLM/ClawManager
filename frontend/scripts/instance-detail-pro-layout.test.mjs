@@ -11,6 +11,10 @@ const frameSource = readFileSync(
   path.resolve(scriptDir, "../src/components/InstanceServiceFrame.tsx"),
   "utf8",
 );
+const skillPanelSource = readFileSync(
+  path.resolve(scriptDir, "../src/components/InstanceSkillHubPanel.tsx"),
+  "utf8",
+);
 
 function assert(condition, message) {
   if (!condition) {
@@ -25,17 +29,31 @@ assert(
   "Instance detail page must branch pro/desktop instances away from the lite workspace layout.",
 );
 
-for (const label of ["Runtime Overview", "Runtime Events", "Instance Skills"]) {
+for (const label of ["Runtime Overview", "Runtime Events"]) {
   assert(detailSource.includes(label), `Pro instance detail section missing: ${label}`);
 }
 
-for (const api of ["getRuntimeDetails", "listInstanceSkills", "attachSkillToInstance", "removeSkillFromInstance"]) {
-  assert(detailSource.includes(api), `Pro instance detail page must use ${api}.`);
+assert(
+  detailSource.includes("<InstanceSkillHubPanel"),
+  "Pro instance detail section missing: InstanceSkillHubPanel",
+);
+
+assert(
+  detailSource.includes("getRuntimeDetails"),
+  "Pro instance detail page must load runtime details.",
+);
+for (const api of ["listInstanceSkills", "attachSkillToInstance", "removeSkillFromInstance"]) {
+  assert(skillPanelSource.includes(api), `Pro instance skill panel must use ${api}.`);
 }
 
 assert(
   detailSource.includes("renderLiteWorkspace") && detailSource.includes("renderProWorkspace"),
   "Instance detail page must keep separate lite and pro render paths.",
+);
+
+assert(
+  detailSource.includes('instance.type === "workbuddy"'),
+  "Instance detail must expose the Workbuddy Pro /config workspace.",
 );
 
 function sliceBetween(source, startMarker, endMarker) {
@@ -71,7 +89,7 @@ assert(
 
 assert(
   proRender.includes('data-section="runtime-overview"') &&
-    proRender.indexOf("Instance Skills") < proRender.indexOf("Runtime Overview"),
+    proRender.indexOf("<InstanceSkillHubPanel") < proRender.indexOf("Runtime Overview"),
   "Instance Skills must render before the compact Runtime Overview card.",
 );
 
