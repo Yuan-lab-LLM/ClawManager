@@ -9,27 +9,25 @@ const source = fs.readFileSync(
 
 for (const marker of [
   'const LEADER_RUNTIME_TYPE: RuntimeType = "openclaw"',
-  'item.instance_type === "hermes"',
-  'runtime_type: runtimeType',
-  'image_registry: imageForRuntime(runtimeType)',
-  'updateWorkerRuntime(member.id, runtimeType)',
-  'OpenClaw Leader · Lite Worker 可选',
-  'Hermes Lite',
+  'const TEAM_WORKER_RUNTIME_TYPE: RuntimeType = "openclaw"',
+  "runtime_type: runtimeType",
+  "image_registry: imageForRuntime(runtimeType)",
+  "OpenClaw Lite",
 ]) {
   assert.ok(source.includes(marker), `CreateTeamPage missing ${marker}`);
 }
 
 assert.ok(
-  source.includes('member.isLeader ? LEADER_RUNTIME_TYPE : member.runtimeType'),
-  "Leader runtime must remain fixed while Worker runtime stays selectable",
+  source.includes("? LEADER_RUNTIME_TYPE\n          : TEAM_WORKER_RUNTIME_TYPE"),
+  "Every new Team Worker must use the temporarily supported OpenClaw Lite runtime.",
 );
 assert.ok(
-  !source.includes("runtime_type: FIXED_RUNTIME_TYPE"),
-  "Team payload must not overwrite every Worker runtime with OpenClaw",
+  !source.includes('(["openclaw", "hermes"] as RuntimeType[]).map'),
+  "Team creation must not expose the Hermes Lite Worker selector.",
 );
 assert.ok(
-  !source.includes("image_registry: openClawLiteImage"),
-  "Team payload must resolve images per member runtime",
+  !source.includes("selectedHermesImage") && !source.includes("hermesLiteImage"),
+  "Team creation must not render Hermes Lite image controls or summaries.",
 );
 
-console.log("create Team mixed-runtime contract passed");
+console.log("create Team OpenClaw-only runtime contract passed");

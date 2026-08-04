@@ -71,13 +71,9 @@ assert(
   "Quota validation must include CPU/memory/storage/GPU only for Pro mode.",
 );
 assert(
-  source.includes('type === "workbuddy"') &&
-    source.includes('type === "custom" || type === "workbuddy"'),
-  "Create page must expose Workbuddy as a managed Pro-only runtime.",
-);
-assert(
-  source.includes('src="/workbuddy.png"') && source.includes('alt="Workbuddy"'),
-  "Create page must render the Workbuddy runtime icon.",
+  source.includes('TEMPORARILY_HIDDEN_CREATE_INSTANCE_TYPE_IDS') &&
+    source.includes('TEMPORARILY_HIDDEN_CREATE_INSTANCE_TYPE_IDS.has(type.id)'),
+  "Create page must hide temporarily unavailable runtime types from every new-instance chooser.",
 );
 
 console.log("Create instance mode selector placement is valid.");

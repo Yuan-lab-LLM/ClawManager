@@ -119,11 +119,17 @@ const INSTANCE_TYPE_I18N_KEYS: Record<
   },
 };
 
+// Keep the runtime implementation and existing-instance views intact while
+// temporarily removing unavailable runtimes from the new-instance chooser.
+const TEMPORARILY_HIDDEN_CREATE_INSTANCE_TYPE_IDS = new Set(["workbuddy"]);
+
 const FALLBACK_CREATE_INSTANCE_TYPES = INSTANCE_TYPES.filter((type) =>
-  ["openclaw", "hermes", "workbuddy"].includes(type.id),
+  ["openclaw", "hermes", "workbuddy"].includes(type.id) &&
+  !TEMPORARILY_HIDDEN_CREATE_INSTANCE_TYPE_IDS.has(type.id),
 );
 const CONFIGURED_CREATE_INSTANCE_TYPES = INSTANCE_TYPES.filter((type) =>
-  ["openclaw", "hermes", "workbuddy", "custom"].includes(type.id),
+  ["openclaw", "hermes", "workbuddy", "custom"].includes(type.id) &&
+  !TEMPORARILY_HIDDEN_CREATE_INSTANCE_TYPE_IDS.has(type.id),
 );
 
 const INSTANCE_MODE_OPTIONS: {
