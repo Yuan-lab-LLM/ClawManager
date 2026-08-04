@@ -19,14 +19,25 @@ const (
 
 	RuntimeGatewayPortStart = 20000
 	RuntimePodCapacity      = 100
-	// OpenClaw Lite and the runtime agent share this three-port contract.
+	// OpenClaw Lite reserves a primary gateway port plus its adjacent browser
+	// ports. Hermes Lite only exposes the primary dashboard port.
 	RuntimeGatewayPortOffset        = 0
 	RuntimeBrowserCDPPortOffset     = 1
 	RuntimeBrowserControlPortOffset = 2
-	RuntimeGatewayPortsPerInstance  = RuntimeBrowserControlPortOffset + 1
-	RuntimeGatewayPortEnd           = RuntimeGatewayPortStart + RuntimePodCapacity*RuntimeGatewayPortsPerInstance - 1
-	RuntimeLinuxIDBase              = 200000
+	RuntimeOpenClawPortsPerInstance = RuntimeBrowserControlPortOffset + 1
+	RuntimeHermesPortsPerInstance   = 1
+	// Keep the shared range large enough for the runtime with the largest port
+	// block. Runtime-specific allocation still stops at the Pod slot capacity.
+	RuntimeGatewayPortEnd = RuntimeGatewayPortStart + RuntimePodCapacity*RuntimeOpenClawPortsPerInstance - 1
+	RuntimeLinuxIDBase    = 200000
 )
+
+func RuntimeGatewayPortBlockSize(runtimeType string) int {
+	if normalized, ok := NormalizeV2RuntimeType(runtimeType); ok && normalized == RuntimeTypeHermes {
+		return RuntimeHermesPortsPerInstance
+	}
+	return RuntimeOpenClawPortsPerInstance
+}
 
 func NormalizeV2RuntimeType(instanceType string) (string, bool) {
 	switch strings.ToLower(strings.TrimSpace(instanceType)) {

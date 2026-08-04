@@ -36,7 +36,7 @@ func TestRuntimeLinuxID(t *testing.T) {
 	}
 }
 
-func TestRuntimeGatewayPortRangeMatchesInstanceCapacity(t *testing.T) {
+func TestRuntimeGatewayPortRangeMatchesOpenClawInstanceCapacity(t *testing.T) {
 	if got, want := RuntimeGatewayPortOffset, 0; got != want {
 		t.Fatalf("gateway port offset = %d, want %d", got, want)
 	}
@@ -46,15 +46,24 @@ func TestRuntimeGatewayPortRangeMatchesInstanceCapacity(t *testing.T) {
 	if got, want := RuntimeBrowserControlPortOffset, 2; got != want {
 		t.Fatalf("browser control port offset = %d, want %d", got, want)
 	}
-	if got, want := RuntimeGatewayPortsPerInstance, 3; got != want {
+	if got, want := RuntimeGatewayPortBlockSize(RuntimeTypeOpenClaw), 3; got != want {
 		t.Fatalf("expected %d ports per gateway instance, got %d", want, got)
 	}
-	wantEnd := RuntimeGatewayPortStart + RuntimePodCapacity*RuntimeGatewayPortsPerInstance - 1
+	wantEnd := RuntimeGatewayPortStart + RuntimePodCapacity*RuntimeOpenClawPortsPerInstance - 1
 	if RuntimeGatewayPortEnd != wantEnd {
 		t.Fatalf("gateway port end = %d, want %d", RuntimeGatewayPortEnd, wantEnd)
 	}
-	if got := (RuntimeGatewayPortEnd - RuntimeGatewayPortStart + 1) / RuntimeGatewayPortsPerInstance; got != RuntimePodCapacity {
+	if got := (RuntimeGatewayPortEnd - RuntimeGatewayPortStart + 1) / RuntimeOpenClawPortsPerInstance; got != RuntimePodCapacity {
 		t.Fatalf("gateway port range supports %d instances, want %d", got, RuntimePodCapacity)
+	}
+}
+
+func TestRuntimeGatewayPortBlockSizeUsesSinglePortForHermes(t *testing.T) {
+	if got, want := RuntimeGatewayPortBlockSize(RuntimeTypeHermes), 1; got != want {
+		t.Fatalf("Hermes gateway port block size = %d, want %d", got, want)
+	}
+	if got, want := RuntimeGatewayPortBlockSize("unknown"), RuntimeOpenClawPortsPerInstance; got != want {
+		t.Fatalf("unknown runtime gateway port block size = %d, want safe default %d", got, want)
 	}
 }
 

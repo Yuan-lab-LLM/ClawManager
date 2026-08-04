@@ -189,7 +189,7 @@ func TestRuntimeSchedulerSkipsAgentRejectedGatewayPort(t *testing.T) {
 	if got := agent.createRequests[0].req.GatewayPort; got != RuntimeGatewayPortStart {
 		t.Fatalf("first gateway port = %d, want %d", got, RuntimeGatewayPortStart)
 	}
-	wantPort := RuntimeGatewayPortStart + RuntimeGatewayPortsPerInstance
+	wantPort := RuntimeGatewayPortStart + RuntimeOpenClawPortsPerInstance
 	if got := agent.createRequests[1].req.GatewayPort; got != wantPort {
 		t.Fatalf("second gateway port = %d, want %d", got, wantPort)
 	}
@@ -663,8 +663,8 @@ func TestRuntimeSchedulerReconcileStartsBatchConcurrently(t *testing.T) {
 		if port < RuntimeGatewayPortStart || port+RuntimeBrowserControlPortOffset > RuntimeGatewayPortEnd {
 			t.Fatalf("gateway port block %d-%d is outside configured range", port, port+RuntimeBrowserControlPortOffset)
 		}
-		if offset := (port - RuntimeGatewayPortStart) % RuntimeGatewayPortsPerInstance; offset != RuntimeGatewayPortOffset {
-			t.Fatalf("gateway port %d is not aligned to a %d-port block", port, RuntimeGatewayPortsPerInstance)
+		if offset := (port - RuntimeGatewayPortStart) % RuntimeOpenClawPortsPerInstance; offset != RuntimeGatewayPortOffset {
+			t.Fatalf("gateway port %d is not aligned to a %d-port block", port, RuntimeOpenClawPortsPerInstance)
 		}
 		for member := port; member <= port+RuntimeBrowserControlPortOffset; member++ {
 			if owner, exists := usedPorts[member]; exists {
@@ -673,8 +673,78 @@ func TestRuntimeSchedulerReconcileStartsBatchConcurrently(t *testing.T) {
 			usedPorts[member] = port
 		}
 	}
-	if got, want := len(usedPorts), 4*RuntimeGatewayPortsPerInstance; got != want {
+	if got, want := len(usedPorts), 4*RuntimeOpenClawPortsPerInstance; got != want {
 		t.Fatalf("reserved port members = %d, want %d", got, want)
+	}
+	if got := len(bindingRepo.bindings); got != 4 {
+		t.Fatalf("reserved bindings = %d, want 4", got)
+	}
+}
+
+func TestRuntimeSchedulerReconcileAssignsSinglePortsToHermesBatch(t *testing.T) {
+	ctx := context.Background()
+	endpoint := "http://agent.runtime"
+	instanceRepo := newFakeRuntimeInstanceRepo()
+	for instanceID := 91; instanceID <= 94; instanceID++ {
+		workspacePath := fmt.Sprintf("/workspaces/hermes/user-45/instance-%d", instanceID)
+		instanceRepo.creating = append(instanceRepo.creating, models.Instance{
+			ID:                instanceID,
+			UserID:            45,
+			Type:              RuntimeTypeHermes,
+			RuntimeType:       RuntimeBackendGateway,
+			InstanceMode:      InstanceModeLite,
+			Status:            "creating",
+			WorkspacePath:     &workspacePath,
+			RuntimeGeneration: 1,
+		})
+	}
+	pod := models.RuntimePod{
+		ID:            10,
+		RuntimeType:   RuntimeTypeHermes,
+		AgentEndpoint: &endpoint,
+		State:         "ready",
+		Capacity:      100,
+	}
+	agent := &fakeRuntimeAgentClient{
+		createResponse: &RuntimeAgentCreateGatewayResponse{GatewayID: "gw", Status: "starting"},
+		createDelay:    25 * time.Millisecond,
+	}
+	bindingRepo := newFakeRuntimeBindingRepo()
+	scheduler := NewRuntimeScheduler(
+		instanceRepo,
+		&fakeRuntimePodRepo{
+			pods:        map[int64]*models.RuntimePod{10: &pod},
+			schedulable: []models.RuntimePod{pod},
+		},
+		bindingRepo,
+		&fakeRuntimeRolloutRepo{},
+		agent,
+		nil,
+		nil,
+		&fakeRuntimeDeploymentService{},
+		time.Second,
+		WithRuntimeSchedulerGatewayStartInFlightLimit(4),
+	)
+
+	if err := scheduler.reconcile(ctx); err != nil {
+		t.Fatalf("reconcile returned error: %v", err)
+	}
+	if got := atomic.LoadInt32(&agent.maxActiveCreates); got != 4 {
+		t.Fatalf("concurrent CreateGateway calls = %d, want 4", got)
+	}
+	if got := len(agent.createRequests); got != 4 {
+		t.Fatalf("CreateGateway calls = %d, want 4", got)
+	}
+	usedPorts := map[int]struct{}{}
+	for _, request := range agent.createRequests {
+		port := request.req.GatewayPort
+		if port < RuntimeGatewayPortStart || port >= RuntimeGatewayPortStart+4 {
+			t.Fatalf("Hermes gateway port = %d, want one of %d-%d", port, RuntimeGatewayPortStart, RuntimeGatewayPortStart+3)
+		}
+		if _, exists := usedPorts[port]; exists {
+			t.Fatalf("Hermes gateway port %d was assigned more than once", port)
+		}
+		usedPorts[port] = struct{}{}
 	}
 	if got := len(bindingRepo.bindings); got != 4 {
 		t.Fatalf("reserved bindings = %d, want 4", got)
