@@ -1268,6 +1268,74 @@ func TestProjectTeamEventDoesNotQueueForcedRecoveryWithoutExactTurnResult(t *tes
 	}
 }
 
+func TestProjectTeamEventKeepsRetryableStreamFailureStateNeutral(t *testing.T) {
+	taskID := 70
+	memberID := 121
+	messageID := "team-31-worker-stream-retry"
+	assignmentID := "dev-stream-1"
+	task := &models.TeamTask{
+		ID: taskID, TeamID: 31, TargetMemberID: 120, MessageID: "team-31-user-root",
+		Status: models.TeamTaskStatusRunning, WorkflowState: teamWorkflowStateExecuting,
+		UpdatedAt: time.Now().UTC().Add(-teamAssignmentMonitorEvery),
+	}
+	member := &models.TeamMember{
+		ID: memberID, TeamID: 31, MemberKey: "developer", Role: "developer",
+		Status: models.TeamMemberStatusBusy, CurrentTaskID: &taskID, Availability: models.TeamMemberAvailabilityBusy,
+	}
+	workItem := models.TeamWorkItem{
+		ID: 501, TeamID: 31, RootTaskID: taskID, WorkID: assignmentID, AssignmentID: &assignmentID,
+		OwnerMemberID: &memberID, Status: models.TeamTaskStatusRunning, RequiredForRoot: true,
+		UpdatedAt: time.Now().UTC().Add(-teamAssignmentMonitorEvery),
+	}
+	repo := &teamRepositoryStub{
+		tasksByID:    map[int]*models.TeamTask{taskID: task},
+		membersByKey: map[string]*models.TeamMember{"developer": member},
+		workItems:    []models.TeamWorkItem{workItem},
+	}
+	service := &teamService{repo: repo}
+	payloadJSON, err := json.Marshal(map[string]interface{}{
+		"protocolVersion": 4,
+		"event":           "task_progress",
+		"eventKind":       "assignment_attempt_failed",
+		"messageId":       messageID,
+		"sourceMessageId": "assign-developer",
+		"memberId":        "developer",
+		"taskId":          "team-31-task-70",
+		"rootTaskId":      "team-31-task-70",
+		"assignmentId":    assignmentID,
+		"workId":          assignmentID,
+		"status":          "running",
+		"runtimeStatus":   "retrying",
+		"retryable":       true,
+		"summary":         "Model stream interrupted before a verified terminal response.",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.projectTeamEvent(
+		&models.Team{ID: 31, CommunicationMode: teamCommunicationModeLeaderMediated},
+		nil,
+		redisStreamMessage{ID: "1781171178655-2", Fields: map[string]string{"payload": string(payloadJSON)}},
+	); err != nil {
+		t.Fatalf("projectTeamEvent returned error: %v", err)
+	}
+	if task.Status != models.TeamTaskStatusRunning || task.FinishedAt != nil {
+		t.Fatalf("retryable model interruption must not close the root task: %#v", task)
+	}
+	if repo.workItems[0].Status != models.TeamTaskStatusRunning || repo.workItems[0].FinishedAt != nil {
+		t.Fatalf("retryable model interruption must leave the assignment resumable: %#v", repo.workItems[0])
+	}
+	if len(repo.createdEvents) != 1 {
+		t.Fatalf("expected one diagnostic event, got %#v", repo.createdEvents)
+	}
+	stored := teamEventPayloadMap(repo.createdEvents[0])
+	if eventString(stored, "chatPolicy") != "hidden" ||
+		!eventBool(stored, "nonAuthoritative") ||
+		eventString(stored, "stateEffect") != "none" {
+		t.Fatalf("retryable model interruption must be hidden and state-neutral: %#v", stored)
+	}
+}
+
 func TestProjectTeamEventKeepsSubstantialDirectTargetReplyNonTerminal(t *testing.T) {
 	taskID := 68
 	messageID := "team-31-bootstrap-introduction"
@@ -6867,6 +6935,16 @@ func TestAutomaticCompletionDiagnosticsAndTurnFinishedStayInternal(t *testing.T)
 	applyTeamChatPolicy("task_progress", turnFinished, nil, nil)
 	if eventBool(turnFinished, "visibleToChat") || eventString(turnFinished, "chatPolicy") != "hidden" {
 		t.Fatalf("turn-finished transport diagnostics must remain internal: %#v", turnFinished)
+	}
+	retryableAttempt := map[string]interface{}{
+		"eventKind":     "assignment_attempt_failed",
+		"summary":       "Model stream interrupted before a verified terminal response.",
+		"chatPolicy":    "hidden",
+		"visibleToChat": false,
+	}
+	applyTeamChatPolicy("task_progress", retryableAttempt, nil, nil)
+	if eventBool(retryableAttempt, "visibleToChat") || eventString(retryableAttempt, "chatPolicy") != "hidden" {
+		t.Fatalf("retryable infrastructure diagnostics must remain internal: %#v", retryableAttempt)
 	}
 }
 

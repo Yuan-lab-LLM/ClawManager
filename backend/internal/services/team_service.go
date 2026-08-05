@@ -6421,7 +6421,7 @@ func applyTeamChatPolicy(eventType string, payload map[string]interface{}, task 
 			return
 		}
 	}
-	if eventKind == "turn_finished_without_completion" {
+	if eventKind == "turn_finished_without_completion" || eventKind == "assignment_attempt_failed" {
 		payload["chatPolicy"] = "hidden"
 		payload["visibleToChat"] = false
 		payload["visible_to_chat"] = false
@@ -7595,11 +7595,17 @@ func (s *teamService) projectTeamEvent(team *models.Team, bus *redisBus, message
 	normalizeUnauthorizedAssignmentCheckResult(payload)
 	passiveMonitorEvent := isPassiveAssignmentMonitorEvent(eventType, payload)
 	stateNeutralAssignmentEvent := false
-	if strings.EqualFold(eventString(payload, "eventKind", "event_kind", "kind"), "turn_finished_without_completion") {
+	if eventKind := strings.ToLower(strings.TrimSpace(eventString(payload, "eventKind", "event_kind", "kind"))); eventKind == "turn_finished_without_completion" || eventKind == "assignment_attempt_failed" {
 		stateNeutralAssignmentEvent = true
 		payload["stateEffect"] = "none"
 		payload["nonAuthoritative"] = true
 		payload["rootTaskTerminal"] = false
+		if eventKind == "assignment_attempt_failed" {
+			payload["retryable"] = true
+			payload["status"] = models.TeamTaskStatusRunning
+			payload["runtimeStatus"] = "retrying"
+			payload["availability"] = models.TeamMemberAvailabilityBusy
+		}
 		payload["chatPolicy"] = "hidden"
 		payload["visibleToChat"] = false
 		payload["visible_to_chat"] = false

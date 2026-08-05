@@ -1,5 +1,6 @@
 import { Maximize2, Minimize2, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useI18n } from "../contexts/I18nContext";
 import { useInstanceDesktopAccess } from "../hooks/useInstanceDesktopAccess";
 import { clearHermesDashboardStorage, prepareHermesDashboardStorage } from "../lib/hermesDashboardStorage";
 import { prepareOpenClawControlUIStorage } from "../lib/openclawControlStorage";
@@ -41,6 +42,7 @@ export function InstanceServiceFrame({
   instanceType,
   availability,
 }: InstanceServiceFrameProps) {
+  const { t } = useI18n();
   const isAvailable = availability === "available";
   const frameContainerRef = useRef<HTMLElement | null>(null);
   const [preparedFrame, setPreparedFrame] = useState<PreparedFrame | null>(null);
@@ -119,20 +121,21 @@ export function InstanceServiceFrame({
   const renderFrameShell = (content: ReactNode) => (
     <section
       ref={frameContainerRef}
-      className="cm-surface flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-white max-xl:min-h-[360px]"
+      className="cm-surface relative isolate flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-white max-xl:min-h-[360px]"
       style={isFullscreen ? { height: "100vh", width: "100vw", borderRadius: 0 } : undefined}
     >
-      <div className="flex h-12 items-center justify-between border-b border-slate-200 px-3">
+      <div className="relative z-20 flex h-12 shrink-0 items-center justify-between border-b border-slate-200 bg-white px-3">
         <div className="min-w-0 truncate text-sm font-medium text-slate-950">
           {instanceName}
         </div>
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="relative z-20 flex shrink-0 items-center gap-2">
           {isAvailable && (
             <button
               type="button"
               onClick={handleRefresh}
               className="cm-icon-button"
-              title="Refresh"
+              title={t("common.refresh")}
+              aria-label={t("common.refresh")}
             >
               <RefreshCw className={`h-4 w-4 ${reconnecting ? "animate-spin" : ""}`} />
             </button>
@@ -141,7 +144,8 @@ export function InstanceServiceFrame({
             type="button"
             onClick={handleFullscreen}
             className="cm-icon-button"
-            title={isFullscreen ? "Exit fullscreen" : "Fullscreen"}
+            title={isFullscreen ? t("instances.exitFullscreen") : t("instances.enterFullscreen")}
+            aria-label={isFullscreen ? t("instances.exitFullscreen") : t("instances.enterFullscreen")}
           >
             {isFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
           </button>

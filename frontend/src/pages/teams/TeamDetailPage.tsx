@@ -3276,6 +3276,13 @@ function isProtocolNoiseItem(item: CollaborationItem) {
   const visibleRaw = payloadText(item.payload, ["visibleToChat", "visible_to_chat"]).toLowerCase();
   const explicitlyHidden = ["false", "0", "no", "off"].includes(visibleRaw);
   const chatPolicy = payloadText(item.payload, ["chatPolicy", "chat_policy"]).toLowerCase();
+  const eventKind = chatEventKind(item.payload);
+  if (
+    eventKind === "turn_finished_without_completion" ||
+    eventKind === "assignment_attempt_failed"
+  ) {
+    return true;
+  }
   if (isBusinessChatItem(item)) {
     return false;
   }

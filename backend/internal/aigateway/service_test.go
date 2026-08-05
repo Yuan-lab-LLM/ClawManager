@@ -1,9 +1,14 @@
 package aigateway
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
+	"io"
+	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"clawreef/internal/models"
 )
@@ -197,9 +202,12 @@ func TestRewriteStreamLineKeepsToolCalls(t *testing.T) {
 	var completionTokens int
 	var totalTokens int
 
-	done := inspectStreamLine(line, &assistantText, &promptTokens, &completionTokens, &totalTokens)
-	if done {
+	inspection := inspectStreamLine(line, &assistantText, &promptTokens, &completionTokens, &totalTokens)
+	if inspection.Done {
 		t.Fatalf("expected tool chunk not to finish the stream")
+	}
+	if inspection.Finished {
+		t.Fatalf("expected tool chunk not to carry a terminal finish reason")
 	}
 	if assistantText.String() != "" {
 		t.Fatalf("expected tool chunks not to be appended as assistant text, got %q", assistantText.String())
@@ -218,6 +226,185 @@ func TestRewriteStreamLineKeepsToolCalls(t *testing.T) {
 		t.Fatalf("expected function metadata to survive, got %#v", chunk.Choices[0].Delta.ToolCalls[0])
 	}
 }
+
+type flushBuffer struct {
+	bytes.Buffer
+	flushes int
+}
+
+func (b *flushBuffer) Flush() {
+	b.flushes++
+}
+
+func TestProxyOpenAIStreamAcceptsDoneSentinel(t *testing.T) {
+	input := strings.Join([]string{
+		`data: {"choices":[{"index":0,"delta":{"content":"hello"},"finish_reason":null}]}`,
+		"",
+		"data: [DONE]",
+		"",
+	}, "\n")
+	output := &flushBuffer{}
+
+	result, err := proxyOpenAIStream(strings.NewReader(input), output, output)
+	if err != nil {
+		t.Fatalf("proxyOpenAIStream returned error: %v", err)
+	}
+	if !result.SawDone || !result.Terminal {
+		t.Fatalf("expected a verified terminal stream, got %#v", result)
+	}
+	if result.AssistantText != "hello" {
+		t.Fatalf("expected assistant text to be preserved, got %q", result.AssistantText)
+	}
+	if output.String() != input {
+		t.Fatalf("expected provider stream to pass through unchanged")
+	}
+	if output.flushes == 0 {
+		t.Fatalf("expected streaming output to be flushed")
+	}
+}
+
+func TestProxyOpenAIStreamAcceptsFinishReasonBeforeEOF(t *testing.T) {
+	input := "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"done\"},\"finish_reason\":\"stop\"}]}\n\n"
+	output := &flushBuffer{}
+
+	result, err := proxyOpenAIStream(strings.NewReader(input), output, output)
+	if err != nil {
+		t.Fatalf("proxyOpenAIStream returned error: %v", err)
+	}
+	if result.SawDone || !result.SawFinishReason || !result.Terminal {
+		t.Fatalf("expected finish_reason to verify terminal EOF, got %#v", result)
+	}
+}
+
+func TestProxyOpenAIStreamRejectsTruncatedEOF(t *testing.T) {
+	input := "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"partial\"},\"finish_reason\":null}]}\n\n"
+	output := &flushBuffer{}
+
+	result, err := proxyOpenAIStream(strings.NewReader(input), output, output)
+	if !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("expected unexpected EOF, got result=%#v err=%v", result, err)
+	}
+	if result.Terminal {
+		t.Fatalf("truncated stream must not be terminal")
+	}
+}
+
+func TestProxyOpenAIStreamPreservesProviderErrorFrame(t *testing.T) {
+	input := "data: {\"error\":{\"message\":\"provider overloaded\",\"type\":\"server_error\",\"code\":\"overloaded\"}}\n\n"
+	output := &flushBuffer{}
+
+	_, err := proxyOpenAIStream(strings.NewReader(input), output, output)
+	if err == nil || !strings.Contains(err.Error(), "provider overloaded") {
+		t.Fatalf("expected provider stream error, got %v", err)
+	}
+	if output.String() != input {
+		t.Fatalf("expected provider error frame to reach the client unchanged")
+	}
+}
+
+func TestEmitOpenAIStreamErrorUsesSDKCompatibleEnvelope(t *testing.T) {
+	output := &flushBuffer{}
+	err := emitOpenAIStreamError(output, output, "trace-123", io.ErrUnexpectedEOF)
+	if err != nil {
+		t.Fatalf("emitOpenAIStreamError returned error: %v", err)
+	}
+
+	line := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(output.String()), "data:"))
+	var envelope struct {
+		Error struct {
+			Message string `json:"message"`
+			Type    string `json:"type"`
+			Code    string `json:"code"`
+			TraceID string `json:"trace_id"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(line), &envelope); err != nil {
+		t.Fatalf("expected JSON SSE error envelope, got %q: %v", line, err)
+	}
+	if envelope.Error.Code != upstreamStreamInterruptedCode || envelope.Error.Type != "upstream_stream_error" {
+		t.Fatalf("unexpected error envelope: %#v", envelope.Error)
+	}
+	if envelope.Error.TraceID != "trace-123" {
+		t.Fatalf("expected trace id, got %#v", envelope.Error)
+	}
+	if !strings.Contains(envelope.Error.Message, upstreamStreamInterruptedCode) {
+		t.Fatalf("expected stable retry classification in message, got %q", envelope.Error.Message)
+	}
+}
+
+func TestGatewayUsesSeparateClientsForStreamingAndNonStreaming(t *testing.T) {
+	nonStreaming, streaming := newGatewayHTTPClients()
+	if nonStreaming.Timeout != 3*time.Minute {
+		t.Fatalf("expected bounded non-stream timeout, got %s", nonStreaming.Timeout)
+	}
+	if streaming.Timeout != 0 {
+		t.Fatalf("streaming client must not have a whole-request timeout, got %s", streaming.Timeout)
+	}
+	if nonStreaming == streaming {
+		t.Fatalf("streaming and non-streaming requests must not share one client")
+	}
+}
+
+type failingWriter struct {
+	err error
+}
+
+func (w *failingWriter) Write(_ []byte) (int, error) {
+	return 0, w.err
+}
+
+func (w *failingWriter) Flush() {}
+
+func TestProxyOpenAIStreamReturnsDownstreamWriteFailure(t *testing.T) {
+	writeErr := errors.New("client disconnected")
+	writer := &failingWriter{err: writeErr}
+	_, err := proxyOpenAIStream(
+		strings.NewReader("data: [DONE]\n\n"),
+		writer,
+		writer,
+	)
+	if !errors.Is(err, writeErr) {
+		t.Fatalf("expected downstream write error, got %v", err)
+	}
+}
+
+func TestProxyAnthropicStreamRequiresMessageStop(t *testing.T) {
+	input := strings.Join([]string{
+		"event: message_start",
+		`data: {"type":"message_start","message":{"id":"msg-1","model":"claude-test","usage":{"input_tokens":2,"output_tokens":0}}}`,
+		"",
+		"event: content_block_delta",
+		`data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"partial"}}`,
+		"",
+	}, "\n")
+	output := &flushBuffer{}
+	state := &anthropicStreamState{ToolCalls: map[int]*anthropicToolCallState{}}
+
+	_, err := proxyAnthropicStream(strings.NewReader(input), output, output, state)
+	if !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("expected incomplete Anthropic stream to fail, got %v", err)
+	}
+}
+
+func TestProxyAnthropicStreamAcceptsMessageStop(t *testing.T) {
+	input := strings.Join([]string{
+		"event: message_start",
+		`data: {"type":"message_start","message":{"id":"msg-1","model":"claude-test","usage":{"input_tokens":2,"output_tokens":0}}}`,
+		"",
+		"event: message_stop",
+		`data: {"type":"message_stop"}`,
+		"",
+	}, "\n")
+	output := &flushBuffer{}
+	state := &anthropicStreamState{ToolCalls: map[int]*anthropicToolCallState{}}
+
+	_, err := proxyAnthropicStream(strings.NewReader(input), output, output, state)
+	if err != nil {
+		t.Fatalf("expected message_stop to complete Anthropic stream, got %v", err)
+	}
+}
+
+var _ http.Flusher = (*flushBuffer)(nil)
 
 func TestExtractAssistantContentFallsBackToToolCalls(t *testing.T) {
 	response := ChatCompletionResponse{

@@ -109,9 +109,22 @@ assert(
 );
 
 assert(
-  !proRender.includes("h-[560px]") &&
-    (proRender.includes("aspect-video") || proRender.includes("aspect-[16/9]")),
-  "Pro desktop frame must use a stable 16:9 desktop ratio instead of the old fixed height.",
+  !detailSource.includes("proWorkspaceBrowserOpen") &&
+    !proRender.includes("PanelRightOpen") &&
+    !proRender.includes("PanelRightClose"),
+  "Pro workspace browser must remain visible without a collapse control.",
+);
+
+assert(
+  proRender.includes("xl:grid-cols-[minmax(0,7fr)_minmax(380px,3fr)]") &&
+    proRender.includes("supportsWorkspace(instance) ?"),
+  "Pro desktop and workspace browser must remain side by side at a stable 70/30 desktop ratio.",
+);
+
+assert(
+  !proRender.includes("aspect-video") &&
+    proRender.split("h-[clamp(520px,calc(100vh-10rem),760px)]").length >= 3,
+  "Pro desktop and workspace browser must share a bounded height so aspect ratio cannot force cross-column overlap.",
 );
 
 assert(
@@ -122,7 +135,9 @@ assert(
 assert(
   frameSource.includes("requestFullscreen") &&
     frameSource.includes("Maximize2") &&
-    frameSource.includes("Minimize2"),
+    frameSource.includes("Minimize2") &&
+    !frameSource.includes("toolbarActions") &&
+    frameSource.includes('aria-label={isFullscreen ? t("instances.exitFullscreen")'),
   "Instance service frame must expose a fullscreen control.",
 );
 
