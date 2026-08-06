@@ -34,6 +34,7 @@ type SaveLLMModelRequest struct {
 	ProtocolType      string
 	BaseURL           string
 	ProviderModelName string
+	ReasoningEnabled  *bool
 	APIKey            *string
 	APIKeySecretRef   *string
 	IsSecure          bool
@@ -82,6 +83,7 @@ func (s *llmModelService) ListModels() ([]models.LLMModel, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to list llm models: %w", err)
 	}
+	populateReasoningCapabilities(items)
 	return items, nil
 }
 
@@ -90,6 +92,7 @@ func (s *llmModelService) ListActiveModels() ([]models.LLMModel, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to list active llm models: %w", err)
 	}
+	populateReasoningCapabilities(items)
 	return items, nil
 }
 
@@ -190,6 +193,18 @@ func (s *llmModelService) SaveModel(req SaveLLMModelRequest) (*models.LLMModel, 
 		OutputPrice:       req.OutputPrice,
 		Currency:          currency,
 	}
+	models.PopulateLLMReasoningCapability(model)
+	if req.ReasoningEnabled != nil {
+		if *req.ReasoningEnabled && !model.SupportsReasoning {
+			return nil, errors.New("reasoning control is not supported for this provider model")
+		}
+		model.ReasoningEnabled = *req.ReasoningEnabled
+	} else if current != nil && model.SupportsReasoning {
+		model.ReasoningEnabled = current.ReasoningEnabled
+	}
+	if !model.SupportsReasoning {
+		model.ReasoningEnabled = false
+	}
 
 	if current != nil {
 		model.CreatedAt = current.CreatedAt
@@ -200,6 +215,15 @@ func (s *llmModelService) SaveModel(req SaveLLMModelRequest) (*models.LLMModel, 
 	}
 
 	return model, nil
+}
+
+func populateReasoningCapabilities(items []models.LLMModel) {
+	for index := range items {
+		models.PopulateLLMReasoningCapability(&items[index])
+		if !items[index].SupportsReasoning {
+			items[index].ReasoningEnabled = false
+		}
+	}
 }
 
 func (s *llmModelService) DeleteModel(id int) error {

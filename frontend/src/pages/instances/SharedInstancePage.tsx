@@ -1,5 +1,5 @@
 import axios from "axios";
-import { Maximize2, Minimize2, RefreshCw } from "lucide-react";
+import { Maximize2, Minimize2, PanelRightClose, PanelRightOpen, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { WorkspaceFileManager } from "../../components/WorkspaceFileManager";
@@ -36,6 +36,7 @@ export default function SharedInstancePage() {
   const [error, setError] = useState<string | null>(null);
   const [frameVersion, setFrameVersion] = useState(0);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [workspaceVisible, setWorkspaceVisible] = useState(true);
 
   const loadSession = useCallback(
     async (options?: { reloadFrame?: boolean; background?: boolean }) => {
@@ -198,7 +199,11 @@ export default function SharedInstancePage() {
         </span>
       </header>
 
-      <section className="grid min-h-0 flex-1 gap-4 p-4 max-xl:grid-rows-[minmax(420px,1fr)_minmax(360px,0.8fr)] xl:grid-cols-[minmax(0,1fr)_minmax(360px,28rem)]">
+      <section className={`grid min-h-0 flex-1 gap-4 p-4 ${
+        canShowWorkspace && workspaceVisible
+          ? "max-xl:grid-rows-[minmax(420px,1fr)_minmax(360px,0.8fr)] xl:grid-cols-[minmax(0,1fr)_minmax(360px,28rem)]"
+          : "grid-cols-1"
+      }`}>
         <section
           ref={frameContainerRef}
           className="cm-surface flex min-h-0 min-w-0 flex-col overflow-hidden bg-white"
@@ -209,6 +214,17 @@ export default function SharedInstancePage() {
               {session.instance.name}
             </div>
             <div className="flex shrink-0 items-center gap-2">
+              {canShowWorkspace && (
+                <button
+                  type="button"
+                  className="cm-icon-button"
+                  title={workspaceVisible ? "Hide file browser" : "Show file browser"}
+                  aria-label={workspaceVisible ? "Hide file browser" : "Show file browser"}
+                  onClick={() => setWorkspaceVisible((visible) => !visible)}
+                >
+                  {workspaceVisible ? <PanelRightClose className="h-4 w-4" /> : <PanelRightOpen className="h-4 w-4" />}
+                </button>
+              )}
               <button
                 type="button"
                 className="cm-icon-button"
@@ -242,7 +258,7 @@ export default function SharedInstancePage() {
           />
         </section>
 
-        {canShowWorkspace ? (
+        {workspaceVisible && (canShowWorkspace ? (
           <div className="min-h-0 min-w-0">
             <WorkspaceFileManager
               instanceId={session.instance.id}
@@ -258,7 +274,7 @@ export default function SharedInstancePage() {
               ? "Workspace files are not included in this share link."
               : "This instance does not expose a workspace."}
           </section>
-        )}
+        ))}
       </section>
     </main>
   );

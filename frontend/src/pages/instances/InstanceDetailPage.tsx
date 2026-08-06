@@ -357,6 +357,7 @@ const InstanceDetailPage: React.FC = () => {
     readPanelExpanded("session-usage", instanceId),
   );
   const [workspaceHeightPx, setWorkspaceHeightPx] = useState<number | null>(null);
+  const [workspaceVisible, setWorkspaceVisible] = useState(true);
   const [collapsedBottomHeightPx, setCollapsedBottomHeightPx] = useState<number | null>(null);
   const workspaceSectionRef = useRef<HTMLElement>(null);
   const liteRootRef = useRef<HTMLDivElement>(null);
@@ -1296,7 +1297,9 @@ const InstanceDetailPage: React.FC = () => {
             ? { height: pinnedWorkspaceHeight, minHeight: pinnedWorkspaceHeight, flexShrink: 0 }
             : { minHeight: 420, flex: 1 }
         }
-        className="grid shrink-0 grid-cols-1 grid-rows-[minmax(0,1fr)] gap-4 overflow-hidden min-h-[420px] xl:grid-cols-[minmax(0,1fr)_minmax(360px,28rem)]"
+        className={`grid shrink-0 grid-cols-1 grid-rows-[minmax(0,1fr)] gap-4 overflow-hidden min-h-[420px] ${
+          workspaceVisible ? "xl:grid-cols-[minmax(0,1fr)_minmax(360px,28rem)]" : "xl:grid-cols-1"
+        }`}
       >
         <div className="h-full min-h-0 min-w-0">
           <InstanceServiceFrame
@@ -1304,9 +1307,11 @@ const InstanceDetailPage: React.FC = () => {
             instanceName={instance.name}
             instanceType={instance.type}
             availability={availability}
+            workspaceVisible={supportsWorkspace(instance) ? workspaceVisible : undefined}
+            onWorkspaceVisibilityChange={supportsWorkspace(instance) ? setWorkspaceVisible : undefined}
           />
         </div>
-        {supportsWorkspace(instance) ? (
+        {workspaceVisible && (supportsWorkspace(instance) ? (
           <div className="h-full min-h-0 min-w-0">
             <WorkspaceFileManager instanceId={instance.id} />
           </div>
@@ -1314,7 +1319,7 @@ const InstanceDetailPage: React.FC = () => {
           <div className="cm-surface flex h-full min-h-[420px] items-center justify-center text-sm text-slate-500">
             No workspace
           </div>
-        )}
+        ))}
       </section>
       <div ref={liteBottomRef} className="flex shrink-0 flex-col gap-2">
         <InstanceSkillHubPanel
@@ -1368,7 +1373,9 @@ const InstanceDetailPage: React.FC = () => {
       {renderActionMessage()}
       <section
         data-layout="pro-desktop-workspace"
-        className="grid items-start gap-4 xl:grid-cols-[minmax(0,7fr)_minmax(380px,3fr)]"
+        className={`grid items-start gap-4 ${
+          workspaceVisible ? "xl:grid-cols-[minmax(0,7fr)_minmax(380px,3fr)]" : "xl:grid-cols-1"
+        }`}
       >
         <div className="h-[clamp(520px,calc(100vh-10rem),760px)] min-w-0 overflow-hidden">
           <InstanceServiceFrame
@@ -1376,10 +1383,12 @@ const InstanceDetailPage: React.FC = () => {
             instanceName={instance.name}
             instanceType={instance.type}
             availability={availability}
+            workspaceVisible={supportsWorkspace(instance) ? workspaceVisible : undefined}
+            onWorkspaceVisibilityChange={supportsWorkspace(instance) ? setWorkspaceVisible : undefined}
           />
         </div>
 
-        {supportsWorkspace(instance) ? (
+        {workspaceVisible && (supportsWorkspace(instance) ? (
           <div className="h-[clamp(520px,calc(100vh-10rem),760px)] min-w-0 overflow-hidden">
             <WorkspaceFileManager instanceId={instance.id} initialPath="/config" />
           </div>
@@ -1387,7 +1396,7 @@ const InstanceDetailPage: React.FC = () => {
           <div className="cm-surface flex h-[clamp(520px,calc(100vh-10rem),760px)] min-w-0 items-center justify-center text-sm text-slate-500">
             No workspace
           </div>
-        )}
+        ))}
       </section>
 
       {(instance.runtime_type || "desktop") === "desktop" && (
@@ -1453,7 +1462,7 @@ const InstanceDetailPage: React.FC = () => {
             {desktopStreamMessage || t("instances.restartRequiredAfterChange")}
           </p>
         </section>
-      )}
+        )}
 
       <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(280px,22rem)]">
         <InstanceSkillHubPanel

@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS llm_models (
   protocol_type VARCHAR(100) NULL,
   base_url VARCHAR(500) NOT NULL,
   provider_model_name VARCHAR(255) NOT NULL,
+  reasoning_enabled BOOLEAN NOT NULL DEFAULT FALSE,
   api_key TEXT NULL,
   api_key_secret_ref VARCHAR(255) NULL,
   is_secure BOOLEAN NOT NULL DEFAULT FALSE,
@@ -86,6 +87,16 @@ WHERE protocol_type IS NULL OR TRIM(protocol_type) = '';
 
 	if _, err := r.sess.SQL().Exec(backfillProtocolTypeQuery); err != nil {
 		panic(fmt.Errorf("failed to ensure llm_models protocol_type column: %w", err))
+	}
+
+	const alterReasoningEnabledQuery = `
+ALTER TABLE llm_models
+  ADD COLUMN reasoning_enabled BOOLEAN NOT NULL DEFAULT FALSE AFTER provider_model_name;
+`
+	if _, err := r.sess.SQL().Exec(alterReasoningEnabledQuery); err != nil {
+		if !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
+			panic(fmt.Errorf("failed to ensure llm_models reasoning_enabled column: %w", err))
+		}
 	}
 }
 

@@ -243,3 +243,22 @@ export function findProviderTemplate(providerType: string, baseUrl: string) {
     template.allowCustomBaseUrl
   ));
 }
+
+export function supportsManagedReasoningControl(
+  providerType: string,
+  protocolType: string | undefined,
+  baseUrl: string,
+  providerModelName: string,
+) {
+  const protocol = resolveProviderProtocolType(providerType, protocolType);
+  if (protocol !== 'openai' && protocol !== 'openai-compatible') {
+    return false;
+  }
+  let hostname = '';
+  try {
+    hostname = new URL(baseUrl.trim()).hostname.toLowerCase().replace(/\.$/, '');
+  } catch {
+    return false;
+  }
+  return hostname === 'api.deepseek.com' && providerModelName.trim().toLowerCase().startsWith('deepseek-');
+}

@@ -1589,11 +1589,43 @@ func buildOpenAICompatibleRequestBody(req ChatCompletionRequest, model *models.L
 		return nil, fmt.Errorf("failed to encode provider model name: %w", err)
 	}
 	payload["model"] = json.RawMessage(modelPayload)
+	if err := applyReasoningControl(payload, model); err != nil {
+		return nil, err
+	}
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return nil, fmt.Errorf("failed to encode provider request: %w", err)
 	}
 	return body, nil
+}
+
+func applyReasoningControl(payload map[string]json.RawMessage, model *models.LLMModel) error {
+	if payload == nil || model == nil {
+		return nil
+	}
+	control := models.ResolveLLMReasoningControl(
+		model.ProviderType,
+		model.ProtocolType,
+		model.BaseURL,
+		model.ProviderModelName,
+	)
+	switch control {
+	case models.ReasoningControlDeepSeekThinking:
+		// DeepSeek enables thinking by default when this field is absent. Always
+		// emit the admin-managed choice so "off" is enforced on the wire rather
+		// than remaining only an OpenClaw capability hint.
+		delete(payload, "reasoning_effort")
+		state := "disabled"
+		if model.ReasoningEnabled {
+			state = "enabled"
+		}
+		encoded, err := json.Marshal(map[string]string{"type": state})
+		if err != nil {
+			return fmt.Errorf("failed to encode provider reasoning control: %w", err)
+		}
+		payload["thinking"] = encoded
+	}
+	return nil
 }
 
 func buildAnthropicRequestBody(req ChatCompletionRequest, model *models.LLMModel) ([]byte, error) {

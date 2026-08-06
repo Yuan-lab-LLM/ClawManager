@@ -258,8 +258,9 @@ type gatewayTokenAliasRecorder interface {
 	UpsertGatewayTokenAlias(ctx context.Context, instanceID int, accessToken string, expiresAt time.Time) error
 }
 type gatewayModelInjection struct {
-	defaultModel string
-	modelsJSON   string
+	defaultModel  string
+	modelsJSON    string
+	reasoningJSON string
 }
 
 type InstanceServiceOption func(*instanceService)
@@ -1112,6 +1113,7 @@ func (s *instanceService) buildGatewayEnv(instance *models.Instance) (map[string
 		"CLAWMANAGER_LLM_BASE_URL":   baseURL,
 		"CLAWMANAGER_LLM_API_KEY":    token,
 		"CLAWMANAGER_LLM_MODEL":      modelInjection.modelsJSON,
+		"CLAWMANAGER_LLM_REASONING":  modelInjection.reasoningJSON,
 		"CLAWMANAGER_LLM_PROVIDER":   "openai-compatible",
 		"CLAWMANAGER_INSTANCE_TOKEN": token,
 		"OPENAI_BASE_URL":            baseURL,
@@ -1348,6 +1350,7 @@ func (s *instanceService) resolveGatewayModelInjection() (*gatewayModelInjection
 	}
 
 	modelsForInjection := []string{"auto"}
+	reasoningForInjection := map[string]bool{"auto": false}
 	seen := map[string]struct{}{
 		"auto": {},
 	}
@@ -1367,16 +1370,23 @@ func (s *instanceService) resolveGatewayModelInjection() (*gatewayModelInjection
 		}
 		seen[normalizedName] = struct{}{}
 		modelsForInjection = append(modelsForInjection, displayName)
+		models.PopulateLLMReasoningCapability(&item)
+		reasoningForInjection[displayName] = item.SupportsReasoning && item.ReasoningEnabled
 	}
 
 	rawModels, err := json.Marshal(modelsForInjection)
 	if err != nil {
 		return nil, fmt.Errorf("failed to encode gateway model list: %w", err)
 	}
+	rawReasoning, err := json.Marshal(reasoningForInjection)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode gateway model reasoning settings: %w", err)
+	}
 
 	return &gatewayModelInjection{
-		defaultModel: "auto",
-		modelsJSON:   string(rawModels),
+		defaultModel:  "auto",
+		modelsJSON:    string(rawModels),
+		reasoningJSON: string(rawReasoning),
 	}, nil
 }
 

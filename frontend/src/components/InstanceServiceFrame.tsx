@@ -1,4 +1,4 @@
-import { Maximize2, Minimize2, RefreshCw } from "lucide-react";
+import { Maximize2, Minimize2, PanelRightClose, PanelRightOpen, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useI18n } from "../contexts/I18nContext";
 import { useInstanceDesktopAccess } from "../hooks/useInstanceDesktopAccess";
@@ -11,6 +11,8 @@ interface InstanceServiceFrameProps {
   instanceName: string;
   instanceType?: string;
   availability: InstanceAvailability;
+  workspaceVisible?: boolean;
+  onWorkspaceVisibilityChange?: (visible: boolean) => void;
 }
 
 function resolveEmbedUrl(url: string | null) {
@@ -41,6 +43,8 @@ export function InstanceServiceFrame({
   instanceName,
   instanceType,
   availability,
+  workspaceVisible,
+  onWorkspaceVisibilityChange,
 }: InstanceServiceFrameProps) {
   const { t } = useI18n();
   const isAvailable = availability === "available";
@@ -129,6 +133,17 @@ export function InstanceServiceFrame({
           {instanceName}
         </div>
         <div className="relative z-20 flex shrink-0 items-center gap-2">
+          {typeof workspaceVisible === "boolean" && onWorkspaceVisibilityChange && (
+            <button
+              type="button"
+              onClick={() => onWorkspaceVisibilityChange(!workspaceVisible)}
+              className="cm-icon-button"
+              title={workspaceVisible ? t("instances.hideWorkspace") : t("instances.showWorkspace")}
+              aria-label={workspaceVisible ? t("instances.hideWorkspace") : t("instances.showWorkspace")}
+            >
+              {workspaceVisible ? <PanelRightClose className="h-4 w-4" /> : <PanelRightOpen className="h-4 w-4" />}
+            </button>
+          )}
           {isAvailable && (
             <button
               type="button"

@@ -109,16 +109,32 @@ assert(
 );
 
 assert(
-  !detailSource.includes("proWorkspaceBrowserOpen") &&
-    !proRender.includes("PanelRightOpen") &&
-    !proRender.includes("PanelRightClose"),
-  "Pro workspace browser must remain visible without a collapse control.",
+  detailSource.includes("workspaceVisible") &&
+    proRender.includes("workspaceVisible={supportsWorkspace(instance) ? workspaceVisible : undefined}") &&
+    proRender.includes("onWorkspaceVisibilityChange={supportsWorkspace(instance) ? setWorkspaceVisible : undefined}") &&
+    frameSource.includes("PanelRightOpen") &&
+    frameSource.includes("PanelRightClose"),
+  "Lite and Pro service frames must expose one shared workspace visibility control.",
 );
 
 assert(
   proRender.includes("xl:grid-cols-[minmax(0,7fr)_minmax(380px,3fr)]") &&
+    proRender.includes('workspaceVisible ? "xl:grid-cols-[minmax(0,7fr)_minmax(380px,3fr)]" : "xl:grid-cols-1"') &&
     proRender.includes("supportsWorkspace(instance) ?"),
-  "Pro desktop and workspace browser must remain side by side at a stable 70/30 desktop ratio.",
+  "Expanded Pro desktop and workspace browser must remain side by side at a stable 70/30 ratio.",
+);
+
+const liteRender = sliceBetween(
+  detailSource,
+  "const renderLiteWorkspace = () => {",
+  "\n  const renderProWorkspace = () => (",
+);
+
+assert(
+  liteRender.includes("workspaceVisible={supportsWorkspace(instance) ? workspaceVisible : undefined}") &&
+    liteRender.includes("onWorkspaceVisibilityChange={supportsWorkspace(instance) ? setWorkspaceVisible : undefined}") &&
+    liteRender.includes('workspaceVisible ? "xl:grid-cols-[minmax(0,1fr)_minmax(360px,28rem)]" : "xl:grid-cols-1"'),
+  "Lite instance detail must keep the workspace visible by default and expand the service frame when hidden.",
 );
 
 assert(

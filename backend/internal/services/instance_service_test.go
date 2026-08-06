@@ -70,7 +70,13 @@ func TestBuildGatewayEnvInjectsGatewayModelCatalog(t *testing.T) {
 						{DisplayName: "GPT-4.1"},
 						{DisplayName: "Claude 3.7 Sonnet"},
 						{DisplayName: "auto"},
-						{ProviderModelName: "deepseek-r1"},
+						{
+							ProviderType:      models.ProviderTypeOpenAICompatible,
+							ProtocolType:      models.ProtocolTypeOpenAICompatible,
+							BaseURL:           "https://api.deepseek.com",
+							ProviderModelName: "deepseek-r1",
+							ReasoningEnabled:  true,
+						},
 					},
 				},
 			}
@@ -88,6 +94,9 @@ func TestBuildGatewayEnvInjectsGatewayModelCatalog(t *testing.T) {
 			}
 			if env["CLAWMANAGER_LLM_MODEL"] != `["auto","GPT-4.1","Claude 3.7 Sonnet","deepseek-r1"]` {
 				t.Fatalf("expected CLAWMANAGER_LLM_MODEL to contain injected model catalog JSON, got %q", env["CLAWMANAGER_LLM_MODEL"])
+			}
+			if env["CLAWMANAGER_LLM_REASONING"] != `{"Claude 3.7 Sonnet":false,"GPT-4.1":false,"auto":false,"deepseek-r1":true}` {
+				t.Fatalf("expected authoritative reasoning settings, got %q", env["CLAWMANAGER_LLM_REASONING"])
 			}
 			if env["OPENAI_MODEL"] != "auto" {
 				t.Fatalf("expected OPENAI_MODEL to remain the default gateway alias, got %q", env["OPENAI_MODEL"])

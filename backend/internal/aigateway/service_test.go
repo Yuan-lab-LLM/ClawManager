@@ -117,6 +117,81 @@ func TestBuildProviderRequestPreservesToolConfiguration(t *testing.T) {
 	}
 }
 
+func TestBuildProviderRequestEnforcesDeepSeekThinkingSetting(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		enabled bool
+		want    string
+	}{
+		{name: "disabled", enabled: false, want: "disabled"},
+		{name: "enabled", enabled: true, want: "enabled"},
+	}
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			req := ChatCompletionRequest{
+				Model: "NB",
+				RawBody: []byte(`{"model":"NB","messages":[{"role":"user","content":"hello"}],` +
+					`"thinking":{"type":"enabled"},"reasoning_effort":"high"}`),
+			}
+			model := &models.LLMModel{
+				ProviderType:      models.ProviderTypeOpenAICompatible,
+				ProtocolType:      models.ProtocolTypeOpenAICompatible,
+				BaseURL:           "https://api.deepseek.com",
+				ProviderModelName: "deepseek-v4-flash",
+				ReasoningEnabled:  tc.enabled,
+			}
+			body, err := buildProviderRequestBody(req, model)
+			if err != nil {
+				t.Fatalf("buildProviderRequestBody returned error: %v", err)
+			}
+			var payload map[string]json.RawMessage
+			if err := json.Unmarshal(body, &payload); err != nil {
+				t.Fatalf("decode provider request: %v", err)
+			}
+			var thinking struct {
+				Type string `json:"type"`
+			}
+			if err := json.Unmarshal(payload["thinking"], &thinking); err != nil {
+				t.Fatalf("decode thinking control: %v", err)
+			}
+			if thinking.Type != tc.want {
+				t.Fatalf("thinking.type = %q, want %q", thinking.Type, tc.want)
+			}
+			if _, exists := payload["reasoning_effort"]; exists {
+				t.Fatalf("reasoning_effort must not conflict with DeepSeek thinking control")
+			}
+		})
+	}
+}
+
+func TestBuildProviderRequestPreservesUnknownReasoningFields(t *testing.T) {
+	t.Parallel()
+	req := ChatCompletionRequest{
+		Model:   "custom",
+		RawBody: []byte(`{"model":"custom","messages":[{"role":"user","content":"hello"}],"reasoning_effort":"medium"}`),
+	}
+	model := &models.LLMModel{
+		ProviderType:      models.ProviderTypeOpenAICompatible,
+		ProtocolType:      models.ProtocolTypeOpenAICompatible,
+		BaseURL:           "https://gateway.example.com/v1",
+		ProviderModelName: "custom-reasoner",
+	}
+	body, err := buildProviderRequestBody(req, model)
+	if err != nil {
+		t.Fatalf("buildProviderRequestBody returned error: %v", err)
+	}
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("decode provider request: %v", err)
+	}
+	if string(payload["reasoning_effort"]) != `"medium"` {
+		t.Fatalf("unsupported provider-specific fields must pass through, got %s", payload["reasoning_effort"])
+	}
+}
+
 func TestBuildProviderRequestUsesAnthropicProtocolForLocalModel(t *testing.T) {
 	req := ChatCompletionRequest{
 		Model: "gateway-model",

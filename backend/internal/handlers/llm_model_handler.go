@@ -24,6 +24,7 @@ type UpsertLLMModelRequest struct {
 	ProtocolType      string  `json:"protocol_type,omitempty"`
 	BaseURL           string  `json:"base_url" binding:"required"`
 	ProviderModelName string  `json:"provider_model_name" binding:"required"`
+	ReasoningEnabled  *bool   `json:"reasoning_enabled,omitempty"`
 	APIKey            *string `json:"api_key,omitempty"`
 	APIKeySecretRef   *string `json:"api_key_secret_ref,omitempty"`
 	IsSecure          bool    `json:"is_secure"`
@@ -76,6 +77,7 @@ func (h *LLMModelHandler) UpsertModel(c *gin.Context) {
 		ProtocolType:      req.ProtocolType,
 		BaseURL:           req.BaseURL,
 		ProviderModelName: req.ProviderModelName,
+		ReasoningEnabled:  req.ReasoningEnabled,
 		APIKey:            req.APIKey,
 		APIKeySecretRef:   req.APIKeySecretRef,
 		IsSecure:          req.IsSecure,

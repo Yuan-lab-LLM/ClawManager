@@ -33,6 +33,15 @@ assert(
 );
 
 assert(
+  pageSource.includes("const [workspaceVisible, setWorkspaceVisible] = useState(true)") &&
+    pageSource.includes("PanelRightClose") &&
+    pageSource.includes("PanelRightOpen") &&
+    pageSource.includes("canShowWorkspace && workspaceVisible") &&
+    pageSource.includes("workspaceVisible && (canShowWorkspace ?"),
+  "Shared page must expose the workspace visibility control without changing the default visible state.",
+);
+
+assert(
   sharedServiceSource.includes('axios.create({') &&
     !sharedServiceSource.includes('from "./api"') &&
     sharedServiceSource.includes("X-ClawManager-Share-CSRF"),

@@ -8,6 +8,9 @@ export interface LLMModel {
   protocol_type?: string;
   base_url: string;
   provider_model_name: string;
+  reasoning_enabled: boolean;
+  supports_reasoning?: boolean;
+  reasoning_control?: string;
   api_key?: string;
   api_key_secret_ref?: string;
   is_secure: boolean;
