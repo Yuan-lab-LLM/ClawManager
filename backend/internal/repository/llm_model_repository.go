@@ -87,11 +87,22 @@ WHERE protocol_type IS NULL OR TRIM(protocol_type) = '';
 	if _, err := r.sess.SQL().Exec(backfillProtocolTypeQuery); err != nil {
 		panic(fmt.Errorf("failed to ensure llm_models protocol_type column: %w", err))
 	}
+
+	const addPriorityColumn = `
+ALTER TABLE llm_models
+  ADD COLUMN priority INT NOT NULL DEFAULT 0 AFTER is_active;
+`
+
+	if _, err := r.sess.SQL().Exec(addPriorityColumn); err != nil {
+		if !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
+			panic(fmt.Errorf("failed to ensure llm_models priority column: %w", err))
+		}
+	}
 }
 
 func (r *llmModelRepository) List() ([]models.LLMModel, error) {
 	var items []models.LLMModel
-	if err := r.sess.Collection("llm_models").Find().OrderBy("-is_secure", "display_name").All(&items); err != nil {
+	if err := r.sess.Collection("llm_models").Find().OrderBy("-priority", "-is_secure", "display_name").All(&items); err != nil {
 		return nil, fmt.Errorf("failed to list llm models: %w", err)
 	}
 	return items, nil
@@ -99,7 +110,7 @@ func (r *llmModelRepository) List() ([]models.LLMModel, error) {
 
 func (r *llmModelRepository) ListActive() ([]models.LLMModel, error) {
 	var items []models.LLMModel
-	if err := r.sess.Collection("llm_models").Find(db.Cond{"is_active": true}).OrderBy("-is_secure", "display_name").All(&items); err != nil {
+	if err := r.sess.Collection("llm_models").Find(db.Cond{"is_active": true}).OrderBy("-priority", "-is_secure", "display_name").All(&items); err != nil {
 		return nil, fmt.Errorf("failed to list active llm models: %w", err)
 	}
 	return items, nil

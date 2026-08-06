@@ -2,6 +2,7 @@ package aigateway
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -42,6 +43,215 @@ func (s *stubChatSessionService) GetSession(sessionID string) (*models.ChatSessi
 
 func (s *stubChatSessionService) EnsureSession(sessionID string, userID, instanceID *int, traceID *string, title *string) (*models.ChatSession, error) {
 	return s.session, nil
+}
+
+// --- LLMModelRepository stub ---
+
+type stubLLMModelRepository struct {
+	activeModels []models.LLMModel
+	allModels    []models.LLMModel
+	byName       map[string]*models.LLMModel
+}
+
+func (r *stubLLMModelRepository) List() ([]models.LLMModel, error) {
+	return r.allModels, nil
+}
+
+func (r *stubLLMModelRepository) ListActive() ([]models.LLMModel, error) {
+	return r.activeModels, nil
+}
+
+func (r *stubLLMModelRepository) GetByID(id int) (*models.LLMModel, error) {
+	for i := range r.allModels {
+		if r.allModels[i].ID == id {
+			return &r.allModels[i], nil
+		}
+	}
+	return nil, nil
+}
+
+func (r *stubLLMModelRepository) GetByDisplayName(displayName string) (*models.LLMModel, error) {
+	if r.byName != nil {
+		return r.byName[displayName], nil
+	}
+	for i := range r.allModels {
+		if r.allModels[i].DisplayName == displayName {
+			return &r.allModels[i], nil
+		}
+	}
+	return nil, nil
+}
+
+func (r *stubLLMModelRepository) Save(model *models.LLMModel) error { return nil }
+func (r *stubLLMModelRepository) Delete(id int) error               { return nil }
+
+// --- Tests for ListAvailableModels ---
+
+func TestListAvailableModelsReturnsAutoAndAllActive(t *testing.T) {
+	repo := &stubLLMModelRepository{
+		activeModels: []models.LLMModel{
+			{ID: 1, DisplayName: "GPT-4o", ProviderType: "openai", IsActive: true, Priority: 10},
+			{ID: 2, DisplayName: "Claude-3", ProviderType: "anthropic", IsActive: true, Priority: 5},
+		},
+	}
+	svc := &service{modelRepo: repo}
+
+	result, err := svc.ListAvailableModels()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result) != 3 {
+		t.Fatalf("expected 3 models (Auto + 2 active), got %d", len(result))
+	}
+	if result[0].DisplayName != "Auto" {
+		t.Errorf("first model should be Auto, got %q", result[0].DisplayName)
+	}
+	if result[1].DisplayName != "GPT-4o" {
+		t.Errorf("second model should be GPT-4o, got %q", result[1].DisplayName)
+	}
+	if result[2].DisplayName != "Claude-3" {
+		t.Errorf("third model should be Claude-3, got %q", result[2].DisplayName)
+	}
+}
+
+func TestListAvailableModelsEmptyWhenNoActive(t *testing.T) {
+	repo := &stubLLMModelRepository{activeModels: []models.LLMModel{}}
+	svc := &service{modelRepo: repo}
+
+	result, err := svc.ListAvailableModels()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result) != 0 {
+		t.Fatalf("expected 0 models when none active, got %d", len(result))
+	}
+}
+
+// --- Tests for selectAutoModel ---
+
+func TestSelectAutoModelPicksHighestPriority(t *testing.T) {
+	repo := &stubLLMModelRepository{
+		activeModels: []models.LLMModel{
+			{ID: 1, DisplayName: "High", Priority: 100, IsSecure: false, IsActive: true},
+			{ID: 2, DisplayName: "Low", Priority: 10, IsSecure: false, IsActive: true},
+		},
+	}
+	svc := &service{modelRepo: repo}
+
+	selected, err := svc.selectAutoModel()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if selected.DisplayName != "High" {
+		t.Errorf("expected highest priority model 'High', got %q", selected.DisplayName)
+	}
+}
+
+func TestSelectAutoModelSkipsSecure(t *testing.T) {
+	repo := &stubLLMModelRepository{
+		activeModels: []models.LLMModel{
+			{ID: 1, DisplayName: "Secure", Priority: 100, IsSecure: true, IsActive: true},
+			{ID: 2, DisplayName: "Normal", Priority: 50, IsSecure: false, IsActive: true},
+		},
+	}
+	svc := &service{modelRepo: repo}
+
+	selected, err := svc.selectAutoModel()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if selected.DisplayName != "Normal" {
+		t.Errorf("expected non-secure model 'Normal', got %q", selected.DisplayName)
+	}
+}
+
+func TestSelectAutoModelFallsBackToSecureWhenNoNonSecure(t *testing.T) {
+	repo := &stubLLMModelRepository{
+		activeModels: []models.LLMModel{
+			{ID: 1, DisplayName: "SecureOnly", Priority: 10, IsSecure: true, IsActive: true},
+		},
+	}
+	svc := &service{modelRepo: repo}
+
+	selected, err := svc.selectAutoModel()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if selected.DisplayName != "SecureOnly" {
+		t.Errorf("expected fallback to secure model, got %q", selected.DisplayName)
+	}
+}
+
+func TestSelectAutoModelDistributesAmongSamePriority(t *testing.T) {
+	repo := &stubLLMModelRepository{
+		activeModels: []models.LLMModel{
+			{ID: 1, DisplayName: "A", Priority: 100, IsSecure: false, IsActive: true},
+			{ID: 2, DisplayName: "B", Priority: 100, IsSecure: false, IsActive: true},
+			{ID: 3, DisplayName: "C", Priority: 100, IsSecure: false, IsActive: true},
+		},
+	}
+	svc := &service{modelRepo: repo}
+
+	counts := map[string]int{}
+	iterations := 300
+	for i := 0; i < iterations; i++ {
+		selected, err := svc.selectAutoModel()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		counts[selected.DisplayName]++
+	}
+
+	// Each model should be selected at least once in 300 iterations.
+	for _, name := range []string{"A", "B", "C"} {
+		if counts[name] == 0 {
+			t.Errorf("model %q was never selected in %d iterations — load balancing broken", name, iterations)
+		}
+	}
+}
+
+func TestSelectAutoModelExcludingSkipsExcluded(t *testing.T) {
+	repo := &stubLLMModelRepository{
+		activeModels: []models.LLMModel{
+			{ID: 1, DisplayName: "Primary", Priority: 100, IsSecure: false, IsActive: true},
+			{ID: 2, DisplayName: "Fallback", Priority: 50, IsSecure: false, IsActive: true},
+		},
+	}
+	svc := &service{modelRepo: repo}
+
+	selected, err := svc.selectAutoModelExcluding(map[int]bool{1: true})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if selected.DisplayName != "Fallback" {
+		t.Errorf("expected 'Fallback' after excluding primary, got %q", selected.DisplayName)
+	}
+}
+
+func TestSelectAutoModelExcludingAllReturnsError(t *testing.T) {
+	repo := &stubLLMModelRepository{
+		activeModels: []models.LLMModel{
+			{ID: 1, DisplayName: "Only", Priority: 100, IsSecure: false, IsActive: true},
+		},
+	}
+	svc := &service{modelRepo: repo}
+
+	_, err := svc.selectAutoModelExcluding(map[int]bool{1: true})
+	if err == nil {
+		t.Fatal("expected error when all models excluded, got nil")
+	}
+}
+
+func TestErrProviderConnectionIsDetectable(t *testing.T) {
+	var err error = &errProviderConnection{wrapped: errors.New("connection refused")}
+
+	var connErr *errProviderConnection
+	if !errors.As(err, &connErr) {
+		t.Fatal("errors.As should detect errProviderConnection")
+	}
+	if connErr.Error() != "connection refused" {
+		t.Errorf("unexpected error message: %q", connErr.Error())
+	}
 }
 
 func TestBuildProviderRequestPreservesToolConfiguration(t *testing.T) {
