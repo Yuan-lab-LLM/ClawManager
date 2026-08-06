@@ -2196,6 +2196,7 @@ function teamArtifactRefsFromPayload(payload: Record<string, unknown>, step?: Re
     step?.artifact_refs,
   ];
   const refs: string[] = [];
+  const seenPaths = new Set<string>();
   for (const candidate of candidates) {
     if (!Array.isArray(candidate)) {
       continue;
@@ -2205,10 +2206,15 @@ function teamArtifactRefsFromPayload(payload: Record<string, unknown>, step?: Re
         continue;
       }
       const value = raw.trim();
-      if (!value || !isTeamWorkspaceLink(value) || refs.includes(value)) {
+      if (!value || !isTeamWorkspaceLink(value)) {
         continue;
       }
-      refs.push(value);
+      const relativePath = workspaceLinkToRelativePath(value);
+      if (!relativePath || seenPaths.has(relativePath)) {
+        continue;
+      }
+      seenPaths.add(relativePath);
+      refs.push(`/team/${relativePath}`);
     }
   }
   return refs;
@@ -4888,6 +4894,7 @@ type TeamChatMessage = {
   threadKey?: string;
   sortPhase?: number;
   artifactRefs?: string[];
+  presentationKey?: string;
 };
 
 const TEAM_CHAT_WAIT_DIGEST_MS = 3 * 60 * 1000;
@@ -5293,6 +5300,7 @@ function chatMessageFromItem(
     threadKey: item.taskKey,
     sortPhase: chatItemSortPhase(item, isAssignmentEvent, isTerminalFeedback),
     artifactRefs: teamArtifactRefsFromPayload(item.payload, item.collaborationStep),
+    presentationKey: chatPresentationTurnKey(item, senderKey, content),
   };
 }
 
@@ -5335,14 +5343,35 @@ const finalFeedbackContentPattern =
   /\bDONE\b|team_complete_task|任务核心结果|完整详细产出|结果已反馈|已完成|执行完成|完成任务/;
 
 function dedupeTeamChatMessages(messages: TeamChatMessage[]) {
+  const mergedMessages: TeamChatMessage[] = [];
+  const presentationIndexes = new Map<string, number>();
+  for (const message of messages) {
+    const candidate: TeamChatMessage = {
+      ...message,
+      artifactRefs: message.artifactRefs ? [...message.artifactRefs] : undefined,
+    };
+    if (candidate.presentationKey) {
+      const existingIndex = presentationIndexes.get(candidate.presentationKey);
+      if (existingIndex !== undefined) {
+        const existing = mergedMessages[existingIndex];
+        existing.artifactRefs = mergeTeamChatArtifactRefs(existing.artifactRefs, candidate.artifactRefs);
+        if ((!existing.tone || existing.tone === "normal") && candidate.tone && candidate.tone !== "normal") {
+          existing.tone = candidate.tone;
+        }
+        continue;
+      }
+      presentationIndexes.set(candidate.presentationKey, mergedMessages.length);
+    }
+    mergedMessages.push(candidate);
+  }
   const lastReplaceable = new Map<string, number>();
-  messages.forEach((message, index) => {
+  mergedMessages.forEach((message, index) => {
     if (message.dedupeKey?.startsWith("replaceable:")) {
       lastReplaceable.set(message.dedupeKey, index);
     }
   });
   const seen = new Set<string>();
-  return messages.filter((message, index) => {
+  return mergedMessages.filter((message, index) => {
     if (!message.dedupeKey) {
       return true;
     }
@@ -5357,6 +5386,48 @@ function dedupeTeamChatMessages(messages: TeamChatMessage[]) {
   });
 }
 
+function chatPresentationTurnKey(
+  item: CollaborationItem,
+  senderKey: string,
+  content: string,
+) {
+  const sourceMessageId = payloadTextDeep(item.payload, [
+    "sourceMessageId",
+    "source_message_id",
+    "inReplyTo",
+    "in_reply_to",
+  ]);
+  const assignmentId = payloadTextDeep(item.payload, [
+    "assignmentId",
+    "assignment_id",
+    "canonicalWorkId",
+    "canonical_work_id",
+    "workId",
+    "work_id",
+  ]);
+  const normalizedContent = normalizeChatIdentityContent(content);
+  if (!sourceMessageId || !normalizedContent) {
+    return undefined;
+  }
+  return `turn:${item.taskKey}:${senderKey}:${assignmentId}:${sourceMessageId}:${chatContentHash(normalizedContent)}`;
+}
+
+function mergeTeamChatArtifactRefs(...groups: Array<string[] | undefined>) {
+  const refs: string[] = [];
+  const seen = new Set<string>();
+  for (const group of groups) {
+    for (const raw of group || []) {
+      const relativePath = workspaceLinkToRelativePath(raw);
+      if (!relativePath || seen.has(relativePath)) {
+        continue;
+      }
+      seen.add(relativePath);
+      refs.push(`/team/${relativePath}`);
+    }
+  }
+  return refs.length > 0 ? refs : undefined;
+}
+
 function chatItemDedupeKey(
   item: CollaborationItem,
   senderKey: string,
@@ -5369,6 +5440,9 @@ function chatItemDedupeKey(
     payloadTextDeep(item.payload, ["messageId", "message_id", "inReplyTo", "in_reply_to"]) ||
     item.event.message_id ||
     "";
+  const sourceTurnId =
+    payloadTextDeep(item.payload, ["sourceMessageId", "source_message_id", "inReplyTo", "in_reply_to"]) ||
+    messageId;
   const taskId =
     payloadTextDeep(item.payload, ["rootTaskId", "root_task_id", "taskId", "task_id", "runtimeTaskId"]) ||
     (item.event.task_id ? canonicalTaskKey(item.event.task_id) : item.taskKey);
@@ -5408,19 +5482,23 @@ function chatItemDedupeKey(
     // Result IDs are transport/audit identifiers. Chat de-duplication is based
     // on the actual business content, so a corrected second result remains
     // visible while a re-delivered identical result does not appear twice.
-    return `feedback:${taskId}:${senderKey}:${item.to || ""}:${assignmentId}:${contentHash}`;
+    return `feedback:${taskId}:${senderKey}:${item.to || ""}:${assignmentId}:${sourceTurnId}:${contentHash}`;
   }
   if (item.eventType === "task_completed" || item.eventType === "completion" || item.eventType === "reply") {
-    return `feedback:${taskId}:${senderKey}:${item.to || ""}:${assignmentId}:${contentHash || resultScope || chatContentHash(contentKey)}`;
+    return `feedback:${taskId}:${senderKey}:${item.to || ""}:${assignmentId}:${sourceTurnId}:${contentHash || resultScope || chatContentHash(contentKey)}`;
   }
   if (isBusinessChatItem(item)) {
-    return `narrative:${taskId}:${senderKey}:${item.to || ""}:${assignmentId}:${eventKind}:${contentHash}`;
+    return `narrative:${taskId}:${senderKey}:${item.to || ""}:${assignmentId}:${sourceTurnId}:${eventKind}:${contentHash}`;
   }
   return "";
 }
 
 function normalizeChatDedupeContent(content: string) {
   return content.trim().replace(/\s+/g, " ").slice(0, 240);
+}
+
+function normalizeChatIdentityContent(content: string) {
+  return content.trim().replace(/\r\n/g, "\n").replace(/\s+/g, " ");
 }
 
 function chatContentHash(content: string) {
@@ -5549,6 +5627,10 @@ function TeamChatMessageRow({
   message: TeamChatMessage;
   onWorkspaceFileOpen?: (path: string) => void;
 }) {
+  const [artifactsExpanded, setArtifactsExpanded] = useState(false);
+  const artifactRefs = message.artifactRefs || [];
+  const hiddenArtifactCount = Math.max(artifactRefs.length - 5, 0);
+  const visibleArtifactRefs = artifactsExpanded ? artifactRefs : artifactRefs.slice(0, 5);
   const bubbleClass =
     message.tone === "assignment"
       ? "relative overflow-hidden border border-amber-200 bg-gradient-to-br from-amber-50 via-white to-orange-50 text-gray-950 shadow-[0_14px_28px_-22px_rgba(180,83,9,0.8)]"
@@ -5589,9 +5671,9 @@ function TeamChatMessageRow({
             compact
             onWorkspaceFileOpen={onWorkspaceFileOpen}
           />
-          {message.artifactRefs && message.artifactRefs.length > 0 && (
+          {artifactRefs.length > 0 && (
             <div className="mt-2 flex flex-wrap gap-1.5 border-t border-slate-100 pt-2">
-              {message.artifactRefs.map((artifactRef) => {
+              {visibleArtifactRefs.map((artifactRef) => {
                 const relativePath = workspaceLinkToRelativePath(artifactRef);
                 const action = workspaceFileAction(relativePath);
                 if (!action) {
@@ -5624,6 +5706,16 @@ function TeamChatMessageRow({
                   </button>
                 );
               })}
+              {hiddenArtifactCount > 0 && (
+                <button
+                  type="button"
+                  aria-expanded={artifactsExpanded}
+                  onClick={() => setArtifactsExpanded((current) => !current)}
+                  className="inline-flex items-center rounded-md border border-dashed border-slate-300 bg-slate-50 px-2 py-1 text-[11px] font-medium text-slate-600 transition hover:border-slate-400 hover:bg-slate-100"
+                >
+                  {artifactsExpanded ? "收起文件" : `展开其余 ${hiddenArtifactCount} 个文件`}
+                </button>
+              )}
             </div>
           )}
         </div>

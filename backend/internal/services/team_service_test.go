@@ -2590,6 +2590,10 @@ func TestEvaluateProtocolV3ExplicitPhaseRequiresDispositionBeforeWorkflowSeal(t 
 	}
 
 	payload["phaseDispositions"] = []interface{}{map[string]interface{}{
+		"phaseId":  "research",
+		"decision": "cancelled",
+		"reason":   "the model incorrectly disposed an already completed phase",
+	}, map[string]interface{}{
 		"phaseId":  "implementation",
 		"decision": "skipped",
 		"reason":   "研究结论已证明无需进入实现阶段",
@@ -2600,6 +2604,14 @@ func TestEvaluateProtocolV3ExplicitPhaseRequiresDispositionBeforeWorkflowSeal(t 
 	}
 	if evaluation.Decision != teamCompletionDecisionAccepted {
 		t.Fatalf("structured phase disposition must allow final sealing: %#v", evaluation)
+	}
+	effective := structuredTeamPhaseDispositions(payload)
+	if len(effective) != 1 || effective["implementation"].Decision != "skipped" {
+		t.Fatalf("only the unexecuted planned phase should retain a disposition: %#v", payload)
+	}
+	ignored, ok := payload["ignoredPhaseDispositions"].([]interface{})
+	if !ok || len(ignored) != 1 || eventString(ignored[0].(map[string]interface{}), "phaseId") != "research" {
+		t.Fatalf("completed phase disposition should remain only as a non-blocking diagnostic: %#v", payload)
 	}
 }
 
@@ -4017,6 +4029,44 @@ func TestTeamEventPayloadsFilterStructuredTerminalNarrativeSuppression(t *testin
 	payloads := teamEventPayloads(events)
 	if len(payloads) != 1 || payloads[0].ID != 42 {
 		t.Fatalf("only the canonical terminal delivery should cross the public chat boundary: %#v", payloads)
+	}
+}
+
+func TestTeamEventPayloadsMergePairedCompletionArtifactsIntoNarrative(t *testing.T) {
+	taskID := 35
+	memberID := 80
+	narrativeJSON := `{"event":"reply","eventKind":"agent_narrative","text":"Final delivery body","sourceMessageId":"worker-turn-1","assignmentId":"dev-kanban","chatPolicy":"visible","visibleToChat":true}`
+	completionJSON := `{"event":"completion_proposed","resultMarkdown":"Final delivery body","sourceMessageId":"worker-turn-1","assignmentId":"dev-kanban","chatPolicy":"hidden","visibleToChat":false,"finalDeliveredByNarrative":true,"automaticTurnResult":true,"artifactRefs":["/team/artifacts/team-16-task-35/members/developer/dev-kanban/kanban.html","/team/work/team-16-task-35/kanban.html"]}`
+	events := []models.TeamEvent{
+		{ID: 641, TeamID: 16, TaskID: &taskID, MemberID: &memberID, EventType: "reply", PayloadJSON: &narrativeJSON},
+		{ID: 642, TeamID: 16, TaskID: &taskID, MemberID: &memberID, EventType: "completion_proposed", PayloadJSON: &completionJSON},
+	}
+
+	payloads := teamEventPayloads(events)
+	if len(payloads) != 1 || payloads[0].ID != 641 {
+		t.Fatalf("paired Runtime final must project one narrative bubble, got %#v", payloads)
+	}
+	refs := normalizeContextRefs(payloads[0].Payload["artifactRefs"])
+	if len(refs) != 2 || refs[0] != "/team/artifacts/team-16-task-35/members/developer/dev-kanban/kanban.html" || refs[1] != "/team/work/team-16-task-35/kanban.html" {
+		t.Fatalf("completion artifacts were not merged into the visible narrative: %#v", payloads[0].Payload)
+	}
+	if !eventBool(payloads[0].Payload, "presentationArtifactsMerged") {
+		t.Fatalf("merged narrative should expose presentation diagnostic: %#v", payloads[0].Payload)
+	}
+}
+
+func TestTeamEventPayloadsRetainUnpairedHiddenCompletionAsFallback(t *testing.T) {
+	taskID := 35
+	memberID := 80
+	completionJSON := `{"event":"completion_proposed","resultMarkdown":"Only durable delivery","sourceMessageId":"worker-turn-missing","assignmentId":"dev-kanban","chatPolicy":"hidden","visibleToChat":false,"finalDeliveredByNarrative":true,"automaticTurnResult":true,"artifactRefs":["/team/work/team-16-task-35/kanban.html"]}`
+	events := []models.TeamEvent{{
+		ID: 642, TeamID: 16, TaskID: &taskID, MemberID: &memberID,
+		EventType: "completion_proposed", PayloadJSON: &completionJSON,
+	}}
+
+	payloads := teamEventPayloads(events)
+	if len(payloads) != 1 || payloads[0].ID != 642 {
+		t.Fatalf("an unpaired completion must remain visible as a compatibility fallback: %#v", payloads)
 	}
 }
 

@@ -849,7 +849,7 @@ func appendTeamTaskCompletionInstruction(prompt string, communicationMode, inten
 		"- Every Team message must preserve rootTaskId/messageId context when available and must clearly state whether it is an assignment, peer request, progress update, result, review, blocker, or final synthesis.",
 		"- For multi-stage work, publish a structured leader_plan with planVersion and phases. Every team_send must carry a stable phaseId, assignmentId, workId, revision, required flag, and dependencies. Completing one phase never completes the user root task.",
 		"- The Leader may call team_complete_task for the root only after the workflow is sealed, remainingActions is empty, every required latest assignment and review is complete, and finalAnswerReady is true. Worker completion closes only that assignment.",
-		"- A required phase declared in leader_plan cannot disappear implicitly. If a planned phase is intentionally not started, the Leader must include phaseDispositions with phaseId, decision (cancelled, skipped, or superseded), and a concrete reason in team_complete_task. Never use a phase disposition for running or unfinished assigned work.",
+		"- A required phase declared in leader_plan cannot disappear implicitly. If a planned phase is intentionally not started, the Leader must include phaseDispositions with phaseId, decision (cancelled, skipped, or superseded), and a concrete reason in team_complete_task. Omit phases whose assigned work already succeeded; the control plane closes those automatically. Never use a disposition for running or unfinished assigned work.",
 		"- A failed or stale required assignment blocks root success unless the Leader supplies a structured waiver containing assignmentId, reason, and accepted risk. Never waive running/pending work or omit the risk record.",
 		"- Optional work does not need to succeed, but every omitted optional assignment must be listed in skippedAssignments with assignmentId and a concrete reason.",
 		"- Report verification truthfully. If browser/DOM verification did not run or failed, label it as unverified; a hand-written simulator or static inspection is not a browser pass. Any artifact change after review invalidates that review and requires fresh validation.",
@@ -5534,6 +5534,24 @@ func structuredTeamPhaseDispositions(payload map[string]interface{}) map[string]
 	return result
 }
 
+func teamPhaseDispositionPayloads(dispositions map[string]teamPhaseDisposition) []interface{} {
+	phaseIDs := make([]string, 0, len(dispositions))
+	for phaseID := range dispositions {
+		phaseIDs = append(phaseIDs, phaseID)
+	}
+	sort.Strings(phaseIDs)
+	result := make([]interface{}, 0, len(phaseIDs))
+	for _, phaseID := range phaseIDs {
+		disposition := dispositions[phaseID]
+		result = append(result, map[string]interface{}{
+			"phaseId":  disposition.PhaseID,
+			"decision": disposition.Decision,
+			"reason":   disposition.Reason,
+		})
+	}
+	return result
+}
+
 func phaseUsesExplicitDisposition(phase models.TeamWorkflowPhase) bool {
 	return strings.EqualFold(strings.TrimSpace(derefTeamString(phase.CompletionPolicy)), teamPhaseCompletionPolicyExplicitV1)
 }
@@ -5745,6 +5763,36 @@ func (s *teamService) evaluateLeaderRootCompletion(team *models.Team, task *mode
 	finalAnswerReady := eventBool(payload, "finalAnswerReady", "final_answer_ready")
 	remainingActions := normalizeContextRefs(firstTeamValue(payload, "remainingActions", "remaining_actions", "nextActions", "next_actions"))
 	phaseDispositions := structuredTeamPhaseDispositions(payload)
+	ignoredPhaseDispositions := make([]interface{}, 0)
+	for idx := range phases {
+		phase := phases[idx]
+		if latestPlanVersion > 0 && phase.PlanVersion != latestPlanVersion {
+			continue
+		}
+		disposition, exists := phaseDispositions[phase.PhaseID]
+		if !exists {
+			continue
+		}
+		hasRequiredWork := phaseHasRequiredWork(phase.PhaseID, byBusinessID, member.ID)
+		phaseSatisfied := phase.Status == teamPhaseStatusCompleted ||
+			(hasRequiredWork && !phaseHasIncompleteRequiredWork(phase.PhaseID, byBusinessID, member.ID, waivers))
+		if !phaseSatisfied {
+			continue
+		}
+		ignoredPhaseDispositions = append(ignoredPhaseDispositions, map[string]interface{}{
+			"phaseId":          disposition.PhaseID,
+			"reportedDecision": disposition.Decision,
+			"reason":           disposition.Reason,
+			"ignoredReason":    "phase_already_satisfied",
+		})
+		delete(phaseDispositions, phase.PhaseID)
+	}
+	if len(ignoredPhaseDispositions) > 0 {
+		payload["reportedPhaseDispositions"] = firstTeamValue(payload, "phaseDispositions", "phase_dispositions")
+		payload["ignoredPhaseDispositions"] = ignoredPhaseDispositions
+		payload["phaseDispositionDiagnostic"] = "dispositions apply only to unexecuted planned phases"
+		payload["phaseDispositions"] = teamPhaseDispositionPayloads(phaseDispositions)
+	}
 	if protocolVersion >= 3 && !naturalTurnCompletion &&
 		(!workflowFinal || !finalAnswerReady || len(remainingActions) > 0) {
 		result.Decision = teamCompletionDecisionDeferred
@@ -11202,23 +11250,95 @@ func teamTaskPayload(task models.TeamTask) (*TeamTaskPayload, error) {
 }
 
 func teamEventPayloads(events []models.TeamEvent) []TeamEventPayload {
-	result := make([]TeamEventPayload, 0, len(events))
+	parsed := make([]TeamEventPayload, 0, len(events))
 	for _, event := range events {
 		payload := TeamEventPayload{TeamEvent: event}
 		if event.PayloadJSON != nil && strings.TrimSpace(*event.PayloadJSON) != "" {
 			_ = json.Unmarshal([]byte(*event.PayloadJSON), &payload.Payload)
 		}
 		sanitizePublicTeamEventPayload(event.EventType, payload.Payload)
+		parsed = append(parsed, payload)
+	}
+
+	// Runtime final turns carry two durable facts: a visible assistant narrative
+	// and a hidden completion proposal that owns workflow state plus discovered
+	// artifacts. Preserve both in storage, but project one chat bubble by merging
+	// the completion artifacts into its exact same-turn narrative. If the paired
+	// narrative is absent, retain the completion as a safe compatibility fallback.
+	narrativeByTurn := make(map[string]int)
+	for idx := range parsed {
+		payload := parsed[idx]
+		if !isStructuredAgentNarrativeEvent(payload.EventType, payload.Payload) ||
+			isStructurallySuppressedTeamNarrative(payload.Payload) {
+			continue
+		}
+		if key := teamChatPresentationTurnKey(payload.TeamEvent, payload.Payload); key != "" {
+			narrativeByTurn[key] = idx
+		}
+	}
+
+	result := make([]TeamEventPayload, 0, len(parsed))
+	for idx := range parsed {
+		payload := parsed[idx]
 		chatPolicy := strings.ToLower(strings.TrimSpace(eventString(payload.Payload, "chatPolicy", "chat_policy")))
+		if eventBool(payload.Payload, "finalDeliveredByNarrative", "final_delivered_by_narrative") && chatPolicy == "hidden" {
+			if narrativeIndex, ok := narrativeByTurn[teamChatPresentationTurnKey(payload.TeamEvent, payload.Payload)]; ok && narrativeIndex != idx {
+				mergeTeamChatPresentationArtifacts(parsed[narrativeIndex].Payload, payload.Payload)
+				continue
+			}
+		}
 		hidden, hiddenDefined := teamEventBoolValue(payload.Payload, "visibleToChat", "visible_to_chat")
 		eventKind := strings.ToLower(strings.TrimSpace(eventString(payload.Payload, "eventKind", "event_kind", "kind")))
-		business := teamChatEventIsBusinessContent(strings.ToLower(strings.TrimSpace(event.EventType)), eventKind, payload.Payload)
-		if event.EventType == "member_result_confirmed" || (!business && (chatPolicy == "hidden" || (hiddenDefined && !hidden && chatPolicy == ""))) {
+		business := teamChatEventIsBusinessContent(strings.ToLower(strings.TrimSpace(payload.EventType)), eventKind, payload.Payload)
+		if payload.EventType == "member_result_confirmed" || (!business && (chatPolicy == "hidden" || (hiddenDefined && !hidden && chatPolicy == ""))) {
 			continue
 		}
 		result = append(result, payload)
 	}
 	return result
+}
+
+func teamChatPresentationTurnKey(event models.TeamEvent, payload map[string]interface{}) string {
+	if payload == nil {
+		return ""
+	}
+	sourceMessageID := eventString(payload,
+		"sourceMessageId", "source_message_id", "inReplyTo", "in_reply_to")
+	assignmentID := eventString(payload,
+		"assignmentId", "assignment_id", "canonicalWorkId", "canonical_work_id", "workId", "work_id")
+	body := strings.TrimSpace(strings.ReplaceAll(runtimeTurnResultText(payload), "\r\n", "\n"))
+	if sourceMessageID == "" || body == "" {
+		return ""
+	}
+	memberID := 0
+	if event.MemberID != nil {
+		memberID = *event.MemberID
+	}
+	taskID := 0
+	if event.TaskID != nil {
+		taskID = *event.TaskID
+	}
+	sum := sha256.Sum256([]byte(body))
+	return fmt.Sprintf("%d:%d:%s:%s:%x", taskID, memberID, sourceMessageID, assignmentID, sum[:])
+}
+
+func mergeTeamChatPresentationArtifacts(target, source map[string]interface{}) {
+	if target == nil || source == nil {
+		return
+	}
+	refs := uniqueTeamStrings(append(
+		normalizeContextRefs(firstTeamValue(target, "artifactRefs", "artifact_refs")),
+		normalizeContextRefs(firstTeamValue(source, "artifactRefs", "artifact_refs"))...,
+	))
+	if len(refs) > 0 {
+		target["artifactRefs"] = refs
+		target["presentationArtifactsMerged"] = true
+	}
+	if firstTeamValue(target, "artifactMetadata", "artifact_metadata") == nil {
+		if metadata := firstTeamValue(source, "artifactMetadata", "artifact_metadata"); metadata != nil {
+			target["artifactMetadata"] = metadata
+		}
+	}
 }
 
 // Deferred completion reports must remain available to the internal ledger
