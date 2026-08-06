@@ -237,13 +237,33 @@ func TestEgressProxyHandlerServesInteractivePreviewOnIsolatedSignedOrigin(t *tes
 	const prefix = "results/task-193"
 	encodedPrefix := base64.RawURLEncoding.EncodeToString([]byte(prefix))
 	signature := signTeamPreviewModeForTest(token, team.ID, prefix, teamPreviewInteractiveMode)
-	target := "http://" + isolatedInteractivePreviewHost(signature) + "/v2/interactive/94/" + encodedPrefix + "/" + signature + "/kanban.html"
-	handler := NewEgressProxyHandler(nil, WithTeamArtifactPreview(
-		&stubTeamPreviewRepository{team: team},
-		&stubTeamPreviewSecrets{token: token},
-		workspaceRoot,
-		func(int) string { return "clawmanager-user-7" },
-	))
+	previewPath := "/v2/interactive/94/" + encodedPrefix + "/" + signature + "/kanban.html"
+	target := "http://" + isolatedInteractivePreviewHost(signature) + previewPath
+	const previewOrigin = "http://clawmanager-egress-proxy.clawmanager-hxc-peer-system.svc.cluster.local:3128"
+	handler := NewEgressProxyHandler(
+		nil,
+		WithTeamArtifactPreview(
+			&stubTeamPreviewRepository{team: team},
+			&stubTeamPreviewSecrets{token: token},
+			workspaceRoot,
+			func(int) string { return "clawmanager-user-7" },
+		),
+		WithTeamArtifactPreviewOrigin(previewOrigin),
+	)
+
+	bootstrap := httptest.NewRecorder()
+	bootstrapCtx, _ := gin.CreateTestContext(bootstrap)
+	bootstrapCtx.Request = httptest.NewRequest(http.MethodGet, previewOrigin+previewPath, nil)
+	handler.Handle(bootstrapCtx)
+	if bootstrap.Code != http.StatusTemporaryRedirect {
+		t.Fatalf("interactive bootstrap expected 307, got %d: %s", bootstrap.Code, bootstrap.Body.String())
+	}
+	if got, want := bootstrap.Header().Get("Location"), target; got != want {
+		t.Fatalf("interactive bootstrap Location = %q, want %q", got, want)
+	}
+	if got := bootstrap.Header().Get("Cache-Control"); !strings.Contains(got, "no-store") {
+		t.Fatalf("interactive bootstrap cache policy = %q", got)
+	}
 
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)

@@ -167,6 +167,81 @@ func TestBuildProviderRequestEnforcesDeepSeekThinkingSetting(t *testing.T) {
 	}
 }
 
+func TestBuildProviderRequestNormalizesDeepSeekMaxTokens(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name            string
+		raw             string
+		wantMaxTokens   string
+		wantMaxComplete bool
+	}{
+		{
+			name:          "openclaw compatibility field",
+			raw:           `{"model":"NB","messages":[{"role":"user","content":"hello"}],"max_completion_tokens":65536}`,
+			wantMaxTokens: "65536",
+		},
+		{
+			name:          "explicit provider field wins",
+			raw:           `{"model":"NB","messages":[{"role":"user","content":"hello"}],"max_tokens":32768,"max_completion_tokens":65536}`,
+			wantMaxTokens: "32768",
+		},
+	}
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			body, err := buildProviderRequestBody(ChatCompletionRequest{
+				Model:   "NB",
+				RawBody: []byte(tc.raw),
+			}, &models.LLMModel{
+				ProviderType:      models.ProviderTypeOpenAICompatible,
+				ProtocolType:      models.ProtocolTypeOpenAICompatible,
+				BaseURL:           "https://api.deepseek.com",
+				ProviderModelName: "deepseek-v4-flash",
+			})
+			if err != nil {
+				t.Fatalf("buildProviderRequestBody returned error: %v", err)
+			}
+			var payload map[string]json.RawMessage
+			if err := json.Unmarshal(body, &payload); err != nil {
+				t.Fatalf("decode provider request: %v", err)
+			}
+			if got := string(payload["max_tokens"]); got != tc.wantMaxTokens {
+				t.Fatalf("max_tokens = %s, want %s", got, tc.wantMaxTokens)
+			}
+			if _, exists := payload["max_completion_tokens"]; exists != tc.wantMaxComplete {
+				t.Fatalf("max_completion_tokens presence = %v, want %v", exists, tc.wantMaxComplete)
+			}
+		})
+	}
+}
+
+func TestBuildProviderRequestPreservesUnknownMaxTokenField(t *testing.T) {
+	t.Parallel()
+	body, err := buildProviderRequestBody(ChatCompletionRequest{
+		Model:   "custom",
+		RawBody: []byte(`{"model":"custom","messages":[{"role":"user","content":"hello"}],"max_completion_tokens":24576}`),
+	}, &models.LLMModel{
+		ProviderType:      models.ProviderTypeOpenAICompatible,
+		ProtocolType:      models.ProtocolTypeOpenAICompatible,
+		BaseURL:           "https://gateway.example.com/v1",
+		ProviderModelName: "custom-model",
+	})
+	if err != nil {
+		t.Fatalf("buildProviderRequestBody returned error: %v", err)
+	}
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("decode provider request: %v", err)
+	}
+	if got := string(payload["max_completion_tokens"]); got != "24576" {
+		t.Fatalf("unknown compatible provider field changed: %s", got)
+	}
+	if _, exists := payload["max_tokens"]; exists {
+		t.Fatal("unknown compatible provider must not inherit DeepSeek token normalization")
+	}
+}
+
 func TestBuildProviderRequestPreservesUnknownReasoningFields(t *testing.T) {
 	t.Parallel()
 	req := ChatCompletionRequest{

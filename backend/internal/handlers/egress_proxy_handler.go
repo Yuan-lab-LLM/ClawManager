@@ -267,9 +267,20 @@ func (h *EgressProxyHandler) handleTeamPreview(c *gin.Context) {
 		c.String(http.StatusForbidden, "Team artifact preview authorization failed")
 		return
 	}
-	if mode == teamPreviewInteractiveMode && !isIsolatedInteractivePreviewHost(c.Request, signature) {
-		c.String(http.StatusForbidden, "Team artifact preview authorization failed")
-		return
+	if mode == teamPreviewInteractiveMode {
+		if h.isManagedInteractivePreviewBootstrapHost(c.Request) {
+			c.Header("Cache-Control", "private, no-store, max-age=0")
+			c.Header("Referrer-Policy", "no-referrer")
+			c.Redirect(
+				http.StatusTemporaryRedirect,
+				"http://"+isolatedInteractivePreviewHost(signature)+c.Request.URL.EscapedPath(),
+			)
+			return
+		}
+		if !isIsolatedInteractivePreviewHost(c.Request, signature) {
+			c.String(http.StatusForbidden, "Team artifact preview authorization failed")
+			return
+		}
 	}
 
 	relativePath, err := cleanTeamPreviewRelativePath(joinTeamPreviewPath(signedPrefix, requestedPath))
@@ -422,9 +433,18 @@ func isolatedInteractivePreviewHost(signature string) string {
 	return "p-" + value + "." + teamPreviewHost
 }
 
-func isIsolatedInteractivePreviewHost(request *http.Request, signature string) bool {
-	if request == nil {
+func (h *EgressProxyHandler) isManagedInteractivePreviewBootstrapHost(request *http.Request) bool {
+	host := normalizedTeamPreviewRequestHost(request)
+	if host == "" || host == teamPreviewHost || strings.HasSuffix(host, "."+teamPreviewHost) {
 		return false
+	}
+	_, ok := h.previewHosts[host]
+	return ok
+}
+
+func normalizedTeamPreviewRequestHost(request *http.Request) string {
+	if request == nil {
+		return ""
 	}
 	host := request.Host
 	if request.URL != nil && strings.TrimSpace(request.URL.Host) != "" {
@@ -433,8 +453,11 @@ func isIsolatedInteractivePreviewHost(request *http.Request, signature string) b
 	if parsed, _, err := net.SplitHostPort(host); err == nil {
 		host = parsed
 	}
-	host = strings.ToLower(strings.Trim(strings.TrimSpace(host), "[]"))
-	return host == isolatedInteractivePreviewHost(signature)
+	return strings.ToLower(strings.Trim(strings.TrimSpace(host), "[]"))
+}
+
+func isIsolatedInteractivePreviewHost(request *http.Request, signature string) bool {
+	return normalizedTeamPreviewRequestHost(request) == isolatedInteractivePreviewHost(signature)
 }
 
 func setTeamPreviewHeaders(headers http.Header, contentType, mode string) {

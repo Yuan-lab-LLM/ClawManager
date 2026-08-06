@@ -1589,7 +1589,7 @@ func buildOpenAICompatibleRequestBody(req ChatCompletionRequest, model *models.L
 		return nil, fmt.Errorf("failed to encode provider model name: %w", err)
 	}
 	payload["model"] = json.RawMessage(modelPayload)
-	if err := applyReasoningControl(payload, model); err != nil {
+	if err := applyOpenAICompatibleProviderContract(payload, model); err != nil {
 		return nil, err
 	}
 	body, err := json.Marshal(payload)
@@ -1597,6 +1597,31 @@ func buildOpenAICompatibleRequestBody(req ChatCompletionRequest, model *models.L
 		return nil, fmt.Errorf("failed to encode provider request: %w", err)
 	}
 	return body, nil
+}
+
+func applyOpenAICompatibleProviderContract(payload map[string]json.RawMessage, model *models.LLMModel) error {
+	if payload == nil || model == nil {
+		return nil
+	}
+	if models.ResolveLLMReasoningControl(
+		model.ProviderType,
+		model.ProtocolType,
+		model.BaseURL,
+		model.ProviderModelName,
+	) == models.ReasoningControlDeepSeekThinking {
+		// DeepSeek's OpenAI-compatible API accepts max_tokens. OpenClaw uses
+		// max_completion_tokens for an opaque ClawManager proxy because it cannot
+		// see the resolved downstream provider. Normalize only after ClawManager
+		// has resolved the official DeepSeek route; arbitrary compatible proxies
+		// retain their original wire contract.
+		if _, hasMaxTokens := payload["max_tokens"]; !hasMaxTokens {
+			if value, hasMaxCompletionTokens := payload["max_completion_tokens"]; hasMaxCompletionTokens {
+				payload["max_tokens"] = value
+			}
+		}
+		delete(payload, "max_completion_tokens")
+	}
+	return applyReasoningControl(payload, model)
 }
 
 func applyReasoningControl(payload map[string]json.RawMessage, model *models.LLMModel) error {
