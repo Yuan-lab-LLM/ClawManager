@@ -810,9 +810,10 @@ func TestBuildTeamMemberSoulMarkdownAddsBoundedVerificationPolicies(t *testing.T
 			forbidden: []string{"## Verification Policy", "directly reachable HTTP(S)"},
 		},
 		{
-			name:      "ordinary developer remains unchanged",
+			name:      "ordinary developer gets soft self-check ownership",
 			member:    plannedTeamMember{MemberKey: "worker", Role: "developer", ProfileKey: "agency.senior-developer"},
-			forbidden: []string{"## Verification Policy", "directly reachable HTTP(S)"},
+			expected:  []string{"## Proportionate Self-Check", "Keep self-checks proportional", "independent review or QA downstream", "not a completion gate"},
+			forbidden: []string{"## Verification Policy", "Never install dependencies", "Browser verification is not required"},
 		},
 	}
 
@@ -4052,6 +4053,32 @@ func TestTeamEventPayloadsMergePairedCompletionArtifactsIntoNarrative(t *testing
 	}
 	if !eventBool(payloads[0].Payload, "presentationArtifactsMerged") {
 		t.Fatalf("merged narrative should expose presentation diagnostic: %#v", payloads[0].Payload)
+	}
+}
+
+func TestTeamEventPayloadsNormalizeSilentTokenAndMergeCallbackSessionDuplicate(t *testing.T) {
+	taskID := 37
+	memberID := 91
+	body := "Development dispatched; waiting for the worker result."
+	callbackJSON := `{"event":"reply","eventKind":"agent_narrative","narrativeSource":"deliver_callback","text":"Development dispatched; waiting for the worker result.","content":"Development dispatched; waiting for the worker result.","sourceMessageId":"root-turn-17","chatPolicy":"visible","visibleToChat":true}`
+	sessionJSON := `{"event":"reply","eventKind":"agent_narrative","narrativeSource":"assistant_session","text":"Development dispatched; waiting for the worker result.\n\nNO_REPLY","content":"Development dispatched; waiting for the worker result.\n\nNO_REPLY","sourceMessageId":"root-turn-17","chatPolicy":"visible","visibleToChat":true,"lateProjection":true}`
+	events := []models.TeamEvent{
+		{ID: 688, TeamID: 17, TaskID: &taskID, MemberID: &memberID, EventType: "reply", PayloadJSON: &callbackJSON},
+		{ID: 693, TeamID: 17, TaskID: &taskID, MemberID: &memberID, EventType: "reply", PayloadJSON: &sessionJSON},
+	}
+	payloads := teamEventPayloads(events)
+	if len(payloads) != 1 || payloads[0].ID != 688 || eventString(payloads[0].Payload, "text") != body {
+		t.Fatalf("callback/session copies must project as one normalized message: %#v", payloads)
+	}
+
+	literalJSON := `{"event":"reply","eventKind":"agent_narrative","text":"OpenClaw uses NO_REPLY as its silent token.","sourceMessageId":"root-turn-18","chatPolicy":"visible","visibleToChat":true}`
+	silentJSON := `{"event":"reply","eventKind":"agent_narrative","text":"NO_REPLY","sourceMessageId":"root-turn-19","chatPolicy":"visible","visibleToChat":true}`
+	payloads = teamEventPayloads([]models.TeamEvent{
+		{ID: 694, TeamID: 17, TaskID: &taskID, MemberID: &memberID, EventType: "reply", PayloadJSON: &literalJSON},
+		{ID: 695, TeamID: 17, TaskID: &taskID, MemberID: &memberID, EventType: "reply", PayloadJSON: &silentJSON},
+	})
+	if len(payloads) != 1 || payloads[0].ID != 694 || eventString(payloads[0].Payload, "text") != "OpenClaw uses NO_REPLY as its silent token." {
+		t.Fatalf("only the exact silent control reply should disappear: %#v", payloads)
 	}
 }
 

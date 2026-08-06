@@ -43,6 +43,19 @@ const COMMON_COLLABORATION_RULES = [
   "Ask the Leader to coordinate cross-member dependencies instead of silently taking over another role.",
 ];
 
+const EXECUTION_VERIFICATION_RULES = [
+  "Keep self-checks proportional: prefer syntax checks, existing tests, existing tools, and a small smoke test.",
+  "When independent review or QA is planned downstream, hand off the verified artifact instead of building a second Browser or test harness solely to duplicate acceptance.",
+  "If no independent verifier is planned, or your assignment explicitly requires Browser, visual, interaction, or end-to-end evidence, perform the proportionate validation needed for that requirement.",
+  "Product dependencies remain allowed, and optional validation setup is not a completion gate; report completed checks and remaining verification scope without blocking the handoff.",
+];
+
+const INDEPENDENT_VERIFICATION_PROFILES = new Set<AgencyAgentProfileKey>([
+  "agency.code-reviewer",
+  "agency.evidence-collector",
+  "agency.api-tester",
+]);
+
 const collaborationRulesForProfile = (
   profile: AgencyAgentProfile,
 ): string[] =>
@@ -50,6 +63,10 @@ const collaborationRulesForProfile = (
     new Set([
       ...COMMON_COLLABORATION_RULES,
       ...profile.collaborationRules,
+      ...(profile.key !== "agency.agents-orchestrator" &&
+      !INDEPENDENT_VERIFICATION_PROFILES.has(profile.key)
+        ? EXECUTION_VERIFICATION_RULES
+        : []),
     ]),
   );
 

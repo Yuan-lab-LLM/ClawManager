@@ -17,6 +17,7 @@ const requiredFunctions = new Set([
   "workspaceLinkToRelativePath",
   "mergeTeamChatArtifactRefs",
   "dedupeTeamChatMessages",
+  "normalizeTeamChatVisibleControlText",
 ]);
 const declarations = [];
 for (const statement of sourceFile.statements) {
@@ -35,7 +36,7 @@ const compiled = ts.transpileModule(declarations.join("\n"), {
 const module = { exports: {} };
 new Function("module", "exports", compiled)(module, module.exports);
 
-const { dedupeTeamChatMessages, mergeTeamChatArtifactRefs } = module.exports;
+const { dedupeTeamChatMessages, mergeTeamChatArtifactRefs, normalizeTeamChatVisibleControlText } = module.exports;
 const body = "P1 implementation delivered.";
 const messages = dedupeTeamChatMessages([
   {
@@ -76,6 +77,22 @@ const distinctTurns = dedupeTeamChatMessages([
   { ...messages[0], id: "turn-b", presentationKey: "turn-b", dedupeKey: "feedback:turn-b" },
 ]);
 assert.equal(distinctTurns.length, 2, "identical prose from different source turns must remain visible");
+
+assert.equal(
+  normalizeTeamChatVisibleControlText(`${body}\n\nNO_REPLY`, { eventKind: "agent_narrative" }),
+  body,
+  "historical assistant-session control tokens must not create a second presentation identity",
+);
+assert.equal(
+  normalizeTeamChatVisibleControlText("NO_REPLY", { eventKind: "agent_narrative" }),
+  "",
+  "a token-only narrative is not user-visible",
+);
+assert.equal(
+  normalizeTeamChatVisibleControlText("OpenClaw uses NO_REPLY as its silent token.", { eventKind: "agent_narrative" }),
+  "OpenClaw uses NO_REPLY as its silent token.",
+  "ordinary prose about the token must be preserved",
+);
 
 assert.deepEqual(
   mergeTeamChatArtifactRefs(

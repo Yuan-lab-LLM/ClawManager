@@ -99,6 +99,7 @@ var (
 	teamMemberKeyPattern                = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)
 	teamMemberInstanceNameInvalidChars  = regexp.MustCompile(`[^a-z0-9-]+`)
 	teamMemberInstanceNameRepeatedDashs = regexp.MustCompile(`-+`)
+	teamTrailingSilentReplyPattern      = regexp.MustCompile(`(?i)(?:^|\r?\n[\t ]*|\*+)NO_REPLY[\t ]*$`)
 )
 
 type TeamService interface {
@@ -2200,6 +2201,9 @@ func buildTeamMemberSoulMarkdown(member plannedTeamMember, communicationMode str
 	if verificationGuidance := teamMemberVerificationGuidance(member); len(verificationGuidance) > 0 {
 		lines = append(lines, "", "## Verification Policy")
 		lines = append(lines, verificationGuidance...)
+	} else if executionGuidance := teamMemberExecutionSelfCheckGuidance(member); len(executionGuidance) > 0 {
+		lines = append(lines, "", "## Proportionate Self-Check")
+		lines = append(lines, executionGuidance...)
 	}
 	lines = append(lines,
 		"",
@@ -2267,6 +2271,20 @@ func teamMemberVerificationGuidance(member plannedTeamMember) []string {
 		}
 	default:
 		return nil
+	}
+}
+
+func teamMemberExecutionSelfCheckGuidance(member plannedTeamMember) []string {
+	role := strings.ToLower(strings.TrimSpace(effectiveTeamMemberRole(member)))
+	memberKey := strings.ToLower(strings.TrimSpace(member.MemberKey))
+	if member.IsLeader || role == "leader" || strings.Contains(role, "leader") || memberKey == "leader" || classifyTeamVerificationRole(member) != teamVerificationRoleNone {
+		return nil
+	}
+	return []string{
+		"- Keep self-checks proportional to your assigned output: prefer syntax checks, existing project tests, existing tools, and a small smoke test.",
+		"- When the Team plan assigns independent review or QA downstream, deliver your verified implementation or artifact to that owner instead of building a second Browser or test harness solely to duplicate their acceptance pass.",
+		"- If no independent verifier is planned, or the assignment explicitly requires you to provide Browser, visual, interaction, or end-to-end evidence, perform the proportionate validation needed for that requirement.",
+		"- Product dependencies required by the implementation remain allowed. An optional validation setup or environment limitation is not a completion gate: report the checks performed and any remaining verification scope, then continue the handoff.",
 	}
 }
 
@@ -11257,6 +11275,7 @@ func teamEventPayloads(events []models.TeamEvent) []TeamEventPayload {
 			_ = json.Unmarshal([]byte(*event.PayloadJSON), &payload.Payload)
 		}
 		sanitizePublicTeamEventPayload(event.EventType, payload.Payload)
+		normalizeTeamChatNarrativeDisplay(payload.Payload)
 		parsed = append(parsed, payload)
 	}
 
@@ -11266,13 +11285,20 @@ func teamEventPayloads(events []models.TeamEvent) []TeamEventPayload {
 	// the completion artifacts into its exact same-turn narrative. If the paired
 	// narrative is absent, retain the completion as a safe compatibility fallback.
 	narrativeByTurn := make(map[string]int)
+	duplicateNarratives := make(map[int]struct{})
 	for idx := range parsed {
 		payload := parsed[idx]
 		if !isStructuredAgentNarrativeEvent(payload.EventType, payload.Payload) ||
-			isStructurallySuppressedTeamNarrative(payload.Payload) {
+			isStructurallySuppressedTeamNarrative(payload.Payload) ||
+			eventBool(payload.Payload, "silentControlReply", "silent_control_reply") {
 			continue
 		}
 		if key := teamChatPresentationTurnKey(payload.TeamEvent, payload.Payload); key != "" {
+			if existingIndex, exists := narrativeByTurn[key]; exists {
+				mergeTeamChatPresentationArtifacts(parsed[existingIndex].Payload, payload.Payload)
+				duplicateNarratives[idx] = struct{}{}
+				continue
+			}
 			narrativeByTurn[key] = idx
 		}
 	}
@@ -11280,6 +11306,10 @@ func teamEventPayloads(events []models.TeamEvent) []TeamEventPayload {
 	result := make([]TeamEventPayload, 0, len(parsed))
 	for idx := range parsed {
 		payload := parsed[idx]
+		if _, duplicate := duplicateNarratives[idx]; duplicate ||
+			eventBool(payload.Payload, "silentControlReply", "silent_control_reply") {
+			continue
+		}
 		chatPolicy := strings.ToLower(strings.TrimSpace(eventString(payload.Payload, "chatPolicy", "chat_policy")))
 		if eventBool(payload.Payload, "finalDeliveredByNarrative", "final_delivered_by_narrative") && chatPolicy == "hidden" {
 			if narrativeIndex, ok := narrativeByTurn[teamChatPresentationTurnKey(payload.TeamEvent, payload.Payload)]; ok && narrativeIndex != idx {
@@ -11296,6 +11326,32 @@ func teamEventPayloads(events []models.TeamEvent) []TeamEventPayload {
 		result = append(result, payload)
 	}
 	return result
+}
+
+func normalizeTeamChatNarrativeDisplay(payload map[string]interface{}) {
+	if payload == nil || !strings.EqualFold(eventString(payload, "eventKind", "event_kind", "kind"), "agent_narrative") {
+		return
+	}
+	original := runtimeTurnResultText(payload)
+	if original == "" {
+		return
+	}
+	normalized := strings.TrimSpace(teamTrailingSilentReplyPattern.ReplaceAllString(strings.TrimSpace(original), ""))
+	if normalized == original {
+		return
+	}
+	for _, key := range []string{"text", "content"} {
+		if value, ok := payload[key].(string); ok && strings.TrimSpace(value) == strings.TrimSpace(original) {
+			payload[key] = normalized
+		}
+	}
+	payload["displayControlTokenStripped"] = true
+	if normalized == "" {
+		payload["silentControlReply"] = true
+		payload["chatPolicy"] = "hidden"
+		payload["visibleToChat"] = false
+		payload["visible_to_chat"] = false
+	}
 }
 
 func teamChatPresentationTurnKey(event models.TeamEvent, payload map[string]interface{}) string {

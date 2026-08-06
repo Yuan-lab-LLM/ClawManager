@@ -5245,6 +5245,11 @@ function chatMessageFromItem(
   const targetLabel = item.to
     ? displayMemberName(item.to, memberByKey, leaderMemberId)
     : "";
+  const eventKind = chatEventKind(item.payload);
+  const visibleItemContent = normalizeTeamChatVisibleControlText(item.content, item.payload);
+  if (eventKind === "agent_narrative" && item.content.trim() && !visibleItemContent) {
+    return null;
+  }
   const isAssignmentEvent =
     item.eventType === "outbound" ||
     item.eventType === "task_assigned" ||
@@ -5252,11 +5257,10 @@ function chatMessageFromItem(
     item.eventType === "peer_request" ||
     item.eventType === "peer_handoff" ||
     item.eventType === "peer_review_request";
-  const hasContent = Boolean(item.content.trim());
+  const hasContent = Boolean(visibleItemContent.trim());
   const isFeedbackEvent =
     isWorkerToLeaderMessage(senderKey, item.to, leaderMemberId) ||
     isWorkerFeedbackEvent(item, senderKey, leaderMemberId, hasContent);
-  const eventKind = chatEventKind(item.payload);
   const isSystemProcess =
     senderKey === "clawmanager-monitor" ||
     eventKind === "assignment_check_requested" ||
@@ -5268,7 +5272,7 @@ function chatMessageFromItem(
     isAssignmentEvent && !hasContent
       ? assignmentEventFallback(item, senderLabel, targetLabel, isFeedbackEvent)
       : chatFallbackText(item, progress, status);
-  const content = item.content || fallbackContent;
+  const content = visibleItemContent || fallbackContent;
   const isTerminalFeedback = isTerminalFeedbackItem(item, content, isFeedbackEvent);
   return {
     id: `event-${item.event.id}`,
@@ -5302,6 +5306,26 @@ function chatMessageFromItem(
     artifactRefs: teamArtifactRefsFromPayload(item.payload, item.collaborationStep),
     presentationKey: chatPresentationTurnKey(item, senderKey, content),
   };
+}
+
+function normalizeTeamChatVisibleControlText(
+  content: string,
+  payload: Record<string, unknown>,
+) {
+  const eventKind = String(
+    payload.eventKind ?? payload.event_kind ?? payload.kind ?? "",
+  ).trim().toLowerCase();
+  if (eventKind !== "agent_narrative") {
+    return content;
+  }
+  const value = content.trim();
+  if (!value) {
+    return "";
+  }
+  if (/^NO_REPLY$/i.test(value)) {
+    return "";
+  }
+  return value.replace(/(?:^|\r?\n[\t ]*|\*+)NO_REPLY[\t ]*$/i, "").trim();
 }
 
 function chatItemSortPhase(
