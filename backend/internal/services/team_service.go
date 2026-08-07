@@ -779,6 +779,182 @@ func applyTeamTaskEnvelopeContext(envelope map[string]interface{}, task *models.
 	}
 }
 
+func shouldRequestRootCoordinationRecovery(task *models.TeamTask, member *models.TeamMember, eventKind string, payload map[string]interface{}) bool {
+	if task == nil || member == nil || isTerminalTeamTaskStatus(task.Status) ||
+		member.ID != task.TargetMemberID {
+		return false
+	}
+	if !strings.EqualFold(strings.TrimSpace(eventKind), "turn_finished_without_completion") ||
+		!eventBool(payload, "activeTurnFinished", "active_turn_finished") ||
+		eventBool(payload, "hadOutboundAssignment", "had_outbound_assignment") ||
+		eventBool(payload, "explicitCompletion", "explicit_completion") ||
+		eventBool(payload, "rootTaskTerminal", "root_task_terminal") {
+		return false
+	}
+	return true
+}
+
+func (s *teamService) createRootCoordinationRecovery(
+	team *models.Team,
+	bus *redisBus,
+	task *models.TeamTask,
+	leader *models.TeamMember,
+	sourcePayload map[string]interface{},
+	sourceEvent *models.TeamEvent,
+) error {
+	if s == nil || s.repo == nil || team == nil || task == nil || leader == nil || sourceEvent == nil {
+		return nil
+	}
+	rootTaskRef := fmt.Sprintf("team-%d-task-%d", team.ID, task.ID)
+	isLeaderOwner := isLeaderTeamMember(leader)
+	recoveryKind := "root_assignment_recovery_requested"
+	intent := "root_assignment_recovery"
+	workID := "root-assignment-recovery"
+	title := "Continue root task assignment"
+	if isLeaderOwner {
+		recoveryKind = "root_coordination_recovery_requested"
+		intent = "root_coordination_recovery"
+		workID = "leader-root-coordination"
+		title = "Continue root task coordination"
+	} else if activeWorkID := eventString(sourcePayload, "assignmentId", "assignment_id", "canonicalWorkId", "canonical_work_id", "workId", "work_id"); activeWorkID != "" {
+		workID = activeWorkID
+	} else {
+		workID = rootTaskRef
+	}
+	sourceID := strings.TrimSpace(derefTeamString(sourceEvent.EventID))
+	if sourceID == "" {
+		sourceID = strings.TrimSpace(derefTeamString(sourceEvent.RedisStreamID))
+	}
+	if sourceID == "" {
+		sourceID = fmt.Sprintf("event-%d", sourceEvent.ID)
+	}
+	eventID := fmt.Sprintf(
+		"root-turn-recovery:%d:%d:%s",
+		team.ID,
+		task.ID,
+		normalizeTeamRedisKeyPart(sourceID),
+	)
+	now := time.Now().UTC()
+	summary := "The root-task owner turn ended without publishing a Team action; ClawManager requested a non-terminal recovery check."
+	payload := map[string]interface{}{
+		"event":              recoveryKind,
+		"type":               recoveryKind,
+		"eventKind":          recoveryKind,
+		"protocolVersion":    3,
+		"source":             "clawmanager_monitor",
+		"sourceEventId":      sourceID,
+		"nonAuthoritative":   true,
+		"stateEffect":        "none",
+		"rootTaskTerminal":   false,
+		"teamId":             strconv.Itoa(team.ID),
+		"taskId":             rootTaskRef,
+		"rootTaskId":         rootTaskRef,
+		"rootMessageId":      task.MessageID,
+		"messageId":          eventID,
+		"memberId":           leader.MemberKey,
+		"from":               "clawmanager-monitor",
+		"to":                 leader.MemberKey,
+		"target":             leader.MemberKey,
+		"workId":             workID,
+		"assignmentId":       workID,
+		"status":             models.TeamTaskStatusRunning,
+		"runtimeStatus":      models.TeamTaskStatusRunning,
+		"availability":       models.TeamMemberAvailabilityBusy,
+		"summary":            summary,
+		"workflowState":      task.WorkflowState,
+		"planVersion":        task.PlanVersion,
+		"ledgerVersion":      task.LedgerVersion,
+		"visibleToChat":      false,
+		"chatDigestEligible": false,
+		"monitor":            true,
+		"monitorType":        intent,
+	}
+	if eventBool(sourcePayload, "lastToolFailed", "last_tool_failed") {
+		payload["lastToolFailed"] = true
+		payload["lastToolName"] = eventString(sourcePayload, "lastToolName", "last_tool_name")
+	}
+	payloadJSON, err := marshalOptionalJSON(payload)
+	if err != nil {
+		return err
+	}
+	recoveryEvent := &models.TeamEvent{
+		TeamID:      team.ID,
+		TaskID:      &task.ID,
+		MemberID:    &leader.ID,
+		MessageID:   &eventID,
+		EventID:     &eventID,
+		EventType:   recoveryKind,
+		PayloadJSON: payloadJSON,
+		OccurredAt:  &now,
+		CreatedAt:   now,
+	}
+	promptLines := []string{
+		"[ROOT_TASK_RECOVERY] The previous root-task owner turn ended without publishing a Team action. The root task remains open; this reminder is not a completion decision.",
+		fmt.Sprintf("rootTaskId=%s rootMessageId=%s planVersion=%d ledgerVersion=%d", rootTaskRef, task.MessageID, task.PlanVersion, task.LedgerVersion),
+	}
+	if isLeaderOwner {
+		promptLines = append(promptLines, "Inspect the current root-task ledger and continue the appropriate next step. If work must be delegated, publish/update the collaboration plan and call team_send. If assignments are already active, record only a concise progress update and wait for their results. If all required results are confirmed, synthesize the user-facing answer and call team_complete_task. If a real blocker exists, report it precisely so the Leader/control plane can recover. Do not claim completion before the task is actually complete.")
+	} else {
+		promptLines = append(promptLines, "Inspect the active root assignment and continue from its current evidence. If the deliverable is ready, call team_complete_task with the actual result and artifact links. If work is still in progress, call team_update_progress with a concise running update and continue. If a real blocker prevents progress, report it precisely for recovery. Do not claim completion before the deliverable is ready.")
+	}
+	prompt := strings.Join(promptLines, "\n")
+	envelope := map[string]interface{}{
+		"v":                  1,
+		"protocolVersion":    3,
+		"messageId":          eventID,
+		"teamId":             strconv.Itoa(team.ID),
+		"from":               "clawmanager-monitor",
+		"to":                 leader.MemberKey,
+		"replyTo":            teamTaskReplyTarget,
+		"requiresCompletion": false,
+		"completionTool":     teamTaskCompletionTool,
+		"intent":             intent,
+		"taskId":             rootTaskRef,
+		"rootTaskId":         rootTaskRef,
+		"rootMessageId":      task.MessageID,
+		"workId":             workID,
+		"assignmentId":       workID,
+		"title":              title,
+		"prompt":             prompt,
+		"rawPrompt":          prompt,
+		"monitorPolicy":      defaultTeamMonitorPolicy(),
+		"metadata":           payload,
+		"createdAt":          now.Format(time.RFC3339Nano),
+	}
+	applyTeamTaskEnvelopeContext(envelope, task, leader.MemberKey)
+	if refs := s.durableTeamTaskContextRefs(team, task); len(refs) > 0 {
+		envelope["artifactRefs"] = refs
+		envelope["contextRefs"] = refs
+	}
+	envelopeJSON, err := marshalJSON(envelope)
+	if err != nil {
+		return err
+	}
+	outbox := &models.TeamEventOutbox{
+		TeamID:        team.ID,
+		SourceEventID: eventID,
+		Destination:   teamInboxKey(team.ID, leader.MemberKey),
+		MessageID:     eventID,
+		PayloadJSON:   envelopeJSON,
+		Status:        "pending",
+		AvailableAt:   now,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}
+	if err := s.repo.CreateEventWithOutbox(recoveryEvent, outbox); err != nil {
+		return err
+	}
+	if bus == nil || outbox.ID <= 0 {
+		return nil
+	}
+	s.publishTeamRootWorkflowState(bus, task)
+	if err := s.deliverTeamEventOutbox(team, bus, outbox); err != nil {
+		_ = s.repo.MarkEventOutboxFailed(outbox.ID, now.Add(teamOutboxRetryDelay(outbox.Attempts)), err.Error())
+		return nil
+	}
+	return s.repo.MarkEventOutboxDelivered(outbox.ID, time.Now().UTC())
+}
+
 func defaultTeamMonitorPolicy() map[string]interface{} {
 	return map[string]interface{}{
 		"enabled":                  true,
@@ -2082,13 +2258,17 @@ func (s *teamService) enrichTaskWorkspaceContract(userID int, team *models.Team,
 			"Shared status JSON files are compatibility snapshots; do not treat them as the task truth source.",
 		},
 	}
+	// Keep extension fields supplied by older/newer clients, but always replace
+	// the control-plane-owned workspace identity. Reusing an earlier root task's
+	// taskRef or derived directories poisons the next task's prompt and artifact
+	// routing while making the conversation history look authoritative. The
+	// current task and Team are the only source of truth for these fields.
 	if existing, ok := payload["workspaceContract"].(map[string]interface{}); ok {
-		for key, value := range contract {
-			if _, exists := existing[key]; !exists {
-				existing[key] = value
+		for key, value := range existing {
+			if _, controlled := contract[key]; !controlled {
+				contract[key] = value
 			}
 		}
-		return
 	}
 	payload["workspaceContract"] = contract
 }
@@ -8360,6 +8540,17 @@ func (s *teamService) projectTeamEvent(team *models.Team, bus *redisBus, message
 			if errors.Is(err, repository.ErrDuplicateTeamEvent) {
 				return nil
 			}
+			return err
+		}
+	}
+	if stateNeutralAssignmentEvent &&
+		shouldRequestRootCoordinationRecovery(
+			task,
+			member,
+			eventString(payload, "eventKind", "event_kind", "kind"),
+			payload,
+		) {
+		if err := s.createRootCoordinationRecovery(team, bus, task, member, payload, event); err != nil {
 			return err
 		}
 	}

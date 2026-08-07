@@ -1231,7 +1231,7 @@ func TestProjectTeamEventDoesNotTreatPlainFinalReplyAsTaskCompleted(t *testing.T
 	}
 }
 
-func TestProjectTeamEventDoesNotQueueForcedRecoveryWithoutExactTurnResult(t *testing.T) {
+func TestProjectTeamEventQueuesNonTerminalRootRecoveryForFinishedLeaderTurn(t *testing.T) {
 	taskID := 69
 	messageID := "team-31-user-root"
 	task := &models.TeamTask{
@@ -1266,8 +1266,16 @@ func TestProjectTeamEventDoesNotQueueForcedRecoveryWithoutExactTurnResult(t *tes
 	); err != nil {
 		t.Fatalf("projectTeamEvent returned error: %v", err)
 	}
-	if len(repo.outboxRows) != 0 {
-		t.Fatalf("turn end must not create a forced Agent continuation, got %#v", repo.outboxRows)
+	if len(repo.outboxRows) != 1 {
+		t.Fatalf("turn end without a Team action must create one durable coordination reminder, got %#v", repo.outboxRows)
+	}
+	var recoveryEnvelope map[string]interface{}
+	if err := json.Unmarshal([]byte(repo.outboxRows[0].PayloadJSON), &recoveryEnvelope); err != nil {
+		t.Fatalf("decode recovery envelope: %v", err)
+	}
+	if eventString(recoveryEnvelope, "intent") != "root_coordination_recovery" ||
+		eventBool(recoveryEnvelope, "requiresCompletion") {
+		t.Fatalf("recovery must be non-terminal and must not force completion: %#v", recoveryEnvelope)
 	}
 	if task.Status == models.TeamTaskStatusSucceeded || task.FinishedAt != nil || task.AcceptedCompletionID != nil {
 		t.Fatalf("a turn without an exact paired narrative must remain non-terminal: %#v", task)
@@ -7765,10 +7773,20 @@ func TestProtocolV3ExactTurnNarrativeRemainsMonitorEvidence(t *testing.T) {
 	if task.Status != models.TeamTaskStatusRunning || task.AcceptedCompletionID != nil {
 		t.Fatalf("exact same-turn Runtime prose changed terminal state: %#v", task)
 	}
-	if len(repo.outboxRows) != 0 {
-		t.Fatalf("turn evidence must not create a completion outbox: %#v", repo.outboxRows)
+	if len(repo.outboxRows) != 1 {
+		t.Fatalf("turn evidence should create one non-terminal coordination recovery outbox: %#v", repo.outboxRows)
 	}
-	finalPayload := teamEventPayloadMap(repo.createdEvents[len(repo.createdEvents)-1])
+	var finalPayload map[string]interface{}
+	for idx := range repo.createdEvents {
+		candidate := teamEventPayloadMap(repo.createdEvents[idx])
+		if eventString(candidate, "eventKind", "event_kind") == "turn_finished_without_completion" {
+			finalPayload = candidate
+			break
+		}
+	}
+	if finalPayload == nil {
+		t.Fatalf("turn evidence event was not persisted: %#v", repo.createdEvents)
+	}
 	if eventBool(finalPayload, "runtimeTurnResultCandidate") || eventBool(finalPayload, "visibleToChat") || eventString(finalPayload, "stateEffect") != "none" {
 		t.Fatalf("turn evidence must remain hidden and state-neutral: %#v", finalPayload)
 	}
@@ -7886,6 +7904,105 @@ func TestLegacyReviewerTeamSendClosesUniqueReviewContract(t *testing.T) {
 				t.Fatalf("legacy Reviewer delivery did not close its unique contract: %#v", items)
 			}
 		}
+	}
+}
+
+func TestEnrichTaskWorkspaceContractReplacesStaleRootIdentity(t *testing.T) {
+	service := &teamService{runtimeWorkspaceRoot: "/workspaces/teams"}
+	team := &models.Team{ID: 28, SharedMountPath: "/team"}
+	task := &models.TeamTask{ID: 64, TeamID: 28}
+	payload := map[string]interface{}{
+		"workspaceContract": map[string]interface{}{
+			"taskRef":              "team-28-task-63",
+			"artifactRoot":         "/team/artifacts/team-28-task-63",
+			"leaderResultRoot":     "/team/results/team-28-task-63",
+			"clientExtensionField": "preserved",
+		},
+	}
+
+	service.enrichTaskWorkspaceContract(7, team, task, payload)
+	contract, ok := payload["workspaceContract"].(map[string]interface{})
+	if !ok {
+		t.Fatal("workspace contract was not generated")
+	}
+	if got := eventString(contract, "taskRef"); got != "team-28-task-64" {
+		t.Fatalf("stale taskRef survived: %q", got)
+	}
+	if got := eventString(contract, "artifactRoot"); got != "/team/artifacts/team-28-task-64" {
+		t.Fatalf("stale artifact root survived: %q", got)
+	}
+	if got := eventString(contract, "leaderResultRoot"); got != "/team/results/team-28-task-64" {
+		t.Fatalf("stale result root survived: %q", got)
+	}
+	if got := eventString(contract, "clientExtensionField"); got != "preserved" {
+		t.Fatalf("non-task extension field was lost: %q", got)
+	}
+}
+
+func TestRootCoordinationRecoveryUsesMachineTurnFactsOnly(t *testing.T) {
+	team := &models.Team{ID: 28, CommunicationMode: teamCommunicationModeLeaderMediated}
+	leader := &models.TeamMember{ID: 1, TeamID: team.ID, MemberKey: "delivery-lead", Role: "leader"}
+	worker := &models.TeamMember{ID: 2, TeamID: team.ID, MemberKey: "developer", Role: "developer"}
+	task := &models.TeamTask{ID: 64, TeamID: team.ID, TargetMemberID: leader.ID, Status: models.TeamTaskStatusRunning}
+	payload := map[string]interface{}{
+		"activeTurnFinished":    true,
+		"hadOutboundAssignment": false,
+		"rootTaskTerminal":      false,
+	}
+	if !shouldRequestRootCoordinationRecovery(task, leader, "turn_finished_without_completion", payload) {
+		t.Fatal("leader turn without a Team action should request non-terminal recovery")
+	}
+	if shouldRequestRootCoordinationRecovery(task, worker, "turn_finished_without_completion", payload) {
+		t.Fatal("a non-owner Worker turn must not be converted into root recovery")
+	}
+	directTask := &models.TeamTask{ID: 65, TeamID: team.ID, TargetMemberID: worker.ID, Status: models.TeamTaskStatusRunning}
+	if !shouldRequestRootCoordinationRecovery(directTask, worker, "turn_finished_without_completion", payload) {
+		t.Fatal("a direct root-task owner must receive the same non-terminal recovery coverage")
+	}
+	withDispatch := map[string]interface{}{
+		"activeTurnFinished":    true,
+		"hadOutboundAssignment": true,
+		"rootTaskTerminal":      false,
+	}
+	if shouldRequestRootCoordinationRecovery(task, leader, "turn_finished_without_completion", withDispatch) {
+		t.Fatal("a Leader turn that dispatched work must not receive a recovery nudge")
+	}
+	if shouldRequestRootCoordinationRecovery(task, leader, "reply", payload) {
+		t.Fatal("ordinary prose must not trigger recovery classification")
+	}
+}
+
+func TestCreateRootCoordinationRecoveryPersistsHiddenEventAndOutbox(t *testing.T) {
+	repo := &teamRepositoryStub{}
+	service := &teamService{repo: repo}
+	team := &models.Team{ID: 28, CommunicationMode: teamCommunicationModeLeaderMediated}
+	leader := &models.TeamMember{ID: 1, TeamID: team.ID, MemberKey: "delivery-lead", Role: "leader"}
+	task := &models.TeamTask{
+		ID: 64, TeamID: team.ID, TargetMemberID: leader.ID, MessageID: "root-64",
+		Status: models.TeamTaskStatusRunning, WorkflowState: teamWorkflowStatePlanning,
+	}
+	sourceID := "turn-finished-64"
+	streamID := "123-0"
+	source := &models.TeamEvent{EventID: &sourceID, RedisStreamID: &streamID}
+	if err := service.createRootCoordinationRecovery(team, nil, task, leader, map[string]interface{}{}, source); err != nil {
+		t.Fatalf("createRootCoordinationRecovery returned error: %v", err)
+	}
+	if len(repo.createdEvents) != 1 || repo.createdEvents[0].EventType != "root_coordination_recovery_requested" {
+		t.Fatalf("unexpected recovery events: %#v", repo.createdEvents)
+	}
+	payload := teamEventPayloadMap(repo.createdEvents[0])
+	if eventBool(payload, "visibleToChat") || eventBool(payload, "rootTaskTerminal") || eventString(payload, "stateEffect") != "none" {
+		t.Fatalf("recovery event must remain hidden and state-neutral: %#v", payload)
+	}
+	if len(repo.outboxRows) != 1 {
+		t.Fatalf("expected one durable recovery outbox, got %d", len(repo.outboxRows))
+	}
+	var envelope map[string]interface{}
+	if err := json.Unmarshal([]byte(repo.outboxRows[0].PayloadJSON), &envelope); err != nil {
+		t.Fatalf("decode recovery envelope: %v", err)
+	}
+	if eventString(envelope, "rootTaskId") != "team-28-task-64" || eventBool(envelope, "requiresCompletion") {
+		t.Fatalf("unexpected recovery envelope: %#v", envelope)
 	}
 }
 
@@ -8206,6 +8323,38 @@ func (s *teamRepositoryStub) ConfirmWorkItemResult(item *models.TeamWorkItem, ev
 	clone.ID = len(s.outboxRows) + 1
 	outbox.ID = clone.ID
 	s.outboxRows = append(s.outboxRows, clone)
+	return nil
+}
+func (s *teamRepositoryStub) CreateEventWithOutbox(event *models.TeamEvent, outbox *models.TeamEventOutbox) error {
+	if event == nil || outbox == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	eventExists := false
+	for idx := range s.createdEvents {
+		if s.createdEvents[idx].TeamID == event.TeamID &&
+			derefTeamString(s.createdEvents[idx].EventID) == derefTeamString(event.EventID) {
+			eventExists = true
+			break
+		}
+	}
+	if !eventExists {
+		cloneEvent := *event
+		cloneEvent.ID = len(s.createdEvents) + 1
+		event.ID = cloneEvent.ID
+		s.createdEvents = append(s.createdEvents, cloneEvent)
+	}
+	for idx := range s.outboxRows {
+		if s.outboxRows[idx].TeamID == outbox.TeamID && s.outboxRows[idx].MessageID == outbox.MessageID {
+			outbox.ID = s.outboxRows[idx].ID
+			return nil
+		}
+	}
+	cloneOutbox := *outbox
+	cloneOutbox.ID = len(s.outboxRows) + 1
+	outbox.ID = cloneOutbox.ID
+	s.outboxRows = append(s.outboxRows, cloneOutbox)
 	return nil
 }
 func (s *teamRepositoryStub) ListPendingEventOutbox(now time.Time, limit int) ([]models.TeamEventOutbox, error) {

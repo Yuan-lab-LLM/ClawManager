@@ -52,6 +52,7 @@ type TeamRepository interface {
 	ListWorkflowPhasesByRootTaskID(rootTaskID int) ([]models.TeamWorkflowPhase, error)
 	AcceptRootCompletion(task *models.TeamTask, expectedLedgerVersion int64, event *models.TeamEvent, outbox *models.TeamEventOutbox) (bool, error)
 	ConfirmWorkItemResult(item *models.TeamWorkItem, event *models.TeamEvent, outbox *models.TeamEventOutbox) error
+	CreateEventWithOutbox(event *models.TeamEvent, outbox *models.TeamEventOutbox) error
 	CreateEventOutbox(outbox *models.TeamEventOutbox) error
 	ListPendingEventOutbox(now time.Time, limit int) ([]models.TeamEventOutbox, error)
 	MarkEventOutboxDelivered(id int, deliveredAt time.Time) error
@@ -322,6 +323,42 @@ func (r *teamRepository) ConfirmWorkItemResult(item *models.TeamWorkItem, event 
 		if err := txRepo.UpsertWorkItem(item); err != nil {
 			return err
 		}
+		if err := txRepo.CreateEvent(event); err != nil && !errors.Is(err, ErrDuplicateTeamEvent) {
+			return err
+		}
+		if outbox.Status == "" {
+			outbox.Status = "pending"
+		}
+		now := time.Now().UTC()
+		if outbox.AvailableAt.IsZero() {
+			outbox.AvailableAt = now
+		}
+		if outbox.CreatedAt.IsZero() {
+			outbox.CreatedAt = now
+		}
+		if outbox.UpdatedAt.IsZero() {
+			outbox.UpdatedAt = now
+		}
+		res, err := sess.Collection("team_event_outbox").Insert(outbox)
+		if err != nil {
+			if strings.Contains(err.Error(), "uk_team_event_outbox_message") {
+				return nil
+			}
+			return fmt.Errorf("failed to create team event outbox: %w", err)
+		}
+		if id, ok := res.ID().(int64); ok {
+			outbox.ID = int(id)
+		}
+		return nil
+	})
+}
+
+func (r *teamRepository) CreateEventWithOutbox(event *models.TeamEvent, outbox *models.TeamEventOutbox) error {
+	if event == nil || outbox == nil {
+		return fmt.Errorf("event and outbox are required")
+	}
+	return r.sess.Tx(func(sess db.Session) error {
+		txRepo := &teamRepository{sess: sess}
 		if err := txRepo.CreateEvent(event); err != nil && !errors.Is(err, ErrDuplicateTeamEvent) {
 			return err
 		}
