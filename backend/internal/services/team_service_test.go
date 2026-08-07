@@ -3311,6 +3311,118 @@ func TestCompletedReviewerAssignmentClosesOnlyItsPersistedTargetGate(t *testing.
 	}
 }
 
+func TestRecoveredValidationAttemptSupersedesOnlyItsFailedRetryLane(t *testing.T) {
+	now := time.Now().UTC()
+	teamID := 127
+	rootTaskID := 612
+	targetOwnerID := 700
+	validatorOwnerID := 701
+	targetID := "a-dev-kanban"
+	priorID := "a-review-kanban"
+	recoveryID := "a-dev-fix-kanban"
+	successorID := "a-review-kanban-r2"
+	phaseID := "phase-02-validation"
+	targetRevision := 1
+	priorFinished := now.Add(-2 * time.Minute)
+	recoveryCreated := now.Add(-time.Minute)
+	successorStarted := now.Add(-30 * time.Second)
+	recoveryDependencies := `["a-dev-kanban"]`
+	successorDependencies := `["a-dev-fix-kanban","a-dev-kanban"]`
+	task := &models.TeamTask{ID: rootTaskID, TeamID: teamID, Status: models.TeamTaskStatusRunning, LedgerVersion: 7}
+	repo := &teamRepositoryStub{workItems: []models.TeamWorkItem{
+		{ID: 1, TeamID: teamID, RootTaskID: rootTaskID, WorkID: targetID, AssignmentID: &targetID,
+			OwnerMemberID: &targetOwnerID, Revision: targetRevision, RequiredForRoot: true, ReviewRequired: true,
+			ValidatedRevision: &targetRevision, Status: models.TeamTaskStatusSucceeded, CreatedAt: now.Add(-10 * time.Minute), UpdatedAt: now.Add(-9 * time.Minute)},
+		{ID: 2, TeamID: teamID, RootTaskID: rootTaskID, WorkID: priorID, AssignmentID: &priorID,
+			OwnerMemberID: &validatorOwnerID, Revision: 1, PhaseID: &phaseID, RequiredForRoot: true,
+			ReviewTargetAssignmentID: &targetID, ReviewTargetRevision: &targetRevision,
+			Status: models.TeamTaskStatusFailed, CreatedAt: now.Add(-5 * time.Minute), FinishedAt: &priorFinished, UpdatedAt: priorFinished},
+		{ID: 3, TeamID: teamID, RootTaskID: rootTaskID, WorkID: recoveryID, AssignmentID: &recoveryID,
+			OwnerMemberID: &targetOwnerID, Revision: 1, RequiredForRoot: true, Status: models.TeamTaskStatusSucceeded,
+			DependsOnJSON: &recoveryDependencies, CreatedAt: recoveryCreated, UpdatedAt: recoveryCreated.Add(30 * time.Second)},
+		{ID: 4, TeamID: teamID, RootTaskID: rootTaskID, WorkID: successorID, AssignmentID: &successorID,
+			OwnerMemberID: &validatorOwnerID, Revision: 1, PhaseID: &phaseID, RequiredForRoot: true,
+			ReviewTargetAssignmentID: &targetID, ReviewTargetRevision: &targetRevision,
+			Status: models.TeamTaskStatusSucceeded, DependsOnJSON: &successorDependencies,
+			CreatedAt: successorStarted, StartedAt: &successorStarted, UpdatedAt: now},
+	}}
+	service := &teamService{repo: repo}
+	changed, err := service.supersedeRecoveredValidationAttempts(task, repo.workItems, repo.workItems[3], now)
+	if err != nil || !changed {
+		t.Fatalf("a successful validation retry after a persisted recovery assignment should retire the old failed attempt: changed=%v err=%v", changed, err)
+	}
+	prior := repo.workItems[1]
+	if prior.SupersededBy == nil || *prior.SupersededBy != successorID || prior.RequiredForRoot {
+		t.Fatalf("the old failed validation must remain auditable but stop gating the root task: %#v", prior)
+	}
+	if prior.Status != models.TeamTaskStatusFailed || task.LedgerVersion != 8 {
+		t.Fatalf("supersession must preserve historical failure and advance the ledger once: prior=%#v task=%#v", prior, task)
+	}
+}
+
+func TestIndependentFailedValidationIsNotSupersededByAnotherSuccess(t *testing.T) {
+	now := time.Now().UTC()
+	targetID := "article"
+	phaseID := "phase-validation"
+	targetRevision := 1
+	firstValidator := 21
+	secondValidator := 22
+	priorFinished := now.Add(-time.Minute)
+	priorID := "fact-check"
+	successorID := "security-check"
+	task := &models.TeamTask{ID: 613, TeamID: 128, Status: models.TeamTaskStatusRunning, LedgerVersion: 2}
+	repo := &teamRepositoryStub{workItems: []models.TeamWorkItem{
+		{ID: 1, TeamID: task.TeamID, RootTaskID: task.ID, WorkID: priorID, AssignmentID: &priorID,
+			OwnerMemberID: &firstValidator, PhaseID: &phaseID, RequiredForRoot: true, Status: models.TeamTaskStatusFailed,
+			ReviewTargetAssignmentID: &targetID, ReviewTargetRevision: &targetRevision, FinishedAt: &priorFinished, UpdatedAt: priorFinished},
+		{ID: 2, TeamID: task.TeamID, RootTaskID: task.ID, WorkID: successorID, AssignmentID: &successorID,
+			OwnerMemberID: &secondValidator, PhaseID: &phaseID, RequiredForRoot: true, Status: models.TeamTaskStatusSucceeded,
+			ReviewTargetAssignmentID: &targetID, ReviewTargetRevision: &targetRevision, CreatedAt: now, UpdatedAt: now},
+	}}
+	service := &teamService{repo: repo}
+	changed, err := service.supersedeRecoveredValidationAttempts(task, repo.workItems, repo.workItems[1], now)
+	if err != nil || changed || repo.workItems[0].SupersededBy != nil || !repo.workItems[0].RequiredForRoot {
+		t.Fatalf("independent validators must remain independent root gates: changed=%v prior=%#v err=%v", changed, repo.workItems[0], err)
+	}
+}
+
+func TestMemberOperationalStateUsesAllPersistedAssignments(t *testing.T) {
+	runtimeSucceeded := models.TeamTaskStatusSucceeded
+	member := &models.TeamMember{ID: 41, TeamID: 12, Status: models.TeamMemberStatusIdle,
+		Availability: models.TeamMemberAvailabilityIdle, RuntimeStatus: &runtimeSucceeded, Progress: 100}
+	finishedRoot := 100
+	activeRoot := 101
+	now := time.Now().UTC()
+	items := []models.TeamWorkItem{
+		{ID: 1, TeamID: member.TeamID, RootTaskID: finishedRoot, WorkID: "done", OwnerMemberID: &member.ID,
+			Status: models.TeamTaskStatusSucceeded, UpdatedAt: now.Add(-time.Minute)},
+		{ID: 2, TeamID: member.TeamID, RootTaskID: activeRoot, WorkID: "active", OwnerMemberID: &member.ID,
+			Status: models.TeamTaskStatusRunning, UpdatedAt: now},
+	}
+	if !reconcileTeamMemberOperationalState(member, items) {
+		t.Fatal("an active assignment should repair a stale idle transport update")
+	}
+	if member.Status != models.TeamMemberStatusBusy || member.Availability != models.TeamMemberAvailabilityBusy ||
+		member.CurrentTaskID == nil || *member.CurrentTaskID != activeRoot || derefTeamString(member.RuntimeStatus) != models.TeamTaskStatusRunning {
+		t.Fatalf("active work must remain busy regardless of a later idle callback: %#v", member)
+	}
+}
+
+func TestMemberOperationalStateClosesStaleRuntimeAfterLastSuccess(t *testing.T) {
+	runtimeRunning := models.TeamTaskStatusRunning
+	member := &models.TeamMember{ID: 42, TeamID: 12, Status: models.TeamMemberStatusIdle,
+		Availability: models.TeamMemberAvailabilityIdle, RuntimeStatus: &runtimeRunning, Progress: 65}
+	items := []models.TeamWorkItem{{ID: 1, TeamID: member.TeamID, RootTaskID: 102, WorkID: "done", OwnerMemberID: &member.ID,
+		Status: models.TeamTaskStatusSucceeded, UpdatedAt: time.Now().UTC()}}
+	if !reconcileTeamMemberOperationalState(member, items) {
+		t.Fatal("a terminal assignment should repair a stale running runtime status")
+	}
+	if member.Status != models.TeamMemberStatusIdle || member.Availability != models.TeamMemberAvailabilityIdle ||
+		member.CurrentTaskID != nil || derefTeamString(member.RuntimeStatus) != models.TeamTaskStatusSucceeded || member.Progress != 100 {
+		t.Fatalf("the member should converge to a coherent terminal state: %#v", member)
+	}
+}
+
 func TestValidationContractIsGenericAndClosesFromSuccessfulBoundWorkItem(t *testing.T) {
 	team := &models.Team{ID: 103, CommunicationMode: teamCommunicationModeLeaderMediated}
 	task := &models.TeamTask{ID: 213, TeamID: team.ID, TargetMemberID: 501, Status: models.TeamTaskStatusRunning}

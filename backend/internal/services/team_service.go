@@ -3376,7 +3376,9 @@ func (s *teamService) sweepAssignmentStatusChecks() error {
 				if task == nil || owner == nil || owner.TeamID != team.ID || isLeaderTeamMember(owner) {
 					continue
 				}
-				if owner.Status != models.TeamMemberStatusIdle || owner.CurrentTaskID != nil || owner.Availability == models.TeamMemberAvailabilityBusy {
+				if owner.Status != models.TeamMemberStatusIdle || owner.CurrentTaskID != nil ||
+					owner.Availability != models.TeamMemberAvailabilityIdle ||
+					!strings.EqualFold(strings.TrimSpace(derefTeamString(owner.RuntimeStatus)), models.TeamTaskStatusSucceeded) {
 					terminalStatus := models.TeamTaskStatusSucceeded
 					owner.Status = models.TeamMemberStatusIdle
 					owner.CurrentTaskID = nil
@@ -8480,6 +8482,15 @@ func (s *teamService) projectTeamEvent(team *models.Team, bus *redisBus, message
 			member.Availability = models.TeamMemberAvailabilityIdle
 			member.BlockedReason = nil
 		}
+		// Runtime availability is an instantaneous transport observation. The
+		// persisted assignment ledger is the business truth: a progress callback
+		// cannot make a member available while another assignment is still active,
+		// and a post-completion message cannot reopen a terminal member state.
+		memberItems, memberItemsErr := s.repo.ListWorkItemsByTeamID(team.ID, 500)
+		if memberItemsErr != nil {
+			return memberItemsErr
+		}
+		reconcileTeamMemberOperationalState(member, memberItems)
 		member.UpdatedAt = now
 		if err := s.repo.UpdateMember(member); err != nil {
 			return err
@@ -8525,6 +8536,104 @@ func (s *teamService) projectTeamEvent(team *models.Team, bus *redisBus, message
 	}
 	s.publishTeamRootWorkflowState(bus, task)
 	return nil
+}
+
+func reconcileTeamMemberOperationalState(member *models.TeamMember, items []models.TeamWorkItem) bool {
+	if member == nil {
+		return false
+	}
+	owned := make([]models.TeamWorkItem, 0)
+	active := make([]models.TeamWorkItem, 0)
+	for idx := range items {
+		item := items[idx]
+		if item.OwnerMemberID == nil || *item.OwnerMemberID != member.ID || item.SupersededBy != nil {
+			continue
+		}
+		owned = append(owned, item)
+		switch strings.ToLower(strings.TrimSpace(item.Status)) {
+		case models.TeamTaskStatusDispatched, models.TeamTaskStatusRunning:
+			active = append(active, item)
+		}
+	}
+	if len(owned) == 0 {
+		return false
+	}
+	changed := false
+	setString := func(target *string, value string) {
+		if *target != value {
+			*target = value
+			changed = true
+		}
+	}
+	setOptionalString := func(target **string, value string) {
+		if strings.TrimSpace(derefTeamString(*target)) == value {
+			return
+		}
+		copyValue := value
+		*target = &copyValue
+		changed = true
+	}
+	if len(active) > 0 {
+		latest := active[0]
+		for idx := 1; idx < len(active); idx++ {
+			if active[idx].UpdatedAt.After(latest.UpdatedAt) ||
+				(active[idx].UpdatedAt.Equal(latest.UpdatedAt) && active[idx].ID > latest.ID) {
+				latest = active[idx]
+			}
+		}
+		setString(&member.Status, models.TeamMemberStatusBusy)
+		setString(&member.Availability, models.TeamMemberAvailabilityBusy)
+		if member.CurrentTaskID == nil || *member.CurrentTaskID != latest.RootTaskID {
+			rootTaskID := latest.RootTaskID
+			member.CurrentTaskID = &rootTaskID
+			changed = true
+		}
+		runtimeStatus := strings.ToLower(strings.TrimSpace(derefTeamString(member.RuntimeStatus)))
+		switch runtimeStatus {
+		case "", models.TeamTaskStatusSucceeded, models.TeamTaskStatusFailed, models.TeamTaskStatusStale, "idle", "completed":
+			setOptionalString(&member.RuntimeStatus, models.TeamTaskStatusRunning)
+		}
+		if member.BlockedReason != nil {
+			member.BlockedReason = nil
+			changed = true
+		}
+		return changed
+	}
+
+	latest := owned[0]
+	for idx := 1; idx < len(owned); idx++ {
+		if owned[idx].UpdatedAt.After(latest.UpdatedAt) ||
+			(owned[idx].UpdatedAt.Equal(latest.UpdatedAt) && owned[idx].ID > latest.ID) {
+			latest = owned[idx]
+		}
+	}
+	switch strings.ToLower(strings.TrimSpace(latest.Status)) {
+	case models.TeamTaskStatusSucceeded:
+		setString(&member.Status, models.TeamMemberStatusIdle)
+		setString(&member.Availability, models.TeamMemberAvailabilityIdle)
+		setOptionalString(&member.RuntimeStatus, models.TeamTaskStatusSucceeded)
+		if member.CurrentTaskID != nil {
+			member.CurrentTaskID = nil
+			changed = true
+		}
+		if member.Progress != 100 {
+			member.Progress = 100
+			changed = true
+		}
+		if member.BlockedReason != nil {
+			member.BlockedReason = nil
+			changed = true
+		}
+	case models.TeamTaskStatusFailed, models.TeamTaskStatusStale:
+		setString(&member.Status, models.TeamMemberStatusIdle)
+		setString(&member.Availability, models.TeamMemberAvailabilityBlocked)
+		setOptionalString(&member.RuntimeStatus, latest.Status)
+		if member.CurrentTaskID != nil {
+			member.CurrentTaskID = nil
+			changed = true
+		}
+	}
+	return changed
 }
 
 func isLeaderMediatedRecoverableWarning(team *models.Team, eventType string, payload map[string]interface{}, member *models.TeamMember, task *models.TeamTask) bool {
@@ -10097,7 +10206,12 @@ func (s *teamService) applyStructuredAssignmentValidation(
 			workItemBusinessID(validator) != validatorAssignmentID {
 			continue
 		}
-		return s.applyCompletedValidationWorkItem(task, items, validator, now)
+		validated, validationErr := s.applyCompletedValidationWorkItem(task, items, validator, now)
+		if validationErr != nil {
+			return false, validationErr
+		}
+		superseded, supersedeErr := s.supersedeRecoveredValidationAttempts(task, items, validator, now)
+		return validated || superseded, supersedeErr
 	}
 	return false, nil
 }
@@ -10190,6 +10304,11 @@ func (s *teamService) reconcileCompletedAssignmentValidations(task *models.TeamT
 			repairedTargets[targetID] = struct{}{}
 		}
 		changed = changed || applied
+		superseded, supersedeErr := s.supersedeRecoveredValidationAttempts(task, items, validator, now)
+		if supersedeErr != nil {
+			return changed, supersedeErr
+		}
+		changed = changed || superseded
 	}
 	if changed {
 		if err := s.repo.UpdateTask(task); err != nil {
@@ -10197,6 +10316,111 @@ func (s *teamService) reconcileCompletedAssignmentValidations(task *models.TeamT
 		}
 	}
 	return changed, nil
+}
+
+// supersedeRecoveredValidationAttempts retires only an older failed attempt in
+// the same persisted validation lane after a newer attempt has succeeded. It
+// never infers retry intent from prose or role names. Independent validations
+// remain separate when their owner, phase, target, or dependency lineage differs.
+func (s *teamService) supersedeRecoveredValidationAttempts(
+	task *models.TeamTask,
+	items []models.TeamWorkItem,
+	successor models.TeamWorkItem,
+	now time.Time,
+) (bool, error) {
+	if s == nil || s.repo == nil || task == nil || successor.SupersededBy != nil ||
+		successor.Status != models.TeamTaskStatusSucceeded || successor.OwnerMemberID == nil ||
+		successor.ReviewTargetAssignmentID == nil {
+		return false, nil
+	}
+	targetID := strings.TrimSpace(derefTeamString(successor.ReviewTargetAssignmentID))
+	phaseID := strings.TrimSpace(derefTeamString(successor.PhaseID))
+	if targetID == "" || phaseID == "" {
+		return false, nil
+	}
+	targetRevision := teamMaxInt(derefTeamInt(successor.ReviewTargetRevision), 1)
+	changed := false
+	for idx := range items {
+		prior := items[idx]
+		if prior.ID == successor.ID || prior.SupersededBy != nil || prior.OwnerMemberID == nil ||
+			*prior.OwnerMemberID != *successor.OwnerMemberID ||
+			strings.TrimSpace(derefTeamString(prior.PhaseID)) != phaseID ||
+			strings.TrimSpace(derefTeamString(prior.ReviewTargetAssignmentID)) != targetID ||
+			teamMaxInt(derefTeamInt(prior.ReviewTargetRevision), 1) != targetRevision ||
+			(prior.Status != models.TeamTaskStatusFailed && prior.Status != models.TeamTaskStatusStale) ||
+			!validationAttemptPrecedes(prior, successor) ||
+			!validationRetryLineageProven(items, prior, successor, targetID) {
+			continue
+		}
+		supersededBy := successor.WorkID
+		prior.SupersededBy = &supersededBy
+		prior.RequiredForRoot = false
+		prior.UpdatedAt = now
+		if err := s.repo.UpsertWorkItem(&prior); err != nil {
+			return changed, err
+		}
+		items[idx] = prior
+		changed = true
+	}
+	if changed {
+		task.LedgerVersion++
+		task.UpdatedAt = now
+	}
+	return changed, nil
+}
+
+func validationAttemptPrecedes(prior, successor models.TeamWorkItem) bool {
+	priorFinished := prior.UpdatedAt
+	if prior.FinishedAt != nil {
+		priorFinished = *prior.FinishedAt
+	}
+	successorStarted := successor.CreatedAt
+	if successor.StartedAt != nil {
+		successorStarted = *successor.StartedAt
+	}
+	return prior.ID < successor.ID && (priorFinished.IsZero() || successorStarted.IsZero() || !successorStarted.Before(priorFinished))
+}
+
+func validationRetryLineageProven(items []models.TeamWorkItem, prior, successor models.TeamWorkItem, targetID string) bool {
+	priorCanonical := strings.TrimSpace(derefTeamString(prior.CanonicalWorkID))
+	successorCanonical := strings.TrimSpace(derefTeamString(successor.CanonicalWorkID))
+	if priorCanonical != "" && priorCanonical == successorCanonical {
+		return true
+	}
+	dependencies := teamWorkItemDependencies(successor)
+	if slices.Contains(dependencies, workItemBusinessID(prior)) || slices.Contains(dependencies, prior.WorkID) {
+		return true
+	}
+	priorFinished := prior.UpdatedAt
+	if prior.FinishedAt != nil {
+		priorFinished = *prior.FinishedAt
+	}
+	byBusinessID := make(map[string]models.TeamWorkItem, len(items))
+	for idx := range items {
+		item := items[idx]
+		businessID := workItemBusinessID(item)
+		if businessID != "" {
+			byBusinessID[businessID] = item
+		}
+	}
+	for _, dependencyID := range dependencies {
+		dependency, ok := byBusinessID[dependencyID]
+		if !ok || dependency.ID == prior.ID || dependency.ReviewTargetAssignmentID != nil ||
+			(!priorFinished.IsZero() && dependency.CreatedAt.Before(priorFinished)) {
+			continue
+		}
+		if dependencyID == targetID || slices.Contains(teamWorkItemDependencies(dependency), targetID) {
+			return true
+		}
+	}
+	return false
+}
+
+func derefTeamInt(value *int) int {
+	if value == nil {
+		return 0
+	}
+	return *value
 }
 
 func normalizeExistingCollaborationStep(step map[string]interface{}, team *models.Team, eventType string, payload map[string]interface{}, member *models.TeamMember, task *models.TeamTask) {
