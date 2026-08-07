@@ -234,3 +234,33 @@ func TestMigration044AddsWorkbuddyRuntime(t *testing.T) {
 		}
 	}
 }
+
+func TestMigration045BootstrapsAndUpgradesLLMModels(t *testing.T) {
+	raw, err := embeddedMigrations.ReadFile("migrations/045_add_llm_model_reasoning_control.sql")
+	if err != nil {
+		t.Fatalf("read migration 045: %v", err)
+	}
+
+	sql := string(raw)
+	createTable := "CREATE TABLE IF NOT EXISTS llm_models"
+	guardColumn := "information_schema.COLUMNS"
+	addColumn := "ALTER TABLE llm_models ADD COLUMN reasoning_enabled"
+	for _, required := range []string{
+		createTable,
+		guardColumn,
+		"TABLE_NAME = 'llm_models'",
+		"COLUMN_NAME = 'reasoning_enabled'",
+		addColumn,
+		"PREPARE stmt FROM @stmt",
+		"EXECUTE stmt",
+		"DEALLOCATE PREPARE stmt",
+	} {
+		if !strings.Contains(sql, required) {
+			t.Fatalf("migration 045 must contain %s", required)
+		}
+	}
+
+	if strings.Index(sql, createTable) > strings.Index(sql, addColumn) {
+		t.Fatalf("migration 045 must create the legacy llm_models table before adding reasoning_enabled")
+	}
+}
