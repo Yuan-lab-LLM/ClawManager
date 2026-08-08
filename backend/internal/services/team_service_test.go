@@ -3772,6 +3772,46 @@ func TestTerminalMonitorRepairsOnlyCanonicalExistingAssignment(t *testing.T) {
 	}
 }
 
+func TestTerminalMonitorRequiresExactNonProvisionalAttemptEvidence(t *testing.T) {
+	team := &models.Team{ID: 72, CommunicationMode: teamCommunicationModeLeaderMediated}
+	task := &models.TeamTask{ID: 145, TeamID: 72, TargetMemberID: 1, Status: models.TeamTaskStatusRunning, LedgerVersion: 3}
+	reviewer := &models.TeamMember{ID: 3, TeamID: 72, MemberKey: "reviewer", Role: "reviewer"}
+	assignmentID := "assign-review-kanban"
+	provisional := `{"dependencyBlocked":true,"provisionalAssignmentResult":true}`
+	repo := &teamRepositoryStub{workItems: []models.TeamWorkItem{{
+		ID: 9002, TeamID: team.ID, RootTaskID: task.ID, WorkID: "assign-review-kanban:r2", AssignmentID: &assignmentID,
+		OwnerMemberID: &reviewer.ID, Status: models.TeamTaskStatusRunning, Revision: 2, ResultJSON: &provisional,
+	}}}
+	service := &teamService{repo: repo}
+	payload := map[string]interface{}{
+		"eventKind": "assignment_check_result", "checkId": "monitor:team-72-task-145:assign-review-kanban:r2:1",
+		"terminalEvidence": true, "exactAttemptEvidence": true,
+		"workItemId": 9002, "assignmentId": assignmentID, "workId": "assign-review-kanban:r2",
+		"revision": 2, "status": "succeeded", "summary": "old provisional attempt",
+	}
+	changed, err := service.reconcileTerminalMonitorWorkItem(team, task, reviewer, payload, time.Now().UTC())
+	if err != nil || changed {
+		t.Fatalf("Monitor must not promote a provisional dependency-blocked attempt, changed=%v err=%v", changed, err)
+	}
+	repo.workItems[0].ResultJSON = nil
+	payload["revision"] = 1
+	changed, err = service.reconcileTerminalMonitorWorkItem(team, task, reviewer, payload, time.Now().UTC())
+	if err != nil || changed {
+		t.Fatalf("Monitor must not cross revisions, changed=%v err=%v", changed, err)
+	}
+	payload["revision"] = 2
+	payload["exactAttemptEvidence"] = false
+	changed, err = service.reconcileTerminalMonitorWorkItem(team, task, reviewer, payload, time.Now().UTC())
+	if err != nil || changed {
+		t.Fatalf("an explicit non-exact receipt must remain non-authoritative, changed=%v err=%v", changed, err)
+	}
+	payload["exactAttemptEvidence"] = true
+	changed, err = service.reconcileTerminalMonitorWorkItem(team, task, reviewer, payload, time.Now().UTC())
+	if err != nil || !changed || repo.workItems[0].Status != models.TeamTaskStatusSucceeded {
+		t.Fatalf("exact current attempt evidence should recover a stuck card, changed=%v err=%v item=%#v", changed, err, repo.workItems[0])
+	}
+}
+
 func TestDuplicateDispatchCannotReopenTerminalWorkflow(t *testing.T) {
 	team := &models.Team{ID: 72, CommunicationMode: teamCommunicationModeLeaderMediated}
 	task := &models.TeamTask{ID: 144, TeamID: 72, Status: models.TeamTaskStatusRunning, WorkflowState: teamWorkflowStateSynthesizing, LedgerVersion: 9}
@@ -6021,6 +6061,26 @@ func TestAssignmentMonitorEnvelopeIsNonTerminalAndAddressedToWorker(t *testing.T
 	metadata, ok := envelope["metadata"].(map[string]interface{})
 	if !ok || metadata["monitor"] != true || metadata["monitorType"] != "assignment_status_check" || metadata["eventKind"] != "assignment_check_requested" || metadata["visibleToChat"] != false {
 		t.Fatalf("unexpected monitor metadata: %#v", envelope["metadata"])
+	}
+}
+
+func TestAssignmentMonitorEnvelopeCarriesCanonicalAndExecutionIdentity(t *testing.T) {
+	now := time.Date(2026, 8, 9, 10, 30, 0, 0, time.UTC)
+	team := &models.Team{ID: 46}
+	task := &models.TeamTask{ID: 79, TeamID: 46, MessageID: "team-46-task-root"}
+	assignmentID := "qa-board"
+	item := &models.TeamWorkItem{
+		ID: 9003, WorkID: "qa-board:r3", AssignmentID: &assignmentID, Revision: 3,
+		Title: "QA board revision 3", UpdatedAt: now.Add(-4 * time.Minute),
+	}
+	owner := &models.TeamMember{ID: 302, TeamID: 46, MemberKey: "reviewer"}
+	envelope, _ := buildAssignmentStatusCheckEnvelope(team, task, item, owner, now)
+	if envelope["assignmentId"] != assignmentID || envelope["workId"] != "qa-board:r3" || envelope["revision"] != 3 || envelope["workItemId"] != 9003 {
+		t.Fatalf("Monitor must bind both canonical and exact execution identity: %#v", envelope)
+	}
+	metadata, _ := envelope["metadata"].(map[string]interface{})
+	if metadata["assignmentId"] != assignmentID || metadata["workId"] != "qa-board:r3" || metadata["revision"] != 3 || metadata["workItemId"] != 9003 {
+		t.Fatalf("Monitor metadata lost exact identity: %#v", metadata)
 	}
 }
 

@@ -1026,7 +1026,7 @@ func appendTeamTaskCompletionInstruction(prompt string, communicationMode, inten
 		"- If a worker is still executing a long step, report concise progress and continue. If context was lost or an artifact path is wrong, report a recoverable blocker to the Leader instead of treating the root task as failed.",
 		"- Every Team message must preserve rootTaskId/messageId context when available and must clearly state whether it is an assignment, peer request, progress update, result, review, blocker, or final synthesis.",
 		"- For multi-stage work, publish a structured leader_plan with planVersion and phases. Every team_send must carry a stable phaseId, assignmentId, workId, revision, required flag, and dependencies. Completing one phase never completes the user root task.",
-		"- The Leader owns validation assignment scope. For a production-only implementation assignment that will be checked downstream, set reviewRequired=true and state that the current member produces the artifact without running tests or acceptance checks. For every test, review, evidence, or verification assignment, set validationAssignment=true, validationTargetAssignmentId, validationTargetRevision, and dependsOn; this is role-agnostic, so several members may receive different validation assignments in parallel. If the current member must both produce and validate, say so explicitly and mark that assignment as validation work rather than relying on the member's role name.",
+		"- The Leader owns validation assignment scope. For a production-only implementation assignment that will be checked downstream, set reviewRequired=true and state that the current member produces the artifact without running tests or acceptance checks. For every test, review, evidence, or verification assignment, set validationAssignment=true, validationTargetAssignmentId, validationTargetRevision, and dependsOn. Run assignments in parallel only when the published plan has no dependency path between them and every required input is independently ready; several members may receive different validation assignments in parallel only under that condition. If B depends on A, follow A -> B: registering B early does not mean B may execute before A succeeds. A waiting_dependencies receipt means B is registered but has not started and will release automatically; do not resend it. Set allowEarlyStart=true only when the published plan explicitly permits useful preflight work before the dependency is ready, never to claim final validation of a missing artifact. Before creating a newer revision, inspect the current attempt; a running/busy equivalent attempt with a recent heartbeat must be allowed to finish. These rules are role-agnostic: independent validators may run in parallel, while dependent validators must follow the plan. If the current member must both produce and validate, say so explicitly and mark that assignment as validation work rather than relying on the member's role name.",
 		"- The Leader may call team_complete_task for the root only after the workflow is sealed, remainingActions is empty, every required latest assignment and review is complete, and finalAnswerReady is true. Worker completion closes only that assignment.",
 		"- A required phase declared in leader_plan cannot disappear implicitly. If a planned phase is intentionally not started, the Leader must include phaseDispositions with phaseId, decision (cancelled, skipped, or superseded), and a concrete reason in team_complete_task. Omit phases whose assigned work already succeeded; the control plane closes those automatically. Never use a disposition for running or unfinished assigned work.",
 		"- A failed or stale required assignment blocks root success unless the Leader supplies a structured waiver containing assignmentId, reason, and accepted risk. Never waive running/pending work or omit the risk record.",
@@ -3638,6 +3638,17 @@ func (s *teamService) sweepAssignmentStatusChecks() error {
 			if owner == nil || owner.TeamID != team.ID || isLeaderTeamMember(owner) || !isActiveTeamMember(owner) {
 				continue
 			}
+			rootItems := make([]models.TeamWorkItem, 0)
+			for idx := range items {
+				if items[idx].RootTaskID == item.RootTaskID {
+					rootItems = append(rootItems, items[idx])
+				}
+			}
+			if unresolved := unresolvedTeamWorkItemDependencies(rootItems, workItemBusinessID(item)); len(unresolved) > 0 {
+				// Runtime owns the deferred dispatch lease. Monitor must not wake a
+				// downstream member before the exact prerequisites are ready.
+				continue
+			}
 			if bus == nil {
 				bus, err = s.redisBusForTeam(context.Background(), &team)
 				if err != nil {
@@ -4817,9 +4828,13 @@ func buildAssignmentStatusCheckEnvelope(team *models.Team, task *models.TeamTask
 		checkSequence = time.Now().UTC().UnixMilli()
 	}
 	messageID := fmt.Sprintf("monitor:%s:%s:%d", taskRef, item.WorkID, checkSequence)
+	assignmentID := workItemBusinessID(*item)
+	if assignmentID == "" {
+		assignmentID = item.WorkID
+	}
 	prompt := strings.Join([]string{
 		"[STATUS_CHECK] This is an automatic ClawManager assignment monitor.",
-		fmt.Sprintf("rootTaskId=%s rootMessageId=%s workId=%s assignmentId=%s", taskRef, task.MessageID, item.WorkID, item.WorkID),
+		fmt.Sprintf("rootTaskId=%s rootMessageId=%s workId=%s assignmentId=%s revision=%d workItemId=%d", taskRef, task.MessageID, item.WorkID, assignmentID, teamMaxInt(item.Revision, 1), item.ID),
 		"Check the current assignment state. If you are still working, call team_update_progress with status=\"running\", eventKind=\"assignment_check_result\", a concise progress summary, and continue the same assignment. If the deliverable is already ready, call team_complete_task now with the actual result and artifact links. If you stopped or lost context, resume from the assignment evidence; when that is not possible, report the exact recoverable blocker to the Leader. Never claim completion before the deliverable is ready.",
 	}, "\n")
 	envelope := map[string]interface{}{
@@ -4837,7 +4852,10 @@ func buildAssignmentStatusCheckEnvelope(team *models.Team, task *models.TeamTask
 		"rootTaskId":         taskRef,
 		"rootMessageId":      task.MessageID,
 		"workId":             item.WorkID,
-		"assignmentId":       item.WorkID,
+		"assignmentId":       assignmentID,
+		"canonicalWorkId":    assignmentID,
+		"revision":           teamMaxInt(item.Revision, 1),
+		"workItemId":         item.ID,
 		"checkId":            messageID,
 		"checkSequence":      checkSequence,
 		"requestedAt":        now.Format(time.RFC3339Nano),
@@ -4851,6 +4869,9 @@ func buildAssignmentStatusCheckEnvelope(team *models.Team, task *models.TeamTask
 			"eventKind":     "assignment_check_requested",
 			"visibleToChat": false,
 			"workItemId":    item.ID,
+			"assignmentId":  assignmentID,
+			"workId":        item.WorkID,
+			"revision":      teamMaxInt(item.Revision, 1),
 			"workItemTitle": item.Title,
 			"lastUpdatedAt": item.UpdatedAt.Format(time.RFC3339Nano),
 			"checkId":       messageID,
@@ -5635,8 +5656,11 @@ func (s *teamService) reconcileTerminalMonitorWorkItem(team *models.Team, task *
 	if status != models.TeamTaskStatusSucceeded && status != models.TeamTaskStatusFailed {
 		return false, nil
 	}
-	identity := eventString(payload, "assignmentId", "assignment_id", "canonicalWorkId", "canonical_work_id", "workId", "work_id")
-	if identity == "" {
+	workItemID := eventInt(payload, "workItemId", "work_item_id")
+	identity := eventString(payload, "assignmentId", "assignment_id", "canonicalWorkId", "canonical_work_id")
+	workID := eventString(payload, "workId", "work_id")
+	revision := eventInt(payload, "revision", "workRevision", "work_revision")
+	if workItemID <= 0 && identity == "" && workID == "" {
 		return false, nil
 	}
 	items, err := s.repo.ListWorkItemsByRootTaskID(task.ID)
@@ -5645,11 +5669,38 @@ func (s *teamService) reconcileTerminalMonitorWorkItem(team *models.Team, task *
 	}
 	for idx := range items {
 		item := items[idx]
-		if item.OwnerMemberID == nil || *item.OwnerMemberID != member.ID || item.SupersededBy != nil ||
-			(item.WorkID != identity && derefTeamString(item.AssignmentID) != identity && derefTeamString(item.CanonicalWorkID) != identity) {
+		if item.OwnerMemberID == nil || *item.OwnerMemberID != member.ID || item.SupersededBy != nil {
+			continue
+		}
+		if workItemID > 0 {
+			if item.ID != workItemID {
+				continue
+			}
+		} else if item.WorkID != workID && derefTeamString(item.AssignmentID) != identity && derefTeamString(item.CanonicalWorkID) != identity {
+			continue
+		}
+		if revision > 0 && teamMaxInt(item.Revision, 1) != revision {
 			continue
 		}
 		if isTerminalTeamTaskStatus(item.Status) {
+			return false, nil
+		}
+		// A dependency-blocked attempt must be executed again after its inputs
+		// become ready. A terminal Runtime status from that old attempt is not
+		// proof that the recheck happened, so Monitor may not promote it.
+		if item.ResultJSON != nil && strings.TrimSpace(*item.ResultJSON) != "" {
+			result := map[string]interface{}{}
+			if json.Unmarshal([]byte(*item.ResultJSON), &result) == nil &&
+				(eventBool(result, "dependencyBlocked", "dependency_blocked") ||
+					eventBool(result, "provisionalAssignmentResult", "provisional_assignment_result")) {
+				return false, nil
+			}
+		}
+		// Current runtimes attest that the terminal status belongs to the exact
+		// monitored attempt. Older runtimes remain compatible through the exact
+		// work-item/revision checks above, but an explicit false is never ignored.
+		if _, present := teamEventBoolValue(payload, "exactAttemptEvidence", "exact_attempt_evidence"); present &&
+			!eventBool(payload, "exactAttemptEvidence", "exact_attempt_evidence") {
 			return false, nil
 		}
 		item.Status = status
@@ -7185,6 +7236,41 @@ func (s *teamService) publishTeamRootWorkflowState(bus *redisBus, task *models.T
 		"currentPhaseId": task.CurrentPhaseID,
 		"terminal":       isTerminalTeamTaskStatus(task.Status),
 		"updatedAt":      time.Now().UTC().Format(time.RFC3339Nano),
+	}
+	// Runtime uses this compact, advisory snapshot only for dependency-aware
+	// dispatch and in-flight deduplication. Database Work Items remain the source
+	// of truth; a missing snapshot must stay fail-open for mixed-version pairs.
+	if s != nil && s.repo != nil {
+		if items, listErr := s.repo.ListWorkItemsByRootTaskID(task.ID); listErr == nil {
+			latest := map[string]models.TeamWorkItem{}
+			for idx := range items {
+				item := items[idx]
+				businessID := workItemBusinessID(item)
+				if businessID == "" || item.SupersededBy != nil {
+					continue
+				}
+				if current, ok := latest[businessID]; !ok || teamMaxInt(item.Revision, 1) >= teamMaxInt(current.Revision, 1) {
+					latest[businessID] = item
+				}
+			}
+			assignments := make(map[string]interface{}, len(latest))
+			for businessID, item := range latest {
+				assignments[businessID] = map[string]interface{}{
+					"workItemId":                   item.ID,
+					"workId":                       item.WorkID,
+					"assignmentId":                 businessID,
+					"revision":                     teamMaxInt(item.Revision, 1),
+					"status":                       item.Status,
+					"ownerMemberId":                item.OwnerMemberID,
+					"phaseId":                      derefTeamString(item.PhaseID),
+					"dependsOn":                    teamWorkItemDependencies(item),
+					"validationTargetAssignmentId": derefTeamString(item.ReviewTargetAssignmentID),
+					"validationTargetRevision":     derefTeamInt(item.ReviewTargetRevision),
+					"updatedAt":                    item.UpdatedAt.Format(time.RFC3339Nano),
+				}
+			}
+			state["assignments"] = assignments
+		}
 	}
 	encoded, err := json.Marshal(state)
 	if err != nil {
@@ -10325,6 +10411,15 @@ func (s *teamService) projectTeamWorkItem(
 				existingAssignmentID = existing.WorkID
 			}
 			if existingAssignmentID != assignmentID || teamMaxInt(existing.Revision, 1) >= revision || existing.SupersededBy != nil {
+				continue
+			}
+			// A newer request must not invalidate a healthy in-flight attempt.
+			// Failed validation remains auditable until its exact successor succeeds;
+			// non-validation retries preserve the established phase recovery behavior.
+			isDeferredValidationFailure := item.ReviewTargetAssignmentID != nil &&
+				(existing.Status == models.TeamTaskStatusFailed || existing.Status == models.TeamTaskStatusStale)
+			if isDeferredValidationFailure ||
+				(existing.Status != models.TeamTaskStatusSucceeded && existing.Status != models.TeamTaskStatusFailed && existing.Status != models.TeamTaskStatusStale) {
 				continue
 			}
 			supersededBy := workID
