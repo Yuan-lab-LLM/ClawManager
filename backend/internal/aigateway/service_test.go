@@ -160,8 +160,62 @@ func TestBuildProviderRequestEnforcesDeepSeekThinkingSetting(t *testing.T) {
 			if thinking.Type != tc.want {
 				t.Fatalf("thinking.type = %q, want %q", thinking.Type, tc.want)
 			}
-			if _, exists := payload["reasoning_effort"]; exists {
-				t.Fatalf("reasoning_effort must not conflict with DeepSeek thinking control")
+			if tc.enabled {
+				if string(payload["reasoning_effort"]) != `"high"` {
+					t.Fatalf("enabled DeepSeek request must preserve normalized effort, got %s", payload["reasoning_effort"])
+				}
+			} else if _, exists := payload["reasoning_effort"]; exists {
+				t.Fatalf("disabled DeepSeek request retained reasoning_effort")
+			}
+		})
+	}
+}
+
+func TestBuildProviderRequestCombinesManagedOpenClawAndModelThinkingSettings(t *testing.T) {
+	t.Parallel()
+	openclaw := "openclaw"
+	tests := []struct {
+		name         string
+		modelEnabled bool
+		raw          string
+		wantState    string
+		wantEffort   string
+	}{
+		{name: "model disabled wins", raw: `{"model":"NB","messages":[],"thinking":{"type":"enabled"},"reasoning_effort":"max"}`, wantState: "disabled"},
+		{name: "openclaw explicitly off", modelEnabled: true, raw: `{"model":"NB","messages":[],"thinking":{"type":"disabled"},"reasoning_effort":"max"}`, wantState: "disabled"},
+		{name: "openclaw omission is off", modelEnabled: true, raw: `{"model":"NB","messages":[]}`, wantState: "disabled"},
+		{name: "openclaw high", modelEnabled: true, raw: `{"model":"NB","messages":[],"reasoning_effort":"medium"}`, wantState: "enabled", wantEffort: "high"},
+		{name: "openclaw max", modelEnabled: true, raw: `{"model":"NB","messages":[],"reasoning_effort":"xhigh"}`, wantState: "enabled", wantEffort: "max"},
+	}
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			req := ChatCompletionRequest{Model: "NB", RawBody: []byte(tc.raw), ManagedAgentType: &openclaw}
+			model := &models.LLMModel{
+				ProviderType: models.ProviderTypeOpenAICompatible, ProtocolType: models.ProtocolTypeOpenAICompatible,
+				BaseURL: "https://api.deepseek.com", ProviderModelName: "deepseek-v4-flash", ReasoningEnabled: tc.modelEnabled,
+			}
+			body, err := buildProviderRequestBody(req, model)
+			if err != nil {
+				t.Fatalf("buildProviderRequestBody returned error: %v", err)
+			}
+			var payload map[string]json.RawMessage
+			if err := json.Unmarshal(body, &payload); err != nil {
+				t.Fatalf("decode payload: %v", err)
+			}
+			var thinking struct {
+				Type string `json:"type"`
+			}
+			if err := json.Unmarshal(payload["thinking"], &thinking); err != nil || thinking.Type != tc.wantState {
+				t.Fatalf("thinking = %#v, err=%v, want %q", thinking, err, tc.wantState)
+			}
+			if tc.wantEffort == "" {
+				if _, ok := payload["reasoning_effort"]; ok {
+					t.Fatalf("disabled request retained reasoning_effort: %s", payload["reasoning_effort"])
+				}
+			} else if string(payload["reasoning_effort"]) != `"`+tc.wantEffort+`"` {
+				t.Fatalf("reasoning_effort = %s, want %q", payload["reasoning_effort"], tc.wantEffort)
 			}
 		})
 	}

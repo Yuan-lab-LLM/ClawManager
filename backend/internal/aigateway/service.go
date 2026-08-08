@@ -1589,7 +1589,7 @@ func buildOpenAICompatibleRequestBody(req ChatCompletionRequest, model *models.L
 		return nil, fmt.Errorf("failed to encode provider model name: %w", err)
 	}
 	payload["model"] = json.RawMessage(modelPayload)
-	if err := applyOpenAICompatibleProviderContract(payload, model); err != nil {
+	if err := applyOpenAICompatibleProviderContract(payload, model, req.ManagedAgentType); err != nil {
 		return nil, err
 	}
 	body, err := json.Marshal(payload)
@@ -1599,7 +1599,7 @@ func buildOpenAICompatibleRequestBody(req ChatCompletionRequest, model *models.L
 	return body, nil
 }
 
-func applyOpenAICompatibleProviderContract(payload map[string]json.RawMessage, model *models.LLMModel) error {
+func applyOpenAICompatibleProviderContract(payload map[string]json.RawMessage, model *models.LLMModel, managedAgentType *string) error {
 	if payload == nil || model == nil {
 		return nil
 	}
@@ -1621,10 +1621,63 @@ func applyOpenAICompatibleProviderContract(payload map[string]json.RawMessage, m
 		}
 		delete(payload, "max_completion_tokens")
 	}
-	return applyReasoningControl(payload, model)
+	return applyReasoningControl(payload, model, managedAgentType)
 }
 
-func applyReasoningControl(payload map[string]json.RawMessage, model *models.LLMModel) error {
+type reasoningRequestIntent struct {
+	set     bool
+	enabled bool
+	effort  string
+}
+
+func openAICompatibleReasoningIntent(payload map[string]json.RawMessage) reasoningRequestIntent {
+	if payload == nil {
+		return reasoningRequestIntent{}
+	}
+	if raw, ok := payload["thinking"]; ok {
+		var thinking struct {
+			Type string `json:"type"`
+		}
+		if json.Unmarshal(raw, &thinking) == nil {
+			switch strings.ToLower(strings.TrimSpace(thinking.Type)) {
+			case "disabled", "off", "none":
+				return reasoningRequestIntent{set: true}
+			case "enabled", "on":
+				return reasoningRequestIntent{set: true, enabled: true}
+			}
+		}
+	}
+	if raw, ok := payload["reasoning_effort"]; ok {
+		var effort string
+		if json.Unmarshal(raw, &effort) == nil {
+			effort = strings.ToLower(strings.TrimSpace(effort))
+			switch effort {
+			case "off", "none", "disabled":
+				return reasoningRequestIntent{set: true}
+			case "minimal", "low", "medium", "high", "xhigh", "max":
+				return reasoningRequestIntent{set: true, enabled: true, effort: effort}
+			}
+		}
+	}
+	return reasoningRequestIntent{}
+}
+
+func normalizeDeepSeekReasoningEffort(effort string) string {
+	switch strings.ToLower(strings.TrimSpace(effort)) {
+	case "xhigh", "max":
+		return "max"
+	case "minimal", "low", "medium", "high":
+		return "high"
+	default:
+		return ""
+	}
+}
+
+func isManagedOpenClawRequest(managedAgentType *string) bool {
+	return managedAgentType != nil && strings.EqualFold(strings.TrimSpace(*managedAgentType), "openclaw")
+}
+
+func applyReasoningControl(payload map[string]json.RawMessage, model *models.LLMModel, managedAgentType *string) error {
 	if payload == nil || model == nil {
 		return nil
 	}
@@ -1636,19 +1689,37 @@ func applyReasoningControl(payload map[string]json.RawMessage, model *models.LLM
 	)
 	switch control {
 	case models.ReasoningControlDeepSeekThinking:
-		// DeepSeek enables thinking by default when this field is absent. Always
-		// emit the admin-managed choice so "off" is enforced on the wire rather
-		// than remaining only an OpenClaw capability hint.
-		delete(payload, "reasoning_effort")
+		// The model setting is the capability ceiling. Managed OpenClaw requests
+		// may further disable thinking for the current session/turn, but may never
+		// enable a model that the administrator disabled.
+		intent := openAICompatibleReasoningIntent(payload)
+		enabled := model.ReasoningEnabled
+		if isManagedOpenClawRequest(managedAgentType) {
+			enabled = enabled && intent.set && intent.enabled
+		} else if intent.set {
+			enabled = enabled && intent.enabled
+		}
 		state := "disabled"
-		if model.ReasoningEnabled {
+		if enabled {
 			state = "enabled"
+		} else {
+			delete(payload, "reasoning_effort")
+			delete(payload, "reasoning")
 		}
 		encoded, err := json.Marshal(map[string]string{"type": state})
 		if err != nil {
 			return fmt.Errorf("failed to encode provider reasoning control: %w", err)
 		}
 		payload["thinking"] = encoded
+		if enabled {
+			if effort := normalizeDeepSeekReasoningEffort(intent.effort); effort != "" {
+				encodedEffort, err := json.Marshal(effort)
+				if err != nil {
+					return fmt.Errorf("failed to encode provider reasoning effort: %w", err)
+				}
+				payload["reasoning_effort"] = encodedEffort
+			}
+		}
 	}
 	return nil
 }

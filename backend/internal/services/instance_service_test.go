@@ -98,6 +98,9 @@ func TestBuildGatewayEnvInjectsGatewayModelCatalog(t *testing.T) {
 			if env["CLAWMANAGER_LLM_REASONING"] != `{"Claude 3.7 Sonnet":false,"GPT-4.1":false,"auto":false,"deepseek-r1":true}` {
 				t.Fatalf("expected authoritative reasoning settings, got %q", env["CLAWMANAGER_LLM_REASONING"])
 			}
+			if env["CLAWMANAGER_LLM_REASONING_CONTROL"] != `{"Claude 3.7 Sonnet":"","GPT-4.1":"","auto":"","deepseek-r1":"deepseek-thinking"}` {
+				t.Fatalf("expected authoritative reasoning controls, got %q", env["CLAWMANAGER_LLM_REASONING_CONTROL"])
+			}
 			if env["OPENAI_MODEL"] != "auto" {
 				t.Fatalf("expected OPENAI_MODEL to remain the default gateway alias, got %q", env["OPENAI_MODEL"])
 			}
