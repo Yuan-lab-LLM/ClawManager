@@ -2599,7 +2599,7 @@ func TestEvaluateProtocolV3ExplicitPhaseRequiresDispositionBeforeWorkflowSeal(t 
 	if evaluation.Decision != teamCompletionDecisionDeferred ||
 		evaluation.Reason != "open_workflow_phases" ||
 		len(evaluation.PendingPhases) != 1 ||
-		evaluation.PendingPhases[0] != "implementation:disposition" {
+		evaluation.PendingPhases[0] != "implementation:leader_review" {
 		t.Fatalf("explicit phase without disposition must remain open: %#v", evaluation)
 	}
 
@@ -3743,7 +3743,7 @@ func TestProjectTeamWorkItemKeepsUnmatchedProgressOutOfKanban(t *testing.T) {
 	}
 }
 
-func TestTerminalMonitorRepairsOnlyCanonicalExistingAssignment(t *testing.T) {
+func TestTerminalMonitorIsObservationOnly(t *testing.T) {
 	team := &models.Team{ID: 72, CommunicationMode: teamCommunicationModeLeaderMediated}
 	task := &models.TeamTask{ID: 144, TeamID: 72, TargetMemberID: 1, Status: models.TeamTaskStatusRunning, LedgerVersion: 6}
 	reviewer := &models.TeamMember{ID: 3, TeamID: 72, MemberKey: "reviewer", Role: "reviewer"}
@@ -3758,11 +3758,8 @@ func TestTerminalMonitorRepairsOnlyCanonicalExistingAssignment(t *testing.T) {
 		"terminalEvidence": true, "assignmentId": assignmentID, "status": "succeeded", "summary": "复查已完成",
 	}
 	changed, err := service.reconcileTerminalMonitorWorkItem(team, task, reviewer, payload, time.Now().UTC())
-	if err != nil || !changed {
-		t.Fatalf("terminal monitor evidence should repair canonical assignment, changed=%v err=%v", changed, err)
-	}
-	if repo.workItems[0].Status != models.TeamTaskStatusSucceeded || task.LedgerVersion != 7 {
-		t.Fatalf("terminal repair did not converge ledger: item=%#v task=%#v", repo.workItems[0], task)
+	if err != nil || changed || repo.workItems[0].Status != models.TeamTaskStatusRunning || task.LedgerVersion != 6 {
+		t.Fatalf("Monitor observation must not mutate assignment state: changed=%v item=%#v task=%#v err=%v", changed, repo.workItems[0], task, err)
 	}
 
 	payload["assignmentId"] = "invented-review-id"
@@ -3772,7 +3769,7 @@ func TestTerminalMonitorRepairsOnlyCanonicalExistingAssignment(t *testing.T) {
 	}
 }
 
-func TestTerminalMonitorRequiresExactNonProvisionalAttemptEvidence(t *testing.T) {
+func TestTerminalMonitorCannotPromoteAnyAttempt(t *testing.T) {
 	team := &models.Team{ID: 72, CommunicationMode: teamCommunicationModeLeaderMediated}
 	task := &models.TeamTask{ID: 145, TeamID: 72, TargetMemberID: 1, Status: models.TeamTaskStatusRunning, LedgerVersion: 3}
 	reviewer := &models.TeamMember{ID: 3, TeamID: 72, MemberKey: "reviewer", Role: "reviewer"}
@@ -3794,21 +3791,10 @@ func TestTerminalMonitorRequiresExactNonProvisionalAttemptEvidence(t *testing.T)
 		t.Fatalf("Monitor must not promote a provisional dependency-blocked attempt, changed=%v err=%v", changed, err)
 	}
 	repo.workItems[0].ResultJSON = nil
-	payload["revision"] = 1
-	changed, err = service.reconcileTerminalMonitorWorkItem(team, task, reviewer, payload, time.Now().UTC())
-	if err != nil || changed {
-		t.Fatalf("Monitor must not cross revisions, changed=%v err=%v", changed, err)
-	}
-	payload["revision"] = 2
-	payload["exactAttemptEvidence"] = false
-	changed, err = service.reconcileTerminalMonitorWorkItem(team, task, reviewer, payload, time.Now().UTC())
-	if err != nil || changed {
-		t.Fatalf("an explicit non-exact receipt must remain non-authoritative, changed=%v err=%v", changed, err)
-	}
 	payload["exactAttemptEvidence"] = true
 	changed, err = service.reconcileTerminalMonitorWorkItem(team, task, reviewer, payload, time.Now().UTC())
-	if err != nil || !changed || repo.workItems[0].Status != models.TeamTaskStatusSucceeded {
-		t.Fatalf("exact current attempt evidence should recover a stuck card, changed=%v err=%v item=%#v", changed, err, repo.workItems[0])
+	if err != nil || changed || repo.workItems[0].Status != models.TeamTaskStatusRunning {
+		t.Fatalf("even exact Monitor evidence is a reminder, not a terminal writer: changed=%v err=%v item=%#v", changed, err, repo.workItems[0])
 	}
 }
 
@@ -6084,6 +6070,70 @@ func TestAssignmentMonitorEnvelopeCarriesCanonicalAndExecutionIdentity(t *testin
 	}
 }
 
+func TestAssignmentMonitorEnvelopeCarriesExactRuntimeAndArtifactEvidence(t *testing.T) {
+	now := time.Date(2026, 8, 9, 11, 0, 0, 0, time.UTC)
+	team := &models.Team{ID: 46}
+	task := &models.TeamTask{ID: 80, TeamID: 46, MessageID: "team-46-task-root-80"}
+	assignmentID := "build-board"
+	resultJSON := `{"artifactRefs":["/team/artifacts/team-46-task-80/members/developer/build-board/index.html"]}`
+	item := &models.TeamWorkItem{
+		ID: 9004, RootTaskID: task.ID, WorkID: assignmentID, AssignmentID: &assignmentID, Revision: 2,
+		Title: "Build board", ResultJSON: &resultJSON, UpdatedAt: now.Add(-4 * time.Minute),
+	}
+	owner := &models.TeamMember{ID: 303, TeamID: 46, MemberKey: "developer"}
+	activity := &teamAssignmentActivitySnapshot{
+		TurnState: "suspected_stalled", LastActivityKind: "assistant_message",
+		LastAssistantText: "The implementation is written; I am preparing the final receipt.",
+		LastToolName:      "team_artifact_write", LastToolAt: now.Add(-time.Minute).Format(time.RFC3339Nano),
+	}
+	envelope, _ := buildAssignmentStatusCheckEnvelopeWithEvidence(team, task, item, owner, activity, 4, now)
+	prompt := eventString(envelope, "prompt")
+	if !strings.Contains(prompt, activity.LastAssistantText) || !strings.Contains(prompt, "team_artifact_write") ||
+		!strings.Contains(prompt, "4 earlier Monitor reminder") || !strings.Contains(prompt, "/team/artifacts/team-46-task-80/") {
+		t.Fatalf("Monitor must give the member exact dialogue, tool, attempt, and artifact facts: %s", prompt)
+	}
+	if refs := normalizeContextRefs(envelope["artifactRefs"]); !slices.Equal(refs, []string{"/team/artifacts/team-46-task-80/members/developer/build-board/index.html"}) {
+		t.Fatalf("Monitor envelope lost durable artifact evidence: %#v", envelope)
+	}
+}
+
+func TestControlPlaneReceiptRecoveryRequiresDurableAcceptedResult(t *testing.T) {
+	now := time.Now().UTC()
+	plain := `{"summary":"looks complete"}`
+	if workItemHasAcceptedResultReceipt(models.TeamWorkItem{Status: models.TeamTaskStatusSucceeded, FinishedAt: &now, ResultJSON: &plain}) {
+		t.Fatal("a status row plus prose is not enough to synthesize a missing result confirmation")
+	}
+	explicit := `{"completionId":"completion-worker-1","explicitCompletion":true,"assignmentResultOnly":true}`
+	if !workItemHasAcceptedResultReceipt(models.TeamWorkItem{Status: models.TeamTaskStatusSucceeded, FinishedAt: &now, ResultJSON: &explicit}) {
+		t.Fatal("an accepted durable completion receipt should be eligible for idempotent control-plane repair")
+	}
+	if workItemHasAcceptedResultReceipt(models.TeamWorkItem{Status: models.TeamTaskStatusRunning, ResultJSON: &explicit}) {
+		t.Fatal("control-plane consistency must never promote an active attempt")
+	}
+}
+
+func TestMemberResultConfirmationIdentityIncludesRevision(t *testing.T) {
+	taskID := 901
+	memberID := 902
+	payloadJSON := `{"from":"developer","assignmentId":"build","revision":1,"contentHash":"same-content","sourceMessageId":"turn-shared"}`
+	repo := &teamRepositoryStub{createdEvents: []models.TeamEvent{{
+		TeamID: 90, TaskID: &taskID, MemberID: &memberID, EventType: "member_result_confirmed", PayloadJSON: &payloadJSON,
+	}}}
+	service := &teamService{repo: repo}
+	matched, err := service.hasLeaderMediatedResultConfirmationForAttempt(90, taskID, "developer", "build", 1, "same-content")
+	if err != nil || !matched {
+		t.Fatalf("the exact revision confirmation should match: matched=%v err=%v", matched, err)
+	}
+	matched, err = service.hasLeaderMediatedResultConfirmationForAttempt(90, taskID, "developer", "build", 2, "same-content")
+	if err != nil || matched {
+		t.Fatalf("an older identical result must not suppress a new revision: matched=%v err=%v", matched, err)
+	}
+	sameSource, err := service.hasLeaderMediatedResultConfirmationForSource(90, taskID, "developer", "build", 2, "turn-shared")
+	if err != nil || sameSource {
+		t.Fatalf("a reused source id must not cross revision identity: matched=%v err=%v", sameSource, err)
+	}
+}
+
 func TestAssignmentMonitorDoesNotQueueBehindRecentUnansweredAttempt(t *testing.T) {
 	now := time.Date(2026, 8, 7, 12, 0, 0, 0, time.UTC)
 	taskID := 78
@@ -7361,7 +7411,7 @@ func TestMemberFailureHasSingleTerminalWriter(t *testing.T) {
 	}
 }
 
-func TestAnyRoleResultBeforeDependenciesIsProvisionalAndRecoverable(t *testing.T) {
+func TestAnyRoleResultBeforeDependenciesRemainsTerminalWithAdvisory(t *testing.T) {
 	team := &models.Team{ID: 131, CommunicationMode: teamCommunicationModeLeaderMediated}
 	task := &models.TeamTask{ID: 331, TeamID: team.ID, TargetMemberID: 1, MessageID: "root-331", Status: models.TeamTaskStatusRunning}
 	producerID := 2
@@ -7383,19 +7433,56 @@ func TestAnyRoleResultBeforeDependenciesIsProvisionalAndRecoverable(t *testing.T
 	if err := service.createLeaderMediatedResultNotification(team, nil, task, consumer, payload, event); err != nil {
 		t.Fatal(err)
 	}
-	if repo.workItems[1].Status != models.TeamTaskStatusRunning || repo.workItems[1].FinishedAt != nil {
-		t.Fatalf("a downstream attempt closed before its dependency: %#v", repo.workItems[1])
+	if repo.workItems[1].Status != models.TeamTaskStatusSucceeded || repo.workItems[1].FinishedAt == nil {
+		t.Fatalf("dependency metadata must not rewrite a completed attempt: %#v", repo.workItems[1])
 	}
 	stored := workItemResultPayload(repo.workItems[1])
-	if !eventBool(stored, "provisionalAssignmentResult") || !slices.Equal(normalizeContextRefs(stored["blockedDependencies"]), []string{producerAssignment}) {
-		t.Fatalf("the provisional dependency evidence was not persisted: %#v", stored)
+	if eventBool(stored, "provisionalAssignmentResult") || eventBool(stored, "dependencyBlocked") ||
+		eventString(stored, "dependencyState") != "known_waiting" ||
+		!slices.Equal(normalizeContextRefs(stored["waitingDependencies"]), []string{producerAssignment}) {
+		t.Fatalf("dependency concern must remain advisory without changing terminal state: %#v", stored)
 	}
-	if len(repo.createdEvents) != 0 {
-		t.Fatalf("a provisional attempt must not create a terminal confirmation: %#v", repo.createdEvents)
+	if len(repo.createdEvents) != 1 || repo.createdEvents[0].EventType != "member_result_confirmed" {
+		t.Fatalf("the control plane must confirm the member result independently of dependency prose: %#v", repo.createdEvents)
 	}
-	repo.workItems[0].Status = models.TeamTaskStatusSucceeded
-	if ready := dependencyBlockedAssignmentsReadyAfter(repo.workItems, producerAssignment); !slices.Equal(ready, []string{consumerAssignment}) {
-		t.Fatalf("the role-agnostic downstream assignment was not recoverable: %#v", ready)
+	if ready := dependencyBlockedAssignmentsReadyAfter(repo.workItems, producerAssignment); len(ready) != 0 {
+		t.Fatalf("a terminal attempt must not create a hidden automatic replay: %#v", ready)
+	}
+}
+
+func TestMalformedDependencyCannotBlockTeam33Completion(t *testing.T) {
+	team := &models.Team{ID: 33, CommunicationMode: teamCommunicationModeLeaderMediated}
+	task := &models.TeamTask{ID: 77, TeamID: 33, TargetMemberID: 91, MessageID: "team-33-task-root", Status: models.TeamTaskStatusRunning}
+	architect := &models.TeamMember{ID: 94, TeamID: 33, MemberKey: "architect", Role: "architect"}
+	pmID := 92
+	designerID := 93
+	malformedDepends := `["P1a,P1b,P1c"]`
+	repo := &teamRepositoryStub{workItems: []models.TeamWorkItem{
+		{ID: 98, TeamID: 33, RootTaskID: 77, WorkID: "P1a", AssignmentID: stringPtr("P1a"), OwnerMemberID: &pmID, Status: models.TeamTaskStatusSucceeded, Revision: 1},
+		{ID: 99, TeamID: 33, RootTaskID: 77, WorkID: "P1b", AssignmentID: stringPtr("P1b"), OwnerMemberID: &designerID, Status: models.TeamTaskStatusSucceeded, Revision: 1},
+		{ID: 100, TeamID: 33, RootTaskID: 77, WorkID: "P1c", AssignmentID: stringPtr("P1c"), OwnerMemberID: &pmID, Status: models.TeamTaskStatusSucceeded, Revision: 1},
+		{ID: 101, TeamID: 33, RootTaskID: 77, WorkID: "P2", AssignmentID: stringPtr("P2"), OwnerMemberID: &architect.ID, Status: models.TeamTaskStatusRunning, Revision: 1, DependsOnJSON: &malformedDepends},
+	}}
+	payload := map[string]interface{}{
+		"assignmentId": "P2", "workId": "P2", "revision": 1,
+		"status": models.TeamTaskStatusSucceeded, "summary": "P2 delivered",
+		"resultMarkdown": "P2 complete", "assignmentResultOnly": true,
+		"memberResultConfirmed": false,
+	}
+	event := &models.TeamEvent{ID: 2227, TeamID: 33, TaskID: &task.ID, MemberID: &architect.ID, EventType: "completion_proposed", CreatedAt: time.Now().UTC()}
+	if err := (&teamService{repo: repo}).createLeaderMediatedResultNotification(team, nil, task, architect, payload, event); err != nil {
+		t.Fatal(err)
+	}
+	if repo.workItems[3].Status != models.TeamTaskStatusSucceeded || repo.workItems[3].FinishedAt == nil {
+		t.Fatalf("malformed advisory dependency reopened P2: %#v", repo.workItems[3])
+	}
+	stored := workItemResultPayload(repo.workItems[3])
+	if eventString(stored, "dependencyState") != "unknown_advisory" ||
+		!slices.Equal(normalizeContextRefs(stored["unknownDependencies"]), []string{"P1a,P1b,P1c"}) {
+		t.Fatalf("expected an auditable unknown dependency advisory: %#v", stored)
+	}
+	if len(repo.createdEvents) != 1 || repo.createdEvents[0].EventType != "member_result_confirmed" {
+		t.Fatalf("member_result_confirmed must be generated by the control plane: %#v", repo.createdEvents)
 	}
 }
 
@@ -7511,13 +7598,13 @@ func TestMemberResultIdentityUsesSourceTurnAcrossSupportedLegacyProse(t *testing
 	}}}
 	service := &teamService{repo: repo}
 	same, err := service.hasLeaderMediatedResultConfirmationForSource(
-		103, taskID, "developer", "build-kanban", "msg-worker-turn-1",
+		103, taskID, "developer", "build-kanban", 1, "msg-worker-turn-1",
 	)
 	if err != nil || !same {
 		t.Fatalf("same source turn must remain one result even when prose hashes differ: same=%v err=%v", same, err)
 	}
 	different, err := service.hasLeaderMediatedResultConfirmationForSource(
-		103, taskID, "developer", "build-kanban", "msg-worker-turn-2",
+		103, taskID, "developer", "build-kanban", 1, "msg-worker-turn-2",
 	)
 	if err != nil || different {
 		t.Fatalf("a later correction turn must remain eligible: different=%v err=%v", different, err)
@@ -7881,11 +7968,21 @@ func TestTimeoutScannerNeverPromotesHistoricalReplyToSuccess(t *testing.T) {
 		}},
 	}
 	service := &teamService{repo: repo}
-	if err := service.markTaskStale(task, 30*time.Minute); err != nil {
+	if err := service.observeTaskStall(task, 30*time.Minute); err != nil {
 		t.Fatal(err)
 	}
-	if task.Status != models.TeamTaskStatusStale || task.Status == models.TeamTaskStatusSucceeded {
-		t.Fatalf("timeout scanner invented a successful result from historical prose: %#v", task)
+	if task.Status != models.TeamTaskStatusRunning || task.FinishedAt != nil || task.ErrorMessage != nil {
+		t.Fatalf("timeout observation must not interrupt or complete the task: %#v", task)
+	}
+	foundObservation := false
+	for idx := range repo.createdEvents {
+		if repo.createdEvents[idx].EventType == "task_stall_observed" {
+			foundObservation = true
+			break
+		}
+	}
+	if !foundObservation {
+		t.Fatalf("timeout scanner should retain a state-neutral observation for recovery: %#v", repo.createdEvents)
 	}
 }
 
