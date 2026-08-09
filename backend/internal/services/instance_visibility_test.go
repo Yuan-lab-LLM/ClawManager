@@ -29,6 +29,9 @@ func (r *stubInstanceVisibilityRepo) Create(*models.Instance) error { panic("not
 func (r *stubInstanceVisibilityRepo) GetByID(int) (*models.Instance, error) {
 	panic("not used")
 }
+func (r *stubInstanceVisibilityRepo) FindByPodIP(string) (*models.Instance, error) {
+	panic("not used")
+}
 func (r *stubInstanceVisibilityRepo) GetByAccessToken(string) (*models.Instance, error) {
 	panic("not used")
 }

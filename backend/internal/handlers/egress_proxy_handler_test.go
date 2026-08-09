@@ -1,17 +1,21 @@
 package handlers
 
 import (
+	"bufio"
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"clawreef/internal/egresspolicy"
 	"clawreef/internal/models"
@@ -112,13 +116,7 @@ func TestEgressProxyHandlerAcceptsEgressInstanceHeaderAlias(t *testing.T) {
 func TestEgressProxyHandlerRejectsUnsafeConnectResolution(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	audit := &stubEgressAuditService{}
-	handler := &EgressProxyHandler{
-		policy: egresspolicy.Policy{Mode: egresspolicy.ModeOpen},
-		audit:  audit,
-		dialContext: func(context.Context, string, string) (net.Conn, error) {
-			return nil, egresspolicy.ErrUnsafeTarget
-		},
-	}
+	handler := NewEgressProxyHandler(audit)
 
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
@@ -131,6 +129,215 @@ func TestEgressProxyHandlerRejectsUnsafeConnectResolution(t *testing.T) {
 	}
 	if len(audit.events) != 1 {
 		t.Fatalf("expected unsafe target audit event, got %+v", audit.events)
+	}
+}
+
+type stubPrivateExceptionSource struct {
+	rules []egresspolicy.PrivateExceptionRule
+}
+
+func (s *stubPrivateExceptionSource) SnapshotRules() []egresspolicy.PrivateExceptionRule {
+	return s.rules
+}
+
+type stubEgressInstanceResolver struct {
+	byID    map[int]*models.Instance
+	byPodIP map[string]*models.Instance
+}
+
+func (s *stubEgressInstanceResolver) GetByID(id int) (*models.Instance, error) {
+	if s.byID == nil {
+		return nil, nil
+	}
+	return s.byID[id], nil
+}
+
+func (s *stubEgressInstanceResolver) FindByPodIP(podIP string) (*models.Instance, error) {
+	if s.byPodIP == nil {
+		return nil, nil
+	}
+	return s.byPodIP[podIP], nil
+}
+
+func TestEgressProxyHandlerAllowsPrivateExceptionWithInstanceIdentity(t *testing.T) {
+	handler := NewEgressProxyHandler(
+		&stubEgressAuditService{},
+		WithEgressPrivateExceptions(
+			&stubPrivateExceptionSource{rules: []egresspolicy.PrivateExceptionRule{{
+				ScopeType: egresspolicy.ScopeInstance,
+				ScopeID:   8,
+				Prefix:    netip.MustParsePrefix("10.255.25.3/32"),
+				Port:      18080,
+			}}},
+			&stubEgressInstanceResolver{byID: map[int]*models.Instance{
+				8: {ID: 8, UserID: 1},
+			}},
+		),
+	)
+	dialed := ""
+	handler.baseDialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
+		dialed = address
+		left, right := net.Pipe()
+		_ = left.Close()
+		return right, nil
+	}
+
+	instanceID := 8
+	userID := 1
+	ctx := context.WithValue(context.Background(), egressIdentityContextKey{}, egressRequestIdentity{
+		InstanceID: &instanceID,
+		UserID:     &userID,
+	})
+	conn, err := handler.proxyDialContext(ctx, "tcp", "10.255.25.3:18080")
+	if err != nil {
+		t.Fatalf("expected private exception dial success, got %v", err)
+	}
+	_ = conn.Close()
+	if dialed != "10.255.25.3:18080" {
+		t.Fatalf("expected exception dial, got %q", dialed)
+	}
+}
+
+func TestEgressProxyHandlerResolvesIdentityFromHeaderAndPodIP(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	resolver := &stubEgressInstanceResolver{
+		byID: map[int]*models.Instance{
+			8: {ID: 8, UserID: 1},
+		},
+		byPodIP: map[string]*models.Instance{
+			"10.42.0.130": {ID: 8, UserID: 1},
+		},
+	}
+	handler := NewEgressProxyHandler(
+		&stubEgressAuditService{},
+		WithEgressPrivateExceptions(&stubPrivateExceptionSource{}, resolver),
+	)
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "http://example.com/", nil)
+	ctx.Request.Header.Set("X-ClawManager-Egress-Instance-Id", "8")
+	identity := handler.resolveEgressIdentity(ctx)
+	if identity.InstanceID == nil || *identity.InstanceID != 8 || identity.UserID == nil || *identity.UserID != 1 {
+		t.Fatalf("expected header identity, got %+v", identity)
+	}
+
+	ctx.Request = httptest.NewRequest(http.MethodGet, "http://example.com/", nil)
+	ctx.Request.RemoteAddr = "10.42.0.130:48800"
+	identity = handler.resolveEgressIdentity(ctx)
+	if identity.InstanceID == nil || *identity.InstanceID != 8 {
+		t.Fatalf("expected pod ip identity, got %+v", identity)
+	}
+}
+
+func TestEgressProxyHandlerRejectsPrivateTargetWithoutIdentity(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewEgressProxyHandler(
+		&stubEgressAuditService{},
+		WithEgressPrivateExceptions(
+			&stubPrivateExceptionSource{rules: []egresspolicy.PrivateExceptionRule{{
+				ScopeType: egresspolicy.ScopeInstance,
+				ScopeID:   8,
+				Prefix:    netip.MustParsePrefix("10.255.25.3/32"),
+				Port:      18080,
+			}}},
+			&stubEgressInstanceResolver{},
+		),
+	)
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodConnect, "https://10.255.25.3:18080", nil)
+	ctx.Request.Host = "10.255.25.3:18080"
+	handler.handleConnect(ctx)
+
+	if recorder.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 without identity, got %d", recorder.Code)
+	}
+}
+
+type hijackableResponseRecorder struct {
+	*httptest.ResponseRecorder
+	serverConn net.Conn
+	clientConn net.Conn
+}
+
+func newHijackableResponseRecorder(t *testing.T) *hijackableResponseRecorder {
+	t.Helper()
+	clientConn, serverConn := net.Pipe()
+	recorder := &hijackableResponseRecorder{
+		ResponseRecorder: httptest.NewRecorder(),
+		serverConn:       serverConn,
+		clientConn:       clientConn,
+	}
+	t.Cleanup(func() {
+		_ = clientConn.Close()
+		_ = serverConn.Close()
+	})
+	return recorder
+}
+
+func (h *hijackableResponseRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	return h.serverConn, bufio.NewReadWriter(bufio.NewReader(h.serverConn), bufio.NewWriter(h.serverConn)), nil
+}
+
+func TestEgressProxyHandlerConnectAllowsPrivateExceptionWithHeader(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewEgressProxyHandler(
+		&stubEgressAuditService{},
+		WithEgressPrivateExceptions(
+			&stubPrivateExceptionSource{rules: []egresspolicy.PrivateExceptionRule{{
+				ScopeType: egresspolicy.ScopeInstance,
+				ScopeID:   8,
+				Prefix:    netip.MustParsePrefix("10.255.25.3/32"),
+				Port:      18080,
+			}}},
+			&stubEgressInstanceResolver{byID: map[int]*models.Instance{
+				8: {ID: 8, UserID: 1},
+			}},
+		),
+	)
+	dialed := ""
+	handler.baseDialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
+		dialed = address
+		left, right := net.Pipe()
+		t.Cleanup(func() {
+			_ = left.Close()
+			_ = right.Close()
+		})
+		return right, nil
+	}
+
+	recorder := newHijackableResponseRecorder(t)
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodConnect, "https://10.255.25.3:18080", nil)
+	ctx.Request.Host = "10.255.25.3:18080"
+	ctx.Request.Header.Set("X-ClawManager-Egress-Instance-Id", "8")
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		handler.handleConnect(ctx)
+	}()
+
+	_ = recorder.clientConn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	buf := make([]byte, 64)
+	n, err := recorder.clientConn.Read(buf)
+	if err != nil && err != io.EOF {
+		t.Fatalf("read connect response: %v", err)
+	}
+	response := string(buf[:n])
+	if !strings.Contains(response, "200 Connection Established") {
+		t.Fatalf("expected CONNECT 200, got %q dialed=%q recorder=%d body=%s", response, dialed, recorder.Code, recorder.Body.String())
+	}
+	if dialed != "10.255.25.3:18080" {
+		t.Fatalf("expected exception dial, got %q", dialed)
+	}
+	_ = recorder.clientConn.Close()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("handleConnect did not finish")
 	}
 }
 

@@ -119,6 +119,11 @@ export const skillHubService = {
     return response.data.data;
   },
 
+  getSkillMarkdown: async (skillId: number): Promise<string> => {
+    const response = await api.get(`/skill-hub/skills/${skillId}/skill-md`);
+    return response.data.data?.content ?? '';
+  },
+
   retryPackageCollect: async (instanceId: number, skillId: number): Promise<void> => {
     await api.post(`/instances/${instanceId}/skills/${skillId}/retry-package-collect`);
   },

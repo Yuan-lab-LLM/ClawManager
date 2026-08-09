@@ -6,6 +6,7 @@ import { eventsTranslations } from './eventsI18n';
 import { runtimeTranslations } from './runtimeI18n';
 import { hostHardeningTranslations } from './hostHardeningI18n';
 import { outboundTranslations } from './outboundI18n';
+import { egressPrivateTranslations } from './egressPrivateI18n';
 import { policyTranslations } from './policyI18n';
 import { governTranslations } from './governI18n';
 
@@ -43,6 +44,7 @@ export const secplaneTranslations: Record<Locale, TranslationTree> = mergeLocale
   (l) => ({ runtime: runtimeTranslations[l] }),
   (l) => ({ protection: { hostHardening: hostHardeningTranslations[l] } }),
   (l) => ({ protection: { outbound: outboundTranslations[l] } }),
+  (l) => ({ protection: { egressPrivate: egressPrivateTranslations[l] } }),
   (l) => ({ protection: { policy: policyTranslations[l] } }),
   (l) => ({ protection: { govern: governTranslations[l] } }),
 ]);

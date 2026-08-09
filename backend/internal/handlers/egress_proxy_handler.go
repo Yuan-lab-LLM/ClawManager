@@ -44,37 +44,61 @@ type teamPreviewSecretReader interface {
 	GetSecretValue(ctx context.Context, namespace, name, key string) (string, error)
 }
 
+type egressPrivateExceptionSource interface {
+	SnapshotRules() []egresspolicy.PrivateExceptionRule
+}
+
+type egressInstanceResolver interface {
+	GetByID(id int) (*models.Instance, error)
+	FindByPodIP(podIP string) (*models.Instance, error)
+}
+
+type egressIdentityContextKey struct{}
+
+type egressRequestIdentity struct {
+	InstanceID *int
+	UserID     *int
+}
+
 // EgressProxyHandler provides a minimal forward proxy for ordinary HTTP/HTTPS traffic.
 type EgressProxyHandler struct {
-	transport        *http.Transport
-	dialContext      func(context.Context, string, string) (net.Conn, error)
-	policy           egresspolicy.Policy
-	audit            services.AuditEventService
-	previewRepo      teamPreviewRepository
-	previewSecrets   teamPreviewSecretReader
-	workspaceRoot    string
-	namespaceForUser func(int) string
-	previewHosts     map[string]struct{}
+	transport          *http.Transport
+	dialContext        func(context.Context, string, string) (net.Conn, error)
+	baseDialContext    func(context.Context, string, string) (net.Conn, error)
+	lookupNetIP        egresspolicy.LookupNetIPFunc
+	privateExceptions  egressPrivateExceptionSource
+	instances          egressInstanceResolver
+	policy             egresspolicy.Policy
+	audit              services.AuditEventService
+	previewRepo        teamPreviewRepository
+	previewSecrets     teamPreviewSecretReader
+	workspaceRoot      string
+	namespaceForUser   func(int) string
+	previewHosts       map[string]struct{}
 }
 
 // NewEgressProxyHandler creates a new egress proxy handler.
 func NewEgressProxyHandler(audit services.AuditEventService, options ...EgressProxyOption) *EgressProxyHandler {
-	safeDialer := egresspolicy.NewSafeDialer()
-	handler := &EgressProxyHandler{
-		transport: &http.Transport{
-			Proxy:                 nil,
-			DialContext:           safeDialer.DialContext,
-			ForceAttemptHTTP2:     false,
-			MaxIdleConns:          100,
-			IdleConnTimeout:       90 * time.Second,
-			TLSHandshakeTimeout:   10 * time.Second,
-			ExpectContinueTimeout: 1 * time.Second,
-		},
-		dialContext:  safeDialer.DialContext,
-		policy:       egresspolicy.LoadFromEnv(),
-		audit:        audit,
-		previewHosts: map[string]struct{}{teamPreviewHost: {}},
+	baseDialer := net.Dialer{
+		Timeout:   30 * time.Second,
+		KeepAlive: 30 * time.Second,
 	}
+	handler := &EgressProxyHandler{
+		baseDialContext: baseDialer.DialContext,
+		policy:          egresspolicy.LoadFromEnv(),
+		audit:           audit,
+		previewHosts:    map[string]struct{}{teamPreviewHost: {}},
+	}
+	handler.transport = &http.Transport{
+		Proxy:                 nil,
+		DialContext:           handler.proxyDialContext,
+		ForceAttemptHTTP2:     false,
+		MaxIdleConns:          100,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+	}
+	handler.dialContext = handler.proxyDialContext
 	for _, option := range options {
 		if option != nil {
 			option(handler)
@@ -115,6 +139,14 @@ func WithTeamArtifactPreview(
 	}
 }
 
+// WithEgressPrivateExceptions wires private CIDR exception matching and instance identity lookup.
+func WithEgressPrivateExceptions(source egressPrivateExceptionSource, instances egressInstanceResolver) EgressProxyOption {
+	return func(handler *EgressProxyHandler) {
+		handler.privateExceptions = source
+		handler.instances = instances
+	}
+}
+
 // Handle proxies ordinary HTTP or HTTPS CONNECT traffic.
 func (h *EgressProxyHandler) Handle(c *gin.Context) {
 	if strings.EqualFold(c.Request.Method, http.MethodConnect) {
@@ -138,11 +170,20 @@ func (h *EgressProxyHandler) Handle(c *gin.Context) {
 		return
 	}
 
-	outReq := c.Request.Clone(c.Request.Context())
+	identity := h.resolveEgressIdentity(c)
+	reqCtx := context.WithValue(c.Request.Context(), egressIdentityContextKey{}, identity)
+	outReq := c.Request.Clone(reqCtx)
 	outReq.RequestURI = ""
 	removeHopHeaders(outReq.Header)
 
-	resp, err := h.transport.RoundTrip(outReq)
+	transport := h.transport
+	if transport == nil {
+		transport = &http.Transport{
+			Proxy:       nil,
+			DialContext: h.proxyDialContext,
+		}
+	}
+	resp, err := transport.RoundTrip(outReq)
 	if err != nil {
 		if errors.Is(err, egresspolicy.ErrUnsafeTarget) {
 			h.recordBlockedEgress(c, c.Request.URL.Host, err.Error())
@@ -173,11 +214,9 @@ func (h *EgressProxyHandler) handleConnect(c *gin.Context) {
 		return
 	}
 
-	dialContext := h.dialContext
-	if dialContext == nil {
-		dialContext = egresspolicy.NewSafeDialer().DialContext
-	}
-	upstreamConn, err := dialContext(c.Request.Context(), "tcp", target)
+	identity := h.resolveEgressIdentity(c)
+	reqCtx := context.WithValue(c.Request.Context(), egressIdentityContextKey{}, identity)
+	upstreamConn, err := h.proxyDialContext(reqCtx, "tcp", target)
 	if err != nil {
 		if errors.Is(err, egresspolicy.ErrUnsafeTarget) {
 			h.recordBlockedEgress(c, target, err.Error())
@@ -487,16 +526,70 @@ func setTeamPreviewHeaders(headers http.Header, contentType, mode string) {
 	)
 }
 
+func (h *EgressProxyHandler) proxyDialContext(ctx context.Context, network, address string) (net.Conn, error) {
+	identity, _ := ctx.Value(egressIdentityContextKey{}).(egressRequestIdentity)
+	var rules []egresspolicy.PrivateExceptionRule
+	if h.privateExceptions != nil {
+		rules = h.privateExceptions.SnapshotRules()
+	}
+	dial := h.baseDialContext
+	if dial == nil {
+		base := net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}
+		dial = base.DialContext
+	}
+	return egresspolicy.DialContextAllowingPrivateExceptions(
+		ctx,
+		network,
+		address,
+		rules,
+		identity.InstanceID,
+		identity.UserID,
+		h.lookupNetIP,
+		dial,
+	)
+}
+
+func (h *EgressProxyHandler) resolveEgressIdentity(c *gin.Context) egressRequestIdentity {
+	if instanceID := resolveEgressInstanceID(c); instanceID != nil {
+		identity := egressRequestIdentity{InstanceID: instanceID}
+		if h.instances != nil {
+			if instance, err := h.instances.GetByID(*instanceID); err == nil && instance != nil {
+				userID := instance.UserID
+				identity.UserID = &userID
+			}
+		}
+		return identity
+	}
+	if h.instances == nil || c == nil || c.Request == nil {
+		return egressRequestIdentity{}
+	}
+	host, _, err := net.SplitHostPort(strings.TrimSpace(c.Request.RemoteAddr))
+	if err != nil {
+		host = strings.TrimSpace(c.Request.RemoteAddr)
+	}
+	host = strings.Trim(host, "[]")
+	if host == "" {
+		return egressRequestIdentity{}
+	}
+	instance, err := h.instances.FindByPodIP(host)
+	if err != nil || instance == nil {
+		return egressRequestIdentity{}
+	}
+	instanceID := instance.ID
+	userID := instance.UserID
+	return egressRequestIdentity{InstanceID: &instanceID, UserID: &userID}
+}
+
 func (h *EgressProxyHandler) recordBlockedEgress(c *gin.Context, host, reason string) {
 	if h.audit == nil {
 		return
 	}
-	instanceID := resolveEgressInstanceID(c)
+	identity := h.resolveEgressIdentity(c)
 	remoteAddr := strings.TrimSpace(c.Request.RemoteAddr)
 	message := fmt.Sprintf("Blocked egress to %s (%s) from %s", host, reason, remoteAddr)
 	if err := h.audit.RecordEvent(&models.AuditEvent{
 		TraceID:      fmt.Sprintf("egress_%d", time.Now().UnixNano()),
-		InstanceID:   instanceID,
+		InstanceID:   identity.InstanceID,
 		EventType:    "egress.llm.blocked",
 		TrafficClass: models.TrafficClassGenericEgress,
 		Severity:     models.AuditSeverityWarn,

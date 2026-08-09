@@ -485,6 +485,10 @@ func (r *runtimeAgentHandlerInstanceRepo) GetByID(id int) (*models.Instance, err
 	return nil, nil
 }
 
+func (r *runtimeAgentHandlerInstanceRepo) FindByPodIP(string) (*models.Instance, error) {
+	return nil, nil
+}
+
 func (r *runtimeAgentHandlerInstanceRepo) GetByAccessToken(accessToken string) (*models.Instance, error) {
 	return nil, nil
 }

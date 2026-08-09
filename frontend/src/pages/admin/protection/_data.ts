@@ -27,7 +27,7 @@ export type ProtectionScenario = {
 export const CATEGORIES: ProtectionCategory[] = [
   { id: 'overview', code: '总览', label: '总览', labelKey: 'secplane.protection.category.overview', sub: 'OVERVIEW', path: '/admin/secplane', color: '#dc2626' },
   { id: 'cat-1', code: '1', label: '智能体运行时安全', labelKey: 'secplane.protection.category.runtime', sub: 'RUNTIME', path: '/admin/secplane/runtime', color: '#dc2626', count: 6 },
-  { id: 'cat-4', code: '2', label: '数据与组件可信', labelKey: 'secplane.protection.category.trust', sub: 'TRUST', path: '/admin/secplane/cat-trust', color: '#6b21a8', count: 1 },
+  { id: 'cat-4', code: '2', label: '数据与组件可信', labelKey: 'secplane.protection.category.trust', sub: 'TRUST', path: '/admin/secplane/cat-trust', color: '#6b21a8', count: 2 },
   { id: 'cat-2', code: '3', label: '统一身份与权限', labelKey: 'secplane.protection.category.identity', sub: 'IDENTITY', path: '/admin/secplane/cat-identity', color: '#1d4ed8', count: 1 },
   { id: 'cat-6', code: '4', label: '环境隔离与安全增强', labelKey: 'secplane.protection.category.isolate', sub: 'ISOLATE', path: '/admin/secplane/cat-isolate', color: '#0f766e', count: 2 },
   { id: 'cat-5', code: '5', label: '监管与运营治理', labelKey: 'secplane.protection.category.govern', sub: 'GOVERN', path: '/admin/secplane/cat-govern', color: '#b45309', count: 2 },
@@ -45,6 +45,7 @@ export const SCENARIOS: ProtectionScenario[] = [
   { id: 'g', code: 'G', label: '人因审批', subtitle: '高风险操作审批回路', path: '/admin/secplane/runtime/approval', cat: 'cat-1' },
   { id: 'h', code: 'H', label: '出站治理', subtitle: '智能体出站白名单+TLS', labelKey: 'secplane.protection.category.scenarioH', subtitleKey: 'secplane.protection.category.scenarioHSub', path: '/admin/secplane/trust/outbound', cat: 'cat-2' },
   { id: 'sk', code: 'SK', label: 'SKILL 技能扫描', subtitle: '技能仓库扫描 / 报告 / Scanner 配置', labelKey: 'secplane.protection.category.scenarioSK', subtitleKey: 'secplane.protection.category.scenarioSKSub', path: '/admin/security', cat: 'cat-4' },
+  { id: 'ep', code: 'EP', label: 'Egress 私网例外', subtitle: 'CIDR+端口私网放行（按用户/实例）', labelKey: 'secplane.protection.category.scenarioEP', subtitleKey: 'secplane.protection.category.scenarioEPSub', path: '/admin/secplane/trust/egress-private', cat: 'cat-4' },
   { id: 'i', code: 'I', label: '应急熔断', subtitle: '主机/实例熔断+双人复核', labelKey: 'secplane.protection.category.scenarioI', subtitleKey: 'secplane.protection.category.scenarioISub', path: '/admin/secplane/govern/breaker', cat: 'cat-5' },
   { id: 'j', code: 'J', label: '全链路审计', subtitle: '事件流聚合与回溯', labelKey: 'secplane.protection.category.scenarioJ', subtitleKey: 'secplane.protection.category.scenarioJSub', path: '/admin/secplane/govern/audit', cat: 'cat-5' },
   { id: 'l', code: 'L', label: '宿主加固', subtitle: '主机防护 + 勒索防护 + 入侵检测 + 合规检测', labelKey: 'secplane.protection.category.scenarioL', subtitleKey: 'secplane.protection.category.scenarioLSub', path: '/admin/secplane/isolate/host', cat: 'cat-6' },

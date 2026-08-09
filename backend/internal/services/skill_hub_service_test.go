@@ -343,6 +343,7 @@ func (r *importTestInstanceRepo) GetByID(id int) (*models.Instance, error) {
 	}
 	return nil, nil
 }
+func (r *importTestInstanceRepo) FindByPodIP(string) (*models.Instance, error) { return nil, nil }
 func (r *importTestInstanceRepo) GetByAccessToken(string) (*models.Instance, error) { panic("not used") }
 func (r *importTestInstanceRepo) GetByAgentBootstrapToken(string) (*models.Instance, error) {
 	panic("not used")

@@ -14,6 +14,9 @@ type stubGovernanceInstanceRepo struct {
 }
 
 func (s *stubGovernanceInstanceRepo) Create(*models.Instance) error { panic("not used") }
+func (s *stubGovernanceInstanceRepo) FindByPodIP(string) (*models.Instance, error) {
+	return nil, nil
+}
 func (s *stubGovernanceInstanceRepo) GetByID(int) (*models.Instance, error) {
 	panic("not used")
 }

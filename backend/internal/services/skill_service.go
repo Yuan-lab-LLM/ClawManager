@@ -18,6 +18,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"clawreef/internal/models"
 	"clawreef/internal/repository"
@@ -210,6 +212,7 @@ type SkillService interface {
 	SaveBackInstanceSkillToLibrary(actorUserID int, actorRole string, instanceID, skillID int) (*SkillPayload, error)
 	SaveForeignInstanceSkillToMyLibrary(actorUserID int, actorRole string, instanceID, skillID int) (*SkillPayload, error)
 	PublishSkillAsNew(actorUserID int, actorRole string, skillID int, tagIDs []int) (*SkillPayload, error)
+	GetSkillMarkdown(actorUserID int, actorRole string, skillID int) (string, error)
 	RetrySkillPackageCollection(actorUserID int, actorRole string, instanceID, skillID int) error
 	ListAttachableSkills(actorUserID int, actorRole string) ([]SkillPayload, error)
 	ImportHubArchive(ctx context.Context, userID int, fileHeader *multipart.FileHeader) ([]SkillPayload, error)
@@ -1881,20 +1884,27 @@ func flattenSingleTopLevelDir(files map[string][]byte) map[string][]byte {
 	return flattened
 }
 
+const skillKeyMaxRunes = 120
+
 func sanitizeSkillKey(value string) string {
 	value = strings.ToLower(strings.TrimSpace(value))
 	var builder strings.Builder
 	for _, r := range value {
 		switch {
-		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
-			builder.WriteRune(r)
 		case r == '-' || r == '_' || r == ' ' || r == '.':
 			builder.WriteRune('-')
+		case unicode.IsLetter(r) || unicode.IsDigit(r):
+			builder.WriteRune(r)
 		}
 	}
 	result := strings.Trim(builder.String(), "-")
 	for strings.Contains(result, "--") {
 		result = strings.ReplaceAll(result, "--", "-")
+	}
+	if utf8.RuneCountInString(result) > skillKeyMaxRunes {
+		runes := []rune(result)
+		result = string(runes[:skillKeyMaxRunes])
+		result = strings.Trim(result, "-")
 	}
 	return result
 }

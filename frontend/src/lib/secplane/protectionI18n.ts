@@ -234,6 +234,9 @@ export const protectionTranslations: Record<Locale, TranslationTree> = {
       // scenario SK (SKILL Scan)
       scenarioSK: 'SKILL Scan',
       scenarioSKSub: 'Skill repo scanning / reporting / Scanner configuration',
+      // scenario EP (Egress Private Exceptions)
+      scenarioEP: 'Egress Private Exceptions',
+      scenarioEPSub: 'CIDR+port private allowlist by user/instance',
       // cat-2 stats
       cat2Stat1Label: 'Scenarios',
       cat2Stat1Sub: 'Identity & Access',
@@ -513,6 +516,9 @@ export const protectionTranslations: Record<Locale, TranslationTree> = {
       // scenario SK (SKILL Scan)
       scenarioSK: 'SKILL 技能扫描',
       scenarioSKSub: '技能仓库扫描 / 报告 / Scanner 配置',
+      // scenario EP (Egress 私网例外)
+      scenarioEP: 'Egress 私网例外',
+      scenarioEPSub: 'CIDR+端口私网放行（按用户/实例）',
       // cat-2 stats
       cat2Stat1Label: '场景数',
       cat2Stat1Sub: '统一身份与权限',
@@ -789,6 +795,8 @@ export const protectionTranslations: Record<Locale, TranslationTree> = {
       // scenario SK (SKILL Scan)
       scenarioSK: 'SKILLスキャン',
       scenarioSKSub: 'スキルリポジトリスキャン / レポート / スキャナー設定',
+      scenarioEP: 'Egress プライベート例外',
+      scenarioEPSub: 'ユーザー/インスタンス別の CIDR+ポート許可',
       // cat-2 stats
       cat2Stat1Label: 'シナリオ数',
       cat2Stat1Sub: 'アイデンティティとアクセス',
@@ -1065,6 +1073,8 @@ export const protectionTranslations: Record<Locale, TranslationTree> = {
       // scenario SK (SKILL Scan)
       scenarioSK: 'SKILL 스캔',
       scenarioSKSub: '스킬 저장소 스캔 / 보고서 / 스캐너 설정',
+      scenarioEP: 'Egress 사설망 예외',
+      scenarioEPSub: '사용자/인스턴스별 CIDR+포트 허용',
       // cat-2 stats
       cat2Stat1Label: '시나리오 수',
       cat2Stat1Sub: 'ID 및 액세스',
@@ -1341,6 +1351,8 @@ export const protectionTranslations: Record<Locale, TranslationTree> = {
       // scenario SK (SKILL Scan)
       scenarioSK: 'SKILL-Scan',
       scenarioSKSub: 'Skill-Repository-Scanning / Berichte / Scanner-Konfiguration',
+      scenarioEP: 'Egress-Privatnetz-Ausnahmen',
+      scenarioEPSub: 'CIDR+Port-Freigabe nach Benutzer/Instanz',
       // cat-2 stats
       cat2Stat1Label: 'Szenarien',
       cat2Stat1Sub: 'Identität und Zugriff',

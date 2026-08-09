@@ -1048,6 +1048,10 @@ const skillHubTranslations: Record<Locale, TranslationTree> = {
     saveToMyLibraryFailed: "Failed to save skill to your library.",
     alreadyInLibrary: "In Skill Library",
     versionLabel: "v{version}",
+    summaryNone: "No summary yet",
+    summaryDetail: "Details",
+    summaryEmptySection: "None",
+    skillMdTitle: "SKILL.md",
     configCenterHint: "Upload skill packages here, then publish them from Skill Hub.",
     importConflict: {
       title: "Duplicate skill detected",
@@ -1069,6 +1073,7 @@ const skillHubTranslations: Record<Locale, TranslationTree> = {
       updateTags: "Failed to update tags",
       download: "Failed to download skill",
       tagsRequired: "Select at least one tag",
+      loadSkillMd: "Failed to load SKILL.md",
     },
     notices: {
       published: "Skill published to hub",
@@ -1156,6 +1161,10 @@ const skillHubTranslations: Record<Locale, TranslationTree> = {
     saveToMyLibraryFailed: "保存到我的库失败。",
     alreadyInLibrary: "已在 Skill 库",
     versionLabel: "v{version}",
+    summaryNone: "暂无简介",
+    summaryDetail: "详情",
+    summaryEmptySection: "暂无",
+    skillMdTitle: "SKILL.md",
     configCenterHint: "可在此上传 Skill 包，然后前往 Skill Hub 发布。",
     importConflict: {
       title: "检测到同名 Skill",
@@ -1177,6 +1186,7 @@ const skillHubTranslations: Record<Locale, TranslationTree> = {
       updateTags: "更新标签失败",
       download: "下载失败",
       tagsRequired: "请至少选择一个标签",
+      loadSkillMd: "加载 SKILL.md 失败",
     },
     notices: {
       published: "已发布到 Hub",
@@ -1262,6 +1272,10 @@ const skillHubTranslations: Record<Locale, TranslationTree> = {
     saveToMyLibraryFailed: "マイライブラリへの保存に失敗しました。",
     alreadyInLibrary: "Skill ライブラリにあります",
     versionLabel: "v{version}",
+    summaryNone: "概要なし",
+    summaryDetail: "詳細",
+    summaryEmptySection: "なし",
+    skillMdTitle: "SKILL.md",
     configCenterHint: "ここで Skill パッケージをアップロードし、Skill Hub から公開してください。",
     importConflict: {
       title: "同名 Skill を検出",
@@ -1283,6 +1297,7 @@ const skillHubTranslations: Record<Locale, TranslationTree> = {
       updateTags: "タグの更新に失敗しました",
       download: "ダウンロードに失敗しました",
       tagsRequired: "タグを1つ以上選択してください",
+      loadSkillMd: "SKILL.md の読み込みに失敗しました",
     },
     notices: {
       published: "Hub に公開しました",
@@ -1368,6 +1383,10 @@ const skillHubTranslations: Record<Locale, TranslationTree> = {
     saveToMyLibraryFailed: "내 라이브러리 저장에 실패했습니다.",
     alreadyInLibrary: "Skill 라이브러리에 있음",
     versionLabel: "v{version}",
+    summaryNone: "요약 없음",
+    summaryDetail: "상세",
+    summaryEmptySection: "없음",
+    skillMdTitle: "SKILL.md",
     configCenterHint: "여기서 Skill 패키지를 업로드한 뒤 Skill Hub에서 게시하세요.",
     importConflict: {
       title: "동일 이름 Skill 감지",
@@ -1389,6 +1408,7 @@ const skillHubTranslations: Record<Locale, TranslationTree> = {
       updateTags: "태그 업데이트 실패",
       download: "다운로드 실패",
       tagsRequired: "태그를 하나 이상 선택하세요",
+      loadSkillMd: "SKILL.md 로드 실패",
     },
     notices: {
       published: "Hub에 게시됨",
@@ -1474,6 +1494,10 @@ const skillHubTranslations: Record<Locale, TranslationTree> = {
     saveToMyLibraryFailed: "Speichern in meine Bibliothek fehlgeschlagen.",
     alreadyInLibrary: "In Skill-Bibliothek",
     versionLabel: "v{version}",
+    summaryNone: "Keine Kurzbeschreibung",
+    summaryDetail: "Details",
+    summaryEmptySection: "Keine",
+    skillMdTitle: "SKILL.md",
     configCenterHint: "Laden Sie Skill-Pakete hier hoch und veröffentlichen Sie sie im Skill Hub.",
     importConflict: {
       title: "Doppelter Skill erkannt",
@@ -1495,6 +1519,7 @@ const skillHubTranslations: Record<Locale, TranslationTree> = {
       updateTags: "Tags konnten nicht aktualisiert werden",
       download: "Download fehlgeschlagen",
       tagsRequired: "Mindestens ein Tag auswählen",
+      loadSkillMd: "SKILL.md konnte nicht geladen werden",
     },
     notices: {
       published: "Im Hub veröffentlicht",

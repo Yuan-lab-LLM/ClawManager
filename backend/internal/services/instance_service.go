@@ -753,6 +753,10 @@ func (s *instanceService) create(userID int, req CreateInstanceRequest, validate
 }
 
 func (s *instanceService) createV2Instance(ctx context.Context, userID int, req CreateInstanceRequest, runtimeType string, environmentOverridesJSON *string) (*models.Instance, error) {
+	if _, err := s.resolveGatewayModelInjection(); err != nil {
+		return nil, err
+	}
+
 	now := time.Now()
 	workspaceRoot := s.runtimeWorkspaceRoot()
 	instance := &models.Instance{

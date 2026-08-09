@@ -541,3 +541,35 @@ func splitTestPath(value string) []string {
 	}
 	return result
 }
+
+func TestSanitizeSkillKeyKeepsUnicodeLetters(t *testing.T) {
+	got := sanitizeSkillKey("股票价值投资分析")
+	if got != "股票价值投资分析" {
+		t.Fatalf("sanitizeSkillKey(chinese) = %q, want chinese key", got)
+	}
+
+	// Mixed Chinese + ASCII keeps both; no longer collapses to only "top20".
+	got = sanitizeSkillKey("股票成交额TOP20")
+	if got != "股票成交额top20" {
+		t.Fatalf("sanitizeSkillKey(mixed) = %q, want 股票成交额top20", got)
+	}
+
+	if sanitizeSkillKey("My Skill") != "my-skill" {
+		t.Fatalf("sanitizeSkillKey(ascii) = %q, want my-skill", sanitizeSkillKey("My Skill"))
+	}
+
+	got = sanitizeSkillKey("../evil/name")
+	if got != "evilname" {
+		t.Fatalf("sanitizeSkillKey(path) = %q, want evilname", got)
+	}
+	got = sanitizeSkillKey(`a/b\c:d*e?f"g<h>i|j`)
+	if strings.ContainsAny(got, `/\:*?"<>|`) || got == "" {
+		t.Fatalf("sanitizeSkillKey(dangerous) = %q, want safe non-empty key", got)
+	}
+
+	long := strings.Repeat("技", skillKeyMaxRunes+10)
+	got = sanitizeSkillKey(long)
+	if len([]rune(got)) != skillKeyMaxRunes {
+		t.Fatalf("sanitizeSkillKey(long) rune count = %d, want %d", len([]rune(got)), skillKeyMaxRunes)
+	}
+}

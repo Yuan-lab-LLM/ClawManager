@@ -18,6 +18,7 @@ func TestInstanceServiceCreateV2CreatesWorkspaceOnly(t *testing.T) {
 	service := &instanceService{
 		instanceRepo:  instanceRepo,
 		quotaRepo:     v2LifecycleQuotaRepo{},
+		llmModelRepo:  &stubLLMModelRepository{active: []models.LLMModel{{DisplayName: "auto"}}},
 		workspaceRoot: workspaceRoot,
 	}
 
@@ -69,6 +70,34 @@ func TestInstanceServiceCreateV2CreatesWorkspaceOnly(t *testing.T) {
 	}
 }
 
+func TestInstanceServiceCreateV2RequiresActiveModels(t *testing.T) {
+	workspaceRoot := strings.ReplaceAll(t.TempDir(), "\\", "/")
+	instanceRepo := newV2LifecycleInstanceRepo()
+	service := &instanceService{
+		instanceRepo:  instanceRepo,
+		quotaRepo:     v2LifecycleQuotaRepo{},
+		llmModelRepo:  &stubLLMModelRepository{},
+		workspaceRoot: workspaceRoot,
+	}
+
+	_, err := service.Create(45, CreateInstanceRequest{
+		Name:      "Lite Without Models",
+		Type:      "openclaw",
+		Mode:      InstanceModeLite,
+		CPUCores:  2,
+		MemoryGB:  4,
+		DiskGB:    20,
+		OSType:    "openclaw",
+		OSVersion: "latest",
+	})
+	if err == nil || !strings.Contains(err.Error(), "no active models are configured") {
+		t.Fatalf("Create error = %v, want no active models are configured", err)
+	}
+	if len(instanceRepo.created) != 0 {
+		t.Fatalf("created instance records = %d, want 0", len(instanceRepo.created))
+	}
+}
+
 func TestInstanceServiceCreateV2PersistsAgentTokensAndSnapshot(t *testing.T) {
 	workspaceRoot := strings.ReplaceAll(t.TempDir(), "\\", "/")
 	instanceRepo := newV2LifecycleInstanceRepo()
@@ -78,6 +107,7 @@ func TestInstanceServiceCreateV2PersistsAgentTokensAndSnapshot(t *testing.T) {
 	service := &instanceService{
 		instanceRepo:          instanceRepo,
 		quotaRepo:             v2LifecycleQuotaRepo{},
+		llmModelRepo:          &stubLLMModelRepository{active: []models.LLMModel{{DisplayName: "auto"}}},
 		workspaceRoot:         workspaceRoot,
 		openClawConfigService: configService,
 	}
@@ -198,6 +228,7 @@ func TestInstanceServiceCreateLiteSkipsPerInstanceResourceQuota(t *testing.T) {
 	service := &instanceService{
 		instanceRepo:  instanceRepo,
 		quotaRepo:     fixedV2QuotaRepo{cpu: 1, memory: 1, storage: 10, gpu: 0},
+		llmModelRepo:  &stubLLMModelRepository{active: []models.LLMModel{{DisplayName: "auto"}}},
 		workspaceRoot: workspaceRoot,
 	}
 
@@ -987,6 +1018,10 @@ func (r *v2LifecycleInstanceRepo) Create(instance *models.Instance) error {
 
 func (r *v2LifecycleInstanceRepo) GetByID(id int) (*models.Instance, error) {
 	return r.byID[id], nil
+}
+
+func (r *v2LifecycleInstanceRepo) FindByPodIP(string) (*models.Instance, error) {
+	return nil, nil
 }
 
 func (r *v2LifecycleInstanceRepo) GetByAccessToken(string) (*models.Instance, error) {

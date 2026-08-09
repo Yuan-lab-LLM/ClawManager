@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"testing"
 
 	"clawreef/internal/models"
@@ -17,6 +18,59 @@ func TestPreviewImportDirectoryNone(t *testing.T) {
 	}
 	if item.ConflictType != skillImportConflictNone {
 		t.Fatalf("conflict_type = %q, want %q", item.ConflictType, skillImportConflictNone)
+	}
+}
+
+func TestPreviewImportDirectoryAcceptsChineseName(t *testing.T) {
+	svc := &skillService{repo: &skillRepoStub{skills: map[int]*models.Skill{}}}
+	item, err := svc.previewImportDirectory(1, extractedSkillDirectory{
+		Name:  "股票价值投资分析",
+		Files: map[string][]byte{"SKILL.md": []byte("# 股票价值投资分析")},
+	})
+	if err != nil {
+		t.Fatalf("previewImportDirectory() error = %v", err)
+	}
+	if item.SkillKey != "股票价值投资分析" {
+		t.Fatalf("SkillKey = %q, want 股票价值投资分析", item.SkillKey)
+	}
+	if item.ConflictType != skillImportConflictNone {
+		t.Fatalf("conflict_type = %q, want %q", item.ConflictType, skillImportConflictNone)
+	}
+}
+
+func TestImportDirectoryWritesFrontmatterDescription(t *testing.T) {
+	stub := &skillRepoStub{skills: map[int]*models.Skill{}, blobs: map[int]*models.SkillBlob{}, versions: map[int]*models.SkillVersion{}}
+	svc := &skillService{repo: stub, storage: fakeObjectStorage{}, scanner: testSkillScanner{}}
+	dir := extractedSkillDirectory{
+		Name: "demo-skill",
+		Files: map[string][]byte{
+			"SKILL.md": []byte("---\nname: demo\ndescription: 从 frontmatter 读取\n---\n# Demo\n"),
+		},
+	}
+	result, err := svc.importDirectoryWithOptions(context.Background(), 1, dir, "demo.zip", ImportDirectoryOptions{Action: skillImportActionAuto})
+	if err != nil {
+		t.Fatalf("importDirectoryWithOptions() error = %v", err)
+	}
+	if result.Skill.Description == nil || *result.Skill.Description != "从 frontmatter 读取" {
+		t.Fatalf("Description = %#v, want frontmatter text", result.Skill.Description)
+	}
+}
+
+func TestImportDirectoryWithoutDescriptionSucceeds(t *testing.T) {
+	stub := &skillRepoStub{skills: map[int]*models.Skill{}, blobs: map[int]*models.SkillBlob{}, versions: map[int]*models.SkillVersion{}}
+	svc := &skillService{repo: stub, storage: fakeObjectStorage{}, scanner: testSkillScanner{}}
+	dir := extractedSkillDirectory{
+		Name: "no-desc-skill",
+		Files: map[string][]byte{
+			"SKILL.md": []byte("---\nname: no-desc\n---\n# Body\n"),
+		},
+	}
+	result, err := svc.importDirectoryWithOptions(context.Background(), 1, dir, "no-desc.zip", ImportDirectoryOptions{Action: skillImportActionAuto})
+	if err != nil {
+		t.Fatalf("importDirectoryWithOptions() error = %v", err)
+	}
+	if result.Skill.Description != nil {
+		t.Fatalf("Description = %#v, want nil", result.Skill.Description)
 	}
 }
 

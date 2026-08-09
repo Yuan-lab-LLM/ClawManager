@@ -1110,7 +1110,8 @@ func (s *RuntimeScheduler) createGatewayOnPodWithPortFallback(
 		return fmt.Errorf("runtime gateway start is not prepared")
 	}
 	excludedPorts := map[int]struct{}{}
-	maxAttempts := (s.gatewayPortEnd - s.gatewayPortStart + 1) / maxInt(RuntimeGatewayPortsPerInstance, 1)
+	blockSize := RuntimeGatewayPortBlockSize(runtimeType)
+	maxAttempts := (s.gatewayPortEnd - s.gatewayPortStart + 1) / maxInt(blockSize, 1)
 	if maxAttempts <= 0 {
 		maxAttempts = 1
 	}
@@ -1165,7 +1166,7 @@ func (s *RuntimeScheduler) reserveGatewayPortExcludingPorts(
 	if s == nil || s.bindingRepo == nil {
 		return nil, fmt.Errorf("runtime scheduler binding repository is not configured")
 	}
-	blockSize := RuntimeGatewayPortsPerInstance
+	blockSize := RuntimeGatewayPortBlockSize(runtimeType)
 	if blockSize <= 0 {
 		blockSize = 1
 	}
