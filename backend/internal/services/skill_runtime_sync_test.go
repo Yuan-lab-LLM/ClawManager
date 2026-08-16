@@ -345,6 +345,7 @@ func TestSyncAgentSkillsKeepsHubVersionBaselineWhenInstanceCopyChanges(t *testin
 	versionID := 1
 	stub := &provenanceCaptureRepoStub{
 		capturingSkillRepoStub: capturingSkillRepoStub{
+			nextSkillID: 1,
 			skillRepoStub: skillRepoStub{
 				skills: map[int]*models.Skill{
 					10: {ID: 10, UserID: 1, SkillKey: "customer-manager", Name: "Customer Manager", SourceType: skillSourceUploaded, Status: skillStatusActive, CurrentVersionID: &versionID},
