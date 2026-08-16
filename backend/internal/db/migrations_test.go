@@ -30,7 +30,6 @@ UPDATE demo SET note = "a;quoted" WHERE id = 1;
 		t.Fatalf("unexpected statements:\nwant: %#v\ngot: %#v", want, got)
 	}
 }
-
 func TestMigration023IsEmbedded(t *testing.T) {
 	files, err := embeddedMigrations.ReadDir("migrations")
 	if err != nil {
@@ -236,27 +235,6 @@ func TestMigration045AddsOpenCodeInstanceType(t *testing.T) {
 	} {
 		if !strings.Contains(sql, required) {
 			t.Fatalf("migration 045 must contain %s", required)
-		}
-	}
-}
-
-func TestMigration046AddsCodexAndClaudeCodeInstanceTypes(t *testing.T) {
-	raw, err := embeddedMigrations.ReadFile("migrations/046_add_codex_and_claude_code_instance_types.sql")
-	if err != nil {
-		t.Fatalf("read migration 046: %v", err)
-	}
-	sql := string(raw)
-	for _, required := range []string{
-		"MODIFY COLUMN type ENUM",
-		"'codex'",
-		"'claude-code'",
-		"Codex Pro",
-		"Claude Code Pro",
-		"agentsruntime/codex:latest",
-		"agentsruntime/claude-code:latest",
-	} {
-		if !strings.Contains(sql, required) {
-			t.Fatalf("migration 046 must contain %s", required)
 		}
 	}
 }

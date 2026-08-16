@@ -324,7 +324,7 @@ const InstanceSkillHubPanel: React.FC<InstanceSkillHubPanelProps> = ({
   const { t, locale } = useI18n();
   const { user } = useAuth();
   const instanceId = instance.id;
-  const skillHubUnsupported = instance.type.trim().toLowerCase() === "opencode";
+  const skillHubUnsupported = false;
 
   const [skillLoading, setSkillLoading] = useState(false);
   const [skillError, setSkillError] = useState<string | null>(null);
@@ -512,7 +512,7 @@ const InstanceSkillHubPanel: React.FC<InstanceSkillHubPanelProps> = ({
   const usesWorkspaceSkillSync =
     isLiteInstance ||
     (Boolean(instance.workspace_path?.trim()) &&
-      (instance.type === "hermes" || instance.type === "openclaw"));
+      (instance.type === "hermes" || instance.type === "openclaw" || instance.type === "opencode"));
 
   const handleInstallHubSkill = async (skillId: number) => {
     if (!usesWorkspaceSkillSync) {

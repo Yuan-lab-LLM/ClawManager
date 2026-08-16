@@ -340,7 +340,7 @@ func responseInputMessages(input interface{}) []aigateway.ChatMessage {
 			if role == "" {
 				role = "user"
 			}
-			// Codex uses the Responses API's developer role for its managed
+			// Responses API requests may use the developer role for managed
 			// instructions. OpenAI-compatible providers behind ClawManager
 			// commonly only accept the Chat Completions system role.
 			if role == "developer" {

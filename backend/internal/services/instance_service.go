@@ -168,7 +168,7 @@ func (s *instanceService) ValidateCreateRequests(userID int, requests []CreateIn
 type CreateInstanceRequest struct {
 	Name                 string              `json:"name" validate:"required,min=3,max=50"`
 	Description          *string             `json:"description,omitempty"`
-	Type                 string              `json:"type" validate:"required,oneof=openclaw ubuntu debian centos custom webtop hermes opencode codex claude-code"`
+	Type                 string              `json:"type" validate:"required,oneof=openclaw ubuntu debian centos custom webtop hermes opencode"`
 	Mode                 string              `json:"mode" validate:"omitempty,oneof=lite pro"`
 	InstanceMode         string              `json:"instance_mode" validate:"omitempty,oneof=lite pro"`
 	RuntimeType          string              `json:"runtime_type" validate:"omitempty,oneof=gateway desktop shell"`
@@ -258,9 +258,8 @@ type gatewayTokenAliasRecorder interface {
 	UpsertGatewayTokenAlias(ctx context.Context, instanceID int, accessToken string, expiresAt time.Time) error
 }
 type gatewayModelInjection struct {
-	defaultModel            string
-	codingAgentDefaultModel string
-	modelsJSON              string
+	defaultModel string
+	modelsJSON   string
 }
 
 type InstanceServiceOption func(*instanceService)
@@ -337,9 +336,6 @@ func (s *instanceService) create(userID int, req CreateInstanceRequest, validate
 	}
 
 	instanceMode := resolveCreateInstanceMode(req)
-	if requiresProInstanceMode(req.Type) && instanceMode != InstanceModePro {
-		return nil, fmt.Errorf("%s is only available in pro mode", req.Type)
-	}
 	modeRuntimeType, _ := RuntimeTypeForInstanceMode(instanceMode)
 	if !hasExplicitCreateInstanceMode(req) && normalizeInstanceRuntimeType(req.RuntimeType) == RuntimeBackendShell {
 		modeRuntimeType = RuntimeBackendShell
@@ -1044,9 +1040,7 @@ func (s *instanceService) securityModeForInstance(instanceType string) k8s.PodSe
 		return k8s.PodSecurityPrivileged
 	}
 	if strings.EqualFold(strings.TrimSpace(instanceType), "openclaw") ||
-		strings.EqualFold(strings.TrimSpace(instanceType), "opencode") ||
-		strings.EqualFold(strings.TrimSpace(instanceType), RuntimeTypeCodex) ||
-		strings.EqualFold(strings.TrimSpace(instanceType), RuntimeTypeClaudeCode) {
+		strings.EqualFold(strings.TrimSpace(instanceType), "opencode") {
 		return k8s.PodSecurityChromiumCompat
 	}
 	return k8s.PodSecurityDefault
@@ -1130,21 +1124,64 @@ func (s *instanceService) buildGatewayEnv(instance *models.Instance) (map[string
 		"OPENAI_API_KEY":             token,
 		"OPENAI_MODEL":               modelInjection.defaultModel,
 	}
-	if (strings.EqualFold(strings.TrimSpace(instance.Type), RuntimeTypeCodex) || strings.EqualFold(strings.TrimSpace(instance.Type), RuntimeTypeClaudeCode)) && modelInjection.codingAgentDefaultModel != "" {
-		env["OPENAI_MODEL"] = modelInjection.codingAgentDefaultModel
-	}
 	if strings.EqualFold(strings.TrimSpace(instance.Type), RuntimeTypeOpenCode) {
 		env["OPENCODE_SERVER_PASSWORD"] = token
 		env["OPENCODE_SERVER_USERNAME"] = "opencode"
-	}
-	if strings.EqualFold(strings.TrimSpace(instance.Type), RuntimeTypeClaudeCode) {
-		// Claude Code uses the Anthropic Messages protocol. Its endpoint is the
-		// ClawManager compatibility route under the same governed gateway base.
-		env["ANTHROPIC_BASE_URL"] = baseURL
-		env["ANTHROPIC_API_KEY"] = token
-		env["ANTHROPIC_MODEL"] = env["OPENAI_MODEL"]
+		configContent, err := buildOpenCodeGatewayConfig(modelInjection.modelsJSON)
+		if err != nil {
+			return nil, fmt.Errorf("failed to build opencode gateway config: %w", err)
+		}
+		// The Lite runtime agent materializes this in the instance's persistent
+		// OpenCode config directory before it starts `opencode web`.  Keeping the
+		// credentials as env references ensures the generated file does not embed
+		// a user-managed provider or a direct external API key.
+		env["OPENCODE_CONFIG_CONTENT"] = configContent
 	}
 	return env, nil
+}
+
+// buildOpenCodeGatewayConfig translates ClawManager's active model catalogue
+// into OpenCode's custom-provider format. The gateway's "auto" model is always
+// included, so a newly-created Lite instance is usable even when the active
+// catalogue contains only aliases added after the runtime image was built.
+func buildOpenCodeGatewayConfig(modelsJSON string) (string, error) {
+	var modelIDs []string
+	if err := json.Unmarshal([]byte(modelsJSON), &modelIDs); err != nil {
+		return "", fmt.Errorf("invalid gateway model catalogue: %w", err)
+	}
+
+	models := make(map[string]map[string]string, len(modelIDs))
+	for _, modelID := range modelIDs {
+		modelID = strings.TrimSpace(modelID)
+		if modelID == "" {
+			continue
+		}
+		models[modelID] = map[string]string{"name": modelID}
+	}
+	if _, ok := models["auto"]; !ok {
+		models["auto"] = map[string]string{"name": "auto"}
+	}
+
+	config := map[string]interface{}{
+		"$schema": "https://opencode.ai/config.json",
+		"model":   "clawmanager/auto",
+		"provider": map[string]interface{}{
+			"clawmanager": map[string]interface{}{
+				"npm":  "@ai-sdk/openai-compatible",
+				"name": "ClawManager AI Gateway",
+				"options": map[string]string{
+					"baseURL": "{env:CLAWMANAGER_LLM_BASE_URL}",
+					"apiKey":  "{env:CLAWMANAGER_LLM_API_KEY}",
+				},
+				"models": models,
+			},
+		},
+	}
+	raw, err := json.Marshal(config)
+	if err != nil {
+		return "", err
+	}
+	return string(raw), nil
 }
 
 func (s *instanceService) BuildGatewayEnv(instance *models.Instance) (map[string]string, error) {
@@ -1248,7 +1285,7 @@ func (s *instanceService) buildAgentEnv(instance *models.Instance) (map[string]s
 
 func supportsManagedRuntimeIntegration(instanceType string) bool {
 	switch strings.ToLower(strings.TrimSpace(instanceType)) {
-	case "openclaw", "hermes", "opencode", "codex", "claude-code":
+	case "openclaw", "hermes", "opencode":
 		return true
 	default:
 		return false
@@ -1320,22 +1357,7 @@ func managedRuntimePersistentDir(instance *models.Instance) string {
 	if strings.EqualFold(instance.Type, "opencode") {
 		return "/config/.opencode"
 	}
-	if strings.EqualFold(instance.Type, RuntimeTypeCodex) {
-		return "/config/.codex"
-	}
-	if strings.EqualFold(instance.Type, RuntimeTypeClaudeCode) {
-		return "/config/.claude"
-	}
 	return persistentVolumeMountPath(instance)
-}
-
-func requiresProInstanceMode(instanceType string) bool {
-	switch strings.ToLower(strings.TrimSpace(instanceType)) {
-	case RuntimeTypeCodex, RuntimeTypeClaudeCode:
-		return true
-	default:
-		return false
-	}
 }
 func persistentVolumeMountPath(instance *models.Instance) string {
 	if instance == nil {
@@ -1351,7 +1373,37 @@ func persistentVolumeMountPath(instance *models.Instance) string {
 }
 
 func runtimeVolumeInitScripts(instanceType, mountPath string) []k8s.VolumeInitScript {
-	if !strings.EqualFold(strings.TrimSpace(instanceType), "hermes") || strings.TrimSpace(mountPath) != "/config" {
+	if strings.TrimSpace(mountPath) != "/config" {
+		return nil
+	}
+	if strings.EqualFold(strings.TrimSpace(instanceType), "opencode") {
+		return []k8s.VolumeInitScript{
+			{
+				Name:      "data",
+				MountPath: "/config",
+				// Some Webtop/Konsole builds do not provide a default profile.  In
+				// that state Konsole attempts to execute an empty command and shows
+				// a misleading warning before falling back to bash.  Persist an
+				// explicit profile for every OpenCode Pro desktop.
+				Script: `set -eu
+base="${CLAWMANAGER_VOLUME_PATH:-/config}"
+mkdir -p "$base/.config" "$base/.local/share/konsole"
+cat >"$base/.config/konsolerc" <<'EOF'
+[Desktop Entry]
+DefaultProfile=ClawManager.profile
+EOF
+cat >"$base/.local/share/konsole/ClawManager.profile" <<'EOF'
+[General]
+Command=/bin/bash
+Name=ClawManager Shell
+Parent=FALLBACK/
+EOF
+chmod 644 "$base/.config/konsolerc" "$base/.local/share/konsole/ClawManager.profile"
+chown -R 911:1001 "$base/.config" "$base/.local" || true`,
+			},
+		}
+	}
+	if !strings.EqualFold(strings.TrimSpace(instanceType), "hermes") {
 		return nil
 	}
 	return []k8s.VolumeInitScript{
@@ -1423,13 +1475,7 @@ func (s *instanceService) resolveGatewayModelInjection() (*gatewayModelInjection
 
 	return &gatewayModelInjection{
 		defaultModel: "auto",
-		codingAgentDefaultModel: func() string {
-			if len(modelsForInjection) > 1 {
-				return modelsForInjection[1]
-			}
-			return ""
-		}(),
-		modelsJSON: string(rawModels),
+		modelsJSON:   string(rawModels),
 	}, nil
 }
 

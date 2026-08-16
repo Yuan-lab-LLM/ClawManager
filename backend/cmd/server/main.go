@@ -172,6 +172,7 @@ func main() {
 		skillService,
 		externalAccessService,
 		aiObservabilityService,
+		services.NewInstanceShellService(runtimePodRepo, bindingRepo),
 		services.WithInstanceProxyRuntimeRepositories(instanceRepo, runtimePodRepo, bindingRepo),
 	)
 	systemSettingsHandler := handlers.NewSystemSettingsHandler(systemImageSettingService)

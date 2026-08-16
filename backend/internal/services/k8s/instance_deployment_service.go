@@ -13,6 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/util/retry"
 )
 
 const instanceDeploymentRestartedAtAnnotation = "clawmanager.io/restarted-at"
@@ -61,17 +62,29 @@ func (s *InstanceDeploymentService) EnsureDeployment(ctx context.Context, config
 		return nil, fmt.Errorf("instance deployment %s/%s selector mismatch; delete and recreate the deployment to change immutable selector", desired.Namespace, desired.Name)
 	}
 
-	updated := existing.DeepCopy()
-	if updated.Labels == nil {
-		updated.Labels = map[string]string{}
-	}
-	for key, value := range desired.Labels {
-		updated.Labels[key] = value
-	}
-	updated.Spec.Replicas = desired.Spec.Replicas
-	updated.Spec.Template = desired.Spec.Template
+	var result *appsv1.Deployment
+	updateErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		current, getErr := deployments.Get(ctx, desired.Name, metav1.GetOptions{})
+		if getErr != nil {
+			return getErr
+		}
+		if !reflect.DeepEqual(current.Spec.Selector, desired.Spec.Selector) {
+			return fmt.Errorf("instance deployment %s/%s selector mismatch; delete and recreate the deployment to change immutable selector", desired.Namespace, desired.Name)
+		}
 
-	result, updateErr := deployments.Update(ctx, updated, metav1.UpdateOptions{})
+		updated := current.DeepCopy()
+		if updated.Labels == nil {
+			updated.Labels = map[string]string{}
+		}
+		for key, value := range desired.Labels {
+			updated.Labels[key] = value
+		}
+		updated.Spec.Replicas = desired.Spec.Replicas
+		updated.Spec.Template = desired.Spec.Template
+
+		result, getErr = deployments.Update(ctx, updated, metav1.UpdateOptions{})
+		return getErr
+	})
 	if updateErr != nil {
 		return nil, fmt.Errorf("failed to update instance deployment %s/%s: %w", desired.Namespace, desired.Name, updateErr)
 	}
@@ -388,6 +401,16 @@ func buildInstanceDeploymentPodSpec(client *Client, config PodConfig, runtimeTyp
 			MountPath: mount.MountPath,
 			ReadOnly:  mount.ReadOnly,
 		})
+	}
+
+	// Keep Deployment-backed desktop instances consistent with the legacy pod
+	// path: layout/bootstrap scripts must run before the Webtop init process
+	// copies its default desktop profile into the persistent volume.
+	for index, initScript := range config.VolumeInitScripts {
+		if initScript.Name == "" || initScript.MountPath == "" || initScript.Script == "" {
+			continue
+		}
+		spec.InitContainers = append(spec.InitContainers, buildVolumeInitScriptContainer(index, config.Image, pullPolicy, initScript))
 	}
 
 	for index, fix := range config.VolumeOwnershipFixes {

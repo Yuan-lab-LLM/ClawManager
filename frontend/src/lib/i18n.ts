@@ -2448,14 +2448,6 @@ export const translations: Record<Locale, TranslationTree> = {
           label: "OpenCode Runtime",
           description: "Official OpenCode coding agent (Lite web / Pro desktop)",
         },
-        codex: {
-          label: "Codex",
-          description: "OpenAI Codex coding agent (Pro desktop)",
-        },
-        claudeCode: {
-          label: "Claude Code",
-          description: "Anthropic Claude Code agent (Pro desktop)",
-        },
         custom: {
           label: "Custom Image",
           description: "Use your own custom image",
@@ -3978,14 +3970,6 @@ export const translations: Record<Locale, TranslationTree> = {
         opencode: {
           label: "OpenCode Runtime",
           description: "官方 OpenCode 编码助手（Lite Web / Pro 桌面）",
-        },
-        codex: {
-          label: "Codex",
-          description: "OpenAI Codex 编码智能体（Pro 桌面）",
-        },
-        claudeCode: {
-          label: "Claude Code",
-          description: "Anthropic Claude Code 智能体（Pro 桌面）",
         },
         custom: {
           label: "自定义镜像",

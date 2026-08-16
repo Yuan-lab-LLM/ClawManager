@@ -30,8 +30,6 @@ function supportsWorkspace(instance: Instance) {
     instance.type === "openclaw" ||
     instance.type === "hermes" ||
     instance.type === "opencode" ||
-    instance.type === "codex" ||
-    instance.type === "claude-code" ||
     Boolean(instance.workspace_path)
   );
 }
@@ -44,8 +42,6 @@ function workspaceInitialPath(instance: Instance, isPro: boolean) {
   if (type === "opencode") {
     return isPro ? ".opencode" : "home/.opencode";
   }
-  if (type === "codex") return ".codex";
-  if (type === "claude-code") return ".claude";
   if (type === "openclaw" && !isPro) {
     return "home/.openclaw";
   }
@@ -59,10 +55,6 @@ function typeLabel(type: Instance["type"]) {
       ? "OpenClaw"
       : type === "opencode"
         ? "OpenCode"
-        : type === "codex"
-          ? "Codex"
-          : type === "claude-code"
-            ? "Claude Code"
         : type;
 }
 
@@ -194,7 +186,14 @@ const InstancePortalPage: React.FC = () => {
   const selectedInstanceId = selectedInstance?.id ?? null;
   const selectedInstanceStatus = selectedInstance?.status ?? null;
   const selectedRuntimeType = selectedInstance?.runtime_type ?? "desktop";
-  const isShellPortal = selectedRuntimeType === "shell";
+  // The Lite OpenCode web client is currently unreliable behind a prefixed
+  // reverse proxy. Use the official terminal UI instead; it connects directly
+  // to the same per-instance gateway and provider configuration.
+  const isShellPortal =
+    selectedRuntimeType === "shell" ||
+    (selectedInstance?.type === "opencode" &&
+      selectedInstance.instance_mode === "lite" &&
+      selectedRuntimeType === "gateway");
   const isProPortal = Boolean(
     selectedInstance && selectedInstance.instance_mode === "pro",
   );

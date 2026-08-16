@@ -110,10 +110,6 @@ function typeLabel(type: string) {
       ? "OpenClaw"
       : type === "opencode"
         ? "OpenCode"
-        : type === "codex"
-          ? "Codex"
-          : type === "claude-code"
-            ? "Claude Code"
         : type;
 }
 
@@ -136,8 +132,6 @@ function supportsWorkspace(instance: Instance) {
     instance.type === "openclaw" ||
     instance.type === "hermes" ||
     instance.type === "opencode" ||
-    instance.type === "codex" ||
-    instance.type === "claude-code" ||
     Boolean(instance.workspace_path)
   );
 }
@@ -362,6 +356,10 @@ const InstanceDetailPage: React.FC = () => {
     useState<DesktopStreamProfile | "">("");
   const [desktopStreamMessage, setDesktopStreamMessage] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
+  const [openCodeProjectRestartPending, setOpenCodeProjectRestartPending] =
+    useState(false);
+  const [openCodeProjectRestartSawTransition, setOpenCodeProjectRestartSawTransition] =
+    useState(false);
   const [skillPanelExpanded, setSkillPanelExpanded] = useState(() =>
     readPanelExpanded("skills", instanceId),
   );
@@ -476,6 +474,33 @@ const InstanceDetailPage: React.FC = () => {
       [instanceId],
     ),
   );
+
+  useEffect(() => {
+    if (!openCodeProjectRestartPending) {
+      return;
+    }
+
+    const currentStatus = status?.status ?? instance?.status;
+    if (!currentStatus) {
+      return;
+    }
+    if (currentStatus !== "running") {
+      setOpenCodeProjectRestartSawTransition(true);
+      return;
+    }
+    if (!openCodeProjectRestartSawTransition) {
+      return;
+    }
+
+    setActionMessage(null);
+    setOpenCodeProjectRestartPending(false);
+    setOpenCodeProjectRestartSawTransition(false);
+  }, [
+    instance?.status,
+    openCodeProjectRestartPending,
+    openCodeProjectRestartSawTransition,
+    status?.status,
+  ]);
 
   useEffect(() => {
     if (!restartMenuOpen) {
@@ -727,6 +752,47 @@ const InstanceDetailPage: React.FC = () => {
           t("instances.restartEnvironmentFailed"),
         ),
       );
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleSelectOpenCodeProject = async (relativePath: string) => {
+    if (!instance || instance.type !== "opencode" || instance.instance_mode !== "pro") {
+      return;
+    }
+
+    const normalized = relativePath
+      .replaceAll("\\", "/")
+      .split("/")
+      .filter(Boolean);
+    if (
+      normalized[0] !== "workspace" ||
+      normalized.some((part) => part === "." || part === "..")
+    ) {
+      alert("Invalid project directory");
+      return;
+    }
+
+    const projectPath = ["/config", ...normalized].join("/");
+    try {
+      setOpenCodeProjectRestartPending(false);
+      setOpenCodeProjectRestartSawTransition(false);
+      setActionLoading("select-opencode-project");
+      setActionMessage("Saving OpenCode project and restarting…");
+      await instanceService.restartInstance(instance.id, {
+        environment_overrides: {
+          CLAWMANAGER_DEFAULT_PROJECT_PATH: projectPath,
+        },
+      });
+      setActionMessage("OpenCode project saved. The instance is restarting.");
+      setOpenCodeProjectRestartPending(true);
+      await fetchMeta(instance.id, { background: true });
+    } catch (selectProjectError) {
+      setOpenCodeProjectRestartPending(false);
+      setOpenCodeProjectRestartSawTransition(false);
+      setActionMessage(null);
+      alert(getErrorMessage(selectProjectError, "Failed to set OpenCode project"));
     } finally {
       setActionLoading(null);
     }
@@ -1315,6 +1381,7 @@ const InstanceDetailPage: React.FC = () => {
             instanceId={instance.id}
             instanceName={instance.name}
             instanceType={instance.type}
+            instanceMode={instance.instance_mode}
             availability={availability}
           />
         </div>
@@ -1387,13 +1454,23 @@ const InstanceDetailPage: React.FC = () => {
             instanceId={instance.id}
             instanceName={instance.name}
             instanceType={instance.type}
+            instanceMode={instance.instance_mode}
             availability={availability}
           />
         </div>
 
         {supportsWorkspace(instance) ? (
           <div className="min-h-[420px] min-w-0 xl:h-full xl:min-h-0">
-            <WorkspaceFileManager instanceId={instance.id} initialPath="/config" />
+            <WorkspaceFileManager
+              instanceId={instance.id}
+              initialPath="workspace"
+              onSelectDirectory={
+                instance.type === "opencode" && instance.instance_mode === "pro"
+                  ? handleSelectOpenCodeProject
+                  : undefined
+              }
+              selectingDirectory={actionLoading === "select-opencode-project"}
+            />
           </div>
         ) : (
           <div className="cm-surface flex min-h-[420px] items-center justify-center text-sm text-slate-500 xl:min-h-0">

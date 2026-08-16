@@ -5,7 +5,7 @@ import "strings"
 // FormatOpenClawSessionKey extracts the display session key from a stored session ID.
 func FormatOpenClawSessionKey(sessionID string) string {
 	sessionID = strings.TrimSpace(sessionID)
-	for _, prefix := range []string{"agent:openclaw:", "agent:hermes:", "agent:opencode:", "agent:codex:", "agent:claude-code:"} {
+	for _, prefix := range []string{"agent:openclaw:", "agent:hermes:", "agent:opencode:"} {
 		if strings.HasPrefix(sessionID, prefix) {
 			return strings.TrimPrefix(sessionID, prefix)
 		}
@@ -33,10 +33,6 @@ func NormalizeOpenClawSessionID(sessionKey string, runtimeType string) string {
 		return "agent:hermes:" + sessionKey
 	case "opencode":
 		return "agent:opencode:" + sessionKey
-	case "codex":
-		return "agent:codex:" + sessionKey
-	case "claude-code":
-		return "agent:claude-code:" + sessionKey
 	default:
 		return "agent:openclaw:" + sessionKey
 	}

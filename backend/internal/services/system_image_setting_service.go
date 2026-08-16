@@ -15,37 +15,31 @@ var orderedSystemImageTypes = []string{
 	"webtop",
 	"hermes",
 	"opencode",
-	"codex",
-	"claude-code",
 	"debian",
 	"centos",
 	"custom",
 }
 
 var supportedSystemImageTypes = map[string]string{
-	"openclaw":    "OpenClaw Pro",
-	"ubuntu":      "Ubuntu Desktop",
-	"webtop":      "Webtop Desktop",
-	"hermes":      "Hermes Pro",
-	"opencode":    "OpenCode Pro",
-	"codex":       "Codex Pro",
-	"claude-code": "Claude Code Pro",
-	"debian":      "Debian Desktop",
-	"centos":      "CentOS Desktop",
-	"custom":      "Custom Image",
+	"openclaw": "OpenClaw Pro",
+	"ubuntu":   "Ubuntu Desktop",
+	"webtop":   "Webtop Desktop",
+	"hermes":   "Hermes Pro",
+	"opencode": "OpenCode Pro",
+	"debian":   "Debian Desktop",
+	"centos":   "CentOS Desktop",
+	"custom":   "Custom Image",
 }
 
 var defaultSystemImageSettings = map[string]string{
-	"openclaw":    "ghcr.io/yuan-lab-llm/agentsruntime/openclaw:latest",
-	"ubuntu":      "lscr.io/linuxserver/webtop:ubuntu-xfce",
-	"webtop":      "lscr.io/linuxserver/webtop:ubuntu-xfce",
-	"hermes":      "ghcr.io/yuan-lab-llm/agentsruntime/hermes:latest",
-	"opencode":    "ghcr.io/yuan-lab-llm/agentsruntime/opencode:latest",
-	"codex":       "ghcr.io/yuan-lab-llm/agentsruntime/codex:latest",
-	"claude-code": "ghcr.io/yuan-lab-llm/agentsruntime/claude-code:latest",
-	"debian":      "docker.io/clawreef/debian-desktop:12",
-	"centos":      "docker.io/clawreef/centos-desktop:9",
-	"custom":      "registry.example.com/your-custom-image:latest",
+	"openclaw": "ghcr.io/yuan-lab-llm/agentsruntime/openclaw:latest",
+	"ubuntu":   "lscr.io/linuxserver/webtop:ubuntu-xfce",
+	"webtop":   "lscr.io/linuxserver/webtop:ubuntu-xfce",
+	"hermes":   "ghcr.io/yuan-lab-llm/agentsruntime/hermes:latest",
+	"opencode": "ghcr.io/yuan-lab-llm/agentsruntime/opencode:latest",
+	"debian":   "docker.io/clawreef/debian-desktop:12",
+	"centos":   "docker.io/clawreef/centos-desktop:9",
+	"custom":   "registry.example.com/your-custom-image:latest",
 }
 
 var defaultGatewaySystemImageSettings = map[string]string{
@@ -60,12 +54,10 @@ var defaultGatewaySystemImageSettings = map[string]string{
 }
 
 var defaultEnabledSystemImageTypes = map[string]bool{
-	"openclaw":    true,
-	"ubuntu":      true,
-	"hermes":      true,
-	"opencode":    true,
-	"codex":       true,
-	"claude-code": true,
+	"openclaw": true,
+	"ubuntu":   true,
+	"hermes":   true,
+	"opencode": true,
 }
 
 var defaultEnabledGatewaySystemImageTypes = map[string]bool{

@@ -137,10 +137,6 @@ function typeLabel(type: string) {
       ? "OpenClaw"
       : type === "opencode"
         ? "OpenCode"
-        : type === "codex"
-          ? "Codex"
-          : type === "claude-code"
-            ? "Claude Code"
         : type;
 }
 

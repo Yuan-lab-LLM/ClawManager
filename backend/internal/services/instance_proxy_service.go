@@ -160,8 +160,15 @@ func (s *InstanceProxyService) ProxyRequest(ctx context.Context, instanceID int,
 		targetURL.RawQuery = queryParams.Encode()
 	}
 
-	// Create new request with longer timeout for streaming
-	proxyCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	// OpenCode uses a long-lived SSE stream at /global/event to initialize and
+	// keep its session UI in sync. Giving that request the normal five-minute
+	// HTTP proxy deadline delays all events until the connection is closed and
+	// leaves the Lite portal as an empty shell.
+	proxyCtx := ctx
+	cancel := func() {}
+	if !isOpenCodeEventStreamRequest(opencodeLite, bootstrapPath) {
+		proxyCtx, cancel = context.WithTimeout(ctx, 5*time.Minute)
+	}
 	defer cancel()
 
 	var bootstrapSetCookies []string
@@ -279,6 +286,10 @@ func (s *InstanceProxyService) ProxyRequest(ctx context.Context, instanceID int,
 	// Write status code
 	w.WriteHeader(resp.StatusCode)
 
+	if strings.HasPrefix(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") {
+		return copyEventStream(w, resp.Body)
+	}
+
 	// Copy response body
 	_, err = io.Copy(w, resp.Body)
 	if err != nil {
@@ -286,6 +297,32 @@ func (s *InstanceProxyService) ProxyRequest(ctx context.Context, instanceID int,
 	}
 
 	return nil
+}
+
+func isOpenCodeEventStreamRequest(opencodeLite bool, targetPath string) bool {
+	return opencodeLite && strings.TrimSpace(targetPath) == "/global/event"
+}
+
+func copyEventStream(w http.ResponseWriter, body io.Reader) error {
+	buffer := make([]byte, 32*1024)
+	flusher, _ := w.(http.Flusher)
+	for {
+		read, readErr := body.Read(buffer)
+		if read > 0 {
+			if _, err := w.Write(buffer[:read]); err != nil {
+				return fmt.Errorf("failed to write event stream: %w", err)
+			}
+			if flusher != nil {
+				flusher.Flush()
+			}
+		}
+		if errors.Is(readErr, io.EOF) {
+			return nil
+		}
+		if readErr != nil {
+			return fmt.Errorf("failed to read event stream: %w", readErr)
+		}
+	}
 }
 
 // ProxyWebSocket handles WebSocket upgrade requests
@@ -807,7 +844,10 @@ func injectOpenCodeAbsolutePathPatch(html, proxyPrefix string) string {
 	if err != nil {
 		return html
 	}
-	script := `<script>(function(p){if(!p)return;function fix(u){if(u&&typeof u.url==="string")u=u.url;if(typeof URL!=="undefined"&&u instanceof URL)u=u.toString();if(typeof u!=="string"||!u)return u;if(u.charAt(0)==="/"){if(u.indexOf("//")===0||u===p||u.indexOf(p+"/")===0)return u;return p+u;}try{var a=new URL(u,window.location.href);if(a.host===window.location.host&&a.pathname.charAt(0)==="/"&&a.pathname!==p&&a.pathname.indexOf(p+"/")!==0)return p+a.pathname+a.search+a.hash;}catch(e){}return u;}if(window.history){["pushState","replaceState"].forEach(function(n){var oh=window.history[n];if(typeof oh==="function"){window.history[n]=function(a,b,u){return oh.call(window.history,a,b,fix(u));};}});}var of=window.fetch;if(typeof of==="function"){window.fetch=function(input,init){if(typeof input==="string"||(typeof URL!=="undefined"&&input instanceof URL)){input=fix(input);}else if(input&&typeof input.url==="string"){try{input=new Request(fix(input.url),input);}catch(e){}}return of.call(this,input,init);};}if(window.XMLHttpRequest&&XMLHttpRequest.prototype){var oo=XMLHttpRequest.prototype.open;XMLHttpRequest.prototype.open=function(method,url){arguments[1]=fix(url);return oo.apply(this,arguments);};}if(typeof window.EventSource==="function"){var OE=window.EventSource;window.EventSource=function(url,config){return new OE(fix(url),config);};window.EventSource.prototype=OE.prototype;try{Object.setPrototypeOf(window.EventSource,OE);}catch(e){}}if(typeof window.WebSocket==="function"){var OW=window.WebSocket;window.WebSocket=function(url,protocols){url=fix(url);return protocols===undefined?new OW(url):new OW(url,protocols);};window.WebSocket.prototype=OW.prototype;try{Object.setPrototypeOf(window.WebSocket,OW);}catch(e){}}function wrap(fn){return function(url){return fn.call(this,fix(url));};}try{var la=window.location.assign.bind(window.location);window.location.assign=wrap(la);}catch(e){}try{var lr=window.location.replace.bind(window.location);window.location.replace=wrap(lr);}catch(e){}})(` + string(prefixJSON) + `);</script>`
+	// Keep WebSocket URLs absolute. Unlike fetch/EventSource, WebSocket does
+	// not accept a relative URL; converting ws://host/path to /proxy/path
+	// prevents the OpenCode UI from establishing its event channel.
+	script := `<script>(function(p){if(!p)return;function fix(u){if(u&&typeof u.url==="string")u=u.url;if(typeof URL!=="undefined"&&u instanceof URL)u=u.toString();if(typeof u!=="string"||!u)return u;if(u.charAt(0)==="/"){if(u.indexOf("//")===0||u===p||u.indexOf(p+"/")===0)return u;return p+u;}try{var a=new URL(u,window.location.href);if(a.host===window.location.host&&a.pathname.charAt(0)==="/"&&a.pathname!==p&&a.pathname.indexOf(p+"/")!==0){var v=p+a.pathname+a.search+a.hash;return a.protocol==="ws:"||a.protocol==="wss:"?a.protocol+"//"+a.host+v:v;}}catch(e){}return u;}if(window.history){["pushState","replaceState"].forEach(function(n){var oh=window.history[n];if(typeof oh==="function"){window.history[n]=function(a,b,u){return oh.call(window.history,a,b,fix(u));};}});}var of=window.fetch;if(typeof of==="function"){window.fetch=function(input,init){if(typeof input==="string"||(typeof URL!=="undefined"&&input instanceof URL)){input=fix(input);}else if(input&&typeof input.url==="string"){try{input=new Request(fix(input.url),input);}catch(e){}}return of.call(this,input,init);};}if(window.XMLHttpRequest&&XMLHttpRequest.prototype){var oo=XMLHttpRequest.prototype.open;XMLHttpRequest.prototype.open=function(method,url){arguments[1]=fix(url);return oo.apply(this,arguments);};}if(typeof window.EventSource==="function"){var OE=window.EventSource;window.EventSource=function(url,config){return new OE(fix(url),config);};window.EventSource.prototype=OE.prototype;try{Object.setPrototypeOf(window.EventSource,OE);}catch(e){}}if(typeof window.WebSocket==="function"){var OW=window.WebSocket;window.WebSocket=function(url,protocols){url=fix(url);return protocols===undefined?new OW(url):new OW(url,protocols);};window.WebSocket.prototype=OW.prototype;try{Object.setPrototypeOf(window.WebSocket,OW);}catch(e){}}function wrap(fn){return function(url){return fn.call(this,fix(url));};}try{var la=window.location.assign.bind(window.location);window.location.assign=wrap(la);}catch(e){}try{var lr=window.location.replace.bind(window.location);window.location.replace=wrap(lr);}catch(e){}})(` + string(prefixJSON) + `);</script>`
 
 	for _, tag := range []string{"<head>", "<Head>", "<HEAD>"} {
 		if idx := strings.Index(html, tag); idx != -1 {

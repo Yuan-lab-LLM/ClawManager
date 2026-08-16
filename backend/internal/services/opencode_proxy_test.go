@@ -50,6 +50,9 @@ func TestInjectOpenCodeAbsolutePathPatch(t *testing.T) {
 	if !strings.Contains(got, "u instanceof URL") || !strings.Contains(got, "a.host===window.location.host") {
 		t.Fatalf("expected URL object and same-host patch: %s", got)
 	}
+	if !strings.Contains(got, `a.protocol==="ws:"||a.protocol==="wss:"`) {
+		t.Fatalf("expected WebSocket URLs to remain absolute: %s", got)
+	}
 	if !strings.Contains(got, prefix) {
 		t.Fatalf("expected prefix in patch: %s", got)
 	}
@@ -149,5 +152,17 @@ func TestShouldRewriteHTMLForProxyOpenCodeLite(t *testing.T) {
 	}
 	if service.shouldRewriteHTMLForProxy(8, "opencode") {
 		t.Fatal("pro opencode must not force lite HTML rewrite")
+	}
+}
+
+func TestIsOpenCodeEventStreamRequest(t *testing.T) {
+	if !isOpenCodeEventStreamRequest(true, "/global/event") {
+		t.Fatal("expected OpenCode Lite global event stream to bypass the HTTP timeout")
+	}
+	if isOpenCodeEventStreamRequest(false, "/global/event") {
+		t.Fatal("non-Lite requests must keep the standard HTTP timeout")
+	}
+	if isOpenCodeEventStreamRequest(true, "/api/health") {
+		t.Fatal("non-event OpenCode requests must keep the standard HTTP timeout")
 	}
 }

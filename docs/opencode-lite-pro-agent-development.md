@@ -48,6 +48,40 @@ OpenCode **使用官方发行物（钉版本）**，不维护 OpenCode fork。Li
 
 Skill Hub、OpenClaw 配置中心 plan、workspace 归档导入导出、定时任务 bootstrap、Team persona overlay。
 
-## 5. Lite Web 失败保底
+## 5. Skill Hub compatibility
+
+ClawManager Skill Hub keeps its existing ZIP package format and `SKILL.md`
+contract for OpenCode. Do not convert uploaded packages or introduce an
+OpenCode-only skill format.
+
+The runtime must use these roots, which are already scanned by official
+OpenCode:
+
+| Mode | Skill root |
+| --- | --- |
+| Lite | `{workspace}/home/.opencode/skills/<name>/SKILL.md` |
+| Pro | `/config/workspace/.opencode/skills/<name>/SKILL.md` |
+
+For Pro, ClawManager injects `CLAWMANAGER_SKILL_DIR=/config/workspace/.opencode/skills`.
+The image-level instance agent must use that variable and implement the
+existing generic Skill Hub protocol without changing command names:
+
+- `install_skill`: download the specified version, reject zip-slip paths,
+  atomically extract it into `${CLAWMANAGER_SKILL_DIR}/{target_name}`, then
+  report inventory.
+- `uninstall_skill` / `remove_skill`: delete only the resolved child directory
+  of `${CLAWMANAGER_SKILL_DIR}`, then report inventory.
+- `sync_skill_inventory`: recursively scan `SKILL.md` folders under the root
+  and submit a full `skills/inventory` report using the platform content-MD5
+  algorithm.
+- `collect_skill_package` and `skills/upload`: package one selected skill
+  directory using the existing archive format; preserve the current upload,
+  scan, import, and publish workflows.
+
+`agentsruntime/opencode` must implement these commands before OpenCode Pro on
+non-hostPath storage can claim complete Skill Hub support. The current image's
+agent does not yet implement them.
+
+## 6. Lite Web 失败保底
 
 若钉版本官方 web 在平台代理改写后仍无法在门户完成加载/会话/Gateway 调用，则 Lite 可改为浏览器终端内官方 TUI；Pro 保持 web。触发条件与验收见平台接入计划。

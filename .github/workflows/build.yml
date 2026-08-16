@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - 'codex/**'
       - 'feature/**'
       - 'fix/**'
   pull_request:

@@ -7,11 +7,9 @@ import (
 )
 
 const (
-	RuntimeTypeOpenClaw   = "openclaw"
-	RuntimeTypeHermes     = "hermes"
-	RuntimeTypeOpenCode   = "opencode"
-	RuntimeTypeCodex      = "codex"
-	RuntimeTypeClaudeCode = "claude-code"
+	RuntimeTypeOpenClaw = "openclaw"
+	RuntimeTypeHermes   = "hermes"
+	RuntimeTypeOpenCode = "opencode"
 
 	InstanceModeLite = "lite"
 	InstanceModePro  = "pro"
@@ -50,10 +48,6 @@ func NormalizeV2RuntimeType(instanceType string) (string, bool) {
 		return RuntimeTypeHermes, true
 	case RuntimeTypeOpenCode:
 		return RuntimeTypeOpenCode, true
-	case RuntimeTypeCodex:
-		return RuntimeTypeCodex, true
-	case RuntimeTypeClaudeCode:
-		return RuntimeTypeClaudeCode, true
 	default:
 		return "", false
 	}

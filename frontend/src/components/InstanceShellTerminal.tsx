@@ -9,6 +9,7 @@ interface InstanceShellTerminalProps {
   instanceId: number;
   instanceName: string;
   isRunning: boolean;
+  autoConnect?: boolean;
   heightClassName?: string;
   className?: string;
 }
@@ -26,6 +27,7 @@ export function InstanceShellTerminal({
   instanceId,
   instanceName,
   isRunning,
+  autoConnect = false,
   heightClassName = "h-[54vh] min-h-[420px] max-h-[720px] md:h-[58vh] xl:h-[60vh]",
   className = "",
 }: InstanceShellTerminalProps) {
@@ -41,6 +43,7 @@ export function InstanceShellTerminal({
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const resizeFrameRef = useRef<number | null>(null);
+  const manuallyDisconnectedRef = useRef(false);
 
   const buildShellUrl = useCallback(() => {
     const token = localStorage.getItem("access_token");
@@ -98,7 +101,10 @@ export function InstanceShellTerminal({
     });
   }, [fitAndSendResize]);
 
-  const disconnect = useCallback(() => {
+  const disconnect = useCallback((manual = true) => {
+    if (manual) {
+      manuallyDisconnectedRef.current = true;
+    }
     socketRef.current?.close();
     socketRef.current = null;
     setConnectionState((current) =>
@@ -205,6 +211,19 @@ export function InstanceShellTerminal({
   }, [buildShellUrl, isRunning, scheduleFitAndResize, t]);
 
   useEffect(() => {
+    manuallyDisconnectedRef.current = false;
+  }, [instanceId]);
+
+  // OpenCode Lite uses this terminal as its primary UI. Connect as soon as
+  // its xterm surface exists, while preserving a user's explicit disconnect.
+  useEffect(() => {
+    if (!autoConnect || !isRunning || !terminalElement || manuallyDisconnectedRef.current) {
+      return;
+    }
+    connect();
+  }, [autoConnect, connect, instanceId, isRunning, terminalElement]);
+
+  useEffect(() => {
     if (!terminalElement) {
       return;
     }
@@ -308,7 +327,7 @@ export function InstanceShellTerminal({
 
   useEffect(() => {
     if (!isRunning) {
-      disconnect();
+      disconnect(false);
     }
   }, [disconnect, isRunning]);
 
@@ -402,7 +421,7 @@ export function InstanceShellTerminal({
           {isConnected ? (
             <button
               type="button"
-              onClick={disconnect}
+              onClick={() => disconnect()}
               className="rounded-md bg-[#243041] px-3 py-1.5 text-xs font-medium text-gray-200 hover:bg-[#31415a]"
             >
               {t("instances.disconnectShell")}
