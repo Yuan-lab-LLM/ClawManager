@@ -1,50 +1,84 @@
-# Team Workspace Quick Guide
+# Kurzanleitung für Team-Workspaces
 
-Teams lassen mehrere OpenClaw-Lite-Mitglieder an einem gemeinsamen Ziel arbeiten. Waehle eine Rollenvorlage, erstelle das Team und beschreibe das Ziel im Team-Chat fuer den Leader. Der Leader plant, delegiert, koordiniert, sammelt Ergebnisse und liefert die finale Zusammenfassung.
+Ein Team verwendet einen OpenClaw-Lite-Leader, der mehrere Worker für ein gemeinsames Ziel koordiniert. Du kannst eine unveränderliche integrierte Vorlage verwenden oder aus einer natürlichsprachlichen Beschreibung eine eigene Vorlage erzeugen. Der Leader versteht das Ziel, verteilt Aufgaben, sammelt Ergebnisse, behandelt Ausnahmen und veröffentlicht das Endergebnis.
 
 ## Geltungsbereich
 
-- Teams laufen derzeit im Modus **OpenClaw Lite**.
-- Die Zusammenarbeit ist fest als **Leader-vermittelte Zusammenarbeit** definiert: Arbeit erreicht zuerst den Leader, der die Mitglieder koordiniert.
-- Vorlagen enthalten bereits die Rollen der Mitglieder. In der Regel musst du nicht fuer jedes Mitglied Runtime, Ressourcenprofil oder Kollaborationsoptionen konfigurieren.
+- Die Zusammenarbeit ist fest **Leader-vermittelt**: Anfragen erreichen zuerst den Leader, der anschließend die Mitglieder koordiniert.
+- Der Leader verwendet immer **OpenClaw Lite**. Jeder Worker kann **OpenClaw Lite** oder **Hermes Lite** verwenden.
+- Wenn kein aktiviertes Hermes-Lite-Gateway-Image konfiguriert ist, ist Hermes Lite deaktiviert und die Ursache wird angezeigt.
+- Integrierte Vorlagen können nicht geändert oder gelöscht werden. Eigene Vorlagen gehören dem aktuellen Benutzer und können angepasst, gelöscht und wiederverwendet werden.
 
-## 1. Team erstellen
+## 1. Team aus einer integrierten Vorlage erstellen
 
-1. Oeffne **Teams** in der Navigation und waehle das Erstellen eines Teams.
+1. Öffne **Teams** in der Navigation und rufe die Erstellungsseite auf.
 2. Gib einen Teamnamen ein und passe bei Bedarf den gemeinsamen Speicher an.
-3. Waehle eine Mitgliedervorlage und pruefe Leader, Mitgliederzahl und Runtime in der Zusammenfassung.
-4. Waehle **Erstellen**.
+3. Wähle eine Vorlage und für jeden Worker eine verfügbare Runtime.
+4. Prüfe die Zusammenfassung und wähle **Erstellen**.
 
-![Team erstellen: Name eingeben, Vorlage waehlen und Zusammenfassung pruefen](./main/team-create.png)
+Die Aktion **+ Benutzerdefiniertes Team** oben rechts öffnet die Verwaltung eigener Vorlagen. Die Runtime der Worker wird in der Mitgliedertabelle derselben Seite ausgewählt.
 
-Die Erstellungsseite verwendet fest OpenClaw Lite und Leader-vermittelte Zusammenarbeit. Die Vorlage definiert die Aufgaben der Mitglieder; einzelne Ressourcenprofile sind nicht erforderlich.
+![Integrierte Vorlagen, Einstieg in benutzerdefinierte Teams und Runtime-Auswahl](./main/team-create-fixed-and-custom-entry.png)
 
-## 2. Zusammenarbeit starten
+Es gibt acht unveränderliche Vorlagen: Standard mit zwei Mitgliedern, Delivery mit drei Mitgliedern, Product Discovery mit vier Mitgliedern, Quality Gate mit vier Mitgliedern, Full-stack Delivery mit fünf Mitgliedern, API Integration mit fünf Mitgliedern, Research Publication mit sechs Mitgliedern und Software Engineering mit acht Mitgliedern. Rollen und Verantwortlichkeiten sind bereits enthalten; einzelne Ressourcenprofile müssen nicht eingerichtet werden.
 
-Oeffne die Team-Detailseite und beschreibe das fachliche Ziel im Team-Chat fuer den Leader, zum Beispiel: „Erstelle eine einfache Rechner-App.“
+## 2. Benutzerdefiniertes Team erzeugen
 
-Der Leader erstellt den Plan, weist Mitglieder zu, sammelt Ergebnisse und Review-Nachweise und veroeffentlicht die finale Zusammenfassung. Du musst nicht dieselbe Aufgabe einzeln an alle Mitglieder senden.
+Öffne **Benutzerdefiniertes Team** und beschreibe das gewünschte Ziel. Lasse die Mitgliederzahl für eine automatische Auswahl leer oder wähle insgesamt 2–6 Mitglieder.
 
-## 3. Fortschritt verfolgen
+![Benutzerdefiniertes Team aus natürlicher Sprache und Mitgliederzahl erzeugen](./main/custom-team-generate.png)
 
-Die Team-Detailseite hat zwei zentrale Bereiche:
+Erzeugung und Rollenänderungen verwenden das AI Gateway des aktuellen Benutzers mit `model: "auto"`. Das Gateway wählt das tatsächliche Modell; dessen gespeicherte Thinking-Einstellung gilt. Auf der Team-Seite gibt es keinen eigenen Thinking-Schalter. Ist kein Modell verfügbar, fordert die Seite dazu auf, zuerst ein Modell in der Modellverwaltung zu aktivieren.
 
-- **Team-Chat** zeigt Plaene, Zuweisungen, aussagekraeftigen Fortschritt, Lieferungen, Reviews und die Leader-Zusammenfassung.
-- **Execution Kanban** zeigt Gesamtaufgabenstatus, ausstehende, laufende und abgeschlossene Arbeit.
+Jedes Ergebnis erfüllt folgende Regeln:
 
-![Team-Details: Chat zeigt Zusammenarbeit, Kanban zeigt Aufgabenstatus](./main/team-workflow.jpg)
+- Das Team umfasst 2–6 Mitglieder.
+- Das erste und einzige Leader-Mitglied behält `memberId=leader`.
+- Fähigkeits-Tags beschreiben geeignete Fähigkeiten; sie installieren keine Skills und ändern keine Runtime-Konfiguration.
 
-Zustaende wie „Leader plant“, „Warten auf Mitgliederlieferung“ und „Warten auf Leader-Zusammenfassung“ zeigen die aktuelle Phase. Sende die gleiche Aufgabe nicht erneut; ergaenze Anforderungen im Chat, wenn sich Ziel oder Abnahmekriterien aendern.
+## 3. Eigene Vorlagen verwalten
 
-## 4. Ergebnisse ansehen
+Unter **Meine benutzerdefinierten Teams** kannst du eine Vorlage auswählen und:
 
-Mitglieder geben Artefakte und Validierungsergebnisse an den Leader zurueck. Die finale Zusammenfassung erscheint im Team-Chat und in den Aufgabendetails. Ueber den Tab **Files** oben auf der Detailseite kannst du gemeinsame Team-Artefakte ansehen.
+- umbenennen;
+- nach Änderung von Ziel oder Mitgliederzahl das gesamte Team aktualisieren;
+- das gesamte Team aus dem gespeicherten Ziel und der gespeicherten Anzahl neu erzeugen;
+- die Vorlage löschen oder auf der Team-Erstellungsseite verwenden.
 
-## 5. Vorlage waehlen
+![Vorhandene benutzerdefinierte Team-Vorlagen verwalten](./main/custom-team-manage.png)
 
-- **Standard Two-Member Team**: Ein Leader koordiniert ein Ausfuehrungsmitglied fuer eine fokussierte Aufgabe.
-- **Delivery Three-Member Team**: Implementierung plus Review fuer eine kleine Lieferung.
-- **Product Discovery Four-Member Team**: Produkt-, Design- und technische Machbarkeitsanalyse.
-- **Software Engineering Eight-Member Team**: Produkt, Design, Frontend, Backend, Architektur, QA und Code Review.
+Jede Aktualisierung erzeugt eine neue Version. Integrierte Vorlagen erscheinen nicht in der bearbeitbaren Liste.
 
-Vorlagen sind ein Ausgangspunkt. Waehle die passendste Vorlage und ergaenze Umfang, Einschraenkungen und Abnahmekriterien im Team-Chat.
+## 4. Verantwortlichkeiten anpassen
+
+Öffne ein Mitglied und beschreibe die gewünschte Änderung in natürlicher Sprache. Leere Eingaben werden nicht gesendet und führen zu einem klaren Hinweis.
+
+![Verantwortlichkeiten eines Mitglieds natürlichsprachlich anpassen](./main/custom-team-member-adjustment.png)
+
+Auch der Leader kann angepasst werden, jedoch nur in seiner fachlichen Erweiterung. Leader-Identität, unveränderliche Orchestrierung, aktuelle Worker-Liste sowie Delegation, Ergebnissammlung, Prüfung und finale Zusammenfassung bleiben erhalten. Nach einer Änderung der Worker-Zahl erhält der Leader über den bestehenden Team-Start weiterhin die vollständige Mitgliederliste und alle Verantwortlichkeiten.
+
+## 5. Zusammenarbeit starten und verfolgen
+
+Beschreibe nach der Erstellung das Ziel im Team-Chat. Der Leader plant, delegiert, sammelt Ergebnisse und Review-Nachweise und veröffentlicht die finale Zusammenfassung. Der Abschluss eines Workers beendet nur dessen Arbeitselement; die Gesamtaufgabe endet nach der Zusammenfassung des Leaders.
+
+Die Team-Detailseite enthält:
+
+- **Team-Chat** für Pläne, Zuweisungen, relevante Fortschritte, Ergebnisse, Reviews und finale Zusammenfassung.
+- **Execution Kanban** mit der aktuellen Anfrage im Kopfbereich sowie Gesamt- und Mitgliederstatus.
+- **Anfragenavigation** ab zwei Anfragen; eine neue Anfrage wird automatisch ausgewählt.
+- **Files** für gemeinsame Artefakte. Markdown, Text und JSON können direkt angesehen, andere Dateien heruntergeladen werden.
+
+Monitor beobachtet Aktivität, Abschlussbelege und Fehlersignale für Erinnerungen und Wiederherstellung. Er erzeugt nicht selbstständig Erfolg, Fehler, Abbruch oder Abschluss eines Tasks.
+
+## 6. Hermes-Lite-Worker-Sitzungen
+
+Hermes-Lite-Team-Unterhaltungen verwenden den nativen Hermes-Sitzungsspeicher. Vollständige Nachrichten und Tool-Ergebnisse erscheinen während der Ausführung schrittweise in der Hermes-GUI und nicht erst nach Abschluss als Historie.
+
+Wird dieselbe Hermes-Lite-Instanz über ein Team-Mitglied oder die Instanzliste geöffnet, ist dieselbe Team-Sitzung sichtbar und kann fortgesetzt werden. Normale Hermes-Sitzungen bleiben unverändert. Sitzungen dienen Interaktion und Beobachtung; für Kanban und Abschluss bleibt der Team-Kontrollpfad maßgeblich.
+
+## 7. Empfehlungen
+
+- Beginne mit der ähnlichsten integrierten Vorlage und erzeuge eine eigene Vorlage für dauerhaft wiederverwendbare Spezialrollen.
+- Nenne Umfang, Datenquellen, Ausgabeformat und Abnahmekriterien im Ziel.
+- Sende dieselbe Anfrage nicht erneut, nur weil ein Worker geliefert hat; warte auf Prüfung und Zusammenfassung des Leaders.
+- Thinking kann Latenz und Reasoning-Token erhöhen. Konfiguriere es passend zur Aufgabe in der Modellverwaltung.

@@ -1572,6 +1572,18 @@ func buildOpenAICompatibleRequestBody(req ChatCompletionRequest, model *models.L
 		if err := json.Unmarshal(req.RawBody, &payload); err != nil {
 			return nil, fmt.Errorf("failed to decode provider request: %w", err)
 		}
+	} else {
+		// HTTP proxy calls retain RawBody so unknown provider extensions survive.
+		// Internal callers construct ChatCompletionRequest directly, so synthesize
+		// the equivalent wire payload instead of silently dropping messages and
+		// generation parameters.
+		structuredBody, err := json.Marshal(req)
+		if err != nil {
+			return nil, fmt.Errorf("failed to encode structured provider request: %w", err)
+		}
+		if err := json.Unmarshal(structuredBody, &payload); err != nil {
+			return nil, fmt.Errorf("failed to decode structured provider request: %w", err)
+		}
 	}
 	if payload == nil {
 		payload = map[string]json.RawMessage{}

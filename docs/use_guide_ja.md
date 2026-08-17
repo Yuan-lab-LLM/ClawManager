@@ -260,6 +260,7 @@ https://<サーバーIP>:30443
    * **Base URL**：モデルサービスが提供するインターフェースアドレスを入力します。
    * **API Key**：対応するモデルサービスの有効なキーを入力します。
    * **Provider Model**：実際に呼び出すモデル名を入力します。
+   * **Thinking**：ClawManager がプロバイダーの Thinking プロトコルを確実に制御できる場合だけ利用できます。無効にすると、すべてのリクエストで Thinking が明示的に無効になります。有効な場合でも、対応する Agent セッションは Thinking を無効にしたり強度を選択したりできます。現在の管理対象は、公式 DeepSeek OpenAI-compatible エンドポイント上の `deepseek-*` モデルです。Thinking は遅延と推論 Token を増やす場合があります。
    * **通貨**：実際の状況に応じて入力します。課金表示が不要な場合はデフォルトのままでも構いません。
    * **入力価格 / 出力価格**：課金統計を行わない場合は `0` を入力できます。
 3. 送信前に必ず次にチェックを入れてください：
@@ -662,9 +663,9 @@ AI 監査ページは、最近の管理対象モデル呼び出し記録を確�
 <a id="sec-13-team"></a>
 ### 10.4 Team 協働
 
-Team では複数の OpenClaw Lite メンバーが共通目標に取り組みます。**Teams** を開き、メンバーテンプレートを選び、Team 名を入力して作成します。メンバーごとの Runtime やリソースプリセットの設定は不要です。
+Team では、1 人の OpenClaw Lite Leader が複数の Worker を調整します。変更できない 8 種類の組み込みテンプレートを選ぶか、作成ページ右上の **カスタム Team** から自然言語と任意の合計 2～6 人を使って自分専用のテンプレートを生成、調整、再利用できます。Leader は OpenClaw Lite に固定され、各 Worker は OpenClaw Lite または利用可能な Hermes Lite を選択できます。
 
-作成後、Team チャットで Leader に目標を説明します。Leader が計画、実行、レビュー、最終統合を調整します。現在の段階と完了した成果物は **Execution Kanban** で、共有成果物は **Files** で確認できます。
+カスタム Team の生成は同じ AI Gateway を `model: "auto"` で使用し、実際に選択されたモデルの Thinking 設定を継承します。作成後は Team チャットで Leader に目標を説明します。**Execution Kanban** で現在の Query と成果を確認し、**Files** で共有成果物を参照できます。Hermes Lite Worker の Team セッションは Hermes GUI で実行中から確認できます。
 
 詳しくは [Team Workspace Quick Guide](./team-workspaces-guide_ja.md) を参照してください。
 

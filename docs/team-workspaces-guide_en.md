@@ -1,50 +1,84 @@
 # Team Workspace Quick Guide
 
-Teams let multiple OpenClaw Lite members work toward one shared goal. Choose a role template, create the Team, then describe the goal to the Leader in Team chat. The Leader plans, delegates, coordinates, synthesizes, and delivers the final result.
+A Team uses one OpenClaw Lite Leader to coordinate multiple Workers around a shared goal. You can start from an immutable built-in template or generate a user-owned custom template from natural-language intent. The Leader understands the request, delegates work, collects member deliveries, handles recovery, and publishes the final result.
 
 ## Scope
 
-- Teams currently run in **OpenClaw Lite** mode.
-- Collaboration is fixed to **Leader-mediated collaboration**: work reaches the Leader first, who coordinates the members.
-- Templates already define member responsibilities. You normally do not configure a runtime, resource preset, or collaboration setting for every member.
+- Collaboration is fixed to **Leader-mediated collaboration**: requests reach the Leader first, who coordinates the members.
+- The Leader always uses **OpenClaw Lite**. Each Worker can use **OpenClaw Lite** or **Hermes Lite**.
+- Hermes Lite is disabled with an explanation when no enabled Hermes Lite gateway image is configured.
+- Built-in templates cannot be changed or deleted. Custom templates belong to the current user and can be refined, deleted, and reused.
 
-## 1. Create a Team
+## 1. Create a Team from a Built-in Template
 
-1. Open **Teams** from the navigation and choose to create a Team.
+1. Open **Teams** from the navigation and enter the creation page.
 2. Enter a Team name and adjust shared storage when needed.
-3. Choose a member template and confirm the Leader, member count, and runtime in the summary.
-4. Select **Create**.
+3. Choose a template and select an available Runtime for each Worker.
+4. Review the summary and select **Create**.
 
-![Create a Team: enter a name, choose a template, and confirm the summary](./main/team-create.png)
+The **+ Custom Team** action in the upper-right opens custom-template management. Worker Runtime selection is available in the member table on the same page.
 
-The creation page fixes Teams to OpenClaw Lite and Leader-mediated collaboration. The selected template defines member responsibilities, so individual resource presets are not required.
+![Built-in templates, the Custom Team entry, and Worker Runtime selection](./main/team-create-fixed-and-custom-entry.png)
 
-## 2. Start Collaboration
+Eight immutable built-in templates are available: Standard Two-Member, Delivery Three-Member, Product Discovery Four-Member, Quality Gate Four-Member, Full-stack Delivery Five-Member, API Integration Five-Member, Research Publication Six-Member, and Software Engineering Eight-Member. Templates already provide member responsibilities and role profiles, so individual resource-preset setup is not required.
 
-Open the Team detail page and describe the business goal to the Leader in Team chat. For example: “Build a simple calculator app.”
+## 2. Generate a Custom Team
 
-The Leader creates the plan, assigns members, collects deliveries and review evidence, and publishes a final synthesis. You do not need to manually send the same task to every member.
+Open **Custom Team** and describe what the Team should achieve. Leave the member count empty for automatic allocation, or select a total of 2–6 members.
 
-## 3. Follow Progress
+![Generate a custom Team from natural language and a member count](./main/custom-team-generate.png)
 
-The Team detail page has two primary areas:
+Generation and responsibility adjustment use the current user's AI Gateway with `model: "auto"`. The gateway chooses the actual model, and that model's saved Thinking setting applies. The Custom Team page has no separate Thinking switch. If no model is available, the page asks the user to enable one in model management.
 
-- **Team chat** shows plans, assignments, meaningful progress, deliveries, reviews, and Leader synthesis.
-- **Execution Kanban** shows root-task state, pending work, active work, and completed deliveries.
+Every generated result keeps these rules:
 
-![Team detail: chat shows collaboration while Kanban shows task state](./main/team-workflow.jpg)
+- The Team contains 2–6 members.
+- The first and only Leader keeps `memberId=leader`.
+- Capability tags describe suitable abilities; they do not install Skills or modify Runtime configuration.
 
-States such as “Leader planning”, “waiting for member delivery”, and “waiting for Leader synthesis” indicate the current collaboration stage. Do not resend the same task; add a follow-up in chat if the goal or acceptance criteria change.
+## 3. Manage Custom Templates
 
-## 4. View Deliveries
+Select a template under **My Custom Teams** to:
 
-Members return artifacts and validation conclusions to the Leader. The final synthesis appears in Team chat and task details. Use the **Files** tab at the top of the detail page to browse shared Team artifacts.
+- rename it;
+- revise the whole Team after changing the intent or member count;
+- regenerate the whole Team from the saved intent and count;
+- delete it, or use it on the Team creation page.
 
-## 5. Choose a Template
+![Manage existing custom Team templates](./main/custom-team-manage.png)
 
-- **Standard two-member Team**: a Leader coordinates one execution member for a focused task.
-- **Delivery three-member Team**: implementation plus review for a small delivery.
-- **Product discovery four-member Team**: product, design, and technical-feasibility exploration.
-- **Software engineering eight-member Team**: product, design, frontend, backend, architecture, QA, and code review.
+Each update creates a new template version. Built-in templates never appear in the editable list.
 
-Templates are a starting point. Select the closest one, then add scope, constraints, and acceptance criteria in Team chat.
+## 4. Refine Member Responsibilities
+
+Expand a member and describe the requested change in natural language. Empty input produces an explicit prompt and is not submitted.
+
+![Refine a member responsibility with natural language](./main/custom-team-member-adjustment.png)
+
+The Leader can also be refined, but only its domain-specific extension changes. The Leader identity, immutable orchestration behavior, current Worker roster, delegation, collection, review, and final-synthesis relationships remain intact. After the Worker count changes, the existing Team bootstrap still gives the Leader the complete roster and responsibilities.
+
+## 5. Start and Follow Collaboration
+
+After creation, describe the goal to the Leader in Team chat. The Leader plans, delegates, collects deliveries and review evidence, and publishes the final synthesis. A Worker completion closes only that Worker's item; the root task completes after Leader synthesis.
+
+The Team detail page includes:
+
+- **Team chat** for plans, assignments, meaningful progress, deliveries, reviews, and final synthesis.
+- **Execution Kanban**, whose header shows the current query and whose cards show root and member work state.
+- **Query navigation** when two or more queries exist; a newly submitted query becomes the default selection.
+- **Files** for shared artifacts. Markdown, text, and JSON can be previewed in the page; other files can be downloaded.
+
+Monitor observes activity, completion receipts, and failure signals for reminders and recovery. It does not independently manufacture task success, failure, cancellation, or completion.
+
+## 6. Hermes Lite Worker Sessions
+
+Hermes Lite Team conversations use Hermes native session storage. Complete messages and tool results appear incrementally in the Hermes GUI while work is running, rather than only after the task becomes historical.
+
+Opening the same Hermes Lite instance from a Team member or from the instance list shows and can continue the same Team session. Ordinary Hermes sessions retain their existing behavior. Sessions provide interaction and observability; Team control-plane state remains authoritative for Kanban and completion.
+
+## 7. Recommendations
+
+- Start with the closest built-in template; generate a custom template for specialized responsibilities you expect to reuse.
+- State scope, data sources, output format, and acceptance criteria in the goal.
+- Do not resend the same request merely because a Worker has delivered; allow the Leader to review and synthesize.
+- Thinking can increase latency and reasoning-token usage. Configure it in model management according to the task.

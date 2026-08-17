@@ -260,6 +260,7 @@ Nach dem Login müssen Sie zunächst ein verfügbares **Sicherheitsmodell** konf
    * **Base URL**: Tragen Sie die vom Modelldienst bereitgestellte Schnittstellenadresse ein.
    * **API Key**: Tragen Sie den gültigen Schlüssel des entsprechenden Modelldienstes ein.
    * **Provider Model**: Tragen Sie den tatsächlichen Namen des aufzurufenden Modells ein.
+   * **Thinking**: Diese Option ist nur verfügbar, wenn ClawManager das Thinking-Protokoll des Providers zuverlässig steuern kann. Bei deaktivierter Option wird Thinking für jede Anfrage ausdrücklich ausgeschaltet. Ist sie aktiviert, kann eine unterstützte Agent-Sitzung Thinking weiterhin deaktivieren oder eine Stufe wählen. Der aktuelle verwaltete Vertrag unterstützt `deepseek-*`-Modelle am offiziellen OpenAI-kompatiblen DeepSeek-Endpunkt. Thinking kann Latenz und Reasoning-Token erhöhen.
    * **Währung**: Tragen Sie die Angabe entsprechend Ihrer tatsächlichen Situation ein; wenn keine Kostendarstellung benötigt wird, können Sie den Standardwert beibehalten.
    * **Eingabepreis / Ausgabepreis**: Wenn keine Kostenstatistik benötigt wird, können Sie zunächst `0` eintragen.
 3. Aktivieren Sie vor dem Absenden unbedingt:
@@ -663,9 +664,9 @@ Gehe beim Hochladen von Skills wie folgt vor:
 <a id="sec-13-team"></a>
 ### 10.4 Team-Zusammenarbeit
 
-Teams lassen mehrere OpenClaw-Lite-Mitglieder an einem gemeinsamen Ziel arbeiten. Oeffne **Teams**, waehle eine Mitgliedervorlage, gib einen Teamnamen ein und erstelle das Team; Runtime- und Ressourcenprofile je Mitglied sind nicht erforderlich.
+Ein Team verwendet einen OpenClaw-Lite-Leader, der mehrere Worker koordiniert. Wähle eine von acht unveränderlichen integrierten Vorlagen oder öffne oben rechts auf der Erstellungsseite **Benutzerdefiniertes Team**, um aus natürlicher Sprache und optional insgesamt 2–6 Mitgliedern eine eigene Vorlage zu erzeugen, anzupassen und wiederzuverwenden. Der Leader bleibt OpenClaw Lite; jeder Worker kann OpenClaw Lite oder ein verfügbares Hermes-Lite-Image verwenden.
 
-Beschreibe nach der Erstellung das Ziel im Team-Chat fuer den Leader. Der Leader koordiniert Planung, Ausfuehrung, Review und finale Zusammenfassung. Mit **Execution Kanban** siehst du die aktuelle Phase und abgeschlossene Lieferungen; unter **Files** findest du gemeinsame Artefakte.
+Die Erzeugung eigener Teams verwendet dasselbe AI Gateway mit `model: "auto"` und übernimmt die Thinking-Einstellung des tatsächlich ausgewählten Modells. Beschreibe nach der Erstellung das Ziel im Team-Chat. **Execution Kanban** zeigt die aktuelle Anfrage und Lieferungen, **Files** zeigt gemeinsame Artefakte, und in einem Hermes-Lite-Worker kann die Team-Sitzung live in der Hermes-GUI verfolgt werden.
 
 Siehe [Team Workspace Quick Guide](./team-workspaces-guide_de.md).
 

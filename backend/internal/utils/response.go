@@ -56,6 +56,25 @@ func HandleError(c *gin.Context, err error) {
 		Error(c, http.StatusBadRequest, errStr)
 		return
 	}
+	if strings.HasPrefix(errStr, "failed to generate custom team template:") || strings.HasPrefix(errStr, "failed to parse generated custom team") || strings.HasPrefix(errStr, "failed to decode custom team template model response:") || strings.HasPrefix(errStr, "failed to list models for custom team template:") || strings.HasPrefix(errStr, "custom team template model request failed:") {
+		Error(c, http.StatusBadGateway, errStr)
+		return
+	}
+	if strings.HasPrefix(errStr, "custom team ") || strings.HasPrefix(errStr, "generated custom team ") {
+		switch {
+		case strings.Contains(errStr, "not found"):
+			Error(c, http.StatusNotFound, errStr)
+		case strings.Contains(errStr, "revision conflict"), strings.Contains(errStr, "name already exists"):
+			Error(c, http.StatusConflict, errStr)
+		case strings.Contains(errStr, "requires an active AI model"):
+			Error(c, http.StatusServiceUnavailable, errStr)
+		case strings.HasPrefix(errStr, "custom team template generator"), strings.HasPrefix(errStr, "custom team template model"):
+			Error(c, http.StatusBadGateway, errStr)
+		default:
+			Error(c, http.StatusBadRequest, errStr)
+		}
+		return
+	}
 
 	switch errStr {
 	case "username already exists", "email already exists", "instance name already exists", "team name already exists", "openclaw config resource key already exists", "team task message id already exists":

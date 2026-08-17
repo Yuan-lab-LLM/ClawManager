@@ -106,5 +106,40 @@ assert.deepEqual(
 assert.match(source, /artifactRefs\.slice\(0, 5\)/, "collapsed chat bubbles must show at most five file links");
 assert.match(source, /展开其余 \$\{hiddenArtifactCount\} 个文件/, "extra file links must be explicitly expandable");
 assert.match(source, /aria-expanded=\{artifactsExpanded\}/, "file expansion control must expose accessibility state");
+assert.match(
+  source,
+  /queryAnchors\.length\s*>=\s*2/,
+  "question navigation must appear as soon as a second user question exists",
+);
+assert.doesNotMatch(
+  source,
+  /setDispatchError\(null\);\s*setSelectedGroupKey\(null\);\s*(?:const\s+\w+\s*=\s*)?await teamService\.dispatchTask/s,
+  "a failed dispatch must not discard the user's current historical selection",
+);
+assert.match(
+  source,
+  /const dispatchedTask = await teamService\.dispatchTask[\s\S]*setLoadedTasks\(\(current\) => mergeTasksByLatestState\(current, \[dispatchedTask\]\)\);[\s\S]*setSelectedGroupKey\(canonicalTaskKey\(dispatchedTask\.id\)\);/,
+  "a successful local dispatch must immediately select the newly created task",
+);
+assert.doesNotMatch(
+  source,
+  /server-smoke/,
+  "the Kanban must not retain the old fixed smoke-test title",
+);
+assert.match(
+  source,
+  /payload:\s*\{\s*title:\s*taskPrompt\.trim\(\),\s*prompt:\s*taskPrompt\.trim\(\)/,
+  "new tasks must use the submitted query instead of a fixed title",
+);
+assert.match(
+  source,
+  /title=\{queryText \|\| undefined\}[\s\S]*\{queryText \|\| "用户提交 query 后，这里会展示拆解、执行和汇总。"\}/,
+  "the Kanban header must present the current query as its primary text",
+);
+assert.match(
+  source,
+  /case "long":\s*return 1110;[\s\S]*case "medium":\s*return 945;[\s\S]*default:\s*return 740;/,
+  "the shared chat and Kanban height must reduce empty space without clipping the detail panel",
+);
 
 process.stdout.write("Team chat presentation contract test passed\n");

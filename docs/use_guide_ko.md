@@ -260,6 +260,7 @@ https://<서버IP>:30443
    * **Base URL**: 모델 서비스가 제공하는 인터페이스 주소를 입력합니다.
    * **API Key**: 해당 모델 서비스의 유효한 키를 입력합니다.
    * **Provider Model**: 실제 호출할 모델 이름을 입력합니다.
+   * **Thinking**: ClawManager가 공급자의 Thinking 프로토콜을 안정적으로 제어할 수 있을 때만 사용할 수 있습니다. 비활성화하면 모든 요청에서 Thinking이 명시적으로 꺼집니다. 활성화된 경우에도 지원되는 Agent 세션은 Thinking을 끄거나 강도를 선택할 수 있습니다. 현재 관리 대상은 공식 DeepSeek OpenAI-compatible 엔드포인트의 `deepseek-*` 모델입니다. Thinking은 지연 시간과 추론 Token 사용량을 늘릴 수 있습니다.
    * **통화**: 실제 상황에 맞게 입력합니다. 비용 표시가 필요 없다면 기본값을 유지할 수 있습니다.
    * **입력 가격 / 출력 가격**: 비용 통계를 하지 않을 경우 `0`을 입력할 수 있습니다.
 3. 제출 전에 반드시 다음 항목을 체크합니다:
@@ -663,9 +664,9 @@ AI 감사 페이지는 최근의 관리형 모델 호출 기록을 확인하는 
 <a id="sec-13-team"></a>
 ### 10.4 Team 협업
 
-Team은 여러 OpenClaw Lite 멤버가 공통 목표를 위해 협업하게 합니다. **Teams**를 열고 멤버 템플릿을 선택한 다음 Team 이름을 입력해 만드세요. 멤버별 Runtime이나 리소스 프리셋 설정은 필요하지 않습니다.
+Team은 한 명의 OpenClaw Lite Leader가 여러 Worker를 조율하도록 합니다. 변경할 수 없는 8개의 기본 템플릿을 선택하거나 생성 페이지 오른쪽 위의 **사용자 정의 Team**에서 자연어와 선택 사항인 총 2~6명의 인원수를 사용해 사용자 전용 템플릿을 생성, 조정, 재사용할 수 있습니다. Leader는 OpenClaw Lite로 고정되며 각 Worker는 OpenClaw Lite 또는 사용 가능한 Hermes Lite를 선택할 수 있습니다.
 
-생성 후 Team 채팅에서 Leader에게 목표를 설명합니다. Leader가 계획, 실행, 검토, 최종 종합을 조율합니다. **Execution Kanban**에서 현재 단계와 완료된 산출물을 보고, **Files**에서 공유 산출물을 확인할 수 있습니다.
+사용자 정의 Team 생성은 같은 AI Gateway를 `model: "auto"`로 사용하고 실제로 선택된 모델의 Thinking 설정을 따릅니다. 생성 후 Team 채팅에서 Leader에게 목표를 설명합니다. **Execution Kanban**에서 현재 Query와 산출물을 확인하고 **Files**에서 공유 산출물을 볼 수 있습니다. Hermes Lite Worker의 Team 세션은 실행 중에도 Hermes GUI에서 확인할 수 있습니다.
 
 자세한 내용은 [Team Workspace Quick Guide](./team-workspaces-guide_ko.md)를 참고하세요.
 

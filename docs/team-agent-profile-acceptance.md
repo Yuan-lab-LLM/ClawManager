@@ -17,6 +17,11 @@ Team role profiles in ClawManager.
 1. The Team creation page exposes the existing built-in templates:
    - Standard two-member Team
    - Delivery three-member Team
+   - Product Discovery four-member Team
+   - Quality Gate four-member Team
+   - Full-stack Delivery five-member Team
+   - API Integration five-member Team
+   - Research Publication six-member Team
    - Software Engineering Team
 2. Each built-in template member has a compact agency profile key.
 3. Importing a built-in template preserves:
@@ -86,6 +91,5 @@ cat /etc/clawmanager/team/team.json
 2. Verify Leader and Worker receive different profile payloads.
 3. Dispatch a simple task to the Leader.
 4. Confirm the Leader can read roster roles and coordinate via Team events.
-5. Repeat with Hermes runtime members when a Hermes image is available.
-6. If Hermes receives env values but does not apply the profile, record that as
-   a Hermes runtime loader gap rather than a ClawManager injection failure.
+5. Repeat with a Hermes Lite Worker when an enabled Hermes Lite gateway image is available; the Leader remains OpenClaw Lite.
+6. Confirm the Hermes Worker applies the same profile aliases and Team roster context rather than treating the payload as an unsupported loader gap.

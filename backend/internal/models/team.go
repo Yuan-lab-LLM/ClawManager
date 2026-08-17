@@ -27,6 +27,7 @@ const (
 	TeamTaskStatusPending    = "pending"
 	TeamTaskStatusDispatched = "dispatched"
 	TeamTaskStatusRunning    = "running"
+	TeamTaskStatusWaiting    = "waiting"
 	TeamTaskStatusSucceeded  = "succeeded"
 	TeamTaskStatusFailed     = "failed"
 	TeamTaskStatusStale      = "stale"

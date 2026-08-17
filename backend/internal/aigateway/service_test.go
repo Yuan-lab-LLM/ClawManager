@@ -171,6 +171,60 @@ func TestBuildProviderRequestEnforcesDeepSeekThinkingSetting(t *testing.T) {
 	}
 }
 
+func TestBuildProviderRequestFromStructuredInternalCallPreservesMessagesAndModelThinking(t *testing.T) {
+	t.Parallel()
+	temperature := 0.2
+	maxTokens := 6000
+	tests := []struct {
+		name    string
+		enabled bool
+		want    string
+	}{
+		{name: "thinking disabled by model config", enabled: false, want: "disabled"},
+		{name: "thinking enabled by model config", enabled: true, want: "enabled"},
+	}
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			req := ChatCompletionRequest{
+				Model: "auto",
+				Messages: []ChatMessage{
+					{Role: "system", Content: "Return JSON."},
+					{Role: "user", Content: "Create a team."},
+				},
+				Temperature: &temperature,
+				MaxTokens:   &maxTokens,
+			}
+			model := &models.LLMModel{
+				ProviderType: models.ProviderTypeOpenAICompatible, ProtocolType: models.ProtocolTypeOpenAICompatible,
+				BaseURL: "https://api.deepseek.com", ProviderModelName: "deepseek-v4-flash", ReasoningEnabled: tc.enabled,
+			}
+			body, err := buildProviderRequestBody(req, model)
+			if err != nil {
+				t.Fatalf("buildProviderRequestBody returned error: %v", err)
+			}
+			var payload map[string]json.RawMessage
+			if err := json.Unmarshal(body, &payload); err != nil {
+				t.Fatalf("decode provider request: %v", err)
+			}
+			var messages []ChatMessage
+			if err := json.Unmarshal(payload["messages"], &messages); err != nil || len(messages) != 2 {
+				t.Fatalf("messages = %#v, err=%v, want 2 messages", messages, err)
+			}
+			if string(payload["max_tokens"]) != "6000" || string(payload["temperature"]) != "0.2" {
+				t.Fatalf("generation parameters missing: %s", body)
+			}
+			var thinking struct {
+				Type string `json:"type"`
+			}
+			if err := json.Unmarshal(payload["thinking"], &thinking); err != nil || thinking.Type != tc.want {
+				t.Fatalf("thinking = %#v, err=%v, want %q", thinking, err, tc.want)
+			}
+		})
+	}
+}
+
 func TestBuildProviderRequestCombinesManagedOpenClawAndModelThinkingSettings(t *testing.T) {
 	t.Parallel()
 	openclaw := "openclaw"

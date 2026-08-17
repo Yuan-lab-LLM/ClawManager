@@ -454,11 +454,11 @@ const teamWorkspaceHeight = (
   }
   switch (detailSize) {
     case "long":
-      return 1220;
+      return 1110;
     case "medium":
-      return 1040;
+      return 945;
     default:
-      return 820;
+      return 740;
   }
 };
 
@@ -840,17 +840,16 @@ const isFailedCollaborationItem = (item: CollaborationItem) => {
   }
   const eventType = item.eventType;
   if (eventType !== "task_failed" && eventType !== "message_failed") {
-    return status === "failed" || status === "failure" || status === "error" || status === "blocked";
+    return status === "failed" || status === "failure" || status === "error";
   }
   const content = item.content.toLowerCase();
   if (content.includes("dispatch finished without reply/completion") || content.includes("without reply/completion")) {
     return false;
   }
-  return /error|failed|failure|exception|timeout|forbidden|失败|错误|异常|超时|blocked/.test(content) ||
+  return /error|failed|failure|exception|timeout|forbidden|失败|错误|异常|超时/.test(content) ||
     status === "failed" ||
     status === "failure" ||
-    status === "error" ||
-    status === "blocked";
+    status === "error";
 };
 
 const buildCollaborationGroups = (
@@ -1002,7 +1001,6 @@ const TeamDetailPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [targetMember] = useState("");
-  const [taskTitle] = useState("server-smoke");
   const [taskPrompt, setTaskPrompt] = useState("");
   const [dispatching, setDispatching] = useState(false);
   const [dispatchError, setDispatchError] = useState<string | null>(null);
@@ -1173,15 +1171,16 @@ const TeamDetailPage: React.FC = () => {
     try {
       setDispatching(true);
       setDispatchError(null);
-      setSelectedGroupKey(null);
-      await teamService.dispatchTask(teamId, {
+      const dispatchedTask = await teamService.dispatchTask(teamId, {
         target_member_id: targetMember.trim(),
         payload: {
-          title: taskTitle.trim() || "Team task",
+          title: taskPrompt.trim(),
           prompt: taskPrompt.trim(),
           responseLocale: "zh-CN",
         },
       });
+      setLoadedTasks((current) => mergeTasksByLatestState(current, [dispatchedTask]));
+      setSelectedGroupKey(canonicalTaskKey(dispatchedTask.id));
       setTaskPrompt("");
       await loadTeam({ background: true });
     } catch (err: any) {
@@ -2485,7 +2484,7 @@ function CollaborationPanel({
         )}
       </div>
 
-      {queryAnchors.length >= 3 && (
+      {queryAnchors.length >= 2 && (
         <QuestionAnchorRail
           groups={queryAnchors}
           activeGroupKey={activeGroupKey}
@@ -2600,7 +2599,6 @@ function InteractionProcessPanel({
     : latestRuntimeStatus === "waiting_completion"
       ? "等待显式完成确认"
       : workflowStatusText(group?.task?.workflow_state) || processStatusText(visualStatus);
-  const title = group?.task ? taskTitleText(group.task) : group?.title || "等待任务";
   const queryText = group?.task
     ? taskPromptText(group.task) || group.title
     : group?.items.find((item) => item.content)?.content || "";
@@ -2686,8 +2684,10 @@ function InteractionProcessPanel({
                 {statusText}
               </span>
             </div>
-            <div className="mt-2 text-sm font-semibold leading-5">{title}</div>
-            <div className="mt-1 line-clamp-2 text-[11px] leading-4 text-slate-600">
+            <div
+              className="mt-2 line-clamp-2 text-sm font-semibold leading-5 text-slate-800"
+              title={queryText || undefined}
+            >
               {queryText || "用户提交 query 后，这里会展示拆解、执行和汇总。"}
             </div>
             <div className="mt-1.5 flex max-w-full flex-nowrap items-center gap-1 overflow-hidden text-[10px] leading-4 text-slate-500">
@@ -3449,8 +3449,11 @@ function isTerminalEventType(eventType: string) {
 }
 
 function kanbanColumnForStep(step: ProcessStep, visualStatus: string, steps: ProcessStep[] = []): KanbanColumnKey {
-  if (["succeeded", "success", "completed", "complete", "done", "finished", "ok", "failed", "failure", "error", "blocked", "stale"].includes((step.status || "").toLowerCase())) {
+  if (["succeeded", "success", "completed", "complete", "done", "finished", "ok", "failed", "failure", "error", "stale"].includes((step.status || "").toLowerCase())) {
     return "done";
+  }
+  if (["waiting", "blocked", "waiting_dependency", "waiting_dependencies"].includes((step.status || "").toLowerCase())) {
+    return "doing";
   }
   if (isCompletionEvidenceStep(step, steps) || isFailureEvidenceStep(step)) {
     return "done";
@@ -3490,7 +3493,7 @@ function buildWorkItemKanbanColumns(
     const column: KanbanColumnKey =
       item.status === "succeeded" || item.status === "failed" || item.status === "stale"
         ? "done"
-        : item.status === "running"
+        : item.status === "running" || item.status === "waiting"
           ? "doing"
           : "todo";
     const owner = item.owner_member_id
@@ -3522,11 +3525,11 @@ function buildWorkItemKanbanColumns(
           ? "task_completed"
           : item.status === "failed" || item.status === "stale"
             ? "task_failed"
-            : item.status === "running"
+            : item.status === "running" || item.status === "waiting"
               ? "task_progress"
               : "task_assigned",
       time: new Date(item.updated_at).getTime(),
-      progress: item.status === "succeeded" ? 100 : item.status === "running" ? 50 : undefined,
+      progress: item.status === "succeeded" ? 100 : item.status === "running" ? 50 : item.status === "waiting" ? 35 : undefined,
       statusLabel:
         item.status === "succeeded"
           ? "已完成"
@@ -3534,7 +3537,9 @@ function buildWorkItemKanbanColumns(
             ? "失败"
             : item.status === "stale"
               ? "超时"
-              : item.status === "running"
+              : item.status === "waiting"
+                ? "等待中"
+                : item.status === "running"
                 ? "执行中"
                 : item.status === "dispatched"
                   ? "已分派"
@@ -3860,6 +3865,13 @@ function buildPeerCollaborationModel(
         actorLane.waitingOn = displayMemberName(targetKey, memberByKey, leaderMemberId);
         setLaneCard(actorLane, step, "working", "等待协作", `${actorLane.label} 等待 ${actorLane.waitingOn}`);
       }
+      continue;
+    }
+
+    const stepStatus = (step.status || "").toLowerCase();
+    if (["waiting", "blocked", "waiting_dependency", "waiting_dependencies"].includes(stepStatus) && !isFailureEvidenceStep(step)) {
+      const lane = ensureLane(actorKey);
+      setLaneCard(lane, step, "waiting", "等待中", `${lane.label} 正在等待条件满足`);
       continue;
     }
 

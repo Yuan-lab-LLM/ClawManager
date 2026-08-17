@@ -1,6 +1,6 @@
 import type { AgencyAgentProfileKey } from "./agencyAgentProfiles";
 import type { InstanceMode } from "../types/instance";
-import type { TeamCommunicationMode } from "../types/team";
+import type { TeamCommunicationMode, TeamMemberRoleProfileRequest } from "../types/team";
 
 export type RuntimeType = "openclaw" | "hermes";
 export type ResourcePresetKey = "small" | "medium" | "large" | "custom";
@@ -21,6 +21,7 @@ export type TeamMemberTemplateMember = {
   gpuCount: number;
   image: string;
   agentProfileKey?: AgencyAgentProfileKey;
+  roleProfile?: TeamMemberRoleProfileRequest;
 };
 
 export type TeamMemberTemplate = {

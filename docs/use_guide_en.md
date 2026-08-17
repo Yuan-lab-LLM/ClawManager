@@ -285,6 +285,7 @@ After logging in, you need to configure an available **secure model** first so t
    * **Base URL**: Enter the endpoint address provided by the model service.
    * **API Key**: Enter the valid key for the corresponding model service.
    * **Provider Model**: Enter the actual model name to call.
+   * **Thinking**: Available only when ClawManager can reliably control the provider's Thinking protocol. Disabling it explicitly disables Thinking on every request. When enabled, a supported Agent session may still disable it or select an effort level. The current managed contract supports `deepseek-*` models on the official DeepSeek OpenAI-compatible endpoint. Thinking can increase latency and reasoning-token usage.
    * **Currency**: Fill it in according to your situation; if no billing display is needed, you can keep the default.
    * **Input Price / Output Price**: If billing statistics are not needed, you can first fill in `0`.
 3. Be sure to check the following before submission:
@@ -688,9 +689,9 @@ To upload skills, follow these steps:
 <a id="sec-13-team"></a>
 ### 10.4 Team Collaboration
 
-Teams let multiple OpenClaw Lite members work toward a shared goal. Open **Teams**, choose a member template, enter a Team name, and create it; individual member runtime and resource-preset setup is not required.
+A Team uses one OpenClaw Lite Leader to coordinate multiple Workers. Choose one of eight read-only built-in templates, or open **Custom Team** from the upper-right of the creation page to generate, refine, and reuse a user-owned template from natural language and an optional total of 2–6 members. The Leader remains OpenClaw Lite; each Worker can use OpenClaw Lite or an available Hermes Lite image.
 
-After creation, describe the goal to the Leader in Team chat. The Leader coordinates planning, execution, review, and final synthesis. Use **Execution Kanban** to follow the current stage and completed deliveries, and use **Files** to browse shared artifacts.
+Custom Team generation uses the same AI Gateway with `model: "auto"` and inherits the Thinking setting of the model actually selected. After creation, describe the goal to the Leader in Team chat. Use **Execution Kanban** to follow the current query and deliveries, use **Files** for shared artifacts, and open a Hermes Lite Worker to view its Team session live in the Hermes GUI.
 
 See the [Team Workspace Quick Guide](./team-workspaces-guide_en.md).
 
