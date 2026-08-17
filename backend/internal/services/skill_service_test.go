@@ -363,7 +363,7 @@ func TestChownRuntimePathReportsRootPermissionDenied(t *testing.T) {
 	}
 
 	err := chownRuntimePath(target, RuntimeLinuxID(90), RuntimeLinuxID(90), 0600)
-	if err == nil || !strings.Contains(err.Error(), "failed to set lite runtime owner") {
+	if err == nil || !strings.Contains(err.Error(), "failed to set runtime owner") {
 		t.Fatalf("chownRuntimePath() error = %v, want owner error", err)
 	}
 }

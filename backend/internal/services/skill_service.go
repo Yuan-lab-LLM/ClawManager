@@ -760,7 +760,7 @@ func ensureRuntimeSkillOwnership(instance *models.Instance) error {
 	if root == "" {
 		return nil
 	}
-	if err := os.Chown(root, 911, 1001); err != nil {
+	if err := chownRuntimePath(root, 911, 1001, 0750); err != nil {
 		return fmt.Errorf("failed to set OpenCode skill root owner: %w", err)
 	}
 	return filepath.WalkDir(root, func(current string, entry os.DirEntry, walkErr error) error {
@@ -770,14 +770,14 @@ func ensureRuntimeSkillOwnership(instance *models.Instance) error {
 		if !isPathWithin(root, current) {
 			return fmt.Errorf("OpenCode skill path escapes root: %s", current)
 		}
-		if err := os.Chown(current, 911, 1001); err != nil {
-			return err
+		if entry.Type()&os.ModeSymlink != 0 {
+			return nil
 		}
 		mode := os.FileMode(0640)
 		if entry.IsDir() {
 			mode = 0750
 		}
-		return os.Chmod(current, mode)
+		return chownRuntimePath(current, 911, 1001, mode)
 	})
 }
 
@@ -847,10 +847,10 @@ func chownRuntimePath(targetPath string, uid, gid int, mode os.FileMode) error {
 			}
 			return nil
 		}
-		return fmt.Errorf("failed to set lite runtime owner on %s: %w", targetPath, err)
+		return fmt.Errorf("failed to set runtime owner on %s: %w", targetPath, err)
 	}
 	if err := os.Chmod(targetPath, mode); err != nil {
-		return fmt.Errorf("failed to set lite runtime permissions on %s: %w", targetPath, err)
+		return fmt.Errorf("failed to set runtime permissions on %s: %w", targetPath, err)
 	}
 	return nil
 }
