@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"clawreef/internal/aigateway"
+	"clawreef/internal/services"
 	"clawreef/internal/utils"
 
 	"github.com/gin-gonic/gin"
@@ -14,12 +15,15 @@ import (
 
 // AIGatewayHandler exposes AI gateway endpoints.
 type AIGatewayHandler struct {
-	service aigateway.Service
+	service                     aigateway.Service
+	instanceService             services.InstanceService
+	workspaceFileService        services.WorkspaceFileService
+	runtimeWorkspaceFileService services.WorkspaceFileService
 }
 
 // NewAIGatewayHandler creates a new AI gateway handler.
-func NewAIGatewayHandler(service aigateway.Service) *AIGatewayHandler {
-	return &AIGatewayHandler{service: service}
+func NewAIGatewayHandler(service aigateway.Service, instanceService services.InstanceService, workspaceFileService, runtimeWorkspaceFileService services.WorkspaceFileService) *AIGatewayHandler {
+	return &AIGatewayHandler{service: service, instanceService: instanceService, workspaceFileService: workspaceFileService, runtimeWorkspaceFileService: runtimeWorkspaceFileService}
 }
 
 // ListModels returns active models available to the current user.

@@ -249,13 +249,14 @@ kubectl -n clawmanager-system get pvc
 kubectl -n clawmanager-system rollout status deployment/clawmanager-app --timeout=15m
 kubectl -n clawmanager-system rollout status deployment/openclaw-runtime --timeout=15m
 kubectl -n clawmanager-system rollout status deployment/hermes-runtime --timeout=15m
+kubectl -n clawmanager-system rollout status deployment/opencode-runtime --timeout=15m
 kubectl -n clawmanager-system get deploy,pod,pvc -o wide
 ```
 
 Expected result:
 
 - All PVCs are `Bound`.
-- `clawmanager-app`, `openclaw-runtime`, and `hermes-runtime` are available.
+- `clawmanager-app`, `openclaw-runtime`, `hermes-runtime`, and `opencode-runtime` are available.
 - MySQL, Redis, MinIO, and skill scanner pods are running.
 
 If PVCs stay `Pending`, check CSI and StorageClass:

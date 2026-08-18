@@ -1,4 +1,4 @@
-export type RuntimeType = "openclaw" | "hermes";
+export type RuntimeType = "openclaw" | "hermes" | "opencode";
 
 export interface RuntimePod {
   id: number;

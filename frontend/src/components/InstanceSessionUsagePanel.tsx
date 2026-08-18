@@ -76,7 +76,10 @@ export default function InstanceSessionUsagePanel({
     [onPanelExpandedChange],
   );
 
-  const supported = instanceType === "openclaw" || instanceType === "hermes";
+  const supported =
+    instanceType === "openclaw" ||
+    instanceType === "hermes" ||
+    instanceType === "opencode";
   const since = useMemo(() => resolveSessionUsageSince(timeRange), [timeRange]);
 
   useEffect(() => {

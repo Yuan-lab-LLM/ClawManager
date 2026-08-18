@@ -104,7 +104,13 @@ function availabilityClass(availability: InstanceAvailability) {
 }
 
 function typeLabel(type: string) {
-  return type === "hermes" ? "Hermes" : type === "openclaw" ? "OpenClaw" : type;
+  return type === "hermes"
+    ? "Hermes"
+    : type === "openclaw"
+      ? "OpenClaw"
+      : type === "opencode"
+        ? "OpenCode"
+        : type;
 }
 
 function formatBytes(value?: number) {
@@ -125,7 +131,7 @@ function supportsWorkspace(instance: Instance) {
   return (
     instance.type === "openclaw" ||
     instance.type === "hermes" ||
-    instance.type === "workbuddy" ||
+    instance.type === "opencode" ||
     Boolean(instance.workspace_path)
   );
 }
@@ -350,6 +356,10 @@ const InstanceDetailPage: React.FC = () => {
     useState<DesktopStreamProfile | "">("");
   const [desktopStreamMessage, setDesktopStreamMessage] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
+  const [openCodeProjectRestartPending, setOpenCodeProjectRestartPending] =
+    useState(false);
+  const [openCodeProjectRestartSawTransition, setOpenCodeProjectRestartSawTransition] =
+    useState(false);
   const [skillPanelExpanded, setSkillPanelExpanded] = useState(() =>
     readPanelExpanded("skills", instanceId),
   );
@@ -357,7 +367,6 @@ const InstanceDetailPage: React.FC = () => {
     readPanelExpanded("session-usage", instanceId),
   );
   const [workspaceHeightPx, setWorkspaceHeightPx] = useState<number | null>(null);
-  const [workspaceVisible, setWorkspaceVisible] = useState(true);
   const [collapsedBottomHeightPx, setCollapsedBottomHeightPx] = useState<number | null>(null);
   const workspaceSectionRef = useRef<HTMLElement>(null);
   const liteRootRef = useRef<HTMLDivElement>(null);
@@ -465,6 +474,33 @@ const InstanceDetailPage: React.FC = () => {
       [instanceId],
     ),
   );
+
+  useEffect(() => {
+    if (!openCodeProjectRestartPending) {
+      return;
+    }
+
+    const currentStatus = status?.status ?? instance?.status;
+    if (!currentStatus) {
+      return;
+    }
+    if (currentStatus !== "running") {
+      setOpenCodeProjectRestartSawTransition(true);
+      return;
+    }
+    if (!openCodeProjectRestartSawTransition) {
+      return;
+    }
+
+    setActionMessage(null);
+    setOpenCodeProjectRestartPending(false);
+    setOpenCodeProjectRestartSawTransition(false);
+  }, [
+    instance?.status,
+    openCodeProjectRestartPending,
+    openCodeProjectRestartSawTransition,
+    status?.status,
+  ]);
 
   useEffect(() => {
     if (!restartMenuOpen) {
@@ -716,6 +752,47 @@ const InstanceDetailPage: React.FC = () => {
           t("instances.restartEnvironmentFailed"),
         ),
       );
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleSelectOpenCodeProject = async (relativePath: string) => {
+    if (!instance || instance.type !== "opencode" || instance.instance_mode !== "pro") {
+      return;
+    }
+
+    const normalized = relativePath
+      .replaceAll("\\", "/")
+      .split("/")
+      .filter(Boolean);
+    if (
+      normalized[0] !== "workspace" ||
+      normalized.some((part) => part === "." || part === "..")
+    ) {
+      alert("Invalid project directory");
+      return;
+    }
+
+    const projectPath = ["/config", ...normalized].join("/");
+    try {
+      setOpenCodeProjectRestartPending(false);
+      setOpenCodeProjectRestartSawTransition(false);
+      setActionLoading("select-opencode-project");
+      setActionMessage("Saving OpenCode project and restarting…");
+      await instanceService.restartInstance(instance.id, {
+        environment_overrides: {
+          CLAWMANAGER_DEFAULT_PROJECT_PATH: projectPath,
+        },
+      });
+      setActionMessage("OpenCode project saved. The instance is restarting.");
+      setOpenCodeProjectRestartPending(true);
+      await fetchMeta(instance.id, { background: true });
+    } catch (selectProjectError) {
+      setOpenCodeProjectRestartPending(false);
+      setOpenCodeProjectRestartSawTransition(false);
+      setActionMessage(null);
+      alert(getErrorMessage(selectProjectError, "Failed to set OpenCode project"));
     } finally {
       setActionLoading(null);
     }
@@ -1297,21 +1374,18 @@ const InstanceDetailPage: React.FC = () => {
             ? { height: pinnedWorkspaceHeight, minHeight: pinnedWorkspaceHeight, flexShrink: 0 }
             : { minHeight: 420, flex: 1 }
         }
-        className={`grid shrink-0 grid-cols-1 grid-rows-[minmax(0,1fr)] gap-4 overflow-hidden min-h-[420px] ${
-          workspaceVisible ? "xl:grid-cols-[minmax(0,1fr)_minmax(360px,28rem)]" : "xl:grid-cols-1"
-        }`}
+        className="grid shrink-0 grid-cols-1 grid-rows-[minmax(0,1fr)] gap-4 overflow-hidden min-h-[420px] xl:grid-cols-[minmax(0,1fr)_minmax(360px,28rem)]"
       >
         <div className="h-full min-h-0 min-w-0">
           <InstanceServiceFrame
             instanceId={instance.id}
             instanceName={instance.name}
             instanceType={instance.type}
+            instanceMode={instance.instance_mode}
             availability={availability}
-            workspaceVisible={supportsWorkspace(instance) ? workspaceVisible : undefined}
-            onWorkspaceVisibilityChange={supportsWorkspace(instance) ? setWorkspaceVisible : undefined}
           />
         </div>
-        {workspaceVisible && (supportsWorkspace(instance) ? (
+        {supportsWorkspace(instance) ? (
           <div className="h-full min-h-0 min-w-0">
             <WorkspaceFileManager instanceId={instance.id} />
           </div>
@@ -1319,7 +1393,7 @@ const InstanceDetailPage: React.FC = () => {
           <div className="cm-surface flex h-full min-h-[420px] items-center justify-center text-sm text-slate-500">
             No workspace
           </div>
-        ))}
+        )}
       </section>
       <div ref={liteBottomRef} className="flex shrink-0 flex-col gap-2">
         <InstanceSkillHubPanel
@@ -1373,30 +1447,36 @@ const InstanceDetailPage: React.FC = () => {
       {renderActionMessage()}
       <section
         data-layout="pro-desktop-workspace"
-        className={`grid items-start gap-4 ${
-          workspaceVisible ? "xl:grid-cols-[minmax(0,7fr)_minmax(380px,3fr)]" : "xl:grid-cols-1"
-        }`}
+        className="grid items-stretch gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(360px,28rem)]"
       >
-        <div className="h-[clamp(520px,calc(100vh-10rem),760px)] min-w-0 overflow-hidden">
+        <div className="aspect-video min-h-[420px] min-w-0 overflow-hidden xl:min-h-0">
           <InstanceServiceFrame
             instanceId={instance.id}
             instanceName={instance.name}
             instanceType={instance.type}
+            instanceMode={instance.instance_mode}
             availability={availability}
-            workspaceVisible={supportsWorkspace(instance) ? workspaceVisible : undefined}
-            onWorkspaceVisibilityChange={supportsWorkspace(instance) ? setWorkspaceVisible : undefined}
           />
         </div>
 
-        {workspaceVisible && (supportsWorkspace(instance) ? (
-          <div className="h-[clamp(520px,calc(100vh-10rem),760px)] min-w-0 overflow-hidden">
-            <WorkspaceFileManager instanceId={instance.id} initialPath="/config" />
+        {supportsWorkspace(instance) ? (
+          <div className="min-h-[420px] min-w-0 xl:h-full xl:min-h-0">
+            <WorkspaceFileManager
+              instanceId={instance.id}
+              initialPath="workspace"
+              onSelectDirectory={
+                instance.type === "opencode" && instance.instance_mode === "pro"
+                  ? handleSelectOpenCodeProject
+                  : undefined
+              }
+              selectingDirectory={actionLoading === "select-opencode-project"}
+            />
           </div>
         ) : (
-          <div className="cm-surface flex h-[clamp(520px,calc(100vh-10rem),760px)] min-w-0 items-center justify-center text-sm text-slate-500">
+          <div className="cm-surface flex min-h-[420px] items-center justify-center text-sm text-slate-500 xl:min-h-0">
             No workspace
           </div>
-        ))}
+        )}
       </section>
 
       {(instance.runtime_type || "desktop") === "desktop" && (
@@ -1462,7 +1542,7 @@ const InstanceDetailPage: React.FC = () => {
             {desktopStreamMessage || t("instances.restartRequiredAfterChange")}
           </p>
         </section>
-        )}
+      )}
 
       <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(280px,22rem)]">
         <InstanceSkillHubPanel

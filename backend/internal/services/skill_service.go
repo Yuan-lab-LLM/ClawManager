@@ -46,37 +46,37 @@ const (
 )
 
 type SkillPayload struct {
-	ID               int                   `json:"id"`
-	ExternalSkillID  string                `json:"external_skill_id"`
-	UserID           int                   `json:"user_id"`
-	SkillKey         string                `json:"skill_key"`
-	Name             string                `json:"name"`
-	Description      *string               `json:"description,omitempty"`
-	Status           string                `json:"status"`
-	SourceType       string                `json:"source_type"`
-	RiskLevel        string                `json:"risk_level"`
-	ScanStatus       string                `json:"scan_status"`
-	LastScannedAt    *time.Time            `json:"last_scanned_at,omitempty"`
-	CurrentVersionID *int                  `json:"current_version_id,omitempty"`
-	CurrentVersionNo *int                  `json:"current_version_no,omitempty"`
-	ContentHash      *string               `json:"content_hash,omitempty"`
-	ContentMD5       *string               `json:"content_md5,omitempty"`
-	ArchiveHash      *string               `json:"archive_hash,omitempty"`
-	RiskReason       *string               `json:"risk_reason,omitempty"`
-	TopFindings      []SkillFindingPayload `json:"top_findings,omitempty"`
-	InstanceCount    int                   `json:"instance_count"`
-	Visibility       string                `json:"visibility"`
-	PublishedAt      *time.Time            `json:"published_at,omitempty"`
-	PublishedBy      *int                  `json:"published_by,omitempty"`
-	Tags             []SkillHubTagPayload  `json:"tags,omitempty"`
+	ID                       int                   `json:"id"`
+	ExternalSkillID          string                `json:"external_skill_id"`
+	UserID                   int                   `json:"user_id"`
+	SkillKey                 string                `json:"skill_key"`
+	Name                     string                `json:"name"`
+	Description              *string               `json:"description,omitempty"`
+	Status                   string                `json:"status"`
+	SourceType               string                `json:"source_type"`
+	RiskLevel                string                `json:"risk_level"`
+	ScanStatus               string                `json:"scan_status"`
+	LastScannedAt            *time.Time            `json:"last_scanned_at,omitempty"`
+	CurrentVersionID         *int                  `json:"current_version_id,omitempty"`
+	CurrentVersionNo         *int                  `json:"current_version_no,omitempty"`
+	ContentHash              *string               `json:"content_hash,omitempty"`
+	ContentMD5               *string               `json:"content_md5,omitempty"`
+	ArchiveHash              *string               `json:"archive_hash,omitempty"`
+	RiskReason               *string               `json:"risk_reason,omitempty"`
+	TopFindings              []SkillFindingPayload `json:"top_findings,omitempty"`
+	InstanceCount            int                   `json:"instance_count"`
+	Visibility               string                `json:"visibility"`
+	PublishedAt              *time.Time            `json:"published_at,omitempty"`
+	PublishedBy              *int                  `json:"published_by,omitempty"`
+	Tags                     []SkillHubTagPayload  `json:"tags,omitempty"`
 	Publishable              bool                  `json:"publishable"`
 	PublishBlockedReason     *string               `json:"publish_blocked_reason,omitempty"`
 	PackageCollectError      *string               `json:"package_collect_error,omitempty"`
 	PackageMaterializeStatus *string               `json:"package_materialize_status,omitempty"`
 	PackageMaterializeError  *string               `json:"package_materialize_error,omitempty"`
 	OwnerUsername            *string               `json:"owner_username,omitempty"`
-	CreatedAt        time.Time             `json:"created_at"`
-	UpdatedAt        time.Time             `json:"updated_at"`
+	CreatedAt                time.Time             `json:"created_at"`
+	UpdatedAt                time.Time             `json:"updated_at"`
 }
 
 type SkillFindingPayload struct {
@@ -234,6 +234,15 @@ type skillService struct {
 	runtimeSkillSync   *runtimeSkillSyncDeps
 	materializeService *SkillPackageMaterializeService
 }
+
+type skillScannerFailureError struct {
+	cause error
+}
+
+func (e *skillScannerFailureError) Error() string {
+	return fmt.Sprintf("skill scanner failed: %v", e.cause)
+}
+func (e *skillScannerFailureError) Unwrap() error { return e.cause }
 
 func NewSkillService(repo repository.SkillRepository, instanceRepo repository.InstanceRepository, userRepo repository.UserRepository, commandService InstanceCommandService, commandRepo repository.InstanceCommandRepository, storage ObjectStorageService, scanner SkillScannerClient) SkillService {
 	return &skillService{repo: repo, instanceRepo: instanceRepo, userRepo: userRepo, commandService: commandService, commandRepo: commandRepo, storage: storage, scanner: scanner}
@@ -582,9 +591,6 @@ func (s *skillService) AttachSkillToInstance(actorUserID int, actorRole string, 
 	if skill.Status != "active" {
 		return nil, fmt.Errorf("skill is not active")
 	}
-	if isBlockedSkillRisk(skill.RiskLevel) {
-		return nil, fmt.Errorf("skill is blocked by risk policy")
-	}
 
 	versionID := skill.CurrentVersionID
 	var blob *models.SkillBlob
@@ -610,7 +616,7 @@ func (s *skillService) AttachSkillToInstance(actorUserID int, actorRole string, 
 	if err := s.repo.UpsertInstanceSkill(item); err != nil {
 		return nil, err
 	}
-	if versionID != nil && blob != nil {
+	if versionID != nil && blob != nil && !SupportsServerWorkspaceSkillScan(instance) {
 		if _, err := s.commandService.Create(instanceID, nil, CreateInstanceCommandRequest{
 			CommandType: InstanceCommandTypeInstallSkill,
 			Payload: map[string]interface{}{
@@ -645,7 +651,7 @@ func (s *skillService) materializeLiteInstanceSkill(ctx context.Context, instanc
 	if err != nil {
 		return err
 	}
-	if !isLiteRuntimeInstance(instance) || instance.WorkspacePath == nil || strings.TrimSpace(*instance.WorkspacePath) == "" {
+	if (!isLiteRuntimeInstance(instance) && !SupportsServerWorkspaceSkillScan(instance)) || instance.WorkspacePath == nil || strings.TrimSpace(*instance.WorkspacePath) == "" {
 		return nil
 	}
 
@@ -673,10 +679,35 @@ func (s *skillService) materializeLiteInstanceSkill(ctx context.Context, instanc
 	if targetRoot == "" {
 		return nil
 	}
-	if err := writeSkillDirectoryAtomically(targetRoot, targetName, dirs[0].Files); err != nil {
+	files := dirs[0].Files
+	if strings.EqualFold(strings.TrimSpace(instance.Type), RuntimeTypeOpenCode) {
+		files = withOpenCodeSkillFrontmatter(files, targetName, skill)
+	}
+	if err := writeSkillDirectoryAtomically(targetRoot, targetName, files); err != nil {
 		return err
 	}
-	return ensureLiteRuntimePersistentOwnership(instance)
+	return ensureRuntimeSkillOwnership(instance)
+}
+
+// withOpenCodeSkillFrontmatter keeps the Hub archive untouched while making a
+// legacy plain-Markdown SKILL.md discoverable by OpenCode. OpenCode requires a
+// name and description frontmatter block; existing packages that already have
+// one are copied byte-for-byte.
+func withOpenCodeSkillFrontmatter(files map[string][]byte, name string, skill *models.Skill) map[string][]byte {
+	body, ok := files["SKILL.md"]
+	if !ok || bytes.HasPrefix(bytes.TrimSpace(body), []byte("---")) {
+		return files
+	}
+	description := "ClawManager managed skill " + name
+	if skill != nil && skill.Description != nil && strings.TrimSpace(*skill.Description) != "" {
+		description = strings.TrimSpace(*skill.Description)
+	}
+	copyFiles := make(map[string][]byte, len(files))
+	for path, content := range files {
+		copyFiles[path] = content
+	}
+	copyFiles["SKILL.md"] = []byte(fmt.Sprintf("---\nname: %s\ndescription: %q\n---\n\n%s", name, description, body))
+	return copyFiles
 }
 
 func resolveInstanceSkillSourceType(existing *models.InstanceSkill, incoming string, skill *models.Skill) string {
@@ -706,7 +737,48 @@ func liteRuntimePersistentRoot(instance *models.Instance) string {
 	if strings.EqualFold(strings.TrimSpace(instance.Type), RuntimeTypeHermes) {
 		return filepath.Join(workspacePath, "home", ".hermes")
 	}
+	if strings.EqualFold(strings.TrimSpace(instance.Type), RuntimeTypeOpenCode) {
+		if isLiteRuntimeInstance(instance) {
+			return filepath.Join(workspacePath, "home", ".opencode")
+		}
+		return filepath.Join(workspacePath, ".opencode")
+	}
 	return filepath.Join(workspacePath, "home", ".openclaw")
+}
+
+func ensureRuntimeSkillOwnership(instance *models.Instance) error {
+	if instance == nil || instance.ID <= 0 || instance.WorkspacePath == nil {
+		return nil
+	}
+	if isLiteRuntimeInstance(instance) {
+		return ensureLiteRuntimePersistentOwnership(instance)
+	}
+	if !strings.EqualFold(strings.TrimSpace(instance.Type), RuntimeTypeOpenCode) || os.PathSeparator != '/' {
+		return nil
+	}
+	root := runtimeSkillInstallRoot(instance)
+	if root == "" {
+		return nil
+	}
+	if err := chownRuntimePath(root, 911, 1001, 0750); err != nil {
+		return fmt.Errorf("failed to set OpenCode skill root owner: %w", err)
+	}
+	return filepath.WalkDir(root, func(current string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if !isPathWithin(root, current) {
+			return fmt.Errorf("OpenCode skill path escapes root: %s", current)
+		}
+		if entry.Type()&os.ModeSymlink != 0 {
+			return nil
+		}
+		mode := os.FileMode(0640)
+		if entry.IsDir() {
+			mode = 0750
+		}
+		return chownRuntimePath(current, 911, 1001, mode)
+	})
 }
 
 func ensureLiteRuntimePersistentOwnership(instance *models.Instance) error {
@@ -775,10 +847,10 @@ func chownRuntimePath(targetPath string, uid, gid int, mode os.FileMode) error {
 			}
 			return nil
 		}
-		return fmt.Errorf("failed to set lite runtime owner on %s: %w", targetPath, err)
+		return fmt.Errorf("failed to set runtime owner on %s: %w", targetPath, err)
 	}
 	if err := os.Chmod(targetPath, mode); err != nil {
-		return fmt.Errorf("failed to set lite runtime permissions on %s: %w", targetPath, err)
+		return fmt.Errorf("failed to set runtime permissions on %s: %w", targetPath, err)
 	}
 	return nil
 }
@@ -868,6 +940,13 @@ func isPathWithin(root, target string) bool {
 }
 
 func (s *skillService) RemoveSkillFromInstance(instanceID int, skillID int) error {
+	instance, err := s.instanceRepo.GetByID(instanceID)
+	if err != nil {
+		return err
+	}
+	if instance == nil {
+		return fmt.Errorf("instance not found")
+	}
 	item, err := s.repo.GetInstanceSkill(instanceID, skillID)
 	if err != nil {
 		return err
@@ -885,13 +964,15 @@ func (s *skillService) RemoveSkillFromInstance(instanceID int, skillID int) erro
 	if err := s.repo.UpsertInstanceSkill(item); err != nil {
 		return err
 	}
-	if _, err := s.commandService.Create(instanceID, nil, CreateInstanceCommandRequest{
-		CommandType:    InstanceCommandTypeUninstallSkill,
-		Payload:        map[string]interface{}{"skill_id": skillID, "target_name": skillKeyForRemoval(item)},
-		IdempotencyKey: fmt.Sprintf("remove-skill-%d-%d-%d", instanceID, skillID, now.UnixNano()),
-		TimeoutSeconds: 300,
-	}); err != nil {
-		return fmt.Errorf("failed to queue uninstall skill command: %w", err)
+	if !SupportsServerWorkspaceSkillScan(instance) {
+		if _, err := s.commandService.Create(instanceID, nil, CreateInstanceCommandRequest{
+			CommandType:    InstanceCommandTypeUninstallSkill,
+			Payload:        map[string]interface{}{"skill_id": skillID, "target_name": skillKeyForRemoval(item)},
+			IdempotencyKey: fmt.Sprintf("remove-skill-%d-%d-%d", instanceID, skillID, now.UnixNano()),
+			TimeoutSeconds: 300,
+		}); err != nil {
+			return fmt.Errorf("failed to queue uninstall skill command: %w", err)
+		}
 	}
 	return nil
 }
@@ -938,17 +1019,12 @@ func (s *skillService) removeRuntimeInstanceSkillDirectory(instanceID int, item 
 	if err := os.RemoveAll(targetPath); err != nil {
 		return fmt.Errorf("failed to remove runtime skill directory: %w", err)
 	}
-	return ensureLiteRuntimePersistentOwnership(instance)
+	return ensureRuntimeSkillOwnership(instance)
 }
 
 func (s *skillService) removeLiteInstanceSkillDirectory(instanceID int, item *models.InstanceSkill) error {
 	return s.removeRuntimeInstanceSkillDirectory(instanceID, item)
 }
-func isBlockedSkillRisk(value string) bool {
-	value = strings.TrimSpace(value)
-	return strings.EqualFold(value, skillRiskMedium) || strings.EqualFold(value, skillRiskHigh)
-}
-
 func isRemovedInstanceSkill(item *models.InstanceSkill) bool {
 	if item == nil {
 		return false
@@ -1017,7 +1093,13 @@ func (s *skillService) SyncAgentSkills(instanceID int, req AgentSkillInventoryRe
 			}
 		}
 
-		if skill != nil && liteInventoryUsesWorkspaceHash(instance) {
+		// An uploaded skill is a library-managed artifact. Its installed version
+		// must remain the comparison baseline when an instance copy is edited;
+		// otherwise a workspace scan would rewrite that version's blob hash and
+		// hide the divergence from the UI.
+		if skill != nil &&
+			liteInventoryUsesWorkspaceHash(instance) &&
+			!strings.EqualFold(skill.SourceType, skillSourceUploaded) {
 			reconciledBlob, reconciledVersion, reconcileErr := s.reconcileLiteDiscoveredBlob(skill, hash)
 			if reconcileErr != nil {
 				return reconcileErr
@@ -1083,13 +1165,22 @@ func (s *skillService) SyncAgentSkills(instanceID int, req AgentSkillInventoryRe
 				return err
 			}
 		}
+		existingInstanceSkill, err := s.repo.GetInstanceSkill(instanceID, skill.ID)
+		if err != nil {
+			return err
+		}
+		if isUserRemovedInstanceSkill(existingInstanceSkill) {
+			continue
+		}
+		isHubInstalled := normalizedSource == "injected_by_clawmanager" ||
+			(existingInstanceSkill != nil && strings.EqualFold(strings.TrimSpace(existingInstanceSkill.SourceType), "injected_by_clawmanager"))
 		if version == nil {
 			version, err = s.repo.GetVersionBySkillAndBlob(skill.ID, blob.ID)
 			if err != nil {
 				return err
 			}
 		}
-		if version == nil && !(strings.EqualFold(skill.SourceType, skillSourceUploaded) && normalizedSource == "injected_by_clawmanager") {
+		if version == nil && !(strings.EqualFold(skill.SourceType, skillSourceUploaded) && isHubInstalled) {
 			latest, err := s.repo.GetLatestVersionBySkillID(skill.ID)
 			if err != nil {
 				return err
@@ -1112,12 +1203,19 @@ func (s *skillService) SyncAgentSkills(instanceID int, req AgentSkillInventoryRe
 				return err
 			}
 		}
-		existingInstanceSkill, err := s.repo.GetInstanceSkill(instanceID, skill.ID)
-		if err != nil {
-			return err
-		}
-		if isUserRemovedInstanceSkill(existingInstanceSkill) {
-			continue
+		// A modified Hub-installed skill has no library version for its newly
+		// observed hash. Keep the version that was originally installed so the
+		// observed hash can be compared against it and content_diverged becomes
+		// true instead of dropping the baseline.
+		if version == nil &&
+			strings.EqualFold(skill.SourceType, skillSourceUploaded) &&
+			isHubInstalled &&
+			existingInstanceSkill != nil &&
+			existingInstanceSkill.SkillVersionID != nil {
+			version, err = s.repo.GetVersionByID(*existingInstanceSkill.SkillVersionID)
+			if err != nil {
+				return err
+			}
 		}
 
 		active = append(active, skill.ID)
@@ -1548,7 +1646,7 @@ func extractArchiveFileMap(filename string, raw []byte) (map[string][]byte, erro
 			if err != nil {
 				return nil, fmt.Errorf("failed to read zip entry: %w", err)
 			}
-			fileMap[entry.Name] = content
+			fileMap[decodeZipEntryName(entry)] = content
 		}
 	default:
 		return nil, fmt.Errorf("only .zip skill archives are supported")
@@ -1698,7 +1796,7 @@ func (s *skillService) promoteSkillToUploadedLibrary(skill *models.Skill) error 
 
 func (s *skillService) recordScan(blob *models.SkillBlob, dir *extractedSkillDirectory) error {
 	if s.scanner == nil {
-		return fmt.Errorf("skill scanner is not configured")
+		return s.markSkillScanFailed(blob, fmt.Errorf("skill scanner is not configured"))
 	}
 	if dir == nil {
 		return fmt.Errorf("skill scanner requires real skill package content")
@@ -1709,7 +1807,7 @@ func (s *skillService) recordScan(blob *models.SkillBlob, dir *extractedSkillDir
 	}
 	riskLevel, findings, summary, err := s.scanner.ScanArchive(context.Background(), blob.FileName, archiveBytes, nil)
 	if err != nil {
-		return fmt.Errorf("skill scanner failed: %w", err)
+		return s.markSkillScanFailed(blob, err)
 	}
 	if strings.TrimSpace(summary) == "" {
 		summary = "Skill scanned by external skill-scanner service"
@@ -1731,6 +1829,19 @@ func (s *skillService) recordScan(blob *models.SkillBlob, dir *extractedSkillDir
 		return err
 	}
 	return nil
+}
+
+func (s *skillService) markSkillScanFailed(blob *models.SkillBlob, cause error) error {
+	if blob == nil {
+		return fmt.Errorf("skill scanner failed: %w", cause)
+	}
+	blob.ScanStatus = "failed"
+	blob.RiskLevel = skillRiskUnknown
+	blob.UpdatedAt = time.Now().UTC()
+	if err := s.repo.UpdateBlob(blob); err != nil {
+		return fmt.Errorf("failed to record skill scan failure: %w", err)
+	}
+	return &skillScannerFailureError{cause: cause}
 }
 
 func buildNormalizedZip(dir extractedSkillDirectory) ([]byte, string, error) {
@@ -1930,7 +2041,7 @@ func (s *skillService) toSkillPayload(item models.Skill) (*SkillPayload, error) 
 	payload := &SkillPayload{
 		ID: item.ID, ExternalSkillID: formatExternalSkillID(item.ID), UserID: item.UserID, SkillKey: item.SkillKey, Name: item.Name, Description: item.Description,
 		Status: item.Status, SourceType: item.SourceType, RiskLevel: item.RiskLevel, ScanStatus: "pending",
-		Visibility: skillVisibilityPrivate,
+		Visibility:    skillVisibilityPrivate,
 		LastScannedAt: item.LastScannedAt, CurrentVersionID: item.CurrentVersionID, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt,
 	}
 	if strings.TrimSpace(item.Visibility) != "" {

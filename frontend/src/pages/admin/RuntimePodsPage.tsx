@@ -13,6 +13,7 @@ const FILTERS: Array<{ value: RuntimeFilter; labelKey?: string; label?: string }
   { value: "all", labelKey: "common.all" },
   { value: "openclaw", label: "OpenClaw" },
   { value: "hermes", label: "Hermes" },
+  { value: "opencode", label: "OpenCode" },
 ];
 
 function formatBytes(value: number) {
@@ -30,7 +31,9 @@ function formatBytes(value: number) {
 }
 
 function formatRuntimeType(value: string) {
-  return value === "hermes" ? "Hermes" : "OpenClaw";
+  if (value === "hermes") return "Hermes";
+  if (value === "opencode") return "OpenCode";
+  return "OpenClaw";
 }
 
 function stateClass(pod: RuntimePod) {

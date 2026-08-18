@@ -132,6 +132,9 @@ func extractToken(c *gin.Context) (string, bool) {
 		}
 		return parts[1], true
 	}
+	if token := strings.TrimSpace(c.GetHeader("x-api-key")); token != "" {
+		return token, true
+	}
 
 	// Browsers cannot set custom Authorization headers for native WebSocket
 	// handshakes, so allow `?token=` specifically for upgrade requests.

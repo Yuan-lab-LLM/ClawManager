@@ -169,7 +169,7 @@ func (s *instanceService) ValidateCreateRequests(userID int, requests []CreateIn
 type CreateInstanceRequest struct {
 	Name                 string              `json:"name" validate:"required,min=3,max=50"`
 	Description          *string             `json:"description,omitempty"`
-	Type                 string              `json:"type" validate:"required,oneof=openclaw ubuntu debian centos custom webtop hermes workbuddy"`
+	Type                 string              `json:"type" validate:"required,oneof=openclaw ubuntu debian centos custom webtop hermes opencode workbuddy"`
 	Mode                 string              `json:"mode" validate:"omitempty,oneof=lite pro"`
 	InstanceMode         string              `json:"instance_mode" validate:"omitempty,oneof=lite pro"`
 	RuntimeType          string              `json:"runtime_type" validate:"omitempty,oneof=gateway desktop shell"`
@@ -1045,7 +1045,9 @@ func (s *instanceService) securityModeForInstance(instanceType string) k8s.PodSe
 	if s != nil && s.allowPrivilegedPods {
 		return k8s.PodSecurityPrivileged
 	}
-	if strings.EqualFold(strings.TrimSpace(instanceType), "openclaw") {
+	if strings.EqualFold(strings.TrimSpace(instanceType), "openclaw") ||
+		strings.EqualFold(strings.TrimSpace(instanceType), "opencode") ||
+		strings.EqualFold(strings.TrimSpace(instanceType), "workbuddy") {
 		return k8s.PodSecurityChromiumCompat
 	}
 	return k8s.PodSecurityDefault
@@ -1118,7 +1120,7 @@ func (s *instanceService) buildGatewayEnv(instance *models.Instance) (map[string
 
 	token := strings.TrimSpace(*instance.AccessToken)
 	s.refreshGatewayTokenAlias(instance.ID, token)
-	return map[string]string{
+	env := map[string]string{
 		"CLAWMANAGER_LLM_BASE_URL":          baseURL,
 		"CLAWMANAGER_LLM_API_KEY":           token,
 		"CLAWMANAGER_LLM_MODEL":             modelInjection.modelsJSON,
@@ -1130,7 +1132,65 @@ func (s *instanceService) buildGatewayEnv(instance *models.Instance) (map[string
 		"OPENAI_API_BASE":                   baseURL,
 		"OPENAI_API_KEY":                    token,
 		"OPENAI_MODEL":                      modelInjection.defaultModel,
-	}, nil
+	}
+	if strings.EqualFold(strings.TrimSpace(instance.Type), RuntimeTypeOpenCode) {
+		env["OPENCODE_SERVER_PASSWORD"] = token
+		env["OPENCODE_SERVER_USERNAME"] = "opencode"
+		configContent, err := buildOpenCodeGatewayConfig(modelInjection.modelsJSON)
+		if err != nil {
+			return nil, fmt.Errorf("failed to build opencode gateway config: %w", err)
+		}
+		// The Lite runtime agent materializes this in the instance's persistent
+		// OpenCode config directory before it starts `opencode web`.  Keeping the
+		// credentials as env references ensures the generated file does not embed
+		// a user-managed provider or a direct external API key.
+		env["OPENCODE_CONFIG_CONTENT"] = configContent
+	}
+	return env, nil
+}
+
+// buildOpenCodeGatewayConfig translates ClawManager's active model catalogue
+// into OpenCode's custom-provider format. The gateway's "auto" model is always
+// included, so a newly-created Lite instance is usable even when the active
+// catalogue contains only aliases added after the runtime image was built.
+func buildOpenCodeGatewayConfig(modelsJSON string) (string, error) {
+	var modelIDs []string
+	if err := json.Unmarshal([]byte(modelsJSON), &modelIDs); err != nil {
+		return "", fmt.Errorf("invalid gateway model catalogue: %w", err)
+	}
+
+	models := make(map[string]map[string]string, len(modelIDs))
+	for _, modelID := range modelIDs {
+		modelID = strings.TrimSpace(modelID)
+		if modelID == "" {
+			continue
+		}
+		models[modelID] = map[string]string{"name": modelID}
+	}
+	if _, ok := models["auto"]; !ok {
+		models["auto"] = map[string]string{"name": "auto"}
+	}
+
+	config := map[string]interface{}{
+		"$schema": "https://opencode.ai/config.json",
+		"model":   "clawmanager/auto",
+		"provider": map[string]interface{}{
+			"clawmanager": map[string]interface{}{
+				"npm":  "@ai-sdk/openai-compatible",
+				"name": "ClawManager AI Gateway",
+				"options": map[string]string{
+					"baseURL": "{env:CLAWMANAGER_LLM_BASE_URL}",
+					"apiKey":  "{env:CLAWMANAGER_LLM_API_KEY}",
+				},
+				"models": models,
+			},
+		},
+	}
+	raw, err := json.Marshal(config)
+	if err != nil {
+		return "", err
+	}
+	return string(raw), nil
 }
 
 func (s *instanceService) BuildGatewayEnv(instance *models.Instance) (map[string]string, error) {
@@ -1234,7 +1294,7 @@ func (s *instanceService) buildAgentEnv(instance *models.Instance) (map[string]s
 
 func supportsManagedRuntimeIntegration(instanceType string) bool {
 	switch strings.ToLower(strings.TrimSpace(instanceType)) {
-	case "openclaw", "hermes", "workbuddy":
+	case "openclaw", "hermes", "opencode", "workbuddy":
 		return true
 	default:
 		return false
@@ -1295,10 +1355,16 @@ func managedRuntimePersistentDir(instance *models.Instance) string {
 		if strings.EqualFold(instance.Type, "hermes") {
 			return path.Join(workspacePath, "home", ".hermes")
 		}
+		if strings.EqualFold(instance.Type, "opencode") {
+			return path.Join(workspacePath, "home", ".opencode")
+		}
 		return path.Join(workspacePath, "home", ".openclaw")
 	}
 	if strings.EqualFold(instance.Type, "hermes") {
 		return "/config/.hermes"
+	}
+	if strings.EqualFold(instance.Type, "opencode") {
+		return "/config/.opencode"
 	}
 	return persistentVolumeMountPath(instance)
 }
@@ -1316,7 +1382,37 @@ func persistentVolumeMountPath(instance *models.Instance) string {
 }
 
 func runtimeVolumeInitScripts(instanceType, mountPath string) []k8s.VolumeInitScript {
-	if !strings.EqualFold(strings.TrimSpace(instanceType), "hermes") || strings.TrimSpace(mountPath) != "/config" {
+	if strings.TrimSpace(mountPath) != "/config" {
+		return nil
+	}
+	if strings.EqualFold(strings.TrimSpace(instanceType), "opencode") {
+		return []k8s.VolumeInitScript{
+			{
+				Name:      "data",
+				MountPath: "/config",
+				// Some Webtop/Konsole builds do not provide a default profile.  In
+				// that state Konsole attempts to execute an empty command and shows
+				// a misleading warning before falling back to bash.  Persist an
+				// explicit profile for every OpenCode Pro desktop.
+				Script: `set -eu
+base="${CLAWMANAGER_VOLUME_PATH:-/config}"
+mkdir -p "$base/.config" "$base/.local/share/konsole"
+cat >"$base/.config/konsolerc" <<'EOF'
+[Desktop Entry]
+DefaultProfile=ClawManager.profile
+EOF
+cat >"$base/.local/share/konsole/ClawManager.profile" <<'EOF'
+[General]
+Command=/bin/bash
+Name=ClawManager Shell
+Parent=FALLBACK/
+EOF
+chmod 644 "$base/.config/konsolerc" "$base/.local/share/konsole/ClawManager.profile"
+chown -R 911:1001 "$base/.config" "$base/.local" || true`,
+			},
+		}
+	}
+	if !strings.EqualFold(strings.TrimSpace(instanceType), "hermes") {
 		return nil
 	}
 	return []k8s.VolumeInitScript{

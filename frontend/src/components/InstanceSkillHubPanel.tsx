@@ -324,6 +324,7 @@ const InstanceSkillHubPanel: React.FC<InstanceSkillHubPanelProps> = ({
   const { t, locale } = useI18n();
   const { user } = useAuth();
   const instanceId = instance.id;
+  const skillHubUnsupported = false;
 
   const [skillLoading, setSkillLoading] = useState(false);
   const [skillError, setSkillError] = useState<string | null>(null);
@@ -381,6 +382,9 @@ const InstanceSkillHubPanel: React.FC<InstanceSkillHubPanelProps> = ({
   }, [instanceId]);
 
   useEffect(() => {
+    if (skillHubUnsupported) {
+      return;
+    }
     let disposed = false;
     const load = async () => {
       try {
@@ -406,7 +410,7 @@ const InstanceSkillHubPanel: React.FC<InstanceSkillHubPanelProps> = ({
     return () => {
       disposed = true;
     };
-  }, [reloadSkillSection]);
+  }, [reloadSkillSection, skillHubUnsupported]);
 
   useEffect(() => {
     skillSyncActiveRef.current = false;
@@ -417,7 +421,7 @@ const InstanceSkillHubPanel: React.FC<InstanceSkillHubPanelProps> = ({
   }, [instanceId]);
 
   useEffect(() => {
-    if (!panelExpanded) {
+    if (skillHubUnsupported || !panelExpanded) {
       return;
     }
     const skillsTimer = window.setInterval(() => {
@@ -426,7 +430,7 @@ const InstanceSkillHubPanel: React.FC<InstanceSkillHubPanelProps> = ({
       }
     }, skillsPollInterval);
     return () => window.clearInterval(skillsTimer);
-  }, [panelExpanded, refreshSkills, skillsPollInterval]);
+  }, [panelExpanded, refreshSkills, skillsPollInterval, skillHubUnsupported]);
 
   useEffect(() => {
     setInstanceSkillPage(1);
@@ -508,7 +512,7 @@ const InstanceSkillHubPanel: React.FC<InstanceSkillHubPanelProps> = ({
   const usesWorkspaceSkillSync =
     isLiteInstance ||
     (Boolean(instance.workspace_path?.trim()) &&
-      (instance.type === "hermes" || instance.type === "openclaw"));
+      (instance.type === "hermes" || instance.type === "openclaw" || instance.type === "opencode"));
 
   const handleInstallHubSkill = async (skillId: number) => {
     if (!usesWorkspaceSkillSync) {
@@ -844,6 +848,10 @@ const InstanceSkillHubPanel: React.FC<InstanceSkillHubPanelProps> = ({
     native: countNativeSkills(instanceSkills),
     installed: hubInstalledCount,
   });
+
+  if (skillHubUnsupported) {
+    return null;
+  }
 
   return (
     <>

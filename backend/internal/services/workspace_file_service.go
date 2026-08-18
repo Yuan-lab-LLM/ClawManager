@@ -223,7 +223,11 @@ func (s *workspaceFileService) OpenDownload(ctx context.Context, scope Workspace
 	if err != nil {
 		return nil, "", 0, err
 	}
-	if err := s.recordAudit(ctx, scope, "download", resolved.RelativePath, info.Size()); err != nil {
+	action := "download"
+	if strings.HasPrefix(strings.TrimSpace(scope.AuditActionPrefix), "llm_") {
+		action = "input_file"
+	}
+	if err := s.recordAudit(ctx, scope, action, resolved.RelativePath, info.Size()); err != nil {
 		file.Close()
 		return nil, "", 0, err
 	}
@@ -617,7 +621,7 @@ func runtimeWorkspaceOwner(scope WorkspaceFileScope) (int, int, bool) {
 	if parts[len(parts)-1] != instancePart || parts[len(parts)-2] != userPart {
 		return 0, 0, false
 	}
-	if runtimeType != RuntimeTypeOpenClaw && runtimeType != RuntimeTypeHermes {
+	if runtimeType != RuntimeTypeOpenClaw && runtimeType != RuntimeTypeHermes && runtimeType != RuntimeTypeOpenCode {
 		return 0, 0, false
 	}
 	linuxID := RuntimeLinuxID(scope.InstanceID)

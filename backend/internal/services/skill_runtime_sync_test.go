@@ -138,10 +138,12 @@ func TestDiscoverRuntimeSkillDirectoriesFlatAndNested(t *testing.T) {
 	}
 }
 
-func TestRuntimeSkillInstallRootOpenClawAndHermes(t *testing.T) {
+func TestRuntimeSkillInstallRootOpenClawHermesAndOpenCode(t *testing.T) {
 	workspace := "/workspaces/demo/instance-1"
 	hermes := &models.Instance{Type: RuntimeTypeHermes, WorkspacePath: &workspace}
 	openclaw := &models.Instance{Type: RuntimeTypeOpenClaw, WorkspacePath: &workspace}
+	opencodeLite := &models.Instance{Type: RuntimeTypeOpenCode, InstanceMode: InstanceModeLite, RuntimeType: RuntimeBackendGateway, WorkspacePath: &workspace}
+	opencodePro := &models.Instance{Type: RuntimeTypeOpenCode, InstanceMode: InstanceModePro, RuntimeType: RuntimeBackendDesktop, WorkspacePath: &workspace}
 
 	hermesRoot := runtimeSkillInstallRoot(hermes)
 	openclawRoot := runtimeSkillInstallRoot(openclaw)
@@ -150,6 +152,20 @@ func TestRuntimeSkillInstallRootOpenClawAndHermes(t *testing.T) {
 	}
 	if openclawRoot != filepath.Join(workspace, "home", ".openclaw", "workspace", "skills") {
 		t.Fatalf("openclaw root = %q", openclawRoot)
+	}
+	if got := runtimeSkillInstallRoot(opencodeLite); got != filepath.Join(workspace, "home", ".opencode", "skills") {
+		t.Fatalf("OpenCode Lite root = %q", got)
+	}
+	if got := runtimeSkillInstallRoot(opencodePro); got != filepath.Join(workspace, "workspace", ".opencode", "skills") {
+		t.Fatalf("OpenCode Pro root = %q", got)
+	}
+}
+
+func TestSupportsServerWorkspaceSkillScanOpenCode(t *testing.T) {
+	workspace := "/workspaces/demo/instance-1"
+	instance := &models.Instance{Type: RuntimeTypeOpenCode, InstanceMode: InstanceModePro, RuntimeType: RuntimeBackendDesktop, WorkspacePath: &workspace}
+	if !SupportsServerWorkspaceSkillScan(instance) {
+		t.Fatal("expected OpenCode Pro to support server workspace skill sync")
 	}
 }
 
@@ -234,22 +250,22 @@ func TestSyncAgentSkillsPreservesInjectedProvenanceAfterWorkspaceScan(t *testing
 	stub := &provenanceCaptureRepoStub{
 		capturingSkillRepoStub: capturingSkillRepoStub{
 			skillRepoStub: skillRepoStub{
-			skills: map[int]*models.Skill{
-				10: {
-					ID: 10, UserID: 1, SkillKey: "ppt-1-0-0", Name: "ppt-1.0.0",
-					SourceType: skillSourceUploaded, Status: skillStatusActive,
-					Visibility: skillVisibilityPublic, CurrentVersionID: &versionID,
+				skills: map[int]*models.Skill{
+					10: {
+						ID: 10, UserID: 1, SkillKey: "ppt-1-0-0", Name: "ppt-1.0.0",
+						SourceType: skillSourceUploaded, Status: skillStatusActive,
+						Visibility: skillVisibilityPublic, CurrentVersionID: &versionID,
+					},
 				},
-			},
-			blobs: map[int]*models.SkillBlob{
-				1: {ID: 1, ContentHash: contentHash, ObjectKey: "hub/ppt.zip", ScanStatus: "completed"},
-			},
-			versions: map[int]*models.SkillVersion{
-				1: {ID: 1, SkillID: 10, BlobID: 1, VersionNo: 1},
-			},
-			instanceSkills: []models.InstanceSkill{
-				{InstanceID: 1, SkillID: 10, SourceType: "injected_by_clawmanager", Status: "active"},
-			},
+				blobs: map[int]*models.SkillBlob{
+					1: {ID: 1, ContentHash: contentHash, ObjectKey: "hub/ppt.zip", ScanStatus: "completed"},
+				},
+				versions: map[int]*models.SkillVersion{
+					1: {ID: 1, SkillID: 10, BlobID: 1, VersionNo: 1},
+				},
+				instanceSkills: []models.InstanceSkill{
+					{InstanceID: 1, SkillID: 10, SourceType: "injected_by_clawmanager", Status: "active"},
+				},
 			},
 		},
 	}
@@ -283,19 +299,19 @@ func TestSyncAgentSkillsReusesUploadedSkillOnWorkspaceScan(t *testing.T) {
 	stub := &provenanceCaptureRepoStub{
 		capturingSkillRepoStub: capturingSkillRepoStub{
 			skillRepoStub: skillRepoStub{
-			skills: map[int]*models.Skill{
-				10: {
-					ID: 10, UserID: 1, SkillKey: "ppt-1-0-0", Name: "ppt-1.0.0",
-					SourceType: skillSourceUploaded, Status: skillStatusActive,
-					Visibility: skillVisibilityPublic, CurrentVersionID: &versionID,
+				skills: map[int]*models.Skill{
+					10: {
+						ID: 10, UserID: 1, SkillKey: "ppt-1-0-0", Name: "ppt-1.0.0",
+						SourceType: skillSourceUploaded, Status: skillStatusActive,
+						Visibility: skillVisibilityPublic, CurrentVersionID: &versionID,
+					},
 				},
-			},
-			blobs: map[int]*models.SkillBlob{
-				1: {ID: 1, ContentHash: contentHash, ObjectKey: "hub/ppt.zip", ScanStatus: "completed"},
-			},
-			versions: map[int]*models.SkillVersion{
-				1: {ID: 1, SkillID: 10, BlobID: 1, VersionNo: 1},
-			},
+				blobs: map[int]*models.SkillBlob{
+					1: {ID: 1, ContentHash: contentHash, ObjectKey: "hub/ppt.zip", ScanStatus: "completed"},
+				},
+				versions: map[int]*models.SkillVersion{
+					1: {ID: 1, SkillID: 10, BlobID: 1, VersionNo: 1},
+				},
 			},
 		},
 	}
@@ -320,6 +336,57 @@ func TestSyncAgentSkillsReusesUploadedSkillOnWorkspaceScan(t *testing.T) {
 	}
 	if len(stub.upserted) != 1 || stub.upserted[0].SkillID != 10 {
 		t.Fatalf("upserted = %#v, want instance skill for uploaded skill id 10", stub.upserted)
+	}
+}
+
+func TestSyncAgentSkillsKeepsHubVersionBaselineWhenInstanceCopyChanges(t *testing.T) {
+	installedHash := "abc123def456789012345678901234"
+	changedHash := "def456abc123789012345678901234"
+	versionID := 1
+	stub := &provenanceCaptureRepoStub{
+		capturingSkillRepoStub: capturingSkillRepoStub{
+			nextSkillID: 1,
+			skillRepoStub: skillRepoStub{
+				skills: map[int]*models.Skill{
+					10: {ID: 10, UserID: 1, SkillKey: "customer-manager", Name: "Customer Manager", SourceType: skillSourceUploaded, Status: skillStatusActive, CurrentVersionID: &versionID},
+				},
+				blobs: map[int]*models.SkillBlob{
+					1: {ID: 1, ContentHash: installedHash, ObjectKey: "hub/customer-manager.zip", ScanStatus: "completed"},
+				},
+				versions: map[int]*models.SkillVersion{
+					1: {ID: 1, SkillID: 10, BlobID: 1, VersionNo: 1},
+				},
+				instanceSkills: []models.InstanceSkill{
+					{InstanceID: 1, SkillID: 10, SkillVersionID: &versionID, SourceType: "injected_by_clawmanager", Status: "active", ObservedHash: &installedHash},
+				},
+			},
+		},
+	}
+	instRepo := &importTestInstanceRepo{instances: map[int]*models.Instance{
+		1: {ID: 1, UserID: 1, Type: RuntimeTypeHermes, InstanceMode: InstanceModeLite, RuntimeType: RuntimeBackendGateway},
+	}}
+	svc := &skillService{repo: stub, instanceRepo: instRepo, commandService: &noopInstanceCommandService{}}
+
+	if err := svc.SyncAgentSkills(1, AgentSkillInventoryReportRequest{Mode: "full", Skills: []AgentSkillRecord{{
+		Identifier: "customer-manager", ContentMD5: changedHash, Source: "discovered_in_instance",
+	}}}); err != nil {
+		t.Fatalf("SyncAgentSkills() error = %v", err)
+	}
+	if len(stub.upserted) != 1 {
+		t.Fatalf("upserted %d instance skills, want 1", len(stub.upserted))
+	}
+	updated := stub.upserted[0]
+	if updated.SkillVersionID == nil || *updated.SkillVersionID != versionID {
+		t.Fatalf("SkillVersionID = %v, want original version %d", updated.SkillVersionID, versionID)
+	}
+	if updated.ObservedHash == nil || *updated.ObservedHash != changedHash {
+		t.Fatalf("ObservedHash = %v, want changed hash %q", updated.ObservedHash, changedHash)
+	}
+	if got := stub.blobs[1].ContentHash; got != installedHash {
+		t.Fatalf("installed blob hash = %q, want unchanged %q", got, installedHash)
+	}
+	if !isInstanceSkillContentDiverged(updated.ObservedHash, installedHash) {
+		t.Fatal("expected modified Hub-installed skill to be marked as diverged")
 	}
 }
 
@@ -408,9 +475,9 @@ func TestRequestLiteSkillInventorySyncUsesIncrementalWhenAgentResyncFollows(t *t
 	}}
 
 	svc := &skillService{
-		repo:         stub,
-		instanceRepo: instRepo,
-		commandRepo:  cmdRepo,
+		repo:           stub,
+		instanceRepo:   instRepo,
+		commandRepo:    cmdRepo,
 		commandService: &noopInstanceCommandService{},
 	}
 	svc.ConfigureRuntimeSkillSync(bindingRepo, podRepo, agent)

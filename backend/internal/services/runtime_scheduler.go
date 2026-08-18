@@ -420,6 +420,8 @@ func defaultRuntimeDeploymentName(runtimeType string) string {
 		return "openclaw-runtime"
 	case RuntimeTypeHermes:
 		return "hermes-runtime"
+	case RuntimeTypeOpenCode:
+		return "opencode-runtime"
 	default:
 		return ""
 	}

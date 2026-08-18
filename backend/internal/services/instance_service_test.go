@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -62,7 +63,7 @@ func TestBuildGatewayEnvInjectsGatewayModelCatalog(t *testing.T) {
 	t.Setenv("CLAWMANAGER_LLM_GATEWAY_BASE_URL", "http://gateway.example/api/v1/gateway/llm")
 
 	token := "igt_test_token"
-	for _, instanceType := range []string{"openclaw", "hermes", "workbuddy"} {
+	for _, instanceType := range []string{"openclaw", "hermes", "opencode"} {
 		t.Run(instanceType, func(t *testing.T) {
 			service := &instanceService{
 				llmModelRepo: &stubLLMModelRepository{
@@ -70,13 +71,7 @@ func TestBuildGatewayEnvInjectsGatewayModelCatalog(t *testing.T) {
 						{DisplayName: "GPT-4.1"},
 						{DisplayName: "Claude 3.7 Sonnet"},
 						{DisplayName: "auto"},
-						{
-							ProviderType:      models.ProviderTypeOpenAICompatible,
-							ProtocolType:      models.ProtocolTypeOpenAICompatible,
-							BaseURL:           "https://api.deepseek.com",
-							ProviderModelName: "deepseek-r1",
-							ReasoningEnabled:  true,
-						},
+						{ProviderModelName: "deepseek-r1"},
 					},
 				},
 			}
@@ -95,19 +90,46 @@ func TestBuildGatewayEnvInjectsGatewayModelCatalog(t *testing.T) {
 			if env["CLAWMANAGER_LLM_MODEL"] != `["auto","GPT-4.1","Claude 3.7 Sonnet","deepseek-r1"]` {
 				t.Fatalf("expected CLAWMANAGER_LLM_MODEL to contain injected model catalog JSON, got %q", env["CLAWMANAGER_LLM_MODEL"])
 			}
-			if env["CLAWMANAGER_LLM_REASONING"] != `{"Claude 3.7 Sonnet":false,"GPT-4.1":false,"auto":false,"deepseek-r1":true}` {
-				t.Fatalf("expected authoritative reasoning settings, got %q", env["CLAWMANAGER_LLM_REASONING"])
-			}
-			if env["CLAWMANAGER_LLM_REASONING_CONTROL"] != `{"Claude 3.7 Sonnet":"","GPT-4.1":"","auto":"","deepseek-r1":"deepseek-thinking"}` {
-				t.Fatalf("expected authoritative reasoning controls, got %q", env["CLAWMANAGER_LLM_REASONING_CONTROL"])
-			}
 			if env["OPENAI_MODEL"] != "auto" {
 				t.Fatalf("expected OPENAI_MODEL to remain the default gateway alias, got %q", env["OPENAI_MODEL"])
 			}
 			if env["CLAWMANAGER_LLM_API_KEY"] != token || env["OPENAI_API_KEY"] != token {
 				t.Fatalf("expected gateway token aliases to be preserved")
 			}
+			if instanceType == "opencode" {
+				assertOpenCodeGatewayConfig(t, env["OPENCODE_CONFIG_CONTENT"])
+			}
 		})
+	}
+}
+
+func assertOpenCodeGatewayConfig(t *testing.T, raw string) {
+	t.Helper()
+	var config struct {
+		Model    string `json:"model"`
+		Provider map[string]struct {
+			NPM     string                       `json:"npm"`
+			Options map[string]string            `json:"options"`
+			Models  map[string]map[string]string `json:"models"`
+		} `json:"provider"`
+	}
+	if err := json.Unmarshal([]byte(raw), &config); err != nil {
+		t.Fatalf("OPENCODE_CONFIG_CONTENT is not valid JSON: %v", err)
+	}
+	provider, ok := config.Provider["clawmanager"]
+	if !ok {
+		t.Fatalf("missing clawmanager provider in OpenCode config: %s", raw)
+	}
+	if config.Model != "clawmanager/auto" || provider.NPM != "@ai-sdk/openai-compatible" {
+		t.Fatalf("unexpected OpenCode provider config: %s", raw)
+	}
+	if provider.Options["baseURL"] != "{env:CLAWMANAGER_LLM_BASE_URL}" || provider.Options["apiKey"] != "{env:CLAWMANAGER_LLM_API_KEY}" {
+		t.Fatalf("OpenCode config must use governed gateway env references: %s", raw)
+	}
+	for _, model := range []string{"auto", "GPT-4.1", "Claude 3.7 Sonnet", "deepseek-r1"} {
+		if _, ok := provider.Models[model]; !ok {
+			t.Fatalf("OpenCode config is missing model %q: %s", model, raw)
+		}
 	}
 }
 
@@ -306,7 +328,7 @@ func TestBuildAgentEnvInjectsHermesAgentConfig(t *testing.T) {
 }
 
 func TestPersistentVolumeMountPathNormalizesManagedDesktopRuntimes(t *testing.T) {
-	for _, instanceType := range []string{"openclaw", "ubuntu", "webtop", "hermes", "workbuddy"} {
+	for _, instanceType := range []string{"openclaw", "ubuntu", "webtop", "hermes"} {
 		t.Run(instanceType, func(t *testing.T) {
 			got := persistentVolumeMountPath(&models.Instance{
 				Type:      instanceType,
@@ -329,34 +351,6 @@ func TestManagedRuntimePersistentDirKeepsHermesSubdirectory(t *testing.T) {
 	}
 }
 
-func TestWorkbuddySupportsManagedRuntimeInjection(t *testing.T) {
-	if !supportsManagedRuntimeIntegration("workbuddy") {
-		t.Fatal("expected Workbuddy to support managed runtime integration")
-	}
-	if !supportsRuntimeConfigInjection("workbuddy") {
-		t.Fatal("expected Workbuddy to support runtime config injection")
-	}
-
-	t.Setenv("CLAWMANAGER_AGENT_CONTROL_BASE_URL", "http://agent-control.example")
-	token := "agt_boot_workbuddy"
-	env, err := (&instanceService{}).buildAgentEnv(&models.Instance{
-		ID:                  923,
-		Type:                "workbuddy",
-		DiskGB:              20,
-		MountPath:           "/config",
-		AgentBootstrapToken: &token,
-	})
-	if err != nil {
-		t.Fatalf("buildAgentEnv returned error: %v", err)
-	}
-	if env["CLAWMANAGER_AGENT_RUNTIME_TYPE"] != "workbuddy" {
-		t.Fatalf("expected Workbuddy agent runtime type, got %q", env["CLAWMANAGER_AGENT_RUNTIME_TYPE"])
-	}
-	if env["CLAWMANAGER_AGENT_PERSISTENT_DIR"] != "/config" {
-		t.Fatalf("expected Workbuddy agent persistent dir /config, got %q", env["CLAWMANAGER_AGENT_PERSISTENT_DIR"])
-	}
-}
-
 func TestRuntimeVolumeInitScriptsAddsHermesLayoutMigration(t *testing.T) {
 	scripts := runtimeVolumeInitScripts("hermes", "/config")
 	if len(scripts) != 1 {
@@ -367,6 +361,23 @@ func TestRuntimeVolumeInitScriptsAddsHermesLayoutMigration(t *testing.T) {
 	}
 	if !strings.Contains(scripts[0].Script, `target="$base/.hermes"`) {
 		t.Fatalf("expected Hermes init script to target /config/.hermes, got %s", scripts[0].Script)
+	}
+}
+
+func TestRuntimeVolumeInitScriptsConfiguresOpenCodeKonsoleShell(t *testing.T) {
+	scripts := runtimeVolumeInitScripts("opencode", "/config")
+	if len(scripts) != 1 {
+		t.Fatalf("expected one OpenCode volume init script, got %d", len(scripts))
+	}
+	for _, expected := range []string{
+		`.config/konsolerc`,
+		`.local/share/konsole/ClawManager.profile`,
+		`DefaultProfile=ClawManager.profile`,
+		`Command=/bin/bash`,
+	} {
+		if !strings.Contains(scripts[0].Script, expected) {
+			t.Fatalf("expected OpenCode init script to contain %q, got %s", expected, scripts[0].Script)
+		}
 	}
 }
 

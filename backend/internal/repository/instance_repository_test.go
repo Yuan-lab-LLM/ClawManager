@@ -17,7 +17,7 @@ func TestBuildV2SchedulerInstanceQueryRequiresWorkspaceTypeAndStatuses(t *testin
 		"instance_mode = ?",
 		"workspace_path IS NOT NULL",
 		"TRIM(workspace_path) <> ''",
-		"type IN (?, ?)",
+		"type IN (?, ?, ?)",
 		"ORDER BY id",
 		"LIMIT ?",
 	}
@@ -27,7 +27,7 @@ func TestBuildV2SchedulerInstanceQueryRequiresWorkspaceTypeAndStatuses(t *testin
 		}
 	}
 
-	wantArgs := []any{"creating", "running", "gateway", "lite", "openclaw", "hermes", 25}
+	wantArgs := []any{"creating", "running", "gateway", "lite", "openclaw", "hermes", "opencode", 25}
 	if !reflect.DeepEqual(args, wantArgs) {
 		t.Fatalf("args = %#v, want %#v", args, wantArgs)
 	}
@@ -47,7 +47,7 @@ func TestBuildV2SchedulerInstanceQueryDefaultsLimit(t *testing.T) {
 	if !strings.Contains(normalized, "status IN (?)") {
 		t.Fatalf("query %q does not contain single status predicate", normalized)
 	}
-	wantArgs := []any{"creating", "gateway", "lite", "openclaw", "hermes", 100}
+	wantArgs := []any{"creating", "gateway", "lite", "openclaw", "hermes", "opencode", 100}
 	if !reflect.DeepEqual(args, wantArgs) {
 		t.Fatalf("args = %#v, want %#v", args, wantArgs)
 	}

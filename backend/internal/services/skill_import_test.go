@@ -2,10 +2,19 @@ package services
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"clawreef/internal/models"
 )
+
+type failingSkillScanner struct{}
+
+func (failingSkillScanner) ScanArchive(context.Context, string, []byte, map[string]string) (string, map[string]interface{}, string, error) {
+	return "", nil, "", fmt.Errorf("scanner rejected archive")
+}
+
+func (failingSkillScanner) AvailableAnalyzers(context.Context) ([]string, error) { return nil, nil }
 
 func TestPreviewImportDirectoryNone(t *testing.T) {
 	svc := &skillService{repo: &skillRepoStub{skills: map[int]*models.Skill{}}}
@@ -71,6 +80,26 @@ func TestImportDirectoryWithoutDescriptionSucceeds(t *testing.T) {
 	}
 	if result.Skill.Description != nil {
 		t.Fatalf("Description = %#v, want nil", result.Skill.Description)
+	}
+}
+
+func TestImportDirectorySucceedsWhenScannerFails(t *testing.T) {
+	stub := &skillRepoStub{skills: map[int]*models.Skill{}, blobs: map[int]*models.SkillBlob{}, versions: map[int]*models.SkillVersion{}}
+	svc := &skillService{repo: stub, storage: fakeObjectStorage{}, scanner: failingSkillScanner{}}
+	dir := extractedSkillDirectory{Name: "scanner-failure", Files: map[string][]byte{"SKILL.md": []byte("# Scanner failure")}}
+
+	result, err := svc.importDirectoryWithOptions(context.Background(), 1, dir, "scanner-failure.zip", ImportDirectoryOptions{Action: skillImportActionAuto})
+	if err != nil {
+		t.Fatalf("importDirectoryWithOptions() error = %v", err)
+	}
+	if result.Skill.ScanStatus != "failed" {
+		t.Fatalf("ScanStatus = %q, want failed", result.Skill.ScanStatus)
+	}
+	if result.Skill.RiskLevel != skillRiskUnknown {
+		t.Fatalf("RiskLevel = %q, want %q", result.Skill.RiskLevel, skillRiskUnknown)
+	}
+	if blob := stub.blobs[1]; blob == nil || blob.ScanStatus != "failed" {
+		t.Fatalf("blob scan status = %#v, want failed", blob)
 	}
 }
 

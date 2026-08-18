@@ -285,6 +285,31 @@ func TestMaterializeLiteInstanceSkillWritesHermesHomeSkill(t *testing.T) {
 	target := filepath.Join(workspacePath, "home", ".hermes", "skills", "paper-ranker")
 	assertFileEquals(t, filepath.Join(target, "SKILL.md"), "# Paper Ranker\n")
 }
+
+func TestMaterializeLiteInstanceSkillWritesOpenCodeProSkill(t *testing.T) {
+	archive := buildTestZip(t, map[string][]byte{
+		"paper-ranker/SKILL.md": []byte("# Paper Ranker\n"),
+	})
+	workspacePath := filepath.Join(t.TempDir(), "opencode", "user-45", "instance-91")
+	if err := os.MkdirAll(workspacePath, 0750); err != nil {
+		t.Fatalf("MkdirAll(workspacePath): %v", err)
+	}
+	instanceRepo := newV2LifecycleInstanceRepo()
+	instanceRepo.byID[91] = &models.Instance{
+		ID: 91, UserID: 45, Type: RuntimeTypeOpenCode,
+		RuntimeType: RuntimeBackendDesktop, InstanceMode: InstanceModePro, WorkspacePath: &workspacePath,
+	}
+	service := &skillService{
+		instanceRepo: instanceRepo,
+		storage:      fakeObjectStorage{"skills/paper-ranker.zip": archive},
+	}
+	if err := service.materializeLiteInstanceSkill(context.Background(), 91, &models.Skill{SkillKey: "paper-ranker"}, &models.SkillBlob{
+		ObjectKey: "skills/paper-ranker.zip", FileName: "paper-ranker.zip",
+	}); err != nil {
+		t.Fatalf("materializeLiteInstanceSkill() error = %v", err)
+	}
+	assertFileEquals(t, filepath.Join(workspacePath, "workspace", ".opencode", "skills", "paper-ranker", "SKILL.md"), "---\nname: paper-ranker\ndescription: \"ClawManager managed skill paper-ranker\"\n---\n\n# Paper Ranker\n")
+}
 func TestChownRuntimePathToleratesNonRootPermissionDenied(t *testing.T) {
 	target := filepath.Join(t.TempDir(), "skill-file")
 	if err := os.WriteFile(target, []byte("skill"), 0644); err != nil {
@@ -338,7 +363,7 @@ func TestChownRuntimePathReportsRootPermissionDenied(t *testing.T) {
 	}
 
 	err := chownRuntimePath(target, RuntimeLinuxID(90), RuntimeLinuxID(90), 0600)
-	if err == nil || !strings.Contains(err.Error(), "failed to set lite runtime owner") {
+	if err == nil || !strings.Contains(err.Error(), "failed to set runtime owner") {
 		t.Fatalf("chownRuntimePath() error = %v, want owner error", err)
 	}
 }

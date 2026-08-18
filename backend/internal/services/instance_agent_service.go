@@ -117,7 +117,7 @@ func (s *instanceAgentService) Register(bootstrapToken string, req AgentRegister
 		return nil, fmt.Errorf("invalid agent bootstrap token")
 	}
 	if !supportsManagedRuntimeIntegration(instance.Type) {
-		return nil, fmt.Errorf("agent registration is only supported for openclaw or hermes instances")
+		return nil, fmt.Errorf("agent registration is only supported for managed runtime instances")
 	}
 
 	now := time.Now().UTC()

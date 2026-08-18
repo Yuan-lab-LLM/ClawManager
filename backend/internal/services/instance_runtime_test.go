@@ -34,6 +34,10 @@ func TestBuildRuntimeConfig_HermesUsesWebtopDefaults(t *testing.T) {
 	if config.Env["HERMES_HOME"] != "/config/.hermes" {
 		t.Fatalf("expected Hermes HERMES_HOME /config/.hermes, got %q", config.Env["HERMES_HOME"])
 	}
+	openCodeConfig := buildRuntimeConfig("opencode", "opencode", "latest", nil, nil)
+	if openCodeConfig.Env["CLAWMANAGER_SKILL_DIR"] != "/config/workspace/.opencode/skills" {
+		t.Fatalf("expected OpenCode skill root /config/workspace/.opencode/skills, got %q", openCodeConfig.Env["CLAWMANAGER_SKILL_DIR"])
+	}
 	if config.Env["SUBFOLDER"] != "/" {
 		t.Fatalf("expected Hermes default SUBFOLDER /, got %q", config.Env["SUBFOLDER"])
 	}

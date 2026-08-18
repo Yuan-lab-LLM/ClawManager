@@ -1,6 +1,6 @@
 # Runtime Agent 通用接入规范
 
-本文定义任意新 runtime 接入 ClawManager Agent Control Plane 的通用方案。后续新增 OpenClaw、Hermes 以外的 runtime 时，应优先遵守本文，再补充该 runtime 自己的镜像构建细节。
+本文定义任意新 runtime 接入 ClawManager Agent Control Plane 的通用方案。后续新增 OpenClaw、Hermes、OpenCode 以外的 runtime 时，应优先遵守本文，再补充该 runtime 自己的镜像构建细节。
 
 ## 接入目标
 

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"mime/multipart"
 	"net/http"
 	"net/url"
@@ -13,6 +14,8 @@ import (
 
 	"clawreef/internal/config"
 )
+
+const skillScannerErrorBodyLimit = 4096
 
 type SkillScannerClient interface {
 	ScanArchive(ctx context.Context, fileName string, content []byte, options map[string]string) (string, map[string]interface{}, string, error)
@@ -89,7 +92,7 @@ func (c *httpSkillScannerClient) ScanArchive(ctx context.Context, fileName strin
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", nil, "", fmt.Errorf("skill scanner returned status %d", resp.StatusCode)
+		return "", nil, "", fmt.Errorf("%s", formatSkillScannerStatusError(resp.StatusCode, resp.Body))
 	}
 
 	var raw map[string]interface{}
@@ -99,6 +102,22 @@ func (c *httpSkillScannerClient) ScanArchive(ctx context.Context, fileName strin
 	riskLevel := normalizeScannerRiskLevel(raw)
 	summary := extractScannerSummary(raw)
 	return riskLevel, raw, summary, nil
+}
+
+func formatSkillScannerStatusError(statusCode int, body io.Reader) string {
+	detail := ""
+	if body != nil {
+		raw, _ := io.ReadAll(io.LimitReader(body, skillScannerErrorBodyLimit))
+		detail = strings.TrimSpace(string(raw))
+		detail = strings.Join(strings.Fields(detail), " ")
+		if len(detail) > 512 {
+			detail = detail[:512]
+		}
+	}
+	if detail == "" {
+		return fmt.Sprintf("skill scanner returned status %d", statusCode)
+	}
+	return fmt.Sprintf("skill scanner returned status %d: %s", statusCode, detail)
 }
 
 func (c *httpSkillScannerClient) AvailableAnalyzers(ctx context.Context) ([]string, error) {

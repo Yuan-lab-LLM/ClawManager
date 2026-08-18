@@ -27,9 +27,14 @@ func TestIsHubPublishableBlob(t *testing.T) {
 			want: true,
 		},
 		{
-			name: "medium risk blocked",
+			name: "medium risk allowed when scanned",
 			blob: &models.SkillBlob{ScanStatus: "completed", RiskLevel: skillRiskMedium, ObjectKey: "key"},
-			want: false,
+			want: true,
+		},
+		{
+			name: "high risk allowed when scanned",
+			blob: &models.SkillBlob{ScanStatus: "completed", RiskLevel: skillRiskHigh, ObjectKey: "key"},
+			want: true,
 		},
 		{
 			name: "pending scan blocked",
@@ -94,6 +99,14 @@ func TestCanAttachSkillRules(t *testing.T) {
 	}
 	if !svc.CanAttachSkill(99, "admin", privateSkill, otherInstance) {
 		t.Fatal("admin should attach any skill to any instance")
+	}
+	highRiskSkill := &models.Skill{UserID: 1, SourceType: skillSourceUploaded, Status: "active", Visibility: skillVisibilityPrivate, RiskLevel: skillRiskHigh}
+	if !svc.CanAttachSkill(1, "user", highRiskSkill, ownInstance) {
+		t.Fatal("owner should attach high-risk skill to own instance")
+	}
+	mediumRiskPublic := &models.Skill{UserID: 2, SourceType: skillSourceUploaded, Status: "active", Visibility: skillVisibilityPublic, RiskLevel: skillRiskMedium}
+	if !svc.CanAttachSkill(3, "user", mediumRiskPublic, otherInstance) {
+		t.Fatal("user should attach medium-risk public skill to own instance")
 	}
 }
 
@@ -242,11 +255,14 @@ func TestPublishToHubRejectsPendingScan(t *testing.T) {
 	}
 }
 
-func TestPublishToHubRejectsMediumRisk(t *testing.T) {
+func TestPublishToHubAllowsMediumRisk(t *testing.T) {
 	svc, _ := newPublishTestStub(&models.SkillBlob{ScanStatus: "completed", RiskLevel: skillRiskMedium, ObjectKey: "key.zip"})
-	_, err := svc.PublishToHub(1, "user", 1, []int{1})
-	if err == nil || err.Error() != "skill_risk_blocked" {
-		t.Fatalf("expected skill_risk_blocked, got %v", err)
+	item, err := svc.PublishToHub(1, "user", 1, []int{1})
+	if err != nil {
+		t.Fatalf("PublishToHub() error = %v", err)
+	}
+	if item == nil || !strings.EqualFold(item.Visibility, skillVisibilityPublic) {
+		t.Fatalf("expected medium-risk publish to succeed, got %#v", item)
 	}
 }
 

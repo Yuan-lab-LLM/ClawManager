@@ -3,12 +3,12 @@ package services
 import "testing"
 
 func TestNormalizeV2RuntimeTypeAcceptsManagedRuntimeTypes(t *testing.T) {
-	for _, input := range []string{"openclaw", " OpenClaw ", "hermes", "Hermes"} {
+	for _, input := range []string{"openclaw", " OpenClaw ", "hermes", "Hermes", "opencode", " OpenCode "} {
 		got, ok := NormalizeV2RuntimeType(input)
 		if !ok {
 			t.Fatalf("expected %q to be accepted", input)
 		}
-		if got != RuntimeTypeOpenClaw && got != RuntimeTypeHermes {
+		if got != RuntimeTypeOpenClaw && got != RuntimeTypeHermes && got != RuntimeTypeOpenCode {
 			t.Fatalf("expected normalized managed runtime type, got %q", got)
 		}
 	}

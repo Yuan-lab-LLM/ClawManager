@@ -131,7 +131,13 @@ function availabilityClass(availability: InstanceAvailability) {
 }
 
 function typeLabel(type: string) {
-  return type === "hermes" ? "Hermes" : type === "openclaw" ? "OpenClaw" : type;
+  return type === "hermes"
+    ? "Hermes"
+    : type === "openclaw"
+      ? "OpenClaw"
+      : type === "opencode"
+        ? "OpenCode"
+        : type;
 }
 
 function modeLabel(mode: Instance["instance_mode"]) {
@@ -189,7 +195,7 @@ const InstanceListPage: React.FC = () => {
   const [batchCreatePrefix, setBatchCreatePrefix] = useState("lite-openclaw");
   const [batchCreateCount, setBatchCreateCount] = useState(3);
   const [batchCreateStartIndex, setBatchCreateStartIndex] = useState(1);
-  const [batchCreateType, setBatchCreateType] = useState<"openclaw" | "hermes">("openclaw");
+  const [batchCreateType, setBatchCreateType] = useState<"openclaw" | "hermes" | "opencode">("openclaw");
   const [batchCreateImageKey, setBatchCreateImageKey] = useState("");
   const [runtimeImageSettings, setRuntimeImageSettings] = useState<SystemImageSetting[]>([]);
   const [batchCreateLoading, setBatchCreateLoading] = useState(false);
@@ -565,11 +571,12 @@ const InstanceListPage: React.FC = () => {
                   {t("instances.type")}
                   <select
                     value={batchCreateType}
-                    onChange={(event) => setBatchCreateType(event.target.value as "openclaw" | "hermes")}
+                    onChange={(event) => setBatchCreateType(event.target.value as "openclaw" | "hermes" | "opencode")}
                     className="app-input mt-1 w-full"
                   >
                     <option value="openclaw">OpenClaw</option>
                     <option value="hermes">Hermes</option>
+                    <option value="opencode">OpenCode</option>
                   </select>
                 </label>
                 <label className="block text-sm font-medium text-slate-700">

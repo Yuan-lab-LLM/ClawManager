@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -330,7 +331,7 @@ func (s *skillService) importDirectoryWithOptions(ctx context.Context, userID in
 		if err := s.repo.CreateBlob(blob); err != nil {
 			return nil, err
 		}
-		if err := s.recordScan(blob, &dir); err != nil {
+		if err := s.recordImportScan(blob, &dir); err != nil {
 			return nil, err
 		}
 	} else {
@@ -338,7 +339,7 @@ func (s *skillService) importDirectoryWithOptions(ctx context.Context, userID in
 			return nil, err
 		}
 		if blob.LastScanResultID == nil || blob.ScanStatus != "completed" {
-			if err := s.recordScan(blob, &dir); err != nil {
+			if err := s.recordImportScan(blob, &dir); err != nil {
 				return nil, err
 			}
 		}
@@ -440,4 +441,19 @@ func (s *skillService) importDirectoryWithOptions(ctx context.Context, userID in
 		result.PreviousVersionNo = previousVersionNo
 	}
 	return result, nil
+}
+
+// recordImportScan makes scanning best-effort for user uploads. A scanner
+// rejection must not discard an otherwise valid archive; the blob is retained
+// with scan_status=failed so it remains visibly unaudited and can be retried.
+func (s *skillService) recordImportScan(blob *models.SkillBlob, dir *extractedSkillDirectory) error {
+	err := s.recordScan(blob, dir)
+	if err == nil {
+		return nil
+	}
+	var scanErr *skillScannerFailureError
+	if errors.As(err, &scanErr) {
+		return nil
+	}
+	return err
 }

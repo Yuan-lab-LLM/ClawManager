@@ -2,17 +2,23 @@ package k8s
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 )
 
 func TestBuildInstanceDeploymentUsesStableIdentityAndPVC(t *testing.T) {
-	client := &Client{Clientset: fake.NewSimpleClientset(), Namespace: "clawreef"}
+	clientset := fake.NewSimpleClientset()
+	client := &Client{Clientset: clientset, Namespace: "clawreef"}
 	deployment := BuildInstanceDeployment(client, PodConfig{
 		InstanceID:      42,
 		InstanceName:    "Pro Desktop",
@@ -55,6 +61,28 @@ func TestBuildInstanceDeploymentUsesStableIdentityAndPVC(t *testing.T) {
 	}
 	if got := template.Spec.Volumes[0].PersistentVolumeClaim.ClaimName; got != "clawreef-42-pvc" {
 		t.Fatalf("PVC name = %q, want clawreef-42-pvc", got)
+	}
+}
+
+func TestBuildInstanceDeploymentRunsVolumeInitScripts(t *testing.T) {
+	clientset := fake.NewSimpleClientset()
+	client := &Client{Clientset: clientset, Namespace: "clawreef"}
+	deployment := BuildInstanceDeployment(client, PodConfig{
+		InstanceID: 42, InstanceName: "OpenCode Pro", UserID: 7,
+		Type: "opencode", RuntimeType: "desktop", CPUCores: 2, MemoryGB: 4,
+		Image: "registry/opencode:pro", MountPath: "/config", ContainerPort: 3001,
+		VolumeInitScripts: []VolumeInitScript{{Name: "data", MountPath: "/config", Script: "echo bootstrap"}},
+	}, 1)
+
+	if len(deployment.Spec.Template.Spec.InitContainers) != 1 {
+		t.Fatalf("init containers = %#v, want one volume bootstrap container", deployment.Spec.Template.Spec.InitContainers)
+	}
+	init := deployment.Spec.Template.Spec.InitContainers[0]
+	if got := init.Command; len(got) != 3 || got[2] != "echo bootstrap" {
+		t.Fatalf("init command = %#v, want volume bootstrap script", got)
+	}
+	if len(init.VolumeMounts) != 1 || init.VolumeMounts[0].MountPath != "/config" {
+		t.Fatalf("init mounts = %#v, want /config data mount", init.VolumeMounts)
 	}
 }
 
@@ -120,6 +148,47 @@ func TestInstanceDeploymentServiceEnsureAndScale(t *testing.T) {
 	}
 	if scaled.Spec.Replicas == nil || *scaled.Spec.Replicas != 0 {
 		t.Fatalf("scaled replicas = %#v, want 0", scaled.Spec.Replicas)
+	}
+}
+
+func TestInstanceDeploymentServiceEnsureRetriesConflict(t *testing.T) {
+	config := PodConfig{
+		InstanceID:    46,
+		InstanceName:  "OpenCode Pro",
+		UserID:        8,
+		Type:          "opencode",
+		RuntimeType:   "desktop",
+		CPUCores:      2,
+		MemoryGB:      4,
+		Image:         "opencode:local",
+		MountPath:     "/config",
+		ContainerPort: 3001,
+	}
+	clientset := fake.NewSimpleClientset()
+	client := &Client{Clientset: clientset, Namespace: "clawreef"}
+	service := &InstanceDeploymentService{
+		client:           client,
+		namespaceService: &NamespaceService{client: client},
+	}
+	ctx := context.Background()
+	if _, err := service.EnsureDeployment(ctx, config, 1); err != nil {
+		t.Fatalf("initial EnsureDeployment returned error: %v", err)
+	}
+
+	updateAttempts := 0
+	clientset.Fake.PrependReactor("update", "deployments", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		updateAttempts++
+		if updateAttempts == 1 {
+			return true, nil, apierrors.NewConflict(schema.GroupResource{Group: "apps", Resource: "deployments"}, "clawreef-46-deployment", fmt.Errorf("stale resource version"))
+		}
+		return false, nil, nil
+	})
+
+	if _, err := service.EnsureDeployment(ctx, config, 1); err != nil {
+		t.Fatalf("EnsureDeployment after conflict returned error: %v", err)
+	}
+	if updateAttempts < 2 {
+		t.Fatalf("update attempts = %d, want retry after conflict", updateAttempts)
 	}
 }
 
