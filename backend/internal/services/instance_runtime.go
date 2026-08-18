@@ -73,6 +73,11 @@ func buildRuntimeConfig(instanceType, osType, osVersion string, registry, tag *s
 		config.Env["OPENCODE_CONFIG_DIR"] = "/config/.opencode"
 		config.Env["CLAWMANAGER_SKILL_DIR"] = "/config/workspace/.opencode/skills"
 		config.Env["CLAWMANAGER_PROJECT_PATH"] = "/config/workspace"
+	case "workbuddy":
+		config.Image = defaultSystemImageSettings["workbuddy"]
+		config.Port = 3001
+		config.MountPath = "/config"
+		config.Env = defaultWebtopDesktopEnv("Workbuddy")
 	case "openclaw":
 		config.MountPath = "/config"
 		if (registry == nil || strings.TrimSpace(*registry) == "") && (tag == nil || strings.TrimSpace(*tag) == "") {
@@ -93,7 +98,7 @@ func buildRuntimeConfig(instanceType, osType, osVersion string, registry, tag *s
 
 func defaultPortForInstanceType(instanceType string) int32 {
 	switch instanceType {
-	case "ubuntu", "webtop", "hermes", "opencode":
+	case "ubuntu", "webtop", "hermes", "opencode", "workbuddy":
 		return 3001
 	default:
 		return 3001
@@ -102,7 +107,7 @@ func defaultPortForInstanceType(instanceType string) int32 {
 
 func defaultMountPathForInstanceType(instanceType string) string {
 	switch instanceType {
-	case "ubuntu", "webtop", "openclaw", "hermes", "opencode":
+	case "ubuntu", "webtop", "openclaw", "hermes", "opencode", "workbuddy":
 		return "/config"
 	default:
 		return "/home/user/data"
@@ -123,6 +128,8 @@ func defaultEnvForInstanceType(instanceType string) map[string]string {
 		env["CLAWMANAGER_SKILL_DIR"] = "/config/workspace/.opencode/skills"
 		env["CLAWMANAGER_PROJECT_PATH"] = "/config/workspace"
 		return env
+	case "workbuddy":
+		return defaultWebtopDesktopEnv("Workbuddy")
 	default:
 		return map[string]string{}
 	}
@@ -166,7 +173,7 @@ func withInstanceProxyEnv(instanceType string, instanceID int, env map[string]st
 
 func usesWebtopImage(instanceType string) bool {
 	switch instanceType {
-	case "ubuntu", "webtop", "hermes", "openclaw", "opencode":
+	case "ubuntu", "webtop", "hermes", "openclaw", "opencode", "workbuddy":
 		return true
 	default:
 		return false

@@ -26,6 +26,14 @@ func TestApplyManagedInstanceSessionDefaultsUsesMainForHermesInstanceToken(t *te
 	}
 }
 
+func TestApplyManagedInstanceSessionDefaultsUsesMainForWorkbuddyInstanceToken(t *testing.T) {
+	req := ChatCompletionRequest{}
+	ApplyManagedInstanceSessionDefaults(&req, "instance", "workbuddy")
+	if got := resolveSessionID(req); got != "agent:workbuddy:main" {
+		t.Fatalf("expected normalized session id agent:workbuddy:main, got %q", got)
+	}
+}
+
 func TestApplyManagedInstanceSessionDefaultsSkipsUserJWTCalls(t *testing.T) {
 	req := ChatCompletionRequest{}
 	ApplyManagedInstanceSessionDefaults(&req, "user", "openclaw")

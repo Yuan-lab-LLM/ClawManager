@@ -124,6 +124,118 @@ func TestRuntimeSchedulerAssignsCreatingInstanceToReadyPod(t *testing.T) {
 	}
 }
 
+func TestRuntimeSchedulerReplacesOlderGenerationBindingForCreatingInstance(t *testing.T) {
+	ctx := context.Background()
+	endpoint := "http://agent.runtime"
+	workspacePath := "/workspaces/openclaw/user-45/instance-18"
+	instanceRepo := newFakeRuntimeInstanceRepo()
+	podRepo := &fakeRuntimePodRepo{
+		pods: map[int64]*models.RuntimePod{
+			9: {ID: 9, RuntimeType: RuntimeTypeOpenClaw, AgentEndpoint: &endpoint, State: "ready", Capacity: 2},
+		},
+		schedulable: []models.RuntimePod{
+			{ID: 9, RuntimeType: RuntimeTypeOpenClaw, AgentEndpoint: &endpoint, State: "ready", Capacity: 2},
+		},
+	}
+	bindingRepo := newFakeRuntimeBindingRepo()
+	bindingRepo.bindings[18] = &models.InstanceRuntimeBinding{
+		InstanceID:   18,
+		RuntimePodID: 9,
+		RuntimeType:  RuntimeTypeOpenClaw,
+		GatewayID:    "gw-18-3",
+		GatewayPort:  RuntimeGatewayPortStart,
+		State:        "error",
+		Generation:   3,
+	}
+	agent := &fakeRuntimeAgentClient{createResponse: &RuntimeAgentCreateGatewayResponse{
+		GatewayID: "gw-18-4",
+		Status:    "running",
+	}}
+	scheduler := NewRuntimeScheduler(
+		instanceRepo,
+		podRepo,
+		bindingRepo,
+		&fakeRuntimeRolloutRepo{},
+		agent,
+		&fakeRuntimeEventService{},
+		nil,
+		&fakeRuntimeDeploymentService{},
+		time.Second,
+	)
+	instance := models.Instance{
+		ID:                18,
+		UserID:            45,
+		Type:              RuntimeTypeOpenClaw,
+		RuntimeType:       RuntimeBackendGateway,
+		InstanceMode:      InstanceModeLite,
+		Status:            "creating",
+		WorkspacePath:     &workspacePath,
+		RuntimeGeneration: 4,
+		MemoryGB:          2,
+		DiskGB:            8,
+	}
+
+	if errs := scheduler.reconcileCreatingInstance(ctx, instance); len(errs) != 0 {
+		t.Fatalf("reconcileCreatingInstance errors = %v", errs)
+	}
+
+	if len(agent.deleteRequests) != 1 || agent.deleteRequests[0].gatewayID != "gw-18-3" {
+		t.Fatalf("stale gateway delete requests = %#v", agent.deleteRequests)
+	}
+	if len(agent.createRequests) != 1 || agent.createRequests[0].req.Generation != 4 {
+		t.Fatalf("new gateway create requests = %#v", agent.createRequests)
+	}
+	binding := bindingRepo.bindings[18]
+	if binding == nil || binding.Generation != 4 || binding.State != "running" {
+		t.Fatalf("replacement binding = %+v, want running generation 4", binding)
+	}
+	state := instanceRepo.runtimeStates[18]
+	if state.status != "running" || state.generation != 4 {
+		t.Fatalf("instance runtime state = %+v, want running generation 4", state)
+	}
+}
+
+func TestRuntimeSchedulerDoesNotDeleteNewerGenerationBinding(t *testing.T) {
+	ctx := context.Background()
+	instanceRepo := newFakeRuntimeInstanceRepo()
+	bindingRepo := newFakeRuntimeBindingRepo()
+	bindingRepo.bindings[19] = &models.InstanceRuntimeBinding{
+		InstanceID:   19,
+		RuntimePodID: 9,
+		GatewayID:    "gw-19-5",
+		State:        "running",
+		Generation:   5,
+	}
+	agent := &fakeRuntimeAgentClient{}
+	scheduler := NewRuntimeScheduler(
+		instanceRepo,
+		&fakeRuntimePodRepo{},
+		bindingRepo,
+		&fakeRuntimeRolloutRepo{},
+		agent,
+		&fakeRuntimeEventService{},
+		nil,
+		&fakeRuntimeDeploymentService{},
+		time.Second,
+	)
+
+	if errs := scheduler.reconcileCreatingInstance(ctx, models.Instance{
+		ID:                19,
+		Status:            "creating",
+		RuntimeGeneration: 4,
+	}); len(errs) != 0 {
+		t.Fatalf("reconcileCreatingInstance errors = %v", errs)
+	}
+
+	if len(agent.deleteRequests) != 0 || bindingRepo.deleteAndReleaseCalls[19] != 0 {
+		t.Fatalf("newer binding was deleted: agent=%#v calls=%d", agent.deleteRequests, bindingRepo.deleteAndReleaseCalls[19])
+	}
+	state := instanceRepo.runtimeStates[19]
+	if state.status != "running" || state.generation != 5 {
+		t.Fatalf("instance runtime state = %+v, want running generation 5", state)
+	}
+}
+
 func TestRuntimeSchedulerSkipsAgentRejectedGatewayPort(t *testing.T) {
 	ctx := context.Background()
 	endpoint := "http://agent.runtime"
@@ -1216,6 +1328,60 @@ func TestRuntimeSchedulerReconcileRetriesRecoverableNoSchedulableError(t *testin
 	state := instanceRepo.runtimeStates[68]
 	if state.status != "running" || state.generation != 29 || state.message != nil {
 		t.Fatalf("runtime state = %+v, want running generation 29 without error message", state)
+	}
+}
+
+func TestRuntimeSchedulerReconcileRetriesUnboundGatewayStartFailureAfterRuntimeUpgrade(t *testing.T) {
+	ctx := context.Background()
+	endpoint := "http://agent.runtime"
+	workspacePath := "/workspaces/openclaw/user-46/instance-970"
+	errorMessage := "gateway start failed: exit status 1"
+	instanceRepo := newFakeRuntimeInstanceRepo()
+	instanceRepo.desiredRunning = []models.Instance{{
+		ID:                  970,
+		UserID:              46,
+		Type:                RuntimeTypeOpenClaw,
+		RuntimeType:         RuntimeBackendGateway,
+		InstanceMode:        InstanceModeLite,
+		Status:              "error",
+		RuntimeErrorMessage: &errorMessage,
+		MemoryGB:            1,
+		DiskGB:              1,
+		WorkspacePath:       &workspacePath,
+		RuntimeGeneration:   26,
+	}}
+	podRepo := &fakeRuntimePodRepo{
+		pods: map[int64]*models.RuntimePod{
+			51: {ID: 51, RuntimeType: RuntimeTypeOpenClaw, AgentEndpoint: &endpoint, State: "ready", Capacity: 100},
+		},
+		schedulable: []models.RuntimePod{
+			{ID: 51, RuntimeType: RuntimeTypeOpenClaw, AgentEndpoint: &endpoint, State: "ready", Capacity: 100},
+		},
+	}
+	agent := &fakeRuntimeAgentClient{
+		createResponse: &RuntimeAgentCreateGatewayResponse{GatewayID: "gw-970-26", Port: 20000, Status: "running"},
+	}
+	scheduler := NewRuntimeScheduler(
+		instanceRepo,
+		podRepo,
+		newFakeRuntimeBindingRepo(),
+		&fakeRuntimeRolloutRepo{},
+		agent,
+		NewRuntimeEventService(nil),
+		nil,
+		&fakeRuntimeDeploymentService{},
+		time.Second,
+	)
+
+	if err := scheduler.reconcile(ctx); err != nil {
+		t.Fatalf("reconcile returned error: %v", err)
+	}
+	if got := len(agent.createRequests); got != 1 {
+		t.Fatalf("CreateGateway calls = %d, want one retry after the runtime upgrade", got)
+	}
+	state := instanceRepo.runtimeStates[970]
+	if state.status != "running" || state.generation != 26 || state.message != nil {
+		t.Fatalf("runtime state = %+v, want recovered generation 26 without an error", state)
 	}
 }
 

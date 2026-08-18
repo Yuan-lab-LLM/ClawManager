@@ -3,6 +3,7 @@ package services
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"testing"
@@ -104,6 +105,108 @@ func TestRepairLitePromptWorkspaceOwnershipKeepsReadableRootSquashedFilesUsable(
 	instance := &models.Instance{ID: 96, Type: "openclaw", InstanceMode: InstanceModeLite, WorkspacePath: &workspace}
 	if err := repairLitePromptWorkspaceOwnership(instance); err != nil {
 		t.Fatalf("readable root-squashed prompt files must remain compatible: %v", err)
+	}
+}
+
+func TestPrepareHermesLitePromptRootsOwnsWorkerParentAndPromptRoots(t *testing.T) {
+	workspace := t.TempDir()
+	instance := &models.Instance{
+		ID:            117,
+		Type:          "hermes",
+		InstanceMode:  InstanceModeLite,
+		WorkspacePath: &workspace,
+	}
+	original := chownLitePromptWorkspacePath
+	t.Cleanup(func() { chownLitePromptWorkspacePath = original })
+	type call struct {
+		path     string
+		uid, gid int
+	}
+	var calls []call
+	chownLitePromptWorkspacePath = func(path string, uid, gid int) error {
+		calls = append(calls, call{path: filepath.Clean(path), uid: uid, gid: gid})
+		return nil
+	}
+
+	roots, err := prepareHermesLitePromptRoots(instance)
+	if err != nil {
+		t.Fatalf("prepareHermesLitePromptRoots() error = %v", err)
+	}
+	workerRoot := filepath.Join(workspace, "home", ".clawmanager-team-worker")
+	expectedRoots := []string{
+		filepath.Join(workspace, "home", ".hermes"),
+		filepath.Join(workerRoot, ".hermes"),
+	}
+	if len(roots) != len(expectedRoots) {
+		t.Fatalf("prompt roots = %#v, want %#v", roots, expectedRoots)
+	}
+	for index := range expectedRoots {
+		if filepath.Clean(roots[index]) != filepath.Clean(expectedRoots[index]) {
+			t.Fatalf("prompt root %d = %q, want %q", index, roots[index], expectedRoots[index])
+		}
+	}
+	expectedOwned := map[string]bool{
+		filepath.Clean(workerRoot):       true,
+		filepath.Clean(expectedRoots[0]): true,
+		filepath.Clean(expectedRoots[1]): true,
+	}
+	for _, got := range calls {
+		if !expectedOwned[got.path] {
+			t.Fatalf("unexpected managed ownership repair: %#v", got)
+		}
+		delete(expectedOwned, got.path)
+		if got.uid != RuntimeLinuxID(instance.ID) || got.gid != teamSharedGID {
+			t.Fatalf("chown %s used %d:%d, want %d:%d", got.path, got.uid, got.gid, RuntimeLinuxID(instance.ID), teamSharedGID)
+		}
+		info, statErr := os.Lstat(got.path)
+		if statErr != nil {
+			t.Fatal(statErr)
+		}
+		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() ||
+			(runtime.GOOS != "windows" && info.Mode().Perm() != 0o750) {
+			t.Fatalf("managed directory %s has unsafe mode %v", got.path, info.Mode())
+		}
+	}
+	if len(expectedOwned) != 0 {
+		t.Fatalf("managed directories were not assigned to the runtime: %#v", expectedOwned)
+	}
+}
+
+func TestPrepareHermesLitePromptRootsRejectsUnrepairableWorkerRoot(t *testing.T) {
+	workspace := t.TempDir()
+	instance := &models.Instance{ID: 118, Type: "hermes", InstanceMode: InstanceModeLite, WorkspacePath: &workspace}
+	original := chownLitePromptWorkspacePath
+	t.Cleanup(func() { chownLitePromptWorkspacePath = original })
+	chownLitePromptWorkspacePath = func(path string, _, _ int) error {
+		if filepath.Clean(path) == filepath.Join(workspace, "home", ".clawmanager-team-worker") {
+			return os.ErrPermission
+		}
+		return nil
+	}
+
+	if _, err := prepareHermesLitePromptRoots(instance); err == nil || !strings.Contains(err.Error(), "set runtime owner") {
+		t.Fatalf("prepareHermesLitePromptRoots() error = %v, want ownership failure", err)
+	}
+}
+
+func TestPrepareHermesLitePromptRootsRejectsSymlinkedWorkerRoot(t *testing.T) {
+	workspace := t.TempDir()
+	home := filepath.Join(workspace, "home")
+	if err := os.MkdirAll(home, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	outside := t.TempDir()
+	workerRoot := filepath.Join(home, ".clawmanager-team-worker")
+	if err := os.Symlink(outside, workerRoot); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	instance := &models.Instance{ID: 119, Type: "hermes", InstanceMode: InstanceModeLite, WorkspacePath: &workspace}
+	original := chownLitePromptWorkspacePath
+	t.Cleanup(func() { chownLitePromptWorkspacePath = original })
+	chownLitePromptWorkspacePath = func(string, int, int) error { return nil }
+
+	if _, err := prepareHermesLitePromptRoots(instance); err == nil || !strings.Contains(err.Error(), "real directory") {
+		t.Fatalf("prepareHermesLitePromptRoots() error = %v, want symlink rejection", err)
 	}
 }
 

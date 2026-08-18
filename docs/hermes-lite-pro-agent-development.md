@@ -202,6 +202,9 @@ Hermes Lite 验收：
 - 缺少 LLM token 时 gateway 不报告 `running`，错误信息明确。
 - 通过 ClawManager proxy 访问 Hermes Lite 不需要用户手工粘贴 token。
 - 每个 Lite 实例的 skill inventory、配置和 workspace 互相隔离。
+- Hermes Lite Team Worker 使用独立的 `redis_team` profile 和 Hermes 原生 SessionDB；普通 Hermes 会话不得与 Team profile 合并。
+- Team 执行过程中，完整的 assistant/tool-result 消息边界会增量写入原生 SessionDB，展开中的 GUI 会话可以实时刷新，不必等任务结束后才出现历史记录。
+- SessionDB 负责原生会话展示与继续对话，不是 Team 任务、Kanban、完成回执或 Monitor 判断的业务状态来源。
 
 Hermes Pro 验收：
 

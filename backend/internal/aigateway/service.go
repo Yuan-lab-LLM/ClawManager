@@ -53,34 +53,34 @@ type ChatMessage struct {
 
 // ChatCompletionRequest is the platform gateway request shape.
 type ChatCompletionRequest struct {
-	RawBody           []byte          `json:"-"`
-	Model             string          `json:"model"`
-	Messages          []ChatMessage   `json:"messages"`
-	Temperature       *float64        `json:"temperature,omitempty"`
-	TopP              *float64        `json:"top_p,omitempty"`
-	MaxTokens         *int            `json:"max_tokens,omitempty"`
-	Stream            bool            `json:"stream"`
-	Tools             json.RawMessage `json:"tools,omitempty"`
-	ToolChoice        json.RawMessage `json:"tool_choice,omitempty"`
-	ParallelToolCalls *bool           `json:"parallel_tool_calls,omitempty"`
-	ResponseFormat    json.RawMessage `json:"response_format,omitempty"`
-	Stop              json.RawMessage `json:"stop,omitempty"`
-	N                 *int            `json:"n,omitempty"`
-	FrequencyPenalty  *float64        `json:"frequency_penalty,omitempty"`
-	PresencePenalty   *float64        `json:"presence_penalty,omitempty"`
-	ReasoningEffort   *string         `json:"reasoning_effort,omitempty"`
-	StreamOptions     json.RawMessage `json:"stream_options,omitempty"`
-	User              *string         `json:"user,omitempty"`
-	SessionID         *string         `json:"session_id,omitempty"`
-	OpenClawSessionKey *string        `json:"-"`
+	RawBody            []byte          `json:"-"`
+	Model              string          `json:"model"`
+	Messages           []ChatMessage   `json:"messages"`
+	Temperature        *float64        `json:"temperature,omitempty"`
+	TopP               *float64        `json:"top_p,omitempty"`
+	MaxTokens          *int            `json:"max_tokens,omitempty"`
+	Stream             bool            `json:"stream"`
+	Tools              json.RawMessage `json:"tools,omitempty"`
+	ToolChoice         json.RawMessage `json:"tool_choice,omitempty"`
+	ParallelToolCalls  *bool           `json:"parallel_tool_calls,omitempty"`
+	ResponseFormat     json.RawMessage `json:"response_format,omitempty"`
+	Stop               json.RawMessage `json:"stop,omitempty"`
+	N                  *int            `json:"n,omitempty"`
+	FrequencyPenalty   *float64        `json:"frequency_penalty,omitempty"`
+	PresencePenalty    *float64        `json:"presence_penalty,omitempty"`
+	ReasoningEffort    *string         `json:"reasoning_effort,omitempty"`
+	StreamOptions      json.RawMessage `json:"stream_options,omitempty"`
+	User               *string         `json:"user,omitempty"`
+	SessionID          *string         `json:"session_id,omitempty"`
+	OpenClawSessionKey *string         `json:"-"`
 	ManagedAgentType   *string         `json:"-"`
-	InstanceID        *int            `json:"instance_id,omitempty"`
-	InstanceMode      *string         `json:"instance_mode,omitempty"`
-	RuntimeType       *string         `json:"runtime_type,omitempty"`
-	GatewayID         *string         `json:"gateway_id,omitempty"`
-	RuntimePodID      *int64          `json:"runtime_pod_id,omitempty"`
-	TraceID           *string         `json:"trace_id,omitempty"`
-	RequestID         *string         `json:"request_id,omitempty"`
+	InstanceID         *int            `json:"instance_id,omitempty"`
+	InstanceMode       *string         `json:"instance_mode,omitempty"`
+	RuntimeType        *string         `json:"runtime_type,omitempty"`
+	GatewayID          *string         `json:"gateway_id,omitempty"`
+	RuntimePodID       *int64          `json:"runtime_pod_id,omitempty"`
+	TraceID            *string         `json:"trace_id,omitempty"`
+	RequestID          *string         `json:"request_id,omitempty"`
 }
 
 // ChatCompletionResponse is used for audit parsing only.
@@ -126,6 +126,8 @@ const autoModelID = "auto"
 const maxStoredIdentifierLength = 100
 const anthropicVersionHeader = "2023-06-01"
 const defaultAnthropicMaxTokens = 4096
+const providerRequestTimeout = 3 * time.Minute
+const upstreamStreamInterruptedCode = "upstream_stream_interrupted"
 
 var providerVersionSegmentPattern = regexp.MustCompile(`(?i)^v\d+(?:[a-z0-9._-]*)?$`)
 
@@ -162,6 +164,60 @@ type openAIStreamChunk struct {
 		CompletionTokens int `json:"completion_tokens"`
 		TotalTokens      int `json:"total_tokens"`
 	} `json:"usage,omitempty"`
+	Error *struct {
+		Message string `json:"message,omitempty"`
+		Type    string `json:"type,omitempty"`
+		Code    string `json:"code,omitempty"`
+	} `json:"error,omitempty"`
+}
+
+type openAIStreamInspection struct {
+	Done          bool
+	Finished      bool
+	ProviderError error
+}
+
+type openAIStreamProxyResult struct {
+	RawStream        string
+	AssistantText    string
+	PromptTokens     int
+	CompletionTokens int
+	TotalTokens      int
+	SawDone          bool
+	SawFinishReason  bool
+	Terminal         bool
+}
+
+type upstreamStreamReadError struct {
+	err error
+}
+
+func (e *upstreamStreamReadError) Error() string {
+	return fmt.Sprintf("failed while reading provider stream: %v", e.err)
+}
+
+func (e *upstreamStreamReadError) Unwrap() error {
+	return e.err
+}
+
+type upstreamStreamProviderError struct {
+	message string
+}
+
+func (e *upstreamStreamProviderError) Error() string {
+	return e.message
+}
+
+type downstreamStreamWriteError struct {
+	err error
+}
+
+func (e *downstreamStreamWriteError) Error() string {
+	return fmt.Sprintf("failed while writing provider stream: %v", e.err)
+}
+
+func (e *downstreamStreamWriteError) Unwrap() error {
+	return e.err
 }
 
 type openAIStreamDelta struct {
@@ -293,6 +349,7 @@ type service struct {
 	chatMessageService services.ChatMessageService
 	secretRefService   services.SecretRefService
 	httpClient         *http.Client
+	streamHTTPClient   *http.Client
 }
 
 // NewService creates a new AI gateway service.
@@ -306,6 +363,7 @@ func NewService(
 	chatSessionService services.ChatSessionService,
 	chatMessageService services.ChatMessageService,
 ) Service {
+	httpClient, streamHTTPClient := newGatewayHTTPClients()
 	return &service{
 		modelRepo:          modelRepo,
 		invocationService:  invocationService,
@@ -316,10 +374,20 @@ func NewService(
 		chatSessionService: chatSessionService,
 		chatMessageService: chatMessageService,
 		secretRefService:   services.NewSecretRefService(),
-		httpClient: &http.Client{
-			Timeout: 90 * time.Second,
-		},
+		httpClient:         httpClient,
+		streamHTTPClient:   streamHTTPClient,
 	}
+}
+
+func newGatewayHTTPClients() (*http.Client, *http.Client) {
+	return &http.Client{
+			Timeout: providerRequestTimeout,
+		}, &http.Client{
+			// Streaming model calls are bounded by the incoming request context,
+			// not by a fixed whole-request deadline. A single Agent turn may
+			// legitimately take longer than an ordinary JSON request.
+			Timeout: 0,
+		}
 }
 
 func (s *service) ListAvailableModels() ([]AvailableModel, error) {
@@ -897,7 +965,7 @@ func (s *service) streamOpenAICompatible(ctx context.Context, prepared *prepared
 	}
 
 	startedAt := time.Now()
-	response, err := s.httpClient.Do(httpRequest)
+	response, err := s.streamHTTPClient.Do(httpRequest)
 	if err != nil {
 		s.recordFailure(prepared.traceID, prepared.requestID, prepared.req, userIDOrZero(prepared.userIDPtr), prepared.resolvedModel, startedAt, fmt.Sprintf("provider call failed: %v", err), providerRequestBody)
 		return fmt.Errorf("failed to call provider: %w", err)
@@ -928,44 +996,45 @@ func (s *service) streamOpenAICompatible(ctx context.Context, prepared *prepared
 		return nil
 	}
 
-	reader := bufio.NewReader(response.Body)
-	var rawStream strings.Builder
-	var assistantText strings.Builder
-	promptTokens := 0
-	completionTokens := 0
-	totalTokens := 0
-	streamFailed := false
-
-	for {
-		line, readErr := reader.ReadString('\n')
-		if line != "" {
-			done := inspectStreamLine(line, &assistantText, &promptTokens, &completionTokens, &totalTokens)
-			rawStream.WriteString(line)
-			if _, err := io.WriteString(w, line); err == nil {
-				flusher.Flush()
-			}
-			if done {
-				break
+	result, streamErr := proxyOpenAIStream(response.Body, w, flusher)
+	if streamErr != nil {
+		s.recordFailure(
+			prepared.traceID,
+			prepared.requestID,
+			prepared.req,
+			userIDOrZero(prepared.userIDPtr),
+			prepared.resolvedModel,
+			startedAt,
+			streamErr.Error(),
+			providerRequestBody,
+		)
+		var providerErr *upstreamStreamProviderError
+		var readErr *upstreamStreamReadError
+		if errors.As(streamErr, &readErr) &&
+			!errors.As(streamErr, &providerErr) &&
+			ctx.Err() == nil {
+			if emitErr := emitOpenAIStreamError(w, flusher, prepared.traceID, streamErr); emitErr != nil {
+				return errors.Join(streamErr, emitErr)
 			}
 		}
-
-		if readErr != nil {
-			if errors.Is(readErr, io.EOF) {
-				break
-			}
-			streamFailed = true
-			s.recordFailure(prepared.traceID, prepared.requestID, prepared.req, userIDOrZero(prepared.userIDPtr), prepared.resolvedModel, startedAt, fmt.Sprintf("failed while reading provider stream: %v", readErr), providerRequestBody)
-			break
-		}
+		return streamErr
 	}
 
-	if !streamFailed {
-		assistantContent := assistantText.String()
-		if strings.TrimSpace(assistantContent) == "" {
-			assistantContent = rawStream.String()
-		}
-		s.recordSuccess(prepared, providerRequestBody, rawStream.String(), assistantContent, promptTokens, completionTokens, totalTokens, int(time.Since(startedAt).Milliseconds()), true)
+	assistantContent := result.AssistantText
+	if strings.TrimSpace(assistantContent) == "" {
+		assistantContent = result.RawStream
 	}
+	s.recordSuccess(
+		prepared,
+		providerRequestBody,
+		result.RawStream,
+		assistantContent,
+		result.PromptTokens,
+		result.CompletionTokens,
+		result.TotalTokens,
+		int(time.Since(startedAt).Milliseconds()),
+		true,
+	)
 	return nil
 }
 
@@ -986,7 +1055,7 @@ func (s *service) streamAnthropic(ctx context.Context, prepared *preparedChatReq
 	}
 
 	startedAt := time.Now()
-	response, err := s.httpClient.Do(httpRequest)
+	response, err := s.streamHTTPClient.Do(httpRequest)
 	if err != nil {
 		s.recordFailure(prepared.traceID, prepared.requestID, prepared.req, userIDOrZero(prepared.userIDPtr), prepared.resolvedModel, startedAt, fmt.Sprintf("provider call failed: %v", err), providerRequestBody)
 		return fmt.Errorf("failed to call provider: %w", err)
@@ -1020,15 +1089,78 @@ func (s *service) streamAnthropic(ctx context.Context, prepared *preparedChatReq
 		return nil
 	}
 
-	reader := bufio.NewReader(response.Body)
-	var rawStream strings.Builder
 	state := &anthropicStreamState{
 		Created:   time.Now().Unix(),
 		ToolCalls: map[int]*anthropicToolCallState{},
 	}
+	rawStream, streamErr := proxyAnthropicStream(response.Body, w, flusher, state)
+	if streamErr != nil {
+		s.recordFailure(
+			prepared.traceID,
+			prepared.requestID,
+			prepared.req,
+			userIDOrZero(prepared.userIDPtr),
+			prepared.resolvedModel,
+			startedAt,
+			streamErr.Error(),
+			providerRequestBody,
+		)
+		if ctx.Err() == nil {
+			if emitErr := emitOpenAIStreamError(w, flusher, prepared.traceID, streamErr); emitErr != nil {
+				return errors.Join(streamErr, emitErr)
+			}
+		}
+		return streamErr
+	}
+
+	finalChunk := openAIStreamResponseChunk{
+		ID:      defaultIfBlank(state.ResponseID, "chatcmpl-anthropic"),
+		Object:  "chat.completion.chunk",
+		Created: state.Created,
+		Model:   state.Model,
+		Choices: []openAIStreamChoice{
+			{
+				Index: 0,
+				Delta: openAIStreamDelta{},
+			},
+		},
+		Usage: &struct {
+			PromptTokens     int `json:"prompt_tokens"`
+			CompletionTokens int `json:"completion_tokens"`
+			TotalTokens      int `json:"total_tokens"`
+		}{
+			PromptTokens:     state.PromptTokens,
+			CompletionTokens: state.CompletionTokens,
+			TotalTokens:      state.PromptTokens + state.CompletionTokens,
+		},
+	}
+	if err := emitOpenAIStreamPayload(w, flusher, finalChunk); err != nil {
+		streamErr := &downstreamStreamWriteError{err: err}
+		s.recordFailure(prepared.traceID, prepared.requestID, prepared.req, userIDOrZero(prepared.userIDPtr), prepared.resolvedModel, startedAt, streamErr.Error(), providerRequestBody)
+		return streamErr
+	}
+	if err := emitOpenAIStreamDone(w, flusher); err != nil {
+		streamErr := &downstreamStreamWriteError{err: err}
+		s.recordFailure(prepared.traceID, prepared.requestID, prepared.req, userIDOrZero(prepared.userIDPtr), prepared.resolvedModel, startedAt, streamErr.Error(), providerRequestBody)
+		return streamErr
+	}
+
+	assistantContent := strings.TrimSpace(state.AssistantText.String())
+	if assistantContent == "" {
+		assistantContent = renderAnthropicToolCalls(state)
+	}
+	if assistantContent == "" {
+		assistantContent = rawStream
+	}
+	s.recordSuccess(prepared, providerRequestBody, rawStream, assistantContent, state.PromptTokens, state.CompletionTokens, state.PromptTokens+state.CompletionTokens, int(time.Since(startedAt).Milliseconds()), true)
+	return nil
+}
+
+func proxyAnthropicStream(reader io.Reader, writer io.Writer, flusher http.Flusher, state *anthropicStreamState) (string, error) {
+	buffered := bufio.NewReader(reader)
+	var rawStream strings.Builder
 	eventType := ""
 	dataLines := make([]string, 0, 2)
-	streamFailed := false
 	done := false
 
 	flushEvent := func() error {
@@ -1038,7 +1170,7 @@ func (s *service) streamAnthropic(ctx context.Context, prepared *preparedChatReq
 		}
 		payload := strings.Join(dataLines, "\n")
 		dataLines = dataLines[:0]
-		finished, err := processAnthropicStreamEvent(payload, eventType, state, w, flusher)
+		finished, err := processAnthropicStreamEvent(payload, eventType, state, writer, flusher)
 		eventType = ""
 		if err != nil {
 			return err
@@ -1050,16 +1182,14 @@ func (s *service) streamAnthropic(ctx context.Context, prepared *preparedChatReq
 	}
 
 	for !done {
-		line, readErr := reader.ReadString('\n')
+		line, readErr := buffered.ReadString('\n')
 		if line != "" {
 			rawStream.WriteString(line)
 			trimmedLine := strings.TrimRight(line, "\r\n")
 			switch {
 			case trimmedLine == "":
 				if err := flushEvent(); err != nil {
-					streamFailed = true
-					s.recordFailure(prepared.traceID, prepared.requestID, prepared.req, userIDOrZero(prepared.userIDPtr), prepared.resolvedModel, startedAt, fmt.Sprintf("failed while processing provider stream: %v", err), providerRequestBody)
-					break
+					return rawStream.String(), err
 				}
 			case strings.HasPrefix(trimmedLine, "event:"):
 				eventType = strings.TrimSpace(strings.TrimPrefix(trimmedLine, "event:"))
@@ -1071,78 +1201,112 @@ func (s *service) streamAnthropic(ctx context.Context, prepared *preparedChatReq
 		if readErr != nil {
 			if errors.Is(readErr, io.EOF) {
 				if err := flushEvent(); err != nil {
-					streamFailed = true
-					s.recordFailure(prepared.traceID, prepared.requestID, prepared.req, userIDOrZero(prepared.userIDPtr), prepared.resolvedModel, startedAt, fmt.Sprintf("failed while processing provider stream: %v", err), providerRequestBody)
+					return rawStream.String(), err
 				}
-				break
+				if done {
+					return rawStream.String(), nil
+				}
+				return rawStream.String(), &upstreamStreamReadError{err: io.ErrUnexpectedEOF}
 			}
-			streamFailed = true
-			s.recordFailure(prepared.traceID, prepared.requestID, prepared.req, userIDOrZero(prepared.userIDPtr), prepared.resolvedModel, startedAt, fmt.Sprintf("failed while reading provider stream: %v", readErr), providerRequestBody)
-			break
+			return rawStream.String(), &upstreamStreamReadError{err: readErr}
 		}
 	}
-
-	if !streamFailed {
-		finalChunk := openAIStreamResponseChunk{
-			ID:      defaultIfBlank(state.ResponseID, "chatcmpl-anthropic"),
-			Object:  "chat.completion.chunk",
-			Created: state.Created,
-			Model:   state.Model,
-			Choices: []openAIStreamChoice{
-				{
-					Index: 0,
-					Delta: openAIStreamDelta{},
-				},
-			},
-			Usage: &struct {
-				PromptTokens     int `json:"prompt_tokens"`
-				CompletionTokens int `json:"completion_tokens"`
-				TotalTokens      int `json:"total_tokens"`
-			}{
-				PromptTokens:     state.PromptTokens,
-				CompletionTokens: state.CompletionTokens,
-				TotalTokens:      state.PromptTokens + state.CompletionTokens,
-			},
-		}
-		if err := emitOpenAIStreamPayload(w, flusher, finalChunk); err != nil {
-			s.recordFailure(prepared.traceID, prepared.requestID, prepared.req, userIDOrZero(prepared.userIDPtr), prepared.resolvedModel, startedAt, fmt.Sprintf("failed while writing normalized stream: %v", err), providerRequestBody)
-			return nil
-		}
-		if err := emitOpenAIStreamDone(w, flusher); err != nil {
-			s.recordFailure(prepared.traceID, prepared.requestID, prepared.req, userIDOrZero(prepared.userIDPtr), prepared.resolvedModel, startedAt, fmt.Sprintf("failed while closing normalized stream: %v", err), providerRequestBody)
-			return nil
-		}
-
-		assistantContent := strings.TrimSpace(state.AssistantText.String())
-		if assistantContent == "" {
-			assistantContent = renderAnthropicToolCalls(state)
-		}
-		if assistantContent == "" {
-			assistantContent = rawStream.String()
-		}
-		normalizedStream := rawStream.String()
-		s.recordSuccess(prepared, providerRequestBody, normalizedStream, assistantContent, state.PromptTokens, state.CompletionTokens, state.PromptTokens+state.CompletionTokens, int(time.Since(startedAt).Milliseconds()), true)
-	}
-	return nil
+	return rawStream.String(), nil
 }
 
-func inspectStreamLine(line string, assistantText *strings.Builder, promptTokens, completionTokens, totalTokens *int) bool {
+func proxyOpenAIStream(reader io.Reader, writer io.Writer, flusher http.Flusher) (openAIStreamProxyResult, error) {
+	buffered := bufio.NewReader(reader)
+	var rawStream strings.Builder
+	var assistantText strings.Builder
+	promptTokens := 0
+	completionTokens := 0
+	totalTokens := 0
+	sawDone := false
+	sawFinishReason := false
+	var pendingProviderError error
+
+	result := func() openAIStreamProxyResult {
+		return openAIStreamProxyResult{
+			RawStream:        rawStream.String(),
+			AssistantText:    assistantText.String(),
+			PromptTokens:     promptTokens,
+			CompletionTokens: completionTokens,
+			TotalTokens:      totalTokens,
+			SawDone:          sawDone,
+			SawFinishReason:  sawFinishReason,
+			Terminal:         sawDone || sawFinishReason,
+		}
+	}
+
+	for {
+		line, readErr := buffered.ReadString('\n')
+		if line != "" {
+			inspection := inspectStreamLine(
+				line,
+				&assistantText,
+				&promptTokens,
+				&completionTokens,
+				&totalTokens,
+			)
+			sawDone = sawDone || inspection.Done
+			sawFinishReason = sawFinishReason || inspection.Finished
+			rawStream.WriteString(line)
+			if _, err := io.WriteString(writer, line); err != nil {
+				return result(), &downstreamStreamWriteError{err: err}
+			}
+			flusher.Flush()
+			if inspection.ProviderError != nil {
+				pendingProviderError = inspection.ProviderError
+			}
+			if pendingProviderError != nil && strings.TrimSpace(line) == "" {
+				return result(), pendingProviderError
+			}
+			if inspection.Done {
+				return result(), nil
+			}
+		}
+
+		if readErr != nil {
+			if pendingProviderError != nil {
+				return result(), pendingProviderError
+			}
+			if errors.Is(readErr, io.EOF) {
+				if sawFinishReason {
+					return result(), nil
+				}
+				return result(), &upstreamStreamReadError{err: io.ErrUnexpectedEOF}
+			}
+			return result(), &upstreamStreamReadError{err: readErr}
+		}
+	}
+}
+
+func inspectStreamLine(line string, assistantText *strings.Builder, promptTokens, completionTokens, totalTokens *int) openAIStreamInspection {
 	trimmed := strings.TrimSpace(line)
 	if !strings.HasPrefix(trimmed, "data:") {
-		return false
+		return openAIStreamInspection{}
 	}
 
 	payload := strings.TrimSpace(strings.TrimPrefix(trimmed, "data:"))
 	if payload == "" {
-		return false
+		return openAIStreamInspection{}
 	}
 	if payload == "[DONE]" {
-		return true
+		return openAIStreamInspection{Done: true}
 	}
 
 	var chunk openAIStreamChunk
 	if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
-		return false
+		return openAIStreamInspection{}
+	}
+	if chunk.Error != nil {
+		message := strings.TrimSpace(chunk.Error.Message)
+		if message == "" {
+			message = "provider returned an error stream event"
+		}
+		return openAIStreamInspection{
+			ProviderError: &upstreamStreamProviderError{message: message},
+		}
 	}
 
 	if chunk.Usage != nil {
@@ -1151,13 +1315,17 @@ func inspectStreamLine(line string, assistantText *strings.Builder, promptTokens
 		*totalTokens = chunk.Usage.TotalTokens
 	}
 
+	finished := false
 	for _, choice := range chunk.Choices {
 		content := flattenMessageContent(choice.Delta.Content)
 		if content != "" {
 			assistantText.WriteString(content)
 		}
+		if choice.FinishReason != nil && strings.TrimSpace(*choice.FinishReason) != "" {
+			finished = true
+		}
 	}
-	return false
+	return openAIStreamInspection{Finished: finished}
 }
 
 func buildProviderRequestBody(req ChatCompletionRequest, model *models.LLMModel) ([]byte, error) {
@@ -1371,6 +1539,22 @@ func emitOpenAIStreamDone(w io.Writer, flusher http.Flusher) error {
 	return nil
 }
 
+func emitOpenAIStreamError(w io.Writer, flusher http.Flusher, traceID string, _ error) error {
+	payload := struct {
+		Error struct {
+			Message string `json:"message"`
+			Type    string `json:"type"`
+			Code    string `json:"code"`
+			TraceID string `json:"trace_id,omitempty"`
+		} `json:"error"`
+	}{}
+	payload.Error.Message = upstreamStreamInterruptedCode + ": upstream model stream ended before a verified terminal event; retry this turn"
+	payload.Error.Type = "upstream_stream_error"
+	payload.Error.Code = upstreamStreamInterruptedCode
+	payload.Error.TraceID = strings.TrimSpace(traceID)
+	return emitOpenAIStreamPayload(w, flusher, payload)
+}
+
 func conditionalAssistantRole(state *anthropicStreamState) string {
 	if state.SentRole {
 		return ""
@@ -1387,6 +1571,18 @@ func buildOpenAICompatibleRequestBody(req ChatCompletionRequest, model *models.L
 	if len(req.RawBody) > 0 {
 		if err := json.Unmarshal(req.RawBody, &payload); err != nil {
 			return nil, fmt.Errorf("failed to decode provider request: %w", err)
+		}
+	} else {
+		// HTTP proxy calls retain RawBody so unknown provider extensions survive.
+		// Internal callers construct ChatCompletionRequest directly, so synthesize
+		// the equivalent wire payload instead of silently dropping messages and
+		// generation parameters.
+		structuredBody, err := json.Marshal(req)
+		if err != nil {
+			return nil, fmt.Errorf("failed to encode structured provider request: %w", err)
+		}
+		if err := json.Unmarshal(structuredBody, &payload); err != nil {
+			return nil, fmt.Errorf("failed to decode structured provider request: %w", err)
 		}
 	}
 	if payload == nil {
@@ -1405,11 +1601,139 @@ func buildOpenAICompatibleRequestBody(req ChatCompletionRequest, model *models.L
 		return nil, fmt.Errorf("failed to encode provider model name: %w", err)
 	}
 	payload["model"] = json.RawMessage(modelPayload)
+	if err := applyOpenAICompatibleProviderContract(payload, model, req.ManagedAgentType); err != nil {
+		return nil, err
+	}
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return nil, fmt.Errorf("failed to encode provider request: %w", err)
 	}
 	return body, nil
+}
+
+func applyOpenAICompatibleProviderContract(payload map[string]json.RawMessage, model *models.LLMModel, managedAgentType *string) error {
+	if payload == nil || model == nil {
+		return nil
+	}
+	if models.ResolveLLMReasoningControl(
+		model.ProviderType,
+		model.ProtocolType,
+		model.BaseURL,
+		model.ProviderModelName,
+	) == models.ReasoningControlDeepSeekThinking {
+		// DeepSeek's OpenAI-compatible API accepts max_tokens. OpenClaw uses
+		// max_completion_tokens for an opaque ClawManager proxy because it cannot
+		// see the resolved downstream provider. Normalize only after ClawManager
+		// has resolved the official DeepSeek route; arbitrary compatible proxies
+		// retain their original wire contract.
+		if _, hasMaxTokens := payload["max_tokens"]; !hasMaxTokens {
+			if value, hasMaxCompletionTokens := payload["max_completion_tokens"]; hasMaxCompletionTokens {
+				payload["max_tokens"] = value
+			}
+		}
+		delete(payload, "max_completion_tokens")
+	}
+	return applyReasoningControl(payload, model, managedAgentType)
+}
+
+type reasoningRequestIntent struct {
+	set     bool
+	enabled bool
+	effort  string
+}
+
+func openAICompatibleReasoningIntent(payload map[string]json.RawMessage) reasoningRequestIntent {
+	if payload == nil {
+		return reasoningRequestIntent{}
+	}
+	if raw, ok := payload["thinking"]; ok {
+		var thinking struct {
+			Type string `json:"type"`
+		}
+		if json.Unmarshal(raw, &thinking) == nil {
+			switch strings.ToLower(strings.TrimSpace(thinking.Type)) {
+			case "disabled", "off", "none":
+				return reasoningRequestIntent{set: true}
+			case "enabled", "on":
+				return reasoningRequestIntent{set: true, enabled: true}
+			}
+		}
+	}
+	if raw, ok := payload["reasoning_effort"]; ok {
+		var effort string
+		if json.Unmarshal(raw, &effort) == nil {
+			effort = strings.ToLower(strings.TrimSpace(effort))
+			switch effort {
+			case "off", "none", "disabled":
+				return reasoningRequestIntent{set: true}
+			case "minimal", "low", "medium", "high", "xhigh", "max":
+				return reasoningRequestIntent{set: true, enabled: true, effort: effort}
+			}
+		}
+	}
+	return reasoningRequestIntent{}
+}
+
+func normalizeDeepSeekReasoningEffort(effort string) string {
+	switch strings.ToLower(strings.TrimSpace(effort)) {
+	case "xhigh", "max":
+		return "max"
+	case "minimal", "low", "medium", "high":
+		return "high"
+	default:
+		return ""
+	}
+}
+
+func isManagedOpenClawRequest(managedAgentType *string) bool {
+	return managedAgentType != nil && strings.EqualFold(strings.TrimSpace(*managedAgentType), "openclaw")
+}
+
+func applyReasoningControl(payload map[string]json.RawMessage, model *models.LLMModel, managedAgentType *string) error {
+	if payload == nil || model == nil {
+		return nil
+	}
+	control := models.ResolveLLMReasoningControl(
+		model.ProviderType,
+		model.ProtocolType,
+		model.BaseURL,
+		model.ProviderModelName,
+	)
+	switch control {
+	case models.ReasoningControlDeepSeekThinking:
+		// The model setting is the capability ceiling. Managed OpenClaw requests
+		// may further disable thinking for the current session/turn, but may never
+		// enable a model that the administrator disabled.
+		intent := openAICompatibleReasoningIntent(payload)
+		enabled := model.ReasoningEnabled
+		if isManagedOpenClawRequest(managedAgentType) {
+			enabled = enabled && intent.set && intent.enabled
+		} else if intent.set {
+			enabled = enabled && intent.enabled
+		}
+		state := "disabled"
+		if enabled {
+			state = "enabled"
+		} else {
+			delete(payload, "reasoning_effort")
+			delete(payload, "reasoning")
+		}
+		encoded, err := json.Marshal(map[string]string{"type": state})
+		if err != nil {
+			return fmt.Errorf("failed to encode provider reasoning control: %w", err)
+		}
+		payload["thinking"] = encoded
+		if enabled {
+			if effort := normalizeDeepSeekReasoningEffort(intent.effort); effort != "" {
+				encodedEffort, err := json.Marshal(effort)
+				if err != nil {
+					return fmt.Errorf("failed to encode provider reasoning effort: %w", err)
+				}
+				payload["reasoning_effort"] = encodedEffort
+			}
+		}
+	}
+	return nil
 }
 
 func buildAnthropicRequestBody(req ChatCompletionRequest, model *models.LLMModel) ([]byte, error) {

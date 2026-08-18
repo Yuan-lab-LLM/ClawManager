@@ -544,10 +544,19 @@ func (s *RuntimeScheduler) reconcile(ctx context.Context) error {
 				continue
 			}
 			if binding != nil {
-				if err := s.syncInstanceStateFromBinding(ctx, instance, binding); err != nil {
-					errs = append(errs, fmt.Errorf("sync desired instance %d from binding: %w", instance.ID, err))
+				stale, staleErr := s.cleanupStaleInstanceBinding(ctx, instance, binding)
+				if staleErr != nil {
+					errs = append(errs, fmt.Errorf("clean stale running binding for desired instance %d: %w", instance.ID, staleErr))
+					continue
 				}
-				continue
+				if stale {
+					binding = nil
+				} else if err := s.syncInstanceStateFromBinding(ctx, instance, binding); err != nil {
+					errs = append(errs, fmt.Errorf("sync desired instance %d from binding: %w", instance.ID, err))
+					continue
+				} else {
+					continue
+				}
 			}
 			binding, err = s.bindingRepo.GetByInstanceID(ctx, instance.ID)
 			if err != nil {
@@ -555,10 +564,19 @@ func (s *RuntimeScheduler) reconcile(ctx context.Context) error {
 				continue
 			}
 			if binding != nil {
-				if err := s.syncInstanceStateFromBinding(ctx, instance, binding); err != nil {
-					errs = append(errs, fmt.Errorf("sync desired instance %d from binding: %w", instance.ID, err))
+				stale, staleErr := s.cleanupStaleInstanceBinding(ctx, instance, binding)
+				if staleErr != nil {
+					errs = append(errs, fmt.Errorf("clean stale binding for desired instance %d: %w", instance.ID, staleErr))
+					continue
 				}
-				continue
+				if stale {
+					binding = nil
+				} else if err := s.syncInstanceStateFromBinding(ctx, instance, binding); err != nil {
+					errs = append(errs, fmt.Errorf("sync desired instance %d from binding: %w", instance.ID, err))
+					continue
+				} else {
+					continue
+				}
 			}
 			if assignErr := s.assignInstance(ctx, instance); assignErr != nil {
 				if errors.Is(assignErr, errRuntimeScaleOutPending) || errors.Is(assignErr, errRuntimeGatewayStartPending) {
@@ -617,10 +635,16 @@ func (s *RuntimeScheduler) reconcileCreatingInstance(ctx context.Context, instan
 		return []error{fmt.Errorf("get binding for creating instance %d: %w", instance.ID, err)}
 	}
 	if binding != nil {
-		if err := s.syncInstanceStateFromBinding(ctx, instance, binding); err != nil {
-			return []error{fmt.Errorf("sync creating instance %d from binding: %w", instance.ID, err)}
+		stale, staleErr := s.cleanupStaleInstanceBinding(ctx, instance, binding)
+		if staleErr != nil {
+			return []error{fmt.Errorf("clean stale binding for creating instance %d: %w", instance.ID, staleErr)}
 		}
-		return nil
+		if !stale {
+			if err := s.syncInstanceStateFromBinding(ctx, instance, binding); err != nil {
+				return []error{fmt.Errorf("sync creating instance %d from binding: %w", instance.ID, err)}
+			}
+			return nil
+		}
 	}
 	if err := s.assignInstance(ctx, instance); err != nil {
 		if errors.Is(err, errRuntimeScaleOutPending) || errors.Is(err, errRuntimeGatewayStartPending) {
@@ -631,6 +655,33 @@ func (s *RuntimeScheduler) reconcileCreatingInstance(ctx context.Context, instan
 		return errs
 	}
 	return nil
+}
+
+// cleanupStaleInstanceBinding removes only a binding from an older runtime
+// generation. A newer binding may have been created after the instance snapshot
+// was read and must never be removed by this reconciliation pass.
+func (s *RuntimeScheduler) cleanupStaleInstanceBinding(ctx context.Context, instance models.Instance, binding *models.InstanceRuntimeBinding) (bool, error) {
+	if binding == nil || binding.Generation >= instance.RuntimeGeneration {
+		return false, nil
+	}
+	if s.bindingRepo == nil {
+		return false, fmt.Errorf("runtime binding repository is not configured")
+	}
+	if s.podRepo != nil && s.agentClient != nil && strings.TrimSpace(binding.GatewayID) != "" {
+		pod, err := s.podRepo.GetByID(ctx, binding.RuntimePodID)
+		if err != nil {
+			return false, fmt.Errorf("get runtime pod %d: %w", binding.RuntimePodID, err)
+		}
+		if pod != nil && pod.AgentEndpoint != nil && strings.TrimSpace(*pod.AgentEndpoint) != "" {
+			if err := s.agentClient.DeleteGateway(ctx, strings.TrimSpace(*pod.AgentEndpoint), binding.GatewayID); err != nil && !errors.Is(err, ErrRuntimeAgentNotFound) {
+				return false, fmt.Errorf("delete stale gateway %q: %w", binding.GatewayID, err)
+			}
+		}
+	}
+	if err := s.bindingRepo.DeleteByInstanceIDAndReleaseSlot(ctx, instance.ID, binding.RuntimePodID); err != nil {
+		return false, fmt.Errorf("delete stale binding and release slot: %w", err)
+	}
+	return true, nil
 }
 
 func (s *RuntimeScheduler) syncInstanceStateFromBinding(ctx context.Context, instance models.Instance, binding *models.InstanceRuntimeBinding) error {
@@ -1012,6 +1063,11 @@ func (s *RuntimeScheduler) prepareGatewayStartExcludingPorts(
 		return nil, fmt.Errorf("build runtime gateway environment: %w", err)
 	}
 	uid, gid := runtimeGatewayLinuxIDs(instance.ID, environment)
+	if runtimeType == RuntimeTypeOpenClaw {
+		if err := ensureOpenClawPluginLayoutCompatibility(workspacePath, uid, gid); err != nil {
+			return nil, fmt.Errorf("prepare OpenClaw workspace compatibility: %w", err)
+		}
+	}
 	reservedBinding, err := s.reserveGatewayPortExcludingPorts(ctx, instance, runtimeType, pod, workspacePath, excludedPorts)
 	if err != nil {
 		return nil, err
@@ -1321,7 +1377,8 @@ func isRecoverableRuntimeSchedulingError(instance models.Instance) bool {
 	}
 	message := strings.TrimSpace(*instance.RuntimeErrorMessage)
 	return message == fmt.Sprintf("no schedulable %s runtime pod", runtimeType) ||
-		strings.Contains(message, fmt.Sprintf("no schedulable %s runtime pod:", runtimeType))
+		strings.Contains(message, fmt.Sprintf("no schedulable %s runtime pod:", runtimeType)) ||
+		message == "gateway start failed: exit status 1"
 }
 
 func minInt(a, b int) int {

@@ -426,6 +426,75 @@ func TestEgressProxyHandlerDoesNotInterceptArbitraryPreviewLikeHost(t *testing.T
 	}
 }
 
+func TestEgressProxyHandlerServesInteractivePreviewOnIsolatedSignedOrigin(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	workspaceRoot := t.TempDir()
+	secretName := "team-94-token"
+	team := &models.Team{ID: 94, UserID: 7, TeamTokenSecretName: &secretName}
+	artifactRoot := filepath.Join(k8s.TeamSharedWorkspacePath(workspaceRoot, team.UserID, team.ID), "results", "task-193")
+	if err := os.MkdirAll(artifactRoot, 0o755); err != nil {
+		t.Fatalf("mkdir artifact root: %v", err)
+	}
+	const artifact = `<!doctype html><style>body{color:red}</style><script>localStorage.setItem("ready","1")</script>`
+	if err := os.WriteFile(filepath.Join(artifactRoot, "kanban.html"), []byte(artifact), 0o644); err != nil {
+		t.Fatalf("write artifact: %v", err)
+	}
+
+	const token = "preview-secret"
+	const prefix = "results/task-193"
+	encodedPrefix := base64.RawURLEncoding.EncodeToString([]byte(prefix))
+	signature := signTeamPreviewModeForTest(token, team.ID, prefix, teamPreviewInteractiveMode)
+	previewPath := "/v2/interactive/94/" + encodedPrefix + "/" + signature + "/kanban.html"
+	target := "http://" + isolatedInteractivePreviewHost(signature) + previewPath
+	const previewOrigin = "http://clawmanager-egress-proxy.clawmanager-hxc-peer-system.svc.cluster.local:3128"
+	handler := NewEgressProxyHandler(
+		nil,
+		WithTeamArtifactPreview(
+			&stubTeamPreviewRepository{team: team},
+			&stubTeamPreviewSecrets{token: token},
+			workspaceRoot,
+			func(int) string { return "clawmanager-user-7" },
+		),
+		WithTeamArtifactPreviewOrigin(previewOrigin),
+	)
+
+	bootstrap := httptest.NewRecorder()
+	bootstrapCtx, _ := gin.CreateTestContext(bootstrap)
+	bootstrapCtx.Request = httptest.NewRequest(http.MethodGet, previewOrigin+previewPath, nil)
+	handler.Handle(bootstrapCtx)
+	if bootstrap.Code != http.StatusTemporaryRedirect {
+		t.Fatalf("interactive bootstrap expected 307, got %d: %s", bootstrap.Code, bootstrap.Body.String())
+	}
+	if got, want := bootstrap.Header().Get("Location"), target; got != want {
+		t.Fatalf("interactive bootstrap Location = %q, want %q", got, want)
+	}
+	if got := bootstrap.Header().Get("Cache-Control"); !strings.Contains(got, "no-store") {
+		t.Fatalf("interactive bootstrap cache policy = %q", got)
+	}
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, target, nil)
+	handler.Handle(ctx)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+	csp := recorder.Header().Get("Content-Security-Policy")
+	for _, expected := range []string{"'unsafe-inline'", "connect-src 'none'", "form-action 'none'"} {
+		if !strings.Contains(csp, expected) {
+			t.Fatalf("interactive CSP %q missing %q", csp, expected)
+		}
+	}
+
+	wrongOrigin := httptest.NewRecorder()
+	wrongCtx, _ := gin.CreateTestContext(wrongOrigin)
+	wrongCtx.Request = httptest.NewRequest(http.MethodGet, "http://p-wrong."+teamPreviewHost+"/v2/interactive/94/"+encodedPrefix+"/"+signature+"/kanban.html", nil)
+	handler.Handle(wrongCtx)
+	if wrongOrigin.Code != http.StatusForbidden {
+		t.Fatalf("interactive preview on a non-isolated origin returned %d", wrongOrigin.Code)
+	}
+}
+
 func TestEgressProxyHandlerRejectsInvalidTeamArtifactPreviewSignature(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	secretName := "team-94-token"
@@ -453,5 +522,11 @@ func TestEgressProxyHandlerRejectsInvalidTeamArtifactPreviewSignature(t *testing
 func signTeamPreviewForTest(token string, teamID int, prefix string) string {
 	mac := hmac.New(sha256.New, []byte(token))
 	_, _ = mac.Write([]byte(teamPreviewSignaturePayload(teamID, prefix)))
+	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+}
+
+func signTeamPreviewModeForTest(token string, teamID int, prefix, mode string) string {
+	mac := hmac.New(sha256.New, []byte(token))
+	_, _ = mac.Write([]byte(teamPreviewSignaturePayloadForMode(teamID, prefix, mode)))
 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }

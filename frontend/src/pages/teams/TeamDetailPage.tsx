@@ -454,11 +454,11 @@ const teamWorkspaceHeight = (
   }
   switch (detailSize) {
     case "long":
-      return 1220;
+      return 1110;
     case "medium":
-      return 1040;
+      return 945;
     default:
-      return 820;
+      return 740;
   }
 };
 
@@ -840,17 +840,16 @@ const isFailedCollaborationItem = (item: CollaborationItem) => {
   }
   const eventType = item.eventType;
   if (eventType !== "task_failed" && eventType !== "message_failed") {
-    return status === "failed" || status === "failure" || status === "error" || status === "blocked";
+    return status === "failed" || status === "failure" || status === "error";
   }
   const content = item.content.toLowerCase();
   if (content.includes("dispatch finished without reply/completion") || content.includes("without reply/completion")) {
     return false;
   }
-  return /error|failed|failure|exception|timeout|forbidden|失败|错误|异常|超时|blocked/.test(content) ||
+  return /error|failed|failure|exception|timeout|forbidden|失败|错误|异常|超时/.test(content) ||
     status === "failed" ||
     status === "failure" ||
-    status === "error" ||
-    status === "blocked";
+    status === "error";
 };
 
 const buildCollaborationGroups = (
@@ -1002,7 +1001,6 @@ const TeamDetailPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [targetMember] = useState("");
-  const [taskTitle] = useState("server-smoke");
   const [taskPrompt, setTaskPrompt] = useState("");
   const [dispatching, setDispatching] = useState(false);
   const [dispatchError, setDispatchError] = useState<string | null>(null);
@@ -1173,15 +1171,16 @@ const TeamDetailPage: React.FC = () => {
     try {
       setDispatching(true);
       setDispatchError(null);
-      setSelectedGroupKey(null);
-      await teamService.dispatchTask(teamId, {
+      const dispatchedTask = await teamService.dispatchTask(teamId, {
         target_member_id: targetMember.trim(),
         payload: {
-          title: taskTitle.trim() || "Team task",
+          title: taskPrompt.trim(),
           prompt: taskPrompt.trim(),
           responseLocale: "zh-CN",
         },
       });
+      setLoadedTasks((current) => mergeTasksByLatestState(current, [dispatchedTask]));
+      setSelectedGroupKey(canonicalTaskKey(dispatchedTask.id));
       setTaskPrompt("");
       await loadTeam({ background: true });
     } catch (err: any) {
@@ -2196,6 +2195,7 @@ function teamArtifactRefsFromPayload(payload: Record<string, unknown>, step?: Re
     step?.artifact_refs,
   ];
   const refs: string[] = [];
+  const seenPaths = new Set<string>();
   for (const candidate of candidates) {
     if (!Array.isArray(candidate)) {
       continue;
@@ -2205,10 +2205,15 @@ function teamArtifactRefsFromPayload(payload: Record<string, unknown>, step?: Re
         continue;
       }
       const value = raw.trim();
-      if (!value || !isTeamWorkspaceLink(value) || refs.includes(value)) {
+      if (!value || !isTeamWorkspaceLink(value)) {
         continue;
       }
-      refs.push(value);
+      const relativePath = workspaceLinkToRelativePath(value);
+      if (!relativePath || seenPaths.has(relativePath)) {
+        continue;
+      }
+      seenPaths.add(relativePath);
+      refs.push(`/team/${relativePath}`);
     }
   }
   return refs;
@@ -2479,7 +2484,7 @@ function CollaborationPanel({
         )}
       </div>
 
-      {queryAnchors.length >= 3 && (
+      {queryAnchors.length >= 2 && (
         <QuestionAnchorRail
           groups={queryAnchors}
           activeGroupKey={activeGroupKey}
@@ -2594,7 +2599,6 @@ function InteractionProcessPanel({
     : latestRuntimeStatus === "waiting_completion"
       ? "等待显式完成确认"
       : workflowStatusText(group?.task?.workflow_state) || processStatusText(visualStatus);
-  const title = group?.task ? taskTitleText(group.task) : group?.title || "等待任务";
   const queryText = group?.task
     ? taskPromptText(group.task) || group.title
     : group?.items.find((item) => item.content)?.content || "";
@@ -2680,8 +2684,10 @@ function InteractionProcessPanel({
                 {statusText}
               </span>
             </div>
-            <div className="mt-2 text-sm font-semibold leading-5">{title}</div>
-            <div className="mt-1 line-clamp-2 text-[11px] leading-4 text-slate-600">
+            <div
+              className="mt-2 line-clamp-2 text-sm font-semibold leading-5 text-slate-800"
+              title={queryText || undefined}
+            >
               {queryText || "用户提交 query 后，这里会展示拆解、执行和汇总。"}
             </div>
             <div className="mt-1.5 flex max-w-full flex-nowrap items-center gap-1 overflow-hidden text-[10px] leading-4 text-slate-500">
@@ -3276,6 +3282,13 @@ function isProtocolNoiseItem(item: CollaborationItem) {
   const visibleRaw = payloadText(item.payload, ["visibleToChat", "visible_to_chat"]).toLowerCase();
   const explicitlyHidden = ["false", "0", "no", "off"].includes(visibleRaw);
   const chatPolicy = payloadText(item.payload, ["chatPolicy", "chat_policy"]).toLowerCase();
+  const eventKind = chatEventKind(item.payload);
+  if (
+    eventKind === "turn_finished_without_completion" ||
+    eventKind === "assignment_attempt_failed"
+  ) {
+    return true;
+  }
   if (isBusinessChatItem(item)) {
     return false;
   }
@@ -3436,8 +3449,11 @@ function isTerminalEventType(eventType: string) {
 }
 
 function kanbanColumnForStep(step: ProcessStep, visualStatus: string, steps: ProcessStep[] = []): KanbanColumnKey {
-  if (["succeeded", "success", "completed", "complete", "done", "finished", "ok", "failed", "failure", "error", "blocked", "stale"].includes((step.status || "").toLowerCase())) {
+  if (["succeeded", "success", "completed", "complete", "done", "finished", "ok", "failed", "failure", "error", "stale"].includes((step.status || "").toLowerCase())) {
     return "done";
+  }
+  if (["waiting", "blocked", "waiting_dependency", "waiting_dependencies"].includes((step.status || "").toLowerCase())) {
+    return "doing";
   }
   if (isCompletionEvidenceStep(step, steps) || isFailureEvidenceStep(step)) {
     return "done";
@@ -3477,7 +3493,7 @@ function buildWorkItemKanbanColumns(
     const column: KanbanColumnKey =
       item.status === "succeeded" || item.status === "failed" || item.status === "stale"
         ? "done"
-        : item.status === "running"
+        : item.status === "running" || item.status === "waiting"
           ? "doing"
           : "todo";
     const owner = item.owner_member_id
@@ -3509,11 +3525,11 @@ function buildWorkItemKanbanColumns(
           ? "task_completed"
           : item.status === "failed" || item.status === "stale"
             ? "task_failed"
-            : item.status === "running"
+            : item.status === "running" || item.status === "waiting"
               ? "task_progress"
               : "task_assigned",
       time: new Date(item.updated_at).getTime(),
-      progress: item.status === "succeeded" ? 100 : item.status === "running" ? 50 : undefined,
+      progress: item.status === "succeeded" ? 100 : item.status === "running" ? 50 : item.status === "waiting" ? 35 : undefined,
       statusLabel:
         item.status === "succeeded"
           ? "已完成"
@@ -3521,7 +3537,9 @@ function buildWorkItemKanbanColumns(
             ? "失败"
             : item.status === "stale"
               ? "超时"
-              : item.status === "running"
+              : item.status === "waiting"
+                ? "等待中"
+                : item.status === "running"
                 ? "执行中"
                 : item.status === "dispatched"
                   ? "已分派"
@@ -3847,6 +3865,13 @@ function buildPeerCollaborationModel(
         actorLane.waitingOn = displayMemberName(targetKey, memberByKey, leaderMemberId);
         setLaneCard(actorLane, step, "working", "等待协作", `${actorLane.label} 等待 ${actorLane.waitingOn}`);
       }
+      continue;
+    }
+
+    const stepStatus = (step.status || "").toLowerCase();
+    if (["waiting", "blocked", "waiting_dependency", "waiting_dependencies"].includes(stepStatus) && !isFailureEvidenceStep(step)) {
+      const lane = ensureLane(actorKey);
+      setLaneCard(lane, step, "waiting", "等待中", `${lane.label} 正在等待条件满足`);
       continue;
     }
 
@@ -4881,6 +4906,7 @@ type TeamChatMessage = {
   threadKey?: string;
   sortPhase?: number;
   artifactRefs?: string[];
+  presentationKey?: string;
 };
 
 const TEAM_CHAT_WAIT_DIGEST_MS = 3 * 60 * 1000;
@@ -5231,6 +5257,11 @@ function chatMessageFromItem(
   const targetLabel = item.to
     ? displayMemberName(item.to, memberByKey, leaderMemberId)
     : "";
+  const eventKind = chatEventKind(item.payload);
+  const visibleItemContent = normalizeTeamChatVisibleControlText(item.content, item.payload);
+  if (eventKind === "agent_narrative" && item.content.trim() && !visibleItemContent) {
+    return null;
+  }
   const isAssignmentEvent =
     item.eventType === "outbound" ||
     item.eventType === "task_assigned" ||
@@ -5238,11 +5269,10 @@ function chatMessageFromItem(
     item.eventType === "peer_request" ||
     item.eventType === "peer_handoff" ||
     item.eventType === "peer_review_request";
-  const hasContent = Boolean(item.content.trim());
+  const hasContent = Boolean(visibleItemContent.trim());
   const isFeedbackEvent =
     isWorkerToLeaderMessage(senderKey, item.to, leaderMemberId) ||
     isWorkerFeedbackEvent(item, senderKey, leaderMemberId, hasContent);
-  const eventKind = chatEventKind(item.payload);
   const isSystemProcess =
     senderKey === "clawmanager-monitor" ||
     eventKind === "assignment_check_requested" ||
@@ -5254,7 +5284,7 @@ function chatMessageFromItem(
     isAssignmentEvent && !hasContent
       ? assignmentEventFallback(item, senderLabel, targetLabel, isFeedbackEvent)
       : chatFallbackText(item, progress, status);
-  const content = item.content || fallbackContent;
+  const content = visibleItemContent || fallbackContent;
   const isTerminalFeedback = isTerminalFeedbackItem(item, content, isFeedbackEvent);
   return {
     id: `event-${item.event.id}`,
@@ -5286,7 +5316,28 @@ function chatMessageFromItem(
     threadKey: item.taskKey,
     sortPhase: chatItemSortPhase(item, isAssignmentEvent, isTerminalFeedback),
     artifactRefs: teamArtifactRefsFromPayload(item.payload, item.collaborationStep),
+    presentationKey: chatPresentationTurnKey(item, senderKey, content),
   };
+}
+
+function normalizeTeamChatVisibleControlText(
+  content: string,
+  payload: Record<string, unknown>,
+) {
+  const eventKind = String(
+    payload.eventKind ?? payload.event_kind ?? payload.kind ?? "",
+  ).trim().toLowerCase();
+  if (eventKind !== "agent_narrative") {
+    return content;
+  }
+  const value = content.trim();
+  if (!value) {
+    return "";
+  }
+  if (/^NO_REPLY$/i.test(value)) {
+    return "";
+  }
+  return value.replace(/(?:^|\r?\n[\t ]*|\*+)NO_REPLY[\t ]*$/i, "").trim();
 }
 
 function chatItemSortPhase(
@@ -5328,14 +5379,35 @@ const finalFeedbackContentPattern =
   /\bDONE\b|team_complete_task|任务核心结果|完整详细产出|结果已反馈|已完成|执行完成|完成任务/;
 
 function dedupeTeamChatMessages(messages: TeamChatMessage[]) {
+  const mergedMessages: TeamChatMessage[] = [];
+  const presentationIndexes = new Map<string, number>();
+  for (const message of messages) {
+    const candidate: TeamChatMessage = {
+      ...message,
+      artifactRefs: message.artifactRefs ? [...message.artifactRefs] : undefined,
+    };
+    if (candidate.presentationKey) {
+      const existingIndex = presentationIndexes.get(candidate.presentationKey);
+      if (existingIndex !== undefined) {
+        const existing = mergedMessages[existingIndex];
+        existing.artifactRefs = mergeTeamChatArtifactRefs(existing.artifactRefs, candidate.artifactRefs);
+        if ((!existing.tone || existing.tone === "normal") && candidate.tone && candidate.tone !== "normal") {
+          existing.tone = candidate.tone;
+        }
+        continue;
+      }
+      presentationIndexes.set(candidate.presentationKey, mergedMessages.length);
+    }
+    mergedMessages.push(candidate);
+  }
   const lastReplaceable = new Map<string, number>();
-  messages.forEach((message, index) => {
+  mergedMessages.forEach((message, index) => {
     if (message.dedupeKey?.startsWith("replaceable:")) {
       lastReplaceable.set(message.dedupeKey, index);
     }
   });
   const seen = new Set<string>();
-  return messages.filter((message, index) => {
+  return mergedMessages.filter((message, index) => {
     if (!message.dedupeKey) {
       return true;
     }
@@ -5350,6 +5422,48 @@ function dedupeTeamChatMessages(messages: TeamChatMessage[]) {
   });
 }
 
+function chatPresentationTurnKey(
+  item: CollaborationItem,
+  senderKey: string,
+  content: string,
+) {
+  const sourceMessageId = payloadTextDeep(item.payload, [
+    "sourceMessageId",
+    "source_message_id",
+    "inReplyTo",
+    "in_reply_to",
+  ]);
+  const assignmentId = payloadTextDeep(item.payload, [
+    "assignmentId",
+    "assignment_id",
+    "canonicalWorkId",
+    "canonical_work_id",
+    "workId",
+    "work_id",
+  ]);
+  const normalizedContent = normalizeChatIdentityContent(content);
+  if (!sourceMessageId || !normalizedContent) {
+    return undefined;
+  }
+  return `turn:${item.taskKey}:${senderKey}:${assignmentId}:${sourceMessageId}:${chatContentHash(normalizedContent)}`;
+}
+
+function mergeTeamChatArtifactRefs(...groups: Array<string[] | undefined>) {
+  const refs: string[] = [];
+  const seen = new Set<string>();
+  for (const group of groups) {
+    for (const raw of group || []) {
+      const relativePath = workspaceLinkToRelativePath(raw);
+      if (!relativePath || seen.has(relativePath)) {
+        continue;
+      }
+      seen.add(relativePath);
+      refs.push(`/team/${relativePath}`);
+    }
+  }
+  return refs.length > 0 ? refs : undefined;
+}
+
 function chatItemDedupeKey(
   item: CollaborationItem,
   senderKey: string,
@@ -5362,6 +5476,9 @@ function chatItemDedupeKey(
     payloadTextDeep(item.payload, ["messageId", "message_id", "inReplyTo", "in_reply_to"]) ||
     item.event.message_id ||
     "";
+  const sourceTurnId =
+    payloadTextDeep(item.payload, ["sourceMessageId", "source_message_id", "inReplyTo", "in_reply_to"]) ||
+    messageId;
   const taskId =
     payloadTextDeep(item.payload, ["rootTaskId", "root_task_id", "taskId", "task_id", "runtimeTaskId"]) ||
     (item.event.task_id ? canonicalTaskKey(item.event.task_id) : item.taskKey);
@@ -5401,19 +5518,23 @@ function chatItemDedupeKey(
     // Result IDs are transport/audit identifiers. Chat de-duplication is based
     // on the actual business content, so a corrected second result remains
     // visible while a re-delivered identical result does not appear twice.
-    return `feedback:${taskId}:${senderKey}:${item.to || ""}:${assignmentId}:${contentHash}`;
+    return `feedback:${taskId}:${senderKey}:${item.to || ""}:${assignmentId}:${sourceTurnId}:${contentHash}`;
   }
   if (item.eventType === "task_completed" || item.eventType === "completion" || item.eventType === "reply") {
-    return `feedback:${taskId}:${senderKey}:${item.to || ""}:${assignmentId}:${contentHash || resultScope || chatContentHash(contentKey)}`;
+    return `feedback:${taskId}:${senderKey}:${item.to || ""}:${assignmentId}:${sourceTurnId}:${contentHash || resultScope || chatContentHash(contentKey)}`;
   }
   if (isBusinessChatItem(item)) {
-    return `narrative:${taskId}:${senderKey}:${item.to || ""}:${assignmentId}:${eventKind}:${contentHash}`;
+    return `narrative:${taskId}:${senderKey}:${item.to || ""}:${assignmentId}:${sourceTurnId}:${eventKind}:${contentHash}`;
   }
   return "";
 }
 
 function normalizeChatDedupeContent(content: string) {
   return content.trim().replace(/\s+/g, " ").slice(0, 240);
+}
+
+function normalizeChatIdentityContent(content: string) {
+  return content.trim().replace(/\r\n/g, "\n").replace(/\s+/g, " ");
 }
 
 function chatContentHash(content: string) {
@@ -5542,6 +5663,10 @@ function TeamChatMessageRow({
   message: TeamChatMessage;
   onWorkspaceFileOpen?: (path: string) => void;
 }) {
+  const [artifactsExpanded, setArtifactsExpanded] = useState(false);
+  const artifactRefs = message.artifactRefs || [];
+  const hiddenArtifactCount = Math.max(artifactRefs.length - 5, 0);
+  const visibleArtifactRefs = artifactsExpanded ? artifactRefs : artifactRefs.slice(0, 5);
   const bubbleClass =
     message.tone === "assignment"
       ? "relative overflow-hidden border border-amber-200 bg-gradient-to-br from-amber-50 via-white to-orange-50 text-gray-950 shadow-[0_14px_28px_-22px_rgba(180,83,9,0.8)]"
@@ -5582,9 +5707,9 @@ function TeamChatMessageRow({
             compact
             onWorkspaceFileOpen={onWorkspaceFileOpen}
           />
-          {message.artifactRefs && message.artifactRefs.length > 0 && (
+          {artifactRefs.length > 0 && (
             <div className="mt-2 flex flex-wrap gap-1.5 border-t border-slate-100 pt-2">
-              {message.artifactRefs.map((artifactRef) => {
+              {visibleArtifactRefs.map((artifactRef) => {
                 const relativePath = workspaceLinkToRelativePath(artifactRef);
                 const action = workspaceFileAction(relativePath);
                 if (!action) {
@@ -5617,6 +5742,16 @@ function TeamChatMessageRow({
                   </button>
                 );
               })}
+              {hiddenArtifactCount > 0 && (
+                <button
+                  type="button"
+                  aria-expanded={artifactsExpanded}
+                  onClick={() => setArtifactsExpanded((current) => !current)}
+                  className="inline-flex items-center rounded-md border border-dashed border-slate-300 bg-slate-50 px-2 py-1 text-[11px] font-medium text-slate-600 transition hover:border-slate-400 hover:bg-slate-100"
+                >
+                  {artifactsExpanded ? "收起文件" : `展开其余 ${hiddenArtifactCount} 个文件`}
+                </button>
+              )}
             </div>
           )}
         </div>

@@ -111,12 +111,13 @@ It is designed for:
 <a id="team-workspaces"></a>
 ## Team Workspaces
 
-Team Workspaces provide a simplified OpenClaw Lite collaboration flow: choose a role template, create the Team, and describe the goal in the Team chat. The Leader plans the work, coordinates members, collects deliveries, and publishes the final result.
+Team Workspaces provide a Leader-mediated collaboration flow: choose one of eight read-only built-in templates or a user-owned custom template, create the Team, and describe the goal in Team chat. The OpenClaw Lite Leader plans the work, coordinates members, collects deliveries, and publishes the final result.
 
-- fixed Leader-mediated collaboration, without per-member runtime or resource-preset setup
-- built-in templates for focused delivery, product discovery, and software engineering work
+- an OpenClaw Lite Leader with OpenClaw Lite or Hermes Lite Workers selected per member
+- eight immutable built-in templates plus custom Teams generated and refined from natural-language intent
 - Team chat for plans, assignments, progress, reviews, deliveries, and final synthesis
-- Execution Kanban for the root-task state and current member deliveries
+- Execution Kanban for the current query, root-task state, and member deliveries
+- shared Team artifacts and native Hermes session visibility for Hermes Lite Workers
 
 See the [Team Workspace Quick Guide](./docs/team-workspaces-guide_en.md) for the creation flow, collaboration stages, and result viewing.
 
@@ -207,12 +208,12 @@ Pro mode provisions a dedicated desktop runtime for each instance, backed by its
 
 ![](./docs/main/proopenclaw.png)
 
-### Team Workspace
+### Team Creation
 
-The Team workspace page brings the leader desktop, Team chat, member table, and dispatch workflow into one operational view, so users can follow collaboration progress without leaving ClawManager.
+The Team creation page combines eight immutable templates, user-owned custom Teams, and per-Worker OpenClaw Lite or Hermes Lite selection in one flow.
 
 <p align="center">
-  <img src="./docs/main/team-workspace.png" alt="ClawManager Team workspace" width="100%" />
+  <img src="./docs/main/team-create-fixed-and-custom-entry.png" alt="ClawManager Team creation and custom Team entry" width="100%" />
 </p>
 
 ### Admin Console

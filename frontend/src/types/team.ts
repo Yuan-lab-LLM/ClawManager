@@ -122,7 +122,7 @@ export interface TeamWorkItem {
   validated_revision?: number;
   owner_member_id?: number;
   title: string;
-  status: "pending" | "dispatched" | "running" | "succeeded" | "failed" | "stale";
+  status: "pending" | "dispatched" | "running" | "waiting" | "succeeded" | "failed" | "stale";
   depends_on?: string[];
   result?: Record<string, unknown>;
   artifact_refs?: string[];
@@ -148,8 +148,25 @@ export interface CreateTeamMemberRequest {
   image_registry?: string;
   image_tag?: string;
   environment_overrides?: Record<string, string>;
+  role_profile?: TeamMemberRoleProfileRequest;
   openclaw_config_plan?: OpenClawConfigPlan;
   is_leader?: boolean;
+}
+
+export interface TeamMemberRoleProfileRequest {
+  schema_version?: number;
+  profile_key?: string;
+  display_name?: string;
+  role_hint?: string;
+  summary?: string;
+  mission?: string;
+  responsibilities?: string[];
+  boundaries?: string[];
+  expected_inputs?: string[];
+  deliverables?: string[];
+  acceptance_criteria?: string[];
+  collaboration_notes?: string[];
+  capability_tags?: string[];
 }
 
 export interface CreateTeamRequest {

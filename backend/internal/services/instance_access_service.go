@@ -213,7 +213,7 @@ func (s *InstanceAccessService) RevokeToken(token string) {
 func (s *InstanceAccessService) GetAccessURL(instanceID int, instanceType string, podIP string, podName string) string {
 	// Generate access URL based on instance type
 	switch instanceType {
-	case "openclaw":
+	case "openclaw", "hermes", "workbuddy", "webtop":
 		// OpenClaw desktop typically uses VNC or web interface
 		if podIP != "" {
 			return fmt.Sprintf("https://%s:3001/", podIP)
@@ -246,7 +246,7 @@ func (s *InstanceAccessService) GetAccessURLWithEndpoint(instanceID int, instanc
 
 	// Generate access URL based on instance type
 	switch instanceType {
-	case "openclaw":
+	case "openclaw", "hermes", "workbuddy", "webtop":
 		// OpenClaw desktop typically uses VNC or web interface
 		return fmt.Sprintf("https://%s/", endpoint)
 	case "ubuntu", "debian", "centos":

@@ -11,6 +11,10 @@ const frameSource = readFileSync(
   path.resolve(scriptDir, "../src/components/InstanceServiceFrame.tsx"),
   "utf8",
 );
+const skillPanelSource = readFileSync(
+  path.resolve(scriptDir, "../src/components/InstanceSkillHubPanel.tsx"),
+  "utf8",
+);
 
 function assert(condition, message) {
   if (!condition) {
@@ -25,17 +29,31 @@ assert(
   "Instance detail page must branch pro/desktop instances away from the lite workspace layout.",
 );
 
-for (const label of ["Runtime Overview", "Runtime Events", "Instance Skills"]) {
+for (const label of ["Runtime Overview", "Runtime Events"]) {
   assert(detailSource.includes(label), `Pro instance detail section missing: ${label}`);
 }
 
-for (const api of ["getRuntimeDetails", "listInstanceSkills", "attachSkillToInstance", "removeSkillFromInstance"]) {
-  assert(detailSource.includes(api), `Pro instance detail page must use ${api}.`);
+assert(
+  detailSource.includes("<InstanceSkillHubPanel"),
+  "Pro instance detail section missing: InstanceSkillHubPanel",
+);
+
+assert(
+  detailSource.includes("getRuntimeDetails"),
+  "Pro instance detail page must load runtime details.",
+);
+for (const api of ["listInstanceSkills", "attachSkillToInstance", "removeSkillFromInstance"]) {
+  assert(skillPanelSource.includes(api), `Pro instance skill panel must use ${api}.`);
 }
 
 assert(
   detailSource.includes("renderLiteWorkspace") && detailSource.includes("renderProWorkspace"),
   "Instance detail page must keep separate lite and pro render paths.",
+);
+
+assert(
+  detailSource.includes('instance.type === "workbuddy"'),
+  "Instance detail must expose the Workbuddy Pro /config workspace.",
 );
 
 function sliceBetween(source, startMarker, endMarker) {
@@ -71,7 +89,7 @@ assert(
 
 assert(
   proRender.includes('data-section="runtime-overview"') &&
-    proRender.indexOf("Instance Skills") < proRender.indexOf("Runtime Overview"),
+    proRender.indexOf("<InstanceSkillHubPanel") < proRender.indexOf("Runtime Overview"),
   "Instance Skills must render before the compact Runtime Overview card.",
 );
 
@@ -91,9 +109,38 @@ assert(
 );
 
 assert(
-  !proRender.includes("h-[560px]") &&
-    (proRender.includes("aspect-video") || proRender.includes("aspect-[16/9]")),
-  "Pro desktop frame must use a stable 16:9 desktop ratio instead of the old fixed height.",
+  detailSource.includes("workspaceVisible") &&
+    proRender.includes("workspaceVisible={supportsWorkspace(instance) ? workspaceVisible : undefined}") &&
+    proRender.includes("onWorkspaceVisibilityChange={supportsWorkspace(instance) ? setWorkspaceVisible : undefined}") &&
+    frameSource.includes("PanelRightOpen") &&
+    frameSource.includes("PanelRightClose"),
+  "Lite and Pro service frames must expose one shared workspace visibility control.",
+);
+
+assert(
+  proRender.includes("xl:grid-cols-[minmax(0,7fr)_minmax(380px,3fr)]") &&
+    proRender.includes('workspaceVisible ? "xl:grid-cols-[minmax(0,7fr)_minmax(380px,3fr)]" : "xl:grid-cols-1"') &&
+    proRender.includes("supportsWorkspace(instance) ?"),
+  "Expanded Pro desktop and workspace browser must remain side by side at a stable 70/30 ratio.",
+);
+
+const liteRender = sliceBetween(
+  detailSource,
+  "const renderLiteWorkspace = () => {",
+  "\n  const renderProWorkspace = () => (",
+);
+
+assert(
+  liteRender.includes("workspaceVisible={supportsWorkspace(instance) ? workspaceVisible : undefined}") &&
+    liteRender.includes("onWorkspaceVisibilityChange={supportsWorkspace(instance) ? setWorkspaceVisible : undefined}") &&
+    liteRender.includes('workspaceVisible ? "xl:grid-cols-[minmax(0,1fr)_minmax(360px,28rem)]" : "xl:grid-cols-1"'),
+  "Lite instance detail must keep the workspace visible by default and expand the service frame when hidden.",
+);
+
+assert(
+  !proRender.includes("aspect-video") &&
+    proRender.split("h-[clamp(520px,calc(100vh-10rem),760px)]").length >= 3,
+  "Pro desktop and workspace browser must share a bounded height so aspect ratio cannot force cross-column overlap.",
 );
 
 assert(
@@ -104,7 +151,9 @@ assert(
 assert(
   frameSource.includes("requestFullscreen") &&
     frameSource.includes("Maximize2") &&
-    frameSource.includes("Minimize2"),
+    frameSource.includes("Minimize2") &&
+    !frameSource.includes("toolbarActions") &&
+    frameSource.includes('aria-label={isFullscreen ? t("instances.exitFullscreen")'),
   "Instance service frame must expose a fullscreen control.",
 );
 

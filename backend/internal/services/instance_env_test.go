@@ -126,6 +126,34 @@ func TestBuildInstancePodEnvAppliesOverridesAfterDefaults(t *testing.T) {
 	}
 }
 
+func TestBuildInstancePodEnvConfiguresWorkbuddyProxyAndManagedRuntime(t *testing.T) {
+	t.Setenv("CLAWMANAGER_EGRESS_PROXY_URL", "")
+	t.Setenv("CLAWMANAGER_SYSTEM_NAMESPACE", "")
+	t.Setenv("K8S_NAMESPACE", "")
+
+	instance := &models.Instance{
+		ID:          923,
+		Type:        "workbuddy",
+		RuntimeType: RuntimeBackendDesktop,
+	}
+	runtimeConfig := buildRuntimeConfig(instance.Type, "workbuddy", "latest", nil, nil)
+
+	env, err := buildInstancePodEnv(instance, runtimeConfig.Env, nil, nil)
+	if err != nil {
+		t.Fatalf("buildInstancePodEnv returned error: %v", err)
+	}
+
+	if env["SUBFOLDER"] != "/api/v1/instances/923/proxy/" {
+		t.Fatalf("expected managed Workbuddy proxy path, got %q", env["SUBFOLDER"])
+	}
+	if env["TITLE"] != "Workbuddy" {
+		t.Fatalf("expected Workbuddy desktop title, got %q", env["TITLE"])
+	}
+	if env["CLAWMANAGER_RUNTIME_TYPE"] != RuntimeBackendDesktop {
+		t.Fatalf("expected Workbuddy desktop runtime marker, got %q", env["CLAWMANAGER_RUNTIME_TYPE"])
+	}
+}
+
 func TestValidateManagedRuntimeEnvironmentOverridesSkipsNonManagedTypes(t *testing.T) {
 	err := validateManagedRuntimeEnvironmentOverrides("ubuntu", map[string]string{
 		"OPENAI_BASE_URL": "https://api.openai.com/v1",

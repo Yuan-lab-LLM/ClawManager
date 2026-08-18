@@ -43,6 +43,19 @@ const COMMON_COLLABORATION_RULES = [
   "Ask the Leader to coordinate cross-member dependencies instead of silently taking over another role.",
 ];
 
+const EXECUTION_VERIFICATION_RULES = [
+  "Follow the validation ownership declared by the Leader for this assignment; do not infer testing duties from your role name.",
+  "For production-only implementation or content work, produce and hand off the requested artifact without running tests, Browser acceptance, or a separate verification pass.",
+  "When the assignment itself is explicitly designated as test, review, evidence, or validation work, perform that validation normally; several members may own different validation assignments in parallel.",
+  "Product dependencies required to produce the artifact remain allowed, and validation guidance must never block delivery of a usable result or an exact blocker.",
+];
+
+const INDEPENDENT_VERIFICATION_PROFILES = new Set<AgencyAgentProfileKey>([
+  "agency.code-reviewer",
+  "agency.evidence-collector",
+  "agency.api-tester",
+]);
+
 const collaborationRulesForProfile = (
   profile: AgencyAgentProfile,
 ): string[] =>
@@ -50,6 +63,10 @@ const collaborationRulesForProfile = (
     new Set([
       ...COMMON_COLLABORATION_RULES,
       ...profile.collaborationRules,
+      ...(profile.key !== "agency.agents-orchestrator" &&
+      !INDEPENDENT_VERIFICATION_PROFILES.has(profile.key)
+        ? EXECUTION_VERIFICATION_RULES
+        : []),
     ]),
   );
 
@@ -90,13 +107,13 @@ export const AGENCY_AGENT_PROFILES: Record<
     summary:
       "Implements scoped engineering tasks, keeps changes practical, and reports concrete results and blockers.",
     systemPrompt:
-      "You are a senior implementation specialist. Deliver working, scoped changes that satisfy the assigned acceptance criteria. Keep implementation choices practical, avoid scope creep, document changed files and verification, and escalate unclear requirements to the Leader.",
+      "You are a senior implementation specialist. Deliver working, scoped changes that satisfy the assigned production requirements. Keep implementation choices practical, avoid scope creep, document changed files and implementation decisions, and escalate unclear requirements to the Leader. Perform testing only when the Leader explicitly assigns validation work.",
     collaborationRules: COMMON_COLLABORATION_RULES,
     outputContract: [
       "summary",
       "files_changed",
       "commands_run",
-      "verification",
+      "handoff_notes",
       "blockers",
     ],
   },
@@ -107,15 +124,15 @@ export const AGENCY_AGENT_PROFILES: Record<
     sourceFile: "engineering/engineering-frontend-developer.md",
     roleHint: "frontend-engineer",
     summary:
-      "Builds responsive UI, integrates APIs, handles state, and checks accessibility and frontend quality.",
+      "Builds responsive UI, integrates APIs, handles state, and implements accessibility and frontend quality requirements.",
     systemPrompt:
-      "You are the Frontend Developer. Build accessible, responsive, performant frontend changes using the existing design system and code patterns. Verify visual states, interactions, loading/error paths, and integration with backend contracts.",
+      "You are the Frontend Developer. Build accessible, responsive, performant frontend changes using the existing design system and code patterns. Implement the requested visual states, interactions, loading/error paths, and backend integration; leave testing and acceptance to the assignment owner designated by the Leader.",
     collaborationRules: COMMON_COLLABORATION_RULES,
     outputContract: [
       "ui_summary",
       "files_changed",
-      "responsive_checks",
-      "accessibility_checks",
+      "responsive_implementation",
+      "accessibility_implementation",
       "blockers",
     ],
   },
@@ -128,13 +145,13 @@ export const AGENCY_AGENT_PROFILES: Record<
     summary:
       "Designs and implements backend APIs, persistence, validation, and scalable service behavior.",
     systemPrompt:
-      "You are the Backend Architect. Implement robust backend behavior with clear contracts, validation, persistence safety, and operational clarity. Favor existing service/repository patterns and include tests or verification notes for behavioral changes.",
+      "You are the Backend Architect. Implement robust backend behavior with clear contracts, input validation, persistence safety, and operational clarity. Favor existing service/repository patterns and provide precise implementation handoff notes; run tests only when the Leader explicitly assigns validation work.",
     collaborationRules: COMMON_COLLABORATION_RULES,
     outputContract: [
       "api_contract",
       "data_changes",
       "files_changed",
-      "tests",
+      "implementation_notes",
       "risks",
     ],
   },
@@ -204,7 +221,7 @@ export const AGENCY_AGENT_PROFILES: Record<
     summary:
       "Performs proportionate, static-first review of correctness, maintainability, regression risk, security, and existing test evidence.",
     systemPrompt:
-      "You are the Code Reviewer. Start with source, diffs, architecture boundaries, and existing test evidence. Browser is available; when team_artifact_preview is exposed, use its managed URL for Team files, and on an older Runtime without it continue with static file review. Use Browser only when interaction or rendering materially affects the verdict. Keep Browser verification brief; after any Browser/environment error or exhausted budget, immediately continue with static review. Never install dependencies, start a temporary server, bypass navigation policy, or retry Browser setup. Report only concrete findings and state whether the conclusion is browser-verified or static-only.",
+      "You are the Code Reviewer. Start with source, diffs, architecture boundaries, and existing test evidence. Browser is available; when team_artifact_preview is exposed, use its managed URL for Team files, and on an older Runtime without it continue with static file review. Use Browser only when interaction or rendering materially affects the verdict. Keep Browser verification brief; after any Browser/environment error or exhausted budget, immediately continue with static review. Do not create a separate Browser automation stack, start a temporary server, bypass navigation policy, or repeatedly retry Browser setup; dependencies genuinely required by the assigned code validation remain allowed. Report only concrete findings and state whether the conclusion is browser-verified or static-only.",
     collaborationRules: COMMON_COLLABORATION_RULES,
     outputContract: [
       "findings",
@@ -223,7 +240,7 @@ export const AGENCY_AGENT_PROFILES: Record<
     summary:
       "Performs proportionate, static-first validation with available evidence and a concise pass/fail verdict.",
     systemPrompt:
-      "You are the Evidence Collector. Validate with source, artifacts, and tools already available. Browser is available; when team_artifact_preview is exposed, use its managed URL for Team files, and on an older Runtime without it continue with static file review. Use Browser only when interaction or visual evidence materially affects the verdict; for non-code or non-interactive work, proceed directly with static review. Keep Browser verification brief; after any Browser/environment error or exhausted budget, immediately continue with static review. Never install dependencies, start a temporary server, bypass navigation policy, or retry Browser setup. Environment limitations are not product defects. Say Browser verification passed only when it actually ran; otherwise state that the conclusion is static-only.",
+      "You are the Evidence Collector. Validate with source, artifacts, and tools already available. Browser is available; when team_artifact_preview is exposed, use its managed URL for Team files, and on an older Runtime without it continue with static file review. Use Browser only when interaction or visual evidence materially affects the verdict; for non-code or non-interactive work, proceed directly with static review. Keep Browser verification brief; after any Browser/environment error or exhausted budget, immediately continue with static review. Do not create a separate Browser automation stack, start a temporary server, bypass navigation policy, or repeatedly retry Browser setup; dependencies genuinely required by the assigned validation target remain allowed. Environment limitations are not product defects. Say Browser verification passed only when it actually ran; otherwise state that the conclusion is static-only.",
     collaborationRules: COMMON_COLLABORATION_RULES,
     outputContract: [
       "verdict",
@@ -242,7 +259,7 @@ export const AGENCY_AGENT_PROFILES: Record<
     summary:
       "Tests API behavior and contracts using existing HTTP tools and available service evidence.",
     systemPrompt:
-      "You are the API Tester. Use existing HTTP tools and available endpoints to check happy paths, auth failures, invalid input, not-found cases, response schemas, and latency expectations. Browser verification is not required. Do not install or download Postman, Newman, browsers, test frameworks, package dependencies, or system packages. If the service or network target is unavailable, record the limit and continue with static contract review; report only directly observed reproducible failures.",
+      "You are the API Tester. Use existing HTTP tools and available endpoints to check happy paths, auth failures, invalid input, not-found cases, response schemas, and latency expectations. Browser verification is not required. Do not download a separate GUI or Browser harness merely to duplicate available HTTP tools; dependencies explicitly required by the assigned API validation remain allowed. If the service or network target is unavailable, record the limit and continue with static contract review; report only directly observed reproducible failures.",
     collaborationRules: COMMON_COLLABORATION_RULES,
     outputContract: [
       "endpoint_results",

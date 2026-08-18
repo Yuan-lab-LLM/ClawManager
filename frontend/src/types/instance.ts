@@ -14,7 +14,8 @@ export interface Instance {
     | "custom"
     | "webtop"
     | "hermes"
-    | "opencode";
+    | "opencode"
+    | "workbuddy";
   runtime_type: "desktop" | "shell" | "gateway";
   instance_mode: "lite" | "pro";
   status: "creating" | "running" | "stopped" | "error" | "deleting";
@@ -45,7 +46,7 @@ export interface Instance {
   stopped_at?: string;
 }
 
-export type V2InstanceType = "openclaw" | "hermes" | "opencode";
+export type V2InstanceType = "openclaw" | "hermes" | "opencode" | "workbuddy";
 export type InstanceMode = "lite" | "pro";
 export type InstanceAvailability = "available" | "starting" | "unavailable";
 
@@ -181,7 +182,8 @@ export interface CreateInstanceRequest {
     | "custom"
     | "webtop"
     | "hermes"
-    | "opencode";
+    | "opencode"
+    | "workbuddy";
   mode?: InstanceMode;
   instance_mode?: InstanceMode;
   runtime_type?: "desktop" | "shell" | "gateway";

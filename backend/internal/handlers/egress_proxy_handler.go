@@ -28,10 +28,12 @@ import (
 )
 
 const (
-	teamPreviewHost       = "clawmanager-team-preview.invalid"
-	teamPreviewPathPrefix = "/v1/"
-	teamPreviewMaxSize    = 64 << 20
-	teamTokenSecretKey    = "CLAWMANAGER_TEAM_TOKEN"
+	teamPreviewHost            = "clawmanager-team-preview.invalid"
+	teamPreviewPathPrefix      = "/v1/"
+	teamPreviewV2Prefix        = "/v2/"
+	teamPreviewInteractiveMode = "interactive"
+	teamPreviewMaxSize         = 64 << 20
+	teamTokenSecretKey         = "CLAWMANAGER_TEAM_TOKEN"
 )
 
 type teamPreviewRepository interface {
@@ -257,6 +259,9 @@ func (h *EgressProxyHandler) isTeamPreviewRequest(request *http.Request) bool {
 		host = normalized
 	}
 	host = strings.ToLower(strings.Trim(strings.TrimSpace(host), "[]"))
+	if strings.HasSuffix(host, "."+teamPreviewHost) {
+		return true
+	}
 	_, ok := h.previewHosts[host]
 	return ok
 }
@@ -272,7 +277,7 @@ func (h *EgressProxyHandler) handleTeamPreview(c *gin.Context) {
 		return
 	}
 
-	teamID, signedPrefix, signature, requestedPath, err := parseTeamPreviewPath(c.Request.URL.Path)
+	teamID, signedPrefix, signature, requestedPath, mode, err := parseTeamPreviewPath(c.Request.URL.Path)
 	if err != nil {
 		c.String(http.StatusBadRequest, "invalid Team artifact preview link")
 		return
@@ -297,9 +302,24 @@ func (h *EgressProxyHandler) handleTeamPreview(c *gin.Context) {
 		c.String(http.StatusForbidden, "Team artifact preview authorization failed")
 		return
 	}
-	if !verifyTeamPreviewSignature(token, teamID, signedPrefix, signature) {
+	if !verifyTeamPreviewSignatureForMode(token, teamID, signedPrefix, mode, signature) {
 		c.String(http.StatusForbidden, "Team artifact preview authorization failed")
 		return
+	}
+	if mode == teamPreviewInteractiveMode {
+		if h.isManagedInteractivePreviewBootstrapHost(c.Request) {
+			c.Header("Cache-Control", "private, no-store, max-age=0")
+			c.Header("Referrer-Policy", "no-referrer")
+			c.Redirect(
+				http.StatusTemporaryRedirect,
+				"http://"+isolatedInteractivePreviewHost(signature)+c.Request.URL.EscapedPath(),
+			)
+			return
+		}
+		if !isIsolatedInteractivePreviewHost(c.Request, signature) {
+			c.String(http.StatusForbidden, "Team artifact preview authorization failed")
+			return
+		}
 	}
 
 	relativePath, err := cleanTeamPreviewRelativePath(joinTeamPreviewPath(signedPrefix, requestedPath))
@@ -342,35 +362,46 @@ func (h *EgressProxyHandler) handleTeamPreview(c *gin.Context) {
 	if contentType == "" {
 		contentType = "application/octet-stream"
 	}
-	setTeamPreviewHeaders(c.Writer.Header(), contentType)
+	setTeamPreviewHeaders(c.Writer.Header(), contentType, mode)
 	http.ServeContent(c.Writer, c.Request, info.Name(), info.ModTime(), file)
 }
 
-func parseTeamPreviewPath(rawPath string) (int, string, string, string, error) {
-	if !strings.HasPrefix(rawPath, teamPreviewPathPrefix) {
-		return 0, "", "", "", fmt.Errorf("unexpected preview path")
+func parseTeamPreviewPath(rawPath string) (int, string, string, string, string, error) {
+	mode := ""
+	pathPrefix := teamPreviewPathPrefix
+	if strings.HasPrefix(rawPath, teamPreviewV2Prefix) {
+		pathPrefix = teamPreviewV2Prefix
+	} else if !strings.HasPrefix(rawPath, teamPreviewPathPrefix) {
+		return 0, "", "", "", "", fmt.Errorf("unexpected preview path")
 	}
-	parts := strings.Split(strings.TrimPrefix(rawPath, teamPreviewPathPrefix), "/")
+	parts := strings.Split(strings.TrimPrefix(rawPath, pathPrefix), "/")
+	if pathPrefix == teamPreviewV2Prefix {
+		if len(parts) < 5 || parts[0] != teamPreviewInteractiveMode {
+			return 0, "", "", "", "", fmt.Errorf("invalid preview mode")
+		}
+		mode = parts[0]
+		parts = parts[1:]
+	}
 	if len(parts) < 4 {
-		return 0, "", "", "", fmt.Errorf("incomplete preview path")
+		return 0, "", "", "", "", fmt.Errorf("incomplete preview path")
 	}
 	teamID, err := strconv.Atoi(parts[0])
 	if err != nil || teamID <= 0 {
-		return 0, "", "", "", fmt.Errorf("invalid team id")
+		return 0, "", "", "", "", fmt.Errorf("invalid team id")
 	}
 	prefix, err := decodeTeamPreviewPrefix(parts[1])
 	if err != nil {
-		return 0, "", "", "", err
+		return 0, "", "", "", "", err
 	}
 	signature := strings.TrimSpace(parts[2])
 	if signature == "" {
-		return 0, "", "", "", fmt.Errorf("missing signature")
+		return 0, "", "", "", "", fmt.Errorf("missing signature")
 	}
 	requestedPath, err := cleanTeamPreviewRelativePath(strings.Join(parts[3:], "/"))
 	if err != nil {
-		return 0, "", "", "", err
+		return 0, "", "", "", "", err
 	}
-	return teamID, prefix, signature, requestedPath, nil
+	return teamID, prefix, signature, requestedPath, mode, nil
 }
 
 func decodeTeamPreviewPrefix(encoded string) (string, error) {
@@ -413,22 +444,80 @@ func teamPreviewSignaturePayload(teamID int, prefix string) string {
 }
 
 func verifyTeamPreviewSignature(token string, teamID int, prefix, signature string) bool {
+	return verifyTeamPreviewSignatureForMode(token, teamID, prefix, "", signature)
+}
+
+func teamPreviewSignaturePayloadForMode(teamID int, prefix, mode string) string {
+	if mode == "" {
+		return teamPreviewSignaturePayload(teamID, prefix)
+	}
+	return fmt.Sprintf("team-preview-v2\n%s\n%d\n%s", mode, teamID, prefix)
+}
+
+func verifyTeamPreviewSignatureForMode(token string, teamID int, prefix, mode, signature string) bool {
 	provided, err := base64.RawURLEncoding.DecodeString(signature)
 	if err != nil {
 		return false
 	}
 	mac := hmac.New(sha256.New, []byte(token))
-	_, _ = mac.Write([]byte(teamPreviewSignaturePayload(teamID, prefix)))
+	_, _ = mac.Write([]byte(teamPreviewSignaturePayloadForMode(teamID, prefix, mode)))
 	return hmac.Equal(provided, mac.Sum(nil))
 }
 
-func setTeamPreviewHeaders(headers http.Header, contentType string) {
+func isolatedInteractivePreviewHost(signature string) string {
+	value := strings.ToLower(strings.TrimSpace(signature))
+	if len(value) > 16 {
+		value = value[:16]
+	}
+	return "p-" + value + "." + teamPreviewHost
+}
+
+func (h *EgressProxyHandler) isManagedInteractivePreviewBootstrapHost(request *http.Request) bool {
+	host := normalizedTeamPreviewRequestHost(request)
+	if host == "" || host == teamPreviewHost || strings.HasSuffix(host, "."+teamPreviewHost) {
+		return false
+	}
+	_, ok := h.previewHosts[host]
+	return ok
+}
+
+func normalizedTeamPreviewRequestHost(request *http.Request) string {
+	if request == nil {
+		return ""
+	}
+	host := request.Host
+	if request.URL != nil && strings.TrimSpace(request.URL.Host) != "" {
+		host = request.URL.Host
+	}
+	if parsed, _, err := net.SplitHostPort(host); err == nil {
+		host = parsed
+	}
+	return strings.ToLower(strings.Trim(strings.TrimSpace(host), "[]"))
+}
+
+func isIsolatedInteractivePreviewHost(request *http.Request, signature string) bool {
+	return normalizedTeamPreviewRequestHost(request) == isolatedInteractivePreviewHost(signature)
+}
+
+func setTeamPreviewHeaders(headers http.Header, contentType, mode string) {
 	headers.Set("Content-Type", contentType)
 	headers.Set("Cache-Control", "private, no-store, max-age=0")
 	headers.Set("Referrer-Policy", "no-referrer")
 	headers.Set("X-Content-Type-Options", "nosniff")
 	headers.Set("X-Frame-Options", "DENY")
 	headers.Set("Cross-Origin-Opener-Policy", "same-origin")
+	if mode == teamPreviewInteractiveMode {
+		headers.Set("Origin-Agent-Cluster", "?1")
+		headers.Set(
+			"Content-Security-Policy",
+			"sandbox allow-scripts allow-same-origin allow-modals; "+
+				"default-src 'none'; script-src 'self' 'unsafe-inline' blob:; "+
+				"style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; "+
+				"font-src 'self' data:; media-src 'self' data: blob:; worker-src blob:; "+
+				"connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+		)
+		return
+	}
 	headers.Set(
 		"Content-Security-Policy",
 		"sandbox allow-scripts allow-same-origin allow-forms allow-modals allow-popups; "+

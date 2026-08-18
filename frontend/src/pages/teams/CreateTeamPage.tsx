@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import OpenClawConfigPlanSection, {
   type OpenClawInjectionMode,
 } from "../../components/OpenClawConfigPlanSection";
@@ -9,6 +9,8 @@ import {
   type SystemImageSetting,
 } from "../../services/systemSettingsService";
 import { teamService } from "../../services/teamService";
+import { customTeamTemplateService } from "../../services/customTeamTemplateService";
+import type { CustomTeamTemplate } from "../../types/customTeamTemplate";
 import {
   buildAgencyAgentEnvironment,
   getAgencyAgentProfile,
@@ -39,6 +41,48 @@ type TeamMemberDraft = TeamMemberTemplateMember & {
   instanceMode: InstanceMode;
 };
 
+const memberTemplateFromCustom = (
+  template: CustomTeamTemplate,
+): TeamMemberTemplate => ({
+  id: `custom-${template.id}`,
+  name: template.name,
+  teamName: template.name,
+  description: template.spec.summary,
+  communicationMode: "leader_mediated",
+  source: "custom",
+  members: template.spec.members.map((member) => ({
+    memberId: member.memberId,
+    name: member.displayName,
+    role: member.role,
+    runtimeType: "openclaw",
+    instanceMode: "lite",
+    description: member.summary || member.mission,
+    resourcePreset: "small",
+    isLeader: member.isLeader,
+    cpuCores: 2,
+    memoryGb: 4,
+    diskGb: 20,
+    gpuEnabled: false,
+    gpuCount: 0,
+    image: "",
+    roleProfile: {
+      schema_version: 1,
+      profile_key: `custom.team-template.${template.id}.${member.memberId}`,
+      display_name: member.displayName,
+      role_hint: member.role,
+      summary: member.summary,
+      mission: member.mission,
+      responsibilities: member.responsibilities,
+      boundaries: member.boundaries,
+      expected_inputs: member.expectedInputs,
+      deliverables: member.deliverables,
+      acceptance_criteria: member.acceptanceCriteria,
+      collaboration_notes: member.collaborationNotes,
+      capability_tags: member.capabilityTags,
+    },
+  })),
+});
+
 const TEAM_COMMUNICATION_MODE_OPTIONS: Array<{
   value: TeamCommunicationMode;
   label: string;
@@ -61,7 +105,7 @@ const RESOURCE_PRESETS: Record<
 };
 
 const ENV_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
-const FIXED_RUNTIME_TYPE: RuntimeType = "openclaw";
+const LEADER_RUNTIME_TYPE: RuntimeType = "openclaw";
 const FIXED_INSTANCE_MODE: InstanceMode = "lite";
 const FIXED_COMMUNICATION_MODE: TeamCommunicationMode = "leader_mediated";
 const TEAM_TEMPLATE_DISPLAY_COPY: Record<
@@ -133,7 +177,7 @@ const draftFromTemplateMember = (
   usedIds: Set<string>,
   index: number,
   isLeader: boolean,
-  image: string,
+  imageForRuntime: (runtimeType: RuntimeType) => string,
 ): TeamMemberDraft => {
   const preset = normalizedPreset(templateMember.resourcePreset);
   const config = RESOURCE_PRESETS[preset];
@@ -142,13 +186,19 @@ const draftFromTemplateMember = (
       ? templateMember.role
       : "member";
 
+  const runtimeType: RuntimeType = isLeader
+    ? LEADER_RUNTIME_TYPE
+    : templateMember.runtimeType === "hermes"
+      ? "hermes"
+      : "openclaw";
+
   return defaultMember({
     ...templateMember,
     memberId: uniqueMemberId(templateMember.memberId, usedIds, index),
     role: isLeader ? "leader" : templateRole,
-    runtimeType: FIXED_RUNTIME_TYPE,
+    runtimeType,
     instanceMode: FIXED_INSTANCE_MODE,
-    image,
+    image: imageForRuntime(runtimeType),
     resourcePreset: preset,
     isLeader,
     cpuCores: config.cpuCores,
@@ -159,7 +209,10 @@ const draftFromTemplateMember = (
   });
 };
 
-const buildTemplateMembers = (template: TeamMemberTemplate, image: string) => {
+const buildTemplateMembers = (
+  template: TeamMemberTemplate,
+  imageForRuntime: (runtimeType: RuntimeType) => string,
+) => {
   const usedIds = new Set<string>();
   const importedMembers: TeamMemberDraft[] = [];
   let leaderAssigned = false;
@@ -170,7 +223,13 @@ const buildTemplateMembers = (template: TeamMemberTemplate, image: string) => {
       leaderAssigned = true;
     }
     importedMembers.push(
-      draftFromTemplateMember(templateMember, usedIds, index + 1, shouldBeLeader, image),
+      draftFromTemplateMember(
+        templateMember,
+        usedIds,
+        index + 1,
+        shouldBeLeader,
+        imageForRuntime,
+      ),
     );
   });
 
@@ -179,6 +238,8 @@ const buildTemplateMembers = (template: TeamMemberTemplate, image: string) => {
       ...importedMembers[0],
       isLeader: true,
       role: "leader",
+      runtimeType: LEADER_RUNTIME_TYPE,
+      image: imageForRuntime(LEADER_RUNTIME_TYPE),
     };
   }
 
@@ -221,15 +282,20 @@ const uniqueMemberId = (raw: string, usedIds: Set<string>, fallbackIndex: number
 
 const CreateTeamPage: React.FC = () => {
   const navigate = useNavigate();
+  const requestedTemplateId = useMemo(
+    () => new URLSearchParams(window.location.search).get("template"),
+    [],
+  );
   const initialTemplate = SORTED_BUILTIN_MEMBER_TEMPLATES[0];
   const [name, setName] = useState(initialTemplate?.teamName || "");
   const [sharedStorageGb, setSharedStorageGb] = useState(10);
   const [images, setImages] = useState<SystemImageSetting[]>([]);
+  const [customTemplates, setCustomTemplates] = useState<CustomTeamTemplate[]>([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState(
     initialTemplate?.id || "",
   );
   const [members, setMembers] = useState<TeamMemberDraft[]>(() =>
-    initialTemplate ? buildTemplateMembers(initialTemplate, "") : [],
+    initialTemplate ? buildTemplateMembers(initialTemplate, () => "") : [],
   );
   const [loadingImages, setLoadingImages] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -246,7 +312,13 @@ const CreateTeamPage: React.FC = () => {
     null,
   );
 
-  const memberTemplates = SORTED_BUILTIN_MEMBER_TEMPLATES;
+  const memberTemplates = useMemo(
+    () => [
+      ...SORTED_BUILTIN_MEMBER_TEMPLATES,
+      ...customTemplates.map(memberTemplateFromCustom),
+    ],
+    [customTemplates],
+  );
   const selectedTemplate = useMemo(
     () =>
       memberTemplates.find((template) => template.id === selectedTemplateId) ||
@@ -265,6 +337,23 @@ const CreateTeamPage: React.FC = () => {
   );
   const selectedImage = defaultOpenClawMemberImages[0];
   const openClawLiteImage = selectedImage?.image || "";
+  const defaultHermesMemberImages = useMemo(
+    () =>
+      images.filter(
+        (item) =>
+          item.instance_type === "hermes" &&
+          item.is_enabled !== false &&
+          normalizedImageRuntimeType(item) === imageRuntimeTypeForMode("lite"),
+      ),
+    [images],
+  );
+  const selectedHermesImage = defaultHermesMemberImages[0];
+  const hermesLiteImage = selectedHermesImage?.image || "";
+  const imageForRuntime = useCallback(
+    (runtimeType: RuntimeType) =>
+      runtimeType === "hermes" ? hermesLiteImage : openClawLiteImage,
+    [hermesLiteImage, openClawLiteImage],
+  );
 
   useEffect(() => {
     const loadImages = async () => {
@@ -281,6 +370,26 @@ const CreateTeamPage: React.FC = () => {
     void loadImages();
   }, []);
 
+  useEffect(() => {
+    const loadCustomTemplates = async () => {
+      try {
+        const items = await customTeamTemplateService.list();
+        setCustomTemplates(items);
+        const requested = items
+          .map(memberTemplateFromCustom)
+          .find((template) => template.id === requestedTemplateId);
+        if (requested) {
+          setSelectedTemplateId(requested.id);
+          setName(requested.teamName || "");
+          setMembers(buildTemplateMembers(requested, () => ""));
+        }
+      } catch {
+        setCustomTemplates([]);
+      }
+    };
+    void loadCustomTemplates();
+  }, [requestedTemplateId]);
+
   const applyTemplate = (templateId: string) => {
     const template =
       memberTemplates.find((item) => item.id === templateId) || memberTemplates[0];
@@ -289,7 +398,24 @@ const CreateTeamPage: React.FC = () => {
     }
     setSelectedTemplateId(template.id);
     setName(template.teamName || "");
-    setMembers(buildTemplateMembers(template, openClawLiteImage));
+    setMembers(buildTemplateMembers(template, imageForRuntime));
+    setError(null);
+  };
+
+  const updateWorkerRuntime = (memberDraftId: string, runtimeType: RuntimeType) => {
+    setMembers((current) =>
+      current.map((member) => {
+        if (member.id !== memberDraftId || member.isLeader) {
+          return member;
+        }
+        return {
+          ...member,
+          runtimeType,
+          instanceMode: FIXED_INSTANCE_MODE,
+          image: imageForRuntime(runtimeType),
+        };
+      }),
+    );
     setError(null);
   };
 
@@ -368,6 +494,9 @@ const CreateTeamPage: React.FC = () => {
     if (profile?.roleHint && profile.roleHint !== "leader") {
       return profile.roleHint;
     }
+    if (member.roleProfile?.role_hint && member.roleProfile.role_hint !== "leader") {
+      return member.roleProfile.role_hint;
+    }
     return member.role.trim() || "member";
   };
 
@@ -376,7 +505,7 @@ const CreateTeamPage: React.FC = () => {
     if (explicit) {
       return explicit;
     }
-    return profileForMember(member)?.summary || "";
+    return member.roleProfile?.summary || profileForMember(member)?.summary || "";
   };
 
   const displayNameForMember = (member: TeamMemberDraft) => {
@@ -386,7 +515,7 @@ const CreateTeamPage: React.FC = () => {
 
   const profileLabelForMember = (member: TeamMemberDraft) => {
     const profile = profileForMember(member);
-    return profile?.displayName || profile?.name || member.agentProfileKey || "未指定";
+    return member.roleProfile?.display_name || profile?.displayName || profile?.name || member.agentProfileKey || "未指定";
   };
 
   const buildMemberEnvironmentOverrides = (
@@ -398,7 +527,7 @@ const CreateTeamPage: React.FC = () => {
       memberId: normalizedMemberId,
       displayName: member.name.trim() || normalizedMemberId,
       role: effectiveMemberRole(member),
-      runtimeType: FIXED_RUNTIME_TYPE,
+      runtimeType: member.isLeader ? LEADER_RUNTIME_TYPE : member.runtimeType,
       isLeader: member.isLeader,
     });
     const merged = {
@@ -445,12 +574,20 @@ const CreateTeamPage: React.FC = () => {
         return `成员 ID 重复：${memberId}`;
       }
       memberIds.add(memberId);
+      if (member.isLeader && member.runtimeType !== LEADER_RUNTIME_TYPE) {
+        return "Leader 必须使用 OpenClaw Lite";
+      }
+      if (!imageForRuntime(member.runtimeType)) {
+        return member.runtimeType === "hermes"
+          ? "没有可用的 Hermes Lite 镜像"
+          : "没有可用的 OpenClaw Lite 镜像";
+      }
       if (member.cpuCores <= 0 || member.memoryGb <= 0 || member.diskGb <= 0) {
         return `成员 ${memberId} 的资源规格无效`;
       }
     }
     return null;
-  }, [loadingImages, members, name, openClawLiteImage]);
+  }, [imageForRuntime, loadingImages, members, name, openClawLiteImage]);
 
   const environmentDraft = buildEnvironmentOverridesPayload();
   const openClawPlanInvalid =
@@ -502,13 +639,14 @@ const CreateTeamPage: React.FC = () => {
       members: members.map((member) => {
         const normalizedMemberId = normalizeMemberId(member.memberId);
         const memberDescription = effectiveMemberDescription(member);
+        const runtimeType = member.isLeader ? LEADER_RUNTIME_TYPE : member.runtimeType;
         return {
           member_id: normalizedMemberId,
           name: displayNameForMember(member),
           role: effectiveMemberRole(member),
           mode: FIXED_INSTANCE_MODE,
           instance_mode: FIXED_INSTANCE_MODE,
-          runtime_type: FIXED_RUNTIME_TYPE,
+          runtime_type: runtimeType,
           description: memberDescription || undefined,
           is_leader: member.isLeader,
           cpu_cores: member.cpuCores,
@@ -516,11 +654,12 @@ const CreateTeamPage: React.FC = () => {
           disk_gb: member.diskGb,
           gpu_enabled: false,
           gpu_count: 0,
-          image_registry: openClawLiteImage,
+          image_registry: imageForRuntime(runtimeType),
           environment_overrides: buildMemberEnvironmentOverrides(
             member,
             normalizedMemberId,
           ),
+          role_profile: member.roleProfile,
           openclaw_config_plan: openClawConfigPlan,
         };
       }),
@@ -689,9 +828,12 @@ const CreateTeamPage: React.FC = () => {
                     当前 {members.length} 个成员，{members.filter((member) => member.isLeader).length} 个 Leader
                   </p>
                 </div>
-                <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700">
-                  OpenClaw Lite
-                </span>
+                <Link
+                  to="/teams/custom-templates"
+                  className="app-button-primary inline-flex items-center justify-center px-4 py-2 text-sm"
+                >
+                  + 自定义 Team
+                </Link>
               </div>
 
               <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -737,9 +879,7 @@ const CreateTeamPage: React.FC = () => {
                   </p>
                 </label>
                 <label className="block md:col-span-2">
-                  <span className="text-sm font-medium text-gray-700">
-                    选择模板包
-                  </span>
+                  <span className="text-sm font-medium text-gray-700">选择模板包</span>
                   <select
                     value={selectedTemplate?.id || ""}
                     onChange={(event) => applyTemplate(event.target.value)}
@@ -747,6 +887,7 @@ const CreateTeamPage: React.FC = () => {
                   >
                     {memberTemplates.map((template) => (
                       <option key={template.id} value={template.id}>
+                        {template.source === "custom" ? "自定义 · " : ""}
                         {getTemplateDisplayName(template)} · {template.members.length} 成员
                       </option>
                     ))}
@@ -766,9 +907,10 @@ const CreateTeamPage: React.FC = () => {
               )}
 
               <div className="mt-5 overflow-hidden rounded-xl border border-[#eadfd8]">
-                <div className="hidden grid-cols-[minmax(120px,0.9fr)_minmax(140px,1fr)_minmax(150px,1fr)_minmax(280px,1.8fr)] gap-3 border-b border-[#eadfd8] bg-gray-50 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 lg:grid">
+                <div className="hidden grid-cols-[minmax(110px,0.8fr)_minmax(130px,0.9fr)_minmax(190px,1.15fr)_minmax(140px,0.9fr)_minmax(260px,1.7fr)] gap-3 border-b border-[#eadfd8] bg-gray-50 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 lg:grid">
                   <div>成员 ID</div>
                   <div>显示名称</div>
+                  <div>运行时</div>
                   <div>角色模板</div>
                   <div>角色解释</div>
                 </div>
@@ -776,7 +918,7 @@ const CreateTeamPage: React.FC = () => {
                   {members.map((member) => (
                     <div
                       key={member.id}
-                      className="grid grid-cols-1 gap-3 px-4 py-4 text-sm lg:grid-cols-[minmax(120px,0.9fr)_minmax(140px,1fr)_minmax(150px,1fr)_minmax(280px,1.8fr)] lg:items-center"
+                      className="grid grid-cols-1 gap-3 px-4 py-4 text-sm lg:grid-cols-[minmax(110px,0.8fr)_minmax(130px,0.9fr)_minmax(190px,1.15fr)_minmax(140px,0.9fr)_minmax(260px,1.7fr)] lg:items-center"
                     >
                       <div>
                         <div className="text-xs font-medium text-gray-500 lg:hidden">
@@ -796,6 +938,56 @@ const CreateTeamPage: React.FC = () => {
                         <div className="text-gray-900">
                           {displayNameForMember(member)}
                         </div>
+                      </div>
+                      <div>
+                        <div className="text-xs font-medium text-gray-500 lg:hidden">
+                          运行时
+                        </div>
+                        {member.isLeader ? (
+                          <div className="inline-flex rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700">
+                            OpenClaw Lite
+                          </div>
+                        ) : (
+                          <div
+                            className="inline-flex rounded-lg border border-[#eadfd8] bg-gray-50 p-0.5"
+                            role="group"
+                            aria-label={`${member.memberId} 运行时`}
+                          >
+                            {(["openclaw", "hermes"] as RuntimeType[]).map(
+                              (runtimeType) => {
+                                const selected = member.runtimeType === runtimeType;
+                                const unavailable =
+                                  runtimeType === "hermes" && !hermesLiteImage;
+                                return (
+                                  <button
+                                    key={runtimeType}
+                                    type="button"
+                                    disabled={unavailable}
+                                    title={
+                                      unavailable
+                                        ? "未配置可用的 Hermes Lite 镜像"
+                                        : undefined
+                                    }
+                                    onClick={() =>
+                                      updateWorkerRuntime(member.id, runtimeType)
+                                    }
+                                    className={`rounded-md px-2.5 py-1 text-xs font-medium transition ${
+                                      selected
+                                        ? runtimeType === "hermes"
+                                          ? "bg-violet-600 text-white shadow-sm"
+                                          : "bg-emerald-600 text-white shadow-sm"
+                                        : "text-gray-600 hover:bg-white"
+                                    } disabled:cursor-not-allowed disabled:opacity-40`}
+                                  >
+                                    {runtimeType === "hermes"
+                                      ? "Hermes Lite"
+                                      : "OpenClaw Lite"}
+                                  </button>
+                                );
+                              },
+                            )}
+                          </div>
+                        )}
                       </div>
                       <div>
                         <div className="text-xs font-medium text-gray-500 lg:hidden">
@@ -843,7 +1035,16 @@ const CreateTeamPage: React.FC = () => {
                       : "未选择"
                   }
                 />
-                <SummaryRow label="运行方式" value="OpenClaw Lite" />
+                <SummaryRow
+                  label="运行方式"
+                  value={
+                    members.some(
+                      (member) => !member.isLeader && member.runtimeType === "hermes",
+                    )
+                      ? "OpenClaw Leader + 混合 Lite Worker"
+                      : "OpenClaw Lite"
+                  }
+                />
                 <SummaryRow
                   label="协作模式"
                   value={communicationModeOption.label}
@@ -856,6 +1057,18 @@ const CreateTeamPage: React.FC = () => {
                   label="默认镜像"
                   value={selectedImage?.display_name || selectedImage?.image || "无"}
                 />
+                {members.some(
+                  (member) => !member.isLeader && member.runtimeType === "hermes",
+                ) && (
+                  <SummaryRow
+                    label="Hermes Lite 镜像"
+                    value={
+                      selectedHermesImage?.display_name ||
+                      selectedHermesImage?.image ||
+                      "无"
+                    }
+                  />
+                )}
                 <SummaryRow
                   label="环境变量"
                   value={

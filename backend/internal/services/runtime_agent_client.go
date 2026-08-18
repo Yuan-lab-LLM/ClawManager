@@ -13,7 +13,10 @@ import (
 	"time"
 )
 
-var ErrRuntimeAgentConflict = errors.New("runtime agent conflict")
+var (
+	ErrRuntimeAgentConflict = errors.New("runtime agent conflict")
+	ErrRuntimeAgentNotFound = errors.New("runtime agent resource not found")
+)
 
 type RuntimeAgentClient interface {
 	Health(ctx context.Context, endpoint string) error
@@ -141,6 +144,9 @@ func (c *runtimeAgentHTTPClient) do(ctx context.Context, method, endpoint, path 
 		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		if resp.StatusCode == http.StatusConflict {
 			return fmt.Errorf("%w: %s", ErrRuntimeAgentConflict, string(msg))
+		}
+		if resp.StatusCode == http.StatusNotFound {
+			return fmt.Errorf("%w: %s", ErrRuntimeAgentNotFound, string(msg))
 		}
 		return fmt.Errorf("runtime agent status %d: %s", resp.StatusCode, string(msg))
 	}

@@ -1,9 +1,14 @@
 package aigateway
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
+	"io"
+	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"clawreef/internal/models"
 )
@@ -112,6 +117,264 @@ func TestBuildProviderRequestPreservesToolConfiguration(t *testing.T) {
 	}
 }
 
+func TestBuildProviderRequestEnforcesDeepSeekThinkingSetting(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		enabled bool
+		want    string
+	}{
+		{name: "disabled", enabled: false, want: "disabled"},
+		{name: "enabled", enabled: true, want: "enabled"},
+	}
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			req := ChatCompletionRequest{
+				Model: "NB",
+				RawBody: []byte(`{"model":"NB","messages":[{"role":"user","content":"hello"}],` +
+					`"thinking":{"type":"enabled"},"reasoning_effort":"high"}`),
+			}
+			model := &models.LLMModel{
+				ProviderType:      models.ProviderTypeOpenAICompatible,
+				ProtocolType:      models.ProtocolTypeOpenAICompatible,
+				BaseURL:           "https://api.deepseek.com",
+				ProviderModelName: "deepseek-v4-flash",
+				ReasoningEnabled:  tc.enabled,
+			}
+			body, err := buildProviderRequestBody(req, model)
+			if err != nil {
+				t.Fatalf("buildProviderRequestBody returned error: %v", err)
+			}
+			var payload map[string]json.RawMessage
+			if err := json.Unmarshal(body, &payload); err != nil {
+				t.Fatalf("decode provider request: %v", err)
+			}
+			var thinking struct {
+				Type string `json:"type"`
+			}
+			if err := json.Unmarshal(payload["thinking"], &thinking); err != nil {
+				t.Fatalf("decode thinking control: %v", err)
+			}
+			if thinking.Type != tc.want {
+				t.Fatalf("thinking.type = %q, want %q", thinking.Type, tc.want)
+			}
+			if tc.enabled {
+				if string(payload["reasoning_effort"]) != `"high"` {
+					t.Fatalf("enabled DeepSeek request must preserve normalized effort, got %s", payload["reasoning_effort"])
+				}
+			} else if _, exists := payload["reasoning_effort"]; exists {
+				t.Fatalf("disabled DeepSeek request retained reasoning_effort")
+			}
+		})
+	}
+}
+
+func TestBuildProviderRequestFromStructuredInternalCallPreservesMessagesAndModelThinking(t *testing.T) {
+	t.Parallel()
+	temperature := 0.2
+	maxTokens := 6000
+	tests := []struct {
+		name    string
+		enabled bool
+		want    string
+	}{
+		{name: "thinking disabled by model config", enabled: false, want: "disabled"},
+		{name: "thinking enabled by model config", enabled: true, want: "enabled"},
+	}
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			req := ChatCompletionRequest{
+				Model: "auto",
+				Messages: []ChatMessage{
+					{Role: "system", Content: "Return JSON."},
+					{Role: "user", Content: "Create a team."},
+				},
+				Temperature: &temperature,
+				MaxTokens:   &maxTokens,
+			}
+			model := &models.LLMModel{
+				ProviderType: models.ProviderTypeOpenAICompatible, ProtocolType: models.ProtocolTypeOpenAICompatible,
+				BaseURL: "https://api.deepseek.com", ProviderModelName: "deepseek-v4-flash", ReasoningEnabled: tc.enabled,
+			}
+			body, err := buildProviderRequestBody(req, model)
+			if err != nil {
+				t.Fatalf("buildProviderRequestBody returned error: %v", err)
+			}
+			var payload map[string]json.RawMessage
+			if err := json.Unmarshal(body, &payload); err != nil {
+				t.Fatalf("decode provider request: %v", err)
+			}
+			var messages []ChatMessage
+			if err := json.Unmarshal(payload["messages"], &messages); err != nil || len(messages) != 2 {
+				t.Fatalf("messages = %#v, err=%v, want 2 messages", messages, err)
+			}
+			if string(payload["max_tokens"]) != "6000" || string(payload["temperature"]) != "0.2" {
+				t.Fatalf("generation parameters missing: %s", body)
+			}
+			var thinking struct {
+				Type string `json:"type"`
+			}
+			if err := json.Unmarshal(payload["thinking"], &thinking); err != nil || thinking.Type != tc.want {
+				t.Fatalf("thinking = %#v, err=%v, want %q", thinking, err, tc.want)
+			}
+		})
+	}
+}
+
+func TestBuildProviderRequestCombinesManagedOpenClawAndModelThinkingSettings(t *testing.T) {
+	t.Parallel()
+	openclaw := "openclaw"
+	tests := []struct {
+		name         string
+		modelEnabled bool
+		raw          string
+		wantState    string
+		wantEffort   string
+	}{
+		{name: "model disabled wins", raw: `{"model":"NB","messages":[],"thinking":{"type":"enabled"},"reasoning_effort":"max"}`, wantState: "disabled"},
+		{name: "openclaw explicitly off", modelEnabled: true, raw: `{"model":"NB","messages":[],"thinking":{"type":"disabled"},"reasoning_effort":"max"}`, wantState: "disabled"},
+		{name: "openclaw omission is off", modelEnabled: true, raw: `{"model":"NB","messages":[]}`, wantState: "disabled"},
+		{name: "openclaw high", modelEnabled: true, raw: `{"model":"NB","messages":[],"reasoning_effort":"medium"}`, wantState: "enabled", wantEffort: "high"},
+		{name: "openclaw max", modelEnabled: true, raw: `{"model":"NB","messages":[],"reasoning_effort":"xhigh"}`, wantState: "enabled", wantEffort: "max"},
+	}
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			req := ChatCompletionRequest{Model: "NB", RawBody: []byte(tc.raw), ManagedAgentType: &openclaw}
+			model := &models.LLMModel{
+				ProviderType: models.ProviderTypeOpenAICompatible, ProtocolType: models.ProtocolTypeOpenAICompatible,
+				BaseURL: "https://api.deepseek.com", ProviderModelName: "deepseek-v4-flash", ReasoningEnabled: tc.modelEnabled,
+			}
+			body, err := buildProviderRequestBody(req, model)
+			if err != nil {
+				t.Fatalf("buildProviderRequestBody returned error: %v", err)
+			}
+			var payload map[string]json.RawMessage
+			if err := json.Unmarshal(body, &payload); err != nil {
+				t.Fatalf("decode payload: %v", err)
+			}
+			var thinking struct {
+				Type string `json:"type"`
+			}
+			if err := json.Unmarshal(payload["thinking"], &thinking); err != nil || thinking.Type != tc.wantState {
+				t.Fatalf("thinking = %#v, err=%v, want %q", thinking, err, tc.wantState)
+			}
+			if tc.wantEffort == "" {
+				if _, ok := payload["reasoning_effort"]; ok {
+					t.Fatalf("disabled request retained reasoning_effort: %s", payload["reasoning_effort"])
+				}
+			} else if string(payload["reasoning_effort"]) != `"`+tc.wantEffort+`"` {
+				t.Fatalf("reasoning_effort = %s, want %q", payload["reasoning_effort"], tc.wantEffort)
+			}
+		})
+	}
+}
+
+func TestBuildProviderRequestNormalizesDeepSeekMaxTokens(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name            string
+		raw             string
+		wantMaxTokens   string
+		wantMaxComplete bool
+	}{
+		{
+			name:          "openclaw compatibility field",
+			raw:           `{"model":"NB","messages":[{"role":"user","content":"hello"}],"max_completion_tokens":65536}`,
+			wantMaxTokens: "65536",
+		},
+		{
+			name:          "explicit provider field wins",
+			raw:           `{"model":"NB","messages":[{"role":"user","content":"hello"}],"max_tokens":32768,"max_completion_tokens":65536}`,
+			wantMaxTokens: "32768",
+		},
+	}
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			body, err := buildProviderRequestBody(ChatCompletionRequest{
+				Model:   "NB",
+				RawBody: []byte(tc.raw),
+			}, &models.LLMModel{
+				ProviderType:      models.ProviderTypeOpenAICompatible,
+				ProtocolType:      models.ProtocolTypeOpenAICompatible,
+				BaseURL:           "https://api.deepseek.com",
+				ProviderModelName: "deepseek-v4-flash",
+			})
+			if err != nil {
+				t.Fatalf("buildProviderRequestBody returned error: %v", err)
+			}
+			var payload map[string]json.RawMessage
+			if err := json.Unmarshal(body, &payload); err != nil {
+				t.Fatalf("decode provider request: %v", err)
+			}
+			if got := string(payload["max_tokens"]); got != tc.wantMaxTokens {
+				t.Fatalf("max_tokens = %s, want %s", got, tc.wantMaxTokens)
+			}
+			if _, exists := payload["max_completion_tokens"]; exists != tc.wantMaxComplete {
+				t.Fatalf("max_completion_tokens presence = %v, want %v", exists, tc.wantMaxComplete)
+			}
+		})
+	}
+}
+
+func TestBuildProviderRequestPreservesUnknownMaxTokenField(t *testing.T) {
+	t.Parallel()
+	body, err := buildProviderRequestBody(ChatCompletionRequest{
+		Model:   "custom",
+		RawBody: []byte(`{"model":"custom","messages":[{"role":"user","content":"hello"}],"max_completion_tokens":24576}`),
+	}, &models.LLMModel{
+		ProviderType:      models.ProviderTypeOpenAICompatible,
+		ProtocolType:      models.ProtocolTypeOpenAICompatible,
+		BaseURL:           "https://gateway.example.com/v1",
+		ProviderModelName: "custom-model",
+	})
+	if err != nil {
+		t.Fatalf("buildProviderRequestBody returned error: %v", err)
+	}
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("decode provider request: %v", err)
+	}
+	if got := string(payload["max_completion_tokens"]); got != "24576" {
+		t.Fatalf("unknown compatible provider field changed: %s", got)
+	}
+	if _, exists := payload["max_tokens"]; exists {
+		t.Fatal("unknown compatible provider must not inherit DeepSeek token normalization")
+	}
+}
+
+func TestBuildProviderRequestPreservesUnknownReasoningFields(t *testing.T) {
+	t.Parallel()
+	req := ChatCompletionRequest{
+		Model:   "custom",
+		RawBody: []byte(`{"model":"custom","messages":[{"role":"user","content":"hello"}],"reasoning_effort":"medium"}`),
+	}
+	model := &models.LLMModel{
+		ProviderType:      models.ProviderTypeOpenAICompatible,
+		ProtocolType:      models.ProtocolTypeOpenAICompatible,
+		BaseURL:           "https://gateway.example.com/v1",
+		ProviderModelName: "custom-reasoner",
+	}
+	body, err := buildProviderRequestBody(req, model)
+	if err != nil {
+		t.Fatalf("buildProviderRequestBody returned error: %v", err)
+	}
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("decode provider request: %v", err)
+	}
+	if string(payload["reasoning_effort"]) != `"medium"` {
+		t.Fatalf("unsupported provider-specific fields must pass through, got %s", payload["reasoning_effort"])
+	}
+}
+
 func TestBuildProviderRequestUsesAnthropicProtocolForLocalModel(t *testing.T) {
 	req := ChatCompletionRequest{
 		Model: "gateway-model",
@@ -197,9 +460,12 @@ func TestRewriteStreamLineKeepsToolCalls(t *testing.T) {
 	var completionTokens int
 	var totalTokens int
 
-	done := inspectStreamLine(line, &assistantText, &promptTokens, &completionTokens, &totalTokens)
-	if done {
+	inspection := inspectStreamLine(line, &assistantText, &promptTokens, &completionTokens, &totalTokens)
+	if inspection.Done {
 		t.Fatalf("expected tool chunk not to finish the stream")
+	}
+	if inspection.Finished {
+		t.Fatalf("expected tool chunk not to carry a terminal finish reason")
 	}
 	if assistantText.String() != "" {
 		t.Fatalf("expected tool chunks not to be appended as assistant text, got %q", assistantText.String())
@@ -218,6 +484,185 @@ func TestRewriteStreamLineKeepsToolCalls(t *testing.T) {
 		t.Fatalf("expected function metadata to survive, got %#v", chunk.Choices[0].Delta.ToolCalls[0])
 	}
 }
+
+type flushBuffer struct {
+	bytes.Buffer
+	flushes int
+}
+
+func (b *flushBuffer) Flush() {
+	b.flushes++
+}
+
+func TestProxyOpenAIStreamAcceptsDoneSentinel(t *testing.T) {
+	input := strings.Join([]string{
+		`data: {"choices":[{"index":0,"delta":{"content":"hello"},"finish_reason":null}]}`,
+		"",
+		"data: [DONE]",
+		"",
+	}, "\n")
+	output := &flushBuffer{}
+
+	result, err := proxyOpenAIStream(strings.NewReader(input), output, output)
+	if err != nil {
+		t.Fatalf("proxyOpenAIStream returned error: %v", err)
+	}
+	if !result.SawDone || !result.Terminal {
+		t.Fatalf("expected a verified terminal stream, got %#v", result)
+	}
+	if result.AssistantText != "hello" {
+		t.Fatalf("expected assistant text to be preserved, got %q", result.AssistantText)
+	}
+	if output.String() != input {
+		t.Fatalf("expected provider stream to pass through unchanged")
+	}
+	if output.flushes == 0 {
+		t.Fatalf("expected streaming output to be flushed")
+	}
+}
+
+func TestProxyOpenAIStreamAcceptsFinishReasonBeforeEOF(t *testing.T) {
+	input := "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"done\"},\"finish_reason\":\"stop\"}]}\n\n"
+	output := &flushBuffer{}
+
+	result, err := proxyOpenAIStream(strings.NewReader(input), output, output)
+	if err != nil {
+		t.Fatalf("proxyOpenAIStream returned error: %v", err)
+	}
+	if result.SawDone || !result.SawFinishReason || !result.Terminal {
+		t.Fatalf("expected finish_reason to verify terminal EOF, got %#v", result)
+	}
+}
+
+func TestProxyOpenAIStreamRejectsTruncatedEOF(t *testing.T) {
+	input := "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"partial\"},\"finish_reason\":null}]}\n\n"
+	output := &flushBuffer{}
+
+	result, err := proxyOpenAIStream(strings.NewReader(input), output, output)
+	if !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("expected unexpected EOF, got result=%#v err=%v", result, err)
+	}
+	if result.Terminal {
+		t.Fatalf("truncated stream must not be terminal")
+	}
+}
+
+func TestProxyOpenAIStreamPreservesProviderErrorFrame(t *testing.T) {
+	input := "data: {\"error\":{\"message\":\"provider overloaded\",\"type\":\"server_error\",\"code\":\"overloaded\"}}\n\n"
+	output := &flushBuffer{}
+
+	_, err := proxyOpenAIStream(strings.NewReader(input), output, output)
+	if err == nil || !strings.Contains(err.Error(), "provider overloaded") {
+		t.Fatalf("expected provider stream error, got %v", err)
+	}
+	if output.String() != input {
+		t.Fatalf("expected provider error frame to reach the client unchanged")
+	}
+}
+
+func TestEmitOpenAIStreamErrorUsesSDKCompatibleEnvelope(t *testing.T) {
+	output := &flushBuffer{}
+	err := emitOpenAIStreamError(output, output, "trace-123", io.ErrUnexpectedEOF)
+	if err != nil {
+		t.Fatalf("emitOpenAIStreamError returned error: %v", err)
+	}
+
+	line := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(output.String()), "data:"))
+	var envelope struct {
+		Error struct {
+			Message string `json:"message"`
+			Type    string `json:"type"`
+			Code    string `json:"code"`
+			TraceID string `json:"trace_id"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(line), &envelope); err != nil {
+		t.Fatalf("expected JSON SSE error envelope, got %q: %v", line, err)
+	}
+	if envelope.Error.Code != upstreamStreamInterruptedCode || envelope.Error.Type != "upstream_stream_error" {
+		t.Fatalf("unexpected error envelope: %#v", envelope.Error)
+	}
+	if envelope.Error.TraceID != "trace-123" {
+		t.Fatalf("expected trace id, got %#v", envelope.Error)
+	}
+	if !strings.Contains(envelope.Error.Message, upstreamStreamInterruptedCode) {
+		t.Fatalf("expected stable retry classification in message, got %q", envelope.Error.Message)
+	}
+}
+
+func TestGatewayUsesSeparateClientsForStreamingAndNonStreaming(t *testing.T) {
+	nonStreaming, streaming := newGatewayHTTPClients()
+	if nonStreaming.Timeout != 3*time.Minute {
+		t.Fatalf("expected bounded non-stream timeout, got %s", nonStreaming.Timeout)
+	}
+	if streaming.Timeout != 0 {
+		t.Fatalf("streaming client must not have a whole-request timeout, got %s", streaming.Timeout)
+	}
+	if nonStreaming == streaming {
+		t.Fatalf("streaming and non-streaming requests must not share one client")
+	}
+}
+
+type failingWriter struct {
+	err error
+}
+
+func (w *failingWriter) Write(_ []byte) (int, error) {
+	return 0, w.err
+}
+
+func (w *failingWriter) Flush() {}
+
+func TestProxyOpenAIStreamReturnsDownstreamWriteFailure(t *testing.T) {
+	writeErr := errors.New("client disconnected")
+	writer := &failingWriter{err: writeErr}
+	_, err := proxyOpenAIStream(
+		strings.NewReader("data: [DONE]\n\n"),
+		writer,
+		writer,
+	)
+	if !errors.Is(err, writeErr) {
+		t.Fatalf("expected downstream write error, got %v", err)
+	}
+}
+
+func TestProxyAnthropicStreamRequiresMessageStop(t *testing.T) {
+	input := strings.Join([]string{
+		"event: message_start",
+		`data: {"type":"message_start","message":{"id":"msg-1","model":"claude-test","usage":{"input_tokens":2,"output_tokens":0}}}`,
+		"",
+		"event: content_block_delta",
+		`data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"partial"}}`,
+		"",
+	}, "\n")
+	output := &flushBuffer{}
+	state := &anthropicStreamState{ToolCalls: map[int]*anthropicToolCallState{}}
+
+	_, err := proxyAnthropicStream(strings.NewReader(input), output, output, state)
+	if !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("expected incomplete Anthropic stream to fail, got %v", err)
+	}
+}
+
+func TestProxyAnthropicStreamAcceptsMessageStop(t *testing.T) {
+	input := strings.Join([]string{
+		"event: message_start",
+		`data: {"type":"message_start","message":{"id":"msg-1","model":"claude-test","usage":{"input_tokens":2,"output_tokens":0}}}`,
+		"",
+		"event: message_stop",
+		`data: {"type":"message_stop"}`,
+		"",
+	}, "\n")
+	output := &flushBuffer{}
+	state := &anthropicStreamState{ToolCalls: map[int]*anthropicToolCallState{}}
+
+	_, err := proxyAnthropicStream(strings.NewReader(input), output, output, state)
+	if err != nil {
+		t.Fatalf("expected message_stop to complete Anthropic stream, got %v", err)
+	}
+}
+
+var _ http.Flusher = (*flushBuffer)(nil)
 
 func TestExtractAssistantContentFallsBackToToolCalls(t *testing.T) {
 	response := ChatCompletionResponse{

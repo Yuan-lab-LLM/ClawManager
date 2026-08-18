@@ -15,31 +15,34 @@ var orderedSystemImageTypes = []string{
 	"webtop",
 	"hermes",
 	"opencode",
+	"workbuddy",
 	"debian",
 	"centos",
 	"custom",
 }
 
 var supportedSystemImageTypes = map[string]string{
-	"openclaw": "OpenClaw Pro",
-	"ubuntu":   "Ubuntu Desktop",
-	"webtop":   "Webtop Desktop",
-	"hermes":   "Hermes Pro",
-	"opencode": "OpenCode Pro",
-	"debian":   "Debian Desktop",
-	"centos":   "CentOS Desktop",
-	"custom":   "Custom Image",
+	"openclaw":  "OpenClaw Pro",
+	"ubuntu":    "Ubuntu Desktop",
+	"webtop":    "Webtop Desktop",
+	"hermes":    "Hermes Pro",
+	"opencode":  "OpenCode Pro",
+	"workbuddy": "Workbuddy Pro",
+	"debian":    "Debian Desktop",
+	"centos":    "CentOS Desktop",
+	"custom":    "Custom Image",
 }
 
 var defaultSystemImageSettings = map[string]string{
-	"openclaw": "ghcr.io/yuan-lab-llm/agentsruntime/openclaw:latest",
-	"ubuntu":   "lscr.io/linuxserver/webtop:ubuntu-xfce",
-	"webtop":   "lscr.io/linuxserver/webtop:ubuntu-xfce",
-	"hermes":   "ghcr.io/yuan-lab-llm/agentsruntime/hermes:latest",
-	"opencode": "ghcr.io/yuan-lab-llm/agentsruntime/opencode:latest",
-	"debian":   "docker.io/clawreef/debian-desktop:12",
-	"centos":   "docker.io/clawreef/centos-desktop:9",
-	"custom":   "registry.example.com/your-custom-image:latest",
+	"openclaw":  "ghcr.io/yuan-lab-llm/agentsruntime/openclaw:latest",
+	"ubuntu":    "lscr.io/linuxserver/webtop:ubuntu-xfce",
+	"webtop":    "lscr.io/linuxserver/webtop:ubuntu-xfce",
+	"hermes":    "ghcr.io/yuan-lab-llm/agentsruntime/hermes:latest",
+	"opencode":  "ghcr.io/yuan-lab-llm/agentsruntime/opencode:latest",
+	"workbuddy": "ghcr.io/yuan-lab-llm/agentsruntime/workbuddy-linux:latest",
+	"debian":    "docker.io/clawreef/debian-desktop:12",
+	"centos":    "docker.io/clawreef/centos-desktop:9",
+	"custom":    "registry.example.com/your-custom-image:latest",
 }
 
 var defaultGatewaySystemImageSettings = map[string]string{
@@ -54,10 +57,11 @@ var defaultGatewaySystemImageSettings = map[string]string{
 }
 
 var defaultEnabledSystemImageTypes = map[string]bool{
-	"openclaw": true,
-	"ubuntu":   true,
-	"hermes":   true,
-	"opencode": true,
+	"openclaw":  true,
+	"ubuntu":    true,
+	"hermes":    true,
+	"opencode":  true,
+	"workbuddy": true,
 }
 
 var defaultEnabledGatewaySystemImageTypes = map[string]bool{
@@ -326,6 +330,9 @@ func displayNameForSystemImagePreset(instanceType, runtimeType string) string {
 			return "OpenCode Lite"
 		}
 		return "OpenCode Pro"
+	}
+	if instanceType == "workbuddy" {
+		return "Workbuddy Pro"
 	}
 	return displayNameForSystemImageType(instanceType)
 }

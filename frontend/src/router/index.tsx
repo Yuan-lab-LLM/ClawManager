@@ -57,6 +57,7 @@ import InstancePortalPage from '../pages/instances/InstancePortalPage';
 import SharedInstancePage from '../pages/instances/SharedInstancePage';
 import TeamListPage from '../pages/teams/TeamListPage';
 import CreateTeamPage from '../pages/teams/CreateTeamPage';
+import CustomTeamTemplatesPage from '../pages/teams/CustomTeamTemplatesPage';
 import TeamDetailPage from '../pages/teams/TeamDetailPage';
 import SkillHubPage from '../pages/skill-hub/SkillHubPage';
 
@@ -225,6 +226,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <CreateTeamPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/teams/custom-templates"
+        element={
+          <ProtectedRoute>
+            <CustomTeamTemplatesPage />
           </ProtectedRoute>
         }
       />

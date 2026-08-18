@@ -81,6 +81,7 @@ flowchart LR
 - 相关改动已部署到 172.16.1.12 环境，并完成一轮自动化回归。
 - 当前自动化测试已覆盖普通实例 Lite / Pro 模式、Share Link 基础行为、管理端模式展示以及 Team Lite 创建链路。
 - Lite 批量创建调度已改为可配置并发，容量为 100 的部署允许单 Pod 同时接收 100 个异步 gateway 创建请求；控制面会按 runtime 原子预留端口（OpenClaw 为三端口组，Hermes 为单端口），再调用 runtime agent，并在端口冲突时改用下一组。
+- OpenClaw Lite 已补充 5.4 与 7.1 workspace 兼容：启动前保留旧版全局插件布局，并为新版 `npm/projects/*/node_modules` 中缺失的全局包创建幂等软链接；显式重试会清理旧 generation binding，且仅在运行时明确报告 SQLite 损坏时，将可选的旧版任务数据库移入实例内 quarantine 后继续启动。
 - 联调中发现，部分 Lite runtime / agent 能力仍需补齐，主要集中在 Team 任务消费和 Hermes Lite 会话稳定性上。
 
 ## 计划

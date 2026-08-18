@@ -85,13 +85,15 @@ Agent 启动时如果 `CLAWMANAGER_AGENT_ENABLED` 不是 `true`，应进入空�
 | `CLAWMANAGER_LLM_API_KEY` | 当前实例专属 Gateway API key |
 | `CLAWMANAGER_LLM_MODEL` | 平台注入的模型目录 JSON，首项通常包含 `auto` |
 | `CLAWMANAGER_LLM_PROVIDER` | 当前为 `openai-compatible` |
+| `CLAWMANAGER_LLM_REASONING` | 按模型显示名称索引的 Thinking 开关 JSON；平台保存的关闭状态是权威上限 |
+| `CLAWMANAGER_LLM_REASONING_CONTROL` | 按模型显示名称索引的供应商 Thinking 控制协议 JSON；空值表示 Runtime 不应猜测或强行开启 |
 | `CLAWMANAGER_INSTANCE_TOKEN` | 当前实例 token，和 Gateway API key 同源 |
 | `OPENAI_BASE_URL` | OpenAI SDK 兼容别名 |
 | `OPENAI_API_BASE` | OpenAI SDK 兼容别名 |
 | `OPENAI_API_KEY` | OpenAI SDK 兼容别名 |
 | `OPENAI_MODEL` | 默认模型，通常为 `auto` |
 
-Runtime 内的应用和 agent 如果需要调用模型，优先使用这些变量，不要让用户在镜像内手工写入 provider key。
+Runtime 内的应用和 agent 如果需要调用模型，优先使用这些变量，不要让用户在镜像内手工写入 provider key。Runtime 可以把受支持的会话级开关或强度随请求传给 AI Gateway，但不能仅凭模型名称猜测供应商 Thinking 协议，也不能绕过平台关闭的模型级开关。
 
 ### LLM Session 归因
 

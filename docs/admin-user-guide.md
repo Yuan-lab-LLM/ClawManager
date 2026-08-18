@@ -17,7 +17,7 @@ Administrators use ClawManager to:
 End users use ClawManager to:
 
 - create or access OpenClaw workspaces
-- create a template-based Team and describe a shared goal in the Team chat
+- create a Team from one of eight read-only built-in templates or a user-owned custom template, then describe a shared goal in Team chat
 - open workspaces through the portal experience
 - inspect runtime status, agent signals, and recent command activity
 - attach or remove skills from an instance when permitted
@@ -36,7 +36,7 @@ End users use ClawManager to:
 1. Start with the AI Gateway overview if your team cares most about model governance.
 2. Review Agent Control Plane if your focus is runtime visibility and operations.
 3. Review Resource Management and Security Center if you want reusable channels, skills, and scan-backed workflows.
-4. Create a Team from a role template when a task benefits from coordinated planning, delivery, and review.
+4. Create a Team from a built-in or custom template when a task benefits from coordinated planning, delivery, and review. The Leader uses OpenClaw Lite; each Worker can use OpenClaw Lite or an available Hermes Lite image.
 
 ## Desktop Clipboard
 

@@ -11,6 +11,7 @@ import {
   findProviderTemplate,
   normalizeBaseUrl,
   resolveProviderProtocolType,
+  supportsManagedReasoningControl,
   type ProviderTemplate,
 } from '../../lib/modelProviderTemplates';
 
@@ -52,6 +53,7 @@ type EditableModelSnapshot = Pick<
   | 'protocol_type'
   | 'base_url'
   | 'provider_model_name'
+  | 'reasoning_enabled'
   | 'api_key'
   | 'api_key_secret_ref'
   | 'is_secure'
@@ -71,6 +73,7 @@ const captureSnapshot = (card: EditableModel): EditableModelSnapshot => ({
   protocol_type: card.protocol_type,
   base_url: card.base_url,
   provider_model_name: card.provider_model_name,
+  reasoning_enabled: card.reasoning_enabled,
   api_key: card.api_key,
   api_key_secret_ref: card.api_key_secret_ref,
   is_secure: card.is_secure,
@@ -91,6 +94,7 @@ const createEmptyModel = (): EditableModel => ({
   protocol_type: '',
   base_url: '',
   provider_model_name: '',
+  reasoning_enabled: false,
   api_key: '',
   api_key_secret_ref: '',
   is_secure: false,
@@ -523,6 +527,7 @@ const ModelManagementPage: React.FC = () => {
           protocol_type: resolveProviderProtocolType(item.provider_type, item.protocol_type),
           api_key: item.api_key ?? '',
           api_key_secret_ref: item.api_key_secret_ref ?? '',
+          reasoning_enabled: item.reasoning_enabled ?? false,
           local_id: `${item.id ?? item.display_name}-${index}`,
           isEditing: false,
           error: null,
@@ -721,6 +726,12 @@ const ModelManagementPage: React.FC = () => {
         protocol_type: resolveProviderProtocolType(card.provider_type, card.protocol_type),
         base_url: card.base_url.trim(),
         provider_model_name: card.provider_model_name.trim(),
+        reasoning_enabled: supportsManagedReasoningControl(
+          card.provider_type,
+          card.protocol_type,
+          card.base_url,
+          card.provider_model_name,
+        ) && card.reasoning_enabled,
         api_key: card.api_key?.trim() || undefined,
         api_key_secret_ref: card.api_key_secret_ref?.trim() || undefined,
         is_secure: card.is_secure,
@@ -821,6 +832,12 @@ const ModelManagementPage: React.FC = () => {
                 const allowBaseUrlEditing = Boolean(currentTemplate?.allowCustomBaseUrl);
                 const showsProtocolSelector = card.provider_type === 'local';
                 const providerModelListId = `provider-model-options-${card.local_id}`;
+                const reasoningSupported = supportsManagedReasoningControl(
+                  card.provider_type,
+                  card.protocol_type,
+                  card.base_url,
+                  card.provider_model_name,
+                );
                 const providerModelHelpText = card.discovering
                   ? t('modelManagementPage.loadingProviderModels')
                   : autoDiscoverySupported
@@ -872,6 +889,16 @@ const ModelManagementPage: React.FC = () => {
                         <div>
                           <dt className="font-medium text-gray-700">{t('modelManagementPage.currency')}</dt>
                           <dd className="mt-1 text-gray-600">{card.currency || '-'}</dd>
+                        </div>
+                        <div>
+                          <dt className="font-medium text-gray-700">{t('modelManagementPage.reasoning')}</dt>
+                          <dd className="mt-1 text-gray-600">
+                            {reasoningSupported
+                              ? card.reasoning_enabled
+                                ? t('modelManagementPage.reasoningEnabled')
+                                : t('modelManagementPage.reasoningDisabled')
+                              : t('modelManagementPage.reasoningUnsupported')}
+                          </dd>
                         </div>
                         {showsProtocolSelector && (
                           <div>
@@ -1072,6 +1099,26 @@ const ModelManagementPage: React.FC = () => {
                           {card.discovery_error}
                         </div>
                       )}
+                    </div>
+
+                    <div className={`mt-4 rounded-2xl border px-4 py-3 ${reasoningSupported ? 'border-[#ead8cf] bg-white/75' : 'border-gray-200 bg-gray-50/80'}`}>
+                      <label className={`flex items-center justify-between gap-4 text-sm ${reasoningSupported ? 'text-gray-700' : 'text-gray-400'}`}>
+                        <span>
+                          <span className="block font-medium">{t('modelManagementPage.reasoning')}</span>
+                          <span className="mt-1 block text-xs font-normal">
+                            {reasoningSupported
+                              ? t('modelManagementPage.reasoningHelp')
+                              : t('modelManagementPage.reasoningUnsupportedHelp')}
+                          </span>
+                        </span>
+                        <input
+                          type="checkbox"
+                          checked={reasoningSupported && card.reasoning_enabled}
+                          disabled={!reasoningSupported}
+                          onChange={(event) => updateCard(card.local_id, { reasoning_enabled: event.target.checked })}
+                          className="h-4 w-4 shrink-0 rounded border-gray-300 text-[#b84c28] focus:ring-[#b84c28] disabled:cursor-not-allowed disabled:opacity-50"
+                        />
+                      </label>
                     </div>
 
                     <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">

@@ -247,6 +247,20 @@ func TestRuntimeAgentClientNonConflictErrorIncludesStatusAndBody(t *testing.T) {
 	}
 }
 
+func TestRuntimeAgentClientDeleteGatewayReturnsNotFoundSentinel(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte("gateway not found"))
+	}))
+	defer server.Close()
+
+	client := NewRuntimeAgentClientWithHTTPClient("token", server.Client())
+	err := client.DeleteGateway(context.Background(), server.URL, "gw-missing")
+	if !errors.Is(err, ErrRuntimeAgentNotFound) {
+		t.Fatalf("DeleteGateway error = %v, want ErrRuntimeAgentNotFound", err)
+	}
+}
+
 func runtimeAgentIntPtr(v int) *int {
 	return &v
 }

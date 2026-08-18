@@ -12,6 +12,9 @@ AI Gateway applies fine-grained model governance so users can access only author
 - Provider onboarding with discovery and centralized endpoint configuration
 - Tiered model governance with regular models and secure models for sensitive workloads
 - Per-model activation, endpoint, credential reference, and pricing controls
+- A managed **Thinking** switch is shown only when ClawManager can reliably control the provider protocol. The current managed contract covers official DeepSeek OpenAI-compatible endpoints with `deepseek-*` provider models. Unsupported models remain explicitly marked as unsupported.
+- The saved model setting is authoritative: disabling Thinking forces it off for every request. When it is enabled, a managed OpenClaw session may still disable it or select a supported effort level. Internal AI Gateway calls, including custom Team generation and role adjustment through `model: "auto"`, inherit the setting of the model that the gateway actually selects.
+- Thinking controls the provider request mode; it does not expose private reasoning text. Enabling it can increase latency and reasoning-token usage.
 
 ### 2. Audit and Trace
 ![](./AIGateway/aigateway-audit.png)

@@ -317,6 +317,96 @@ func TestInstanceServiceStartV2MarksCreatingWithNextGeneration(t *testing.T) {
 	}
 }
 
+func TestInstanceServiceStartV2CleansFailedBindingBeforeNextGeneration(t *testing.T) {
+	workspacePath := "/workspaces/openclaw/user-45/instance-78"
+	instanceRepo := newV2LifecycleInstanceRepo()
+	instanceRepo.byID[78] = &models.Instance{
+		ID:                78,
+		UserID:            45,
+		Type:              "openclaw",
+		RuntimeType:       "gateway",
+		Status:            "error",
+		WorkspacePath:     &workspacePath,
+		RuntimeGeneration: 4,
+	}
+	endpoint := "http://agent.local:19090"
+	podRepo := &fakeRuntimePodRepo{pods: map[int64]*models.RuntimePod{
+		9: {ID: 9, AgentEndpoint: &endpoint},
+	}}
+	bindingRepo := newFakeRuntimeBindingRepo()
+	bindingRepo.bindings[78] = &models.InstanceRuntimeBinding{
+		InstanceID:   78,
+		RuntimePodID: 9,
+		GatewayID:    "gw-78-4",
+		GatewayPort:  20000,
+		State:        "error",
+		Generation:   4,
+	}
+	agent := &fakeRuntimeAgentClient{}
+	service := &instanceService{
+		instanceRepo:   instanceRepo,
+		runtimePodRepo: podRepo,
+		bindingRepo:    bindingRepo,
+		agentClient:    agent,
+	}
+
+	if err := service.Start(78); err != nil {
+		t.Fatalf("Start returned error: %v", err)
+	}
+
+	if len(agent.deleteRequests) != 1 || agent.deleteRequests[0].gatewayID != "gw-78-4" {
+		t.Fatalf("delete gateway requests = %#v", agent.deleteRequests)
+	}
+	if bindingRepo.deleteAndReleaseCalls[78] != 1 || bindingRepo.bindings[78] != nil {
+		t.Fatalf("failed binding was not removed: calls=%d binding=%+v", bindingRepo.deleteAndReleaseCalls[78], bindingRepo.bindings[78])
+	}
+	state := instanceRepo.runtimeStates[78]
+	if state.status != "creating" || state.generation != 5 {
+		t.Fatalf("runtime state = %#v, want creating generation 5", state)
+	}
+}
+
+func TestInstanceServiceStartV2QuarantinesReportedCorruptLegacyTaskDatabase(t *testing.T) {
+	workspacePath := t.TempDir()
+	legacyTasksRoot := path.Join(workspacePath, "home", ".openclaw", "tasks")
+	if err := os.MkdirAll(legacyTasksRoot, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	legacyDatabase := path.Join(legacyTasksRoot, "runs.sqlite")
+	if err := os.WriteFile(legacyDatabase, []byte("corrupt"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runtimeError := "SQLITE_CORRUPT: database disk image is malformed"
+	instanceRepo := newV2LifecycleInstanceRepo()
+	instanceRepo.byID[79] = &models.Instance{
+		ID:                  79,
+		UserID:              45,
+		Type:                "openclaw",
+		RuntimeType:         "gateway",
+		Status:              "error",
+		WorkspacePath:       &workspacePath,
+		RuntimeGeneration:   8,
+		RuntimeErrorMessage: &runtimeError,
+	}
+	service := &instanceService{instanceRepo: instanceRepo}
+
+	if err := service.Start(79); err != nil {
+		t.Fatalf("Start returned error: %v", err)
+	}
+
+	if _, err := os.Stat(legacyDatabase); !os.IsNotExist(err) {
+		t.Fatalf("legacy corrupt database still exists: %v", err)
+	}
+	quarantineEntries, err := os.ReadDir(path.Join(workspacePath, "home", ".openclaw", "quarantine"))
+	if err != nil || len(quarantineEntries) != 1 {
+		t.Fatalf("quarantine entries = %#v, err=%v", quarantineEntries, err)
+	}
+	state := instanceRepo.runtimeStates[79]
+	if state.status != "creating" || state.generation != 9 {
+		t.Fatalf("runtime state = %#v, want creating generation 9", state)
+	}
+}
+
 func TestInstanceServiceStopV2DeletesGatewayBindingAndReleasesSlot(t *testing.T) {
 	workspacePath := "/workspaces/openclaw/user-45/instance-88"
 	instanceRepo := newV2LifecycleInstanceRepo()

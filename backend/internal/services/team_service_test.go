@@ -225,6 +225,13 @@ func TestBuildTeamMemberInstanceRequestMountsHermesSoul(t *testing.T) {
 	if req.Team.PersonaConfigKey != "hermes-soul-worker.md" {
 		t.Fatalf("expected Hermes persona config key, got %q", req.Team.PersonaConfigKey)
 	}
+	if req.Type != "hermes" || req.Mode != InstanceModeLite || req.RuntimeType != RuntimeBackendGateway {
+		t.Fatalf("expected Hermes Lite gateway request, got type=%q mode=%q runtime=%q", req.Type, req.Mode, req.RuntimeType)
+	}
+	if req.EnvironmentOverrides["CLAWMANAGER_TEAM_RUNTIME_TYPE"] != "hermes" ||
+		req.EnvironmentOverrides["CLAWMANAGER_TEAM_PROTOCOL_VERSION"] != "4" {
+		t.Fatalf("expected Hermes Team runtime contract env, got %#v", req.EnvironmentOverrides)
+	}
 }
 
 func TestBuildTeamMemberInstanceRequestSupportsLiteMode(t *testing.T) {
@@ -458,7 +465,7 @@ func TestPlanTeamMembersRequiresExactlyOneLeader(t *testing.T) {
 func TestPlanTeamMembersSupportsHermesRuntime(t *testing.T) {
 	plans, err := planTeamMembers("team", []CreateTeamMemberRequest{
 		{MemberID: "lead", Role: "leader"},
-		{MemberID: "hermes-writer", Role: "writer", RuntimeType: "Hermes", InstanceMode: "Pro"},
+		{MemberID: "hermes-writer", Role: "writer", RuntimeType: "Hermes", InstanceMode: "Lite"},
 	})
 	if err != nil {
 		t.Fatalf("planTeamMembers returned error: %v", err)
@@ -466,8 +473,24 @@ func TestPlanTeamMembersSupportsHermesRuntime(t *testing.T) {
 	if plans[1].RuntimeType != "hermes" {
 		t.Fatalf("expected Hermes runtime to be normalized, got %#v", plans[1])
 	}
-	if plans[1].InstanceMode != InstanceModePro {
-		t.Fatalf("expected Pro instance mode to be normalized, got %#v", plans[1])
+	if plans[1].InstanceMode != InstanceModeLite {
+		t.Fatalf("expected Lite instance mode to be normalized, got %#v", plans[1])
+	}
+
+	_, err = planTeamMembers("team", []CreateTeamMemberRequest{
+		{MemberID: "lead", Role: "leader"},
+		{MemberID: "hermes-writer", Role: "writer", RuntimeType: "Hermes", InstanceMode: "Pro"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "Hermes team workers must use Lite mode") {
+		t.Fatalf("expected Hermes Pro rejection, got %v", err)
+	}
+
+	_, err = planTeamMembers("team", []CreateTeamMemberRequest{
+		{MemberID: "lead", Role: "leader", RuntimeType: "Hermes", InstanceMode: "Lite"},
+		{MemberID: "worker", Role: "developer"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "team leader must use OpenClaw Lite") {
+		t.Fatalf("expected Hermes Leader rejection, got %v", err)
 	}
 
 	_, err = planTeamMembers("team", []CreateTeamMemberRequest{
@@ -646,6 +669,10 @@ func TestAppendTeamTaskCompletionInstructionSeparatesCollaborationModes(t *testi
 		"wait for the assigned workers' actual results",
 		"Do not hand off directly to another Worker",
 		"Only the Leader may finalize the root task",
+		"Leader owns validation assignment scope",
+		"production-only implementation assignment",
+		"validationAssignment=true",
+		"several members may receive different validation assignments in parallel",
 	} {
 		if !strings.Contains(leaderMediated, expected) {
 			t.Fatalf("leader-mediated completion contract missing %q: %s", expected, leaderMediated)
@@ -767,7 +794,7 @@ func TestBuildTeamMemberSoulMarkdownAddsBoundedVerificationPolicies(t *testing.T
 		{
 			name:      "evidence reviewer",
 			member:    plannedTeamMember{MemberKey: "reviewer", Role: "reviewer", ProfileKey: "agency.evidence-collector"},
-			expected:  []string{"## Verification Policy", "Browser is available", "team_artifact_preview", "immediately continue with static review", "Never install dependencies"},
+			expected:  []string{"## Verification Policy", "Browser is available", "team_artifact_preview", "immediately continue with static review", "Dependencies genuinely required by the assigned validation target remain allowed"},
 			forbidden: []string{"reviewVerdict", "reviewedRevision", "reviewedAssignmentId"},
 		},
 		{
@@ -787,9 +814,10 @@ func TestBuildTeamMemberSoulMarkdownAddsBoundedVerificationPolicies(t *testing.T
 			forbidden: []string{"## Verification Policy", "directly reachable HTTP(S)"},
 		},
 		{
-			name:      "ordinary developer remains unchanged",
+			name:      "ordinary producer follows assignment validation ownership",
 			member:    plannedTeamMember{MemberKey: "worker", Role: "developer", ProfileKey: "agency.senior-developer"},
-			forbidden: []string{"## Verification Policy", "directly reachable HTTP(S)"},
+			expected:  []string{"## Assignment Validation Ownership", "validation ownership declared by the Leader", "production-only implementation", "different validation assignments in parallel", "must never prevent"},
+			forbidden: []string{"## Verification Policy", "Browser verification is not required"},
 		},
 	}
 
@@ -849,9 +877,9 @@ func TestResearchProfilesInheritGenericTeamCapabilities(t *testing.T) {
 				}
 			}
 			for _, expected := range []string{
-				"Browser is available to every OpenClaw Team worker",
+				"Browser is available to every supported Team worker",
 				"team_artifact_preview",
-				"Use team_complete_task only when the assigned task is actually complete",
+				"When your assigned work is ready, call team_complete_task once",
 				"Prefer SOUL.md for your member identity",
 			} {
 				if !strings.Contains(agents, expected) {
@@ -867,6 +895,9 @@ func TestResearchProfilesInheritGenericTeamCapabilities(t *testing.T) {
 
 func TestWriteLiteTeamMemberIdentityFiles(t *testing.T) {
 	workspace := t.TempDir()
+	originalChown := chownLitePromptWorkspacePath
+	t.Cleanup(func() { chownLitePromptWorkspacePath = originalChown })
+	chownLitePromptWorkspacePath = func(string, int, int) error { return nil }
 	profileEnv := map[string]string{
 		"CLAWMANAGER_AGENT_PERSONA_JSON": `{"profileKey":"agency.senior-developer","name":"Senior Developer","roleHint":"senior-developer","summary":"Implements scoped engineering tasks.","systemPrompt":"You are a senior implementation specialist."}`,
 	}
@@ -889,6 +920,7 @@ func TestWriteLiteTeamMemberIdentityFiles(t *testing.T) {
 		t.Fatalf("buildTeamRosterConfig returned error: %v", err)
 	}
 	instance := &models.Instance{
+		ID:            31,
 		Type:          "hermes",
 		RuntimeType:   RuntimeBackendGateway,
 		InstanceMode:  InstanceModeLite,
@@ -902,7 +934,12 @@ func TestWriteLiteTeamMemberIdentityFiles(t *testing.T) {
 		teamAgentsFileName,
 		teamSoulFileName,
 		teamConfigFileName,
-		filepath.Join(".hermes", teamSoulFileName),
+		filepath.Join("home", ".hermes", teamAgentsFileName),
+		filepath.Join("home", ".hermes", teamSoulFileName),
+		filepath.Join("home", ".hermes", teamConfigFileName),
+		filepath.Join("home", ".clawmanager-team-worker", ".hermes", teamAgentsFileName),
+		filepath.Join("home", ".clawmanager-team-worker", ".hermes", teamSoulFileName),
+		filepath.Join("home", ".clawmanager-team-worker", ".hermes", teamConfigFileName),
 	} {
 		if _, err := os.Stat(filepath.Join(workspace, name)); err != nil {
 			t.Fatalf("expected Lite identity file %s: %v", name, err)
@@ -929,6 +966,10 @@ func TestWriteLiteTeamMemberIdentityFiles(t *testing.T) {
 	}
 	if !strings.Contains(string(agentsBytes), "SOUL.md as the member-specific identity") {
 		t.Fatalf("AGENTS.md missing identity source guidance: %s", string(agentsBytes))
+	}
+	if !strings.Contains(string(agentsBytes), "call team_complete_task once") ||
+		!strings.Contains(string(agentsBytes), "compatibility fallback") {
+		t.Fatalf("AGENTS.md missing explicit completion plus tolerant fallback guidance: %s", string(agentsBytes))
 	}
 	rosterBytes, err := os.ReadFile(filepath.Join(workspace, teamConfigFileName))
 	if err != nil {
@@ -1190,7 +1231,7 @@ func TestProjectTeamEventDoesNotTreatPlainFinalReplyAsTaskCompleted(t *testing.T
 	}
 }
 
-func TestProjectTeamEventDoesNotQueueForcedRecoveryWithoutExactTurnResult(t *testing.T) {
+func TestProjectTeamEventQueuesNonTerminalRootRecoveryForFinishedLeaderTurn(t *testing.T) {
 	taskID := 69
 	messageID := "team-31-user-root"
 	task := &models.TeamTask{
@@ -1225,11 +1266,87 @@ func TestProjectTeamEventDoesNotQueueForcedRecoveryWithoutExactTurnResult(t *tes
 	); err != nil {
 		t.Fatalf("projectTeamEvent returned error: %v", err)
 	}
-	if len(repo.outboxRows) != 0 {
-		t.Fatalf("turn end must not create a forced Agent continuation, got %#v", repo.outboxRows)
+	if len(repo.outboxRows) != 1 {
+		t.Fatalf("turn end without a Team action must create one durable coordination reminder, got %#v", repo.outboxRows)
+	}
+	var recoveryEnvelope map[string]interface{}
+	if err := json.Unmarshal([]byte(repo.outboxRows[0].PayloadJSON), &recoveryEnvelope); err != nil {
+		t.Fatalf("decode recovery envelope: %v", err)
+	}
+	if eventString(recoveryEnvelope, "intent") != "root_coordination_recovery" ||
+		eventBool(recoveryEnvelope, "requiresCompletion") {
+		t.Fatalf("recovery must be non-terminal and must not force completion: %#v", recoveryEnvelope)
 	}
 	if task.Status == models.TeamTaskStatusSucceeded || task.FinishedAt != nil || task.AcceptedCompletionID != nil {
 		t.Fatalf("a turn without an exact paired narrative must remain non-terminal: %#v", task)
+	}
+}
+
+func TestProjectTeamEventKeepsRetryableStreamFailureStateNeutral(t *testing.T) {
+	taskID := 70
+	memberID := 121
+	messageID := "team-31-worker-stream-retry"
+	assignmentID := "dev-stream-1"
+	task := &models.TeamTask{
+		ID: taskID, TeamID: 31, TargetMemberID: 120, MessageID: "team-31-user-root",
+		Status: models.TeamTaskStatusRunning, WorkflowState: teamWorkflowStateExecuting,
+		UpdatedAt: time.Now().UTC().Add(-teamAssignmentMonitorEvery),
+	}
+	member := &models.TeamMember{
+		ID: memberID, TeamID: 31, MemberKey: "developer", Role: "developer",
+		Status: models.TeamMemberStatusBusy, CurrentTaskID: &taskID, Availability: models.TeamMemberAvailabilityBusy,
+	}
+	workItem := models.TeamWorkItem{
+		ID: 501, TeamID: 31, RootTaskID: taskID, WorkID: assignmentID, AssignmentID: &assignmentID,
+		OwnerMemberID: &memberID, Status: models.TeamTaskStatusRunning, RequiredForRoot: true,
+		UpdatedAt: time.Now().UTC().Add(-teamAssignmentMonitorEvery),
+	}
+	repo := &teamRepositoryStub{
+		tasksByID:    map[int]*models.TeamTask{taskID: task},
+		membersByKey: map[string]*models.TeamMember{"developer": member},
+		workItems:    []models.TeamWorkItem{workItem},
+	}
+	service := &teamService{repo: repo}
+	payloadJSON, err := json.Marshal(map[string]interface{}{
+		"protocolVersion": 4,
+		"event":           "task_progress",
+		"eventKind":       "assignment_attempt_failed",
+		"messageId":       messageID,
+		"sourceMessageId": "assign-developer",
+		"memberId":        "developer",
+		"taskId":          "team-31-task-70",
+		"rootTaskId":      "team-31-task-70",
+		"assignmentId":    assignmentID,
+		"workId":          assignmentID,
+		"status":          "running",
+		"runtimeStatus":   "retrying",
+		"retryable":       true,
+		"summary":         "Model stream interrupted before a verified terminal response.",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.projectTeamEvent(
+		&models.Team{ID: 31, CommunicationMode: teamCommunicationModeLeaderMediated},
+		nil,
+		redisStreamMessage{ID: "1781171178655-2", Fields: map[string]string{"payload": string(payloadJSON)}},
+	); err != nil {
+		t.Fatalf("projectTeamEvent returned error: %v", err)
+	}
+	if task.Status != models.TeamTaskStatusRunning || task.FinishedAt != nil {
+		t.Fatalf("retryable model interruption must not close the root task: %#v", task)
+	}
+	if repo.workItems[0].Status != models.TeamTaskStatusRunning || repo.workItems[0].FinishedAt != nil {
+		t.Fatalf("retryable model interruption must leave the assignment resumable: %#v", repo.workItems[0])
+	}
+	if len(repo.createdEvents) != 1 {
+		t.Fatalf("expected one diagnostic event, got %#v", repo.createdEvents)
+	}
+	stored := teamEventPayloadMap(repo.createdEvents[0])
+	if eventString(stored, "chatPolicy") != "hidden" ||
+		!eventBool(stored, "nonAuthoritative") ||
+		eventString(stored, "stateEffect") != "none" {
+		t.Fatalf("retryable model interruption must be hidden and state-neutral: %#v", stored)
 	}
 }
 
@@ -1674,6 +1791,72 @@ func TestProjectTeamEventDowngradesLiteDispatchWrapperFailure(t *testing.T) {
 	}
 	if len(repo.createdEvents) != 1 || repo.createdEvents[0].EventType != "message_warning" {
 		t.Fatalf("expected warning event, got %#v", repo.createdEvents)
+	}
+}
+
+func TestProjectTeamEventKeepsTargetResolutionWarningOnCurrentAttempt(t *testing.T) {
+	taskID := 72
+	teamID := 31
+	leaderID := 120
+	workerID := 121
+	messageID := "team-31-task-72"
+	assignmentID := "phase-1"
+	task := &models.TeamTask{
+		ID: taskID, TeamID: teamID, TargetMemberID: leaderID, MessageID: messageID,
+		Status: models.TeamTaskStatusRunning, UpdatedAt: time.Now().UTC(),
+	}
+	worker := &models.TeamMember{
+		ID: workerID, TeamID: teamID, MemberKey: "worker", Role: "developer",
+		Status: models.TeamMemberStatusBusy, CurrentTaskID: &taskID, Availability: models.TeamMemberAvailabilityBusy,
+	}
+	repo := &teamRepositoryStub{
+		tasksByID:        map[int]*models.TeamTask{taskID: task},
+		tasksByMessageID: map[string]*models.TeamTask{messageID: task},
+		membersByKey:     map[string]*models.TeamMember{"worker": worker},
+		workItems: []models.TeamWorkItem{{
+			TeamID: teamID, RootTaskID: taskID, WorkID: assignmentID, AssignmentID: &assignmentID,
+			Revision: 1, OwnerMemberID: &workerID, Status: models.TeamTaskStatusRunning,
+		}},
+	}
+	service := &teamService{repo: repo}
+	payload := map[string]interface{}{
+		"event":                 "message_warning",
+		"eventKind":             "target_resolution_warning",
+		"memberId":              "worker",
+		"messageId":             "outbound-72",
+		"rootMessageId":         messageID,
+		"rootTaskId":            "team-31-task-72",
+		"assignmentId":          assignmentID,
+		"workId":                assignmentID,
+		"revision":              1,
+		"failureDomain":         "transport",
+		"failureKind":           "target_resolution",
+		"nonAuthoritative":      true,
+		"stateEffect":           "none",
+		"rootTaskTerminal":      false,
+		"clarificationRequired": true,
+		"targetSuggestions":     []interface{}{"leader"},
+		"runtimeStatus":         "running",
+		"availability":          "busy",
+	}
+	payloadJSON, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = service.projectTeamEvent(&models.Team{ID: teamID, CommunicationMode: teamCommunicationModeLeaderMediated}, nil, redisStreamMessage{
+		ID: "1781171178660-0", Fields: map[string]string{"payload": string(payloadJSON)},
+	})
+	if err != nil {
+		t.Fatalf("project target-resolution warning: %v", err)
+	}
+	if len(repo.workItems) != 1 || repo.workItems[0].Status != models.TeamTaskStatusRunning || repo.workItems[0].FinishedAt != nil {
+		t.Fatalf("target-resolution warning must leave the current attempt active: %#v", repo.workItems)
+	}
+	if len(repo.createdEvents) != 1 || repo.createdEvents[0].EventType != "message_warning" {
+		t.Fatalf("expected one state-neutral warning audit event, got %#v", repo.createdEvents)
+	}
+	if repo.updatedTask != nil && isTerminalTeamTaskStatus(repo.updatedTask.Status) {
+		t.Fatalf("transport warning must not terminate the root task: %#v", repo.updatedTask)
 	}
 }
 
@@ -2482,11 +2665,15 @@ func TestEvaluateProtocolV3ExplicitPhaseRequiresDispositionBeforeWorkflowSeal(t 
 	if evaluation.Decision != teamCompletionDecisionDeferred ||
 		evaluation.Reason != "open_workflow_phases" ||
 		len(evaluation.PendingPhases) != 1 ||
-		evaluation.PendingPhases[0] != "implementation:disposition" {
+		evaluation.PendingPhases[0] != "implementation:leader_review" {
 		t.Fatalf("explicit phase without disposition must remain open: %#v", evaluation)
 	}
 
 	payload["phaseDispositions"] = []interface{}{map[string]interface{}{
+		"phaseId":  "research",
+		"decision": "cancelled",
+		"reason":   "the model incorrectly disposed an already completed phase",
+	}, map[string]interface{}{
 		"phaseId":  "implementation",
 		"decision": "skipped",
 		"reason":   "研究结论已证明无需进入实现阶段",
@@ -2497,6 +2684,14 @@ func TestEvaluateProtocolV3ExplicitPhaseRequiresDispositionBeforeWorkflowSeal(t 
 	}
 	if evaluation.Decision != teamCompletionDecisionAccepted {
 		t.Fatalf("structured phase disposition must allow final sealing: %#v", evaluation)
+	}
+	effective := structuredTeamPhaseDispositions(payload)
+	if len(effective) != 1 || effective["implementation"].Decision != "skipped" {
+		t.Fatalf("only the unexecuted planned phase should retain a disposition: %#v", payload)
+	}
+	ignored, ok := payload["ignoredPhaseDispositions"].([]interface{})
+	if !ok || len(ignored) != 1 || eventString(ignored[0].(map[string]interface{}), "phaseId") != "research" {
+		t.Fatalf("completed phase disposition should remain only as a non-blocking diagnostic: %#v", payload)
 	}
 }
 
@@ -3133,6 +3328,137 @@ func TestProjectTeamWorkItemRevisionInheritsEstablishedReviewGate(t *testing.T) 
 	}
 }
 
+func TestDeliverySemanticsCreatesNewSequentialStageForDifferentMember(t *testing.T) {
+	team := &models.Team{ID: 194, CommunicationMode: teamCommunicationModeLeaderMediated}
+	task := &models.TeamTask{ID: 295, TeamID: team.ID, TargetMemberID: 400, Status: models.TeamTaskStatusRunning}
+	worker1ID := 401
+	worker2 := &models.TeamMember{ID: 402, TeamID: team.ID, MemberKey: "worker-2", Role: "specialist"}
+	firstAssignment := "stage-one"
+	repo := &teamRepositoryStub{
+		membersByKey: map[string]*models.TeamMember{"worker-2": worker2},
+		workItems: []models.TeamWorkItem{{
+			ID: 501, TeamID: team.ID, RootTaskID: task.ID, WorkID: firstAssignment, AssignmentID: &firstAssignment,
+			OwnerMemberID: &worker1ID, Revision: 1, RequiredForRoot: true, Status: models.TeamTaskStatusSucceeded,
+		}},
+	}
+	payload := map[string]interface{}{
+		"deliverySemanticsVersion": 1, "businessDeliveryKind": "assignment", "businessMutation": true,
+		"requiresCompletion": true, "revisionAuthorized": true,
+		"assignmentId": "stage-two", "workId": "stage-two", "revision": 7, "required": true,
+		"collaborationStep": map[string]interface{}{
+			"type": "assignment", "status": "dispatched", "actor": "leader", "target": "worker-2", "workId": "stage-two",
+		},
+	}
+	service := &teamService{repo: repo}
+	if err := service.projectTeamWorkItem(team, task, worker2, "outbound", payload, &models.TeamEvent{CreatedAt: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	if len(repo.workItems) != 2 {
+		t.Fatalf("a new member stage must create one independent Work Item: %#v", repo.workItems)
+	}
+	created := repo.workItems[1]
+	if workItemBusinessID(created) != "stage-two" || created.Revision != 1 || created.OwnerMemberID == nil || *created.OwnerMemberID != worker2.ID {
+		t.Fatalf("new stage identity must be server-normalized to revision 1: %#v", created)
+	}
+}
+
+func TestDeliverySemanticsContextNeverCreatesWorkItem(t *testing.T) {
+	team := &models.Team{ID: 194, CommunicationMode: teamCommunicationModeLeaderMediated}
+	task := &models.TeamTask{ID: 296, TeamID: team.ID, TargetMemberID: 400, Status: models.TeamTaskStatusRunning}
+	worker := &models.TeamMember{ID: 401, TeamID: team.ID, MemberKey: "worker-1", Role: "specialist"}
+	repo := &teamRepositoryStub{membersByKey: map[string]*models.TeamMember{"worker-1": worker}}
+	payload := map[string]interface{}{
+		"deliverySemanticsVersion": 1, "businessDeliveryKind": "peer_request", "businessMutation": false,
+		"requiresCompletion": false, "nonAuthoritative": true, "assignmentId": "stage-one", "revision": 2,
+		"collaborationStep": map[string]interface{}{
+			"type": "peer_request", "status": "running", "actor": "leader", "target": "worker-1", "workId": "stage-one",
+		},
+	}
+	service := &teamService{repo: repo}
+	if err := service.projectTeamWorkItem(team, task, worker, "peer_request", payload, &models.TeamEvent{CreatedAt: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	if len(repo.workItems) != 0 {
+		t.Fatalf("context or peer traffic must not materialize business work: %#v", repo.workItems)
+	}
+}
+
+func TestDeliverySemanticsRevisionRequiresLedgerAuthorization(t *testing.T) {
+	team := &models.Team{ID: 194, CommunicationMode: teamCommunicationModeLeaderMediated}
+	task := &models.TeamTask{ID: 297, TeamID: team.ID, TargetMemberID: 400, Status: models.TeamTaskStatusRunning}
+	worker := &models.TeamMember{ID: 401, TeamID: team.ID, MemberKey: "worker-1", Role: "specialist"}
+	assignmentID := "stage-one"
+	phaseID := "phase-one"
+	dependencyJSON := `["source-stage"]`
+	repo := &teamRepositoryStub{
+		membersByKey: map[string]*models.TeamMember{"worker-1": worker},
+		workItems: []models.TeamWorkItem{{
+			ID: 501, TeamID: team.ID, RootTaskID: task.ID, WorkID: assignmentID, AssignmentID: &assignmentID,
+			OwnerMemberID: &worker.ID, PhaseID: &phaseID, Revision: 1, RequiredForRoot: true, ReviewRequired: true,
+			Title: "Issued stage contract", Status: models.TeamTaskStatusSucceeded, DependsOnJSON: &dependencyJSON,
+		}},
+	}
+	base := map[string]interface{}{
+		"deliverySemanticsVersion": 1, "businessDeliveryKind": "assignment", "businessMutation": true,
+		"requiresCompletion": true, "assignmentId": assignmentID, "workId": assignmentID, "revision": 2,
+		"collaborationStep": map[string]interface{}{
+			"type": "assignment", "status": "dispatched", "actor": "leader", "target": "worker-1", "workId": assignmentID,
+		},
+	}
+	service := &teamService{repo: repo}
+	if err := service.projectTeamWorkItem(team, task, worker, "outbound", base, &models.TeamEvent{CreatedAt: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	if len(repo.workItems) != 1 || base["workflowConcern"] != "revision_authority_missing" {
+		t.Fatalf("an Agent-authored revision alone must remain non-blocking: items=%#v payload=%#v", repo.workItems, base)
+	}
+	authorized := make(map[string]interface{}, len(base))
+	for key, value := range base {
+		authorized[key] = value
+	}
+	repo.workItems[0].Status = models.TeamTaskStatusFailed
+	repo.workItems[0].ResultJSON = stringPtr(`{"originalEvent":"task_failed","event":"task_failed","assignmentId":"stage-one","status":"failed","resultFailed":true}`)
+	// Runtime may omit or mis-state revisionAuthorized. Persisted failure facts,
+	// not an Agent/Runtime boolean, are the authority for an exact successor.
+	authorized["revisionAuthorized"] = false
+	delete(authorized, "workflowConcern")
+	delete(authorized, "projectionSuppressed")
+	if err := service.projectTeamWorkItem(team, task, worker, "outbound", authorized, &models.TeamEvent{CreatedAt: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	if len(repo.workItems) != 2 || repo.workItems[1].Revision != 2 {
+		t.Fatalf("a ledger-authorized successor should create exactly one revision: %#v", repo.workItems)
+	}
+	got := repo.workItems[1]
+	if derefTeamString(got.PhaseID) != phaseID || derefTeamString(got.DependsOnJSON) != dependencyJSON ||
+		!got.RequiredForRoot || !got.ReviewRequired || got.Title != "Issued stage contract" {
+		t.Fatalf("a real successor revision must inherit the durable assignment contract: %#v", got)
+	}
+}
+
+func TestRevisionRecoveryUsesLatestValidationForCurrentTargetRevision(t *testing.T) {
+	now := time.Now().UTC()
+	targetID := "stage-one"
+	targetRevision := 2
+	failedReview := `{"reviewVerdict":"FAIL"}`
+	passedReview := `{"reviewVerdict":"PASS"}`
+	items := []models.TeamWorkItem{
+		{ID: 1, WorkID: targetID, AssignmentID: &targetID, Revision: targetRevision, Status: models.TeamTaskStatusSucceeded, UpdatedAt: now.Add(-3 * time.Minute)},
+		{ID: 2, WorkID: "review-old", ReviewTargetAssignmentID: &targetID, ReviewTargetRevision: &targetRevision, Status: models.TeamTaskStatusSucceeded, ResultJSON: &failedReview, UpdatedAt: now.Add(-2 * time.Minute)},
+		{ID: 3, WorkID: "review-new", ReviewTargetAssignmentID: &targetID, ReviewTargetRevision: &targetRevision, Status: models.TeamTaskStatusSucceeded, ResultJSON: &passedReview, UpdatedAt: now.Add(-time.Minute)},
+	}
+	if teamAssignmentRevisionRecoveryAllowed(items, targetID) {
+		t.Fatal("an older FAIL must not keep authorizing rework after the current revision passed a newer validation")
+	}
+	if !teamAssignmentRevisionRecoveryAllowed(items[:2], targetID) {
+		t.Fatal("the latest explicit FAIL for the current target revision should authorize one recoverable successor")
+	}
+	items[0].ValidatedRevision = &targetRevision
+	if teamAssignmentRevisionRecoveryAllowed(items[:2], targetID) {
+		t.Fatal("a durable validation receipt on the current target revision must outrank stale failure evidence")
+	}
+}
+
 func TestCompletedReviewerAssignmentClosesOnlyItsPersistedTargetGate(t *testing.T) {
 	task := &models.TeamTask{ID: 193, TeamID: 93, TargetMemberID: 315, Status: models.TeamTaskStatusRunning, LedgerVersion: 20}
 	reviewer := &models.TeamMember{ID: 317, TeamID: 93, MemberKey: "reviewer", Role: "qa-engineer"}
@@ -3190,6 +3516,118 @@ func TestCompletedReviewerAssignmentClosesOnlyItsPersistedTargetGate(t *testing.
 	}
 }
 
+func TestRecoveredValidationAttemptSupersedesOnlyItsFailedRetryLane(t *testing.T) {
+	now := time.Now().UTC()
+	teamID := 127
+	rootTaskID := 612
+	targetOwnerID := 700
+	validatorOwnerID := 701
+	targetID := "a-dev-kanban"
+	priorID := "a-review-kanban"
+	recoveryID := "a-dev-fix-kanban"
+	successorID := "a-review-kanban-r2"
+	phaseID := "phase-02-validation"
+	targetRevision := 1
+	priorFinished := now.Add(-2 * time.Minute)
+	recoveryCreated := now.Add(-time.Minute)
+	successorStarted := now.Add(-30 * time.Second)
+	recoveryDependencies := `["a-dev-kanban"]`
+	successorDependencies := `["a-dev-fix-kanban","a-dev-kanban"]`
+	task := &models.TeamTask{ID: rootTaskID, TeamID: teamID, Status: models.TeamTaskStatusRunning, LedgerVersion: 7}
+	repo := &teamRepositoryStub{workItems: []models.TeamWorkItem{
+		{ID: 1, TeamID: teamID, RootTaskID: rootTaskID, WorkID: targetID, AssignmentID: &targetID,
+			OwnerMemberID: &targetOwnerID, Revision: targetRevision, RequiredForRoot: true, ReviewRequired: true,
+			ValidatedRevision: &targetRevision, Status: models.TeamTaskStatusSucceeded, CreatedAt: now.Add(-10 * time.Minute), UpdatedAt: now.Add(-9 * time.Minute)},
+		{ID: 2, TeamID: teamID, RootTaskID: rootTaskID, WorkID: priorID, AssignmentID: &priorID,
+			OwnerMemberID: &validatorOwnerID, Revision: 1, PhaseID: &phaseID, RequiredForRoot: true,
+			ReviewTargetAssignmentID: &targetID, ReviewTargetRevision: &targetRevision,
+			Status: models.TeamTaskStatusFailed, CreatedAt: now.Add(-5 * time.Minute), FinishedAt: &priorFinished, UpdatedAt: priorFinished},
+		{ID: 3, TeamID: teamID, RootTaskID: rootTaskID, WorkID: recoveryID, AssignmentID: &recoveryID,
+			OwnerMemberID: &targetOwnerID, Revision: 1, RequiredForRoot: true, Status: models.TeamTaskStatusSucceeded,
+			DependsOnJSON: &recoveryDependencies, CreatedAt: recoveryCreated, UpdatedAt: recoveryCreated.Add(30 * time.Second)},
+		{ID: 4, TeamID: teamID, RootTaskID: rootTaskID, WorkID: successorID, AssignmentID: &successorID,
+			OwnerMemberID: &validatorOwnerID, Revision: 1, PhaseID: &phaseID, RequiredForRoot: true,
+			ReviewTargetAssignmentID: &targetID, ReviewTargetRevision: &targetRevision,
+			Status: models.TeamTaskStatusSucceeded, DependsOnJSON: &successorDependencies,
+			CreatedAt: successorStarted, StartedAt: &successorStarted, UpdatedAt: now},
+	}}
+	service := &teamService{repo: repo}
+	changed, err := service.supersedeRecoveredValidationAttempts(task, repo.workItems, repo.workItems[3], now)
+	if err != nil || !changed {
+		t.Fatalf("a successful validation retry after a persisted recovery assignment should retire the old failed attempt: changed=%v err=%v", changed, err)
+	}
+	prior := repo.workItems[1]
+	if prior.SupersededBy == nil || *prior.SupersededBy != successorID || prior.RequiredForRoot {
+		t.Fatalf("the old failed validation must remain auditable but stop gating the root task: %#v", prior)
+	}
+	if prior.Status != models.TeamTaskStatusFailed || task.LedgerVersion != 8 {
+		t.Fatalf("supersession must preserve historical failure and advance the ledger once: prior=%#v task=%#v", prior, task)
+	}
+}
+
+func TestIndependentFailedValidationIsNotSupersededByAnotherSuccess(t *testing.T) {
+	now := time.Now().UTC()
+	targetID := "article"
+	phaseID := "phase-validation"
+	targetRevision := 1
+	firstValidator := 21
+	secondValidator := 22
+	priorFinished := now.Add(-time.Minute)
+	priorID := "fact-check"
+	successorID := "security-check"
+	task := &models.TeamTask{ID: 613, TeamID: 128, Status: models.TeamTaskStatusRunning, LedgerVersion: 2}
+	repo := &teamRepositoryStub{workItems: []models.TeamWorkItem{
+		{ID: 1, TeamID: task.TeamID, RootTaskID: task.ID, WorkID: priorID, AssignmentID: &priorID,
+			OwnerMemberID: &firstValidator, PhaseID: &phaseID, RequiredForRoot: true, Status: models.TeamTaskStatusFailed,
+			ReviewTargetAssignmentID: &targetID, ReviewTargetRevision: &targetRevision, FinishedAt: &priorFinished, UpdatedAt: priorFinished},
+		{ID: 2, TeamID: task.TeamID, RootTaskID: task.ID, WorkID: successorID, AssignmentID: &successorID,
+			OwnerMemberID: &secondValidator, PhaseID: &phaseID, RequiredForRoot: true, Status: models.TeamTaskStatusSucceeded,
+			ReviewTargetAssignmentID: &targetID, ReviewTargetRevision: &targetRevision, CreatedAt: now, UpdatedAt: now},
+	}}
+	service := &teamService{repo: repo}
+	changed, err := service.supersedeRecoveredValidationAttempts(task, repo.workItems, repo.workItems[1], now)
+	if err != nil || changed || repo.workItems[0].SupersededBy != nil || !repo.workItems[0].RequiredForRoot {
+		t.Fatalf("independent validators must remain independent root gates: changed=%v prior=%#v err=%v", changed, repo.workItems[0], err)
+	}
+}
+
+func TestMemberOperationalStateUsesAllPersistedAssignments(t *testing.T) {
+	runtimeSucceeded := models.TeamTaskStatusSucceeded
+	member := &models.TeamMember{ID: 41, TeamID: 12, Status: models.TeamMemberStatusIdle,
+		Availability: models.TeamMemberAvailabilityIdle, RuntimeStatus: &runtimeSucceeded, Progress: 100}
+	finishedRoot := 100
+	activeRoot := 101
+	now := time.Now().UTC()
+	items := []models.TeamWorkItem{
+		{ID: 1, TeamID: member.TeamID, RootTaskID: finishedRoot, WorkID: "done", OwnerMemberID: &member.ID,
+			Status: models.TeamTaskStatusSucceeded, UpdatedAt: now.Add(-time.Minute)},
+		{ID: 2, TeamID: member.TeamID, RootTaskID: activeRoot, WorkID: "active", OwnerMemberID: &member.ID,
+			Status: models.TeamTaskStatusRunning, UpdatedAt: now},
+	}
+	if !reconcileTeamMemberOperationalState(member, items) {
+		t.Fatal("an active assignment should repair a stale idle transport update")
+	}
+	if member.Status != models.TeamMemberStatusBusy || member.Availability != models.TeamMemberAvailabilityBusy ||
+		member.CurrentTaskID == nil || *member.CurrentTaskID != activeRoot || derefTeamString(member.RuntimeStatus) != models.TeamTaskStatusRunning {
+		t.Fatalf("active work must remain busy regardless of a later idle callback: %#v", member)
+	}
+}
+
+func TestMemberOperationalStateClosesStaleRuntimeAfterLastSuccess(t *testing.T) {
+	runtimeRunning := models.TeamTaskStatusRunning
+	member := &models.TeamMember{ID: 42, TeamID: 12, Status: models.TeamMemberStatusIdle,
+		Availability: models.TeamMemberAvailabilityIdle, RuntimeStatus: &runtimeRunning, Progress: 65}
+	items := []models.TeamWorkItem{{ID: 1, TeamID: member.TeamID, RootTaskID: 102, WorkID: "done", OwnerMemberID: &member.ID,
+		Status: models.TeamTaskStatusSucceeded, UpdatedAt: time.Now().UTC()}}
+	if !reconcileTeamMemberOperationalState(member, items) {
+		t.Fatal("a terminal assignment should repair a stale running runtime status")
+	}
+	if member.Status != models.TeamMemberStatusIdle || member.Availability != models.TeamMemberAvailabilityIdle ||
+		member.CurrentTaskID != nil || derefTeamString(member.RuntimeStatus) != models.TeamTaskStatusSucceeded || member.Progress != 100 {
+		t.Fatalf("the member should converge to a coherent terminal state: %#v", member)
+	}
+}
+
 func TestValidationContractIsGenericAndClosesFromSuccessfulBoundWorkItem(t *testing.T) {
 	team := &models.Team{ID: 103, CommunicationMode: teamCommunicationModeLeaderMediated}
 	task := &models.TeamTask{ID: 213, TeamID: team.ID, TargetMemberID: 501, Status: models.TeamTaskStatusRunning}
@@ -3243,6 +3681,11 @@ func TestValidationContractIsGenericAndClosesFromSuccessfulBoundWorkItem(t *test
 	if err := service.projectTeamWorkItem(team, task, auditor, "task_completed", resultPayload, &models.TeamEvent{CreatedAt: time.Now().UTC()}); err != nil {
 		t.Fatal(err)
 	}
+	// The event projector is intentionally non-terminal; the confirmation
+	// transaction is the sole owner of assignment terminal state.
+	repo.workItems[1].Status = models.TeamTaskStatusSucceeded
+	validatorFinishedAt := time.Now().UTC()
+	repo.workItems[1].FinishedAt = &validatorFinishedAt
 	changed, err = service.applyStructuredAssignmentValidation(task, auditor, resultPayload, time.Now().UTC())
 	if err != nil || !changed || repo.workItems[0].ValidatedRevision == nil || *repo.workItems[0].ValidatedRevision != 2 {
 		t.Fatalf("the successful bound work item should close the gate without verdict/hash fields: changed=%v err=%v item=%#v", changed, err, repo.workItems[0])
@@ -3330,6 +3773,9 @@ func TestOrdinaryDeveloperReviewerLeaderFlowDoesNotFinishEarlyOrRequireSecondClo
 	if err := service.projectTeamWorkItem(team, task, reviewer, "task_completed", reviewerResultPayload, &models.TeamEvent{CreatedAt: time.Now().UTC()}); err != nil {
 		t.Fatal(err)
 	}
+	repo.workItems[1].Status = models.TeamTaskStatusSucceeded
+	reviewerFinishedAt := time.Now().UTC()
+	repo.workItems[1].FinishedAt = &reviewerFinishedAt
 	evaluation, err = service.evaluateLeaderRootCompletion(team, task, leader, completionPayload)
 	if err != nil || evaluation.Decision != teamCompletionDecisionAccepted {
 		t.Fatalf("all required assignments plus the Leader final result should complete without extra Agent fields: evaluation=%#v err=%v", evaluation, err)
@@ -3494,7 +3940,7 @@ func TestProjectTeamWorkItemKeepsUnmatchedProgressOutOfKanban(t *testing.T) {
 	}
 }
 
-func TestTerminalMonitorRepairsOnlyCanonicalExistingAssignment(t *testing.T) {
+func TestTerminalMonitorIsObservationOnly(t *testing.T) {
 	team := &models.Team{ID: 72, CommunicationMode: teamCommunicationModeLeaderMediated}
 	task := &models.TeamTask{ID: 144, TeamID: 72, TargetMemberID: 1, Status: models.TeamTaskStatusRunning, LedgerVersion: 6}
 	reviewer := &models.TeamMember{ID: 3, TeamID: 72, MemberKey: "reviewer", Role: "reviewer"}
@@ -3509,17 +3955,43 @@ func TestTerminalMonitorRepairsOnlyCanonicalExistingAssignment(t *testing.T) {
 		"terminalEvidence": true, "assignmentId": assignmentID, "status": "succeeded", "summary": "复查已完成",
 	}
 	changed, err := service.reconcileTerminalMonitorWorkItem(team, task, reviewer, payload, time.Now().UTC())
-	if err != nil || !changed {
-		t.Fatalf("terminal monitor evidence should repair canonical assignment, changed=%v err=%v", changed, err)
-	}
-	if repo.workItems[0].Status != models.TeamTaskStatusSucceeded || task.LedgerVersion != 7 {
-		t.Fatalf("terminal repair did not converge ledger: item=%#v task=%#v", repo.workItems[0], task)
+	if err != nil || changed || repo.workItems[0].Status != models.TeamTaskStatusRunning || task.LedgerVersion != 6 {
+		t.Fatalf("Monitor observation must not mutate assignment state: changed=%v item=%#v task=%#v err=%v", changed, repo.workItems[0], task, err)
 	}
 
 	payload["assignmentId"] = "invented-review-id"
 	changed, err = service.reconcileTerminalMonitorWorkItem(team, task, reviewer, payload, time.Now().UTC())
 	if err != nil || changed {
 		t.Fatalf("monitor evidence must not create or repair an unknown assignment, changed=%v err=%v", changed, err)
+	}
+}
+
+func TestTerminalMonitorCannotPromoteAnyAttempt(t *testing.T) {
+	team := &models.Team{ID: 72, CommunicationMode: teamCommunicationModeLeaderMediated}
+	task := &models.TeamTask{ID: 145, TeamID: 72, TargetMemberID: 1, Status: models.TeamTaskStatusRunning, LedgerVersion: 3}
+	reviewer := &models.TeamMember{ID: 3, TeamID: 72, MemberKey: "reviewer", Role: "reviewer"}
+	assignmentID := "assign-review-kanban"
+	provisional := `{"dependencyBlocked":true,"provisionalAssignmentResult":true}`
+	repo := &teamRepositoryStub{workItems: []models.TeamWorkItem{{
+		ID: 9002, TeamID: team.ID, RootTaskID: task.ID, WorkID: "assign-review-kanban:r2", AssignmentID: &assignmentID,
+		OwnerMemberID: &reviewer.ID, Status: models.TeamTaskStatusRunning, Revision: 2, ResultJSON: &provisional,
+	}}}
+	service := &teamService{repo: repo}
+	payload := map[string]interface{}{
+		"eventKind": "assignment_check_result", "checkId": "monitor:team-72-task-145:assign-review-kanban:r2:1",
+		"terminalEvidence": true, "exactAttemptEvidence": true,
+		"workItemId": 9002, "assignmentId": assignmentID, "workId": "assign-review-kanban:r2",
+		"revision": 2, "status": "succeeded", "summary": "old provisional attempt",
+	}
+	changed, err := service.reconcileTerminalMonitorWorkItem(team, task, reviewer, payload, time.Now().UTC())
+	if err != nil || changed {
+		t.Fatalf("Monitor must not promote a provisional dependency-blocked attempt, changed=%v err=%v", changed, err)
+	}
+	repo.workItems[0].ResultJSON = nil
+	payload["exactAttemptEvidence"] = true
+	changed, err = service.reconcileTerminalMonitorWorkItem(team, task, reviewer, payload, time.Now().UTC())
+	if err != nil || changed || repo.workItems[0].Status != models.TeamTaskStatusRunning {
+		t.Fatalf("even exact Monitor evidence is a reminder, not a terminal writer: changed=%v err=%v item=%#v", changed, err, repo.workItems[0])
 	}
 }
 
@@ -3599,10 +4071,12 @@ func TestHydrateExplicitCompletionEnvelopeKeepsCompatibleRetryFlowing(t *testing
 	payload := map[string]interface{}{
 		"protocolVersion": 3, "completionId": "completion:69:139:root:r1",
 		"completionSource": teamTaskCompletionTool, "explicitCompletion": true,
+		"taskId": "team-999-task-999", "rootTaskId": "team-999-task-999", "memberId": "wrong-member",
 		"summary": "所有已派发工作已完成，提交最终交付。",
 	}
 	hydrateExplicitCompletionEnvelope(payload, team, task, leader, "1784010000000-1")
-	if !hasStrictTeamCompletionEnvelope(payload) || eventString(payload, "taskId") != "team-69-task-139" || eventString(payload, "memberId") != "delivery-lead" {
+	if !hasStrictTeamCompletionEnvelope(payload) || eventString(payload, "taskId") != "team-69-task-139" || eventString(payload, "rootTaskId") != "team-69-task-139" || eventString(payload, "memberId") != "delivery-lead" ||
+		eventString(payload, "reportedTaskId") != "team-999-task-999" || eventString(payload, "reportedMemberId") != "wrong-member" {
 		t.Fatalf("compatible completion retry must regain only derivable correlation fields: %#v", payload)
 	}
 }
@@ -3868,6 +4342,113 @@ func TestTeamChatPolicyKeepsTransportAcknowledgementHidden(t *testing.T) {
 	applyTeamChatPolicy("assignment_heartbeat", payload, nil, &models.TeamMember{MemberKey: "developer"})
 	if payload["chatPolicy"] != "digest" || payload["visibleToChat"] != false {
 		t.Fatalf("heartbeat without business content must remain digest-only: %#v", payload)
+	}
+}
+
+func TestTeamChatPolicyHonorsStructuredTerminalNarrativeSuppression(t *testing.T) {
+	suppressed := map[string]interface{}{
+		"eventKind":               "agent_narrative",
+		"text":                    "Internal post-completion bookkeeping.",
+		"chatPolicy":              "visible",
+		"visibleToChat":           true,
+		"lateProjection":          true,
+		"suppressedAfterTerminal": true,
+		"nonAuthoritative":        true,
+		"stateEffect":             "none",
+	}
+	applyTeamChatPolicy("reply", suppressed, nil, &models.TeamMember{MemberKey: "developer"})
+	if suppressed["chatPolicy"] != "hidden" || suppressed["visibleToChat"] != false {
+		t.Fatalf("structured post-terminal runtime bookkeeping must remain hidden: %#v", suppressed)
+	}
+
+	terminalDelivery := map[string]interface{}{
+		"eventKind":               "agent_narrative",
+		"text":                    "Final verified implementation report.",
+		"chatPolicy":              "hidden",
+		"visibleToChat":           false,
+		"lateProjection":          true,
+		"terminalDelivery":        true,
+		"suppressedAfterTerminal": true,
+		"nonAuthoritative":        true,
+		"stateEffect":             "none",
+	}
+	applyTeamChatPolicy("reply", terminalDelivery, nil, &models.TeamMember{MemberKey: "developer"})
+	if terminalDelivery["chatPolicy"] != "hidden" || terminalDelivery["visibleToChat"] != false {
+		t.Fatalf("raw terminal assistant prose must remain internal like every other narrative: %#v", terminalDelivery)
+	}
+}
+
+func TestTeamEventPayloadsFilterStructuredTerminalNarrativeSuppression(t *testing.T) {
+	suppressedJSON := `{"event":"reply","eventKind":"agent_narrative","text":"Internal bookkeeping","chatPolicy":"hidden","visibleToChat":false,"lateProjection":true,"suppressedAfterTerminal":true,"nonAuthoritative":true,"stateEffect":"none"}`
+	deliveryJSON := `{"event":"reply","eventKind":"agent_narrative","text":"Final verified delivery","chatPolicy":"visible","visibleToChat":true,"lateProjection":true,"terminalDelivery":true,"nonAuthoritative":true,"stateEffect":"none"}`
+	events := []models.TeamEvent{
+		{ID: 41, EventType: "reply", PayloadJSON: &suppressedJSON},
+		{ID: 42, EventType: "reply", PayloadJSON: &deliveryJSON},
+	}
+	payloads := teamEventPayloads(events)
+	if len(payloads) != 0 {
+		t.Fatalf("no internal assistant narrative should cross the public chat boundary: %#v", payloads)
+	}
+}
+
+func TestTeamEventPayloadsMergePairedCompletionArtifactsIntoNarrative(t *testing.T) {
+	taskID := 35
+	memberID := 80
+	narrativeJSON := `{"event":"reply","eventKind":"agent_narrative","text":"Final delivery body","sourceMessageId":"worker-turn-1","assignmentId":"dev-kanban","chatPolicy":"visible","visibleToChat":true}`
+	completionJSON := `{"event":"completion_proposed","resultMarkdown":"Final delivery body","sourceMessageId":"worker-turn-1","assignmentId":"dev-kanban","chatPolicy":"hidden","visibleToChat":false,"finalDeliveredByNarrative":true,"automaticTurnResult":true,"artifactRefs":["/team/artifacts/team-16-task-35/members/developer/dev-kanban/kanban.html","/team/work/team-16-task-35/kanban.html"]}`
+	events := []models.TeamEvent{
+		{ID: 641, TeamID: 16, TaskID: &taskID, MemberID: &memberID, EventType: "reply", PayloadJSON: &narrativeJSON},
+		{ID: 642, TeamID: 16, TaskID: &taskID, MemberID: &memberID, EventType: "completion_proposed", PayloadJSON: &completionJSON},
+	}
+
+	payloads := teamEventPayloads(events)
+	if len(payloads) != 1 || payloads[0].ID != 642 {
+		t.Fatalf("paired Runtime final must project only the structured completion, got %#v", payloads)
+	}
+	refs := normalizeContextRefs(payloads[0].Payload["artifactRefs"])
+	if len(refs) != 2 || refs[0] != "/team/artifacts/team-16-task-35/members/developer/dev-kanban/kanban.html" || refs[1] != "/team/work/team-16-task-35/kanban.html" {
+		t.Fatalf("completion artifacts were not merged into the visible narrative: %#v", payloads[0].Payload)
+	}
+}
+
+func TestTeamEventPayloadsNormalizeSilentTokenAndMergeCallbackSessionDuplicate(t *testing.T) {
+	taskID := 37
+	memberID := 91
+	body := "Development dispatched; waiting for the worker result."
+	callbackJSON := `{"event":"reply","eventKind":"agent_narrative","narrativeSource":"deliver_callback","text":"Development dispatched; waiting for the worker result.","content":"Development dispatched; waiting for the worker result.","sourceMessageId":"root-turn-17","chatPolicy":"visible","visibleToChat":true}`
+	sessionJSON := `{"event":"reply","eventKind":"agent_narrative","narrativeSource":"assistant_session","text":"Development dispatched; waiting for the worker result.\n\nNO_REPLY","content":"Development dispatched; waiting for the worker result.\n\nNO_REPLY","sourceMessageId":"root-turn-17","chatPolicy":"visible","visibleToChat":true,"lateProjection":true}`
+	events := []models.TeamEvent{
+		{ID: 688, TeamID: 17, TaskID: &taskID, MemberID: &memberID, EventType: "reply", PayloadJSON: &callbackJSON},
+		{ID: 693, TeamID: 17, TaskID: &taskID, MemberID: &memberID, EventType: "reply", PayloadJSON: &sessionJSON},
+	}
+	payloads := teamEventPayloads(events)
+	if len(payloads) != 0 {
+		t.Fatalf("callback/session narratives must remain internal: body=%q payloads=%#v", body, payloads)
+	}
+
+	literalJSON := `{"event":"reply","eventKind":"agent_narrative","text":"OpenClaw uses NO_REPLY as its silent token.","sourceMessageId":"root-turn-18","chatPolicy":"visible","visibleToChat":true}`
+	silentJSON := `{"event":"reply","eventKind":"agent_narrative","text":"NO_REPLY","sourceMessageId":"root-turn-19","chatPolicy":"visible","visibleToChat":true}`
+	payloads = teamEventPayloads([]models.TeamEvent{
+		{ID: 694, TeamID: 17, TaskID: &taskID, MemberID: &memberID, EventType: "reply", PayloadJSON: &literalJSON},
+		{ID: 695, TeamID: 17, TaskID: &taskID, MemberID: &memberID, EventType: "reply", PayloadJSON: &silentJSON},
+	})
+	if len(payloads) != 0 {
+		t.Fatalf("all internal narrative text, including control-token discussion, must remain out of chat: %#v", payloads)
+	}
+}
+
+func TestTeamEventPayloadsRetainUnpairedHiddenCompletionAsFallback(t *testing.T) {
+	taskID := 35
+	memberID := 80
+	completionJSON := `{"event":"completion_proposed","resultMarkdown":"Only durable delivery","sourceMessageId":"worker-turn-missing","assignmentId":"dev-kanban","chatPolicy":"hidden","visibleToChat":false,"finalDeliveredByNarrative":true,"automaticTurnResult":true,"artifactRefs":["/team/work/team-16-task-35/kanban.html"]}`
+	events := []models.TeamEvent{{
+		ID: 642, TeamID: 16, TaskID: &taskID, MemberID: &memberID,
+		EventType: "completion_proposed", PayloadJSON: &completionJSON,
+	}}
+
+	payloads := teamEventPayloads(events)
+	if len(payloads) != 1 || payloads[0].ID != 642 {
+		t.Fatalf("an unpaired completion must remain visible as a compatibility fallback: %#v", payloads)
 	}
 }
 
@@ -4816,7 +5397,7 @@ func TestCollectTeamArtifactReferencesStopsAtMarkdownAndJSONDelimiters(t *testin
 	}
 }
 
-func TestProjectTeamEventTreatsLegacyBootstrapReportAsCompletion(t *testing.T) {
+func TestProjectTeamEventKeepsLegacyBootstrapProseNonTerminal(t *testing.T) {
 	teamID := 31
 	taskID := 67
 	messageID := "team-31-bootstrap-introduction"
@@ -4868,15 +5449,15 @@ func TestProjectTeamEventTreatsLegacyBootstrapReportAsCompletion(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("projectTeamEvent returned error: %v", err)
 	}
-	if repo.updatedTask == nil || repo.updatedTask.Status != models.TeamTaskStatusSucceeded || repo.updatedTask.FinishedAt == nil {
-		t.Fatalf("legacy bootstrap report should close the root task, got %#v", repo.updatedTask)
+	if task.Status != models.TeamTaskStatusRunning || task.FinishedAt != nil {
+		t.Fatalf("legacy bootstrap prose changed root terminal state, got %#v", task)
 	}
-	if len(repo.createdEvents) != 1 || repo.createdEvents[0].EventType != "task_completed" {
-		t.Fatalf("expected one normalized task_completed event, got %#v", repo.createdEvents)
+	if len(repo.createdEvents) != 1 || repo.createdEvents[0].EventType != "reply" {
+		t.Fatalf("expected one non-terminal reply event, got %#v", repo.createdEvents)
 	}
 	payload := teamEventPayloadMap(repo.createdEvents[0])
-	if !eventBool(payload, "legacyCompletionCandidate") || eventString(payload, "completionSource") != "legacy_runtime_reply" {
-		t.Fatalf("expected legacy completion markers, got %#v", payload)
+	if eventBool(payload, "legacyCompletionCandidate") || eventString(payload, "completionSource") == "legacy_runtime_reply" {
+		t.Fatalf("legacy prose was incorrectly promoted to completion, got %#v", payload)
 	}
 }
 
@@ -5053,6 +5634,38 @@ func TestProjectTeamEventDoesNotTreatLegacyAckAsCompletion(t *testing.T) {
 	}
 	if len(repo.createdEvents) != 1 || repo.createdEvents[0].EventType != "reply" {
 		t.Fatalf("expected ack to stay as reply, got %#v", repo.createdEvents)
+	}
+}
+
+func TestTeamChatHidesRuntimeCompletionControlReply(t *testing.T) {
+	payloadJSON, err := json.Marshal(map[string]interface{}{
+		"eventKind": "agent_narrative",
+		"text":      "Redis Team task completed",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := teamEventPayloads([]models.TeamEvent{{
+		ID: 1, TeamID: 31, EventType: "reply", PayloadJSON: stringPtr(string(payloadJSON)),
+	}})
+	if len(events) != 0 {
+		t.Fatalf("runtime control reply must not be rendered in Team chat: %#v", events)
+	}
+}
+
+func TestCompletionArtifactValidationIgnoresPathsGuessedFromProse(t *testing.T) {
+	service := &teamService{runtimeWorkspaceRoot: t.TempDir()}
+	team := &models.Team{ID: 21, UserID: 1}
+	payload := map[string]interface{}{
+		"protocolVersion": 1,
+		"resultMarkdown":  "Review: /team/results/team-21-task-48/reviews/review.md（PASS）",
+	}
+	if missing := service.missingTeamArtifactReferences(team, payload); len(missing) != 0 {
+		t.Fatalf("a prose path must not become a hard completion dependency: %#v", missing)
+	}
+	payload["artifactRefs"] = []interface{}{"/team/results/team-21-task-48/reviews/review.md"}
+	if missing := service.missingTeamArtifactReferences(team, payload); len(missing) != 1 {
+		t.Fatalf("an explicit missing artifact must remain authoritative: %#v", missing)
 	}
 }
 
@@ -5471,7 +6084,71 @@ func TestLeaderMediatedWorkerProgressIsNotConfirmedAsResult(t *testing.T) {
 	}
 }
 
-func TestLeaderMediatedMonitorBlockerDoesNotCloseRootTask(t *testing.T) {
+func TestLeaderMediatedDependencyWaitStaysOnSameAssignment(t *testing.T) {
+	teamID := 131
+	taskID := 274
+	leaderID := 1001
+	workerID := 1002
+	assignmentID := "digest-filter"
+	dependencyJSON := `["digest-collect"]`
+	task := &models.TeamTask{ID: taskID, TeamID: teamID, TargetMemberID: leaderID, MessageID: "team-131-task-274", Status: models.TeamTaskStatusRunning}
+	worker := &models.TeamMember{ID: workerID, TeamID: teamID, MemberKey: "content-filter", Role: "domain-specialist"}
+	repo := &teamRepositoryStub{
+		tasksByID:        map[int]*models.TeamTask{taskID: task},
+		tasksByMessageID: map[string]*models.TeamTask{task.MessageID: task},
+		membersByID:      map[int]*models.TeamMember{workerID: worker},
+		membersByKey:     map[string]*models.TeamMember{"content-filter": worker},
+		workItems: []models.TeamWorkItem{{
+			ID: 1, TeamID: teamID, RootTaskID: taskID, WorkID: assignmentID, AssignmentID: &assignmentID,
+			OwnerMemberID: &workerID, Revision: 1, RequiredForRoot: true, Status: models.TeamTaskStatusRunning,
+			DependsOnJSON: &dependencyJSON,
+		}},
+	}
+	payload := map[string]interface{}{
+		"event": "task_progress", "memberId": "content-filter", "rootTaskId": fmt.Sprintf("team-%d-task-%d", teamID, taskID),
+		"rootMessageId": task.MessageID, "messageId": "wait-turn-1",
+		"protocolVersion": 4, "eventKind": "worker_progress", "nonAuthoritative": true, "stateEffect": "none",
+		"assignmentId": assignmentID, "workId": assignmentID, "revision": 1,
+		"status": "blocked", "availability": "blocked", "summary": "Waiting for digest-collect.",
+		"collaborationStep": map[string]interface{}{"type": "progress", "actor": "content-filter", "workId": assignmentID},
+	}
+	if isLeaderMediatedWorkerToLeaderResult(&models.Team{ID: teamID, CommunicationMode: teamCommunicationModeLeaderMediated}, "task_progress", payload, worker, task) {
+		t.Fatalf("dependency wait progress must not become a terminal member result: %#v", payload)
+	}
+	service := &teamService{repo: repo}
+	payloadJSON, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.projectTeamEvent(&models.Team{ID: teamID, UserID: 1, SharedMountPath: "/team", CommunicationMode: teamCommunicationModeLeaderMediated}, nil, redisStreamMessage{
+		ID: "wait-stream-1", Fields: map[string]string{"payload": string(payloadJSON)},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(repo.workItems) != 1 || repo.workItems[0].Status != models.TeamTaskStatusWaiting || repo.workItems[0].FinishedAt != nil {
+		t.Fatalf("dependency wait must preserve one non-terminal assignment: %#v", repo.workItems)
+	}
+	if got := teamWorkItemDependencies(repo.workItems[0]); !slices.Equal(got, []string{"digest-collect"}) {
+		t.Fatalf("dependency wait rewrote the issued contract: %#v", repo.workItems[0])
+	}
+	if teamAssignmentRevisionRecoveryAllowed(repo.workItems, assignmentID) {
+		t.Fatal("a waiting assignment must not authorize a recovery revision")
+	}
+}
+
+func TestFalseFailedWaitingObservationDoesNotAuthorizeRevision(t *testing.T) {
+	assignmentID := "digest-filter"
+	resultJSON := `{"eventKind":"worker_progress","nonAuthoritative":true,"stateEffect":"none","status":"blocked","assignmentId":"digest-filter"}`
+	items := []models.TeamWorkItem{{WorkID: assignmentID, AssignmentID: &assignmentID, Revision: 1, Status: models.TeamTaskStatusFailed, ResultJSON: &resultJSON}}
+	if teamAssignmentRevisionRecoveryAllowed(items, assignmentID) {
+		t.Fatal("a misprojected waiting observation must not authorize r2")
+	}
+	if !workItemIsMisprojectedWaitingObservation(items[0]) {
+		t.Fatal("the reconciler must recognize the old false-failure shape")
+	}
+}
+
+func TestLeaderMediatedStructuredMonitorFailureDoesNotCloseRootTask(t *testing.T) {
 	teamID := 46
 	taskID := 79
 	messageID := "team-46-task-1783559040281180893"
@@ -5484,15 +6161,16 @@ func TestLeaderMediatedMonitorBlockerDoesNotCloseRootTask(t *testing.T) {
 		membersByKey:     map[string]*models.TeamMember{"delivery-lead": leader, "leader": leader},
 	}
 	service := &teamService{repo: repo, runtimeWorkspaceRoot: t.TempDir()}
-	monitorSummary := "Monitoring agent for dev-papers-001 completed. Developer unresponsive after 3 consecutive status checks. Zero paper files found, no summary created. Blocker report sent to leader for investigation."
+	monitorSummary := "No result is available yet."
 	payloadJSON, err := json.Marshal(map[string]interface{}{
-		"event":         "task_failed",
-		"memberId":      "delivery-lead",
-		"messageId":     messageID,
-		"rootTaskId":    "team-46-task-79",
-		"rootMessageId": messageID,
-		"status":        "failed",
-		"summary":       monitorSummary,
+		"event":           "task_failed",
+		"memberId":        "delivery-lead",
+		"messageId":       messageID,
+		"sourceMessageId": "monitor:team-46-task-79:dev-papers-001:1",
+		"rootTaskId":      "team-46-task-79",
+		"rootMessageId":   messageID,
+		"status":          "failed",
+		"summary":         monitorSummary,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -5516,12 +6194,12 @@ func TestLeaderMediatedMonitorBlockerDoesNotCloseRootTask(t *testing.T) {
 	}
 }
 
-func TestLeaderMediatedMemberResultReopensNonAuthoritativeMonitorFailure(t *testing.T) {
+func TestLeaderMediatedMemberResultReopensNonFinalWorkflowFailure(t *testing.T) {
 	teamID := 46
 	taskID := 79
 	messageID := "team-46-task-1783559040281180893"
 	finishedAt := time.Now().UTC().Add(-5 * time.Minute)
-	monitorSummary := "Monitoring agent for dev-papers-001 completed. Developer unresponsive after 3 consecutive status checks. Zero paper files found, no summary created."
+	monitorSummary := "non-final workflow failure"
 	task := &models.TeamTask{ID: taskID, TeamID: teamID, TargetMemberID: 169, MessageID: messageID, Status: models.TeamTaskStatusFailed, FinishedAt: &finishedAt, ErrorMessage: &monitorSummary, UpdatedAt: time.Now().UTC()}
 	leader := &models.TeamMember{ID: 169, TeamID: teamID, MemberKey: "delivery-lead", Role: "leader", Status: models.TeamMemberStatusBusy, Availability: models.TeamMemberAvailabilityBusy}
 	developer := &models.TeamMember{ID: 170, TeamID: teamID, MemberKey: "developer", Role: "developer", Status: models.TeamMemberStatusBusy, CurrentTaskID: &taskID, Availability: models.TeamMemberAvailabilityBusy}
@@ -5564,6 +6242,32 @@ func TestLeaderMediatedMemberResultReopensNonAuthoritativeMonitorFailure(t *test
 	}
 }
 
+func TestLeaderMediatedMemberResultDoesNotReopenAcceptedRootCompletion(t *testing.T) {
+	completionID := "completion-root-final"
+	finishedAt := time.Now().UTC().Add(-time.Minute)
+	task := &models.TeamTask{
+		ID:                   80,
+		TeamID:               46,
+		Status:               models.TeamTaskStatusFailed,
+		WorkflowState:        teamWorkflowStateCompletionPending,
+		AcceptedCompletionID: &completionID,
+		FinishedAt:           &finishedAt,
+	}
+	repo := &teamRepositoryStub{}
+	service := &teamService{repo: repo}
+	if err := service.reopenLeaderMediatedRootAfterMemberResult(
+		&models.Team{ID: 46, CommunicationMode: teamCommunicationModeLeaderMediated},
+		task,
+		nil,
+		time.Now().UTC(),
+	); err != nil {
+		t.Fatal(err)
+	}
+	if repo.updatedTask != nil || task.Status != models.TeamTaskStatusFailed || task.FinishedAt == nil {
+		t.Fatalf("an accepted root completion must remain terminal: %#v", task)
+	}
+}
+
 func TestAssignmentMonitorEnvelopeIsNonTerminalAndAddressedToWorker(t *testing.T) {
 	now := time.Date(2026, 7, 9, 10, 30, 0, 0, time.UTC)
 	team := &models.Team{ID: 46}
@@ -5572,7 +6276,9 @@ func TestAssignmentMonitorEnvelopeIsNonTerminalAndAddressedToWorker(t *testing.T
 	owner := &models.TeamMember{ID: 301, TeamID: 46, MemberKey: "developer"}
 
 	envelope, messageID := buildAssignmentStatusCheckEnvelope(team, task, item, owner, now)
-	if messageID != "monitor:team-46-task-78:dev-papers-001:1783592760" {
+	expectedSequence := now.UnixMilli()
+	expectedMessageID := fmt.Sprintf("monitor:team-46-task-78:dev-papers-001:%d", expectedSequence)
+	if messageID != expectedMessageID {
 		t.Fatalf("unexpected monitor message id %q", messageID)
 	}
 	if envelope["intent"] != "assignment_status_check" || envelope["to"] != "developer" || envelope["from"] != "clawmanager-monitor" {
@@ -5581,12 +6287,12 @@ func TestAssignmentMonitorEnvelopeIsNonTerminalAndAddressedToWorker(t *testing.T
 	if envelope["requiresCompletion"] != false || envelope["rootTaskId"] != "team-46-task-78" || envelope["workId"] != "dev-papers-001" {
 		t.Fatalf("monitor envelope should be non-terminal and assignment scoped: %#v", envelope)
 	}
-	if envelope["checkId"] != messageID || envelope["checkSequence"] != int64(1783592760) || envelope["requestedAt"] == "" {
+	if envelope["checkId"] != messageID || envelope["checkSequence"] != expectedSequence || envelope["requestedAt"] == "" {
 		t.Fatalf("monitor envelope must carry stable check identity: %#v", envelope)
 	}
 	_, repeatedMessageID := buildAssignmentStatusCheckEnvelope(team, task, item, owner, now.Add(3*time.Minute))
-	if repeatedMessageID != messageID {
-		t.Fatalf("unchanged work item should collapse repeated monitor checks, got %q then %q", messageID, repeatedMessageID)
+	if repeatedMessageID == messageID {
+		t.Fatalf("a later throttled Monitor attempt needs a fresh durable identity: %q", repeatedMessageID)
 	}
 	monitorPolicy, ok := envelope["monitorPolicy"].(map[string]interface{})
 	if !ok || monitorPolicy["enabled"] != true || monitorPolicy["visibleToChat"] != true {
@@ -5596,12 +6302,137 @@ func TestAssignmentMonitorEnvelopeIsNonTerminalAndAddressedToWorker(t *testing.T
 		t.Fatalf("expected monitor envelope to separate internal heartbeat and chat digest cadence, got %#v", monitorPolicy)
 	}
 	prompt, _ := envelope["prompt"].(string)
-	if !strings.Contains(prompt, "call team_update_progress") || !strings.Contains(prompt, "assignment_check_result") || strings.Contains(prompt, "call team_complete_task") {
-		t.Fatalf("monitor prompt should request progress without forcing completion: %s", prompt)
+	if !strings.Contains(prompt, "call team_update_progress") || !strings.Contains(prompt, "assignment_check_result") || !strings.Contains(prompt, "call team_complete_task") {
+		t.Fatalf("monitor prompt should support progress, exact blocker recovery, and ready-result completion: %s", prompt)
 	}
 	metadata, ok := envelope["metadata"].(map[string]interface{})
 	if !ok || metadata["monitor"] != true || metadata["monitorType"] != "assignment_status_check" || metadata["eventKind"] != "assignment_check_requested" || metadata["visibleToChat"] != false {
 		t.Fatalf("unexpected monitor metadata: %#v", envelope["metadata"])
+	}
+}
+
+func TestAssignmentMonitorEnvelopeCarriesCanonicalAndExecutionIdentity(t *testing.T) {
+	now := time.Date(2026, 8, 9, 10, 30, 0, 0, time.UTC)
+	team := &models.Team{ID: 46}
+	task := &models.TeamTask{ID: 79, TeamID: 46, MessageID: "team-46-task-root"}
+	assignmentID := "qa-board"
+	item := &models.TeamWorkItem{
+		ID: 9003, WorkID: "qa-board:r3", AssignmentID: &assignmentID, Revision: 3,
+		Title: "QA board revision 3", UpdatedAt: now.Add(-4 * time.Minute),
+	}
+	owner := &models.TeamMember{ID: 302, TeamID: 46, MemberKey: "reviewer"}
+	envelope, _ := buildAssignmentStatusCheckEnvelope(team, task, item, owner, now)
+	if envelope["assignmentId"] != assignmentID || envelope["workId"] != "qa-board:r3" || envelope["revision"] != 3 || envelope["workItemId"] != 9003 {
+		t.Fatalf("Monitor must bind both canonical and exact execution identity: %#v", envelope)
+	}
+	metadata, _ := envelope["metadata"].(map[string]interface{})
+	if metadata["assignmentId"] != assignmentID || metadata["workId"] != "qa-board:r3" || metadata["revision"] != 3 || metadata["workItemId"] != 9003 {
+		t.Fatalf("Monitor metadata lost exact identity: %#v", metadata)
+	}
+}
+
+func TestAssignmentMonitorEnvelopeCarriesExactRuntimeAndArtifactEvidence(t *testing.T) {
+	now := time.Date(2026, 8, 9, 11, 0, 0, 0, time.UTC)
+	team := &models.Team{ID: 46}
+	task := &models.TeamTask{ID: 80, TeamID: 46, MessageID: "team-46-task-root-80"}
+	assignmentID := "build-board"
+	resultJSON := `{"artifactRefs":["/team/artifacts/team-46-task-80/members/developer/build-board/index.html"]}`
+	item := &models.TeamWorkItem{
+		ID: 9004, RootTaskID: task.ID, WorkID: assignmentID, AssignmentID: &assignmentID, Revision: 2,
+		Title: "Build board", ResultJSON: &resultJSON, UpdatedAt: now.Add(-4 * time.Minute),
+	}
+	owner := &models.TeamMember{ID: 303, TeamID: 46, MemberKey: "developer"}
+	activity := &teamAssignmentActivitySnapshot{
+		TurnID: "turn-9004", TurnState: "quiet_healthy", ExecutionAlive: true,
+		QuietForSeconds: 188, StallCandidate: true, ActivityClass: "live_turn_quiet",
+		SessionCursor: "cursor-44", LastActivityKind: "assistant_message",
+		LastAssistantText: "The implementation is written; I am preparing the final receipt.",
+		LastToolName:      "team_artifact_write", LastToolAt: now.Add(-time.Minute).Format(time.RFC3339Nano),
+	}
+	envelope, _ := buildAssignmentStatusCheckEnvelopeWithEvidence(team, task, item, owner, activity, 4, now)
+	prompt := eventString(envelope, "prompt")
+	if !strings.Contains(prompt, activity.LastAssistantText) || !strings.Contains(prompt, "team_artifact_write") ||
+		!strings.Contains(prompt, "4 earlier Monitor reminder") || !strings.Contains(prompt, "/team/artifacts/team-46-task-80/") ||
+		!strings.Contains(prompt, "executionAlive=true") || !strings.Contains(prompt, "quietForSeconds=188") ||
+		!strings.Contains(prompt, "sessionCursor=cursor-44") {
+		t.Fatalf("Monitor must give the member exact dialogue, tool, attempt, and artifact facts: %s", prompt)
+	}
+	metadata, _ := envelope["metadata"].(map[string]interface{})
+	businessFacts, _ := metadata["businessFacts"].(map[string]interface{})
+	if businessFacts["attemptStatus"] != item.Status || businessFacts["acceptedResultReceipt"] != false {
+		t.Fatalf("Monitor must carry machine business facts separately from dialogue: %#v", businessFacts)
+	}
+	if refs := normalizeContextRefs(envelope["artifactRefs"]); !slices.Equal(refs, []string{"/team/artifacts/team-46-task-80/members/developer/build-board/index.html"}) {
+		t.Fatalf("Monitor envelope lost durable artifact evidence: %#v", envelope)
+	}
+}
+
+func TestControlPlaneReceiptRecoveryRequiresDurableAcceptedResult(t *testing.T) {
+	now := time.Now().UTC()
+	plain := `{"summary":"looks complete"}`
+	if workItemHasAcceptedResultReceipt(models.TeamWorkItem{Status: models.TeamTaskStatusSucceeded, FinishedAt: &now, ResultJSON: &plain}) {
+		t.Fatal("a status row plus prose is not enough to synthesize a missing result confirmation")
+	}
+	explicit := `{"completionId":"completion-worker-1","explicitCompletion":true,"assignmentResultOnly":true}`
+	if !workItemHasAcceptedResultReceipt(models.TeamWorkItem{Status: models.TeamTaskStatusSucceeded, FinishedAt: &now, ResultJSON: &explicit}) {
+		t.Fatal("an accepted durable completion receipt should be eligible for idempotent control-plane repair")
+	}
+	if workItemHasAcceptedResultReceipt(models.TeamWorkItem{Status: models.TeamTaskStatusRunning, ResultJSON: &explicit}) {
+		t.Fatal("control-plane consistency must never promote an active attempt")
+	}
+}
+
+func TestMemberResultConfirmationIdentityIncludesRevision(t *testing.T) {
+	taskID := 901
+	memberID := 902
+	payloadJSON := `{"from":"developer","assignmentId":"build","revision":1,"contentHash":"same-content","sourceMessageId":"turn-shared"}`
+	repo := &teamRepositoryStub{createdEvents: []models.TeamEvent{{
+		TeamID: 90, TaskID: &taskID, MemberID: &memberID, EventType: "member_result_confirmed", PayloadJSON: &payloadJSON,
+	}}}
+	service := &teamService{repo: repo}
+	matched, err := service.hasLeaderMediatedResultConfirmationForAttempt(90, taskID, "developer", "build", 1, "same-content")
+	if err != nil || !matched {
+		t.Fatalf("the exact revision confirmation should match: matched=%v err=%v", matched, err)
+	}
+	matched, err = service.hasLeaderMediatedResultConfirmationForAttempt(90, taskID, "developer", "build", 2, "same-content")
+	if err != nil || matched {
+		t.Fatalf("an older identical result must not suppress a new revision: matched=%v err=%v", matched, err)
+	}
+	sameSource, err := service.hasLeaderMediatedResultConfirmationForSource(90, taskID, "developer", "build", 2, "turn-shared")
+	if err != nil || sameSource {
+		t.Fatalf("a reused source id must not cross revision identity: matched=%v err=%v", sameSource, err)
+	}
+}
+
+func TestAssignmentMonitorDoesNotQueueBehindRecentUnansweredAttempt(t *testing.T) {
+	now := time.Date(2026, 8, 7, 12, 0, 0, 0, time.UTC)
+	taskID := 78
+	team := &models.Team{ID: 46}
+	task := &models.TeamTask{ID: taskID, TeamID: 46, MessageID: "team-46-task-78"}
+	item := &models.TeamWorkItem{RootTaskID: taskID, WorkID: "dev-papers-001"}
+	checkID := "monitor:team-46-task-78:dev-papers-001:1"
+	requestJSON := `{"eventKind":"assignment_check_requested","checkId":"` + checkID + `","assignmentId":"dev-papers-001"}`
+	repo := &teamRepositoryStub{createdEvents: []models.TeamEvent{{
+		TeamID: 46, TaskID: &taskID, EventType: "assignment_check_requested",
+		PayloadJSON: &requestJSON, CreatedAt: now.Add(-time.Minute),
+	}}}
+	service := &teamService{repo: repo}
+	outstanding, err := service.hasRecentUnansweredAssignmentMonitor(team, task, item, now)
+	if err != nil || !outstanding {
+		t.Fatalf("a recent unanswered Monitor must suppress queue buildup: outstanding=%v err=%v", outstanding, err)
+	}
+	outstanding, err = service.hasRecentUnansweredAssignmentMonitor(team, task, item, now.Add(4*time.Minute))
+	if err != nil || outstanding {
+		t.Fatalf("an expired unanswered Monitor lease must permit recovery: outstanding=%v err=%v", outstanding, err)
+	}
+	resultJSON := `{"eventKind":"assignment_check_result","checkId":"` + checkID + `","assignmentId":"dev-papers-001"}`
+	repo.createdEvents = append(repo.createdEvents, models.TeamEvent{
+		TeamID: 46, TaskID: &taskID, EventType: "task_progress",
+		PayloadJSON: &resultJSON, CreatedAt: now,
+	})
+	outstanding, err = service.hasRecentUnansweredAssignmentMonitor(team, task, item, now.Add(2*time.Minute))
+	if err != nil || outstanding {
+		t.Fatalf("an answered Monitor must not permanently deduplicate later recovery: outstanding=%v err=%v", outstanding, err)
 	}
 }
 
@@ -5702,6 +6533,24 @@ func TestLeaderMediatedRecoverableWarningClassification(t *testing.T) {
 	team := &models.Team{ID: 47, CommunicationMode: teamCommunicationModeLeaderMediated}
 	task := &models.TeamTask{ID: 82, TeamID: 47, Status: models.TeamTaskStatusRunning}
 	member := &models.TeamMember{ID: 12, TeamID: 47, MemberKey: "developer", Role: "developer"}
+	targetResolution := map[string]interface{}{
+		"eventKind":             "target_resolution_warning",
+		"failureDomain":         "transport",
+		"failureKind":           "target_resolution",
+		"nonAuthoritative":      true,
+		"stateEffect":           "none",
+		"rootTaskTerminal":      false,
+		"clarificationRequired": true,
+	}
+	if !isNonAuthoritativeDispatchFailure("message_failed", targetResolution) {
+		t.Fatal("an outbound message failure must never become an assignment result")
+	}
+	if isLeaderMediatedWorkerToLeaderResult(team, "message_failed", targetResolution, member, task) {
+		t.Fatal("transport failure must not confirm a failed Worker result")
+	}
+	if !isLeaderMediatedRecoverableWarning(team, "message_warning", targetResolution, member, task) {
+		t.Fatal("target ambiguity should ask the same Worker and Leader to review without closing the attempt")
+	}
 	if !isLeaderMediatedRecoverableWarning(team, "message_warning", map[string]interface{}{
 		"artifactValidationFailed": true,
 		"rootTaskTerminal":         false,
@@ -6219,13 +7068,23 @@ func TestLeaderSynthesisReminderCreatedWhenWorkersDone(t *testing.T) {
 	if len(repo.createdEvents) != 1 {
 		t.Fatalf("ledger-only projection changes must not create duplicate synthesis reminders, got %#v", repo.createdEvents)
 	}
+	if err := service.createLeaderSynthesisReminder(&models.Team{ID: 51, CommunicationMode: teamCommunicationModeLeaderMediated}, nil, task, leader, resultItems, now.Add(4*time.Minute)); err != nil {
+		t.Fatalf("next-generation createLeaderSynthesisReminder returned error: %v", err)
+	}
+	if len(repo.createdEvents) != 2 {
+		t.Fatalf("unchanged workflow facts must receive a later reminder generation, got %#v", repo.createdEvents)
+	}
+	secondPayload := teamEventPayloadMap(repo.createdEvents[1])
+	if eventInt(secondPayload, "reminderGeneration") != 2 {
+		t.Fatalf("expected reminder generation 2, got %#v", secondPayload)
+	}
 
 	changedResult := `{"summary":"PASS with updated evidence","resultMarkdown":"Reviewer verdict: PASS with updated evidence."}`
 	resultItems[1].ResultJSON = &changedResult
-	if err := service.createLeaderSynthesisReminder(&models.Team{ID: 51, CommunicationMode: teamCommunicationModeLeaderMediated}, nil, task, leader, resultItems, now.Add(2*time.Minute)); err != nil {
+	if err := service.createLeaderSynthesisReminder(&models.Team{ID: 51, CommunicationMode: teamCommunicationModeLeaderMediated}, nil, task, leader, resultItems, now.Add(5*time.Minute)); err != nil {
 		t.Fatalf("changed-result createLeaderSynthesisReminder returned error: %v", err)
 	}
-	if len(repo.createdEvents) != 2 {
+	if len(repo.createdEvents) != 3 {
 		t.Fatalf("a materially changed result must allow a fresh synthesis reminder, got %#v", repo.createdEvents)
 	}
 }
@@ -6671,8 +7530,8 @@ func TestTrustedRuntimeTurnResultSignalRejectsControlAndInterimTurns(t *testing.
 			"messageId": "team-92-task-root-message",
 		}
 	}
-	if !isTrustedRuntimeTurnResultSignal("task_progress", base()) {
-		t.Fatal("a Runtime-authored final turn must be eligible for exact narrative correlation")
+	if isTrustedRuntimeTurnResultSignal("task_progress", base()) {
+		t.Fatal("a Runtime-authored turn end must never become business completion")
 	}
 	cases := []struct {
 		name   string
@@ -6696,21 +7555,354 @@ func TestTrustedRuntimeTurnResultSignalRejectsControlAndInterimTurns(t *testing.
 	}
 }
 
-func TestAutomaticRuntimeCompletionKeepsStrictEnvelopeAndSingleChatCopy(t *testing.T) {
+func TestRuntimeTurnResultClassifiesLeaderMediatedWorkerAsAssignmentResult(t *testing.T) {
+	team := &models.Team{ID: 121, CommunicationMode: teamCommunicationModeLeaderMediated}
+	task := &models.TeamTask{ID: 301, TeamID: team.ID, TargetMemberID: 1, Status: models.TeamTaskStatusRunning}
+	worker := &models.TeamMember{ID: 2, TeamID: team.ID, MemberKey: "developer", Role: "developer"}
+	payload := map[string]interface{}{
+		"protocolVersion": 4, "eventKind": "turn_result_candidate",
+		"activeTurnFinished": true, "hadAssistantNarrative": true,
+		"hadOutboundAssignment": false, "completionRecoveryAttempt": 0,
+		"resultMarkdown": "# Delivered\n\nThe implementation is complete.",
+		"messageId":      "worker-turn-301",
+	}
+	eventType, err := (&teamService{repo: &teamRepositoryStub{}}).promoteRuntimeTurnResultCandidate(team, task, worker, "task_progress", payload)
+	if err != nil || eventType != "task_progress" {
+		t.Fatalf("worker turn evidence was unexpectedly rewritten: event=%s err=%v payload=%#v", eventType, err, payload)
+	}
+	if eventBool(payload, "assignmentResultOnly") || eventBool(payload, "rootTaskTerminal") {
+		t.Fatalf("turn evidence must not close either assignment or root: %#v", payload)
+	}
+	if isTeamTaskCompletionSignal(eventType, normalizedTeamTaskEventStatus(payload), payload) {
+		t.Fatalf("turn evidence entered assignment completion projection: %#v", payload)
+	}
+}
+
+func TestRuntimeTurnResultKeepsDirectTargetAsRootResult(t *testing.T) {
+	team := &models.Team{ID: 122, CommunicationMode: "direct"}
+	task := &models.TeamTask{ID: 302, TeamID: team.ID, TargetMemberID: 2, Status: models.TeamTaskStatusRunning}
+	worker := &models.TeamMember{ID: 2, TeamID: team.ID, MemberKey: "developer", Role: "developer"}
+	payload := map[string]interface{}{
+		"protocolVersion": 4, "eventKind": "turn_result_candidate",
+		"activeTurnFinished": true, "hadAssistantNarrative": true,
+		"hadOutboundAssignment": false, "completionRecoveryAttempt": 0,
+		"resultMarkdown": "# Direct result", "messageId": "direct-turn-302",
+	}
+	if _, err := (&teamService{repo: &teamRepositoryStub{}}).promoteRuntimeTurnResultCandidate(team, task, worker, "task_progress", payload); err != nil {
+		t.Fatal(err)
+	}
+	if eventBool(payload, "assignmentResultOnly") || eventBool(payload, "rootTaskTerminal") {
+		t.Fatalf("direct turn prose must also remain non-terminal: %#v", payload)
+	}
+}
+
+func TestAssignmentFailureNeverNormalizesToSucceededResult(t *testing.T) {
+	payload := map[string]interface{}{
+		"assignmentResultOnly": true,
+		"assignmentId":         "review-assignment",
+		"originalEvent":        "task_failed",
+		"resultFailed":         true,
+		"status":               models.TeamTaskStatusFailed,
+		"runtimeStatus":        models.TeamTaskStatusFailed,
+		"summary":              "Required artifact is unavailable.",
+	}
+	step := map[string]interface{}{"type": "result"}
+	normalizeExistingCollaborationStep(step, &models.Team{ID: 123}, "task_failed", payload, &models.TeamMember{MemberKey: "reviewer"}, nil)
+	if eventString(step, "status") != models.TeamTaskStatusFailed {
+		t.Fatalf("failed assignment receipt was converted to success: step=%#v payload=%#v", step, payload)
+	}
+}
+
+func TestLeaderMediatedRuntimeFailureStaysAssignmentScopedAndWakesRecovery(t *testing.T) {
+	team := &models.Team{ID: 123, CommunicationMode: teamCommunicationModeLeaderMediated}
+	task := &models.TeamTask{ID: 303, TeamID: team.ID, TargetMemberID: 1, Status: models.TeamTaskStatusRunning}
+	worker := &models.TeamMember{ID: 2, TeamID: team.ID, MemberKey: "developer", Role: "developer"}
+	payload := map[string]interface{}{
+		"protocolVersion":  4,
+		"status":           models.TeamTaskStatusFailed,
+		"runtimeStatus":    models.TeamTaskStatusFailed,
+		"assignmentId":     "dev1",
+		"workId":           "dev1",
+		"completionSource": "runtime_error",
+		"summary":          "model dispatch failed",
+	}
+	if !isLeaderMediatedWorkerToLeaderResult(team, "task_failed", payload, worker, task) {
+		t.Fatalf("a Worker failure with an authenticated assignment must remain assignment-scoped: %#v", payload)
+	}
+	markLeaderMediatedAssignmentResult("task_failed", payload, worker)
+	if !eventBool(payload, "assignmentResultOnly") || eventBool(payload, "rootTaskTerminal") ||
+		eventString(payload, "status") != models.TeamTaskStatusFailed ||
+		eventString(payload, "availability") != models.TeamMemberAvailabilityBlocked {
+		t.Fatalf("assignment failure was converted or promoted to root state: %#v", payload)
+	}
+
+	reconciliation := map[string]interface{}{
+		"eventKind":        "runtime_reconciliation_needed",
+		"failureDomain":    "runtime_adapter",
+		"retryable":        true,
+		"stateEffect":      "none",
+		"rootTaskTerminal": false,
+	}
+	if !isLeaderMediatedRecoverableWarning(team, "task_progress", reconciliation, worker, task) {
+		t.Fatalf("a confirmed Runtime reconciliation fault must wake the non-terminal recovery path: %#v", reconciliation)
+	}
+	plainWarning := map[string]interface{}{
+		"eventKind":        "message_warning",
+		"rootTaskTerminal": false,
+		"summary":          "advisory transport warning",
+	}
+	if isLeaderMediatedRecoverableWarning(team, "message_warning", plainWarning, worker, task) {
+		t.Fatalf("an unstructured warning must not start an assignment recovery cycle: %#v", plainWarning)
+	}
+}
+
+func TestUnresolvedDependenciesTriggerRecoveryOnlyForConfirmedBlocker(t *testing.T) {
+	developerID := 11
+	reviewerID := 12
+	dependencyJSON := `["P1"]`
+	blockedResultJSON := `{"dependencyBlocked":true,"blockedDependencies":["P1"]}`
+	items := []models.TeamWorkItem{
+		{WorkID: "P1", AssignmentID: stringPtr("P1"), OwnerMemberID: &developerID, Status: models.TeamTaskStatusRunning, Revision: 1},
+		{WorkID: "P2", AssignmentID: stringPtr("P2"), OwnerMemberID: &reviewerID, Status: models.TeamTaskStatusFailed, Revision: 1, DependsOnJSON: &dependencyJSON, ResultJSON: &blockedResultJSON},
+	}
+	if got := unresolvedTeamWorkItemDependencies(items, "P2"); !slices.Equal(got, []string{"P1"}) {
+		t.Fatalf("running prerequisite was not identified from the issued contract: %#v", got)
+	}
+	items[0].Status = models.TeamTaskStatusSucceeded
+	if got := unresolvedTeamWorkItemDependencies(items, "P2"); len(got) != 0 {
+		t.Fatalf("recovered prerequisite must not trigger another blocker recovery: %#v", got)
+	}
+	if got := unresolvedTeamWorkItemDependencies(items, "P1"); len(got) != 0 {
+		t.Fatalf("an independent assignment must never acquire a dependency gate: %#v", got)
+	}
+	items[0].Status = models.TeamTaskStatusRunning
+	if got := dependencyBlockedAssignmentsReadyAfter(items, "P1"); !slices.Equal(got, []string{"P2"}) {
+		t.Fatalf("a confirmed blocker must become recoverable when its last prerequisite succeeds: %#v", got)
+	}
+	items[1].ResultJSON = stringPtr(`{"status":"failed"}`)
+	if got := dependencyBlockedAssignmentsReadyAfter(items, "P1"); len(got) != 0 {
+		t.Fatalf("a real product failure must not be retried as a dependency recovery: %#v", got)
+	}
+}
+
+func TestDependencyReadyContextKeepsSameAttemptAndIgnoresUnknownDependencies(t *testing.T) {
+	now := time.Date(2026, 8, 12, 12, 0, 0, 0, time.UTC)
+	producerID := 11
+	consumerID := 12
+	dependencyJSON := `["collect-news"]`
+	producerAssignment := "collect-news"
+	consumerAssignment := "filter-news"
+	team := &models.Team{ID: 132, CommunicationMode: teamCommunicationModeLeaderMediated}
+	task := &models.TeamTask{ID: 332, TeamID: team.ID, MessageID: "root-332", Status: models.TeamTaskStatusRunning}
+	consumer := &models.TeamMember{ID: consumerID, TeamID: team.ID, MemberKey: "content-filter", Role: "domain-specialist"}
+	items := []models.TeamWorkItem{
+		{ID: 1, TeamID: team.ID, RootTaskID: task.ID, WorkID: producerAssignment, AssignmentID: &producerAssignment, OwnerMemberID: &producerID, Revision: 1, Status: models.TeamTaskStatusRunning},
+		{ID: 2, TeamID: team.ID, RootTaskID: task.ID, WorkID: consumerAssignment, AssignmentID: &consumerAssignment, OwnerMemberID: &consumerID, Revision: 1, Status: models.TeamTaskStatusRunning, DependsOnJSON: &dependencyJSON},
+	}
+	if got := dependencyReadyAssignmentsAfter(items, producerAssignment); !slices.Equal(got, []string{consumerAssignment}) {
+		t.Fatalf("exact downstream dependency should become ready after producer success: %#v", got)
+	}
+	repo := &teamRepositoryStub{workItems: items, membersByID: map[int]*models.TeamMember{consumerID: consumer}}
+	service := &teamService{repo: repo}
+	if err := service.dispatchDependencyReadyReminder(team, nil, task, &items[1], consumer, now); err != nil {
+		t.Fatal(err)
+	}
+	if len(repo.createdEvents) != 0 || len(repo.outboxRows) != 0 {
+		t.Fatalf("dependency readiness must be verified against persisted succeeded facts: events=%#v outbox=%#v", repo.createdEvents, repo.outboxRows)
+	}
+	repo.workItems[0].Status = models.TeamTaskStatusSucceeded
+	if err := service.dispatchDependencyReadyReminder(team, nil, task, &items[1], consumer, now); err != nil {
+		t.Fatal(err)
+	}
+	if len(repo.createdEvents) != 1 || len(repo.outboxRows) != 1 {
+		t.Fatalf("expected one durable readiness context, events=%#v outbox=%#v", repo.createdEvents, repo.outboxRows)
+	}
+	var envelope map[string]interface{}
+	if err := json.Unmarshal([]byte(repo.outboxRows[0].PayloadJSON), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if eventString(envelope, "assignmentId") != consumerAssignment || eventInt(envelope, "revision") != 1 || eventBool(envelope, "requiresCompletion") {
+		t.Fatalf("readiness context changed attempt identity or business semantics: %#v", envelope)
+	}
+	if err := service.dispatchDependencyReadyReminder(team, nil, task, &items[1], consumer, now.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if len(repo.createdEvents) != 1 || len(repo.outboxRows) != 1 {
+		t.Fatalf("same dependency generation must remain idempotent: events=%#v outbox=%#v", repo.createdEvents, repo.outboxRows)
+	}
+	unknownJSON := `["model-authored-label"]`
+	items[1].DependsOnJSON = &unknownJSON
+	if got := dependencyReadyAssignmentsAfter(items, producerAssignment); len(got) != 0 {
+		t.Fatalf("unknown dependency text must not create a hidden control-plane action: %#v", got)
+	}
+}
+
+func TestMemberFailureHasSingleTerminalWriter(t *testing.T) {
+	team := &models.Team{ID: 130, CommunicationMode: teamCommunicationModeLeaderMediated}
+	task := &models.TeamTask{ID: 330, TeamID: team.ID, TargetMemberID: 1, MessageID: "root-330", Status: models.TeamTaskStatusRunning}
+	member := &models.TeamMember{ID: 2, TeamID: team.ID, MemberKey: "domain-specialist", Role: "domain-specialist"}
+	assignmentID := "inspect-source"
+	repo := &teamRepositoryStub{workItems: []models.TeamWorkItem{{
+		ID: 1, TeamID: team.ID, RootTaskID: task.ID, WorkID: assignmentID, AssignmentID: &assignmentID,
+		OwnerMemberID: &member.ID, Revision: 1, RequiredForRoot: true, Status: models.TeamTaskStatusRunning,
+	}}}
+	payload := map[string]interface{}{
+		"assignmentId": assignmentID, "workId": assignmentID, "revision": 1,
+		"status": models.TeamTaskStatusFailed, "summary": "Source endpoint returned a permanent error.",
+		"resultMarkdown": "The assigned inspection could not be completed.", "assignmentResultOnly": true,
+	}
+	event := &models.TeamEvent{ID: 1, TeamID: team.ID, TaskID: &task.ID, MemberID: &member.ID, EventType: "task_failed", CreatedAt: time.Now().UTC()}
+	service := &teamService{repo: repo}
+	if err := service.createLeaderMediatedResultNotification(team, nil, task, member, payload, event); err != nil {
+		t.Fatal(err)
+	}
+	if repo.workItems[0].Status != models.TeamTaskStatusFailed {
+		t.Fatalf("a real member failure was projected as success: %#v", repo.workItems[0])
+	}
+	if len(repo.createdEvents) != 1 || repo.createdEvents[0].EventType != "member_result_confirmed" {
+		t.Fatalf("failure confirmation was not persisted atomically: %#v", repo.createdEvents)
+	}
+}
+
+func TestAnyRoleResultBeforeDependenciesRemainsTerminalWithAdvisory(t *testing.T) {
+	team := &models.Team{ID: 131, CommunicationMode: teamCommunicationModeLeaderMediated}
+	task := &models.TeamTask{ID: 331, TeamID: team.ID, TargetMemberID: 1, MessageID: "root-331", Status: models.TeamTaskStatusRunning}
+	producerID := 2
+	consumer := &models.TeamMember{ID: 3, TeamID: team.ID, MemberKey: "security-auditor", Role: "domain-specialist"}
+	producerAssignment := "produce-evidence"
+	consumerAssignment := "audit-evidence"
+	dependsJSON := `["produce-evidence"]`
+	repo := &teamRepositoryStub{workItems: []models.TeamWorkItem{
+		{ID: 1, TeamID: team.ID, RootTaskID: task.ID, WorkID: producerAssignment, AssignmentID: &producerAssignment, OwnerMemberID: &producerID, Revision: 1, RequiredForRoot: true, Status: models.TeamTaskStatusRunning},
+		{ID: 2, TeamID: team.ID, RootTaskID: task.ID, WorkID: consumerAssignment, AssignmentID: &consumerAssignment, OwnerMemberID: &consumer.ID, Revision: 1, RequiredForRoot: true, Status: models.TeamTaskStatusRunning, DependsOnJSON: &dependsJSON},
+	}}
+	payload := map[string]interface{}{
+		"assignmentId": consumerAssignment, "workId": consumerAssignment, "revision": 1,
+		"status": models.TeamTaskStatusSucceeded, "summary": "Early audit attempt.",
+		"resultMarkdown": "No final evidence was available yet.", "assignmentResultOnly": true,
+	}
+	event := &models.TeamEvent{ID: 1, TeamID: team.ID, TaskID: &task.ID, MemberID: &consumer.ID, EventType: "task_completed", CreatedAt: time.Now().UTC()}
+	service := &teamService{repo: repo}
+	if err := service.createLeaderMediatedResultNotification(team, nil, task, consumer, payload, event); err != nil {
+		t.Fatal(err)
+	}
+	if repo.workItems[1].Status != models.TeamTaskStatusSucceeded || repo.workItems[1].FinishedAt == nil {
+		t.Fatalf("dependency metadata must not rewrite a completed attempt: %#v", repo.workItems[1])
+	}
+	stored := workItemResultPayload(repo.workItems[1])
+	if eventBool(stored, "provisionalAssignmentResult") || eventBool(stored, "dependencyBlocked") ||
+		eventString(stored, "dependencyState") != "known_waiting" ||
+		!slices.Equal(normalizeContextRefs(stored["waitingDependencies"]), []string{producerAssignment}) {
+		t.Fatalf("dependency concern must remain advisory without changing terminal state: %#v", stored)
+	}
+	if len(repo.createdEvents) != 1 || repo.createdEvents[0].EventType != "member_result_confirmed" {
+		t.Fatalf("the control plane must confirm the member result independently of dependency prose: %#v", repo.createdEvents)
+	}
+	if ready := dependencyBlockedAssignmentsReadyAfter(repo.workItems, producerAssignment); len(ready) != 0 {
+		t.Fatalf("a terminal attempt must not create a hidden automatic replay: %#v", ready)
+	}
+}
+
+func TestMalformedDependencyCannotBlockTeam33Completion(t *testing.T) {
+	team := &models.Team{ID: 33, CommunicationMode: teamCommunicationModeLeaderMediated}
+	task := &models.TeamTask{ID: 77, TeamID: 33, TargetMemberID: 91, MessageID: "team-33-task-root", Status: models.TeamTaskStatusRunning}
+	architect := &models.TeamMember{ID: 94, TeamID: 33, MemberKey: "architect", Role: "architect"}
+	pmID := 92
+	designerID := 93
+	malformedDepends := `["P1a,P1b,P1c"]`
+	repo := &teamRepositoryStub{workItems: []models.TeamWorkItem{
+		{ID: 98, TeamID: 33, RootTaskID: 77, WorkID: "P1a", AssignmentID: stringPtr("P1a"), OwnerMemberID: &pmID, Status: models.TeamTaskStatusSucceeded, Revision: 1},
+		{ID: 99, TeamID: 33, RootTaskID: 77, WorkID: "P1b", AssignmentID: stringPtr("P1b"), OwnerMemberID: &designerID, Status: models.TeamTaskStatusSucceeded, Revision: 1},
+		{ID: 100, TeamID: 33, RootTaskID: 77, WorkID: "P1c", AssignmentID: stringPtr("P1c"), OwnerMemberID: &pmID, Status: models.TeamTaskStatusSucceeded, Revision: 1},
+		{ID: 101, TeamID: 33, RootTaskID: 77, WorkID: "P2", AssignmentID: stringPtr("P2"), OwnerMemberID: &architect.ID, Status: models.TeamTaskStatusRunning, Revision: 1, DependsOnJSON: &malformedDepends},
+	}}
+	payload := map[string]interface{}{
+		"assignmentId": "P2", "workId": "P2", "revision": 1,
+		"status": models.TeamTaskStatusSucceeded, "summary": "P2 delivered",
+		"resultMarkdown": "P2 complete", "assignmentResultOnly": true,
+		"memberResultConfirmed": false,
+	}
+	event := &models.TeamEvent{ID: 2227, TeamID: 33, TaskID: &task.ID, MemberID: &architect.ID, EventType: "completion_proposed", CreatedAt: time.Now().UTC()}
+	if err := (&teamService{repo: repo}).createLeaderMediatedResultNotification(team, nil, task, architect, payload, event); err != nil {
+		t.Fatal(err)
+	}
+	if repo.workItems[3].Status != models.TeamTaskStatusSucceeded || repo.workItems[3].FinishedAt == nil {
+		t.Fatalf("malformed advisory dependency reopened P2: %#v", repo.workItems[3])
+	}
+	stored := workItemResultPayload(repo.workItems[3])
+	if eventString(stored, "dependencyState") != "unknown_advisory" ||
+		!slices.Equal(normalizeContextRefs(stored["unknownDependencies"]), []string{"P1a,P1b,P1c"}) {
+		t.Fatalf("expected an auditable unknown dependency advisory: %#v", stored)
+	}
+	if len(repo.createdEvents) != 1 || repo.createdEvents[0].EventType != "member_result_confirmed" {
+		t.Fatalf("member_result_confirmed must be generated by the control plane: %#v", repo.createdEvents)
+	}
+}
+
+func TestAcceptedAutomaticRuntimeCompletionIsCanonicalChatCopy(t *testing.T) {
 	payload := map[string]interface{}{
 		"protocolVersion": 4, "eventId": "evt-auto", "completionId": "completion-auto",
 		"taskId": "team-95-task-250", "rootTaskId": "team-95-task-250",
 		"memberId": "developer", "status": "succeeded",
-		"completionSource": teamTaskCompletionTool, "explicitCompletion": true,
+		"completionSource": "assistant_turn_result", "explicitCompletion": false,
 		"automaticTurnResult": true, "assignmentResultOnly": true,
-		"summary": "Implementation delivered.", "resultMarkdown": "# Implementation delivered",
+		"activeTurnFinished": true, "hadAssistantNarrative": true, "hadOutboundAssignment": false,
+		"completionDecision": teamCompletionDecisionAccepted,
+		"summary":            "Implementation delivered.", "resultMarkdown": "# Implementation delivered",
 	}
-	if !isTeamTaskCompletionSignal("completion_proposed", "succeeded", payload) {
-		t.Fatalf("automatic Runtime submission must retain the strict completion envelope: %#v", payload)
+	if isTeamTaskCompletionSignal("completion_proposed", "succeeded", payload) {
+		t.Fatalf("automatic Runtime submission must not be a completion signal: %#v", payload)
 	}
 	applyTeamChatPolicy("completion_proposed", payload, nil, &models.TeamMember{MemberKey: "developer"})
 	if eventBool(payload, "visibleToChat") || eventString(payload, "chatPolicy") != "hidden" {
-		t.Fatalf("paired automatic completion must not duplicate the already projected narrative: %#v", payload)
+		t.Fatalf("automatic completion diagnostics must stay internal: %#v", payload)
+	}
+}
+
+func TestTrustedNaturalCompletionRequiresFinishedSafeTurn(t *testing.T) {
+	base := func() map[string]interface{} {
+		return map[string]interface{}{
+			"protocolVersion": 4, "eventId": "evt-natural", "completionId": "completion-natural",
+			"taskId": "team-121-task-301", "rootTaskId": "team-121-task-301",
+			"memberId": "developer", "status": "succeeded", "summary": "Delivered.",
+			"resultMarkdown": "# Delivered", "completionSource": "assistant_turn_result",
+			"explicitCompletion": false, "automaticTurnResult": true,
+			"activeTurnFinished": true, "hadAssistantNarrative": true,
+			"hadOutboundAssignment": false,
+		}
+	}
+	if isTeamTaskCompletionSignal("completion_proposed", "succeeded", base()) {
+		t.Fatal("natural prose must wait for an explicit completion receipt")
+	}
+	for _, key := range []string{"activeTurnFinished", "hadAssistantNarrative"} {
+		payload := base()
+		payload[key] = false
+		if isTeamTaskCompletionSignal("completion_proposed", "succeeded", payload) {
+			t.Fatalf("natural completion without %s must remain running: %#v", key, payload)
+		}
+	}
+	for _, key := range []string{"hadOutboundAssignment"} {
+		payload := base()
+		payload[key] = true
+		if isTeamTaskCompletionSignal("completion_proposed", "succeeded", payload) {
+			t.Fatalf("unsafe natural completion with %s must remain running: %#v", key, payload)
+		}
+	}
+}
+
+func TestNaturalCompletionUsesTurnStructureInsteadOfToolOrWordingHeuristics(t *testing.T) {
+	payload := map[string]interface{}{
+		"protocolVersion": 4, "eventId": "evt-natural-tool-evidence", "completionId": "completion-natural-tool-evidence",
+		"taskId": "team-95-task-251", "rootTaskId": "team-95-task-251",
+		"memberId": "reviewer", "status": "succeeded",
+		"completionSource": "assistant_turn_result", "explicitCompletion": false,
+		"automaticTurnResult": true, "assignmentResultOnly": true,
+		"activeTurnFinished": true, "hadAssistantNarrative": true, "hadOutboundAssignment": false,
+		"lastToolFailed": true, "completionContinuationRequired": true,
+		"summary": "Assistant turn returned.", "resultMarkdown": "The model returned a complete assistant turn after its tool loop.",
+	}
+	if isTeamTaskCompletionSignal("completion_proposed", normalizedTeamTaskEventStatus(payload), payload) {
+		t.Fatalf("turn structure or tool evidence must not become business completion: %#v", payload)
 	}
 }
 
@@ -6737,6 +7929,18 @@ func TestProtocolV4WorkerOutboundWaitsForStructuredTurnResult(t *testing.T) {
 	if !isLeaderMediatedWorkerToLeaderResult(team, "completion_proposed", payload, worker, task) {
 		t.Fatal("protocol v4 structured completion must close the Worker assignment")
 	}
+	natural := map[string]interface{}{
+		"protocolVersion": 4, "to": "leader", "assignmentId": "build-kanban",
+		"assignmentResultOnly": true, "status": "succeeded",
+		"completionSource": "assistant_turn_result", "explicitCompletion": false,
+		"automaticTurnResult": true, "activeTurnFinished": true,
+		"hadAssistantNarrative": true, "hadOutboundAssignment": false,
+		"completionId":   "completion:103:213:developer:build-kanban:natural",
+		"resultMarkdown": "# Implementation complete",
+	}
+	if isLeaderMediatedWorkerToLeaderResult(team, "completion_proposed", natural, worker, task) {
+		t.Fatal("protocol v4 natural fallback must not close the Worker assignment")
+	}
 }
 
 func TestMemberResultIdentityUsesSourceTurnAcrossSupportedLegacyProse(t *testing.T) {
@@ -6747,13 +7951,13 @@ func TestMemberResultIdentityUsesSourceTurnAcrossSupportedLegacyProse(t *testing
 	}}}
 	service := &teamService{repo: repo}
 	same, err := service.hasLeaderMediatedResultConfirmationForSource(
-		103, taskID, "developer", "build-kanban", "msg-worker-turn-1",
+		103, taskID, "developer", "build-kanban", 1, "msg-worker-turn-1",
 	)
 	if err != nil || !same {
 		t.Fatalf("same source turn must remain one result even when prose hashes differ: same=%v err=%v", same, err)
 	}
 	different, err := service.hasLeaderMediatedResultConfirmationForSource(
-		103, taskID, "developer", "build-kanban", "msg-worker-turn-2",
+		103, taskID, "developer", "build-kanban", 1, "msg-worker-turn-2",
 	)
 	if err != nil || different {
 		t.Fatalf("a later correction turn must remain eligible: different=%v err=%v", different, err)
@@ -6787,9 +7991,19 @@ func TestAutomaticCompletionDiagnosticsAndTurnFinishedStayInternal(t *testing.T)
 	if eventBool(turnFinished, "visibleToChat") || eventString(turnFinished, "chatPolicy") != "hidden" {
 		t.Fatalf("turn-finished transport diagnostics must remain internal: %#v", turnFinished)
 	}
+	retryableAttempt := map[string]interface{}{
+		"eventKind":     "assignment_attempt_failed",
+		"summary":       "Model stream interrupted before a verified terminal response.",
+		"chatPolicy":    "hidden",
+		"visibleToChat": false,
+	}
+	applyTeamChatPolicy("task_progress", retryableAttempt, nil, nil)
+	if eventBool(retryableAttempt, "visibleToChat") || eventString(retryableAttempt, "chatPolicy") != "hidden" {
+		t.Fatalf("retryable infrastructure diagnostics must remain internal: %#v", retryableAttempt)
+	}
 }
 
-func TestNaturalTurnCompletionCannotSkipUndispatchedFuturePhase(t *testing.T) {
+func TestExplicitCompletionPreservesLegacyWorkflowSealing(t *testing.T) {
 	taskID := 259
 	leaderID := 959
 	workerID := 958
@@ -6825,9 +8039,8 @@ func TestNaturalTurnCompletionCannotSkipUndispatchedFuturePhase(t *testing.T) {
 			"resultMarkdown": "# Phase 1 complete", "summary": "Phase 1 complete",
 		},
 	)
-	if err != nil || evaluation.Decision != teamCompletionDecisionDeferred ||
-		!slices.Contains(evaluation.PendingPhases, phaseTwo) {
-		t.Fatalf("natural result skipped an undispatched future phase: evaluation=%#v err=%v", evaluation, err)
+	if err != nil || evaluation.Decision != teamCompletionDecisionAccepted {
+		t.Fatalf("an explicit sealed completion must preserve legacy phase semantics: evaluation=%#v err=%v", evaluation, err)
 	}
 }
 
@@ -6942,7 +8155,7 @@ func TestExecutionResultCannotRewriteIssuedAssignmentContract(t *testing.T) {
 		t.Fatalf("result must not fork a second contract: %#v", repo.workItems)
 	}
 	got := repo.workItems[0]
-	if got.Status != models.TeamTaskStatusSucceeded || got.Revision != 2 ||
+	if got.Status != models.TeamTaskStatusRunning || got.Revision != 2 ||
 		derefTeamString(got.CanonicalWorkID) != canonicalID || derefTeamString(got.PhaseID) != phaseID ||
 		!got.RequiredForRoot || !got.ReviewRequired || derefTeamString(got.DependsOnJSON) != dependencyJSON ||
 		derefTeamString(got.ReviewTargetAssignmentID) != reviewTarget || got.ReviewTargetRevision == nil || *got.ReviewTargetRevision != reviewRevision ||
@@ -6988,6 +8201,9 @@ func TestReviewerResultUsesIssuedTargetWithoutAgentContractFields(t *testing.T) 
 	); err != nil {
 		t.Fatal(err)
 	}
+	repo.workItems[1].Status = models.TeamTaskStatusSucceeded
+	reviewerFinishedAt := time.Now().UTC()
+	repo.workItems[1].FinishedAt = &reviewerFinishedAt
 	validated, err := service.applyStructuredAssignmentValidation(task, reviewer, payload, time.Now().UTC())
 	if err != nil || !validated {
 		t.Fatalf("issued review target should validate without Agent-authored contract fields: validated=%v err=%v payload=%#v", validated, err, payload)
@@ -7007,7 +8223,7 @@ func TestReviewerResultUsesIssuedTargetWithoutAgentContractFields(t *testing.T) 
 	}
 }
 
-func TestProtocolV3ExactTurnNarrativeCompletesDirectLeaderTaskWithoutRecovery(t *testing.T) {
+func TestProtocolV3ExactTurnNarrativeRemainsMonitorEvidence(t *testing.T) {
 	taskID := 262
 	leaderID := 980
 	messageID := "team-98-root-message"
@@ -7042,6 +8258,10 @@ func TestProtocolV3ExactTurnNarrativeCompletesDirectLeaderTaskWithoutRecovery(t 
 		"status": "waiting_completion", "activeTurnFinished": true,
 		"hadAssistantNarrative": true, "hadOutboundAssignment": false,
 		"completionRecoveryAttempt": 0,
+		"verificationMode":          "managed_browser",
+		"browserVerification": map[string]interface{}{
+			"status": "verified", "opened": true, "inspected": true,
+		},
 	})
 	if err := service.projectTeamEvent(
 		&models.Team{ID: 98, CommunicationMode: teamCommunicationModeLeaderMediated},
@@ -7050,15 +8270,33 @@ func TestProtocolV3ExactTurnNarrativeCompletesDirectLeaderTaskWithoutRecovery(t 
 	); err != nil {
 		t.Fatal(err)
 	}
-	if task.Status != models.TeamTaskStatusSucceeded || task.AcceptedCompletionID == nil {
-		t.Fatalf("exact same-turn Runtime result was not accepted: %#v", task)
+	if task.Status != models.TeamTaskStatusRunning || task.AcceptedCompletionID != nil {
+		t.Fatalf("exact same-turn Runtime prose changed terminal state: %#v", task)
 	}
 	if len(repo.outboxRows) != 1 {
-		t.Fatalf("accepted natural turn must use the atomic completion/outbox path: %#v", repo.outboxRows)
+		t.Fatalf("turn evidence should create one non-terminal coordination recovery outbox: %#v", repo.outboxRows)
 	}
-	finalPayload := teamEventPayloadMap(repo.createdEvents[len(repo.createdEvents)-1])
-	if !eventBool(finalPayload, "runtimeTurnResultCandidate") || eventBool(finalPayload, "visibleToChat") {
-		t.Fatalf("completion record must be private because the paired narrative is already visible: %#v", finalPayload)
+	var finalPayload map[string]interface{}
+	for idx := range repo.createdEvents {
+		candidate := teamEventPayloadMap(repo.createdEvents[idx])
+		if eventString(candidate, "eventKind", "event_kind") == "turn_finished_without_completion" {
+			finalPayload = candidate
+			break
+		}
+	}
+	if finalPayload == nil {
+		t.Fatalf("turn evidence event was not persisted: %#v", repo.createdEvents)
+	}
+	if eventBool(finalPayload, "runtimeTurnResultCandidate") || eventBool(finalPayload, "visibleToChat") || eventString(finalPayload, "stateEffect") != "none" {
+		t.Fatalf("turn evidence must remain hidden and state-neutral: %#v", finalPayload)
+	}
+	if eventString(finalPayload, "completionSource") != "" || eventBool(finalPayload, "explicitCompletion") || eventBool(finalPayload, "automaticTurnResult") {
+		t.Fatalf("turn evidence must not claim a completion source: %#v", finalPayload)
+	}
+	verification, _ := finalPayload["browserVerification"].(map[string]interface{})
+	if eventString(finalPayload, "verificationMode") != "managed_browser" ||
+		!eventBool(verification, "opened") || !eventBool(verification, "inspected") {
+		t.Fatalf("managed Browser evidence was lost while promoting the exact turn result: %#v", finalPayload)
 	}
 }
 
@@ -7083,15 +8321,25 @@ func TestTimeoutScannerNeverPromotesHistoricalReplyToSuccess(t *testing.T) {
 		}},
 	}
 	service := &teamService{repo: repo}
-	if err := service.markTaskStale(task, 30*time.Minute); err != nil {
+	if err := service.observeTaskStall(task, 30*time.Minute); err != nil {
 		t.Fatal(err)
 	}
-	if task.Status != models.TeamTaskStatusStale || task.Status == models.TeamTaskStatusSucceeded {
-		t.Fatalf("timeout scanner invented a successful result from historical prose: %#v", task)
+	if task.Status != models.TeamTaskStatusRunning || task.FinishedAt != nil || task.ErrorMessage != nil {
+		t.Fatalf("timeout observation must not interrupt or complete the task: %#v", task)
+	}
+	foundObservation := false
+	for idx := range repo.createdEvents {
+		if repo.createdEvents[idx].EventType == "task_stall_observed" {
+			foundObservation = true
+			break
+		}
+	}
+	if !foundObservation {
+		t.Fatalf("timeout scanner should retain a state-neutral observation for recovery: %#v", repo.createdEvents)
 	}
 }
 
-func TestOldRuntimeDispatchWrapperNeverStartsRecovery(t *testing.T) {
+func TestOldRuntimeDispatchWrapperStartsStateNeutralRecovery(t *testing.T) {
 	team := &models.Team{ID: 100, CommunicationMode: teamCommunicationModeLeaderMediated}
 	task := &models.TeamTask{ID: 264, TeamID: 100, Status: models.TeamTaskStatusRunning}
 	member := &models.TeamMember{ID: 1001, TeamID: 100, MemberKey: "reviewer", Role: "reviewer"}
@@ -7099,8 +8347,8 @@ func TestOldRuntimeDispatchWrapperNeverStartsRecovery(t *testing.T) {
 		"originalEvent": "task_failed", "nonAuthoritative": true,
 		"error": "dispatch finished without reply/completion", "rootTaskTerminal": false,
 	}
-	if isLeaderMediatedRecoverableWarning(team, "message_warning", payload, member, task) {
-		t.Fatal("old Runtime wrapper diagnostics must not trigger a recovery storm")
+	if !isLeaderMediatedRecoverableWarning(team, "message_warning", payload, member, task) {
+		t.Fatal("old Runtime transport diagnostics must wake an idempotent recovery observer without failing the assignment")
 	}
 }
 
@@ -7166,6 +8414,184 @@ func TestLegacyReviewerTeamSendClosesUniqueReviewContract(t *testing.T) {
 				t.Fatalf("legacy Reviewer delivery did not close its unique contract: %#v", items)
 			}
 		}
+	}
+}
+
+func TestEnrichTaskWorkspaceContractReplacesStaleRootIdentity(t *testing.T) {
+	service := &teamService{runtimeWorkspaceRoot: "/workspaces/teams"}
+	team := &models.Team{ID: 28, SharedMountPath: "/team"}
+	task := &models.TeamTask{ID: 64, TeamID: 28}
+	payload := map[string]interface{}{
+		"workspaceContract": map[string]interface{}{
+			"taskRef":              "team-28-task-63",
+			"artifactRoot":         "/team/artifacts/team-28-task-63",
+			"leaderResultRoot":     "/team/results/team-28-task-63",
+			"clientExtensionField": "preserved",
+		},
+	}
+
+	service.enrichTaskWorkspaceContract(7, team, task, payload)
+	contract, ok := payload["workspaceContract"].(map[string]interface{})
+	if !ok {
+		t.Fatal("workspace contract was not generated")
+	}
+	if got := eventString(contract, "taskRef"); got != "team-28-task-64" {
+		t.Fatalf("stale taskRef survived: %q", got)
+	}
+	if got := eventString(contract, "artifactRoot"); got != "/team/artifacts/team-28-task-64" {
+		t.Fatalf("stale artifact root survived: %q", got)
+	}
+	if got := eventString(contract, "leaderResultRoot"); got != "/team/results/team-28-task-64" {
+		t.Fatalf("stale result root survived: %q", got)
+	}
+	if got := eventString(contract, "clientExtensionField"); got != "preserved" {
+		t.Fatalf("non-task extension field was lost: %q", got)
+	}
+}
+
+func TestRootCoordinationRecoveryUsesMachineTurnFactsOnly(t *testing.T) {
+	team := &models.Team{ID: 28, CommunicationMode: teamCommunicationModeLeaderMediated}
+	leader := &models.TeamMember{ID: 1, TeamID: team.ID, MemberKey: "delivery-lead", Role: "leader"}
+	worker := &models.TeamMember{ID: 2, TeamID: team.ID, MemberKey: "developer", Role: "developer"}
+	task := &models.TeamTask{ID: 64, TeamID: team.ID, TargetMemberID: leader.ID, Status: models.TeamTaskStatusRunning}
+	payload := map[string]interface{}{
+		"activeTurnFinished":    true,
+		"hadOutboundAssignment": false,
+		"rootTaskTerminal":      false,
+	}
+	if !shouldRequestRootCoordinationRecovery(task, leader, "turn_finished_without_completion", payload) {
+		t.Fatal("leader turn without a Team action should request non-terminal recovery")
+	}
+	if shouldRequestRootCoordinationRecovery(task, worker, "turn_finished_without_completion", payload) {
+		t.Fatal("a non-owner Worker turn must not be converted into root recovery")
+	}
+	workerReceiptGap := map[string]interface{}{
+		"activeTurnFinished":          true,
+		"assignmentId":                "dev-page",
+		"turnObservationOutcome":      "completion_receipt_gap",
+		"immediateRecoveryEligible":   true,
+		"downstreamAssignmentStarted": false,
+	}
+	if !shouldRequestRootCoordinationRecovery(task, worker, "turn_finished_without_completion", workerReceiptGap) {
+		t.Fatal("an authenticated Worker return without a completion receipt should receive a state-neutral recovery turn")
+	}
+	workerReceiptGap["downstreamAssignmentStarted"] = true
+	if shouldRequestRootCoordinationRecovery(task, worker, "turn_finished_without_completion", workerReceiptGap) {
+		t.Fatal("a real downstream assignment must remain a legitimate wait")
+	}
+	directTask := &models.TeamTask{ID: 65, TeamID: team.ID, TargetMemberID: worker.ID, Status: models.TeamTaskStatusRunning}
+	if !shouldRequestRootCoordinationRecovery(directTask, worker, "turn_finished_without_completion", payload) {
+		t.Fatal("a direct root-task owner must receive the same non-terminal recovery coverage")
+	}
+	withDispatch := map[string]interface{}{
+		"activeTurnFinished":    true,
+		"hadOutboundAssignment": true,
+		"rootTaskTerminal":      false,
+	}
+	if shouldRequestRootCoordinationRecovery(task, leader, "turn_finished_without_completion", withDispatch) {
+		t.Fatal("a Leader turn that dispatched work must not receive a recovery nudge")
+	}
+	if shouldRequestRootCoordinationRecovery(task, leader, "reply", payload) {
+		t.Fatal("ordinary prose must not trigger recovery classification")
+	}
+	actionableObservation := map[string]interface{}{
+		"activeTurnFinished":        true,
+		"rootTaskTerminal":          false,
+		"turnObservationOutcome":    "retryable_tool_gap",
+		"immediateRecoveryEligible": true,
+	}
+	cloneObservation := func(source map[string]interface{}) map[string]interface{} {
+		cloned := make(map[string]interface{}, len(source))
+		for key, value := range source {
+			cloned[key] = value
+		}
+		return cloned
+	}
+	if !shouldRequestRootCoordinationRecovery(task, leader, "turn_finished_without_completion", actionableObservation) {
+		t.Fatal("an exact retryable Team-tool gap should receive one immediate recovery turn")
+	}
+	conflictingObservation := cloneObservation(actionableObservation)
+	conflictingObservation["observationConflict"] = true
+	if shouldRequestRootCoordinationRecovery(task, leader, "turn_finished_without_completion", conflictingObservation) {
+		t.Fatal("conflicting observer facts must degrade to Monitor evidence without an immediate action")
+	}
+	unknownObservation := cloneObservation(actionableObservation)
+	unknownObservation["turnObservationOutcome"] = "runtime_observation_unknown"
+	if shouldRequestRootCoordinationRecovery(task, leader, "turn_finished_without_completion", unknownObservation) {
+		t.Fatal("unknown observations must not drive workflow recovery")
+	}
+	recoveryTurn := cloneObservation(actionableObservation)
+	recoveryTurn["completionRecoveryAttempt"] = 1
+	if shouldRequestRootCoordinationRecovery(task, leader, "turn_finished_without_completion", recoveryTurn) {
+		t.Fatal("an immediate recovery turn must not recursively create another reminder")
+	}
+}
+
+func TestMemberResultNotificationCarriesNonBlockingTurnOutcomePolicy(t *testing.T) {
+	leader := &models.TeamMember{ID: 1, TeamID: 28, MemberKey: "delivery-lead", Role: "leader"}
+	member := &models.TeamMember{ID: 2, TeamID: 28, MemberKey: "developer", Role: "developer"}
+	task := &models.TeamTask{ID: 64, TeamID: 28, TargetMemberID: leader.ID, MessageID: "root-64", Status: models.TeamTaskStatusRunning}
+	service := &teamService{repo: &teamRepositoryStub{membersByID: map[int]*models.TeamMember{leader.ID: leader}}}
+	envelope, target := service.buildLeaderMediatedResultNotificationEnvelope(
+		&models.Team{ID: 28, CommunicationMode: teamCommunicationModeLeaderMediated},
+		task,
+		member,
+		map[string]interface{}{
+			"assignmentId": "dev-page",
+			"workId":       "dev-page",
+			"status":       models.TeamTaskStatusSucceeded,
+			"summary":      "Implementation delivered.",
+		},
+		"member-result-confirmed:64",
+	)
+	if target != leader.MemberKey || eventBool(envelope, "requiresCompletion") {
+		t.Fatalf("unexpected result notification routing: target=%q envelope=%#v", target, envelope)
+	}
+	policy, ok := envelope["turnOutcomePolicy"].(map[string]interface{})
+	if !ok || !eventBool(policy, "actionExpected") || !eventBool(policy, "immediateRecoveryAllowed") {
+		t.Fatalf("result notification must request an observable, non-blocking Leader action: %#v", envelope)
+	}
+}
+
+func TestCreateRootCoordinationRecoveryPersistsHiddenEventAndOutbox(t *testing.T) {
+	repo := &teamRepositoryStub{}
+	service := &teamService{repo: repo}
+	team := &models.Team{ID: 28, CommunicationMode: teamCommunicationModeLeaderMediated}
+	leader := &models.TeamMember{ID: 1, TeamID: team.ID, MemberKey: "delivery-lead", Role: "leader"}
+	task := &models.TeamTask{
+		ID: 64, TeamID: team.ID, TargetMemberID: leader.ID, MessageID: "root-64",
+		Status: models.TeamTaskStatusRunning, WorkflowState: teamWorkflowStatePlanning,
+	}
+	sourceID := "turn-finished-64"
+	streamID := "123-0"
+	source := &models.TeamEvent{EventID: &sourceID, RedisStreamID: &streamID}
+	if err := service.createRootCoordinationRecovery(team, nil, task, leader, map[string]interface{}{}, source); err != nil {
+		t.Fatalf("createRootCoordinationRecovery returned error: %v", err)
+	}
+	if len(repo.createdEvents) != 1 || repo.createdEvents[0].EventType != "root_coordination_recovery_requested" {
+		t.Fatalf("unexpected recovery events: %#v", repo.createdEvents)
+	}
+	payload := teamEventPayloadMap(repo.createdEvents[0])
+	if eventBool(payload, "visibleToChat") || eventBool(payload, "rootTaskTerminal") || eventString(payload, "stateEffect") != "none" {
+		t.Fatalf("recovery event must remain hidden and state-neutral: %#v", payload)
+	}
+	if len(repo.outboxRows) != 1 {
+		t.Fatalf("expected one durable recovery outbox, got %d", len(repo.outboxRows))
+	}
+	var envelope map[string]interface{}
+	if err := json.Unmarshal([]byte(repo.outboxRows[0].PayloadJSON), &envelope); err != nil {
+		t.Fatalf("decode recovery envelope: %v", err)
+	}
+	if eventString(envelope, "rootTaskId") != "team-28-task-64" || eventBool(envelope, "requiresCompletion") {
+		t.Fatalf("unexpected recovery envelope: %#v", envelope)
+	}
+	policy, ok := envelope["turnOutcomePolicy"].(map[string]interface{})
+	if !ok || eventBool(policy, "immediateRecoveryAllowed") || !eventBool(policy, "actionExpected") {
+		t.Fatalf("recovery turn must be observable but must not recursively self-trigger: %#v", envelope)
+	}
+	metadata, _ := envelope["metadata"].(map[string]interface{})
+	if eventInt(metadata, "completionRecoveryAttempt") != 1 {
+		t.Fatalf("recovery generation was not carried into the next turn: %#v", envelope)
 	}
 }
 
@@ -7486,6 +8912,38 @@ func (s *teamRepositoryStub) ConfirmWorkItemResult(item *models.TeamWorkItem, ev
 	clone.ID = len(s.outboxRows) + 1
 	outbox.ID = clone.ID
 	s.outboxRows = append(s.outboxRows, clone)
+	return nil
+}
+func (s *teamRepositoryStub) CreateEventWithOutbox(event *models.TeamEvent, outbox *models.TeamEventOutbox) error {
+	if event == nil || outbox == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	eventExists := false
+	for idx := range s.createdEvents {
+		if s.createdEvents[idx].TeamID == event.TeamID &&
+			derefTeamString(s.createdEvents[idx].EventID) == derefTeamString(event.EventID) {
+			eventExists = true
+			break
+		}
+	}
+	if !eventExists {
+		cloneEvent := *event
+		cloneEvent.ID = len(s.createdEvents) + 1
+		event.ID = cloneEvent.ID
+		s.createdEvents = append(s.createdEvents, cloneEvent)
+	}
+	for idx := range s.outboxRows {
+		if s.outboxRows[idx].TeamID == outbox.TeamID && s.outboxRows[idx].MessageID == outbox.MessageID {
+			outbox.ID = s.outboxRows[idx].ID
+			return nil
+		}
+	}
+	cloneOutbox := *outbox
+	cloneOutbox.ID = len(s.outboxRows) + 1
+	outbox.ID = cloneOutbox.ID
+	s.outboxRows = append(s.outboxRows, cloneOutbox)
 	return nil
 }
 func (s *teamRepositoryStub) ListPendingEventOutbox(now time.Time, limit int) ([]models.TeamEventOutbox, error) {

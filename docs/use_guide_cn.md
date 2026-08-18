@@ -286,6 +286,7 @@ https://<服务器IP>:30443
    * **Base URL**：填写模型服务提供的接口地址。
    * **API Key**：填写对应模型服务的有效密钥。
    * **Provider Model**：填写实际调用的模型名称。
+   * **模型思考**：仅在 ClawManager 能可靠控制供应商 Thinking 协议时可用。关闭后所有请求都会明确禁用 Thinking；开启后，受支持的 Agent 会话仍可进一步关闭或选择强度。当前支持官方 DeepSeek OpenAI-compatible 地址中的 `deepseek-*` 模型。Thinking 可能增加耗时和推理 Token。
    * **币种**：按实际情况填写；如无需计费展示，可保持默认。
    * **输入价格 / 输出价格**：如不做计费统计，可先填写 `0`。
 3. 提交前务必勾选：
@@ -689,9 +690,9 @@ AI 审计页面用于查看最近的受管模型调用记录，帮助管理员�
 <a id="sec-13-team"></a>
 ### 10.4 Team 协作
 
-Team 用于让多个 OpenClaw Lite 成员围绕同一目标协作。进入 **Teams** 后，选择成员模板、填写 Team 名称并创建即可；不需要逐个配置成员运行时或资源预设。
+Team 使用一个 OpenClaw Lite Leader 协调多个 Worker。可以选择八个只读固定模板，也可以从创建页右上角进入 **自定义 Team**，通过自然语言和可选的 2–6 人总人数生成、调整和复用自己的模板。Leader 固定使用 OpenClaw Lite；每个 Worker 可选择 OpenClaw Lite 或已配置的 Hermes Lite。
 
-创建后，在团队群聊中向 Leader 描述目标。Leader 会安排成员完成计划、执行、验收和最终汇总；通过 **Execution Kanban** 查看当前阶段和已完成交付，通过 **文件** 标签查看共享产物。
+自定义 Team 通过同一 AI Gateway 的 `model: "auto"` 生成，并继承实际选中模型的 Thinking 配置。创建后，在团队群聊中向 Leader 描述目标；通过 **Execution Kanban** 查看当前 Query 和交付状态，通过 **文件** 查看共享产物。Hermes Lite Worker 的 Team 会话也可在 Hermes GUI 中实时查看。
 
 详见 [Team 协作快速指南](./team-workspaces-guide.md)。
 
