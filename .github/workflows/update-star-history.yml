@@ -1,0 +1,70 @@
+name: Update Star History
+
+env:
+  STAR_HISTORY_REPOSITORY: Yuan-lab-LLM/ClawManager
+
+on:
+  schedule:
+    # 09:37 Asia/Shanghai. Avoid the busy start of the UTC hour.
+    - cron: '37 1 * * *'
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/scripts/generate_star_history.py'
+      - '.github/scripts/test_generate_star_history.py'
+      - '.github/workflows/update-star-history.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-star-history
+  cancel-in-progress: true
+
+jobs:
+  update:
+    name: Generate and publish chart
+    if: github.repository == 'Yuan-lab-LLM/ClawManager'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Verify chart generator
+        working-directory: .github/scripts
+        run: python3 -m unittest -v test_generate_star_history.py
+
+      - name: Generate light and dark charts
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 .github/scripts/generate_star_history.py
+
+      - name: Publish to the star-history branch
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
+          git fetch --no-tags origin \
+            '+refs/heads/star-history:refs/remotes/origin/star-history' || true
+
+          LIGHT_BLOB="$(git hash-object -w generated-star-history/star-history-light.svg)"
+          DARK_BLOB="$(git hash-object -w generated-star-history/star-history-dark.svg)"
+          TREE="$(printf '100644 blob %s\tstar-history-dark.svg\n100644 blob %s\tstar-history-light.svg\n' \
+            "${DARK_BLOB}" "${LIGHT_BLOB}" | git mktree)"
+
+          PARENT="$(git rev-parse --verify refs/remotes/origin/star-history 2>/dev/null || true)"
+          if [ -n "${PARENT}" ]; then
+            COMMIT="$(printf 'chore: update star history\n' | git commit-tree "${TREE}" -p "${PARENT}")"
+          else
+            COMMIT="$(printf 'chore: initialize star history\n' | git commit-tree "${TREE}")"
+          fi
+
+          git push origin "${COMMIT}:refs/heads/star-history"
