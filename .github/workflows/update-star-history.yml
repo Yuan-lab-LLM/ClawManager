@@ -68,3 +68,20 @@ jobs:
           fi
 
           git push origin "${COMMIT}:refs/heads/star-history"
+
+      - name: Verify public chart URLs
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          for THEME in light dark; do
+            URL="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/star-history/star-history-${THEME}.svg?run=${GITHUB_RUN_ID}"
+            OUTPUT="${RUNNER_TEMP}/star-history-${THEME}.svg"
+
+            curl --fail --location \
+              --retry 6 --retry-all-errors --retry-delay 5 \
+              --output "${OUTPUT}" "${URL}"
+
+            grep -q '<svg' "${OUTPUT}"
+            grep -q 'Yuan-lab-LLM/ClawManager' "${OUTPUT}"
+          done
