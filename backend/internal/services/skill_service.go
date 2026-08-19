@@ -737,6 +737,9 @@ func liteRuntimePersistentRoot(instance *models.Instance) string {
 	if strings.EqualFold(strings.TrimSpace(instance.Type), RuntimeTypeHermes) {
 		return filepath.Join(workspacePath, "home", ".hermes")
 	}
+	if strings.EqualFold(strings.TrimSpace(instance.Type), RuntimeTypeDeepSeekHarness) {
+		return filepath.Join(workspacePath, "home", ".dsh")
+	}
 	if strings.EqualFold(strings.TrimSpace(instance.Type), RuntimeTypeOpenCode) {
 		if isLiteRuntimeInstance(instance) {
 			return filepath.Join(workspacePath, "home", ".opencode")

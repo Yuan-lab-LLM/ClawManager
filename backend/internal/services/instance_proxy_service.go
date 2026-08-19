@@ -60,7 +60,13 @@ type serviceLookupCall struct {
 	err         error
 }
 
-const defaultServiceCacheTTL = 30 * time.Second
+const (
+	defaultServiceCacheTTL                 = 30 * time.Second
+	deepSeekHarnessPublicURLTemplateEnvVar = "CLAWMANAGER_DEEPSEEK_HARNESS_PUBLIC_URL_TEMPLATE"
+)
+
+// DedicatedRuntimeOriginHeader marks requests routed through a runtime-specific browser origin.
+const DedicatedRuntimeOriginHeader = "X-ClawManager-Runtime-Origin"
 
 var ErrInstanceGatewayUnavailable = errors.New("instance gateway is not available")
 
@@ -135,11 +141,12 @@ func (s *InstanceProxyService) ProxyRequest(ctx context.Context, instanceID int,
 	}
 
 	effectiveRequestPath := canonicalProxyEntryRequestPath(r.URL.Path, accessToken, instanceID)
+	dedicatedRuntimeOrigin := isDedicatedRuntimeOriginRequest(r, accessToken.InstanceType)
 
 	// Extract the actual path from the request (remove the proxy prefix)
 	targetPath := s.extractTargetPath(effectiveRequestPath, instanceID, accessToken.InstanceType)
 	targetPort := s.resolveTargetPort(accessToken.InstanceType, accessToken.TargetPort, targetPath)
-	shouldRewriteHTML := s.shouldRewriteHTMLForProxy(instanceID, accessToken.InstanceType)
+	shouldRewriteHTML := s.shouldRewriteHTMLForProxy(instanceID, accessToken.InstanceType) && !dedicatedRuntimeOrigin
 
 	// Build target URL
 	targetURL, err := s.resolveHTTPProxyTarget(ctx, accessToken, instanceID, targetPort, targetPath, effectiveRequestPath)
@@ -208,6 +215,15 @@ func (s *InstanceProxyService) ProxyRequest(ctx context.Context, instanceID int,
 		}
 	}
 	attachCookiesToRequest(proxyReq, bootstrapSetCookies)
+	if dedicatedRuntimeOrigin && isDeepSeekHarnessRuntimeType(accessToken.InstanceType) {
+		// DeepSeek Harness validates every /api request against Host and Origin.
+		// The browser uses a per-instance public origin while the upstream sees
+		// the runtime Pod address, so normalize both values at this trust boundary.
+		proxyReq.Host = targetURL.Host
+		if strings.TrimSpace(proxyReq.Header.Get("Origin")) != "" {
+			proxyReq.Header.Set("Origin", targetURL.Scheme+"://"+targetURL.Host)
+		}
+	}
 
 	// Set X-Forwarded headers
 	proxyReq.Header.Set("X-Forwarded-For", r.RemoteAddr)
@@ -237,7 +253,7 @@ func (s *InstanceProxyService) ProxyRequest(ctx context.Context, instanceID int,
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Access-Control-Allow-Credentials", "true")
 
-	if location := resp.Header.Get("Location"); location != "" {
+	if location := resp.Header.Get("Location"); location != "" && !dedicatedRuntimeOrigin {
 		resp.Header.Set("Location", s.rewriteRedirectLocation(instanceID, location))
 	}
 
@@ -347,6 +363,7 @@ func (s *InstanceProxyService) ProxyWebSocket(ctx context.Context, instanceID in
 	if accessToken.InstanceID != instanceID {
 		return fmt.Errorf("token does not match instance")
 	}
+	dedicatedRuntimeOrigin := isDedicatedRuntimeOriginRequest(r, accessToken.InstanceType)
 
 	// Extract the actual path from the request
 	targetPath := s.extractTargetPath(r.URL.Path, instanceID, accessToken.InstanceType)
@@ -399,7 +416,13 @@ func (s *InstanceProxyService) ProxyWebSocket(ctx context.Context, instanceID in
 		setOpenCodeServerBasicAuthHeaders(upstreamHeader, managedGatewayToken)
 	} else {
 		setManagedRuntimeGatewayAuthHeaders(upstreamHeader, managedGatewayToken)
-		if managedGatewayToken != "" {
+		if dedicatedRuntimeOrigin && isDeepSeekHarnessRuntimeType(accessToken.InstanceType) {
+			// DeepSeek Harness applies the same Host/Origin trust check to its
+			// event sockets as it does to HTTP API requests. The public dedicated
+			// origin is only a ClawManager routing boundary; the upstream handshake
+			// must use the selected instance gateway as its origin.
+			upstreamHeader.Set("Origin", websocketUpstreamOrigin(targetURL))
+		} else if managedGatewayToken != "" {
 			upstreamHeader.Set("Origin", s.openClawWebSocketOrigin(targetURL))
 		}
 	}
@@ -519,6 +542,23 @@ func setManagedRuntimeGatewayAuthHeaders(header http.Header, token string) {
 	header.Set("OpenAI-Api-Key", token)
 	header.Set("X-ClawManager-Instance-Token", token)
 	header.Set("X-ClawManager-LLM-API-Key", token)
+}
+
+func isDeepSeekHarnessRuntimeType(instanceType string) bool {
+	runtimeType, managed := NormalizeV2RuntimeType(instanceType)
+	return managed && runtimeType == RuntimeTypeDeepSeekHarness
+}
+
+func isDedicatedRuntimeOriginRequest(r *http.Request, instanceType string) bool {
+	if r == nil {
+		return false
+	}
+	runtimeType, managed := NormalizeV2RuntimeType(instanceType)
+	originRuntimeType, originManaged := NormalizeV2RuntimeType(r.Header.Get(DedicatedRuntimeOriginHeader))
+	if !managed || !originManaged || runtimeType != originRuntimeType {
+		return false
+	}
+	return runtimeType == RuntimeTypeDeepSeekHarness
 }
 
 func setOpenCodeServerBasicAuthHeaders(header http.Header, token string) {
@@ -1113,10 +1153,47 @@ func (s *InstanceProxyService) GetProxyURLForInstance(instance *models.Instance,
 	if instance == nil {
 		return ""
 	}
+	if runtimeType, ok := v2RuntimeTypeForInstance(instance); ok && runtimeType == RuntimeTypeDeepSeekHarness {
+		if publicURL := managedRuntimePublicURL(runtimeType, instance.ID, token); publicURL != "" {
+			return publicURL
+		}
+	}
 	if runtimeType, ok := v2RuntimeTypeForInstance(instance); ok && runtimeType == RuntimeTypeHermes {
 		return proxyURLWithPath(instance.ID, "/chat", token)
 	}
 	return proxyURLWithPath(instance.ID, "/", token)
+}
+
+func managedRuntimePublicURL(runtimeType string, instanceID int, token string) string {
+	// DNS and TLS are deployment concerns. ClawManager only expands the
+	// deployment-provided origin template, so the same code supports public
+	// wildcard DNS (for example nip.io) and an offline authoritative DNS zone.
+	var envVar string
+	switch runtimeType {
+	case RuntimeTypeDeepSeekHarness:
+		envVar = deepSeekHarnessPublicURLTemplateEnvVar
+	default:
+		return ""
+	}
+	template := strings.TrimSpace(os.Getenv(envVar))
+	if template == "" || !strings.Contains(template, "{instance_id}") {
+		return ""
+	}
+
+	rawURL := strings.ReplaceAll(template, "{instance_id}", strconv.Itoa(instanceID))
+	parsed, err := url.Parse(rawURL)
+	if err != nil || (parsed.Scheme != "https" && parsed.Scheme != "http") || strings.TrimSpace(parsed.Host) == "" {
+		return ""
+	}
+	if parsed.Path == "" {
+		parsed.Path = "/"
+	}
+	if token != "" {
+		query := parsed.Query()
+		query.Set("token", token)
+		parsed.RawQuery = query.Encode()
+	}
+	return parsed.String()
 }
 
 // GetTargetPortForInstance returns the service target port used by the instance type.
@@ -1188,7 +1265,7 @@ func (s *InstanceProxyService) resolveTargetScheme(instanceType string, websocke
 
 func usesHTTPSUpstream(instanceType string) bool {
 	switch instanceType {
-	case "ubuntu", "webtop", "hermes", "openclaw", "workbuddy":
+	case "ubuntu", "webtop", "hermes", "openclaw", "workbuddy", RuntimeTypeDeepSeekHarness:
 		return true
 	default:
 		return false

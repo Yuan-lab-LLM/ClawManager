@@ -62,6 +62,7 @@ Recent highlights from the latest product and documentation updates.
 - [2026-08-19] Added managed OpenCode workspaces, refreshed the instance desktop experience, and expanded Skill Hub delivery to OpenClaw, Hermes, and OpenCode runtimes. See the [OpenCode Workspace Guide](./docs/opencode-lite-pro-agent-development_en.md).
 - [2026-08-18] Expanded Team collaboration with eight read-only built-in templates, natural-language custom Team templates, optional Hermes Lite Workers, live Execution Kanban, shared artifacts, and member-session visibility.
 - [2026-08-17] Added model-managed Thinking, AI Gateway Session Usage, editable scheduled tasks, and improved Lite instance lifecycle and batch operations.
+- [2026-08-16] Added DeepSeek Harness Lite and Pro support, including shared runtime-pool isolation, dedicated Webtop desktops, AI Gateway model injection, skills/workspace integration, and dedicated Lite browser origins.
 - [2026-07-07] Added the Security Protection Platform (secplane) frontend — a comprehensive security console covering runtime defense (input/state/decision/output surface, asset tamper-proofing, human approval), host hardening & container isolation, outbound trusted-endpoint governance, policy governance, kill-switch/circuit-breaker, full-chain audit, SecureClaw data-and-component trust auditing, collaboration governance, and input detection. All 4 defense layers are accessible from a unified admin UI with full i18n for 5 languages.
 - [2026-06-14] Added Lite / Pro runtime modes and rollout support, so Lite instances can run through shared gateway runtime pools while Pro instances keep dedicated desktop deployments for stronger isolation.
 - [2026-05-18] Added the Team workspace MVP introduction and preview, covering one-click Team creation, OpenClaw member orchestration, Redis Team Bus injection, shared storage, member status, task dispatch, and event/result views.
@@ -120,6 +121,7 @@ ClawManager currently supports the following managed runtimes:
 - <img src="frontend/public/openclaw.png" alt="OpenClaw icon" width="18" /> `OpenClaw`: Lite and Pro workspaces with native conversations, tools, scheduled tasks, and Team support
 - <img src="frontend/public/hermes.png" alt="Hermes icon" width="18" /> `Hermes`: Lite and Pro workspaces with a persistent `.hermes` home, native sessions, and optional Team Worker support
 - <img src="frontend/public/opencode.png" alt="OpenCode icon" width="18" /> `OpenCode`: managed coding workspaces with AI Gateway model access, workspace files, and terminal/desktop access. See the [OpenCode Workspace Guide](./docs/opencode-lite-pro-agent-development_en.md).
+- <img src="frontend/public/deepseek-harness.svg" alt="DeepSeek Harness icon" width="18" /> `DeepSeek Harness`: Lite pooled and Pro desktop workspaces with AI Gateway model injection, skills, workspace files, and isolated browser access
 
 Runtime previews:
 
@@ -152,7 +154,7 @@ The cluster profile is validated with Longhorn (`longhorn` for RWO data and `lon
 
 ### Runtime and Instance Management
 
-Create OpenClaw, Hermes, or OpenCode workspaces in Lite or Pro mode, choose an enabled system image, apply a resource preset or custom CPU/memory/storage values, and manage lifecycle, desktop access, files, shell access, environment variables, archives, Share Links, and Lite batch operations from one place.
+Create OpenClaw, Hermes, OpenCode, or DeepSeek Harness workspaces in Lite or Pro mode, choose an enabled system image, apply a resource preset or custom CPU/memory/storage values, and manage lifecycle, desktop access, files, shell access, environment variables, archives, Share Links, and Lite batch operations from one place.
 
 ### AI Gateway
 
@@ -216,7 +218,7 @@ The product is designed to feel coherent across administration, workspace access
 
 ### Lite Mode Deployment
 
-Lite mode provisions instances through a shared gateway runtime pool. Each workspace runs as an isolated gateway process inside managed runtime Pods, which keeps startup fast and lowers dedicated CPU, memory, storage, and GPU allocation overhead while preserving workspace access, Share Link / Password access, channel and skill injection, and admin visibility.
+Lite mode provisions OpenClaw, Hermes, OpenCode, and DeepSeek Harness instances through shared gateway runtime pools. Each workspace runs as an isolated gateway process inside managed runtime Pods, which keeps startup fast and lowers dedicated CPU, memory, storage, and GPU allocation overhead while preserving workspace access, Share Link / Password access, supported channel and skill injection, and admin visibility.
 
 ![](./docs/main/liteopenclaw.png)
 
@@ -277,7 +279,7 @@ AI Gateway extends the workspace experience with governed model access, audit tr
 ## How It Works
 
 1. Admins define governance policies and reusable resources.
-2. Users create or enter OpenClaw, Hermes, or OpenCode workspaces in Lite or Pro mode.
+2. Users create or enter OpenClaw, Hermes, OpenCode, or DeepSeek Harness workspaces in Lite or Pro mode.
 3. Team workspaces can provision multiple member runtimes with Redis Team Bus and shared storage configuration.
 4. Agents connect back to the control plane and report runtime state.
 5. Channels, skills, and bundles are compiled and applied to instances.

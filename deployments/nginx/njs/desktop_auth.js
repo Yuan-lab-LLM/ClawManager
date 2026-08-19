@@ -36,13 +36,21 @@ function b64urlToString(s) {
     return Buffer.from(std, 'base64').toString();
 }
 
+function requestInstanceID(r) {
+    return r.variables.inst_id || r.variables.runtime_inst_id || '';
+}
+
 function readCookieToken(r) {
     var cookie = r.headersIn['Cookie'];
     if (!cookie) {
         return '';
     }
 
-    var name = 'instance_access_' + r.variables.inst_id;
+    var instanceID = requestInstanceID(r);
+    if (!instanceID) {
+        return '';
+    }
+    var name = 'instance_access_' + instanceID;
     var parts = cookie.split(';');
     for (var i = 0; i < parts.length; i++) {
         var kv = parts[i].trim();
@@ -107,7 +115,8 @@ function resolveTarget(r) {
         return DENY;
     }
 
-    if (String(payload.instance_id) !== String(r.variables.inst_id)) {
+    var instanceID = requestInstanceID(r);
+    if (!instanceID || String(payload.instance_id) !== String(instanceID)) {
         return DENY;
     }
 

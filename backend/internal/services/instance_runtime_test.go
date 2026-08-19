@@ -89,6 +89,23 @@ func TestBuildRuntimeConfig_WorkbuddyUsesManagedWebtopDefaults(t *testing.T) {
 	assertSelkiesClipboardEnabled(t, config.Env)
 }
 
+func TestBuildRuntimeConfig_DeepSeekHarnessUsesManagedWebtopDefaults(t *testing.T) {
+	config := buildRuntimeConfig(RuntimeTypeDeepSeekHarness, RuntimeTypeDeepSeekHarness, "latest", nil, nil)
+
+	if config.Image != defaultSystemImageSettings[RuntimeTypeDeepSeekHarness] {
+		t.Fatalf("DeepSeek Harness image = %q", config.Image)
+	}
+	if config.Port != 3001 || config.MountPath != "/config" {
+		t.Fatalf("unexpected DeepSeek Harness runtime config: %#v", config)
+	}
+	if config.Env["DSH_HOME"] != "/config/.dsh" || config.Env["TITLE"] != "DeepSeek Harness Pro" {
+		t.Fatalf("unexpected DeepSeek Harness environment: %#v", config.Env)
+	}
+	if !usesWebtopImage(RuntimeTypeDeepSeekHarness) || !usesHTTPSUpstream(RuntimeTypeDeepSeekHarness) {
+		t.Fatal("DeepSeek Harness Pro must use Webtop HTTPS proxy behavior")
+	}
+}
+
 func assertSelkiesClipboardEnabled(t *testing.T, env map[string]string) {
 	t.Helper()
 	for _, key := range []string{

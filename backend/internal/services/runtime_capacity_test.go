@@ -3,12 +3,12 @@ package services
 import "testing"
 
 func TestNormalizeV2RuntimeTypeAcceptsManagedRuntimeTypes(t *testing.T) {
-	for _, input := range []string{"openclaw", " OpenClaw ", "hermes", "Hermes", "opencode", " OpenCode "} {
+	for _, input := range []string{"openclaw", " OpenClaw ", "hermes", "Hermes", "opencode", " OpenCode ", "deepseek-harness", " DeepSeek-Harness "} {
 		got, ok := NormalizeV2RuntimeType(input)
 		if !ok {
 			t.Fatalf("expected %q to be accepted", input)
 		}
-		if got != RuntimeTypeOpenClaw && got != RuntimeTypeHermes && got != RuntimeTypeOpenCode {
+		if got != RuntimeTypeOpenClaw && got != RuntimeTypeHermes && got != RuntimeTypeOpenCode && got != RuntimeTypeDeepSeekHarness {
 			t.Fatalf("expected normalized managed runtime type, got %q", got)
 		}
 	}
@@ -64,6 +64,12 @@ func TestRuntimeGatewayPortBlockSizeUsesSinglePortForHermes(t *testing.T) {
 	}
 	if got, want := RuntimeGatewayPortBlockSize("unknown"), RuntimeOpenClawPortsPerInstance; got != want {
 		t.Fatalf("unknown runtime gateway port block size = %d, want safe default %d", got, want)
+	}
+}
+
+func TestRuntimeGatewayPortBlockSizeUsesSinglePortForDeepSeekHarness(t *testing.T) {
+	if got, want := RuntimeGatewayPortBlockSize(RuntimeTypeDeepSeekHarness), 1; got != want {
+		t.Fatalf("DeepSeek Harness gateway port block size = %d, want %d", got, want)
 	}
 }
 

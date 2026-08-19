@@ -64,6 +64,45 @@ kubectl get pvc -n clawmanager-system
 kubectl get pods -n clawmanager-system
 ```
 
+## DeepSeek Harness Runtime
+
+DeepSeek Harness is available in both runtime modes:
+
+- Lite runs `dsh web` as an isolated process in the shared
+  `deepseek-harness-runtime` pool. Its persistent home is
+  `<workspace>/home/.dsh`.
+- Pro runs a dedicated Webtop Deployment on port `3001`; `dsh web` listens on
+  loopback port `3080` inside the desktop and Chromium opens it automatically.
+  Its persistent home is `/config/.dsh`.
+
+The runtime image source is owned by the
+[AgentsRuntime repository](https://github.com/Iamlovingit/AgentsRuntime/tree/main/deepseek-harness)
+under `deepseek-harness/`, not by ClawManager. It pins `@deepseek-ai/dsh` to an
+explicit release candidate and publishes the `deepseek-harness` and
+`deepseek-harness-lite` images. Both modes receive the ClawManager-managed
+OpenAI-compatible base URL, instance credential, and model list. The bundled
+Cordis patch exposes only that managed provider and disables the direct public
+DeepSeek web-search provider.
+
+The DeepSeek Harness browser uses root-relative HTTP and websocket routes. Lite
+therefore requires a dedicated origin template:
+
+```text
+CLAWMANAGER_DEEPSEEK_HARNESS_PUBLIC_URL_TEMPLATE=https://deepseek-harness-{instance_id}.172-16-1-12.nip.io:39443/
+```
+
+For an offline deployment, use the same wildcard DNS and certificate strategy
+described above, for example:
+
+```text
+CLAWMANAGER_DEEPSEEK_HARNESS_PUBLIC_URL_TEMPLATE=https://deepseek-harness-{instance_id}.clawmanager.test:39443/
+```
+
+The `{instance_id}` placeholder is required. The bundled Nginx configuration
+authenticates the short-lived bootstrap token, promotes it to an origin-scoped
+cookie, and forwards HTTP and websocket traffic through the control plane to
+the assigned Lite process.
+
 ## Storage Profiles
 
 ### Single-Node

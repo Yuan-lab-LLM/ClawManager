@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"reflect"
 	"strings"
 	"testing"
@@ -497,6 +498,22 @@ func TestShortExternalAccessEntryRedirectTarget(t *testing.T) {
 			canonicalPath: "/api/v1/instances/71/proxy/chat/?token=secret",
 			want:          "/share/sl_abc123",
 		},
+		{
+			name:          "dedicated runtime origin redirects to shared instance shell",
+			method:        http.MethodGet,
+			requestPath:   "/s/sl_abc123/",
+			code:          "sl_abc123",
+			canonicalPath: "https://deepseek-harness-71.example.test/",
+			want:          "/share/sl_abc123",
+		},
+		{
+			name:          "unsupported absolute scheme does not redirect",
+			method:        http.MethodGet,
+			requestPath:   "/s/sl_abc123/",
+			code:          "sl_abc123",
+			canonicalPath: "file:///tmp/runtime.html",
+			want:          "",
+		},
 	}
 
 	for _, tt := range tests {
@@ -593,6 +610,79 @@ func TestSharedInstanceSessionIssuesScopedRuntimeAndWorkspaceSession(t *testing.
 		if !strings.Contains(joinedCookies, path) {
 			t.Fatalf("session cookies missing %q:\n%s", path, joinedCookies)
 		}
+	}
+}
+
+func TestSharedDeepSeekHarnessSessionBootstrapsDedicatedRuntimeOrigin(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	t.Setenv(
+		"CLAWMANAGER_DEEPSEEK_HARNESS_PUBLIC_URL_TEMPLATE",
+		"https://deepseek-harness-{instance_id}.example.test/",
+	)
+	workspacePath := t.TempDir()
+	instanceService := &fakeWorkspaceHandlerInstanceService{instances: map[int]*models.Instance{
+		78: {
+			ID:            78,
+			UserID:        20,
+			Name:          "shared-deepseek-harness",
+			Type:          services.RuntimeTypeDeepSeekHarness,
+			Status:        "running",
+			RuntimeType:   services.RuntimeBackendGateway,
+			InstanceMode:  services.InstanceModeLite,
+			WorkspacePath: &workspacePath,
+		},
+	}}
+	accessTokens := services.NewInstanceAccessService()
+	defer accessTokens.Stop()
+	handler := &InstanceHandler{
+		instanceService: instanceService,
+		externalAccessService: &fakeSharedExternalAccessService{access: &models.InstanceExternalAccess{
+			InstanceID:      78,
+			Enabled:         true,
+			AuthMode:        services.ExternalAccessModeShareLink,
+			WorkspaceAccess: services.ExternalWorkspaceAccessWrite,
+		}},
+		accessService: accessTokens,
+		proxyService:  services.NewInstanceProxyService(accessTokens),
+	}
+	router := gin.New()
+	router.GET("/api/v1/shared-instances/:code/session", handler.GetSharedInstanceSession)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/shared-instances/sl_test/session", nil)
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s, want 200", rec.Code, rec.Body.String())
+	}
+	var response struct {
+		Data struct {
+			AccessURL string `json:"access_url"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode session response: %v", err)
+	}
+	parsed, err := url.Parse(response.Data.AccessURL)
+	if err != nil {
+		t.Fatalf("parse access URL %q: %v", response.Data.AccessURL, err)
+	}
+	if got, want := parsed.Host, "deepseek-harness-78.example.test"; got != want {
+		t.Fatalf("access URL host = %q, want %q", got, want)
+	}
+	token := parsed.Query().Get("token")
+	if token == "" {
+		t.Fatalf("dedicated runtime access URL is missing bootstrap token: %q", response.Data.AccessURL)
+	}
+	accessToken, err := accessTokens.ValidateToken(token)
+	if err != nil {
+		t.Fatalf("validate bootstrap token: %v", err)
+	}
+	if accessToken.InstanceID != 78 {
+		t.Fatalf("bootstrap token instance ID = %d, want 78", accessToken.InstanceID)
+	}
+	if got, want := accessToken.SessionBinding, sharedExternalAccessSessionBinding("sl_test"); got != want {
+		t.Fatalf("bootstrap token session binding = %q, want %q", got, want)
 	}
 }
 
@@ -711,6 +801,34 @@ func TestProxyAccessTokenRejectsRuntimeQueryTokenWithoutCookie(t *testing.T) {
 	}
 	if recorder.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusUnauthorized)
+	}
+}
+
+func TestBrowserAccessEntryURLBootstrapsDedicatedOrigin(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		accessURL string
+		proxyURL  string
+		want      string
+	}{
+		{
+			name:      "same origin keeps token out of entry URL",
+			accessURL: "/api/v1/instances/76/proxy/",
+			proxyURL:  "/api/v1/instances/76/proxy/?token=jwt",
+			want:      "/api/v1/instances/76/proxy/",
+		},
+		{
+			name:      "dedicated origin uses token bootstrap URL",
+			accessURL: "https://deepseek-harness-76.example.test/",
+			proxyURL:  "https://deepseek-harness-76.example.test/?token=jwt",
+			want:      "https://deepseek-harness-76.example.test/?token=jwt",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := browserAccessEntryURL(tc.accessURL, tc.proxyURL); got != tc.want {
+				t.Fatalf("browserAccessEntryURL() = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 

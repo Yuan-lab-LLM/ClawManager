@@ -62,6 +62,7 @@ Wichtige aktuelle Produkt- und Dokumentations-Updates.
 - [2026-08-19] Verwaltete OpenCode-Workspaces, eine aktualisierte Instanzansicht und Skill-Hub-Bereitstellung fuer OpenClaw, Hermes und OpenCode hinzugefuegt. Siehe [OpenCode Workspace Guide](./docs/opencode-lite-pro-agent-development_de.md).
 - [2026-08-18] Team-Kollaboration um acht schreibgeschuetzte Vorlagen, benutzerdefinierte Teams aus natuerlicher Sprache, optionale Hermes Lite Worker, Live-Kanban, gemeinsame Artefakte und Member-Sessions erweitert.
 - [2026-08-17] Modellgesteuertes Thinking, AI-Gateway Session Usage, bearbeitbare geplante Aufgaben und erweiterte Lite-Lifecycle- und Batch-Funktionen hinzugefuegt.
+- [2026-08-16] DeepSeek Harness Lite und Pro mit isolierten Shared-Runtime-Pools, dedizierten Webtop-Desktops, AI-Gateway-Modellinjektion, Skills/Workspace-Integration und eigener Lite-Browser-Origin hinzugefuegt.
 - [2026-07-07] Security Protection Platform (secplane) Frontend-Konsole hinzugefuegt — umfassende Sicherheitskonsole mit Runtime-Abwehr (Eingabe-/Zustands-/Entscheidungs-/Ausgabeoberflaeche, Asset-Schutz, menschliche Freigabe), Host-Haertung und Container-Isolierung, Outbound-Vertrauens-Governance, Richtlinien-Governance, Kill-Switch/Circuit-Breaker, Full-Chain-Audit, SecureClaw-Daten- und Komponentenvertrauens-Audit, Kollaborations-Governance und Eingabeerkennung. 4 Verteidigungsschichten in einer einheitlichen Admin-UI mit vollstaendiger i18n fuer 5 Sprachen.
 - [2026-06-14] Lite-/Pro-Runtime-Modi und Rollout-Support hinzugefuegt: Lite-Instanzen laufen ueber gemeinsame Gateway-Runtime-Pools, waehrend Pro-Instanzen dedizierte Desktop-Deployments fuer staerkere Isolation behalten.
 - [2026-05-18] Team-Workspace-MVP mit Einfuehrung und Vorschau hinzugefuegt, inklusive One-Click-Team-Erstellung, OpenClaw-Member-Orchestrierung, Redis-Team-Bus-Injection, Shared Storage, Member-Status, Task-Dispatch sowie Event- und Ergebnisansichten.
@@ -120,6 +121,7 @@ ClawManager unterstuetzt derzeit die folgenden verwalteten Runtimes:
 - <img src="frontend/public/openclaw.png" alt="OpenClaw icon" width="18" /> `OpenClaw`: Lite-/Pro-Workspaces mit Sessions, Tools, geplanten Aufgaben und Team-Support
 - <img src="frontend/public/hermes.png" alt="Hermes icon" width="18" /> `Hermes`: Lite-/Pro-Workspaces mit persistentem `.hermes`-Home, nativen Sessions und Team-Worker-Support
 - <img src="frontend/public/opencode.png" alt="OpenCode icon" width="18" /> `OpenCode`: verwaltete Coding-Workspaces mit AI Gateway, Desktop/Terminal und Dateien. Siehe [OpenCode Workspace Guide](./docs/opencode-lite-pro-agent-development_de.md).
+- <img src="frontend/public/deepseek-harness.svg" alt="DeepSeek Harness icon" width="18" /> `DeepSeek Harness`: Lite-Pool- und Pro-Desktop-Workspaces mit AI-Gateway-Modellinjektion, Skills, Workspace-Dateien und isoliertem Browserzugriff
 
 Runtime-Vorschau:
 
@@ -151,7 +153,7 @@ Waehle zuerst `k3s` oder `k8s` und danach das Storage-Profil fuer einen Einzelkn
 
 ### Runtime- und Instanzverwaltung
 
-OpenClaw-, Hermes- oder OpenCode-Workspaces in Lite oder Pro erstellen und Images, Ressourcen, Lifecycle, Desktop, Dateien, Shell, Umgebungsvariablen, Archive, Share Links und Lite-Batch-Aktionen zentral verwalten.
+OpenClaw-, Hermes-, OpenCode- oder DeepSeek-Harness-Workspaces in Lite oder Pro erstellen und Images, Ressourcen, Lifecycle, Desktop, Dateien, Shell, Umgebungsvariablen, Archive, Share Links und Lite-Batch-Aktionen zentral verwalten.
 
 <a id="ai-gateway"></a>
 ### AI Gateway
@@ -218,7 +220,7 @@ ClawManager ist so gestaltet, dass Administration, Zugriff und AI-Governance nic
 
 ### Lite-Mode-Deployment
 
-Lite Mode stellt Instanzen ueber einen gemeinsamen Gateway-Runtime-Pool bereit. Jeder Workspace laeuft als isolierter Gateway-Prozess in verwalteten Runtime-Pods. Das sorgt fuer schnelle Starts und reduziert dedizierte CPU-, Memory-, Storage- und GPU-Allocation, waehrend Workspace-Zugriff, Share Link / Password Access, channel- und skill-Injection sowie Admin-Sichtbarkeit erhalten bleiben.
+Lite Mode stellt OpenClaw-, Hermes-, OpenCode- und DeepSeek-Harness-Instanzen ueber gemeinsame Gateway-Runtime-Pools bereit. Jeder Workspace laeuft als isolierter Gateway-Prozess in verwalteten Runtime-Pods. Das sorgt fuer schnelle Starts und reduziert dedizierte CPU-, Memory-, Storage- und GPU-Allocation, waehrend Workspace-Zugriff, Share Link / Password Access, unterstuetzte channel- und skill-Injection sowie Admin-Sichtbarkeit erhalten bleiben.
 
 ![](./docs/main/liteopenclaw.png)
 

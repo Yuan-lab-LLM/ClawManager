@@ -169,7 +169,7 @@ func (s *instanceService) ValidateCreateRequests(userID int, requests []CreateIn
 type CreateInstanceRequest struct {
 	Name                 string              `json:"name" validate:"required,min=3,max=50"`
 	Description          *string             `json:"description,omitempty"`
-	Type                 string              `json:"type" validate:"required,oneof=openclaw ubuntu debian centos custom webtop hermes opencode workbuddy"`
+	Type                 string              `json:"type" validate:"required,oneof=openclaw ubuntu debian centos custom webtop hermes opencode workbuddy deepseek-harness"`
 	Mode                 string              `json:"mode" validate:"omitempty,oneof=lite pro"`
 	InstanceMode         string              `json:"instance_mode" validate:"omitempty,oneof=lite pro"`
 	RuntimeType          string              `json:"runtime_type" validate:"omitempty,oneof=gateway desktop shell"`
@@ -1294,7 +1294,7 @@ func (s *instanceService) buildAgentEnv(instance *models.Instance) (map[string]s
 
 func supportsManagedRuntimeIntegration(instanceType string) bool {
 	switch strings.ToLower(strings.TrimSpace(instanceType)) {
-	case "openclaw", "hermes", "opencode", "workbuddy":
+	case "openclaw", "hermes", "opencode", "workbuddy", RuntimeTypeDeepSeekHarness:
 		return true
 	default:
 		return false
@@ -1355,6 +1355,9 @@ func managedRuntimePersistentDir(instance *models.Instance) string {
 		if strings.EqualFold(instance.Type, "hermes") {
 			return path.Join(workspacePath, "home", ".hermes")
 		}
+		if strings.EqualFold(instance.Type, RuntimeTypeDeepSeekHarness) {
+			return path.Join(workspacePath, "home", ".dsh")
+		}
 		if strings.EqualFold(instance.Type, "opencode") {
 			return path.Join(workspacePath, "home", ".opencode")
 		}
@@ -1362,6 +1365,9 @@ func managedRuntimePersistentDir(instance *models.Instance) string {
 	}
 	if strings.EqualFold(instance.Type, "hermes") {
 		return "/config/.hermes"
+	}
+	if strings.EqualFold(instance.Type, RuntimeTypeDeepSeekHarness) {
+		return "/config/.dsh"
 	}
 	if strings.EqualFold(instance.Type, "opencode") {
 		return "/config/.opencode"

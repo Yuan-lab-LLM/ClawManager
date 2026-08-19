@@ -33,6 +33,12 @@ const LITE_RUNTIME_CARDS: RuntimeCardDefinition[] = [
     display_name: 'Hermes Lite',
     image: 'ghcr.io/yuan-lab-llm/agentsruntime/hermes-lite:latest',
   },
+  {
+    instance_type: 'deepseek-harness',
+    runtime_type: 'gateway',
+    display_name: 'DeepSeek Harness Lite',
+    image: 'ghcr.io/yuan-lab-llm/agentsruntime/deepseek-harness-lite:latest',
+  },
 ];
 
 const PRO_BASE_RUNTIME_CARDS: RuntimeCardDefinition[] = [
@@ -47,6 +53,12 @@ const PRO_BASE_RUNTIME_CARDS: RuntimeCardDefinition[] = [
     runtime_type: 'desktop',
     display_name: 'Hermes Pro',
     image: 'ghcr.io/yuan-lab-llm/agentsruntime/hermes:latest',
+  },
+  {
+    instance_type: 'deepseek-harness',
+    runtime_type: 'desktop',
+    display_name: 'DeepSeek Harness Pro',
+    image: 'ghcr.io/yuan-lab-llm/agentsruntime/deepseek-harness:latest',
   },
   {
     instance_type: 'workbuddy',

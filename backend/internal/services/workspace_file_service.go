@@ -621,7 +621,7 @@ func runtimeWorkspaceOwner(scope WorkspaceFileScope) (int, int, bool) {
 	if parts[len(parts)-1] != instancePart || parts[len(parts)-2] != userPart {
 		return 0, 0, false
 	}
-	if runtimeType != RuntimeTypeOpenClaw && runtimeType != RuntimeTypeHermes && runtimeType != RuntimeTypeOpenCode {
+	if runtimeType != RuntimeTypeOpenClaw && runtimeType != RuntimeTypeHermes && runtimeType != RuntimeTypeOpenCode && runtimeType != RuntimeTypeDeepSeekHarness {
 		return 0, 0, false
 	}
 	linuxID := RuntimeLinuxID(scope.InstanceID)

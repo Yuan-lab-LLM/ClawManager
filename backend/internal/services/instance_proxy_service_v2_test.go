@@ -84,6 +84,102 @@ func TestInstanceProxyServiceUsesRuntimeBindingForV2(t *testing.T) {
 	}
 }
 
+func TestInstanceProxyServiceNormalizesDeepSeekHarnessDedicatedOrigin(t *testing.T) {
+	instanceToken := "igt_deepseek_harness_instance"
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api" {
+			t.Fatalf("upstream path = %q", r.URL.Path)
+		}
+		origin, err := url.Parse(r.Header.Get("Origin"))
+		if err != nil || origin.Host != r.Host {
+			t.Fatalf("Origin/Host trust boundary mismatch: origin=%q host=%q err=%v", r.Header.Get("Origin"), r.Host, err)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer "+instanceToken {
+			t.Fatalf("Authorization = %q", got)
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(`<!doctype html><html><head></head><body>DSH</body></html>`))
+	}))
+	defer upstream.Close()
+
+	service, token := newDeepSeekHarnessV2ProxyTestService(t, upstream.URL, 135, instanceToken)
+	service.httpClient = upstream.Client()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/instances/135/proxy/api?token="+url.QueryEscape(token.Token), nil)
+	req.Header.Set("Origin", "https://deepseek-harness-135.runtime.example.test")
+	req.Header.Set(DedicatedRuntimeOriginHeader, RuntimeTypeDeepSeekHarness)
+	rec := httptest.NewRecorder()
+	if err := service.ProxyRequest(req.Context(), 135, token.Token, rec, req); err != nil {
+		t.Fatalf("ProxyRequest returned error: %v", err)
+	}
+	if strings.Contains(rec.Body.String(), "<base ") {
+		t.Fatalf("dedicated-origin HTML unexpectedly contains proxy base: %s", rec.Body.String())
+	}
+}
+
+func TestInstanceProxyServiceNormalizesDeepSeekHarnessDedicatedWebSocketOrigin(t *testing.T) {
+	instanceToken := "igt_deepseek_harness_instance"
+	upgrader := websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/events.mux" {
+			http.Error(w, "unexpected websocket path", http.StatusNotFound)
+			return
+		}
+		if got, want := r.Header.Get("Origin"), "http://"+r.Host; got != want {
+			http.Error(w, "untrusted websocket origin", http.StatusForbidden)
+			return
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer "+instanceToken {
+			http.Error(w, "missing instance authorization", http.StatusUnauthorized)
+			return
+		}
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		messageType, message, err := conn.ReadMessage()
+		if err != nil {
+			return
+		}
+		if string(message) != "session-list" {
+			return
+		}
+		_ = conn.WriteMessage(messageType, []byte("session-list-ok"))
+	}))
+	defer upstream.Close()
+
+	service, token := newDeepSeekHarnessV2ProxyTestService(t, upstream.URL, 136, instanceToken)
+	// Reproduce the production setting used by the OpenClaw proxy. DeepSeek
+	// Harness must use its own upstream origin instead of inheriting this value.
+	service.openClawProxyOrigin = "http://clawmanager-gateway.clawmanager-system.svc.cluster.local:9001"
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := service.ProxyWebSocket(r.Context(), 136, token.Token, w, r); err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+		}
+	}))
+	defer proxy.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(proxy.URL, "http") + "/api/v1/instances/136/proxy/api/events.mux"
+	header := http.Header{}
+	header.Set("Origin", "https://deepseek-harness-136.runtime.example.test")
+	header.Set(DedicatedRuntimeOriginHeader, RuntimeTypeDeepSeekHarness)
+	clientConn, _, err := websocket.DefaultDialer.Dial(wsURL, header)
+	if err != nil {
+		t.Fatalf("client websocket dial failed: %v", err)
+	}
+	defer clientConn.Close()
+	if err := clientConn.WriteMessage(websocket.TextMessage, []byte("session-list")); err != nil {
+		t.Fatalf("client websocket write failed: %v", err)
+	}
+	_, message, err := clientConn.ReadMessage()
+	if err != nil {
+		t.Fatalf("client websocket read failed: %v", err)
+	}
+	if string(message) != "session-list-ok" {
+		t.Fatalf("client websocket message = %q", message)
+	}
+}
+
 func TestInstanceProxyServiceInjectsInstanceTokenForHermesLite(t *testing.T) {
 	instanceToken := "igt_hermes_instance"
 	var loginHits int
@@ -825,6 +921,22 @@ func TestInstanceProxyServiceUsesBaseProxyEntryForV2OpenClaw(t *testing.T) {
 	}
 }
 
+func TestInstanceProxyServiceUsesConfiguredDedicatedOriginForDeepSeekHarnessLite(t *testing.T) {
+	t.Setenv(deepSeekHarnessPublicURLTemplateEnvVar, "https://deepseek-harness-{instance_id}.172-16-1-12.nip.io:39443/")
+	workspacePath := "/workspaces/deepseek-harness/user-45/instance-123"
+	accessService := NewInstanceAccessService()
+	t.Cleanup(accessService.Stop)
+	service := NewInstanceProxyService(accessService)
+	got := service.GetProxyURLForInstance(&models.Instance{
+		ID: 123, Type: RuntimeTypeDeepSeekHarness, RuntimeType: RuntimeBackendGateway,
+		InstanceMode: InstanceModeLite, WorkspacePath: &workspacePath,
+	}, "token+with/slash")
+	want := "https://deepseek-harness-123.172-16-1-12.nip.io:39443/?token=token%2Bwith%2Fslash"
+	if got != want {
+		t.Fatalf("GetProxyURLForInstance() = %q, want %q", got, want)
+	}
+}
+
 func TestInstanceProxyServiceUsesChatEntryForHermesLite(t *testing.T) {
 	workspacePath := "/workspaces/hermes/user-45/instance-123"
 	accessService := NewInstanceAccessService()
@@ -1021,6 +1133,28 @@ func newV2ProxyTestService(t *testing.T, instanceRepo repository.InstanceReposit
 	service.bindingRepo = bindingRepo
 	service.runtimePodRepo = podRepo
 	return service, token
+}
+
+func newDeepSeekHarnessV2ProxyTestService(t *testing.T, upstreamURL string, instanceID int, instanceToken string) (*InstanceProxyService, *AccessToken) {
+	t.Helper()
+	podIP, gatewayPort := splitURLHostPortForProxyTest(t, upstreamURL)
+	workspacePath := "/workspaces/deepseek-harness/user-45/instance-" + strconv.Itoa(instanceID)
+	instanceRepo := newV2LifecycleInstanceRepo()
+	instanceRepo.byID[instanceID] = &models.Instance{
+		ID: instanceID, UserID: 45, Type: RuntimeTypeDeepSeekHarness,
+		RuntimeType: RuntimeBackendGateway, InstanceMode: InstanceModeLite,
+		Status: "running", AccessToken: &instanceToken, WorkspacePath: &workspacePath,
+		RuntimeGeneration: 1,
+	}
+	bindingRepo := newFakeRuntimeBindingRepo()
+	bindingRepo.bindings[instanceID] = &models.InstanceRuntimeBinding{
+		InstanceID: instanceID, RuntimePodID: int64(instanceID), GatewayPort: gatewayPort,
+		State: "running", Generation: 1,
+	}
+	podRepo := &fakeRuntimePodRepo{pods: map[int64]*models.RuntimePod{
+		int64(instanceID): {ID: int64(instanceID), PodIP: &podIP, State: "ready"},
+	}}
+	return newV2ProxyTestService(t, instanceRepo, bindingRepo, podRepo, 45, instanceID, RuntimeTypeDeepSeekHarness)
 }
 
 func splitURLHostPortForProxyTest(t *testing.T, rawURL string) (string, int) {

@@ -2450,6 +2450,10 @@ export const translations: Record<Locale, TranslationTree> = {
           label: "Hermes Runtime",
           description: "Hermes runtime built on the webtop desktop base",
         },
+        deepseekHarness: {
+          label: "DeepSeek Harness",
+          description: "Managed DeepSeek Harness workspace, available in Lite and Pro modes",
+        },
         workbuddy: {
           label: "Workbuddy",
           description: "Managed Workbuddy runtime on a webtop desktop base",
@@ -3981,6 +3985,10 @@ export const translations: Record<Locale, TranslationTree> = {
           label: "Hermes Runtime",
           description: "基于 Webtop 桌面基础镜像构建的 Hermes 运行时",
         },
+        deepseekHarness: {
+          label: "DeepSeek Harness",
+          description: "由 ClawManager 管理的 DeepSeek Harness 工作空间，支持 Lite 和 Pro 模式",
+        },
         workbuddy: {
           label: "Workbuddy",
           description: "基于 Webtop 桌面基础镜像构建的托管 Workbuddy 运行时",
@@ -5453,6 +5461,11 @@ export const translations: Record<Locale, TranslationTree> = {
           description:
             "Webtop デスクトップベースで構築された Hermes ランタイム",
         },
+        deepseekHarness: {
+          label: "DeepSeek Harness",
+          description:
+            "ClawManager が管理する Lite / Pro 対応の DeepSeek Harness ワークスペース",
+        },
         workbuddy: {
           label: "Workbuddy",
           description:
@@ -6889,6 +6902,10 @@ export const translations: Record<Locale, TranslationTree> = {
         hermes: {
           label: "Hermes Runtime",
           description: "Webtop 데스크톱 기반으로 빌드된 Hermes 런타임",
+        },
+        deepseekHarness: {
+          label: "DeepSeek Harness",
+          description: "ClawManager가 관리하는 Lite 및 Pro 모드 DeepSeek Harness 작업 공간",
         },
         workbuddy: {
           label: "Workbuddy",
@@ -8348,6 +8365,11 @@ export const translations: Record<Locale, TranslationTree> = {
           label: "Hermes Runtime",
           description:
             "Hermes-Runtime auf Basis des Webtop-Desktop-Images",
+        },
+        deepseekHarness: {
+          label: "DeepSeek Harness",
+          description:
+            "Von ClawManager verwalteter DeepSeek-Harness-Arbeitsbereich für Lite und Pro",
         },
         workbuddy: {
           label: "Workbuddy",

@@ -62,6 +62,7 @@
 - [2026-08-19] 관리형 OpenCode 워크스페이스, 새 인스턴스 화면, OpenClaw·Hermes·OpenCode용 Skill Hub 제공을 추가했습니다. [OpenCode Workspace Guide](./docs/opencode-lite-pro-agent-development_ko.md)를 참고하세요.
 - [2026-08-18] 읽기 전용 템플릿 8개, 자연어 사용자 정의 Team, Hermes Lite Worker, 실시간 Kanban, 공유 산출물, 멤버 세션으로 Team 협업을 확장했습니다.
 - [2026-08-17] 모델 관리 Thinking, AI Gateway Session Usage, 예약 작업 편집, Lite 라이프사이클과 일괄 작업을 추가했습니다.
+- [2026-08-16] DeepSeek Harness Lite/Pro를 추가해 공유 Runtime Pool 격리, 전용 Webtop 데스크톱, AI Gateway 모델 주입, Skill·Workspace 통합, Lite 전용 Browser Origin을 지원합니다.
 - [2026-07-07] 보안 방어 플랫폼(secplane) 프론트엔드 콘솔을 추가했습니다. 런타임 방어(입력/상태/의사결정/출력 표면, 자산 변조 방지, 휴먼 승인), 호스트 강화 및 컨테이너 격리, 아웃바운드 신뢰 엔드포인트 거버넌스, 정책 거버넌스, 킬스위치/서킷브레이커, 전체 체인 감사, SecureClaw 데이터 및 컴포넌트 신뢰 감사, 협업 거버넌스, 입력 탐지를 포괄하는 4계층 방어 통합 관리 UI를 5개 언어 i18n으로 제공합니다.
 - [2026-06-14] Lite / Pro 런타임 모드와 롤아웃 지원을 추가했습니다. Lite 인스턴스는 공유 gateway runtime pool에서 실행되고, Pro 인스턴스는 더 강한 격리를 위해 전용 desktop deployment를 유지합니다.
 - [2026-05-18] Team 워크스페이스 MVP 소개와 미리보기를 추가했습니다. 원클릭 Team 생성, OpenClaw 멤버 오케스트레이션, Redis Team Bus 주입, 공유 스토리지, 멤버 상태, 작업 배포, 이벤트/결과 보기를 포함합니다.
@@ -120,6 +121,7 @@ ClawManager는 현재 다음 관리형 Runtime을 지원합니다.
 - <img src="frontend/public/openclaw.png" alt="OpenClaw icon" width="18" /> `OpenClaw`: Lite/Pro, 네이티브 대화, 도구, 예약 작업, Team 지원
 - <img src="frontend/public/hermes.png" alt="Hermes icon" width="18" /> `Hermes`: Lite/Pro, 영구 `.hermes`, 네이티브 세션, Team Worker 지원
 - <img src="frontend/public/opencode.png" alt="OpenCode icon" width="18" /> `OpenCode`: AI Gateway, 데스크톱/터미널, 파일을 제공하는 관리형 코딩 워크스페이스. [OpenCode Workspace Guide](./docs/opencode-lite-pro-agent-development_ko.md)
+- <img src="frontend/public/deepseek-harness.svg" alt="DeepSeek Harness icon" width="18" /> `DeepSeek Harness`: Lite 공유 Pool 및 Pro 전용 Desktop, AI Gateway 모델 주입, Skill, Workspace File, 격리 Browser Access 지원
 
 Runtime 미리보기:
 
@@ -151,7 +153,7 @@ Runtime 미리보기:
 
 ### Runtime 및 인스턴스 관리
 
-OpenClaw, Hermes, OpenCode를 Lite/Pro로 만들고 이미지, 리소스, 수명주기, 데스크톱, 파일, Shell, 환경 변수, 아카이브, Share Link, Lite 일괄 작업을 관리합니다.
+OpenClaw, Hermes, OpenCode, DeepSeek Harness를 Lite/Pro로 만들고 이미지, 리소스, 수명주기, 데스크톱, 파일, Shell, 환경 변수, 아카이브, Share Link, Lite 일괄 작업을 관리합니다.
 
 <a id="ai-gateway"></a>
 ### AI Gateway
@@ -218,7 +220,7 @@ ClawManager는 관리, 접근, AI 거버넌스를 서로 분리된 도구로 다
 
 ### Lite 모드 배포
 
-Lite 모드는 공유 gateway runtime pool을 통해 인스턴스를 프로비저닝합니다. 각 워크스페이스는 관리되는 runtime Pod 안의 독립 gateway 프로세스로 실행되어 빠르게 시작되고 전용 CPU, 메모리, 스토리지, GPU 할당 부담을 줄이면서도 워크스페이스 접근, Share Link / Password 접근, channel 및 skill 주입, 관리자 가시성을 유지합니다.
+Lite 모드는 OpenClaw, Hermes, OpenCode, DeepSeek Harness 인스턴스를 공유 gateway runtime pool을 통해 프로비저닝합니다. 각 워크스페이스는 관리되는 runtime Pod 안의 독립 gateway 프로세스로 실행되어 빠르게 시작되고 전용 CPU, 메모리, 스토리지, GPU 할당 부담을 줄이면서도 워크스페이스 접근, Share Link / Password 접근, 지원되는 channel 및 skill 주입, 관리자 가시성을 유지합니다.
 
 ![](./docs/main/liteopenclaw.png)
 

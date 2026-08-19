@@ -264,3 +264,25 @@ func TestMigration045BootstrapsAndUpgradesLLMModels(t *testing.T) {
 		t.Fatalf("migration 045 must create the legacy llm_models table before adding reasoning_enabled")
 	}
 }
+
+func TestMigration047AddsDeepSeekHarnessRuntimes(t *testing.T) {
+	raw, err := embeddedMigrations.ReadFile("migrations/047_add_deepseek_harness_runtime.sql")
+	if err != nil {
+		t.Fatalf("read migration 047: %v", err)
+	}
+
+	sql := string(raw)
+	for _, required := range []string{
+		"'deepseek-harness'",
+		"'desktop'",
+		"'gateway'",
+		"'DeepSeek Harness Pro'",
+		"'DeepSeek Harness Lite'",
+		"ghcr.io/yuan-lab-llm/agentsruntime/deepseek-harness:latest",
+		"ghcr.io/yuan-lab-llm/agentsruntime/deepseek-harness-lite:latest",
+	} {
+		if !strings.Contains(sql, required) {
+			t.Fatalf("migration 047 must contain %s", required)
+		}
+	}
+}

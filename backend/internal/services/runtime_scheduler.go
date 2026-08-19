@@ -422,6 +422,8 @@ func defaultRuntimeDeploymentName(runtimeType string) string {
 		return "hermes-runtime"
 	case RuntimeTypeOpenCode:
 		return "opencode-runtime"
+	case RuntimeTypeDeepSeekHarness:
+		return "deepseek-harness-runtime"
 	default:
 		return ""
 	}

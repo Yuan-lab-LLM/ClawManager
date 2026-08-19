@@ -1340,6 +1340,10 @@ spec:
               value: "redis://clawmanager-redis.clawmanager-system.svc.cluster.local:6379/0"
             - name: CLAWMANAGER_DESKTOP_DIRECT_PROXY
               value: "true"
+            # Required for the DeepSeek Harness Lite root-origin UI. The
+            # {instance_id} placeholder is required; see docs/deployment.md.
+            - name: CLAWMANAGER_DEEPSEEK_HARNESS_PUBLIC_URL_TEMPLATE
+              value: ""
             # Leader election for control-plane singleton background loops.
             # Required before scaling replicas > 1 so SyncService / Team event
             # consumers / stale-task monitor run on exactly one replica.
@@ -1738,3 +1742,101 @@ spec:
     - name: proxy
       port: 3128
       targetPort: 9001
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: deepseek-harness-runtime
+  namespace: clawmanager-system
+  labels:
+    app: deepseek-harness-runtime
+    clawmanager.io/runtime-type: deepseek-harness
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: deepseek-harness-runtime
+      clawmanager.io/runtime-type: deepseek-harness
+  template:
+    metadata:
+      labels:
+        app: deepseek-harness-runtime
+        clawmanager.io/runtime-type: deepseek-harness
+    spec:
+      containers:
+        - name: runtime
+          image: ghcr.io/yuan-lab-llm/agentsruntime/deepseek-harness-lite:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: CLAWMANAGER_RUNTIME_TYPE
+              value: deepseek-harness
+            - name: CLAWMANAGER_BACKEND_URL
+              value: "http://clawmanager-gateway.clawmanager-system.svc.cluster.local:9001"
+            - name: CLAWMANAGER_RUNTIME_DEPLOYMENT_NAME
+              value: deepseek-harness-runtime
+            - name: CLAWMANAGER_RUNTIME_IMAGE_REF
+              value: ghcr.io/yuan-lab-llm/agentsruntime/deepseek-harness-lite:latest
+            - name: CLAWMANAGER_AGENT_PORT
+              value: "19090"
+            - name: CLAWMANAGER_GATEWAY_PORT_START
+              value: "20300"
+            - name: CLAWMANAGER_GATEWAY_PORT_END
+              value: "20599"
+            - name: CLAWMANAGER_AGENT_CONTROL_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: clawmanager-secrets
+                  key: runtime-agent-control-token
+            - name: CLAWMANAGER_AGENT_REPORT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: clawmanager-secrets
+                  key: runtime-agent-report-token
+            - name: RUNTIME_WORKSPACE_ROOT
+              value: /workspaces
+            - name: RUNTIME_AGENT_LISTEN_ADDR
+              value: "0.0.0.0:19090"
+            - name: RUNTIME_AGENT_PUBLIC_PORT
+              value: "19090"
+            - name: RUNTIME_GATEWAY_PORT_START
+              value: "20300"
+            - name: RUNTIME_GATEWAY_PORT_END
+              value: "20599"
+            - name: RUNTIME_GATEWAY_COMMAND
+              value: /usr/local/bin/start-deepseek-harness-gateway
+            - name: RUNTIME_AGENT_CONTROL_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: clawmanager-secrets
+                  key: runtime-agent-control-token
+            - name: RUNTIME_AGENT_REPORT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: clawmanager-secrets
+                  key: runtime-agent-report-token
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          ports:
+            - name: agent
+              containerPort: 19090
+          volumeMounts:
+            - name: workspaces
+              mountPath: /workspaces
+      volumes:
+        - name: workspaces
+          persistentVolumeClaim:
+            claimName: clawmanager-workspaces

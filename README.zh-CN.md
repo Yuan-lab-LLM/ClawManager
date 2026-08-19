@@ -62,6 +62,7 @@
 - [2026-08-19] 新增受管 OpenCode 工作空间，更新实例桌面体验，并将 Skill Hub 能力交付扩展到 OpenClaw、Hermes 与 OpenCode Runtime。详见 [OpenCode 工作空间指南](./docs/opencode-lite-pro-agent-development.md)。
 - [2026-08-18] 完善 Team 协作：8 个只读内置模板、自然语言生成的自定义 Team、可选 Hermes Lite Worker、实时 Execution Kanban、共享产物与成员会话查看。
 - [2026-08-17] 新增模型级托管 Thinking、AI Gateway 会话用量、定时任务编辑，以及更完善的 Lite 实例生命周期和批量操作。
+- [2026-08-16] 新增 DeepSeek Harness Lite / Pro：支持共享运行时池隔离、专属 Webtop 桌面、AI Gateway 模型注入、Skill 与工作空间集成，以及 Lite 专用浏览器域名。
 - [2026-07-07] 新增安全防护平台（secplane）前端控制台——覆盖运行时防御（输入面/状态面/决策面/输出面、资产防篡改、人因审批）、主机加固与容器隔离、出站可信端点治理、策略治理、应急熔断、全链路审计、SecureClaw 数据与组件可信审计、协同接入治理及输入检测，4 层防护统一管理界面，5 语言 i18n 完整支持。
 - [2026-06-14] 新增 Lite / Pro 运行时模式与滚动升级支持，Lite 实例可通过共享 gateway 运行时池运行，Pro 实例保留专属 desktop deployment 以获得更强隔离。
 - [2026-05-18] 新增 Team 工作空间 MVP 介绍与界面预览，覆盖一键创建 Team、OpenClaw 成员编排、Redis Team Bus 配置注入、共享存储、成员状态、任务派发，以及事件和结果查看。
@@ -120,6 +121,7 @@ ClawManager 当前支持以下受管 Runtime：
 - <img src="frontend/public/openclaw.png" alt="OpenClaw icon" width="18" /> `OpenClaw`：支持 Lite / Pro、原生会话、工具、定时任务和 Team 的工作空间
 - <img src="frontend/public/hermes.png" alt="Hermes icon" width="18" /> `Hermes`：支持 Lite / Pro、持久化 `.hermes` 目录、原生会话和 Team Worker 的工作空间
 - <img src="frontend/public/opencode.png" alt="OpenCode icon" width="18" /> `OpenCode`：接入 AI Gateway 的受管编码工作空间，提供桌面/终端与文件能力。详见 [OpenCode 工作空间指南](./docs/opencode-lite-pro-agent-development.md)
+- <img src="frontend/public/deepseek-harness.svg" alt="DeepSeek Harness icon" width="18" /> `DeepSeek Harness`：支持 Lite 共享池与 Pro 专属桌面，通过 AI Gateway 注入受管模型，并集成 Skill、工作空间文件和隔离浏览器访问
 
 Runtime 预览：
 
@@ -153,7 +155,7 @@ ClawManager 现在将 Kubernetes 发行版与存储 profile 拆开。先选择 `
 
 ### Runtime 与实例管理
 
-创建 OpenClaw、Hermes 或 OpenCode 的 Lite / Pro 工作空间，选择已启用的系统镜像和资源规格，并在同一界面管理生命周期、桌面、文件、Shell、环境变量、归档、Share Link 与 Lite 批量操作。
+创建 OpenClaw、Hermes、OpenCode 或 DeepSeek Harness 的 Lite / Pro 工作空间，选择已启用的系统镜像和资源规格，并在同一界面管理生命周期、桌面、文件、Shell、环境变量、归档、Share Link 与 Lite 批量操作。
 
 <a id="ai-gateway"></a>
 ### AI Gateway
@@ -221,7 +223,7 @@ ClawManager 的设计目标，是让管理、访问与 AI 治理体验形成统�
 
 ### Lite 模式部署
 
-Lite 模式通过共享 gateway 运行时池创建实例。每个工作空间作为受管 runtime Pod 中的独立 gateway 进程运行，启动更快，并减少专属 CPU、内存、存储和 GPU 配额开销，同时保留工作空间访问、Share Link / Password 访问、channel 与 skill 注入，以及管理端可见性。
+Lite 模式通过共享 gateway 运行时池创建 OpenClaw、Hermes、OpenCode 与 DeepSeek Harness 实例。每个工作空间作为受管 runtime Pod 中的独立 gateway 进程运行，启动更快，并减少专属 CPU、内存、存储和 GPU 配额开销，同时保留工作空间访问、Share Link / Password 访问、受支持的 channel 与 skill 注入，以及管理端可见性。
 
 ![](./docs/main/liteopenclaw.png)
 
@@ -282,7 +284,7 @@ AI Gateway 将模型访问治理纳入工作空间体验本身，提供审计记
 ## 工作方式
 
 1. 管理员先定义治理策略与可复用资源。
-2. 用户创建或进入 OpenClaw、Hermes 或 OpenCode 的 Lite / Pro 工作空间。
+2. 用户创建或进入 OpenClaw、Hermes、OpenCode 或 DeepSeek Harness 的 Lite / Pro 工作空间。
 3. Team 工作空间可以一次编排多个成员 Runtime，并注入 Redis Team Bus 与共享存储配置。
 4. Agent 回连控制平面并上报运行时状态。
 5. Channel、skill 与 bundle 被编译并应用到实例中。

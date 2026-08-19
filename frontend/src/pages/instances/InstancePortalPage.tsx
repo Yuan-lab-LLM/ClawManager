@@ -12,7 +12,11 @@ import { WorkspaceFileManager } from "../../components/WorkspaceFileManager";
 import { useInstanceDesktopAccess } from "../../hooks/useInstanceDesktopAccess";
 import { prepareOpenClawControlUIStorage } from "../../lib/openclawControlStorage";
 import { instanceService } from "../../services/instanceService";
-import type { Instance, InstanceRuntimeDetails } from "../../types/instance";
+import {
+  formatInstanceType,
+  type Instance,
+  type InstanceRuntimeDetails,
+} from "../../types/instance";
 import { useI18n } from "../../contexts/I18nContext";
 
 const PORTAL_RUNTIME_POLL_INTERVAL_MS = 10000;
@@ -30,6 +34,8 @@ function supportsWorkspace(instance: Instance) {
     instance.type === "openclaw" ||
     instance.type === "hermes" ||
     instance.type === "opencode" ||
+    instance.type === "workbuddy" ||
+    instance.type === "deepseek-harness" ||
     Boolean(instance.workspace_path)
   );
 }
@@ -45,17 +51,10 @@ function workspaceInitialPath(instance: Instance, isPro: boolean) {
   if (type === "openclaw" && !isPro) {
     return "home/.openclaw";
   }
+  if (type === "deepseek-harness") {
+    return isPro ? ".dsh" : "home/.dsh";
+  }
   return isPro ? "/config" : undefined;
-}
-
-function typeLabel(type: Instance["type"]) {
-  return type === "hermes"
-    ? "Hermes"
-    : type === "openclaw"
-      ? "OpenClaw"
-      : type === "opencode"
-        ? "OpenCode"
-        : type;
 }
 
 function modeLabel(mode: Instance["instance_mode"]) {
@@ -474,7 +473,7 @@ const InstancePortalPage: React.FC = () => {
                               </span>
                             </div>
                             <p className="mt-1 text-xs text-[#8f8681]">
-                              {typeLabel(instance.type)} {instance.os_version}
+                              {formatInstanceType(instance.type)} {instance.os_version}
                             </p>
                             <p className="mt-2 text-xs text-[#8f8681]">
                               {instance.cpu_cores} {t("common.cpu")} /{" "}

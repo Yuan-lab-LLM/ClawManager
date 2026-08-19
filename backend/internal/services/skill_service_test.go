@@ -473,6 +473,20 @@ func TestLiteRuntimePersistentAncestorsIncludeOpenClawHome(t *testing.T) {
 	}
 }
 
+func TestLiteRuntimePersistentRootUsesDeepSeekHarnessHome(t *testing.T) {
+	workspacePath := filepath.Join(t.TempDir(), "deepseek-harness", "user-1", "instance-91")
+	instance := &models.Instance{
+		Type:          RuntimeTypeDeepSeekHarness,
+		RuntimeType:   RuntimeBackendGateway,
+		InstanceMode:  InstanceModeLite,
+		WorkspacePath: &workspacePath,
+	}
+	want := filepath.Join(workspacePath, "home", ".dsh")
+	if got := liteRuntimePersistentRoot(instance); got != want {
+		t.Fatalf("DeepSeek Harness persistent root = %q, want %q", got, want)
+	}
+}
+
 type fakeObjectStorage map[string][]byte
 
 func (f fakeObjectStorage) PutObject(context.Context, string, []byte, string) error {

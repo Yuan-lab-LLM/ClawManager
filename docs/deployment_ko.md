@@ -17,7 +17,7 @@ ClawManager는 Kubernetes Native 플랫폼입니다. Distribution과 Storage에 
 
 ## 구성과 절차
 
-Profile은 ClawManager, MySQL, MinIO, Skill Scanner, Team Redis, Workspace Service, OpenClaw/Hermes/OpenCode Lite Pool을 실행합니다. Lite Instance는 Runtime Pod를 공유합니다.
+Profile은 ClawManager, MySQL, MinIO, Skill Scanner, Team Redis, Workspace Service, OpenClaw/Hermes/OpenCode/DeepSeek Harness Lite Pool을 실행합니다. Lite Instance는 Runtime Pod를 공유합니다.
 
 1. Secret, Image, StorageClass, 외부 Access 확인.
 2. Single Node Label 또는 Cluster RWO/RWX CSI 확인.
@@ -26,6 +26,15 @@ Profile은 ClawManager, MySQL, MinIO, Skill Scanner, Team Redis, Workspace Servi
 5. 공개할 Runtime별 Test Instance 생성.
 
 새 MySQL은 `clawmanager-mysql-init`로 초기화되며 기존 Volume은 First-Start Script를 다시 실행하지 않습니다. 영구 Data에 `emptyDir`를 사용하지 마세요.
+
+## DeepSeek Harness Runtime
+
+- Lite는 공유 `deepseek-harness-runtime` Pool에서 격리된 `dsh web` Process를 실행하고 `<workspace>/home/.dsh`에 상태를 유지합니다.
+- Pro는 Port `3001`의 전용 Webtop Deployment를 사용하며 내부 `dsh web`은 Loopback Port `3080`, 영구 Home은 `/config/.dsh`입니다.
+- 두 모드 모두 ClawManager가 AI Gateway URL, Instance Credential, Model List를 주입하며 Skill과 Workspace File을 지원합니다.
+- Lite에는 전용 Origin Template이 필요합니다. 예: `CLAWMANAGER_DEEPSEEK_HARNESS_PUBLIC_URL_TEMPLATE=https://deepseek-harness-{instance_id}.clawmanager.test:39443/`. `{instance_id}`는 필수입니다.
+
+Image Source는 [AgentsRuntime의 `deepseek-harness/`](https://github.com/Iamlovingit/AgentsRuntime/tree/main/deepseek-harness)에 있습니다. Offline 환경에서는 Lite Origin용 Wildcard DNS와 인증서를 준비하세요.
 
 ## Storage와 ARM64
 

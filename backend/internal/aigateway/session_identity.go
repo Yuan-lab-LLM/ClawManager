@@ -8,7 +8,7 @@ const defaultManagedSessionKey = "main"
 // runtime LLM governance (OpenClaw / Hermes / OpenCode / Workbuddy).
 func IsManagedInstanceType(instanceType string) bool {
 	switch strings.ToLower(strings.TrimSpace(instanceType)) {
-	case "openclaw", "hermes", "opencode", "workbuddy":
+	case "openclaw", "hermes", "opencode", "workbuddy", "deepseek-harness":
 		return true
 	default:
 		return false

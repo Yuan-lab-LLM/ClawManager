@@ -215,6 +215,28 @@ func TestSystemImageSettingServiceListIncludesHermesLiteDefault(t *testing.T) {
 	}
 }
 
+func TestSystemImageSettingServiceListIncludesDeepSeekHarnessProAndLite(t *testing.T) {
+	service := NewSystemImageSettingService(&stubSystemImageSettingRepository{})
+	items, err := service.List()
+	if err != nil {
+		t.Fatalf("List returned error: %v", err)
+	}
+
+	found := map[string]bool{}
+	for _, item := range items {
+		if item.InstanceType != RuntimeTypeDeepSeekHarness {
+			continue
+		}
+		found[item.RuntimeType] = true
+		if !item.IsEnabled {
+			t.Fatalf("DeepSeek Harness preset must be enabled: %#v", item)
+		}
+	}
+	if !found[RuntimeBackendDesktop] || !found[RuntimeBackendGateway] {
+		t.Fatalf("expected DeepSeek Harness Pro and Lite presets, got %#v", found)
+	}
+}
+
 func TestSystemImageSettingServiceListIncludesWorkbuddyProDefault(t *testing.T) {
 	service := NewSystemImageSettingService(&stubSystemImageSettingRepository{})
 

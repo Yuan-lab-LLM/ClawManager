@@ -17,7 +17,7 @@ Nur ein vollstaendiges Profil verwenden. Longhorn-Namen sind Beispiele; kompatib
 
 ## Inhalt und Ablauf
 
-Die Profile starten ClawManager, MySQL, MinIO, Skill Scanner, Team Redis, Workspace Services sowie Lite-Pools fuer OpenClaw, Hermes und OpenCode. Lite-Instanzen teilen einen Runtime Pod.
+Die Profile starten ClawManager, MySQL, MinIO, Skill Scanner, Team Redis, Workspace Services sowie Lite-Pools fuer OpenClaw, Hermes, OpenCode und DeepSeek Harness. Lite-Instanzen teilen einen Runtime Pod.
 
 1. Secrets, Images, StorageClass und externen Zugang pruefen.
 2. Single Node korrekt labeln oder RWO/RWX CSI im Cluster bestaetigen.
@@ -26,6 +26,15 @@ Die Profile starten ClawManager, MySQL, MinIO, Skill Scanner, Team Redis, Worksp
 5. Je freigegebenem Runtime eine Testinstanz erstellen.
 
 Neues MySQL wird ueber `clawmanager-mysql-init` initialisiert; bestehende Volumes wiederholen First-Start-Skripte nicht. Dauerhafte Daten duerfen nicht auf `emptyDir` liegen.
+
+## DeepSeek Harness Runtime
+
+- Lite startet einen isolierten `dsh web`-Prozess im gemeinsamen Pool `deepseek-harness-runtime`; das persistente Home liegt unter `<workspace>/home/.dsh`.
+- Pro verwendet ein dediziertes Webtop Deployment auf Port `3001`; `dsh web` lauscht intern auf Loopback-Port `3080`, das persistente Home ist `/config/.dsh`.
+- Beide Modi erhalten AI-Gateway-URL, Instanz-Credential und Modellliste von ClawManager und integrieren Skills sowie Workspace-Dateien.
+- Lite benoetigt ein eigenes Origin-Template, zum Beispiel `CLAWMANAGER_DEEPSEEK_HARNESS_PUBLIC_URL_TEMPLATE=https://deepseek-harness-{instance_id}.clawmanager.test:39443/`; `{instance_id}` ist erforderlich.
+
+Die Images werden im [`deepseek-harness/`-Verzeichnis von AgentsRuntime](https://github.com/Iamlovingit/AgentsRuntime/tree/main/deepseek-harness) gepflegt. Offline-Installationen benoetigen Wildcard-DNS und ein passendes Zertifikat fuer die Lite-Origins.
 
 ## Storage und ARM64
 

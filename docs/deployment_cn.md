@@ -17,7 +17,7 @@ ClawManager 是 Kubernetes 原生平台。先选择 Kubernetes 发行版，再�
 
 ## 部署内容与流程
 
-清单包含 ClawManager、MySQL、MinIO、Skill Scanner、Team Redis、共享工作区服务，以及 OpenClaw、Hermes、OpenCode Lite Runtime 池。Lite 实例在共享 Runtime Pod 中运行，不会每个实例创建独立 Pod。
+清单包含 ClawManager、MySQL、MinIO、Skill Scanner、Team Redis、共享工作区服务，以及 OpenClaw、Hermes、OpenCode、DeepSeek Harness Lite Runtime 池。Lite 实例在共享 Runtime Pod 中运行，不会每个实例创建独立 Pod。
 
 1. 核对 Secret、镜像、StorageClass 和入口暴露方式。
 2. 单节点先设置清单要求的存储节点标签；集群先确认 RWO/RWX StorageClass。
@@ -26,6 +26,15 @@ ClawManager 是 Kubernetes 原生平台。先选择 Kubernetes 发行版，再�
 5. 分别创建需要对外开放的 Runtime 测试实例。
 
 全新 MySQL 使用 `clawmanager-mysql-init` 自动初始化；已有数据卷不会重复执行首次初始化脚本。MySQL、Redis、MinIO、工作区和对象数据都应使用持久卷，不能用 `emptyDir` 作为长期存储。
+
+## DeepSeek Harness Runtime
+
+- Lite 在共享 `deepseek-harness-runtime` 池中运行隔离的 `dsh web` 进程，持久化目录为 `<workspace>/home/.dsh`。
+- Pro 使用专属 Webtop Deployment；桌面端口为 `3001`，内部 `dsh web` 监听回环端口 `3080`，持久化目录为 `/config/.dsh`。
+- 两种模式都由 ClawManager 注入 AI Gateway 地址、实例凭据和模型列表，并支持 Skill 与工作区文件。
+- Lite 浏览器必须配置独立域名模板，例如 `CLAWMANAGER_DEEPSEEK_HARNESS_PUBLIC_URL_TEMPLATE=https://deepseek-harness-{instance_id}.clawmanager.test:39443/`；`{instance_id}` 不可省略。
+
+镜像源码位于 [AgentsRuntime 的 `deepseek-harness/`](https://github.com/Iamlovingit/AgentsRuntime/tree/main/deepseek-harness)。离线环境应为 Lite 独立域名配置通配 DNS 与证书。
 
 ## 存储边界
 

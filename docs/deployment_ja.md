@@ -17,7 +17,7 @@ ClawManager は Kubernetes Native です。Distribution と Storage に合う Pr
 
 ## 内容と手順
 
-Profile は ClawManager、MySQL、MinIO、Skill Scanner、Team Redis、Workspace Service、OpenClaw/Hermes/OpenCode Lite Pool を起動します。Lite Instance は Runtime Pod を共有します。
+Profile は ClawManager、MySQL、MinIO、Skill Scanner、Team Redis、Workspace Service、OpenClaw/Hermes/OpenCode/DeepSeek Harness Lite Pool を起動します。Lite Instance は Runtime Pod を共有します。
 
 1. Secret、Image、StorageClass、外部 Access を確認。
 2. Single Node の Label または Cluster の RWO/RWX CSI を確認。
@@ -26,6 +26,15 @@ Profile は ClawManager、MySQL、MinIO、Skill Scanner、Team Redis、Workspace
 5. 公開する Runtime ごとに Test Instance を作成。
 
 新規 MySQL は `clawmanager-mysql-init` で初期化され、既存 Volume では First-Start Script を再実行しません。永続 Data に `emptyDir` を使いません。
+
+## DeepSeek Harness Runtime
+
+- Lite は共有 `deepseek-harness-runtime` Pool 内で分離された `dsh web` Process を実行し、`<workspace>/home/.dsh` に状態を永続化します。
+- Pro は専用 Webtop Deployment を Port `3001` で提供し、内部の `dsh web` は Loopback Port `3080`、永続 Home は `/config/.dsh` です。
+- 両モードとも ClawManager から AI Gateway URL、Instance Credential、Model List を受け取り、Skill と Workspace File を利用できます。
+- Lite には専用 Origin Template が必要です。例: `CLAWMANAGER_DEEPSEEK_HARNESS_PUBLIC_URL_TEMPLATE=https://deepseek-harness-{instance_id}.clawmanager.test:39443/`。`{instance_id}` は必須です。
+
+Image Source は [AgentsRuntime の `deepseek-harness/`](https://github.com/Iamlovingit/AgentsRuntime/tree/main/deepseek-harness) にあります。Offline 環境では Lite Origin 用の Wildcard DNS と証明書を準備してください。
 
 ## Storage と ARM64
 

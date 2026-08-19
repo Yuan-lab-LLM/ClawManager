@@ -15,7 +15,8 @@ export interface Instance {
     | "webtop"
     | "hermes"
     | "opencode"
-    | "workbuddy";
+    | "workbuddy"
+    | "deepseek-harness";
   runtime_type: "desktop" | "shell" | "gateway";
   instance_mode: "lite" | "pro";
   status: "creating" | "running" | "stopped" | "error" | "deleting";
@@ -46,7 +47,29 @@ export interface Instance {
   stopped_at?: string;
 }
 
-export type V2InstanceType = "openclaw" | "hermes" | "opencode" | "workbuddy";
+export type V2InstanceType =
+  | "openclaw"
+  | "hermes"
+  | "opencode"
+  | "workbuddy"
+  | "deepseek-harness";
+
+export function formatInstanceType(type: string): string {
+  switch (type) {
+    case "openclaw":
+      return "OpenClaw";
+    case "hermes":
+      return "Hermes";
+    case "opencode":
+      return "OpenCode";
+    case "workbuddy":
+      return "Workbuddy";
+    case "deepseek-harness":
+      return "DeepSeek Harness";
+    default:
+      return type;
+  }
+}
 export type InstanceMode = "lite" | "pro";
 export type InstanceAvailability = "available" | "starting" | "unavailable";
 
@@ -183,7 +206,8 @@ export interface CreateInstanceRequest {
     | "webtop"
     | "hermes"
     | "opencode"
-    | "workbuddy";
+    | "workbuddy"
+    | "deepseek-harness";
   mode?: InstanceMode;
   instance_mode?: InstanceMode;
   runtime_type?: "desktop" | "shell" | "gateway";
@@ -329,6 +353,22 @@ export const INSTANCE_TYPES: InstanceType[] = [
     description: "OpenCode coding agent runtime",
     icon: "opencode",
     defaultOs: "opencode",
+    defaultVersion: "latest",
+  },
+  {
+    id: "deepseek-harness",
+    name: "DeepSeek Harness",
+    description: "DeepSeek Harness workspace managed by ClawManager",
+    icon: "deepseek-harness",
+    defaultOs: "deepseek-harness",
+    defaultVersion: "latest",
+  },
+  {
+    id: "workbuddy",
+    name: "Workbuddy",
+    description: "Managed Workbuddy runtime on a webtop desktop base",
+    icon: "workbuddy",
+    defaultOs: "workbuddy",
     defaultVersion: "latest",
   },
   {

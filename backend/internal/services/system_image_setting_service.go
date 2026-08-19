@@ -11,6 +11,7 @@ import (
 
 var orderedSystemImageTypes = []string{
 	"openclaw",
+	RuntimeTypeDeepSeekHarness,
 	"ubuntu",
 	"webtop",
 	"hermes",
@@ -22,52 +23,57 @@ var orderedSystemImageTypes = []string{
 }
 
 var supportedSystemImageTypes = map[string]string{
-	"openclaw":  "OpenClaw Pro",
-	"ubuntu":    "Ubuntu Desktop",
-	"webtop":    "Webtop Desktop",
-	"hermes":    "Hermes Pro",
-	"opencode":  "OpenCode Pro",
-	"workbuddy": "Workbuddy Pro",
-	"debian":    "Debian Desktop",
-	"centos":    "CentOS Desktop",
-	"custom":    "Custom Image",
+	"openclaw":                 "OpenClaw Pro",
+	RuntimeTypeDeepSeekHarness: "DeepSeek Harness Pro",
+	"ubuntu":                   "Ubuntu Desktop",
+	"webtop":                   "Webtop Desktop",
+	"hermes":                   "Hermes Pro",
+	"opencode":                 "OpenCode Pro",
+	"workbuddy":                "Workbuddy Pro",
+	"debian":                   "Debian Desktop",
+	"centos":                   "CentOS Desktop",
+	"custom":                   "Custom Image",
 }
 
 var defaultSystemImageSettings = map[string]string{
-	"openclaw":  "ghcr.io/yuan-lab-llm/agentsruntime/openclaw:latest",
-	"ubuntu":    "lscr.io/linuxserver/webtop:ubuntu-xfce",
-	"webtop":    "lscr.io/linuxserver/webtop:ubuntu-xfce",
-	"hermes":    "ghcr.io/yuan-lab-llm/agentsruntime/hermes:latest",
-	"opencode":  "ghcr.io/yuan-lab-llm/agentsruntime/opencode:latest",
-	"workbuddy": "ghcr.io/yuan-lab-llm/agentsruntime/workbuddy-linux:latest",
-	"debian":    "docker.io/clawreef/debian-desktop:12",
-	"centos":    "docker.io/clawreef/centos-desktop:9",
-	"custom":    "registry.example.com/your-custom-image:latest",
+	"openclaw":                 "ghcr.io/yuan-lab-llm/agentsruntime/openclaw:latest",
+	RuntimeTypeDeepSeekHarness: "ghcr.io/yuan-lab-llm/agentsruntime/deepseek-harness:latest",
+	"ubuntu":                   "lscr.io/linuxserver/webtop:ubuntu-xfce",
+	"webtop":                   "lscr.io/linuxserver/webtop:ubuntu-xfce",
+	"hermes":                   "ghcr.io/yuan-lab-llm/agentsruntime/hermes:latest",
+	"opencode":                 "ghcr.io/yuan-lab-llm/agentsruntime/opencode:latest",
+	"workbuddy":                "ghcr.io/yuan-lab-llm/agentsruntime/workbuddy-linux:latest",
+	"debian":                   "docker.io/clawreef/debian-desktop:12",
+	"centos":                   "docker.io/clawreef/centos-desktop:9",
+	"custom":                   "registry.example.com/your-custom-image:latest",
 }
 
 var defaultGatewaySystemImageSettings = map[string]string{
-	"openclaw": "ghcr.io/yuan-lab-llm/agentsruntime/openclaw-lite:latest",
-	"ubuntu":   "ubuntu:22.04",
-	"webtop":   "ubuntu:22.04",
-	"hermes":   "ghcr.io/yuan-lab-llm/agentsruntime/hermes-lite:latest",
-	"opencode": "ghcr.io/yuan-lab-llm/agentsruntime/opencode-lite:latest",
-	"debian":   "debian:12",
-	"centos":   "quay.io/centos/centos:stream9",
-	"custom":   "registry.example.com/your-custom-shell-image:latest",
+	"openclaw":                 "ghcr.io/yuan-lab-llm/agentsruntime/openclaw-lite:latest",
+	RuntimeTypeDeepSeekHarness: "ghcr.io/yuan-lab-llm/agentsruntime/deepseek-harness-lite:latest",
+	"ubuntu":                   "ubuntu:22.04",
+	"webtop":                   "ubuntu:22.04",
+	"hermes":                   "ghcr.io/yuan-lab-llm/agentsruntime/hermes-lite:latest",
+	"opencode":                 "ghcr.io/yuan-lab-llm/agentsruntime/opencode-lite:latest",
+	"debian":                   "debian:12",
+	"centos":                   "quay.io/centos/centos:stream9",
+	"custom":                   "registry.example.com/your-custom-shell-image:latest",
 }
 
 var defaultEnabledSystemImageTypes = map[string]bool{
-	"openclaw":  true,
-	"ubuntu":    true,
-	"hermes":    true,
-	"opencode":  true,
-	"workbuddy": true,
+	"openclaw":                 true,
+	"ubuntu":                   true,
+	"hermes":                   true,
+	"opencode":                 true,
+	"workbuddy":                true,
+	RuntimeTypeDeepSeekHarness: true,
 }
 
 var defaultEnabledGatewaySystemImageTypes = map[string]bool{
-	"openclaw": true,
-	"hermes":   true,
-	"opencode": true,
+	"openclaw":                 true,
+	"hermes":                   true,
+	"opencode":                 true,
+	RuntimeTypeDeepSeekHarness: true,
 }
 
 // RuntimeImageConfig is the runtime card selected for an instance type.
@@ -324,6 +330,12 @@ func displayNameForSystemImagePreset(instanceType, runtimeType string) string {
 			return "Hermes Lite"
 		}
 		return "Hermes Pro"
+	}
+	if instanceType == RuntimeTypeDeepSeekHarness {
+		if normalizedRuntimeType == RuntimeBackendGateway {
+			return "DeepSeek Harness Lite"
+		}
+		return "DeepSeek Harness Pro"
 	}
 	if instanceType == "opencode" {
 		if normalizedRuntimeType == "gateway" {
