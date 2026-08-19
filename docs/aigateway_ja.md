@@ -2,7 +2,7 @@
 
 # AI Gateway ユーザーガイド
 
-AI Gateway は OpenClaw、Hermes、OpenCode、Team、Platform Function の管理対象 Model Access Layer です。
+AI Gateway は OpenClaw、Hermes、OpenCode、DeepSeek Harness、Team、Platform Function の管理対象 Model Access Layer です。
 
 ## Instance 作成前
 

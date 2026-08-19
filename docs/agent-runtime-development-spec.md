@@ -1,6 +1,6 @@
 # Agent Runtime 开发规范
 
-本文是 ClawManager 托管 runtime 的 agent 侧开发规范，适用于当前的 OpenClaw、Hermes、OpenCode，以及后续新增的任意 runtime。开发新 runtime 时，应先满足本文的通用要求，再补充 runtime 自己的启动命令、配置文件和健康检查细节。
+本文是 ClawManager 托管 runtime 的 agent 侧开发规范，适用于当前的 OpenClaw、Hermes、OpenCode、DeepSeek Harness，以及后续新增的任意 runtime。开发新 runtime 时，应先满足本文的通用要求，再补充 runtime 自己的启动命令、配置文件和健康检查细节。
 
 相关协议和背景请同时参考：
 

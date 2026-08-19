@@ -137,6 +137,10 @@ Runtime 预览：
 
 ![OpenCode 受管工作空间](./docs/main/runtime-opencode.png)
 
+**<img src="frontend/public/deepseek-harness.svg" alt="DeepSeek Harness icon" width="18" /> DeepSeek Harness**
+
+![DeepSeek Harness 受管工作空间](./docs/main/runtime-deepseek-harness.png)
+
 <a id="get-started"></a>
 ## 快速开始
 

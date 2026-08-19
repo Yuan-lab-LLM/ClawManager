@@ -46,10 +46,11 @@ k3s / Kubernetes それぞれに Single-Node HostPath と Multi-Node CSI/RWX の
 | OpenClaw | Conversation、Tool、Scheduled Task、Team Leader/Worker | Shared Pool | Dedicated Desktop |
 | Hermes | Hermes Native Session/Tool、Team Worker | Shared Pool | Dedicated Desktop |
 | OpenCode | AI Gateway、File、Terminal/Desktop を備えた Coding Workspace | Shared Pool | Dedicated Desktop |
+| DeepSeek Harness | AI Gateway、Skill、Workspace File、Native Browser UI を備えた管理対象 Agent Workspace | Shared Pool | Dedicated Webtop |
 
 選択に応じて System Image、Resource Preset または CPU/Memory/Storage、Stream Profile、Environment、Archive、Resource Pack、個別 Resource、初期 Skill が表示されます。Lite はインスタンスごとの Pod を作らず、共有 Runtime Pod 内で隔離 Workspace/Process を動かします。
 
-Skill Hub は OpenCode 専用ではありません。OpenClaw、Hermes、OpenCode が同じ Catalog を利用し、保存先と Reload 方法だけが Runtime ごとに異なります。作成時に Skill 選択がない場合は、準備完了後に Skill Hub またはインスタンス画面から Install します。
+Skill Hub は OpenCode 専用ではありません。OpenClaw、Hermes、OpenCode、DeepSeek Harness が同じ Catalog を利用し、保存先と Reload 方法だけが Runtime ごとに異なります。作成時に Skill 選択がない場合は、準備完了後に Skill Hub またはインスタンス画面から Install します。
 
 <a id="operate-an-instance"></a>
 ## 5. インスタンス操作
@@ -67,7 +68,7 @@ Skill Hub は OpenCode 専用ではありません。OpenClaw、Hermes、OpenCod
 
 Resource Management には **Resources**、**Resource Packs**、読み取り専用の **Injection Records** があります。Resources は Channel、Upload Skill、Scheduled Task を扱い、Agent type は現在予約済みです。
 
-Skill Hub は Runtime 横断の Skill 管理・配布基盤です。Browse、My Skills、Ownership、Tag、Version、Scan、Publish、Install、インスタンス側確認を扱います。ZIP は `SKILL.md` を含む必要があり、Scan Failure は修正のため残ります。Scan 完了は自動承認ではありません。OpenClaw、Hermes、OpenCode が対象です。[Resource Management](./resource-management_ja.md) と [Skill Hub](./skill-hub-guide_ja.md) を参照してください。
+Skill Hub は Runtime 横断の Skill 管理・配布基盤です。Browse、My Skills、Ownership、Tag、Version、Scan、Publish、Install、インスタンス側確認を扱います。ZIP は `SKILL.md` を含む必要があり、Scan Failure は修正のため残ります。Scan 完了は自動承認ではありません。OpenClaw、Hermes、OpenCode、DeepSeek Harness が対象です。[Resource Management](./resource-management_ja.md) と [Skill Hub](./skill-hub-guide_ja.md) を参照してください。
 
 <a id="team-collaboration"></a>
 ## 7. Team コラボレーション
@@ -89,7 +90,7 @@ Users では Account、Role、Quota、CSV Import、Instances では全体検索�
 ![Runtime Image 設定と Lite Rolling Upgrade](./main/runtime-settings-rollout.png)
 
 1. Lite/Pro Card で Image を入力し **Save**。これは将来の Provisioning 設定を保存するだけで、稼働中 Lite Pod は置換しません。
-2. 稼働 Pool を更新するには上部の **Lite Runtime Rolling Upgrade** で OpenClaw Lite、Hermes Lite、OpenCode Lite を選び、Current/Target Image、Batch、Max Unavailable を確認します。
+2. 稼働 Pool を更新するには上部の **Lite Runtime Rolling Upgrade** で OpenClaw Lite、Hermes Lite、OpenCode Lite、DeepSeek Harness Lite を選び、Current/Target Image、Batch、Max Unavailable を確認します。
 3. **Start Rolling Upgrade** で Drain と Replace を順次実行します。
 4. 完了後に Runtime Health と Test Instance を確認します。
 

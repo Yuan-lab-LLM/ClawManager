@@ -1,6 +1,6 @@
 # Lite Skill Package Materialization
 
-Lite (OpenClaw, Hermes, and OpenCode) instances discover skills from the shared workspace instead of
+Lite (OpenClaw, Hermes, OpenCode, and DeepSeek Harness) instances discover skills from the shared workspace instead of
 using the instance agent `collect_skill_package` command.
 
 ## Lifecycle
@@ -21,6 +21,7 @@ using the instance agent `collect_skill_package` command.
 | Hermes Lite | `{workspace}/home/.hermes/skills/{name}` |
 | OpenClaw Lite | `{workspace}/home/.openclaw/workspace/skills/{name}` |
 | OpenCode Lite | `{workspace}/home/.opencode/skills/{name}` |
+| DeepSeek Harness Lite | `{workspace}/home/.dsh/skills/{name}` |
 
 The authoritative directory name is stored in `instance_skills.workspace_dir`.
 

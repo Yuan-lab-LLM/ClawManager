@@ -33,7 +33,7 @@ OpenCode는 관리형 AI Gateway Provider 구성을 받습니다. 관리자가 �
 
 Model Error는 Instance State, Model Health, Protocol, AI Audit 순서로 확인합니다. 일반 사용에는 Security Model이 필요하지 않습니다.
 
-Skill Hub는 OpenClaw, Hermes, OpenCode 공통 기능입니다. OpenCode Lite는 `{workspace}/home/.opencode/skills`, managed HostPath Pro는 `/config/workspace/.opencode/skills`를 사용합니다. Creation에 선택이 없으면 이후 Install하고 Skill Management에서 확인합니다. Non-HostPath Pro는 Runtime Agent Command가 필요합니다.
+Skill Hub는 OpenClaw, Hermes, OpenCode, DeepSeek Harness 공통 기능입니다. OpenCode Lite는 `{workspace}/home/.opencode/skills`, managed HostPath Pro는 `/config/workspace/.opencode/skills`를 사용합니다. Creation에 선택이 없으면 이후 Install하고 Skill Management에서 확인합니다. Non-HostPath Pro는 Runtime Agent Command가 필요합니다.
 
 ## 경계와 문제 해결
 

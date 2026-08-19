@@ -2,7 +2,7 @@
 
 # AI Gateway User Guide
 
-AI Gateway is the managed model-access layer for ClawManager workspaces. Administrators configure providers and policies once; OpenClaw, Hermes, OpenCode, Team members, and platform features then use the enabled models through the gateway.
+AI Gateway is the managed model-access layer for ClawManager workspaces. Administrators configure providers and policies once; OpenClaw, Hermes, OpenCode, DeepSeek Harness, Team members, and platform features then use the enabled models through the gateway.
 
 ## Before You Create an Instance
 

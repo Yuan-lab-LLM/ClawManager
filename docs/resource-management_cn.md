@@ -35,7 +35,7 @@
 
 ## 与其他功能的关系
 
-- **Skill Hub** 管理技能目录、所有者、标签、版本、发布，以及向兼容的 OpenClaw、Hermes、OpenCode 实例安装。
+- **Skill Hub** 管理技能目录、所有者、标签、版本、发布，以及向兼容的 OpenClaw、Hermes、OpenCode、DeepSeek Harness 实例安装。
 - **创建实例**会按 Runtime 支持范围提供归档、资源包、手动资源或技能选择。
 - **实例技能管理**用于核对运行工作空间中实际落盘的技能版本。
 - **安全防护**是独立的管理端功能，负责 Runtime 防御、隔离、策略、应急响应与审计。Skill Scanner 是安全防护中的一个场景，不属于资源管理页签。

@@ -34,7 +34,7 @@ ClawManager 提供四套维护中的部署形态：k3s 或 Kubernetes，各自�
 用户工作区包含：
 
 - **工作台**：查看当前账号可访问的入口和资源。
-- **我的实例**：管理本人拥有或他人共享的 OpenClaw、Hermes、OpenCode 工作空间。
+- **我的实例**：管理本人拥有或他人共享的 OpenClaw、Hermes、OpenCode、DeepSeek Harness 工作空间。
 - **Teams**：多 Agent 协作、群聊、Kanban、文件和成员产出。
 - **资源管理**：通道、上传技能、定时任务、资源包和注入记录。
 - **Skill Hub**：面向所有受支持 Runtime 的统一技能目录、版本与安装平台。
@@ -59,12 +59,13 @@ ClawManager 提供四套维护中的部署形态：k3s 或 Kubernetes，各自�
 | OpenClaw | 会话、工具、定时任务、Team Leader/Worker | 共享 Runtime 池 | 独立桌面工作负载 |
 | Hermes | Hermes 原生会话和工具，可作为 Team Worker | 共享 Runtime 池 | 独立桌面工作负载 |
 | OpenCode | 接入 AI Gateway 的编码工作空间、文件、终端和桌面 | 共享 Runtime 池 | 独立桌面工作负载 |
+| DeepSeek Harness | 接入 AI Gateway、Skill、工作区文件和原生浏览器界面的受管 Agent 工作空间 | 共享 Runtime 池 | 独立 Webtop 工作负载 |
 
 创建页只显示当前 Runtime/模式支持的选项，可能包括：系统镜像、资源预设或自定义 CPU/内存/存储、桌面流质量、环境变量、工作区归档导入、资源包、手动资源和初始技能。
 
 **Lite 不会为每个实例创建独立 Kubernetes Pod。** 它在对应的共享 Runtime Pod 中启动隔离的工作区/进程；Pro 使用独立工作负载，资源隔离更强。
 
-Skill Hub 不是 OpenCode 独有功能。OpenClaw、Hermes、OpenCode 都从同一技能平台获取技能，只是落盘目录、生效和重载方式不同。如果某个 Runtime 的创建页没有技能预选，实例就绪后仍可从 Skill Hub 或实例详情安装。
+Skill Hub 不是 OpenCode 独有功能。OpenClaw、Hermes、OpenCode、DeepSeek Harness 都从同一技能平台获取技能，只是落盘目录、生效和重载方式不同。如果某个 Runtime 的创建页没有技能预选，实例就绪后仍可从 Skill Hub 或实例详情安装。
 
 <a id="operate-an-instance"></a>
 ## 五、使用和管理实例
@@ -80,7 +81,7 @@ Skill Hub 不是 OpenCode 独有功能。OpenClaw、Hermes、OpenCode 都从同�
 - **会话 Token 用量**：查看 Runtime 已上报的会话 Token 与估算费用；未上报的数据不会被系统猜测填充。
 - **Runtime 概览 / 事件**：独立实例可能展示工作负载健康和事件，用于排障。
 
-OpenClaw 和 Hermes 保留各自的原生会话行为；OpenCode 展示编码工作空间，不会被强行改造成另一套 ClawManager 会话界面。
+OpenClaw 和 Hermes 保留各自的原生会话行为；OpenCode 与 DeepSeek Harness 展示各自的原生工作空间，不会被强行改造成另一套 ClawManager 会话界面。
 
 <a id="resources-and-skills"></a>
 ## 六、资源管理与 Skill Hub
@@ -93,7 +94,7 @@ OpenClaw 和 Hermes 保留各自的原生会话行为；OpenCode 展示编码工
 
 **Skill Hub** 是跨 Runtime 的统一技能管理与交付平台。它和资源管理有关，但专门负责可复用技能目录的完整生命周期：浏览、我的 Skill、所有权、标签、版本、扫描状态、发布、安装和实例侧核对。上传包必须是包含 `SKILL.md` 的 ZIP；扫描失败的版本会保留，方便查看原因并上传新版本。扫描完成也不等于自动允许发布或安装。
 
-OpenClaw、Hermes、OpenCode 都属于支持范围，但具体落盘目录、重载方式和镜像能力可能不同。详见 [资源管理指南](./resource-management_cn.md) 和 [Skill Hub 使用指南](./skill-hub-guide.md)。
+OpenClaw、Hermes、OpenCode、DeepSeek Harness 都属于支持范围，但具体落盘目录、重载方式和镜像能力可能不同。详见 [资源管理指南](./resource-management_cn.md) 和 [Skill Hub 使用指南](./skill-hub-guide.md)。
 
 <a id="team-collaboration"></a>
 ## 七、Team 协作
@@ -125,7 +126,7 @@ OpenClaw、Hermes、OpenCode 都属于支持范围，但具体落盘目录、重
 这里必须区分“保存镜像配置”和“更新正在运行的 Lite 池”：
 
 1. 在 Lite 或 Pro Runtime 卡片中填写镜像并点击 **保存**。这只会持久化后续创建/选择使用的镜像配置，不会替换当前正在运行的共享 Lite Pod。
-2. 如果要让现有 Lite 池使用新镜像，在页面上方找到 **Lite 运行时滚动升级**。选择 OpenClaw Lite、Hermes Lite 或 OpenCode Lite，核对当前镜像和目标镜像，并设置批次与最大不可用数。
+2. 如果要让现有 Lite 池使用新镜像，在页面上方找到 **Lite 运行时滚动升级**。选择 OpenClaw Lite、Hermes Lite、OpenCode Lite 或 DeepSeek Harness Lite，核对当前镜像和目标镜像，并设置批次与最大不可用数。
 3. 点击 **启动滚动升级**。ClawManager 会按批次排空并替换共享 Runtime 容量，直到目标镜像投入运行。
 4. 更新完成后重新检查“运行时”健康状态，并打开测试实例验收。
 

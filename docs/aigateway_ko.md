@@ -2,7 +2,7 @@
 
 # AI Gateway 사용자 가이드
 
-AI Gateway는 OpenClaw, Hermes, OpenCode, Team과 Platform Function의 관리형 Model Access Layer입니다.
+AI Gateway는 OpenClaw, Hermes, OpenCode, DeepSeek Harness, Team과 Platform Function의 관리형 Model Access Layer입니다.
 
 ## Instance 생성 전
 

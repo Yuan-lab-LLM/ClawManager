@@ -137,6 +137,10 @@ Runtime 미리보기:
 
 ![OpenCode workspace](./docs/main/runtime-opencode.png)
 
+**<img src="frontend/public/deepseek-harness.svg" alt="DeepSeek Harness icon" width="18" /> DeepSeek Harness**
+
+![DeepSeek Harness 워크스페이스](./docs/main/runtime-deepseek-harness.png)
+
 <a id="get-started"></a>
 ## 시작하기
 

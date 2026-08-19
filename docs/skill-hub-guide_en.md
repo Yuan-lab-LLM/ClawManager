@@ -2,7 +2,7 @@
 
 # Skill Hub User Guide
 
-Skill Hub is ClawManager's reusable skill catalog for OpenClaw, Hermes, and OpenCode workspaces. It turns files from one instance into scanned, versioned, publishable assets that can be installed again.
+Skill Hub is ClawManager's reusable skill catalog for OpenClaw, Hermes, OpenCode, and DeepSeek Harness workspaces. It turns files from one instance into scanned, versioned, publishable assets that can be installed again.
 
 ## Views
 
@@ -28,7 +28,7 @@ A completed scan is not a guarantee of zero risk. Publication and installation a
 3. Confirm the version.
 4. Open each instance and refresh **Skill Management** to verify the effective version.
 
-OpenClaw, Hermes, and OpenCode are supported, but their materialization paths and reload behavior differ. OpenCode skill preselection may not be shown during instance creation; install after creation from Skill Hub or the instance page. OpenCode Pro on non-HostPath storage additionally depends on the Runtime Agent's skill-command support.
+OpenClaw, Hermes, OpenCode, and DeepSeek Harness are supported, but their materialization paths and reload behavior differ. DeepSeek Harness uses `home/.dsh/skills` in Lite workspaces and `.dsh/skills` in Pro workspaces. OpenCode skill preselection may not be shown during instance creation; install after creation from Skill Hub or the instance page. OpenCode Pro on non-HostPath storage additionally depends on the Runtime Agent's skill-command support.
 
 ## Collect a Skill from an Instance
 

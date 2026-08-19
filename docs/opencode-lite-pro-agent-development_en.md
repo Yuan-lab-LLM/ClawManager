@@ -42,7 +42,7 @@ OpenCode uses the platform's enabled model catalog and supports the request prot
 
 ## Skill Hub compatibility
 
-Skill Hub is a platform-wide capability shared by OpenClaw, Hermes, and OpenCode; it is not an OpenCode feature. For OpenCode specifically, Lite materializes skills below `{workspace}/home/.opencode/skills`, while managed HostPath Pro uses `/config/workspace/.opencode/skills`.
+Skill Hub is a platform-wide capability shared by OpenClaw, Hermes, OpenCode, and DeepSeek Harness; it is not an OpenCode feature. For OpenCode specifically, Lite materializes skills below `{workspace}/home/.opencode/skills`, while managed HostPath Pro uses `/config/workspace/.opencode/skills`.
 
 If skill preselection is absent during creation, install after the instance is ready. Refresh Instance Skill Management to confirm the effective version. Non-HostPath OpenCode Pro additionally depends on the selected Runtime Agent image implementing remote install/uninstall; a successful HostPath test does not prove every storage backend has the same support.
 

@@ -2,7 +2,7 @@
 
 # AI Gateway Benutzerhandbuch
 
-AI Gateway ist der verwaltete Modellzugang fuer OpenClaw, Hermes, OpenCode, Teams und Plattformfunktionen.
+AI Gateway ist der verwaltete Modellzugang fuer OpenClaw, Hermes, OpenCode, DeepSeek Harness, Teams und Plattformfunktionen.
 
 ## Vor der Instanzerstellung
 

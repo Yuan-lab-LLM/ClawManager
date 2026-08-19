@@ -1,6 +1,6 @@
 # ClawManager Agent V2 开发规范
 
-本文整理当前 ClawManager 代码中的最新 agent 约定，面向 OpenClaw、Hermes、OpenCode 以及后续新增的托管 runtime。开发或改造 runtime 镜像时，应优先遵守本文；字段级契约以 `docs/clawmanager-agent-v2-contract.md` 和后端代码为准。
+本文整理当前 ClawManager 代码中的最新 agent 约定，面向 OpenClaw、Hermes、OpenCode、DeepSeek Harness 以及后续新增的托管 runtime。开发或改造 runtime 镜像时，应优先遵守本文；字段级契约以 `docs/clawmanager-agent-v2-contract.md` 和后端代码为准。
 
 ## 1. 架构定位
 

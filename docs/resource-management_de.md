@@ -29,7 +29,7 @@ Injektionsprotokolle sind schreibgeschuetzte Liefernachweise mit Snapshot-ID, Mo
 
 ## Abgrenzung
 
-- **Skill Hub** verwaltet Katalog, Versionen, Veroeffentlichung und Installation fuer OpenClaw, Hermes und OpenCode.
+- **Skill Hub** verwaltet Katalog, Versionen, Veroeffentlichung und Installation fuer OpenClaw, Hermes, OpenCode und DeepSeek Harness.
 - **Instanzerstellung** bietet je nach Runtime Archive, Pakete, einzelne Ressourcen oder Skills an.
 - **Security Protection** ist die separate Admin-Konsole fuer Runtime-Abwehr, Isolation, Richtlinien, Notfallsteuerung und Audit. Skill Scanner ist dort ein Szenario, kein Tab der Ressourcenverwaltung.
 

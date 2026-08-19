@@ -33,7 +33,7 @@ Unter **My Instances → Create** OpenCode und Lite/Pro waehlen, danach Image, R
 
 Bei Modellfehlern erst Instanzstatus, dann Model Health, Protokoll und AI Audit pruefen. Ein Security Model ist fuer normale Nutzung nicht erforderlich.
 
-Skill Hub ist eine gemeinsame Plattformfunktion fuer OpenClaw, Hermes und OpenCode. OpenCode Lite materialisiert nach `{workspace}/home/.opencode/skills`, managed HostPath Pro nach `/config/workspace/.opencode/skills`. Fehlt die Auswahl bei Creation, danach installieren und in Skill Management verifizieren. Non-HostPath Pro benoetigt passende Runtime-Agent-Commands.
+Skill Hub ist eine gemeinsame Plattformfunktion fuer OpenClaw, Hermes, OpenCode und DeepSeek Harness. OpenCode Lite materialisiert nach `{workspace}/home/.opencode/skills`, managed HostPath Pro nach `/config/workspace/.opencode/skills`. Fehlt die Auswahl bei Creation, danach installieren und in Skill Management verifizieren. Non-HostPath Pro benoetigt passende Runtime-Agent-Commands.
 
 ## Grenzen und Fehlerbehebung
 

@@ -2,7 +2,7 @@
 
 # Skill Hub 사용자 가이드
 
-Skill Hub는 OpenClaw, Hermes, OpenCode가 함께 사용하는 Version 관리 Skill Catalog입니다. 인스턴스 파일을 Scan, Publish, 재설치 가능한 Asset으로 바꾸는 플랫폼이며 OpenCode 전용 기능이 아닙니다.
+Skill Hub는 OpenClaw, Hermes, OpenCode, DeepSeek Harness가 함께 사용하는 Version 관리 Skill Catalog입니다. 인스턴스 파일을 Scan, Publish, 재설치 가능한 Asset으로 바꾸는 플랫폼이며 OpenCode 전용 기능이 아닙니다.
 
 ## 화면
 
@@ -23,7 +23,7 @@ Scan Completed가 자동 안전 보장이나 승인이라는 뜻은 아닙니다
 
 ## Install과 확인
 
-Skill Detail에서 Install을 선택하고 호환 Instance와 Version을 확정합니다. 이후 Instance Skill Management를 Refresh하여 실제 Version을 확인합니다. OpenClaw, Hermes, OpenCode를 지원하지만 저장 경로와 Reload 방식은 Runtime마다 다릅니다. Creation에 Skill 선택이 없으면 생성 후 설치하세요.
+Skill Detail에서 Install을 선택하고 호환 Instance와 Version을 확정합니다. 이후 Instance Skill Management를 Refresh하여 실제 Version을 확인합니다. OpenClaw, Hermes, OpenCode, DeepSeek Harness를 지원하지만 저장 경로와 Reload 방식은 Runtime마다 다릅니다. DeepSeek Harness는 Lite에서 `home/.dsh/skills`, Pro에서 `.dsh/skills`를 사용합니다.
 
 ## Instance에서 수집
 

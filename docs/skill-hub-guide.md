@@ -2,7 +2,7 @@
 
 # Skill Hub 使用指南
 
-Skill Hub 是 ClawManager 的可复用技能中心，面向 OpenClaw、Hermes 和 OpenCode 工作空间。它把技能从“某个实例里的文件”变成可扫描、可版本化、可发布、可再次安装的资产。
+Skill Hub 是 ClawManager 的可复用技能中心，面向 OpenClaw、Hermes、OpenCode 和 DeepSeek Harness 工作空间。它把技能从“某个实例里的文件”变成可扫描、可版本化、可发布、可再次安装的资产。
 
 ## 入口与视图
 
@@ -28,7 +28,7 @@ Skill Hub 是 ClawManager 的可复用技能中心，面向 OpenClaw、Hermes �
 3. 确认版本后提交。
 4. 打开实例详情，在 **技能管理** 中刷新并核对实际版本。
 
-OpenClaw、Hermes 和 OpenCode 均属于支持范围，但不同 Runtime 的落盘目录和生效方式不同。OpenCode 在创建页暂不一定显示技能预选，创建完成后可从 Skill Hub 或实例详情安装。非 HostPath 的 OpenCode Pro 环境还依赖 Runtime Agent 的技能命令支持，若界面显示安装未完成，请管理员核对当前 Runtime 镜像能力。
+OpenClaw、Hermes、OpenCode 和 DeepSeek Harness 均属于支持范围，但不同 Runtime 的落盘目录和生效方式不同。DeepSeek Harness Lite 使用工作空间下的 `home/.dsh/skills`，Pro 使用 `.dsh/skills`；创建完成后可从 Skill Hub 或实例详情安装。OpenCode 在创建页暂不一定显示技能预选，非 HostPath 的 OpenCode Pro 环境还依赖 Runtime Agent 的技能命令支持。若界面显示安装未完成，请管理员核对当前 Runtime 镜像能力。
 
 ## 从实例收录技能
 

@@ -37,7 +37,7 @@ Injection records help answer “what was delivered?” They are not security ev
 
 ## Relationship to Other Features
 
-- **Skill Hub** manages the reusable skill catalog, owners, tags, versions, publication, and installation to compatible OpenClaw, Hermes, and OpenCode instances.
+- **Skill Hub** manages the reusable skill catalog, owners, tags, versions, publication, and installation to compatible OpenClaw, Hermes, OpenCode, and DeepSeek Harness instances.
 - **Instance creation** selects archives, resource packs, manual resources, or skills when the chosen runtime supports them.
 - **Instance Skill Management** shows the materialized skill version in a running workspace.
 - **Security Protection** is a separate administrator feature for runtime defense, isolation, policy, emergency response, and audit. Skill Scanner is one scenario inside that platform, not a Resource Management tab.

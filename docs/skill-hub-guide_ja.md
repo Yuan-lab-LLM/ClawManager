@@ -2,7 +2,7 @@
 
 # Skill Hub ユーザーガイド
 
-Skill Hub は OpenClaw、Hermes、OpenCode 共通の Version 管理 Skill Catalog です。インスタンス内の File を Scan、Publish、再 Install できる Asset に変換する基盤で、OpenCode 専用機能ではありません。
+Skill Hub は OpenClaw、Hermes、OpenCode、DeepSeek Harness 共通の Version 管理 Skill Catalog です。インスタンス内の File を Scan、Publish、再 Install できる Asset に変換する基盤で、OpenCode 専用機能ではありません。
 
 ## View
 
@@ -23,7 +23,7 @@ Scan Completed は自動的な安全保証や承認ではありません。Packa
 
 ## Install と確認
 
-Skill Detail で Install を選び、対応 Instance と Version を確定します。その後 Instance の Skill Management を Refresh し、実際の Version を確認します。OpenClaw、Hermes、OpenCode に対応しますが、保存先と Reload は Runtime ごとに異なります。Creation に Skill 選択がない場合は作成後に Install します。
+Skill Detail で Install を選び、対応 Instance と Version を確定します。その後 Instance の Skill Management を Refresh し、実際の Version を確認します。OpenClaw、Hermes、OpenCode、DeepSeek Harness に対応しますが、保存先と Reload は Runtime ごとに異なります。DeepSeek Harness は Lite で `home/.dsh/skills`、Pro で `.dsh/skills` を使用します。
 
 ## Instance から収録
 

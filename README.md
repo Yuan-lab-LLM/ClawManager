@@ -137,6 +137,10 @@ Runtime previews:
 
 ![OpenCode managed workspace](./docs/main/runtime-opencode.png)
 
+**<img src="frontend/public/deepseek-harness.svg" alt="DeepSeek Harness icon" width="18" /> DeepSeek Harness**
+
+![DeepSeek Harness managed workspace](./docs/main/runtime-deepseek-harness.png)
+
 ## Get Started
 
 ClawManager now separates the Kubernetes distribution from the storage profile. Choose `k3s` or `k8s` first, then choose the storage profile that matches the cluster shape:

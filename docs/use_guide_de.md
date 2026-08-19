@@ -46,10 +46,11 @@ Unter **My Instances → Create** Runtime und Modus waehlen:
 | OpenClaw | Sessions, Tools, Scheduled Tasks, Team Leader/Worker | gemeinsamer Pool | dedizierter Desktop |
 | Hermes | native Hermes-Sessions/Tools, optional Team Worker | gemeinsamer Pool | dedizierter Desktop |
 | OpenCode | Coding-Workspace mit AI Gateway, Dateien, Terminal/Desktop | gemeinsamer Pool | dedizierter Desktop |
+| DeepSeek Harness | verwalteter Agent-Workspace mit AI Gateway, Skills, Workspace-Dateien und nativer Browser-UI | gemeinsamer Pool | dedizierter Webtop |
 
 Je nach Auswahl erscheinen Image, Ressourcenpreset oder CPU/Memory/Storage, Stream-Profil, Umgebungsvariablen, Archivimport, Resource Pack, einzelne Ressourcen und Skills. Lite erstellt keinen Pod pro Instanz, sondern einen isolierten Workspace/Prozess im gemeinsamen Runtime Pod.
 
-Skill Hub ist keine OpenCode-Sonderfunktion: OpenClaw, Hermes und OpenCode verwenden denselben Katalog. Nur Zielpfad und Reload unterscheiden sich. Fehlt die Skill-Auswahl bei der Erstellung, nach Bereitstellung ueber Skill Hub oder die Instanzseite installieren.
+Skill Hub ist keine OpenCode-Sonderfunktion: OpenClaw, Hermes, OpenCode und DeepSeek Harness verwenden denselben Katalog. Nur Zielpfad und Reload unterscheiden sich. Fehlt die Skill-Auswahl bei der Erstellung, nach Bereitstellung ueber Skill Hub oder die Instanzseite installieren.
 
 <a id="operate-an-instance"></a>
 ## 5. Instanz bedienen
@@ -67,7 +68,7 @@ Skill Hub ist keine OpenCode-Sonderfunktion: OpenClaw, Hermes und OpenCode verwe
 
 Resource Management besitzt **Resources**, **Resource Packs** und schreibgeschuetzte **Injection Records**. Resources umfassen Channels, hochgeladene Skill-Pakete und Scheduled Tasks; der Typ Agent ist derzeit reserviert.
 
-Skill Hub ist die Runtime-uebergreifende Plattform fuer Browse, My Skills, Ownership, Tags, Versionen, Scanstatus, Publication, Installation und Verifikation in der Instanz. ZIP-Pakete brauchen `SKILL.md`. Fehlgeschlagene Scans bleiben zur Korrektur sichtbar; ein abgeschlossener Scan ist keine automatische Freigabe. Unterstuetzt werden OpenClaw, Hermes und OpenCode. Siehe [Resource Management](./resource-management_de.md) und [Skill Hub](./skill-hub-guide_de.md).
+Skill Hub ist die Runtime-uebergreifende Plattform fuer Browse, My Skills, Ownership, Tags, Versionen, Scanstatus, Publication, Installation und Verifikation in der Instanz. ZIP-Pakete brauchen `SKILL.md`. Fehlgeschlagene Scans bleiben zur Korrektur sichtbar; ein abgeschlossener Scan ist keine automatische Freigabe. Unterstuetzt werden OpenClaw, Hermes, OpenCode und DeepSeek Harness. Siehe [Resource Management](./resource-management_de.md) und [Skill Hub](./skill-hub-guide_de.md).
 
 <a id="team-collaboration"></a>
 ## 7. Team-Kollaboration
@@ -89,7 +90,7 @@ Unter **Admin Console → Settings** Images verwalten:
 ![Runtime-Image-Einstellungen und Lite-Rollout](./main/runtime-settings-rollout.png)
 
 1. Image in der Lite-/Pro-Karte eintragen und **Save** klicken. Das speichert das Image fuer spaetere Bereitstellung, ersetzt aber keinen laufenden Lite Pod.
-2. Fuer den aktiven Lite-Pool oben **Lite Runtime Rolling Upgrade** nutzen: OpenClaw Lite, Hermes Lite oder OpenCode Lite auswaehlen, Current/Target Image sowie Batch und Max Unavailable pruefen.
+2. Fuer den aktiven Lite-Pool oben **Lite Runtime Rolling Upgrade** nutzen: OpenClaw Lite, Hermes Lite, OpenCode Lite oder DeepSeek Harness Lite auswaehlen, Current/Target Image sowie Batch und Max Unavailable pruefen.
 3. **Start Rolling Upgrade** startet kontrolliertes Drain und Replacement.
 4. Danach Runtime-Gesundheit und eine Testinstanz pruefen.
 

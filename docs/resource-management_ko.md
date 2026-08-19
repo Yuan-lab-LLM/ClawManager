@@ -29,7 +29,7 @@ Session Template과 Log Policy는 내부 모델에 있지만 이 화면에서는
 
 ## 다른 기능과의 경계
 
-- **Skill Hub**는 OpenClaw, Hermes, OpenCode용 Skill Catalog, Version, Publish, Install을 관리합니다.
+- **Skill Hub**는 OpenClaw, Hermes, OpenCode, DeepSeek Harness용 Skill Catalog, Version, Publish, Install을 관리합니다.
 - **인스턴스 생성**에서는 Runtime 지원 범위에 따라 Archive, Resource Pack, 개별 Resource, Skill을 선택합니다.
 - **Security Protection**은 Runtime 방어, 격리, 정책, 비상 대응, Audit을 위한 별도의 관리자 기능입니다. Skill Scanner는 그 안의 한 Scenario이며 리소스 관리 탭이 아닙니다.
 

@@ -2,7 +2,7 @@
 
 # Skill Hub Benutzerhandbuch
 
-Skill Hub ist der gemeinsame, versionierte Skill-Katalog fuer OpenClaw, Hermes und OpenCode. Er macht aus Dateien einer Instanz gepruefte, veroeffentlichbare und erneut installierbare Assets; er ist keine OpenCode-Sonderfunktion.
+Skill Hub ist der gemeinsame, versionierte Skill-Katalog fuer OpenClaw, Hermes, OpenCode und DeepSeek Harness. Er macht aus Dateien einer Instanz gepruefte, veroeffentlichbare und erneut installierbare Assets; er ist keine OpenCode-Sonderfunktion.
 
 ## Ansichten
 
@@ -23,7 +23,7 @@ Scan completed bedeutet nicht automatisch risikofrei oder freigegeben. Package, 
 
 ## Installation und Verifikation
 
-Skill oeffnen, Install waehlen, eine oder mehrere kompatible Instanzen und Version bestaetigen. Danach in jeder Instanz Skill Management aktualisieren und die effektive Version pruefen. OpenClaw, Hermes und OpenCode werden unterstuetzt; Materialisierung und Reload sind Runtime-spezifisch. Wenn Creation keine Vorauswahl zeigt, nach Erstellung installieren.
+Skill oeffnen, Install waehlen, eine oder mehrere kompatible Instanzen und Version bestaetigen. Danach in jeder Instanz Skill Management aktualisieren und die effektive Version pruefen. OpenClaw, Hermes, OpenCode und DeepSeek Harness werden unterstuetzt; Materialisierung und Reload sind Runtime-spezifisch. DeepSeek Harness nutzt `home/.dsh/skills` in Lite und `.dsh/skills` in Pro.
 
 ## Aus einer Instanz sammeln
 

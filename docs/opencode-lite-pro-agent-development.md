@@ -42,7 +42,7 @@ OpenCode 使用平台已启用模型和管理员配置的请求协议。生产�
 
 ## Skill Hub 兼容
 
-Skill Hub 是 OpenClaw、Hermes、OpenCode 共用的平台能力，并非 OpenCode 功能。本节只说明 OpenCode 的兼容差异：Lite 通常落盘到 `{workspace}/home/.opencode/skills`，受管 HostPath Pro 使用 `/config/workspace/.opencode/skills`。
+Skill Hub 是 OpenClaw、Hermes、OpenCode、DeepSeek Harness 共用的平台能力，并非 OpenCode 功能。本节只说明 OpenCode 的兼容差异：Lite 通常落盘到 `{workspace}/home/.opencode/skills`，受管 HostPath Pro 使用 `/config/workspace/.opencode/skills`。
 
 创建页没有技能预选时，可在实例就绪后安装，并在实例技能管理中核对实际版本。非 HostPath OpenCode Pro 还依赖所选 Runtime Agent 镜像实现远程安装/卸载；HostPath 场景验证成功不代表所有存储后端能力相同。
 

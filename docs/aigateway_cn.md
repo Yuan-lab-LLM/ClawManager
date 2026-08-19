@@ -2,7 +2,7 @@
 
 # AI Gateway 使用指南
 
-AI Gateway 是 OpenClaw、Hermes、OpenCode、Team 与平台功能统一访问模型的受管入口。
+AI Gateway 是 OpenClaw、Hermes、OpenCode、DeepSeek Harness、Team 与平台功能统一访问模型的受管入口。
 
 ## 使用前配置
 

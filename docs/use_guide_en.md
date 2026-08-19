@@ -34,7 +34,7 @@ After the core workloads and storage claims are ready, open the configured web a
 The user workspace contains:
 
 - **Workbench**: an entry view for resources you can access.
-- **My Instances**: OpenClaw, Hermes, and OpenCode workspaces owned by or shared with you.
+- **My Instances**: OpenClaw, Hermes, OpenCode, and DeepSeek Harness workspaces owned by or shared with you.
 - **Teams**: multi-agent collaboration, chat, Kanban, files, and member results.
 - **Resource Management**: channels, uploaded skills, scheduled tasks, resource packs, and injection records.
 - **Skill Hub**: the shared, versioned skill catalog for all supported runtimes.
@@ -59,12 +59,13 @@ Open **My Instances → Create**, then choose the Runtime and mode:
 | OpenClaw | conversations, tools, scheduled tasks, Team Leader/Worker | shared Runtime pool | dedicated desktop workload |
 | Hermes | native Hermes sessions and tools; optional Team Worker | shared Runtime pool | dedicated desktop workload |
 | OpenCode | managed coding workspace with AI Gateway, files, terminal, and desktop | shared Runtime pool | dedicated desktop workload |
+| DeepSeek Harness | managed agent workspace with AI Gateway, skills, workspace files, and a native browser UI | shared Runtime pool | dedicated Webtop workload |
 
 The form displays only options supported by the selected Runtime and mode. Depending on that choice, configure the system image, resource preset or custom CPU/memory/storage, desktop stream profile, environment variables, archive import, resource pack, manual resources, or initial skills.
 
 **Lite does not create a Kubernetes Pod per instance.** It starts an isolated workspace/process inside the corresponding shared Runtime Pod. Pro uses a dedicated workload and stronger resource isolation.
 
-Skill Hub is not an OpenCode-only feature. OpenClaw, Hermes, and OpenCode all consume skills from the same catalog; only the installation path and reload method differ. If creation does not show skill preselection for a Runtime, install the skill after the instance is ready.
+Skill Hub is not an OpenCode-only feature. OpenClaw, Hermes, OpenCode, and DeepSeek Harness all consume skills from the same catalog; only the installation path and reload method differ. If creation does not show skill preselection for a Runtime, install the skill after the instance is ready.
 
 <a id="operate-an-instance"></a>
 ## 5. Operate an instance
@@ -80,7 +81,7 @@ The instance page combines lifecycle actions, the embedded Runtime UI or desktop
 - **Session Usage**: summarizes reported token use and estimated cost for the instance. Missing runtime metadata remains missing rather than being guessed.
 - **Runtime Overview / Events**: dedicated instances may expose workload health and event information for troubleshooting.
 
-OpenClaw and Hermes preserve their own native conversation/session behavior. OpenCode exposes its coding workspace rather than being given a separate ClawManager conversation model.
+OpenClaw and Hermes preserve their own native conversation/session behavior. OpenCode and DeepSeek Harness expose their native workspaces rather than being given a separate ClawManager conversation model.
 
 <a id="resources-and-skills"></a>
 ## 6. Manage resources and skills
@@ -93,7 +94,7 @@ OpenClaw and Hermes preserve their own native conversation/session behavior. Ope
 
 **Skill Hub** is the cross-Runtime skill management and delivery platform. It is related to Resource Management, but it owns the reusable catalog lifecycle: Browse, My Skills, versions, ownership, tags, scan status, publication, installation, and instance-side verification. Uploads require a ZIP containing `SKILL.md`. A failed scan remains visible so the owner can correct and upload a new version; scan completion does not by itself guarantee publication or installation approval.
 
-OpenClaw, Hermes, and OpenCode are all supported. Runtime-specific storage paths, reload behavior, and image capabilities can still differ. See the [Resource Management Guide](./resource-management.md) and [Skill Hub Guide](./skill-hub-guide_en.md).
+OpenClaw, Hermes, OpenCode, and DeepSeek Harness are all supported. Runtime-specific storage paths, reload behavior, and image capabilities can still differ. See the [Resource Management Guide](./resource-management.md) and [Skill Hub Guide](./skill-hub-guide_en.md).
 
 <a id="team-collaboration"></a>
 ## 7. Use Team collaboration
@@ -125,7 +126,7 @@ Open **Admin Console → Settings** to manage Runtime images.
 The page deliberately separates **saving an image setting** from **updating a running Lite pool**:
 
 1. In the Lite or Pro Runtime card, enter the desired image and click **Save**. This persists the selectable/default image for later provisioning; it does not replace the running shared Lite Pod.
-2. For an existing Lite pool, use **Lite Runtime Rolling Upgrade** at the top of the page. Select OpenClaw Lite, Hermes Lite, or OpenCode Lite, confirm the current and target gateway images, and set batch size and maximum unavailable.
+2. For an existing Lite pool, use **Lite Runtime Rolling Upgrade** at the top of the page. Select OpenClaw Lite, Hermes Lite, OpenCode Lite, or DeepSeek Harness Lite, confirm the current and target gateway images, and set batch size and maximum unavailable.
 3. Click **Start Rolling Upgrade**. ClawManager drains and replaces shared Runtime capacity in controlled batches until the target image is active.
 4. Recheck Runtime health and open a test instance after the rollout.
 

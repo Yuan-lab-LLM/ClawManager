@@ -23,7 +23,7 @@ The cluster profile is validated with Longhorn as the example CSI implementation
 - MinIO for object storage-backed features
 - `skill-scanner` for skill analysis workflows
 - Team Redis and shared workspace storage services
-- Shared Lite Runtime pools for OpenClaw, Hermes, and OpenCode
+- Shared Lite Runtime pools for OpenClaw, Hermes, OpenCode, and DeepSeek Harness
 - Kubernetes Services used for portal, gateway, and supporting traffic paths
 
 ## Repository Entry Points
@@ -43,7 +43,7 @@ The cluster profile is validated with Longhorn as the example CSI implementation
 4. Review the bundled manifest and adjust secrets, images, StorageClass names, and ingress exposure for your environment.
 5. Deploy the platform components into the cluster.
 6. Wait for the core services to become ready.
-7. Validate frontend access, AI Gateway management pages, Security Protection connectivity, and OpenClaw/Hermes/OpenCode runtime creation flows.
+7. Validate frontend access, AI Gateway management pages, Security Protection connectivity, and OpenClaw/Hermes/OpenCode/DeepSeek Harness runtime creation flows.
 
 Single-node example:
 
@@ -136,9 +136,9 @@ Unsupported combinations:
 
 ## ARM64 Deployment
 
-The official ClawManager and Skill Scanner images are published for `linux/arm64`, but a complete installation also uses MySQL, Redis, MinIO/workspace services, and the selected OpenClaw, Hermes, or OpenCode Runtime images. Verify the manifest of **every pinned image** before deploying to ARM nodes; platform support does not make a custom Runtime image ARM64-compatible.
+The official ClawManager and Skill Scanner images are published for `linux/arm64`, but a complete installation also uses MySQL, Redis, MinIO/workspace services, and the selected OpenClaw, Hermes, OpenCode, or DeepSeek Harness Runtime images. Verify the manifest of **every pinned image** before deploying to ARM nodes; platform support does not make a custom Runtime image ARM64-compatible.
 
-For mixed-architecture clusters, use architecture-compatible tags together with node selectors or affinity. The shared Lite profiles include OpenClaw, Hermes, and OpenCode pools, so validate every enabled pool image even when users initially see only one Runtime. Use SSD-backed persistent storage, sufficient memory, and reproducible tags rather than `latest`, then perform the same PVC, Runtime creation, desktop, and model acceptance checks as on amd64.
+For mixed-architecture clusters, use architecture-compatible tags together with node selectors or affinity. The shared Lite profiles include OpenClaw, Hermes, OpenCode, and DeepSeek Harness pools, so validate every enabled pool image even when users initially see only one Runtime. Use SSD-backed persistent storage, sufficient memory, and reproducible tags rather than `latest`, then perform the same PVC, Runtime creation, desktop, and model acceptance checks as on amd64.
 
 ## Operational Notes
 
