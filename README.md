@@ -35,6 +35,7 @@
   <a href="#agent-control-plane">Agent Control Plane</a> |
   <a href="#runtime-integrations">Runtime Integrations</a> |
   <a href="#resource-management">Resource Management</a> |
+  <a href="#security-protection-platform">Security Protection</a> |
   <a href="#get-started">Get Started</a>
 </p>
 
@@ -58,6 +59,9 @@
 
 Recent highlights from the latest product and documentation updates.
 
+- [2026-08-19] Added managed OpenCode workspaces, refreshed the instance desktop experience, and expanded Skill Hub delivery to OpenClaw, Hermes, and OpenCode runtimes. See the [OpenCode Workspace Guide](./docs/opencode-lite-pro-agent-development_en.md).
+- [2026-08-18] Expanded Team collaboration with eight read-only built-in templates, natural-language custom Team templates, optional Hermes Lite Workers, live Execution Kanban, shared artifacts, and member-session visibility.
+- [2026-08-17] Added model-managed Thinking, AI Gateway Session Usage, editable scheduled tasks, and improved Lite instance lifecycle and batch operations.
 - [2026-07-07] Added the Security Protection Platform (secplane) frontend — a comprehensive security console covering runtime defense (input/state/decision/output surface, asset tamper-proofing, human approval), host hardening & container isolation, outbound trusted-endpoint governance, policy governance, kill-switch/circuit-breaker, full-chain audit, SecureClaw data-and-component trust auditing, collaboration governance, and input detection. All 4 defense layers are accessible from a unified admin UI with full i18n for 5 languages.
 - [2026-06-14] Added Lite / Pro runtime modes and rollout support, so Lite instances can run through shared gateway runtime pools while Pro instances keep dedicated desktop deployments for stronger isolation.
 - [2026-05-18] Added the Team workspace MVP introduction and preview, covering one-click Team creation, OpenClaw member orchestration, Redis Team Bus injection, shared storage, member status, task dispatch, and event/result views.
@@ -100,7 +104,7 @@ Join the ClawManager open source community on WeChat or Discord for product upda
 
 ## Product Tour
 
-ClawManager brings AI agent instance operations to Kubernetes and layers three higher-level control planes on top of that runtime foundation. Teams use it to govern AI access, orchestrate runtime behavior through agents, and manage reusable channels and skills with scanning and bundle-based delivery.
+ClawManager brings AI agent operations to Kubernetes in one product: managed runtimes, collaborative Teams, governed model access, reusable resources, Skill Hub, and platform security. Users work through browser-based desktops while administrators retain visibility and policy control without exposing Kubernetes details.
 
 It is designed for:
 
@@ -108,38 +112,28 @@ It is designed for:
 - operators who need runtime visibility, command dispatch, and desired-state control
 - builders who want governed AI access and reusable resource injection instead of manual per-instance setup
 
-<a id="team-workspaces"></a>
-## Team Workspaces
-
-Team Workspaces provide a Leader-mediated collaboration flow: choose one of eight read-only built-in templates or a user-owned custom template, create the Team, and describe the goal in Team chat. The OpenClaw Lite Leader plans the work, coordinates members, collects deliveries, and publishes the final result.
-
-- an OpenClaw Lite Leader with OpenClaw Lite or Hermes Lite Workers selected per member
-- eight immutable built-in templates plus custom Teams generated and refined from natural-language intent
-- Team chat for plans, assignments, progress, reviews, deliveries, and final synthesis
-- Execution Kanban for the current query, root-task state, and member deliveries
-- shared Team artifacts and native Hermes session visibility for Hermes Lite Workers
-
-See the [Team Workspace Quick Guide](./docs/team-workspaces-guide_en.md) for the creation flow, collaboration stages, and result viewing.
-
 <a id="runtime-integrations"></a>
 ## Runtime Integrations
 
 ClawManager currently supports the following managed runtimes:
 
-- <img src="frontend/public/openclaw.png" alt="OpenClaw icon" width="18" /> `OpenClaw`: the default OpenClaw-style workspace runtime used by ClawManager-managed desktop instances
-- <img src="frontend/public/hermes.png" alt="Hermes icon" width="18" /> `Hermes`: a Webtop-based runtime integration with a persistent `.hermes` workspace and embedded Hermes agent
+- <img src="frontend/public/openclaw.png" alt="OpenClaw icon" width="18" /> `OpenClaw`: Lite and Pro workspaces with native conversations, tools, scheduled tasks, and Team support
+- <img src="frontend/public/hermes.png" alt="Hermes icon" width="18" /> `Hermes`: Lite and Pro workspaces with a persistent `.hermes` home, native sessions, and optional Team Worker support
+- <img src="frontend/public/opencode.png" alt="OpenCode icon" width="18" /> `OpenCode`: managed coding workspaces with AI Gateway model access, workspace files, and terminal/desktop access. See the [OpenCode Workspace Guide](./docs/opencode-lite-pro-agent-development_en.md).
 
 Runtime previews:
 
 **<img src="frontend/public/openclaw.png" alt="OpenClaw icon" width="18" /> OpenClaw**
 
-![openclaw](./docs/images/openclaw.png)
+![OpenClaw managed workspace](./docs/main/runtime-openclaw.png)
 
 **<img src="frontend/public/hermes.png" alt="Hermes icon" width="18" /> Hermes**
 
-![hermes](./docs/images/hermes.png)
+![Hermes managed workspace](./docs/main/runtime-hermes.png)
 
-Runtime authors can follow the [Hermes Runtime Guide](./docs/hermes-runtime-agent-development.md), the [Generic Runtime Agent Integration Guide](./docs/runtime-agent-integration-guide.md), and the [Skill Content MD5 Spec](./docs/skill-content-md5-spec.md) to build compatible agents.
+**<img src="frontend/public/opencode.png" alt="OpenCode icon" width="18" /> OpenCode**
+
+![OpenCode managed workspace](./docs/main/runtime-opencode.png)
 
 ## Get Started
 
@@ -154,16 +148,21 @@ ClawManager now separates the Kubernetes distribution from the storage profile. 
 
 The cluster profile is validated with Longhorn (`longhorn` for RWO data and `longhorn-rwx` for RWX workspaces), but these StorageClass names are examples. You can replace them with any CSI classes that provide the same access modes.
 
-## Three Control Planes
+## Core Platform Capabilities
+
+### Runtime and Instance Management
+
+Create OpenClaw, Hermes, or OpenCode workspaces in Lite or Pro mode, choose an enabled system image, apply a resource preset or custom CPU/memory/storage values, and manage lifecycle, desktop access, files, shell access, environment variables, archives, Share Links, and Lite batch operations from one place.
 
 ### AI Gateway
 
-AI Gateway is the governance plane for model access inside ClawManager. It gives managed agent runtimes a unified OpenAI-compatible entry point while adding policy and audit controls on top of upstream providers.
+AI Gateway is the governed model entry point for managed runtimes. Its five user-facing areas cover Models, AI Audit, Costs, Session Usage, and Risk Rules.
 
-- Unified gateway entry for model traffic
-- Secure model routing and policy-aware model selection
+- OpenAI Chat Completions, OpenAI Responses, and Anthropic Messages compatibility
+- Persistent model configuration, provider health, pricing, and managed Thinking where supported
+- Security-model routing for sensitive policies without requiring every normal model to be marked as secure
 - End-to-end audit and trace records
-- Built-in cost accounting and usage analysis
+- Built-in cost accounting plus per-instance and per-session token usage
 - Risk control rules that can block or reroute requests
 
 See the [AI Gateway Guide](./docs/aigateway.md).
@@ -178,19 +177,38 @@ Agent Control Plane is the runtime orchestration layer for managed AI agent inst
 - Runtime command dispatch for start, stop, config apply, health checks, and skill operations
 - Instance-level visibility into agent status, channels, skills, and command history
 
-See the [Agent Control Plane Guide](./docs/agent-control-plane.md).
+Lifecycle, status, restart, runtime health, and administrator operations are covered in the [User Manual](./docs/use_guide_en.md#operate-an-instance).
 
 ### Resource Management
 
-Resource Management is the reusable asset layer for AI agent workspaces. It helps teams prepare channels and skills once, organize them into bundles, inject them into instances, and keep security review in the loop.
+Resource Management is the user-side OpenClaw configuration center for reusable startup content. It is organized into Resources, Resource Packs, and Injection Records and is separate from the administrator Security Protection console.
 
-- Channel management for workspace connectivity and integration templates
-- Skill management for reusable packaged capabilities
-- Skill Scanner workflows for risk review and scan operations
-- Bundle-based resource composition for repeatable workspace setup
-- Injection snapshots and runtime-level visibility into what was applied
+- Channel configuration with supported templates, form/JSON editing, cloning, and lifecycle controls
+- Skill ZIP import, conflict handling, download, and deletion; Skill Hub adds catalog, ownership, versions, publishing, and installation
+- Scheduled-task editing with simple and advanced modes; Agent resources are visible but not yet configurable here
+- Resource Pack creation, editing, cloning, and reuse during instance creation
+- Read-only injection snapshots showing mode, resources, environment variables, status, and creation time
 
-See the [Resource Management Guide](./docs/resource-management.md) and the [Security / Skill Scanner Guide](./docs/security-skill-scanner.md).
+See the [Resource Management Guide](./docs/resource-management.md) and [Skill Hub Guide](./docs/skill-hub-guide_en.md).
+
+<a id="team-workspaces"></a>
+### Team Collaboration
+
+Team collaboration uses a Leader-mediated workflow. Create a Team from one of eight immutable built-in templates or a user-owned custom template, then describe the goal in Team chat. The OpenClaw Lite Leader plans and decomposes the request, dispatches work, verifies member deliveries, and publishes the unified result.
+
+- each Team has one OpenClaw Lite Leader; each Worker can use OpenClaw Lite or Hermes Lite when available
+- custom Teams can be generated from natural-language intent, refined by role, regenerated, and reused
+- Team chat records plans, assignments, progress, reviews, deliveries, and the final synthesis
+- Execution Kanban follows the current query, task breakdown, and member delivery state
+- shared files and artifacts retain collaboration output; Hermes Lite Workers expose their native Team sessions from the instance view
+
+See the [Team Workspace Quick Guide](./docs/team-workspaces-guide_en.md) for creation, collaboration stages, and result viewing.
+
+### Security Protection Platform
+
+Security Protection is a separate administrator workspace. Its live overview combines four alert metrics, recent cross-product events, Pod Live Aegis configuration, report export, and an emergency circuit breaker. The overview currently presents the KSecure model as seven risk surfaces, fifteen defense scenarios, and four defense layers. Drill-down areas cover runtime defense, host/container isolation, component trust, outbound and identity governance, policy, collaboration, quotas, approvals, Skill Scanner, and full-chain audit.
+
+See the [Security Platform Guide](./docs/security-platform.md).
 
 ## Product Gallery
 
@@ -208,12 +226,28 @@ Pro mode provisions a dedicated desktop runtime for each instance, backed by its
 
 ![](./docs/main/proopenclaw.png)
 
-### Team Creation
+### Team Collaboration
 
-The Team creation page combines eight immutable templates, user-owned custom Teams, and per-Worker OpenClaw Lite or Hermes Lite selection in one flow.
+The Team workspace shows the real execution flow in one view: user requests and member messages on the left, and the current query, task decomposition, delivery state, and artifact details on the Execution Kanban. The Leader coordinates members and publishes the final result without hiding the intermediate work.
 
 <p align="center">
-  <img src="./docs/main/team-create-fixed-and-custom-entry.png" alt="ClawManager Team creation and custom Team entry" width="100%" />
+  <img src="./docs/main/team-collaboration.png" alt="ClawManager Team collaboration workspace with chat and Execution Kanban" width="100%" />
+</p>
+
+### Resource Management
+
+Users manage reusable OpenClaw channels, skills, scheduled tasks, resource packs, and injection records from one configuration center. Security Protection remains a separate administrator feature.
+
+<p align="center">
+  <img src="./docs/main/resource-management-current.png" alt="ClawManager OpenClaw Resource Management" width="100%" />
+</p>
+
+### Security Protection
+
+Administrators use the dedicated Security Protection workspace to review live security metrics and events, navigate the KSecure layered defense model, configure Pod Aegis, export evidence, and control emergency circuit breaking.
+
+<p align="center">
+  <img src="./docs/main/security-protection-current.png" alt="ClawManager Security Protection overview" width="100%" />
 </p>
 
 ### Admin Console
@@ -221,7 +255,7 @@ The Team creation page combines eight immutable templates, user-owned custom Tea
 The admin console brings together users, quotas, runtime operations, security controls, and platform-level policies in one place. It is the operational center for teams running AI agent infrastructure at scale.
 
 <p align="center">
-  <img src="./docs/main/admin.png" alt="ClawManager admin console" width="100%" />
+  <img src="./docs/main/admin-current.png" alt="ClawManager admin console and cluster capacity overview" width="100%" />
 </p>
 
 ### Portal Access
@@ -229,7 +263,7 @@ The admin console brings together users, quotas, runtime operations, security co
 The portal experience gives users a clean entry point into their workspaces, with browser-based access and runtime visibility that stays connected to the control plane instead of exposing infrastructure details directly.
 
 <p align="center">
-  <img src="./docs/main/portal.png" alt="ClawManager portal access" width="100%" />
+  <img src="./docs/main/portal-current.png" alt="ClawManager desktop portal with instance list, runtime desktop, and workspace files" width="100%" />
 </p>
 
 ### AI Gateway
@@ -237,13 +271,13 @@ The portal experience gives users a clean entry point into their workspaces, wit
 AI Gateway extends the workspace experience with governed model access, audit trails, cost visibility, and risk-aware routing, making AI usage manageable as part of the platform rather than an isolated integration.
 
 <p align="center">
-  <img src="./docs/main/aigateway.png" alt="ClawManager AI Gateway" width="100%" />
+  <img src="./docs/main/ai-gateway-current.png" alt="ClawManager AI Gateway modules" width="100%" />
 </p>
 
 ## How It Works
 
 1. Admins define governance policies and reusable resources.
-2. Users create or enter managed AI agent workspaces on Kubernetes.
+2. Users create or enter OpenClaw, Hermes, or OpenCode workspaces in Lite or Pro mode.
 3. Team workspaces can provision multiple member runtimes with Redis Team Bus and shared storage configuration.
 4. Agents connect back to the control plane and report runtime state.
 5. Channels, skills, and bundles are compiled and applied to instances.
@@ -258,22 +292,18 @@ ClawManager is built as a Kubernetes-native platform with a React frontend, a Go
 - Deployment assets live under `deployments/`
 - Supporting product docs live under `docs/`
 
-See the [Developer Guide](./docs/developer-guide.md).
+Runtime and protocol implementation references remain under `docs/` for contributors, while the user-facing documentation below is organized by product workflow.
 
 ## Documentation
 
 - [User Guide](./docs/use_guide_en.md)
 - [Team Workspace Quick Guide](./docs/team-workspaces-guide_en.md)
 - [Deployment Guide](./docs/deployment.md)
-- [Admin and User Guide](./docs/admin-user-guide.md)
-- [Agent Control Plane Guide](./docs/agent-control-plane.md)
 - [AI Gateway Guide](./docs/aigateway.md)
-- [Security / Skill Scanner Guide](./docs/security-skill-scanner.md)
+- [Security Platform Guide](./docs/security-platform.md)
 - [Resource Management Guide](./docs/resource-management.md)
-- [Hermes Runtime Guide](./docs/hermes-runtime-agent-development.md)
-- [Generic Runtime Agent Integration Guide](./docs/runtime-agent-integration-guide.md)
-- [Skill Content MD5 Spec](./docs/skill-content-md5-spec.md)
-- [Developer Guide](./docs/developer-guide.md)
+- [Skill Hub Guide](./docs/skill-hub-guide_en.md)
+- [OpenCode Workspace Guide](./docs/opencode-lite-pro-agent-development_en.md)
 
 ## License
 
@@ -285,10 +315,10 @@ Issues and pull requests are welcome.
 
 ## Star History
 
-<a href="https://www.star-history.com/?repos=Yuan-lab-LLM%2FClawManager&type=date&legend=top-left">
+<a href="https://github.com/Yuan-lab-LLM/ClawManager/actions/workflows/update-star-history.yml">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=Yuan-lab-LLM/ClawManager&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=Yuan-lab-LLM/ClawManager&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=Yuan-lab-LLM/ClawManager&type=date&legend=top-left" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Yuan-lab-LLM/ClawManager/star-history/star-history-dark.svg" />
+   <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/Yuan-lab-LLM/ClawManager/star-history/star-history-light.svg" />
+   <img alt="Star History Chart" src="https://raw.githubusercontent.com/Yuan-lab-LLM/ClawManager/star-history/star-history-light.svg" />
  </picture>
 </a>

@@ -1,3 +1,5 @@
+[← 返回 README](../README.zh-CN.md)
+
 # Runtime Agent 通用接入规范
 
 本文定义任意新 runtime 接入 ClawManager Agent Control Plane 的通用方案。后续新增 OpenClaw、Hermes、OpenCode 以外的 runtime 时，应优先遵守本文，再补充该 runtime 自己的镜像构建细节。
@@ -438,7 +440,7 @@ Authorization: Bearer {session_token}
 - `mode=full` 表示这次 inventory 是全量结果，平台会用它对齐实例 skill 状态。
 - skill 内容变化后要重新计算 `content_md5` 并上报。
 - 如果支持上传 skill 包，使用 `POST {base}/api/v1/agent/skills/upload`，multipart 表单中带 `file`、`agent_id`、`skill_id`、`skill_version`、`identifier`、`content_md5`、`source`。
-- `content_md5` 必须按目录内容指纹计算，不是 zip 文件 MD5。完整算法见 [Skill Content MD5 Calculation Spec](skill-content-md5-spec.md)。
+- `content_md5` 必须匹配控制面契约测试所使用的规范化目录内容指纹，不能直接计算 ZIP 文件 MD5。
 
 ### 配置和安装包下载
 

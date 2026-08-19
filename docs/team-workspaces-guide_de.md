@@ -1,3 +1,5 @@
+[← Zurück zur README](../README.de.md)
+
 # Kurzanleitung für Team-Workspaces
 
 Ein Team verwendet einen OpenClaw-Lite-Leader, der mehrere Worker für ein gemeinsames Ziel koordiniert. Du kannst eine unveränderliche integrierte Vorlage verwenden oder aus einer natürlichsprachlichen Beschreibung eine eigene Vorlage erzeugen. Der Leader versteht das Ziel, verteilt Aufgaben, sammelt Ergebnisse, behandelt Ausnahmen und veröffentlicht das Endergebnis.

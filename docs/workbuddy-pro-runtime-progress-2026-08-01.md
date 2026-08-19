@@ -1,5 +1,7 @@
 # Workbuddy Pro Runtime Progress
 
+> Historical implementation note (2026-08-01). Workbuddy and the Windows VM runtime were later removed from the current AgentsRuntime baseline and are not selectable product features in the current ClawManager UI. Do not use this document as a deployment or user guide.
+
 ## Scope
 
 Workbuddy is a first-class, Pro-only desktop runtime. It uses a dedicated Kubernetes Deployment, Service, and PVC rather than the shared Lite runtime pool.

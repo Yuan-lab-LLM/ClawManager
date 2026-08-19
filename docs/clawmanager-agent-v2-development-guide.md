@@ -1,6 +1,6 @@
 # ClawManager Agent V2 开发规范
 
-本文整理当前 ClawManager 代码中的最新 agent 约定，面向 OpenClaw、Hermes 以及后续新增的托管 runtime。开发或改造 runtime 镜像时，应优先遵守本文；字段级契约以 `docs/clawmanager-agent-v2-contract.md` 和后端代码为准。
+本文整理当前 ClawManager 代码中的最新 agent 约定，面向 OpenClaw、Hermes、OpenCode 以及后续新增的托管 runtime。开发或改造 runtime 镜像时，应优先遵守本文；字段级契约以 `docs/clawmanager-agent-v2-contract.md` 和后端代码为准。
 
 ## 1. 架构定位
 
@@ -797,7 +797,7 @@ Content-Type: multipart/form-data
 
 - `identifier` 和 `content_md5` 必须稳定。
 - `mode=full` 的 inventory 代表全量结果，平台会用它对齐实例 skill 状态。
-- `content_md5` 按目录内容指纹计算，不是 zip 文件 MD5；算法见 `docs/skill-content-md5-spec.md`。
+- `content_md5` 必须匹配控制面契约测试所使用的规范化目录内容指纹，不能直接计算 zip 文件 MD5。
 - 打包和解压必须防止路径逃逸。
 
 ## 14. 安全规范
@@ -885,4 +885,3 @@ execve(binary, ["openclaw", "gateway", "run", "--port", "20017"], env)
 - `docs/runtime-agent-integration-guide.md`
 - `docs/hermes-lite-pro-agent-development.md`
 - `docs/hermes-runtime-agent-development.md`
-- `docs/skill-content-md5-spec.md`

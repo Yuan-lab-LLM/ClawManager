@@ -3,7 +3,7 @@
 本文写给 Hermes agent 侧开发者，用来区分 ClawManager 中 Hermes Lite 和 Hermes Pro 两种形态。先读本文，再分别参考：
 
 - Lite: `docs/agent-runtime-development-spec.md` 和 `docs/clawmanager-agent-v2-contract.md`
-- Pro: `docs/hermes-runtime-agent-development.md` 和 `docs/agent-control-plane.md`
+- Pro: `docs/hermes-runtime-agent-development.md`
 
 一句话原则：
 

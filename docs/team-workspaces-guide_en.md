@@ -1,3 +1,5 @@
+[← Back to README](../README.md)
+
 # Team Workspace Quick Guide
 
 A Team uses one OpenClaw Lite Leader to coordinate multiple Workers around a shared goal. You can start from an immutable built-in template or generate a user-owned custom template from natural-language intent. The Leader understands the request, delegates work, collects member deliveries, handles recovery, and publishes the final result.

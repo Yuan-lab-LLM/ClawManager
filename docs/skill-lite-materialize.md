@@ -1,6 +1,6 @@
 # Lite Skill Package Materialization
 
-Lite (gateway / Hermes) instances discover skills from the shared workspace instead of
+Lite (OpenClaw, Hermes, and OpenCode) instances discover skills from the shared workspace instead of
 using the instance agent `collect_skill_package` command.
 
 ## Lifecycle
@@ -20,6 +20,7 @@ using the instance agent `collect_skill_package` command.
 |---------|---------------------|
 | Hermes Lite | `{workspace}/home/.hermes/skills/{name}` |
 | OpenClaw Lite | `{workspace}/home/.openclaw/workspace/skills/{name}` |
+| OpenCode Lite | `{workspace}/home/.opencode/skills/{name}` |
 
 The authoritative directory name is stored in `instance_skills.workspace_dir`.
 
@@ -35,7 +36,7 @@ The authoritative directory name is stored in `instance_skills.workspace_dir`.
 
 ## Agent commands
 
-Pro and Shell instances still use `collect_skill_package` via the instance agent.
+Pro and Shell instances normally use `collect_skill_package` via the instance agent. Managed HostPath OpenCode Pro can also use ClawManager's direct workspace path at `/config/workspace/.opencode/skills`; non-HostPath OpenCode Pro depends on the Runtime Agent command implementation.
 Lite instances **do not**; package collection is server-side only.
 
 For Lite inventory, ClawManager treats the shared workspace scan as the authoritative

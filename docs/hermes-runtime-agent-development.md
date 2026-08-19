@@ -1,3 +1,5 @@
+[← Back to README](../README.md)
+
 # Hermes Runtime Image and Agent Development Guide
 
 This guide is for Hermes image and agent developers. It explains how to build a ClawManager-managed Hermes runtime image on top of Webtop, and how the embedded Hermes agent should integrate with ClawManager Agent Control Plane so Hermes can behave like OpenClaw: report live runtime status, report health and system metrics, sync skill inventory, upload skill packages, and poll runtime commands.
@@ -633,7 +635,7 @@ Recommended behavior:
 
 ### content_md5 Calculation
 
-ClawManager `content_md5` is a skill directory content fingerprint, not a zip file MD5. The full algorithm is defined in [Skill Content MD5 Calculation Spec](skill-content-md5-spec.md).
+ClawManager `content_md5` is the normalized skill-directory content fingerprint used by the control plane contract, not the MD5 of ZIP bytes. Runtime implementations must match the control-plane normalization and contract tests.
 
 The most common mistake is top-level directory handling:
 

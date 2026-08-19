@@ -35,6 +35,7 @@
   <a href="#agent-control-plane">Agent Control Plane</a> |
   <a href="#runtime-integrations">Runtime 連携</a> |
   <a href="#resource-management">リソース管理</a> |
+  <a href="#security-protection-platform">Security Protection</a> |
   <a href="#get-started">はじめに</a>
 </p>
 
@@ -58,12 +59,15 @@
 
 最近の重要な製品アップデートとドキュメント更新です。
 
+- [2026-08-19] 管理対象 OpenCode ワークスペース、新しいインスタンス画面、OpenClaw・Hermes・OpenCode 向け Skill Hub 配布を追加しました。[OpenCode Workspace Guide](./docs/opencode-lite-pro-agent-development_ja.md) を参照してください。
+- [2026-08-18] 8 個の読み取り専用テンプレート、自然言語によるカスタム Team、Hermes Lite Worker、ライブ Kanban、共有成果物、メンバーセッションで Team コラボレーションを強化しました。
+- [2026-08-17] モデル管理 Thinking、AI Gateway Session Usage、スケジュールタスク編集、Lite のライフサイクルと一括操作を追加しました。
 - [2026-07-07] セキュリティ保護プラットフォーム（secplane）フロントエンドコンソールを追加しました。ランタイム防御（入力/状態/決定/出力サーフェス、資産改ざん防止、ヒューマン承認）、ホスト強化とコンテナ分離、アウトバウンド信頼エンドポイントガバナンス、ポリシーガバナンス、キルスイッチ/サーキットブレーカー、フルチェーン監査、SecureClaw データ・コンポーネント信頼監査、コラボレーションガバナンス、入力検出をカバーする4層防御の統合管理UIを5言語i18nで提供します。
 - [2026-06-14] Lite / Pro ランタイムモードとロールアウト対応を追加しました。Lite インスタンスは共有 gateway runtime pool で動作し、Pro インスタンスはより強い分離のため専用 desktop deployment を維持します。
 - [2026-05-18] Team ワークスペース MVP の紹介とプレビューを追加しました。ワンクリック Team 作成、OpenClaw メンバーのオーケストレーション、Redis Team Bus 注入、共有ストレージ、メンバー状態、タスク配布、イベント/結果ビューをカバーします。
-- [2026-04-29] Hermes Runtime 連携を追加しました。Webtop ベースのインスタンス作成、Agent Control Plane 登録、AI Gateway 注入、channel と skill のブートストラップ、`.hermes` のインポート/エクスポートに対応しています。詳しくは [Hermes Runtime Guide](./docs/hermes-runtime-agent-development.md) を参照してください。
+- [2026-04-29] Hermes Runtime 連携を追加しました。Webtop ベースのインスタンス作成、Agent Control Plane 登録、AI Gateway 注入、channel と skill のブートストラップ、`.hermes` のインポート/エクスポートに対応しています。[ユーザーマニュアル](./docs/use_guide_ja.md#create-a-workspace) を参照してください。
 - [2026-04-08] プラットフォームに Skill 管理と Skill スキャンのワークフローを追加しました。詳細は [Merged PR #52](https://github.com/Yuan-lab-LLM/ClawManager/pull/52) を参照してください。
-- [2026-03-26] AI Gateway ドキュメントを更新し、モデルガバナンス、監査とトレース、コスト計算、リスク制御の説明を強化しました。詳しくは [AI Gateway Guide](./docs/aigateway.md) を参照してください。
+- [2026-03-26] AI Gateway ドキュメントを更新し、モデルガバナンス、監査とトレース、コスト計算、リスク制御の説明を強化しました。詳しくは [AI Gateway Guide](./docs/aigateway_ja.md) を参照してください。
 - [2026-03-20] ClawManager は、AI エージェントワークスペース向けのより広いコントロールプレーンへと進化し、ランタイム制御、再利用可能なリソース、安全スキャンのワークフローを強化しました。
 
 > ClawManager があなたのチームに役立つなら、ぜひ Star を付けて、より多くのユーザーや開発者に届くよう応援してください。
@@ -100,7 +104,7 @@ ClawManager オープンソースコミュニティに WeChat または Discord 
 <a id="product-tour"></a>
 ## 製品紹介
 
-ClawManager は、AI エージェントインスタンスの運用を Kubernetes に持ち込み、そのランタイム基盤の上に 3 つの高次なコントロールプレーンを重ねます。チームはこれを使って AI アクセスを統制し、Agent を通じてランタイム動作を編成し、スキャン可能で再利用可能な channel と skill を用いてワークスペース機能を提供できます。
+ClawManager は、管理対象 Runtime、Team、モデルアクセス、リソースと Skill Hub、プラットフォームセキュリティを 1 つの Kubernetes ネイティブ製品に統合します。
 
 次のようなチームに向いています。
 
@@ -108,54 +112,51 @@ ClawManager は、AI エージェントインスタンスの運用を Kubernetes
 - ランタイムの可観測性、コマンド配布、 desired state 管理が必要な運用チーム
 - 手作業の設定ではなく、再利用可能なリソースで Agent ワークスペースを届けたい開発チーム
 
-<a id="team-workspaces"></a>
-## Team ワークスペース
-
-Team ワークスペースは、簡素化された OpenClaw Lite の協働フローを提供します。ロールテンプレートを選び、Team を作成して、Team チャットで目標を説明するだけです。Leader が計画、メンバー調整、成果物収集、最終結果の提示を担当します。
-
-- メンバーごとの Runtime やリソースプリセットを設定せず、Leader 仲介型の協働に固定
-- デリバリー、製品探索、ソフトウェア開発向けの組み込みテンプレート
-- 計画、割り当て、進捗、レビュー、成果物、最終統合を表示する Team チャット
-- 総合タスク状態と現在の成果物を表示する Execution Kanban
-
-作成、協働段階、結果の確認方法は [Team Workspace Quick Guide](./docs/team-workspaces-guide_ja.md) を参照してください。
-
 <a id="runtime-integrations"></a>
 ## Runtime 連携
 
 ClawManager は現在、次の管理対象 Runtime をサポートします。
 
-- <img src="frontend/public/openclaw.png" alt="OpenClaw icon" width="18" /> `OpenClaw`: ClawManager が管理するデスクトップインスタンスで使われる標準の OpenClaw スタイル Runtime
-- <img src="frontend/public/hermes.png" alt="Hermes icon" width="18" /> `Hermes`: 永続化された `.hermes` ワークスペースと内蔵 Hermes agent を備えた Webtop ベースの Runtime 連携
+- <img src="frontend/public/openclaw.png" alt="OpenClaw icon" width="18" /> `OpenClaw`: Lite / Pro、ネイティブ会話、ツール、スケジュールタスク、Team 対応
+- <img src="frontend/public/hermes.png" alt="Hermes icon" width="18" /> `Hermes`: Lite / Pro、永続 `.hermes`、ネイティブセッション、Team Worker 対応
+- <img src="frontend/public/opencode.png" alt="OpenCode icon" width="18" /> `OpenCode`: AI Gateway、デスクトップ/ターミナル、ファイルを備えた管理対象コーディング環境。[OpenCode Workspace Guide](./docs/opencode-lite-pro-agent-development_ja.md)
 
 Runtime プレビュー:
 
 **<img src="frontend/public/openclaw.png" alt="OpenClaw icon" width="18" /> OpenClaw**
 
-![openclaw](./docs/images/openclaw.png)
+![OpenClaw workspace](./docs/main/runtime-openclaw.png)
 
 **<img src="frontend/public/hermes.png" alt="Hermes icon" width="18" /> Hermes**
 
-![hermes](./docs/images/hermes.png)
+![Hermes workspace](./docs/main/runtime-hermes.png)
 
-Runtime 開発者は、[Hermes Runtime Guide](./docs/hermes-runtime-agent-development.md)、[Generic Runtime Agent Integration Guide](./docs/runtime-agent-integration-guide.md)、[Skill Content MD5 Spec](./docs/skill-content-md5-spec.md) を参照して互換 agent を実装できます。
+**<img src="frontend/public/opencode.png" alt="OpenCode icon" width="18" /> OpenCode**
+
+![OpenCode workspace](./docs/main/runtime-opencode.png)
 
 <a id="get-started"></a>
 ## はじめに
 
-ClawManager は、標準 Kubernetes と軽量クラスタの両方に対して、より明確な導入入口を提供します。まずは自分の環境に合うデプロイパスを選び、その後に初回ログインと基本操作のフローへ進むのがおすすめです。
+まず `k3s` または `k8s` を選び、次に単一ノードまたはクラスタ向けのストレージ構成を選びます。
 
-- 標準 Kubernetes デプロイ: [deployments/k8s/clawmanager.yaml](./deployments/k8s/clawmanager.yaml)
-- K3s / 軽量クラスタ向けデプロイ: [deployments/k3s/clawmanager.yaml](./deployments/k3s/clawmanager.yaml)
+- k3s 単一ノード / HostPath: [Manifest](./deployments/k3s/single-node/clawmanager.yaml)
+- k3s クラスタ / CSI-RWX: [Manifest](./deployments/k3s/cluster/clawmanager.yaml)
+- Kubernetes 単一ノード / HostPath: [Manifest](./deployments/k8s/single-node/clawmanager.yaml)
+- Kubernetes クラスタ / CSI-RWX: [Manifest](./deployments/k8s/cluster/clawmanager.yaml)
 - 初回ログインと基本操作フロー: [ユーザーガイド](./docs/use_guide_ja.md)
-- デプロイ説明とアーキテクチャ背景: [Deployment Guide (English)](./docs/deployment.md)
+- デプロイ説明とアーキテクチャ背景: [Deployment Guide](./docs/deployment_ja.md)
 
-## 3 つのコントロールプレーン
+## プラットフォームの主要機能
+
+### Runtime とインスタンス管理
+
+OpenClaw、Hermes、OpenCode を Lite / Pro で作成し、イメージ、リソース、ライフサイクル、デスクトップ、ファイル、Shell、環境変数、アーカイブ、Share Link、一括操作を管理できます。
 
 <a id="ai-gateway"></a>
 ### AI Gateway
 
-AI Gateway は、ClawManager におけるモデルアクセスのガバナンスプレーンです。管理対象の Agent Runtime に統一された OpenAI 互換エントリポイントを提供し、上流プロバイダの上にポリシー、監査、コスト制御を追加します。
+AI Gateway は Models、AI Audit、Costs、Session Usage、Risk Rules の 5 領域を提供します。Chat Completions、OpenAI Responses、Anthropic Messages と、対応モデルの管理対象 Thinking を扱います。
 
 - モデルトラフィックの統一エントリポイント
 - セキュアモデルのルーティングとポリシー駆動のモデル選択
@@ -163,7 +164,7 @@ AI Gateway は、ClawManager におけるモデルアクセスのガバナンス
 - 組み込みのコスト計算と利用分析
 - ブロックやルート変更を行えるリスク制御ルール
 
-[AI Gateway Guide (English)](./docs/aigateway.md) を参照してください。
+[AI Gateway Guide](./docs/aigateway_ja.md) を参照してください。
 
 <a id="agent-control-plane"></a>
 ### Agent Control Plane
@@ -176,20 +177,40 @@ Agent Control Plane は、管理対象 AI エージェントインスタンス�
 - 起動、停止、設定適用、ヘルスチェック、Skill 操作のコマンド配布
 - インスタンス単位での Agent 状態、channel、skill、コマンド履歴の可視化
 
-[Agent Control Plane Guide (English)](./docs/agent-control-plane.md) を参照してください。
+Lifecycle、Status、Restart、Runtime Health、管理操作は [ユーザーマニュアル](./docs/use_guide_ja.md#operate-an-instance) を参照してください。
 
 <a id="resource-management"></a>
 ### リソース管理
 
-リソース管理は、AI エージェントワークスペース向けの再利用可能な資産レイヤーです。チームは channel や skill を準備し、bundle として組み合わせ、インスタンスへ注入し、安全レビューをその流れに組み込むことができます。
+リソース管理は、リソース、リソースパック、注入記録の 3 タブで構成されるユーザー向け OpenClaw 設定センターです。管理者向け Security Protection とは独立しています。
 
-- `Channel` 管理: ワークスペース接続と統合テンプレート
-- `Skill` 管理: 再利用可能な機能パッケージ
-- `Skill Scanner` ワークフロー: リスク確認とスキャンジョブ
-- bundle ベースのリソース構成: 再現性の高いセットアップ
-- 注入スナップショットによる実適用内容の追跡
+- Channel Template、Form/JSON 編集、複製、Lifecycle 管理
+- Skill ZIP の Import、競合解決、Download、削除。Skill Hub は Catalog、Version、Publish、Install を担当
+- Scheduled Task の簡易/高度な編集。Agent Resource は表示されますが、現在この画面では設定できません
+- Resource Pack の作成、編集、複製、インスタンス作成時の再利用
+- 配布 Mode、Resource、環境変数、Status、作成時刻を示す読み取り専用の Injection Record
 
-[Resource Management Guide (English)](./docs/resource-management.md) と [Security / Skill Scanner Guide (English)](./docs/security-skill-scanner.md) を参照してください。
+[Resource Management Guide](./docs/resource-management_ja.md) と [Skill Hub Guide](./docs/skill-hub-guide_ja.md) を参照してください。
+
+<a id="team-workspaces"></a>
+### Team コラボレーション
+
+Team は Leader 仲介型の Flow です。8 個の変更不可 Built-in Template または User Custom Template から作成し、OpenClaw Lite Leader が計画、Task 分解、Dispatch、Member Delivery 検証、最終結果の公開を行います。
+
+- Team ごとに OpenClaw Lite Leader は 1 名、Worker は OpenClaw Lite または Hermes Lite
+- Custom Team は自然言語で生成し、Role ごとに調整、全体再生成、再利用が可能
+- Team Chat は Plan、Assignment、Progress、Review、Delivery、Final Synthesis を記録
+- Execution Kanban は Current Query、Task Breakdown、Delivery State を表示
+- Shared File/Artifact を保持し、Hermes Lite の Native Team Session は Instance View で確認可能
+
+作成、協働段階、結果の確認方法は [Team Workspace Quick Guide](./docs/team-workspaces-guide_ja.md) を参照してください。
+
+<a id="security-protection-platform"></a>
+### Security Protection Platform
+
+Security Protection は 4 つの Live 指標、Security Event、Pod Live Aegis Configuration、Report Export、Emergency Circuit Breaker を備えた独立 Admin Workspace です。Overview は現在 KSecure を 7 Risk Surface、15 Scenario、4 Layer と表示し、Runtime 防御、Host/Container 分離、Component Trust、Identity/Outbound、Policy、Collaboration、Quota、Approval、Skill Scanner、Full-chain Audit へ移動できます。
+
+[Security Platform Guide](./docs/security-platform_ja.md) を参照してください。
 
 ## 製品ギャラリー
 
@@ -209,10 +230,26 @@ Pro モードは各インスタンスに専用 desktop runtime をプロビジ�
 
 ### Team ワークスペース
 
-Team ワークスペース画面は、Leader デスクトップ、Team チャット、メンバー表、配布ワークフローを 1 つの運用ビューにまとめ、ClawManager から離れずに協調作業の進捗を追えるようにします。
+Team ワークスペースは、左に会話と成果物、右に現在の問い合わせ、タスク分解、状態、成果物詳細を表示します。
 
 <p align="center">
-  <img src="./docs/main/team-workspace.png" alt="ClawManager Team ワークスペース" width="100%" />
+  <img src="./docs/main/team-collaboration.png" alt="ClawManager Team ワークスペース" width="100%" />
+</p>
+
+### リソース管理
+
+Channel、Skill、Scheduled Task、Resource Pack、Injection Record を一つのユーザー画面で管理し、Security Protection は独立した管理者機能として扱います。
+
+<p align="center">
+  <img src="./docs/main/resource-management-current.png" alt="ClawManager リソース管理" width="100%" />
+</p>
+
+### Security Protection
+
+専用の管理画面で Live 指標と Event、KSecure Layer、Pod Aegis、Report Export、Emergency Circuit Breaker を操作します。
+
+<p align="center">
+  <img src="./docs/main/security-protection-current.png" alt="ClawManager Security Protection" width="100%" />
 </p>
 
 ### 管理コンソール
@@ -220,7 +257,7 @@ Team ワークスペース画面は、Leader デスクトップ、Team チャッ
 管理コンソールでは、ユーザー、クォータ、ランタイム操作、セキュリティ制御、プラットフォームレベルのポリシーをひとつの画面に集約します。大規模な AI エージェント基盤を運用するチームの中心となる作業面です。
 
 <p align="center">
-  <img src="./docs/main/admin.png" alt="ClawManager 管理コンソール" width="100%" />
+  <img src="./docs/main/admin-current.png" alt="ClawManager 管理コンソール" width="100%" />
 </p>
 
 ### Portal Access
@@ -228,7 +265,7 @@ Team ワークスペース画面は、Leader デスクトップ、Team チャッ
 Portal は、ユーザーに一貫したワークスペース入口を提供します。ブラウザベースでアクセスしながら、コントロールプレーンと同期したランタイム状態を確認でき、インフラの細部を直接意識する必要はありません。
 
 <p align="center">
-  <img src="./docs/main/portal.png" alt="ClawManager Portal Access" width="100%" />
+  <img src="./docs/main/portal-current.png" alt="ClawManager Portal Access" width="100%" />
 </p>
 
 ### AI Gateway
@@ -236,7 +273,7 @@ Portal は、ユーザーに一貫したワークスペース入口を提供し�
 AI Gateway は、モデル利用のガバナンスをワークスペース体験そのものに統合します。監査ログ、コスト可視化、リスクルーティングを通じて、AI 利用を単発の統合ではなく、プラットフォーム機能として扱えるようにします。
 
 <p align="center">
-  <img src="./docs/main/aigateway.png" alt="ClawManager AI Gateway" width="100%" />
+  <img src="./docs/main/ai-gateway-current.png" alt="ClawManager AI Gateway" width="100%" />
 </p>
 
 ## 動作の流れ
@@ -257,22 +294,18 @@ ClawManager は、React フロントエンド、Go バックエンド、状態�
 - デプロイ資産は `deployments/`
 - 製品ドキュメントと素材は `docs/`
 
-[Developer Guide (English)](./docs/developer-guide.md) を参照してください。
+Runtime と Protocol の技術資料は Contributor 向けに `docs/` に残し、以下のユーザードキュメントは製品 Workflow ごとに整理しています。
 
 ## ドキュメント
 
 - [ユーザーガイド](./docs/use_guide_ja.md)
 - [Team Workspace Quick Guide](./docs/team-workspaces-guide_ja.md)
-- [Deployment Guide (English)](./docs/deployment.md)
-- [Admin and User Guide (English)](./docs/admin-user-guide.md)
-- [Agent Control Plane Guide (English)](./docs/agent-control-plane.md)
-- [AI Gateway Guide (English)](./docs/aigateway.md)
-- [Security / Skill Scanner Guide (English)](./docs/security-skill-scanner.md)
-- [Resource Management Guide (English)](./docs/resource-management.md)
-- [Hermes Runtime Guide](./docs/hermes-runtime-agent-development.md)
-- [Generic Runtime Agent Integration Guide](./docs/runtime-agent-integration-guide.md)
-- [Skill Content MD5 Spec](./docs/skill-content-md5-spec.md)
-- [Developer Guide (English)](./docs/developer-guide.md)
+- [Deployment Guide](./docs/deployment_ja.md)
+- [AI Gateway Guide](./docs/aigateway_ja.md)
+- [Security Platform Guide](./docs/security-platform_ja.md)
+- [Resource Management Guide](./docs/resource-management_ja.md)
+- [Skill Hub Guide](./docs/skill-hub-guide_ja.md)
+- [OpenCode Workspace Guide](./docs/opencode-lite-pro-agent-development_ja.md)
 
 ## ライセンス
 
@@ -284,10 +317,10 @@ Issue と Pull Request を歓迎します。
 
 ## Star History
 
-<a href="https://www.star-history.com/?repos=Yuan-lab-LLM%2FClawManager&type=date&legend=top-left">
+<a href="https://github.com/Yuan-lab-LLM/ClawManager/actions/workflows/update-star-history.yml">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=Yuan-lab-LLM/ClawManager&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=Yuan-lab-LLM/ClawManager&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=Yuan-lab-LLM/ClawManager&type=date&legend=top-left" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Yuan-lab-LLM/ClawManager/star-history/star-history-dark.svg" />
+   <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/Yuan-lab-LLM/ClawManager/star-history/star-history-light.svg" />
+   <img alt="Star History Chart" src="https://raw.githubusercontent.com/Yuan-lab-LLM/ClawManager/star-history/star-history-light.svg" />
  </picture>
 </a>

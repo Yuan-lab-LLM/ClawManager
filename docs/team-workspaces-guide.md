@@ -1,3 +1,5 @@
+[← 返回 README](../README.zh-CN.md)
+
 # Team 协作快速指南
 
 Team 让一个 OpenClaw Lite Leader 协调多个 Worker 围绕同一目标工作。你可以直接使用只读的固定模板，也可以用自然语言生成自己的 Team 模板。Leader 负责理解目标、拆解和派发任务、回收成员产出、处理异常并交付最终结果。

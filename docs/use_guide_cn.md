@@ -1,758 +1,186 @@
-[<- 返回 README 首页](../README.zh-CN.md)
+[← 返回 README](../README.zh-CN.md)
 
-# ClawManager 部署与快速启动指南
+# ClawManager 用户手册
+
+这是当前 ClawManager 产品界面的主操作手册，同时覆盖普通用户和管理员。只有流程较长、需要独立查阅的主题才跳转到专题文档。
 
 ## 目录
-- [一、环境与目标](#sec-01)
-- [二、部署方式总览](#sec-02)
-- [三、方案 A：使用 k3s 部署](#sec-03)
-- [四、方案 B：使用标准 Kubernetes 部署](#sec-04)
-- [五、国内网络下的镜像拉取建议（可选）](#sec-05)
-- [六、部署 ClawManager](#sec-06)
-- [七、启动 Web 页面](#sec-08)
-- [八、快速启动指南（登录后初始化并创建 OpenClaw 实例）](#sec-09)
-- [九、控制台与 AI 网关其他功能说明](#sec-12)
-- [十、工作台模块说明](#sec-13)
-- [10.4 Team 协作](#sec-13-team)
-- [十一、问题与对策速查](#sec-14)
-- [十二、建议的最终检查顺序（可按此自查）](#sec-15)
-
-<a id="sec-01"></a>
-## 一、环境与目标
-- **系统假设**：`x86_64` 架构 Linux 服务器。
-- **部署目标**：部署 **ClawManager**，并在 Web 页面中完成安全模型配置，随后创建并启动一个 **OpenClaw Desktop** 实例。
-- **适用场景**：
-  - **方案 A：k3s 单机/轻量集群部署**
-  - **方案 B：标准 Kubernetes 集群部署**（如 kubeadm 集群、企业 K8s 集群、云上 K8s 集群）
 
+- [一、部署与登录](#deploy-and-sign-in)
+- [二、角色与导航](#roles-and-navigation)
+- [三、配置模型](#configure-model-access)
+- [四、创建受管工作空间](#create-a-workspace)
+- [五、使用和管理实例](#operate-an-instance)
+- [六、资源管理与 Skill Hub](#resources-and-skills)
+- [七、Team 协作](#team-collaboration)
+- [八、管理员日常操作](#administration)
+- [九、Runtime 镜像与 Lite 滚动更新](#runtime-images-and-rollout)
+- [十、AI Gateway 与会话用量](#ai-gateway)
+- [十一、安全防护](#security-protection)
+- [十二、剪贴板、输入和桌面注意事项](#clipboard-and-desktop)
+- [十三、排障与验收](#troubleshooting)
+- [十四、专题指南](#focused-guides)
 
----
+<a id="deploy-and-sign-in"></a>
+## 一、部署与登录
 
-<a id="sec-02"></a>
-## 二、部署方式总览
-先选择 Kubernetes 发行版，再选择存储 profile：
+ClawManager 提供四套维护中的部署形态：k3s 或 Kubernetes，各自包含单节点 HostPath 和多节点 CSI/RWX。一次只应用一套完整 profile，不要混用清单，也不要用临时 HostPath 修补多节点存储。
 
-- `k3s/single-node`：单节点 HostPath 官方验证路径，需要标记一个存储节点。
-- `k3s/cluster`：多节点 CSI/RWX 路径，默认使用 Longhorn 示例。
-- `k8s/single-node`：标准 Kubernetes 单节点 HostPath 官方验证路径。
-- `k8s/cluster`：标准 Kubernetes 多节点 CSI/RWX 路径，默认使用 Longhorn 示例。
+核心工作负载和存储声明就绪后，打开部署时配置的访问地址，使用平台管理员创建的账号登录。清单入口、存储要求、ARM64 检查和生产准备见 [部署指南](./deployment_cn.md)。
 
-Longhorn 是官方验证示例，不是强绑定依赖。只要你的存储方案能提供相同的 RWO/RWX 能力，就可以替换 `longhorn` 和 `longhorn-rwx`。
+<a id="roles-and-navigation"></a>
+## 二、角色与导航
 
-推荐入口：
-
-```bash
-deployments/k3s/single-node/clawmanager.yaml
-deployments/k3s/cluster/clawmanager.yaml
-deployments/k8s/single-node/clawmanager.yaml
-deployments/k8s/cluster/clawmanager.yaml
-```
-
----
-
-<a id="sec-03"></a>
-## 三、方案 A：使用 k3s 部署
-
-### 3.1 安装 k3s
-```bash
-curl -sfL https://get.k3s.io | sh -
-```
-
-国内网络可使用镜像源安装：
-
-```bash
-curl -sfL https://rancher-mirror.rancher.cn/k3s/k3s-install.sh | \
-  INSTALL_K3S_MIRROR=cn sh -
-```
-
-### 3.2 检查服务状态
-```bash
-sudo systemctl status k3s --no-pager
-sudo systemctl enable k3s
-```
-
-### 3.3 配置 kubectl
-如果当前用户无法直接使用 `kubectl`，执行：
-
-```bash
-mkdir -p ~/.kube
-sudo cp /etc/rancher/k3s/k3s.yaml ~/.kube/config
-sudo chown "$USER:$USER" ~/.kube/config
-```
-
-或者临时指定：
-
-```bash
-export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
-```
-
-### 3.4 验证集群
-```bash
-kubectl get nodes
-```
-
-正常应看到节点处于 `Ready`。
-
----
-
-<a id="sec-04"></a>
-## 四、方案 B：使用标准 Kubernetes 部署
-
-> 适用于已经有可用 Kubernetes 集群的 x86 服务器环境。
-
-### 4.1 前提检查
-确认当前 `kubectl` 已连接到目标集群：
-
-```bash
-kubectl get nodes
-kubectl get ns
-```
-
-正常应看到至少 1 个 `Ready` 节点。
-
-### 4.2 检查 StorageClass 能力
-ClawManager 中的 MySQL、Redis、MinIO、workspace 和实例 PVC 都需要持久化存储。cluster profile 需要一个 RWO StorageClass 和一个 RWX workspace StorageClass：
-
-```bash
-kubectl get storageclass
-```
-
-默认 cluster 清单使用 `longhorn` 作为 RWO 示例，使用 `longhorn-rwx` 作为 RWX workspace 示例。如果你使用其他 CSI 存储，请替换这些 StorageClass 名称。多节点场景不要使用 `local-path` 这类节点本地存储来冒充 RWX workspace。
-
-部署前先确认两个 StorageClass 都存在：
-
-```bash
-kubectl get storageclass longhorn longhorn-rwx
-```
-
----
-
-<a id="sec-05"></a>
-## 五、国内网络下的镜像拉取建议（可选）
-如果服务器访问 Docker Hub 或其他公共仓库较慢，可配置镜像加速。
-
-### 5.1 k3s 场景：配置 `/etc/rancher/k3s/registries.yaml`
-```yaml
-mirrors:
-  docker.io:
-    endpoint:
-      - "https://docker.m.daocloud.io"
-      - "https://docker.nju.edu.cn"
-      - "https://docker.1ms.run"
-  quay.io:
-    endpoint:
-      - "https://quay.mirrors.ustc.edu.cn"
-  gcr.io:
-    endpoint:
-      - "https://gcr.mirrors.ustc.edu.cn"
-  k8s.gcr.io:
-    endpoint:
-      - "https://registry.aliyuncs.com/google_containers"
-```
-
-修改后执行：
+用户工作区包含：
 
-```bash
-sudo systemctl restart k3s
-```
+- **工作台**：查看当前账号可访问的入口和资源。
+- **我的实例**：管理本人拥有或他人共享的 OpenClaw、Hermes、OpenCode 工作空间。
+- **Teams**：多 Agent 协作、群聊、Kanban、文件和成员产出。
+- **资源管理**：通道、上传技能、定时任务、资源包和注入记录。
+- **Skill Hub**：面向所有受支持 Runtime 的统一技能目录、版本与安装平台。
+- **设置**：个人偏好和当前版本支持的账号选项。
 
-### 5.2 验证拉镜像
-```bash
-sudo k3s crictl pull docker.io/rancher/mirrored-pause:3.6
-```
+管理后台在此基础上增加全局用户、实例、Runtime 池、安全防护、AI 网关和系统设置。页面上的按钮受角色和配额控制；按钮不可见时，应先确认权限而不是直接判断为页面故障。
 
----
+<a id="configure-model-access"></a>
+## 三、配置模型
 
-<a id="sec-06"></a>
-## 六、部署 ClawManager
+创建需要模型的工作空间或自定义 Team 前，管理员应进入 **AI 网关 → 模型**，添加上游 Provider，启用至少一个普通模型并测试健康状态。普通模型即可满足实例创建和自定义 Team；安全模型只在风控规则需要把敏感请求改道时使用。
 
-### 6.1 拉取项目代码
-```bash
-git clone https://github.com/Yuan-lab-LLM/ClawManager.git
-cd ClawManager
-```
+受管 **Thinking** 是模型级持久设置，只对 ClawManager 能可靠控制的 Provider/模型组合开放。开启后可能增加响应时间和推理 Token，但不会向用户展示私有思维链。
 
-### 6.2 应用部署清单
-在仓库根目录按场景选择一个入口执行：
+<a id="create-a-workspace"></a>
+## 四、创建受管工作空间
 
-```bash
-# k3s 单节点
-kubectl get nodes
-kubectl label node <node> clawmanager.io/storage-node=true --overwrite
-kubectl apply -f deployments/k3s/single-node/clawmanager.yaml
+进入 **我的实例 → 创建**，选择 Runtime 和模式：
 
-# k3s 多节点
-kubectl get storageclass longhorn longhorn-rwx
-kubectl apply -f deployments/k3s/cluster/clawmanager.yaml
+| Runtime | 主要用途 | Lite | Pro |
+|---|---|---|---|
+| OpenClaw | 会话、工具、定时任务、Team Leader/Worker | 共享 Runtime 池 | 独立桌面工作负载 |
+| Hermes | Hermes 原生会话和工具，可作为 Team Worker | 共享 Runtime 池 | 独立桌面工作负载 |
+| OpenCode | 接入 AI Gateway 的编码工作空间、文件、终端和桌面 | 共享 Runtime 池 | 独立桌面工作负载 |
 
-# 标准 Kubernetes 单节点
-kubectl get nodes
-kubectl label node <node> clawmanager.io/storage-node=true --overwrite
-kubectl apply -f deployments/k8s/single-node/clawmanager.yaml
+创建页只显示当前 Runtime/模式支持的选项，可能包括：系统镜像、资源预设或自定义 CPU/内存/存储、桌面流质量、环境变量、工作区归档导入、资源包、手动资源和初始技能。
 
-# 标准 Kubernetes 多节点
-kubectl get storageclass longhorn longhorn-rwx
-kubectl apply -f deployments/k8s/cluster/clawmanager.yaml
-```
+**Lite 不会为每个实例创建独立 Kubernetes Pod。** 它在对应的共享 Runtime Pod 中启动隔离的工作区/进程；Pro 使用独立工作负载，资源隔离更强。
 
-### 6.3 查看基础资源
-```bash
-kubectl get ns
-kubectl get pods -n clawmanager-system
-kubectl get svc -n clawmanager-system
-```
+Skill Hub 不是 OpenCode 独有功能。OpenClaw、Hermes、OpenCode 都从同一技能平台获取技能，只是落盘目录、生效和重载方式不同。如果某个 Runtime 的创建页没有技能预选，实例就绪后仍可从 Skill Hub 或实例详情安装。
 
-正常情况下，会看到以下组件：
-- `clawmanager-app`
-- `mysql`
-- `minio`
-- `skill-scanner`
+<a id="operate-an-instance"></a>
+## 五、使用和管理实例
 
-如果你看到以下错误：
+实例详情把生命周期操作、Runtime 原生界面或桌面、工作区文件和 Runtime 专属面板集中在一起：
 
-```text
-0/1 nodes are available: pod has unbound immediate PersistentVolumeClaims
-```
+- **启动 / 停止 / 重启**：通过 ClawManager 操作，不要直接修改生成的 Kubernetes 对象。带环境变量覆盖的重启可把受支持的变量应用到当前实例。
+- **删除**：根据存储方式移除受管实例及相关数据。删除前先下载需要保留的文件或归档。
+- **Share Link**：设置访问凭据、有效期和是否允许访问工作区，再把链接交给他人；不再使用时及时撤销。
+- **工作区文件**：在当前 Runtime/存储路径支持时浏览、上传、下载、编辑或删除。
+- **桌面流质量**：低、标准、高三个档位在带宽和画质之间取舍；保存后通常还需按页面提示重启/应用才能生效。
+- **技能管理**：查看已安装、已发现技能和实际生效版本。
+- **会话 Token 用量**：查看 Runtime 已上报的会话 Token 与估算费用；未上报的数据不会被系统猜测填充。
+- **Runtime 概览 / 事件**：独立实例可能展示工作负载健康和事件，用于排障。
 
-说明当前选择的存储 profile 未准备好。先收集事件，再检查 PVC 和 StorageClass：
+OpenClaw 和 Hermes 保留各自的原生会话行为；OpenCode 展示编码工作空间，不会被强行改造成另一套 ClawManager 会话界面。
 
-```bash
-kubectl get pvc -n clawmanager-system
-kubectl get pods -n clawmanager-system
-kubectl get events -n clawmanager-system --sort-by=.lastTimestamp
-kubectl describe pvc -n clawmanager-system clawmanager-workspaces
-```
+<a id="resources-and-skills"></a>
+## 六、资源管理与 Skill Hub
 
----
+**资源管理**负责准备可复用的启动内容：
 
-<a id="sec-08"></a>
-## 七、启动 Web 页面
+- **资源**：通道、上传的技能包和定时任务；Agent 类型当前是预留类型，不能像普通资源一样编辑。
+- **资源包**：把兼容资源组合起来，供创建实例时复用。
+- **注入记录**：只读展示某次实例注入实际编译了什么。
 
-### 7.1 通过 NodePort 访问
-ClawManager 默认前端 Service 为 HTTPS NodePort。可先查看：
+**Skill Hub** 是跨 Runtime 的统一技能管理与交付平台。它和资源管理有关，但专门负责可复用技能目录的完整生命周期：浏览、我的 Skill、所有权、标签、版本、扫描状态、发布、安装和实例侧核对。上传包必须是包含 `SKILL.md` 的 ZIP；扫描失败的版本会保留，方便查看原因并上传新版本。扫描完成也不等于自动允许发布或安装。
 
-```bash
-kubectl get svc -n clawmanager-system
-```
-
-若前端端口为：
-
-```text
-443:30443/TCP
-```
+OpenClaw、Hermes、OpenCode 都属于支持范围，但具体落盘目录、重载方式和镜像能力可能不同。详见 [资源管理指南](./resource-management_cn.md) 和 [Skill Hub 使用指南](./skill-hub-guide.md)。
 
-则可直接在浏览器访问：
+<a id="team-collaboration"></a>
+## 七、Team 协作
 
-```text
-https://<服务器IP>:30443
-```
+进入 **Teams → 创建**，选择八个不可修改的内置模板之一，或选择自己的自定义模板。Leader 固定使用 OpenClaw Lite；Worker 在相应镜像已启用时可选择 OpenClaw Lite 或 Hermes Lite。
 
+自定义模板可根据自然语言意图生成 2–6 名成员，也可修改名称、意图和人数，重新生成整个 Team，用自然语言调整单个角色，删除并在创建 Team 时复用。调整 Leader 只会扩展领域职责，不会替换其固定编排职责；Leader 仍需理解任务、派发 Worker、回收与核验成员结果并发布最终答案。
 
-### 7.2 首次 HTTPS 访问说明
-由于通常是自签名证书，浏览器可能会提示“不安全”或证书警告，点击：
+执行期间，Team 页面同时展示群聊、当前最新问题的 Execution Kanban、文件、产物、成员交付和最终结果。用户提交新问题后默认切换到最新任务组，历史任务仍可选择。详见 [Team 协作快速指南](./team-workspaces-guide.md)。
 
-```text
-高级 → 继续访问
-```
+<a id="administration"></a>
+## 八、管理员日常操作
 
-即可进入页面。
+管理员需要区分以下入口和边界：
 
----
+- **用户**：创建账号、设置角色和配额、导入受支持的 CSV，并按平台保留策略删除账号。
+- **实例**：搜索全局实例，查看归属、Runtime 和状态，执行启动、停止、重启、同步或删除。
+- **运行时**：查看共享 Runtime Pod、容量与健康状态；维护前可排空 Pod，停止接收新分配，并由调度器替换或迁移受管 Lite 工作。
+- **设置**：配置 Runtime 默认/可用镜像，并发起受控 Lite 滚动更新。
+- **安全防护**与 **AI 网关**是独立管理工作区，都不属于资源管理页面。
 
-<a id="sec-09"></a>
-## 八、快速启动指南（登录后初始化并创建 OpenClaw 实例）
+<a id="runtime-images-and-rollout"></a>
+## 九、Runtime 镜像与 Lite 滚动更新
 
-完成前文部署并成功打开管理页面后，还需要完成以下初始化步骤，才能真正创建并启动一个 **OpenClaw** 实例。
+进入 **管理后台 → 设置** 管理 Runtime 镜像。
 
-### 8.1 登录系统
-1. 打开部署完成后的页面，例如：`https://<节点IP>:30443`。
-2. 使用默认管理员账号登录：
-   - **用户名**：`admin`
-   - **密码**：`admin123`
-3. 首次进入后，建议按需修改默认密码。
+![Runtime 镜像设置与 Lite 滚动更新](./main/runtime-settings-rollout.png)
 
+这里必须区分“保存镜像配置”和“更新正在运行的 Lite 池”：
 
-### 8.2 配置安全模型（AI 网关）
+1. 在 Lite 或 Pro Runtime 卡片中填写镜像并点击 **保存**。这只会持久化后续创建/选择使用的镜像配置，不会替换当前正在运行的共享 Lite Pod。
+2. 如果要让现有 Lite 池使用新镜像，在页面上方找到 **Lite 运行时滚动升级**。选择 OpenClaw Lite、Hermes Lite 或 OpenCode Lite，核对当前镜像和目标镜像，并设置批次与最大不可用数。
+3. 点击 **启动滚动升级**。ClawManager 会按批次排空并替换共享 Runtime 容量，直到目标镜像投入运行。
+4. 更新完成后重新检查“运行时”健康状态，并打开测试实例验收。
 
-![图1：AI网关配置](./main/1.png)
-登录后，需要先配置一个可用的**安全模型**，供平台和后续实例统一使用。
+滚动升级的目标镜像应与刚保存的镜像一致。批次越大，更新越快，但同时可用的共享容量越少；排空过程中活动 Lite 会话可能被中断，因此生产环境应使用保守参数并选择合适维护窗口。Pro 卡片只定义后续独立实例使用的镜像，保存 Pro 镜像不会静默替换已有 Pro 实例。
 
-1. 点击左侧菜单：**AI 网关** → **模型**。
-2. 新增或编辑一个模型，根据你接入的模型服务按实际情况填写以下信息：
+<a id="ai-gateway"></a>
+## 十、AI Gateway 与会话用量
 
-   * **显示名称**：填写一个便于识别的名称。
-   * **厂商模板**：根据你的模型服务类型选择对应模板；如果使用自定义或兼容接口，可选择 **Local / Internal**。
-   * **协议**：根据接口协议选择，例如 **OpenAI Compatible** 或其他实际协议。
-   * **Base URL**：填写模型服务提供的接口地址。
-   * **API Key**：填写对应模型服务的有效密钥。
-   * **Provider Model**：填写实际调用的模型名称。
-   * **模型思考**：仅在 ClawManager 能可靠控制供应商 Thinking 协议时可用。关闭后所有请求都会明确禁用 Thinking；开启后，受支持的 Agent 会话仍可进一步关闭或选择强度。当前支持官方 DeepSeek OpenAI-compatible 地址中的 `deepseek-*` 模型。Thinking 可能增加耗时和推理 Token。
-   * **币种**：按实际情况填写；如无需计费展示，可保持默认。
-   * **输入价格 / 输出价格**：如不做计费统计，可先填写 `0`。
-3. 提交前务必勾选：
+AI Gateway 包含五个入口：
 
-   * **安全模型**
-   * **启用**
-4. 点击 **保存**。
+- **模型**：Provider、协议、凭据、价格、健康、安全角色和 Thinking。
+- **AI 审计**：请求 trace、路由、错误、延迟和策略证据。
+- **成本**：Token 费用估算与内部核算视图。
+- **会话用量**：按 Runtime、用户、实例和会话统计用量。
+- **风控规则**：按顺序执行放行、阻断或安全模型改道。
 
-> 说明：页面中的图片仅用于展示填写位置和示例格式，实际内容请以你所使用的模型服务配置为准。
+会话用量是观测视图，不是会话编辑器或最终账单。可按时间、用户、Runtime、实例和会话过滤，在 Runtime 有上报时比较输入、输出、缓存和推理 Token，再到 AI 审计查看请求级证据。Provider 总量可能因不同 Runtime/Provider 的 Token 分类方式而不同。详见 [AI Gateway 使用指南](./aigateway_cn.md)。
 
+<a id="security-protection"></a>
+## 十一、安全防护
 
-### 8.3 创建 OpenClaw 实例
-模型配置完成后，再创建 **OpenClaw Desktop** 实例。
+安全防护是独立的管理员工作区。总览集中展示实时告警指标、跨产品安全事件、Pod 实时 Aegis 配置、报告导出、应急控制和 KSecure 纵深防御模型；详细页面覆盖运行时防护、主机/容器隔离、信任、身份与出站治理、策略、协作、配额/审批、Skill Scanner 和全链路审计。
 
-1. 点击左下角 **ADMIN**，切换到 **工作台**。
-2. 点击 **创建实例**。
+Skill Scanner 同时服务两个场景：用户在 Skill Hub 查看技能扫描生命周期；管理员在安全防护中管理 Scanner 健康、策略和安全证据。详见 [安全防护平台指南](./security-platform_cn.md)。
 
-![](./main/2.png)
-#### 第 1 步：基础信息
-- 填写 **实例名称**（至少 3 个字符）。
-- 描述可选，不填也可以。
-- 点击 **下一步**。
+<a id="clipboard-and-desktop"></a>
+## 十二、剪贴板、输入和桌面注意事项
 
-![](./main/3.png)
-#### 第 2 步：选择类型
-- 选择 **OpenClaw Desktop**。
-- 点击 **下一步**。
+剪贴板行为取决于 Runtime 镜像和桌面配置，可能是双向同步、仅从本机粘贴到桌面，或完全禁用。环境设置变化通常需要重启桌面或实例。先测试纯文本，再测试中文/Unicode；剪贴板传输和键盘/输入法是两条不同链路，浏览器权限也可能阻止访问。不要用密码或 API Key 做测试。
 
+<a id="troubleshooting"></a>
+## 十三、排障与验收
 
-![](./main/4.png)
-#### 第 3 步：配置
-- 可直接选择 **Small** 规格：
-  - `2 CPU`
-  - `4 GB RAM`
-  - `20 GB Disk`
-- 也可以在下方自定义配置中按需修改。
-- OpenClaw 资源注入部分，可根据需要选择：
-  - **手动资源**
-  - **资源包**
-  - **归档导入**
-- 首次使用可先保持默认或选择 **手动资源**。
-- 最后点击 **创建**。
+| 现象 | 优先检查 |
+|---|---|
+| 看不到 Runtime 或镜像 | 管理员是否保存并启用了对应镜像。 |
+| 已保存 Lite 镜像但运行中仍是旧版本 | 保存只改配置，还需启动 Lite 滚动更新。 |
+| 没有可用模型 | 至少启用一个普通模型，不要求标记为安全模型。 |
+| Lite 实例没有独立 Pod | 正常现象：Lite 共享 Runtime Pod。 |
+| PVC 一直 Pending | 存储 profile、StorageClass、访问模式、节点标签和容量。 |
+| Share Link 无法访问文件 | 链接权限、有效期、凭据和工作区共享开关。 |
+| 技能扫描失败 | 查看保留的错误，修正包并上传新版本。 |
+| 安装后看不到技能 | 刷新技能管理，核对版本/路径，并按 Runtime 要求重启或重载。 |
+| 会话用量为空 | 时间筛选、实例筛选，以及 Runtime 是否上报。 |
+| Team 显示历史问题 | 切换到最新任务/问题组；新问题默认选择最新组。 |
 
-### 8.4 首次创建说明
-- 第一次创建 **OpenClaw** 实例时，需要下载所需镜像和初始化环境，耗时会明显更长。
-- 在网络较慢或首次拉取镜像时，实例状态可能会长时间显示为 **创建中**，请耐心等待。
-- 若长时间未启动成功，再回到 Kubernetes / Docker 日志中排查镜像、PVC、网关模型等问题。
+最终验收至少应证明：核心工作负载和 PVC 健康；普通模型可用；所有对外开放的 Runtime 都能创建并打开测试实例；文件和生命周期操作正常；审核后的技能可以安装；AI 审计/会话用量有数据；如果使用 Team，群聊、Kanban、文件、成员交付和最终结果都可用。
 
----
+<a id="focused-guides"></a>
+## 十四、专题指南
 
-<a id="sec-12"></a>
-## 九、控制台与 AI 网关其他功能说明
-
-除模型配置外，平台首页控制台与 AI 网关还提供审计、成本和规则治理等能力，便于管理员统一查看集群状态、模型调用记录和安全策略执行情况。
-
-### 9.1 控制台总览
-
-![](./main/5.png)
-
-控制台首页用于展示当前集群与平台的整体运行状态，方便管理员快速了解资源使用情况和系统健康状态。
-
-主要包含以下信息：
-
-- **集群基础信息概览**：展示当前平台的用户总数、实例总数、运行中实例数量以及总存储使用情况。
-- **节点概览**：展示当前可用节点数量，以及当前集群中主要调度节点信息。
-- **资源申请情况**：展示当前平台已申请的 CPU、内存和磁盘资源总量。
-- **容量看板**：按节点、CPU、内存、磁盘等维度展示整体资源容量与当前使用率，便于判断集群是否还有可用余量。
-- **基础设施表**：用于查看当前节点、资源与基础运行环境的状态信息。
-
-> 说明：控制台主要用于查看平台总体资源、节点和实例运行概况，不直接用于具体实例内的 OpenClaw 操作。
-
-
-### 9.2 安全中心（skill-scanner）
-
-控制台的 **安全中心** 用于统一查看平台资源的扫描状态、历史报告与扫描器配置。它依赖后端的 **skill-scanner** 服务运行，可用于对资源进行静态扫描、深度扫描以及基于 LLM 的补充分析，从而帮助管理员识别潜在风险内容、异常资源与可疑技能。
-
-安全中心当前主要包括以下三个模块：
-
-* **运行总览**
-* **报告历史**
-* **扫描器配置**
-
-#### 9.2.1 运行总览
-
-![](./main/14.png)
-
-“运行总览”页面用于查看当前平台的整体扫描状态与风险分布，便于管理员快速掌握当前安全态势。
-
-页面主要包括以下内容：
-
-* **当前生效模式**：展示当前使用的是 **Quick 模式** 还是 **Deep 模式**。
-* **快速扫描 / 全量扫描**：
-
-  * **快速扫描**：适合处理新增或变更资源，扫描范围较轻，执行速度更快。
-  * **全量扫描**：适合定期重扫全部资源，用于完整复核平台当前所有资源状态。
-* **资产总数**：当前纳入安全中心扫描范围的资源数量。
-* **已完成扫描**：已完成扫描的资源数量。
-* **高风险 / 中风险**：当前扫描结果中被识别出的风险等级统计。
-* **扫描覆盖率**：展示已完成真实扫描的资产数占平台总资产的比例。
-* **SAFE / 高风险 / 等待中 / 失败**：
-
-  * **SAFE**：扫描通过、当前未发现风险的资源数量
-  * **高风险**：需要立即处置的风险资产数量
-  * **等待中**：等待取证或排队扫描的资源数量
-  * **失败**：扫描执行失败、需要重新执行的资源数量
-* **平台资产风险态势**：按风险等级聚合展示当前平台资产的风险分布情况。
-* **热点资产**：展示使用最频繁的技能或高频使用资源，帮助管理员快速定位重点资产。
-* **扫描器状态**：展示当前 skill-scanner 的可用性及连接状态，例如“静态扫描可用”“已连接”等。
-* **风险提醒与处置建议**：给出当前风险态势下的简要提醒信息。
-* **最近的扫描任务**：展示最近执行过的扫描记录，便于回溯近期扫描活动。
-
-> 说明：
->
-> * 当页面显示“当前没有高风险或中风险资产”时，说明当前扫描结果未发现显著风险。
-> * 当页面显示“还没有扫描任务记录”时，说明当前尚未执行过扫描，或尚未产生有效扫描结果。
-
-#### 9.2.2 报告历史
-
-“报告历史”页面用于查看历史扫描报告与相关结果记录，便于管理员回溯过去的扫描执行情况。
-
-该模块主要用于：
-
-* 查看过去已执行的扫描任务结果
-* 对比不同时间点的扫描输出
-* 辅助追踪某个资源在不同阶段的安全变化情况
-* 为后续复查、复扫和问题定位提供历史依据
-
-> 说明：
->
-> * “报告历史”更偏向历史结果归档与回溯；
-> * “运行总览”更偏向当前状态与整体概览。
-
-#### 9.2.3 扫描器配置
-
-![](./main/15.png)
-
-“扫描器配置”页面用于维护 skill-scanner 的运行方式、LLM 相关配置以及 quick / deep 两套扫描策略。保存后会触发 Deployment rollout，并等待新配置生效。
-
-页面主要包括以下内容：
-
-##### （1）skill-scanner 服务状态
-
-* 展示当前后端扫描服务的命名空间、Deployment 名称和连接状态。
-* 当页面显示 **已连接**、**静态扫描可用** 时，说明基础静态扫描能力已可用。
-
-##### （2）LLM 配置
-
-该区域用于配置主 LLM，以供 scanner 在需要时执行基于模型的分析能力。
-
-主要字段包括：
-
-* **主 LLM 集成**：可直接从 **AI Gateway** 中已配置好的模型导入主 LLM 配置。
-* **LLM API Key**：对应 `SKILL_SCANNER_LLM_API_KEY`，用于主 LLM analyzer 的鉴权。
-* **LLM Model**：对应 `SKILL_SCANNER_LLM_MODEL`，例如具体模型名称。
-* **LLM Base URL**：对应 `SKILL_SCANNER_LLM_BASE_URL`，用于配置主 LLM 服务地址。
-
-##### （3）Meta LLM 集成
-
-该区域用于配置 meta analyzer 所使用的模型，通常用于对 findings 做进一步总结、归纳或二次处理。
-
-主要字段包括：
-
-* **Meta LLM 集成**：可从 **AI Gateway** 中已配置好的模型直接导入 meta analyzer 配置。
-* **Meta LLM API Key**：对应 `SKILL_SCANNER_META_LLM_API_KEY`。
-* **Meta LLM Model**：对应 `SKILL_SCANNER_META_LLM_MODEL`。
-* **Meta LLM Base URL**：对应 `SKILL_SCANNER_META_LLM_BASE_URL`。
-
-> 说明：
->
-> * 若当前未配置 LLM，页面通常会提示当前仅支持静态扫描；
-> * 配置主 LLM 与 Meta LLM 后，scanner 才能启用更完整的语义分析与总结能力。
-
-##### （4）当前扫描模式
-
-页面支持选择当前平台实际采用的扫描模式：
-
-* **Quick 模式**：使用 quick analyzers 执行扫描，适合日常快速检查。
-* **Deep 模式**：使用 deep analyzers 执行扫描，适合更完整、更深入的分析。
-
-需要注意的是：
-
-* Dashboard 上的“快速扫描”和“全量扫描”都会使用这里选定的扫描强度；
-* 它们的差异主要在于扫描范围，而不在 analyzer 深度本身。
-
-
-
-##### （5）Quick / Deep 扫描策略
-
-页面下方分别维护 **快速** 与 **深度** 两套扫描策略配置，便于管理员按不同场景选择不同的 analyzer 组合。
-
-每套策略都包括以下配置项：
-
-* **超时（秒）**：设置当前模式下扫描任务的超时时间。
-* **调用方法**：可按需启用或停用不同 analyzer。
-
-当前可见的 analyzer 类型包括：
-
-* **Static**：YAML + YARA 静态规则扫描
-* **Bytecode**：Python bytecode 完整性校验
-* **Pipeline**：命令链路与 taint 分析
-* **Behavioral**：基于 AST 的行为与数据流分析
-* **LLM**：依赖外部 LLM 的语义分析
-* **Meta**：对 findings 进行二次汇总分析
-
-通常可按以下思路理解：
-
-* **Quick 模式**：偏向更快执行，常用于日常增量检查
-* **Deep 模式**：可启用更多 analyzer，适合更深入的复核与安全审计
-
-##### （6）保存并应用
-
-页面右上角的 **保存并应用** 用于提交当前所有 scanner 相关配置。保存后会：
-
-* 更新 ClawManager 中的 quick / deep 扫描策略
-* 更新 skill-scanner Deployment 的相关环境变量
-* 等待 rollout 完成后使新配置正式生效
-
-> 说明：
->
-> * 修改扫描器配置后，建议等待配置完全生效，再执行新的扫描任务；
-> * 若配置后发现连接状态异常，可优先检查 AI Gateway 模型、LLM 地址、Key 和 Deployment rollout 状态。
-
-### 9.3 AI 网关功能概览
-
-AI 网关除了“模型”配置外，还包含以下模块：
-
-* **AI 审计**：查看模型调用 Trace、请求与响应负载、命中风险、路由决策以及调用明细。
-* **成本**：查看 Token 用量、预估费用、内部成本和趋势统计。
-* **风控规则**：配置敏感检测规则，控制命中后是放行还是路由到安全模型。
-
-### 9.4 成本模块
-
-成本页面用于统计平台模型调用的费用与 Token 使用情况，帮助管理员了解整体消耗情况。
-
-![](./main/6.png)
-
-页面主要包括以下内容：
-
-* **输入 Token**：统计输入提示词总量。
-* **输出 Token**：统计模型生成内容总量。
-* **预估费用**：按 Provider 单价估算的费用。
-* **内部成本**：安全模型相关的内部核算成本。
-* **每日费用趋势**：按最近 7 天查看当前窗口内的预估费用和 Token 变化。
-* **用户汇总**：按用户聚合用量和费用。
-* **实例汇总**：按实例聚合用量和费用。
-* **最近成本记录**：支持按 Trace、用户、模型等条件搜索并分页查看成本记录，并可进一步跳转到审计详情。
-
-> 说明：如果当前尚未产生模型调用记录，输入 Token、输出 Token、费用及趋势图可能都为 0，这是正常现象。
-
-### 9.5 AI 审计模块
-
-AI 审计页面用于查看最近的受管模型调用记录，帮助管理员排查模型调用、Token 使用和路由结果。
-
-![](./main/7.png)
-
-主要功能包括：
-
-* **最近 AI Trace**：查看最近的模型调用链路。
-* **Trace 列表**：在统一表格中查看最近的受管 Trace。
-* **搜索与筛选**：支持按 Trace、请求内容、用户、模型等条件进行搜索。
-* **状态筛选**：支持按状态查看不同调用结果。
-* **模型筛选**：支持按模型筛选对应的调用记录。
-* **分页刷新**：支持分页查看和手动刷新最新审计结果。
-
-> 说明：如果页面提示“暂无 AI 审计记录”，说明当前尚未产生模型实际调用请求。
-
-### 9.6 风控规则模块
-
-风控规则页面用于配置敏感内容检测规则，并决定命中规则后的处理动作。
-
-![](./main/8.png)
-
-该模块主要支持：
-
-* **规则列表管理**：查看全部规则及其启用状态。
-* **规则分类查看**：支持按个人信息、公司信息、客户业务、安全凭据、财务法务、政治敏感、自定义等分类查看规则。
-* **规则字段配置**：可设置规则 ID、显示名称、严重级别、动作、排序、正则 Pattern 和描述。
-* **规则动作控制**：命中规则后可选择放行，或路由到安全模型。
-* **批量启用 / 停用**：支持批量调整规则状态。
-* **规则测试台**：可粘贴样本文本，测试启用规则或草稿规则会命中哪些内容。
-
-当前内置规则示例包括但不限于：
-
-* 个人信息：邮箱地址、手机号、身份证号、护照号、银行卡上下文、住址、简历内容等。
-* 公司信息：内网 IP、内部域名、主机命名、Kubernetes Service DNS、项目代号、组织架构、薪资 / HR 信息等。
-* 客户业务：客户名单、合同 / 报价单、发票税号、CRM / 工单数据等。
-* 安全凭据：私钥、API Key、Token、JWT、Cookie / Session、数据库连接串、Kubeconfig、环境变量密钥等。
-* 财务法务：预算、利润、营收、法务意见、诉讼、NDA 等。
-* 政治敏感：政治机构、军事国家安全、极端暴力相关表述等。
-
-> 说明：默认规则已覆盖多类常见敏感信息检测场景，实际使用中可根据业务需求继续新增、调整或停用部分规则。
----
-
-<a id="sec-13"></a>
-## 十、工作台模块说明
-
-工作台是普通用户进入平台后的主要操作区域，用于查看个人资源配额、创建实例、管理实例以及维护 OpenClaw 相关资源。该模块更偏向日常使用与运维操作，与管理员侧的“控制台总览”不同。
-
-### 10.1 工作台首页
-![](./main/9.png)
-工作台首页用于展示当前账号的实例与资源使用概况，主要包含以下内容：
-
-- **我的实例**：显示当前账号下已创建的实例数量。
-- **运行中**：显示当前正在运行的实例数量。
-- **已用存储**：显示当前账号已经占用的存储空间。
-- **我的资源配额**：展示当前账号可用的配额信息，包括实例数、最大 CPU 核数、最大内存、最大存储以及最大 GPU 数。
-- **快捷操作**：提供 **创建新实例** 和 **查看全部实例** 两个入口，便于快速开始使用平台。
-
-> 说明：当页面显示“还没有实例”时，可直接点击 **创建新实例** 开始创建第一个 OpenClaw Desktop 实例。
-
-### 10.2 我的实例
-
-“我的实例”页面用于统一查看和管理当前账号下已创建的实例。该页面主要承担实例管理功能。
-![](./main/10.png)
-支持的常见操作包括：
-
-- **查看实例状态**：查看实例是否处于创建中、运行中、已停止或异常状态。
-- **进入实例详情**：查看实例的基础信息、资源配置和运行情况。
-- **停止实例**：当实例运行异常或需要重新加载环境时，可执行停止操作。
-- **删除实例**：当实例不再使用时，可直接删除，释放对应的 CPU、内存和存储资源。
-
-> 说明：删除实例后，实例相关资源会被一并清理，执行前请确认其中的数据和配置是否已完成备份。
-
-### 10.3 资源管理
-
-“资源管理”页面用于维护 OpenClaw 可用的资源内容，便于实例在启动后注入和使用。
-![](./main/11.png)
-页面主要包括以下部分：
-
-- **资源**：查看和维护可用资源条目。
-- **资源包**：将多个资源组合为可复用的资源包，便于批量注入。
-- **注入记录**：查看资源注入历史与执行情况。
-
-在资源管理页左侧，还可以按资源类型进行区分管理，当前页面中可见的类型包括：
-
-- **通道**
-- **技能**
-- **定时任务**
-- **智能体（即将上线）**
-
-页面右上角支持：
-
-- **刷新**：重新加载当前资源列表。
-- **新建**：创建新的资源项。
-
-### 10.3.1 新建通道
-
-“通道”用于配置 OpenClaw 与外部消息平台或接入端的连接方式，例如 Telegram、Slack、飞书 / Lark 等。
-
-![](./main/12.png)
-
-创建通道时，可按以下步骤操作：
-
-1. 进入 **资源管理** 页面，保持在 **资源** 页签。
-2. 在左侧资源类型中选择 **通道**。
-3. 点击页面右侧的 **新建**，打开“新建资源”弹窗。
-4. 在弹窗中填写基础信息：
-   - **类型**：选择 **通道**
-   - **资源 Key**：填写该通道的唯一标识，建议使用易于识别且不重复的英文或组合名称
-   - **名称**：填写通道显示名称
-   - **标签**：可选，用于分类检索
-   - **描述**：可选，用于补充说明该通道的用途
-   - **已启用**：建议保持勾选状态
-5. 在 **Channel 模板** 区域中选择一个起始模板。当前支持的模板包括：
-   - `Telegram`
-   - `DingTalk`
-   - `Slack`
-   - `飞书 / Lark`
-
-6. 选择模板后，点击 **加载模板**。系统会将对应模板的基础配置自动写入下方的 **内容 JSON** 区域。
-7. 根据你的实际接入信息，继续补充或修改 **内容 JSON** 中的字段内容。
-8. 确认配置无误后，点击保存，完成通道创建。
-
-> 说明：
-> - **Channel 模板** 用于帮助你快速生成基础配置；
-> - **内容 JSON** 是最终生效的通道配置内容；
-> - 如果没有完全匹配的模板，也可以直接在 **内容 JSON** 中手动填写配置。
-
-### 10.3.2 上传技能
-
-技能用于为 OpenClaw 提供可复用的功能能力。平台支持通过上传归档文件的方式批量导入技能。
-
-![](./main/13.png)
-
-上传技能时，可按以下步骤操作：
-
-1. 进入 **资源管理** 页面，保持在 **资源** 页签。
-2. 在左侧资源类型中选择 **技能**。
-3. 点击 **选择文件**，选择本地技能压缩包。
-4. 当前页面仅支持上传 **`.zip`** 文件。
-5. 选择完成后，点击右侧的 **上传技能归档**。
-6. 系统会自动解析上传内容，并将每个一级目录导入为一个技能。
-7. 上传完成后，可在技能列表中查看已导入的技能内容。
-
-> 说明：
-> - 技能归档建议提前按目录整理清楚；
-> - 每个一级目录会被识别为一个独立技能；
-> - 如果上传后列表未立即刷新，可手动点击页面右上角 **刷新** 重新加载。
----
-
-<a id="sec-13-team"></a>
-### 10.4 Team 协作
-
-Team 使用一个 OpenClaw Lite Leader 协调多个 Worker。可以选择八个只读固定模板，也可以从创建页右上角进入 **自定义 Team**，通过自然语言和可选的 2–6 人总人数生成、调整和复用自己的模板。Leader 固定使用 OpenClaw Lite；每个 Worker 可选择 OpenClaw Lite 或已配置的 Hermes Lite。
-
-自定义 Team 通过同一 AI Gateway 的 `model: "auto"` 生成，并继承实际选中模型的 Thinking 配置。创建后，在团队群聊中向 Leader 描述目标；通过 **Execution Kanban** 查看当前 Query 和交付状态，通过 **文件** 查看共享产物。Hermes Lite Worker 的 Team 会话也可在 Hermes GUI 中实时查看。
-
-详见 [Team 协作快速指南](./team-workspaces-guide.md)。
-
-<a id="sec-14"></a>
-## 十一、问题与对策速查
-
-<a id="sec-14-storage"></a>
-### 11.1 存储问题专项处理（PV/PVC）
-
-如果你看到以下错误：
-
-```text
-0/1 nodes are available: pod has unbound immediate PersistentVolumeClaims
-```
-
-说明当前选择的存储 profile 未准备好。不要在多节点集群里临时补 HostPath PV；请回到两条官方验证路径之一：
-
-- 单节点：给唯一存储节点打 `clawmanager.io/storage-node=true` 标签，再应用 `deployments/<k3s|k8s>/single-node/clawmanager.yaml`。
-- 多节点：确认 RWO 和 RWX StorageClass 存在，再应用 `deployments/<k3s|k8s>/cluster/clawmanager.yaml`。
-
-不支持的组合：
-
-- 多节点 HostPath
-- 多节点场景使用 `local-path` 作为 RWX workspace
-- 使用 `workspace-store.clawmanager-system.svc.cluster.local` 这类集群内 Service DNS 作为 kubelet 挂载的 NFS server
-- MySQL、Redis、MinIO、workspace 或 object 这类持久数据落到 `emptyDir`
-
-#### 11.1.1 收集诊断信息
-
-```bash
-kubectl get storageclass
-kubectl get pvc -n clawmanager-system
-kubectl get events -n clawmanager-system --sort-by=.lastTimestamp
-kubectl get pods -n clawmanager-system -w
-```
-
-预期应看到：
-- `mysql-data` / `redis-data` / `minio-data` / `clawmanager-workspaces` 为 `Bound`
-- `mysql` / `clawmanager-team-redis` / `minio` / `skill-scanner` / `clawmanager-app` 最终为 `Running`
-
----
-
-| 现象 | 原因 | 处理 |
-| :--- | :--- | :--- |
-| `kubectl` 连接 `localhost:8080` 被拒绝 | kubeconfig 未配置 | 设置 `KUBECONFIG` 或复制到 `~/.kube/config` |
-| Pod 拉镜像超时 | 网络到 Docker Hub / GHCR 不稳定 | 配置镜像加速或代理 |
-| MySQL / Redis / MinIO 一直 `Pending` | PVC 未绑定 | 检查 StorageClass、PVC 状态和 PVC 事件 |
-| 浏览器打不开页面 | NodePort 未放通 / `port-forward` 进程未保持 | 放行端口或保持转发终端运行 |
-| 页面能打开但无法创建 OpenClaw 实例 | 未配置安全模型 | 先在 **AI 网关 → 模型** 中配置并启用安全模型 |
-| 实例长时间“创建中” | 首次拉镜像耗时长 / 存储或网络问题 | 耐心等待，必要时检查 Pod 和事件 |
-
----
-
-<a id="sec-15"></a>
-## 十二、建议的最终检查顺序（可按此自查）
-1. `kubectl get nodes`
-2. `kubectl get storageclass`
-3. `kubectl get pods -n clawmanager-system`
-4. `kubectl get pvc -n clawmanager-system`
-5. `kubectl get svc -n clawmanager-system`
-6. 浏览器访问 `https://<IP>:30443`
-7. 登录后台并完成 **安全模型配置**
-8. 在工作台中创建 **OpenClaw Desktop** 实例
+- [部署指南](./deployment_cn.md)
+- [Team 协作快速指南](./team-workspaces-guide.md)
+- [AI Gateway 使用指南](./aigateway_cn.md)
+- [安全防护平台指南](./security-platform_cn.md)
+- [资源管理指南](./resource-management_cn.md)
+- [Skill Hub 使用指南](./skill-hub-guide.md)
+- [OpenCode 工作空间指南](./opencode-lite-pro-agent-development.md)

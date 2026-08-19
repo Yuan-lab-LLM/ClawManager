@@ -1,3 +1,5 @@
+[← Back to README](../README.md)
+
 # Deployment Guide
 
 ClawManager is packaged as a Kubernetes-first platform. This guide is the operational entry point for deploying the control plane, locating the relevant manifests in the repository, and understanding which services are expected to come up in a working environment.
@@ -20,6 +22,8 @@ The cluster profile is validated with Longhorn as the example CSI implementation
 - MySQL for application state
 - MinIO for object storage-backed features
 - `skill-scanner` for skill analysis workflows
+- Team Redis and shared workspace storage services
+- Shared Lite Runtime pools for OpenClaw, Hermes, and OpenCode
 - Kubernetes Services used for portal, gateway, and supporting traffic paths
 
 ## Repository Entry Points
@@ -39,7 +43,7 @@ The cluster profile is validated with Longhorn as the example CSI implementation
 4. Review the bundled manifest and adjust secrets, images, StorageClass names, and ingress exposure for your environment.
 5. Deploy the platform components into the cluster.
 6. Wait for the core services to become ready.
-7. Validate frontend access, AI Gateway management pages, Security Center connectivity, and runtime creation flows.
+7. Validate frontend access, AI Gateway management pages, Security Protection connectivity, and OpenClaw/Hermes/OpenCode runtime creation flows.
 
 Single-node example:
 
@@ -91,19 +95,26 @@ Unsupported combinations:
 - durable MySQL, Redis, MinIO, workspace, or object data on `emptyDir`
 - cluster profile with implicit HostPath fallback
 
+## ARM64 Deployment
+
+The official ClawManager and Skill Scanner images are published for `linux/arm64`, but a complete installation also uses MySQL, Redis, MinIO/workspace services, and the selected OpenClaw, Hermes, or OpenCode Runtime images. Verify the manifest of **every pinned image** before deploying to ARM nodes; platform support does not make a custom Runtime image ARM64-compatible.
+
+For mixed-architecture clusters, use architecture-compatible tags together with node selectors or affinity. The shared Lite profiles include OpenClaw, Hermes, and OpenCode pools, so validate every enabled pool image even when users initially see only one Runtime. Use SSD-backed persistent storage, sufficient memory, and reproducible tags rather than `latest`, then perform the same PVC, Runtime creation, desktop, and model acceptance checks as on amd64.
+
 ## Operational Notes
 
 - ClawManager is designed around in-cluster services and platform-mediated access rather than direct pod exposure.
 - Resource Management features depend on object storage and `skill-scanner` being available.
+- The deployment profiles include first-start MySQL initialization through the `clawmanager-mysql-init` ConfigMap. Existing database volumes do not re-run those initialization scripts.
+- Lite instances are processes/workspaces inside the corresponding shared Runtime Pod; they do not create one Pod per user instance.
 - Runtime workspace `.openclaw` and `.hermes` archive import/export size is controlled by `CLAWMANAGER_WORKSPACE_ARCHIVE_MAX_MIB`. The default is `500` MiB; set the env var on the ClawManager app deployment when a larger or smaller limit is needed.
 - For install issues, collect `kubectl get storageclass`, `kubectl get pvc -n clawmanager-system`, `kubectl get pods -n clawmanager-system`, `kubectl get events -n clawmanager-system --sort-by=.lastTimestamp`, and `kubectl describe pvc -n clawmanager-system <pvc-name>` output before filing an issue.
 - Production environments should review images, credentials, TLS, persistence, and networking policies before rollout.
 
 ## Related Guides
 
-- [Admin and User Guide](./admin-user-guide.md)
-- [Agent Control Plane Guide](./agent-control-plane.md)
+- [User Manual](./use_guide_en.md)
 - [AI Gateway Guide](./aigateway.md)
-- [Security / Skill Scanner Guide](./security-skill-scanner.md)
+- [Security Protection Platform](./security-platform.md)
 - [Resource Management Guide](./resource-management.md)
-- [Developer Guide](./developer-guide.md)
+- [Skill Hub Guide](./skill-hub-guide_en.md)
