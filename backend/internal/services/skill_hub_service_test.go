@@ -360,7 +360,9 @@ func (r *importTestInstanceRepo) GetByID(id int) (*models.Instance, error) {
 	return nil, nil
 }
 func (r *importTestInstanceRepo) FindByPodIP(string) (*models.Instance, error) { return nil, nil }
-func (r *importTestInstanceRepo) GetByAccessToken(string) (*models.Instance, error) { panic("not used") }
+func (r *importTestInstanceRepo) GetByAccessToken(string) (*models.Instance, error) {
+	panic("not used")
+}
 func (r *importTestInstanceRepo) GetByAgentBootstrapToken(string) (*models.Instance, error) {
 	panic("not used")
 }
@@ -371,7 +373,7 @@ func (r *importTestInstanceRepo) GetAll(int, int) ([]models.Instance, error) {
 	}
 	return items, nil
 }
-func (r *importTestInstanceRepo) CountAll() (int, error)                    { panic("not used") }
+func (r *importTestInstanceRepo) CountAll() (int, error) { panic("not used") }
 func (r *importTestInstanceRepo) GetByUserID(int, int, int) ([]models.Instance, error) {
 	panic("not used")
 }
@@ -398,8 +400,8 @@ func (r *importTestInstanceRepo) SetWorkspacePath(context.Context, int, string) 
 func (r *importTestInstanceRepo) UpdateWorkspaceUsage(context.Context, int, int64) error {
 	panic("not used")
 }
-func (r *importTestInstanceRepo) Update(*models.Instance) error             { panic("not used") }
-func (r *importTestInstanceRepo) Delete(int) error                          { panic("not used") }
+func (r *importTestInstanceRepo) Update(*models.Instance) error { panic("not used") }
+func (r *importTestInstanceRepo) Delete(int) error              { panic("not used") }
 
 type noopInstanceCommandService struct{}
 
@@ -429,8 +431,8 @@ func TestPublishFromInstanceRejectsDiscoveredSkill(t *testing.T) {
 				SourceType: skillSourceDiscovered, Visibility: skillVisibilityPrivate, CurrentVersionID: &versionID,
 			},
 		},
-		versions: map[int]*models.SkillVersion{versionID: {ID: versionID, SkillID: 1, BlobID: blobID}},
-		blobs:    map[int]*models.SkillBlob{blobID: {ID: blobID, ScanStatus: "completed", RiskLevel: skillRiskNone, ObjectKey: "key.zip"}},
+		versions:       map[int]*models.SkillVersion{versionID: {ID: versionID, SkillID: 1, BlobID: blobID}},
+		blobs:          map[int]*models.SkillBlob{blobID: {ID: blobID, ScanStatus: "completed", RiskLevel: skillRiskNone, ObjectKey: "key.zip"}},
 		instanceSkills: []models.InstanceSkill{{InstanceID: 1, SkillID: 1, Status: "active", SourceType: "discovered_in_instance"}},
 	}
 	instRepo := &importTestInstanceRepo{instances: map[int]*models.Instance{1: {ID: 1, UserID: 1}}}
@@ -451,8 +453,8 @@ func TestImportInstanceSkillToLibraryPendingPackage(t *testing.T) {
 				SourceType: skillSourceDiscovered, Visibility: skillVisibilityPrivate, CurrentVersionID: &versionID,
 			},
 		},
-		versions: map[int]*models.SkillVersion{versionID: {ID: versionID, SkillID: 1, BlobID: blobID}},
-		blobs:    map[int]*models.SkillBlob{blobID: {ID: blobID, ScanStatus: "pending", RiskLevel: skillRiskUnknown, ObjectKey: ""}},
+		versions:       map[int]*models.SkillVersion{versionID: {ID: versionID, SkillID: 1, BlobID: blobID}},
+		blobs:          map[int]*models.SkillBlob{blobID: {ID: blobID, ScanStatus: "pending", RiskLevel: skillRiskUnknown, ObjectKey: ""}},
 		instanceSkills: []models.InstanceSkill{{InstanceID: 1, SkillID: 1, Status: "active", SourceType: "discovered_in_instance"}},
 		tagAssignments: map[int][]int{},
 		tags: map[int]*models.SkillHubTag{

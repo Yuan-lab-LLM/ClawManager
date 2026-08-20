@@ -9,6 +9,7 @@ import (
 )
 
 type skillFrontmatter struct {
+	Name        string      `yaml:"name"`
 	Description interface{} `yaml:"description"`
 }
 
@@ -22,10 +23,26 @@ func findSkillManifestBytes(files map[string][]byte) ([]byte, bool) {
 }
 
 func extractSkillFrontmatterDescription(skillMD []byte) string {
+	meta, ok := parseSkillFrontmatter(skillMD)
+	if !ok {
+		return ""
+	}
+	return normalizeFrontmatterDescription(meta.Description)
+}
+
+func extractSkillFrontmatterName(skillMD []byte) string {
+	meta, ok := parseSkillFrontmatter(skillMD)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(meta.Name)
+}
+
+func parseSkillFrontmatter(skillMD []byte) (skillFrontmatter, bool) {
 	text := strings.ReplaceAll(string(skillMD), "\r\n", "\n")
 	trimmed := strings.TrimSpace(text)
 	if !strings.HasPrefix(trimmed, "---") {
-		return ""
+		return skillFrontmatter{}, false
 	}
 	rest := trimmed[3:]
 	if strings.HasPrefix(rest, "\n") {
@@ -33,14 +50,14 @@ func extractSkillFrontmatterDescription(skillMD []byte) string {
 	}
 	end := strings.Index(rest, "\n---")
 	if end < 0 {
-		return ""
+		return skillFrontmatter{}, false
 	}
 	yamlBlock := rest[:end]
 	var meta skillFrontmatter
 	if err := yaml.Unmarshal([]byte(yamlBlock), &meta); err != nil {
-		return ""
+		return skillFrontmatter{}, false
 	}
-	return normalizeFrontmatterDescription(meta.Description)
+	return meta, true
 }
 
 func normalizeFrontmatterDescription(value interface{}) string {

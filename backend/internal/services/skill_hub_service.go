@@ -63,6 +63,7 @@ type BatchInstallHubSkillResult struct {
 	InstanceSkill *InstanceSkillPayload `json:"instance_skill,omitempty"`
 	Error         string                `json:"error,omitempty"`
 }
+
 func isAdminRole(role string) bool {
 	return strings.EqualFold(strings.TrimSpace(role), "admin")
 }

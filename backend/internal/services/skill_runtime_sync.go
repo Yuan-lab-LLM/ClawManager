@@ -48,6 +48,24 @@ func (s *skillService) SyncRuntimeAgentSkillsReport(payload map[string]any) erro
 		if report.InstanceID <= 0 {
 			continue
 		}
+		// OpenCode Lite skills live in the shared workspace and are materialized
+		// by ClawManager. RuntimeAgent versions that do not scan OpenCode's XDG
+		// config directory may report an empty full inventory; treating that as
+		// authoritative would immediately mark a successfully installed skill as
+		// missing. Re-scan the mounted workspace instead.
+		instance, instanceErr := s.instanceRepo.GetByID(report.InstanceID)
+		if instanceErr != nil {
+			return instanceErr
+		}
+		if instance != nil &&
+			strings.EqualFold(strings.TrimSpace(instance.Type), RuntimeTypeOpenCode) &&
+			SupportsServerWorkspaceSkillScan(instance) {
+			if err := s.syncRuntimeSkillsFromWorkspace(report.InstanceID, "full"); err != nil {
+				return err
+			}
+			s.completePendingSkillInventorySync(report.InstanceID)
+			continue
+		}
 		skills := make([]AgentSkillRecord, 0, len(report.Skills))
 		for _, record := range report.Skills {
 			record.Source = normalizeRuntimeSkillSource(record.Source)
@@ -88,7 +106,9 @@ func (s *skillService) RequestLiteSkillInventorySync(instanceID int) error {
 
 	if SupportsServerWorkspaceSkillScan(instance) {
 		workspaceMode := "full"
-		willResyncAgent := isLiteRuntimeInstance(instance) && s.runtimeSkillSync != nil
+		willResyncAgent := isLiteRuntimeInstance(instance) &&
+			s.runtimeSkillSync != nil &&
+			!strings.EqualFold(strings.TrimSpace(instance.Type), RuntimeTypeOpenCode)
 		if willResyncAgent {
 			workspaceMode = "incremental"
 		}
@@ -100,7 +120,9 @@ func (s *skillService) RequestLiteSkillInventorySync(instanceID int) error {
 		}
 	}
 
-	if !isLiteRuntimeInstance(instance) || s.runtimeSkillSync == nil {
+	if !isLiteRuntimeInstance(instance) ||
+		s.runtimeSkillSync == nil ||
+		strings.EqualFold(strings.TrimSpace(instance.Type), RuntimeTypeOpenCode) {
 		return nil
 	}
 	deps := s.runtimeSkillSync

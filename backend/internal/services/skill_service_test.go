@@ -286,9 +286,10 @@ func TestMaterializeLiteInstanceSkillWritesHermesHomeSkill(t *testing.T) {
 	assertFileEquals(t, filepath.Join(target, "SKILL.md"), "# Paper Ranker\n")
 }
 
-func TestMaterializeLiteInstanceSkillWritesOpenCodeProSkill(t *testing.T) {
+func TestMaterializeLiteInstanceSkillWritesOpenCodeGlobalSkillUsingManifestName(t *testing.T) {
+	manifest := "---\nname: ppt-generator\ndescription: Generate presentations\n---\n# PPT Generator\n"
 	archive := buildTestZip(t, map[string][]byte{
-		"paper-ranker/SKILL.md": []byte("# Paper Ranker\n"),
+		"ppt-1-0-0/SKILL.md": []byte(manifest),
 	})
 	workspacePath := filepath.Join(t.TempDir(), "opencode", "user-45", "instance-91")
 	if err := os.MkdirAll(workspacePath, 0750); err != nil {
@@ -297,19 +298,51 @@ func TestMaterializeLiteInstanceSkillWritesOpenCodeProSkill(t *testing.T) {
 	instanceRepo := newV2LifecycleInstanceRepo()
 	instanceRepo.byID[91] = &models.Instance{
 		ID: 91, UserID: 45, Type: RuntimeTypeOpenCode,
-		RuntimeType: RuntimeBackendDesktop, InstanceMode: InstanceModePro, WorkspacePath: &workspacePath,
+		RuntimeType: RuntimeBackendGateway, InstanceMode: InstanceModeLite, WorkspacePath: &workspacePath,
+	}
+	service := &skillService{
+		instanceRepo: instanceRepo,
+		storage:      fakeObjectStorage{"skills/ppt.zip": archive},
+	}
+	if err := service.materializeLiteInstanceSkill(context.Background(), 91, &models.Skill{SkillKey: "ppt-1-0-0"}, &models.SkillBlob{
+		ObjectKey: "skills/ppt.zip", FileName: "ppt.zip",
+	}); err != nil {
+		t.Fatalf("materializeLiteInstanceSkill() error = %v", err)
+	}
+	target := filepath.Join(workspacePath, "home", ".config", "opencode", "skills", "ppt-generator", "SKILL.md")
+	assertFileEquals(t, target, manifest)
+}
+
+func TestMaterializeInstanceSkillWritesOpenCodeProProjectSkill(t *testing.T) {
+	archive := buildTestZip(t, map[string][]byte{
+		"paper-ranker/SKILL.md": []byte("# Paper Ranker\n"),
+	})
+	workspacePath := filepath.Join(t.TempDir(), "opencode", "user-45", "instance-92")
+	if err := os.MkdirAll(workspacePath, 0750); err != nil {
+		t.Fatalf("MkdirAll(workspacePath): %v", err)
+	}
+	instanceRepo := newV2LifecycleInstanceRepo()
+	instanceRepo.byID[92] = &models.Instance{
+		ID:            92,
+		UserID:        45,
+		Type:          RuntimeTypeOpenCode,
+		RuntimeType:   RuntimeBackendDesktop,
+		InstanceMode:  InstanceModePro,
+		WorkspacePath: &workspacePath,
 	}
 	service := &skillService{
 		instanceRepo: instanceRepo,
 		storage:      fakeObjectStorage{"skills/paper-ranker.zip": archive},
 	}
-	if err := service.materializeLiteInstanceSkill(context.Background(), 91, &models.Skill{SkillKey: "paper-ranker"}, &models.SkillBlob{
-		ObjectKey: "skills/paper-ranker.zip", FileName: "paper-ranker.zip",
+	if err := service.materializeLiteInstanceSkill(context.Background(), 92, &models.Skill{SkillKey: "paper-ranker"}, &models.SkillBlob{
+		ObjectKey: "skills/paper-ranker.zip",
+		FileName:  "paper-ranker.zip",
 	}); err != nil {
 		t.Fatalf("materializeLiteInstanceSkill() error = %v", err)
 	}
 	assertFileEquals(t, filepath.Join(workspacePath, "workspace", ".opencode", "skills", "paper-ranker", "SKILL.md"), "---\nname: paper-ranker\ndescription: \"ClawManager managed skill paper-ranker\"\n---\n\n# Paper Ranker\n")
 }
+
 func TestChownRuntimePathToleratesNonRootPermissionDenied(t *testing.T) {
 	target := filepath.Join(t.TempDir(), "skill-file")
 	if err := os.WriteFile(target, []byte("skill"), 0644); err != nil {
@@ -473,17 +506,17 @@ func TestLiteRuntimePersistentAncestorsIncludeOpenClawHome(t *testing.T) {
 	}
 }
 
-func TestLiteRuntimePersistentRootUsesDeepSeekHarnessHome(t *testing.T) {
-	workspacePath := filepath.Join(t.TempDir(), "deepseek-harness", "user-1", "instance-91")
+func TestLiteRuntimePersistentRootUsesOpenCodeConfigDirectory(t *testing.T) {
+	workspacePath := filepath.Join(t.TempDir(), "opencode", "user-1", "instance-90")
 	instance := &models.Instance{
-		Type:          RuntimeTypeDeepSeekHarness,
+		Type:          RuntimeTypeOpenCode,
 		RuntimeType:   RuntimeBackendGateway,
 		InstanceMode:  InstanceModeLite,
 		WorkspacePath: &workspacePath,
 	}
-	want := filepath.Join(workspacePath, "home", ".dsh")
+	want := filepath.Join(workspacePath, "home", ".config", "opencode")
 	if got := liteRuntimePersistentRoot(instance); got != want {
-		t.Fatalf("DeepSeek Harness persistent root = %q, want %q", got, want)
+		t.Fatalf("OpenCode persistent root = %q, want %q", got, want)
 	}
 }
 

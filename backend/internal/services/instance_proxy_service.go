@@ -163,6 +163,7 @@ func (s *InstanceProxyService) ProxyRequest(ctx context.Context, instanceID int,
 	// Copy query parameters, excluding ClawManager-owned proxy/gateway tokens.
 	queryParams := r.URL.Query()
 	s.removeProxyAccessTokenQuery(queryParams, token, managedGatewayToken)
+	openCodeProjectSearchRewritten := s.rewriteOpenCodeProjectSearchDirectory(ctx, instanceID, accessToken.InstanceType, bootstrapPath, queryParams)
 	if len(queryParams) > 0 {
 		targetURL.RawQuery = queryParams.Encode()
 	}
@@ -238,6 +239,9 @@ func (s *InstanceProxyService) ProxyRequest(ctx context.Context, instanceID int,
 	if shouldRewriteHTML {
 		proxyReq.Header.Del("Accept-Encoding")
 	}
+	if openCodeProjectSearchRewritten {
+		proxyReq.Header.Del("Accept-Encoding")
+	}
 
 	// Remove hop-by-hop headers
 	s.removeHopByHopHeaders(proxyReq.Header)
@@ -255,6 +259,24 @@ func (s *InstanceProxyService) ProxyRequest(ctx context.Context, instanceID int,
 
 	if location := resp.Header.Get("Location"); location != "" && !dedicatedRuntimeOrigin {
 		resp.Header.Set("Location", s.rewriteRedirectLocation(instanceID, location))
+	}
+
+	if openCodeProjectSearchRewritten && resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusMultipleChoices {
+		body, readErr := io.ReadAll(resp.Body)
+		if readErr != nil {
+			return fmt.Errorf("failed to read OpenCode file search response: %w", readErr)
+		}
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			return fmt.Errorf("failed to close OpenCode file search response: %w", closeErr)
+		}
+		if modifiedBody, changed := rewriteOpenCodeFileSearchResponse(bootstrapPath, body); changed {
+			body = modifiedBody
+			resp.Header.Del("ETag")
+			resp.Header.Del("Last-Modified")
+		}
+		resp.Body = io.NopCloser(bytes.NewReader(body))
+		resp.ContentLength = int64(len(body))
+		resp.Header.Set("Content-Length", strconv.Itoa(len(body)))
 	}
 
 	if shouldRewriteHTML && strings.Contains(resp.Header.Get("Content-Type"), "text/html") {
@@ -603,6 +625,143 @@ func (s *InstanceProxyService) isHermesLiteProxyInstance(instanceID int, instanc
 	}
 	runtimeType, ok := v2RuntimeTypeForInstance(instance)
 	return ok && runtimeType == RuntimeTypeHermes
+}
+
+// rewriteOpenCodeProjectSearchDirectory keeps OpenCode's web project picker
+// away from the instance HOME directory. OpenCode 1.18.x uses FFF for this
+// endpoint, and FFF refuses to index HOME. The ClawManager workspace browser
+// stores uploaded user projects directly under the instance workspace root,
+// alongside the internal home directory.
+func (s *InstanceProxyService) rewriteOpenCodeProjectSearchDirectory(ctx context.Context, instanceID int, instanceType, targetPath string, query url.Values) bool {
+	if s == nil || s.bindingRepo == nil || !isOpenCodeRuntimeType(instanceType) {
+		return false
+	}
+	binding, err := s.bindingRepo.GetRunningByInstanceID(ctx, instanceID)
+	if err != nil || binding == nil {
+		return false
+	}
+	return rewriteOpenCodeFileSearchDirectory(targetPath, binding.WorkspacePath, query)
+}
+
+func rewriteOpenCodeFileSearchDirectory(targetPath, workspaceRoot string, query url.Values) bool {
+	if query == nil {
+		return false
+	}
+	root := strings.TrimRight(strings.TrimSpace(workspaceRoot), "/")
+	if root == "" {
+		return false
+	}
+	var key string
+	switch strings.TrimSpace(targetPath) {
+	case "/api/fs/find":
+		key = "location[directory]"
+	case "/find/file":
+		key = "directory"
+	default:
+		return false
+	}
+	if strings.TrimRight(strings.TrimSpace(query.Get(key)), "/") != root+"/home" {
+		return false
+	}
+	query.Set(key, root)
+	return true
+}
+
+type openCodeFileSearchItem struct {
+	Path string `json:"path"`
+	Type string `json:"type"`
+}
+
+type openCodeFileSearchPayload struct {
+	Location json.RawMessage          `json:"location"`
+	Data     []openCodeFileSearchItem `json:"data"`
+}
+
+// OpenCode's FFF directory results contain matching descendants but can omit
+// their top-level project directory. The project picker needs that parent to
+// open the project itself. Internal HOME descendants are not user projects.
+func rewriteOpenCodeFileSearchResponse(targetPath string, body []byte) ([]byte, bool) {
+	if strings.TrimSpace(targetPath) == "/find/file" {
+		return rewriteOpenCodeFindFileResponse(body)
+	}
+	if strings.TrimSpace(targetPath) != "/api/fs/find" {
+		return body, false
+	}
+
+	var payload openCodeFileSearchPayload
+	if err := json.Unmarshal(body, &payload); err != nil || payload.Data == nil {
+		return body, false
+	}
+
+	result := make([]openCodeFileSearchItem, 0, len(payload.Data)*2)
+	seen := make(map[string]struct{}, len(payload.Data)*2)
+	appendItem := func(item openCodeFileSearchItem) {
+		if _, exists := seen[item.Path]; exists {
+			return
+		}
+		seen[item.Path] = struct{}{}
+		result = append(result, item)
+	}
+
+	for _, item := range payload.Data {
+		cleanPath := strings.TrimLeft(strings.TrimSpace(item.Path), "/")
+		if cleanPath == "" || cleanPath == "home/" || strings.HasPrefix(cleanPath, "home/") {
+			continue
+		}
+		topLevel := strings.SplitN(cleanPath, "/", 2)[0] + "/"
+		appendItem(openCodeFileSearchItem{Path: topLevel, Type: "directory"})
+		item.Path = cleanPath
+		appendItem(item)
+	}
+
+	if len(result) == 0 && len(payload.Data) == 0 {
+		return body, false
+	}
+	payload.Data = result
+	modified, err := json.Marshal(payload)
+	if err != nil {
+		return body, false
+	}
+	return modified, true
+}
+
+// OpenCode 1.18.x's current web UI uses /find/file rather than /api/fs/find.
+// It returns matching descendant paths as a string array and omits the parent
+// project directory, so add each visible top-level project root and hide the
+// internal HOME tree.
+func rewriteOpenCodeFindFileResponse(body []byte) ([]byte, bool) {
+	var paths []string
+	if err := json.Unmarshal(body, &paths); err != nil || paths == nil {
+		return body, false
+	}
+
+	result := make([]string, 0, len(paths)*2)
+	seen := make(map[string]struct{}, len(paths)*2)
+	appendPath := func(path string) {
+		if _, exists := seen[path]; exists {
+			return
+		}
+		seen[path] = struct{}{}
+		result = append(result, path)
+	}
+
+	for _, path := range paths {
+		cleanPath := strings.TrimLeft(strings.TrimSpace(path), "/")
+		if cleanPath == "" || cleanPath == "home/" || strings.HasPrefix(cleanPath, "home/") {
+			continue
+		}
+		topLevel := strings.SplitN(cleanPath, "/", 2)[0] + "/"
+		appendPath(topLevel)
+		if strings.HasSuffix(cleanPath, "/") {
+			appendPath(cleanPath)
+		}
+	}
+
+	modified, err := json.Marshal(result)
+	if err != nil {
+		return body, false
+	}
+	return modified, true
 }
 
 func isHermesDashboardPublicAuthPath(targetPath string) bool {

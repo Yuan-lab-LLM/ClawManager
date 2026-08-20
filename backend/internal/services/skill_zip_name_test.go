@@ -120,9 +120,9 @@ func buildGBKTestZip(t *testing.T, files map[string][]byte) []byte {
 	for name, content := range files {
 		encoded := mustEncodeGB18030(t, name)
 		header := &zip.FileHeader{
-			Name:     string(encoded),
-			Method:   zip.Deflate,
-			NonUTF8:  true,
+			Name:    string(encoded),
+			Method:  zip.Deflate,
+			NonUTF8: true,
 		}
 		entry, err := writer.CreateHeader(header)
 		if err != nil {

@@ -591,7 +591,6 @@ func (s *skillService) AttachSkillToInstance(actorUserID int, actorRole string, 
 	if skill.Status != "active" {
 		return nil, fmt.Errorf("skill is not active")
 	}
-
 	versionID := skill.CurrentVersionID
 	var blob *models.SkillBlob
 	if versionID != nil {
@@ -674,6 +673,14 @@ func (s *skillService) materializeLiteInstanceSkill(ctx context.Context, instanc
 	if targetName == "" {
 		return fmt.Errorf("lite skill materialization target is invalid")
 	}
+	if strings.EqualFold(strings.TrimSpace(instance.Type), RuntimeTypeOpenCode) {
+		if manifest, ok := dirs[0].Files["SKILL.md"]; ok {
+			manifestName := extractSkillFrontmatterName(manifest)
+			if manifestName != "" && sanitizeSkillKey(manifestName) == manifestName {
+				targetName = manifestName
+			}
+		}
+	}
 
 	targetRoot := runtimeSkillInstallRoot(instance)
 	if targetRoot == "" {
@@ -742,7 +749,7 @@ func liteRuntimePersistentRoot(instance *models.Instance) string {
 	}
 	if strings.EqualFold(strings.TrimSpace(instance.Type), RuntimeTypeOpenCode) {
 		if isLiteRuntimeInstance(instance) {
-			return filepath.Join(workspacePath, "home", ".opencode")
+			return filepath.Join(workspacePath, "home", ".config", "opencode")
 		}
 		return filepath.Join(workspacePath, ".opencode")
 	}

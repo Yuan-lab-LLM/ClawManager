@@ -488,6 +488,40 @@ func TestRequestLiteSkillInventorySyncUsesIncrementalWhenAgentResyncFollows(t *t
 	}
 }
 
+func TestRequestLiteSkillInventorySyncUsesOpenCodeWorkspaceAsAuthority(t *testing.T) {
+	workspace := t.TempDir()
+	skillRoot := filepath.Join(workspace, "home", ".config", "opencode", "skills", "ppt-generator")
+	if err := os.MkdirAll(skillRoot, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillRoot, "SKILL.md"), []byte("---\nname: ppt-generator\ndescription: test\n---\n"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	stub := &capturingSkillRepoStub{skillRepoStub: skillRepoStub{
+		skills: map[int]*models.Skill{
+			10: {ID: 10, UserID: 1, SkillKey: "ppt-generator", Name: "ppt-generator", SourceType: skillSourceUploaded, Status: skillStatusActive},
+		},
+		blobs: map[int]*models.SkillBlob{}, versions: map[int]*models.SkillVersion{},
+		instanceSkills: []models.InstanceSkill{{InstanceID: 1, SkillID: 10, Status: "active", SourceType: "injected_by_clawmanager"}},
+	}}
+	instRepo := &importTestInstanceRepo{instances: map[int]*models.Instance{
+		1: {ID: 1, UserID: 1, Type: RuntimeTypeOpenCode, InstanceMode: InstanceModeLite, RuntimeType: RuntimeBackendGateway, WorkspacePath: &workspace, RuntimeGeneration: 1},
+	}}
+	agent := &recordingSkillResyncAgentClient{}
+	svc := &skillService{repo: stub, instanceRepo: instRepo, commandService: &noopInstanceCommandService{}}
+	svc.ConfigureRuntimeSkillSync(newFakeRuntimeBindingRepo(), &fakeRuntimePodRepo{}, agent)
+
+	if err := svc.RequestLiteSkillInventorySync(1); err != nil {
+		t.Fatalf("RequestLiteSkillInventorySync() error = %v", err)
+	}
+	if len(agent.calls) != 0 {
+		t.Fatalf("OpenCode agent resync calls = %#v, want none", agent.calls)
+	}
+	if len(stub.instanceSkills) != 1 || stub.instanceSkills[0].Status != "active" {
+		t.Fatalf("instance skills = %#v, want active workspace skill", stub.instanceSkills)
+	}
+}
+
 func TestRequestLiteSkillInventorySyncPropagatesResyncError(t *testing.T) {
 	workspace := t.TempDir()
 	skillsRoot := filepath.Join(workspace, "home", ".hermes", "skills")
