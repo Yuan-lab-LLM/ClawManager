@@ -28,7 +28,7 @@ func runtimeSkillInstallRoot(instance *models.Instance) string {
 			return filepath.Join(workspacePath, "home", ".dsh", "skills")
 		}
 		if strings.EqualFold(strings.TrimSpace(instance.Type), RuntimeTypeOpenCode) {
-			return filepath.Join(workspacePath, "home", ".opencode", "skills")
+			return filepath.Join(workspacePath, "home", ".config", "opencode", "skills")
 		}
 		return filepath.Join(workspacePath, "home", ".openclaw", "workspace", "skills")
 	}
