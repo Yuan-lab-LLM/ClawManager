@@ -34,6 +34,12 @@ const LITE_RUNTIME_CARDS: RuntimeCardDefinition[] = [
     image: 'ghcr.io/yuan-lab-llm/agentsruntime/hermes-lite:latest',
   },
   {
+    instance_type: 'opencode',
+    runtime_type: 'gateway',
+    display_name: 'OpenCode Lite',
+    image: 'ghcr.io/yuan-lab-llm/agentsruntime/opencode-lite:latest',
+  },
+  {
     instance_type: 'deepseek-harness',
     runtime_type: 'gateway',
     display_name: 'DeepSeek Harness Lite',
