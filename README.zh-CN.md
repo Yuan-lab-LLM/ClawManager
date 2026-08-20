@@ -326,10 +326,10 @@ ClawManager 是一个 Kubernetes 原生平台，包含 React 前端、Go 后端�
 
 ## Star History
 
-<a href="https://github.com/Yuan-lab-LLM/ClawManager/actions/workflows/update-star-history.yml">
+<a href="https://star-history.dera.page/#Yuan-lab-LLM/ClawManager&type=date">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Yuan-lab-LLM/ClawManager/star-history/star-history-dark.svg" />
-   <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/Yuan-lab-LLM/ClawManager/star-history/star-history-light.svg" />
-   <img alt="Star History Chart" src="https://raw.githubusercontent.com/Yuan-lab-LLM/ClawManager/star-history/star-history-light.svg" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://star-history.dera.page/svg?repos=Yuan-lab-LLM/ClawManager&type=date&theme=dark" />
+   <source media="(prefers-color-scheme: light)" srcset="https://star-history.dera.page/svg?repos=Yuan-lab-LLM/ClawManager&type=date&theme=light" />
+   <img alt="Star History Chart" src="https://star-history.dera.page/svg?repos=Yuan-lab-LLM/ClawManager&type=date&theme=light" />
  </picture>
 </a>
