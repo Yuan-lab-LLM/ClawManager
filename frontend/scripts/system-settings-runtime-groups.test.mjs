@@ -43,7 +43,8 @@ assert(
 );
 assert(
   pageSource.includes("ghcr.io/yuan-lab-llm/agentsruntime/openclaw-lite:latest") &&
-    pageSource.includes("ghcr.io/yuan-lab-llm/agentsruntime/hermes-lite:latest"),
+    pageSource.includes("ghcr.io/yuan-lab-llm/agentsruntime/hermes-lite:latest") &&
+    pageSource.includes("ghcr.io/yuan-lab-llm/agentsruntime/opencode-lite:latest"),
   "System settings page must use the Lite default runtime images.",
 );
 assert(

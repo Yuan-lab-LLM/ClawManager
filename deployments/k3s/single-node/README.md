@@ -104,6 +104,12 @@ grep -n 'image:' clawmanager.yaml | head -n 40
 If this is an offline or private-registry deployment, load or push the images to
 the registry used by the manifest before continuing.
 
+Before applying the manifest, set
+`CLAWMANAGER_OPENCODE_PUBLIC_URL_TEMPLATE` in `clawmanager-app`. Use the
+`nip.io` template for connected clients or the BIND-backed template for offline
+clients. DNS, TLS, and verification requirements are documented in the
+[OpenCode Lite public-origin strategy](../../../docs/deployment.md#opencode-lite-public-origin-strategy).
+
 ### 6. Apply The Manifest
 
 ```sh

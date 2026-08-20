@@ -67,6 +67,12 @@ kubectl describe pod <pod-name> -n <namespace>
 
 Then verify registry access from the node that runs the pod.
 
+Before applying the manifest, set
+`CLAWMANAGER_OPENCODE_PUBLIC_URL_TEMPLATE` in `clawmanager-app`. Use the
+`nip.io` template for connected clients or the BIND-backed template for offline
+clients. DNS, TLS, and verification requirements are documented in the
+[OpenCode Lite public-origin strategy](../../../docs/deployment.md#opencode-lite-public-origin-strategy).
+
 ### 4. Prepare Every Node
 
 Longhorn uses iSCSI for block volumes and NFS for RWX volumes. Install the
