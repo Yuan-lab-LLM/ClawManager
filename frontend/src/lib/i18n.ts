@@ -2450,6 +2450,10 @@ export const translations: Record<Locale, TranslationTree> = {
           label: "Hermes Runtime",
           description: "Hermes runtime built on the webtop desktop base",
         },
+        opencode: {
+          label: "OpenCode",
+          description: "Managed OpenCode coding workspace, available in Lite and Pro modes",
+        },
         deepseekHarness: {
           label: "DeepSeek Harness",
           description: "Managed DeepSeek Harness workspace, available in Lite and Pro modes",
@@ -3985,6 +3989,10 @@ export const translations: Record<Locale, TranslationTree> = {
           label: "Hermes Runtime",
           description: "基于 Webtop 桌面基础镜像构建的 Hermes 运行时",
         },
+        opencode: {
+          label: "OpenCode",
+          description: "由 ClawManager 管理的 OpenCode 编码工作空间，支持 Lite 和 Pro 模式",
+        },
         deepseekHarness: {
           label: "DeepSeek Harness",
           description: "由 ClawManager 管理的 DeepSeek Harness 工作空间，支持 Lite 和 Pro 模式",
@@ -5461,6 +5469,11 @@ export const translations: Record<Locale, TranslationTree> = {
           description:
             "Webtop デスクトップベースで構築された Hermes ランタイム",
         },
+        opencode: {
+          label: "OpenCode",
+          description:
+            "ClawManager が管理する Lite / Pro 対応の OpenCode コーディングワークスペース",
+        },
         deepseekHarness: {
           label: "DeepSeek Harness",
           description:
@@ -6902,6 +6915,10 @@ export const translations: Record<Locale, TranslationTree> = {
         hermes: {
           label: "Hermes Runtime",
           description: "Webtop 데스크톱 기반으로 빌드된 Hermes 런타임",
+        },
+        opencode: {
+          label: "OpenCode",
+          description: "ClawManager가 관리하는 Lite 및 Pro 모드 OpenCode 코딩 작업 공간",
         },
         deepseekHarness: {
           label: "DeepSeek Harness",
@@ -8365,6 +8382,11 @@ export const translations: Record<Locale, TranslationTree> = {
           label: "Hermes Runtime",
           description:
             "Hermes-Runtime auf Basis des Webtop-Desktop-Images",
+        },
+        opencode: {
+          label: "OpenCode",
+          description:
+            "Von ClawManager verwalteter OpenCode-Coding-Arbeitsbereich für Lite und Pro",
         },
         deepseekHarness: {
           label: "DeepSeek Harness",

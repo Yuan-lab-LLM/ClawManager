@@ -1463,7 +1463,7 @@ const CreateInstancePage: React.FC = () => {
               onClick={() => setError(null)}
               className="float-right text-red-500 hover:text-red-700"
             >
-              \u00d7
+              ×
             </button>
           </div>
         )}

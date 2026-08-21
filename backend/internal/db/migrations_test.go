@@ -286,3 +286,28 @@ func TestMigration047AddsDeepSeekHarnessRuntimes(t *testing.T) {
 		}
 	}
 }
+
+func TestMigration048PreservesAllInstanceTypes(t *testing.T) {
+	raw, err := embeddedMigrations.ReadFile("migrations/048_fix_instance_type_enum.sql")
+	if err != nil {
+		t.Fatalf("read migration 048: %v", err)
+	}
+
+	sql := string(raw)
+	for _, instanceType := range []string{
+		"'openclaw'",
+		"'ubuntu'",
+		"'debian'",
+		"'centos'",
+		"'custom'",
+		"'webtop'",
+		"'hermes'",
+		"'workbuddy'",
+		"'opencode'",
+		"'deepseek-harness'",
+	} {
+		if !strings.Contains(sql, instanceType) {
+			t.Fatalf("migration 048 must preserve instance type %s", instanceType)
+		}
+	}
+}
