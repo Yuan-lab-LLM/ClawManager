@@ -171,6 +171,52 @@ func TestRuntimeSkillInstallRootOpenCodeLite(t *testing.T) {
 	}
 }
 
+func TestRuntimeSkillInstallRootOpenCodeProFollowsSelectedProject(t *testing.T) {
+	workspace := t.TempDir()
+	environment, err := marshalEnvironmentOverrides(map[string]string{
+		openCodeDefaultProjectEnv: "/config/workspace/project-alpha",
+	})
+	if err != nil {
+		t.Fatalf("marshal environment: %v", err)
+	}
+	instance := &models.Instance{
+		Type: RuntimeTypeOpenCode, InstanceMode: InstanceModePro,
+		RuntimeType: RuntimeBackendDesktop, WorkspacePath: &workspace,
+		EnvironmentOverridesJSON: environment,
+	}
+
+	want := filepath.Join(workspace, "workspace", "project-alpha", ".opencode", "skills")
+	if got := runtimeSkillInstallRoot(instance); got != want {
+		t.Fatalf("OpenCode Pro selected-project root = %q, want %q", got, want)
+	}
+}
+
+func TestRuntimeSkillInstallRootOpenCodeProRejectsProjectEscape(t *testing.T) {
+	workspace := t.TempDir()
+	for _, projectPath := range []string{
+		"/config/workspace/../outside",
+		"/config/other-project",
+		"/tmp/project",
+	} {
+		environment, err := marshalEnvironmentOverrides(map[string]string{
+			openCodeDefaultProjectEnv: projectPath,
+		})
+		if err != nil {
+			t.Fatalf("marshal environment: %v", err)
+		}
+		instance := &models.Instance{
+			Type: RuntimeTypeOpenCode, InstanceMode: InstanceModePro,
+			RuntimeType: RuntimeBackendDesktop, WorkspacePath: &workspace,
+			EnvironmentOverridesJSON: environment,
+		}
+
+		want := filepath.Join(workspace, "workspace", ".opencode", "skills")
+		if got := runtimeSkillInstallRoot(instance); got != want {
+			t.Fatalf("OpenCode Pro root for %q = %q, want safe fallback %q", projectPath, got, want)
+		}
+	}
+}
+
 func TestRuntimeSkillInstallRootDeepSeekHarness(t *testing.T) {
 	workspace := "/workspaces/deepseek-harness/user-45/instance-92"
 	for _, tc := range []struct {

@@ -2,6 +2,7 @@ package services
 
 import (
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -40,10 +41,48 @@ func runtimeSkillInstallRoot(instance *models.Instance) string {
 	}
 	if strings.EqualFold(strings.TrimSpace(instance.Type), RuntimeTypeOpenCode) {
 		// OpenCode Pro discovers project skills below its /config/workspace
-		// working directory. WorkspacePath is the host path mounted at /config.
-		return filepath.Join(workspacePath, "workspace", ".opencode", "skills")
+		// working directory. WorkspacePath is the host path mounted at /config,
+		// so translate the selected container project back into that host path.
+		projectRelativePath := openCodeProProjectRelativePath(instance)
+		return filepath.Join(workspacePath, filepath.FromSlash(projectRelativePath), ".opencode", "skills")
 	}
 	return filepath.Join(workspacePath, "home", ".openclaw", "workspace", "skills")
+}
+
+const openCodeDefaultProjectEnv = "CLAWMANAGER_DEFAULT_PROJECT_PATH"
+
+// openCodeProProjectRelativePath maps an OpenCode project below
+// /config/workspace to its path relative to the instance's /config mount.
+// Invalid or legacy values fall back to the default project.
+func openCodeProProjectRelativePath(instance *models.Instance) string {
+	const defaultProject = "workspace"
+	if instance == nil {
+		return defaultProject
+	}
+	overrides, err := parseEnvironmentOverridesJSON(instance.EnvironmentOverridesJSON)
+	if err != nil {
+		return defaultProject
+	}
+	containerPath := strings.TrimSpace(overrides[openCodeDefaultProjectEnv])
+	if containerPath == "" {
+		return defaultProject
+	}
+	containerPath = strings.ReplaceAll(containerPath, "\\", "/")
+	for _, part := range strings.Split(containerPath, "/") {
+		if part == ".." {
+			return defaultProject
+		}
+	}
+	containerPath = path.Clean(containerPath)
+	const configPrefix = "/config/"
+	if !strings.HasPrefix(containerPath, configPrefix) {
+		return defaultProject
+	}
+	relativePath := strings.TrimPrefix(containerPath, configPrefix)
+	if relativePath != defaultProject && !strings.HasPrefix(relativePath, defaultProject+"/") {
+		return defaultProject
+	}
+	return relativePath
 }
 
 func liteSkillInstallRoot(instance *models.Instance) string {
