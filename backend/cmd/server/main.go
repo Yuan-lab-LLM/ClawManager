@@ -88,7 +88,17 @@ func main() {
 	}
 
 	// Initialize services
-	authService := services.NewAuthService(userRepo, cfg.JWT)
+	var enterpriseAuthenticator services.EnterpriseAuthenticator
+	enterpriseDiagnostics := services.NewLDAPDiagnostics(cfg.Auth.Enterprise.Enabled, cfg.Auth.Enterprise.LDAP)
+	if cfg.Auth.Enterprise.Enabled {
+		ldapAuthenticator, ldapErr := services.NewLDAPAuthenticator(cfg.Auth.Enterprise.LDAP)
+		if ldapErr != nil {
+			log.Fatalf("Failed to initialize LDAP authenticator: %v", ldapErr)
+		}
+		enterpriseAuthenticator = ldapAuthenticator
+		log.Printf("Enterprise LDAP authentication enabled")
+	}
+	authService := services.NewAuthService(userRepo, cfg.JWT, enterpriseAuthenticator, services.WithEnterpriseAuthPolicy(cfg.Auth.Enterprise))
 	quotaService := services.NewQuotaService(quotaRepo)
 	userService := services.NewUserService(userRepo, quotaRepo)
 	systemImageSettingService := services.NewSystemImageSettingService(systemImageSettingRepo)
@@ -164,6 +174,7 @@ func main() {
 
 	// Initialize handlers
 	authHandler := handlers.NewAuthHandler(authService)
+	enterpriseAuthHandler := handlers.NewEnterpriseAuthHandler(enterpriseDiagnostics)
 	userHandler := handlers.NewUserHandler(userService, quotaService)
 	instanceHandler := handlers.NewInstanceHandler(
 		instanceService,
@@ -465,6 +476,7 @@ func main() {
 		adminRuntime.Use(middleware.SetUserInfo(userRepo))
 		adminRuntime.Use(middleware.NewAdminAuth(userRepo))
 		{
+			adminRuntime.GET("/auth/enterprise/status", enterpriseAuthHandler.Status)
 			adminRuntime.GET("/runtime-pods", runtimePoolHandler.ListPods)
 			adminRuntime.GET("/runtime-pods/:id/gateways", runtimePoolHandler.GetPodGateways)
 			adminRuntime.POST("/runtime-pods/:id/drain", runtimePoolHandler.DrainPod)

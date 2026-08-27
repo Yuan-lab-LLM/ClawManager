@@ -13,6 +13,7 @@ import (
 // UserService defines the interface for user operations
 type UserService interface {
 	CreateUser(username, email, password, role string) (*models.User, error)
+	CreateUserWithProvider(username, email, password, role, authProvider string) (*models.User, error)
 	GetUserByID(id int) (*models.User, error)
 	GetUserByUsername(username string) (*models.User, error)
 	ListUsers(offset, limit int) ([]models.User, error)
@@ -43,7 +44,13 @@ func NewUserService(userRepo repository.UserRepository, quotaRepo repository.Quo
 
 // CreateUser creates a new user (admin only)
 func (s *userService) CreateUser(username, email, password, role string) (*models.User, error) {
-	if password == "" {
+	return s.CreateUserWithProvider(username, email, password, role, AuthProviderLocal)
+}
+
+// CreateUserWithProvider creates a local or LDAP-provisioned user.
+func (s *userService) CreateUserWithProvider(username, email, password, role, authProvider string) (*models.User, error) {
+	authProvider = normalizeAuthProvider(authProvider)
+	if authProvider == AuthProviderLocal && password == "" {
 		password = defaultPasswordForRole(role)
 	}
 
@@ -65,10 +72,16 @@ func (s *userService) CreateUser(username, email, password, role string) (*model
 		return nil, errors.New("email already exists")
 	}
 
-	// Hash password
-	passwordHash, err := utils.HashPassword(password)
-	if err != nil {
-		return nil, fmt.Errorf("failed to hash password: %w", err)
+	var passwordHash string
+	if authProvider == AuthProviderLDAP {
+		passwordHash = enterprisePasswordMarker(authProvider)
+	} else {
+		// Hash password
+		var err error
+		passwordHash, err = utils.HashPassword(password)
+		if err != nil {
+			return nil, fmt.Errorf("failed to hash password: %w", err)
+		}
 	}
 
 	// Create user
@@ -77,6 +90,7 @@ func (s *userService) CreateUser(username, email, password, role string) (*model
 		Email:        email,
 		PasswordHash: passwordHash,
 		Role:         role,
+		AuthProvider: authProvider,
 		IsActive:     true,
 		CreatedAt:    time.Now(),
 		UpdatedAt:    time.Now(),

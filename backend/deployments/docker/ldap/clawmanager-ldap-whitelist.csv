@@ -1,0 +1,4 @@
+Username,Email,Role,Auth Provider,Password (optional),Max Instances,Max CPU Cores,Max Memory (GB),Max Storage (GB),Max GPU Count (optional)
+alice,alice@example.com,admin,ldap,,20,80,200,1000,4
+carol,carol@example.com,user,ldap,,10,40,100,500,2
+erin,erin@example.com,user,ldap,,10,40,100,500,2

@@ -13,6 +13,7 @@ type UserRepository interface {
 	GetByID(id int) (*models.User, error)
 	GetByUsername(username string) (*models.User, error)
 	GetByEmail(email string) (*models.User, error)
+	GetByExternalIdentity(authProvider, externalID string) (*models.User, error)
 	Update(user *models.User) error
 	Delete(id int) error
 	List(offset, limit int) ([]models.User, error)
@@ -75,6 +76,22 @@ func (r *userRepository) GetByEmail(email string) (*models.User, error) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("failed to get user by email: %w", err)
+	}
+	return &user, nil
+}
+
+// GetByExternalIdentity gets a user by enterprise identity provider and external ID.
+func (r *userRepository) GetByExternalIdentity(authProvider, externalID string) (*models.User, error) {
+	var user models.User
+	err := r.sess.Collection("users").Find(db.Cond{
+		"auth_provider": authProvider,
+		"external_id":   externalID,
+	}).One(&user)
+	if err != nil {
+		if err == db.ErrNoMoreRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to get user by external identity: %w", err)
 	}
 	return &user, nil
 }

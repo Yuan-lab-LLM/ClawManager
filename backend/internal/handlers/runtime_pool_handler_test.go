@@ -332,6 +332,9 @@ func (r *runtimePoolHandlerUserRepo) GetByUsername(username string) (*models.Use
 func (r *runtimePoolHandlerUserRepo) GetByEmail(email string) (*models.User, error) {
 	return nil, nil
 }
+func (r *runtimePoolHandlerUserRepo) GetByExternalIdentity(authProvider, externalID string) (*models.User, error) {
+	return nil, nil
+}
 func (r *runtimePoolHandlerUserRepo) Update(user *models.User) error { return nil }
 func (r *runtimePoolHandlerUserRepo) Delete(id int) error            { return nil }
 func (r *runtimePoolHandlerUserRepo) List(offset, limit int) ([]models.User, error) {

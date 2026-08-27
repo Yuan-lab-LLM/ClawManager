@@ -13,6 +13,7 @@ export interface CreateUserRequest {
   email: string;
   password: string;
   role: 'admin' | 'user';
+  auth_provider?: 'local' | 'ldap';
 }
 
 export interface ImportUsersResponse {
@@ -22,12 +23,13 @@ export interface ImportUsersResponse {
     username: string;
     email: string;
     role: 'admin' | 'user';
+    auth_provider: 'local' | 'ldap';
     max_instances: number;
     max_cpu_cores: number;
     max_memory_gb: number;
     max_storage_gb: number;
     max_gpu_count: number;
-    initial_password: string;
+    initial_password?: string;
   }>;
   errors: Array<{
     line: number;
@@ -77,6 +79,18 @@ export const userService = {
   // Delete user (admin only)
   deleteUser: async (id: number): Promise<void> => {
     await api.delete(`/users/${id}`);
+  },
+
+  // Disable LDAP login for a provisioned user (admin only)
+  disableUser: async (id: number): Promise<User> => {
+    const response = await api.put(`/users/${id}`, { is_active: false });
+    return response.data.data;
+  },
+
+  // Restore LDAP login for a disabled provisioned user (admin only)
+  restoreUser: async (id: number): Promise<User> => {
+    const response = await api.put(`/users/${id}`, { is_active: true });
+    return response.data.data;
   },
 
   // Update user role (admin only)

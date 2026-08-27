@@ -1591,6 +1591,8 @@ export const translations: Record<Locale, TranslationTree> = {
       stop: "Stop",
       start: "Start",
       restart: "Restart",
+      disable: "Disable",
+      restore: "Restore",
       delete: "Delete",
       cpu: "CPU",
       memory: "Memory",
@@ -1668,6 +1670,9 @@ export const translations: Record<Locale, TranslationTree> = {
       passwordChanged: "Password changed successfully",
       changePasswordFailed: "Failed to change password",
       loginFailed: "Login failed",
+      invalidCredentials: "Invalid username or password",
+      accountDisabled: "This account is disabled. Contact an administrator.",
+      enterprisePasswordManaged: "LDAP users must change their password in the enterprise identity platform.",
     },
     admin: {
       dashboardTitle: "Console",
@@ -2142,6 +2147,8 @@ export const translations: Record<Locale, TranslationTree> = {
       loading: "Loading users...",
       loadFailed: "Failed to load users",
       deleteFailed: "Failed to delete user",
+      restoreFailed: "Failed to restore user",
+      updateStatusFailed: "Failed to update user status",
       loadQuotaFailed: "Failed to load quota",
       updateQuotaFailed: "Failed to update quota",
       updateRoleFailed: "Failed to update role",
@@ -2151,6 +2158,15 @@ export const translations: Record<Locale, TranslationTree> = {
       importUsers: "Import Users",
       showingUsers: "Showing {from}-{to} of {total} users",
       noUsers: "No users found",
+      noFilteredUsers: "No users match this filter",
+      filterAll: "All",
+      filterLocal: "Local",
+      filterLdap: "LDAP",
+      filterInactive: "Disabled",
+      filterAdmin: "Admins",
+      authProvider: "Auth Provider",
+      authProviderLocal: "Local",
+      authProviderLdap: "LDAP",
       importCompleted: "Import completed: {created} created, {failed} failed",
       expectedColumns: "Expected columns:",
       lineError: "Line {line}{username}",
@@ -2168,6 +2184,23 @@ export const translations: Record<Locale, TranslationTree> = {
       importing: "Importing...",
       startImport: "Start Import",
       addNewUser: "Add New User",
+      ldapCreateHelp:
+        "LDAP users must authenticate through LDAP first.",
+      ldapCreateDisabledHelp:
+        "LDAP authentication is currently disabled. This user cannot log in yet.",
+      enterpriseCheckingTitle: "Checking LDAP status...",
+      enterpriseStatusUnavailableTitle: "Enterprise auth status unavailable",
+      enterpriseStatusUnavailableMessage:
+        "LDAP users can still be managed, but the current LDAP connection status could not be loaded.",
+      enterpriseDisabledTitle: "LDAP authentication is disabled",
+      enterpriseUnhealthyTitle: "LDAP health check failed",
+      enterpriseUnhealthyMessage:
+        "LDAP users can be prepared, but login may fail until this is fixed: {error}",
+      enterpriseUnknownError: "unknown error",
+      enterpriseWarningTitle: "LDAP connected with warnings",
+      enterpriseWarningMessage:
+        "LDAP is reachable, but one or more security warnings are present. Review the backend configuration before production use.",
+      enterpriseConnectedTitle: "LDAP connected",
       editQuotaFor: "Edit Quota for {username}",
       maxInstances: "Max Instances",
       maxCpuCores: "Max CPU Cores",
@@ -2176,8 +2209,16 @@ export const translations: Record<Locale, TranslationTree> = {
       maxGpuCount: "Max GPU Count",
       changeRoleFor: "Change Role for {username}",
       confirmDeleteTitle: "Confirm Delete",
+      confirmDisableTitle: "Confirm Disable",
+      confirmRestoreTitle: "Confirm Restore",
       confirmDeleteMessage:
         "Are you sure you want to delete user {username}? This action cannot be undone.",
+      confirmDeleteLdapMessage:
+        "Delete the local ClawManager record for LDAP user {username}? This will not delete the account from LDAP. This action cannot be undone.",
+      confirmDisableLdapMessage:
+        "Disable LDAP login for {username}? Existing resources and audit history will be retained.",
+      confirmRestoreLdapMessage:
+        "Restore LDAP login for {username}? This user will be able to authenticate through LDAP again.",
     },
     errorBoundary: {
       title: "Something went wrong",
@@ -3176,6 +3217,8 @@ export const translations: Record<Locale, TranslationTree> = {
       stop: "停止",
       start: "启动",
       restart: "重启",
+      disable: "停用",
+      restore: "恢复",
       delete: "删除",
       cpu: "CPU",
       memory: "内存",
@@ -3253,6 +3296,9 @@ export const translations: Record<Locale, TranslationTree> = {
       passwordChanged: "密码修改成功",
       changePasswordFailed: "修改密码失败",
       loginFailed: "登录失败",
+      invalidCredentials: "用户名或密码错误",
+      accountDisabled: "该账号已停用，请联系管理员。",
+      enterprisePasswordManaged: "LDAP 用户需要在企业身份平台中修改密码。",
     },
     admin: {
       dashboardTitle: "控制台",
@@ -3702,6 +3748,8 @@ export const translations: Record<Locale, TranslationTree> = {
       loading: "正在加载用户...",
       loadFailed: "加载用户失败",
       deleteFailed: "删除用户失败",
+      restoreFailed: "恢复用户失败",
+      updateStatusFailed: "更新用户状态失败",
       loadQuotaFailed: "加载配额失败",
       updateQuotaFailed: "更新配额失败",
       updateRoleFailed: "更新角色失败",
@@ -3711,6 +3759,15 @@ export const translations: Record<Locale, TranslationTree> = {
       importUsers: "导入用户",
       showingUsers: "显示第 {from}-{to} 个用户，共 {total} 个",
       noUsers: "暂无用户",
+      noFilteredUsers: "当前筛选条件下暂无用户",
+      filterAll: "全部",
+      filterLocal: "本地",
+      filterLdap: "LDAP",
+      filterInactive: "已停用",
+      filterAdmin: "管理员",
+      authProvider: "认证提供方",
+      authProviderLocal: "本地",
+      authProviderLdap: "LDAP",
       importCompleted: "导入完成：成功创建 {created} 个，失败 {failed} 个",
       expectedColumns: "期望列：",
       lineError: "第 {line} 行{username}",
@@ -3728,6 +3785,23 @@ export const translations: Record<Locale, TranslationTree> = {
       importing: "导入中...",
       startImport: "开始导入",
       addNewUser: "添加新用户",
+      ldapCreateHelp:
+        "LDAP 用户需要提前通过 LDAP 完成认证。",
+      ldapCreateDisabledHelp:
+        "LDAP 认证当前未启用，该用户暂时无法登录。",
+      enterpriseCheckingTitle: "正在检查 LDAP 状态...",
+      enterpriseStatusUnavailableTitle: "无法获取企业认证状态",
+      enterpriseStatusUnavailableMessage:
+        "仍可管理 LDAP 用户，但当前无法加载 LDAP 连接状态。",
+      enterpriseDisabledTitle: "LDAP 认证未启用",
+      enterpriseUnhealthyTitle: "LDAP 健康检查失败",
+      enterpriseUnhealthyMessage:
+        "可以先准备 LDAP 用户，但修复前登录可能失败：{error}",
+      enterpriseUnknownError: "未知错误",
+      enterpriseWarningTitle: "LDAP 已连接，但存在警告",
+      enterpriseWarningMessage:
+        "LDAP 可以访问，但当前配置存在安全警告。生产使用前请检查后端配置。",
+      enterpriseConnectedTitle: "LDAP 已连接",
       editQuotaFor: "编辑 {username} 的配额",
       maxInstances: "最大实例数",
       maxCpuCores: "最大 CPU 核数",
@@ -3736,7 +3810,15 @@ export const translations: Record<Locale, TranslationTree> = {
       maxGpuCount: "最大 GPU 数",
       changeRoleFor: "修改 {username} 的角色",
       confirmDeleteTitle: "确认删除",
+      confirmDisableTitle: "确认停用",
+      confirmRestoreTitle: "确认恢复",
       confirmDeleteMessage: "确定要删除用户 {username} 吗？此操作不可撤销。",
+      confirmDeleteLdapMessage:
+        "确定要删除 LDAP 用户 {username} 在 ClawManager 中的本地用户记录吗？这不会删除 LDAP 目录中的账号。此操作不可撤销。",
+      confirmDisableLdapMessage:
+        "确定要禁用 {username} 的 LDAP 登录资格吗？现有资源和审计历史会保留。",
+      confirmRestoreLdapMessage:
+        "确定要恢复 {username} 的 LDAP 登录资格吗？恢复后该用户可以再次通过 LDAP 登录。",
     },
     errorBoundary: {
       title: "页面发生错误",
@@ -4673,6 +4755,8 @@ export const translations: Record<Locale, TranslationTree> = {
       stop: "停止",
       start: "開始",
       restart: "再起動",
+      disable: "無効化",
+      restore: "復元",
       delete: "削除",
       cpu: "CPU",
       memory: "メモリ",
@@ -4749,6 +4833,9 @@ export const translations: Record<Locale, TranslationTree> = {
       passwordChanged: "パスワードが変更されました",
       changePasswordFailed: "パスワードの変更に失敗しました",
       loginFailed: "ログインに失敗しました",
+      invalidCredentials: "ユーザー名またはパスワードが正しくありません",
+      accountDisabled: "このアカウントは無効です。管理者に連絡してください。",
+      enterprisePasswordManaged: "LDAP ユーザーは企業の ID プラットフォームでパスワードを変更する必要があります。",
     },
     admin: {
       dashboardTitle: "コンソール",
@@ -5181,6 +5268,8 @@ export const translations: Record<Locale, TranslationTree> = {
       loading: "ユーザーを読み込み中...",
       loadFailed: "ユーザーの読み込みに失敗しました",
       deleteFailed: "ユーザーの削除に失敗しました",
+      restoreFailed: "ユーザーの復元に失敗しました",
+      updateStatusFailed: "ユーザー状態の更新に失敗しました",
       loadQuotaFailed: "クォータの読み込みに失敗しました",
       updateQuotaFailed: "クォータの更新に失敗しました",
       updateRoleFailed: "ロールの更新に失敗しました",
@@ -5190,6 +5279,15 @@ export const translations: Record<Locale, TranslationTree> = {
       importUsers: "ユーザーをインポート",
       showingUsers: "{total} 人中 {from}-{to} 人のユーザーを表示",
       noUsers: "ユーザーが見つかりません",
+      noFilteredUsers: "このフィルターに一致するユーザーはいません",
+      filterAll: "すべて",
+      filterLocal: "ローカル",
+      filterLdap: "LDAP",
+      filterInactive: "無効",
+      filterAdmin: "管理者",
+      authProvider: "認証プロバイダー",
+      authProviderLocal: "ローカル",
+      authProviderLdap: "LDAP",
       importCompleted: "インポート完了: 作成 {created} 件、失敗 {failed} 件",
       expectedColumns: "想定列:",
       lineError: "行 {line}{username}",
@@ -5207,6 +5305,23 @@ export const translations: Record<Locale, TranslationTree> = {
       importing: "インポート中...",
       startImport: "インポート開始",
       addNewUser: "新しいユーザーを追加",
+      ldapCreateHelp:
+        "LDAP ユーザーは事前に LDAP で認証する必要があります。",
+      ldapCreateDisabledHelp:
+        "LDAP 認証は現在無効です。このユーザーはまだログインできません。",
+      enterpriseCheckingTitle: "LDAP 状態を確認中...",
+      enterpriseStatusUnavailableTitle: "企業認証ステータスを取得できません",
+      enterpriseStatusUnavailableMessage:
+        "LDAP ユーザーは管理できますが、現在の LDAP 接続ステータスを読み込めませんでした。",
+      enterpriseDisabledTitle: "LDAP 認証は無効です",
+      enterpriseUnhealthyTitle: "LDAP ヘルスチェックに失敗しました",
+      enterpriseUnhealthyMessage:
+        "LDAP ユーザーは準備できますが、修正されるまでログインに失敗する可能性があります: {error}",
+      enterpriseUnknownError: "不明なエラー",
+      enterpriseWarningTitle: "LDAP は接続されていますが警告があります",
+      enterpriseWarningMessage:
+        "LDAP には到達できますが、セキュリティ警告があります。本番利用前にバックエンド設定を確認してください。",
+      enterpriseConnectedTitle: "LDAP 接続済み",
       editQuotaFor: "{username} のクォータを編集",
       maxInstances: "最大インスタンス数",
       maxCpuCores: "最大 CPU コア",
@@ -5215,8 +5330,16 @@ export const translations: Record<Locale, TranslationTree> = {
       maxGpuCount: "最大 GPU 数",
       changeRoleFor: "{username} のロールを変更",
       confirmDeleteTitle: "削除の確認",
+      confirmDisableTitle: "無効化の確認",
+      confirmRestoreTitle: "復元の確認",
       confirmDeleteMessage:
         "ユーザー {username} を削除してもよろしいですか？この操作は元に戻せません。",
+      confirmDeleteLdapMessage:
+        "LDAP ユーザー {username} の ClawManager ローカルユーザー記録を削除しますか？LDAP ディレクトリ上のアカウントは削除されません。この操作は元に戻せません。",
+      confirmDisableLdapMessage:
+        "{username} の LDAP ログインを無効にしますか？既存のリソースと監査履歴は保持されます。",
+      confirmRestoreLdapMessage:
+        "{username} の LDAP ログインを復元しますか？このユーザーは再び LDAP でログインできるようになります。",
     },
     errorBoundary: {
       title: "問題が発生しました",
@@ -6137,6 +6260,8 @@ export const translations: Record<Locale, TranslationTree> = {
       stop: "중지",
       start: "시작",
       restart: "재시작",
+      disable: "비활성화",
+      restore: "복원",
       delete: "삭제",
       cpu: "CPU",
       memory: "메모리",
@@ -6213,6 +6338,9 @@ export const translations: Record<Locale, TranslationTree> = {
       passwordChanged: "비밀번호가 성공적으로 변경되었습니다",
       changePasswordFailed: "비밀번호 변경에 실패했습니다",
       loginFailed: "로그인 실패",
+      invalidCredentials: "사용자 이름 또는 비밀번호가 올바르지 않습니다",
+      accountDisabled: "이 계정은 비활성화되었습니다. 관리자에게 문의하세요.",
+      enterprisePasswordManaged: "LDAP 사용자는 기업 ID 플랫폼에서 비밀번호를 변경해야 합니다.",
     },
     admin: {
       dashboardTitle: "콘솔",
@@ -6641,6 +6769,8 @@ export const translations: Record<Locale, TranslationTree> = {
       loading: "사용자를 불러오는 중...",
       loadFailed: "사용자를 불러오지 못했습니다",
       deleteFailed: "사용자를 삭제하지 못했습니다",
+      restoreFailed: "사용자를 복원하지 못했습니다",
+      updateStatusFailed: "사용자 상태를 업데이트하지 못했습니다",
       loadQuotaFailed: "할당량을 불러오지 못했습니다",
       updateQuotaFailed: "할당량을 업데이트하지 못했습니다",
       updateRoleFailed: "역할을 업데이트하지 못했습니다",
@@ -6650,6 +6780,15 @@ export const translations: Record<Locale, TranslationTree> = {
       importUsers: "사용자 가져오기",
       showingUsers: "총 {total}명 중 {from}-{to}명 사용자 표시",
       noUsers: "사용자를 찾을 수 없습니다",
+      noFilteredUsers: "이 필터와 일치하는 사용자가 없습니다",
+      filterAll: "전체",
+      filterLocal: "로컬",
+      filterLdap: "LDAP",
+      filterInactive: "비활성",
+      filterAdmin: "관리자",
+      authProvider: "인증 공급자",
+      authProviderLocal: "로컬",
+      authProviderLdap: "LDAP",
       importCompleted: "가져오기 완료: 생성 {created}명, 실패 {failed}명",
       expectedColumns: "필수 열:",
       lineError: "{line}행{username}",
@@ -6667,6 +6806,23 @@ export const translations: Record<Locale, TranslationTree> = {
       importing: "가져오는 중...",
       startImport: "가져오기 시작",
       addNewUser: "새 사용자 추가",
+      ldapCreateHelp:
+        "LDAP 사용자는 먼저 LDAP로 인증해야 합니다.",
+      ldapCreateDisabledHelp:
+        "LDAP 인증이 현재 비활성화되어 있어 이 사용자는 아직 로그인할 수 없습니다.",
+      enterpriseCheckingTitle: "LDAP 상태 확인 중...",
+      enterpriseStatusUnavailableTitle: "기업 인증 상태를 불러올 수 없음",
+      enterpriseStatusUnavailableMessage:
+        "LDAP 사용자는 계속 관리할 수 있지만 현재 LDAP 연결 상태를 불러오지 못했습니다.",
+      enterpriseDisabledTitle: "LDAP 인증이 비활성화됨",
+      enterpriseUnhealthyTitle: "LDAP 상태 확인 실패",
+      enterpriseUnhealthyMessage:
+        "LDAP 사용자를 미리 준비할 수는 있지만, 수정 전까지 로그인이 실패할 수 있습니다: {error}",
+      enterpriseUnknownError: "알 수 없는 오류",
+      enterpriseWarningTitle: "LDAP 연결됨, 경고 있음",
+      enterpriseWarningMessage:
+        "LDAP에 연결할 수 있지만 하나 이상의 보안 경고가 있습니다. 운영 환경에서 사용하기 전에 백엔드 설정을 확인하세요.",
+      enterpriseConnectedTitle: "LDAP 연결됨",
       editQuotaFor: "{username}의 할당량 편집",
       maxInstances: "최대 인스턴스 수",
       maxCpuCores: "최대 CPU 코어",
@@ -6675,8 +6831,16 @@ export const translations: Record<Locale, TranslationTree> = {
       maxGpuCount: "최대 GPU 수",
       changeRoleFor: "{username}의 역할 변경",
       confirmDeleteTitle: "삭제 확인",
+      confirmDisableTitle: "비활성화 확인",
+      confirmRestoreTitle: "복원 확인",
       confirmDeleteMessage:
         "사용자 {username}을(를) 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.",
+      confirmDeleteLdapMessage:
+        "LDAP 사용자 {username}의 ClawManager 로컬 사용자 기록을 삭제하시겠습니까? LDAP 디렉터리의 계정은 삭제되지 않습니다. 이 작업은 되돌릴 수 없습니다.",
+      confirmDisableLdapMessage:
+        "{username}의 LDAP 로그인을 비활성화하시겠습니까? 기존 리소스와 감사 기록은 유지됩니다.",
+      confirmRestoreLdapMessage:
+        "{username}의 LDAP 로그인을 복원하시겠습니까? 이 사용자는 다시 LDAP로 로그인할 수 있습니다.",
     },
     errorBoundary: {
       title: "문제가 발생했습니다",
@@ -7580,6 +7744,8 @@ export const translations: Record<Locale, TranslationTree> = {
       stop: "Stoppen",
       start: "Starten",
       restart: "Neustarten",
+      disable: "Deaktivieren",
+      restore: "Wiederherstellen",
       delete: "Löschen",
       cpu: "CPU",
       memory: "Speicher",
@@ -7657,6 +7823,9 @@ export const translations: Record<Locale, TranslationTree> = {
       passwordChanged: "Passwort erfolgreich geändert",
       changePasswordFailed: "Passwort konnte nicht geändert werden",
       loginFailed: "Anmeldung fehlgeschlagen",
+      invalidCredentials: "Ungültiger Benutzername oder ungültiges Passwort",
+      accountDisabled: "Dieses Konto ist deaktiviert. Wenden Sie sich an einen Administrator.",
+      enterprisePasswordManaged: "LDAP-Benutzer müssen ihr Passwort in der Unternehmens-Identitätsplattform ändern.",
     },
     admin: {
       dashboardTitle: "Konsole",
@@ -8097,6 +8266,8 @@ export const translations: Record<Locale, TranslationTree> = {
       loading: "Benutzer werden geladen...",
       loadFailed: "Benutzer konnten nicht geladen werden",
       deleteFailed: "Benutzer konnte nicht gelöscht werden",
+      restoreFailed: "Benutzer konnte nicht wiederhergestellt werden",
+      updateStatusFailed: "Benutzerstatus konnte nicht aktualisiert werden",
       loadQuotaFailed: "Kontingent konnte nicht geladen werden",
       updateQuotaFailed: "Kontingent konnte nicht aktualisiert werden",
       updateRoleFailed: "Rolle konnte nicht aktualisiert werden",
@@ -8106,6 +8277,15 @@ export const translations: Record<Locale, TranslationTree> = {
       importUsers: "Benutzer importieren",
       showingUsers: "Zeige Benutzer {from}-{to} von {total}",
       noUsers: "Keine Benutzer gefunden",
+      noFilteredUsers: "Keine Benutzer entsprechen diesem Filter",
+      filterAll: "Alle",
+      filterLocal: "Lokal",
+      filterLdap: "LDAP",
+      filterInactive: "Deaktiviert",
+      filterAdmin: "Admins",
+      authProvider: "Auth-Anbieter",
+      authProviderLocal: "Lokal",
+      authProviderLdap: "LDAP",
       importCompleted:
         "Import abgeschlossen: {created} erstellt, {failed} fehlgeschlagen",
       expectedColumns: "Erwartete Spalten:",
@@ -8124,6 +8304,23 @@ export const translations: Record<Locale, TranslationTree> = {
       importing: "Import läuft...",
       startImport: "Import starten",
       addNewUser: "Neuen Benutzer hinzufügen",
+      ldapCreateHelp:
+        "LDAP-Benutzer müssen sich zuerst über LDAP authentifizieren.",
+      ldapCreateDisabledHelp:
+        "LDAP-Authentifizierung ist derzeit deaktiviert. Dieser Benutzer kann sich noch nicht anmelden.",
+      enterpriseCheckingTitle: "LDAP-Status wird geprüft...",
+      enterpriseStatusUnavailableTitle: "Enterprise-Auth-Status nicht verfügbar",
+      enterpriseStatusUnavailableMessage:
+        "LDAP-Benutzer können weiterhin verwaltet werden, aber der aktuelle LDAP-Verbindungsstatus konnte nicht geladen werden.",
+      enterpriseDisabledTitle: "LDAP-Authentifizierung ist deaktiviert",
+      enterpriseUnhealthyTitle: "LDAP-Health-Check fehlgeschlagen",
+      enterpriseUnhealthyMessage:
+        "LDAP-Benutzer können vorbereitet werden, aber Anmeldungen können fehlschlagen, bis dies behoben ist: {error}",
+      enterpriseUnknownError: "unbekannter Fehler",
+      enterpriseWarningTitle: "LDAP verbunden, aber mit Warnungen",
+      enterpriseWarningMessage:
+        "LDAP ist erreichbar, aber es gibt Sicherheitswarnungen. Prüfen Sie die Backend-Konfiguration vor dem Produktionseinsatz.",
+      enterpriseConnectedTitle: "LDAP verbunden",
       editQuotaFor: "Kontingent für {username} bearbeiten",
       maxInstances: "Maximale Instanzen",
       maxCpuCores: "Maximale CPU-Kerne",
@@ -8132,8 +8329,16 @@ export const translations: Record<Locale, TranslationTree> = {
       maxGpuCount: "Maximale GPU-Anzahl",
       changeRoleFor: "Rolle für {username} ändern",
       confirmDeleteTitle: "Löschen bestätigen",
+      confirmDisableTitle: "Deaktivieren bestätigen",
+      confirmRestoreTitle: "Wiederherstellen bestätigen",
       confirmDeleteMessage:
         "Möchten Sie den Benutzer {username} wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden.",
+      confirmDeleteLdapMessage:
+        "Lokalen ClawManager-Datensatz für LDAP-Benutzer {username} löschen? Das Konto im LDAP-Verzeichnis wird nicht gelöscht. Diese Aktion kann nicht rückgängig gemacht werden.",
+      confirmDisableLdapMessage:
+        "LDAP-Anmeldung für {username} deaktivieren? Vorhandene Ressourcen und der Auditverlauf bleiben erhalten.",
+      confirmRestoreLdapMessage:
+        "LDAP-Anmeldung für {username} wiederherstellen? Dieser Benutzer kann sich wieder über LDAP anmelden.",
     },
     errorBoundary: {
       title: "Etwas ist schiefgelaufen",

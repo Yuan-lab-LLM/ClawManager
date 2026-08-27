@@ -15,6 +15,7 @@ type Config struct {
 	Server           ServerConfig           `yaml:"server"`
 	Database         DatabaseConfig         `yaml:"database"`
 	JWT              JWTConfig              `yaml:"jwt"`
+	Auth             AuthConfig             `yaml:"auth"`
 	Kubernetes       KubernetesConfig       `yaml:"kubernetes"`
 	Storage          StorageConfig          `yaml:"storage"`
 	Runtime          RuntimePoolConfig      `yaml:"runtime"`
@@ -66,6 +67,35 @@ type JWTConfig struct {
 	Secret        string `yaml:"secret"`
 	AccessExpiry  int    `yaml:"access_expiry"`  // minutes
 	RefreshExpiry int    `yaml:"refresh_expiry"` // hours
+}
+
+type AuthConfig struct {
+	Enterprise EnterpriseAuthConfig `yaml:"enterprise"`
+}
+
+type EnterpriseAuthConfig struct {
+	Enabled            bool       `yaml:"enabled"`
+	AllowLocalFallback bool       `yaml:"allowLocalFallback"`
+	SyncRole           bool       `yaml:"syncRole"`
+	LDAP               LDAPConfig `yaml:"ldap"`
+}
+
+type LDAPConfig struct {
+	Host              string   `yaml:"host"`
+	Port              int      `yaml:"port"`
+	UseTLS            bool     `yaml:"useTLS"`
+	StartTLS          bool     `yaml:"startTLS"`
+	SkipTLSVerify     bool     `yaml:"skipTLSVerify"`
+	BindDN            string   `yaml:"bindDN"`
+	BindPassword      string   `yaml:"bindPassword"`
+	BaseDN            string   `yaml:"baseDN"`
+	UserFilter        string   `yaml:"userFilter"`
+	UsernameAttribute string   `yaml:"usernameAttribute"`
+	EmailAttribute    string   `yaml:"emailAttribute"`
+	GroupBaseDN        string   `yaml:"groupBaseDN"`
+	GroupFilter        string   `yaml:"groupFilter"`
+	AdminGroupDNs      []string `yaml:"adminGroupDNs"`
+	DefaultRole        string   `yaml:"defaultRole"`
 }
 
 // KubernetesConfig holds Kubernetes-related configuration
@@ -232,6 +262,30 @@ func Load() (*Config, error) {
 			AccessExpiry:  60,  // 60 minutes
 			RefreshExpiry: 168, // 7 days
 		},
+		Auth: AuthConfig{
+			Enterprise: EnterpriseAuthConfig{
+				Enabled:            getEnvBool("AUTH_ENTERPRISE_ENABLED", false),
+				AllowLocalFallback: getEnvBool("AUTH_ENTERPRISE_ALLOW_LOCAL_FALLBACK", true),
+				SyncRole:           getEnvBool("AUTH_ENTERPRISE_SYNC_ROLE", false),
+				LDAP: LDAPConfig{
+					Host:              getEnv("LDAP_HOST", ""),
+					Port:              getEnvInt("LDAP_PORT", 389),
+					UseTLS:            getEnvBool("LDAP_USE_TLS", false),
+					StartTLS:          getEnvBool("LDAP_START_TLS", false),
+					SkipTLSVerify:     getEnvBool("LDAP_SKIP_TLS_VERIFY", false),
+					BindDN:            getEnv("LDAP_BIND_DN", ""),
+					BindPassword:      getEnv("LDAP_BIND_PASSWORD", ""),
+					BaseDN:            getEnv("LDAP_BASE_DN", ""),
+					UserFilter:        getEnv("LDAP_USER_FILTER", "(&(objectClass=person)(uid=%s))"),
+					UsernameAttribute: getEnv("LDAP_USERNAME_ATTRIBUTE", "uid"),
+					EmailAttribute:    getEnv("LDAP_EMAIL_ATTRIBUTE", "mail"),
+					GroupBaseDN:        getEnv("LDAP_GROUP_BASE_DN", ""),
+					GroupFilter:        getEnv("LDAP_GROUP_FILTER", "(member=%s)"),
+					AdminGroupDNs:      splitEnvList(getEnv("LDAP_ADMIN_GROUP_DNS", "")),
+					DefaultRole:        getEnv("LDAP_DEFAULT_ROLE", "user"),
+				},
+			},
+		},
 		Kubernetes: KubernetesConfig{
 			Mode: getEnv("K8S_MODE", "auto"),
 			OutOfCluster: OutOfClusterConfig{
@@ -370,6 +424,7 @@ func Load() (*Config, error) {
 
 	// Override with environment variables
 	applyEnvOverrides(config)
+	normalizeAuthConfig(config)
 	normalizeStorageConfig(config)
 
 	return config, nil
@@ -405,6 +460,61 @@ func applyEnvOverrides(config *Config) {
 	// JWT config
 	if secret := os.Getenv("JWT_SECRET"); secret != "" {
 		config.JWT.Secret = secret
+	}
+
+	if enabled := os.Getenv("AUTH_ENTERPRISE_ENABLED"); enabled != "" {
+		config.Auth.Enterprise.Enabled = strings.EqualFold(enabled, "true")
+	}
+	if fallback := os.Getenv("AUTH_ENTERPRISE_ALLOW_LOCAL_FALLBACK"); fallback != "" {
+		config.Auth.Enterprise.AllowLocalFallback = strings.EqualFold(fallback, "true")
+	}
+	if syncRole := os.Getenv("AUTH_ENTERPRISE_SYNC_ROLE"); syncRole != "" {
+		config.Auth.Enterprise.SyncRole = strings.EqualFold(syncRole, "true")
+	}
+	if host := os.Getenv("LDAP_HOST"); host != "" {
+		config.Auth.Enterprise.LDAP.Host = host
+	}
+	if port := os.Getenv("LDAP_PORT"); port != "" {
+		fmt.Sscanf(port, "%d", &config.Auth.Enterprise.LDAP.Port)
+	}
+	if useTLS := os.Getenv("LDAP_USE_TLS"); useTLS != "" {
+		config.Auth.Enterprise.LDAP.UseTLS = strings.EqualFold(useTLS, "true")
+	}
+	if startTLS := os.Getenv("LDAP_START_TLS"); startTLS != "" {
+		config.Auth.Enterprise.LDAP.StartTLS = strings.EqualFold(startTLS, "true")
+	}
+	if skipTLS := os.Getenv("LDAP_SKIP_TLS_VERIFY"); skipTLS != "" {
+		config.Auth.Enterprise.LDAP.SkipTLSVerify = strings.EqualFold(skipTLS, "true")
+	}
+	if bindDN := os.Getenv("LDAP_BIND_DN"); bindDN != "" {
+		config.Auth.Enterprise.LDAP.BindDN = bindDN
+	}
+	if bindPassword := os.Getenv("LDAP_BIND_PASSWORD"); bindPassword != "" {
+		config.Auth.Enterprise.LDAP.BindPassword = bindPassword
+	}
+	if baseDN := os.Getenv("LDAP_BASE_DN"); baseDN != "" {
+		config.Auth.Enterprise.LDAP.BaseDN = baseDN
+	}
+	if userFilter := os.Getenv("LDAP_USER_FILTER"); userFilter != "" {
+		config.Auth.Enterprise.LDAP.UserFilter = userFilter
+	}
+	if usernameAttr := os.Getenv("LDAP_USERNAME_ATTRIBUTE"); usernameAttr != "" {
+		config.Auth.Enterprise.LDAP.UsernameAttribute = usernameAttr
+	}
+	if emailAttr := os.Getenv("LDAP_EMAIL_ATTRIBUTE"); emailAttr != "" {
+		config.Auth.Enterprise.LDAP.EmailAttribute = emailAttr
+	}
+	if groupBaseDN := os.Getenv("LDAP_GROUP_BASE_DN"); groupBaseDN != "" {
+		config.Auth.Enterprise.LDAP.GroupBaseDN = groupBaseDN
+	}
+	if groupFilter := os.Getenv("LDAP_GROUP_FILTER"); groupFilter != "" {
+		config.Auth.Enterprise.LDAP.GroupFilter = groupFilter
+	}
+	if adminGroups := os.Getenv("LDAP_ADMIN_GROUP_DNS"); adminGroups != "" {
+		config.Auth.Enterprise.LDAP.AdminGroupDNs = splitEnvList(adminGroups)
+	}
+	if defaultRole := os.Getenv("LDAP_DEFAULT_ROLE"); defaultRole != "" {
+		config.Auth.Enterprise.LDAP.DefaultRole = defaultRole
 	}
 
 	// Kubernetes config
@@ -565,6 +675,65 @@ func normalizeStorageConfig(config *Config) {
 	if strings.TrimSpace(config.Runtime.WorkspaceNFSPath) == "" {
 		config.Runtime.WorkspaceNFSPath = "/"
 	}
+}
+
+func normalizeAuthConfig(config *Config) {
+	if config == nil {
+		return
+	}
+	ldap := &config.Auth.Enterprise.LDAP
+	if ldap.Port <= 0 {
+		if ldap.UseTLS {
+			ldap.Port = 636
+		} else {
+			ldap.Port = 389
+		}
+	}
+	if strings.TrimSpace(ldap.UserFilter) == "" {
+		ldap.UserFilter = "(&(objectClass=person)(uid=%s))"
+	}
+	if strings.TrimSpace(ldap.UsernameAttribute) == "" {
+		ldap.UsernameAttribute = "uid"
+	}
+	if strings.TrimSpace(ldap.EmailAttribute) == "" {
+		ldap.EmailAttribute = "mail"
+	}
+	if strings.TrimSpace(ldap.GroupFilter) == "" {
+		ldap.GroupFilter = "(member=%s)"
+	}
+	ldap.DefaultRole = normalizeLDAPRole(ldap.DefaultRole)
+	if ldap.GroupBaseDN == "" {
+		ldap.GroupBaseDN = ldap.BaseDN
+	}
+	for i, group := range ldap.AdminGroupDNs {
+		ldap.AdminGroupDNs[i] = strings.TrimSpace(group)
+	}
+}
+
+func normalizeLDAPRole(role string) string {
+	switch strings.ToLower(strings.TrimSpace(role)) {
+	case "admin":
+		return "admin"
+	default:
+		return "user"
+	}
+}
+
+func splitEnvList(value string) []string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	fields := strings.FieldsFunc(value, func(r rune) bool {
+		return r == ',' || r == ';' || r == '\n'
+	})
+	result := make([]string, 0, len(fields))
+	for _, field := range fields {
+		if trimmed := strings.TrimSpace(field); trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+	return result
 }
 
 func normalizeStorageProfile(value string) string {

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { authService } from '../services/authService';
 import { useI18n } from '../contexts/I18nContext';
+import { localizeAuthError } from '../utils/authErrors';
 
 interface ChangePasswordModalProps {
   open: boolean;
@@ -61,7 +62,7 @@ const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({ open, onClose
         err.response?.data?.error ||
         err.response?.data?.message ||
         err.message;
-      setError(backendError || t('auth.changePasswordFailed'));
+      setError(backendError ? localizeAuthError(backendError, t) : t('auth.changePasswordFailed'));
     } finally {
       setLoading(false);
     }

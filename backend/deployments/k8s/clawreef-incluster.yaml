@@ -658,6 +658,46 @@ spec:
                 secretKeyRef:
                   name: clawreef-secrets
                   key: jwt-secret
+            - name: AUTH_ENTERPRISE_ENABLED
+              value: "false"
+            - name: AUTH_ENTERPRISE_ALLOW_LOCAL_FALLBACK
+              value: "true"
+            - name: AUTH_ENTERPRISE_SYNC_ROLE
+              value: "false"
+            - name: LDAP_HOST
+              value: ""
+            - name: LDAP_PORT
+              value: "389"
+            - name: LDAP_USE_TLS
+              value: "false"
+            - name: LDAP_START_TLS
+              value: "false"
+            - name: LDAP_SKIP_TLS_VERIFY
+              value: "false"
+            - name: LDAP_BIND_DN
+              value: ""
+            - name: LDAP_BIND_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: clawreef-secrets
+                  key: ldap-bind-password
+                  optional: true
+            - name: LDAP_BASE_DN
+              value: ""
+            - name: LDAP_USER_FILTER
+              value: "(&(objectClass=person)(uid=%s))"
+            - name: LDAP_USERNAME_ATTRIBUTE
+              value: "uid"
+            - name: LDAP_EMAIL_ATTRIBUTE
+              value: "mail"
+            - name: LDAP_GROUP_BASE_DN
+              value: ""
+            - name: LDAP_GROUP_FILTER
+              value: "(member=%s)"
+            - name: LDAP_ADMIN_GROUP_DNS
+              value: ""
+            - name: LDAP_DEFAULT_ROLE
+              value: "user"
             - name: K8S_MODE
               value: "incluster"
             - name: K8S_NAMESPACE

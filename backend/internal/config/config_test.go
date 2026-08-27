@@ -53,6 +53,84 @@ func TestLoadRuntimeGatewayStartInFlightLimitOverride(t *testing.T) {
 	}
 }
 
+func TestLoadEnterpriseLDAPDefaultsDisabled(t *testing.T) {
+	for _, key := range []string{
+		"AUTH_ENTERPRISE_ENABLED",
+		"AUTH_ENTERPRISE_ALLOW_LOCAL_FALLBACK",
+		"AUTH_ENTERPRISE_SYNC_ROLE",
+		"LDAP_HOST",
+		"LDAP_PORT",
+		"LDAP_BASE_DN",
+		"LDAP_ADMIN_GROUP_DNS",
+	} {
+		t.Setenv(key, "")
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+
+	if cfg.Auth.Enterprise.Enabled {
+		t.Fatalf("enterprise auth must default to disabled")
+	}
+	if !cfg.Auth.Enterprise.AllowLocalFallback {
+		t.Fatalf("enterprise local fallback should default to enabled")
+	}
+	if cfg.Auth.Enterprise.SyncRole {
+		t.Fatalf("enterprise role sync must default to disabled")
+	}
+	if got, want := cfg.Auth.Enterprise.LDAP.Port, 389; got != want {
+		t.Fatalf("ldap port = %d, want %d", got, want)
+	}
+	if got, want := cfg.Auth.Enterprise.LDAP.UserFilter, "(&(objectClass=person)(uid=%s))"; got != want {
+		t.Fatalf("ldap user filter = %q, want %q", got, want)
+	}
+	if got, want := cfg.Auth.Enterprise.LDAP.DefaultRole, "user"; got != want {
+		t.Fatalf("ldap default role = %q, want %q", got, want)
+	}
+}
+
+func TestLoadEnterpriseLDAPEnvOverrides(t *testing.T) {
+	t.Setenv("AUTH_ENTERPRISE_ENABLED", "true")
+	t.Setenv("AUTH_ENTERPRISE_ALLOW_LOCAL_FALLBACK", "false")
+	t.Setenv("AUTH_ENTERPRISE_SYNC_ROLE", "true")
+	t.Setenv("LDAP_HOST", "ldap.example.com")
+	t.Setenv("LDAP_PORT", "636")
+	t.Setenv("LDAP_USE_TLS", "true")
+	t.Setenv("LDAP_BASE_DN", "dc=example,dc=com")
+	t.Setenv("LDAP_GROUP_BASE_DN", "ou=Groups,dc=example,dc=com")
+	t.Setenv("LDAP_ADMIN_GROUP_DNS", "cn=admins,ou=Groups,dc=example,dc=com; cn=ops,ou=Groups,dc=example,dc=com")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+
+	ldap := cfg.Auth.Enterprise.LDAP
+	if !cfg.Auth.Enterprise.Enabled {
+		t.Fatalf("enterprise auth should be enabled")
+	}
+	if cfg.Auth.Enterprise.AllowLocalFallback {
+		t.Fatalf("enterprise local fallback should be disabled")
+	}
+	if !cfg.Auth.Enterprise.SyncRole {
+		t.Fatalf("enterprise role sync should be enabled")
+	}
+	if got, want := ldap.Host, "ldap.example.com"; got != want {
+		t.Fatalf("ldap host = %q, want %q", got, want)
+	}
+	if got, want := ldap.Port, 636; got != want {
+		t.Fatalf("ldap port = %d, want %d", got, want)
+	}
+	if !ldap.UseTLS {
+		t.Fatalf("ldap useTLS should be enabled")
+	}
+	if got, want := len(ldap.AdminGroupDNs), 2; got != want {
+		t.Fatalf("admin group count = %d, want %d", got, want)
+	}
+}
+
 func TestLoadStorageProfileDefaultsDisableHostPathFallback(t *testing.T) {
 	for _, key := range []string{
 		"CLAWMANAGER_STORAGE_PROFILE",

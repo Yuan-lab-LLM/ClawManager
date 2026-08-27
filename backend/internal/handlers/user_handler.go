@@ -57,10 +57,11 @@ type UpdateQuotaRequest struct {
 
 // CreateUserRequest represents a create user request (admin only)
 type CreateUserRequest struct {
-	Username string `json:"username" binding:"required,min=3,max=32,alphanum"`
-	Email    string `json:"email" binding:"required,email"`
-	Password string `json:"password" binding:"omitempty,min=8"`
-	Role     string `json:"role" binding:"required,oneof=admin user"`
+	Username     string `json:"username" binding:"required,min=3,max=32,alphanum"`
+	Email        string `json:"email" binding:"required,email"`
+	Password     string `json:"password" binding:"omitempty,min=8"`
+	Role         string `json:"role" binding:"required,oneof=admin user"`
+	AuthProvider string `json:"auth_provider" binding:"omitempty,oneof=local ldap"`
 }
 
 type importUserResult struct {
@@ -73,12 +74,13 @@ type importedUserCredential struct {
 	Username        string `json:"username"`
 	Email           string `json:"email"`
 	Role            string `json:"role"`
+	AuthProvider    string `json:"auth_provider"`
 	MaxInstances    int     `json:"max_instances"`
 	MaxCPUCores     float64 `json:"max_cpu_cores"`
 	MaxMemoryGB     int     `json:"max_memory_gb"`
 	MaxStorageGB    int    `json:"max_storage_gb"`
 	MaxGPUCount     int    `json:"max_gpu_count"`
-	InitialPassword string `json:"initial_password"`
+	InitialPassword string `json:"initial_password,omitempty"`
 }
 
 var importUsernamePattern = regexp.MustCompile(`^[a-zA-Z0-9]+$`)
@@ -125,7 +127,7 @@ func (h *UserHandler) CreateUser(c *gin.Context) {
 		return
 	}
 
-	user, err := h.userService.CreateUser(req.Username, req.Email, req.Password, req.Role)
+	user, err := h.userService.CreateUserWithProvider(req.Username, req.Email, req.Password, req.Role, req.AuthProvider)
 	if err != nil {
 		utils.HandleError(c, err)
 		return
@@ -195,6 +197,7 @@ func (h *UserHandler) ImportUsers(c *gin.Context) {
 		username := importFieldValue(fields, headerMap, "username")
 		email := importFieldValue(fields, headerMap, "email")
 		role := importFieldValue(fields, headerMap, "role")
+		authProvider := normalizeImportedAuthProvider(importFieldValue(fields, headerMap, "authprovider"))
 		password := importFieldValue(fields, headerMap, "password")
 		maxInstances, parseErr := parseImportInt(fields, headerMap, "maxinstances", true)
 		if parseErr != "" {
@@ -226,7 +229,7 @@ func (h *UserHandler) ImportUsers(c *gin.Context) {
 			email = fmt.Sprintf("%s@import.clawmanager.local", strings.ToLower(username))
 		}
 
-		if validationErr := validateImportedUser(username, email, password, role); validationErr != "" {
+		if validationErr := validateImportedUser(username, email, password, role, authProvider); validationErr != "" {
 			results = append(results, importUserResult{
 				Line:     lineNumber,
 				Username: username,
@@ -235,11 +238,15 @@ func (h *UserHandler) ImportUsers(c *gin.Context) {
 			continue
 		}
 
-		if password == "" {
+		initialPassword := ""
+		if authProvider == services.AuthProviderLocal && password == "" {
 			password = servicesDefaultPasswordForRole(role)
 		}
+		if authProvider == services.AuthProviderLocal {
+			initialPassword = password
+		}
 
-		user, createErr := h.userService.CreateUser(username, email, password, role)
+		user, createErr := h.userService.CreateUserWithProvider(username, email, password, role, authProvider)
 		if createErr != nil {
 			results = append(results, importUserResult{
 				Line:     lineNumber,
@@ -268,12 +275,13 @@ func (h *UserHandler) ImportUsers(c *gin.Context) {
 			Username:        user.Username,
 			Email:           user.Email,
 			Role:            user.Role,
+			AuthProvider:    user.AuthProvider,
 			MaxInstances:    maxInstances,
 			MaxCPUCores:     maxCPUCores,
 			MaxMemoryGB:     maxMemoryGB,
 			MaxStorageGB:    maxStorageGB,
 			MaxGPUCount:     maxGPUCount,
-			InitialPassword: password,
+			InitialPassword: initialPassword,
 		})
 	}
 
@@ -303,7 +311,7 @@ func buildImportHeaderMap(record []string) map[string]int {
 	for index, raw := range record {
 		key := normalizeImportHeader(raw)
 		switch key {
-		case "username", "email", "role", "password", "maxinstances", "maxcpucores", "maxmemorygb", "maxstoragegb", "maxgpucount":
+		case "username", "email", "role", "authprovider", "password", "maxinstances", "maxcpucores", "maxmemorygb", "maxstoragegb", "maxgpucount":
 			headers[key] = index
 		}
 	}
@@ -324,7 +332,18 @@ func importFieldValue(fields []string, headerMap map[string]int, key string) str
 	return strings.TrimSpace(fields[index])
 }
 
-func validateImportedUser(username, email, password, role string) string {
+func normalizeImportedAuthProvider(provider string) string {
+	switch strings.ToLower(strings.TrimSpace(provider)) {
+	case "", services.AuthProviderLocal:
+		return services.AuthProviderLocal
+	case services.AuthProviderLDAP:
+		return services.AuthProviderLDAP
+	default:
+		return provider
+	}
+}
+
+func validateImportedUser(username, email, password, role, authProvider string) string {
 	if len(username) < 3 || len(username) > 32 {
 		return "Username must be between 3 and 32 characters"
 	}
@@ -339,6 +358,9 @@ func validateImportedUser(username, email, password, role string) string {
 	}
 	if role != "admin" && role != "user" {
 		return "Role must be admin or user"
+	}
+	if authProvider != services.AuthProviderLocal && authProvider != services.AuthProviderLDAP {
+		return "Auth Provider must be local or ldap"
 	}
 	return ""
 }
@@ -379,6 +401,8 @@ func headerLabel(key string) string {
 		return "Username"
 	case "role":
 		return "Role"
+	case "authprovider":
+		return "Auth Provider"
 	case "maxinstances":
 		return "Max Instances"
 	case "maxcpucores":
@@ -448,10 +472,14 @@ func (h *UserHandler) UpdateUser(c *gin.Context) {
 
 	// Get current user ID from context
 	currentUserID, _ := c.Get("userID")
+	userRole, _ := c.Get("userRole")
 
-	// Users can only update their own profile
-	if currentUserID.(int) != id {
-		utils.Error(c, http.StatusForbidden, "Can only update your own profile")
+	// Users can update their own profile. Admins may update another user's
+	// active status so LDAP whitelist entries can be restored after disable.
+	isSelfUpdate := currentUserID.(int) == id
+	isAdminStatusUpdate := userRole == "admin" && req.IsActive != nil && req.Email == ""
+	if !isSelfUpdate && !isAdminStatusUpdate {
+		utils.Error(c, http.StatusForbidden, "Can only update your own profile or user status as admin")
 		return
 	}
 

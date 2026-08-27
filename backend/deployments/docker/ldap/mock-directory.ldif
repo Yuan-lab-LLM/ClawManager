@@ -1,0 +1,99 @@
+dn: ou=users,dc=example,dc=com
+objectClass: organizationalUnit
+ou: users
+
+dn: ou=groups,dc=example,dc=com
+objectClass: organizationalUnit
+ou: groups
+
+dn: uid=alice,ou=users,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: alice
+cn: Alice Admin
+sn: Admin
+givenName: Alice
+displayName: Alice Admin
+mail: alice@example.com
+userPassword: alice123456
+
+dn: uid=bob,ou=users,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: bob
+cn: Bob User
+sn: User
+givenName: Bob
+displayName: Bob User
+mail: bob@example.com
+userPassword: bob123456
+
+dn: uid=carol,ou=users,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: carol
+cn: Carol Operator
+sn: Operator
+givenName: Carol
+displayName: Carol Operator
+mail: carol@example.com
+userPassword: carol123456
+
+dn: uid=dave,ou=users,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: dave
+cn: Dave Developer
+sn: Developer
+givenName: Dave
+displayName: Dave Developer
+mail: dave@example.com
+userPassword: dave123456
+
+dn: uid=erin,ou=users,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: erin
+cn: Erin Reviewer
+sn: Reviewer
+givenName: Erin
+displayName: Erin Reviewer
+mail: erin@example.com
+userPassword: erin123456
+
+dn: uid=frank,ou=users,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: frank
+cn: Frank Contractor
+sn: Contractor
+givenName: Frank
+displayName: Frank Contractor
+mail: frank@example.com
+userPassword: frank123456
+
+dn: cn=clawmanager-admins,ou=groups,dc=example,dc=com
+objectClass: groupOfNames
+cn: clawmanager-admins
+member: uid=alice,ou=users,dc=example,dc=com
+
+dn: cn=clawmanager-users,ou=groups,dc=example,dc=com
+objectClass: groupOfNames
+cn: clawmanager-users
+member: uid=bob,ou=users,dc=example,dc=com
+member: uid=carol,ou=users,dc=example,dc=com
+member: uid=dave,ou=users,dc=example,dc=com
+member: uid=erin,ou=users,dc=example,dc=com
+member: uid=frank,ou=users,dc=example,dc=com

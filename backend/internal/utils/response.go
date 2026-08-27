@@ -74,7 +74,7 @@ func HandleError(c *gin.Context, err error) {
 		Error(c, http.StatusUnauthorized, errStr)
 	case "agent registration is only supported for openclaw instances", "agent registration is only supported for openclaw or hermes instances", "agent registration is only supported for managed runtime instances", "agent id does not match session", "access denied", "skill_attach_forbidden":
 		Error(c, http.StatusForbidden, errStr)
-	case "current password is incorrect":
+	case "current password is incorrect", "enterprise users must change password in the enterprise identity platform":
 		Error(c, http.StatusBadRequest, errStr)
 	case "user not found", "model not found", "skill not found", "skill hub tag not found":
 		Error(c, http.StatusNotFound, errStr)
