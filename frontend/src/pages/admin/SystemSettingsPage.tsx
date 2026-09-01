@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Plus, Rocket, Save, Trash2 } from 'lucide-react';
+import { AlertTriangle, KeyRound, Pencil, Plus, Rocket, Save, ShieldCheck, Trash2 } from 'lucide-react';
 import AdminLayout from '../../components/AdminLayout';
 import { useI18n } from '../../contexts/I18nContext';
 import PasswordSettingsSection from '../../components/PasswordSettingsSection';
@@ -7,8 +7,16 @@ import {
   systemSettingsService,
   type SystemImageSetting,
 } from '../../services/systemSettingsService';
+import {
+  enterpriseAuthService,
+  type EnterpriseAuthConfig,
+  type EnterpriseAuthConfigUpdate,
+  type EnterpriseAuthStatus,
+  type LDAPConfigPublic,
+} from '../../services/enterpriseAuthService';
 import { runtimePoolService } from '../../services/runtimePoolService';
 import type { RuntimePod, RuntimeType } from '../../types/runtimePool';
+import { localizeEnterpriseAuthIssue, localizeEnterpriseAuthIssues } from '../../utils/enterpriseAuthErrors';
 
 type ImageRuntimeType = 'desktop' | 'gateway';
 type RuntimeGroup = 'lite' | 'pro';
@@ -84,6 +92,36 @@ const VISIBLE_PRO_BASE_RUNTIME_CARDS = PRO_BASE_RUNTIME_CARDS.filter(isRuntimeCa
 
 const PRO_CUSTOM_DEFAULT_IMAGE = 'registry.example.com/your-custom-image:latest';
 const FIXED_RUNTIME_CARDS = [...LITE_RUNTIME_CARDS, ...VISIBLE_PRO_BASE_RUNTIME_CARDS];
+const DEFAULT_LDAP_FORM: LDAPConfigPublic = {
+  host: '',
+  port: 389,
+  use_tls: false,
+  start_tls: false,
+  skip_tls_verify: false,
+  tls_ca_file: '',
+  tls_server_name: '',
+  bind_dn: '',
+  base_dn: '',
+  user_filter: '(&(objectClass=inetOrgPerson)(uid=%s))',
+  username_attribute: 'uid',
+  email_attribute: 'mail',
+  group_base_dn: '',
+  group_filter: '(member=%s)',
+  admin_group_dns: [],
+  default_role: 'user',
+};
+
+const LDAP_PLACEHOLDERS = {
+  host: 'ldap.example.com',
+  tlsCAFile: '/etc/ssl/certs/company-ldap.pem',
+  tlsServerName: 'ldap.internal.example.com',
+  bindDN: 'cn=readonly,dc=example,dc=com',
+  baseDN: 'ou=People,dc=example,dc=com',
+  groupBaseDN: 'ou=Groups,dc=example,dc=com',
+  userFilter: '(&(objectClass=inetOrgPerson)(uid=%s))',
+  groupFilter: '(member=%s)',
+  adminGroups: 'cn=clawmanager-admins,ou=Groups,dc=example,dc=com',
+};
 
 interface EditableImageCard extends SystemImageSetting {
   local_id: string;
@@ -96,12 +134,15 @@ interface EditableImageCard extends SystemImageSetting {
   error?: string | null;
 }
 
-function getErrorMessage(error: unknown, fallback: string) {
+function getErrorMessage(error: unknown, fallback: string, translateEnterpriseIssue?: (message: string) => string) {
   const responseError = (error as { response?: { data?: { error?: string } } })?.response?.data?.error;
   if (responseError) {
-    return responseError;
+    return translateEnterpriseIssue ? translateEnterpriseIssue(responseError) : responseError;
   }
-  return error instanceof Error ? error.message : fallback;
+  if (error instanceof Error) {
+    return translateEnterpriseIssue ? translateEnterpriseIssue(error.message) : error.message;
+  }
+  return fallback;
 }
 
 function normalizeImageRuntimeType(runtimeType?: string): ImageRuntimeType {
@@ -136,6 +177,39 @@ function resolveCurrentRuntimeImage(pods: RuntimePod[]) {
 
   const images = Array.from(new Set(candidates.map((pod) => pod.image_ref.trim())));
   return images.join(', ');
+}
+
+function ldapConfigWithDefaults(ldap?: Partial<LDAPConfigPublic>): LDAPConfigPublic {
+  const nonEmpty = (value: string | undefined, fallback: string) =>
+    value?.trim() ? value : fallback;
+
+  return {
+    ...DEFAULT_LDAP_FORM,
+    ...ldap,
+    port: ldap?.port || (ldap?.use_tls ? 636 : 389),
+    bind_dn: nonEmpty(ldap?.bind_dn, DEFAULT_LDAP_FORM.bind_dn),
+    base_dn: nonEmpty(ldap?.base_dn, DEFAULT_LDAP_FORM.base_dn),
+    user_filter: nonEmpty(ldap?.user_filter, DEFAULT_LDAP_FORM.user_filter),
+    username_attribute: nonEmpty(ldap?.username_attribute, DEFAULT_LDAP_FORM.username_attribute),
+    email_attribute: nonEmpty(ldap?.email_attribute, DEFAULT_LDAP_FORM.email_attribute),
+    group_base_dn: nonEmpty(ldap?.group_base_dn, DEFAULT_LDAP_FORM.group_base_dn),
+    group_filter: nonEmpty(ldap?.group_filter, DEFAULT_LDAP_FORM.group_filter),
+    admin_group_dns: ldap?.admin_group_dns?.length
+      ? ldap.admin_group_dns
+      : [...DEFAULT_LDAP_FORM.admin_group_dns],
+    default_role: nonEmpty(ldap?.default_role, DEFAULT_LDAP_FORM.default_role),
+  };
+}
+
+function parseAdminGroupDNs(value: string) {
+  return value.split(/\r?\n|;/).map((item) => item.trim()).filter(Boolean);
+}
+
+function enterpriseStatusFailed(status?: EnterpriseAuthStatus | null) {
+  if (!status) {
+    return false;
+  }
+  return Boolean(status.error) || Object.values(status.checks || {}).includes('failed');
 }
 
 function toEditableCard(
@@ -219,6 +293,20 @@ const SystemSettingsPage: React.FC = () => {
   const [rolloutMaxUnavailable, setRolloutMaxUnavailable] = useState(1);
   const [rolloutSaving, setRolloutSaving] = useState(false);
   const [rolloutError, setRolloutError] = useState<string | null>(null);
+  const [enterpriseConfig, setEnterpriseConfig] = useState<EnterpriseAuthConfig | null>(null);
+  const [enterpriseLoading, setEnterpriseLoading] = useState(true);
+  const [enterpriseSaving, setEnterpriseSaving] = useState(false);
+  const [enterpriseTesting, setEnterpriseTesting] = useState(false);
+  const [enterpriseError, setEnterpriseError] = useState<string | null>(null);
+  const [enterpriseTestStatus, setEnterpriseTestStatus] = useState<EnterpriseAuthStatus | null>(null);
+  const [ldapEnabled, setLdapEnabled] = useState(false);
+  const [allowLocalFallback, setAllowLocalFallback] = useState(true);
+  const [syncRole, setSyncRole] = useState(false);
+  const [ldapForm, setLdapForm] = useState<LDAPConfigPublic>(DEFAULT_LDAP_FORM);
+  const [bindPassword, setBindPassword] = useState('');
+  const [bindPasswordEditing, setBindPasswordEditing] = useState(false);
+  const [clearBindPassword, setClearBindPassword] = useState(false);
+  const [adminGroupDNsText, setAdminGroupDNsText] = useState('');
 
   const liteCards = useMemo(
     () => LITE_RUNTIME_CARDS.map((definition) =>
@@ -267,6 +355,37 @@ const SystemSettingsPage: React.FC = () => {
   }, [t, rolloutRuntimeType]);
 
   useEffect(() => {
+    const loadEnterpriseConfig = async () => {
+      try {
+        setEnterpriseLoading(true);
+        setEnterpriseError(null);
+        const config = await enterpriseAuthService.getConfig();
+        const ldap = ldapConfigWithDefaults(config.ldap);
+        setEnterpriseConfig(config);
+        setLdapEnabled(config.enabled);
+        setAllowLocalFallback(config.allow_local_fallback);
+        setSyncRole(config.sync_role);
+        setLdapForm(ldap);
+        setAdminGroupDNsText(ldap.admin_group_dns.join('\n'));
+        setBindPassword('');
+        setBindPasswordEditing(false);
+        setClearBindPassword(false);
+        setEnterpriseTestStatus(null);
+      } catch (error: unknown) {
+        setEnterpriseError(getErrorMessage(
+          error,
+          t('systemSettingsPage.enterpriseLoadFailed'),
+          (message) => localizeEnterpriseAuthIssue(message, t),
+        ));
+      } finally {
+        setEnterpriseLoading(false);
+      }
+    };
+
+    void loadEnterpriseConfig();
+  }, [t]);
+
+  useEffect(() => {
     let cancelled = false;
     const loadCurrentImage = async () => {
       try {
@@ -308,6 +427,88 @@ const SystemSettingsPage: React.FC = () => {
     setCards((current) => current.map((card) =>
       card.local_id === localId ? { ...card, ...patch, error: null } : card,
     ));
+  };
+
+  const updateLDAPForm = (patch: Partial<LDAPConfigPublic>) => {
+    setLdapForm((current) => ({ ...current, ...patch }));
+    setEnterpriseError(null);
+    setEnterpriseTestStatus(null);
+  };
+
+  const handleClearBindPasswordChange = (checked: boolean) => {
+    setClearBindPassword(checked);
+    if (checked) {
+      setBindPassword('');
+      setBindPasswordEditing(false);
+    }
+  };
+
+  const buildEnterprisePayload = (): EnterpriseAuthConfigUpdate => ({
+    expected_version: enterpriseConfig?.version ?? 0,
+    enabled: ldapEnabled,
+    allow_local_fallback: allowLocalFallback,
+    sync_role: syncRole,
+    ldap: {
+      ...ldapConfigWithDefaults(ldapForm),
+      host: ldapForm.host.trim(),
+      tls_ca_file: ldapForm.tls_ca_file.trim(),
+      tls_server_name: ldapForm.tls_server_name.trim(),
+      bind_dn: ldapForm.bind_dn.trim(),
+      base_dn: ldapForm.base_dn.trim(),
+      user_filter: ldapForm.user_filter.trim(),
+      username_attribute: ldapForm.username_attribute.trim(),
+      email_attribute: ldapForm.email_attribute.trim(),
+      group_base_dn: ldapForm.group_base_dn.trim(),
+      group_filter: ldapForm.group_filter.trim(),
+      admin_group_dns: parseAdminGroupDNs(adminGroupDNsText),
+      default_role: ldapForm.default_role === 'admin' ? 'admin' : 'user',
+    },
+    bind_password: clearBindPassword ? '' : bindPassword,
+    clear_bind_password: clearBindPassword,
+  });
+
+  const handleTestEnterpriseConfig = async () => {
+    try {
+      setEnterpriseTesting(true);
+      setEnterpriseError(null);
+      const status = await enterpriseAuthService.testConfig(buildEnterprisePayload());
+      setEnterpriseTestStatus(status);
+    } catch (error: unknown) {
+      setEnterpriseError(getErrorMessage(
+        error,
+        t('systemSettingsPage.enterpriseTestFailed'),
+        (message) => localizeEnterpriseAuthIssue(message, t),
+      ));
+    } finally {
+      setEnterpriseTesting(false);
+    }
+  };
+
+  const handleSaveEnterpriseConfig = async () => {
+    try {
+      setEnterpriseSaving(true);
+      setEnterpriseError(null);
+      const saved = await enterpriseAuthService.updateConfig(buildEnterprisePayload());
+      const ldap = ldapConfigWithDefaults(saved.ldap);
+      setEnterpriseConfig(saved);
+      setLdapEnabled(saved.enabled);
+      setAllowLocalFallback(saved.allow_local_fallback);
+      setSyncRole(saved.sync_role);
+      setLdapForm(ldap);
+      setAdminGroupDNsText(ldap.admin_group_dns.join('\n'));
+      setBindPassword('');
+      setBindPasswordEditing(false);
+      setClearBindPassword(false);
+      setEnterpriseTestStatus(saved.status);
+    } catch (error: unknown) {
+      setEnterpriseError(getErrorMessage(
+        error,
+        t('systemSettingsPage.enterpriseSaveFailed'),
+        (message) => localizeEnterpriseAuthIssue(message, t),
+      ));
+    } finally {
+      setEnterpriseSaving(false);
+    }
   };
 
   const addProCustomCard = () => {
@@ -517,10 +718,206 @@ const SystemSettingsPage: React.FC = () => {
     </div>
   );
 
+  const renderEnterpriseStatus = () => {
+    const status = enterpriseTestStatus ?? enterpriseConfig?.status;
+    if (enterpriseLoading) {
+      return <span className="text-sm text-gray-500">{t('common.loading')}</span>;
+    }
+    if (!status?.enabled) {
+      return <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">{t('systemSettingsPage.enterpriseDisabled')}</span>;
+    }
+    if (enterpriseStatusFailed(status)) {
+      return <span className="rounded-full bg-red-100 px-2.5 py-1 text-xs font-medium text-red-700">{t('systemSettingsPage.enterpriseUnhealthy')}</span>;
+    }
+    if (status.warnings?.length) {
+      return <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-medium text-amber-700">{t('systemSettingsPage.enterpriseWarning')}</span>;
+    }
+    return <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-700">{t('systemSettingsPage.enterpriseHealthy')}</span>;
+  };
+
+  const bindPasswordConfigured = Boolean(enterpriseConfig?.bind_password_configured);
+  const showBindPasswordMask = bindPasswordConfigured && !bindPasswordEditing && !clearBindPassword;
+  const bindPasswordPlaceholder = bindPasswordConfigured
+    ? t('systemSettingsPage.ldapPasswordReplacementPlaceholder')
+    : t('systemSettingsPage.ldapPasswordPlaceholder');
+
   return (
     <AdminLayout title={t('admin.systemSettings')}>
       <div className="space-y-6">
         <PasswordSettingsSection />
+
+        <section className="app-panel p-6">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h2 className="text-xl font-semibold text-gray-900">{t('systemSettingsPage.enterpriseTitle')}</h2>
+              <p className="mt-1 text-sm text-gray-500">{t('systemSettingsPage.enterpriseLoginAliasHelp')}</p>
+            </div>
+            {renderEnterpriseStatus()}
+          </div>
+
+          {enterpriseError && (
+            <div className="mt-4 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {enterpriseError}
+            </div>
+          )}
+          {ldapForm.skip_tls_verify && (
+            <div className="mt-4 flex gap-2 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>{t('systemSettingsPage.enterpriseSkipTLSWarning')}</span>
+            </div>
+          )}
+          {(enterpriseTestStatus?.error || enterpriseTestStatus?.warnings?.length) && (
+            <div className="mt-4 rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+              {enterpriseTestStatus.error
+                ? localizeEnterpriseAuthIssue(enterpriseTestStatus.error, t)
+                : localizeEnterpriseAuthIssues(enterpriseTestStatus.warnings, t).join(', ')}
+            </div>
+          )}
+
+          {enterpriseLoading ? (
+            <div className="mt-6 text-sm text-gray-500">{t('common.loading')}</div>
+          ) : (
+            <div className="mt-6 space-y-5">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <label className="flex items-center justify-between rounded-md border border-slate-200 px-4 py-3">
+                  <span className="text-sm font-medium text-gray-700">{t('systemSettingsPage.enterpriseEnabled')}</span>
+                  <input type="checkbox" checked={ldapEnabled} onChange={(event) => setLdapEnabled(event.target.checked)} className="h-4 w-4" />
+                </label>
+                <label className="flex items-center justify-between rounded-md border border-slate-200 px-4 py-3">
+                  <span className="text-sm font-medium text-gray-700">{t('systemSettingsPage.enterpriseSyncRole')}</span>
+                  <input type="checkbox" checked={syncRole} onChange={(event) => setSyncRole(event.target.checked)} className="h-4 w-4" />
+                </label>
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-4">
+                <div className="lg:col-span-3">
+                  <label className="block text-sm font-medium text-gray-700">{t('systemSettingsPage.ldapHost')}</label>
+                  <input className="app-input mt-1 block w-full" value={ldapForm.host} onChange={(event) => updateLDAPForm({ host: event.target.value })} placeholder={LDAP_PLACEHOLDERS.host} />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">{t('systemSettingsPage.ldapPort')}</label>
+                  <input type="number" min={1} className="app-input mt-1 block w-full" value={ldapForm.port} onChange={(event) => updateLDAPForm({ port: Number(event.target.value) || 389 })} />
+                </div>
+                <label className="flex items-center gap-2 text-sm text-gray-700">
+                  <input type="checkbox" checked={ldapForm.use_tls} onChange={(event) => updateLDAPForm({ use_tls: event.target.checked, start_tls: event.target.checked ? false : ldapForm.start_tls })} />
+                  {t('systemSettingsPage.ldapUseTLS')}
+                </label>
+                <label className="flex items-center gap-2 text-sm text-gray-700">
+                  <input type="checkbox" checked={ldapForm.start_tls} onChange={(event) => updateLDAPForm({ start_tls: event.target.checked, use_tls: event.target.checked ? false : ldapForm.use_tls })} />
+                  {t('systemSettingsPage.ldapStartTLS')}
+                </label>
+                <label className="flex items-center gap-2 text-sm text-gray-700">
+                  <input type="checkbox" checked={ldapForm.skip_tls_verify} onChange={(event) => updateLDAPForm({ skip_tls_verify: event.target.checked })} />
+                  {t('systemSettingsPage.ldapSkipTLS')}
+                </label>
+                <div className="lg:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700">{t('systemSettingsPage.ldapTLSCAFile')}</label>
+                  <input className="app-input mt-1 block w-full" value={ldapForm.tls_ca_file} onChange={(event) => updateLDAPForm({ tls_ca_file: event.target.value })} placeholder={LDAP_PLACEHOLDERS.tlsCAFile} />
+                </div>
+                <div className="lg:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700">{t('systemSettingsPage.ldapTLSServerName')}</label>
+                  <input className="app-input mt-1 block w-full" value={ldapForm.tls_server_name} onChange={(event) => updateLDAPForm({ tls_server_name: event.target.value })} placeholder={LDAP_PLACEHOLDERS.tlsServerName} />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">{t('systemSettingsPage.ldapBindDN')}</label>
+                  <input className="app-input mt-1 block w-full" value={ldapForm.bind_dn} onChange={(event) => updateLDAPForm({ bind_dn: event.target.value })} placeholder={LDAP_PLACEHOLDERS.bindDN} />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">
+                    {t('systemSettingsPage.ldapBindPassword')}
+                    {bindPasswordConfigured ? <span className="ml-2 text-xs font-normal text-gray-500">{t('systemSettingsPage.ldapPasswordConfigured')}</span> : null}
+                  </label>
+                  {showBindPasswordMask ? (
+                    <div className="mt-1 flex gap-2">
+                      <input
+                        type="password"
+                        className="app-input block min-w-0 flex-1 bg-slate-50 text-slate-500"
+                        value={t('systemSettingsPage.ldapSavedPasswordMask')}
+                        readOnly
+                        onFocus={() => setBindPasswordEditing(true)}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setBindPasswordEditing(true)}
+                        className="app-button-secondary inline-flex shrink-0 items-center gap-2"
+                      >
+                        <Pencil className="h-4 w-4" />
+                        {t('systemSettingsPage.ldapChangePassword')}
+                      </button>
+                    </div>
+                  ) : (
+                    <input
+                      type="password"
+                      className="app-input mt-1 block w-full"
+                      value={bindPassword}
+                      autoFocus={bindPasswordEditing && !clearBindPassword}
+                      disabled={clearBindPassword}
+                      onChange={(event) => setBindPassword(event.target.value)}
+                      placeholder={bindPasswordPlaceholder}
+                    />
+                  )}
+                  <label className="mt-2 flex items-center gap-2 text-xs text-gray-600">
+                    <input type="checkbox" checked={clearBindPassword} onChange={(event) => handleClearBindPasswordChange(event.target.checked)} />
+                    {t('systemSettingsPage.ldapClearPassword')}
+                  </label>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">{t('systemSettingsPage.ldapBaseDN')}</label>
+                  <input className="app-input mt-1 block w-full" value={ldapForm.base_dn} onChange={(event) => updateLDAPForm({ base_dn: event.target.value })} placeholder={LDAP_PLACEHOLDERS.baseDN} />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">{t('systemSettingsPage.ldapGroupBaseDN')}</label>
+                  <input className="app-input mt-1 block w-full" value={ldapForm.group_base_dn} onChange={(event) => updateLDAPForm({ group_base_dn: event.target.value })} placeholder={LDAP_PLACEHOLDERS.groupBaseDN} />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">{t('systemSettingsPage.ldapUserFilter')}</label>
+                  <input className="app-input mt-1 block w-full font-mono" value={ldapForm.user_filter} onChange={(event) => updateLDAPForm({ user_filter: event.target.value })} placeholder={LDAP_PLACEHOLDERS.userFilter} />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">{t('systemSettingsPage.ldapGroupFilter')}</label>
+                  <input className="app-input mt-1 block w-full font-mono" value={ldapForm.group_filter} onChange={(event) => updateLDAPForm({ group_filter: event.target.value })} placeholder={LDAP_PLACEHOLDERS.groupFilter} />
+                </div>
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">{t('systemSettingsPage.ldapUsernameAttribute')}</label>
+                    <input className="app-input mt-1 block w-full" value={ldapForm.username_attribute} onChange={(event) => updateLDAPForm({ username_attribute: event.target.value })} />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">{t('systemSettingsPage.ldapEmailAttribute')}</label>
+                    <input className="app-input mt-1 block w-full" value={ldapForm.email_attribute} onChange={(event) => updateLDAPForm({ email_attribute: event.target.value })} />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">{t('systemSettingsPage.ldapDefaultRole')}</label>
+                  <select className="app-input mt-1 block w-full" value={ldapForm.default_role} onChange={(event) => updateLDAPForm({ default_role: event.target.value })}>
+                    <option value="user">{t('systemSettingsPage.ldapRoleUser')}</option>
+                    <option value="admin">{t('systemSettingsPage.ldapRoleAdmin')}</option>
+                  </select>
+                </div>
+                <div className="lg:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700">{t('systemSettingsPage.ldapAdminGroups')}</label>
+                  <textarea className="app-input mt-1 block min-h-24 w-full font-mono" value={adminGroupDNsText} onChange={(event) => setAdminGroupDNsText(event.target.value)} placeholder={LDAP_PLACEHOLDERS.adminGroups} />
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-3 border-t border-slate-200 pt-4 sm:flex-row sm:items-center sm:justify-end">
+                <div className="flex flex-wrap gap-3">
+                  <button type="button" onClick={() => void handleTestEnterpriseConfig()} disabled={enterpriseTesting || enterpriseSaving} className="app-button-secondary inline-flex items-center gap-2 disabled:cursor-not-allowed disabled:opacity-50">
+                    <ShieldCheck className="h-4 w-4" />
+                    {enterpriseTesting ? t('systemSettingsPage.enterpriseTesting') : t('systemSettingsPage.enterpriseTest')}
+                  </button>
+                  <button type="button" onClick={() => void handleSaveEnterpriseConfig()} disabled={enterpriseTesting || enterpriseSaving} className="app-button-primary inline-flex items-center gap-2 disabled:cursor-not-allowed disabled:opacity-50">
+                    <KeyRound className="h-4 w-4" />
+                    {enterpriseSaving ? t('modelManagementPage.saving') : t('systemSettingsPage.enterpriseSave')}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </section>
 
         <section className="app-panel p-6">
           <div className="flex flex-col gap-1">

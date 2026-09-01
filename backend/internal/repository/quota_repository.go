@@ -70,13 +70,14 @@ func (r *quotaRepository) DeleteByUserID(userID int) error {
 // CreateDefaultQuota creates default quota for a user
 func (r *quotaRepository) CreateDefaultQuota(userID int) (*models.UserQuota, error) {
 	now := time.Now()
+	defaults := models.DefaultQuotaForRole("user")
 	quota := &models.UserQuota{
 		UserID:       userID,
-		MaxInstances: 10,
-		MaxCPUCores:  40,
-		MaxMemoryGB:  100,
-		MaxStorageGB: 500,
-		MaxGPUCount:  2,
+		MaxInstances: defaults.MaxInstances,
+		MaxCPUCores:  defaults.MaxCPUCores,
+		MaxMemoryGB:  defaults.MaxMemoryGB,
+		MaxStorageGB: defaults.MaxStorageGB,
+		MaxGPUCount:  defaults.MaxGPUCount,
 		CreatedAt:    now,
 		UpdatedAt:    now,
 	}

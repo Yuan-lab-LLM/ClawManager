@@ -15,6 +15,7 @@ jwt:
   refresh_expiry: 168
 
 auth:
+  configEncryptionKey: "clawmanager-auth-key-dev-32byte!"
   enterprise:
     enabled: false
     allowLocalFallback: true
@@ -25,6 +26,8 @@ auth:
       useTLS: false
       startTLS: false
       skipTLSVerify: false
+      tlsCAFile: ""
+      tlsServerName: ""
       bindDN: ""
       bindPassword: ""
       baseDN: ""

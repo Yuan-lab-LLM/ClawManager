@@ -1,17 +1,30 @@
 package repository
 
 import (
+	"errors"
 	"fmt"
+	"strings"
 
 	"clawreef/internal/models"
 	"github.com/upper/db/v4"
 )
+
+// ErrUserLoginAliasConflict indicates that another request claimed the LDAP
+// login alias between the availability check and the insert.
+var ErrUserLoginAliasConflict = errors.New("user login alias conflict")
+
+// ErrUserUsernameConflict indicates that another request claimed the local
+// username between the availability check and the insert.
+var ErrUserUsernameConflict = errors.New("user username conflict")
 
 // UserRepository defines the interface for user data operations
 type UserRepository interface {
 	Create(user *models.User) error
 	GetByID(id int) (*models.User, error)
 	GetByUsername(username string) (*models.User, error)
+	GetByAuthProviderUsername(authProvider, username string) (*models.User, error)
+	CountByAuthProviderUsername(authProvider, username string) (int, error)
+	GetByLoginAlias(authProvider, loginAlias string) (*models.User, error)
 	GetByEmail(email string) (*models.User, error)
 	GetByExternalIdentity(authProvider, externalID string) (*models.User, error)
 	Update(user *models.User) error
@@ -34,6 +47,12 @@ func NewUserRepository(sess db.Session) UserRepository {
 func (r *userRepository) Create(user *models.User) error {
 	res, err := r.sess.Collection("users").Insert(user)
 	if err != nil {
+		if isLoginAliasConflict(err) {
+			return fmt.Errorf("%w: %v", ErrUserLoginAliasConflict, err)
+		}
+		if isUsernameConflict(err) {
+			return fmt.Errorf("%w: %v", ErrUserUsernameConflict, err)
+		}
 		return fmt.Errorf("failed to create user: %w", err)
 	}
 	// Get the last insert ID
@@ -63,6 +82,46 @@ func (r *userRepository) GetByUsername(username string) (*models.User, error) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("failed to get user by username: %w", err)
+	}
+	return &user, nil
+}
+
+func isLoginAliasConflict(err error) bool {
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "uk_users_provider_login_alias") ||
+		(strings.Contains(message, "duplicate entry") && strings.Contains(message, "login_alias"))
+}
+
+func isUsernameConflict(err error) bool {
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "uk_users_local_username") ||
+		(strings.Contains(message, "duplicate entry") && strings.Contains(message, "local_username_key"))
+}
+
+func (r *userRepository) GetByAuthProviderUsername(authProvider, username string) (*models.User, error) {
+	var user models.User
+	err := r.sess.Collection("users").Find(db.Cond{"auth_provider": authProvider, "username": username}).One(&user)
+	if err != nil {
+		if err == db.ErrNoMoreRows { return nil, nil }
+		return nil, fmt.Errorf("failed to get user by auth provider and username: %w", err)
+	}
+	return &user, nil
+}
+
+func (r *userRepository) CountByAuthProviderUsername(authProvider, username string) (int, error) {
+	count, err := r.sess.Collection("users").Find(db.Cond{"auth_provider": authProvider, "username": username}).Count()
+	if err != nil {
+		return 0, fmt.Errorf("failed to count users by auth provider and username: %w", err)
+	}
+	return int(count), nil
+}
+
+func (r *userRepository) GetByLoginAlias(authProvider, loginAlias string) (*models.User, error) {
+	var user models.User
+	err := r.sess.Collection("users").Find(db.Cond{"auth_provider": authProvider, "login_alias": loginAlias}).One(&user)
+	if err != nil {
+		if err == db.ErrNoMoreRows { return nil, nil }
+		return nil, fmt.Errorf("failed to get user by login alias: %w", err)
 	}
 	return &user, nil
 }

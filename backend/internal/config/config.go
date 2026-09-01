@@ -70,7 +70,8 @@ type JWTConfig struct {
 }
 
 type AuthConfig struct {
-	Enterprise EnterpriseAuthConfig `yaml:"enterprise"`
+	ConfigEncryptionKey string               `yaml:"configEncryptionKey"`
+	Enterprise          EnterpriseAuthConfig `yaml:"enterprise"`
 }
 
 type EnterpriseAuthConfig struct {
@@ -86,6 +87,8 @@ type LDAPConfig struct {
 	UseTLS            bool     `yaml:"useTLS"`
 	StartTLS          bool     `yaml:"startTLS"`
 	SkipTLSVerify     bool     `yaml:"skipTLSVerify"`
+	TLSCAFile         string   `yaml:"tlsCAFile"`
+	TLSServerName     string   `yaml:"tlsServerName"`
 	BindDN            string   `yaml:"bindDN"`
 	BindPassword      string   `yaml:"bindPassword"`
 	BaseDN            string   `yaml:"baseDN"`
@@ -263,6 +266,7 @@ func Load() (*Config, error) {
 			RefreshExpiry: 168, // 7 days
 		},
 		Auth: AuthConfig{
+			ConfigEncryptionKey: getEnv("AUTH_CONFIG_ENCRYPTION_KEY", ""),
 			Enterprise: EnterpriseAuthConfig{
 				Enabled:            getEnvBool("AUTH_ENTERPRISE_ENABLED", false),
 				AllowLocalFallback: getEnvBool("AUTH_ENTERPRISE_ALLOW_LOCAL_FALLBACK", true),
@@ -273,6 +277,8 @@ func Load() (*Config, error) {
 					UseTLS:            getEnvBool("LDAP_USE_TLS", false),
 					StartTLS:          getEnvBool("LDAP_START_TLS", false),
 					SkipTLSVerify:     getEnvBool("LDAP_SKIP_TLS_VERIFY", false),
+					TLSCAFile:         getEnv("LDAP_TLS_CA_FILE", ""),
+					TLSServerName:     getEnv("LDAP_TLS_SERVER_NAME", ""),
 					BindDN:            getEnv("LDAP_BIND_DN", ""),
 					BindPassword:      getEnv("LDAP_BIND_PASSWORD", ""),
 					BaseDN:            getEnv("LDAP_BASE_DN", ""),
@@ -393,6 +399,7 @@ func Load() (*Config, error) {
 	// Try to load from k8s config file
 	configPaths := []string{
 		"configs/k8s.yaml",
+		"backend/configs/k8s.yaml",
 		"../configs/k8s.yaml",
 		"/app/configs/k8s.yaml",
 	}
@@ -412,13 +419,20 @@ func Load() (*Config, error) {
 	}
 
 	// Try to load from legacy dev.yaml config file
-	if _, err := os.Stat("configs/dev.yaml"); err == nil {
-		data, err := os.ReadFile("configs/dev.yaml")
-		if err != nil {
-			return nil, fmt.Errorf("failed to read config file: %w", err)
-		}
-		if err := yaml.Unmarshal(data, config); err != nil {
-			return nil, fmt.Errorf("failed to parse config file: %w", err)
+	devConfigPaths := []string{
+		"configs/dev.yaml",
+		"backend/configs/dev.yaml",
+	}
+	for _, path := range devConfigPaths {
+		if _, err := os.Stat(path); err == nil {
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return nil, fmt.Errorf("failed to read config file: %w", err)
+			}
+			if err := yaml.Unmarshal(data, config); err != nil {
+				return nil, fmt.Errorf("failed to parse config file: %w", err)
+			}
+			break
 		}
 	}
 
@@ -461,6 +475,9 @@ func applyEnvOverrides(config *Config) {
 	if secret := os.Getenv("JWT_SECRET"); secret != "" {
 		config.JWT.Secret = secret
 	}
+	if key := os.Getenv("AUTH_CONFIG_ENCRYPTION_KEY"); key != "" {
+		config.Auth.ConfigEncryptionKey = key
+	}
 
 	if enabled := os.Getenv("AUTH_ENTERPRISE_ENABLED"); enabled != "" {
 		config.Auth.Enterprise.Enabled = strings.EqualFold(enabled, "true")
@@ -485,6 +502,12 @@ func applyEnvOverrides(config *Config) {
 	}
 	if skipTLS := os.Getenv("LDAP_SKIP_TLS_VERIFY"); skipTLS != "" {
 		config.Auth.Enterprise.LDAP.SkipTLSVerify = strings.EqualFold(skipTLS, "true")
+	}
+	if caFile := os.Getenv("LDAP_TLS_CA_FILE"); caFile != "" {
+		config.Auth.Enterprise.LDAP.TLSCAFile = caFile
+	}
+	if serverName := os.Getenv("LDAP_TLS_SERVER_NAME"); serverName != "" {
+		config.Auth.Enterprise.LDAP.TLSServerName = serverName
 	}
 	if bindDN := os.Getenv("LDAP_BIND_DN"); bindDN != "" {
 		config.Auth.Enterprise.LDAP.BindDN = bindDN
@@ -682,6 +705,12 @@ func normalizeAuthConfig(config *Config) {
 		return
 	}
 	ldap := &config.Auth.Enterprise.LDAP
+	ldap.Host = strings.TrimSpace(ldap.Host)
+	ldap.TLSCAFile = strings.TrimSpace(ldap.TLSCAFile)
+	ldap.TLSServerName = strings.TrimSpace(ldap.TLSServerName)
+	ldap.BindDN = strings.TrimSpace(ldap.BindDN)
+	ldap.BaseDN = strings.TrimSpace(ldap.BaseDN)
+	ldap.GroupBaseDN = strings.TrimSpace(ldap.GroupBaseDN)
 	if ldap.Port <= 0 {
 		if ldap.UseTLS {
 			ldap.Port = 636
@@ -725,7 +754,7 @@ func splitEnvList(value string) []string {
 		return nil
 	}
 	fields := strings.FieldsFunc(value, func(r rune) bool {
-		return r == ',' || r == ';' || r == '\n'
+		return r == ';' || r == '\n' || r == '\r'
 	})
 	result := make([]string, 0, len(fields))
 	for _, field := range fields {

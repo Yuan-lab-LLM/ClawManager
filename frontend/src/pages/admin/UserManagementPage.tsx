@@ -4,12 +4,45 @@ import { useI18n } from '../../contexts/I18nContext';
 import { enterpriseAuthService } from '../../services/enterpriseAuthService';
 import type { EnterpriseAuthStatus } from '../../services/enterpriseAuthService';
 import { userService } from '../../services/userService';
-import type { CreateUserRequest, ImportUsersResponse } from '../../services/userService';
+import type { CreateUserRequest, ImportUsersResponse, LDAPImportRequest, LDAPImportUser } from '../../services/userService';
 import type { User, UserQuota } from '../../types/user';
+import { localizeEnterpriseAuthIssue } from '../../utils/enterpriseAuthErrors';
 
 const USERS_PAGE_SIZE = 20;
 type UserFilter = 'all' | 'local' | 'ldap' | 'inactive' | 'admin';
 type EnterpriseAuthTone = 'success' | 'warning' | 'error' | 'neutral';
+type CreateUserField = 'username' | 'email' | 'role';
+type ImportQuotaValues = Omit<LDAPImportRequest, 'role'>;
+
+const DEFAULT_USER_IMPORT_QUOTA: ImportQuotaValues = {
+  max_instances: 10,
+  max_cpu_cores: 40,
+  max_memory_gb: 100,
+  max_storage_gb: 500,
+  max_gpu_count: 2,
+};
+
+const DEFAULT_ADMIN_IMPORT_QUOTA: ImportQuotaValues = {
+  max_instances: 100,
+  max_cpu_cores: 200,
+  max_memory_gb: 1000,
+  max_storage_gb: 5000,
+  max_gpu_count: 10,
+};
+
+function quotaValuesEqual(left: ImportQuotaValues, right: ImportQuotaValues) {
+  return left.max_instances === right.max_instances &&
+    left.max_cpu_cores === right.max_cpu_cores &&
+    left.max_memory_gb === right.max_memory_gb &&
+    left.max_storage_gb === right.max_storage_gb &&
+    left.max_gpu_count === right.max_gpu_count;
+}
+
+function quotaForImportRole(role: 'admin' | 'user', requested: ImportQuotaValues, roleSyncEnabled = false) {
+  return role === 'admin' && (roleSyncEnabled || quotaValuesEqual(requested, DEFAULT_USER_IMPORT_QUOTA))
+    ? DEFAULT_ADMIN_IMPORT_QUOTA
+    : requested;
+}
 
 const getEnterpriseAuthToneClasses = (tone: EnterpriseAuthTone) => {
   switch (tone) {
@@ -47,8 +80,11 @@ const UserManagementPage: React.FC = () => {
   const [totalUsers, setTotalUsers] = useState(0);
   const [loading, setLoading] = useState(true);
   const [enterpriseAuthStatus, setEnterpriseAuthStatus] = useState<EnterpriseAuthStatus | null>(null);
+  const [enterpriseAuthSyncRole, setEnterpriseAuthSyncRole] = useState(false);
   const [enterpriseAuthLoading, setEnterpriseAuthLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [createUserError, setCreateUserError] = useState<string | null>(null);
+  const [createUserFieldErrors, setCreateUserFieldErrors] = useState<Partial<Record<CreateUserField, string>>>({});
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [showQuotaModal, setShowQuotaModal] = useState(false);
   const [showRoleModal, setShowRoleModal] = useState(false);
@@ -64,13 +100,21 @@ const UserManagementPage: React.FC = () => {
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState<ImportUsersResponse | null>(null);
+  const [importMode, setImportMode] = useState<'csv' | 'ldap'>('csv');
+  const [ldapPreview, setLdapPreview] = useState<LDAPImportUser[]>([]);
+  const [ldapPreviewLoading, setLdapPreviewLoading] = useState(false);
+  const [ldapPreviewQuery, setLdapPreviewQuery] = useState('');
+  const [ldapPreviewLimit, setLdapPreviewLimit] = useState(100);
+  const [selectedLDAPExternalIDs, setSelectedLDAPExternalIDs] = useState<string[]>([]);
+  const [ldapImportConfig, setLdapImportConfig] = useState<LDAPImportRequest>({
+    role: 'user', ...DEFAULT_USER_IMPORT_QUOTA,
+  });
   const importInputRef = useRef<HTMLInputElement | null>(null);
   const [newUser, setNewUser] = useState<CreateUserRequest>({
     username: '',
     email: '',
     password: '',
     role: 'user',
-    auth_provider: 'local',
   });
 
   const loadUsers = useCallback(async (targetPage: number) => {
@@ -110,13 +154,15 @@ const UserManagementPage: React.FC = () => {
     const loadEnterpriseAuthStatus = async () => {
       try {
         setEnterpriseAuthLoading(true);
-        const status = await enterpriseAuthService.getStatus();
+        const config = await enterpriseAuthService.getConfig();
         if (!cancelled) {
-          setEnterpriseAuthStatus(status);
+          setEnterpriseAuthStatus(config.status);
+          setEnterpriseAuthSyncRole(config.sync_role);
         }
       } catch {
         if (!cancelled) {
           setEnterpriseAuthStatus(null);
+          setEnterpriseAuthSyncRole(false);
         }
       } finally {
         if (!cancelled) {
@@ -209,7 +255,10 @@ const UserManagementPage: React.FC = () => {
       return {
         tone: 'error',
         message: t('userManagementPage.enterpriseUnhealthyMessage', {
-          error: enterpriseAuthStatus.error || t('userManagementPage.enterpriseUnknownError'),
+          error: localizeEnterpriseAuthIssue(
+            enterpriseAuthStatus.error,
+            t,
+          ) || t('userManagementPage.enterpriseUnknownError'),
         }),
       };
     }
@@ -221,6 +270,17 @@ const UserManagementPage: React.FC = () => {
     }
     return null;
   }, [enterpriseAuthLoading, enterpriseAuthStatus, t]);
+  const importableLDAPUsers = useMemo(
+    () => ldapPreview.filter((user) => user.status === 'ready' || user.status === 'pending_alias'),
+    [ldapPreview],
+  );
+  const selectedLDAPSet = useMemo(() => new Set(selectedLDAPExternalIDs), [selectedLDAPExternalIDs]);
+  const selectedLDAPImportableCount = useMemo(
+    () => importableLDAPUsers.filter((user) => selectedLDAPSet.has(user.external_id)).length,
+    [importableLDAPUsers, selectedLDAPSet],
+  );
+  const allImportableLDAPSelected = importableLDAPUsers.length > 0 &&
+    selectedLDAPImportableCount === importableLDAPUsers.length;
 
   const handleDeleteClick = (user: User) => {
     setUserToDelete(user);
@@ -344,13 +404,24 @@ const UserManagementPage: React.FC = () => {
   };
 
   const handleAddUser = async () => {
+    setCreateUserError(null);
+    setCreateUserFieldErrors({});
     try {
       await userService.createUser(newUser);
       setShowAddModal(false);
-      setNewUser({ username: '', email: '', password: '', role: 'user', auth_provider: 'local' });
+      setCreateUserError(null);
+      setCreateUserFieldErrors({});
+      setNewUser({ username: '', email: '', password: '', role: 'user' });
       await loadUsers(page);
     } catch (err: unknown) {
-      setError(getRequestErrorMessage(err, t('userManagementPage.createFailed')));
+      const createError = getCreateUserError(err, t);
+      if (createError.field) {
+        setCreateUserFieldErrors({ [createError.field]: createError.message });
+        setCreateUserError(null);
+      } else {
+        setCreateUserFieldErrors({});
+        setCreateUserError(createError.message);
+      }
     }
   };
 
@@ -375,6 +446,70 @@ const UserManagementPage: React.FC = () => {
     }
   };
 
+  const handlePreviewLDAPUsers = async () => {
+    try {
+      setLdapPreviewLoading(true);
+      setError(null);
+      const result = await userService.previewLDAPUsers({
+        query: ldapPreviewQuery.trim() || undefined,
+        limit: ldapPreviewLimit || undefined,
+      });
+      setLdapPreview(result.users || []);
+      setSelectedLDAPExternalIDs((current) => {
+        const available = new Set((result.users || [])
+          .filter((user) => user.status === 'ready' || user.status === 'pending_alias')
+          .map((user) => user.external_id));
+        return current.filter((externalID) => available.has(externalID));
+      });
+    } catch (err: unknown) {
+      setError(localizeEnterpriseAuthIssue(
+        getRequestErrorMessage(err, t('userManagementPage.ldapPreviewFailed')),
+        t,
+      ));
+    } finally {
+      setLdapPreviewLoading(false);
+    }
+  };
+
+  const handleImportLDAPUsers = async () => {
+    if (selectedLDAPImportableCount === 0) return;
+    try {
+      setImporting(true);
+      setError(null);
+      const result = await userService.importLDAPUsers({
+        ...ldapImportConfig,
+        query: ldapPreviewQuery.trim() || undefined,
+        limit: ldapPreviewLimit || undefined,
+        external_ids: selectedLDAPExternalIDs,
+      });
+      setImportResult(result);
+      setShowImportModal(false);
+      setLdapPreview([]);
+      setSelectedLDAPExternalIDs([]);
+      await loadUsers(1);
+    } catch (err: unknown) {
+      setError(localizeEnterpriseAuthIssue(
+        getRequestErrorMessage(err, t('userManagementPage.importFailed')),
+        t,
+      ));
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const toggleLDAPSelection = (externalID: string, checked: boolean) => {
+    setSelectedLDAPExternalIDs((current) => {
+      if (checked) {
+        return current.includes(externalID) ? current : [...current, externalID];
+      }
+      return current.filter((item) => item !== externalID);
+    });
+  };
+
+  const toggleAllImportableLDAPSelection = (checked: boolean) => {
+    setSelectedLDAPExternalIDs(checked ? importableLDAPUsers.map((user) => user.external_id) : []);
+  };
+
   const handleDownloadTemplate = () => {
     const template = [
       [
@@ -382,6 +517,7 @@ const UserManagementPage: React.FC = () => {
         'Email',
         'Role',
         'Auth Provider',
+        'External ID',
         'Password (optional)',
         'Max Instances',
         'Max CPU Cores',
@@ -389,10 +525,10 @@ const UserManagementPage: React.FC = () => {
         'Max Storage (GB)',
         'Max GPU Count (optional)',
       ],
-      ['alice', 'alice@example.com', 'user', 'ldap', '', '10', '40', '100', '500', '2'],
-      ['bob', '', 'admin', 'local', 'admin123', '20', '80', '200', '1000', '4'],
+      ['alice', 'alice@example.com', 'user', 'ldap', 'uid=alice,ou=users,dc=example,dc=com', '', '10', '40', '100', '500', '2'],
+      ['bob', '', 'admin', 'local', '', 'admin123', '20', '80', '200', '1000', '4'],
     ]
-      .map((row) => row.join(','))
+      .map((row) => row.map((value) => /[",\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value).join(','))
       .join('\n');
 
     const blob = new Blob([template], { type: 'text/csv;charset=utf-8;' });
@@ -428,10 +564,17 @@ const UserManagementPage: React.FC = () => {
           <span>{enterpriseAuthSummary.label}</span>
         </div>
         <div className="flex justify-end gap-3">
-          <button onClick={() => setShowImportModal(true)} className="app-button-secondary">
+          <button onClick={() => { setImportMode('csv'); setShowImportModal(true); }} className="app-button-secondary">
             {t('userManagementPage.importUsers')}
           </button>
-          <button onClick={() => setShowAddModal(true)} className="app-button-primary">
+          <button
+            onClick={() => {
+              setShowAddModal(true);
+              setCreateUserError(null);
+              setCreateUserFieldErrors({});
+            }}
+            className="app-button-primary"
+          >
             {t('admin.addUser')}
           </button>
         </div>
@@ -465,9 +608,14 @@ const UserManagementPage: React.FC = () => {
                     created: importResult.created_count,
                     failed: importResult.failed_count,
                   })}
+                  {typeof importResult.skipped_count === 'number' && (
+                    <span className="ml-2 text-amber-700">
+                      {t('userManagementPage.importSkipped', { skipped: importResult.skipped_count })}
+                    </span>
+                  )}
                 </div>
                 <div className="mt-1 text-[#8f5b4b]">
-                  {t('userManagementPage.expectedColumns')} <code>Username,Email,Role,Auth Provider,Password (optional),Max Instances,Max CPU Cores,Max Memory (GB),Max Storage (GB),Max GPU Count (optional)</code>
+                  {t('userManagementPage.expectedColumns')} <code>Username,Email,Role,Auth Provider,External ID,Password (optional),Max Instances,Max CPU Cores,Max Memory (GB),Max Storage (GB),Max GPU Count (optional)</code>
                 </div>
               </div>
               <button
@@ -485,7 +633,7 @@ const UserManagementPage: React.FC = () => {
                       {t('userManagementPage.lineError', {
                         line: item.line,
                         username: item.username ? ` (${item.username})` : '',
-                      })}: {item.error}
+                      })}: {localizeEnterpriseAuthIssue(item.error, t)}
                     </li>
                   ))}
                 </ul>
@@ -497,8 +645,13 @@ const UserManagementPage: React.FC = () => {
                 <ul className="space-y-2">
                   {importResult.created_users.map((item, index) => (
                     <li key={`${item.username}-${index}`} className="rounded-md bg-[#fff8f5] px-3 py-2 text-sm text-[#5f5957]">
-                      <div><span className="font-medium text-[#171212]">{item.username}</span> · {item.role} · {item.auth_provider || 'local'}</div>
+                      <div><span className="font-medium text-[#171212]">{item.username}</span>{item.login_alias ? ` · ${item.login_alias}` : ''} · {item.role} · {item.auth_provider || 'local'}</div>
                       <div>{t('auth.email')}: {item.email}</div>
+                      {item.warning_codes?.map((warningCode) => (
+                        <div key={warningCode} className="text-amber-700">
+                          {warningCode === 'ldap_password_ignored' ? t('userManagementPage.ldapPasswordIgnored') : warningCode}
+                        </div>
+                      ))}
                       <div>
                         {t('userManagementPage.quota')}: {item.max_instances} / {item.max_cpu_cores} CPU / {item.max_memory_gb} GB / {item.max_storage_gb} GB / {item.max_gpu_count} GPU
                       </div>
@@ -574,6 +727,7 @@ const UserManagementPage: React.FC = () => {
                     <tr key={user.id}>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="text-sm font-medium text-gray-900">{user.username}</div>
+                        {user.login_alias && <div className="text-xs text-gray-500">{user.login_alias}</div>}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="text-sm text-gray-500">{user.email}</div>
@@ -695,64 +849,149 @@ const UserManagementPage: React.FC = () => {
           className="fixed inset-0 h-full w-full overflow-y-auto bg-gray-600 bg-opacity-50"
           onClick={(e) => handleModalBackgroundClick(e, () => setShowImportModal(false))}
         >
-          <div className="relative top-20 mx-auto w-[28rem] rounded-md border bg-white p-5 shadow-lg">
+          <div className="relative top-12 mx-auto w-[min(42rem,calc(100%-2rem))] rounded-md border bg-white p-5 shadow-lg">
             <h3 className="mb-4 text-lg font-medium text-gray-900">
               {t('userManagementPage.importUsers')}
             </h3>
-            <div className="space-y-4">
-              <div className="rounded-lg border border-[#eadfd8] bg-[#fff8f5] p-3 text-sm text-[#5f5957]">
-                <div className="font-medium text-[#171212]">{t('userManagementPage.supportedFormat')}</div>
-                <div className="mt-1">{t('userManagementPage.csvHeaders')}</div>
-                <code className="mt-2 block rounded bg-white px-2 py-1 text-xs">Username,Email,Role,Auth Provider,Password (optional),Max Instances,Max CPU Cores,Max Memory (GB),Max Storage (GB),Max GPU Count (optional)</code>
-                <div className="mt-2 text-xs text-[#8f5b4b]">
-                  {t('userManagementPage.csvHelp')}
-                </div>
-                <button
-                  type="button"
-                  onClick={handleDownloadTemplate}
-                  className="mt-3 inline-flex items-center rounded-md border border-[#eadfd8] bg-white px-3 py-2 text-sm font-medium text-[#5f5957] hover:bg-[#fff2ea]"
-                >
-                  {t('userManagementPage.downloadTemplate')}
-                </button>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700">
-                  {t('userManagementPage.importFile')}
-                </label>
-                <input
-                  ref={importInputRef}
-                  type="file"
-                  accept=".csv"
-                  onChange={(e) => setImportFile(e.target.files?.[0] || null)}
-                  className="hidden"
-                />
-                <div className="mt-2 flex items-center gap-3">
-                  <button
-                    type="button"
-                    onClick={() => importInputRef.current?.click()}
-                    className="rounded-md bg-[#ef4444] px-4 py-2 text-sm font-medium text-white hover:bg-[#dc2626]"
-                  >
-                    {t('userManagementPage.chooseFile')}
-                  </button>
-                  <span className="text-sm text-gray-500">
-                    {importFile ? importFile.name : t('userManagementPage.noFileSelected')}
-                  </span>
-                </div>
-              </div>
+            <div className="mb-4 flex gap-2 border-b border-gray-200">
+              <button type="button" onClick={() => setImportMode('csv')} className={`border-b-2 px-3 py-2 text-sm font-medium ${importMode === 'csv' ? 'border-red-500 text-red-600' : 'border-transparent text-gray-500'}`}>{t('userManagementPage.csvImport')}</button>
+              <button type="button" disabled={!enterpriseAuthStatus?.enabled || !enterpriseAuthStatus.configured || Object.values(enterpriseAuthStatus.checks || {}).includes('failed')} onClick={() => { setImportMode('ldap'); if (ldapPreview.length === 0) void handlePreviewLDAPUsers(); }} className={`border-b-2 px-3 py-2 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-40 ${importMode === 'ldap' ? 'border-red-500 text-red-600' : 'border-transparent text-gray-500'}`}>{t('userManagementPage.ldapImport')}</button>
             </div>
+            {importMode === 'csv' ? (
+              <div className="space-y-4">
+                <div className="rounded-lg border border-[#eadfd8] bg-[#fff8f5] p-3 text-sm text-[#5f5957]">
+                  <div className="font-medium text-[#171212]">{t('userManagementPage.supportedFormat')}</div>
+                  <div className="mt-1">{t('userManagementPage.csvHeaders')}</div>
+                  <code className="mt-2 block rounded bg-white px-2 py-1 text-xs">Username,Email,Role,Auth Provider,External ID,Password (optional),Max Instances,Max CPU Cores,Max Memory (GB),Max Storage (GB),Max GPU Count (optional)</code>
+                  <div className="mt-2 text-xs text-[#8f5b4b]">{t('userManagementPage.csvHelp')}</div>
+                  <button type="button" onClick={handleDownloadTemplate} className="mt-3 inline-flex items-center rounded-md border border-[#eadfd8] bg-white px-3 py-2 text-sm font-medium text-[#5f5957] hover:bg-[#fff2ea]">{t('userManagementPage.downloadTemplate')}</button>
+                </div>
+                <input ref={importInputRef} type="file" accept=".csv" onChange={(e) => setImportFile(e.target.files?.[0] || null)} className="hidden" />
+                <div className="flex items-center gap-3"><button type="button" onClick={() => importInputRef.current?.click()} className="rounded-md bg-[#ef4444] px-4 py-2 text-sm font-medium text-white hover:bg-[#dc2626]">{t('userManagementPage.chooseFile')}</button><span className="text-sm text-gray-500">{importFile ? importFile.name : t('userManagementPage.noFileSelected')}</span></div>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {enterpriseAuthSyncRole && (
+                  <div className="rounded-lg border border-blue-100 bg-blue-50 p-3 text-sm text-blue-800">
+                    {t('userManagementPage.ldapSyncRoleNotice')}
+                  </div>
+                )}
+                {ldapPreviewLoading ? <div className="py-8 text-center text-sm text-gray-500">{t('userManagementPage.ldapLoading')}</div> : (
+                  <>
+                    <div className="grid grid-cols-1 gap-3 rounded-lg border border-gray-200 bg-gray-50 p-3 sm:grid-cols-[1fr_8rem_auto] sm:items-end">
+                      <label className="text-sm text-gray-700">
+                        {t('userManagementPage.ldapSearch')}
+                        <input
+                          type="search"
+                          value={ldapPreviewQuery}
+                          onChange={(event) => setLdapPreviewQuery(event.target.value)}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter') void handlePreviewLDAPUsers();
+                          }}
+                          className="mt-1 block w-full rounded border px-2 py-2"
+                          placeholder={t('userManagementPage.ldapSearchPlaceholder')}
+                        />
+                      </label>
+                      <label className="text-sm text-gray-700">
+                        {t('userManagementPage.ldapPreviewLimit')}
+                        <input
+                          type="number"
+                          min="1"
+                          value={ldapPreviewLimit}
+                          onChange={(event) => setLdapPreviewLimit(Number(event.target.value) || 100)}
+                          className="mt-1 block w-full rounded border px-2 py-2"
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => void handlePreviewLDAPUsers()}
+                        className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100"
+                      >
+                        {t('userManagementPage.ldapRefreshPreview')}
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-4 gap-2 text-center text-sm"><div className="rounded bg-gray-50 p-2"><b>{ldapPreview.length}</b><div>{t('userManagementPage.ldapTotal')}</div></div><div className="rounded bg-green-50 p-2"><b>{importableLDAPUsers.length}</b><div>{t('userManagementPage.ldapReady')}</div></div><div className="rounded bg-blue-50 p-2"><b>{selectedLDAPImportableCount}</b><div>{t('userManagementPage.ldapSelected')}</div></div><div className="rounded bg-amber-50 p-2"><b>{ldapPreview.length - importableLDAPUsers.length}</b><div>{t('userManagementPage.ldapSkipped')}</div></div></div>
+                    <div className="max-h-48 overflow-auto rounded border border-gray-200">
+                      <table className="min-w-full text-left text-sm">
+                        <thead className="bg-gray-50">
+                          <tr>
+                            <th className="w-10 px-3 py-2">
+                              <input
+                                type="checkbox"
+                                checked={allImportableLDAPSelected}
+                                disabled={importableLDAPUsers.length === 0}
+                                onChange={(event) => toggleAllImportableLDAPSelection(event.target.checked)}
+                              />
+                            </th>
+                            <th className="px-3 py-2">{t('auth.username')}</th>
+                            <th className="px-3 py-2">{t('auth.email')}</th>
+                            <th className="px-3 py-2">{t('userManagementPage.ldapRole')}</th>
+                            <th className="px-3 py-2">{t('userManagementPage.quota')}</th>
+                            <th className="px-3 py-2">{t('common.status')}</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {ldapPreview.map((user) => {
+                            const role = (enterpriseAuthSyncRole ? user.role : ldapImportConfig.role) === 'admin' ? 'admin' : 'user';
+                            const previewQuota = quotaForImportRole(role, ldapImportConfig, enterpriseAuthSyncRole);
+                            const importable = user.status === 'ready' || user.status === 'pending_alias';
+                            return (
+                              <tr key={user.external_id} className="border-t">
+                                <td className="px-3 py-2">
+                                  <input
+                                    type="checkbox"
+                                    checked={selectedLDAPSet.has(user.external_id)}
+                                    disabled={!importable}
+                                    onChange={(event) => toggleLDAPSelection(user.external_id, event.target.checked)}
+                                  />
+                                </td>
+                                <td className="px-3 py-2">{user.username || '-'}</td>
+                                <td className="px-3 py-2">{user.email || '-'}</td>
+                                <td className="px-3 py-2">{role === 'admin' ? t('common.admin') : t('common.user')}</td>
+                                <td className="px-3 py-2 text-xs text-gray-600">{previewQuota.max_instances} / {previewQuota.max_cpu_cores} CPU / {previewQuota.max_memory_gb} GB / {previewQuota.max_storage_gb} GB / {previewQuota.max_gpu_count} GPU</td>
+                                <td className="px-3 py-2">{user.status === 'ready' ? t('userManagementPage.ldapReady') : user.status === 'pending_alias' ? t('userManagementPage.ldapPendingAlias') : user.status === 'exists' ? t('userManagementPage.ldapExists') : (localizeEnterpriseAuthIssue(user.error, t) || t('userManagementPage.ldapInvalid'))}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                      {([['role', t('admin.role')], ['max_instances', t('userManagementPage.maxInstances')], ['max_cpu_cores', t('userManagementPage.maxCpuCores')], ['max_memory_gb', t('userManagementPage.maxMemoryGb')], ['max_storage_gb', t('userManagementPage.maxStorageGb')], ['max_gpu_count', t('userManagementPage.maxGpuCount')]] as const).map(([key, label]) => (
+                        key === 'role' && enterpriseAuthSyncRole ? null : (
+                          <label key={key} className="text-sm text-gray-700">
+                            {label}
+                            {key === 'role' ? (
+                              <select value={ldapImportConfig.role} onChange={(e) => setLdapImportConfig({ ...ldapImportConfig, role: e.target.value as 'admin' | 'user' })} className="mt-1 block w-full rounded border px-2 py-2">
+                                <option value="user">{t('common.user')}</option>
+                                <option value="admin">{t('common.admin')}</option>
+                              </select>
+                            ) : (
+                              <input type="number" min="0" value={ldapImportConfig[key]} onChange={(e) => setLdapImportConfig({ ...ldapImportConfig, [key]: Number(e.target.value) })} className="mt-1 block w-full rounded border px-2 py-2" />
+                            )}
+                          </label>
+                        )
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
             <div className="mt-4 flex justify-end space-x-2">
               <button
                 onClick={() => {
                   setShowImportModal(false);
                   setImportFile(null);
+                  setLdapPreview([]);
+                  setSelectedLDAPExternalIDs([]);
                 }}
                 className="rounded-md bg-gray-300 px-4 py-2 text-gray-700 hover:bg-gray-400"
               >
                 {t('common.cancel')}
               </button>
               <button
-                onClick={handleImportUsers}
-                disabled={!importFile || importing}
+                onClick={importMode === 'csv' ? handleImportUsers : handleImportLDAPUsers}
+                disabled={importing || (importMode === 'csv' ? !importFile : selectedLDAPImportableCount === 0)}
                 className="rounded-md bg-[#ef4444] px-4 py-2 text-white hover:bg-[#dc2626] disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {importing ? t('userManagementPage.importing') : t('userManagementPage.startImport')}
@@ -765,12 +1004,21 @@ const UserManagementPage: React.FC = () => {
       {showAddModal && (
         <div
           className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full"
-          onClick={(e) => handleModalBackgroundClick(e, () => setShowAddModal(false))}
+          onClick={(e) => handleModalBackgroundClick(e, () => {
+            setShowAddModal(false);
+            setCreateUserError(null);
+            setCreateUserFieldErrors({});
+          })}
         >
           <div className="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
             <h3 className="text-lg font-medium text-gray-900 mb-4">
               {t('userManagementPage.addNewUser')}
             </h3>
+            {createUserError && (
+              <div className="mb-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
+                {createUserError}
+              </div>
+            )}
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700">
@@ -779,10 +1027,21 @@ const UserManagementPage: React.FC = () => {
                 <input
                   type="text"
                   value={newUser.username}
-                  onChange={(e) => setNewUser({ ...newUser, username: e.target.value })}
-                  className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md"
+                  onChange={(e) => {
+                    setNewUser({ ...newUser, username: e.target.value });
+                    setCreateUserFieldErrors((current) => ({ ...current, username: undefined }));
+                    setCreateUserError(null);
+                  }}
+                  aria-invalid={Boolean(createUserFieldErrors.username)}
+                  aria-describedby={createUserFieldErrors.username ? 'create-user-username-error' : undefined}
+                  className={`mt-1 block w-full rounded-md border px-3 py-2 ${createUserFieldErrors.username ? 'border-red-400' : 'border-gray-300'}`}
                   placeholder={t('auth.usernamePlaceholder')}
                 />
+                {createUserFieldErrors.username && (
+                  <p id="create-user-username-error" className="mt-1 text-sm text-red-600" role="alert">
+                    {createUserFieldErrors.username}
+                  </p>
+                )}
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700">
@@ -791,10 +1050,21 @@ const UserManagementPage: React.FC = () => {
                 <input
                   type="email"
                   value={newUser.email}
-                  onChange={(e) => setNewUser({ ...newUser, email: e.target.value })}
-                  className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md"
+                  onChange={(e) => {
+                    setNewUser({ ...newUser, email: e.target.value });
+                    setCreateUserFieldErrors((current) => ({ ...current, email: undefined }));
+                    setCreateUserError(null);
+                  }}
+                  aria-invalid={Boolean(createUserFieldErrors.email)}
+                  aria-describedby={createUserFieldErrors.email ? 'create-user-email-error' : undefined}
+                  className={`mt-1 block w-full rounded-md border px-3 py-2 ${createUserFieldErrors.email ? 'border-red-400' : 'border-gray-300'}`}
                   placeholder={t('auth.enterEmail')}
                 />
+                {createUserFieldErrors.email && (
+                  <p id="create-user-email-error" className="mt-1 text-sm text-red-600" role="alert">
+                    {createUserFieldErrors.email}
+                  </p>
+                )}
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700">
@@ -802,41 +1072,35 @@ const UserManagementPage: React.FC = () => {
                 </label>
                 <select
                   value={newUser.role}
-                  onChange={(e) => setNewUser({ ...newUser, role: e.target.value as 'admin' | 'user' })}
-                  className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md"
+                  onChange={(e) => {
+                    setNewUser({ ...newUser, role: e.target.value as 'admin' | 'user' });
+                    setCreateUserFieldErrors((current) => ({ ...current, role: undefined }));
+                    setCreateUserError(null);
+                  }}
+                  aria-invalid={Boolean(createUserFieldErrors.role)}
+                  aria-describedby={createUserFieldErrors.role ? 'create-user-role-error' : undefined}
+                  className={`mt-1 block w-full rounded-md border px-3 py-2 ${createUserFieldErrors.role ? 'border-red-400' : 'border-gray-300'}`}
                 >
                   <option value="user">{t('common.user')}</option>
                   <option value="admin">{t('common.admin')}</option>
                 </select>
+                {createUserFieldErrors.role && (
+                  <p id="create-user-role-error" className="mt-1 text-sm text-red-600" role="alert">
+                    {createUserFieldErrors.role}
+                  </p>
+                )}
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700">
-                  {t('userManagementPage.authProvider')}
-                </label>
-                <select
-                  value={newUser.auth_provider || 'local'}
-                  onChange={(e) => setNewUser({ ...newUser, auth_provider: e.target.value as 'local' | 'ldap' })}
-                  className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md"
-                >
-                  <option value="local">{t('userManagementPage.authProviderLocal')}</option>
-                  <option value="ldap">{t('userManagementPage.authProviderLdap')}</option>
-                </select>
+              <div className="rounded-md border border-[#eadfd8] bg-[#fff8f5] px-3 py-2 text-sm text-[#5f5957]">
+                {t('userManagementPage.initialPassword')}: <span className="font-medium">{newUser.role === 'admin' ? 'admin123' : 'user123'}</span>
               </div>
-              {newUser.auth_provider === 'ldap' ? (
-                <div className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-800">
-                  {enterpriseAuthStatus?.enabled
-                    ? t('userManagementPage.ldapCreateHelp')
-                    : t('userManagementPage.ldapCreateDisabledHelp')}
-                </div>
-              ) : (
-                <div className="rounded-md border border-[#eadfd8] bg-[#fff8f5] px-3 py-2 text-sm text-[#5f5957]">
-                  {t('userManagementPage.initialPassword')}: <span className="font-medium">{newUser.role === 'admin' ? 'admin123' : 'user123'}</span>
-                </div>
-              )}
             </div>
             <div className="mt-4 flex justify-end space-x-2">
               <button
-                onClick={() => setShowAddModal(false)}
+                onClick={() => {
+                  setShowAddModal(false);
+                  setCreateUserError(null);
+                  setCreateUserFieldErrors({});
+                }}
                 className="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400"
               >
                 {t('common.cancel')}
@@ -1055,6 +1319,32 @@ function getRequestErrorMessage(err: unknown, fallback: string) {
   }
 
   return fallback;
+}
+
+function getCreateUserError(
+  err: unknown,
+  translate: (key: string) => string,
+): { message: string; field?: CreateUserField } {
+  const rawMessage = getRequestErrorMessage(err, '').trim();
+  const knownErrors: Record<string, { key: string; field?: CreateUserField }> = {
+    'Username is required': { key: 'userManagementPage.createUsernameRequired', field: 'username' },
+    'Username must be at least 3 characters': { key: 'userManagementPage.createUsernameMinLength', field: 'username' },
+    'Username must be at most 32 characters': { key: 'userManagementPage.createUsernameMaxLength', field: 'username' },
+    'Username must be alphanumeric': { key: 'userManagementPage.createUsernameAlphanumeric', field: 'username' },
+    'Email is required': { key: 'userManagementPage.createEmailRequired', field: 'email' },
+    'Email must be a valid email': { key: 'userManagementPage.createEmailInvalid', field: 'email' },
+    'Role is required': { key: 'userManagementPage.createRoleRequired', field: 'role' },
+    'Role is invalid': { key: 'userManagementPage.createRoleInvalid', field: 'role' },
+    'username already exists': { key: 'userManagementPage.createUsernameExists' },
+    'email already exists': { key: 'userManagementPage.createEmailExists' },
+    'local usernames cannot start with ldap_': { key: 'userManagementPage.createReservedUsername', field: 'username' },
+    'LDAP users must be imported from LDAP': { key: 'userManagementPage.createLdapNotAllowed' },
+  };
+  const knownError = knownErrors[rawMessage];
+
+  return knownError
+    ? { message: translate(knownError.key), field: knownError.field }
+    : { message: translate('userManagementPage.createFailed') };
 }
 
 export default UserManagementPage;

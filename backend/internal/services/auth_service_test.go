@@ -38,12 +38,15 @@ func TestLoginEnterpriseRejectsUnprovisionedLDAPUser(t *testing.T) {
 
 func TestLoginEnterpriseAllowsProvisionedLDAPUser(t *testing.T) {
 	userRepo := newFakeUserRepo()
+	externalID := "uid=alice,ou=People,dc=example,dc=com"
 	if err := userRepo.Create(&models.User{
 		Username:     "alice",
 		Email:        "alice@example.com",
 		PasswordHash: "external:ldap",
 		Role:         "user",
 		AuthProvider: AuthProviderLDAP,
+		LoginAlias:   stringPtr("ldap_alice"),
+		ExternalID:   &externalID,
 		IsActive:     true,
 		CreatedAt:    time.Now(),
 		UpdatedAt:    time.Now(),
@@ -60,7 +63,7 @@ func TestLoginEnterpriseAllowsProvisionedLDAPUser(t *testing.T) {
 		},
 	})
 
-	tokenPair, err := auth.Login("alice", "secret")
+	tokenPair, err := auth.Login("ldap_alice", "secret")
 	if err != nil {
 		t.Fatalf("Login returned error: %v", err)
 	}
@@ -97,6 +100,7 @@ func TestLoginEnterpriseRejectsDisabledProvisionedLDAPUser(t *testing.T) {
 		PasswordHash: "external:ldap",
 		Role:         "user",
 		AuthProvider: AuthProviderLDAP,
+		LoginAlias:   stringPtr("ldap_alice"),
 		IsActive:     false,
 		CreatedAt:    time.Now(),
 		UpdatedAt:    time.Now(),
@@ -113,7 +117,7 @@ func TestLoginEnterpriseRejectsDisabledProvisionedLDAPUser(t *testing.T) {
 		},
 	})
 
-	if _, err := auth.Login("alice", "secret"); err == nil || err.Error() != "account is disabled" {
+	if _, err := auth.Login("ldap_alice", "secret"); err == nil || err.Error() != "invalid username or password" {
 		t.Fatalf("Login error = %v, want account is disabled", err)
 	}
 }
@@ -127,6 +131,7 @@ func TestLoginEnterpriseRejectsExternalIdentityConflict(t *testing.T) {
 		PasswordHash: "external:ldap",
 		Role:         "user",
 		AuthProvider: AuthProviderLDAP,
+		LoginAlias:   stringPtr("ldap_alice"),
 		ExternalID:   &conflictingDN,
 		IsActive:     true,
 		CreatedAt:    time.Now(),
@@ -140,6 +145,8 @@ func TestLoginEnterpriseRejectsExternalIdentityConflict(t *testing.T) {
 		PasswordHash: "external:ldap",
 		Role:         "user",
 		AuthProvider: AuthProviderLDAP,
+		LoginAlias:   stringPtr("ldap_alice"),
+		ExternalID:   stringPtr("uid=alice,ou=People,dc=example,dc=com"),
 		IsActive:     true,
 		CreatedAt:    time.Now(),
 		UpdatedAt:    time.Now(),
@@ -163,12 +170,15 @@ func TestLoginEnterpriseRejectsExternalIdentityConflict(t *testing.T) {
 
 func TestLoginEnterpriseSyncsRoleWhenEnabled(t *testing.T) {
 	userRepo := newFakeUserRepo()
+	quotaRepo := newQuotaRoleTestRepo()
 	if err := userRepo.Create(&models.User{
 		Username:     "alice",
 		Email:        "alice@example.com",
 		PasswordHash: "external:ldap",
 		Role:         "user",
 		AuthProvider: AuthProviderLDAP,
+		LoginAlias:   stringPtr("ldap_alice"),
+		ExternalID:   stringPtr("uid=alice,ou=People,dc=example,dc=com"),
 		IsActive:     true,
 		CreatedAt:    time.Now(),
 		UpdatedAt:    time.Now(),
@@ -189,8 +199,9 @@ func TestLoginEnterpriseSyncsRoleWhenEnabled(t *testing.T) {
 			},
 		},
 		WithEnterpriseAuthPolicy(config.EnterpriseAuthConfig{AllowLocalFallback: true, SyncRole: true}),
+		WithQuotaRepository(quotaRepo),
 	)
-	if _, err := auth.Login("alice", "secret"); err != nil {
+	if _, err := auth.Login("ldap_alice", "secret"); err != nil {
 		t.Fatalf("Login returned error: %v", err)
 	}
 	user, err := userRepo.GetByUsername("alice")
@@ -199,6 +210,13 @@ func TestLoginEnterpriseSyncsRoleWhenEnabled(t *testing.T) {
 	}
 	if got, want := user.Role, "admin"; got != want {
 		t.Fatalf("role = %q, want %q", got, want)
+	}
+	quota, err := quotaRepo.GetByUserID(user.ID)
+	if err != nil {
+		t.Fatalf("GetByUserID returned error: %v", err)
+	}
+	if !quota.IsDefaultForRole("admin") {
+		t.Fatalf("quota after LDAP login = %#v, want admin defaults", quota)
 	}
 }
 
@@ -231,7 +249,7 @@ func TestLoginFallsBackToLocalUser(t *testing.T) {
 	}
 }
 
-func TestLoginRejectsLocalFallbackWhenEnterprisePolicyDisablesIt(t *testing.T) {
+func TestLoginWithoutPrefixIgnoresEnterpriseFallbackPolicy(t *testing.T) {
 	userRepo := newFakeUserRepo()
 	passwordHash, err := utils.HashPassword("local-password")
 	if err != nil {
@@ -256,8 +274,8 @@ func TestLoginRejectsLocalFallbackWhenEnterprisePolicyDisablesIt(t *testing.T) {
 		fakeEnterpriseAuth{err: ErrEnterpriseUnavailable},
 		WithEnterpriseAuthPolicy(config.EnterpriseAuthConfig{AllowLocalFallback: false}),
 	)
-	if _, err := auth.Login("admin", "local-password"); err == nil || err.Error() != "invalid username or password" {
-		t.Fatalf("Login error = %v, want invalid username or password", err)
+	if _, err := auth.Login("admin", "local-password"); err != nil {
+		t.Fatalf("unqualified login should use local authentication: %v", err)
 	}
 }
 
@@ -291,7 +309,7 @@ func TestLoginFallsBackToLocalUserWhenLDAPUserNotFound(t *testing.T) {
 	}
 }
 
-func TestLoginRejectsEnterpriseInvalidCredentialsWithoutLocalFallback(t *testing.T) {
+func TestLoginWithoutPrefixUsesLocalAuthentication(t *testing.T) {
 	userRepo := newFakeUserRepo()
 	passwordHash, err := utils.HashPassword("local-password")
 	if err != nil {
@@ -311,8 +329,8 @@ func TestLoginRejectsEnterpriseInvalidCredentialsWithoutLocalFallback(t *testing
 	}
 
 	auth := NewAuthService(userRepo, testJWTConfig(), fakeEnterpriseAuth{err: ErrEnterpriseInvalidCredentials})
-	if _, err := auth.Login("alice", "local-password"); err == nil {
-		t.Fatalf("expected invalid enterprise credentials to reject login without local fallback")
+	if _, err := auth.Login("alice", "local-password"); err != nil {
+		t.Fatalf("unqualified login should use local authentication: %v", err)
 	}
 }
 
@@ -504,6 +522,42 @@ func (r *fakeUserRepo) GetByUsername(username string) (*models.User, error) {
 			clone := *user
 			return &clone, nil
 		}
+	}
+	return nil, nil
+}
+
+func (a fakeEnterpriseAuth) AuthenticateByIdentity(_ context.Context, externalID, _ string) (*EnterpriseUser, error) {
+	if a.err != nil {
+		return nil, a.err
+	}
+	if a.user == nil || a.user.ExternalID != externalID {
+		return nil, ErrEnterpriseUserNotFound
+	}
+	return a.user, nil
+}
+
+func (r *fakeUserRepo) GetByAuthProviderUsername(authProvider, username string) (*models.User, error) {
+	for _, user := range r.users {
+		provider := user.AuthProvider
+		if provider == "" { provider = AuthProviderLocal }
+		if provider == authProvider && user.Username == username { clone := *user; return &clone, nil }
+	}
+	return nil, nil
+}
+
+func (r *fakeUserRepo) CountByAuthProviderUsername(authProvider, username string) (int, error) {
+	count := 0
+	for _, user := range r.users {
+		provider := user.AuthProvider
+		if provider == "" { provider = AuthProviderLocal }
+		if provider == authProvider && user.Username == username { count++ }
+	}
+	return count, nil
+}
+
+func (r *fakeUserRepo) GetByLoginAlias(authProvider, loginAlias string) (*models.User, error) {
+	for _, user := range r.users {
+		if user.AuthProvider == authProvider && user.LoginAlias != nil && *user.LoginAlias == loginAlias { clone := *user; return &clone, nil }
 	}
 	return nil, nil
 }

@@ -63,6 +63,17 @@ func TestNewLDAPAuthenticatorValidatesRequiredConfig(t *testing.T) {
 			},
 			want: "ldap groupFilter must contain %s placeholder",
 		},
+		{
+			name: "ca file requires tls mode",
+			cfg: config.LDAPConfig{
+				Host:        "ldap.example.com",
+				BaseDN:      "dc=example,dc=com",
+				UserFilter:  "(uid=%s)",
+				GroupFilter: "(member=%s)",
+				TLSCAFile:   "/etc/ssl/certs/company-ldap.pem",
+			},
+			want: "ldap TLS CA file requires useTLS or startTLS",
+		},
 	}
 
 	for _, tc := range tests {
@@ -102,6 +113,52 @@ func TestUniqueLDAPAttributesTrimsAndDeduplicates(t *testing.T) {
 	}
 }
 
+func TestLDAPDirectoryFilterUsesWildcardForConfiguredPlaceholder(t *testing.T) {
+	got := ldapDirectoryFilter("(&(objectClass=person)(uid=%s))", "")
+	if got != "(&(objectClass=person)(uid=*))" {
+		t.Fatalf("directory filter = %q", got)
+	}
+}
+
+func TestLDAPDirectoryFilterUsesEscapedContainsQuery(t *testing.T) {
+	got := ldapDirectoryFilter("(&(objectClass=person)(uid=%s))", "ali*ce)")
+	if got != "(&(objectClass=person)(uid=*ali\\2ace\\29*))" {
+		t.Fatalf("directory filter = %q", got)
+	}
+}
+
+func TestLDAPSearchLimit(t *testing.T) {
+	if got := ldapSearchLimit(-1); got != 0 {
+		t.Fatalf("negative limit = %d, want 0", got)
+	}
+	if got := ldapSearchLimit(25); got != 25 {
+		t.Fatalf("limit = %d, want 25", got)
+	}
+}
+
+func TestLDAPSimpleMemberAttribute(t *testing.T) {
+	attribute, ok := ldapSimpleMemberAttribute("(member=%s)")
+	if !ok || attribute != "member" {
+		t.Fatalf("simple member attribute = %q, %v; want member, true", attribute, ok)
+	}
+	if _, ok := ldapSimpleMemberAttribute("(&(objectClass=group)(member=%s))"); ok {
+		t.Fatalf("compound group filter must use per-user fallback")
+	}
+}
+
+func TestLDAPRoleForDNUsePrefetchedAdminMembers(t *testing.T) {
+	authenticator := &LDAPAuthenticator{cfg: config.LDAPConfig{DefaultRole: "user"}}
+	role := authenticator.roleForDN("uid=alice,ou=People,dc=example,dc=com", map[string]struct{}{
+		"uid=alice,ou=people,dc=example,dc=com": {},
+	})
+	if role != "admin" {
+		t.Fatalf("role = %q, want admin", role)
+	}
+	if role := authenticator.roleForDN("uid=bob,ou=People,dc=example,dc=com", nil); role != "user" {
+		t.Fatalf("default role = %q, want user", role)
+	}
+}
+
 func TestLDAPDiagnosticsStatusDisabledSkipsChecks(t *testing.T) {
 	status := NewLDAPDiagnostics(false, config.LDAPConfig{}).Status(context.Background())
 	if status.Enabled {
@@ -127,5 +184,33 @@ func TestLDAPDiagnosticsStatusReportsConfigError(t *testing.T) {
 	}
 	if status.Error != "ldap host is required" {
 		t.Fatalf("status error = %q, want ldap host is required", status.Error)
+	}
+}
+
+func TestLDAPDiagnosticsStatusIncludesDetails(t *testing.T) {
+	status := NewLDAPDiagnostics(true, config.LDAPConfig{
+		Host:          "ldap.example.com",
+		Port:          636,
+		UseTLS:        true,
+		SkipTLSVerify: true,
+		TLSCAFile:     "/etc/ssl/certs/company-ldap.pem",
+		TLSServerName: "ldap.internal.example.com",
+		BaseDN:        "dc=example,dc=com",
+		GroupBaseDN:   "ou=Groups,dc=example,dc=com",
+		UserFilter:    "(uid=%s)",
+		GroupFilter:   "(member=%s)",
+	}).Status(context.Background())
+
+	if got, want := status.Details["tls_mode"], "ldaps"; got != want {
+		t.Fatalf("tls mode = %q, want %q", got, want)
+	}
+	if got, want := status.Details["tls_verify"], "disabled"; got != want {
+		t.Fatalf("tls verify = %q, want %q", got, want)
+	}
+	if got, want := status.Details["tls_server_name"], "ldap.internal.example.com"; got != want {
+		t.Fatalf("tls server name = %q, want %q", got, want)
+	}
+	if got, want := status.Details["group_role_strategy"], "prefetch_admin_group_members"; got != want {
+		t.Fatalf("group role strategy = %q, want %q", got, want)
 	}
 }

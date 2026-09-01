@@ -13,6 +13,7 @@ stringData:
   mysql-root-password: root123
   mysql-password: clawreef123
   jwt-secret: clawreef-dev-secret-key-change-in-production
+  auth-config-encryption-key: clawmanager-auth-key-dev-32byte!
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -658,6 +659,11 @@ spec:
                 secretKeyRef:
                   name: clawreef-secrets
                   key: jwt-secret
+            - name: AUTH_CONFIG_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: clawreef-secrets
+                  key: auth-config-encryption-key
             - name: AUTH_ENTERPRISE_ENABLED
               value: "false"
             - name: AUTH_ENTERPRISE_ALLOW_LOCAL_FALLBACK
@@ -674,6 +680,10 @@ spec:
               value: "false"
             - name: LDAP_SKIP_TLS_VERIFY
               value: "false"
+            - name: LDAP_TLS_CA_FILE
+              value: ""
+            - name: LDAP_TLS_SERVER_NAME
+              value: ""
             - name: LDAP_BIND_DN
               value: ""
             - name: LDAP_BIND_PASSWORD

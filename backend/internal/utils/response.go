@@ -56,9 +56,13 @@ func HandleError(c *gin.Context, err error) {
 		Error(c, http.StatusBadRequest, errStr)
 		return
 	}
+	if errStr == "local usernames cannot start with ldap_" || errStr == "LDAP users must be imported from LDAP" {
+		Error(c, http.StatusBadRequest, errStr)
+		return
+	}
 
 	switch errStr {
-	case "username already exists", "email already exists", "instance name already exists", "team name already exists", "openclaw config resource key already exists", "team task message id already exists":
+	case "username already exists", "user already exists", "email already exists", "instance name already exists", "team name already exists", "openclaw config resource key already exists", "team task message id already exists":
 		Error(c, http.StatusConflict, errStr)
 	case "display name already exists":
 		Error(c, http.StatusConflict, errStr)

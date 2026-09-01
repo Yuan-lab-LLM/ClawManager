@@ -56,6 +56,7 @@ func main() {
 	quotaRepo := repository.NewQuotaRepository(database)
 	instanceRepo := repository.NewInstanceRepository(database)
 	systemImageSettingRepo := repository.NewSystemImageSettingRepository(database)
+	enterpriseAuthSettingRepo := repository.NewEnterpriseAuthSettingRepository(database)
 	llmModelRepo := repository.NewLLMModelRepository(database)
 	modelInvocationRepo := repository.NewModelInvocationRepository(database)
 	auditEventRepo := repository.NewAuditEventRepository(database)
@@ -88,17 +89,21 @@ func main() {
 	}
 
 	// Initialize services
-	var enterpriseAuthenticator services.EnterpriseAuthenticator
-	enterpriseDiagnostics := services.NewLDAPDiagnostics(cfg.Auth.Enterprise.Enabled, cfg.Auth.Enterprise.LDAP)
-	if cfg.Auth.Enterprise.Enabled {
-		ldapAuthenticator, ldapErr := services.NewLDAPAuthenticator(cfg.Auth.Enterprise.LDAP)
-		if ldapErr != nil {
-			log.Fatalf("Failed to initialize LDAP authenticator: %v", ldapErr)
-		}
-		enterpriseAuthenticator = ldapAuthenticator
+	authConfigEncryptionKey := cfg.Auth.ConfigEncryptionKey
+	if authConfigEncryptionKey == "" {
+		authConfigEncryptionKey = "sha256:" + cfg.JWT.Secret
+	}
+	enterpriseAuthManager, err := services.NewEnterpriseAuthManager(enterpriseAuthSettingRepo, cfg.Auth.Enterprise, authConfigEncryptionKey)
+	if err != nil {
+		log.Fatalf("Failed to initialize enterprise auth manager: %v", err)
+	}
+	enterpriseAuthCtx, enterpriseAuthCancel := context.WithCancel(context.Background())
+	defer enterpriseAuthCancel()
+	enterpriseAuthManager.Start(enterpriseAuthCtx)
+	if enterpriseAuthManager.Status(context.Background()).Enabled {
 		log.Printf("Enterprise LDAP authentication enabled")
 	}
-	authService := services.NewAuthService(userRepo, cfg.JWT, enterpriseAuthenticator, services.WithEnterpriseAuthPolicy(cfg.Auth.Enterprise))
+	authService := services.NewAuthService(userRepo, cfg.JWT, enterpriseAuthManager, services.WithEnterpriseAuthPolicy(cfg.Auth.Enterprise), services.WithQuotaRepository(quotaRepo))
 	quotaService := services.NewQuotaService(quotaRepo)
 	userService := services.NewUserService(userRepo, quotaRepo)
 	systemImageSettingService := services.NewSystemImageSettingService(systemImageSettingRepo)
@@ -174,8 +179,8 @@ func main() {
 
 	// Initialize handlers
 	authHandler := handlers.NewAuthHandler(authService)
-	enterpriseAuthHandler := handlers.NewEnterpriseAuthHandler(enterpriseDiagnostics)
-	userHandler := handlers.NewUserHandler(userService, quotaService)
+	enterpriseAuthHandler := handlers.NewEnterpriseAuthHandler(enterpriseAuthManager, enterpriseAuthManager)
+	userHandler := handlers.NewUserHandler(userService, quotaService, enterpriseAuthManager)
 	instanceHandler := handlers.NewInstanceHandler(
 		instanceService,
 		instanceAgentService,
@@ -393,6 +398,8 @@ func main() {
 				adminOnly.GET("", userHandler.ListUsers)
 				adminOnly.POST("", userHandler.CreateUser)
 				adminOnly.POST("/import", userHandler.ImportUsers)
+				adminOnly.GET("/import/ldap/preview", userHandler.PreviewLDAPUsers)
+				adminOnly.POST("/import/ldap", userHandler.ImportLDAPUsers)
 				adminOnly.DELETE("/:id", userHandler.DeleteUser)
 				adminOnly.PUT("/:id/role", userHandler.UpdateRole)
 				adminOnly.PUT("/:id/quota", userHandler.UpdateUserQuota)
@@ -476,6 +483,9 @@ func main() {
 		adminRuntime.Use(middleware.SetUserInfo(userRepo))
 		adminRuntime.Use(middleware.NewAdminAuth(userRepo))
 		{
+			adminRuntime.GET("/auth/enterprise/config", enterpriseAuthHandler.Config)
+			adminRuntime.POST("/auth/enterprise/config/test", enterpriseAuthHandler.TestConfig)
+			adminRuntime.PUT("/auth/enterprise/config", enterpriseAuthHandler.UpdateConfig)
 			adminRuntime.GET("/auth/enterprise/status", enterpriseAuthHandler.Status)
 			adminRuntime.GET("/runtime-pods", runtimePoolHandler.ListPods)
 			adminRuntime.GET("/runtime-pods/:id/gateways", runtimePoolHandler.GetPodGateways)
@@ -770,6 +780,7 @@ func main() {
 	if runtimeAdminEventBridgeCancel != nil {
 		runtimeAdminEventBridgeCancel()
 	}
+	enterpriseAuthCancel()
 	wsHub.Stop()
 	instanceHandler.Shutdown()
 

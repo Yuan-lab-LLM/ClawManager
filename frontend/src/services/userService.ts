@@ -13,7 +13,6 @@ export interface CreateUserRequest {
   email: string;
   password: string;
   role: 'admin' | 'user';
-  auth_provider?: 'local' | 'ldap';
 }
 
 export interface ImportUsersResponse {
@@ -21,9 +20,11 @@ export interface ImportUsersResponse {
   failed_count: number;
   created_users: Array<{
     username: string;
+    login_alias?: string;
     email: string;
     role: 'admin' | 'user';
     auth_provider: 'local' | 'ldap';
+    warning_codes?: string[];
     max_instances: number;
     max_cpu_cores: number;
     max_memory_gb: number;
@@ -31,11 +32,52 @@ export interface ImportUsersResponse {
     max_gpu_count: number;
     initial_password?: string;
   }>;
+  updated_count?: number;
+  updated_users?: Array<{
+    username: string;
+    login_alias?: string;
+    email: string;
+    role: 'admin' | 'user';
+    auth_provider: 'ldap';
+  }>;
   errors: Array<{
     line: number;
     username?: string;
     error: string;
   }>;
+  skipped_count?: number;
+  skipped?: Array<{ line: number; username?: string; error: string }>;
+}
+
+export interface LDAPImportUser {
+  external_id: string;
+  username: string;
+  email: string;
+  role?: 'admin' | 'user';
+  error?: string;
+  status: 'ready' | 'exists' | 'pending_alias' | 'invalid' | string;
+}
+
+export interface LDAPPreviewResponse {
+  users: LDAPImportUser[];
+  total: number;
+}
+
+export interface LDAPPreviewRequest {
+  query?: string;
+  limit?: number;
+}
+
+export interface LDAPImportRequest {
+  role: 'admin' | 'user';
+  max_instances: number;
+  max_cpu_cores: number;
+  max_memory_gb: number;
+  max_storage_gb: number;
+  max_gpu_count: number;
+  query?: string;
+  limit?: number;
+  external_ids?: string[];
 }
 
 export const userService = {
@@ -53,6 +95,16 @@ export const userService = {
         'Content-Type': 'multipart/form-data',
       },
     });
+    return response.data.data;
+  },
+
+  previewLDAPUsers: async (params: LDAPPreviewRequest = {}): Promise<LDAPPreviewResponse> => {
+    const response = await api.get('/users/import/ldap/preview', { params });
+    return response.data.data;
+  },
+
+  importLDAPUsers: async (data: LDAPImportRequest): Promise<ImportUsersResponse> => {
+    const response = await api.post('/users/import/ldap', data);
     return response.data.data;
   },
 

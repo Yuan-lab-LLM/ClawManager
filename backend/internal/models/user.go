@@ -12,6 +12,7 @@ type User struct {
 	PasswordHash string     `db:"password_hash" json:"-"`
 	Role         string     `db:"role" json:"role"`
 	AuthProvider string     `db:"auth_provider" json:"auth_provider"`
+	LoginAlias   *string    `db:"login_alias" json:"login_alias,omitempty"`
 	ExternalID   *string    `db:"external_id" json:"external_id,omitempty"`
 	IsActive     bool       `db:"is_active" json:"is_active"`
 	CreatedAt    time.Time  `db:"created_at" json:"created_at"`

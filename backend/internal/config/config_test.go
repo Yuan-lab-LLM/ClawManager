@@ -60,6 +60,8 @@ func TestLoadEnterpriseLDAPDefaultsDisabled(t *testing.T) {
 		"AUTH_ENTERPRISE_SYNC_ROLE",
 		"LDAP_HOST",
 		"LDAP_PORT",
+		"LDAP_TLS_CA_FILE",
+		"LDAP_TLS_SERVER_NAME",
 		"LDAP_BASE_DN",
 		"LDAP_ADMIN_GROUP_DNS",
 	} {
@@ -92,12 +94,15 @@ func TestLoadEnterpriseLDAPDefaultsDisabled(t *testing.T) {
 }
 
 func TestLoadEnterpriseLDAPEnvOverrides(t *testing.T) {
+	t.Setenv("AUTH_CONFIG_ENCRYPTION_KEY", "env-auth-config-key-32-byte-key!")
 	t.Setenv("AUTH_ENTERPRISE_ENABLED", "true")
 	t.Setenv("AUTH_ENTERPRISE_ALLOW_LOCAL_FALLBACK", "false")
 	t.Setenv("AUTH_ENTERPRISE_SYNC_ROLE", "true")
 	t.Setenv("LDAP_HOST", "ldap.example.com")
 	t.Setenv("LDAP_PORT", "636")
 	t.Setenv("LDAP_USE_TLS", "true")
+	t.Setenv("LDAP_TLS_CA_FILE", "/etc/ssl/certs/company-ldap.pem")
+	t.Setenv("LDAP_TLS_SERVER_NAME", "ldap.internal.example.com")
 	t.Setenv("LDAP_BASE_DN", "dc=example,dc=com")
 	t.Setenv("LDAP_GROUP_BASE_DN", "ou=Groups,dc=example,dc=com")
 	t.Setenv("LDAP_ADMIN_GROUP_DNS", "cn=admins,ou=Groups,dc=example,dc=com; cn=ops,ou=Groups,dc=example,dc=com")
@@ -126,8 +131,23 @@ func TestLoadEnterpriseLDAPEnvOverrides(t *testing.T) {
 	if !ldap.UseTLS {
 		t.Fatalf("ldap useTLS should be enabled")
 	}
+	if got, want := ldap.TLSCAFile, "/etc/ssl/certs/company-ldap.pem"; got != want {
+		t.Fatalf("ldap TLS CA file = %q, want %q", got, want)
+	}
+	if got, want := ldap.TLSServerName, "ldap.internal.example.com"; got != want {
+		t.Fatalf("ldap TLS server name = %q, want %q", got, want)
+	}
+	if got, want := cfg.Auth.ConfigEncryptionKey, "env-auth-config-key-32-byte-key!"; got != want {
+		t.Fatalf("auth config encryption key = %q, want %q", got, want)
+	}
 	if got, want := len(ldap.AdminGroupDNs), 2; got != want {
 		t.Fatalf("admin group count = %d, want %d", got, want)
+	}
+	if got, want := ldap.AdminGroupDNs[0], "cn=admins,ou=Groups,dc=example,dc=com"; got != want {
+		t.Fatalf("first admin group DN = %q, want %q", got, want)
+	}
+	if got, want := ldap.AdminGroupDNs[1], "cn=ops,ou=Groups,dc=example,dc=com"; got != want {
+		t.Fatalf("second admin group DN = %q, want %q", got, want)
 	}
 }
 

@@ -18,6 +18,7 @@ stringData:
   mysql-root-password: root123
   mysql-password: clawreef123
   jwt-secret: change-me-in-production
+  auth-config-encryption-key: clawmanager-auth-key-dev-32byte!
   runtime-agent-control-token: change-me-runtime-control-token
   runtime-agent-report-token: change-me-runtime-report-token
   openclaw-gateway-token: change-me-openclaw-gateway-token
@@ -1288,6 +1289,11 @@ spec:
                 secretKeyRef:
                   name: clawmanager-secrets
                   key: jwt-secret
+            - name: AUTH_CONFIG_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: clawmanager-secrets
+                  key: auth-config-encryption-key
             - name: AUTH_ENTERPRISE_ENABLED
               value: "false"
             - name: AUTH_ENTERPRISE_ALLOW_LOCAL_FALLBACK
@@ -1304,6 +1310,10 @@ spec:
               value: "false"
             - name: LDAP_SKIP_TLS_VERIFY
               value: "false"
+            - name: LDAP_TLS_CA_FILE
+              value: ""
+            - name: LDAP_TLS_SERVER_NAME
+              value: ""
             - name: LDAP_BIND_DN
               value: ""
             - name: LDAP_BIND_PASSWORD
