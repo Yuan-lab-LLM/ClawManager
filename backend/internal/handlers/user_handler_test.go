@@ -91,9 +91,9 @@ func TestValidateImportedUserRejectsInvalidProvider(t *testing.T) {
 	}
 }
 
-func TestValidateImportedUserRejectsReservedLocalLDAPPrefix(t *testing.T) {
-	if err := validateImportedUser("ldap_fsmith", "fsmith@example.com", "", "user", "local", ""); err != "local usernames cannot start with ldap_" {
-		t.Fatalf("expected reserved local username error, got %q", err)
+func TestValidateImportedUserRejectsUnderscoreInLocalUsername(t *testing.T) {
+	if err := validateImportedUser("ldap_fsmith", "fsmith@example.com", "", "user", "local", ""); err != "Username must be alphanumeric" {
+		t.Fatalf("expected alphanumeric username error, got %q", err)
 	}
 }
 

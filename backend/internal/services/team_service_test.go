@@ -6011,8 +6011,6 @@ func cloneStringInterfaceMap(source map[string]interface{}) map[string]interface
 	return clone
 }
 
-func stringPtr(value string) *string { return &value }
-
 func TestTaskHasRecentActivityUsesBusinessWorkItems(t *testing.T) {
 	now := time.Now().UTC()
 	task := &models.TeamTask{

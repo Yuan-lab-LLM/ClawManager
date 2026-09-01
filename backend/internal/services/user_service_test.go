@@ -95,6 +95,8 @@ func (r *aliasRaceRepo) Create(user *models.User) error {
 	if !r.claimed {
 		r.claimed = true
 		winner := *user
+		winner.Email = "winner@example.com"
+		winner.ExternalID = stringPtr("uid=fsmith,ou=employees,dc=example,dc=com")
 		if err := r.fakeUserRepo.Create(&winner); err != nil {
 			return err
 		}
