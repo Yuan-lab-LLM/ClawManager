@@ -207,6 +207,11 @@ const TEMPLATE_ICON_META: Record<string, { src: string; glyph: string; className
     glyph: 'OR',
     className: 'border-[#d9d7f5] bg-[#f3f1ff] text-[#5847b7]',
   },
+  orcarouter: {
+    src: '/vendor-icons/orcarouter.svg',
+    glyph: 'OC',
+    className: 'border-[#cde3f7] bg-[#eef6ff] text-[#0160e6]',
+  },
   deepseek: {
     src: '/vendor-icons/deepseek.ico',
     glyph: 'DS',
