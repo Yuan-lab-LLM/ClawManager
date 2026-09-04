@@ -839,6 +839,67 @@ func TestProxyAccessTokenRejectsRuntimeQueryTokenWithoutCookie(t *testing.T) {
 	}
 }
 
+func TestProxyAccessTokenBootstrapsDedicatedOpenCodeOriginCookie(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	accessService := services.NewInstanceAccessService()
+	defer accessService.Stop()
+	token, err := accessService.GenerateToken(
+		1,
+		171,
+		services.RuntimeTypeOpenCode,
+		"https://opencode-171.runtime.example.test/",
+		"",
+		20000,
+		time.Hour,
+	)
+	if err != nil {
+		t.Fatalf("GenerateToken returned error: %v", err)
+	}
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	requestURL := "/api/v1/instances/171/proxy/?token=" + url.QueryEscape(token.Token) + "&token=runtime-session&view=compact"
+	c.Request = httptest.NewRequest(http.MethodGet, requestURL, nil)
+	c.Request.Header.Set(services.DedicatedRuntimeOriginHeader, services.RuntimeTypeOpenCode)
+
+	handler := &InstanceHandler{accessService: accessService}
+	if got, ok := handler.proxyAccessToken(c, 171); ok || got != "" {
+		t.Fatalf("proxyAccessToken = %q/%v, want redirect after cookie bootstrap", got, ok)
+	}
+	if recorder.Code != http.StatusTemporaryRedirect {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusTemporaryRedirect)
+	}
+	if got := recorder.Header().Get("Location"); got != "/?token=runtime-session&view=compact" {
+		t.Fatalf("Location = %q", got)
+	}
+	setCookie := recorder.Header().Get("Set-Cookie")
+	for _, want := range []string{
+		"instance_access_171=",
+		"Path=/",
+		"HttpOnly",
+		"Secure",
+		"SameSite=None",
+	} {
+		if !strings.Contains(setCookie, want) {
+			t.Fatalf("Set-Cookie missing %q: %s", want, setCookie)
+		}
+	}
+	if strings.Contains(recorder.Header().Get("Location"), token.Token) {
+		t.Fatal("redirect leaked the ClawManager access token")
+	}
+}
+
+func TestDedicatedRuntimeCleanLocationUsesRootPath(t *testing.T) {
+	requestURL, err := url.Parse("/api/v1/instances/171/proxy/assets/app.js?token=access&lang=zh-CN")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := dedicatedRuntimeCleanLocation(requestURL, 171, "access")
+	if want := "/assets/app.js?lang=zh-CN"; got != want {
+		t.Fatalf("dedicatedRuntimeCleanLocation() = %q, want %q", got, want)
+	}
+}
+
 func TestBrowserAccessEntryURLBootstrapsDedicatedOrigin(t *testing.T) {
 	for _, tc := range []struct {
 		name      string

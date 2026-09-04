@@ -116,6 +116,24 @@ clients. DNS, TLS, and verification requirements are documented in the
 kubectl apply -f clawmanager.yaml
 ```
 
+For a Docker Desktop installation exposed on `localhost:8443`, generate and
+install a self-signed certificate covering `*.127-0-0-1.nip.io` from Windows
+PowerShell:
+
+```powershell
+..\install-local-nipio-tls.ps1
+```
+
+To also trust that self-signed certificate for the current Windows user:
+
+```powershell
+..\install-local-nipio-tls.ps1 -TrustCurrentUser
+```
+
+The script backs up the existing `clawmanager-tls` Secret under the current
+user's temporary directory, updates the Secret, and restarts every Deployment
+in `clawmanager-system` that directly mounts it.
+
 ### 7. Check ClawManager
 
 ```sh
