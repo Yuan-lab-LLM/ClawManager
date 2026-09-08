@@ -185,14 +185,9 @@ const InstancePortalPage: React.FC = () => {
   const selectedInstanceId = selectedInstance?.id ?? null;
   const selectedInstanceStatus = selectedInstance?.status ?? null;
   const selectedRuntimeType = selectedInstance?.runtime_type ?? "desktop";
-  // The Lite OpenCode web client is currently unreliable behind a prefixed
-  // reverse proxy. Use the official terminal UI instead; it connects directly
-  // to the same per-instance gateway and provider configuration.
-  const isShellPortal =
-    selectedRuntimeType === "shell" ||
-    (selectedInstance?.type === "opencode" &&
-      selectedInstance.instance_mode === "lite" &&
-      selectedRuntimeType === "gateway");
+  // OpenCode Lite owns a dedicated per-instance origin, so it must use the
+  // regular browser access flow. Only an actual shell runtime uses the TUI.
+  const isShellPortal = selectedRuntimeType === "shell";
   const isProPortal = Boolean(
     selectedInstance && selectedInstance.instance_mode === "pro",
   );
