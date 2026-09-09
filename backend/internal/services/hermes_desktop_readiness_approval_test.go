@@ -138,7 +138,7 @@ func TestHermesDesktopRendererReadinessApprovalRealWebSocket(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/auth/password-login":
-			dashboardTestLogin(t, w, r)
+			desktopTestLogin(t, w, r)
 		case "/api/auth/ws-ticket":
 			_, _ = w.Write([]byte(`{"ticket":"upstream-ticket"}`))
 		case "/api/model/options":

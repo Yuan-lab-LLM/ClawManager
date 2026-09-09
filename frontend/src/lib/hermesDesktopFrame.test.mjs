@@ -9,17 +9,17 @@ const supported = { instance_id: 42, available: true };
 test("Desktop is the default only after capability confirmation; initial pending mounts neither frame", () => {
   assert.deepEqual(resolveHermesDesktopView({ ...viewInput, pending: true }), { mode: "pending", reason: "checking" });
   assert.deepEqual(resolveHermesDesktopView({ ...viewInput, capability: supported }), { mode: "desktop" });
-  assert.deepEqual(resolveHermesDesktopView({ ...viewInput, instanceAvailable: false, pending: true }), { mode: "classic" });
+  assert.deepEqual(resolveHermesDesktopView({ ...viewInput, instanceAvailable: false, pending: true }), { mode: "unavailable" });
 });
 
 test("capability results are scoped to the selected instance", () => {
   const next = { ...viewInput, instanceId: 43 };
   assert.equal(resolveHermesDesktopView({ ...next, pending: true }).mode, "pending");
-  assert.deepEqual(resolveHermesDesktopView({ ...next, capability: supported }), { mode: "classic", reason: "capabilityUnknown" });
+  assert.deepEqual(resolveHermesDesktopView({ ...next, capability: supported }), { mode: "unavailable", reason: "capabilityUnknown" });
   assert.deepEqual(resolveHermesDesktopView({ ...next, capability: { instance_id: 43, available: true } }), { mode: "desktop" });
 });
 
-test("gate and capability failures identify Classic with a fixed safe reason, never raw server text", () => {
+test("gate and capability failures identify Desktop as unavailable with a fixed safe reason, never raw server text", () => {
   const reasons = {
     feature_disabled: "featureDisabled", runtime_capability_unsupported: "runtimeUnsupported", runtime_unsupported: "runtimeUnsupported",
     runtime_auth_unavailable: "securityUnavailable", runtime_origin_unavailable: "securityUnavailable", ticket_store_unavailable: "securityUnavailable",
@@ -28,15 +28,15 @@ test("gate and capability failures identify Classic with a fixed safe reason, ne
     "unexpected raw token=do-not-display": "capabilityUnknown", toString: "capabilityUnknown", ["__proto__"]: "capabilityUnknown",
   };
   for (const [reason, expected] of Object.entries(reasons)) {
-    assert.deepEqual(resolveHermesDesktopView({ ...viewInput, capability: { instance_id: 42, available: false, reason } }), { mode: "classic", reason: expected });
+    assert.deepEqual(resolveHermesDesktopView({ ...viewInput, capability: { instance_id: 42, available: false, reason } }), { mode: "unavailable", reason: expected });
   }
-  assert.deepEqual(resolveHermesDesktopView(viewInput), { mode: "classic", reason: "capabilityUnknown" });
-  assert.deepEqual(resolveHermesDesktopView({ ...viewInput, capability: { instance_id: 42, available: false, reason: { toString: "not-callable" } } }), { mode: "classic", reason: "capabilityUnknown" });
-  assert.deepEqual(resolveHermesDesktopView({ ...viewInput, failed: true, capability: supported }), { mode: "classic", reason: "probeFailed" });
+  assert.deepEqual(resolveHermesDesktopView(viewInput), { mode: "unavailable", reason: "capabilityUnknown" });
+  assert.deepEqual(resolveHermesDesktopView({ ...viewInput, capability: { instance_id: 42, available: false, reason: { toString: "not-callable" } } }), { mode: "unavailable", reason: "capabilityUnknown" });
+  assert.deepEqual(resolveHermesDesktopView({ ...viewInput, failed: true, capability: supported }), { mode: "unavailable", reason: "probeFailed" });
 });
 
 test("unavailable Desktop is not a permanent user choice; a later confirmed capability opens Desktop", () => {
-  assert.equal(resolveHermesDesktopView({ ...viewInput, capability: { ...supported, available: false, reason: "feature_disabled" } }).mode, "classic");
+  assert.equal(resolveHermesDesktopView({ ...viewInput, capability: { ...supported, available: false, reason: "feature_disabled" } }).mode, "unavailable");
   assert.equal(resolveHermesDesktopView({ ...viewInput, capability: supported }).mode, "desktop");
 });
 

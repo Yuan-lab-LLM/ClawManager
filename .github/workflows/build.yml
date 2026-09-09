@@ -37,7 +37,7 @@ jobs:
         run: npm run build
 
       - name: Test Hermes iframe boundaries
-        run: node --test src/lib/hermesDesktopFrame.test.mjs src/lib/hermesDashboardAuth.test.mjs src/services/authService.test.mjs ../e2e/hermes-dashboard-edge.test.mjs
+        run: node --test src/lib/hermesDesktopFrame.test.mjs src/services/authService.test.mjs ../e2e/desktop-proxy-edge.test.mjs
 
   hermes-desktop:
     name: Hermes Desktop Web Build

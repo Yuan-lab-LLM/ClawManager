@@ -1390,6 +1390,11 @@ spec:
               value: "redis://clawmanager-redis.clawmanager-system.svc.cluster.local:6379/0"
             - name: CLAWMANAGER_DESKTOP_DIRECT_PROXY
               value: "true"
+            # Required for the OpenCode Lite per-instance browser origin. Set
+            # this to a nip.io or private wildcard-DNS URL template; the
+            # {instance_id} placeholder is mandatory. See docs/deployment.md.
+            - name: CLAWMANAGER_OPENCODE_PUBLIC_URL_TEMPLATE
+              value: ""
             # Required for the DeepSeek Harness Lite root-origin UI. The
             # {instance_id} placeholder is required; see docs/deployment.md.
             - name: CLAWMANAGER_DEEPSEEK_HARNESS_PUBLIC_URL_TEMPLATE

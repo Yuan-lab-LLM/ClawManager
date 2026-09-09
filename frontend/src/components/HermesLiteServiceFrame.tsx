@@ -1,15 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
 import { RefreshCw } from "lucide-react";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useI18n } from "../contexts/I18nContext";
 import { hermesDesktopRenewalDelay, isHermesDesktopFrameMessage, resolveHermesDesktopRendererUrl, resolveHermesDesktopView } from "../lib/hermesDesktopFrame";
 import { hermesDesktopService } from "../services/hermesDesktopService";
 import type { InstanceServiceFrameProps } from "./InstanceServiceFrame";
 import { InstanceServiceFrameShell } from "./InstanceServiceFrameShell";
 
-interface HermesLiteServiceFrameProps extends InstanceServiceFrameProps {
-  renderClassic: () => ReactNode;
-}
+type HermesLiteServiceFrameProps = InstanceServiceFrameProps;
 
 export function HermesLiteServiceFrame(props: HermesLiteServiceFrameProps) {
   const { t } = useI18n();
@@ -42,18 +40,19 @@ export function HermesLiteServiceFrame(props: HermesLiteServiceFrameProps) {
       </InstanceServiceFrameShell>
     );
   }
-  if (view.mode === "classic") {
+  if (view.mode === "unavailable") {
     return (
-      <div className="flex h-full min-h-0 flex-col gap-2">
-        {view.reason && (
-          <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950" role="status">
-            <span className="font-medium">{t("hermesDesktop.currentClassic")}</span>
-            <span>{t(`hermesDesktop.${view.reason}`)}</span>
-            <button type="button" disabled={capability.isFetching} onClick={() => void capability.refetch()} className="rounded border border-amber-300 px-2 py-1 text-xs disabled:opacity-50">{t("hermesDesktop.retryCapability")}</button>
-          </div>
-        )}
-        <div className="min-h-0 flex-1">{props.renderClassic()}</div>
-      </div>
+      <InstanceServiceFrameShell
+        instanceName={props.instanceName}
+        refreshing={capability.isFetching}
+        workspaceVisible={props.workspaceVisible}
+        onWorkspaceVisibilityChange={props.onWorkspaceVisibilityChange}
+      >
+        <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 p-6 text-center text-sm text-slate-600" role="alert">
+          <p>{t(`hermesDesktop.${view.reason ?? "capabilityUnknown"}`)}</p>
+          <button type="button" disabled={capability.isFetching} onClick={() => void capability.refetch()} className="rounded-md border border-slate-200 px-3 py-1.5 disabled:opacity-50">{t("hermesDesktop.retryCapability")}</button>
+        </div>
+      </InstanceServiceFrameShell>
     );
   }
   return (

@@ -16,9 +16,6 @@ import (
 // Hermes. Each browser frame contains one or more newline-delimited JSON-RPC
 // objects, not arbitrary raw frames or a JSON batch array.
 func (s *HermesDesktopService) ProxyWebSocket(ctx context.Context, c *HermesDesktopClaims, ticket string, w http.ResponseWriter, r *http.Request) error {
-	if c.Surface != "" {
-		return ErrHermesDesktopForbidden
-	}
 	return s.proxyHermesWebSocket(ctx, c, ticket, "/api/ws", nil, w, r)
 }
 
@@ -96,9 +93,7 @@ func (s *HermesDesktopService) proxyHermesWebSocket(ctx context.Context, c *Herm
 			}
 			for _, line := range lines {
 				filtered, err := hermesDesktopFilterRPC(line)
-				if c.Surface == "dashboard" {
-					filtered, err = hermesDashboardFilterRPC(line)
-				} else if err == nil {
+				if err == nil {
 					if !s.desktopRPCModelAllowed(ctx, target, filtered) {
 						err = ErrHermesDesktopForbidden
 					} else {
@@ -140,7 +135,7 @@ func (s *HermesDesktopService) proxyHermesWebSocket(ctx context.Context, c *Herm
 	}()
 	go func() {
 		defer func() { done <- struct{}{} }()
-		redactor := newHermesStreamRedactor(*target.instance.AccessToken, cookies, dial.Ticket)
+		redactor := newHermesDesktopStreamRedactor(*target.instance.AccessToken, cookies, dial.Ticket)
 		for {
 			kind, frame, err := upstream.ReadMessage()
 			if err != nil || (kind != websocket.TextMessage && !(path == "/api/pty" && kind == websocket.BinaryMessage)) {
@@ -155,11 +150,9 @@ func (s *HermesDesktopService) proxyHermesWebSocket(ctx context.Context, c *Herm
 			}
 			var cleaned [][]byte
 			for _, line := range bytes.Split(bytes.TrimSpace(frame), []byte("\n")) {
-				if c.Surface != "dashboard" {
-					line, err = rpcScope.observe(line)
-					if err != nil {
-						return
-					}
+				line, err = rpcScope.observe(line)
+				if err != nil {
+					return
 				}
 				safe, err := hermesDesktopSanitize(line, *target.instance.AccessToken, cookies, dial.Ticket)
 				if err != nil {
@@ -186,13 +179,12 @@ func (s *HermesDesktopService) proxyHermesWebSocket(ctx context.Context, c *Herm
 			return nil
 		case <-expires.C:
 			_ = upstream.Close()
-			_ = client.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(s.hermesWebSocketSessionCloseCode(ctx, c, true), "ClawManager session ended; reconnect"), time.Now().Add(time.Second))
+			_ = client.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(4401, "ClawManager session ended; reconnect"), time.Now().Add(time.Second))
 			return nil
 		case <-ticker.C:
 			if _, err := s.authorizeClaims(ctx, c); err != nil {
 				_ = upstream.Close()
-				leaseExpired := c.ExpiresAt != nil && !time.Now().Before(c.ExpiresAt.Time)
-				_ = client.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(s.hermesWebSocketSessionCloseCode(ctx, c, leaseExpired), "ClawManager session ended; reconnect"), time.Now().Add(time.Second))
+				_ = client.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(4401, "ClawManager session ended; reconnect"), time.Now().Add(time.Second))
 				return nil
 			}
 			if client.WriteControl(websocket.PingMessage, nil, time.Now().Add(5*time.Second)) != nil || upstream.WriteControl(websocket.PingMessage, nil, time.Now().Add(5*time.Second)) != nil {
@@ -202,25 +194,44 @@ func (s *HermesDesktopService) proxyHermesWebSocket(ctx context.Context, c *Herm
 	}
 }
 
-// The stock gated dashboard treats 4401 as a terminal authentication failure.
-// Its parent may already have renewed the cookie, so a socket reaching only
-// its old lease expiry needs a transient close and a freshly minted CM ticket.
-// This probe does not extend the socket/lease: it only chooses the close code,
-// and revalidates epoch, active owner, instance and allocation before allowing
-// a retry. Both timer paths use it so the authorization ticker cannot turn a
-// normal expiry into a terminal 4401 race. A fired expiry timer is authoritative
-// for that socket's lifetime: its monotonic deadline must not be reclassified
-// by a later wall-clock read (for example after VM/NTP clock correction).
-func (s *HermesDesktopService) hermesWebSocketSessionCloseCode(ctx context.Context, c *HermesDesktopClaims, leaseExpired bool) int {
-	if c.Surface != "dashboard" || c.ExpiresAt == nil || !leaseExpired {
-		return 4401
+// PTY is a byte stream, unlike the Desktop JSON-RPC channel. Hold only a suffix
+// that might be the start of a known secret, so split-frame credentials cannot
+// escape while ordinary terminal output remains immediate. Pending prefixes are
+// discarded on close, not flushed to the browser.
+type hermesDesktopStreamRedactor struct {
+	secrets [][]byte
+	pending []byte
+}
+
+func newHermesDesktopStreamRedactor(password string, cookies []*http.Cookie, ticket string) *hermesDesktopStreamRedactor {
+	redactor := &hermesDesktopStreamRedactor{}
+	secrets := []string{password, ticket}
+	for _, cookie := range cookies {
+		secrets = append(secrets, cookie.Value)
 	}
-	probe := *c
-	expiry := *c.ExpiresAt
-	expiry.Time = time.Now().Add(time.Minute)
-	probe.ExpiresAt = &expiry
-	if _, err := s.authorizeClaims(ctx, &probe); err != nil {
-		return 4401
+	for _, secret := range secrets {
+		if secret != "" {
+			redactor.secrets = append(redactor.secrets, []byte(secret))
+		}
 	}
-	return websocket.CloseServiceRestart
+	return redactor
+}
+
+func (r *hermesDesktopStreamRedactor) Filter(frame []byte) []byte {
+	body := append(r.pending, frame...)
+	for _, secret := range r.secrets {
+		body = bytes.ReplaceAll(body, secret, []byte("[redacted]"))
+	}
+	hold := 0
+	for _, secret := range r.secrets {
+		for n := min(len(secret)-1, len(body)); n > hold; n-- {
+			if bytes.Equal(body[len(body)-n:], secret[:n]) {
+				hold = n
+				break
+			}
+		}
+	}
+	end := len(body) - hold
+	r.pending = bytes.Clone(body[end:])
+	return body[:end]
 }

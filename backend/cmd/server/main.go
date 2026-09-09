@@ -207,7 +207,7 @@ func main() {
 		skillService,
 		externalAccessService,
 		aiObservabilityService,
-		services.NewInstanceShellService(runtimePodRepo, bindingRepo),
+		services.NewInstanceShellService(),
 		services.WithInstanceProxyRuntimeRepositories(instanceRepo, runtimePodRepo, bindingRepo),
 	)
 	hermesDesktopService := services.NewHermesDesktopService(services.HermesDesktopConfig{
@@ -217,7 +217,6 @@ func main() {
 		Teams: repository.NewHermesDesktopTeamGuard(database), Agent: runtimeAgentClient, Redis: platformRedis,
 	})
 	hermesDesktopHandler := handlers.NewHermesDesktopHandler(hermesDesktopService)
-	instanceHandler.SetHermesDesktopService(hermesDesktopService)
 	authHandler.SetDesktopLogoutHook(hermesDesktopService.RevokeUserSessions)
 	systemSettingsHandler := handlers.NewSystemSettingsHandler(systemImageSettingService)
 	llmModelHandler := handlers.NewLLMModelHandler(llmModelService)

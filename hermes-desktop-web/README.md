@@ -85,6 +85,6 @@ CM src/main.tsx：校验实例、隔离浏览器存储、校验 BFF 会话、安
 
 `e2e/fixtures/hermes-desktop/main.go` 是 loopback-only 的合成协议服务：用于验证真实编译页面、原始侧栏/路由、聊天/历史和禁用提示，不调用真实模型，不操作实例工作区。其通过不能替代真实 172 的 BFF Cookie、WS、三副本重连和权限验收。
 
-上线门禁为 CM 开关和真实 Runtime capability。不能直接修改验收字段，也不能把 `dashboard` 改成 `serve` 来绕过能力检查。当前 UI 在能力不可用时自动使用经典 Dashboard；Desktop 可用时直接进入 renderer，不再提供手工视图切换。
+上线门禁为 CM 开关和真实 Runtime capability。不能直接修改验收字段，也不能把 `dashboard` 改成 `serve` 来绕过能力检查。当前 UI 只在能力确认后进入 Desktop renderer；能力不可用时展示明确错误并允许重试，不再回退到旧界面。
 
 发布前运行 renderer build、typecheck、全部单元测试、ClawManager 前后端测试和 `e2e/hermes-desktop-smoke.mjs`。集群部署记录和截图保存在发布系统或本地忽略目录，不提交到源码仓库。

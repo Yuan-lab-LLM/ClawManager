@@ -129,7 +129,6 @@ func workspaceArchiveMaxBytes() int64 {
 
 // InstanceHandler handles instance management requests
 type InstanceHandler struct {
-	hermesDesktop                 *HermesDesktopHandler
 	instanceService               services.InstanceService
 	instanceAgentService          services.InstanceAgentService
 	runtimeStatusService          services.InstanceRuntimeStatusService
@@ -1455,10 +1454,6 @@ func (h *InstanceHandler) GenerateAccessToken(c *gin.Context) {
 	}
 
 	// Generate proxy entry URL. The actual Service remains internal-only.
-	if h.hermesDesktop != nil && h.hermesDesktop.service.IsDashboardInstance(instance.ID) {
-		h.hermesDesktop.DashboardBootstrap(c, instance.ID)
-		return
-	}
 	accessURL := h.proxyService.GetProxyURLForInstance(instance, "")
 
 	if accessURL == "" {
@@ -1572,8 +1567,8 @@ func (h *InstanceHandler) StreamShell(c *gin.Context) {
 		return
 	}
 
-	if !strings.EqualFold(strings.TrimSpace(instance.RuntimeType), "shell") && !services.IsOpenCodeLiteTUIInstance(instance) {
-		utils.Error(c, http.StatusBadRequest, "Shell access is only available for shell or OpenCode Lite instances")
+	if !strings.EqualFold(strings.TrimSpace(instance.RuntimeType), "shell") {
+		utils.Error(c, http.StatusBadRequest, "Shell access is only available for shell instances")
 		return
 	}
 
@@ -1639,10 +1634,6 @@ func (h *InstanceHandler) ProxyInstance(c *gin.Context) {
 		return
 	}
 
-	if h.hermesDesktop != nil && h.hermesDesktop.service.IsDashboardInstance(id) {
-		h.hermesDesktop.Dashboard(c)
-		return
-	}
 	token, ok := h.proxyAccessToken(c, id)
 	if !ok {
 		return
@@ -1657,7 +1648,15 @@ func (h *InstanceHandler) proxyAccessToken(c *gin.Context, id int) (string, bool
 	queryToken := strings.TrimSpace(original.URL.Query().Get("token"))
 	if queryToken != "" {
 		if accessToken, validateErr := h.accessService.ValidateToken(queryToken); validateErr == nil && accessToken.InstanceID == id {
-			h.promoteProxyAccessTokenCookie(c, id, cookieName, queryToken, accessToken)
+			dedicatedOrigin := h.promoteProxyAccessTokenCookie(c, id, cookieName, queryToken, accessToken)
+			originRuntimeType, _ := services.NormalizeV2RuntimeType(c.GetHeader(services.DedicatedRuntimeOriginHeader))
+			if dedicatedOrigin && originRuntimeType == services.RuntimeTypeOpenCode &&
+				(c.Request.Method == http.MethodGet || c.Request.Method == http.MethodHead) {
+				// Promote the one-time query token to the dedicated origin's cookie and
+				// immediately remove it from the visible browser URL.
+				c.Redirect(http.StatusTemporaryRedirect, dedicatedRuntimeCleanLocation(original.URL, id, queryToken))
+				return "", false
+			}
 			return queryToken, true
 		}
 	}
@@ -1676,7 +1675,7 @@ func (h *InstanceHandler) proxyAccessToken(c *gin.Context, id int) (string, bool
 	return "", false
 }
 
-func (h *InstanceHandler) promoteProxyAccessTokenCookie(c *gin.Context, id int, cookieName, queryToken string, accessToken *services.AccessToken) {
+func (h *InstanceHandler) promoteProxyAccessTokenCookie(c *gin.Context, id int, cookieName, queryToken string, accessToken *services.AccessToken) bool {
 	// Promote only a validated ClawManager access token. Runtime applications may
 	// also use a token query parameter for their own websocket/session protocol.
 	cookiePath := fmt.Sprintf("/api/v1/instances/%d/proxy", id)
@@ -1684,7 +1683,7 @@ func (h *InstanceHandler) promoteProxyAccessTokenCookie(c *gin.Context, id int, 
 	originRuntimeType, originManaged := services.NormalizeV2RuntimeType(c.GetHeader(services.DedicatedRuntimeOriginHeader))
 	instanceRuntimeType, instanceManaged := services.NormalizeV2RuntimeType(accessToken.InstanceType)
 	dedicatedOrigin := originManaged && instanceManaged && originRuntimeType == instanceRuntimeType &&
-		originRuntimeType == services.RuntimeTypeDeepSeekHarness
+		(originRuntimeType == services.RuntimeTypeOpenCode || originRuntimeType == services.RuntimeTypeDeepSeekHarness)
 	if dedicatedOrigin {
 		cookiePath = "/"
 		cookieSecure = true
@@ -1699,6 +1698,40 @@ func (h *InstanceHandler) promoteProxyAccessTokenCookie(c *gin.Context, id int, 
 		cookieSecure,
 		true,
 	)
+	return dedicatedOrigin
+}
+
+func dedicatedRuntimeCleanLocation(requestURL *url.URL, instanceID int, accessToken string) string {
+	if requestURL == nil {
+		return "/"
+	}
+	prefix := fmt.Sprintf("/api/v1/instances/%d/proxy", instanceID)
+	pathValue := strings.TrimPrefix(requestURL.Path, prefix)
+	if pathValue == "" {
+		pathValue = "/"
+	} else if !strings.HasPrefix(pathValue, "/") {
+		pathValue = "/" + pathValue
+	}
+
+	query := requestURL.Query()
+	values := query["token"]
+	if len(values) > 0 {
+		kept := values[:0]
+		for _, value := range values {
+			if value != accessToken {
+				kept = append(kept, value)
+			}
+		}
+		if len(kept) == 0 {
+			query.Del("token")
+		} else {
+			query["token"] = kept
+		}
+	}
+	if encoded := query.Encode(); encoded != "" {
+		return pathValue + "?" + encoded
+	}
+	return pathValue
 }
 
 func (h *InstanceHandler) proxyInstanceWithToken(c *gin.Context, id int, token string) {
@@ -1708,6 +1741,8 @@ func (h *InstanceHandler) proxyInstanceWithToken(c *gin.Context, id int, token s
 		if err := h.proxyService.ProxyWebSocket(c.Request.Context(), id, token, c.Writer, original); err != nil {
 			if errors.Is(err, services.ErrInstanceGatewayUnavailable) {
 				http.Error(c.Writer, "Instance gateway is not available", http.StatusServiceUnavailable)
+			} else if errors.Is(err, services.ErrOpenCodeDedicatedOriginRequired) {
+				http.Error(c.Writer, err.Error(), http.StatusNotFound)
 			} else {
 				http.Error(c.Writer, err.Error(), http.StatusBadGateway)
 			}
@@ -1728,6 +1763,8 @@ func (h *InstanceHandler) proxyInstanceWithToken(c *gin.Context, id int, token s
 			http.Error(c.Writer, "Token does not match instance", http.StatusForbidden)
 		} else if errors.Is(err, services.ErrInstanceGatewayUnavailable) {
 			http.Error(c.Writer, "Instance gateway is not available", http.StatusServiceUnavailable)
+		} else if errors.Is(err, services.ErrOpenCodeDedicatedOriginRequired) {
+			http.Error(c.Writer, err.Error(), http.StatusNotFound)
 		} else {
 			http.Error(c.Writer, fmt.Sprintf("Failed to proxy request: %v", err), http.StatusBadGateway)
 		}
@@ -2360,21 +2397,6 @@ func (h *InstanceHandler) GetSharedInstanceSession(c *gin.Context) {
 		return
 	}
 	proxyURL := h.proxyService.GetProxyURLForInstance(instance, instanceToken.Token)
-	accessURL := browserAccessEntryURL(instanceToken.AccessURL, proxyURL)
-	sessionExpiresAt := instanceToken.ExpiresAt
-	if h.hermesDesktop != nil && h.hermesDesktop.service.IsDashboardInstance(instance.ID) {
-		desktop, err := h.hermesDesktop.activateDesktopSession(c, instance.UserID, instance.ID)
-		if err != nil {
-			hermesDesktopError(c, err)
-			return
-		}
-		if !desktop.Available || desktop.ExpiresAt == nil || strings.TrimSpace(desktop.RendererURL) == "" {
-			hermesDesktopError(c, services.ErrHermesDesktopUnavailable)
-			return
-		}
-		accessURL = desktop.RendererURL
-		sessionExpiresAt = *desktop.ExpiresAt
-	}
 	workspaceAccess, err := services.NormalizeExternalWorkspaceAccess(access.WorkspaceAccess)
 	if err != nil {
 		workspaceAccess = services.ExternalWorkspaceAccessNone
@@ -2395,8 +2417,8 @@ func (h *InstanceHandler) GetSharedInstanceSession(c *gin.Context) {
 			"instance_mode": instance.InstanceMode,
 			"runtime_type":  instance.RuntimeType,
 		},
-		"access_url":          accessURL,
-		"session_expires_at":  sessionExpiresAt,
+		"access_url":          browserAccessEntryURL(instanceToken.AccessURL, proxyURL),
+		"session_expires_at":  instanceToken.ExpiresAt,
 		"share_expires_at":    access.ExpiresAt,
 		"workspace_access":    workspaceAccess,
 		"workspace_available": workspaceAvailable,

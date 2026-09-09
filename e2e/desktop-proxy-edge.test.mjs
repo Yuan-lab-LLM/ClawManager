@@ -8,7 +8,7 @@ import test from 'node:test'
 // synthetic keys/tokens are local fixtures and never authenticate to a cluster.
 const source = readFileSync(new URL('../deployments/nginx/njs/desktop_auth.js', import.meta.url), 'utf8')
 const nginx = readFileSync(new URL('../deployments/nginx/nginx.conf', import.meta.url), 'utf8')
-const key = 'hermes-dashboard-edge-test-only'
+const key = 'desktop-proxy-edge-test-only'
 const fallback = 'http://127.0.0.1:9001'
 
 function loadEdge(env = { INSTANCE_ACCESS_TOKEN_SECRET: key }) {
@@ -49,34 +49,7 @@ function request({ cookie = '', query = '', id = '42', variables = {}, args } = 
   }
 }
 
-test('Dashboard cookie is only a backend routing hint, including forged/empty values', () => {
-  const edge = loadEdge()
-  for (const value of ['opaque-cm-lease', 'forged.not-a-valid.signature', '']) {
-    assert.equal(edge.resolveTarget(request({ cookie: `cm_hermes_dashboard_42=${value}` })), fallback)
-  }
-  // Routing does not require nginx to validate the backend-owned lease format.
-  assert.equal(loadEdge({}).resolveTarget(request({ cookie: 'cm_hermes_dashboard_42=forged' })), fallback)
-})
-
-test('Dashboard cookie wins over otherwise valid direct-proxy JWTs', () => {
-  const direct = token()
-  assert.equal(loadEdge().resolveTarget(request({
-    cookie: `unrelated=x; cm_hermes_dashboard_42=forged; instance_access_42=${direct}`,
-    query: `token=${direct}`,
-  })), fallback)
-})
-
-test('Cookie names must match the current instance exactly', () => {
-  const edge = loadEdge()
-  for (const cookie of ['cm_hermes_dashboard_43=forged', 'cm_hermes_dashboard_420=forged', 'prefix_cm_hermes_dashboard_42=forged']) {
-    assert.equal(edge.resolveTarget(request({ cookie })), 'deny')
-  }
-  assert.equal(edge.resolveTarget(request({
-    cookie: 'cm_hermes_dashboard_42=forged', variables: { inst_id: '', runtime_inst_id: '42' },
-  })), fallback)
-})
-
-test('No Dashboard cookie preserves the existing direct and legacy token flows', () => {
+test('Signed access tokens preserve the existing direct and control-plane fallback flows', () => {
   const edge = loadEdge()
   const direct = token()
   assert.equal(edge.resolveTarget(request({ query: `token=${direct}` })), 'https://runtime-42.test:8443')
@@ -96,33 +69,28 @@ test('A refreshed query JWT still rotates an expired legacy cookie', () => {
   })), 'https://fresh-runtime.test:8443')
 })
 
-test('Verified legacy Hermes JWTs never use historical upstream claims, regardless of mode', () => {
+test('Runtime type does not override a verified direct-proxy upstream', () => {
   const edge = loadEdge()
-  for (const instanceType of ['hermes', 'Hermes', ' HERMES ']) {
-    for (const instanceMode of [undefined, 'pro', 'lite']) {
-      const legacy = token({ instance_type: instanceType, instance_mode: instanceMode })
-      assert.equal(edge.resolveTarget(request({ query: `token=${legacy}` })), fallback)
-      assert.equal(edge.resolveTarget(request({ cookie: `instance_access_42=${legacy}` })), fallback)
-    }
-  }
-  for (const instanceType of ['openclaw', 'opencode', 'deepseek-harness', 'ubuntu']) {
-    const legacy = token({ instance_type: instanceType })
-    assert.equal(edge.resolveTarget(request({ query: `token=${legacy}` })), 'https://runtime-42.test:8443')
+  for (const instanceType of ['hermes', 'openclaw', 'opencode', 'deepseek-harness', 'ubuntu']) {
+    const access = token({ instance_type: instanceType })
+    assert.equal(edge.resolveTarget(request({ query: `token=${access}` })), 'https://runtime-42.test:8443')
+    assert.equal(edge.resolveTarget(request({ cookie: `instance_access_42=${access}` })), 'https://runtime-42.test:8443')
   }
   assert.equal(edge.resolveTarget(request({ query: `token=${token({ instance_type: 'hermes', exp: 1 })}` })), 'deny')
 })
 
-test('cleanUri removes CM access JWTs but preserves BFF WS tickets and business query', () => {
+test('cleanUri removes CM access JWTs but preserves runtime business query', () => {
   const edge = loadEdge()
-  for (const access of [token(), token({ exp: 1 })]) {
+  const liveAccess = token()
+  for (const access of [liveAccess, token({ exp: 1 })]) {
     const r = request({
-      cookie: 'cm_hermes_dashboard_42=opaque-cm-lease',
+      cookie: `instance_access_42=${liveAccess}`,
       query: `channel=chat%2F42&token=${access}&ticket=cm-one-use-ticket&resume=1`,
     })
-    assert.equal(edge.resolveTarget(r), fallback)
+    assert.equal(edge.resolveTarget(r), 'https://runtime-42.test:8443')
     assert.equal(edge.cleanUri(r), '/api/v1/instances/42/proxy/chat?channel=chat%2F42&ticket=cm-one-use-ticket&resume=1')
   }
-  const r = request({ cookie: 'cm_hermes_dashboard_42=opaque-cm-lease', query: 'ticket=cm-one-use-ticket&channel=chat-42' })
+  const r = request({ cookie: `instance_access_42=${token()}`, query: 'ticket=cm-one-use-ticket&channel=chat-42' })
   assert.equal(edge.cleanUri(r), r.variables.request_uri)
 })
 

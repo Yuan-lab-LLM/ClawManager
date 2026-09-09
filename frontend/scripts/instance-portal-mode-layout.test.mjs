@@ -49,6 +49,19 @@ assert(
 );
 
 assert(
+  portalSource.includes(
+    'const isShellPortal = selectedRuntimeType === "shell";',
+  ),
+  "OpenCode Lite must use its dedicated browser origin instead of the shell portal.",
+);
+
+assert(
+  !serviceFrameSource.includes("isOpenCodeLite") &&
+    !serviceFrameSource.includes("<InstanceShellTerminal"),
+  "OpenCode Lite service frames must not fall back to the terminal TUI.",
+);
+
+assert(
   portalSource.includes("xl:grid-rows-[minmax(0,1fr)]") &&
     portalSource.includes("xl:overflow-hidden") &&
     !portalSource.includes("content-start overflow-y-auto") &&

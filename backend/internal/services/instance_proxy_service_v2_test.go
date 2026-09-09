@@ -210,10 +210,76 @@ func TestInstanceProxyServiceNormalizesDeepSeekHarnessDedicatedWebSocketOrigin(t
 	}
 }
 
+func TestInstanceProxyServiceKeepsOpenCodeDedicatedOriginAtRoot(t *testing.T) {
+	instanceToken := "igt_opencode_instance"
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		username, password, ok := r.BasicAuth()
+		if !ok || username != "opencode" || password != instanceToken {
+			t.Fatalf("BasicAuth = %q/%q/%v", username, password, ok)
+		}
+		if got := r.Header.Get("X-Forwarded-Prefix"); got != "" {
+			t.Fatalf("X-Forwarded-Prefix = %q, want empty for dedicated origin", got)
+		}
+		if r.URL.Path == "/redirect" {
+			w.Header().Set("Location", "/session/next")
+			w.WriteHeader(http.StatusTemporaryRedirect)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(`<!doctype html><html><head><script src="/assets/app.js"></script></head><body></body></html>`))
+	}))
+	defer upstream.Close()
+
+	service, token := newOpenCodeV2ProxyTestService(t, upstream.URL, 134, instanceToken)
+	client := upstream.Client()
+	client.CheckRedirect = func(_ *http.Request, _ []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	service.httpClient = client
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/instances/134/proxy/?token="+url.QueryEscape(token.Token), nil)
+	req.Header.Set(DedicatedRuntimeOriginHeader, RuntimeTypeOpenCode)
+	rec := httptest.NewRecorder()
+	if err := service.ProxyRequest(req.Context(), 134, token.Token, rec, req); err != nil {
+		t.Fatalf("ProxyRequest returned error: %v", err)
+	}
+	if strings.Contains(rec.Body.String(), "<base ") || strings.Contains(rec.Body.String(), "/api/v1/instances/134/proxy") {
+		t.Fatalf("dedicated-origin HTML was rewritten as a subpath: %s", rec.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/instances/134/proxy/redirect?token="+url.QueryEscape(token.Token), nil)
+	req.Header.Set(DedicatedRuntimeOriginHeader, RuntimeTypeOpenCode)
+	rec = httptest.NewRecorder()
+	if err := service.ProxyRequest(req.Context(), 134, token.Token, rec, req); err != nil {
+		t.Fatalf("redirect ProxyRequest returned error: %v", err)
+	}
+	if got := rec.Header().Get("Location"); got != "/session/next" {
+		t.Fatalf("Location = %q, want root-origin redirect", got)
+	}
+}
+
+func TestInstanceProxyServiceRejectsLegacyOpenCodeSubpathProxy(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("legacy OpenCode request must not reach the runtime")
+	}))
+	defer upstream.Close()
+
+	service, token := newOpenCodeV2ProxyTestService(t, upstream.URL, 137, "igt_opencode_instance")
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/instances/137/proxy/", nil)
+	if err := service.ProxyRequest(req.Context(), 137, token.Token, httptest.NewRecorder(), req); !errors.Is(err, ErrOpenCodeDedicatedOriginRequired) {
+		t.Fatalf("ProxyRequest error = %v, want ErrOpenCodeDedicatedOriginRequired", err)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/instances/137/proxy/ws", nil)
+	if err := service.ProxyWebSocket(req.Context(), 137, token.Token, httptest.NewRecorder(), req); !errors.Is(err, ErrOpenCodeDedicatedOriginRequired) {
+		t.Fatalf("ProxyWebSocket error = %v, want ErrOpenCodeDedicatedOriginRequired", err)
+	}
+}
+
 func TestInstanceProxyServiceRejectsHermesLiteLegacyHTTP(t *testing.T) {
 	for _, tokenType := range []string{RuntimeTypeHermes, RuntimeTypeOpenClaw} {
 		t.Run(tokenType, func(t *testing.T) {
-			service, token, hits := legacyHermesProxyFixture(t, tokenType, InstanceModeLite)
+			service, token, hits := hermesProxyGuardFixture(t, tokenType, InstanceModeLite)
 			for _, route := range []struct{ method, path string }{
 				{"GET", "/"}, {"GET", "/chat"}, {"GET", "/chat/"}, {"HEAD", "/chat"},
 				{"GET", "/login"}, {"POST", "/auth/password-login"},
@@ -223,7 +289,7 @@ func TestInstanceProxyServiceRejectsHermesLiteLegacyHTTP(t *testing.T) {
 			} {
 				t.Run(route.method+route.path, func(t *testing.T) {
 					req := httptest.NewRequest(route.method, "/api/v1/instances/127/proxy"+route.path, nil)
-					req.Header.Set("Cookie", "hermes_session_at=browser-cookie; cm_hermes_dashboard_127=forged")
+					req.Header.Set("Cookie", "untrusted_runtime_cookie=forged")
 					req.Header.Set("X-Api-Key", "browser-api-key")
 					rec := httptest.NewRecorder()
 					err := service.ProxyRequest(req.Context(), 127, token, rec, req)
@@ -242,11 +308,11 @@ func TestInstanceProxyServiceRejectsHermesLiteLegacyHTTP(t *testing.T) {
 func TestInstanceProxyServiceRejectsHermesLiteLegacyWebSocket(t *testing.T) {
 	for _, tokenType := range []string{RuntimeTypeHermes, RuntimeTypeOpenClaw} {
 		t.Run(tokenType, func(t *testing.T) {
-			service, token, hits := legacyHermesProxyFixture(t, tokenType, InstanceModeLite)
+			service, token, hits := hermesProxyGuardFixture(t, tokenType, InstanceModeLite)
 			for _, route := range []string{"/api/ws", "/api/ws?token=runtime-token", "/api/pty?channel=chat-127&ticket=browser-ticket", "/api/events?channel=chat-127&ticket=browser-ticket"} {
 				t.Run(route, func(t *testing.T) {
 					req := httptest.NewRequest("GET", "/api/v1/instances/127/proxy"+route, nil)
-					req.Header.Set("Cookie", "hermes_session_at=browser-cookie; cm_hermes_dashboard_127=forged")
+					req.Header.Set("Cookie", "untrusted_runtime_cookie=forged")
 					req.Header.Set("Origin", "https://browser.invalid")
 					req.Header.Set("Sec-WebSocket-Protocol", "hermes-gateway-v1,hermes-gateway-ticket.browser-ticket")
 					req.Header.Set("Connection", "Upgrade")
@@ -266,7 +332,7 @@ func TestInstanceProxyServiceRejectsHermesLiteLegacyWebSocket(t *testing.T) {
 }
 
 func TestInstanceProxyServiceKeepsHermesProHTTP(t *testing.T) {
-	service, token, hits := legacyHermesProxyFixture(t, RuntimeTypeHermes, InstanceModePro)
+	service, token, hits := hermesProxyGuardFixture(t, RuntimeTypeHermes, InstanceModePro)
 	req := httptest.NewRequest("GET", "/api/v1/instances/127/proxy/api/status", nil)
 	rec := httptest.NewRecorder()
 	if err := service.ProxyRequest(req.Context(), 127, token, rec, req); err != nil {
@@ -332,7 +398,35 @@ func TestInstanceProxyServiceUsesConfiguredDedicatedOriginForDeepSeekHarnessLite
 	}
 }
 
-func TestInstanceProxyServiceUsesChatEntryForHermesLite(t *testing.T) {
+func TestInstanceProxyServiceRequiresConfiguredDedicatedOriginForOpenCodeLite(t *testing.T) {
+	workspacePath := "/workspaces/opencode/user-45/instance-123"
+	instance := &models.Instance{
+		ID: 123, Type: RuntimeTypeOpenCode, RuntimeType: RuntimeBackendGateway,
+		InstanceMode: InstanceModeLite, WorkspacePath: &workspacePath,
+	}
+	accessService := NewInstanceAccessService()
+	t.Cleanup(accessService.Stop)
+	service := NewInstanceProxyService(accessService)
+
+	t.Setenv(openCodePublicURLTemplateEnvVar, "https://opencode-{instance_id}.172-16-1-12.nip.io:39443/")
+	got := service.GetProxyURLForInstance(instance, "token+with/slash")
+	want := "https://opencode-123.172-16-1-12.nip.io:39443/?token=token%2Bwith%2Fslash"
+	if got != want {
+		t.Fatalf("GetProxyURLForInstance() = %q, want %q", got, want)
+	}
+
+	t.Setenv(openCodePublicURLTemplateEnvVar, "")
+	if got := service.GetProxyURLForInstance(instance, "token"); got != "" {
+		t.Fatalf("missing dedicated-origin template returned legacy proxy URL %q", got)
+	}
+
+	t.Setenv(openCodePublicURLTemplateEnvVar, "https://runtime.example.test/")
+	if got := service.GetProxyURLForInstance(instance, "token"); got != "" {
+		t.Fatalf("invalid dedicated-origin template returned legacy proxy URL %q", got)
+	}
+}
+
+func TestInstanceProxyServiceDoesNotExposeGenericEntryForHermesLite(t *testing.T) {
 	workspacePath := "/workspaces/hermes/user-45/instance-123"
 	accessService := NewInstanceAccessService()
 	t.Cleanup(accessService.Stop)
@@ -345,7 +439,7 @@ func TestInstanceProxyServiceUsesChatEntryForHermesLite(t *testing.T) {
 		WorkspacePath: &workspacePath,
 	}, "token+with/slash")
 
-	want := "/api/v1/instances/123/proxy/chat/?token=token%2Bwith%2Fslash"
+	want := ""
 	if got != want {
 		t.Fatalf("GetProxyURLForInstance() = %q, want %q", got, want)
 	}
@@ -552,6 +646,28 @@ func newDeepSeekHarnessV2ProxyTestService(t *testing.T, upstreamURL string, inst
 		int64(instanceID): {ID: int64(instanceID), PodIP: &podIP, State: "ready"},
 	}}
 	return newV2ProxyTestService(t, instanceRepo, bindingRepo, podRepo, 45, instanceID, RuntimeTypeDeepSeekHarness)
+}
+
+func newOpenCodeV2ProxyTestService(t *testing.T, upstreamURL string, instanceID int, instanceToken string) (*InstanceProxyService, *AccessToken) {
+	t.Helper()
+	podIP, gatewayPort := splitURLHostPortForProxyTest(t, upstreamURL)
+	workspacePath := "/workspaces/opencode/user-45/instance-" + strconv.Itoa(instanceID)
+	instanceRepo := newV2LifecycleInstanceRepo()
+	instanceRepo.byID[instanceID] = &models.Instance{
+		ID: instanceID, UserID: 45, Type: RuntimeTypeOpenCode,
+		RuntimeType: RuntimeBackendGateway, InstanceMode: InstanceModeLite,
+		Status: "running", AccessToken: &instanceToken, WorkspacePath: &workspacePath,
+		RuntimeGeneration: 1,
+	}
+	bindingRepo := newFakeRuntimeBindingRepo()
+	bindingRepo.bindings[instanceID] = &models.InstanceRuntimeBinding{
+		InstanceID: instanceID, RuntimePodID: int64(instanceID), GatewayPort: gatewayPort,
+		State: "running", Generation: 1,
+	}
+	podRepo := &fakeRuntimePodRepo{pods: map[int64]*models.RuntimePod{
+		int64(instanceID): {ID: int64(instanceID), PodIP: &podIP, State: "ready"},
+	}}
+	return newV2ProxyTestService(t, instanceRepo, bindingRepo, podRepo, 45, instanceID, RuntimeTypeOpenCode)
 }
 
 func splitURLHostPortForProxyTest(t *testing.T, rawURL string) (string, int) {

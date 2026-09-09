@@ -102,7 +102,8 @@ func TestIsOpenCodeLiteProxyInstance(t *testing.T) {
 	}
 }
 
-func TestGetProxyURLForInstanceOpenCodeLiteUsesRoot(t *testing.T) {
+func TestGetProxyURLForInstanceOpenCodeLiteUsesDedicatedOrigin(t *testing.T) {
+	t.Setenv(openCodePublicURLTemplateEnvVar, "https://opencode-{instance_id}.runtime.example.test/")
 	workspacePath := "/workspaces/opencode/user-45/instance-123"
 	accessService := NewInstanceAccessService()
 	t.Cleanup(accessService.Stop)
@@ -115,7 +116,7 @@ func TestGetProxyURLForInstanceOpenCodeLiteUsesRoot(t *testing.T) {
 		WorkspacePath: &workspacePath,
 	}, "token+with/slash")
 
-	want := "/api/v1/instances/123/proxy/?token=token%2Bwith%2Fslash"
+	want := "https://opencode-123.runtime.example.test/?token=token%2Bwith%2Fslash"
 	if got != want {
 		t.Fatalf("GetProxyURLForInstance() = %q, want %q", got, want)
 	}

@@ -3,7 +3,6 @@ import type { Locale, TranslationTree } from "./i18n";
 export const hermesDesktopTranslations: Record<Locale, TranslationTree> = {
   en: {
     checking: "Checking Desktop Web availability…",
-    currentClassic: "Current view: Classic Dashboard",
     retryCapability: "Check Desktop availability again",
     featureDisabled: "Desktop Web is not enabled on this ClawManager server.",
     runtimeUnsupported: "This Runtime does not advertise a compatible Desktop Web capability.",
@@ -20,7 +19,6 @@ export const hermesDesktopTranslations: Record<Locale, TranslationTree> = {
   },
   zh: {
     checking: "正在检查 Desktop Web 是否可用…",
-    currentClassic: "当前界面：经典 Dashboard",
     retryCapability: "重新检查 Desktop 能力",
     featureDisabled: "当前 ClawManager 服务尚未启用 Desktop Web。",
     runtimeUnsupported: "当前 Runtime 未提供兼容的 Desktop Web 能力。",
@@ -37,7 +35,6 @@ export const hermesDesktopTranslations: Record<Locale, TranslationTree> = {
   },
   ja: {
     checking: "Desktop Web が利用可能か確認しています…",
-    currentClassic: "現在の画面：従来の Dashboard",
     retryCapability: "Desktop の利用可否を再確認",
     featureDisabled: "この ClawManager サーバーでは Desktop Web が有効になっていません。",
     runtimeUnsupported: "この Runtime は互換性のある Desktop Web 機能を提供していません。",
@@ -54,7 +51,6 @@ export const hermesDesktopTranslations: Record<Locale, TranslationTree> = {
   },
   ko: {
     checking: "Desktop Web 사용 가능 여부를 확인하는 중…",
-    currentClassic: "현재 화면: 기존 Dashboard",
     retryCapability: "Desktop 사용 가능 여부 다시 확인",
     featureDisabled: "이 ClawManager 서버에서 Desktop Web이 활성화되지 않았습니다.",
     runtimeUnsupported: "현재 Runtime이 호환되는 Desktop Web 기능을 제공하지 않습니다.",
@@ -71,7 +67,6 @@ export const hermesDesktopTranslations: Record<Locale, TranslationTree> = {
   },
   de: {
     checking: "Verfügbarkeit von Desktop Web wird geprüft…",
-    currentClassic: "Aktuelle Ansicht: Klassisches Dashboard",
     retryCapability: "Desktop-Verfügbarkeit erneut prüfen",
     featureDisabled: "Desktop Web ist auf diesem ClawManager-Server nicht aktiviert.",
     runtimeUnsupported: "Diese Runtime bietet keine kompatible Desktop-Web-Funktion an.",

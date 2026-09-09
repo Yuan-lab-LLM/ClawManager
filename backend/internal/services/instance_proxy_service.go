@@ -62,13 +62,17 @@ type serviceLookupCall struct {
 
 const (
 	defaultServiceCacheTTL                 = 30 * time.Second
+	openCodePublicURLTemplateEnvVar        = "CLAWMANAGER_OPENCODE_PUBLIC_URL_TEMPLATE"
 	deepSeekHarnessPublicURLTemplateEnvVar = "CLAWMANAGER_DEEPSEEK_HARNESS_PUBLIC_URL_TEMPLATE"
 )
 
 // DedicatedRuntimeOriginHeader marks requests routed through a runtime-specific browser origin.
 const DedicatedRuntimeOriginHeader = "X-ClawManager-Runtime-Origin"
 
-var ErrInstanceGatewayUnavailable = errors.New("instance gateway is not available")
+var (
+	ErrInstanceGatewayUnavailable      = errors.New("instance gateway is not available")
+	ErrOpenCodeDedicatedOriginRequired = errors.New("OpenCode Lite requires its dedicated instance origin")
+)
 
 type InstanceProxyServiceOption func(*InstanceProxyService)
 
@@ -139,14 +143,18 @@ func (s *InstanceProxyService) ProxyRequest(ctx context.Context, instanceID int,
 	if accessToken.InstanceID != instanceID {
 		return fmt.Errorf("token does not match instance")
 	}
-	// Hermes Lite is exclusively served by its authenticated BFF. Classify the
-	// current instance, not the potentially stale type embedded in an old JWT.
+	// Hermes Lite is served only through the managed Desktop bridge. Its raw
+	// runtime endpoint must not remain reachable through the generic proxy.
 	if s.isHermesLiteProxyInstance(instanceID, RuntimeTypeHermes) {
 		return ErrHermesDesktopUnavailable
 	}
 
 	effectiveRequestPath := canonicalProxyEntryRequestPath(r.URL.Path, accessToken, instanceID)
 	dedicatedRuntimeOrigin := isDedicatedRuntimeOriginRequest(r, accessToken.InstanceType)
+	opencodeLite := s.isOpenCodeLiteProxyInstance(instanceID, accessToken.InstanceType)
+	if opencodeLite && !dedicatedRuntimeOrigin {
+		return ErrOpenCodeDedicatedOriginRequired
+	}
 
 	// Extract the actual path from the request (remove the proxy prefix)
 	targetPath := s.extractTargetPath(effectiveRequestPath, instanceID, accessToken.InstanceType)
@@ -160,8 +168,7 @@ func (s *InstanceProxyService) ProxyRequest(ctx context.Context, instanceID int,
 	}
 
 	managedGatewayToken := s.managedRuntimeGatewayBearerToken(ctx, instanceID, accessToken.InstanceType)
-	proxyPrefix := hermesProxyPrefix(instanceID)
-	opencodeLite := s.isOpenCodeLiteProxyInstance(instanceID, accessToken.InstanceType)
+	proxyPrefix := instanceProxyPrefix(instanceID)
 	bootstrapPath := stripInstanceProxyPrefix(targetPath, instanceID)
 
 	// Copy query parameters, excluding ClawManager-owned proxy/gateway tokens.
@@ -217,7 +224,11 @@ func (s *InstanceProxyService) ProxyRequest(ctx context.Context, instanceID int,
 	proxyReq.Header.Set("X-Forwarded-For", r.RemoteAddr)
 	proxyReq.Header.Set("X-Forwarded-Host", r.Host)
 	proxyReq.Header.Set("X-Forwarded-Proto", requestScheme(r))
-	proxyReq.Header.Set("X-Forwarded-Prefix", proxyPrefix)
+	if dedicatedRuntimeOrigin {
+		proxyReq.Header.Del("X-Forwarded-Prefix")
+	} else {
+		proxyReq.Header.Set("X-Forwarded-Prefix", proxyPrefix)
+	}
 	if opencodeLite {
 		setOpenCodeServerBasicAuthHeaders(proxyReq.Header, managedGatewayToken)
 	} else if !isRuntimePublicAuthPath(bootstrapPath) {
@@ -246,6 +257,11 @@ func (s *InstanceProxyService) ProxyRequest(ctx context.Context, instanceID int,
 
 	if location := resp.Header.Get("Location"); location != "" && !dedicatedRuntimeOrigin {
 		resp.Header.Set("Location", s.rewriteRedirectLocation(instanceID, location))
+	}
+	// OpenCode is authenticated on the internal hop. Never expose its Basic
+	// challenge to the browser, where it would open a native login dialog.
+	if opencodeLite {
+		resp.Header.Del("WWW-Authenticate")
 	}
 
 	if openCodeProjectSearchRewritten && resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusMultipleChoices {
@@ -363,11 +379,16 @@ func (s *InstanceProxyService) ProxyWebSocket(ctx context.Context, instanceID in
 	if accessToken.InstanceID != instanceID {
 		return fmt.Errorf("token does not match instance")
 	}
-	// Browser cookies/tickets for Hermes must never use this raw WS tunnel.
+	// Browser cookies and tickets for Hermes Desktop must never enter this raw
+	// WebSocket tunnel.
 	if s.isHermesLiteProxyInstance(instanceID, RuntimeTypeHermes) {
 		return ErrHermesDesktopUnavailable
 	}
 	dedicatedRuntimeOrigin := isDedicatedRuntimeOriginRequest(r, accessToken.InstanceType)
+	opencodeLite := s.isOpenCodeLiteProxyInstance(instanceID, accessToken.InstanceType)
+	if opencodeLite && !dedicatedRuntimeOrigin {
+		return ErrOpenCodeDedicatedOriginRequired
+	}
 
 	// Extract the actual path from the request
 	targetPath := s.extractTargetPath(r.URL.Path, instanceID, accessToken.InstanceType)
@@ -379,7 +400,6 @@ func (s *InstanceProxyService) ProxyWebSocket(ctx context.Context, instanceID in
 	}
 
 	managedGatewayToken := s.managedRuntimeGatewayBearerToken(ctx, instanceID, accessToken.InstanceType)
-	opencodeLite := s.isOpenCodeLiteProxyInstance(instanceID, accessToken.InstanceType)
 
 	// Copy query parameters, excluding ClawManager-owned proxy/gateway tokens.
 	// Preserve DSH's significant leading '?' in plugin-loader batch queries.
@@ -408,7 +428,11 @@ func (s *InstanceProxyService) ProxyWebSocket(ctx context.Context, instanceID in
 	upstreamHeader.Set("X-Forwarded-For", r.RemoteAddr)
 	upstreamHeader.Set("X-Forwarded-Host", r.Host)
 	upstreamHeader.Set("X-Forwarded-Proto", requestScheme(r))
-	upstreamHeader.Set("X-Forwarded-Prefix", fmt.Sprintf("/api/v1/instances/%d/proxy", instanceID))
+	if dedicatedRuntimeOrigin {
+		upstreamHeader.Del("X-Forwarded-Prefix")
+	} else {
+		upstreamHeader.Set("X-Forwarded-Prefix", fmt.Sprintf("/api/v1/instances/%d/proxy", instanceID))
+	}
 	if opencodeLite {
 		setOpenCodeServerBasicAuthHeaders(upstreamHeader, managedGatewayToken)
 	} else {
@@ -555,7 +579,7 @@ func isDedicatedRuntimeOriginRequest(r *http.Request, instanceType string) bool 
 	if !managed || !originManaged || runtimeType != originRuntimeType {
 		return false
 	}
-	return runtimeType == RuntimeTypeDeepSeekHarness
+	return runtimeType == RuntimeTypeOpenCode || runtimeType == RuntimeTypeDeepSeekHarness
 }
 
 func setOpenCodeServerBasicAuthHeaders(header http.Header, token string) {
@@ -574,7 +598,7 @@ func setOpenCodeServerBasicAuthHeaders(header http.Header, token string) {
 	header.Del("OpenAI-Api-Key")
 }
 
-func hermesProxyPrefix(instanceID int) string {
+func instanceProxyPrefix(instanceID int) string {
 	return fmt.Sprintf("/api/v1/instances/%d/proxy", instanceID)
 }
 
@@ -747,8 +771,8 @@ func rewriteOpenCodeFindFileResponse(body []byte) ([]byte, bool) {
 	return modified, true
 }
 
-// Preserve the legacy public-auth header behavior for other runtime types.
-// Hermes Lite cannot reach this proxy at all; its BFF owns authentication.
+// Preserve the public-auth header behavior for managed runtimes other than the
+// separately protected Hermes Desktop bridge.
 func isRuntimePublicAuthPath(targetPath string) bool {
 	path := strings.TrimSpace(targetPath)
 	if path == "" {
@@ -760,28 +784,7 @@ func isRuntimePublicAuthPath(targetPath string) bool {
 	return path == "/login" || strings.HasPrefix(path, "/login?") || path == "/auth" || strings.HasPrefix(path, "/auth/")
 }
 
-const instanceProxyWebSocketMaxMessageBytes int64 = 8 << 20 // Preserve the existing tunnel frame limit.
-
-func injectHermesAbsolutePathPatch(html, proxyPrefix string) string {
-	prefix := strings.TrimRight(strings.TrimSpace(proxyPrefix), "/")
-	if prefix == "" || html == "" {
-		return html
-	}
-	// Keep the script brace-safe for fmt; prefix is JSON-quoted for JS.
-	prefixJSON, err := json.Marshal(prefix)
-	if err != nil {
-		return html
-	}
-	script := `<script>(function(p){if(!p)return;function fix(u){if(typeof u!=="string")return u;if(!u||u.charAt(0)!=="/"||u.indexOf("//")===0)return u;if(u===p||u.indexOf(p+"/")===0)return u;return p+u;}var of=window.fetch;if(typeof of==="function"){window.fetch=function(input,init){if(typeof input==="string"){input=fix(input);}else if(input&&typeof input.url==="string"){try{input=new Request(fix(input.url),input);}catch(e){}}return of.call(this,input,init);};}if(window.XMLHttpRequest&&XMLHttpRequest.prototype){var oo=XMLHttpRequest.prototype.open;XMLHttpRequest.prototype.open=function(method,url){if(typeof url==="string"){arguments[1]=fix(url);}return oo.apply(this,arguments);};}function wrap(fn){return function(url){if(typeof url==="string"){url=fix(url);}return fn.call(this,url);};}try{var la=window.location.assign.bind(window.location);window.location.assign=wrap(la);}catch(e){}try{var lr=window.location.replace.bind(window.location);window.location.replace=wrap(lr);}catch(e){}})(` + string(prefixJSON) + `);</script>`
-
-	for _, tag := range []string{"<head>", "<Head>", "<HEAD>"} {
-		if idx := strings.Index(html, tag); idx != -1 {
-			insertAt := idx + len(tag)
-			return html[:insertAt] + script + html[insertAt:]
-		}
-	}
-	return script + html
-}
+const instanceProxyWebSocketMaxMessageBytes int64 = 8 << 20
 
 var openCodeHTMLRootAssetPattern = regexp.MustCompile(`(?i)(\b(?:href|src)\s*=\s*["'])(/[^"']*)`)
 
@@ -1084,13 +1087,19 @@ func (s *InstanceProxyService) GetProxyURLForInstance(instance *models.Instance,
 	if instance == nil {
 		return ""
 	}
+	if runtimeType, ok := v2RuntimeTypeForInstance(instance); ok && runtimeType == RuntimeTypeOpenCode {
+		// OpenCode's web UI owns the root of its origin. Do not fall back to the
+		// legacy /instances/{id}/proxy subpath when the deployment forgot its
+		// dedicated-origin template; fail access generation instead.
+		return managedRuntimePublicURL(runtimeType, instance.ID, token)
+	}
 	if runtimeType, ok := v2RuntimeTypeForInstance(instance); ok && runtimeType == RuntimeTypeDeepSeekHarness {
 		if publicURL := managedRuntimePublicURL(runtimeType, instance.ID, token); publicURL != "" {
 			return publicURL
 		}
 	}
 	if runtimeType, ok := v2RuntimeTypeForInstance(instance); ok && runtimeType == RuntimeTypeHermes {
-		return proxyURLWithPath(instance.ID, "/chat", token)
+		return ""
 	}
 	return proxyURLWithPath(instance.ID, "/", token)
 }
@@ -1101,6 +1110,8 @@ func managedRuntimePublicURL(runtimeType string, instanceID int, token string) s
 	// wildcard DNS (for example nip.io) and an offline authoritative DNS zone.
 	var envVar string
 	switch runtimeType {
+	case RuntimeTypeOpenCode:
+		envVar = openCodePublicURLTemplateEnvVar
 	case RuntimeTypeDeepSeekHarness:
 		envVar = deepSeekHarnessPublicURLTemplateEnvVar
 	default:
@@ -1212,14 +1223,6 @@ func (s *InstanceProxyService) shouldRewriteHTML(instanceType string) bool {
 }
 
 func (s *InstanceProxyService) shouldRewriteHTMLForProxy(instanceID int, instanceType string) bool {
-	if s != nil && s.instanceRepo != nil && strings.EqualFold(strings.TrimSpace(instanceType), RuntimeTypeHermes) {
-		instance, err := s.instanceRepo.GetByID(instanceID)
-		if err == nil && instance != nil {
-			if runtimeType, ok := v2RuntimeTypeForInstance(instance); ok && runtimeType == RuntimeTypeHermes {
-				return true
-			}
-		}
-	}
 	if s.isOpenCodeLiteProxyInstance(instanceID, instanceType) {
 		return true
 	}

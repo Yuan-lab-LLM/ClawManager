@@ -22,8 +22,8 @@ export function resolveHermesDesktopView({
   pending: boolean;
   failed: boolean;
   capability?: { instance_id: number; available: boolean; reason?: string };
-}): { mode: "classic" | "desktop" | "pending"; reason?: string } {
-  if (!instanceAvailable) return { mode: "classic" };
+}): { mode: "unavailable" | "desktop" | "pending"; reason?: string } {
+  if (!instanceAvailable) return { mode: "unavailable" };
   if (pending && !capability && !failed) {
     return { mode: "pending", reason: "checking" };
   }
@@ -35,7 +35,7 @@ export function resolveHermesDesktopView({
   const reason = failed ? "probeFailed"
     : matchesInstance && typeof capability.reason === "string" && Object.hasOwn(UNAVAILABLE_REASONS, capability.reason)
       ? UNAVAILABLE_REASONS[capability.reason] : "capabilityUnknown";
-  return { mode: "classic", reason };
+  return { mode: "unavailable", reason };
 }
 
 export function resolveHermesDesktopRendererUrl(value: string | undefined, instanceId: number, origin: string): string | null {

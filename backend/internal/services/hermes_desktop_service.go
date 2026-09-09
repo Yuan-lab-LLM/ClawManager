@@ -64,7 +64,6 @@ type HermesDesktopDescriptor struct {
 }
 
 type HermesDesktopClaims struct {
-	Surface    string `json:"surface,omitempty"`
 	UserID     int    `json:"uid"`
 	InstanceID int    `json:"iid"`
 	Generation int    `json:"gen"`
@@ -331,7 +330,7 @@ func (s *HermesDesktopService) Authenticate(ctx context.Context, raw string, ins
 	if err != nil {
 		return nil, err
 	}
-	if c.InstanceID != instanceID || c.Surface != "" {
+	if c.InstanceID != instanceID {
 		return nil, ErrHermesDesktopForbidden
 	}
 	if _, err = s.authorizeClaims(ctx, c); err != nil {
@@ -351,10 +350,7 @@ func (s *HermesDesktopService) authorizeClaims(ctx context.Context, c *HermesDes
 	if c.Epoch != epoch {
 		return nil, ErrHermesDesktopUnauthorized
 	}
-	if c.Surface != "" && c.Surface != "dashboard" {
-		return nil, ErrHermesDesktopForbidden
-	}
-	target, reason, err := s.resolveRuntime(ctx, c.UserID, c.InstanceID, c.Surface != "dashboard")
+	target, reason, err := s.resolveRuntime(ctx, c.UserID, c.InstanceID, true)
 	if err != nil {
 		return nil, err
 	}
@@ -364,7 +360,7 @@ func (s *HermesDesktopService) authorizeClaims(ctx context.Context, c *HermesDes
 	if c.Generation != target.binding.Generation || c.PodID != target.pod.ID || c.Port != target.binding.GatewayPort {
 		return nil, ErrHermesDesktopUnauthorized
 	}
-	if c.Surface != "dashboard" && !s.compatible(ctx, target) {
+	if !s.compatible(ctx, target) {
 		return nil, ErrHermesDesktopUnavailable
 	}
 	return target, nil
@@ -391,7 +387,7 @@ func (s *HermesDesktopService) redeemTicket(ctx context.Context, raw string, c *
 	if err != nil {
 		return err
 	}
-	if ticket.Surface != c.Surface || ticket.UserID != c.UserID || ticket.InstanceID != c.InstanceID || ticket.Generation != c.Generation || ticket.PodID != c.PodID || ticket.Port != c.Port || ticket.SessionID != c.SessionID || ticket.Epoch != c.Epoch {
+	if ticket.UserID != c.UserID || ticket.InstanceID != c.InstanceID || ticket.Generation != c.Generation || ticket.PodID != c.PodID || ticket.Port != c.Port || ticket.SessionID != c.SessionID || ticket.Epoch != c.Epoch {
 		return ErrHermesDesktopForbidden
 	}
 	if s.config.Redis == nil {

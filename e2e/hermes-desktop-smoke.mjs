@@ -157,28 +157,6 @@ await request(`${base}/ws?ticket=${canaryMarker}`, { headers: { Origin: origin }
 await request(`${base}/session`, { headers: { Origin: 'https://cross-origin.invalid' }, status: 403 })
 await request(`${base}/ws-ticket`, { method: 'POST', status: 403 })
 
-if (hermesInstanceID !== undefined) {
-  // The caller identifies an existing ordinary Hermes Lite instance. These
-  // checks never mint a valid lease: all cookies/tickets below are fake. They
-  // intentionally stop at the CM edge/BFF, before upstream login or tools.
-  const classic = `/api/v1/instances/${hermesInstanceID}/proxy`
-  const cookie = `cm_hermes_dashboard_${hermesInstanceID}=${canaryMarker}`
-  const sameOrigin = { Origin: origin, 'Sec-Fetch-Site': 'same-origin' }
-  const fakeSession = { ...sameOrigin, Cookie: cookie }
-  await request(`/api/v1/instances/${hermesInstanceID}/access?token=${canaryMarker}`, { method: 'POST', headers: sameOrigin, status: 401 })
-  await request(`${classic}/chat/?ticket=${canaryMarker}`, { headers: sameOrigin, status: 401 })
-  await request(`${classic}/chat/?token=${canaryMarker}`, { headers: { ...sameOrigin, Cookie: `hermes_session_at=${canaryMarker}` }, status: 401 })
-  await request(`${classic}/chat/?ticket=${canaryMarker}`, { headers: fakeSession, status: 401 })
-  await request(`${classic}/api/env/reveal?token=${canaryMarker}`, { headers: fakeSession, status: 401 })
-  await request(`${classic}/api/auth/ws-ticket?ticket=${canaryMarker}`, { method: 'POST', headers: fakeSession, status: 401 })
-  // Valid upgrade syntax makes an accidental 101 fail this non-WS smoke test.
-  await request(`${classic}/api/pty?channel=smoke-denied&ticket=${canaryMarker}`, {
-    headers: { ...fakeSession, Connection: 'Upgrade', Upgrade: 'websocket', 'Sec-WebSocket-Version': '13', 'Sec-WebSocket-Key': 'c21va2UtdGVzdC1rZXktMQ==' },
-    status: 401,
-  })
-  await request(`${classic}/chat/?ticket=${canaryMarker}`, { headers: { Cookie: cookie, Origin: 'https://cross-origin.invalid', 'Sec-Fetch-Site': 'cross-site' }, status: 403 })
-  await request(`${classic}/api/auth/ws-ticket?ticket=${canaryMarker}`, { method: 'POST', headers: { Cookie: cookie }, status: 403 })
-}
 console.log(JSON.stringify({
   origin, tlsVerification: !insecure, version: expectedVersion, rendererCommit: info.hermes_commit,
   buildInput: info.build_input_sha256, dynamicRendererAssetCount: dynamicRendererAssets.size,

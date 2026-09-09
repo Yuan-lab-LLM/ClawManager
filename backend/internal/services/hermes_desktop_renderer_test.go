@@ -230,7 +230,7 @@ func TestHermesDesktopRendererSingleInstanceSidebar(t *testing.T) {
 	var reads atomic.Int32
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/auth/password-login" {
-			dashboardTestLogin(t, w, r)
+			desktopTestLogin(t, w, r)
 			return
 		}
 		if r.URL.Path != "/api/sessions" || r.URL.Query().Has("profile") || r.URL.Query().Has("recents_profile") {
@@ -334,7 +334,7 @@ func TestHermesDesktopRendererRealWebSocketBridge(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/auth/password-login":
-			dashboardTestLogin(t, w, r)
+			desktopTestLogin(t, w, r)
 		case "/api/auth/ws-ticket":
 			_, _ = w.Write([]byte(`{"ticket":"upstream-ticket"}`))
 		case "/api/model/options":
@@ -463,7 +463,7 @@ func TestHermesDesktopRendererLeaseExpiresAndFreshLeaseReconnects(t *testing.T) 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/auth/password-login":
-			dashboardTestLogin(t, w, r)
+			desktopTestLogin(t, w, r)
 		case "/api/auth/ws-ticket":
 			_, _ = w.Write([]byte(`{"ticket":"fixture-private-ticket"}`))
 		case "/api/ws":
@@ -581,7 +581,7 @@ func TestHermesDesktopRendererLogoutWinsDelayedModelValidation(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/auth/password-login":
-			dashboardTestLogin(t, w, r)
+			desktopTestLogin(t, w, r)
 		case "/api/auth/ws-ticket":
 			_, _ = w.Write([]byte(`{"ticket":"fixture-private-ticket"}`))
 		case "/api/model/options":
