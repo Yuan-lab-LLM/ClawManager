@@ -1,5 +1,7 @@
 ﻿export type Locale = "en" | "zh" | "ja" | "ko" | "de";
 
+import { hermesDesktopTranslations } from "./hermesDesktopI18n";
+
 export const DEFAULT_LOCALE: Locale = "en";
 
 export interface TranslationTree {
@@ -1633,6 +1635,7 @@ export const translations: Record<Locale, TranslationTree> = {
       secplane: "Security Protection",
     },
     adminLayout: adminLayoutTranslations.en,
+    hermesDesktop: hermesDesktopTranslations.en,
     securityCenter: securityCenterTranslations.en,
     secplane: secplaneTranslations.en,
     skillHubPage: skillHubTranslations.en,
@@ -3374,6 +3377,7 @@ export const translations: Record<Locale, TranslationTree> = {
       secplane: "安全防护",
     },
     adminLayout: adminLayoutTranslations.zh,
+    hermesDesktop: hermesDesktopTranslations.zh,
     securityCenter: securityCenterTranslations.zh,
     secplane: secplaneTranslations.zh,
     skillHubPage: skillHubTranslations.zh,
@@ -5026,6 +5030,7 @@ export const translations: Record<Locale, TranslationTree> = {
       secplane: "セキュリティ保護",
     },
     adminLayout: adminLayoutTranslations.ja,
+    hermesDesktop: hermesDesktopTranslations.ja,
     securityCenter: securityCenterTranslations.ja,
     secplane: secplaneTranslations.ja,
     skillHubPage: skillHubTranslations.ja,
@@ -6604,6 +6609,7 @@ export const translations: Record<Locale, TranslationTree> = {
       secplane: "보안 방어",
     },
     adminLayout: adminLayoutTranslations.ko,
+    hermesDesktop: hermesDesktopTranslations.ko,
     securityCenter: securityCenterTranslations.ko,
     secplane: secplaneTranslations.ko,
     skillHubPage: skillHubTranslations.ko,
@@ -8161,6 +8167,7 @@ export const translations: Record<Locale, TranslationTree> = {
       secplane: "Sicherheitsschutz",
     },
     adminLayout: adminLayoutTranslations.de,
+    hermesDesktop: hermesDesktopTranslations.de,
     securityCenter: securityCenterTranslations.de,
     secplane: secplaneTranslations.de,
     skillHubPage: skillHubTranslations.de,

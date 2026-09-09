@@ -26,7 +26,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
@@ -35,6 +35,30 @@ jobs:
 
       - name: Build frontend
         run: npm run build
+
+      - name: Test Hermes iframe boundaries
+        run: node --test src/lib/hermesDesktopFrame.test.mjs src/lib/hermesDashboardAuth.test.mjs src/services/authService.test.mjs ../e2e/hermes-dashboard-edge.test.mjs
+
+  hermes-desktop:
+    name: Hermes Desktop Web Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Install renderer dependencies
+        run: npm ci --prefix hermes-desktop-web --ignore-scripts
+
+      - name: Build pinned Desktop renderer
+        run: node hermes-desktop-web/scripts/build.mjs
+
+      - name: Test browser bridge
+        run: npm test --prefix hermes-desktop-web
 
   backend:
     name: Backend Build
@@ -67,6 +91,7 @@ jobs:
     needs:
       - frontend
       - backend
+      - hermes-desktop
     steps:
       - name: Checkout
         uses: actions/checkout@v4

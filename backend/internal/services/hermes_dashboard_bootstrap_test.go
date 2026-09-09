@@ -1,58 +1,65 @@
 package services
 
 import (
-	"bytes"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"clawreef/internal/models"
 )
 
-func TestCollectUpstreamSetCookies(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Add("Set-Cookie", "hermes_session_at=session-127; Path=/proxy; HttpOnly")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("ok"))
+// All tests below use synthetic legacy instance-access tokens. Hermes Lite may
+// no longer bootstrap its upstream session through the generic proxy, including
+// external/shared entry points that still possess one of these old tokens.
+func legacyHermesProxyFixture(t *testing.T, tokenType, mode string) (*InstanceProxyService, string, *atomic.Int32) {
+	t.Helper()
+	hits := &atomic.Int32{}
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"upstream":true}`))
 	}))
-	defer srv.Close()
-
-	resp, err := srv.Client().Post(srv.URL+"/auth/password-login", "application/json", bytes.NewReader([]byte(`{}`)))
+	t.Cleanup(upstream.Close)
+	ip, port := splitURLHostPortForProxyTest(t, upstream.URL)
+	password := "legacy-test-managed-password"
+	workspace := "/workspaces/hermes/user-45/instance-127"
+	instances := newV2LifecycleInstanceRepo()
+	instances.byID[127] = &models.Instance{
+		ID: 127, UserID: 45, Type: RuntimeTypeHermes, RuntimeType: RuntimeBackendGateway,
+		InstanceMode: mode, Status: "running", AccessToken: &password,
+		WorkspacePath: &workspace, RuntimeGeneration: 5,
+	}
+	bindings := newFakeRuntimeBindingRepo()
+	bindings.bindings[127] = &models.InstanceRuntimeBinding{
+		InstanceID: 127, RuntimePodID: 10, GatewayPort: port, State: "running", Generation: 5,
+	}
+	pods := &fakeRuntimePodRepo{pods: map[int64]*models.RuntimePod{10: {ID: 10, PodIP: &ip, State: "ready"}}}
+	access := NewInstanceAccessService()
+	t.Cleanup(access.Stop)
+	token, err := access.GenerateToken(45, 127, tokenType, "/api/v1/instances/127/proxy/chat/", "", 3000, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
-
-	got := collectUpstreamSetCookies(resp)
-	if len(got) == 0 {
-		t.Fatalf("no cookies; Values=%v Map=%v Cookies=%v", resp.Header.Values("Set-Cookie"), resp.Header["Set-Cookie"], resp.Cookies())
-	}
+	service := NewInstanceProxyService(access, WithInstanceProxyRuntimeRepositories(instances, pods, bindings))
+	service.httpClient = upstream.Client()
+	return service, token.Token, hits
 }
 
-func TestIsHermesLiteProxyInstanceMatchesTokenInjectionSetup(t *testing.T) {
-	instanceToken := "igt_hermes_instance"
-	workspacePath := "/workspaces/hermes/user-45/instance-127"
-	instanceRepo := newV2LifecycleInstanceRepo()
-	instanceRepo.byID[127] = &models.Instance{
-		ID:                127,
-		UserID:            45,
-		Type:              "hermes",
-		RuntimeType:       "gateway",
-		InstanceMode:      InstanceModeLite,
-		Status:            "running",
-		AccessToken:       &instanceToken,
-		WorkspacePath:     &workspacePath,
-		RuntimeGeneration: 5,
-	}
-	service := NewInstanceProxyService(NewInstanceAccessService())
-	service.instanceRepo = instanceRepo
-	if !service.isHermesLiteProxyInstance(127, "hermes") {
-		inst, _ := instanceRepo.GetByID(127)
-		rt, ok := v2RuntimeTypeForInstance(inst)
-		t.Fatalf("isHermesLiteProxyInstance=false; runtimeType=%q ok=%v mode=%q runtime=%q", rt, ok, inst.InstanceMode, inst.RuntimeType)
-	}
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/instances/127/proxy/chat", nil)
-	if !shouldBootstrapHermesDashboardSession(req, "/chat") {
-		t.Fatal("shouldBootstrap=false")
+func TestLegacyHermesGuardPreservesProClassification(t *testing.T) {
+	for _, tc := range []struct {
+		mode    string
+		blocked bool
+	}{{InstanceModeLite, true}, {InstanceModePro, false}} {
+		t.Run(tc.mode, func(t *testing.T) {
+			service, _, hits := legacyHermesProxyFixture(t, RuntimeTypeHermes, tc.mode)
+			if got := service.isHermesLiteProxyInstance(127, RuntimeTypeHermes); got != tc.blocked {
+				t.Fatalf("Hermes %s classified as Lite=%v", tc.mode, got)
+			}
+			if hits.Load() != 0 {
+				t.Fatal("classification contacted upstream")
+			}
+		})
 	}
 }

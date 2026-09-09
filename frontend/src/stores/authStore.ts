@@ -2,6 +2,12 @@ import { create } from 'zustand';
 import type { User } from '../types/auth';
 import { authService } from '../services/authService';
 
+function authErrorMessage(error: unknown, fallback: string): string {
+  const message = (error as { response?: { data?: { error?: unknown } } })
+    ?.response?.data?.error;
+  return typeof message === 'string' && message ? message : fallback;
+}
+
 interface AuthState {
   user: User | null;
   isAuthenticated: boolean;
@@ -44,9 +50,9 @@ export const useAuthStore = create<AuthState>((set) => {
         await authService.login({ username, password });
         const user = await authService.getCurrentUser();
         set({ user, isAuthenticated: true, isLoading: false });
-      } catch (err: any) {
+      } catch (err: unknown) {
         set({ 
-          error: err.response?.data?.error || 'Login failed', 
+          error: authErrorMessage(err, 'Login failed'),
           isLoading: false,
           isAuthenticated: false 
         });
@@ -62,9 +68,9 @@ export const useAuthStore = create<AuthState>((set) => {
         await authService.login({ username, password });
         const user = await authService.getCurrentUser();
         set({ user, isAuthenticated: true, isLoading: false });
-      } catch (err: any) {
+      } catch (err: unknown) {
         set({ 
-          error: err.response?.data?.error || 'Registration failed', 
+          error: authErrorMessage(err, 'Registration failed'),
           isLoading: false 
         });
         throw err;
@@ -72,15 +78,19 @@ export const useAuthStore = create<AuthState>((set) => {
     },
 
     logout: async () => {
-      set({ isLoading: true });
+      set({ isLoading: true, error: null });
+      let logoutFailed = false;
       try {
         await authService.logout();
+      } catch (error) {
+        logoutFailed = true;
+        throw error;
       } finally {
         set({ 
           user: null, 
           isAuthenticated: false, 
           isLoading: false,
-          error: null 
+          error: logoutFailed ? 'logout_incomplete' : null
         });
       }
     },
@@ -96,7 +106,7 @@ export const useAuthStore = create<AuthState>((set) => {
       try {
         const user = await authService.getCurrentUser();
         set({ user, isAuthenticated: true, isLoading: false });
-      } catch (err) {
+      } catch {
         set({ 
           user: null, 
           isAuthenticated: false, 

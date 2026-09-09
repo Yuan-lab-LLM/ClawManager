@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft,
   Bot,
@@ -39,6 +39,7 @@ const appLogoSrc = '/lobster_logo.png';
 
 const AdminLayout: React.FC<AdminLayoutProps> = ({ children, title = '' }) => {
   const location = useLocation();
+  const navigate = useNavigate();
   const { user, logout } = useAuth();
   const { t } = useI18n();
   const [profileExpanded, setProfileExpanded] = useState(false);
@@ -88,9 +89,14 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children, title = '' }) => {
     return candidates.some((path) => location.pathname === path || location.pathname.startsWith(`${path}/`));
   };
 
-  const handleLogout = () => {
-    logout();
-    window.location.href = '/login';
+  const handleLogout = async () => {
+    try {
+      await logout();
+    } catch {
+      // Keep the auth store's notice visible; do not abort logout by reloading.
+    } finally {
+      navigate('/login', { replace: true });
+    }
   };
 
   const renderNavItem = (item: NavItem) => {

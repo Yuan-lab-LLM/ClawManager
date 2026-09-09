@@ -1,13 +1,15 @@
-import { Maximize2, Minimize2, PanelRightClose, PanelRightOpen, RefreshCw } from "lucide-react";
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { useI18n } from "../contexts/I18nContext";
+import { RefreshCw } from "lucide-react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { useInstanceDesktopAccess } from "../hooks/useInstanceDesktopAccess";
 import { clearHermesDashboardStorage, prepareHermesDashboardStorage } from "../lib/hermesDashboardStorage";
+import { resolveHermesDashboardUrl } from "../lib/hermesDashboardAuth";
 import { prepareOpenClawControlUIStorage } from "../lib/openclawControlStorage";
 import type { InstanceAvailability } from "../types/instance";
 import { InstanceShellTerminal } from "./InstanceShellTerminal";
+import { HermesLiteServiceFrame } from "./HermesLiteServiceFrame";
+import { InstanceServiceFrameShell } from "./InstanceServiceFrameShell";
 
-interface InstanceServiceFrameProps {
+export interface InstanceServiceFrameProps {
   instanceId: number;
   instanceName: string;
   instanceType?: string;
@@ -41,7 +43,20 @@ interface PreparedFrame {
   src: string;
 }
 
-export function InstanceServiceFrame({
+export function InstanceServiceFrame(props: InstanceServiceFrameProps) {
+  if (props.instanceType?.toLowerCase() === "hermes" && props.instanceMode?.toLowerCase() === "lite") {
+    return (
+      <HermesLiteServiceFrame
+        key={props.instanceId}
+        {...props}
+        renderClassic={() => <ClassicInstanceServiceFrame {...props} />}
+      />
+    );
+  }
+  return <ClassicInstanceServiceFrame {...props} />;
+}
+
+function ClassicInstanceServiceFrame({
   instanceId,
   instanceName,
   instanceType,
@@ -51,17 +66,19 @@ export function InstanceServiceFrame({
   workspaceVisible,
   onWorkspaceVisibilityChange,
 }: InstanceServiceFrameProps) {
-  const { t } = useI18n();
   const isAvailable = availability === "available";
-  const frameContainerRef = useRef<HTMLElement | null>(null);
   const [preparedFrame, setPreparedFrame] = useState<PreparedFrame | null>(null);
-  const [isFullscreen, setIsFullscreen] = useState(false);
   const normalizedType = instanceType?.toLowerCase() ?? "";
   const isHermes = normalizedType === "hermes";
+  const isHermesLite = isHermes && instanceMode?.toLowerCase() === "lite";
+  const resolveServiceEmbedUrl = useCallback((url: string | null) => isHermesLite
+    ? resolveHermesDashboardUrl(url, instanceId, window.location.origin)
+    : resolveEmbedUrl(url), [isHermesLite, instanceId]);
   const isOpenCodeLite =
     normalizedType === "opencode" && instanceMode?.toLowerCase() === "lite";
   const {
     embedUrl,
+    frameRevision,
     loading,
     error,
     reconnecting,
@@ -72,7 +89,8 @@ export function InstanceServiceFrame({
     instanceId,
     isRunning: isAvailable,
     reloadOnAccessRefresh: normalizedType === "deepseek-harness",
-    resolveEmbedUrl,
+    sameOriginAccess: isHermesLite,
+    resolveEmbedUrl: resolveServiceEmbedUrl,
     failedMessage: "Failed to open instance service",
   });
 
@@ -80,23 +98,15 @@ export function InstanceServiceFrame({
     void refreshAccess({ forceReload: true });
   }, [refreshAccess]);
 
-  const handleFullscreen = useCallback(() => {
-    const element = frameContainerRef.current;
-    if (!element) {
-      return;
-    }
-    if (document.fullscreenElement === element) {
-      void document.exitFullscreen();
-      return;
-    }
-    const request = element.requestFullscreen();
-    void request.catch(() => undefined);
-  }, []);
-
   useEffect(() => {
+    let cancelled = false;
     if (!embedUrl) {
-      setPreparedFrame(null);
-      return;
+      queueMicrotask(() => {
+        if (!cancelled) setPreparedFrame(null);
+      });
+      return () => {
+        cancelled = true;
+      };
     }
 
     let src = embedUrl;
@@ -105,7 +115,12 @@ export function InstanceServiceFrame({
     } else if (isHermes) {
       src = prepareHermesDashboardStorage(instanceId, embedUrl);
     }
-    setPreparedFrame({ instanceId, embedUrl, src });
+    queueMicrotask(() => {
+      if (!cancelled) setPreparedFrame({ instanceId, embedUrl, src });
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [embedUrl, instanceId, isHermes, normalizedType]);
 
   useEffect(() => {
@@ -117,65 +132,21 @@ export function InstanceServiceFrame({
     };
   }, [isHermes, instanceId]);
 
-  useEffect(() => {
-    const handleChange = () => {
-      setIsFullscreen(document.fullscreenElement === frameContainerRef.current);
-    };
-    document.addEventListener("fullscreenchange", handleChange);
-    return () => document.removeEventListener("fullscreenchange", handleChange);
-  }, []);
-
   const frameSrc =
     preparedFrame?.instanceId === instanceId && preparedFrame.embedUrl === embedUrl
       ? preparedFrame.src
       : null;
 
   const renderFrameShell = (content: ReactNode) => (
-    <section
-      ref={frameContainerRef}
-      className="cm-surface relative isolate flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-white max-xl:min-h-[360px]"
-      style={isFullscreen ? { height: "100vh", width: "100vw", borderRadius: 0 } : undefined}
+    <InstanceServiceFrameShell
+      instanceName={instanceName}
+      onRefresh={isAvailable ? handleRefresh : undefined}
+      refreshing={reconnecting}
+      workspaceVisible={workspaceVisible}
+      onWorkspaceVisibilityChange={onWorkspaceVisibilityChange}
     >
-      <div className="relative z-20 flex h-12 shrink-0 items-center justify-between border-b border-slate-200 bg-white px-3">
-        <div className="min-w-0 truncate text-sm font-medium text-slate-950">
-          {instanceName}
-        </div>
-        <div className="relative z-20 flex shrink-0 items-center gap-2">
-          {typeof workspaceVisible === "boolean" && onWorkspaceVisibilityChange && (
-            <button
-              type="button"
-              onClick={() => onWorkspaceVisibilityChange(!workspaceVisible)}
-              className="cm-icon-button"
-              title={workspaceVisible ? t("instances.hideWorkspace") : t("instances.showWorkspace")}
-              aria-label={workspaceVisible ? t("instances.hideWorkspace") : t("instances.showWorkspace")}
-            >
-              {workspaceVisible ? <PanelRightClose className="h-4 w-4" /> : <PanelRightOpen className="h-4 w-4" />}
-            </button>
-          )}
-          {isAvailable && (
-            <button
-              type="button"
-              onClick={handleRefresh}
-              className="cm-icon-button"
-              title={t("common.refresh")}
-              aria-label={t("common.refresh")}
-            >
-              <RefreshCw className={`h-4 w-4 ${reconnecting ? "animate-spin" : ""}`} />
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={handleFullscreen}
-            className="cm-icon-button"
-            title={isFullscreen ? t("instances.exitFullscreen") : t("instances.enterFullscreen")}
-            aria-label={isFullscreen ? t("instances.exitFullscreen") : t("instances.enterFullscreen")}
-          >
-            {isFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
-          </button>
-        </div>
-      </div>
       {content}
-    </section>
+    </InstanceServiceFrameShell>
   );
 
   if (availability === "starting") {
@@ -220,8 +191,8 @@ export function InstanceServiceFrame({
       <iframe
         key={
           isHermes
-            ? `hermes-${instanceId}-${reloadToken}`
-            : `frame-${instanceId}-${reloadToken}`
+            ? `hermes-${instanceId}-${reloadToken}-${frameRevision}`
+            : `frame-${instanceId}-${reloadToken}-${frameRevision}`
         }
         title={`${instanceName} service`}
         src={frameSrc}

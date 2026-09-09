@@ -12,6 +12,7 @@ require (
 	github.com/minio/minio-go/v7 v7.0.85
 	github.com/upper/db/v4 v4.10.0
 	golang.org/x/crypto v0.49.0
+	golang.org/x/net v0.51.0
 	golang.org/x/text v0.35.0
 	gopkg.in/yaml.v3 v3.0.1
 	k8s.io/api v0.32.3
@@ -73,7 +74,6 @@ require (
 	github.com/x448/float16 v0.8.4 // indirect
 	go.mongodb.org/mongo-driver/v2 v2.5.0 // indirect
 	golang.org/x/arch v0.22.0 // indirect
-	golang.org/x/net v0.51.0 // indirect
 	golang.org/x/oauth2 v0.23.0 // indirect
 	golang.org/x/sys v0.42.0 // indirect
 	golang.org/x/term v0.41.0 // indirect

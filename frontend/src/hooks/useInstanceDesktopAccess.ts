@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { isAxiosError } from "axios";
 import { instanceService } from "../services/instanceService";
+import { isHermesDashboardErrorDocument } from "../lib/hermesDashboardAuth";
 
 interface RefreshAccessOptions {
   forceReload?: boolean;
@@ -11,6 +13,7 @@ interface UseInstanceDesktopAccessOptions {
   isRunning: boolean;
   retainSessionOnStop?: boolean;
   reloadOnAccessRefresh?: boolean;
+  sameOriginAccess?: boolean;
   resolveEmbedUrl: (url: string | null) => string | null;
   failedMessage: string;
   refreshLeadMs?: number;
@@ -39,13 +42,14 @@ const accessRequestStore = new Map<number, Promise<DesktopAccessResponse>>();
 
 function requestDesktopAccess(
   instanceId: number,
+  sameOrigin: boolean,
 ): Promise<DesktopAccessResponse> {
   const existingRequest = accessRequestStore.get(instanceId);
   if (existingRequest) {
     return existingRequest;
   }
 
-  const request = instanceService.generateAccessToken(instanceId);
+  const request = instanceService.generateAccessToken(instanceId, sameOrigin);
   const trackedRequest = request.finally(() => {
     if (accessRequestStore.get(instanceId) === trackedRequest) {
       accessRequestStore.delete(instanceId);
@@ -61,6 +65,7 @@ export function useInstanceDesktopAccess({
   isRunning,
   retainSessionOnStop = false,
   reloadOnAccessRefresh = false,
+  sameOriginAccess = false,
   resolveEmbedUrl,
   failedMessage,
   refreshLeadMs = DEFAULT_REFRESH_LEAD_MS,
@@ -81,6 +86,8 @@ export function useInstanceDesktopAccess({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [reconnecting, setReconnecting] = useState(false);
+  const [frameRevision, setFrameRevision] = useState(0);
+  const lastFrameRecoveryRef = useRef(0);
 
   const requestIdRef = useRef(0);
   const embedUrlRef = useRef<string | null>(initialCachedSession?.embedUrl ?? null);
@@ -168,6 +175,7 @@ export function useInstanceDesktopAccess({
   }, [clearRefreshTimeout, clearRetryTimeout, instanceId]);
 
   useEffect(() => {
+    let cancelled = false;
     clearRetryTimeout();
     clearRefreshTimeout();
     requestIdRef.current += 1;
@@ -186,11 +194,17 @@ export function useInstanceDesktopAccess({
       cachedSession?.hasEstablishedSession ?? false;
     retryAttemptRef.current = 0;
 
-    setEmbedUrl(nextEmbedUrl);
-    setExpiresAt(nextExpiresAt);
-    setError(null);
-    setLoading(false);
-    setReconnecting(false);
+    queueMicrotask(() => {
+      if (cancelled) return;
+      setEmbedUrl(nextEmbedUrl);
+      setExpiresAt(nextExpiresAt);
+      setError(null);
+      setLoading(false);
+      setReconnecting(false);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [clearRefreshTimeout, clearRetryTimeout, instanceId]);
 
   const shouldPreserveSession = useCallback(() => {
@@ -226,7 +240,7 @@ export function useInstanceDesktopAccess({
     retryTimeoutRef.current = window.setTimeout(() => {
       retryTimeoutRef.current = null;
       void refreshAccessRef.current?.({
-        forceReload: !embedUrlRef.current,
+        forceReload: !embedUrlRef.current || !hasEstablishedSessionRef.current,
         silent: true,
       });
     }, nextDelay);
@@ -253,14 +267,22 @@ export function useInstanceDesktopAccess({
       }
 
       try {
-        const data = await requestDesktopAccess(instanceId);
+        const data = await requestDesktopAccess(instanceId, sameOriginAccess);
         if (requestId !== requestIdRef.current) {
           return;
         }
 
         const nextEmbedUrl = resolveEmbedUrl(data.access_url || data.proxy_url);
         const nextExpiresAt = new Date(data.expires_at);
+        if (!nextEmbedUrl || !Number.isFinite(nextExpiresAt.getTime())) {
+          throw new Error(failedMessage);
+        }
         const previousEmbedUrl = embedUrlRef.current;
+        // A suspended tab may miss renewal and leave the stock dashboard's
+        // socket permanently stopped after a 401. A newly valid lease then
+        // needs a fresh frame, even though its credential-free URL is stable.
+        const managedLeaseExpired = sameOriginAccess && expiresAtRef.current !== null &&
+          expiresAtRef.current.getTime() <= Date.now();
 
         expiresAtRef.current = nextExpiresAt;
         retryAttemptRef.current = 0;
@@ -268,10 +290,11 @@ export function useInstanceDesktopAccess({
         setError(null);
 
         const shouldReloadFrame =
-          !previousEmbedUrl || forceReload || reloadOnAccessRefresh;
+          !previousEmbedUrl || forceReload || reloadOnAccessRefresh || managedLeaseExpired;
         if (shouldReloadFrame) {
           embedUrlRef.current = nextEmbedUrl;
           setEmbedUrl(nextEmbedUrl);
+          setFrameRevision((revision) => revision + 1);
         } else {
           setEmbedUrl(previousEmbedUrl);
         }
@@ -280,12 +303,12 @@ export function useInstanceDesktopAccess({
           embedUrl: shouldReloadFrame ? nextEmbedUrl : previousEmbedUrl,
           expiresAt: nextExpiresAt.getTime(),
         });
-      } catch (err: any) {
+      } catch (err: unknown) {
         if (requestId !== requestIdRef.current) {
           return;
         }
 
-        setError(err.response?.data?.error || failedMessage);
+        setError((isAxiosError<{ error?: string }>(err) && err.response?.data?.error) || failedMessage);
         if (!embedUrlRef.current) {
           setEmbedUrl(null);
           setExpiresAt(null);
@@ -305,6 +328,7 @@ export function useInstanceDesktopAccess({
       instanceId,
       isRunning,
       reloadOnAccessRefresh,
+      sameOriginAccess,
       resolveEmbedUrl,
       scheduleRetry,
       shouldPreserveSession,
@@ -318,8 +342,8 @@ export function useInstanceDesktopAccess({
 
   useEffect(() => {
     if (!instanceId) {
-      clearAccessState();
-      return;
+      const clearTimer = window.setTimeout(clearAccessState, 0);
+      return () => window.clearTimeout(clearTimer);
     }
 
     if (!isRunning) {
@@ -329,13 +353,19 @@ export function useInstanceDesktopAccess({
         return;
       }
 
-      clearAccessState();
-      return;
+      const clearTimer = window.setTimeout(clearAccessState, 0);
+      return () => window.clearTimeout(clearTimer);
     }
 
-    void refreshAccess({ forceReload: true });
+    const refreshTimer = window.setTimeout(() => {
+      void refreshAccess({ forceReload: true });
+    }, 0);
 
     return () => {
+      window.clearTimeout(refreshTimer);
+      // A view switch can unmount this hook while access is still in flight.
+      // Ignore that response so it cannot recreate retry timers for the old view.
+      requestIdRef.current += 1;
       clearRetryTimeout();
       clearRefreshTimeout();
     };
@@ -386,7 +416,7 @@ export function useInstanceDesktopAccess({
       const isNearExpiry =
         currentExpiry === 0 || currentExpiry - Date.now() <= refreshLeadMs;
 
-      if (!hasActiveFrame) {
+      if (!hasActiveFrame || !hasEstablishedSessionRef.current) {
         void refreshAccessRef.current?.({ forceReload: true, silent: true });
         return;
       }
@@ -424,7 +454,18 @@ export function useInstanceDesktopAccess({
       window.setTimeout(() => {
         try {
           const frameText = frame.contentDocument?.body?.textContent?.trim() ?? "";
-          if (frameText && FRAME_ERROR_PATTERN.test(frameText)) {
+          const managedError = sameOriginAccess && isHermesDashboardErrorDocument(frameText);
+          if (managedError) {
+            hasEstablishedSessionRef.current = false;
+            syncSessionStore({ hasEstablishedSession: false });
+            if (Date.now() - lastFrameRecoveryRef.current < retryDelayMs) {
+              setError(failedMessage);
+              scheduleRetry();
+              return;
+            }
+            lastFrameRecoveryRef.current = Date.now();
+          }
+          if (managedError || (frameText && FRAME_ERROR_PATTERN.test(frameText))) {
             if (!hasEstablishedSessionRef.current) {
               void refreshAccessRef.current?.({ forceReload: true, silent: true });
             }
@@ -438,7 +479,7 @@ export function useInstanceDesktopAccess({
         }
       }, 0);
     },
-    [syncSessionStore],
+    [failedMessage, retryDelayMs, sameOriginAccess, scheduleRetry, setError, syncSessionStore],
   );
 
   const handleFrameError = useCallback(() => {
@@ -449,6 +490,7 @@ export function useInstanceDesktopAccess({
 
   return {
     embedUrl,
+    frameRevision,
     expiresAt,
     loading,
     error,

@@ -87,6 +87,82 @@ Success response body:
 
 ClawManager currently treats any HTTP 2xx response as success and does not require a response body for this endpoint. Any non-2xx status is treated as an error.
 
+#### Optional Hermes Desktop Web capability (contract versions 1 and 2)
+
+Starting with the Hermes Desktop Web integration, ClawManager separately reads
+this optional object to decide whether the experimental UI can be enabled. The
+existing generic health check remains compatible with an empty 2xx response.
+Requests carry `X-ClawManager-Control-Token`; agents must protect this endpoint.
+
+```json
+{
+  "status": "ready",
+  "capabilities": {
+    "hermes_desktop_web": {
+      "contract_version": 2,
+      "enabled": true,
+      "hermes_ref": "v2026.8.31",
+      "hermes_commit": "29112bef099274229cadff79cdff7bf7b99c4b77",
+      "rpc_protocol": "hermes-jsonrpc-v1",
+      "backend_mode": "dashboard",
+      "auth_mode": "password-cookie",
+      "artifacts_verified": true,
+      "release_accepted": false,
+      "payload_sha256": "<64 lowercase hex characters from the verified release>"
+    }
+  }
+}
+```
+
+All fields in `hermes_desktop_web` are required when `enabled` is true. Unknown
+contract versions, unsupported commits, an absent capability, or malformed
+JSON disable Desktop Web only; they must not break existing Lite/Dashboard
+operations. Version 2 separates deployed protocol support from signed release
+acceptance: `enabled` requires the managed launch configuration, authentication,
+fixed upstream protocol and actual image artifact hashes to be verified. The
+three added fields are mandatory; `release_accepted` must accurately retain
+false until signed release evidence is verified. An unsigned release must not
+contain acceptance evidence. An accepted release with invalid evidence is rejected.
+ClawManager requires `artifacts_verified=true` and a valid payload digest, then
+performs the same user, instance, Redis and upstream authentication checks.
+This permits direct deployment verification without a circular requirement for
+prior browser acceptance. It does not generate an acceptance report or signature.
+Version 1 remains supported for older accepted runtimes. Both versions admit only
+the pinned commit above, Dashboard mode and password-cookie authentication;
+neither infers compatibility from a version string alone.
+
+Both versions expose a non-native Web Core surface: the BFF forces `source: "web"`
+on session creation and resume. Runtime tool policy must exclude `desktop_ui`
+and tools that require an Electron UI response, including warm resumes that
+reuse an existing agent/toolset. A source string alone is not proof of this
+guarantee; fail the compatibility gate if it cannot be enforced and tested.
+
+ClawManager resolves the current running binding and generation before probing
+the agent. Team instances and Hermes Pro are excluded from this initial
+integration. No credentials, session cookies, connection URLs or LLM secrets
+belong in the capability report.
+
+The upstream authentication exchange used by the BFF is:
+
+1. `POST /auth/password-login` with JSON `provider=basic`, username
+   `clawmanager`, the platform-managed password and `next=/chat`; the BFF
+   retains the Hermes session cookie on the server.
+2. `POST /api/auth/ws-ticket` with that cookie to mint an upstream ticket.
+3. Connect to `/api/ws` inside the cluster with subprotocols
+   `hermes-gateway-v1` and `hermes-gateway-ticket.<upstream-ticket>`.
+   Never put an upstream ticket/token in the query. Only the public protocol
+   `hermes-gateway-v1` may be echoed in the handshake response.
+
+All three exchanges use the configured trusted internal
+`CLAWMANAGER_CONTROL_UI_ORIGIN`, after the BFF validates the browser-facing
+Origin and authorization. This supersedes the upstream query-ticket example.
+
+Neither the Hermes cookie nor its WebSocket ticket is returned to the browser.
+The browser uses a separate ClawManager HttpOnly session and a 30-second,
+single-use ClawManager WebSocket ticket. Redis enforces redemption across
+ClawManager replicas. See [AgentsRuntime development requirements](agentsruntime-hermes-web.md)
+for process isolation, deployment and acceptance requirements.
+
 ### POST /v1/gateways
 
 The agent creates a gateway subprocess and returns the bound port. If no port is free in the requested range, return HTTP 409.

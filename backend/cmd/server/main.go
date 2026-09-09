@@ -210,6 +210,15 @@ func main() {
 		services.NewInstanceShellService(runtimePodRepo, bindingRepo),
 		services.WithInstanceProxyRuntimeRepositories(instanceRepo, runtimePodRepo, bindingRepo),
 	)
+	hermesDesktopService := services.NewHermesDesktopService(services.HermesDesktopConfig{
+		ControlUIOrigin: strings.TrimSpace(os.Getenv("CLAWMANAGER_CONTROL_UI_ORIGIN")),
+		Enabled:         strings.EqualFold(strings.TrimSpace(os.Getenv("CLAWMANAGER_HERMES_DESKTOP_WEB_ENABLED")), "true"),
+		Secret:          cfg.JWT.Secret, Instances: instanceRepo, Users: userRepo, Bindings: bindingRepo, Pods: runtimePodRepo,
+		Teams: repository.NewHermesDesktopTeamGuard(database), Agent: runtimeAgentClient, Redis: platformRedis,
+	})
+	hermesDesktopHandler := handlers.NewHermesDesktopHandler(hermesDesktopService)
+	instanceHandler.SetHermesDesktopService(hermesDesktopService)
+	authHandler.SetDesktopLogoutHook(hermesDesktopService.RevokeUserSessions)
 	systemSettingsHandler := handlers.NewSystemSettingsHandler(systemImageSettingService)
 	llmModelHandler := handlers.NewLLMModelHandler(llmModelService)
 	aiGatewayHandler := handlers.NewAIGatewayHandler(aiGatewayService, instanceService, workspaceFileService, runtimeWorkspaceFileService)
@@ -356,7 +365,8 @@ func main() {
 	}
 
 	// Setup router
-	r := gin.Default()
+	r := gin.New()
+	r.Use(handlers.HermesDesktopRedactTickets(), gin.Logger(), gin.Recovery())
 
 	// Middleware
 	r.Use(middleware.CORS())
@@ -373,7 +383,6 @@ func main() {
 		// Build information is intentionally public so operators can identify the
 		// running control-plane version even when authentication is unavailable.
 		api.GET("/version", versionHandler.Get)
-
 		sharedInstances := api.Group("/shared-instances")
 		{
 			sharedInstances.GET("/:code/session", instanceHandler.GetSharedInstanceSession)
@@ -401,7 +410,7 @@ func main() {
 			auth.POST("/register", authHandler.Register)
 			auth.POST("/login", authHandler.Login)
 			auth.POST("/refresh", authHandler.RefreshToken)
-			auth.POST("/logout", authHandler.Logout)
+			auth.POST("/logout", middleware.Auth(), authHandler.Logout)
 			auth.GET("/me", middleware.Auth(), middleware.SetUserInfo(userRepo), authHandler.GetCurrentUser)
 			auth.POST("/change-password", middleware.Auth(), authHandler.ChangePassword)
 		}
@@ -432,10 +441,24 @@ func main() {
 		}
 
 		// Instance routes (authenticated)
+		// Desktop iframe requests use a separate, short-lived, instance-scoped
+		// HttpOnly cookie. Bootstrap alone uses the normal bearer middleware.
+		hermesDesktop := api.Group("/instances/:id/hermes-desktop")
+		hermesDesktop.GET("/session", hermesDesktopHandler.Session)
+		hermesDesktop.DELETE("/session", hermesDesktopHandler.ClearSession)
+		hermesDesktop.GET("/api/*path", hermesDesktopHandler.API)
+		hermesDesktop.POST("/api/*path", hermesDesktopHandler.API)
+		hermesDesktop.PUT("/api/*path", hermesDesktopHandler.API)
+		hermesDesktop.PATCH("/api/*path", hermesDesktopHandler.API)
+		hermesDesktop.DELETE("/api/*path", hermesDesktopHandler.API)
+		hermesDesktop.POST("/ws-ticket", hermesDesktopHandler.Ticket)
+		hermesDesktop.GET("/ws", hermesDesktopHandler.WebSocket)
 		instances := api.Group("/instances")
 		instances.Use(middleware.Auth())
 		instances.Use(middleware.SetUserInfo(userRepo))
 		{
+			instances.GET("/:id/hermes-desktop/bootstrap", hermesDesktopHandler.Bootstrap)
+			instances.POST("/:id/hermes-desktop/bootstrap", hermesDesktopHandler.Bootstrap)
 			instances.GET("", instanceHandler.ListInstances)
 			instances.POST("", instanceHandler.CreateInstance)
 			instances.POST("/batch/lite", instanceHandler.BatchCreateLiteInstances)

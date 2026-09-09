@@ -3,9 +3,17 @@ package services
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
+
+func skipIfTestSymlinkUnavailable(t *testing.T, err error) {
+	t.Helper()
+	if err != nil && runtime.GOOS == "windows" && strings.Contains(strings.ToLower(err.Error()), "required privilege") {
+		t.Skipf("symlink assertions require Windows Developer Mode or SeCreateSymbolicLinkPrivilege: %v", err)
+	}
+}
 
 func TestEnsureOpenClawPluginLayoutCompatibilityLeavesLegacyLayoutUntouched(t *testing.T) {
 	workspace := t.TempDir()
@@ -19,10 +27,12 @@ func TestEnsureOpenClawPluginLayoutCompatibilityLeavesLegacyLayoutUntouched(t *t
 	}
 	legacyLink := filepath.Join(globalRoot, "legacy-plugin")
 	if err := os.Symlink(defaultsPackage, legacyLink); err != nil {
+		skipIfTestSymlinkUnavailable(t, err)
 		t.Fatal(err)
 	}
 
 	if err := ensureOpenClawPluginLayoutCompatibility(workspace, 0, 0); err != nil {
+		skipIfTestSymlinkUnavailable(t, err)
 		t.Fatalf("ensureOpenClawPluginLayoutCompatibility returned error: %v", err)
 	}
 
@@ -53,6 +63,7 @@ func TestEnsureOpenClawPluginLayoutCompatibilityLinksProjectPackages(t *testing.
 	}
 
 	if err := ensureOpenClawPluginLayoutCompatibility(workspace, 0, 0); err != nil {
+		skipIfTestSymlinkUnavailable(t, err)
 		t.Fatalf("ensureOpenClawPluginLayoutCompatibility returned error: %v", err)
 	}
 

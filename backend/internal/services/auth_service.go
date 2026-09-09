@@ -120,6 +120,13 @@ func (s *authService) Register(username, email, password string) (*models.User, 
 	if err := s.userRepo.Create(user); err != nil {
 		return nil, fmt.Errorf("failed to create user: %w", err)
 	}
+	// Self-registration needs the same ordinary quota as administrator-created
+	// users. Instance creation must not depend on first visiting the quota page.
+	if s.quotaRepo != nil {
+		if _, err := s.quotaRepo.CreateDefaultQuota(user.ID); err != nil {
+			return nil, fmt.Errorf("failed to create default quota: %w", err)
+		}
+	}
 
 	return user, nil
 }

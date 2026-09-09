@@ -84,11 +84,18 @@ export default function SharedInstancePage() {
   }, [loadSession]);
 
   useEffect(() => {
-    const timer = window.setInterval(() => {
+    if (!session) {
+      return;
+    }
+    const expiresAt = Date.parse(session.session_expires_at);
+    const renewalDelay = Number.isFinite(expiresAt)
+      ? Math.max(30_000, Math.min(45 * 60 * 1000, expiresAt - Date.now() - 60_000))
+      : 45 * 60 * 1000;
+    const timer = window.setTimeout(() => {
       void loadSession({ background: true });
-    }, 45 * 60 * 1000);
-    return () => window.clearInterval(timer);
-  }, [loadSession]);
+    }, renewalDelay);
+    return () => window.clearTimeout(timer);
+  }, [loadSession, session]);
 
   useEffect(() => {
     const previousTitle = document.title;

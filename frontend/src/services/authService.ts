@@ -32,9 +32,14 @@ export const authService = {
 
   // Logout
   logout: async (): Promise<void> => {
-    await api.post('/auth/logout');
-    localStorage.removeItem('access_token');
-    localStorage.removeItem('refresh_token');
+    try {
+      await api.post('/auth/logout');
+    } finally {
+      // A failed server revocation must not restore local login on reload.
+      // Preserve the rejection so callers can report that revocation failed.
+      localStorage.removeItem('access_token');
+      localStorage.removeItem('refresh_token');
+    }
   },
 
   // Refresh token

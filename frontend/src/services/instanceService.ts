@@ -160,15 +160,18 @@ export const instanceService = {
   // Generate access token
   generateAccessToken: async (
     id: number,
+    sameOrigin = false,
   ): Promise<{
-    token: string;
+    token?: string;
     access_url: string;
     proxy_url: string;
     expires_at: string;
     desktop_proxy_mode?: "control-plane" | "fallback" | "direct";
     desktop_upstream_present?: boolean;
   }> => {
-    const response = await api.post(`/instances/${id}/access`);
+    const response = sameOrigin
+      ? await api.post(`/api/v1/instances/${id}/access`, null, { baseURL: window.location.origin })
+      : await api.post(`/instances/${id}/access`);
     return response.data.data;
   },
 

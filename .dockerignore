@@ -1,6 +1,7 @@
 .git
 .gitignore
 .codex
+.codex-logs
 .DS_Store
 node_modules
 frontend/node_modules
@@ -9,7 +10,15 @@ backend/bin
 backend/.cache
 backend/.codex
 backend/.tmp
+.tmp
 dev_docs
 docs
 scripts
+!hermes-desktop-web/scripts
+!hermes-desktop-web/scripts/**
+hermes-desktop-web/node_modules
+hermes-desktop-web/.cache
+hermes-desktop-web/.upstream
+hermes-desktop-web/dist
+frontend/public/hermes-desktop-web
 *.log

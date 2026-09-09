@@ -9,7 +9,8 @@
 //                                 (taken from the token's "upstream" claim)
 //   "http://127.0.0.1:9001"    -> fall back to the in-process control-plane
 //                                 proxy (gray rollout / legacy tokens without
-//                                 an "upstream" claim)
+//                                 an "upstream" claim, or a Hermes Dashboard
+//                                 cookie requiring backend authorization)
 //
 // The function runs in the main request context (js_set), so query args and
 // cookies of the original request are available.
@@ -38,6 +39,24 @@ function b64urlToString(s) {
 
 function requestInstanceID(r) {
     return r.variables.inst_id || r.variables.runtime_inst_id || '';
+}
+
+function hasHermesDashboardCookie(r) {
+    var instanceID = requestInstanceID(r);
+    var cookie = r.headersIn['Cookie'];
+    if (!instanceID || !cookie) {
+        return false;
+    }
+    var name = 'cm_hermes_dashboard_' + instanceID;
+    var parts = cookie.split(';');
+    for (var i = 0; i < parts.length; i++) {
+        var kv = parts[i].trim();
+        var eq = kv.indexOf('=');
+        if (eq > 0 && kv.substring(0, eq) === name) {
+            return true;
+        }
+    }
+    return false;
 }
 
 function readCookieToken(r) {
@@ -116,6 +135,13 @@ function validatedAccessPayload(r, token, key, allowExpired) {
 }
 
 function resolveTarget(r) {
+    // Presence is a routing hint, NEVER proof of authorization. In particular,
+    // even a forged/empty cookie or an old direct-proxy token must go through
+    // the backend's current user/instance/generation/Redis lease checks.
+    if (hasHermesDashboardCookie(r)) {
+        return CONTROL_PLANE_FALLBACK;
+    }
+
     var key = secret();
     if (!key) {
         r.error('desktop_auth: missing JWT secret in environment');
@@ -134,6 +160,13 @@ function resolveTarget(r) {
         return DENY;
     }
 
+    // Historical instance-access JWTs do not bind the current Pro/Lite mode.
+    // A Hermes upstream claim can outlive a mode/allocation change, so only
+    // the control plane may select its current BFF or Pro desktop route.
+    if (String(payload.instance_type || '').trim().toLowerCase() === 'hermes') {
+        return CONTROL_PLANE_FALLBACK;
+    }
+
     if (payload.upstream) {
         return 'https://' + payload.upstream;
     }
@@ -145,7 +178,9 @@ function resolveTarget(r) {
 // ClawManager instance-access JWT stripped. Runtime apps such as Hermes may use
 // their own "token" query parameter for websocket/session auth; when the
 // ClawManager token came from the HttpOnly cookie, that runtime token must be
-// preserved and forwarded to the upstream gateway.
+// preserved and forwarded to the selected target. A Hermes Dashboard cookie
+// selects only the BFF, so its own short-lived WS ticket and business query
+// reach the backend unchanged; upstream Hermes tickets never enter this layer.
 function cleanUri(r) {
     var uri = r.variables.request_uri || r.uri || '/';
     var q = uri.indexOf('?');

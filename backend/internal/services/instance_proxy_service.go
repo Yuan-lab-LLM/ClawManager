@@ -139,6 +139,11 @@ func (s *InstanceProxyService) ProxyRequest(ctx context.Context, instanceID int,
 	if accessToken.InstanceID != instanceID {
 		return fmt.Errorf("token does not match instance")
 	}
+	// Hermes Lite is exclusively served by its authenticated BFF. Classify the
+	// current instance, not the potentially stale type embedded in an old JWT.
+	if s.isHermesLiteProxyInstance(instanceID, RuntimeTypeHermes) {
+		return ErrHermesDesktopUnavailable
+	}
 
 	effectiveRequestPath := canonicalProxyEntryRequestPath(r.URL.Path, accessToken, instanceID)
 	dedicatedRuntimeOrigin := isDedicatedRuntimeOriginRequest(r, accessToken.InstanceType)
@@ -156,7 +161,6 @@ func (s *InstanceProxyService) ProxyRequest(ctx context.Context, instanceID int,
 
 	managedGatewayToken := s.managedRuntimeGatewayBearerToken(ctx, instanceID, accessToken.InstanceType)
 	proxyPrefix := hermesProxyPrefix(instanceID)
-	hermesLite := s.isHermesLiteProxyInstance(instanceID, accessToken.InstanceType)
 	opencodeLite := s.isOpenCodeLiteProxyInstance(instanceID, accessToken.InstanceType)
 	bootstrapPath := stripInstanceProxyPrefix(targetPath, instanceID)
 
@@ -188,31 +192,6 @@ func (s *InstanceProxyService) ProxyRequest(ctx context.Context, instanceID int,
 	}
 	defer cancel()
 
-	var bootstrapSetCookies []string
-	if hermesLite && shouldBootstrapHermesDashboardSession(r, bootstrapPath) && strings.TrimSpace(managedGatewayToken) != "" {
-		if cookies, bootErr := s.bootstrapHermesDashboardSession(proxyCtx, targetURL, instanceID, managedGatewayToken, r); bootErr == nil {
-			bootstrapSetCookies = cookies
-		}
-	}
-
-	// After a successful bootstrap on non-chat entry points, send the browser
-	// to /chat with session cookies instead of serving the login HTML.
-	if len(bootstrapSetCookies) > 0 && shouldRedirectHermesBootstrapToChat(bootstrapPath) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Credentials", "true")
-		for _, cookie := range bootstrapSetCookies {
-			if strings.TrimSpace(cookie) == "" {
-				continue
-			}
-			w.Header().Add("Set-Cookie", cookie)
-		}
-		w.Header().Set("Location", hermesChatProxyLocation(instanceID, token))
-		w.Header().Del("X-Frame-Options")
-		w.Header().Del("Content-Security-Policy")
-		w.WriteHeader(http.StatusFound)
-		return nil
-	}
-
 	proxyReq, err := http.NewRequestWithContext(proxyCtx, r.Method, targetURL.String(), r.Body)
 	if err != nil {
 		return fmt.Errorf("failed to create proxy request: %w", err)
@@ -224,7 +203,6 @@ func (s *InstanceProxyService) ProxyRequest(ctx context.Context, instanceID int,
 			proxyReq.Header.Add(key, value)
 		}
 	}
-	attachCookiesToRequest(proxyReq, bootstrapSetCookies)
 	if dedicatedRuntimeOrigin && isDeepSeekHarnessRuntimeType(accessToken.InstanceType) {
 		// DeepSeek Harness validates every /api request against Host and Origin.
 		// The browser uses a per-instance public origin while the upstream sees
@@ -242,7 +220,7 @@ func (s *InstanceProxyService) ProxyRequest(ctx context.Context, instanceID int,
 	proxyReq.Header.Set("X-Forwarded-Prefix", proxyPrefix)
 	if opencodeLite {
 		setOpenCodeServerBasicAuthHeaders(proxyReq.Header, managedGatewayToken)
-	} else if !isHermesDashboardPublicAuthPath(bootstrapPath) {
+	} else if !isRuntimePublicAuthPath(bootstrapPath) {
 		setManagedRuntimeGatewayAuthHeaders(proxyReq.Header, managedGatewayToken)
 	}
 	if shouldRewriteHTML {
@@ -298,9 +276,6 @@ func (s *InstanceProxyService) ProxyRequest(ctx context.Context, instanceID int,
 		}
 
 		modifiedBody := injectProxyBase(string(body), proxyBaseForRequestPath(effectiveRequestPath, instanceID))
-		if hermesLite {
-			modifiedBody = injectHermesAbsolutePathPatch(modifiedBody, proxyPrefix)
-		}
 		if opencodeLite {
 			modifiedBody = rewriteOpenCodeHTMLRootAssets(modifiedBody, proxyPrefix)
 			modifiedBody = injectOpenCodeAbsolutePathPatch(modifiedBody, proxyPrefix)
@@ -317,12 +292,6 @@ func (s *InstanceProxyService) ProxyRequest(ctx context.Context, instanceID int,
 		for _, value := range values {
 			w.Header().Add(key, value)
 		}
-	}
-	for _, cookie := range bootstrapSetCookies {
-		if strings.TrimSpace(cookie) == "" {
-			continue
-		}
-		w.Header().Add("Set-Cookie", cookie)
 	}
 	w.Header().Del("X-Frame-Options")
 	w.Header().Del("Content-Security-Policy")
@@ -394,6 +363,10 @@ func (s *InstanceProxyService) ProxyWebSocket(ctx context.Context, instanceID in
 	if accessToken.InstanceID != instanceID {
 		return fmt.Errorf("token does not match instance")
 	}
+	// Browser cookies/tickets for Hermes must never use this raw WS tunnel.
+	if s.isHermesLiteProxyInstance(instanceID, RuntimeTypeHermes) {
+		return ErrHermesDesktopUnavailable
+	}
 	dedicatedRuntimeOrigin := isDedicatedRuntimeOriginRequest(r, accessToken.InstanceType)
 
 	// Extract the actual path from the request
@@ -406,10 +379,7 @@ func (s *InstanceProxyService) ProxyWebSocket(ctx context.Context, instanceID in
 	}
 
 	managedGatewayToken := s.managedRuntimeGatewayBearerToken(ctx, instanceID, accessToken.InstanceType)
-	upstreamPath := stripInstanceProxyPrefix(targetPath, instanceID)
-	hermesLite := s.isHermesLiteProxyInstance(instanceID, accessToken.InstanceType)
 	opencodeLite := s.isOpenCodeLiteProxyInstance(instanceID, accessToken.InstanceType)
-	skipManagedWSAuth := hermesLite && isHermesDashboardTicketWebSocket(upstreamPath, r.URL.Query())
 
 	// Copy query parameters, excluding ClawManager-owned proxy/gateway tokens.
 	// Preserve DSH's significant leading '?' in plugin-loader batch queries.
@@ -439,16 +409,7 @@ func (s *InstanceProxyService) ProxyWebSocket(ctx context.Context, instanceID in
 	upstreamHeader.Set("X-Forwarded-Host", r.Host)
 	upstreamHeader.Set("X-Forwarded-Proto", requestScheme(r))
 	upstreamHeader.Set("X-Forwarded-Prefix", fmt.Sprintf("/api/v1/instances/%d/proxy", instanceID))
-	// Hermes dashboard chat uses cookie + ticket query auth. Do not inject
-	// managed Bearer/API-Key headers or rewrite Origin for those sockets.
-	if skipManagedWSAuth {
-		upstreamHeader.Del("Authorization")
-		upstreamHeader.Del("X-Api-Key")
-		upstreamHeader.Del("X-OpenAI-Api-Key")
-		upstreamHeader.Del("OpenAI-Api-Key")
-		upstreamHeader.Del("X-ClawManager-Instance-Token")
-		upstreamHeader.Del("X-ClawManager-LLM-API-Key")
-	} else if opencodeLite {
+	if opencodeLite {
 		setOpenCodeServerBasicAuthHeaders(upstreamHeader, managedGatewayToken)
 	} else {
 		setManagedRuntimeGatewayAuthHeaders(upstreamHeader, managedGatewayToken)
@@ -486,7 +447,7 @@ func (s *InstanceProxyService) ProxyWebSocket(ctx context.Context, instanceID in
 		return fmt.Errorf("failed to connect upstream websocket: %w", err)
 	}
 	defer upstreamConn.Close()
-	upstreamConn.SetReadLimit(hermesWebSocketMaxMessageBytes)
+	upstreamConn.SetReadLimit(instanceProxyWebSocketMaxMessageBytes)
 
 	upgrader := websocket.Upgrader{
 		CheckOrigin:     func(r *http.Request) bool { return true },
@@ -504,7 +465,7 @@ func (s *InstanceProxyService) ProxyWebSocket(ctx context.Context, instanceID in
 		return fmt.Errorf("failed to upgrade client websocket: %w", err)
 	}
 	defer clientConn.Close()
-	clientConn.SetReadLimit(hermesWebSocketMaxMessageBytes)
+	clientConn.SetReadLimit(instanceProxyWebSocketMaxMessageBytes)
 
 	errCh := make(chan error, 2)
 	pipe := func(dst, src *websocket.Conn) {
@@ -640,6 +601,9 @@ func (s *InstanceProxyService) isHermesLiteProxyInstance(instanceID int, instanc
 	}
 	instance, err := s.instanceRepo.GetByID(instanceID)
 	if err != nil || instance == nil {
+		return false
+	}
+	if mode, ok := NormalizeInstanceMode(instance.InstanceMode); ok && mode == InstanceModePro {
 		return false
 	}
 	runtimeType, ok := v2RuntimeTypeForInstance(instance)
@@ -783,7 +747,9 @@ func rewriteOpenCodeFindFileResponse(body []byte) ([]byte, bool) {
 	return modified, true
 }
 
-func isHermesDashboardPublicAuthPath(targetPath string) bool {
+// Preserve the legacy public-auth header behavior for other runtime types.
+// Hermes Lite cannot reach this proxy at all; its BFF owns authentication.
+func isRuntimePublicAuthPath(targetPath string) bool {
 	path := strings.TrimSpace(targetPath)
 	if path == "" {
 		return false
@@ -791,223 +757,10 @@ func isHermesDashboardPublicAuthPath(targetPath string) bool {
 	if !strings.HasPrefix(path, "/") {
 		path = "/" + path
 	}
-	switch {
-	case path == "/login", strings.HasPrefix(path, "/login?"):
-		return true
-	case path == "/auth", strings.HasPrefix(path, "/auth/"):
-		return true
-	default:
-		return false
-	}
+	return path == "/login" || strings.HasPrefix(path, "/login?") || path == "/auth" || strings.HasPrefix(path, "/auth/")
 }
 
-const hermesWebSocketMaxMessageBytes int64 = 8 << 20 // 8 MiB PTY snapshots
-
-func isHermesDashboardTicketWebSocket(targetPath string, query url.Values) bool {
-	if query != nil && strings.TrimSpace(query.Get("ticket")) != "" {
-		return true
-	}
-	path := normalizeHermesBootstrapPath(targetPath)
-	switch path {
-	case "/api/pty", "/api/events":
-		return true
-	default:
-		return strings.HasPrefix(path, "/api/pty/") || strings.HasPrefix(path, "/api/events/")
-	}
-}
-
-func isHermesSessionCookieName(name string) bool {
-	bare := strings.TrimSpace(name)
-	for _, prefix := range []string{"__Host-", "__Secure-"} {
-		if strings.HasPrefix(bare, prefix) {
-			bare = strings.TrimPrefix(bare, prefix)
-			break
-		}
-	}
-	return bare == "hermes_session_at"
-}
-
-func requestHasHermesSessionCookie(r *http.Request) bool {
-	if r == nil {
-		return false
-	}
-	for _, cookie := range r.Cookies() {
-		if isHermesSessionCookieName(cookie.Name) && strings.TrimSpace(cookie.Value) != "" {
-			return true
-		}
-	}
-	return false
-}
-
-func shouldBootstrapHermesDashboardSession(r *http.Request, targetPath string) bool {
-	if r == nil {
-		return false
-	}
-	method := strings.ToUpper(strings.TrimSpace(r.Method))
-	if method != http.MethodGet && method != http.MethodHead {
-		return false
-	}
-	if requestHasHermesSessionCookie(r) {
-		return false
-	}
-	path := normalizeHermesBootstrapPath(targetPath)
-	switch path {
-	case "/", "/chat", "/login":
-		return true
-	}
-	if strings.HasPrefix(path, "/login") {
-		return true
-	}
-	accept := strings.ToLower(r.Header.Get("Accept"))
-	if strings.Contains(accept, "text/html") &&
-		!strings.HasPrefix(path, "/api") &&
-		!strings.HasPrefix(path, "/auth") &&
-		!strings.HasPrefix(path, "/assets") {
-		return true
-	}
-	return false
-}
-
-func normalizeHermesBootstrapPath(targetPath string) string {
-	path := strings.TrimSpace(targetPath)
-	if path == "" {
-		return "/"
-	}
-	if !strings.HasPrefix(path, "/") {
-		path = "/" + path
-	}
-	trimmed := strings.TrimSuffix(path, "/")
-	if trimmed == "" {
-		return "/"
-	}
-	return trimmed
-}
-
-func shouldRedirectHermesBootstrapToChat(bootstrapPath string) bool {
-	return normalizeHermesBootstrapPath(bootstrapPath) != "/chat"
-}
-
-func hermesChatProxyLocation(instanceID int, proxyToken string) string {
-	location := fmt.Sprintf("/api/v1/instances/%d/proxy/chat/", instanceID)
-	if token := strings.TrimSpace(proxyToken); token != "" {
-		return location + "?token=" + url.QueryEscape(token)
-	}
-	return location
-}
-
-func (s *InstanceProxyService) bootstrapHermesDashboardSession(
-	ctx context.Context,
-	upstreamTarget *url.URL,
-	instanceID int,
-	password string,
-	clientReq *http.Request,
-) ([]string, error) {
-	if s == nil || s.httpClient == nil || upstreamTarget == nil {
-		return nil, fmt.Errorf("hermes bootstrap unavailable")
-	}
-	password = strings.TrimSpace(password)
-	if password == "" {
-		return nil, fmt.Errorf("hermes bootstrap password missing")
-	}
-
-	loginURL := &url.URL{
-		Scheme: upstreamTarget.Scheme,
-		Host:   upstreamTarget.Host,
-		Path:   "/auth/password-login",
-	}
-	body, err := json.Marshal(map[string]string{
-		"provider": "basic",
-		"username": "clawmanager",
-		"password": password,
-		"next":     "/chat",
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, loginURL.String(), bytes.NewReader(body))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	if clientReq != nil {
-		req.Header.Set("X-Forwarded-For", clientReq.RemoteAddr)
-		req.Header.Set("X-Forwarded-Host", clientReq.Host)
-		req.Header.Set("X-Forwarded-Proto", requestScheme(clientReq))
-	}
-	req.Header.Set("X-Forwarded-Prefix", hermesProxyPrefix(instanceID))
-
-	resp, err := s.httpClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	_, _ = io.Copy(io.Discard, resp.Body)
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("hermes password-login status %d", resp.StatusCode)
-	}
-	cookies := collectUpstreamSetCookies(resp)
-	if len(cookies) == 0 {
-		return nil, fmt.Errorf("hermes password-login returned no cookies")
-	}
-	return cookies, nil
-}
-
-func collectUpstreamSetCookies(resp *http.Response) []string {
-	if resp == nil {
-		return nil
-	}
-	if values := resp.Header.Values("Set-Cookie"); len(values) > 0 {
-		return append([]string(nil), values...)
-	}
-	if values := resp.Header["Set-Cookie"]; len(values) > 0 {
-		return append([]string(nil), values...)
-	}
-	out := make([]string, 0, len(resp.Cookies()))
-	for _, cookie := range resp.Cookies() {
-		if cookie == nil || strings.TrimSpace(cookie.Name) == "" {
-			continue
-		}
-		out = append(out, cookie.String())
-	}
-	return out
-}
-
-func attachCookiesToRequest(req *http.Request, setCookies []string) {
-	if req == nil || len(setCookies) == 0 {
-		return
-	}
-	existing := req.Header.Get("Cookie")
-	parts := make([]string, 0, len(setCookies)+1)
-	if strings.TrimSpace(existing) != "" {
-		parts = append(parts, existing)
-	}
-	for _, raw := range setCookies {
-		name, value, ok := parseSetCookiePair(raw)
-		if !ok {
-			continue
-		}
-		parts = append(parts, name+"="+value)
-	}
-	if len(parts) == 0 {
-		return
-	}
-	req.Header.Set("Cookie", strings.Join(parts, "; "))
-}
-
-func parseSetCookiePair(raw string) (name, value string, ok bool) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return "", "", false
-	}
-	pair := strings.SplitN(raw, ";", 2)[0]
-	name, value, found := strings.Cut(pair, "=")
-	name = strings.TrimSpace(name)
-	if !found || name == "" {
-		return "", "", false
-	}
-	return name, value, true
-}
+const instanceProxyWebSocketMaxMessageBytes int64 = 8 << 20 // Preserve the existing tunnel frame limit.
 
 func injectHermesAbsolutePathPatch(html, proxyPrefix string) string {
 	prefix := strings.TrimRight(strings.TrimSpace(proxyPrefix), "/")

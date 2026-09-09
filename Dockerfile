@@ -1,4 +1,15 @@
-FROM --platform=$BUILDPLATFORM node:20-alpine AS frontend-builder
+FROM --platform=$BUILDPLATFORM node:24-alpine AS hermes-desktop-deps
+
+WORKDIR /app
+RUN apk add --no-cache git
+COPY hermes-desktop-web/package*.json ./hermes-desktop-web/
+RUN --mount=type=cache,id=clawmanager-hermes-npm,target=/root/.npm,sharing=locked npm ci --prefix hermes-desktop-web --ignore-scripts
+
+FROM hermes-desktop-deps AS hermes-desktop-builder
+COPY hermes-desktop-web/ ./hermes-desktop-web/
+RUN node hermes-desktop-web/scripts/build.mjs
+
+FROM --platform=$BUILDPLATFORM node:24-alpine AS frontend-builder
 
 WORKDIR /app/frontend
 
@@ -43,6 +54,7 @@ WORKDIR /app
 
 COPY --from=backend-builder /out/clawreef-server /usr/local/bin/clawreef-server
 COPY --from=frontend-builder /app/frontend/dist /usr/share/nginx/html
+COPY --from=hermes-desktop-builder /app/frontend/public/hermes-desktop-web /usr/share/nginx/html/hermes-desktop-web
 COPY deployments/nginx/nginx.conf /etc/nginx/nginx.conf
 COPY deployments/nginx/njs/desktop_auth.js /etc/nginx/njs/desktop_auth.js
 COPY deployments/container/start.sh /app/start.sh

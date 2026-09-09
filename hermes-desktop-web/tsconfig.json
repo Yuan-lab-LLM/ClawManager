@@ -1,0 +1,18 @@
+{
+  "compilerOptions": {
+    "target": "ES2023", "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "module": "ESNext", "moduleResolution": "Bundler", "jsx": "react-jsx",
+    "strict": true, "noEmit": true, "skipLibCheck": true, "allowImportingTsExtensions": true,
+    "resolveJsonModule": true, "allowJs": true, "types": ["node", "vite/client"],
+    "paths": {
+      "@/debug/dev-only": ["./.upstream/source/apps/desktop/src/debug/dev-only.noop.ts"],
+      "@hermes/plugin-sdk": ["./.upstream/source/apps/desktop/src/sdk/index.ts"],
+      "@hermes/shared": ["./.upstream/source/apps/shared/src/index.ts"],
+      "@hermes/shared/billing": ["./.upstream/source/apps/shared/src/billing-types.ts"],
+      "@hermes/shared/*": ["./.upstream/source/apps/shared/src/*"],
+      "@/*": ["./.upstream/source/apps/desktop/src/*"]
+    }
+  },
+  "include": ["src", "test", "vite.config.ts", ".upstream/source/apps/desktop/src/global.d.ts"],
+  "exclude": [".upstream/source/apps/desktop/src/**/*.test.ts", ".upstream/source/apps/desktop/src/**/*.test.tsx", ".upstream/source/apps/shared/src/**/*.test.ts"]
+}

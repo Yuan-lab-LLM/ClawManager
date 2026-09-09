@@ -425,6 +425,64 @@ func TestSyncAgentSkillsReusesUploadedSkillOnWorkspaceScan(t *testing.T) {
 	}
 }
 
+func TestSyncAgentSkillsReusesContentAddressedBlobWithoutRewritingCurrentBlob(t *testing.T) {
+	oldHash := "11111111111111111111111111111111"
+	observedHash := "22222222222222222222222222222222"
+	currentVersionID := 10
+	workspace := t.TempDir()
+	stub := &provenanceCaptureRepoStub{
+		capturingSkillRepoStub: capturingSkillRepoStub{
+			skillRepoStub: skillRepoStub{
+				skills: map[int]*models.Skill{
+					7: {
+						ID: 7, UserID: 1, SkillKey: "demo", Name: "demo",
+						SourceType: skillSourceDiscovered, Status: skillStatusActive,
+						CurrentVersionID: &currentVersionID,
+					},
+				},
+				blobs: map[int]*models.SkillBlob{
+					10: {ID: 10, ContentHash: oldHash, ArchiveHash: oldHash, ScanStatus: "completed"},
+					20: {ID: 20, ContentHash: observedHash, ArchiveHash: observedHash, ScanStatus: "completed"},
+				},
+				versions: map[int]*models.SkillVersion{
+					10: {ID: 10, SkillID: 7, BlobID: 10, VersionNo: 1, SourceType: skillSourceDiscovered},
+				},
+			},
+		},
+	}
+	instRepo := &importTestInstanceRepo{instances: map[int]*models.Instance{
+		1: {
+			ID: 1, UserID: 1, Type: RuntimeTypeHermes, InstanceMode: InstanceModeLite,
+			RuntimeType: RuntimeBackendGateway, WorkspacePath: &workspace,
+		},
+	}}
+	svc := &skillService{repo: stub, instanceRepo: instRepo, commandService: &noopInstanceCommandService{}}
+
+	err := svc.SyncAgentSkills(1, AgentSkillInventoryReportRequest{
+		Mode: "full",
+		Skills: []AgentSkillRecord{{
+			Identifier: "demo", ContentMD5: observedHash, Source: "discovered_in_instance",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("SyncAgentSkills() error = %v", err)
+	}
+	if got := stub.blobs[10].ContentHash; got != oldHash {
+		t.Fatalf("current blob content hash = %q, want immutable %q", got, oldHash)
+	}
+	if got := stub.blobs[20].ContentHash; got != observedHash {
+		t.Fatalf("observed blob content hash = %q, want %q", got, observedHash)
+	}
+	updatedSkill := stub.skills[7]
+	if updatedSkill == nil || updatedSkill.CurrentVersionID == nil || *updatedSkill.CurrentVersionID == currentVersionID {
+		t.Fatalf("skill current version = %#v, want a new version for observed blob", updatedSkill)
+	}
+	newVersion := stub.versions[*updatedSkill.CurrentVersionID]
+	if newVersion == nil || newVersion.BlobID != 20 || newVersion.VersionNo != 2 {
+		t.Fatalf("new version = %#v, want blob 20 version 2", newVersion)
+	}
+}
+
 type recordingSkillResyncAgentClient struct {
 	fakeRuntimeAgentClient
 	calls []struct {

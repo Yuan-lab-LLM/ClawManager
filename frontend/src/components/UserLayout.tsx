@@ -62,9 +62,14 @@ const UserLayout: React.FC<UserLayoutProps> = ({
     return location.pathname === item.path || location.pathname.startsWith(`${item.path}/`);
   };
 
-  const handleLogout = () => {
-    logout();
-    navigate('/login');
+  const handleLogout = async () => {
+    try {
+      await logout();
+    } catch {
+      // The login page displays the auth store's incomplete-revocation notice.
+    } finally {
+      navigate('/login', { replace: true });
+    }
   };
 
   const renderNavItem = (item: UserNavItem) => {

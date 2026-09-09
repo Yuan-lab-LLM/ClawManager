@@ -129,6 +129,7 @@ func workspaceArchiveMaxBytes() int64 {
 
 // InstanceHandler handles instance management requests
 type InstanceHandler struct {
+	hermesDesktop                 *HermesDesktopHandler
 	instanceService               services.InstanceService
 	instanceAgentService          services.InstanceAgentService
 	runtimeStatusService          services.InstanceRuntimeStatusService
@@ -1454,6 +1455,10 @@ func (h *InstanceHandler) GenerateAccessToken(c *gin.Context) {
 	}
 
 	// Generate proxy entry URL. The actual Service remains internal-only.
+	if h.hermesDesktop != nil && h.hermesDesktop.service.IsDashboardInstance(instance.ID) {
+		h.hermesDesktop.DashboardBootstrap(c, instance.ID)
+		return
+	}
 	accessURL := h.proxyService.GetProxyURLForInstance(instance, "")
 
 	if accessURL == "" {
@@ -1634,6 +1639,10 @@ func (h *InstanceHandler) ProxyInstance(c *gin.Context) {
 		return
 	}
 
+	if h.hermesDesktop != nil && h.hermesDesktop.service.IsDashboardInstance(id) {
+		h.hermesDesktop.Dashboard(c)
+		return
+	}
 	token, ok := h.proxyAccessToken(c, id)
 	if !ok {
 		return
@@ -1644,7 +1653,8 @@ func (h *InstanceHandler) ProxyInstance(c *gin.Context) {
 
 func (h *InstanceHandler) proxyAccessToken(c *gin.Context, id int) (string, bool) {
 	cookieName := fmt.Sprintf("instance_access_%d", id)
-	queryToken := strings.TrimSpace(c.Query("token"))
+	original := originalInstanceProxyRequest(c)
+	queryToken := strings.TrimSpace(original.URL.Query().Get("token"))
 	if queryToken != "" {
 		if accessToken, validateErr := h.accessService.ValidateToken(queryToken); validateErr == nil && accessToken.InstanceID == id {
 			h.promoteProxyAccessTokenCookie(c, id, cookieName, queryToken, accessToken)
@@ -1652,9 +1662,9 @@ func (h *InstanceHandler) proxyAccessToken(c *gin.Context, id int) (string, bool
 		}
 	}
 
-	if cookieToken, err := c.Cookie(cookieName); err == nil && strings.TrimSpace(cookieToken) != "" {
-		if accessToken, validateErr := h.accessService.ValidateToken(cookieToken); validateErr == nil && accessToken.InstanceID == id {
-			return cookieToken, true
+	if cookie, err := original.Cookie(cookieName); err == nil && strings.TrimSpace(cookie.Value) != "" {
+		if accessToken, validateErr := h.accessService.ValidateToken(cookie.Value); validateErr == nil && accessToken.InstanceID == id {
+			return cookie.Value, true
 		}
 	}
 
@@ -1692,9 +1702,10 @@ func (h *InstanceHandler) promoteProxyAccessTokenCookie(c *gin.Context, id int, 
 }
 
 func (h *InstanceHandler) proxyInstanceWithToken(c *gin.Context, id int, token string) {
+	original := originalInstanceProxyRequest(c)
 	// Check if it's a WebSocket upgrade request
 	if strings.EqualFold(c.GetHeader("Upgrade"), "websocket") {
-		if err := h.proxyService.ProxyWebSocket(c.Request.Context(), id, token, c.Writer, c.Request); err != nil {
+		if err := h.proxyService.ProxyWebSocket(c.Request.Context(), id, token, c.Writer, original); err != nil {
 			if errors.Is(err, services.ErrInstanceGatewayUnavailable) {
 				http.Error(c.Writer, "Instance gateway is not available", http.StatusServiceUnavailable)
 			} else {
@@ -1705,7 +1716,7 @@ func (h *InstanceHandler) proxyInstanceWithToken(c *gin.Context, id int, token s
 	}
 
 	// Proxy regular HTTP request
-	if err := h.proxyService.ProxyRequest(c.Request.Context(), id, token, c.Writer, c.Request); err != nil {
+	if err := h.proxyService.ProxyRequest(c.Request.Context(), id, token, c.Writer, original); err != nil {
 		// Log the error
 		fmt.Printf("Proxy error for instance %d: %v\n", id, err)
 
@@ -2349,6 +2360,21 @@ func (h *InstanceHandler) GetSharedInstanceSession(c *gin.Context) {
 		return
 	}
 	proxyURL := h.proxyService.GetProxyURLForInstance(instance, instanceToken.Token)
+	accessURL := browserAccessEntryURL(instanceToken.AccessURL, proxyURL)
+	sessionExpiresAt := instanceToken.ExpiresAt
+	if h.hermesDesktop != nil && h.hermesDesktop.service.IsDashboardInstance(instance.ID) {
+		desktop, err := h.hermesDesktop.activateDesktopSession(c, instance.UserID, instance.ID)
+		if err != nil {
+			hermesDesktopError(c, err)
+			return
+		}
+		if !desktop.Available || desktop.ExpiresAt == nil || strings.TrimSpace(desktop.RendererURL) == "" {
+			hermesDesktopError(c, services.ErrHermesDesktopUnavailable)
+			return
+		}
+		accessURL = desktop.RendererURL
+		sessionExpiresAt = *desktop.ExpiresAt
+	}
 	workspaceAccess, err := services.NormalizeExternalWorkspaceAccess(access.WorkspaceAccess)
 	if err != nil {
 		workspaceAccess = services.ExternalWorkspaceAccessNone
@@ -2369,8 +2395,8 @@ func (h *InstanceHandler) GetSharedInstanceSession(c *gin.Context) {
 			"instance_mode": instance.InstanceMode,
 			"runtime_type":  instance.RuntimeType,
 		},
-		"access_url":          browserAccessEntryURL(instanceToken.AccessURL, proxyURL),
-		"session_expires_at":  instanceToken.ExpiresAt,
+		"access_url":          accessURL,
+		"session_expires_at":  sessionExpiresAt,
 		"share_expires_at":    access.ExpiresAt,
 		"workspace_access":    workspaceAccess,
 		"workspace_available": workspaceAvailable,
