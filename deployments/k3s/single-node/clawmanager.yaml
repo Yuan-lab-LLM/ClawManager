@@ -1392,6 +1392,10 @@ spec:
               value: "redis://clawmanager-redis.clawmanager-system.svc.cluster.local:6379/0"
             - name: TEAM_REDIS_URL
               value: "redis://clawmanager-redis.clawmanager-system.svc.cluster.local:6379/0"
+            - name: CLAWMANAGER_HERMES_DESKTOP_WEB_ENABLED
+              value: "true"
+            - name: CLAWMANAGER_CONTROL_UI_ORIGIN
+              value: "http://clawmanager-gateway.clawmanager-system.svc.cluster.local:9001"
             - name: CLAWMANAGER_DESKTOP_DIRECT_PROXY
               value: "true"
             # Required for the OpenCode Lite root-origin UI. The {instance_id}
@@ -1606,6 +1610,10 @@ spec:
             - name: CLAWMANAGER_RUNTIME_TYPE
               value: hermes
             - name: CLAWMANAGER_BACKEND_URL
+              value: "http://clawmanager-gateway.clawmanager-system.svc.cluster.local:9001"
+            - name: CLAWMANAGER_HERMES_DESKTOP_WEB_ENABLED
+              value: "true"
+            - name: CLAWMANAGER_CONTROL_UI_ORIGIN
               value: "http://clawmanager-gateway.clawmanager-system.svc.cluster.local:9001"
             - name: CLAWMANAGER_RUNTIME_DEPLOYMENT_NAME
               value: hermes-runtime

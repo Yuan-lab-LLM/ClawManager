@@ -43,6 +43,81 @@ func TestRuntimeManifestsAreValidYAML(t *testing.T) {
 	}
 }
 
+func TestDeploymentManifestsConfigureHermesDesktopWeb(t *testing.T) {
+	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
+	wantDeployments := map[string]string{
+		"clawmanager-app": "clawmanager-app",
+		"hermes-runtime":  "runtime",
+	}
+	const wantOrigin = "http://clawmanager-gateway.clawmanager-system.svc.cluster.local:9001"
+
+	for _, manifest := range deploymentRuntimeManifests(repoRoot) {
+		t.Run(manifest, func(t *testing.T) {
+			file, err := os.Open(manifest)
+			if err != nil {
+				t.Fatalf("open manifest: %v", err)
+			}
+			defer file.Close()
+
+			found := make(map[string]bool, len(wantDeployments))
+			decoder := yaml.NewDecoder(file)
+			for {
+				var document struct {
+					Kind     string `yaml:"kind"`
+					Metadata struct {
+						Name string `yaml:"name"`
+					} `yaml:"metadata"`
+					Spec struct {
+						Template struct {
+							Spec struct {
+								Containers []struct {
+									Name string `yaml:"name"`
+									Env  []struct {
+										Name  string `yaml:"name"`
+										Value string `yaml:"value"`
+									} `yaml:"env"`
+								} `yaml:"containers"`
+							} `yaml:"spec"`
+						} `yaml:"template"`
+					} `yaml:"spec"`
+				}
+				if err := decoder.Decode(&document); err == io.EOF {
+					break
+				} else if err != nil {
+					t.Fatalf("parse manifest: %v", err)
+				}
+
+				containerName, wanted := wantDeployments[document.Metadata.Name]
+				if document.Kind != "Deployment" || !wanted {
+					continue
+				}
+				for _, container := range document.Spec.Template.Spec.Containers {
+					if container.Name != containerName {
+						continue
+					}
+					found[document.Metadata.Name] = true
+					environment := make(map[string]string, len(container.Env))
+					for _, variable := range container.Env {
+						environment[variable.Name] = variable.Value
+					}
+					if environment["CLAWMANAGER_HERMES_DESKTOP_WEB_ENABLED"] != "true" {
+						t.Fatalf("%s must explicitly enable Hermes Desktop Web", document.Metadata.Name)
+					}
+					if got := environment["CLAWMANAGER_CONTROL_UI_ORIGIN"]; got != wantOrigin {
+						t.Fatalf("%s has unexpected Hermes control UI origin %q", document.Metadata.Name, got)
+					}
+				}
+			}
+
+			for deployment := range wantDeployments {
+				if !found[deployment] {
+					t.Fatalf("manifest does not contain configured %s deployment", deployment)
+				}
+			}
+		})
+	}
+}
+
 func TestNineNodeProductionDatabaseLoadControls(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	manifest := filepath.Join(repoRoot, "deployments", "k8s", "sites", "nine-node-production", "20-clawmanager-production.yaml")
