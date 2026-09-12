@@ -49,7 +49,10 @@ func TestDeploymentManifestsConfigureHermesDesktopWeb(t *testing.T) {
 		"clawmanager-app": "clawmanager-app",
 		"hermes-runtime":  "runtime",
 	}
-	const wantOrigin = "http://clawmanager-gateway.clawmanager-system.svc.cluster.local:9001"
+	const (
+		wantOrigin      = "http://clawmanager-gateway.clawmanager-system.svc.cluster.local:9001"
+		wantHermesImage = "ghcr.io/yuan-lab-llm/agentsruntime/hermes-lite@sha256:4fd519962d0afe796b36dade6f8e66379e7030a2c6f3c62b4a6574352b2eac44"
+	)
 
 	for _, manifest := range deploymentRuntimeManifests(repoRoot) {
 		t.Run(manifest, func(t *testing.T) {
@@ -71,8 +74,9 @@ func TestDeploymentManifestsConfigureHermesDesktopWeb(t *testing.T) {
 						Template struct {
 							Spec struct {
 								Containers []struct {
-									Name string `yaml:"name"`
-									Env  []struct {
+									Name  string `yaml:"name"`
+									Image string `yaml:"image"`
+									Env   []struct {
 										Name  string `yaml:"name"`
 										Value string `yaml:"value"`
 									} `yaml:"env"`
@@ -105,6 +109,21 @@ func TestDeploymentManifestsConfigureHermesDesktopWeb(t *testing.T) {
 					}
 					if got := environment["CLAWMANAGER_CONTROL_UI_ORIGIN"]; got != wantOrigin {
 						t.Fatalf("%s has unexpected Hermes control UI origin %q", document.Metadata.Name, got)
+					}
+					if document.Metadata.Name == "hermes-runtime" {
+						if container.Image != wantHermesImage {
+							t.Fatalf("Hermes runtime must use immutable image %q, got %q", wantHermesImage, container.Image)
+						}
+						if got := environment["CLAWMANAGER_RUNTIME_IMAGE_REF"]; got != wantHermesImage {
+							t.Fatalf("Hermes runtime must report immutable image ref %q, got %q", wantHermesImage, got)
+						}
+						wantProxyCIDR := "10.244.0.0/16"
+						if strings.Contains(filepath.Clean(manifest), filepath.Join("deployments", "k3s")) {
+							wantProxyCIDR = "10.42.0.0/16"
+						}
+						if got := environment["CLAWMANAGER_TRUSTED_PROXY_CIDRS"]; got != wantProxyCIDR {
+							t.Fatalf("Hermes runtime has unexpected trusted proxy CIDR %q", got)
+						}
 					}
 				}
 			}

@@ -1604,7 +1604,7 @@ spec:
     spec:
       containers:
         - name: runtime
-          image: ghcr.io/yuan-lab-llm/agentsruntime/hermes-lite:latest
+          image: ghcr.io/yuan-lab-llm/agentsruntime/hermes-lite@sha256:4fd519962d0afe796b36dade6f8e66379e7030a2c6f3c62b4a6574352b2eac44
           imagePullPolicy: IfNotPresent
           env:
             - name: CLAWMANAGER_RUNTIME_TYPE
@@ -1615,10 +1615,14 @@ spec:
               value: "true"
             - name: CLAWMANAGER_CONTROL_UI_ORIGIN
               value: "http://clawmanager-gateway.clawmanager-system.svc.cluster.local:9001"
+            # k3s uses 10.42.0.0/16 by default. Update this value when the
+            # cluster was installed with a different Pod CIDR.
+            - name: CLAWMANAGER_TRUSTED_PROXY_CIDRS
+              value: "10.42.0.0/16"
             - name: CLAWMANAGER_RUNTIME_DEPLOYMENT_NAME
               value: hermes-runtime
             - name: CLAWMANAGER_RUNTIME_IMAGE_REF
-              value: ghcr.io/yuan-lab-llm/agentsruntime/hermes-lite:latest
+              value: ghcr.io/yuan-lab-llm/agentsruntime/hermes-lite@sha256:4fd519962d0afe796b36dade6f8e66379e7030a2c6f3c62b4a6574352b2eac44
             - name: CLAWMANAGER_AGENT_PORT
               value: "19090"
             - name: CLAWMANAGER_GATEWAY_PORT_START
