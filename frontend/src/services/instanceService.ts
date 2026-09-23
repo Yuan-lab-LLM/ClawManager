@@ -24,6 +24,19 @@ import type {
 } from "../types/instance";
 import type { InstanceSkill } from "../types/skill";
 
+export interface BrowserWorkerStatus {
+  enabled: boolean;
+  available: boolean;
+  instance_id: number;
+  access_url?: string;
+  reason?: string;
+  expires_at?: string;
+  status?: "disabled" | "provisioning" | "ready" | "degraded" | "error";
+  last_error?: string;
+  display_width?: number;
+  display_height?: number;
+}
+
 export const instanceService = {
   // Get instance list
   getInstances: async (
@@ -177,6 +190,18 @@ export const instanceService = {
     desktop_upstream_present?: boolean;
   }> => {
     const response = await api.post(`/instances/${id}/access`);
+    return response.data.data;
+  },
+
+  getBrowserWorker: async (id: number): Promise<BrowserWorkerStatus> => {
+    const response = await api.get(`/instances/${id}/browser-worker`);
+    return response.data.data;
+  },
+
+  generateBrowserWorkerAccess: async (
+    id: number,
+  ): Promise<BrowserWorkerStatus> => {
+    const response = await api.post(`/instances/${id}/browser-worker/access`);
     return response.data.data;
   },
 
