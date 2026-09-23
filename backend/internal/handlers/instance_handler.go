@@ -146,6 +146,13 @@ type InstanceHandler struct {
 	externalAccessService         services.InstanceExternalAccessService
 	ieiSSOService                 *services.IEISSOService
 	aiObservabilityService        services.AIObservabilityService
+	browserWorkerService          *services.BrowserWorkerService
+}
+
+func (h *InstanceHandler) SetBrowserWorkerService(service *services.BrowserWorkerService) {
+	if h != nil {
+		h.browserWorkerService = service
+	}
 }
 
 // NewInstanceHandler creates a new instance handler
@@ -213,28 +220,29 @@ type ExternalAccessRequest struct {
 
 // CreateInstanceRequest represents a create instance request
 type CreateInstanceRequest struct {
-	Name                 string                       `json:"name" binding:"required,min=3,max=50"`
-	Owner                *string                      `json:"owner,omitempty" binding:"omitempty,max=128"`
-	Description          *string                      `json:"description,omitempty"`
-	Type                 string                       `json:"type" binding:"required,oneof=openclaw ubuntu debian centos custom webtop hermes opencode deepseek-harness"`
-	RuntimeVariant       string                       `json:"runtime_variant,omitempty" binding:"omitempty,oneof=linux windows"`
-	Mode                 string                       `json:"mode" binding:"omitempty,oneof=lite pro"`
-	InstanceMode         string                       `json:"instance_mode" binding:"omitempty,oneof=lite pro"`
-	RuntimeType          string                       `json:"runtime_type" binding:"omitempty,oneof=gateway desktop shell"`
-	DesktopStreamProfile string                       `json:"desktop_stream_profile,omitempty" binding:"omitempty,oneof=low standard high"`
-	CPUCores             float64                      `json:"cpu_cores" binding:"required,min=0.1,max=32"`
-	MemoryGB             int                          `json:"memory_gb" binding:"required,min=1,max=128"`
-	DiskGB               int                          `json:"disk_gb" binding:"required,min=5,max=1000"`
-	GPUEnabled           bool                         `json:"gpu_enabled"`
-	GPUCount             int                          `json:"gpu_count" binding:"min=0,max=4"`
-	OSType               string                       `json:"os_type" binding:"required"`
-	OSVersion            string                       `json:"os_version" binding:"required"`
-	ImageRegistry        *string                      `json:"image_registry,omitempty"`
-	ImageTag             *string                      `json:"image_tag,omitempty"`
-	EnvironmentOverrides map[string]string            `json:"environment_overrides,omitempty"`
-	StorageClass         string                       `json:"storage_class"`
-	OpenClawConfigPlan   *services.OpenClawConfigPlan `json:"openclaw_config_plan,omitempty"`
-	SkillIDs             []int                        `json:"skill_ids,omitempty"`
+	Name                 string                        `json:"name" binding:"required,min=3,max=50"`
+	Owner                *string                       `json:"owner,omitempty" binding:"omitempty,max=128"`
+	Description          *string                       `json:"description,omitempty"`
+	Type                 string                        `json:"type" binding:"required,oneof=openclaw ubuntu debian centos custom webtop hermes opencode deepseek-harness"`
+	RuntimeVariant       string                        `json:"runtime_variant,omitempty" binding:"omitempty,oneof=linux windows"`
+	Mode                 string                        `json:"mode" binding:"omitempty,oneof=lite pro"`
+	InstanceMode         string                        `json:"instance_mode" binding:"omitempty,oneof=lite pro"`
+	RuntimeType          string                        `json:"runtime_type" binding:"omitempty,oneof=gateway desktop shell"`
+	DesktopStreamProfile string                        `json:"desktop_stream_profile,omitempty" binding:"omitempty,oneof=low standard high"`
+	CPUCores             float64                       `json:"cpu_cores" binding:"required,min=0.1,max=32"`
+	MemoryGB             int                           `json:"memory_gb" binding:"required,min=1,max=128"`
+	DiskGB               int                           `json:"disk_gb" binding:"required,min=5,max=1000"`
+	GPUEnabled           bool                          `json:"gpu_enabled"`
+	GPUCount             int                           `json:"gpu_count" binding:"min=0,max=4"`
+	OSType               string                        `json:"os_type" binding:"required"`
+	OSVersion            string                        `json:"os_version" binding:"required"`
+	ImageRegistry        *string                       `json:"image_registry,omitempty"`
+	ImageTag             *string                       `json:"image_tag,omitempty"`
+	EnvironmentOverrides map[string]string             `json:"environment_overrides,omitempty"`
+	StorageClass         string                        `json:"storage_class"`
+	OpenClawConfigPlan   *services.OpenClawConfigPlan  `json:"openclaw_config_plan,omitempty"`
+	SkillIDs             []int                         `json:"skill_ids,omitempty"`
+	BrowserWorker        *services.BrowserWorkerUpdate `json:"browser_worker,omitempty"`
 }
 
 type BatchCreateLiteInstanceTemplate struct {
@@ -456,6 +464,16 @@ func (h *InstanceHandler) CreateInstance(c *gin.Context) {
 	for _, skillID := range skillIDs {
 		if _, err := h.skillService.AttachSkillToInstance(userID.(int), userRole.(string), instance.ID, skillID); err != nil {
 			utils.HandleHubError(c, err)
+			return
+		}
+	}
+	if req.BrowserWorker != nil && req.BrowserWorker.Enabled {
+		if h.browserWorkerService == nil {
+			utils.Error(c, http.StatusServiceUnavailable, "Browser Worker service is unavailable")
+			return
+		}
+		if _, err := h.browserWorkerService.Update(c.Request.Context(), instance, *req.BrowserWorker); err != nil {
+			utils.HandleError(c, err)
 			return
 		}
 	}
@@ -914,6 +932,12 @@ func (h *InstanceHandler) DeleteInstance(c *gin.Context) {
 	if userRole != "admin" && instance.UserID != userID.(int) {
 		utils.Error(c, http.StatusForbidden, "Access denied")
 		return
+	}
+	if h.browserWorkerService != nil {
+		if err := h.browserWorkerService.DeleteForInstance(c.Request.Context(), id); err != nil {
+			utils.HandleError(c, err)
+			return
+		}
 	}
 
 	if err := h.instanceService.Delete(id); err != nil {

@@ -239,6 +239,13 @@ export interface CreateInstanceRequest {
   storage_class?: string;
   openclaw_config_plan?: OpenClawConfigPlan;
   skill_ids?: number[];
+  browser_worker?: {
+    enabled: boolean;
+    resource_profile?: "standard";
+    display_width?: number;
+    display_height?: number;
+    retain_profile?: boolean;
+  };
 }
 
 export interface BatchCreateLiteInstancesRequest {
