@@ -307,6 +307,26 @@ func TestNginxRoutesOpenCodeDedicatedOrigins(t *testing.T) {
 	}
 }
 
+func TestNginxBrowserWorkerPreservesPublicOriginAndWebSocket(t *testing.T) {
+	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
+	raw, err := os.ReadFile(filepath.Join(repoRoot, "deployments", "nginx", "nginx.conf"))
+	if err != nil {
+		t.Fatalf("read nginx config: %v", err)
+	}
+	text := string(raw)
+	for _, want := range []string{
+		`location ~ ^/api/v1/instances/[0-9]+/browser-proxy(?:/|$)`,
+		"proxy_set_header Host $http_host;",
+		"proxy_set_header X-Forwarded-Host $http_host;",
+		"proxy_set_header Upgrade $http_upgrade;",
+		"proxy_read_timeout 86400s;",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("browser worker nginx route must contain %q", want)
+		}
+	}
+}
+
 func TestNginxWorkersAreBoundedOnLargeClusterNodes(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	raw, err := os.ReadFile(filepath.Join(repoRoot, "deployments", "nginx", "nginx.conf"))
@@ -368,8 +388,8 @@ func TestNginxAgentRoutesSupportSilentRenewalAndLongRunningWork(t *testing.T) {
 		"proxy_read_timeout 86400s;",
 		"proxy_send_timeout 86400s;",
 	} {
-		if count := strings.Count(text, want); count != 4 {
-			t.Fatalf("nginx agent routes must contain %q four times, got %d", want, count)
+		if count := strings.Count(text, want); count != 5 {
+			t.Fatalf("nginx long-running routes must contain %q five times, got %d", want, count)
 		}
 	}
 }
