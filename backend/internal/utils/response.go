@@ -56,7 +56,7 @@ func HandleError(c *gin.Context, err error) {
 		Error(c, http.StatusBadRequest, errStr)
 		return
 	}
-	if errStr == "local usernames cannot start with ldap_" || errStr == "LDAP users must be imported from LDAP" {
+	if errStr == "LDAP users must be imported from LDAP" {
 		Error(c, http.StatusBadRequest, errStr)
 		return
 	}

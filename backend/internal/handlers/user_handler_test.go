@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"clawreef/internal/models"
@@ -241,11 +242,12 @@ func TestLDAPListOptionsFromRequest(t *testing.T) {
 
 type ldapImportTestResponse struct {
 	Data struct {
-		CreatedCount int               `json:"created_count"`
-		UpdatedCount int               `json:"updated_count"`
-		SkippedCount int               `json:"skipped_count"`
-		FailedCount  int               `json:"failed_count"`
-		UpdatedUsers []updatedLDAPUser `json:"updated_users"`
+		CreatedCount int                `json:"created_count"`
+		UpdatedCount int                `json:"updated_count"`
+		SkippedCount int                `json:"skipped_count"`
+		FailedCount  int                `json:"failed_count"`
+		Errors       []importUserResult `json:"errors"`
+		UpdatedUsers []updatedLDAPUser  `json:"updated_users"`
 	} `json:"data"`
 }
 
@@ -291,7 +293,7 @@ func (d *fakeLDAPImportDirectory) EnterpriseAuthPolicy() services.EnterpriseAuth
 }
 
 type fakeLDAPImportUserService struct {
-	nextID              int
+	nextID               int
 	existingByExternalID map[string]*models.User
 	createdByExternalID  map[string]*models.User
 }
@@ -313,6 +315,9 @@ func (s *fakeLDAPImportUserService) CreateUserWithProvider(username, email, pass
 }
 
 func (s *fakeLDAPImportUserService) CreateUserWithProviderAndExternalID(username, email, _ string, role, authProvider, externalID string) (*models.User, error) {
+	if user, _ := s.GetUserByUsername(username); user != nil {
+		return nil, errors.New("username already exists")
+	}
 	if _, ok := s.existingByExternalID[externalID]; ok {
 		return nil, errors.New("user already exists")
 	}
@@ -322,7 +327,6 @@ func (s *fakeLDAPImportUserService) CreateUserWithProviderAndExternalID(username
 		Email:        email,
 		Role:         role,
 		AuthProvider: authProvider,
-		LoginAlias:   stringPtrValueForTest("ldap_" + username),
 		ExternalID:   stringPtrValueForTest(externalID),
 		IsActive:     true,
 	}
@@ -346,6 +350,13 @@ func (s *fakeLDAPImportUserService) GetUserByID(id int) (*models.User, error) {
 }
 
 func (s *fakeLDAPImportUserService) GetUserByUsername(username string) (*models.User, error) {
+	for _, users := range []map[string]*models.User{s.existingByExternalID, s.createdByExternalID} {
+		for _, user := range users {
+			if strings.EqualFold(user.Username, username) {
+				return user, nil
+			}
+		}
+	}
 	return nil, errors.New("user not found")
 }
 
@@ -361,17 +372,6 @@ func (s *fakeLDAPImportUserService) GetUserByExternalIdentity(_ string, external
 		return user, nil
 	}
 	return nil, errors.New("user not found")
-}
-
-func (s *fakeLDAPImportUserService) EnsureLDAPLoginAlias(externalID string) (*models.User, error) {
-	user, ok := s.existingByExternalID[externalID]
-	if !ok {
-		return nil, errors.New("user not found")
-	}
-	if user.LoginAlias == nil {
-		user.LoginAlias = stringPtrValueForTest("ldap_" + user.Username)
-	}
-	return user, nil
 }
 
 func (s *fakeLDAPImportUserService) GetUserByEmail(email string) (*models.User, error) {

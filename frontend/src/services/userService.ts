@@ -55,7 +55,7 @@ export interface LDAPImportUser {
   email: string;
   role?: 'admin' | 'user';
   error?: string;
-  status: 'ready' | 'exists' | 'pending_alias' | 'invalid' | string;
+  status: 'ready' | 'exists' | 'invalid' | string;
 }
 
 export interface LDAPPreviewResponse {

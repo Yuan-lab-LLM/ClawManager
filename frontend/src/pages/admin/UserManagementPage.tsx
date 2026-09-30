@@ -271,7 +271,7 @@ const UserManagementPage: React.FC = () => {
     return null;
   }, [enterpriseAuthLoading, enterpriseAuthStatus, t]);
   const importableLDAPUsers = useMemo(
-    () => ldapPreview.filter((user) => user.status === 'ready' || user.status === 'pending_alias'),
+    () => ldapPreview.filter((user) => user.status === 'ready'),
     [ldapPreview],
   );
   const selectedLDAPSet = useMemo(() => new Set(selectedLDAPExternalIDs), [selectedLDAPExternalIDs]);
@@ -457,7 +457,7 @@ const UserManagementPage: React.FC = () => {
       setLdapPreview(result.users || []);
       setSelectedLDAPExternalIDs((current) => {
         const available = new Set((result.users || [])
-          .filter((user) => user.status === 'ready' || user.status === 'pending_alias')
+          .filter((user) => user.status === 'ready')
           .map((user) => user.external_id));
         return current.filter((externalID) => available.has(externalID));
       });
@@ -645,7 +645,7 @@ const UserManagementPage: React.FC = () => {
                 <ul className="space-y-2">
                   {importResult.created_users.map((item, index) => (
                     <li key={`${item.username}-${index}`} className="rounded-md bg-[#fff8f5] px-3 py-2 text-sm text-[#5f5957]">
-                      <div><span className="font-medium text-[#171212]">{item.username}</span>{item.login_alias ? ` · ${item.login_alias}` : ''} · {item.role} · {item.auth_provider || 'local'}</div>
+                      <div><span className="font-medium text-[#171212]">{item.username}</span> · {item.role} · {item.auth_provider || 'local'}</div>
                       <div>{t('auth.email')}: {item.email}</div>
                       {item.warning_codes?.map((warningCode) => (
                         <div key={warningCode} className="text-amber-700">
@@ -727,7 +727,6 @@ const UserManagementPage: React.FC = () => {
                     <tr key={user.id}>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="text-sm font-medium text-gray-900">{user.username}</div>
-                        {user.login_alias && <div className="text-xs text-gray-500">{user.login_alias}</div>}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="text-sm text-gray-500">{user.email}</div>
@@ -934,7 +933,7 @@ const UserManagementPage: React.FC = () => {
                           {ldapPreview.map((user) => {
                             const role = (enterpriseAuthSyncRole ? user.role : ldapImportConfig.role) === 'admin' ? 'admin' : 'user';
                             const previewQuota = quotaForImportRole(role, ldapImportConfig, enterpriseAuthSyncRole);
-                            const importable = user.status === 'ready' || user.status === 'pending_alias';
+                            const importable = user.status === 'ready';
                             return (
                               <tr key={user.external_id} className="border-t">
                                 <td className="px-3 py-2">
@@ -949,7 +948,7 @@ const UserManagementPage: React.FC = () => {
                                 <td className="px-3 py-2">{user.email || '-'}</td>
                                 <td className="px-3 py-2">{role === 'admin' ? t('common.admin') : t('common.user')}</td>
                                 <td className="px-3 py-2 text-xs text-gray-600">{previewQuota.max_instances} / {previewQuota.max_cpu_cores} CPU / {previewQuota.max_memory_gb} GB / {previewQuota.max_storage_gb} GB / {previewQuota.max_gpu_count} GPU</td>
-                                <td className="px-3 py-2">{user.status === 'ready' ? t('userManagementPage.ldapReady') : user.status === 'pending_alias' ? t('userManagementPage.ldapPendingAlias') : user.status === 'exists' ? t('userManagementPage.ldapExists') : (localizeEnterpriseAuthIssue(user.error, t) || t('userManagementPage.ldapInvalid'))}</td>
+                                <td className="px-3 py-2">{user.status === 'ready' ? t('userManagementPage.ldapReady') : user.status === 'exists' ? t('userManagementPage.ldapExists') : (localizeEnterpriseAuthIssue(user.error, t) || t('userManagementPage.ldapInvalid'))}</td>
                               </tr>
                             );
                           })}
@@ -1337,7 +1336,6 @@ function getCreateUserError(
     'Role is invalid': { key: 'userManagementPage.createRoleInvalid', field: 'role' },
     'username already exists': { key: 'userManagementPage.createUsernameExists' },
     'email already exists': { key: 'userManagementPage.createEmailExists' },
-    'local usernames cannot start with ldap_': { key: 'userManagementPage.createReservedUsername', field: 'username' },
     'LDAP users must be imported from LDAP': { key: 'userManagementPage.createLdapNotAllowed' },
   };
   const knownError = knownErrors[rawMessage];

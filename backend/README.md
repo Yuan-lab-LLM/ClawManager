@@ -60,30 +60,35 @@ log in. A user that exists in LDAP but has not been imported into ClawManager is
 rejected with the same invalid-login response as a bad username or password.
 LDAP users must change their password in the enterprise identity platform.
 
-Local users log in with their normal username, such as `fsmith`. LDAP users use
-the generated `ldap_<uid>` alias; when the uid is duplicated across OUs, the
-alias includes the OU, such as `ldap_fsmith_contractors`. The alias is stored
-and remains stable, while the full LDAP DN is retained only as the internal
-external identity. An unqualified username always selects local authentication;
-it is never looked up in LDAP. Local usernames beginning with `ldap_` are
-reserved so they cannot be confused with LDAP aliases.
+Both local and LDAP users log in with their username, such as `fsmith`.
+Authentication uses the imported account's provider; LDAP passwords are verified
+against its stored DN. Old `ldap_<uid>` aliases no longer select an account.
+Previously imported users can log in immediately by username without re-importing.
 
 Use the administrator's LDAP import flow or CSV import to provision LDAP users.
 The LDAP import flow can preview a filtered, size-limited directory result and
 imports only the selected entries. For CSV import, set `Auth Provider` to `ldap`
 and provide the LDAP DN in the `External ID` column; the password column is
-ignored for those rows. LDAP users use the generated stable alias (including an
-OU suffix when needed) to log in. The manual create-user form remains
-local-user-only because it does not collect the LDAP external identity. Existing
-LDAP records without an alias are shown as pending alias completion; re-running
-the LDAP import assigns the stable alias.
+ignored for those rows. The manual create-user form remains local-user-only.
+Usernames are globally unique across all accounts, including disabled accounts,
+using the database's case-insensitive collation. A conflicting import row fails
+with `username already exists`; other rows continue. Within a batch, the first
+successfully imported account claims the username. Re-importing the same DN in
+the LDAP import flow still synchronizes roles when enabled, or skips that account.
+
+Migration `063_unique_usernames.sql` restores global username uniqueness. Before
+applying it, the backend checks for historical duplicates and stops the upgrade
+with their usernames, account IDs, and providers. An administrator must resolve
+these conflicts and restart the upgrade; no accounts are automatically renamed,
+merged, or deleted. The migration is safe to retry after resolution. Historical
+`login_alias` values are retained as unused compatibility data.
 
 Key environment variables:
 
 - `AUTH_ENTERPRISE_ALLOW_LOCAL_FALLBACK` is retained for configuration
-  compatibility and has no effect on login selection. Unqualified names are
-  always local; only an `ldap_` alias selects LDAP and it is authenticated by
-  the stored LDAP DN.
+  compatibility and has no effect on login selection. The account provider
+  determines authentication; LDAP is authenticated by the stored DN and failures
+  never fall back to a different provider.
 - `AUTH_ENTERPRISE_SYNC_ROLE` optionally sets and updates provisioned LDAP users'
   local roles from LDAP admin group membership during LDAP import and login. It
   defaults to `false`, so roles are managed in ClawManager unless explicitly
@@ -128,8 +133,8 @@ Development fixtures:
   `alice`, `bob`, `carol`, `dave`, `erin`, and `frank`.
 - `deployments/docker/ldap/clawmanager-ldap-whitelist.csv` is a CSV import
   example for the fixture users `alice`, `carol`, and `erin`.
-- Expected login behavior with the fixture: `ldap_alice`, `ldap_carol`, and
-  `ldap_erin` can log in with their LDAP passwords after either the CSV import
+- Expected login behavior with the fixture: `alice`, `carol`, and
+  `erin` can log in with their LDAP passwords after either the CSV import
   or the dedicated LDAP import; `bob`, `dave`, and `frank` still exist in LDAP
   but cannot log in until imported into ClawManager.
 

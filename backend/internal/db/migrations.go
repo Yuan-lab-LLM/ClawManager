@@ -42,6 +42,11 @@ func applyEmbeddedMigrations(session db.Session) error {
 		if _, ok := applied[entry.Name()]; ok {
 			continue
 		}
+		if entry.Name() == "063_unique_usernames.sql" {
+			if err := checkUniqueUsernames(session); err != nil {
+				return fmt.Errorf("cannot apply migration %s: %w", entry.Name(), err)
+			}
+		}
 
 		rawSQL, err := embeddedMigrations.ReadFile(path.Join("migrations", entry.Name()))
 		if err != nil {
@@ -66,6 +71,38 @@ func applyEmbeddedMigrations(session db.Session) error {
 		log.Printf("Applied database migration %s", entry.Name())
 	}
 
+	return nil
+}
+
+// Group and join using the database collation, exactly as the unique index does.
+// Include each conflicting row separately so long groups cannot be truncated.
+func checkUniqueUsernames(session db.Session) error {
+	rows, err := session.SQL().Query(`
+		SELECT u.username, u.id, u.auth_provider
+		FROM users AS u
+		JOIN (SELECT username FROM users GROUP BY username HAVING COUNT(*) > 1) AS duplicates
+		  ON duplicates.username = u.username
+		ORDER BY u.username, u.id
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to check duplicate usernames: %w", err)
+	}
+	defer rows.Close()
+	var conflicts []string
+	for rows.Next() {
+		var username, provider string
+		var id int
+		if err := rows.Scan(&username, &id, &provider); err != nil {
+			return fmt.Errorf("failed to read duplicate username: %w", err)
+		}
+		conflicts = append(conflicts, fmt.Sprintf("username=%q id=%d auth_provider=%q", username, id, provider))
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("failed to read duplicate usernames: %w", err)
+	}
+	if len(conflicts) > 0 {
+		return fmt.Errorf("duplicate usernames must be resolved by an administrator before retrying the upgrade: %s", strings.Join(conflicts, "; "))
+	}
 	return nil
 }
 

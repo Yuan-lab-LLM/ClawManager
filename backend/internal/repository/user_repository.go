@@ -13,7 +13,7 @@ import (
 // login alias between the availability check and the insert.
 var ErrUserLoginAliasConflict = errors.New("user login alias conflict")
 
-// ErrUserUsernameConflict indicates that another request claimed the local
+// ErrUserUsernameConflict indicates that another request claimed the global
 // username between the availability check and the insert.
 var ErrUserUsernameConflict = errors.New("user username conflict")
 
@@ -94,7 +94,8 @@ func isLoginAliasConflict(err error) bool {
 
 func isUsernameConflict(err error) bool {
 	message := strings.ToLower(err.Error())
-	return strings.Contains(message, "uk_users_local_username") ||
+	return strings.Contains(message, "uk_users_username") ||
+		strings.Contains(message, "uk_users_local_username") ||
 		(strings.Contains(message, "duplicate entry") && strings.Contains(message, "local_username_key"))
 }
 
@@ -102,7 +103,9 @@ func (r *userRepository) GetByAuthProviderUsername(authProvider, username string
 	var user models.User
 	err := r.sess.Collection("users").Find(db.Cond{"auth_provider": authProvider, "username": username}).One(&user)
 	if err != nil {
-		if err == db.ErrNoMoreRows { return nil, nil }
+		if err == db.ErrNoMoreRows {
+			return nil, nil
+		}
 		return nil, fmt.Errorf("failed to get user by auth provider and username: %w", err)
 	}
 	return &user, nil
@@ -120,7 +123,9 @@ func (r *userRepository) GetByLoginAlias(authProvider, loginAlias string) (*mode
 	var user models.User
 	err := r.sess.Collection("users").Find(db.Cond{"auth_provider": authProvider, "login_alias": loginAlias}).One(&user)
 	if err != nil {
-		if err == db.ErrNoMoreRows { return nil, nil }
+		if err == db.ErrNoMoreRows {
+			return nil, nil
+		}
 		return nil, fmt.Errorf("failed to get user by login alias: %w", err)
 	}
 	return &user, nil
