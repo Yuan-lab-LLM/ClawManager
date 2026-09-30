@@ -60,6 +60,7 @@ func main() {
 	userRepo := repository.NewUserRepository(database)
 	quotaRepo := repository.NewQuotaRepository(database)
 	instanceRepo := repository.NewInstanceRepository(database)
+	browserWorkerRepo := repository.NewBrowserWorkerRepository(database)
 	systemImageSettingRepo := repository.NewSystemImageSettingRepository(database)
 	enterpriseAuthSettingRepo := repository.NewEnterpriseAuthSettingRepository(database)
 	llmModelRepo := repository.NewLLMModelRepository(database)
@@ -245,6 +246,16 @@ func main() {
 		services.NewInstanceShellService(),
 		services.WithInstanceProxyRuntimeRepositories(instanceRepo, runtimePodRepo, bindingRepo),
 	)
+	browserWorkerService := services.NewBrowserWorkerService(browserWorkerRepo, instanceRepo, k8s.GetClient())
+	instanceHandler.SetBrowserWorkerService(browserWorkerService)
+	go func() {
+		browserWorkerService.ReconcileAll(context.Background())
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			browserWorkerService.ReconcileAll(context.Background())
+		}
+	}()
 	hermesDesktopService := services.NewHermesDesktopService(services.HermesDesktopConfig{
 		ControlUIOrigin: services.HermesControlUIOrigin(cfg.Runtime.Namespace, os.Getenv("CLAWMANAGER_CONTROL_UI_ORIGIN")),
 		Enabled:         services.HermesWebEnabled(os.Getenv("CLAWMANAGER_HERMES_DESKTOP_WEB_ENABLED")),
@@ -584,6 +595,8 @@ func main() {
 			instances.POST("/:id/config/revisions/publish", instanceHandler.PublishConfigRevision)
 			instances.POST("/:id/access", instanceHandler.GenerateAccessToken)
 			instances.GET("/:id/access", instanceHandler.AccessInstance)
+			instances.GET("/:id/browser-worker", instanceHandler.GetBrowserWorker)
+			instances.POST("/:id/browser-worker/access", instanceHandler.GenerateBrowserWorkerAccess)
 			instances.GET("/:id/shell", instanceHandler.StreamShell)
 			instances.POST("/:id/sync", instanceHandler.ForceSync)
 			instances.GET("/:id/openclaw/export", instanceHandler.ExportOpenClaw)
@@ -901,6 +914,8 @@ func main() {
 		// These routes proxy requests to the actual instance pods
 		api.Any("/instances/:id/proxy", instanceHandler.ProxyInstance)
 		api.Any("/instances/:id/proxy/*path", instanceHandler.ProxyInstance)
+		api.Any("/instances/:id/browser-proxy", instanceHandler.ProxyBrowserWorker)
+		api.Any("/instances/:id/browser-proxy/*path", instanceHandler.ProxyBrowserWorker)
 
 		// WebSocket routes
 		ws := api.Group("/ws")
