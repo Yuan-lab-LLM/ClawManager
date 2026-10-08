@@ -67,6 +67,10 @@ func TestBrowserWorkerCreatesIsolatedKubernetesResources(t *testing.T) {
 }
 
 func TestBrowserWorkerConfigPatchIsReversible(t *testing.T) {
+	originalSetFileOwnership := setFileOwnership
+	setFileOwnership = func(string, int, int) error { return nil }
+	t.Cleanup(func() { setFileOwnership = originalSetFileOwnership })
+
 	workspace := t.TempDir()
 	configDir := filepath.Join(workspace, "home", ".openclaw")
 	if err := os.MkdirAll(configDir, 0o755); err != nil {
@@ -77,7 +81,7 @@ func TestBrowserWorkerConfigPatchIsReversible(t *testing.T) {
 	if err := os.WriteFile(path, original, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	service := &BrowserWorkerService{client: &cmk8s.Client{Namespace: "clawmanager-system"}}
+	service := &BrowserWorkerService{client: &cmk8s.Client{Namespace: "clawmanager"}}
 	instance := &models.Instance{ID: 42, UserID: 7, WorkspacePath: &workspace}
 	if err := service.patchOpenClawConfig(instance, true); err != nil {
 		t.Fatalf("enable patch: %v", err)
