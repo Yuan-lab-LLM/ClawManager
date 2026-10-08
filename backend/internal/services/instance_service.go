@@ -295,6 +295,7 @@ type instanceService struct {
 	bindingRepo           repository.InstanceRuntimeBindingRepository
 	agentClient           RuntimeAgentClient
 	runtimeUpgradeGuard   RuntimeUpgradeDeletionGuard
+	resourceCleanup       func(context.Context, int) error
 	workspaceRoot         string
 	podService            *k8s.PodService
 	deploymentService     *k8s.InstanceDeploymentService
@@ -324,6 +325,11 @@ type gatewayTokenAliasRecorder interface {
 	UpsertGatewayTokenAlias(ctx context.Context, instanceID int, accessToken string, expiresAt time.Time) error
 }
 type InstanceServiceOption func(*instanceService)
+
+// Shared by HTTP, batch, Team and pending-deletion paths.
+func WithInstanceResourceCleanup(cleanup func(context.Context, int) error) InstanceServiceOption {
+	return func(s *instanceService) { s.resourceCleanup = cleanup }
+}
 
 type RuntimeUpgradeDeletionGuard interface {
 	ValidateInstanceDeletion(ctx context.Context, instanceID int) error
@@ -1993,6 +1999,11 @@ func (s *instanceService) deleteV2Instance(ctx context.Context, instance *models
 		GetHub().BroadcastInstanceStatus(instance.UserID, instance)
 	}
 
+	if s.resourceCleanup != nil {
+		if err := s.resourceCleanup(ctx, instance.ID); err != nil {
+			return fmt.Errorf("failed to clean instance components: %w", err)
+		}
+	}
 	cleanupErr := s.cleanupV2GatewayBinding(ctx, instance)
 	if cleanupErr != nil {
 		return cleanupErr

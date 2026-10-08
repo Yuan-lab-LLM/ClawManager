@@ -37,7 +37,7 @@ jobs:
         run: npm run build
 
       - name: Test Hermes iframe boundaries
-        run: node --test src/lib/hermesDesktopFrame.test.mjs src/services/authService.test.mjs ../e2e/desktop-proxy-edge.test.mjs
+        run: node --test src/lib/hermesDesktopFrame.test.mjs src/lib/browserWorkerAccess.test.mjs src/services/authService.test.mjs ../e2e/desktop-proxy-edge.test.mjs
 
   hermes-desktop:
     name: Hermes Desktop Web Build
@@ -84,6 +84,35 @@ jobs:
 
       - name: Run backend tests
         run: go test ./...
+
+  browser-worker:
+    name: Browser Worker Build and Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+      - name: Test authenticated CDP and GUI relay
+        working-directory: deployments/browser-worker/cdp-proxy
+        run: go test -race main.go main_test.go
+      - uses: docker/setup-buildx-action@v3
+      - name: Build visible browser
+        uses: docker/build-push-action@v6
+        with:
+          context: deployments/browser-worker
+          file: deployments/browser-worker/Dockerfile
+          platforms: linux/amd64
+          push: false
+          tags: browser-worker:ci
+      - name: Build relay
+        uses: docker/build-push-action@v6
+        with:
+          context: deployments/browser-worker
+          file: deployments/browser-worker/Dockerfile.cdp-proxy
+          platforms: linux/amd64
+          push: false
+          tags: browser-worker-relay:ci
 
   docker:
     name: Docker Build

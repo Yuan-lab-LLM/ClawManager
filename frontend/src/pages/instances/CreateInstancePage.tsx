@@ -580,6 +580,7 @@ const CreateInstancePage: React.FC = () => {
   });
   const [skillLoading, setSkillLoading] = useState(false);
   const [selectedSkillIds, setSelectedSkillIds] = useState<number[]>([]);
+  const [browserWorkerEnabled, setBrowserWorkerEnabled] = useState(false);
   const [skillPage, setSkillPage] = useState(1);
   const openClawImportInputRef = useRef<HTMLInputElement | null>(null);
   const nextCustomEnvIdRef = useRef(0);
@@ -1064,6 +1065,16 @@ const CreateInstancePage: React.FC = () => {
                 openClawResourceIds.length > 0
               ? { mode: "manual", resource_ids: openClawResourceIds }
               : undefined,
+        browser_worker:
+          formData.type === "openclaw" && selectedMode === "lite"
+            ? {
+                enabled: browserWorkerEnabled,
+                resource_profile: "standard",
+                display_width: 1440,
+                display_height: 900,
+                retain_profile: true,
+              }
+            : undefined,
       };
 
       const createdInstance =
@@ -2359,6 +2370,15 @@ const CreateInstancePage: React.FC = () => {
 
                 {supportsRuntimeInjection(formData.type, selectedRuntimeImage?.image, selectedRuntimeVariant) && (
                   <div className="app-panel order-2 p-6">
+                    {formData.type === "openclaw" && selectedMode === "lite" && (
+                      <label className="mb-6 flex cursor-pointer items-start justify-between gap-4 rounded-2xl border border-gray-200 bg-gray-50 px-4 py-4">
+                        <div>
+                          <div className="font-medium text-gray-900">可视化浏览器</div>
+                          <div className="mt-1 text-sm text-gray-500">为该实例创建独立 Browser Worker，保留登录状态并支持人工验证。</div>
+                        </div>
+                        <input type="checkbox" className="mt-1 h-5 w-5" checked={browserWorkerEnabled} onChange={(event) => setBrowserWorkerEnabled(event.target.checked)} />
+                      </label>
+                    )}
                     <div className="flex items-start justify-between gap-4">
                       <div>
                         <h2 className="text-lg font-medium text-gray-900">
