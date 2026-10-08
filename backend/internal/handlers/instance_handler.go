@@ -447,6 +447,16 @@ func (h *InstanceHandler) CreateInstance(c *gin.Context) {
 	}
 
 	createReq := instanceCreateRequestToService(req)
+	if req.BrowserWorker != nil && req.BrowserWorker.Enabled {
+		if h.browserWorkerService == nil {
+			utils.Error(c, http.StatusServiceUnavailable, "Browser Worker service is unavailable")
+			return
+		}
+		if err := h.browserWorkerService.ValidateCreateRequest(createReq, *req.BrowserWorker); err != nil {
+			utils.Error(c, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
 
 	instance, err := h.instanceService.Create(userID.(int), createReq)
 	if err != nil {
@@ -933,13 +943,6 @@ func (h *InstanceHandler) DeleteInstance(c *gin.Context) {
 		utils.Error(c, http.StatusForbidden, "Access denied")
 		return
 	}
-	if h.browserWorkerService != nil {
-		if err := h.browserWorkerService.DeleteForInstance(c.Request.Context(), id); err != nil {
-			utils.HandleError(c, err)
-			return
-		}
-	}
-
 	if err := h.instanceService.Delete(id); err != nil {
 		utils.HandleError(c, err)
 		return

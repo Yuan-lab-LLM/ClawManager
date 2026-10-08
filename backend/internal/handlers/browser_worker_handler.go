@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -38,14 +37,6 @@ type browserWorkerDescriptor struct {
 	DisplayHeight int     `json:"display_height,omitempty"`
 }
 
-func browserWorkerNamespace() string {
-	value := strings.TrimSpace(os.Getenv(browserWorkerNamespaceEnv))
-	if value == "" {
-		return "clawmanager-system"
-	}
-	return value
-}
-
 func browserWorkerBase(instanceID int) string {
 	return fmt.Sprintf("/api/v1/instances/%d/browser-proxy", instanceID)
 }
@@ -54,13 +45,13 @@ func browserWorkerCookieName(instanceID int) string {
 	return fmt.Sprintf("cm_browser_worker_%d", instanceID)
 }
 
-func browserWorkerTarget(instanceID int) *url.URL {
+func browserWorkerTarget(instanceID int, namespace string) *url.URL {
 	return &url.URL{
 		Scheme: "http",
 		Host: fmt.Sprintf(
 			"clawbrowser-%d.%s.svc.cluster.local:%d",
 			instanceID,
-			browserWorkerNamespace(),
+			namespace,
 			browserWorkerPort,
 		),
 	}
@@ -72,8 +63,8 @@ func browserWorkerSupported(instance *models.Instance) bool {
 		strings.EqualFold(strings.TrimSpace(instance.InstanceMode), services.InstanceModeLite)
 }
 
-func browserWorkerHealthy(instanceID int) bool {
-	target := browserWorkerTarget(instanceID)
+func browserWorkerHealthy(instanceID int, namespace string) bool {
+	target := browserWorkerTarget(instanceID, namespace)
 	client := &http.Client{
 		Timeout: 3 * time.Second,
 		Transport: &http.Transport{
@@ -84,7 +75,7 @@ func browserWorkerHealthy(instanceID int) bool {
 			return http.ErrUseLastResponse
 		},
 	}
-	response, err := client.Get(target.String() + "/")
+	response, err := client.Get(target.String() + "/healthz")
 	if err != nil {
 		return false
 	}
@@ -118,14 +109,16 @@ func (h *InstanceHandler) describeBrowserWorker(instance *models.Instance) brows
 		descriptor.Reason = "instance_not_running"
 		return descriptor
 	}
-	if !browserWorkerHealthy(instance.ID) {
+	if config.Generation != config.ObservedGeneration || config.Status == models.BrowserWorkerStatusError {
+		descriptor.Reason = "browser_worker_config_pending"
+		return descriptor
+	}
+	if !browserWorkerHealthy(instance.ID, h.browserWorkerService.Namespace()) {
 		descriptor.Reason = "browser_worker_unavailable"
-		_ = h.browserWorkerService.SetObserved(instance.ID, models.BrowserWorkerStatusDegraded, nil)
 		return descriptor
 	}
 	descriptor.Available = true
 	descriptor.Status = models.BrowserWorkerStatusReady
-	_ = h.browserWorkerService.SetObserved(instance.ID, models.BrowserWorkerStatusReady, nil)
 	descriptor.AccessURL = browserWorkerBase(instance.ID) + "/"
 	return descriptor
 }
@@ -266,12 +259,18 @@ func (h *InstanceHandler) ProxyBrowserWorker(c *gin.Context) {
 	c.Request.Header.Del("Authorization")
 	c.Request.Header.Set("X-Forwarded-Prefix", base)
 
-	target := browserWorkerTarget(id)
+	token, err := h.browserWorkerService.AuthToken(c.Request.Context(), id)
+	if err != nil {
+		c.AbortWithStatus(http.StatusServiceUnavailable)
+		return
+	}
+	target := browserWorkerTarget(id, h.browserWorkerService.Namespace())
 	proxy := httputil.NewSingleHostReverseProxy(target)
 	originalDirector := proxy.Director
 	proxy.Director = func(request *http.Request) {
 		originalDirector(request)
 		request.Host = target.Host
+		request.SetBasicAuth("openclaw", token)
 	}
 	proxy.ErrorHandler = func(writer http.ResponseWriter, _ *http.Request, _ error) {
 		writer.Header().Set("Content-Type", "application/json")

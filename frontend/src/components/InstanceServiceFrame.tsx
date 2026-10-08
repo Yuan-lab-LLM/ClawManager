@@ -4,6 +4,7 @@ import { useI18n } from "../contexts/I18nContext";
 import { useInstanceDesktopAccess } from "../hooks/useInstanceDesktopAccess";
 import { useRuntimeCertificateTrust } from "../hooks/useRuntimeCertificateTrust";
 import { prepareOpenClawControlUIStorage } from "../lib/openclawControlStorage";
+import { browserWorkerAccessIsFresh, browserWorkerRenewalDelay, refreshBrowserWorkerAccess } from "../lib/browserWorkerAccess";
 import { instanceService, type BrowserWorkerStatus } from "../services/instanceService";
 import type { InstanceAvailability } from "../types/instance";
 import { HermesLiteServiceFrame } from "./HermesLiteServiceFrame";
@@ -112,6 +113,8 @@ function EmbeddedInstanceServiceFrame({
   const [browserLoading, setBrowserLoading] = useState(false);
   const [browserError, setBrowserError] = useState<string | null>(null);
   const [browserReloadToken, setBrowserReloadToken] = useState(0);
+  const [browserExpiresAt, setBrowserExpiresAt] = useState<string>();
+  const browserRequestInFlight = useRef(false);
   const normalizedType = instanceType?.toLowerCase() ?? "";
   const browserWorkerCandidate =
     normalizedType === "openclaw" && instanceMode?.toLowerCase() === "lite";
@@ -167,8 +170,11 @@ function EmbeddedInstanceServiceFrame({
 
   const openBrowserWorker = useCallback(async (force = false) => {
     setActiveView("browser");
-    if ((!force && browserFrameUrl) || browserLoading) return;
-    setBrowserLoading(true);
+    if (browserRequestInFlight.current) return false;
+    if (!force && browserFrameUrl && browserWorkerAccessIsFresh(browserExpiresAt)) return true;
+    const reloadExpiredFrame = !force && !!browserFrameUrl;
+    browserRequestInFlight.current = true;
+    setBrowserLoading(!browserFrameUrl);
     setBrowserError(null);
     try {
       const access = await instanceService.generateBrowserWorkerAccess(instanceId);
@@ -178,28 +184,41 @@ function EmbeddedInstanceServiceFrame({
       }
       setBrowserWorker(access);
       setBrowserFrameUrl(nextURL);
+      setBrowserExpiresAt(access.expires_at);
+      if (reloadExpiredFrame) setBrowserReloadToken((current) => current + 1);
+      return true;
     } catch (requestError) {
       setBrowserError(
         requestError instanceof Error
           ? requestError.message
           : "Browser Worker is unavailable",
       );
+      setBrowserExpiresAt(undefined);
+      return false;
     } finally {
+      browserRequestInFlight.current = false;
       setBrowserLoading(false);
     }
-  }, [browserFrameUrl, browserLoading, instanceId]);
+  }, [browserExpiresAt, browserFrameUrl, instanceId]);
+
+  useEffect(() => {
+    if (activeView !== "browser" || !isAvailable) return;
+    const delay = browserWorkerRenewalDelay(browserExpiresAt);
+    if (delay === null) return;
+    const timer = window.setTimeout(() => { void openBrowserWorker(true); }, delay);
+    return () => window.clearTimeout(timer);
+  }, [activeView, browserExpiresAt, isAvailable, openBrowserWorker]);
 
   const handleRefresh = useCallback(() => {
     if (activeView === "browser") {
-      if (browserFrameUrl) {
-        setBrowserReloadToken((current) => current + 1);
-      } else {
-        void openBrowserWorker();
-      }
+      void refreshBrowserWorkerAccess(
+        () => openBrowserWorker(true),
+        () => setBrowserReloadToken((current) => current + 1),
+      );
       return;
     }
     void refreshAccess({ forceReload: true });
-  }, [activeView, browserFrameUrl, openBrowserWorker, refreshAccess]);
+  }, [activeView, openBrowserWorker, refreshAccess]);
 
   const handleFullscreen = useCallback(() => {
     const element = frameContainerRef.current;

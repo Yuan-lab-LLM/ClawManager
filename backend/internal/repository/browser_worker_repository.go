@@ -13,6 +13,7 @@ type BrowserWorkerRepository interface {
 	Upsert(config *models.InstanceBrowserWorker) error
 	ListDesired(limit int) ([]models.InstanceBrowserWorker, error)
 	UpdateObserved(instanceID, observedGeneration int, status string, lastError *string) error
+	UpdateStatus(instanceID, generation int, status string, lastError *string) error
 }
 
 type browserWorkerRepository struct{ sess db.Session }
@@ -63,5 +64,11 @@ func (r *browserWorkerRepository) ListDesired(limit int) ([]models.InstanceBrows
 
 func (r *browserWorkerRepository) UpdateObserved(instanceID, observedGeneration int, status string, lastError *string) error {
 	values := map[string]any{"observed_generation": observedGeneration, "status": status, "last_error": lastError, "updated_at": time.Now().UTC()}
-	return r.sess.Collection("instance_browser_workers").Find(db.Cond{"instance_id": instanceID}).Update(values)
+	return r.sess.Collection("instance_browser_workers").Find(db.Cond{"instance_id": instanceID, "generation": observedGeneration}).Update(values)
+}
+
+// A failed or pending reconciliation must not acknowledge the desired generation.
+func (r *browserWorkerRepository) UpdateStatus(instanceID, generation int, status string, lastError *string) error {
+	values := map[string]any{"status": status, "last_error": lastError, "updated_at": time.Now().UTC()}
+	return r.sess.Collection("instance_browser_workers").Find(db.Cond{"instance_id": instanceID, "generation": generation}).Update(values)
 }

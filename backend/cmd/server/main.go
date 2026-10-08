@@ -137,6 +137,7 @@ func main() {
 	services.SetOpenClawTransferRuntimeRepositories(instanceRepo, bindingRepo, runtimePodRepo)
 	runtimeAgentClient := services.NewRuntimeAgentClient(cfg.Runtime.AgentControlToken)
 	runtimeUpgradeService := services.NewRuntimeUpgradeService(database, rolloutRepo, runtimePodRepo, bindingRepo, runtimeAgentClient, cfg.Runtime.WorkspaceRoot, cfg.Runtime.RedisURL)
+	browserWorkerService := services.NewBrowserWorkerService(browserWorkerRepo, instanceRepo, k8s.GetClient())
 	instanceService := services.NewInstanceService(
 		instanceRepo,
 		quotaRepo,
@@ -146,6 +147,7 @@ func main() {
 		services.WithV2RuntimeLifecycle(runtimePodRepo, bindingRepo, runtimeAgentClient, cfg.Runtime.WorkspaceRoot),
 		services.WithRuntimeUpgradeDeletionGuard(runtimeUpgradeService),
 		services.WithExpandedLLMModelCatalog(llmModelService),
+		services.WithInstanceResourceCleanup(browserWorkerService.DeleteForInstance),
 	)
 	externalAccessService := services.NewInstanceExternalAccessService(instanceExternalAccessRepo)
 	var northboundCoreServer *http.Server
@@ -246,16 +248,7 @@ func main() {
 		services.NewInstanceShellService(),
 		services.WithInstanceProxyRuntimeRepositories(instanceRepo, runtimePodRepo, bindingRepo),
 	)
-	browserWorkerService := services.NewBrowserWorkerService(browserWorkerRepo, instanceRepo, k8s.GetClient())
 	instanceHandler.SetBrowserWorkerService(browserWorkerService)
-	go func() {
-		browserWorkerService.ReconcileAll(context.Background())
-		ticker := time.NewTicker(30 * time.Second)
-		defer ticker.Stop()
-		for range ticker.C {
-			browserWorkerService.ReconcileAll(context.Background())
-		}
-	}()
 	hermesDesktopService := services.NewHermesDesktopService(services.HermesDesktopConfig{
 		ControlUIOrigin: services.HermesControlUIOrigin(cfg.Runtime.Namespace, os.Getenv("CLAWMANAGER_CONTROL_UI_ORIGIN")),
 		Enabled:         services.HermesWebEnabled(os.Getenv("CLAWMANAGER_HERMES_DESKTOP_WEB_ENABLED")),
@@ -398,6 +391,7 @@ func main() {
 	defer leaderCancel()
 
 	startBackground := func(ctx context.Context) {
+		go browserWorkerService.Run(ctx, 30*time.Second)
 		log.Printf("Starting leader-only background loops (identity=%s)", cfg.LeaderElection.Identity)
 		syncService.Start()
 		materializeWorker.Start()
