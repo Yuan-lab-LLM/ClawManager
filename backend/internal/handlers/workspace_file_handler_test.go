@@ -63,18 +63,28 @@ func (s *fakeWorkspaceHandlerInstanceService) GetInstanceStatus(instanceID int) 
 func (s *fakeWorkspaceHandlerInstanceService) ForceSyncInstance(instanceID int) error { return nil }
 
 type fakeWorkspaceFileService struct {
-	lastScope   services.WorkspaceFileScope
-	listCalls   int
-	deleteCalls int
-	file        *os.File
-	filename    string
-	size        int64
+	lastScope       services.WorkspaceFileScope
+	listCalls       int
+	searchCalls     int
+	lastSearchQuery string
+	deleteCalls     int
+	file            *os.File
+	filename        string
+	size            int64
 }
 
 func (s *fakeWorkspaceFileService) List(ctx context.Context, scope services.WorkspaceFileScope, relativePath string) ([]services.WorkspaceEntry, error) {
 	s.lastScope = scope
 	s.listCalls++
 	return []services.WorkspaceEntry{{Name: "readme.md", Path: "readme.md", ModifiedAt: time.Unix(1, 0), Previewable: true, Downloadable: true}}, nil
+}
+func (s *fakeWorkspaceFileService) Search(ctx context.Context, scope services.WorkspaceFileScope, query string) ([]services.WorkspaceEntry, error) {
+	s.lastScope = scope
+	s.searchCalls++
+	s.lastSearchQuery = query
+	return []services.WorkspaceEntry{
+		{Name: "readme.md", Path: "docs/readme.md", ModifiedAt: time.Unix(1, 0), Previewable: true, Downloadable: true},
+	}, nil
 }
 func (s *fakeWorkspaceFileService) Preview(ctx context.Context, scope services.WorkspaceFileScope, relativePath string) (*services.WorkspacePreview, error) {
 	s.lastScope = scope
@@ -187,6 +197,42 @@ func TestWorkspaceFileHandlerAdminUsesInstanceOwnerScope(t *testing.T) {
 	}
 	if fileService.lastScope.InstanceID != 77 || fileService.lastScope.UserID != 20 || fileService.lastScope.WorkspacePath != workspacePath {
 		t.Fatalf("scope = %#v, want instance owner scope", fileService.lastScope)
+	}
+}
+
+func TestWorkspaceFileHandlerSearchPassesQueryAndOwnerScope(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	workspacePath := t.TempDir()
+	instanceService := &fakeWorkspaceHandlerInstanceService{instances: map[int]*models.Instance{
+		77: {ID: 77, UserID: 10, WorkspacePath: &workspacePath},
+	}}
+	fileService := &fakeWorkspaceFileService{}
+	handler := NewWorkspaceFileHandler(instanceService, fileService)
+
+	router := workspaceFileTestRouter(10, "user")
+	router.GET("/api/v1/instances/:id/workspace/search", handler.Search)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/instances/77/workspace/search?q=readme", nil)
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s, want 200", rec.Code, rec.Body.String())
+	}
+	if fileService.searchCalls != 1 {
+		t.Fatalf("workspace file service search called %d times, want 1", fileService.searchCalls)
+	}
+	if fileService.lastSearchQuery != "readme" {
+		t.Fatalf("search query = %q, want readme", fileService.lastSearchQuery)
+	}
+	if fileService.lastScope.InstanceID != 77 || fileService.lastScope.UserID != 10 {
+		t.Fatalf("scope = %#v, want instance owner scope", fileService.lastScope)
+	}
+	if !strings.Contains(rec.Body.String(), `"limit":200`) {
+		t.Fatalf("body = %s, want limit 200 in response", rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `docs/readme.md`) {
+		t.Fatalf("body = %s, want search entry in response", rec.Body.String())
 	}
 }
 

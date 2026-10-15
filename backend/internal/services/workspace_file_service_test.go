@@ -93,6 +93,78 @@ func TestWorkspaceFileServiceListHidesTransientSkillTempDirs(t *testing.T) {
 		t.Fatalf("entries = %#v, want only paper-ranker", entries)
 	}
 }
+
+func TestWorkspaceFileServiceSearchRecursivelyMatchesNames(t *testing.T) {
+	root := t.TempDir()
+	layout := []struct {
+		relative string
+		dir      bool
+	}{
+		{relative: "docs", dir: true},
+		{relative: filepath.Join("docs", "README.md")},
+		{relative: filepath.Join("docs", "deep", "notes.txt"), dir: true},
+		{relative: filepath.Join("docs", "deep", "notes.txt", "readme.log")},
+		{relative: filepath.Join("node_modules", "left-pad", "readme.js"), dir: true},
+		{relative: filepath.Join(".git", "readme"), dir: true},
+		{relative: ".tmp", dir: true},
+		{relative: ".tmp-skill-demo"},
+	}
+	for _, item := range layout {
+		target := filepath.Join(root, item.relative)
+		if item.dir {
+			if err := os.MkdirAll(target, 0750); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
+		if err := os.MkdirAll(filepath.Dir(target), 0750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(target, []byte("x"), 0640); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	service := NewWorkspaceFileService(&recordingWorkspaceFileAuditRepo{})
+	entries, err := service.Search(context.Background(), workspaceTestScope(root), "READ")
+	if err != nil {
+		t.Fatalf("Search returned error: %v", err)
+	}
+
+	paths := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		paths = append(paths, entry.Path)
+	}
+	want := strings.Join([]string{
+		filepath.ToSlash(filepath.Join("docs", "deep", "notes.txt", "readme.log")),
+		filepath.ToSlash(filepath.Join("docs", "README.md")),
+	}, ",")
+	if strings.Join(paths, ",") != want {
+		t.Fatalf("search paths = %v, want %v", paths, want)
+	}
+	if entries[0].IsDir {
+		t.Fatalf("entry %#v, want a file", entries[0])
+	}
+	if !entries[0].Previewable || !entries[0].Downloadable {
+		t.Fatalf("entry capabilities = %#v, want previewable and downloadable", entries[0])
+	}
+}
+
+func TestWorkspaceFileServiceSearchEmptyQueryReturnsNoEntries(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "readme.md"), []byte("x"), 0640); err != nil {
+		t.Fatal(err)
+	}
+
+	service := NewWorkspaceFileService(&recordingWorkspaceFileAuditRepo{})
+	entries, err := service.Search(context.Background(), workspaceTestScope(root), "   ")
+	if err != nil {
+		t.Fatalf("Search returned error: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("entries = %#v, want none for empty query", entries)
+	}
+}
 func TestWorkspaceFileServicePreviewTextAndDoesNotAudit(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "notes.md"), []byte("# hello"), 0640); err != nil {

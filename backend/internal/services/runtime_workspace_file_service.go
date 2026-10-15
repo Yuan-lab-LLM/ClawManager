@@ -90,6 +90,34 @@ func (s *runtimeWorkspaceFileService) List(ctx context.Context, scope WorkspaceF
 	return entries, nil
 }
 
+func (s *runtimeWorkspaceFileService) Search(ctx context.Context, scope WorkspaceFileScope, query string) ([]WorkspaceEntry, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return []WorkspaceEntry{}, nil
+	}
+	var response struct {
+		Entries []runtimeWorkspaceEntryPayload `json:"entries"`
+	}
+	if err := s.runJSON(ctx, scope, []string{
+		"python3",
+		"-c",
+		runtimeWorkspaceSearchScript,
+		runtimeWorkspaceBase(scope),
+		query,
+		fmt.Sprintf("%d", WorkspaceSearchMaxResults),
+	}, nil, &response); err != nil {
+		return nil, err
+	}
+	entries := make([]WorkspaceEntry, 0, len(response.Entries))
+	for _, payload := range response.Entries {
+		entries = append(entries, runtimeWorkspaceEntryFromPayload(payload))
+	}
+	return entries, nil
+}
+
 func (s *runtimeWorkspaceFileService) Preview(ctx context.Context, scope WorkspaceFileScope, relativePath string) (*WorkspacePreview, error) {
 	relative, entry, err := s.statFile(ctx, scope, relativePath)
 	if err != nil {
@@ -612,6 +640,52 @@ var runtimeWorkspaceStatEntryScript = runtimeWorkspacePythonPrelude + `
 base = safe_base(sys.argv[1])
 rel, target = target_for(base, sys.argv[2] if len(sys.argv) > 2 else "")
 json_out(entry_payload(base, rel, target))
+`
+
+var runtimeWorkspaceSearchScript = runtimeWorkspacePythonPrelude + `
+base = safe_base(sys.argv[1])
+query = (sys.argv[2] if len(sys.argv) > 2 else "").strip().lower()
+try:
+    max_results = max(1, int(sys.argv[3]) if len(sys.argv) > 3 else 200)
+except ValueError:
+    max_results = 200
+matches = []
+if query:
+    skipped_dirs = {".git", "node_modules"}
+    queue = [base]
+    index = 0
+    while index < len(queue) and len(matches) < max_results:
+        current = queue[index]
+        index += 1
+        try:
+            if not is_subpath(base, os.path.realpath(current)):
+                continue
+            with os.scandir(current) as scan:
+                children = list(scan)
+        except Exception:
+            continue
+        for entry in children:
+            if len(matches) >= max_results:
+                break
+            name = entry.name
+            if name == ".tmp" or name.startswith(".tmp-skill-") or entry.is_symlink():
+                continue
+            child_path = os.path.join(current, name)
+            try:
+                real = os.path.realpath(child_path)
+                if not is_subpath(base, real):
+                    continue
+            except Exception:
+                continue
+            if query in name.lower():
+                try:
+                    child_rel = os.path.relpath(child_path, base).replace(os.sep, "/")
+                except Exception:
+                    continue
+                matches.append(entry_payload(base, child_rel, child_path))
+            if name not in skipped_dirs and entry.is_dir(follow_symlinks=False):
+                queue.append(child_path)
+json_out({"entries": matches})
 `
 
 var runtimeWorkspaceStreamFileScript = runtimeWorkspacePythonPrelude + `
