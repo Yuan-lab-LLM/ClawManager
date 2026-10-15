@@ -1726,6 +1726,8 @@ export const translations: Record<Locale, TranslationTree> = {
     common: {
       loading: "Loading...",
       logout: "Logout",
+      collapseSidebar: "Collapse sidebar",
+      expandSidebar: "Expand sidebar",
       admin: "Admin",
       user: "User",
       comingSoon: "Coming Soon",
@@ -3497,6 +3499,8 @@ export const translations: Record<Locale, TranslationTree> = {
     common: {
       loading: "加载中...",
       logout: "退出登录",
+      collapseSidebar: "收起侧栏",
+      expandSidebar: "展开侧栏",
       admin: "管理员",
       user: "用户",
       comingSoon: "即将上线",
@@ -5180,6 +5184,8 @@ export const translations: Record<Locale, TranslationTree> = {
     common: {
       loading: "読み込み中...",
       logout: "ログアウト",
+      collapseSidebar: "サイドバーを折りたたむ",
+      expandSidebar: "サイドバーを展開",
       admin: "管理者",
       user: "ユーザー",
       comingSoon: "近日公開",
@@ -6783,6 +6789,8 @@ export const translations: Record<Locale, TranslationTree> = {
     common: {
       loading: "불러오는 중...",
       logout: "로그아웃",
+      collapseSidebar: "사이드바 접기",
+      expandSidebar: "사이드바 펼치기",
       admin: "관리자",
       user: "사용자",
       comingSoon: "곧 제공 예정",
@@ -8366,6 +8374,8 @@ export const translations: Record<Locale, TranslationTree> = {
     common: {
       loading: "Lädt...",
       logout: "Abmelden",
+      collapseSidebar: "Seitenleiste einklappen",
+      expandSidebar: "Seitenleiste ausklappen",
       admin: "Admin",
       user: "Benutzer",
       comingSoon: "Demnächst verfügbar",
