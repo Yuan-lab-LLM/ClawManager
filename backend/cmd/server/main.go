@@ -484,6 +484,7 @@ func main() {
 			ieiSystem.GET("/lifecycle-operations/:operationID", ieiSystemHandler.GetSessionLifecycleOperation)
 			ieiSystem.POST("/instances/:id/access", ieiSystemHandler.GenerateInstanceAccess)
 			ieiSystem.GET("/instances/:id/workspace/files", ieiSystemHandler.ListWorkspace)
+			ieiSystem.GET("/instances/:id/workspace/search", ieiSystemHandler.SearchWorkspace)
 			ieiSystem.GET("/instances/:id/workspace/preview", ieiSystemHandler.PreviewWorkspace)
 			ieiSystem.GET("/instances/:id/workspace/download", ieiSystemHandler.DownloadWorkspace)
 			ieiSystem.POST("/instances/:id/workspace/upload", ieiSystemHandler.UploadWorkspace)
@@ -496,6 +497,7 @@ func main() {
 		{
 			sharedInstances.GET("/:code/session", instanceHandler.GetSharedInstanceSession)
 			sharedInstances.GET("/:code/workspace/files", workspaceFileHandler.SharedList)
+			sharedInstances.GET("/:code/workspace/search", workspaceFileHandler.SharedSearch)
 			sharedInstances.GET("/:code/workspace/preview", workspaceFileHandler.SharedPreview)
 			sharedInstances.GET("/:code/workspace/download", workspaceFileHandler.SharedDownload)
 			sharedInstances.POST("/:code/workspace/upload", workspaceFileHandler.SharedUpload)
@@ -604,6 +606,7 @@ func main() {
 			instances.POST("/:id/external-access/password/reset", instanceHandler.ResetExternalAccessPassword)
 			instances.DELETE("/:id/external-access", instanceHandler.DisableExternalAccess)
 			instances.GET("/:id/workspace/files", workspaceFileHandler.List)
+			instances.GET("/:id/workspace/search", workspaceFileHandler.Search)
 			instances.GET("/:id/workspace/preview", workspaceFileHandler.Preview)
 			instances.GET("/:id/workspace/download", workspaceFileHandler.Download)
 			instances.POST("/:id/workspace/upload", workspaceFileHandler.Upload)

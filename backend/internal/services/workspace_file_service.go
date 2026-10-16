@@ -65,6 +65,7 @@ type WorkspacePreview struct {
 
 type WorkspaceFileService interface {
 	List(ctx context.Context, scope WorkspaceFileScope, relativePath string) ([]WorkspaceEntry, error)
+	Search(ctx context.Context, scope WorkspaceFileScope, query string) ([]WorkspaceEntry, error)
 	Preview(ctx context.Context, scope WorkspaceFileScope, relativePath string) (*WorkspacePreview, error)
 	OpenPreview(ctx context.Context, scope WorkspaceFileScope, relativePath string) (*os.File, string, int64, error)
 	OpenDownload(ctx context.Context, scope WorkspaceFileScope, relativePath string) (io.ReadCloser, string, int64, error)
@@ -149,6 +150,96 @@ func (s *workspaceFileService) List(ctx context.Context, scope WorkspaceFileScop
 		return left < right
 	})
 	return entries, nil
+}
+
+// WorkspaceSearchMaxResults caps recursive filename search results so a huge
+// workspace cannot produce an unbounded response or an endless walk.
+const WorkspaceSearchMaxResults = 200
+
+// workspaceSearchSkippedDirs are dependency/VCS directories excluded from
+// recursive search traversal to keep the walk fast and the results relevant.
+var workspaceSearchSkippedDirs = map[string]struct{}{
+	".git":         {},
+	"node_modules": {},
+}
+
+// Search recursively matches workspace entry names against query
+// (case-insensitive substring) and returns up to WorkspaceSearchMaxResults
+// entries with paths relative to the workspace root. The walk is best-effort:
+// directories that cannot be opened are skipped instead of failing the search.
+func (s *workspaceFileService) Search(ctx context.Context, scope WorkspaceFileScope, query string) ([]WorkspaceEntry, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	query = strings.ToLower(strings.TrimSpace(query))
+	if query == "" {
+		return []WorkspaceEntry{}, nil
+	}
+	root, err := openWorkspaceRoot(scope.WorkspacePath)
+	if err != nil {
+		return nil, err
+	}
+	defer root.Close()
+
+	results := make([]WorkspaceEntry, 0, WorkspaceSearchMaxResults)
+	var walk func(relativePath string) error
+	walk = func(relativePath string) error {
+		if len(results) >= WorkspaceSearchMaxResults {
+			return nil
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		dir, err := root.Open(workspaceRootName(relativePath))
+		if err != nil {
+			return nil
+		}
+		items, readErr := dir.ReadDir(-1)
+		closeErr := dir.Close()
+		if readErr != nil || closeErr != nil {
+			return nil
+		}
+		for _, item := range items {
+			if len(results) >= WorkspaceSearchMaxResults {
+				return nil
+			}
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			if isWorkspaceTransientEntry(item.Name()) || item.Type()&os.ModeSymlink != 0 {
+				continue
+			}
+			itemInfo, infoErr := item.Info()
+			if infoErr != nil {
+				continue
+			}
+			childRelative := joinWorkspaceRelative(relativePath, item.Name())
+			if strings.Contains(strings.ToLower(item.Name()), query) {
+				results = append(results, buildWorkspaceEntry(childRelative, itemInfo))
+			}
+			if itemInfo.IsDir() {
+				if _, skip := workspaceSearchSkippedDirs[item.Name()]; skip {
+					continue
+				}
+				if err := walk(childRelative); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	}
+	if err := walk(""); err != nil {
+		return nil, err
+	}
+	sort.Slice(results, func(i, j int) bool {
+		left := strings.ToLower(results[i].Path)
+		right := strings.ToLower(results[j].Path)
+		if left == right {
+			return results[i].Path < results[j].Path
+		}
+		return left < right
+	})
+	return results, nil
 }
 
 func (s *workspaceFileService) Preview(ctx context.Context, scope WorkspaceFileScope, relativePath string) (*WorkspacePreview, error) {

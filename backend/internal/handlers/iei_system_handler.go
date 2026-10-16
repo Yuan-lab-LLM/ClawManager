@@ -486,6 +486,10 @@ func (h *IEISystemHandler) ListWorkspace(c *gin.Context) {
 	h.handleWorkspace(c, (*WorkspaceFileHandler).List)
 }
 
+func (h *IEISystemHandler) SearchWorkspace(c *gin.Context) {
+	h.handleWorkspace(c, (*WorkspaceFileHandler).Search)
+}
+
 func (h *IEISystemHandler) PreviewWorkspace(c *gin.Context) {
 	h.handleWorkspace(c, (*WorkspaceFileHandler).Preview)
 }
