@@ -31,6 +31,14 @@ func Error(c *gin.Context, status int, message string) {
 func HandleError(c *gin.Context, err error) {
 	// Log the actual error for debugging
 	log.Printf("[ERROR] %v", err)
+	var coded interface {
+		ErrorCode() string
+		HTTPStatus() int
+	}
+	if errors.As(err, &coded) {
+		c.JSON(coded.HTTPStatus(), gin.H{"success": false, "error": err.Error(), "error_code": coded.ErrorCode()})
+		return
+	}
 
 	// Handle validation errors
 	if validationErrors, ok := err.(validator.ValidationErrors); ok {

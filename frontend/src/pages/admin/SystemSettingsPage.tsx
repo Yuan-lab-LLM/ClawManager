@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, KeyRound, Pencil, Plus, Rocket, Save, ShieldCheck, Trash2 } from 'lucide-react';
 import AdminLayout from '../../components/AdminLayout';
+import UpgradeRecoveryActions from '../../components/UpgradeRecoveryActions';
 import { useI18n } from '../../contexts/I18nContext';
 import PasswordSettingsSection from '../../components/PasswordSettingsSection';
 import {
@@ -504,6 +505,28 @@ const SystemSettingsPage: React.FC = () => {
   }, []);
 
 	useEffect(() => {
+		let cancelled = false;
+		const restoreRollout = async () => {
+			try {
+				const recent = await runtimePoolService.listRollouts();
+				// Preflight records are previews, not running upgrades; restoring one
+				// as active would disable confirmation indefinitely after a reload.
+				const active = recent.find((item) => ['pending', 'running'].includes(item.status));
+				const latest = active ?? recent[0];
+				if (!latest || cancelled) return;
+				const details = await runtimePoolService.getRollout(latest.id);
+				if (cancelled) return;
+				setRolloutDetails((current) => current ?? details);
+				if (active) setActiveRolloutId((current) => current ?? active.id);
+			} catch {
+				// Rollout history is supplementary; settings remain usable when unavailable.
+			}
+		};
+		void restoreRollout();
+		return () => { cancelled = true; };
+	}, []);
+
+	useEffect(() => {
 		if (!activeRolloutId) {
 			return undefined;
 		}
@@ -801,6 +824,16 @@ const SystemSettingsPage: React.FC = () => {
     } finally {
 		if (!activeRolloutId) setRolloutSaving(false);
     }
+  };
+
+  const preflightHealthyInstances = async () => {
+    if (!rolloutImage.trim()) {setRolloutError('请先填写目标镜像'); return;}
+    setRolloutSaving(true);
+    try {
+      const result = await runtimePoolService.preflightOpenClawRollout({target_image_ref:rolloutImage.trim(),batch_size:rolloutBatchSize,max_unavailable:0,auto_rollback:true});
+      setRolloutPreflight(result);setRolloutError(result.passed?null:result.blockers.join('；'));
+    } catch(error) {setRolloutError(getErrorMessage(error,'正常实例预检失败'));}
+    finally {setRolloutSaving(false);}
   };
 
   const renderRuntimeCard = (card: EditableImageCard) => (
@@ -1127,6 +1160,7 @@ const SystemSettingsPage: React.FC = () => {
               <input
                 type="text"
                 value={rolloutImage}
+                data-upgrade-target-image
                 onChange={(event) => { setRolloutImage(event.target.value); setRolloutPreflight(null); setRolloutError(null); }}
                 className="app-input mt-1 block w-full"
                 placeholder={rolloutRuntimeType === 'openclaw'
@@ -1187,16 +1221,41 @@ const SystemSettingsPage: React.FC = () => {
 			<div className="mt-4 rounded-md border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
 			  <div className="font-medium">
 				升级 #{rolloutDetails.rollout.id}：{rolloutDetails.rollout.status} / {rolloutDetails.rollout.phase}
+				{rolloutDetails.items.some((item) => item.recovery_status === 'needs_attention') && <span className="ml-2 text-red-700">恢复受阻，需要处理（升级隔离仍保留）</span>}
 			  </div>
 			  <div className="mt-1">
 				目标：<span className="font-mono break-all">{rolloutDetails.rollout.target_image_ref}</span>
 			  </div>
 			  <div className="mt-1">
-				实例 {rolloutDetails.items.length} 个；已验证 {rolloutDetails.items.filter((item) => ['gateway_verified', 'verified'].includes(item.state)).length} 个；已恢复 {rolloutDetails.items.filter((item) => ['restored', 'restart_ready'].includes(item.state)).length} 个。
+				{rolloutDetails.pool_progress ? <>运行池 {rolloutDetails.pool_progress.completed} / {rolloutDetails.pool_progress.targets.length} 已更新；当前：{rolloutDetails.pool_progress.targets[rolloutDetails.pool_progress.completed]?.Name ?? '等待最终验证'}</> : <>实例 {rolloutDetails.items.length} 个；Gateway 已验证 {rolloutDetails.items.filter((item) => !item.isolated_at&&['gateway_verified', 'verified'].includes(item.state)).length} 个；等待恢复 {rolloutDetails.items.filter((item) => !item.isolated_at&&['migrated', 'restart_ready'].includes(item.state)).length} 个；数据已回退 {rolloutDetails.items.filter((item) => item.state === 'restored').length} 个。</>}
 			  </div>
-			  {rolloutDetails.rollout.rollback_status && <div className="mt-1">自动回退：{rolloutDetails.rollout.rollback_status}</div>}
+			  {rolloutDetails.items.some(item=>item.isolated_at)&&<div className="mt-2 font-medium text-amber-800" data-upgrade-partial>已隔离 {rolloutDetails.items.filter(item=>item.isolated_at).length} 个实例，数据保留；其余实例{rolloutDetails.rollout.status==='finished'?'已完成升级':'继续升级'}。</div>}
+			  {rolloutDetails.rollout.rollback_status && <div className="mt-1">自动回退：{rolloutDetails.rollout.rollback_status==='not_needed'?'未修改实例，无需回退':rolloutDetails.rollout.rollback_status}</div>}
+			  {rolloutDetails.execution && <div className="mt-2 rounded border border-blue-100 bg-white/70 px-3 py-2">
+				<div>并发上限：检查 {rolloutDetails.execution.check} · 迁移 {rolloutDetails.execution.migrate} · 启动 {rolloutDetails.execution.start} · 回退 {rolloutDetails.execution.restore}；{rolloutDetails.execution.version >= 1 ? `每批最多 ${rolloutDetails.rollout.batch_size ?? 1} 个实例` : '旧版计划兼容模式'}。</div>
+				<div className="mt-1">当前处理中 {rolloutDetails.items.filter(item => !item.isolated_at&&item.operation_deadline_at && new Date(item.operation_deadline_at).getTime() > Date.now()).length} 个；待检查 {rolloutDetails.items.filter(item => !item.isolated_at&&['pending', 'prepared'].includes(item.state) && !item.operation_deadline_at).length} 个；检查通过 {rolloutDetails.items.filter(item => !item.isolated_at&&item.state === 'compatibility_checked').length} 个。</div>
+				<div className="mt-1">同一 Team 的 Worker 优先；本次参与升级的实例迁移校验通过后才激活目标 Runtime。失败组单独隔离，旧 Runtime 缺少操作防重能力时自动串行。</div>
+			  </div>}
 			  {(rolloutDetails.rollout.error_message || rolloutDetails.rollout.rollback_error) && (
-				<div className="mt-2 text-red-700">{rolloutDetails.rollout.error_message || rolloutDetails.rollout.rollback_error}</div>
+				<div className="mt-2 text-red-700">{rolloutDetails.rollout.error_message}{rolloutDetails.rollout.rollback_error && <div className="mt-1">回退恢复：{rolloutDetails.rollout.rollback_error}</div>}</div>
+			  )}
+			  {rolloutDetails.items.length > 0 && (
+				<div className="mt-3 max-h-48 overflow-y-auto rounded-md border border-blue-100 bg-white/80">
+				  {rolloutDetails.items.map((item) => (
+					<div key={item.id} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 border-b border-blue-100 px-3 py-2 text-sm last:border-b-0">
+					  <span>实例 #{item.instance_id}{item.team_id ? ` · Team #${item.team_id}` : ''}</span>
+					  <span className="font-medium">{({ migrated: '迁移完成，等待恢复', restart_ready: '等待启动验证', gateway_verified: 'Gateway 已验证', verified: '升级验收完成', restored: '数据已回退，待恢复验证' } as Record<string, string>)[item.state] ?? item.state}{item.recovery_status ? ` · ${({ pending: '等待启动', starting: '启动中', retrying: '等待重试', needs_attention: '需要处理', verified: '已验证' } as Record<string, string>)[item.recovery_status] ?? item.recovery_status}` : ''}</span>
+					  {!!item.restart_attempts && <span className="w-full">启动尝试：{item.restart_attempts} 次</span>}
+					  {item.operation_deadline_at && <span className="w-full">{new Date(item.operation_deadline_at).getTime() > Date.now() ? '处理中' : '等待核对执行状态'}：{({ compatibility_check: '兼容检查', session_migration: '数据迁移', gateway_restart: '启动验证', rollback_restore: '数据回退' } as Record<string,string>)[item.operation_phase ?? ''] ?? item.operation_phase} · 第 {item.operation_attempts} 次调度{item.operation_started_at ? ` · 开始于 ${new Date(item.operation_started_at).toLocaleTimeString()}` : ''}</span>}
+					  {item.restart_next_retry_at && <span className="w-full">下次重试：{new Date(item.restart_next_retry_at).toLocaleString()}</span>}
+					  {item.error_message && <span className="w-full text-red-700">{item.error_message}</span>}
+					  {item.operation_next_retry_at&&<span className="w-full">暂时性故障，已重试 {item.operation_failures??0} 次；下次检查：{new Date(item.operation_next_retry_at).toLocaleString()}</span>}
+					  {item.operation_last_error&&item.operation_last_error!==item.error_message&&<span className="w-full text-red-700">最近原因：{item.operation_last_error}</span>}
+					  {item.isolated_at&&<span className="w-full font-medium text-amber-800">已隔离，数据保留{['pending','prepared','compatibility_checked'].includes(item.state)?'，原版本继续运行':item.recovery_status==='source_restored'?'，已恢复原版本':'，等待单独修复'}。</span>}
+					  {rolloutDetails.rollout.runtime_type==='openclaw'&&(rolloutDetails.rollout.status==='error'||(item.isolated_at&&rolloutDetails.rollout.status==='finished'))&&<UpgradeRecoveryActions instanceId={item.instance_id} targetImage={rolloutImage} onUpgradeOthers={()=>void preflightHealthyInstances()} />}
+					</div>
+				  ))}
+				</div>
 			  )}
 			</div>
 		  )}
@@ -1210,6 +1269,20 @@ const SystemSettingsPage: React.FC = () => {
               </div>
               {rolloutPreflight.warnings.length > 0 && <div className="mt-2">提示：{rolloutPreflight.warnings.join('；')}</div>}
               {rolloutPreflight.blockers.length > 0 && <div className="mt-2">阻断：{rolloutPreflight.blockers.join('；')}</div>}
+              {!!rolloutPreflight.isolated?.length&&<div className="mt-3 space-y-2" data-upgrade-isolation>
+                <div className="font-medium">已隔离 {rolloutPreflight.isolated.length} 个实例，本次不参与升级；数据和必要旧运行环境保留。</div>
+                {rolloutPreflight.isolated.map(item=><div key={item.instance_id}>实例 #{item.instance_id}{item.team_id?` · Team #${item.team_id}`:''}<UpgradeRecoveryActions instanceId={item.instance_id} targetImage={rolloutImage}/></div>)}
+                {rolloutPreflight.passed&&<div>其余 {rolloutPreflight.instance_count} 个实例预检通过，可确认升级；隔离实例修复后再重新加入。</div>}
+              </div>}
+              {!!rolloutPreflight.unavailable?.length&&<div className="mt-3 space-y-2">
+                {rolloutPreflight.unavailable.map(item=><div key={item.instance_id}><div className="mb-1">实例 #{item.instance_id}{item.team_id?` · Team #${item.team_id}`:''}：{item.reason}</div><UpgradeRecoveryActions instanceId={item.instance_id} targetImage={rolloutImage}/></div>)}
+                <button type="button" className="app-button-secondary" disabled={rolloutSaving||activeRolloutId!==null} onClick={()=>{
+                  if(!window.confirm('暂缓这些实例及其所属 Team，保留它们的数据和必要旧运行环境，只重新预检其他实例。确认继续？'))return;
+                  setRolloutSaving(true);
+                  void runtimePoolService.preflightOpenClawRollout({target_image_ref:rolloutImage.trim(),batch_size:rolloutBatchSize,max_unavailable:0,auto_rollback:true,exclude_instance_ids:[...new Set([...(rolloutPreflight.excluded_instance_ids??[]),...(rolloutPreflight.unavailable??[]).map(item=>item.instance_id)])]}).then(result=>{setRolloutPreflight(result);setRolloutError(result.passed?null:result.blockers.join('；'))}).catch(error=>setRolloutError(getErrorMessage(error,'重新预检失败'))).finally(()=>setRolloutSaving(false));
+                }}>暂缓故障范围，预检其他实例</button>
+              </div>}
+			  {!!rolloutPreflight.excluded_instance_ids?.length&&<div className="mt-2">本次暂缓：{rolloutPreflight.excluded_instance_ids.map(id=>`#${id}`).join('、')}，数据及必要旧运行环境保留。</div>}
 			  {rolloutPreflight.rollout?.plan_fingerprint && <div className="mt-2 font-mono text-xs break-all">审计指纹：{rolloutPreflight.rollout.plan_fingerprint}</div>}
             </div>
           )}

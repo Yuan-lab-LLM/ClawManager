@@ -157,6 +157,8 @@ func (r *runtimePodRepository) TryClaimSlot(ctx context.Context, podID int64) (b
 		UPDATE runtime_pods
 		SET used_slots = used_slots + 1, updated_at = ?
 		WHERE id = ? AND state = 'ready' AND draining = 0 AND used_slots < capacity
+		AND NOT EXISTS (SELECT 1 FROM runtime_rollouts rr
+		  WHERE rr.runtime_type = runtime_pods.runtime_type AND rr.status IN ('pending','running'))
 	`, time.Now().UTC(), podID)
 	if err != nil {
 		return false, fmt.Errorf("failed to claim runtime pod slot: %w", err)

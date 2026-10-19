@@ -130,6 +130,9 @@ func (c *usernameMigrationConn) QueryContext(_ context.Context, query string, ar
 	if query == "SELECT DATABASE() AS name" {
 		return &usernameMigrationRows{columns: []string{"name"}, values: [][]driver.Value{{"username_migration_test"}}}, nil
 	}
+	if strings.Contains(query, "SELECT GET_LOCK(") {
+		return &usernameMigrationRows{columns: []string{"locked"}, values: [][]driver.Value{{int64(1)}}}, nil
+	}
 	if strings.Contains(query, "SELECT filename FROM schema_migrations") {
 		entries, err := embeddedMigrations.ReadDir("migrations")
 		if err != nil {

@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -368,9 +369,13 @@ func (r *instanceRepository) filteredByUserID(userID int, filter models.Instance
 		}
 	}
 	if value := strings.ToLower(strings.TrimSpace(filter.Query)); value != "" {
+		id, _ := strconv.Atoi(strings.TrimPrefix(value, "#"))
+		if strings.HasPrefix(value, "#") {
+			return result.And(db.Cond{"id": id})
+		}
 		pattern := "%" + value + "%"
 		result = result.And(`(
-			LOWER(name) LIKE ? OR LOWER(type) LIKE ? OR LOWER(instance_mode) LIKE ? OR
+			id = ? OR LOWER(name) LIKE ? OR LOWER(type) LIKE ? OR LOWER(instance_mode) LIKE ? OR
 			EXISTS (
 				SELECT 1
 				FROM team_members tm
@@ -378,7 +383,7 @@ func (r *instanceRepository) filteredByUserID(userID int, filter models.Instance
 				WHERE tm.instance_id = instances.id
 				  AND (LOWER(t.name) LIKE ? OR LOWER(tm.display_name) LIKE ? OR LOWER(tm.member_key) LIKE ? OR LOWER(tm.role) LIKE ?)
 			)
-		)`, pattern, pattern, pattern, pattern, pattern, pattern, pattern)
+		)`, id, pattern, pattern, pattern, pattern, pattern, pattern, pattern)
 	}
 	return result
 }
@@ -387,6 +392,38 @@ func (r *instanceRepository) GetFilteredByUserID(userID int, filter models.Insta
 	var instances []models.Instance
 	if err := r.filteredByUserID(userID, filter).OrderBy("-created_at", "-id").Offset(offset).Limit(limit).All(&instances); err != nil {
 		return nil, fmt.Errorf("failed to get filtered instances: %w", err)
+	}
+	if len(instances) > 0 {
+		ids := make([]int, 0, len(instances))
+		for _, item := range instances {
+			ids = append(ids, item.ID)
+		}
+		var bindings []models.InstanceRuntimeBinding
+		if err := r.sess.Collection("instance_runtime_bindings").Find(db.Cond{"instance_id IN": ids}).All(&bindings); err != nil {
+			return nil, err
+		}
+		var agents []models.InstanceAgent
+		if err := r.sess.Collection("instance_agents").Find(db.Cond{"instance_id IN": ids}).All(&agents); err != nil {
+			return nil, err
+		}
+		last := map[int]*time.Time{}
+		for _, b := range bindings {
+			if b.LastHealthAt != nil && (last[b.InstanceID] == nil || b.LastHealthAt.After(*last[b.InstanceID])) {
+				last[b.InstanceID] = b.LastHealthAt
+			}
+		}
+		for _, a := range agents {
+			if a.LastHeartbeatAt != nil && (last[a.InstanceID] == nil || a.LastHeartbeatAt.After(*last[a.InstanceID])) {
+				last[a.InstanceID] = a.LastHeartbeatAt
+			}
+		}
+		for i := range instances {
+			instances[i].LastOnlineAt = last[instances[i].ID]
+			if instances[i].RuntimeErrorMessage != nil {
+				message := models.SanitizeInstanceError(*instances[i].RuntimeErrorMessage)
+				instances[i].RuntimeErrorMessage = &message
+			}
+		}
 	}
 	return instances, nil
 }
@@ -718,15 +755,34 @@ func buildV2SchedulerInstanceQuery(statuses []string, limit int) (string, []any)
 }
 
 func (r *instanceRepository) UpdateRuntimeState(ctx context.Context, id int, status string, generation int, message *string) error {
+	return r.updateRuntimeStateWithCode(ctx, id, status, generation, message, nil)
+}
+
+// Optional capability keeps old repository adapters compatible. The code and
+// message are committed atomically with the existing generation fence.
+func (r *instanceRepository) UpdateRuntimeFailure(ctx context.Context, id, generation int, message, code string) error {
+	return r.updateRuntimeStateWithCode(ctx, id, "error", generation, &message, &code)
+}
+
+func (r *instanceRepository) FenceRuntimeRestart(ctx context.Context, id, expectedGeneration int) (bool, error) {
+	result, err := r.sess.SQL().ExecContext(ctx, `UPDATE instances SET status = 'stopped', runtime_generation = runtime_generation + 1, runtime_error_message = NULL, runtime_error_code = NULL, updated_at = ? WHERE id = ? AND runtime_generation = ? AND status IN ('running','stopped','error') AND EXISTS (SELECT 1 FROM llm_models WHERE is_active = 1)`, time.Now().UTC(), id, expectedGeneration)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	return rows == 1, err
+}
+
+func (r *instanceRepository) updateRuntimeStateWithCode(ctx context.Context, id int, status string, generation int, message, code *string) error {
 	res, err := r.sess.SQL().ExecContext(ctx, `
 		UPDATE instances
-		SET status = ?, runtime_generation = ?, runtime_error_message = ?, updated_at = ?
+		SET status = ?, runtime_generation = ?, runtime_error_message = ?, runtime_error_code = ?, updated_at = ?
 		WHERE id = ? AND runtime_generation <= ?
 		  AND (
 			status <> ? OR runtime_generation <> ? OR
-			NOT (runtime_error_message <=> ?)
+			NOT (runtime_error_message <=> ?) OR NOT (runtime_error_code <=> ?)
 		  )
-	`, status, generation, message, time.Now().UTC(), id, generation, status, generation, message)
+	`, status, generation, message, code, time.Now().UTC(), id, generation, status, generation, message, code)
 	if err != nil {
 		return fmt.Errorf("failed to update instance runtime state: %w", err)
 	}
@@ -840,7 +896,7 @@ func (r *instanceRepository) PromoteResetReplacement(ctx context.Context, source
 	name = strings.TrimSpace(name)
 	quarantineOwner = strings.TrimSpace(quarantineOwner)
 	quarantineName = strings.TrimSpace(quarantineName)
-	if owner == "" || name == "" || quarantineOwner == "" || quarantineName == "" {
+	if name == "" || quarantineOwner == "" || quarantineName == "" {
 		return fmt.Errorf("invalid factory-reset replacement identity")
 	}
 	return r.sess.TxContext(ctx, func(tx db.Session) error {

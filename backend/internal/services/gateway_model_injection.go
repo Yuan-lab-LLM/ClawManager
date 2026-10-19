@@ -2,6 +2,7 @@ package services
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -9,6 +10,11 @@ import (
 )
 
 const managedAutoModelRef = "auto/auto"
+
+// ErrModelConfigurationRequired is a configuration failure, not a pool or
+// capacity failure. Keep the message for older API consumers; callers should
+// classify it using errors.Is rather than inspecting wrapped text.
+var ErrModelConfigurationRequired = &runtimeFailure{code: "MODEL_CONFIGURATION_REQUIRED", cause: errors.New("no active models are configured")}
 
 var openCodeBuiltInProviders = []string{
 	"openai",
@@ -153,7 +159,7 @@ func (s *instanceService) listGatewayModels() ([]models.LLMModel, error) {
 		return nil, fmt.Errorf("failed to list active models: %w", err)
 	}
 	if len(items) == 0 {
-		return nil, fmt.Errorf("no active models are configured")
+		return nil, ErrModelConfigurationRequired
 	}
 	return items, nil
 }

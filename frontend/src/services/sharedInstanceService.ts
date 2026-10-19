@@ -53,8 +53,8 @@ export function createSharedWorkspaceService(
       return response.data.data.entries;
     },
 
-    async search(_instanceId: number, query: string): Promise<WorkspaceSearchResponse> {
-      const response = await sharedAPI.get(`${base}/search`, { params: { q: query } });
+    async search(_instanceId: number, query: string, limit?: number): Promise<WorkspaceSearchResponse> {
+      const response = await sharedAPI.get(`${base}/search`, { params: { q: query, ...(limit ? { limit } : {}) } });
       return response.data.data;
     },
 

@@ -67,6 +67,7 @@ type fakeWorkspaceFileService struct {
 	listCalls       int
 	searchCalls     int
 	lastSearchQuery string
+	lastSearchLimit int
 	deleteCalls     int
 	file            *os.File
 	filename        string
@@ -78,10 +79,11 @@ func (s *fakeWorkspaceFileService) List(ctx context.Context, scope services.Work
 	s.listCalls++
 	return []services.WorkspaceEntry{{Name: "readme.md", Path: "readme.md", ModifiedAt: time.Unix(1, 0), Previewable: true, Downloadable: true}}, nil
 }
-func (s *fakeWorkspaceFileService) Search(ctx context.Context, scope services.WorkspaceFileScope, query string) ([]services.WorkspaceEntry, error) {
+func (s *fakeWorkspaceFileService) Search(ctx context.Context, scope services.WorkspaceFileScope, query string, limit int) ([]services.WorkspaceEntry, error) {
 	s.lastScope = scope
 	s.searchCalls++
 	s.lastSearchQuery = query
+	s.lastSearchLimit = limit
 	return []services.WorkspaceEntry{
 		{Name: "readme.md", Path: "docs/readme.md", ModifiedAt: time.Unix(1, 0), Previewable: true, Downloadable: true},
 	}, nil
@@ -233,6 +235,57 @@ func TestWorkspaceFileHandlerSearchPassesQueryAndOwnerScope(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), `docs/readme.md`) {
 		t.Fatalf("body = %s, want search entry in response", rec.Body.String())
+	}
+}
+
+func TestWorkspaceFileHandlerSearchLimitParam(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	workspacePath := t.TempDir()
+	instanceService := &fakeWorkspaceHandlerInstanceService{instances: map[int]*models.Instance{
+		77: {ID: 77, UserID: 10, WorkspacePath: &workspacePath},
+	}}
+	fileService := &fakeWorkspaceFileService{}
+	handler := NewWorkspaceFileHandler(instanceService, fileService)
+
+	router := workspaceFileTestRouter(10, "user")
+	router.GET("/api/v1/instances/:id/workspace/search", handler.Search)
+
+	// Explicit limit is passed through to the service and echoed back.
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/instances/77/workspace/search?q=readme&limit=50", nil)
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s, want 200", rec.Code, rec.Body.String())
+	}
+	if fileService.lastSearchLimit != 50 {
+		t.Fatalf("search limit = %d, want 50", fileService.lastSearchLimit)
+	}
+	if !strings.Contains(rec.Body.String(), `"limit":50`) {
+		t.Fatalf("body = %s, want limit 50 in response", rec.Body.String())
+	}
+
+	// Limits above the ceiling are clamped.
+	fileService.lastSearchLimit = 0
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/instances/77/workspace/search?q=readme&limit=99999", nil)
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s, want 200", rec.Code, rec.Body.String())
+	}
+	if fileService.lastSearchLimit != services.WorkspaceSearchLimitCeiling {
+		t.Fatalf("search limit = %d, want ceiling %d", fileService.lastSearchLimit, services.WorkspaceSearchLimitCeiling)
+	}
+
+	// An invalid limit falls back to the default.
+	fileService.lastSearchLimit = 0
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/instances/77/workspace/search?q=readme&limit=abc", nil)
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s, want 200", rec.Code, rec.Body.String())
+	}
+	if fileService.lastSearchLimit != services.WorkspaceSearchMaxResults {
+		t.Fatalf("search limit = %d, want default %d", fileService.lastSearchLimit, services.WorkspaceSearchMaxResults)
 	}
 }
 

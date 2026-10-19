@@ -40,6 +40,7 @@ var (
 
 type WorkspaceFileScope struct {
 	InstanceID        int
+	TeamID            int
 	UserID            int
 	WorkspacePath     string
 	AuditActionPrefix string
@@ -65,7 +66,7 @@ type WorkspacePreview struct {
 
 type WorkspaceFileService interface {
 	List(ctx context.Context, scope WorkspaceFileScope, relativePath string) ([]WorkspaceEntry, error)
-	Search(ctx context.Context, scope WorkspaceFileScope, query string) ([]WorkspaceEntry, error)
+	Search(ctx context.Context, scope WorkspaceFileScope, query string, limit int) ([]WorkspaceEntry, error)
 	Preview(ctx context.Context, scope WorkspaceFileScope, relativePath string) (*WorkspacePreview, error)
 	OpenPreview(ctx context.Context, scope WorkspaceFileScope, relativePath string) (*os.File, string, int64, error)
 	OpenDownload(ctx context.Context, scope WorkspaceFileScope, relativePath string) (io.ReadCloser, string, int64, error)
@@ -76,7 +77,9 @@ type WorkspaceFileService interface {
 }
 
 type workspaceFileService struct {
-	auditRepo repository.WorkspaceFileAuditRepository
+	auditRepo     repository.WorkspaceFileAuditRepository
+	teamAuditRepo repository.TeamWorkspaceFileAuditRepository
+	mutationGuard WorkspaceUpgradeMutationGuard
 }
 
 func NewWorkspaceFileService(auditRepo repository.WorkspaceFileAuditRepository) WorkspaceFileService {
@@ -152,9 +155,26 @@ func (s *workspaceFileService) List(ctx context.Context, scope WorkspaceFileScop
 	return entries, nil
 }
 
-// WorkspaceSearchMaxResults caps recursive filename search results so a huge
-// workspace cannot produce an unbounded response or an endless walk.
+// WorkspaceSearchMaxResults is the default cap for recursive filename search
+// results when the request does not ask for a specific limit.
 const WorkspaceSearchMaxResults = 200
+
+// WorkspaceSearchLimitCeiling caps the client-provided search limit so a large
+// request cannot turn the workspace walk or the response unbounded.
+const WorkspaceSearchLimitCeiling = 1000
+
+// NormalizeWorkspaceSearchLimit clamps a client-provided search limit to the
+// supported range: non-positive values fall back to the default and values
+// above the ceiling are truncated.
+func NormalizeWorkspaceSearchLimit(limit int) int {
+	if limit <= 0 {
+		return WorkspaceSearchMaxResults
+	}
+	if limit > WorkspaceSearchLimitCeiling {
+		return WorkspaceSearchLimitCeiling
+	}
+	return limit
+}
 
 // workspaceSearchSkippedDirs are dependency/VCS directories excluded from
 // recursive search traversal to keep the walk fast and the results relevant.
@@ -164,10 +184,12 @@ var workspaceSearchSkippedDirs = map[string]struct{}{
 }
 
 // Search recursively matches workspace entry names against query
-// (case-insensitive substring) and returns up to WorkspaceSearchMaxResults
-// entries with paths relative to the workspace root. The walk is best-effort:
-// directories that cannot be opened are skipped instead of failing the search.
-func (s *workspaceFileService) Search(ctx context.Context, scope WorkspaceFileScope, query string) ([]WorkspaceEntry, error) {
+// (case-insensitive substring) and returns up to limit entries with paths
+// relative to the workspace root; limit is clamped via
+// NormalizeWorkspaceSearchLimit. The walk is best-effort: directories that
+// cannot be opened are skipped instead of failing the search.
+func (s *workspaceFileService) Search(ctx context.Context, scope WorkspaceFileScope, query string, limit int) ([]WorkspaceEntry, error) {
+	limit = NormalizeWorkspaceSearchLimit(limit)
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -181,10 +203,10 @@ func (s *workspaceFileService) Search(ctx context.Context, scope WorkspaceFileSc
 	}
 	defer root.Close()
 
-	results := make([]WorkspaceEntry, 0, WorkspaceSearchMaxResults)
+	results := make([]WorkspaceEntry, 0, limit)
 	var walk func(relativePath string) error
 	walk = func(relativePath string) error {
-		if len(results) >= WorkspaceSearchMaxResults {
+		if len(results) >= limit {
 			return nil
 		}
 		if err := ctx.Err(); err != nil {
@@ -200,7 +222,7 @@ func (s *workspaceFileService) Search(ctx context.Context, scope WorkspaceFileSc
 			return nil
 		}
 		for _, item := range items {
-			if len(results) >= WorkspaceSearchMaxResults {
+			if len(results) >= limit {
 				return nil
 			}
 			if err := ctx.Err(); err != nil {
@@ -488,7 +510,7 @@ func appendWorkspaceDirectoryToArchive(ctx context.Context, root *os.Root, relat
 	return nil
 }
 
-func (s *workspaceFileService) Upload(ctx context.Context, scope WorkspaceFileScope, relativeDir string, filename string, reader io.Reader, size int64) (*WorkspaceEntry, error) {
+func (s *workspaceFileService) upload(ctx context.Context, scope WorkspaceFileScope, relativeDir string, filename string, reader io.Reader, size int64) (*WorkspaceEntry, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -572,7 +594,7 @@ func (s *workspaceFileService) Upload(ctx context.Context, scope WorkspaceFileSc
 	return &entry, nil
 }
 
-func (s *workspaceFileService) Mkdir(ctx context.Context, scope WorkspaceFileScope, relativePath string) (*WorkspaceEntry, error) {
+func (s *workspaceFileService) mkdir(ctx context.Context, scope WorkspaceFileScope, relativePath string) (*WorkspaceEntry, error) {
 	if isWorkspaceRootRelative(relativePath) {
 		return nil, ErrWorkspaceRootOperation
 	}
@@ -609,7 +631,7 @@ func (s *workspaceFileService) Mkdir(ctx context.Context, scope WorkspaceFileSco
 	return &entry, nil
 }
 
-func (s *workspaceFileService) Rename(ctx context.Context, scope WorkspaceFileScope, oldPath, newPath string) (*WorkspaceEntry, error) {
+func (s *workspaceFileService) rename(ctx context.Context, scope WorkspaceFileScope, oldPath, newPath string) (*WorkspaceEntry, error) {
 	if isWorkspaceRootRelative(oldPath) || isWorkspaceRootRelative(newPath) {
 		return nil, ErrWorkspaceRootOperation
 	}
@@ -654,7 +676,7 @@ func (s *workspaceFileService) Rename(ctx context.Context, scope WorkspaceFileSc
 	return &entry, nil
 }
 
-func (s *workspaceFileService) Delete(ctx context.Context, scope WorkspaceFileScope, relativePath string) error {
+func (s *workspaceFileService) delete(ctx context.Context, scope WorkspaceFileScope, relativePath string) error {
 	if isWorkspaceRootRelative(relativePath) {
 		return ErrWorkspaceRootOperation
 	}
@@ -703,6 +725,12 @@ func (s *workspaceFileService) openExistingFile(ctx context.Context, scope Works
 }
 
 func (s *workspaceFileService) recordAudit(ctx context.Context, scope WorkspaceFileScope, action, relativePath string, bytes int64) error {
+	if scope.TeamID != 0 {
+		if s.teamAuditRepo == nil {
+			return nil
+		}
+		return s.teamAuditRepo.Create(ctx, &models.TeamWorkspaceFileAudit{TeamID: scope.TeamID, UserID: scope.UserID, Action: strings.TrimSpace(scope.AuditActionPrefix) + action, RelativePath: relativePath, Bytes: bytes, CreatedAt: time.Now().UTC()})
+	}
 	if s.auditRepo == nil {
 		return nil
 	}
@@ -734,7 +762,7 @@ func buildWorkspaceEntry(relativePath string, info os.FileInfo) WorkspaceEntry {
 }
 
 func isWorkspaceTransientEntry(name string) bool {
-	return name == ".tmp" || strings.HasPrefix(name, ".tmp-skill-")
+	return name == ".tmp" || strings.HasPrefix(name, ".tmp-skill-") || name == ".clawmanager-editor-lock" || strings.HasPrefix(name, ".clawmanager-edit-")
 }
 
 func workspaceEntryPreviewable(name string, size int64, isDir bool) bool {
@@ -749,6 +777,9 @@ func workspaceEntryPreviewable(name string, size int64, isDir bool) bool {
 }
 
 func workspacePreviewKind(name string, size int64) (string, string, bool, int64) {
+	if workspaceTextName(name) {
+		return "text", "text/plain; charset=utf-8", true, textPreviewMaxBytes
+	}
 	ext := strings.ToLower(filepath.Ext(name))
 	switch ext {
 	case ".txt", ".md", ".json", ".yaml", ".yml", ".log", ".py", ".js", ".ts", ".go", ".sh":

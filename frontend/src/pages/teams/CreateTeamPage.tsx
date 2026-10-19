@@ -4,6 +4,8 @@ import OpenClawConfigPlanSection, {
   type OpenClawInjectionMode,
 } from "../../components/OpenClawConfigPlanSection";
 import UserLayout from "../../components/UserLayout";
+import TeamBadge, { TeamIconPicker } from '../../components/teams/TeamBadge';
+import { resolveTeamIcon } from '../../lib/teamIcons';
 import {
   systemSettingsService,
   type SystemImageSetting,
@@ -54,6 +56,8 @@ const memberTemplateFromCustom = (
     memberId: member.memberId,
     name: member.displayName,
     role: member.role,
+    iconKey: member.autoIconKey || member.iconKey,
+    iconOverride: member.iconOverride,
     runtimeType: "openclaw",
     instanceMode: "lite",
     description: member.summary || member.mission,
@@ -643,6 +647,7 @@ const CreateTeamPage: React.FC = () => {
         return {
           member_id: normalizedMemberId,
           name: displayNameForMember(member),
+          icon_key: resolveTeamIcon({leader:member.isLeader,iconKey:member.iconKey,override:member.iconOverride,profileKey:member.agentProfileKey,role:effectiveMemberRole(member),name:displayNameForMember(member),tags:member.roleProfile?.capability_tags}),
           role: effectiveMemberRole(member),
           mode: FIXED_INSTANCE_MODE,
           instance_mode: FIXED_INSTANCE_MODE,
@@ -935,8 +940,9 @@ const CreateTeamPage: React.FC = () => {
                         <div className="text-xs font-medium text-gray-500 lg:hidden">
                           显示名称
                         </div>
-                        <div className="text-gray-900">
-                          {displayNameForMember(member)}
+                        <div className="flex items-center gap-2 text-gray-900">
+                          {member.isLeader ? <TeamBadge iconKey="leader" size="preview" /> : <TeamIconPicker label={`${displayNameForMember(member)}职能图标`} value={member.iconOverride} autoKey={resolveTeamIcon({iconKey:member.iconKey,profileKey:member.agentProfileKey,role:effectiveMemberRole(member),name:displayNameForMember(member),tags:member.roleProfile?.capability_tags})} disabled={submitting} onChange={value=>setMembers(current=>current.map(item=>item.id===member.id?{...item,iconOverride:value}:item))} />}
+                          <span>{displayNameForMember(member)}</span>
                         </div>
                       </div>
                       <div>

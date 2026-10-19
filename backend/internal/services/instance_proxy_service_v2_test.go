@@ -110,9 +110,13 @@ func TestSetOpenClawRuntimeForwardedClientTrustBoundary(t *testing.T) {
 			req.RemoteAddr = test.remoteAddr
 			req.Header.Set("X-Real-IP", test.realIP)
 			req.Header.Set("X-Forwarded-For", test.forwarded)
+			req.Header.Set("Forwarded", "for=203.0.113.99;proto=https")
 			header := req.Header.Clone()
 
 			setOpenClawRuntimeForwardedClient(header, req)
+			if header.Get("Forwarded") != "" {
+				t.Fatal("caller Forwarded header survived reconstruction")
+			}
 
 			if got := header.Get("X-Forwarded-For"); got != test.want {
 				t.Fatalf("X-Forwarded-For = %q, want %q", got, test.want)

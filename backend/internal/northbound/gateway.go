@@ -3,6 +3,7 @@ package northbound
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/url"
@@ -109,6 +110,14 @@ func (c *CoreClient) Forward(ginContext *gin.Context, principal Principal) error
 			ginContext.Header(header, value)
 		}
 	}
+	if principal.AuthType == "api_key" && response.StatusCode == http.StatusAccepted {
+		var op struct {
+			ID string `json:"operation_id"`
+		}
+		if json.Unmarshal(responseBody, &op) == nil {
+			ginContext.Set("northboundOperationID", op.ID)
+		}
+	}
 	ginContext.Data(response.StatusCode, response.Header.Get("Content-Type"), responseBody)
 	return nil
 }
@@ -163,7 +172,11 @@ func (l *FixedWindowLimiter) AllowLimit(key string, limit int) bool {
 func DynamicRateLimit(limiter *FixedWindowLimiter, provider RuntimeSettingsProvider, limit func(*models.NorthboundAdminSettings) int, key func(*gin.Context) string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		settings := provider.Current()
-		if !limiter.AllowLimit(key(c), limit(settings)) {
+		allowed := limiter.AllowLimit(key(c), limit(settings))
+		if p := currentPrincipal(c); p != nil && p.AuthType == "api_key" && allowed {
+			allowed = limiter.AllowLimit("api-key:"+strconv.Itoa(p.UserID)+":"+p.KeyID, limit(settings))
+		}
+		if !allowed {
 			c.Header("Retry-After", "60")
 			writeError(c, apiError(429, "RATE_LIMITED", "Too many requests", nil))
 			c.Abort()
@@ -244,9 +257,21 @@ func RejectSuspiciousRequest() gin.HandlerFunc {
 			c.Abort()
 			return
 		}
-		for _, header := range []string{"Authorization", "Content-Type", "Idempotency-Key"} {
+		for _, header := range []string{"Authorization", "X-API-Key", "Content-Type", "Idempotency-Key"} {
 			if len(c.Request.Header.Values(header)) > 1 {
 				writeError(c, apiError(400, "INVALID_REQUEST", "Duplicate security-sensitive header", nil))
+				c.Abort()
+				return
+			}
+		}
+		if _, present := c.Request.Header["X-Api-Key"]; present {
+			if len(c.Request.Header.Values("Authorization")) > 0 {
+				writeError(c, apiError(400, "INVALID_REQUEST", "Use exactly one authentication credential", nil))
+				c.Abort()
+				return
+			}
+			if requestPath == "/api/northbound/v1/auth/challenge" || requestPath == "/api/northbound/v1/auth/login" || requestPath == "/api/northbound/v1/auth/refresh" {
+				writeError(c, apiError(400, "AUTH_METHOD_UNSUPPORTED", "API keys call business endpoints directly", nil))
 				c.Abort()
 				return
 			}
@@ -339,8 +364,10 @@ func RegisterGatewayRoutes(router *gin.Engine, auth *AuthHandler, core *CoreClie
 	}{
 		{"/lite-instances/:id/restart", ScopeLiteRestart},
 		{"/lite-instances/:id/reset", ScopeLiteReset},
+		{"/lite-instances/:id/delete", ScopeLiteDelete},
 		{"/pro-instances/:id/restart", ScopeProRestart},
 		{"/pro-instances/:id/reset", ScopeProReset},
+		{"/pro-instances/:id/delete", ScopeProDelete},
 	} {
 		route := route
 		resources.POST(route.path, RequireScope(route.scope), createRate, func(c *gin.Context) {
@@ -371,6 +398,11 @@ func RegisterGatewayRoutes(router *gin.Engine, auth *AuthHandler, core *CoreClie
 		}
 	})
 	resources.GET("/lite-instances/:id", RequireScope(ScopeLiteRead), queryRateLimit, func(c *gin.Context) {
+		if err := core.Forward(c, *currentPrincipal(c)); err != nil {
+			writeError(c, err)
+		}
+	})
+	resources.GET("/owners/usage", RequireScope(ScopeOwnerUsageRead), queryRateLimit, func(c *gin.Context) {
 		if err := core.Forward(c, *currentPrincipal(c)); err != nil {
 			writeError(c, err)
 		}
@@ -416,7 +448,7 @@ func RegisterGatewayRoutes(router *gin.Engine, auth *AuthHandler, core *CoreClie
 			writeError(c, err)
 		}
 	})
-	resources.GET("/operations/:id", RequireAnyScope(ScopeLiteCreate, ScopeLiteRead, ScopeProCreate, ScopeProRead, ScopeLiteRestart, ScopeLiteReset, ScopeProRestart, ScopeProReset), queryRateLimit, func(c *gin.Context) {
+	resources.GET("/operations/:id", RequireAnyScope(ScopeLiteCreate, ScopeLiteRead, ScopeProCreate, ScopeProRead, ScopeLiteRestart, ScopeLiteReset, ScopeLiteDelete, ScopeProRestart, ScopeProReset, ScopeProDelete), queryRateLimit, func(c *gin.Context) {
 		if err := core.Forward(c, *currentPrincipal(c)); err != nil {
 			writeError(c, err)
 		}

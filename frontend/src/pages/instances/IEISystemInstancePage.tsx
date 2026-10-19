@@ -1,9 +1,11 @@
 import axios from "axios";
 import { ArrowLeft, Maximize2, Minimize2, RefreshCw, RotateCw, ShieldAlert } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useLocation, useParams } from "react-router-dom";
+import { ownerOverviewURL } from "../../lib/ownerPortalNavigation";
 import { WorkspaceFileManager } from "../../components/WorkspaceFileManager";
 import { useExpiringResourceRenewal } from "../../hooks/useExpiringResourceRenewal";
+import { useOwnerActivity } from "../../hooks/useOwnerActivity";
 import { useRuntimeCertificateTrust } from "../../hooks/useRuntimeCertificateTrust";
 import { refreshDedicatedRuntimeCookie } from "../../lib/instanceAccess";
 import { prepareOpenClawControlUIStorage } from "../../lib/openclawControlStorage";
@@ -13,6 +15,9 @@ import {
   type IEISystemInstance,
   type IEISystemInstanceAccess,
 } from "../../services/ieiSystemService";
+
+// Preserve the personal branch's capability boundary: this Runtime cannot CAS-save text.
+const workBuddyWorkspaceService = { ...ieiSystemWorkspaceService, readText: undefined, saveText: undefined };
 
 function resolveEmbedUrl(url: string) {
   if (/^https?:\/\//i.test(url)) return url;
@@ -41,17 +46,23 @@ function wait(milliseconds: number) {
   return new Promise<void>((resolve) => window.setTimeout(resolve, milliseconds));
 }
 
+function instanceDisplayName(instance: IEISystemInstance) {
+  return instance.alias?.trim() || instance.name;
+}
+
 export default function IEISystemInstancePage() {
   const { id = "" } = useParams<{ id: string }>();
   const instanceID = Number(id);
-  const listReturnURL = Number.isInteger(instanceID) && instanceID > 0
-    ? `/ieisystem/list-instances?selected_instance_id=${instanceID}`
-    : "/ieisystem/list-instances";
+  const location = useLocation();
+  const returnSearch = location.state?.portalReturnSearch;
+  const listReturnURL = ownerOverviewURL(instanceID,typeof returnSearch==='string'?returnSearch:'');
   const frameContainerRef = useRef<HTMLElement | null>(null);
   const [instance, setInstance] = useState<IEISystemInstance | null>(null);
   const [access, setAccess] = useState<IEISystemInstanceAccess | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [runtimeError, setRuntimeError] = useState<string | null>(null);
+  const requestRef = useRef(0);
   const [frameVersion, setFrameVersion] = useState(0);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [restartDialogOpen, setRestartDialogOpen] = useState(false);
@@ -59,6 +70,7 @@ export default function IEISystemInstancePage() {
   const [restartNotice, setRestartNotice] = useState<string | null>(null);
   const [restartError, setRestartError] = useState<string | null>(null);
   const mountedRef = useRef(true);
+  const {onFrameLoad,activityNote}=useOwnerActivity(instanceID,instance?.status==='running'&&!restartInProgress);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -68,6 +80,7 @@ export default function IEISystemInstancePage() {
   }, []);
 
   const openInstance = useCallback(async () => {
+    const request = ++requestRef.current;
     if (!Number.isInteger(instanceID) || instanceID <= 0) {
       setError("实例编号无效。");
       setLoading(false);
@@ -75,18 +88,34 @@ export default function IEISystemInstancePage() {
     }
     setLoading(true);
     setError(null);
+    setRuntimeError(null);
     try {
       // Both calls validate the dedicated IEI session and owner relationship.
       const nextInstance = await ieiSystemService.getInstance(instanceID);
+      if (request !== requestRef.current || !mountedRef.current) return;
       setInstance(nextInstance);
-      const nextAccess = await ieiSystemService.generateAccess(instanceID);
-      setAccess(nextAccess);
-      setFrameVersion((version) => version + 1);
+      setAccess(null);
+      try {
+        const nextAccess = await ieiSystemService.generateAccess(instanceID);
+        if (request !== requestRef.current || !mountedRef.current) return;
+        setAccess(nextAccess);
+        setFrameVersion((version) => version + 1);
+      } catch (accessError) {
+        if (request !== requestRef.current || !mountedRef.current) return;
+        if (axios.isAxiosError(accessError) && [401,403,404].includes(accessError.response?.status ?? 0)) {
+          setInstance(null);
+          setError("访问验证失效，请返回列表重新登录或确认实例权限。");
+        } else {
+          setRuntimeError(nextInstance.status === "stopped" ? "实例已停止，运行界面暂不可用。" : nextInstance.status === "error" ? "实例运行异常，暂时无法连接运行界面。" : "暂时无法连接运行界面，请稍后重新连接。");
+        }
+      }
     } catch (openError) {
+      if (request !== requestRef.current || !mountedRef.current) return;
+      setInstance(null);
       setAccess(null);
       setError(errorMessage(openError));
     } finally {
-      setLoading(false);
+      if (request === requestRef.current && mountedRef.current) setLoading(false);
     }
   }, [instanceID]);
 
@@ -182,6 +211,7 @@ export default function IEISystemInstancePage() {
         const nextAccess = await ieiSystemService.generateAccess(instanceID);
         if (!mountedRef.current) return;
         setAccess(nextAccess);
+        setRuntimeError(null);
         setFrameVersion((version) => version + 1);
         return;
       }
@@ -214,7 +244,7 @@ export default function IEISystemInstancePage() {
     }
   };
 
-  if (loading && !access) {
+  if (loading && (!instance || instance.id !== instanceID)) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-slate-100 text-sm text-slate-600">
         <RefreshCw className="mr-2 h-5 w-5 animate-spin" />
@@ -223,7 +253,7 @@ export default function IEISystemInstancePage() {
     );
   }
 
-  if (!instance || !access || error) {
+  if (!instance || instance.id !== instanceID || error) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-slate-100 p-6">
         <section className="w-full max-w-md rounded-xl border border-red-200 bg-white p-6 text-center shadow-sm">
@@ -231,7 +261,7 @@ export default function IEISystemInstancePage() {
           <p className="mt-2 text-sm leading-6 text-slate-600">{error ?? "访问验证未通过。"}</p>
           <div className="mt-5 flex justify-center gap-2">
             <Link className="app-button-secondary" to={listReturnURL}>
-              <ArrowLeft className="h-4 w-4" /> 返回列表
+              <ArrowLeft className="h-4 w-4" /> 返回我的总览
             </Link>
             <button type="button" className="app-button-primary" onClick={() => void openInstance()}>
               <RefreshCw className="h-4 w-4" /> 重试
@@ -242,25 +272,26 @@ export default function IEISystemInstancePage() {
     );
   }
 
-  const canShowWorkspace = access.workspace_available;
+  const canShowWorkspace = instance.workspace_available ?? access?.workspace_available ?? false;
+  const isWorkBuddyLite = instance.type.trim().toLowerCase() === "workbuddy" && instance.runtime_type === "gateway";
 
   return (
     <main className="flex h-screen min-h-[560px] flex-col overflow-hidden bg-slate-100">
       <header className="flex h-14 shrink-0 items-center justify-between gap-4 border-b border-slate-200 bg-white px-4">
         <div className="flex min-w-0 items-center gap-3">
-          <Link className="cm-icon-button shrink-0" title="返回实例列表" to={listReturnURL}>
+          <Link className="cm-icon-button shrink-0" aria-label="返回我的总览" title="返回我的总览" to={listReturnURL}>
             <ArrowLeft className="h-4 w-4" />
           </Link>
           <div className="min-w-0">
-            <h1 className="truncate text-base font-semibold text-slate-950">{instance.name}</h1>
-            <p className="text-xs text-slate-500">浪潮信息安全访问 · {instance.owner}</p>
+            <h1 className="truncate text-base font-semibold text-slate-950">{instanceDisplayName(instance)}</h1>
+            <p className="truncate text-[10px] text-slate-500" title={activityNote}>浪潮信息安全访问 · {instance.owner} · {activityNote}</p>
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <button
             type="button"
             className="app-button-secondary"
-            disabled={restartInProgress || loading || instance.status.trim().toLowerCase() !== "running"}
+            disabled={restartInProgress || loading || !["running", "error"].includes(instance.status.trim().toLowerCase())}
             onClick={() => {
               setRestartError(null);
               setRestartDialogOpen(true);
@@ -299,7 +330,7 @@ export default function IEISystemInstancePage() {
           style={isFullscreen ? { height: "100vh", width: "100vw", borderRadius: 0 } : undefined}
         >
           <div className="flex h-12 shrink-0 items-center justify-between border-b border-slate-200 px-3">
-            <span className="min-w-0 truncate text-sm font-medium text-slate-950">{instance.name}</span>
+            <span className="min-w-0 truncate text-sm font-medium text-slate-950">{instanceDisplayName(instance)}</span>
             <div className="flex shrink-0 items-center gap-2">
               <button type="button" className="cm-icon-button" title="刷新访问" onClick={() => void openInstance()}>
                 <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
@@ -318,10 +349,18 @@ export default function IEISystemInstancePage() {
               </div>
             </div>
           )}
-          {frameSrc ? (
+          {runtimeError ? (
+            <div className="flex flex-1 flex-col items-center justify-center gap-4 p-6 text-center" role="status">
+              <ShieldAlert className="h-9 w-9 text-amber-500" />
+              <p className="text-base font-semibold text-slate-900">{runtimeError}</p>
+              <p className="max-w-md text-sm leading-6 text-slate-600">工作区独立于运行界面加载。可在右侧检查并修改文件；保存后如需生效，请确认配置并手动重启。</p>
+              <button className="app-button-secondary" disabled={loading} onClick={() => void openInstance()}>重新连接</button>
+            </div>
+          ) : frameSrc ? (
             <iframe
               key={`${frameSrc}:${frameVersion}`}
-              title={`${instance.name} service`}
+              onLoad={event=>onFrameLoad(event.currentTarget)}
+              title={`${instanceDisplayName(instance)} service`}
               src={frameSrc}
               className="min-h-0 w-full flex-1 border-0 bg-white"
               scrolling="no"
@@ -357,10 +396,11 @@ export default function IEISystemInstancePage() {
           <div className="min-h-0 min-w-0">
             <WorkspaceFileManager
               instanceId={instance.id}
-              initialPath={access.workspace_root === "/config" ? "/config" : undefined}
-              service={ieiSystemWorkspaceService}
+              key={instance.id}
+              initialPath={isWorkBuddyLite ? "/home" : (instance.workspace_root ?? access?.workspace_root) === "/config" ? "/config" : undefined}
+              service={isWorkBuddyLite ? workBuddyWorkspaceService : ieiSystemWorkspaceService}
               workspaceKey={`iei:${instance.owner}:${instance.id}`}
-              canWrite
+              canWrite={!restartInProgress && !["creating", "deleting"].includes(instance.status)}
               localeOverride="zh"
             />
           </div>

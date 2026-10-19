@@ -60,6 +60,7 @@ export interface StartRuntimeRolloutRequest {
   max_unavailable: number;
   preflight_id?: string;
   auto_rollback?: boolean;
+  exclude_instance_ids?: number[];
 }
 
 export interface RuntimeRollout {
@@ -69,6 +70,7 @@ export interface RuntimeRollout {
   target_image_digest?: string;
   status: string;
   phase: string;
+  batch_size?: number;
   preflight_id?: string;
   plan_fingerprint?: string;
   auto_rollback: boolean;
@@ -78,6 +80,9 @@ export interface RuntimeRollout {
 }
 
 export interface RuntimeUpgradePreflightResult {
+	isolated?: Array<{instance_id:number;team_id?:number;reason:string}>;
+  unavailable?: Array<{instance_id:number;team_id?:number;reason:string}>;
+  excluded_instance_ids?: number[];
   rollout?: RuntimeRollout;
   strategy: "legacy_rolling" | "openclaw_8plus_data_safe" | string;
   target_image_ref: string;
@@ -95,14 +100,36 @@ export interface RuntimeUpgradePreflightResult {
 }
 
 export interface RuntimeUpgradeItem {
+	isolated_at?: string;
+	isolation_phase?: string;
+	phase_entered_at?: string;
   id: number;
   instance_id: number;
   team_id?: number;
   state: string;
+  operation_phase?: string;
+  operation_started_at?: string;
+  operation_deadline_at?: string;
+  operation_attempts?: number;
+	operation_failures?: number;
+	operation_next_retry_at?: string;
+	operation_last_error?: string;
   error_message?: string;
+  recovery_status?: "pending" | "starting" | "retrying" | "needs_attention" | "verified" | "source_restore_ready" | "source_restored";
+  recovery_error_code?: string;
+  restart_attempts?: number;
+  restart_deadline_at?: string;
+  restart_next_retry_at?: string;
 }
 
 export interface RuntimeUpgradeDetails {
+  execution?: { version: number; check: number; migrate: number; start: number; restore: number };
+  pool_progress?: {
+    version: number;
+    completed: number;
+    applying: boolean;
+    targets: Array<{ Namespace: string; Name: string; Image: string }>;
+  } | null;
   rollout: RuntimeRollout;
   items: RuntimeUpgradeItem[];
   audits: Array<{ id: number; action: string; phase: string; outcome: string; created_at: string }>;

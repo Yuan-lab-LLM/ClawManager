@@ -80,20 +80,16 @@ const AdminDashboard: React.FC = () => {
         setError(null);
 
         const [usersData, instancesData, clusterData] = await Promise.all([
-          userService.getUsers(1, 1000),
-          adminInstanceService.getInstances(1, 1000),
+          userService.getUsers(1, 1),
+          adminInstanceService.getSummary(),
           adminService.getClusterResources(),
         ]);
 
-        const instances = instancesData.instances || [];
-        const runningInstances = instances.filter((instance) => instance.status === 'running').length;
-        const totalStorageGB = instances.reduce((sum, instance) => sum + instance.disk_gb, 0);
-
         setStats({
-          totalUsers: usersData.total || (usersData.users || []).length,
-          totalInstances: instancesData.total || instances.length,
-          runningInstances,
-          totalStorageGB,
+          totalUsers: usersData.total,
+          totalInstances: instancesData.total,
+          runningInstances: instancesData.running,
+          totalStorageGB: instancesData.allocated_storage_gb,
         });
         setClusterResources(clusterData);
       } catch (err: any) {

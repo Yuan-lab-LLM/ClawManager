@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -132,6 +133,7 @@ func workspaceArchiveMaxBytes() int64 {
 
 // InstanceHandler handles instance management requests
 type InstanceHandler struct {
+	batchMutationReservation      func([]int) (func(), error)
 	instanceService               services.InstanceService
 	instanceAgentService          services.InstanceAgentService
 	runtimeStatusService          services.InstanceRuntimeStatusService
@@ -144,6 +146,7 @@ type InstanceHandler struct {
 	openClawConfigService         services.OpenClawConfigService
 	skillService                  services.SkillService
 	externalAccessService         services.InstanceExternalAccessService
+	hermesDesktopActivator        func(context.Context, int, string, string) (*services.HermesDesktopDescriptor, string, error)
 	ieiSSOService                 *services.IEISSOService
 	aiObservabilityService        services.AIObservabilityService
 	browserWorkerService          *services.BrowserWorkerService
@@ -153,6 +156,11 @@ func (h *InstanceHandler) SetBrowserWorkerService(service *services.BrowserWorke
 	if h != nil {
 		h.browserWorkerService = service
 	}
+}
+
+// NewInstanceHandler creates a new instance handler
+func (h *InstanceHandler) SetBatchMutationReservation(reserve func([]int) (func(), error)) {
+	h.batchMutationReservation = reserve
 }
 
 // NewInstanceHandler creates a new instance handler
@@ -194,6 +202,13 @@ func (h *InstanceHandler) SetIEISSOService(service *services.IEISSOService) {
 	if h != nil {
 		h.ieiSSOService = service
 	}
+}
+
+func (h *InstanceHandler) SetHermesDesktopService(service *services.HermesDesktopService) {
+	if h == nil || service == nil {
+		return
+	}
+	h.hermesDesktopActivator = service.ActivateShared
 }
 
 type InstanceRuntimeDetailsResponse struct {
@@ -765,6 +780,14 @@ func (h *InstanceHandler) BatchDeleteLiteInstances(c *gin.Context) {
 
 	seen := map[int]struct{}{}
 	instances := make([]*models.Instance, 0, len(req.InstanceIDs))
+	if h.batchMutationReservation != nil {
+		release, err := h.batchMutationReservation(req.InstanceIDs)
+		if err != nil {
+			utils.Error(c, http.StatusConflict, err.Error())
+			return
+		}
+		defer release()
+	}
 	for _, id := range req.InstanceIDs {
 		if _, exists := seen[id]; exists {
 			continue
@@ -1881,11 +1904,16 @@ func (h *InstanceHandler) validCurrentExternalSession(c *gin.Context, accessToke
 		if h.ieiSSOService == nil {
 			return false
 		}
-		rawSession, err := c.Cookie(ieiSystemSessionCookie)
+		// Instance proxy credentials are redacted from c.Request before the
+		// handler runs so they do not leak into access/recovery logs. Read the
+		// preserved original request here; otherwise every same-origin
+		// IEI-bound token is rejected because the session cookie was removed
+		// from the sanitized request.
+		rawSession, err := originalInstanceProxyRequest(c).Cookie(ieiSystemSessionCookie)
 		if err != nil {
 			return false
 		}
-		session, err := h.ieiSSOService.ValidateSession(rawSession)
+		session, err := h.ieiSSOService.ValidateSession(rawSession.Value)
 		return err == nil && accessToken.SessionBinding == ieiSystemSessionBinding(session.SessionID)
 	}
 	if h.externalAccessService == nil {
@@ -1942,6 +1970,14 @@ func (h *InstanceHandler) proxyInstanceWithToken(c *gin.Context, id int, token s
 	// Check if it's a WebSocket upgrade request
 	if strings.EqualFold(c.GetHeader("Upgrade"), "websocket") {
 		if err := h.proxyService.ProxyWebSocket(c.Request.Context(), id, token, c.Writer, original); err != nil {
+			var coded interface {
+				ErrorCode() string
+				HTTPStatus() int
+			}
+			if errors.As(err, &coded) && !c.Writer.Written() {
+				utils.HandleError(c, err)
+				return
+			}
 			if errors.Is(err, services.ErrInstanceGatewayUnavailable) {
 				http.Error(c.Writer, "Instance gateway is not available", http.StatusServiceUnavailable)
 			} else if errors.Is(err, services.ErrOpenCodeDedicatedOriginRequired) {
@@ -1955,6 +1991,14 @@ func (h *InstanceHandler) proxyInstanceWithToken(c *gin.Context, id int, token s
 
 	// Proxy regular HTTP request
 	if err := h.proxyService.ProxyRequest(c.Request.Context(), id, token, c.Writer, original); err != nil {
+		var coded interface {
+			ErrorCode() string
+			HTTPStatus() int
+		}
+		if errors.As(err, &coded) && !c.Writer.Written() {
+			utils.HandleError(c, err)
+			return
+		}
 		// Log the error
 		fmt.Printf("Proxy error for instance %d: %v\n", id, err)
 
@@ -2574,7 +2618,7 @@ func (h *InstanceHandler) OpenShortExternalAccess(c *gin.Context) {
 		canonicalAccessURL = instanceToken.AccessURL
 	} else {
 		setShortExternalAccessCookies(c, instance.ID, code, token, int(time.Hour.Seconds()))
-		canonicalAccessURL = h.proxyService.GetProxyURLForInstance(instance, "")
+		canonicalAccessURL = h.externalAccessEntryURL(instance)
 	}
 
 	originalPath := c.Request.URL.Path
@@ -2644,6 +2688,41 @@ func (h *InstanceHandler) GetSharedInstanceSession(c *gin.Context) {
 		return
 	}
 	proxyURL := h.proxyService.GetProxyURLForInstance(instance, instanceToken.Token)
+	accessURL := browserAccessEntryURL(instanceToken.AccessURL, proxyURL)
+	sessionExpiresAt := instanceToken.ExpiresAt
+	if isSharedHermesDesktopInstance(instance) {
+		if h.hermesDesktopActivator == nil {
+			utils.Error(c, http.StatusServiceUnavailable, "Hermes Desktop sharing is not configured")
+			return
+		}
+		descriptor, desktopToken, err := h.hermesDesktopActivator(
+			c.Request.Context(),
+			instance.ID,
+			code,
+			sharedExternalAccessSessionBinding(code, access),
+		)
+		if err != nil {
+			hermesDesktopError(c, err)
+			return
+		}
+		if descriptor == nil || !descriptor.Available || descriptor.ExpiresAt == nil || strings.TrimSpace(descriptor.RendererURL) == "" || strings.TrimSpace(desktopToken) == "" {
+			reason := "desktop_unavailable"
+			if descriptor != nil && strings.TrimSpace(descriptor.Reason) != "" {
+				reason = descriptor.Reason
+			}
+			utils.Error(c, http.StatusServiceUnavailable, reason)
+			return
+		}
+		setHermesSessionCookie(
+			c,
+			services.HermesDesktopCookieName(instance.ID),
+			services.HermesDesktopBase(instance.ID)+"/",
+			desktopToken,
+			*descriptor.ExpiresAt,
+		)
+		accessURL = descriptor.RendererURL
+		sessionExpiresAt = *descriptor.ExpiresAt
+	}
 	workspaceAccess, err := services.NormalizeExternalWorkspaceAccess(access.WorkspaceAccess)
 	if err != nil {
 		workspaceAccess = services.ExternalWorkspaceAccessNone
@@ -2664,8 +2743,8 @@ func (h *InstanceHandler) GetSharedInstanceSession(c *gin.Context) {
 			"instance_mode": instance.InstanceMode,
 			"runtime_type":  instance.RuntimeType,
 		},
-		"access_url":          browserAccessEntryURL(instanceToken.AccessURL, proxyURL),
-		"session_expires_at":  instanceToken.ExpiresAt,
+		"access_url":          accessURL,
+		"session_expires_at":  sessionExpiresAt,
 		"share_expires_at":    access.ExpiresAt,
 		"workspace_access":    workspaceAccess,
 		"workspace_available": workspaceAvailable,
@@ -2727,7 +2806,7 @@ func (h *InstanceHandler) requireExternalAccessInstance(c *gin.Context, access *
 }
 
 func (h *InstanceHandler) issueShortExternalAccessToken(c *gin.Context, instance *models.Instance, code string, access *models.InstanceExternalAccess) (*services.AccessToken, bool) {
-	accessURL := h.proxyService.GetProxyURLForInstance(instance, "")
+	accessURL := h.externalAccessEntryURL(instance)
 	if accessURL == "" {
 		utils.Error(c, http.StatusServiceUnavailable, "Unable to generate access URL")
 		return nil, false
@@ -2750,6 +2829,17 @@ func (h *InstanceHandler) issueShortExternalAccessToken(c *gin.Context, instance
 	}
 	setShortExternalAccessCookies(c, instance.ID, code, instanceToken.Token, int(time.Hour.Seconds()))
 	return instanceToken, true
+}
+
+func (h *InstanceHandler) externalAccessEntryURL(instance *models.Instance) string {
+	if h == nil || h.proxyService == nil || instance == nil {
+		return ""
+	}
+	accessURL := h.proxyService.GetProxyURLForInstance(instance, "")
+	if accessURL == "" && isSharedHermesDesktopInstance(instance) {
+		return sharedHermesDesktopEntryURL(instance.ID)
+	}
+	return accessURL
 }
 
 func (h *InstanceHandler) validShortLinkAccessToken(c *gin.Context, code string, access *models.InstanceExternalAccess) string {
@@ -2865,20 +2955,20 @@ func sharedExternalAccessCSRFToken(code, token string) string {
 }
 
 func sharedExternalAccessSessionBinding(code string, accesses ...*models.InstanceExternalAccess) string {
-	code = strings.Trim(strings.TrimSpace(code), "/")
-	if code == "" {
-		return ""
+	return services.ExternalAccessSessionBinding(code, accesses...)
+}
+
+func isSharedHermesDesktopInstance(instance *models.Instance) bool {
+	if instance == nil || !strings.EqualFold(strings.TrimSpace(instance.RuntimeType), services.RuntimeBackendGateway) {
+		return false
 	}
-	credentialVersion := ""
-	if len(accesses) > 0 && accesses[0] != nil && accesses[0].AuthMode == services.ExternalAccessModePassword && accesses[0].PasswordHash != nil {
-		credentialVersion = strings.TrimSpace(*accesses[0].PasswordHash)
-	}
-	payload := "shared-instance-session\x00" + code
-	if credentialVersion != "" {
-		payload += "\x00" + credentialVersion
-	}
-	sum := sha256.Sum256([]byte(payload))
-	return hex.EncodeToString(sum[:])
+	runtimeType, runtimeOK := services.NormalizeV2RuntimeType(instance.Type)
+	mode, modeOK := services.NormalizeInstanceMode(instance.InstanceMode)
+	return runtimeOK && modeOK && runtimeType == services.RuntimeTypeHermes && mode == services.InstanceModeLite
+}
+
+func sharedHermesDesktopEntryURL(instanceID int) string {
+	return fmt.Sprintf("/hermes-desktop-web/?instance_id=%d", instanceID)
 }
 
 func shortExternalAccessEntryRedirectTarget(method, requestPath, code, canonicalPath string) string {
@@ -2899,10 +2989,17 @@ func shortExternalAccessEntryRedirectTarget(method, requestPath, code, canonical
 		return ""
 	}
 	isInternalProxyPath := strings.HasPrefix(parsed.Path, "/api/v1/instances/")
+	isHermesDesktopRenderer := parsed.Scheme == "" && parsed.Host == "" &&
+		(parsed.Path == "/hermes-desktop-web/" || parsed.Path == "/hermes-desktop-web/index.html") &&
+		len(parsed.Query()) == 1 && len(parsed.Query()["instance_id"]) == 1
+	if isHermesDesktopRenderer {
+		instanceID, err := strconv.Atoi(parsed.Query().Get("instance_id"))
+		isHermesDesktopRenderer = err == nil && instanceID > 0
+	}
 	isDedicatedRuntimeURL := parsed.IsAbs() &&
 		(parsed.Scheme == "https" || parsed.Scheme == "http") &&
 		strings.TrimSpace(parsed.Host) != ""
-	if !isInternalProxyPath && !isDedicatedRuntimeURL {
+	if !isInternalProxyPath && !isHermesDesktopRenderer && !isDedicatedRuntimeURL {
 		return ""
 	}
 	return sharedExternalAccessPagePath(code)

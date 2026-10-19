@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"clawreef/internal/heartbeat"
 	"clawreef/internal/models"
 	"clawreef/internal/repository"
 	"clawreef/internal/services"
@@ -29,7 +30,7 @@ type RuntimePoolHandler struct {
 }
 
 const (
-	runtimePodListFallbackHeartbeatTimeout = 10 * time.Second
+	runtimePodListFallbackHeartbeatTimeout = heartbeat.Timeout
 	runtimePodListStaleWindowMultiplier    = 3
 )
 
@@ -43,10 +44,11 @@ type startRuntimeRolloutRequest struct {
 }
 
 type runtimeUpgradePreflightRequest struct {
-	TargetImageRef string `json:"target_image_ref" binding:"required"`
-	BatchSize      int    `json:"batch_size"`
-	MaxUnavailable int    `json:"max_unavailable"`
-	AutoRollback   *bool  `json:"auto_rollback,omitempty"`
+	TargetImageRef     string `json:"target_image_ref" binding:"required"`
+	BatchSize          int    `json:"batch_size"`
+	MaxUnavailable     int    `json:"max_unavailable"`
+	AutoRollback       *bool  `json:"auto_rollback,omitempty"`
+	ExcludeInstanceIDs []int  `json:"exclude_instance_ids,omitempty"`
 }
 
 type runtimePoolPodListItem struct {
@@ -76,6 +78,7 @@ func (h *RuntimePoolHandler) PreflightOpenClawRollout(c *gin.Context) {
 	result, err := h.upgrade.Preflight(c.Request.Context(), services.RuntimeUpgradePreflightRequest{
 		TargetImageRef: strings.TrimSpace(req.TargetImageRef), BatchSize: req.BatchSize,
 		MaxUnavailable: req.MaxUnavailable, AutoRollback: autoRollback, ActorUserID: currentUserIDPtr(c),
+		ExcludeInstanceIDs: req.ExcludeInstanceIDs,
 	})
 	if err != nil {
 		utils.HandleError(c, err)
@@ -103,7 +106,14 @@ func (h *RuntimePoolHandler) GetRollout(c *gin.Context) {
 		utils.Error(c, http.StatusNotFound, "runtime rollout not found")
 		return
 	}
-	utils.Success(c, http.StatusOK, "Runtime rollout retrieved successfully", details)
+	progress, err := services.LoadRuntimePoolProgress(c.Request.Context(), h.rolloutRepo, id)
+	if err != nil {
+		utils.HandleError(c, err)
+		return
+	}
+	utils.Success(c, http.StatusOK, "Runtime rollout retrieved successfully", gin.H{
+		"rollout": details.Rollout, "items": details.Items, "audits": details.Audits, "pool_progress": progress, "execution": details.Execution,
+	})
 }
 
 func NewRuntimePoolHandler(
@@ -297,12 +307,8 @@ func (h *RuntimePoolHandler) StartRollout(c *gin.Context) {
 		utils.HandleError(c, err)
 		return
 	}
-	if h.scheduler != nil {
-		if err := h.scheduler.StartRollout(c.Request.Context(), rollout.ID); err != nil {
-			utils.HandleError(c, err)
-			return
-		}
-	}
+	// The elected scheduler owns execution. A request on a follower must not
+	// mutate runtime pools concurrently with the leader.
 	h.publish(c.Request.Context(), "runtime_rollout", map[string]any{
 		"rollout_id":       rollout.ID,
 		"runtime_type":     rollout.RuntimeType,
@@ -313,6 +319,36 @@ func (h *RuntimePoolHandler) StartRollout(c *gin.Context) {
 		"started_by":       rollout.StartedBy,
 	})
 	utils.Success(c, http.StatusCreated, "Runtime rollout created successfully", gin.H{"rollout": rollout})
+}
+
+func (h *RuntimePoolHandler) ListRollouts(c *gin.Context) {
+	repo, ok := h.rolloutRepo.(interface {
+		ListRecent(context.Context, string) ([]models.RuntimeRollout, error)
+	})
+	if !ok {
+		utils.Error(c, http.StatusServiceUnavailable, "Runtime rollout history unavailable")
+		return
+	}
+	items, err := repo.ListRecent(c.Request.Context(), strings.TrimSpace(c.Query("runtime_type")))
+	if err != nil {
+		utils.HandleError(c, err)
+		return
+	}
+	active, err := h.rolloutRepo.ListActive(c.Request.Context(), strings.TrimSpace(c.Query("runtime_type")))
+	if err != nil {
+		utils.HandleError(c, err)
+		return
+	}
+	seen := make(map[int64]struct{}, len(items))
+	for _, item := range items {
+		seen[item.ID] = struct{}{}
+	}
+	for _, item := range active {
+		if _, exists := seen[item.ID]; !exists {
+			items = append(items, item)
+		}
+	}
+	utils.Success(c, http.StatusOK, "Runtime rollout history", gin.H{"items": items})
 }
 
 func (h *RuntimePoolHandler) publish(ctx context.Context, eventType string, payload any) {

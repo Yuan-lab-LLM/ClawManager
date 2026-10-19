@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS instances (
   id INT AUTO_INCREMENT PRIMARY KEY,
   user_id INT NOT NULL,
   name VARCHAR(255) NOT NULL,
+  alias VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL,
   description TEXT,
   type ENUM('openclaw', 'ubuntu', 'debian', 'centos', 'custom', 'webtop', 'hermes') DEFAULT 'ubuntu',
   runtime_type ENUM('desktop', 'shell') NOT NULL DEFAULT 'desktop',

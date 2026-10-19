@@ -1,8 +1,10 @@
 package handlers
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 
 	"clawreef/internal/models"
 	"clawreef/internal/services"
@@ -12,6 +14,41 @@ import (
 
 type NorthboundAdminHandler struct {
 	service *services.NorthboundAdminService
+}
+
+func (h *NorthboundAdminHandler) APIKeys(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
+	id, err := strconv.Atoi(c.Query("user_id"))
+	if err != nil || id <= 0 {
+		utils.Error(c, 400, "Invalid user_id")
+		return
+	}
+	result, err := h.service.ListAPIKeys(id)
+	if err != nil {
+		utils.Error(c, 400, err.Error())
+		return
+	}
+	utils.Success(c, 200, "API keys retrieved", result)
+}
+
+func (h *NorthboundAdminHandler) MutateAPIKey(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 16384)
+	var req services.APIKeyMutation
+	if err := c.ShouldBindJSON(&req); err != nil {
+		utils.Error(c, 400, "Invalid API key request")
+		return
+	}
+	result, err := h.service.MutateAPIKey(c.Request.Context(), adminActorID(c), req)
+	if err != nil {
+		status := 400
+		if errors.Is(err, services.ErrNorthboundSettingsConflict) {
+			status = 409
+		}
+		utils.Error(c, status, err.Error())
+		return
+	}
+	utils.Success(c, 200, "API key saved", result)
 }
 
 func NewNorthboundAdminHandler(service *services.NorthboundAdminService) *NorthboundAdminHandler {
@@ -45,6 +82,27 @@ func (h *NorthboundAdminHandler) SaveSettings(c *gin.Context) {
 		return
 	}
 	utils.Success(c, http.StatusOK, "Northbound settings saved", value)
+}
+
+func (h *NorthboundAdminHandler) SaveSettingsSection(c *gin.Context) {
+	var req struct {
+		Version int64                      `json:"version"`
+		Fields  map[string]json.RawMessage `json:"fields"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		utils.ValidationError(c, err)
+		return
+	}
+	result, err := h.service.SaveSettingsSection(c.Request.Context(), adminActorID(c), c.Param("section"), req.Version, req.Fields)
+	if err != nil {
+		status := 400
+		if errors.Is(err, services.ErrNorthboundSettingsConflict) {
+			status = 409
+		}
+		utils.Error(c, status, err.Error())
+		return
+	}
+	utils.Success(c, 200, "Settings section saved", result)
 }
 
 func (h *NorthboundAdminHandler) SaveCaller(c *gin.Context) {

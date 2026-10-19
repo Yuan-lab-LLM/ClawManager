@@ -59,6 +59,7 @@
 
 最近の重要な製品アップデートとドキュメント更新です。
 
+- [2026-10-16] Team ワークスペースを刷新しました。連続コラボレーション型チャット、見やすいメンバー別の表示と職能アバター、共有ファイルのオンライン編集、`@メンバー` による単独タスクに対応します。過去の作業を参照して成果物を修正でき、各依頼は履歴と Kanban に独立して記録されます。[Team ガイド](./docs/team-workspaces-guide_ja.md)を参照してください。
 - [2026-09-08] バージョン対応の事前検証、移行検証、上限付きリカバリ、保存済み移行元 ID によるロールバックを追加し、OpenClaw Lite のデータ安全なロールアウトを強化しました。8.1 能力マーカーを持たない旧イメージは従来のローリング更新経路を継続します。
 - [2026-09-02] Northbound API と Owner 分離 Portal を拡張し、OpenClaw、Hermes、OpenCode、DeepSeek Harness の Lite / Pro 作成、非同期ライフサイクル操作、保護された Share Link 管理に対応しました。[Northbound API Guide](./docs/northbound-api-guide.md) を参照してください。
 - [2026-09-01] LDAP エンタープライズ認証、管理対象 Provider のモデルカタログ拡張、OpenCode と DeepSeek Harness の管理対象インスタンス専用 Browser Origin を追加しました。
@@ -210,13 +211,16 @@ Lifecycle、Status、Restart、Runtime Health、管理操作は [ユーザーマ
 <a id="team-workspaces"></a>
 ### Team コラボレーション
 
-Team は Leader 仲介型の Flow です。8 個の変更不可 Built-in Template または User Custom Template から作成し、OpenClaw Lite Leader が計画、Task 分解、Dispatch、Member Delivery 検証、最終結果の公開を行います。
+Team は 8 個の変更不可の組み込みテンプレート、またはユーザー所有のカスタムテンプレートから作成します。既定の `@Leader` では OpenClaw Lite Leader が計画、作業分担、成果の検証、最終結果の公開を担当します。Worker を `@` で指定すれば、そのメンバーだけで実行するタスクとなり、Leader の取りまとめを待ちません。
 
 - Team ごとに OpenClaw Lite Leader は 1 名、Worker は OpenClaw Lite または Hermes Lite
 - Custom Team は自然言語で生成し、Role ごとに調整、全体再生成、再利用が可能
-- Team Chat は Plan、Assignment、Progress、Review、Delivery、Final Synthesis を記録
-- Execution Kanban は Current Query、Task Breakdown、Delivery State を表示
-- Shared File/Artifact を保持し、Hermes Lite の Native Team Session は Instance View で確認可能
+- 明るい連続コラボレーション型チャットは文字を読みやすくし、メンバーの連続メッセージをまとめつつユーザー・Leader・Worker を区別します。メンバー、作業フロー、ファイルのパネルを展開できます
+- 職能アバターは組み込み／カスタムの役割に自動対応します。Team 作成時やカスタムテンプレート編集時に Worker のアバターをクリックして変更しても、職務や Runtime 設定は変わりません
+- `@` 入力または宛先選択で単独タスクを作成し、過去のタスクを参照して成果物を修正できます。各依頼は独立した履歴と Kanban 項目になります
+- Execution Kanban は依頼、作業項目、受理された成果を表示します。通常の協働は Leader が取りまとめ、単独タスクは選択した Worker の正式な成果提出後に完了します
+- ファイルブラウザーは共有成果物のプレビュー・ダウンロードと対応テキストのオンライン編集を提供します。明示的な保存、リモート変更通知、バージョン競合チェックに対応し、自動保存や複数人のリアルタイム共同編集ではありません
+- Hermes Lite のネイティブ Team セッションはインスタンス画面から確認できます。新機能には対応する ClawManager App と Runtime が必要で、Runtime だけを更新しても Team UI は変わりません
 
 作成、協働段階、結果の確認方法は [Team Workspace Quick Guide](./docs/team-workspaces-guide_ja.md) を参照してください。
 
@@ -245,7 +249,9 @@ Pro モードは各インスタンスに専用 desktop runtime をプロビジ�
 
 ### Team ワークスペース
 
-Team ワークスペースは、左に会話と成果物、右に現在の問い合わせ、タスク分解、状態、成果物詳細を表示します。
+Team ワークスペースは、連続コラボレーション型チャット、職能アバター、展開可能な Execution Kanban とファイルブラウザーを一つの画面にまとめます。既定の Leader 協働に加え、`@メンバー` で成果物の修正を直接依頼でき、共有テキストをオンラインで編集・保存できます。
+
+下の画像は作業フローを説明する旧画面の例です。現行版では上記の連続コラボレーション型レイアウトを使用します。
 
 <p align="center">
   <img src="./docs/main/team-collaboration.png" alt="ClawManager Team ワークスペース" width="100%" />

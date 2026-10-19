@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"clawreef/internal/models"
+	"clawreef/internal/ownerrecords"
 	"clawreef/internal/repository"
 	"clawreef/internal/services/k8s"
 
@@ -28,6 +29,7 @@ import (
 
 // InstanceProxyService handles proxying requests to instance pods
 type InstanceProxyService struct {
+	ownerUsage           *ownerrecords.Store
 	serviceService       *k8s.ServiceService
 	accessService        *InstanceAccessService
 	instanceRepo         repository.InstanceRepository
@@ -41,6 +43,7 @@ type InstanceProxyService struct {
 	cacheMu              sync.RWMutex
 	lookupMu             sync.Mutex
 	serviceTTL           time.Duration
+	proxyPolicy          *RuntimeProxyPolicyCoordinator
 }
 
 type serviceCacheKey struct {
@@ -492,7 +495,7 @@ func (s *InstanceProxyService) ProxyWebSocket(ctx context.Context, instanceID in
 	clientConn.SetReadLimit(instanceProxyWebSocketMaxMessageBytes)
 
 	errCh := make(chan error, 2)
-	pipe := func(dst, src *websocket.Conn) {
+	pipe := func(dst, src *websocket.Conn, upstream bool) {
 		for {
 			messageType, reader, readErr := src.NextReader()
 			if readErr != nil {
@@ -504,10 +507,20 @@ func (s *InstanceProxyService) ProxyWebSocket(ctx context.Context, instanceID in
 				errCh <- writeErr
 				return
 			}
-			if _, copyErr := io.Copy(writer, reader); copyErr != nil {
+			var observed boundedUsageFrame
+			var source io.Reader = reader
+			if s.ownerUsage != nil && accessToken.InstanceType == "openclaw" && messageType == websocket.TextMessage {
+				source = io.TeeReader(reader, &observed)
+			}
+			if _, copyErr := io.Copy(writer, source); copyErr != nil {
 				_ = writer.Close()
 				errCh <- copyErr
 				return
+			}
+			// Persist a bounded submission observation before the final frame is
+			// flushed, so a fast upstream final cannot race its submission record.
+			if len(observed.data) > 0 {
+				s.observeOwnerFrame(instanceID, upstream, &observed)
 			}
 			if closeErr := writer.Close(); closeErr != nil {
 				errCh <- closeErr
@@ -516,8 +529,8 @@ func (s *InstanceProxyService) ProxyWebSocket(ctx context.Context, instanceID in
 		}
 	}
 
-	go pipe(upstreamConn, clientConn)
-	go pipe(clientConn, upstreamConn)
+	go pipe(upstreamConn, clientConn, false)
+	go pipe(clientConn, upstreamConn, true)
 
 	select {
 	case <-ctx.Done():
@@ -619,6 +632,8 @@ func setOpenClawRuntimeForwardedClient(header http.Header, request *http.Request
 	if header == nil || request == nil {
 		return
 	}
+	// Never carry a second, caller-controlled attribution chain alongside XFF.
+	header.Del("Forwarded")
 	peer := parseProxyPeerIP(request.RemoteAddr)
 	client := peer
 	if peer != nil && peer.IsLoopback() {
@@ -962,6 +977,11 @@ func (s *InstanceProxyService) resolveV2ProxyTarget(ctx context.Context, accessT
 	}
 	if pod == nil || pod.PodIP == nil || strings.TrimSpace(*pod.PodIP) == "" || binding.GatewayPort <= 0 {
 		return nil, true, ErrInstanceGatewayUnavailable
+	}
+	if isOpenClawRuntimeType(instance.Type) || strings.EqualFold(instance.Type, RuntimeTypeHermes) {
+		if err := s.proxyPolicy.Ensure(ctx, pod); err != nil {
+			return nil, true, &runtimeFailure{code: "PROXY_POLICY_NOT_READY", cause: fmt.Errorf("proxy policy is not ready: %w", err)}
+		}
 	}
 	scheme := "http"
 	if websocket {

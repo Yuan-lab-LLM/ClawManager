@@ -132,12 +132,17 @@ func (h *WorkspaceFileHandler) Search(c *gin.Context) {
 	if !ok {
 		return
 	}
-	entries, err := service.Search(c.Request.Context(), scope, c.Query("q"))
+	limit, err := strconv.Atoi(c.Query("limit"))
+	if err != nil {
+		limit = 0
+	}
+	limit = services.NormalizeWorkspaceSearchLimit(limit)
+	entries, err := service.Search(c.Request.Context(), scope, c.Query("q"), limit)
 	if err != nil {
 		handleWorkspaceFileError(c, err)
 		return
 	}
-	utils.Success(c, http.StatusOK, "Workspace search completed", gin.H{"entries": entries, "limit": services.WorkspaceSearchMaxResults})
+	utils.Success(c, http.StatusOK, "Workspace search completed", gin.H{"entries": entries, "limit": limit})
 }
 
 func (h *WorkspaceFileHandler) Preview(c *gin.Context) {
@@ -476,6 +481,8 @@ func safeWorkspaceDownloadName(name string) string {
 
 func handleWorkspaceFileError(c *gin.Context, err error) {
 	switch {
+	case errors.Is(err, services.ErrWorkspaceUpgradeBusy):
+		utils.Error(c, http.StatusConflict, err.Error())
 	case errors.Is(err, services.ErrWorkspacePathNotFound):
 		utils.Error(c, http.StatusNotFound, err.Error())
 	case errors.Is(err, services.ErrWorkspacePreviewTooLarge), errors.Is(err, services.ErrWorkspaceUploadTooLarge):

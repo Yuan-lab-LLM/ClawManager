@@ -164,6 +164,7 @@ func (s *runtimeDeploymentService) EnsureUpgradeLabPool(ctx context.Context, nam
 	container := &target.Spec.Template.Spec.Containers[containerIndex]
 	container.Image = strings.TrimSpace(image)
 	upsertEnvVar(container, "CLAWMANAGER_RUNTIME_DEPLOYMENT_NAME", name)
+	upsertEnvVar(container, "CLAWMANAGER_DEPLOYMENT_NAME", name)
 	upsertEnvVar(container, "CLAWMANAGER_RUNTIME_IMAGE_REF", strings.TrimSpace(image))
 	upsertEnvVar(container, "CLAWMANAGER_RUNTIME_IMAGE_DIGEST", runtimeImageDigest(image))
 	upsertEnvVar(container, "CLAWMANAGER_RUNTIME_UPGRADE_ID", runID)
@@ -281,6 +282,7 @@ func (s *runtimeDeploymentService) EnsureUpgradePool(ctx context.Context, namesp
 	container := &target.Spec.Template.Spec.Containers[containerIndex]
 	container.Image = strings.TrimSpace(image)
 	upsertEnvVar(container, "CLAWMANAGER_RUNTIME_DEPLOYMENT_NAME", targetName)
+	upsertEnvVar(container, "CLAWMANAGER_DEPLOYMENT_NAME", targetName)
 	upsertEnvVar(container, "CLAWMANAGER_RUNTIME_IMAGE_REF", strings.TrimSpace(image))
 	upsertEnvVar(container, "CLAWMANAGER_RUNTIME_IMAGE_DIGEST", runtimeImageDigest(image))
 	upsertEnvVar(container, "CLAWMANAGER_RUNTIME_UPGRADE_ID", upgradeID)
@@ -292,6 +294,16 @@ func (s *runtimeDeploymentService) EnsureUpgradePool(ctx context.Context, namesp
 }
 
 func (s *runtimeDeploymentService) SetUpgradePoolActive(ctx context.Context, namespace, sourceName, targetName, upgradeID string, active bool) error {
+	return s.setUpgradePoolActive(ctx, namespace, sourceName, targetName, upgradeID, active, false)
+}
+
+// A scoped upgrade must keep the old pool serving its unselected instances.
+// Scheduling affinity in the controller prevents crossing the data-format boundary.
+func (s *runtimeDeploymentService) SetUpgradePoolActivePreservingSource(ctx context.Context, namespace, sourceName, targetName, upgradeID string) error {
+	return s.setUpgradePoolActive(ctx, namespace, sourceName, targetName, upgradeID, true, true)
+}
+
+func (s *runtimeDeploymentService) setUpgradePoolActive(ctx context.Context, namespace, sourceName, targetName, upgradeID string, active, preserveSource bool) error {
 	if s == nil || s.client == nil {
 		return fmt.Errorf("k8s client not initialized")
 	}
@@ -323,6 +335,9 @@ func (s *runtimeDeploymentService) SetUpgradePoolActive(ctx context.Context, nam
 	if active {
 		if err := setScheduling(targetName, "true", true); err != nil {
 			return fmt.Errorf("enable upgrade target scheduling: %w", err)
+		}
+		if preserveSource {
+			return nil
 		}
 		if err := setScheduling(sourceName, "false", false); err != nil {
 			_ = setScheduling(targetName, "false", true)
@@ -468,6 +483,7 @@ func buildRuntimeAgentEnv(spec RuntimeDeploymentSpec, workspaceRoot string, gate
 		{Name: "CLAWMANAGER_RUNTIME_TYPE", Value: spec.RuntimeType},
 		{Name: "CLAWMANAGER_BACKEND_URL", Value: runtimeBackendURL(spec)},
 		{Name: "CLAWMANAGER_RUNTIME_DEPLOYMENT_NAME", Value: spec.Name},
+		{Name: "CLAWMANAGER_DEPLOYMENT_NAME", Value: spec.Name},
 		{Name: "CLAWMANAGER_RUNTIME_IMAGE_REF", Value: spec.Image},
 		{Name: "CLAWMANAGER_RUNTIME_IMAGE_DIGEST", Value: runtimeImageDigest(spec.Image)},
 		{Name: "CLAWMANAGER_AGENT_PORT", Value: "19090"},

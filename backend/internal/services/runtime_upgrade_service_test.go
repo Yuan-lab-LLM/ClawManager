@@ -142,17 +142,18 @@ func TestRuntimeUpgradeScopePersistsLabSelectionWithoutNewRolloutColumns(t *test
 
 func TestUpgradeGatewayRestartTimeoutOnlyAppliesToActiveRestart(t *testing.T) {
 	now := time.Now().UTC()
-	if !upgradeGatewayRestartExpired(models.RuntimeUpgradeItem{State: "restart_ready", UpdatedAt: now.Add(-openClawUpgradeGatewayRestartTimeout)}, time.Time{}, now) {
+	expired, fresh := now.Add(-time.Second), now.Add(time.Minute)
+	if !upgradeGatewayRestartExpired(models.RuntimeUpgradeItem{State: "restart_ready", RestartDeadlineAt: &expired}, time.Time{}, now) {
 		t.Fatal("expired restart_ready item was allowed to wait forever")
 	}
-	if upgradeGatewayRestartExpired(models.RuntimeUpgradeItem{State: "restart_ready", UpdatedAt: now.Add(-time.Minute)}, time.Time{}, now) {
+	if upgradeGatewayRestartExpired(models.RuntimeUpgradeItem{State: "restart_ready", RestartDeadlineAt: &fresh}, time.Time{}, now) {
 		t.Fatal("fresh gateway restart was timed out")
 	}
-	if upgradeGatewayRestartExpired(models.RuntimeUpgradeItem{State: "gateway_verified", UpdatedAt: now.Add(-time.Hour)}, time.Time{}, now) {
+	if upgradeGatewayRestartExpired(models.RuntimeUpgradeItem{State: "gateway_verified", RestartDeadlineAt: &expired}, time.Time{}, now) {
 		t.Fatal("verified gateway was timed out")
 	}
-	if upgradeGatewayRestartExpired(models.RuntimeUpgradeItem{State: "restart_ready", UpdatedAt: now.Add(-time.Hour)}, now.Add(-time.Minute), now) {
-		t.Fatal("replacement target pod did not restart the health window")
+	if !upgradeGatewayRestartExpired(models.RuntimeUpgradeItem{State: "restart_ready", RestartDeadlineAt: &expired}, now.Add(-time.Minute), now) {
+		t.Fatal("replacement target pod must not silently reset the deadline")
 	}
 }
 

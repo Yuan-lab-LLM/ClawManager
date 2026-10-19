@@ -507,3 +507,40 @@ func TestNginxRoutesOpenCodePerInstanceOrigins(t *testing.T) {
 		t.Fatalf("public nginx routes must clear the dedicated-origin marker, got %d guards", got)
 	}
 }
+
+func TestInitialSchemasIncludeOptionalInstanceAlias(t *testing.T) {
+	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
+	manifests := append(
+		deploymentRuntimeManifests(repoRoot),
+		filepath.Join(repoRoot, "backend", "deployments", "k8s", "clawreef-incluster.yaml"),
+		filepath.Join(repoRoot, "deployments", "k8s", "sites", "nine-node-production", "20-clawmanager-production.yaml"),
+	)
+	for _, manifest := range manifests {
+		raw, err := os.ReadFile(manifest)
+		if err != nil {
+			t.Fatalf("read manifest %s: %v", manifest, err)
+		}
+		if !strings.Contains(string(raw), "alias VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL") {
+			t.Fatalf("manifest %s must include the optional instance alias column", manifest)
+		}
+	}
+}
+
+func TestNorthboundGatewayBootstrapIncludesDynamicSettingsReadGrants(t *testing.T) {
+	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
+	for _, relative := range []string{
+		filepath.Join("deployments", "k8s", "sites", "nine-node-production", "scripts", "bootstrap-northbound-secrets.sh"),
+		filepath.Join("deployments", "k8s", "northbound", "README.md"),
+		filepath.Join("docs", "northbound-upgrade-guide.md"),
+	} {
+		raw, err := os.ReadFile(filepath.Join(repoRoot, relative))
+		if err != nil {
+			t.Fatalf("read %s: %v", relative, err)
+		}
+		for _, table := range []string{"northbound_admin_settings", "northbound_caller_policies"} {
+			if !strings.Contains(string(raw), "GRANT SELECT ON clawmanager."+table) {
+				t.Fatalf("%s must grant Gateway read access to %s", relative, table)
+			}
+		}
+	}
+}

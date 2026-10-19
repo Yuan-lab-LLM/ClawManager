@@ -32,6 +32,7 @@ const (
 )
 
 type CoreService struct {
+	ownerUsage      ownerUsageReader
 	repo            *repository.NorthboundRepository
 	users           repository.UserRepository
 	instances       coreInstanceService
@@ -69,6 +70,31 @@ func (s *CoreService) settings() *models.NorthboundAdminSettings {
 }
 
 func (s *CoreService) ValidatePrincipal(principal Principal) error {
+	if principal.AuthType == "api_key" {
+		if principal.SessionID != "" || principal.KeyID == "" || principal.UserID <= 0 {
+			return apiError(401, "AUTH_INVALID", "Invalid internal identity", nil)
+		}
+		user, err := s.users.GetByID(principal.UserID)
+		if err != nil {
+			return err
+		}
+		if user == nil || !user.IsActive {
+			return apiError(401, "AUTH_INVALID", "Invalid internal identity", nil)
+		}
+		current, err := keyPrincipal(s.runtimeSettings, principal.UserID, principal.KeyID, "")
+		if err != nil {
+			return err
+		}
+		for _, scope := range principal.Scopes {
+			if !current.HasScope(scope) {
+				return apiError(403, "SCOPE_DENIED", "Insufficient permission", nil)
+			}
+		}
+		return nil
+	}
+	if (principal.AuthType != "" && principal.AuthType != "session") || principal.KeyID != "" {
+		return apiError(401, "AUTH_INVALID", "Invalid internal identity", nil)
+	}
 	if principal.UserID <= 0 || strings.TrimSpace(principal.SessionID) == "" {
 		return apiError(401, "AUTH_INVALID", "Invalid internal identity", nil)
 	}
@@ -107,8 +133,18 @@ func (s *CoreService) ValidatePrincipal(principal Principal) error {
 }
 
 func (s *CoreService) SubmitCreate(principal Principal, idempotencyKey string, req CreateLiteInstanceRequest) (*models.NorthboundOperation, bool, error) {
+	if err := validateNorthboundCreateMode(req.InstanceMode, services.InstanceModeLite); err != nil {
+		return nil, false, err
+	}
+	// Keep the established canonical payload and idempotency hash unchanged.
+	req.InstanceMode = ""
 	req.Name = strings.TrimSpace(req.Name)
 	req.Type = strings.ToLower(strings.TrimSpace(req.Type))
+	alias, aliasErr := normalizeInstanceAlias(req.Alias)
+	if aliasErr != nil {
+		return nil, false, apiError(422, "VALIDATION_ERROR", aliasErr.Error(), aliasErr)
+	}
+	req.Alias = alias
 	owner, ownerErr := services.NormalizeInstanceOwner(req.Owner)
 	if ownerErr != nil {
 		return nil, false, apiError(422, "VALIDATION_ERROR", ownerErr.Error(), ownerErr)
@@ -191,8 +227,17 @@ func isSupportedNorthboundProType(instanceType string) bool {
 }
 
 func (s *CoreService) SubmitProCreate(principal Principal, idempotencyKey string, req CreateProInstanceRequest) (*models.NorthboundOperation, bool, error) {
+	if err := validateNorthboundCreateMode(req.InstanceMode, services.InstanceModePro); err != nil {
+		return nil, false, err
+	}
+	req.InstanceMode = ""
 	req.Name = strings.TrimSpace(req.Name)
 	req.Type = strings.ToLower(strings.TrimSpace(req.Type))
+	alias, aliasErr := normalizeInstanceAlias(req.Alias)
+	if aliasErr != nil {
+		return nil, false, apiError(422, "VALIDATION_ERROR", aliasErr.Error(), aliasErr)
+	}
+	req.Alias = alias
 	owner, ownerErr := services.NormalizeInstanceOwner(req.Owner)
 	if ownerErr != nil {
 		return nil, false, apiError(422, "VALIDATION_ERROR", ownerErr.Error(), ownerErr)
@@ -249,6 +294,8 @@ func (s *CoreService) SubmitLifecycle(principal Principal, idempotencyKey string
 			operationType = OperationTypeLiteRestart
 		} else if action == "reset" {
 			operationType = OperationTypeLiteReset
+		} else if action == "delete" {
+			operationType = OperationTypeLiteDelete
 		}
 	case services.InstanceModePro:
 		instance, err = s.GetProInstance(principal.UserID, instanceID)
@@ -256,6 +303,8 @@ func (s *CoreService) SubmitLifecycle(principal Principal, idempotencyKey string
 			operationType = OperationTypeProRestart
 		} else if action == "reset" {
 			operationType = OperationTypeProReset
+		} else if action == "delete" {
+			operationType = OperationTypeProDelete
 		}
 		// WorkBuddy remains in the canonical Lite compatibility domain, matching
 		// its create behavior and preventing duplicate lifecycle operations when
@@ -265,6 +314,8 @@ func (s *CoreService) SubmitLifecycle(principal Principal, idempotencyKey string
 				operationType = OperationTypeLiteRestart
 			} else if action == "reset" {
 				operationType = OperationTypeLiteReset
+			} else if action == "delete" {
+				operationType = OperationTypeLiteDelete
 			}
 		}
 	default:
@@ -287,11 +338,14 @@ func (s *CoreService) SubmitLifecycle(principal Principal, idempotencyKey string
 		return nil, false, apiError(409, "LIFECYCLE_IN_PROGRESS", "Another lifecycle operation is already in progress", nil)
 	}
 	status := strings.ToLower(strings.TrimSpace(instance.Status))
-	if action == "restart" && status != "running" {
+	if action == "restart" && status != "running" && status != "error" {
 		return nil, false, apiError(409, "INVALID_INSTANCE_STATE", "Instance is not running", nil)
 	}
 	if action == "reset" && status != "running" && status != "stopped" && status != "error" {
 		return nil, false, apiError(409, "INVALID_INSTANCE_STATE", "Instance cannot be reset while a lifecycle operation is in progress", nil)
+	}
+	if action == "delete" && status != "running" && status != "stopped" && status != "error" {
+		return nil, false, apiError(409, "INVALID_INSTANCE_STATE", "Instance cannot be deleted while a lifecycle operation is in progress", nil)
 	}
 	return s.submitCreateOperation(principal, idempotencyKey, InstanceLifecycleRequest{InstanceID: instanceID}, operationType, "Too many unfinished instance operations")
 }
@@ -351,6 +405,10 @@ func (s *CoreService) submitCreateOperation(
 	if lifecycleRequest, ok := request.(InstanceLifecycleRequest); ok && lifecycleRequest.InstanceID > 0 {
 		instanceID := lifecycleRequest.InstanceID
 		item.InstanceID = &instanceID
+	}
+	if principal.AuthType == "api_key" {
+		item.APIKeyID = stringPointer(principal.KeyID)
+		item.AuthScope = stringPointer(principal.RequestScope)
 	}
 	if err := s.repo.CreateOperation(item); err != nil {
 		existing, getErr := s.repo.GetOperationByIdempotency(principal.UserID, operationType, keyHash)
@@ -672,6 +730,9 @@ func (w *OperationWorker) Start(parent context.Context) {
 	ctx, cancel := context.WithCancel(parent)
 	w.cancel = cancel
 	go w.loop(ctx)
+	// Only v2 batch operations use the bounded pool. Standalone operations keep
+	// their existing execution policy. DB reservations cap all replicas together.
+	go w.batchLoop(ctx)
 }
 
 func (w *OperationWorker) Stop() {
@@ -687,6 +748,7 @@ func (w *OperationWorker) Stop() {
 }
 
 func (w *OperationWorker) loop(ctx context.Context) {
+	var nextBatchCheck time.Time
 	for {
 		tick := time.Duration(w.service.settings().OperationTickMilliseconds) * time.Millisecond
 		if tick <= 0 {
@@ -698,12 +760,48 @@ func (w *OperationWorker) loop(ctx context.Context) {
 			timer.Stop()
 			return
 		case <-timer.C:
+			if time.Now().After(nextBatchCheck) {
+				nextBatchCheck = time.Now().Add(3 * time.Second)
+				if err := w.service.repo.AdvanceLifecycleBatches(ctx); err != nil {
+					log.Printf("lifecycle batch scheduler failed: %v", err)
+					continue
+				}
+			}
 			w.processOne(ctx)
 		}
 	}
 }
 
 func (w *OperationWorker) processOne(ctx context.Context) {
+	w.processNext(ctx, false)
+}
+
+func (w *OperationWorker) batchLoop(ctx context.Context) {
+	timer := time.NewTicker(time.Second)
+	defer timer.Stop()
+	slots := make(chan struct{}, 10)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-timer.C:
+			count, err := w.service.repo.ReadyBatchOperationCount(time.Now().UTC())
+			if err != nil {
+				log.Printf("batch ready count failed: %v", err)
+				continue
+			}
+			for n := 0; n < count && n < 10; n++ {
+				select {
+				case slots <- struct{}{}:
+					go func() { defer func() { <-slots }(); w.processNext(ctx, true) }()
+				default:
+				}
+			}
+		}
+	}
+}
+
+func (w *OperationWorker) processNext(ctx context.Context, batchOnly bool) {
 	claimID, err := randomToken(w.owner+"_", 8)
 	if err != nil {
 		return
@@ -713,7 +811,12 @@ func (w *OperationWorker) processOne(ctx context.Context) {
 	if lease <= 0 {
 		lease = 30 * time.Second
 	}
-	item, err := w.service.repo.ClaimNextOperation(ctx, claimID, now, now.Add(lease))
+	var item *models.NorthboundOperation
+	if batchOnly {
+		item, err = w.service.repo.ClaimNextBatchOperation(ctx, claimID, now, now.Add(lease))
+	} else {
+		item, err = w.service.repo.ClaimNextOperation(ctx, claimID, now, now.Add(lease))
+	}
 	if err != nil {
 		log.Printf("northbound operation claim failed: %v", err)
 		return
@@ -764,7 +867,8 @@ func (w *OperationWorker) processOne(ctx context.Context) {
 
 func isLifecycleOperation(operationType string) bool {
 	switch operationType {
-	case OperationTypeLiteRestart, OperationTypeLiteReset, OperationTypeProRestart, OperationTypeProReset:
+	case OperationTypeLiteRestart, OperationTypeLiteReset, OperationTypeLiteDelete,
+		OperationTypeProRestart, OperationTypeProReset, OperationTypeProDelete:
 		return true
 	default:
 		return false
@@ -777,6 +881,14 @@ func (w *OperationWorker) processLifecycle(ctx context.Context, item *models.Nor
 		_ = w.service.repo.MarkOperationFailed(ctx, item.OperationID, "INVALID_REQUEST", "Stored operation payload is invalid", time.Now().UTC())
 		return
 	}
+	if strings.HasSuffix(item.OperationID, "_retry") {
+		previous, err := w.service.repo.PreviousLifecycleAttempt(item.OperationID)
+		if err != nil {
+			_ = w.service.repo.MarkOperationFailed(ctx, item.OperationID, "BATCH_RETRY_UNSAFE", "Retry ledger unavailable", time.Now().UTC())
+			return
+		}
+		request.PreviousOperationID = previous
+	}
 	// Replacement reset records switch instance_id from the source to the new
 	// instance while retaining the immutable source id in request_payload. Resume
 	// them before loading the source: the source row may already have been safely
@@ -785,15 +897,34 @@ func (w *OperationWorker) processLifecycle(ctx context.Context, item *models.Nor
 		w.finishOrContinueReplacementReset(ctx, item, request.InstanceID)
 		return
 	}
+	if request.PreviousOperationID != "" && (item.ErrorCode == nil || *item.ErrorCode != lifecycleWaitingCode) {
+		if w.reconcileBatchRetry(ctx, item, request) {
+			return
+		}
+	}
 	var current *models.Instance
 	var currentErr error
-	if item.OperationType == OperationTypeProRestart || item.OperationType == OperationTypeProReset {
+	if item.OperationType == OperationTypeProRestart || item.OperationType == OperationTypeProReset || item.OperationType == OperationTypeProDelete {
 		current, currentErr = w.service.GetProInstance(item.UserID, request.InstanceID)
 	} else {
 		current, currentErr = w.service.GetInstance(item.UserID, request.InstanceID)
 	}
 	if currentErr != nil || current == nil {
-		_ = w.service.repo.MarkOperationFailed(ctx, item.OperationID, "INSTANCE_NOT_FOUND", "Instance not found", time.Now().UTC())
+		var currentAPIError *APIError
+		deleteTargetAlreadyAbsent := (item.OperationType == OperationTypeLiteDelete || item.OperationType == OperationTypeProDelete) &&
+			(current == nil && currentErr == nil || errors.As(currentErr, &currentAPIError) && currentAPIError.Code == "INSTANCE_NOT_FOUND")
+		if deleteTargetAlreadyAbsent {
+			now := time.Now().UTC()
+			if err := w.service.repo.MarkOperationSucceededWithoutInstance(ctx, item.OperationID, now); err != nil {
+				log.Printf("northbound delete operation %s completion failed: %v", item.OperationID, err)
+			}
+			return
+		}
+		code, message := "INSTANCE_NOT_FOUND", "Instance not found"
+		if currentErr != nil {
+			code, message = "DEPENDENCY_UNAVAILABLE", "Unable to verify the instance before lifecycle operation"
+		}
+		_ = w.service.repo.MarkOperationFailed(ctx, item.OperationID, code, message, time.Now().UTC())
 		return
 	}
 	currentStatus := strings.ToLower(strings.TrimSpace(current.Status))
@@ -801,12 +932,37 @@ func (w *OperationWorker) processLifecycle(ctx context.Context, item *models.Nor
 		w.finishOrContinueLifecycle(ctx, item, request.InstanceID, currentStatus, lifecycleAuditPrefix(item.OperationType))
 		return
 	}
-	if (item.OperationType == OperationTypeLiteRestart || item.OperationType == OperationTypeProRestart) && currentStatus != "running" {
+	if (item.OperationType == OperationTypeLiteRestart || item.OperationType == OperationTypeProRestart) && currentStatus != "running" && currentStatus != "error" && !(request.PreviousOperationID != "" && currentStatus == "stopped") {
 		_ = w.service.repo.MarkOperationFailed(ctx, item.OperationID, "INVALID_INSTANCE_STATE", "Instance is not running", time.Now().UTC())
 		return
 	}
 	if (item.OperationType == OperationTypeLiteReset || item.OperationType == OperationTypeProReset) && currentStatus != "running" && currentStatus != "stopped" && currentStatus != "error" {
 		_ = w.service.repo.MarkOperationFailed(ctx, item.OperationID, "INVALID_INSTANCE_STATE", "Instance lifecycle operation is already in progress", time.Now().UTC())
+		return
+	}
+	if (item.OperationType == OperationTypeLiteDelete || item.OperationType == OperationTypeProDelete) && currentStatus != "running" && currentStatus != "stopped" && currentStatus != "error" {
+		_ = w.service.repo.MarkOperationFailed(ctx, item.OperationID, "INVALID_INSTANCE_STATE", "Instance lifecycle operation is already in progress", time.Now().UTC())
+		return
+	}
+	if item.OperationType == OperationTypeLiteDelete || item.OperationType == OperationTypeProDelete {
+		deleteErr := w.runLifecycleActionWithLease(ctx, item, func() error {
+			return permanentlyDeleteInstance(w.service.instances, request.InstanceID)
+		})
+		if deleteErr != nil {
+			log.Printf("northbound delete operation %s failed: %v", item.OperationID, deleteErr)
+			_ = w.service.repo.MarkOperationFailed(ctx, item.OperationID, "DELETE_FAILED", "Instance and data deletion failed; administrator attention may be required", time.Now().UTC())
+			item.Status = "failed"
+			w.service.auditOperation(item, lifecycleAuditPrefix(item.OperationType)+".failed", models.AuditSeverityWarn, auditOperationMessage(item.OperationID, "failed"), &request.InstanceID, "DELETE_FAILED")
+			return
+		}
+		now := time.Now().UTC()
+		if err := w.service.repo.MarkOperationSucceededWithoutInstance(ctx, item.OperationID, now); err != nil {
+			log.Printf("northbound delete operation %s completion failed: %v", item.OperationID, err)
+			return
+		}
+		item.Status = "succeeded"
+		item.InstanceID = nil
+		w.service.auditOperation(item, lifecycleAuditPrefix(item.OperationType)+".succeeded", models.AuditSeverityInfo, auditOperationMessage(item.OperationID, "succeeded"), &request.InstanceID, "")
 		return
 	}
 	if isResetOperation(item.OperationType) {
@@ -815,7 +971,15 @@ func (w *OperationWorker) processLifecycle(ctx context.Context, item *models.Nor
 			_ = w.service.repo.MarkOperationFailed(ctx, item.OperationID, "RESET_UNAVAILABLE", "Safe replacement reset is unavailable; original instance was not changed", time.Now().UTC())
 			return
 		}
-		replacement, createErr := replacer.CreateResetReplacement(request.InstanceID, item.OperationID)
+		var replacement *models.Instance
+		createErr := w.runLifecycleActionWithLease(ctx, item, func() error {
+			var err error
+			replacement, err = replacer.CreateResetReplacement(request.InstanceID, item.OperationID)
+			return err
+		})
+		if ctx.Err() != nil {
+			return
+		}
 		if createErr != nil || replacement == nil {
 			message := "Unable to create a clean replacement; original instance and data were not deleted"
 			if createErr != nil {
@@ -854,6 +1018,7 @@ func (w *OperationWorker) processLifecycle(ctx context.Context, item *models.Nor
 	}
 	actionErr := w.runLifecycleActionWithLease(ctx, item, action)
 	if actionErr != nil {
+		log.Printf("northbound lifecycle operation %s instance %d action failed: %v", item.OperationID, request.InstanceID, actionErr)
 		// Lifecycle operations are not retried automatically. A failed factory
 		// reset may already have erased persistent data, so the error must never
 		// imply that the old workspace was retained.
@@ -893,7 +1058,16 @@ func (w *OperationWorker) finishOrContinueReplacementReset(ctx context.Context, 
 	status := strings.ToLower(strings.TrimSpace(replacement.Status))
 	now := time.Now().UTC()
 	if status == "running" {
-		cleanupPending, warning, finalizeErr := replacer.FinalizeResetReplacement(sourceInstanceID, replacementID)
+		var cleanupPending bool
+		var warning string
+		finalizeErr := w.runLifecycleActionWithLease(ctx, item, func() error {
+			var err error
+			cleanupPending, warning, err = replacer.FinalizeResetReplacement(sourceInstanceID, replacementID)
+			return err
+		})
+		if ctx.Err() != nil {
+			return
+		}
 		if finalizeErr != nil {
 			log.Printf("northbound replacement reset %s cutover failed: %v", item.OperationID, finalizeErr)
 			_ = replacer.DiscardResetReplacement(replacementID)
@@ -940,6 +1114,10 @@ func lifecycleAuditPrefix(operationType string) string {
 		return "northbound.lite.reset"
 	case OperationTypeProReset:
 		return "northbound.pro.reset"
+	case OperationTypeLiteDelete:
+		return "northbound.lite.delete"
+	case OperationTypeProDelete:
+		return "northbound.pro.delete"
 	default:
 		return "northbound.lifecycle"
 	}
@@ -1031,6 +1209,14 @@ func resetInstance(instances coreInstanceService, instanceID int) error {
 	return resetter.Reset(instanceID)
 }
 
+func permanentlyDeleteInstance(instances coreInstanceService, instanceID int) error {
+	deleter, ok := instances.(services.InstancePermanentDeleteService)
+	if !ok {
+		return errors.New("instance permanent delete service is unavailable")
+	}
+	return deleter.DeletePermanently(instanceID)
+}
+
 func operationCreateRequest(item *models.NorthboundOperation) (services.CreateInstanceRequest, string, error) {
 	return operationCreateRequestWithSettings(item, nil)
 }
@@ -1082,6 +1268,7 @@ func liteCreateRequestWithSettings(item *models.NorthboundOperation, request Cre
 	}
 	return services.CreateInstanceRequest{
 		Name:                    request.Name,
+		Alias:                   request.Alias,
 		Owner:                   &request.Owner,
 		Description:             request.Description,
 		Type:                    request.Type,
@@ -1115,6 +1302,7 @@ func proCreateRequestWithSettings(item *models.NorthboundOperation, request Crea
 		image := services.LinuxWorkbuddyImage()
 		return services.CreateInstanceRequest{
 			Name:                    request.Name,
+			Alias:                   request.Alias,
 			Owner:                   &request.Owner,
 			Description:             request.Description,
 			Type:                    "workbuddy",
@@ -1149,6 +1337,7 @@ func proCreateRequestWithSettings(item *models.NorthboundOperation, request Crea
 	}
 	return services.CreateInstanceRequest{
 		Name:                    request.Name,
+		Alias:                   request.Alias,
 		Owner:                   &request.Owner,
 		Description:             request.Description,
 		Type:                    instanceType,

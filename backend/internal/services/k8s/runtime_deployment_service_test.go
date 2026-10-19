@@ -146,6 +146,7 @@ func TestBuildRuntimeDeploymentInjectsAgentV2Environment(t *testing.T) {
 	requireEnv(t, container, "CLAWMANAGER_RUNTIME_TYPE", "hermes")
 	requireEnv(t, container, "CLAWMANAGER_BACKEND_URL", "http://clawmanager-gateway.clawmanager-system.svc.cluster.local:9001")
 	requireEnv(t, container, "CLAWMANAGER_RUNTIME_DEPLOYMENT_NAME", "runtime-hermes")
+	requireEnv(t, container, "CLAWMANAGER_DEPLOYMENT_NAME", "runtime-hermes")
 	requireEnv(t, container, "CLAWMANAGER_RUNTIME_IMAGE_REF", "registry/hermes:v2")
 	requireEnv(t, container, "CLAWMANAGER_RUNTIME_IMAGE_DIGEST", "")
 	requireEnv(t, container, "RUNTIME_WORKSPACE_ROOT", "/workspaces")
@@ -392,6 +393,7 @@ func TestRuntimeDeploymentServiceCreatesIsolatedUpgradePool(t *testing.T) {
 	}
 	requireEnv(t, container, "CLAWMANAGER_RUNTIME_UPGRADE_ID", "81")
 	requireEnv(t, container, "CLAWMANAGER_RUNTIME_DEPLOYMENT_NAME", "openclaw-runtime-u81")
+	requireEnv(t, container, "CLAWMANAGER_DEPLOYMENT_NAME", "openclaw-runtime-u81")
 	unchanged, err := client.AppsV1().Deployments("runtime-system").Get(context.Background(), "openclaw-runtime", metav1.GetOptions{})
 	if err != nil {
 		t.Fatal(err)
@@ -435,6 +437,28 @@ func TestRuntimeDeploymentServiceActivatesAndSafelyDeletesUpgradePool(t *testing
 	}
 	if _, err := client.AppsV1().Deployments(namespace).Get(context.Background(), "openclaw-runtime-u9", metav1.GetOptions{}); !apierrors.IsNotFound(err) {
 		t.Fatalf("upgrade target still exists: %v", err)
+	}
+}
+
+func TestRuntimeDeploymentServiceScopedCommitKeepsSourceScheduling(t *testing.T) {
+	const ns = "runtime-system"
+	source := BuildRuntimeDeployment(RuntimeDeploymentSpec{Name: "openclaw-runtime", Namespace: ns, RuntimeType: "openclaw", Image: "old", Replicas: 1, WorkspacePVCClaimName: "workspaces"})
+	source.Labels[runtimeSchedulingLabel] = "true"
+	client := fake.NewSimpleClientset(source)
+	service := NewRuntimeDeploymentService(client)
+	if err := service.EnsureUpgradePool(context.Background(), ns, source.Name, "openclaw-runtime-u99", "registry/core@sha256:"+strings.Repeat("c", 64), "99"); err != nil {
+		t.Fatal(err)
+	}
+	preserver := service.(interface {
+		SetUpgradePoolActivePreservingSource(context.Context, string, string, string, string) error
+	})
+	if err := preserver.SetUpgradePoolActivePreservingSource(context.Background(), ns, source.Name, "openclaw-runtime-u99", "99"); err != nil {
+		t.Fatal(err)
+	}
+	old, _ := client.AppsV1().Deployments(ns).Get(context.Background(), source.Name, metav1.GetOptions{})
+	next, _ := client.AppsV1().Deployments(ns).Get(context.Background(), "openclaw-runtime-u99", metav1.GetOptions{})
+	if old.Labels[runtimeSchedulingLabel] != "true" || next.Labels[runtimeSchedulingLabel] != "true" || *old.Spec.Replicas != 1 {
+		t.Fatal("scoped commit disabled the excluded instances' source")
 	}
 }
 

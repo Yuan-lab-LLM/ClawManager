@@ -18,6 +18,7 @@ type northboundInstanceStub struct {
 	items        map[int]*models.Instance
 	restartCalls []int
 	resetCalls   []int
+	deleteCalls  []int
 }
 
 func (s *northboundInstanceStub) Restart(id int) error {
@@ -27,6 +28,12 @@ func (s *northboundInstanceStub) Restart(id int) error {
 
 func (s *northboundInstanceStub) Reset(id int) error {
 	s.resetCalls = append(s.resetCalls, id)
+	return nil
+}
+
+func (s *northboundInstanceStub) DeletePermanently(id int) error {
+	s.deleteCalls = append(s.deleteCalls, id)
+	delete(s.items, id)
 	return nil
 }
 
@@ -384,14 +391,18 @@ func TestNorthboundResourceRoutesAreRegistered(t *testing.T) {
 		"POST /internal/northbound/v1/pro-instances":                                       false,
 		"GET /internal/northbound/v1/pro-instances":                                        false,
 		"GET /internal/northbound/v1/pro-instances/:id":                                    false,
-		"POST /api/northbound/v1/lite-instances/:id/restart":                              false,
-		"POST /api/northbound/v1/lite-instances/:id/reset":                                false,
-		"POST /api/northbound/v1/pro-instances/:id/restart":                               false,
-		"POST /api/northbound/v1/pro-instances/:id/reset":                                 false,
-		"POST /internal/northbound/v1/lite-instances/:id/restart":                         false,
-		"POST /internal/northbound/v1/lite-instances/:id/reset":                           false,
-		"POST /internal/northbound/v1/pro-instances/:id/restart":                          false,
-		"POST /internal/northbound/v1/pro-instances/:id/reset":                            false,
+		"POST /api/northbound/v1/lite-instances/:id/restart":                               false,
+		"POST /api/northbound/v1/lite-instances/:id/reset":                                 false,
+		"POST /api/northbound/v1/lite-instances/:id/delete":                                false,
+		"POST /api/northbound/v1/pro-instances/:id/restart":                                false,
+		"POST /api/northbound/v1/pro-instances/:id/reset":                                  false,
+		"POST /api/northbound/v1/pro-instances/:id/delete":                                 false,
+		"POST /internal/northbound/v1/lite-instances/:id/restart":                          false,
+		"POST /internal/northbound/v1/lite-instances/:id/reset":                            false,
+		"POST /internal/northbound/v1/lite-instances/:id/delete":                           false,
+		"POST /internal/northbound/v1/pro-instances/:id/restart":                           false,
+		"POST /internal/northbound/v1/pro-instances/:id/reset":                             false,
+		"POST /internal/northbound/v1/pro-instances/:id/delete":                            false,
 		"POST /api/northbound/v1/lite-instances/:id/external-access/password":              false,
 		"POST /api/northbound/v1/lite-instances/:id/external-access/share-link/reset":      false,
 		"POST /api/northbound/v1/lite-instances/:id/external-access/password/reset":        false,

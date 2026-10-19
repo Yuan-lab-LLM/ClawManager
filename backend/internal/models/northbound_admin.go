@@ -43,15 +43,17 @@ type NorthboundAdminSettings struct {
 func (NorthboundAdminSettings) TableName() string { return "northbound_admin_settings" }
 
 type NorthboundCallerPolicy struct {
-	UserID     int       `db:"user_id,primarykey" json:"user_id"`
-	Username   string    `db:"username" json:"username,omitempty"`
-	Email      string    `db:"email" json:"email,omitempty"`
-	Enabled    bool      `db:"enabled" json:"enabled"`
-	ScopesJSON string    `db:"scopes_json" json:"-"`
-	Scopes     []string  `db:"-" json:"scopes"`
-	CreatedAt  time.Time `db:"created_at" json:"created_at"`
-	UpdatedAt  time.Time `db:"updated_at" json:"updated_at"`
-	UpdatedBy  *int      `db:"updated_by" json:"updated_by,omitempty"`
+	APIKeysJSON    *string   `db:"api_keys_json" json:"-"`
+	APIKeysVersion int64     `db:"api_keys_version" json:"-"`
+	UserID         int       `db:"user_id,primarykey" json:"user_id"`
+	Username       string    `db:"username" json:"username,omitempty"`
+	Email          string    `db:"email" json:"email,omitempty"`
+	Enabled        bool      `db:"enabled" json:"enabled"`
+	ScopesJSON     string    `db:"scopes_json" json:"-"`
+	Scopes         []string  `db:"-" json:"scopes"`
+	CreatedAt      time.Time `db:"created_at" json:"created_at"`
+	UpdatedAt      time.Time `db:"updated_at" json:"updated_at"`
+	UpdatedBy      *int      `db:"updated_by" json:"updated_by,omitempty"`
 }
 
 func (NorthboundCallerPolicy) TableName() string { return "northbound_caller_policies" }

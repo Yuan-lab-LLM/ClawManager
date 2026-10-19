@@ -90,7 +90,8 @@ func (s *runtimeWorkspaceFileService) List(ctx context.Context, scope WorkspaceF
 	return entries, nil
 }
 
-func (s *runtimeWorkspaceFileService) Search(ctx context.Context, scope WorkspaceFileScope, query string) ([]WorkspaceEntry, error) {
+func (s *runtimeWorkspaceFileService) Search(ctx context.Context, scope WorkspaceFileScope, query string, limit int) ([]WorkspaceEntry, error) {
+	limit = NormalizeWorkspaceSearchLimit(limit)
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -107,7 +108,7 @@ func (s *runtimeWorkspaceFileService) Search(ctx context.Context, scope Workspac
 		runtimeWorkspaceSearchScript,
 		runtimeWorkspaceBase(scope),
 		query,
-		fmt.Sprintf("%d", WorkspaceSearchMaxResults),
+		fmt.Sprintf("%d", limit),
 	}, nil, &response); err != nil {
 		return nil, err
 	}
@@ -482,6 +483,12 @@ func runtimeWorkspaceEntryFromPayload(payload runtimeWorkspaceEntryPayload) Work
 }
 
 func mapRuntimeWorkspaceError(execErr error, stderr string) error {
+	if runtimeWorkspaceErrorCode(stderr) == "text_conflict" {
+		return ErrWorkspaceTextConflict
+	}
+	if runtimeWorkspaceErrorCode(stderr) == "text_unsupported" {
+		return ErrWorkspaceTextUnsupported
+	}
 	code := runtimeWorkspaceErrorCode(stderr)
 	switch code {
 	case "not_found":
@@ -496,6 +503,8 @@ func mapRuntimeWorkspaceError(execErr error, stderr string) error {
 		return ErrWorkspaceEntryExists
 	case "upload_too_large":
 		return ErrWorkspaceUploadTooLarge
+	case "preview_too_large":
+		return ErrWorkspacePreviewTooLarge
 	case "filename_invalid", "invalid":
 		return ErrWorkspacePathInvalid
 	}
@@ -712,6 +721,8 @@ with zipfile.ZipFile(sys.stdout.buffer, mode="w", compression=zipfile.ZIP_DEFLAT
             name for name in directories
             if name != ".tmp"
             and not name.startswith(".tmp-skill-")
+            and name != ".clawmanager-editor-lock"
+            and not name.startswith(".clawmanager-edit-")
             and not os.path.islink(os.path.join(current, name))
         ]
         current_rel = os.path.relpath(current, target)

@@ -1,0 +1,22 @@
+.team-functional-badge{position:relative;display:inline-flex;align-items:center;justify-content:center;flex:none;width:36px;height:36px;border-radius:11px;background:#eff6ff;color:#2563eb;border:1px solid #e1ecfb}
+.team-functional-badge>svg{width:21px;height:21px;stroke-width:1.8}
+.team-functional-badge[data-identity=leader]{background:#fff1ed;color:#bc4d35;border-color:#f5ded6}
+.team-functional-badge[data-identity=user]{background:#fff8ed;color:#996324;border-color:#f2e5cd}
+.team-functional-badge[data-identity=system],.team-functional-badge[data-identity=unknown]{background:#f5f6f8;color:#64748b;border-color:#e5e7eb}
+.team-functional-badge[data-size=chat]{width:42px;height:42px;border-radius:13px}
+.team-functional-badge[data-size=chat]>svg{width:24px;height:24px}
+.team-functional-badge[data-size=workflow]{width:28px;height:28px;border-radius:9px}
+.team-functional-badge[data-size=workflow]>svg{width:17px;height:17px}
+.team-functional-badge small{position:absolute;right:-5px;bottom:-4px;display:grid;place-items:center;min-width:16px;height:16px;padding:0 3px;border-radius:5px;border:1px solid #e5e7eb;background:#fff;color:#64748b;font-size:11px;line-height:1;font-weight:500}
+.team-avatar-picker-trigger{display:inline-flex;align-items:center;justify-content:center;flex:none;padding:0;border:0;border-radius:11px;background:transparent;cursor:pointer;transition:box-shadow .15s}
+.team-avatar-picker-trigger:hover{box-shadow:0 0 0 3px #eff6ff}
+.team-avatar-picker-trigger:focus-visible{outline:2px solid #2563eb;outline-offset:4px}
+.team-avatar-picker-trigger:disabled{opacity:.55;cursor:wait}
+.team-avatar-picker-options{position:fixed;inset:auto;margin:0;width:284px;max-width:calc(100vw - 24px);max-height:calc(100dvh - 24px);padding:12px;border:1px solid #e2e8f0;border-radius:16px;background:#fff;box-shadow:0 14px 40px #0f172a26,0 3px 10px #0f172a0d;overflow:auto;box-sizing:border-box}
+.team-avatar-picker-options:popover-open{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px}
+.team-avatar-picker-options>button{position:relative;display:flex;align-items:center;justify-content:center;width:100%;min-height:44px;padding:3px;border:1px solid transparent;border-radius:12px;background:transparent;cursor:pointer}
+.team-avatar-picker-options>button:hover{background:#f1f5f9}
+.team-avatar-picker-options>button[aria-pressed=true]{border-color:#60a5fa;background:#eff6ff;box-shadow:0 0 0 1px #bfdbfe}
+.team-avatar-picker-options>button:focus-visible{outline:2px solid #2563eb;outline-offset:1px}
+.team-avatar-picker-options>button:disabled{opacity:.55;cursor:wait}
+.team-avatar-picker-auto{position:absolute;right:1px;bottom:1px;width:13px;height:13px;padding:1px;border-radius:50%;background:#fff;color:#64748b}

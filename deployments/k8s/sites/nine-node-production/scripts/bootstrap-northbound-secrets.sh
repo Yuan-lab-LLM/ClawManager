@@ -139,6 +139,8 @@ ALTER USER 'clawmanager_northbound'@'%' IDENTIFIED BY '$db_password';
 GRANT SELECT ON clawmanager.users TO 'clawmanager_northbound'@'%';
 GRANT SELECT, INSERT, UPDATE ON clawmanager.northbound_auth_challenges TO 'clawmanager_northbound'@'%';
 GRANT SELECT, INSERT, UPDATE ON clawmanager.northbound_sessions TO 'clawmanager_northbound'@'%';
+GRANT SELECT ON clawmanager.northbound_admin_settings TO 'clawmanager_northbound'@'%';
+GRANT SELECT ON clawmanager.northbound_caller_policies TO 'clawmanager_northbound'@'%';
 GRANT INSERT ON clawmanager.audit_events TO 'clawmanager_northbound'@'%';
 FLUSH PRIVILEGES;
 EOF

@@ -1,10 +1,15 @@
 import axios from "axios";
+import {useOwnerPortalVisit} from '../../hooks/useOwnerPortalVisit';
+import { OwnerInstanceCard } from "../../components/OwnerInstanceCard";
+import { expandedInstanceFromSearch } from "../../lib/ownerPortalNavigation";
+import { OwnerDashboard } from "../../components/OwnerDashboard";
 import {
   ArrowRight,
   Briefcase,
   Box,
   CheckCircle2,
   LogOut,
+  House,
   Power,
   RefreshCw,
   Search,
@@ -115,7 +120,7 @@ function operationIsPending(
 ) {
   if (!operation) return false;
   const operationStatus = operation.status.toLowerCase();
-  if (["queued", "processing"].includes(operationStatus)) return true;
+  if (["queued", "processing", "batch_pending"].includes(operationStatus)) return true;
   return operationStatus === "succeeded" && instanceStatus?.toLowerCase() === "creating";
 }
 
@@ -153,6 +158,10 @@ function formatTime(value?: string) {
   }).format(new Date(value));
 }
 
+function instanceDisplayName(instance: IEISystemInstance) {
+  return instance.alias?.trim() || instance.name;
+}
+
 function selectedInstanceIDFromURL() {
   const value = Number(new URLSearchParams(window.location.search).get("selected_instance_id"));
   return Number.isInteger(value) && value > 0 ? value : null;
@@ -161,12 +170,31 @@ function selectedInstanceIDFromURL() {
 export default function IEISystemListInstancesPage() {
   const initialized = useRef(false);
   const [session, setSession] = useState<IEISystemSession | null>(null);
+  useOwnerPortalVisit(session?.owner);
+  const [expandedInstanceID, setExpandedInstanceID] = useState<number|null>(()=>expandedInstanceFromSearch(window.location.search));
   const [instances, setInstances] = useState<IEISystemInstance[]>([]);
   const [selectedID, setSelectedID] = useState<number | null>(null);
-  const [query, setQuery] = useState("");
-  const [runtimeFilter, setRuntimeFilter] = useState("all");
+  const [view, setView] = useState(() => {
+    const saved=new URLSearchParams(window.location.search).get('view');
+    return saved==='overview'?'overview':saved==='instance'||selectedInstanceIDFromURL()?'instance':'overview';
+  });
+  const [query, setQuery] = useState(() => new URLSearchParams(window.location.search).get('q') || '');
+  const [runtimeFilter, setRuntimeFilter] = useState(() => new URLSearchParams(window.location.search).get('runtime') || 'all');
   const [showFilters, setShowFilters] = useState(false);
+  const [menuInstanceID, setMenuInstanceID] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
+  const restoreExpandedCard = useRef(expandedInstanceID);
+  useEffect(() => {
+    if (loading || !restoreExpandedCard.current) return;
+    const card = document.querySelector(`[data-instance-id="${restoreExpandedCard.current}"]`);
+    if (!card) return;
+    card.scrollIntoView({block:'nearest'});
+    restoreExpandedCard.current = null;
+  }, [loading, instances]);
+  const [refreshing,setRefreshing]=useState(false);
+  const [refreshError,setRefreshError]=useState('');
+  const refreshInFlight=useRef(false);
+  const dashboardRefresh=useRef<(()=>Promise<void>)|null>(null);
   const [lifecycleOperations, setLifecycleOperations] = useState<
     Record<number, IEISystemLifecycleOperation>
   >({});
@@ -190,6 +218,19 @@ export default function IEISystemListInstancesPage() {
         : (items[0]?.id ?? null);
     });
   }, []);
+
+  const refreshPortal=async()=>{
+    if(refreshInFlight.current)return;
+    refreshInFlight.current=true;setRefreshing(true);setRefreshError('');
+    try{
+      const results=await Promise.allSettled([
+        ieiSystemService.getSession().then(setSession),
+        loadInstances(),
+        dashboardRefresh.current?.()
+      ]);
+      if(results.some(r=>r.status==='rejected'))setRefreshError('部分数据刷新失败，已保留原内容，请重试。');
+    }finally{refreshInFlight.current=false;setRefreshing(false)}
+  };
 
   const initialize = useCallback(async () => {
     setLoading(true);
@@ -241,6 +282,10 @@ export default function IEISystemListInstancesPage() {
   useEffect(() => {
     if (!initialized.current) return;
     const params = new URLSearchParams(window.location.search);
+    params.set('view', view);
+    if(expandedInstanceID)params.set('expanded_instance_id',String(expandedInstanceID));else params.delete('expanded_instance_id');
+    if (query) params.set('q', query); else params.delete('q');
+    if (runtimeFilter !== 'all') params.set('runtime', runtimeFilter); else params.delete('runtime');
     if (selectedID) params.set("selected_instance_id", String(selectedID));
     else params.delete("selected_instance_id");
     params.delete("token");
@@ -250,7 +295,7 @@ export default function IEISystemListInstancesPage() {
       "",
       `${window.location.pathname}${queryString ? `?${queryString}` : ""}${window.location.hash}`,
     );
-  }, [selectedID]);
+  }, [selectedID, view, query, runtimeFilter, expandedInstanceID]);
 
   const runtimeOptions = useMemo(() => {
     const types = [...new Set(instances.map((instance) => instance.type.trim().toLowerCase()))];
@@ -263,6 +308,7 @@ export default function IEISystemListInstancesPage() {
       const matchesRuntime = runtimeFilter === "all" || instance.type.toLowerCase() === runtimeFilter;
       const matchesQuery =
         !normalizedQuery ||
+        (instance.alias?.toLowerCase().includes(normalizedQuery) ?? false) ||
         instance.name.toLowerCase().includes(normalizedQuery) ||
         String(instance.id).includes(normalizedQuery) ||
         getIEIRuntimePresentation(instance.type).name.toLowerCase().includes(normalizedQuery);
@@ -413,10 +459,11 @@ export default function IEISystemListInstancesPage() {
     setError("访问会话已退出，请从智慧协作平台重新进入。");
   };
 
-  const handleRestart = async () => {
-    if (!selectedInstance || selectedLifecyclePending || selectedInstance.status.toLowerCase() !== "running") return;
-    if (!window.confirm(`确认重启实例“${selectedInstance.name}”？工作区数据会保留。`)) return;
-    const instanceID = selectedInstance.id;
+  const handleRestart = async (target = selectedInstance) => {
+    if (!target || operationIsPending(lifecycleOperations[target.id], target.status) || !["running", "error"].includes(target.status.toLowerCase())) return;
+    if (!window.confirm(`确认重启实例“${instanceDisplayName(target)}”？工作区数据会保留。`)) return;
+    const instanceID = target.id;
+    setMenuInstanceID(null);
     setLifecycleErrors((current) => {
       const next = { ...current };
       delete next[instanceID];
@@ -436,21 +483,22 @@ export default function IEISystemListInstancesPage() {
     }
   };
 
-  const handleReset = async () => {
-    if (!selectedInstance || selectedLifecyclePending) return;
-    const status = selectedInstance.status.toLowerCase();
+  const handleReset = async (target = selectedInstance) => {
+    if (!target || operationIsPending(lifecycleOperations[target.id], target.status)) return;
+    const status = target.status.toLowerCase();
     if (!["running", "stopped", "error"].includes(status)) return;
     if (
       !window.confirm(
-        `重置实例“${selectedInstance.name}”将永久删除其中的全部文件、配置、技能、任务和会话。\n\n系统不会自动备份，请先下载需要保留的数据。是否继续？`,
+        `重置实例“${instanceDisplayName(target)}”将永久删除其中的全部文件、配置、技能、任务和会话。\n\n系统不会自动备份，请先下载需要保留的数据。是否继续？`,
       )
     ) return;
     if (
       !window.confirm(
-        `最后确认：重置成功后，实例“${selectedInstance.name}”的原数据无法恢复。\n\n确定清空全部数据并重新初始化实例吗？`,
+        `最后确认：重置成功后，实例“${instanceDisplayName(target)}”的原数据无法恢复。\n\n确定清空全部数据并重新初始化实例吗？`,
       )
     ) return;
-    const instanceID = selectedInstance.id;
+    const instanceID = target.id;
+    setMenuInstanceID(null);
     setLifecycleErrors((current) => {
       const next = { ...current };
       delete next[instanceID];
@@ -471,14 +519,14 @@ export default function IEISystemListInstancesPage() {
   };
 
   return (
-    <main className="flex min-h-screen flex-col bg-[#f4f7fb] text-slate-900">
+    <main className={`flex min-h-screen flex-col bg-[#f4f7fb] text-slate-900 ${view==='overview'?'portal-overview':''}`}>
       <header className="shrink-0 border-b border-slate-200 bg-white/95 shadow-[0_1px_16px_rgba(15,23,42,0.025)] backdrop-blur">
-        <div className="flex min-h-[92px] items-center justify-between gap-6 px-7 py-4 lg:px-9">
+        <div className="flex min-h-[64px] flex-wrap items-center justify-between gap-3 px-4 py-2 sm:flex-nowrap sm:gap-6 sm:px-7 lg:px-9">
           <div className="flex min-w-0 shrink-0 items-center gap-4">
             <img
               src="/inspur-information.png"
               alt="浪潮信息"
-              className="h-auto w-[180px] object-contain object-left"
+              className="h-auto w-[145px] object-contain object-left"
             />
             <div className="hidden h-8 w-px bg-slate-200 sm:block" />
             <div className="hidden whitespace-nowrap text-sm font-medium tracking-[0.08em] text-slate-400 sm:block">
@@ -486,7 +534,7 @@ export default function IEISystemListInstancesPage() {
             </div>
           </div>
           {session ? (
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2 sm:gap-4">
               <div className="hidden min-w-0 text-right lg:block">
                 <div className="flex items-center justify-end gap-2 text-sm font-semibold text-slate-800">
                   <CheckCircle2 className="h-4 w-4 text-emerald-500" />
@@ -495,18 +543,21 @@ export default function IEISystemListInstancesPage() {
                 <p className="mt-1 max-w-64 truncate text-sm text-slate-500">{session.owner}</p>
               </div>
               <div className="hidden h-8 w-px bg-slate-200 lg:block" />
+              {instances.length>0&&<button type="button" onClick={() => {setView('overview');setMenuInstanceID(null);}} aria-pressed={view==='overview'} className="inline-flex h-8 items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:border-blue-300 hover:text-blue-700">
+                <House className="h-4 w-4" />我的总览
+              </button>}
               <button
                 type="button"
-                className="inline-flex h-11 items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:border-blue-300 hover:text-blue-700 disabled:opacity-60"
-                onClick={() => void initialize()}
-                disabled={loading}
+                className="inline-flex h-8 items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:border-blue-300 hover:text-blue-700 disabled:opacity-60"
+                onClick={() => void refreshPortal()}
+                disabled={loading||refreshing}
               >
-                <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+                <RefreshCw className={`h-4 w-4 ${loading||refreshing ? "animate-spin" : ""}`} />
                 刷新
               </button>
               <button
                 type="button"
-                className="inline-flex h-11 items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:border-red-200 hover:text-red-600"
+                className="inline-flex h-8 items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:border-red-200 hover:text-red-600"
                 onClick={() => void handleLogout()}
               >
                 <LogOut className="h-4 w-4" />
@@ -517,7 +568,8 @@ export default function IEISystemListInstancesPage() {
         </div>
       </header>
 
-      <section className="min-h-0 flex-1 p-4 lg:p-5">
+      {refreshError&&<p role="alert" className="fixed right-4 top-16 z-30 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800">{refreshError}</p>}
+      <section className="portal-content min-h-0 flex-1 p-4 lg:p-5">
         {error ? (
           <div className="mx-auto mt-16 max-w-lg rounded-2xl border border-red-200 bg-white p-7 text-center shadow-sm">
             <h2 className="text-lg font-semibold">访问验证失败</h2>
@@ -544,11 +596,11 @@ export default function IEISystemListInstancesPage() {
               </p>
               <button
                 type="button"
-                className="mt-6 inline-flex h-11 items-center gap-2 rounded-lg bg-gradient-to-r from-blue-700 to-blue-600 px-5 text-sm font-semibold text-white shadow-[0_9px_20px_rgba(37,99,235,0.18)] transition hover:from-blue-800 hover:to-blue-700 disabled:opacity-60"
-                onClick={() => void initialize()}
-                disabled={loading}
+                className="mt-6 inline-flex h-8 items-center gap-2 rounded-lg bg-gradient-to-r from-blue-700 to-blue-600 px-5 text-sm font-semibold text-white shadow-[0_9px_20px_rgba(37,99,235,0.18)] transition hover:from-blue-800 hover:to-blue-700 disabled:opacity-60"
+                onClick={() => void refreshPortal()}
+                disabled={loading||refreshing}
               >
-                <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+                <RefreshCw className={`h-4 w-4 ${loading||refreshing ? "animate-spin" : ""}`} />
                 重新检查
               </button>
               <div className="mt-6 flex flex-col items-center gap-2 text-xs text-slate-500 sm:flex-row sm:gap-6">
@@ -600,8 +652,8 @@ export default function IEISystemListInstancesPage() {
             </div>
           </div>
         ) : selectedInstance && selectedRuntime ? (
-          <div className="grid gap-4 lg:h-[calc(100vh-132px)] lg:min-h-[640px] lg:grid-cols-[minmax(280px,330px)_minmax(460px,1fr)_minmax(280px,320px)] 2xl:grid-cols-[minmax(320px,380px)_minmax(560px,1fr)_minmax(320px,360px)]">
-            <aside className="flex min-h-[680px] flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-[0_12px_35px_rgba(15,23,42,0.045)] lg:min-h-0">
+          <div className={view==='overview'?'portal-overview-grid grid items-start gap-3 lg:grid-cols-[320px_minmax(0,1fr)] xl:grid-cols-[350px_minmax(0,1fr)]':'grid gap-4 lg:h-[calc(100vh-132px)] lg:min-h-[640px] lg:grid-cols-[minmax(280px,330px)_minmax(460px,1fr)_minmax(280px,320px)] 2xl:grid-cols-[minmax(320px,380px)_minmax(560px,1fr)_minmax(320px,360px)]'}>
+            <aside className={`portal-instance-sidebar flex flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-[0_12px_35px_rgba(15,23,42,0.045)] lg:min-h-0 ${view==='overview'?'max-h-[360px] lg:max-h-[calc(100vh-132px)]':'min-h-[680px]'}`}>
               <div className="flex items-center justify-between border-b border-slate-100 px-5 py-5">
                 <h2 className="text-base font-bold text-[#14213a]">我的实例 · {instances.length}</h2>
                 <button
@@ -646,56 +698,27 @@ export default function IEISystemListInstancesPage() {
                   </div>
                 ) : (
                   visibleInstances.map((instance) => {
-                    const runtime = getIEIRuntimePresentation(instance.type);
-                    const selected = instance.id === selectedInstance.id;
+                    const selected = view === 'instance' && instance.id === selectedInstance.id;
                     const displayStatus = lifecycleDisplayStatus(
                       instance,
                       lifecycleOperations[instance.id],
                     );
                     return (
-                      <button
-                        key={instance.id}
-                        type="button"
-                        onClick={() => setSelectedID(instance.id)}
-                        className={`group w-full rounded-xl border p-4 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-200 ${
-                          selected
-                            ? runtime.theme.selection
-                            : "border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50"
-                        }`}
-                      >
-                        <div className="flex items-start gap-3">
-                          <div
-                            className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border ${runtime.theme.border} ${runtime.theme.accentSoft} p-1.5`}
-                          >
-                            <InstanceTypeIcon type={instance.type} />
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-start justify-between gap-2">
-                              <h3 className="truncate text-[15px] font-bold text-slate-900">
-                                {instance.name}
-                              </h3>
-                              <span
-                                className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-semibold ${statusClass(displayStatus)}`}
-                              >
-                                {statusLabel(displayStatus)}
-                              </span>
-                            </div>
-                            <p className="mt-1 text-xs text-slate-500">
-                              {runtime.name} · #{instance.id}
-                            </p>
-                            <div className="mt-3 flex items-center gap-2 text-[11px] text-slate-400">
-                              <span className={`h-2 w-2 rounded-full ${runtime.theme.dot}`} />
-                              更新于 {formatTime(instance.updated_at)}
-                            </div>
-                          </div>
-                        </div>
-                      </button>
+                      <div key={instance.id}>
+                        <OwnerInstanceCard instance={instance} expanded={expandedInstanceID===instance.id} selected={selected} status={statusLabel(displayStatus)} pending={operationIsPending(lifecycleOperations[instance.id],instance.status)} menuOpen={menuInstanceID===instance.id}
+                          onToggle={()=>{setExpandedInstanceID(current=>current===instance.id?null:instance.id);setMenuInstanceID(null)}}
+                          onMenu={()=>setMenuInstanceID(current=>current===instance.id?null:instance.id)} onCloseMenu={()=>setMenuInstanceID(null)}
+                          onDetails={()=>{setSelectedID(instance.id);setView('instance')}}
+                          onRestart={()=>void handleRestart(instance)} onReset={()=>void handleReset(instance)}/>
+                      {lifecycleErrors[instance.id]&&<p role="alert" className="px-2 py-1 text-xs text-rose-600">{lifecycleErrors[instance.id]}</p>}
+                      </div>
                     );
                   })
                 )}
               </div>
             </aside>
 
+            {view==='overview' ? <div className="portal-dashboard-host min-w-0"><OwnerDashboard refreshAction={dashboardRefresh} owner={session?.owner??''} instances={instances} onSelect={id=>{if(instances.some(i=>i.id===id)){setSelectedID(id);setView('instance');}}}/></div> : <>
             <section className="flex min-h-[680px] flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-[0_12px_35px_rgba(15,23,42,0.045)] lg:min-h-0">
               <div className="border-b border-slate-100 px-6 py-5">
                 <h2 className="text-base font-bold text-[#14213a]">运行时说明</h2>
@@ -725,7 +748,7 @@ export default function IEISystemListInstancesPage() {
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-3">
                       <h1 className="truncate text-2xl font-bold tracking-tight text-[#10203b]">
-                        {selectedInstance.name}
+                        {instanceDisplayName(selectedInstance)}
                       </h1>
                       <span
                         className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${statusClass(selectedDisplayStatus)}`}
@@ -759,13 +782,13 @@ export default function IEISystemListInstancesPage() {
                   <button
                     type="button"
                     onClick={() => void handleRestart()}
-                    disabled={selectedLifecyclePending || selectedInstance.status.toLowerCase() !== "running"}
+                  disabled={selectedLifecyclePending || !["running", "error"].includes(selectedInstance.status.toLowerCase())}
                     className="inline-flex h-12 items-center justify-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-5 text-sm font-semibold text-blue-700 transition hover:border-blue-300 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     <Power className={`h-4 w-4 ${selectedLifecyclePending && selectedOperation?.action === "restart" ? "animate-pulse" : ""}`} />
                     重启实例
                   </button>
-                  {selectedLifecyclePending || selectedInstance.status.toLowerCase() !== "running" ? (
+                  {selectedInstance.status.toLowerCase() === "deleting" ? (
                     <button
                       type="button"
                       disabled
@@ -777,6 +800,7 @@ export default function IEISystemListInstancesPage() {
                   ) : (
                     <Link
                       to={`/ieisystem/instances/${selectedInstance.id}`}
+                      state={{portalReturnSearch:window.location.search}}
                       className="inline-flex h-12 shrink-0 items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-blue-700 to-blue-600 px-6 text-sm font-semibold text-white shadow-[0_10px_24px_rgba(37,99,235,0.22)] transition hover:-translate-y-0.5 hover:from-blue-800 hover:to-blue-700"
                     >
                       进入实例
@@ -883,7 +907,7 @@ export default function IEISystemListInstancesPage() {
                   </div>
                   <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
                     <h3 className="max-w-full truncate text-lg font-bold text-[#10203b]">
-                      {selectedInstance.name}
+                      {instanceDisplayName(selectedInstance)}
                     </h3>
                   </div>
                   <span
@@ -896,7 +920,8 @@ export default function IEISystemListInstancesPage() {
                 <div className="mt-6 overflow-hidden rounded-xl border border-slate-200">
                   <dl className="divide-y divide-slate-100 px-4">
                     {[
-                      ["实例名称", selectedInstance.name],
+                      [selectedInstance.alias?.trim() ? "实例别名" : "实例名称", instanceDisplayName(selectedInstance)],
+                      ...(selectedInstance.alias?.trim() ? [["技术名称", selectedInstance.name]] : []),
                       ["实例 ID", `#${selectedInstance.id}`],
                       ["运行时", selectedRuntime.name],
                       ["运行时类型", selectedRuntime.category],
@@ -919,6 +944,7 @@ export default function IEISystemListInstancesPage() {
                 </div>
               </div>
             </aside>
+            </>}
           </div>
         ) : null}
       </section>

@@ -17,6 +17,7 @@ var (
 	ErrRuntimeAgentConflict    = errors.New("runtime agent conflict")
 	ErrRuntimeAgentNotFound    = errors.New("runtime agent resource not found")
 	ErrRuntimeAgentUnsupported = errors.New("runtime agent operation unsupported")
+	ErrRuntimeUpgradeBusy      = errors.New("runtime upgrade operation is still in flight")
 )
 
 type RuntimeAgentClient interface {
@@ -44,16 +45,20 @@ type RuntimeUpgradeAgentClient interface {
 }
 
 type RuntimeAgentWorkspaceRequest struct {
-	RolloutID             string `json:"rollout_id"`
-	SnapshotID            string `json:"snapshot_id,omitempty"`
-	UserID                int    `json:"user_id"`
-	InstanceID            int    `json:"instance_id"`
-	Generation            int    `json:"generation"`
-	LeaseToken            string `json:"lease_token,omitempty"`
-	OfficialDBCheck       bool   `json:"official_database_check,omitempty"`
-	PreserveSessionSQLite bool   `json:"preserve_session_sqlite,omitempty"`
-	UID                   int    `json:"uid,omitempty"`
-	GID                   int    `json:"gid,omitempty"`
+	ManagedPluginPlanSHA256 string `json:"managed_plugin_plan_sha256,omitempty"`
+	RolloutID               string `json:"rollout_id"`
+	SnapshotID              string `json:"snapshot_id,omitempty"`
+	UserID                  int    `json:"user_id"`
+	InstanceID              int    `json:"instance_id"`
+	Generation              int    `json:"generation"`
+	LeaseToken              string `json:"lease_token,omitempty"`
+	OfficialDBCheck         bool   `json:"official_database_check,omitempty"`
+	PreserveSessionSQLite   bool   `json:"preserve_session_sqlite,omitempty"`
+	UID                     int    `json:"uid,omitempty"`
+	GID                     int    `json:"gid,omitempty"`
+	RecoveryMode            string `json:"recovery_mode,omitempty"`
+	ResumeRolloutID         string `json:"resume_rollout_id,omitempty"`
+	ResumeGeneration        int    `json:"resume_generation,omitempty"`
 }
 
 type RuntimeAgentWriterLeaseRequest struct {
@@ -116,22 +121,25 @@ type RuntimeAgentSessionSQLiteMigration struct {
 	SessionCatalogSHA256 string           `json:"session_catalog_sha256,omitempty"`
 	PhaseDurationsMS     map[string]int64 `json:"phase_durations_ms,omitempty"`
 	CompletedAt          time.Time        `json:"completed_at"`
+	DataPreserved        bool             `json:"data_preserved,omitempty"`
+	PreservationSHA256   string           `json:"preservation_sha256,omitempty"`
 }
 
 type RuntimeAgentUpgradeCompatibility struct {
-	InstanceID           int       `json:"instance_id"`
-	Status               string    `json:"status"`
-	ConfigOriginalSHA256 string    `json:"config_original_sha256"`
-	ConfigTargetSHA256   string    `json:"config_target_sha256"`
-	ConfigBytes          int64     `json:"config_bytes"`
-	SessionBytes         int64     `json:"session_bytes"`
-	StateBytes           int64     `json:"state_bytes"`
-	AvailableBytes       uint64    `json:"available_bytes"`
-	ConfigValidated      bool      `json:"config_validated"`
-	DoctorValidated      bool      `json:"doctor_validated"`
-	SessionDryRunValid   bool      `json:"session_dry_run_valid"`
-	ProbeOutputSHA256    string    `json:"probe_output_sha256"`
-	CheckedAt            time.Time `json:"checked_at"`
+	ManagedPluginPlanSHA256 string    `json:"managed_plugin_plan_sha256,omitempty"`
+	InstanceID              int       `json:"instance_id"`
+	Status                  string    `json:"status"`
+	ConfigOriginalSHA256    string    `json:"config_original_sha256"`
+	ConfigTargetSHA256      string    `json:"config_target_sha256"`
+	ConfigBytes             int64     `json:"config_bytes"`
+	SessionBytes            int64     `json:"session_bytes"`
+	StateBytes              int64     `json:"state_bytes"`
+	AvailableBytes          uint64    `json:"available_bytes"`
+	ConfigValidated         bool      `json:"config_validated"`
+	DoctorValidated         bool      `json:"doctor_validated"`
+	SessionDryRunValid      bool      `json:"session_dry_run_valid"`
+	ProbeOutputSHA256       string    `json:"probe_output_sha256"`
+	CheckedAt               time.Time `json:"checked_at"`
 }
 
 type RuntimeAgentSessionSQLiteRestore struct {
@@ -389,6 +397,9 @@ func (c *runtimeAgentHTTPClient) doWithClient(ctx context.Context, httpClient *h
 		}
 		if resp.StatusCode == http.StatusConflict {
 			return fmt.Errorf("%w: %s", ErrRuntimeAgentConflict, string(msg))
+		}
+		if resp.StatusCode == http.StatusLocked {
+			return fmt.Errorf("%w: %s", ErrRuntimeUpgradeBusy, string(msg))
 		}
 		if resp.StatusCode == http.StatusNotFound {
 			return fmt.Errorf("%w: %s", ErrRuntimeAgentNotFound, string(msg))

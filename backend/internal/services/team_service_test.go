@@ -8656,14 +8656,14 @@ func TestCreateRootCoordinationRecoveryPersistsHiddenEventAndOutbox(t *testing.T
 	}
 	sourceID := "turn-finished-64"
 	streamID := "123-0"
-	source := &models.TeamEvent{EventID: &sourceID, RedisStreamID: &streamID}
+	source := &models.TeamEvent{TeamID: team.ID, EventID: &sourceID, RedisStreamID: &streamID, EventType: "task_progress"}
 	if err := service.createRootCoordinationRecovery(team, nil, task, leader, map[string]interface{}{}, source); err != nil {
 		t.Fatalf("createRootCoordinationRecovery returned error: %v", err)
 	}
-	if len(repo.createdEvents) != 1 || repo.createdEvents[0].EventType != "root_coordination_recovery_requested" {
+	if len(repo.createdEvents) != 2 || repo.createdEvents[1].EventType != "root_coordination_recovery_requested" {
 		t.Fatalf("unexpected recovery events: %#v", repo.createdEvents)
 	}
-	payload := teamEventPayloadMap(repo.createdEvents[0])
+	payload := teamEventPayloadMap(repo.createdEvents[1])
 	if eventBool(payload, "visibleToChat") || eventBool(payload, "rootTaskTerminal") || eventString(payload, "stateEffect") != "none" {
 		t.Fatalf("recovery event must remain hidden and state-neutral: %#v", payload)
 	}
@@ -9276,12 +9276,23 @@ func (s *teamRepositoryStub) ConfirmWorkItemResult(item *models.TeamWorkItem, ev
 	s.outboxRows = append(s.outboxRows, clone)
 	return nil
 }
-func (s *teamRepositoryStub) CreateEventWithOutbox(event *models.TeamEvent, outbox *models.TeamEventOutbox) error {
+func (s *teamRepositoryStub) CreateEventWithOutbox(event *models.TeamEvent, outbox *models.TeamEventOutbox, observations ...*models.TeamEvent) error {
 	if event == nil || outbox == nil {
 		return nil
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	for _, observation := range observations {
+		found := false
+		for _, existing := range s.createdEvents {
+			if observation != nil && existing.TeamID == observation.TeamID && derefTeamString(existing.EventID) == derefTeamString(observation.EventID) {
+				found = true
+			}
+		}
+		if observation != nil && !found {
+			s.createdEvents = append(s.createdEvents, *observation)
+		}
+	}
 	eventExists := false
 	for idx := range s.createdEvents {
 		if s.createdEvents[idx].TeamID == event.TeamID &&

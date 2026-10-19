@@ -216,6 +216,7 @@ func isTeamDistributionCreatableType(instanceType string) bool {
 // CreateInstanceRequest holds data for creating an instance
 type CreateInstanceRequest struct {
 	Name                    string              `json:"name" validate:"required,min=3,max=50"`
+	Alias                   *string             `json:"alias,omitempty"`
 	Owner                   *string             `json:"owner,omitempty"`
 	Description             *string             `json:"description,omitempty"`
 	Type                    string              `json:"type" validate:"required,oneof=openclaw ubuntu debian centos custom webtop hermes opencode deepseek-harness"`
@@ -596,6 +597,7 @@ func (s *instanceService) create(userID int, req CreateInstanceRequest, validate
 		UserID:                   userID,
 		Owner:                    req.Owner,
 		Name:                     req.Name,
+		Alias:                    trimOptionalString(req.Alias),
 		Description:              req.Description,
 		Type:                     req.Type,
 		RuntimeType:              runtimeType,
@@ -975,6 +977,7 @@ func (s *instanceService) createV2Instance(ctx context.Context, userID int, req 
 		UserID:                   userID,
 		Owner:                    req.Owner,
 		Name:                     strings.TrimSpace(req.Name),
+		Alias:                    trimOptionalString(req.Alias),
 		Description:              trimOptionalString(req.Description),
 		Type:                     runtimeType,
 		RuntimeType:              RuntimeBackendGateway,
@@ -1239,6 +1242,14 @@ func hydrateInstanceDesktopStreamProfile(instance *models.Instance) {
 
 // Start starts an instance
 func (s *instanceService) Start(instanceID int) error {
+	if guard, ok := s.runtimeUpgradeGuard.(interface {
+		WithInstanceMutation(context.Context, int, func() error) error
+	}); ok {
+		return guard.WithInstanceMutation(context.Background(), instanceID, func() error { return s.startWithoutUpgradeMutationRace(instanceID) })
+	}
+	return s.startWithoutUpgradeMutationRace(instanceID)
+}
+func (s *instanceService) startWithoutUpgradeMutationRace(instanceID int) error {
 	ctx := context.Background()
 
 	instance, err := s.instanceRepo.GetByID(instanceID)
@@ -1258,6 +1269,9 @@ func (s *instanceService) Start(instanceID int) error {
 	}
 
 	if runtimeType, ok := v2RuntimeTypeForInstance(instance); ok {
+		if err := s.validateInstanceStartConfiguration(ctx, instance); err != nil {
+			return err
+		}
 		if err := s.prepareV2InstanceStart(ctx, instance); err != nil {
 			return err
 		}
@@ -1585,6 +1599,14 @@ requires_openai_auth = true
 }
 
 func (s *instanceService) buildGatewayEnv(instance *models.Instance) (map[string]string, error) {
+	env, err := s.buildGatewayEnvReadOnly(instance)
+	if err == nil && len(env) > 0 && instance != nil && instance.AccessToken != nil {
+		s.refreshGatewayTokenAlias(instance.ID, strings.TrimSpace(*instance.AccessToken))
+	}
+	return env, err
+}
+
+func (s *instanceService) buildGatewayEnvReadOnly(instance *models.Instance) (map[string]string, error) {
 	if instance == nil || instance.AccessToken == nil || strings.TrimSpace(*instance.AccessToken) == "" {
 		return map[string]string{}, nil
 	}
@@ -1603,7 +1625,6 @@ func (s *instanceService) buildGatewayEnv(instance *models.Instance) (map[string
 	}
 
 	token := strings.TrimSpace(*instance.AccessToken)
-	s.refreshGatewayTokenAlias(instance.ID, token)
 	env := map[string]string{
 		"CLAWMANAGER_LLM_BASE_URL":          baseURL,
 		"CLAWMANAGER_LLM_API_KEY":           token,
@@ -1935,6 +1956,7 @@ func (s *instanceService) startV2Instance(ctx context.Context, instance *models.
 	instance.Status = "creating"
 	instance.RuntimeGeneration = nextGeneration
 	instance.RuntimeErrorMessage = nil
+	instance.RuntimeErrorCode = nil
 	now := time.Now()
 	instance.StartedAt = &now
 	instance.UpdatedAt = now
@@ -2083,6 +2105,14 @@ func ensureRuntimeWorkspaceDirectories(root, runtimeType string, userID, instanc
 
 // Stop stops an instance
 func (s *instanceService) Stop(instanceID int) error {
+	if guard, ok := s.runtimeUpgradeGuard.(interface {
+		WithInstanceMutation(context.Context, int, func() error) error
+	}); ok {
+		return guard.WithInstanceMutation(context.Background(), instanceID, func() error { return s.stopWithoutUpgradeMutationRace(instanceID) })
+	}
+	return s.stopWithoutUpgradeMutationRace(instanceID)
+}
+func (s *instanceService) stopWithoutUpgradeMutationRace(instanceID int) error {
 	ctx := context.Background()
 
 	instance, err := s.instanceRepo.GetByID(instanceID)
@@ -2098,7 +2128,7 @@ func (s *instanceService) Stop(instanceID int) error {
 		return s.stopV2Instance(ctx, instance)
 	}
 
-	if instance.Status != "running" {
+	if instance.Status != "running" && instance.Status != "error" {
 		return fmt.Errorf("instance is not running")
 	}
 
@@ -2148,10 +2178,35 @@ func (s *instanceService) Restart(instanceID int) error {
 	if instance == nil {
 		return fmt.Errorf("instance not found")
 	}
+	if err := s.validateInstanceStartConfiguration(ctx, instance); err != nil {
+		return err
+	}
 
 	_, isV2 := v2RuntimeTypeForInstance(instance)
 	waitForDesktopPods := !isV2 && instanceUsesDesktopRuntime(instance)
 
+	if isV2 {
+		// Fence heartbeats/scheduler snapshots from the old gateway before Stop.
+		// Otherwise a late "running" update can resurrect the stopped generation
+		// and make Start reject the restart as "already running". No workspace
+		// contents are changed; Start allocates the next running generation.
+		if repo, ok := s.instanceRepo.(interface {
+			FenceRuntimeRestart(context.Context, int, int) (bool, error)
+		}); ok {
+			claimed, err := repo.FenceRuntimeRestart(ctx, instanceID, instance.RuntimeGeneration)
+			if err != nil {
+				return fmt.Errorf("failed to fence previous runtime generation: %w", err)
+			}
+			if !claimed {
+				if err := s.validateInstanceStartConfiguration(ctx, instance); err != nil {
+					return err
+				}
+				return fmt.Errorf("instance changed during restart preparation; retry after the current operation")
+			}
+		} else if err := s.instanceRepo.UpdateRuntimeState(ctx, instanceID, "stopped", instance.RuntimeGeneration+1, nil); err != nil {
+			return fmt.Errorf("failed to fence previous runtime generation: %w", err)
+		}
+	}
 	if err := s.Stop(instanceID); err != nil {
 		return fmt.Errorf("failed to stop instance: %w", err)
 	}
@@ -2185,6 +2240,12 @@ type InstanceReplacementResetService interface {
 	CreateResetReplacement(sourceInstanceID int, operationID string) (*models.Instance, error)
 	FinalizeResetReplacement(sourceInstanceID, replacementInstanceID int) (cleanupPending bool, warning string, err error)
 	DiscardResetReplacement(replacementInstanceID int) error
+}
+
+// InstancePermanentDeleteService is used by the northbound worker for a
+// synchronous, verifiable removal of both runtime resources and user data.
+type InstancePermanentDeleteService interface {
+	DeletePermanently(instanceID int) error
 }
 
 const (
@@ -2258,6 +2319,7 @@ func resetReplacementCreateRequest(source *models.Instance, operationID string) 
 	stagingOwner := factoryResetStagingOwner
 	return CreateInstanceRequest{
 		Name:                    factoryResetStagingName(source.ID, operationID),
+		Alias:                   source.Alias,
 		Owner:                   &stagingOwner,
 		Description:             source.Description,
 		Type:                    source.Type,
@@ -2276,6 +2338,21 @@ func resetReplacementCreateRequest(source *models.Instance, operationID string) 
 		StorageClass:            source.StorageClass,
 		ProvisioningOperationID: "reset_" + strings.TrimSpace(operationID),
 	}, nil
+}
+
+// DeletePermanently removes the same persistent resources as a factory-reset
+// source cleanup and returns only after the database record is gone. Unlike the
+// legacy UI Delete method it never reports success after merely scheduling a
+// best-effort background cleanup.
+func (s *instanceService) DeletePermanently(instanceID int) error {
+	instance, err := s.instanceRepo.GetByID(instanceID)
+	if err != nil {
+		return fmt.Errorf("failed to get instance for permanent deletion: %w", err)
+	}
+	if instance == nil {
+		return nil
+	}
+	return s.cleanupResetSource(context.Background(), instance)
 }
 
 // FinalizeResetReplacement atomically hides the source and exposes the healthy
@@ -2304,6 +2381,9 @@ func (s *instanceService) FinalizeResetReplacement(sourceInstanceID, replacement
 		// trying to discard the user's new instance.
 		return false, "", nil
 	}
+	if source.UserID != replacement.UserID {
+		return false, "", fmt.Errorf("factory-reset replacement user mismatch")
+	}
 	stagingNamePrefix := fmt.Sprintf("reset-%d-", sourceInstanceID)
 	quarantineName := factoryResetQuarantineName(source.ID)
 	alreadyPromoted := source.Owner != nil &&
@@ -2311,17 +2391,19 @@ func (s *instanceService) FinalizeResetReplacement(sourceInstanceID, replacement
 		source.Name == quarantineName
 
 	if alreadyPromoted {
-		if replacement.Owner == nil || strings.TrimSpace(*replacement.Owner) == "" || strings.HasPrefix(replacement.Name, stagingNamePrefix) {
+		if strings.HasPrefix(replacement.Name, stagingNamePrefix) {
 			return false, "", fmt.Errorf("factory-reset replacement cutover state is inconsistent")
 		}
 		// The network-policy name for Pro instances includes the original
 		// instance name. After cutover that name lives on the replacement.
 		source.Name = replacement.Name
 	} else {
-		if source.Owner == nil || strings.TrimSpace(*source.Owner) == "" {
-			return false, "", fmt.Errorf("factory-reset source identity is unavailable")
+		// Workspace-created instances need not have a northbound display owner.
+		// UserID remains the authorization identity throughout replacement.
+		originalOwner := ""
+		if source.Owner != nil {
+			originalOwner = strings.TrimSpace(*source.Owner)
 		}
-		originalOwner := strings.TrimSpace(*source.Owner)
 		originalName := source.Name
 
 		promoter, ok := s.instanceRepo.(repository.InstanceResetReplacementRepository)
@@ -2372,6 +2454,11 @@ func (s *instanceService) DiscardResetReplacement(replacementInstanceID int) err
 	replacement, err := s.instanceRepo.GetByID(replacementInstanceID)
 	if err != nil || replacement == nil {
 		return err
+	}
+	// A cutover commit can succeed even if its response was lost. Never erase
+	// a promoted instance when a worker retries or sees an ambiguous DB error.
+	if replacement.Owner == nil || *replacement.Owner != factoryResetStagingOwner {
+		return fmt.Errorf("refusing to discard a non-staging replacement")
 	}
 	replacement.Owner = factoryResetString(factoryResetQuarantineOwner)
 	replacement.Status = "stopped"
@@ -2645,6 +2732,7 @@ func (s *instanceService) resetInstanceRuntimeData(ctx context.Context, instance
 	instance.PodNamespace = nil
 	instance.PodIP = nil
 	instance.RuntimeErrorMessage = nil
+	instance.RuntimeErrorCode = nil
 	instance.WorkspaceUsageBytes = 0
 	instance.StoppedAt = nil
 	return nil
@@ -2775,7 +2863,14 @@ func (s *instanceService) RestartWithEnvironment(instanceID int, environmentOver
 		return err
 	}
 
-	instance.EnvironmentOverridesJSON = encoded
+	// Repositories may return shared pointers. Do not mutate even the in-memory
+	// source until the complete proposed configuration has passed validation.
+	prepared := *instance
+	prepared.EnvironmentOverridesJSON = encoded
+	if err := s.validateInstanceStartConfiguration(context.Background(), &prepared); err != nil {
+		return err
+	}
+	instance = &prepared
 	instance.UpdatedAt = time.Now()
 	if err := s.instanceRepo.Update(instance); err != nil {
 		return fmt.Errorf("failed to persist instance environment overrides: %w", err)

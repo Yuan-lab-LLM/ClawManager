@@ -136,10 +136,9 @@ assert.match(
   /title=\{queryText \|\| undefined\}[\s\S]*\{queryText \|\| "用户提交 query 后，这里会展示拆解、执行和汇总。"\}/,
   "the Kanban header must present the current query as its primary text",
 );
-assert.match(
-  source,
-  /case "long":\s*return 1110;[\s\S]*case "medium":\s*return 945;[\s\S]*default:\s*return 740;/,
-  "the shared chat and Kanban height must reduce empty space without clipping the detail panel",
-);
+assert.doesNotMatch(source, /teamWorkspaceHeight/, "chat height must not depend on card detail length");
+assert.match(source, /<TeamChatWorkspace/, "Team detail must use the unified workspace");
+assert.match(source, /team-plain-message/, "messages must use plain transcript presentation");
+assert.doesNotMatch(source, /max-w-\[92%\]/, "message width must not retain bubble constraints");
 
 process.stdout.write("Team chat presentation contract test passed\n");

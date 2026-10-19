@@ -21,6 +21,7 @@ import (
 	"unicode"
 
 	"clawreef/internal/models"
+	"clawreef/internal/ownerrecords"
 	"clawreef/internal/repository"
 	"clawreef/internal/services"
 	"clawreef/internal/utils"
@@ -339,6 +340,7 @@ type Service interface {
 }
 
 type service struct {
+	ownerUsage           *ownerrecords.Store
 	modelRepo            repository.LLMModelRepository
 	expandedModelCatalog services.ExpandedLLMModelCatalog
 	invocationService    services.ModelInvocationService
@@ -354,6 +356,10 @@ type service struct {
 }
 
 type ServiceOption func(*service)
+
+func WithOwnerUsage(store *ownerrecords.Store) ServiceOption {
+	return func(s *service) { s.ownerUsage = store }
+}
 
 func WithExpandedLLMModelCatalog(catalog services.ExpandedLLMModelCatalog) ServiceOption {
 	return func(s *service) {
@@ -541,6 +547,9 @@ func (s *service) prepareChatRequest(userID int, req ChatCompletionRequest) (*pr
 	}
 
 	requestedModel := strings.TrimSpace(req.Model)
+	if s.ownerUsage != nil && req.InstanceID != nil && *req.InstanceID > 0 {
+		s.ownerUsage.QueueBinding(uint64(*req.InstanceID))
+	}
 	selectedModel, err := s.resolveRequestedModel(requestedModel)
 	if err != nil {
 		return nil, err

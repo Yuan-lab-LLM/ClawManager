@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"clawreef/internal/models"
+	"clawreef/internal/repository"
 )
 
 func TestValidateCreateInstanceDiskGBUsesModeSpecificMinimum(t *testing.T) {
@@ -115,6 +116,20 @@ func TestFinalizeResetReplacementIsIdempotentAfterSourceCleanup(t *testing.T) {
 	}
 	if _, ok := repo.byID[202]; !ok {
 		t.Fatal("promoted replacement was removed during completion retry")
+	}
+}
+
+func TestDiscardResetReplacementNeverDeletesPromotedInstance(t *testing.T) {
+	for _, owner := range []*string{nil, factoryResetString(""), factoryResetString("user@example.com")} {
+		repo := newV2LifecycleInstanceRepo()
+		repo.byID[202] = &models.Instance{ID: 202, UserID: 7, Owner: owner, Name: "user-instance", Status: "running"}
+		service := &instanceService{instanceRepo: repo}
+		if err := service.DiscardResetReplacement(202); err == nil {
+			t.Fatal("promoted replacement discard accepted")
+		}
+		if repo.byID[202] == nil || repo.byID[202].Status != "running" {
+			t.Fatal("promoted replacement changed")
+		}
 	}
 }
 
@@ -438,6 +453,7 @@ func TestInstanceServiceStartV2MarksCreatingWithNextGeneration(t *testing.T) {
 	}
 	service := &instanceService{instanceRepo: instanceRepo}
 
+	configureLifecycleModels(t, service)
 	if err := service.Start(77); err != nil {
 		t.Fatalf("Start returned error: %v", err)
 	}
@@ -481,6 +497,7 @@ func TestInstanceServiceStartV2CleansFailedBindingBeforeNextGeneration(t *testin
 		agentClient:    agent,
 	}
 
+	configureLifecycleModels(t, service)
 	if err := service.Start(78); err != nil {
 		t.Fatalf("Start returned error: %v", err)
 	}
@@ -521,6 +538,7 @@ func TestInstanceServiceStartV2QuarantinesReportedCorruptLegacyTaskDatabase(t *t
 	}
 	service := &instanceService{instanceRepo: instanceRepo}
 
+	configureLifecycleModels(t, service)
 	if err := service.Start(79); err != nil {
 		t.Fatalf("Start returned error: %v", err)
 	}
@@ -685,6 +703,16 @@ func TestInstanceServiceStopV2KeepsBindingWhenRuntimePodLookupFails(t *testing.T
 	}
 }
 
+type restartHeartbeatAgent struct {
+	fakeRuntimeAgentClient
+	onDelete func()
+}
+
+func (a *restartHeartbeatAgent) DeleteGateway(ctx context.Context, endpoint, gatewayID string) error {
+	a.onDelete()
+	return a.fakeRuntimeAgentClient.DeleteGateway(ctx, endpoint, gatewayID)
+}
+
 func TestInstanceServiceRestartV2RecreatesGatewayViaScheduler(t *testing.T) {
 	workspacePath := "/workspaces/openclaw/user-45/instance-89"
 	instanceRepo := newV2LifecycleInstanceRepo()
@@ -712,7 +740,13 @@ func TestInstanceServiceRestartV2RecreatesGatewayViaScheduler(t *testing.T) {
 		State:        "running",
 		Generation:   8,
 	}
-	agent := &fakeRuntimeAgentClient{}
+	// A heartbeat already in flight must not resurrect the stopped generation.
+	agent := &restartHeartbeatAgent{onDelete: func() {
+		err := instanceRepo.UpdateRuntimeState(context.Background(), 89, "running", 8, nil)
+		if !errors.Is(err, repository.ErrStaleRuntimeGeneration) {
+			t.Errorf("old heartbeat accepted during restart: %v", err)
+		}
+	}}
 	service := &instanceService{
 		instanceRepo:   instanceRepo,
 		runtimePodRepo: podRepo,
@@ -720,6 +754,7 @@ func TestInstanceServiceRestartV2RecreatesGatewayViaScheduler(t *testing.T) {
 		agentClient:    agent,
 	}
 
+	configureLifecycleModels(t, service)
 	if err := service.Restart(89); err != nil {
 		t.Fatalf("Restart returned error: %v", err)
 	}
@@ -731,8 +766,11 @@ func TestInstanceServiceRestartV2RecreatesGatewayViaScheduler(t *testing.T) {
 		t.Fatalf("binding delete and release calls = %d, want 1", bindingRepo.deleteAndReleaseCalls[89])
 	}
 	state := instanceRepo.runtimeStates[89]
-	if state.status != "creating" || state.generation != 9 {
-		t.Fatalf("runtime state = %#v, want creating generation 9", state)
+	if state.status != "creating" || state.generation != 10 {
+		t.Fatalf("runtime state = %#v, want creating generation 10", state)
+	}
+	if *instanceRepo.byID[89].WorkspacePath != workspacePath {
+		t.Fatal("restart changed workspace")
 	}
 }
 
@@ -758,6 +796,7 @@ func TestInstanceServiceRestartWithEnvironmentMergesDesiredState(t *testing.T) {
 	}
 	service := &instanceService{instanceRepo: instanceRepo}
 
+	configureLifecycleModels(t, service)
 	err = service.RestartWithEnvironment(191, map[string]string{
 		"LOG_LEVEL":        "debug",
 		"SKILL_CACHE_PATH": "/workspace/cache",
@@ -781,8 +820,8 @@ func TestInstanceServiceRestartWithEnvironmentMergesDesiredState(t *testing.T) {
 		t.Fatalf("SKILL_CACHE_PATH = %q, want /workspace/cache", environment["SKILL_CACHE_PATH"])
 	}
 	state := instanceRepo.runtimeStates[191]
-	if state.status != "creating" || state.generation != 4 {
-		t.Fatalf("runtime state = %#v, want creating generation 4", state)
+	if state.status != "creating" || state.generation != 5 {
+		t.Fatalf("runtime state = %#v, want creating generation 5", state)
 	}
 }
 
@@ -890,6 +929,7 @@ func TestInstanceServiceRestartWithEnvironmentRemovesDesiredState(t *testing.T) 
 	}
 	service := &instanceService{instanceRepo: instanceRepo}
 
+	configureLifecycleModels(t, service)
 	err = service.RestartWithEnvironment(
 		195,
 		map[string]string{"RESET_ME": "new-value"},
@@ -913,8 +953,8 @@ func TestInstanceServiceRestartWithEnvironmentRemovesDesiredState(t *testing.T) 
 		t.Fatalf("RESET_ME = %q, want new-value", environment["RESET_ME"])
 	}
 	state := instanceRepo.runtimeStates[195]
-	if state.status != "creating" || state.generation != 6 {
-		t.Fatalf("runtime state = %#v, want creating generation 6", state)
+	if state.status != "creating" || state.generation != 7 {
+		t.Fatalf("runtime state = %#v, want creating generation 7", state)
 	}
 }
 
@@ -1516,6 +1556,9 @@ func (r *v2LifecycleInstanceRepo) GetV2Creating(context.Context, int) ([]models.
 func (r *v2LifecycleInstanceRepo) UpdateRuntimeState(ctx context.Context, id int, status string, generation int, message *string) error {
 	instance := r.byID[id]
 	if instance != nil {
+		if instance.RuntimeGeneration > generation {
+			return repository.ErrStaleRuntimeGeneration
+		}
 		instance.Status = status
 		instance.RuntimeGeneration = generation
 		instance.RuntimeErrorMessage = message

@@ -17,6 +17,7 @@ COPY frontend/package*.json ./
 RUN npm ci
 
 COPY frontend/ ./
+COPY backend/internal/teampresentation/catalog.json /app/backend/internal/teampresentation/catalog.json
 RUN npm run build
 
 FROM --platform=$BUILDPLATFORM golang:1.26.1-alpine AS backend-builder
@@ -49,7 +50,7 @@ FROM nginx:1.27-alpine
 
 # nginx-module-njs provides ngx_http_js_module.so, loaded by nginx.conf to run
 # the desktop access-token verification (deployments/nginx/njs/desktop_auth.js).
-RUN apk add --no-cache dumb-init openssl nginx-module-njs
+RUN apk add --no-cache dumb-init openssl nginx-module-njs sqlite
 
 WORKDIR /app
 

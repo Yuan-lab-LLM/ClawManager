@@ -1,4 +1,5 @@
 import api from "./api";
+import type { WorkspaceText } from "../components/WorkspaceTextEditor";
 import type {
   CreateTeamRequest,
   DispatchTeamTaskRequest,
@@ -73,9 +74,11 @@ export const teamService = {
   listWorkspaceFiles: async (
     teamId: number,
     path: string = "",
+    signal?: AbortSignal,
   ): Promise<TeamWorkspaceListResponse> => {
     const response = await api.get(`/teams/${teamId}/workspace/files`, {
       params: { path },
+      signal,
     });
     return response.data.data;
   },
@@ -83,9 +86,11 @@ export const teamService = {
   previewWorkspaceFile: async (
     teamId: number,
     path: string,
+    signal?: AbortSignal,
   ): Promise<TeamWorkspacePreviewResponse> => {
     const response = await api.get(`/teams/${teamId}/workspace/preview`, {
       params: { path },
+      signal,
     });
     return response.data.data;
   },
@@ -96,6 +101,15 @@ export const teamService = {
       responseType: "blob",
     });
     return response.data;
+  },
+
+  readText: async (teamId: number, path: string, signal?: AbortSignal): Promise<WorkspaceText> => {
+    const response = await api.get(`/teams/${teamId}/workspace/text`, { params: { path }, signal });
+    return response.data.data;
+  },
+  saveText: async (teamId: number, path: string, text: string, version: string): Promise<WorkspaceText> => {
+    const response = await api.put(`/teams/${teamId}/workspace/text`, { path, text, version });
+    return response.data.data;
   },
 
   createWorkspaceFolder: async (

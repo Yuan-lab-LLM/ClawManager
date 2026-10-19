@@ -53,7 +53,7 @@ type TeamRepository interface {
 	ListWorkflowPhasesByRootTaskID(rootTaskID int) ([]models.TeamWorkflowPhase, error)
 	AcceptRootCompletion(task *models.TeamTask, expectedLedgerVersion int64, event *models.TeamEvent, outbox *models.TeamEventOutbox) (bool, error)
 	ConfirmWorkItemResult(item *models.TeamWorkItem, event *models.TeamEvent, outbox *models.TeamEventOutbox) error
-	CreateEventWithOutbox(event *models.TeamEvent, outbox *models.TeamEventOutbox) error
+	CreateEventWithOutbox(event *models.TeamEvent, outbox *models.TeamEventOutbox, observations ...*models.TeamEvent) error
 	CreateEventOutbox(outbox *models.TeamEventOutbox) error
 	ListPendingEventOutbox(now time.Time, limit int) ([]models.TeamEventOutbox, error)
 	MarkEventOutboxDelivered(id int, deliveredAt time.Time) error
@@ -409,12 +409,28 @@ func (r *teamRepository) ConfirmWorkItemResult(item *models.TeamWorkItem, event 
 	})
 }
 
-func (r *teamRepository) CreateEventWithOutbox(event *models.TeamEvent, outbox *models.TeamEventOutbox) error {
+func (r *teamRepository) CreateEventWithOutbox(event *models.TeamEvent, outbox *models.TeamEventOutbox, observations ...*models.TeamEvent) error {
 	if event == nil || outbox == nil {
 		return fmt.Errorf("event and outbox are required")
 	}
 	return r.sess.Tx(func(sess db.Session) error {
 		txRepo := &teamRepository{sess: sess}
+		// Commit the source observation with its recovery action. Otherwise a
+		// crash between the two writes makes stream deduplication lose recovery.
+		for _, observation := range observations {
+			if observation != nil {
+				// A periodic Monitor may pass an already-persisted observation.
+				// Replay by its event/stream identity, never its auto-increment PK.
+				pending := *observation
+				pending.ID = 0
+				pending.SequenceNo = 0
+				if err := txRepo.CreateEvent(&pending); err != nil && !errors.Is(err, ErrDuplicateTeamEvent) {
+					return err
+				} else if err == nil {
+					*observation = pending
+				}
+			}
+		}
 		if err := txRepo.CreateEvent(event); err != nil && !errors.Is(err, ErrDuplicateTeamEvent) {
 			return err
 		}
@@ -504,6 +520,10 @@ func (r *teamRepository) ListWorkflowPhasesByRootTaskID(rootTaskID int) ([]model
 }
 
 func (r *teamRepository) AcceptRootCompletion(task *models.TeamTask, expectedLedgerVersion int64, event *models.TeamEvent, outbox *models.TeamEventOutbox) (bool, error) {
+	return r.acceptRootCompletion(task, expectedLedgerVersion, event, outbox, nil)
+}
+
+func (r *teamRepository) acceptRootCompletion(task *models.TeamTask, expectedLedgerVersion int64, event *models.TeamEvent, outbox *models.TeamEventOutbox, singleItem *models.TeamWorkItem) (bool, error) {
 	if task == nil || event == nil || outbox == nil || task.ID <= 0 {
 		return false, fmt.Errorf("task, accepted completion event and outbox are required")
 	}
@@ -542,6 +562,11 @@ WHERE id = ? AND ledger_version = ? AND accepted_completion_id IS NULL
 			return nil
 		}
 		accepted = true
+		if singleItem != nil {
+			if err := (&teamRepository{sess: sess}).UpsertWorkItem(singleItem); err != nil {
+				return err
+			}
+		}
 		if _, err := sess.SQL().Exec(`
 UPDATE team_workflow_phases
 SET status = 'completed', completed_at = ?, updated_at = ?
@@ -555,16 +580,25 @@ WHERE root_task_id = ? AND (? = 0 OR plan_version = ?)
 		// if a member already started a newer task, a late completion cannot reset
 		// that member back to idle. Keeping this in the same transaction prevents a
 		// succeeded root from leaving 8.1 workers permanently busy after restart.
+		progress := 100
+		runtimeStatus := models.TeamTaskStatusSucceeded
+		if singleItem != nil {
+			runtimeStatus = task.Status
+			if task.Status != models.TeamTaskStatusSucceeded {
+				progress = 0
+			}
+		}
 		if _, err := sess.SQL().Exec(`
 UPDATE team_members
-SET status = ?, current_task_id = NULL, progress = 100, availability = ?,
+SET status = ?, current_task_id = NULL, progress = ?, availability = ?,
     runtime_status = ?, runtime_task_id = NULL, runtime_intent = NULL,
     blocked_reason = NULL, updated_at = ?
 WHERE team_id = ? AND current_task_id = ?
 `,
 			models.TeamMemberStatusIdle,
+			progress,
 			models.TeamMemberAvailabilityIdle,
-			models.TeamTaskStatusSucceeded,
+			runtimeStatus,
 			task.UpdatedAt,
 			task.TeamID,
 			task.ID,

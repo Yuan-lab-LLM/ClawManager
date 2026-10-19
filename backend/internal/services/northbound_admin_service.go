@@ -30,6 +30,8 @@ var ErrNorthboundSettingsConflict = errors.New("northbound settings were changed
 var allowedNorthboundScopes = map[string]struct{}{
 	"lite-instances:create": {}, "lite-instances:read": {}, "pro-instances:create": {}, "pro-instances:read": {},
 	"lite-instances:restart": {}, "lite-instances:reset": {}, "pro-instances:restart": {}, "pro-instances:reset": {},
+	"lite-instances:delete": {}, "pro-instances:delete": {},
+	"owners:usage:read":                {},
 	"lite-instances:share-link:manage": {}, "lite-instances:share-link:reset": {},
 }
 

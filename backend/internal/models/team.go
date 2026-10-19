@@ -64,6 +64,7 @@ type TeamMember struct {
 	UserID        int        `db:"user_id" json:"user_id"`
 	MemberKey     string     `db:"member_key" json:"member_key"`
 	DisplayName   string     `db:"display_name" json:"display_name"`
+	IconKey       *string    `db:"icon_key" json:"icon_key,omitempty"`
 	Role          string     `db:"role" json:"role"`
 	RuntimeType   string     `db:"runtime_type" json:"runtime_type"`
 	InstanceMode  string     `db:"instance_mode" json:"instance_mode"`

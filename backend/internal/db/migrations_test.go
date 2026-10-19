@@ -664,3 +664,22 @@ func TestMigration050IncludesLDAPTLSCertificateSettings(t *testing.T) {
 		}
 	}
 }
+
+func TestMigration059AddsOptionalInstanceAliasIdempotently(t *testing.T) {
+	raw, err := embeddedMigrations.ReadFile("migrations/063_add_instance_alias.sql")
+	if err != nil {
+		t.Fatalf("read migration 059: %v", err)
+	}
+	sql := string(raw)
+	for _, required := range []string{
+		"information_schema.COLUMNS",
+		"COLUMN_NAME = 'alias'",
+		"ADD COLUMN alias VARCHAR(128)",
+		"utf8mb4_unicode_ci NULL",
+		"PREPARE instance_alias_column_stmt",
+	} {
+		if !strings.Contains(sql, required) {
+			t.Fatalf("migration 059 must contain %s", required)
+		}
+	}
+}

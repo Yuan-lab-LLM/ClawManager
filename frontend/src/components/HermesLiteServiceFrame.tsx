@@ -66,7 +66,7 @@ type FrameState = {
   key: string;
   src: string | null;
   status: "opening" | "ready" | "error";
-  error?: "unavailable" | "connectionFailed" | "startupTimeout";
+  error?: string;
 };
 
 function HermesDesktopFrame({
@@ -100,7 +100,11 @@ function HermesDesktopFrame({
         const nextSrc = resolveHermesDesktopRendererUrl(response.renderer_url, instanceId, window.location.origin);
         const renewalDelay = hermesDesktopRenewalDelay(response.expires_at);
         if (!response.available || response.instance_id !== instanceId || !nextSrc || renewalDelay === null) {
-          setState({ key: launchKey, src: null, status: "error", error: "unavailable" });
+          // Activation can fail after a successful capability probe. Use the
+          // same fixed reason mapping, rather than claiming the Runtime lacks
+          // Desktop Web support when its upstream authentication failed.
+          const rejected = resolveHermesDesktopView({ instanceId, instanceAvailable: true, pending: false, failed: false, capability: response });
+          setState({ key: launchKey, src: null, status: "error", error: rejected.reason ?? "capabilityUnknown" });
           return;
         }
         expiresAt = Date.parse(response.expires_at!);

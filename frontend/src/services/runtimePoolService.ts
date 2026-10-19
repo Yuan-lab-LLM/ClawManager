@@ -50,6 +50,14 @@ export const runtimePoolService = {
     };
   },
 
+  async listRollouts(runtimeType?: RuntimeType): Promise<RuntimeRollout[]> {
+    const response = await api.get("/admin/runtime-rollouts", {
+      params: runtimeType ? { runtime_type: runtimeType } : undefined,
+    });
+    const items = response.data.data?.items;
+    return Array.isArray(items) ? items : [];
+  },
+
   async preflightOpenClawRollout(data: Omit<StartRuntimeRolloutRequest, "runtime_type" | "preflight_id">): Promise<RuntimeUpgradePreflightResult> {
     const response = await api.post("/admin/runtime-rollouts/preflight", data);
     const result = response.data.data as RuntimeUpgradePreflightResult | null | undefined;

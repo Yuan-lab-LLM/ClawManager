@@ -45,6 +45,10 @@ type RuntimePod struct {
 	SourceDeployment  string `db:"-" json:"source_deployment,omitempty"`
 	SchedulingEnabled *bool  `db:"-" json:"scheduling_enabled,omitempty"`
 	DesiredReplicas   int32  `db:"-" json:"desired_replicas,omitempty"`
+	// Only populated by the control-plane Kubernetes inventory, never by an
+	// Agent report. Legacy Agents may omit pod_uid in their registration.
+	KubernetesPodUID *string `db:"-" json:"-"`
+	KubernetesReady  bool    `db:"-" json:"-"`
 }
 
 func (p RuntimePod) Capabilities() []string {

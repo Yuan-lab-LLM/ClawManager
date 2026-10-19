@@ -236,6 +236,36 @@ paths:
       responses:
         "202": { $ref: "#/components/responses/OperationAccepted" }
         "409": { $ref: "#/components/responses/Conflict" }
+  /api/northbound/v1/lite-instances/{id}/delete:
+    post:
+      summary: Permanently delete a Lite instance and its workspace
+      description: Requires lite-instances:delete and explicit confirmation of data loss.
+      operationId: deleteLiteInstanceConfirmed
+      security: [{ bearerAuth: [] }, { apiKeyAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - { name: id, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/ConfirmInstanceReset" } } }
+      responses:
+        "202": { $ref: "#/components/responses/OperationAccepted" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/northbound/v1/pro-instances/{id}/delete:
+    post:
+      summary: Permanently delete a Pro instance and its workspace
+      description: Requires pro-instances:delete and explicit confirmation of data loss.
+      operationId: deleteProInstanceConfirmed
+      security: [{ bearerAuth: [] }, { apiKeyAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - { name: id, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/ConfirmInstanceReset" } } }
+      responses:
+        "202": { $ref: "#/components/responses/OperationAccepted" }
+        "409": { $ref: "#/components/responses/Conflict" }
   /api/northbound/v1/pro-instances:
     post:
       summary: Submit a managed Pro provisioning operation
@@ -491,6 +521,10 @@ paths:
           $ref: "#/components/responses/NotFound"
 components:
   securitySchemes:
+    apiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
     bearerAuth:
       type: http
       scheme: bearer
@@ -572,6 +606,13 @@ components:
           type: string
           enum: [openclaw, hermes, opencode, deepseek-harness]
           description: Runtime family provisioned as Lite. Callers do not select the mode.
+        alias:
+          type: [string, "null"]
+          description: Optional user-facing alias.
+        instance_mode:
+          type: string
+          enum: [lite]
+          description: Optional assertion of Lite mode; other modes are rejected.
         description:
           type: [string, "null"]
           maxLength: 2000
@@ -595,6 +636,13 @@ components:
           type: string
           enum: [openclaw, hermes, opencode, deepseek-harness]
           description: Runtime family. The endpoint fixes Pro/desktop mode and resolves the enabled DESKTOP image saved in ClawManager. These runtimes use 4 CPU, 8 GB memory, 50 GB storage, and no GPU.
+        alias:
+          type: [string, "null"]
+          description: Optional user-facing alias.
+        instance_mode:
+          type: string
+          enum: [pro]
+          description: Optional assertion of Pro mode; other modes are rejected.
         description:
           type: [string, "null"]
           maxLength: 2000

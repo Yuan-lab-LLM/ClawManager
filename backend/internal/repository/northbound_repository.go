@@ -2,8 +2,10 @@ package repository
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"clawreef/internal/models"
@@ -303,6 +305,36 @@ func (r *NorthboundRepository) RevokeSession(ctx context.Context, sessionID stri
 
 func (r *NorthboundRepository) CreateOperation(item *models.NorthboundOperation) error {
 	ensureTimestamps(&item.CreatedAt, &item.UpdatedAt)
+	if item.InstanceID != nil && (strings.HasSuffix(item.OperationType, "restart") || strings.HasSuffix(item.OperationType, "reset") || strings.HasSuffix(item.OperationType, "delete")) {
+		return r.sess.TxContext(context.Background(), func(tx db.Session) error {
+			if err := lockLifecycleScheduler(context.Background(), tx); err != nil {
+				return err
+			}
+			reserved, err := tx.Collection("instance_lifecycle_manual_guards").Find(db.Cond{"instance_id": *item.InstanceID}).Count()
+			if err != nil {
+				return err
+			}
+			if reserved > 0 {
+				return fmt.Errorf("instance has a direct mutation in progress")
+			}
+			retryReserved, err := lifecycleRetryReservation(tx, *item.InstanceID)
+			if err != nil {
+				return err
+			}
+			if retryReserved {
+				return fmt.Errorf("instance is awaiting batch retry")
+			}
+			count, err := tx.Collection("northbound_operations").Find(db.And(db.Cond{"status IN": []string{"queued", "processing", "batch_pending"}}, db.Or(db.Cond{"instance_id": *item.InstanceID}, db.Cond{"request_payload": fmt.Sprintf(`{"instance_id":%d}`, *item.InstanceID)}))).Count()
+			if err != nil {
+				return err
+			}
+			if count > 0 {
+				return fmt.Errorf("instance lifecycle operation is already reserved")
+			}
+			_, err = tx.Collection(item.TableName()).Insert(item)
+			return err
+		}, nil)
+	}
 	res, err := r.sess.Collection(item.TableName()).Insert(item)
 	if err != nil {
 		return fmt.Errorf("failed to create northbound operation: %w", err)
@@ -370,8 +402,8 @@ func (r *NorthboundRepository) GetActiveLifecycleOperation(userID, instanceID in
 	err := r.sess.Collection(item.TableName()).Find(db.And(
 		db.Cond{
 			"user_id":           userID,
-			"status IN":         []string{"queued", "processing"},
-			"operation_type IN": []string{"lite_instance_restart", "lite_instance_reset", "pro_instance_restart", "pro_instance_reset"},
+			"status IN":         []string{"queued", "processing", "batch_pending"},
+			"operation_type IN": []string{"lite_instance_restart", "lite_instance_reset", "lite_instance_delete", "pro_instance_restart", "pro_instance_reset", "pro_instance_delete"},
 		},
 		db.Or(
 			db.Cond{"instance_id": instanceID},
@@ -387,6 +419,22 @@ func (r *NorthboundRepository) GetActiveLifecycleOperation(userID, instanceID in
 	return &item, nil
 }
 
+// MarkOperationSucceededWithoutInstance completes operations whose resource
+// was intentionally deleted. Keeping instance_id NULL avoids restoring an
+// invalid foreign-key reference after ON DELETE SET NULL has run.
+func (r *NorthboundRepository) MarkOperationSucceededWithoutInstance(ctx context.Context, operationID string, now time.Time) error {
+	_, err := r.sess.SQL().ExecContext(ctx, `
+		UPDATE northbound_operations
+		SET status = 'succeeded', instance_id = NULL, error_code = NULL, error_message = NULL,
+		    lease_owner = NULL, lease_expires_at = NULL, finished_at = ?, updated_at = ?
+		WHERE operation_id = ?
+	`, now, now, operationID)
+	if err != nil {
+		return fmt.Errorf("failed to complete northbound operation without instance: %w", err)
+	}
+	return nil
+}
+
 func (r *NorthboundRepository) CountPendingOperationsByUser(userID int) (int, error) {
 	count, err := r.sess.Collection("northbound_operations").Find(db.Cond{
 		"user_id":   userID,
@@ -399,33 +447,72 @@ func (r *NorthboundRepository) CountPendingOperationsByUser(userID int) (int, er
 }
 
 func (r *NorthboundRepository) ClaimNextOperation(ctx context.Context, leaseOwner string, now, leaseUntil time.Time) (*models.NorthboundOperation, error) {
-	result, err := r.sess.SQL().ExecContext(ctx, `
-		UPDATE northbound_operations
-		SET status = 'processing', lease_owner = ?, lease_expires_at = ?,
-		    attempt_count = attempt_count + 1,
-		    started_at = COALESCE(started_at, ?), updated_at = ?
-		WHERE id = (
-			SELECT id FROM (
-				SELECT id FROM northbound_operations
-				WHERE (status = 'queued' AND available_at <= ?)
-				   OR (status = 'processing' AND lease_expires_at < ?)
-				ORDER BY id
-				LIMIT 1
-			) candidate
-		)
-	`, leaseOwner, leaseUntil, now, now, now, now)
+	return r.claimNextOperation(ctx, leaseOwner, now, leaseUntil, false)
+}
+
+func (r *NorthboundRepository) ClaimNextBatchOperation(ctx context.Context, leaseOwner string, now, leaseUntil time.Time) (*models.NorthboundOperation, error) {
+	return r.claimNextOperation(ctx, leaseOwner, now, leaseUntil, true)
+}
+
+func (r *NorthboundRepository) claimNextOperation(ctx context.Context, leaseOwner string, now, leaseUntil time.Time, batchOnly bool) (*models.NorthboundOperation, error) {
+	filter := "NOT EXISTS"
+	if batchOnly {
+		filter = "EXISTS"
+	}
+	filter += ` (SELECT 1 FROM instance_lifecycle_batch_items bi JOIN instance_lifecycle_batches b ON b.batch_id=bi.batch_id WHERE bi.operation_id COLLATE utf8mb4_unicode_ci=northbound_operations.operation_id AND b.policy_version=2)`
+	// Discover candidates without locking an ordered scan. A locking scan with
+	// correlated membership filters can lock other eligible rows as it scans,
+	// making concurrent workers skip the entire batch. Lock only a primary key;
+	// status/lease are rechecked under that lock before claiming it.
+	rows, err := r.sess.SQL().QueryContext(ctx, `SELECT id FROM northbound_operations WHERE ((status='queued' AND available_at<=?) OR (status='processing' AND lease_expires_at<?)) AND `+filter+` ORDER BY id LIMIT 10`, now, now)
 	if err != nil {
-		return nil, fmt.Errorf("failed to claim northbound operation: %w", err)
+		return nil, fmt.Errorf("failed to discover northbound operations: %w", err)
 	}
-	count, _ := result.RowsAffected()
-	if count != 1 {
-		return nil, nil
+	var candidates []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		candidates = append(candidates, id)
 	}
-	var item models.NorthboundOperation
-	if err := r.sess.Collection(item.TableName()).Find(db.Cond{"lease_owner": leaseOwner, "status": "processing"}).One(&item); err != nil {
-		return nil, fmt.Errorf("failed to load claimed northbound operation: %w", err)
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, err
 	}
-	return &item, nil
+	var claimed *models.NorthboundOperation
+	for _, candidate := range candidates {
+		err = r.sess.TxContext(ctx, func(tx db.Session) error {
+			row, err := tx.SQL().QueryRow(`SELECT id FROM northbound_operations WHERE id=? AND ((status='queued' AND available_at<=?) OR (status='processing' AND lease_expires_at<?)) FOR UPDATE SKIP LOCKED`, candidate, now, now)
+			if err != nil {
+				return err
+			}
+			var id int64
+			if err = row.Scan(&id); err == sql.ErrNoRows {
+				return nil
+			} else if err != nil {
+				return err
+			}
+			if _, err := tx.SQL().ExecContext(ctx, `UPDATE northbound_operations SET status='processing',lease_owner=?,lease_expires_at=?,attempt_count=attempt_count+1,started_at=COALESCE(started_at,?),updated_at=? WHERE id=?`, leaseOwner, leaseUntil, now, now, id); err != nil {
+				return err
+			}
+			var item models.NorthboundOperation
+			if err := tx.Collection(item.TableName()).Find(db.Cond{"id": id}).One(&item); err != nil {
+				return err
+			}
+			claimed = &item
+			return nil
+		}, nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to claim northbound operation: %w", err)
+		}
+		if claimed != nil {
+			break
+		}
+	}
+	return claimed, nil
 }
 
 func (r *NorthboundRepository) MarkOperationSucceeded(ctx context.Context, operationID string, instanceID int, now time.Time) error {

@@ -1,0 +1,14 @@
+.team-collapsible-table{min-width:0;max-width:100%;margin:10px 0;border:1px solid #dce4ee;border-radius:10px;background:#fff;overflow:hidden}
+.team-table-scroll{max-width:100%;overflow-x:auto;overscroll-behavior-x:contain;scrollbar-width:thin;scrollbar-color:#b9c9dc #f3f6fa}
+.team-table-scroll:focus-visible{outline:2px solid #38bdf8;outline-offset:-2px}
+.team-table-clip{position:relative;overflow:hidden}
+.team-collapsible-table[data-collapsed=true] .team-table-clip::after{content:"";position:absolute;bottom:0;left:0;right:0;height:28px;background:linear-gradient(transparent,#fff);pointer-events:none}
+.team-markdown-table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:12px;line-height:1.7}
+.team-markdown-table th{background:#f3f6fb;color:#40536c;font-weight:600;overflow-wrap:anywhere;border-bottom:1px solid #dce4ee}
+.team-markdown-table th,.team-markdown-table td{padding:10px 12px;vertical-align:top}
+.team-markdown-table td{overflow-wrap:anywhere;word-break:normal;color:#334155;border-bottom:1px solid #edf1f6}
+.team-markdown-table tbody tr:nth-child(even){background:#fafcfe}
+.team-table-footer{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:9px 12px;border-top:1px solid #e2e9f2;background:#f7faff;font-size:11px;color:#8191a7}
+.team-table-footer button{display:inline-flex;align-items:center;gap:5px;flex-shrink:0;border:1px solid #cde2f5;border-radius:7px;padding:5px 10px;color:#0369a1;background:#fff;font-size:12px}
+.team-table-footer button:hover{background:#eaf5ff}
+.team-table-footer button:focus-visible{outline:2px solid #0284c7;outline-offset:2px}

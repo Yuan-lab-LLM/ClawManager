@@ -48,6 +48,7 @@ type HermesDesktopConfig struct {
 	Bindings        repository.InstanceRuntimeBindingRepository
 	Pods            repository.RuntimePodRepository
 	Teams           repository.HermesDesktopTeamGuard
+	ExternalAccess  InstanceExternalAccessService
 	Agent           RuntimeAgentClient
 	Redis           PlatformRedisClient
 }
@@ -64,13 +65,14 @@ type HermesDesktopDescriptor struct {
 }
 
 type HermesDesktopClaims struct {
-	UserID     int    `json:"uid"`
-	InstanceID int    `json:"iid"`
-	Generation int    `json:"gen"`
-	PodID      int64  `json:"pod"`
-	Port       int    `json:"port"`
-	SessionID  string `json:"sid"`
-	Epoch      string `json:"epoch"`
+	UserID                 int    `json:"uid"`
+	InstanceID             int    `json:"iid"`
+	Generation             int    `json:"gen"`
+	PodID                  int64  `json:"pod"`
+	Port                   int    `json:"port"`
+	SessionID              string `json:"sid"`
+	Epoch                  string `json:"epoch"`
+	ExternalSessionBinding string `json:"external_binding,omitempty"`
 	jwt.RegisteredClaims
 }
 
@@ -240,6 +242,33 @@ func (s *HermesDesktopService) redisReady(ctx context.Context) bool {
 }
 
 func (s *HermesDesktopService) Activate(ctx context.Context, userID, instanceID int) (*HermesDesktopDescriptor, string, error) {
+	return s.activate(ctx, userID, instanceID, "")
+}
+
+// ActivateShared creates the same instance-scoped Desktop Web session used by
+// an owner, but binds it to the current external-access credential. The caller
+// must first authenticate the share/password session and pass the binding it
+// authenticated so a credential rotation racing activation fails closed.
+func (s *HermesDesktopService) ActivateShared(ctx context.Context, instanceID int, code, expectedBinding string) (*HermesDesktopDescriptor, string, error) {
+	if s == nil || s.config.ExternalAccess == nil || s.config.Instances == nil {
+		return nil, "", ErrHermesDesktopUnavailable
+	}
+	access, err := s.config.ExternalAccess.ResolveShortLink(ctx, code)
+	if err != nil || access == nil || access.InstanceID != instanceID {
+		return nil, "", ErrHermesDesktopUnauthorized
+	}
+	binding := ExternalAccessSessionBinding(code, access)
+	if binding == "" || binding != strings.TrimSpace(expectedBinding) {
+		return nil, "", ErrHermesDesktopUnauthorized
+	}
+	instance, err := s.config.Instances.GetByID(instanceID)
+	if err != nil || instance == nil {
+		return nil, "", ErrHermesDesktopForbidden
+	}
+	return s.activate(ctx, instance.UserID, instanceID, binding)
+}
+
+func (s *HermesDesktopService) activate(ctx context.Context, userID, instanceID int, externalBinding string) (*HermesDesktopDescriptor, string, error) {
 	// Capture the authorization epoch before health/login network calls. A
 	// logout racing a slow activation must not be adopted as its new epoch.
 	if _, reason, err := s.resolve(ctx, userID, instanceID); err != nil {
@@ -280,7 +309,7 @@ func (s *HermesDesktopService) Activate(ctx context.Context, userID, instanceID 
 	if currentEpoch != epoch {
 		return nil, "", ErrHermesDesktopUnauthorized
 	}
-	claims := HermesDesktopClaims{UserID: userID, InstanceID: instanceID, Generation: target.binding.Generation, PodID: target.pod.ID, Port: target.binding.GatewayPort, SessionID: id, Epoch: epoch}
+	claims := HermesDesktopClaims{UserID: userID, InstanceID: instanceID, Generation: target.binding.Generation, PodID: target.pod.ID, Port: target.binding.GatewayPort, SessionID: id, Epoch: epoch, ExternalSessionBinding: externalBinding}
 	token, err := s.sign(&claims, "session", HermesDesktopSessionTTL)
 	if err != nil {
 		return nil, "", err
@@ -344,6 +373,9 @@ func (s *HermesDesktopService) authorizeClaims(ctx context.Context, c *HermesDes
 	if c.Epoch != epoch {
 		return nil, ErrHermesDesktopUnauthorized
 	}
+	if c.ExternalSessionBinding != "" && !s.validExternalSessionBinding(ctx, c) {
+		return nil, ErrHermesDesktopUnauthorized
+	}
 	target, reason, err := s.resolveRuntime(ctx, c.UserID, c.InstanceID, true)
 	if err != nil {
 		return nil, err
@@ -358,6 +390,21 @@ func (s *HermesDesktopService) authorizeClaims(ctx context.Context, c *HermesDes
 		return nil, ErrHermesDesktopUnavailable
 	}
 	return target, nil
+}
+
+func (s *HermesDesktopService) validExternalSessionBinding(ctx context.Context, c *HermesDesktopClaims) bool {
+	if s == nil || c == nil || s.config.ExternalAccess == nil {
+		return false
+	}
+	access, err := s.config.ExternalAccess.Get(ctx, c.InstanceID)
+	if err != nil || access == nil || !access.Enabled || access.PublicSlug == nil {
+		return false
+	}
+	if access.ExpiresAt != nil && !time.Now().UTC().Before(*access.ExpiresAt) {
+		return false
+	}
+	code := strings.TrimSpace(*access.PublicSlug)
+	return code != "" && c.ExternalSessionBinding == ExternalAccessSessionBinding(code, access)
 }
 
 func (s *HermesDesktopService) MintTicket(c *HermesDesktopClaims) (string, time.Time, error) {
@@ -381,7 +428,7 @@ func (s *HermesDesktopService) redeemTicket(ctx context.Context, raw string, c *
 	if err != nil {
 		return err
 	}
-	if ticket.UserID != c.UserID || ticket.InstanceID != c.InstanceID || ticket.Generation != c.Generation || ticket.PodID != c.PodID || ticket.Port != c.Port || ticket.SessionID != c.SessionID || ticket.Epoch != c.Epoch {
+	if ticket.UserID != c.UserID || ticket.InstanceID != c.InstanceID || ticket.Generation != c.Generation || ticket.PodID != c.PodID || ticket.Port != c.Port || ticket.SessionID != c.SessionID || ticket.Epoch != c.Epoch || ticket.ExternalSessionBinding != c.ExternalSessionBinding {
 		return ErrHermesDesktopForbidden
 	}
 	if s.config.Redis == nil {

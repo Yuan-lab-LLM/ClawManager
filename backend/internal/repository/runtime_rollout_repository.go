@@ -25,6 +25,19 @@ func NewRuntimeRolloutRepository(sess db.Session) RuntimeRolloutRepository {
 	return &runtimeRolloutRepository{sess: sess}
 }
 
+func (r *runtimeRolloutRepository) ListRecent(ctx context.Context, runtimeType string) ([]models.RuntimeRollout, error) {
+	cond := db.Cond{}
+	if runtimeType != "" {
+		cond["runtime_type"] = runtimeType
+	}
+	var result []models.RuntimeRollout
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	err := r.sess.Collection("runtime_rollouts").Find(cond).OrderBy("-id").Limit(10).All(&result)
+	return result, err
+}
+
 func (r *runtimeRolloutRepository) Create(ctx context.Context, rollout *models.RuntimeRollout) error {
 	if err := ctx.Err(); err != nil {
 		return err

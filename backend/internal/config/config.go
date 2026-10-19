@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"clawreef/internal/heartbeat"
+
 	"gopkg.in/yaml.v3"
 )
 
@@ -426,7 +428,7 @@ func Load() (*Config, error) {
 			BackendReplicaID:          getEnv("HOSTNAME", "clawmanager-backend-local"),
 			RedisURL:                  getEnv("PLATFORM_REDIS_URL", getEnv("TEAM_REDIS_URL", "")),
 			SchedulerEnabled:          getEnvBool("RUNTIME_SCHEDULER_ENABLED", true),
-			HeartbeatTimeout:          getEnvDuration("RUNTIME_HEARTBEAT_TIMEOUT", 10*time.Second),
+			HeartbeatTimeout:          getEnvDuration("RUNTIME_HEARTBEAT_TIMEOUT", heartbeat.Timeout),
 			SchedulerTick:             getEnvDuration("RUNTIME_SCHEDULER_TICK", 2*time.Second),
 			OpenClawImage:             getEnv("OPENCLAW_RUNTIME_IMAGE", "ghcr.io/yuan-lab-llm/agentsruntime/openclaw-lite:latest"),
 			HermesImage:               getEnv("HERMES_RUNTIME_IMAGE", "ghcr.io/yuan-lab-llm/agentsruntime/hermes-lite:latest"),

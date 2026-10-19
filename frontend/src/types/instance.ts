@@ -40,6 +40,8 @@ export interface Instance {
   workspace_usage_bytes?: number;
   runtime_generation?: number;
   runtime_error_message?: string;
+  runtime_error_code?: string;
+  last_online_at?: string;
   pod_name?: string;
   pod_namespace?: string;
   pod_ip?: string;

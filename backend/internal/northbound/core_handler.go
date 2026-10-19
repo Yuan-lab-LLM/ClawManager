@@ -32,7 +32,7 @@ func (h *CoreHandler) Middleware() gin.HandlerFunc {
 			c.Abort()
 			return
 		}
-		principal := &Principal{UserID: claims.UserID, SessionID: claims.SessionID, Scopes: claims.Scopes}
+		principal := &Principal{UserID: claims.UserID, SessionID: claims.SessionID, Scopes: claims.Scopes, AuthType: claims.AuthType, KeyID: claims.KeyID}
 		if err := h.service.ValidatePrincipal(*principal); err != nil {
 			writeError(c, err)
 			c.Abort()
@@ -57,6 +57,7 @@ func (h *CoreHandler) SubmitCreate(c *gin.Context) {
 		writeError(c, apiError(422, "VALIDATION_ERROR", "Invalid instance request", err))
 		return
 	}
+	principal.RequestScope = ScopeLiteCreate
 	item, replayed, err := h.service.SubmitCreate(*principal, c.GetHeader("Idempotency-Key"), req)
 	if err != nil {
 		writeError(c, err)
@@ -80,6 +81,7 @@ func (h *CoreHandler) SubmitProCreate(c *gin.Context) {
 		writeError(c, apiError(422, "VALIDATION_ERROR", "Invalid Pro instance request", err))
 		return
 	}
+	principal.RequestScope = ScopeProCreate
 	item, replayed, err := h.service.SubmitProCreate(*principal, c.GetHeader("Idempotency-Key"), req)
 	if err != nil {
 		writeError(c, err)
@@ -97,6 +99,14 @@ func (h *CoreHandler) GetOperation(c *gin.Context) {
 	item, err := h.service.GetOperation(principal.UserID, c.Param("id"))
 	if err != nil {
 		writeError(c, err)
+		return
+	}
+	scope := operationScope(item.OperationType)
+	if item.AuthScope != nil && *item.AuthScope != "" {
+		scope = *item.AuthScope
+	}
+	if principal.AuthType == "api_key" && !principal.HasScope(scope) {
+		writeError(c, apiError(403, "SCOPE_DENIED", "Insufficient permission to read this operation", nil))
 		return
 	}
 	c.JSON(http.StatusOK, operationResponse(item))
@@ -151,10 +161,33 @@ func (h *CoreHandler) SubmitProReset(c *gin.Context) {
 	h.submitLifecycle(c, ScopeProReset, "pro", "reset")
 }
 
+func (h *CoreHandler) SubmitLiteDelete(c *gin.Context) {
+	if !requireDeleteDataLossConfirmation(c) {
+		return
+	}
+	h.submitLifecycle(c, ScopeLiteDelete, "lite", "delete")
+}
+
+func (h *CoreHandler) SubmitProDelete(c *gin.Context) {
+	if !requireDeleteDataLossConfirmation(c) {
+		return
+	}
+	h.submitLifecycle(c, ScopeProDelete, "pro", "delete")
+}
+
 func requireResetDataLossConfirmation(c *gin.Context) bool {
 	var request ConfirmInstanceResetRequest
 	if err := c.ShouldBindJSON(&request); err != nil || !request.ConfirmDataLoss {
 		writeError(c, apiError(http.StatusBadRequest, "RESET_CONFIRMATION_REQUIRED", "Reset permanently deletes all instance data; set confirm_data_loss to true", err))
+		return false
+	}
+	return true
+}
+
+func requireDeleteDataLossConfirmation(c *gin.Context) bool {
+	var request ConfirmInstanceDeleteRequest
+	if err := c.ShouldBindJSON(&request); err != nil || !request.ConfirmDataLoss {
+		writeError(c, apiError(http.StatusBadRequest, "DELETE_CONFIRMATION_REQUIRED", "Delete permanently removes the instance and all data; set confirm_data_loss to true", err))
 		return false
 	}
 	return true
@@ -171,6 +204,7 @@ func (h *CoreHandler) submitLifecycle(c *gin.Context, requiredScope, mode, actio
 		writeError(c, apiError(http.StatusNotFound, "INSTANCE_NOT_FOUND", "Instance not found", nil))
 		return
 	}
+	principal.RequestScope = requiredScope
 	item, replayed, err := h.service.SubmitLifecycle(*principal, c.GetHeader("Idempotency-Key"), id, mode, action)
 	if err != nil {
 		writeError(c, err)
@@ -291,16 +325,19 @@ func (h *CoreHandler) ResetShareLinkPassword(c *gin.Context) {
 func RegisterCoreRoutes(router *gin.Engine, handler *CoreHandler) {
 	group := router.Group("/internal/northbound/v1")
 	group.Use(handler.Middleware())
+	group.GET("/owners/usage", handler.GetOwnerUsage)
 	group.POST("/lite-instances", handler.SubmitCreate)
 	group.GET("/lite-instances", handler.ListInstances)
 	group.GET("/lite-instances/:id", handler.GetInstance)
 	group.POST("/lite-instances/:id/restart", handler.SubmitLiteRestart)
 	group.POST("/lite-instances/:id/reset", handler.SubmitLiteReset)
+	group.POST("/lite-instances/:id/delete", handler.SubmitLiteDelete)
 	group.POST("/pro-instances", handler.SubmitProCreate)
 	group.GET("/pro-instances", handler.ListProInstances)
 	group.GET("/pro-instances/:id", handler.GetProInstance)
 	group.POST("/pro-instances/:id/restart", handler.SubmitProRestart)
 	group.POST("/pro-instances/:id/reset", handler.SubmitProReset)
+	group.POST("/pro-instances/:id/delete", handler.SubmitProDelete)
 	group.POST("/lite-instances/:id/external-access/password", handler.EnableShareLinkPassword)
 	group.POST("/lite-instances/:id/external-access/share-link/reset", handler.ResetShareLinkURL)
 	group.POST("/lite-instances/:id/external-access/password/reset", handler.ResetShareLinkPassword)

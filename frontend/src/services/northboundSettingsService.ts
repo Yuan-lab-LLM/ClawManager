@@ -77,6 +77,18 @@ export interface NorthboundOverview {
 }
 
 export const northboundSettingsService = {
+  saveSection: async (section: string, version: number, fields: Partial<NorthboundSettings>): Promise<NorthboundSettings> => {
+    const response = await api.patch(`/admin/northbound/settings/${section}`, { version, fields });
+    return response.data.data;
+  },
+  getAPIKeys: async (userID: number): Promise<NorthboundAPIKeyList> => {
+    const response = await api.get('/admin/northbound/api-keys', { params: { user_id: userID } });
+    return response.data.data;
+  },
+  mutateAPIKey: async (request: NorthboundAPIKeyMutation): Promise<NorthboundAPIKeyList & {secret?: string}> => {
+    const response = await api.post('/admin/northbound/api-keys', request);
+    return response.data.data;
+  },
   getOverview: async (): Promise<NorthboundOverview> => {
     const response = await api.get('/admin/northbound');
     return response.data.data;
@@ -114,3 +126,13 @@ export const northboundSettingsService = {
     const response = await api.post('/admin/northbound/certificate/activate', { confirmation: 'ACTIVATE' }); return response.data.data;
   },
 };
+
+export interface NorthboundAPIKey {
+ id: string; name: string; scopes: string[]; effective_scopes: string[]; enabled: boolean;
+ expires_at: string; created_at: string; created_by: number; revoked_at?: string;
+}
+export interface NorthboundAPIKeyList {user_id: number; version: number; keys: NorthboundAPIKey[]}
+export interface NorthboundAPIKeyMutation {
+ user_id: number; version: number; action: 'create'|'update'|'disable'|'revoke'|'rotate'|'remove';
+ id?: string; name?: string; scopes?: string[]; enabled?: boolean; expires_at?: string;
+}

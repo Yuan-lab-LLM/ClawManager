@@ -126,7 +126,7 @@ func TestWorkspaceFileServiceSearchRecursivelyMatchesNames(t *testing.T) {
 	}
 
 	service := NewWorkspaceFileService(&recordingWorkspaceFileAuditRepo{})
-	entries, err := service.Search(context.Background(), workspaceTestScope(root), "READ")
+	entries, err := service.Search(context.Background(), workspaceTestScope(root), "READ", 0)
 	if err != nil {
 		t.Fatalf("Search returned error: %v", err)
 	}
@@ -157,12 +157,56 @@ func TestWorkspaceFileServiceSearchEmptyQueryReturnsNoEntries(t *testing.T) {
 	}
 
 	service := NewWorkspaceFileService(&recordingWorkspaceFileAuditRepo{})
-	entries, err := service.Search(context.Background(), workspaceTestScope(root), "   ")
+	entries, err := service.Search(context.Background(), workspaceTestScope(root), "   ", 0)
 	if err != nil {
 		t.Fatalf("Search returned error: %v", err)
 	}
 	if len(entries) != 0 {
 		t.Fatalf("entries = %#v, want none for empty query", entries)
+	}
+}
+
+func TestWorkspaceFileServiceSearchHonorsLimit(t *testing.T) {
+	root := t.TempDir()
+	for _, name := range []string{"a-readme.md", "b-readme.md", "c-readme.md"} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte("x"), 0640); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	service := NewWorkspaceFileService(&recordingWorkspaceFileAuditRepo{})
+	entries, err := service.Search(context.Background(), workspaceTestScope(root), "readme", 2)
+	if err != nil {
+		t.Fatalf("Search returned error: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("entries = %d, want 2 (explicit limit honored)", len(entries))
+	}
+
+	entries, err = service.Search(context.Background(), workspaceTestScope(root), "readme", 0)
+	if err != nil {
+		t.Fatalf("Search returned error: %v", err)
+	}
+	if len(entries) != 3 {
+		t.Fatalf("entries = %d, want 3 (default limit keeps every match)", len(entries))
+	}
+}
+
+func TestNormalizeWorkspaceSearchLimit(t *testing.T) {
+	cases := []struct {
+		limit int
+		want  int
+	}{
+		{limit: 0, want: WorkspaceSearchMaxResults},
+		{limit: -5, want: WorkspaceSearchMaxResults},
+		{limit: 50, want: 50},
+		{limit: WorkspaceSearchLimitCeiling, want: WorkspaceSearchLimitCeiling},
+		{limit: WorkspaceSearchLimitCeiling + 1, want: WorkspaceSearchLimitCeiling},
+	}
+	for _, testCase := range cases {
+		if got := NormalizeWorkspaceSearchLimit(testCase.limit); got != testCase.want {
+			t.Fatalf("NormalizeWorkspaceSearchLimit(%d) = %d, want %d", testCase.limit, got, testCase.want)
+		}
 	}
 }
 func TestWorkspaceFileServicePreviewTextAndDoesNotAudit(t *testing.T) {

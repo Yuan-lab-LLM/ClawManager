@@ -40,6 +40,12 @@ test("unavailable Desktop is not a permanent user choice; a later confirmed capa
   assert.equal(resolveHermesDesktopView({ ...viewInput, capability: supported }).mode, "desktop");
 });
 
+test("activation rejection after a successful probe keeps the safe authentication reason", () => {
+  assert.equal(resolveHermesDesktopView({ ...viewInput, capability: supported }).mode, "desktop");
+  assert.deepEqual(resolveHermesDesktopView({ ...viewInput, capability: { ...supported, available: false, reason: "runtime_auth_unavailable" } }), { mode: "unavailable", reason: "securityUnavailable" });
+  assert.deepEqual(resolveHermesDesktopView({ ...viewInput, capability: { instance_id: 43, available: false, reason: "runtime_auth_unavailable" } }), { mode: "unavailable", reason: "capabilityUnknown" });
+});
+
 test("renderer is same-origin, instance-scoped and contains no bearer material", () => {
   assert.equal(resolveHermesDesktopRendererUrl("/hermes-desktop-web/?instance_id=42", 42, origin), "/hermes-desktop-web/?instance_id=42");
   assert.equal(resolveHermesDesktopRendererUrl(`${origin}/hermes-desktop-web/index.html?instance_id=42`, 42, origin), "/hermes-desktop-web/index.html?instance_id=42");
