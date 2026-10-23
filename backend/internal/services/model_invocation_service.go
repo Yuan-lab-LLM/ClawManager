@@ -51,6 +51,9 @@ func (s *modelInvocationService) RecordInvocation(invocation *models.ModelInvoca
 	if strings.TrimSpace(invocation.Status) == "" {
 		invocation.Status = models.ModelInvocationStatusPending
 	}
+	if invocation.AttemptNo <= 0 {
+		invocation.AttemptNo = 1
+	}
 
 	return s.repo.Create(invocation)
 }

@@ -112,3 +112,50 @@ func (s *objectStorageService) resolveObjectKey(objectKey string) string {
 	}
 	return s.basePath + "/" + objectKey
 }
+
+// Only internally generated image object keys are accepted by these new APIs.
+func validateImageObjectKey(key string) error {
+	if !strings.HasPrefix(key, "gateway-images/") || !imageArtifactIDPattern.MatchString(strings.TrimPrefix(key, "gateway-images/")) {
+		return ErrImageArtifactUnavailable
+	}
+	return nil
+}
+
+func (s *objectStorageService) GetObjectLimited(ctx context.Context, key string, limit int64) ([]byte, error) {
+	if err := validateImageObjectKey(key); err != nil {
+		return nil, err
+	}
+	if limit <= 0 || limit > maxStoredImageArtifactBytes {
+		return nil, ErrImageArtifactUnavailable
+	}
+	var reader io.ReadCloser
+	var err error
+	if s.minioClient == nil {
+		reader, err = os.Open(filepath.Join(s.localPath, filepath.FromSlash(s.resolveObjectKey(key))))
+	} else {
+		reader, err = s.minioClient.GetObject(ctx, s.bucket, s.resolveObjectKey(key), minio.GetObjectOptions{})
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer reader.Close()
+	data, err := io.ReadAll(io.LimitReader(reader, limit+1))
+	if int64(len(data)) > limit {
+		return nil, ErrImageArtifactUnavailable
+	}
+	return data, err
+}
+
+func (s *objectStorageService) DeleteObject(ctx context.Context, key string) error {
+	if err := validateImageObjectKey(key); err != nil {
+		return err
+	}
+	if s.minioClient != nil {
+		return s.minioClient.RemoveObject(ctx, s.bucket, s.resolveObjectKey(key), minio.RemoveObjectOptions{})
+	}
+	err := os.Remove(filepath.Join(s.localPath, filepath.FromSlash(s.resolveObjectKey(key))))
+	if os.IsNotExist(err) {
+		return nil
+	}
+	return err
+}

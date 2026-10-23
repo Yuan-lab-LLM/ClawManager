@@ -76,9 +76,9 @@ assert(
   "Create page must hide temporarily unavailable runtime types from every new-instance chooser.",
 );
 assert(
-  source.includes('const isLiteOnlyInstanceType = (type: string) => type === "opencode";') &&
-    source.includes('!isLiteOnlyInstanceType(item.id)'),
-  "Create page must expose OpenCode only in Lite mode.",
+  !source.includes("isLiteOnlyInstanceType") &&
+    source.includes('selectedMode === "pro" || !isProOnlyInstanceType(item.id)'),
+  "Create page must expose OpenCode in both Lite and Pro modes.",
 );
 
 console.log("Create instance mode selector placement is valid.");

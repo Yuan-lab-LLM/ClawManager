@@ -418,7 +418,7 @@ export default function InstanceSessionUsagePanel({
                                     >
                                       <div className="font-medium text-slate-900">{trace.trace_id}</div>
                                       <div className="text-slate-500">
-                                        {trace.requested_model} · {trace.status} ·{" "}
+                                        {trace.requested_model}{" → "}{trace.actual_provider_model || (locale.startsWith("zh") ? "实际模型未记录" : "Actual model not recorded")} · {trace.status} ·{" "}
                                         {formatNumber(trace.total_tokens)} tokens
                                       </div>
                                     </div>

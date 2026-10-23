@@ -10,6 +10,7 @@ require (
 	github.com/gorilla/websocket v1.5.3
 	github.com/upper/db/v4 v4.10.0
 	golang.org/x/crypto v0.49.0
+	golang.org/x/image v0.36.0
 	golang.org/x/text v0.35.0
 	gopkg.in/yaml.v3 v3.0.1
 	k8s.io/api v0.32.3

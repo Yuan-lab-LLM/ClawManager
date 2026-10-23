@@ -46,6 +46,10 @@ type AuditListItem struct {
 	CompletionTokens    int        `json:"completion_tokens"`
 	TotalTokens         int        `json:"total_tokens"`
 	LatencyMs           *int       `json:"latency_ms,omitempty"`
+	TTFTMs              *int       `json:"ttft_ms,omitempty"`
+	GenerationMs        *int       `json:"generation_ms,omitempty"`
+	TokensPerSecond     *float64   `json:"tokens_per_second,omitempty"`
+	AttemptNo           int        `json:"attempt_no,omitempty"`
 	ErrorMessage        *string    `json:"error_message,omitempty"`
 	CreatedAt           time.Time  `json:"created_at"`
 	CompletedAt         *time.Time `json:"completed_at,omitempty"`
@@ -173,12 +177,18 @@ type InstanceSessionUsageQuery struct {
 
 // InstanceSessionUsageSummary summarizes token usage across all sessions on an instance.
 type InstanceSessionUsageSummary struct {
-	TotalPromptTokens     int     `json:"total_prompt_tokens"`
-	TotalCompletionTokens int     `json:"total_completion_tokens"`
-	TotalTokens           int     `json:"total_tokens"`
-	TotalEstimatedCost    float64 `json:"total_estimated_cost"`
-	Currency              string  `json:"currency"`
-	SessionCount          int     `json:"session_count"`
+	TotalPromptTokens     int        `json:"total_prompt_tokens"`
+	TotalCompletionTokens int        `json:"total_completion_tokens"`
+	TotalTokens           int        `json:"total_tokens"`
+	TotalEstimatedCost    float64    `json:"total_estimated_cost"`
+	Currency              string     `json:"currency"`
+	SessionCount          int        `json:"session_count"`
+	LatestRequestedModel  string     `json:"latest_requested_model,omitempty"`
+	LatestActualModel     string     `json:"latest_actual_model,omitempty"`
+	LatestModelStatus     string     `json:"latest_model_status,omitempty"`
+	LatestModelAt         *time.Time `json:"latest_model_at,omitempty"`
+	LatestLatencyMs       *int       `json:"latest_latency_ms,omitempty"`
+	LatestTTFTMs          *int       `json:"latest_ttft_ms,omitempty"`
 }
 
 // InstanceSessionUsageCompliance reports session attribution quality for an instance.
@@ -215,29 +225,30 @@ type InstanceSessionUsageResult struct {
 
 // InstanceSessionTrace is a recent trace row within one session.
 type InstanceSessionTrace struct {
-	TraceID          string    `json:"trace_id"`
-	RequestedModel   string    `json:"requested_model"`
-	Status           string    `json:"status"`
-	PromptTokens     int       `json:"prompt_tokens"`
-	CompletionTokens int       `json:"completion_tokens"`
-	TotalTokens      int       `json:"total_tokens"`
-	CreatedAt        time.Time `json:"created_at"`
+	TraceID             string    `json:"trace_id"`
+	RequestedModel      string    `json:"requested_model"`
+	ActualProviderModel string    `json:"actual_provider_model"`
+	Status              string    `json:"status"`
+	PromptTokens        int       `json:"prompt_tokens"`
+	CompletionTokens    int       `json:"completion_tokens"`
+	TotalTokens         int       `json:"total_tokens"`
+	CreatedAt           time.Time `json:"created_at"`
 }
 
 // InstanceSessionUsageDetail is the drill-down payload for one session on an instance.
 type InstanceSessionUsageDetail struct {
-	SessionID        string               `json:"session_id"`
-	SessionKey       string               `json:"session_key"`
-	Title            *string              `json:"title,omitempty"`
-	PromptTokens     int                  `json:"prompt_tokens"`
-	CompletionTokens int                  `json:"completion_tokens"`
-	TotalTokens      int                  `json:"total_tokens"`
-	EstimatedCost    float64              `json:"estimated_cost"`
-	Currency         string               `json:"currency"`
-	InvocationCount  int                  `json:"invocation_count"`
-	FirstSeenAt      time.Time            `json:"first_seen_at"`
-	LastSeenAt       time.Time            `json:"last_seen_at"`
-	ModelBreakdown   []CostBreakdownItem  `json:"model_breakdown"`
+	SessionID        string                 `json:"session_id"`
+	SessionKey       string                 `json:"session_key"`
+	Title            *string                `json:"title,omitempty"`
+	PromptTokens     int                    `json:"prompt_tokens"`
+	CompletionTokens int                    `json:"completion_tokens"`
+	TotalTokens      int                    `json:"total_tokens"`
+	EstimatedCost    float64                `json:"estimated_cost"`
+	Currency         string                 `json:"currency"`
+	InvocationCount  int                    `json:"invocation_count"`
+	FirstSeenAt      time.Time              `json:"first_seen_at"`
+	LastSeenAt       time.Time              `json:"last_seen_at"`
+	ModelBreakdown   []CostBreakdownItem    `json:"model_breakdown"`
 	RecentTraces     []InstanceSessionTrace `json:"recent_traces"`
 }
 
@@ -291,11 +302,11 @@ type InstanceSessionUsageOverviewItem struct {
 
 // InstanceSessionUsageOverview aggregates session usage across managed runtime instances.
 type InstanceSessionUsageOverview struct {
-	Summary InstanceSessionUsageSummary          `json:"summary"`
-	Items   []InstanceSessionUsageOverviewItem   `json:"items"`
-	Total   int                                  `json:"total"`
-	Page    int                                  `json:"page"`
-	Limit   int                                  `json:"limit"`
+	Summary InstanceSessionUsageSummary        `json:"summary"`
+	Items   []InstanceSessionUsageOverviewItem `json:"items"`
+	Total   int                                `json:"total"`
+	Page    int                                `json:"page"`
+	Limit   int                                `json:"limit"`
 }
 
 // AIObservabilityService provides read APIs for audit and cost reporting.
@@ -311,16 +322,16 @@ type AIObservabilityService interface {
 }
 
 type aiObservabilityService struct {
-	invocationRepo  repository.ModelInvocationRepository
-	auditRepo       repository.AuditEventRepository
-	costRepo        repository.CostRecordRepository
-	riskHitRepo     repository.RiskHitRepository
-	chatMessageRepo repository.ChatMessageRepository
-	chatSessionRepo repository.ChatSessionRepository
-	llmModelRepo    repository.LLMModelRepository
-	instanceRepo        repository.InstanceRepository
-	userRepo            repository.UserRepository
-	runtimeStatusRepo   repository.InstanceRuntimeStatusRepository
+	invocationRepo    repository.ModelInvocationRepository
+	auditRepo         repository.AuditEventRepository
+	costRepo          repository.CostRecordRepository
+	riskHitRepo       repository.RiskHitRepository
+	chatMessageRepo   repository.ChatMessageRepository
+	chatSessionRepo   repository.ChatSessionRepository
+	llmModelRepo      repository.LLMModelRepository
+	instanceRepo      repository.InstanceRepository
+	userRepo          repository.UserRepository
+	runtimeStatusRepo repository.InstanceRuntimeStatusRepository
 }
 
 // NewAIObservabilityService creates a new observability reporting service.
@@ -1245,11 +1256,9 @@ func firstRelevantEventMessage(events []models.AuditEvent) string {
 
 func aggregateInvocationsByTrace(items []models.ModelInvocation, usernames map[int]string) []AuditListItem {
 	type traceAggregate struct {
-		item         AuditListItem
-		hasCompleted bool
-		hasBlocked   bool
-		hasFailed    bool
-		hasPending   bool
+		item               AuditListItem
+		latestInvocationID int
+		latestStatus       string
 	}
 
 	byTrace := make(map[string]*traceAggregate, len(items))
@@ -1263,6 +1272,8 @@ func aggregateInvocationsByTrace(items []models.ModelInvocation, usernames map[i
 		if aggregate == nil {
 			requestID := strings.TrimSpace(invocation.RequestID)
 			aggregate = &traceAggregate{
+				latestInvocationID: invocation.ID,
+				latestStatus:       strings.ToLower(strings.TrimSpace(invocation.Status)),
 				item: AuditListItem{
 					TraceID:             traceID,
 					RequestID:           requestID,
@@ -1306,16 +1317,6 @@ func aggregateInvocationsByTrace(items []models.ModelInvocation, usernames map[i
 		if strings.TrimSpace(aggregate.item.RequestedModel) == "" && strings.TrimSpace(invocation.RequestedModel) != "" {
 			aggregate.item.RequestedModel = invocation.RequestedModel
 		}
-		if strings.TrimSpace(invocation.ActualProviderModel) != "" {
-			aggregate.item.ActualProviderModel = invocation.ActualProviderModel
-		}
-		if strings.TrimSpace(invocation.ProviderType) != "" {
-			aggregate.item.ProviderType = invocation.ProviderType
-		}
-		if aggregate.item.ErrorMessage == nil && invocation.ErrorMessage != nil && strings.TrimSpace(*invocation.ErrorMessage) != "" {
-			aggregate.item.ErrorMessage = invocation.ErrorMessage
-		}
-
 		aggregate.item.PromptTokens += invocation.PromptTokens
 		aggregate.item.CompletionTokens += invocation.CompletionTokens
 		aggregate.item.TotalTokens += invocation.TotalTokens
@@ -1326,30 +1327,30 @@ func aggregateInvocationsByTrace(items []models.ModelInvocation, usernames map[i
 			totalLatency := *aggregate.item.LatencyMs + *invocation.LatencyMs
 			aggregate.item.LatencyMs = pointerToInt(totalLatency)
 		}
-
-		switch strings.ToLower(strings.TrimSpace(invocation.Status)) {
-		case models.ModelInvocationStatusCompleted:
-			aggregate.hasCompleted = true
-		case models.ModelInvocationStatusBlocked:
-			aggregate.hasBlocked = true
-		case models.ModelInvocationStatusFailed:
-			aggregate.hasFailed = true
-		default:
-			aggregate.hasPending = true
+		if invocation.ID >= aggregate.latestInvocationID {
+			aggregate.latestInvocationID = invocation.ID
+			aggregate.latestStatus = strings.ToLower(strings.TrimSpace(invocation.Status))
+			if strings.TrimSpace(invocation.ActualProviderModel) != "" {
+				aggregate.item.ActualProviderModel = invocation.ActualProviderModel
+			}
+			if strings.TrimSpace(invocation.ProviderType) != "" {
+				aggregate.item.ProviderType = invocation.ProviderType
+			}
+			aggregate.item.ErrorMessage = invocation.ErrorMessage
+			aggregate.item.TTFTMs = invocation.TTFTMs
+			aggregate.item.GenerationMs = invocation.GenerationMs
+			aggregate.item.TokensPerSecond = invocation.TokensPerSecond
+			aggregate.item.AttemptNo = invocation.AttemptNo
 		}
 	}
 
 	result := make([]AuditListItem, 0, len(byTrace))
 	for _, aggregate := range byTrace {
-		switch {
-		case aggregate.hasFailed:
-			aggregate.item.Status = models.ModelInvocationStatusFailed
-		case aggregate.hasBlocked:
-			aggregate.item.Status = models.ModelInvocationStatusBlocked
-		case aggregate.hasPending && !aggregate.hasCompleted:
-			aggregate.item.Status = models.ModelInvocationStatusPending
+		switch aggregate.latestStatus {
+		case models.ModelInvocationStatusCompleted, models.ModelInvocationStatusBlocked, models.ModelInvocationStatusFailed:
+			aggregate.item.Status = aggregate.latestStatus
 		default:
-			aggregate.item.Status = models.ModelInvocationStatusCompleted
+			aggregate.item.Status = models.ModelInvocationStatusPending
 		}
 		result = append(result, aggregate.item)
 	}
@@ -2061,10 +2062,14 @@ func (s *aiObservabilityService) GetInstanceSessionUsageDetail(instanceID int, s
 	modelTotals := map[string]*CostBreakdownItem{}
 	recentTraces := make([]InstanceSessionTrace, 0, len(invocations))
 	for _, invocation := range invocations {
-		modelRow := modelTotals[invocation.RequestedModel]
+		modelLabel := strings.TrimSpace(invocation.ActualProviderModel)
+		if modelLabel == "" {
+			modelLabel = invocation.RequestedModel
+		}
+		modelRow := modelTotals[modelLabel]
 		if modelRow == nil {
-			modelRow = &CostBreakdownItem{Label: invocation.RequestedModel}
-			modelTotals[invocation.RequestedModel] = modelRow
+			modelRow = &CostBreakdownItem{Label: modelLabel}
+			modelTotals[modelLabel] = modelRow
 		}
 		modelRow.PromptTokens += invocation.PromptTokens
 		modelRow.CompletionTokens += invocation.CompletionTokens
@@ -2078,13 +2083,14 @@ func (s *aiObservabilityService) GetInstanceSessionUsageDetail(instanceID int, s
 		}
 
 		recentTraces = append(recentTraces, InstanceSessionTrace{
-			TraceID:          invocation.TraceID,
-			RequestedModel:   invocation.RequestedModel,
-			Status:           invocation.Status,
-			PromptTokens:     invocation.PromptTokens,
-			CompletionTokens: invocation.CompletionTokens,
-			TotalTokens:      invocation.TotalTokens,
-			CreatedAt:        invocation.CreatedAt,
+			TraceID:             invocation.TraceID,
+			RequestedModel:      invocation.RequestedModel,
+			ActualProviderModel: invocation.ActualProviderModel,
+			Status:              invocation.Status,
+			PromptTokens:        invocation.PromptTokens,
+			CompletionTokens:    invocation.CompletionTokens,
+			TotalTokens:         invocation.TotalTokens,
+			CreatedAt:           invocation.CreatedAt,
 		})
 	}
 
@@ -2311,6 +2317,20 @@ func summarizeSessionUsageItems(
 	if invocationRepo != nil {
 		if count, countErr := invocationRepo.CountDistinctSessionsByInstance(instanceID, filter); countErr == nil {
 			summary.SessionCount = count
+		}
+		if len(allItems) > 0 {
+			if recent, recentErr := invocationRepo.ListRecentByInstanceSession(instanceID, allItems[0].SessionID, 1, filter); recentErr == nil && len(recent) > 0 {
+				latest := recent[0]
+				summary.LatestRequestedModel = latest.RequestedModel
+				summary.LatestActualModel = latest.ActualProviderModel
+				summary.LatestModelStatus = latest.Status
+				summary.LatestModelAt = &latest.CreatedAt
+				summary.LatestLatencyMs = latest.LatencyMs
+				summary.LatestTTFTMs = latest.TTFTMs
+				if filter.Until == nil {
+					applyLatestStreamRetryStatus(&summary, latest, auditRepo, time.Now())
+				}
+			}
 		}
 	}
 	compliance.HasFallbackSessions = compliance.FallbackSessionCount > 0

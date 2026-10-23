@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -288,16 +289,25 @@ func (h *RuntimeAgentHandler) ReportGateways(c *gin.Context) {
 		lifecycle := services.NormalizeRuntimeGatewayLifecycle(gateway.State, gateway.ErrorMessage)
 		if lifecycle.Running {
 			if err := h.bindingRepo.UpdateRunning(c.Request.Context(), gateway.InstanceID, gateway.Generation, strings.TrimSpace(gateway.GatewayID), gateway.GatewayPort, gateway.GatewayPID); err != nil {
+				if errors.Is(err, models.ErrRuntimeUpgradeInProgress) {
+					continue
+				}
 				utils.HandleError(c, err)
 				return
 			}
 		} else {
 			if err := h.bindingRepo.UpdateState(c.Request.Context(), gateway.InstanceID, gateway.Generation, lifecycle.BindingState, lifecycle.Message); err != nil {
+				if errors.Is(err, models.ErrRuntimeUpgradeInProgress) {
+					continue
+				}
 				utils.HandleError(c, err)
 				return
 			}
 		}
 		if err := h.syncInstanceRuntimeState(c.Request.Context(), gateway, lifecycle); err != nil {
+			if errors.Is(err, models.ErrRuntimeUpgradeInProgress) {
+				continue
+			}
 			utils.HandleError(c, err)
 			return
 		}
@@ -316,6 +326,9 @@ func (h *RuntimeAgentHandler) ReportGateways(c *gin.Context) {
 			continue
 		}
 		if _, err := h.bindingRepo.DeleteRunningByInstanceIDGenerationAndReleaseSlot(c.Request.Context(), binding.InstanceID, podID, binding.Generation); err != nil {
+			if errors.Is(err, models.ErrRuntimeUpgradeInProgress) {
+				continue
+			}
 			utils.HandleError(c, err)
 			return
 		}

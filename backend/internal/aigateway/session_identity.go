@@ -36,7 +36,7 @@ func ApplyManagedInstanceSessionDefaults(req *ChatCompletionRequest, gatewayAuth
 	if req == nil {
 		return
 	}
-	if strings.TrimSpace(gatewayAuthType) != "instance" {
+	if strings.TrimSpace(gatewayAuthType) != "instance" && strings.TrimSpace(gatewayAuthType) != "virtual_key" {
 		return
 	}
 	instanceType = strings.TrimSpace(instanceType)

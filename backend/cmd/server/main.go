@@ -80,6 +80,7 @@ func main() {
 	skillRepo := repository.NewSkillRepository(database)
 	securityScanRepo := repository.NewSecurityScanRepository(database)
 	instanceExternalAccessRepo := repository.NewInstanceExternalAccessRepository(database)
+	gatewayKeyRepo := repository.NewGatewayKeyRepository(database)
 
 	if repaired, repairErr := services.RepairSeededAdminPassword(userRepo); repairErr != nil {
 		log.Printf("Warning: failed to repair seeded admin password: %v", repairErr)
@@ -95,6 +96,8 @@ func main() {
 	llmModelService := services.NewLLMModelService(llmModelRepo)
 	modelInvocationService := services.NewModelInvocationService(modelInvocationRepo)
 	auditEventService := services.NewAuditEventService(auditEventRepo)
+	gatewayKeyService := services.NewGatewayKeyService(gatewayKeyRepo, instanceRepo, auditEventService)
+	gatewayBudgetService := services.NewGatewayBudgetService(gatewayKeyRepo)
 	costRecordService := services.NewCostRecordService(costRecordRepo)
 	chatSessionService := services.NewChatSessionService(chatSessionRepo)
 	chatMessageService := services.NewChatMessageService(chatMessageRepo)
@@ -119,8 +122,12 @@ func main() {
 		llmModelRepo,
 		openClawConfigService,
 		services.WithPrivilegedInstancePods(cfg.Kubernetes.Runtime.Pod.Privileged),
+		services.WithGatewayKeyRepository(gatewayKeyRepo),
 		services.WithV2RuntimeLifecycle(runtimePodRepo, bindingRepo, runtimeAgentClient, cfg.Runtime.WorkspaceRoot),
 	)
+	if err := gatewayKeyService.BackfillManagedInstanceKeys(context.Background()); err != nil {
+		log.Printf("Warning: failed to backfill managed gateway keys: %v", err)
+	}
 	instanceAgentService := services.NewInstanceAgentService(instanceRepo, instanceAgentRepo, instanceDesiredStateRepo, instanceRuntimeStatusRepo, instanceCommandRepo)
 	instanceRuntimeStatusService := services.NewInstanceRuntimeStatusService(instanceRuntimeStatusRepo, instanceAgentRepo, instanceDesiredStateRepo)
 	instanceCommandService := services.NewInstanceCommandService(instanceCommandRepo, instanceRuntimeStatusRepo, instanceDesiredStateRepo, skillRepo)
@@ -142,8 +149,8 @@ func main() {
 		log.Printf("platform redis disabled: redis url is empty")
 	}
 	runtimeEvents := services.NewRuntimeEventService(platformRedis)
-	workspaceFileService := services.NewWorkspaceFileService(workspaceFileAuditRepo)
-	runtimeWorkspaceFileService := services.NewRuntimeWorkspaceFileService(workspaceFileAuditRepo)
+	workspaceFileService := services.WithWorkspaceUpgradeGuard(services.NewWorkspaceFileService(workspaceFileAuditRepo), instanceRepo, false)
+	runtimeWorkspaceFileService := services.WithWorkspaceUpgradeGuard(services.NewRuntimeWorkspaceFileService(workspaceFileAuditRepo, repository.NewWorkspaceWriteRepository(database)), instanceRepo, true)
 	skillService := services.NewSkillService(skillRepo, instanceRepo, userRepo, instanceCommandService, instanceCommandRepo, objectStorageService, skillScannerClient)
 	materializeJobRepo := repository.NewSkillPackageMaterializeJobRepository(database)
 	materializeService := services.NewSkillPackageMaterializeService(materializeJobRepo, skillRepo, services.SkillServiceAsMaterializer(skillService))
@@ -159,7 +166,43 @@ func main() {
 	services.ConfigureSkillRuntimeSync(skillService, bindingRepo, runtimePodRepo, runtimeAgentClient)
 	securityScanService := services.NewSecurityScanService(securityScanRepo, skillRepo, objectStorageService, skillScannerClient)
 	externalAccessService := services.NewInstanceExternalAccessService(instanceExternalAccessRepo)
-	aiGatewayService := aigateway.NewService(llmModelRepo, modelInvocationService, auditEventService, costRecordService, riskDetectionService, riskHitService, chatSessionService, chatMessageService)
+	gatewayCoordinationRedisURL := strings.TrimSpace(os.Getenv("GATEWAY_RATE_LIMIT_REDIS_URL"))
+	if gatewayCoordinationRedisURL == "" {
+		gatewayCoordinationRedisURL = strings.TrimSpace(cfg.Runtime.RedisURL)
+	}
+	deploymentStore := services.NewNoopGatewayDeploymentStore()
+	if gatewayCoordinationRedisURL != "" {
+		if store, storeErr := services.NewRedisGatewayDeploymentStore(gatewayCoordinationRedisURL); storeErr == nil {
+			deploymentStore = store
+		} else {
+			log.Fatalf("gateway deployment routing is configured but invalid: %v", storeErr)
+		}
+	}
+	classifierEncryptionKey := os.Getenv("ROUTING_CLASSIFIER_ENCRYPTION_KEY")
+	if classifierEncryptionKey == "" {
+		classifierEncryptionKey = cfg.JWT.Secret
+	}
+	classifierSettingsService := aigateway.NewClassifierSettingsService(repository.NewRoutingClassifierSettingRepository(database), classifierEncryptionKey)
+	classifierOption, classifierErr := classifierSettingsService.LiveRoutingOption(os.Getenv("CLAWMANAGER_ROUTING_CLASSIFIER"))
+	if classifierErr != nil {
+		log.Fatal(classifierErr)
+	}
+	runtimeTasks := repository.NewGatewayTaskRepository(database)
+	imageArtifacts, err := services.NewGatewayImageArtifactService(database, objectStorageService)
+	if err != nil {
+		log.Fatalf("Failed to initialize image artifact storage: %v", err)
+	}
+	imageCleanupCtx, imageCleanupCancel := context.WithCancel(context.Background())
+	defer imageCleanupCancel()
+	go imageArtifacts.RunCleanup(imageCleanupCtx)
+	imageJobs := services.NewGatewayImageJobService(database, gatewayBudgetService)
+	go imageJobs.RunRecovery(imageCleanupCtx)
+	aiGatewayService := aigateway.NewService(llmModelRepo, modelInvocationService, auditEventService, costRecordService, riskDetectionService, riskHitService, chatSessionService, chatMessageService, aigateway.WithDeploymentStore(deploymentStore), classifierOption, aigateway.WithRuntimeTasks(runtimeTasks), aigateway.WithImageArtifacts(imageArtifacts), aigateway.WithImageJobs(imageJobs))
+	gatewayRuntimeHandler := handlers.NewGatewayRuntimeHandler(runtimeTasks, aiGatewayService, auditEventService)
+	runtimeProtocols := repository.NewRuntimeProtocolRepository(database)
+	runtimeProtocolHandler := handlers.NewRuntimeProtocolHandler(runtimeProtocols, instanceRepo)
+	runtimeMaintenanceHandler := handlers.NewRuntimeMaintenanceHandler(repository.NewRuntimeMaintenanceRepository(database), instanceRepo)
+	runtimeProtocolPolicy := middleware.RuntimeProtocolPolicy(runtimeProtocols)
 	customTeamTemplateService := teamtemplate.NewService(customTeamTemplateRepo, aiGatewayService)
 
 	// Initialize handlers
@@ -175,12 +218,24 @@ func main() {
 		skillService,
 		externalAccessService,
 		aiObservabilityService,
-		services.NewInstanceShellService(runtimePodRepo, bindingRepo),
+		services.NewInstanceShellService(),
 		services.WithInstanceProxyRuntimeRepositories(instanceRepo, runtimePodRepo, bindingRepo),
+		services.WithOpenCodeLiteSessionBootstrap(),
 	)
 	systemSettingsHandler := handlers.NewSystemSettingsHandler(systemImageSettingService)
+	routingClassifierHandler := handlers.NewRoutingClassifierHandler(classifierSettingsService)
 	llmModelHandler := handlers.NewLLMModelHandler(llmModelService)
-	aiGatewayHandler := handlers.NewAIGatewayHandler(aiGatewayService, instanceService, workspaceFileService, runtimeWorkspaceFileService)
+	rateLimitStore := services.NewNoopGatewayRateLimitStore()
+	rateLimitRedisURL := gatewayCoordinationRedisURL
+	if rateLimitRedisURL != "" {
+		if store, storeErr := services.NewRedisGatewayRateLimitStore(rateLimitRedisURL); storeErr == nil {
+			rateLimitStore = store
+		} else {
+			log.Fatalf("gateway rate limiting is configured but invalid: %v", storeErr)
+		}
+	}
+	aiGatewayHandler := handlers.NewAIGatewayHandler(aiGatewayService, instanceService, workspaceFileService, runtimeWorkspaceFileService, rateLimitStore, gatewayBudgetService)
+	gatewayKeyHandler := handlers.NewGatewayKeyHandler(gatewayKeyService)
 	customTeamTemplateHandler := handlers.NewCustomTeamTemplateHandler(customTeamTemplateService)
 	aiObservabilityHandler := handlers.NewAIObservabilityHandler(aiObservabilityService)
 	riskRuleHandler := handlers.NewRiskRuleHandler(riskRuleService)
@@ -203,7 +258,7 @@ func main() {
 			},
 		),
 		handlers.WithTeamArtifactPreviewOrigin(teamPreviewOrigin),
-		handlers.WithEgressPrivateExceptions(egressPrivateExceptionService, instanceRepo),
+		handlers.WithEgressPrivateExceptions(egressPrivateExceptionService, repository.NewEgressInstanceRepository(database)),
 	)
 	openClawConfigHandler := handlers.NewOpenClawConfigHandler(openClawConfigService)
 	skillHandler := handlers.NewSkillHandler(skillService, instanceService)
@@ -411,6 +466,10 @@ func main() {
 			instances.GET("/:id/environment-overrides", instanceHandler.GetInstanceEnvironmentOverrides)
 			instances.GET("/:id/status", instanceHandler.GetInstanceStatus)
 			instances.GET("/:id/runtime", instanceHandler.GetRuntimeDetails)
+			instances.GET("/:id/runtime-governance", runtimeProtocolHandler.Status)
+			instances.GET("/:id/runtime-maintenance", runtimeMaintenanceHandler.Status)
+			instances.POST("/:id/runtime-maintenance", runtimeMaintenanceHandler.Begin)
+			instances.POST("/:id/runtime-maintenance/cancel", runtimeMaintenanceHandler.Cancel)
 			instances.GET("/:id/session-usage", instanceHandler.GetInstanceSessionUsage)
 			instances.GET("/:id/session-usage/detail", instanceHandler.GetInstanceSessionUsageDetail)
 			instances.POST("/:id/runtime/:command", instanceHandler.CreateRuntimeCommand)
@@ -595,6 +654,10 @@ func main() {
 			adminSystemSettings.PUT("/images", systemSettingsHandler.UpsertSystemImageSetting)
 			adminSystemSettings.DELETE("/images/:instanceType", systemSettingsHandler.DeleteSystemImageSetting)
 			adminSystemSettings.GET("/cluster-resources", clusterResourceHandler.GetOverview)
+			adminSystemSettings.GET("/routing-classifier", routingClassifierHandler.Get)
+			adminSystemSettings.PUT("/routing-classifier", routingClassifierHandler.Save)
+			adminSystemSettings.PUT("/routing-classifier/mode", routingClassifierHandler.SetMode)
+			adminSystemSettings.POST("/routing-classifier/compare", routingClassifierHandler.Compare)
 		}
 
 		adminModels := api.Group("/admin/models")
@@ -604,8 +667,23 @@ func main() {
 		{
 			adminModels.GET("", llmModelHandler.ListModels)
 			adminModels.POST("/discover", llmModelHandler.DiscoverModels)
+			adminModels.POST("/batch", llmModelHandler.BatchUpsertModels)
 			adminModels.PUT("", llmModelHandler.UpsertModel)
 			adminModels.DELETE("/:id", llmModelHandler.DeleteModel)
+		}
+
+		adminGatewayKeys := api.Group("/admin/gateway-keys")
+		adminGatewayKeys.Use(middleware.Auth())
+		adminGatewayKeys.Use(middleware.SetUserInfo(userRepo))
+		adminGatewayKeys.Use(middleware.NewAdminAuth(userRepo))
+		{
+			adminGatewayKeys.GET("", gatewayKeyHandler.List)
+			adminGatewayKeys.POST("", gatewayKeyHandler.Create)
+			adminGatewayKeys.POST("/:id/rotate", gatewayKeyHandler.Rotate)
+			adminGatewayKeys.PATCH("/:id/limits", gatewayKeyHandler.UpdateLimits)
+			adminGatewayKeys.PATCH("/:id/budget", gatewayKeyHandler.UpdateBudget)
+			adminGatewayKeys.GET("/:id/usage", gatewayKeyHandler.BudgetUsage)
+			adminGatewayKeys.POST("/:id/revoke", gatewayKeyHandler.Revoke)
 		}
 
 		adminAIAudit := api.Group("/admin/ai-audit")
@@ -686,12 +764,23 @@ func main() {
 		}
 
 		gatewayLLM := api.Group("/gateway/llm")
-		gatewayLLM.Use(middleware.GatewayAuth(instanceRepo, bindingRepo))
+		gatewayLLM.Use(middleware.GatewayAuth(instanceRepo, gatewayKeyRepo, bindingRepo))
 		{
 			gatewayLLM.GET("/models", aiGatewayHandler.ListModels)
-			gatewayLLM.POST("/chat/completions", aiGatewayHandler.ChatCompletions)
-			gatewayLLM.POST("/v1/responses", aiGatewayHandler.Responses)
-			gatewayLLM.POST("/v1/messages", aiGatewayHandler.AnthropicMessages)
+			gatewayLLM.POST("/images/generations", runtimeProtocolPolicy, aiGatewayHandler.ImageGenerations)
+			gatewayLLM.POST("/images/edits", runtimeProtocolPolicy, aiGatewayHandler.ImageEdits)
+			gatewayLLM.GET("/images/artifacts/:artifactID", aiGatewayHandler.ImageArtifact)
+			gatewayLLM.GET("/images/requests/:requestID", aiGatewayHandler.ImageRequestStatus)
+			gatewayLLM.GET("/images/models", aiGatewayHandler.ImageModels)
+			gatewayLLM.GET("/runtime/catalog", gatewayRuntimeHandler.Catalog)
+			gatewayLLM.POST("/runtime/capabilities", runtimeProtocolHandler.Negotiate)
+			gatewayLLM.POST("/runtime/maintenance", runtimeMaintenanceHandler.Poll)
+			gatewayLLM.POST("/runtime/tasks/check", gatewayRuntimeHandler.CheckTask)
+			gatewayLLM.POST("/runtime/tasks/finish", gatewayRuntimeHandler.FinishTask)
+			gatewayLLM.POST("/chat/completions", runtimeProtocolPolicy, aiGatewayHandler.ChatCompletions)
+			gatewayLLM.POST("/responses", runtimeProtocolPolicy, aiGatewayHandler.Responses)
+			gatewayLLM.POST("/v1/responses", runtimeProtocolPolicy, aiGatewayHandler.Responses)
+			gatewayLLM.POST("/v1/messages", runtimeProtocolPolicy, aiGatewayHandler.AnthropicMessages)
 		}
 
 		agent := api.Group("/agent")

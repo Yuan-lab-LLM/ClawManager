@@ -1,0 +1,22 @@
+[
+  {"id":"hs01","expected_tier":1,"turns":[{"text":"HTTP 404 表示什么？一句话说明。"}]},
+  {"id":"hs02","expected_tier":1,"turns":[{"text":"把这句话翻译成英文：请设计容灾系统并证明算法正确。"}]},
+  {"id":"hs03","expected_tier":1,"turns":[{"text":"计算 23 乘以 4，只给结果。"}]},
+  {"id":"hs04","expected_tier":1,"turns":[{"text":"提取这段文字中的日期：复杂系统评审在2026-10-02举行。"}]},
+  {"id":"hs05","expected_tier":1,"turns":[{"text":"设计一个跨区域支付系统。"},{"text":"换个问题，英国的首都是哪里？"}]},
+  {"id":"hm01","expected_tier":2,"turns":[{"text":"用 JavaScript 写个函数，把数组里的重复数字去掉。"}]},
+  {"id":"hm02","expected_tier":2,"turns":[{"text":"Make a small HTML page with a button that switches between light and dark backgrounds."}]},
+  {"id":"hm03","expected_tier":2,"turns":[{"text":"帮我给客户写一封交付延期两天的邮件，说明原因并道歉。"}]},
+  {"id":"hm04","expected_tier":2,"turns":[{"text":"这段代码 a = [1, 2]; print(a[2]) 报错了，解释原因并修好。"}]},
+  {"id":"hm05","expected_tier":2,"turns":[{"text":"写一个判断闰年的函数。"},{"text":"继续，补上几个单元测试。"}]},
+  {"id":"hc01","expected_tier":3,"turns":[{"text":"设计多租户文档检索系统，统筹权限隔离、索引更新延迟、灾备和成本，说明各模块如何配合。"}]},
+  {"id":"hc02","expected_tier":3,"turns":[{"text":"线上下单偶发重复扣款，同时出现队列重投和数据库主从切换。请给出跨服务排查、验证和整体修复方案。"}]},
+  {"id":"hc03","expected_tier":3,"turns":[{"text":"把单机文件服务迁移到跨地域对象存储，要求不停机、旧链接可用、权限不变并能回滚，请设计完整迁移方案。"}]},
+  {"id":"hc04","expected_tier":3,"turns":[{"text":"Design an API platform with tenant isolation, regional failover and strict latency limits; explain the tradeoffs across components."}]},
+  {"id":"hc05","expected_tier":3,"turns":[{"text":"设计跨机房消息系统，要兼顾顺序、重试和灾备。"},{"text":"接着细化故障切换期间的去重和顺序保证。"}]},
+  {"id":"hr01","expected_tier":4,"turns":[{"text":"严格证明任意有限树的边数等于顶点数减一。"}]},
+  {"id":"hr02","expected_tier":4,"turns":[{"text":"用循环不变量严格论证二分查找算法正确且必然终止。"}]},
+  {"id":"hr03","expected_tier":4,"turns":[{"text":"从定义出发推导柯西施瓦茨不等式，并证明等号成立条件。"}]},
+  {"id":"hr04","expected_tier":4,"turns":[{"text":"Prove that there are infinitely many prime numbers, with a complete contradiction argument."}]},
+  {"id":"hr05","expected_tier":4,"turns":[{"text":"严格证明等比数列求和公式。"},{"text":"继续，补全归纳步骤，不能省略代数推导。"}]}
+]

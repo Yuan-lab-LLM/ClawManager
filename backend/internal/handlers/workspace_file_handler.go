@@ -372,6 +372,7 @@ func (h *WorkspaceFileHandler) instanceWorkspaceScope(c *gin.Context, instance *
 		return instance, h.runtimeWorkspaceFileService, services.WorkspaceFileScope{
 			InstanceID:        instance.ID,
 			UserID:            instance.UserID,
+			RuntimeGeneration: instance.RuntimeGeneration,
 			WorkspacePath:     "/config",
 			AuditActionPrefix: auditActionPrefix,
 		}, true
@@ -384,6 +385,7 @@ func (h *WorkspaceFileHandler) instanceWorkspaceScope(c *gin.Context, instance *
 	return instance, h.fileService, services.WorkspaceFileScope{
 		InstanceID:        instance.ID,
 		UserID:            instance.UserID,
+		RuntimeGeneration: instance.RuntimeGeneration,
 		WorkspacePath:     *instance.WorkspacePath,
 		AuditActionPrefix: auditActionPrefix,
 	}, true

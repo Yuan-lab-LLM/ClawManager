@@ -120,6 +120,16 @@ func (s *SyncService) syncAllInstances() {
 
 // syncInstance synchronizes a single instance's state
 func (s *SyncService) syncInstance(ctx context.Context, instance *models.Instance) {
+	release, err := acquireInstanceLifecycleOperation(ctx, s.instanceRepo, instance.ID)
+	if err != nil {
+		return
+	}
+	defer release()
+	current, err := currentLifecycleSnapshot(s.instanceRepo, *instance)
+	if err != nil || current == nil || current.Status == "deleting" {
+		return
+	}
+	instance = current
 	if _, ok := v2RuntimeTypeForInstance(instance); ok {
 		s.updateInfraStatus(instance.ID, instance.Status)
 		return

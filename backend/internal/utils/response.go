@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"clawreef/internal/models"
 	"errors"
 	"log"
 	"net/http"
@@ -29,6 +30,46 @@ func Error(c *gin.Context, status int, message string) {
 
 // HandleError handles different types of errors and sends appropriate responses
 func HandleError(c *gin.Context, err error) {
+	if errors.Is(err, models.ErrChatNotSupported) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"code": "model_operation_not_supported", "type": "invalid_request_error", "message": err.Error()}})
+		return
+	}
+	if errors.Is(err, models.ErrInvalidModelOperations) {
+		Error(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	if errors.Is(err, models.ErrVisionNotSupported) || errors.Is(err, models.ErrInvalidImageInput) || errors.Is(err, models.ErrNoVisionModel) {
+		code := "invalid_image_input"
+		if errors.Is(err, models.ErrVisionNotSupported) {
+			code = "vision_not_supported"
+		}
+		if errors.Is(err, models.ErrNoVisionModel) {
+			code = "vision_model_unavailable"
+		}
+		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"code": code, "type": "invalid_request_error", "message": err.Error()}})
+		return
+	}
+	if errors.Is(err, models.ErrRuntimeUpgradeInProgress) || errors.Is(err, models.ErrRuntimeUpgradeConflict) || errors.Is(err, models.ErrRuntimeUpgradeWritersActive) {
+		Error(c, http.StatusConflict, err.Error())
+		return
+	}
+	if errors.Is(err, models.ErrInstanceOperationInProgress) {
+		Error(c, http.StatusConflict, models.ErrInstanceOperationInProgress.Error())
+		return
+	}
+	if errors.Is(err, models.ErrModelUnavailable) {
+		c.Header("Content-Type", "application/json")
+		c.JSON(http.StatusForbidden, gin.H{"error": gin.H{"code": "model_unavailable", "type": "permission_error", "message": models.ErrModelUnavailable.Error()}})
+		return
+	}
+	if errors.Is(err, models.ErrModelAccessConflict) {
+		Error(c, http.StatusConflict, models.ErrModelAccessConflict.Error())
+		return
+	}
+	if errors.Is(err, models.ErrInvalidModelAccess) {
+		Error(c, http.StatusBadRequest, models.ErrInvalidModelAccess.Error())
+		return
+	}
 	// Log the actual error for debugging
 	log.Printf("[ERROR] %v", err)
 
@@ -56,8 +97,31 @@ func HandleError(c *gin.Context, err error) {
 		Error(c, http.StatusBadRequest, errStr)
 		return
 	}
+	if errStr == "context window tokens must be non-negative" || errStr == "context window tokens exceeds the supported maximum" ||
+		errStr == "max concurrent requests must be non-negative" || errStr == "deployment priority must be non-negative" ||
+		errStr == "model group must be at most 100 characters" {
+		Error(c, http.StatusBadRequest, errStr)
+		return
+	}
 
 	switch errStr {
+	case "invalid generation limits or request body", "output token limit must be between 1 and 2147483647", "conflicting output token limits", "conflicting completion counts", "invalid completion count", "provider protocol or completion count is not supported", "quality tier must be between 0 (unclassified) and 4 (reasoning)":
+		Error(c, http.StatusBadRequest, errStr)
+	case "no eligible model for automatic routing":
+		Error(c, http.StatusServiceUnavailable, errStr)
+	case "gateway deployment is unavailable":
+		c.Header("Retry-After", "1")
+		Error(c, http.StatusServiceUnavailable, errStr)
+	case "gateway budget only supports USD models", "gateway budget currency requires administrator review and explicit usage reset":
+		Error(c, http.StatusConflict, errStr)
+	case "gateway key budget exceeded":
+		Error(c, http.StatusPaymentRequired, errStr)
+	case "gateway key budget limit is invalid", "gateway key budget period is invalid", "gateway key limits must be non-negative", "gateway key limits are invalid", "gateway key name is required and must be at most 160 characters", "gateway key owner is required", "gateway key type is not supported", "gateway key expiration must be in the future":
+		Error(c, http.StatusBadRequest, errStr)
+	case "gateway key not found":
+		Error(c, http.StatusNotFound, errStr)
+	case "managed instance gateway keys cannot be revoked manually", "managed instance gateway keys require coordinated rotation", "only active gateway keys can be rotated", "gateway key is no longer active":
+		Error(c, http.StatusConflict, errStr)
 	case "username already exists", "email already exists", "instance name already exists", "team name already exists", "openclaw config resource key already exists", "team task message id already exists":
 		Error(c, http.StatusConflict, errStr)
 	case "display name already exists":
@@ -90,6 +154,11 @@ func HandleError(c *gin.Context, err error) {
 
 // ValidationError handles validation errors from gin binding
 func ValidationError(c *gin.Context, err error) {
+	var tooLarge *http.MaxBytesError
+	if errors.As(err, &tooLarge) {
+		Error(c, http.StatusRequestEntityTooLarge, "Gateway request body exceeds the configured limit")
+		return
+	}
 	var ve validator.ValidationErrors
 	if errors.As(err, &ve) {
 		Error(c, http.StatusBadRequest, formatValidationErrors(ve))

@@ -132,6 +132,10 @@ func (h *RuntimePoolHandler) StartRollout(c *gin.Context) {
 		return
 	}
 	targetImage := strings.TrimSpace(req.TargetImageRef)
+	if runtimeType == "opencode" {
+		utils.Error(c, http.StatusConflict, models.ErrOpenCodeSafeUpgradeRequired.Error())
+		return
+	}
 	if targetImage == "" {
 		utils.Error(c, http.StatusBadRequest, "target image ref is required")
 		return

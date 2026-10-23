@@ -5,7 +5,7 @@ import { useInstanceDesktopAccess } from "../hooks/useInstanceDesktopAccess";
 import { clearHermesDashboardStorage, prepareHermesDashboardStorage } from "../lib/hermesDashboardStorage";
 import { prepareOpenClawControlUIStorage } from "../lib/openclawControlStorage";
 import type { InstanceAvailability } from "../types/instance";
-import { InstanceShellTerminal } from "./InstanceShellTerminal";
+import InstanceModelHint from "./InstanceModelHint";
 
 interface InstanceServiceFrameProps {
   instanceId: number;
@@ -44,7 +44,6 @@ export function InstanceServiceFrame({
   instanceId,
   instanceName,
   instanceType,
-  instanceMode,
   availability,
   workspaceVisible,
   onWorkspaceVisibilityChange,
@@ -56,8 +55,6 @@ export function InstanceServiceFrame({
   const [isFullscreen, setIsFullscreen] = useState(false);
   const normalizedType = instanceType?.toLowerCase() ?? "";
   const isHermes = normalizedType === "hermes";
-  const isOpenCodeLite =
-    normalizedType === "opencode" && instanceMode?.toLowerCase() === "lite";
   const {
     embedUrl,
     loading,
@@ -149,6 +146,9 @@ export function InstanceServiceFrame({
               {workspaceVisible ? <PanelRightClose className="h-4 w-4" /> : <PanelRightOpen className="h-4 w-4" />}
             </button>
           )}
+          {["opencode", "openclaw", "hermes", "deepseek-harness"].includes(normalizedType) && (
+            <InstanceModelHint instanceId={instanceId} active={isAvailable} />
+          )}
           {isAvailable && (
             <button
               type="button"
@@ -188,19 +188,6 @@ export function InstanceServiceFrame({
       <div className="flex min-h-0 flex-1 items-center justify-center text-sm text-slate-600">
         Unavailable
       </div>,
-    );
-  }
-
-  if (isOpenCodeLite) {
-    return (
-      <InstanceShellTerminal
-        instanceId={instanceId}
-        instanceName={instanceName}
-        isRunning={isAvailable}
-        autoConnect
-        heightClassName="h-full min-h-0 max-h-none"
-        className="h-full"
-      />
     );
   }
 

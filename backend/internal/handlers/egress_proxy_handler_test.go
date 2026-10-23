@@ -52,6 +52,13 @@ func (s *stubEgressAuditService) RecordEvent(event *models.AuditEvent) error {
 	return nil
 }
 
+func (s *stubEgressAuditService) RecordEventContext(ctx context.Context, event *models.AuditEvent) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return s.RecordEvent(event)
+}
+
 func (s *stubEgressAuditService) ListEventsByTraceID(string) ([]models.AuditEvent, error) {
 	return nil, nil
 }
@@ -59,12 +66,16 @@ func (s *stubEgressAuditService) ListEventsByTraceID(string) ([]models.AuditEven
 func TestEgressProxyHandlerBlocksDeniedConnectHost(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	audit := &stubEgressAuditService{}
+	token := "audit-instance-token"
 	handler := &EgressProxyHandler{
 		policy: egresspolicy.Policy{
 			Mode:               egresspolicy.ModeDenylist,
 			DeniedHostSuffixes: []string{"api.openai.com"},
 		},
 		audit: audit,
+		instances: &stubEgressInstanceResolver{byID: map[int]*models.Instance{
+			42: {ID: 42, UserID: 1, AccessToken: &token},
+		}},
 	}
 
 	recorder := httptest.NewRecorder()
@@ -72,6 +83,7 @@ func TestEgressProxyHandlerBlocksDeniedConnectHost(t *testing.T) {
 	ctx.Request = httptest.NewRequest(http.MethodConnect, "https://api.openai.com:443", nil)
 	ctx.Request.Host = "api.openai.com:443"
 	ctx.Request.Header.Set("X-ClawManager-Instance-Id", "42")
+	ctx.Request.Header.Set("Proxy-Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte("42:"+egresspolicy.InstanceProxyPassword(42, token))))
 
 	handler.handleConnect(ctx)
 
@@ -95,6 +107,9 @@ func TestEgressProxyHandlerAcceptsEgressInstanceHeaderAlias(t *testing.T) {
 			DeniedHostSuffixes: []string{"api.openai.com"},
 		},
 		audit: audit,
+		instances: &stubEgressInstanceResolver{byPodIP: map[string]*models.Instance{
+			"192.0.2.1": {ID: 77, UserID: 1},
+		}},
 	}
 
 	recorder := httptest.NewRecorder()
@@ -108,8 +123,8 @@ func TestEgressProxyHandlerAcceptsEgressInstanceHeaderAlias(t *testing.T) {
 	if recorder.Code != http.StatusForbidden {
 		t.Fatalf("expected 403, got %d", recorder.Code)
 	}
-	if audit.events[0].InstanceID == nil || *audit.events[0].InstanceID != 77 {
-		t.Fatalf("expected instance id 77 on egress audit event, got %+v", audit.events[0].InstanceID)
+	if audit.events[0].InstanceID != nil {
+		t.Fatalf("unauthenticated header must not identify the instance: %+v", audit.events[0].InstanceID)
 	}
 }
 
@@ -136,7 +151,7 @@ type stubPrivateExceptionSource struct {
 	rules []egresspolicy.PrivateExceptionRule
 }
 
-func (s *stubPrivateExceptionSource) SnapshotRules() []egresspolicy.PrivateExceptionRule {
+func (s *stubPrivateExceptionSource) SnapshotRulesContext(context.Context) []egresspolicy.PrivateExceptionRule {
 	return s.rules
 }
 
@@ -150,6 +165,13 @@ func (s *stubEgressInstanceResolver) GetByID(id int) (*models.Instance, error) {
 		return nil, nil
 	}
 	return s.byID[id], nil
+}
+
+func (s *stubEgressInstanceResolver) GetByIDContext(ctx context.Context, id int) (*models.Instance, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return s.GetByID(id)
 }
 
 func (s *stubEgressInstanceResolver) FindByPodIP(podIP string) (*models.Instance, error) {
@@ -198,7 +220,7 @@ func TestEgressProxyHandlerAllowsPrivateExceptionWithInstanceIdentity(t *testing
 	}
 }
 
-func TestEgressProxyHandlerResolvesIdentityFromHeaderAndPodIP(t *testing.T) {
+func TestEgressProxyHandlerRejectsIdentityFromHeaderAndPodIP(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	resolver := &stubEgressInstanceResolver{
 		byID: map[int]*models.Instance{
@@ -217,16 +239,17 @@ func TestEgressProxyHandlerResolvesIdentityFromHeaderAndPodIP(t *testing.T) {
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodGet, "http://example.com/", nil)
 	ctx.Request.Header.Set("X-ClawManager-Egress-Instance-Id", "8")
+	ctx.Request.RemoteAddr = "10.42.0.130:48800"
 	identity := handler.resolveEgressIdentity(ctx)
-	if identity.InstanceID == nil || *identity.InstanceID != 8 || identity.UserID == nil || *identity.UserID != 1 {
-		t.Fatalf("expected header identity, got %+v", identity)
+	if identity.InstanceID != nil || identity.UserID != nil {
+		t.Fatalf("unauthenticated header granted identity: %+v", identity)
 	}
 
 	ctx.Request = httptest.NewRequest(http.MethodGet, "http://example.com/", nil)
 	ctx.Request.RemoteAddr = "10.42.0.130:48800"
 	identity = handler.resolveEgressIdentity(ctx)
-	if identity.InstanceID == nil || *identity.InstanceID != 8 {
-		t.Fatalf("expected pod ip identity, got %+v", identity)
+	if identity.InstanceID != nil || identity.UserID != nil {
+		t.Fatalf("pod ip granted identity: %+v", identity)
 	}
 }
 
@@ -281,8 +304,9 @@ func (h *hijackableResponseRecorder) Hijack() (net.Conn, *bufio.ReadWriter, erro
 	return h.serverConn, bufio.NewReadWriter(bufio.NewReader(h.serverConn), bufio.NewWriter(h.serverConn)), nil
 }
 
-func TestEgressProxyHandlerConnectAllowsPrivateExceptionWithHeader(t *testing.T) {
+func TestEgressProxyHandlerConnectAllowsPrivateExceptionWithAuthentication(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+	token := "instance-token"
 	handler := NewEgressProxyHandler(
 		&stubEgressAuditService{},
 		WithEgressPrivateExceptions(
@@ -293,7 +317,7 @@ func TestEgressProxyHandlerConnectAllowsPrivateExceptionWithHeader(t *testing.T)
 				Port:      18080,
 			}}},
 			&stubEgressInstanceResolver{byID: map[int]*models.Instance{
-				8: {ID: 8, UserID: 1},
+				8: {ID: 8, UserID: 1, AccessToken: &token},
 			}},
 		),
 	)
@@ -313,6 +337,8 @@ func TestEgressProxyHandlerConnectAllowsPrivateExceptionWithHeader(t *testing.T)
 	ctx.Request = httptest.NewRequest(http.MethodConnect, "https://10.255.25.3:18080", nil)
 	ctx.Request.Host = "10.255.25.3:18080"
 	ctx.Request.Header.Set("X-ClawManager-Egress-Instance-Id", "8")
+	ctx.Request.RemoteAddr = "10.42.0.130:48800"
+	ctx.Request.Header.Set("Proxy-Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte("8:"+egresspolicy.InstanceProxyPassword(8, token))))
 
 	done := make(chan struct{})
 	go func() {

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import AdminLayout from '../../../../components/AdminLayout';
 import { useI18n } from '../../../../contexts/I18nContext';
@@ -9,6 +9,7 @@ import {
   type EgressPrivateScopeType,
 } from '../../../../services/egressPrivateExceptionService';
 import { userService } from '../../../../services/userService';
+import { loadAllScopeOptions } from '../../../../lib/egressScopeOptions';
 
 type Option = { id: number; label: string };
 
@@ -34,6 +35,12 @@ const EgressPrivateExceptionPage: React.FC = () => {
 
   const [instances, setInstances] = useState<Option[]>([]);
   const [users, setUsers] = useState<Option[]>([]);
+  const [instancesLoading, setInstancesLoading] = useState(false);
+  const [usersLoading, setUsersLoading] = useState(false);
+  const [instanceOptionsError, setInstanceOptionsError] = useState<string | null>(null);
+  const [userOptionsError, setUserOptionsError] = useState<string | null>(null);
+  const itemsRequest = useRef(0);
+  const optionsRequest = useRef(0);
 
   const resetCreateForm = useCallback(() => {
     setEditingId(null);
@@ -46,54 +53,68 @@ const EgressPrivateExceptionPage: React.FC = () => {
   }, [instances]);
 
   const loadItems = useCallback(async () => {
+    const request = ++itemsRequest.current;
+    const isCurrent = () => itemsRequest.current === request;
     setLoading(true);
     setError(null);
     try {
-      setItems(await egressPrivateExceptionService.list());
+      const result = await egressPrivateExceptionService.list();
+      if (isCurrent()) setItems(result);
     } catch (e) {
       const err = e as { message?: string };
-      setError(err.message ?? t(`${k}.loadFail`));
+      if (isCurrent()) setError(err.message ?? t(`${k}.loadFail`));
     } finally {
-      setLoading(false);
+      if (isCurrent()) setLoading(false);
     }
   }, [k, t]);
 
   const loadOptions = useCallback(async () => {
-    try {
-      const [instanceResp, userResp] = await Promise.all([
-        adminInstanceService.getInstances(1, 200),
-        userService.getUsers(1, 200),
-      ]);
-      setInstances(
-        (instanceResp.instances ?? []).map((item) => ({
-          id: item.id,
-          label: `${item.name} (#${item.id})`,
-        })),
-      );
-      setUsers(
-        (userResp.users ?? []).map((item) => ({
-          id: item.id,
-          label: `${item.username} (#${item.id})`,
-        })),
-      );
-    } catch {
-      setInstances([]);
-      setUsers([]);
-    }
-  }, []);
+    const request = ++optionsRequest.current;
+    const isCurrent = () => optionsRequest.current === request;
+    setInstancesLoading(true);
+    setUsersLoading(true);
+    setInstanceOptionsError(null);
+    setUserOptionsError(null);
+    await Promise.allSettled([
+      loadAllScopeOptions(async (page, limit) => {
+        if (!isCurrent()) throw new Error('Superseded scope options request');
+        const response = await adminInstanceService.getInstances(page, limit);
+        return { items: response.instances ?? [], total: response.total };
+      })
+        .then((items) => {
+          if (isCurrent()) setInstances(items.map((item) => ({ id: item.id, label: `${item.name} (#${item.id})` })));
+        })
+        .catch(() => { if (isCurrent()) setInstanceOptionsError(t(`${k}.instanceOptionsLoadFail`)); })
+        .finally(() => { if (isCurrent()) setInstancesLoading(false); }),
+      loadAllScopeOptions(async (page, limit) => {
+        if (!isCurrent()) throw new Error('Superseded scope options request');
+        const response = await userService.getUsers(page, limit);
+        return { items: response.users ?? [], total: response.total };
+      })
+        .then((items) => {
+          if (isCurrent()) setUsers(items.map((item) => ({ id: item.id, label: `${item.username} (#${item.id})` })));
+        })
+        .catch(() => { if (isCurrent()) setUserOptionsError(t(`${k}.userOptionsLoadFail`)); })
+        .finally(() => { if (isCurrent()) setUsersLoading(false); }),
+    ]);
+  }, [k, t]);
 
   useEffect(() => {
-    loadItems();
-    loadOptions();
+    void loadItems();
+    void loadOptions();
+    return () => {
+      itemsRequest.current += 1;
+      optionsRequest.current += 1;
+    };
   }, [loadItems, loadOptions]);
 
   useEffect(() => {
-    if (editingId !== null) return;
+    if (editingId !== null || (scopeType === 'instance' ? instancesLoading : usersLoading)) return;
     const options = scopeType === 'instance' ? instances : users;
-    if (options.length > 0 && !options.some((item) => item.id === scopeId)) {
-      setScopeId(options[0].id);
+    if (!options.some((item) => item.id === scopeId)) {
+      setScopeId(options[0]?.id ?? 0);
     }
-  }, [scopeType, instances, users, scopeId, editingId]);
+  }, [scopeType, instances, users, scopeId, editingId, instancesLoading, usersLoading]);
 
   const onEdit = (item: EgressPrivateException) => {
     setEditingId(item.id);
@@ -112,7 +133,7 @@ const EgressPrivateExceptionPage: React.FC = () => {
   };
 
   const onSubmit = async () => {
-    if (!scopeId || !cidr.trim() || port <= 0) return;
+    if (!scopeId || !cidr.trim() || port <= 0 || scopeLoading || scopeOptionsError) return;
     setSaving(true);
     setError(null);
     const payload = {
@@ -155,6 +176,8 @@ const EgressPrivateExceptionPage: React.FC = () => {
   };
 
   const scopeOptions = scopeType === 'instance' ? instances : users;
+  const scopeLoading = scopeType === 'instance' ? instancesLoading : usersLoading;
+  const scopeOptionsError = scopeType === 'instance' ? instanceOptionsError : userOptionsError;
   const isEditing = editingId !== null;
 
   return (
@@ -188,7 +211,7 @@ const EgressPrivateExceptionPage: React.FC = () => {
             <h3 className="section-title-lg">
               {isEditing ? t(`${k}.formTitleEdit`) : t(`${k}.formTitle`)}
             </h3>
-            <button type="button" className="btn-secondary btn-sm" onClick={loadItems} disabled={loading}>
+            <button type="button" className="btn-secondary btn-sm" onClick={() => { void loadItems(); void loadOptions(); }} disabled={loading || instancesLoading || usersLoading}>
               {t(`${k}.refresh`)}
             </button>
           </div>
@@ -199,7 +222,7 @@ const EgressPrivateExceptionPage: React.FC = () => {
               <select
                 className="w-full border rounded-lg px-3 py-2"
                 value={scopeType}
-                onChange={(e) => setScopeType(e.target.value as EgressPrivateScopeType)}
+                onChange={(e) => { setScopeType(e.target.value as EgressPrivateScopeType); setScopeId(0); }}
               >
                 <option value="instance">{t(`${k}.scopeInstance`)}</option>
                 <option value="user">{t(`${k}.scopeUser`)}</option>
@@ -211,10 +234,11 @@ const EgressPrivateExceptionPage: React.FC = () => {
               <select
                 className="w-full border rounded-lg px-3 py-2"
                 value={scopeId || ''}
+                disabled={scopeLoading || Boolean(scopeOptionsError)}
                 onChange={(e) => setScopeId(Number(e.target.value))}
               >
                 <option value="">
-                  {scopeType === 'instance' ? t(`${k}.pickInstance`) : t(`${k}.pickUser`)}
+                  {scopeLoading ? t(`${k}.optionsLoading`) : scopeType === 'instance' ? t(`${k}.pickInstance`) : t(`${k}.pickUser`)}
                 </option>
                 {scopeOptions.map((item) => (
                   <option key={item.id} value={item.id}>
@@ -265,7 +289,7 @@ const EgressPrivateExceptionPage: React.FC = () => {
               type="button"
               className="btn-primary btn-sm"
               onClick={onSubmit}
-              disabled={saving || !scopeId}
+              disabled={saving || !scopeId || scopeLoading || Boolean(scopeOptionsError)}
             >
               {isEditing ? t(`${k}.save`) : t(`${k}.create`)}
             </button>
@@ -277,6 +301,8 @@ const EgressPrivateExceptionPage: React.FC = () => {
           </div>
 
           {error && <div className="text-sm tone-red">{error}</div>}
+          {instanceOptionsError && <div role="alert" className="text-sm tone-red">{instanceOptionsError}</div>}
+          {userOptionsError && <div role="alert" className="text-sm tone-red">{userOptionsError}</div>}
         </div>
 
         <div className="panel overflow-x-auto">

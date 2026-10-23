@@ -6,27 +6,22 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strconv"
 	"strings"
 	"sync"
 
 	"clawreef/internal/models"
-	"clawreef/internal/repository"
 	"clawreef/internal/services/k8s"
 
 	"github.com/gorilla/websocket"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/remotecommand"
 )
 
 // InstanceShellService streams an interactive shell into an instance pod.
 type InstanceShellService struct {
-	podService     *k8s.PodService
-	runtimePodRepo repository.RuntimePodRepository
-	bindingRepo    repository.InstanceRuntimeBindingRepository
-	upgrader       websocket.Upgrader
+	podService *k8s.PodService
+	upgrader   websocket.Upgrader
 }
 
 type shellClientMessage struct {
@@ -48,11 +43,9 @@ type shellWebSocketWriter struct {
 	done <-chan struct{}
 }
 
-func NewInstanceShellService(runtimePodRepo repository.RuntimePodRepository, bindingRepo repository.InstanceRuntimeBindingRepository) *InstanceShellService {
+func NewInstanceShellService() *InstanceShellService {
 	return &InstanceShellService{
-		podService:     k8s.NewPodService(),
-		runtimePodRepo: runtimePodRepo,
-		bindingRepo:    bindingRepo,
+		podService: k8s.NewPodService(),
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool { return true },
 		},
@@ -132,22 +125,8 @@ func (s *InstanceShellService) execTarget(ctx context.Context, instance *models.
 	if instance == nil {
 		return nil, "", nil, fmt.Errorf("instance is required")
 	}
-	if IsOpenCodeLiteTUIInstance(instance) {
-		if s.bindingRepo == nil || s.runtimePodRepo == nil {
-			return nil, "", nil, fmt.Errorf("runtime terminal lookup is not configured")
-		}
-		binding, err := s.bindingRepo.GetRunningByInstanceID(ctx, instance.ID)
-		if err != nil || binding == nil {
-			return nil, "", nil, fmt.Errorf("OpenCode runtime gateway is unavailable")
-		}
-		if binding.Generation != instance.RuntimeGeneration {
-			return nil, "", nil, fmt.Errorf("OpenCode runtime gateway is stale")
-		}
-		runtimePod, err := s.runtimePodRepo.GetByID(ctx, binding.RuntimePodID)
-		if err != nil || runtimePod == nil || strings.TrimSpace(runtimePod.PodName) == "" || strings.TrimSpace(runtimePod.Namespace) == "" {
-			return nil, "", nil, fmt.Errorf("OpenCode runtime pod is unavailable")
-		}
-		return &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: runtimePod.PodName, Namespace: runtimePod.Namespace}}, "runtime", openCodeTUICommand(instance, binding), nil
+	if !strings.EqualFold(strings.TrimSpace(instance.RuntimeType), RuntimeBackendShell) {
+		return nil, "", nil, fmt.Errorf("shell access is only available for shell instances")
 	}
 
 	pod, err := s.podService.GetPod(ctx, instance.UserID, instance.ID)
@@ -155,49 +134,6 @@ func (s *InstanceShellService) execTarget(ctx context.Context, instance *models.
 		return nil, "", nil, err
 	}
 	return pod, "desktop", defaultShellCommand(), nil
-}
-
-func IsOpenCodeLiteTUIInstance(instance *models.Instance) bool {
-	return instance != nil &&
-		strings.EqualFold(strings.TrimSpace(instance.Type), RuntimeTypeOpenCode) &&
-		strings.EqualFold(strings.TrimSpace(instance.InstanceMode), InstanceModeLite) &&
-		strings.EqualFold(strings.TrimSpace(instance.RuntimeType), RuntimeBackendGateway)
-}
-
-func openCodeTUICommand(instance *models.Instance, binding *models.InstanceRuntimeBinding) []string {
-	workspace := ""
-	if instance != nil && instance.WorkspacePath != nil {
-		workspace = strings.TrimSpace(*instance.WorkspacePath)
-	}
-	if workspace == "" && instance != nil {
-		workspace = RuntimeWorkspacePath(RuntimeTypeOpenCode, instance.UserID, instance.ID)
-	}
-	home := workspace + "/home"
-	uid := RuntimeLinuxID(instance.ID)
-	gatewayPID := ""
-	if binding != nil && binding.GatewayPID != nil && *binding.GatewayPID > 0 {
-		gatewayPID = strconv.Itoa(*binding.GatewayPID)
-	} else if instance != nil {
-		// The gateway is owned by the same per-instance Linux user. Reading its
-		// environment after dropping privileges is permitted and supplies the
-		// API key referenced by the generated OpenCode config.
-		gatewayPID = "$(pgrep -u " + strconv.Itoa(uid) + " -f '/usr/local/bin/opencode web' | head -n 1)"
-	}
-	// Start the official TUI in the same per-instance home directory as the
-	// gateway. Running it directly avoids reading the gateway's private
-	// credentials from /proc, which is blocked by the runtime's process
-	// isolation. The TUI still loads the same per-instance provider config.
-	command := "/usr/local/bin/opencode " + shellQuoteForTerminal(workspace)
-	script := "exec setpriv --reuid=" + strconv.Itoa(uid) + " --regid=" + strconv.Itoa(uid) + " --clear-groups sh -lc " + shellQuoteForTerminal(
-		"gateway_pid="+shellQuoteForTerminal(gatewayPID)+"; "+
-			"if [ -n \"$gateway_pid\" ]; then export $(tr '\\000' '\\n' </proc/$gateway_pid/environ | grep '^CLAWMANAGER_LLM_API_KEY=' || true); fi; "+
-			"export HOME="+shellQuoteForTerminal(home)+" OPENCODE_CONFIG_DIR="+shellQuoteForTerminal(home+"/.opencode")+" OPENCODE_CONFIG="+shellQuoteForTerminal(home+"/.opencode/opencode.json")+" TERM=${TERM:-xterm-256color} COLORTERM=${COLORTERM:-truecolor}; exec "+command,
-	)
-	return []string{"sh", "-lc", script}
-}
-
-func shellQuoteForTerminal(value string) string {
-	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
 }
 
 func defaultShellCommand() []string {

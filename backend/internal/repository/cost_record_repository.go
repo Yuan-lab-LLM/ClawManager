@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS cost_records (
   runtime_type VARCHAR(32) NULL,
   gateway_id VARCHAR(128) NULL,
   runtime_pod_id BIGINT NULL,
+  gateway_key_id BIGINT NULL,
   invocation_id INT NULL,
   model_id INT NULL,
   provider_type VARCHAR(100) NOT NULL,
@@ -69,6 +70,7 @@ CREATE TABLE IF NOT EXISTS cost_records (
   INDEX idx_cost_records_trace_id (trace_id),
   INDEX idx_cost_records_user_id (user_id),
   INDEX idx_cost_records_gateway_id (gateway_id),
+  INDEX idx_cost_records_gateway_key_id (gateway_key_id),
   INDEX idx_cost_records_model_id (model_id),
   INDEX idx_cost_records_provider_type (provider_type),
   INDEX idx_cost_records_recorded_at (recorded_at)

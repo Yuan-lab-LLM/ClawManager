@@ -249,11 +249,14 @@ export function supportsManagedReasoningControl(
   protocolType: string | undefined,
   baseUrl: string,
   providerModelName: string,
+  controlMode?: string,
 ) {
   const protocol = resolveProviderProtocolType(providerType, protocolType);
   if (protocol !== 'openai' && protocol !== 'openai-compatible') {
     return false;
   }
+  if (controlMode === 'none') return false;
+  if (controlMode) return ['deepseek-thinking', 'thinking-type', 'enable-thinking', 'chat-template-kwargs'].includes(controlMode);
   let hostname = '';
   try {
     hostname = new URL(baseUrl.trim()).hostname.toLowerCase().replace(/\.$/, '');

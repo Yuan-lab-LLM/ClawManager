@@ -58,6 +58,7 @@ CREATE TABLE IF NOT EXISTS model_invocations (
   runtime_type VARCHAR(32) NULL,
   gateway_id VARCHAR(128) NULL,
   runtime_pod_id BIGINT NULL,
+  gateway_key_id BIGINT NULL,
   model_id INT NULL,
   provider_type VARCHAR(100) NOT NULL,
   requested_model VARCHAR(255) NOT NULL,
@@ -71,6 +72,10 @@ CREATE TABLE IF NOT EXISTS model_invocations (
   cached_tokens INT NULL,
   reasoning_tokens INT NULL,
   latency_ms INT NULL,
+  ttft_ms INT NULL,
+  generation_ms INT NULL,
+  tokens_per_second DECIMAL(12,4) NULL,
+  attempt_no INT NOT NULL DEFAULT 1,
   is_streaming BOOLEAN NOT NULL DEFAULT FALSE,
   status VARCHAR(50) NOT NULL,
   error_message TEXT NULL,
@@ -81,6 +86,7 @@ CREATE TABLE IF NOT EXISTS model_invocations (
   INDEX idx_model_invocations_user_id (user_id),
   INDEX idx_model_invocations_instance_id (instance_id),
   INDEX idx_model_invocations_gateway_id (gateway_id),
+  INDEX idx_model_invocations_gateway_key_id (gateway_key_id),
   INDEX idx_model_invocations_model_id (model_id),
   INDEX idx_model_invocations_status (status),
   INDEX idx_model_invocations_created_at (created_at)
@@ -93,6 +99,9 @@ CREATE TABLE IF NOT EXISTS model_invocations (
 	if _, err := r.sess.SQL().Exec("ALTER TABLE model_invocations ADD INDEX idx_model_invocations_session_id (session_id)"); err != nil && !isDuplicateIndexError(err) {
 		panic(fmt.Errorf("failed to ensure session index on model_invocations: %w", err))
 	}
+	// TTFT/generation/TPS/attempt columns are installed by migration 056.
+	// Re-running ALTER TABLE here on every startup would create avoidable
+	// metadata locking on the hottest observability table.
 }
 
 func (r *modelInvocationRepository) Create(invocation *models.ModelInvocation) error {
@@ -212,7 +221,7 @@ func (r *modelInvocationRepository) ListRecentByInstanceSession(instanceID int, 
 		limit = 20
 	}
 	query := `
-SELECT id, trace_id, session_id, request_id, user_id, instance_id, instance_mode, runtime_type, gateway_id, runtime_pod_id, model_id, provider_type, requested_model, actual_provider_model, traffic_class, request_payload, response_payload, prompt_tokens, completion_tokens, total_tokens, cached_tokens, reasoning_tokens, latency_ms, is_streaming, status, error_message, created_at, completed_at
+SELECT id, trace_id, session_id, request_id, user_id, instance_id, instance_mode, runtime_type, gateway_id, runtime_pod_id, gateway_key_id, model_id, provider_type, requested_model, actual_provider_model, traffic_class, request_payload, response_payload, prompt_tokens, completion_tokens, total_tokens, cached_tokens, reasoning_tokens, latency_ms, ttft_ms, generation_ms, tokens_per_second, attempt_no, is_streaming, status, error_message, created_at, completed_at
 FROM model_invocations
 WHERE instance_id = ?
   AND session_id = ?
@@ -244,6 +253,7 @@ LIMIT ?`
 			&item.RuntimeType,
 			&item.GatewayID,
 			&item.RuntimePodID,
+			&item.GatewayKeyID,
 			&item.ModelID,
 			&item.ProviderType,
 			&item.RequestedModel,
@@ -257,6 +267,10 @@ LIMIT ?`
 			&item.CachedTokens,
 			&item.ReasoningTokens,
 			&item.LatencyMs,
+			&item.TTFTMs,
+			&item.GenerationMs,
+			&item.TokensPerSecond,
+			&item.AttemptNo,
 			&item.IsStreaming,
 			&item.Status,
 			&item.ErrorMessage,

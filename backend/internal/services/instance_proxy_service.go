@@ -28,19 +28,22 @@ import (
 
 // InstanceProxyService handles proxying requests to instance pods
 type InstanceProxyService struct {
-	serviceService       *k8s.ServiceService
-	accessService        *InstanceAccessService
-	instanceRepo         repository.InstanceRepository
-	runtimePodRepo       repository.RuntimePodRepository
-	bindingRepo          repository.InstanceRuntimeBindingRepository
-	httpClient           *http.Client
-	openClawGatewayToken string
-	openClawProxyOrigin  string
-	serviceCache         map[serviceCacheKey]serviceCacheEntry
-	serviceLookups       map[serviceCacheKey]*serviceLookupCall
-	cacheMu              sync.RWMutex
-	lookupMu             sync.Mutex
-	serviceTTL           time.Duration
+	serviceService           *k8s.ServiceService
+	accessService            *InstanceAccessService
+	instanceRepo             repository.InstanceRepository
+	runtimePodRepo           repository.RuntimePodRepository
+	bindingRepo              repository.InstanceRuntimeBindingRepository
+	httpClient               *http.Client
+	openClawGatewayToken     string
+	openClawProxyOrigin      string
+	serviceCache             map[serviceCacheKey]serviceCacheEntry
+	serviceLookups           map[serviceCacheKey]*serviceLookupCall
+	cacheMu                  sync.RWMutex
+	lookupMu                 sync.Mutex
+	serviceTTL               time.Duration
+	openCodeBootstrapEnabled bool
+	openCodeBootstrapMu      sync.Mutex
+	openCodeBootstraps       map[string]*openCodeBootstrapCall
 }
 
 type serviceCacheKey struct {
@@ -166,6 +169,14 @@ func (s *InstanceProxyService) ProxyRequest(ctx context.Context, instanceID int,
 	proxyPrefix := hermesProxyPrefix(instanceID)
 	hermesLite := s.isHermesLiteProxyInstance(instanceID, accessToken.InstanceType)
 	bootstrapPath := stripInstanceProxyPrefix(targetPath, instanceID)
+	openCodeStorageScope := ""
+	if opencodeLite && isOpenCodeBrowserDocumentRequest(r, bootstrapPath) {
+		instance, lookupErr := s.instanceRepo.GetByID(instanceID)
+		if lookupErr != nil || instance == nil {
+			return fmt.Errorf("failed to resolve OpenCode browser storage identity")
+		}
+		openCodeStorageScope = openCodeBrowserStorageScope(instance)
+	}
 
 	// Copy query parameters, excluding ClawManager-owned proxy/gateway tokens.
 	queryParams := r.URL.Query()
@@ -174,8 +185,20 @@ func (s *InstanceProxyService) ProxyRequest(ctx context.Context, instanceID int,
 	if len(queryParams) > 0 {
 		targetURL.RawQuery = queryParams.Encode()
 	}
+	if s.openCodeBootstrapEnabled && opencodeLite && openCodeStorageScope != "" && bootstrapPath == "/" && len(queryParams) == 0 {
+		sessionID, bootstrapErr := s.ensureOpenCodeInitialSession(ctx, instanceID, targetURL, managedGatewayToken)
+		if bootstrapErr != nil {
+			return fmt.Errorf("failed to initialize OpenCode session: %w", bootstrapErr)
+		}
+		if sessionID != "" {
+			w.Header().Set("Cache-Control", "no-store")
+			http.Redirect(w, r, openCodeSessionBrowserRoute(r, sessionID), http.StatusTemporaryRedirect)
+			return nil
+		}
+	}
 
-	// OpenCode uses a long-lived SSE stream at /global/event to initialize and
+	// OpenCode uses a long-lived SSE stream at /global/event (V1) or /api/event
+	// (V2) to initialize and
 	// keep its session UI in sync. Giving that request the normal five-minute
 	// HTTP proxy deadline delays all events until the connection is closed and
 	// leaves the Lite portal as an empty shell.
@@ -247,8 +270,13 @@ func (s *InstanceProxyService) ProxyRequest(ctx context.Context, instanceID int,
 	} else if !isHermesDashboardPublicAuthPath(bootstrapPath) {
 		setManagedRuntimeGatewayAuthHeaders(proxyReq.Header, managedGatewayToken)
 	}
-	if shouldRewriteHTML {
+	if shouldRewriteHTML || openCodeStorageScope != "" {
 		proxyReq.Header.Del("Accept-Encoding")
+	}
+	if openCodeStorageScope != "" {
+		// Cached upstream HTML predates our instance-specific bootstrap.
+		proxyReq.Header.Del("If-None-Match")
+		proxyReq.Header.Del("If-Modified-Since")
 	}
 	if openCodeProjectSearchRewritten {
 		proxyReq.Header.Del("Accept-Encoding")
@@ -295,7 +323,7 @@ func (s *InstanceProxyService) ProxyRequest(ctx context.Context, instanceID int,
 		resp.Header.Set("Content-Length", strconv.Itoa(len(body)))
 	}
 
-	if shouldRewriteHTML && strings.Contains(resp.Header.Get("Content-Type"), "text/html") {
+	if (shouldRewriteHTML || openCodeStorageScope != "") && strings.Contains(resp.Header.Get("Content-Type"), "text/html") {
 		body, readErr := io.ReadAll(resp.Body)
 		if readErr != nil {
 			return fmt.Errorf("failed to read upstream html: %w", readErr)
@@ -304,13 +332,21 @@ func (s *InstanceProxyService) ProxyRequest(ctx context.Context, instanceID int,
 			return fmt.Errorf("failed to close upstream html body: %w", closeErr)
 		}
 
-		modifiedBody := injectProxyBase(string(body), proxyBaseForRequestPath(effectiveRequestPath, instanceID))
-		if hermesLite {
-			modifiedBody = injectHermesAbsolutePathPatch(modifiedBody, proxyPrefix)
+		modifiedBody := string(body)
+		if shouldRewriteHTML {
+			modifiedBody = injectProxyBase(modifiedBody, proxyBaseForRequestPath(effectiveRequestPath, instanceID))
+			if hermesLite {
+				modifiedBody = injectHermesAbsolutePathPatch(modifiedBody, proxyPrefix)
+			}
+			if opencodeLite {
+				modifiedBody = rewriteOpenCodeHTMLRootAssets(modifiedBody, proxyPrefix)
+				modifiedBody = injectOpenCodeAbsolutePathPatch(modifiedBody, proxyPrefix)
+			}
 		}
-		if opencodeLite {
-			modifiedBody = rewriteOpenCodeHTMLRootAssets(modifiedBody, proxyPrefix)
-			modifiedBody = injectOpenCodeAbsolutePathPatch(modifiedBody, proxyPrefix)
+		if openCodeStorageScope != "" {
+			modifiedBody = injectOpenCodeBrowserStorageScope(modifiedBody, openCodeStorageScope)
+			resp.Header.Set("Cache-Control", "no-store")
+			resp.Header.Del("Last-Modified")
 		}
 		resp.Body = io.NopCloser(bytes.NewReader([]byte(modifiedBody)))
 		resp.ContentLength = int64(len(modifiedBody))
@@ -354,7 +390,15 @@ func (s *InstanceProxyService) ProxyRequest(ctx context.Context, instanceID int,
 }
 
 func isOpenCodeEventStreamRequest(opencodeLite bool, targetPath string) bool {
-	return opencodeLite && strings.TrimSpace(targetPath) == "/global/event"
+	if !opencodeLite {
+		return false
+	}
+	switch strings.TrimSpace(targetPath) {
+	case "/global/event", "/api/event":
+		return true
+	default:
+		return false
+	}
 }
 
 func copyEventStream(w http.ResponseWriter, body io.Reader) error {

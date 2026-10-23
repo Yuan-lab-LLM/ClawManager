@@ -311,3 +311,119 @@ func TestMigration048PreservesAllInstanceTypes(t *testing.T) {
 		}
 	}
 }
+
+func TestMigration052AddsGatewayKeyBudgetAndAttribution(t *testing.T) {
+	raw, err := embeddedMigrations.ReadFile("migrations/052_add_gateway_key_budget_and_attribution.sql")
+	if err != nil {
+		t.Fatalf("read migration 052: %v", err)
+	}
+	sql := string(raw)
+	for _, required := range []string{
+		"information_schema.COLUMNS",
+		"information_schema.STATISTICS",
+		"budget_limit",
+		"budget_period",
+		"budget_spent",
+		"actual_cost",
+		"settlement_status",
+		"gateway_key_budget_reservations",
+		"gateway_key_budget_ledger",
+		"idx_model_invocations_gateway_key_id",
+		"idx_audit_events_gateway_key_id",
+		"idx_cost_records_gateway_key_id",
+	} {
+		if !strings.Contains(sql, required) {
+			t.Fatalf("migration 052 must contain %s", required)
+		}
+	}
+}
+
+func TestMigration051IsRetrySafe(t *testing.T) {
+	raw, err := embeddedMigrations.ReadFile("migrations/051_add_gateway_key_rate_limits.sql")
+	if err != nil {
+		t.Fatalf("read migration 051: %v", err)
+	}
+	sql := string(raw)
+	if !strings.Contains(sql, "information_schema.COLUMNS") {
+		t.Fatal("migration 051 must guard gateway key rate-limit columns")
+	}
+	for _, column := range []string{"rpm_limit", "tpm_limit", "concurrent_requests_limit"} {
+		if !strings.Contains(sql, "COLUMN_NAME = '"+column+"'") {
+			t.Fatalf("migration 051 must guard %s column addition", column)
+		}
+	}
+}
+
+func TestMigration052GuardsEveryAlteredColumnAndIndex(t *testing.T) {
+	raw, err := embeddedMigrations.ReadFile("migrations/052_add_gateway_key_budget_and_attribution.sql")
+	if err != nil {
+		t.Fatalf("read migration 052: %v", err)
+	}
+	sql := string(raw)
+	for _, column := range []string{
+		"budget_limit", "budget_period", "budget_spent", "budget_reset_at",
+		"actual_cost", "settlement_status", "gateway_key_id",
+	} {
+		if !strings.Contains(sql, "COLUMN_NAME = '"+column+"'") {
+			t.Fatalf("migration 052 must guard %s column addition", column)
+		}
+	}
+	for _, index := range []string{
+		"idx_model_invocations_gateway_key_id",
+		"idx_audit_events_gateway_key_id",
+		"idx_cost_records_gateway_key_id",
+	} {
+		if !strings.Contains(sql, "INDEX_NAME = '"+index+"'") {
+			t.Fatalf("migration 052 must guard %s index addition", index)
+		}
+	}
+}
+
+func TestMigration053AddsLLMModelContextWindow(t *testing.T) {
+	raw, err := embeddedMigrations.ReadFile("migrations/053_add_llm_model_context_window.sql")
+	if err != nil {
+		t.Fatalf("read migration 053: %v", err)
+	}
+	sql := string(raw)
+	for _, required := range []string{
+		"information_schema.COLUMNS",
+		"TABLE_NAME = 'llm_models'",
+		"COLUMN_NAME = 'context_window_tokens'",
+		"ALTER TABLE llm_models ADD COLUMN context_window_tokens",
+		"PREPARE stmt FROM @stmt",
+		"EXECUTE stmt",
+		"DEALLOCATE PREPARE stmt",
+	} {
+		if !strings.Contains(sql, required) {
+			t.Fatalf("migration 053 must contain %s", required)
+		}
+	}
+}
+
+func TestMigration056AddsDeploymentRoutingMetrics(t *testing.T) {
+	raw, err := embeddedMigrations.ReadFile("migrations/056_add_gateway_deployment_routing.sql")
+	if err != nil {
+		t.Fatalf("read migration 056: %v", err)
+	}
+	sql := string(raw)
+	for _, column := range []string{
+		"max_concurrent_requests", "ttft_ms", "generation_ms", "tokens_per_second", "attempt_no",
+	} {
+		if !strings.Contains(sql, "COLUMN_NAME = '"+column+"'") {
+			t.Fatalf("migration 056 must guard %s column addition", column)
+		}
+	}
+	for _, required := range []string{
+		"information_schema.COLUMNS",
+		"ALTER TABLE llm_models ADD COLUMN max_concurrent_requests",
+		"ALTER TABLE model_invocations ADD COLUMN ttft_ms",
+		"ALTER TABLE model_invocations ADD COLUMN tokens_per_second",
+		"PREPARE stmt FROM @stmt",
+		"EXECUTE stmt",
+		"DEALLOCATE PREPARE stmt",
+	} {
+		if !strings.Contains(sql, required) {
+			t.Fatalf("migration 056 must contain %s", required)
+		}
+	}
+}

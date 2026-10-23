@@ -1567,8 +1567,8 @@ func (h *InstanceHandler) StreamShell(c *gin.Context) {
 		return
 	}
 
-	if !strings.EqualFold(strings.TrimSpace(instance.RuntimeType), "shell") && !services.IsOpenCodeLiteTUIInstance(instance) {
-		utils.Error(c, http.StatusBadRequest, "Shell access is only available for shell or OpenCode Lite instances")
+	if !strings.EqualFold(strings.TrimSpace(instance.RuntimeType), "shell") {
+		utils.Error(c, http.StatusBadRequest, "Shell access is only available for shell instances")
 		return
 	}
 

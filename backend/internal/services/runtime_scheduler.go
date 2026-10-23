@@ -213,25 +213,7 @@ func (s *RuntimeScheduler) FailoverPod(ctx context.Context, podID int64, reason 
 		return errors.Join(errs...)
 	}
 	for _, binding := range bindings {
-		nextGeneration := binding.Generation + 1
-		instance, err := s.instanceRepo.GetByID(binding.InstanceID)
-		if err != nil {
-			errs = append(errs, err)
-			continue
-		}
-		if instance != nil {
-			nextGeneration = instance.RuntimeGeneration + 1
-		}
-		message := reason
-		if err := s.instanceRepo.UpdateRuntimeState(ctx, binding.InstanceID, "creating", nextGeneration, &message); err != nil {
-			errs = append(errs, err)
-			continue
-		}
-		if err := s.bindingRepo.DeleteByInstanceID(ctx, binding.InstanceID); err != nil {
-			errs = append(errs, err)
-			continue
-		}
-		if err := s.podRepo.ReleaseSlot(ctx, podID); err != nil {
+		if err := s.failoverBinding(ctx, podID, binding, reason); err != nil {
 			errs = append(errs, err)
 		}
 	}
@@ -248,6 +230,15 @@ func (s *RuntimeScheduler) StartRollout(ctx context.Context, rolloutID int64) er
 	}
 	if rollout == nil {
 		return fmt.Errorf("runtime rollout %d not found", rolloutID)
+	}
+	// The legacy rollout changes a shared Deployment before migrating its
+	// instances. It is not a data-preserving OpenCode upgrade path.
+	if rollout.RuntimeType == "opencode" {
+		message := models.ErrOpenCodeSafeUpgradeRequired.Error()
+		if err := s.rolloutRepo.UpdateStatus(ctx, rollout.ID, "error", nil, nil, &message); err != nil {
+			return err
+		}
+		return models.ErrOpenCodeSafeUpgradeRequired
 	}
 
 	startedAt := time.Now().UTC()
@@ -534,59 +525,7 @@ func (s *RuntimeScheduler) reconcile(ctx context.Context) error {
 			errs = append(errs, err)
 		}
 		for _, instance := range desired {
-			if !isSchedulerManagedV2Instance(instance) {
-				continue
-			}
-			if isRuntimeErrorInstance(instance) && !isRecoverableRuntimeSchedulingError(instance) {
-				continue
-			}
-			binding, err := s.bindingRepo.GetRunningByInstanceID(ctx, instance.ID)
-			if err != nil {
-				errs = append(errs, fmt.Errorf("get running binding for instance %d: %w", instance.ID, err))
-				continue
-			}
-			if binding != nil {
-				stale, staleErr := s.cleanupStaleInstanceBinding(ctx, instance, binding)
-				if staleErr != nil {
-					errs = append(errs, fmt.Errorf("clean stale running binding for desired instance %d: %w", instance.ID, staleErr))
-					continue
-				}
-				if stale {
-					binding = nil
-				} else if err := s.syncInstanceStateFromBinding(ctx, instance, binding); err != nil {
-					errs = append(errs, fmt.Errorf("sync desired instance %d from binding: %w", instance.ID, err))
-					continue
-				} else {
-					continue
-				}
-			}
-			binding, err = s.bindingRepo.GetByInstanceID(ctx, instance.ID)
-			if err != nil {
-				errs = append(errs, fmt.Errorf("get binding for desired instance %d: %w", instance.ID, err))
-				continue
-			}
-			if binding != nil {
-				stale, staleErr := s.cleanupStaleInstanceBinding(ctx, instance, binding)
-				if staleErr != nil {
-					errs = append(errs, fmt.Errorf("clean stale binding for desired instance %d: %w", instance.ID, staleErr))
-					continue
-				}
-				if stale {
-					binding = nil
-				} else if err := s.syncInstanceStateFromBinding(ctx, instance, binding); err != nil {
-					errs = append(errs, fmt.Errorf("sync desired instance %d from binding: %w", instance.ID, err))
-					continue
-				} else {
-					continue
-				}
-			}
-			if assignErr := s.assignInstance(ctx, instance); assignErr != nil {
-				if errors.Is(assignErr, errRuntimeScaleOutPending) || errors.Is(assignErr, errRuntimeGatewayStartPending) {
-					continue
-				}
-				errs = append(errs, fmt.Errorf("assign desired instance %d: %w", instance.ID, assignErr))
-				s.markInstanceError(ctx, instance, assignErr, &errs)
-			}
+			errs = append(errs, s.reconcileDesiredInstance(ctx, instance)...)
 		}
 	}
 	return errors.Join(errs...)
@@ -632,6 +571,22 @@ func (s *RuntimeScheduler) reconcileCreatingInstances(ctx context.Context, insta
 }
 
 func (s *RuntimeScheduler) reconcileCreatingInstance(ctx context.Context, instance models.Instance) []error {
+	release, err := acquireInstanceLifecycleOperation(ctx, s.instanceRepo, instance.ID)
+	if err != nil {
+		return schedulerGuardErrors(err)
+	}
+	defer release()
+	current, err := currentLifecycleSnapshot(s.instanceRepo, instance)
+	if err != nil {
+		return []error{err}
+	}
+	if current == nil || current.Status != "creating" {
+		return nil
+	}
+	return s.reconcileCreatingInstanceLocked(ctx, *current)
+}
+
+func (s *RuntimeScheduler) reconcileCreatingInstanceLocked(ctx context.Context, instance models.Instance) []error {
 	binding, err := s.bindingRepo.GetByInstanceID(ctx, instance.ID)
 	if err != nil {
 		return []error{fmt.Errorf("get binding for creating instance %d: %w", instance.ID, err)}

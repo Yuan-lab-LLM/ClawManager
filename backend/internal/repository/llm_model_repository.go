@@ -39,6 +39,11 @@ CREATE TABLE IF NOT EXISTS llm_models (
   description TEXT NULL,
   provider_type VARCHAR(100) NOT NULL,
   protocol_type VARCHAR(100) NULL,
+	  model_group VARCHAR(100) NOT NULL,
+	  deployment_priority INT NOT NULL DEFAULT 100,
+	  max_concurrent_requests INT NOT NULL DEFAULT 0,
+	  context_window_tokens INT NOT NULL DEFAULT 0,
+	  quality_tier INT NOT NULL DEFAULT 0,
   base_url VARCHAR(500) NOT NULL,
   provider_model_name VARCHAR(255) NOT NULL,
   reasoning_enabled BOOLEAN NOT NULL DEFAULT FALSE,
@@ -98,71 +103,162 @@ ALTER TABLE llm_models
 			panic(fmt.Errorf("failed to ensure llm_models reasoning_enabled column: %w", err))
 		}
 	}
+
+	// Model-group, routing-capacity, context-window and quality-tier schema
+	// changes are owned by embedded migrations 049 and 053-056. Do not repeat
+	// ALTER/UPDATE statements here: repository construction happens on every
+	// process start and otherwise takes unnecessary metadata locks.
+}
+
+func (r *llmModelRepository) readModels(cond db.Cond, order bool) ([]models.LLMModel, error) {
+	var items []models.LLMModel
+	// Read scope and grants in one snapshot. Never interpret a failed grant query as public.
+	err := r.sess.Tx(func(sess db.Session) error {
+		query := sess.Collection("llm_models").Find(cond)
+		if order {
+			query = query.OrderBy("-is_secure", "model_group", "deployment_priority", "display_name")
+		}
+		if err := query.All(&items); err != nil {
+			return err
+		}
+		if len(items) == 0 {
+			return nil
+		}
+		ids := make([]int, 0, len(items))
+		for _, item := range items {
+			ids = append(ids, item.ID)
+		}
+		var grants []struct {
+			ModelID int `db:"model_id"`
+			UserID  int `db:"user_id"`
+		}
+		if err := sess.Collection("llm_model_user_grants").Find(db.Cond{"model_id": ids}).All(&grants); err != nil {
+			return err
+		}
+		byModel := make(map[int][]int)
+		for _, grant := range grants {
+			byModel[grant.ModelID] = append(byModel[grant.ModelID], grant.UserID)
+		}
+		for i := range items {
+			items[i].AllowedUserIDs = byModel[items[i].ID]
+			if items[i].AllowedUserIDs == nil {
+				items[i].AllowedUserIDs = []int{}
+			}
+		}
+		return nil
+	})
+	return items, err
 }
 
 func (r *llmModelRepository) List() ([]models.LLMModel, error) {
-	var items []models.LLMModel
-	if err := r.sess.Collection("llm_models").Find().OrderBy("-is_secure", "display_name").All(&items); err != nil {
-		return nil, fmt.Errorf("failed to list llm models: %w", err)
-	}
-	return items, nil
+	return r.readModels(db.Cond{}, true)
 }
-
 func (r *llmModelRepository) ListActive() ([]models.LLMModel, error) {
-	var items []models.LLMModel
-	if err := r.sess.Collection("llm_models").Find(db.Cond{"is_active": true}).OrderBy("-is_secure", "display_name").All(&items); err != nil {
-		return nil, fmt.Errorf("failed to list active llm models: %w", err)
-	}
-	return items, nil
+	return r.readModels(db.Cond{"is_active": true}, true)
 }
-
 func (r *llmModelRepository) GetByID(id int) (*models.LLMModel, error) {
-	var item models.LLMModel
-	err := r.sess.Collection("llm_models").Find(db.Cond{"id": id}).One(&item)
-	if err != nil {
-		if err == db.ErrNoMoreRows {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("failed to get llm model by id: %w", err)
+	items, err := r.readModels(db.Cond{"id": id}, false)
+	if err != nil || len(items) == 0 {
+		return nil, err
 	}
-	return &item, nil
+	return &items[0], nil
 }
-
-func (r *llmModelRepository) GetByDisplayName(displayName string) (*models.LLMModel, error) {
-	var item models.LLMModel
-	err := r.sess.Collection("llm_models").Find(db.Cond{"display_name": displayName}).One(&item)
-	if err != nil {
-		if err == db.ErrNoMoreRows {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("failed to get llm model by display name: %w", err)
+func (r *llmModelRepository) GetByDisplayName(name string) (*models.LLMModel, error) {
+	items, err := r.readModels(db.Cond{"display_name": name}, false)
+	if err != nil || len(items) == 0 {
+		return nil, err
 	}
-	return &item, nil
+	return &items[0], nil
 }
 
 func (r *llmModelRepository) Save(model *models.LLMModel) error {
-	now := time.Now()
-	if model.ID == 0 {
-		model.CreatedAt = now
-		model.UpdatedAt = now
-		res, err := r.sess.Collection("llm_models").Insert(model)
-		if err != nil {
-			return fmt.Errorf("failed to create llm model: %w", err)
+	err := r.sess.Tx(func(sess db.Session) error {
+		if model.ID != 0 {
+			row, err := sess.SQL().QueryRow("SELECT visibility_scope, access_policy_version FROM llm_models WHERE id = ? FOR UPDATE", model.ID)
+			if err != nil {
+				return err
+			}
+			var scope string
+			var version int
+			if err := row.Scan(&scope, &version); err != nil {
+				return err
+			}
+			if model.UpdateAccessPolicy {
+				if model.AccessPolicyVersion != version {
+					return models.ErrModelAccessConflict
+				}
+				model.AccessPolicyVersion = version + 1
+			} else {
+				// A legacy client editing price etc. cannot reset an ACL read earlier.
+				model.VisibilityScope, model.AccessPolicyVersion = scope, version
+				var grants []struct {
+					UserID int `db:"user_id"`
+				}
+				if err := sess.Collection("llm_model_user_grants").Find(db.Cond{"model_id": model.ID}).All(&grants); err != nil {
+					return err
+				}
+				model.AllowedUserIDs = []int{}
+				for _, grant := range grants {
+					model.AllowedUserIDs = append(model.AllowedUserIDs, grant.UserID)
+				}
+			}
+		} else {
+			model.AccessPolicyVersion = 1
+			if model.VisibilityScope == "" {
+				model.VisibilityScope = models.ModelVisibilityAll
+			}
 		}
-		model.ID = int(res.ID().(int64))
-		return nil
+		if model.UpdateAccessPolicy && model.VisibilityScope == models.ModelVisibilitySelected {
+			if len(model.AllowedUserIDs) == 0 {
+				return models.ErrInvalidModelAccess
+			}
+			count, err := sess.Collection("users").Find(db.Cond{"id": model.AllowedUserIDs, "is_active": true}).Count()
+			if err != nil {
+				return err
+			}
+			if int(count) != len(model.AllowedUserIDs) {
+				return models.ErrInvalidModelAccess
+			}
+		}
+		model.UpdatedAt = time.Now()
+		if model.ID == 0 {
+			model.CreatedAt = model.UpdatedAt
+			res, err := sess.Collection("llm_models").Insert(model)
+			if err != nil {
+				return err
+			}
+			model.ID = int(res.ID().(int64))
+		} else if err := sess.Collection("llm_models").Find(db.Cond{"id": model.ID}).Update(model); err != nil {
+			return err
+		}
+		if model.UpdateAccessPolicy {
+			if err := sess.Collection("llm_model_user_grants").Find(db.Cond{"model_id": model.ID}).Delete(); err != nil {
+				return err
+			}
+			if model.VisibilityScope == models.ModelVisibilitySelected {
+				for _, userID := range model.AllowedUserIDs {
+					if _, err := sess.Collection("llm_model_user_grants").Insert(map[string]interface{}{"model_id": model.ID, "user_id": userID}); err != nil {
+						return err
+					}
+				}
+			}
+		}
+		return revokeUnauthorizedTasks(sess, model.ID)
+	})
+	if err == nil {
+		publishModelAccessChange()
 	}
-
-	model.UpdatedAt = now
-	if err := r.sess.Collection("llm_models").Find(db.Cond{"id": model.ID}).Update(model); err != nil {
-		return fmt.Errorf("failed to update llm model: %w", err)
-	}
-	return nil
+	return err
 }
-
 func (r *llmModelRepository) Delete(id int) error {
-	if err := r.sess.Collection("llm_models").Find(db.Cond{"id": id}).Delete(); err != nil {
-		return fmt.Errorf("failed to delete llm model: %w", err)
+	err := r.sess.Tx(func(sess db.Session) error {
+		if err := sess.Collection("llm_models").Find(db.Cond{"id": id}).Delete(); err != nil {
+			return err
+		}
+		return revokeUnauthorizedTasks(sess, id)
+	})
+	if err == nil {
+		publishModelAccessChange()
 	}
-	return nil
+	return err
 }

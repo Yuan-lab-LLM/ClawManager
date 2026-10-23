@@ -216,6 +216,10 @@ export interface AIAuditItem {
   completion_tokens: number;
   total_tokens: number;
   latency_ms?: number;
+  ttft_ms?: number;
+  generation_ms?: number;
+  tokens_per_second?: number;
+  attempt_no?: number;
   error_message?: string;
   created_at: string;
   completed_at?: string;
@@ -244,6 +248,10 @@ export interface ModelInvocationRecord {
   response_payload?: string;
   error_message?: string;
   latency_ms?: number;
+  ttft_ms?: number;
+  generation_ms?: number;
+  tokens_per_second?: number;
+  attempt_no?: number;
   created_at: string;
   completed_at?: string;
 }

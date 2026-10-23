@@ -11,6 +11,10 @@ const desktopAccessHookSource = readFileSync(
   path.resolve(scriptDir, "../src/hooks/useInstanceDesktopAccess.ts"),
   "utf8",
 );
+const serviceFrameSource = readFileSync(
+  path.resolve(scriptDir, "../src/components/InstanceServiceFrame.tsx"),
+  "utf8",
+);
 
 function assert(condition, message) {
   if (!condition) {
@@ -42,6 +46,19 @@ assert(
 assert(
   portalSource.includes('data-portal-mode={isProPortal ? "pro" : "lite"}'),
   "Portal must expose separate Pro and Lite layout markers.",
+);
+
+assert(
+  portalSource.includes(
+    'const isShellPortal = selectedRuntimeType === "shell";',
+  ),
+  "OpenCode Lite must use its dedicated browser origin instead of the shell portal.",
+);
+
+assert(
+  !serviceFrameSource.includes("isOpenCodeLite") &&
+    !serviceFrameSource.includes("<InstanceShellTerminal"),
+  "OpenCode Lite service frames must not fall back to the terminal TUI.",
 );
 
 assert(

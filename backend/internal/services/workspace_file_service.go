@@ -40,6 +40,7 @@ var (
 type WorkspaceFileScope struct {
 	InstanceID        int
 	UserID            int
+	RuntimeGeneration int
 	WorkspacePath     string
 	AuditActionPrefix string
 }

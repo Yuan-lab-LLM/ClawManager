@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -41,6 +42,7 @@ CREATE TABLE IF NOT EXISTS audit_events (
   runtime_type VARCHAR(32) NULL,
   gateway_id VARCHAR(128) NULL,
   runtime_pod_id BIGINT NULL,
+  gateway_key_id BIGINT NULL,
   invocation_id INT NULL,
   event_type VARCHAR(100) NOT NULL,
   traffic_class VARCHAR(50) NOT NULL,
@@ -52,6 +54,7 @@ CREATE TABLE IF NOT EXISTS audit_events (
   INDEX idx_audit_events_request_id (request_id),
   INDEX idx_audit_events_user_id (user_id),
   INDEX idx_audit_events_gateway_id (gateway_id),
+  INDEX idx_audit_events_gateway_key_id (gateway_key_id),
   INDEX idx_audit_events_invocation_id (invocation_id),
   INDEX idx_audit_events_event_type (event_type),
   INDEX idx_audit_events_created_at (created_at)
@@ -64,10 +67,14 @@ CREATE TABLE IF NOT EXISTS audit_events (
 }
 
 func (r *auditEventRepository) Create(event *models.AuditEvent) error {
+	return r.CreateContext(context.Background(), event)
+}
+
+func (r *auditEventRepository) CreateContext(ctx context.Context, event *models.AuditEvent) error {
 	if event.CreatedAt.IsZero() {
 		event.CreatedAt = time.Now()
 	}
-	res, err := r.sess.Collection("audit_events").Insert(event)
+	res, err := r.sess.WithContext(ctx).Collection("audit_events").Insert(event)
 	if err != nil {
 		return fmt.Errorf("failed to create audit event: %w", err)
 	}

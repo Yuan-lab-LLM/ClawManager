@@ -2,11 +2,46 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"clawreef/internal/aigateway"
+	"clawreef/internal/services"
+	"github.com/gin-gonic/gin"
 )
+
+type failingProtocolResponseWriter struct {
+	header http.Header
+	err    error
+}
+
+func (w *failingProtocolResponseWriter) Header() http.Header       { return w.header }
+func (*failingProtocolResponseWriter) WriteHeader(int)             {}
+func (w *failingProtocolResponseWriter) Write([]byte) (int, error) { return 0, w.err }
+
+type fakeGatewayRateLimitStore struct {
+	input           services.GatewayRateLimitInput
+	finalizedTokens int
+	releaseCount    int
+}
+
+func (s *fakeGatewayRateLimitStore) Acquire(_ context.Context, input services.GatewayRateLimitInput) (*services.GatewayRateLimitLease, error) {
+	s.input = input
+	return &services.GatewayRateLimitLease{}, nil
+}
+func (s *fakeGatewayRateLimitStore) Finalize(_ context.Context, _ *services.GatewayRateLimitLease, actualTokens int) error {
+	s.finalizedTokens = actualTokens
+	return nil
+}
+func (s *fakeGatewayRateLimitStore) Release(_ context.Context, _ *services.GatewayRateLimitLease) error {
+	s.releaseCount++
+	return nil
+}
 
 type responseRecorder struct {
 	header http.Header
@@ -18,6 +53,55 @@ func (r *responseRecorder) Header() http.Header         { return r.header }
 func (r *responseRecorder) Write(p []byte) (int, error) { return r.body.Write(p) }
 func (r *responseRecorder) WriteHeader(int)             {}
 func contains(s, part string) bool                      { return strings.Contains(s, part) }
+
+func TestGatewayUserIDRequiresPositiveAuthenticatedOwner(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	if _, ok := gatewayUserID(c); ok {
+		t.Fatal("missing user identity must not be accepted")
+	}
+	c.Set("userID", 0)
+	if _, ok := gatewayUserID(c); ok {
+		t.Fatal("zero user identity must not be accepted")
+	}
+	c.Set("userID", 42)
+	if id, ok := gatewayUserID(c); !ok || id != 42 {
+		t.Fatalf("gatewayUserID = %d/%v, want 42/true", id, ok)
+	}
+}
+
+func TestGatewayKeyLeaseCarriesTPMAndFinalizesUsage(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/gateway/llm/chat/completions", nil)
+	c.Set("gatewayKeyID", "gk_test")
+	c.Set("gatewayKeyRPMLimit", 10)
+	c.Set("gatewayKeyTPMLimit", 2000)
+	c.Set("gatewayKeyConcurrencyLimit", 2)
+	store := &fakeGatewayRateLimitStore{}
+	handler := &AIGatewayHandler{rateLimitStore: store}
+	maxTokens := 100
+	req := aigateway.ChatCompletionRequest{RawBody: []byte(`{"model":"general","messages":[{"role":"user","content":"hello"}]}`), MaxTokens: &maxTokens}
+	lease, ok := handler.acquireGatewayKeyLease(c, &req)
+	if !ok || lease == nil {
+		t.Fatal("expected Gateway Key lease")
+	}
+	if store.input.TPMLimit != 2000 || store.input.EstimatedTokens <= maxTokens {
+		t.Fatalf("unexpected rate-limit input: %#v", store.input)
+	}
+	handler.attachGatewayUsageFinalizer(&req, lease)
+	if req.UsageFinalizer == nil {
+		t.Fatal("usage finalizer was not attached")
+	}
+	if err := req.UsageFinalizer(42); err != nil {
+		t.Fatalf("usage finalizer returned error: %v", err)
+	}
+	handler.releaseGatewayKeyLease(lease)
+	if store.finalizedTokens != 42 || store.releaseCount != 1 {
+		t.Fatalf("finalized=%d released=%d", store.finalizedTokens, store.releaseCount)
+	}
+}
 
 func TestResponsesRequestNormalizesToolRounds(t *testing.T) {
 	p := responsesRequest{
@@ -184,5 +268,21 @@ func TestProtocolStreamWriterEmitsResponsesEvents(t *testing.T) {
 		if !contains(got, event) {
 			t.Fatalf("missing %s in %s", event, got)
 		}
+	}
+}
+
+func TestProtocolStreamWriterPropagatesDownstreamWriteFailure(t *testing.T) {
+	wantErr := errors.New("client disconnected")
+	w := &protocolStreamWriter{
+		ResponseWriter: &failingProtocolResponseWriter{header: make(http.Header), err: wantErr},
+		kind:           "responses",
+		model:          "gateway-model",
+	}
+	_, err := w.Write([]byte("data: {\"id\":\"chat_1\",\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}\n\n"))
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("stream write error = %v, want %v", err, wantErr)
+	}
+	if _, err = w.Write([]byte("data: [DONE]\n\n")); !errors.Is(err, wantErr) {
+		t.Fatalf("subsequent stream write error = %v, want %v", err, wantErr)
 	}
 }

@@ -1,11 +1,16 @@
 .git
 .gitignore
 .codex
+.codex-temp
+.tmp
+outputs
 .DS_Store
 node_modules
 frontend/node_modules
 frontend/dist
 backend/bin
+backend/*.exe
+backend/*.test
 backend/.cache
 backend/.codex
 backend/.tmp

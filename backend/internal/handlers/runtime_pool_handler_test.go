@@ -18,6 +18,19 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+func TestRuntimePoolHandlerRejectsUnsafeOpenCodeRolloutBeforePersistence(t *testing.T) {
+	repo := &runtimePoolHandlerRolloutRepo{}
+	handler := NewRuntimePoolHandler(&runtimePoolHandlerPodRepo{}, &runtimePoolHandlerBindingRepo{}, repo, nil, &runtimePoolHandlerEvents{})
+	router := runtimePoolHandlerRouter(1, "admin", handler)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/runtime-rollouts", bytes.NewBufferString(`{"runtime_type":"opencode","target_image_ref":"test:new"}`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusConflict || repo.created != nil {
+		t.Fatalf("status=%d created=%+v", rec.Code, repo.created)
+	}
+}
+
 func TestRuntimePoolHandlerRejectsNonAdmin(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	handler := NewRuntimePoolHandler(&runtimePoolHandlerPodRepo{}, &runtimePoolHandlerBindingRepo{}, &runtimePoolHandlerRolloutRepo{}, nil, &runtimePoolHandlerEvents{})

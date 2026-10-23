@@ -336,12 +336,19 @@ func buildV2SchedulerInstanceQuery(statuses []string, limit int) (string, []any)
 			AND workspace_path IS NOT NULL
 			AND TRIM(workspace_path) <> ''
 			AND type IN (?, ?, ?, ?)
+			AND NOT EXISTS (SELECT 1 FROM gateway_runtime_upgrades u WHERE u.instance_id=instances.id AND u.state NOT IN ('cancelled','completed'))
 		ORDER BY id
 		LIMIT ?
 	`, statusPlaceholders), args
 }
 
 func (r *instanceRepository) UpdateRuntimeState(ctx context.Context, id int, status string, generation int, message *string) error {
+	return r.withUnfencedInstance(ctx, id, func(local *instanceRepository) error {
+		return local.updateRuntimeState(ctx, id, status, generation, message)
+	})
+}
+
+func (r *instanceRepository) updateRuntimeState(ctx context.Context, id int, status string, generation int, message *string) error {
 	res, err := r.sess.SQL().ExecContext(ctx, `
 		UPDATE instances
 		SET status = ?, runtime_generation = ?, runtime_error_message = ?, updated_at = ?
@@ -386,15 +393,17 @@ func (r *instanceRepository) getRuntimeGeneration(ctx context.Context, id int) (
 }
 
 func (r *instanceRepository) SetWorkspacePath(ctx context.Context, id int, workspacePath string) error {
-	_, err := r.sess.SQL().ExecContext(ctx, `
+	return r.withUnfencedInstance(ctx, id, func(local *instanceRepository) error {
+		_, err := local.sess.SQL().ExecContext(ctx, `
 		UPDATE instances
 		SET workspace_path = ?, updated_at = ?
 		WHERE id = ?
 	`, workspacePath, time.Now().UTC(), id)
-	if err != nil {
-		return fmt.Errorf("failed to set instance workspace path: %w", err)
-	}
-	return nil
+		if err != nil {
+			return fmt.Errorf("failed to set instance workspace path: %w", err)
+		}
+		return nil
+	})
 }
 
 func (r *instanceRepository) UpdateWorkspaceUsage(ctx context.Context, id int, usageBytes int64) error {
@@ -411,18 +420,27 @@ func (r *instanceRepository) UpdateWorkspaceUsage(ctx context.Context, id int, u
 
 // Update updates an instance
 func (r *instanceRepository) Update(instance *models.Instance) error {
-	err := r.sess.Collection("instances").Find(db.Cond{"id": instance.ID}).Update(instance)
-	if err != nil {
-		return fmt.Errorf("failed to update instance: %w", err)
-	}
-	return nil
+	return r.withUnfencedInstance(context.Background(), instance.ID, func(local *instanceRepository) error {
+		err := local.sess.Collection("instances").Find(db.Cond{"id": instance.ID}).Update(instance)
+		if err != nil {
+			return fmt.Errorf("failed to update instance: %w", err)
+		}
+		return nil
+	})
 }
 
 // Delete deletes an instance
 func (r *instanceRepository) Delete(id int) error {
-	err := r.sess.Collection("instances").Find(db.Cond{"id": id}).Delete()
-	if err != nil {
-		return fmt.Errorf("failed to delete instance: %w", err)
-	}
-	return nil
+	return r.withUnfencedInstance(context.Background(), id, func(local *instanceRepository) error {
+		// Only terminal fences reach here. Remove them in the same transaction;
+		// the FK protects active operations from accidental cascading deletion.
+		if err := local.sess.Collection("gateway_runtime_upgrades").Find(db.Cond{"instance_id": id}).Delete(); err != nil {
+			return err
+		}
+		err := local.sess.Collection("instances").Find(db.Cond{"id": id}).Delete()
+		if err != nil {
+			return fmt.Errorf("failed to delete instance: %w", err)
+		}
+		return nil
+	})
 }

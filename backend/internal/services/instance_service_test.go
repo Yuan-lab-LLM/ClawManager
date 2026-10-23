@@ -68,15 +68,16 @@ func TestBuildGatewayEnvInjectsGatewayModelCatalog(t *testing.T) {
 			service := &instanceService{
 				llmModelRepo: &stubLLMModelRepository{
 					active: []models.LLMModel{
-						{DisplayName: "GPT-4.1"},
-						{DisplayName: "Claude 3.7 Sonnet"},
-						{DisplayName: "auto"},
-						{ProviderModelName: "deepseek-r1"},
+						{DisplayName: "GPT-4.1", ModelGroup: "general", ContextWindowTokens: 128000},
+						{DisplayName: "Claude 3.7 Sonnet", ModelGroup: "general", ContextWindowTokens: 200000},
+						{DisplayName: "auto", ContextWindowTokens: 64000},
+						{ProviderModelName: "deepseek-r1", ContextWindowTokens: 32000},
 					},
 				},
 			}
 
 			env, err := service.buildGatewayEnv(&models.Instance{
+				UserID:      1,
 				Type:        instanceType,
 				AccessToken: &token,
 			})
@@ -93,6 +94,16 @@ func TestBuildGatewayEnvInjectsGatewayModelCatalog(t *testing.T) {
 			if env["OPENAI_MODEL"] != "auto" {
 				t.Fatalf("expected OPENAI_MODEL to remain the default gateway alias, got %q", env["OPENAI_MODEL"])
 			}
+			if env["CLAWMANAGER_LLM_CONTEXT_WINDOW"] != "32000" {
+				t.Fatalf("expected conservative default context window, got %q", env["CLAWMANAGER_LLM_CONTEXT_WINDOW"])
+			}
+			var contextWindows map[string]int
+			if err := json.Unmarshal([]byte(env["CLAWMANAGER_LLM_CONTEXT_WINDOWS"]), &contextWindows); err != nil {
+				t.Fatalf("context window catalogue is not valid JSON: %v", err)
+			}
+			if contextWindows["GPT-4.1"] != 128000 || contextWindows["Claude 3.7 Sonnet"] != 128000 || contextWindows["general"] != 128000 {
+				t.Fatalf("unexpected context window catalogue: %#v", contextWindows)
+			}
 			if env["CLAWMANAGER_LLM_API_KEY"] != token || env["OPENAI_API_KEY"] != token {
 				t.Fatalf("expected gateway token aliases to be preserved")
 			}
@@ -108,9 +119,14 @@ func assertOpenCodeGatewayConfig(t *testing.T, raw string) {
 	var config struct {
 		Model    string `json:"model"`
 		Provider map[string]struct {
-			NPM     string                       `json:"npm"`
-			Options map[string]string            `json:"options"`
-			Models  map[string]map[string]string `json:"models"`
+			NPM     string            `json:"npm"`
+			Options map[string]string `json:"options"`
+			Models  map[string]struct {
+				Name  string `json:"name"`
+				Limit struct {
+					Context int `json:"context"`
+				} `json:"limit"`
+			} `json:"models"`
 		} `json:"provider"`
 	}
 	if err := json.Unmarshal([]byte(raw), &config); err != nil {
@@ -130,6 +146,31 @@ func assertOpenCodeGatewayConfig(t *testing.T, raw string) {
 		if _, ok := provider.Models[model]; !ok {
 			t.Fatalf("OpenCode config is missing model %q: %s", model, raw)
 		}
+	}
+	if provider.Models["auto"].Limit.Context != 32000 || provider.Models["GPT-4.1"].Limit.Context != 128000 || provider.Models["Claude 3.7 Sonnet"].Limit.Context != 128000 {
+		t.Fatalf("OpenCode config is missing model context limits: %s", raw)
+	}
+}
+
+func TestResolveGatewayModelInjectionKeepsUnknownAggregateContextWindow(t *testing.T) {
+	service := &instanceService{llmModelRepo: &stubLLMModelRepository{active: []models.LLMModel{
+		{DisplayName: "known", ModelGroup: "shared", ContextWindowTokens: 128000},
+		{DisplayName: "unknown", ModelGroup: "shared", ContextWindowTokens: 0},
+	}}}
+
+	injection, err := service.resolveGatewayModelInjection(1)
+	if err != nil {
+		t.Fatalf("resolveGatewayModelInjection returned error: %v", err)
+	}
+	if injection.defaultContextWindow != 0 {
+		t.Fatalf("default context window = %d, want unknown", injection.defaultContextWindow)
+	}
+	var contextWindows map[string]int
+	if err := json.Unmarshal([]byte(injection.contextWindowsJSON), &contextWindows); err != nil {
+		t.Fatalf("context window catalogue is not valid JSON: %v", err)
+	}
+	if contextWindows["shared"] != 0 || contextWindows["known"] != 0 || contextWindows["unknown"] != 0 {
+		t.Fatalf("unexpected context window aggregation: %#v", contextWindows)
 	}
 }
 
@@ -225,6 +266,7 @@ func TestBuildGatewayEnvMergesEnvironmentOverrides(t *testing.T) {
 
 	env, err := service.BuildGatewayEnv(&models.Instance{
 		ID:                       88,
+		UserID:                   1,
 		Type:                     "openclaw",
 		RuntimeType:              RuntimeBackendGateway,
 		AccessToken:              &token,
@@ -425,7 +467,7 @@ func TestResolveGatewayModelInjectionRequiresActiveModels(t *testing.T) {
 		llmModelRepo: &stubLLMModelRepository{},
 	}
 
-	injection, err := service.resolveGatewayModelInjection()
+	injection, err := service.resolveGatewayModelInjection(1)
 	if err == nil {
 		t.Fatalf("expected resolveGatewayModelInjection to fail when no active models exist, got %#v", injection)
 	}

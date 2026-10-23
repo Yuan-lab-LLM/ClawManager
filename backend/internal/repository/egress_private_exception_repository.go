@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -13,7 +14,7 @@ import (
 // EgressPrivateExceptionRepository persists egress private-network exceptions.
 type EgressPrivateExceptionRepository interface {
 	List(scopeType string, scopeID *int) ([]models.EgressPrivateException, error)
-	ListEnabled() ([]models.EgressPrivateException, error)
+	ListEnabled(context.Context) ([]models.EgressPrivateException, error)
 	GetByID(id int) (*models.EgressPrivateException, error)
 	Create(item *models.EgressPrivateException) error
 	Update(item *models.EgressPrivateException) error
@@ -49,9 +50,9 @@ func (r *egressPrivateExceptionRepository) List(scopeType string, scopeID *int) 
 	return items, nil
 }
 
-func (r *egressPrivateExceptionRepository) ListEnabled() ([]models.EgressPrivateException, error) {
+func (r *egressPrivateExceptionRepository) ListEnabled(ctx context.Context) ([]models.EgressPrivateException, error) {
 	var items []models.EgressPrivateException
-	err := r.sess.Collection("egress_private_exceptions").Find(db.Cond{"enabled": true}).OrderBy("id").All(&items)
+	err := r.sess.WithContext(ctx).Collection("egress_private_exceptions").Find(db.Cond{"enabled": true}).OrderBy("id").All(&items)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list enabled egress private exceptions: %w", err)
 	}

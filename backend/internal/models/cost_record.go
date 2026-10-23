@@ -14,6 +14,7 @@ type CostRecord struct {
 	RuntimeType      *string   `db:"runtime_type" json:"runtime_type,omitempty"`
 	GatewayID        *string   `db:"gateway_id" json:"gateway_id,omitempty"`
 	RuntimePodID     *int64    `db:"runtime_pod_id" json:"runtime_pod_id,omitempty"`
+	GatewayKeyID     *int      `db:"gateway_key_id" json:"gateway_key_id,omitempty"`
 	InvocationID     *int      `db:"invocation_id" json:"invocation_id,omitempty"`
 	ModelID          *int      `db:"model_id" json:"model_id,omitempty"`
 	ProviderType     string    `db:"provider_type" json:"provider_type"`
