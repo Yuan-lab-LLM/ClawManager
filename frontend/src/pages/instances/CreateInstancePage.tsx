@@ -12,6 +12,7 @@ import { userService } from "../../services/userService";
 import {
   DEFAULT_LITE_DISK_GB,
   INSTANCE_TYPES,
+  MINIMUM_PRO_DISK_GB,
   PRESET_CONFIGS,
 } from "../../types/instance";
 import type { CreateInstanceRequest, InstanceMode } from "../../types/instance";
@@ -699,6 +700,14 @@ const CreateInstancePage: React.FC = () => {
                           os_type: fallbackType.defaultOs,
                           os_version: fallbackType.defaultVersion,
                           storage_class: "",
+                        }
+                      : {}),
+                    ...(mode.id === "pro" &&
+                    current.disk_gb < MINIMUM_PRO_DISK_GB
+                      ? {
+                          cpu_cores: PRESET_CONFIGS.medium.cpu_cores,
+                          memory_gb: PRESET_CONFIGS.medium.memory_gb,
+                          disk_gb: PRESET_CONFIGS.medium.disk_gb,
                         }
                       : {}),
                   };
