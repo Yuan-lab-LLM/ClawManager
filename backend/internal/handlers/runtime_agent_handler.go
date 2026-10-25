@@ -4,7 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -39,21 +42,27 @@ type runtimeAgentPodIdentity struct {
 }
 
 type runtimeAgentRegisterRequest struct {
-	RuntimeType    string          `json:"runtime_type" binding:"required"`
-	Namespace      string          `json:"namespace" binding:"required"`
-	PodName        string          `json:"pod_name" binding:"required"`
-	PodUID         *string         `json:"pod_uid,omitempty"`
-	PodIP          *string         `json:"pod_ip,omitempty"`
-	NodeName       *string         `json:"node_name,omitempty"`
-	DeploymentName string          `json:"deployment_name" binding:"required"`
-	ImageRef       string          `json:"image_ref" binding:"required"`
-	AgentEndpoint  *string         `json:"agent_endpoint,omitempty"`
-	State          string          `json:"state"`
-	Capacity       int             `json:"capacity"`
-	UsedSlots      int             `json:"used_slots"`
-	Draining       bool            `json:"draining"`
-	Metrics        json.RawMessage `json:"metrics,omitempty"`
-	ReportedAt     *time.Time      `json:"reported_at,omitempty"`
+	RuntimeType       string          `json:"runtime_type" binding:"required"`
+	Namespace         string          `json:"namespace" binding:"required"`
+	PodName           string          `json:"pod_name" binding:"required"`
+	PodUID            *string         `json:"pod_uid,omitempty"`
+	PodIP             *string         `json:"pod_ip,omitempty"`
+	NodeName          *string         `json:"node_name,omitempty"`
+	DeploymentName    string          `json:"deployment_name" binding:"required"`
+	ImageRef          string          `json:"image_ref" binding:"required"`
+	OpenClawVersion   string          `json:"openclaw_version,omitempty"`
+	ProtocolVersion   string          `json:"protocol_version,omitempty"`
+	TeamPluginVersion string          `json:"team_plugin_version,omitempty"`
+	SessionStore      string          `json:"session_store,omitempty"`
+	ImageDigest       string          `json:"image_digest,omitempty"`
+	Capabilities      []string        `json:"capabilities,omitempty"`
+	AgentEndpoint     *string         `json:"agent_endpoint,omitempty"`
+	State             string          `json:"state"`
+	Capacity          int             `json:"capacity"`
+	UsedSlots         int             `json:"used_slots"`
+	Draining          bool            `json:"draining"`
+	Metrics           json.RawMessage `json:"metrics,omitempty"`
+	ReportedAt        *time.Time      `json:"reported_at,omitempty"`
 }
 
 type runtimeAgentHeartbeatRequest struct {
@@ -81,14 +90,19 @@ type runtimeAgentGatewaysRequest struct {
 }
 
 type runtimeAgentGatewayReport struct {
-	InstanceID   int        `json:"instance_id" binding:"required"`
-	GatewayID    string     `json:"gateway_id"`
-	GatewayPort  int        `json:"gateway_port"`
-	GatewayPID   *int       `json:"gateway_pid,omitempty"`
-	State        string     `json:"state" binding:"required"`
-	Generation   int        `json:"generation" binding:"required"`
-	ErrorMessage *string    `json:"error_message,omitempty"`
-	HealthAt     *time.Time `json:"health_at,omitempty"`
+	InstanceID     int        `json:"instance_id" binding:"required"`
+	GatewayID      string     `json:"gateway_id"`
+	GatewayPort    int        `json:"gateway_port"`
+	GatewayPID     *int       `json:"gateway_pid,omitempty"`
+	WorkspacePath  string     `json:"workspace_path,omitempty"`
+	State          string     `json:"state" binding:"required"`
+	Generation     int        `json:"generation" binding:"required"`
+	ErrorMessage   *string    `json:"error_message,omitempty"`
+	FailureClass   string     `json:"failure_class,omitempty"`
+	ExitCode       *int       `json:"exit_code,omitempty"`
+	Retryable      *bool      `json:"retryable,omitempty"`
+	RestartAttempt int        `json:"restart_attempt,omitempty"`
+	HealthAt       *time.Time `json:"health_at,omitempty"`
 }
 
 func NewRuntimeAgentHandler(cfg config.RuntimePoolConfig, podRepo repository.RuntimePodRepository, bindingRepo repository.InstanceRuntimeBindingRepository, instanceRepo repository.InstanceRepository, events runtimeEventPublisher, skillService services.SkillService) *RuntimeAgentHandler {
@@ -121,10 +135,11 @@ func (h *RuntimeAgentHandler) Register(c *gin.Context) {
 		state = "ready"
 	}
 	capacity := runtimePodCapacityFromReport(req.Capacity, h.cfg.MaxGatewaysPerPod)
+	// Liveness is measured at the control plane. Agent clocks may drift and a
+	// request can sit behind a slow database or network path before it arrives.
+	// Using reported_at here can make a newly received report look stale and
+	// trigger a destructive failover immediately.
 	lastSeen := time.Now().UTC()
-	if req.ReportedAt != nil && !req.ReportedAt.IsZero() {
-		lastSeen = req.ReportedAt.UTC()
-	}
 	var metricsJSON *string
 	if len(req.Metrics) > 0 {
 		if !json.Valid(req.Metrics) {
@@ -134,27 +149,43 @@ func (h *RuntimeAgentHandler) Register(c *gin.Context) {
 		raw := string(req.Metrics)
 		metricsJSON = &raw
 	}
+	var capabilitiesJSON *string
+	if len(req.Capabilities) > 0 {
+		raw, err := json.Marshal(normalizeRuntimeCapabilities(req.Capabilities))
+		if err != nil {
+			utils.Error(c, http.StatusBadRequest, "capabilities must be valid")
+			return
+		}
+		encoded := string(raw)
+		capabilitiesJSON = &encoded
+	}
 	pod := &models.RuntimePod{
-		RuntimeType:     runtimeType,
-		Namespace:       strings.TrimSpace(req.Namespace),
-		PodName:         strings.TrimSpace(req.PodName),
-		PodUID:          trimStringPtr(req.PodUID),
-		PodIP:           trimStringPtr(req.PodIP),
-		NodeName:        trimStringPtr(req.NodeName),
-		DeploymentName:  strings.TrimSpace(req.DeploymentName),
-		ImageRef:        strings.TrimSpace(req.ImageRef),
-		AgentEndpoint:   trimStringPtr(req.AgentEndpoint),
-		State:           state,
-		Capacity:        capacity,
-		UsedSlots:       req.UsedSlots,
-		Draining:        req.Draining,
-		MetricsJSON:     metricsJSON,
-		LastSeenAt:      &lastSeen,
-		CPUMillisUsed:   0,
-		MemoryBytesUsed: 0,
-		DiskBytesUsed:   0,
-		NetworkRXBytes:  0,
-		NetworkTXBytes:  0,
+		RuntimeType:          runtimeType,
+		Namespace:            strings.TrimSpace(req.Namespace),
+		PodName:              strings.TrimSpace(req.PodName),
+		PodUID:               trimStringPtr(req.PodUID),
+		PodIP:                trimStringPtr(req.PodIP),
+		NodeName:             trimStringPtr(req.NodeName),
+		DeploymentName:       strings.TrimSpace(req.DeploymentName),
+		ImageRef:             strings.TrimSpace(req.ImageRef),
+		OpenClawVersion:      trimStringValuePtr(req.OpenClawVersion),
+		AgentProtocolVersion: trimStringValuePtr(req.ProtocolVersion),
+		TeamPluginVersion:    trimStringValuePtr(req.TeamPluginVersion),
+		SessionStore:         trimStringValuePtr(req.SessionStore),
+		ImageDigest:          trimStringValuePtr(req.ImageDigest),
+		CapabilitiesJSON:     capabilitiesJSON,
+		AgentEndpoint:        trimStringPtr(req.AgentEndpoint),
+		State:                state,
+		Capacity:             capacity,
+		UsedSlots:            req.UsedSlots,
+		Draining:             req.Draining,
+		MetricsJSON:          metricsJSON,
+		LastSeenAt:           &lastSeen,
+		CPUMillisUsed:        0,
+		MemoryBytesUsed:      0,
+		DiskBytesUsed:        0,
+		NetworkRXBytes:       0,
+		NetworkTXBytes:       0,
 	}
 	if err := h.podRepo.UpsertFromAgent(c.Request.Context(), pod); err != nil {
 		utils.HandleError(c, err)
@@ -170,6 +201,7 @@ func (h *RuntimeAgentHandler) Register(c *gin.Context) {
 		"capacity":     capacity,
 		"draining":     req.Draining,
 		"last_seen_at": lastSeen,
+		"reported_at":  req.ReportedAt,
 	})
 	utils.Success(c, http.StatusOK, "Runtime pod registered successfully", gin.H{"pod": pod})
 }
@@ -188,9 +220,6 @@ func (h *RuntimeAgentHandler) Heartbeat(c *gin.Context) {
 		return
 	}
 	lastSeen := time.Now().UTC()
-	if req.ReportedAt != nil && !req.ReportedAt.IsZero() {
-		lastSeen = req.ReportedAt.UTC()
-	}
 	capacity := runtimePodCapacityFromReport(0, h.cfg.MaxGatewaysPerPod)
 	if err := h.podRepo.UpdateHeartbeat(c.Request.Context(), podID, strings.TrimSpace(req.State), req.UsedSlots, capacity, req.Draining, lastSeen); err != nil {
 		utils.HandleError(c, err)
@@ -203,6 +232,7 @@ func (h *RuntimeAgentHandler) Heartbeat(c *gin.Context) {
 		"capacity":     capacity,
 		"draining":     req.Draining,
 		"last_seen_at": lastSeen,
+		"reported_at":  req.ReportedAt,
 	})
 	utils.Success(c, http.StatusOK, "Runtime pod heartbeat accepted", nil)
 }
@@ -230,9 +260,6 @@ func (h *RuntimeAgentHandler) ReportMetrics(c *gin.Context) {
 		metricsJSON = &raw
 	}
 	lastSeen := time.Now().UTC()
-	if req.ReportedAt != nil && !req.ReportedAt.IsZero() {
-		lastSeen = req.ReportedAt.UTC()
-	}
 	update := repository.RuntimePodMetricsUpdate{
 		CPUMillisUsed:   req.CPUMillisUsed,
 		MemoryBytesUsed: req.MemoryBytesUsed,
@@ -254,6 +281,7 @@ func (h *RuntimeAgentHandler) ReportMetrics(c *gin.Context) {
 		"network_rx_bytes":  req.NetworkRXBytes,
 		"network_tx_bytes":  req.NetworkTXBytes,
 		"last_seen_at":      lastSeen,
+		"reported_at":       req.ReportedAt,
 	}
 	if metricsJSON != nil {
 		payload["metrics"] = json.RawMessage(*metricsJSON)
@@ -283,6 +311,21 @@ func (h *RuntimeAgentHandler) ReportGateways(c *gin.Context) {
 			utils.HandleError(c, err)
 			return
 		}
+		if binding == nil || pendingBindingCanYieldToReportedGateway(binding, podID, gateway) {
+			reconciled, reconcileErr := h.reconcileReportedOpenClawGateway(c.Request.Context(), podID, gateway)
+			if reconcileErr != nil {
+				utils.HandleError(c, reconcileErr)
+				return
+			}
+			if !reconciled {
+				continue
+			}
+			binding, err = h.bindingRepo.GetByInstanceID(c.Request.Context(), gateway.InstanceID)
+			if err != nil {
+				utils.HandleError(c, err)
+				return
+			}
+		}
 		if binding == nil || binding.RuntimePodID != podID || binding.Generation != gateway.Generation {
 			continue
 		}
@@ -305,7 +348,7 @@ func (h *RuntimeAgentHandler) ReportGateways(c *gin.Context) {
 			}
 		}
 		if err := h.syncInstanceRuntimeState(c.Request.Context(), gateway, lifecycle); err != nil {
-			if errors.Is(err, models.ErrRuntimeUpgradeInProgress) {
+			if errors.Is(err, models.ErrRuntimeUpgradeInProgress) || errors.Is(err, repository.ErrStaleRuntimeGeneration) {
 				continue
 			}
 			utils.HandleError(c, err)
@@ -323,6 +366,17 @@ func (h *RuntimeAgentHandler) ReportGateways(c *gin.Context) {
 			continue
 		}
 		if !h.missingGatewayCleanupEligible(binding, now) {
+			if !h.missingPendingGatewayCleanupEligible(binding, now) {
+				continue
+			}
+			releaser, ok := h.bindingRepo.(repository.PendingGatewayBindingReleaser)
+			if !ok {
+				continue
+			}
+			if _, err := releaser.DeletePendingByInstanceIDGenerationAndReleaseSlot(c.Request.Context(), binding.InstanceID, podID, binding.Generation, now.Add(-pendingGatewayReconcileGrace(h.cfg.HeartbeatTimeout))); err != nil {
+				utils.HandleError(c, err)
+				return
+			}
 			continue
 		}
 		if _, err := h.bindingRepo.DeleteRunningByInstanceIDGenerationAndReleaseSlot(c.Request.Context(), binding.InstanceID, podID, binding.Generation); err != nil {
@@ -340,6 +394,75 @@ func (h *RuntimeAgentHandler) ReportGateways(c *gin.Context) {
 	utils.Success(c, http.StatusOK, "Runtime gateway report accepted", nil)
 }
 
+func pendingBindingCanYieldToReportedGateway(binding *models.InstanceRuntimeBinding, podID int64, gateway runtimeAgentGatewayReport) bool {
+	if binding == nil {
+		return false
+	}
+	expectedPendingID := fmt.Sprintf("pending-%d-%d", gateway.InstanceID, binding.Generation)
+	return binding.RuntimePodID == podID &&
+		(binding.Generation == gateway.Generation || binding.Generation == gateway.Generation+1) &&
+		strings.EqualFold(strings.TrimSpace(binding.State), services.RuntimeGatewayBindingCreating) &&
+		strings.TrimSpace(binding.GatewayID) == expectedPendingID
+}
+
+func (h *RuntimeAgentHandler) reconcileReportedOpenClawGateway(ctx context.Context, podID int64, gateway runtimeAgentGatewayReport) (bool, error) {
+	if h == nil || h.instanceRepo == nil || h.podRepo == nil || h.bindingRepo == nil {
+		return false, nil
+	}
+	reconciler, ok := h.bindingRepo.(repository.ReportedGatewayBindingReconciler)
+	if !ok {
+		return false, nil
+	}
+	pod, err := h.podRepo.GetByID(ctx, podID)
+	if err != nil || pod == nil {
+		return false, err
+	}
+	if !strings.EqualFold(strings.TrimSpace(pod.RuntimeType), services.RuntimeTypeOpenClaw) || !runtimePodHasCapability(*pod, "openclaw.upgrade-preflight-v3") {
+		return false, nil
+	}
+	instance, err := h.instanceRepo.GetByID(gateway.InstanceID)
+	if err != nil || instance == nil {
+		return false, err
+	}
+	status := strings.ToLower(strings.TrimSpace(instance.Status))
+	if !strings.EqualFold(strings.TrimSpace(instance.Type), services.RuntimeTypeOpenClaw) || !strings.EqualFold(strings.TrimSpace(instance.InstanceMode), services.InstanceModeLite) || (status != "error" && status != "creating") {
+		return false, nil
+	}
+	expectedGatewayID := fmt.Sprintf("gw-%d-%d", gateway.InstanceID, gateway.Generation)
+	expectedWorkspace := services.RuntimeWorkspacePathWithRoot(h.cfg.WorkspaceRoot, services.RuntimeTypeOpenClaw, instance.UserID, instance.ID)
+	actualWorkspace := strings.TrimSpace(gateway.WorkspacePath)
+	if gateway.Generation <= 0 || (instance.RuntimeGeneration != gateway.Generation && instance.RuntimeGeneration != gateway.Generation+1) || strings.TrimSpace(gateway.GatewayID) != expectedGatewayID || actualWorkspace == "" || !sameRuntimePath(actualWorkspace, expectedWorkspace) {
+		return false, nil
+	}
+	lifecycle := services.NormalizeRuntimeGatewayLifecycle(gateway.State, gateway.ErrorMessage)
+	if !lifecycle.Running || gateway.GatewayPort <= 0 {
+		return false, nil
+	}
+	healthAt := gateway.HealthAt
+	if healthAt == nil {
+		now := time.Now().UTC()
+		healthAt = &now
+	}
+	return reconciler.ReconcileReportedGateway(ctx, &models.InstanceRuntimeBinding{
+		InstanceID: gateway.InstanceID, RuntimePodID: podID, RuntimeType: services.RuntimeTypeOpenClaw,
+		GatewayID: gateway.GatewayID, GatewayPort: gateway.GatewayPort, GatewayPID: gateway.GatewayPID,
+		WorkspacePath: expectedWorkspace, State: services.RuntimeGatewayBindingRunning, Generation: gateway.Generation, LastHealthAt: healthAt,
+	}, instance.RuntimeGeneration, services.RuntimeGatewayPortBlockSize(services.RuntimeTypeOpenClaw))
+}
+
+func runtimePodHasCapability(pod models.RuntimePod, required string) bool {
+	for _, capability := range pod.Capabilities() {
+		if strings.TrimSpace(capability) == required {
+			return true
+		}
+	}
+	return false
+}
+
+func sameRuntimePath(left, right string) bool {
+	return filepath.Clean(strings.TrimSpace(left)) == filepath.Clean(strings.TrimSpace(right))
+}
+
 func (h *RuntimeAgentHandler) missingGatewayCleanupEligible(binding models.InstanceRuntimeBinding, now time.Time) bool {
 	if h == nil || h.cfg.HeartbeatTimeout <= 0 || binding.LastHealthAt == nil {
 		return false
@@ -348,6 +471,24 @@ func (h *RuntimeAgentHandler) missingGatewayCleanupEligible(binding models.Insta
 		return false
 	}
 	return !binding.LastHealthAt.After(now.Add(-h.cfg.HeartbeatTimeout))
+}
+
+func (h *RuntimeAgentHandler) missingPendingGatewayCleanupEligible(binding models.InstanceRuntimeBinding, now time.Time) bool {
+	if h == nil || h.cfg.HeartbeatTimeout <= 0 || binding.UpdatedAt.IsZero() {
+		return false
+	}
+	if !strings.EqualFold(strings.TrimSpace(binding.State), services.RuntimeGatewayBindingCreating) || strings.TrimSpace(binding.GatewayID) != fmt.Sprintf("pending-%d-%d", binding.InstanceID, binding.Generation) {
+		return false
+	}
+	return !binding.UpdatedAt.After(now.Add(-pendingGatewayReconcileGrace(h.cfg.HeartbeatTimeout)))
+}
+
+func pendingGatewayReconcileGrace(heartbeatTimeout time.Duration) time.Duration {
+	grace := 4 * heartbeatTimeout
+	if grace < 45*time.Second {
+		grace = 45 * time.Second
+	}
+	return grace
 }
 
 func (h *RuntimeAgentHandler) syncInstanceRuntimeState(ctx context.Context, gateway runtimeAgentGatewayReport, lifecycle services.RuntimeGatewayLifecycleState) error {
@@ -364,6 +505,10 @@ func (h *RuntimeAgentHandler) ReportSkills(c *gin.Context) {
 	var payload map[string]any
 	if err := c.ShouldBindJSON(&payload); err != nil {
 		utils.ValidationError(c, err)
+		return
+	}
+	if !h.cfg.SkillReportPersistence {
+		utils.Success(c, http.StatusOK, "Runtime agent skills report accepted without persistence", gin.H{"persisted": false})
 		return
 	}
 	if h.skillService != nil {
@@ -433,4 +578,26 @@ func trimStringPtr(value *string) *string {
 		return nil
 	}
 	return &trimmed
+}
+
+func trimStringValuePtr(value string) *string {
+	return trimStringPtr(&value)
+}
+
+func normalizeRuntimeCapabilities(values []string) []string {
+	seen := map[string]struct{}{}
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, exists := seen[value]; exists {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	sort.Strings(result)
+	return result
 }

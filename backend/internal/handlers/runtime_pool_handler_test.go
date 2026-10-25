@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -112,7 +113,7 @@ func TestRuntimePoolHandlerListPodsReturnsMetricsForAdmin(t *testing.T) {
 func TestRuntimePoolHandlerListPodsOmitsStaleRuntimePods(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	recentSeen := time.Now().UTC()
-	staleSeen := recentSeen.Add(-5 * time.Minute)
+	staleSeen := recentSeen.Add(-runtimePodListStaleWindowMultiplier*runtimePodListFallbackHeartbeatTimeout - time.Minute)
 	handler := NewRuntimePoolHandler(&runtimePoolHandlerPodRepo{pods: []models.RuntimePod{
 		{ID: 1, RuntimeType: "openclaw", PodName: "openclaw-runtime-live", State: "ready", LastSeenAt: &recentSeen},
 		{ID: 2, RuntimeType: "openclaw", PodName: "openclaw-runtime-deleted", State: "unhealthy", LastSeenAt: &staleSeen},
@@ -225,18 +226,41 @@ func TestRuntimePoolHandlerListPodsIncludesUnreportedDeploymentPods(t *testing.T
 	}
 }
 
+func TestMergeRuntimePoolDeploymentPodsEnrichesAgentRowsWithPoolMetadata(t *testing.T) {
+	disabled := false
+	digest := "sha256:" + strings.Repeat("8", 64)
+	items := runtimePoolPodListItems([]models.RuntimePod{
+		{Namespace: "runtime-system", DeploymentName: "openclaw-runtime-u48", PodName: "target-pod", RuntimeType: "openclaw", ImageRef: "registry/openclaw:stale", State: "ready"},
+		{Namespace: "runtime-system", DeploymentName: "openclaw-runtime-u55", PodName: "deleted-pod", RuntimeType: "openclaw", ImageRef: "registry/openclaw:deleted", State: "unhealthy"},
+	}, true)
+	discovered := []models.RuntimePod{{Namespace: "runtime-system", DeploymentName: "openclaw-runtime-u48", PodName: "target-pod", ImageRef: "registry/openclaw@" + digest, ImageDigest: &digest, PoolRole: "upgrade-target", UpgradeID: "48", SourceDeployment: "openclaw-runtime", SchedulingEnabled: &disabled}}
+	got := mergeRuntimePoolDeploymentPods(items, discovered)
+	if len(got) != 1 || got[0].PoolRole != "upgrade-target" || got[0].UpgradeID != "48" || got[0].SchedulingEnabled == nil || *got[0].SchedulingEnabled {
+		t.Fatalf("pool metadata was not merged: %#v", got)
+	}
+	if got[0].ImageRef != "registry/openclaw@"+digest || got[0].ImageDigest == nil || *got[0].ImageDigest != digest {
+		t.Fatalf("Kubernetes image did not replace stale Agent image: %#v", got[0])
+	}
+}
+
 func TestRuntimePoolHandlerStartRolloutStoresRequesterAndPublishesEvent(t *testing.T) {
+	registry := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Docker-Content-Digest", "sha256:"+strings.Repeat("a", 64))
+		_, _ = w.Write([]byte(`{"schemaVersion":2}`))
+	}))
+	defer registry.Close()
 	gin.SetMode(gin.TestMode)
 	rolloutRepo := &runtimePoolHandlerRolloutRepo{}
 	events := &runtimePoolHandlerEvents{}
 	handler := NewRuntimePoolHandler(&runtimePoolHandlerPodRepo{}, &runtimePoolHandlerBindingRepo{}, rolloutRepo, nil, events)
+	handler.hermesWebInspector = func(context.Context, string) (bool, error) { return false, nil }
 
 	router := runtimePoolHandlerRouter(7, "admin", handler)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/runtime-rollouts", bytes.NewBufferString(`{
 		"runtime_type": "hermes",
-		"target_image_ref": "ghcr.io/example/hermes:v2",
+		"target_image_ref": "`+strings.TrimPrefix(registry.URL, "http://")+`/hermes:v2",
 		"batch_size": 2,
 		"max_unavailable": 1
 	}`))
@@ -249,6 +273,9 @@ func TestRuntimePoolHandlerStartRolloutStoresRequesterAndPublishesEvent(t *testi
 	if rolloutRepo.created == nil {
 		t.Fatalf("rollout was not created")
 	}
+	if !strings.HasSuffix(rolloutRepo.created.TargetImageRef, "@sha256:"+strings.Repeat("a", 64)) {
+		t.Fatalf("tag was not pinned: %s", rolloutRepo.created.TargetImageRef)
+	}
 	if rolloutRepo.created.StartedBy == nil || *rolloutRepo.created.StartedBy != 7 {
 		t.Fatalf("started_by = %#v, want 7", rolloutRepo.created.StartedBy)
 	}
@@ -257,7 +284,7 @@ func TestRuntimePoolHandlerStartRolloutStoresRequesterAndPublishesEvent(t *testi
 	}
 }
 
-func TestRuntimePoolHandlerStartRolloutRunsSchedulerImmediately(t *testing.T) {
+func TestRuntimePoolHandlerStartRolloutQueuesForElectedScheduler(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rolloutRepo := &runtimePoolHandlerRolloutRepo{}
 	podRepo := &runtimePoolHandlerPodRepo{pods: []models.RuntimePod{{
@@ -284,13 +311,14 @@ func TestRuntimePoolHandlerStartRolloutRunsSchedulerImmediately(t *testing.T) {
 		time.Second,
 	)
 	handler := NewRuntimePoolHandler(podRepo, &runtimePoolHandlerBindingRepo{}, rolloutRepo, scheduler, &runtimePoolHandlerEvents{})
+	handler.hermesWebInspector = func(context.Context, string) (bool, error) { return false, nil }
 
 	router := runtimePoolHandlerRouter(7, "admin", handler)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/runtime-rollouts", bytes.NewBufferString(`{
 		"runtime_type": "hermes",
-		"target_image_ref": "registry/hermes:v2",
+		"target_image_ref": "registry/hermes@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		"batch_size": 1,
 		"max_unavailable": 1
 	}`))
@@ -300,15 +328,34 @@ func TestRuntimePoolHandlerStartRolloutRunsSchedulerImmediately(t *testing.T) {
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("status = %d, body = %s, want 201", rec.Code, rec.Body.String())
 	}
-	if got := len(deployments.rollouts); got != 1 {
-		t.Fatalf("deployment rollouts = %d, want 1", got)
+	if got := len(deployments.rollouts); got != 0 {
+		t.Fatalf("HTTP handler mutated %d deployments before elected execution", got)
 	}
-	rollout := deployments.rollouts[0]
-	if rollout.namespace != "clawmanager-system" || rollout.name != "hermes-runtime" || rollout.image != "registry/hermes:v2" {
-		t.Fatalf("deployment rollout = %+v, want hermes-runtime registry/hermes:v2", rollout)
+	if rolloutRepo.created == nil || rolloutRepo.created.Status != "pending" {
+		t.Fatal("request must persist a pending operation")
 	}
-	if podRepo.markedPodID != 21 || podRepo.markedState != "draining" || !podRepo.markedDraining {
-		t.Fatalf("pod mark = id:%d state:%q draining:%t, want drain pod 21", podRepo.markedPodID, podRepo.markedState, podRepo.markedDraining)
+	if podRepo.markedPodID != 0 {
+		t.Fatal("HTTP handler drained a runtime")
+	}
+}
+
+func TestRuntimePoolHandlerListRolloutsRestoresTeamUpgradeHistory(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := &runtimePoolHandlerRolloutRepo{recent: []models.RuntimeRollout{
+		{ID: 23, RuntimeType: "hermes", Status: "finished", Phase: "verified"},
+	}, active: []models.RuntimeRollout{
+		{ID: 12, RuntimeType: "hermes", Status: "running", Phase: "draining"},
+	}}
+	handler := NewRuntimePoolHandler(&runtimePoolHandlerPodRepo{}, &runtimePoolHandlerBindingRepo{}, repo, nil, &runtimePoolHandlerEvents{})
+	router := runtimePoolHandlerRouter(1, "admin", handler)
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/admin/runtime-rollouts?runtime_type=hermes", nil)
+	router.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), `"id":23`) || !strings.Contains(recorder.Body.String(), `"id":12`) {
+		t.Fatalf("history response = %d %s", recorder.Code, recorder.Body.String())
+	}
+	if repo.lastRuntimeType != "hermes" {
+		t.Fatalf("runtime type filter = %q", repo.lastRuntimeType)
 	}
 }
 
@@ -327,6 +374,7 @@ func runtimePoolHandlerRouter(userID int, role string, handler *RuntimePoolHandl
 	{
 		admin.GET("/runtime-pods", handler.ListPods)
 		admin.POST("/runtime-rollouts", handler.StartRollout)
+		admin.GET("/runtime-rollouts", handler.ListRollouts)
 	}
 	return router
 }
@@ -342,7 +390,20 @@ func (r *runtimePoolHandlerUserRepo) GetByID(id int) (*models.User, error) {
 func (r *runtimePoolHandlerUserRepo) GetByUsername(username string) (*models.User, error) {
 	return nil, nil
 }
+
+func (r *runtimePoolHandlerUserRepo) GetByAuthProviderUsername(authProvider, username string) (*models.User, error) {
+	return r.GetByUsername(username)
+}
+func (r *runtimePoolHandlerUserRepo) CountByAuthProviderUsername(authProvider, username string) (int, error) {
+	return 0, nil
+}
+func (r *runtimePoolHandlerUserRepo) GetByLoginAlias(authProvider, loginAlias string) (*models.User, error) {
+	return nil, nil
+}
 func (r *runtimePoolHandlerUserRepo) GetByEmail(email string) (*models.User, error) {
+	return nil, nil
+}
+func (r *runtimePoolHandlerUserRepo) GetByExternalIdentity(authProvider, externalID string) (*models.User, error) {
 	return nil, nil
 }
 func (r *runtimePoolHandlerUserRepo) Update(user *models.User) error { return nil }
@@ -459,8 +520,16 @@ func (r *runtimePoolHandlerBindingRepo) DeleteRunningByInstanceIDGenerationAndRe
 }
 
 type runtimePoolHandlerRolloutRepo struct {
-	created *models.RuntimeRollout
-	byID    map[int64]*models.RuntimeRollout
+	created         *models.RuntimeRollout
+	byID            map[int64]*models.RuntimeRollout
+	recent          []models.RuntimeRollout
+	active          []models.RuntimeRollout
+	lastRuntimeType string
+}
+
+func (r *runtimePoolHandlerRolloutRepo) ListRecent(_ context.Context, runtimeType string) ([]models.RuntimeRollout, error) {
+	r.lastRuntimeType = runtimeType
+	return r.recent, nil
 }
 
 func (r *runtimePoolHandlerRolloutRepo) Create(ctx context.Context, rollout *models.RuntimeRollout) error {
@@ -480,7 +549,7 @@ func (r *runtimePoolHandlerRolloutRepo) GetByID(ctx context.Context, id int64) (
 	return r.byID[id], nil
 }
 func (r *runtimePoolHandlerRolloutRepo) ListActive(ctx context.Context, runtimeType string) ([]models.RuntimeRollout, error) {
-	return nil, nil
+	return r.active, nil
 }
 func (r *runtimePoolHandlerRolloutRepo) UpdateStatus(ctx context.Context, id int64, status string, startedAt *time.Time, finishedAt *time.Time, message *string) error {
 	return nil
@@ -516,7 +585,7 @@ func (s *runtimePoolHandlerDeploymentService) Ensure(ctx context.Context, spec k
 func (s *runtimePoolHandlerDeploymentService) Scale(ctx context.Context, namespace, name string, replicas int32) error {
 	return nil
 }
-func (s *runtimePoolHandlerDeploymentService) RolloutImage(ctx context.Context, namespace, name, image string, maxUnavailable, maxSurge int) error {
+func (s *runtimePoolHandlerDeploymentService) RolloutImage(ctx context.Context, namespace, name, image, upgradeID string, maxUnavailable, maxSurge int) error {
 	s.rollouts = append(s.rollouts, runtimePoolHandlerDeploymentRollout{
 		namespace:      namespace,
 		name:           name,
@@ -524,6 +593,18 @@ func (s *runtimePoolHandlerDeploymentService) RolloutImage(ctx context.Context, 
 		maxUnavailable: maxUnavailable,
 		maxSurge:       maxSurge,
 	})
+	return nil
+}
+
+func (s *runtimePoolHandlerDeploymentService) EnsureUpgradePool(ctx context.Context, namespace, sourceName, targetName, image, upgradeID string) error {
+	return nil
+}
+
+func (s *runtimePoolHandlerDeploymentService) SetUpgradePoolActive(ctx context.Context, namespace, sourceName, targetName, upgradeID string, active bool) error {
+	return nil
+}
+
+func (s *runtimePoolHandlerDeploymentService) DeleteUpgradePool(ctx context.Context, namespace, sourceName, targetName, upgradeID string) error {
 	return nil
 }
 func (s *runtimePoolHandlerDeploymentService) ListPods(ctx context.Context, namespace, runtimeType string) ([]k8s.RuntimeDeploymentPod, error) {
@@ -536,6 +617,20 @@ func (s *runtimePoolHandlerDeploymentService) ListPods(ctx context.Context, name
 			continue
 		}
 		pods = append(pods, pod)
+	}
+	return pods, nil
+}
+
+func (s *runtimePoolHandlerDeploymentService) ListDeploymentPods(ctx context.Context, refs []k8s.RuntimeDeploymentRef) ([]k8s.RuntimeDeploymentPod, error) {
+	allowed := make(map[string]struct{}, len(refs))
+	for _, ref := range refs {
+		allowed[ref.Namespace+"/"+ref.Name] = struct{}{}
+	}
+	var pods []k8s.RuntimeDeploymentPod
+	for _, pod := range s.pods {
+		if _, ok := allowed[pod.Namespace+"/"+pod.DeploymentName]; ok {
+			pods = append(pods, pod)
+		}
 	}
 	return pods, nil
 }

@@ -1,0 +1,15 @@
+const {chromium}=require('playwright'),assert=require('node:assert/strict');
+(async()=>{
+ const browser=await chromium.launch({channel:'chrome',headless:true});const context=await browser.newContext({ignoreHTTPSErrors:true,viewport:{width:1440,height:900}}),page=await context.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.name));
+ // Only instance presentation is a fixture; all statistics/auth/XP come from
+ // the exact candidate image and its isolated database, not a UI mock.
+ await context.route(/\/api\/v1\/ieisystem\/instances(?:\?.*)?$/,r=>r.fulfill({json:{data:{instances:[{id:1,name:'验证实例',type:'openclaw',status:'running',instance_mode:'lite',created_at:new Date().toISOString(),updated_at:new Date().toISOString()}],total:1}}}));
+ page.on('response',r=>{const u=new URL(r.url());if(u.pathname.startsWith('/api/'))console.log('API',u.pathname,r.status())});
+ await page.goto(process.env.OWNER_LIVE_URL);console.log('Loaded candidate');await page.locator('.owner-growth-path').waitFor();console.log('Growth path loaded',await page.getByTestId('task-stat').innerText());await page.waitForFunction(()=>document.querySelector('[data-testid="task-stat"]')?.textContent.includes('1 / 6'));
+ assert.equal(await page.locator('.owner-task').count(),6);assert.match(await page.locator('.owner-task-tabs').innerText(),/10 \/ 105 XP/);
+ assert.match(await page.locator('.owner-task').first().innerText(),/已发放/);
+ await page.getByRole('button',{name:'累计任务',exact:true}).click();assert.equal(await page.locator('.owner-task').count(),6);assert.equal(await page.getByRole('button',{name:'下一页',exact:true}).count(),0);
+ const cards=await page.locator('.owner-task').allTextContents();assert.match(cards[0],/累计访问.*7/);assert.match(cards[1],/累计访问.*30/);assert.match(cards[2],/累计有效提问.*50/);assert.match(cards[3],/累计有效提问.*200/);assert.match(cards[4],/累计 Token.*1000万/);assert.match(cards[5],/累计 Token.*5000万/);
+ for(const size of [{width:1440,height:900},{width:1280,height:800},{width:1920,height:1080}]){await page.setViewportSize(size);await page.waitForTimeout(150);assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));const boxes=await page.locator('.owner-task').evaluateAll(es=>es.map(e=>{const r=e.getBoundingClientRect();return {x:r.x,y:r.y,w:r.width,h:r.height}}));for(let i=0;i<6;i+=2){assert(Math.abs(boxes[i].y-boxes[i+1].y)<2);assert(boxes[i].x+boxes[i].w<=boxes[i+1].x)}}
+ await page.locator('.owner-path-nodes button').last().click();assert.match(await page.getByRole('dialog').innerText(),/27,000/);assert.doesNotMatch(await page.locator('body').innerText(),/Lv\.100|开放100级/);await page.keyboard.press('Escape');await page.screenshot({path:'.tmp/owner-r16-candidate.png',fullPage:true});assert.deepEqual(errors,[]);await browser.close();console.log('PASS exact-image Chrome: live visit/XP, six daily nodes, six cumulative cards/three category rows, 27000 XP curve, 1280/1440/1920 layouts, no JS error');
+})().catch(e=>{console.error('Candidate UI failed',e.name,e.code||'',e.actual??'',e.expected??'');process.exit(1)});

@@ -1,5 +1,5 @@
 ALTER TABLE instances
-MODIFY COLUMN type ENUM('openclaw', 'ubuntu', 'debian', 'centos', 'custom', 'webtop', 'hermes', 'workbuddy') DEFAULT 'ubuntu';
+MODIFY COLUMN type ENUM('openclaw', 'ubuntu', 'debian', 'centos', 'custom', 'webtop', 'hermes', 'workbuddy', 'opencode', 'deepseek-harness', 'codex', 'claude-code') DEFAULT 'ubuntu';
 
 UPDATE system_image_settings
 SET instance_type = 'workbuddy',

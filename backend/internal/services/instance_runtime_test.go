@@ -83,7 +83,7 @@ func TestBuildRuntimeConfig_WorkbuddyUsesManagedWebtopDefaults(t *testing.T) {
 	if !usesWebtopImage("workbuddy") {
 		t.Fatalf("expected Workbuddy to use Webtop proxy behavior")
 	}
-	if !usesHTTPSUpstream("workbuddy") {
+	if !usesHTTPSUpstream("workbuddy", 3001) {
 		t.Fatalf("expected Workbuddy to use HTTPS upstream proxying")
 	}
 	assertSelkiesClipboardEnabled(t, config.Env)
@@ -101,7 +101,7 @@ func TestBuildRuntimeConfig_DeepSeekHarnessUsesManagedWebtopDefaults(t *testing.
 	if config.Env["DSH_HOME"] != "/config/.dsh" || config.Env["TITLE"] != "DeepSeek Harness Pro" {
 		t.Fatalf("unexpected DeepSeek Harness environment: %#v", config.Env)
 	}
-	if !usesWebtopImage(RuntimeTypeDeepSeekHarness) || !usesHTTPSUpstream(RuntimeTypeDeepSeekHarness) {
+	if !usesWebtopImage(RuntimeTypeDeepSeekHarness) || !usesHTTPSUpstream(RuntimeTypeDeepSeekHarness, 3001) {
 		t.Fatal("DeepSeek Harness Pro must use Webtop HTTPS proxy behavior")
 	}
 }

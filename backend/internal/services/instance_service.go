@@ -9,17 +9,23 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"clawreef/internal/models"
 	"clawreef/internal/repository"
 	"clawreef/internal/services/k8s"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 // InstanceService defines the interface for instance operations
@@ -41,6 +47,30 @@ type InstanceService interface {
 	ForceSyncInstance(instanceID int) error
 }
 
+const OpenCodeDefaultProjectRelativePath = "starter"
+
+// InstanceOwnerService is the owner-scoped listing capability used by the
+// northbound API and its authenticated portal page.
+type InstanceOwnerService interface {
+	GetLiteByUserIDAndOwner(userID int, owner string, offset, limit int) ([]models.Instance, int, error)
+	GetWorkbuddyProByUserIDAndOwner(userID int, owner string, offset, limit int) ([]models.Instance, int, error)
+	GetProByUserIDAndOwner(userID int, owner string, offset, limit int) ([]models.Instance, int, error)
+	GetNorthboundByUserIDAndOwner(userID int, owner string, offset, limit int) ([]models.Instance, int, error)
+}
+
+// IEISystemInstanceService provides the email-owner scoped supported-instance
+// view after an IEI SSO session has been validated.
+type IEISystemInstanceService interface {
+	GetSupportedByOwnerEmail(owner string, offset, limit int) ([]models.Instance, int, error)
+}
+
+// InstanceQueryService exposes filtered caller-scoped listing and dashboard
+// aggregation without widening the lifecycle-oriented InstanceService.
+type InstanceQueryService interface {
+	GetFilteredByUserID(userID int, filter models.InstanceListFilter, offset, limit int) ([]models.Instance, int, error)
+	GetSummaryByUserID(userID int) (*models.InstanceSummary, error)
+}
+
 func (s *instanceService) ValidateCreateRequests(userID int, requests []CreateInstanceRequest) error {
 	if len(requests) == 0 {
 		return nil
@@ -49,6 +79,9 @@ func (s *instanceService) ValidateCreateRequests(userID int, requests []CreateIn
 		requests[idx].Name = strings.TrimSpace(requests[idx].Name)
 		if requests[idx].Name == "" {
 			return fmt.Errorf("instance name is required")
+		}
+		if !isTeamDistributionCreatableType(requests[idx].Type) {
+			return fmt.Errorf("instance type %q is not available in the team distribution", strings.TrimSpace(requests[idx].Type))
 		}
 		environmentOverrides, err := normalizeEnvironmentOverrides(requests[idx].EnvironmentOverrides)
 		if err != nil {
@@ -62,6 +95,12 @@ func (s *instanceService) ValidateCreateRequests(userID int, requests []CreateIn
 		}
 		if _, ok := normalizeDesktopStreamProfile(requests[idx].DesktopStreamProfile); !ok {
 			return fmt.Errorf("invalid desktop stream profile")
+		}
+		if err := validateWindowsWorkbuddyRequest(requests[idx]); err != nil {
+			return err
+		}
+		if err := validateCreateInstanceDiskGB(requests[idx], resolveCreateInstanceMode(requests[idx])); err != nil {
+			return err
 		}
 	}
 
@@ -165,28 +204,41 @@ func (s *instanceService) ValidateCreateRequests(userID int, requests []CreateIn
 	return nil
 }
 
+func isTeamDistributionCreatableType(instanceType string) bool {
+	switch strings.ToLower(strings.TrimSpace(instanceType)) {
+	case "workbuddy", RuntimeTypeCodex, RuntimeTypeClaudeCode:
+		return false
+	default:
+		return true
+	}
+}
+
 // CreateInstanceRequest holds data for creating an instance
 type CreateInstanceRequest struct {
-	Name                 string              `json:"name" validate:"required,min=3,max=50"`
-	Description          *string             `json:"description,omitempty"`
-	Type                 string              `json:"type" validate:"required,oneof=openclaw ubuntu debian centos custom webtop hermes opencode workbuddy deepseek-harness"`
-	Mode                 string              `json:"mode" validate:"omitempty,oneof=lite pro"`
-	InstanceMode         string              `json:"instance_mode" validate:"omitempty,oneof=lite pro"`
-	RuntimeType          string              `json:"runtime_type" validate:"omitempty,oneof=gateway desktop shell"`
-	DesktopStreamProfile string              `json:"desktop_stream_profile,omitempty" validate:"omitempty,oneof=low standard high"`
-	CPUCores             float64             `json:"cpu_cores" validate:"required,min=0.1,max=32"`
-	MemoryGB             int                 `json:"memory_gb" validate:"required,min=1,max=128"`
-	DiskGB               int                 `json:"disk_gb" validate:"required,min=10,max=1000"`
-	GPUEnabled           bool                `json:"gpu_enabled"`
-	GPUCount             int                 `json:"gpu_count" validate:"min=0,max=4"`
-	OSType               string              `json:"os_type" validate:"required"`
-	OSVersion            string              `json:"os_version" validate:"required"`
-	ImageRegistry        *string             `json:"image_registry,omitempty"`
-	ImageTag             *string             `json:"image_tag,omitempty"`
-	EnvironmentOverrides map[string]string   `json:"environment_overrides,omitempty"`
-	StorageClass         string              `json:"storage_class"`
-	OpenClawConfigPlan   *OpenClawConfigPlan `json:"openclaw_config_plan,omitempty"`
-	Team                 *TeamInstanceConfig `json:"-"`
+	Name                    string              `json:"name" validate:"required,min=3,max=50"`
+	Alias                   *string             `json:"alias,omitempty"`
+	Owner                   *string             `json:"owner,omitempty"`
+	Description             *string             `json:"description,omitempty"`
+	Type                    string              `json:"type" validate:"required,oneof=openclaw ubuntu debian centos custom webtop hermes opencode deepseek-harness"`
+	RuntimeVariant          string              `json:"runtime_variant,omitempty" validate:"omitempty,oneof=linux windows"`
+	Mode                    string              `json:"mode" validate:"omitempty,oneof=lite pro"`
+	InstanceMode            string              `json:"instance_mode" validate:"omitempty,oneof=lite pro"`
+	RuntimeType             string              `json:"runtime_type" validate:"omitempty,oneof=gateway desktop shell"`
+	DesktopStreamProfile    string              `json:"desktop_stream_profile,omitempty" validate:"omitempty,oneof=low standard high"`
+	CPUCores                float64             `json:"cpu_cores" validate:"required,min=0.1,max=32"`
+	MemoryGB                int                 `json:"memory_gb" validate:"required,min=1,max=128"`
+	DiskGB                  int                 `json:"disk_gb" validate:"required,min=5,max=1000"`
+	GPUEnabled              bool                `json:"gpu_enabled"`
+	GPUCount                int                 `json:"gpu_count" validate:"min=0,max=4"`
+	OSType                  string              `json:"os_type" validate:"required"`
+	OSVersion               string              `json:"os_version" validate:"required"`
+	ImageRegistry           *string             `json:"image_registry,omitempty"`
+	ImageTag                *string             `json:"image_tag,omitempty"`
+	EnvironmentOverrides    map[string]string   `json:"environment_overrides,omitempty"`
+	StorageClass            string              `json:"storage_class"`
+	OpenClawConfigPlan      *OpenClawConfigPlan `json:"openclaw_config_plan,omitempty"`
+	Team                    *TeamInstanceConfig `json:"-"`
+	ProvisioningOperationID string              `json:"-"`
 }
 
 type TeamInstanceConfig struct {
@@ -238,42 +290,62 @@ type instanceService struct {
 	quotaRepo             repository.QuotaRepository
 	llmModelRepo          repository.LLMModelRepository
 	gatewayKeyRepo        repository.GatewayKeyRepository
+	expandedModelCatalog  ExpandedLLMModelCatalog
 	openClawConfigService OpenClawConfigService
 	allowPrivilegedPods   bool
 	runtimePodRepo        repository.RuntimePodRepository
 	bindingRepo           repository.InstanceRuntimeBindingRepository
 	agentClient           RuntimeAgentClient
+	runtimeUpgradeGuard   RuntimeUpgradeDeletionGuard
+	resourceCleanup       func(context.Context, int) error
 	workspaceRoot         string
 	podService            *k8s.PodService
 	deploymentService     *k8s.InstanceDeploymentService
 	pvcService            *k8s.PVCService
 	serviceService        *k8s.ServiceService
 	networkPolicyService  *k8s.NetworkPolicyService
+	secretService         *k8s.SecretService
+	deletionMu            sync.Mutex
+	deletionsInFlight     map[int]struct{}
 }
 
 const (
 	defaultGatewayTokenAliasTTL = 7 * 24 * time.Hour
 	gatewayTokenAliasTTLEnv     = "CLAWMANAGER_GATEWAY_TOKEN_ALIAS_TTL_HOURS"
+	workbuddyGoldenPVCEnv       = "CLAWMANAGER_WORKBUDDY_GOLDEN_PVC"
+	codexGoldenPVCEnv           = "CLAWMANAGER_CODEX_GOLDEN_PVC"
+	workbuddyWindowsPVCSizeGB   = 80
+	workbuddyWindowsMinCPUCores = 6
+	workbuddyWindowsMinMemoryGB = 12
+	workbuddyWindowsNodeLabel   = "clawmanager.io/windows-runtime"
+	windowsCodexBootstrapMount  = "/shared/.clawmanager"
+	windowsCodexConfigKey       = "config.toml"
+	windowsCodexAuthKey         = "auth.json"
 )
 
 type gatewayTokenAliasRecorder interface {
 	UpsertGatewayTokenAlias(ctx context.Context, instanceID int, accessToken string, expiresAt time.Time) error
 }
-type gatewayModelInjection struct {
-	defaultModel         string
-	defaultContextWindow int
-	modelsJSON           string
-	contextWindowsJSON   string
-	reasoningJSON        string
-	reasoningControlJSON string
-	visionJSON           string
+type InstanceServiceOption func(*instanceService)
+
+// Shared by HTTP, batch, Team and pending-deletion paths.
+func WithInstanceResourceCleanup(cleanup func(context.Context, int) error) InstanceServiceOption {
+	return func(s *instanceService) { s.resourceCleanup = cleanup }
 }
 
-type InstanceServiceOption func(*instanceService)
+type RuntimeUpgradeDeletionGuard interface {
+	ValidateInstanceDeletion(ctx context.Context, instanceID int) error
+}
 
 func WithPrivilegedInstancePods(allowed bool) InstanceServiceOption {
 	return func(s *instanceService) {
 		s.allowPrivilegedPods = allowed
+	}
+}
+
+func WithExpandedLLMModelCatalog(catalog ExpandedLLMModelCatalog) InstanceServiceOption {
+	return func(s *instanceService) {
+		s.expandedModelCatalog = catalog
 	}
 }
 
@@ -295,6 +367,12 @@ func WithGatewayKeyRepository(repo repository.GatewayKeyRepository) InstanceServ
 	return func(s *instanceService) { s.gatewayKeyRepo = repo }
 }
 
+func WithRuntimeUpgradeDeletionGuard(guard RuntimeUpgradeDeletionGuard) InstanceServiceOption {
+	return func(s *instanceService) {
+		s.runtimeUpgradeGuard = guard
+	}
+}
+
 // NewInstanceService creates a new instance service
 func NewInstanceService(instanceRepo repository.InstanceRepository, quotaRepo repository.QuotaRepository, llmModelRepo repository.LLMModelRepository, openClawConfigService OpenClawConfigService, options ...InstanceServiceOption) InstanceService {
 	service := &instanceService{
@@ -308,6 +386,8 @@ func NewInstanceService(instanceRepo repository.InstanceRepository, quotaRepo re
 		pvcService:            k8s.NewPVCService(),
 		serviceService:        k8s.NewServiceService(),
 		networkPolicyService:  k8s.NewNetworkPolicyService(),
+		secretService:         k8s.NewSecretService(),
+		deletionsInFlight:     make(map[int]struct{}),
 	}
 	for _, option := range options {
 		if option != nil {
@@ -332,6 +412,38 @@ func (s *instanceService) create(userID int, req CreateInstanceRequest, validate
 	ctx := context.Background()
 	req.Name = strings.TrimSpace(req.Name)
 	req.Type = strings.ToLower(strings.TrimSpace(req.Type))
+	if req.Owner != nil {
+		owner, err := NormalizeInstanceOwner(*req.Owner)
+		if err != nil {
+			return nil, err
+		}
+		req.Owner = &owner
+	}
+	req.ProvisioningOperationID = strings.TrimSpace(req.ProvisioningOperationID)
+	if req.ProvisioningOperationID != "" {
+		if repo, ok := s.instanceRepo.(interface {
+			GetByProvisioningOperationID(string) (*models.Instance, error)
+		}); ok {
+			existing, err := repo.GetByProvisioningOperationID(req.ProvisioningOperationID)
+			if err != nil {
+				return nil, err
+			}
+			if existing != nil {
+				if existing.UserID != userID {
+					return nil, fmt.Errorf("provisioning operation belongs to another user")
+				}
+				return existing, nil
+			}
+		}
+	}
+	// Only already-persisted northbound operations carry a provisioning
+	// operation ID at this point. Keep those replayable for upgrade
+	// compatibility, while rejecting every new direct or prevalidated request
+	// for products that the team distribution does not ship.
+	if req.ProvisioningOperationID == "" && !isTeamDistributionCreatableType(req.Type) {
+		return nil, fmt.Errorf("instance type %q is not available in the team distribution", req.Type)
+	}
+	req.RuntimeVariant = resolveManagedRuntimeVariantForRequest(req)
 	environmentOverrides, err := normalizeEnvironmentOverrides(req.EnvironmentOverrides)
 	if err != nil {
 		return nil, err
@@ -350,6 +462,15 @@ func (s *instanceService) create(userID int, req CreateInstanceRequest, validate
 	}
 
 	instanceMode := resolveCreateInstanceMode(req)
+	if err := validateCreateInstanceDiskGB(req, instanceMode); err != nil {
+		return nil, err
+	}
+	if err := validateWindowsWorkbuddyRequest(req); err != nil {
+		return nil, err
+	}
+	if requiresProInstanceMode(req.Type) && instanceMode != InstanceModePro {
+		return nil, fmt.Errorf("%s is only available in pro mode", req.Type)
+	}
 	modeRuntimeType, _ := RuntimeTypeForInstanceMode(instanceMode)
 	if !hasExplicitCreateInstanceMode(req) && normalizeInstanceRuntimeType(req.RuntimeType) == RuntimeBackendShell {
 		modeRuntimeType = RuntimeBackendShell
@@ -437,20 +558,34 @@ func (s *instanceService) create(userID int, req CreateInstanceRequest, validate
 		return s.createV2Instance(ctx, userID, req, runtimeType, environmentOverridesJSON)
 	}
 
-	runtimeConfig := buildRuntimeConfig(req.Type, req.OSType, req.OSVersion, req.ImageRegistry, req.ImageTag)
+	runtimeConfig := applyManagedRuntimeVariant(
+		buildRuntimeConfig(req.Type, req.OSType, req.OSVersion, req.ImageRegistry, req.ImageTag),
+		req.Type,
+		req.RuntimeVariant,
+		req.ImageRegistry == nil,
+	)
 	runtimeType := normalizeInstanceRuntimeType(req.RuntimeType)
 	if modeRuntimeType != "" {
 		runtimeType = modeRuntimeType
 	}
 	if (req.ImageRegistry == nil || strings.TrimSpace(*req.ImageRegistry) == "") && (req.ImageTag == nil || strings.TrimSpace(*req.ImageTag) == "") {
-		if selection, ok := runtimeImageOverride(req.Type); ok {
+		selection, ok := runtimeImageOverride(req.Type)
+		if modeRuntimeType != "" {
+			selection, ok = RuntimeImageForBackend(req.Type, modeRuntimeType)
+		}
+		if ok {
 			image := selection.Image
 			req.ImageRegistry = &image
 			req.ImageTag = nil
 			if modeRuntimeType == "" {
 				runtimeType = normalizeInstanceRuntimeType(selection.RuntimeType)
 			}
-			runtimeConfig = buildRuntimeConfig(req.Type, req.OSType, req.OSVersion, req.ImageRegistry, req.ImageTag)
+			runtimeConfig = applyManagedRuntimeVariant(
+				buildRuntimeConfig(req.Type, req.OSType, req.OSVersion, req.ImageRegistry, req.ImageTag),
+				req.Type,
+				req.RuntimeVariant,
+				false,
+			)
 		}
 	} else if req.ImageRegistry != nil {
 		if selection, ok := runtimeImageOverrideForImage(req.Type, *req.ImageRegistry); ok {
@@ -468,10 +603,13 @@ func (s *instanceService) create(userID int, req CreateInstanceRequest, validate
 	now := time.Now()
 	instance := &models.Instance{
 		UserID:                   userID,
+		Owner:                    req.Owner,
 		Name:                     req.Name,
+		Alias:                    trimOptionalString(req.Alias),
 		Description:              req.Description,
 		Type:                     req.Type,
 		RuntimeType:              runtimeType,
+		RuntimeVariant:           req.RuntimeVariant,
 		InstanceMode:             InstanceModeForRuntimeType(runtimeType),
 		Status:                   "creating",
 		CPUCores:                 req.CPUCores,
@@ -486,6 +624,7 @@ func (s *instanceService) create(userID int, req CreateInstanceRequest, validate
 		EnvironmentOverridesJSON: environmentOverridesJSON,
 		StorageClass:             req.StorageClass,
 		MountPath:                runtimeConfig.MountPath,
+		ProvisioningOperationID:  trimOptionalString(&req.ProvisioningOperationID),
 		CreatedAt:                now,
 		UpdatedAt:                now,
 	}
@@ -512,6 +651,9 @@ func (s *instanceService) create(userID int, req CreateInstanceRequest, validate
 	if err != nil {
 		s.instanceRepo.Delete(instance.ID)
 		return nil, fmt.Errorf("failed to build instance agent config: %w", err)
+	}
+	if isWindowsVMInstance(instance) {
+		runtimeConfig.Env = windowsWorkbuddyInstanceEnv(runtimeConfig.Env, instance)
 	}
 	extraEnv, err := buildInstancePodEnv(instance, runtimeConfig.Env, gatewayEnv, agentEnv)
 	if err != nil {
@@ -548,18 +690,54 @@ func (s *instanceService) create(userID int, req CreateInstanceRequest, validate
 	// If storage class is not specified in request, use empty string
 	// PVCService will use the default from K8s client config
 	storageClass := req.StorageClass
+	var instancePVC *corev1.PersistentVolumeClaim
 
-	_, err = s.pvcService.CreatePVC(ctx, userID, instance.ID, req.DiskGB, storageClass)
+	if isWindowsVMInstance(instance) {
+		goldenPVCEnv := workbuddyGoldenPVCEnv
+		goldenRuntimeName := "Windows Workbuddy"
+		if isWindowsCodexInstance(instance) {
+			goldenPVCEnv = codexGoldenPVCEnv
+			goldenRuntimeName = "Windows Codex"
+		}
+		sourcePVC := strings.TrimSpace(os.Getenv(goldenPVCEnv))
+		if sourcePVC == "" {
+			err = fmt.Errorf("%s is required for %s instances", goldenPVCEnv, goldenRuntimeName)
+		} else if isWindowsCodexInstance(instance) {
+			instancePVC, err = s.pvcService.CreatePVCFromSource(ctx, userID, instance.ID, req.DiskGB, storageClass, sourcePVC)
+		} else {
+			instancePVC, err = s.pvcService.ClaimWorkbuddyPrewarmPVC(ctx, userID, instance.ID, req.DiskGB, storageClass, sourcePVC)
+			if err == nil && instancePVC == nil {
+				instancePVC, err = s.pvcService.CreatePVCFromSource(ctx, userID, instance.ID, req.DiskGB, storageClass, sourcePVC)
+			}
+		}
+	} else {
+		instancePVC, err = s.pvcService.CreatePVC(ctx, userID, instance.ID, req.DiskGB, storageClass)
+	}
 	if err != nil {
 		// Rollback: delete instance record
+		if instancePVC != nil && strings.TrimSpace(instancePVC.Name) != "" {
+			_ = s.pvcService.DeletePVCByName(ctx, userID, instance.ID, instancePVC.Name)
+		}
 		if bootstrapSnapshot != nil {
 			_ = s.openClawConfigService.MarkSnapshotFailed(bootstrapSnapshot, err)
 		}
 		s.instanceRepo.Delete(instance.ID)
 		return nil, fmt.Errorf("failed to create PVC: %w", err)
 	}
+	if instancePVC == nil || strings.TrimSpace(instancePVC.Name) == "" {
+		s.instanceRepo.Delete(instance.ID)
+		return nil, fmt.Errorf("failed to create PVC: empty PVC result")
+	}
+	pvcName := strings.TrimSpace(instancePVC.Name)
+	instance.PVCName = &pvcName
+	instance.UpdatedAt = time.Now()
+	if err := s.instanceRepo.Update(instance); err != nil {
+		_ = s.pvcService.DeletePVCByName(ctx, userID, instance.ID, pvcName)
+		s.instanceRepo.Delete(instance.ID)
+		return nil, fmt.Errorf("failed to persist instance PVC name: %w", err)
+	}
 	if err := EnsureInstanceWorkspacePathForServerScan(ctx, s.instanceRepo, instance); err != nil {
-		s.pvcService.DeletePVC(ctx, userID, instance.ID)
+		s.deleteInstancePVC(ctx, instance)
 		if bootstrapSnapshot != nil {
 			_ = s.openClawConfigService.MarkSnapshotFailed(bootstrapSnapshot, err)
 		}
@@ -567,19 +745,20 @@ func (s *instanceService) create(userID int, req CreateInstanceRequest, validate
 		return nil, err
 	}
 
-	nodeSelector, err := s.pvcService.NodeSelectorForPVC(ctx, userID, instance.ID, storageClass)
+	nodeSelector, err := s.pvcService.NodeSelectorForPVCName(ctx, userID, pvcName, storageClass)
 	if err != nil {
 		if bootstrapSnapshot != nil {
 			_ = s.openClawConfigService.MarkSnapshotFailed(bootstrapSnapshot, err)
 		}
-		s.pvcService.DeletePVC(ctx, userID, instance.ID)
+		s.deleteInstancePVC(ctx, instance)
 		s.instanceRepo.Delete(instance.ID)
 		return nil, fmt.Errorf("failed to resolve PVC node selector: %w", err)
 	}
+	nodeSelector = runtimeNodeSelectorForInstance(instance, nodeSelector)
 
 	// Managed runtime network policy: optional egress lock when enabled.
 	if err := s.syncInstanceNetworkPolicy(ctx, userID, instance); err != nil {
-		s.pvcService.DeletePVC(ctx, userID, instance.ID)
+		s.deleteInstancePVC(ctx, instance)
 		if bootstrapSnapshot != nil {
 			_ = s.openClawConfigService.MarkSnapshotFailed(bootstrapSnapshot, err)
 		}
@@ -592,8 +771,22 @@ func (s *instanceService) create(userID int, req CreateInstanceRequest, validate
 	envFromSecretNames := []string{bootstrapSecretName}
 	extraPVCMounts := []k8s.PVCMount{}
 	configMapFileMounts := []k8s.ConfigMapFileMount{}
+	secretDirectoryMounts := []k8s.SecretDirectoryMount{}
+	codexBootstrapSecretName := ""
 	volumeOwnershipFixes := []k8s.VolumeOwnershipFix{}
 	var fsGroup *int64
+	if isWindowsCodexInstance(instance) {
+		codexSecretName, secretErr := s.ensureWindowsCodexBootstrapSecret(ctx, instance)
+		if secretErr != nil {
+			s.deleteInstancePVC(ctx, instance)
+			s.instanceRepo.Delete(instance.ID)
+			return nil, fmt.Errorf("failed to provision Windows Codex bootstrap: %w", secretErr)
+		}
+		secretDirectoryMounts = append(secretDirectoryMounts, k8s.SecretDirectoryMount{
+			Name: "codex-bootstrap", SecretName: codexSecretName, MountPath: windowsCodexBootstrapMount,
+		})
+		codexBootstrapSecretName = codexSecretName
+	}
 	if req.Team != nil {
 		if strings.TrimSpace(req.Team.SecretName) != "" {
 			envFromSecretNames = append(envFromSecretNames, strings.TrimSpace(req.Team.SecretName))
@@ -644,36 +837,44 @@ func (s *instanceService) create(userID int, req CreateInstanceRequest, validate
 	}
 
 	podConfig := k8s.PodConfig{
-		InstanceID:           instance.ID,
-		InstanceName:         instance.Name,
-		UserID:               userID,
-		Type:                 instance.Type,
-		RuntimeType:          runtimeType,
-		CPUCores:             instance.CPUCores,
-		MemoryGB:             instance.MemoryGB,
-		GPUEnabled:           instance.GPUEnabled,
-		GPUCount:             instance.GPUCount,
-		Image:                runtimeConfig.Image,
-		MountPath:            runtimeConfig.MountPath,
-		ContainerPort:        runtimeConfig.Port,
-		ImagePullPolicy:      corev1.PullPolicy(defaultImagePullPolicy()),
-		ExtraEnv:             extraEnv,
-		EnvFromSecretNames:   envFromSecretNames,
-		ExtraPVCMounts:       extraPVCMounts,
-		ConfigMapFileMounts:  configMapFileMounts,
-		VolumeInitScripts:    runtimeVolumeInitScripts(instance.Type, runtimeConfig.MountPath),
-		FSGroup:              fsGroup,
-		NodeSelector:         nodeSelector,
-		VolumeOwnershipFixes: volumeOwnershipFixes,
-		SHMSizeGB:            shmSizeGB,
-		SecurityMode:         s.securityModeForInstance(instance.Type),
+		InstanceID:            instance.ID,
+		InstanceName:          instance.Name,
+		UserID:                userID,
+		Type:                  instance.Type,
+		RuntimeType:           runtimeType,
+		CPUCores:              instance.CPUCores,
+		MemoryGB:              instance.MemoryGB,
+		GPUEnabled:            instance.GPUEnabled,
+		GPUCount:              instance.GPUCount,
+		Image:                 runtimeConfig.Image,
+		PVCName:               pvcName,
+		MountPath:             runtimeConfig.MountPath,
+		ContainerPort:         runtimeConfig.Port,
+		ProbePort:             runtimeProbePortForInstance(instance, runtimeConfig.Port),
+		StartupProbeFailures:  runtimeStartupProbeFailuresForInstance(instance),
+		TerminationGrace:      runtimeTerminationGraceForInstance(instance),
+		ImagePullPolicy:       corev1.PullPolicy(defaultImagePullPolicy()),
+		ExtraEnv:              extraEnv,
+		EnvFromSecretNames:    envFromSecretNames,
+		ExtraPVCMounts:        extraPVCMounts,
+		ConfigMapFileMounts:   configMapFileMounts,
+		SecretDirectoryMounts: secretDirectoryMounts,
+		VolumeInitScripts:     runtimeVolumeInitScripts(instance.Type, runtimeConfig.MountPath),
+		FSGroup:               fsGroup,
+		NodeSelector:          nodeSelector,
+		VolumeOwnershipFixes:  volumeOwnershipFixes,
+		SHMSizeGB:             shmSizeGB,
+		SecurityMode:          s.securityModeForRuntime(instance),
 	}
 
 	var workloadNamespace string
 	var workloadName string
 	if instanceUsesDesktopRuntime(instance) {
 		if s.deploymentService == nil {
-			s.pvcService.DeletePVC(ctx, userID, instance.ID)
+			if codexBootstrapSecretName != "" {
+				_ = s.secretService.DeleteSecret(ctx, userID, codexBootstrapSecretName)
+			}
+			s.deleteInstancePVC(ctx, instance)
 			if bootstrapSnapshot != nil {
 				_ = s.openClawConfigService.MarkSnapshotFailed(bootstrapSnapshot, fmt.Errorf("instance deployment service is not configured"))
 			}
@@ -682,7 +883,10 @@ func (s *instanceService) create(userID int, req CreateInstanceRequest, validate
 		}
 		deployment, err := s.deploymentService.EnsureDeployment(ctx, podConfig, 1)
 		if err != nil {
-			s.pvcService.DeletePVC(ctx, userID, instance.ID)
+			if codexBootstrapSecretName != "" {
+				_ = s.secretService.DeleteSecret(ctx, userID, codexBootstrapSecretName)
+			}
+			s.deleteInstancePVC(ctx, instance)
 			if bootstrapSnapshot != nil {
 				_ = s.openClawConfigService.MarkSnapshotFailed(bootstrapSnapshot, err)
 			}
@@ -698,14 +902,17 @@ func (s *instanceService) create(userID int, req CreateInstanceRequest, validate
 			InstanceName:    instance.Name,
 			UserID:          userID,
 			ContainerPort:   runtimeConfig.Port,
-			AdditionalPorts: additionalServicePorts(runtimeConfig.Port),
+			AdditionalPorts: additionalServicePortsForInstance(instance, runtimeConfig.Port),
 		}
 
 		serviceInfo, err := s.serviceService.CreateService(ctx, serviceConfig)
 		if err != nil {
 			// Rollback: delete Deployment, PVC and instance record.
 			_ = s.deploymentService.DeleteDeployment(ctx, userID, instance.ID)
-			s.pvcService.DeletePVC(ctx, userID, instance.ID)
+			if codexBootstrapSecretName != "" {
+				_ = s.secretService.DeleteSecret(ctx, userID, codexBootstrapSecretName)
+			}
+			s.deleteInstancePVC(ctx, instance)
 			if bootstrapSnapshot != nil {
 				_ = s.openClawConfigService.MarkSnapshotFailed(bootstrapSnapshot, err)
 			}
@@ -718,7 +925,10 @@ func (s *instanceService) create(userID int, req CreateInstanceRequest, validate
 		pod, err := s.podService.CreatePod(ctx, podConfig)
 		if err != nil {
 			// Rollback: delete PVC and instance record.
-			s.pvcService.DeletePVC(ctx, userID, instance.ID)
+			if codexBootstrapSecretName != "" {
+				_ = s.secretService.DeleteSecret(ctx, userID, codexBootstrapSecretName)
+			}
+			s.deleteInstancePVC(ctx, instance)
 			if bootstrapSnapshot != nil {
 				_ = s.openClawConfigService.MarkSnapshotFailed(bootstrapSnapshot, err)
 			}
@@ -773,7 +983,9 @@ func (s *instanceService) createV2Instance(ctx context.Context, userID int, req 
 	workspaceRoot := s.runtimeWorkspaceRoot()
 	instance := &models.Instance{
 		UserID:                   userID,
+		Owner:                    req.Owner,
 		Name:                     strings.TrimSpace(req.Name),
+		Alias:                    trimOptionalString(req.Alias),
 		Description:              trimOptionalString(req.Description),
 		Type:                     runtimeType,
 		RuntimeType:              RuntimeBackendGateway,
@@ -792,6 +1004,7 @@ func (s *instanceService) createV2Instance(ctx context.Context, userID int, req 
 		StorageClass:             strings.TrimSpace(req.StorageClass),
 		MountPath:                workspaceRoot,
 		RuntimeGeneration:        1,
+		ProvisioningOperationID:  trimOptionalString(&req.ProvisioningOperationID),
 		CreatedAt:                now,
 		UpdatedAt:                now,
 		StartedAt:                &now,
@@ -868,6 +1081,141 @@ func (s *instanceService) GetByUserID(userID int, offset, limit int) ([]models.I
 	return instances, total, nil
 }
 
+func (s *instanceService) GetFilteredByUserID(userID int, filter models.InstanceListFilter, offset, limit int) ([]models.Instance, int, error) {
+	repo, ok := s.instanceRepo.(repository.InstanceQueryRepository)
+	if !ok {
+		return nil, 0, fmt.Errorf("instance repository does not support filtered queries")
+	}
+	instances, err := repo.GetFilteredByUserID(userID, filter, offset, limit)
+	if err != nil {
+		return nil, 0, err
+	}
+	hydrateInstancesDesktopStreamProfile(instances)
+	total, err := repo.CountFilteredByUserID(userID, filter)
+	if err != nil {
+		return nil, 0, err
+	}
+	return instances, total, nil
+}
+
+func (s *instanceService) GetSummaryByUserID(userID int) (*models.InstanceSummary, error) {
+	repo, ok := s.instanceRepo.(repository.InstanceQueryRepository)
+	if !ok {
+		return nil, fmt.Errorf("instance repository does not support summary queries")
+	}
+	return repo.SummarizeByUserID(userID)
+}
+
+// GetLiteByUserIDAndOwner returns only the caller's Lite instances whose owner
+// matches exactly. Owner is normalized before it reaches the repository.
+func (s *instanceService) GetLiteByUserIDAndOwner(userID int, owner string, offset, limit int) ([]models.Instance, int, error) {
+	normalized, err := NormalizeInstanceOwner(owner)
+	if err != nil {
+		return nil, 0, err
+	}
+	repo, ok := s.instanceRepo.(repository.InstanceOwnerRepository)
+	if !ok {
+		return nil, 0, fmt.Errorf("instance repository does not support owner filtering")
+	}
+	instances, err := repo.GetLiteByUserIDAndOwner(userID, normalized, offset, limit)
+	if err != nil {
+		return nil, 0, err
+	}
+	hydrateInstancesDesktopStreamProfile(instances)
+	total, err := repo.CountLiteByUserIDAndOwner(userID, normalized)
+	if err != nil {
+		return nil, 0, err
+	}
+	return instances, total, nil
+}
+
+func (s *instanceService) GetWorkbuddyProByUserIDAndOwner(userID int, owner string, offset, limit int) ([]models.Instance, int, error) {
+	normalized, err := NormalizeInstanceOwner(owner)
+	if err != nil {
+		return nil, 0, err
+	}
+	repo, ok := s.instanceRepo.(repository.InstanceOwnerRepository)
+	if !ok {
+		return nil, 0, fmt.Errorf("instance repository does not support owner filtering")
+	}
+	instances, err := repo.GetWorkbuddyProByUserIDAndOwner(userID, normalized, offset, limit)
+	if err != nil {
+		return nil, 0, err
+	}
+	hydrateInstancesDesktopStreamProfile(instances)
+	total, err := repo.CountWorkbuddyProByUserIDAndOwner(userID, normalized)
+	if err != nil {
+		return nil, 0, err
+	}
+	return instances, total, nil
+}
+
+func (s *instanceService) GetProByUserIDAndOwner(userID int, owner string, offset, limit int) ([]models.Instance, int, error) {
+	normalized, err := NormalizeInstanceOwner(owner)
+	if err != nil {
+		return nil, 0, err
+	}
+	repo, ok := s.instanceRepo.(repository.InstanceOwnerRepository)
+	if !ok {
+		return nil, 0, fmt.Errorf("instance repository does not support owner filtering")
+	}
+	instances, err := repo.GetProByUserIDAndOwner(userID, normalized, offset, limit)
+	if err != nil {
+		return nil, 0, err
+	}
+	hydrateInstancesDesktopStreamProfile(instances)
+	total, err := repo.CountProByUserIDAndOwner(userID, normalized)
+	if err != nil {
+		return nil, 0, err
+	}
+	return instances, total, nil
+}
+
+// GetNorthboundByUserIDAndOwner returns the compatibility unified collection
+// exposed by /lite-instances: managed Lite runtimes plus every Pro runtime
+// supported by the northbound contract.
+func (s *instanceService) GetNorthboundByUserIDAndOwner(userID int, owner string, offset, limit int) ([]models.Instance, int, error) {
+	normalized, err := NormalizeInstanceOwner(owner)
+	if err != nil {
+		return nil, 0, err
+	}
+	repo, ok := s.instanceRepo.(repository.NorthboundInstanceOwnerRepository)
+	if !ok {
+		return nil, 0, fmt.Errorf("instance repository does not support northbound owner filtering")
+	}
+	instances, err := repo.GetNorthboundByUserIDAndOwner(userID, normalized, offset, limit)
+	if err != nil {
+		return nil, 0, err
+	}
+	hydrateInstancesDesktopStreamProfile(instances)
+	total, err := repo.CountNorthboundByUserIDAndOwner(userID, normalized)
+	if err != nil {
+		return nil, 0, err
+	}
+	return instances, total, nil
+}
+
+func (s *instanceService) GetSupportedByOwnerEmail(owner string, offset, limit int) ([]models.Instance, int, error) {
+	normalized := strings.ToLower(strings.TrimSpace(owner))
+	if normalized == "" {
+		return nil, 0, fmt.Errorf("owner is required")
+	}
+	repo, ok := s.instanceRepo.(repository.IEISystemInstanceRepository)
+	if !ok {
+		return nil, 0, fmt.Errorf("instance repository does not support IEI owner filtering")
+	}
+	instances, err := repo.GetSupportedByOwnerEmail(normalized, offset, limit)
+	if err != nil {
+		return nil, 0, err
+	}
+	hydrateInstancesDesktopStreamProfile(instances)
+	total, err := repo.CountSupportedByOwnerEmail(normalized)
+	if err != nil {
+		return nil, 0, err
+	}
+	return instances, total, nil
+}
+
 func (s *instanceService) GetAllInstances(offset, limit int) ([]models.Instance, int, error) {
 	instances, err := s.instanceRepo.GetAll(offset, limit)
 	if err != nil {
@@ -907,9 +1255,17 @@ func (s *instanceService) Start(instanceID int) error {
 		return err
 	}
 	defer release()
-	return s.startInstance(instanceID)
+	return s.startWithUpgradeGuard(instanceID)
 }
 
+func (s *instanceService) startWithUpgradeGuard(instanceID int) error {
+	if guard, ok := s.runtimeUpgradeGuard.(interface {
+		WithInstanceMutation(context.Context, int, func() error) error
+	}); ok {
+		return guard.WithInstanceMutation(context.Background(), instanceID, func() error { return s.startInstance(instanceID) })
+	}
+	return s.startInstance(instanceID)
+}
 func (s *instanceService) startInstance(instanceID int) error {
 	ctx := context.Background()
 
@@ -930,6 +1286,9 @@ func (s *instanceService) startInstance(instanceID int) error {
 	}
 
 	if runtimeType, ok := v2RuntimeTypeForInstance(instance); ok {
+		if err := s.validateInstanceStartConfiguration(ctx, instance); err != nil {
+			return err
+		}
 		if err := s.prepareV2InstanceStart(ctx, instance); err != nil {
 			return err
 		}
@@ -951,9 +1310,12 @@ func (s *instanceService) startInstance(instanceID int) error {
 	if err != nil {
 		return fmt.Errorf("failed to build instance agent config: %w", err)
 	}
-	runtimeConfig := buildRuntimeConfig(instance.Type, instance.OSType, instance.OSVersion, instance.ImageRegistry, instance.ImageTag)
+	runtimeConfig := buildRuntimeConfigForInstance(instance)
 	mountPath := persistentVolumeMountPath(instance)
 	instance.MountPath = mountPath
+	if isWindowsVMInstance(instance) {
+		runtimeConfig.Env = windowsWorkbuddyInstanceEnv(runtimeConfig.Env, instance)
+	}
 	extraEnv, err := buildInstancePodEnv(instance, runtimeConfig.Env, gatewayEnv, agentEnv)
 	if err != nil {
 		return fmt.Errorf("failed to resolve instance environment: %w", err)
@@ -963,7 +1325,7 @@ func (s *instanceService) startInstance(instanceID int) error {
 	}
 
 	bootstrapSecretName := ""
-	if supportsRuntimeConfigInjection(instance.Type) && s.openClawConfigService != nil && instance.OpenClawConfigSnapshotID != nil && *instance.OpenClawConfigSnapshotID > 0 {
+	if supportsRuntimeConfigInjectionForInstance(instance) && s.openClawConfigService != nil && instance.OpenClawConfigSnapshotID != nil && *instance.OpenClawConfigSnapshotID > 0 {
 		bootstrapSecretName, err = s.openClawConfigService.EnsureSnapshotSecret(ctx, instance.UserID, instance, *instance.OpenClawConfigSnapshotID)
 		if err != nil {
 			return fmt.Errorf("failed to restore runtime bootstrap secret: %w", err)
@@ -977,30 +1339,47 @@ func (s *instanceService) startInstance(instanceID int) error {
 
 	runtimeType := normalizeInstanceRuntimeType(instance.RuntimeType)
 	shmSizeGB := popSHMSizeGB(extraEnv, runtimeType, instance.MemoryGB)
-	nodeSelector, err := s.pvcService.NodeSelectorForPVC(ctx, instance.UserID, instance.ID, instance.StorageClass)
+	pvcName := instancePVCName(instance, s.pvcService.GetClient())
+	nodeSelector, err := s.pvcService.NodeSelectorForPVCName(ctx, instance.UserID, pvcName, instance.StorageClass)
 	if err != nil {
 		return fmt.Errorf("failed to resolve PVC node selector: %w", err)
 	}
+	nodeSelector = runtimeNodeSelectorForInstance(instance, nodeSelector)
+	secretDirectoryMounts := []k8s.SecretDirectoryMount{}
+	if isWindowsCodexInstance(instance) {
+		codexSecretName, secretErr := s.ensureWindowsCodexBootstrapSecret(ctx, instance)
+		if secretErr != nil {
+			return fmt.Errorf("failed to provision Windows Codex bootstrap: %w", secretErr)
+		}
+		secretDirectoryMounts = append(secretDirectoryMounts, k8s.SecretDirectoryMount{
+			Name: "codex-bootstrap", SecretName: codexSecretName, MountPath: windowsCodexBootstrapMount,
+		})
+	}
 	podConfig := k8s.PodConfig{
-		InstanceID:         instance.ID,
-		InstanceName:       instance.Name,
-		UserID:             instance.UserID,
-		Type:               instance.Type,
-		RuntimeType:        runtimeType,
-		CPUCores:           instance.CPUCores,
-		MemoryGB:           instance.MemoryGB,
-		GPUEnabled:         instance.GPUEnabled,
-		GPUCount:           instance.GPUCount,
-		Image:              runtimeConfig.Image,
-		MountPath:          mountPath,
-		ContainerPort:      runtimeConfig.Port,
-		ImagePullPolicy:    corev1.PullPolicy(defaultImagePullPolicy()),
-		ExtraEnv:           extraEnv,
-		EnvFromSecretNames: []string{bootstrapSecretName},
-		VolumeInitScripts:  runtimeVolumeInitScripts(instance.Type, mountPath),
-		NodeSelector:       nodeSelector,
-		SHMSizeGB:          shmSizeGB,
-		SecurityMode:       s.securityModeForInstance(instance.Type),
+		InstanceID:            instance.ID,
+		InstanceName:          instance.Name,
+		UserID:                instance.UserID,
+		Type:                  instance.Type,
+		RuntimeType:           runtimeType,
+		CPUCores:              instance.CPUCores,
+		MemoryGB:              instance.MemoryGB,
+		GPUEnabled:            instance.GPUEnabled,
+		GPUCount:              instance.GPUCount,
+		Image:                 runtimeConfig.Image,
+		PVCName:               pvcName,
+		MountPath:             mountPath,
+		ContainerPort:         runtimeConfig.Port,
+		ProbePort:             runtimeProbePortForInstance(instance, runtimeConfig.Port),
+		StartupProbeFailures:  runtimeStartupProbeFailuresForInstance(instance),
+		TerminationGrace:      runtimeTerminationGraceForInstance(instance),
+		ImagePullPolicy:       corev1.PullPolicy(defaultImagePullPolicy()),
+		ExtraEnv:              extraEnv,
+		EnvFromSecretNames:    []string{bootstrapSecretName},
+		SecretDirectoryMounts: secretDirectoryMounts,
+		VolumeInitScripts:     runtimeVolumeInitScripts(instance.Type, mountPath),
+		NodeSelector:          nodeSelector,
+		SHMSizeGB:             shmSizeGB,
+		SecurityMode:          s.securityModeForRuntime(instance),
 	}
 
 	var workloadNamespace string
@@ -1024,7 +1403,7 @@ func (s *instanceService) startInstance(instanceID int) error {
 				InstanceName:    instance.Name,
 				UserID:          instance.UserID,
 				ContainerPort:   runtimeConfig.Port,
-				AdditionalPorts: additionalServicePorts(runtimeConfig.Port),
+				AdditionalPorts: additionalServicePortsForInstance(instance, runtimeConfig.Port),
 			}
 			_, err = s.serviceService.CreateService(ctx, serviceConfig)
 			if err != nil {
@@ -1062,6 +1441,9 @@ func (s *instanceService) startInstance(instanceID int) error {
 }
 
 func (s *instanceService) securityModeForInstance(instanceType string) k8s.PodSecurityMode {
+	if isWindowsVMInstanceType(instanceType) {
+		return k8s.PodSecurityPrivileged
+	}
 	if s != nil && s.allowPrivilegedPods {
 		return k8s.PodSecurityPrivileged
 	}
@@ -1073,6 +1455,26 @@ func (s *instanceService) securityModeForInstance(instanceType string) k8s.PodSe
 	return k8s.PodSecurityDefault
 }
 
+func (s *instanceService) securityModeForRuntime(instance *models.Instance) k8s.PodSecurityMode {
+	if isWindowsVMInstance(instance) {
+		return k8s.PodSecurityPrivileged
+	}
+	if instance == nil {
+		return k8s.PodSecurityDefault
+	}
+	if s != nil && s.allowPrivilegedPods {
+		return k8s.PodSecurityPrivileged
+	}
+	if isLinuxWorkbuddyInstance(instance) {
+		return k8s.PodSecurityWorkbuddyLinux
+	}
+	switch strings.ToLower(strings.TrimSpace(instance.Type)) {
+	case "openclaw", "opencode", "workbuddy", RuntimeTypeCodex, RuntimeTypeClaudeCode:
+		return k8s.PodSecurityChromiumCompat
+	default:
+		return k8s.PodSecurityDefault
+	}
+}
 func (s *instanceService) ensureGatewayToken(instance *models.Instance) (string, error) {
 	if instance.AccessToken != nil && strings.TrimSpace(*instance.AccessToken) != "" {
 		token := strings.TrimSpace(*instance.AccessToken)
@@ -1131,11 +1533,112 @@ func gatewayTokenAliasTTL() time.Duration {
 	}
 	return time.Duration(*value) * time.Hour
 }
+
+func (s *instanceService) ensureWindowsCodexBootstrapSecret(ctx context.Context, instance *models.Instance) (string, error) {
+	if !isWindowsCodexInstance(instance) {
+		return "", nil
+	}
+	if s == nil || s.secretService == nil {
+		return "", fmt.Errorf("secret service is not configured")
+	}
+
+	token, err := s.ensureGatewayToken(instance)
+	if err != nil {
+		return "", err
+	}
+	baseURL, ok := defaultGatewayBaseURL()
+	if !ok {
+		return "", fmt.Errorf("gateway base URL is not configured")
+	}
+	modelInjection, err := s.resolveGatewayModelInjection(instance.UserID)
+	if err != nil {
+		return "", err
+	}
+	model := strings.TrimSpace(modelInjection.codingAgentDefaultModel)
+	if model == "" {
+		model = strings.TrimSpace(modelInjection.defaultModel)
+	}
+	files, err := renderWindowsCodexBootstrapFiles(baseURL, model, token)
+	if err != nil {
+		return "", err
+	}
+
+	client := k8s.GetClient()
+	if client == nil {
+		return "", fmt.Errorf("k8s client not initialized")
+	}
+	secretName := client.GetCodexBootstrapSecretName(instance.ID, instance.Name)
+	if err := s.secretService.UpsertSecret(ctx, instance.UserID, secretName, files, map[string]string{
+		"app":           "clawreef",
+		"instance-id":   fmt.Sprintf("%d", instance.ID),
+		"instance-name": instance.Name,
+		"user-id":       fmt.Sprintf("%d", instance.UserID),
+		"managed-by":    "clawreef",
+		"resource-type": "codex-windows-bootstrap",
+	}); err != nil {
+		return "", err
+	}
+
+	s.refreshGatewayTokenAlias(instance.ID, token)
+	return secretName, nil
+}
+
+func renderWindowsCodexBootstrapFiles(baseURL, model, token string) (map[string]string, error) {
+	baseURL = strings.TrimSpace(baseURL)
+	model = strings.TrimSpace(model)
+	token = strings.TrimSpace(token)
+	if baseURL == "" || model == "" || token == "" {
+		return nil, fmt.Errorf("base URL, model, and instance token are required")
+	}
+	// Codex appends /responses to the provider base URL. The ClawManager
+	// Responses-compatible endpoint is exposed under /v1/responses.
+	baseURL = strings.TrimRight(baseURL, "/")
+	if !strings.HasSuffix(baseURL, "/v1") {
+		baseURL += "/v1"
+	}
+
+	config := fmt.Sprintf(`model_provider = "clawmanager"
+model = %s
+review_model = %s
+windows_wsl_setup_acknowledged = true
+sandbox_mode = "danger-full-access"
+approval_policy = "never"
+web_search = "live"
+cli_auth_credentials_store = "file"
+
+[features]
+goals = true
+
+[model_providers.clawmanager]
+name = "ClawManager"
+base_url = %s
+wire_api = "responses"
+requires_openai_auth = true
+`, strconv.Quote(model), strconv.Quote(model), strconv.Quote(baseURL))
+	authJSON, err := json.MarshalIndent(map[string]string{"OPENAI_API_KEY": token}, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode Codex auth file: %w", err)
+	}
+
+	return map[string]string{
+		windowsCodexConfigKey: config,
+		windowsCodexAuthKey:   string(authJSON) + "\n",
+	}, nil
+}
+
 func (s *instanceService) buildGatewayEnv(instance *models.Instance) (map[string]string, error) {
+	env, err := s.buildGatewayEnvReadOnly(instance)
+	if err == nil && len(env) > 0 && instance != nil && instance.AccessToken != nil {
+		s.refreshGatewayTokenAlias(instance.ID, strings.TrimSpace(*instance.AccessToken))
+	}
+	return env, err
+}
+
+func (s *instanceService) buildGatewayEnvReadOnly(instance *models.Instance) (map[string]string, error) {
 	if instance == nil || instance.AccessToken == nil || strings.TrimSpace(*instance.AccessToken) == "" {
 		return map[string]string{}, nil
 	}
-	if !supportsManagedRuntimeIntegration(instance.Type) {
+	if !supportsManagedRuntimeIntegrationForInstance(instance) {
 		return map[string]string{}, nil
 	}
 
@@ -1150,7 +1653,6 @@ func (s *instanceService) buildGatewayEnv(instance *models.Instance) (map[string
 	}
 
 	token := strings.TrimSpace(*instance.AccessToken)
-	s.refreshGatewayTokenAlias(instance.ID, token)
 	env := map[string]string{
 		"CLAWMANAGER_GATEWAY_GENERATION":    strconv.Itoa(instance.RuntimeGeneration),
 		"CLAWMANAGER_LLM_BASE_URL":          baseURL,
@@ -1158,6 +1660,7 @@ func (s *instanceService) buildGatewayEnv(instance *models.Instance) (map[string
 		"CLAWMANAGER_LLM_MODEL":             modelInjection.modelsJSON,
 		"CLAWMANAGER_LLM_CONTEXT_WINDOW":    strconv.Itoa(modelInjection.defaultContextWindow),
 		"CLAWMANAGER_LLM_CONTEXT_WINDOWS":   modelInjection.contextWindowsJSON,
+		"CLAWMANAGER_LLM_PROVIDER_MODELS":   modelInjection.providerModelsJSON,
 		"CLAWMANAGER_LLM_REASONING":         modelInjection.reasoningJSON,
 		"CLAWMANAGER_LLM_REASONING_CONTROL": modelInjection.reasoningControlJSON,
 		"CLAWMANAGER_LLM_VISION":            modelInjection.visionJSON,
@@ -1167,6 +1670,9 @@ func (s *instanceService) buildGatewayEnv(instance *models.Instance) (map[string
 		"OPENAI_API_BASE":                   baseURL,
 		"OPENAI_API_KEY":                    token,
 		"OPENAI_MODEL":                      modelInjection.defaultModel,
+	}
+	if (strings.EqualFold(strings.TrimSpace(instance.Type), RuntimeTypeCodex) || strings.EqualFold(strings.TrimSpace(instance.Type), RuntimeTypeClaudeCode)) && modelInjection.codingAgentDefaultModel != "" {
+		env["OPENAI_MODEL"] = modelInjection.codingAgentDefaultModel
 	}
 	if strings.EqualFold(strings.TrimSpace(instance.Type), RuntimeTypeOpenCode) {
 		env["OPENCODE_SERVER_PASSWORD"] = token
@@ -1180,6 +1686,12 @@ func (s *instanceService) buildGatewayEnv(instance *models.Instance) (map[string
 		// credentials as env references ensures the generated file does not embed
 		// a user-managed provider or a direct external API key.
 		env["OPENCODE_CONFIG_CONTENT"] = configContent
+		if strings.EqualFold(strings.TrimSpace(instance.InstanceMode), InstanceModeLite) {
+			env["CLAWMANAGER_DEFAULT_PROJECT_RELATIVE_PATH"] = OpenCodeDefaultProjectRelativePath
+			if instance.WorkspacePath != nil && strings.TrimSpace(*instance.WorkspacePath) != "" {
+				env["CLAWMANAGER_DEFAULT_PROJECT_PATH"] = path.Join(strings.TrimSpace(*instance.WorkspacePath), OpenCodeDefaultProjectRelativePath)
+			}
+		}
 	}
 	return env, nil
 }
@@ -1188,7 +1700,11 @@ func (s *instanceService) buildGatewayEnv(instance *models.Instance) (map[string
 // into OpenCode's custom-provider format. The gateway's "auto" model is always
 // included, so a newly-created Lite instance is usable even when the active
 // catalogue contains only aliases added after the runtime image was built.
-func buildOpenCodeGatewayConfig(modelsJSON, contextWindowsJSON string) (string, error) {
+func buildOpenCodeGatewayConfig(modelsJSON string, contextWindowSettings ...string) (string, error) {
+	if len(contextWindowSettings) == 0 {
+		return buildProviderOpenCodeGatewayConfig(modelsJSON)
+	}
+	contextWindowsJSON := contextWindowSettings[0]
 	var modelIDs []string
 	if err := json.Unmarshal([]byte(modelsJSON), &modelIDs); err != nil {
 		return "", fmt.Errorf("invalid gateway model catalogue: %w", err)
@@ -1235,9 +1751,8 @@ func buildOpenCodeGatewayConfig(modelsJSON, contextWindowsJSON string) (string, 
 	}
 	return string(raw), nil
 }
-
 func (s *instanceService) BuildGatewayEnv(instance *models.Instance) (map[string]string, error) {
-	if instance == nil || !supportsManagedRuntimeIntegration(instance.Type) {
+	if instance == nil || !supportsManagedRuntimeIntegrationForInstance(instance) {
 		return s.buildGatewayEnv(instance)
 	}
 	if instance.AccessToken == nil || strings.TrimSpace(*instance.AccessToken) == "" {
@@ -1309,7 +1824,7 @@ func (s *instanceService) ensureAgentBootstrapToken(instance *models.Instance) (
 }
 
 func (s *instanceService) buildAgentEnv(instance *models.Instance) (map[string]string, error) {
-	if instance == nil || !supportsManagedRuntimeIntegration(instance.Type) {
+	if instance == nil || !supportsManagedRuntimeIntegrationForInstance(instance) {
 		return map[string]string{}, nil
 	}
 	if instance.AgentBootstrapToken == nil || strings.TrimSpace(*instance.AgentBootstrapToken) == "" {
@@ -1345,13 +1860,13 @@ func supportsManagedRuntimeIntegration(instanceType string) bool {
 }
 
 func (s *instanceService) createRuntimeBootstrapSnapshot(userID int, instance *models.Instance, plan *OpenClawConfigPlan) (*models.OpenClawInjectionSnapshot, error) {
-	if !supportsRuntimeConfigInjection(instance.Type) || s.openClawConfigService == nil {
+	if !supportsRuntimeConfigInjectionForInstance(instance) || s.openClawConfigService == nil {
 		return nil, nil
 	}
 	if plan != nil && hasOpenClawConfigSelections(*plan) {
 		return s.openClawConfigService.CreateSnapshotForInstance(userID, instance, plan)
 	}
-	if supportsManagedRuntimeIntegration(instance.Type) {
+	if supportsManagedRuntimeIntegrationForInstance(instance) {
 		return s.openClawConfigService.CreateDefaultLLMGovernanceSnapshot(userID, instance)
 	}
 	return nil, nil
@@ -1368,7 +1883,7 @@ func (s *instanceService) syncInstanceNetworkPolicy(ctx context.Context, userID 
 		}
 		return nil
 	}
-	if isInstanceNetworkLockEnabled() && supportsManagedRuntimeIntegration(instance.Type) {
+	if isInstanceNetworkLockEnabled() && supportsManagedRuntimeIntegrationForInstance(instance) {
 		if err := s.networkPolicyService.EnsureDefaultPolicy(ctx, userID, instance.ID, instance.Name); err != nil {
 			return fmt.Errorf("failed to ensure network policy: %w", err)
 		}
@@ -1417,15 +1932,27 @@ func managedRuntimePersistentDir(instance *models.Instance) string {
 	}
 	return persistentVolumeMountPath(instance)
 }
+
+func requiresProInstanceMode(instanceType string) bool {
+	switch strings.ToLower(strings.TrimSpace(instanceType)) {
+	case RuntimeTypeCodex, RuntimeTypeClaudeCode:
+		return true
+	default:
+		return false
+	}
+}
 func persistentVolumeMountPath(instance *models.Instance) string {
 	if instance == nil {
 		return "/config"
 	}
-	if defaultPath := defaultMountPathForInstanceType(instance.Type); defaultPath == "/config" {
-		return defaultPath
+	if !isWindowsVMInstance(instance) && defaultMountPathForInstanceType(instance.Type) == "/config" {
+		return "/config"
 	}
 	if strings.TrimSpace(instance.MountPath) != "" {
 		return strings.TrimSpace(instance.MountPath)
+	}
+	if isWindowsVMInstance(instance) {
+		return buildRuntimeConfigForInstance(instance).MountPath
 	}
 	return defaultMountPathForInstanceType(instance.Type)
 }
@@ -1503,10 +2030,11 @@ func (s *instanceService) resolveGatewayModelInjection(ownerID int) (*gatewayMod
 	}
 	items = models.ChatModels(items)
 	if len(items) == 0 {
-		return nil, fmt.Errorf("no active models are configured")
+		return nil, ErrModelConfigurationRequired
 	}
 
 	modelsForInjection := []string{"auto"}
+	providerRefs := []string{managedAutoModelRef}
 	reasoningForInjection := map[string]bool{"auto": false}
 	visionForInjection := map[string]bool{"auto": false}
 	for _, item := range items {
@@ -1550,10 +2078,14 @@ func (s *instanceService) resolveGatewayModelInjection(ownerID int) (*gatewayMod
 		}
 		seen[normalizedName] = struct{}{}
 		modelsForInjection = append(modelsForInjection, displayName)
+		providerRefs = append(providerRefs, modelCatalogProviderName(item)+"/"+displayName)
 		models.PopulateLLMReasoningCapability(&item)
 		reasoningForInjection[displayName] = item.SupportsReasoning && item.ReasoningEnabled
+		qualifiedName := modelCatalogProviderName(item) + "/" + displayName
+		reasoningForInjection[qualifiedName] = reasoningForInjection[displayName]
 		visionForInjection[displayName] = models.LLMVisionInputAvailable(&item)
 		reasoningControlForInjection[displayName] = item.ReasoningControl
+		reasoningControlForInjection[qualifiedName] = item.ReasoningControl
 		contextWindow := item.ContextWindowTokens
 		if normalizedGroup := strings.ToLower(strings.TrimSpace(item.ModelGroup)); normalizedGroup != "" {
 			contextWindow = safeContextWindow(modelsByGroup[normalizedGroup])
@@ -1582,14 +2114,24 @@ func (s *instanceService) resolveGatewayModelInjection(ownerID int) (*gatewayMod
 		return nil, fmt.Errorf("failed to encode gateway model context windows: %w", err)
 	}
 
+	providerJSON, err := marshalGatewayModelSetting("provider model list", providerRefs)
+	if err != nil {
+		return nil, err
+	}
+	codingDefault := ""
+	if len(modelsForInjection) > 1 {
+		codingDefault = modelsForInjection[1]
+	}
 	return &gatewayModelInjection{
-		defaultModel:         "auto",
-		defaultContextWindow: contextWindowsForInjection["auto"],
-		modelsJSON:           string(rawModels),
-		contextWindowsJSON:   string(rawContextWindows),
-		reasoningJSON:        string(rawReasoning),
-		reasoningControlJSON: string(rawReasoningControl),
-		visionJSON:           string(rawVision),
+		codingAgentDefaultModel: codingDefault,
+		providerModelsJSON:      providerJSON,
+		defaultModel:            "auto",
+		defaultContextWindow:    contextWindowsForInjection["auto"],
+		modelsJSON:              string(rawModels),
+		contextWindowsJSON:      string(rawContextWindows),
+		reasoningJSON:           string(rawReasoning),
+		reasoningControlJSON:    string(rawReasoningControl),
+		visionJSON:              string(rawVision),
 	}, nil
 }
 
@@ -1609,7 +2151,6 @@ func safeContextWindow(items []models.LLMModel) int {
 	}
 	return minimum
 }
-
 func mergeEnvMaps(base map[string]string, overlay map[string]string) map[string]string {
 	merged := map[string]string{}
 	for key, value := range base {
@@ -1635,6 +2176,7 @@ func (s *instanceService) startV2Instance(ctx context.Context, instance *models.
 	instance.Status = "creating"
 	instance.RuntimeGeneration = nextGeneration
 	instance.RuntimeErrorMessage = nil
+	instance.RuntimeErrorCode = nil
 	now := time.Now()
 	instance.StartedAt = &now
 	instance.UpdatedAt = now
@@ -1699,6 +2241,11 @@ func (s *instanceService) deleteV2Instance(ctx context.Context, instance *models
 		GetHub().BroadcastInstanceStatus(instance.UserID, instance)
 	}
 
+	if s.resourceCleanup != nil {
+		if err := s.resourceCleanup(ctx, instance.ID); err != nil {
+			return fmt.Errorf("failed to clean instance components: %w", err)
+		}
+	}
 	cleanupErr := s.cleanupV2GatewayBinding(ctx, instance)
 	if cleanupErr != nil {
 		return cleanupErr
@@ -1783,9 +2330,17 @@ func (s *instanceService) Stop(instanceID int) error {
 		return err
 	}
 	defer release()
-	return s.stopInstance(instanceID)
+	return s.stopWithUpgradeGuard(instanceID)
 }
 
+func (s *instanceService) stopWithUpgradeGuard(instanceID int) error {
+	if guard, ok := s.runtimeUpgradeGuard.(interface {
+		WithInstanceMutation(context.Context, int, func() error) error
+	}); ok {
+		return guard.WithInstanceMutation(context.Background(), instanceID, func() error { return s.stopInstance(instanceID) })
+	}
+	return s.stopInstance(instanceID)
+}
 func (s *instanceService) stopInstance(instanceID int) error {
 	ctx := context.Background()
 
@@ -1802,7 +2357,7 @@ func (s *instanceService) stopInstance(instanceID int) error {
 		return s.stopV2Instance(ctx, instance)
 	}
 
-	if instance.Status != "running" {
+	if instance.Status != "running" && instance.Status != "error" {
 		return fmt.Errorf("instance is not running")
 	}
 
@@ -1849,7 +2404,18 @@ func (s *instanceService) Restart(instanceID int) error {
 		return err
 	}
 	defer release()
-	return s.restartInstance(instanceID)
+	return s.withRuntimeUpgradeMutation(instanceID, func() error { return s.restartInstance(instanceID) })
+}
+
+// Combine the upstream OpenClaw recovery fence with the instance lifecycle
+// lock held by callers, without reacquiring either lock inside Stop/Start.
+func (s *instanceService) withRuntimeUpgradeMutation(instanceID int, run func() error) error {
+	if guard, ok := s.runtimeUpgradeGuard.(interface {
+		WithInstanceMutation(context.Context, int, func() error) error
+	}); ok {
+		return guard.WithInstanceMutation(context.Background(), instanceID, run)
+	}
+	return run()
 }
 
 func (s *instanceService) restartInstance(instanceID int) error {
@@ -1861,10 +2427,35 @@ func (s *instanceService) restartInstance(instanceID int) error {
 	if instance == nil {
 		return fmt.Errorf("instance not found")
 	}
+	if err := s.validateInstanceStartConfiguration(ctx, instance); err != nil {
+		return err
+	}
 
 	_, isV2 := v2RuntimeTypeForInstance(instance)
 	waitForDesktopPods := !isV2 && instanceUsesDesktopRuntime(instance)
 
+	if isV2 {
+		// Fence heartbeats/scheduler snapshots from the old gateway before Stop.
+		// Otherwise a late "running" update can resurrect the stopped generation
+		// and make Start reject the restart as "already running". No workspace
+		// contents are changed; Start allocates the next running generation.
+		if repo, ok := s.instanceRepo.(interface {
+			FenceRuntimeRestart(context.Context, int, int) (bool, error)
+		}); ok {
+			claimed, err := repo.FenceRuntimeRestart(ctx, instanceID, instance.RuntimeGeneration)
+			if err != nil {
+				return fmt.Errorf("failed to fence previous runtime generation: %w", err)
+			}
+			if !claimed {
+				if err := s.validateInstanceStartConfiguration(ctx, instance); err != nil {
+					return err
+				}
+				return fmt.Errorf("instance changed during restart preparation; retry after the current operation")
+			}
+		} else if err := s.instanceRepo.UpdateRuntimeState(ctx, instanceID, "stopped", instance.RuntimeGeneration+1, nil); err != nil {
+			return fmt.Errorf("failed to fence previous runtime generation: %w", err)
+		}
+	}
 	if err := s.stopInstance(instanceID); err != nil {
 		return fmt.Errorf("failed to stop instance: %w", err)
 	}
@@ -1882,6 +2473,571 @@ func (s *instanceService) restartInstance(instanceID int) error {
 		return fmt.Errorf("failed to start instance: %w", err)
 	}
 
+	return nil
+}
+
+// InstanceResetService is deliberately separate from InstanceService so that
+// consumers must opt in to the destructive factory reset operation.
+type InstanceResetService interface {
+	Reset(instanceID int) error
+}
+
+// InstanceReplacementResetService implements a factory reset by provisioning a
+// clean instance first. The source remains untouched until the replacement is
+// healthy, which makes reset safe for already-broken runtimes as well.
+type InstanceReplacementResetService interface {
+	CreateResetReplacement(sourceInstanceID int, operationID string) (*models.Instance, error)
+	FinalizeResetReplacement(sourceInstanceID, replacementInstanceID int) (cleanupPending bool, warning string, err error)
+	DiscardResetReplacement(replacementInstanceID int) error
+}
+
+// InstancePermanentDeleteService is used by the northbound worker for a
+// synchronous, verifiable removal of both runtime resources and user data.
+type InstancePermanentDeleteService interface {
+	DeletePermanently(instanceID int) error
+}
+
+const (
+	factoryResetStagingOwner    = "factory-reset-staging@clawmanager.local"
+	factoryResetQuarantineOwner = "admin@clawmanager.local"
+)
+
+func factoryResetStagingName(sourceID int, operationID string) string {
+	suffix := strings.TrimPrefix(strings.TrimSpace(operationID), "op_")
+	if len(suffix) > 12 {
+		suffix = suffix[len(suffix)-12:]
+	}
+	if suffix == "" {
+		suffix = strconv.FormatInt(time.Now().UnixNano(), 36)
+	}
+	return fmt.Sprintf("reset-%d-%s", sourceID, suffix)
+}
+
+func factoryResetQuarantineName(sourceID int) string {
+	return fmt.Sprintf("cleanup-pending-%d", sourceID)
+}
+
+func factoryResetString(value string) *string { return &value }
+
+// CreateResetReplacement deliberately uses the normal instance provisioning
+// path and current system image selection. It copies only deployment shape;
+// workspace contents, runtime-local configuration, tokens and snapshots are
+// never copied from the source.
+func (s *instanceService) CreateResetReplacement(sourceInstanceID int, operationID string) (*models.Instance, error) {
+	source, err := s.GetByID(sourceInstanceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load factory-reset source: %w", err)
+	}
+	if source == nil {
+		return nil, fmt.Errorf("factory-reset source instance not found")
+	}
+	if err := s.ValidateDelete(sourceInstanceID); err != nil {
+		return nil, err
+	}
+	req, err := resetReplacementCreateRequest(source, operationID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Replacement is a one-for-one internal operation. The staging name avoids
+	// a duplicate-name conflict; user quota is not charged twice while both
+	// records coexist. Global mode capacity and runtime validation still apply.
+	replacement, err := s.create(source.UserID, req, false)
+	if err != nil {
+		return nil, fmt.Errorf("failed to provision clean replacement: %w", err)
+	}
+	return replacement, nil
+}
+
+func resetReplacementCreateRequest(source *models.Instance, operationID string) (CreateInstanceRequest, error) {
+	if source == nil {
+		return CreateInstanceRequest{}, fmt.Errorf("factory-reset source instance not found")
+	}
+	mode, ok := NormalizeInstanceMode(source.InstanceMode)
+	if !ok || (mode != InstanceModeLite && mode != InstanceModePro) {
+		return CreateInstanceRequest{}, fmt.Errorf("factory reset is supported only for managed Lite and Pro instances")
+	}
+	if mode == InstanceModeLite {
+		if _, ok := v2RuntimeTypeForInstance(source); !ok {
+			return CreateInstanceRequest{}, fmt.Errorf("factory-reset source is not a managed Lite runtime")
+		}
+	} else if !instanceUsesDesktopRuntime(source) {
+		return CreateInstanceRequest{}, fmt.Errorf("factory-reset source is not a managed Pro desktop runtime")
+	}
+
+	stagingOwner := factoryResetStagingOwner
+	return CreateInstanceRequest{
+		Name:                    factoryResetStagingName(source.ID, operationID),
+		Alias:                   source.Alias,
+		Owner:                   &stagingOwner,
+		Description:             source.Description,
+		Type:                    source.Type,
+		RuntimeVariant:          source.RuntimeVariant,
+		Mode:                    mode,
+		InstanceMode:            mode,
+		RuntimeType:             source.RuntimeType,
+		DesktopStreamProfile:    source.DesktopStreamProfile,
+		CPUCores:                source.CPUCores,
+		MemoryGB:                source.MemoryGB,
+		DiskGB:                  source.DiskGB,
+		GPUEnabled:              source.GPUEnabled,
+		GPUCount:                source.GPUCount,
+		OSType:                  source.OSType,
+		OSVersion:               source.OSVersion,
+		StorageClass:            source.StorageClass,
+		ProvisioningOperationID: "reset_" + strings.TrimSpace(operationID),
+	}, nil
+}
+
+// DeletePermanently removes the same persistent resources as a factory-reset
+// source cleanup and returns only after the database record is gone. Unlike the
+// legacy UI Delete method it never reports success after merely scheduling a
+// best-effort background cleanup.
+func (s *instanceService) DeletePermanently(instanceID int) error {
+	instance, err := s.instanceRepo.GetByID(instanceID)
+	if err != nil {
+		return fmt.Errorf("failed to get instance for permanent deletion: %w", err)
+	}
+	if instance == nil {
+		return nil
+	}
+	return s.cleanupResetSource(context.Background(), instance)
+}
+
+// FinalizeResetReplacement atomically hides the source and exposes the healthy
+// replacement before attempting destructive cleanup. Cleanup failure therefore
+// cannot take the newly delivered instance away from the user.
+func (s *instanceService) FinalizeResetReplacement(sourceInstanceID, replacementInstanceID int) (bool, string, error) {
+	ctx := context.Background()
+	if err := s.ValidateDelete(sourceInstanceID); err != nil {
+		return false, "", err
+	}
+	replacement, err := s.instanceRepo.GetByID(replacementInstanceID)
+	if err != nil {
+		return false, "", fmt.Errorf("failed to reload factory-reset replacement: %w", err)
+	}
+	if replacement == nil || strings.ToLower(strings.TrimSpace(replacement.Status)) != "running" {
+		return false, "", fmt.Errorf("factory-reset replacement is not running")
+	}
+	source, err := s.instanceRepo.GetByID(sourceInstanceID)
+	if err != nil {
+		return false, "", fmt.Errorf("failed to reload factory-reset source: %w", err)
+	}
+	if source == nil {
+		// The old row is deleted only after a successful atomic cutover. If the
+		// worker stopped before it could persist operation success, a retry must
+		// treat the already-promoted replacement as success instead of failing or
+		// trying to discard the user's new instance.
+		return false, "", nil
+	}
+	if source.UserID != replacement.UserID {
+		return false, "", fmt.Errorf("factory-reset replacement user mismatch")
+	}
+	stagingNamePrefix := fmt.Sprintf("reset-%d-", sourceInstanceID)
+	quarantineName := factoryResetQuarantineName(source.ID)
+	alreadyPromoted := source.Owner != nil &&
+		strings.EqualFold(strings.TrimSpace(*source.Owner), factoryResetQuarantineOwner) &&
+		source.Name == quarantineName
+
+	if alreadyPromoted {
+		if strings.HasPrefix(replacement.Name, stagingNamePrefix) {
+			return false, "", fmt.Errorf("factory-reset replacement cutover state is inconsistent")
+		}
+		// The network-policy name for Pro instances includes the original
+		// instance name. After cutover that name lives on the replacement.
+		source.Name = replacement.Name
+	} else {
+		// Workspace-created instances need not have a northbound display owner.
+		// UserID remains the authorization identity throughout replacement.
+		originalOwner := ""
+		if source.Owner != nil {
+			originalOwner = strings.TrimSpace(*source.Owner)
+		}
+		originalName := source.Name
+
+		promoter, ok := s.instanceRepo.(repository.InstanceResetReplacementRepository)
+		if !ok {
+			return false, "", fmt.Errorf("instance repository does not support replacement reset")
+		}
+		reason := fmt.Sprintf("factory-reset source replaced by instance %d; cleanup pending", replacement.ID)
+		if err := promoter.PromoteResetReplacement(
+			ctx,
+			source.ID,
+			replacement.ID,
+			originalOwner,
+			originalName,
+			factoryResetQuarantineOwner,
+			quarantineName,
+			reason,
+		); err != nil {
+			return false, "", err
+		}
+
+		replacement.Owner = factoryResetString(originalOwner)
+		replacement.Name = originalName
+	}
+
+	// Keep source.Name unchanged for resource cleanup: Pro network-policy names
+	// include it. Broadcast a copy carrying the quarantined database identity.
+	quarantinedSource := *source
+	quarantinedSource.Owner = factoryResetString(factoryResetQuarantineOwner)
+	quarantinedSource.Name = quarantineName
+	quarantinedSource.Status = "stopped"
+	GetHub().BroadcastInstanceStatus(source.UserID, &quarantinedSource)
+	GetHub().BroadcastInstanceStatus(replacement.UserID, replacement)
+
+	if err := s.cleanupResetSource(ctx, source); err != nil {
+		warning := fmt.Sprintf("New instance is ready; old instance %d cleanup requires administrator attention: %v", source.ID, err)
+		return true, warning, nil
+	}
+	return false, "", nil
+}
+
+// DiscardResetReplacement is used only before owner cutover. The source is not
+// touched even when cleanup of a failed staging instance needs admin follow-up.
+func (s *instanceService) DiscardResetReplacement(replacementInstanceID int) error {
+	ctx := context.Background()
+	if err := s.ValidateDelete(replacementInstanceID); err != nil {
+		return err
+	}
+	replacement, err := s.instanceRepo.GetByID(replacementInstanceID)
+	if err != nil || replacement == nil {
+		return err
+	}
+	// A cutover commit can succeed even if its response was lost. Never erase
+	// a promoted instance when a worker retries or sees an ambiguous DB error.
+	if replacement.Owner == nil || *replacement.Owner != factoryResetStagingOwner {
+		return fmt.Errorf("refusing to discard a non-staging replacement")
+	}
+	replacement.Owner = factoryResetString(factoryResetQuarantineOwner)
+	replacement.Status = "stopped"
+	replacement.UpdatedAt = time.Now().UTC()
+	if err := s.instanceRepo.Update(replacement); err != nil {
+		return err
+	}
+	return s.cleanupResetSource(ctx, replacement)
+}
+
+func (s *instanceService) cleanupResetSource(ctx context.Context, instance *models.Instance) error {
+	if instance == nil {
+		return fmt.Errorf("factory-reset cleanup instance is missing")
+	}
+	if err := s.ValidateDelete(instance.ID); err != nil {
+		return err
+	}
+	if runtimeType, ok := v2RuntimeTypeForInstance(instance); ok {
+		if err := s.cleanupV2GatewayBinding(ctx, instance); err != nil {
+			return err
+		}
+		if err := s.eraseV2Workspace(instance, runtimeType); err != nil {
+			return err
+		}
+	} else {
+		if s.deploymentService == nil || s.pvcService == nil {
+			return fmt.Errorf("Pro cleanup services are not configured")
+		}
+		pvcName := instancePVCName(instance, s.pvcService.GetClient())
+		oldPVName := ""
+		if pvc, err := s.pvcService.GetPVCByName(ctx, instance.UserID, pvcName); err == nil && pvc != nil {
+			oldPVName = strings.TrimSpace(pvc.Spec.VolumeName)
+		} else if err != nil && !apierrors.IsNotFound(err) {
+			return fmt.Errorf("failed to inspect old Pro workspace: %w", err)
+		}
+		if err := s.deploymentService.DeleteDeployment(ctx, instance.UserID, instance.ID); err != nil {
+			return fmt.Errorf("failed to delete old Pro deployment: %w", err)
+		}
+		if err := s.deploymentService.WaitForDeploymentPodsDeleted(ctx, instance.UserID, instance.ID); err != nil {
+			return fmt.Errorf("failed waiting for old Pro pods: %w", err)
+		}
+		if s.serviceService != nil {
+			if err := s.serviceService.DeleteService(ctx, instance.UserID, instance.ID); err != nil {
+				return fmt.Errorf("failed to delete old Pro service: %w", err)
+			}
+		}
+		if s.networkPolicyService != nil {
+			if err := s.networkPolicyService.DeletePolicy(ctx, instance.UserID, instance.ID, instance.Name); err != nil {
+				return fmt.Errorf("failed to delete old Pro network policy: %w", err)
+			}
+		}
+		if err := s.pvcService.DeletePVCByName(ctx, instance.UserID, instance.ID, pvcName); err != nil && !apierrors.IsNotFound(err) {
+			return fmt.Errorf("failed to delete old Pro workspace: %w", err)
+		}
+		if err := s.pvcService.WaitForPVCDeleted(ctx, instance.UserID, pvcName, 0); err != nil {
+			return err
+		}
+		if oldPVName != "" {
+			if err := s.pvcService.WaitForPVDeleted(ctx, oldPVName, 0); err != nil {
+				return err
+			}
+		}
+		// Remove non-persistent labelled leftovers after the data-bearing
+		// resources have been synchronously verified as deleted.
+		if cleanup := k8s.NewCleanupService(); cleanup != nil {
+			_ = cleanup.DeleteAllInstanceResources(ctx, instance.UserID, instance.ID)
+		}
+	}
+	if err := s.resetInstanceRuntimeData(ctx, instance); err != nil {
+		return err
+	}
+	if err := s.instanceRepo.Delete(instance.ID); err != nil {
+		return fmt.Errorf("failed to delete old factory-reset record: %w", err)
+	}
+	return nil
+}
+
+// InstanceLifecycleFailureService lets an asynchronous lifecycle worker turn a
+// stale creating state into a recoverable error without deleting any runtime
+// resource or persistent data.
+type InstanceLifecycleFailureService interface {
+	MarkLifecycleFailure(instanceID int) error
+}
+
+// Reset preserves the instance identity but permanently replaces its runtime
+// workspace and clears instance-local runtime state. Callers must obtain an
+// explicit data-loss confirmation before invoking this service.
+func (s *instanceService) Reset(instanceID int) error {
+	ctx := context.Background()
+	instance, err := s.instanceRepo.GetByID(instanceID)
+	if err != nil {
+		return fmt.Errorf("failed to get instance: %w", err)
+	}
+	if instance == nil {
+		return fmt.Errorf("instance not found")
+	}
+	if err := s.ValidateDelete(instanceID); err != nil {
+		return err
+	}
+
+	if runtimeType, ok := v2RuntimeTypeForInstance(instance); ok {
+		if err := s.claimReset(instanceID); err != nil {
+			return err
+		}
+		if err := s.cleanupV2GatewayBinding(ctx, instance); err != nil {
+			s.markResetError(instanceID)
+			return fmt.Errorf("failed to stop existing Lite runtime: %w", err)
+		}
+		if err := s.resetV2Workspace(instance, runtimeType); err != nil {
+			s.markResetError(instanceID)
+			return err
+		}
+		if err := s.resetInstanceRuntimeData(ctx, instance); err != nil {
+			s.markResetError(instanceID)
+			return err
+		}
+		if err := s.prepareFreshRuntimeCredentials(instance); err != nil {
+			s.markResetError(instanceID)
+			return err
+		}
+		if err := s.Start(instanceID); err != nil {
+			s.markResetError(instanceID)
+			return fmt.Errorf("failed to create fresh Lite runtime: %w", err)
+		}
+		return nil
+	}
+	if !instanceUsesDesktopRuntime(instance) {
+		return fmt.Errorf("runtime reset is supported only for managed Lite and Pro desktop instances")
+	}
+	if s.pvcService == nil || s.deploymentService == nil {
+		return fmt.Errorf("instance reset services are not configured")
+	}
+
+	pvcName := instancePVCName(instance, s.pvcService.GetClient())
+	var oldPVCUID types.UID
+	oldPVName := ""
+	storageClass := strings.TrimSpace(instance.StorageClass)
+	pvc, err := s.pvcService.GetPVCByName(ctx, instance.UserID, pvcName)
+	if err == nil {
+		if pvc.Status.Phase != corev1.ClaimBound || strings.TrimSpace(pvc.Spec.VolumeName) == "" {
+			return fmt.Errorf("persistent workspace is not bound; runtime was not changed")
+		}
+		if err := s.pvcService.ValidatePVCDataDeletionPolicy(ctx, pvc); err != nil {
+			return fmt.Errorf("persistent workspace cannot be safely erased: %w", err)
+		}
+		oldPVCUID = pvc.UID
+		oldPVName = strings.TrimSpace(pvc.Spec.VolumeName)
+		if pvc.Spec.StorageClassName != nil && strings.TrimSpace(*pvc.Spec.StorageClassName) != "" {
+			storageClass = strings.TrimSpace(*pvc.Spec.StorageClassName)
+		}
+	} else if !apierrors.IsNotFound(err) {
+		return fmt.Errorf("persistent workspace is unavailable; runtime was not changed: %w", err)
+	}
+	if err := s.claimReset(instanceID); err != nil {
+		return err
+	}
+
+	if err := s.deploymentService.DeleteDeployment(ctx, instance.UserID, instance.ID); err != nil {
+		s.markResetError(instanceID)
+		return fmt.Errorf("failed to delete runtime deployment: %w", err)
+	}
+	if err := s.deploymentService.WaitForDeploymentPodsDeleted(ctx, instance.UserID, instance.ID); err != nil {
+		s.markResetError(instanceID)
+		return fmt.Errorf("failed waiting for runtime pods to stop: %w", err)
+	}
+
+	if pvc != nil {
+		if err := s.pvcService.DeletePVCByName(ctx, instance.UserID, instance.ID, pvcName); err != nil {
+			s.markResetError(instanceID)
+			return fmt.Errorf("failed to erase persistent workspace: %w", err)
+		}
+		if err := s.pvcService.WaitForPVCDeleted(ctx, instance.UserID, pvcName, 0); err != nil {
+			s.markResetError(instanceID)
+			return err
+		}
+		if err := s.pvcService.WaitForPVDeleted(ctx, oldPVName, 0); err != nil {
+			s.markResetError(instanceID)
+			return err
+		}
+	}
+	replacementPVC, err := s.pvcService.CreatePVC(ctx, instance.UserID, instance.ID, instance.DiskGB, storageClass)
+	if err != nil {
+		s.markResetError(instanceID)
+		return fmt.Errorf("failed to create fresh persistent workspace: %w", err)
+	}
+	if replacementPVC == nil || strings.TrimSpace(replacementPVC.Name) != pvcName {
+		s.markResetError(instanceID)
+		return fmt.Errorf("fresh persistent workspace name does not match instance record")
+	}
+	boundPVC, err := s.pvcService.WaitForPVCBoundByName(ctx, instance.UserID, pvcName, 0)
+	if err != nil {
+		s.markResetError(instanceID)
+		return fmt.Errorf("fresh persistent workspace did not become ready: %w", err)
+	}
+	if oldPVCUID != "" && boundPVC.UID == oldPVCUID {
+		s.markResetError(instanceID)
+		return fmt.Errorf("persistent workspace was not replaced")
+	}
+	if err := s.resetInstanceRuntimeData(ctx, instance); err != nil {
+		s.markResetError(instanceID)
+		return err
+	}
+	if err := s.prepareFreshRuntimeCredentials(instance); err != nil {
+		s.markResetError(instanceID)
+		return err
+	}
+	if err := s.Start(instanceID); err != nil {
+		s.markResetError(instanceID)
+		return fmt.Errorf("failed to create fresh Pro runtime: %w", err)
+	}
+	return nil
+}
+
+func (s *instanceService) resetV2Workspace(instance *models.Instance, runtimeType string) error {
+	if err := s.eraseV2Workspace(instance, runtimeType); err != nil {
+		return err
+	}
+	root := filepath.Clean(s.runtimeWorkspaceRoot())
+	expected := filepath.Clean(RuntimeWorkspacePathWithRoot(root, runtimeType, instance.UserID, instance.ID))
+	created, err := ensureRuntimeWorkspaceDirectories(root, runtimeType, instance.UserID, instance.ID)
+	if err != nil {
+		return fmt.Errorf("failed to create fresh Lite workspace: %w", err)
+	}
+	if filepath.Clean(created) != expected {
+		return fmt.Errorf("fresh Lite workspace path does not match instance record")
+	}
+	return nil
+}
+
+func (s *instanceService) eraseV2Workspace(instance *models.Instance, runtimeType string) error {
+	if instance == nil || instance.WorkspacePath == nil {
+		return fmt.Errorf("Lite workspace path is missing")
+	}
+	root := filepath.Clean(s.runtimeWorkspaceRoot())
+	expected := filepath.Clean(RuntimeWorkspacePathWithRoot(root, runtimeType, instance.UserID, instance.ID))
+	actual := filepath.Clean(strings.TrimSpace(*instance.WorkspacePath))
+	if actual == "." || actual == root || actual != expected || !isPathWithin(root, actual) {
+		return fmt.Errorf("Lite workspace path failed factory-reset safety validation")
+	}
+	if info, err := os.Lstat(actual); err == nil {
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("Lite workspace path must not be a symbolic link")
+		}
+		resolvedRoot, rootErr := filepath.EvalSymlinks(root)
+		resolvedParent, parentErr := filepath.EvalSymlinks(filepath.Dir(actual))
+		if rootErr != nil || parentErr != nil || !isPathWithin(resolvedRoot, resolvedParent) {
+			return fmt.Errorf("Lite workspace parent failed factory-reset safety validation")
+		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("failed to inspect Lite workspace: %w", err)
+	}
+	if err := os.RemoveAll(actual); err != nil {
+		return fmt.Errorf("failed to erase Lite workspace: %w", err)
+	}
+	return nil
+}
+
+func (s *instanceService) resetInstanceRuntimeData(ctx context.Context, instance *models.Instance) error {
+	resetter, ok := s.instanceRepo.(repository.InstanceFactoryResetRepository)
+	if !ok {
+		return fmt.Errorf("instance repository does not support factory reset")
+	}
+	if err := resetter.ResetInstanceRuntimeData(ctx, instance.ID); err != nil {
+		return fmt.Errorf("failed to clear instance runtime data: %w", err)
+	}
+	instance.Status = "stopped"
+	instance.AccessURL = nil
+	instance.AccessToken = nil
+	instance.AgentBootstrapToken = nil
+	instance.PodName = nil
+	instance.PodNamespace = nil
+	instance.PodIP = nil
+	instance.RuntimeErrorMessage = nil
+	instance.RuntimeErrorCode = nil
+	instance.WorkspaceUsageBytes = 0
+	instance.StoppedAt = nil
+	return nil
+}
+
+func (s *instanceService) prepareFreshRuntimeCredentials(instance *models.Instance) error {
+	if _, err := s.ensureGatewayToken(instance); err != nil {
+		return fmt.Errorf("failed to create fresh gateway token: %w", err)
+	}
+	if _, err := s.ensureAgentBootstrapToken(instance); err != nil {
+		return fmt.Errorf("failed to create fresh agent bootstrap token: %w", err)
+	}
+	return nil
+}
+
+func (s *instanceService) claimReset(instanceID int) error {
+	claimer, ok := s.instanceRepo.(repository.InstanceLifecycleStatusRepository)
+	if !ok {
+		return fmt.Errorf("instance repository does not support safe lifecycle claims")
+	}
+	// Move the instance out of the scheduler's desired-running set before any
+	// persistent data is erased. The durable northbound operation remains the
+	// cross-replica lifecycle lock.
+	claimed, err := claimer.ClaimLifecycleStatus(context.Background(), instanceID, []string{"running", "stopped", "error"}, "stopped")
+	if err != nil {
+		return err
+	}
+	if !claimed {
+		return fmt.Errorf("instance lifecycle operation is already in progress")
+	}
+	return nil
+}
+
+func (s *instanceService) markResetError(instanceID int) {
+	instance, err := s.instanceRepo.GetByID(instanceID)
+	if err != nil || instance == nil {
+		return
+	}
+	instance.Status = "error"
+	instance.UpdatedAt = time.Now()
+	_ = s.instanceRepo.Update(instance)
+	GetHub().BroadcastInstanceStatus(instance.UserID, instance)
+}
+
+func (s *instanceService) MarkLifecycleFailure(instanceID int) error {
+	claimer, ok := s.instanceRepo.(repository.InstanceLifecycleStatusRepository)
+	if !ok {
+		return fmt.Errorf("instance repository does not support safe lifecycle transitions")
+	}
+	changed, err := claimer.ClaimLifecycleStatus(context.Background(), instanceID, []string{"creating"}, "error")
+	if err != nil || !changed {
+		return err
+	}
+	if instance, getErr := s.instanceRepo.GetByID(instanceID); getErr == nil && instance != nil {
+		GetHub().BroadcastInstanceStatus(instance.UserID, instance)
+	}
 	return nil
 }
 
@@ -1919,7 +3075,9 @@ func (s *instanceService) RestartWithEnvironment(instanceID int, environmentOver
 		return err
 	}
 	defer release()
-	return s.restartInstanceWithEnvironment(instanceID, environmentOverrides, environmentOverrideRemovals)
+	return s.withRuntimeUpgradeMutation(instanceID, func() error {
+		return s.restartInstanceWithEnvironment(instanceID, environmentOverrides, environmentOverrideRemovals)
+	})
 }
 
 func (s *instanceService) restartInstanceWithEnvironment(instanceID int, environmentOverrides map[string]string, environmentOverrideRemovals []string) error {
@@ -1965,7 +3123,14 @@ func (s *instanceService) restartInstanceWithEnvironment(instanceID int, environ
 		return err
 	}
 
-	instance.EnvironmentOverridesJSON = encoded
+	// Repositories may return shared pointers. Do not mutate even the in-memory
+	// source until the complete proposed configuration has passed validation.
+	prepared := *instance
+	prepared.EnvironmentOverridesJSON = encoded
+	if err := s.validateInstanceStartConfiguration(context.Background(), &prepared); err != nil {
+		return err
+	}
+	instance = &prepared
 	instance.UpdatedAt = time.Now()
 	if err := s.instanceRepo.Update(instance); err != nil {
 		return fmt.Errorf("failed to persist instance environment overrides: %w", err)
@@ -1993,8 +3158,15 @@ func (s *instanceService) deleteInstance(instanceID int) error {
 	if instance == nil {
 		return fmt.Errorf("instance not found")
 	}
+	if err := s.ValidateDelete(instanceID); err != nil {
+		return err
+	}
 
 	if _, ok := v2RuntimeTypeForInstance(instance); ok {
+		if !s.beginDeletion(instanceID) {
+			return fmt.Errorf("instance %d deletion is already in progress", instanceID)
+		}
+		defer s.finishDeletion(instanceID)
 		return s.deleteV2Instance(context.Background(), instance)
 	}
 
@@ -2010,8 +3182,107 @@ func (s *instanceService) deleteInstance(instanceID int) error {
 		GetHub().BroadcastInstanceStatus(instance.UserID, instance)
 	}
 
-	go s.completeDeletion(instance.UserID, instance.ID)
+	s.scheduleLegacyDeletion(instance.UserID, instance.ID)
 
+	return nil
+}
+
+func (s *instanceService) beginDeletion(instanceID int) bool {
+	s.deletionMu.Lock()
+	defer s.deletionMu.Unlock()
+	if s.deletionsInFlight == nil {
+		s.deletionsInFlight = make(map[int]struct{})
+	}
+	if _, exists := s.deletionsInFlight[instanceID]; exists {
+		return false
+	}
+	s.deletionsInFlight[instanceID] = struct{}{}
+	return true
+}
+
+func (s *instanceService) finishDeletion(instanceID int) {
+	s.deletionMu.Lock()
+	delete(s.deletionsInFlight, instanceID)
+	s.deletionMu.Unlock()
+}
+
+func (s *instanceService) scheduleLegacyDeletion(userID, instanceID int) {
+	if !s.beginDeletion(instanceID) {
+		return
+	}
+	go func() {
+		defer s.finishDeletion(instanceID)
+		s.completeDeletion(userID, instanceID)
+	}()
+}
+
+// ResumePendingDeletions retries only instances already marked deleting. It
+// never selects running or stopped instances and therefore cannot create new
+// deletion intent. Active data-safe rollouts remain protected by the same
+// fail-closed guard used by the HTTP and Team deletion paths.
+func (s *instanceService) ResumePendingDeletions(ctx context.Context) (int, error) {
+	repo, ok := s.instanceRepo.(repository.PendingInstanceDeletionRepository)
+	if !ok {
+		return 0, nil
+	}
+	instances, err := repo.GetByStatus(ctx, "deleting", 0)
+	if err != nil {
+		return 0, err
+	}
+	retried := 0
+	var failures []string
+	for idx := range instances {
+		instanceID := instances[idx].ID
+		if err := s.Delete(instanceID); err != nil {
+			failures = append(failures, fmt.Sprintf("instance %d: %v", instanceID, err))
+			continue
+		}
+		retried++
+	}
+	if len(failures) > 0 {
+		return retried, fmt.Errorf("pending instance deletion retry failed: %s", strings.Join(failures, "; "))
+	}
+	return retried, nil
+}
+
+// RunPendingDeletionReconciler resumes explicit, partially completed deletes
+// immediately after leader election and periodically thereafter.
+func (s *instanceService) RunPendingDeletionReconciler(ctx context.Context, interval time.Duration) {
+	if interval <= 0 {
+		interval = 30 * time.Second
+	}
+	run := func() {
+		retried, err := s.ResumePendingDeletions(ctx)
+		if err != nil {
+			fmt.Printf("Warning: pending instance deletion reconciliation: %v\n", err)
+			return
+		}
+		if retried > 0 {
+			fmt.Printf("Retried %d pending instance deletion(s)\n", retried)
+		}
+	}
+	run()
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			run()
+		}
+	}
+}
+
+// ValidateDelete performs the non-mutating lifecycle checks shared by direct
+// instance deletion and Team deletion preflight.
+func (s *instanceService) ValidateDelete(instanceID int) error {
+	if s.runtimeUpgradeGuard == nil {
+		return nil
+	}
+	if err := s.runtimeUpgradeGuard.ValidateInstanceDeletion(context.Background(), instanceID); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -2543,12 +3814,157 @@ func (s *instanceService) forceSyncDeploymentInstance(ctx context.Context, insta
 	return nil
 }
 
-func additionalServicePorts(primaryPort int32) []int32 {
+func additionalServicePorts(instanceType string, primaryPort int32) []int32 {
+	if isWindowsVMInstanceType(instanceType) {
+		return []int32{3389}
+	}
 	if primaryPort == 3000 || primaryPort == 8082 {
 		return []int32{3000, 8082}
 	}
 
 	return nil
+}
+
+func additionalServicePortsForInstance(instance *models.Instance, primaryPort int32) []int32 {
+	if isWindowsVMInstance(instance) {
+		return []int32{3389}
+	}
+	if primaryPort == 3000 || primaryPort == 8082 {
+		return []int32{3000, 8082}
+	}
+	return nil
+}
+
+func isWindowsWorkbuddy(instanceType string) bool {
+	return strings.EqualFold(strings.TrimSpace(instanceType), "workbuddy")
+}
+
+func isWindowsVMInstanceType(instanceType string) bool {
+	return isWindowsWorkbuddy(instanceType) || strings.EqualFold(strings.TrimSpace(instanceType), RuntimeTypeCodex)
+}
+
+func instancePVCName(instance *models.Instance, client *k8s.Client) string {
+	if instance != nil && instance.PVCName != nil && strings.TrimSpace(*instance.PVCName) != "" {
+		return strings.TrimSpace(*instance.PVCName)
+	}
+	if instance != nil && client != nil {
+		return client.GetPVCName(instance.ID)
+	}
+	return ""
+}
+
+func (s *instanceService) deleteInstancePVC(ctx context.Context, instance *models.Instance) {
+	if s == nil || s.pvcService == nil || instance == nil {
+		return
+	}
+	_ = s.pvcService.DeletePVCByName(ctx, instance.UserID, instance.ID, instancePVCName(instance, s.pvcService.GetClient()))
+}
+
+func validateWindowsWorkbuddyRequest(req CreateInstanceRequest) error {
+	isWorkbuddy := strings.EqualFold(strings.TrimSpace(req.Type), "workbuddy")
+	isCodex := strings.EqualFold(strings.TrimSpace(req.Type), RuntimeTypeCodex)
+	if !isWorkbuddy && !isCodex {
+		return nil
+	}
+	if strings.TrimSpace(req.RuntimeVariant) != "" && normalizeWorkbuddyRuntimeVariant(req.RuntimeVariant) == "" {
+		return fmt.Errorf("invalid %s runtime variant", req.Type)
+	}
+	if resolveManagedRuntimeVariantForRequest(req) != WorkbuddyRuntimeWindows {
+		return nil
+	}
+	runtimeName := "Windows Workbuddy"
+	if isCodex {
+		runtimeName = "Windows Codex"
+	}
+	if resolveCreateInstanceMode(req) != InstanceModePro {
+		return fmt.Errorf("%s is available only in Pro mode", runtimeName)
+	}
+	if req.CPUCores < workbuddyWindowsMinCPUCores {
+		return fmt.Errorf("%s requires at least %d CPU cores", runtimeName, workbuddyWindowsMinCPUCores)
+	}
+	if req.MemoryGB < workbuddyWindowsMinMemoryGB {
+		return fmt.Errorf("%s requires at least %dGB memory", runtimeName, workbuddyWindowsMinMemoryGB)
+	}
+	if req.DiskGB != workbuddyWindowsPVCSizeGB {
+		return fmt.Errorf("%s requires an %dGB disk to match the golden PVC", runtimeName, workbuddyWindowsPVCSizeGB)
+	}
+	return nil
+}
+
+func windowsWorkbuddyInstanceEnv(base map[string]string, instance *models.Instance) map[string]string {
+	env := mergeEnvMaps(base, nil)
+	if instance == nil {
+		return env
+	}
+	guestMemoryGB := instance.MemoryGB - 2
+	if guestMemoryGB < 4 {
+		guestMemoryGB = 4
+	}
+	cpuCores := int(instance.CPUCores)
+	if cpuCores < workbuddyWindowsMinCPUCores {
+		cpuCores = workbuddyWindowsMinCPUCores
+	}
+	env["RAM_SIZE"] = fmt.Sprintf("%dG", guestMemoryGB)
+	env["CPU_CORES"] = strconv.Itoa(cpuCores)
+	return env
+}
+
+func runtimeProbePort(instanceType string, primaryPort int32) int32 {
+	if isWindowsVMInstanceType(instanceType) {
+		return 3389
+	}
+	return primaryPort
+}
+
+func runtimeProbePortForInstance(instance *models.Instance, primaryPort int32) int32 {
+	if isWindowsVMInstance(instance) {
+		return 3389
+	}
+	return primaryPort
+}
+
+func runtimeStartupProbeFailures(instanceType string) int32 {
+	if isWindowsVMInstanceType(instanceType) {
+		return 120
+	}
+	return 30
+}
+
+func runtimeStartupProbeFailuresForInstance(instance *models.Instance) int32 {
+	if isWindowsVMInstance(instance) {
+		return 120
+	}
+	return 30
+}
+
+func runtimeTerminationGrace(instanceType string) int64 {
+	if isWindowsVMInstanceType(instanceType) {
+		return 120
+	}
+	return 0
+}
+
+func runtimeTerminationGraceForInstance(instance *models.Instance) int64 {
+	if isWindowsVMInstance(instance) {
+		return 120
+	}
+	return 0
+}
+
+func runtimeNodeSelector(instanceType string, existing map[string]string) map[string]string {
+	selector := mergeEnvMaps(existing, nil)
+	if isWindowsVMInstanceType(instanceType) {
+		selector[workbuddyWindowsNodeLabel] = "true"
+	}
+	return selector
+}
+
+func runtimeNodeSelectorForInstance(instance *models.Instance, existing map[string]string) map[string]string {
+	selector := mergeEnvMaps(existing, nil)
+	if isWindowsVMInstance(instance) {
+		selector[workbuddyWindowsNodeLabel] = "true"
+	}
+	return selector
 }
 
 func normalizeInstanceRuntimeType(runtimeType string) string {
@@ -2605,6 +4021,24 @@ func modeForExistingInstance(instance *models.Instance) string {
 func instanceModeUsesDedicatedResources(mode string) bool {
 	normalized, ok := NormalizeInstanceMode(mode)
 	return ok && normalized == InstanceModePro
+}
+
+func validateCreateInstanceDiskGB(req CreateInstanceRequest, mode string) error {
+	normalizedMode, ok := NormalizeInstanceMode(mode)
+	if !ok {
+		return fmt.Errorf("unsupported instance mode %q", mode)
+	}
+	minimum := DefaultLiteDiskGB
+	if normalizedMode == InstanceModePro {
+		minimum = MinimumProDiskGB
+	}
+	if req.DiskGB < minimum {
+		return fmt.Errorf("%s disk must be at least %dGB", normalizedMode, minimum)
+	}
+	if req.DiskGB > 1000 {
+		return fmt.Errorf("disk must not exceed 1000GB")
+	}
+	return nil
 }
 
 func (s *instanceService) enforceInstanceModeLimits(ctx context.Context, mode string, cpuCores float64, memoryGB, storageGB, gpuCount int) error {
@@ -2744,4 +4178,22 @@ func trimOptionalString(value *string) *string {
 		return nil
 	}
 	return &trimmed
+}
+
+// NormalizeInstanceOwner applies the canonical storage and lookup rules for
+// northbound owner identifiers.
+func NormalizeInstanceOwner(value string) (string, error) {
+	owner := strings.TrimSpace(value)
+	if owner == "" {
+		return "", fmt.Errorf("owner is required")
+	}
+	if !utf8.ValidString(owner) || len(owner) > 128 {
+		return "", fmt.Errorf("owner must contain at most 128 UTF-8 bytes")
+	}
+	for _, character := range owner {
+		if unicode.IsControl(character) {
+			return "", fmt.Errorf("owner must not contain control characters")
+		}
+	}
+	return owner, nil
 }

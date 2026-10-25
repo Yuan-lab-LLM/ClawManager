@@ -4,6 +4,7 @@ export interface SystemImageSetting {
   id?: number;
   instance_type: string;
   runtime_type?: "desktop" | "gateway";
+  runtime_variant?: "linux" | "windows";
   display_name: string;
   image: string;
   is_enabled?: boolean;

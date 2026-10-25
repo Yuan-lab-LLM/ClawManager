@@ -1,8 +1,9 @@
 import axios from "axios";
-import { Maximize2, Minimize2, PanelRightClose, PanelRightOpen, RefreshCw } from "lucide-react";
+import { Maximize2, Minimize2, PanelRightClose, PanelRightOpen, RefreshCw, ShieldAlert } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { WorkspaceFileManager } from "../../components/WorkspaceFileManager";
+import { useRuntimeCertificateTrust } from "../../hooks/useRuntimeCertificateTrust";
 import { prepareOpenClawControlUIStorage } from "../../lib/openclawControlStorage";
 import {
   createSharedWorkspaceService,
@@ -84,11 +85,18 @@ export default function SharedInstancePage() {
   }, [loadSession]);
 
   useEffect(() => {
-    const timer = window.setInterval(() => {
+    if (!session) {
+      return;
+    }
+    const expiresAt = Date.parse(session.session_expires_at);
+    const renewalDelay = Number.isFinite(expiresAt)
+      ? Math.max(30_000, Math.min(45 * 60 * 1000, expiresAt - Date.now() - 60_000))
+      : 45 * 60 * 1000;
+    const timer = window.setTimeout(() => {
       void loadSession({ background: true });
-    }, 45 * 60 * 1000);
-    return () => window.clearInterval(timer);
-  }, [loadSession]);
+    }, renewalDelay);
+    return () => window.clearTimeout(timer);
+  }, [loadSession, session]);
 
   useEffect(() => {
     const previousTitle = document.title;
@@ -129,7 +137,7 @@ export default function SharedInstancePage() {
     [code, session],
   );
 
-  const frameSrc = useMemo(() => {
+  const accessFrameUrl = useMemo(() => {
     if (!session?.access_url) {
       return "";
     }
@@ -138,6 +146,18 @@ export default function SharedInstancePage() {
       ? prepareOpenClawControlUIStorage(session.instance.id, url)
       : url;
   }, [session]);
+  const normalizedType = session?.instance.type.trim().toLowerCase() ?? "";
+  const requiresRuntimeCertificateTrust =
+    normalizedType === "opencode" || normalizedType === "deepseek-harness";
+  const {
+    frameUrl: frameSrc,
+    checkingCertificate,
+    certificateConfirmationRequired,
+    confirmCertificate,
+  } = useRuntimeCertificateTrust(
+    accessFrameUrl || null,
+    requiresRuntimeCertificateTrust,
+  );
 
   const handleFullscreen = useCallback(() => {
     const element = frameContainerRef.current;
@@ -247,15 +267,42 @@ export default function SharedInstancePage() {
               </button>
             </div>
           </div>
-          <iframe
-            key={`${frameSrc}:${frameVersion}`}
-            title={`${session.instance.name} service`}
-            src={frameSrc}
-            className="min-h-0 w-full flex-1 border-0 bg-white"
-            scrolling="no"
-            allow="clipboard-read; clipboard-write; fullscreen; autoplay"
-            referrerPolicy="no-referrer"
-          />
+          {frameSrc ? (
+            <iframe
+              key={`${frameSrc}:${frameVersion}`}
+              title={`${session.instance.name} service`}
+              src={frameSrc}
+              className="min-h-0 w-full flex-1 border-0 bg-white"
+              scrolling="no"
+              allow="clipboard-read; clipboard-write; fullscreen; autoplay"
+              referrerPolicy="no-referrer"
+            />
+          ) : certificateConfirmationRequired ? (
+            <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
+              <ShieldAlert className="h-8 w-8 text-amber-500" />
+              <div>
+                <p className="text-sm font-semibold text-slate-900">
+                  Confirm the runtime HTTPS certificate
+                </p>
+                <p className="mt-1 max-w-lg text-sm leading-6 text-slate-600">
+                  Continue once to trust this runtime origin. After confirmation, the browser
+                  will automatically return to this shared instance.
+                </p>
+              </div>
+              <button
+                type="button"
+                className="app-button-primary"
+                onClick={confirmCertificate}
+              >
+                Continue
+              </button>
+            </div>
+          ) : (
+            <div className="flex min-h-0 flex-1 items-center justify-center text-sm text-slate-600">
+              <RefreshCw className="mr-2 h-5 w-5 animate-spin" />
+              {checkingCertificate ? "Checking HTTPS certificate..." : "Opening shared instance..."}
+            </div>
+          )}
         </section>
 
         {workspaceVisible && (canShowWorkspace ? (

@@ -166,26 +166,28 @@ func buildHermesImportCommand() []string {
 }
 
 func buildWorkspaceImportCommand(spec workspaceTransferSpec) []string {
-	clearTarget := `rm -rf "$target_dir" && mkdir -p "$base_dir"`
-	if spec.preserveTargetDir {
-		script := fmt.Sprintf(
-			`base_dir="%s"; target_dir="$base_dir/%s"; `+
-				`mkdir -p "$target_dir" && find "$target_dir" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} + && `+
-				`tar xzf - -C "$base_dir" && chown -R abc:abc "$target_dir"`,
-			spec.baseDirExpr,
-			spec.dirName,
-		)
-		return []string{"sh", "-lc", script}
-	}
 	inner := fmt.Sprintf(
 		`base_dir="%s"; target_dir="$base_dir/%s"; `+
-			`%s && tar xzf - -C "$base_dir"`,
+			`import_root="$base_dir/.clawmanager-imports"; mkdir -p "$import_root"; `+
+			`staging_dir="$(mktemp -d "$import_root/import.XXXXXX")" || exit 1; `+
+			`archive="$staging_dir/archive.tar.gz"; cat > "$archive"; `+
+			`tar tzf "$archive" | awk 'BEGIN { ok=1 } /^\// { ok=0 } /(^|\/)\.\.($|\/)/ { ok=0 } { if ($0 !~ /^%s(\/|$)/) ok=0 } END { exit ok ? 0 : 1 }' || exit 65; `+
+			`tar xzf "$archive" -C "$staging_dir" --no-same-owner; `+
+			`new_target="$staging_dir/%s"; test -d "$new_target" || exit 66; `+
+			`preserved="$base_dir/%s.preserved.$(date +%%s%%N)"; `+
+			`if [ -e "$target_dir" ]; then mv "$target_dir" "$preserved"; fi; `+
+			`if ! mv "$new_target" "$target_dir"; then if [ -e "$preserved" ]; then mv "$preserved" "$target_dir"; fi; exit 67; fi; `+
+			`chown -R abc:abc "$target_dir"`,
 		spec.baseDirExpr,
 		spec.dirName,
-		clearTarget,
+		spec.dirName,
+		spec.dirName,
+		spec.dirName,
 	)
-	outer := fmt.Sprintf(`exec su abc -s /bin/sh -c %s`, shellQuote(inner))
-	return []string{"sh", "-lc", outer}
+	if spec.preserveTargetDir {
+		return []string{"sh", "-lc", inner}
+	}
+	return []string{"sh", "-lc", fmt.Sprintf(`exec su abc -s /bin/sh -c %s`, shellQuote(inner))}
 }
 
 func (s *openClawTransferService) Export(ctx context.Context, userID, instanceID int) ([]byte, error) {
@@ -377,8 +379,8 @@ func isLiteRuntimeInstance(instance *models.Instance) bool {
 	if instance == nil {
 		return false
 	}
-	if strings.EqualFold(strings.TrimSpace(instance.InstanceMode), InstanceModeLite) {
-		return true
+	if mode, ok := NormalizeInstanceMode(instance.InstanceMode); ok {
+		return mode == InstanceModeLite
 	}
 	return strings.EqualFold(strings.TrimSpace(instance.RuntimeType), RuntimeBackendGateway)
 }

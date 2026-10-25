@@ -1,18 +1,23 @@
-import { Maximize2, Minimize2, PanelRightClose, PanelRightOpen, RefreshCw } from "lucide-react";
+import { Maximize2, MessageSquare, Minimize2, Monitor, PanelRightClose, PanelRightOpen, RefreshCw, ShieldAlert } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useI18n } from "../contexts/I18nContext";
 import { useInstanceDesktopAccess } from "../hooks/useInstanceDesktopAccess";
-import { clearHermesDashboardStorage, prepareHermesDashboardStorage } from "../lib/hermesDashboardStorage";
+import { useRuntimeCertificateTrust } from "../hooks/useRuntimeCertificateTrust";
 import { prepareOpenClawControlUIStorage } from "../lib/openclawControlStorage";
+import { browserWorkerAccessIsFresh, browserWorkerRenewalDelay, refreshBrowserWorkerAccess } from "../lib/browserWorkerAccess";
+import { instanceService, type BrowserWorkerStatus } from "../services/instanceService";
 import type { InstanceAvailability } from "../types/instance";
 import InstanceModelHint from "./InstanceModelHint";
+import { HermesLiteServiceFrame } from "./HermesLiteServiceFrame";
 
-interface InstanceServiceFrameProps {
+export interface InstanceServiceFrameProps {
   instanceId: number;
   instanceName: string;
   instanceType?: string;
-  instanceMode?: string;
+  instanceMode: string;
   availability: InstanceAvailability;
+  reloadToken?: number;
+  openCodeInitialDirectory?: string;
   workspaceVisible?: boolean;
   onWorkspaceVisibilityChange?: (visible: boolean) => void;
 }
@@ -40,11 +45,61 @@ interface PreparedFrame {
   src: string;
 }
 
+function encodeOpenCodeDirectory(directory: string) {
+  const bytes = new TextEncoder().encode(directory);
+  let binary = "";
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte);
+  }
+  return window
+    .btoa(binary)
+    .replaceAll("+", "-")
+    .replaceAll("/", "_")
+    .replace(/=+$/u, "");
+}
+
+function openCodeNewSessionUrl(
+  entryUrl: string,
+  directory: string | undefined,
+) {
+  const normalizedDirectory = directory?.trim().replaceAll("\\", "/");
+  if (!normalizedDirectory?.startsWith("/")) {
+    return entryUrl;
+  }
+
+  try {
+    const parsed = new URL(entryUrl, window.location.href);
+    const directorySlug = encodeOpenCodeDirectory(normalizedDirectory);
+    const proxyOrOriginBase = parsed.pathname.endsWith("/")
+      ? parsed.pathname
+      : `${parsed.pathname}/`;
+    parsed.pathname = `${proxyOrOriginBase}${directorySlug}/session`;
+    parsed.hash = "";
+    return parsed.toString();
+  } catch {
+    return entryUrl;
+  }
+}
+
 export function InstanceServiceFrame({
+  instanceMode,
+  ...props
+}: InstanceServiceFrameProps) {
+  if (props.instanceType?.toLowerCase() === "hermes" && instanceMode?.toLowerCase() === "lite") {
+    return <HermesLiteServiceFrame {...props} instanceMode={instanceMode} />;
+  }
+
+  return <EmbeddedInstanceServiceFrame {...props} instanceMode={instanceMode} />;
+}
+
+function EmbeddedInstanceServiceFrame({
   instanceId,
   instanceName,
   instanceType,
+  instanceMode,
   availability,
+  reloadToken = 0,
+  openCodeInitialDirectory,
   workspaceVisible,
   onWorkspaceVisibilityChange,
 }: InstanceServiceFrameProps) {
@@ -53,10 +108,19 @@ export function InstanceServiceFrame({
   const frameContainerRef = useRef<HTMLElement | null>(null);
   const [preparedFrame, setPreparedFrame] = useState<PreparedFrame | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [activeView, setActiveView] = useState<"chat" | "browser">("chat");
+  const [browserWorker, setBrowserWorker] = useState<BrowserWorkerStatus | null>(null);
+  const [browserFrameUrl, setBrowserFrameUrl] = useState<string | null>(null);
+  const [browserLoading, setBrowserLoading] = useState(false);
+  const [browserError, setBrowserError] = useState<string | null>(null);
+  const [browserReloadToken, setBrowserReloadToken] = useState(0);
+  const [browserExpiresAt, setBrowserExpiresAt] = useState<string>();
+  const browserRequestInFlight = useRef(false);
   const normalizedType = instanceType?.toLowerCase() ?? "";
-  const isHermes = normalizedType === "hermes";
+  const browserWorkerCandidate =
+    normalizedType === "openclaw" && instanceMode?.toLowerCase() === "lite";
   const {
-    embedUrl,
+    embedUrl: accessEmbedUrl,
     loading,
     error,
     reconnecting,
@@ -66,13 +130,96 @@ export function InstanceServiceFrame({
   } = useInstanceDesktopAccess({
     instanceId,
     isRunning: isAvailable,
+    reloadOnAccessRefresh: normalizedType === "deepseek-harness",
     resolveEmbedUrl,
     failedMessage: "Failed to open instance service",
   });
+  const requiresRuntimeCertificateTrust =
+    normalizedType === "opencode" || normalizedType === "deepseek-harness";
+  const {
+    frameUrl: embedUrl,
+    checkingCertificate,
+    certificateConfirmationRequired,
+    confirmCertificate,
+  } = useRuntimeCertificateTrust(
+    accessEmbedUrl,
+    requiresRuntimeCertificateTrust,
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!browserWorkerCandidate || !isAvailable) {
+      queueMicrotask(() => {
+        if (!cancelled) setBrowserWorker(null);
+      });
+      return () => {
+        cancelled = true;
+      };
+    }
+    void instanceService
+      .getBrowserWorker(instanceId)
+      .then((status) => {
+        if (!cancelled) setBrowserWorker(status);
+      })
+      .catch(() => {
+        if (!cancelled) setBrowserWorker(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [browserWorkerCandidate, instanceId, isAvailable, reloadToken]);
+
+  const openBrowserWorker = useCallback(async (force = false) => {
+    setActiveView("browser");
+    if (browserRequestInFlight.current) return false;
+    if (!force && browserFrameUrl && browserWorkerAccessIsFresh(browserExpiresAt)) return true;
+    const reloadExpiredFrame = !force && !!browserFrameUrl;
+    browserRequestInFlight.current = true;
+    setBrowserLoading(!browserFrameUrl);
+    setBrowserError(null);
+    try {
+      const access = await instanceService.generateBrowserWorkerAccess(instanceId);
+      const nextURL = resolveEmbedUrl(access.access_url ?? null);
+      if (!access.available || !nextURL) {
+        throw new Error(access.reason || "Browser Worker is unavailable");
+      }
+      setBrowserWorker(access);
+      setBrowserFrameUrl(nextURL);
+      setBrowserExpiresAt(access.expires_at);
+      if (reloadExpiredFrame) setBrowserReloadToken((current) => current + 1);
+      return true;
+    } catch (requestError) {
+      setBrowserError(
+        requestError instanceof Error
+          ? requestError.message
+          : "Browser Worker is unavailable",
+      );
+      setBrowserExpiresAt(undefined);
+      return false;
+    } finally {
+      browserRequestInFlight.current = false;
+      setBrowserLoading(false);
+    }
+  }, [browserExpiresAt, browserFrameUrl, instanceId]);
+
+  useEffect(() => {
+    if (activeView !== "browser" || !isAvailable) return;
+    const delay = browserWorkerRenewalDelay(browserExpiresAt);
+    if (delay === null) return;
+    const timer = window.setTimeout(() => { void openBrowserWorker(true); }, delay);
+    return () => window.clearTimeout(timer);
+  }, [activeView, browserExpiresAt, isAvailable, openBrowserWorker]);
 
   const handleRefresh = useCallback(() => {
+    if (activeView === "browser") {
+      void refreshBrowserWorkerAccess(
+        () => openBrowserWorker(true),
+        () => setBrowserReloadToken((current) => current + 1),
+      );
+      return;
+    }
     void refreshAccess({ forceReload: true });
-  }, [refreshAccess]);
+  }, [activeView, openBrowserWorker, refreshAccess]);
 
   const handleFullscreen = useCallback(() => {
     const element = frameContainerRef.current;
@@ -88,28 +235,35 @@ export function InstanceServiceFrame({
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
     if (!embedUrl) {
-      setPreparedFrame(null);
-      return;
+      queueMicrotask(() => {
+        if (!cancelled) {
+          setPreparedFrame(null);
+        }
+      });
+      return () => {
+        cancelled = true;
+      };
     }
 
     let src = embedUrl;
     if (normalizedType === "openclaw") {
       src = prepareOpenClawControlUIStorage(instanceId, embedUrl);
-    } else if (isHermes) {
-      src = prepareHermesDashboardStorage(instanceId, embedUrl);
+    } else if (normalizedType === "opencode") {
+      // The root route is OpenCode's global landing page. Its directory-scoped
+      // /session route selects the managed project and opens a blank chat.
+      src = openCodeNewSessionUrl(embedUrl, openCodeInitialDirectory);
     }
-    setPreparedFrame({ instanceId, embedUrl, src });
-  }, [embedUrl, instanceId, isHermes, normalizedType]);
-
-  useEffect(() => {
-    if (!isHermes) {
-      return;
-    }
+    queueMicrotask(() => {
+      if (!cancelled) {
+        setPreparedFrame({ instanceId, embedUrl, src });
+      }
+    });
     return () => {
-      clearHermesDashboardStorage();
+      cancelled = true;
     };
-  }, [isHermes, instanceId]);
+  }, [embedUrl, instanceId, normalizedType, openCodeInitialDirectory]);
 
   useEffect(() => {
     const handleChange = () => {
@@ -131,8 +285,36 @@ export function InstanceServiceFrame({
       style={isFullscreen ? { height: "100vh", width: "100vw", borderRadius: 0 } : undefined}
     >
       <div className="relative z-20 flex h-12 shrink-0 items-center justify-between border-b border-slate-200 bg-white px-3">
-        <div className="min-w-0 truncate text-sm font-medium text-slate-950">
-          {instanceName}
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="min-w-0 truncate text-sm font-medium text-slate-950">
+            {instanceName}
+          </div>
+          {browserWorker?.enabled && (
+            <div className="flex shrink-0 rounded-md bg-slate-100 p-0.5" role="tablist">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeView === "chat"}
+                onClick={() => setActiveView("chat")}
+                className={`flex items-center gap-1 rounded px-2 py-1 text-xs ${activeView === "chat" ? "bg-white text-slate-950 shadow-sm" : "text-slate-600"}`}
+                title="OpenClaw"
+              >
+                <MessageSquare className="h-3.5 w-3.5" />
+                OpenClaw
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeView === "browser"}
+                onClick={() => void openBrowserWorker()}
+                className={`flex items-center gap-1 rounded px-2 py-1 text-xs ${activeView === "browser" ? "bg-white text-slate-950 shadow-sm" : "text-slate-600"}`}
+                title={browserWorker.reason || t("skillHubPage.tags.browser")}
+              >
+                <Monitor className="h-3.5 w-3.5" />
+                {t("skillHubPage.tags.browser")}
+              </button>
+            </div>
+          )}
         </div>
         <div className="relative z-20 flex shrink-0 items-center gap-2">
           {typeof workspaceVisible === "boolean" && onWorkspaceVisibilityChange && (
@@ -191,18 +373,83 @@ export function InstanceServiceFrame({
     );
   }
 
+  if (activeView === "browser" && browserWorker?.enabled) {
+    return renderFrameShell(
+      <div className="relative flex min-h-0 flex-1 flex-col bg-slate-950">
+        {browserFrameUrl && (
+          <iframe
+            key={`browser-worker-${instanceId}-${browserReloadToken}`}
+            title={`${instanceName} Browser Worker`}
+            src={browserFrameUrl}
+            className="min-h-0 w-full flex-1 border-0 bg-slate-950"
+            scrolling="no"
+            allow="clipboard-read; clipboard-write; fullscreen"
+            onLoad={() => setBrowserLoading(false)}
+            onError={() => {
+              setBrowserLoading(false);
+              setBrowserError("Browser Worker connection failed");
+            }}
+          />
+        )}
+        {(!browserFrameUrl || browserLoading || browserError) && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-white p-6 text-center text-sm text-slate-600">
+            {browserLoading && <RefreshCw className="h-5 w-5 animate-spin" />}
+            <p>{browserError || (browserLoading ? "Opening browser" : browserWorker.reason || "Browser Worker is unavailable")}</p>
+            {browserError && (
+              <button
+                type="button"
+                onClick={() => {
+                  setBrowserFrameUrl(null);
+                  setBrowserError(null);
+                  void openBrowserWorker(true);
+                }}
+                className="rounded-md border border-slate-200 px-3 py-1.5"
+              >
+                {t("common.refresh")}
+              </button>
+            )}
+          </div>
+        )}
+      </div>,
+    );
+  }
   if (!embedUrl || !frameSrc) {
+    if (certificateConfirmationRequired) {
+      return renderFrameShell(
+        <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
+          <ShieldAlert className="h-8 w-8 text-amber-500" />
+          <div>
+            <p className="text-sm font-semibold text-slate-900">
+              {t("instances.certificateConfirmationRequired")}
+            </p>
+            <p className="mt-1 max-w-lg text-sm leading-6 text-slate-600">
+              {t("instances.certificateConfirmationDescription")}
+            </p>
+          </div>
+          <button
+            type="button"
+            className="app-button-primary"
+            onClick={confirmCertificate}
+          >
+            {t("instances.continueCertificateConfirmation")}
+          </button>
+        </div>,
+      );
+    }
+
     return renderFrameShell(
       <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 text-sm text-slate-600">
         <RefreshCw className={`h-5 w-5 ${loading || reconnecting ? "animate-spin" : ""}`} />
-        {error || "Opening"}
+        {checkingCertificate
+          ? t("instances.checkingCertificate")
+          : error || "Opening"}
       </div>,
     );
   }
 
   return renderFrameShell(
       <iframe
-        key={isHermes ? `hermes-${instanceId}` : `frame-${instanceId}`}
+        key={`frame-${instanceId}-${reloadToken}`}
         title={`${instanceName} service`}
         src={frameSrc}
         className="min-h-0 w-full flex-1 border-0 bg-white"

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"clawreef/internal/heartbeat"
 	"clawreef/internal/models"
 	"clawreef/internal/repository"
 )
@@ -48,10 +49,11 @@ type AgentHeartbeatRequest struct {
 }
 
 type AgentHeartbeatResponse struct {
-	ServerTime              time.Time `json:"server_time"`
-	HasPendingCommand       bool      `json:"has_pending_command"`
-	DesiredPowerState       string    `json:"desired_power_state"`
-	DesiredConfigRevisionID *int      `json:"desired_config_revision_id,omitempty"`
+	HeartbeatIntervalSeconds int       `json:"heartbeat_interval_seconds"`
+	ServerTime               time.Time `json:"server_time"`
+	HasPendingCommand        bool      `json:"has_pending_command"`
+	DesiredPowerState        string    `json:"desired_power_state"`
+	DesiredConfigRevisionID  *int      `json:"desired_config_revision_id,omitempty"`
 }
 
 type InstanceAgentPayload struct {
@@ -186,7 +188,7 @@ func (s *instanceAgentService) Register(bootstrapToken string, req AgentRegister
 	return &AgentRegisterResponse{
 		SessionToken:               sessionToken,
 		SessionExpiresAt:           sessionExpiresAt,
-		HeartbeatIntervalSeconds:   15,
+		HeartbeatIntervalSeconds:   heartbeat.ReportIntervalSeconds(),
 		CommandPollIntervalSeconds: 5,
 		ServerTime:                 now,
 	}, nil
@@ -275,10 +277,11 @@ func (s *instanceAgentService) Heartbeat(session *AgentSession, req AgentHeartbe
 	}
 
 	return &AgentHeartbeatResponse{
-		ServerTime:              now,
-		HasPendingCommand:       nextCommand != nil,
-		DesiredPowerState:       desiredState.DesiredPowerState,
-		DesiredConfigRevisionID: desiredState.DesiredConfigRevisionID,
+		HeartbeatIntervalSeconds: heartbeat.ReportIntervalSeconds(),
+		ServerTime:               now,
+		HasPendingCommand:        nextCommand != nil,
+		DesiredPowerState:        desiredState.DesiredPowerState,
+		DesiredConfigRevisionID:  desiredState.DesiredConfigRevisionID,
 	}, nil
 }
 
@@ -368,9 +371,9 @@ func deriveAgentStatus(agent *models.InstanceAgent) string {
 	}
 	age := time.Since(*agent.LastHeartbeatAt)
 	switch {
-	case age <= 45*time.Second:
+	case age <= heartbeat.OnlineWindow:
 		return agentStatusOnline
-	case age <= 120*time.Second:
+	case age <= heartbeat.Timeout:
 		return agentStatusStale
 	default:
 		return agentStatusOffline

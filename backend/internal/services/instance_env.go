@@ -15,21 +15,24 @@ import (
 var ErrInvalidEnvironmentOverrides = errors.New("invalid environment overrides")
 
 var protectedManagedRuntimeEnvKeys = map[string]struct{}{
-	"CLAWMANAGER_GATEWAY_GENERATION":    {},
-	"CLAWMANAGER_LLM_BASE_URL":          {},
-	"CLAWMANAGER_LLM_API_KEY":           {},
-	"CLAWMANAGER_LLM_MODEL":             {},
-	"CLAWMANAGER_LLM_CONTEXT_WINDOW":    {},
-	"CLAWMANAGER_LLM_CONTEXT_WINDOWS":   {},
-	"CLAWMANAGER_LLM_REASONING":         {},
-	"CLAWMANAGER_LLM_REASONING_CONTROL": {},
-	"CLAWMANAGER_LLM_VISION":            {},
-	"CLAWMANAGER_LLM_PROVIDER":          {},
-	"CLAWMANAGER_INSTANCE_TOKEN":        {},
-	"OPENAI_BASE_URL":                   {},
-	"OPENAI_API_BASE":                   {},
-	"OPENAI_API_KEY":                    {},
-	"OPENAI_MODEL":                      {},
+	"CLAWMANAGER_GATEWAY_GENERATION":            {},
+	"CLAWMANAGER_LLM_BASE_URL":                  {},
+	"CLAWMANAGER_LLM_API_KEY":                   {},
+	"CLAWMANAGER_LLM_MODEL":                     {},
+	"CLAWMANAGER_LLM_CONTEXT_WINDOW":            {},
+	"CLAWMANAGER_LLM_CONTEXT_WINDOWS":           {},
+	"CLAWMANAGER_LLM_PROVIDER_MODELS":           {},
+	"CLAWMANAGER_LLM_REASONING":                 {},
+	"CLAWMANAGER_LLM_REASONING_CONTROL":         {},
+	"CLAWMANAGER_LLM_VISION":                    {},
+	"CLAWMANAGER_LLM_PROVIDER":                  {},
+	"CLAWMANAGER_INSTANCE_TOKEN":                {},
+	"OPENAI_BASE_URL":                           {},
+	"OPENAI_API_BASE":                           {},
+	"OPENAI_API_KEY":                            {},
+	"OPENAI_MODEL":                              {},
+	"CLAWMANAGER_DEFAULT_PROJECT_PATH":          {},
+	"CLAWMANAGER_DEFAULT_PROJECT_RELATIVE_PATH": {},
 }
 
 func isLLMGovernanceStrictEnabled() bool {
@@ -216,13 +219,16 @@ func buildInstancePodEnv(instance *models.Instance, runtimeEnv, gatewayEnv, agen
 
 	resolved := mergeEnvMaps(runtimeEnv, mergeEnvMaps(gatewayEnv, agentEnv))
 	resolved = withInstanceProxyEnv(instance, resolved)
+	if isWebtopRuntimeInstance(instance) {
+		resolved["SUBFOLDER"] = fmt.Sprintf("/api/v1/instances/%d/proxy/", instance.ID)
+	}
 	resolved["CLAWMANAGER_RUNTIME_TYPE"] = normalizeInstanceRuntimeType(instance.RuntimeType)
 	if normalizeInstanceRuntimeType(instance.RuntimeType) == "shell" {
 		resolved["CLAWMANAGER_DESKTOP_ENABLED"] = "false"
 		delete(resolved, "SUBFOLDER")
 	}
 	resolved = mergeEnvMaps(resolved, overrides)
-	if supportsManagedRuntimeIntegration(instance.Type) && isLLMGovernanceStrictEnabled() {
+	if supportsManagedRuntimeIntegrationForInstance(instance) && isLLMGovernanceStrictEnabled() {
 		resolved = applyProtectedManagedRuntimeEnv(resolved, mergeEnvMaps(gatewayEnv, agentEnv))
 	}
 
@@ -241,9 +247,12 @@ func buildInstanceGatewayEnv(instance *models.Instance, gatewayEnv map[string]st
 
 	resolved := mergeEnvMaps(gatewayEnv, nil)
 	resolved = withInstanceProxyEnv(instance, resolved)
+	if isWebtopRuntimeInstance(instance) {
+		resolved["SUBFOLDER"] = fmt.Sprintf("/api/v1/instances/%d/proxy/", instance.ID)
+	}
 	resolved["CLAWMANAGER_RUNTIME_TYPE"] = normalizeInstanceRuntimeType(instance.RuntimeType)
 	resolved = mergeEnvMaps(resolved, overrides)
-	if supportsManagedRuntimeIntegration(instance.Type) && isLLMGovernanceStrictEnabled() {
+	if supportsManagedRuntimeIntegrationForInstance(instance) && isLLMGovernanceStrictEnabled() {
 		resolved = applyProtectedManagedRuntimeEnv(resolved, gatewayEnv)
 	}
 

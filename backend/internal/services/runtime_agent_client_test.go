@@ -94,6 +94,64 @@ func TestRuntimeAgentClientDefaultTimeoutAllowsGatewayStartup(t *testing.T) {
 	if agentClient.httpClient.Timeout != 30*time.Second {
 		t.Fatalf("default timeout = %v, want 30s", agentClient.httpClient.Timeout)
 	}
+	if agentClient.upgradeHTTPClient.Timeout != 16*time.Minute {
+		t.Fatalf("upgrade timeout = %v, want 16m", agentClient.upgradeHTTPClient.Timeout)
+	}
+}
+
+func TestRuntimeAgentClientUsesLongTimeoutOnlyForUpgradeOperations(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(75 * time.Millisecond)
+		if r.URL.Path == "/v1/openclaw/session-sqlite/migrate" {
+			_ = json.NewEncoder(w).Encode(RuntimeAgentSessionSQLiteMigration{InstanceID: 7, Status: "validated"})
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	client := &runtimeAgentHTTPClient{
+		controlToken:      "token",
+		httpClient:        &http.Client{Timeout: 20 * time.Millisecond},
+		upgradeHTTPClient: &http.Client{Timeout: 250 * time.Millisecond},
+	}
+	if err := client.Health(context.Background(), server.URL); err == nil {
+		t.Fatal("fast control request unexpectedly ignored its short timeout")
+	}
+	result, err := client.MigrateSessionSQLite(context.Background(), server.URL, RuntimeAgentWorkspaceRequest{})
+	if err != nil {
+		t.Fatalf("long upgrade request used the control timeout: %v", err)
+	}
+	if result.Status != "validated" {
+		t.Fatalf("unexpected migration result: %+v", result)
+	}
+}
+
+func TestRuntimeAgentClientReadsDurableUpgradeReceipts(t *testing.T) {
+	var paths []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		switch r.URL.Path {
+		case "/v1/openclaw/session-sqlite/migrate/status":
+			_ = json.NewEncoder(w).Encode(RuntimeAgentSessionSQLiteMigration{InstanceID: 9, Status: "validated", OutputSHA256: "digest", SessionCatalogSHA256: "catalog"})
+		case "/v1/openclaw/session-sqlite/restore/status":
+			_ = json.NewEncoder(w).Encode(RuntimeAgentSessionSQLiteRestore{InstanceID: 9, Status: "restored", ConfigRestored: true, StateRestored: true})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	client := NewRuntimeAgentClientWithHTTPClient("token", server.Client()).(RuntimeUpgradeAgentClient)
+	req := RuntimeAgentWorkspaceRequest{RolloutID: "55", UserID: 1, InstanceID: 9, Generation: 2}
+	if _, err := client.SessionSQLiteMigrationStatus(context.Background(), server.URL, req); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.SessionSQLiteRestoreStatus(context.Background(), server.URL, req); err != nil {
+		t.Fatal(err)
+	}
+	if len(paths) != 2 || paths[0] != "/v1/openclaw/session-sqlite/migrate/status" || paths[1] != "/v1/openclaw/session-sqlite/restore/status" {
+		t.Fatalf("receipt paths = %#v", paths)
+	}
 }
 
 func TestRuntimeAgentClientDeleteGatewayEscapesGatewayID(t *testing.T) {
@@ -247,6 +305,25 @@ func TestRuntimeAgentClientNonConflictErrorIncludesStatusAndBody(t *testing.T) {
 	}
 }
 
+func TestRuntimeAgentClientClassifiesLegacyUnsupportedGatewayState(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/v1/gateways/gw-legacy" {
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}))
+	defer server.Close()
+
+	client, ok := NewRuntimeAgentClientWithHTTPClient("token", server.Client()).(RuntimeUpgradeAgentClient)
+	if !ok {
+		t.Fatal("HTTP Runtime Agent client does not implement gateway state")
+	}
+	_, err := client.GatewayState(context.Background(), server.URL, "gw-legacy")
+	if !errors.Is(err, ErrRuntimeAgentUnsupported) {
+		t.Fatalf("GatewayState error = %v, want ErrRuntimeAgentUnsupported", err)
+	}
+}
+
 func TestRuntimeAgentClientDeleteGatewayReturnsNotFoundSentinel(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
@@ -258,6 +335,41 @@ func TestRuntimeAgentClientDeleteGatewayReturnsNotFoundSentinel(t *testing.T) {
 	err := client.DeleteGateway(context.Background(), server.URL, "gw-missing")
 	if !errors.Is(err, ErrRuntimeAgentNotFound) {
 		t.Fatalf("DeleteGateway error = %v, want ErrRuntimeAgentNotFound", err)
+	}
+}
+
+func TestRuntimeUpgradeAgentClientWriterLeaseContract(t *testing.T) {
+	var paths []string
+	var bodies []RuntimeAgentWriterLeaseRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		var body RuntimeAgentWriterLeaseRequest
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		bodies = append(bodies, body)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+	client, ok := NewRuntimeAgentClientWithHTTPClient("token", server.Client()).(RuntimeUpgradeAgentClient)
+	if !ok {
+		t.Fatal("HTTP Runtime Agent client does not implement the upgrade contract")
+	}
+	req := RuntimeAgentWriterLeaseRequest{
+		RuntimeAgentWorkspaceRequest: RuntimeAgentWorkspaceRequest{RolloutID: "rollout-1", SnapshotID: "snapshot-1", UserID: 7, InstanceID: 19, Generation: 3, LeaseToken: "lease-1"},
+		Token:                        "lease-1", TTLSeconds: 3600,
+	}
+	if err := client.AcquireWriterLease(context.Background(), server.URL, req); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.ReleaseWriterLease(context.Background(), server.URL, req); err != nil {
+		t.Fatal(err)
+	}
+	if len(paths) != 2 || paths[0] != "/v1/openclaw/writer-leases/acquire" || paths[1] != "/v1/openclaw/writer-leases/release" {
+		t.Fatalf("writer lease paths = %#v", paths)
+	}
+	if len(bodies) != 2 || bodies[0].LeaseToken != "lease-1" || bodies[0].TTLSeconds != 3600 {
+		t.Fatalf("writer lease bodies = %#v", bodies)
 	}
 }
 

@@ -37,6 +37,7 @@ CREATE TABLE IF NOT EXISTS system_image_settings (
   id INT AUTO_INCREMENT PRIMARY KEY,
   instance_type VARCHAR(50) NOT NULL,
   runtime_type ENUM('desktop', 'shell', 'gateway') NOT NULL DEFAULT 'desktop',
+  runtime_variant VARCHAR(32) NOT NULL DEFAULT '',
   display_name VARCHAR(255) NOT NULL,
   image VARCHAR(500) NOT NULL,
   is_enabled BOOLEAN NOT NULL DEFAULT TRUE,
@@ -52,9 +53,32 @@ CREATE TABLE IF NOT EXISTS system_image_settings (
 
 	r.ensureIsEnabledColumn()
 	r.ensureRuntimeTypeColumn()
+	r.ensureRuntimeVariantColumn()
 	r.ensureRuntimeTypeAllowsGateway()
 	r.ensureInstanceTypeIsNotUnique()
 	r.ensureInstanceTypeIndex()
+}
+
+func (r *systemImageSettingRepository) ensureRuntimeVariantColumn() {
+	var count int
+	row, err := r.sess.SQL().QueryRow(`
+SELECT COUNT(*)
+FROM information_schema.columns
+WHERE table_schema = DATABASE()
+  AND table_name = 'system_image_settings'
+  AND column_name = 'runtime_variant'
+`)
+	if err != nil {
+		panic(fmt.Errorf("failed to inspect system_image_settings runtime_variant column: %w", err))
+	}
+	if err := row.Scan(&count); err != nil {
+		panic(fmt.Errorf("failed to scan system_image_settings runtime_variant column count: %w", err))
+	}
+	if count == 0 {
+		if _, err := r.sess.SQL().Exec("ALTER TABLE system_image_settings ADD COLUMN runtime_variant VARCHAR(32) NOT NULL DEFAULT '' AFTER runtime_type"); err != nil {
+			panic(fmt.Errorf("failed to ensure system_image_settings.runtime_variant column: %w", err))
+		}
+	}
 }
 
 func (r *systemImageSettingRepository) ensureIsEnabledColumn() {
@@ -223,6 +247,7 @@ func (r *systemImageSettingRepository) Save(setting *models.SystemImageSetting) 
 
 		existing.InstanceType = setting.InstanceType
 		existing.RuntimeType = setting.RuntimeType
+		existing.RuntimeVariant = setting.RuntimeVariant
 		existing.DisplayName = setting.DisplayName
 		existing.Image = setting.Image
 		existing.IsEnabled = setting.IsEnabled

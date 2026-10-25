@@ -59,6 +59,10 @@
 
 Recent highlights from the latest product and documentation updates.
 
+- [2026-10-16] Refreshed Team workspaces with a continuous-collaboration chat layout, clearer member grouping and functional avatars, online shared-file editing, and `@member` single-member tasks. Reference earlier work to refine an artifact while keeping each request separate in history and Kanban. See the [Team Workspace Quick Guide](./docs/team-workspaces-guide_en.md).
+- [2026-09-08] Hardened data-safe OpenClaw Lite rollouts with version-aware preflight, migration verification, bounded recovery, and source-identity rollback. Legacy images without the 8.1 capability marker continue to use the established rolling-update path.
+- [2026-09-02] Expanded the Northbound API and owner-scoped portal with OpenClaw, Hermes, OpenCode, and DeepSeek Harness Lite/Pro provisioning, asynchronous lifecycle operations, and protected Share Link management. See the [Northbound API Guide](./docs/northbound-api-guide.md).
+- [2026-09-01] Added LDAP enterprise authentication, expanded managed provider model catalogs, and dedicated browser origins for managed OpenCode and DeepSeek Harness instances.
 - [2026-08-19] Added managed OpenCode workspaces, refreshed the instance desktop experience, and expanded Skill Hub delivery to OpenClaw, Hermes, and OpenCode runtimes. See the [OpenCode Workspace Guide](./docs/opencode-lite-pro-agent-development_en.md).
 - [2026-08-18] Expanded Team collaboration with eight read-only built-in templates, natural-language custom Team templates, optional Hermes Lite Workers, live Execution Kanban, shared artifacts, and member-session visibility.
 - [2026-08-17] Added model-managed Thinking, AI Gateway Session Usage, editable scheduled tasks, and improved Lite instance lifecycle and batch operations.
@@ -160,6 +164,12 @@ The cluster profile is validated with Longhorn (`longhorn` for RWO data and `lon
 
 Create OpenClaw, Hermes, OpenCode, or DeepSeek Harness workspaces in Lite or Pro mode, choose an enabled system image, apply a resource preset or custom CPU/memory/storage values, and manage lifecycle, desktop access, files, shell access, environment variables, archives, Share Links, and Lite batch operations from one place.
 
+### Northbound API and Enterprise Access
+
+Integrate ClawManager with external systems through a separately deployed Northbound gateway. One-time JWE authentication, scoped tokens, owner isolation, idempotent asynchronous operations, rate limits, audit records, and gateway-to-Core mTLS keep the public integration boundary separate from the management console. Administrators can also configure LDAP/LDAPS or StartTLS authentication, preview and import directory users, and map groups to platform roles.
+
+The Northbound API manages supported OpenClaw, Hermes, OpenCode, and DeepSeek Harness Lite/Pro instances, including create, query, restart, confirmed reset, and password-protected Share Links. See the [Northbound API Guide](./docs/northbound-api-guide.md) and [deployment add-on](./deployments/k8s/northbound/README.md).
+
 ### AI Gateway
 
 AI Gateway is the governed model entry point for managed runtimes. Its five user-facing areas cover Models, AI Audit, Costs, Session Usage, and Risk Rules.
@@ -200,13 +210,16 @@ See the [Resource Management Guide](./docs/resource-management.md) and [Skill Hu
 <a id="team-workspaces"></a>
 ### Team Collaboration
 
-Team collaboration uses a Leader-mediated workflow. Create a Team from one of eight immutable built-in templates or a user-owned custom template, then describe the goal in Team chat. The OpenClaw Lite Leader plans and decomposes the request, dispatches work, verifies member deliveries, and publishes the unified result.
+Create a Team from one of eight immutable built-in templates or a user-owned custom template. The default `@Leader` route uses Leader-mediated collaboration: the OpenClaw Lite Leader plans, delegates, verifies member deliveries, and publishes the unified result. Alternatively, `@` a Worker to run the request as a single-member task without waiting for Leader synthesis.
 
 - each Team has one OpenClaw Lite Leader; each Worker can use OpenClaw Lite or Hermes Lite when available
 - custom Teams can be generated from natural-language intent, refined by role, regenerated, and reused
-- Team chat records plans, assignments, progress, reviews, deliveries, and the final synthesis
-- Execution Kanban follows the current query, task breakdown, and member delivery state
-- shared files and artifacts retain collaboration output; Hermes Lite Workers expose their native Team sessions from the instance view
+- continuous-collaboration chat uses a bright layout, readable typography, and grouped member messages while keeping users, Leaders, and Workers distinct; expand the member, workflow, and file panels as needed
+- functional avatars match built-in and custom roles automatically; click a Worker avatar during Team creation or custom-template editing to change its appearance without changing responsibilities or Runtime settings
+- type `@` or use the recipient selector to start a single-member task, optionally referencing an earlier task to refine its output; each request has its own history and Kanban entry
+- Execution Kanban tracks queries, work items, and accepted deliveries; collaborative tasks retain Leader synthesis, while a single-member task completes after the selected Worker's accepted delivery
+- the file browser previews and downloads shared artifacts and edits supported text files online, with explicit saving, remote-change notices, and version-conflict checks; this is not autosave or real-time multi-user co-editing
+- Hermes Lite Workers expose their native Team sessions from the instance view; the new features need compatible ClawManager App and Runtime versions, and updating Runtime alone does not update the Team UI
 
 See the [Team Workspace Quick Guide](./docs/team-workspaces-guide_en.md) for creation, collaboration stages, and result viewing.
 
@@ -234,7 +247,9 @@ Pro mode provisions a dedicated desktop runtime for each instance, backed by its
 
 ### Team Collaboration
 
-The Team workspace shows the real execution flow in one view: user requests and member messages on the left, and the current query, task decomposition, delivery state, and artifact details on the Execution Kanban. The Leader coordinates members and publishes the final result without hiding the intermediate work.
+The Team workspace brings continuous-collaboration chat, functional member avatars, expandable Execution Kanban, and a file browser into one view. Use the default Leader workflow or `@member` follow-ups to refine existing output, and edit supported shared text files with explicit saving.
+
+The image below shows an earlier interface for workflow reference; the current version uses the continuous-collaboration layout described above.
 
 <p align="center">
   <img src="./docs/main/team-collaboration.png" alt="ClawManager Team collaboration workspace with chat and Execution Kanban" width="100%" />
@@ -310,6 +325,12 @@ Runtime and protocol implementation references remain under `docs/` for contribu
 - [Resource Management Guide](./docs/resource-management.md)
 - [Skill Hub Guide](./docs/skill-hub-guide_en.md)
 - [OpenCode Workspace Guide](./docs/opencode-lite-pro-agent-development_en.md)
+- [Hermes Runtime Guide](./docs/hermes-runtime-agent-development.md)
+- [Generic Runtime Agent Integration Guide](./docs/runtime-agent-integration-guide.md)
+- [Northbound API Deployment Add-on](./deployments/k8s/northbound/README.md)
+- [Northbound API Guide (Chinese)](./docs/northbound-api-guide.md)
+- [Northbound API Upgrade Guide (Chinese)](./docs/northbound-upgrade-guide.md)
+- [Northbound OpenAPI 3.1 Specification](./docs/northbound-openapi.yaml)
 
 ## License
 

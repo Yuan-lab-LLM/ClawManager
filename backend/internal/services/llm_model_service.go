@@ -21,6 +21,7 @@ import (
 type LLMModelService interface {
 	ListModels() ([]models.LLMModel, error)
 	ListActiveModels() ([]models.LLMModel, error)
+	ListExpandedActiveModels() ([]models.LLMModel, error)
 	SaveModel(req SaveLLMModelRequest) (*models.LLMModel, error)
 	DeleteModel(id int) error
 	DiscoverProviderModels(req DiscoverLLMModelsRequest) ([]DiscoveredLLMModel, error)
@@ -63,6 +64,7 @@ type SaveLLMModelRequest struct {
 	VisionSupportOverride      *bool
 	ResetVisionSupportOverride bool
 	CapabilitySource           string
+	ProviderModels             []models.LLMProviderModel
 }
 
 // DiscoverLLMModelsRequest contains fields needed to query a provider for available models.
@@ -241,6 +243,7 @@ type llmModelService struct {
 	repo             repository.LLMModelRepository
 	httpClient       *http.Client
 	secretRefService SecretRefService
+	discoveryCache   *providerDiscoveryCache
 }
 
 var versionSegmentPattern = regexp.MustCompile(`(?i)^v\d+(?:[a-z0-9._-]*)?$`)
@@ -254,6 +257,7 @@ func NewLLMModelService(repo repository.LLMModelRepository) LLMModelService {
 	return &llmModelService{
 		repo:             repo,
 		secretRefService: NewSecretRefService(),
+		discoveryCache:   newProviderDiscoveryCache(),
 		httpClient: &http.Client{
 			Timeout: 20 * time.Second,
 			CheckRedirect: func(req *http.Request, via []*http.Request) error {
@@ -459,6 +463,16 @@ func (s *llmModelService) SaveModel(req SaveLLMModelRequest) (*models.LLMModel, 
 		protocolType != models.ProtocolTypeOpenAI && protocolType != models.ProtocolTypeOpenAICompatible {
 		return nil, errors.New("reasoning control mode requires an OpenAI-compatible upstream protocol")
 	}
+	// Provider catalog metadata is preserved for compatibility only. Saving one
+	// deployment must not discover/import other models or change its grants.
+	if req.ProviderModels != nil {
+		if err := models.SetLLMProviderModels(model, req.ProviderModels); err != nil {
+			return nil, fmt.Errorf("failed to encode provider models: %w", err)
+		}
+	} else if current != nil && sameModelDiscoveryConfig(current, model) {
+		model.ProviderModelsJSON = current.ProviderModelsJSON
+		model.ProviderModels = current.ProviderModels
+	}
 	models.PopulateLLMReasoningCapability(model)
 	if req.ReasoningEnabled != nil {
 		if *req.ReasoningEnabled && !model.SupportsReasoning {
@@ -482,6 +496,7 @@ func (s *llmModelService) SaveModel(req SaveLLMModelRequest) (*models.LLMModel, 
 	if err := s.repo.Save(model); err != nil {
 		return nil, fmt.Errorf("failed to save llm model: %w", err)
 	}
+	s.resetProviderDiscoveryCache()
 
 	return model, nil
 }
@@ -497,6 +512,29 @@ func discoveryURLTargetsPrivateNetwork(raw string) bool {
 	}
 	ip := net.ParseIP(host)
 	return ip != nil && (ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsUnspecified())
+}
+
+func sameModelDiscoveryConfig(current, next *models.LLMModel) bool {
+	if current == nil || next == nil {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(current.ProviderType), strings.TrimSpace(next.ProviderType)) &&
+		strings.EqualFold(strings.TrimSpace(current.ProtocolType), strings.TrimSpace(next.ProtocolType)) &&
+		strings.EqualFold(strings.TrimRight(strings.TrimSpace(current.BaseURL), "/"), strings.TrimRight(strings.TrimSpace(next.BaseURL), "/")) &&
+		optionalStringEqual(current.APIKey, next.APIKey) &&
+		optionalStringEqual(current.APIKeySecretRef, next.APIKeySecretRef)
+}
+
+func optionalStringEqual(left, right *string) bool {
+	leftValue := ""
+	if left != nil {
+		leftValue = strings.TrimSpace(*left)
+	}
+	rightValue := ""
+	if right != nil {
+		rightValue = strings.TrimSpace(*right)
+	}
+	return leftValue == rightValue
 }
 
 func populateReasoningCapabilities(items []models.LLMModel) {
@@ -520,6 +558,7 @@ func (s *llmModelService) DeleteModel(id int) error {
 	if err := s.repo.Delete(id); err != nil {
 		return fmt.Errorf("failed to delete llm model: %w", err)
 	}
+	s.resetProviderDiscoveryCache()
 	return nil
 }
 

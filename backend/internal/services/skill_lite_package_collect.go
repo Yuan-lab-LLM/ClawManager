@@ -182,14 +182,27 @@ func (s *skillService) reconcileLiteDiscoveredBlob(skill *models.Skill, contentH
 	if blob == nil {
 		return nil, version, nil
 	}
-	if !strings.EqualFold(strings.TrimSpace(blob.ContentHash), contentHash) {
-		blob.ContentHash = contentHash
-		blob.ArchiveHash = contentHash
-		if err := s.repo.UpdateBlob(blob); err != nil {
-			return nil, version, err
-		}
+	if strings.EqualFold(strings.TrimSpace(blob.ContentHash), contentHash) {
+		return blob, version, nil
 	}
-	return blob, version, nil
+
+	// Skill blobs are content-addressed and shared across skills/instances.
+	// Changing the hash of the current version's blob can collide with an
+	// already-known blob and, more importantly, rewrites history for every
+	// version that references it. Resolve the observed content to its own blob;
+	// SyncAgentSkills will create the blob/version when it is genuinely new.
+	targetBlob, err := s.repo.GetBlobByContentHash(contentHash)
+	if err != nil {
+		return nil, nil, err
+	}
+	if targetBlob == nil {
+		return nil, nil, nil
+	}
+	targetVersion, err := s.repo.GetVersionBySkillAndBlob(skill.ID, targetBlob.ID)
+	if err != nil {
+		return nil, nil, err
+	}
+	return targetBlob, targetVersion, nil
 }
 
 func liteInventoryUsesWorkspaceHash(instance *models.Instance) bool {

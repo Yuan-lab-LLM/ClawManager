@@ -72,6 +72,14 @@ func HandleError(c *gin.Context, err error) {
 	}
 	// Log the actual error for debugging
 	log.Printf("[ERROR] %v", err)
+	var coded interface {
+		ErrorCode() string
+		HTTPStatus() int
+	}
+	if errors.As(err, &coded) {
+		c.JSON(coded.HTTPStatus(), gin.H{"success": false, "error": err.Error(), "error_code": coded.ErrorCode()})
+		return
+	}
 
 	// Handle validation errors
 	if validationErrors, ok := err.(validator.ValidationErrors); ok {
@@ -97,7 +105,7 @@ func HandleError(c *gin.Context, err error) {
 		Error(c, http.StatusBadRequest, errStr)
 		return
 	}
-	if errStr == "context window tokens must be non-negative" || errStr == "context window tokens exceeds the supported maximum" ||
+	if errStr == "LDAP users must be imported from LDAP" || errStr == "context window tokens must be non-negative" || errStr == "context window tokens exceeds the supported maximum" ||
 		errStr == "max concurrent requests must be non-negative" || errStr == "deployment priority must be non-negative" ||
 		errStr == "model group must be at most 100 characters" {
 		Error(c, http.StatusBadRequest, errStr)
@@ -122,7 +130,7 @@ func HandleError(c *gin.Context, err error) {
 		Error(c, http.StatusNotFound, errStr)
 	case "managed instance gateway keys cannot be revoked manually", "managed instance gateway keys require coordinated rotation", "only active gateway keys can be rotated", "gateway key is no longer active":
 		Error(c, http.StatusConflict, errStr)
-	case "username already exists", "email already exists", "instance name already exists", "team name already exists", "openclaw config resource key already exists", "team task message id already exists":
+	case "username already exists", "user already exists", "email already exists", "instance name already exists", "team name already exists", "openclaw config resource key already exists", "team task message id already exists":
 		Error(c, http.StatusConflict, errStr)
 	case "display name already exists":
 		Error(c, http.StatusConflict, errStr)
@@ -138,7 +146,7 @@ func HandleError(c *gin.Context, err error) {
 		Error(c, http.StatusUnauthorized, errStr)
 	case "agent registration is only supported for openclaw instances", "agent registration is only supported for openclaw or hermes instances", "agent registration is only supported for managed runtime instances", "agent id does not match session", "access denied", "skill_attach_forbidden":
 		Error(c, http.StatusForbidden, errStr)
-	case "current password is incorrect":
+	case "current password is incorrect", "enterprise users must change password in the enterprise identity platform":
 		Error(c, http.StatusBadRequest, errStr)
 	case "user not found", "model not found", "skill not found", "skill hub tag not found":
 		Error(c, http.StatusNotFound, errStr)

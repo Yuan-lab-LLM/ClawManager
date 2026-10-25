@@ -224,13 +224,6 @@ func (s *gatewayKeyService) Rotate(ctx context.Context, id, actorID int) (*model
 	return rotated, raw, nil
 }
 
-func stringValue(value *string) string {
-	if value == nil {
-		return ""
-	}
-	return *value
-}
-
 func (s *gatewayKeyService) Resolve(raw string) (*models.GatewayKey, error) {
 	key, err := s.repo.GetByToken(raw)
 	if err != nil || key == nil {

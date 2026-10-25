@@ -11,8 +11,8 @@ type stubCommandRepo struct {
 	failed *models.InstanceCommand
 }
 
-func (s *stubCommandRepo) Create(*models.InstanceCommand) error { panic("not used") }
-func (s *stubCommandRepo) Update(*models.InstanceCommand) error { panic("not used") }
+func (s *stubCommandRepo) Create(*models.InstanceCommand) error         { panic("not used") }
+func (s *stubCommandRepo) Update(*models.InstanceCommand) error         { panic("not used") }
 func (s *stubCommandRepo) GetByID(int) (*models.InstanceCommand, error) { panic("not used") }
 func (s *stubCommandRepo) GetByInstanceIdempotencyKey(int, string) (*models.InstanceCommand, error) {
 	panic("not used")

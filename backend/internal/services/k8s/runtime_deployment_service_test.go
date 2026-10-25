@@ -3,6 +3,7 @@ package k8s
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -145,7 +146,9 @@ func TestBuildRuntimeDeploymentInjectsAgentV2Environment(t *testing.T) {
 	requireEnv(t, container, "CLAWMANAGER_RUNTIME_TYPE", "hermes")
 	requireEnv(t, container, "CLAWMANAGER_BACKEND_URL", "http://clawmanager-gateway.clawmanager-system.svc.cluster.local:9001")
 	requireEnv(t, container, "CLAWMANAGER_RUNTIME_DEPLOYMENT_NAME", "runtime-hermes")
+	requireEnv(t, container, "CLAWMANAGER_DEPLOYMENT_NAME", "runtime-hermes")
 	requireEnv(t, container, "CLAWMANAGER_RUNTIME_IMAGE_REF", "registry/hermes:v2")
+	requireEnv(t, container, "CLAWMANAGER_RUNTIME_IMAGE_DIGEST", "")
 	requireEnv(t, container, "RUNTIME_WORKSPACE_ROOT", "/workspaces")
 	requireEnv(t, container, "RUNTIME_AGENT_LISTEN_ADDR", "0.0.0.0:19090")
 	requireEnv(t, container, "RUNTIME_AGENT_PUBLIC_PORT", "19090")
@@ -159,6 +162,13 @@ func TestBuildRuntimeDeploymentInjectsAgentV2Environment(t *testing.T) {
 	requireEnvFieldRef(t, container, "POD_NAMESPACE", "metadata.namespace")
 	requireEnvFieldRef(t, container, "POD_IP", "status.podIP")
 	requireEnvFieldRef(t, container, "NODE_NAME", "spec.nodeName")
+}
+
+func TestRuntimeDeploymentReportsImmutableImageDigest(t *testing.T) {
+	digest := strings.Repeat("a", 64)
+	image := "registry/openclaw@sha256:" + digest
+	deployment := BuildRuntimeDeployment(RuntimeDeploymentSpec{Name: "runtime-openclaw", Namespace: "runtime-system", RuntimeType: "openclaw", Image: image, Replicas: 1})
+	requireEnv(t, deployment.Spec.Template.Spec.Containers[0], "CLAWMANAGER_RUNTIME_IMAGE_DIGEST", "sha256:"+digest)
 }
 
 func TestRuntimeDeploymentServiceEnsureCreatesAndUpdates(t *testing.T) {
@@ -329,7 +339,7 @@ func TestRuntimeDeploymentServiceRolloutImage(t *testing.T) {
 	client := fake.NewSimpleClientset(deployment)
 	service := NewRuntimeDeploymentService(client)
 
-	if err := service.RolloutImage(context.Background(), "runtime-system", "runtime-hermes", "registry/hermes:v2", 1, 2); err != nil {
+	if err := service.RolloutImage(context.Background(), "runtime-system", "runtime-hermes", "registry/hermes:v2", "", 1, 2); err != nil {
 		t.Fatalf("RolloutImage returned error: %v", err)
 	}
 
@@ -356,6 +366,189 @@ func TestRuntimeDeploymentServiceRolloutImage(t *testing.T) {
 	}
 }
 
+func TestRuntimeDeploymentServiceCreatesIsolatedUpgradePool(t *testing.T) {
+	source := BuildRuntimeDeployment(RuntimeDeploymentSpec{Name: "openclaw-runtime", Namespace: "runtime-system", RuntimeType: "openclaw", Image: "registry/openclaw:old", Replicas: 3, WorkspacePVCClaimName: "workspaces"})
+	client := fake.NewSimpleClientset(source)
+	service := NewRuntimeDeploymentService(client)
+	targetImage := "registry/openclaw@sha256:" + strings.Repeat("a", 64)
+	if err := service.EnsureUpgradePool(context.Background(), "runtime-system", "openclaw-runtime", "openclaw-runtime-u81", targetImage, "81"); err != nil {
+		t.Fatal(err)
+	}
+	target, err := client.AppsV1().Deployments("runtime-system").Get(context.Background(), "openclaw-runtime-u81", metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if target.Spec.Replicas == nil || *target.Spec.Replicas != 3 {
+		t.Fatalf("target replicas = %v, want 3", target.Spec.Replicas)
+	}
+	if target.Spec.Selector.MatchLabels["app"] != "openclaw-runtime-u81" || target.Labels["clawmanager.io/source-deployment"] != "openclaw-runtime" {
+		t.Fatalf("target labels/selectors are not isolated: labels=%v selector=%v", target.Labels, target.Spec.Selector.MatchLabels)
+	}
+	if target.Labels[runtimeSchedulingLabel] != "false" || target.Spec.Template.Labels[runtimeSchedulingLabel] != "false" {
+		t.Fatalf("upgrade target must start unschedulable: labels=%v template=%v", target.Labels, target.Spec.Template.Labels)
+	}
+	container := target.Spec.Template.Spec.Containers[0]
+	if container.Image != targetImage {
+		t.Fatalf("target runtime image = %s", container.Image)
+	}
+	requireEnv(t, container, "CLAWMANAGER_RUNTIME_UPGRADE_ID", "81")
+	requireEnv(t, container, "CLAWMANAGER_RUNTIME_DEPLOYMENT_NAME", "openclaw-runtime-u81")
+	requireEnv(t, container, "CLAWMANAGER_DEPLOYMENT_NAME", "openclaw-runtime-u81")
+	unchanged, err := client.AppsV1().Deployments("runtime-system").Get(context.Background(), "openclaw-runtime", metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if unchanged.Spec.Template.Spec.Containers[0].Image != "registry/openclaw:old" {
+		t.Fatalf("source deployment image was mutated: %s", unchanged.Spec.Template.Spec.Containers[0].Image)
+	}
+}
+
+func TestRuntimeDeploymentServiceActivatesAndSafelyDeletesUpgradePool(t *testing.T) {
+	const namespace = "runtime-system"
+	source := BuildRuntimeDeployment(RuntimeDeploymentSpec{Name: "openclaw-runtime", Namespace: namespace, RuntimeType: "openclaw", Image: "registry/openclaw:old", Replicas: 1, WorkspacePVCClaimName: "workspaces"})
+	client := fake.NewSimpleClientset(source)
+	service := NewRuntimeDeploymentService(client)
+	targetImage := "registry/openclaw@sha256:" + strings.Repeat("c", 64)
+	if err := service.EnsureUpgradePool(context.Background(), namespace, source.Name, "openclaw-runtime-u9", targetImage, "9"); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.SetUpgradePoolActive(context.Background(), namespace, source.Name, "openclaw-runtime-u9", "9", true); err != nil {
+		t.Fatal(err)
+	}
+	activeSource, _ := client.AppsV1().Deployments(namespace).Get(context.Background(), source.Name, metav1.GetOptions{})
+	activeTarget, _ := client.AppsV1().Deployments(namespace).Get(context.Background(), "openclaw-runtime-u9", metav1.GetOptions{})
+	if activeSource.Labels[runtimeSchedulingLabel] != "false" || activeTarget.Labels[runtimeSchedulingLabel] != "true" {
+		t.Fatalf("activation labels source=%v target=%v", activeSource.Labels, activeTarget.Labels)
+	}
+	if err := service.SetUpgradePoolActive(context.Background(), namespace, source.Name, "openclaw-runtime-u9", "9", false); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.DeleteUpgradePool(context.Background(), namespace, source.Name, "openclaw-runtime-u9", "9"); err == nil {
+		t.Fatal("expected deletion to fail before target is scaled to zero")
+	}
+	if err := service.Scale(context.Background(), namespace, "openclaw-runtime-u9", 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.DeleteUpgradePool(context.Background(), namespace, source.Name, "openclaw-runtime-u9", "wrong"); err == nil {
+		t.Fatal("expected ownership mismatch to fail closed")
+	}
+	if err := service.DeleteUpgradePool(context.Background(), namespace, source.Name, "openclaw-runtime-u9", "9"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.AppsV1().Deployments(namespace).Get(context.Background(), "openclaw-runtime-u9", metav1.GetOptions{}); !apierrors.IsNotFound(err) {
+		t.Fatalf("upgrade target still exists: %v", err)
+	}
+}
+
+func TestRuntimeDeploymentServiceScopedCommitKeepsSourceScheduling(t *testing.T) {
+	const ns = "runtime-system"
+	source := BuildRuntimeDeployment(RuntimeDeploymentSpec{Name: "openclaw-runtime", Namespace: ns, RuntimeType: "openclaw", Image: "old", Replicas: 1, WorkspacePVCClaimName: "workspaces"})
+	source.Labels[runtimeSchedulingLabel] = "true"
+	client := fake.NewSimpleClientset(source)
+	service := NewRuntimeDeploymentService(client)
+	if err := service.EnsureUpgradePool(context.Background(), ns, source.Name, "openclaw-runtime-u99", "registry/core@sha256:"+strings.Repeat("c", 64), "99"); err != nil {
+		t.Fatal(err)
+	}
+	preserver := service.(interface {
+		SetUpgradePoolActivePreservingSource(context.Context, string, string, string, string) error
+	})
+	if err := preserver.SetUpgradePoolActivePreservingSource(context.Background(), ns, source.Name, "openclaw-runtime-u99", "99"); err != nil {
+		t.Fatal(err)
+	}
+	old, _ := client.AppsV1().Deployments(ns).Get(context.Background(), source.Name, metav1.GetOptions{})
+	next, _ := client.AppsV1().Deployments(ns).Get(context.Background(), "openclaw-runtime-u99", metav1.GetOptions{})
+	if old.Labels[runtimeSchedulingLabel] != "true" || next.Labels[runtimeSchedulingLabel] != "true" || *old.Spec.Replicas != 1 {
+		t.Fatal("scoped commit disabled the excluded instances' source")
+	}
+}
+
+func TestRuntimeDeploymentServiceUpgradeLabOwnershipIsIsolatedAndDeleteIsFailClosed(t *testing.T) {
+	const namespace = "runtime-system"
+	source := BuildRuntimeDeployment(RuntimeDeploymentSpec{Name: "openclaw-runtime", Namespace: namespace, RuntimeType: "openclaw", Image: "registry/openclaw:serving", Replicas: 2, WorkspacePVCClaimName: "workspaces"})
+	client := fake.NewSimpleClientset(source)
+	service := NewRuntimeDeploymentService(client)
+	lab, ok := service.(RuntimeUpgradeLabDeploymentService)
+	if !ok {
+		t.Fatal("runtime deployment service does not expose upgrade lab operations")
+	}
+	labImage := "registry/openclaw@sha256:" + strings.Repeat("b", 64)
+	if err := lab.EnsureUpgradeLabPool(context.Background(), namespace, source.Name, "openclaw-upgrade-lab-r7-source", labImage, "lab-r7", 1); err != nil {
+		t.Fatal(err)
+	}
+	created, err := client.AppsV1().Deployments(namespace).Get(context.Background(), "openclaw-upgrade-lab-r7-source", metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.Labels[upgradeLabPurposeLabel] != upgradeLabPurposeValue || created.Labels[upgradeLabRunLabel] != "lab-r7" {
+		t.Fatalf("lab ownership labels = %#v", created.Labels)
+	}
+	if created.Spec.Replicas == nil || *created.Spec.Replicas != 1 || created.Spec.Selector.MatchLabels["app"] != created.Name {
+		t.Fatalf("lab pool is not isolated: replicas=%v selector=%#v", created.Spec.Replicas, created.Spec.Selector)
+	}
+	if got := created.Spec.Template.Spec.Containers[0].Image; got != labImage {
+		t.Fatalf("lab image = %q", got)
+	}
+	serving, err := client.AppsV1().Deployments(namespace).Get(context.Background(), source.Name, metav1.GetOptions{})
+	if err != nil || serving.Spec.Template.Spec.Containers[0].Image != "registry/openclaw:serving" {
+		t.Fatalf("serving deployment was changed: deployment=%#v err=%v", serving, err)
+	}
+	if err := lab.DeleteUpgradeLabPool(context.Background(), namespace, source.Name, "lab-r7"); err == nil {
+		t.Fatal("cleanup accepted a serving deployment")
+	}
+	if _, err := client.AppsV1().Deployments(namespace).Get(context.Background(), source.Name, metav1.GetOptions{}); err != nil {
+		t.Fatalf("serving deployment was removed: %v", err)
+	}
+	if err := lab.DeleteUpgradeLabPool(context.Background(), namespace, created.Name, "wrong-run"); err == nil {
+		t.Fatal("cleanup accepted the wrong lab owner")
+	}
+	if err := lab.DeleteUpgradeLabPool(context.Background(), namespace, created.Name, "lab-r7"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRuntimeDeploymentServiceCreatesFullStandbySurgeForOpenClawUpgrade(t *testing.T) {
+	deployment := BuildRuntimeDeployment(RuntimeDeploymentSpec{
+		Name: "openclaw-runtime", Namespace: "runtime-system", RuntimeType: "openclaw",
+		Image: "registry/openclaw:old", Replicas: 4, WorkspaceNFSServer: "nfs.local", WorkspaceNFSPath: "/exports",
+	})
+	client := fake.NewSimpleClientset(deployment)
+	service := NewRuntimeDeploymentService(client)
+	if err := service.RolloutImage(context.Background(), "runtime-system", "openclaw-runtime", "registry/openclaw@sha256:"+strings.Repeat("a", 64), "81", 3, 1); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := client.AppsV1().Deployments("runtime-system").Get(context.Background(), "openclaw-runtime", metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	container := updated.Spec.Template.Spec.Containers[0]
+	requireEnv(t, container, "CLAWMANAGER_RUNTIME_UPGRADE_ID", "81")
+	if container.ReadinessProbe == nil || container.ReadinessProbe.HTTPGet == nil || container.ReadinessProbe.HTTPGet.Path != "/readyz" || container.ReadinessProbe.HTTPGet.Port.StrVal != "agent" {
+		t.Fatalf("standby readiness probe = %#v", container.ReadinessProbe)
+	}
+	if got := updated.Spec.Strategy.RollingUpdate.MaxUnavailable.IntValue(); got != 0 {
+		t.Fatalf("maxUnavailable = %d, want 0", got)
+	}
+	if got := updated.Spec.Strategy.RollingUpdate.MaxSurge.IntValue(); got != 4 {
+		t.Fatalf("maxSurge = %d, want full replica count 4", got)
+	}
+	if err := service.RolloutImage(context.Background(), "runtime-system", "openclaw-runtime", "registry/openclaw:old", "", 0, 1); err != nil {
+		t.Fatal(err)
+	}
+	rolledBack, err := client.AppsV1().Deployments("runtime-system").Get(context.Background(), "openclaw-runtime", metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	container = rolledBack.Spec.Template.Spec.Containers[0]
+	if container.ReadinessProbe != nil {
+		t.Fatalf("upgrade readiness probe survived rollback: %#v", container.ReadinessProbe)
+	}
+	for _, env := range container.Env {
+		if env.Name == "CLAWMANAGER_RUNTIME_UPGRADE_ID" {
+			t.Fatal("upgrade id survived rollback")
+		}
+	}
+}
+
 func TestRuntimeDeploymentServiceRolloutImageRetriesConflict(t *testing.T) {
 	deployment := BuildRuntimeDeployment(RuntimeDeploymentSpec{
 		Name:               "runtime-hermes",
@@ -377,7 +570,7 @@ func TestRuntimeDeploymentServiceRolloutImageRetriesConflict(t *testing.T) {
 	})
 	service := NewRuntimeDeploymentService(client)
 
-	if err := service.RolloutImage(context.Background(), "runtime-system", "runtime-hermes", "registry/hermes:v2", 1, 1); err != nil {
+	if err := service.RolloutImage(context.Background(), "runtime-system", "runtime-hermes", "registry/hermes:v2", "", 1, 1); err != nil {
 		t.Fatalf("RolloutImage returned error: %v", err)
 	}
 	if updateAttempts < 2 {
@@ -428,9 +621,14 @@ func TestRuntimeDeploymentServiceListPodsReturnsRuntimeDeploymentPods(t *testing
 				Type:   corev1.PodReady,
 				Status: corev1.ConditionTrue,
 			}},
+			ContainerStatuses: []corev1.ContainerStatus{{Name: "runtime", ImageID: "docker-pullable://registry/openclaw-lite@sha256:" + strings.Repeat("a", 64)}},
 		},
 	}
-	client := fake.NewSimpleClientset(deployment, pod)
+	evicted := pod.DeepCopy()
+	evicted.Name = "openclaw-runtime-old-evicted"
+	evicted.Status.Phase = corev1.PodFailed
+	evicted.Status.Reason = "Evicted"
+	client := fake.NewSimpleClientset(deployment, pod, evicted)
 	service := NewRuntimeDeploymentService(client)
 
 	pods, err := service.ListPods(context.Background(), "runtime-system", "openclaw")
@@ -447,11 +645,62 @@ func TestRuntimeDeploymentServiceListPodsReturnsRuntimeDeploymentPods(t *testing
 	if got.ImageRef != "registry/openclaw-lite:final2" {
 		t.Fatalf("image = %q, want registry/openclaw-lite:final2", got.ImageRef)
 	}
+	if got.ImageDigest != "sha256:"+strings.Repeat("a", 64) {
+		t.Fatalf("image digest = %q", got.ImageDigest)
+	}
 	if got.State != "ready" {
 		t.Fatalf("state = %q, want ready", got.State)
 	}
 	if got.PodIP == nil || *got.PodIP != podIP || got.NodeName == nil || *got.NodeName != nodeName {
 		t.Fatalf("pod network fields = ip:%v node:%v, want %s/%s", got.PodIP, got.NodeName, podIP, nodeName)
+	}
+}
+
+func TestRuntimeDeploymentServiceListPodsSkipsRetainedZeroReplicaPool(t *testing.T) {
+	active := BuildRuntimeDeployment(RuntimeDeploymentSpec{Name: "openclaw-runtime", Namespace: "runtime-system", RuntimeType: "openclaw", Image: "registry/openclaw:v1", Replicas: 1})
+	retained := BuildRuntimeDeployment(RuntimeDeploymentSpec{Name: "openclaw-runtime-u45", Namespace: "runtime-system", RuntimeType: "openclaw", Image: "registry/openclaw:v2", Replicas: 0})
+	retained.Labels[runtimePoolRoleLabel] = "upgrade-target"
+	retained.Labels[runtimeUpgradeIDLabel] = "45"
+	retained.Labels[runtimeSourceLabel] = "openclaw-runtime"
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "openclaw-runtime-a", Namespace: "runtime-system", Labels: map[string]string{"app": "openclaw-runtime"}}, Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "runtime", Image: "registry/openclaw:v1"}}}}
+	client := fake.NewSimpleClientset(active, retained, pod)
+	podLists := 0
+	client.PrependReactor("list", "pods", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		podLists++
+		return false, nil, nil
+	})
+	service := NewRuntimeDeploymentService(client)
+
+	if _, err := service.ListPods(context.Background(), "runtime-system", "openclaw"); err != nil {
+		t.Fatalf("ListPods returned error: %v", err)
+	}
+	if podLists != 1 {
+		t.Fatalf("pod list calls = %d, want only the active pool", podLists)
+	}
+}
+
+func TestRuntimeDeploymentServiceListDeploymentPodsIsScoped(t *testing.T) {
+	active := BuildRuntimeDeployment(RuntimeDeploymentSpec{Name: "openclaw-runtime-u57", Namespace: "runtime-system", RuntimeType: "openclaw", Image: "registry/openclaw:v1", Replicas: 1})
+	unrelated := BuildRuntimeDeployment(RuntimeDeploymentSpec{Name: "openclaw-runtime-u45", Namespace: "runtime-system", RuntimeType: "openclaw", Image: "registry/openclaw:v2", Replicas: 1})
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "openclaw-runtime-u57-a", Namespace: "runtime-system", Labels: map[string]string{"app": "openclaw-runtime-u57", "clawmanager.io/runtime-type": "openclaw"}}, Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "runtime", Image: "registry/openclaw:v1"}}}}
+	client := fake.NewSimpleClientset(active, unrelated, pod)
+	podLists := 0
+	client.PrependReactor("list", "pods", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		podLists++
+		selector := action.(k8stesting.ListAction).GetListRestrictions().Labels.String()
+		if strings.Contains(selector, "openclaw-runtime-u45") {
+			return true, nil, fmt.Errorf("unrelated pool must not be queried")
+		}
+		return false, nil, nil
+	})
+	service := NewRuntimeDeploymentService(client)
+
+	pods, err := service.ListDeploymentPods(context.Background(), []RuntimeDeploymentRef{{Namespace: "runtime-system", Name: "openclaw-runtime-u57"}})
+	if err != nil {
+		t.Fatalf("ListDeploymentPods returned error: %v", err)
+	}
+	if podLists != 1 || len(pods) != 1 || pods[0].DeploymentName != "openclaw-runtime-u57" {
+		t.Fatalf("scoped inventory calls=%d pods=%#v", podLists, pods)
 	}
 }
 

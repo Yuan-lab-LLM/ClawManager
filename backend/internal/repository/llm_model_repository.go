@@ -46,6 +46,7 @@ CREATE TABLE IF NOT EXISTS llm_models (
 	  quality_tier INT NOT NULL DEFAULT 0,
   base_url VARCHAR(500) NOT NULL,
   provider_model_name VARCHAR(255) NOT NULL,
+  provider_models_json TEXT NULL,
   reasoning_enabled BOOLEAN NOT NULL DEFAULT FALSE,
   api_key TEXT NULL,
   api_key_secret_ref VARCHAR(255) NULL,
@@ -147,6 +148,9 @@ func (r *llmModelRepository) readModels(cond db.Cond, order bool) ([]models.LLMM
 		}
 		return nil
 	})
+	if err == nil {
+		populateProviderModels(items)
+	}
 	return items, err
 }
 
@@ -261,4 +265,10 @@ func (r *llmModelRepository) Delete(id int) error {
 		publishModelAccessChange()
 	}
 	return err
+}
+
+func populateProviderModels(items []models.LLMModel) {
+	for index := range items {
+		models.PopulateLLMProviderModels(&items[index])
+	}
 }

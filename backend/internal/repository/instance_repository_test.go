@@ -13,6 +13,7 @@ func TestBuildV2SchedulerInstanceQueryRequiresWorkspaceTypeAndStatuses(t *testin
 	requiredFragments := []string{
 		"FROM instances",
 		"status IN (?, ?)",
+		"description, ''))) NOT LIKE 'openclaw-upgrade-lab:%'",
 		"runtime_type = ?",
 		"instance_mode = ?",
 		"workspace_path IS NOT NULL",

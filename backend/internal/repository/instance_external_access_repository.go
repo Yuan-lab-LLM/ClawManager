@@ -13,8 +13,44 @@ type InstanceExternalAccessRepository interface {
 	GetByInstanceID(ctx context.Context, instanceID int) (*models.InstanceExternalAccess, error)
 	GetByShortCodeHash(ctx context.Context, codeHash string) (*models.InstanceExternalAccess, error)
 	Upsert(ctx context.Context, access *models.InstanceExternalAccess) error
+	ResetURL(ctx context.Context, instanceID, createdBy int, publicSlug, shortCodeHash string) (bool, error)
+	ResetPassword(ctx context.Context, instanceID, createdBy int, passwordHash, passwordValue, passwordHint string) (bool, error)
 	Disable(ctx context.Context, instanceID int) error
 	MarkUsed(ctx context.Context, id int64) error
+}
+
+func (r *instanceExternalAccessRepository) ResetURL(ctx context.Context, instanceID, createdBy int, publicSlug, shortCodeHash string) (bool, error) {
+	result, err := r.sess.SQL().ExecContext(ctx, `
+		UPDATE instance_external_access
+		SET public_slug = ?, short_code_hash = ?, public_token_hash = NULL,
+		    created_by = ?, last_used_at = NULL, updated_at = ?
+		WHERE instance_id = ? AND enabled = 1
+	`, publicSlug, shortCodeHash, createdBy, time.Now().UTC(), instanceID)
+	if err != nil {
+		return false, fmt.Errorf("failed to reset instance external access URL: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("failed to inspect instance external access URL reset: %w", err)
+	}
+	return rows == 1, nil
+}
+
+func (r *instanceExternalAccessRepository) ResetPassword(ctx context.Context, instanceID, createdBy int, passwordHash, passwordValue, passwordHint string) (bool, error) {
+	result, err := r.sess.SQL().ExecContext(ctx, `
+		UPDATE instance_external_access
+		SET api_key_hash = ?, password_value = ?, api_key_prefix = ?, public_token_hash = NULL,
+		    created_by = ?, last_used_at = NULL, updated_at = ?
+		WHERE instance_id = ? AND enabled = 1 AND auth_mode = 'password'
+	`, passwordHash, passwordValue, passwordHint, createdBy, time.Now().UTC(), instanceID)
+	if err != nil {
+		return false, fmt.Errorf("failed to reset instance external access password: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("failed to inspect instance external access password reset: %w", err)
+	}
+	return rows == 1, nil
 }
 
 type instanceExternalAccessRepository struct {

@@ -26,10 +26,10 @@ func NewServiceService() *ServiceService {
 
 // ServiceConfig holds configuration for creating a service
 type ServiceConfig struct {
-	InstanceID    int
-	InstanceName  string
-	UserID        int
-	ContainerPort int32
+	InstanceID      int
+	InstanceName    string
+	UserID          int
+	ContainerPort   int32
 	AdditionalPorts []int32
 }
 

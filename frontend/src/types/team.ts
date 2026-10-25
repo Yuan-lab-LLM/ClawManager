@@ -22,6 +22,7 @@ export interface Team {
 }
 
 export interface TeamMember {
+  icon_key?: string;
   id: number;
   team_id: number;
   instance_id?: number;
@@ -133,6 +134,7 @@ export interface TeamWorkItem {
 }
 
 export interface CreateTeamMemberRequest {
+  icon_key?: string;
   member_id?: string;
   name?: string;
   role: string;
@@ -208,6 +210,7 @@ export interface TeamListResponse {
 }
 
 export interface TeamWorkspaceFileEntry {
+  editable?: boolean;
   name: string;
   path: string;
   type: "file" | "directory";
@@ -229,6 +232,8 @@ export interface TeamWorkspacePreviewResponse {
 }
 
 export interface DispatchTeamTaskRequest {
+  execution_type?: 'team' | 'single_member';
+  context_task_id?: number;
   target_member_id: string;
   message_id?: string;
   payload: Record<string, unknown>;

@@ -89,7 +89,7 @@ test('settings page includes entry and endpoints use admin-only group', () => {
   assert.match(main, /adminSystemSettings\.PUT\("\/routing-classifier\/mode", routingClassifierHandler.SetMode\)/);
   assert.doesNotMatch(main, /WithRoutingClassifier\(/);
   assert.match(main, /LiveRoutingOption\(os\.Getenv\("CLAWMANAGER_ROUTING_CLASSIFIER"\)\)/);
-  assert.match(main, /WithDeploymentStore\(deploymentStore\), classifierOption\)/);
+  assert.match(main, /WithDeploymentStore\(deploymentStore\),\s*classifierOption(?:,|\))/);
 });
 
 test('live mode discloses data transfer and save affects subsequent Auto requests', async () => {

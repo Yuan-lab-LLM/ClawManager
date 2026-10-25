@@ -8,12 +8,12 @@ import (
 )
 
 type SkillPackageMaterializeWorker struct {
-	service            *SkillPackageMaterializeService
-	tick               time.Duration
-	batchSize          int
-	concurrency        int
-	perInstanceLimit   int
-	enabled            bool
+	service          *SkillPackageMaterializeService
+	tick             time.Duration
+	batchSize        int
+	concurrency      int
+	perInstanceLimit int
+	enabled          bool
 
 	mu       sync.Mutex
 	running  bool

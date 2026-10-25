@@ -3,6 +3,7 @@ package k8s
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -27,6 +28,7 @@ const (
 
 	PodSecurityDefault        PodSecurityMode = "default"
 	PodSecurityChromiumCompat PodSecurityMode = "chromium-compat"
+	PodSecurityWorkbuddyLinux PodSecurityMode = "workbuddy-linux"
 	PodSecurityPrivileged     PodSecurityMode = "privileged"
 )
 
@@ -44,29 +46,34 @@ func (s *PodService) GetClient() *Client {
 
 // PodConfig holds configuration for creating a pod
 type PodConfig struct {
-	InstanceID           int
-	InstanceName         string
-	UserID               int
-	Type                 string
-	RuntimeType          string
-	CPUCores             float64
-	MemoryGB             int
-	GPUEnabled           bool
-	GPUCount             int
-	Image                string
-	MountPath            string
-	ContainerPort        int32
-	ImagePullPolicy      corev1.PullPolicy
-	ExtraEnv             map[string]string
-	EnvFromSecretNames   []string
-	ExtraPVCMounts       []PVCMount
-	ConfigMapFileMounts  []ConfigMapFileMount
-	VolumeInitScripts    []VolumeInitScript
-	FSGroup              *int64
-	NodeSelector         map[string]string
-	VolumeOwnershipFixes []VolumeOwnershipFix
-	SHMSizeGB            int
-	SecurityMode         PodSecurityMode
+	InstanceID            int
+	InstanceName          string
+	UserID                int
+	Type                  string
+	RuntimeType           string
+	CPUCores              float64
+	MemoryGB              int
+	GPUEnabled            bool
+	GPUCount              int
+	Image                 string
+	PVCName               string
+	MountPath             string
+	ContainerPort         int32
+	ProbePort             int32
+	StartupProbeFailures  int32
+	TerminationGrace      int64
+	ImagePullPolicy       corev1.PullPolicy
+	ExtraEnv              map[string]string
+	EnvFromSecretNames    []string
+	ExtraPVCMounts        []PVCMount
+	ConfigMapFileMounts   []ConfigMapFileMount
+	SecretDirectoryMounts []SecretDirectoryMount
+	VolumeInitScripts     []VolumeInitScript
+	FSGroup               *int64
+	NodeSelector          map[string]string
+	VolumeOwnershipFixes  []VolumeOwnershipFix
+	SHMSizeGB             int
+	SecurityMode          PodSecurityMode
 }
 
 type PVCMount struct {
@@ -83,6 +90,14 @@ type ConfigMapFileMount struct {
 	MountPath     string
 	ReadOnly      bool
 	AsDirectory   bool
+}
+
+// SecretDirectoryMount projects every key in a Secret into a read-only directory.
+// Use this instead of EnvFrom when the consumer expects credential/config files.
+type SecretDirectoryMount struct {
+	Name       string
+	SecretName string
+	MountPath  string
 }
 
 type VolumeOwnershipFix struct {
@@ -108,7 +123,10 @@ func (s *PodService) CreatePod(ctx context.Context, config PodConfig) (*corev1.P
 
 	deploymentName := s.client.GetDeploymentName(config.InstanceID, config.InstanceName)
 	namespace := s.client.GetNamespace(config.UserID)
-	pvcName := s.client.GetPVCName(config.InstanceID)
+	pvcName := strings.TrimSpace(config.PVCName)
+	if pvcName == "" {
+		pvcName = s.client.GetPVCName(config.InstanceID)
+	}
 	runtimeType := normalizePodRuntimeType(config.RuntimeType)
 
 	// Build resource requirements
@@ -143,7 +161,7 @@ func (s *PodService) CreatePod(ctx context.Context, config PodConfig) (*corev1.P
 	}
 
 	annotations := map[string]string{}
-	if config.SecurityMode == PodSecurityChromiumCompat {
+	if requiresUnconfinedAppArmor(config.SecurityMode) {
 		annotations["container.apparmor.security.beta.kubernetes.io/desktop"] = "unconfined"
 	}
 
@@ -322,6 +340,21 @@ func (s *PodService) CreatePod(ctx context.Context, config PodConfig) (*corev1.P
 		pod.Spec.Containers[0].VolumeMounts = append(pod.Spec.Containers[0].VolumeMounts, volumeMount)
 	}
 
+	for _, mount := range config.SecretDirectoryMounts {
+		if mount.Name == "" || mount.SecretName == "" || mount.MountPath == "" {
+			continue
+		}
+		pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
+			Name: mount.Name,
+			VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{
+				SecretName: mount.SecretName,
+			}},
+		})
+		pod.Spec.Containers[0].VolumeMounts = append(pod.Spec.Containers[0].VolumeMounts, corev1.VolumeMount{
+			Name: mount.Name, MountPath: mount.MountPath, ReadOnly: true,
+		})
+	}
+
 	if config.SHMSizeGB > 0 {
 		shmLimit := resource.MustParse(fmt.Sprintf("%dGi", config.SHMSizeGB))
 		pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
@@ -423,6 +456,22 @@ func buildContainerSecurityContext(mode PodSecurityMode) *corev1.SecurityContext
 				Type: corev1.SeccompProfileTypeUnconfined,
 			},
 		}
+	case PodSecurityWorkbuddyLinux:
+		privileged := true
+		allowPrivilegeEscalation := true
+		return &corev1.SecurityContext{
+			Privileged:               &privileged,
+			AllowPrivilegeEscalation: &allowPrivilegeEscalation,
+			Capabilities: &corev1.Capabilities{
+				Add: []corev1.Capability{"NET_ADMIN", "SYS_ADMIN"},
+			},
+			SeccompProfile: &corev1.SeccompProfile{
+				Type: corev1.SeccompProfileTypeUnconfined,
+			},
+			AppArmorProfile: &corev1.AppArmorProfile{
+				Type: corev1.AppArmorProfileTypeUnconfined,
+			},
+		}
 	case PodSecurityPrivileged:
 		privileged := true
 		return &corev1.SecurityContext{
@@ -431,6 +480,10 @@ func buildContainerSecurityContext(mode PodSecurityMode) *corev1.SecurityContext
 	default:
 		return nil
 	}
+}
+
+func requiresUnconfinedAppArmor(mode PodSecurityMode) bool {
+	return mode == PodSecurityChromiumCompat || mode == PodSecurityWorkbuddyLinux
 }
 
 func buildVolumeOwnershipInitContainer(index int, image string, pullPolicy corev1.PullPolicy, fix VolumeOwnershipFix) corev1.Container {

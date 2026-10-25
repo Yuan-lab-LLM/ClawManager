@@ -1,42 +1,44 @@
 ﻿import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { useCallback } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useI18n } from '../../contexts/I18nContext';
 import UserLayout from '../../components/UserLayout';
 import { userService } from '../../services/userService';
 import { instanceService } from '../../services/instanceService';
 import type { UserQuota } from '../../types/user';
-import type { Instance } from '../../types/instance';
+import type { Instance, InstanceSummary } from '../../types/instance';
 
 const UserDashboard: React.FC = () => {
   const { user } = useAuth();
   const { t } = useI18n();
   const [quota, setQuota] = useState<UserQuota | null>(null);
   const [instances, setInstances] = useState<Instance[]>([]);
+  const [summary, setSummary] = useState<InstanceSummary | null>(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    loadData();
-  }, []);
-
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     if (!user) return;
     try {
-      const [quotaData, instancesData] = await Promise.all([
+      const [quotaData, instancesData, summaryData] = await Promise.all([
         userService.getUserQuota(user.id),
-        instanceService.getInstances(1, 100)
+        instanceService.getInstances(1, 5),
+        instanceService.getSummary(),
       ]);
       setQuota(quotaData);
       setInstances(instancesData.instances);
+      setSummary(summaryData);
     } catch (err) {
       console.error('Failed to load data:', err);
     } finally {
       setLoading(false);
     }
-  };
+  }, [user]);
 
-  const runningCount = instances.filter(i => i.status === 'running').length;
-  const totalStorage = instances.reduce((sum, i) => sum + i.disk_gb, 0);
+  useEffect(() => {
+    void loadData();
+  }, [loadData]);
+
   const recentInstances = [...instances].sort((a, b) => {
     return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
   });
@@ -52,7 +54,7 @@ const UserDashboard: React.FC = () => {
                 {t('userDashboard.myInstances')}
               </dt>
               <dd className="mt-1 text-3xl font-semibold text-[#171212]">
-                {instances.length}
+                {summary?.total ?? 0}
               </dd>
             </div>
           </Link>
@@ -63,7 +65,7 @@ const UserDashboard: React.FC = () => {
                 {t('userDashboard.running')}
               </dt>
               <dd className="mt-1 text-3xl font-semibold text-[#dc2626]">
-                {runningCount}
+                {summary?.running ?? 0}
               </dd>
             </div>
           </Link>
@@ -74,7 +76,7 @@ const UserDashboard: React.FC = () => {
                 {t('userDashboard.storageUsed')}
               </dt>
               <dd className="mt-1 text-3xl font-semibold text-[#171212]">
-                {totalStorage} GB
+                {summary?.allocated_storage_gb ?? 0} GB
               </dd>
             </div>
           </div>
@@ -90,7 +92,7 @@ const UserDashboard: React.FC = () => {
               <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
                 <div className="text-center">
                     <div className="text-2xl font-bold text-[#dc2626]">
-                    {instances.length} / {quota.max_instances}
+                    {summary?.total ?? 0} / {quota.max_instances}
                   </div>
                   <div className="text-sm text-gray-500">{t('userDashboard.instances')}</div>
                 </div>
@@ -126,7 +128,7 @@ const UserDashboard: React.FC = () => {
         </div>
 
         {/* Recent Instances */}
-        {instances.length > 0 && (
+        {(summary?.total ?? 0) > 0 && (
           <div>
             <div className="flex justify-between items-center mb-4">
               <h2 className="text-lg font-medium text-gray-900">{t('userDashboard.recentInstances')}</h2>

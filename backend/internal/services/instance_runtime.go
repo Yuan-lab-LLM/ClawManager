@@ -116,8 +116,10 @@ func defaultPortForInstanceType(instanceType string) int32 {
 
 func defaultMountPathForInstanceType(instanceType string) string {
 	switch instanceType {
-	case "ubuntu", "webtop", "openclaw", "hermes", "opencode", "workbuddy", RuntimeTypeDeepSeekHarness:
+	case "ubuntu", "webtop", "openclaw", "hermes", "opencode", "workbuddy", RuntimeTypeDeepSeekHarness, RuntimeTypeClaudeCode:
 		return "/config"
+	case "codex":
+		return "/storage"
 	default:
 		return "/home/user/data"
 	}
@@ -127,6 +129,10 @@ func defaultEnvForInstanceType(instanceType string) map[string]string {
 	switch instanceType {
 	case "ubuntu", "webtop", "openclaw":
 		return defaultWebtopDesktopEnv("ClawManager Desktop")
+	case "workbuddy":
+		return defaultWindowsWorkbuddyEnv()
+	case "codex":
+		return defaultWindowsCodexEnv()
 	case "hermes":
 		env := defaultWebtopDesktopEnv("Hermes Runtime")
 		env["HERMES_HOME"] = "/config/.hermes"
@@ -141,10 +147,36 @@ func defaultEnvForInstanceType(instanceType string) map[string]string {
 		env["CLAWMANAGER_SKILL_DIR"] = "/config/workspace/.opencode/skills"
 		env["CLAWMANAGER_PROJECT_PATH"] = "/config/workspace"
 		return env
-	case "workbuddy":
-		return defaultWebtopDesktopEnv("Workbuddy")
+	case RuntimeTypeClaudeCode:
+		env := defaultWebtopDesktopEnv("Claude Code")
+		env["CLAUDE_CONFIG_DIR"] = "/config/.claude"
+		env["CLAWMANAGER_PROJECT_PATH"] = "/config/workspace"
+		return env
 	default:
 		return map[string]string{}
+	}
+}
+
+func defaultWindowsWorkbuddyEnv() map[string]string {
+	return map[string]string{
+		"VERSION":      "10l",
+		"DISK_SIZE":    "64G",
+		"DISK_FMT":     "qcow2",
+		"SHUTDOWN":     "Y",
+		"QEMU_TIMEOUT": "120",
+	}
+}
+
+func defaultWindowsCodexEnv() map[string]string {
+	return map[string]string{
+		"VERSION":      "11",
+		"LANGUAGE":     "Chinese",
+		"REGION":       "zh-CN",
+		"KEYBOARD":     "zh-CN",
+		"DISK_SIZE":    "80G",
+		"DISK_FMT":     "qcow2",
+		"SHUTDOWN":     "Y",
+		"QEMU_TIMEOUT": "120",
 	}
 }
 
@@ -230,7 +262,7 @@ func proxyEndpointPort(proxyURL *url.URL) string {
 
 func usesWebtopImage(instanceType string) bool {
 	switch instanceType {
-	case "ubuntu", "webtop", "hermes", "openclaw", "opencode", "workbuddy", RuntimeTypeDeepSeekHarness:
+	case "ubuntu", "webtop", "hermes", "openclaw", "opencode", "workbuddy", RuntimeTypeDeepSeekHarness, RuntimeTypeClaudeCode:
 		return true
 	default:
 		return false

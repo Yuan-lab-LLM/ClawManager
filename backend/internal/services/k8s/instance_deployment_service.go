@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"strings"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -267,6 +268,7 @@ func BuildInstanceDeployment(client *Client, config PodConfig, replicas int32) *
 		},
 		Spec: appsv1.DeploymentSpec{
 			Replicas: &replicas,
+			Strategy: instanceDeploymentStrategy(config),
 			Selector: &metav1.LabelSelector{
 				MatchLabels: map[string]string{
 					"app":         "clawreef",
@@ -284,17 +286,36 @@ func BuildInstanceDeployment(client *Client, config PodConfig, replicas int32) *
 	}
 }
 
+func instanceDeploymentStrategy(config PodConfig) appsv1.DeploymentStrategy {
+	instanceType := strings.ToLower(strings.TrimSpace(config.Type))
+	if strings.TrimSpace(config.MountPath) == "/storage" && (instanceType == "workbuddy" || instanceType == "codex") {
+		return appsv1.DeploymentStrategy{Type: appsv1.RecreateDeploymentStrategyType}
+	}
+	return appsv1.DeploymentStrategy{}
+}
+
 func instanceDeploymentAnnotations(config PodConfig) map[string]string {
-	if config.SecurityMode == PodSecurityChromiumCompat {
+	if requiresUnconfinedAppArmor(config.SecurityMode) {
 		return map[string]string{"container.apparmor.security.beta.kubernetes.io/desktop": "unconfined"}
 	}
 	return nil
 }
 
 func buildInstanceDeploymentPodSpec(client *Client, config PodConfig, runtimeType string) corev1.PodSpec {
-	pvcName := client.GetPVCName(config.InstanceID)
+	pvcName := strings.TrimSpace(config.PVCName)
+	if pvcName == "" {
+		pvcName = client.GetPVCName(config.InstanceID)
+	}
 	if config.ContainerPort == 0 {
 		config.ContainerPort = 3001
+	}
+	probePort := config.ProbePort
+	if probePort == 0 {
+		probePort = config.ContainerPort
+	}
+	startupProbeFailures := config.StartupProbeFailures
+	if startupProbeFailures <= 0 {
+		startupProbeFailures = 30
 	}
 	pullPolicy := config.ImagePullPolicy
 	if pullPolicy == "" {
@@ -325,20 +346,20 @@ func buildInstanceDeploymentPodSpec(client *Client, config PodConfig, runtimeTyp
 			Name:          "http",
 		}},
 		StartupProbe: &corev1.Probe{
-			ProbeHandler:     corev1.ProbeHandler{TCPSocket: &corev1.TCPSocketAction{Port: intstrFromInt32(config.ContainerPort)}},
-			FailureThreshold: 30,
+			ProbeHandler:     corev1.ProbeHandler{TCPSocket: &corev1.TCPSocketAction{Port: intstrFromInt32(probePort)}},
+			FailureThreshold: startupProbeFailures,
 			PeriodSeconds:    5,
 			TimeoutSeconds:   2,
 		},
 		ReadinessProbe: &corev1.Probe{
-			ProbeHandler:        corev1.ProbeHandler{TCPSocket: &corev1.TCPSocketAction{Port: intstrFromInt32(config.ContainerPort)}},
+			ProbeHandler:        corev1.ProbeHandler{TCPSocket: &corev1.TCPSocketAction{Port: intstrFromInt32(probePort)}},
 			InitialDelaySeconds: 3,
 			PeriodSeconds:       5,
 			TimeoutSeconds:      2,
 			FailureThreshold:    6,
 		},
 		LivenessProbe: &corev1.Probe{
-			ProbeHandler:        corev1.ProbeHandler{TCPSocket: &corev1.TCPSocketAction{Port: intstrFromInt32(config.ContainerPort)}},
+			ProbeHandler:        corev1.ProbeHandler{TCPSocket: &corev1.TCPSocketAction{Port: intstrFromInt32(probePort)}},
 			InitialDelaySeconds: 15,
 			PeriodSeconds:       10,
 			TimeoutSeconds:      2,
@@ -354,6 +375,12 @@ func buildInstanceDeploymentPodSpec(client *Client, config PodConfig, runtimeTyp
 			{Name: "INSTANCE_ID", Value: fmt.Sprintf("%d", config.InstanceID)},
 			{Name: "USER_ID", Value: fmt.Sprintf("%d", config.UserID)},
 		},
+	}
+	if probePort != config.ContainerPort {
+		container.Ports = append(container.Ports, corev1.ContainerPort{
+			ContainerPort: probePort,
+			Name:          "ready",
+		})
 	}
 	if runtimeType == "shell" {
 		container.Ports = nil
@@ -384,6 +411,10 @@ func buildInstanceDeploymentPodSpec(client *Client, config PodConfig, runtimeTyp
 				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: pvcName},
 			},
 		}},
+	}
+	if config.TerminationGrace > 0 {
+		grace := config.TerminationGrace
+		spec.TerminationGracePeriodSeconds = &grace
 	}
 
 	for _, mount := range config.ExtraPVCMounts {
@@ -438,6 +469,21 @@ func buildInstanceDeploymentPodSpec(client *Client, config PodConfig, runtimeTyp
 			volumeMount.SubPath = mount.Key
 		}
 		spec.Containers[0].VolumeMounts = append(spec.Containers[0].VolumeMounts, volumeMount)
+	}
+
+	for _, mount := range config.SecretDirectoryMounts {
+		if mount.Name == "" || mount.SecretName == "" || mount.MountPath == "" {
+			continue
+		}
+		spec.Volumes = append(spec.Volumes, corev1.Volume{
+			Name: mount.Name,
+			VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{
+				SecretName: mount.SecretName,
+			}},
+		})
+		spec.Containers[0].VolumeMounts = append(spec.Containers[0].VolumeMounts, corev1.VolumeMount{
+			Name: mount.Name, MountPath: mount.MountPath, ReadOnly: true,
+		})
 	}
 
 	if config.SHMSizeGB > 0 {

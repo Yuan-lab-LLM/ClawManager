@@ -1,0 +1,827 @@
+openapi: 3.1.0
+info:
+  title: ClawManager Northbound API
+  version: 1.3.0
+  description: Public API for authenticated OpenClaw, Hermes, OpenCode, and DeepSeek Harness provisioning and password-protected ShareLink management.
+servers:
+  - url: https://northbound.example.com:38443
+paths:
+  /api/northbound/v1/auth/challenge:
+    post:
+      summary: Create a one-time JWE login challenge
+      operationId: createLoginChallenge
+      responses:
+        "201":
+          description: Challenge issued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginChallenge"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+  /api/northbound/v1/auth/login:
+    post:
+      summary: Log in with a compact JWE credential
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [challenge_id, credential_jwe]
+              properties:
+                challenge_id:
+                  type: string
+                  description: One-time challenge ID returned by the challenge endpoint; it must also appear unchanged inside the encrypted JWE payload.
+                credential_jwe:
+                  type: string
+                  description: Five-part Compact JWE using the challenge kid, RSA-OAEP-256, and A256GCM. Plaintext credentials must never appear in the outer request.
+      responses:
+        "200":
+          description: Authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenResponse"
+        "401":
+          $ref: "#/components/responses/InvalidCredentials"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+  /api/northbound/v1/auth/refresh:
+    post:
+      summary: Rotate the refresh token and issue a new access token
+      operationId: refreshToken
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [refresh_token]
+              properties:
+                refresh_token:
+                  type: string
+                  description: Current opaque refresh token. A successful refresh rotates it; clients must immediately replace the old value.
+      responses:
+        "200":
+          description: Token rotated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenResponse"
+        "401":
+          $ref: "#/components/responses/AuthInvalid"
+  /api/northbound/v1/auth/logout:
+    post:
+      summary: Revoke the current northbound session
+      operationId: logout
+      security:
+        - bearerAuth: []
+      responses:
+        "204":
+          description: Session revoked
+        "401":
+          $ref: "#/components/responses/AuthInvalid"
+  /api/northbound/v1/auth/me:
+    get:
+      summary: Return the current northbound identity and scopes
+      operationId: getCurrentIdentity
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Current identity
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, username, scopes, session_id]
+                properties:
+                  id: { type: integer }
+                  username: { type: string }
+                  scopes:
+                    type: array
+                    items: { type: string }
+                  session_id: { type: string }
+        "401":
+          $ref: "#/components/responses/AuthInvalid"
+  /api/northbound/v1/lite-instances:
+    post:
+      summary: Submit a managed instance provisioning operation
+      operationId: createLiteInstance
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateLiteInstance"
+      responses:
+        "202":
+          description: Operation accepted; Location identifies the operation resource.
+          headers:
+            Location:
+              schema: { type: string }
+            Idempotent-Replayed:
+              schema: { type: string, enum: ["true"] }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "401":
+          $ref: "#/components/responses/AuthInvalid"
+        "403":
+          $ref: "#/components/responses/ScopeDenied"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+    get:
+      summary: List the current user's supported northbound instances
+      operationId: listLiteInstances
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: owner
+          in: query
+          required: true
+          description: Exact, case-sensitive owner identifier used when the instances were created.
+          schema: { type: string, minLength: 1, maxLength: 128 }
+        - name: page
+          in: query
+          description: One-based page number.
+          schema: { type: integer, minimum: 1, default: 1 }
+        - name: limit
+          in: query
+          description: Maximum instances returned per page; server caps values at 100.
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      responses:
+        "200":
+          description: Compatibility unified view containing managed Lite instances plus supported Pro instances
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [instances, owner, total, page, limit]
+                properties:
+                  instances:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/LiteInstance"
+                  owner: { type: string, description: Exact owner filter applied to this result. }
+                  total: { type: integer }
+                  page: { type: integer }
+                  limit: { type: integer }
+        "401":
+          $ref: "#/components/responses/AuthInvalid"
+        "403":
+          $ref: "#/components/responses/ScopeDenied"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+  /api/northbound/v1/lite-instances/{id}:
+    get:
+      summary: Get one supported northbound instance owned by the current user
+      operationId: getLiteInstance
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Positive supported instance ID owned by the authenticated user.
+          schema: { type: integer, minimum: 1 }
+      responses:
+        "200":
+          description: Managed Lite instance or supported Pro instance
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LiteInstance"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/northbound/v1/lite-instances/{id}/restart:
+    post:
+      summary: Restart a running Lite instance without changing its workspace
+      operationId: restartLiteInstance
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - { name: id, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/EmptyRequest" } } }
+      responses:
+        "202": { $ref: "#/components/responses/OperationAccepted" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/northbound/v1/lite-instances/{id}/reset:
+    post:
+      summary: Replace a Lite instance with a clean instance and erase the old workspace
+      description: Creates and verifies a clean Lite instance first. Only after the replacement is running does the service revoke and erase the old instance. If replacement creation fails, the original instance and data are not changed. A successful operation returns the new instance ID in instance_id; callers must switch to it. Back up required data before calling this operation.
+      operationId: resetLiteInstance
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - { name: id, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/ConfirmInstanceReset" } } }
+      responses:
+        "202": { $ref: "#/components/responses/OperationAccepted" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/northbound/v1/lite-instances/{id}/delete:
+    post:
+      summary: Permanently delete a Lite instance and its workspace
+      description: Requires lite-instances:delete and explicit confirmation of data loss.
+      operationId: deleteLiteInstanceConfirmed
+      security: [{ bearerAuth: [] }, { apiKeyAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - { name: id, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/ConfirmInstanceReset" } } }
+      responses:
+        "202": { $ref: "#/components/responses/OperationAccepted" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/northbound/v1/pro-instances/{id}/delete:
+    post:
+      summary: Permanently delete a Pro instance and its workspace
+      description: Requires pro-instances:delete and explicit confirmation of data loss.
+      operationId: deleteProInstanceConfirmed
+      security: [{ bearerAuth: [] }, { apiKeyAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - { name: id, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/ConfirmInstanceReset" } } }
+      responses:
+        "202": { $ref: "#/components/responses/OperationAccepted" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/northbound/v1/pro-instances:
+    post:
+      summary: Submit a managed Pro provisioning operation
+      description: Creates OpenClaw, Hermes, OpenCode, or DeepSeek Harness in dedicated Pro/desktop mode using the enabled DESKTOP image saved in ClawManager system settings.
+      operationId: createProInstance
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateProInstance"
+      responses:
+        "202":
+          description: Operation accepted; Location identifies the operation resource.
+          headers:
+            Location:
+              schema: { type: string }
+            Idempotent-Replayed:
+              schema: { type: string, enum: ["true"] }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "401":
+          $ref: "#/components/responses/AuthInvalid"
+        "403":
+          $ref: "#/components/responses/ScopeDenied"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+    get:
+      summary: List the current user's supported Pro instances
+      description: Returns OpenClaw, Hermes, OpenCode, and DeepSeek Harness Pro instances for the exact owner.
+      operationId: listProInstances
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: owner
+          in: query
+          required: true
+          description: Exact, case-sensitive owner identifier used when the instances were created.
+          schema: { type: string, minLength: 1, maxLength: 128 }
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 1, default: 1 }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      responses:
+        "200":
+          description: Paginated supported Pro instances
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [instances, owner, total, page, limit]
+                properties:
+                  instances:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ProInstance"
+                  owner: { type: string }
+                  total: { type: integer }
+                  page: { type: integer }
+                  limit: { type: integer }
+        "401":
+          $ref: "#/components/responses/AuthInvalid"
+        "403":
+          $ref: "#/components/responses/ScopeDenied"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+  /api/northbound/v1/pro-instances/{id}:
+    get:
+      summary: Get one supported Pro instance owned by the current user
+      operationId: getProInstance
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1 }
+      responses:
+        "200":
+          description: Supported Pro instance
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProInstance"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/northbound/v1/pro-instances/{id}/restart:
+    post:
+      summary: Restart a running Pro instance without changing its PVC
+      operationId: restartProInstance
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - { name: id, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/EmptyRequest" } } }
+      responses:
+        "202": { $ref: "#/components/responses/OperationAccepted" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/northbound/v1/pro-instances/{id}/reset:
+    post:
+      summary: Replace a Pro instance with a clean instance and erase the old PVC
+      description: Creates and verifies a clean Pro instance and PVC first. Only after the replacement is running does the service revoke and erase the old instance and PVC. If replacement creation fails, the original instance and data are not changed. A successful operation returns the new instance ID in instance_id; callers must switch to it. Back up required data before calling this operation.
+      operationId: resetProInstance
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - { name: id, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/ConfirmInstanceReset" } } }
+      responses:
+        "202": { $ref: "#/components/responses/OperationAccepted" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/northbound/v1/lite-instances/{id}/external-access/password:
+    post:
+      summary: Enable password-protected ShareLink access for a supported instance
+      description: Requires `lite-instances:share-link:manage`. Supports OpenClaw, Hermes, OpenCode, and DeepSeek Harness Lite and Pro instances. Any previous external-access URL and credentials are replaced. The generated password is returned in this response and must not be logged.
+      operationId: enableLiteInstanceShareLinkPassword
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Positive supported instance ID owned by the authenticated user.
+          schema: { type: integer, minimum: 1 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/EnableShareLinkPassword" }
+      responses:
+        "200":
+          description: Password-protected ShareLink enabled and credentials generated
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ShareLinkCredentials" }
+        "401":
+          $ref: "#/components/responses/AuthInvalid"
+        "403":
+          $ref: "#/components/responses/ScopeDenied"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+  /api/northbound/v1/lite-instances/{id}/external-access/share-link/reset:
+    post:
+      summary: Reset the share-link URL for a supported instance owned by the current user
+      description: Requires `lite-instances:share-link:reset`. The old URL and existing sessions become invalid immediately. Password, expiration, and workspace permissions are preserved.
+      operationId: resetLiteInstanceShareLinkURL
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Positive supported instance ID owned by the authenticated user.
+          schema: { type: integer, minimum: 1 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/EmptyRequest" }
+      responses:
+        "200":
+          description: Share-link URL reset
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ShareLinkReset" }
+        "401":
+          $ref: "#/components/responses/AuthInvalid"
+        "403":
+          $ref: "#/components/responses/ScopeDenied"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+  /api/northbound/v1/lite-instances/{id}/external-access/password/reset:
+    post:
+      summary: Reset the share-link password for a supported instance owned by the current user
+      description: Requires `lite-instances:share-link:reset`. The share URL is preserved. The old password and existing authenticated sessions become invalid immediately.
+      operationId: resetLiteInstanceShareLinkPassword
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Positive supported instance ID owned by the authenticated user.
+          schema: { type: integer, minimum: 1 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/EmptyRequest" }
+      responses:
+        "200":
+          description: Share-link password reset; the new password is returned only in this response
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ShareLinkReset" }
+        "401":
+          $ref: "#/components/responses/AuthInvalid"
+        "403":
+          $ref: "#/components/responses/ScopeDenied"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+  /api/northbound/v1/operations/{id}:
+    get:
+      summary: Get an asynchronous operation owned by the current user
+      operationId: getOperation
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Opaque operation ID returned by createLiteInstance.
+          schema: { type: string, minLength: 1 }
+      responses:
+        "200":
+          description: Operation state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "404":
+          $ref: "#/components/responses/NotFound"
+components:
+  securitySchemes:
+    apiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: Stable key for one logical create request. Reuse the same 8-128-byte value only with the identical body; never include credentials or other secrets.
+      schema:
+        type: string
+        minLength: 8
+        maxLength: 128
+  schemas:
+    LoginChallenge:
+      type: object
+      required: [challenge_id, nonce, expires_at, encryption]
+      properties:
+        challenge_id:
+          type: string
+          description: Opaque one-time challenge ID. The challenge is consumed after one login attempt.
+        nonce:
+          type: string
+          description: Server nonce that must be copied unchanged into the encrypted JWE payload.
+        expires_at:
+          type: string
+          format: date-time
+          description: Challenge expiration time. The default deployment lifetime is 60 seconds.
+        encryption:
+          type: object
+          required: [kid, alg, enc, public_jwk]
+          properties:
+            kid:
+              type: string
+              description: Key ID that must be copied to the JWE protected header.
+            alg: { type: string, const: RSA-OAEP-256, description: Required JWE key-management algorithm. }
+            enc: { type: string, const: A256GCM, description: Required JWE content-encryption algorithm. }
+            public_jwk:
+              type: object
+              required: [kty, kid, n, e]
+              properties:
+                kty: { type: string, const: RSA }
+                kid: { type: string }
+                n: { type: string }
+                e: { type: string }
+    TokenResponse:
+      type: object
+      required: [access_token, refresh_token, token_type, expires_in, refresh_expires_in, scopes, session_id]
+      properties:
+        access_token: { type: string, description: Opaque Bearer token for northbound API calls. }
+        refresh_token: { type: string, description: Opaque rotating refresh token; replace the previous token after every successful refresh. }
+        token_type: { type: string, const: Bearer }
+        expires_in: { type: integer, minimum: 1, description: Access-token lifetime in seconds; default deployment value is 1800. }
+        refresh_expires_in: { type: integer, minimum: 1, description: Refresh-token lifetime in seconds; default deployment value is 604800. }
+        scopes:
+          type: array
+          description: Permissions fixed when the session is created; re-login is required to receive newly introduced scopes.
+          items:
+            type: string
+            enum: [lite-instances:create, lite-instances:read, lite-instances:restart, lite-instances:reset, pro-instances:create, pro-instances:read, pro-instances:restart, pro-instances:reset, lite-instances:share-link:manage, lite-instances:share-link:reset]
+        session_id: { type: string, description: Northbound session identifier for audit and logout; it is not an access token. }
+    CreateLiteInstance:
+      type: object
+      additionalProperties: false
+      required: [name, owner, type]
+      properties:
+        name:
+          type: string
+          minLength: 3
+          maxLength: 50
+          description: Display name, trimmed by the server and unique per user. It must satisfy both the OpenAPI 3-50-character constraint and the server's 3-50-UTF-8-byte check.
+        owner:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: Creator or business owner identifier. The server trims it, stores at most 128 UTF-8 bytes, rejects control characters, and uses case-sensitive exact matching for list queries.
+        type:
+          type: string
+          enum: [openclaw, hermes, opencode, deepseek-harness]
+          description: Runtime family provisioned as Lite. Callers do not select the mode.
+        alias:
+          type: [string, "null"]
+          description: Optional user-facing alias.
+        instance_mode:
+          type: string
+          enum: [lite]
+          description: Optional assertion of Lite mode; other modes are rejected.
+        description:
+          type: [string, "null"]
+          maxLength: 2000
+          description: Optional metadata only; it is not injected into the runtime. The server enforces at most 2000 UTF-8 bytes.
+    CreateProInstance:
+      type: object
+      additionalProperties: false
+      required: [name, owner, type]
+      properties:
+        name:
+          type: string
+          minLength: 3
+          maxLength: 50
+          description: Display name using the same contract as CreateLiteInstance.
+        owner:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: Creator or business owner identifier using the same normalization and exact-query contract as CreateLiteInstance.
+        type:
+          type: string
+          enum: [openclaw, hermes, opencode, deepseek-harness]
+          description: Runtime family. The endpoint fixes Pro/desktop mode and resolves the enabled DESKTOP image saved in ClawManager. These runtimes use 4 CPU, 8 GB memory, 50 GB storage, and no GPU.
+        alias:
+          type: [string, "null"]
+          description: Optional user-facing alias.
+        instance_mode:
+          type: string
+          enum: [pro]
+          description: Optional assertion of Pro mode; other modes are rejected.
+        description:
+          type: [string, "null"]
+          maxLength: 2000
+          description: Optional metadata only; it is not injected into the runtime.
+    EmptyRequest:
+      type: object
+      additionalProperties: false
+      maxProperties: 0
+    ConfirmInstanceReset:
+      type: object
+      additionalProperties: false
+      required: [confirm_data_loss]
+      properties:
+        confirm_data_loss:
+          type: boolean
+          const: true
+          description: Must be true. Reset permanently deletes the instance workspace and cannot be undone without a separate backup.
+    EnableShareLinkPassword:
+      type: object
+      additionalProperties: false
+      properties:
+        expires_mode:
+          type: string
+          enum: [preset, custom, permanent]
+          default: preset
+          description: Expiration strategy. preset uses expires_preset, custom requires a future expires_at, and permanent omits expiration.
+        expires_preset:
+          type: string
+          enum: [1h, 24h, 7d, 30d]
+          default: 24h
+          description: Used only with expires_mode=preset. Durations are calculated from server request-processing time.
+        expires_at:
+          type: [string, "null"]
+          format: date-time
+          description: Required future RFC 3339 timestamp only when expires_mode=custom. Do not send it for preset or permanent.
+        workspace_access:
+          type: string
+          enum: [none, read, write]
+          default: none
+          description: Controls only shared Workspace files. none hides files and denies all file APIs; read permits list, preview, and download; write additionally permits upload, mkdir, rename, and delete. Chat and the shared instance page remain accessible in every mode. Reset operations preserve this value; call the enable endpoint again to change it.
+    LiteInstance:
+      type: object
+      required: [id, name, owner, type, instance_mode, runtime_type, status, created_at, updated_at]
+      properties:
+        id: { type: integer, minimum: 1, description: Supported instance ID used by subsequent instance and ShareLink calls. }
+        name: { type: string, description: Instance display name. }
+        owner: { type: string, description: Creator or business owner identifier stored on this instance. }
+        description: { type: [string, "null"], description: Optional instance metadata. }
+        type: { type: string, enum: [openclaw, hermes, opencode, deepseek-harness], description: Managed runtime family. }
+        instance_mode: { type: string, enum: [lite, pro], description: Effective instance mode selected by the server. }
+        runtime_type: { type: string, enum: [gateway, desktop, shell], description: Effective runtime backend. }
+        runtime_variant: { type: string, enum: [linux, windows], description: Optional managed runtime variant. }
+        status: { type: string, description: Runtime lifecycle status; callers should wait for running before treating the instance as ready. }
+        availability: { type: string, enum: [available, starting, unavailable], description: Derived display state; running maps to available and creating maps to starting. }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        started_at: { type: [string, "null"], format: date-time }
+    ProInstance:
+      type: object
+      required: [id, name, owner, type, instance_mode, runtime_type, status, created_at, updated_at]
+      properties:
+        id: { type: integer, minimum: 1 }
+        name: { type: string }
+        owner: { type: string }
+        description: { type: [string, "null"] }
+        type: { type: string, enum: [openclaw, hermes, opencode, deepseek-harness] }
+        instance_mode: { type: string, const: pro }
+        runtime_type: { type: string, const: desktop }
+        runtime_variant: { type: string, enum: [linux, windows] }
+        status: { type: string }
+        availability: { type: string, enum: [available, starting, unavailable] }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        started_at: { type: [string, "null"], format: date-time }
+    Operation:
+      type: object
+      required: [operation_id, status, resource_type, created_at, updated_at]
+      properties:
+        operation_id: { type: string, description: Opaque ID used to poll this operation. }
+        status: { type: string, enum: [queued, processing, succeeded, failed] }
+        resource_type: { type: string, enum: [lite_instance, pro_instance, lite_instance_restart, lite_instance_reset, pro_instance_restart, pro_instance_reset], description: Identifies provisioning or lifecycle work for the selected instance collection. }
+        instance_id: { type: integer, minimum: 1, description: Present after success; use it for instance and ShareLink endpoints. }
+        error_code: { type: string }
+        error_message: { type: string }
+        created_at: { type: string, format: date-time }
+        started_at: { type: [string, "null"], format: date-time }
+        finished_at: { type: [string, "null"], format: date-time }
+        updated_at: { type: string, format: date-time }
+    ShareLinkReset:
+      type: object
+      required: [instance_id, auth_mode, share_url, workspace_access, updated_at]
+      properties:
+        instance_id: { type: integer, minimum: 1 }
+        auth_mode: { type: string, enum: [share_link, password] }
+        share_url:
+          type: string
+          description: Share path relative to the ClawManager public origin.
+          examples: [/s/sl_example/]
+        password:
+          type: string
+          description: Present only after password reset. Treat as a secret and do not log it.
+        workspace_access:
+          type: string
+          enum: [none, read, write]
+          description: Effective shared Workspace permission. none denies files; read permits list/preview/download; write additionally permits file modifications. URL and password reset preserve it.
+        expires_at: { type: [string, "null"], format: date-time, description: Link expiration time; omitted for permanent access. }
+        updated_at: { type: string, format: date-time }
+    ShareLinkCredentials:
+      type: object
+      required: [instance_id, auth_mode, share_url, password, workspace_access, updated_at]
+      properties:
+        instance_id: { type: integer, minimum: 1 }
+        auth_mode: { type: string, const: password }
+        share_url:
+          type: string
+          description: Share path relative to the ClawManager public origin.
+          examples: [/s/sl_example/]
+        password:
+          type: string
+          description: Generated ShareLink password. Treat as a secret and do not log it.
+        workspace_access:
+          type: string
+          enum: [none, read, write]
+          description: Effective shared Workspace permission. none denies files; read permits list/preview/download; write additionally permits upload, mkdir, rename, and delete. It does not control chat access.
+        expires_at: { type: [string, "null"], format: date-time, description: Link expiration time; omitted for permanent access. }
+        updated_at: { type: string, format: date-time }
+    Error:
+      type: object
+      required: [code, message, request_id]
+      properties:
+        code: { type: string }
+        message: { type: string }
+        request_id: { type: string }
+  responses:
+    OperationAccepted:
+      description: Asynchronous lifecycle operation accepted; poll the Location resource until it succeeds or fails.
+      headers:
+        Location:
+          schema: { type: string }
+        Idempotent-Replayed:
+          schema: { type: string, enum: ["true"] }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Operation" }
+    InvalidCredentials:
+      description: Invalid username, password, challenge, or JWE
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    AuthInvalid:
+      description: Invalid, expired, or revoked northbound session
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    ScopeDenied:
+      description: Required scope is absent
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Conflict:
+      description: Resource state, name, or idempotency conflict
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    ValidationError:
+      description: Request fields failed validation
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    RateLimited:
+      description: Rate or unfinished-operation limit reached
+      headers:
+        Retry-After:
+          schema: { type: string }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NotFound:
+      description: Resource does not exist or is not owned by this user
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }

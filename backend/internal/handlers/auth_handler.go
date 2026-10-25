@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"net/http"
 
 	"clawreef/internal/services"
@@ -11,7 +12,12 @@ import (
 
 // AuthHandler handles authentication-related requests
 type AuthHandler struct {
-	authService services.AuthService
+	authService       services.AuthService
+	desktopLogoutHook func(context.Context, int) error
+}
+
+func (h *AuthHandler) SetDesktopLogoutHook(hook func(context.Context, int) error) {
+	h.desktopLogoutHook = hook
 }
 
 // NewAuthHandler creates a new auth handler
@@ -95,6 +101,12 @@ func (h *AuthHandler) RefreshToken(c *gin.Context) {
 
 // Logout handles user logout
 func (h *AuthHandler) Logout(c *gin.Context) {
+	if h.desktopLogoutHook != nil {
+		if err := h.desktopLogoutHook(c.Request.Context(), c.GetInt("userID")); err != nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"success": false, "error": "desktop_session_revocation_unavailable"})
+			return
+		}
+	}
 	// In a stateless JWT system, logout is handled client-side
 	// by removing the token from storage
 	utils.Success(c, http.StatusOK, "Logout successful", nil)

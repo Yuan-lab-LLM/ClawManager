@@ -51,6 +51,100 @@ Server runs on port **9001**.
 - `POST /api/v1/auth/logout` - User logout
 - `GET /api/v1/auth/me` - Get current user
 
+#### Enterprise LDAP Authentication
+
+Set `AUTH_ENTERPRISE_ENABLED=true` to let ClawManager authenticate users through
+LDAP/OpenLDAP while keeping local JWT, RBAC, quota, and instance ownership flows.
+LDAP users must be provisioned in the local ClawManager user list before they can
+log in. A user that exists in LDAP but has not been imported into ClawManager is
+rejected with the same invalid-login response as a bad username or password.
+LDAP users must change their password in the enterprise identity platform.
+
+Both local and LDAP users log in with their username, such as `fsmith`.
+Authentication uses the imported account's provider; LDAP passwords are verified
+against its stored DN. Old `ldap_<uid>` aliases no longer select an account.
+Previously imported users can log in immediately by username without re-importing.
+
+Use the administrator's LDAP import flow or CSV import to provision LDAP users.
+The LDAP import flow can preview a filtered, size-limited directory result and
+imports only the selected entries. For CSV import, set `Auth Provider` to `ldap`
+and provide the LDAP DN in the `External ID` column; the password column is
+ignored for those rows. The manual create-user form remains local-user-only.
+Usernames are globally unique across all accounts, including disabled accounts,
+using the database's case-insensitive collation. A conflicting import row fails
+with `username already exists`; other rows continue. Within a batch, the first
+successfully imported account claims the username. Re-importing the same DN in
+the LDAP import flow still synchronizes roles when enabled, or skips that account.
+
+Migration `063_unique_usernames.sql` restores global username uniqueness. Before
+applying it, the backend checks for historical duplicates and stops the upgrade
+with their usernames, account IDs, and providers. An administrator must resolve
+these conflicts and restart the upgrade; no accounts are automatically renamed,
+merged, or deleted. The migration is safe to retry after resolution. Historical
+`login_alias` values are retained as unused compatibility data.
+
+Key environment variables:
+
+- `AUTH_ENTERPRISE_ALLOW_LOCAL_FALLBACK` is retained for configuration
+  compatibility and has no effect on login selection. The account provider
+  determines authentication; LDAP is authenticated by the stored DN and failures
+  never fall back to a different provider.
+- `AUTH_ENTERPRISE_SYNC_ROLE` optionally sets and updates provisioned LDAP users'
+  local roles from LDAP admin group membership during LDAP import and login. It
+  defaults to `false`, so roles are managed in ClawManager unless explicitly
+  enabled.
+- `LDAP_HOST`, `LDAP_PORT`
+- `LDAP_USE_TLS` or `LDAP_START_TLS`
+- `LDAP_TLS_CA_FILE` for an internal CA bundle mounted into the backend
+  container, and `LDAP_TLS_SERVER_NAME` when the LDAP address differs from the
+  certificate DNS name.
+- `LDAP_BIND_DN`, `LDAP_BIND_PASSWORD`
+- `AUTH_CONFIG_ENCRYPTION_KEY` when saving a bind password through the admin UI
+- `LDAP_BASE_DN`, `LDAP_USER_FILTER`
+- `LDAP_GROUP_BASE_DN`, `LDAP_GROUP_FILTER`
+- `LDAP_ADMIN_GROUP_DNS`
+
+`LDAP_BIND_PASSWORD` remains environment-managed when it is supplied through
+the environment, so saving other LDAP settings does not require an encryption
+key or copy the password into the database. `AUTH_CONFIG_ENCRYPTION_KEY` (or
+`auth.configEncryptionKey` in a config file) is required only when saving a new
+bind password through the administrator UI. For production, generate it with
+`openssl rand -base64 32`, store it in the deployment Secret, and keep it stable
+across service restarts and replicas.
+Rotating it requires migrating existing database-managed bind passwords first;
+otherwise the old ciphertext cannot be decrypted.
+If neither value is configured, ClawManager derives a stable encryption key from
+`JWT_SECRET` so existing deployments can still save a bind password; configure a
+dedicated encryption key for production deployments.
+
+For production, store `LDAP_BIND_PASSWORD` in a Kubernetes Secret or equivalent
+secret manager instead of committing it in plain text. Prefer `LDAP_USE_TLS=true`
+for LDAPS or `LDAP_START_TLS=true` for StartTLS. Mount the directory CA bundle
+and point `LDAP_TLS_CA_FILE` at it instead of enabling `LDAP_SKIP_TLS_VERIFY`;
+use `LDAP_TLS_SERVER_NAME` if the service name used for routing does not match
+the certificate SAN. Enable `LDAP_SKIP_TLS_VERIFY` only for controlled test
+environments. LDAP import prefetches administrator group members when
+`LDAP_GROUP_FILTER` is the simple `(member=%s)` shape; more complex group
+filters still work, but role detection falls back to a per-user group search.
+
+Development fixtures:
+
+- `deployments/docker/ldap/mock-directory.ldif` contains mock LDAP users:
+  `alice`, `bob`, `carol`, `dave`, `erin`, and `frank`.
+- `deployments/docker/ldap/clawmanager-ldap-whitelist.csv` is a CSV import
+  example for the fixture users `alice`, `carol`, and `erin`.
+- Expected login behavior with the fixture: `alice`, `carol`, and
+  `erin` can log in with their LDAP passwords after either the CSV import
+  or the dedicated LDAP import; `bob`, `dave`, and `frank` still exist in LDAP
+  but cannot log in until imported into ClawManager.
+
+Admin diagnostics:
+
+- `GET /api/v1/admin/auth/enterprise/status` returns a redacted LDAP status
+  summary for administrators, including dial, service bind, user search, group
+  search, TLS mode, certificate verification mode, role lookup strategy, and
+  configuration warnings.
+
 ### Default Admin Account
 
 - Username: `admin`

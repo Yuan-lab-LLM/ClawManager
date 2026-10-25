@@ -3,6 +3,7 @@ package services
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"clawreef/internal/models"
@@ -13,8 +14,13 @@ import (
 // UserService defines the interface for user operations
 type UserService interface {
 	CreateUser(username, email, password, role string) (*models.User, error)
+	CreateUserWithProvider(username, email, password, role, authProvider string) (*models.User, error)
+	CreateUserWithProviderAndExternalID(username, email, password, role, authProvider, externalID string) (*models.User, error)
 	GetUserByID(id int) (*models.User, error)
 	GetUserByUsername(username string) (*models.User, error)
+	GetUserByLoginAlias(authProvider, loginAlias string) (*models.User, error)
+	GetUserByExternalIdentity(authProvider, externalID string) (*models.User, error)
+	GetUserByEmail(email string) (*models.User, error)
 	ListUsers(offset, limit int) ([]models.User, error)
 	CountUsers() (int, error)
 	UpdateUser(user *models.User) error
@@ -43,11 +49,20 @@ func NewUserService(userRepo repository.UserRepository, quotaRepo repository.Quo
 
 // CreateUser creates a new user (admin only)
 func (s *userService) CreateUser(username, email, password, role string) (*models.User, error) {
-	if password == "" {
-		password = defaultPasswordForRole(role)
-	}
+	return s.CreateUserWithProvider(username, email, password, role, AuthProviderLocal)
+}
 
-	// Check if username already exists
+// CreateUserWithProvider creates a user without an external identity. LDAP
+// users must use CreateUserWithProviderAndExternalID so their DN is stored.
+func (s *userService) CreateUserWithProvider(username, email, password, role, authProvider string) (*models.User, error) {
+	return s.CreateUserWithProviderAndExternalID(username, email, password, role, authProvider, "")
+}
+
+func (s *userService) CreateUserWithProviderAndExternalID(username, email, password, role, authProvider, externalID string) (*models.User, error) {
+	authProvider = normalizeAuthProvider(authProvider)
+	if authProvider == AuthProviderLDAP && strings.TrimSpace(externalID) == "" {
+		return nil, errors.New("LDAP users must be imported from LDAP")
+	}
 	existingUser, err := s.userRepo.GetByUsername(username)
 	if err != nil {
 		return nil, fmt.Errorf("failed to check username: %w", err)
@@ -55,8 +70,15 @@ func (s *userService) CreateUser(username, email, password, role string) (*model
 	if existingUser != nil {
 		return nil, errors.New("username already exists")
 	}
-
-	// Check if email already exists
+	if authProvider == AuthProviderLDAP {
+		existingUser, err = s.userRepo.GetByExternalIdentity(authProvider, strings.TrimSpace(externalID))
+		if err != nil {
+			return nil, fmt.Errorf("failed to check user identity: %w", err)
+		}
+		if existingUser != nil {
+			return nil, errors.New("user already exists")
+		}
+	}
 	existingUser, err = s.userRepo.GetByEmail(email)
 	if err != nil {
 		return nil, fmt.Errorf("failed to check email: %w", err)
@@ -64,33 +86,44 @@ func (s *userService) CreateUser(username, email, password, role string) (*model
 	if existingUser != nil {
 		return nil, errors.New("email already exists")
 	}
-
-	// Hash password
-	passwordHash, err := utils.HashPassword(password)
-	if err != nil {
-		return nil, fmt.Errorf("failed to hash password: %w", err)
+	var passwordHash string
+	if authProvider == AuthProviderLDAP {
+		passwordHash = enterprisePasswordMarker(authProvider)
+	} else {
+		if password == "" {
+			password = defaultPasswordForRole(role)
+		}
+		passwordHash, err = utils.HashPassword(password)
+		if err != nil {
+			return nil, fmt.Errorf("failed to hash password: %w", err)
+		}
 	}
-
-	// Create user
 	user := &models.User{
 		Username:     username,
 		Email:        email,
 		PasswordHash: passwordHash,
 		Role:         role,
+		AuthProvider: authProvider,
 		IsActive:     true,
 		CreatedAt:    time.Now(),
 		UpdatedAt:    time.Now(),
 	}
-
+	if authProvider == AuthProviderLDAP {
+		user.ExternalID = stringPtr(strings.TrimSpace(externalID))
+	}
+	// The global unique index is authoritative when concurrent imports race.
 	if err := s.userRepo.Create(user); err != nil {
+		if errors.Is(err, repository.ErrUserUsernameConflict) {
+			return nil, errors.New("username already exists")
+		}
 		return nil, fmt.Errorf("failed to create user: %w", err)
 	}
-
-	// Create default quota for user
 	if _, err := s.quotaRepo.CreateDefaultQuota(user.ID); err != nil {
 		return nil, fmt.Errorf("failed to create default quota: %w", err)
 	}
-
+	if err := SyncDefaultQuotaForRole(s.quotaRepo, user.ID, role); err != nil {
+		return nil, err
+	}
 	return user, nil
 }
 
@@ -109,6 +142,39 @@ func (s *userService) GetUserByID(id int) (*models.User, error) {
 // GetUserByUsername gets a user by username
 func (s *userService) GetUserByUsername(username string) (*models.User, error) {
 	user, err := s.userRepo.GetByUsername(username)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get user: %w", err)
+	}
+	if user == nil {
+		return nil, errors.New("user not found")
+	}
+	return user, nil
+}
+
+func (s *userService) GetUserByLoginAlias(authProvider, loginAlias string) (*models.User, error) {
+	user, err := s.userRepo.GetByLoginAlias(authProvider, loginAlias)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get user by login alias: %w", err)
+	}
+	if user == nil {
+		return nil, errors.New("user not found")
+	}
+	return user, nil
+}
+
+func (s *userService) GetUserByExternalIdentity(authProvider, externalID string) (*models.User, error) {
+	user, err := s.userRepo.GetByExternalIdentity(authProvider, externalID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get user by external identity: %w", err)
+	}
+	if user == nil {
+		return nil, errors.New("user not found")
+	}
+	return user, nil
+}
+
+func (s *userService) GetUserByEmail(email string) (*models.User, error) {
+	user, err := s.userRepo.GetByEmail(email)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get user: %w", err)
 	}
@@ -198,6 +264,9 @@ func (s *userService) UpdateUserRole(id int, role string) error {
 
 	if err := s.userRepo.Update(user); err != nil {
 		return fmt.Errorf("failed to update user role: %w", err)
+	}
+	if err := SyncDefaultQuotaForRole(s.quotaRepo, id, role); err != nil {
+		return err
 	}
 
 	return nil

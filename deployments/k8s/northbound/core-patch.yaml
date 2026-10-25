@@ -1,0 +1,68 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: clawmanager-app
+  namespace: clawmanager-system
+spec:
+  template:
+    spec:
+      containers:
+        - name: clawmanager-app
+          ports:
+            - name: northbound-core
+              containerPort: 9002
+          env:
+            - name: CLAWMANAGER_NORTHBOUND_ENABLED
+              value: "true"
+            - name: NORTHBOUND_CORE_INTERNAL_ADDRESS
+              value: ":9002"
+            - name: NORTHBOUND_INTERNAL_JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: clawmanager-northbound-secrets
+                  key: internal-jwt-secret
+            - name: IEISYSTEM_SSO_ENABLED
+              value: "true"
+            - name: IEISYSTEM_SSO_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: clawmanager-iei-sso
+                  key: aes-key
+            - name: IEISYSTEM_SSO_IV
+              valueFrom:
+                secretKeyRef:
+                  name: clawmanager-iei-sso
+                  key: aes-iv
+            - name: IEISYSTEM_SESSION_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: clawmanager-iei-sso
+                  key: session-secret
+            - name: IEISYSTEM_SSO_TOKEN_TTL
+              value: "24h"
+            - name: IEISYSTEM_SESSION_TTL
+              value: "24h"
+            - name: IEISYSTEM_SSO_TIMEZONE
+              value: Asia/Shanghai
+            - name: IEISYSTEM_COOKIE_SECURE
+              value: "true"
+            - name: NORTHBOUND_CORE_TLS_CERT_FILE
+              value: /etc/clawmanager/northbound/core/tls.crt
+            - name: NORTHBOUND_CORE_TLS_KEY_FILE
+              value: /etc/clawmanager/northbound/core/tls.key
+            - name: NORTHBOUND_CORE_CLIENT_CA_FILE
+              value: /etc/clawmanager/northbound/gateway-ca/ca.crt
+          volumeMounts:
+            - name: northbound-core-tls
+              mountPath: /etc/clawmanager/northbound/core
+              readOnly: true
+            - name: northbound-gateway-client-ca
+              mountPath: /etc/clawmanager/northbound/gateway-ca
+              readOnly: true
+      volumes:
+        - name: northbound-core-tls
+          secret:
+            secretName: clawmanager-northbound-core-tls
+        - name: northbound-gateway-client-ca
+          secret:
+            secretName: clawmanager-northbound-gateway-client-ca

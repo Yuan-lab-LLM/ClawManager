@@ -1,5 +1,5 @@
 # Build stage
-FROM golang:1.21-alpine AS builder
+FROM golang:1.26.1-alpine AS builder
 
 WORKDIR /app
 
@@ -14,7 +14,8 @@ RUN go mod download
 COPY . .
 
 # Build the application
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o bin/server cmd/server/main.go
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -buildvcs=false -o bin/server ./cmd/server \
+    && CGO_ENABLED=0 GOOS=linux go build -trimpath -buildvcs=false -o bin/northbound-gateway ./cmd/northbound-gateway
 
 # Final stage
 FROM alpine:latest
@@ -25,6 +26,7 @@ WORKDIR /root/
 
 # Copy the binary from builder
 COPY --from=builder /app/bin/server .
+COPY --from=builder /app/bin/northbound-gateway .
 
 # Expose port
 EXPOSE 8080

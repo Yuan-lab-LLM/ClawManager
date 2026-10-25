@@ -1,6 +1,8 @@
 package db
 
 import (
+	"context"
+	"database/sql"
 	"embed"
 	"fmt"
 	"log"
@@ -18,11 +20,38 @@ var embeddedMigrations embed.FS
 const schemaMigrationsTable = "schema_migrations"
 
 func applyEmbeddedMigrations(session db.Session) error {
-	if err := ensureSchemaMigrationsTable(session); err != nil {
+	// Startup precedes leader election. Serialize migrations across App replicas
+	// using a dedicated connection; pooled GET_LOCK/RELEASE_LOCK is unsafe.
+	driver, ok := session.Driver().(*sql.DB)
+	if !ok {
+		return fmt.Errorf("migration lock requires MySQL SQL driver")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	conn, err := driver.Conn(ctx)
+	if err != nil {
+		return fmt.Errorf("migration lock connection: %w", err)
+	}
+	defer conn.Close()
+	var acquired sql.NullInt64
+	if err = conn.QueryRowContext(ctx, "SELECT GET_LOCK(CONCAT('cm:migrate:',MD5(DATABASE())),30)").Scan(&acquired); err != nil || !acquired.Valid || acquired.Int64 != 1 {
+		return fmt.Errorf("migration lock unavailable: %v", err)
+	}
+	defer func() {
+		release, stop := context.WithTimeout(context.Background(), 5*time.Second)
+		defer stop()
+		_, _ = conn.ExecContext(release, "SELECT RELEASE_LOCK(CONCAT('cm:migrate:',MD5(DATABASE())))")
+	}()
+	return applyEmbeddedMigrationsLocked(conn)
+}
+
+func applyEmbeddedMigrationsLocked(conn *sql.Conn) error {
+	optionalReady := true
+	if err := ensureSchemaMigrationsTable(conn); err != nil {
 		return err
 	}
 
-	applied, err := listAppliedMigrations(session)
+	applied, err := listAppliedMigrations(conn)
 	if err != nil {
 		return err
 	}
@@ -42,6 +71,11 @@ func applyEmbeddedMigrations(session db.Session) error {
 		if _, ok := applied[entry.Name()]; ok {
 			continue
 		}
+		if entry.Name() == "063_unique_usernames.sql" {
+			if err := checkUniqueUsernames(conn); err != nil {
+				return fmt.Errorf("cannot apply migration %s: %w", entry.Name(), err)
+			}
+		}
 
 		rawSQL, err := embeddedMigrations.ReadFile(path.Join("migrations", entry.Name()))
 		if err != nil {
@@ -49,28 +83,94 @@ func applyEmbeddedMigrations(session db.Session) error {
 		}
 
 		statements := splitSQLStatements(string(rawSQL))
+		optionalFailed := false
 		for idx, statement := range statements {
-			if _, err := session.SQL().Exec(statement); err != nil {
+			statementCtx := context.Background()
+			stop := func() {}
+			if entry.Name() == "067_add_northbound_owner_records.sql" {
+				statementCtx, stop = context.WithTimeout(statementCtx, 30*time.Second)
+			}
+			_, statementErr := conn.ExecContext(statementCtx, statement)
+			stop()
+			if err := statementErr; err != nil {
+				if entry.Name() == "067_add_northbound_owner_records.sql" {
+					log.Printf("Optional owner analytics migration deferred: %T", err)
+					optionalFailed = true
+					break
+				}
 				return fmt.Errorf("failed to execute migration %s statement %d: %w", entry.Name(), idx+1, err)
 			}
 		}
+		if optionalFailed {
+			optionalReady = false
+			continue
+		}
+		if entry.Name() == "067_add_northbound_owner_records.sql" {
+			if err := verifyOwnerAnalytics(conn); err != nil {
+				optionalReady = false
+				log.Printf("Optional analytics schema incompatible: %T", err)
+				continue
+			}
+		}
 
-		if _, err := session.SQL().Exec(
+		if _, err := conn.ExecContext(context.Background(),
 			fmt.Sprintf("INSERT INTO %s (filename, applied_at) VALUES (?, ?)", schemaMigrationsTable),
 			entry.Name(),
 			time.Now().UTC(),
 		); err != nil {
+			if entry.Name() == "067_add_northbound_owner_records.sql" {
+				optionalReady = false
+				log.Printf("Optional analytics migration record unavailable: %T", err)
+				continue
+			}
 			return fmt.Errorf("failed to record applied migration %s: %w", entry.Name(), err)
 		}
 
 		log.Printf("Applied database migration %s", entry.Name())
 	}
-
+	if err := verifyOwnerAnalytics(conn); err != nil {
+		ownerAnalyticsAvailable.Store(false)
+		log.Printf("Owner analytics disabled; schema validation unavailable: %T", err)
+	} else {
+		ownerAnalyticsAvailable.Store(optionalReady)
+	}
 	return nil
 }
 
-func ensureSchemaMigrationsTable(session db.Session) error {
-	_, err := session.SQL().Exec(fmt.Sprintf(`
+// Group and join using the database collation, exactly as the unique index does.
+// Include each conflicting row separately so long groups cannot be truncated.
+func checkUniqueUsernames(conn *sql.Conn) error {
+	rows, err := conn.QueryContext(context.Background(), `
+		SELECT u.username, u.id, u.auth_provider
+		FROM users AS u
+		JOIN (SELECT username FROM users GROUP BY username HAVING COUNT(*) > 1) AS duplicates
+		  ON duplicates.username = u.username
+		ORDER BY u.username, u.id
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to check duplicate usernames: %w", err)
+	}
+	defer rows.Close()
+	var conflicts []string
+	for rows.Next() {
+		var username, provider string
+		var id int
+		if err := rows.Scan(&username, &id, &provider); err != nil {
+			return fmt.Errorf("failed to read duplicate username: %w", err)
+		}
+		conflicts = append(conflicts, fmt.Sprintf("username=%q id=%d auth_provider=%q", username, id, provider))
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("failed to read duplicate usernames: %w", err)
+	}
+	if len(conflicts) > 0 {
+		return fmt.Errorf("duplicate usernames must be resolved by an administrator before retrying the upgrade: %s", strings.Join(conflicts, "; "))
+	}
+	return nil
+}
+
+func ensureSchemaMigrationsTable(conn *sql.Conn) error {
+	_, err := conn.ExecContext(context.Background(), fmt.Sprintf(`
 		CREATE TABLE IF NOT EXISTS %s (
 			id INT AUTO_INCREMENT PRIMARY KEY,
 			filename VARCHAR(255) NOT NULL,
@@ -84,8 +184,8 @@ func ensureSchemaMigrationsTable(session db.Session) error {
 	return nil
 }
 
-func listAppliedMigrations(session db.Session) (map[string]struct{}, error) {
-	rows, err := session.SQL().Query(fmt.Sprintf("SELECT filename FROM %s", schemaMigrationsTable))
+func listAppliedMigrations(conn *sql.Conn) (map[string]struct{}, error) {
+	rows, err := conn.QueryContext(context.Background(), fmt.Sprintf("SELECT filename FROM %s", schemaMigrationsTable))
 	if err != nil {
 		return nil, fmt.Errorf("failed to query applied migrations: %w", err)
 	}

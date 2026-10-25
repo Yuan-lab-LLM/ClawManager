@@ -1,12 +1,14 @@
 package handlers
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"html"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -35,6 +37,8 @@ const (
 	maxLiteBatchCreateCount       = 100
 	liteBatchCreateConcurrency    = 4
 	maxLiteBatchDeleteCount       = 100
+	dedicatedAccessRefreshPath    = "/__clawmanager_access_refresh"
+	dedicatedAccessRefreshHeader  = "X-ClawManager-Access-Refresh-Token"
 )
 
 // desktopDirectProxyEnv toggles embedding the instance Service "host:port" into
@@ -70,7 +74,7 @@ func (h *InstanceHandler) desktopAccessUpstream(c *gin.Context, instance *models
 	if usesRuntimeGateway(instance) {
 		return "", false
 	}
-	if !h.proxyService.IsWebtopInstanceType(instance.Type) {
+	if !h.proxyService.IsWebtopInstance(instance) {
 		fmt.Printf("Desktop direct proxy fallback: unsupported desktop instance type instance=%d user=%d type=%s target_port=%d\n",
 			instance.ID, instance.UserID, instance.Type, targetPort)
 		return "", true
@@ -105,8 +109,8 @@ func usesRuntimeGateway(instance *models.Instance) bool {
 	if strings.EqualFold(strings.TrimSpace(instance.RuntimeType), services.RuntimeBackendGateway) {
 		return true
 	}
-	if mode, ok := services.NormalizeInstanceMode(instance.InstanceMode); ok && mode == services.InstanceModeLite {
-		return true
+	if mode, ok := services.NormalizeInstanceMode(instance.InstanceMode); ok {
+		return mode == services.InstanceModeLite
 	}
 	return false
 }
@@ -129,6 +133,7 @@ func workspaceArchiveMaxBytes() int64 {
 
 // InstanceHandler handles instance management requests
 type InstanceHandler struct {
+	batchMutationReservation      func([]int) (func(), error)
 	instanceService               services.InstanceService
 	instanceAgentService          services.InstanceAgentService
 	runtimeStatusService          services.InstanceRuntimeStatusService
@@ -141,7 +146,21 @@ type InstanceHandler struct {
 	openClawConfigService         services.OpenClawConfigService
 	skillService                  services.SkillService
 	externalAccessService         services.InstanceExternalAccessService
+	hermesDesktopActivator        func(context.Context, int, string, string) (*services.HermesDesktopDescriptor, string, error)
+	ieiSSOService                 *services.IEISSOService
 	aiObservabilityService        services.AIObservabilityService
+	browserWorkerService          *services.BrowserWorkerService
+}
+
+func (h *InstanceHandler) SetBrowserWorkerService(service *services.BrowserWorkerService) {
+	if h != nil {
+		h.browserWorkerService = service
+	}
+}
+
+// NewInstanceHandler creates a new instance handler
+func (h *InstanceHandler) SetBatchMutationReservation(reserve func([]int) (func(), error)) {
+	h.batchMutationReservation = reserve
 }
 
 // NewInstanceHandler creates a new instance handler
@@ -178,6 +197,20 @@ func (h *InstanceHandler) InstanceAccessService() *services.InstanceAccessServic
 	return h.accessService
 }
 
+// SetIEISSOService enables validation of IEI-bound instance proxy tokens.
+func (h *InstanceHandler) SetIEISSOService(service *services.IEISSOService) {
+	if h != nil {
+		h.ieiSSOService = service
+	}
+}
+
+func (h *InstanceHandler) SetHermesDesktopService(service *services.HermesDesktopService) {
+	if h == nil || service == nil {
+		return
+	}
+	h.hermesDesktopActivator = service.ActivateShared
+}
+
 type InstanceRuntimeDetailsResponse struct {
 	Runtime       *services.InstanceRuntimeStatusPayload `json:"runtime,omitempty"`
 	Agent         *services.InstanceAgentPayload         `json:"agent,omitempty"`
@@ -202,26 +235,29 @@ type ExternalAccessRequest struct {
 
 // CreateInstanceRequest represents a create instance request
 type CreateInstanceRequest struct {
-	Name                 string                       `json:"name" binding:"required,min=3,max=50"`
-	Description          *string                      `json:"description,omitempty"`
-	Type                 string                       `json:"type" binding:"required,oneof=openclaw ubuntu debian centos custom webtop hermes opencode workbuddy deepseek-harness"`
-	Mode                 string                       `json:"mode" binding:"omitempty,oneof=lite pro"`
-	InstanceMode         string                       `json:"instance_mode" binding:"omitempty,oneof=lite pro"`
-	RuntimeType          string                       `json:"runtime_type" binding:"omitempty,oneof=gateway desktop shell"`
-	DesktopStreamProfile string                       `json:"desktop_stream_profile,omitempty" binding:"omitempty,oneof=low standard high"`
-	CPUCores             float64                      `json:"cpu_cores" binding:"required,min=0.1,max=32"`
-	MemoryGB             int                          `json:"memory_gb" binding:"required,min=1,max=128"`
-	DiskGB               int                          `json:"disk_gb" binding:"required,min=10,max=1000"`
-	GPUEnabled           bool                         `json:"gpu_enabled"`
-	GPUCount             int                          `json:"gpu_count" binding:"min=0,max=4"`
-	OSType               string                       `json:"os_type" binding:"required"`
-	OSVersion            string                       `json:"os_version" binding:"required"`
-	ImageRegistry        *string                      `json:"image_registry,omitempty"`
-	ImageTag             *string                      `json:"image_tag,omitempty"`
-	EnvironmentOverrides map[string]string            `json:"environment_overrides,omitempty"`
-	StorageClass         string                       `json:"storage_class"`
-	OpenClawConfigPlan   *services.OpenClawConfigPlan `json:"openclaw_config_plan,omitempty"`
-	SkillIDs             []int                        `json:"skill_ids,omitempty"`
+	Name                 string                        `json:"name" binding:"required,min=3,max=50"`
+	Owner                *string                       `json:"owner,omitempty" binding:"omitempty,max=128"`
+	Description          *string                       `json:"description,omitempty"`
+	Type                 string                        `json:"type" binding:"required,oneof=openclaw ubuntu debian centos custom webtop hermes opencode deepseek-harness"`
+	RuntimeVariant       string                        `json:"runtime_variant,omitempty" binding:"omitempty,oneof=linux windows"`
+	Mode                 string                        `json:"mode" binding:"omitempty,oneof=lite pro"`
+	InstanceMode         string                        `json:"instance_mode" binding:"omitempty,oneof=lite pro"`
+	RuntimeType          string                        `json:"runtime_type" binding:"omitempty,oneof=gateway desktop shell"`
+	DesktopStreamProfile string                        `json:"desktop_stream_profile,omitempty" binding:"omitempty,oneof=low standard high"`
+	CPUCores             float64                       `json:"cpu_cores" binding:"required,min=0.1,max=32"`
+	MemoryGB             int                           `json:"memory_gb" binding:"required,min=1,max=128"`
+	DiskGB               int                           `json:"disk_gb" binding:"required,min=5,max=1000"`
+	GPUEnabled           bool                          `json:"gpu_enabled"`
+	GPUCount             int                           `json:"gpu_count" binding:"min=0,max=4"`
+	OSType               string                        `json:"os_type" binding:"required"`
+	OSVersion            string                        `json:"os_version" binding:"required"`
+	ImageRegistry        *string                       `json:"image_registry,omitempty"`
+	ImageTag             *string                       `json:"image_tag,omitempty"`
+	EnvironmentOverrides map[string]string             `json:"environment_overrides,omitempty"`
+	StorageClass         string                        `json:"storage_class"`
+	OpenClawConfigPlan   *services.OpenClawConfigPlan  `json:"openclaw_config_plan,omitempty"`
+	SkillIDs             []int                         `json:"skill_ids,omitempty"`
+	BrowserWorker        *services.BrowserWorkerUpdate `json:"browser_worker,omitempty"`
 }
 
 type BatchCreateLiteInstanceTemplate struct {
@@ -295,9 +331,13 @@ type RestartInstanceRequest struct {
 
 // ListInstancesRequest represents a list instances request
 type ListInstancesRequest struct {
-	Page   int    `form:"page,default=1"`
-	Limit  int    `form:"limit,default=20"`
-	Status string `form:"status,omitempty"`
+	Page         int    `form:"page,default=1"`
+	Limit        int    `form:"limit,default=20"`
+	Query        string `form:"query,omitempty"`
+	Type         string `form:"type,omitempty"`
+	InstanceMode string `form:"instance_mode,omitempty"`
+	Availability string `form:"availability,omitempty"`
+	Status       string `form:"status,omitempty"`
 }
 
 // ListInstances lists instances owned by the current user (workspace view).
@@ -314,11 +354,42 @@ func (h *InstanceHandler) ListInstances(c *gin.Context) {
 		utils.ValidationError(c, err)
 		return
 	}
+	if req.Page < 1 {
+		req.Page = 1
+	}
+	if req.Limit < 1 {
+		req.Limit = 20
+	}
+	if req.Limit > 100 {
+		req.Limit = 100
+	}
+	if mode := strings.ToLower(strings.TrimSpace(req.InstanceMode)); mode != "" && mode != services.InstanceModeLite && mode != services.InstanceModePro {
+		utils.ValidationError(c, fmt.Errorf("instance_mode must be lite or pro"))
+		return
+	}
+	if availability := strings.ToLower(strings.TrimSpace(req.Availability)); availability != "" && availability != "available" && availability != "starting" && availability != "unavailable" {
+		utils.ValidationError(c, fmt.Errorf("availability must be available, starting, or unavailable"))
+		return
+	}
 
 	// Calculate offset
 	offset := (req.Page - 1) * req.Limit
 
-	instances, total, err := h.instanceService.GetByUserID(userID.(int), offset, req.Limit)
+	queryService, supportsQuery := h.instanceService.(services.InstanceQueryService)
+	var instances []models.Instance
+	var total int
+	var err error
+	if supportsQuery {
+		instances, total, err = queryService.GetFilteredByUserID(userID.(int), models.InstanceListFilter{
+			Query:        req.Query,
+			Type:         req.Type,
+			InstanceMode: req.InstanceMode,
+			Availability: req.Availability,
+			Status:       req.Status,
+		}, offset, req.Limit)
+	} else {
+		instances, total, err = h.instanceService.GetByUserID(userID.(int), offset, req.Limit)
+	}
 	if err != nil {
 		utils.HandleError(c, err)
 		return
@@ -332,6 +403,22 @@ func (h *InstanceHandler) ListInstances(c *gin.Context) {
 	}
 
 	utils.Success(c, http.StatusOK, "Instances retrieved successfully", response)
+}
+
+// GetInstanceSummary returns aggregate instance counts for the current user.
+func (h *InstanceHandler) GetInstanceSummary(c *gin.Context) {
+	userID, _ := c.Get("userID")
+	queryService, ok := h.instanceService.(services.InstanceQueryService)
+	if !ok {
+		utils.HandleError(c, fmt.Errorf("instance summary is not supported"))
+		return
+	}
+	summary, err := queryService.GetSummaryByUserID(userID.(int))
+	if err != nil {
+		utils.HandleError(c, err)
+		return
+	}
+	utils.Success(c, http.StatusOK, "Instance summary retrieved successfully", summary)
 }
 
 // ListAllInstances lists every instance across all users (admin console view).
@@ -375,6 +462,16 @@ func (h *InstanceHandler) CreateInstance(c *gin.Context) {
 	}
 
 	createReq := instanceCreateRequestToService(req)
+	if req.BrowserWorker != nil && req.BrowserWorker.Enabled {
+		if h.browserWorkerService == nil {
+			utils.Error(c, http.StatusServiceUnavailable, "Browser Worker service is unavailable")
+			return
+		}
+		if err := h.browserWorkerService.ValidateCreateRequest(createReq, *req.BrowserWorker); err != nil {
+			utils.Error(c, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
 
 	instance, err := h.instanceService.Create(userID.(int), createReq)
 	if err != nil {
@@ -395,6 +492,16 @@ func (h *InstanceHandler) CreateInstance(c *gin.Context) {
 			return
 		}
 	}
+	if req.BrowserWorker != nil && req.BrowserWorker.Enabled {
+		if h.browserWorkerService == nil {
+			utils.Error(c, http.StatusServiceUnavailable, "Browser Worker service is unavailable")
+			return
+		}
+		if _, err := h.browserWorkerService.Update(c.Request.Context(), instance, *req.BrowserWorker); err != nil {
+			utils.HandleError(c, err)
+			return
+		}
+	}
 
 	utils.Success(c, http.StatusCreated, "Instance created successfully", instance)
 }
@@ -402,8 +509,10 @@ func (h *InstanceHandler) CreateInstance(c *gin.Context) {
 func instanceCreateRequestToService(req CreateInstanceRequest) services.CreateInstanceRequest {
 	return services.CreateInstanceRequest{
 		Name:                 req.Name,
+		Owner:                req.Owner,
 		Description:          req.Description,
 		Type:                 req.Type,
+		RuntimeVariant:       req.RuntimeVariant,
 		Mode:                 req.Mode,
 		InstanceMode:         req.InstanceMode,
 		RuntimeType:          req.RuntimeType,
@@ -591,7 +700,7 @@ func buildLiteBatchCreateRequests(req BatchCreateLiteInstancesRequest) ([]servic
 		template.MemoryGB = 4
 	}
 	if template.DiskGB <= 0 {
-		template.DiskGB = 20
+		template.DiskGB = services.DefaultLiteDiskGB
 	}
 	if strings.TrimSpace(template.OSType) == "" {
 		template.OSType = template.Type
@@ -671,6 +780,14 @@ func (h *InstanceHandler) BatchDeleteLiteInstances(c *gin.Context) {
 
 	seen := map[int]struct{}{}
 	instances := make([]*models.Instance, 0, len(req.InstanceIDs))
+	if h.batchMutationReservation != nil {
+		release, err := h.batchMutationReservation(req.InstanceIDs)
+		if err != nil {
+			utils.Error(c, http.StatusConflict, err.Error())
+			return
+		}
+		defer release()
+	}
 	for _, id := range req.InstanceIDs {
 		if _, exists := seen[id]; exists {
 			continue
@@ -849,7 +966,6 @@ func (h *InstanceHandler) DeleteInstance(c *gin.Context) {
 		utils.Error(c, http.StatusForbidden, "Access denied")
 		return
 	}
-
 	if err := h.instanceService.Delete(id); err != nil {
 		utils.HandleError(c, err)
 		return
@@ -1638,56 +1754,97 @@ func (h *InstanceHandler) ProxyInstance(c *gin.Context) {
 	if !ok {
 		return
 	}
+	if h.isDedicatedAccessRefreshRequest(c, id, token) {
+		c.Header("Cache-Control", "no-store")
+		c.Header("Pragma", "no-cache")
+		c.Status(http.StatusNoContent)
+		return
+	}
 
 	h.proxyInstanceWithToken(c, id, token)
 }
 
 func (h *InstanceHandler) proxyAccessToken(c *gin.Context, id int) (string, bool) {
+	original := originalInstanceProxyRequest(c)
+	queryToken := strings.TrimSpace(original.URL.Query().Get("token"))
+	if queryToken == "" && isDedicatedAccessRefreshPath(c, id) {
+		queryToken = strings.TrimSpace(c.GetHeader(dedicatedAccessRefreshHeader))
+	}
+	// A freshly issued ClawManager token must be allowed to replace an expired
+	// dedicated-origin cookie. Runtime applications can also own a `token`
+	// query parameter, so only prefer the query value when it is recognizably an
+	// instance-access JWT.
+	if queryToken != "" && h.accessService.IsInstanceAccessToken(queryToken) {
+		if accessToken, err := h.accessService.ValidateToken(queryToken); err == nil &&
+			accessToken.InstanceID == id && h.validCurrentExternalSession(c, accessToken) {
+			return h.promoteProxyAccessToken(c, id, queryToken, accessToken)
+		}
+	}
+
 	cookieName := fmt.Sprintf("instance_access_%d", id)
-	if cookieToken, err := c.Cookie(cookieName); err == nil && strings.TrimSpace(cookieToken) != "" {
-		if accessToken, validateErr := h.accessService.ValidateToken(cookieToken); validateErr == nil && accessToken.InstanceID == id {
+	for _, cookie := range original.Cookies() {
+		if cookie.Name != cookieName {
+			continue
+		}
+		cookieToken := strings.TrimSpace(cookie.Value)
+		if cookieToken == "" {
+			continue
+		}
+		if accessToken, validateErr := h.accessService.ValidateToken(cookieToken); validateErr == nil &&
+			accessToken.InstanceID == id && h.validCurrentExternalSession(c, accessToken) {
 			return cookieToken, true
 		}
 	}
 
-	queryToken := strings.TrimSpace(c.Query("token"))
 	if queryToken == "" {
 		utils.Error(c, http.StatusBadRequest, "Access token required")
 		return "", false
 	}
 	accessToken, err := h.accessService.ValidateToken(queryToken)
-	if err != nil || accessToken.InstanceID != id {
+	if err != nil || accessToken.InstanceID != id || !h.validCurrentExternalSession(c, accessToken) {
 		utils.Error(c, http.StatusUnauthorized, "Access token expired or invalid")
 		return "", false
 	}
+	return h.promoteProxyAccessToken(c, id, queryToken, accessToken)
+}
 
+func (h *InstanceHandler) promoteProxyAccessToken(c *gin.Context, id int, queryToken string, accessToken *services.AccessToken) (string, bool) {
 	// Promote only a validated ClawManager access token. Runtime applications may
 	// also use a token query parameter for their own websocket/session protocol.
+	cookieName := fmt.Sprintf("instance_access_%d", id)
 	cookiePath := fmt.Sprintf("/api/v1/instances/%d/proxy", id)
-	cookieSecure := false
 	originRuntimeType, originManaged := services.NormalizeV2RuntimeType(c.GetHeader(services.DedicatedRuntimeOriginHeader))
 	instanceRuntimeType, instanceManaged := services.NormalizeV2RuntimeType(accessToken.InstanceType)
 	dedicatedOrigin := originManaged && instanceManaged && originRuntimeType == instanceRuntimeType &&
 		(originRuntimeType == services.RuntimeTypeOpenCode || originRuntimeType == services.RuntimeTypeDeepSeekHarness)
 	if dedicatedOrigin {
 		cookiePath = "/"
-		cookieSecure = true
-		c.SetSameSite(http.SameSiteNoneMode)
+		maxAge := max(1, int(time.Until(accessToken.ExpiresAt).Seconds()))
+		http.SetCookie(c.Writer, &http.Cookie{
+			Name:        cookieName,
+			Value:       queryToken,
+			Path:        cookiePath,
+			MaxAge:      maxAge,
+			Expires:     accessToken.ExpiresAt,
+			HttpOnly:    true,
+			Secure:      true,
+			SameSite:    http.SameSiteNoneMode,
+			Partitioned: true,
+		})
+	} else {
+		c.SetCookie(
+			cookieName,
+			queryToken,
+			int(time.Hour.Seconds()),
+			cookiePath,
+			"",
+			false,
+			true,
+		)
 	}
-	c.SetCookie(
-		cookieName,
-		queryToken,
-		int(time.Hour.Seconds()),
-		cookiePath,
-		"",
-		cookieSecure,
-		true,
-	)
 	if dedicatedOrigin && originRuntimeType == services.RuntimeTypeOpenCode &&
 		(c.Request.Method == http.MethodGet || c.Request.Method == http.MethodHead) {
-		// Promote the one-time query token to the dedicated origin's cookie and
-		// immediately remove it from the visible browser URL.
-		c.Redirect(http.StatusTemporaryRedirect, dedicatedRuntimeCleanLocation(c.Request.URL, id, queryToken))
+		c.Redirect(http.StatusTemporaryRedirect, dedicatedRuntimeCleanLocation(originalInstanceProxyRequest(c).URL, id, queryToken))
 		return "", false
 	}
 	return queryToken, true
@@ -1726,10 +1883,100 @@ func dedicatedRuntimeCleanLocation(requestURL *url.URL, instanceID int, accessTo
 	return pathValue
 }
 
+// validCurrentExternalSession makes a share-issued instance token revocable.
+// Ordinary owner-issued tokens have no session binding and are unaffected.
+func (h *InstanceHandler) validCurrentExternalSession(c *gin.Context, accessToken *services.AccessToken) bool {
+	if accessToken == nil {
+		return false
+	}
+	if strings.TrimSpace(accessToken.SessionBinding) == "" {
+		return true
+	}
+	if strings.HasPrefix(accessToken.SessionBinding, ieiSystemSessionBindingPrefix) {
+		// The IEI session cookie belongs to the ClawManager management origin and
+		// browsers cannot send it to the per-instance OpenCode/DSH origin. The
+		// dedicated origin therefore treats the signed, instance-scoped token as
+		// the handoff capability. Its expiry is capped by the IEI session expiry
+		// when GenerateInstanceAccess issues it.
+		if isDedicatedIEIRuntimeOrigin(c, accessToken) {
+			return true
+		}
+		if h.ieiSSOService == nil {
+			return false
+		}
+		// Instance proxy credentials are redacted from c.Request before the
+		// handler runs so they do not leak into access/recovery logs. Read the
+		// preserved original request here; otherwise every same-origin
+		// IEI-bound token is rejected because the session cookie was removed
+		// from the sanitized request.
+		rawSession, err := originalInstanceProxyRequest(c).Cookie(ieiSystemSessionCookie)
+		if err != nil {
+			return false
+		}
+		session, err := h.ieiSSOService.ValidateSession(rawSession.Value)
+		return err == nil && accessToken.SessionBinding == ieiSystemSessionBinding(session.SessionID)
+	}
+	if h.externalAccessService == nil {
+		return false
+	}
+	access, err := h.externalAccessService.Get(c.Request.Context(), accessToken.InstanceID)
+	if err != nil || access == nil || !access.Enabled || access.PublicSlug == nil {
+		return false
+	}
+	code := strings.TrimSpace(*access.PublicSlug)
+	return code != "" && accessToken.SessionBinding == sharedExternalAccessSessionBinding(code, access)
+}
+
+func isDedicatedIEIRuntimeOrigin(c *gin.Context, accessToken *services.AccessToken) bool {
+	if c == nil || c.Request == nil || accessToken == nil {
+		return false
+	}
+	originRuntimeType, originManaged := services.NormalizeV2RuntimeType(c.GetHeader(services.DedicatedRuntimeOriginHeader))
+	instanceRuntimeType, instanceManaged := services.NormalizeV2RuntimeType(accessToken.InstanceType)
+	if !originManaged || !instanceManaged || originRuntimeType != instanceRuntimeType ||
+		(originRuntimeType != services.RuntimeTypeOpenCode && originRuntimeType != services.RuntimeTypeDeepSeekHarness) {
+		return false
+	}
+
+	host := strings.TrimSpace(c.Request.Host)
+	if parsedHost, _, err := net.SplitHostPort(host); err == nil {
+		host = parsedHost
+	}
+	expectedPrefix := fmt.Sprintf("%s-%d.", originRuntimeType, accessToken.InstanceID)
+	return strings.HasPrefix(strings.ToLower(host), expectedPrefix)
+}
+
+func (h *InstanceHandler) isDedicatedAccessRefreshRequest(c *gin.Context, instanceID int, token string) bool {
+	if c == nil || c.Request == nil || (c.Request.Method != http.MethodGet && c.Request.Method != http.MethodHead) {
+		return false
+	}
+	if !isDedicatedAccessRefreshPath(c, instanceID) {
+		return false
+	}
+	accessToken, err := h.accessService.ValidateToken(token)
+	return err == nil && accessToken.InstanceID == instanceID && isDedicatedIEIRuntimeOrigin(c, accessToken)
+}
+
+func isDedicatedAccessRefreshPath(c *gin.Context, instanceID int) bool {
+	if c == nil || c.Request == nil {
+		return false
+	}
+	want := fmt.Sprintf("/api/v1/instances/%d/proxy%s", instanceID, dedicatedAccessRefreshPath)
+	return c.Request.URL.Path == want
+}
 func (h *InstanceHandler) proxyInstanceWithToken(c *gin.Context, id int, token string) {
+	original := originalInstanceProxyRequest(c)
 	// Check if it's a WebSocket upgrade request
 	if strings.EqualFold(c.GetHeader("Upgrade"), "websocket") {
-		if err := h.proxyService.ProxyWebSocket(c.Request.Context(), id, token, c.Writer, c.Request); err != nil {
+		if err := h.proxyService.ProxyWebSocket(c.Request.Context(), id, token, c.Writer, original); err != nil {
+			var coded interface {
+				ErrorCode() string
+				HTTPStatus() int
+			}
+			if errors.As(err, &coded) && !c.Writer.Written() {
+				utils.HandleError(c, err)
+				return
+			}
 			if errors.Is(err, services.ErrInstanceGatewayUnavailable) {
 				http.Error(c.Writer, "Instance gateway is not available", http.StatusServiceUnavailable)
 			} else if errors.Is(err, services.ErrOpenCodeDedicatedOriginRequired) {
@@ -1742,7 +1989,15 @@ func (h *InstanceHandler) proxyInstanceWithToken(c *gin.Context, id int, token s
 	}
 
 	// Proxy regular HTTP request
-	if err := h.proxyService.ProxyRequest(c.Request.Context(), id, token, c.Writer, c.Request); err != nil {
+	if err := h.proxyService.ProxyRequest(c.Request.Context(), id, token, c.Writer, original); err != nil {
+		var coded interface {
+			ErrorCode() string
+			HTTPStatus() int
+		}
+		if errors.As(err, &coded) && !c.Writer.Written() {
+			utils.HandleError(c, err)
+			return
+		}
 		// Log the error
 		fmt.Printf("Proxy error for instance %d: %v\n", id, err)
 
@@ -2220,6 +2475,50 @@ func (h *InstanceHandler) CreateExternalAccessPassword(c *gin.Context) {
 	utils.Success(c, http.StatusOK, "Share link password created successfully", result)
 }
 
+func (h *InstanceHandler) ResetExternalAccessURL(c *gin.Context) {
+	instance, ok := h.requireOwnedInstance(c)
+	if !ok {
+		return
+	}
+	if h.externalAccessService == nil {
+		utils.Error(c, http.StatusServiceUnavailable, "External access is not configured")
+		return
+	}
+	userID, _ := c.Get("userID")
+	result, err := h.externalAccessService.ResetURL(c.Request.Context(), instance.ID, userID.(int))
+	if err != nil {
+		if errors.Is(err, services.ErrExternalAccessNotEnabled) {
+			utils.Error(c, http.StatusConflict, err.Error())
+			return
+		}
+		utils.HandleError(c, err)
+		return
+	}
+	utils.Success(c, http.StatusOK, "Share link URL reset successfully", result)
+}
+
+func (h *InstanceHandler) ResetExternalAccessPassword(c *gin.Context) {
+	instance, ok := h.requireOwnedInstance(c)
+	if !ok {
+		return
+	}
+	if h.externalAccessService == nil {
+		utils.Error(c, http.StatusServiceUnavailable, "External access is not configured")
+		return
+	}
+	userID, _ := c.Get("userID")
+	result, err := h.externalAccessService.ResetPassword(c.Request.Context(), instance.ID, userID.(int))
+	if err != nil {
+		if errors.Is(err, services.ErrExternalAccessNotEnabled) || errors.Is(err, services.ErrExternalAccessPasswordNotEnabled) {
+			utils.Error(c, http.StatusConflict, err.Error())
+			return
+		}
+		utils.HandleError(c, err)
+		return
+	}
+	utils.Success(c, http.StatusOK, "Share link password reset successfully", result)
+}
+
 func (h *InstanceHandler) DisableExternalAccess(c *gin.Context) {
 	instance, ok := h.requireOwnedInstance(c)
 	if !ok {
@@ -2258,7 +2557,7 @@ func (h *InstanceHandler) OpenShortExternalAccess(c *gin.Context) {
 			return
 		}
 	case services.ExternalAccessModePassword:
-		token = h.validShortLinkAccessToken(c, code, access.InstanceID)
+		token = h.validShortLinkAccessToken(c, code, access)
 		if token == "" {
 			password := externalPassword(c)
 			isPasswordFormPost := c.Request.Method == http.MethodPost && password == ""
@@ -2286,7 +2585,7 @@ func (h *InstanceHandler) OpenShortExternalAccess(c *gin.Context) {
 			if !ok {
 				return
 			}
-			instanceToken, ok := h.issueShortExternalAccessToken(c, instance, code)
+			instanceToken, ok := h.issueShortExternalAccessToken(c, instance, code, access)
 			if !ok {
 				return
 			}
@@ -2310,7 +2609,7 @@ func (h *InstanceHandler) OpenShortExternalAccess(c *gin.Context) {
 		}
 	}
 	if token == "" {
-		instanceToken, ok := h.issueShortExternalAccessToken(c, instance, code)
+		instanceToken, ok := h.issueShortExternalAccessToken(c, instance, code, access)
 		if !ok {
 			return
 		}
@@ -2318,7 +2617,7 @@ func (h *InstanceHandler) OpenShortExternalAccess(c *gin.Context) {
 		canonicalAccessURL = instanceToken.AccessURL
 	} else {
 		setShortExternalAccessCookies(c, instance.ID, code, token, int(time.Hour.Seconds()))
-		canonicalAccessURL = h.proxyService.GetProxyURLForInstance(instance, "")
+		canonicalAccessURL = h.externalAccessEntryURL(instance)
 	}
 
 	originalPath := c.Request.URL.Path
@@ -2365,7 +2664,7 @@ func (h *InstanceHandler) GetSharedInstanceSession(c *gin.Context) {
 	}
 	switch access.AuthMode {
 	case services.ExternalAccessModePassword:
-		if h.validShortLinkAccessToken(c, code, access.InstanceID) == "" {
+		if h.validShortLinkAccessToken(c, code, access) == "" {
 			utils.Error(c, http.StatusUnauthorized, "Share link password authentication is required")
 			return
 		}
@@ -2383,11 +2682,46 @@ func (h *InstanceHandler) GetSharedInstanceSession(c *gin.Context) {
 	if !ok {
 		return
 	}
-	instanceToken, ok := h.issueShortExternalAccessToken(c, instance, code)
+	instanceToken, ok := h.issueShortExternalAccessToken(c, instance, code, access)
 	if !ok {
 		return
 	}
 	proxyURL := h.proxyService.GetProxyURLForInstance(instance, instanceToken.Token)
+	accessURL := browserAccessEntryURL(instanceToken.AccessURL, proxyURL)
+	sessionExpiresAt := instanceToken.ExpiresAt
+	if isSharedHermesDesktopInstance(instance) {
+		if h.hermesDesktopActivator == nil {
+			utils.Error(c, http.StatusServiceUnavailable, "Hermes Desktop sharing is not configured")
+			return
+		}
+		descriptor, desktopToken, err := h.hermesDesktopActivator(
+			c.Request.Context(),
+			instance.ID,
+			code,
+			sharedExternalAccessSessionBinding(code, access),
+		)
+		if err != nil {
+			hermesDesktopError(c, err)
+			return
+		}
+		if descriptor == nil || !descriptor.Available || descriptor.ExpiresAt == nil || strings.TrimSpace(descriptor.RendererURL) == "" || strings.TrimSpace(desktopToken) == "" {
+			reason := "desktop_unavailable"
+			if descriptor != nil && strings.TrimSpace(descriptor.Reason) != "" {
+				reason = descriptor.Reason
+			}
+			utils.Error(c, http.StatusServiceUnavailable, reason)
+			return
+		}
+		setHermesSessionCookie(
+			c,
+			services.HermesDesktopCookieName(instance.ID),
+			services.HermesDesktopBase(instance.ID)+"/",
+			desktopToken,
+			*descriptor.ExpiresAt,
+		)
+		accessURL = descriptor.RendererURL
+		sessionExpiresAt = *descriptor.ExpiresAt
+	}
 	workspaceAccess, err := services.NormalizeExternalWorkspaceAccess(access.WorkspaceAccess)
 	if err != nil {
 		workspaceAccess = services.ExternalWorkspaceAccessNone
@@ -2408,8 +2742,8 @@ func (h *InstanceHandler) GetSharedInstanceSession(c *gin.Context) {
 			"instance_mode": instance.InstanceMode,
 			"runtime_type":  instance.RuntimeType,
 		},
-		"access_url":          browserAccessEntryURL(instanceToken.AccessURL, proxyURL),
-		"session_expires_at":  instanceToken.ExpiresAt,
+		"access_url":          accessURL,
+		"session_expires_at":  sessionExpiresAt,
 		"share_expires_at":    access.ExpiresAt,
 		"workspace_access":    workspaceAccess,
 		"workspace_available": workspaceAvailable,
@@ -2470,8 +2804,8 @@ func (h *InstanceHandler) requireExternalAccessInstance(c *gin.Context, access *
 	return instance, true
 }
 
-func (h *InstanceHandler) issueShortExternalAccessToken(c *gin.Context, instance *models.Instance, code string) (*services.AccessToken, bool) {
-	accessURL := h.proxyService.GetProxyURLForInstance(instance, "")
+func (h *InstanceHandler) issueShortExternalAccessToken(c *gin.Context, instance *models.Instance, code string, access *models.InstanceExternalAccess) (*services.AccessToken, bool) {
+	accessURL := h.externalAccessEntryURL(instance)
 	if accessURL == "" {
 		utils.Error(c, http.StatusServiceUnavailable, "Unable to generate access URL")
 		return nil, false
@@ -2486,7 +2820,7 @@ func (h *InstanceHandler) issueShortExternalAccessToken(c *gin.Context, instance
 		upstream,
 		targetPort,
 		1*time.Hour,
-		sharedExternalAccessSessionBinding(code),
+		sharedExternalAccessSessionBinding(code, access),
 	)
 	if err != nil {
 		utils.HandleError(c, err)
@@ -2496,8 +2830,22 @@ func (h *InstanceHandler) issueShortExternalAccessToken(c *gin.Context, instance
 	return instanceToken, true
 }
 
-func (h *InstanceHandler) validShortLinkAccessToken(c *gin.Context, code string, instanceID int) string {
+func (h *InstanceHandler) externalAccessEntryURL(instance *models.Instance) string {
+	if h == nil || h.proxyService == nil || instance == nil {
+		return ""
+	}
+	accessURL := h.proxyService.GetProxyURLForInstance(instance, "")
+	if accessURL == "" && isSharedHermesDesktopInstance(instance) {
+		return sharedHermesDesktopEntryURL(instance.ID)
+	}
+	return accessURL
+}
+
+func (h *InstanceHandler) validShortLinkAccessToken(c *gin.Context, code string, access *models.InstanceExternalAccess) string {
 	if h == nil || h.accessService == nil {
+		return ""
+	}
+	if access == nil {
 		return ""
 	}
 	token, err := c.Cookie(shortExternalAccessCookieName(code))
@@ -2506,8 +2854,8 @@ func (h *InstanceHandler) validShortLinkAccessToken(c *gin.Context, code string,
 	}
 	accessToken, err := h.accessService.ValidateToken(token)
 	if err != nil ||
-		accessToken.InstanceID != instanceID ||
-		accessToken.SessionBinding != sharedExternalAccessSessionBinding(code) {
+		accessToken.InstanceID != access.InstanceID ||
+		accessToken.SessionBinding != sharedExternalAccessSessionBinding(code, access) {
 		return ""
 	}
 	return token
@@ -2605,13 +2953,21 @@ func sharedExternalAccessCSRFToken(code, token string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func sharedExternalAccessSessionBinding(code string) string {
-	code = strings.Trim(strings.TrimSpace(code), "/")
-	if code == "" {
-		return ""
+func sharedExternalAccessSessionBinding(code string, accesses ...*models.InstanceExternalAccess) string {
+	return services.ExternalAccessSessionBinding(code, accesses...)
+}
+
+func isSharedHermesDesktopInstance(instance *models.Instance) bool {
+	if instance == nil || !strings.EqualFold(strings.TrimSpace(instance.RuntimeType), services.RuntimeBackendGateway) {
+		return false
 	}
-	sum := sha256.Sum256([]byte("shared-instance-session\x00" + code))
-	return hex.EncodeToString(sum[:])
+	runtimeType, runtimeOK := services.NormalizeV2RuntimeType(instance.Type)
+	mode, modeOK := services.NormalizeInstanceMode(instance.InstanceMode)
+	return runtimeOK && modeOK && runtimeType == services.RuntimeTypeHermes && mode == services.InstanceModeLite
+}
+
+func sharedHermesDesktopEntryURL(instanceID int) string {
+	return fmt.Sprintf("/hermes-desktop-web/?instance_id=%d", instanceID)
 }
 
 func shortExternalAccessEntryRedirectTarget(method, requestPath, code, canonicalPath string) string {
@@ -2632,10 +2988,17 @@ func shortExternalAccessEntryRedirectTarget(method, requestPath, code, canonical
 		return ""
 	}
 	isInternalProxyPath := strings.HasPrefix(parsed.Path, "/api/v1/instances/")
+	isHermesDesktopRenderer := parsed.Scheme == "" && parsed.Host == "" &&
+		(parsed.Path == "/hermes-desktop-web/" || parsed.Path == "/hermes-desktop-web/index.html") &&
+		len(parsed.Query()) == 1 && len(parsed.Query()["instance_id"]) == 1
+	if isHermesDesktopRenderer {
+		instanceID, err := strconv.Atoi(parsed.Query().Get("instance_id"))
+		isHermesDesktopRenderer = err == nil && instanceID > 0
+	}
 	isDedicatedRuntimeURL := parsed.IsAbs() &&
 		(parsed.Scheme == "https" || parsed.Scheme == "http") &&
 		strings.TrimSpace(parsed.Host) != ""
-	if !isInternalProxyPath && !isDedicatedRuntimeURL {
+	if !isInternalProxyPath && !isHermesDesktopRenderer && !isDedicatedRuntimeURL {
 		return ""
 	}
 	return sharedExternalAccessPagePath(code)

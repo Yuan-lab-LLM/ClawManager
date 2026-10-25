@@ -3,6 +3,8 @@ package services
 import (
 	"errors"
 	"fmt"
+	"strings"
+	"time"
 
 	"clawreef/internal/models"
 	"clawreef/internal/repository"
@@ -26,6 +28,41 @@ func NewQuotaService(quotaRepo repository.QuotaRepository) QuotaService {
 	return &quotaService{
 		quotaRepo: quotaRepo,
 	}
+}
+
+// SyncDefaultQuotaForRole upgrades a user who still has the ordinary default
+// quota when the directory assigns the administrator role. Custom quotas are
+// intentionally left untouched.
+func SyncDefaultQuotaForRole(quotaRepo repository.QuotaRepository, userID int, role string) error {
+	if quotaRepo == nil || !isAdministratorRole(role) {
+		return nil
+	}
+
+	quota, err := quotaRepo.GetByUserID(userID)
+	if err != nil {
+		return fmt.Errorf("failed to get quota for role sync: %w", err)
+	}
+	created := quota == nil
+	if created {
+		quota, err = quotaRepo.CreateDefaultQuota(userID)
+		if err != nil {
+			return fmt.Errorf("failed to create quota for role sync: %w", err)
+		}
+	}
+	if !created && !quota.IsDefaultForRole("user") {
+		return nil
+	}
+
+	quota.ApplyResourceValues(models.DefaultQuotaForRole("admin"))
+	quota.UpdatedAt = time.Now()
+	if err := quotaRepo.Update(quota); err != nil {
+		return fmt.Errorf("failed to apply administrator default quota: %w", err)
+	}
+	return nil
+}
+
+func isAdministratorRole(role string) bool {
+	return strings.EqualFold(strings.TrimSpace(role), "admin")
 }
 
 // GetUserQuota gets quota for a user

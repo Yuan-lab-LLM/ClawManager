@@ -17,6 +17,7 @@ export interface RuntimeGovernanceStatus {
 export interface Instance {
   id: number;
   user_id: number;
+  owner?: string;
   name: string;
   description?: string;
   type:
@@ -29,8 +30,11 @@ export interface Instance {
     | "hermes"
     | "opencode"
     | "workbuddy"
-    | "deepseek-harness";
+    | "deepseek-harness"
+    | "codex"
+    | "claude-code";
   runtime_type: "desktop" | "shell" | "gateway";
+  runtime_variant?: "linux" | "windows";
   instance_mode: "lite" | "pro";
   status: "creating" | "running" | "stopped" | "error" | "deleting";
   cpu_cores: number;
@@ -49,6 +53,8 @@ export interface Instance {
   workspace_usage_bytes?: number;
   runtime_generation?: number;
   runtime_error_message?: string;
+  runtime_error_code?: string;
+  last_online_at?: string;
   pod_name?: string;
   pod_namespace?: string;
   pod_ip?: string;
@@ -65,7 +71,9 @@ export type V2InstanceType =
   | "hermes"
   | "opencode"
   | "workbuddy"
-  | "deepseek-harness";
+  | "deepseek-harness"
+  | "codex"
+  | "claude-code";
 
 export function formatInstanceType(type: string): string {
   switch (type) {
@@ -79,6 +87,10 @@ export function formatInstanceType(type: string): string {
       return "Workbuddy";
     case "deepseek-harness":
       return "DeepSeek Harness";
+    case "codex":
+      return "Codex";
+    case "claude-code":
+      return "Claude Code";
     default:
       return type;
   }
@@ -209,6 +221,7 @@ export interface InstanceConfigRevision {
 
 export interface CreateInstanceRequest {
   name: string;
+  owner?: string;
   description?: string;
   type:
     | "openclaw"
@@ -220,10 +233,13 @@ export interface CreateInstanceRequest {
     | "hermes"
     | "opencode"
     | "workbuddy"
-    | "deepseek-harness";
+    | "deepseek-harness"
+    | "codex"
+    | "claude-code";
   mode?: InstanceMode;
   instance_mode?: InstanceMode;
   runtime_type?: "desktop" | "shell" | "gateway";
+  runtime_variant?: "linux" | "windows";
   desktop_stream_profile?: DesktopStreamProfile;
   cpu_cores: number;
   memory_gb: number;
@@ -238,6 +254,13 @@ export interface CreateInstanceRequest {
   storage_class?: string;
   openclaw_config_plan?: OpenClawConfigPlan;
   skill_ids?: number[];
+  browser_worker?: {
+    enabled: boolean;
+    resource_profile?: "standard";
+    display_width?: number;
+    display_height?: number;
+    retain_profile?: boolean;
+  };
 }
 
 export interface BatchCreateLiteInstancesRequest {
@@ -300,6 +323,23 @@ export interface InstanceListResponse {
   total: number;
   page: number;
   limit: number;
+}
+
+export interface InstanceListFilters {
+  query?: string;
+  type?: string;
+  instance_mode?: "lite" | "pro";
+  availability?: InstanceAvailability;
+}
+
+export interface InstanceSummary {
+  total: number;
+  running: number;
+  creating: number;
+  stopped: number;
+  error: number;
+  deleting: number;
+  allocated_storage_gb: number;
 }
 
 export interface InstanceType {
@@ -382,6 +422,22 @@ export const INSTANCE_TYPES: InstanceType[] = [
     description: "Managed Workbuddy runtime on a webtop desktop base",
     icon: "workbuddy",
     defaultOs: "workbuddy",
+    defaultVersion: "latest",
+  },
+  {
+    id: "codex",
+    name: "Codex Pro",
+    description: "Managed Codex coding workspace on a dedicated desktop",
+    icon: "codex",
+    defaultOs: "codex",
+    defaultVersion: "latest",
+  },
+  {
+    id: "claude-code",
+    name: "Claude Code Pro",
+    description: "Managed Claude Code workspace on a dedicated desktop",
+    icon: "claude-code",
+    defaultOs: "claude-code",
     defaultVersion: "latest",
   },
   {
@@ -520,3 +576,5 @@ export const PRESET_CONFIGS = {
     description: "For heavy workloads",
   },
 };
+
+export const DEFAULT_LITE_DISK_GB = 5;

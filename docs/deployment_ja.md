@@ -27,6 +27,12 @@ Profile は ClawManager、MySQL、MinIO、Skill Scanner、Team Redis、Workspace
 
 新規 MySQL は `clawmanager-mysql-init` で初期化され、既存 Volume では First-Start Script を再実行しません。永続 Data に `emptyDir` を使いません。
 
+## オプションの Northbound API
+
+基本 Profile は Northbound API を公開しません。有効化する場合は、先に ClawManager Core を更新し、その後で独立した [Northbound Kubernetes Add-on](../deployments/k8s/northbound/README.md) を適用します。外部 API として公開できるのは Northbound Gateway だけです。Core の内部 Service は非公開のままにし、文書化された mTLS、Credential、Network Policy の境界を維持してください。外部 Port は NodePort、Load Balancer、Ingress で割り当てられ、API Contract には含まれません。
+
+既存環境では [Northbound Upgrade Guide（中国語）](./northbound-upgrade-guide.md)に従い、Client Contract は [OpenAPI 3.1 Specification](./northbound-openapi.yaml)を参照してください。
+
 ## DeepSeek Harness Runtime
 
 - Lite は共有 `deepseek-harness-runtime` Pool 内で分離された `dsh web` Process を実行し、`<workspace>/home/.dsh` に状態を永続化します。

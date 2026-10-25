@@ -994,6 +994,7 @@ const ModelManagementPage: React.FC = () => {
               description: saved.description ?? '',
               api_key: saved.api_key ?? '',
               api_key_secret_ref: saved.api_key_secret_ref ?? '',
+              discovered_models: card.discovered_models ?? [],
               isNew: false,
               isEditing: false,
               saving: false,

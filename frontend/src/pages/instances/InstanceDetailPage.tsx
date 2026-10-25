@@ -1,11 +1,11 @@
-﻿import React, {
+import React, {
   useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useLocation } from "react-router-dom";
 import {
   ArrowLeft,
   Ban,
@@ -39,6 +39,7 @@ import RuntimeMaintenancePanel from "../../components/RuntimeMaintenancePanel";
 import { InstanceServiceFrame } from "../../components/InstanceServiceFrame";
 import RestartWithEnvironmentDialog from "../../components/RestartWithEnvironmentDialog";
 import UserLayout from "../../components/UserLayout";
+import UpgradeRecoveryActions from "../../components/UpgradeRecoveryActions";
 import { WorkspaceFileManager } from "../../components/WorkspaceFileManager";
 import { useI18n } from "../../contexts/I18nContext";
 import { useInstanceStatusWebSocket } from "../../hooks/useWebSocket";
@@ -60,9 +61,16 @@ import {
 
 const META_POLL_INTERVAL_MS = 5000;
 const RUNTIME_POLL_INTERVAL_MS = 5000;
+const RESTART_NOTICE_AUTO_DISMISS_MS = 6000;
 const LITE_COLLAPSED_BOTTOM_FALLBACK_PX = 120;
 const LITE_COLLAPSED_BOTTOM_MAX_PX = 220;
 const LITE_ROOT_GAP_TOTAL_PX = 16; // two gap-2 rows between header / workspace / bottom
+type ExternalAccessAction =
+  | "share-link"
+  | "password"
+  | "reset-url"
+  | "reset-password"
+  | "disable";
 const DESKTOP_STREAM_PROFILES: Array<{
   id: DesktopStreamProfile;
   labelKey: string;
@@ -142,11 +150,16 @@ function formatBytes(value?: number) {
 }
 
 function supportsWorkspace(instance: Instance) {
+  if (instance.type === "workbuddy" || instance.type === "codex") {
+    return (
+      instance.runtime_variant === "linux" ||
+      (!instance.runtime_variant && instance.mount_path?.trim() === "/config")
+    );
+  }
   return (
     instance.type === "openclaw" ||
     instance.type === "hermes" ||
     instance.type === "opencode" ||
-    instance.type === "workbuddy" ||
     instance.type === "deepseek-harness" ||
     Boolean(instance.workspace_path)
   );
@@ -340,6 +353,9 @@ const InstanceDetailPage: React.FC = () => {
   const { t, locale } = useI18n();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
+  const requestedReturn = location.state?.returnTo;
+  const listReturnTo = typeof requestedReturn === "string" && /^\/instances(?:\?[^#]*)?$/.test(requestedReturn) ? requestedReturn : "/instances";
   const instanceId = id ? Number(id) : null;
 
   const [instance, setInstance] = useState<Instance | null>(null);
@@ -370,6 +386,7 @@ const InstanceDetailPage: React.FC = () => {
   const [externalActionLoading, setExternalActionLoading] = useState<
     string | null
   >(null);
+  const [externalResetTarget, setExternalResetTarget] = useState<"url" | "password" | null>(null);
   const [externalError, setExternalError] = useState<string | null>(null);
   const [copyState, setCopyState] = useState<string | null>(null);
   const [externalExpiresMode, setExternalExpiresMode] =
@@ -392,6 +409,7 @@ const InstanceDetailPage: React.FC = () => {
     string | null
   >(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
+  const [serviceFrameReloadToken, setServiceFrameReloadToken] = useState(0);
   const [openCodeProjectRestartPending, setOpenCodeProjectRestartPending] =
     useState(false);
   const [
@@ -417,6 +435,54 @@ const InstanceDetailPage: React.FC = () => {
   const liteBottomRef = useRef<HTMLDivElement>(null);
   const bottomPanelExpandedRef = useRef(false);
   const restartMenuRef = useRef<HTMLDivElement>(null);
+  const restartNoticeTimerRef = useRef<number | null>(null);
+
+  const cancelRestartNoticeTimer = useCallback(() => {
+    if (restartNoticeTimerRef.current !== null) {
+      window.clearTimeout(restartNoticeTimerRef.current);
+      restartNoticeTimerRef.current = null;
+    }
+  }, []);
+
+  const dismissRestartNotice = useCallback(() => {
+    cancelRestartNoticeTimer();
+    setActionMessage(null);
+  }, [cancelRestartNoticeTimer]);
+
+  const showRestartNotice = useCallback(
+    (message: string) => {
+      cancelRestartNoticeTimer();
+      setActionMessage(message);
+    },
+    [cancelRestartNoticeTimer],
+  );
+
+  const markRestartSubmitted = useCallback(
+    (message: string) => {
+      showRestartNotice(message);
+      restartNoticeTimerRef.current = window.setTimeout(() => {
+        restartNoticeTimerRef.current = null;
+        setActionMessage((current) => (current === message ? null : current));
+      }, RESTART_NOTICE_AUTO_DISMISS_MS);
+      setServiceFrameReloadToken((current) => current + 1);
+    },
+    [showRestartNotice],
+  );
+
+  useEffect(() => {
+    return () => cancelRestartNoticeTimer();
+  }, [cancelRestartNoticeTimer]);
+
+  const openCodeInitialDirectory = (() => {
+    if (instance?.type !== "opencode" || instance.instance_mode !== "lite") {
+      return undefined;
+    }
+    const workspacePath = instance?.workspace_path?.trim().replaceAll("\\", "/");
+    if (!workspacePath?.startsWith("/")) {
+      return undefined;
+    }
+    return `${workspacePath.replace(/\/+$/gu, "")}/starter`;
+  })();
 
   const fetchMeta = useCallback(
     async (targetInstanceId: number, options?: { background?: boolean }) => {
@@ -543,10 +609,11 @@ const InstanceDetailPage: React.FC = () => {
       return;
     }
 
-    setActionMessage(null);
+    dismissRestartNotice();
     setOpenCodeProjectRestartPending(false);
     setOpenCodeProjectRestartSawTransition(false);
   }, [
+    dismissRestartNotice,
     instance?.status,
     openCodeProjectRestartPending,
     openCodeProjectRestartSawTransition,
@@ -752,9 +819,9 @@ const InstanceDetailPage: React.FC = () => {
     try {
       setActionLoading(action);
       if (action === "restart") {
-        setActionMessage(t("instances.restartInProgress"));
+        showRestartNotice(t("instances.restartInProgress"));
       } else {
-        setActionMessage(null);
+        dismissRestartNotice();
       }
       switch (action) {
         case "start":
@@ -765,16 +832,17 @@ const InstanceDetailPage: React.FC = () => {
           break;
         case "restart":
           await instanceService.restartInstance(instance.id);
-          setActionMessage(t("instances.restartSubmitted"));
+          markRestartSubmitted(t("instances.restartSubmitted"));
           break;
         case "delete":
           await instanceService.deleteInstance(instance.id);
           setShowDeleteDialog(false);
-          navigate("/instances");
+          navigate(listReturnTo);
           return;
       }
       await fetchMeta(instance.id, { background: true });
     } catch (err: unknown) {
+      dismissRestartNotice();
       alert(getErrorMessage(err, t("instances.failedToLoad")));
     } finally {
       setActionLoading(null);
@@ -792,7 +860,7 @@ const InstanceDetailPage: React.FC = () => {
     try {
       setActionLoading("restart-environment");
       setRestartEnvironmentError(null);
-      setActionMessage(t("instances.restartInProgress"));
+      showRestartNotice(t("instances.restartInProgress"));
       await instanceService.restartInstance(instance.id, {
         environment_overrides: environmentOverrides,
         environment_override_removals: environmentOverrideRemovals,
@@ -806,10 +874,10 @@ const InstanceDetailPage: React.FC = () => {
         );
       });
       setShowRestartEnvironmentDialog(false);
-      setActionMessage(t("instances.restartEnvironmentSaved"));
+      markRestartSubmitted(t("instances.restartEnvironmentSaved"));
       await fetchMeta(instance.id, { background: true });
     } catch (restartError) {
-      setActionMessage(null);
+      dismissRestartNotice();
       setRestartEnvironmentError(
         getErrorMessage(restartError, t("instances.restartEnvironmentFailed")),
       );
@@ -845,19 +913,21 @@ const InstanceDetailPage: React.FC = () => {
       setOpenCodeProjectRestartPending(false);
       setOpenCodeProjectRestartSawTransition(false);
       setActionLoading("select-opencode-project");
-      setActionMessage("Saving OpenCode project and restarting…");
+      showRestartNotice("Saving OpenCode project and restarting…");
       await instanceService.restartInstance(instance.id, {
         environment_overrides: {
           CLAWMANAGER_DEFAULT_PROJECT_PATH: projectPath,
         },
       });
-      setActionMessage("OpenCode project saved. The instance is restarting.");
+      markRestartSubmitted(
+        "OpenCode project saved. The instance is restarting.",
+      );
       setOpenCodeProjectRestartPending(true);
       await fetchMeta(instance.id, { background: true });
     } catch (selectProjectError) {
       setOpenCodeProjectRestartPending(false);
       setOpenCodeProjectRestartSawTransition(false);
-      setActionMessage(null);
+      dismissRestartNotice();
       alert(
         getErrorMessage(selectProjectError, "Failed to set OpenCode project"),
       );
@@ -925,7 +995,7 @@ const InstanceDetailPage: React.FC = () => {
   };
 
   const handleExternalAction = async (
-    action: "share-link" | "password" | "disable",
+    action: ExternalAccessAction,
   ) => {
     if (!instance) {
       return;
@@ -960,6 +1030,20 @@ const InstanceDetailPage: React.FC = () => {
         setExternalPassword(result.password);
         setExternalPasswordVisible(false);
         setExternalShareURL(absoluteExternalURL(result.share_url));
+        setExternalAccessPanelOpen(true);
+      } else if (action === "reset-url") {
+        const result = await instanceService.resetExternalShareURL(instance.id);
+        setExternalAccess(result.access);
+        setExternalShareURL(absoluteExternalURL(result.share_url));
+        setExternalResetTarget(null);
+        setExternalAccessPanelOpen(true);
+      } else if (action === "reset-password") {
+        const result = await instanceService.resetExternalAccessPassword(instance.id);
+        setExternalAccess(result.access);
+        setExternalPassword(result.password);
+        setExternalPasswordVisible(false);
+        setExternalShareURL(absoluteExternalURL(result.share_url));
+        setExternalResetTarget(null);
         setExternalAccessPanelOpen(true);
       } else {
         await instanceService.disableExternalAccess(instance.id);
@@ -1002,7 +1086,7 @@ const InstanceDetailPage: React.FC = () => {
     try {
       setActionLoading("desktop-stream-profile");
       setDesktopStreamMessage(null);
-      setActionMessage(null);
+      dismissRestartNotice();
       await saveDesktopStreamProfile();
       setDesktopStreamMessage(t("instances.desktopStreamSavedRestartRequired"));
     } catch (streamError) {
@@ -1021,14 +1105,15 @@ const InstanceDetailPage: React.FC = () => {
     try {
       setActionLoading("desktop-stream-restart");
       setDesktopStreamMessage(t("instances.restartInProgress"));
-      setActionMessage(t("instances.restartInProgress"));
+      showRestartNotice(t("instances.restartInProgress"));
       await saveDesktopStreamProfile();
       await instanceService.restartInstance(instance.id);
       setDesktopStreamMessage(t("instances.restartSubmitted"));
-      setActionMessage(t("instances.restartSubmitted"));
+      markRestartSubmitted(t("instances.restartSubmitted"));
       await fetchMeta(instance.id, { background: true });
     } catch (streamError) {
       console.error("Failed to apply desktop stream profile", streamError);
+      dismissRestartNotice();
       setDesktopStreamMessage(t("instances.desktopStreamSaveFailed"));
     } finally {
       setActionLoading(null);
@@ -1075,7 +1160,7 @@ const InstanceDetailPage: React.FC = () => {
     <div className="flex shrink-0 flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
       <div className="min-w-0">
         <Link
-          to="/instances"
+          to={listReturnTo}
           className="mb-3 inline-flex items-center gap-2 text-sm font-medium text-slate-500 hover:text-slate-950"
         >
           <ArrowLeft className="h-4 w-4" />
@@ -1375,6 +1460,28 @@ const InstanceDetailPage: React.FC = () => {
               {externalAccess?.enabled && (
                 <button
                   type="button"
+                  className="app-button-secondary"
+                  disabled={externalActionLoading !== null}
+                  onClick={() => setExternalResetTarget("url")}
+                >
+                  <RotateCw className="h-4 w-4" />
+                  Reset URL
+                </button>
+              )}
+              {externalAccess?.enabled && externalAccess.auth_mode === "password" && (
+                <button
+                  type="button"
+                  className="app-button-secondary"
+                  disabled={externalActionLoading !== null}
+                  onClick={() => setExternalResetTarget("password")}
+                >
+                  <KeyRound className="h-4 w-4" />
+                  Reset Password
+                </button>
+              )}
+              {externalAccess?.enabled && (
+                <button
+                  type="button"
                   className="app-button-secondary border-red-200 text-red-700 hover:border-red-300 hover:bg-red-50 hover:text-red-800"
                   disabled={externalActionLoading !== null}
                   onClick={() => void handleExternalAction("disable")}
@@ -1516,6 +1623,8 @@ const InstanceDetailPage: React.FC = () => {
               instanceType={instance.type}
               instanceMode={instance.instance_mode}
               availability={availability}
+              reloadToken={serviceFrameReloadToken}
+              openCodeInitialDirectory={openCodeInitialDirectory}
               workspaceVisible={supportsWorkspace(instance) ? workspaceVisible : undefined}
               onWorkspaceVisibilityChange={supportsWorkspace(instance) ? setWorkspaceVisible : undefined}
             />
@@ -1523,7 +1632,15 @@ const InstanceDetailPage: React.FC = () => {
           {workspaceVisible &&
             (supportsWorkspace(instance) ? (
               <div className="h-full min-h-0 min-w-0">
-                <WorkspaceFileManager instanceId={instance.id} />
+                <WorkspaceFileManager
+                  instanceId={instance.id}
+                  initialPath={
+                    instance.type === "opencode" &&
+                    instance.instance_mode === "lite"
+                      ? "starter"
+                      : undefined
+                  }
+                />
               </div>
             ) : (
               <div className="cm-surface flex h-full min-h-[420px] items-center justify-center text-sm text-slate-500">
@@ -1594,7 +1711,15 @@ const InstanceDetailPage: React.FC = () => {
         <RotateCw
           className={`h-4 w-4 ${restartActionActive ? "animate-spin" : ""}`}
         />
-        <span>{actionMessage}</span>
+        <span className="min-w-0 flex-1">{actionMessage}</span>
+        <button
+          type="button"
+          className="rounded p-0.5 text-amber-700 hover:bg-amber-100 hover:text-amber-900"
+          aria-label={t("common.close")}
+          onClick={dismissRestartNotice}
+        >
+          <X className="h-4 w-4" />
+        </button>
       </div>
     ) : null;
 
@@ -1613,6 +1738,7 @@ const InstanceDetailPage: React.FC = () => {
             instanceType={instance.type}
             instanceMode={instance.instance_mode}
             availability={availability}
+            reloadToken={serviceFrameReloadToken}
             workspaceVisible={supportsWorkspace(instance) ? workspaceVisible : undefined}
             onWorkspaceVisibilityChange={supportsWorkspace(instance) ? setWorkspaceVisible : undefined}
           />
@@ -1712,7 +1838,7 @@ const InstanceDetailPage: React.FC = () => {
             {desktopStreamMessage || t("instances.restartRequiredAfterChange")}
           </p>
         </section>
-      )}
+        )}
 
       <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(280px,22rem)]">
         <InstanceSkillHubPanel
@@ -1835,6 +1961,33 @@ const InstanceDetailPage: React.FC = () => {
         !isDedicatedInstance && (skillPanelExpanded || sessionPanelExpanded)
       }
     >
+      {instance.type==='openclaw'&&instance.instance_mode==='lite'&&<UpgradeRecoveryActions instanceId={instance.id} onRecovered={()=>void fetchMeta(instance.id,{background:true})}/>}
+      <ConfirmDialog
+        open={externalResetTarget !== null}
+        title={externalResetTarget === "password" ? "Reset share password" : "Reset share URL"}
+        message={
+          externalResetTarget === "password"
+            ? "The old password and existing authenticated share sessions will stop working immediately. The share URL, expiration, and workspace permissions will stay unchanged."
+            : "The old share URL will stop working immediately. Password, expiration, and workspace permissions will stay unchanged."
+        }
+        confirmLabel={externalResetTarget === "password" ? "Reset Password" : "Reset URL"}
+        cancelLabel={t("common.cancel")}
+        destructive
+        loading={
+          externalActionLoading ===
+          (externalResetTarget === "password" ? "reset-password" : "reset-url")
+        }
+        onCancel={() => {
+          if (externalActionLoading === null) {
+            setExternalResetTarget(null);
+          }
+        }}
+        onConfirm={() =>
+          void handleExternalAction(
+            externalResetTarget === "password" ? "reset-password" : "reset-url",
+          )
+        }
+      />
       <ConfirmDialog
         open={showDeleteDialog}
         title={t("common.delete")}

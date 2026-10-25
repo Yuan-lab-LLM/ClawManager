@@ -43,13 +43,26 @@ func (r *customTeamTemplateRepository) Create(item *models.CustomTeamTemplate) e
 
 func (r *customTeamTemplateRepository) Update(item *models.CustomTeamTemplate) error {
 	item.UpdatedAt = time.Now().UTC()
-	if err := r.sess.Collection("custom_team_templates").Find(db.Cond{
-		"id": item.ID, "user_id": item.UserID,
-	}).Update(item); err != nil {
+	// Keep the existing expected_revision contract atomic, including competing
+	// model edits which began before a decoration edit finished.
+	result, err := r.sess.SQL().Exec(`UPDATE custom_team_templates
+		SET name=?, intent=?, requested_member_count=?, resolved_member_count=?,
+		    spec_json=?, revision=?, last_trace_id=?, updated_at=?
+		WHERE id=? AND user_id=? AND revision=?`, item.Name, item.Intent,
+		item.RequestedMemberCount, item.ResolvedMemberCount, item.SpecJSON, item.Revision,
+		item.LastTraceID, item.UpdatedAt, item.ID, item.UserID, item.Revision-1)
+	if err != nil {
 		if strings.Contains(err.Error(), "Duplicate entry") && strings.Contains(err.Error(), "uk_custom_team_templates_user_name") {
 			return fmt.Errorf("custom team template name already exists")
 		}
 		return fmt.Errorf("failed to update custom team template: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to inspect custom team template update: %w", err)
+	}
+	if rows != 1 {
+		return fmt.Errorf("custom team template revision conflict")
 	}
 	return nil
 }

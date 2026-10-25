@@ -12,6 +12,8 @@ import {
 } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import UserLayout from "../../components/UserLayout";
+import TeamBadge, { TeamIconPicker } from '../../components/teams/TeamBadge';
+import { resolveTeamIcon } from '../../lib/teamIcons';
 import { customTeamTemplateService } from "../../services/customTeamTemplateService";
 import type {
   CustomTeamMemberSpec,
@@ -220,6 +222,14 @@ const CustomTeamTemplatesPage: React.FC = () => {
     } finally {
       setBusy(null);
     }
+  };
+
+  const updateIcon = async (member: CustomTeamMemberSpec, iconOverride: string) => {
+    if (!selected) return;
+    try {
+      setBusy(`icon:${member.memberId}`); setError(null);
+      applyUpdated(await customTeamTemplateService.updateMemberIcon(selected.id, member.memberId, iconOverride, selected.revision), { syncEditor: false });
+    } catch (err) { setError(errorMessage(err)); } finally { setBusy(null); }
   };
 
   const regenerateAll = async () => {
@@ -498,7 +508,9 @@ const CustomTeamTemplatesPage: React.FC = () => {
                     const memberBusy = busy?.endsWith(`:${member.memberId}`);
                     return (
                       <article key={member.memberId} className="app-panel overflow-hidden">
-                        <button
+                        <div className="flex items-start gap-3 px-5 py-4">
+                          {member.isLeader ? <TeamBadge iconKey="leader" ordinal={index + 1} size="preview" /> : <TeamIconPicker label={`${member.displayName}职能图标`} ordinal={index + 1} value={member.iconOverride} autoKey={member.autoIconKey || resolveTeamIcon({role:member.role,name:member.displayName,tags:member.capabilityTags})} disabled={Boolean(busy)} onChange={value => void updateIcon(member,value)} />}
+                          <button
                           type="button"
                           onClick={() =>
                             setExpanded((current) => ({
@@ -506,13 +518,11 @@ const CustomTeamTemplatesPage: React.FC = () => {
                               [member.memberId]: !open,
                             }))
                           }
-                          className="flex w-full items-center justify-between gap-4 px-5 py-4 text-left hover:bg-[#fffaf6]"
+                          aria-expanded={open}
+                          className="flex min-w-0 flex-1 items-center justify-between gap-4 rounded-lg text-left hover:bg-[#fffaf6]"
                         >
                           <div className="min-w-0">
                             <div className="flex flex-wrap items-center gap-2">
-                              <span className="flex h-6 w-6 items-center justify-center rounded-full bg-gray-100 text-xs font-semibold text-gray-600">
-                                {index + 1}
-                              </span>
                               <span className="font-semibold text-gray-900">{member.displayName}</span>
                               <span
                                 className={`rounded-full px-2 py-0.5 text-xs font-medium ${
@@ -529,7 +539,8 @@ const CustomTeamTemplatesPage: React.FC = () => {
                             </p>
                           </div>
                           {open ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
-                        </button>
+                          </button>
+                        </div>
 
                         {open && (
                           <div className="border-t border-[#f1e5df] bg-white px-5 py-5">

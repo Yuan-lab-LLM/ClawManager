@@ -302,6 +302,12 @@ func (c *Client) GetOpenClawBootstrapSecretName(instanceID int, instanceName str
 	return sanitizeK8sName(fmt.Sprintf("clawreef-%d-%s-openclaw-bootstrap", instanceID, instanceName))
 }
 
+// GetCodexBootstrapSecretName returns the per-instance Secret containing the
+// Windows Codex config.toml and auth.json bootstrap files.
+func (c *Client) GetCodexBootstrapSecretName(instanceID int, instanceName string) string {
+	return sanitizeK8sName(fmt.Sprintf("clawreef-%d-%s-codex-bootstrap", instanceID, instanceName))
+}
+
 // GetNetworkPolicyName returns the default network policy name for an instance.
 func (c *Client) GetNetworkPolicyName(instanceID int, instanceName string) string {
 	return sanitizeK8sName(fmt.Sprintf("clawreef-%d-%s-netpol", instanceID, instanceName))

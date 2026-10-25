@@ -21,6 +21,7 @@ import (
 	"unicode"
 
 	"clawreef/internal/models"
+	"clawreef/internal/ownerrecords"
 	"clawreef/internal/repository"
 	"clawreef/internal/services"
 	"clawreef/internal/utils"
@@ -409,6 +410,8 @@ type Service interface {
 }
 
 type service struct {
+	ownerUsage               *ownerrecords.Store
+	expandedModelCatalog     services.ExpandedLLMModelCatalog
 	runtimeTasks             repository.GatewayTaskRepository
 	imageArtifacts           services.GatewayImageArtifactService
 	imageJobs                services.GatewayImageJobStore
@@ -438,6 +441,16 @@ func WithDeploymentStore(store services.GatewayDeploymentStore) ServiceOption {
 		if store != nil {
 			target.deploymentStore = store
 		}
+	}
+}
+
+func WithOwnerUsage(store *ownerrecords.Store) ServiceOption {
+	return func(s *service) { s.ownerUsage = store }
+}
+
+func WithExpandedLLMModelCatalog(catalog services.ExpandedLLMModelCatalog) ServiceOption {
+	return func(s *service) {
+		s.expandedModelCatalog = catalog
 	}
 }
 
@@ -488,15 +501,16 @@ func newGatewayHTTPClients() (*http.Client, *http.Client) {
 }
 
 func (s *service) ListAvailableModels() ([]AvailableModel, error) {
-	items, err := s.modelRepo.ListActive()
+	items, err := s.listActiveModels()
 	if err != nil {
 		return nil, fmt.Errorf("failed to list available models: %w", err)
 	}
-	if len(models.ChatModels(items)) == 0 {
+	items = models.ChatModels(items)
+	if len(items) == 0 {
 		return []AvailableModel{}, nil
 	}
 
-	return []AvailableModel{
+	available := []AvailableModel{
 		{
 			ID:          0,
 			DisplayName: "Auto",
@@ -504,7 +518,39 @@ func (s *service) ListAvailableModels() ([]AvailableModel, error) {
 			IsSecure:    false,
 			Provider:    "gateway",
 		},
-	}, nil
+	}
+	seen := map[string]struct{}{autoModelID: {}}
+	for _, item := range items {
+		displayName := strings.TrimSpace(item.DisplayName)
+		if displayName == "" {
+			displayName = strings.TrimSpace(item.ProviderModelName)
+		}
+		if displayName == "" {
+			continue
+		}
+
+		normalizedName := strings.ToLower(displayName)
+		if _, exists := seen[normalizedName]; exists {
+			continue
+		}
+		seen[normalizedName] = struct{}{}
+		available = append(available, AvailableModel{
+			ID:          item.ID,
+			DisplayName: displayName,
+			Description: item.Description,
+			IsSecure:    item.IsSecure,
+			Provider:    item.ProviderType,
+		})
+	}
+
+	return available, nil
+}
+
+func (s *service) listActiveModels() ([]models.LLMModel, error) {
+	// The repository is scoped to the instance owner on request entry. A
+	// provider discovery catalog is not an authorization source: it must never
+	// add unconfigured models or bypass the scoped repository.
+	return s.modelRepo.ListActive()
 }
 
 func (s *service) ChatCompletions(ctx context.Context, userID int, req ChatCompletionRequest) (*ProxyResponse, string, error) {
@@ -841,6 +887,9 @@ func (s *service) prepareChatRequest(ctx context.Context, userID int, req ChatCo
 	}
 
 	requestedModel := strings.TrimSpace(req.Model)
+	if s.ownerUsage != nil && req.InstanceID != nil && *req.InstanceID > 0 {
+		s.ownerUsage.QueueBinding(uint64(*req.InstanceID))
+	}
 	var selectedModel *models.LLMModel
 	var err error
 	if !isAutoModelRequest(requestedModel) {
@@ -3061,7 +3110,7 @@ func (s *service) resolveTargetModelForRequest(selectedModel *models.LLMModel, a
 		return selectedModel, models.RiskActionRouteSecureModel, nil
 	}
 
-	activeModels, err := s.modelRepo.ListActive()
+	activeModels, err := s.listActiveModels()
 	if err != nil {
 		return nil, models.RiskActionBlock, fmt.Errorf("failed to list active secure models: %w", err)
 	}
@@ -3078,22 +3127,46 @@ func (s *service) resolveRequestedModel(requestedModel string) (*models.LLMModel
 	if isAutoModelRequest(requestedModel) {
 		return s.selectAutoModel()
 	}
-
-	selectedModel, err := s.modelRepo.GetByDisplayName(requestedModel)
+	requestedModel = strings.TrimSpace(requestedModel)
+	// Preserve the scoped repository's explicit denial (including its stable
+	// error code) before attempting logical-group aliases.
+	configured, lookupErr := s.modelRepo.GetByDisplayName(requestedModel)
+	if lookupErr != nil {
+		return nil, lookupErr
+	}
+	if configured != nil && configured.IsActive {
+		if !models.LLMChatAvailable(configured) {
+			return nil, models.ErrChatNotSupported
+		}
+		return configured, nil
+	}
+	items, err := s.listActiveModels()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get model: %w", err)
+		return nil, fmt.Errorf("failed to list active models: %w", err)
 	}
-	if selectedModel == nil || !selectedModel.IsActive {
-		return s.selectModelGroup(requestedModel)
+	for _, item := range items {
+		if strings.TrimSpace(item.DisplayName) == requestedModel {
+			selected := item
+			if !models.LLMChatAvailable(&selected) {
+				return nil, models.ErrChatNotSupported
+			}
+			return &selected, nil
+		}
 	}
-	if !models.LLMChatAvailable(selectedModel) {
-		return nil, models.ErrChatNotSupported
+	for _, item := range items {
+		if strings.EqualFold(strings.TrimSpace(item.DisplayName), requestedModel) {
+			selected := item
+			if !models.LLMChatAvailable(&selected) {
+				return nil, models.ErrChatNotSupported
+			}
+			return &selected, nil
+		}
 	}
-	return selectedModel, nil
+	return s.selectModelGroup(requestedModel)
 }
 
 func (s *service) selectAutoModel() (*models.LLMModel, error) {
-	items, err := s.modelRepo.ListActive()
+	items, err := s.listActiveModels()
 	if err != nil {
 		return nil, fmt.Errorf("failed to list active models: %w", err)
 	}

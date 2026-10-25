@@ -34,6 +34,7 @@ type WorkspaceFileHandler struct {
 const (
 	sharedWorkspaceContextKey = "shared-instance-workspace"
 	sharedWorkspaceCSRFHeader = "X-ClawManager-Share-CSRF"
+	ieiWorkspaceContextKey    = "iei-instance-workspace"
 )
 
 type createWorkspaceFolderRequest struct {
@@ -119,6 +120,29 @@ func (h *WorkspaceFileHandler) List(c *gin.Context) {
 		return
 	}
 	utils.Success(c, http.StatusOK, "Workspace files retrieved successfully", gin.H{"entries": entries})
+}
+
+func (h *WorkspaceFileHandler) SharedSearch(c *gin.Context) {
+	h.markSharedRequest(c)
+	h.Search(c)
+}
+
+func (h *WorkspaceFileHandler) Search(c *gin.Context) {
+	_, service, scope, ok := h.workspaceScope(c)
+	if !ok {
+		return
+	}
+	limit, err := strconv.Atoi(c.Query("limit"))
+	if err != nil {
+		limit = 0
+	}
+	limit = services.NormalizeWorkspaceSearchLimit(limit)
+	entries, err := service.Search(c.Request.Context(), scope, c.Query("q"), limit)
+	if err != nil {
+		handleWorkspaceFileError(c, err)
+		return
+	}
+	utils.Success(c, http.StatusOK, "Workspace search completed", gin.H{"entries": entries, "limit": limit})
 }
 
 func (h *WorkspaceFileHandler) Preview(c *gin.Context) {
@@ -267,6 +291,14 @@ func (h *WorkspaceFileHandler) workspaceScope(c *gin.Context) (*models.Instance,
 	if shared, _ := c.Get(sharedWorkspaceContextKey); shared == true {
 		return h.sharedWorkspaceScope(c)
 	}
+	if rawInstance, exists := c.Get(ieiWorkspaceContextKey); exists {
+		instance, ok := rawInstance.(*models.Instance)
+		if !ok || instance == nil {
+			utils.Error(c, http.StatusUnauthorized, "IEI workspace session is invalid")
+			return nil, nil, services.WorkspaceFileScope{}, false
+		}
+		return h.instanceWorkspaceScope(c, instance, "iei_")
+	}
 
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
@@ -338,7 +370,7 @@ func (h *WorkspaceFileHandler) sharedWorkspaceScope(c *gin.Context) (*models.Ins
 	accessToken, tokenErr := h.instanceAccessService.ValidateToken(token)
 	if tokenErr != nil ||
 		accessToken.InstanceID != access.InstanceID ||
-		accessToken.SessionBinding != sharedExternalAccessSessionBinding(code) {
+		accessToken.SessionBinding != sharedExternalAccessSessionBinding(code, access) {
 		utils.Error(c, http.StatusUnauthorized, "Share session expired or invalid")
 		return nil, nil, services.WorkspaceFileScope{}, false
 	}
@@ -395,11 +427,14 @@ func isDesktopWorkspaceInstance(instance *models.Instance) bool {
 	if instance == nil {
 		return false
 	}
+	if services.IsWindowsVMRuntimeInstance(instance) {
+		return false
+	}
 	return strings.EqualFold(strings.TrimSpace(instance.InstanceMode), services.InstanceModePro) ||
 		strings.EqualFold(strings.TrimSpace(instance.RuntimeType), services.RuntimeBackendDesktop)
 }
 
-func streamWorkspaceFile(c *gin.Context, file io.ReadSeeker, filename, contentType, disposition string, size int64) {
+func streamWorkspaceFile(c *gin.Context, file io.Reader, filename, contentType, disposition string, size int64) {
 	safeName := safeWorkspaceDownloadName(filename)
 	c.Header("Content-Type", contentType)
 	c.Header("X-Content-Type-Options", "nosniff")
@@ -448,6 +483,8 @@ func safeWorkspaceDownloadName(name string) string {
 
 func handleWorkspaceFileError(c *gin.Context, err error) {
 	switch {
+	case errors.Is(err, services.ErrWorkspaceUpgradeBusy):
+		utils.Error(c, http.StatusConflict, err.Error())
 	case errors.Is(err, services.ErrWorkspacePathNotFound):
 		utils.Error(c, http.StatusNotFound, err.Error())
 	case errors.Is(err, services.ErrWorkspacePreviewTooLarge), errors.Is(err, services.ErrWorkspaceUploadTooLarge):

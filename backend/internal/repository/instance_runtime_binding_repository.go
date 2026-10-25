@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"clawreef/internal/models"
@@ -25,6 +26,27 @@ type InstanceRuntimeBindingRepository interface {
 	DeleteByInstanceID(ctx context.Context, instanceID int) error
 	DeleteByInstanceIDAndReleaseSlot(ctx context.Context, instanceID int, runtimePodID int64) error
 	DeleteRunningByInstanceIDGenerationAndReleaseSlot(ctx context.Context, instanceID int, runtimePodID int64, generation int) (bool, error)
+}
+
+// ReportedGatewayBindingReconciler repairs one narrowly defined control-plane
+// drift from an authoritative Runtime snapshot. Keeping this optional avoids
+// imposing 8.1 reconciliation rules on older Runtime repository consumers.
+type ReportedGatewayBindingReconciler interface {
+	ReconcileReportedGateway(ctx context.Context, binding *models.InstanceRuntimeBinding, expectedInstanceGeneration, portBlockSize int) (bool, error)
+}
+
+// PendingGatewayBindingReleaser conditionally releases an abandoned start
+// reservation after a fresh Runtime snapshot confirms that it does not exist.
+type PendingGatewayBindingReleaser interface {
+	DeletePendingByInstanceIDGenerationAndReleaseSlot(ctx context.Context, instanceID int, runtimePodID int64, generation int, updatedBefore time.Time) (bool, error)
+}
+
+// FailedGatewayBindingReleaser conditionally releases an old Agent-reported
+// process failure after that Agent has confirmed the writer is gone. The
+// generation/state predicate prevents a delayed recovery pass from deleting a
+// newer binding.
+type FailedGatewayBindingReleaser interface {
+	DeleteFailedByInstanceIDGenerationAndReleaseSlot(ctx context.Context, instanceID int, runtimePodID int64, generation int) (bool, error)
 }
 
 type instanceRuntimeBindingRepository struct {
@@ -54,6 +76,101 @@ func (r *instanceRuntimeBindingRepository) create(ctx context.Context, binding *
 		binding.ID = id
 	}
 	return nil
+}
+
+func (r *instanceRuntimeBindingRepository) ReconcileReportedGateway(ctx context.Context, binding *models.InstanceRuntimeBinding, expectedInstanceGeneration, portBlockSize int) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	if binding == nil || binding.InstanceID <= 0 || binding.RuntimePodID <= 0 || binding.Generation <= 0 || (expectedInstanceGeneration != binding.Generation && expectedInstanceGeneration != binding.Generation+1) || portBlockSize <= 0 {
+		return false, nil
+	}
+	reconciled := false
+	err := r.sess.TxContext(ctx, func(tx db.Session) error {
+		var status string
+		var generation int
+		row, err := tx.SQL().QueryRowContext(ctx, `SELECT status, runtime_generation FROM instances WHERE id = ? FOR UPDATE`, binding.InstanceID)
+		if err != nil {
+			return err
+		}
+		if err := row.Scan(&status, &generation); err != nil {
+			return err
+		}
+		if (status != "error" && status != "creating") || generation != expectedInstanceGeneration {
+			return nil
+		}
+		var existingID, existingPodID sql.NullInt64
+		var existingGatewayID, existingState sql.NullString
+		var existingGeneration sql.NullInt64
+		row, err = tx.SQL().QueryRowContext(ctx, `
+			SELECT MAX(id), MAX(runtime_pod_id), MAX(gateway_id), MAX(state), MAX(generation)
+			FROM instance_runtime_bindings WHERE instance_id = ?
+			FOR UPDATE
+		`, binding.InstanceID)
+		if err != nil {
+			return err
+		}
+		if err := row.Scan(&existingID, &existingPodID, &existingGatewayID, &existingState, &existingGeneration); err != nil {
+			return err
+		}
+		if existingID.Valid {
+			expectedPendingID := fmt.Sprintf("pending-%d-%d", binding.InstanceID, existingGeneration.Int64)
+			if !existingPodID.Valid || existingPodID.Int64 != binding.RuntimePodID || !existingGeneration.Valid || int(existingGeneration.Int64) != expectedInstanceGeneration || !strings.EqualFold(existingState.String, "creating") || existingGatewayID.String != expectedPendingID {
+				return nil
+			}
+			if _, err := tx.SQL().ExecContext(ctx, `DELETE FROM instance_runtime_bindings WHERE id = ?`, existingID.Int64); err != nil {
+				return err
+			}
+		}
+		var portConflicts int
+		row, err = tx.SQL().QueryRowContext(ctx, `
+			SELECT COUNT(*) FROM instance_runtime_bindings
+			WHERE runtime_pod_id = ?
+			  AND gateway_port <= ?
+			  AND gateway_port + ? - 1 >= ?
+		`, binding.RuntimePodID, binding.GatewayPort+portBlockSize-1, portBlockSize, binding.GatewayPort)
+		if err != nil {
+			return err
+		}
+		if err := row.Scan(&portConflicts); err != nil {
+			return err
+		}
+		if portConflicts != 0 {
+			return nil
+		}
+		now := time.Now().UTC()
+		if _, err := tx.SQL().ExecContext(ctx, `
+			INSERT INTO instance_runtime_bindings (
+				instance_id, runtime_pod_id, runtime_type, gateway_id, gateway_port,
+				gateway_pid, workspace_path, state, generation, last_health_at,
+				error_message, created_at, updated_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, 'running', ?, ?, NULL, ?, ?)
+		`, binding.InstanceID, binding.RuntimePodID, binding.RuntimeType, binding.GatewayID, binding.GatewayPort,
+			binding.GatewayPID, binding.WorkspacePath, binding.Generation, binding.LastHealthAt, now, now); err != nil {
+			return err
+		}
+		result, err := tx.SQL().ExecContext(ctx, `
+			UPDATE instances
+			SET status = 'running', runtime_generation = ?, runtime_error_message = NULL, updated_at = ?
+			WHERE id = ? AND status IN ('error', 'creating') AND runtime_generation = ?
+		`, binding.Generation, now, binding.InstanceID, expectedInstanceGeneration)
+		if err != nil {
+			return err
+		}
+		affected, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if affected != 1 {
+			return fmt.Errorf("instance %d changed while reconciling reported gateway", binding.InstanceID)
+		}
+		reconciled = true
+		return nil
+	}, nil)
+	if err != nil {
+		return false, fmt.Errorf("reconcile reported gateway binding: %w", err)
+	}
+	return reconciled, nil
 }
 
 func (r *instanceRuntimeBindingRepository) GetByInstanceID(ctx context.Context, instanceID int) (*models.InstanceRuntimeBinding, error) {
@@ -328,5 +445,74 @@ func (r *instanceRuntimeBindingRepository) DeleteRunningByInstanceIDGenerationAn
 		deleted = true
 		return nil
 	})
+	return deleted, err
+}
+
+func (r *instanceRuntimeBindingRepository) DeleteFailedByInstanceIDGenerationAndReleaseSlot(ctx context.Context, instanceID int, runtimePodID int64, generation int) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	deleted := false
+	err := r.sess.TxContext(ctx, func(tx db.Session) error {
+		res, err := tx.SQL().ExecContext(ctx, `
+			DELETE FROM instance_runtime_bindings
+			WHERE instance_id = ? AND runtime_pod_id = ? AND generation = ?
+			  AND state IN ('error', 'failed', 'stopped')
+		`, instanceID, runtimePodID, generation)
+		if err != nil {
+			return fmt.Errorf("failed to delete confirmed failed instance runtime binding: %w", err)
+		}
+		affected, err := res.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("failed to inspect confirmed failed binding delete: %w", err)
+		}
+		if affected == 0 {
+			return nil
+		}
+		if _, err := tx.SQL().ExecContext(ctx, `
+			UPDATE runtime_pods
+			SET used_slots = CASE WHEN used_slots > 0 THEN used_slots - 1 ELSE 0 END, updated_at = ?
+			WHERE id = ?
+		`, time.Now().UTC(), runtimePodID); err != nil {
+			return fmt.Errorf("failed to release confirmed failed runtime slot: %w", err)
+		}
+		deleted = true
+		return nil
+	}, nil)
+	return deleted, err
+}
+
+func (r *instanceRuntimeBindingRepository) DeletePendingByInstanceIDGenerationAndReleaseSlot(ctx context.Context, instanceID int, runtimePodID int64, generation int, updatedBefore time.Time) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	deleted := false
+	err := r.sess.TxContext(ctx, func(tx db.Session) error {
+		expectedGatewayID := fmt.Sprintf("pending-%d-%d", instanceID, generation)
+		res, err := tx.SQL().ExecContext(ctx, `
+			DELETE FROM instance_runtime_bindings
+			WHERE instance_id = ? AND runtime_pod_id = ? AND generation = ?
+			  AND state = 'creating' AND gateway_id = ? AND updated_at <= ?
+		`, instanceID, runtimePodID, generation, expectedGatewayID, updatedBefore)
+		if err != nil {
+			return fmt.Errorf("failed to delete abandoned pending runtime binding: %w", err)
+		}
+		affected, err := res.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("failed to inspect pending runtime binding delete: %w", err)
+		}
+		if affected == 0 {
+			return nil
+		}
+		if _, err := tx.SQL().ExecContext(ctx, `
+			UPDATE runtime_pods
+			SET used_slots = CASE WHEN used_slots > 0 THEN used_slots - 1 ELSE 0 END, updated_at = ?
+			WHERE id = ?
+		`, time.Now().UTC(), runtimePodID); err != nil {
+			return fmt.Errorf("failed to release abandoned pending runtime slot: %w", err)
+		}
+		deleted = true
+		return nil
+	}, nil)
 	return deleted, err
 }

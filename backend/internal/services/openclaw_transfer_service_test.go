@@ -73,8 +73,10 @@ func TestBuildImportCommand_UsesSuAbc(t *testing.T) {
 	if !strings.Contains(script, "su abc -s /bin/sh -c") {
 		t.Errorf("expected `su abc -s /bin/sh -c` wrap to land files as uid 1000, got: %s", script)
 	}
-	if !strings.Contains(script, "tar xzf -") {
-		t.Errorf("expected `tar xzf -` in extract, got: %s", script)
+	for _, want := range []string{"archive.tar.gz", "tar tzf", "tar xzf", ".preserved.", "mv \"$new_target\" \"$target_dir\""} {
+		if !strings.Contains(script, want) {
+			t.Errorf("expected atomic import fragment %q, got: %s", want, script)
+		}
 	}
 }
 
@@ -89,7 +91,7 @@ func TestBuildImportCommand_NoHomeReference(t *testing.T) {
 	}
 }
 
-func TestBuildHermesImportCommand_PreservesMountedHermesDirectory(t *testing.T) {
+func TestBuildHermesImportCommand_AtomicallyPreservesPreviousDirectory(t *testing.T) {
 	cmd := buildHermesImportCommand()
 	if len(cmd) != 3 || cmd[0] != "sh" || cmd[1] != "-lc" {
 		t.Fatalf("unexpected command shape: %#v", cmd)
@@ -102,11 +104,10 @@ func TestBuildHermesImportCommand_PreservesMountedHermesDirectory(t *testing.T) 
 	if strings.Contains(script, `rm -rf "$target_dir"`) {
 		t.Errorf("Hermes import must not remove the /config/.hermes mount point, got: %s", script)
 	}
-	if !strings.Contains(script, `find "$target_dir" -mindepth 1 -maxdepth 1`) {
-		t.Errorf("expected Hermes import to clear contents below mount point, got: %s", script)
-	}
-	if !strings.Contains(script, "tar xzf -") {
-		t.Errorf("expected `tar xzf -` in extract, got: %s", script)
+	for _, want := range []string{"archive.tar.gz", "tar tzf", "tar xzf", `.hermes.preserved.`, `mv "$new_target" "$target_dir"`} {
+		if !strings.Contains(script, want) {
+			t.Errorf("expected atomic Hermes import fragment %q, got: %s", want, script)
+		}
 	}
 	if !strings.Contains(script, `chown -R abc:abc "$target_dir"`) {
 		t.Errorf("expected Hermes import to restore runtime user ownership, got: %s", script)

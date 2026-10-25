@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"clawreef/internal/models"
+	"clawreef/internal/services/k8s"
 )
 
 func TestGatewayTokenAliasTTLConfig(t *testing.T) {
@@ -29,6 +30,14 @@ func TestGatewayTokenAliasTTLConfig(t *testing.T) {
 
 type stubLLMModelRepository struct {
 	active []models.LLMModel
+}
+
+type expandedModelCatalogStub struct {
+	active []models.LLMModel
+}
+
+func (s *expandedModelCatalogStub) ListExpandedActiveModels() ([]models.LLMModel, error) {
+	return append([]models.LLMModel(nil), s.active...), nil
 }
 
 func (r *stubLLMModelRepository) List() ([]models.LLMModel, error) {
@@ -71,7 +80,7 @@ func TestBuildGatewayEnvInjectsGatewayModelCatalog(t *testing.T) {
 						{DisplayName: "GPT-4.1", ModelGroup: "general", ContextWindowTokens: 128000},
 						{DisplayName: "Claude 3.7 Sonnet", ModelGroup: "general", ContextWindowTokens: 200000},
 						{DisplayName: "auto", ContextWindowTokens: 64000},
-						{ProviderModelName: "deepseek-r1", ContextWindowTokens: 32000},
+						{ProviderModelName: "deepseek-r1", ContextWindowTokens: 32000, ProviderType: models.ProviderTypeOpenAICompatible, ProtocolType: models.ProtocolTypeOpenAICompatible, BaseURL: "https://api.deepseek.com"},
 					},
 				},
 			}
@@ -90,6 +99,15 @@ func TestBuildGatewayEnvInjectsGatewayModelCatalog(t *testing.T) {
 			}
 			if env["CLAWMANAGER_LLM_MODEL"] != `["auto","GPT-4.1","Claude 3.7 Sonnet","deepseek-r1"]` {
 				t.Fatalf("expected CLAWMANAGER_LLM_MODEL to contain injected model catalog JSON, got %q", env["CLAWMANAGER_LLM_MODEL"])
+			}
+			if env["CLAWMANAGER_LLM_REASONING"] != `{"Claude 3.7 Sonnet":false,"Claude 3.7 Sonnet/Claude 3.7 Sonnet":false,"GPT-4.1":false,"GPT-4.1/GPT-4.1":false,"auto":false,"deepseek-r1":false,"openai-compatible/deepseek-r1":false}` {
+				t.Fatalf("expected authoritative reasoning settings, got %q", env["CLAWMANAGER_LLM_REASONING"])
+			}
+			if env["CLAWMANAGER_LLM_REASONING_CONTROL"] != `{"Claude 3.7 Sonnet":"","Claude 3.7 Sonnet/Claude 3.7 Sonnet":"","GPT-4.1":"","GPT-4.1/GPT-4.1":"","auto":"","deepseek-r1":"deepseek-thinking","openai-compatible/deepseek-r1":"deepseek-thinking"}` {
+				t.Fatalf("expected authoritative reasoning controls, got %q", env["CLAWMANAGER_LLM_REASONING_CONTROL"])
+			}
+			if env["CLAWMANAGER_LLM_PROVIDER_MODELS"] != `["auto/auto","GPT-4.1/GPT-4.1","Claude 3.7 Sonnet/Claude 3.7 Sonnet","openai-compatible/deepseek-r1"]` {
+				t.Fatalf("expected CLAWMANAGER_LLM_PROVIDER_MODELS to preserve configured provider names, got %q", env["CLAWMANAGER_LLM_PROVIDER_MODELS"])
 			}
 			if env["OPENAI_MODEL"] != "auto" {
 				t.Fatalf("expected OPENAI_MODEL to remain the default gateway alias, got %q", env["OPENAI_MODEL"])
@@ -114,6 +132,70 @@ func TestBuildGatewayEnvInjectsGatewayModelCatalog(t *testing.T) {
 	}
 }
 
+func TestResolveGatewayModelInjectionDoesNotGrantDiscoveredModels(t *testing.T) {
+	provider := models.LLMModel{
+		DisplayName:       "icompify",
+		ProviderType:      models.ProviderTypeOpenAICompatible,
+		ProtocolType:      models.ProtocolTypeOpenAICompatible,
+		ProviderModelName: "qwen3.8",
+		IsActive:          true,
+	}
+	if err := models.SetLLMProviderModels(&provider, []models.LLMProviderModel{
+		{ID: "qwen3.8"},
+		{ID: "glm-5.2"},
+		{ID: "minimax-m3"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	service := &instanceService{
+		llmModelRepo: &stubLLMModelRepository{active: []models.LLMModel{provider}},
+	}
+
+	injection, err := service.resolveGatewayModelInjection(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if injection.modelsJSON != `["auto","icompify"]` {
+		t.Fatalf("provider catalog was not expanded for instance injection: %s", injection.modelsJSON)
+	}
+	if injection.providerModelsJSON != `["auto/auto","icompify/icompify"]` {
+		t.Fatalf("provider-qualified catalog was not injected: %s", injection.providerModelsJSON)
+	}
+	if injection.codingAgentDefaultModel != "icompify" {
+		t.Fatalf("coding agent default = %q, want icompify", injection.codingAgentDefaultModel)
+	}
+}
+
+func TestResolveGatewayModelInjectionIgnoresUnapprovedExpandedCatalog(t *testing.T) {
+	expanded := []models.LLMModel{
+		{DisplayName: "model-1", ProviderModelName: "provider-model-1", CatalogProviderName: "configured-provider"},
+		{DisplayName: "model-2", ProviderModelName: "provider-model-2", CatalogProviderName: "configured-provider"},
+		{DisplayName: "model-3", ProviderModelName: "provider-model-3", CatalogProviderName: "configured-provider"},
+		{DisplayName: "model-4", ProviderModelName: "provider-model-4", CatalogProviderName: "configured-provider"},
+		{DisplayName: "model-5", ProviderModelName: "provider-model-5", CatalogProviderName: "configured-provider"},
+		{DisplayName: "model-6", ProviderModelName: "provider-model-6", CatalogProviderName: "configured-provider"},
+		{DisplayName: "model-7", ProviderModelName: "provider-model-7", CatalogProviderName: "configured-provider"},
+	}
+	service := &instanceService{
+		llmModelRepo:         &stubLLMModelRepository{active: expanded[:1]},
+		expandedModelCatalog: &expandedModelCatalogStub{active: expanded},
+	}
+
+	injection, err := service.resolveGatewayModelInjection(1)
+	if err != nil {
+		t.Fatalf("resolveGatewayModelInjection returned error: %v", err)
+	}
+	if injection.modelsJSON != `["auto","model-1"]` {
+		t.Fatalf("expanded provider models were not injected: %s", injection.modelsJSON)
+	}
+	if injection.providerModelsJSON != `["auto/auto","configured-provider/model-1"]` {
+		t.Fatalf("expanded provider model references were not injected: %s", injection.providerModelsJSON)
+	}
+	if injection.codingAgentDefaultModel != "model-1" {
+		t.Fatalf("coding agent default = %q, want model-1", injection.codingAgentDefaultModel)
+	}
+}
+
 func assertOpenCodeGatewayConfig(t *testing.T, raw string) {
 	t.Helper()
 	var config struct {
@@ -132,20 +214,11 @@ func assertOpenCodeGatewayConfig(t *testing.T, raw string) {
 	if err := json.Unmarshal([]byte(raw), &config); err != nil {
 		t.Fatalf("OPENCODE_CONFIG_CONTENT is not valid JSON: %v", err)
 	}
+	if config.Model != "clawmanager/auto" { t.Fatalf("legacy provider reference changed: %s", raw) }
 	provider, ok := config.Provider["clawmanager"]
-	if !ok {
-		t.Fatalf("missing clawmanager provider in OpenCode config: %s", raw)
-	}
-	if config.Model != "clawmanager/auto" || provider.NPM != "@ai-sdk/openai-compatible" {
-		t.Fatalf("unexpected OpenCode provider config: %s", raw)
-	}
-	if provider.Options["baseURL"] != "{env:CLAWMANAGER_LLM_BASE_URL}" || provider.Options["apiKey"] != "{env:CLAWMANAGER_LLM_API_KEY}" {
-		t.Fatalf("OpenCode config must use governed gateway env references: %s", raw)
-	}
-	for _, model := range []string{"auto", "GPT-4.1", "Claude 3.7 Sonnet", "deepseek-r1"} {
-		if _, ok := provider.Models[model]; !ok {
-			t.Fatalf("OpenCode config is missing model %q: %s", model, raw)
-		}
+	if !ok || provider.NPM != "@ai-sdk/openai-compatible" || provider.Options["baseURL"] != "{env:CLAWMANAGER_LLM_BASE_URL}" || provider.Options["apiKey"] != "{env:CLAWMANAGER_LLM_API_KEY}" { t.Fatalf("missing governed provider: %s", raw) }
+	for _, name := range []string{"auto","GPT-4.1","Claude 3.7 Sonnet","deepseek-r1"} {
+		if _, ok := provider.Models[name]; !ok { t.Fatalf("missing model %q", name) }
 	}
 	if provider.Models["auto"].Limit.Context != 32000 || provider.Models["GPT-4.1"].Limit.Context != 128000 || provider.Models["Claude 3.7 Sonnet"].Limit.Context != 128000 {
 		t.Fatalf("OpenCode config is missing model context limits: %s", raw)
@@ -381,6 +454,14 @@ func TestPersistentVolumeMountPathNormalizesManagedDesktopRuntimes(t *testing.T)
 			}
 		})
 	}
+	got := persistentVolumeMountPath(&models.Instance{Type: "workbuddy", MountPath: "/storage"})
+	if got != "/storage" {
+		t.Fatalf("expected Workbuddy PVC mount path /storage, got %q", got)
+	}
+	got = persistentVolumeMountPath(&models.Instance{Type: RuntimeTypeCodex, MountPath: "/storage"})
+	if got != "/storage" {
+		t.Fatalf("expected Codex PVC mount path /storage, got %q", got)
+	}
 }
 
 func TestManagedRuntimePersistentDirKeepsHermesSubdirectory(t *testing.T) {
@@ -473,6 +554,62 @@ func TestResolveGatewayModelInjectionRequiresActiveModels(t *testing.T) {
 	}
 }
 
+func TestRenderWindowsCodexBootstrapFiles(t *testing.T) {
+	files, err := renderWindowsCodexBootstrapFiles(
+		"http://clawmanager-gateway.system.svc:9001/api/v1/gateway/llm",
+		"gpt-5.4",
+		"igt_instance_token",
+	)
+	if err != nil {
+		t.Fatalf("renderWindowsCodexBootstrapFiles returned error: %v", err)
+	}
+	config := files[windowsCodexConfigKey]
+	for _, expected := range []string{
+		`model_provider = "clawmanager"`,
+		`model = "gpt-5.4"`,
+		`review_model = "gpt-5.4"`,
+		`base_url = "http://clawmanager-gateway.system.svc:9001/api/v1/gateway/llm/v1"`,
+		`wire_api = "responses"`,
+		`requires_openai_auth = true`,
+		`sandbox_mode = "danger-full-access"`,
+		`approval_policy = "never"`,
+	} {
+		if !strings.Contains(config, expected) {
+			t.Fatalf("config missing %q:\n%s", expected, config)
+		}
+	}
+	if strings.Contains(config, "igt_instance_token") {
+		t.Fatal("config.toml must not contain the instance token")
+	}
+	if strings.Contains(config, "default_permissions") || strings.Contains(config, "[sandbox_workspace_write]") {
+		t.Fatal("full-access sandbox config must not include a permission profile or workspace-write settings")
+	}
+
+	var auth map[string]string
+	if err := json.Unmarshal([]byte(files[windowsCodexAuthKey]), &auth); err != nil {
+		t.Fatalf("auth.json is invalid JSON: %v", err)
+	}
+	if got := auth["OPENAI_API_KEY"]; got != "igt_instance_token" {
+		t.Fatalf("auth OPENAI_API_KEY = %q", got)
+	}
+}
+
+func TestRenderWindowsCodexBootstrapFilesDoesNotDuplicateVersionPath(t *testing.T) {
+	files, err := renderWindowsCodexBootstrapFiles(
+		"http://clawmanager-gateway.system.svc:9001/api/v1/gateway/llm/v1/",
+		"gpt-5.4",
+		"igt_instance_token",
+	)
+	if err != nil {
+		t.Fatalf("renderWindowsCodexBootstrapFiles returned error: %v", err)
+	}
+
+	config := files[windowsCodexConfigKey]
+	if !strings.Contains(config, `base_url = "http://clawmanager-gateway.system.svc:9001/api/v1/gateway/llm/v1"`) {
+		t.Fatalf("config has unexpected base URL:\n%s", config)
+	}
+}
+
 func TestSecurityModeForInstance(t *testing.T) {
 	service := &instanceService{}
 
@@ -482,9 +619,34 @@ func TestSecurityModeForInstance(t *testing.T) {
 	if got := service.securityModeForInstance("ubuntu"); got != "default" {
 		t.Fatalf("expected ubuntu to use default security mode, got %q", got)
 	}
+	if got := service.securityModeForInstance("workbuddy"); got != "privileged" {
+		t.Fatalf("expected Workbuddy to use privileged mode for KVM, got %q", got)
+	}
+	if got := service.securityModeForInstance(RuntimeTypeCodex); got != "privileged" {
+		t.Fatalf("expected Codex to use privileged mode for KVM, got %q", got)
+	}
 
 	service.allowPrivilegedPods = true
 	if got := service.securityModeForInstance("openclaw"); got != "privileged" {
 		t.Fatalf("expected explicit privileged override to win, got %q", got)
+	}
+}
+
+func TestSecurityModeForRuntimeUsesLinuxWorkbuddySandboxMode(t *testing.T) {
+	service := &instanceService{}
+
+	linuxWorkbuddy := &models.Instance{Type: "workbuddy", RuntimeVariant: WorkbuddyRuntimeLinux}
+	if got := service.securityModeForRuntime(linuxWorkbuddy); got != k8s.PodSecurityWorkbuddyLinux {
+		t.Fatalf("expected Linux WorkBuddy to use its bubblewrap-compatible mode, got %q", got)
+	}
+
+	windowsWorkbuddy := &models.Instance{Type: "workbuddy", RuntimeVariant: WorkbuddyRuntimeWindows}
+	if got := service.securityModeForRuntime(windowsWorkbuddy); got != k8s.PodSecurityPrivileged {
+		t.Fatalf("expected Windows WorkBuddy to retain the KVM privileged mode, got %q", got)
+	}
+
+	linuxCodex := &models.Instance{Type: RuntimeTypeCodex, RuntimeVariant: WorkbuddyRuntimeLinux}
+	if got := service.securityModeForRuntime(linuxCodex); got != k8s.PodSecurityChromiumCompat {
+		t.Fatalf("expected Linux Codex to retain chromium compat mode, got %q", got)
 	}
 }

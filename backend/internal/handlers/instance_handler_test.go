@@ -35,6 +35,16 @@ type restartRecordingInstanceService struct {
 	environmentNamesErr error
 }
 
+func TestInstanceCreateRequestToServiceIncludesOwner(t *testing.T) {
+	owner := "owner@example.com"
+	req := CreateInstanceRequest{Name: "owned-lite", Owner: &owner}
+
+	got := instanceCreateRequestToService(req)
+	if got.Owner == nil || *got.Owner != owner {
+		t.Fatalf("owner = %v, want %q", got.Owner, owner)
+	}
+}
+
 func (s *restartRecordingInstanceService) GetEnvironmentOverrideNames(instanceID int) ([]string, error) {
 	return s.environmentNames, s.environmentNamesErr
 }
@@ -759,6 +769,21 @@ func TestSharedInstanceSessionRequiresPasswordEntrySession(t *testing.T) {
 	}
 }
 
+func TestSharePasswordResetChangesSessionBindingWithoutChangingURL(t *testing.T) {
+	oldHash := "old-password-hash"
+	newHash := "new-password-hash"
+	oldAccess := &models.InstanceExternalAccess{AuthMode: services.ExternalAccessModePassword, PasswordHash: &oldHash}
+	newAccess := &models.InstanceExternalAccess{AuthMode: services.ExternalAccessModePassword, PasswordHash: &newHash}
+	oldBinding := sharedExternalAccessSessionBinding("sl_test", oldAccess)
+	newBinding := sharedExternalAccessSessionBinding("sl_test", newAccess)
+	if oldBinding == newBinding {
+		t.Fatal("password reset must invalidate existing share sessions")
+	}
+	if got := sharedExternalAccessSessionBinding("sl_test"); got == "" {
+		t.Fatal("legacy share-link binding must remain available")
+	}
+}
+
 func TestProxyAccessTokenPrefersCookieOverRuntimeQueryToken(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	accessService := services.NewInstanceAccessService()
@@ -786,6 +811,99 @@ func TestProxyAccessTokenPrefersCookieOverRuntimeQueryToken(t *testing.T) {
 	}
 }
 
+func TestProxyAccessTokenRejectsShareSessionAfterPasswordReset(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	accessService := services.NewInstanceAccessService()
+	defer accessService.Stop()
+
+	slug := "sl_test"
+	oldHash := "old-password-hash"
+	newHash := "new-password-hash"
+	oldAccess := &models.InstanceExternalAccess{
+		InstanceID:   76,
+		Enabled:      true,
+		AuthMode:     services.ExternalAccessModePassword,
+		PublicSlug:   &slug,
+		PasswordHash: &oldHash,
+	}
+	currentAccess := &models.InstanceExternalAccess{
+		InstanceID:   76,
+		Enabled:      true,
+		AuthMode:     services.ExternalAccessModePassword,
+		PublicSlug:   &slug,
+		PasswordHash: &newHash,
+	}
+	staleToken, err := accessService.GenerateBoundToken(
+		1, 76, "hermes", "/api/v1/instances/76/proxy/", "", 3000, time.Hour,
+		sharedExternalAccessSessionBinding(slug, oldAccess),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	currentToken, err := accessService.GenerateBoundToken(
+		1, 76, "hermes", "/api/v1/instances/76/proxy/", "", 3000, time.Hour,
+		sharedExternalAccessSessionBinding(slug, currentAccess),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	handler := &InstanceHandler{
+		accessService:         accessService,
+		externalAccessService: &fakeSharedExternalAccessService{access: currentAccess},
+	}
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/v1/instances/76/proxy/", nil)
+	c.Request.AddCookie(&http.Cookie{Name: "instance_access_76", Value: staleToken.Token})
+	if got, ok := handler.proxyAccessToken(c, 76); ok || got != "" {
+		t.Fatalf("stale share token = %q/%v, want rejected", got, ok)
+	}
+
+	recorder = httptest.NewRecorder()
+	c, _ = gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/v1/instances/76/proxy/", nil)
+	c.Request.AddCookie(&http.Cookie{Name: "instance_access_76", Value: currentToken.Token})
+	if got, ok := handler.proxyAccessToken(c, 76); !ok || got != currentToken.Token {
+		t.Fatalf("current share token = %q/%v, want accepted", got, ok)
+	}
+}
+
+func TestProxyAccessTokenRotatesDedicatedOriginCookieFromManagedQueryToken(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	accessService := services.NewInstanceAccessService()
+	defer accessService.Stop()
+	oldToken, err := accessService.GenerateToken(1, 76, "deepseek-harness", "https://deepseek-harness-76.example.test/", "", 3001, time.Hour)
+	if err != nil {
+		t.Fatalf("GenerateToken(old) returned error: %v", err)
+	}
+	freshToken, err := accessService.GenerateToken(2, 76, "deepseek-harness", "https://deepseek-harness-76.example.test/", "", 3001, time.Hour)
+	if err != nil {
+		t.Fatalf("GenerateToken(fresh) returned error: %v", err)
+	}
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/v1/instances/76/proxy/?token="+url.QueryEscape(freshToken.Token), nil)
+	c.Request.Header.Set(services.DedicatedRuntimeOriginHeader, services.RuntimeTypeDeepSeekHarness)
+	c.Request.AddCookie(&http.Cookie{Name: "instance_access_76", Value: oldToken.Token})
+
+	handler := &InstanceHandler{accessService: accessService}
+	got, ok := handler.proxyAccessToken(c, 76)
+	if !ok {
+		t.Fatal("proxyAccessToken rejected fresh managed query token")
+	}
+	if got != freshToken.Token {
+		t.Fatalf("proxyAccessToken selected stale cookie token, got %q", got)
+	}
+	setCookie := recorder.Header().Get("Set-Cookie")
+	for _, want := range []string{"instance_access_76=" + freshToken.Token, "Path=/", "Secure", "HttpOnly", "SameSite=None"} {
+		if !strings.Contains(setCookie, want) {
+			t.Fatalf("Set-Cookie = %q, want %q", setCookie, want)
+		}
+	}
+}
+
 func TestProxyAccessTokenRejectsRuntimeQueryTokenWithoutCookie(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	accessService := services.NewInstanceAccessService()
@@ -804,66 +922,7 @@ func TestProxyAccessTokenRejectsRuntimeQueryTokenWithoutCookie(t *testing.T) {
 	}
 }
 
-func TestProxyAccessTokenBootstrapsDedicatedOpenCodeOriginCookie(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	accessService := services.NewInstanceAccessService()
-	defer accessService.Stop()
-	token, err := accessService.GenerateToken(
-		1,
-		171,
-		services.RuntimeTypeOpenCode,
-		"https://opencode-171.runtime.example.test/",
-		"",
-		20000,
-		time.Hour,
-	)
-	if err != nil {
-		t.Fatalf("GenerateToken returned error: %v", err)
-	}
 
-	recorder := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(recorder)
-	requestURL := "/api/v1/instances/171/proxy/?token=" + url.QueryEscape(token.Token) + "&token=runtime-session&view=compact"
-	c.Request = httptest.NewRequest(http.MethodGet, requestURL, nil)
-	c.Request.Header.Set(services.DedicatedRuntimeOriginHeader, services.RuntimeTypeOpenCode)
-
-	handler := &InstanceHandler{accessService: accessService}
-	if got, ok := handler.proxyAccessToken(c, 171); ok || got != "" {
-		t.Fatalf("proxyAccessToken = %q/%v, want redirect after cookie bootstrap", got, ok)
-	}
-	if recorder.Code != http.StatusTemporaryRedirect {
-		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusTemporaryRedirect)
-	}
-	if got := recorder.Header().Get("Location"); got != "/?token=runtime-session&view=compact" {
-		t.Fatalf("Location = %q", got)
-	}
-	setCookie := recorder.Header().Get("Set-Cookie")
-	for _, want := range []string{
-		"instance_access_171=",
-		"Path=/",
-		"HttpOnly",
-		"Secure",
-		"SameSite=None",
-	} {
-		if !strings.Contains(setCookie, want) {
-			t.Fatalf("Set-Cookie missing %q: %s", want, setCookie)
-		}
-	}
-	if strings.Contains(recorder.Header().Get("Location"), token.Token) {
-		t.Fatal("redirect leaked the ClawManager access token")
-	}
-}
-
-func TestDedicatedRuntimeCleanLocationUsesRootPath(t *testing.T) {
-	requestURL, err := url.Parse("/api/v1/instances/171/proxy/assets/app.js?token=access&lang=zh-CN")
-	if err != nil {
-		t.Fatal(err)
-	}
-	got := dedicatedRuntimeCleanLocation(requestURL, 171, "access")
-	if want := "/assets/app.js?lang=zh-CN"; got != want {
-		t.Fatalf("dedicatedRuntimeCleanLocation() = %q, want %q", got, want)
-	}
-}
 
 func TestBrowserAccessEntryURLBootstrapsDedicatedOrigin(t *testing.T) {
 	for _, tc := range []struct {
@@ -893,6 +952,88 @@ func TestBrowserAccessEntryURLBootstrapsDedicatedOrigin(t *testing.T) {
 	}
 }
 
+func TestProxyAccessTokenBootstrapsDedicatedOpenCodeOriginCookie(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	accessService := services.NewInstanceAccessService()
+	defer accessService.Stop()
+	token, err := accessService.GenerateToken(
+		1, 171, services.RuntimeTypeOpenCode,
+		"https://opencode-171.runtime.example.test/", "", 20000, time.Hour,
+	)
+	if err != nil {
+		t.Fatalf("GenerateToken returned error: %v", err)
+	}
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	requestURL := "/api/v1/instances/171/proxy/?token=" + url.QueryEscape(token.Token) + "&token=runtime-session&view=compact"
+	c.Request = httptest.NewRequest(http.MethodGet, requestURL, nil)
+	c.Request.Header.Set(services.DedicatedRuntimeOriginHeader, services.RuntimeTypeOpenCode)
+
+	handler := &InstanceHandler{accessService: accessService}
+	if got, ok := handler.proxyAccessToken(c, 171); ok || got != "" {
+		t.Fatalf("proxyAccessToken = %q/%v, want redirect after cookie bootstrap", got, ok)
+	}
+	if recorder.Code != http.StatusTemporaryRedirect {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusTemporaryRedirect)
+	}
+	if got := recorder.Header().Get("Location"); got != "/?token=runtime-session&view=compact" {
+		t.Fatalf("Location = %q", got)
+	}
+	setCookie := recorder.Header().Get("Set-Cookie")
+	for _, want := range []string{"instance_access_171=", "Path=/", "HttpOnly", "Secure", "SameSite=None", "Partitioned"} {
+		if !strings.Contains(setCookie, want) {
+			t.Fatalf("Set-Cookie missing %q: %s", want, setCookie)
+		}
+	}
+	if strings.Contains(recorder.Header().Get("Location"), token.Token) {
+		t.Fatal("redirect leaked the ClawManager access token")
+	}
+}
+
+func TestProxyAccessTokenUsesValidPartitionedCookieAfterStaleLegacyCookie(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	accessService := services.NewInstanceAccessService()
+	defer accessService.Stop()
+	stale, err := accessService.GenerateToken(
+		1, 171, services.RuntimeTypeOpenCode,
+		"https://opencode-171.runtime.example.test/", "", 20000, -time.Second,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err := accessService.GenerateToken(
+		1, 171, services.RuntimeTypeOpenCode,
+		"https://opencode-171.runtime.example.test/", "", 20000, time.Hour,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/v1/instances/171/proxy/", nil)
+	c.Request.Host = "opencode-171.runtime.example.test"
+	c.Request.Header.Set(services.DedicatedRuntimeOriginHeader, services.RuntimeTypeOpenCode)
+	c.Request.AddCookie(&http.Cookie{Name: "instance_access_171", Value: stale.Token})
+	c.Request.AddCookie(&http.Cookie{Name: "instance_access_171", Value: current.Token})
+
+	handler := &InstanceHandler{accessService: accessService}
+	if got, ok := handler.proxyAccessToken(c, 171); !ok || got != current.Token {
+		t.Fatalf("proxyAccessToken = %q/%v, want the valid cookie", got, ok)
+	}
+}
+
+func TestDedicatedRuntimeCleanLocationUsesRootPath(t *testing.T) {
+	requestURL, err := url.Parse("/api/v1/instances/171/proxy/assets/app.js?token=access&lang=zh-CN")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := dedicatedRuntimeCleanLocation(requestURL, 171, "access"), "/assets/app.js?lang=zh-CN"; got != want {
+		t.Fatalf("dedicatedRuntimeCleanLocation() = %q, want %q", got, want)
+	}
+}
+
 func TestBuildLiteBatchCreateRequestsDefaultsToGatewayLite(t *testing.T) {
 	requests, handlerRequests, err := buildLiteBatchCreateRequests(BatchCreateLiteInstancesRequest{
 		NamePrefix: "batch-lite",
@@ -910,6 +1051,9 @@ func TestBuildLiteBatchCreateRequestsDefaultsToGatewayLite(t *testing.T) {
 		}
 		if req.Type != "openclaw" || req.OSType != "openclaw" || req.OSVersion != "latest" {
 			t.Fatalf("request %d defaults = type %q os %q version %q", idx, req.Type, req.OSType, req.OSVersion)
+		}
+		if req.DiskGB != services.DefaultLiteDiskGB {
+			t.Fatalf("request %d disk = %dGiB, want %dGiB", idx, req.DiskGB, services.DefaultLiteDiskGB)
 		}
 	}
 }

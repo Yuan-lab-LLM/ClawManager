@@ -18,41 +18,42 @@ type LLMModelHandler struct {
 
 // UpsertLLMModelRequest defines editable fields for model catalog entries.
 type UpsertLLMModelRequest struct {
-	VisibilityScope            *string  `json:"visibility_scope,omitempty"`
-	AllowedUserIDs             *[]int   `json:"allowed_user_ids,omitempty"`
-	AccessPolicyVersion        *int     `json:"access_policy_version,omitempty"`
-	ID                         int      `json:"id,omitempty"`
-	DisplayName                string   `json:"display_name" binding:"required"`
-	Description                *string  `json:"description,omitempty"`
-	ProviderType               string   `json:"provider_type" binding:"required"`
-	ProtocolType               string   `json:"protocol_type,omitempty"`
-	ModelKind                  *string  `json:"model_kind,omitempty"`
-	ImageGenerationEnabled     *bool    `json:"image_generation_enabled,omitempty"`
-	ImageEditEnabled           *bool    `json:"image_edit_enabled,omitempty"`
-	ImagePricePerImage         *float64 `json:"image_price_per_image,omitempty"`
-	ResetImagePrice            bool     `json:"reset_image_price,omitempty"`
-	ModelGroup                 string   `json:"model_group,omitempty"`
-	DeploymentPriority         int      `json:"deployment_priority,omitempty"`
-	MaxConcurrentRequests      int      `json:"max_concurrent_requests,omitempty"`
-	ContextWindowTokens        int      `json:"context_window_tokens,omitempty"`
-	QualityTier                *int     `json:"quality_tier,omitempty"`
-	BaseURL                    string   `json:"base_url" binding:"required"`
-	ProviderModelName          string   `json:"provider_model_name" binding:"required"`
-	ReasoningEnabled           *bool    `json:"reasoning_enabled,omitempty"`
-	ReasoningControlMode       *string  `json:"reasoning_control_mode,omitempty"`
-	APIKey                     *string  `json:"api_key,omitempty"`
-	APIKeySecretRef            *string  `json:"api_key_secret_ref,omitempty"`
-	IsSecure                   bool     `json:"is_secure"`
-	IsActive                   bool     `json:"is_active"`
-	InputPrice                 float64  `json:"input_price"`
-	OutputPrice                float64  `json:"output_price"`
-	Currency                   string   `json:"currency,omitempty"`
-	SupportsTools              bool     `json:"supports_tools,omitempty"`
-	ToolsSupportOverride       *bool    `json:"tools_support_override,omitempty"`
-	SupportsVision             bool     `json:"supports_vision,omitempty"`
-	VisionSupportOverride      *bool    `json:"vision_support_override,omitempty"`
-	ResetVisionSupportOverride bool     `json:"reset_vision_support_override,omitempty"`
-	CapabilitySource           string   `json:"capability_source,omitempty"`
+	VisibilityScope            *string                   `json:"visibility_scope,omitempty"`
+	AllowedUserIDs             *[]int                    `json:"allowed_user_ids,omitempty"`
+	AccessPolicyVersion        *int                      `json:"access_policy_version,omitempty"`
+	ID                         int                       `json:"id,omitempty"`
+	DisplayName                string                    `json:"display_name" binding:"required"`
+	Description                *string                   `json:"description,omitempty"`
+	ProviderType               string                    `json:"provider_type" binding:"required"`
+	ProtocolType               string                    `json:"protocol_type,omitempty"`
+	ModelKind                  *string                   `json:"model_kind,omitempty"`
+	ImageGenerationEnabled     *bool                     `json:"image_generation_enabled,omitempty"`
+	ImageEditEnabled           *bool                     `json:"image_edit_enabled,omitempty"`
+	ImagePricePerImage         *float64                  `json:"image_price_per_image,omitempty"`
+	ResetImagePrice            bool                      `json:"reset_image_price,omitempty"`
+	ModelGroup                 string                    `json:"model_group,omitempty"`
+	DeploymentPriority         int                       `json:"deployment_priority,omitempty"`
+	MaxConcurrentRequests      int                       `json:"max_concurrent_requests,omitempty"`
+	ContextWindowTokens        int                       `json:"context_window_tokens,omitempty"`
+	QualityTier                *int                      `json:"quality_tier,omitempty"`
+	BaseURL                    string                    `json:"base_url" binding:"required"`
+	ProviderModelName          string                    `json:"provider_model_name" binding:"required"`
+	ReasoningEnabled           *bool                     `json:"reasoning_enabled,omitempty"`
+	ReasoningControlMode       *string                   `json:"reasoning_control_mode,omitempty"`
+	APIKey                     *string                   `json:"api_key,omitempty"`
+	APIKeySecretRef            *string                   `json:"api_key_secret_ref,omitempty"`
+	IsSecure                   bool                      `json:"is_secure"`
+	IsActive                   bool                      `json:"is_active"`
+	InputPrice                 float64                   `json:"input_price"`
+	OutputPrice                float64                   `json:"output_price"`
+	Currency                   string                    `json:"currency,omitempty"`
+	SupportsTools              bool                      `json:"supports_tools,omitempty"`
+	ToolsSupportOverride       *bool                     `json:"tools_support_override,omitempty"`
+	SupportsVision             bool                      `json:"supports_vision,omitempty"`
+	VisionSupportOverride      *bool                     `json:"vision_support_override,omitempty"`
+	ResetVisionSupportOverride bool                      `json:"reset_vision_support_override,omitempty"`
+	CapabilitySource           string                    `json:"capability_source,omitempty"`
+	ProviderModels             []models.LLMProviderModel `json:"provider_models,omitempty"`
 }
 
 // DiscoverLLMModelsRequest defines fields needed to fetch provider models.
@@ -128,6 +129,7 @@ func (h *LLMModelHandler) UpsertModel(c *gin.Context) {
 		VisionSupportOverride:      req.VisionSupportOverride,
 		ResetVisionSupportOverride: req.ResetVisionSupportOverride,
 		CapabilitySource:           req.CapabilitySource,
+		ProviderModels:             req.ProviderModels,
 	})
 	if err != nil {
 		utils.HandleError(c, err)

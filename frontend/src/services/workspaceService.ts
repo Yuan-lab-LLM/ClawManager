@@ -1,5 +1,5 @@
 import api from "./api";
-import type { WorkspaceEntry, WorkspacePreview } from "../types/workspace";
+import type { WorkspaceEntry, WorkspacePreview, WorkspaceSearchResponse } from "../types/workspace";
 
 export const workspaceService = {
   async list(instanceId: number, path = ""): Promise<WorkspaceEntry[]> {
@@ -7,6 +7,13 @@ export const workspaceService = {
       params: { path },
     });
     return response.data.data.entries;
+  },
+
+  async search(instanceId: number, query: string, limit?: number): Promise<WorkspaceSearchResponse> {
+    const response = await api.get(`/instances/${instanceId}/workspace/search`, {
+      params: { q: query, ...(limit ? { limit } : {}) },
+    });
+    return response.data.data;
   },
 
   async preview(instanceId: number, path: string): Promise<WorkspacePreview> {

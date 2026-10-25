@@ -1,0 +1,289 @@
+# Optional disaster-recovery enhancement. It is intentionally disabled for the
+# initial production deployment because the selected mysql:8.4.8 image does not
+# include mysqlbinlog. Before enabling it, replace the image below with a
+# validated linux/amd64 MySQL 8.4 client image that provides mysql, mysqlbinlog,
+# TLS support, bash and sha256sum, then complete a restore drill.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mysql-binlog-archiver-script
+  namespace: clawmanager-system
+data:
+  archive-binlogs.sh: |
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    readonly BACKUP_ROOT=/backup
+    readonly FULL_ROOT="${BACKUP_ROOT}/full"
+    readonly BINLOG_ROOT="${BACKUP_ROOT}/binlog"
+    readonly FINAL_ROOT="${BINLOG_ROOT}/files"
+    readonly CURRENT_ROOT="${BINLOG_ROOT}/current"
+    readonly POLL_SECONDS=300
+    readonly CONNECTION_SERVER_ID=910001
+
+    umask 077
+    mkdir -p "${FULL_ROOT}" "${FINAL_ROOT}" "${CURRENT_ROOT}" /state
+    export MYSQL_PWD="${MYSQL_BINLOG_PASSWORD}"
+
+    mysql_query() {
+      mysql --host=mysql --user=clawmanager_binlog --ssl-mode=REQUIRED \
+        --batch --skip-column-names --execute="$1"
+    }
+
+    latest_complete_manifest() {
+      find "${FULL_ROOT}" -mindepth 2 -maxdepth 2 -type f -name complete -printf '%h\n' \
+        | sort -r | head -n 1
+    }
+
+    oldest_complete_manifest() {
+      find "${FULL_ROOT}" -mindepth 2 -maxdepth 2 -type f -name complete -printf '%h\n' \
+        | sort | head -n 1
+    }
+
+    manifest_value() {
+      local manifest="$1"
+      local key="$2"
+      awk -F= -v wanted="${key}" '$1 == wanted {sub(/^[^=]*=/, ""); print; exit}' "${manifest}"
+    }
+
+    while ! mysql_query 'SELECT 1' >/dev/null 2>&1; do
+      echo "Waiting for MySQL and the dedicated binlog account..."
+      sleep 10
+    done
+
+    while :; do
+      latest_dir="$(latest_complete_manifest || true)"
+      if [ -z "${latest_dir}" ] || [ ! -f "${latest_dir}/complete" ]; then
+        echo "Waiting for the first successful full backup before starting binlog archival..."
+        rm -f /state/healthy
+        sleep "${POLL_SECONDS}"
+        continue
+      fi
+
+      baseline_file="$(manifest_value "${latest_dir}/manifest.env" BINLOG_FILE)"
+      current_file="$(mysql_query 'SHOW BINARY LOG STATUS' | awk '{print $1}')"
+      mapfile -t server_logs < <(mysql_query 'SHOW BINARY LOGS' | awk '{print $1}')
+
+      if [ -z "${baseline_file}" ] || [ -z "${current_file}" ] || [ "${#server_logs[@]}" -eq 0 ]; then
+        echo "ERROR: MySQL returned incomplete binlog metadata." >&2
+        rm -f /state/healthy
+        sleep "${POLL_SECONDS}"
+        continue
+      fi
+
+      baseline_available=false
+      cycle_ok=true
+      for log_name in "${server_logs[@]}"; do
+        if [ "${log_name}" = "${baseline_file}" ]; then
+          baseline_available=true
+        fi
+      done
+      if [ "${baseline_available}" != true ] && [ ! -f "${FINAL_ROOT}/${baseline_file}.complete" ]; then
+        echo "ERROR: required baseline ${baseline_file} is neither on MySQL nor in the archive." >&2
+        rm -f /state/healthy
+        sleep "${POLL_SECONDS}"
+        continue
+      fi
+
+      for log_name in "${server_logs[@]}"; do
+        if [[ "${log_name}" < "${baseline_file}" ]]; then
+          continue
+        fi
+        if [ "${log_name}" != "${current_file}" ] && [ -f "${FINAL_ROOT}/${log_name}.complete" ]; then
+          continue
+        fi
+
+        session_dir="$(mktemp -d "${BINLOG_ROOT}/.session.XXXXXX")"
+        if ! mysqlbinlog --read-from-remote-server --raw \
+          --connection-server-id="${CONNECTION_SERVER_ID}" \
+          --host=mysql --user=clawmanager_binlog --ssl-mode=REQUIRED \
+          --result-file="${session_dir}/" "${log_name}"; then
+          find "${session_dir}" -depth -delete
+          rm -f /state/healthy
+          cycle_ok=false
+          break
+        fi
+
+        downloaded="${session_dir}/${log_name}"
+        if [ ! -s "${downloaded}" ]; then
+          echo "ERROR: downloaded binlog ${log_name} is empty." >&2
+          find "${session_dir}" -depth -delete
+          rm -f /state/healthy
+          cycle_ok=false
+          break
+        fi
+
+        if [ "${log_name}" = "${current_file}" ]; then
+          sha256sum "${downloaded}" >"${downloaded}.sha256"
+          mv -f "${downloaded}" "${CURRENT_ROOT}/${log_name}.partial"
+          mv -f "${downloaded}.sha256" "${CURRENT_ROOT}/${log_name}.partial.sha256"
+        else
+          sha256sum "${downloaded}" >"${downloaded}.sha256"
+          mv "${downloaded}" "${FINAL_ROOT}/${log_name}"
+          mv "${downloaded}.sha256" "${FINAL_ROOT}/${log_name}.sha256"
+          touch "${FINAL_ROOT}/${log_name}.complete"
+          rm -f "${CURRENT_ROOT}/${log_name}.partial" "${CURRENT_ROOT}/${log_name}.partial.sha256"
+        fi
+        find "${session_dir}" -depth -delete
+      done
+
+      if [ "${cycle_ok}" != true ]; then
+        sleep "${POLL_SECONDS}"
+        continue
+      fi
+
+      # Preserve every log required by the oldest retained complete backup.
+      oldest_dir="$(oldest_complete_manifest || true)"
+      if [ -n "${oldest_dir}" ]; then
+        oldest_required="$(manifest_value "${oldest_dir}/manifest.env" BINLOG_FILE)"
+        if [ -n "${oldest_required}" ]; then
+          for marker in "${FINAL_ROOT}"/binlog.*.complete; do
+            [ -e "${marker}" ] || continue
+            archived_path="${marker%.complete}"
+            archived_name="$(basename "${archived_path}")"
+            if [[ "${archived_name}" < "${oldest_required}" ]]; then
+              rm -f "${archived_path}" \
+                "${archived_path}.sha256" \
+                "${archived_path}.complete"
+            fi
+          done
+        fi
+      fi
+
+      date -u +%Y-%m-%dT%H:%M:%SZ > /state/healthy
+      sleep "${POLL_SECONDS}"
+    done
+  bootstrap-binlog-user.sh: |
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    until MYSQL_PWD="${MYSQL_ROOT_PASSWORD}" mysql \
+      --host=mysql --user=root --ssl-mode=REQUIRED \
+      --batch --skip-column-names --execute='SELECT 1' >/dev/null 2>&1; do
+      sleep 5
+    done
+
+    binlog_password_b64="$(printf '%s' "${MYSQL_BINLOG_PASSWORD}" | base64 | tr -d '\r\n')"
+    MYSQL_PWD="${MYSQL_ROOT_PASSWORD}" mysql \
+      --host=mysql --user=root --ssl-mode=REQUIRED <<SQL
+    SET @binlog_password = FROM_BASE64('${binlog_password_b64}');
+    SET @create_binlog = CONCAT(
+      "CREATE USER IF NOT EXISTS 'clawmanager_binlog'@'%' IDENTIFIED BY ",
+      QUOTE(@binlog_password), " REQUIRE SSL"
+    );
+    PREPARE statement FROM @create_binlog;
+    EXECUTE statement;
+    DEALLOCATE PREPARE statement;
+    SET @alter_binlog = CONCAT(
+      "ALTER USER 'clawmanager_binlog'@'%' IDENTIFIED BY ",
+      QUOTE(@binlog_password), " REQUIRE SSL"
+    );
+    PREPARE statement FROM @alter_binlog;
+    EXECUTE statement;
+    DEALLOCATE PREPARE statement;
+    GRANT REPLICATION SLAVE, REPLICATION CLIENT
+      ON *.* TO 'clawmanager_binlog'@'%';
+    FLUSH PRIVILEGES;
+    SQL
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: mysql-binlog-archive-user
+  namespace: clawmanager-system
+spec:
+  backoffLimit: 6
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app: mysql-binlog-archive-user
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: bootstrap
+          image: 10.130.15.40:5000/mysql:8.4.8
+          imagePullPolicy: IfNotPresent
+          command: ["bash", "/scripts/bootstrap-binlog-user.sh"]
+          env:
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: clawmanager-secrets
+                  key: mysql-root-password
+            - name: MYSQL_BINLOG_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: clawmanager-secrets
+                  key: mysql-binlog-password
+          volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+              readOnly: true
+      volumes:
+        - name: scripts
+          configMap:
+            name: mysql-binlog-archiver-script
+            defaultMode: 0550
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mysql-binlog-archiver
+  namespace: clawmanager-system
+spec:
+  replicas: 0
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: mysql-binlog-archiver
+  template:
+    metadata:
+      labels:
+        app: mysql-binlog-archiver
+    spec:
+      containers:
+        - name: archiver
+          image: 10.130.15.40:5000/mysql:8.4.8
+          imagePullPolicy: IfNotPresent
+          command: ["bash", "/scripts/archive-binlogs.sh"]
+          env:
+            - name: MYSQL_BINLOG_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: clawmanager-secrets
+                  key: mysql-binlog-password
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          readinessProbe:
+            exec:
+              command:
+                - bash
+                - -ec
+                - test -s /state/healthy && find /state/healthy -mmin -10 | grep -q .
+            initialDelaySeconds: 30
+            periodSeconds: 60
+          volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+              readOnly: true
+            - name: backup
+              mountPath: /backup
+            - name: state
+              mountPath: /state
+      volumes:
+        - name: scripts
+          configMap:
+            name: mysql-binlog-archiver-script
+            defaultMode: 0550
+        - name: backup
+          persistentVolumeClaim:
+            claimName: clawmanager-mysql-backups
+        - name: state
+          emptyDir: {}

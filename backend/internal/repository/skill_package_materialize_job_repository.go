@@ -312,7 +312,11 @@ func (r *skillPackageMaterializeJobRepository) ListBackfillCandidates(limit int)
 		JOIN skill_versions sv ON sv.id = s.current_version_id
 		JOIN skill_blobs sb ON sb.id = sv.blob_id
 		WHERE isk.status = 'active'
-		  AND (LOWER(TRIM(i.instance_mode)) = 'lite' OR LOWER(TRIM(i.runtime_type)) = 'gateway')
+		  AND (CASE
+		    WHEN LOWER(TRIM(i.instance_mode)) IN ('lite','pro') THEN LOWER(TRIM(i.instance_mode))
+		    WHEN LOWER(TRIM(i.runtime_type)) = 'gateway' THEN 'lite'
+		    ELSE 'pro'
+		  END) = 'lite'
 		  AND TRIM(sb.object_key) = ''
 		  AND isk.workspace_dir IS NOT NULL
 		  AND TRIM(isk.workspace_dir) <> ''

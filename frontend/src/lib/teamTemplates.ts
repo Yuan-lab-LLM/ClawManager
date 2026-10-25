@@ -6,6 +6,8 @@ export type RuntimeType = "openclaw" | "hermes";
 export type ResourcePresetKey = "small" | "medium" | "large" | "custom";
 
 export type TeamMemberTemplateMember = {
+  iconKey?: string;
+  iconOverride?: string;
   memberId: string;
   name: string;
   role: string;

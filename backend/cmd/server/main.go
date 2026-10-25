@@ -12,11 +12,14 @@ import (
 	"time"
 
 	"clawreef/internal/aigateway"
+	"clawreef/internal/buildinfo"
 	"clawreef/internal/config"
 	"clawreef/internal/db"
 	"clawreef/internal/handlers"
 	"clawreef/internal/middleware"
 	"clawreef/internal/models"
+	"clawreef/internal/northbound"
+	"clawreef/internal/ownerrecords"
 	"clawreef/internal/repository"
 	"clawreef/internal/services"
 	"clawreef/internal/services/k8s"
@@ -27,6 +30,9 @@ import (
 )
 
 func main() {
+	build := buildinfo.Current()
+	log.Printf("Starting ClawManager version=%s commit=%s build_time=%s", build.Version, build.Commit, build.BuildTime)
+
 	// Load configuration
 	cfg, err := config.Load()
 	if err != nil {
@@ -55,7 +61,9 @@ func main() {
 	userRepo := repository.NewUserRepository(database)
 	quotaRepo := repository.NewQuotaRepository(database)
 	instanceRepo := repository.NewInstanceRepository(database)
+	browserWorkerRepo := repository.NewBrowserWorkerRepository(database)
 	systemImageSettingRepo := repository.NewSystemImageSettingRepository(database)
+	enterpriseAuthSettingRepo := repository.NewEnterpriseAuthSettingRepository(database)
 	llmModelRepo := repository.NewLLMModelRepository(database)
 	modelInvocationRepo := repository.NewModelInvocationRepository(database)
 	auditEventRepo := repository.NewAuditEventRepository(database)
@@ -81,6 +89,8 @@ func main() {
 	securityScanRepo := repository.NewSecurityScanRepository(database)
 	instanceExternalAccessRepo := repository.NewInstanceExternalAccessRepository(database)
 	gatewayKeyRepo := repository.NewGatewayKeyRepository(database)
+	northboundRepo := repository.NewNorthboundRepository(database)
+	northboundRuntimeSettings := northbound.NewDatabaseRuntimeSettings(northboundRepo, cfg.Northbound)
 
 	if repaired, repairErr := services.RepairSeededAdminPassword(userRepo); repairErr != nil {
 		log.Printf("Warning: failed to repair seeded admin password: %v", repairErr)
@@ -89,7 +99,21 @@ func main() {
 	}
 
 	// Initialize services
-	authService := services.NewAuthService(userRepo, cfg.JWT)
+	authConfigEncryptionKey := cfg.Auth.ConfigEncryptionKey
+	if authConfigEncryptionKey == "" {
+		authConfigEncryptionKey = "sha256:" + cfg.JWT.Secret
+	}
+	enterpriseAuthManager, err := services.NewEnterpriseAuthManager(enterpriseAuthSettingRepo, cfg.Auth.Enterprise, authConfigEncryptionKey)
+	if err != nil {
+		log.Fatalf("Failed to initialize enterprise auth manager: %v", err)
+	}
+	enterpriseAuthCtx, enterpriseAuthCancel := context.WithCancel(context.Background())
+	defer enterpriseAuthCancel()
+	enterpriseAuthManager.Start(enterpriseAuthCtx)
+	if enterpriseAuthManager.Status(context.Background()).Enabled {
+		log.Printf("Enterprise LDAP authentication enabled")
+	}
+	authService := services.NewAuthService(userRepo, cfg.JWT, enterpriseAuthManager, services.WithEnterpriseAuthPolicy(cfg.Auth.Enterprise), services.WithQuotaRepository(quotaRepo))
 	quotaService := services.NewQuotaService(quotaRepo)
 	userService := services.NewUserService(userRepo, quotaRepo)
 	systemImageSettingService := services.NewSystemImageSettingService(systemImageSettingRepo)
@@ -116,6 +140,8 @@ func main() {
 	services.SetRuntimeImageSettingsProvider(systemImageSettingService)
 	services.SetOpenClawTransferRuntimeRepositories(instanceRepo, bindingRepo, runtimePodRepo)
 	runtimeAgentClient := services.NewRuntimeAgentClient(cfg.Runtime.AgentControlToken)
+	runtimeUpgradeService := services.NewRuntimeUpgradeService(database, rolloutRepo, runtimePodRepo, bindingRepo, runtimeAgentClient, cfg.Runtime.WorkspaceRoot, cfg.Runtime.RedisURL)
+	browserWorkerService := services.NewBrowserWorkerService(browserWorkerRepo, instanceRepo, k8s.GetClient())
 	instanceService := services.NewInstanceService(
 		instanceRepo,
 		quotaRepo,
@@ -124,9 +150,42 @@ func main() {
 		services.WithPrivilegedInstancePods(cfg.Kubernetes.Runtime.Pod.Privileged),
 		services.WithGatewayKeyRepository(gatewayKeyRepo),
 		services.WithV2RuntimeLifecycle(runtimePodRepo, bindingRepo, runtimeAgentClient, cfg.Runtime.WorkspaceRoot),
+		services.WithRuntimeUpgradeDeletionGuard(runtimeUpgradeService),
+		services.WithExpandedLLMModelCatalog(llmModelService),
+		services.WithInstanceResourceCleanup(browserWorkerService.DeleteForInstance),
 	)
 	if err := gatewayKeyService.BackfillManagedInstanceKeys(context.Background()); err != nil {
 		log.Printf("Warning: failed to backfill managed gateway keys: %v", err)
+	}
+	externalAccessService := services.NewInstanceExternalAccessService(instanceExternalAccessRepo)
+	var northboundCoreServer *http.Server
+	var northboundOperationWorker *northbound.OperationWorker
+	northboundCoreService := northbound.NewCoreService(northboundRepo, userRepo, instanceService, externalAccessService, cfg.Northbound, northboundRuntimeSettings)
+	northboundCoreService.SetAuditRepository(auditEventRepo)
+	northboundOperationWorker = northbound.NewOperationWorker(northboundCoreService, cfg.Runtime.BackendReplicaID)
+	if cfg.Northbound.Enabled {
+		coreTLSConfig, tlsErr := northbound.CoreTLSConfig(cfg.Northbound)
+		if tlsErr != nil {
+			log.Fatalf("Failed to initialize northbound Core TLS: %v", tlsErr)
+		}
+		if len(cfg.Northbound.InternalJWTSecret) < 32 {
+			log.Fatal("Failed to initialize northbound Core: NORTHBOUND_INTERNAL_JWT_SECRET must contain at least 32 bytes")
+		}
+		coreHandler := northbound.NewCoreHandler(northboundCoreService, cfg.Northbound.InternalJWTSecret)
+		coreRouter := gin.New()
+		_ = coreRouter.SetTrustedProxies(nil)
+		coreRouter.Use(gin.Logger(), gin.Recovery(), northbound.RequestContext(), northbound.BodyLimit(64<<10))
+		northbound.RegisterCoreRoutes(coreRouter, coreHandler)
+		northboundCoreServer = &http.Server{
+			Addr:              cfg.Northbound.CoreInternalAddress,
+			Handler:           coreRouter,
+			TLSConfig:         coreTLSConfig,
+			ReadHeaderTimeout: 5 * time.Second,
+			ReadTimeout:       15 * time.Second,
+			WriteTimeout:      35 * time.Second,
+			IdleTimeout:       60 * time.Second,
+			MaxHeaderBytes:    16 << 10,
+		}
 	}
 	instanceAgentService := services.NewInstanceAgentService(instanceRepo, instanceAgentRepo, instanceDesiredStateRepo, instanceRuntimeStatusRepo, instanceCommandRepo)
 	instanceRuntimeStatusService := services.NewInstanceRuntimeStatusService(instanceRuntimeStatusRepo, instanceAgentRepo, instanceDesiredStateRepo)
@@ -137,6 +196,7 @@ func main() {
 		instanceService,
 		services.WithTeamRuntimeWorkspaceRoot(cfg.Runtime.WorkspaceRoot),
 		services.WithTeamOpenClawConfigService(openClawConfigService),
+		services.WithTeamWorkspaceAuditRepository(repository.NewTeamWorkspaceFileAuditRepository(database)),
 	)
 	var platformRedis services.PlatformRedisClient
 	if redisURL := strings.TrimSpace(cfg.Runtime.RedisURL); redisURL != "" {
@@ -149,7 +209,9 @@ func main() {
 		log.Printf("platform redis disabled: redis url is empty")
 	}
 	runtimeEvents := services.NewRuntimeEventService(platformRedis)
-	workspaceFileService := services.WithWorkspaceUpgradeGuard(services.NewWorkspaceFileService(workspaceFileAuditRepo), instanceRepo, false)
+	baseWorkspaceFileService := services.NewWorkspaceFileService(workspaceFileAuditRepo)
+	services.ConfigureWorkspaceUpgradeGuard(baseWorkspaceFileService, runtimeUpgradeService)
+	workspaceFileService := services.WithWorkspaceUpgradeGuard(baseWorkspaceFileService, instanceRepo, false)
 	runtimeWorkspaceFileService := services.WithWorkspaceUpgradeGuard(services.NewRuntimeWorkspaceFileService(workspaceFileAuditRepo, repository.NewWorkspaceWriteRepository(database)), instanceRepo, true)
 	skillService := services.NewSkillService(skillRepo, instanceRepo, userRepo, instanceCommandService, instanceCommandRepo, objectStorageService, skillScannerClient)
 	materializeJobRepo := repository.NewSkillPackageMaterializeJobRepository(database)
@@ -165,7 +227,7 @@ func main() {
 	)
 	services.ConfigureSkillRuntimeSync(skillService, bindingRepo, runtimePodRepo, runtimeAgentClient)
 	securityScanService := services.NewSecurityScanService(securityScanRepo, skillRepo, objectStorageService, skillScannerClient)
-	externalAccessService := services.NewInstanceExternalAccessService(instanceExternalAccessRepo)
+	ownerStore := &ownerrecords.Store{Session: database, HistoryRoot: cfg.Runtime.WorkspaceRoot, Availability: db.OwnerAnalyticsAvailable}
 	gatewayCoordinationRedisURL := strings.TrimSpace(os.Getenv("GATEWAY_RATE_LIMIT_REDIS_URL"))
 	if gatewayCoordinationRedisURL == "" {
 		gatewayCoordinationRedisURL = strings.TrimSpace(cfg.Runtime.RedisURL)
@@ -197,7 +259,7 @@ func main() {
 	go imageArtifacts.RunCleanup(imageCleanupCtx)
 	imageJobs := services.NewGatewayImageJobService(database, gatewayBudgetService)
 	go imageJobs.RunRecovery(imageCleanupCtx)
-	aiGatewayService := aigateway.NewService(llmModelRepo, modelInvocationService, auditEventService, costRecordService, riskDetectionService, riskHitService, chatSessionService, chatMessageService, aigateway.WithDeploymentStore(deploymentStore), classifierOption, aigateway.WithRuntimeTasks(runtimeTasks), aigateway.WithImageArtifacts(imageArtifacts), aigateway.WithImageJobs(imageJobs))
+	aiGatewayService := aigateway.NewService(llmModelRepo, modelInvocationService, auditEventService, costRecordService, riskDetectionService, riskHitService, chatSessionService, chatMessageService, aigateway.WithOwnerUsage(ownerStore), aigateway.WithDeploymentStore(deploymentStore), classifierOption, aigateway.WithRuntimeTasks(runtimeTasks), aigateway.WithImageArtifacts(imageArtifacts), aigateway.WithImageJobs(imageJobs))
 	gatewayRuntimeHandler := handlers.NewGatewayRuntimeHandler(runtimeTasks, aiGatewayService, auditEventService)
 	runtimeProtocols := repository.NewRuntimeProtocolRepository(database)
 	runtimeProtocolHandler := handlers.NewRuntimeProtocolHandler(runtimeProtocols, instanceRepo)
@@ -206,8 +268,10 @@ func main() {
 	customTeamTemplateService := teamtemplate.NewService(customTeamTemplateRepo, aiGatewayService)
 
 	// Initialize handlers
+	versionHandler := handlers.NewVersionHandler()
 	authHandler := handlers.NewAuthHandler(authService)
-	userHandler := handlers.NewUserHandler(userService, quotaService)
+	enterpriseAuthHandler := handlers.NewEnterpriseAuthHandler(enterpriseAuthManager, enterpriseAuthManager)
+	userHandler := handlers.NewUserHandler(userService, quotaService, enterpriseAuthManager)
 	instanceHandler := handlers.NewInstanceHandler(
 		instanceService,
 		instanceAgentService,
@@ -221,9 +285,41 @@ func main() {
 		services.NewInstanceShellService(),
 		services.WithInstanceProxyRuntimeRepositories(instanceRepo, runtimePodRepo, bindingRepo),
 		services.WithOpenCodeLiteSessionBootstrap(),
+		services.WithInstanceProxyPolicyCoordinator(runtimeAgentClient, cfg.Runtime.Namespace),
+		services.WithInstanceProxyOwnerUsage(ownerStore),
 	)
+	instanceHandler.SetBrowserWorkerService(browserWorkerService)
+	hermesDesktopService := services.NewHermesDesktopService(services.HermesDesktopConfig{
+		ControlUIOrigin: services.HermesControlUIOrigin(cfg.Runtime.Namespace, os.Getenv("CLAWMANAGER_CONTROL_UI_ORIGIN")),
+		Enabled:         services.HermesWebEnabled(os.Getenv("CLAWMANAGER_HERMES_DESKTOP_WEB_ENABLED")),
+		Secret:          cfg.JWT.Secret, Instances: instanceRepo, Users: userRepo, Bindings: bindingRepo, Pods: runtimePodRepo,
+		Teams: repository.NewHermesDesktopTeamGuard(database), Agent: runtimeAgentClient, Redis: platformRedis, ExternalAccess: externalAccessService,
+	})
+	hermesDesktopHandler := handlers.NewHermesDesktopHandler(hermesDesktopService)
+	authHandler.SetDesktopLogoutHook(hermesDesktopService.RevokeUserSessions)
+	ieiSSOService, err := services.NewIEISSOService(cfg.IEISystem)
+	if err != nil {
+		log.Fatalf("Failed to initialize IEI system SSO: %v", err)
+	}
+	instanceHandler.SetIEISSOService(ieiSSOService)
+	instanceHandler.SetHermesDesktopService(hermesDesktopService)
+	ieiSystemHandler := handlers.NewIEISystemHandler(cfg.IEISystem, ieiSSOService, instanceService, instanceHandler)
+	ieiSystemHandler.SetHermesDesktopService(hermesDesktopService)
+	ieiSystemHandler.SetOwnerDashboard(ownerStore)
+	if northboundCoreService != nil {
+		northboundCoreService.SetOwnerUsage(ownerStore)
+	}
+	if northboundCoreService != nil {
+		ieiSystemHandler.SetLifecycleService(northboundCoreService)
+	}
 	systemSettingsHandler := handlers.NewSystemSettingsHandler(systemImageSettingService)
 	routingClassifierHandler := handlers.NewRoutingClassifierHandler(classifierSettingsService)
+	var northboundController services.NorthboundClusterController
+	if k8s.GetClient() != nil && k8s.GetClient().Clientset != nil {
+		northboundController = services.NewKubernetesNorthboundController(k8s.GetClient())
+	}
+	northboundAdminService := services.NewNorthboundAdminService(northboundRepo, userRepo, northboundController)
+	northboundAdminHandler := handlers.NewNorthboundAdminHandler(northboundAdminService)
 	llmModelHandler := handlers.NewLLMModelHandler(llmModelService)
 	rateLimitStore := services.NewNoopGatewayRateLimitStore()
 	rateLimitRedisURL := gatewayCoordinationRedisURL
@@ -264,11 +360,22 @@ func main() {
 	skillHandler := handlers.NewSkillHandler(skillService, instanceService)
 	skillHubHandler := handlers.NewSkillHubHandler(skillService, instanceService)
 	securityHandler := handlers.NewSecurityHandler(securityScanService)
-	agentHandler := handlers.NewAgentHandler(instanceAgentService, instanceCommandService, instanceRuntimeStatusService, instanceConfigRevisionService, skillService)
+	agentHandler := handlers.NewAgentHandler(
+		instanceAgentService,
+		instanceCommandService,
+		instanceRuntimeStatusService,
+		instanceConfigRevisionService,
+		skillService,
+		handlers.WithAgentSkillReportPersistence(cfg.Runtime.SkillReportPersistence),
+	)
+	if !cfg.Runtime.SkillReportPersistence {
+		log.Printf("skill inventory report persistence is disabled; reports will be acknowledged without database synchronization")
+	}
 	teamHandler := handlers.NewTeamHandler(teamService)
 	workspaceFileHandler := handlers.NewWorkspaceFileHandler(instanceService, workspaceFileService, runtimeWorkspaceFileService)
 	workspaceFileHandler.SetSkillRepository(skillRepo)
 	workspaceFileHandler.SetExternalAccessServices(externalAccessService, instanceHandler.InstanceAccessService())
+	ieiSystemHandler.SetWorkspaceFileHandler(workspaceFileHandler)
 	runtimeAgentHandler := handlers.NewRuntimeAgentHandler(cfg.Runtime, runtimePodRepo, bindingRepo, instanceRepo, runtimeEvents, skillService)
 
 	// Initialize WebSocket hub and handler
@@ -290,6 +397,9 @@ func main() {
 	var runtimeSchedulerCancel context.CancelFunc
 	var runtimeSchedulerMu sync.Mutex
 	var runtimeScheduler *services.RuntimeScheduler
+	if controller, ok := teamService.(services.TeamUpgradeMaintenanceController); ok {
+		runtimeUpgradeService.SetTeamMaintenanceController(controller)
+	}
 	if cfg.Runtime.SchedulerEnabled {
 		k8sClient := k8s.GetClient()
 		if k8sClient == nil || k8sClient.Clientset == nil {
@@ -304,6 +414,8 @@ func main() {
 				services.WithRuntimeSchedulerHeartbeatTimeout(cfg.Runtime.HeartbeatTimeout),
 				services.WithRuntimeSchedulerMaxGatewaysPerPod(cfg.Runtime.MaxGatewaysPerPod),
 				services.WithRuntimeSchedulerGatewayStartInFlightLimit(cfg.Runtime.GatewayStartInFlightLimit),
+				services.WithRuntimeUpgradeService(runtimeUpgradeService),
+				services.WithRuntimeSchedulerProxyPolicyCoordinator(services.NewRuntimeProxyPolicyCoordinator(k8sClient.Clientset, runtimeAgentClient, cfg.Runtime.Namespace, "clawmanager-frontend")),
 			}
 			if gatewayEnvProvider, ok := instanceService.(interface {
 				BuildGatewayEnv(*models.Instance) (map[string]string, error)
@@ -322,21 +434,38 @@ func main() {
 				cfg.Runtime.SchedulerTick,
 				runtimeSchedulerOptions...,
 			)
+			runtimeUpgradeService.SetDeploymentInventoryProvider(runtimeScheduler)
+			runtimeUpgradeService.SetUpgradeGatewayRestarter(runtimeScheduler)
 			log.Printf("runtime scheduler initialized")
 		}
 	} else {
 		log.Printf("runtime scheduler disabled by configuration")
 	}
 	runtimePoolHandler := handlers.NewRuntimePoolHandler(runtimePodRepo, bindingRepo, rolloutRepo, runtimeScheduler, runtimeEvents)
+	runtimePoolHandler.SetUpgradeService(runtimeUpgradeService)
+	workbuddyPrewarmController := k8s.NewWorkbuddyPrewarmController()
 
 	leaderCtx, leaderCancel := context.WithCancel(context.Background())
 	defer leaderCancel()
+	go ownerStore.RunBuffered(leaderCtx)
+	go db.RetryOwnerAnalytics(leaderCtx, database)
 
 	startBackground := func(ctx context.Context) {
+		go ownerStore.Run(ctx)
+		go browserWorkerService.Run(ctx, 30*time.Second)
 		log.Printf("Starting leader-only background loops (identity=%s)", cfg.LeaderElection.Identity)
 		syncService.Start()
 		materializeWorker.Start()
 		teamService.StartBackground(ctx)
+		if reconciler, ok := instanceService.(interface {
+			RunPendingDeletionReconciler(context.Context, time.Duration)
+		}); ok {
+			go reconciler.RunPendingDeletionReconciler(ctx, 30*time.Second)
+		}
+		if northboundOperationWorker != nil {
+			northboundOperationWorker.Start(ctx)
+		}
+		go workbuddyPrewarmController.Run(ctx)
 		if runtimeScheduler != nil {
 			runtimeSchedulerMu.Lock()
 			if runtimeSchedulerCancel == nil {
@@ -351,6 +480,9 @@ func main() {
 	stopBackground := func() {
 		log.Printf("Stopping leader-only background loops (identity=%s)", cfg.LeaderElection.Identity)
 		materializeWorker.Stop()
+		if northboundOperationWorker != nil {
+			northboundOperationWorker.Stop()
+		}
 		runtimeSchedulerMu.Lock()
 		if runtimeSchedulerCancel != nil {
 			runtimeSchedulerCancel()
@@ -379,7 +511,8 @@ func main() {
 	}
 
 	// Setup router
-	r := gin.Default()
+	r := gin.New()
+	r.Use(handlers.HermesDesktopRedactTickets(), gin.Logger(), gin.Recovery())
 
 	// Middleware
 	r.Use(middleware.CORS())
@@ -393,10 +526,48 @@ func main() {
 
 	api := r.Group("/api/v1")
 	{
+		// Build information is intentionally public so operators can identify the
+		// running control-plane version even when authentication is unavailable.
+		api.GET("/version", versionHandler.Get)
+
+		ieiSystem := api.Group("/ieisystem")
+		{
+			ieiSystem.POST("/session", ieiSystemHandler.ExchangeSession)
+			ieiSystem.GET("/session", ieiSystemHandler.GetSession)
+			ieiSystem.GET("/dashboard", ieiSystemHandler.GetDashboard)
+			ieiSystem.GET("/growth", ieiSystemHandler.GetGrowth)
+			ieiSystem.POST("/visit", ieiSystemHandler.RecordOwnerVisit)
+			ieiSystem.POST("/growth/sync", ieiSystemHandler.GetGrowth)
+			ieiSystem.GET("/reports", ieiSystemHandler.GetOwnerReport)
+			ieiSystem.POST("/reports", ieiSystemHandler.GetOwnerReport)
+			ieiSystem.POST("/instances/:id/activity", ieiSystemHandler.RecordOwnerActivity)
+			ieiSystem.POST("/session/refresh", ieiSystemHandler.RefreshSession)
+			ieiSystem.DELETE("/session", ieiSystemHandler.DeleteSession)
+			ieiSystem.GET("/instances", ieiSystemHandler.ListInstances)
+			ieiSystem.GET("/instances/:id", ieiSystemHandler.GetInstance)
+			ieiSystem.POST("/instances/:id/restart", ieiSystemHandler.RestartInstance)
+			ieiSystem.POST("/instances/:id/reset", ieiSystemHandler.ResetInstance)
+			ieiSystem.GET("/instances/:id/lifecycle-operation", ieiSystemHandler.GetLatestLifecycleOperation)
+			ieiSystem.GET("/instances/:id/lifecycle-operations/:operationID", ieiSystemHandler.GetLifecycleOperation)
+			ieiSystem.GET("/lifecycle-operations/:operationID", ieiSystemHandler.GetSessionLifecycleOperation)
+			ieiSystem.POST("/instances/:id/access", ieiSystemHandler.GenerateInstanceAccess)
+			ieiSystem.GET("/instances/:id/workspace/files", ieiSystemHandler.ListWorkspace)
+			ieiSystem.GET("/instances/:id/workspace/search", ieiSystemHandler.SearchWorkspace)
+			ieiSystem.GET("/instances/:id/workspace/preview", ieiSystemHandler.PreviewWorkspace)
+			ieiSystem.GET("/instances/:id/workspace/text", ieiSystemHandler.WorkspaceText)
+			ieiSystem.PUT("/instances/:id/workspace/text", ieiSystemHandler.WorkspaceText)
+			ieiSystem.GET("/instances/:id/workspace/download", ieiSystemHandler.DownloadWorkspace)
+			ieiSystem.POST("/instances/:id/workspace/upload", ieiSystemHandler.UploadWorkspace)
+			ieiSystem.POST("/instances/:id/workspace/folders", ieiSystemHandler.CreateWorkspaceFolder)
+			ieiSystem.PATCH("/instances/:id/workspace/entries", ieiSystemHandler.RenameWorkspaceEntry)
+			ieiSystem.DELETE("/instances/:id/workspace/entries", ieiSystemHandler.DeleteWorkspaceEntry)
+		}
+
 		sharedInstances := api.Group("/shared-instances")
 		{
 			sharedInstances.GET("/:code/session", instanceHandler.GetSharedInstanceSession)
 			sharedInstances.GET("/:code/workspace/files", workspaceFileHandler.SharedList)
+			sharedInstances.GET("/:code/workspace/search", workspaceFileHandler.SharedSearch)
 			sharedInstances.GET("/:code/workspace/preview", workspaceFileHandler.SharedPreview)
 			sharedInstances.GET("/:code/workspace/download", workspaceFileHandler.SharedDownload)
 			sharedInstances.POST("/:code/workspace/upload", workspaceFileHandler.SharedUpload)
@@ -420,7 +591,7 @@ func main() {
 			auth.POST("/register", authHandler.Register)
 			auth.POST("/login", authHandler.Login)
 			auth.POST("/refresh", authHandler.RefreshToken)
-			auth.POST("/logout", authHandler.Logout)
+			auth.POST("/logout", middleware.Auth(), authHandler.Logout)
 			auth.GET("/me", middleware.Auth(), middleware.SetUserInfo(userRepo), authHandler.GetCurrentUser)
 			auth.POST("/change-password", middleware.Auth(), authHandler.ChangePassword)
 		}
@@ -437,6 +608,8 @@ func main() {
 				adminOnly.GET("", userHandler.ListUsers)
 				adminOnly.POST("", userHandler.CreateUser)
 				adminOnly.POST("/import", userHandler.ImportUsers)
+				adminOnly.GET("/import/ldap/preview", userHandler.PreviewLDAPUsers)
+				adminOnly.POST("/import/ldap", userHandler.ImportLDAPUsers)
 				adminOnly.DELETE("/:id", userHandler.DeleteUser)
 				adminOnly.PUT("/:id/role", userHandler.UpdateRole)
 				adminOnly.PUT("/:id/quota", userHandler.UpdateUserQuota)
@@ -449,11 +622,29 @@ func main() {
 		}
 
 		// Instance routes (authenticated)
+		// Desktop iframe requests use a separate, short-lived, instance-scoped
+		// HttpOnly cookie. Bootstrap alone uses the normal bearer middleware.
+		hermesDesktop := api.Group("/instances/:id/hermes-desktop")
+		hermesDesktop.GET("/session", hermesDesktopHandler.Session)
+		hermesDesktop.DELETE("/session", hermesDesktopHandler.ClearSession)
+		hermesDesktop.GET("/api/*path", hermesDesktopHandler.API)
+		hermesDesktop.POST("/api/*path", hermesDesktopHandler.API)
+		hermesDesktop.PUT("/api/*path", hermesDesktopHandler.API)
+		hermesDesktop.PATCH("/api/*path", hermesDesktopHandler.API)
+		hermesDesktop.DELETE("/api/*path", hermesDesktopHandler.API)
+		hermesDesktop.POST("/ws-ticket", hermesDesktopHandler.Ticket)
+		hermesDesktop.GET("/ws", hermesDesktopHandler.WebSocket)
 		instances := api.Group("/instances")
 		instances.Use(middleware.Auth())
 		instances.Use(middleware.SetUserInfo(userRepo))
+		instanceHandler.SetBatchMutationReservation(northboundRepo.ReserveInstanceMutations)
+		instances.Use(northboundCoreService.BatchMutationGuard)
+		northboundCoreService.RegisterBatchRoutes(instances)
 		{
+			instances.GET("/:id/hermes-desktop/bootstrap", hermesDesktopHandler.Bootstrap)
+			instances.POST("/:id/hermes-desktop/bootstrap", hermesDesktopHandler.Bootstrap)
 			instances.GET("", instanceHandler.ListInstances)
+			instances.GET("/summary", instanceHandler.GetInstanceSummary)
 			instances.POST("", instanceHandler.CreateInstance)
 			instances.POST("/batch/lite", instanceHandler.BatchCreateLiteInstances)
 			instances.POST("/batch/delete", instanceHandler.BatchDeleteLiteInstances)
@@ -463,6 +654,9 @@ func main() {
 			instances.POST("/:id/start", instanceHandler.StartInstance)
 			instances.POST("/:id/stop", instanceHandler.StopInstance)
 			instances.POST("/:id/restart", instanceHandler.RestartInstance)
+			recoveryHandler := handlers.NewRuntimeRecoveryHandler(runtimeUpgradeService, instanceRepo)
+			instances.GET("/:id/upgrade-recovery", recoveryHandler.Inspect)
+			instances.POST("/:id/upgrade-recovery", recoveryHandler.Recover)
 			instances.GET("/:id/environment-overrides", instanceHandler.GetInstanceEnvironmentOverrides)
 			instances.GET("/:id/status", instanceHandler.GetInstanceStatus)
 			instances.GET("/:id/runtime", instanceHandler.GetRuntimeDetails)
@@ -477,6 +671,8 @@ func main() {
 			instances.POST("/:id/config/revisions/publish", instanceHandler.PublishConfigRevision)
 			instances.POST("/:id/access", instanceHandler.GenerateAccessToken)
 			instances.GET("/:id/access", instanceHandler.AccessInstance)
+			instances.GET("/:id/browser-worker", instanceHandler.GetBrowserWorker)
+			instances.POST("/:id/browser-worker/access", instanceHandler.GenerateBrowserWorkerAccess)
 			instances.GET("/:id/shell", instanceHandler.StreamShell)
 			instances.POST("/:id/sync", instanceHandler.ForceSync)
 			instances.GET("/:id/openclaw/export", instanceHandler.ExportOpenClaw)
@@ -486,8 +682,11 @@ func main() {
 			instances.GET("/:id/external-access", instanceHandler.GetExternalAccess)
 			instances.POST("/:id/external-access/share-link", instanceHandler.EnableShareLink)
 			instances.POST("/:id/external-access/password", instanceHandler.CreateExternalAccessPassword)
+			instances.POST("/:id/external-access/share-link/reset", instanceHandler.ResetExternalAccessURL)
+			instances.POST("/:id/external-access/password/reset", instanceHandler.ResetExternalAccessPassword)
 			instances.DELETE("/:id/external-access", instanceHandler.DisableExternalAccess)
 			instances.GET("/:id/workspace/files", workspaceFileHandler.List)
+			instances.GET("/:id/workspace/search", workspaceFileHandler.Search)
 			instances.GET("/:id/workspace/preview", workspaceFileHandler.Preview)
 			instances.GET("/:id/workspace/download", workspaceFileHandler.Download)
 			instances.POST("/:id/workspace/upload", workspaceFileHandler.Upload)
@@ -517,6 +716,7 @@ func main() {
 		adminInstances.Use(middleware.NewAdminAuth(userRepo))
 		{
 			adminInstances.GET("", instanceHandler.ListAllInstances)
+			adminInstances.GET("/summary", instanceHandler.GetAdminInstanceSummary)
 		}
 
 		adminRuntime := api.Group("/admin")
@@ -524,10 +724,17 @@ func main() {
 		adminRuntime.Use(middleware.SetUserInfo(userRepo))
 		adminRuntime.Use(middleware.NewAdminAuth(userRepo))
 		{
+			adminRuntime.GET("/auth/enterprise/config", enterpriseAuthHandler.Config)
+			adminRuntime.POST("/auth/enterprise/config/test", enterpriseAuthHandler.TestConfig)
+			adminRuntime.PUT("/auth/enterprise/config", enterpriseAuthHandler.UpdateConfig)
+			adminRuntime.GET("/auth/enterprise/status", enterpriseAuthHandler.Status)
 			adminRuntime.GET("/runtime-pods", runtimePoolHandler.ListPods)
 			adminRuntime.GET("/runtime-pods/:id/gateways", runtimePoolHandler.GetPodGateways)
 			adminRuntime.POST("/runtime-pods/:id/drain", runtimePoolHandler.DrainPod)
 			adminRuntime.POST("/runtime-rollouts", runtimePoolHandler.StartRollout)
+			adminRuntime.POST("/runtime-rollouts/preflight", runtimePoolHandler.PreflightOpenClawRollout)
+			adminRuntime.GET("/runtime-rollouts/:id", runtimePoolHandler.GetRollout)
+			adminRuntime.GET("/runtime-rollouts", runtimePoolHandler.ListRollouts)
 		}
 
 		teams := api.Group("/teams")
@@ -543,6 +750,8 @@ func main() {
 			teams.GET("/:id/events", teamHandler.ListEvents)
 			teams.GET("/:id/workspace/files", teamHandler.ListWorkspaceFiles)
 			teams.GET("/:id/workspace/preview", teamHandler.PreviewWorkspaceFile)
+			teams.GET("/:id/workspace/text", teamHandler.WorkspaceText)
+			teams.PUT("/:id/workspace/text", teamHandler.WorkspaceText)
 			teams.GET("/:id/workspace/download", teamHandler.DownloadWorkspaceFile)
 			teams.POST("/:id/workspace/folders", teamHandler.CreateWorkspaceFolder)
 			teams.POST("/:id/workspace/rename", teamHandler.RenameWorkspaceEntry)
@@ -563,6 +772,7 @@ func main() {
 			customTeamTemplates.POST("/:id/revise", customTeamTemplateHandler.Revise)
 			customTeamTemplates.POST("/:id/regenerate", customTeamTemplateHandler.Regenerate)
 			customTeamTemplates.POST("/:id/members/:memberID/adjust", customTeamTemplateHandler.AdjustMember)
+			customTeamTemplates.PUT("/:id/members/:memberID/icon", customTeamTemplateHandler.UpdateMemberIcon)
 			customTeamTemplates.POST("/:id/members/:memberID/regenerate", customTeamTemplateHandler.RegenerateMember)
 		}
 
@@ -658,6 +868,24 @@ func main() {
 			adminSystemSettings.PUT("/routing-classifier", routingClassifierHandler.Save)
 			adminSystemSettings.PUT("/routing-classifier/mode", routingClassifierHandler.SetMode)
 			adminSystemSettings.POST("/routing-classifier/compare", routingClassifierHandler.Compare)
+		}
+
+		northboundSettings := api.Group("/admin/northbound")
+		northboundSettings.Use(middleware.Auth())
+		northboundSettings.Use(middleware.SetUserInfo(userRepo))
+		northboundSettings.Use(middleware.NewAdminAuth(userRepo))
+		{
+			northboundSettings.GET("", northboundAdminHandler.Overview)
+			northboundSettings.PUT("/settings", northboundAdminHandler.SaveSettings)
+			northboundSettings.PATCH("/settings/:section", northboundAdminHandler.SaveSettingsSection)
+			northboundSettings.PUT("/callers", northboundAdminHandler.SaveCaller)
+			northboundSettings.GET("/api-keys", northboundAdminHandler.APIKeys)
+			northboundSettings.POST("/api-keys", northboundAdminHandler.MutateAPIKey)
+			northboundSettings.PUT("/external-node-port", northboundAdminHandler.SetExternalNodePort)
+			northboundSettings.GET("/certificate/ca", northboundAdminHandler.DownloadCA)
+			northboundSettings.GET("/certificate/prepared-ca", northboundAdminHandler.DownloadPreparedCA)
+			northboundSettings.POST("/certificate/prepare", northboundAdminHandler.PrepareCertificate)
+			northboundSettings.POST("/certificate/activate", northboundAdminHandler.ActivateCertificate)
 		}
 
 		adminModels := api.Group("/admin/models")
@@ -801,6 +1029,8 @@ func main() {
 		// These routes proxy requests to the actual instance pods
 		api.Any("/instances/:id/proxy", instanceHandler.ProxyInstance)
 		api.Any("/instances/:id/proxy/*path", instanceHandler.ProxyInstance)
+		api.Any("/instances/:id/browser-proxy", instanceHandler.ProxyBrowserWorker)
+		api.Any("/instances/:id/browser-proxy/*path", instanceHandler.ProxyBrowserWorker)
 
 		// WebSocket routes
 		ws := api.Group("/ws")
@@ -813,6 +1043,15 @@ func main() {
 	}
 
 	// Start server with graceful shutdown
+	if northboundCoreServer != nil {
+		go func() {
+			log.Printf("Northbound Core mTLS server starting on %s", cfg.Northbound.CoreInternalAddress)
+			if err := northboundCoreServer.ListenAndServeTLS("", ""); err != nil && err != http.ErrServerClosed {
+				log.Fatalf("Failed to start northbound Core server: %v", err)
+			}
+		}()
+	}
+
 	srv := &http.Server{
 		Addr:    cfg.Server.Address,
 		Handler: r,
@@ -838,6 +1077,11 @@ func main() {
 	if err := srv.Shutdown(ctx); err != nil {
 		log.Printf("HTTP server forced to shutdown: %v", err)
 	}
+	if northboundCoreServer != nil {
+		if err := northboundCoreServer.Shutdown(ctx); err != nil {
+			log.Printf("Northbound Core server forced to shutdown: %v", err)
+		}
+	}
 
 	// Stop background services. Cancelling leaderCtx releases the lease (and,
 	// if we were leader, triggers stopBackground); the explicit stopBackground
@@ -847,6 +1091,7 @@ func main() {
 	if runtimeAdminEventBridgeCancel != nil {
 		runtimeAdminEventBridgeCancel()
 	}
+	enterpriseAuthCancel()
 	wsHub.Stop()
 	instanceHandler.Shutdown()
 

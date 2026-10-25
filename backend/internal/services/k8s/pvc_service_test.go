@@ -12,6 +12,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
@@ -391,6 +392,62 @@ func TestCreatePVCUsesInstanceStorageClassDefault(t *testing.T) {
 	}
 }
 
+func TestCreatePVCFromSourceCreatesCSIClone(t *testing.T) {
+	ctx := context.Background()
+	storageClass := "longhorn"
+	namespace := "clawmanager-user-1"
+	source := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{Name: "workbuddy-golden-v1", Namespace: namespace},
+		Spec: corev1.PersistentVolumeClaimSpec{
+			StorageClassName: &storageClass,
+			Resources: corev1.VolumeResourceRequirements{Requests: corev1.ResourceList{
+				corev1.ResourceStorage: resource.MustParse("80Gi"),
+			}},
+		},
+		Status: corev1.PersistentVolumeClaimStatus{Phase: corev1.ClaimBound},
+	}
+	client := &Client{
+		Clientset:            fake.NewSimpleClientset(source),
+		Namespace:            "clawmanager",
+		InstanceStorageClass: storageClass,
+	}
+	service := &PVCService{client: client, namespaceService: &NamespaceService{client: client}}
+
+	pvc, err := service.CreatePVCFromSource(ctx, 1, 372, 80, "", source.Name)
+	if err != nil {
+		t.Fatalf("CreatePVCFromSource returned error: %v", err)
+	}
+	if pvc.Spec.DataSource == nil || pvc.Spec.DataSource.Kind != "PersistentVolumeClaim" || pvc.Spec.DataSource.Name != source.Name {
+		t.Fatalf("unexpected clone data source: %#v", pvc.Spec.DataSource)
+	}
+	if pvc.Labels["clawmanager.io/golden-pvc"] != source.Name {
+		t.Fatalf("golden PVC label = %q, want %q", pvc.Labels["clawmanager.io/golden-pvc"], source.Name)
+	}
+}
+
+func TestCreatePVCFromSourceRejectsSizeMismatch(t *testing.T) {
+	ctx := context.Background()
+	storageClass := "longhorn"
+	namespace := "clawmanager-user-1"
+	source := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{Name: "workbuddy-golden-v1", Namespace: namespace},
+		Spec: corev1.PersistentVolumeClaimSpec{
+			StorageClassName: &storageClass,
+			Resources: corev1.VolumeResourceRequirements{Requests: corev1.ResourceList{
+				corev1.ResourceStorage: resource.MustParse("80Gi"),
+			}},
+		},
+		Status: corev1.PersistentVolumeClaimStatus{Phase: corev1.ClaimBound},
+	}
+	client := &Client{Clientset: fake.NewSimpleClientset(source), Namespace: "clawmanager", InstanceStorageClass: storageClass}
+	service := &PVCService{client: client, namespaceService: &NamespaceService{client: client}}
+
+	_, err := service.CreatePVCFromSource(ctx, 1, 373, 64, "", source.Name)
+	if err == nil || !strings.Contains(err.Error(), "size must equal") {
+		t.Fatalf("expected clone size mismatch error, got %v", err)
+	}
+}
+
 func TestCreateTeamSharedPVCUsesWorkspaceStorageDefaults(t *testing.T) {
 	ctx := context.Background()
 	client := &Client{
@@ -659,6 +716,57 @@ func TestWaitForPVCBindingLeavesDynamicStorageClassToProvisioner(t *testing.T) {
 	}
 	if len(pvs.Items) != 0 {
 		t.Fatalf("expected no manual PVs for dynamic storageClass, got %#v", pvs.Items)
+	}
+}
+
+func TestValidatePVCDataDeletionPolicyAcceptsDeleteReclaimPolicy(t *testing.T) {
+	pv := &corev1.PersistentVolume{
+		ObjectMeta: metav1.ObjectMeta{Name: "factory-reset-pv"},
+		Spec: corev1.PersistentVolumeSpec{
+			PersistentVolumeReclaimPolicy: corev1.PersistentVolumeReclaimDelete,
+		},
+	}
+	pvc := &corev1.PersistentVolumeClaim{
+		Spec: corev1.PersistentVolumeClaimSpec{VolumeName: pv.Name},
+	}
+	service := &PVCService{client: &Client{Clientset: fake.NewSimpleClientset(pv)}}
+
+	if err := service.ValidatePVCDataDeletionPolicy(context.Background(), pvc); err != nil {
+		t.Fatalf("ValidatePVCDataDeletionPolicy returned error: %v", err)
+	}
+}
+
+func TestValidatePVCDataDeletionPolicyRejectsRetainReclaimPolicy(t *testing.T) {
+	pv := &corev1.PersistentVolume{
+		ObjectMeta: metav1.ObjectMeta{Name: "retained-pv"},
+		Spec: corev1.PersistentVolumeSpec{
+			PersistentVolumeReclaimPolicy: corev1.PersistentVolumeReclaimRetain,
+		},
+	}
+	pvc := &corev1.PersistentVolumeClaim{
+		Spec: corev1.PersistentVolumeClaimSpec{VolumeName: pv.Name},
+	}
+	service := &PVCService{client: &Client{Clientset: fake.NewSimpleClientset(pv)}}
+
+	err := service.ValidatePVCDataDeletionPolicy(context.Background(), pvc)
+	if err == nil || !strings.Contains(err.Error(), "cannot guarantee data deletion") {
+		t.Fatalf("expected Retain policy rejection, got %v", err)
+	}
+}
+
+func TestFactoryResetDeletionWaitsReturnWhenObjectsAreGone(t *testing.T) {
+	service := &PVCService{
+		client: &Client{
+			Clientset: fake.NewSimpleClientset(),
+			Namespace: "clawmanager",
+		},
+	}
+
+	if err := service.WaitForPVCDeleted(context.Background(), 42, "clawreef-7-pvc", time.Second); err != nil {
+		t.Fatalf("WaitForPVCDeleted returned error: %v", err)
+	}
+	if err := service.WaitForPVDeleted(context.Background(), "factory-reset-pv", time.Second); err != nil {
+		t.Fatalf("WaitForPVDeleted returned error: %v", err)
 	}
 }
 

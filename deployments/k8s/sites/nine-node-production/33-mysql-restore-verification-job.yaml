@@ -1,0 +1,149 @@
+# Safe restore rehearsal. This Job is suspended by default and restores only
+# into an isolated emptyDir-backed MySQL process inside its own Pod.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mysql-restore-verification-script
+  namespace: clawmanager-system
+data:
+  verify-restore.sh: |
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    latest_dir="$(
+      find /backup/full -mindepth 2 -maxdepth 2 -type f -name complete -printf '%h\n' \
+        | sort -r | head -n 1
+    )"
+    if [ -z "${latest_dir}" ]; then
+      echo "ERROR: no completed MySQL full backup is available." >&2
+      exit 1
+    fi
+
+    cd "${latest_dir}"
+    sha256sum --check SHA256SUMS
+
+    chown -R mysql:mysql /var/lib/mysql
+    mysqld --initialize-insecure \
+      --user=mysql \
+      --datadir=/var/lib/mysql
+
+    mysqld \
+      --user=mysql \
+      --datadir=/var/lib/mysql \
+      --socket=/tmp/mysql.sock \
+      --pid-file=/tmp/mysql.pid \
+      --log-bin=verification-binlog \
+      --server-id=990001 \
+      --gtid-mode=ON \
+      --enforce-gtid-consistency=ON \
+      --skip-networking=1 &
+    mysql_pid=$!
+    trap 'kill "${mysql_pid}" 2>/dev/null || true' EXIT
+
+    for attempt in $(seq 1 120); do
+      if mysqladmin \
+        --socket=/tmp/mysql.sock --user=root ping >/dev/null 2>&1; then
+        break
+      fi
+      if [ "${attempt}" -eq 120 ]; then
+        echo "ERROR: isolated verification MySQL did not become Ready." >&2
+        exit 1
+      fi
+      sleep 2
+    done
+
+    gzip -cd dump.sql.gz | mysql \
+      --socket=/tmp/mysql.sock --user=root
+
+    check_sql=/tmp/check-restored-tables.sql
+    mysql --socket=/tmp/mysql.sock --user=root \
+      --batch --skip-column-names >"${check_sql}" <<'SQL'
+    SELECT CONCAT(
+      'CHECK TABLE ', CHAR(96),
+      REPLACE(TABLE_SCHEMA, CHAR(96), CONCAT(CHAR(96), CHAR(96))),
+      CHAR(96), '.', CHAR(96),
+      REPLACE(TABLE_NAME, CHAR(96), CONCAT(CHAR(96), CHAR(96))),
+      CHAR(96), ';'
+    )
+    FROM INFORMATION_SCHEMA.TABLES
+    WHERE TABLE_TYPE = 'BASE TABLE'
+      AND TABLE_SCHEMA NOT IN ('information_schema', 'mysql', 'performance_schema', 'sys')
+    ORDER BY TABLE_SCHEMA, TABLE_NAME;
+    SQL
+    table_count="$(wc -l <"${check_sql}" | tr -d ' ')"
+    if [ "${table_count}" -eq 0 ]; then
+      echo "ERROR: restored backup contains no business tables." >&2
+      exit 1
+    fi
+
+    check_output="$(
+      mysql --socket=/tmp/mysql.sock --user=root \
+        --batch --skip-column-names <"${check_sql}"
+    )"
+    printf '%s\n' "${check_output}"
+    if printf '%s\n' "${check_output}" | grep -q $'\terror\t'; then
+      echo "ERROR: CHECK TABLE reported an error." >&2
+      exit 1
+    fi
+    ok_count="$(
+      printf '%s\n' "${check_output}" \
+        | awk -F '\t' '$3 == "status" && $4 == "OK" { count++ } END { print count + 0 }'
+    )"
+    if [ "${ok_count}" -ne "${table_count}" ]; then
+      echo "ERROR: CHECK TABLE did not return OK for every restored business table." >&2
+      exit 1
+    fi
+
+    mysqladmin \
+      --socket=/tmp/mysql.sock --user=root shutdown
+    wait "${mysql_pid}"
+    trap - EXIT
+    echo "Restore verification succeeded for ${latest_dir}."
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: mysql-restore-verification
+  namespace: clawmanager-system
+spec:
+  suspend: true
+  backoffLimit: 0
+  activeDeadlineSeconds: 21600
+  template:
+    metadata:
+      labels:
+        app: mysql-restore-verification
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: verification
+          image: 10.130.15.40:5000/mysql:8.4.8
+          imagePullPolicy: IfNotPresent
+          command: ["bash", "/scripts/verify-restore.sh"]
+          resources:
+            requests:
+              cpu: "1"
+              memory: 2Gi
+            limits:
+              cpu: "4"
+              memory: 8Gi
+          volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+              readOnly: true
+            - name: backup
+              mountPath: /backup
+              readOnly: true
+            - name: verification-data
+              mountPath: /var/lib/mysql
+      volumes:
+        - name: scripts
+          configMap:
+            name: mysql-restore-verification-script
+            defaultMode: 0550
+        - name: backup
+          persistentVolumeClaim:
+            claimName: clawmanager-mysql-backups
+        - name: verification-data
+          emptyDir:
+            sizeLimit: 600Gi

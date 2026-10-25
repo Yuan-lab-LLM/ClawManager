@@ -49,12 +49,87 @@ func TestMigration023IsEmbedded(t *testing.T) {
 	}
 }
 
+func TestOpenClaw81UpgradeMigrationsAreEmbeddedAndDataSafe(t *testing.T) {
+	safety, err := embeddedMigrations.ReadFile("migrations/058_add_openclaw_runtime_upgrade_safety.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	safetySQL := string(safety)
+	for _, contract := range []string{"runtime_upgrade_items", "runtime_upgrade_audits", "preflight_id", "capabilities_json", "rollback_status"} {
+		if !strings.Contains(safetySQL, contract) {
+			t.Fatalf("migration 058 missing %q", contract)
+		}
+	}
+	pin, err := embeddedMigrations.ReadFile("migrations/059_pin_openclaw_2026_8_1_images.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pinSQL := string(pin)
+	if !strings.Contains(pinSQL, "2026.8.1") || !strings.Contains(pinSQL, "image IN") {
+		t.Fatal("migration 059 must update only known previous defaults to 2026.8.1")
+	}
+	for _, destructive := range []string{"DROP TABLE", "TRUNCATE", "DELETE FROM instances", "DELETE FROM runtime_pods"} {
+		if strings.Contains(strings.ToUpper(safetySQL+pinSQL), destructive) {
+			t.Fatalf("OpenClaw upgrade migration contains destructive statement %q", destructive)
+		}
+	}
+	release, err := embeddedMigrations.ReadFile("migrations/060_allow_terminal_runtime_upgrade_instance_deletion.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	releaseSQL := string(release)
+	if !strings.Contains(releaseSQL, "DROP FOREIGN KEY fk_runtime_upgrade_item_instance") {
+		t.Fatal("migration 060 must release only the historical instance deletion blocker")
+	}
+	for _, destructive := range []string{"DELETE FROM", "DROP TABLE", "TRUNCATE"} {
+		if strings.Contains(strings.ToUpper(releaseSQL), destructive) {
+			t.Fatalf("migration 060 must preserve audit and user rows; found %q", destructive)
+		}
+	}
+	sourceIdentity, err := embeddedMigrations.ReadFile("migrations/061_persist_runtime_upgrade_source_identity.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sourceIdentitySQL := string(sourceIdentity)
+	for _, required := range []string{"source_gateway_id", "source_generation", "source_pod_uid", "source_deployment_name", "source_image_digest"} {
+		if !strings.Contains(sourceIdentitySQL, required) {
+			t.Fatalf("migration 061 missing %q", required)
+		}
+	}
+	for _, destructive := range []string{"DELETE FROM", "DROP TABLE", "TRUNCATE"} {
+		if strings.Contains(strings.ToUpper(sourceIdentitySQL), destructive) {
+			t.Fatalf("migration 061 must preserve existing rollout and user rows; found %q", destructive)
+		}
+	}
+	followLatest, err := embeddedMigrations.ReadFile("migrations/062_follow_openclaw_latest_images.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	followLatestSQL := string(followLatest)
+	for _, required := range []string{
+		"ghcr.io/yuan-lab-llm/agentsruntime/openclaw:2026.8.1",
+		"ghcr.io/yuan-lab-llm/agentsruntime/openclaw:latest",
+		"ghcr.io/yuan-lab-llm/agentsruntime/openclaw-lite:2026.8.1",
+		"ghcr.io/yuan-lab-llm/agentsruntime/openclaw-lite:latest",
+		"image IN",
+	} {
+		if !strings.Contains(followLatestSQL, required) {
+			t.Fatalf("migration 062 missing %q", required)
+		}
+	}
+	for _, destructive := range []string{"DELETE FROM", "DROP TABLE", "TRUNCATE"} {
+		if strings.Contains(strings.ToUpper(followLatestSQL), destructive) {
+			t.Fatalf("migration 062 must preserve custom image settings and user rows; found %q", destructive)
+		}
+	}
+}
+
 func TestMigration034UpdatesLiteDefaultImages(t *testing.T) {
 	raw, err := embeddedMigrations.ReadFile("migrations/034_update_lite_default_images.sql")
 	if err != nil {
 		t.Fatalf("read migration 034: %v", err)
 	}
-	sql := string(raw)
+	sql := strings.ReplaceAll(string(raw), "\r\n", "\n")
 	for _, image := range []string{
 		"ghcr.io/yuan-lab-llm/agentsruntime/openclaw-lite:latest",
 		"ghcr.io/yuan-lab-llm/agentsruntime/hermes-lite:latest",
@@ -218,6 +293,202 @@ func TestMigration042AddsImmutableReviewContractTarget(t *testing.T) {
 	}
 }
 
+func TestMigration048AddsWorkbuddyRuntime(t *testing.T) {
+	raw, err := embeddedMigrations.ReadFile("migrations/048_add_workbuddy_instance_type.sql")
+	if err != nil {
+		t.Fatalf("read migration 048: %v", err)
+	}
+	sql := string(raw)
+	for _, required := range []string{
+		"'workbuddy'",
+		"instance_type = 'workbuddy'",
+		"LOWER(TRIM(display_name)) = 'workbuddy'",
+	} {
+		if !strings.Contains(sql, required) {
+			t.Fatalf("migration 048 must contain %s", required)
+		}
+	}
+}
+
+func TestManagedRuntimeEnumMigrationsPreserveAllRuntimeTypes(t *testing.T) {
+	files := []string{
+		"044_add_workbuddy_instance_type.sql",
+		"045_add_opencode_instance_type.sql",
+		"046_add_opencode_lite_runtime.sql",
+		"047_add_deepseek_harness_runtime.sql",
+		"048_add_workbuddy_instance_type.sql",
+		"049_add_opencode_instance_type.sql",
+		"051_add_codex_and_claude_code_instance_types.sql",
+		"055_reconcile_instance_type_enum.sql",
+	}
+	requiredTypes := []string{"'workbuddy'", "'opencode'", "'deepseek-harness'", "'codex'", "'claude-code'"}
+	for _, name := range files {
+		raw, err := embeddedMigrations.ReadFile("migrations/" + name)
+		if err != nil {
+			t.Fatalf("read migration %s: %v", name, err)
+		}
+		sql := string(raw)
+		for _, instanceType := range requiredTypes {
+			if !strings.Contains(sql, instanceType) {
+				t.Fatalf("migration %s must preserve instance type %s", name, instanceType)
+			}
+		}
+	}
+}
+
+func TestMigration050UpdatesWorkbuddyWindowsRuntime(t *testing.T) {
+	raw, err := embeddedMigrations.ReadFile("migrations/050_update_workbuddy_windows_runtime.sql")
+	if err != nil {
+		t.Fatalf("read migration 050: %v", err)
+	}
+	sql := string(raw)
+	for _, required := range []string{
+		"windows-vm-workbuddy:latest",
+		"runtime_type = 'desktop'",
+		"instance_type = 'workbuddy'",
+	} {
+		if !strings.Contains(sql, required) {
+			t.Fatalf("migration 050 must contain %s", required)
+		}
+	}
+}
+
+func TestMigration045AddsNorthboundSecurityState(t *testing.T) {
+	raw, err := embeddedMigrations.ReadFile("migrations/045_add_northbound_api.sql")
+	if err != nil {
+		t.Fatalf("read migration 045: %v", err)
+	}
+	sql := string(raw)
+	for _, required := range []string{
+		"CREATE TABLE IF NOT EXISTS northbound_auth_challenges",
+		"CREATE TABLE IF NOT EXISTS northbound_sessions",
+		"previous_refresh_token_hash",
+		"refresh_token_history",
+		"CREATE TABLE IF NOT EXISTS northbound_operations",
+		"uk_northbound_operation_idempotency",
+		"provisioning_operation_id",
+		"uk_instances_provisioning_operation",
+	} {
+		if !strings.Contains(sql, required) {
+			t.Fatalf("migration 045 must contain %s", required)
+		}
+	}
+}
+
+func TestMigration047AddsInstanceOwner(t *testing.T) {
+	raw, err := embeddedMigrations.ReadFile("migrations/047_add_instance_owner.sql")
+	if err != nil {
+		t.Fatalf("read migration 047: %v", err)
+	}
+	sql := string(raw)
+	for _, required := range []string{
+		"ADD COLUMN owner VARCHAR(128)",
+		"COLLATE utf8mb4_bin",
+		"owner_normalized",
+		"GENERATED ALWAYS AS (LOWER(TRIM(owner))) STORED",
+		"idx_instances_user_owner_mode_created",
+		"user_id, owner, instance_mode, created_at, id",
+		"idx_instances_owner_normalized_mode_created",
+		"owner_normalized, instance_mode, created_at, id",
+	} {
+		if !strings.Contains(sql, required) {
+			t.Fatalf("migration 047 must contain %s", required)
+		}
+	}
+}
+
+func TestMigration049AddsOpenCodeInstanceType(t *testing.T) {
+	raw, err := embeddedMigrations.ReadFile("migrations/049_add_opencode_instance_type.sql")
+	if err != nil {
+		t.Fatalf("read migration 049: %v", err)
+	}
+	sql := string(raw)
+	for _, required := range []string{
+		"MODIFY COLUMN type ENUM",
+		"'workbuddy'",
+		"'opencode'",
+		"'gateway'",
+		"'desktop'",
+		"OpenCode Lite",
+		"OpenCode Pro",
+		"agentsruntime/opencode-lite:latest",
+		"agentsruntime/opencode:latest",
+	} {
+		if !strings.Contains(sql, required) {
+			t.Fatalf("migration 049 must contain %s", required)
+		}
+	}
+}
+
+func TestMigration052AddsInstancePVCName(t *testing.T) {
+	raw, err := embeddedMigrations.ReadFile("migrations/052_add_instance_pvc_name.sql")
+	if err != nil {
+		t.Fatalf("read migration 052: %v", err)
+	}
+	sql := string(raw)
+	for _, required := range []string{"ALTER TABLE instances", "pvc_name", "VARCHAR(253)", "information_schema.COLUMNS", "PREPARE instance_pvc_name_column_stmt"} {
+		if !strings.Contains(sql, required) {
+			t.Fatalf("migration 052 must contain %s", required)
+		}
+	}
+}
+
+func TestMigration051AddsCodexAndClaudeCodeInstanceTypes(t *testing.T) {
+	raw, err := embeddedMigrations.ReadFile("migrations/051_add_codex_and_claude_code_instance_types.sql")
+	if err != nil {
+		t.Fatalf("read migration 051: %v", err)
+	}
+	sql := string(raw)
+	for _, required := range []string{
+		"MODIFY COLUMN type ENUM",
+		"'workbuddy'",
+		"'codex'",
+		"'claude-code'",
+		"Codex Pro",
+		"Claude Code Pro",
+		"agentsruntime/codex:latest",
+		"agentsruntime/claude-code:latest",
+	} {
+		if !strings.Contains(sql, required) {
+			t.Fatalf("migration 051 must contain %s", required)
+		}
+	}
+}
+
+func TestMigration053AddsAndBackfillsInstanceRuntimeVariant(t *testing.T) {
+	raw, err := embeddedMigrations.ReadFile("migrations/053_add_instance_runtime_variant.sql")
+	if err != nil {
+		t.Fatalf("read migration 053: %v", err)
+	}
+	sql := string(raw)
+	for _, required := range []string{"runtime_variant", "'linux'", "'windows'", "workbuddy-linux", "windows-vm-workbuddy", "information_schema.COLUMNS", "PREPARE instance_runtime_variant_column_stmt"} {
+		if !strings.Contains(sql, required) {
+			t.Fatalf("migration 053 must contain %s", required)
+		}
+	}
+}
+
+func TestMigration054AddsAndBackfillsSystemImageRuntimeVariant(t *testing.T) {
+	raw, err := embeddedMigrations.ReadFile("migrations/054_add_system_image_runtime_variant.sql")
+	if err != nil {
+		t.Fatalf("read migration 054: %v", err)
+	}
+	sql := string(raw)
+	for _, required := range []string{
+		"system_image_settings",
+		"runtime_variant",
+		"workbuddy-linux",
+		"windows-vm-workbuddy",
+		"windows-vm-codex",
+		"agentsruntime/codex",
+		"WHERE type = 'codex'",
+	} {
+		if !strings.Contains(sql, required) {
+			t.Fatalf("migration 054 must contain %s", required)
+		}
+	}
+}
+
 func TestMigration044AddsWorkbuddyRuntime(t *testing.T) {
 	raw, err := embeddedMigrations.ReadFile("migrations/044_add_workbuddy_instance_type.sql")
 	if err != nil {
@@ -265,6 +536,28 @@ func TestMigration045BootstrapsAndUpgradesLLMModels(t *testing.T) {
 	}
 }
 
+func TestMigration056AddsLLMProviderModelCatalog(t *testing.T) {
+	raw, err := embeddedMigrations.ReadFile("migrations/056_add_llm_provider_models.sql")
+	if err != nil {
+		t.Fatalf("read migration 056: %v", err)
+	}
+
+	sql := string(raw)
+	for _, required := range []string{
+		"information_schema.COLUMNS",
+		"TABLE_NAME = 'llm_models'",
+		"COLUMN_NAME = 'provider_models_json'",
+		"ALTER TABLE llm_models ADD COLUMN provider_models_json TEXT",
+		"PREPARE stmt FROM @stmt",
+		"EXECUTE stmt",
+		"DEALLOCATE PREPARE stmt",
+	} {
+		if !strings.Contains(sql, required) {
+			t.Fatalf("migration 056 must contain %s", required)
+		}
+	}
+}
+
 func TestMigration047AddsDeepSeekHarnessRuntimes(t *testing.T) {
 	raw, err := embeddedMigrations.ReadFile("migrations/047_add_deepseek_harness_runtime.sql")
 	if err != nil {
@@ -287,6 +580,22 @@ func TestMigration047AddsDeepSeekHarnessRuntimes(t *testing.T) {
 	}
 }
 
+func TestMigration058EnablesDeepSeekHarnessProWithoutOverwritingCustomPolicy(t *testing.T) {
+	raw, err := embeddedMigrations.ReadFile("migrations/058_enable_deepseek_harness_pro.sql")
+	if err != nil {
+		t.Fatalf("read migration 058: %v", err)
+	}
+	sql := string(raw)
+	for _, required := range []string{
+		"JSON_LENGTH(allowed_pro_types) = 4",
+		"JSON_CONTAINS(allowed_pro_types, JSON_QUOTE('openclaw'))",
+		"JSON_ARRAY_APPEND(allowed_pro_types, '$', 'deepseek-harness')",
+	} {
+		if !strings.Contains(sql, required) {
+			t.Fatalf("migration 058 must contain %s", required)
+		}
+	}
+}
 func TestMigration048PreservesAllInstanceTypes(t *testing.T) {
 	raw, err := embeddedMigrations.ReadFile("migrations/048_fix_instance_type_enum.sql")
 	if err != nil {

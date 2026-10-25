@@ -13,8 +13,8 @@ import (
 )
 
 type stubAIObservabilityHandlerService struct {
-	overview *services.InstanceSessionUsageOverview
-	err      error
+	overview  *services.InstanceSessionUsageOverview
+	err       error
 	lastQuery services.InstanceSessionUsageOverviewQuery
 }
 

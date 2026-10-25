@@ -1,0 +1,12 @@
+FROM golang:1.25-alpine AS build
+
+WORKDIR /src
+COPY cdp-proxy/main.go ./main.go
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/cdp-proxy ./main.go
+
+FROM scratch
+
+COPY --from=build /out/cdp-proxy /cdp-proxy
+
+USER 65532:65532
+ENTRYPOINT ["/cdp-proxy"]

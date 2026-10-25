@@ -2,6 +2,8 @@ import api from "./api";
 import type {
   Instance,
   InstanceListResponse,
+  InstanceListFilters,
+  InstanceSummary,
   CreateInstanceRequest,
   UpdateInstanceRequest,
   RestartInstanceRequest,
@@ -23,6 +25,19 @@ import type {
 } from "../types/instance";
 import type { InstanceSkill } from "../types/skill";
 
+export interface BrowserWorkerStatus {
+  enabled: boolean;
+  available: boolean;
+  instance_id: number;
+  access_url?: string;
+  reason?: string;
+  expires_at?: string;
+  status?: "disabled" | "provisioning" | "ready" | "degraded" | "error";
+  last_error?: string;
+  display_width?: number;
+  display_height?: number;
+}
+
 export const instanceService = {
   getRuntimeMaintenance: async (id: number): Promise<RuntimeMaintenanceStatus> => {
     const response = await api.get(`/instances/${id}/runtime-maintenance`);
@@ -43,10 +58,16 @@ export const instanceService = {
   getInstances: async (
     page: number = 1,
     limit: number = 20,
+    filters?: InstanceListFilters,
   ): Promise<InstanceListResponse> => {
     const response = await api.get("/instances", {
-      params: { page, limit },
+      params: { page, limit, ...filters },
     });
+    return response.data.data;
+  },
+
+  getSummary: async (): Promise<InstanceSummary> => {
+    const response = await api.get("/instances/summary");
     return response.data.data;
   },
 
@@ -188,6 +209,18 @@ export const instanceService = {
     return response.data.data;
   },
 
+  getBrowserWorker: async (id: number): Promise<BrowserWorkerStatus> => {
+    const response = await api.get(`/instances/${id}/browser-worker`);
+    return response.data.data;
+  },
+
+  generateBrowserWorkerAccess: async (
+    id: number,
+  ): Promise<BrowserWorkerStatus> => {
+    const response = await api.post(`/instances/${id}/browser-worker/access`);
+    return response.data.data;
+  },
+
   // Access instance with token
   getAccessUrl: (id: number, token: string): string => {
     return `/api/v1/instances/${id}/access?token=${token}`;
@@ -216,6 +249,22 @@ export const instanceService = {
     const response = await api.post(
       `/instances/${id}/external-access/password`,
       data,
+    );
+    return response.data.data;
+  },
+
+  resetExternalShareURL: async (id: number): Promise<EnableShareLinkResult> => {
+    const response = await api.post(
+      `/instances/${id}/external-access/share-link/reset`,
+    );
+    return response.data.data;
+  },
+
+  resetExternalAccessPassword: async (
+    id: number,
+  ): Promise<PasswordExternalAccessResult> => {
+    const response = await api.post(
+      `/instances/${id}/external-access/password/reset`,
     );
     return response.data.data;
   },

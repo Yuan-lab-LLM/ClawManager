@@ -29,6 +29,26 @@ func TestBuildContainerSecurityContext(t *testing.T) {
 		t.Fatalf("expected chromium compat mode to use unconfined seccomp profile, got %#v", chromium.SeccompProfile)
 	}
 
+	workbuddy := buildContainerSecurityContext(PodSecurityWorkbuddyLinux)
+	if workbuddy == nil || workbuddy.Privileged == nil || !*workbuddy.Privileged {
+		t.Fatalf("expected Linux WorkBuddy mode to enable privileged security context")
+	}
+	if workbuddy.AllowPrivilegeEscalation == nil || !*workbuddy.AllowPrivilegeEscalation {
+		t.Fatalf("expected Linux WorkBuddy mode to allow the setuid bubblewrap helper")
+	}
+	if workbuddy.SeccompProfile == nil || workbuddy.SeccompProfile.Type != corev1.SeccompProfileTypeUnconfined {
+		t.Fatalf("expected Linux WorkBuddy mode to use unconfined seccomp, got %#v", workbuddy.SeccompProfile)
+	}
+	if workbuddy.AppArmorProfile == nil || workbuddy.AppArmorProfile.Type != corev1.AppArmorProfileTypeUnconfined {
+		t.Fatalf("expected Linux WorkBuddy mode to use unconfined AppArmor, got %#v", workbuddy.AppArmorProfile)
+	}
+	if workbuddy.Capabilities == nil || len(workbuddy.Capabilities.Add) != 2 {
+		t.Fatalf("expected Linux WorkBuddy mode to add sandbox capabilities, got %#v", workbuddy.Capabilities)
+	}
+	if !requiresUnconfinedAppArmor(PodSecurityWorkbuddyLinux) {
+		t.Fatalf("expected Linux WorkBuddy mode to request the compatibility AppArmor annotation")
+	}
+
 	privileged := buildContainerSecurityContext(PodSecurityPrivileged)
 	if privileged == nil || privileged.Privileged == nil || !*privileged.Privileged {
 		t.Fatalf("expected privileged mode to enable privileged security context")

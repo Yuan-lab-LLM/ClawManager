@@ -32,6 +32,7 @@ The cluster profile is validated with Longhorn as the example CSI implementation
 - Kubernetes cluster manifest: [`deployments/k8s/cluster/clawmanager.yaml`](../deployments/k8s/cluster/clawmanager.yaml)
 - K3s single-node manifest: [`deployments/k3s/single-node/clawmanager.yaml`](../deployments/k3s/single-node/clawmanager.yaml)
 - K3s cluster manifest: [`deployments/k3s/cluster/clawmanager.yaml`](../deployments/k3s/cluster/clawmanager.yaml)
+- Optional Northbound API add-on: [`deployments/k8s/northbound/`](../deployments/k8s/northbound/README.md)
 - Container startup script: [`deployments/container/start.sh`](../deployments/container/start.sh)
 - Nginx config: [`deployments/nginx/nginx.conf`](../deployments/nginx/nginx.conf)
 
@@ -64,10 +65,33 @@ kubectl get pvc -n clawmanager-system
 kubectl get pods -n clawmanager-system
 ```
 
-## OpenCode Lite Per-Instance Origins
+## Optional Northbound API
 
-OpenCode Lite must use a dedicated browser origin for every logical instance,
-even though its process still runs in the shared `opencode-runtime` pool. Set:
+The base deployment profiles do not expose the Northbound API. To enable it,
+upgrade the ClawManager Core first, then apply the separate
+[Northbound Kubernetes add-on](../deployments/k8s/northbound/README.md). The
+Northbound Gateway is the only public API endpoint; keep the Core service
+private and preserve the documented mTLS, credential, and network-policy
+boundaries. The external port may be published through a NodePort, load
+balancer, or Ingress and is not part of the API contract.
+
+Follow the [Northbound upgrade guide](./northbound-upgrade-guide.md) for an
+existing installation and use the
+[OpenAPI 3.1 specification](./northbound-openapi.yaml) as the client contract.
+
+## OpenCode Lite Public-Origin Strategy
+
+OpenCode Lite serves its web application and APIs from absolute root paths such
+as `/assets` and `/global/health`. Each logical OpenCode instance therefore
+needs a dedicated browser origin even though the runtime Pod is shared. Set:
+
+```text
+CLAWMANAGER_OPENCODE_PUBLIC_URL_TEMPLATE
+```
+
+The value must be an absolute HTTP(S) URL containing `{instance_id}`. The
+bundled manifests expose the variable with an empty value; installers must set
+it to a hostname covered by wildcard DNS and TLS, for example:
 
 ```text
 CLAWMANAGER_OPENCODE_PUBLIC_URL_TEMPLATE=https://opencode-{instance_id}.172-16-1-12.nip.io:39443/
@@ -109,7 +133,6 @@ kubectl -n clawmanager-system set env deployment/clawmanager-app \
   'CLAWMANAGER_OPENCODE_PUBLIC_URL_TEMPLATE=https://opencode-{instance_id}.clawmanager.test:39443/'
 kubectl -n clawmanager-system rollout status deployment/clawmanager-app
 ```
-
 ## DeepSeek Harness Runtime
 
 DeepSeek Harness is available in both runtime modes:
@@ -203,3 +226,7 @@ For mixed-architecture clusters, use architecture-compatible tags together with 
 - [Security Protection Platform](./security-platform.md)
 - [Resource Management Guide](./resource-management.md)
 - [Skill Hub Guide](./skill-hub-guide_en.md)
+- [Northbound API Deployment Add-on](../deployments/k8s/northbound/README.md)
+- [Northbound API Guide (Chinese)](./northbound-api-guide.md)
+- [Northbound API Upgrade Guide (Chinese)](./northbound-upgrade-guide.md)
+- [Northbound OpenAPI 3.1 Specification](./northbound-openapi.yaml)

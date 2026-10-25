@@ -1,0 +1,40 @@
+# Static NFS storage for MySQL full backups and archived binlogs.
+# Capacity is declarative and is not an NFS server-side quota.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: clawmanager-mysql-backups
+spec:
+  capacity:
+    storage: 1Ti
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: nfs-static
+  mountOptions:
+    - nfsvers=4.2
+    - hard
+    - timeo=600
+    - retrans=2
+  nfs:
+    server: 10.130.224.6
+    path: /mnt/nfs6/sample/clawmanager/mysql-backups
+  claimRef:
+    apiVersion: v1
+    kind: PersistentVolumeClaim
+    name: clawmanager-mysql-backups
+    namespace: clawmanager-system
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: clawmanager-mysql-backups
+  namespace: clawmanager-system
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 1Ti
+  storageClassName: nfs-static
+  volumeName: clawmanager-mysql-backups

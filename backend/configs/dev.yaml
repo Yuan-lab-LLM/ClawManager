@@ -13,3 +13,28 @@ jwt:
   secret: "clawreef-dev-secret-key-change-in-production"
   access_expiry: 60
   refresh_expiry: 168
+
+auth:
+  configEncryptionKey: "clawmanager-auth-key-dev-32byte!"
+  enterprise:
+    enabled: false
+    allowLocalFallback: true
+    syncRole: false
+    ldap:
+      host: ""
+      port: 389
+      useTLS: false
+      startTLS: false
+      skipTLSVerify: false
+      tlsCAFile: ""
+      tlsServerName: ""
+      bindDN: ""
+      bindPassword: ""
+      baseDN: ""
+      userFilter: "(&(objectClass=person)(uid=%s))"
+      usernameAttribute: "uid"
+      emailAttribute: "mail"
+      groupBaseDN: ""
+      groupFilter: "(member=%s)"
+      adminGroupDNs: []
+      defaultRole: "user"

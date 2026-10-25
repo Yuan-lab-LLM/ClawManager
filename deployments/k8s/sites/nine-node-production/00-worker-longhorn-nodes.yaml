@@ -1,0 +1,83 @@
+# Apply this file before 10-clawmanager-production.yaml.
+# 900 GiB is reserved on each approximately 3.5 TiB root filesystem for the
+# operating system, containerd, and Kubernetes. The Longhorn data directory is
+# an ordinary directory on the root LVM, not a separate mount.
+apiVersion: v1
+kind: Node
+metadata:
+  name: k8s-worker1
+  labels:
+    node.longhorn.io/create-default-disk: "config"
+  annotations:
+    node.longhorn.io/default-disks-config: >-
+      [{"path":"/var/lib/longhorn","allowScheduling":true,"storageReserved":966367641600,"tags":["worker-local"]}]
+---
+apiVersion: v1
+kind: Node
+metadata:
+  name: k8s-worker2
+  labels:
+    node.longhorn.io/create-default-disk: "config"
+  annotations:
+    node.longhorn.io/default-disks-config: >-
+      [{"path":"/var/lib/longhorn","allowScheduling":true,"storageReserved":966367641600,"tags":["worker-local"]}]
+---
+apiVersion: v1
+kind: Node
+metadata:
+  name: k8s-worker3
+  labels:
+    node.longhorn.io/create-default-disk: "config"
+  annotations:
+    node.longhorn.io/default-disks-config: >-
+      [{"path":"/var/lib/longhorn","allowScheduling":true,"storageReserved":966367641600,"tags":["worker-local"]}]
+---
+apiVersion: v1
+kind: Node
+metadata:
+  name: k8s-worker4
+  labels:
+    node.longhorn.io/create-default-disk: "config"
+  annotations:
+    node.longhorn.io/default-disks-config: >-
+      [{"path":"/var/lib/longhorn","allowScheduling":true,"storageReserved":966367641600,"tags":["worker-local"]}]
+---
+apiVersion: v1
+kind: Node
+metadata:
+  name: k8s-worker5
+  labels:
+    node.longhorn.io/create-default-disk: "config"
+  annotations:
+    node.longhorn.io/default-disks-config: >-
+      [{"path":"/var/lib/longhorn","allowScheduling":true,"storageReserved":966367641600,"tags":["worker-local"]}]
+---
+apiVersion: v1
+kind: Node
+metadata:
+  name: k8s-worker6
+  labels:
+    node.longhorn.io/create-default-disk: "config"
+  annotations:
+    node.longhorn.io/default-disks-config: >-
+      [{"path":"/var/lib/longhorn","allowScheduling":true,"storageReserved":966367641600,"tags":["worker-local"]}]
+---
+apiVersion: v1
+kind: Node
+metadata:
+  name: k8s-worker7
+  labels:
+    node.longhorn.io/create-default-disk: "config"
+  annotations:
+    node.longhorn.io/default-disks-config: >-
+      [{"path":"/var/lib/longhorn","allowScheduling":true,"storageReserved":966367641600,"tags":["worker-local"]}]
+---
+apiVersion: v1
+kind: Node
+metadata:
+  name: k8s-worker8
+  labels:
+    node.longhorn.io/create-default-disk: "config"
+  annotations:
+    node.longhorn.io/default-disks-config: >-
+      [{"path":"/var/lib/longhorn","allowScheduling":true,"storageReserved":966367641600,"tags":["worker-local"]}]

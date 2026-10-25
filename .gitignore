@@ -21,7 +21,13 @@
 /frontend/node_modules/
 /frontend/dist/
 /frontend/dist-ssr/
+/frontend/public/hermes-desktop-web/
+/hermes-desktop-web/node_modules/
+/hermes-desktop-web/.cache/
+/hermes-desktop-web/.upstream/
+/hermes-desktop-web/dist/
 /outputs/
+/venv/
 # Logs
 *.log
 npm-debug.log*
@@ -45,6 +51,9 @@ lerna-debug.log*
 .env
 .env.local
 .env.*.local
+/.venv-northbound/
+__pycache__/
+*.py[cod]
 
 # Database
 *.db
@@ -56,6 +65,7 @@ Thumbs.db
 # Temporary files
 *.tmp
 *.temp
+*.bkp
 /test_*
 /deploy/
 /test.tar
@@ -69,6 +79,11 @@ Thumbs.db
 /_pr*.md
 .clawmanager-last-image
 /pr138.patch
+/examples/northbound-ca.crt
+/docs/northbound-api-test-guide.private.md
+/deployments/k8s/sites/nine-node-production/server_login.md
+/deployments/k8s/sites/nine-node-production/private/
+/deployments/k8s/sites/nine-node-production/certificates/
 
 # Team runtime config snapshots
 /team-*.json
@@ -85,6 +100,7 @@ devplan.md
 AGENTS.md
 TASK_BREAKDOWN.md
 dev_progress.md
+/progress.md
 CLAUDE.md
 TEAM_IMAGE_DEPLOY_STEPS.md
 TEAM_PROFILES_LOCAL_TESTING.md
@@ -92,5 +108,6 @@ TEAM_PROFILES_LOCAL_TESTING.md
 /clawmanager-apply.sh
 /clawmanager-team-profiles-test.yaml
 /clawmanager-tenant.yaml
+/clawmanager-local-dev.tar
 .codex
 /litellm-five-highlights-design.md

@@ -25,6 +25,7 @@ type TeamRepository interface {
 
 	CreateMember(member *models.TeamMember) error
 	UpdateMember(member *models.TeamMember) error
+	ReleaseMemberFromTask(memberID, taskID int, runtimeStatus, availability string, progress int, updatedAt time.Time) (bool, error)
 	GetMemberByID(id int) (*models.TeamMember, error)
 	GetMemberByTeamKey(teamID int, memberKey string) (*models.TeamMember, error)
 	ListMembersByTeamID(teamID int) ([]models.TeamMember, error)
@@ -52,11 +53,18 @@ type TeamRepository interface {
 	ListWorkflowPhasesByRootTaskID(rootTaskID int) ([]models.TeamWorkflowPhase, error)
 	AcceptRootCompletion(task *models.TeamTask, expectedLedgerVersion int64, event *models.TeamEvent, outbox *models.TeamEventOutbox) (bool, error)
 	ConfirmWorkItemResult(item *models.TeamWorkItem, event *models.TeamEvent, outbox *models.TeamEventOutbox) error
-	CreateEventWithOutbox(event *models.TeamEvent, outbox *models.TeamEventOutbox) error
+	CreateEventWithOutbox(event *models.TeamEvent, outbox *models.TeamEventOutbox, observations ...*models.TeamEvent) error
 	CreateEventOutbox(outbox *models.TeamEventOutbox) error
 	ListPendingEventOutbox(now time.Time, limit int) ([]models.TeamEventOutbox, error)
 	MarkEventOutboxDelivered(id int, deliveredAt time.Time) error
 	MarkEventOutboxFailed(id int, availableAt time.Time, cause string) error
+}
+
+// PendingTeamDeletionRepository is an optional lifecycle capability for
+// resuming deletions that already recorded explicit user intent.
+type PendingTeamDeletionRepository interface {
+	ListTeamsByStatus(status string) ([]models.Team, error)
+	ListMembersByStatus(status string) ([]models.TeamMember, error)
 }
 
 type teamRepository struct {
@@ -141,6 +149,18 @@ func (r *teamRepository) ListActiveTeams() ([]models.Team, error) {
 	return teams, nil
 }
 
+func (r *teamRepository) ListTeamsByStatus(status string) ([]models.Team, error) {
+	status = strings.ToLower(strings.TrimSpace(status))
+	if status == "" {
+		return nil, fmt.Errorf("team status is required")
+	}
+	var teams []models.Team
+	if err := r.sess.Collection("teams").Find(db.Cond{"status": status}).OrderBy("id").All(&teams); err != nil {
+		return nil, fmt.Errorf("failed to list teams by status: %w", err)
+	}
+	return teams, nil
+}
+
 func (r *teamRepository) CountTeamsByUserID(userID int) (int, error) {
 	count, err := r.sess.Collection("teams").Find(db.Cond{"user_id": userID}).Count()
 	if err != nil {
@@ -169,6 +189,42 @@ func (r *teamRepository) UpdateMember(member *models.TeamMember) error {
 		return fmt.Errorf("failed to update team member: %w", err)
 	}
 	return nil
+}
+
+func (r *teamRepository) ReleaseMemberFromTask(memberID, taskID int, runtimeStatus, availability string, progress int, updatedAt time.Time) (bool, error) {
+	if memberID <= 0 || taskID <= 0 {
+		return false, fmt.Errorf("member id and task id are required")
+	}
+	if updatedAt.IsZero() {
+		updatedAt = time.Now().UTC()
+	}
+	result, err := r.sess.SQL().Exec(`
+UPDATE team_members
+SET status = ?, current_task_id = NULL, progress = ?, availability = ?,
+    runtime_status = ?, runtime_task_id = NULL, runtime_intent = NULL,
+    blocked_reason = NULL, updated_at = ?
+WHERE id = ? AND current_task_id = ?
+`, models.TeamMemberStatusIdle, progress, availability, runtimeStatus, updatedAt, memberID, taskID)
+	if err != nil {
+		return false, fmt.Errorf("failed to release team member from terminal task: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("failed to inspect released team member: %w", err)
+	}
+	return affected == 1, nil
+}
+
+func (r *teamRepository) ListMembersByStatus(status string) ([]models.TeamMember, error) {
+	status = strings.ToLower(strings.TrimSpace(status))
+	if status == "" {
+		return nil, fmt.Errorf("team member status is required")
+	}
+	var members []models.TeamMember
+	if err := r.sess.Collection("team_members").Find(db.Cond{"status": status}).OrderBy("id").All(&members); err != nil {
+		return nil, fmt.Errorf("failed to list team members by status: %w", err)
+	}
+	return members, nil
 }
 
 func (r *teamRepository) GetMemberByID(id int) (*models.TeamMember, error) {
@@ -353,12 +409,28 @@ func (r *teamRepository) ConfirmWorkItemResult(item *models.TeamWorkItem, event 
 	})
 }
 
-func (r *teamRepository) CreateEventWithOutbox(event *models.TeamEvent, outbox *models.TeamEventOutbox) error {
+func (r *teamRepository) CreateEventWithOutbox(event *models.TeamEvent, outbox *models.TeamEventOutbox, observations ...*models.TeamEvent) error {
 	if event == nil || outbox == nil {
 		return fmt.Errorf("event and outbox are required")
 	}
 	return r.sess.Tx(func(sess db.Session) error {
 		txRepo := &teamRepository{sess: sess}
+		// Commit the source observation with its recovery action. Otherwise a
+		// crash between the two writes makes stream deduplication lose recovery.
+		for _, observation := range observations {
+			if observation != nil {
+				// A periodic Monitor may pass an already-persisted observation.
+				// Replay by its event/stream identity, never its auto-increment PK.
+				pending := *observation
+				pending.ID = 0
+				pending.SequenceNo = 0
+				if err := txRepo.CreateEvent(&pending); err != nil && !errors.Is(err, ErrDuplicateTeamEvent) {
+					return err
+				} else if err == nil {
+					*observation = pending
+				}
+			}
+		}
 		if err := txRepo.CreateEvent(event); err != nil && !errors.Is(err, ErrDuplicateTeamEvent) {
 			return err
 		}
@@ -448,6 +520,10 @@ func (r *teamRepository) ListWorkflowPhasesByRootTaskID(rootTaskID int) ([]model
 }
 
 func (r *teamRepository) AcceptRootCompletion(task *models.TeamTask, expectedLedgerVersion int64, event *models.TeamEvent, outbox *models.TeamEventOutbox) (bool, error) {
+	return r.acceptRootCompletion(task, expectedLedgerVersion, event, outbox, nil)
+}
+
+func (r *teamRepository) acceptRootCompletion(task *models.TeamTask, expectedLedgerVersion int64, event *models.TeamEvent, outbox *models.TeamEventOutbox, singleItem *models.TeamWorkItem) (bool, error) {
 	if task == nil || event == nil || outbox == nil || task.ID <= 0 {
 		return false, fmt.Errorf("task, accepted completion event and outbox are required")
 	}
@@ -486,6 +562,11 @@ WHERE id = ? AND ledger_version = ? AND accepted_completion_id IS NULL
 			return nil
 		}
 		accepted = true
+		if singleItem != nil {
+			if err := (&teamRepository{sess: sess}).UpsertWorkItem(singleItem); err != nil {
+				return err
+			}
+		}
 		if _, err := sess.SQL().Exec(`
 UPDATE team_workflow_phases
 SET status = 'completed', completed_at = ?, updated_at = ?
@@ -493,6 +574,36 @@ WHERE root_task_id = ? AND (? = 0 OR plan_version = ?)
   AND status NOT IN ('cancelled', 'superseded')
 `, task.UpdatedAt, task.UpdatedAt, task.ID, task.PlanVersion, task.PlanVersion); err != nil {
 			return fmt.Errorf("failed to complete team workflow phases: %w", err)
+		}
+		// A root completion ends only the members that are still attached to this
+		// exact task. The current_task_id predicate is the compare-and-clear guard:
+		// if a member already started a newer task, a late completion cannot reset
+		// that member back to idle. Keeping this in the same transaction prevents a
+		// succeeded root from leaving 8.1 workers permanently busy after restart.
+		progress := 100
+		runtimeStatus := models.TeamTaskStatusSucceeded
+		if singleItem != nil {
+			runtimeStatus = task.Status
+			if task.Status != models.TeamTaskStatusSucceeded {
+				progress = 0
+			}
+		}
+		if _, err := sess.SQL().Exec(`
+UPDATE team_members
+SET status = ?, current_task_id = NULL, progress = ?, availability = ?,
+    runtime_status = ?, runtime_task_id = NULL, runtime_intent = NULL,
+    blocked_reason = NULL, updated_at = ?
+WHERE team_id = ? AND current_task_id = ?
+`,
+			models.TeamMemberStatusIdle,
+			progress,
+			models.TeamMemberAvailabilityIdle,
+			runtimeStatus,
+			task.UpdatedAt,
+			task.TeamID,
+			task.ID,
+		); err != nil {
+			return fmt.Errorf("failed to release members from completed team task: %w", err)
 		}
 		txRepo := &teamRepository{sess: sess}
 		if err := txRepo.CreateEvent(event); err != nil && !errors.Is(err, ErrDuplicateTeamEvent) {

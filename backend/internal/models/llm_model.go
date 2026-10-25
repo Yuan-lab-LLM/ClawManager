@@ -43,20 +43,23 @@ type LLMModel struct {
 	SupportsTools        bool   `db:"supports_tools" json:"supports_tools"`
 	// ToolsSupportOverride is an administrator assertion independent of discovery.
 	// NULL retains legacy/automatic behavior; false is an explicit opt-out.
-	ToolsSupportOverride  *bool     `db:"tools_support_override" json:"tools_support_override"`
-	SupportsVision        bool      `db:"supports_vision" json:"supports_vision"`
-	VisionSupportOverride *bool     `db:"vision_support_override" json:"vision_support_override"`
-	CapabilitySource      string    `db:"capability_source" json:"capability_source,omitempty"`
-	ReasoningControl      string    `db:"-" json:"reasoning_control,omitempty"`
-	APIKey                *string   `db:"api_key" json:"api_key,omitempty"`
-	APIKeySecretRef       *string   `db:"api_key_secret_ref" json:"api_key_secret_ref,omitempty"`
-	IsSecure              bool      `db:"is_secure" json:"is_secure"`
-	IsActive              bool      `db:"is_active" json:"is_active"`
-	InputPrice            float64   `db:"input_price" json:"input_price"`
-	OutputPrice           float64   `db:"output_price" json:"output_price"`
-	Currency              string    `db:"currency" json:"currency"`
-	CreatedAt             time.Time `db:"created_at" json:"created_at"`
-	UpdatedAt             time.Time `db:"updated_at" json:"updated_at"`
+	ToolsSupportOverride  *bool              `db:"tools_support_override" json:"tools_support_override"`
+	SupportsVision        bool               `db:"supports_vision" json:"supports_vision"`
+	VisionSupportOverride *bool              `db:"vision_support_override" json:"vision_support_override"`
+	CapabilitySource      string             `db:"capability_source" json:"capability_source,omitempty"`
+	ReasoningControl      string             `db:"-" json:"reasoning_control,omitempty"`
+	APIKey                *string            `db:"api_key" json:"api_key,omitempty"`
+	APIKeySecretRef       *string            `db:"api_key_secret_ref" json:"api_key_secret_ref,omitempty"`
+	IsSecure              bool               `db:"is_secure" json:"is_secure"`
+	IsActive              bool               `db:"is_active" json:"is_active"`
+	InputPrice            float64            `db:"input_price" json:"input_price"`
+	OutputPrice           float64            `db:"output_price" json:"output_price"`
+	Currency              string             `db:"currency" json:"currency"`
+	CreatedAt             time.Time          `db:"created_at" json:"created_at"`
+	UpdatedAt             time.Time          `db:"updated_at" json:"updated_at"`
+	ProviderModelsJSON    *string            `db:"provider_models_json" json:"-"`
+	ProviderModels        []LLMProviderModel `db:"-" json:"provider_models"`
+	CatalogProviderName   string             `db:"-" json:"catalog_provider_name,omitempty"`
 }
 
 // TableName returns the table name for the LLM model.

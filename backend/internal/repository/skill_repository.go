@@ -159,6 +159,21 @@ func (r *skillRepository) CreateBlob(blob *models.SkillBlob) error {
 	ensureTimestamps(&blob.CreatedAt, &blob.UpdatedAt)
 	res, err := r.sess.Collection("skill_blobs").Insert(blob)
 	if err != nil {
+		// Runtime inventories can be reported concurrently by multiple
+		// ClawManager replicas. The content hash is the blob identity, so a
+		// duplicate insert means another reporter already persisted the same
+		// immutable blob. Reuse that row instead of turning an idempotent report
+		// into a 500 response.
+		if isDuplicateEntryError(err) {
+			existing, lookupErr := r.GetBlobByContentHash(blob.ContentHash)
+			if lookupErr != nil {
+				return lookupErr
+			}
+			if existing != nil {
+				*blob = *existing
+				return nil
+			}
+		}
 		return fmt.Errorf("failed to create skill blob: %w", err)
 	}
 	if id, ok := res.ID().(int64); ok {
@@ -251,7 +266,7 @@ func (r *skillRepository) ListInstanceSkills(instanceID int) ([]models.InstanceS
 func (r *skillRepository) ListActiveInstanceSkillsBySkillID(skillID int) ([]models.InstanceSkill, error) {
 	var items []models.InstanceSkill
 	if err := r.sess.Collection("instance_skills").Find(db.Cond{
-		"skill_id": skillID,
+		"skill_id":      skillID,
 		"status NOT IN": []string{"removed", "missing"},
 	}).OrderBy("-updated_at", "-id").All(&items); err != nil {
 		return nil, fmt.Errorf("failed to list active instance skills by skill id: %w", err)

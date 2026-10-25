@@ -1,0 +1,5 @@
+FROM 10.130.15.40:5000/kubectl:v1.31.14 AS kubectl
+
+FROM 10.130.15.40:5000/redis:7-alpine
+COPY --from=kubectl /bin/kubectl /usr/local/bin/kubectl
+ENTRYPOINT ["/bin/sh"]

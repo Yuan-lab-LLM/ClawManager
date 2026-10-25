@@ -29,6 +29,12 @@ func NewAuditEventRepository(sess db.Session) AuditEventRepository {
 	return repo
 }
 
+// NewAuditEventRepositoryExistingTable skips DDL and is intended for
+// least-privilege processes after Core has applied migrations.
+func NewAuditEventRepositoryExistingTable(sess db.Session) AuditEventRepository {
+	return &auditEventRepository{sess: sess}
+}
+
 func (r *auditEventRepository) ensureTable() {
 	const query = `
 CREATE TABLE IF NOT EXISTS audit_events (

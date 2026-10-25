@@ -8,10 +8,14 @@ const sourcePath = path.resolve(
   "../src/pages/instances/CreateInstancePage.tsx",
 );
 const source = readFileSync(sourcePath, "utf8");
+const instanceTypeSource = readFileSync(
+  path.resolve(scriptDir, "../src/types/instance.ts"),
+  "utf8",
+);
 
 function sectionBetween(startMarker, endMarker) {
   const start = source.indexOf(startMarker);
-  const end = source.indexOf(endMarker);
+  const end = source.indexOf(endMarker, start + startMarker.length);
   if (start === -1 || end === -1 || end <= start) {
     throw new Error(`Unable to locate section: ${startMarker}`);
   }
@@ -71,9 +75,23 @@ assert(
   "Quota validation must include CPU/memory/storage/GPU only for Pro mode.",
 );
 assert(
-  source.includes('TEMPORARILY_HIDDEN_CREATE_INSTANCE_TYPE_IDS') &&
-    source.includes('TEMPORARILY_HIDDEN_CREATE_INSTANCE_TYPE_IDS.has(type.id)'),
-  "Create page must hide temporarily unavailable runtime types from every new-instance chooser.",
+  instanceTypeSource.includes('id: "codex"') &&
+    instanceTypeSource.includes('id: "claude-code"') &&
+    source.includes('"workbuddy"') &&
+    source.includes('"codex"') &&
+    source.includes('"claude-code"') &&
+    source.includes("HIDDEN_TEAM_INSTANCE_TYPE_IDS") &&
+    source.includes("!HIDDEN_TEAM_INSTANCE_TYPE_IDS.has(item.instance_type)"),
+  "Historical runtime types must remain renderable while the team distribution filters them from every create source.",
+);
+const proOnlyTypes = sectionBetween(
+  "const isProOnlyInstanceType",
+  "const ",
+);
+assert(
+  proOnlyTypes.includes('type === "codex"') &&
+    proOnlyTypes.includes('type === "claude-code"'),
+  "Historical Codex and Claude Code records must retain their Pro classification.",
 );
 assert(
   !source.includes("isLiteOnlyInstanceType") &&

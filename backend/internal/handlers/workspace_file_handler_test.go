@@ -63,18 +63,30 @@ func (s *fakeWorkspaceHandlerInstanceService) GetInstanceStatus(instanceID int) 
 func (s *fakeWorkspaceHandlerInstanceService) ForceSyncInstance(instanceID int) error { return nil }
 
 type fakeWorkspaceFileService struct {
-	lastScope   services.WorkspaceFileScope
-	listCalls   int
-	deleteCalls int
-	file        *os.File
-	filename    string
-	size        int64
+	lastScope       services.WorkspaceFileScope
+	listCalls       int
+	searchCalls     int
+	lastSearchQuery string
+	lastSearchLimit int
+	deleteCalls     int
+	file            *os.File
+	filename        string
+	size            int64
 }
 
 func (s *fakeWorkspaceFileService) List(ctx context.Context, scope services.WorkspaceFileScope, relativePath string) ([]services.WorkspaceEntry, error) {
 	s.lastScope = scope
 	s.listCalls++
 	return []services.WorkspaceEntry{{Name: "readme.md", Path: "readme.md", ModifiedAt: time.Unix(1, 0), Previewable: true, Downloadable: true}}, nil
+}
+func (s *fakeWorkspaceFileService) Search(ctx context.Context, scope services.WorkspaceFileScope, query string, limit int) ([]services.WorkspaceEntry, error) {
+	s.lastScope = scope
+	s.searchCalls++
+	s.lastSearchQuery = query
+	s.lastSearchLimit = limit
+	return []services.WorkspaceEntry{
+		{Name: "readme.md", Path: "docs/readme.md", ModifiedAt: time.Unix(1, 0), Previewable: true, Downloadable: true},
+	}, nil
 }
 func (s *fakeWorkspaceFileService) Preview(ctx context.Context, scope services.WorkspaceFileScope, relativePath string) (*services.WorkspacePreview, error) {
 	s.lastScope = scope
@@ -84,7 +96,7 @@ func (s *fakeWorkspaceFileService) OpenPreview(ctx context.Context, scope servic
 	s.lastScope = scope
 	return s.file, "text/plain; charset=utf-8", s.size, nil
 }
-func (s *fakeWorkspaceFileService) OpenDownload(ctx context.Context, scope services.WorkspaceFileScope, relativePath string) (*os.File, string, int64, error) {
+func (s *fakeWorkspaceFileService) OpenDownload(ctx context.Context, scope services.WorkspaceFileScope, relativePath string) (io.ReadCloser, string, int64, error) {
 	s.lastScope = scope
 	return s.file, s.filename, s.size, nil
 }
@@ -118,6 +130,12 @@ func (s *fakeSharedExternalAccessService) EnableShareLink(ctx context.Context, i
 	return nil, fmt.Errorf("not implemented")
 }
 func (s *fakeSharedExternalAccessService) CreatePassword(ctx context.Context, instanceID, createdBy int, expiration services.ExternalAccessExpirationRequest) (*services.PasswordExternalAccessResult, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (s *fakeSharedExternalAccessService) ResetURL(ctx context.Context, instanceID, createdBy int) (*services.EnableShareLinkResult, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (s *fakeSharedExternalAccessService) ResetPassword(ctx context.Context, instanceID, createdBy int) (*services.PasswordExternalAccessResult, error) {
 	return nil, fmt.Errorf("not implemented")
 }
 func (s *fakeSharedExternalAccessService) Disable(ctx context.Context, instanceID int) error {
@@ -181,6 +199,93 @@ func TestWorkspaceFileHandlerAdminUsesInstanceOwnerScope(t *testing.T) {
 	}
 	if fileService.lastScope.InstanceID != 77 || fileService.lastScope.UserID != 20 || fileService.lastScope.WorkspacePath != workspacePath {
 		t.Fatalf("scope = %#v, want instance owner scope", fileService.lastScope)
+	}
+}
+
+func TestWorkspaceFileHandlerSearchPassesQueryAndOwnerScope(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	workspacePath := t.TempDir()
+	instanceService := &fakeWorkspaceHandlerInstanceService{instances: map[int]*models.Instance{
+		77: {ID: 77, UserID: 10, WorkspacePath: &workspacePath},
+	}}
+	fileService := &fakeWorkspaceFileService{}
+	handler := NewWorkspaceFileHandler(instanceService, fileService)
+
+	router := workspaceFileTestRouter(10, "user")
+	router.GET("/api/v1/instances/:id/workspace/search", handler.Search)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/instances/77/workspace/search?q=readme", nil)
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s, want 200", rec.Code, rec.Body.String())
+	}
+	if fileService.searchCalls != 1 {
+		t.Fatalf("workspace file service search called %d times, want 1", fileService.searchCalls)
+	}
+	if fileService.lastSearchQuery != "readme" {
+		t.Fatalf("search query = %q, want readme", fileService.lastSearchQuery)
+	}
+	if fileService.lastScope.InstanceID != 77 || fileService.lastScope.UserID != 10 {
+		t.Fatalf("scope = %#v, want instance owner scope", fileService.lastScope)
+	}
+	if !strings.Contains(rec.Body.String(), `"limit":200`) {
+		t.Fatalf("body = %s, want limit 200 in response", rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `docs/readme.md`) {
+		t.Fatalf("body = %s, want search entry in response", rec.Body.String())
+	}
+}
+
+func TestWorkspaceFileHandlerSearchLimitParam(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	workspacePath := t.TempDir()
+	instanceService := &fakeWorkspaceHandlerInstanceService{instances: map[int]*models.Instance{
+		77: {ID: 77, UserID: 10, WorkspacePath: &workspacePath},
+	}}
+	fileService := &fakeWorkspaceFileService{}
+	handler := NewWorkspaceFileHandler(instanceService, fileService)
+
+	router := workspaceFileTestRouter(10, "user")
+	router.GET("/api/v1/instances/:id/workspace/search", handler.Search)
+
+	// Explicit limit is passed through to the service and echoed back.
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/instances/77/workspace/search?q=readme&limit=50", nil)
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s, want 200", rec.Code, rec.Body.String())
+	}
+	if fileService.lastSearchLimit != 50 {
+		t.Fatalf("search limit = %d, want 50", fileService.lastSearchLimit)
+	}
+	if !strings.Contains(rec.Body.String(), `"limit":50`) {
+		t.Fatalf("body = %s, want limit 50 in response", rec.Body.String())
+	}
+
+	// Limits above the ceiling are clamped.
+	fileService.lastSearchLimit = 0
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/instances/77/workspace/search?q=readme&limit=99999", nil)
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s, want 200", rec.Code, rec.Body.String())
+	}
+	if fileService.lastSearchLimit != services.WorkspaceSearchLimitCeiling {
+		t.Fatalf("search limit = %d, want ceiling %d", fileService.lastSearchLimit, services.WorkspaceSearchLimitCeiling)
+	}
+
+	// An invalid limit falls back to the default.
+	fileService.lastSearchLimit = 0
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/instances/77/workspace/search?q=readme&limit=abc", nil)
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s, want 200", rec.Code, rec.Body.String())
+	}
+	if fileService.lastSearchLimit != services.WorkspaceSearchMaxResults {
+		t.Fatalf("search limit = %d, want default %d", fileService.lastSearchLimit, services.WorkspaceSearchMaxResults)
 	}
 }
 
@@ -404,6 +509,43 @@ func TestSharedWorkspaceFileHandlerDoesNotExposeLegacyNoneScope(t *testing.T) {
 	}
 	if fileService.listCalls != 0 {
 		t.Fatalf("legacy none scope reached file service %d times", fileService.listCalls)
+	}
+}
+
+func TestDesktopWorkspaceEligibilityFollowsManagedRuntimeVariant(t *testing.T) {
+	tests := []struct {
+		name     string
+		instance *models.Instance
+		want     bool
+	}{
+		{
+			name:     "linux workbuddy",
+			instance: &models.Instance{Type: "workbuddy", RuntimeVariant: "linux", InstanceMode: services.InstanceModePro},
+			want:     true,
+		},
+		{
+			name:     "windows workbuddy",
+			instance: &models.Instance{Type: "workbuddy", RuntimeVariant: "windows", InstanceMode: services.InstanceModePro},
+			want:     false,
+		},
+		{
+			name:     "linux codex",
+			instance: &models.Instance{Type: services.RuntimeTypeCodex, RuntimeVariant: "linux", InstanceMode: services.InstanceModePro},
+			want:     true,
+		},
+		{
+			name:     "windows codex",
+			instance: &models.Instance{Type: services.RuntimeTypeCodex, RuntimeVariant: "windows", InstanceMode: services.InstanceModePro},
+			want:     false,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := isDesktopWorkspaceInstance(test.instance); got != test.want {
+				t.Fatalf("isDesktopWorkspaceInstance() = %v, want %v", got, test.want)
+			}
+		})
 	}
 }
 

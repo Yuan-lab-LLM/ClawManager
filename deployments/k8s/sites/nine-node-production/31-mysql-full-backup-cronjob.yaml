@@ -1,0 +1,229 @@
+# MySQL full-backup identity and daily full backup.
+# Prerequisite: add mysql-backup-password to the existing
+# clawmanager-secrets Secret before applying this file.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mysql-production-backup-scripts
+  namespace: clawmanager-system
+data:
+  bootstrap-users.sh: |
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    until MYSQL_PWD="${MYSQL_ROOT_PASSWORD}" mysql \
+      --host=mysql --user=root --ssl-mode=REQUIRED \
+      --batch --skip-column-names --execute='SELECT 1' >/dev/null 2>&1; do
+      sleep 5
+    done
+
+    backup_password_b64="$(printf '%s' "${MYSQL_BACKUP_PASSWORD}" | base64 | tr -d '\r\n')"
+
+    MYSQL_PWD="${MYSQL_ROOT_PASSWORD}" mysql \
+      --host=mysql --user=root --ssl-mode=REQUIRED <<SQL
+    SET @backup_password = FROM_BASE64('${backup_password_b64}');
+    SET @create_backup = CONCAT(
+      "CREATE USER IF NOT EXISTS 'clawmanager_backup'@'%' IDENTIFIED BY ",
+      QUOTE(@backup_password), " REQUIRE SSL"
+    );
+    PREPARE statement FROM @create_backup;
+    EXECUTE statement;
+    DEALLOCATE PREPARE statement;
+    SET @alter_backup = CONCAT(
+      "ALTER USER 'clawmanager_backup'@'%' IDENTIFIED BY ",
+      QUOTE(@backup_password), " REQUIRE SSL"
+    );
+    PREPARE statement FROM @alter_backup;
+    EXECUTE statement;
+    DEALLOCATE PREPARE statement;
+    GRANT SELECT, SHOW VIEW, TRIGGER, EVENT, RELOAD, PROCESS, REPLICATION CLIENT
+      ON *.* TO 'clawmanager_backup'@'%';
+
+    FLUSH PRIVILEGES;
+    SQL
+
+  full-backup.sh: |
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    readonly BACKUP_ROOT=/backup
+    readonly FULL_ROOT="${BACKUP_ROOT}/full"
+    readonly RETAIN_SUCCESSFUL=7
+    readonly SOFT_BUDGET_KIB=1073741824
+
+    umask 077
+    mkdir -p "${FULL_ROOT}"
+
+    used_kib="$(du -sk "${BACKUP_ROOT}" | awk '{print $1}')"
+    used_percent="$((used_kib * 100 / SOFT_BUDGET_KIB))"
+    if [ "${used_percent}" -ge 85 ]; then
+      echo "ERROR: MySQL backup directory has reached ${used_percent}% of its 1 TiB soft budget; refusing to start another full backup." >&2
+      exit 1
+    fi
+    if [ "${used_percent}" -ge 70 ]; then
+      echo "WARNING: MySQL backup directory has reached ${used_percent}% of its 1 TiB soft budget; capacity expansion is required." >&2
+    fi
+
+    latest_dump="$(find "${FULL_ROOT}" -mindepth 2 -maxdepth 2 -type f -name dump.sql.gz -printf '%T@ %p\n' \
+      | sort -nr | awk 'NR==1 {sub(/^[^ ]+ /, ""); print}')"
+    if [ -n "${latest_dump}" ]; then
+      previous_bytes="$(wc -c <"${latest_dump}" | tr -d ' ')"
+      available_bytes="$(( $(df -Pk "${BACKUP_ROOT}" | awk 'NR==2 {print $4}') * 1024 ))"
+      if [ "${available_bytes}" -lt "$((previous_bytes * 2))" ]; then
+        echo "ERROR: NFS free space is less than twice the previous full-backup size." >&2
+        exit 1
+      fi
+    fi
+
+    timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
+    run_dir="${FULL_ROOT}/${timestamp}.partial"
+    final_dir="${FULL_ROOT}/${timestamp}"
+    mkdir "${run_dir}"
+
+    export MYSQL_PWD="${MYSQL_BACKUP_PASSWORD}"
+    gtid_executed="$(mysql --host=mysql --user=clawmanager_backup --ssl-mode=REQUIRED \
+      --batch --skip-column-names --execute='SELECT @@GLOBAL.gtid_executed')"
+
+    mysqldump --host=mysql --user=clawmanager_backup --ssl-mode=REQUIRED \
+      --all-databases --single-transaction --quick --routines --events \
+      --triggers --hex-blob --source-data=2 --set-gtid-purged=AUTO \
+      | gzip -1 >"${run_dir}/dump.sql.gz"
+
+    source_line="$(gzip -cd "${run_dir}/dump.sql.gz" \
+      | awk '/^-- CHANGE REPLICATION SOURCE TO / && !found {print; found=1}')"
+    binlog_file="$(printf '%s\n' "${source_line}" \
+      | sed -n "s/.*SOURCE_LOG_FILE='\([^']*\)'.*/\1/p")"
+    binlog_position="$(printf '%s\n' "${source_line}" \
+      | sed -n 's/.*SOURCE_LOG_POS=\([0-9][0-9]*\).*/\1/p')"
+    if [ -z "${binlog_file}" ] || [ -z "${binlog_position}" ]; then
+      echo "ERROR: mysqldump did not contain an exact binary-log coordinate." >&2
+      exit 1
+    fi
+
+    (
+      cd "${run_dir}"
+      sha256sum dump.sql.gz >SHA256SUMS
+    )
+    dump_bytes="$(wc -c <"${run_dir}/dump.sql.gz" | tr -d ' ')"
+    cat >"${run_dir}/manifest.env" <<EOF
+    BACKUP_FORMAT_VERSION=1
+    COMPLETED_AT_UTC=${timestamp}
+    BINLOG_FILE=${binlog_file}
+    BINLOG_POSITION=${binlog_position}
+    GTID_EXECUTED_B64=$(printf '%s' "${gtid_executed}" | base64 | tr -d '\r\n')
+    DUMP_BYTES=${dump_bytes}
+    MYSQL_CLIENT_VERSION=$(mysql --version | tr ' ' '_')
+    MYSQLDUMP_VERSION=$(mysqldump --version | tr ' ' '_')
+    EOF
+    touch "${run_dir}/complete"
+    mv "${run_dir}" "${final_dir}"
+
+    mapfile -t successful_backups < <(
+      find "${FULL_ROOT}" -mindepth 1 -maxdepth 1 -type d ! -name '*.partial' -printf '%f\n' | sort -r
+    )
+    if [ "${#successful_backups[@]}" -gt "${RETAIN_SUCCESSFUL}" ]; then
+      for old_name in "${successful_backups[@]:${RETAIN_SUCCESSFUL}}"; do
+        old_path="${FULL_ROOT}/${old_name}"
+        case "${old_path}" in
+          "${FULL_ROOT}"/*) find "${old_path}" -depth -delete ;;
+          *) echo "ERROR: refusing unsafe backup cleanup target ${old_path}" >&2; exit 1 ;;
+        esac
+      done
+    fi
+
+    echo "MySQL full backup completed: ${final_dir}"
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: mysql-production-backup-users
+  namespace: clawmanager-system
+spec:
+  backoffLimit: 6
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app: mysql-production-backup-users
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: bootstrap
+          image: 10.130.15.40:5000/mysql:8.4.8
+          imagePullPolicy: IfNotPresent
+          command: ["bash", "/scripts/bootstrap-users.sh"]
+          env:
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: clawmanager-secrets
+                  key: mysql-root-password
+            - name: MYSQL_BACKUP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: clawmanager-secrets
+                  key: mysql-backup-password
+          volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+              readOnly: true
+      volumes:
+        - name: scripts
+          configMap:
+            name: mysql-production-backup-scripts
+            defaultMode: 0550
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: mysql-production-full-backup
+  namespace: clawmanager-system
+spec:
+  schedule: "0 2 * * *"
+  timeZone: Asia/Shanghai
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 21600
+      backoffLimit: 1
+      template:
+        metadata:
+          labels:
+            app: mysql-production-full-backup
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: backup
+              image: 10.130.15.40:5000/mysql:8.4.8
+              imagePullPolicy: IfNotPresent
+              command: ["bash", "/scripts/full-backup.sh"]
+              env:
+                - name: MYSQL_BACKUP_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: clawmanager-secrets
+                      key: mysql-backup-password
+              resources:
+                requests:
+                  cpu: "1"
+                  memory: 2Gi
+                limits:
+                  cpu: "4"
+                  memory: 8Gi
+              volumeMounts:
+                - name: scripts
+                  mountPath: /scripts
+                  readOnly: true
+                - name: backup
+                  mountPath: /backup
+          volumes:
+            - name: scripts
+              configMap:
+                name: mysql-production-backup-scripts
+                defaultMode: 0550
+            - name: backup
+              persistentVolumeClaim:
+                claimName: clawmanager-mysql-backups

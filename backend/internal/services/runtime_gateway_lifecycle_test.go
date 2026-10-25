@@ -15,6 +15,7 @@ func TestNormalizeRuntimeGatewayLifecycle(t *testing.T) {
 		{name: "running", raw: "running", bindingState: "running", instanceState: "running", running: true, recognized: true, createAccepted: true},
 		{name: "ready", raw: "ready", bindingState: "running", instanceState: "running", running: true, recognized: true, createAccepted: true},
 		{name: "healthy", raw: "healthy", bindingState: "running", instanceState: "running", running: true, recognized: true, createAccepted: true},
+		{name: "unhealthy live process", raw: "unhealthy", bindingState: "unhealthy", instanceState: "error", recognized: true},
 		{name: "starting", raw: "starting", bindingState: "creating", instanceState: "creating", recognized: true, createAccepted: true},
 		{name: "creating", raw: "creating", bindingState: "creating", instanceState: "creating", recognized: true, createAccepted: true},
 		{name: "pending", raw: "pending", bindingState: "creating", instanceState: "creating", recognized: true, createAccepted: true},

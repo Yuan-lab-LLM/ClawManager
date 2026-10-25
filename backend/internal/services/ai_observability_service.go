@@ -734,7 +734,7 @@ func (s *aiObservabilityService) completeModelBreakdowns(modelTotals map[string]
 		for _, item := range items {
 			existing[item.Label] = struct{}{}
 		}
-		for _, model := range activeModels {
+		for _, model := range models.ExpandLLMModelCatalog(activeModels) {
 			if _, ok := existing[model.DisplayName]; ok {
 				continue
 			}

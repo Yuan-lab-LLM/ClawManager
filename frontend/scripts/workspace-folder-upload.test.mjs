@@ -7,6 +7,10 @@ const source = readFileSync(
   path.resolve(scriptDir, "../src/components/WorkspaceFileManager.tsx"),
   "utf8",
 );
+const translations = readFileSync(
+  path.resolve(scriptDir, "../src/lib/i18n.ts"),
+  "utf8",
+);
 
 function assert(condition, message) {
   if (!condition) {
@@ -53,8 +57,10 @@ assert(
 
 assert(
   source.includes('role="menu"') &&
-    source.includes("上传文件") &&
-    source.includes("上传文件夹"),
+    source.includes('translateLabel("workspaceFileManager.uploadFiles")') &&
+    source.includes('translateLabel("workspaceFileManager.uploadFolder")') &&
+    translations.includes('uploadFiles: "上传文件"') &&
+    translations.includes('uploadFolder: "上传文件夹"'),
   "Workspace upload menu must expose separate file and folder upload choices.",
 );
 

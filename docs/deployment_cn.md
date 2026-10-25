@@ -27,6 +27,12 @@ ClawManager 是 Kubernetes 原生平台。先选择 Kubernetes 发行版，再�
 
 全新 MySQL 使用 `clawmanager-mysql-init` 自动初始化；已有数据卷不会重复执行首次初始化脚本。MySQL、Redis、MinIO、工作区和对象数据都应使用持久卷，不能用 `emptyDir` 作为长期存储。
 
+## 可选北向接口
+
+基础部署 profile 默认不对外发布北向接口。需要启用时，先升级 ClawManager Core，再应用独立的 [北向接口 Kubernetes 附加包](../deployments/k8s/northbound/README.md)。只有北向 Gateway 可以作为外部 API 入口；Core 内部服务必须保持集群内可见，并保留文档要求的 mTLS、凭据隔离和网络策略边界。外部端口可以通过 NodePort、负载均衡器或 Ingress 映射，不属于 API 协议本身。
+
+已有环境请先阅读[北向接口版本升级说明](./northbound-upgrade-guide.md)，调用方以[北向接口使用说明](./northbound-api-guide.md)和 [OpenAPI 3.1 规范](./northbound-openapi.yaml)为准。
+
 ## DeepSeek Harness Runtime
 
 - Lite 在共享 `deepseek-harness-runtime` 池中运行隔离的 `dsh web` 进程，持久化目录为 `<workspace>/home/.dsh`。
@@ -45,7 +51,7 @@ ClawManager 是 Kubernetes 原生平台。先选择 Kubernetes 发行版，再�
 
 ## ARM64
 
-官方 ClawManager 和 Skill Scanner 镜像支持 `linux/arm64`，但完整部署还包含 MySQL、Redis、MinIO/工作区服务及三类 Runtime。部署到 ARM 节点前检查清单中**每一个固定镜像**的 manifest；主镜像支持 ARM64 不代表自定义 Runtime 自动兼容。
+官方 ClawManager 和 Skill Scanner 镜像支持 `linux/arm64`，但完整部署还包含 MySQL、Redis、MinIO/工作区服务及四类 Runtime。部署到 ARM 节点前检查清单中**每一个固定镜像**的 manifest；主镜像支持 ARM64 不代表自定义 Runtime 自动兼容。
 
 混合架构集群应使用兼容标签并配置 node selector/affinity。建议使用 SSD 持久存储、足够内存和固定版本标签，完成与 amd64 相同的 PVC、实例、桌面、模型和技能验收。
 

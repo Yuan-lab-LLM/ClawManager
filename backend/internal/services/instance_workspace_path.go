@@ -35,7 +35,7 @@ func proDesktopWorkspaceScanEligible(instance *models.Instance) bool {
 	if v2Type, ok := v2RuntimeTypeForInstance(instance); ok && strings.TrimSpace(v2Type) != "" {
 		return false
 	}
-	return supportsManagedRuntimeIntegration(instance.Type)
+	return supportsManagedRuntimeIntegrationForInstance(instance)
 }
 
 func EnsureInstanceWorkspacePathForServerScan(ctx context.Context, repo repository.InstanceRepository, instance *models.Instance) error {

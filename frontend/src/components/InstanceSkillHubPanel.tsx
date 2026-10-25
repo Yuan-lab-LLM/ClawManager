@@ -507,7 +507,8 @@ const InstanceSkillHubPanel: React.FC<InstanceSkillHubPanelProps> = ({
   const hubTagLabel = (tag: SkillHubTag) => t(`skillHubPage.tags.${tag.tag_key}`) || tag.name;
 
   const isLiteInstance =
-    instance.instance_mode === "lite" || instance.runtime_type === "gateway";
+    instance.instance_mode === "lite" ||
+    (instance.instance_mode !== "pro" && instance.runtime_type === "gateway");
 
   const usesWorkspaceSkillSync =
     isLiteInstance ||

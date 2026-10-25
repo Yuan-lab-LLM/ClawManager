@@ -1,0 +1,188 @@
+# Assign the production-durable RecurringJob group only to durable Longhorn
+# volumes. This avoids putting a recurringJobSelector on the global longhorn
+# StorageClass, which would also select future cache and pre-warm volumes.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: longhorn-backup-assignment
+  namespace: clawmanager-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: longhorn-backup-assignment
+rules:
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims", "persistentvolumes"]
+    verbs: ["get", "list"]
+  - apiGroups: ["longhorn.io"]
+    resources: ["volumes"]
+    verbs: ["get", "list", "patch", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: longhorn-backup-assignment
+subjects:
+  - kind: ServiceAccount
+    name: longhorn-backup-assignment
+    namespace: clawmanager-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: longhorn-backup-assignment
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: longhorn-backup-assignment-script
+  namespace: clawmanager-system
+data:
+  reconcile.sh: |
+    #!/usr/bin/env sh
+    set -eu
+
+    readonly LONGHORN_NAMESPACE=longhorn-system
+    readonly GROUP_LABEL=recurring-job-group.longhorn.io/production-durable
+
+    volume_for_pvc() {
+      namespace="$1"
+      claim="$2"
+      pv="$(kubectl get pvc --namespace "${namespace}" "${claim}" \
+        -o jsonpath='{.spec.volumeName}' 2>/dev/null || true)"
+      [ -n "${pv}" ] || return 1
+      driver="$(kubectl get pv "${pv}" -o jsonpath='{.spec.csi.driver}' 2>/dev/null || true)"
+      [ "${driver}" = "driver.longhorn.io" ] || return 1
+      kubectl get pv "${pv}" -o jsonpath='{.spec.csi.volumeHandle}'
+    }
+
+    enable_for_pvc() {
+      namespace="$1"
+      claim="$2"
+      volume="$(volume_for_pvc "${namespace}" "${claim}" || true)"
+      [ -n "${volume}" ] || return 0
+      kubectl label volume.longhorn.io --namespace "${LONGHORN_NAMESPACE}" \
+        "${volume}" "${GROUP_LABEL}=enabled" --overwrite >/dev/null
+      echo "Enabled production backup for ${namespace}/${claim} (${volume})"
+    }
+
+    disable_for_pvc() {
+      namespace="$1"
+      claim="$2"
+      volume="$(volume_for_pvc "${namespace}" "${claim}" || true)"
+      [ -n "${volume}" ] || return 0
+      kubectl label volume.longhorn.io --namespace "${LONGHORN_NAMESPACE}" \
+        "${volume}" "${GROUP_LABEL}-" >/dev/null 2>&1 || true
+      echo "Disabled production backup for cache volume ${namespace}/${claim} (${volume})"
+    }
+
+    # Core durable services are fixed and explicitly in scope.
+    enable_for_pvc clawmanager-system mysql-data
+    enable_for_pvc clawmanager-system redis-data
+    enable_for_pvc clawmanager-system minio-data
+
+    # Existing ClawManager instance PVCs already carry managed-by and instance-id.
+    # A cloned user instance is durable even when it records a golden source PVC.
+    managed_pvcs=/tmp/managed-pvcs
+    kubectl get pvc --all-namespaces --selector managed-by=clawreef \
+      -o jsonpath='{range .items[*]}{.metadata.namespace}{"\t"}{.metadata.name}{"\n"}{end}' \
+      >"${managed_pvcs}"
+    while read -r namespace claim; do
+      [ -n "${namespace}" ] && [ -n "${claim}" ] || continue
+      instance_id="$(kubectl get pvc --namespace "${namespace}" "${claim}" -o jsonpath='{.metadata.labels.instance-id}' 2>/dev/null || true)"
+      data_class="$(kubectl get pvc --namespace "${namespace}" "${claim}" -o jsonpath='{.metadata.labels.clawmanager\.io/data-class}' 2>/dev/null || true)"
+      if [ -n "${instance_id}" ] && [ "${data_class}" != "cache" ]; then
+        enable_for_pvc "${namespace}" "${claim}"
+      fi
+    done <"${managed_pvcs}"
+
+    # Explicit cache classification always wins and removes an accidental label.
+    cache_pvcs=/tmp/cache-pvcs
+    kubectl get pvc --all-namespaces --selector clawmanager.io/data-class=cache \
+      -o jsonpath='{range .items[*]}{.metadata.namespace}{"\t"}{.metadata.name}{"\n"}{end}' \
+      >"${cache_pvcs}"
+    while read -r namespace claim; do
+      [ -n "${namespace}" ] && [ -n "${claim}" ] || continue
+      disable_for_pvc "${namespace}" "${claim}"
+    done <"${cache_pvcs}"
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: longhorn-backup-assignment-initial
+  namespace: clawmanager-system
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app: longhorn-backup-assignment
+    spec:
+      serviceAccountName: longhorn-backup-assignment
+      restartPolicy: OnFailure
+      containers:
+        - name: reconcile
+          image: 10.130.15.40:5000/kubectl-shell:v1.31.14
+          imagePullPolicy: IfNotPresent
+          command: ["sh", "/scripts/reconcile.sh"]
+          resources:
+            requests:
+              cpu: 20m
+              memory: 32Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+          volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+              readOnly: true
+      volumes:
+        - name: scripts
+          configMap:
+            name: longhorn-backup-assignment-script
+            defaultMode: 0550
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: longhorn-backup-assignment
+  namespace: clawmanager-system
+spec:
+  schedule: "*/10 * * * *"
+  suspend: false
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 300
+      template:
+        metadata:
+          labels:
+            app: longhorn-backup-assignment
+        spec:
+          serviceAccountName: longhorn-backup-assignment
+          restartPolicy: Never
+          containers:
+            - name: reconcile
+              image: 10.130.15.40:5000/kubectl-shell:v1.31.14
+              imagePullPolicy: IfNotPresent
+              command: ["sh", "/scripts/reconcile.sh"]
+              resources:
+                requests:
+                  cpu: 20m
+                  memory: 32Mi
+                limits:
+                  cpu: 200m
+                  memory: 128Mi
+              volumeMounts:
+                - name: scripts
+                  mountPath: /scripts
+                  readOnly: true
+          volumes:
+            - name: scripts
+              configMap:
+                name: longhorn-backup-assignment-script
+                defaultMode: 0550

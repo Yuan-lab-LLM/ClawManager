@@ -5,12 +5,18 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"clawreef/internal/models"
 	"clawreef/internal/repository"
+)
+
+var (
+	ErrExternalAccessNotEnabled         = errors.New("external access is not enabled")
+	ErrExternalAccessPasswordNotEnabled = errors.New("external access password is not enabled")
 )
 
 const (
@@ -53,9 +59,79 @@ type InstanceExternalAccessService interface {
 	Get(ctx context.Context, instanceID int) (*models.InstanceExternalAccess, error)
 	EnableShareLink(ctx context.Context, instanceID, createdBy int, expiration ExternalAccessExpirationRequest) (*EnableShareLinkResult, error)
 	CreatePassword(ctx context.Context, instanceID, createdBy int, expiration ExternalAccessExpirationRequest) (*PasswordExternalAccessResult, error)
+	ResetURL(ctx context.Context, instanceID, createdBy int) (*EnableShareLinkResult, error)
+	ResetPassword(ctx context.Context, instanceID, createdBy int) (*PasswordExternalAccessResult, error)
 	Disable(ctx context.Context, instanceID int) error
 	ResolveShortLink(ctx context.Context, code string) (*models.InstanceExternalAccess, error)
 	ValidateShortLink(ctx context.Context, code, password string) (*models.InstanceExternalAccess, error)
+}
+
+func (s *instanceExternalAccessService) ResetURL(ctx context.Context, instanceID, createdBy int) (*EnableShareLinkResult, error) {
+	if s == nil || s.repo == nil {
+		return nil, fmt.Errorf("instance external access repository is not configured")
+	}
+	existing, err := s.repo.GetByInstanceID(ctx, instanceID)
+	if err != nil {
+		return nil, err
+	}
+	if existing == nil || !existing.Enabled {
+		return nil, ErrExternalAccessNotEnabled
+	}
+	code, codeHash, err := generateShortCode()
+	if err != nil {
+		return nil, err
+	}
+	updated, err := s.repo.ResetURL(ctx, instanceID, createdBy, code, codeHash)
+	if err != nil {
+		return nil, err
+	}
+	if !updated {
+		return nil, ErrExternalAccessNotEnabled
+	}
+	saved, err := s.repo.GetByInstanceID(ctx, instanceID)
+	if err != nil {
+		return nil, err
+	}
+	return &EnableShareLinkResult{Access: saved, ShareURL: shortExternalAccessURL(code)}, nil
+}
+
+func (s *instanceExternalAccessService) ResetPassword(ctx context.Context, instanceID, createdBy int) (*PasswordExternalAccessResult, error) {
+	if s == nil || s.repo == nil {
+		return nil, fmt.Errorf("instance external access repository is not configured")
+	}
+	existing, err := s.repo.GetByInstanceID(ctx, instanceID)
+	if err != nil {
+		return nil, err
+	}
+	if existing == nil || !existing.Enabled {
+		return nil, ErrExternalAccessNotEnabled
+	}
+	if existing.AuthMode != ExternalAccessModePassword {
+		return nil, ErrExternalAccessPasswordNotEnabled
+	}
+	password, err := randomToken("pwd", 16)
+	if err != nil {
+		return nil, err
+	}
+	passwordHash := hashExternalSecret(password)
+	hint := password
+	if len(hint) > 12 {
+		hint = hint[:12]
+	}
+	updated, err := s.repo.ResetPassword(ctx, instanceID, createdBy, passwordHash, password, hint)
+	if err != nil {
+		return nil, err
+	}
+	if !updated {
+		return nil, ErrExternalAccessPasswordNotEnabled
+	}
+	saved, err := s.repo.GetByInstanceID(ctx, instanceID)
+	if err != nil {
+		return nil, err
+	}
+	return &PasswordExternalAccessResult{
+		Access: saved, Password: password, ShareURL: ExternalAccessShareURL(saved),
+	}, nil
 }
 
 type instanceExternalAccessService struct {
@@ -178,6 +254,26 @@ func NormalizeExternalWorkspaceAccess(value string) (string, error) {
 	default:
 		return "", fmt.Errorf("unsupported external workspace access")
 	}
+}
+
+// ExternalAccessSessionBinding returns a non-secret fingerprint of the current
+// share credential. Tokens carrying this binding can be rejected immediately
+// after a link is disabled, reset, expired, or has its password rotated.
+func ExternalAccessSessionBinding(code string, accesses ...*models.InstanceExternalAccess) string {
+	code = strings.Trim(strings.TrimSpace(code), "/")
+	if code == "" {
+		return ""
+	}
+	credentialVersion := ""
+	if len(accesses) > 0 && accesses[0] != nil && accesses[0].AuthMode == ExternalAccessModePassword && accesses[0].PasswordHash != nil {
+		credentialVersion = strings.TrimSpace(*accesses[0].PasswordHash)
+	}
+	payload := "shared-instance-session\x00" + code
+	if credentialVersion != "" {
+		payload += "\x00" + credentialVersion
+	}
+	sum := sha256.Sum256([]byte(payload))
+	return hex.EncodeToString(sum[:])
 }
 
 func (s *instanceExternalAccessService) Disable(ctx context.Context, instanceID int) error {

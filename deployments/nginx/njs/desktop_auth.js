@@ -40,26 +40,27 @@ function requestInstanceID(r) {
     return r.variables.inst_id || r.variables.runtime_inst_id || '';
 }
 
-function readCookieToken(r) {
+function readCookieTokens(r) {
     var cookie = r.headersIn['Cookie'];
     if (!cookie) {
-        return '';
+        return [];
     }
 
     var instanceID = requestInstanceID(r);
     if (!instanceID) {
-        return '';
+        return [];
     }
     var name = 'instance_access_' + instanceID;
     var parts = cookie.split(';');
+    var tokens = [];
     for (var i = 0; i < parts.length; i++) {
         var kv = parts[i].trim();
         var eq = kv.indexOf('=');
         if (eq > 0 && kv.substring(0, eq) === name) {
-            return kv.substring(eq + 1);
+            tokens.push(kv.substring(eq + 1));
         }
     }
-    return '';
+    return tokens;
 }
 
 function readQueryToken(r) {
@@ -69,12 +70,61 @@ function readQueryToken(r) {
     return '';
 }
 
-function readToken(r) {
-    var cookieToken = readCookieToken(r);
-    if (cookieToken) {
-        return cookieToken;
+function validateTokenCandidate(r, token, key, allowExpired) {
+    if (!token) {
+        return null;
     }
-    return readQueryToken(r);
+
+    var segments = token.split('.');
+    if (segments.length !== 3) {
+        return null;
+    }
+
+    var signingInput = segments[0] + '.' + segments[1];
+    var expected = crypto.createHmac('sha256', key).update(signingInput).digest('base64');
+    if (toStdB64NoPad(expected) !== toStdB64NoPad(segments[2])) {
+        return null;
+    }
+
+    var payload;
+    try {
+        payload = JSON.parse(b64urlToString(segments[1]));
+    } catch (e) {
+        return null;
+    }
+
+    if (payload.token_type !== 'instance_access') {
+        return null;
+    }
+
+    if (!allowExpired && payload.exp && (Date.now() / 1000) >= Number(payload.exp)) {
+        return null;
+    }
+
+    var instanceID = requestInstanceID(r);
+    if (!instanceID || String(payload.instance_id) !== String(instanceID)) {
+        return null;
+    }
+
+    return { token: token, payload: payload };
+}
+
+function selectValidToken(r, key) {
+    // Prefer a fresh query capability so it can replace an expired cookie on a
+    // dedicated runtime origin. Fall back to the cookie when `token` belongs
+    // to the runtime application rather than ClawManager.
+    var query = validateTokenCandidate(r, readQueryToken(r), key, false);
+    if (query) {
+        return query;
+    }
+    var cookieTokens = readCookieTokens(r);
+    for (var i = 0; i < cookieTokens.length; i++) {
+        var cookie = validateTokenCandidate(r, cookieTokens[i], key, false);
+        if (cookie) {
+            return cookie;
+        }
+    }
+    return null;
 }
 
 function resolveTarget(r) {
@@ -84,44 +134,13 @@ function resolveTarget(r) {
         return DENY;
     }
 
-    var token = readToken(r);
-    if (!token) {
+    var selected = selectValidToken(r, key);
+    if (!selected) {
         return DENY;
     }
 
-    var segments = token.split('.');
-    if (segments.length !== 3) {
-        return DENY;
-    }
-
-    var signingInput = segments[0] + '.' + segments[1];
-    var expected = crypto.createHmac('sha256', key).update(signingInput).digest('base64');
-    if (toStdB64NoPad(expected) !== toStdB64NoPad(segments[2])) {
-        return DENY;
-    }
-
-    var payload;
-    try {
-        payload = JSON.parse(b64urlToString(segments[1]));
-    } catch (e) {
-        return DENY;
-    }
-
-    if (payload.token_type !== 'instance_access') {
-        return DENY;
-    }
-
-    if (payload.exp && (Date.now() / 1000) >= Number(payload.exp)) {
-        return DENY;
-    }
-
-    var instanceID = requestInstanceID(r);
-    if (!instanceID || String(payload.instance_id) !== String(instanceID)) {
-        return DENY;
-    }
-
-    if (payload.upstream) {
-        return 'https://' + payload.upstream;
+    if (selected.payload.upstream) {
+        return 'https://' + selected.payload.upstream;
     }
 
     return CONTROL_PLANE_FALLBACK;
@@ -143,8 +162,10 @@ function cleanUri(r) {
     if (!queryToken) {
         return uri;
     }
-    var cookieToken = readCookieToken(r);
-    if (cookieToken && cookieToken !== queryToken) {
+    var key = secret();
+    // Strip any correctly signed ClawManager capability, including an expired
+    // one. A non-ClawManager `token` remains available to the runtime app.
+    if (!key || !validateTokenCandidate(r, queryToken, key, true)) {
         return uri;
     }
 

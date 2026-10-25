@@ -1,0 +1,16 @@
+# Daily Longhorn backup. 01:00 UTC is 09:00 Asia/Shanghai and is deliberately
+# after the 02:00-08:00 MySQL full-backup window.
+apiVersion: longhorn.io/v1beta2
+kind: RecurringJob
+metadata:
+  name: production-daily-backup
+  namespace: longhorn-system
+spec:
+  cron: "0 1 * * *"
+  task: backup
+  retain: 7
+  concurrency: 2
+  groups:
+    - production-durable
+  labels:
+    clawmanager.io/backup-policy: production-daily

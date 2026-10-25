@@ -21,6 +21,7 @@ export interface LLMModel {
   quality_tier?: number;
   base_url: string;
   provider_model_name: string;
+  provider_models?: DiscoveredProviderModel[];
   reasoning_enabled: boolean;
   reasoning_control_mode?: string;
   supports_reasoning?: boolean;

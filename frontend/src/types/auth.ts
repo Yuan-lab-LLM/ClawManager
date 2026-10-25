@@ -3,6 +3,9 @@ export interface User {
   username: string;
   email: string;
   role: 'admin' | 'user';
+  auth_provider?: 'local' | 'ldap';
+  login_alias?: string;
+  external_id?: string;
   is_active: boolean;
   created_at: string;
   updated_at: string;

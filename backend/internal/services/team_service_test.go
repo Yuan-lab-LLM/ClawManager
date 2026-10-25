@@ -1,11 +1,15 @@
 package services
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -261,6 +265,9 @@ func TestBuildTeamMemberInstanceRequestSupportsLiteMode(t *testing.T) {
 	if req.RuntimeType != RuntimeBackendGateway {
 		t.Fatalf("expected lite Team member to target gateway runtime, got %q", req.RuntimeType)
 	}
+	if req.DiskGB != DefaultLiteDiskGB {
+		t.Fatalf("expected Lite Team member disk to default to %dGiB, got %dGiB", DefaultLiteDiskGB, req.DiskGB)
+	}
 
 	rosterJSON := `{"teamId":"8","members":[{"memberId":"lite-worker"}]}`
 	liteReq := service.buildTeamMemberInstanceRequestWithSecrets(team, memberPlan, &teamRuntimeSecrets{
@@ -273,6 +280,22 @@ func TestBuildTeamMemberInstanceRequestSupportsLiteMode(t *testing.T) {
 	}
 	if liteReq.EnvironmentOverrides["CLAWMANAGER_TEAM_CONFIG_JSON"] != rosterJSON {
 		t.Fatalf("Lite Team roster JSON should preserve upstream logical sharedDir contract, got %#v", liteReq.EnvironmentOverrides)
+	}
+}
+
+func TestBuildTeamMemberInstanceRequestKeepsProDiskDefault(t *testing.T) {
+	service := &teamService{}
+	req := service.buildTeamMemberInstanceRequest(&models.Team{Name: "Pro Team"}, plannedTeamMember{
+		MemberKey:    "pro-worker",
+		RuntimeType:  "openclaw",
+		InstanceMode: InstanceModePro,
+	})
+
+	if req.InstanceMode != InstanceModePro || req.RuntimeType != RuntimeBackendDesktop {
+		t.Fatalf("expected Pro desktop request, got mode=%q runtime=%q", req.InstanceMode, req.RuntimeType)
+	}
+	if req.DiskGB != 20 {
+		t.Fatalf("expected existing Pro disk default to remain 20GiB, got %dGiB", req.DiskGB)
 	}
 }
 
@@ -322,8 +345,9 @@ func TestOpenClawConfigPlanForTeamMemberFiltersOnlyWorkers(t *testing.T) {
 	service := &teamService{openClawConfigPlanner: planner}
 
 	leaderPlan, err := service.openClawConfigPlanForTeamMember(7, plannedTeamMember{
-		IsLeader: true,
-		Request:  CreateTeamMemberRequest{OpenClawConfigPlan: originalPlan},
+		IsLeader:    true,
+		RuntimeType: RuntimeTypeOpenClaw,
+		Request:     CreateTeamMemberRequest{OpenClawConfigPlan: originalPlan},
 	})
 	if err != nil {
 		t.Fatalf("leader plan returned error: %v", err)
@@ -336,8 +360,9 @@ func TestOpenClawConfigPlanForTeamMemberFiltersOnlyWorkers(t *testing.T) {
 	}
 
 	workerPlan, err := service.openClawConfigPlanForTeamMember(7, plannedTeamMember{
-		IsLeader: false,
-		Request:  CreateTeamMemberRequest{OpenClawConfigPlan: originalPlan},
+		IsLeader:    false,
+		RuntimeType: RuntimeTypeOpenClaw,
+		Request:     CreateTeamMemberRequest{OpenClawConfigPlan: originalPlan},
 	})
 	if err != nil {
 		t.Fatalf("worker plan returned error: %v", err)
@@ -347,6 +372,19 @@ func TestOpenClawConfigPlanForTeamMemberFiltersOnlyWorkers(t *testing.T) {
 	}
 	if planner.calls != 1 || planner.userID != 7 || planner.plan != originalPlan {
 		t.Fatalf("unexpected planner call: %#v", planner)
+	}
+	hermesPlan, err := service.openClawConfigPlanForTeamMember(7, plannedTeamMember{
+		RuntimeType: RuntimeTypeHermes,
+		Request:     CreateTeamMemberRequest{OpenClawConfigPlan: originalPlan},
+	})
+	if err != nil {
+		t.Fatalf("Hermes plan returned error: %v", err)
+	}
+	if hermesPlan != nil {
+		t.Fatal("Hermes member must never receive an OpenClaw config plan")
+	}
+	if planner.calls != 1 {
+		t.Fatalf("Hermes plan unexpectedly called OpenClaw planner: %d", planner.calls)
 	}
 }
 
@@ -1648,6 +1686,10 @@ func TestProjectTeamEventLeaderPlanningDoesNotCreateLeaderAssignmentLane(t *test
 		CurrentTaskID: &taskID,
 		Availability:  models.TeamMemberAvailabilityBusy,
 	}
+	leaderRuntimeTaskID := "team-31-task-179"
+	leaderRuntimeIntent := "final synthesis"
+	leader.RuntimeTaskID = &leaderRuntimeTaskID
+	leader.RuntimeIntent = &leaderRuntimeIntent
 	repo := &teamRepositoryStub{
 		tasksByID:        map[int]*models.TeamTask{taskID: task},
 		tasksByMessageID: map[string]*models.TeamTask{messageID: task},
@@ -2451,6 +2493,11 @@ func TestProjectTeamEventLeaderMediatedLeaderCompletionAfterAssignmentResultsClo
 	}
 	if repo.updatedTask.ResultJSON == nil || !strings.Contains(*repo.updatedTask.ResultJSON, "designer=1") {
 		t.Fatalf("expected final synthesis result stored, got %#v", repo.updatedTask.ResultJSON)
+	}
+	if repo.updatedMember == nil || repo.updatedMember.Status != models.TeamMemberStatusIdle ||
+		repo.updatedMember.Availability != models.TeamMemberAvailabilityIdle ||
+		repo.updatedMember.CurrentTaskID != nil || repo.updatedMember.RuntimeTaskID != nil || repo.updatedMember.RuntimeIntent != nil {
+		t.Fatalf("accepted root completion must release the Leader's matching runtime assignment: %#v", repo.updatedMember)
 	}
 	if len(repo.outboxRows) != 1 || !strings.Contains(repo.outboxRows[0].Destination, "completion-acks") || !strings.Contains(repo.outboxRows[0].PayloadJSON, `"decision":"accepted"`) {
 		t.Fatalf("accepted root completion must atomically persist its acknowledgement: %#v", repo.outboxRows)
@@ -3615,16 +3662,63 @@ func TestMemberOperationalStateUsesAllPersistedAssignments(t *testing.T) {
 
 func TestMemberOperationalStateClosesStaleRuntimeAfterLastSuccess(t *testing.T) {
 	runtimeRunning := models.TeamTaskStatusRunning
+	runtimeTaskID := "team-12-task-102"
+	runtimeIntent := "finish assignment"
 	member := &models.TeamMember{ID: 42, TeamID: 12, Status: models.TeamMemberStatusIdle,
-		Availability: models.TeamMemberAvailabilityIdle, RuntimeStatus: &runtimeRunning, Progress: 65}
+		Availability: models.TeamMemberAvailabilityIdle, RuntimeStatus: &runtimeRunning,
+		RuntimeTaskID: &runtimeTaskID, RuntimeIntent: &runtimeIntent, Progress: 65}
 	items := []models.TeamWorkItem{{ID: 1, TeamID: member.TeamID, RootTaskID: 102, WorkID: "done", OwnerMemberID: &member.ID,
 		Status: models.TeamTaskStatusSucceeded, UpdatedAt: time.Now().UTC()}}
 	if !reconcileTeamMemberOperationalState(member, items) {
 		t.Fatal("a terminal assignment should repair a stale running runtime status")
 	}
 	if member.Status != models.TeamMemberStatusIdle || member.Availability != models.TeamMemberAvailabilityIdle ||
-		member.CurrentTaskID != nil || derefTeamString(member.RuntimeStatus) != models.TeamTaskStatusSucceeded || member.Progress != 100 {
+		member.CurrentTaskID != nil || member.RuntimeTaskID != nil || member.RuntimeIntent != nil ||
+		derefTeamString(member.RuntimeStatus) != models.TeamTaskStatusSucceeded || member.Progress != 100 {
 		t.Fatalf("the member should converge to a coherent terminal state: %#v", member)
+	}
+}
+
+func TestTerminalTaskReconciliationCompareAndClearsOnlyMatchingMembers(t *testing.T) {
+	terminalTaskID := 103
+	newTaskID := 104
+	terminalRuntimeID := "team-12-task-103"
+	newRuntimeID := "team-12-task-104"
+	intent := "work"
+	team := &models.Team{ID: 12, Status: models.TeamStatusRunning, CommunicationMode: teamCommunicationModeLeaderMediated}
+	terminal := &models.TeamTask{ID: terminalTaskID, TeamID: team.ID, Status: models.TeamTaskStatusSucceeded}
+	current := &models.TeamTask{ID: newTaskID, TeamID: team.ID, Status: models.TeamTaskStatusRunning}
+	staleLeader := &models.TeamMember{ID: 51, TeamID: team.ID, MemberKey: "leader", Role: "leader",
+		Status: models.TeamMemberStatusBusy, Availability: models.TeamMemberAvailabilityBusy,
+		CurrentTaskID: &terminalTaskID, RuntimeTaskID: &terminalRuntimeID, RuntimeIntent: &intent}
+	staleWorker := &models.TeamMember{ID: 52, TeamID: team.ID, MemberKey: "worker", Role: "worker",
+		Status: models.TeamMemberStatusBusy, Availability: models.TeamMemberAvailabilityBusy,
+		CurrentTaskID: &terminalTaskID, RuntimeTaskID: &terminalRuntimeID, RuntimeIntent: &intent}
+	newWorker := &models.TeamMember{ID: 53, TeamID: team.ID, MemberKey: "new-worker", Role: "worker",
+		Status: models.TeamMemberStatusBusy, Availability: models.TeamMemberAvailabilityBusy,
+		CurrentTaskID: &newTaskID, RuntimeTaskID: &newRuntimeID, RuntimeIntent: &intent}
+	repo := &teamRepositoryStub{
+		tasksByID: map[int]*models.TeamTask{terminalTaskID: terminal, newTaskID: current},
+		membersByID: map[int]*models.TeamMember{
+			staleLeader.ID: staleLeader,
+			staleWorker.ID: staleWorker,
+			newWorker.ID:   newWorker,
+		},
+	}
+	service := &teamService{repo: repo}
+	if err := service.reconcileTerminalTeamMemberBindings(team, []models.TeamMember{*staleLeader, *staleWorker, *newWorker}, time.Now().UTC()); err != nil {
+		t.Fatalf("reconcileTerminalTeamMemberBindings returned error: %v", err)
+	}
+	for _, member := range []*models.TeamMember{staleLeader, staleWorker} {
+		if member.Status != models.TeamMemberStatusIdle || member.Availability != models.TeamMemberAvailabilityIdle ||
+			member.CurrentTaskID != nil || member.RuntimeTaskID != nil || member.RuntimeIntent != nil ||
+			derefTeamString(member.RuntimeStatus) != models.TeamTaskStatusSucceeded || member.Progress != 100 {
+			t.Fatalf("terminal task member did not converge safely: %#v", member)
+		}
+	}
+	if newWorker.CurrentTaskID == nil || *newWorker.CurrentTaskID != newTaskID ||
+		derefTeamString(newWorker.RuntimeTaskID) != newRuntimeID || newWorker.Status != models.TeamMemberStatusBusy {
+		t.Fatalf("a member on a newer task must not be cleared: %#v", newWorker)
 	}
 }
 
@@ -6010,8 +6104,6 @@ func cloneStringInterfaceMap(source map[string]interface{}) map[string]interface
 	}
 	return clone
 }
-
-func stringPtr(value string) *string { return &value }
 
 func TestTaskHasRecentActivityUsesBusinessWorkItems(t *testing.T) {
 	now := time.Now().UTC()
@@ -8564,14 +8656,14 @@ func TestCreateRootCoordinationRecoveryPersistsHiddenEventAndOutbox(t *testing.T
 	}
 	sourceID := "turn-finished-64"
 	streamID := "123-0"
-	source := &models.TeamEvent{EventID: &sourceID, RedisStreamID: &streamID}
+	source := &models.TeamEvent{TeamID: team.ID, EventID: &sourceID, RedisStreamID: &streamID, EventType: "task_progress"}
 	if err := service.createRootCoordinationRecovery(team, nil, task, leader, map[string]interface{}{}, source); err != nil {
 		t.Fatalf("createRootCoordinationRecovery returned error: %v", err)
 	}
-	if len(repo.createdEvents) != 1 || repo.createdEvents[0].EventType != "root_coordination_recovery_requested" {
+	if len(repo.createdEvents) != 2 || repo.createdEvents[1].EventType != "root_coordination_recovery_requested" {
 		t.Fatalf("unexpected recovery events: %#v", repo.createdEvents)
 	}
-	payload := teamEventPayloadMap(repo.createdEvents[0])
+	payload := teamEventPayloadMap(repo.createdEvents[1])
 	if eventBool(payload, "visibleToChat") || eventBool(payload, "rootTaskTerminal") || eventString(payload, "stateEffect") != "none" {
 		t.Fatalf("recovery event must remain hidden and state-neutral: %#v", payload)
 	}
@@ -8595,20 +8687,256 @@ func TestCreateRootCoordinationRecoveryPersistsHiddenEventAndOutbox(t *testing.T
 	}
 }
 
+type teamDeletionInstanceServiceStub struct {
+	InstanceService
+	validateErr     error
+	validateErrByID map[int]error
+	validateCalls   []int
+	deleteErr       error
+	deleteCalls     []int
+}
+
+type teamRuntimeAvailabilityInstanceServiceStub struct {
+	InstanceService
+	instances map[int]*models.Instance
+	err       error
+}
+
+func (s *teamRuntimeAvailabilityInstanceServiceStub) GetByID(id int) (*models.Instance, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	return s.instances[id], nil
+}
+
+func TestTeamRuntimeAvailabilityProjectsFailedInstanceOffline(t *testing.T) {
+	instanceID := 930
+	runtimeError := "exit status 1"
+	member := &models.TeamMember{ID: 90, InstanceID: &instanceID, Status: models.TeamMemberStatusBusy, Availability: models.TeamMemberAvailabilityBusy}
+	service := &teamService{instanceService: &teamRuntimeAvailabilityInstanceServiceStub{instances: map[int]*models.Instance{
+		instanceID: {ID: instanceID, Status: "error", RuntimeErrorMessage: &runtimeError},
+	}}}
+
+	unavailable, _, changed, err := service.reconcileTeamMemberRuntimeAvailability(member, nil, time.Now().UTC())
+	if err != nil || !unavailable || !changed {
+		t.Fatalf("availability result unavailable=%t changed=%t err=%v", unavailable, changed, err)
+	}
+	if member.Status != models.TeamMemberStatusOffline || member.Availability != models.TeamMemberAvailabilityOffline || derefTeamString(member.RuntimeStatus) != "error" {
+		t.Fatalf("failed Runtime projection = %+v", member)
+	}
+	if !strings.Contains(derefTeamString(member.BlockedReason), runtimeError) {
+		t.Fatalf("blocked reason = %q, want Runtime failure", derefTeamString(member.BlockedReason))
+	}
+}
+
+func TestTeamRuntimeAvailabilityRestoresActiveAssignmentAfterRuntimeRecovery(t *testing.T) {
+	instanceID := 931
+	rootTaskID := 401
+	runtimeStatus := "error"
+	reason := teamRuntimeUnavailableReasonPrefix + "exit status 1"
+	member := &models.TeamMember{
+		ID: 91, InstanceID: &instanceID, Status: models.TeamMemberStatusOffline,
+		Availability: models.TeamMemberAvailabilityOffline, RuntimeStatus: &runtimeStatus, BlockedReason: &reason,
+	}
+	service := &teamService{instanceService: &teamRuntimeAvailabilityInstanceServiceStub{instances: map[int]*models.Instance{
+		instanceID: {ID: instanceID, Status: "running"},
+	}}}
+	items := []models.TeamWorkItem{{ID: 501, RootTaskID: rootTaskID, OwnerMemberID: &member.ID, WorkID: "A1", Status: models.TeamTaskStatusRunning}}
+
+	unavailable, _, changed, err := service.reconcileTeamMemberRuntimeAvailability(member, items, time.Now().UTC())
+	if err != nil || unavailable || !changed {
+		t.Fatalf("availability result unavailable=%t changed=%t err=%v", unavailable, changed, err)
+	}
+	if member.Status != models.TeamMemberStatusBusy || member.Availability != models.TeamMemberAvailabilityBusy || member.CurrentTaskID == nil || *member.CurrentTaskID != rootTaskID || derefTeamString(member.RuntimeStatus) != "running" || member.BlockedReason != nil {
+		t.Fatalf("recovered Runtime projection = %+v", member)
+	}
+}
+
+func TestTeamRuntimeAvailabilityDoesNotInferFailureFromControlPlaneReadError(t *testing.T) {
+	instanceID := 932
+	member := &models.TeamMember{ID: 92, InstanceID: &instanceID, Status: models.TeamMemberStatusBusy, Availability: models.TeamMemberAvailabilityBusy}
+	service := &teamService{instanceService: &teamRuntimeAvailabilityInstanceServiceStub{err: context.DeadlineExceeded}}
+
+	unavailable, _, changed, err := service.reconcileTeamMemberRuntimeAvailability(member, nil, time.Now().UTC())
+	if err == nil || unavailable || changed {
+		t.Fatalf("availability result unavailable=%t changed=%t err=%v", unavailable, changed, err)
+	}
+	if member.Status != models.TeamMemberStatusBusy || member.Availability != models.TeamMemberAvailabilityBusy {
+		t.Fatalf("transient control-plane error mutated member: %+v", member)
+	}
+}
+
+func (s *teamDeletionInstanceServiceStub) ValidateDelete(instanceID int) error {
+	s.validateCalls = append(s.validateCalls, instanceID)
+	if err := s.validateErrByID[instanceID]; err != nil {
+		return err
+	}
+	return s.validateErr
+}
+
+func (s *teamDeletionInstanceServiceStub) Delete(instanceID int) error {
+	s.deleteCalls = append(s.deleteCalls, instanceID)
+	return s.deleteErr
+}
+
+func TestDeleteMemberValidatesRuntimeUpgradeBeforeChangingMemberState(t *testing.T) {
+	instanceID := 901
+	team := &models.Team{ID: 71, UserID: 45, Status: models.TeamStatusRunning}
+	member := &models.TeamMember{
+		ID:         81,
+		TeamID:     team.ID,
+		UserID:     team.UserID,
+		InstanceID: &instanceID,
+		MemberKey:  "worker-a",
+		Role:       "worker",
+		Status:     models.TeamMemberStatusIdle,
+	}
+	repo := &teamRepositoryStub{
+		teamsByID:   map[int]*models.Team{team.ID: team},
+		membersByID: map[int]*models.TeamMember{member.ID: member},
+	}
+	instances := &teamDeletionInstanceServiceStub{validateErr: errors.New("active rollout")}
+	service := &teamService{repo: repo, instanceService: instances}
+
+	err := service.DeleteMember(team.UserID, team.ID, strconv.Itoa(member.ID))
+	if err == nil || !strings.Contains(err.Error(), "active rollout") {
+		t.Fatalf("DeleteMember error = %v, want active rollout rejection", err)
+	}
+	if member.Status != models.TeamMemberStatusIdle || len(repo.updatedMembers) != 0 {
+		t.Fatalf("member mutated before validation: status=%q updates=%#v", member.Status, repo.updatedMembers)
+	}
+	if !reflect.DeepEqual(instances.validateCalls, []int{instanceID}) || len(instances.deleteCalls) != 0 {
+		t.Fatalf("validate calls=%#v delete calls=%#v", instances.validateCalls, instances.deleteCalls)
+	}
+}
+
+func TestDeleteTeamValidatesEveryMemberBeforeChangingTeamState(t *testing.T) {
+	firstInstanceID := 911
+	secondInstanceID := 912
+	team := &models.Team{ID: 73, UserID: 45, Status: models.TeamStatusRunning}
+	first := &models.TeamMember{ID: 83, TeamID: team.ID, UserID: team.UserID, InstanceID: &firstInstanceID, MemberKey: "leader", Role: "leader", Status: models.TeamMemberStatusIdle}
+	second := &models.TeamMember{ID: 84, TeamID: team.ID, UserID: team.UserID, InstanceID: &secondInstanceID, MemberKey: "worker", Role: "worker", Status: models.TeamMemberStatusIdle}
+	repo := &teamRepositoryStub{
+		teamsByID:   map[int]*models.Team{team.ID: team},
+		membersByID: map[int]*models.TeamMember{first.ID: first, second.ID: second},
+	}
+	instances := &teamDeletionInstanceServiceStub{validateErrByID: map[int]error{secondInstanceID: errors.New("active rollout")}}
+	service := &teamService{repo: repo, instanceService: instances}
+
+	err := service.DeleteTeam(team.UserID, team.ID)
+	if err == nil || !strings.Contains(err.Error(), "active rollout") {
+		t.Fatalf("DeleteTeam error = %v, want active rollout rejection", err)
+	}
+	if team.Status != models.TeamStatusRunning || repo.updatedTeam != nil || len(repo.updatedMembers) != 0 {
+		t.Fatalf("Team mutated before all members passed validation: team=%#v member updates=%#v", repo.updatedTeam, repo.updatedMembers)
+	}
+	if len(instances.deleteCalls) != 0 {
+		t.Fatalf("delete calls = %#v, want none", instances.deleteCalls)
+	}
+}
+
+func TestDeleteMemberClearsInstanceReferenceAfterSuccessfulDelete(t *testing.T) {
+	instanceID := 902
+	team := &models.Team{ID: 72, UserID: 45, Status: models.TeamStatusRunning}
+	member := &models.TeamMember{
+		ID:         82,
+		TeamID:     team.ID,
+		UserID:     team.UserID,
+		InstanceID: &instanceID,
+		MemberKey:  "worker-b",
+		Role:       "worker",
+		Status:     models.TeamMemberStatusIdle,
+	}
+	repo := &teamRepositoryStub{
+		teamsByID:                map[int]*models.Team{team.ID: team},
+		membersByID:              map[int]*models.TeamMember{member.ID: member},
+		updateMemberErrForStatus: models.TeamMemberStatusDeleted,
+	}
+	instances := &teamDeletionInstanceServiceStub{}
+	service := &teamService{repo: repo, instanceService: instances}
+
+	err := service.DeleteMember(team.UserID, team.ID, strconv.Itoa(member.ID))
+	if err == nil || !strings.Contains(err.Error(), "forced member update failure") {
+		t.Fatalf("DeleteMember error = %v, want forced terminal update failure", err)
+	}
+	if !reflect.DeepEqual(instances.deleteCalls, []int{instanceID}) {
+		t.Fatalf("delete calls = %#v, want [%d]", instances.deleteCalls, instanceID)
+	}
+	if repo.updatedMember == nil || repo.updatedMember.Status != models.TeamMemberStatusDeleted || repo.updatedMember.InstanceID != nil {
+		t.Fatalf("terminal member update retained a stale instance reference: %#v", repo.updatedMember)
+	}
+}
+
+type pendingDeletionTeamRepositoryStub struct {
+	*teamRepositoryStub
+}
+
+func (s *pendingDeletionTeamRepositoryStub) ListTeamsByStatus(status string) ([]models.Team, error) {
+	result := make([]models.Team, 0)
+	for _, team := range s.teamsByID {
+		if team != nil && team.Status == status {
+			result = append(result, *team)
+		}
+	}
+	return result, nil
+}
+
+func (s *pendingDeletionTeamRepositoryStub) ListMembersByStatus(status string) ([]models.TeamMember, error) {
+	result := make([]models.TeamMember, 0)
+	for _, member := range s.membersByID {
+		if member != nil && member.Status == status {
+			result = append(result, *member)
+		}
+	}
+	return result, nil
+}
+
+func TestPendingDeletionReconcilerFinishesDeletedTeamMember(t *testing.T) {
+	instanceID := 921
+	team := &models.Team{ID: 74, UserID: 45, Status: models.TeamStatusDeleted}
+	member := &models.TeamMember{
+		ID:         85,
+		TeamID:     team.ID,
+		UserID:     team.UserID,
+		InstanceID: &instanceID,
+		MemberKey:  "worker-c",
+		Role:       "worker",
+		Status:     models.TeamMemberStatusDeleting,
+	}
+	baseRepo := &teamRepositoryStub{
+		teamsByID:   map[int]*models.Team{team.ID: team},
+		membersByID: map[int]*models.TeamMember{member.ID: member},
+	}
+	repo := &pendingDeletionTeamRepositoryStub{teamRepositoryStub: baseRepo}
+	instances := &teamDeletionInstanceServiceStub{}
+	service := &teamService{repo: repo, instanceService: instances}
+
+	service.resumePendingTeamDeletions()
+
+	if !reflect.DeepEqual(instances.deleteCalls, []int{instanceID}) {
+		t.Fatalf("delete calls = %#v, want [%d]", instances.deleteCalls, instanceID)
+	}
+	if baseRepo.updatedMember == nil || baseRepo.updatedMember.Status != models.TeamMemberStatusDeleted || baseRepo.updatedMember.InstanceID != nil {
+		t.Fatalf("pending deleted-Team member did not converge: %#v", baseRepo.updatedMember)
+	}
+}
+
 type teamRepositoryStub struct {
-	mu               sync.Mutex
-	teamsByID        map[int]*models.Team
-	membersByID      map[int]*models.TeamMember
-	membersByKey     map[string]*models.TeamMember
-	tasksByID        map[int]*models.TeamTask
-	tasksByMessageID map[string]*models.TeamTask
-	createdEvents    []models.TeamEvent
-	workItems        []models.TeamWorkItem
-	workflowPhases   []models.TeamWorkflowPhase
-	outboxRows       []models.TeamEventOutbox
-	updatedTask      *models.TeamTask
-	updatedMember    *models.TeamMember
-	updatedTeam      *models.Team
+	mu                       sync.Mutex
+	teamsByID                map[int]*models.Team
+	membersByID              map[int]*models.TeamMember
+	membersByKey             map[string]*models.TeamMember
+	tasksByID                map[int]*models.TeamTask
+	tasksByMessageID         map[string]*models.TeamTask
+	createdEvents            []models.TeamEvent
+	workItems                []models.TeamWorkItem
+	workflowPhases           []models.TeamWorkflowPhase
+	outboxRows               []models.TeamEventOutbox
+	updatedTask              *models.TeamTask
+	updatedMember            *models.TeamMember
+	updatedMembers           []models.TeamMember
+	updateMemberErrForStatus string
+	updatedTeam              *models.Team
 }
 
 type teamOpenClawConfigPlannerStub struct {
@@ -8655,7 +8983,41 @@ func (s *teamRepositoryStub) CreateMember(member *models.TeamMember) error { ret
 func (s *teamRepositoryStub) UpdateMember(member *models.TeamMember) error {
 	clone := *member
 	s.updatedMember = &clone
+	s.updatedMembers = append(s.updatedMembers, clone)
+	if s.updateMemberErrForStatus != "" && clone.Status == s.updateMemberErrForStatus {
+		return errors.New("forced member update failure")
+	}
 	return nil
+}
+func (s *teamRepositoryStub) ReleaseMemberFromTask(memberID, taskID int, runtimeStatus, availability string, progress int, updatedAt time.Time) (bool, error) {
+	var member *models.TeamMember
+	if s.membersByID != nil {
+		member = s.membersByID[memberID]
+	}
+	if member == nil {
+		for _, candidate := range s.membersByKey {
+			if candidate != nil && candidate.ID == memberID {
+				member = candidate
+				break
+			}
+		}
+	}
+	if member == nil || member.CurrentTaskID == nil || *member.CurrentTaskID != taskID {
+		return false, nil
+	}
+	member.Status = models.TeamMemberStatusIdle
+	member.CurrentTaskID = nil
+	member.Progress = progress
+	member.Availability = availability
+	member.RuntimeStatus = &runtimeStatus
+	member.RuntimeTaskID = nil
+	member.RuntimeIntent = nil
+	member.BlockedReason = nil
+	member.UpdatedAt = updatedAt
+	clone := *member
+	s.updatedMember = &clone
+	s.updatedMembers = append(s.updatedMembers, clone)
+	return true, nil
 }
 func (s *teamRepositoryStub) GetMemberByID(id int) (*models.TeamMember, error) {
 	if s.membersByID != nil {
@@ -8914,12 +9276,23 @@ func (s *teamRepositoryStub) ConfirmWorkItemResult(item *models.TeamWorkItem, ev
 	s.outboxRows = append(s.outboxRows, clone)
 	return nil
 }
-func (s *teamRepositoryStub) CreateEventWithOutbox(event *models.TeamEvent, outbox *models.TeamEventOutbox) error {
+func (s *teamRepositoryStub) CreateEventWithOutbox(event *models.TeamEvent, outbox *models.TeamEventOutbox, observations ...*models.TeamEvent) error {
 	if event == nil || outbox == nil {
 		return nil
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	for _, observation := range observations {
+		found := false
+		for _, existing := range s.createdEvents {
+			if observation != nil && existing.TeamID == observation.TeamID && derefTeamString(existing.EventID) == derefTeamString(observation.EventID) {
+				found = true
+			}
+		}
+		if observation != nil && !found {
+			s.createdEvents = append(s.createdEvents, *observation)
+		}
+	}
 	eventExists := false
 	for idx := range s.createdEvents {
 		if s.createdEvents[idx].TeamID == event.TeamID &&

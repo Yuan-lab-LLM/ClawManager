@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -190,6 +191,87 @@ func TestInstanceExternalAccessRestoresPasswordAfterRefresh(t *testing.T) {
 	}
 }
 
+func TestInstanceExternalAccessResetURLPreservesPasswordAndPolicy(t *testing.T) {
+	repo := newFakeExternalAccessRepo()
+	service := NewInstanceExternalAccessService(repo)
+	expiresAt := time.Now().UTC().Add(7 * 24 * time.Hour).Truncate(time.Second)
+	created, err := service.CreatePassword(context.Background(), 100, 9, ExternalAccessExpirationRequest{
+		Mode: ExternalAccessExpirationCustom, ExpiresAt: &expiresAt, WorkspaceAccess: ExternalWorkspaceAccessRead,
+	})
+	if err != nil {
+		t.Fatalf("CreatePassword failed: %v", err)
+	}
+	oldURL := created.ShareURL
+	oldCode := strings.Trim(strings.TrimPrefix(oldURL, "/s/"), "/")
+	oldPasswordHash := *created.Access.PasswordHash
+
+	reset, err := service.ResetURL(context.Background(), 100, 10)
+	if err != nil {
+		t.Fatalf("ResetURL failed: %v", err)
+	}
+	if reset.ShareURL == oldURL {
+		t.Fatalf("reset URL = %q, want a new URL", reset.ShareURL)
+	}
+	if reset.Access.AuthMode != ExternalAccessModePassword || reset.Access.PasswordHash == nil || *reset.Access.PasswordHash != oldPasswordHash {
+		t.Fatal("URL reset must preserve password authentication")
+	}
+	if reset.Access.WorkspaceAccess != ExternalWorkspaceAccessRead || reset.Access.ExpiresAt == nil || !reset.Access.ExpiresAt.Equal(expiresAt) {
+		t.Fatal("URL reset must preserve expiration and workspace policy")
+	}
+	if _, err := service.ValidateShortLink(context.Background(), oldCode, created.Password); err == nil {
+		t.Fatal("old URL must stop working after reset")
+	}
+	newCode := strings.Trim(strings.TrimPrefix(reset.ShareURL, "/s/"), "/")
+	if _, err := service.ValidateShortLink(context.Background(), newCode, created.Password); err != nil {
+		t.Fatalf("new URL with preserved password failed: %v", err)
+	}
+}
+
+func TestInstanceExternalAccessResetPasswordPreservesURLAndRevokesOldPassword(t *testing.T) {
+	repo := newFakeExternalAccessRepo()
+	service := NewInstanceExternalAccessService(repo)
+	created, err := service.CreatePassword(context.Background(), 100, 9, ExternalAccessExpirationRequest{
+		Mode: ExternalAccessExpirationPermanent, WorkspaceAccess: ExternalWorkspaceAccessWrite,
+	})
+	if err != nil {
+		t.Fatalf("CreatePassword failed: %v", err)
+	}
+	code := strings.Trim(strings.TrimPrefix(created.ShareURL, "/s/"), "/")
+	reset, err := service.ResetPassword(context.Background(), 100, 10)
+	if err != nil {
+		t.Fatalf("ResetPassword failed: %v", err)
+	}
+	if reset.ShareURL != created.ShareURL {
+		t.Fatalf("password reset URL = %q, want %q", reset.ShareURL, created.ShareURL)
+	}
+	if reset.Password == created.Password {
+		t.Fatal("password reset must generate a new password")
+	}
+	if reset.Access.WorkspaceAccess != ExternalWorkspaceAccessWrite || reset.Access.ExpiresAt != nil {
+		t.Fatal("password reset must preserve access policy")
+	}
+	if _, err := service.ValidateShortLink(context.Background(), code, created.Password); err == nil {
+		t.Fatal("old password must stop working after reset")
+	}
+	if _, err := service.ValidateShortLink(context.Background(), code, reset.Password); err != nil {
+		t.Fatalf("new password failed: %v", err)
+	}
+}
+
+func TestInstanceExternalAccessResetRequiresEnabledMatchingMode(t *testing.T) {
+	repo := newFakeExternalAccessRepo()
+	service := NewInstanceExternalAccessService(repo)
+	if _, err := service.ResetURL(context.Background(), 404, 1); !errors.Is(err, ErrExternalAccessNotEnabled) {
+		t.Fatalf("ResetURL error = %v, want ErrExternalAccessNotEnabled", err)
+	}
+	if _, err := service.EnableShareLink(context.Background(), 42, 7, ExternalAccessExpirationRequest{Mode: ExternalAccessExpirationPermanent}); err != nil {
+		t.Fatalf("EnableShareLink failed: %v", err)
+	}
+	if _, err := service.ResetPassword(context.Background(), 42, 7); !errors.Is(err, ErrExternalAccessPasswordNotEnabled) {
+		t.Fatalf("ResetPassword error = %v, want ErrExternalAccessPasswordNotEnabled", err)
+	}
+}
+
 func TestInstanceExternalAccessExpiration(t *testing.T) {
 	repo := newFakeExternalAccessRepo()
 	service := NewInstanceExternalAccessService(repo)
@@ -253,6 +335,38 @@ func (r *fakeExternalAccessRepo) Upsert(ctx context.Context, access *models.Inst
 		r.byCodeHash[*saved.ShortCodeHash] = cloneExternalAccess(saved)
 	}
 	return nil
+}
+
+func (r *fakeExternalAccessRepo) ResetURL(_ context.Context, instanceID, createdBy int, publicSlug, shortCodeHash string) (bool, error) {
+	existing := r.byInstance[instanceID]
+	if existing == nil || !existing.Enabled {
+		return false, nil
+	}
+	if existing.ShortCodeHash != nil {
+		delete(r.byCodeHash, *existing.ShortCodeHash)
+	}
+	existing.PublicSlug = &publicSlug
+	existing.ShortCodeHash = &shortCodeHash
+	existing.CreatedBy = &createdBy
+	existing.LastUsedAt = nil
+	r.byCodeHash[shortCodeHash] = cloneExternalAccess(existing)
+	return true, nil
+}
+
+func (r *fakeExternalAccessRepo) ResetPassword(_ context.Context, instanceID, createdBy int, passwordHash, passwordValue, passwordHint string) (bool, error) {
+	existing := r.byInstance[instanceID]
+	if existing == nil || !existing.Enabled || existing.AuthMode != ExternalAccessModePassword {
+		return false, nil
+	}
+	existing.PasswordHash = &passwordHash
+	existing.PasswordValue = &passwordValue
+	existing.PasswordHint = &passwordHint
+	existing.CreatedBy = &createdBy
+	existing.LastUsedAt = nil
+	if existing.ShortCodeHash != nil {
+		r.byCodeHash[*existing.ShortCodeHash] = cloneExternalAccess(existing)
+	}
+	return true, nil
 }
 
 func (r *fakeExternalAccessRepo) Disable(ctx context.Context, instanceID int) error {

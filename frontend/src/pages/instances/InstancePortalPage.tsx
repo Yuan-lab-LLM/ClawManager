@@ -10,6 +10,7 @@ import { InstanceShellTerminal } from "../../components/InstanceShellTerminal";
 import UserLayout from "../../components/UserLayout";
 import { WorkspaceFileManager } from "../../components/WorkspaceFileManager";
 import { useInstanceDesktopAccess } from "../../hooks/useInstanceDesktopAccess";
+import { useRuntimeCertificateTrust } from "../../hooks/useRuntimeCertificateTrust";
 import { prepareOpenClawControlUIStorage } from "../../lib/openclawControlStorage";
 import { instanceService } from "../../services/instanceService";
 import {
@@ -31,11 +32,17 @@ interface PreparedPortalFrame {
 }
 
 function supportsWorkspace(instance: Instance) {
+  if (instance.type === "workbuddy" || instance.type === "codex") {
+    const image = instance.image_registry?.trim().toLowerCase() ?? "";
+    const inferredLinux = instance.type === "workbuddy"
+      ? image.includes("workbuddy-linux")
+      : image.includes("agentsruntime/codex");
+    return instance.runtime_variant === "linux" || (!instance.runtime_variant && inferredLinux);
+  }
   return (
     instance.type === "openclaw" ||
     instance.type === "hermes" ||
     instance.type === "opencode" ||
-    instance.type === "workbuddy" ||
     instance.type === "deepseek-harness" ||
     Boolean(instance.workspace_path)
   );
@@ -231,7 +238,7 @@ const InstancePortalPage: React.FC = () => {
   );
 
   const {
-    embedUrl,
+    embedUrl: accessEmbedUrl,
     loading: accessLoading,
     error: accessError,
     refreshAccess,
@@ -242,9 +249,24 @@ const InstancePortalPage: React.FC = () => {
     isRunning:
       selectedInstance?.status === "running" && shouldConnect && !isShellPortal,
     retainSessionOnStop: shouldConnect,
+    reloadOnAccessRefresh: selectedInstance?.type === "deepseek-harness",
     resolveEmbedUrl,
     failedMessage: t("instances.failedToGenerateAccessToken"),
   });
+  const requiresRuntimeCertificateTrust = Boolean(
+    selectedInstance &&
+      (selectedInstance.type === "opencode" ||
+        selectedInstance.type === "deepseek-harness"),
+  );
+  const {
+    frameUrl: embedUrl,
+    checkingCertificate,
+    certificateConfirmationRequired,
+    confirmCertificate,
+  } = useRuntimeCertificateTrust(
+    accessEmbedUrl,
+    requiresRuntimeCertificateTrust,
+  );
 
   const portalEmbedUrl = useMemo(
     () => portalEmbedUrlForInstance(selectedInstance, embedUrl),
@@ -367,6 +389,11 @@ const InstancePortalPage: React.FC = () => {
 
   const retryAccess = () => {
     if (!selectedInstance || selectedInstance.status !== "running") {
+      return;
+    }
+
+    if (certificateConfirmationRequired) {
+      confirmCertificate();
       return;
     }
 
@@ -686,11 +713,15 @@ const InstancePortalPage: React.FC = () => {
                       type="button"
                       onClick={retryAccess}
                       onPointerUp={retryAccess}
-                      disabled={accessLoading}
-                      aria-label={t("instances.generateAccess")}
+                      disabled={accessLoading || checkingCertificate}
+                      aria-label={
+                        certificateConfirmationRequired
+                          ? t("instances.continueCertificateConfirmation")
+                          : t("instances.generateAccess")
+                      }
                       className="group flex h-24 w-24 items-center justify-center rounded-full border border-white/20 bg-white/10 text-white backdrop-blur transition hover:scale-[1.03] hover:bg-white/16 disabled:cursor-wait disabled:opacity-70"
                     >
-                      {accessLoading ? (
+                      {accessLoading || checkingCertificate ? (
                         <span className="h-10 w-10 animate-spin rounded-full border-2 border-white/20 border-t-white" />
                       ) : (
                         <svg
@@ -705,10 +736,16 @@ const InstancePortalPage: React.FC = () => {
                     </button>
 
                     <h3 className="mt-6 text-xl font-semibold text-white">
-                      {t("instances.readyToAccess")}
+                      {certificateConfirmationRequired
+                        ? t("instances.certificateConfirmationRequired")
+                        : t("instances.readyToAccess")}
                     </h3>
                     <p className="mt-2 max-w-md text-sm leading-6 text-[#b7c1cf]">
-                      {accessLoading
+                      {checkingCertificate
+                        ? t("instances.checkingCertificate")
+                        : certificateConfirmationRequired
+                          ? t("instances.certificateConfirmationDescription")
+                          : accessLoading
                         ? t("instances.generatingToken")
                         : accessError ||
                           t("instances.generateAccessPrompt", {
@@ -716,7 +753,11 @@ const InstancePortalPage: React.FC = () => {
                           })}
                     </p>
                     <p className="mt-4 text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">
-                      {accessLoading
+                      {checkingCertificate
+                        ? t("instances.checkingCertificate")
+                        : certificateConfirmationRequired
+                          ? t("instances.continueCertificateConfirmation")
+                          : accessLoading
                         ? t("instances.generatingToken")
                         : t("instances.generateAccess")}
                     </p>

@@ -153,6 +153,7 @@ jobs:
             echo "TAG_NAME=${{ needs.prepare-scheduled-release.outputs.tag_name }}" >> "$GITHUB_ENV"
           fi
           echo "IMAGE_URI=ghcr.io/${REPOSITORY_OWNER_LOWER}/clawmanager" >> "$GITHUB_ENV"
+          echo "BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_ENV"
 
       - name: Checkout release tag
         if: github.event_name != 'push'
@@ -201,6 +202,10 @@ jobs:
           file: ./Dockerfile
           push: true
           platforms: linux/amd64,linux/arm64
+          build-args: |
+            VERSION=${{ env.TAG_NAME }}
+            VCS_REF=${{ github.sha }}
+            BUILD_DATE=${{ env.BUILD_DATE }}
           tags: |
             ${{ env.IMAGE_URI }}:${{ env.TAG_NAME }}
             ${{ env.IMAGE_URI }}:latest

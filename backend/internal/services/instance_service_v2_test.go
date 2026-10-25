@@ -10,7 +10,128 @@ import (
 	"testing"
 
 	"clawreef/internal/models"
+	"clawreef/internal/repository"
 )
+
+func TestValidateCreateInstanceDiskGBUsesModeSpecificMinimum(t *testing.T) {
+	if err := validateCreateInstanceDiskGB(CreateInstanceRequest{DiskGB: DefaultLiteDiskGB}, InstanceModeLite); err != nil {
+		t.Fatalf("Lite %dGiB disk should be accepted: %v", DefaultLiteDiskGB, err)
+	}
+	if err := validateCreateInstanceDiskGB(CreateInstanceRequest{DiskGB: DefaultLiteDiskGB - 1}, InstanceModeLite); err == nil {
+		t.Fatalf("Lite disk below %dGiB should be rejected", DefaultLiteDiskGB)
+	}
+	if err := validateCreateInstanceDiskGB(CreateInstanceRequest{DiskGB: MinimumProDiskGB}, InstanceModePro); err != nil {
+		t.Fatalf("Pro %dGiB disk should be accepted: %v", MinimumProDiskGB, err)
+	}
+	if err := validateCreateInstanceDiskGB(CreateInstanceRequest{DiskGB: DefaultLiteDiskGB}, InstanceModePro); err == nil {
+		t.Fatalf("Pro disk below %dGiB should be rejected", MinimumProDiskGB)
+	}
+}
+
+func TestResetReplacementUsesFreshStandardCreateForDeployedNorthboundRuntimes(t *testing.T) {
+	owner := "owner@example.com"
+	cases := []struct {
+		name           string
+		instanceType   string
+		mode           string
+		runtimeType    string
+		runtimeVariant string
+		diskGB         int
+	}{
+		{name: "OpenClaw Lite", instanceType: RuntimeTypeOpenClaw, mode: InstanceModeLite, runtimeType: RuntimeBackendGateway, diskGB: DefaultLiteDiskGB},
+		{name: "Hermes Lite", instanceType: RuntimeTypeHermes, mode: InstanceModeLite, runtimeType: RuntimeBackendGateway, diskGB: DefaultLiteDiskGB},
+		{name: "OpenCode Lite", instanceType: RuntimeTypeOpenCode, mode: InstanceModeLite, runtimeType: RuntimeBackendGateway, diskGB: DefaultLiteDiskGB},
+		{name: "DeepSeek Harness Lite", instanceType: RuntimeTypeDeepSeekHarness, mode: InstanceModeLite, runtimeType: RuntimeBackendGateway, diskGB: DefaultLiteDiskGB},
+		{name: "WorkBuddy Linux Pro", instanceType: "workbuddy", mode: InstanceModePro, runtimeType: RuntimeBackendDesktop, runtimeVariant: WorkbuddyRuntimeLinux, diskGB: 40},
+	}
+
+	for index, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			source := &models.Instance{
+				ID:             100 + index,
+				UserID:         7,
+				Owner:          &owner,
+				Name:           "existing-instance",
+				Description:    factoryResetString("old description"),
+				Type:           tc.instanceType,
+				InstanceMode:   tc.mode,
+				RuntimeType:    tc.runtimeType,
+				RuntimeVariant: tc.runtimeVariant,
+				Status:         "error",
+				CPUCores:       2,
+				MemoryGB:       4,
+				DiskGB:         tc.diskGB,
+				OSType:         "linux",
+				OSVersion:      "latest",
+				StorageClass:   "longhorn",
+			}
+			req, err := resetReplacementCreateRequest(source, "op_replacement_test")
+			if err != nil {
+				t.Fatalf("resetReplacementCreateRequest returned error: %v", err)
+			}
+			if req.Owner == nil || *req.Owner != factoryResetStagingOwner {
+				t.Fatalf("staging owner = %v, want staging owner", req.Owner)
+			}
+			if req.Name == source.Name || !strings.HasPrefix(req.Name, "reset-") {
+				t.Fatalf("staging name = %q", req.Name)
+			}
+			if req.Type != tc.instanceType || req.InstanceMode != tc.mode || req.Mode != tc.mode || req.RuntimeType != tc.runtimeType || req.RuntimeVariant != tc.runtimeVariant {
+				t.Fatalf("replacement runtime shape changed: %#v", req)
+			}
+			if req.DiskGB != tc.diskGB || req.CPUCores != source.CPUCores || req.MemoryGB != source.MemoryGB || req.StorageClass != source.StorageClass {
+				t.Fatalf("replacement resources changed: %#v", req)
+			}
+			if req.ImageRegistry != nil || req.ImageTag != nil || req.EnvironmentOverrides != nil || req.OpenClawConfigPlan != nil {
+				t.Fatalf("replacement copied mutable runtime data instead of using fresh defaults: %#v", req)
+			}
+			if req.ProvisioningOperationID != "reset_op_replacement_test" {
+				t.Fatalf("provisioning operation id = %q", req.ProvisioningOperationID)
+			}
+		})
+	}
+}
+
+func TestFinalizeResetReplacementIsIdempotentAfterSourceCleanup(t *testing.T) {
+	repo := newV2LifecycleInstanceRepo()
+	owner := "owner@example.com"
+	repo.byID[202] = &models.Instance{
+		ID:       202,
+		UserID:   7,
+		Owner:    &owner,
+		Name:     "replacement-instance",
+		Status:   "running",
+		Type:     RuntimeTypeOpenClaw,
+		DiskGB:   DefaultLiteDiskGB,
+		CPUCores: 2,
+		MemoryGB: 4,
+	}
+	service := &instanceService{instanceRepo: repo}
+
+	cleanupPending, warning, err := service.FinalizeResetReplacement(101, 202)
+	if err != nil {
+		t.Fatalf("FinalizeResetReplacement returned error on completion retry: %v", err)
+	}
+	if cleanupPending || warning != "" {
+		t.Fatalf("completion retry returned cleanupPending=%v warning=%q", cleanupPending, warning)
+	}
+	if _, ok := repo.byID[202]; !ok {
+		t.Fatal("promoted replacement was removed during completion retry")
+	}
+}
+
+func TestDiscardResetReplacementNeverDeletesPromotedInstance(t *testing.T) {
+	for _, owner := range []*string{nil, factoryResetString(""), factoryResetString("user@example.com")} {
+		repo := newV2LifecycleInstanceRepo()
+		repo.byID[202] = &models.Instance{ID: 202, UserID: 7, Owner: owner, Name: "user-instance", Status: "running"}
+		service := &instanceService{instanceRepo: repo}
+		if err := service.DiscardResetReplacement(202); err == nil {
+			t.Fatal("promoted replacement discard accepted")
+		}
+		if repo.byID[202] == nil || repo.byID[202].Status != "running" {
+			t.Fatal("promoted replacement changed")
+		}
+	}
+}
 
 func TestInstanceServiceCreateV2CreatesWorkspaceOnly(t *testing.T) {
 	workspaceRoot := strings.ReplaceAll(t.TempDir(), "\\", "/")
@@ -67,6 +188,31 @@ func TestInstanceServiceCreateV2CreatesWorkspaceOnly(t *testing.T) {
 	}
 	if len(instanceRepo.created) != 1 {
 		t.Fatalf("created instance records = %d, want 1", len(instanceRepo.created))
+	}
+}
+
+func TestInstanceServiceCreateV2PersistsNormalizedOwner(t *testing.T) {
+	workspaceRoot := strings.ReplaceAll(t.TempDir(), "\\", "/")
+	instanceRepo := newV2LifecycleInstanceRepo()
+	service := &instanceService{
+		instanceRepo:  instanceRepo,
+		quotaRepo:     v2LifecycleQuotaRepo{},
+		llmModelRepo:  &stubLLMModelRepository{active: []models.LLMModel{{DisplayName: "auto"}}},
+		workspaceRoot: workspaceRoot,
+	}
+	owner := " tenant-a "
+	instance, err := service.Create(45, CreateInstanceRequest{
+		Name: "Owned Lite", Owner: &owner, Type: "openclaw", CPUCores: 2,
+		MemoryGB: 4, DiskGB: 20, OSType: "openclaw", OSVersion: "latest",
+	})
+	if err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+	if instance.Owner == nil || *instance.Owner != "tenant-a" {
+		t.Fatalf("owner = %v, want tenant-a", instance.Owner)
+	}
+	if persisted := instanceRepo.byID[instance.ID]; persisted == nil || persisted.Owner == nil || *persisted.Owner != "tenant-a" {
+		t.Fatalf("persisted owner = %v, want tenant-a", persisted)
 	}
 }
 
@@ -307,6 +453,7 @@ func TestInstanceServiceStartV2MarksCreatingWithNextGeneration(t *testing.T) {
 	}
 	service := &instanceService{instanceRepo: instanceRepo}
 
+	configureLifecycleModels(t, service)
 	if err := service.Start(77); err != nil {
 		t.Fatalf("Start returned error: %v", err)
 	}
@@ -350,6 +497,7 @@ func TestInstanceServiceStartV2CleansFailedBindingBeforeNextGeneration(t *testin
 		agentClient:    agent,
 	}
 
+	configureLifecycleModels(t, service)
 	if err := service.Start(78); err != nil {
 		t.Fatalf("Start returned error: %v", err)
 	}
@@ -390,6 +538,7 @@ func TestInstanceServiceStartV2QuarantinesReportedCorruptLegacyTaskDatabase(t *t
 	}
 	service := &instanceService{instanceRepo: instanceRepo}
 
+	configureLifecycleModels(t, service)
 	if err := service.Start(79); err != nil {
 		t.Fatalf("Start returned error: %v", err)
 	}
@@ -554,6 +703,16 @@ func TestInstanceServiceStopV2KeepsBindingWhenRuntimePodLookupFails(t *testing.T
 	}
 }
 
+type restartHeartbeatAgent struct {
+	fakeRuntimeAgentClient
+	onDelete func()
+}
+
+func (a *restartHeartbeatAgent) DeleteGateway(ctx context.Context, endpoint, gatewayID string) error {
+	a.onDelete()
+	return a.fakeRuntimeAgentClient.DeleteGateway(ctx, endpoint, gatewayID)
+}
+
 func TestInstanceServiceRestartV2RecreatesGatewayViaScheduler(t *testing.T) {
 	workspacePath := "/workspaces/openclaw/user-45/instance-89"
 	instanceRepo := newV2LifecycleInstanceRepo()
@@ -581,7 +740,13 @@ func TestInstanceServiceRestartV2RecreatesGatewayViaScheduler(t *testing.T) {
 		State:        "running",
 		Generation:   8,
 	}
-	agent := &fakeRuntimeAgentClient{}
+	// A heartbeat already in flight must not resurrect the stopped generation.
+	agent := &restartHeartbeatAgent{onDelete: func() {
+		err := instanceRepo.UpdateRuntimeState(context.Background(), 89, "running", 8, nil)
+		if !errors.Is(err, repository.ErrStaleRuntimeGeneration) {
+			t.Errorf("old heartbeat accepted during restart: %v", err)
+		}
+	}}
 	service := &instanceService{
 		instanceRepo:   instanceRepo,
 		runtimePodRepo: podRepo,
@@ -589,6 +754,7 @@ func TestInstanceServiceRestartV2RecreatesGatewayViaScheduler(t *testing.T) {
 		agentClient:    agent,
 	}
 
+	configureLifecycleModels(t, service)
 	if err := service.Restart(89); err != nil {
 		t.Fatalf("Restart returned error: %v", err)
 	}
@@ -600,8 +766,11 @@ func TestInstanceServiceRestartV2RecreatesGatewayViaScheduler(t *testing.T) {
 		t.Fatalf("binding delete and release calls = %d, want 1", bindingRepo.deleteAndReleaseCalls[89])
 	}
 	state := instanceRepo.runtimeStates[89]
-	if state.status != "creating" || state.generation != 9 {
-		t.Fatalf("runtime state = %#v, want creating generation 9", state)
+	if state.status != "creating" || state.generation != 10 {
+		t.Fatalf("runtime state = %#v, want creating generation 10", state)
+	}
+	if *instanceRepo.byID[89].WorkspacePath != workspacePath {
+		t.Fatal("restart changed workspace")
 	}
 }
 
@@ -627,6 +796,7 @@ func TestInstanceServiceRestartWithEnvironmentMergesDesiredState(t *testing.T) {
 	}
 	service := &instanceService{instanceRepo: instanceRepo}
 
+	configureLifecycleModels(t, service)
 	err = service.RestartWithEnvironment(191, map[string]string{
 		"LOG_LEVEL":        "debug",
 		"SKILL_CACHE_PATH": "/workspace/cache",
@@ -650,8 +820,8 @@ func TestInstanceServiceRestartWithEnvironmentMergesDesiredState(t *testing.T) {
 		t.Fatalf("SKILL_CACHE_PATH = %q, want /workspace/cache", environment["SKILL_CACHE_PATH"])
 	}
 	state := instanceRepo.runtimeStates[191]
-	if state.status != "creating" || state.generation != 4 {
-		t.Fatalf("runtime state = %#v, want creating generation 4", state)
+	if state.status != "creating" || state.generation != 5 {
+		t.Fatalf("runtime state = %#v, want creating generation 5", state)
 	}
 }
 
@@ -759,6 +929,7 @@ func TestInstanceServiceRestartWithEnvironmentRemovesDesiredState(t *testing.T) 
 	}
 	service := &instanceService{instanceRepo: instanceRepo}
 
+	configureLifecycleModels(t, service)
 	err = service.RestartWithEnvironment(
 		195,
 		map[string]string{"RESET_ME": "new-value"},
@@ -782,8 +953,8 @@ func TestInstanceServiceRestartWithEnvironmentRemovesDesiredState(t *testing.T) 
 		t.Fatalf("RESET_ME = %q, want new-value", environment["RESET_ME"])
 	}
 	state := instanceRepo.runtimeStates[195]
-	if state.status != "creating" || state.generation != 6 {
-		t.Fatalf("runtime state = %#v, want creating generation 6", state)
+	if state.status != "creating" || state.generation != 7 {
+		t.Fatalf("runtime state = %#v, want creating generation 7", state)
 	}
 }
 
@@ -855,11 +1026,12 @@ func TestInstanceServiceDeleteV2KeepsInstanceAndBindingWhenAgentDeleteFails(t *t
 		State:        "running",
 		Generation:   2,
 	}
+	agent := &fakeRuntimeAgentClient{deleteErr: errors.New("agent delete failed")}
 	service := &instanceService{
 		instanceRepo:   instanceRepo,
 		runtimePodRepo: podRepo,
 		bindingRepo:    bindingRepo,
-		agentClient:    &fakeRuntimeAgentClient{deleteErr: errors.New("agent delete failed")},
+		agentClient:    agent,
 	}
 
 	err := service.Delete(190)
@@ -877,6 +1049,167 @@ func TestInstanceServiceDeleteV2KeepsInstanceAndBindingWhenAgentDeleteFails(t *t
 	}
 	if bindingRepo.deleteAndReleaseCalls[190] != 0 {
 		t.Fatalf("delete and release calls = %d, want 0", bindingRepo.deleteAndReleaseCalls[190])
+	}
+
+	agent.deleteErr = nil
+	retried, err := service.ResumePendingDeletions(context.Background())
+	if err != nil {
+		t.Fatalf("ResumePendingDeletions returned error after agent recovery: %v", err)
+	}
+	if retried != 1 || instanceRepo.byID[190] != nil || bindingRepo.bindings[190] != nil {
+		t.Fatalf("pending deletion did not recover: retried=%d instance=%#v binding=%#v", retried, instanceRepo.byID[190], bindingRepo.bindings[190])
+	}
+}
+
+type runtimeUpgradeDeletionGuardStub struct {
+	err   error
+	calls []int
+}
+
+func (g *runtimeUpgradeDeletionGuardStub) ValidateInstanceDeletion(_ context.Context, instanceID int) error {
+	g.calls = append(g.calls, instanceID)
+	return g.err
+}
+
+func TestInstanceServiceDeleteV2ChecksUpgradeGuardBeforeMutation(t *testing.T) {
+	instanceRepo := newV2LifecycleInstanceRepo()
+	instanceRepo.byID[191] = &models.Instance{
+		ID:          191,
+		UserID:      45,
+		Type:        "openclaw",
+		RuntimeType: "gateway",
+		Status:      "running",
+	}
+	guard := &runtimeUpgradeDeletionGuardStub{err: errors.New("active rollout")}
+	service := &instanceService{
+		instanceRepo:        instanceRepo,
+		runtimeUpgradeGuard: guard,
+		deletionsInFlight:   map[int]struct{}{},
+	}
+
+	err := service.Delete(191)
+	if err == nil || !strings.Contains(err.Error(), "active rollout") {
+		t.Fatalf("Delete error = %v, want active rollout rejection", err)
+	}
+	if got := instanceRepo.byID[191].Status; got != "running" {
+		t.Fatalf("instance status = %q, want running", got)
+	}
+	if len(instanceRepo.deleted) != 0 {
+		t.Fatalf("deleted instances = %#v, want none", instanceRepo.deleted)
+	}
+	if !reflect.DeepEqual(guard.calls, []int{191}) {
+		t.Fatalf("guard calls = %#v, want [191]", guard.calls)
+	}
+}
+
+func TestInstanceServiceFactoryResetChecksUpgradeGuardBeforeMutation(t *testing.T) {
+	instanceRepo := newV2LifecycleInstanceRepo()
+	instanceRepo.byID[196] = &models.Instance{
+		ID:           196,
+		UserID:       45,
+		Name:         "source",
+		Type:         "openclaw",
+		RuntimeType:  "gateway",
+		InstanceMode: "lite",
+		Status:       "running",
+	}
+	guard := &runtimeUpgradeDeletionGuardStub{err: errors.New("active rollout")}
+	service := &instanceService{
+		instanceRepo:        instanceRepo,
+		runtimeUpgradeGuard: guard,
+	}
+
+	err := service.Reset(196)
+	if err == nil || !strings.Contains(err.Error(), "active rollout") {
+		t.Fatalf("Reset error = %v, want active rollout rejection", err)
+	}
+	if got := instanceRepo.byID[196].Status; got != "running" {
+		t.Fatalf("instance status = %q, want running", got)
+	}
+	if !reflect.DeepEqual(guard.calls, []int{196}) {
+		t.Fatalf("guard calls = %#v, want [196]", guard.calls)
+	}
+}
+
+func TestInstanceServiceReplacementResetChecksUpgradeGuardBeforeMutation(t *testing.T) {
+	owner := "owner@example.com"
+	instanceRepo := newV2LifecycleInstanceRepo()
+	instanceRepo.byID[197] = &models.Instance{
+		ID:           197,
+		UserID:       45,
+		Name:         "source",
+		Owner:        &owner,
+		Type:         "openclaw",
+		RuntimeType:  "gateway",
+		InstanceMode: "lite",
+		Status:       "running",
+	}
+	instanceRepo.byID[198] = &models.Instance{
+		ID:           198,
+		UserID:       45,
+		Name:         "reset-197-staging",
+		Owner:        factoryResetString(factoryResetStagingOwner),
+		Type:         "openclaw",
+		RuntimeType:  "gateway",
+		InstanceMode: "lite",
+		Status:       "running",
+	}
+	guard := &runtimeUpgradeDeletionGuardStub{err: errors.New("active rollout")}
+	service := &instanceService{
+		instanceRepo:        instanceRepo,
+		runtimeUpgradeGuard: guard,
+	}
+
+	if _, err := service.CreateResetReplacement(197, "op_guarded"); err == nil || !strings.Contains(err.Error(), "active rollout") {
+		t.Fatalf("CreateResetReplacement error = %v, want active rollout rejection", err)
+	}
+	if cleanupPending, warning, err := service.FinalizeResetReplacement(197, 198); err == nil || !strings.Contains(err.Error(), "active rollout") || cleanupPending || warning != "" {
+		t.Fatalf("FinalizeResetReplacement = (%v, %q, %v), want active rollout rejection", cleanupPending, warning, err)
+	}
+	if err := service.DiscardResetReplacement(198); err == nil || !strings.Contains(err.Error(), "active rollout") {
+		t.Fatalf("DiscardResetReplacement error = %v, want active rollout rejection", err)
+	}
+	if instanceRepo.byID[197].Name != "source" || instanceRepo.byID[198].Name != "reset-197-staging" {
+		t.Fatalf("replacement reset mutated instances while upgrade guard was active: source=%#v replacement=%#v", instanceRepo.byID[197], instanceRepo.byID[198])
+	}
+	if !reflect.DeepEqual(guard.calls, []int{197, 197, 198}) {
+		t.Fatalf("guard calls = %#v, want [197 197 198]", guard.calls)
+	}
+}
+
+func TestInstanceServiceResumePendingDeletionsOnlyRetriesExplicitDeletingRows(t *testing.T) {
+	instanceRepo := newV2LifecycleInstanceRepo()
+	instanceRepo.byID[192] = &models.Instance{
+		ID:          192,
+		UserID:      45,
+		Type:        "openclaw",
+		RuntimeType: "gateway",
+		Status:      "deleting",
+	}
+	instanceRepo.byID[193] = &models.Instance{
+		ID:          193,
+		UserID:      45,
+		Type:        "openclaw",
+		RuntimeType: "gateway",
+		Status:      "running",
+	}
+	service := &instanceService{
+		instanceRepo:      instanceRepo,
+		deletionsInFlight: map[int]struct{}{},
+	}
+
+	retried, err := service.ResumePendingDeletions(context.Background())
+	if err != nil {
+		t.Fatalf("ResumePendingDeletions returned error: %v", err)
+	}
+	if retried != 1 {
+		t.Fatalf("retried = %d, want 1", retried)
+	}
+	if instanceRepo.byID[192] != nil {
+		t.Fatal("deleting instance was not removed")
+	}
+	if instanceRepo.byID[193] == nil || instanceRepo.byID[193].Status != "running" {
+		t.Fatal("running instance was changed by deletion reconciliation")
 	}
 }
 
@@ -997,12 +1330,38 @@ func TestValidateCreateRequestsChecksAggregateModeCapacity(t *testing.T) {
 	}
 
 	err := service.ValidateCreateRequests(45, []CreateInstanceRequest{
-		{Name: "batch-lite-001", Mode: InstanceModeLite},
-		{Name: "batch-lite-002", Mode: InstanceModeLite},
-		{Name: "batch-lite-003", Mode: InstanceModeLite},
+		{Name: "batch-lite-001", Mode: InstanceModeLite, DiskGB: DefaultLiteDiskGB},
+		{Name: "batch-lite-002", Mode: InstanceModeLite, DiskGB: DefaultLiteDiskGB},
+		{Name: "batch-lite-003", Mode: InstanceModeLite, DiskGB: DefaultLiteDiskGB},
 	})
 	if err == nil || !strings.Contains(err.Error(), "lite instance capacity reached: 4/3") {
 		t.Fatalf("aggregate capacity error = %v", err)
+	}
+}
+
+func TestValidateCreateRequestsRejectsProductsExcludedFromTeamDistribution(t *testing.T) {
+	service := &instanceService{}
+
+	for _, instanceType := range []string{"workbuddy", RuntimeTypeCodex, RuntimeTypeClaudeCode} {
+		t.Run(instanceType, func(t *testing.T) {
+			err := service.ValidateCreateRequests(45, []CreateInstanceRequest{{
+				Name: "hidden-runtime",
+				Type: instanceType,
+			}})
+			if err == nil || !strings.Contains(err.Error(), "not available in the team distribution") {
+				t.Fatalf("ValidateCreateRequests error = %v, want team distribution rejection", err)
+			}
+		})
+	}
+}
+
+func TestValidateCreateRequestsAllowsTeamDistributionRuntimes(t *testing.T) {
+	for _, instanceType := range []string{RuntimeTypeOpenClaw, RuntimeTypeHermes, RuntimeTypeOpenCode, RuntimeTypeDeepSeekHarness} {
+		t.Run(instanceType, func(t *testing.T) {
+			if !isTeamDistributionCreatableType(instanceType) {
+				t.Fatalf("isTeamDistributionCreatableType(%q) = false, want true", instanceType)
+			}
+		})
 	}
 }
 
@@ -1126,6 +1485,16 @@ func (r *v2LifecycleInstanceRepo) GetAll(offset, limit int) ([]models.Instance, 
 	return nil, nil
 }
 
+func (r *v2LifecycleInstanceRepo) GetByStatus(_ context.Context, status string, limit int) ([]models.Instance, error) {
+	instances := make([]models.Instance, 0)
+	for _, instance := range r.byID {
+		if instance.Status == status {
+			instances = append(instances, *instance)
+		}
+	}
+	return instances, nil
+}
+
 func (r *v2LifecycleInstanceRepo) CountAll() (int, error) { return len(r.byID), nil }
 
 func (r *v2LifecycleInstanceRepo) GetByUserID(userID int, offset, limit int) ([]models.Instance, error) {
@@ -1187,6 +1556,9 @@ func (r *v2LifecycleInstanceRepo) GetV2Creating(context.Context, int) ([]models.
 func (r *v2LifecycleInstanceRepo) UpdateRuntimeState(ctx context.Context, id int, status string, generation int, message *string) error {
 	instance := r.byID[id]
 	if instance != nil {
+		if instance.RuntimeGeneration > generation {
+			return repository.ErrStaleRuntimeGeneration
+		}
 		instance.Status = status
 		instance.RuntimeGeneration = generation
 		instance.RuntimeErrorMessage = message

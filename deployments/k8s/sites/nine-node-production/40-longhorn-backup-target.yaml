@@ -1,0 +1,11 @@
+# Apply only after Longhorn CRDs and longhorn-manager are Ready.
+# RecurringJob is deliberately separate and is not created until its schedule,
+# retention count, and volume scope are approved.
+apiVersion: longhorn.io/v1beta2
+kind: BackupTarget
+metadata:
+  name: default
+  namespace: longhorn-system
+spec:
+  backupTargetURL: nfs://10.130.224.6:/mnt/nfs6/sample/clawmanager/longhorn-backups
+  pollInterval: 5m

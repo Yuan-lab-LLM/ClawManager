@@ -10,7 +10,7 @@ import (
 // RepairSeededAdminPassword upgrades shipped bad admin seed hashes to the
 // expected admin123 hash without touching user-changed passwords.
 func RepairSeededAdminPassword(userRepo repository.UserRepository) (bool, error) {
-	admin, err := userRepo.GetByUsername("admin")
+	admin, err := userRepo.GetByAuthProviderUsername(AuthProviderLocal, "admin")
 	if err != nil {
 		return false, fmt.Errorf("failed to load admin user: %w", err)
 	}

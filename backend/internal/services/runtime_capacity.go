@@ -11,9 +11,16 @@ const (
 	RuntimeTypeHermes          = "hermes"
 	RuntimeTypeOpenCode        = "opencode"
 	RuntimeTypeDeepSeekHarness = "deepseek-harness"
+	RuntimeTypeCodex           = "codex"
+	RuntimeTypeClaudeCode      = "claude-code"
 
 	InstanceModeLite = "lite"
 	InstanceModePro  = "pro"
+	// DefaultLiteDiskGB is the logical workspace quota assigned to newly
+	// created Lite instances. Lite instances share the runtime workspace
+	// storage rather than provisioning a dedicated volume.
+	DefaultLiteDiskGB = 5
+	MinimumProDiskGB  = 10
 
 	RuntimeBackendGateway = "gateway"
 	RuntimeBackendDesktop = "desktop"

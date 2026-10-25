@@ -5,19 +5,25 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"clawreef/internal/models"
 )
 
 type reasoningLLMModelRepository struct {
-	byID  *models.LLMModel
-	saved *models.LLMModel
+	active []models.LLMModel
+	byID   *models.LLMModel
+	saved  *models.LLMModel
 }
 
-func (r *reasoningLLMModelRepository) List() ([]models.LLMModel, error)       { return nil, nil }
-func (r *reasoningLLMModelRepository) ListActive() ([]models.LLMModel, error) { return nil, nil }
-func (r *reasoningLLMModelRepository) GetByID(int) (*models.LLMModel, error)  { return r.byID, nil }
+func (r *reasoningLLMModelRepository) List() ([]models.LLMModel, error) {
+	return append([]models.LLMModel(nil), r.active...), nil
+}
+func (r *reasoningLLMModelRepository) ListActive() ([]models.LLMModel, error) {
+	return append([]models.LLMModel(nil), r.active...), nil
+}
+func (r *reasoningLLMModelRepository) GetByID(int) (*models.LLMModel, error) { return r.byID, nil }
 func (r *reasoningLLMModelRepository) GetByDisplayName(string) (*models.LLMModel, error) {
 	return nil, nil
 }
@@ -37,7 +43,31 @@ func validReasoningModelRequest() SaveLLMModelRequest {
 		ProtocolType:      models.ProtocolTypeOpenAICompatible,
 		BaseURL:           "https://api.deepseek.com",
 		ProviderModelName: "deepseek-v4-flash",
+		ProviderModels:    []models.LLMProviderModel{{ID: "deepseek-v4-flash"}},
 		IsActive:          true,
+	}
+}
+
+func TestSaveLLMModelPersistsCompleteDiscoveredCatalog(t *testing.T) {
+	repo := &reasoningLLMModelRepository{}
+	service := NewLLMModelService(repo)
+	request := validReasoningModelRequest()
+	request.ProviderModels = []models.LLMProviderModel{
+		{ID: "qwen3.8"},
+		{ID: "glm-5.2", DisplayName: "GLM 5.2"},
+		{ID: "minimax-m3"},
+	}
+	request.ProviderModelName = "qwen3.8"
+
+	saved, err := service.SaveModel(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(saved.ProviderModels) != 3 || saved.ProviderModels[1].ID != "glm-5.2" {
+		t.Fatalf("provider model catalog was not persisted: %#v", saved.ProviderModels)
+	}
+	if saved.ProviderModelsJSON == nil || *saved.ProviderModelsJSON == "" {
+		t.Fatal("provider model catalog JSON was not populated")
 	}
 }
 
@@ -228,5 +258,80 @@ func TestResolveDiscoveryURLRejectsExternalOrigin(t *testing.T) {
 	}
 	if resolved, ok := resolveDiscoveryURL("https://provider.example/v1/models", "/v1/models?after=2"); !ok || resolved != "https://provider.example/v1/models?after=2" {
 		t.Fatalf("same-origin pagination URL was not resolved: %q, %v", resolved, ok)
+	}
+}
+
+func TestListExpandedActiveModelsReturnsOnlyConfiguredDeployments(t *testing.T) {
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		if r.URL.Path != "/v1/models" {
+			t.Fatalf("discovery path = %q, want /v1/models", r.URL.Path)
+		}
+		if r.Header.Get("Authorization") != "Bearer provider-key" {
+			t.Fatalf("discovery authorization header was not forwarded")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"id":"deepseek-v4-flash"},{"id":"deepseek-v4-pro"},{"id":"deepseek-v4-flash-vision-exp"}]}`))
+	}))
+	defer server.Close()
+
+	apiKey := "provider-key"
+	repo := &reasoningLLMModelRepository{active: []models.LLMModel{
+		{
+			ID:                2,
+			DisplayName:       "deepseek",
+			ProviderType:      models.ProviderTypeOpenAICompatible,
+			ProtocolType:      models.ProtocolTypeOpenAICompatible,
+			BaseURL:           server.URL,
+			ProviderModelName: "deepseek-v4-flash",
+			APIKey:            &apiKey,
+			IsActive:          true,
+		},
+		{
+			ID:                3,
+			DisplayName:       "icompify",
+			ProviderType:      models.ProviderTypeOpenAICompatible,
+			ProtocolType:      models.ProtocolTypeOpenAICompatible,
+			BaseURL:           server.URL,
+			ProviderModelName: "deepseek-v4-flash-vision-exp",
+			APIKey:            &apiKey,
+			IsActive:          true,
+		},
+	}}
+	service := NewLLMModelService(repo)
+
+	items, err := service.ListExpandedActiveModels()
+	if err != nil {
+		t.Fatalf("ListExpandedActiveModels returned error: %v", err)
+	}
+	if len(items) != 2 || items[0].DisplayName != "deepseek" || items[1].DisplayName != "icompify" { t.Fatalf("configured deployments changed: %#v", items) }
+	if _, err := service.ListExpandedActiveModels(); err != nil { t.Fatal(err) }
+	if requests.Load() != 0 { t.Fatalf("runtime catalog must not discover/import models: %d", requests.Load()) }
+}
+
+func TestListExpandedActiveModelsFallsBackToConfiguredModelsWhenDiscoveryFails(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "provider unavailable", http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+
+	repo := &reasoningLLMModelRepository{active: []models.LLMModel{{
+		ID:                7,
+		DisplayName:       "fallback-model",
+		ProviderType:      models.ProviderTypeOpenAICompatible,
+		ProtocolType:      models.ProtocolTypeOpenAICompatible,
+		BaseURL:           server.URL,
+		ProviderModelName: "provider-fallback-model",
+		IsActive:          true,
+	}}}
+	service := NewLLMModelService(repo)
+
+	items, err := service.ListExpandedActiveModels()
+	if err != nil {
+		t.Fatalf("temporary discovery failure must not fail the configured catalog: %v", err)
+	}
+	if len(items) != 1 || items[0].DisplayName != "fallback-model" {
+		t.Fatalf("configured fallback model was not preserved: %#v", items)
 	}
 }

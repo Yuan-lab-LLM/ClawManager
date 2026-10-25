@@ -47,10 +47,11 @@ func (r *runtimePodRepository) UpsertFromAgent(ctx context.Context, pod *models.
 	res, err := r.sess.SQL().ExecContext(ctx, `
 		INSERT INTO runtime_pods (
 			runtime_type, namespace, pod_name, pod_uid, pod_ip, node_name, deployment_name,
-			image_ref, agent_endpoint, state, capacity, used_slots, draining, cpu_millis_used,
+			image_ref, openclaw_version, agent_protocol_version, team_plugin_version, session_store,
+			image_digest, capabilities_json, agent_endpoint, state, capacity, used_slots, draining, cpu_millis_used,
 			memory_bytes_used, disk_bytes_used, network_rx_bytes, network_tx_bytes, metrics_json,
 			last_seen_at, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON DUPLICATE KEY UPDATE
 			id = LAST_INSERT_ID(id),
 			runtime_type = VALUES(runtime_type),
@@ -59,6 +60,12 @@ func (r *runtimePodRepository) UpsertFromAgent(ctx context.Context, pod *models.
 			node_name = VALUES(node_name),
 			deployment_name = VALUES(deployment_name),
 			image_ref = VALUES(image_ref),
+			openclaw_version = VALUES(openclaw_version),
+			agent_protocol_version = VALUES(agent_protocol_version),
+			team_plugin_version = VALUES(team_plugin_version),
+			session_store = VALUES(session_store),
+			image_digest = VALUES(image_digest),
+			capabilities_json = VALUES(capabilities_json),
 			agent_endpoint = VALUES(agent_endpoint),
 			capacity = VALUES(capacity),
 			cpu_millis_used = VALUES(cpu_millis_used),
@@ -70,7 +77,8 @@ func (r *runtimePodRepository) UpsertFromAgent(ctx context.Context, pod *models.
 			last_seen_at = VALUES(last_seen_at),
 			updated_at = VALUES(updated_at)
 	`, pod.RuntimeType, pod.Namespace, pod.PodName, pod.PodUID, pod.PodIP, pod.NodeName, pod.DeploymentName,
-		pod.ImageRef, pod.AgentEndpoint, pod.State, pod.Capacity, pod.UsedSlots, pod.Draining, pod.CPUMillisUsed,
+		pod.ImageRef, pod.OpenClawVersion, pod.AgentProtocolVersion, pod.TeamPluginVersion, pod.SessionStore,
+		pod.ImageDigest, pod.CapabilitiesJSON, pod.AgentEndpoint, pod.State, pod.Capacity, pod.UsedSlots, pod.Draining, pod.CPUMillisUsed,
 		pod.MemoryBytesUsed, pod.DiskBytesUsed, pod.NetworkRXBytes, pod.NetworkTXBytes, pod.MetricsJSON,
 		pod.LastSeenAt, pod.CreatedAt, pod.UpdatedAt)
 	if err != nil {
@@ -134,6 +142,7 @@ func (r *runtimePodRepository) ListSchedulable(ctx context.Context, runtimeType 
 		SELECT *
 		FROM runtime_pods
 		WHERE runtime_type = ? AND state = 'ready' AND draining = 0 AND used_slots < capacity
+		  AND LOWER(TRIM(deployment_name)) NOT LIKE 'openclaw-upgrade-lab-%'
 		ORDER BY used_slots, id
 	`, runtimeType)
 	defer iter.Close()
@@ -148,6 +157,8 @@ func (r *runtimePodRepository) TryClaimSlot(ctx context.Context, podID int64) (b
 		UPDATE runtime_pods
 		SET used_slots = used_slots + 1, updated_at = ?
 		WHERE id = ? AND state = 'ready' AND draining = 0 AND used_slots < capacity
+		AND NOT EXISTS (SELECT 1 FROM runtime_rollouts rr
+		  WHERE rr.runtime_type = runtime_pods.runtime_type AND rr.status IN ('pending','running'))
 	`, time.Now().UTC(), podID)
 	if err != nil {
 		return false, fmt.Errorf("failed to claim runtime pod slot: %w", err)
