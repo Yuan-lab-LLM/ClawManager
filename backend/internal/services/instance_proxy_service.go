@@ -47,6 +47,7 @@ type InstanceProxyService struct {
 	openCodeBootstraps       map[string]*openCodeBootstrapCall
 	ownerUsage               *ownerrecords.Store
 	proxyPolicy              *RuntimeProxyPolicyCoordinator
+	runtimeSecurity          *RuntimeSecurityAuthority
 }
 
 type serviceCacheKey struct {
@@ -75,12 +76,20 @@ const (
 // DedicatedRuntimeOriginHeader marks requests routed through a runtime-specific browser origin.
 const DedicatedRuntimeOriginHeader = "X-ClawManager-Runtime-Origin"
 
+// NativeIngressTokenHeader authenticates protected root ingress before native
+// loopback dialing. The ingress relay consumes it rather than forwarding it.
+const NativeIngressTokenHeader = "X-ClawManager-Ingress-Token"
+
 var (
 	ErrInstanceGatewayUnavailable      = errors.New("instance gateway is not available")
 	ErrOpenCodeDedicatedOriginRequired = errors.New("OpenCode Lite requires its dedicated instance origin")
 )
 
 type InstanceProxyServiceOption func(*InstanceProxyService)
+
+func WithInstanceProxyRuntimeSecurity(authority *RuntimeSecurityAuthority) InstanceProxyServiceOption {
+	return func(s *InstanceProxyService) { s.runtimeSecurity = authority }
+}
 
 func WithInstanceProxyRuntimeRepositories(instanceRepo repository.InstanceRepository, runtimePodRepo repository.RuntimePodRepository, bindingRepo repository.InstanceRuntimeBindingRepository) InstanceProxyServiceOption {
 	return func(s *InstanceProxyService) {
@@ -173,7 +182,10 @@ func (s *InstanceProxyService) ProxyRequest(ctx context.Context, instanceID int,
 		return err
 	}
 
-	managedGatewayToken := s.managedRuntimeGatewayBearerToken(ctx, instanceID, accessToken.InstanceType)
+	managedGatewayToken, protectedGateway, err := s.managedRuntimeGatewayBearerToken(ctx, instanceID, accessToken.InstanceType, targetURL, runtimeGateway)
+	if err != nil {
+		return err
+	}
 	proxyPrefix := instanceProxyPrefix(instanceID)
 	bootstrapPath := stripInstanceProxyPrefix(targetPath, instanceID)
 	openCodeStorageScope := ""
@@ -212,7 +224,6 @@ func (s *InstanceProxyService) ProxyRequest(ctx context.Context, instanceID int,
 			return nil
 		}
 	}
-
 
 	// Agent UIs use SSE, streaming responses, and long-running HTTP calls such
 	// as DeepSeek Harness /api/respond. Keep every proxied request attached to
@@ -275,6 +286,7 @@ func (s *InstanceProxyService) ProxyRequest(ctx context.Context, instanceID int,
 
 	// Remove hop-by-hop headers
 	s.removeHopByHopHeaders(proxyReq.Header)
+	setNativeIngressToken(proxyReq.Header, managedGatewayToken, protectedGateway)
 
 	// Execute request
 	resp, err := s.httpClient.Do(proxyReq)
@@ -446,7 +458,10 @@ func (s *InstanceProxyService) ProxyWebSocket(ctx context.Context, instanceID in
 		return err
 	}
 
-	managedGatewayToken := s.managedRuntimeGatewayBearerToken(ctx, instanceID, accessToken.InstanceType)
+	managedGatewayToken, protectedGateway, err := s.managedRuntimeGatewayBearerToken(ctx, instanceID, accessToken.InstanceType, targetURL, runtimeGateway)
+	if err != nil {
+		return err
+	}
 
 	// Copy query parameters, excluding ClawManager-owned proxy/gateway tokens.
 	// Preserve DSH's significant leading '?' in plugin-loader batch queries.
@@ -498,6 +513,7 @@ func (s *InstanceProxyService) ProxyWebSocket(ctx context.Context, instanceID in
 		}
 	}
 
+	setNativeIngressToken(upstreamHeader, managedGatewayToken, protectedGateway)
 	// Keep the pipe alive for the full WebSocket lifetime; do not inherit any
 	// short deadlines that may be attached to the inbound request context.
 	proxyCtx := ctx
@@ -934,27 +950,42 @@ func injectOpenCodeAbsolutePathPatch(html, proxyPrefix string) string {
 	return script + html
 }
 
-func (s *InstanceProxyService) managedRuntimeGatewayBearerToken(ctx context.Context, instanceID int, instanceType string) string {
+func (s *InstanceProxyService) managedRuntimeGatewayBearerToken(ctx context.Context, instanceID int, instanceType string, target *url.URL, runtimeGateway bool) (string, bool, error) {
 	if s == nil || s.instanceRepo == nil {
-		return ""
+		return "", false, nil
 	}
 	normalizedType, managedType := NormalizeV2RuntimeType(instanceType)
 	if !managedType {
-		return ""
+		return "", false, nil
 	}
 	instance, err := s.instanceRepo.GetByID(instanceID)
 	if err != nil || instance == nil {
-		return ""
+		return "", false, ErrInstanceGatewayUnavailable
+	}
+	if instance.RuntimeSecurityProfile != "" {
+		runtimeType, ok := v2RuntimeTypeForInstance(instance)
+		if s.runtimeSecurity == nil || !runtimeGateway || !ok || runtimeType != normalizedType {
+			return "", false, ErrInstanceGatewayUnavailable
+		}
+		credential, err := s.runtimeSecurity.NativeGatewayCredentialForTarget(ctx, instanceID, target)
+		return credential, true, err
 	}
 	if runtimeType, ok := v2RuntimeTypeForInstance(instance); ok && runtimeType == normalizedType {
 		if instance.AccessToken != nil && strings.TrimSpace(*instance.AccessToken) != "" {
-			return strings.TrimSpace(*instance.AccessToken)
+			return strings.TrimSpace(*instance.AccessToken), false, nil
 		}
 	}
 	if normalizedType == RuntimeTypeOpenClaw && s.openClawGatewayToken != "" {
-		return s.openClawGatewayToken
+		return s.openClawGatewayToken, false, nil
 	}
-	return ""
+	return "", false, nil
+}
+
+func setNativeIngressToken(header http.Header, credential string, protected bool) {
+	header.Del(NativeIngressTokenHeader)
+	if protected {
+		header.Set(NativeIngressTokenHeader, credential)
+	}
 }
 
 func (s *InstanceProxyService) resolveHTTPProxyTarget(ctx context.Context, accessToken *AccessToken, instanceID int, targetPort int32, targetPath, requestPath string) (*url.URL, bool, error) {

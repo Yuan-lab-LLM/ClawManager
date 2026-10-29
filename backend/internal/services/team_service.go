@@ -15101,14 +15101,7 @@ func defaultTeamRedisURL() string {
 }
 
 func defaultTeamRedisServiceURL() (string, bool) {
-	systemNamespace := strings.TrimSpace(os.Getenv("CLAWMANAGER_SYSTEM_NAMESPACE"))
-	if systemNamespace == "" {
-		if client := k8s.GetClient(); client != nil {
-			systemNamespace = client.GetSystemNamespace()
-		} else if baseNamespace := strings.TrimSpace(os.Getenv("K8S_NAMESPACE")); baseNamespace != "" {
-			systemNamespace = fmt.Sprintf("%s-system", baseNamespace)
-		}
-	}
+	systemNamespace := defaultSystemNamespace()
 	if systemNamespace == "" {
 		return "", false
 	}

@@ -25,6 +25,60 @@ type concurrentStopRuntimeAgent struct {
 	bindings *fakeRuntimeBindingRepo
 }
 
+type strictStopRuntimeAgent struct {
+	*fakeRuntimeAgentClient
+	strict     bool
+	state      string
+	stateCalls int
+}
+
+func (a *strictStopRuntimeAgent) RequiresConfirmedGatewayStop() bool { return a.strict }
+
+func (a *strictStopRuntimeAgent) GatewayState(context.Context, string, string) (*RuntimeAgentGatewayState, error) {
+	a.stateCalls++
+	if a.state == "" {
+		return nil, ErrRuntimeAgentNotFound
+	}
+	return &RuntimeAgentGatewayState{State: a.state}, nil
+}
+
+func TestStopCandidateGatewayRequiresStrictDeleteReceipt(t *testing.T) {
+	for _, state := range []string{"", "stopped"} {
+		for _, deleteErr := range []error{ErrRuntimeAgentNotFound, ErrRuntimeAgentConflict, fmt.Errorf("missing teardown receipt"), nil} {
+			t.Run(fmt.Sprintf("state=%q/delete=%v", state, deleteErr), func(t *testing.T) {
+				bindings := newFakeRuntimeBindingRepo()
+				bindings.bindings[209] = &models.InstanceRuntimeBinding{InstanceID: 209, RuntimePodID: 9, GatewayID: "gw-209-2", Generation: 2, State: RuntimeGatewayBindingRunning}
+				agent := &strictStopRuntimeAgent{fakeRuntimeAgentClient: &fakeRuntimeAgentClient{deleteErr: deleteErr}, strict: true, state: state}
+				service := &RuntimeUpgradeService{bindings: bindings, agent: agent}
+				stopped, err := service.stopCandidateGateway(context.Background(), runtimeUpgradeCandidate{InstanceID: 209, RuntimePodID: int64Pointer(9), GatewayID: "gw-209-2", Generation: 2, BindingState: RuntimeGatewayBindingRunning, AgentEndpoint: "https://runtime", Capabilities: []string{"openclaw.gateway.stop-confirm"}})
+				if deleteErr != nil {
+					if stopped || err == nil || bindings.bindings[209] == nil || bindings.deleteAndReleaseCalls[209] != 0 {
+						t.Fatalf("unconfirmed stop released source: stopped=%v err=%v", stopped, err)
+					}
+				} else if !stopped || err != nil || bindings.bindings[209] != nil {
+					t.Fatalf("confirmed receipt rejected: stopped=%v err=%v", stopped, err)
+				}
+				if agent.stateCalls != 0 {
+					t.Fatal("strict stop consulted legacy record-absence proof")
+				}
+			})
+		}
+	}
+}
+
+func TestStopCandidateGatewayStrictMissingIdentityIsNotStopped(t *testing.T) {
+	for _, state := range []string{RuntimeGatewayBindingRunning, RuntimeGatewayBindingCreating} {
+		bindings := newFakeRuntimeBindingRepo()
+		bindings.bindings[209] = &models.InstanceRuntimeBinding{InstanceID: 209, RuntimePodID: 9, Generation: 2, State: state}
+		agent := &strictStopRuntimeAgent{fakeRuntimeAgentClient: &fakeRuntimeAgentClient{}, strict: true}
+		service := &RuntimeUpgradeService{bindings: bindings, agent: agent}
+		stopped, err := service.stopCandidateGateway(context.Background(), runtimeUpgradeCandidate{InstanceID: 209, RuntimePodID: int64Pointer(9), BindingState: state})
+		if stopped || err == nil || bindings.bindings[209] == nil {
+			t.Fatalf("missing strict identity authorized stop: state=%s stopped=%v err=%v", state, stopped, err)
+		}
+	}
+}
+
 func (a *concurrentStopRuntimeAgent) DeleteGateway(ctx context.Context, endpoint, gatewayID string) error {
 	if binding := a.bindings.bindings[209]; binding != nil {
 		binding.State = RuntimeGatewayBindingCreating

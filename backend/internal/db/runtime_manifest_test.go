@@ -43,6 +43,29 @@ func TestRuntimeManifestsAreValidYAML(t *testing.T) {
 	}
 }
 
+func TestClawManagerReadinessWaitsForBackend(t *testing.T) {
+	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
+	manifests := append(deploymentRuntimeManifests(repoRoot), filepath.Join(repoRoot, "deployments", "k8s", "sites", "nine-node-production", "20-clawmanager-production.yaml"))
+	for _, manifest := range manifests {
+		t.Run(manifest, func(t *testing.T) {
+			raw, err := os.ReadFile(manifest)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// The edge /healthz returns a static 200 before migrations and backend
+			// initialization finish. Readiness must cross the actual API upstream.
+			ready := regexp.MustCompile(`readinessProbe:\s+httpGet:\s+scheme: HTTPS\s+path: /api/v1/version\s+port: https`)
+			if !ready.Match(raw) {
+				t.Fatal("ClawManager readiness must probe the backend through the HTTPS edge")
+			}
+			live := regexp.MustCompile(`livenessProbe:\s+httpGet:\s+scheme: HTTPS\s+path: /healthz\s+port: https`)
+			if !live.Match(raw) {
+				t.Fatal("liveness must allow backend initialization to complete")
+			}
+		})
+	}
+}
+
 func TestDeploymentManifestsConfigureHermesDesktopWeb(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	wantDeployments := map[string]string{

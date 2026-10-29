@@ -102,6 +102,9 @@ func Initialize(cfg *config.Config) error {
 		return fmt.Errorf("invalid K8S_MODE: %s (must be 'auto', 'incluster', or 'outofcluster')", mode)
 	}
 
+	if err := configureAPIRateLimits(restConfig, cfg); err != nil {
+		return err
+	}
 	clientset, err := kubernetes.NewForConfig(restConfig)
 	if err != nil {
 		return fmt.Errorf("failed to create kubernetes clientset: %w", err)
@@ -127,6 +130,34 @@ func Initialize(cfg *config.Config) error {
 		Mode:                     detectedMode,
 	}
 
+	return nil
+}
+
+// Protected ingress performs multiple fresh identity/policy reads per check.
+// Size the client queue for these short, bounded checks instead of timing out
+// on client-go's five-QPS default. Deadlines and fail-closed checks are unchanged.
+func configureAPIRateLimits(restConfig *rest.Config, cfg *config.Config) error {
+	qps, burst := cfg.Kubernetes.APIQPS, cfg.Kubernetes.APIBurst
+	if qps < 0 || qps > 10000 || burst < 0 || burst > 20000 {
+		return fmt.Errorf("K8S_API_QPS must be 0..10000 and K8S_API_BURST 0..20000")
+	}
+	if cfg.Runtime.NetworkIsolation {
+		if qps == 0 {
+			qps = 100
+		}
+		if burst == 0 {
+			burst = 200
+		}
+	}
+	if qps > 0 && burst == 0 && restConfig.Burst == 0 {
+		burst = rest.DefaultBurst
+	}
+	if qps != 0 {
+		restConfig.QPS = float32(qps)
+	}
+	if burst != 0 {
+		restConfig.Burst = burst
+	}
 	return nil
 }
 
@@ -249,7 +280,17 @@ func (c *Client) GetNamespace(userID int) string {
 
 // GetSystemNamespace returns the control-plane namespace used by ClawManager itself.
 func (c *Client) GetSystemNamespace() string {
-	return sanitizeK8sName(fmt.Sprintf("%s-system", c.Namespace))
+	return ResolveSystemNamespace(c.Namespace)
+}
+
+// ResolveSystemNamespace accepts both a legacy namespace prefix and the full
+// control-plane namespace used by current Kubernetes deployments.
+func ResolveSystemNamespace(namespace string) string {
+	namespace = strings.TrimSpace(namespace)
+	if !strings.HasSuffix(strings.ToLower(namespace), "-system") {
+		namespace += "-system"
+	}
+	return sanitizeK8sName(namespace)
 }
 
 // GetPodName returns the pod name for an instance

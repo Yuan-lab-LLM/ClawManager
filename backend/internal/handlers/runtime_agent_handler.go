@@ -27,12 +27,13 @@ type runtimeEventPublisher interface {
 }
 
 type RuntimeAgentHandler struct {
-	cfg          config.RuntimePoolConfig
-	podRepo      repository.RuntimePodRepository
-	bindingRepo  repository.InstanceRuntimeBindingRepository
-	instanceRepo repository.InstanceRepository
-	events       runtimeEventPublisher
-	skillService services.SkillService
+	reportVerifier RuntimeGatewayReportVerifier
+	cfg            config.RuntimePoolConfig
+	podRepo        repository.RuntimePodRepository
+	bindingRepo    repository.InstanceRuntimeBindingRepository
+	instanceRepo   repository.InstanceRepository
+	events         runtimeEventPublisher
+	skillService   services.SkillService
 }
 
 type runtimeAgentPodIdentity struct {
@@ -310,6 +311,16 @@ func (h *RuntimeAgentHandler) ReportGateways(c *gin.Context) {
 		if err != nil {
 			utils.HandleError(c, err)
 			return
+		}
+		handled, _, recoveryErr := h.reconcileProtectedPendingReport(c.Request.Context(), binding, podID, gateway)
+		if recoveryErr != nil {
+			utils.HandleError(c, recoveryErr)
+			return
+		}
+		if handled {
+			// The protected transaction already updates both rows. A second
+			// write here could resurrect a same-generation concurrent stop.
+			continue
 		}
 		if binding == nil || pendingBindingCanYieldToReportedGateway(binding, podID, gateway) {
 			reconciled, reconcileErr := h.reconcileReportedOpenClawGateway(c.Request.Context(), podID, gateway)

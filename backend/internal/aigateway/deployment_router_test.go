@@ -2,6 +2,7 @@ package aigateway
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"testing"
@@ -50,13 +51,13 @@ func (*routingDeploymentStore) Release(context.Context, *services.GatewayDeploym
 
 func deploymentRoutingFixture() (*preparedChatRequest, []*models.LLMModel) {
 	return &preparedChatRequest{
-			sessionID: "session-sticky", userID: 9, requestID: "request-a",
-			resolvedModel: &models.LLMModel{ModelGroup: "general"},
-			req:           ChatCompletionRequest{MaxTokens: intPtr(256)},
-		}, []*models.LLMModel{
-			{ID: 1, ModelGroup: "general", DeploymentPriority: 1, MaxConcurrentRequests: 10},
-			{ID: 2, ModelGroup: "general", DeploymentPriority: 2, MaxConcurrentRequests: 10},
-		}
+		sessionID: "session-sticky", userID: 9, requestID: "request-a",
+		resolvedModel: &models.LLMModel{ModelGroup: "general"},
+		req:           ChatCompletionRequest{MaxTokens: intPtr(256)},
+	}, []*models.LLMModel{
+		{ID: 1, ModelGroup: "general", DeploymentPriority: 1, MaxConcurrentRequests: 10},
+		{ID: 2, ModelGroup: "general", DeploymentPriority: 2, MaxConcurrentRequests: 10},
+	}
 }
 
 func TestAutoDeploymentRoutingPrefersMateriallyFasterHealthyDeployment(t *testing.T) {
@@ -89,16 +90,31 @@ func TestAutoDeploymentRoutingExcludesCooldownDeployment(t *testing.T) {
 
 func TestAutoDeploymentRoutingDoesNotTrustExpiredPerformanceSamples(t *testing.T) {
 	prepared, candidates := deploymentRoutingFixture()
+	audit := &stubAuditEventService{}
 	old := time.Now().UTC().Add(-deploymentHealthSampleTTL - time.Minute).UnixMilli()
 	now := time.Now().UTC().UnixMilli()
-	gateway := &service{deploymentStore: &routingDeploymentStore{snapshots: map[int]services.GatewayDeploymentSnapshot{
+	gateway := &service{auditEventService: audit, deploymentStore: &routingDeploymentStore{snapshots: map[int]services.GatewayDeploymentSnapshot{
 		1: {DeploymentID: 1, State: "healthy", EWMATTFTMs: 1, EWMALatencyMs: 1, EWMATokensPerSecond: 10000, Samples: 20, LastSuccessMs: old},
 		2: {DeploymentID: 2, State: "healthy", EWMATTFTMs: 400, EWMALatencyMs: 2000, EWMATokensPerSecond: 40, Samples: 20, LastSuccessMs: now},
 	}}}
 
 	ordered := gateway.orderAutoDeployments(t.Context(), prepared, candidates)
-	if ordered[0].ID != 2 {
-		t.Fatalf("expired performance sample remained authoritative: %#v", ordered)
+	if len(ordered) != 2 || len(audit.events) != 1 || audit.events[0].Details == nil {
+		t.Fatalf("missing deployment routing result: %#v", ordered)
+	}
+	var details deploymentRoutingDetails
+	if err := json.Unmarshal([]byte(*audit.events[0].Details), &details); err != nil {
+		t.Fatal(err)
+	}
+	scores := make(map[int]deploymentRouteScore)
+	for _, candidate := range details.Candidates {
+		scores[candidate.DeploymentID] = candidate
+	}
+	// Expired deployments can receive bounded exploration traffic. Check their
+	// discarded measurements and score, independent of the time-bucket hash.
+	stale, fresh := scores[1], scores[2]
+	if stale.State != "unknown" || stale.EWMATTFTMs != 0 || stale.EWMALatencyMs != 0 || stale.EWMATokensPerSecond != 0 || stale.Score <= fresh.Score {
+		t.Fatalf("expired performance sample remained authoritative: %+v", details)
 	}
 }
 

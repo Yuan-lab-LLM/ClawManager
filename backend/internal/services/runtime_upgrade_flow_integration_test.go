@@ -53,7 +53,7 @@ func upgradeFlowDB(t *testing.T) db.Session {
 	for _, n := range []string{"users", "teams", "team_members"} {
 		exec("CREATE TABLE " + n + " (id INT PRIMARY KEY)")
 	}
-	for _, file := range []string{"023_add_runtime_pool_v2.sql", "058_add_openclaw_runtime_upgrade_safety.sql", "061_persist_runtime_upgrade_source_identity.sql", "070_add_upgrade_restart_attempts.sql", "073_add_upgrade_operation_claims.sql", "074_add_upgrade_recovery_key.sql", "075_add_upgrade_retry_diagnostics.sql", "076_add_upgrade_item_isolation.sql"} {
+	for _, file := range []string{"023_add_runtime_pool_v2.sql", "066_add_runtime_upgrade_fence.sql", "058_add_openclaw_runtime_upgrade_safety.sql", "061_persist_runtime_upgrade_source_identity.sql", "070_add_upgrade_restart_attempts.sql", "073_add_upgrade_operation_claims.sql", "074_add_upgrade_recovery_key.sql", "075_add_upgrade_retry_diagnostics.sql", "076_add_upgrade_item_isolation.sql", "064_add_instance_lifecycle_batches.sql", "079_add_runtime_management.sql", "080_add_runtime_pod_deletion_intents.sql"} {
 		b, e := os.ReadFile("../db/migrations/" + file)
 		if e != nil {
 			t.Fatal(e)
@@ -105,7 +105,7 @@ func TestUpgradeRecoveryMySQLFlow(t *testing.T) {
 		t.Run(scenario, func(t *testing.T) {
 			s := upgradeFlowDB(t)
 			ctx := context.Background()
-			root := t.TempDir()
+			root := canonicalCompatibilityTestDir(t)
 			exec := func(q string, args ...any) {
 				t.Helper()
 				if _, e := s.SQL().Exec(q, args...); e != nil {
@@ -182,7 +182,10 @@ func TestUpgradeRecoveryMySQLFlow(t *testing.T) {
 				}
 			}
 			if !done {
-				t.Fatal("rollout could not converge")
+				var diagnostics []models.RuntimeUpgradeItem
+				_ = s.Collection("runtime_upgrade_items").Find("rollout_id", 123).All(&diagnostics)
+				raw, _ := json.Marshal(diagnostics)
+				t.Fatalf("rollout could not converge: %s", raw)
 			}
 			if agent.creates != len(ids) {
 				t.Fatalf("duplicate/lost starts: creates=%d instances=%d", agent.creates, len(ids))

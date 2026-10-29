@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"log"
 	"net/http"
+	"net/netip"
+	"net/url"
 	"os"
 	"os/signal"
 	"strings"
@@ -23,6 +25,8 @@ import (
 	"clawreef/internal/northbound"
 	"clawreef/internal/ownerrecords"
 	"clawreef/internal/repository"
+	"clawreef/internal/runtimeauth"
+	"clawreef/internal/runtimeinventory"
 	"clawreef/internal/services"
 	"clawreef/internal/services/k8s"
 	"clawreef/internal/services/leader"
@@ -30,6 +34,10 @@ import (
 	"clawreef/internal/teamtemplate"
 
 	"github.com/gin-gonic/gin"
+	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/metadata"
+	"k8s.io/client-go/rest"
 )
 
 func main() {
@@ -143,8 +151,107 @@ func main() {
 	services.SetRuntimeImageSettingsProvider(systemImageSettingService)
 	services.SetOpenClawTransferRuntimeRepositories(instanceRepo, bindingRepo, runtimePodRepo)
 	runtimeAgentClient := services.NewRuntimeAgentClient(cfg.Runtime.AgentControlToken)
+	var runtimeSecurity *services.RuntimeSecurityAuthority
+	// The zero inventory fails closed for protected assignments when their
+	// cluster ranges have not been configured, while legacy runtimes still work.
+	runtimeInventory := &runtimeinventory.Inventory{}
+	contextInstances, ok := instanceRepo.(interface {
+		GetByIDContext(context.Context, int) (*models.Instance, error)
+	})
+	if !ok {
+		log.Fatal("Runtime authentication requires contextual instance lookup")
+	}
+	protectedRuntimeInstance := func(ctx context.Context, id int) (bool, error) {
+		instance, err := contextInstances.GetByIDContext(ctx, id)
+		if err != nil {
+			return false, err
+		}
+		if ctx.Err() != nil {
+			return false, ctx.Err()
+		}
+		if instance == nil {
+			return false, services.ErrInstanceGatewayUnavailable
+		}
+		return instance.RuntimeSecurityProfile != "", nil
+	}
+	if cfg.Runtime.ContainerSlots > 0 {
+		slotKubeClient := k8s.GetClient()
+		if slotKubeClient == nil || slotKubeClient.Clientset == nil {
+			log.Fatal("Lite container slots require Kubernetes connectivity")
+		}
+		bootstrapCtx, bootstrapCancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		bootstrapErr := k8s.EnsureRuntimeSlotPools(bootstrapCtx, slotKubeClient.Clientset, cfg.Runtime)
+		bootstrapCancel()
+		if bootstrapErr != nil {
+			log.Fatalf("Failed to initialize Lite container slots: %v", bootstrapErr)
+		}
+		slotNamespace := strings.TrimSpace(cfg.Runtime.Namespace)
+		if slotNamespace == "" {
+			slotNamespace = "clawmanager-system"
+		}
+		trustCtx, trustCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		slotTrust, trustErr := k8s.RuntimeSlotTLSConfig(trustCtx, slotKubeClient.Clientset, slotNamespace)
+		trustCancel()
+		if trustErr != nil {
+			log.Fatalf("Failed to trust Lite container slot management TLS: %v", trustErr)
+		}
+		runtimeAgentClient = services.NewSlotRuntimeAgentClientWithHTTPClient(cfg.Runtime.AgentControlToken, slotKubeClient.Clientset, slotNamespace, &http.Client{Transport: &http.Transport{TLSClientConfig: slotTrust}, Timeout: 30 * time.Second})
+		securityCtx, securityCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		signingKey, securityErr := k8s.RuntimeCapabilitySigningKey(securityCtx, slotKubeClient.Clientset, slotNamespace)
+		securityCancel()
+		if securityErr != nil {
+			log.Fatal("Failed to prepare runtime capability signing key")
+		}
+		if len(cfg.Runtime.NetworkPodCIDRs) > 0 {
+			watchConfig := rest.CopyConfig(slotKubeClient.Config)
+			watchConfig.QPS, watchConfig.Burst, watchConfig.Timeout = 20, 40, 0
+			apiURL, parseErr := url.Parse(watchConfig.Host)
+			if parseErr != nil {
+				log.Fatal("Invalid protected runtime API server address")
+			}
+			apiAddress, parseErr := netip.ParseAddr(apiURL.Hostname())
+			if parseErr != nil || apiAddress.Zone() != "" {
+				log.Fatal("Protected runtime inventory requires a literal API server address")
+			}
+			watchKube, watchErr := kubernetes.NewForConfig(watchConfig)
+			if watchErr != nil {
+				log.Fatal("Failed to initialize protected runtime watch client")
+			}
+			watchDynamic, watchErr := dynamic.NewForConfig(watchConfig)
+			if watchErr != nil {
+				log.Fatal("Failed to initialize protected runtime network inventory client")
+			}
+			watchMetadata, watchErr := metadata.NewForConfig(watchConfig)
+			if watchErr != nil {
+				log.Fatal("Failed to initialize protected runtime metadata proof client")
+			}
+			runtimeInventory, watchErr = runtimeinventory.Start(context.Background(), watchKube, watchDynamic, watchMetadata, slotNamespace, cfg.Runtime.NetworkPodCIDRs, []string{apiAddress.String()})
+			if watchErr != nil {
+				log.Fatal("Failed to initialize protected runtime inventory")
+			}
+			defer runtimeInventory.Close()
+			readyCtx, readyCancel := context.WithTimeout(context.Background(), 15*time.Second)
+			watchErr = runtimeInventory.WaitReady(readyCtx)
+			readyCancel()
+			if watchErr != nil {
+				log.Fatal("Protected runtime inventory did not synchronize")
+			}
+		}
+		runtimeSecurity, securityErr = services.NewRuntimeSecurityAuthority(slotKubeClient.Clientset, slotNamespace, contextInstances, signingKey, services.WithRuntimeSecurityAssignments(runtimeInventory))
+		if securityErr != nil {
+			log.Fatal("Failed to initialize runtime capability authority")
+		}
+		if err := services.ConfigureSlotRuntimeSecurity(runtimeAgentClient, runtimeSecurity); err != nil {
+			log.Fatal("Failed to configure protected runtime assignment lifecycle")
+		}
+	}
 	runtimeUpgradeService := services.NewRuntimeUpgradeService(database, rolloutRepo, runtimePodRepo, bindingRepo, runtimeAgentClient, cfg.Runtime.WorkspaceRoot, cfg.Runtime.RedisURL)
 	browserWorkerService := services.NewBrowserWorkerService(browserWorkerRepo, instanceRepo, k8s.GetClient())
+	if runtimeSecurity != nil {
+		if err := services.ConfigureBrowserRuntimeSecurity(browserWorkerService, runtimeSecurity.CurrentIdentity); err != nil {
+			log.Fatal("Failed to configure protected Browser Worker authority")
+		}
+	}
 	instanceService := services.NewInstanceService(
 		instanceRepo,
 		quotaRepo,
@@ -262,7 +369,7 @@ func main() {
 	go imageArtifacts.RunCleanup(imageCleanupCtx)
 	imageJobs := services.NewGatewayImageJobService(database, gatewayBudgetService)
 	go imageJobs.RunRecovery(imageCleanupCtx)
-	aiGatewayService := aigateway.NewService(llmModelRepo, modelInvocationService, auditEventService, costRecordService, riskDetectionService, riskHitService, chatSessionService, chatMessageService, aigateway.WithOwnerUsage(ownerStore), aigateway.WithDeploymentStore(deploymentStore), classifierOption, aigateway.WithRuntimeTasks(runtimeTasks), aigateway.WithImageArtifacts(imageArtifacts), aigateway.WithImageJobs(imageJobs))
+	aiGatewayService := aigateway.NewService(llmModelRepo, modelInvocationService, auditEventService, costRecordService, riskDetectionService, riskHitService, chatSessionService, chatMessageService, aigateway.WithExpandedLLMModelCatalog(llmModelService), aigateway.WithOwnerUsage(ownerStore), aigateway.WithDeploymentStore(deploymentStore), classifierOption, aigateway.WithRuntimeTasks(runtimeTasks), aigateway.WithImageArtifacts(imageArtifacts), aigateway.WithImageJobs(imageJobs))
 	gatewayRuntimeHandler := handlers.NewGatewayRuntimeHandler(runtimeTasks, aiGatewayService, auditEventService)
 	runtimeProtocols := repository.NewRuntimeProtocolRepository(database)
 	runtimeProtocolHandler := handlers.NewRuntimeProtocolHandler(runtimeProtocols, instanceRepo)
@@ -296,6 +403,7 @@ func main() {
 		aiObservabilityService,
 		services.NewInstanceShellService(),
 		services.WithInstanceProxyRuntimeRepositories(instanceRepo, runtimePodRepo, bindingRepo),
+		services.WithInstanceProxyRuntimeSecurity(runtimeSecurity),
 		services.WithOpenCodeLiteSessionBootstrap(),
 		services.WithInstanceProxyPolicyCoordinator(runtimeAgentClient, cfg.Runtime.Namespace),
 		services.WithInstanceProxyOwnerUsage(ownerStore),
@@ -306,6 +414,7 @@ func main() {
 		Enabled:         services.HermesWebEnabled(os.Getenv("CLAWMANAGER_HERMES_DESKTOP_WEB_ENABLED")),
 		Secret:          cfg.JWT.Secret, Instances: instanceRepo, Users: userRepo, Bindings: bindingRepo, Pods: runtimePodRepo,
 		Teams: repository.NewHermesDesktopTeamGuard(database), Agent: runtimeAgentClient, Redis: platformRedis, ExternalAccess: externalAccessService,
+		RuntimeSecurity: runtimeSecurity,
 	})
 	hermesDesktopHandler := handlers.NewHermesDesktopHandler(hermesDesktopService)
 	authHandler.SetDesktopLogoutHook(hermesDesktopService.RevokeUserSessions)
@@ -353,8 +462,7 @@ func main() {
 	clusterResourceHandler := handlers.NewClusterResourceHandler(clusterResourceService)
 	teamPreviewSecretService := k8s.NewSecretService()
 	teamPreviewOrigin, _ := services.DefaultTeamPreviewOrigin()
-	egressProxyHandler := handlers.NewEgressProxyHandler(
-		auditEventService,
+	egressOptions := []handlers.EgressProxyOption{
 		handlers.WithTeamArtifactPreview(
 			teamRepo,
 			teamPreviewSecretService,
@@ -369,7 +477,94 @@ func main() {
 		),
 		handlers.WithTeamArtifactPreviewOrigin(teamPreviewOrigin),
 		handlers.WithEgressPrivateExceptions(egressPrivateExceptionService, repository.NewEgressInstanceRepository(database)),
-	)
+	}
+	var protectedEgressServer *http.Server
+	var browserEgressServer *http.Server
+	var runtimeServicesHandler *handlers.RuntimeServicesHandler
+	var runtimeLeaseHandler *handlers.RuntimeSecurityLeaseHandler
+	var runtimeCapabilityVerifier middleware.RuntimeCapabilityVerifier
+	if runtimeSecurity != nil {
+		contextBrowserConfigs, ok := browserWorkerRepo.(services.RuntimeBrowserConfigSource)
+		if !ok {
+			log.Fatal("Managed browser requires contextual configuration lookup")
+		}
+		browserAdapter, err := services.NewRuntimeBrowserAdapter(contextInstances, contextBrowserConfigs, browserWorkerService)
+		if err != nil {
+			log.Fatal("Failed to configure managed browser adapter")
+		}
+		managedRedis, err := services.NewManagedTeamRedis(teamService, contextInstances, runtimeSecurity.CurrentIdentity, func(ctx context.Context, address netip.Addr) error {
+			denied, err := runtimeInventory.Deny(ctx, address)
+			if err != nil || !denied {
+				return services.ErrInstanceGatewayUnavailable
+			}
+			return nil
+		})
+		if err != nil {
+			log.Fatal("Failed to configure managed Team Redis")
+		}
+		if err := services.ConfigureManagedTeamRedisNetwork(managedRedis, runtimeSecurity); err != nil {
+			log.Fatal("Failed to configure protected Team network admission")
+		}
+		managedPreview, err := services.NewManagedTeamPreview(managedRedis, runtimeSecurity, cfg.Runtime.WorkspaceRoot, teamPreviewOrigin, func(ctx context.Context, identity runtimeauth.Identity) error {
+			return runtimeSecurity.VerifyManagedPreviewImage(ctx, identity, map[string]string{
+				"openclaw": cfg.Runtime.OpenClawImage, "hermes": cfg.Runtime.HermesImage,
+				"opencode": cfg.Runtime.OpenCodeImage, "deepseek-harness": cfg.Runtime.DeepSeekHarnessImage,
+			})
+		})
+		if err != nil {
+			log.Fatal("Failed to configure managed Team preview")
+		}
+		if err := services.ConfigureSlotTeamPreviewSecurity(runtimeAgentClient, managedPreview); err != nil {
+			log.Fatal("Failed to configure Team preview assignment protection")
+		}
+		egressOptions = append(egressOptions, handlers.WithManagedTeamPreview(managedPreview))
+		workerVerifier, err := services.NewRuntimeBrowserEgressVerifier(runtimeSecurity.CurrentIdentity, browserAdapter)
+		if err != nil {
+			log.Fatal("Failed to configure Browser Worker egress authority")
+		}
+		workerOptions := append(append([]handlers.EgressProxyOption(nil), egressOptions...), handlers.WithEgressRuntimeCapabilities(workerVerifier), handlers.WithEgressHardDeny(runtimeInventory.Deny))
+		workerProxy := handlers.NewEgressProxyHandler(auditEventService, workerOptions...)
+		workerRouter := gin.New()
+		workerRouter.Use(gin.CustomRecovery(func(c *gin.Context, _ any) {
+			log.Print("Browser Worker egress request failed")
+			c.AbortWithStatus(http.StatusInternalServerError)
+		}))
+		workerRouter.NoRoute(workerProxy.Handle)
+		workerRouter.NoMethod(workerProxy.Handle)
+		browserEgressServer = &http.Server{Addr: ":9004", Handler: workerRouter, ReadHeaderTimeout: 5 * time.Second, MaxHeaderBytes: 32 << 10}
+		resolver, err := handlers.NewRuntimeManagedServicesResolver(managedRedis, browserAdapter, managedPreview)
+		if err != nil {
+			log.Fatal("Failed to configure managed runtime services")
+		}
+		runtimeServicesHandler, err = handlers.NewRuntimeServicesHandler(runtimeSecurity.Capabilities(), resolver)
+		if err != nil {
+			log.Fatal("Failed to configure managed service authorization")
+		}
+		runtimeCapabilityVerifier = runtimeSecurity.Capabilities()
+		protectedOptions := append(append([]handlers.EgressProxyOption(nil), egressOptions...), handlers.WithEgressRuntimeCapabilities(runtimeSecurity.Capabilities()), handlers.WithEgressHardDeny(runtimeInventory.Deny))
+		protectedProxy := handlers.NewEgressProxyHandler(auditEventService, protectedOptions...)
+		proxyRouter := gin.New()
+		proxyRouter.Use(gin.CustomRecovery(func(c *gin.Context, _ any) {
+			log.Print("Runtime egress request failed")
+			c.AbortWithStatus(http.StatusInternalServerError)
+		}))
+		proxyRouter.NoRoute(protectedProxy.Handle)
+		proxyRouter.NoMethod(protectedProxy.Handle)
+		protectedEgressServer = &http.Server{Addr: ":9002", Handler: proxyRouter, ReadHeaderTimeout: 5 * time.Second, MaxHeaderBytes: 32 << 10}
+		if len(cfg.Runtime.AgentControlToken) >= 32 {
+			var leaseErr error
+			runtimeLeaseHandler, leaseErr = handlers.NewRuntimeSecurityLeaseHandler(cfg.Runtime.AgentControlToken, runtimeSecurity)
+			if leaseErr != nil {
+				log.Fatal("Failed to initialize trusted runtime lease endpoint")
+			}
+		}
+	}
+	if runtimeSecurity != nil {
+		slotReconcileCtx, slotReconcileCancel := context.WithCancel(context.Background())
+		defer slotReconcileCancel()
+		services.StartRuntimeSlotReconciliation(slotReconcileCtx, runtimeAgentClient)
+	}
+	egressProxyHandler := handlers.NewEgressProxyHandler(auditEventService, egressOptions...)
 	openClawConfigHandler := handlers.NewOpenClawConfigHandler(openClawConfigService)
 	skillHandler := handlers.NewSkillHandler(skillService, instanceService)
 	skillHubHandler := handlers.NewSkillHubHandler(skillService, instanceService)
@@ -391,6 +586,9 @@ func main() {
 	workspaceFileHandler.SetExternalAccessServices(externalAccessService, instanceHandler.InstanceAccessService())
 	ieiSystemHandler.SetWorkspaceFileHandler(workspaceFileHandler)
 	runtimeAgentHandler := handlers.NewRuntimeAgentHandler(cfg.Runtime, runtimePodRepo, bindingRepo, instanceRepo, runtimeEvents, skillService)
+	if runtimeSecurity != nil {
+		runtimeAgentHandler.SetRuntimeGatewayReportVerifier(runtimeSecurity)
+	}
 
 	// Initialize WebSocket hub and handler
 	wsHub := services.GetHub()
@@ -457,6 +655,9 @@ func main() {
 	}
 	runtimePoolHandler := handlers.NewRuntimePoolHandler(runtimePodRepo, bindingRepo, rolloutRepo, runtimeScheduler, runtimeEvents)
 	runtimePoolHandler.SetUpgradeService(runtimeUpgradeService)
+	runtimeManagementService := services.NewRuntimeManagementService(database, runtimeScheduler, northboundRepo)
+	runtimeManagementHandler := handlers.NewRuntimeManagementHandler(runtimeManagementService)
+	runtimePodMaintenanceHandler := handlers.NewRuntimePodMaintenanceHandler(services.NewRuntimePodMaintenanceService(database, runtimeScheduler))
 	workbuddyPrewarmController := k8s.NewWorkbuddyPrewarmController()
 
 	leaderCtx, leaderCancel := context.WithCancel(context.Background())
@@ -551,7 +752,10 @@ func main() {
 
 	// Setup router
 	r := gin.New()
-	r.Use(handlers.HermesDesktopRedactTickets(), gin.Logger(), gin.Recovery())
+	r.Use(handlers.HermesDesktopRedactTickets(), egressProxyHandler.AccessLogger(gin.DefaultWriter), gin.CustomRecovery(func(c *gin.Context, _ any) {
+		log.Print("HTTP request failed")
+		c.AbortWithStatus(http.StatusInternalServerError)
+	}))
 	r.Use(middleware.BackupRequestBoundary(backupHTTPPool, db.SQLGateScope()))
 
 	// Middleware
@@ -624,6 +828,12 @@ func main() {
 			runtimeAgent.POST("/metrics/report", runtimeAgentHandler.ReportMetrics)
 			runtimeAgent.POST("/gateways/report", runtimeAgentHandler.ReportGateways)
 			runtimeAgent.POST("/skills/report", runtimeAgentHandler.ReportSkills)
+		}
+		if runtimeLeaseHandler != nil {
+			api.POST("/runtime/security/lease", gin.WrapH(runtimeLeaseHandler))
+		}
+		if runtimeServicesHandler != nil {
+			api.Any("/runtime/services/*path", gin.WrapH(runtimeServicesHandler))
 		}
 
 		// Auth routes
@@ -770,7 +980,23 @@ func main() {
 			adminRuntime.PUT("/auth/enterprise/config", enterpriseAuthHandler.UpdateConfig)
 			adminRuntime.GET("/auth/enterprise/status", enterpriseAuthHandler.Status)
 			adminRuntime.GET("/runtime-pods", runtimePoolHandler.ListPods)
+			adminRuntime.GET("/runtime-pod-pools", runtimePodMaintenanceHandler.ManagedPools)
+			adminRuntime.GET("/runtime-pods/scale-options", runtimePodMaintenanceHandler.ScaleOptions)
+			adminRuntime.POST("/runtime-pods", runtimePodMaintenanceHandler.Scale)
+			adminRuntime.POST("/runtime-pods/scale-in/preflight", runtimeManagementHandler.ScaleInPreflight)
+			adminRuntime.POST("/runtime-pods/scale-in", runtimeManagementHandler.ScaleInSubmit)
+			adminRuntime.DELETE("/runtime-pods/:id", runtimePodMaintenanceHandler.Delete)
+			adminRuntime.DELETE("/runtime-pod-pools/:name", runtimePodMaintenanceHandler.DeletePool)
 			adminRuntime.GET("/runtime-pods/:id/gateways", runtimePoolHandler.GetPodGateways)
+			adminRuntime.GET("/runtime-pods/:id/events", runtimePoolHandler.GetPodEvents)
+			adminRuntime.POST("/runtime-pods/:id/scheduling", runtimeManagementHandler.Scheduling)
+			adminRuntime.POST("/runtime-pods/:id/evict", runtimeManagementHandler.Evict)
+			adminRuntime.POST("/runtime-scheduling/preflight", runtimeManagementHandler.Preflight)
+			adminRuntime.POST("/runtime-scheduling", runtimeManagementHandler.Submit)
+			adminRuntime.GET("/runtime-scheduling", runtimeManagementHandler.History)
+			adminRuntime.POST("/runtime-balance/plan", runtimeManagementHandler.BalancePlan)
+			adminRuntime.POST("/runtime-balance", runtimeManagementHandler.Balance)
+			adminRuntime.POST("/runtime-scheduling/:id/cancel", runtimeManagementHandler.Cancel)
 			adminRuntime.POST("/runtime-pods/:id/drain", runtimePoolHandler.DrainPod)
 			adminRuntime.POST("/runtime-rollouts", runtimePoolHandler.StartRollout)
 			adminRuntime.POST("/runtime-rollouts/preflight", runtimePoolHandler.PreflightOpenClawRollout)
@@ -1087,7 +1313,7 @@ func main() {
 		}
 
 		gatewayLLM := api.Group("/gateway/llm")
-		gatewayLLM.Use(middleware.GatewayAuth(instanceRepo, gatewayKeyRepo, bindingRepo))
+		gatewayLLM.Use(middleware.GatewayAuthWithRuntimeCapabilitiesAndGatewayKeys(instanceRepo, gatewayKeyRepo, runtimeCapabilityVerifier, protectedRuntimeInstance, bindingRepo))
 		{
 			gatewayLLM.GET("/models", aiGatewayHandler.ListModels)
 			gatewayLLM.POST("/images/generations", runtimeProtocolPolicy, aiGatewayHandler.ImageGenerations)
@@ -1138,6 +1364,20 @@ func main() {
 	}
 
 	// Start server with graceful shutdown
+	if protectedEgressServer != nil {
+		go func() {
+			if err := protectedEgressServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				log.Fatalf("Failed to start authenticated runtime egress listener: %v", err)
+			}
+		}()
+	}
+	if browserEgressServer != nil {
+		go func() {
+			if err := browserEgressServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				log.Fatalf("Failed to start Browser Worker egress listener: %v", err)
+			}
+		}()
+	}
 	if northboundCoreServer != nil {
 		go func() {
 			log.Printf("Northbound Core mTLS server starting on %s", cfg.Northbound.CoreInternalAddress)
@@ -1169,8 +1409,21 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
+	if runtimeServicesHandler != nil {
+		runtimeServicesHandler.Close()
+	}
 	if err := srv.Shutdown(ctx); err != nil {
 		log.Printf("HTTP server forced to shutdown: %v", err)
+	}
+	if protectedEgressServer != nil {
+		if err := protectedEgressServer.Shutdown(ctx); err != nil {
+			log.Printf("Authenticated runtime egress shutdown: %v", err)
+		}
+	}
+	if browserEgressServer != nil {
+		if err := browserEgressServer.Shutdown(ctx); err != nil {
+			log.Printf("Browser Worker egress shutdown: %v", err)
+		}
 	}
 	if northboundCoreServer != nil {
 		if err := northboundCoreServer.Shutdown(ctx); err != nil {

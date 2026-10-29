@@ -53,6 +53,19 @@ func TestCoverageRejectsUnknownObjectsAndInjection(t *testing.T) {
 	}
 }
 
+func TestRuntimeManagementCoordinationIsReferenceOnly(t *testing.T) {
+	for name, classification := range map[string]string{
+		"runtime_management_operations":     "secret",
+		"runtime_management_admission_lock": "internal",
+		"runtime_pod_deletion_intents":      "secret",
+	} {
+		policy, ok := Policy(name)
+		if !ok || policy.Category != "system_backup" || policy.Classification != classification || policy.BackupStrategy != "metadata_only" || policy.RestoreStrategy != "reference_only" {
+			t.Errorf("live runtime coordination %s must not be captured or replayed: %+v", name, policy)
+		}
+	}
+}
+
 func TestRepositoriesDoNotCreateSchema(t *testing.T) {
 	files, err := filepath.Glob("../repository/*.go")
 	if err != nil {

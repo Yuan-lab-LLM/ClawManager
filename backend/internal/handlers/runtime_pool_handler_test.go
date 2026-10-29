@@ -495,7 +495,16 @@ func (r *runtimePoolHandlerBindingRepo) ListByRuntimePodID(ctx context.Context, 
 	return bindings, nil
 }
 func (r *runtimePoolHandlerBindingRepo) ListByRuntimePodIDs(ctx context.Context, runtimePodIDs []int64) ([]models.InstanceRuntimeBinding, error) {
-	return nil, nil
+	var bindings []models.InstanceRuntimeBinding
+	for _, binding := range r.bindings {
+		for _, id := range runtimePodIDs {
+			if binding.RuntimePodID == id {
+				bindings = append(bindings, binding)
+				break
+			}
+		}
+	}
+	return bindings, nil
 }
 func (r *runtimePoolHandlerBindingRepo) UpdateRunning(ctx context.Context, instanceID int, generation int, gatewayID string, port int, pid *int) error {
 	return nil

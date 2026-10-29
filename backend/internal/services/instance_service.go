@@ -2281,14 +2281,20 @@ func (s *instanceService) cleanupV2GatewayBinding(ctx context.Context, instance 
 		return nil
 	}
 
+	strictStop := requiresConfirmedGatewayStop(s.agentClient)
+	if strictStop && (s.runtimePodRepo == nil || strings.TrimSpace(binding.GatewayID) == "") {
+		return fmt.Errorf("runtime source identity is required to confirm v2 gateway cleanup")
+	}
 	if s.runtimePodRepo != nil {
 		pod, podErr := s.runtimePodRepo.GetByID(ctx, binding.RuntimePodID)
 		if podErr != nil {
 			return fmt.Errorf("failed to get runtime pod %d for v2 cleanup: %w", binding.RuntimePodID, podErr)
 		} else if pod == nil {
 			return fmt.Errorf("runtime pod %d is not available for v2 cleanup", binding.RuntimePodID)
+		} else if strictStop && (pod.AgentEndpoint == nil || strings.TrimSpace(*pod.AgentEndpoint) == "") {
+			return fmt.Errorf("runtime source endpoint is required to confirm v2 gateway cleanup")
 		} else if pod != nil && pod.AgentEndpoint != nil && strings.TrimSpace(*pod.AgentEndpoint) != "" && s.agentClient != nil && binding.GatewayID != "" {
-			if err := s.agentClient.DeleteGateway(ctx, strings.TrimSpace(*pod.AgentEndpoint), binding.GatewayID); err != nil && !errors.Is(err, ErrRuntimeAgentNotFound) {
+			if err := s.agentClient.DeleteGateway(ctx, strings.TrimSpace(*pod.AgentEndpoint), binding.GatewayID); err != nil && (requiresConfirmedGatewayStop(s.agentClient) || !errors.Is(err, ErrRuntimeAgentNotFound)) {
 				return fmt.Errorf("failed to delete v2 gateway: %w", err)
 			}
 		}

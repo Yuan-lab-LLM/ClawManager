@@ -14,9 +14,10 @@ const (
 )
 
 const (
-	TeamStatusCreating = "creating"
-	TeamStatusRunning  = "running"
-	TeamStatusFailed   = "failed"
+	TeamPreviewSecurityProfile = "managed-preview-v3"
+	TeamStatusCreating         = "creating"
+	TeamStatusRunning          = "running"
+	TeamStatusFailed           = "failed"
 
 	TeamMemberStatusCreating = "creating"
 	TeamMemberStatusIdle     = "idle"
@@ -45,26 +46,27 @@ const (
 )
 
 type Team struct {
-	ResourceScope       string    `db:"resource_scope" json:"resource_scope"`
-	Owner               *string   `db:"owner" json:"-"`
-	DisplayName         *string   `db:"display_name" json:"-"`
-	ID                  int       `db:"id,primarykey,autoincrement" json:"id"`
-	UserID              int       `db:"user_id" json:"user_id"`
-	Name                string    `db:"name" json:"name"`
-	Description         *string   `db:"description" json:"description,omitempty"`
-	Status              string    `db:"status" json:"status"`
-	CommunicationMode   string    `db:"communication_mode" json:"communication_mode"`
-	RedisURLSecretName  *string   `db:"redis_url_secret_name" json:"-"`
-	RedisURLSecretKey   *string   `db:"redis_url_secret_key" json:"-"`
-	TeamTokenSecretName *string   `db:"team_token_secret_name" json:"-"`
-	TeamTokenSecretKey  *string   `db:"team_token_secret_key" json:"-"`
-	RedisEventsLastID   string    `db:"redis_events_last_id" json:"redis_events_last_id"`
-	SharedPVCName       *string   `db:"shared_pvc_name" json:"shared_pvc_name,omitempty"`
-	SharedPVCNamespace  *string   `db:"shared_pvc_namespace" json:"shared_pvc_namespace,omitempty"`
-	SharedMountPath     string    `db:"shared_mount_path" json:"shared_mount_path"`
-	StorageClass        *string   `db:"storage_class" json:"storage_class,omitempty"`
-	CreatedAt           time.Time `db:"created_at" json:"created_at"`
-	UpdatedAt           time.Time `db:"updated_at" json:"updated_at"`
+	PreviewSecurityProfile string    `db:"preview_security_profile,omitempty" json:"preview_security_profile,omitempty"`
+	ResourceScope          string    `db:"resource_scope" json:"resource_scope"`
+	Owner                  *string   `db:"owner" json:"-"`
+	DisplayName            *string   `db:"display_name" json:"-"`
+	ID                     int       `db:"id,primarykey,autoincrement" json:"id"`
+	UserID                 int       `db:"user_id" json:"user_id"`
+	Name                   string    `db:"name" json:"name"`
+	Description            *string   `db:"description" json:"description,omitempty"`
+	Status                 string    `db:"status" json:"status"`
+	CommunicationMode      string    `db:"communication_mode" json:"communication_mode"`
+	RedisURLSecretName     *string   `db:"redis_url_secret_name" json:"-"`
+	RedisURLSecretKey      *string   `db:"redis_url_secret_key" json:"-"`
+	TeamTokenSecretName    *string   `db:"team_token_secret_name" json:"-"`
+	TeamTokenSecretKey     *string   `db:"team_token_secret_key" json:"-"`
+	RedisEventsLastID      string    `db:"redis_events_last_id" json:"redis_events_last_id"`
+	SharedPVCName          *string   `db:"shared_pvc_name" json:"shared_pvc_name,omitempty"`
+	SharedPVCNamespace     *string   `db:"shared_pvc_namespace" json:"shared_pvc_namespace,omitempty"`
+	SharedMountPath        string    `db:"shared_mount_path" json:"shared_mount_path"`
+	StorageClass           *string   `db:"storage_class" json:"storage_class,omitempty"`
+	CreatedAt              time.Time `db:"created_at" json:"created_at"`
+	UpdatedAt              time.Time `db:"updated_at" json:"updated_at"`
 }
 
 // Empty scope is tolerated only for legacy in-memory callers. Persisted rows

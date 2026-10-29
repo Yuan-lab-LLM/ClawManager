@@ -36,6 +36,7 @@ type Instance struct {
 	WorkspacePath            *string    `db:"workspace_path" json:"workspace_path,omitempty"`
 	WorkspaceUsageBytes      int64      `db:"workspace_usage_bytes" json:"workspace_usage_bytes"`
 	RuntimeGeneration        int        `db:"runtime_generation" json:"runtime_generation"`
+	RuntimeSecurityProfile   string     `db:"runtime_security_profile,omitempty" json:"runtime_security_profile,omitempty"`
 	RuntimeErrorMessage      *string    `db:"runtime_error_message" json:"runtime_error_message,omitempty"`
 	RuntimeErrorCode         *string    `db:"runtime_error_code" json:"runtime_error_code,omitempty"`
 	ProvisioningOperationID  *string    `db:"provisioning_operation_id" json:"-"`

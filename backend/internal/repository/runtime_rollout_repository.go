@@ -42,15 +42,26 @@ func (r *runtimeRolloutRepository) Create(ctx context.Context, rollout *models.R
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	ensureTimestamps(&rollout.CreatedAt, &rollout.UpdatedAt)
-	res, err := r.sess.Collection("runtime_rollouts").Insert(rollout)
-	if err != nil {
-		return fmt.Errorf("failed to create runtime rollout: %w", err)
+	insert := func(sess db.Session) error {
+		ensureTimestamps(&rollout.CreatedAt, &rollout.UpdatedAt)
+		res, err := sess.Collection("runtime_rollouts").Insert(rollout)
+		if err != nil {
+			return fmt.Errorf("failed to create runtime rollout: %w", err)
+		}
+		if id, ok := res.ID().(int64); ok {
+			rollout.ID = id
+		}
+		return nil
 	}
-	if id, ok := res.ID().(int64); ok {
-		rollout.ID = id
+	if rollout.Status != "pending" && rollout.Status != "running" {
+		return insert(r.sess)
 	}
-	return nil
+	return r.sess.TxContext(ctx, func(tx db.Session) error {
+		if err := CheckRuntimeManagementRolloutAdmission(ctx, tx); err != nil {
+			return err
+		}
+		return insert(tx)
+	}, nil)
 }
 
 func (r *runtimeRolloutRepository) GetByID(ctx context.Context, id int64) (*models.RuntimeRollout, error) {

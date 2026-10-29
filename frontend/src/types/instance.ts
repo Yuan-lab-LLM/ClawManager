@@ -37,6 +37,7 @@ export interface Instance {
   runtime_variant?: "linux" | "windows";
   instance_mode: "lite" | "pro";
   status: "creating" | "running" | "stopped" | "error" | "deleting";
+  availability?: InstanceAvailability;
   cpu_cores: number;
   memory_gb: number;
   disk_gb: number;

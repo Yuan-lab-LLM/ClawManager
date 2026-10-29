@@ -13,6 +13,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
 )
@@ -701,6 +702,237 @@ func TestRuntimeDeploymentServiceListDeploymentPodsIsScoped(t *testing.T) {
 	}
 	if podLists != 1 || len(pods) != 1 || pods[0].DeploymentName != "openclaw-runtime-u57" {
 		t.Fatalf("scoped inventory calls=%d pods=%#v", podLists, pods)
+	}
+}
+
+func TestRuntimeDeploymentServiceListPodsBatchesFreshNamespaceSnapshot(t *testing.T) {
+	for _, claimError := range []bool{false, true} {
+		t.Run(fmt.Sprintf("claimError=%t", claimError), func(t *testing.T) {
+			objects := []runtime.Object{}
+			for _, name := range []string{"source", "target", "other"} {
+				runtimeType := "openclaw"
+				if name == "other" {
+					runtimeType = "hermes"
+				}
+				deployment := BuildRuntimeDeployment(RuntimeDeploymentSpec{Name: name, Namespace: "system", RuntimeType: runtimeType, Image: "runtime:v1", Replicas: 1})
+				// Pods need not carry a runtime-type label; use the exact Deployment selector.
+				deployment.Spec.Selector = &metav1.LabelSelector{MatchLabels: map[string]string{"pool": name}, MatchExpressions: []metav1.LabelSelectorRequirement{
+					{Key: "tier", Operator: metav1.LabelSelectorOpIn, Values: []string{"runtime"}},
+					{Key: "excluded", Operator: metav1.LabelSelectorOpDoesNotExist},
+				}}
+				if name == "other" {
+					deployment.Spec.Selector = nil
+				}
+				deployment.Labels[runtimeUpgradeIDLabel] = "42"
+				deployment.Labels[runtimeSchedulingLabel] = "false"
+				pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: name + "-pod", Namespace: "system", UID: types.UID(name + "-uid"), Labels: map[string]string{"pool": name, "tier": "runtime"}}, Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{Name: "runtime", Image: "runtime:v1", VolumeMounts: []corev1.VolumeMount{{Name: runtimeWorkspaceVolume, MountPath: "/workspaces"}}}},
+					Volumes:    []corev1.Volume{{Name: runtimeWorkspaceVolume, VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: "shared"}}}},
+				}, Status: corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{{Name: "runtime", ImageID: "runtime@sha256:" + strings.Repeat("a", 64)}}}}
+				excluded := pod.DeepCopy()
+				excluded.Name += "-excluded"
+				excluded.Labels["excluded"] = "true"
+				succeeded := pod.DeepCopy()
+				succeeded.Name += "-succeeded"
+				succeeded.Status.Phase = corev1.PodSucceeded
+				deleting := pod.DeepCopy()
+				deleting.Name += "-deleting"
+				now := metav1.Now()
+				deleting.DeletionTimestamp = &now
+				objects = append(objects, deployment, pod, excluded, succeeded, deleting)
+			}
+			retained := BuildRuntimeDeployment(RuntimeDeploymentSpec{Name: "retained", Namespace: "system", RuntimeType: "openclaw", Replicas: 0})
+			retained.Spec.Selector = nil
+			unlabelled := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "unlabelled", Namespace: "system"}}
+			claim := &corev1.PersistentVolumeClaim{ObjectMeta: metav1.ObjectMeta{Name: "shared", Namespace: "system", UID: "claim-old"}, Spec: corev1.PersistentVolumeClaimSpec{VolumeName: "pv-old"}}
+			class := "shared-nfs"
+			claim.Spec.StorageClassName = &class
+			objects = append(objects, retained, unlabelled, claim)
+			client := fake.NewSimpleClientset(objects...)
+			if claimError {
+				client.PrependReactor("get", "persistentvolumeclaims", func(k8stesting.Action) (bool, runtime.Object, error) {
+					return true, nil, fmt.Errorf("claim unavailable")
+				})
+			}
+			service := NewRuntimeDeploymentService(client)
+			for snapshot := 0; snapshot < 2; snapshot++ {
+				client.ClearActions()
+				pods, err := service.ListPods(context.Background(), " system ", " OpenClaw ")
+				if err != nil || len(pods) != 2 {
+					t.Fatalf("snapshot %d: pods=%+v err=%v", snapshot, pods, err)
+				}
+				for _, pod := range pods {
+					wantUID := pod.DeploymentName + "-uid"
+					wantImage := "runtime:v1"
+					if snapshot == 1 && pod.DeploymentName == "source" {
+						wantUID = "source-new-uid"
+						wantImage = "runtime:v2"
+					}
+					if pod.PodUID != wantUID || pod.ImageRef != wantImage || pod.ImageDigest != "sha256:"+strings.Repeat("a", 64) || pod.UpgradeID != "42" || pod.SchedulingEnabled == nil || *pod.SchedulingEnabled {
+						t.Fatalf("snapshot %d identity=%+v", snapshot, pod)
+					}
+					if claimError {
+						if pod.WorkspaceStorageIdentity != "" || pod.StorageClass != "" {
+							t.Fatalf("failed claim lookup must fail closed: %+v", pod)
+						}
+					} else {
+						wantClaim := "claim-old"
+						if snapshot == 1 {
+							wantClaim = "claim-new"
+						}
+						if !strings.Contains(pod.WorkspaceStorageIdentity, wantClaim) || pod.StorageClass != class {
+							t.Fatalf("snapshot %d storage=%+v", snapshot, pod)
+						}
+					}
+				}
+				actions := client.Actions()
+				if len(actions) != 3 {
+					t.Fatalf("snapshot %d API calls=%d, want deployment List + namespace Pod List + one shared PVC Get; actions=%v", snapshot, len(actions), actions)
+				}
+				if actions[0].GetVerb() != "list" || actions[0].GetResource().Resource != "deployments" || actions[1].GetResource().Resource != "pods" || actions[2].GetResource().Resource != "persistentvolumeclaims" {
+					t.Fatalf("unexpected actions: %v", actions)
+				}
+				if got := actions[1].(k8stesting.ListAction).GetListRestrictions().Labels.String(); got != "" {
+					t.Fatalf("namespace pod list selector=%q; apply individual deployment selectors locally", got)
+				}
+				if snapshot == 0 {
+					obj, err := client.Tracker().Get(corev1.SchemeGroupVersion.WithResource("pods"), "system", "source-pod")
+					if err != nil {
+						t.Fatal(err)
+					}
+					replacement := obj.(*corev1.Pod).DeepCopy()
+					replacement.UID = "source-new-uid"
+					replacement.Spec.Containers[0].Image = "runtime:v2"
+					if err := client.Tracker().Update(corev1.SchemeGroupVersion.WithResource("pods"), replacement, "system"); err != nil {
+						t.Fatal(err)
+					}
+					replacementClaim := claim.DeepCopy()
+					replacementClaim.UID = "claim-new"
+					replacementClaim.Spec.VolumeName = "pv-new"
+					if err := client.Tracker().Update(corev1.SchemeGroupVersion.WithResource("persistentvolumeclaims"), replacementClaim, "system"); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestRuntimeDeploymentServiceListPodsSelectorErrors(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		selector *metav1.LabelSelector
+		want     string
+	}{
+		{name: "missing", want: "has no selector"},
+		{name: "invalid", selector: &metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{{Key: "app", Operator: "invalid"}}}, want: "has invalid selector"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			deployment := BuildRuntimeDeployment(RuntimeDeploymentSpec{Name: "runtime", Namespace: "system", RuntimeType: "openclaw", Replicas: 1})
+			deployment.Spec.Selector = tc.selector
+			service := NewRuntimeDeploymentService(fake.NewSimpleClientset(deployment))
+			if _, err := service.ListPods(context.Background(), "system", ""); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("selector error=%v, want %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestRuntimeDeploymentServiceScopedInventoryDoesNotReuseNamespaceSnapshot(t *testing.T) {
+	ctx := context.Background()
+	deployment := BuildRuntimeDeployment(RuntimeDeploymentSpec{Name: "runtime", Namespace: "system", RuntimeType: "openclaw", Replicas: 1})
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "runtime-pod", Namespace: "system", UID: "old-uid", Labels: deployment.Spec.Selector.MatchLabels}, Spec: deployment.Spec.Template.Spec}
+	client := fake.NewSimpleClientset(deployment, pod)
+	service := NewRuntimeDeploymentService(client)
+	if _, err := service.ListPods(ctx, "system", "openclaw"); err != nil {
+		t.Fatal(err)
+	}
+	replacement := pod.DeepCopy()
+	replacement.UID = "new-uid"
+	if err := client.Tracker().Update(corev1.SchemeGroupVersion.WithResource("pods"), replacement, "system"); err != nil {
+		t.Fatal(err)
+	}
+	client.PrependReactor("list", "deployments", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, fmt.Errorf("unrelated namespace inventory unavailable")
+	})
+	client.PrependReactor("list", "pods", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		if action.(k8stesting.ListAction).GetListRestrictions().Labels.Empty() {
+			return true, nil, fmt.Errorf("namespace inventory forbidden for rollout")
+		}
+		return false, nil, nil
+	})
+	pods, err := service.ListDeploymentPods(ctx, []RuntimeDeploymentRef{{Namespace: "system", Name: "runtime"}})
+	if err != nil || len(pods) != 1 || pods[0].PodUID != "new-uid" {
+		t.Fatalf("scoped snapshot must remain fresh and isolated: pods=%+v err=%v", pods, err)
+	}
+}
+
+func TestRuntimeDeploymentServiceListPodsNamespaceAndTypeFilters(t *testing.T) {
+	objects := []runtime.Object{}
+	for _, namespace := range []string{"system", "unrelated"} {
+		for _, kind := range []string{"openclaw", "hermes"} {
+			deployment := BuildRuntimeDeployment(RuntimeDeploymentSpec{Name: kind, Namespace: namespace, RuntimeType: kind, Replicas: 1})
+			pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: kind + "-pod", Namespace: namespace, Labels: deployment.Spec.Selector.MatchLabels}, Spec: deployment.Spec.Template.Spec}
+			objects = append(objects, deployment, pod)
+		}
+	}
+	service := NewRuntimeDeploymentService(fake.NewSimpleClientset(objects...))
+	for _, filter := range []string{"", "openclaw", "hermes"} {
+		pods, err := service.ListPods(context.Background(), "system", filter)
+		want := 1
+		if filter == "" {
+			want = 2
+		}
+		if err != nil || len(pods) != want {
+			t.Fatalf("filter=%q pods=%+v err=%v", filter, pods, err)
+		}
+		for _, pod := range pods {
+			if pod.Namespace != "system" || (filter != "" && pod.RuntimeType != filter) {
+				t.Fatalf("wrong namespace/type for filter=%q: %+v", filter, pod)
+			}
+		}
+	}
+}
+
+func TestRuntimeDeploymentServiceListPodsOnlyRetainedPoolsSkipsPodAPI(t *testing.T) {
+	retained := BuildRuntimeDeployment(RuntimeDeploymentSpec{Name: "retained", Namespace: "system", RuntimeType: "openclaw", Replicas: 0})
+	retained.Spec.Selector = nil
+	client := fake.NewSimpleClientset(retained)
+	client.PrependReactor("list", "pods", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, fmt.Errorf("pod API unavailable")
+	})
+	service := NewRuntimeDeploymentService(client)
+	pods, err := service.ListPods(context.Background(), "system", "")
+	if err != nil || len(pods) != 0 || len(client.Actions()) != 1 {
+		t.Fatalf("retained pools require only deployment List: pods=%+v err=%v actions=%v", pods, err, client.Actions())
+	}
+}
+
+func TestRuntimeDeploymentServiceInventoryAPIErrors(t *testing.T) {
+	for _, tc := range []struct {
+		scoped               bool
+		verb, resource, want string
+	}{
+		{verb: "list", resource: "deployments", want: "failed to list runtime deployments in system"},
+		{verb: "list", resource: "pods", want: "failed to list runtime deployment pods system/runtime"},
+		{scoped: true, verb: "get", resource: "deployments", want: "failed to get runtime deployment system/runtime"},
+		{scoped: true, verb: "list", resource: "pods", want: "failed to list runtime deployment pods system/runtime"},
+	} {
+		t.Run(fmt.Sprintf("scoped=%t/%s/%s", tc.scoped, tc.verb, tc.resource), func(t *testing.T) {
+			deployment := BuildRuntimeDeployment(RuntimeDeploymentSpec{Name: "runtime", Namespace: "system", RuntimeType: "openclaw", Replicas: 1})
+			client := fake.NewSimpleClientset(deployment)
+			client.PrependReactor(tc.verb, tc.resource, func(k8stesting.Action) (bool, runtime.Object, error) { return true, nil, fmt.Errorf("API unavailable") })
+			service := NewRuntimeDeploymentService(client)
+			var err error
+			if tc.scoped {
+				_, err = service.ListDeploymentPods(context.Background(), []RuntimeDeploymentRef{{Namespace: "system", Name: "runtime"}})
+			} else {
+				_, err = service.ListPods(context.Background(), "system", "")
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), "API unavailable") {
+				t.Fatalf("error=%v, want %q with cause", err, tc.want)
+			}
+		})
 	}
 }
 

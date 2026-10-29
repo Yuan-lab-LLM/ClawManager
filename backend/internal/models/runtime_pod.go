@@ -25,6 +25,7 @@ type RuntimePod struct {
 	State                string     `db:"state" json:"state"`
 	Capacity             int        `db:"capacity" json:"capacity"`
 	UsedSlots            int        `db:"used_slots" json:"used_slots"`
+	SchedulingPaused     bool       `db:"scheduling_paused" json:"scheduling_paused"`
 	Draining             bool       `db:"draining" json:"draining"`
 	CPUMillisUsed        int64      `db:"cpu_millis_used" json:"cpu_millis_used"`
 	MemoryBytesUsed      int64      `db:"memory_bytes_used" json:"memory_bytes_used"`
@@ -47,8 +48,45 @@ type RuntimePod struct {
 	DesiredReplicas   int32  `db:"-" json:"desired_replicas,omitempty"`
 	// Only populated by the control-plane Kubernetes inventory, never by an
 	// Agent report. Legacy Agents may omit pod_uid in their registration.
-	KubernetesPodUID *string `db:"-" json:"-"`
-	KubernetesReady  bool    `db:"-" json:"-"`
+	KubernetesPodUID              *string       `db:"-" json:"-"`
+	RegisteredPodUID              *string       `db:"-" json:"-"`
+	AgentState                    string        `db:"-" json:"-"`
+	KubernetesReady               bool          `db:"-" json:"-"`
+	CPUMillisLimit                *int64        `db:"-" json:"cpu_millis_limit,omitempty"`
+	MemoryBytesLimit              *int64        `db:"-" json:"memory_bytes_limit,omitempty"`
+	CPUMillisRequest              *int64        `db:"-" json:"-"`
+	MemoryBytesRequest            *int64        `db:"-" json:"-"`
+	CoordinatorCPUMillisRequest   *int64        `db:"-" json:"-"`
+	CoordinatorMemoryBytesRequest *int64        `db:"-" json:"-"`
+	StorageClass                  string        `db:"-" json:"storage_class,omitempty"`
+	Slots                         []RuntimeSlot `db:"-" json:"slots"`
+	WorkspaceStorageIdentity      string        `db:"-" json:"-"`
+	CoordinatorCPUMillis          *int64        `db:"-" json:"-"`
+	CoordinatorMemoryBytes        *int64        `db:"-" json:"-"`
+}
+
+// RuntimeSlot keeps Kubernetes container health separate from its assigned instance.
+type RuntimeSlot struct {
+	Index              int     `json:"index"`
+	ContainerName      string  `json:"container_name"`
+	Ready              bool    `json:"ready"`
+	RestartCount       int32   `json:"restart_count"`
+	Reason             string  `json:"reason,omitempty"`
+	State              string  `json:"state"`
+	CPUMillisUsed      *int64  `json:"cpu_millis_used,omitempty"`
+	MemoryBytesUsed    *int64  `json:"memory_bytes_used,omitempty"`
+	CPUMillisLimit     *int64  `json:"cpu_millis_limit,omitempty"`
+	MemoryBytesLimit   *int64  `json:"memory_bytes_limit,omitempty"`
+	CPUMillisRequest   *int64  `json:"-"`
+	MemoryBytesRequest *int64  `json:"-"`
+	InstanceID         *int    `json:"instance_id,omitempty"`
+	InstanceName       string  `json:"instance_name,omitempty"`
+	Owner              *string `json:"owner,omitempty"`
+	InstanceState      string  `json:"instance_state,omitempty"`
+	GatewayID          string  `json:"gateway_id,omitempty"`
+	GatewayPort        *int    `json:"gateway_port,omitempty"`
+	Generation         *int    `json:"generation,omitempty"`
+	ErrorMessage       *string `json:"error_message,omitempty"`
 }
 
 func (p RuntimePod) Capabilities() []string {

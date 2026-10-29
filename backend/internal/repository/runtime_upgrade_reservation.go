@@ -48,6 +48,13 @@ func (r *instanceRuntimeBindingRepository) ReserveUpgradeGateway(ctx context.Con
 	}
 	var binding *models.InstanceRuntimeBinding
 	err := r.sess.TxContext(ctx, func(tx db.Session) error {
+		if err := LockRuntimeManagementAdmission(ctx, tx); err != nil {
+			return err
+		}
+		if err := CheckRuntimePodBindingAdmission(ctx, tx, req.Pod.ID); err != nil {
+			return err
+		}
+
 		var rollout models.RuntimeRollout
 		if err := lockUpgradeRow(ctx, tx, "SELECT id FROM runtime_rollouts WHERE id = ? FOR UPDATE", req.RolloutID); err != nil {
 			return err

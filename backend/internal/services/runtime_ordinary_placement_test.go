@@ -103,8 +103,12 @@ func TestOrdinaryPlacementMySQLDefaultScopeAndBirthFence(t *testing.T) {
 				unverified.KubernetesReady = false
 				unrelated := expected
 				unrelated.DeploymentName = "unrelated-pool"
-				if rejected, err := u.filterUpgradePlacement(ctx, 901, []models.RuntimePod{unverified, unrelated}); err != nil || len(rejected) != 0 { t.Fatalf("legacy fallback widened scope or trusted registry: %+v %v", rejected, err) }
-				if old, err := u.filterUpgradePlacement(ctx, 902, []models.RuntimePod{expected}); err == nil || len(old) != 0 { t.Fatal("legacy fallback lost original birth fence") }
+				if rejected, err := u.filterUpgradePlacement(ctx, 901, []models.RuntimePod{unverified, unrelated}); err != nil || len(rejected) != 0 {
+					t.Fatalf("legacy fallback widened scope or trusted registry: %+v %v", rejected, err)
+				}
+				if old, err := u.filterUpgradePlacement(ctx, 902, []models.RuntimePod{expected}); err == nil || len(old) != 0 {
+					t.Fatal("legacy fallback lost original birth fence")
+				}
 			}
 			if scenario == "scoped" {
 				old, err := u.filterUpgradePlacement(ctx, 903, []models.RuntimePod{pod, expected})
@@ -203,7 +207,7 @@ func TestOrdinaryPlacementPodChangesAfterReservation(t *testing.T) {
 	bindings := newFakeRuntimeBindingRepo()
 	agent := &fakeRuntimeAgentClient{}
 	dep := &changingOrdinaryInventory{fakeRuntimeDeploymentService: fakeRuntimeDeploymentService{pods: []k8s.RuntimeDeploymentPod{live}}}
-	root := t.TempDir()
+	root := canonicalCompatibilityTestDir(t)
 	path := RuntimeWorkspacePathWithRoot(root, "openclaw", 1, 901)
 	i := models.Instance{ID: 901, UserID: 1, Type: "openclaw", RuntimeType: "gateway", InstanceMode: "lite", RuntimeGeneration: 1, WorkspacePath: &path}
 	s := NewRuntimeScheduler(newFakeRuntimeInstanceRepo(), r, bindings, nil, agent, nil, nil, dep, time.Second, WithRuntimeSchedulerNamespace("tenant"), WithRuntimeSchedulerWorkspaceRoot(root), WithRuntimeSchedulerGatewayEnvBuilder(func(*models.Instance) (map[string]string, error) { return map[string]string{}, nil }))
@@ -278,7 +282,7 @@ func TestOrdinaryPlacementMySQLAfterEmptyPoolSwitch(t *testing.T) {
 		}
 	}
 	exec(`INSERT INTO users(id)VALUES(1)`)
-	root := t.TempDir()
+	root := canonicalCompatibilityTestDir(t)
 	pods := repository.NewRuntimePodRepository(sess)
 	bindings := repository.NewInstanceRuntimeBindingRepository(sess)
 	rollouts := repository.NewRuntimeRolloutRepository(sess)

@@ -25,6 +25,11 @@ func (s *RuntimeScheduler) currentOrdinaryRuntimePods(pods, inventory []models.R
 	result := make([]models.RuntimePod, 0, len(pods))
 	cutoff := s.schedulingHeartbeatCutoff()
 	for _, reported := range pods {
+		// Native slot agents must authenticate the registered Pod identity;
+		// live inventory cannot supply an identity missing from its report.
+		if requiresConfirmedGatewayStop(s.agentClient) && stringValue(reported.PodUID) == "" {
+			continue
+		}
 		if reported.Namespace != s.runtimeNamespace || reported.State != "ready" || reported.Draining || reported.LastSeenAt == nil || reported.LastSeenAt.Before(cutoff) {
 			continue
 		}
@@ -63,6 +68,9 @@ func ordinaryRuntimeIdentityMatches(reported, live models.RuntimePod) bool {
 
 func (s *RuntimeScheduler) verifyOrdinaryRuntimePod(ctx context.Context, pod models.RuntimePod) error {
 	if s.deployments == nil {
+		if requiresConfirmedGatewayStop(s.agentClient) {
+			return fmt.Errorf("%w: slot scheduling requires live Kubernetes Pod inventory", errRuntimeControlPlanePending)
+		}
 		return nil
 	} // no Kubernetes integration configured
 	latest, err := s.podRepo.GetByID(ctx, pod.ID)
@@ -84,6 +92,9 @@ func (s *RuntimeScheduler) verifyOrdinaryRuntimePod(ctx context.Context, pod mod
 
 func (s *RuntimeScheduler) verifiedOrdinaryRuntimePods(ctx context.Context, runtimeType string, pods []models.RuntimePod) ([]models.RuntimePod, error) {
 	if s.deployments == nil {
+		if requiresConfirmedGatewayStop(s.agentClient) {
+			return nil, fmt.Errorf("slot scheduling requires live Kubernetes Pod inventory")
+		}
 		return pods, nil
 	}
 	inventory, err := s.RuntimeDeploymentPods(ctx, runtimeType)

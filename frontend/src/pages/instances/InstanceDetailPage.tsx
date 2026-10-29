@@ -28,6 +28,7 @@ import {
   X,
 } from "lucide-react";
 import ConfirmDialog from "../../components/ConfirmDialog";
+import InstanceLifecycleStatus from "../../components/InstanceLifecycleStatus";
 import {
   instancePanelStorageKey,
   readStoredCollapsed,
@@ -111,28 +112,6 @@ function availabilityForStatus(status: string): InstanceAvailability {
     return "starting";
   }
   return "unavailable";
-}
-
-function availabilityLabel(availability: InstanceAvailability) {
-  switch (availability) {
-    case "available":
-      return "Available";
-    case "starting":
-      return "Starting";
-    default:
-      return "Unavailable";
-  }
-}
-
-function availabilityClass(availability: InstanceAvailability) {
-  switch (availability) {
-    case "available":
-      return "border-emerald-200 bg-emerald-50 text-emerald-700";
-    case "starting":
-      return "border-amber-200 bg-amber-50 text-amber-700";
-    default:
-      return "border-slate-200 bg-slate-50 text-slate-600";
-  }
 }
 
 function formatBytes(value?: number) {
@@ -1170,13 +1149,7 @@ const InstanceDetailPage: React.FC = () => {
           <h1 className="truncate text-2xl font-semibold text-slate-950">
             {instance.name}
           </h1>
-          <span
-            className={`inline-flex rounded-md border px-2 py-1 text-xs font-medium ${availabilityClass(
-              availability,
-            )}`}
-          >
-            {availabilityLabel(availability)}
-          </span>
+          <InstanceLifecycleStatus status={status?.status || instance.status} availability={status?.availability} />
         </div>
         <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm text-slate-500">
           <span>{formatInstanceType(instance.type)}</span>

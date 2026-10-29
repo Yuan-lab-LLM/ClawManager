@@ -100,7 +100,10 @@ func (r *teamRepository) UpdateTeam(team *models.Team) error {
 	if team.UpdatedAt.IsZero() {
 		team.UpdatedAt = time.Now().UTC()
 	}
-	if err := r.sess.Collection("teams").Find(db.Cond{"id": team.ID}).Update(team); err != nil {
+	// Only the contextual monotonic protection transition may write this marker.
+	update := *team
+	update.PreviewSecurityProfile = ""
+	if err := r.sess.Collection("teams").Find(db.Cond{"id": team.ID}).Update(&update); err != nil {
 		return fmt.Errorf("failed to update team: %w", err)
 	}
 	return nil

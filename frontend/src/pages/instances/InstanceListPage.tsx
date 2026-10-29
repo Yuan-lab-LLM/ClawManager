@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Link, useNavigate, useLocation } from "react-router-dom";
 import { Monitor, MonitorPlay, Play, Plus, Search, Square, Trash2 } from "lucide-react";
 import ConfirmDialog from "../../components/ConfirmDialog";
+import InstanceLifecycleStatus from "../../components/InstanceLifecycleStatus";
 import { runtimeFailureSummary } from "../../lib/runtimeFailure";
 import InstanceLifecycleBatches from "../../components/InstanceLifecycleBatches";
 import { collectUnavailableLiteIds, pruneVisibleSelection } from "../../lib/unavailableInstanceSelection";
@@ -92,38 +93,6 @@ const loadTeamMemberships = async (strict = false) => {
 
   return memberships;
 };
-
-function availabilityForStatus(status: string): InstanceAvailability {
-  if (status === "running") {
-    return "available";
-  }
-  if (status === "creating") {
-    return "starting";
-  }
-  return "unavailable";
-}
-
-function availabilityLabel(availability: InstanceAvailability) {
-  switch (availability) {
-    case "available":
-      return "Available";
-    case "starting":
-      return "Starting";
-    default:
-      return "Unavailable";
-  }
-}
-
-function availabilityClass(availability: InstanceAvailability) {
-  switch (availability) {
-    case "available":
-      return "border-emerald-200 bg-emerald-50 text-emerald-700";
-    case "starting":
-      return "border-amber-200 bg-amber-50 text-amber-700";
-    default:
-      return "border-slate-200 bg-slate-50 text-slate-600";
-  }
-}
 
 function modeLabel(mode: Instance["instance_mode"]) {
   return mode === "pro" ? "Pro" : "Lite";
@@ -853,14 +822,13 @@ const InstanceListPage: React.FC = () => {
                 <th className="w-[28%] px-4 py-3">Instance</th>
                 <th className="w-[13%] px-4 py-3">Type</th>
                 <th className="w-[20%] px-4 py-3">Information</th>
-                <th className="w-[16%] px-4 py-3">Availability</th>
+                <th className="w-[16%] px-4 py-3">{t("common.status")}</th>
                 <th className="w-[10%] px-4 py-3">Workspace</th>
                 <th className="w-[10%] px-4 py-3 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 bg-white">
               {filteredInstances.map((instance) => {
-                const availability = availabilityForStatus(instance.status);
                 const memberships = teamMemberships.get(instance.id) || [];
                 const primaryMembership = memberships[0];
                 const canSelectLite = isLiteInstance(instance) && instance.status !== "deleting";
@@ -940,13 +908,7 @@ const InstanceListPage: React.FC = () => {
                       </div>}
                     </td>
                     <td className="px-4 py-3">
-                      <span
-                        className={`inline-flex rounded-md border px-2 py-1 text-xs font-medium ${availabilityClass(
-                          availability,
-                        )}`}
-                      >
-                        {availabilityLabel(availability)}
-                      </span>
+                      <InstanceLifecycleStatus status={instance.status} availability={instance.availability} />
                     </td>
                     <td className="px-4 py-3 text-slate-600">
                       {formatBytes(instance.workspace_usage_bytes)}

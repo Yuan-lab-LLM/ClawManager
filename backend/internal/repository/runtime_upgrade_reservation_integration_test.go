@@ -61,7 +61,7 @@ func upgradeMySQL(t *testing.T) db.Session {
 	}
 	base := read("023_add_runtime_pool_v2.sql")
 	base = base[strings.Index(base, "CREATE TABLE IF NOT EXISTS runtime_pods"):strings.Index(base, "CREATE TABLE IF NOT EXISTS workspace_file_audits")]
-	for _, schema := range []string{base, read("058_add_openclaw_runtime_upgrade_safety.sql"), read("061_persist_runtime_upgrade_source_identity.sql"), read("070_add_upgrade_restart_attempts.sql"), read("074_add_upgrade_recovery_key.sql")} {
+	for _, schema := range []string{base, read("058_add_openclaw_runtime_upgrade_safety.sql"), read("061_persist_runtime_upgrade_source_identity.sql"), read("070_add_upgrade_restart_attempts.sql"), read("074_add_upgrade_recovery_key.sql"), read("079_add_runtime_management.sql"), read("080_add_runtime_pod_deletion_intents.sql")} {
 		for _, query := range strings.Split(schema, ";") {
 			if strings.TrimSpace(query) != "" {
 				exec(query)

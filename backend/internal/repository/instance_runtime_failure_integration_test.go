@@ -48,12 +48,14 @@ func TestRuntimeFailureMySQLContract(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	migration, err := os.ReadFile("../db/migrations/069_add_instance_runtime_error_code.sql")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := sess.SQL().Exec(string(migration)); err != nil {
-		t.Fatal(err)
+	for _, file := range []string{"069_add_instance_runtime_error_code.sql", "066_add_runtime_upgrade_fence.sql"} {
+		migration, err := os.ReadFile("../db/migrations/" + file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := sess.SQL().Exec(string(migration)); err != nil {
+			t.Fatal(err)
+		}
 	}
 	r := &instanceRepository{sess: sess}
 	ctx := context.Background()

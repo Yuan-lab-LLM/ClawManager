@@ -146,29 +146,30 @@ func newRuntimeUpgradeDetails(rollout *models.RuntimeRollout, items []models.Run
 }
 
 type runtimeUpgradeCandidate struct {
-	InstanceID        int
-	UserID            int
-	InstanceStatus    string
-	RuntimeGeneration int
-	RuntimePodID      *int64
-	GatewayID         string
-	Generation        int
-	BindingState      string
-	WorkspacePath     string
-	TeamID            *int
-	TeamMemberID      *int
-	MemberKey         string
-	Role              string
-	RuntimeType       string
-	Availability      string
-	MemberStatus      string
-	SourceVersion     string
-	SourcePodUID      string
-	SourceDeployment  string
-	SourceImageDigest string
-	AgentEndpoint     string
-	Capabilities      []string
-	Blockers          []string
+	InstanceID          int
+	UserID              int
+	InstanceStatus      string
+	RuntimeGeneration   int
+	RuntimePodID        *int64
+	GatewayID           string
+	Generation          int
+	BindingState        string
+	WorkspacePath       string
+	TeamID              *int
+	TeamMemberID        *int
+	MemberKey           string
+	Role                string
+	RuntimeType         string
+	Availability        string
+	MemberStatus        string
+	SourceVersionImages []string
+	SourceVersion       string
+	SourcePodUID        string
+	SourceDeployment    string
+	SourceImageDigest   string
+	AgentEndpoint       string
+	Capabilities        []string
+	Blockers            []string
 }
 
 type runtimeWorkspaceInventory struct {
@@ -353,25 +354,32 @@ func (s *RuntimeUpgradeService) Preflight(ctx context.Context, req RuntimeUpgrad
 		return nil, err
 	}
 	planFingerprint := runtimeUpgradeFingerprint(target, candidates, sourceImages)
+	stoppedSourceEvidence := map[int]any{}
+	for _, candidate := range candidates {
+		if len(candidate.SourceVersionImages) > 0 {
+			stoppedSourceEvidence[candidate.InstanceID] = map[string]any{"runtime_version": candidate.SourceVersion, "immutable_source_images": candidate.SourceVersionImages}
+		}
+	}
 	preflightSummary, _ := json.Marshal(map[string]any{
-		"strategy":                   result.Strategy,
-		"target_runtime_version":     result.TargetRuntimeVersion,
-		"target_upgrade_protocol":    result.TargetUpgradeProtocol,
-		"passed":                     len(result.Blockers) == 0,
-		"blockers":                   result.Blockers,
-		"warnings":                   result.Warnings,
-		"instance_count":             result.InstanceCount,
-		"team_count":                 result.TeamCount,
-		"openclaw_team_member_count": result.OpenClawTeamMemberCount,
-		"hermes_team_member_count":   result.HermesTeamMemberCount,
-		"upgrade_lab_run_id":         req.UpgradeLabRunID,
-		"candidate_instance_ids":     normalizedPositiveIDs(req.CandidateInstanceIDs),
-		"exclude_instance_ids":       normalizedPositiveIDs(req.ExcludeInstanceIDs),
-		"isolated":                   result.Isolated,
-		"recovery_mode":              req.RecoveryMode,
-		"recovery_parent_id":         req.RecoveryParentID,
-		"recovery_request_hash":      req.RecoveryRequestHash,
-		"execution":                  defaultRuntimeUpgradeExecutionPolicy(),
+		"stopped_source_version_evidence": stoppedSourceEvidence,
+		"strategy":                        result.Strategy,
+		"target_runtime_version":          result.TargetRuntimeVersion,
+		"target_upgrade_protocol":         result.TargetUpgradeProtocol,
+		"passed":                          len(result.Blockers) == 0,
+		"blockers":                        result.Blockers,
+		"warnings":                        result.Warnings,
+		"instance_count":                  result.InstanceCount,
+		"team_count":                      result.TeamCount,
+		"openclaw_team_member_count":      result.OpenClawTeamMemberCount,
+		"hermes_team_member_count":        result.HermesTeamMemberCount,
+		"upgrade_lab_run_id":              req.UpgradeLabRunID,
+		"candidate_instance_ids":          normalizedPositiveIDs(req.CandidateInstanceIDs),
+		"exclude_instance_ids":            normalizedPositiveIDs(req.ExcludeInstanceIDs),
+		"isolated":                        result.Isolated,
+		"recovery_mode":                   req.RecoveryMode,
+		"recovery_parent_id":              req.RecoveryParentID,
+		"recovery_request_hash":           req.RecoveryRequestHash,
+		"execution":                       defaultRuntimeUpgradeExecutionPolicy(),
 	})
 	sourceImagesJSON, _ := json.Marshal(sourceImages)
 	requiredJSON, _ := json.Marshal(result.RequiredCapabilities)
@@ -481,6 +489,9 @@ func (s *RuntimeUpgradeService) ConfirmPreflight(ctx context.Context, preflightI
 	}
 	defer release()
 	err = s.sess.TxContext(ctx, func(tx db.Session) error {
+		if err := repository.CheckRuntimeManagementRolloutAdmission(ctx, tx); err != nil {
+			return err
+		}
 		if err := s.lockUpgradeScope(ctx, tx, rollout.ID); err != nil {
 			return err
 		}
@@ -2410,6 +2421,9 @@ func (s *RuntimeUpgradeService) inspectCandidates(ctx context.Context, scope run
 			sourceImages[key] = image
 		}
 	}
+	if err := s.fillStoppedSourceVersions(ctx, candidates, sourceImages, liveImages, pods, inspectOpenClawRegistryImage); err != nil {
+		blockers = append(blockers, err.Error())
+	}
 	if len(sourceImages) == 0 {
 		sourceImages = fallbackSourceImages
 	}
@@ -2599,6 +2613,9 @@ func (s *RuntimeUpgradeService) inspectTeamConsistency(ctx context.Context, team
 // risk a second writer.
 func (s *RuntimeUpgradeService) stopCandidateGateway(ctx context.Context, candidate runtimeUpgradeCandidate) (bool, error) {
 	if candidate.GatewayID == "" {
+		if requiresConfirmedGatewayStop(s.agent) && (candidate.RuntimePodID != nil || strings.TrimSpace(candidate.BindingState) != "") {
+			return false, fmt.Errorf("bound runtime gateway identity is required to confirm source stop")
+		}
 		if candidate.RuntimePodID != nil && candidate.BindingState != "running" {
 			return true, s.bindings.DeleteByInstanceIDAndReleaseSlot(ctx, candidate.InstanceID, *candidate.RuntimePodID)
 		}
@@ -2608,6 +2625,10 @@ func (s *RuntimeUpgradeService) stopCandidateGateway(ctx context.Context, candid
 		return false, fmt.Errorf("running gateway cannot be stopped because its Runtime Agent is unavailable")
 	}
 	deleteErr := s.agent.DeleteGateway(ctx, candidate.AgentEndpoint, candidate.GatewayID)
+	strictStop := requiresConfirmedGatewayStop(s.agent)
+	if strictStop && deleteErr != nil {
+		return false, fmt.Errorf("runtime gateway teardown is not confirmed: %w", deleteErr)
+	}
 	reader, canConfirm := s.agent.(gatewayStateReader)
 	confirmed := errors.Is(deleteErr, ErrRuntimeAgentNotFound)
 	// A 7.1 source agent may return a stop conflict after its process watcher
@@ -2615,7 +2636,7 @@ func (s *RuntimeUpgradeService) stopCandidateGateway(ctx context.Context, candid
 	// state whenever Delete reported an error, even if the legacy capability
 	// report predates openclaw.gateway.stop-confirm.  New agents retain the
 	// stricter confirmation on every stop.
-	if canConfirm && (deleteErr != nil || containsString(candidate.Capabilities, "openclaw.gateway.stop-confirm")) {
+	if !strictStop && canConfirm && (deleteErr != nil || containsString(candidate.Capabilities, "openclaw.gateway.stop-confirm")) {
 		var confirmErr error
 		confirmed, confirmErr = waitForGatewayStopped(ctx, reader, candidate.AgentEndpoint, candidate.GatewayID, 5*time.Second)
 		if !confirmed {
@@ -2654,6 +2675,13 @@ func (s *RuntimeUpgradeService) stopCandidateGateway(ctx context.Context, candid
 		}
 	}
 	return true, nil
+}
+
+// Slot clients only return a successful DeleteGateway after a matching process
+// teardown receipt. Missing records are ambiguous and cannot replace that proof.
+func requiresConfirmedGatewayStop(client RuntimeAgentClient) bool {
+	policy, ok := client.(interface{ RequiresConfirmedGatewayStop() bool })
+	return ok && policy.RequiresConfirmedGatewayStop()
 }
 
 type gatewayStateReader interface {
@@ -3719,14 +3747,16 @@ func immutableRuntimeImage(imageRef, digest string) (string, error) {
 
 func runtimeUpgradeFingerprint(target string, candidates []runtimeUpgradeCandidate, sourceImages map[string]string) string {
 	type fingerprintCandidate struct {
-		InstanceID int
-		UserID     int
-		Workspace  string
-		TeamID     int
-		Member     string
-		Role       string
-		Generation int
-		Binding    string
+		InstanceID                                                   int
+		UserID                                                       int
+		Workspace                                                    string
+		TeamID                                                       int
+		Member                                                       string
+		Role                                                         string
+		Generation                                                   int
+		Binding                                                      string
+		SourceVersion                                                string
+		SourcePodUID, SourceDeployment, SourceImageDigest, GatewayID string
 	}
 	values := make([]fingerprintCandidate, 0, len(candidates))
 	for _, candidate := range candidates {
@@ -3734,7 +3764,7 @@ func runtimeUpgradeFingerprint(target string, candidates []runtimeUpgradeCandida
 		if candidate.TeamID != nil {
 			teamID = *candidate.TeamID
 		}
-		values = append(values, fingerprintCandidate{candidate.InstanceID, candidate.UserID, filepath.Clean(candidate.WorkspacePath), teamID, candidate.MemberKey, candidate.Role, candidate.Generation, candidate.BindingState})
+		values = append(values, fingerprintCandidate{candidate.InstanceID, candidate.UserID, filepath.Clean(candidate.WorkspacePath), teamID, candidate.MemberKey, candidate.Role, candidate.Generation, candidate.BindingState, candidate.SourceVersion, candidate.SourcePodUID, candidate.SourceDeployment, candidate.SourceImageDigest, candidate.GatewayID})
 	}
 	sort.Slice(values, func(i, j int) bool { return values[i].InstanceID < values[j].InstanceID })
 	payload, _ := json.Marshal(map[string]any{"target": strings.TrimSpace(target), "candidates": values, "sources": sourceImages})

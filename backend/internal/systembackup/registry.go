@@ -34,13 +34,15 @@ var businessTables = map[string][]string{
 	"skill_hub":  {"skill_blobs", "skills", "skill_versions", "instance_skills", "skill_scan_results", "skill_package_materialize_jobs", "skill_hub_tags", "skill_hub_tag_assignments"},
 }
 
-var controlTables = []string{"schema_migrations", "system_backup_installation_state", "system_backup_controller_leases", "system_backup_attempts", "system_backup_capture_plans", "system_backup_capture_jobs", "system_backup_capture_aborts", "system_backup_job_sends", "system_backup_stage_resources", "system_backup_dependency_health", "system_backup_config_versions", "system_backup_tasks", "system_backup_events", "system_backup_gate", "system_backup_gate_admissions", "system_backup_mutation_leases", "system_backup_participants", "system_backup_restore_evidence", "system_backup_restore_jobs", "system_backup_quarantine", "system_backup_artifacts", "system_backup_resources", "system_backup_external_actions", "system_backup_operations", "system_backup_strong_auth_nonces", "system_backup_catalog_records", "system_backup_promotions"}
+var controlTables = []string{"schema_migrations", "runtime_management_admission_lock", "system_backup_installation_state", "system_backup_controller_leases", "system_backup_attempts", "system_backup_capture_plans", "system_backup_capture_jobs", "system_backup_capture_aborts", "system_backup_job_sends", "system_backup_stage_resources", "system_backup_dependency_health", "system_backup_config_versions", "system_backup_tasks", "system_backup_events", "system_backup_gate", "system_backup_gate_admissions", "system_backup_mutation_leases", "system_backup_participants", "system_backup_restore_evidence", "system_backup_restore_jobs", "system_backup_quarantine", "system_backup_artifacts", "system_backup_resources", "system_backup_external_actions", "system_backup_operations", "system_backup_strong_auth_nonces", "system_backup_catalog_records", "system_backup_promotions"}
 
 func Registry() []ObjectPolicy {
 	out := []ObjectPolicy{{"system_team_data_backup_jobs", "system_backup", "internal", "metadata_only", "reference_only"}}
 	// These rows reference live processes, generations or outstanding writes.
 	// Restoring them must never enroll a copied instance or replay remote work.
-	for _, name := range []string{"gateway_runtime_tasks", "gateway_runtime_task_models", "gateway_runtime_protocols", "gateway_runtime_maintenance", "gateway_runtime_upgrades", "gateway_runtime_upgrade_stops", "instance_workspace_write_intents"} {
+	// Runtime management journals and deletion fences also contain live native
+	// controller identities; copied work must not run or fence another cluster.
+	for _, name := range []string{"gateway_runtime_tasks", "gateway_runtime_task_models", "gateway_runtime_protocols", "gateway_runtime_maintenance", "gateway_runtime_upgrades", "gateway_runtime_upgrade_stops", "instance_workspace_write_intents", "runtime_management_operations", "runtime_pod_deletion_intents"} {
 		out = append(out, ObjectPolicy{name, "system_backup", "secret", "metadata_only", "reference_only"})
 	}
 	for category, names := range businessTables {

@@ -32,7 +32,7 @@ assert(
 assert(
   pageSource.includes("selectRuntimePod(pod)") &&
     pageSource.includes('role="button"') &&
-    pageSource.includes("onKeyDown={(event) => handleRuntimePodCardKeyDown(event, pod)}"),
+    /onKeyDown=\{\(event\) =>\s*handleRuntimePodCardKeyDown\(event, pod\)\s*\}/.test(pageSource),
   "Runtime pod cards must be selectable by clicking or using the keyboard.",
 );
 assert(
@@ -47,3 +47,7 @@ assert(
 );
 
 console.log("Runtime pods page source contract is valid.");
+
+assert(pageSource.includes("page_size: 16"), "Runtime inventory must request sixteen cards per page.");
+const css = readFileSync(path.resolve(scriptDir, "../src/styles/runtime-pods.css"), "utf8");
+assert(/grid-template-columns: repeat\(4, minmax\(0, 1fr\)\)/.test(css) && /grid-template-rows: repeat\(4, minmax\(0, 1fr\)\)/.test(css), "Desktop inventory must use four rows and four columns.");

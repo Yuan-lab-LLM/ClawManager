@@ -6328,7 +6328,7 @@ spec:
           readinessProbe:
             httpGet:
               scheme: HTTPS
-              path: /healthz
+              path: /api/v1/version
               port: https
             initialDelaySeconds: 10
             periodSeconds: 10

@@ -15,12 +15,20 @@ import (
 // used by newer OpenClaw releases to the global npm layout used by older
 // releases. Existing global packages are authoritative and are never replaced.
 func ensureOpenClawPluginLayoutCompatibility(workspacePath string, uid, gid int) error {
-	openClawHome := filepath.Join(workspacePath, "home", ".openclaw")
+	root, err := openOpenClawCompatibilityRoot(workspacePath)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	openClawHome := filepath.Join("home", ".openclaw")
 	npmRoot := filepath.Join(openClawHome, "npm")
 	projectsRoot := filepath.Join(npmRoot, "projects")
 	globalRoot := filepath.Join(npmRoot, "node_modules")
 
-	projects, err := os.ReadDir(projectsRoot)
+	projects, err := readOpenClawCompatibilityDir(root, projectsRoot)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
@@ -28,7 +36,7 @@ func ensureOpenClawPluginLayoutCompatibility(workspacePath string, uid, gid int)
 		return fmt.Errorf("read OpenClaw npm projects: %w", err)
 	}
 
-	globalInfo, err := os.Lstat(globalRoot)
+	globalInfo, err := root.Lstat(globalRoot)
 	globalRootMissing := errors.Is(err, os.ErrNotExist)
 	if err == nil {
 		if globalInfo.Mode()&os.ModeSymlink != 0 {
@@ -48,18 +56,18 @@ func ensureOpenClawPluginLayoutCompatibility(workspacePath string, uid, gid int)
 			continue
 		}
 		projectModules := filepath.Join(projectsRoot, project.Name(), "node_modules")
-		if err := collectOpenClawProjectPackages(projectModules, packages); err != nil {
+		if err := collectOpenClawProjectPackages(root, projectModules, packages); err != nil {
 			return fmt.Errorf("inspect OpenClaw npm project %q: %w", project.Name(), err)
 		}
 	}
 	if len(packages) == 0 {
 		return nil
 	}
-	if err := os.MkdirAll(globalRoot, 0o755); err != nil {
+	if err := root.MkdirAll(globalRoot, 0o755); err != nil {
 		return fmt.Errorf("create OpenClaw global node_modules: %w", err)
 	}
 	if globalRootMissing {
-		if err := chownOpenClawCompatibilityPath(globalRoot, uid, gid, false); err != nil {
+		if err := chownOpenClawCompatibilityPath(root, globalRoot, uid, gid, false); err != nil {
 			return fmt.Errorf("set OpenClaw global node_modules ownership: %w", err)
 		}
 	}
@@ -71,7 +79,7 @@ func ensureOpenClawPluginLayoutCompatibility(workspacePath string, uid, gid int)
 	sort.Strings(packageNames)
 	for _, packageName := range packageNames {
 		linkPath := filepath.Join(globalRoot, filepath.FromSlash(packageName))
-		exists, err := openClawCompatibilityPathExists(linkPath)
+		exists, err := openClawCompatibilityPathExists(root, linkPath)
 		if err != nil {
 			return err
 		}
@@ -82,15 +90,15 @@ func ensureOpenClawPluginLayoutCompatibility(workspacePath string, uid, gid int)
 		if len(targets) != 1 {
 			return fmt.Errorf("OpenClaw plugin %q exists in multiple npm projects; cannot choose a rollback-compatible target", packageName)
 		}
-		if err := createOpenClawCompatibilityLink(linkPath, targets[0], globalRoot, uid, gid); err != nil {
+		if err := createOpenClawCompatibilityLink(root, linkPath, targets[0], globalRoot, uid, gid); err != nil {
 			return fmt.Errorf("link OpenClaw plugin %q: %w", packageName, err)
 		}
 	}
 	return nil
 }
 
-func collectOpenClawProjectPackages(nodeModulesRoot string, packages map[string][]string) error {
-	entries, err := os.ReadDir(nodeModulesRoot)
+func collectOpenClawProjectPackages(root *os.Root, nodeModulesRoot string, packages map[string][]string) error {
+	entries, err := readOpenClawCompatibilityDir(root, nodeModulesRoot)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
@@ -104,7 +112,7 @@ func collectOpenClawProjectPackages(nodeModulesRoot string, packages map[string]
 		}
 		if strings.HasPrefix(name, "@") && entry.IsDir() {
 			scopeRoot := filepath.Join(nodeModulesRoot, name)
-			scopedEntries, err := os.ReadDir(scopeRoot)
+			scopedEntries, err := readOpenClawCompatibilityDir(root, scopeRoot)
 			if err != nil {
 				return err
 			}
@@ -114,7 +122,7 @@ func collectOpenClawProjectPackages(nodeModulesRoot string, packages map[string]
 				}
 				packageName := name + "/" + scopedEntry.Name()
 				packagePath := filepath.Join(scopeRoot, scopedEntry.Name())
-				plugin, err := isOpenClawPluginPackage(packagePath)
+				plugin, err := isOpenClawPluginPackage(root, packagePath)
 				if err != nil {
 					return err
 				}
@@ -125,7 +133,7 @@ func collectOpenClawProjectPackages(nodeModulesRoot string, packages map[string]
 			continue
 		}
 		packagePath := filepath.Join(nodeModulesRoot, name)
-		plugin, err := isOpenClawPluginPackage(packagePath)
+		plugin, err := isOpenClawPluginPackage(root, packagePath)
 		if err != nil {
 			return err
 		}
@@ -136,9 +144,21 @@ func collectOpenClawProjectPackages(nodeModulesRoot string, packages map[string]
 	return nil
 }
 
-func isOpenClawPluginPackage(packagePath string) (bool, error) {
+func isOpenClawPluginPackage(root *os.Root, packagePath string) (bool, error) {
+	info, err := root.Lstat(packagePath)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("inspect OpenClaw plugin package %q: %w", packagePath, err)
+	}
+	// Project SDK dependencies may link into the immutable image. Only real
+	// package directories are candidates for new global compatibility links.
+	if !info.IsDir() {
+		return false, nil
+	}
 	manifestPath := filepath.Join(packagePath, "openclaw.plugin.json")
-	info, err := os.Stat(manifestPath)
+	info, err = root.Stat(manifestPath)
 	if errors.Is(err, os.ErrNotExist) {
 		return false, nil
 	}
@@ -148,8 +168,8 @@ func isOpenClawPluginPackage(packagePath string) (bool, error) {
 	return !info.IsDir(), nil
 }
 
-func openClawCompatibilityPathExists(path string) (bool, error) {
-	_, err := os.Lstat(path)
+func openClawCompatibilityPathExists(root *os.Root, path string) (bool, error) {
+	_, err := root.Lstat(path)
 	if err == nil {
 		return true, nil
 	}
@@ -159,10 +179,10 @@ func openClawCompatibilityPathExists(path string) (bool, error) {
 	return false, fmt.Errorf("inspect OpenClaw compatibility path %q: %w", path, err)
 }
 
-func createOpenClawCompatibilityLink(linkPath, targetPath, globalRoot string, uid, gid int) error {
+func createOpenClawCompatibilityLink(root *os.Root, linkPath, targetPath, globalRoot string, uid, gid int) error {
 	linkParent := filepath.Dir(linkPath)
 	if linkParent != globalRoot {
-		parentInfo, err := os.Lstat(linkParent)
+		parentInfo, err := root.Lstat(linkParent)
 		if err == nil && parentInfo.Mode()&os.ModeSymlink != 0 {
 			// Preserve an existing whole-scope link rather than writing through it.
 			return nil
@@ -171,11 +191,11 @@ func createOpenClawCompatibilityLink(linkPath, targetPath, globalRoot string, ui
 			return err
 		}
 		parentMissing := errors.Is(err, os.ErrNotExist)
-		if err := os.MkdirAll(linkParent, 0o755); err != nil {
+		if err := root.MkdirAll(linkParent, 0o755); err != nil {
 			return err
 		}
 		if parentMissing {
-			if err := chownOpenClawCompatibilityPath(linkParent, uid, gid, false); err != nil {
+			if err := chownOpenClawCompatibilityPath(root, linkParent, uid, gid, false); err != nil {
 				return err
 			}
 		}
@@ -184,24 +204,29 @@ func createOpenClawCompatibilityLink(linkPath, targetPath, globalRoot string, ui
 	if err != nil {
 		return err
 	}
-	if err := os.Symlink(relativeTarget, linkPath); err != nil {
+	if err := root.Symlink(relativeTarget, linkPath); err != nil {
 		if errors.Is(err, os.ErrExist) {
 			return nil
 		}
 		return err
 	}
-	return chownOpenClawCompatibilityPath(linkPath, uid, gid, true)
+	return chownOpenClawCompatibilityPath(root, linkPath, uid, gid, true)
 }
 
-func chownOpenClawCompatibilityPath(path string, uid, gid int, symlink bool) error {
+func chownOpenClawCompatibilityPath(root *os.Root, path string, uid, gid int, symlink bool) error {
 	if runtime.GOOS == "windows" || uid <= 0 || gid <= 0 {
 		return nil
 	}
 	var err error
 	if symlink {
-		err = os.Lchown(path, uid, gid)
+		err = root.Lchown(path, uid, gid)
 	} else {
-		err = os.Chown(path, uid, gid)
+		file, openErr := root.Open(path)
+		if openErr != nil {
+			return openErr
+		}
+		defer file.Close()
+		err = file.Chown(uid, gid)
 	}
 	// NFS root-squash can reject chown even though the link is readable and the
 	// parent directory is usable. Ownership is therefore best-effort only.
@@ -218,13 +243,21 @@ func quarantineCorruptLegacyOpenClawTaskState(workspacePath string, generation i
 	if strings.TrimSpace(workspacePath) == "" || runtimeError == nil || !isSQLiteCorruptionError(*runtimeError) {
 		return false, nil
 	}
-	openClawHome := filepath.Join(workspacePath, "home", ".openclaw")
+	root, err := openOpenClawCompatibilityRoot(workspacePath)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	defer root.Close()
+	openClawHome := filepath.Join("home", ".openclaw")
 	legacyTasksRoot := filepath.Join(openClawHome, "tasks")
 	fileNames := []string{"runs.sqlite", "runs.sqlite-wal", "runs.sqlite-shm"}
 	existing := make([]string, 0, len(fileNames))
 	for _, fileName := range fileNames {
 		path := filepath.Join(legacyTasksRoot, fileName)
-		if _, err := os.Lstat(path); err == nil {
+		if _, err := root.Lstat(path); err == nil {
 			existing = append(existing, fileName)
 		} else if !errors.Is(err, os.ErrNotExist) {
 			return false, fmt.Errorf("inspect legacy task database %q: %w", path, err)
@@ -236,27 +269,24 @@ func quarantineCorruptLegacyOpenClawTaskState(workspacePath string, generation i
 
 	quarantineRoot := filepath.Join(openClawHome, "quarantine")
 	baseName := "legacy-tasks-generation-" + strconv.Itoa(generation)
-	quarantinePath, err := nextAvailableQuarantinePath(quarantineRoot, baseName)
+	quarantinePath, err := nextAvailableQuarantinePath(root, quarantineRoot, baseName)
 	if err != nil {
 		return false, err
-	}
-	if err := os.MkdirAll(quarantinePath, 0o750); err != nil {
-		return false, fmt.Errorf("create quarantine directory: %w", err)
 	}
 
 	moved := make([]string, 0, len(existing))
 	for _, fileName := range existing {
 		source := filepath.Join(legacyTasksRoot, fileName)
 		destination := filepath.Join(quarantinePath, fileName)
-		if err := os.Rename(source, destination); err != nil {
+		if err := root.Rename(source, destination); err != nil {
 			var rollbackErrs []error
 			for index := len(moved) - 1; index >= 0; index-- {
 				movedName := moved[index]
-				if rollbackErr := os.Rename(filepath.Join(quarantinePath, movedName), filepath.Join(legacyTasksRoot, movedName)); rollbackErr != nil {
+				if rollbackErr := root.Rename(filepath.Join(quarantinePath, movedName), filepath.Join(legacyTasksRoot, movedName)); rollbackErr != nil {
 					rollbackErrs = append(rollbackErrs, rollbackErr)
 				}
 			}
-			_ = os.Remove(quarantinePath)
+			_ = root.Remove(quarantinePath)
 			return false, errors.Join(append([]error{fmt.Errorf("move %s to quarantine: %w", fileName, err)}, rollbackErrs...)...)
 		}
 		moved = append(moved, fileName)
@@ -281,20 +311,81 @@ func isSQLiteCorruptionError(message string) bool {
 	return false
 }
 
-func nextAvailableQuarantinePath(root, baseName string) (string, error) {
+// Atomically reserve a fresh directory: never accept an attacker-created link
+// between an existence check and the first database rename.
+func nextAvailableQuarantinePath(root *os.Root, directory, baseName string) (string, error) {
+	if err := root.MkdirAll(directory, 0o750); err != nil {
+		return "", err
+	}
 	for suffix := 0; suffix < 1000; suffix++ {
 		name := baseName
 		if suffix > 0 {
 			name += "-" + strconv.Itoa(suffix)
 		}
-		candidate := filepath.Join(root, name)
-		_, err := os.Lstat(candidate)
-		if errors.Is(err, os.ErrNotExist) {
+		candidate := filepath.Join(directory, name)
+		if err := root.Mkdir(candidate, 0o750); err == nil {
 			return candidate, nil
-		}
-		if err != nil {
-			return "", fmt.Errorf("inspect quarantine path: %w", err)
+		} else if !errors.Is(err, os.ErrExist) {
+			return "", fmt.Errorf("create quarantine directory: %w", err)
 		}
 	}
 	return "", fmt.Errorf("too many quarantine directories for generation")
+}
+
+func readOpenClawCompatibilityDir(root *os.Root, path string) ([]os.DirEntry, error) {
+	file, err := root.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	return file.ReadDir(-1)
+}
+
+// Pin every component from the filesystem root, including the trusted pool root
+// and its user/instance descendants. A tenant cannot redirect the initial root
+// through a symlink, or swap one between inspection and descriptor acquisition.
+// Arbitrary workspace roots use the same rule and must have canonical ancestors.
+func openOpenClawCompatibilityRoot(path string) (*os.Root, error) {
+	if !filepath.IsAbs(path) {
+		return nil, fmt.Errorf("OpenClaw workspace must be absolute")
+	}
+	path = filepath.Clean(path)
+	base := filepath.VolumeName(path) + string(filepath.Separator)
+	root, err := os.OpenRoot(base)
+	if err != nil {
+		return nil, err
+	}
+	rel, err := filepath.Rel(base, path)
+	if err != nil {
+		root.Close()
+		return nil, err
+	}
+	if rel == "." {
+		root.Close()
+		return nil, fmt.Errorf("filesystem root cannot be an instance workspace")
+	}
+	for _, part := range strings.Split(rel, string(filepath.Separator)) {
+		before, err := root.Lstat(part)
+		if err != nil {
+			root.Close()
+			return nil, err
+		}
+		if !before.IsDir() || before.Mode()&os.ModeSymlink != 0 {
+			root.Close()
+			return nil, fmt.Errorf("OpenClaw workspace requires real directory ancestors")
+		}
+		next, err := root.OpenRoot(part)
+		if err != nil {
+			root.Close()
+			return nil, err
+		}
+		after, err := next.Stat(".")
+		root.Close()
+		if err != nil || !os.SameFile(before, after) {
+			next.Close()
+			return nil, fmt.Errorf("OpenClaw workspace changed during open")
+		}
+		root = next
+	}
+	return root, nil
 }

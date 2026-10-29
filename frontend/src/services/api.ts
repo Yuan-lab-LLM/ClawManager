@@ -91,6 +91,7 @@ api.interceptors.response.use(
     if (isRefreshing) {
       return new Promise((resolve) => {
         subscribeTokenRefresh((newToken: string) => {
+          originalRequest._retry = true;
           originalRequest.headers.Authorization = `Bearer ${newToken}`;
           resolve(api(originalRequest));
         });

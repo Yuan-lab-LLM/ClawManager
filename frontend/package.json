@@ -9,6 +9,7 @@
     "lint": "eslint .",
     "test:version": "node scripts/app-version-display.test.mjs",
     "test:instance-access": "node --test src/hooks/useInstanceDesktopAccess.test.mjs",
+    "test:runtime-management": "node --experimental-strip-types --test scripts/runtime-management.test.mjs",
     "test:opencode-default-entry": "node scripts/opencode-default-entry.test.mjs",
     "preview": "vite preview"
   },

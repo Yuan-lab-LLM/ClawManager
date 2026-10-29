@@ -152,6 +152,20 @@ func main() {
 	newServer := func(addr string, handler http.Handler) *http.Server {
 		return &http.Server{Addr: addr, Handler: handler, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 90 * time.Second}
 	}
+	if os.Getenv("BROWSER_WORKER_NETWORK_ISOLATED") != "" {
+		if os.Getenv("BROWSER_WORKER_NETWORK_ISOLATED") != "1" {
+			log.Fatal("invalid browser network profile")
+		}
+		broker, err := newWorkerEgress(context.Background(), os.Getenv("BROWSER_WORKER_EGRESS_PROXY"), os.Getenv("BROWSER_WORKER_RUNTIME_SCOPE"), os.Getenv("BROWSER_WORKER_POD_UID"), token)
+		if err != nil {
+			log.Fatal("protected browser egress unavailable")
+		}
+		defer broker.Close()
+		server := newServer("127.0.0.1:31280", broker.Egress())
+		server.ReadHeaderTimeout = 5 * time.Second
+		server.MaxHeaderBytes = 16 << 10
+		go func() { log.Fatal(server.ListenAndServe()) }()
+	}
 	go func() { log.Fatal(newServer(":5801", newWorkerHandler(gui, token, false)).ListenAndServe()) }()
 	log.Fatal(newServer(":9222", newWorkerHandler(cdp, token, true)).ListenAndServe())
 }
