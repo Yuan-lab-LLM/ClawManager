@@ -7,6 +7,7 @@ export interface ProviderTemplate {
   allowCustomBaseUrl?: boolean;
   requiresApiKey?: boolean;
   keywords?: string[];
+  suggestedModels?: string[];
 }
 
 export const BUILTIN_PROVIDER_TEMPLATES: ProviderTemplate[] = [
@@ -36,6 +37,7 @@ export const BUILTIN_PROVIDER_TEMPLATES: ProviderTemplate[] = [
     baseUrl: 'https://openrouter.ai/api/v1',
     requiresApiKey: true,
     keywords: ['router', 'aggregator'],
+    suggestedModels: ['minimax/minimax-m3.1-flash', 'minimax/minimax-m3'],
   },
   {
     id: 'deepseek',
@@ -153,6 +155,7 @@ export const BUILTIN_PROVIDER_TEMPLATES: ProviderTemplate[] = [
     baseUrl: 'https://api.minimax.io/v1',
     requiresApiKey: true,
     keywords: ['minimax', 'abab'],
+    suggestedModels: ['MiniMax-M3.1-Flash', 'MiniMax-M3'],
   },
   {
     id: 'minimax-anthropic',
@@ -162,6 +165,7 @@ export const BUILTIN_PROVIDER_TEMPLATES: ProviderTemplate[] = [
     baseUrl: 'https://api.minimax.io/anthropic',
     requiresApiKey: true,
     keywords: ['minimax', 'abab', 'anthropic'],
+    suggestedModels: ['MiniMax-M3.1-Flash', 'MiniMax-M3'],
   },
   {
     id: 'minimax-cn',
@@ -171,6 +175,7 @@ export const BUILTIN_PROVIDER_TEMPLATES: ProviderTemplate[] = [
     baseUrl: 'https://api.minimaxi.com/v1',
     requiresApiKey: true,
     keywords: ['minimax', 'abab', 'china', 'cn'],
+    suggestedModels: ['MiniMax-M3.1-Flash', 'MiniMax-M3'],
   },
   {
     id: 'minimax-cn-anthropic',
@@ -180,6 +185,7 @@ export const BUILTIN_PROVIDER_TEMPLATES: ProviderTemplate[] = [
     baseUrl: 'https://api.minimaxi.com/anthropic',
     requiresApiKey: true,
     keywords: ['minimax', 'abab', 'china', 'cn', 'anthropic'],
+    suggestedModels: ['MiniMax-M3.1-Flash', 'MiniMax-M3'],
   },
   {
     id: 'ollama',
