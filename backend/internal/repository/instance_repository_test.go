@@ -19,6 +19,7 @@ func TestBuildV2SchedulerInstanceQueryRequiresWorkspaceTypeAndStatuses(t *testin
 		"workspace_path IS NOT NULL",
 		"TRIM(workspace_path) <> ''",
 		"type IN (?, ?, ?, ?)",
+		"NOT EXISTS (SELECT 1 FROM gateway_runtime_upgrades",
 		"ORDER BY id",
 		"LIMIT ?",
 	}

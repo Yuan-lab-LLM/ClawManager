@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net/netip"
 	"os"
 	"strconv"
 	"strings"
@@ -155,6 +156,8 @@ type LDAPConfig struct {
 
 // KubernetesConfig holds Kubernetes-related configuration
 type KubernetesConfig struct {
+	APIQPS       int                     `yaml:"apiQPS"`
+	APIBurst     int                     `yaml:"apiBurst"`
 	Mode         string                  `yaml:"mode"` // 连接模式: auto, incluster, outofcluster
 	OutOfCluster OutOfClusterConfig      `yaml:"outOfCluster"`
 	InCluster    InClusterConfig         `yaml:"inCluster"`
@@ -241,27 +244,41 @@ type StorageConfig struct {
 }
 
 // RuntimePoolConfig holds shared V2 runtime pool configuration.
+type RuntimeSlotResources struct {
+	CPURequest    string `yaml:"cpuRequest"`
+	MemoryRequest string `yaml:"memoryRequest"`
+	CPULimit      string `yaml:"cpuLimit"`
+	MemoryLimit   string `yaml:"memoryLimit"`
+}
+
 type RuntimePoolConfig struct {
-	Namespace                 string        `yaml:"namespace"`
-	WorkspaceRoot             string        `yaml:"workspaceRoot"`
-	WorkspacePVCClaimName     string        `yaml:"workspacePvcClaimName"`
-	WorkspaceNFSServer        string        `yaml:"workspaceNfsServer"`
-	WorkspaceNFSPath          string        `yaml:"workspaceNfsPath"`
-	AgentControlToken         string        `yaml:"agentControlToken"`
-	AgentReportToken          string        `yaml:"agentReportToken"`
-	BackendReplicaID          string        `yaml:"backendReplicaId"`
-	RedisURL                  string        `yaml:"redisUrl"`
-	SchedulerEnabled          bool          `yaml:"schedulerEnabled"`
-	HeartbeatTimeout          time.Duration `yaml:"heartbeatTimeout"`
-	SchedulerTick             time.Duration `yaml:"schedulerTick"`
-	OpenClawImage             string        `yaml:"openClawImage"`
-	HermesImage               string        `yaml:"hermesImage"`
-	OpenCodeImage             string        `yaml:"openCodeImage"`
-	MaxGatewaysPerPod         int           `yaml:"maxGatewaysPerPod"`
-	GatewayStartInFlightLimit int           `yaml:"gatewayStartInFlightLimit"`
-	SkillReportPersistence    bool          `yaml:"skillReportPersistence"`
-	GatewayPortStart          int           `yaml:"gatewayPortStart"`
-	GatewayPortEnd            int           `yaml:"gatewayPortEnd"`
+	ContainerSlots            int                  `yaml:"containerSlots"`
+	SlotResources             RuntimeSlotResources `yaml:"slotResources"`
+	PodResources              RuntimeSlotResources `yaml:"podResources"`
+	PodUserNamespaces         bool                 `yaml:"podUserNamespaces"`
+	NetworkIsolation          bool                 `yaml:"networkIsolation"`
+	NetworkPodCIDRs           []string             `yaml:"networkPodCIDRs"`
+	DeepSeekHarnessImage      string               `yaml:"deepSeekHarnessImage"`
+	Namespace                 string               `yaml:"namespace"`
+	WorkspaceRoot             string               `yaml:"workspaceRoot"`
+	WorkspacePVCClaimName     string               `yaml:"workspacePvcClaimName"`
+	WorkspaceNFSServer        string               `yaml:"workspaceNfsServer"`
+	WorkspaceNFSPath          string               `yaml:"workspaceNfsPath"`
+	AgentControlToken         string               `yaml:"agentControlToken"`
+	AgentReportToken          string               `yaml:"agentReportToken"`
+	BackendReplicaID          string               `yaml:"backendReplicaId"`
+	RedisURL                  string               `yaml:"redisUrl"`
+	SchedulerEnabled          bool                 `yaml:"schedulerEnabled"`
+	HeartbeatTimeout          time.Duration        `yaml:"heartbeatTimeout"`
+	SchedulerTick             time.Duration        `yaml:"schedulerTick"`
+	OpenClawImage             string               `yaml:"openClawImage"`
+	HermesImage               string               `yaml:"hermesImage"`
+	OpenCodeImage             string               `yaml:"openCodeImage"`
+	MaxGatewaysPerPod         int                  `yaml:"maxGatewaysPerPod"`
+	GatewayStartInFlightLimit int                  `yaml:"gatewayStartInFlightLimit"`
+	SkillReportPersistence    bool                 `yaml:"skillReportPersistence"`
+	GatewayPortStart          int                  `yaml:"gatewayPortStart"`
+	GatewayPortEnd            int                  `yaml:"gatewayPortEnd"`
 }
 
 // LoggingConfig holds logging configuration
@@ -370,7 +387,9 @@ func Load() (*Config, error) {
 			},
 		},
 		Kubernetes: KubernetesConfig{
-			Mode: getEnv("K8S_MODE", "auto"),
+			APIQPS:   getEnvInt("K8S_API_QPS", 0),
+			APIBurst: getEnvInt("K8S_API_BURST", 0),
+			Mode:     getEnv("K8S_MODE", "auto"),
 			OutOfCluster: OutOfClusterConfig{
 				Kubeconfig: getEnv("KUBECONFIG", getEnv("K8S_KUBECONFIG", "")),
 			},
@@ -418,6 +437,12 @@ func Load() (*Config, error) {
 			WorkspaceAccessMode:      getEnv("K8S_WORKSPACE_ACCESS_MODE", "ReadWriteMany"),
 		},
 		Runtime: RuntimePoolConfig{
+			ContainerSlots:            getEnvInt("RUNTIME_CONTAINER_SLOTS", 0),
+			DeepSeekHarnessImage:      getEnv("DEEPSEEK_HARNESS_RUNTIME_IMAGE", "ghcr.io/yuan-lab-llm/agentsruntime/deepseek-harness-lite:latest"),
+			SlotResources:             RuntimeSlotResources{CPURequest: getEnv("RUNTIME_SLOT_CPU_REQUEST", "100m"), MemoryRequest: getEnv("RUNTIME_SLOT_MEMORY_REQUEST", "256Mi"), CPULimit: getEnv("RUNTIME_SLOT_CPU_LIMIT", "2"), MemoryLimit: getEnv("RUNTIME_SLOT_MEMORY_LIMIT", "4Gi")},
+			PodResources:              RuntimeSlotResources{CPURequest: getEnv("RUNTIME_POD_CPU_REQUEST", ""), MemoryRequest: getEnv("RUNTIME_POD_MEMORY_REQUEST", ""), CPULimit: getEnv("RUNTIME_POD_CPU_LIMIT", ""), MemoryLimit: getEnv("RUNTIME_POD_MEMORY_LIMIT", "")},
+			PodUserNamespaces:         getEnvBool("RUNTIME_POD_USER_NAMESPACES", false),
+			NetworkIsolation:          getEnvBool("RUNTIME_NETWORK_ISOLATION", false),
 			Namespace:                 runtimeNamespace,
 			WorkspaceRoot:             getEnv("RUNTIME_WORKSPACE_ROOT", "/workspaces"),
 			WorkspacePVCClaimName:     getEnv("RUNTIME_WORKSPACE_PVC_CLAIM", ""),
@@ -519,6 +544,31 @@ func Load() (*Config, error) {
 	normalizeAuthConfig(config)
 	normalizeStorageConfig(config)
 
+	if raw := strings.TrimSpace(os.Getenv("RUNTIME_CONTAINER_SLOTS")); raw != "" {
+		if _, err := strconv.Atoi(raw); err != nil {
+			return nil, fmt.Errorf("invalid RUNTIME_CONTAINER_SLOTS: %w", err)
+		}
+	}
+	if config.Runtime.ContainerSlots < 0 || config.Runtime.ContainerSlots > 256 {
+		return nil, fmt.Errorf("runtime containerSlots must be 0 (legacy) or between 1 and 256")
+	}
+	if raw := os.Getenv("RUNTIME_NETWORK_ISOLATION"); raw != "" {
+		if _, err := strconv.ParseBool(raw); err != nil {
+			return nil, fmt.Errorf("invalid RUNTIME_NETWORK_ISOLATION: %w", err)
+		}
+	}
+	if config.Runtime.NetworkIsolation && (config.Runtime.ContainerSlots < 1 || !config.Runtime.PodUserNamespaces || len(config.Runtime.AgentControlToken) < 32) {
+		return nil, fmt.Errorf("runtime network isolation requires container slots, Pod user namespaces and a control credential of at least 32 bytes")
+	}
+	if config.Runtime.NetworkIsolation && len(config.Runtime.NetworkPodCIDRs) == 0 {
+		return nil, fmt.Errorf("runtime network isolation requires actual CNI Pod CIDRs")
+	}
+	for _, value := range config.Runtime.NetworkPodCIDRs {
+		prefix, err := netip.ParsePrefix(value)
+		if err != nil || prefix.Bits() == 0 || prefix != prefix.Masked() || prefix.Addr().Is4In6() {
+			return nil, fmt.Errorf("invalid runtime network Pod CIDR")
+		}
+	}
 	return config, nil
 }
 
@@ -659,6 +709,8 @@ func applyEnvOverrides(config *Config) {
 	config.IEISystem.CookieSecure = getEnvBool("IEISYSTEM_COOKIE_SECURE", config.IEISystem.CookieSecure)
 
 	// Kubernetes config
+	config.Kubernetes.APIQPS = getEnvInt("K8S_API_QPS", config.Kubernetes.APIQPS)
+	config.Kubernetes.APIBurst = getEnvInt("K8S_API_BURST", config.Kubernetes.APIBurst)
 	if mode := os.Getenv("K8S_MODE"); mode != "" {
 		config.Kubernetes.Mode = mode
 	}
@@ -701,6 +753,26 @@ func applyEnvOverrides(config *Config) {
 		config.Storage.WorkspaceAccessMode = accessMode
 	}
 
+	config.Runtime.ContainerSlots = getEnvInt("RUNTIME_CONTAINER_SLOTS", config.Runtime.ContainerSlots)
+	config.Runtime.DeepSeekHarnessImage = getEnv("DEEPSEEK_HARNESS_RUNTIME_IMAGE", config.Runtime.DeepSeekHarnessImage)
+	config.Runtime.SlotResources.CPURequest = getEnv("RUNTIME_SLOT_CPU_REQUEST", config.Runtime.SlotResources.CPURequest)
+	config.Runtime.SlotResources.MemoryRequest = getEnv("RUNTIME_SLOT_MEMORY_REQUEST", config.Runtime.SlotResources.MemoryRequest)
+	config.Runtime.SlotResources.CPULimit = getEnv("RUNTIME_SLOT_CPU_LIMIT", config.Runtime.SlotResources.CPULimit)
+	config.Runtime.SlotResources.MemoryLimit = getEnv("RUNTIME_SLOT_MEMORY_LIMIT", config.Runtime.SlotResources.MemoryLimit)
+	config.Runtime.PodResources.CPURequest = getEnv("RUNTIME_POD_CPU_REQUEST", config.Runtime.PodResources.CPURequest)
+	config.Runtime.PodResources.MemoryRequest = getEnv("RUNTIME_POD_MEMORY_REQUEST", config.Runtime.PodResources.MemoryRequest)
+	config.Runtime.PodResources.CPULimit = getEnv("RUNTIME_POD_CPU_LIMIT", config.Runtime.PodResources.CPULimit)
+	config.Runtime.PodResources.MemoryLimit = getEnv("RUNTIME_POD_MEMORY_LIMIT", config.Runtime.PodResources.MemoryLimit)
+	config.Runtime.PodUserNamespaces = getEnvBool("RUNTIME_POD_USER_NAMESPACES", config.Runtime.PodUserNamespaces)
+	config.Runtime.NetworkIsolation = getEnvBool("RUNTIME_NETWORK_ISOLATION", config.Runtime.NetworkIsolation)
+	if value, present := os.LookupEnv("RUNTIME_NETWORK_POD_CIDRS"); present {
+		config.Runtime.NetworkPodCIDRs = nil
+		if strings.TrimSpace(value) != "" {
+			for _, cidr := range strings.Split(value, ",") {
+				config.Runtime.NetworkPodCIDRs = append(config.Runtime.NetworkPodCIDRs, strings.TrimSpace(cidr))
+			}
+		}
+	}
 	config.Runtime.Namespace = getEnv("RUNTIME_NAMESPACE", getEnv("K8S_NAMESPACE", config.Runtime.Namespace))
 	config.Runtime.WorkspaceRoot = getEnv("RUNTIME_WORKSPACE_ROOT", config.Runtime.WorkspaceRoot)
 	config.Runtime.WorkspacePVCClaimName = getEnv("RUNTIME_WORKSPACE_PVC_CLAIM", config.Runtime.WorkspacePVCClaimName)

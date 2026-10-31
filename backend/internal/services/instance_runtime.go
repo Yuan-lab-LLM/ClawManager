@@ -2,9 +2,12 @@ package services
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 
+	"clawreef/internal/egresspolicy"
+	"clawreef/internal/models"
 	"clawreef/internal/services/k8s"
 )
 
@@ -189,7 +192,7 @@ func defaultWebtopDesktopEnv(title string) map[string]string {
 	}
 }
 
-func withInstanceProxyEnv(instanceType string, instanceID int, env map[string]string) map[string]string {
+func withInstanceProxyEnv(instance *models.Instance, env map[string]string) map[string]string {
 	merged := map[string]string{}
 	for key, value := range env {
 		merged[key] = value
@@ -203,14 +206,58 @@ func withInstanceProxyEnv(instanceType string, instanceID int, env map[string]st
 		merged["https_proxy"] = proxyURL
 		merged["NO_PROXY"] = noProxy
 		merged["no_proxy"] = noProxy
-		merged["CLAWMANAGER_EGRESS_INSTANCE_ID"] = fmt.Sprintf("%d", instanceID)
+		merged["CLAWMANAGER_EGRESS_INSTANCE_ID"] = fmt.Sprintf("%d", instance.ID)
 	}
 
-	if usesWebtopImage(instanceType) {
-		merged["SUBFOLDER"] = fmt.Sprintf("/api/v1/instances/%d/proxy/", instanceID)
+	if usesWebtopImage(instance.Type) {
+		merged["SUBFOLDER"] = fmt.Sprintf("/api/v1/instances/%d/proxy/", instance.ID)
 	}
 
-	return merged
+	return authenticateInstanceProxyEnv(instance, merged)
+}
+
+// authenticateInstanceProxyEnv runs after overrides too, so an old anonymous
+// URL for the platform proxy cannot silently remove the gateway's identity.
+// Credentials are only attached to the configured endpoint, never another proxy.
+func authenticateInstanceProxyEnv(instance *models.Instance, env map[string]string) map[string]string {
+	if instance.AccessToken == nil || strings.TrimSpace(*instance.AccessToken) == "" {
+		return env
+	}
+	proxyURL, ok := defaultEgressProxyURL()
+	if !ok {
+		return env
+	}
+	configured, err := url.Parse(proxyURL)
+	// Explicit system-level upstream authentication belongs to that upstream.
+	if err != nil || configured.Host == "" || configured.User != nil {
+		return env
+	}
+	password := egresspolicy.InstanceProxyPassword(instance.ID, strings.TrimSpace(*instance.AccessToken))
+	for _, key := range []string{"HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"} {
+		parsed, err := url.Parse(strings.TrimSpace(env[key]))
+		if err != nil || parsed.Host == "" || !strings.EqualFold(parsed.Scheme, configured.Scheme) ||
+			!strings.EqualFold(strings.TrimSuffix(parsed.Hostname(), "."), strings.TrimSuffix(configured.Hostname(), ".")) ||
+			proxyEndpointPort(parsed) != proxyEndpointPort(configured) {
+			continue
+		}
+		parsed.User = url.UserPassword(fmt.Sprint(instance.ID), password)
+		env[key] = parsed.String()
+	}
+	return env
+}
+
+func proxyEndpointPort(proxyURL *url.URL) string {
+	if port := proxyURL.Port(); port != "" {
+		return port
+	}
+	switch strings.ToLower(proxyURL.Scheme) {
+	case "http":
+		return "80"
+	case "https":
+		return "443"
+	default:
+		return ""
+	}
 }
 
 func usesWebtopImage(instanceType string) bool {
@@ -229,20 +276,27 @@ func defaultImagePullPolicy() string {
 	return "IfNotPresent"
 }
 
+// defaultSystemNamespace keeps all generated internal service URLs and proxy
+// exclusions on the same control-plane namespace. Explicit names stay exact.
+func defaultSystemNamespace() string {
+	if namespace := strings.TrimSpace(os.Getenv("CLAWMANAGER_SYSTEM_NAMESPACE")); namespace != "" {
+		return namespace
+	}
+	if client := k8s.GetClient(); client != nil {
+		return client.GetSystemNamespace()
+	}
+	if namespace := strings.TrimSpace(os.Getenv("K8S_NAMESPACE")); namespace != "" {
+		return k8s.ResolveSystemNamespace(namespace)
+	}
+	return ""
+}
+
 func defaultEgressProxyURL() (string, bool) {
 	if override := strings.TrimSpace(os.Getenv("CLAWMANAGER_EGRESS_PROXY_URL")); override != "" {
 		return override, true
 	}
 
-	client := k8s.GetClient()
-	var systemNamespace string
-	if overrideNamespace := strings.TrimSpace(os.Getenv("CLAWMANAGER_SYSTEM_NAMESPACE")); overrideNamespace != "" {
-		systemNamespace = overrideNamespace
-	} else if client != nil {
-		systemNamespace = fmt.Sprintf("%s-system", client.Namespace)
-	} else if baseNamespace := strings.TrimSpace(os.Getenv("K8S_NAMESPACE")); baseNamespace != "" {
-		systemNamespace = fmt.Sprintf("%s-system", baseNamespace)
-	}
+	systemNamespace := defaultSystemNamespace()
 
 	if strings.TrimSpace(systemNamespace) == "" {
 		return "", false
@@ -288,14 +342,7 @@ func defaultGatewayBaseURL() (string, bool) {
 		return override, true
 	}
 
-	systemNamespace := strings.TrimSpace(os.Getenv("CLAWMANAGER_SYSTEM_NAMESPACE"))
-	if systemNamespace == "" {
-		if client := k8s.GetClient(); client != nil {
-			systemNamespace = client.GetSystemNamespace()
-		} else if baseNamespace := strings.TrimSpace(os.Getenv("K8S_NAMESPACE")); baseNamespace != "" {
-			systemNamespace = fmt.Sprintf("%s-system", baseNamespace)
-		}
-	}
+	systemNamespace := defaultSystemNamespace()
 	if systemNamespace == "" {
 		return "", false
 	}
@@ -324,14 +371,7 @@ func defaultAgentControlBaseURL() (string, bool) {
 		return override, true
 	}
 
-	systemNamespace := strings.TrimSpace(os.Getenv("CLAWMANAGER_SYSTEM_NAMESPACE"))
-	if systemNamespace == "" {
-		if client := k8s.GetClient(); client != nil {
-			systemNamespace = client.GetSystemNamespace()
-		} else if baseNamespace := strings.TrimSpace(os.Getenv("K8S_NAMESPACE")); baseNamespace != "" {
-			systemNamespace = fmt.Sprintf("%s-system", baseNamespace)
-		}
-	}
+	systemNamespace := defaultSystemNamespace()
 	if systemNamespace == "" {
 		return "", false
 	}
@@ -364,14 +404,7 @@ func defaultNoProxyList() string {
 		return override
 	}
 
-	systemNamespace := strings.TrimSpace(os.Getenv("CLAWMANAGER_SYSTEM_NAMESPACE"))
-	if systemNamespace == "" {
-		if client := k8s.GetClient(); client != nil {
-			systemNamespace = fmt.Sprintf("%s-system", client.Namespace)
-		} else if baseNamespace := strings.TrimSpace(os.Getenv("K8S_NAMESPACE")); baseNamespace != "" {
-			systemNamespace = fmt.Sprintf("%s-system", baseNamespace)
-		}
-	}
+	systemNamespace := defaultSystemNamespace()
 
 	serviceNames := []string{
 		"localhost",

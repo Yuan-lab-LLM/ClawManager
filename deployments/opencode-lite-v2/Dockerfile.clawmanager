@@ -1,0 +1,11 @@
+ARG APP_BASE_IMAGE=clawmanager-local:egress-20261012-1441
+FROM golang:1.26.1-alpine AS builder
+WORKDIR /app/backend
+RUN apk add --no-cache git
+COPY backend/go.mod backend/go.sum ./
+RUN go mod download
+COPY backend/ ./
+RUN go test ./internal/services -run 'OpenCode' -count=1 \
+    && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -buildvcs=false -ldflags="-s -w -buildid=" -o /out/clawreef-server ./cmd/server
+FROM ${APP_BASE_IMAGE}
+COPY --from=builder /out/clawreef-server /usr/local/bin/clawreef-server

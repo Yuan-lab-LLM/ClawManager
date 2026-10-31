@@ -9,7 +9,7 @@ import (
 )
 
 type stubSessionUsageInvocationRepo struct {
-	aggregates []repository.InstanceSessionTokenAggregate
+	aggregates  []repository.InstanceSessionTokenAggregate
 	invocations []models.ModelInvocation
 }
 
@@ -101,8 +101,8 @@ func TestGetInstanceSessionUsageMergesInvocationCostAndSessionMetadata(t *testin
 					CompletionTokens: 40,
 					TotalTokens:      140,
 					InvocationCount:  2,
-					FirstSeenAt:        now.Add(-time.Hour),
-					LastSeenAt:         now,
+					FirstSeenAt:      now.Add(-time.Hour),
+					LastSeenAt:       now,
 				},
 			},
 		},
@@ -215,22 +215,22 @@ func TestGetInstanceSessionUsageDetailBuildsModelBreakdown(t *testing.T) {
 		invocationRepo: &stubSessionUsageInvocationRepo{
 			aggregates: []repository.InstanceSessionTokenAggregate{
 				{
-					SessionID:    "agent:openclaw:main",
-					TotalTokens:  30,
-					LastSeenAt:   now,
-					FirstSeenAt:  now,
+					SessionID:       "agent:openclaw:main",
+					TotalTokens:     30,
+					LastSeenAt:      now,
+					FirstSeenAt:     now,
 					InvocationCount: 1,
 				},
 			},
 			invocations: []models.ModelInvocation{
 				{
-					TraceID:        "trc_1",
-					RequestedModel: "auto",
-					Status:         models.ModelInvocationStatusCompleted,
-					PromptTokens:   20,
+					TraceID:          "trc_1",
+					RequestedModel:   "auto",
+					Status:           models.ModelInvocationStatusCompleted,
+					PromptTokens:     20,
 					CompletionTokens: 10,
-					TotalTokens:    30,
-					CreatedAt:      now,
+					TotalTokens:      30,
+					CreatedAt:        now,
 				},
 			},
 		},

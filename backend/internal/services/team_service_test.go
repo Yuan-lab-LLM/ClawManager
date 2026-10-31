@@ -9347,6 +9347,8 @@ func (s *teamRepositoryStub) CreateEventOutbox(outbox *models.TeamEventOutbox) e
 	return nil
 }
 func (s *teamRepositoryStub) MarkEventOutboxDelivered(id int, deliveredAt time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	for idx := range s.outboxRows {
 		if s.outboxRows[idx].ID == id {
 			s.outboxRows[idx].Status = "delivered"
@@ -9356,6 +9358,8 @@ func (s *teamRepositoryStub) MarkEventOutboxDelivered(id int, deliveredAt time.T
 	return nil
 }
 func (s *teamRepositoryStub) MarkEventOutboxFailed(id int, availableAt time.Time, cause string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	for idx := range s.outboxRows {
 		if s.outboxRows[idx].ID == id {
 			s.outboxRows[idx].Status = "pending"

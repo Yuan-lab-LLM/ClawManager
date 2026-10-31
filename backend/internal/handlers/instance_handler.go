@@ -1964,7 +1964,6 @@ func isDedicatedAccessRefreshPath(c *gin.Context, instanceID int) bool {
 	want := fmt.Sprintf("/api/v1/instances/%d/proxy%s", instanceID, dedicatedAccessRefreshPath)
 	return c.Request.URL.Path == want
 }
-
 func (h *InstanceHandler) proxyInstanceWithToken(c *gin.Context, id int, token string) {
 	original := originalInstanceProxyRequest(c)
 	// Check if it's a WebSocket upgrade request

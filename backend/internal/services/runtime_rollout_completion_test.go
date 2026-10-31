@@ -210,6 +210,11 @@ func TestLiveCompletionLegacyRuntimeTypes(t *testing.T) {
 			repo.raw = ""
 			r.RuntimeType = kind
 			r.Phase = "requested"
+			if kind == RuntimeTypeOpenClaw {
+				// New ordinary rollouts freeze this scope. Historical NULL-scope
+				// compatibility is covered by the real-MySQL placement tests.
+				r.SourceImagesJSON = ptrString(`{"tenant/hermes-runtime":"repo:old"}`)
+			}
 			for _, p := range s.podRepo.(*fakeRuntimePodRepo).pods {
 				p.RuntimeType = kind
 			}

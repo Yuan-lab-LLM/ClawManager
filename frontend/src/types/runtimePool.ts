@@ -9,6 +9,7 @@ export interface RuntimePod {
   runtime_type: RuntimeType;
   namespace: string;
   pod_name: string;
+  pod_uid?: string;
   pod_ip?: string;
   node_name?: string;
   deployment_name: string;
@@ -23,19 +24,196 @@ export interface RuntimePod {
   used_slots: number;
   capacity: number;
   draining: boolean;
-  cpu_millis_used: number;
-  memory_bytes_used: number;
-  disk_bytes_used: number;
-  network_rx_bytes: number;
-  network_tx_bytes: number;
+  cpu_millis_used?: number;
+  memory_bytes_used?: number;
+  disk_bytes_used?: number;
+  network_rx_bytes?: number;
+  network_tx_bytes?: number;
   last_seen_at?: string;
   updated_at?: string;
   agent_reported?: boolean;
+  bindings_reported?: boolean;
   pool_role?: "upgrade-target" | "upgrade-lab" | string;
   pool_purpose?: string;
   upgrade_id?: string;
   source_deployment?: string;
   scheduling_enabled?: boolean;
+  scheduling_paused?: boolean;
+  cpu_millis_limit?: number;
+  memory_bytes_limit?: number;
+  storage_class?: string;
+  slots?: RuntimeSlot[];
+}
+
+export interface RuntimeSlot {
+  index: number;
+  container_name: string;
+  ready: boolean;
+  restart_count: number;
+  reason?: string;
+  state: string;
+  cpu_millis_used?: number;
+  memory_bytes_used?: number;
+  cpu_millis_limit?: number;
+  memory_bytes_limit?: number;
+  instance_id?: number;
+  instance_name?: string;
+  owner?: string;
+  instance_state?: string;
+  gateway_id?: string;
+  gateway_port?: number;
+  generation?: number;
+  error_message?: string;
+}
+
+export interface RuntimePodPageRequest {
+  page: number;
+  page_size: number;
+  runtime_type?: string;
+  search?: string;
+  node?: string;
+  scheduling?: string;
+}
+
+export interface RuntimePodSummary {
+  pods: number;
+  online: number;
+  schedulable: number;
+  capacity: number;
+  ready: number;
+  occupied: number;
+  available: number;
+  running: number;
+  starting: number;
+  migrating: number;
+  error: number;
+  idle: number;
+  unavailable: number;
+}
+
+export interface RuntimePodPage {
+  pods: RuntimePod[];
+  pagination: { page: number; page_size: number; total: number; total_pages: number };
+  summary: RuntimePodSummary;
+  nodes: string[];
+  updated_at: string;
+}
+
+export interface RuntimeResources {
+  cpu_request: string;
+  memory_request: string;
+  cpu_limit: string;
+  memory_limit: string;
+}
+
+export interface RuntimeManagedPool {
+  namespace: string;
+  deployment_name: string;
+  deployment_uid: string;
+  replicas: number;
+}
+
+export interface RuntimeScaleOption extends RuntimeManagedPool {
+  runtime_type: RuntimeType;
+  slot_count: number;
+  pod_resources: RuntimeResources;
+  coordinator_resources: RuntimeResources;
+  slot_resources: RuntimeResources;
+  image_ref: string;
+}
+
+export interface RuntimeScaleOptions {
+  items: RuntimeScaleOption[];
+  limits: { min_pods: number; max_pods: number };
+  unavailable?: Array<{ runtime_type: RuntimeType; reason: string }>;
+}
+
+export interface CreateRuntimePodRequest {
+  runtime_type: RuntimeType;
+  pod_count: number;
+}
+
+export interface RuntimeScaleResult extends RuntimeManagedPool {
+  runtime_type: RuntimeType;
+  added_pods: number;
+  previous_replicas: number;
+  slot_count: number;
+}
+
+export interface RuntimeScaleInPlan extends RuntimeManagedPool {
+  allowed: boolean;
+  blockers: string[];
+  plan_fingerprint: string;
+  runtime_type: RuntimeType;
+  previous_replicas: number;
+  removed_pods: number;
+  source_pods: Array<{ id: number; pod_name: string; pod_uid: string; node_name: string; instance_count: number }>;
+  items: RuntimeSchedulingItem[];
+}
+
+export interface RuntimeBalancePlan {
+  runtime_type: RuntimeType | "all";
+  plan_fingerprint: string;
+  allowed: boolean;
+  moves: Array<{
+    instance_id: number;
+    instance_name?: string;
+    runtime_type: RuntimeType;
+    source_pod_id: number;
+    target_pod_id: number;
+    target_slot: number;
+  }>;
+  groups: Array<{
+    runtime_type: RuntimeType;
+    pod_ids: number[];
+    before: Array<{ pod_id: number; count: number; capacity: number }>;
+    after: Array<{ pod_id: number; count: number; capacity: number }>;
+    balanced: boolean;
+  }>;
+  blocked: Array<{ instance_id?: number; pod_id?: number; runtime_type: RuntimeType; reason: string }>;
+}
+
+export interface RuntimePodEvent {
+  type: string;
+  reason: string;
+  message: string;
+  count?: number;
+  first_seen_at?: string;
+  last_seen_at?: string;
+}
+
+export interface RuntimeSchedulingRequest {
+  instance_ids: number[];
+  target_pod_id: number;
+  target_slot?: number;
+}
+
+export interface RuntimeSchedulingItem {
+  instance_id: number;
+  source_pod_id?: number;
+  target_pod_id?: number;
+  target_slot?: number;
+  state: string;
+  error_message?: string;
+}
+
+export interface RuntimeSchedulingOperation {
+  id: string;
+  kind?: string;
+  status: string;
+  created_at?: string;
+  source_pod_id?: number;
+  target_pod_id?: number;
+  items: RuntimeSchedulingItem[];
+  cancel_requested?: boolean;
+  error_message?: string;
+  phase?: string;
+}
+
+export interface RuntimeSchedulingPreflight {
+  allowed: boolean;
+  blockers: string[];
+  warnings?: string[];
 }
 
 export interface RuntimeGateway {
@@ -123,6 +301,7 @@ export interface RuntimeUpgradeItem {
 }
 
 export interface RuntimeUpgradeDetails {
+  pool_operation?: {stage:string;message:string;validated:number;completed:number;total:number;restored:boolean} | null;
   execution?: { version: number; check: number; migrate: number; start: number; restore: number };
   pool_progress?: {
     version: number;

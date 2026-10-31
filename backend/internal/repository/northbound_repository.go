@@ -43,7 +43,7 @@ func (r *NorthboundRepository) UpdateAdminSettings(ctx context.Context, item *mo
 	}
 	now := time.Now().UTC()
 	result, err := r.sess.SQL().ExecContext(ctx, `UPDATE northbound_admin_settings SET
-		api_enabled=?, external_node_port=?, require_explicit_callers=?, challenge_ttl_seconds=?,
+		api_enabled=?, owner_teams_enabled=?, owner_team_creation_user_id=?, external_node_port=?, require_explicit_callers=?, challenge_ttl_seconds=?,
 		access_token_ttl_seconds=?, refresh_token_ttl_seconds=?, core_request_timeout_seconds=?,
 		challenge_rate_per_minute=?, login_rate_per_minute=?, account_login_rate_per_minute=?,
 		create_rate_per_minute=?, query_rate_per_minute=?, share_rate_per_minute=?, max_pending_operations=?,
@@ -52,7 +52,7 @@ func (r *NorthboundRepository) UpdateAdminSettings(ctx context.Context, item *mo
 		pro_cpu_cores=?, pro_memory_gb=?, pro_disk_gb=?, workbuddy_pro_cpu_cores=?,
 		workbuddy_pro_memory_gb=?, workbuddy_pro_disk_gb=?, version=version+1, updated_by=?, updated_at=?
 		WHERE id=1 AND version=?`,
-		item.APIEnabled, item.ExternalNodePort, item.RequireExplicitCallers, item.ChallengeTTLSeconds,
+		item.APIEnabled, item.OwnerTeamsEnabled, item.OwnerTeamCreationUserID, item.ExternalNodePort, item.RequireExplicitCallers, item.ChallengeTTLSeconds,
 		item.AccessTokenTTLSeconds, item.RefreshTokenTTLSeconds, item.CoreRequestTimeoutSeconds,
 		item.ChallengeRatePerMinute, item.LoginRatePerMinute, item.AccountLoginRatePerMinute,
 		item.CreateRatePerMinute, item.QueryRatePerMinute, item.ShareRatePerMinute, item.MaxPendingOperations,
@@ -495,7 +495,7 @@ func (r *NorthboundRepository) claimNextOperation(ctx context.Context, leaseOwne
 			} else if err != nil {
 				return err
 			}
-			if _, err := tx.SQL().ExecContext(ctx, `UPDATE northbound_operations SET status='processing',lease_owner=?,lease_expires_at=?,attempt_count=attempt_count+1,started_at=COALESCE(started_at,?),updated_at=? WHERE id=?`, leaseOwner, leaseUntil, now, now, id); err != nil {
+			if _, err := tx.SQL().ExecContext(ctx, `UPDATE northbound_operations SET status='processing',lease_owner=?,lease_expires_at=?,attempt_count=attempt_count+IF(error_code='OWNER_TEAM_RUNTIME_WAITING',0,1),started_at=COALESCE(started_at,?),updated_at=? WHERE id=?`, leaseOwner, leaseUntil, now, now, id); err != nil {
 				return err
 			}
 			var item models.NorthboundOperation

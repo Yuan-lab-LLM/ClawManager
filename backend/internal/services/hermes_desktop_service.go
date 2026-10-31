@@ -51,6 +51,7 @@ type HermesDesktopConfig struct {
 	ExternalAccess  InstanceExternalAccessService
 	Agent           RuntimeAgentClient
 	Redis           PlatformRedisClient
+	RuntimeSecurity *RuntimeSecurityAuthority
 }
 
 type HermesDesktopDescriptor struct {
@@ -77,10 +78,11 @@ type HermesDesktopClaims struct {
 }
 
 type hermesDesktopTarget struct {
-	instance *models.Instance
-	binding  *models.InstanceRuntimeBinding
-	pod      *models.RuntimePod
-	url      *url.URL
+	instance         *models.Instance
+	binding          *models.InstanceRuntimeBinding
+	pod              *models.RuntimePod
+	url              *url.URL
+	nativeCredential string
 }
 
 type HermesDesktopService struct {
@@ -152,10 +154,17 @@ func (s *HermesDesktopService) resolveRuntime(ctx context.Context, userID, insta
 	if err != nil || pod == nil || pod.RuntimeType != "hermes" || pod.PodIP == nil || net.ParseIP(strings.TrimSpace(*pod.PodIP)) == nil || pod.AgentEndpoint == nil || (pod.State != "ready" && pod.State != "draining") {
 		return nil, "runtime_not_ready", nil
 	}
-	if instance.AccessToken == nil || strings.TrimSpace(*instance.AccessToken) == "" {
+	if instance.RuntimeSecurityProfile == "" && (instance.AccessToken == nil || strings.TrimSpace(*instance.AccessToken) == "") {
 		return nil, "runtime_auth_unavailable", nil
 	}
 	target := &hermesDesktopTarget{instance: instance, binding: binding, pod: pod, url: &url.URL{Scheme: "http", Host: net.JoinHostPort(strings.TrimSpace(*pod.PodIP), strconv.Itoa(binding.GatewayPort))}}
+	if instance.RuntimeSecurityProfile != "" {
+		credential, err := s.protectedHermesCredential(ctx, target)
+		if err != nil {
+			return nil, "runtime_auth_unavailable", nil
+		}
+		target.nativeCredential = credential
+	}
 	return target, "", nil
 }
 
@@ -514,7 +523,15 @@ func (s *HermesDesktopService) upstreamCookies(ctx context.Context, t *hermesDes
 	if s.gatewayAuth == nil {
 		return nil, ErrHermesDesktopUnavailable
 	}
-	cookies, err := s.gatewayAuth.Cookie(ctx, t.authKey(), t.url, *t.instance.AccessToken)
+	var cookies []*http.Cookie
+	err := s.protectedHermesOperation(ctx, t, func(c context.Context) error {
+		bound, err := s.hermesUpstreamContext(c, t)
+		if err != nil {
+			return err
+		}
+		cookies, err = s.gatewayAuth.Cookie(bound, t.authKey(), t.url, t.gatewayCredential())
+		return err
+	})
 	if err != nil {
 		return nil, ErrHermesDesktopUpstream
 	}
@@ -530,10 +547,25 @@ func (s *HermesDesktopService) upstreamRequest(ctx context.Context, t *hermesDes
 }
 
 func (s *HermesDesktopService) upstreamRequestBody(ctx context.Context, t *hermesDesktopTarget, method, path, query string, body []byte) ([]byte, int, []*http.Cookie, error) {
-	return s.upstreamRequestAttempt(ctx, t, method, path, query, body, true)
+	var response []byte
+	var status int
+	var cookies []*http.Cookie
+	err := s.protectedHermesOperation(ctx, t, func(c context.Context) error {
+		var err error
+		response, status, cookies, err = s.upstreamRequestAttempt(c, t, method, path, query, body, true)
+		return err
+	})
+	if err != nil {
+		return nil, 0, nil, err
+	}
+	return response, status, cookies, nil
 }
 
 func (s *HermesDesktopService) upstreamRequestAttempt(ctx context.Context, t *hermesDesktopTarget, method, path, query string, body []byte, retry bool) ([]byte, int, []*http.Cookie, error) {
+	ctx, err := s.hermesUpstreamContext(ctx, t)
+	if err != nil {
+		return nil, 0, nil, ErrHermesDesktopUpstream
+	}
 	cookies, err := s.upstreamCookies(ctx, t)
 	if err != nil {
 		return nil, 0, nil, err
@@ -602,7 +634,7 @@ func (s *HermesDesktopService) ProxyAPIRequest(ctx context.Context, c *HermesDes
 		if err != nil {
 			return nil, err
 		}
-		return hermesDesktopSanitize(body, *target.instance.AccessToken, cookies)
+		return hermesDesktopSanitize(body, target.platformCredential(), cookies, target.nativeCredential)
 	}
 	if method == http.MethodGet && path == "/hermes/update/check" {
 		status, err := s.desktopRead(ctx, target, "/status", nil)
@@ -644,7 +676,7 @@ func (s *HermesDesktopService) ProxyAPIRequest(ctx context.Context, c *HermesDes
 		if err != nil {
 			return nil, err
 		}
-		secrets := []string{*target.instance.AccessToken}
+		secrets := []string{target.platformCredential(), target.nativeCredential}
 		for _, cookie := range cookies {
 			secrets = append(secrets, cookie.Value)
 		}

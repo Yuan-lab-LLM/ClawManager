@@ -2,9 +2,12 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { createHmac, randomBytes } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 const app=process.env.OPENCLAW102_APP_IMAGE||'clawmanager-hxc-app:team-102-candidate';
 const image=process.env.OPENCLAW102_RUNTIME_IMAGE||'openclaw:team-102-final';
+const legacy=process.env.OPENCLAW_LEGACY_RUNTIME==='1';
+const fixturePath=name=>fileURLToPath(new URL(`./fixtures/${name}`,import.meta.url)).replaceAll('\\','/');
 const prefix=`openclaw102-access-${process.pid}`, ns='openclaw102-local';
 const fixtureRoot=`/workspaces/${prefix}`;
 const workspaceAcceptance=process.env.OPENCLAW102_WORKSPACE==='1';
@@ -38,22 +41,27 @@ try{
  start(names.app,app,['--network-alias',appDNS,'-v',dataVolume+':/workspaces','-p','127.0.0.1::8443',...envArgs({...common,DB_HOST:names.mysql,DB_USER:'root',DB_PASSWORD:'disposable-local-only',DB_NAME:'clawmanager',JWT_SECRET:secret.jwt,RUNTIME_NAMESPACE:ns,RUNTIME_SCHEDULER_ENABLED:'false',PLATFORM_REDIS_URL:`redis://${names.redis}:6379/0`,TEAM_REDIS_URL:`redis://${names.redis}:6379/0`})]);
  const publicURL=`https://127.0.0.1:${port(names.app,8443)}`;
  await until(()=>{try{return sql("SELECT COUNT(*) FROM schema_migrations WHERE filename='072_add_team_workspace_file_audits.sql'")==='1';}catch{return false;}},'migrations');
- start(names.runtime,image,['-v',dataVolume+':/workspaces','--mount','type=bind,source=D:/test/ClawManager-2/e2e/fixtures/openclaw102-model-protocol-stub.mjs,target=/tests/protocol-stub.mjs,readonly','-p','127.0.0.1::19090',...envArgs({...common,CLAWMANAGER_RUNTIME_TYPE:'openclaw',CLAWMANAGER_RUNTIME_DEPLOYMENT_NAME:deploymentName,CLAWMANAGER_DEPLOYMENT_NAME:'stale-inherited-source',CLAWMANAGER_CONTROL_UI_ORIGIN:publicURL,RUNTIME_GATEWAY_AUTH_MODE:'trusted-proxy',POD_NAMESPACE:ns,POD_NAME:podName,POD_UID:prefix+'-uid',CLAWMANAGER_BACKEND_URL:backend,RUNTIME_AGENT_LISTEN_ADDR:'0.0.0.0:19090',RUNTIME_WORKSPACE_ROOT:fixtureRoot})]);
+ start(names.runtime,image,['-v',dataVolume+':/workspaces','--mount',`type=bind,source=${fixturePath('openclaw102-model-protocol-stub.mjs')},target=/tests/protocol-stub.mjs,readonly`,'-p','127.0.0.1::19090',...envArgs({...common,CLAWMANAGER_RUNTIME_TYPE:'openclaw',CLAWMANAGER_RUNTIME_DEPLOYMENT_NAME:deploymentName,CLAWMANAGER_DEPLOYMENT_NAME:legacy?deploymentName:'stale-inherited-source',CLAWMANAGER_CONTROL_UI_ORIGIN:publicURL,RUNTIME_GATEWAY_AUTH_MODE:'trusted-proxy',POD_NAMESPACE:ns,POD_NAME:podName,POD_UID:prefix+'-uid',CLAWMANAGER_BACKEND_URL:backend,RUNTIME_AGENT_LISTEN_ADDR:'0.0.0.0:19090',RUNTIME_WORKSPACE_ROOT:fixtureRoot})]);
  controlBase=`http://127.0.0.1:${port(names.runtime,19090)}`;
  await until(async()=>{try{return(await control('/v1/health')).status==='ready';}catch{return false;}},'Agent /init startup',240000);
  await until(()=>sql(`SELECT COUNT(*) FROM runtime_pods WHERE namespace='${ns}' AND pod_name='${podName}'`)==='1','registration');
  const pod=sql(`SELECT id FROM runtime_pods WHERE namespace='${ns}' AND pod_name='${podName}'`);
  assert.equal(sql(`SELECT deployment_name FROM runtime_pods WHERE id=${pod}`),deploymentName,'real /init registration misidentified long upgrade deployment');
  const startupLogs=spawnSync('docker',['logs',names.runtime],{encoding:'utf8'});
- assert.match(startupLogs.stdout+startupLogs.stderr,/Shared Runtime Agent owns Gateway lifecycle/);
+ if(!legacy)assert.match(startupLogs.stdout+startupLogs.stderr,/Shared Runtime Agent owns Gateway lifecycle/);
  const defaultListener=spawnSync('docker',['exec',names.runtime,'curl','-fsS','--max-time','2','http://127.0.0.1:18789/health'],{encoding:'utf8'});
- assert.notEqual(defaultListener.status,0,'shared pool started an unrelated Desktop Gateway');
- await renew();renewal=setInterval(()=>renew().catch(e=>{renewalError=e;}),10000);
+ // The historical 7.1 image predates shared-only Desktop startup suppression.
+ // Do not impose that later Runtime contract on its App-access compatibility test.
+ if(!legacy)assert.notEqual(defaultListener.status,0,'shared pool started an unrelated Desktop Gateway');
+ if(legacy){
+  const policy=await fetch(controlBase+'/v1/proxy-policy',{headers:{'X-ClawManager-Control-Token':secret.control}});
+  assert.equal(policy.status,404,'legacy fixture must actually lack the new proxy policy API');
+ }else{await renew();renewal=setInterval(()=>renew().catch(e=>{renewalError=e;}),10000);}
  sql("INSERT INTO users(id,username,email,password_hash,role,is_active) VALUES(77,'local-openclaw102','fixture@local.invalid','no-login','user',1)");
  const iid=9105,workspace=`${fixtureRoot}/openclaw/user-77/instance-${iid}`;
  if(workspaceAcceptance){
   const stub=prefix+'-model';
-  start(stub,'node:24.21.0-bookworm-slim',['--mount','type=bind,source=D:/test/ClawManager-2/e2e/fixtures/openclaw102-workspace-model-stub.mjs,target=/fixture.mjs,readonly','--entrypoint','node'],['/fixture.mjs']);
+  start(stub,'node:24.21.0-bookworm-slim',['--mount',`type=bind,source=${fixturePath('openclaw102-workspace-model-stub.mjs')},target=/fixture.mjs,readonly`,'--entrypoint','node'],['/fixture.mjs']);
   await until(()=>docker(['logs',stub]).includes('LOCAL_WORKSPACE_STUB_READY'),'workspace protocol fixture');
   // The upstream default bootstrap prompt includes sensitive examples; retain
   // the App's normal secure-model routing policy rather than disabling it.
@@ -63,7 +71,11 @@ try{
  sql(`INSERT INTO instance_runtime_bindings(instance_id,runtime_pod_id,runtime_type,gateway_id,gateway_port,workspace_path,state,generation) VALUES(${iid},${pod},'openclaw','gw-${iid}-1',20000,'${workspace}','creating',1)`);
  await control('/v1/gateways',{instance_id:iid,user_id:77,agent_type:'openclaw',workspace_path:workspace,gateway_port:20000,uid:209105,gid:1000,generation:1,environment:{CLAWMANAGER_INSTANCE_TOKEN:'local-instance-only',...(workspaceAcceptance?{CLAWMANAGER_LLM_BASE_URL:backend+'/api/v1/gateway/llm',CLAWMANAGER_LLM_API_KEY:'local-instance-only',CLAWMANAGER_LLM_MODEL:'["auto","local-smoke","local-second"]',CLAWMANAGER_LLM_PROVIDER_MODELS:'["auto/auto","fixture/local-smoke","fixture/local-second"]',OPENAI_MODEL:'auto'}:{})}});
  await until(()=>sql(`SELECT status FROM instances WHERE id=${iid}`)==='running','actual instance Running');
- browser=await chromium.launch({headless:true,channel:process.env.PLAYWRIGHT_CHANNEL||'chrome'});
+ // Context-level ignoreHTTPSErrors does not cover legacy ServiceWorker fetches.
+ // Trust only this disposable App's public certificate, not arbitrary origins.
+ const spki=docker(['exec',names.app,'sh','-c','openssl x509 -in /etc/nginx/tls/tls.crt -pubkey -noout | openssl pkey -pubin -outform DER | openssl dgst -sha256 -binary | openssl base64 -A']);
+ assert.match(spki,/^[A-Za-z0-9+/]{43}=$/);
+ browser=await chromium.launch({headless:true,channel:process.env.PLAYWRIGHT_CHANNEL||'chrome',args:[`--ignore-certificate-errors-spki-list=${spki}`]});
  const ctx=await browser.newContext({ignoreHTTPSErrors:true,viewport:{width:1600,height:1000}});
  await ctx.addInitScript(token=>{localStorage.setItem('access_token',token);localStorage.setItem('clawmanager_locale','zh');},jwt());
  const page=await ctx.newPage(),errors=[];
@@ -74,7 +86,7 @@ try{
  await until(()=>frames.some(f=>f.type==='res'&&f.ok&&f.payload?.type==='hello-ok'),'real embedded Control UI signed WebSocket',60000);
  assert.deepEqual(errors,[]);
  assert.equal(renewalError,undefined);
- console.log('PASS actual App proxy, owner authentication, embedded10.2 Control UI assets and authenticated signed WebSocket, real Agent Running; no model calls.');
+ console.log(`PASS actual App proxy, owner authentication, embedded ${legacy?'legacy7.1':'10.2'} Control UI assets and authenticated signed WebSocket, real Agent Running; no model calls.`);
  if(workspaceAcceptance){
   const frame=page.frameLocator('iframe:visible').first();
   const composer=frame.locator('textarea:visible, [contenteditable="true"][role="textbox"]:visible').first();

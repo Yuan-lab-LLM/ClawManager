@@ -18,6 +18,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"clawreef/internal/backupgate"
 	"clawreef/internal/models"
 	"clawreef/internal/repository"
 	"clawreef/internal/services/k8s"
@@ -286,26 +287,28 @@ type InstanceStatus struct {
 
 // instanceService implements InstanceService
 type instanceService struct {
-	instanceRepo          repository.InstanceRepository
-	quotaRepo             repository.QuotaRepository
-	llmModelRepo          repository.LLMModelRepository
-	expandedModelCatalog  ExpandedLLMModelCatalog
-	openClawConfigService OpenClawConfigService
-	allowPrivilegedPods   bool
-	runtimePodRepo        repository.RuntimePodRepository
-	bindingRepo           repository.InstanceRuntimeBindingRepository
-	agentClient           RuntimeAgentClient
-	runtimeUpgradeGuard   RuntimeUpgradeDeletionGuard
-	resourceCleanup       func(context.Context, int) error
-	workspaceRoot         string
-	podService            *k8s.PodService
-	deploymentService     *k8s.InstanceDeploymentService
-	pvcService            *k8s.PVCService
-	serviceService        *k8s.ServiceService
-	networkPolicyService  *k8s.NetworkPolicyService
-	secretService         *k8s.SecretService
-	deletionMu            sync.Mutex
-	deletionsInFlight     map[int]struct{}
+	ownerTeamMutationGuard func(instanceID int, action string, teamID int) error
+	instanceRepo           repository.InstanceRepository
+	quotaRepo              repository.QuotaRepository
+	llmModelRepo           repository.LLMModelRepository
+	gatewayKeyRepo         repository.GatewayKeyRepository
+	expandedModelCatalog   ExpandedLLMModelCatalog
+	openClawConfigService  OpenClawConfigService
+	allowPrivilegedPods    bool
+	runtimePodRepo         repository.RuntimePodRepository
+	bindingRepo            repository.InstanceRuntimeBindingRepository
+	agentClient            RuntimeAgentClient
+	runtimeUpgradeGuard    RuntimeUpgradeDeletionGuard
+	resourceCleanup        func(context.Context, int) error
+	workspaceRoot          string
+	podService             *k8s.PodService
+	deploymentService      *k8s.InstanceDeploymentService
+	pvcService             *k8s.PVCService
+	serviceService         *k8s.ServiceService
+	networkPolicyService   *k8s.NetworkPolicyService
+	secretService          *k8s.SecretService
+	deletionMu             sync.Mutex
+	deletionsInFlight      map[int]struct{}
 }
 
 const (
@@ -357,6 +360,13 @@ func WithV2RuntimeLifecycle(runtimePodRepo repository.RuntimePodRepository, bind
 			s.workspaceRoot = strings.TrimSpace(workspaceRoot)
 		}
 	}
+}
+
+// WithGatewayKeyRepository keeps the managed instance credential represented
+// in the unified Gateway Key directory while preserving the existing token
+// injected into running instances.
+func WithGatewayKeyRepository(repo repository.GatewayKeyRepository) InstanceServiceOption {
+	return func(s *instanceService) { s.gatewayKeyRepo = repo }
 }
 
 func WithRuntimeUpgradeDeletionGuard(guard RuntimeUpgradeDeletionGuard) InstanceServiceOption {
@@ -967,7 +977,7 @@ func (s *instanceService) create(userID int, req CreateInstanceRequest, validate
 }
 
 func (s *instanceService) createV2Instance(ctx context.Context, userID int, req CreateInstanceRequest, runtimeType string, environmentOverridesJSON *string) (*models.Instance, error) {
-	if _, err := s.resolveGatewayModelInjection(); err != nil {
+	if _, err := s.resolveGatewayModelInjection(userID); err != nil {
 		return nil, err
 	}
 
@@ -1048,6 +1058,17 @@ func (s *instanceService) createV2Instance(ctx context.Context, userID int, req 
 }
 
 // GetByID gets an instance by ID
+// GetByProvisioningOperationID reconciles a lost create response without
+// creating another instance. The caller still verifies owner and parent Team.
+func (s *instanceService) GetByProvisioningOperationID(id string) (*models.Instance, error) {
+	if repo, ok := s.instanceRepo.(interface {
+		GetByProvisioningOperationID(string) (*models.Instance, error)
+	}); ok {
+		return repo.GetByProvisioningOperationID(id)
+	}
+	return nil, fmt.Errorf("provisioning lookup unavailable")
+}
+
 func (s *instanceService) GetByID(id int) (*models.Instance, error) {
 	instance, err := s.instanceRepo.GetByID(id)
 	if err != nil {
@@ -1242,14 +1263,23 @@ func hydrateInstanceDesktopStreamProfile(instance *models.Instance) {
 
 // Start starts an instance
 func (s *instanceService) Start(instanceID int) error {
+	release, err := s.acquireLifecycleOperation(instanceID)
+	if err != nil {
+		return err
+	}
+	defer release()
+	return s.startWithUpgradeGuard(instanceID)
+}
+
+func (s *instanceService) startWithUpgradeGuard(instanceID int) error {
 	if guard, ok := s.runtimeUpgradeGuard.(interface {
 		WithInstanceMutation(context.Context, int, func() error) error
 	}); ok {
-		return guard.WithInstanceMutation(context.Background(), instanceID, func() error { return s.startWithoutUpgradeMutationRace(instanceID) })
+		return guard.WithInstanceMutation(context.Background(), instanceID, func() error { return s.startInstance(instanceID) })
 	}
-	return s.startWithoutUpgradeMutationRace(instanceID)
+	return s.startInstance(instanceID)
 }
-func (s *instanceService) startWithoutUpgradeMutationRace(instanceID int) error {
+func (s *instanceService) startInstance(instanceID int) error {
 	ctx := context.Background()
 
 	instance, err := s.instanceRepo.GetByID(instanceID)
@@ -1462,6 +1492,7 @@ func (s *instanceService) ensureGatewayToken(instance *models.Instance) (string,
 	if instance.AccessToken != nil && strings.TrimSpace(*instance.AccessToken) != "" {
 		token := strings.TrimSpace(*instance.AccessToken)
 		s.refreshGatewayTokenAlias(instance.ID, token)
+		s.ensureManagedGatewayKey(instance, token)
 		return token, nil
 	}
 
@@ -1478,7 +1509,17 @@ func (s *instanceService) ensureGatewayToken(instance *models.Instance) (string,
 	}
 
 	s.refreshGatewayTokenAlias(instance.ID, token)
+	s.ensureManagedGatewayKey(instance, token)
 	return token, nil
+}
+
+func (s *instanceService) ensureManagedGatewayKey(instance *models.Instance, token string) {
+	if s == nil || s.gatewayKeyRepo == nil || instance == nil {
+		return
+	}
+	if _, err := s.gatewayKeyRepo.UpsertManagedInstance(context.Background(), instance.ID, instance.UserID, token); err != nil {
+		fmt.Printf("Warning: failed to record managed gateway key for instance %d: %v\n", instance.ID, err)
+	}
 }
 
 func (s *instanceService) refreshGatewayTokenAlias(instanceID int, token string) {
@@ -1522,7 +1563,7 @@ func (s *instanceService) ensureWindowsCodexBootstrapSecret(ctx context.Context,
 	if !ok {
 		return "", fmt.Errorf("gateway base URL is not configured")
 	}
-	modelInjection, err := s.resolveGatewayModelInjection()
+	modelInjection, err := s.resolveGatewayModelInjection(instance.UserID)
 	if err != nil {
 		return "", err
 	}
@@ -1619,19 +1660,23 @@ func (s *instanceService) buildGatewayEnvReadOnly(instance *models.Instance) (ma
 		return nil, fmt.Errorf("gateway base URL is not configured")
 	}
 
-	modelInjection, err := s.resolveGatewayModelInjection()
+	modelInjection, err := s.resolveGatewayModelInjection(instance.UserID)
 	if err != nil {
 		return nil, err
 	}
 
 	token := strings.TrimSpace(*instance.AccessToken)
 	env := map[string]string{
+		"CLAWMANAGER_GATEWAY_GENERATION":    strconv.Itoa(instance.RuntimeGeneration),
 		"CLAWMANAGER_LLM_BASE_URL":          baseURL,
 		"CLAWMANAGER_LLM_API_KEY":           token,
 		"CLAWMANAGER_LLM_MODEL":             modelInjection.modelsJSON,
+		"CLAWMANAGER_LLM_CONTEXT_WINDOW":    strconv.Itoa(modelInjection.defaultContextWindow),
+		"CLAWMANAGER_LLM_CONTEXT_WINDOWS":   modelInjection.contextWindowsJSON,
 		"CLAWMANAGER_LLM_PROVIDER_MODELS":   modelInjection.providerModelsJSON,
 		"CLAWMANAGER_LLM_REASONING":         modelInjection.reasoningJSON,
 		"CLAWMANAGER_LLM_REASONING_CONTROL": modelInjection.reasoningControlJSON,
+		"CLAWMANAGER_LLM_VISION":            modelInjection.visionJSON,
 		"CLAWMANAGER_LLM_PROVIDER":          "openai-compatible",
 		"CLAWMANAGER_INSTANCE_TOKEN":        token,
 		"OPENAI_BASE_URL":                   baseURL,
@@ -1645,7 +1690,7 @@ func (s *instanceService) buildGatewayEnvReadOnly(instance *models.Instance) (ma
 	if strings.EqualFold(strings.TrimSpace(instance.Type), RuntimeTypeOpenCode) {
 		env["OPENCODE_SERVER_PASSWORD"] = token
 		env["OPENCODE_SERVER_USERNAME"] = "opencode"
-		configContent, err := buildOpenCodeGatewayConfig(modelInjection.providerModelsJSON)
+		configContent, err := buildOpenCodeGatewayConfig(modelInjection.modelsJSON, modelInjection.contextWindowsJSON)
 		if err != nil {
 			return nil, fmt.Errorf("failed to build opencode gateway config: %w", err)
 		}
@@ -1664,6 +1709,61 @@ func (s *instanceService) buildGatewayEnvReadOnly(instance *models.Instance) (ma
 	return env, nil
 }
 
+// buildOpenCodeGatewayConfig translates ClawManager's active model catalogue
+// into OpenCode's custom-provider format. The gateway's "auto" model is always
+// included, so a newly-created Lite instance is usable even when the active
+// catalogue contains only aliases added after the runtime image was built.
+func buildOpenCodeGatewayConfig(modelsJSON string, contextWindowSettings ...string) (string, error) {
+	if len(contextWindowSettings) == 0 {
+		return buildProviderOpenCodeGatewayConfig(modelsJSON)
+	}
+	contextWindowsJSON := contextWindowSettings[0]
+	var modelIDs []string
+	if err := json.Unmarshal([]byte(modelsJSON), &modelIDs); err != nil {
+		return "", fmt.Errorf("invalid gateway model catalogue: %w", err)
+	}
+	contextWindows := map[string]int{}
+	if err := json.Unmarshal([]byte(contextWindowsJSON), &contextWindows); err != nil {
+		return "", fmt.Errorf("invalid gateway context window catalogue: %w", err)
+	}
+
+	modelConfigs := make(map[string]map[string]interface{}, len(modelIDs))
+	for _, modelID := range modelIDs {
+		modelID = strings.TrimSpace(modelID)
+		if modelID == "" {
+			continue
+		}
+		modelConfig := map[string]interface{}{"name": modelID}
+		if contextWindow := contextWindows[modelID]; contextWindow > 0 {
+			modelConfig["limit"] = map[string]int{"context": contextWindow}
+		}
+		modelConfigs[modelID] = modelConfig
+	}
+	if _, ok := modelConfigs["auto"]; !ok {
+		modelConfigs["auto"] = map[string]interface{}{"name": "auto"}
+	}
+
+	config := map[string]interface{}{
+		"$schema": "https://opencode.ai/config.json",
+		"model":   "clawmanager/auto",
+		"provider": map[string]interface{}{
+			"clawmanager": map[string]interface{}{
+				"npm":  "@ai-sdk/openai-compatible",
+				"name": "ClawManager AI Gateway",
+				"options": map[string]string{
+					"baseURL": "{env:CLAWMANAGER_LLM_BASE_URL}",
+					"apiKey":  "{env:CLAWMANAGER_LLM_API_KEY}",
+				},
+				"models": modelConfigs,
+			},
+		},
+	}
+	raw, err := json.Marshal(config)
+	if err != nil {
+		return "", err
+	}
+	return string(raw), nil
+}
 func (s *instanceService) BuildGatewayEnv(instance *models.Instance) (map[string]string, error) {
 	if instance == nil || !supportsManagedRuntimeIntegrationForInstance(instance) {
 		return s.buildGatewayEnv(instance)
@@ -1931,6 +2031,139 @@ chown -R 1000:1000 "$target" || true`,
 	}
 }
 
+func (s *instanceService) resolveGatewayModelInjection(ownerID int) (*gatewayModelInjection, error) {
+	if s.llmModelRepo == nil {
+		return nil, fmt.Errorf("llm model repository not configured")
+	}
+
+	modelRepo := repository.ForModelUser(s.llmModelRepo, ownerID)
+	items, err := modelRepo.ListActive()
+	if err != nil {
+		return nil, fmt.Errorf("failed to list active models: %w", err)
+	}
+	items = models.ChatModels(items)
+	if len(items) == 0 {
+		return nil, ErrModelConfigurationRequired
+	}
+
+	modelsForInjection := []string{"auto"}
+	providerRefs := []string{managedAutoModelRef}
+	reasoningForInjection := map[string]bool{"auto": false}
+	visionForInjection := map[string]bool{"auto": false}
+	for _, item := range items {
+		visionForInjection["auto"] = visionForInjection["auto"] || models.LLMVisionInputAvailable(&item)
+	}
+	reasoningControlForInjection := map[string]string{"auto": models.ReasoningControlNone}
+	contextWindowsForInjection := make(map[string]int, len(items)+1)
+	contextWindowsForInjection["auto"] = safeContextWindow(items)
+	modelsByGroup := make(map[string][]models.LLMModel)
+	groupNames := make(map[string]string)
+	for _, item := range items {
+		group := strings.TrimSpace(item.ModelGroup)
+		if group == "" {
+			continue
+		}
+		normalizedGroup := strings.ToLower(group)
+		modelsByGroup[normalizedGroup] = append(modelsByGroup[normalizedGroup], item)
+		if _, exists := groupNames[normalizedGroup]; !exists {
+			groupNames[normalizedGroup] = group
+		}
+	}
+	for normalizedGroup, groupItems := range modelsByGroup {
+		contextWindowsForInjection[groupNames[normalizedGroup]] = safeContextWindow(groupItems)
+	}
+	seen := map[string]struct{}{
+		"auto": {},
+	}
+
+	for _, item := range items {
+		displayName := strings.TrimSpace(item.DisplayName)
+		if displayName == "" {
+			displayName = strings.TrimSpace(item.ProviderModelName)
+		}
+		if displayName == "" {
+			continue
+		}
+
+		normalizedName := strings.ToLower(displayName)
+		if _, exists := seen[normalizedName]; exists {
+			continue
+		}
+		seen[normalizedName] = struct{}{}
+		modelsForInjection = append(modelsForInjection, displayName)
+		providerRefs = append(providerRefs, modelCatalogProviderName(item)+"/"+displayName)
+		models.PopulateLLMReasoningCapability(&item)
+		reasoningForInjection[displayName] = item.SupportsReasoning && item.ReasoningEnabled
+		qualifiedName := modelCatalogProviderName(item) + "/" + displayName
+		reasoningForInjection[qualifiedName] = reasoningForInjection[displayName]
+		visionForInjection[displayName] = models.LLMVisionInputAvailable(&item)
+		reasoningControlForInjection[displayName] = item.ReasoningControl
+		reasoningControlForInjection[qualifiedName] = item.ReasoningControl
+		contextWindow := item.ContextWindowTokens
+		if normalizedGroup := strings.ToLower(strings.TrimSpace(item.ModelGroup)); normalizedGroup != "" {
+			contextWindow = safeContextWindow(modelsByGroup[normalizedGroup])
+		}
+		contextWindowsForInjection[displayName] = contextWindow
+	}
+
+	rawModels, err := json.Marshal(modelsForInjection)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode gateway model list: %w", err)
+	}
+	rawReasoning, err := json.Marshal(reasoningForInjection)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode gateway model reasoning settings: %w", err)
+	}
+	rawVision, err := json.Marshal(visionForInjection)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode gateway model vision settings: %w", err)
+	}
+	rawReasoningControl, err := json.Marshal(reasoningControlForInjection)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode gateway model reasoning controls: %w", err)
+	}
+	rawContextWindows, err := json.Marshal(contextWindowsForInjection)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode gateway model context windows: %w", err)
+	}
+
+	providerJSON, err := marshalGatewayModelSetting("provider model list", providerRefs)
+	if err != nil {
+		return nil, err
+	}
+	codingDefault := ""
+	if len(modelsForInjection) > 1 {
+		codingDefault = modelsForInjection[1]
+	}
+	return &gatewayModelInjection{
+		codingAgentDefaultModel: codingDefault,
+		providerModelsJSON:      providerJSON,
+		defaultModel:            "auto",
+		defaultContextWindow:    contextWindowsForInjection["auto"],
+		modelsJSON:              string(rawModels),
+		contextWindowsJSON:      string(rawContextWindows),
+		reasoningJSON:           string(rawReasoning),
+		reasoningControlJSON:    string(rawReasoningControl),
+		visionJSON:              string(rawVision),
+	}, nil
+}
+
+// safeContextWindow returns a conservative window for a logical route. A
+// route may fail over to any of its deployments, so the smallest configured
+// value is authoritative. If one candidate is unknown, the route remains
+// unknown instead of advertising a window that may be too large.
+func safeContextWindow(items []models.LLMModel) int {
+	minimum := 0
+	for _, item := range items {
+		if item.ContextWindowTokens <= 0 {
+			return 0
+		}
+		if minimum == 0 || item.ContextWindowTokens < minimum {
+			minimum = item.ContextWindowTokens
+		}
+	}
+	return minimum
+}
 func mergeEnvMaps(base map[string]string, overlay map[string]string) map[string]string {
 	merged := map[string]string{}
 	for key, value := range base {
@@ -2048,14 +2281,20 @@ func (s *instanceService) cleanupV2GatewayBinding(ctx context.Context, instance 
 		return nil
 	}
 
+	strictStop := requiresConfirmedGatewayStop(s.agentClient)
+	if strictStop && (s.runtimePodRepo == nil || strings.TrimSpace(binding.GatewayID) == "") {
+		return fmt.Errorf("runtime source identity is required to confirm v2 gateway cleanup")
+	}
 	if s.runtimePodRepo != nil {
 		pod, podErr := s.runtimePodRepo.GetByID(ctx, binding.RuntimePodID)
 		if podErr != nil {
 			return fmt.Errorf("failed to get runtime pod %d for v2 cleanup: %w", binding.RuntimePodID, podErr)
 		} else if pod == nil {
 			return fmt.Errorf("runtime pod %d is not available for v2 cleanup", binding.RuntimePodID)
+		} else if strictStop && (pod.AgentEndpoint == nil || strings.TrimSpace(*pod.AgentEndpoint) == "") {
+			return fmt.Errorf("runtime source endpoint is required to confirm v2 gateway cleanup")
 		} else if pod != nil && pod.AgentEndpoint != nil && strings.TrimSpace(*pod.AgentEndpoint) != "" && s.agentClient != nil && binding.GatewayID != "" {
-			if err := s.agentClient.DeleteGateway(ctx, strings.TrimSpace(*pod.AgentEndpoint), binding.GatewayID); err != nil && !errors.Is(err, ErrRuntimeAgentNotFound) {
+			if err := s.agentClient.DeleteGateway(ctx, strings.TrimSpace(*pod.AgentEndpoint), binding.GatewayID); err != nil && (requiresConfirmedGatewayStop(s.agentClient) || !errors.Is(err, ErrRuntimeAgentNotFound)) {
 				return fmt.Errorf("failed to delete v2 gateway: %w", err)
 			}
 		}
@@ -2105,14 +2344,23 @@ func ensureRuntimeWorkspaceDirectories(root, runtimeType string, userID, instanc
 
 // Stop stops an instance
 func (s *instanceService) Stop(instanceID int) error {
+	release, err := s.acquireLifecycleOperation(instanceID)
+	if err != nil {
+		return err
+	}
+	defer release()
+	return s.stopWithUpgradeGuard(instanceID)
+}
+
+func (s *instanceService) stopWithUpgradeGuard(instanceID int) error {
 	if guard, ok := s.runtimeUpgradeGuard.(interface {
 		WithInstanceMutation(context.Context, int, func() error) error
 	}); ok {
-		return guard.WithInstanceMutation(context.Background(), instanceID, func() error { return s.stopWithoutUpgradeMutationRace(instanceID) })
+		return guard.WithInstanceMutation(context.Background(), instanceID, func() error { return s.stopInstance(instanceID) })
 	}
-	return s.stopWithoutUpgradeMutationRace(instanceID)
+	return s.stopInstance(instanceID)
 }
-func (s *instanceService) stopWithoutUpgradeMutationRace(instanceID int) error {
+func (s *instanceService) stopInstance(instanceID int) error {
 	ctx := context.Background()
 
 	instance, err := s.instanceRepo.GetByID(instanceID)
@@ -2170,6 +2418,26 @@ func (s *instanceService) stopWithoutUpgradeMutationRace(instanceID int) error {
 
 // Restart restarts an instance
 func (s *instanceService) Restart(instanceID int) error {
+	release, err := s.acquireLifecycleOperation(instanceID)
+	if err != nil {
+		return err
+	}
+	defer release()
+	return s.withRuntimeUpgradeMutation(instanceID, func() error { return s.restartInstance(instanceID) })
+}
+
+// Combine the upstream OpenClaw recovery fence with the instance lifecycle
+// lock held by callers, without reacquiring either lock inside Stop/Start.
+func (s *instanceService) withRuntimeUpgradeMutation(instanceID int, run func() error) error {
+	if guard, ok := s.runtimeUpgradeGuard.(interface {
+		WithInstanceMutation(context.Context, int, func() error) error
+	}); ok {
+		return guard.WithInstanceMutation(context.Background(), instanceID, run)
+	}
+	return run()
+}
+
+func (s *instanceService) restartInstance(instanceID int) error {
 	ctx := context.Background()
 	instance, err := s.instanceRepo.GetByID(instanceID)
 	if err != nil {
@@ -2207,7 +2475,7 @@ func (s *instanceService) Restart(instanceID int) error {
 			return fmt.Errorf("failed to fence previous runtime generation: %w", err)
 		}
 	}
-	if err := s.Stop(instanceID); err != nil {
+	if err := s.stopInstance(instanceID); err != nil {
 		return fmt.Errorf("failed to stop instance: %w", err)
 	}
 
@@ -2220,7 +2488,7 @@ func (s *instanceService) Restart(instanceID int) error {
 		}
 	}
 
-	if err := s.Start(instanceID); err != nil {
+	if err := s.startInstance(instanceID); err != nil {
 		return fmt.Errorf("failed to start instance: %w", err)
 	}
 
@@ -2275,6 +2543,11 @@ func factoryResetString(value string) *string { return &value }
 // workspace contents, runtime-local configuration, tokens and snapshots are
 // never copied from the source.
 func (s *instanceService) CreateResetReplacement(sourceInstanceID int, operationID string) (*models.Instance, error) {
+	if s.ownerTeamMutationGuard != nil {
+		if err := s.ownerTeamMutationGuard(sourceInstanceID, "reset", 0); err != nil {
+			return nil, err
+		}
+	}
 	source, err := s.GetByID(sourceInstanceID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load factory-reset source: %w", err)
@@ -2345,6 +2618,11 @@ func resetReplacementCreateRequest(source *models.Instance, operationID string) 
 // legacy UI Delete method it never reports success after merely scheduling a
 // best-effort background cleanup.
 func (s *instanceService) DeletePermanently(instanceID int) error {
+	if s.ownerTeamMutationGuard != nil {
+		if err := s.ownerTeamMutationGuard(instanceID, "delete", 0); err != nil {
+			return err
+		}
+	}
 	instance, err := s.instanceRepo.GetByID(instanceID)
 	if err != nil {
 		return fmt.Errorf("failed to get instance for permanent deletion: %w", err)
@@ -2547,6 +2825,11 @@ type InstanceLifecycleFailureService interface {
 // workspace and clears instance-local runtime state. Callers must obtain an
 // explicit data-loss confirmation before invoking this service.
 func (s *instanceService) Reset(instanceID int) error {
+	if s.ownerTeamMutationGuard != nil {
+		if err := s.ownerTeamMutationGuard(instanceID, "reset", 0); err != nil {
+			return err
+		}
+	}
 	ctx := context.Background()
 	instance, err := s.instanceRepo.GetByID(instanceID)
 	if err != nil {
@@ -2821,8 +3104,19 @@ func (s *instanceService) GetEnvironmentOverrideNames(instanceID int) ([]string,
 // the source of truth and allows a failed restart to be retried with the same
 // desired configuration.
 func (s *instanceService) RestartWithEnvironment(instanceID int, environmentOverrides map[string]string, environmentOverrideRemovals []string) error {
+	release, err := s.acquireLifecycleOperation(instanceID)
+	if err != nil {
+		return err
+	}
+	defer release()
+	return s.withRuntimeUpgradeMutation(instanceID, func() error {
+		return s.restartInstanceWithEnvironment(instanceID, environmentOverrides, environmentOverrideRemovals)
+	})
+}
+
+func (s *instanceService) restartInstanceWithEnvironment(instanceID int, environmentOverrides map[string]string, environmentOverrideRemovals []string) error {
 	if len(environmentOverrides) == 0 && len(environmentOverrideRemovals) == 0 {
-		return s.Restart(instanceID)
+		return s.restartInstance(instanceID)
 	}
 
 	additions, err := normalizeEnvironmentOverrides(environmentOverrides)
@@ -2876,11 +3170,35 @@ func (s *instanceService) RestartWithEnvironment(instanceID int, environmentOver
 		return fmt.Errorf("failed to persist instance environment overrides: %w", err)
 	}
 
-	return s.Restart(instanceID)
+	return s.restartInstance(instanceID)
 }
 
 // Delete starts deleting an instance and all associated K8s resources.
 func (s *instanceService) Delete(instanceID int) error {
+	return s.deleteForTeam(instanceID, 0)
+}
+
+func (s *instanceService) SetOwnerTeamMutationGuard(guard func(int, string, int) error) {
+	s.ownerTeamMutationGuard = guard
+}
+func (s *instanceService) DeleteForOwnerTeam(teamID, instanceID int) error {
+	return s.deleteForTeam(instanceID, teamID)
+}
+func (s *instanceService) deleteForTeam(instanceID, teamID int) error {
+	if s.ownerTeamMutationGuard != nil {
+		if err := s.ownerTeamMutationGuard(instanceID, "delete", teamID); err != nil {
+			return err
+		}
+	}
+	release, err := s.acquireLifecycleOperation(instanceID)
+	if err != nil {
+		return err
+	}
+	defer release()
+	return s.deleteInstance(instanceID)
+}
+
+func (s *instanceService) deleteInstance(instanceID int) error {
 	instance, err := s.instanceRepo.GetByID(instanceID)
 	if err != nil {
 		return fmt.Errorf("failed to get instance: %w", err)
@@ -3019,6 +3337,31 @@ func (s *instanceService) ValidateDelete(instanceID int) error {
 
 func (s *instanceService) completeDeletion(userID, instanceID int) {
 	ctx := context.Background()
+	release, gateErr := backupgate.HoldWorkUnit(ctx, "instance.delete")
+	if gateErr != nil {
+		return
+	}
+	defer release()
+	// The API returns before this worker runs. Reacquire the lifecycle guard.
+	deadline := time.Now().Add(30 * time.Second)
+	var lifecycleRelease func()
+	for {
+		var err error
+		lifecycleRelease, err = s.acquireLifecycleOperation(instanceID)
+		if err == nil {
+			break
+		}
+		if !errors.Is(err, models.ErrInstanceOperationInProgress) || time.Now().After(deadline) {
+			fmt.Printf("Deletion of instance %d deferred: %v\n", instanceID, err)
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	defer lifecycleRelease()
+	instance, err := s.instanceRepo.GetByID(instanceID)
+	if err != nil || instance == nil || instance.UserID != userID || instance.Status != "deleting" {
+		return
+	}
 
 	fmt.Printf("Starting background deletion of instance %d (user %d)\n", instanceID, userID)
 
@@ -3232,6 +3575,11 @@ func (s *instanceService) cleanupOrphanedResourcesByUser(ctx context.Context, us
 
 // Update updates an instance
 func (s *instanceService) Update(instanceID int, req UpdateInstanceRequest) error {
+	release, err := s.acquireLifecycleOperation(instanceID)
+	if err != nil {
+		return err
+	}
+	defer release()
 	instance, err := s.instanceRepo.GetByID(instanceID)
 	if err != nil {
 		return fmt.Errorf("failed to get instance: %w", err)
@@ -3325,6 +3673,11 @@ func (s *instanceService) GetInstanceStatus(instanceID int) (*InstanceStatus, er
 
 // ForceSyncInstance forces a status sync for a single instance
 func (s *instanceService) ForceSyncInstance(instanceID int) error {
+	release, err := s.acquireLifecycleOperation(instanceID)
+	if err != nil {
+		return err
+	}
+	defer release()
 	ctx := context.Background()
 
 	instance, err := s.instanceRepo.GetByID(instanceID)

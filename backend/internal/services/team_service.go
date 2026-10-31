@@ -23,6 +23,7 @@ import (
 	"sync"
 	"time"
 
+	"clawreef/internal/backupgate"
 	"clawreef/internal/models"
 	"clawreef/internal/repository"
 	"clawreef/internal/services/k8s"
@@ -190,13 +191,15 @@ type TeamListPayload struct {
 }
 
 type TeamDetailsPayload struct {
-	Team           *models.Team          `json:"team"`
-	LeaderMemberID string                `json:"leader_member_id,omitempty"`
-	Leader         *models.TeamMember    `json:"leader,omitempty"`
-	Members        []models.TeamMember   `json:"members"`
-	Tasks          []TeamTaskPayload     `json:"tasks,omitempty"`
-	Events         []TeamEventPayload    `json:"events,omitempty"`
-	WorkItems      []TeamWorkItemPayload `json:"work_items,omitempty"`
+	EventsHasMore      bool                  `json:"events_has_more"`
+	EventsNextBeforeID *int                  `json:"events_next_before_id,omitempty"`
+	Team               *models.Team          `json:"team"`
+	LeaderMemberID     string                `json:"leader_member_id,omitempty"`
+	Leader             *models.TeamMember    `json:"leader,omitempty"`
+	Members            []models.TeamMember   `json:"members"`
+	Tasks              []TeamTaskPayload     `json:"tasks,omitempty"`
+	Events             []TeamEventPayload    `json:"events,omitempty"`
+	WorkItems          []TeamWorkItemPayload `json:"work_items,omitempty"`
 }
 
 type TeamTasksHistoryPayload struct {
@@ -288,6 +291,8 @@ type teamService struct {
 	staleMonitorStarted   bool
 	runtimeWorkspaceRoot  string
 	workspaceText         *workspaceFileService
+	observationMu         sync.Mutex
+	observationPods       map[string]teamObservationPods
 }
 
 type teamOpenClawConfigPlanner interface {
@@ -323,6 +328,12 @@ type teamRuntimeSecrets struct {
 }
 
 type TeamServiceOption func(*teamService)
+
+func WithTeamKubernetesClient(client *k8s.Client) TeamServiceOption {
+	return func(s *teamService) {
+		s.pvcService, s.secretService, s.configMapService = k8s.NewTeamProvisioningServices(client)
+	}
+}
 
 func WithTeamRuntimeWorkspaceRoot(root string) TeamServiceOption {
 	return func(s *teamService) {
@@ -444,6 +455,11 @@ func (s *teamService) consumerScanLoop(ctx context.Context) {
 }
 
 func (s *teamService) resumePendingTeamDeletions() {
+	release, gateErr := backupgate.HoldWorkUnit(context.Background(), "team.pending_deletions")
+	if gateErr != nil {
+		return
+	}
+	defer release()
 	repo, ok := s.repo.(repository.PendingTeamDeletionRepository)
 	if !ok {
 		return
@@ -478,7 +494,7 @@ func (s *teamService) resumePendingTeamDeletions() {
 		}
 		if team.Status == models.TeamStatusDeleted {
 			if member.InstanceID != nil && *member.InstanceID > 0 {
-				if err := s.instanceService.Delete(*member.InstanceID); err != nil {
+				if err := s.deleteTeamMemberInstance(team, *member.InstanceID); err != nil {
 					fmt.Printf("Warning: failed to resume deleted Team %d member %s instance deletion: %v\n", team.ID, member.MemberKey, err)
 					continue
 				}
@@ -643,7 +659,7 @@ func (s *teamService) dispatchInitialLeaderTask(userID int, team *models.Team) e
 	_, err = s.DispatchTask(userID, team.ID, DispatchTeamTaskRequest{
 		TargetMemberID: leader.MemberKey,
 		MessageID:      initialLeaderTaskMessageID(team.ID),
-		Payload:        buildInitialLeaderTaskPayload(team.Name),
+		Payload:        buildInitialLeaderTaskPayload(team.VisibleName()),
 	})
 	return err
 }
@@ -1384,11 +1400,27 @@ func (s *teamService) createTeamMemberInstance(userID int, team *models.Team, me
 		CreatedAt:    now,
 		UpdatedAt:    now,
 	}
-	if err := s.repo.CreateMember(member); err != nil {
+	if team.ResourceScope == models.TeamScopeNorthbound {
+		existing, err := s.repo.GetMemberByTeamKey(team.ID, memberPlan.MemberKey)
+		if err != nil {
+			return nil, err
+		}
+		if existing != nil {
+			if existing.UserID != userID || existing.TeamID != team.ID {
+				return nil, fmt.Errorf("member ownership conflict")
+			}
+			member = existing
+		} else if err := s.repo.CreateMember(member); err != nil {
+			return nil, err
+		}
+	} else if err := s.repo.CreateMember(member); err != nil {
 		return nil, err
 	}
 
 	createReq := s.buildTeamMemberInstanceRequestWithSecrets(team, memberPlan, runtimeSecrets, rosterJSON)
+	if team.ResourceScope == models.TeamScopeNorthbound {
+		createReq.ProvisioningOperationID = ownerTeamMemberProvisionID(team.ID, memberPlan.MemberKey)
+	}
 	memberOpenClawPlan, err := s.openClawConfigPlanForTeamMember(userID, memberPlan)
 	if err != nil {
 		member.Status = models.TeamMemberStatusFailed
@@ -1403,6 +1435,24 @@ func (s *teamService) createTeamMemberInstance(userID int, team *models.Team, me
 		member.UpdatedAt = time.Now().UTC()
 		_ = s.repo.UpdateMember(member)
 		return nil, err
+	}
+	if team.ResourceScope == models.TeamScopeNorthbound {
+		if instance == nil || instance.Owner == nil || !strings.EqualFold(*instance.Owner, *team.Owner) || instance.UserID != team.UserID {
+			return nil, fmt.Errorf("member instance ownership conflict")
+		}
+		if instance.Status == "error" || instance.Status == "stopped" {
+			if err := s.instanceService.Start(instance.ID); err != nil {
+				return nil, err
+			}
+		}
+	}
+	// Record the exact binding before identity-file writes. If the process stops,
+	// owner provisioning can inspect this instance without creating a second one.
+	if team.ResourceScope == models.TeamScopeNorthbound {
+		member.InstanceID = &instance.ID
+		if err := s.repo.UpdateMember(member); err != nil {
+			return nil, err
+		}
 	}
 	if err := s.writeLiteTeamMemberIdentityFiles(instance, team, memberPlan, rosterJSON); err != nil {
 		member.Status = models.TeamMemberStatusFailed
@@ -1467,6 +1517,7 @@ func (s *teamService) buildTeamMemberInstanceRequestWithSecrets(team *models.Tea
 		}
 	}
 	return CreateInstanceRequest{
+		Owner:                team.Owner,
 		Name:                 teamMemberInstanceName(team.Name, team.ID, memberPlan.MemberKey),
 		Type:                 memberPlan.RuntimeType,
 		Mode:                 instanceMode,
@@ -1624,9 +1675,23 @@ func (s *teamService) GetTeam(userID, teamID int) (*TeamDetailsPayload, error) {
 	for idx := range members {
 		_, _, _, _ = s.reconcileTeamMemberRuntimeAvailability(&members[idx], workItems, time.Now().UTC())
 	}
+	if team.ResourceScope == models.TeamScopeNorthbound {
+		members = s.ObserveTeamMembers(context.Background(), []models.Team{*team}, members)
+	}
 	leader := findTeamLeader(members)
 	return &TeamDetailsPayload{
-		Team:           team,
+		Team:          team,
+		EventsHasMore: len(events) >= 200,
+		EventsNextBeforeID: func() *int {
+			var oldest *int
+			for _, event := range events {
+				if oldest == nil || event.ID < *oldest {
+					id := event.ID
+					oldest = &id
+				}
+			}
+			return oldest
+		}(),
 		LeaderMemberID: leaderMemberKey(leader),
 		Leader:         leader,
 		Members:        members,
@@ -2255,7 +2320,7 @@ func (s *teamService) enrichBootstrapTaskPayload(userID int, team *models.Team, 
 	payload["teamConfigJson"] = rosterJSON
 	payload["bootstrapSnapshot"] = map[string]interface{}{
 		"teamId":            team.ID,
-		"teamName":          team.Name,
+		"teamName":          team.VisibleName(),
 		"communicationMode": normalizedTeamCommunicationMode(team.CommunicationMode),
 		"sharedDir":         team.SharedMountPath,
 		"configPath":        teamConfigMountPath,
@@ -2326,7 +2391,7 @@ func (s *teamService) completeInitialLeaderTaskFromSnapshot(userID int, team *mo
 		return nil, err
 	}
 	artifactRef := "/team/" + reportRel
-	summary := fmt.Sprintf("Team %s 启动快照完成，已生成成员与协作机制介绍。", team.Name)
+	summary := fmt.Sprintf("Team %s 启动快照完成，已生成成员与协作机制介绍。", team.VisibleName())
 	completionID := fmt.Sprintf("clawmanager-bootstrap:%s", taskRef)
 	eventID := fmt.Sprintf("%s:completed", completionID)
 	eventPayload := map[string]interface{}{
@@ -2411,7 +2476,7 @@ func buildBackendBootstrapReport(team *models.Team, members []models.TeamMember,
 	var b strings.Builder
 	mode := normalizedTeamCommunicationMode(team.CommunicationMode)
 	b.WriteString("# Team 启动介绍\n\n")
-	b.WriteString(fmt.Sprintf("- Team：%s（ID %d）\n", team.Name, team.ID))
+	b.WriteString(fmt.Sprintf("- Team：%s（ID %d）\n", team.VisibleName(), team.ID))
 	b.WriteString(fmt.Sprintf("- 任务：%s\n", taskRef))
 	b.WriteString(fmt.Sprintf("- 协作模式：%s\n", mode))
 	b.WriteString(fmt.Sprintf("- 共享目录：%s\n\n", team.SharedMountPath))
@@ -3480,7 +3545,7 @@ func (s *teamService) DeleteTeam(userID, teamID int) error {
 			return fmt.Errorf("failed to mark Team %d member %s deleting: %w", teamID, member.MemberKey, err)
 		}
 		if member.InstanceID != nil && *member.InstanceID > 0 {
-			if err := s.instanceService.Delete(*member.InstanceID); err != nil {
+			if err := s.deleteTeamMemberInstance(team, *member.InstanceID); err != nil {
 				return fmt.Errorf("failed to delete Team %d member %s instance %d: %w", teamID, member.MemberKey, *member.InstanceID, err)
 			}
 			member.InstanceID = nil
@@ -3550,7 +3615,7 @@ func (s *teamService) DeleteMember(userID, teamID int, memberID string) error {
 		return err
 	}
 	if member.InstanceID != nil && *member.InstanceID > 0 {
-		if err := s.instanceService.Delete(*member.InstanceID); err != nil {
+		if err := s.deleteTeamMemberInstance(team, *member.InstanceID); err != nil {
 			return err
 		}
 		member.InstanceID = nil
@@ -3641,6 +3706,9 @@ func (s *teamService) requireOwnedTeam(userID, teamID int) (*models.Team, error)
 	if team.UserID != userID {
 		return nil, fmt.Errorf("access denied")
 	}
+	if err := team.ValidateScope(); err != nil {
+		return nil, err
+	}
 	return team, nil
 }
 
@@ -3693,14 +3761,29 @@ func (s *teamService) consumeTeamEvents(ctx context.Context, teamID int) {
 			continue
 		}
 		for _, message := range messages {
-			if err := s.projectTeamEvent(team, bus, message); err != nil {
-				fmt.Printf("Warning: failed to project Team %d event %s: %v\n", teamID, message.ID, err)
+			if !s.projectConsumedTeamEvent(ctx, team, bus, message) {
+				break
 			}
-			team.RedisEventsLastID = message.ID
-			team.UpdatedAt = time.Now().UTC()
-			_ = s.repo.UpdateTeam(team)
 		}
+
 	}
+}
+
+// Returning false leaves the persisted and in-memory cursor unchanged, so a
+// message delivered during backup maintenance is read again after resume.
+func (s *teamService) projectConsumedTeamEvent(ctx context.Context, team *models.Team, bus *redisBus, message redisStreamMessage) bool {
+	release, gateErr := backupgate.HoldWorkUnit(ctx, "team.event_projection")
+	if gateErr != nil {
+		return false
+	}
+	defer release()
+	if err := s.projectTeamEvent(team, bus, message); err != nil {
+		fmt.Printf("Warning: failed to project Team %d event %s: %v\n", team.ID, message.ID, err)
+	}
+	team.RedisEventsLastID = message.ID
+	team.UpdatedAt = time.Now().UTC()
+	_ = s.repo.UpdateTeam(team)
+	return true
 }
 
 func (s *teamService) ensureStaleTaskMonitor(ctx context.Context) {
@@ -3727,19 +3810,28 @@ func (s *teamService) monitorStaleTasks(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if err := s.sweepTeamEventOutbox(); err != nil {
-				fmt.Printf("Warning: failed to deliver Team event outbox: %v\n", err)
-			}
-			if err := s.sweepTeamControlPlaneConsistency(); err != nil {
-				fmt.Printf("Warning: failed to reconcile Team control-plane projections: %v\n", err)
-			}
-			if err := s.sweepStaleTasks(); err != nil {
-				fmt.Printf("Warning: failed to sweep stale Team tasks: %v\n", err)
-			}
-			if err := s.sweepAssignmentStatusChecks(); err != nil {
-				fmt.Printf("Warning: failed to sweep Team assignment status checks: %v\n", err)
-			}
+			s.runTeamMaintenanceSweep(ctx)
 		}
+	}
+}
+
+func (s *teamService) runTeamMaintenanceSweep(ctx context.Context) {
+	release, gateErr := backupgate.HoldWorkUnit(ctx, "team.maintenance_sweep")
+	if gateErr != nil {
+		return
+	}
+	defer release()
+	if err := s.sweepTeamEventOutbox(); err != nil {
+		fmt.Printf("Warning: failed to deliver Team event outbox: %v\n", err)
+	}
+	if err := s.sweepTeamControlPlaneConsistency(); err != nil {
+		fmt.Printf("Warning: failed to reconcile Team control-plane projections: %v\n", err)
+	}
+	if err := s.sweepStaleTasks(); err != nil {
+		fmt.Printf("Warning: failed to sweep stale Team tasks: %v\n", err)
+	}
+	if err := s.sweepAssignmentStatusChecks(); err != nil {
+		fmt.Printf("Warning: failed to sweep Team assignment status checks: %v\n", err)
 	}
 }
 
@@ -5863,7 +5955,7 @@ func (s *teamService) taskHasRecentActivity(team *models.Team, task *models.Team
 func (s *teamService) redisBusForTeam(ctx context.Context, team *models.Team) (*redisBus, error) {
 	redisURL := ""
 	if team.RedisURLSecretName != nil && team.RedisURLSecretKey != nil {
-		client := k8s.GetClient()
+		client := s.pvcService.GetClient()
 		if client == nil {
 			return nil, fmt.Errorf("k8s client not initialized")
 		}
@@ -13426,7 +13518,7 @@ func (s *teamService) rollbackTeamCreation(userID int, team *models.Team, cause 
 			continue
 		}
 		if member.InstanceID != nil && *member.InstanceID > 0 {
-			if err := s.instanceService.Delete(*member.InstanceID); err != nil {
+			if err := s.deleteTeamMemberInstance(team, *member.InstanceID); err != nil {
 				fmt.Printf("Warning: failed to delete Team %d member %s instance %d during create rollback: %v\n", team.ID, member.MemberKey, *member.InstanceID, err)
 				continue
 			}
@@ -15009,14 +15101,7 @@ func defaultTeamRedisURL() string {
 }
 
 func defaultTeamRedisServiceURL() (string, bool) {
-	systemNamespace := strings.TrimSpace(os.Getenv("CLAWMANAGER_SYSTEM_NAMESPACE"))
-	if systemNamespace == "" {
-		if client := k8s.GetClient(); client != nil {
-			systemNamespace = client.GetSystemNamespace()
-		} else if baseNamespace := strings.TrimSpace(os.Getenv("K8S_NAMESPACE")); baseNamespace != "" {
-			systemNamespace = fmt.Sprintf("%s-system", baseNamespace)
-		}
-	}
+	systemNamespace := defaultSystemNamespace()
 	if systemNamespace == "" {
 		return "", false
 	}

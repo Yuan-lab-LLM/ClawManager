@@ -1,5 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import AdminLayout from '../../components/AdminLayout';
+import ModelCatalog from '../../components/ModelCatalog';
+import ModelDiscoveryPlan, { type DiscoveryPlanPatch } from '../../components/ModelDiscoveryPlan';
+import { mergeDiscoveredPlan, modelRoutingPlanRows, plannedModelKind, plannedReasoningEnabled } from '../../lib/modelRoutingPlan';
+import { selectedRows, mergeBatchSave } from '../../lib/modelSelection';
 import {
   modelService,
   type DiscoveredProviderModel,
@@ -42,18 +46,39 @@ interface EditableModel extends LLMModel {
   discovery_error?: string | null;
   discovered_models?: DiscoveredProviderModel[];
   discovery_key?: string;
+  plan_excluded_ids?: string[];
   edit_snapshot?: EditableModelSnapshot;
 }
 
 type EditableModelSnapshot = Pick<
   EditableModel,
+  | 'visibility_scope'
+  | 'allowed_user_ids'
+  | 'access_policy_version'
   | 'display_name'
   | 'description'
   | 'provider_type'
   | 'protocol_type'
+  | 'model_kind'
+  | 'image_generation_enabled'
+  | 'image_edit_enabled'
+  | 'image_price_per_image'
+  | 'reset_image_price'
+  | 'model_group'
+  | 'deployment_priority'
+  | 'max_concurrent_requests'
+  | 'context_window_tokens'
+  | 'quality_tier'
   | 'base_url'
   | 'provider_model_name'
   | 'reasoning_enabled'
+  | 'reasoning_control_mode'
+  | 'supports_tools'
+  | 'tools_support_override'
+  | 'supports_vision'
+  | 'vision_support_override'
+  | 'reset_vision_support_override'
+  | 'capability_source'
   | 'api_key'
   | 'api_key_secret_ref'
   | 'is_secure'
@@ -64,16 +89,37 @@ type EditableModelSnapshot = Pick<
   | 'discovered_models'
   | 'discovery_key'
   | 'discovery_error'
+  | 'plan_excluded_ids'
 >;
 
 const captureSnapshot = (card: EditableModel): EditableModelSnapshot => ({
+  visibility_scope: card.visibility_scope,
+  allowed_user_ids: [...(card.allowed_user_ids ?? [])],
+  access_policy_version: card.access_policy_version,
   display_name: card.display_name,
   description: card.description,
   provider_type: card.provider_type,
   protocol_type: card.protocol_type,
+  model_kind: card.model_kind,
+  image_generation_enabled: card.image_generation_enabled,
+  image_edit_enabled: card.image_edit_enabled,
+  image_price_per_image: card.image_price_per_image,
+  reset_image_price: card.reset_image_price,
+  model_group: card.model_group,
+  deployment_priority: card.deployment_priority,
+  max_concurrent_requests: card.max_concurrent_requests,
+  context_window_tokens: card.context_window_tokens,
+  quality_tier: card.quality_tier,
   base_url: card.base_url,
   provider_model_name: card.provider_model_name,
   reasoning_enabled: card.reasoning_enabled,
+  reasoning_control_mode: card.reasoning_control_mode,
+  supports_tools: card.supports_tools,
+  tools_support_override: card.tools_support_override,
+  supports_vision: card.supports_vision,
+  vision_support_override: card.vision_support_override,
+  reset_vision_support_override: card.reset_vision_support_override,
+  capability_source: card.capability_source,
   api_key: card.api_key,
   api_key_secret_ref: card.api_key_secret_ref,
   is_secure: card.is_secure,
@@ -84,14 +130,22 @@ const captureSnapshot = (card: EditableModel): EditableModelSnapshot => ({
   discovered_models: card.discovered_models ?? [],
   discovery_key: card.discovery_key,
   discovery_error: card.discovery_error,
+  plan_excluded_ids: [...(card.plan_excluded_ids ?? [])],
 });
 
 const createEmptyModel = (): EditableModel => ({
+  visibility_scope: 'all',
+  allowed_user_ids: [],
   local_id: `new-${Date.now()}-${Math.random().toString(16).slice(2)}`,
   display_name: '',
   description: '',
   provider_type: '',
   protocol_type: '',
+  model_group: '',
+  deployment_priority: 100,
+  max_concurrent_requests: 0,
+  context_window_tokens: 0,
+  quality_tier: 0,
   base_url: '',
   provider_model_name: '',
   reasoning_enabled: false,
@@ -146,6 +200,28 @@ function canDiscover(card: EditableModel) {
   }
 
   return true;
+}
+
+function uniqueImportedDisplayName(base: string, baseURL: string, used: Set<string>) {
+  const normalized = base.trim() || 'model';
+  if (!used.has(normalized)) {
+    used.add(normalized);
+    return normalized;
+  }
+  let host = 'provider';
+  try {
+    host = new URL(baseURL).hostname || host;
+  } catch {
+    // Keep the deterministic fallback when the URL is still being edited.
+  }
+  let candidate = `${normalized} (${host})`;
+  let suffix = 2;
+  while (used.has(candidate)) {
+    candidate = `${normalized} (${host} ${suffix})`;
+    suffix += 1;
+  }
+  used.add(candidate);
+  return candidate;
 }
 
 function getProviderTypeLabel(providerType: string) {
@@ -327,7 +403,7 @@ const VendorTemplateIcon: React.FC<VendorTemplateIconProps> = ({ template, size 
   const meta = resolveTemplateIconMeta(template);
   const [imageFailed, setImageFailed] = useState(false);
   const sizeClass = size === 'sm'
-    ? 'h-9 w-9 rounded-xl text-[11px]'
+    ? 'h-6 w-6 rounded-lg text-[11px]'
     : 'h-11 w-11 rounded-2xl text-xs';
 
   useEffect(() => {
@@ -424,7 +500,7 @@ const ProviderTemplatePicker: React.FC<ProviderTemplatePickerProps> = ({
       <button
         type="button"
         onClick={() => setOpen((current) => !current)}
-        className="app-input mt-1 flex min-h-[56px] w-full items-center justify-between gap-4 text-left hover:border-[#ef6b4a]"
+        className="app-input mt-1 flex h-[38px] w-full items-center justify-between gap-4 py-0 text-left hover:border-[#ef6b4a]"
       >
         <div className="flex min-w-0 flex-1 items-center gap-3">
           <VendorTemplateIcon template={selectedTemplate} size="sm" />
@@ -510,8 +586,9 @@ const ModelManagementPage: React.FC = () => {
   const [models, setModels] = useState<EditableModel[]>([]);
   const [loading, setLoading] = useState(true);
   const [pageError, setPageError] = useState<string | null>(null);
+  const [bulkSaving, setBulkSaving] = useState(false);
   const discoveryTimersRef = useRef<Record<string, number>>({});
-  const newCardRef = useRef<HTMLDivElement | null>(null);
+  const newCardRef = useRef<HTMLFieldSetElement | null>(null);
   const editingCard = models.find((item) => item.isEditing);
   const hasEditingCard = Boolean(editingCard);
 
@@ -532,7 +609,7 @@ const ModelManagementPage: React.FC = () => {
           isEditing: false,
           error: null,
           discovery_error: null,
-          discovered_models: item.provider_models ?? [],
+          discovered_models: [],
           edit_snapshot: undefined,
         })));
       } catch (error: any) {
@@ -550,7 +627,7 @@ const ModelManagementPage: React.FC = () => {
     discoveryTimersRef.current = {};
 
     models.forEach((card) => {
-      if (!canDiscover(card)) {
+      if (!card.isEditing || card.saving || bulkSaving || !canDiscover(card)) {
         return;
       }
 
@@ -568,10 +645,10 @@ const ModelManagementPage: React.FC = () => {
       Object.values(discoveryTimersRef.current).forEach((timer) => window.clearTimeout(timer));
       discoveryTimersRef.current = {};
     };
-  }, [models]);
+  }, [models, bulkSaving]);
 
   useEffect(() => {
-    if (!editingCard?.isNew || !newCardRef.current) {
+    if (!editingCard || !newCardRef.current) {
       return;
     }
 
@@ -609,6 +686,7 @@ const ModelManagementPage: React.FC = () => {
         if (!Object.prototype.hasOwnProperty.call(patch, 'discovered_models')) {
           next.discovered_models = [];
         }
+        next.plan_excluded_ids = [];
         next.discovering = false;
         if (
           Object.prototype.hasOwnProperty.call(patch, 'provider_type') ||
@@ -617,6 +695,16 @@ const ModelManagementPage: React.FC = () => {
         ) {
           if (!Object.prototype.hasOwnProperty.call(patch, 'provider_model_name')) {
             next.provider_model_name = '';
+          }
+          next.reasoning_control_mode = '';
+          next.reasoning_enabled = false;
+          if (next.isNew) {
+            next.display_name = '';
+            next.model_kind = undefined;
+            next.image_generation_enabled = undefined;
+            next.image_edit_enabled = undefined;
+            next.image_price_per_image = undefined;
+            next.reset_image_price = undefined;
           }
         }
       }
@@ -642,14 +730,17 @@ const ModelManagementPage: React.FC = () => {
     }
 
     const snapshot = card.edit_snapshot ?? captureSnapshot(card);
-    updateCard(card.local_id, {
+    // Restore the snapshot directly: updateCard deliberately invalidates model
+    // settings when connection fields are supplied, even during restoration.
+    setModels((current) => current.map((item) => item.local_id === card.local_id ? {
+      ...item,
       ...snapshot,
       isEditing: false,
       saving: false,
       error: null,
       discovering: false,
       edit_snapshot: undefined,
-    });
+    } : item));
   };
 
   const discoverModels = async (localId: string, force: boolean) => {
@@ -686,14 +777,30 @@ const ModelManagementPage: React.FC = () => {
         const nextProviderModelName = item.provider_model_name.trim()
           ? item.provider_model_name
           : discovered[0]?.id ?? '';
+        const initialPlan = item.isNew && !item.model_group
+          ? discovered.find((model) => model.id === nextProviderModelName) : undefined;
 
         return {
           ...item,
           discovering: false,
           discovery_error: discovered.length === 0 ? t('modelManagementPage.noProviderModels') : null,
-          discovered_models: discovered,
+          discovered_models: mergeDiscoveredPlan(discovered, item.discovery_key === nextKey ? item.discovered_models ?? [] : []),
           discovery_key: nextKey,
           provider_model_name: nextProviderModelName,
+          ...(!item.provider_model_name && !item.display_name ? {
+            display_name: discovered.find((model) => model.id === nextProviderModelName)?.display_name || nextProviderModelName,
+          } : {}),
+          ...(item.isNew ? {
+            supports_tools: discovered.find((model) => model.id === nextProviderModelName)?.supports_tools,
+            supports_vision: discovered.find((model) => model.id === nextProviderModelName)?.supports_vision,
+            capability_source: discovered.find((model) => model.id === nextProviderModelName)?.classification_source,
+          } : {}),
+          ...(initialPlan ? {
+            model_kind: item.model_kind ?? plannedModelKind(initialPlan),
+            model_group: initialPlan.suggested_pool || 'default',
+            quality_tier: initialPlan.suggested_quality_tier ?? 0,
+            deployment_priority: initialPlan.suggested_priority ?? 100,
+          } : {}),
         };
       }));
     } catch (error: any) {
@@ -704,7 +811,8 @@ const ModelManagementPage: React.FC = () => {
                 ...item,
                 discovering: false,
                 discovery_error: error.response?.data?.error || t('modelManagementPage.discoverFailed'),
-                discovered_models: [],
+                // Keep same-source drafts; mark this attempt to avoid an
+                // automatic retry loop. The refresh button can retry explicitly.
                 discovery_key: nextKey,
               }
             : item
@@ -713,29 +821,159 @@ const ModelManagementPage: React.FC = () => {
     }
   };
 
+  const updateDiscoveryPlan = (localId: string, modelId: string, patch: DiscoveryPlanPatch) => {
+    setModels((current) => current.map((card) => {
+      if (card.local_id !== localId) return card;
+      return {
+        ...card,
+        discovered_models: card.discovered_models?.map((model) => model.id === modelId ? { ...model, ...patch, plan_edited: true } : model),
+        ...(card.provider_model_name === modelId ? {
+          ...(patch.visibility_scope !== undefined ? { visibility_scope: patch.visibility_scope } : {}),
+          ...(patch.allowed_user_ids !== undefined ? { allowed_user_ids: patch.allowed_user_ids } : {}),
+          ...(patch.display_name !== undefined ? { display_name: patch.display_name } : {}),
+          ...(patch.model_kind !== undefined ? { model_kind: plannedModelKind(patch) } : {}),
+          ...(patch.image_generation_enabled !== undefined ? { image_generation_enabled: patch.image_generation_enabled } : {}),
+          ...(patch.image_edit_enabled !== undefined ? { image_edit_enabled: patch.image_edit_enabled } : {}),
+          ...(patch.image_price_per_image !== undefined ? { image_price_per_image: patch.image_price_per_image, reset_image_price: patch.reset_image_price ?? false } : {}),
+          ...(patch.suggested_pool !== undefined ? { model_group: patch.suggested_pool } : {}),
+          ...(patch.suggested_quality_tier !== undefined ? { quality_tier: patch.suggested_quality_tier } : {}),
+          ...(patch.suggested_priority !== undefined ? { deployment_priority: patch.suggested_priority } : {}),
+          ...(patch.tools_support_override != null ? { tools_support_override: patch.tools_support_override } : {}),
+          ...(patch.vision_support_override !== undefined ? { vision_support_override: patch.vision_support_override, reset_vision_support_override: false } : {}),
+          ...(patch.reset_vision_support_override ? { vision_support_override: null, reset_vision_support_override: true } : {}),
+          ...(patch.reasoning_enabled !== undefined ? { reasoning_enabled: patch.reasoning_enabled } : {}),
+          ...(patch.reasoning_control_mode !== undefined ? { reasoning_control_mode: patch.reasoning_control_mode } : {}),
+        } : {}),
+      };
+    }));
+  };
+
+  const applyDiscoveryPlan = async (localId: string, selectedIds: string[]) => {
+    const source = models.find((item) => item.local_id === localId);
+    const discovered = source ? selectedRows(modelRoutingPlanRows(source, source.discovered_models ?? []), new Set(selectedIds), (model) => model.id) : [];
+    if (!source || source.discovering || source.saving || bulkSaving || discovered.length === 0) {
+      return;
+    }
+    if (discovered.some((model) => model.visibility_scope === 'selected_users' && !model.allowed_user_ids?.length)) {
+      updateCard(localId, { error: '请选择至少一位可使用此模型的用户' }); return;
+    }
+    if (discovered.some((model) => !model.display_name?.trim())) {
+      updateCard(localId, { discovery_error: t('modelManagementPage.planNamesRequired') });
+      return;
+    }
+    if (!source.provider_type || !source.base_url.trim() || discovered.some((model) => !model.id.trim())) {
+      updateCard(localId, { error: t('modelManagementPage.requiredFields') });
+      return;
+    }
+    const existingKeys = new Set(
+      models.filter((item) => !(item.local_id === localId && item.isNew)).map((item) => `${item.base_url.trim()}\n${item.provider_model_name.trim()}`),
+    );
+    const usedDisplayNames = new Set(models.filter((item) => !(item.local_id === localId && item.isNew)).map((item) => item.display_name.trim()).filter(Boolean));
+    const planned = discovered
+      .filter((model) => !existingKeys.has(`${source.base_url.trim()}\n${model.id.trim()}`))
+      .map((model, index): EditableModel => ({
+        ...createEmptyModel(),
+        display_name: uniqueImportedDisplayName(
+          model.display_name.trim(),
+          source.base_url, usedDisplayNames,
+        ),
+        provider_type: source.provider_type,
+        protocol_type: source.protocol_type,
+        model_group: model.suggested_pool || "default",
+        deployment_priority: model.suggested_priority ?? 50 + index,
+        context_window_tokens: model.context_window_tokens ?? 0,
+        ...(source.context_window_tokens ? { context_window_tokens: source.context_window_tokens } : {}),
+        max_concurrent_requests: source.max_concurrent_requests,
+        description: source.description,
+        quality_tier: model.suggested_quality_tier ?? 0,
+        base_url: source.base_url,
+        provider_model_name: model.id,
+        model_kind: plannedModelKind(model),
+        image_generation_enabled: model.image_generation_enabled ?? false,
+        image_edit_enabled: model.image_edit_enabled ?? false,
+        image_price_per_image: model.image_price_per_image,
+        reset_image_price: model.reset_image_price,
+        visibility_scope: model.visibility_scope ?? 'all',
+        allowed_user_ids: model.allowed_user_ids ?? [],
+        supports_tools: model.supports_tools,
+        tools_support_override: model.tools_support_override,
+        supports_vision: model.supports_vision,
+        vision_support_override: model.vision_support_override,
+        reset_vision_support_override: model.reset_vision_support_override,
+        capability_source: model.classification_source,
+        reasoning_control_mode: model.reasoning_control_mode ?? '',
+        reasoning_enabled: plannedModelKind(model) === 'chat' && supportsManagedReasoningControl(
+          source.provider_type,
+          source.protocol_type,
+          source.base_url,
+          model.id,
+          model.reasoning_control_mode,
+        ) && plannedReasoningEnabled(model),
+        api_key: source.api_key,
+        api_key_secret_ref: source.api_key_secret_ref,
+        is_secure: source.is_secure,
+        is_active: source.is_active && (plannedModelKind(model) === 'chat' || (plannedModelKind(model) === 'image' && (model.image_generation_enabled === true || model.image_edit_enabled === true))),
+        input_price: source.input_price,
+        output_price: source.output_price,
+        currency: source.currency,
+        isNew: true,
+        isEditing: false,
+        discovered_models: [],
+        discovery_key: undefined,
+      }));
+
+    if (planned.length === 0) {
+      updateCard(localId, { discovery_error: "已存在相同来源和模型，无需重复添加" });
+      return;
+    }
+    setModels((current) => [
+      ...planned,
+      ...current.filter((item) => !(item.local_id === localId && item.isNew))
+        .map((item) => item.local_id === localId ? { ...item, discovery_error: null } : item),
+    ]);
+    await saveSelectedCards(planned, true);
+  };
+
   const saveCard = async (card: EditableModel) => {
     if (!card.display_name.trim() || !card.provider_type || !card.base_url.trim() || !card.provider_model_name.trim()) {
       updateCard(card.local_id, { error: t('modelManagementPage.requiredFields') });
       return;
     }
 
+    if (card.visibility_scope === 'selected_users' && !card.allowed_user_ids?.length) {
+      updateCard(card.local_id, { error: '请选择至少一位可使用此模型的用户' }); return;
+    }
     updateCard(card.local_id, { saving: true, error: null });
 
     try {
       const saved = await modelService.saveModel({
         id: card.id,
+        visibility_scope: card.visibility_scope ?? 'all',
+        allowed_user_ids: card.allowed_user_ids ?? [],
+        access_policy_version: card.access_policy_version,
         display_name: card.display_name.trim(),
         description: card.description?.trim() || undefined,
         provider_type: card.provider_type,
         protocol_type: resolveProviderProtocolType(card.provider_type, card.protocol_type),
+        model_kind: card.model_kind,
+        image_generation_enabled: card.image_generation_enabled,
+        image_edit_enabled: card.image_edit_enabled,
+        image_price_per_image: card.image_price_per_image,
+        reset_image_price: card.reset_image_price,
+        model_group: card.model_group?.trim() || card.display_name.trim(),
+        deployment_priority: Number(card.deployment_priority) || 0,
+        max_concurrent_requests: Number(card.max_concurrent_requests) || 0,
+        context_window_tokens: Number(card.context_window_tokens) || 0,
+        quality_tier: Number(card.quality_tier) || 0,
         base_url: card.base_url.trim(),
         provider_model_name: card.provider_model_name.trim(),
-        provider_models: card.discovered_models ?? [],
-        reasoning_enabled: supportsManagedReasoningControl(
+        reasoning_control_mode: card.reasoning_control_mode ?? '',
+        reasoning_enabled: (card.model_kind ?? 'chat') === 'chat' && supportsManagedReasoningControl(
           card.provider_type,
           card.protocol_type,
           card.base_url,
           card.provider_model_name,
+          card.reasoning_control_mode,
         ) && card.reasoning_enabled,
         api_key: card.api_key?.trim() || undefined,
         api_key_secret_ref: card.api_key_secret_ref?.trim() || undefined,
@@ -744,6 +982,12 @@ const ModelManagementPage: React.FC = () => {
         input_price: Number(card.input_price) || 0,
         output_price: Number(card.output_price) || 0,
         currency: card.currency.trim() || 'USD',
+        supports_tools: card.supports_tools,
+        tools_support_override: card.tools_support_override,
+        supports_vision: card.supports_vision,
+        vision_support_override: card.vision_support_override,
+        reset_vision_support_override: card.reset_vision_support_override,
+        capability_source: card.capability_source,
       });
 
       setModels((current) => current.map((item) => (
@@ -754,7 +998,7 @@ const ModelManagementPage: React.FC = () => {
               description: saved.description ?? '',
               api_key: saved.api_key ?? '',
               api_key_secret_ref: saved.api_key_secret_ref ?? '',
-              discovered_models: saved.provider_models ?? card.discovered_models ?? [],
+              discovered_models: card.discovered_models ?? [],
               isNew: false,
               isEditing: false,
               saving: false,
@@ -768,6 +1012,82 @@ const ModelManagementPage: React.FC = () => {
         saving: false,
         error: error.response?.data?.error || t('modelManagementPage.saveFailed'),
       });
+    }
+  };
+
+  const saveSelectedCards = async (selection: EditableModel[], fromPlan = false) => {
+    const selectedIds = new Set(selection.map((card) => card.local_id));
+    // A just-created plan is not in this render's models yet. Submit that exact
+    // selection, then reconcile responses by local ID using functional updates.
+    const pending = selectedRows(fromPlan ? selection : models, selectedIds, (card) => card.local_id).filter((card) => card.isNew);
+    if (pending.length === 0 || bulkSaving || (!fromPlan && hasEditingCard) || models.some((card) => card.saving)) {
+      return;
+    }
+    const invalid = pending.filter((card) => !card.display_name.trim() || !card.provider_type || !card.base_url.trim() || !card.provider_model_name.trim());
+    if (invalid.length > 0) {
+      const invalidIds = new Set(invalid.map((card) => card.local_id));
+      setPageError(t('modelManagementPage.requiredFields'));
+      setModels((current) => current.map((card) => invalidIds.has(card.local_id) ? { ...card, error: t('modelManagementPage.requiredFields') } : card));
+      return;
+    }
+    setBulkSaving(true);
+    setPageError(null);
+    try {
+      const payloads = pending.map((card) => ({
+        id: card.id,
+        visibility_scope: card.visibility_scope ?? 'all',
+        allowed_user_ids: card.allowed_user_ids ?? [],
+        access_policy_version: card.access_policy_version,
+        display_name: card.display_name.trim(),
+        description: card.description?.trim() || undefined,
+        provider_type: card.provider_type,
+        protocol_type: resolveProviderProtocolType(card.provider_type, card.protocol_type),
+        model_kind: card.model_kind,
+        image_generation_enabled: card.image_generation_enabled,
+        image_edit_enabled: card.image_edit_enabled,
+        image_price_per_image: card.image_price_per_image,
+        reset_image_price: card.reset_image_price,
+        model_group: card.model_group?.trim() || card.display_name.trim(),
+        deployment_priority: Number(card.deployment_priority) || 0,
+        max_concurrent_requests: Number(card.max_concurrent_requests) || 0,
+        context_window_tokens: Number(card.context_window_tokens) || 0,
+        quality_tier: Number(card.quality_tier) || 0,
+        base_url: card.base_url.trim(),
+        provider_model_name: card.provider_model_name.trim(),
+        reasoning_control_mode: card.reasoning_control_mode ?? '',
+        reasoning_enabled: (card.model_kind ?? 'chat') === 'chat' && supportsManagedReasoningControl(card.provider_type, card.protocol_type, card.base_url, card.provider_model_name, card.reasoning_control_mode) && card.reasoning_enabled,
+        api_key: card.api_key?.trim() || undefined,
+        api_key_secret_ref: card.api_key_secret_ref?.trim() || undefined,
+        is_secure: card.is_secure,
+        is_active: card.is_active,
+        input_price: Number(card.input_price) || 0,
+        output_price: Number(card.output_price) || 0,
+        currency: card.currency.trim() || 'USD',
+        supports_tools: card.supports_tools,
+        tools_support_override: card.tools_support_override,
+        supports_vision: card.supports_vision,
+        vision_support_override: card.vision_support_override,
+        reset_vision_support_override: card.reset_vision_support_override,
+        capability_source: card.capability_source,
+      }));
+      const saved: LLMModel[] = [];
+      const failed: Array<{ display_name: string; provider_model_name: string; error: string }> = [];
+      for (let offset = 0; offset < payloads.length; offset += 200) {
+        const chunk = payloads.slice(offset, offset + 200);
+        const result = await modelService.saveModelsBatch(chunk);
+        saved.push(...result.saved);
+        failed.push(...result.failed);
+        const chunkIds = new Set(pending.slice(offset, offset + 200).map((card) => card.local_id));
+        setModels((current) => mergeBatchSave(current, chunkIds, result, t('modelManagementPage.saveFailed')));
+      }
+      const result = { saved, failed, saved_count: saved.length, failed_count: failed.length };
+      if (result.failed.length > 0) {
+        setPageError(`批量保存完成：成功 ${result.saved_count ?? result.saved.length} 个，失败 ${result.failed.length} 个`);
+      }
+    } catch (error: any) {
+      setPageError(error.response?.data?.error || '批量保存中断，已保留已成功保存的模型');
+    } finally {
+      setBulkSaving(false);
     }
   };
 
@@ -789,6 +1109,32 @@ const ModelManagementPage: React.FC = () => {
     }
   };
 
+  const deleteSelectedCards = async (selection: EditableModel[]) => {
+    if (bulkSaving || hasEditingCard || models.some((card) => card.saving)) return;
+    const targets = selectedRows(models, new Set(selection.map((card) => card.local_id)), (card) => card.local_id);
+    if (targets.length === 0) return;
+    const saved = targets.filter((card) => card.id).length;
+    if (!window.confirm(t('modelManagementPage.confirmDeleteSelected', { saved, pending: targets.length - saved }))) return;
+    setBulkSaving(true);
+    setPageError(null);
+    let failed = 0;
+    try {
+      // Keep each successful deletion; retain failures in the list for retry.
+      for (const card of targets) {
+        try {
+          if (card.id) await modelService.deleteModel(card.id);
+          setModels((current) => current.filter((item) => item.local_id !== card.local_id));
+        } catch (error: any) {
+          failed++;
+          updateCard(card.local_id, { saving: false, error: error.response?.data?.error || t('modelManagementPage.deleteFailed') });
+        }
+      }
+      if (failed > 0) setPageError(t('modelManagementPage.batchDeleteFailed', { count: failed }));
+    } finally {
+      setBulkSaving(false);
+    }
+  };
+
   return (
     <AdminLayout title={t('nav.models')}>
       <div className="space-y-6">
@@ -800,14 +1146,16 @@ const ModelManagementPage: React.FC = () => {
                 {t('modelManagementPage.subtitle')}
               </p>
             </div>
-            <button
-              type="button"
-              onClick={addCard}
-              disabled={hasEditingCard}
-              className="app-button-primary disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {t('modelManagementPage.addModel')}
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={addCard}
+                disabled={hasEditingCard || bulkSaving}
+                className="app-button-primary disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {t('modelManagementPage.addModel')}
+              </button>
+            </div>
           </div>
 
           {hasEditingCard && (
@@ -825,30 +1173,24 @@ const ModelManagementPage: React.FC = () => {
           {loading ? (
             <div className="mt-6 text-sm text-gray-500">{t('modelManagementPage.loading')}</div>
           ) : (
-          <div className="mt-6 grid grid-cols-1 items-stretch gap-5 xl:grid-cols-2">
-              {models.map((card) => {
+          <div className="mt-6 space-y-5">
+              {models.filter((card) => card.isEditing).map((card) => {
                 const autoDiscoverySupported = AUTO_DISCOVERY_PROVIDERS.has(card.provider_type);
                 const discoveredModels = card.discovered_models ?? [];
+                const batchPlan = Boolean(card.isNew && discoveredModels.length > 0);
+                const planRows = modelRoutingPlanRows(card, discoveredModels);
+                const excluded = new Set(card.plan_excluded_ids ?? []);
+                const selectedPlan = planRows.filter((model) => !excluded.has(model.id));
                 const currentTemplate = getSelectedTemplate(card, t('modelManagementPage.currentVendorTemplate'));
                 const templateOptions = getTemplateOptions(card, t('modelManagementPage.currentVendorTemplate'));
                 const effectiveProtocolType = resolveProviderProtocolType(card.provider_type, card.protocol_type);
-                const providerHeadline = currentTemplate?.label || getProviderTypeLabel(card.provider_type);
-                const providerTypeLabel = getProviderTypeLabel(card.provider_type || currentTemplate?.providerType || '');
-                const protocolTypeLabel = getProtocolTypeLabel(effectiveProtocolType);
                 const allowBaseUrlEditing = Boolean(currentTemplate?.allowCustomBaseUrl);
                 const showsProtocolSelector = card.provider_type === 'local';
-                const providerModelListId = `provider-model-options-${card.local_id}`;
-                const reasoningSupported = supportsManagedReasoningControl(
-                  card.provider_type,
-                  card.protocol_type,
-                  card.base_url,
-                  card.provider_model_name,
-                );
                 const providerModelHelpText = card.discovering
                   ? t('modelManagementPage.loadingProviderModels')
                   : autoDiscoverySupported
                     ? discoveredModels.length > 0
-                      ? t('modelManagementPage.discoveryHelp')
+                      ? t('modelManagementPage.planDiscoveryHelp')
                       : card.discovery_error
                         ? t('modelManagementPage.manualFallbackHelp')
                         : canDiscover(card)
@@ -856,134 +1198,15 @@ const ModelManagementPage: React.FC = () => {
                           : t('modelManagementPage.discoveryCredentialsHelp')
                     : t('modelManagementPage.manualEntryHelp');
 
-                if (!card.isEditing) {
-                  return (
-                    <div
-                      key={card.local_id}
-                      className="flex h-full flex-col rounded-[26px] border border-[#ead8cf] bg-[rgba(255,248,245,0.84)] p-5 shadow-[0_18px_42px_-34px_rgba(72,44,24,0.42)]"
-                    >
-                      <div className="flex items-start justify-between gap-4">
-                        <div className="flex min-w-0 items-start gap-3">
-                          <VendorTemplateIcon template={currentTemplate} />
-                          <div className="min-w-0">
-                            <h3 className="text-lg font-semibold text-gray-900">{card.display_name}</h3>
-                            <p className="mt-1 text-sm text-gray-500">{providerHeadline || '-'}</p>
-                            {providerTypeLabel && providerTypeLabel !== providerHeadline && (
-                              <p className="mt-1 text-xs uppercase tracking-[0.16em] text-[#a78374]">
-                                {providerTypeLabel}
-                              </p>
-                            )}
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2 text-xs text-gray-500">
-                          {card.is_secure && (
-                            <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-emerald-700">
-                              {t('modelManagementPage.secure')}
-                            </span>
-                          )}
-                          <span className={`rounded-full px-2.5 py-1 ${card.is_active ? 'border border-[#d9ead3] bg-[#f3fff0] text-[#2f6b2f]' : 'border border-[#eadfd8] bg-white text-[#7b6f6a]'}`}>
-                            {card.is_active ? t('modelManagementPage.active') : t('modelManagementPage.inactive')}
-                          </span>
-                        </div>
-                      </div>
-
-                      <dl className="mt-5 grid flex-1 content-start grid-cols-1 gap-4 text-sm sm:grid-cols-2">
-                        <div>
-                          <dt className="font-medium text-gray-700">
-                            {t('modelManagementPage.providerModel')} ({discoveredModels.length || 1})
-                          </dt>
-                          <dd className="mt-2 flex flex-wrap gap-2 text-gray-600">
-                            {(discoveredModels.length > 0
-                              ? discoveredModels
-                              : [{ id: card.provider_model_name, display_name: card.provider_model_name }]
-                            ).filter((model) => model.id).map((model) => (
-                              <span
-                                key={model.id}
-                                className="rounded-full border border-[#ead8cf] bg-white px-2.5 py-1 text-xs"
-                              >
-                                {model.id}
-                              </span>
-                            ))}
-                          </dd>
-                        </div>
-                        <div>
-                          <dt className="font-medium text-gray-700">{t('modelManagementPage.currency')}</dt>
-                          <dd className="mt-1 text-gray-600">{card.currency || '-'}</dd>
-                        </div>
-                        <div>
-                          <dt className="font-medium text-gray-700">{t('modelManagementPage.reasoning')}</dt>
-                          <dd className="mt-1 text-gray-600">
-                            {reasoningSupported
-                              ? card.reasoning_enabled
-                                ? t('modelManagementPage.reasoningEnabled')
-                                : t('modelManagementPage.reasoningDisabled')
-                              : t('modelManagementPage.reasoningUnsupported')}
-                          </dd>
-                        </div>
-                        {showsProtocolSelector && (
-                          <div>
-                            <dt className="font-medium text-gray-700">{t('modelManagementPage.protocol')}</dt>
-                            <dd className="mt-1 text-gray-600">{protocolTypeLabel || '-'}</dd>
-                          </div>
-                        )}
-                        <div className="sm:col-span-2">
-                          <dt className="font-medium text-gray-700">{t('modelManagementPage.baseUrl')}</dt>
-                          <dd className="mt-1 break-all text-gray-600">{card.base_url || '-'}</dd>
-                        </div>
-                        <div>
-                          <dt className="font-medium text-gray-700">{t('modelManagementPage.inputPriceShort')}</dt>
-                          <dd className="mt-1 text-gray-600">{card.input_price}</dd>
-                        </div>
-                        <div>
-                          <dt className="font-medium text-gray-700">{t('modelManagementPage.outputPriceShort')}</dt>
-                          <dd className="mt-1 text-gray-600">{card.output_price}</dd>
-                        </div>
-                        <div className="sm:col-span-2">
-                          <dt className="font-medium text-gray-700">{t('common.description')}</dt>
-                          <dd className="mt-1 whitespace-pre-wrap text-gray-600">{card.description || '-'}</dd>
-                        </div>
-                      </dl>
-
-                      <div className="mt-5 flex items-center justify-end gap-3">
-                        <button
-                          type="button"
-                          onClick={() => deleteCard(card)}
-                          disabled={card.saving}
-                          className="app-button-secondary disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                          {t('common.delete')}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => startEditing(card)}
-                          disabled={hasEditingCard}
-                          className="app-button-primary disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                          {t('modelManagementPage.edit')}
-                        </button>
-                      </div>
-                    </div>
-                  );
-                }
 
                 return (
-                  <div
+                  <fieldset
                     key={card.local_id}
-                    ref={card.isNew ? newCardRef : undefined}
-                    className="self-start rounded-[26px] border border-[#ead8cf] bg-[rgba(255,248,245,0.84)] p-5 shadow-[0_18px_42px_-34px_rgba(72,44,24,0.42)]"
+                    ref={newCardRef}
+                    disabled={Boolean(card.saving || bulkSaving)}
+                    className="min-w-0 self-start rounded-[26px] border border-[#ead8cf] bg-[rgba(255,248,245,0.84)] p-5 shadow-[0_18px_42px_-34px_rgba(72,44,24,0.42)]"
                   >
                     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700">{t('modelManagementPage.displayName')}</label>
-                        <input
-                          type="text"
-                          value={card.display_name}
-                          onChange={(event) => updateCard(card.local_id, { display_name: event.target.value })}
-                          className="app-input mt-1 block min-h-[56px] w-full"
-                          placeholder={t('modelManagementPage.displayNamePlaceholder')}
-                        />
-                      </div>
-
                       <div>
                         <label className="block text-sm font-medium text-gray-700">{t('modelManagementPage.vendorTemplate')}</label>
                         <ProviderTemplatePicker
@@ -1005,133 +1228,69 @@ const ModelManagementPage: React.FC = () => {
                           }}
                         />
                       </div>
-                    </div>
-
-                    {showsProtocolSelector && (
-                      <div className="mt-4">
+                      <div>
                         <label className="block text-sm font-medium text-gray-700">{t('modelManagementPage.protocol')}</label>
+                        {showsProtocolSelector ? (
                         <select
                           value={effectiveProtocolType}
                           onChange={(event) => updateCard(card.local_id, {
                             protocol_type: resolveProviderProtocolType(card.provider_type, event.target.value),
                           })}
-                          className="app-input mt-1 block w-full"
+                          className="app-input mt-1 block h-[38px] w-full"
+                          aria-label={t('modelManagementPage.protocol')}
                         >
                           <option value="openai-compatible">{getProtocolTypeLabel('openai-compatible')}</option>
                           <option value="anthropic">{getProtocolTypeLabel('anthropic')}</option>
                         </select>
-                        <p className="mt-2 text-xs text-gray-500">{t('modelManagementPage.localProtocolHelp')}</p>
-                      </div>
-                    )}
-
-                    <div className="mt-4">
-                      <div className="flex items-center justify-between gap-3">
-                        <label className="block text-sm font-medium text-gray-700">{t('modelManagementPage.baseUrl')}</label>
-                        {currentTemplate && (
-                          <span className="rounded-full border border-[#eadfd8] bg-[#fff7f3] px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.12em] text-[#8f5a47]">
-                            {getProviderTypeLabel(currentTemplate.providerType)}
-                          </span>
+                        ) : (
+                          <input className="app-input mt-1 block h-[38px] w-full bg-gray-50" readOnly
+                            value={getProtocolTypeLabel(effectiveProtocolType)} aria-label={t('modelManagementPage.protocol')} />
                         )}
+                        <p className="mt-2 text-xs text-gray-500">{t(showsProtocolSelector ? 'modelManagementPage.localProtocolHelp' : 'modelManagementPage.templateProtocolHelp')}</p>
                       </div>
-                      {allowBaseUrlEditing ? (
-                        <>
-                          <input
-                            type="text"
-                            value={card.base_url}
-                            onChange={(event) => updateCard(card.local_id, { base_url: event.target.value })}
-                            className="app-input mt-1 block w-full"
-                            placeholder={currentTemplate?.baseUrl || t('modelManagementPage.baseUrlPlaceholder')}
-                          />
-                          <p className="mt-2 text-xs text-gray-500">{t('modelManagementPage.editableBaseUrlHelp')}</p>
-                        </>
-                      ) : (
-                        <>
-                          <div className="mt-1 rounded-[22px] border border-[#e5d9d1] bg-white/90 px-4 py-4 text-sm text-[#171212] shadow-[0_10px_24px_-20px_rgba(72,44,24,0.45)]">
-                            {currentTemplate ? (
-                              <span className="break-all">{currentTemplate.baseUrl}</span>
-                            ) : (
-                              <span className="text-gray-400">{t('modelManagementPage.fixedBaseUrlPlaceholder')}</span>
-                            )}
-                          </div>
-                          <p className="mt-2 text-xs text-gray-500">{t('modelManagementPage.fixedBaseUrlHelp')}</p>
-                        </>
-                      )}
                     </div>
 
                     <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700">{t('modelManagementPage.apiKey')}</label>
-                        <input
-                          type="password"
-                          value={card.api_key}
-                          onChange={(event) => updateCard(card.local_id, { api_key: event.target.value })}
-                          className="app-input mt-1 block w-full"
-                          placeholder={t('modelManagementPage.optionalPlaceholder')}
-                        />
+                      <div className="min-w-0">
+                        <label className="block text-sm font-medium text-gray-700">{t('modelManagementPage.baseUrl')}</label>
+                        <input type="text" value={card.base_url} readOnly={!allowBaseUrlEditing}
+                          onChange={(event) => updateCard(card.local_id, { base_url: event.target.value })}
+                          className={`app-input mt-1 block w-full ${allowBaseUrlEditing ? '' : 'bg-gray-50'}`}
+                          placeholder={currentTemplate?.baseUrl || t('modelManagementPage.baseUrlPlaceholder')} />
+                        <p className="mt-2 text-xs text-gray-500">{t(allowBaseUrlEditing ? 'modelManagementPage.editableBaseUrlHelp' : 'modelManagementPage.fixedBaseUrlHelp')}</p>
                       </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700">{t('modelManagementPage.secretRef')}</label>
-                        <input
-                          type="text"
-                          value={card.api_key_secret_ref}
-                          onChange={(event) => updateCard(card.local_id, { api_key_secret_ref: event.target.value })}
-                          className="app-input mt-1 block w-full"
-                          placeholder={t('modelManagementPage.secretRefPlaceholder')}
-                        />
+                      <div className="min-w-0">
+                        <label className="block text-sm font-medium text-gray-700">{t('modelManagementPage.apiKey')}</label>
+                        <input type="password" value={card.api_key}
+                          onChange={(event) => updateCard(card.local_id, { api_key: event.target.value })}
+                          className="app-input mt-1 block w-full" placeholder={t('modelManagementPage.optionalPlaceholder')} />
                       </div>
                     </div>
 
+                    <details className="mt-3 rounded-xl border border-[#ead8cf] bg-white/60 p-3 text-xs text-gray-600">
+                      <summary className="cursor-pointer font-medium">
+                        {t('modelManagementPage.advancedCredentials')}
+                        {card.api_key_secret_ref?.trim() && <span className="ml-2 text-sky-700">{t('modelManagementPage.secretRefConfigured')}</span>}
+                      </summary>
+                      <label className="mt-3 block">{t('modelManagementPage.secretRef')}
+                        <input type="text" value={card.api_key_secret_ref}
+                          onChange={(event) => updateCard(card.local_id, { api_key_secret_ref: event.target.value })}
+                          className="app-input mt-1 block w-full" placeholder={t('modelManagementPage.secretRefPlaceholder')} />
+                      </label>
+                      <p className="mt-2">{t('modelManagementPage.secretRefHelp')}</p>
+                    </details>
+
                     <div className="mt-4">
-                      <div className="flex items-center justify-between gap-3">
-                        <label className="block text-sm font-medium text-gray-700">{t('modelManagementPage.providerModel')}</label>
-                        <button
-                          type="button"
-                          onClick={() => void discoverModels(card.local_id, true)}
-                          disabled={!canDiscover(card) || card.discovering}
-                          className="rounded-xl border border-[#ead8cf] bg-white px-3 py-1 text-xs font-medium text-[#7c5a4d] hover:bg-[#fff5f0] disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                          {card.discovering ? t('common.loading') : t('common.refresh')}
-                        </button>
-                      </div>
-
-                      <input
-                        type="text"
-                        list={autoDiscoverySupported && discoveredModels.length > 0 ? providerModelListId : undefined}
-                        value={card.provider_model_name}
-                        onChange={(event) => updateCard(card.local_id, { provider_model_name: event.target.value })}
-                        className="app-input mt-1 block w-full"
-                        placeholder={discoveredModels.length > 0
-                          ? t('modelManagementPage.selectProviderModel')
-                          : t('modelManagementPage.manualProviderModelPlaceholder')}
-                      />
-
-                      {autoDiscoverySupported && discoveredModels.length > 0 && (
-                        <datalist id={providerModelListId}>
-                          {discoveredModels.map((model) => (
-                            <option key={model.id} value={model.id}>
-                              {model.display_name}
-                            </option>
-                          ))}
-                        </datalist>
-                      )}
-
-                      {discoveredModels.length > 0 && (
-                        <div className="mt-3 flex flex-wrap gap-2">
-                          {discoveredModels.map((model) => (
-                            <span
-                              key={model.id}
-                              className="rounded-full border border-[#ead8cf] bg-white px-2.5 py-1 text-xs text-[#7c5a4d]"
-                              title={model.display_name}
-                            >
-                              {model.id}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-
-                      <div className="mt-2 text-xs text-gray-500">
-                        {providerModelHelpText}
-                      </div>
+                      <ModelDiscoveryPlan key={`${card.local_id}:${buildDiscoveryKey(card)}`} models={planRows} disabled={Boolean(card.discovering || card.saving || bulkSaving)}
+                        batch={batchPlan} excluded={excluded} onExcludedChange={(ids) => updateCard(card.local_id, { plan_excluded_ids: [...ids] })}
+                        connection={{ providerType: card.provider_type, protocolType: card.protocol_type, baseUrl: card.base_url }}
+                        onRefresh={() => void discoverModels(card.local_id, true)} refreshDisabled={!canDiscover(card)}
+                        refreshing={Boolean(card.discovering)} discoveryHelp={providerModelHelpText}
+                        onModelIdChange={!(card.isNew && discoveredModels.length > 0) ? (id) => updateCard(card.local_id, {
+                          provider_model_name: id,
+                          ...(card.isNew && (!card.display_name || card.display_name === card.provider_model_name) ? { display_name: id } : {}),
+                        }) : undefined}
+                        onChange={(modelId, patch) => updateDiscoveryPlan(card.local_id, modelId, patch)} />
 
                       {card.discovery_error && (
                         <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
@@ -1140,24 +1299,31 @@ const ModelManagementPage: React.FC = () => {
                       )}
                     </div>
 
-                    <div className={`mt-4 rounded-2xl border px-4 py-3 ${reasoningSupported ? 'border-[#ead8cf] bg-white/75' : 'border-gray-200 bg-gray-50/80'}`}>
-                      <label className={`flex items-center justify-between gap-4 text-sm ${reasoningSupported ? 'text-gray-700' : 'text-gray-400'}`}>
-                        <span>
-                          <span className="block font-medium">{t('modelManagementPage.reasoning')}</span>
-                          <span className="mt-1 block text-xs font-normal">
-                            {reasoningSupported
-                              ? t('modelManagementPage.reasoningHelp')
-                              : t('modelManagementPage.reasoningUnsupportedHelp')}
-                          </span>
-                        </span>
-                        <input
-                          type="checkbox"
-                          checked={reasoningSupported && card.reasoning_enabled}
-                          disabled={!reasoningSupported}
-                          onChange={(event) => updateCard(card.local_id, { reasoning_enabled: event.target.checked })}
-                          className="h-4 w-4 shrink-0 rounded border-gray-300 text-[#b84c28] focus:ring-[#b84c28] disabled:cursor-not-allowed disabled:opacity-50"
-                        />
-                      </label>
+                    <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+                      <div>
+                      <label className="block text-sm font-medium text-gray-700">{t('modelManagementPage.contextWindowTokens')}</label>
+                      <input
+                        type="number"
+                        min="0"
+                        max="2147483647"
+                        step="1"
+                        value={card.context_window_tokens ?? 0}
+                        onChange={(event) => updateCard(card.local_id, {
+                          context_window_tokens: Number.parseInt(event.target.value, 10) || 0,
+                        })}
+                        className="app-input mt-1 block w-full"
+                        placeholder={t('modelManagementPage.contextWindowPlaceholder')}
+                      />
+                      <p className="mt-2 text-xs text-gray-500">{t('modelManagementPage.contextWindowHelp')}</p>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700">{t('modelManagementPage.maxConcurrentRequests')}</label>
+                        <input type="number" min="0" max="2147483647" step="1" value={card.max_concurrent_requests ?? 0}
+                          onChange={(event) => updateCard(card.local_id, {
+                            max_concurrent_requests: Number.parseInt(event.target.value, 10) || 0,
+                          })} className="app-input mt-1 block w-full" />
+                        <p className="mt-2 text-xs text-gray-500">{t('modelManagementPage.maxConcurrentRequestsHelp')}</p>
+                      </div>
                     </div>
 
                     <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -1268,17 +1434,20 @@ const ModelManagementPage: React.FC = () => {
                         </button>
                         <button
                           type="button"
-                          onClick={() => saveCard(card)}
-                          disabled={card.saving}
+                          onClick={() => batchPlan ? void applyDiscoveryPlan(card.local_id, selectedPlan.map((model) => model.id)) : void saveCard(card)}
+                          disabled={Boolean(card.saving || bulkSaving || card.discovering || (batchPlan && (selectedPlan.length === 0 || selectedPlan.some((model) => !model.display_name?.trim()))))}
                           className="app-button-primary disabled:cursor-not-allowed disabled:opacity-50"
                         >
                           {card.saving ? t('modelManagementPage.saving') : t('common.save')}
                         </button>
                       </div>
                     </div>
-                  </div>
+                  </fieldset>
                 );
               })}
+              {models.some((card) => !card.isEditing) && <ModelCatalog models={models.filter((card) => !card.isEditing)} busy={bulkSaving} editing={hasEditingCard}
+                onEdit={startEditing} onDelete={(card) => void deleteCard(card)}
+                onSaveSelected={(cards) => void saveSelectedCards(cards)} onDeleteSelected={(cards) => void deleteSelectedCards(cards)} />}
             </div>
           )}
 

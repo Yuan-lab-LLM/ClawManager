@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"errors"
 	"net/netip"
 	"strings"
@@ -12,13 +13,17 @@ import (
 	"clawreef/internal/repository"
 )
 
-const egressPrivateExceptionCacheTTL = 30 * time.Second
+const (
+	egressPrivateExceptionCacheTTL       = 30 * time.Second
+	egressPrivateExceptionRefreshTimeout = 2 * time.Second
+	egressPrivateExceptionRetryDelay     = time.Second
+)
 
 var (
-	errInvalidEgressPrivateScopeType = errors.New("invalid egress private exception scope type")
-	errInvalidEgressPrivateCIDR      = errors.New("invalid egress private exception cidr")
-	errEgressPrivateCIDRNotPrivate   = errors.New("egress private exception cidr must be private or link-local")
-	errInvalidEgressPrivatePort      = errors.New("invalid egress private exception port")
+	errInvalidEgressPrivateScopeType  = errors.New("invalid egress private exception scope type")
+	errInvalidEgressPrivateCIDR       = errors.New("invalid egress private exception cidr")
+	errEgressPrivateCIDRNotPrivate    = errors.New("egress private exception cidr must be private or link-local")
+	errInvalidEgressPrivatePort       = errors.New("invalid egress private exception port")
 	errEgressPrivateExceptionNotFound = errors.New("egress private exception not found")
 )
 
@@ -30,6 +35,7 @@ type EgressPrivateExceptionService interface {
 	Delete(id int) error
 	Allows(instanceID, userID *int, ip netip.Addr, port int) bool
 	SnapshotRules() []egresspolicy.PrivateExceptionRule
+	SnapshotRulesContext(context.Context) []egresspolicy.PrivateExceptionRule
 }
 
 type SaveEgressPrivateExceptionRequest struct {
@@ -59,6 +65,9 @@ type egressPrivateExceptionService struct {
 	rules      []egresspolicy.PrivateExceptionRule
 	loadedAt   time.Time
 	invalidate bool
+	refreshing chan struct{}
+	generation uint64
+	retryAt    time.Time
 }
 
 // NewEgressPrivateExceptionService creates the service with an in-memory rule cache.
@@ -134,47 +143,84 @@ func (s *egressPrivateExceptionService) Allows(instanceID, userID *int, ip netip
 }
 
 func (s *egressPrivateExceptionService) SnapshotRules() []egresspolicy.PrivateExceptionRule {
-	s.mu.RLock()
-	fresh := !s.invalidate && time.Since(s.loadedAt) < egressPrivateExceptionCacheTTL
-	if fresh {
-		out := append([]egresspolicy.PrivateExceptionRule(nil), s.rules...)
-		s.mu.RUnlock()
-		return out
-	}
-	s.mu.RUnlock()
+	return s.SnapshotRulesContext(context.Background())
+}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if !s.invalidate && time.Since(s.loadedAt) < egressPrivateExceptionCacheTTL {
-		return append([]egresspolicy.PrivateExceptionRule(nil), s.rules...)
+func (s *egressPrivateExceptionService) SnapshotRulesContext(ctx context.Context) []egresspolicy.PrivateExceptionRule {
+	ctx, cancel := context.WithTimeout(ctx, egressPrivateExceptionRefreshTimeout)
+	defer cancel()
+	for ctx.Err() == nil {
+		s.mu.Lock()
+		if !s.invalidate && time.Since(s.loadedAt) < egressPrivateExceptionCacheTTL {
+			out := append([]egresspolicy.PrivateExceptionRule(nil), s.rules...)
+			s.mu.Unlock()
+			return out
+		}
+		if s.refreshing == nil && time.Now().Before(s.retryAt) {
+			s.mu.Unlock()
+			return nil
+		}
+		if s.refreshing == nil {
+			s.refreshing = make(chan struct{})
+			s.rules = nil
+			go s.refreshRules(s.refreshing, s.generation)
+		}
+		done := s.refreshing
+		s.mu.Unlock()
+		select {
+		case <-done:
+			continue
+		case <-ctx.Done():
+			return nil
+		}
 	}
-	items, err := s.repo.ListEnabled()
-	if err != nil {
-		// Keep last known good snapshot on reload failure.
-		return append([]egresspolicy.PrivateExceptionRule(nil), s.rules...)
+	return nil
+}
+
+func (s *egressPrivateExceptionService) refreshRules(done chan struct{}, generation uint64) {
+	// A caller canceling its wait must not cancel the refresh for other callers
+	// or poison the global cache. This one shared operation has its own deadline.
+	ctx, cancel := context.WithTimeout(context.Background(), egressPrivateExceptionRefreshTimeout)
+	defer cancel()
+	items, err := s.repo.ListEnabled(ctx)
+	if ctx.Err() != nil {
+		err = ctx.Err()
 	}
 	rules := make([]egresspolicy.PrivateExceptionRule, 0, len(items))
-	for _, item := range items {
-		prefix, err := netip.ParsePrefix(strings.TrimSpace(item.CIDR))
-		if err != nil || !egresspolicy.IsEligiblePrivateExceptionPrefix(prefix) {
-			continue
+	if err == nil {
+		for _, item := range items {
+			prefix, parseErr := netip.ParsePrefix(strings.TrimSpace(item.CIDR))
+			prefix = egresspolicy.NormalizePrivateExceptionPrefix(prefix)
+			if parseErr != nil || !egresspolicy.IsEligiblePrivateExceptionPrefix(prefix) {
+				continue
+			}
+			rules = append(rules, egresspolicy.PrivateExceptionRule{ScopeType: item.ScopeType, ScopeID: item.ScopeID, Prefix: prefix, Port: item.Port})
 		}
-		rules = append(rules, egresspolicy.PrivateExceptionRule{
-			ScopeType: item.ScopeType,
-			ScopeID:   item.ScopeID,
-			Prefix:    prefix,
-			Port:      item.Port,
-		})
 	}
-	s.rules = rules
-	s.loadedAt = time.Now()
-	s.invalidate = false
-	return append([]egresspolicy.PrivateExceptionRule(nil), s.rules...)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if generation == s.generation {
+		if err != nil {
+			s.rules = nil
+			s.invalidate = true
+			s.retryAt = time.Now().Add(egressPrivateExceptionRetryDelay)
+		} else {
+			s.rules = rules
+			s.loadedAt = time.Now()
+			s.invalidate = false
+			s.retryAt = time.Time{}
+		}
+	}
+	s.refreshing = nil
+	close(done)
 }
 
 func (s *egressPrivateExceptionService) markStale() {
 	s.mu.Lock()
 	s.invalidate = true
+	s.rules = nil
+	s.generation++
+	s.retryAt = time.Time{}
 	s.mu.Unlock()
 }
 
@@ -195,6 +241,7 @@ func (s *egressPrivateExceptionService) buildValidated(req SaveEgressPrivateExce
 	if err != nil {
 		return nil, errInvalidEgressPrivateCIDR
 	}
+	prefix = egresspolicy.NormalizePrivateExceptionPrefix(prefix)
 	if !egresspolicy.IsEligiblePrivateExceptionPrefix(prefix) {
 		return nil, errEgressPrivateCIDRNotPrivate
 	}

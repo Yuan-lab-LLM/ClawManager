@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path"
 	"reflect"
@@ -12,6 +13,48 @@ import (
 	"clawreef/internal/models"
 	"clawreef/internal/repository"
 )
+
+func TestCleanupV2GatewayBindingPreservesStrictUnconfirmedStop(t *testing.T) {
+	for _, strict := range []bool{false, true} {
+		t.Run(fmt.Sprintf("strict=%v", strict), func(t *testing.T) {
+			bindings := newFakeRuntimeBindingRepo()
+			bindings.bindings[209] = &models.InstanceRuntimeBinding{InstanceID: 209, RuntimePodID: 9, GatewayID: "gw-209-2", Generation: 2, State: RuntimeGatewayBindingRunning}
+			endpoint := "https://runtime"
+			agent := &strictStopRuntimeAgent{fakeRuntimeAgentClient: &fakeRuntimeAgentClient{deleteErr: ErrRuntimeAgentNotFound}, strict: strict}
+			service := &instanceService{bindingRepo: bindings, runtimePodRepo: &fakeRuntimePodRepo{pods: map[int64]*models.RuntimePod{9: {ID: 9, AgentEndpoint: &endpoint}}}, agentClient: agent}
+			err := service.cleanupV2GatewayBinding(context.Background(), &models.Instance{ID: 209})
+			if strict {
+				if err == nil || bindings.bindings[209] == nil || bindings.deleteAndReleaseCalls[209] != 0 {
+					t.Fatalf("strict unconfirmed stop released binding: %v", err)
+				}
+			} else if err != nil || bindings.bindings[209] != nil {
+				t.Fatalf("legacy absence semantics changed: %v", err)
+			}
+		})
+	}
+}
+
+func TestCleanupV2GatewayBindingStrictMissingIdentityPreservesBinding(t *testing.T) {
+	for _, missing := range []string{"pod-repository", "endpoint", "gateway-id"} {
+		t.Run(missing, func(t *testing.T) {
+			bindings := newFakeRuntimeBindingRepo()
+			bindings.bindings[209] = &models.InstanceRuntimeBinding{InstanceID: 209, RuntimePodID: 9, GatewayID: "gw-209-2"}
+			endpoint := "https://runtime"
+			service := &instanceService{bindingRepo: bindings, runtimePodRepo: &fakeRuntimePodRepo{pods: map[int64]*models.RuntimePod{9: {ID: 9, AgentEndpoint: &endpoint}}}, agentClient: &strictStopRuntimeAgent{fakeRuntimeAgentClient: &fakeRuntimeAgentClient{}, strict: true}}
+			switch missing {
+			case "pod-repository":
+				service.runtimePodRepo = nil
+			case "endpoint":
+				endpoint = ""
+			case "gateway-id":
+				bindings.bindings[209].GatewayID = ""
+			}
+			if err := service.cleanupV2GatewayBinding(context.Background(), &models.Instance{ID: 209}); err == nil || bindings.bindings[209] == nil || bindings.deleteAndReleaseCalls[209] != 0 {
+				t.Fatalf("missing %s released strict binding: %v", missing, err)
+			}
+		})
+	}
+}
 
 func TestValidateCreateInstanceDiskGBUsesModeSpecificMinimum(t *testing.T) {
 	if err := validateCreateInstanceDiskGB(CreateInstanceRequest{DiskGB: DefaultLiteDiskGB}, InstanceModeLite); err != nil {
@@ -515,7 +558,7 @@ func TestInstanceServiceStartV2CleansFailedBindingBeforeNextGeneration(t *testin
 }
 
 func TestInstanceServiceStartV2QuarantinesReportedCorruptLegacyTaskDatabase(t *testing.T) {
-	workspacePath := t.TempDir()
+	workspacePath := canonicalCompatibilityTestDir(t)
 	legacyTasksRoot := path.Join(workspacePath, "home", ".openclaw", "tasks")
 	if err := os.MkdirAll(legacyTasksRoot, 0o750); err != nil {
 		t.Fatal(err)

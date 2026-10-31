@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"clawreef/internal/models"
@@ -35,7 +36,17 @@ type RuntimePodRepository interface {
 }
 
 type runtimePodRepository struct {
-	sess db.Session
+	sess                 db.Session
+	registrationMu       sync.RWMutex
+	registrationVerifier func(context.Context, *models.RuntimePod) error
+}
+
+// Optional setter keeps legacy repository fakes compatible. Native servers set
+// this before their scheduler and reporting routes start.
+func (r *runtimePodRepository) SetRuntimePodRegistrationVerifier(verify func(context.Context, *models.RuntimePod) error) {
+	r.registrationMu.Lock()
+	r.registrationVerifier = verify
+	r.registrationMu.Unlock()
 }
 
 func NewRuntimePodRepository(sess db.Session) RuntimePodRepository {
@@ -43,8 +54,51 @@ func NewRuntimePodRepository(sess db.Session) RuntimePodRepository {
 }
 
 func (r *runtimePodRepository) UpsertFromAgent(ctx context.Context, pod *models.RuntimePod) error {
-	ensureTimestamps(&pod.CreatedAt, &pod.UpdatedAt)
-	res, err := r.sess.SQL().ExecContext(ctx, `
+	r.registrationMu.RLock()
+	verify := r.registrationVerifier
+	r.registrationMu.RUnlock()
+	if verify != nil {
+		if err := verify(ctx, pod); err != nil {
+			return err
+		}
+	}
+	return r.sess.TxContext(ctx, func(tx db.Session) error {
+		if err := LockRuntimeManagementAdmission(ctx, tx); err != nil {
+			return err
+		}
+		if pod.PodUID != nil && *pod.PodUID != "" {
+			rows, err := tx.SQL().QueryContext(ctx, "SELECT namespace,pod_name,deployment_name,runtime_type FROM runtime_pods WHERE pod_uid=?", *pod.PodUID)
+			if err != nil {
+				return err
+			}
+			type priorIdentity struct{ namespace, name, owner, runtime string }
+			var existing []priorIdentity
+			for rows.Next() {
+				var prior priorIdentity
+				if err = rows.Scan(&prior.namespace, &prior.name, &prior.owner, &prior.runtime); err != nil {
+					rows.Close()
+					return err
+				}
+				existing = append(existing, prior)
+			}
+			err = rows.Err()
+			rows.Close()
+			if err != nil {
+				return err
+			}
+			for _, prior := range existing {
+				if prior.namespace != pod.Namespace || prior.name != pod.PodName {
+					return fmt.Errorf("Pod UID already belongs to a different namespace/name")
+				}
+				if prior.owner != pod.DeploymentName || prior.runtime != pod.RuntimeType {
+					if err := CheckRuntimePodDeletionIntent(ctx, tx, prior.namespace, prior.owner); err != nil {
+						return fmt.Errorf("fenced Runtime registration cannot change controller identity: %w", err)
+					}
+				}
+			}
+		}
+		ensureTimestamps(&pod.CreatedAt, &pod.UpdatedAt)
+		res, err := tx.SQL().ExecContext(ctx, `
 		INSERT INTO runtime_pods (
 			runtime_type, namespace, pod_name, pod_uid, pod_ip, node_name, deployment_name,
 			image_ref, openclaw_version, agent_protocol_version, team_plugin_version, session_store,
@@ -77,17 +131,28 @@ func (r *runtimePodRepository) UpsertFromAgent(ctx context.Context, pod *models.
 			last_seen_at = VALUES(last_seen_at),
 			updated_at = VALUES(updated_at)
 	`, pod.RuntimeType, pod.Namespace, pod.PodName, pod.PodUID, pod.PodIP, pod.NodeName, pod.DeploymentName,
-		pod.ImageRef, pod.OpenClawVersion, pod.AgentProtocolVersion, pod.TeamPluginVersion, pod.SessionStore,
-		pod.ImageDigest, pod.CapabilitiesJSON, pod.AgentEndpoint, pod.State, pod.Capacity, pod.UsedSlots, pod.Draining, pod.CPUMillisUsed,
-		pod.MemoryBytesUsed, pod.DiskBytesUsed, pod.NetworkRXBytes, pod.NetworkTXBytes, pod.MetricsJSON,
-		pod.LastSeenAt, pod.CreatedAt, pod.UpdatedAt)
-	if err != nil {
-		return fmt.Errorf("failed to upsert runtime pod: %w", err)
-	}
-	if id, err := res.LastInsertId(); err == nil {
-		pod.ID = id
-	}
-	return nil
+			pod.ImageRef, pod.OpenClawVersion, pod.AgentProtocolVersion, pod.TeamPluginVersion, pod.SessionStore,
+			pod.ImageDigest, pod.CapabilitiesJSON, pod.AgentEndpoint, pod.State, pod.Capacity, pod.UsedSlots, pod.Draining, pod.CPUMillisUsed,
+			pod.MemoryBytesUsed, pod.DiskBytesUsed, pod.NetworkRXBytes, pod.NetworkTXBytes, pod.MetricsJSON,
+			pod.LastSeenAt, pod.CreatedAt, pod.UpdatedAt)
+		if err != nil {
+			return fmt.Errorf("failed to upsert runtime pod: %w", err)
+		}
+		if id, err := res.LastInsertId(); err == nil {
+			pod.ID = id
+		}
+		fenced, err := RuntimePodDeletionIntentUID(ctx, tx, pod.Namespace, pod.DeploymentName)
+		if err != nil {
+			return err
+		}
+		if fenced != "" {
+			if _, err = tx.SQL().ExecContext(ctx, "UPDATE runtime_pods SET scheduling_paused=1 WHERE id=?", pod.ID); err != nil {
+				return err
+			}
+			pod.SchedulingPaused = true
+		}
+		return nil
+	}, nil)
 }
 
 func (r *runtimePodRepository) GetByID(ctx context.Context, id int64) (*models.RuntimePod, error) {
@@ -141,8 +206,9 @@ func (r *runtimePodRepository) ListSchedulable(ctx context.Context, runtimeType 
 	iter := r.sess.SQL().IteratorContext(ctx, `
 		SELECT *
 		FROM runtime_pods
-		WHERE runtime_type = ? AND state = 'ready' AND draining = 0 AND used_slots < capacity
+		WHERE runtime_type = ? AND state = 'ready' AND draining = 0 AND scheduling_paused = 0 AND used_slots < capacity
 		  AND LOWER(TRIM(deployment_name)) NOT LIKE 'openclaw-upgrade-lab-%'
+ AND NOT EXISTS (SELECT 1 FROM runtime_pod_deletion_intents di WHERE di.namespace=runtime_pods.namespace AND di.deployment_name=runtime_pods.deployment_name)
 		ORDER BY used_slots, id
 	`, runtimeType)
 	defer iter.Close()
@@ -153,21 +219,43 @@ func (r *runtimePodRepository) ListSchedulable(ctx context.Context, runtimeType 
 }
 
 func (r *runtimePodRepository) TryClaimSlot(ctx context.Context, podID int64) (bool, error) {
-	res, err := r.sess.SQL().ExecContext(ctx, `
-		UPDATE runtime_pods
-		SET used_slots = used_slots + 1, updated_at = ?
-		WHERE id = ? AND state = 'ready' AND draining = 0 AND used_slots < capacity
-		AND NOT EXISTS (SELECT 1 FROM runtime_rollouts rr
-		  WHERE rr.runtime_type = runtime_pods.runtime_type AND rr.status IN ('pending','running'))
-	`, time.Now().UTC(), podID)
-	if err != nil {
-		return false, fmt.Errorf("failed to claim runtime pod slot: %w", err)
-	}
-	affected, err := res.RowsAffected()
-	if err != nil {
-		return false, fmt.Errorf("failed to inspect runtime pod slot claim: %w", err)
-	}
-	return affected == 1, nil
+	return r.tryClaimSlot(ctx, podID, nil)
+}
+
+// The scheduler supplies its configured freshness window. Recheck atomically
+// with capacity acquisition, rather than trusting an earlier SELECT snapshot.
+func (r *runtimePodRepository) TryClaimSlotSince(ctx context.Context, podID int64, cutoff time.Time) (bool, error) {
+	return r.tryClaimSlot(ctx, podID, &cutoff)
+}
+
+func (r *runtimePodRepository) tryClaimSlot(ctx context.Context, podID int64, cutoff *time.Time) (bool, error) {
+	var claimed bool
+	err := r.sess.TxContext(ctx, func(tx db.Session) error {
+		if err := LockRuntimeManagementAdmission(ctx, tx); err != nil {
+			return err
+		}
+		if err := CheckRuntimePodScaleInAdmission(ctx, tx, podID); err != nil {
+			return err
+		}
+		query := `
+ UPDATE runtime_pods SET used_slots=used_slots+1,updated_at=?
+ WHERE id=? AND state='ready' AND draining=0 AND scheduling_paused=0 AND used_slots<capacity
+ AND NOT EXISTS (SELECT 1 FROM runtime_pod_deletion_intents di WHERE di.namespace=runtime_pods.namespace AND di.deployment_name=runtime_pods.deployment_name)
+ AND NOT EXISTS (SELECT 1 FROM runtime_rollouts rr WHERE rr.runtime_type=runtime_pods.runtime_type AND rr.status IN ('pending','running'))`
+		args := []any{time.Now().UTC(), podID}
+		if cutoff != nil {
+			query += ` AND last_seen_at IS NOT NULL AND last_seen_at>=?`
+			args = append(args, *cutoff)
+		}
+		res, err := tx.SQL().ExecContext(ctx, query, args...)
+		if err != nil {
+			return fmt.Errorf("failed to claim runtime pod slot: %w", err)
+		}
+		affected, err := res.RowsAffected()
+		claimed = affected == 1
+		return err
+	}, nil)
+	return claimed, err
 }
 
 func (r *runtimePodRepository) ReleaseSlot(ctx context.Context, podID int64) error {
@@ -232,4 +320,33 @@ func (r *runtimePodRepository) UpdateMetrics(ctx context.Context, podID int64, m
 		return fmt.Errorf("failed to update runtime pod metrics: %w", err)
 	}
 	return nil
+}
+
+// SetSchedulingPaused is control-plane owned; Agent heartbeats cannot clear it.
+func (r *runtimePodRepository) SetSchedulingPaused(ctx context.Context, podID int64, paused bool) error {
+	if paused {
+		_, err := r.sess.SQL().ExecContext(ctx, "UPDATE runtime_pods SET scheduling_paused=1,updated_at=? WHERE id=?", time.Now().UTC(), podID)
+		return err
+	}
+	return r.sess.TxContext(ctx, func(tx db.Session) error {
+		if err := LockRuntimeManagementAdmission(ctx, tx); err != nil {
+			return err
+		}
+		if err := CheckRuntimePodScaleInAdmission(ctx, tx, podID); err != nil {
+			return err
+		}
+		var namespace, name string
+		row, err := tx.SQL().QueryRowContext(ctx, "SELECT namespace,deployment_name FROM runtime_pods WHERE id=?", podID)
+		if err == nil {
+			err = row.Scan(&namespace, &name)
+		}
+		if err != nil {
+			return err
+		}
+		if err = CheckRuntimePodDeletionIntent(ctx, tx, namespace, name); err != nil {
+			return err
+		}
+		_, err = tx.SQL().ExecContext(ctx, "UPDATE runtime_pods SET scheduling_paused=0,updated_at=? WHERE id=?", time.Now().UTC(), podID)
+		return err
+	}, nil)
 }

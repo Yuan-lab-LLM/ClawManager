@@ -6,6 +6,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -52,6 +53,13 @@ func (s *stubEgressAuditService) RecordEvent(event *models.AuditEvent) error {
 	return nil
 }
 
+func (s *stubEgressAuditService) RecordEventContext(ctx context.Context, event *models.AuditEvent) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return s.RecordEvent(event)
+}
+
 func (s *stubEgressAuditService) ListEventsByTraceID(string) ([]models.AuditEvent, error) {
 	return nil, nil
 }
@@ -59,19 +67,24 @@ func (s *stubEgressAuditService) ListEventsByTraceID(string) ([]models.AuditEven
 func TestEgressProxyHandlerBlocksDeniedConnectHost(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	audit := &stubEgressAuditService{}
+	token := "audit-instance-token"
 	handler := &EgressProxyHandler{
 		policy: egresspolicy.Policy{
 			Mode:               egresspolicy.ModeDenylist,
 			DeniedHostSuffixes: []string{"api.openai.com"},
 		},
 		audit: audit,
+		instances: &stubEgressInstanceResolver{byID: map[int]*models.Instance{
+			42: {ID: 42, UserID: 1, AccessToken: &token},
+		}},
 	}
 
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodConnect, "https://api.openai.com:443", nil)
 	ctx.Request.Host = "api.openai.com:443"
-	ctx.Request.Header.Set("X-ClawManager-Instance-Id", "42")
+	ctx.Request.Header.Set("X-ClawManager-Instance-Id", "999")
+	ctx.Request.Header.Set("Proxy-Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte("42:"+egresspolicy.InstanceProxyPassword(42, token))))
 
 	handler.handleConnect(ctx)
 
@@ -82,11 +95,11 @@ func TestEgressProxyHandlerBlocksDeniedConnectHost(t *testing.T) {
 		t.Fatalf("expected egress audit event, got %+v", audit.events)
 	}
 	if audit.events[0].InstanceID == nil || *audit.events[0].InstanceID != 42 {
-		t.Fatalf("expected instance id 42 on egress audit event, got %+v", audit.events[0].InstanceID)
+		t.Fatalf("authenticated instance must override forged header: %+v", audit.events[0].InstanceID)
 	}
 }
 
-func TestEgressProxyHandlerAcceptsEgressInstanceHeaderAlias(t *testing.T) {
+func TestEgressProxyHandlerIgnoresEgressInstanceHeaderAlias(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	audit := &stubEgressAuditService{}
 	handler := &EgressProxyHandler{
@@ -95,6 +108,9 @@ func TestEgressProxyHandlerAcceptsEgressInstanceHeaderAlias(t *testing.T) {
 			DeniedHostSuffixes: []string{"api.openai.com"},
 		},
 		audit: audit,
+		instances: &stubEgressInstanceResolver{byPodIP: map[string]*models.Instance{
+			"192.0.2.1": {ID: 77, UserID: 1},
+		}},
 	}
 
 	recorder := httptest.NewRecorder()
@@ -108,8 +124,8 @@ func TestEgressProxyHandlerAcceptsEgressInstanceHeaderAlias(t *testing.T) {
 	if recorder.Code != http.StatusForbidden {
 		t.Fatalf("expected 403, got %d", recorder.Code)
 	}
-	if audit.events[0].InstanceID == nil || *audit.events[0].InstanceID != 77 {
-		t.Fatalf("expected instance id 77 on egress audit event, got %+v", audit.events[0].InstanceID)
+	if audit.events[0].InstanceID != nil {
+		t.Fatalf("forged alias attributed audit event: %+v", audit.events[0].InstanceID)
 	}
 }
 
@@ -136,7 +152,7 @@ type stubPrivateExceptionSource struct {
 	rules []egresspolicy.PrivateExceptionRule
 }
 
-func (s *stubPrivateExceptionSource) SnapshotRules() []egresspolicy.PrivateExceptionRule {
+func (s *stubPrivateExceptionSource) SnapshotRulesContext(context.Context) []egresspolicy.PrivateExceptionRule {
 	return s.rules
 }
 
@@ -150,6 +166,13 @@ func (s *stubEgressInstanceResolver) GetByID(id int) (*models.Instance, error) {
 		return nil, nil
 	}
 	return s.byID[id], nil
+}
+
+func (s *stubEgressInstanceResolver) GetByIDContext(ctx context.Context, id int) (*models.Instance, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return s.GetByID(id)
 }
 
 func (s *stubEgressInstanceResolver) FindByPodIP(podIP string) (*models.Instance, error) {
@@ -198,7 +221,7 @@ func TestEgressProxyHandlerAllowsPrivateExceptionWithInstanceIdentity(t *testing
 	}
 }
 
-func TestEgressProxyHandlerResolvesIdentityFromHeaderAndPodIP(t *testing.T) {
+func TestEgressProxyHandlerDoesNotTrustHeaderOrPodIP(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	resolver := &stubEgressInstanceResolver{
 		byID: map[int]*models.Instance{
@@ -217,16 +240,17 @@ func TestEgressProxyHandlerResolvesIdentityFromHeaderAndPodIP(t *testing.T) {
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodGet, "http://example.com/", nil)
 	ctx.Request.Header.Set("X-ClawManager-Egress-Instance-Id", "8")
+	ctx.Request.RemoteAddr = "10.42.0.130:48800"
 	identity := handler.resolveEgressIdentity(ctx)
-	if identity.InstanceID == nil || *identity.InstanceID != 8 || identity.UserID == nil || *identity.UserID != 1 {
-		t.Fatalf("expected header identity, got %+v", identity)
+	if identity.InstanceID != nil || identity.UserID != nil {
+		t.Fatalf("forged header supplied identity: %+v", identity)
 	}
 
 	ctx.Request = httptest.NewRequest(http.MethodGet, "http://example.com/", nil)
 	ctx.Request.RemoteAddr = "10.42.0.130:48800"
 	identity = handler.resolveEgressIdentity(ctx)
-	if identity.InstanceID == nil || *identity.InstanceID != 8 {
-		t.Fatalf("expected pod ip identity, got %+v", identity)
+	if identity.InstanceID != nil || identity.UserID != nil {
+		t.Fatalf("shared Pod IP supplied identity: %+v", identity)
 	}
 }
 
@@ -281,8 +305,9 @@ func (h *hijackableResponseRecorder) Hijack() (net.Conn, *bufio.ReadWriter, erro
 	return h.serverConn, bufio.NewReadWriter(bufio.NewReader(h.serverConn), bufio.NewWriter(h.serverConn)), nil
 }
 
-func TestEgressProxyHandlerConnectAllowsPrivateExceptionWithHeader(t *testing.T) {
+func TestEgressProxyHandlerConnectAllowsPrivateExceptionWithTrustedContext(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+	token := "instance-token"
 	handler := NewEgressProxyHandler(
 		&stubEgressAuditService{},
 		WithEgressPrivateExceptions(
@@ -293,7 +318,7 @@ func TestEgressProxyHandlerConnectAllowsPrivateExceptionWithHeader(t *testing.T)
 				Port:      18080,
 			}}},
 			&stubEgressInstanceResolver{byID: map[int]*models.Instance{
-				8: {ID: 8, UserID: 1},
+				8: {ID: 8, UserID: 1, AccessToken: &token},
 			}},
 		),
 	)
@@ -312,7 +337,8 @@ func TestEgressProxyHandlerConnectAllowsPrivateExceptionWithHeader(t *testing.T)
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodConnect, "https://10.255.25.3:18080", nil)
 	ctx.Request.Host = "10.255.25.3:18080"
-	ctx.Request.Header.Set("X-ClawManager-Egress-Instance-Id", "8")
+	instanceID, userID := 8, 1
+	ctx.Request = ctx.Request.WithContext(context.WithValue(ctx.Request.Context(), egressIdentityContextKey{}, egressRequestIdentity{InstanceID: &instanceID, UserID: &userID}))
 
 	done := make(chan struct{})
 	go func() {
@@ -417,6 +443,13 @@ func TestEgressProxyHandlerDoesNotInterceptArbitraryPreviewLikeHost(t *testing.T
 		nil,
 		WithTeamArtifactPreviewOrigin("http://clawmanager-egress-proxy.clawmanager-hxc-peer-system.svc.cluster.local:3128"),
 	)
+	handler.lookupNetIP = func(context.Context, string, string) ([]netip.Addr, error) {
+		return []netip.Addr{netip.MustParseAddr("8.8.8.8")}, nil
+	}
+	handler.baseDialContext = func(context.Context, string, string) (net.Conn, error) {
+		return nil, errors.New("local test: no upstream")
+	}
+
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodGet, "http://attacker.example/v1/94/_/invalid/index.html", nil)
@@ -529,4 +562,28 @@ func signTeamPreviewModeForTest(token string, teamID int, prefix, mode string) s
 	mac := hmac.New(sha256.New, []byte(token))
 	_, _ = mac.Write([]byte(teamPreviewSignaturePayloadForMode(teamID, prefix, mode)))
 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+}
+
+// A legacy proxy credential must never downgrade a protected assignment,
+// including through the public listener that still serves legacy runtimes.
+func TestEgressProxyLegacyCredentialsRespectRuntimeProtection(t *testing.T) {
+	token := "instance-token"
+	for _, profile := range []string{"", "protected-native-slot", " "} {
+		t.Run("profile="+profile, func(t *testing.T) {
+			handler := NewEgressProxyHandler(nil, WithEgressPrivateExceptions(nil, &stubEgressInstanceResolver{byID: map[int]*models.Instance{
+				8: {ID: 8, UserID: 1, AccessToken: &token, RuntimeSecurityProfile: profile},
+			}}))
+			ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+			ctx.Request = httptest.NewRequest(http.MethodGet, "http://example.com/", nil)
+			ctx.Request.Header.Set("Proxy-Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte("8:"+egresspolicy.InstanceProxyPassword(8, token))))
+			identity := handler.resolveEgressIdentity(ctx)
+			if profile != "" {
+				if identity.InstanceID != nil || identity.UserID != nil {
+					t.Fatalf("protected assignment accepted legacy credentials: %+v", identity)
+				}
+			} else if identity.InstanceID == nil || *identity.InstanceID != 8 || identity.UserID == nil || *identity.UserID != 1 {
+				t.Fatalf("legacy credentials lost their authenticated identity: %+v", identity)
+			}
+		})
+	}
 }

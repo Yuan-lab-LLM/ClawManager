@@ -34,6 +34,7 @@ type runtimeWorkspaceExecutor interface {
 type runtimeWorkspaceFileService struct {
 	auditRepo repository.WorkspaceFileAuditRepository
 	executor  runtimeWorkspaceExecutor
+	writes    repository.WorkspaceWriteRepository
 }
 
 type k8sRuntimeWorkspaceExecutor struct {
@@ -48,9 +49,10 @@ type runtimeWorkspaceEntryPayload struct {
 	ModifiedAt time.Time `json:"modified_at"`
 }
 
-func NewRuntimeWorkspaceFileService(auditRepo repository.WorkspaceFileAuditRepository) WorkspaceFileService {
+func NewRuntimeWorkspaceFileService(auditRepo repository.WorkspaceFileAuditRepository, writes repository.WorkspaceWriteRepository) WorkspaceFileService {
 	return &runtimeWorkspaceFileService{
 		auditRepo: auditRepo,
+		writes:    writes,
 		executor: &k8sRuntimeWorkspaceExecutor{
 			deploymentService: k8s.NewInstanceDeploymentService(),
 		},
@@ -250,7 +252,7 @@ func (s *runtimeWorkspaceFileService) Upload(ctx context.Context, scope Workspac
 	targetRelative := joinWorkspaceRelative(dir, cleanName)
 	limited := io.LimitReader(reader, maxBytes+1)
 	var payload runtimeWorkspaceEntryPayload
-	if err := s.runJSON(ctx, scope, []string{
+	if err := s.runWriteJSON(ctx, scope, "upload", []string{
 		"python3",
 		"-c",
 		runtimeWorkspaceUploadScript,
@@ -277,7 +279,7 @@ func (s *runtimeWorkspaceFileService) Mkdir(ctx context.Context, scope Workspace
 		return nil, err
 	}
 	var payload runtimeWorkspaceEntryPayload
-	if err := s.runJSON(ctx, scope, []string{"python3", "-c", runtimeWorkspaceMkdirScript, runtimeWorkspaceBase(scope), relative}, nil, &payload); err != nil {
+	if err := s.runWriteJSON(ctx, scope, "mkdir", []string{"python3", "-c", runtimeWorkspaceMkdirScript, runtimeWorkspaceBase(scope), relative}, nil, &payload); err != nil {
 		return nil, err
 	}
 	if err := s.recordAudit(ctx, scope, "mkdir", relative, 0); err != nil {
@@ -300,7 +302,7 @@ func (s *runtimeWorkspaceFileService) Rename(ctx context.Context, scope Workspac
 		return nil, err
 	}
 	var payload runtimeWorkspaceEntryPayload
-	if err := s.runJSON(ctx, scope, []string{"python3", "-c", runtimeWorkspaceRenameScript, runtimeWorkspaceBase(scope), oldRelative, newRelative}, nil, &payload); err != nil {
+	if err := s.runWriteJSON(ctx, scope, "rename", []string{"python3", "-c", runtimeWorkspaceRenameScript, runtimeWorkspaceBase(scope), oldRelative, newRelative}, nil, &payload); err != nil {
 		return nil, err
 	}
 	if err := s.recordAudit(ctx, scope, "rename", oldRelative+" -> "+newRelative, 0); err != nil {
@@ -318,7 +320,7 @@ func (s *runtimeWorkspaceFileService) Delete(ctx context.Context, scope Workspac
 	if err != nil {
 		return err
 	}
-	if err := s.run(ctx, scope, []string{"python3", "-c", runtimeWorkspaceDeleteScript, runtimeWorkspaceBase(scope), relative}, nil, io.Discard); err != nil {
+	if err := s.runWrite(ctx, scope, "delete", []string{"python3", "-c", runtimeWorkspaceDeleteScript, runtimeWorkspaceBase(scope), relative}, nil, io.Discard); err != nil {
 		return err
 	}
 	return s.recordAudit(ctx, scope, "delete", relative, 0)
@@ -427,7 +429,7 @@ func (s *runtimeWorkspaceFileService) recordAudit(ctx context.Context, scope Wor
 func (e *k8sRuntimeWorkspaceExecutor) exec(ctx context.Context, userID, instanceID int, command []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	client := k8s.GetClient()
 	if client == nil || client.Clientset == nil || client.Config == nil {
-		return fmt.Errorf("k8s client not initialized")
+		return &workspaceExecNotStarted{fmt.Errorf("k8s client not initialized")}
 	}
 	deploymentService := e.deploymentService
 	if deploymentService == nil {
@@ -435,7 +437,7 @@ func (e *k8sRuntimeWorkspaceExecutor) exec(ctx context.Context, userID, instance
 	}
 	pod, err := deploymentService.GetActivePod(ctx, userID, instanceID)
 	if err != nil {
-		return fmt.Errorf("failed to get active instance pod: %w", err)
+		return &workspaceExecNotStarted{fmt.Errorf("failed to get active instance pod: %w", err)}
 	}
 	req := client.Clientset.CoreV1().RESTClient().Post().
 		Resource("pods").
@@ -452,7 +454,7 @@ func (e *k8sRuntimeWorkspaceExecutor) exec(ctx context.Context, userID, instance
 	}, scheme.ParameterCodec)
 	exec, err := remotecommand.NewSPDYExecutor(client.Config, "POST", req.URL())
 	if err != nil {
-		return fmt.Errorf("failed to initialize runtime workspace exec stream: %w", err)
+		return &workspaceExecNotStarted{fmt.Errorf("failed to initialize runtime workspace exec stream: %w", err)}
 	}
 	return exec.StreamWithContext(ctx, remotecommand.StreamOptions{
 		Stdin:  stdin,

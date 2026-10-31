@@ -56,9 +56,9 @@ func (s *workerMaterializeJobRepoStub) GetByIdempotencyKey(string) (*models.Skil
 func (s *workerMaterializeJobRepoStub) ClaimNextPending(context.Context, int) ([]models.SkillPackageMaterializeJob, error) {
 	return s.jobs, nil
 }
-func (s *workerMaterializeJobRepoStub) MarkSucceeded(int) error { return nil }
+func (s *workerMaterializeJobRepoStub) MarkSucceeded(int) error            { return nil }
 func (s *workerMaterializeJobRepoStub) MarkFailed(int, string, bool) error { return nil }
-func (s *workerMaterializeJobRepoStub) MarkRunning(int) error               { return nil }
+func (s *workerMaterializeJobRepoStub) MarkRunning(int) error              { return nil }
 func (s *workerMaterializeJobRepoStub) ReleaseToPending(int) error {
 	s.released++
 	return nil

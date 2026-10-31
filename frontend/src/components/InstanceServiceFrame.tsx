@@ -7,6 +7,7 @@ import { prepareOpenClawControlUIStorage } from "../lib/openclawControlStorage";
 import { browserWorkerAccessIsFresh, browserWorkerRenewalDelay, refreshBrowserWorkerAccess } from "../lib/browserWorkerAccess";
 import { instanceService, type BrowserWorkerStatus } from "../services/instanceService";
 import type { InstanceAvailability } from "../types/instance";
+import InstanceModelHint from "./InstanceModelHint";
 import { HermesLiteServiceFrame } from "./HermesLiteServiceFrame";
 
 export interface InstanceServiceFrameProps {
@@ -327,6 +328,9 @@ function EmbeddedInstanceServiceFrame({
               {workspaceVisible ? <PanelRightClose className="h-4 w-4" /> : <PanelRightOpen className="h-4 w-4" />}
             </button>
           )}
+          {["opencode", "openclaw", "hermes", "deepseek-harness"].includes(normalizedType) && (
+            <InstanceModelHint instanceId={instanceId} active={isAvailable} />
+          )}
           {isAvailable && (
             <button
               type="button"
@@ -409,7 +413,6 @@ function EmbeddedInstanceServiceFrame({
       </div>,
     );
   }
-
   if (!embedUrl || !frameSrc) {
     if (certificateConfirmationRequired) {
       return renderFrameShell(

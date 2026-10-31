@@ -2,7 +2,7 @@ import axios from "axios";
 import { ArrowLeft, Maximize2, Minimize2, RefreshCw, RotateCw, ShieldAlert } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useParams } from "react-router-dom";
-import { ownerOverviewURL } from "../../lib/ownerPortalNavigation";
+import { ownerOverviewURL, ownerTeamOverviewURL } from "../../lib/ownerPortalNavigation";
 import { WorkspaceFileManager } from "../../components/WorkspaceFileManager";
 import { useExpiringResourceRenewal } from "../../hooks/useExpiringResourceRenewal";
 import { useOwnerActivity } from "../../hooks/useOwnerActivity";
@@ -55,7 +55,8 @@ export default function IEISystemInstancePage() {
   const instanceID = Number(id);
   const location = useLocation();
   const returnSearch = location.state?.portalReturnSearch;
-  const listReturnURL = ownerOverviewURL(instanceID,typeof returnSearch==='string'?returnSearch:'');
+  const returnTeamID = Number(location.state?.portalReturnTeamID);
+  const listReturnURL = Number.isSafeInteger(returnTeamID) && returnTeamID>0 ? ownerTeamOverviewURL(returnTeamID,typeof returnSearch==='string'?returnSearch:'') : ownerOverviewURL(instanceID,typeof returnSearch==='string'?returnSearch:'');
   const frameContainerRef = useRef<HTMLElement | null>(null);
   const [instance, setInstance] = useState<IEISystemInstance | null>(null);
   const [access, setAccess] = useState<IEISystemInstanceAccess | null>(null);

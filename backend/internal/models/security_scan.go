@@ -59,10 +59,10 @@ func (s SecurityScanJobItem) TableName() string { return "security_scan_job_item
 
 type SecurityScanReport struct {
 	ID          int       `db:"id,primarykey,autoincrement" json:"id"`
-	JobID        int      `db:"job_id" json:"job_id"`
-	SummaryJSON  string   `db:"summary_json" json:"-"`
-	CreatedAt    time.Time `db:"created_at" json:"created_at"`
-	UpdatedAt    time.Time `db:"updated_at" json:"updated_at"`
+	JobID       int       `db:"job_id" json:"job_id"`
+	SummaryJSON string    `db:"summary_json" json:"-"`
+	CreatedAt   time.Time `db:"created_at" json:"created_at"`
+	UpdatedAt   time.Time `db:"updated_at" json:"updated_at"`
 }
 
 func (s SecurityScanReport) TableName() string { return "security_scan_reports" }

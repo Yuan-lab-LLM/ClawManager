@@ -4,6 +4,7 @@ import AdminLayout from '../../components/AdminLayout';
 import UpgradeRecoveryActions from '../../components/UpgradeRecoveryActions';
 import { useI18n } from '../../contexts/I18nContext';
 import PasswordSettingsSection from '../../components/PasswordSettingsSection';
+import RoutingClassifierSettings from '../../components/RoutingClassifierSettings';
 import {
   systemSettingsService,
   type SystemImageSetting,
@@ -772,7 +773,7 @@ const SystemSettingsPage: React.FC = () => {
     setRolloutMaxUnavailable(1);
   };
 
-  const startRollout = async () => {
+  const startRollout = async (forceCheck = false) => {
     if (!rolloutImage.trim()) {
       setRolloutError(t('systemSettingsPage.rolloutTargetRequired'));
       return;
@@ -781,12 +782,8 @@ const SystemSettingsPage: React.FC = () => {
       setRolloutSaving(true);
       setRolloutError(null);
 		let targetImage = rolloutImage.trim();
-		let preflight = rolloutPreflight;
-		if (rolloutRuntimeType === 'openclaw' && preflight && !preflight.passed) {
-			setRolloutError(preflight.blockers.join('；'));
-			return;
-		}
-      if (rolloutRuntimeType === 'openclaw' && !preflight) {
+		let preflight = forceCheck ? null : rolloutPreflight;
+      if (rolloutRuntimeType === 'openclaw' && (!preflight || !preflight.passed)) {
 			preflight = await runtimePoolService.preflightOpenClawRollout({
 			  target_image_ref: targetImage,
 			  batch_size: Math.max(1, rolloutBatchSize),
@@ -953,6 +950,8 @@ const SystemSettingsPage: React.FC = () => {
     <AdminLayout title={t('admin.systemSettings')}>
       <div className="space-y-6">
         <PasswordSettingsSection />
+
+        <RoutingClassifierSettings />
 
         <section className="app-panel p-6">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -1226,6 +1225,11 @@ const SystemSettingsPage: React.FC = () => {
 			  <div className="mt-1">
 				目标：<span className="font-mono break-all">{rolloutDetails.rollout.target_image_ref}</span>
 			  </div>
+			  {rolloutDetails.pool_operation && <div className="mt-2 rounded border border-blue-100 bg-white/70 px-3 py-2" data-pool-operation>
+                <div>{rolloutDetails.rollout.status==='finished'?'运行池已验证可用':rolloutDetails.pool_operation.message}</div>
+                <div className="mt-1">启动验证 {rolloutDetails.pool_operation.validated}/{rolloutDetails.pool_operation.total}；运行池处理 {rolloutDetails.pool_operation.completed}/{rolloutDetails.pool_operation.total}。等待中的新实例将在运行池就绪后自动调度。</div>
+                {rolloutDetails.pool_operation.restored&&<div>原运行池已恢复并验证，实例数据保留。</div>}
+              </div>}
 			  <div className="mt-1">
 				{rolloutDetails.pool_progress ? <>运行池 {rolloutDetails.pool_progress.completed} / {rolloutDetails.pool_progress.targets.length} 已更新；当前：{rolloutDetails.pool_progress.targets[rolloutDetails.pool_progress.completed]?.Name ?? '等待最终验证'}</> : <>实例 {rolloutDetails.items.length} 个；Gateway 已验证 {rolloutDetails.items.filter((item) => !item.isolated_at&&['gateway_verified', 'verified'].includes(item.state)).length} 个；等待恢复 {rolloutDetails.items.filter((item) => !item.isolated_at&&['migrated', 'restart_ready'].includes(item.state)).length} 个；数据已回退 {rolloutDetails.items.filter((item) => item.state === 'restored').length} 个。</>}
 			  </div>
@@ -1239,6 +1243,7 @@ const SystemSettingsPage: React.FC = () => {
 			  {(rolloutDetails.rollout.error_message || rolloutDetails.rollout.rollback_error) && (
 				<div className="mt-2 text-red-700">{rolloutDetails.rollout.error_message}{rolloutDetails.rollout.rollback_error && <div className="mt-1">回退恢复：{rolloutDetails.rollout.rollback_error}</div>}</div>
 			  )}
+			  {rolloutDetails.rollout.status==='error'&&rolloutDetails.rollout.phase==='empty_pool_reset'&&<button type="button" className="app-button-secondary mt-3" disabled={rolloutSaving||activeRolloutId!==null} onClick={()=>void startRollout(true)}>用填写的镜像恢复并重试</button>}
 			  {rolloutDetails.items.length > 0 && (
 				<div className="mt-3 max-h-48 overflow-y-auto rounded-md border border-blue-100 bg-white/80">
 				  {rolloutDetails.items.map((item) => (

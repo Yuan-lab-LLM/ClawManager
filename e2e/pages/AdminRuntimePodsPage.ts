@@ -47,9 +47,8 @@ export class AdminRuntimePodsPage {
     const card = this.podCard(pod.pod_name);
 
     await expect(card.getByText(this.formatRuntimeType(pod.runtime_type), { exact: true })).toBeVisible();
-    await expect(card.getByText(pod.draining ? "draining" : pod.state, { exact: true })).toBeVisible();
-    await expect(card.getByText("Slots", { exact: true })).toBeVisible();
-    await expect(card.getByText(`${pod.used_slots} / ${pod.capacity}`, { exact: true })).toBeVisible();
+    await expect(card.getByText(pod.draining ? 'Not schedulable' : 'Schedulable', { exact: true })).toBeVisible();
+    await expect(card.getByText(`Instance occupancy ${pod.used_slots} / ${pod.capacity}`, { exact: false })).toBeVisible();
   }
 
   async expectPodMetricsVisible(podName: string) {
@@ -57,8 +56,6 @@ export class AdminRuntimePodsPage {
 
     await expect(card.getByText("CPU", { exact: true })).toBeVisible();
     await expect(card.getByText("Memory", { exact: true })).toBeVisible();
-    await expect(card.getByText("Disk", { exact: true })).toBeVisible();
-    await expect(card.getByText("Network", { exact: true })).toBeVisible();
-    await expect(card.getByText(/Last seen/i)).toBeVisible();
+    await expect(card.getByRole('button', { name: /View all \d+ Agents →/ })).toBeVisible();
   }
 }

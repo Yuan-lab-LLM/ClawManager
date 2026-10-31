@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
 import { ArrowUpRight, ChevronLeft, ChevronRight, MonitorUp, Users, X } from "lucide-react";
 import TeamBadge from './TeamBadge';
+import { useTeamPageEnvironment } from './TeamPageEnvironment';
 import { memberIcon } from '../../lib/teamIcons';
 import type { Team, TeamMember } from "../../types/team";
 import { memberRailState, memberRuntime, memberSchedule, memberSummary, memberHasRuntimeFault } from "./teamMemberPresentation";
@@ -13,7 +14,9 @@ function Avatar({ member, index, leaderKey }: { member: TeamMember; index: numbe
 }
 
 export function MemberEntry({ member, compact = false }: { member: TeamMember; compact?: boolean }) {
-  return member.instance_id ? <Link to={`/instances/${member.instance_id}`} target="_blank" rel="noreferrer" className={compact ? "team-roster-quick-entry" : "team-roster-entry"} aria-label={`进入${member.display_name}实例 #${member.instance_id}`}>
+  const environment = useTeamPageEnvironment();
+  const entry = member.instance_id ? environment.memberEntry?.(member.instance_id) : undefined;
+  return member.instance_id ? <Link to={entry?.to || `/instances/${member.instance_id}`} state={entry?.state} target={entry ? entry.target : "_blank"} rel="noreferrer" className={compact ? "team-roster-quick-entry" : "team-roster-entry"} aria-label={`进入${member.display_name}实例 #${member.instance_id}`}>
     {compact && <MonitorUp size={13} />}<span>{compact ? "进入" : "进入实例"}</span>{!compact && <ArrowUpRight size={13} />}
   </Link> : <span className="team-roster-no-instance">{compact ? "待创建" : "实例待创建"}</span>;
 }

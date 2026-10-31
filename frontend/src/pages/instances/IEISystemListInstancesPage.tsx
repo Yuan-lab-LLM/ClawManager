@@ -3,6 +3,8 @@ import {useOwnerPortalVisit} from '../../hooks/useOwnerPortalVisit';
 import { OwnerInstanceCard } from "../../components/OwnerInstanceCard";
 import { expandedInstanceFromSearch } from "../../lib/ownerPortalNavigation";
 import { OwnerDashboard } from "../../components/OwnerDashboard";
+import { useOwnerTeams } from '../../hooks/useOwnerTeams';
+import { OwnerTeamSidebar, OwnerTeamDashboard } from '../../components/teams/OwnerTeamWorkspace';
 import {
   ArrowRight,
   Briefcase,
@@ -170,6 +172,7 @@ function selectedInstanceIDFromURL() {
 export default function IEISystemListInstancesPage() {
   const initialized = useRef(false);
   const [session, setSession] = useState<IEISystemSession | null>(null);
+  const ownerTeams = useOwnerTeams(session?.owner);
   useOwnerPortalVisit(session?.owner);
   const [expandedInstanceID, setExpandedInstanceID] = useState<number|null>(()=>expandedInstanceFromSearch(window.location.search));
   const [instances, setInstances] = useState<IEISystemInstance[]>([]);
@@ -580,7 +583,7 @@ export default function IEISystemListInstancesPage() {
             <RefreshCw className="mr-2 h-5 w-5 animate-spin" />
             正在验证身份并加载实例…
           </div>
-        ) : instances.length === 0 ? (
+        ) : instances.length === 0 && !ownerTeams.enabled ? (
           <div className="relative mx-auto flex min-h-[calc(100vh-132px)] max-w-6xl items-center justify-center overflow-hidden rounded-2xl border border-blue-100 bg-[#f3f7ff] px-5 py-10 text-center shadow-[0_12px_35px_rgba(15,23,42,0.035)] sm:px-8">
             <div className="pointer-events-none absolute -left-24 -top-24 h-64 w-64 rounded-full bg-blue-100/60" />
             <div className="pointer-events-none absolute -bottom-36 -right-28 h-72 w-72 rounded-full bg-blue-100/60" />
@@ -651,11 +654,11 @@ export default function IEISystemListInstancesPage() {
               </div>
             </div>
           </div>
-        ) : selectedInstance && selectedRuntime ? (
+        ) : (view === 'overview' || selectedInstance && selectedRuntime) ? (
           <div className={view==='overview'?'portal-overview-grid grid items-start gap-3 lg:grid-cols-[320px_minmax(0,1fr)] xl:grid-cols-[350px_minmax(0,1fr)]':'grid gap-4 lg:h-[calc(100vh-132px)] lg:min-h-[640px] lg:grid-cols-[minmax(280px,330px)_minmax(460px,1fr)_minmax(280px,320px)] 2xl:grid-cols-[minmax(320px,380px)_minmax(560px,1fr)_minmax(320px,360px)]'}>
             <aside className={`portal-instance-sidebar flex flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-[0_12px_35px_rgba(15,23,42,0.045)] lg:min-h-0 ${view==='overview'?'max-h-[360px] lg:max-h-[calc(100vh-132px)]':'min-h-[680px]'}`}>
               <div className="flex items-center justify-between border-b border-slate-100 px-5 py-5">
-                <h2 className="text-base font-bold text-[#14213a]">我的实例 · {instances.length}</h2>
+                <h2 className="text-base font-bold text-[#14213a]">{ownerTeams.enabled ? '我的工作空间' : `我的实例 · ${instances.length}`}</h2>
                 <button
                   type="button"
                   className={`cm-icon-button h-9 w-9 ${showFilters ? "border-blue-200 bg-blue-50 text-blue-600" : ""}`}
@@ -665,7 +668,8 @@ export default function IEISystemListInstancesPage() {
                   <SlidersHorizontal className="h-4 w-4" />
                 </button>
               </div>
-              <div className="space-y-3 px-4 py-4">
+              {ownerTeams.enabled && <div className="ot-instance-tabs" role="tablist" aria-label="我的工作空间"><button role="tab" aria-selected={ownerTeams.leftTab==='instances'} onClick={()=>ownerTeams.setLeftTab('instances')}>实例 · {instances.length}</button><button role="tab" aria-selected={ownerTeams.leftTab==='teams'} onClick={()=>ownerTeams.setLeftTab('teams')}>Team · {ownerTeams.total}</button></div>}
+              {ownerTeams.enabled && ownerTeams.leftTab==='teams' ? <OwnerTeamSidebar key={ownerTeams.owner} state={ownerTeams} onSelect={()=>setView('overview')}/> : <><div className="space-y-3 px-4 py-4">
                 <label className="relative block">
                   <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                   <input
@@ -691,7 +695,7 @@ export default function IEISystemListInstancesPage() {
                   </select>
                 ) : null}
               </div>
-              <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 pb-4">
+              <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
                 {visibleInstances.length === 0 ? (
                   <div className="rounded-xl border border-dashed border-slate-200 px-4 py-10 text-center text-sm text-slate-500">
                     没有符合条件的实例
@@ -715,10 +719,10 @@ export default function IEISystemListInstancesPage() {
                     );
                   })
                 )}
-              </div>
+              </div></>}
             </aside>
 
-            {view==='overview' ? <div className="portal-dashboard-host min-w-0"><OwnerDashboard refreshAction={dashboardRefresh} owner={session?.owner??''} instances={instances} onSelect={id=>{if(instances.some(i=>i.id===id)){setSelectedID(id);setView('instance');}}}/></div> : <>
+            {view==='overview' ? <div className="portal-dashboard-host min-w-0"><OwnerDashboard teamContent={ownerTeams.enabled ? <OwnerTeamDashboard key={ownerTeams.owner} state={ownerTeams}/> : undefined} refreshAction={dashboardRefresh} owner={session?.owner??''} instances={instances} onSelect={id=>{if(instances.some(i=>i.id===id)){setSelectedID(id);setView('instance');}}}/></div> : selectedInstance && selectedRuntime ? <>
             <section className="flex min-h-[680px] flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-[0_12px_35px_rgba(15,23,42,0.045)] lg:min-h-0">
               <div className="border-b border-slate-100 px-6 py-5">
                 <h2 className="text-base font-bold text-[#14213a]">运行时说明</h2>
@@ -944,7 +948,7 @@ export default function IEISystemListInstancesPage() {
                 </div>
               </div>
             </aside>
-            </>}
+            </> : null}
           </div>
         ) : null}
       </section>

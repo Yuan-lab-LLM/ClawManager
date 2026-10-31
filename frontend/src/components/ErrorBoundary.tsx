@@ -33,6 +33,8 @@ class ErrorBoundary extends Component<Props, State> {
           <pre style={{ background: '#f5f5f5', padding: '10px', overflow: 'auto' }}>
             {this.state.error?.toString()}
           </pre>
+          <p>请先保留未保存或未发送的内容，再刷新页面重试。</p>
+          <button onClick={() => { if (window.dispatchEvent(new Event('clawmanager:before-page-refresh', { cancelable: true }))) window.location.reload(); }}>刷新页面</button>
         </div>
       );
     }

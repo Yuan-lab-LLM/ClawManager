@@ -1,5 +1,7 @@
 # ClawManager 北向接口使用说明
 
+带 owner 的团队管理、自定义模板、团队对话及文件接口见 [北向 Owner Team 接入说明](./northbound-owner-teams.md)。该类型与原 CM Team 隔离，需管理员单独启用及授权 scope。
+
 本文档面向需要通过程序调用 ClawManager 的系统集成方，适用于 Northbound API `v1.4`。完整机器可读定义见 [northbound-openapi.yaml](./northbound-openapi.yaml)，可运行的 Python Demo 见 [northbound_client.py](../examples/northbound_client.py)。
 
 已有 ClawManager 环境启用本接口前，请先按[北向接口版本升级说明](./northbound-upgrade-guide.md)完成数据库迁移、Core mTLS 和独立 Gateway 部署。

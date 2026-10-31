@@ -4,6 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "test:opencode-storage": "node scripts/opencode-browser-storage.test.mjs",
     "test:p0": "tsx scripts/run-with-log.ts p0",
     "test:p1": "tsx scripts/run-with-log.ts p1",
     "test:p2": "tsx scripts/run-with-log.ts p2",

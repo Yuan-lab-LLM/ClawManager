@@ -77,20 +77,16 @@ func TestBuildGatewayEnvInjectsGatewayModelCatalog(t *testing.T) {
 			service := &instanceService{
 				llmModelRepo: &stubLLMModelRepository{
 					active: []models.LLMModel{
-						{DisplayName: "GPT-4.1"},
-						{DisplayName: "Claude 3.7 Sonnet"},
-						{DisplayName: "auto"},
-						{
-							ProviderType:      models.ProviderTypeOpenAICompatible,
-							ProtocolType:      models.ProtocolTypeOpenAICompatible,
-							BaseURL:           "https://api.deepseek.com",
-							ProviderModelName: "deepseek-r1",
-						},
+						{DisplayName: "GPT-4.1", ModelGroup: "general", ContextWindowTokens: 128000},
+						{DisplayName: "Claude 3.7 Sonnet", ModelGroup: "general", ContextWindowTokens: 200000},
+						{DisplayName: "auto", ContextWindowTokens: 64000},
+						{ProviderModelName: "deepseek-r1", ContextWindowTokens: 32000, ProviderType: models.ProviderTypeOpenAICompatible, ProtocolType: models.ProtocolTypeOpenAICompatible, BaseURL: "https://api.deepseek.com"},
 					},
 				},
 			}
 
 			env, err := service.buildGatewayEnv(&models.Instance{
+				UserID:      1,
 				Type:        instanceType,
 				AccessToken: &token,
 			})
@@ -116,6 +112,16 @@ func TestBuildGatewayEnvInjectsGatewayModelCatalog(t *testing.T) {
 			if env["OPENAI_MODEL"] != "auto" {
 				t.Fatalf("expected OPENAI_MODEL to remain the default gateway alias, got %q", env["OPENAI_MODEL"])
 			}
+			if env["CLAWMANAGER_LLM_CONTEXT_WINDOW"] != "32000" {
+				t.Fatalf("expected conservative default context window, got %q", env["CLAWMANAGER_LLM_CONTEXT_WINDOW"])
+			}
+			var contextWindows map[string]int
+			if err := json.Unmarshal([]byte(env["CLAWMANAGER_LLM_CONTEXT_WINDOWS"]), &contextWindows); err != nil {
+				t.Fatalf("context window catalogue is not valid JSON: %v", err)
+			}
+			if contextWindows["GPT-4.1"] != 128000 || contextWindows["Claude 3.7 Sonnet"] != 128000 || contextWindows["general"] != 128000 {
+				t.Fatalf("unexpected context window catalogue: %#v", contextWindows)
+			}
 			if env["CLAWMANAGER_LLM_API_KEY"] != token || env["OPENAI_API_KEY"] != token {
 				t.Fatalf("expected gateway token aliases to be preserved")
 			}
@@ -126,7 +132,7 @@ func TestBuildGatewayEnvInjectsGatewayModelCatalog(t *testing.T) {
 	}
 }
 
-func TestResolveGatewayModelInjectionExpandsProviderModelCatalog(t *testing.T) {
+func TestResolveGatewayModelInjectionDoesNotGrantDiscoveredModels(t *testing.T) {
 	provider := models.LLMModel{
 		DisplayName:       "icompify",
 		ProviderType:      models.ProviderTypeOpenAICompatible,
@@ -145,22 +151,22 @@ func TestResolveGatewayModelInjectionExpandsProviderModelCatalog(t *testing.T) {
 		llmModelRepo: &stubLLMModelRepository{active: []models.LLMModel{provider}},
 	}
 
-	injection, err := service.resolveGatewayModelInjection()
+	injection, err := service.resolveGatewayModelInjection(1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if injection.modelsJSON != `["auto","qwen3.8","glm-5.2","minimax-m3"]` {
+	if injection.modelsJSON != `["auto","icompify"]` {
 		t.Fatalf("provider catalog was not expanded for instance injection: %s", injection.modelsJSON)
 	}
-	if injection.providerModelsJSON != `["auto/auto","icompify/qwen3.8","icompify/glm-5.2","icompify/minimax-m3"]` {
+	if injection.providerModelsJSON != `["auto/auto","icompify/icompify"]` {
 		t.Fatalf("provider-qualified catalog was not injected: %s", injection.providerModelsJSON)
 	}
-	if injection.codingAgentDefaultModel != "qwen3.8" {
-		t.Fatalf("coding agent default = %q, want qwen3.8", injection.codingAgentDefaultModel)
+	if injection.codingAgentDefaultModel != "icompify" {
+		t.Fatalf("coding agent default = %q, want icompify", injection.codingAgentDefaultModel)
 	}
 }
 
-func TestResolveGatewayModelInjectionUsesExpandedProviderCatalog(t *testing.T) {
+func TestResolveGatewayModelInjectionIgnoresUnapprovedExpandedCatalog(t *testing.T) {
 	expanded := []models.LLMModel{
 		{DisplayName: "model-1", ProviderModelName: "provider-model-1", CatalogProviderName: "configured-provider"},
 		{DisplayName: "model-2", ProviderModelName: "provider-model-2", CatalogProviderName: "configured-provider"},
@@ -175,14 +181,14 @@ func TestResolveGatewayModelInjectionUsesExpandedProviderCatalog(t *testing.T) {
 		expandedModelCatalog: &expandedModelCatalogStub{active: expanded},
 	}
 
-	injection, err := service.resolveGatewayModelInjection()
+	injection, err := service.resolveGatewayModelInjection(1)
 	if err != nil {
 		t.Fatalf("resolveGatewayModelInjection returned error: %v", err)
 	}
-	if injection.modelsJSON != `["auto","model-1","model-2","model-3","model-4","model-5","model-6","model-7"]` {
+	if injection.modelsJSON != `["auto","model-1"]` {
 		t.Fatalf("expanded provider models were not injected: %s", injection.modelsJSON)
 	}
-	if injection.providerModelsJSON != `["auto/auto","configured-provider/model-1","configured-provider/model-2","configured-provider/model-3","configured-provider/model-4","configured-provider/model-5","configured-provider/model-6","configured-provider/model-7"]` {
+	if injection.providerModelsJSON != `["auto/auto","configured-provider/model-1"]` {
 		t.Fatalf("expanded provider model references were not injected: %s", injection.providerModelsJSON)
 	}
 	if injection.codingAgentDefaultModel != "model-1" {
@@ -195,39 +201,49 @@ func assertOpenCodeGatewayConfig(t *testing.T, raw string) {
 	var config struct {
 		Model    string `json:"model"`
 		Provider map[string]struct {
-			NPM     string                       `json:"npm"`
-			Options map[string]string            `json:"options"`
-			Models  map[string]map[string]string `json:"models"`
+			NPM     string            `json:"npm"`
+			Options map[string]string `json:"options"`
+			Models  map[string]struct {
+				Name  string `json:"name"`
+				Limit struct {
+					Context int `json:"context"`
+				} `json:"limit"`
+			} `json:"models"`
 		} `json:"provider"`
 	}
 	if err := json.Unmarshal([]byte(raw), &config); err != nil {
 		t.Fatalf("OPENCODE_CONFIG_CONTENT is not valid JSON: %v", err)
 	}
-	if config.Model != "auto/auto" {
-		t.Fatalf("unexpected OpenCode provider config: %s", raw)
+	if config.Model != "clawmanager/auto" { t.Fatalf("legacy provider reference changed: %s", raw) }
+	provider, ok := config.Provider["clawmanager"]
+	if !ok || provider.NPM != "@ai-sdk/openai-compatible" || provider.Options["baseURL"] != "{env:CLAWMANAGER_LLM_BASE_URL}" || provider.Options["apiKey"] != "{env:CLAWMANAGER_LLM_API_KEY}" { t.Fatalf("missing governed provider: %s", raw) }
+	for _, name := range []string{"auto","GPT-4.1","Claude 3.7 Sonnet","deepseek-r1"} {
+		if _, ok := provider.Models[name]; !ok { t.Fatalf("missing model %q", name) }
 	}
-	wantProviders := map[string][]string{
-		"auto":              {"auto"},
-		"GPT-4.1":           {"GPT-4.1"},
-		"Claude 3.7 Sonnet": {"Claude 3.7 Sonnet"},
-		"openai-compatible": {"deepseek-r1"},
+	if provider.Models["auto"].Limit.Context != 32000 || provider.Models["GPT-4.1"].Limit.Context != 128000 || provider.Models["Claude 3.7 Sonnet"].Limit.Context != 128000 {
+		t.Fatalf("OpenCode config is missing model context limits: %s", raw)
 	}
-	for providerID, modelIDs := range wantProviders {
-		provider, ok := config.Provider[providerID]
-		if !ok {
-			t.Fatalf("missing configured provider %q in OpenCode config: %s", providerID, raw)
-		}
-		if provider.NPM != "@ai-sdk/openai-compatible" || provider.Options["baseURL"] != "{env:CLAWMANAGER_LLM_BASE_URL}" || provider.Options["apiKey"] != "{env:CLAWMANAGER_LLM_API_KEY}" {
-			t.Fatalf("OpenCode provider %q must use governed gateway env references: %s", providerID, raw)
-		}
-		for _, modelID := range modelIDs {
-			if _, ok := provider.Models[modelID]; !ok {
-				t.Fatalf("OpenCode provider %q is missing model %q: %s", providerID, modelID, raw)
-			}
-		}
+}
+
+func TestResolveGatewayModelInjectionKeepsUnknownAggregateContextWindow(t *testing.T) {
+	service := &instanceService{llmModelRepo: &stubLLMModelRepository{active: []models.LLMModel{
+		{DisplayName: "known", ModelGroup: "shared", ContextWindowTokens: 128000},
+		{DisplayName: "unknown", ModelGroup: "shared", ContextWindowTokens: 0},
+	}}}
+
+	injection, err := service.resolveGatewayModelInjection(1)
+	if err != nil {
+		t.Fatalf("resolveGatewayModelInjection returned error: %v", err)
 	}
-	if _, exists := config.Provider["clawmanager"]; exists {
-		t.Fatalf("OpenCode config retained legacy clawmanager provider: %s", raw)
+	if injection.defaultContextWindow != 0 {
+		t.Fatalf("default context window = %d, want unknown", injection.defaultContextWindow)
+	}
+	var contextWindows map[string]int
+	if err := json.Unmarshal([]byte(injection.contextWindowsJSON), &contextWindows); err != nil {
+		t.Fatalf("context window catalogue is not valid JSON: %v", err)
+	}
+	if contextWindows["shared"] != 0 || contextWindows["known"] != 0 || contextWindows["unknown"] != 0 {
+		t.Fatalf("unexpected context window aggregation: %#v", contextWindows)
 	}
 }
 
@@ -323,6 +339,7 @@ func TestBuildGatewayEnvMergesEnvironmentOverrides(t *testing.T) {
 
 	env, err := service.BuildGatewayEnv(&models.Instance{
 		ID:                       88,
+		UserID:                   1,
 		Type:                     "openclaw",
 		RuntimeType:              RuntimeBackendGateway,
 		AccessToken:              &token,
@@ -531,7 +548,7 @@ func TestResolveGatewayModelInjectionRequiresActiveModels(t *testing.T) {
 		llmModelRepo: &stubLLMModelRepository{},
 	}
 
-	injection, err := service.resolveGatewayModelInjection()
+	injection, err := service.resolveGatewayModelInjection(1)
 	if err == nil {
 		t.Fatalf("expected resolveGatewayModelInjection to fail when no active models exist, got %#v", injection)
 	}

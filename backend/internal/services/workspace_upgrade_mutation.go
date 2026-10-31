@@ -98,16 +98,8 @@ func (s *RuntimeUpgradeService) WithWorkspaceMutation(ctx context.Context, scope
 			return ErrWorkspaceUpgradeBusy
 		}
 		for _, id := range lockedIDs {
-			var count int
-			row, e := tx.SQL().QueryRowContext(ctx, `SELECT COUNT(*) FROM runtime_upgrade_items ui JOIN runtime_rollouts r ON ui.rollout_id=r.id WHERE ui.instance_id=? AND (r.status IN ('pending','running') OR (r.status='error' AND ui.recovery_status='needs_attention' AND NOT EXISTS (SELECT 1 FROM runtime_upgrade_items n JOIN runtime_rollouts nr ON nr.id=n.rollout_id WHERE n.instance_id=ui.instance_id AND nr.id>r.id AND nr.status='finished')))`, id)
-			if e != nil {
-				return e
-			}
-			if e = row.Scan(&count); e != nil {
-				return e
-			}
-			if count > 0 {
-				return fmt.Errorf("%w: #%d", ErrWorkspaceUpgradeBusy, id)
+			if err := s.validateInstanceMutation(ctx, tx, id); err != nil {
+				return err
 			}
 		}
 		return nil
@@ -122,4 +114,21 @@ func (s *RuntimeUpgradeService) WithWorkspaceMutation(ctx context.Context, scope
 
 func (s *RuntimeUpgradeService) WithInstanceMutation(ctx context.Context, id int, run func() error) error {
 	return s.WithWorkspaceMutation(ctx, WorkspaceFileScope{InstanceID: id}, run)
+}
+
+// Shared by lifecycle execution and management preflight. The execution caller
+// also holds the workspace fence for the complete mutation.
+func (s *RuntimeUpgradeService) validateInstanceMutation(ctx context.Context, sess db.Session, id int) error {
+	var count int
+	row, err := sess.SQL().QueryRowContext(ctx, `SELECT COUNT(*) FROM runtime_upgrade_items ui JOIN runtime_rollouts r ON ui.rollout_id=r.id WHERE ui.instance_id=? AND (r.status IN ('pending','running') OR (r.status='error' AND ui.recovery_status='needs_attention' AND NOT EXISTS (SELECT 1 FROM runtime_upgrade_items n JOIN runtime_rollouts nr ON nr.id=n.rollout_id WHERE n.instance_id=ui.instance_id AND nr.id>r.id AND nr.status='finished')))`, id)
+	if err != nil {
+		return err
+	}
+	if err = row.Scan(&count); err != nil {
+		return err
+	}
+	if count > 0 {
+		return fmt.Errorf("%w: #%d", ErrWorkspaceUpgradeBusy, id)
+	}
+	return nil
 }

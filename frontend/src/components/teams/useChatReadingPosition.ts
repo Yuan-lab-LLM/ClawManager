@@ -1,9 +1,14 @@
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
 
 /** Preserve an actual message anchor across polling, prepends and dock reflow. */
-export function useChatReadingPosition(lastMessageId?: string) {
+export function useChatReadingPosition(lastMessageId?: string, storageKey?: string) {
   const feedRef = useRef<HTMLDivElement>(null);
   const anchor = useRef<{ id?: string; offset: number; bottom: boolean }>({ offset: 0, bottom: true });
+  const initialized = useRef(false);
+  if (!initialized.current) {
+    initialized.current = true;
+    try { const saved = storageKey && JSON.parse(sessionStorage.getItem(storageKey) || 'null'); if (saved && typeof saved.bottom === 'boolean' && Number.isFinite(saved.offset)) anchor.current = saved; } catch { /* Presentation only. */ }
+  }
   const previousLast = useRef(lastMessageId);
   const [unread, setUnread] = useState(false);
   const restoring = useRef(false);
@@ -16,8 +21,9 @@ export function useChatReadingPosition(lastMessageId?: string) {
       .find(item => item.getBoundingClientRect().bottom > top + 1);
     const bottom = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 48;
     anchor.current = { id: node?.dataset.chatMessage, offset: node ? node.getBoundingClientRect().top - top : 0, bottom };
+    if (storageKey && node) sessionStorage.setItem(storageKey, JSON.stringify(anchor.current));
     if (bottom) setUnread(false);
-  }, []);
+  }, [storageKey]);
   const restore = useCallback(() => {
     const feed = feedRef.current;
     if (!feed) return;

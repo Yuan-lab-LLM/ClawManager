@@ -1,0 +1,54 @@
+{
+  "observed_at_utc": "2026-10-23T17:39:55.424553+00:00",
+  "host": "10.130.14.23",
+  "node_port": 32543,
+  "image": {
+    "commit": "3a64956ffe1c935507016756009f45823a927dde",
+    "build_date": "2026-10-23T17:34:32Z",
+    "version": "team-backup-jobs-20261023-3a64956f",
+    "diff_id": "sha256:9e26d57c47e4d06ef9d20311db03f3e9bb7e9d360159e7e8827ffe9d481c0c0f",
+    "layer_digest": "sha256:fbfd303a9b8a7357976a6c2ee43c172d1bf7c042d1532463f1087cc6e21b6e81",
+    "layer_size": 76947636,
+    "tag": "10.130.14.23:5000/clawmanager-hxc-app:team-backup-jobs-20261023-3a64956f",
+    "image_digest": "sha256:7ddadfa117aee3b2c9af3839714cb7a809323c1d9f05f3d236a0003ad1e498f9"
+  },
+  "deployment": {
+    "namespace": "clawmanager-hxc-peer-system",
+    "deployments": [
+      {
+        "name": "clawmanager-app",
+        "image": "10.130.14.23:5000/clawmanager-hxc-app:team-backup-jobs-20261023-3a64956f",
+        "ready": 1,
+        "generation": 339
+      },
+      {
+        "name": "clawmanager-northbound-gateway",
+        "image": "10.130.14.23:5000/clawmanager-hxc-app:team-backup-jobs-20261023-3a64956f",
+        "ready": 1,
+        "generation": 47
+      }
+    ]
+  },
+  "version_api": {
+    "version": "team-backup-jobs-20261023-3a64956f",
+    "commit": "3a64956ffe1c935507016756009f45823a927dde",
+    "build_time": "2026-10-23T17:34:32Z"
+  },
+  "apply_command_exit_code": 1,
+  "initial_gateway_probe_failed": true,
+  "subsequent_gateway_http": 201,
+  "runtime_image_deployed": false,
+  "git_pushed": false,
+  "formal_acceptance_complete": false,
+  "build_method": "OCI overlay on existing test image plus freshly compiled four Go binaries and frontend/dist",
+  "base_image_digest": "sha256:e987e8fb27907c737f4b97a4c716390a2f9f62de3094311fbbf85bc1cf5a26d6",
+  "browser": {
+    "observed_version": "team-backup-jobs-20261023-3a64956f",
+    "backups_entry_after_console": true,
+    "create_disabled": true,
+    "configuration_disabled": true,
+    "readiness": "not_ready",
+    "initial_reload_tool_timeout": true,
+    "subsequent_dom_read_succeeded": true
+  }
+}

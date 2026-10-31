@@ -42,15 +42,26 @@ func (r *runtimeRolloutRepository) Create(ctx context.Context, rollout *models.R
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	ensureTimestamps(&rollout.CreatedAt, &rollout.UpdatedAt)
-	res, err := r.sess.Collection("runtime_rollouts").Insert(rollout)
-	if err != nil {
-		return fmt.Errorf("failed to create runtime rollout: %w", err)
+	insert := func(sess db.Session) error {
+		ensureTimestamps(&rollout.CreatedAt, &rollout.UpdatedAt)
+		res, err := sess.Collection("runtime_rollouts").Insert(rollout)
+		if err != nil {
+			return fmt.Errorf("failed to create runtime rollout: %w", err)
+		}
+		if id, ok := res.ID().(int64); ok {
+			rollout.ID = id
+		}
+		return nil
 	}
-	if id, ok := res.ID().(int64); ok {
-		rollout.ID = id
+	if rollout.Status != "pending" && rollout.Status != "running" {
+		return insert(r.sess)
 	}
-	return nil
+	return r.sess.TxContext(ctx, func(tx db.Session) error {
+		if err := CheckRuntimeManagementRolloutAdmission(ctx, tx); err != nil {
+			return err
+		}
+		return insert(tx)
+	}, nil)
 }
 
 func (r *runtimeRolloutRepository) GetByID(ctx context.Context, id int64) (*models.RuntimeRollout, error) {
@@ -92,4 +103,11 @@ func (r *runtimeRolloutRepository) UpdateStatus(ctx context.Context, id int64, s
 		return fmt.Errorf("failed to update runtime rollout status: %w", err)
 	}
 	return nil
+}
+
+// Freeze ordinary placement scope before image mutation. Existing historical
+// records are read compatibly, never retroactively rewritten.
+func (r *runtimeRolloutRepository) SaveOrdinarySourceImages(ctx context.Context, id int64, source string) error {
+	_, err := r.sess.SQL().ExecContext(ctx, `UPDATE runtime_rollouts SET source_images_json=? WHERE id=? AND preflight_id IS NULL AND source_images_json IS NULL AND status IN ('pending','running')`, source, id)
+	return err
 }

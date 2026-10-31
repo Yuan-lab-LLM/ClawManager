@@ -1,5 +1,7 @@
 ﻿import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Download, FilePenLine, FileText, MessagesSquare } from "lucide-react";
+import WorkspaceMarkdownPreview from "../../components/WorkspaceMarkdownPreview";
+import WorkspacePreviewBoundary from "../../components/WorkspacePreviewBoundary";
 import { WorkspaceTextEditor, editableWorkspaceName, type WorkspaceTextOperations } from "../../components/WorkspaceTextEditor";
 import TeamBadge from '../../components/teams/TeamBadge';
 import { memberIcon } from '../../lib/teamIcons';
@@ -13,10 +15,10 @@ import TeamHistoryMenu from "../../components/teams/TeamHistoryMenu";
 import TeamWorkflowMini, { buildMiniWorkflow } from "../../components/teams/TeamWorkflowMini";
 import { useChatReadingPosition } from "../../components/teams/useChatReadingPosition";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import UserLayout from "../../components/UserLayout";
+import { TeamPageLayout, useTeamPageEnvironment } from "../../components/teams/TeamPageEnvironment";
 import { useAuth } from "../../contexts/AuthContext";
 import { getTeamMemberDisplayDescription } from "../../lib/teamTemplates";
-import { teamService } from "../../services/teamService";
+import type { TeamWorkspaceAPI } from "../../services/ownerTeamService";
 import type {
   TeamDetails,
   TeamEvent,
@@ -515,10 +517,6 @@ const eventTimeMs = (event: TeamEvent) => {
   return Number.isFinite(ms) ? ms : 0;
 };
 
-const WorkspaceMarkdownPreview = React.lazy(
-  () => import("../../components/WorkspaceMarkdownPreview"),
-);
-
 const chatEventTimeValue = (
   event: TeamEvent,
   payload: Record<string, unknown>,
@@ -582,7 +580,7 @@ const payloadTaskIDs = (payload: Record<string, unknown>) =>
     .filter(Boolean);
 
 const taskCreatorKey = (task?: TeamTask) =>
-  task?.created_by ? `user-${task.created_by}` : "user";
+  typeof task?.payload?.user_key === 'string' ? task.payload.user_key : task?.created_by ? `user-${task.created_by}` : "user";
 
 const taskKeyFromEvent = (
   event: TeamEvent,
@@ -962,7 +960,10 @@ const buildCollaborationGroups = (
 const TeamDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user: cmUser } = useAuth();
+  const environment = useTeamPageEnvironment();
+  const teamService = environment.api;
+  const user = environment.owner ? { username: environment.owner, email: environment.owner, id: 0 } : cmUser;
   const teamId = id ? Number(id) : null;
   const [details, setDetails] = useState<TeamDetails | null>(null);
   const [loadedTasks, setLoadedTasks] = useState<TeamTask[]>([]);
@@ -971,6 +972,7 @@ const TeamDetailPage: React.FC = () => {
   const [hasMoreEvents, setHasMoreEvents] = useState(false);
   const taskHistoryExhausted = useRef(false);
   const eventHistoryExhausted = useRef(false);
+  const eventHistoryCursor = useRef<number | undefined>(undefined);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -989,6 +991,7 @@ const TeamDetailPage: React.FC = () => {
   const [workspaceRevision, setWorkspaceRevision] = useState(0);
   const workspaceFileRequest = useRef<AbortController | null>(null);
   const workspaceChanged = useCallback(async () => { setWorkspaceRevision(value => value + 1); }, []);
+  const ownerViewKey = environment.owner && teamId ? `owner-team-view:${environment.owner}:${teamId}` : '';
 
   useEffect(() => {
     setLoadedTasks([]);
@@ -997,6 +1000,7 @@ const TeamDetailPage: React.FC = () => {
     setHasMoreEvents(false);
     taskHistoryExhausted.current = false;
     eventHistoryExhausted.current = false;
+    eventHistoryCursor.current = undefined;
     setHistoryError(null);
     setSelectedGroupKey(null);
     setTargetMember("");
@@ -1005,8 +1009,25 @@ const TeamDetailPage: React.FC = () => {
     pendingDispatch.current = null;
     setWorkspacePreview(null);
     setEditingPath(null);
+    if (ownerViewKey) {
+      try {
+        const saved = JSON.parse(sessionStorage.getItem(ownerViewKey) || 'null');
+        if (saved) {
+          setSelectedGroupKey(typeof saved.selectedGroupKey === 'string' ? saved.selectedGroupKey : null);
+          setTargetMember(typeof saved.targetMember === 'string' ? saved.targetMember : '');
+          setTaskPrompt(typeof saved.prompt === 'string' ? saved.prompt : '');
+          setReferenceCleared(saved.referenceCleared === true);
+          setEditingPath(typeof saved.editingPath === 'string' ? saved.editingPath : null);
+          pendingDispatch.current = saved.pendingDispatch?.messageId && typeof saved.pendingDispatch.signature === 'string' ? saved.pendingDispatch : null;
+        }
+      } catch { /* A malformed presentation cache cannot grant access. */ }
+    }
     return () => workspaceFileRequest.current?.abort();
-  }, [teamId]);
+  }, [teamId, ownerViewKey]);
+
+  useEffect(() => {
+    if (ownerViewKey) sessionStorage.setItem(ownerViewKey, JSON.stringify({ selectedGroupKey, targetMember, prompt: taskPrompt, referenceCleared, editingPath, pendingDispatch: pendingDispatch.current }));
+  }, [ownerViewKey, selectedGroupKey, targetMember, taskPrompt, referenceCleared, editingPath, dispatching]);
 
   const loadTeam = useCallback(
     async (options?: { background?: boolean }) => {
@@ -1020,6 +1041,7 @@ const TeamDetailPage: React.FC = () => {
           setLoading(true);
         }
         const data = await teamService.getTeam(teamId);
+        if (eventHistoryCursor.current === undefined && data.events_next_before_id) eventHistoryCursor.current = data.events_next_before_id;
         setDetails(data);
         setLoadedTasks((current) => mergeTasksByLatestState(current, data.tasks || []));
         setLoadedEvents((current) => mergeByIdDesc(data.events || [], current));
@@ -1031,7 +1053,7 @@ const TeamDetailPage: React.FC = () => {
         setHasMoreEvents((current) =>
           eventHistoryExhausted.current
             ? false
-            : current || (data.events?.length || 0) >= TEAM_EVENT_HISTORY_PAGE_SIZE,
+            : current || data.events_has_more === true || (data.events?.length || 0) >= TEAM_EVENT_HISTORY_PAGE_SIZE,
         );
         setError(null);
       } catch (err: any) {
@@ -1070,7 +1092,7 @@ const TeamDetailPage: React.FC = () => {
     return baseLabel ? `${baseLabel}（当前用户）` : "当前用户";
   }, [user?.email, user?.username]);
   const currentUserKey =
-    typeof user?.id === "number" ? `user-${user.id}` : "current-user";
+    environment.owner ? `owner-${environment.owner}` : typeof user?.id === "number" ? `user-${user.id}` : "current-user";
   const collaborationGroups = useMemo(
     () => buildCollaborationGroups(events, tasks, memberById),
     [events, tasks, memberById],
@@ -1092,13 +1114,13 @@ const TeamDetailPage: React.FC = () => {
   ) : undefined;
   const composerReference = singleMember && !referenceCleared ? { id: referenceTask?.id, title: referenceTask ? `#${referenceTask.id} ${taskPromptText(referenceTask) || '之前的任务'}` : '该成员最近的工作（自动）' } : undefined;
   const handleDeleteTeam = async () => {
-    if (!teamId || !window.confirm(`删除 Team「${details?.team.name || teamId}」？`)) {
+    if (!teamId || !window.confirm(environment.owner ? `删除 Team「${details?.team.name || teamId}」将删除成员实例和共享数据，无法撤销。请先保全文件，确认继续？` : `删除 Team「${details?.team.name || teamId}」？`)) {
       return;
     }
     try {
       setActionLoading("delete-team");
       await teamService.deleteTeam(teamId);
-      navigate("/teams");
+      navigate(environment.returnURL);
     } catch (err: any) {
       alert(err.response?.data?.error || "删除 Team 失败");
     } finally {
@@ -1213,7 +1235,7 @@ const TeamDetailPage: React.FC = () => {
           ? teamService.getTeamTasks(teamId, oldestID(tasks), TEAM_TASK_HISTORY_PAGE_SIZE)
           : Promise.resolve(null),
         hasMoreEvents
-          ? teamService.getTeamEvents(teamId, oldestID(events), TEAM_EVENT_HISTORY_PAGE_SIZE)
+          ? teamService.getTeamEvents(teamId, eventHistoryCursor.current ?? oldestID(events), TEAM_EVENT_HISTORY_PAGE_SIZE)
           : Promise.resolve(null),
       ]);
       if (taskHistory) {
@@ -1222,6 +1244,7 @@ const TeamDetailPage: React.FC = () => {
         taskHistoryExhausted.current = !taskHistory.has_more;
       }
       if (eventHistory) {
+        eventHistoryCursor.current = eventHistory.next_before_id;
         setLoadedEvents((current) => mergeByIdDesc(current, eventHistory.events || []));
         setHasMoreEvents(eventHistory.has_more);
         eventHistoryExhausted.current = !eventHistory.has_more;
@@ -1235,26 +1258,26 @@ const TeamDetailPage: React.FC = () => {
 
   if (loading) {
     return (
-      <UserLayout>
+      <TeamPageLayout>
         <div className="flex min-h-[60vh] items-center justify-center text-lg text-gray-600">
           正在加载...
         </div>
-      </UserLayout>
+      </TeamPageLayout>
     );
   }
 
   if (!details) {
     return (
-      <UserLayout title="Team">
+      <TeamPageLayout title="Team">
         <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-red-700">
           {error || "Team 不存在"}
         </div>
-      </UserLayout>
+      </TeamPageLayout>
     );
   }
 
   return (
-    <><UserLayout
+    <><TeamPageLayout
       fillHeight
       title={details.team.name}
       titleAccessory={
@@ -1288,7 +1311,7 @@ const TeamDetailPage: React.FC = () => {
               {actionLoading === "delete-team" ? "删除中..." : "删除 Team"}
             </button>
             <Link
-              to="/teams"
+              to={environment.returnURL}
               className="inline-flex h-9 items-center justify-center rounded-xl border border-[#eadfd8] bg-white px-4 text-sm font-medium text-[#5f5957] hover:bg-[#fff8f5]"
             >
               返回列表
@@ -1344,7 +1367,7 @@ const TeamDetailPage: React.FC = () => {
         />}
         files={active => <TeamWorkspaceBrowser key={details.team.id} teamId={details.team.id} rootPath={details.team.shared_mount_path} heightClass="h-full" active={active} refreshKey={workspaceRefreshKey} onMutation={workspaceChanged} />}
       />
-    </UserLayout>
+    </TeamPageLayout>
       {workspacePreview && (
         <WorkspacePreviewModal
           preview={workspacePreview}
@@ -1355,20 +1378,26 @@ const TeamDetailPage: React.FC = () => {
           onEdit={editableWorkspaceName(workspacePreview.name) ? () => { setEditingPath(workspacePreview.path); setWorkspacePreview(null); } : undefined}
         />
       )}
-      {editingPath && details && <WorkspaceTextEditor key={`${details.team.id}:${editingPath}`} instanceId={details.team.id} initialPath={editingPath} service={teamTextOperations} shared canWrite onClose={() => setEditingPath(null)} onSaved={workspaceChanged} />}
+      {editingPath && details && <WorkspaceTextEditor key={`${details.team.id}:${editingPath}`} instanceId={details.team.id} initialPath={editingPath} service={teamTextOperations(teamService)} shared canWrite onClose={() => setEditingPath(null)} onSaved={workspaceChanged} />}
     </>
   );
 };
 
 // Same editor contract, but the resource ID and permissions are Team-scoped.
-const teamTextOperations: WorkspaceTextOperations = {
+const teamTextOperationCache = new WeakMap<TeamWorkspaceAPI, WorkspaceTextOperations>();
+function teamTextOperations(teamService: TeamWorkspaceAPI): WorkspaceTextOperations {
+  const prior = teamTextOperationCache.get(teamService); if (prior) return prior;
+  const operations: WorkspaceTextOperations = {
   readText: teamService.readText,
   saveText: teamService.saveText,
   rename: async (teamId, oldPath, newPath) => {
     if (oldPath.split("/").slice(0, -1).join("/") !== newPath.split("/").slice(0, -1).join("/")) throw new Error("重命名不可移动文件目录。");
     await teamService.renameWorkspaceEntry(teamId, { path: oldPath, new_name: newPath.split("/").pop()! });
   },
-};
+  };
+  teamTextOperationCache.set(teamService, operations);
+  return operations;
+}
 
 function TeamWorkspaceBrowser({
   teamId,
@@ -1386,6 +1415,7 @@ function TeamWorkspaceBrowser({
   onMutation: () => Promise<void>;
 }) {
   const [path, setPath] = useState("");
+  const teamService = useTeamPageEnvironment().api;
   const [entries, setEntries] = useState<TeamWorkspaceFileEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
@@ -1722,7 +1752,7 @@ function TeamWorkspaceBrowser({
           onEdit={editableWorkspaceName(preview.name) ? () => { setEditingPath(preview.path); setPreview(null); } : undefined}
         />
       )}
-      {editingPath && <WorkspaceTextEditor key={`${teamId}:${editingPath}`} instanceId={teamId} initialPath={editingPath} service={teamTextOperations} shared canWrite onClose={() => setEditingPath(null)} onSaved={editorSaved} />}
+      {editingPath && <WorkspaceTextEditor key={`${teamId}:${editingPath}`} instanceId={teamId} initialPath={editingPath} service={teamTextOperations(teamService)} shared canWrite onClose={() => setEditingPath(null)} onSaved={editorSaved} />}
     </section>
   );
 }
@@ -1743,6 +1773,7 @@ function WorkspacePreviewModal({
   onEdit?: () => void;
 }) {
   const [content, setContent] = useState(preview.content);
+  const teamService = useTeamPageEnvironment().api;
   const [refreshError, setRefreshError] = useState("");
   useEffect(() => { setContent(preview.content); }, [preview.content]);
   useEffect(() => {
@@ -1830,15 +1861,9 @@ function WorkspacePreviewModal({
         <div className="team-preview-body min-h-0 overflow-auto overscroll-contain bg-slate-50 p-5 sm:p-6">
           {refreshError && <p role="status" className="mb-3 text-sm text-amber-700">{refreshError}</p>}
           {isMarkdown ? (
-            <React.Suspense
-              fallback={
-                <div className="flex min-h-48 items-center justify-center rounded-xl border border-slate-200 bg-white text-sm text-slate-500">
-                  正在渲染 Markdown…
-                </div>
-              }
-            >
+            <WorkspacePreviewBoundary key={preview.path} content={content}>
               <WorkspaceMarkdownPreview content={content} />
-            </React.Suspense>
+            </WorkspacePreviewBoundary>
           ) : (
             <pre className="whitespace-pre-wrap break-words rounded-xl bg-white p-4 text-sm leading-6 text-slate-800 shadow-inner">
               {content}
@@ -2278,7 +2303,8 @@ function CollaborationPanel({
     (member) => !memberIsStarting(member) && ["idle", "busy"].includes(member.availability || ""),
   ).length;
   const startingCount = members.filter(memberIsStarting).length;
-  const { feedRef, capture, unread, jumpToLatest } = useChatReadingPosition(messages.at(-1)?.id);
+  const chatEnvironment = useTeamPageEnvironment();
+  const { feedRef, capture, unread, jumpToLatest } = useChatReadingPosition(messages.at(-1)?.id, chatEnvironment.owner ? `owner-team-reading:${chatEnvironment.owner}:${team.id}` : undefined);
   const messageAnchorRefs = useRef(new Map<string, HTMLDivElement | null>());
   const firstMessageByGroup = useMemo(() => {
     const result = new Map<string, string>();

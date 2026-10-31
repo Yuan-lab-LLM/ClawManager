@@ -1,0 +1,32 @@
+# Apply before enabling Runtime scale-in (Kubernetes 1.30+).
+# Only Pods explicitly protected by an active scale-in operation are affected.
+# The worker proves enforcement with a server-side dry-run DELETE before moving
+# instances or changing replicas. Deletion cost alone is best effort.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: clawmanager-runtime-scale-in-protection
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["DELETE"]
+        resources: ["pods"]
+    objectSelector:
+      matchExpressions:
+        - key: clawmanager.io/scale-in-protected
+          operator: Exists
+  validations:
+    - expression: "false"
+      reason: Forbidden
+      messageExpression: "'CM_SCALE_IN_PROTECTED: ' + oldObject.metadata.labels['clawmanager.io/scale-in-protected']"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: clawmanager-runtime-scale-in-protection
+spec:
+  policyName: clawmanager-runtime-scale-in-protection
+  validationActions: [Deny]

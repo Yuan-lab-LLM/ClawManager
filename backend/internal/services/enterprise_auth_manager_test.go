@@ -21,10 +21,10 @@ func TestEnterpriseAuthManagerDisabledUpdateSavesWithoutLDAPProbe(t *testing.T) 
 	response, err := manager.UpdateConfig(context.Background(), EnterpriseAuthConfigUpdateRequest{
 		ExpectedVersion:    0,
 		Enabled:            false,
-		AllowLocalFallback:  true,
-		SyncRole:            true,
-		LDAP:                LDAPConfigUpdate{LDAPConfigPublic: LDAPConfigPublic{Host: "", BaseDN: ""}},
-		ClearBindPassword:   true,
+		AllowLocalFallback: true,
+		SyncRole:           true,
+		LDAP:               LDAPConfigUpdate{LDAPConfigPublic: LDAPConfigPublic{Host: "", BaseDN: ""}},
+		ClearBindPassword:  true,
 	}, nil)
 	if err != nil {
 		t.Fatalf("UpdateConfig returned error: %v", err)
@@ -50,8 +50,8 @@ func TestEnterpriseAuthManagerEncryptsAndRedactsBindPassword(t *testing.T) {
 	}
 
 	response, err := manager.UpdateConfig(context.Background(), EnterpriseAuthConfigUpdateRequest{
-		ExpectedVersion:   0,
-		Enabled:           false,
+		ExpectedVersion:    0,
+		Enabled:            false,
 		AllowLocalFallback: true,
 		LDAP: LDAPConfigUpdate{LDAPConfigPublic: LDAPConfigPublic{
 			Host:          "ldap.example.com",
@@ -121,11 +121,11 @@ func TestEnterpriseAuthManagerEncryptsWithConfiguredKey(t *testing.T) {
 	}
 
 	_, err = manager.UpdateConfig(context.Background(), EnterpriseAuthConfigUpdateRequest{
-		ExpectedVersion:   0,
-		Enabled:           false,
+		ExpectedVersion:    0,
+		Enabled:            false,
 		AllowLocalFallback: true,
-		LDAP:              LDAPConfigUpdate{LDAPConfigPublic: LDAPConfigPublic{Host: "ldap.example.com"}},
-		BindPassword:      "super-secret",
+		LDAP:               LDAPConfigUpdate{LDAPConfigPublic: LDAPConfigPublic{Host: "ldap.example.com"}},
+		BindPassword:       "super-secret",
 	}, nil)
 	if err != nil {
 		t.Fatalf("UpdateConfig returned error: %v", err)
@@ -144,11 +144,11 @@ func TestEnterpriseAuthManagerEncryptsWithDerivedConfiguredKey(t *testing.T) {
 	}
 
 	_, err = manager.UpdateConfig(context.Background(), EnterpriseAuthConfigUpdateRequest{
-		ExpectedVersion:   0,
-		Enabled:           false,
+		ExpectedVersion:    0,
+		Enabled:            false,
 		AllowLocalFallback: true,
-		LDAP:              LDAPConfigUpdate{LDAPConfigPublic: LDAPConfigPublic{Host: "ldap.example.com"}},
-		BindPassword:      "super-secret",
+		LDAP:               LDAPConfigUpdate{LDAPConfigPublic: LDAPConfigPublic{Host: "ldap.example.com"}},
+		BindPassword:       "super-secret",
 	}, nil)
 	if err != nil {
 		t.Fatalf("UpdateConfig returned error: %v", err)
@@ -240,11 +240,11 @@ func TestEnterpriseAuthManagerRejectsPasswordWithoutEncryptionKey(t *testing.T) 
 	}
 
 	_, err = manager.UpdateConfig(context.Background(), EnterpriseAuthConfigUpdateRequest{
-		ExpectedVersion:   0,
-		Enabled:           false,
+		ExpectedVersion:    0,
+		Enabled:            false,
 		AllowLocalFallback: true,
-		LDAP:              LDAPConfigUpdate{LDAPConfigPublic: LDAPConfigPublic{Host: "ldap.example.com"}},
-		BindPassword:      "super-secret",
+		LDAP:               LDAPConfigUpdate{LDAPConfigPublic: LDAPConfigPublic{Host: "ldap.example.com"}},
+		BindPassword:       "super-secret",
 	}, nil)
 	if err == nil || !strings.Contains(err.Error(), "AUTH_CONFIG_ENCRYPTION_KEY") {
 		t.Fatalf("UpdateConfig error = %v, want encryption key error", err)

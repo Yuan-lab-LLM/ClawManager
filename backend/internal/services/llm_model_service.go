@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -28,22 +29,42 @@ type LLMModelService interface {
 
 // SaveLLMModelRequest contains editable model catalog fields.
 type SaveLLMModelRequest struct {
-	ID                int
-	DisplayName       string
-	Description       *string
-	ProviderType      string
-	ProtocolType      string
-	BaseURL           string
-	ProviderModelName string
-	ProviderModels    []models.LLMProviderModel
-	ReasoningEnabled  *bool
-	APIKey            *string
-	APIKeySecretRef   *string
-	IsSecure          bool
-	IsActive          bool
-	InputPrice        float64
-	OutputPrice       float64
-	Currency          string
+	VisibilityScope            *string
+	AllowedUserIDs             *[]int
+	AccessPolicyVersion        *int
+	ID                         int
+	DisplayName                string
+	Description                *string
+	ProviderType               string
+	ProtocolType               string
+	ModelKind                  *string
+	ImageGenerationEnabled     *bool
+	ImageEditEnabled           *bool
+	ImagePricePerImage         *float64
+	ResetImagePrice            bool
+	ModelGroup                 string
+	DeploymentPriority         int
+	MaxConcurrentRequests      int
+	ContextWindowTokens        int
+	QualityTier                *int
+	BaseURL                    string
+	ProviderModelName          string
+	ReasoningEnabled           *bool
+	ReasoningControlMode       *string
+	APIKey                     *string
+	APIKeySecretRef            *string
+	IsSecure                   bool
+	IsActive                   bool
+	InputPrice                 float64
+	OutputPrice                float64
+	Currency                   string
+	SupportsTools              bool
+	ToolsSupportOverride       *bool
+	SupportsVision             bool
+	VisionSupportOverride      *bool
+	ResetVisionSupportOverride bool
+	CapabilitySource           string
+	ProviderModels             []models.LLMProviderModel
 }
 
 // DiscoverLLMModelsRequest contains fields needed to query a provider for available models.
@@ -56,7 +77,167 @@ type DiscoverLLMModelsRequest struct {
 }
 
 // DiscoveredLLMModel is a normalized provider model entry returned by discovery.
-type DiscoveredLLMModel = models.LLMProviderModel
+type DiscoveredLLMModel struct {
+	ID                   string   `json:"id"`
+	DisplayName          string   `json:"display_name"`
+	SuggestedPool        string   `json:"suggested_pool"`
+	SuggestedQualityTier int      `json:"suggested_quality_tier"`
+	SuggestedPriority    int      `json:"suggested_priority"`
+	Confidence           int      `json:"confidence"`
+	ClassificationSource string   `json:"classification_source"`
+	Reasons              []string `json:"reasons,omitempty"`
+	ChatCapable          bool     `json:"chat_capable"`
+	ContextWindowTokens  int      `json:"context_window_tokens,omitempty"`
+	SupportsTools        bool     `json:"supports_tools,omitempty"`
+	SupportsVision       bool     `json:"supports_vision,omitempty"`
+	SupportsReasoning    bool     `json:"supports_reasoning,omitempty"`
+	ModelKind            string   `json:"model_kind,omitempty"`
+}
+
+// classifyDiscoveredModel creates a conservative first-pass routing plan.
+// It is deliberately a suggestion: unknown models remain usable in the
+// default pool and are never promoted to a high tier automatically.
+func classifyDiscoveredModel(id, displayName string) DiscoveredLLMModel {
+	item := DiscoveredLLMModel{ID: id, DisplayName: displayName, SuggestedPool: "default", SuggestedPriority: 50, ClassificationSource: "unknown", ChatCapable: true}
+	name := strings.ToLower(strings.TrimSpace(id + " " + displayName))
+	contains := func(values ...string) bool {
+		for _, value := range values {
+			if strings.Contains(name, value) {
+				return true
+			}
+		}
+		return false
+	}
+	if imageModelNamePattern.MatchString(id) || imageModelNamePattern.MatchString(displayName) || contains("image-generation") {
+		item.ChatCapable = false
+		item.ModelKind = models.ModelKindImage
+		item.SuggestedPool = "specialized"
+		item.SuggestedPriority = 100
+		item.ClassificationSource = "name_rule"
+		item.Confidence = 90
+		item.Reasons = []string{"image model name; administrator must confirm generation/edit capability"}
+		return item
+	}
+	if contains("embed", "embedding", "rerank", "moderation", "whisper", "tts") {
+		item.ChatCapable = false
+		item.ModelKind = models.ModelKindOther
+		item.SuggestedPool = "specialized"
+		item.SuggestedPriority = 100
+		item.Confidence = 95
+		item.ClassificationSource = "name_rule"
+		item.Reasons = []string{"non-chat/specialized model name"}
+		return item
+	}
+	if modelNameTokenPattern.MatchString(strings.TrimSpace(id)) || modelNameTokenPattern.MatchString(strings.TrimSpace(displayName)) || contains("deepseek-r1") {
+		item.SuggestedPool = "reasoning"
+		item.SuggestedQualityTier = 4
+		item.SuggestedPriority = 10
+		item.Confidence = 85
+		item.ClassificationSource = "name_rule"
+		item.Reasons = []string{"reasoning marker in model name"}
+		return item
+	}
+	if codingModelTokenPattern.MatchString(name) {
+		item.SuggestedPool = "coding"
+		item.SuggestedQualityTier = 2
+		item.SuggestedPriority = 20
+		item.Confidence = 75
+		item.ClassificationSource = "name_rule"
+		item.Reasons = []string{"coding marker in model name"}
+		return item
+	}
+	if contains("mini", "small", "lite", "flash") {
+		item.SuggestedPool = "cheap"
+		item.SuggestedQualityTier = 1
+		item.SuggestedPriority = 30
+		item.Confidence = 70
+		item.ClassificationSource = "name_rule"
+		item.Reasons = []string{"small/fast model marker in model name"}
+		return item
+	}
+	if premiumModelTokenPattern.MatchString(name) {
+		item.SuggestedPool = "general"
+		item.SuggestedQualityTier = 3
+		item.SuggestedPriority = 10
+		item.Confidence = 65
+		item.ClassificationSource = "name_rule"
+		item.Reasons = []string{"large/premium model marker in model name"}
+		return item
+	}
+	if contains("qwen", "glm", "kimi", "llama", "mistral", "gemma", "gpt", "claude", "command", "yi") {
+		item.SuggestedPool = "general"
+		item.SuggestedQualityTier = 2
+		item.SuggestedPriority = 40
+		item.Confidence = 35
+		item.ClassificationSource = "default_rule"
+		item.Reasons = []string{"known model family without a stronger capability marker"}
+		return item
+	}
+	item.SuggestedPool = "default"
+	item.SuggestedQualityTier = 0
+	item.SuggestedPriority = 50
+	item.Confidence = 0
+	item.ClassificationSource = "unknown"
+	item.Reasons = []string{"model family could not be identified"}
+	return item
+}
+
+func enrichDiscoveredModel(item DiscoveredLLMModel, contextWindow int, modelKind string, capabilities []string) DiscoveredLLMModel {
+	item.ContextWindowTokens = contextWindow
+	if kind := strings.TrimSpace(strings.ToLower(modelKind)); kind != "" {
+		item.ModelKind = kind
+	}
+	switch item.ModelKind {
+	case "chat", "chat-completion", "chat_completion":
+		item.ModelKind = models.ModelKindChat
+		item.ChatCapable = true
+		if strings.TrimSpace(modelKind) != "" {
+			item.ClassificationSource = "provider_metadata"
+		}
+	case "image", "image-generation", "image_generation", "text-to-image", "image-edit", "image_edit":
+		item.ModelKind = models.ModelKindImage
+		item.ChatCapable = false
+		item.SuggestedPool = "specialized"
+		item.SuggestedQualityTier = 0
+		if strings.TrimSpace(modelKind) != "" {
+			item.ClassificationSource = "provider_metadata"
+		}
+	}
+	for _, capability := range capabilities {
+		switch strings.ToLower(strings.TrimSpace(capability)) {
+		case "tools", "tool_choice", "function_calling", "function-calling":
+			item.SupportsTools = true
+		case "vision", "image", "image_input":
+			item.SupportsVision = true
+		case "reasoning", "thinking", "reasoning_content":
+			item.SupportsReasoning = true
+		}
+	}
+	if item.SupportsTools || item.SupportsVision || item.SupportsReasoning || item.ModelKind == "embedding" || item.ModelKind == "embeddings" || item.ModelKind == "rerank" || item.ModelKind == "reranking" || item.ModelKind == "moderation" {
+		item.ClassificationSource = "provider_metadata"
+	}
+	if item.ChatCapable && item.SupportsReasoning && item.SuggestedQualityTier < 4 {
+		item.SuggestedPool = "reasoning"
+		item.SuggestedQualityTier = 4
+		item.SuggestedPriority = 10
+		item.Confidence = maxDiscoveryInt(item.Confidence, 80)
+		item.Reasons = append(item.Reasons, "provider metadata reports reasoning support")
+	}
+	if item.ModelKind == "embedding" || item.ModelKind == "embeddings" || item.ModelKind == "rerank" || item.ModelKind == "reranking" || item.ModelKind == "moderation" {
+		item.ChatCapable = false
+		item.SuggestedPool = "specialized"
+		item.SuggestedQualityTier = 0
+		item.Reasons = append(item.Reasons, "provider metadata reports non-chat model type")
+	}
+	return item
+}
+
+func maxDiscoveryInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
 
 type llmModelService struct {
 	repo             repository.LLMModelRepository
@@ -66,6 +247,10 @@ type llmModelService struct {
 }
 
 var versionSegmentPattern = regexp.MustCompile(`(?i)^v\d+(?:[a-z0-9._-]*)?$`)
+var modelNameTokenPattern = regexp.MustCompile(`(?i)(^|[/_.:-])(reasoner|reasoning|thinking|r1|o1|o3)([/_.:-]|$)`)
+var imageModelNamePattern = regexp.MustCompile(`(?i)(^|[/_.:-])(gpt-image|dall-e|stable-diffusion|flux)([/_.:0-9-]|$)`)
+var codingModelTokenPattern = regexp.MustCompile(`(?i)(^|[/_.:-])(coder|coding|code)([/_.:-]|$)`)
+var premiumModelTokenPattern = regexp.MustCompile(`(?i)(^|[/_.:-])(pro|ultra|max|70b|72b|32b|27b|34b)([/_.:-]|$)`)
 
 // NewLLMModelService creates a new LLM model service.
 func NewLLMModelService(repo repository.LLMModelRepository) LLMModelService {
@@ -75,6 +260,16 @@ func NewLLMModelService(repo repository.LLMModelRepository) LLMModelService {
 		discoveryCache:   newProviderDiscoveryCache(),
 		httpClient: &http.Client{
 			Timeout: 20 * time.Second,
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				if len(via) == 0 {
+					return nil
+				}
+				previous := via[len(via)-1].URL
+				if !strings.EqualFold(previous.Scheme, req.URL.Scheme) || !strings.EqualFold(previous.Host, req.URL.Host) {
+					return http.ErrUseLastResponse
+				}
+				return nil
+			},
 		},
 	}
 }
@@ -116,10 +311,38 @@ func (s *llmModelService) SaveModel(req SaveLLMModelRequest) (*models.LLMModel, 
 	if baseURL == "" {
 		return nil, errors.New("base URL is required")
 	}
+	if providerType != models.ProviderTypeLocal && discoveryURLTargetsPrivateNetwork(baseURL) {
+		return nil, errors.New("provider discovery URL targets a private or loopback network; use provider type local for explicitly trusted local services")
+	}
 
 	providerModelName := strings.TrimSpace(req.ProviderModelName)
 	if providerModelName == "" {
 		return nil, errors.New("provider model name is required")
+	}
+
+	modelGroup := strings.TrimSpace(req.ModelGroup)
+	if modelGroup == "" {
+		// Keep legacy catalog entries routable without requiring a migration of
+		// every administrator-managed model at once.
+		modelGroup = displayName
+	}
+	if len(modelGroup) > 100 {
+		return nil, errors.New("model group must be at most 100 characters")
+	}
+	if req.DeploymentPriority < 0 {
+		return nil, errors.New("deployment priority must be non-negative")
+	}
+	if req.MaxConcurrentRequests < 0 {
+		return nil, errors.New("max concurrent requests must be non-negative")
+	}
+	if req.ContextWindowTokens < 0 {
+		return nil, errors.New("context window tokens must be non-negative")
+	}
+	if req.QualityTier != nil && (*req.QualityTier < 0 || *req.QualityTier > 4) {
+		return nil, errors.New("quality tier must be between 0 (unclassified) and 4 (reasoning)")
+	}
+	if int64(req.ContextWindowTokens) > int64(2147483647) {
+		return nil, errors.New("context window tokens exceeds the supported maximum")
 	}
 
 	if req.InputPrice < 0 {
@@ -154,6 +377,13 @@ func (s *llmModelService) SaveModel(req SaveLLMModelRequest) (*models.LLMModel, 
 		}
 	}
 
+	qualityTier := 0
+	if current != nil {
+		qualityTier = current.QualityTier
+	}
+	if req.QualityTier != nil {
+		qualityTier = *req.QualityTier
+	}
 	var description *string
 	if req.Description != nil {
 		trimmed := strings.TrimSpace(*req.Description)
@@ -179,38 +409,69 @@ func (s *llmModelService) SaveModel(req SaveLLMModelRequest) (*models.LLMModel, 
 	}
 
 	model := &models.LLMModel{
-		ID:                req.ID,
-		DisplayName:       displayName,
-		Description:       description,
-		ProviderType:      providerType,
-		ProtocolType:      protocolType,
-		BaseURL:           baseURL,
-		ProviderModelName: providerModelName,
-		APIKey:            apiKey,
-		APIKeySecretRef:   apiKeySecretRef,
-		IsSecure:          req.IsSecure,
-		IsActive:          req.IsActive,
-		InputPrice:        req.InputPrice,
-		OutputPrice:       req.OutputPrice,
-		Currency:          currency,
+		ID:                    req.ID,
+		DisplayName:           displayName,
+		Description:           description,
+		ProviderType:          providerType,
+		ProtocolType:          protocolType,
+		ModelGroup:            modelGroup,
+		DeploymentPriority:    req.DeploymentPriority,
+		MaxConcurrentRequests: req.MaxConcurrentRequests,
+		ContextWindowTokens:   req.ContextWindowTokens,
+		QualityTier:           qualityTier,
+		BaseURL:               baseURL,
+		ProviderModelName:     providerModelName,
+		APIKey:                apiKey,
+		APIKeySecretRef:       apiKeySecretRef,
+		IsSecure:              req.IsSecure,
+		IsActive:              req.IsActive,
+		InputPrice:            req.InputPrice,
+		OutputPrice:           req.OutputPrice,
+		Currency:              currency,
+		SupportsTools:         req.SupportsTools,
+		ToolsSupportOverride:  req.ToolsSupportOverride,
+		SupportsVision:        req.SupportsVision,
+		VisionSupportOverride: req.VisionSupportOverride,
+		CapabilitySource:      strings.TrimSpace(req.CapabilitySource),
 	}
-	providerModels := req.ProviderModels
-	if len(providerModels) == 0 {
-		discovered, discoverErr := s.DiscoverProviderModels(DiscoverLLMModelsRequest{
-			ProviderType:    model.ProviderType,
-			ProtocolType:    model.ProtocolType,
-			BaseURL:         model.BaseURL,
-			APIKey:          model.APIKey,
-			APIKeySecretRef: model.APIKeySecretRef,
-		})
-		if discoverErr == nil && len(discovered) > 0 {
-			providerModels = discovered
-		} else if current != nil && sameModelDiscoveryConfig(current, model) {
-			providerModels = current.ProviderModels
+	if current != nil && strings.TrimSpace(req.CapabilitySource) == "" {
+		model.SupportsTools = current.SupportsTools
+		model.SupportsVision = current.SupportsVision
+		model.CapabilitySource = current.CapabilitySource
+	}
+	// Older clients and automatic discovery must not erase an explicit choice.
+	if current != nil && req.ToolsSupportOverride == nil {
+		model.ToolsSupportOverride = current.ToolsSupportOverride
+	}
+	if req.ResetVisionSupportOverride {
+		model.VisionSupportOverride = nil
+	} else if current != nil && req.VisionSupportOverride == nil {
+		model.VisionSupportOverride = current.VisionSupportOverride
+	}
+	if err := applyModelOperations(model, current, req); err != nil {
+		return nil, err
+	}
+	if req.ReasoningControlMode != nil {
+		model.ReasoningControlMode = strings.TrimSpace(*req.ReasoningControlMode)
+	} else if current != nil {
+		model.ReasoningControlMode = current.ReasoningControlMode
+	}
+	if !models.ValidReasoningControlMode(model.ReasoningControlMode) {
+		return nil, errors.New("invalid reasoning control mode")
+	}
+	if model.ReasoningControlMode != "" && model.ReasoningControlMode != "none" &&
+		protocolType != models.ProtocolTypeOpenAI && protocolType != models.ProtocolTypeOpenAICompatible {
+		return nil, errors.New("reasoning control mode requires an OpenAI-compatible upstream protocol")
+	}
+	// Provider catalog metadata is preserved for compatibility only. Saving one
+	// deployment must not discover/import other models or change its grants.
+	if req.ProviderModels != nil {
+		if err := models.SetLLMProviderModels(model, req.ProviderModels); err != nil {
+			return nil, fmt.Errorf("failed to encode provider models: %w", err)
 		}
-	}
-	if err := models.SetLLMProviderModels(model, providerModels); err != nil {
-		return nil, fmt.Errorf("failed to encode provider models: %w", err)
+	} else if current != nil && sameModelDiscoveryConfig(current, model) {
+		model.ProviderModelsJSON = current.ProviderModelsJSON
+		model.ProviderModels = current.ProviderModels
 	}
 	models.PopulateLLMReasoningCapability(model)
 	if req.ReasoningEnabled != nil {
@@ -229,12 +490,28 @@ func (s *llmModelService) SaveModel(req SaveLLMModelRequest) (*models.LLMModel, 
 		model.CreatedAt = current.CreatedAt
 	}
 
+	if err := applyModelAccessPolicy(model, current, req); err != nil {
+		return nil, err
+	}
 	if err := s.repo.Save(model); err != nil {
 		return nil, fmt.Errorf("failed to save llm model: %w", err)
 	}
 	s.resetProviderDiscoveryCache()
 
 	return model, nil
+}
+
+func discoveryURLTargetsPrivateNetwork(raw string) bool {
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return true
+	}
+	host := strings.ToLower(parsed.Hostname())
+	if host == "localhost" || strings.HasSuffix(host, ".localhost") || host == "metadata.google.internal" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && (ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsUnspecified())
 }
 
 func sameModelDiscoveryConfig(current, next *models.LLMModel) bool {
@@ -330,41 +607,118 @@ func (s *llmModelService) discoverOpenAICompatibleModels(baseURL, apiKey string)
 		return nil, err
 	}
 
-	request, err := http.NewRequest(http.MethodGet, endpoint, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to build discovery request: %w", err)
-	}
+	return s.discoverOpenAICompatiblePages(endpoint, apiKey, false)
+}
 
-	if apiKey != "" {
-		request.Header.Set("Authorization", "Bearer "+apiKey)
+// discoverOpenAICompatiblePages reads the complete model collection. Most
+// providers return one page, but a number of gateways expose OpenAI-style
+// pagination or use a `models` array instead of `data`.
+func (s *llmModelService) discoverOpenAICompatiblePages(endpoint, apiKey string, anthropic bool) ([]DiscoveredLLMModel, error) {
+	type modelItem struct {
+		ID               string   `json:"id"`
+		Name             string   `json:"name"`
+		OwnedBy          string   `json:"owned_by"`
+		DisplayName      string   `json:"display_name"`
+		Type             string   `json:"type"`
+		ContextLength    int      `json:"context_length"`
+		MaxContextLength int      `json:"max_context_length"`
+		Capabilities     []string `json:"supported_parameters"`
+		Features         []string `json:"capabilities"`
 	}
-
 	type responsePayload struct {
-		Data []struct {
-			ID      string `json:"id"`
-			OwnedBy string `json:"owned_by"`
-		} `json:"data"`
+		Data          []modelItem `json:"data"`
+		Models        []modelItem `json:"models"`
+		HasMore       bool        `json:"has_more"`
+		Next          string      `json:"next"`
+		NextPage      string      `json:"next_page"`
+		NextPageToken string      `json:"next_page_token"`
+		LastID        string      `json:"last_id"`
 	}
 
-	var payload responsePayload
-	if err := s.doJSON(request, &payload); err != nil {
-		return nil, err
-	}
+	const maxPages = 20
+	models := make([]DiscoveredLLMModel, 0)
+	seen := make(map[string]struct{})
+	visited := make(map[string]struct{})
+	currentURL := endpoint
+	for page := 0; page < maxPages && currentURL != ""; page++ {
+		if _, ok := visited[currentURL]; ok {
+			break
+		}
+		visited[currentURL] = struct{}{}
+		request, err := http.NewRequest(http.MethodGet, currentURL, nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to build discovery request: %w", err)
+		}
+		if apiKey != "" {
+			if anthropic {
+				request.Header.Set("anthropic-version", "2023-06-01")
+				request.Header.Set("x-api-key", apiKey)
+			} else {
+				request.Header.Set("Authorization", "Bearer "+apiKey)
+			}
+		}
 
-	models := make([]DiscoveredLLMModel, 0, len(payload.Data))
-	for _, item := range payload.Data {
-		id := strings.TrimSpace(item.ID)
-		if id == "" {
-			continue
+		var payload responsePayload
+		if err := s.doJSON(request, &payload); err != nil {
+			return nil, err
 		}
-		displayName := id
-		if owner := strings.TrimSpace(item.OwnedBy); owner != "" {
-			displayName = fmt.Sprintf("%s (%s)", id, owner)
+		items := payload.Data
+		if len(items) == 0 {
+			items = payload.Models
 		}
-		models = append(models, DiscoveredLLMModel{
-			ID:          id,
-			DisplayName: displayName,
-		})
+		for _, item := range items {
+			id := strings.TrimSpace(item.ID)
+			if id == "" {
+				id = strings.TrimSpace(item.Name)
+			}
+			if id == "" {
+				continue
+			}
+			if _, ok := seen[id]; ok {
+				continue
+			}
+			seen[id] = struct{}{}
+			displayName := strings.TrimSpace(item.DisplayName)
+			if displayName == "" {
+				displayName = id
+			}
+			if owner := strings.TrimSpace(item.OwnedBy); owner != "" && displayName == id {
+				displayName = fmt.Sprintf("%s (%s)", id, owner)
+			}
+			plan := classifyDiscoveredModel(id, displayName)
+			contextWindow := item.ContextLength
+			if item.MaxContextLength > contextWindow {
+				contextWindow = item.MaxContextLength
+			}
+			capabilities := append(append([]string{}, item.Capabilities...), item.Features...)
+			models = append(models, enrichDiscoveredModel(plan, contextWindow, item.Type, capabilities))
+		}
+
+		next := strings.TrimSpace(payload.NextPage)
+		if next == "" {
+			next = strings.TrimSpace(payload.Next)
+		}
+		if next == "" && payload.NextPageToken != "" {
+			queryKey := "after"
+			if anthropic {
+				queryKey = "after_id"
+			}
+			next = appendDiscoveryQuery(currentURL, queryKey, payload.NextPageToken)
+		}
+		if next == "" && anthropic && payload.LastID != "" {
+			next = appendDiscoveryQuery(currentURL, "after_id", payload.LastID)
+		}
+		if next == "" || next == currentURL {
+			break
+		}
+		if page == maxPages-1 {
+			return nil, fmt.Errorf("provider model list exceeds the discovery limit of %d pages", maxPages)
+		}
+		resolvedNext, ok := resolveDiscoveryURL(currentURL, next)
+		if !ok {
+			return nil, errors.New("provider discovery returned a pagination URL outside the provider origin")
+		}
+		currentURL = resolvedNext
 	}
 	return models, nil
 }
@@ -375,43 +729,7 @@ func (s *llmModelService) discoverAnthropicModels(baseURL, apiKey string) ([]Dis
 		return nil, err
 	}
 
-	request, err := http.NewRequest(http.MethodGet, endpoint, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to build discovery request: %w", err)
-	}
-	request.Header.Set("anthropic-version", "2023-06-01")
-	if apiKey != "" {
-		request.Header.Set("x-api-key", apiKey)
-	}
-
-	type responsePayload struct {
-		Data []struct {
-			ID          string `json:"id"`
-			DisplayName string `json:"display_name"`
-		} `json:"data"`
-	}
-
-	var payload responsePayload
-	if err := s.doJSON(request, &payload); err != nil {
-		return nil, err
-	}
-
-	models := make([]DiscoveredLLMModel, 0, len(payload.Data))
-	for _, item := range payload.Data {
-		id := strings.TrimSpace(item.ID)
-		if id == "" {
-			continue
-		}
-		displayName := strings.TrimSpace(item.DisplayName)
-		if displayName == "" {
-			displayName = id
-		}
-		models = append(models, DiscoveredLLMModel{
-			ID:          id,
-			DisplayName: displayName,
-		})
-	}
-	return models, nil
+	return s.discoverOpenAICompatiblePages(endpoint, apiKey, true)
 }
 
 func (s *llmModelService) discoverGoogleModels(baseURL, apiKey string) ([]DiscoveredLLMModel, error) {
@@ -455,10 +773,7 @@ func (s *llmModelService) discoverGoogleModels(baseURL, apiKey string) ([]Discov
 		if displayName == "" {
 			displayName = id
 		}
-		models = append(models, DiscoveredLLMModel{
-			ID:          id,
-			DisplayName: displayName,
-		})
+		models = append(models, classifyDiscoveredModel(id, displayName))
 	}
 	return models, nil
 }
@@ -498,8 +813,10 @@ func buildProviderEndpoint(baseURL, versionPrefix, resource string) (string, err
 
 	versionPath := "/" + strings.Trim(versionPrefix, "/")
 	resourcePath := strings.Trim(resource, "/")
+	basePath := strings.TrimRight(parsed.Path, "/")
 	if strings.HasSuffix(strings.ToLower(parsed.Path), strings.ToLower(versionPath)) {
-		return trimmed + "/" + resourcePath, nil
+		parsed.Path = basePath + "/" + resourcePath
+		return parsed.String(), nil
 	}
 
 	pathSegments := strings.Split(strings.Trim(parsed.Path, "/"), "/")
@@ -508,8 +825,37 @@ func buildProviderEndpoint(baseURL, versionPrefix, resource string) (string, err
 		lastSegment = pathSegments[len(pathSegments)-1]
 	}
 	if versionSegmentPattern.MatchString(lastSegment) {
-		return trimmed + "/" + resourcePath, nil
+		parsed.Path = basePath + "/" + resourcePath
+		return parsed.String(), nil
 	}
 
-	return trimmed + versionPath + "/" + resourcePath, nil
+	parsed.Path = basePath + versionPath + "/" + resourcePath
+	return parsed.String(), nil
+}
+
+func resolveDiscoveryURL(currentURL, next string) (string, bool) {
+	nextURL, err := url.Parse(strings.TrimSpace(next))
+	if err != nil {
+		return "", false
+	}
+	current, err := url.Parse(currentURL)
+	if err != nil {
+		return "", false
+	}
+	resolved := current.ResolveReference(nextURL)
+	if !strings.EqualFold(resolved.Scheme, current.Scheme) || !strings.EqualFold(resolved.Host, current.Host) {
+		return "", false
+	}
+	return resolved.String(), true
+}
+
+func appendDiscoveryQuery(rawURL, key, value string) string {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return ""
+	}
+	query := parsed.Query()
+	query.Set(key, value)
+	parsed.RawQuery = query.Encode()
+	return parsed.String()
 }

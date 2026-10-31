@@ -1,8 +1,9 @@
-FROM golang:1.25-alpine AS build
+FROM golang:1.26.8-bookworm@sha256:9fdc884aacc3bec89b20ffc69f4bb369c78210e3e4f600387b5128b12c199f81 AS build
 
-WORKDIR /src
-COPY cdp-proxy/main.go ./main.go
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/cdp-proxy ./main.go
+WORKDIR /src/ClawManager/deployments/browser-worker/cdp-proxy
+COPY AgentsRuntime/clawmanager-agent /src/AgentsRuntime/clawmanager-agent
+COPY ClawManager/deployments/browser-worker/cdp-proxy ./
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/cdp-proxy .
 
 FROM scratch
 

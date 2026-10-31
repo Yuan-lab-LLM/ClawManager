@@ -42,72 +42,16 @@ func newProviderDiscoveryCache() *providerDiscoveryCache {
 	return &providerDiscoveryCache{entries: make(map[string]cachedProviderDiscovery)}
 }
 
-// ListExpandedActiveModels returns configured models plus every additional
-// model advertised by the same provider connection. Configured aliases remain
-// authoritative; newly discovered models use their provider model id as the
-// gateway alias and inherit the provider-level connection and policy fields.
+// ListExpandedActiveModels retains the upstream catalog interface, but only
+// returns explicitly configured deployments. Discovery remains an admin-only
+// suggestion; its results do not grant permission to call additional models.
 func (s *llmModelService) ListExpandedActiveModels() ([]models.LLMModel, error) {
-	items, err := s.repo.ListActive()
-	if err != nil {
-		return nil, fmt.Errorf("failed to list active llm models: %w", err)
-	}
-	populateReasoningCapabilities(items)
-	if len(items) == 0 {
-		return items, nil
-	}
-	for index := range items {
-		if strings.TrimSpace(items[index].CatalogProviderName) == "" {
-			items[index].CatalogProviderName = modelCatalogProviderName(items[index])
-		}
-	}
-	items = models.ExpandLLMModelCatalog(items)
-
-	groups, usedDisplayNames := groupModelsByProvider(items)
-	expanded := make([]models.LLMModel, 0, len(items))
-	nextVirtualID := -1
-	for _, group := range groups {
-		catalogProviderName := modelCatalogProviderName(group.representative)
-		for index := range group.items {
-			group.items[index].CatalogProviderName = catalogProviderName
-		}
-		expanded = append(expanded, group.items...)
-
-		discovered, discoverErr := s.discoverProviderModelsCached(group.representative)
-		if discoverErr != nil {
-			// Discovery is additive. A temporary provider failure must not hide
-			// or disable the explicitly configured models.
-			continue
-		}
-
-		configuredProviderModels := providerModelNameSet(group.items)
-		for _, discoveredModel := range discovered {
-			providerModelName := strings.TrimSpace(discoveredModel.ID)
-			if providerModelName == "" {
-				continue
-			}
-			normalizedProviderModelName := strings.ToLower(providerModelName)
-			if _, exists := configuredProviderModels[normalizedProviderModelName]; exists {
-				continue
-			}
-
-			virtualModel := group.representative
-			virtualModel.ID = nextVirtualID
-			nextVirtualID--
-			virtualModel.DisplayName = uniqueDiscoveredModelAlias(group.representative, providerModelName, usedDisplayNames)
-			virtualModel.ProviderModelName = providerModelName
-			virtualModel.CatalogProviderName = catalogProviderName
-			virtualModel.CreatedAt = time.Time{}
-			virtualModel.UpdatedAt = time.Time{}
-			models.PopulateLLMReasoningCapability(&virtualModel)
-			if !virtualModel.SupportsReasoning {
-				virtualModel.ReasoningEnabled = false
-			}
-			expanded = append(expanded, virtualModel)
-			configuredProviderModels[normalizedProviderModelName] = struct{}{}
-		}
-	}
-
-	return expanded, nil
+ items, err := s.ListActiveModels()
+ if err != nil { return nil, err }
+ for i := range items {
+  if items[i].CatalogProviderName == "" { items[i].CatalogProviderName = modelCatalogProviderName(items[i]) }
+ }
+ return items, nil
 }
 
 func groupModelsByProvider(items []models.LLMModel) ([]providerModelGroup, map[string]struct{}) {

@@ -17,7 +17,7 @@ const categories = [
  {id:'audit',label:'操作审计',note:'追踪配置变更'},
 ];
 const sectionFields: Record<string, (keyof NorthboundSettings)[]> = {
- access:['api_enabled'], callers:['require_explicit_callers'],
+ access:['api_enabled','owner_teams_enabled','owner_team_creation_user_id'], callers:['require_explicit_callers'],
  traffic:['challenge_ttl_seconds','access_token_ttl_seconds','refresh_token_ttl_seconds','core_request_timeout_seconds','challenge_rate_per_minute','login_rate_per_minute','account_login_rate_per_minute','create_rate_per_minute','query_rate_per_minute','share_rate_per_minute','max_pending_operations','operation_tick_milliseconds','operation_lease_seconds','operation_max_attempts'],
  runtime:['allowed_lite_types','allowed_pro_types','lite_cpu_cores','lite_memory_gb','lite_disk_gb','pro_cpu_cores','pro_memory_gb','pro_disk_gb'],
 };
@@ -26,7 +26,7 @@ const runtimes = [
   { value: 'opencode', label: 'OpenCode' }, { value: 'deepseek-harness', label: 'DeepSeek Harness' },
 ];
 const proRuntimes = runtimes;
-const scopes = ['lite-instances:create', 'lite-instances:read', 'lite-instances:restart', 'lite-instances:reset', 'lite-instances:delete', 'pro-instances:create', 'pro-instances:read', 'pro-instances:restart', 'pro-instances:reset', 'pro-instances:delete', 'lite-instances:share-link:manage', 'lite-instances:share-link:reset', 'owners:usage:read'];
+const scopes = ['lite-instances:create', 'lite-instances:read', 'lite-instances:restart', 'lite-instances:reset', 'lite-instances:delete', 'pro-instances:create', 'pro-instances:read', 'pro-instances:restart', 'pro-instances:reset', 'pro-instances:delete', 'lite-instances:share-link:manage', 'lite-instances:share-link:reset', 'owners:usage:read','teams:read','teams:create','teams:manage','teams:delete','teams:tasks:read','teams:tasks:write','teams:files:read','teams:files:write','team-templates:read','team-templates:write','team-templates:generate'];
 
 function errorMessage(error: unknown) {
   const message = (error as { response?: { data?: { error?: string } } })?.response?.data?.error;
@@ -175,6 +175,7 @@ const NorthboundSettingsPage: React.FC = () => {
             <div className={section==='keys'?'':'hidden'}><NorthboundAPIKeysPanel users={users} callers={overview.callers} scopes={scopes} onDirty={onKeyDirty}/></div>
 
         {section==='access' && <section className="grid gap-4 lg:grid-cols-3">
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 lg:col-span-3"><h2 className="font-semibold">北向团队空间</h2><label className="mt-3 flex items-center gap-3 text-sm"><input type="checkbox" checked={settings.owner_teams_enabled} onChange={e=>update('owner_teams_enabled',e.target.checked)}/>启用带 owner 的北向 Team</label><p className="my-3 text-sm text-slate-500">Owner 自动取门户登录用户，与下方后台账号不是同一概念。后台账号仅承载成员资源、额度和镜像策略；关闭入口不会停止已有团队执行。</p><label className="text-sm">新建 Team 使用哪个后台账号的配额<select className="ml-3 rounded-lg border border-slate-200 px-3 py-2" value={settings.owner_team_creation_user_id} onChange={e=>update('owner_team_creation_user_id',Number(e.target.value))}><option value={0}>尚未配置（禁止门户新建）</option>{users.map(u=><option key={u.id} value={u.id}>{u.username} · {u.email}</option>)}</select></label></div>
           <div className="rounded-2xl border border-slate-200 bg-white p-5 lg:col-span-2">
             <div className="flex items-center justify-between gap-4"><div><h2 className="font-semibold">北向 API 状态</h2><p className="mt-1 text-sm text-slate-500">关闭后仅北向 API 返回 503，Gateway 仍保持健康，普通门户和已有 Runtime 不停止。</p></div><button type="button" onClick={() => update('api_enabled', !settings.api_enabled)} className={`relative h-7 w-12 rounded-full transition ${settings.api_enabled ? 'bg-emerald-500' : 'bg-slate-300'}`}><span className={`absolute top-1 h-5 w-5 rounded-full bg-white transition ${settings.api_enabled ? 'left-6' : 'left-1'}`} /></button></div>
           </div>

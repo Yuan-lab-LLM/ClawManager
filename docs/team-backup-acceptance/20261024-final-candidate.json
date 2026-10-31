@@ -1,0 +1,26 @@
+{
+  "code_commit": "995a364b13321ed676e41cd8e00610dc9d11cb89",
+  "job_image": "10.130.14.23:5000/clawmanager-hxc-app@sha256:6d933e983e577fdfa4e5baf570b0b113ad5c3afefca9427c0a2a4d9e6dc5b1ae",
+  "test": "TestSixRealSourcesPublishAndDataOnlyRestore",
+  "test_seconds": 98.58,
+  "package_seconds": 100.118,
+  "result": "PASS",
+  "operations": [
+    "capture CLI",
+    "independent archive verification Job",
+    "real SQL controller leadership replacement",
+    "single durable attempt",
+    "absolute task deadline propagated",
+    "actual Pod identity checked",
+    "foreground Job and Pod cleanup",
+    "restore CLI",
+    "verify-restored CLI",
+    "SELECT-only SQL",
+    "Redis read-only ACL",
+    "object-store read-only identity",
+    "encrypted history tamper rejection"
+  ],
+  "log_sha256": "ef4ab1f42ee5827635a077892c9052717d5e6a1ce8aefd17d8d17e0688fa49f2",
+  "acceptance_eligible": false,
+  "formal_complete": false
+}

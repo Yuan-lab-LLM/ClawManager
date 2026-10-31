@@ -21,7 +21,7 @@ func (r *catalogModelRepository) GetByDisplayName(string) (*models.LLMModel, err
 func (r *catalogModelRepository) Save(*models.LLMModel) error { return nil }
 func (r *catalogModelRepository) Delete(int) error            { return nil }
 
-func TestAvailableAndRequestedModelsExpandProviderCatalog(t *testing.T) {
+func TestAvailableAndRequestedModelsRequireExplicitDeployment(t *testing.T) {
 	configured := models.LLMModel{
 		ID:                2,
 		DisplayName:       "icompify",
@@ -43,15 +43,8 @@ func TestAvailableAndRequestedModelsExpandProviderCatalog(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(available) != 4 || available[0].DisplayName != "Auto" || available[1].DisplayName != "qwen3.8" || available[3].DisplayName != "deepseek-v4-pro" {
-		t.Fatalf("available models were not expanded: %#v", available)
-	}
-
-	selected, err := service.resolveRequestedModel("glm-5.2")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if selected.DisplayName != "glm-5.2" || selected.ProviderModelName != "glm-5.2" || selected.ID != 2 {
-		t.Fatalf("requested provider model was not resolved through its provider config: %#v", selected)
-	}
+	if len(available) != 2 || available[0].DisplayName != "Auto" || available[1].DisplayName != "icompify" { t.Fatalf("unapproved model exposed: %#v", available) }
+	if selected, err := service.resolveRequestedModel("glm-5.2"); err == nil || selected != nil { t.Fatalf("discovery must not authorize a model: %#v, %v", selected, err) }
+	selected, err := service.resolveRequestedModel("icompify")
+	if err != nil || selected == nil || selected.ID != 2 || selected.ProviderModelName != "qwen3.8" { t.Fatalf("configured alias unavailable: %#v, %v", selected, err) }
 }

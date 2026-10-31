@@ -160,6 +160,9 @@ type EnableShareLinkPasswordRequest struct {
 }
 
 type OperationResponse struct {
+	AttemptCount int        `json:"attempt_count"`
+	TeamID       *int       `json:"team_id,omitempty"`
+	TemplateID   *int       `json:"template_id,omitempty"`
 	OperationID  string     `json:"operation_id"`
 	Status       string     `json:"status"`
 	ResourceType string     `json:"resource_type"`
@@ -174,6 +177,9 @@ type OperationResponse struct {
 
 func operationResponse(item *models.NorthboundOperation) OperationResponse {
 	return OperationResponse{
+		AttemptCount: item.AttemptCount,
+		TeamID:       item.TeamID,
+		TemplateID:   item.TemplateID,
 		OperationID:  item.OperationID,
 		Status:       item.Status,
 		ResourceType: item.OperationType,

@@ -529,6 +529,7 @@ func (r *instanceRepository) CountWorkbuddyProByUserIDAndOwner(userID int, owner
 
 func supportedNorthboundProOwnerInstances(userID int, owner string) db.LogicalExpr {
 	return db.And(
+		db.Raw("NOT EXISTS (SELECT 1 FROM team_members otm JOIN teams ott ON ott.id=otm.team_id WHERE (otm.instance_id=instances.id OR instances.provisioning_operation_id=SHA2(CONCAT('owner-team-',ott.id,'-member-',otm.member_key),256)) AND otm.status<>'deleted' AND ott.resource_scope='northbound' AND ott.status<>'deleted')"),
 		db.Cond{"user_id": userID, "owner": owner, "instance_mode": "pro"},
 		db.Or(
 			db.Cond{"type IN": []string{"openclaw", "hermes", "opencode", "deepseek-harness"}},
@@ -557,6 +558,7 @@ func (r *instanceRepository) CountProByUserIDAndOwner(userID int, owner string) 
 
 func supportedNorthboundOwnerInstances(userID int, owner string) db.LogicalExpr {
 	return db.And(
+		db.Raw("NOT EXISTS (SELECT 1 FROM team_members otm JOIN teams ott ON ott.id=otm.team_id WHERE (otm.instance_id=instances.id OR instances.provisioning_operation_id=SHA2(CONCAT('owner-team-',ott.id,'-member-',otm.member_key),256)) AND otm.status<>'deleted' AND ott.resource_scope='northbound' AND ott.status<>'deleted')"),
 		db.Cond{"user_id": userID, "owner": owner},
 		db.Or(
 			db.Cond{
@@ -596,6 +598,7 @@ func (r *instanceRepository) CountNorthboundByUserIDAndOwner(userID int, owner s
 
 func supportedIEIOwnerInstances(owner string) db.LogicalExpr {
 	return db.And(
+		db.Raw("NOT EXISTS (SELECT 1 FROM team_members otm JOIN teams ott ON ott.id=otm.team_id WHERE (otm.instance_id=instances.id OR instances.provisioning_operation_id=SHA2(CONCAT('owner-team-',ott.id,'-member-',otm.member_key),256)) AND otm.status<>'deleted' AND ott.resource_scope='northbound' AND ott.status<>'deleted')"),
 		db.Cond{"owner_normalized": strings.ToLower(strings.TrimSpace(owner))},
 		db.Or(
 			db.Cond{
@@ -744,11 +747,13 @@ func buildV2SchedulerInstanceQuery(statuses []string, limit int) (string, []any)
 		FROM instances
 		WHERE status IN (%s)
 			AND LOWER(TRIM(COALESCE(description, ''))) NOT LIKE 'openclaw-upgrade-lab:%%'
+            AND NOT EXISTS (SELECT 1 FROM instance_lifecycle_manual_guards mg WHERE mg.instance_id=instances.id AND mg.token LIKE 'runtime_mgmt_%%')
 			AND runtime_type = ?
 			AND instance_mode = ?
 			AND workspace_path IS NOT NULL
 			AND TRIM(workspace_path) <> ''
 			AND type IN (?, ?, ?, ?)
+			AND NOT EXISTS (SELECT 1 FROM gateway_runtime_upgrades u WHERE u.instance_id=instances.id AND u.state NOT IN ('cancelled','completed'))
 		ORDER BY id
 		LIMIT ?
 	`, statusPlaceholders), args
@@ -773,7 +778,17 @@ func (r *instanceRepository) FenceRuntimeRestart(ctx context.Context, id, expect
 	return rows == 1, err
 }
 
+func (r *instanceRepository) updateRuntimeState(ctx context.Context, id int, status string, generation int, message *string) error {
+	return r.updateRuntimeStateWithCodeLocked(ctx, id, status, generation, message, nil)
+}
+
 func (r *instanceRepository) updateRuntimeStateWithCode(ctx context.Context, id int, status string, generation int, message, code *string) error {
+	return r.withUnfencedInstance(ctx, id, func(local *instanceRepository) error {
+		return local.updateRuntimeStateWithCodeLocked(ctx, id, status, generation, message, code)
+	})
+}
+
+func (r *instanceRepository) updateRuntimeStateWithCodeLocked(ctx context.Context, id int, status string, generation int, message, code *string) error {
 	res, err := r.sess.SQL().ExecContext(ctx, `
 		UPDATE instances
 		SET status = ?, runtime_generation = ?, runtime_error_message = ?, runtime_error_code = ?, updated_at = ?
@@ -822,15 +837,17 @@ func (r *instanceRepository) getRuntimeGeneration(ctx context.Context, id int) (
 }
 
 func (r *instanceRepository) SetWorkspacePath(ctx context.Context, id int, workspacePath string) error {
-	_, err := r.sess.SQL().ExecContext(ctx, `
+	return r.withUnfencedInstance(ctx, id, func(local *instanceRepository) error {
+		_, err := local.sess.SQL().ExecContext(ctx, `
 		UPDATE instances
 		SET workspace_path = ?, updated_at = ?
 		WHERE id = ?
 	`, workspacePath, time.Now().UTC(), id)
-	if err != nil {
-		return fmt.Errorf("failed to set instance workspace path: %w", err)
-	}
-	return nil
+		if err != nil {
+			return fmt.Errorf("failed to set instance workspace path: %w", err)
+		}
+		return nil
+	})
 }
 
 func (r *instanceRepository) UpdateWorkspaceUsage(ctx context.Context, id int, usageBytes int64) error {
@@ -945,18 +962,31 @@ func (r *instanceRepository) PromoteResetReplacement(ctx context.Context, source
 
 // Update updates an instance
 func (r *instanceRepository) Update(instance *models.Instance) error {
-	err := r.sess.Collection("instances").Find(db.Cond{"id": instance.ID}).Update(instance)
-	if err != nil {
-		return fmt.Errorf("failed to update instance: %w", err)
-	}
-	return nil
+	return r.withUnfencedInstance(context.Background(), instance.ID, func(local *instanceRepository) error {
+		// Only ProtectRuntimeGeneration may write the sticky security marker.
+		// The omitempty tag excludes it even when updating a stale snapshot.
+		update := *instance
+		update.RuntimeSecurityProfile = ""
+		err := local.sess.Collection("instances").Find(db.Cond{"id": instance.ID}).Update(&update)
+		if err != nil {
+			return fmt.Errorf("failed to update instance: %w", err)
+		}
+		return nil
+	})
 }
 
 // Delete deletes an instance
 func (r *instanceRepository) Delete(id int) error {
-	err := r.sess.Collection("instances").Find(db.Cond{"id": id}).Delete()
-	if err != nil {
-		return fmt.Errorf("failed to delete instance: %w", err)
-	}
-	return nil
+	return r.withUnfencedInstance(context.Background(), id, func(local *instanceRepository) error {
+		// Only terminal fences reach here. Remove them in the same transaction;
+		// the FK protects active operations from accidental cascading deletion.
+		if err := local.sess.Collection("gateway_runtime_upgrades").Find(db.Cond{"instance_id": id}).Delete(); err != nil {
+			return err
+		}
+		err := local.sess.Collection("instances").Find(db.Cond{"id": id}).Delete()
+		if err != nil {
+			return fmt.Errorf("failed to delete instance: %w", err)
+		}
+		return nil
+	})
 }

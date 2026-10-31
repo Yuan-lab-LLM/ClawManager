@@ -83,7 +83,7 @@ func TestRuntimeSchedulerAssignsCreatingInstanceToReadyPod(t *testing.T) {
 		},
 	}
 	events := &fakeRuntimeEventService{}
-	scheduler := NewRuntimeScheduler(
+	scheduler := newLiveFixtureRuntimeScheduler(
 		instanceRepo,
 		podRepo,
 		bindingRepo,
@@ -204,7 +204,7 @@ func TestRuntimeSchedulerRecoversHistoricalHermesUpgradeGuardError(t *testing.T)
 	}
 	podRepo := &fakeRuntimePodRepo{pods: map[int64]*models.RuntimePod{pod.ID: &pod}, schedulable: []models.RuntimePod{pod}}
 	agent := &fakeRuntimeAgentClient{createResponse: &RuntimeAgentCreateGatewayResponse{GatewayID: "gw-145", Status: "running"}}
-	scheduler := NewRuntimeScheduler(
+	scheduler := newLiveFixtureRuntimeScheduler(
 		instanceRepo,
 		podRepo,
 		newFakeRuntimeBindingRepo(),
@@ -215,6 +215,7 @@ func TestRuntimeSchedulerRecoversHistoricalHermesUpgradeGuardError(t *testing.T)
 		&fakeRuntimeDeploymentService{},
 		time.Second,
 		WithRuntimeUpgradeService(&RuntimeUpgradeService{}),
+		WithRuntimeSchedulerNamespace("runtime-system"),
 	)
 
 	if err := scheduler.reconcile(ctx); err != nil {
@@ -256,7 +257,7 @@ func TestRuntimeSchedulerReplacesOlderGenerationBindingForCreatingInstance(t *te
 		GatewayID: "gw-18-4",
 		Status:    "running",
 	}}
-	scheduler := NewRuntimeScheduler(
+	scheduler := newLiveFixtureRuntimeScheduler(
 		instanceRepo,
 		podRepo,
 		bindingRepo,
@@ -375,7 +376,7 @@ func TestRuntimeSchedulerSkipsAgentRejectedGatewayPort(t *testing.T) {
 			Status:    "running",
 		},
 	}
-	scheduler := NewRuntimeScheduler(
+	scheduler := newLiveFixtureRuntimeScheduler(
 		instanceRepo,
 		podRepo,
 		bindingRepo,
@@ -450,7 +451,7 @@ func TestRuntimeSchedulerStoresStartingGatewayBindingAsCreating(t *testing.T) {
 			Status:    "starting",
 		},
 	}
-	scheduler := NewRuntimeScheduler(
+	scheduler := newLiveFixtureRuntimeScheduler(
 		instanceRepo,
 		podRepo,
 		bindingRepo,
@@ -582,7 +583,7 @@ func TestRuntimeSchedulerEnsureUpgradeGatewayDistributesFiveHundredInstancesWith
 	ctx := context.Background()
 	preflightID := "preflight-500"
 	targetImage := "registry/openclaw@sha256:target500"
-	workspaceRoot := t.TempDir()
+	workspaceRoot := canonicalCompatibilityTestDir(t)
 	instanceRepo := newFakeRuntimeInstanceRepo()
 	podRepo := &fakeRuntimePodRepo{pods: map[int64]*models.RuntimePod{}, claimLimit: map[int64]int{}}
 	targets := make([]models.RuntimePod, 0, 5)
@@ -678,7 +679,7 @@ func TestRuntimeSchedulerMarksInstanceErrorWhenGatewayCreateReturnsErrorStatus(t
 		},
 	}
 	events := &fakeRuntimeEventService{}
-	scheduler := NewRuntimeScheduler(
+	scheduler := newLiveFixtureRuntimeScheduler(
 		instanceRepo,
 		podRepo,
 		bindingRepo,
@@ -758,7 +759,7 @@ func TestRuntimeSchedulerThrottlesGatewayStartsWhenPodHasCreatingBinding(t *test
 	agent := &fakeRuntimeAgentClient{
 		createResponse: &RuntimeAgentCreateGatewayResponse{GatewayID: "gw-83", Port: 20083, Status: "running"},
 	}
-	scheduler := NewRuntimeScheduler(
+	scheduler := newLiveFixtureRuntimeScheduler(
 		newFakeRuntimeInstanceRepo(),
 		podRepo,
 		bindingRepo,
@@ -823,7 +824,7 @@ func TestRuntimeSchedulerPreservesPendingBindingWhenCreateOutcomeIsUnknown(t *te
 	podRepo := &fakeRuntimePodRepo{pods: map[int64]*models.RuntimePod{9: &pod}, schedulable: []models.RuntimePod{pod}}
 	bindingRepo := newFakeRuntimeBindingRepo()
 	agent := &fakeRuntimeAgentClient{createErr: context.DeadlineExceeded}
-	scheduler := NewRuntimeScheduler(newFakeRuntimeInstanceRepo(), podRepo, bindingRepo, &fakeRuntimeRolloutRepo{}, agent, &fakeRuntimeEventService{}, nil, &fakeRuntimeDeploymentService{}, time.Second)
+	scheduler := newLiveFixtureRuntimeScheduler(newFakeRuntimeInstanceRepo(), podRepo, bindingRepo, &fakeRuntimeRolloutRepo{}, agent, &fakeRuntimeEventService{}, nil, &fakeRuntimeDeploymentService{}, time.Second)
 	workspace := "/workspaces/openclaw/user-45/instance-91"
 
 	err := scheduler.assignInstance(ctx, models.Instance{ID: 91, UserID: 45, Type: RuntimeTypeOpenClaw, RuntimeType: RuntimeBackendGateway, InstanceMode: InstanceModeLite, Status: "creating", WorkspacePath: &workspace, RuntimeGeneration: 3})
@@ -875,7 +876,7 @@ func TestRuntimeSchedulerReconcileWaitsWhenGatewayStartInFlight(t *testing.T) {
 	agent := &fakeRuntimeAgentClient{
 		createResponse: &RuntimeAgentCreateGatewayResponse{GatewayID: "gw-84", Port: 20084, Status: "running"},
 	}
-	scheduler := NewRuntimeScheduler(
+	scheduler := newLiveFixtureRuntimeScheduler(
 		instanceRepo,
 		podRepo,
 		bindingRepo,
@@ -989,7 +990,7 @@ func TestRuntimeSchedulerAllowsConcurrentGatewayCreationPerPodWithinLimit(t *tes
 		createResponse: &RuntimeAgentCreateGatewayResponse{GatewayID: "gw", Port: 20081, Status: "running"},
 		createDelay:    25 * time.Millisecond,
 	}
-	scheduler := NewRuntimeScheduler(
+	scheduler := newLiveFixtureRuntimeScheduler(
 		newFakeRuntimeInstanceRepo(),
 		podRepo,
 		bindingRepo,
@@ -1051,7 +1052,7 @@ func TestRuntimeSchedulerReconcileStartsBatchConcurrently(t *testing.T) {
 		createDelay:    25 * time.Millisecond,
 	}
 	bindingRepo := newFakeRuntimeBindingRepo()
-	scheduler := NewRuntimeScheduler(
+	scheduler := newLiveFixtureRuntimeScheduler(
 		instanceRepo,
 		&fakeRuntimePodRepo{
 			pods:        map[int64]*models.RuntimePod{9: &pod},
@@ -1129,7 +1130,7 @@ func TestRuntimeSchedulerReconcileAssignsSinglePortsToHermesBatch(t *testing.T) 
 		createDelay:    25 * time.Millisecond,
 	}
 	bindingRepo := newFakeRuntimeBindingRepo()
-	scheduler := NewRuntimeScheduler(
+	scheduler := newLiveFixtureRuntimeScheduler(
 		instanceRepo,
 		&fakeRuntimePodRepo{
 			pods:        map[int64]*models.RuntimePod{10: &pod},
@@ -1212,7 +1213,7 @@ func TestRuntimeSchedulerPassesGatewayEnvironmentToRuntimeAgent(t *testing.T) {
 			Status:    "starting",
 		},
 	}
-	scheduler := NewRuntimeScheduler(
+	scheduler := newLiveFixtureRuntimeScheduler(
 		instanceRepo,
 		podRepo,
 		newFakeRuntimeBindingRepo(),
@@ -1296,7 +1297,7 @@ func TestRuntimeSchedulerUsesTeamSharedGIDForTeamLiteGateway(t *testing.T) {
 	agent := &fakeRuntimeAgentClient{
 		createResponse: &RuntimeAgentCreateGatewayResponse{GatewayID: "gw-130-1", Port: 20030, Status: "running"},
 	}
-	scheduler := NewRuntimeScheduler(
+	scheduler := newLiveFixtureRuntimeScheduler(
 		instanceRepo,
 		podRepo,
 		newFakeRuntimeBindingRepo(),
@@ -1409,7 +1410,7 @@ func TestRuntimeSchedulerScalesOutWhenAllReadyPodsAtCapacity(t *testing.T) {
 	}
 	deployments := &fakeRuntimeDeploymentService{}
 	agent := &fakeRuntimeAgentClient{}
-	scheduler := NewRuntimeScheduler(
+	scheduler := newLiveFixtureRuntimeScheduler(
 		instanceRepo,
 		podRepo,
 		newFakeRuntimeBindingRepo(),
@@ -1667,7 +1668,7 @@ func TestRuntimeSchedulerReconcileAssignsDesiredRunningInstanceWithMissingBindin
 	agent := &fakeRuntimeAgentClient{
 		createResponse: &RuntimeAgentCreateGatewayResponse{GatewayID: "gw-18", Port: 20018, Status: "running"},
 	}
-	scheduler := NewRuntimeScheduler(
+	scheduler := newLiveFixtureRuntimeScheduler(
 		instanceRepo,
 		podRepo,
 		newFakeRuntimeBindingRepo(),
@@ -1717,7 +1718,7 @@ func TestRuntimeSchedulerReconcileRetriesRecoverableNoSchedulableError(t *testin
 	agent := &fakeRuntimeAgentClient{
 		createResponse: &RuntimeAgentCreateGatewayResponse{GatewayID: "gw-68", Port: 20068, Status: "running"},
 	}
-	scheduler := NewRuntimeScheduler(
+	scheduler := newLiveFixtureRuntimeScheduler(
 		instanceRepo,
 		podRepo,
 		newFakeRuntimeBindingRepo(),
@@ -1771,7 +1772,7 @@ func TestRuntimeSchedulerReconcileRetriesUnboundGatewayStartFailureAfterRuntimeU
 	agent := &fakeRuntimeAgentClient{
 		createResponse: &RuntimeAgentCreateGatewayResponse{GatewayID: "gw-970-26", Port: 20000, Status: "running"},
 	}
-	scheduler := NewRuntimeScheduler(
+	scheduler := newLiveFixtureRuntimeScheduler(
 		instanceRepo,
 		podRepo,
 		newFakeRuntimeBindingRepo(),
@@ -1817,7 +1818,7 @@ func TestRuntimeSchedulerRecoversConfirmedLegacyGatewayExitWithBinding(t *testin
 		State: RuntimeGatewayBindingError, Generation: 27,
 	}
 	agent := &fakeRuntimeAgentClient{createResponse: &RuntimeAgentCreateGatewayResponse{GatewayID: "gw-971-27", Status: "running"}}
-	scheduler := NewRuntimeScheduler(instanceRepo, podRepo, bindingRepo, &fakeRuntimeRolloutRepo{}, agent, NewRuntimeEventService(nil), nil, &fakeRuntimeDeploymentService{}, time.Second)
+	scheduler := newLiveFixtureRuntimeScheduler(instanceRepo, podRepo, bindingRepo, &fakeRuntimeRolloutRepo{}, agent, NewRuntimeEventService(nil), nil, &fakeRuntimeDeploymentService{}, time.Second)
 
 	if err := scheduler.reconcile(ctx); err != nil {
 		t.Fatalf("reconcile returned error: %v", err)
@@ -2169,7 +2170,7 @@ func TestRuntimeSchedulerCleansUpGatewayAndReleasesSlotWhenBindingCreateFails(t 
 	agent := &fakeRuntimeAgentClient{
 		createResponse: &RuntimeAgentCreateGatewayResponse{GatewayID: "gw-22", Port: 20022, Status: "running"},
 	}
-	scheduler := NewRuntimeScheduler(
+	scheduler := newLiveFixtureRuntimeScheduler(
 		instanceRepo,
 		podRepo,
 		bindingRepo,
@@ -2238,7 +2239,7 @@ func TestRuntimeSchedulerClearsStaleErrorBindingAndRetriesBindingCreate(t *testi
 	agent := &fakeRuntimeAgentClient{
 		createResponse: &RuntimeAgentCreateGatewayResponse{GatewayID: "gw-218-5", Port: 20000, Status: "running"},
 	}
-	scheduler := NewRuntimeScheduler(
+	scheduler := newLiveFixtureRuntimeScheduler(
 		instanceRepo,
 		podRepo,
 		bindingRepo,
@@ -2325,7 +2326,7 @@ func TestRuntimeSchedulerPreservesGatewayBindingAndSlotWhenWorkspacePathUpdateFa
 	agent := &fakeRuntimeAgentClient{
 		createResponse: &RuntimeAgentCreateGatewayResponse{GatewayID: "gw-23", Port: 20023, Status: "running"},
 	}
-	scheduler := NewRuntimeScheduler(
+	scheduler := newLiveFixtureRuntimeScheduler(
 		instanceRepo,
 		podRepo,
 		bindingRepo,
@@ -2844,6 +2845,15 @@ func TestRuntimeSchedulerLegacyRolloutIsolationAcrossLiteRuntimes(t *testing.T) 
 			}
 			deployments := &fakeRuntimeDeploymentService{}
 			scheduler := NewRuntimeScheduler(newFakeRuntimeInstanceRepo(), podRepo, newFakeRuntimeBindingRepo(), rolloutRepo, &fakeRuntimeAgentClient{}, NewRuntimeEventService(nil), nil, deployments, time.Second)
+			if runtimeType == RuntimeTypeOpenCode {
+				if err := scheduler.StartRollout(ctx, 91); !errors.Is(err, models.ErrOpenCodeSafeUpgradeRequired) {
+					t.Fatalf("unsafe OpenCode rollout: %v", err)
+				}
+				if len(deployments.rolloutImageCalls) != 0 || len(deployments.upgradePoolCalls) != 0 {
+					t.Fatal("unsafe rollout mutated the pool")
+				}
+				return
+			}
 			if err := scheduler.StartRollout(ctx, 91); err != nil {
 				t.Fatal(err)
 			}
@@ -2917,6 +2927,15 @@ func TestRuntimeSchedulerLegacyRolloutPrefersLiveDeploymentInventory(t *testing.
 				RuntimeType: runtimeType, Namespace: "runtime-system", DeploymentName: liveName, PodName: liveName + "-pod", State: "ready",
 			}}}
 			scheduler := NewRuntimeScheduler(newFakeRuntimeInstanceRepo(), podRepo, newFakeRuntimeBindingRepo(), rolloutRepo, &fakeRuntimeAgentClient{}, NewRuntimeEventService(nil), nil, deployments, time.Second, WithRuntimeSchedulerNamespace("runtime-system"))
+			if runtimeType == RuntimeTypeOpenCode {
+				if err := scheduler.StartRollout(ctx, 93); !errors.Is(err, models.ErrOpenCodeSafeUpgradeRequired) {
+					t.Fatalf("unsafe OpenCode rollout: %v", err)
+				}
+				if len(deployments.rolloutImageCalls) != 0 {
+					t.Fatal("unsafe rollout mutated the pool")
+				}
+				return
+			}
 			if err := scheduler.StartRollout(ctx, 93); err != nil {
 				t.Fatal(err)
 			}
@@ -3155,6 +3174,53 @@ func TestRuntimeSchedulerReconcileStartsPendingRollouts(t *testing.T) {
 	}
 	if len(rolloutRepo.statuses) == 0 || rolloutRepo.statuses[0].status != "running" {
 		t.Fatalf("rollout statuses = %+v, want running", rolloutRepo.statuses)
+	}
+}
+
+func TestCleanupStaleInstanceBindingStrictRequiresStopAuthority(t *testing.T) {
+	for _, missing := range []string{"pod-repository", "pod", "endpoint", "gateway-id", "stop-receipt"} {
+		t.Run(missing, func(t *testing.T) {
+			bindings := newFakeRuntimeBindingRepo()
+			binding := &models.InstanceRuntimeBinding{InstanceID: 209, RuntimePodID: 9, GatewayID: "gw-209-2", Generation: 2}
+			bindings.bindings[209] = binding
+			endpoint := "https://runtime"
+			agent := &strictStopRuntimeAgent{fakeRuntimeAgentClient: &fakeRuntimeAgentClient{}, strict: true}
+			scheduler := &RuntimeScheduler{bindingRepo: bindings, podRepo: &fakeRuntimePodRepo{pods: map[int64]*models.RuntimePod{9: {ID: 9, AgentEndpoint: &endpoint}}}, agentClient: agent}
+			switch missing {
+			case "pod-repository":
+				scheduler.podRepo = nil
+			case "pod":
+				scheduler.podRepo = &fakeRuntimePodRepo{}
+			case "endpoint":
+				endpoint = ""
+			case "gateway-id":
+				binding.GatewayID = ""
+			case "stop-receipt":
+				agent.deleteErr = ErrRuntimeAgentNotFound
+			}
+			removed, err := scheduler.cleanupStaleInstanceBinding(context.Background(), models.Instance{ID: 209, RuntimeGeneration: 3}, binding)
+			if removed || err == nil || bindings.bindings[209] == nil || bindings.deleteAndReleaseCalls[209] != 0 {
+				t.Fatalf("missing %s released source: removed=%v err=%v", missing, removed, err)
+			}
+		})
+	}
+}
+
+func TestFailedAssignmentCleanupStrictMissingIdentityPreservesBinding(t *testing.T) {
+	for _, missing := range []string{"gateway-id", "endpoint"} {
+		bindings := newFakeRuntimeBindingRepo()
+		bindings.bindings[209] = &models.InstanceRuntimeBinding{InstanceID: 209, RuntimePodID: 9, GatewayID: "gw-209-2", Generation: 2}
+		scheduler := &RuntimeScheduler{bindingRepo: bindings, agentClient: &strictStopRuntimeAgent{fakeRuntimeAgentClient: &fakeRuntimeAgentClient{}, strict: true}}
+		endpoint, gatewayID := "https://runtime", "gw-209-2"
+		if missing == "gateway-id" {
+			gatewayID = ""
+		} else {
+			endpoint = ""
+		}
+		err := scheduler.cleanupGatewayAfterAssignFailure(context.Background(), endpoint, 209, gatewayID, true, errors.New("create interrupted"))
+		if !errors.Is(err, errRuntimeGatewayStartPending) || bindings.bindings[209] == nil || bindings.deleteCalls[209] != 0 {
+			t.Fatalf("missing %s released uncertain assignment: %v", missing, err)
+		}
 	}
 }
 
@@ -3734,4 +3800,38 @@ func TestIsSchedulerManagedV2InstanceRejectsProDesktop(t *testing.T) {
 
 func ptrString(value string) *string {
 	return &value
+}
+
+func TestRuntimeDeploymentInventoryPreservesPerPodSlots(t *testing.T) {
+	deployments := &fakeRuntimeDeploymentService{pods: []k8s.RuntimeDeploymentPod{{RuntimeType: RuntimeTypeOpenClaw, Namespace: "system", PodName: "runtime-a", Capacity: 2, Slots: []models.RuntimeSlot{{Index: 1, ContainerName: "slot-0", Ready: true, State: "running"}, {Index: 2, ContainerName: "slot-1", State: "waiting", Reason: "CrashLoopBackOff"}}}}}
+	scheduler := NewRuntimeScheduler(nil, nil, nil, nil, nil, nil, nil, deployments, time.Second, WithRuntimeSchedulerNamespace("system"))
+	pods, err := scheduler.RuntimeDeploymentPods(context.Background(), RuntimeTypeOpenClaw)
+	if err != nil || len(pods) != 1 {
+		t.Fatalf("inventory = %+v %v", pods, err)
+	}
+	if pods[0].Capacity != 2 || len(pods[0].Slots) != 2 || pods[0].Slots[1].Ready {
+		t.Fatalf("per-pod slots = %+v", pods[0])
+	}
+}
+
+func TestRuntimeDeploymentInventoryKeepsLiveIdentitySeparateFromAgentReport(t *testing.T) {
+	deployments := &fakeRuntimeDeploymentService{pods: []k8s.RuntimeDeploymentPod{{RuntimeType: RuntimeTypeOpenClaw, Namespace: "system", DeploymentName: "runtime", PodName: "runtime-a", PodUID: "live-uid", State: "pending"}}}
+	reports := &fakeRuntimePodRepo{pods: map[int64]*models.RuntimePod{9: {ID: 9, RuntimeType: RuntimeTypeOpenClaw, Namespace: "system", DeploymentName: "runtime", PodName: "runtime-a", PodUID: stringPtrOrNil("old-uid"), State: "ready"}}}
+	scheduler := NewRuntimeScheduler(nil, reports, nil, nil, nil, nil, nil, deployments, time.Second, WithRuntimeSchedulerNamespace("system"))
+	for _, selected := range []bool{false, true} {
+		var pods []models.RuntimePod
+		var err error
+		if selected {
+			pods, err = scheduler.RuntimeDeploymentPodsFor(context.Background(), RuntimeTypeOpenClaw, []k8s.RuntimeDeploymentRef{{Namespace: "system", Name: "runtime"}})
+		} else {
+			pods, err = scheduler.RuntimeDeploymentPods(context.Background(), RuntimeTypeOpenClaw)
+		}
+		if err != nil || len(pods) != 1 {
+			t.Fatalf("selected=%v pods=%+v err=%v", selected, pods, err)
+		}
+		pod := pods[0]
+		if pod.ID != 9 || stringValue(pod.PodUID) != "live-uid" || stringValue(pod.KubernetesPodUID) != "live-uid" || pod.State == "ready" || pod.KubernetesReady || stringValue(pod.RegisteredPodUID) != "old-uid" || pod.AgentState != "ready" {
+			t.Fatalf("selected=%v live identity/state masked by report: %+v", selected, pod)
+		}
+	}
 }

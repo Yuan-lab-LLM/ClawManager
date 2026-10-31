@@ -288,6 +288,8 @@ func TestInstanceProxyServiceNormalizesDeepSeekHarnessDedicatedOrigin(t *testing
 	}
 }
 
+
+
 func TestInstanceProxyServicePreservesDeepSeekHarnessPluginBatchRawQuery(t *testing.T) {
 	instanceToken := "igt_deepseek_harness_instance"
 	const wantRawQuery = "?@deepseek-ai/dsh-client-modules/client.js&rev=cddf5581d5d5"
@@ -505,6 +507,7 @@ func TestInstanceProxyServiceUsesConfiguredDedicatedOriginForDeepSeekHarnessLite
 		t.Fatalf("GetProxyURLForInstance() = %q, want %q", got, want)
 	}
 }
+
 
 func TestInstanceProxyServiceUsesConfiguredDedicatedOriginForOpenCodeLite(t *testing.T) {
 	for _, tt := range []struct {
@@ -763,27 +766,6 @@ func newOpenClawV2ProxyTestService(t *testing.T, upstreamURL string, instanceID 
 	return service, token
 }
 
-func newOpenCodeV2ProxyTestService(t *testing.T, upstreamURL string, instanceID int, instanceToken string) (*InstanceProxyService, *AccessToken) {
-	t.Helper()
-	podIP, gatewayPort := splitURLHostPortForProxyTest(t, upstreamURL)
-	workspacePath := "/workspaces/opencode/user-45/instance-" + strconv.Itoa(instanceID)
-	instanceRepo := newV2LifecycleInstanceRepo()
-	instanceRepo.byID[instanceID] = &models.Instance{
-		ID: instanceID, UserID: 45, Type: RuntimeTypeOpenCode,
-		RuntimeType: RuntimeBackendGateway, InstanceMode: InstanceModeLite,
-		Status: "running", AccessToken: &instanceToken, WorkspacePath: &workspacePath,
-		RuntimeGeneration: 1,
-	}
-	bindingRepo := newFakeRuntimeBindingRepo()
-	bindingRepo.bindings[instanceID] = &models.InstanceRuntimeBinding{
-		InstanceID: instanceID, RuntimePodID: int64(instanceID), GatewayPort: gatewayPort,
-		State: "running", Generation: 1,
-	}
-	podRepo := &fakeRuntimePodRepo{pods: map[int64]*models.RuntimePod{
-		int64(instanceID): {ID: int64(instanceID), PodIP: &podIP, State: "ready"},
-	}}
-	return newV2ProxyTestService(t, instanceRepo, bindingRepo, podRepo, 45, instanceID, RuntimeTypeOpenCode)
-}
 
 func newDeepSeekHarnessV2ProxyTestService(t *testing.T, upstreamURL string, instanceID int, instanceToken string) (*InstanceProxyService, *AccessToken) {
 	t.Helper()
@@ -805,6 +787,28 @@ func newDeepSeekHarnessV2ProxyTestService(t *testing.T, upstreamURL string, inst
 		int64(instanceID): {ID: int64(instanceID), PodIP: &podIP, State: "ready"},
 	}}
 	return newV2ProxyTestService(t, instanceRepo, bindingRepo, podRepo, 45, instanceID, RuntimeTypeDeepSeekHarness)
+}
+
+func newOpenCodeV2ProxyTestService(t *testing.T, upstreamURL string, instanceID int, instanceToken string) (*InstanceProxyService, *AccessToken) {
+	t.Helper()
+	podIP, gatewayPort := splitURLHostPortForProxyTest(t, upstreamURL)
+	workspacePath := "/workspaces/opencode/user-45/instance-" + strconv.Itoa(instanceID)
+	instanceRepo := newV2LifecycleInstanceRepo()
+	instanceRepo.byID[instanceID] = &models.Instance{
+		ID: instanceID, UserID: 45, Type: RuntimeTypeOpenCode,
+		RuntimeType: RuntimeBackendGateway, InstanceMode: InstanceModeLite,
+		Status: "running", AccessToken: &instanceToken, WorkspacePath: &workspacePath,
+		RuntimeGeneration: 1,
+	}
+	bindingRepo := newFakeRuntimeBindingRepo()
+	bindingRepo.bindings[instanceID] = &models.InstanceRuntimeBinding{
+		InstanceID: instanceID, RuntimePodID: int64(instanceID), GatewayPort: gatewayPort,
+		State: "running", Generation: 1,
+	}
+	podRepo := &fakeRuntimePodRepo{pods: map[int64]*models.RuntimePod{
+		int64(instanceID): {ID: int64(instanceID), PodIP: &podIP, State: "ready"},
+	}}
+	return newV2ProxyTestService(t, instanceRepo, bindingRepo, podRepo, 45, instanceID, RuntimeTypeOpenCode)
 }
 
 func splitURLHostPortForProxyTest(t *testing.T, rawURL string) (string, int) {

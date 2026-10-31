@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { AtSign, ChevronDown, Send, X } from 'lucide-react';
+import { beforePageRefresh } from '../PageVersionNotice';
 import type { TeamMember } from '../../types/team';
 import TeamBadge from './TeamBadge';
 import { memberIcon } from '../../lib/teamIcons';
@@ -17,6 +18,11 @@ export default function TeamTaskComposer({ members, leaderKey, targetKey, onTarg
   const input = useRef<HTMLTextAreaElement>(null);
   const query = useRef<HTMLInputElement>(null);
   const listId = useId();
+  useEffect(() => {
+    const guard = (event: Event) => { if (value.trim() || sending) event.preventDefault(); };
+    window.addEventListener(beforePageRefresh, guard);
+    return () => window.removeEventListener(beforePageRefresh, guard);
+  }, [value, sending]);
   const leader = members.find(member => member.member_key === leaderKey) || members.find(member => ['leader', 'team-leader'].includes(member.role));
   const selected = members.find(member => member.member_key === targetKey) || (!targetKey ? leader : undefined);
   const single = !!selected && selected.id !== leader?.id;

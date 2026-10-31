@@ -1,0 +1,37 @@
+[
+  {
+    "name": "backend-test-all.log",
+    "sha256": "1732989aa061710e46dc653aa9bc23f714bf73278730aaa58557c4ed76777529",
+    "bytes": 1153
+  },
+  {
+    "name": "backup-regression-final.log",
+    "sha256": "6e40c5f245d5f05296545086c271ac8f2d5585233a33ebfa440cfbe2e7cdb16c",
+    "bytes": 313
+  },
+  {
+    "name": "application-gate-test.log",
+    "sha256": "1f49bb7372e900e85fa4efc01cb0ae70c147cfc2f14c121c374753b21abd8ee9",
+    "bytes": 45
+  },
+  {
+    "name": "streaming-full-schema.log",
+    "sha256": "c1c9d4be0d669a81e7aabe725122ac58a8aadf09d93ed093934aa5f923cbeac5",
+    "bytes": 45
+  },
+  {
+    "name": "hermes-contract-regression-after.log",
+    "sha256": "1ee0b882e661f2ef94c95dd8460e2ededb9371eaf7f00d7edab9e119c4758f49",
+    "bytes": 370
+  },
+  {
+    "name": "hermes-maintenance-after.log",
+    "sha256": "9d4cfc495bc9573088b86e92dc160e330dd1a57d23a1bb177f0eaea7e3377ef5",
+    "bytes": 215
+  },
+  {
+    "name": "openclaw-maintenance-after.log",
+    "sha256": "510d94348c2412686aacca9ec425325f7bc8a11ec9e33d7dc941ec2f543e210a",
+    "bytes": 50
+  }
+]

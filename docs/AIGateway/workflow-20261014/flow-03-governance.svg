@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="850" viewBox="0 0 1200 850" role="img" aria-labelledby="title desc">
+<title id="title">Gateway 调用治理与结算流程</title><desc id="desc">Key 身份与权限、Redis 原子准入、MySQL 预算预占、部署租约、上游尝试以及最终用量结算和资源释放。</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10Z" fill="#64748b"/></marker></defs>
+<rect width="1200" height="850" fill="#f8fafc"/>
+<g font-family="Microsoft YaHei, Arial, sans-serif" fill="#17243b">
+<text x="45" y="53" font-size="27" font-weight="700">治理闭环：调用前准入，调用中保护，调用后结算</text>
+<text x="45" y="88" font-size="17" fill="#526277">此图针对已关联受治理 Key 的调用；旧凭据和 JWT 路径须核对实际治理身份。</text>
+<g fill="#fff" stroke="#cad5e2"><rect x="45" y="130" width="335" height="120" rx="12"/><rect x="435" y="130" width="335" height="120" rx="12"/><rect x="825" y="130" width="330" height="120" rx="12"/><rect x="825" y="315" width="330" height="120" rx="12"/><rect x="435" y="315" width="335" height="120" rx="12"/><rect x="45" y="315" width="335" height="120" rx="12"/><rect x="45" y="510" width="520" height="190" rx="12"/><rect x="635" y="510" width="520" height="190" rx="12"/></g>
+<g fill="none" stroke="#64748b" stroke-width="2" marker-end="url(#arrow)"><path d="M380 190H425"/><path d="M770 190H815"/><path d="M990 250V305"/><path d="M825 375H780"/><path d="M435 375H390"/><path d="M210 435V500"/><path d="M210 463H895V500"/></g>
+<g font-size="21" font-weight="700"><text x="65" y="164">1　身份、状态、到期</text><text x="455" y="164">2　Key 限额原子准入</text><text x="845" y="164">3　风险与路由筛选</text><text x="845" y="349">4　预算预占</text><text x="455" y="349">5　部署租约与上游调用</text><text x="65" y="349">6　结束并处理结果</text><text x="70" y="550">成功或已产生用量</text><text x="660" y="550">失败、取消或未进入上游</text></g>
+<g font-size="17" fill="#40516a"><text x="65" y="198">确定用户 / 实例 / Gateway Key</text><text x="65" y="228">模型组权限约束后续候选</text><text x="455" y="198">Redis Lua：RPM / TPM / 并发</text><text x="455" y="228">任一有效限额不满足即拒绝</text><text x="845" y="198">估算输入与输出预留</text><text x="845" y="228">得到符合策略的候选部署</text><text x="845" y="383">MySQL 事务与行锁</text><text x="845" y="413">已用 + 在途预占 + 本次预占</text><text x="455" y="383">Sorted Set 租约与心跳续租</text><text x="455" y="413">可安全恢复时才切换候选</text><text x="65" y="383">区分调用失败与任务失败</text><text x="65" y="413">已派发失败尝试也需计量</text><text x="70" y="589">• 依据 usage 或带标记的估算量结算</text><text x="70" y="626">• 预算账本幂等，调整 TPM 预占</text><text x="70" y="663">• 释放租约，写审计，更新健康与性能</text><text x="660" y="589">• 按实际派发和用量状态处理费用</text><text x="660" y="626">• 释放未结算预占与并发资源</text><text x="660" y="663">• 记录原因；不可将所有失败视为免费</text></g>
+<text x="45" y="757" font-size="18" fill="#40516a">Key 并发保护调用方额度；部署并发保护上游容量，两者不是同一限制。</text>
+<text x="45" y="791" font-size="17" fill="#526277">预算是 Key 级 USD 治理，费用为配置计价；Redis 未配置时的空实现不提供真实分布式限流。</text>
+<text x="45" y="827" font-size="15" fill="#64748b">此流程描述机制，并不表示任意存储故障、估算误差或超长在途请求下都能绝对零超支。</text>
+</g></svg>

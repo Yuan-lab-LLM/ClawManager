@@ -1,3 +1,4 @@
+import axios from "axios";
 import api from "./api";
 import type {
   RuntimeGateway,
@@ -7,12 +8,115 @@ import type {
   RuntimeUpgradeDetails,
   StartRuntimeRolloutRequest,
   RuntimeUpgradePreflightResult,
+  RuntimePodEvent,
+  RuntimeSchedulingRequest,
+  RuntimeSchedulingOperation,
+  RuntimeSchedulingPreflight,
+  RuntimePodPage,
+  RuntimePodPageRequest,
+  RuntimeManagedPool,
+  RuntimeScaleInPlan,
+  RuntimeScaleOptions,
+  RuntimeScaleResult,
+  CreateRuntimePodRequest,
+  RuntimeBalancePlan,
 } from "../types/runtimePool";
 
 export const runtimePoolService = {
-  async listPods(runtimeType?: RuntimeType): Promise<RuntimePod[]> {
+  async listManagedPools(signal?: AbortSignal): Promise<{ items: RuntimeManagedPool[] }> {
+    const response = await api.get('/admin/runtime-pod-pools', { signal });
+    return response.data.data;
+  },
+
+  async listScaleOptions(signal?: AbortSignal): Promise<RuntimeScaleOptions> {
+    const response = await api.get('/admin/runtime-pods/scale-options', { signal });
+    return response.data.data;
+  },
+
+  async createPod(request: CreateRuntimePodRequest): Promise<RuntimeScaleResult> {
+    const response = await api.post('/admin/runtime-pods', request);
+    return response.data.data;
+  },
+
+  async preflightScaleIn(request: CreateRuntimePodRequest): Promise<RuntimeScaleInPlan> {
+    const response = await api.post('/admin/runtime-pods/scale-in/preflight', request);
+    return response.data.data;
+  },
+
+  async scaleIn(request: CreateRuntimePodRequest & { plan_fingerprint: string }): Promise<RuntimeSchedulingOperation> {
+    const response = await api.post('/admin/runtime-pods/scale-in', request);
+    return response.data.data;
+  },
+
+  async deletePod(id: number, podUid: string): Promise<void> {
+    await api.delete(`/admin/runtime-pods/${id}`, { data: { pod_uid: podUid } });
+  },
+
+  async deletePodPool(name: string, namespace: string, deploymentUid: string): Promise<void> {
+    await api.delete(`/admin/runtime-pod-pools/${encodeURIComponent(name)}`, { data: { namespace, deployment_uid: deploymentUid } });
+  },
+
+  async planBalance(runtimeType: RuntimeType | 'all'): Promise<RuntimeBalancePlan> {
+    const response = await api.post('/admin/runtime-balance/plan', { runtime_type: runtimeType });
+    return response.data.data;
+  },
+
+  async executeBalance(runtimeType: RuntimeType | 'all', planFingerprint: string): Promise<RuntimeSchedulingOperation> {
+    const response = await api.post('/admin/runtime-balance', { runtime_type: runtimeType, plan_fingerprint: planFingerprint });
+    return response.data.data;
+  },
+
+  async setScheduling(podId: number, enabled: boolean): Promise<void> {
+    await api.post(`/admin/runtime-pods/${podId}/scheduling`, { enabled });
+  },
+
+  async listEvents(podId: number): Promise<RuntimePodEvent[]> {
+    const response = await api.get(`/admin/runtime-pods/${podId}/events`);
+    return response.data.data?.events ?? [];
+  },
+
+  async schedulingHistory(): Promise<{ items: RuntimeSchedulingOperation[]; supported_modes: string[]; force_unavailable_reason?: string }> {
+    const response = await api.get('/admin/runtime-scheduling');
+    return response.data.data;
+  },
+
+  async cancelScheduling(id: string): Promise<void> {
+    await api.post(`/admin/runtime-scheduling/${encodeURIComponent(id)}/cancel`);
+  },
+
+  async preflightScheduling(request: RuntimeSchedulingRequest): Promise<RuntimeSchedulingPreflight> {
+    const endpoint = '/admin/runtime-scheduling/preflight';
+    const response = await api.post(endpoint, request).catch((error: unknown) => {
+      if (
+        !axios.isAxiosError(error) ||
+        error.code !== 'ERR_NETWORK' ||
+        error.response ||
+        error.config?.url !== endpoint ||
+        ('_retry' in error.config && error.config._retry)
+      ) throw error;
+      return api.post(endpoint, request);
+    });
+    return response.data.data;
+  },
+
+  async schedule(request: RuntimeSchedulingRequest): Promise<RuntimeSchedulingOperation> {
+    const response = await api.post('/admin/runtime-scheduling', request);
+    return response.data.data;
+  },
+
+  async evict(podId: number, data: { mode: string; grace_period_seconds: number; concurrency: number }): Promise<RuntimeSchedulingOperation> {
+    const response = await api.post(`/admin/runtime-pods/${podId}/evict`, data);
+    return response.data.data;
+  },
+  async listPodsPage(params: RuntimePodPageRequest, signal?: AbortSignal): Promise<RuntimePodPage> {
+    const response = await api.get("/admin/runtime-pods", { params, signal });
+    return response.data.data;
+  },
+
+  async listPods(runtimeType?: RuntimeType, signal?: AbortSignal): Promise<RuntimePod[]> {
     const response = await api.get("/admin/runtime-pods", {
       params: runtimeType ? { runtime_type: runtimeType } : undefined,
+      signal,
     });
     const pods = response.data.data?.pods;
     return Array.isArray(pods) ? pods : [];

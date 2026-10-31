@@ -1108,6 +1108,24 @@ kind: ClusterRole
 metadata:
   name: clawmanager-runtime-manager
 rules:
+  - apiGroups: [""]
+    resources: ["nodes", "configmaps"]
+    verbs: ["watch"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["servicecidrs"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["nodes", "persistentvolumes", "persistentvolumeclaims"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["serviceaccounts"]
+    verbs: ["get", "create"]
+  - apiGroups: ["storage.k8s.io"]
+    resources: ["storageclasses"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["configmaps", "secrets"]
+    verbs: ["get", "list", "create", "update"]
   - apiGroups:
       - coordination.k8s.io
     resources:
@@ -1132,6 +1150,7 @@ rules:
       - ""
     resources:
       - pods
+      - endpoints
     verbs:
       - get
       - list
@@ -1410,8 +1429,9 @@ spec:
               value: "http://clawmanager-gateway.clawmanager-system.svc.cluster.local:9001"
             - name: CLAWMANAGER_DESKTOP_DIRECT_PROXY
               value: "true"
-            # Required for the OpenCode Lite root-origin UI. The {instance_id}
-            # placeholder is required; see docs/deployment.md.
+            # Required for the OpenCode Lite per-instance browser origin. Set
+            # this to a nip.io or private wildcard-DNS URL template; the
+            # {instance_id} placeholder is mandatory. See docs/deployment.md.
             - name: CLAWMANAGER_OPENCODE_PUBLIC_URL_TEMPLATE
               value: ""
             # Required for the DeepSeek Harness Lite root-origin UI. The
@@ -1487,7 +1507,7 @@ spec:
           readinessProbe:
             httpGet:
               scheme: HTTPS
-              path: /healthz
+              path: /api/v1/version
               port: https
             initialDelaySeconds: 10
             periodSeconds: 10
@@ -1834,6 +1854,12 @@ spec:
     - name: proxy
       port: 3128
       targetPort: 9001
+    - name: runtime-proxy
+      port: 3129
+      targetPort: 9002
+    - name: browser-proxy
+      port: 3131
+      targetPort: 9004
 ---
 apiVersion: apps/v1
 kind: Deployment

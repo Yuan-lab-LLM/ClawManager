@@ -1,0 +1,12 @@
+{
+  "test": "TestSixRealSourcesPublishAndDataOnlyRestore",
+  "result": "PASS",
+  "test_seconds": 96.84,
+  "package_seconds": 97.969,
+  "controller_code": "995a364b plus persisted-result UID cleanup fix",
+  "job_image": "10.130.14.23:5000/clawmanager-hxc-app@sha256:6d933e983e577fdfa4e5baf570b0b113ad5c3afefca9427c0a2a4d9e6dc5b1ae",
+  "log_sha256": "896218738e79a064c8154d4bbc42ac696467e18580ac90475d8feaa0e3ed90bb",
+  "acceptance_eligible": false,
+  "controller_code_commit": "3a64956ffe1c935507016756009f45823a927dde",
+  "commit_recorded_after_test": true
+}

@@ -28,6 +28,9 @@ import (
 var ErrNorthboundSettingsConflict = errors.New("northbound settings were changed by another administrator")
 
 var allowedNorthboundScopes = map[string]struct{}{
+	"teams:read": {}, "teams:create": {}, "teams:manage": {}, "teams:delete": {},
+	"teams:tasks:read": {}, "teams:tasks:write": {}, "teams:files:read": {}, "teams:files:write": {},
+	"team-templates:read": {}, "team-templates:write": {}, "team-templates:generate": {},
 	"lite-instances:create": {}, "lite-instances:read": {}, "pro-instances:create": {}, "pro-instances:read": {},
 	"lite-instances:restart": {}, "lite-instances:reset": {}, "pro-instances:restart": {}, "pro-instances:reset": {},
 	"lite-instances:delete": {}, "pro-instances:delete": {},
@@ -129,6 +132,18 @@ func (s *NorthboundAdminService) Overview(ctx context.Context) (*NorthboundAdmin
 }
 
 func (s *NorthboundAdminService) SaveSettings(ctx context.Context, actorUserID int, item *models.NorthboundAdminSettings) (*models.NorthboundAdminSettings, error) {
+	if item.OwnerTeamCreationUserID < 0 {
+		return nil, fmt.Errorf("invalid Owner Team creation account")
+	}
+	if item.OwnerTeamCreationUserID > 0 {
+		user, err := s.users.GetByID(item.OwnerTeamCreationUserID)
+		if err != nil {
+			return nil, err
+		}
+		if user == nil || !user.IsActive {
+			return nil, fmt.Errorf("Owner Team creation account must be active")
+		}
+	}
 	if err := validateNorthboundSettings(item); err != nil {
 		return nil, err
 	}

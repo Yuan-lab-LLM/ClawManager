@@ -121,6 +121,8 @@ Content-Type: application/json
     "CLAWMANAGER_LLM_BASE_URL": "http://clawmanager-gateway.clawmanager-system.svc.cluster.local:9001/api/v1/gateway/llm",
     "CLAWMANAGER_LLM_API_KEY": "instance-token",
     "CLAWMANAGER_LLM_MODEL": "[\"auto\"]",
+    "CLAWMANAGER_LLM_CONTEXT_WINDOW": "128000",
+    "CLAWMANAGER_LLM_CONTEXT_WINDOWS": "{\"auto\":128000}",
     "CLAWMANAGER_LLM_PROVIDER": "openai-compatible",
     "CLAWMANAGER_INSTANCE_TOKEN": "instance-token",
     "OPENAI_API_KEY": "instance-token"
@@ -236,6 +238,8 @@ ClawManager 会在 `POST /v1/gateways` 的 `environment` 字段中下发实例�
 CLAWMANAGER_LLM_BASE_URL
 CLAWMANAGER_LLM_API_KEY
 CLAWMANAGER_LLM_MODEL
+CLAWMANAGER_LLM_CONTEXT_WINDOW
+CLAWMANAGER_LLM_CONTEXT_WINDOWS
 CLAWMANAGER_LLM_PROVIDER
 CLAWMANAGER_INSTANCE_TOKEN
 OPENAI_BASE_URL

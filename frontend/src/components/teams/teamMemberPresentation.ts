@@ -5,7 +5,8 @@ export function memberSchedule(status: string) {
   return { label: labels[status] || status || "待确认", tone: status === "busy" ? "active" : status === "failed" ? "error" : "neutral" };
 }
 
-export function memberIsStarting(member: Pick<TeamMember, 'status' | 'runtime_status'>) {
+export function memberIsStarting(member: Pick<TeamMember, 'status' | 'runtime_status' | 'runtime_observation'>) {
+  if (member.runtime_observation) return member.runtime_observation.state === 'starting';
   return !['failed', 'deleting', 'deleted'].includes(member.status) && ['creating', 'starting', 'pending'].includes((member.runtime_status || '').trim().toLowerCase());
 }
 
@@ -26,6 +27,17 @@ export function memberRuntime(availability?: string, runtimeStatus?: string) {
 export function memberRailState(member: TeamMember) {
   if (memberHasRuntimeFault(member)) return { label: "运行异常", tone: "error" };
   if (member.status === "failed" || member.status === "deleting" || member.status === "deleted") return memberSchedule(member.status);
+  if (member.runtime_observation) {
+    const state = member.runtime_observation.state;
+    if (state === 'starting') return { label: '启动中', tone: 'neutral' };
+    if (state === 'offline') return { label: member.runtime_observation.reason === 'collaboration_offline' ? '协作离线' : '实例离线', tone: 'error' };
+    if (state === 'unknown') {
+      if (member.runtime_observation.reason === 'collaboration_heartbeat_missing') return { label: '协作心跳待检查', tone: 'error' };
+      if (member.runtime_observation.reason === 'presence_unavailable') return { label: '在线状态暂不可查', tone: 'unknown' };
+      return { label: member.runtime_observation.reason === 'collaboration_unconfirmed' ? '协作待确认' : '待确认', tone: 'unknown' };
+    }
+    return member.availability === 'busy' ? { label: '执行中', tone: 'active' } : { label: '空闲', tone: 'good' };
+  }
   if (memberIsStarting(member)) return { label: '启动中', tone: 'neutral' };
   if (member.status === 'creating') return memberSchedule(member.status);
   if (!member.availability || !["idle", "busy"].includes(member.availability)) return memberRuntime(member.availability);

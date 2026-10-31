@@ -1,0 +1,20 @@
+CREATE TABLE IF NOT EXISTS system_backup_external_actions (
+  public_id VARCHAR(40) PRIMARY KEY,
+  task_id VARCHAR(40) NOT NULL,
+  action_type VARCHAR(40) NOT NULL,
+  state VARCHAR(32) NOT NULL,
+  request_hash CHAR(64) NOT NULL,
+  request_json LONGTEXT NOT NULL,
+  result_json LONGTEXT NULL,
+  row_version BIGINT UNSIGNED NOT NULL DEFAULT 1,
+  dispatch_deadline DATETIME(6) NOT NULL,
+  created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  unresolved_task_id VARCHAR(40) GENERATED ALWAYS AS (CASE WHEN state IN ('request_sent','provider_unreachable') THEN task_id ELSE NULL END) STORED,
+  UNIQUE KEY uk_sb_final_action (task_id,action_type),
+  UNIQUE KEY uk_sb_one_unresolved (unresolved_task_id),
+  CONSTRAINT ck_sb_action_json CHECK(JSON_VALID(request_json)),
+  CONSTRAINT ck_sb_final_action_type CHECK(action_type IN ('manifest_put','marker_put','acceptance_put','catalog_registration_append')),
+  CONSTRAINT ck_sb_final_action_state CHECK(state IN ('request_sent','provider_unreachable','confirmed_present','confirmed_absent','conflict')),
+  FOREIGN KEY (task_id) REFERENCES system_backup_tasks(public_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

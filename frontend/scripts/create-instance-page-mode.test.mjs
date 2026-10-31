@@ -15,7 +15,7 @@ const instanceTypeSource = readFileSync(
 
 function sectionBetween(startMarker, endMarker) {
   const start = source.indexOf(startMarker);
-  const end = source.indexOf(endMarker);
+  const end = source.indexOf(endMarker, start + startMarker.length);
   if (start === -1 || end === -1 || end <= start) {
     throw new Error(`Unable to locate section: ${startMarker}`);
   }
@@ -86,7 +86,7 @@ assert(
 );
 const proOnlyTypes = sectionBetween(
   "const isProOnlyInstanceType",
-  "const isLiteOnlyInstanceType",
+  "const ",
 );
 assert(
   proOnlyTypes.includes('type === "codex"') &&
@@ -94,9 +94,9 @@ assert(
   "Historical Codex and Claude Code records must retain their Pro classification.",
 );
 assert(
-  source.includes('const isLiteOnlyInstanceType = (type: string) => type === "opencode";') &&
-    source.includes('!isLiteOnlyInstanceType(item.id)'),
-  "Create page must expose OpenCode only in Lite mode.",
+  !source.includes("isLiteOnlyInstanceType") &&
+    source.includes('selectedMode === "pro" || !isProOnlyInstanceType(item.id)'),
+  "Create page must expose OpenCode in both Lite and Pro modes.",
 );
 
 console.log("Create instance mode selector placement is valid.");

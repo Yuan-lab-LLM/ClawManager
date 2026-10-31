@@ -1,0 +1,39 @@
+# Strategic merge patch. Replace all four image references with the images built
+# from AgentsRuntime's container branch before applying. This is opt-in.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: clawmanager-app
+  namespace: clawmanager-system
+spec:
+  template:
+    spec:
+      containers:
+        - name: clawmanager-app
+          env:
+            - name: RUNTIME_CONTAINER_SLOTS
+              value: "8"
+            - name: RUNTIME_NAMESPACE
+              value: "clawmanager-system"
+            - name: RUNTIME_WORKSPACE_ROOT
+              value: "/workspaces"
+            - name: RUNTIME_WORKSPACE_PVC_CLAIM
+              value: "clawmanager-workspaces"
+            - name: RUNTIME_SCHEDULER_ENABLED
+              value: "true"
+            - name: OPENCLAW_RUNTIME_IMAGE
+              value: "YOUR_REGISTRY/openclaw-lite:slots"
+            - name: HERMES_RUNTIME_IMAGE
+              value: "YOUR_REGISTRY/hermes-lite:slots"
+            - name: OPENCODE_RUNTIME_IMAGE
+              value: "YOUR_REGISTRY/opencode-lite:slots"
+            - name: DEEPSEEK_HARNESS_RUNTIME_IMAGE
+              value: "YOUR_REGISTRY/deepseek-harness-lite:slots"
+            - name: RUNTIME_SLOT_CPU_REQUEST
+              value: "100m"
+            - name: RUNTIME_SLOT_MEMORY_REQUEST
+              value: "256Mi"
+            - name: RUNTIME_SLOT_CPU_LIMIT
+              value: "2"
+            - name: RUNTIME_SLOT_MEMORY_LIMIT
+              value: "4Gi"

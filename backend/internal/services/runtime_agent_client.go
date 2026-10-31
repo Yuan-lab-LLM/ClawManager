@@ -184,6 +184,8 @@ type RuntimeAgentCreateGatewayRequest struct {
 	MemoryMB            int                   `json:"memory_mb"`
 	DiskQuotaMB         int                   `json:"disk_quota_mb"`
 	Generation          int                   `json:"generation"`
+	PodUID              string                `json:"pod_uid,omitempty"`
+	SecurityProfile     string                `json:"security_profile,omitempty"`
 	UpgradeID           string                `json:"upgrade_id,omitempty"`
 	Environment         map[string]string     `json:"environment,omitempty"`
 }
@@ -237,6 +239,13 @@ func (c *runtimeAgentHTTPClient) Health(ctx context.Context, endpoint string) er
 }
 
 func (c *runtimeAgentHTTPClient) CreateGateway(ctx context.Context, endpoint string, req RuntimeAgentCreateGatewayRequest) (*RuntimeAgentCreateGatewayResponse, error) {
+	if req.SecurityProfile != "" {
+		return nil, fmt.Errorf("protected runtime generations require authenticated container slots")
+	}
+	return c.createGateway(ctx, endpoint, req)
+}
+
+func (c *runtimeAgentHTTPClient) createGateway(ctx context.Context, endpoint string, req RuntimeAgentCreateGatewayRequest) (*RuntimeAgentCreateGatewayResponse, error) {
 	var resp RuntimeAgentCreateGatewayResponse
 	if err := c.do(ctx, http.MethodPost, endpoint, "/v1/gateways", req, &resp); err != nil {
 		return nil, err

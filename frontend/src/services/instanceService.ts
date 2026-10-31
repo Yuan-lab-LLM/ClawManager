@@ -21,6 +21,7 @@ import type {
   BatchDeleteLiteInstancesResponse,
   InstanceSessionUsageDetail,
   InstanceSessionUsageResult,
+  RuntimeMaintenanceStatus,
 } from "../types/instance";
 import type { InstanceSkill } from "../types/skill";
 
@@ -38,6 +39,21 @@ export interface BrowserWorkerStatus {
 }
 
 export const instanceService = {
+  getRuntimeMaintenance: async (id: number): Promise<RuntimeMaintenanceStatus> => {
+    const response = await api.get(`/instances/${id}/runtime-maintenance`);
+    return response.data.data;
+  },
+  beginRuntimeMaintenance: async (id: number): Promise<RuntimeMaintenanceStatus> => {
+    const response = await api.post(`/instances/${id}/runtime-maintenance`, { timeout_seconds: 300 });
+    return response.data.data;
+  },
+  cancelRuntimeMaintenance: async (id: number, operationId: string): Promise<void> => {
+    await api.post(`/instances/${id}/runtime-maintenance/cancel`, { operation_id: operationId });
+  },
+  getRuntimeGovernance: async (id: number): Promise<import("../types/instance").RuntimeGovernanceStatus> => {
+    const response = await api.get(`/instances/${id}/runtime-governance`);
+    return response.data.data;
+  },
   // Get instance list
   getInstances: async (
     page: number = 1,

@@ -1,1 +1,2 @@
 *.sh text eol=lf
+docs/system-backup/reference/v12/*.md -text

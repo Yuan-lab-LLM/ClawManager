@@ -15,7 +15,6 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-Set-StrictMode -Version Latest
 
 if ($NipIoSuffix -notmatch '^[a-zA-Z0-9.-]+$' -or $NipIoSuffix.StartsWith('.') -or $NipIoSuffix.EndsWith('.')) {
     throw "Invalid nip.io suffix: $NipIoSuffix"
@@ -26,6 +25,7 @@ if ($Namespace -notmatch '^[a-z0-9]([-a-z0-9]*[a-z0-9])?$') {
 if ($SecretName -notmatch '^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$') {
     throw "Invalid Kubernetes Secret name: $SecretName"
 }
+Set-StrictMode -Version Latest
 
 $kubectlBaseArgs = @()
 if ($Kubeconfig) {

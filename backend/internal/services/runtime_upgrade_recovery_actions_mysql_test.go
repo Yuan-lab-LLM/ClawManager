@@ -206,6 +206,12 @@ func TestRecoveryPlacementMySQLDoesNotUpgradeExcludedInstancesOnRestart(t *testi
 	if _, err := sess.SQL().Exec(`UPDATE runtime_rollouts SET status='finished' WHERE id=?`, p.Rollout.ID); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := sess.SQL().Exec(`UPDATE runtime_rollouts SET started_at=NOW()-INTERVAL 1 MINUTE WHERE id=?`, p.Rollout.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sess.SQL().Exec(`INSERT INTO instances(id,user_id,type,runtime_type,instance_mode,status,runtime_generation) VALUES(9999,1,'openclaw','gateway','lite','creating',1)`); err != nil {
+		t.Fatal(err)
+	}
 	source := u.deployments.(recoveryInventory)[0]
 	newPod := source
 	newPod.ID = 320

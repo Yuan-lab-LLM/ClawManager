@@ -35,8 +35,15 @@ func LoadRuntimePoolProgress(ctx context.Context, repo any, id int64) (*RuntimeP
 		return nil, err
 	}
 	var p RuntimePoolProgress
+	var kind struct {
+		Kind string `json:"kind"`
+	}
+	_ = json.Unmarshal([]byte(raw), &kind)
 	if err := json.Unmarshal([]byte(raw), &p); err != nil {
 		return nil, err
+	}
+	if p.Version == 2 && kind.Kind == "openclaw-pool-replacement" {
+		return nil, nil
 	}
 	if p.Version != 1 || len(p.Targets) == 0 || p.Completed < 0 || p.Completed > len(p.Targets) {
 		return nil, fmt.Errorf("invalid runtime rollout checkpoint")

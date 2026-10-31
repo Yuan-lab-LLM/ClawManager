@@ -15,8 +15,10 @@ import (
 	"sync"
 	"time"
 
+	"clawreef/internal/backupgate"
 	"clawreef/internal/models"
 	"clawreef/internal/repository"
+	"clawreef/internal/runtimeauth"
 	cmk8s "clawreef/internal/services/k8s"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -44,10 +46,11 @@ type BrowserWorkerUpdate struct {
 }
 
 type BrowserWorkerService struct {
-	repo      repository.BrowserWorkerRepository
-	instances repository.InstanceRepository
-	client    *cmk8s.Client
-	mu        sync.Mutex
+	repo            repository.BrowserWorkerRepository
+	instances       repository.InstanceRepository
+	client          *cmk8s.Client
+	mu              sync.Mutex
+	networkIdentity runtimeauth.Lookup
 }
 
 func NewBrowserWorkerService(repo repository.BrowserWorkerRepository, instances repository.InstanceRepository, client *cmk8s.Client) *BrowserWorkerService {
@@ -289,6 +292,11 @@ func (s *BrowserWorkerService) Run(ctx context.Context, interval time.Duration) 
 		interval = 30 * time.Second
 	}
 	reconcile := func() {
+		release, gateErr := backupgate.HoldWorkUnit(ctx, "browser.reconcile")
+		if gateErr != nil {
+			return
+		}
+		defer release()
 		round, cancel := context.WithTimeout(ctx, interval)
 		defer cancel()
 		s.ReconcileAll(round)
@@ -362,6 +370,16 @@ func (s *BrowserWorkerService) ensureResources(ctx context.Context, instance *mo
 	policy := desiredBrowserWorkerNetworkPolicy(name, namespace,
 		envOr("POD_NAMESPACE", s.client.GetSystemNamespace()),
 		envOr("RUNTIME_NAMESPACE", s.client.GetSystemNamespace()), labels)
+	if instance.RuntimeSecurityProfile != "" {
+		if instance.RuntimeSecurityProfile != RuntimeSecurityProfile {
+			return errRuntimeBrowser
+		}
+		var err error
+		policy, err = s.protectedNetworkPolicy(ctx, instance)
+		if err != nil {
+			return err
+		}
+	}
 	policies := s.client.Clientset.NetworkingV1().NetworkPolicies(namespace)
 	existingPolicy, policyErr := policies.Get(ctx, name, metav1.GetOptions{})
 	if apierrors.IsNotFound(policyErr) {
@@ -374,6 +392,31 @@ func (s *BrowserWorkerService) ensureResources(ctx context.Context, instance *mo
 		return policyErr
 	}
 	deployment := desiredBrowserWorkerDeployment(name, namespace, labels, workspaceSubPath, s.client.WorkspacePVCClaimName, replicas, config)
+	if instance.RuntimeSecurityProfile == RuntimeSecurityProfile {
+		identity, err := s.protectedBrowserIdentity(ctx, instance)
+		if err != nil {
+			return err
+		}
+		scope := browserRuntimeScope(identity)
+		deployment.Spec.Template.Annotations = map[string]string{browserNetworkAnnotation: browserPolicyHash(policy), browserRuntimeAnnotation: scope}
+		deployment.Spec.Template.Labels["user-id"] = strconv.Itoa(instance.UserID)
+		deployment.Spec.Template.Spec.HostUsers = boolptr(false)
+		deployment.Spec.Template.Spec.Containers[0].SecurityContext = &corev1.SecurityContext{AllowPrivilegeEscalation: boolptr(false), Capabilities: &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}, Add: []corev1.Capability{"SETUID", "SETGID", "CHOWN", "DAC_OVERRIDE", "FOWNER", "KILL"}}}
+		deployment.Spec.Template.Spec.Containers[1].SecurityContext = &corev1.SecurityContext{AllowPrivilegeEscalation: boolptr(false), Capabilities: &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}}}
+		deployment.Spec.Template.Spec.Containers[0].Env = append(deployment.Spec.Template.Spec.Containers[0].Env, corev1.EnvVar{Name: "CHROMIUM_PROXY_SERVER", Value: "http://127.0.0.1:31280"})
+		for index := range deployment.Spec.Template.Spec.Containers[0].Env {
+			if deployment.Spec.Template.Spec.Containers[0].Env[index].Name == "CHROMIUM_CUSTOM_ARGS" {
+				// jlesage evaluates custom args as shell words; preserve Chrome's
+				// loopback-bypass removal as one literal argument, not redirection.
+				deployment.Spec.Template.Spec.Containers[0].Env[index].Value += " --proxy-server=http://127.0.0.1:31280 --proxy-bypass-list='<-loopback>'"
+			}
+		}
+		deployment.Spec.Template.Spec.Containers[1].Env = append(deployment.Spec.Template.Spec.Containers[1].Env, corev1.EnvVar{Name: "BROWSER_WORKER_NETWORK_ISOLATED", Value: "1"}, corev1.EnvVar{Name: "BROWSER_WORKER_RUNTIME_SCOPE", Value: scope}, corev1.EnvVar{Name: "BROWSER_WORKER_EGRESS_PROXY", Value: fmt.Sprintf("http://clawmanager-egress-proxy.%s.svc.cluster.local:3131", envOr("POD_NAMESPACE", s.client.GetSystemNamespace()))})
+		deployment.Spec.Template.Spec.Containers[1].Env = append(deployment.Spec.Template.Spec.Containers[1].Env, corev1.EnvVar{Name: "BROWSER_WORKER_POD_UID", ValueFrom: &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.uid"}}})
+		prepare := &deployment.Spec.Template.Spec.InitContainers[0]
+		prepare.VolumeMounts[0].SubPath = fmt.Sprintf("openclaw/user-%d/instance-%d", instance.UserID, instance.ID)
+		prepare.Args = []string{"mkdir -p /workspace/home/.openclaw/browser-worker && chown -R 1000:1000 /workspace/home/.openclaw/browser-worker"}
+	}
 	deployments := s.client.Clientset.AppsV1().Deployments(namespace)
 	existing, err := deployments.Get(ctx, name, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
@@ -389,6 +432,9 @@ func (s *BrowserWorkerService) ensureResources(ctx context.Context, instance *mo
 		}
 	}
 	service := desiredBrowserWorkerService(name, namespace, labels, instance.ID)
+	if instance.RuntimeSecurityProfile == RuntimeSecurityProfile {
+		service.Spec.Selector["user-id"] = strconv.Itoa(instance.UserID)
+	}
 	services := s.client.Clientset.CoreV1().Services(namespace)
 	existingService, err := services.Get(ctx, name, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
@@ -471,10 +517,11 @@ func desiredBrowserWorkerService(name, namespace string, labels map[string]strin
 	return &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace, Labels: labels},
 		Spec: corev1.ServiceSpec{
+			Type:     corev1.ServiceTypeClusterIP,
 			Selector: map[string]string{"app": "clawbrowser", "instance-id": strconv.Itoa(instanceID)},
 			Ports: []corev1.ServicePort{
 				{Name: "web", Port: 5800, TargetPort: intstr.FromString("web")},
-				{Name: "cdp", Port: 9222, TargetPort: intstr.FromString("cdp")},
+				{Name: "cdp", Port: 9222, Protocol: corev1.ProtocolTCP, TargetPort: intstr.FromString("cdp")},
 			},
 		},
 	}
@@ -576,6 +623,12 @@ func (s *BrowserWorkerService) patchOpenClawConfig(instance *models.Instance, en
 	}
 	if workspace == "" {
 		workspace = RuntimeWorkspacePathWithRoot(s.client.WorkspaceRoot, RuntimeTypeOpenClaw, instance.UserID, instance.ID)
+	}
+	if instance.RuntimeSecurityProfile != "" {
+		if instance.RuntimeSecurityProfile != RuntimeSecurityProfile {
+			return errRuntimeBrowser
+		}
+		return patchProtectedBrowserConfig(workspace, fmt.Sprintf("%s.%s.svc.cluster.local:9222", s.name(instance.ID), s.namespace()), enabled)
 	}
 	path := filepath.Join(workspace, "home", ".openclaw", "openclaw.json")
 	raw, err := os.ReadFile(path)

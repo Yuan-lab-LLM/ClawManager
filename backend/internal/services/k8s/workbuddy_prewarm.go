@@ -16,6 +16,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	utilrand "k8s.io/apimachinery/pkg/util/rand"
+
+	"clawreef/internal/backupgate"
 )
 
 const (
@@ -90,6 +92,11 @@ func (c *WorkbuddyPrewarmController) Run(ctx context.Context) {
 }
 
 func (c *WorkbuddyPrewarmController) reconcileAndLog(ctx context.Context) {
+	release, gateErr := backupgate.HoldWorkUnit(ctx, "workbuddy.prewarm")
+	if gateErr != nil {
+		return
+	}
+	defer release()
 	if err := c.Reconcile(ctx); err != nil && ctx.Err() == nil {
 		log.Printf("WorkBuddy prewarm reconcile failed: %v", err)
 	}

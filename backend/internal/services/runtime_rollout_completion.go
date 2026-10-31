@@ -44,6 +44,9 @@ func (s *RuntimeScheduler) finishLiveRuntimeRollout(ctx context.Context, r model
 		targets = p.Targets
 	}
 	reason, err := s.runtimeRolloutCompletionReason(ctx, r, targets)
+	if err == nil && reason == "" && r.RuntimeType == RuntimeTypeOpenClaw && r.PreflightID == nil {
+		reason, err = s.emptyPoolPlacementCompletionReason(ctx, r)
+	}
 	if err != nil {
 		var changed *runtimeRolloutTargetChanged
 		if errors.As(err, &changed) {
@@ -62,6 +65,32 @@ func (s *RuntimeScheduler) finishLiveRuntimeRollout(ctx context.Context, r model
 		return s.rolloutRepo.UpdateStatus(ctx, r.ID, "finished", r.StartedAt, &now, nil)
 	}
 	return s.waitForRuntimeRolloutVerification(ctx, r, p, reason)
+}
+
+// A ready image is insufficient if new instances cannot use the pool. This
+// read-only prospective check shares the actual placement predicate; publishing
+// finished is the only commit point, so no mutable default can drift from it.
+func (s *RuntimeScheduler) emptyPoolPlacementCompletionReason(ctx context.Context, r models.RuntimeRollout) (string, error) {
+	reported, err := s.podRepo.List(ctx, r.RuntimeType)
+	if err != nil {
+		return "", err
+	}
+	current, err := s.verifiedOrdinaryRuntimePods(ctx, r.RuntimeType, reported)
+	if err != nil {
+		return "", err
+	}
+	if r.SourceImagesJSON == nil && !isEmptyOpenClawPoolReset(&r) && s.upgrade != nil {
+		current, err = s.upgrade.legacyDefaultPlacement(ctx, &r, current)
+	} else {
+		current, err = filterPlacementTarget(current, r.ID, stringValue(r.SourceImagesJSON), r.TargetImageRef, false, true)
+	}
+	if err != nil {
+		return "", err
+	}
+	if len(current) == 0 {
+		return "target image is ready but no verified ordinary Runtime can accept a new instance", nil
+	}
+	return "", nil
 }
 
 func (s *RuntimeScheduler) waitForRuntimeRolloutVerification(ctx context.Context, r models.RuntimeRollout, p *RuntimePoolProgress, reason string) error {

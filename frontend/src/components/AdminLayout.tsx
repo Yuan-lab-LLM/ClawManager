@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
+  Archive,
   ArrowLeft,
   Bot,
   ChevronDown,
@@ -26,6 +27,7 @@ import { CATEGORIES } from '../pages/admin/protection/_data';
 interface AdminLayoutProps {
   children: React.ReactNode;
   title?: string;
+  fullHeight?: boolean;
 }
 
 interface NavItem {
@@ -40,7 +42,7 @@ interface NavItem {
 const shellContainerClass = 'w-full px-3 sm:px-4 lg:px-5 2xl:px-6';
 const appLogoSrc = '/lobster_logo.png';
 
-const AdminLayout: React.FC<AdminLayoutProps> = ({ children, title = '' }) => {
+const AdminLayout: React.FC<AdminLayoutProps> = ({ children, title = '', fullHeight = false }) => {
   const location = useLocation();
   const navigate = useNavigate();
   const { user, logout } = useAuth();
@@ -54,6 +56,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children, title = '' }) => {
 
   const navItems: NavItem[] = [
     { path: '/admin', label: t('nav.adminDashboard'), icon: Home, exact: true },
+    { path: '/admin/backups', label: t('nav.backups'), icon: Archive },
     { path: '/admin/users', label: t('nav.users'), icon: Users },
     { path: '/admin/instances', label: t('nav.instances'), icon: Monitor },
     { path: '/admin/runtime-pods', label: t('nav.runtime'), icon: Server },
@@ -234,18 +237,11 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children, title = '' }) => {
           </nav>
         </header>
 
-        <div className="app-subheader">
-          <div className={`${shellContainerClass} py-4`}>
-            <h1 className="text-xl font-semibold text-slate-950">{title}</h1>
-          </div>
-        </div>
-
-        <main className={`${shellContainerClass} py-6`}>{children}</main>
       </div>
 
-      <div className="hidden min-h-screen md:flex">
+      <div className={`md:flex ${fullHeight ? 'md:h-dvh md:min-h-0' : 'md:min-h-screen'}`}>
         <aside
-          className={`shrink-0 border-r border-slate-200 bg-white transition-[width] duration-200 ${
+          className={`hidden shrink-0 border-r border-slate-200 bg-white transition-[width] duration-200 md:block ${
             sidebarCollapsed ? 'w-16' : 'w-64'
           }`}
         >
@@ -348,14 +344,14 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children, title = '' }) => {
           </div>
         </aside>
 
-        <div className="flex min-w-0 flex-1 flex-col">
-          <div className="app-subheader">
-            <div className={`${shellContainerClass} flex h-20 items-center`}>
-              <h1 className="text-2xl font-semibold text-slate-950">{title}</h1>
+        <div className={`flex min-w-0 flex-1 flex-col ${fullHeight ? 'md:min-h-0' : ''}`}>
+          <div className="app-subheader shrink-0">
+            <div className={`${shellContainerClass} flex items-center py-4 md:h-20 md:py-0`}>
+              <h1 className="text-xl font-semibold text-slate-950 md:text-2xl">{title}</h1>
             </div>
           </div>
 
-          <main className={`${shellContainerClass} flex-1 py-6`}>{children}</main>
+          <main className={`${shellContainerClass} ${fullHeight ? 'flex min-h-0 flex-1 flex-col py-6 md:py-3' : 'flex-1 py-6'}`}>{children}</main>
         </div>
       </div>
     </div>

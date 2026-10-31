@@ -150,7 +150,7 @@ func testUpgradeStandbyMySQLSchedulerLifecycle(t *testing.T, delayed bool, count
 		ids = append(ids, 1000+len(ids))
 	}
 	for _, id := range ids {
-		exec("INSERT INTO instances VALUES (?,1,'openclaw','gateway','lite','stopped',2,?,NULL,NULL,NOW())", id, RuntimeWorkspacePathWithRoot(root, "openclaw", 1, id))
+		exec("INSERT INTO instances(id,user_id,type,runtime_type,instance_mode,status,runtime_generation,workspace_path,runtime_error_message,runtime_error_code,updated_at) VALUES (?,1,'openclaw','gateway','lite','stopped',2,?,NULL,NULL,NOW())", id, RuntimeWorkspacePathWithRoot(root, "openclaw", 1, id))
 		exec(`INSERT INTO runtime_upgrade_items (rollout_id,instance_id,state,source_generation,created_at,updated_at) VALUES (124,?,'prepared',2,NOW(),NOW())`, id)
 	}
 	ip := "10.1.2.3"
@@ -181,7 +181,7 @@ func testUpgradeStandbyMySQLSchedulerLifecycle(t *testing.T, delayed bool, count
 		agent.states[gid] = &RuntimeAgentGatewayState{GatewayID: gid, InstanceID: id, Generation: 2, State: "running"}
 	}
 	if len(scoped) > 0 && scoped[0] {
-		exec("INSERT INTO instances VALUES (490,1,'openclaw','gateway','lite','error',2,?,NULL,NULL,NOW())", RuntimeWorkspacePathWithRoot(root, "openclaw", 1, 490))
+		exec("INSERT INTO instances(id,user_id,type,runtime_type,instance_mode,status,runtime_generation,workspace_path,runtime_error_message,runtime_error_code,updated_at) VALUES (490,1,'openclaw','gateway','lite','error',2,?,NULL,NULL,NOW())", RuntimeWorkspacePathWithRoot(root, "openclaw", 1, 490))
 		if err := bindings.Create(ctx, &models.InstanceRuntimeBinding{InstanceID: 490, RuntimePodID: 307, RuntimeType: "openclaw", GatewayID: "gw-490-2", GatewayPort: 20100, State: "error", Generation: 2, WorkspacePath: RuntimeWorkspacePathWithRoot(root, "openclaw", 1, 490)}); err != nil {
 			t.Fatal(err)
 		}

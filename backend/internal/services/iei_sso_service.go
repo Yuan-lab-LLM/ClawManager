@@ -52,11 +52,33 @@ type ieiSessionClaims struct {
 // "email+yyyy-MM-dd HH:mm:ss". A successful external token is exchanged for a
 // separate short-lived signed session so the AES token is not reused.
 type IEISSOService struct {
-	cfg      config.IEISystemConfig
-	key      []byte
-	iv       []byte
-	location *time.Location
-	now      func() time.Time
+	revocations IEISessionRevocationStore
+	cfg         config.IEISystemConfig
+	key         []byte
+	iv          []byte
+	location    *time.Location
+	now         func() time.Time
+}
+
+type IEISessionRevocationStore interface {
+	IsIEISessionRevoked(string) (bool, error)
+	RevokeIEISession(string, time.Time) error
+}
+
+func (s *IEISSOService) SetSessionRevocationStore(store IEISessionRevocationStore) {
+	s.revocations = store
+}
+func (s *IEISSOService) RevokeSession(token string) error {
+	session, err := s.ValidateSession(token)
+	if err != nil {
+		return err
+	}
+	if s.revocations == nil {
+		return nil
+	}
+	// Renewals retain session ID; retain revocation for the maximum legal TTL,
+	// not merely this possibly older cookie's expiration.
+	return s.revocations.RevokeIEISession(session.SessionID, s.now().Add(24*time.Hour))
 }
 
 func NewIEISSOService(cfg config.IEISystemConfig) (*IEISSOService, error) {
@@ -240,6 +262,12 @@ func (s *IEISSOService) ValidateSession(rawToken string) (*IEISession, error) {
 	email, ok := normalizeIEIEmail(claims.Email)
 	if !ok || !strings.EqualFold(claims.Subject, email) || claims.ExpiresAt == nil {
 		return nil, ErrInvalidIEISession
+	}
+	if s.revocations != nil {
+		revoked, err := s.revocations.IsIEISessionRevoked(claims.SessionID)
+		if err != nil || revoked {
+			return nil, ErrInvalidIEISession
+		}
 	}
 	return &IEISession{
 		Email:     email,

@@ -1,6 +1,19 @@
 import type { OpenClawConfigPlan } from "./openclawConfig";
 import type { InstanceSkill } from "./skill";
 
+export interface RuntimeGovernanceStatus {
+  mode: "legacy" | "governed" | "awaiting_runtime";
+  task_identity_required: boolean;
+  capabilities: string[];
+  report: {
+    protocol: number;
+    generation: number;
+    runtime_version: string;
+    adapter_version: string;
+    reported_at: string;
+  } | null;
+}
+
 export interface Instance {
   id: number;
   user_id: number;
@@ -24,6 +37,7 @@ export interface Instance {
   runtime_variant?: "linux" | "windows";
   instance_mode: "lite" | "pro";
   status: "creating" | "running" | "stopped" | "error" | "deleting";
+  availability?: InstanceAvailability;
   cpu_cores: number;
   memory_gb: number;
   disk_gb: number;
@@ -444,6 +458,12 @@ export interface InstanceSessionUsageSummary {
   total_estimated_cost: number;
   currency: string;
   session_count: number;
+  latest_requested_model?: string;
+  latest_actual_model?: string;
+  latest_model_status?: string;
+  latest_model_at?: string;
+  latest_latency_ms?: number;
+  latest_ttft_ms?: number;
 }
 
 export interface InstanceSessionUsageCompliance {
@@ -478,6 +498,7 @@ export interface InstanceSessionUsageResult {
 export interface InstanceSessionTrace {
   trace_id: string;
   requested_model: string;
+  actual_provider_model?: string;
   status: string;
   prompt_tokens: number;
   completion_tokens: number;
@@ -514,6 +535,25 @@ export interface InstanceLLMGovernanceStatus {
   is_compliant: boolean;
 }
 
+export interface RuntimeMaintenanceStatus {
+  draining: boolean;
+  drained: boolean;
+  automatic_upgrade_available: false;
+  operation: null | {
+    upgrade_fenced?: boolean;
+    operation_id: string;
+    generation: number;
+    deadline: string;
+    cancelled: boolean;
+    gate_closed: boolean;
+    active_executions: number;
+    active_admissions: number;
+    active_jobs: number;
+    queued_inputs: number;
+    reported_at: string | null;
+  };
+}
+
 export const PRESET_CONFIGS = {
   small: {
     name: "Small",
@@ -539,3 +579,4 @@ export const PRESET_CONFIGS = {
 };
 
 export const DEFAULT_LITE_DISK_GB = 5;
+export const MINIMUM_PRO_DISK_GB = 10;

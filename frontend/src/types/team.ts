@@ -44,6 +44,7 @@ export interface TeamMember {
   current_task_id?: number;
   progress: number;
   last_seen_at?: string;
+  runtime_observation?: { state: 'online' | 'starting' | 'offline' | 'unknown'; reason?: string; observed_at?: string };
   availability?: "unknown" | "idle" | "busy" | "blocked" | "offline";
   runtime_status?: string;
   runtime_task_id?: string;
@@ -181,6 +182,9 @@ export interface CreateTeamRequest {
 }
 
 export interface TeamDetails {
+	// Northbound filtering advances the raw cursor even through hidden events.
+	events_has_more?: boolean;
+	events_next_before_id?: number;
   team: Team;
   leader_member_id?: string;
   leader?: TeamMember;

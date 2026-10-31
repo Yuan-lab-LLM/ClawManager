@@ -42,6 +42,7 @@ type WorkspaceFileScope struct {
 	InstanceID        int
 	TeamID            int
 	UserID            int
+	RuntimeGeneration int
 	WorkspacePath     string
 	AuditActionPrefix string
 }

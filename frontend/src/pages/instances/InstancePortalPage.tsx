@@ -17,6 +17,7 @@ import {
   formatInstanceType,
   type Instance,
   type InstanceRuntimeDetails,
+  type InstanceSessionUsageSummary,
 } from "../../types/instance";
 import { useI18n } from "../../contexts/I18nContext";
 
@@ -112,6 +113,8 @@ const InstancePortalPage: React.FC = () => {
   const [shouldConnect, setShouldConnect] = useState(false);
   const [runtimeDetails, setRuntimeDetails] =
     useState<InstanceRuntimeDetails | null>(null);
+  const [latestModel, setLatestModel] =
+    useState<InstanceSessionUsageSummary | null>(null);
   const [runtimeActionLoading, setRuntimeActionLoading] = useState<
     string | null
   >(null);
@@ -192,6 +195,38 @@ const InstancePortalPage: React.FC = () => {
   const selectedInstanceId = selectedInstance?.id ?? null;
   const selectedInstanceStatus = selectedInstance?.status ?? null;
   const selectedRuntimeType = selectedInstance?.runtime_type ?? "desktop";
+
+  useEffect(() => {
+    let cancelled = false;
+    const instanceId = selectedInstance?.id;
+    if (!instanceId || selectedInstance?.status !== "running") {
+      setLatestModel(null);
+      return;
+    }
+
+    const loadLatestModel = async () => {
+      try {
+        const result = await instanceService.getInstanceSessionUsage(instanceId, {
+          page: 1,
+          limit: 1,
+        });
+        if (!cancelled) {
+          setLatestModel(result.summary);
+        }
+      } catch {
+        if (!cancelled) {
+          setLatestModel(null);
+        }
+      }
+    };
+
+    void loadLatestModel();
+    const timer = window.setInterval(loadLatestModel, 4000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [selectedInstance?.id, selectedInstance?.status]);
   // OpenCode Lite owns a dedicated per-instance origin, so it must use the
   // regular browser access flow. Only an actual shell runtime uses the TUI.
   const isShellPortal = selectedRuntimeType === "shell";
@@ -543,6 +578,31 @@ const InstancePortalPage: React.FC = () => {
                 </p>
               </div>
               <div className="flex items-center gap-2">
+                {selectedInstance?.type === "opencode" && (
+                  <div className="group relative hidden sm:block">
+                    <button
+                      type="button"
+                      className="inline-flex max-w-[220px] items-center gap-1.5 rounded-lg border border-[#3b4759] bg-[#202c3d] px-2.5 py-1.5 text-xs text-[#c7d2e0]"
+                      aria-label="查看最近一次回答使用的模型"
+                    >
+                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                      <span className="truncate">
+                        {latestModel?.latest_actual_model
+                          ? `最近模型：${latestModel.latest_actual_model}`
+                          : "最近模型：暂无记录"}
+                      </span>
+                    </button>
+                    <div className="pointer-events-none absolute right-0 top-full z-50 mt-2 w-64 rounded-xl border border-[#3b4759] bg-[#111827] p-3 text-left text-xs text-[#d8e0eb] opacity-0 shadow-2xl transition-opacity group-hover:opacity-100">
+                      <div className="font-semibold text-white">最近一次回答</div>
+                      <div className="mt-2 space-y-1.5 text-[#aab4c4]">
+                        <div className="flex justify-between gap-3"><span>请求模式</span><span className="text-[#e5e7eb]">{latestModel?.latest_requested_model || "—"}</span></div>
+                        <div className="flex justify-between gap-3"><span>实际模型</span><span className="max-w-[140px] truncate text-right text-[#e5e7eb]">{latestModel?.latest_actual_model || "暂无请求记录"}</span></div>
+                        {latestModel?.latest_latency_ms != null && <div className="flex justify-between gap-3"><span>响应耗时</span><span className="text-[#e5e7eb]">{(latestModel.latest_latency_ms / 1000).toFixed(2)} 秒</span></div>}
+                        {latestModel?.latest_ttft_ms != null && <div className="flex justify-between gap-3"><span>首 Token</span><span className="text-[#e5e7eb]">{latestModel.latest_ttft_ms} ms</span></div>}
+                      </div>
+                    </div>
+                  </div>
+                )}
                 {selectedInstance &&
                   selectedInstance.status === "running" &&
                   portalEmbedUrl &&

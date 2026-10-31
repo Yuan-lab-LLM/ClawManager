@@ -27,8 +27,20 @@ func (s *HermesDesktopService) proxyHermesWebSocket(ctx context.Context, c *Herm
 	if err != nil {
 		return err
 	}
-	dial, err := s.gatewayAuth.DialWebSocket(ctx, target.authKey(), target.url, *target.instance.AccessToken, path, query)
+	ctx, err = s.hermesUpstreamContext(ctx, target)
 	if err != nil {
+		return err
+	}
+	var dial *HermesGatewayWebSocket
+	err = s.protectedHermesOperation(ctx, target, func(c context.Context) error {
+		var err error
+		dial, err = s.gatewayAuth.DialWebSocket(c, target.authKey(), target.url, target.gatewayCredential(), path, query)
+		return err
+	})
+	if err != nil {
+		if dial != nil && dial.Conn != nil {
+			_ = dial.Conn.Close()
+		}
 		return ErrHermesDesktopUpstream
 	}
 	upstream, cookies := dial.Conn, dial.Cookies
@@ -41,6 +53,27 @@ func (s *HermesDesktopService) proxyHermesWebSocket(ctx context.Context, c *Herm
 		return err
 	}
 	defer client.Close()
+	ctx, cancel := context.WithDeadline(ctx, c.ExpiresAt.Time)
+	defer cancel()
+	var closeOnce sync.Once
+	closeSockets := func() {
+		closeOnce.Do(func() {
+			cancel()
+			_ = upstream.Close()
+			_ = client.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(4401, "ClawManager session ended; reconnect"), time.Now().Add(100*time.Millisecond))
+			_ = client.Close()
+		})
+	}
+	lifetimeJoined := make(chan struct{})
+	stopLifetime := context.AfterFunc(ctx, func() { defer close(lifetimeJoined); closeSockets() })
+	var relays sync.WaitGroup
+	defer func() {
+		closeSockets()
+		if !stopLifetime() {
+			<-lifetimeJoined
+		}
+		relays.Wait()
+	}()
 	client.SetReadLimit(256 << 10)
 	upstream.SetReadLimit(hermesDesktopMaxBody)
 	var writeMu sync.Mutex
@@ -52,7 +85,9 @@ func (s *HermesDesktopService) proxyHermesWebSocket(ctx context.Context, c *Herm
 	}
 	done := make(chan struct{}, 2)
 	rpcScope := newHermesDesktopRPCScope()
+	relays.Add(2)
 	go func() {
+		defer relays.Done()
 		defer func() { done <- struct{}{} }()
 		window := time.Now()
 		count := 0
@@ -134,8 +169,9 @@ func (s *HermesDesktopService) proxyHermesWebSocket(ctx context.Context, c *Herm
 		}
 	}()
 	go func() {
+		defer relays.Done()
 		defer func() { done <- struct{}{} }()
-		redactor := newHermesDesktopStreamRedactor(*target.instance.AccessToken, cookies, dial.Ticket)
+		redactor := newHermesDesktopStreamRedactor(target.platformCredential(), cookies, dial.Ticket, target.nativeCredential)
 		for {
 			kind, frame, err := upstream.ReadMessage()
 			if err != nil || (kind != websocket.TextMessage && !(path == "/api/pty" && kind == websocket.BinaryMessage)) {
@@ -154,7 +190,7 @@ func (s *HermesDesktopService) proxyHermesWebSocket(ctx context.Context, c *Herm
 				if err != nil {
 					return
 				}
-				safe, err := hermesDesktopSanitize(line, *target.instance.AccessToken, cookies, dial.Ticket)
+				safe, err := hermesDesktopSanitize(line, target.platformCredential(), cookies, dial.Ticket, target.nativeCredential)
 				if err != nil {
 					return
 				}
@@ -167,27 +203,35 @@ func (s *HermesDesktopService) proxyHermesWebSocket(ctx context.Context, c *Herm
 	}()
 	// Bound lifetime to the short CM cookie and re-check ownership, active
 	// account, feature gate and exact runtime generation while a socket lives.
-	ticker := time.NewTicker(15 * time.Second)
+	interval := 15 * time.Second
+	if target.instance.RuntimeSecurityProfile != "" {
+		interval = 5 * time.Second
+	}
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
-	expires := time.NewTimer(time.Until(c.ExpiresAt.Time))
-	defer expires.Stop()
 	for {
 		select {
 		case <-done:
 			return nil
 		case <-ctx.Done():
 			return nil
-		case <-expires.C:
-			_ = upstream.Close()
-			_ = client.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(4401, "ClawManager session ended; reconnect"), time.Now().Add(time.Second))
-			return nil
 		case <-ticker.C:
-			if _, err := s.authorizeClaims(ctx, c); err != nil {
-				_ = upstream.Close()
-				_ = client.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(4401, "ClawManager session ended; reconnect"), time.Now().Add(time.Second))
-				return nil
-			}
-			if client.WriteControl(websocket.PingMessage, nil, time.Now().Add(5*time.Second)) != nil || upstream.WriteControl(websocket.PingMessage, nil, time.Now().Add(5*time.Second)) != nil {
+			checkErr := hermesDeadlineCheck(ctx, func(checkCtx context.Context) error {
+				_, err := s.authorizeClaims(checkCtx, c)
+				if err != nil {
+					return err
+				}
+				// A valid replacement allocation cannot authorize an already
+				// connected socket to the original Pod/IP/native credential.
+				if _, err := s.hermesUpstreamContext(checkCtx, target); err != nil {
+					return err
+				}
+				if err := client.WriteControl(websocket.PingMessage, nil, time.Now().Add(time.Second)); err != nil {
+					return err
+				}
+				return upstream.WriteControl(websocket.PingMessage, nil, time.Now().Add(time.Second))
+			}, closeSockets)
+			if checkErr != nil {
 				return nil
 			}
 		}
@@ -203,9 +247,9 @@ type hermesDesktopStreamRedactor struct {
 	pending []byte
 }
 
-func newHermesDesktopStreamRedactor(password string, cookies []*http.Cookie, ticket string) *hermesDesktopStreamRedactor {
+func newHermesDesktopStreamRedactor(password string, cookies []*http.Cookie, ticket string, extraSecrets ...string) *hermesDesktopStreamRedactor {
 	redactor := &hermesDesktopStreamRedactor{}
-	secrets := []string{password, ticket}
+	secrets := append([]string{password, ticket}, extraSecrets...)
 	for _, cookie := range cookies {
 		secrets = append(secrets, cookie.Value)
 	}

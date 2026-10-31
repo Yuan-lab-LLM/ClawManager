@@ -45,4 +45,3 @@ SET @stmt = IF(
 PREPARE stmt FROM @stmt;
 EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
-

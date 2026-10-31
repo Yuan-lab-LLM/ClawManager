@@ -27,12 +27,13 @@ type runtimeEventPublisher interface {
 }
 
 type RuntimeAgentHandler struct {
-	cfg          config.RuntimePoolConfig
-	podRepo      repository.RuntimePodRepository
-	bindingRepo  repository.InstanceRuntimeBindingRepository
-	instanceRepo repository.InstanceRepository
-	events       runtimeEventPublisher
-	skillService services.SkillService
+	reportVerifier RuntimeGatewayReportVerifier
+	cfg            config.RuntimePoolConfig
+	podRepo        repository.RuntimePodRepository
+	bindingRepo    repository.InstanceRuntimeBindingRepository
+	instanceRepo   repository.InstanceRepository
+	events         runtimeEventPublisher
+	skillService   services.SkillService
 }
 
 type runtimeAgentPodIdentity struct {
@@ -311,6 +312,16 @@ func (h *RuntimeAgentHandler) ReportGateways(c *gin.Context) {
 			utils.HandleError(c, err)
 			return
 		}
+		handled, _, recoveryErr := h.reconcileProtectedPendingReport(c.Request.Context(), binding, podID, gateway)
+		if recoveryErr != nil {
+			utils.HandleError(c, recoveryErr)
+			return
+		}
+		if handled {
+			// The protected transaction already updates both rows. A second
+			// write here could resurrect a same-generation concurrent stop.
+			continue
+		}
 		if binding == nil || pendingBindingCanYieldToReportedGateway(binding, podID, gateway) {
 			reconciled, reconcileErr := h.reconcileReportedOpenClawGateway(c.Request.Context(), podID, gateway)
 			if reconcileErr != nil {
@@ -332,20 +343,23 @@ func (h *RuntimeAgentHandler) ReportGateways(c *gin.Context) {
 		lifecycle := services.NormalizeRuntimeGatewayLifecycle(gateway.State, gateway.ErrorMessage)
 		if lifecycle.Running {
 			if err := h.bindingRepo.UpdateRunning(c.Request.Context(), gateway.InstanceID, gateway.Generation, strings.TrimSpace(gateway.GatewayID), gateway.GatewayPort, gateway.GatewayPID); err != nil {
+				if errors.Is(err, models.ErrRuntimeUpgradeInProgress) {
+					continue
+				}
 				utils.HandleError(c, err)
 				return
 			}
 		} else {
 			if err := h.bindingRepo.UpdateState(c.Request.Context(), gateway.InstanceID, gateway.Generation, lifecycle.BindingState, lifecycle.Message); err != nil {
+				if errors.Is(err, models.ErrRuntimeUpgradeInProgress) {
+					continue
+				}
 				utils.HandleError(c, err)
 				return
 			}
 		}
 		if err := h.syncInstanceRuntimeState(c.Request.Context(), gateway, lifecycle); err != nil {
-			// A Gateway snapshot may overlap a user restart or scheduler retry.
-			// That one stale generation must not reject the whole pod snapshot and
-			// make every unrelated Gateway on the Runtime appear offline.
-			if errors.Is(err, repository.ErrStaleRuntimeGeneration) {
+			if errors.Is(err, models.ErrRuntimeUpgradeInProgress) || errors.Is(err, repository.ErrStaleRuntimeGeneration) {
 				continue
 			}
 			utils.HandleError(c, err)
@@ -377,6 +391,9 @@ func (h *RuntimeAgentHandler) ReportGateways(c *gin.Context) {
 			continue
 		}
 		if _, err := h.bindingRepo.DeleteRunningByInstanceIDGenerationAndReleaseSlot(c.Request.Context(), binding.InstanceID, podID, binding.Generation); err != nil {
+			if errors.Is(err, models.ErrRuntimeUpgradeInProgress) {
+				continue
+			}
 			utils.HandleError(c, err)
 			return
 		}

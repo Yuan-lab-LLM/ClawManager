@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -26,6 +27,7 @@ const (
 )
 
 type IEISystemHandler struct {
+	ownerTeams      *northbound.OwnerTeamAPI
 	dashboard       ownerDashboardReader
 	cfg             config.IEISystemConfig
 	sso             *services.IEISSOService
@@ -103,6 +105,31 @@ func (h *IEISystemHandler) SetWorkspaceFileHandler(workspace *WorkspaceFileHandl
 	h.workspace = workspace
 }
 
+func (h *IEISystemHandler) SetOwnerTeamAPI(api *northbound.OwnerTeamAPI) { h.ownerTeams = api }
+
+func (h *IEISystemHandler) RegisterOwnerTeamRoutes(group *gin.RouterGroup) {
+	northbound.RegisterOwnerTeamRoutes(group, func() *northbound.OwnerTeamAPI { return h.ownerTeams }, func(c *gin.Context) (*northbound.OwnerTeamIdentity, bool) {
+		session, ok := h.requireSession(c)
+		if !ok {
+			return nil, false
+		}
+		if c.Request.Method != http.MethodGet {
+			if c.GetHeader("Sec-Fetch-Site") == "cross-site" {
+				utils.Error(c, 403, "Cross-site request denied")
+				return nil, false
+			}
+			if origin := strings.TrimRight(c.GetHeader("Origin"), "/"); origin != "" {
+				parsed, err := url.Parse(origin)
+				if err != nil || parsed.Host != c.Request.Host || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.User != nil || parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
+					utils.Error(c, 403, "Cross-site request denied")
+					return nil, false
+				}
+			}
+		}
+		return &northbound.OwnerTeamIdentity{Owner: session.Email, SessionID: "iei-team:" + session.SessionID, Source: "iei"}, true
+	})
+}
+
 func (h *IEISystemHandler) SetLifecycleService(lifecycle ieiLifecycleService) {
 	h.lifecycle = lifecycle
 }
@@ -176,6 +203,12 @@ func (h *IEISystemHandler) RefreshSession(c *gin.Context) {
 
 func (h *IEISystemHandler) DeleteSession(c *gin.Context) {
 	h.noStore(c)
+	if token, err := c.Cookie(ieiSystemSessionCookie); err == nil && token != "" {
+		if err := h.sso.RevokeSession(token); err != nil && !errors.Is(err, services.ErrInvalidIEISession) {
+			utils.Error(c, 503, "Unable to revoke session; please retry")
+			return
+		}
+	}
 	h.clearSessionCookie(c)
 	utils.Success(c, http.StatusOK, "IEI system session cleared", nil)
 }

@@ -3,6 +3,8 @@ package models
 import "time"
 
 type NorthboundAdminSettings struct {
+	OwnerTeamsEnabled         bool      `db:"owner_teams_enabled" json:"owner_teams_enabled"`
+	OwnerTeamCreationUserID   int       `db:"owner_team_creation_user_id" json:"owner_team_creation_user_id"`
 	ID                        int       `db:"id,primarykey" json:"id"`
 	APIEnabled                bool      `db:"api_enabled" json:"api_enabled"`
 	ExternalNodePort          int       `db:"external_node_port" json:"external_node_port"`

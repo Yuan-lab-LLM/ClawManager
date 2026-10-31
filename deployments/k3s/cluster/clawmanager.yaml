@@ -6263,8 +6263,9 @@ spec:
               value: "http://clawmanager-gateway.clawmanager-system.svc.cluster.local:9001"
             - name: CLAWMANAGER_DESKTOP_DIRECT_PROXY
               value: "true"
-            # Required for the OpenCode Lite root-origin UI. The {instance_id}
-            # placeholder is required; see docs/deployment.md.
+            # Required for the OpenCode Lite per-instance browser origin. Set
+            # this to a nip.io or private wildcard-DNS URL template; the
+            # {instance_id} placeholder is mandatory. See docs/deployment.md.
             - name: CLAWMANAGER_OPENCODE_PUBLIC_URL_TEMPLATE
               value: ""
             # Required for the DeepSeek Harness Lite root-origin UI. The
@@ -6327,7 +6328,7 @@ spec:
           readinessProbe:
             httpGet:
               scheme: HTTPS
-              path: /healthz
+              path: /api/v1/version
               port: https
             initialDelaySeconds: 10
             periodSeconds: 10

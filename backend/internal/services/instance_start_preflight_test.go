@@ -89,7 +89,7 @@ func (r *deniedRestartFenceRepo) FenceRuntimeRestart(context.Context, int, int) 
 
 func TestRestartConcurrentChangeDoesNotStopWriter(t *testing.T) {
 	repo := &deniedRestartFenceRepo{v2LifecycleInstanceRepo: newV2LifecycleInstanceRepo()}
-	original := models.Instance{ID: 89, Type: "openclaw", RuntimeType: "gateway", InstanceMode: "lite", Status: "running", RuntimeGeneration: 8}
+	original := models.Instance{ID: 89, UserID: 45, Type: "openclaw", RuntimeType: "gateway", InstanceMode: "lite", Status: "running", RuntimeGeneration: 8}
 	repo.byID[89] = &original
 	before := original
 	s := &instanceService{instanceRepo: repo}
