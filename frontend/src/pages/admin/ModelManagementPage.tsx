@@ -683,7 +683,9 @@ const ModelManagementPage: React.FC = () => {
       ) {
         next.discovery_error = null;
         next.discovery_key = undefined;
-        next.discovered_models = [];
+        if (!Object.prototype.hasOwnProperty.call(patch, 'discovered_models')) {
+          next.discovered_models = [];
+        }
         next.plan_excluded_ids = [];
         next.discovering = false;
         if (
@@ -691,7 +693,9 @@ const ModelManagementPage: React.FC = () => {
           Object.prototype.hasOwnProperty.call(patch, 'protocol_type') ||
           Object.prototype.hasOwnProperty.call(patch, 'base_url')
         ) {
-          next.provider_model_name = '';
+          if (!Object.prototype.hasOwnProperty.call(patch, 'provider_model_name')) {
+            next.provider_model_name = '';
+          }
           next.reasoning_control_mode = '';
           next.reasoning_enabled = false;
           if (next.isNew) {
@@ -1212,11 +1216,16 @@ const ModelManagementPage: React.FC = () => {
                           searchPlaceholder={t('modelManagementPage.vendorTemplateSearchPlaceholder')}
                           emptyText={t('modelManagementPage.vendorTemplateEmpty')}
                           getTypeLabel={getProviderTypeLabel}
-                          onSelect={(template) => updateCard(card.local_id, {
-                            provider_type: template.providerType,
-                            protocol_type: resolveProviderProtocolType(template.providerType, template.protocolType),
-                            base_url: template.baseUrl,
-                          })}
+                          onSelect={(template) => {
+                            const suggestedModels = template.suggestedModels ?? [];
+                            updateCard(card.local_id, {
+                              provider_type: template.providerType,
+                              protocol_type: resolveProviderProtocolType(template.providerType, template.protocolType),
+                              base_url: template.baseUrl,
+                              provider_model_name: card.provider_model_name.trim() || suggestedModels[0] || '',
+                              discovered_models: suggestedModels.map((id) => ({ id, display_name: id })),
+                            });
+                          }}
                         />
                       </div>
                       <div>
