@@ -66,7 +66,9 @@ func (s *platformLLMGatewayRepoStub) ListBundles(userID int) ([]models.OpenClawC
 func (s *platformLLMGatewayRepoStub) GetBundleByID(id int) (*models.OpenClawConfigBundle, error) {
 	return nil, nil
 }
-func (s *platformLLMGatewayRepoStub) CreateBundle(bundle *models.OpenClawConfigBundle) error { return nil }
+func (s *platformLLMGatewayRepoStub) CreateBundle(bundle *models.OpenClawConfigBundle) error {
+	return nil
+}
 func (s *platformLLMGatewayRepoStub) UpdateBundle(bundle *models.OpenClawConfigBundle) error {
 	return nil
 }

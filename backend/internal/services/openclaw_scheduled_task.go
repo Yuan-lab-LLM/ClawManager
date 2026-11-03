@@ -10,13 +10,13 @@ import (
 const OpenClawScheduledTaskFormat = "task/openclaw-cron@v1"
 
 type openClawCronSchedule struct {
-	Kind      string  `json:"kind"`
-	At        string  `json:"at,omitempty"`
-	EveryMs   *int64  `json:"everyMs,omitempty"`
-	AnchorMs  *int64  `json:"anchorMs,omitempty"`
-	Expr      string  `json:"expr,omitempty"`
-	Tz        string  `json:"tz,omitempty"`
-	StaggerMs *int64  `json:"staggerMs,omitempty"`
+	Kind      string `json:"kind"`
+	At        string `json:"at,omitempty"`
+	EveryMs   *int64 `json:"everyMs,omitempty"`
+	AnchorMs  *int64 `json:"anchorMs,omitempty"`
+	Expr      string `json:"expr,omitempty"`
+	Tz        string `json:"tz,omitempty"`
+	StaggerMs *int64 `json:"staggerMs,omitempty"`
 }
 
 type openClawCronDelivery struct {
@@ -27,30 +27,30 @@ type openClawCronDelivery struct {
 }
 
 type openClawCronPayload struct {
-	Kind                        string `json:"kind"`
-	Text                        string `json:"text,omitempty"`
-	Message                     string `json:"message,omitempty"`
-	Model                       string `json:"model,omitempty"`
-	Thinking                    string `json:"thinking,omitempty"`
-	TimeoutSeconds              *int   `json:"timeoutSeconds,omitempty"`
-	AllowUnsafeExternalContent  *bool  `json:"allowUnsafeExternalContent,omitempty"`
-	Deliver                     *bool  `json:"deliver,omitempty"`
-	Channel                     string `json:"channel,omitempty"`
-	To                          string `json:"to,omitempty"`
-	BestEffortDeliver           *bool  `json:"bestEffortDeliver,omitempty"`
+	Kind                       string `json:"kind"`
+	Text                       string `json:"text,omitempty"`
+	Message                    string `json:"message,omitempty"`
+	Model                      string `json:"model,omitempty"`
+	Thinking                   string `json:"thinking,omitempty"`
+	TimeoutSeconds             *int   `json:"timeoutSeconds,omitempty"`
+	AllowUnsafeExternalContent *bool  `json:"allowUnsafeExternalContent,omitempty"`
+	Deliver                    *bool  `json:"deliver,omitempty"`
+	Channel                    string `json:"channel,omitempty"`
+	To                         string `json:"to,omitempty"`
+	BestEffortDeliver          *bool  `json:"bestEffortDeliver,omitempty"`
 }
 
 type openClawCronConfig struct {
-	Name           string               `json:"name"`
-	Description    string               `json:"description,omitempty"`
-	Enabled        *bool                `json:"enabled,omitempty"`
-	DeleteAfterRun *bool                `json:"deleteAfterRun,omitempty"`
-	AgentID        string               `json:"agentId,omitempty"`
-	SessionKey     string               `json:"sessionKey,omitempty"`
-	Schedule       openClawCronSchedule `json:"schedule"`
-	SessionTarget  string               `json:"sessionTarget"`
-	WakeMode       string               `json:"wakeMode"`
-	Payload        openClawCronPayload  `json:"payload"`
+	Name           string                `json:"name"`
+	Description    string                `json:"description,omitempty"`
+	Enabled        *bool                 `json:"enabled,omitempty"`
+	DeleteAfterRun *bool                 `json:"deleteAfterRun,omitempty"`
+	AgentID        string                `json:"agentId,omitempty"`
+	SessionKey     string                `json:"sessionKey,omitempty"`
+	Schedule       openClawCronSchedule  `json:"schedule"`
+	SessionTarget  string                `json:"sessionTarget"`
+	WakeMode       string                `json:"wakeMode"`
+	Payload        openClawCronPayload   `json:"payload"`
 	Delivery       *openClawCronDelivery `json:"delivery,omitempty"`
 }
 

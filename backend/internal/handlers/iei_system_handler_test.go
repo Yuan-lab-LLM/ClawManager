@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"crypto/aes"
 	"crypto/cipher"
 	"encoding/base64"
@@ -44,6 +45,22 @@ type fakeIEILifecycleService struct {
 	calls      []fakeIEILifecycleCall
 	submitErr  error
 	operations map[string]*models.NorthboundOperation
+}
+
+type fakeIEIHermesDesktopActivator struct {
+	descriptor services.HermesDesktopDescriptor
+	token      string
+	calls      [][2]int
+	err        error
+}
+
+func (f *fakeIEIHermesDesktopActivator) Activate(_ context.Context, userID, instanceID int) (*services.HermesDesktopDescriptor, string, error) {
+	f.calls = append(f.calls, [2]int{userID, instanceID})
+	if f.err != nil {
+		return nil, "", f.err
+	}
+	d := f.descriptor
+	return &d, f.token, nil
 }
 
 func (s *fakeIEILifecycleService) SubmitLifecycle(principal northbound.Principal, _ string, instanceID int, mode, action string) (*models.NorthboundOperation, bool, error) {
@@ -149,6 +166,9 @@ func TestIEISystemRestartRequiresSessionOwnerAndRunningInstance(t *testing.T) {
 	}
 
 	owned := httptest.NewRequest(http.MethodPost, "/api/v1/ieisystem/instances/1/restart", nil)
+	// A failed runtime must remain restartable; ownership and transitional
+	// state protections above must not be relaxed with it.
+	instanceService.instances[1].Status = "error"
 	owned.AddCookie(sessionCookie)
 	ownedRecorder := httptest.NewRecorder()
 	router.ServeHTTP(ownedRecorder, owned)
@@ -434,6 +454,163 @@ func TestIEISystemDedicatedRuntimeAccessReturnsTokenBootstrapURL(t *testing.T) {
 	}
 }
 
+func TestIEISystemOpenClawLiteAccessReturnsTokenBootstrapURL(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	cfg := testIEIHandlerConfig()
+	sso, err := services.NewIEISSOService(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner := "owner@example.com"
+	instanceService := &fakeIEIInstanceService{
+		fakeWorkspaceHandlerInstanceService: &fakeWorkspaceHandlerInstanceService{instances: map[int]*models.Instance{
+			44: {ID: 44, UserID: 10, Owner: &owner, Name: "Owner OpenClaw", Type: services.RuntimeTypeOpenClaw, RuntimeType: services.RuntimeBackendGateway, InstanceMode: services.InstanceModeLite, Status: "running"},
+		}},
+	}
+	accessService := services.NewInstanceAccessService()
+	defer accessService.Stop()
+	instanceHandler := &InstanceHandler{
+		accessService: accessService,
+		proxyService:  services.NewInstanceProxyService(accessService),
+	}
+	handler := NewIEISystemHandler(cfg, sso, instanceService, instanceHandler)
+	router := gin.New()
+	router.POST("/api/v1/ieisystem/session", handler.ExchangeSession)
+	router.POST("/api/v1/ieisystem/instances/:id/access", handler.GenerateInstanceAccess)
+
+	sessionCookie := exchangeIEITestSession(t, router, cfg, owner)
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/ieisystem/instances/44/access", nil)
+	request.AddCookie(sessionCookie)
+	router.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("access status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+
+	var response struct {
+		Data struct {
+			AccessURL string `json:"access_url"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := url.Parse(response.Data.AccessURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parsed.Path != "/api/v1/instances/44/proxy/" || parsed.Query().Get("token") == "" {
+		t.Fatalf("OpenClaw Lite access URL did not contain its token bootstrap: %q", response.Data.AccessURL)
+	}
+	if !accessService.IsInstanceAccessToken(parsed.Query().Get("token")) {
+		t.Fatal("OpenClaw Lite URL token is not an instance-access capability")
+	}
+}
+
+func TestIsOpenClawLiteInstance(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		instance *models.Instance
+		want     bool
+	}{
+		{
+			name: "openclaw lite gateway",
+			instance: &models.Instance{
+				Type: services.RuntimeTypeOpenClaw, RuntimeType: services.RuntimeBackendGateway, InstanceMode: services.InstanceModeLite,
+			},
+			want: true,
+		},
+		{
+			name: "openclaw pro",
+			instance: &models.Instance{
+				Type: services.RuntimeTypeOpenClaw, RuntimeType: services.RuntimeBackendGateway, InstanceMode: services.InstanceModePro,
+			},
+			want: false,
+		},
+		{
+			name: "hermes lite gateway",
+			instance: &models.Instance{
+				Type: services.RuntimeTypeHermes, RuntimeType: services.RuntimeBackendGateway, InstanceMode: services.InstanceModeLite,
+			},
+			want: false,
+		},
+		{
+			name: "openclaw lite desktop",
+			instance: &models.Instance{
+				Type: services.RuntimeTypeOpenClaw, RuntimeType: "desktop", InstanceMode: services.InstanceModeLite,
+			},
+			want: false,
+		},
+		{name: "nil", instance: nil, want: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isOpenClawLiteInstance(tc.instance); got != tc.want {
+				t.Fatalf("isOpenClawLiteInstance() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestIEISystemHermesLiteAccessReturnsDesktopWebSession(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	cfg := testIEIHandlerConfig()
+	sso, err := services.NewIEISSOService(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner := "owner@example.com"
+	instanceService := &fakeIEIInstanceService{
+		fakeWorkspaceHandlerInstanceService: &fakeWorkspaceHandlerInstanceService{instances: map[int]*models.Instance{
+			42: {ID: 42, UserID: 10, Owner: &owner, Name: "Owner Hermes", Type: services.RuntimeTypeHermes, RuntimeType: services.RuntimeBackendGateway, InstanceMode: services.InstanceModeLite, Status: "running"},
+		}},
+	}
+	expires := time.Now().UTC().Add(8 * time.Minute).Truncate(time.Second)
+	activator := &fakeIEIHermesDesktopActivator{descriptor: services.HermesDesktopDescriptor{
+		Available: true, InstanceID: 42, RendererURL: "/hermes-desktop-web/?instance_id=42", ExpiresAt: &expires,
+	}, token: "desktop-session-token"}
+	handler := NewIEISystemHandler(cfg, sso, instanceService, nil)
+	handler.SetHermesDesktopActivator(activator)
+	router := gin.New()
+	router.POST("/api/v1/ieisystem/session", handler.ExchangeSession)
+	router.POST("/api/v1/ieisystem/instances/:id/access", handler.GenerateInstanceAccess)
+
+	sessionCookie := exchangeIEITestSession(t, router, cfg, owner)
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/ieisystem/instances/42/access", nil)
+	request.AddCookie(sessionCookie)
+	router.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("access status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	var response struct {
+		Data struct {
+			AccessURL string    `json:"access_url"`
+			ExpiresAt time.Time `json:"expires_at"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.Data.AccessURL != "/hermes-desktop-web/?instance_id=42" || !response.Data.ExpiresAt.Equal(expires) {
+		t.Fatalf("unexpected Desktop Web access response: %#v", response.Data)
+	}
+	if len(activator.calls) != 1 || activator.calls[0] != [2]int{10, 42} {
+		t.Fatalf("unexpected activator calls: %#v", activator.calls)
+	}
+	var found bool
+	for _, cookie := range recorder.Result().Cookies() {
+		if cookie.Name == services.HermesDesktopCookieName(42) {
+			found = true
+			if cookie.Value != "desktop-session-token" || cookie.Path != services.HermesDesktopBase(42)+"/" || !cookie.HttpOnly {
+				t.Fatalf("unsafe Desktop Web cookie: %#v", cookie)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("IEI did not set the instance-scoped Desktop Web cookie")
+	}
+}
+
 func TestIEIWorkspaceUsesIEISessionAndOwnerInsteadOfShareLink(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	cfg := testIEIHandlerConfig()
@@ -532,6 +709,14 @@ func TestProxyAccessTokenRequiresMatchingIEISession(t *testing.T) {
 	}
 	if token, ok := handler.proxyAccessToken(requestContext(first.Token), 76); !ok || token != access.Token {
 		t.Fatalf("IEI-bound access rejected its matching session: %q/%v", token, ok)
+	}
+
+	// The production router redacts proxy cookies before invoking the handler.
+	// IEI-bound validation must still use the preserved original request.
+	redacted := requestContext(first.Token)
+	redactInstanceProxyCredentials(redacted)
+	if token, ok := handler.proxyAccessToken(redacted, 76); !ok || token != access.Token {
+		t.Fatalf("IEI-bound access rejected its matching session after redaction: %q/%v", token, ok)
 	}
 
 	dedicatedAccess, err := accessService.GenerateBoundToken(

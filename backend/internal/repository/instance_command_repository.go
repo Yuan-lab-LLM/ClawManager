@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -29,6 +30,15 @@ func NewInstanceCommandRepository(sess db.Session) InstanceCommandRepository {
 }
 
 func (r *instanceCommandRepository) Create(command *models.InstanceCommand) error {
+	if command == nil || command.InstanceID <= 0 {
+		return fmt.Errorf("invalid instance command")
+	}
+	return (&instanceRepository{r.sess}).withUnfencedInstance(context.Background(), command.InstanceID, func(tx *instanceRepository) error {
+		return (&instanceCommandRepository{tx.sess}).create(command)
+	})
+}
+
+func (r *instanceCommandRepository) create(command *models.InstanceCommand) error {
 	ensureTimestamps(&command.CreatedAt, &command.UpdatedAt)
 	if command.IssuedAt.IsZero() {
 		command.IssuedAt = time.Now().UTC()
@@ -44,6 +54,35 @@ func (r *instanceCommandRepository) Create(command *models.InstanceCommand) erro
 }
 
 func (r *instanceCommandRepository) Update(command *models.InstanceCommand) error {
+	if command == nil || command.InstanceID <= 0 || command.ID <= 0 {
+		return fmt.Errorf("invalid instance command")
+	}
+	return (&instanceRepository{r.sess}).withInstanceRowLock(context.Background(), command.InstanceID, func(tx *instanceRepository) error {
+		store := &instanceCommandRepository{tx.sess}
+		current, err := store.GetByID(command.ID)
+		if err != nil {
+			return err
+		}
+		if current == nil || current.InstanceID != command.InstanceID {
+			return fmt.Errorf("instance command identity mismatch")
+		}
+		terminal := command.Status == "succeeded" || command.Status == "failed"
+		if !terminal {
+			if err := checkRuntimeUpgrade(context.Background(), tx.sess, command.InstanceID); err != nil {
+				return err
+			}
+		}
+		if current.Status == "succeeded" || current.Status == "failed" {
+			if current.Status == command.Status {
+				return nil
+			}
+			return fmt.Errorf("instance command is already finished")
+		}
+		return store.update(command)
+	})
+}
+
+func (r *instanceCommandRepository) update(command *models.InstanceCommand) error {
 	if command.UpdatedAt.IsZero() {
 		command.UpdatedAt = time.Now().UTC()
 	}

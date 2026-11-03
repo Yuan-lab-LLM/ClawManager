@@ -38,10 +38,10 @@ type LDAPConfigPublic struct {
 	UserFilter        string   `json:"user_filter"`
 	UsernameAttribute string   `json:"username_attribute"`
 	EmailAttribute    string   `json:"email_attribute"`
-	GroupBaseDN        string   `json:"group_base_dn"`
-	GroupFilter        string   `json:"group_filter"`
-	AdminGroupDNs      []string `json:"admin_group_dns"`
-	DefaultRole        string   `json:"default_role"`
+	GroupBaseDN       string   `json:"group_base_dn"`
+	GroupFilter       string   `json:"group_filter"`
+	AdminGroupDNs     []string `json:"admin_group_dns"`
+	DefaultRole       string   `json:"default_role"`
 }
 
 type LDAPConfigUpdate struct {
@@ -57,7 +57,7 @@ type EnterpriseAuthConfigResponse struct {
 	BindPasswordConfigured bool                 `json:"bind_password_configured"`
 	Version                int64                `json:"version"`
 	UpdatedAt              *time.Time           `json:"updated_at,omitempty"`
-	Status                   EnterpriseAuthStatus `json:"status"`
+	Status                 EnterpriseAuthStatus `json:"status"`
 }
 
 type EnterpriseAuthConfigUpdateRequest struct {
@@ -71,13 +71,13 @@ type EnterpriseAuthConfigUpdateRequest struct {
 }
 
 type enterpriseAuthSnapshot struct {
-	config                   config.EnterpriseAuthConfig
-	authenticator            *LDAPAuthenticator
-	diagnostics              *LDAPAuthenticator
-	version                  int64
-	updatedAt                *time.Time
-	bindPasswordConfigured   bool
-	bindPasswordOverride     bool
+	config                 config.EnterpriseAuthConfig
+	authenticator          *LDAPAuthenticator
+	diagnostics            *LDAPAuthenticator
+	version                int64
+	updatedAt              *time.Time
+	bindPasswordConfigured bool
+	bindPasswordOverride   bool
 }
 
 type EnterpriseAuthManager struct {
@@ -316,10 +316,10 @@ func (m *EnterpriseAuthManager) candidateConfig(req EnterpriseAuthConfigUpdateRe
 			UserFilter:        req.LDAP.UserFilter,
 			UsernameAttribute: req.LDAP.UsernameAttribute,
 			EmailAttribute:    req.LDAP.EmailAttribute,
-			GroupBaseDN:        req.LDAP.GroupBaseDN,
-			GroupFilter:        req.LDAP.GroupFilter,
-			AdminGroupDNs:      cleanStringList(req.LDAP.AdminGroupDNs),
-			DefaultRole:        req.LDAP.DefaultRole,
+			GroupBaseDN:       req.LDAP.GroupBaseDN,
+			GroupFilter:       req.LDAP.GroupFilter,
+			AdminGroupDNs:     cleanStringList(req.LDAP.AdminGroupDNs),
+			DefaultRole:       req.LDAP.DefaultRole,
 		},
 	}
 	if req.ClearBindPassword {
@@ -354,10 +354,10 @@ func (m *EnterpriseAuthManager) configFromSetting(setting *models.EnterpriseAuth
 			UserFilter:        setting.LDAPUserFilter,
 			UsernameAttribute: setting.LDAPUsernameAttribute,
 			EmailAttribute:    setting.LDAPEmailAttribute,
-			GroupBaseDN:        setting.LDAPGroupBaseDN,
-			GroupFilter:        setting.LDAPGroupFilter,
-			AdminGroupDNs:      splitStoredList(derefEnterpriseString(setting.LDAPAdminGroupDNs)),
-			DefaultRole:        setting.LDAPDefaultRole,
+			GroupBaseDN:       setting.LDAPGroupBaseDN,
+			GroupFilter:       setting.LDAPGroupFilter,
+			AdminGroupDNs:     splitStoredList(derefEnterpriseString(setting.LDAPAdminGroupDNs)),
+			DefaultRole:       setting.LDAPDefaultRole,
 		},
 	}
 	if setting.LDAPBindPasswordCiphertext != nil {
@@ -514,10 +514,10 @@ func publicLDAPConfig(cfg config.LDAPConfig) LDAPConfigPublic {
 		UserFilter:        cfg.UserFilter,
 		UsernameAttribute: cfg.UsernameAttribute,
 		EmailAttribute:    cfg.EmailAttribute,
-		GroupBaseDN:        cfg.GroupBaseDN,
-		GroupFilter:        cfg.GroupFilter,
-		AdminGroupDNs:      cleanStringList(cfg.AdminGroupDNs),
-		DefaultRole:        cfg.DefaultRole,
+		GroupBaseDN:       cfg.GroupBaseDN,
+		GroupFilter:       cfg.GroupFilter,
+		AdminGroupDNs:     cleanStringList(cfg.AdminGroupDNs),
+		DefaultRole:       cfg.DefaultRole,
 	}
 }
 

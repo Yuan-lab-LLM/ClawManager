@@ -1,0 +1,11 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import ts from 'typescript';
+const source = fs.readFileSync(new URL('../src/lib/runtimeFailure.ts', import.meta.url), 'utf8');
+const { outputText } = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext } });
+const { runtimeFailureSummary } = await import(`data:text/javascript;base64,${Buffer.from(outputText).toString('base64')}`);
+assert.equal(runtimeFailureSummary({ runtime_error_code: 'MODEL_CONFIGURATION_REQUIRED', runtime_error_message: 'no schedulable openclaw runtime pod' }), '没有可用模型，请检查模型设置');
+assert.equal(runtimeFailureSummary({ runtime_error_code: 'RUNTIME_POOL_UNAVAILABLE' }), '当前没有符合条件的运行池');
+assert.equal(runtimeFailureSummary({ runtime_error_message: 'legacy failure\ndetails' }), 'legacy failure');
+assert.equal(runtimeFailureSummary({ runtime_error_code: 'FUTURE_CODE', runtime_error_message: 'new diagnostic' }), 'new diagnostic');
+console.log('PASS: typed runtime failure descriptions and legacy/unknown compatibility');

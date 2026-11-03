@@ -1,0 +1,383 @@
+.owner-dashboard {min-width:0;display:grid;grid-template-columns:72px minmax(0,1fr);gap:0}
+.owner-bookmarks {padding-top:16px;min-width:0}
+.owner-bookmarks [role=tablist] {display:flex;flex-direction:column;gap:8px}
+.owner-bookmarks [role=tab] {position:relative;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:6px;min-height:70px;width:73px;padding:10px 4px;border:1px solid #e2e8f0;border-right:0;border-radius:12px 0 0 12px;background:#edf2f8;color:#64748b;font-size:14px;white-space:nowrap}
+.owner-bookmarks [role=tab][aria-selected=true] {background:white;color:#2563eb;z-index:1}
+.owner-bookmarks [role=tab][aria-selected=true]::after {content:'';position:absolute;right:-2px;top:0;bottom:0;width:3px;background:white}
+.owner-dashboard>.owner-alert {position:fixed;top:68px;right:20px;z-index:40;max-width:420px;box-shadow:0 4px 16px #0f172a12}
+.owner-panel {min-width:0;min-height:0;padding:10px;border:1px solid #e2e8f0;border-radius:14px;background:white;display:flex;flex-direction:column;gap:10px}
+.owner-alert {border-radius:8px;background:#fffbeb;color:#92400e;padding:8px 12px;font-size:13px}
+.owner-overview,.owner-growth,.owner-reports {display:flex;flex-direction:column;gap:12px;min-width:0;min-height:0}
+.owner-summary {display:grid;grid-template-columns:repeat(4,minmax(0,1fr));grid-template-rows:1.35fr 1fr;min-height:0;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden;background:#fff}
+.owner-growth-summary {display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border:1px solid #e2e8f0;border-radius:12px;background:white}
+.owner-growth-summary.embedded {display:contents}
+.owner-welcome {grid-column:span 2;display:flex;flex-direction:column;justify-content:center;padding:22px 24px;background:radial-gradient(ellipse at top left,#e6f0ff 0%,#f7fbff 60%,white 100%);min-width:0;min-height:0}
+.owner-welcome-line {display:flex;align-items:center;gap:10px;margin-bottom:8px;font-size:18px;font-weight:600;min-width:0}
+.owner-welcome-line span {overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.owner-level-line {display:flex;align-items:center;gap:18px}
+.owner-level {font-size:44px;font-weight:650;letter-spacing:-1.2px;white-space:nowrap;line-height:1.1}
+.owner-progress {width:100%;max-width:430px;min-width:0;margin-top:8px}
+.owner-welcome-line svg {width:40px;height:40px;padding:8px}
+.owner-title-badge {font-size:12px;color:#2563eb;background:#eaf2ff;border-radius:20px;padding:3px 10px;white-space:nowrap}
+.owner-progress p {font-size:12px;color:#64748b;margin-top:5px}
+.owner-growth-stat {display:flex;flex-direction:column;justify-content:center;padding:12px 16px;border-left:1px solid #f1f5f9;min-width:0}
+.owner-growth-stat p:first-child {font-size:14px;color:#64748b}
+.owner-growth-stat strong {font-size:26px;font-weight:600;margin:4px 0;line-height:1.15}
+.owner-growth-stat small {font-size:12px;color:#64748b}
+.owner-metric {display:flex;flex-direction:column;justify-content:center;min-width:0;padding:16px 20px;border-top:1px solid #edf2f7;border-right:1px solid #f1f5f9}
+.owner-metric:last-child {border-right:0}
+.owner-metric-label {font-size:13px;color:#64748b}
+.owner-metric-value {font-size:28px;line-height:1.2;font-weight:600;margin:5px 0}
+.owner-metric-note,.owner-comparison {font-size:12px;color:#64748b}
+.owner-comparison {margin-top:4px;text-align:left}
+.owner-charts {display:grid;grid-template-columns:minmax(0,2fr) minmax(272px,1fr);gap:12px;min-height:0}
+.owner-chart-card {display:flex;flex-direction:column;min-width:0;min-height:0;border:1px solid #e2e8f0;border-radius:12px;padding:12px;background:white}
+.owner-chart-card h3,.owner-continue h3 {font-size:16px;font-weight:600}
+.owner-chart-head {display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
+.owner-chart-caption {font-size:12px;color:#64748b;text-align:right;margin:4px 0}
+.owner-chart-fit {flex:1;min-height:120px;height:100%;min-width:0}
+.owner-heatmap {min-height:235px}
+.owner-heatmap-grid {margin:auto 0;display:flex;justify-content:center;gap:8px;padding:2px 0}
+.owner-heatmap>div.mt-2 {margin-top:4px}
+.owner-continue {container-type:inline-size;border:1px solid #e2e8f0;border-radius:12px;padding:18px;min-height:0}
+.owner-continue-head {display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px;min-height:22px}
+.owner-continue h3 {line-height:22px}
+.owner-continue-head nav {display:flex;align-items:center;gap:6px;font-size:12px;color:#64748b}
+.owner-continue-head nav button {padding:3px;border:1px solid #e2e8f0;border-radius:5px}
+.owner-continue-head nav button:disabled {opacity:.3}
+.owner-continue-list {display:flex;flex-wrap:wrap;gap:10px;align-items:stretch}
+.owner-continue-list>button {display:flex;flex-direction:column;gap:10px;flex:0 0 calc((100% - 20px)/3);max-width:340px;min-width:0;height:176px;text-align:left;padding:14px;border:1px solid #e5edf7;border-radius:12px;background:linear-gradient(120deg,#f8fbff,#fff)}
+.owner-work-identity {display:flex;align-items:center;gap:10px;min-height:42px;width:100%}
+.owner-continue-name {display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;font-size:14px;line-height:18px;font-weight:600;overflow-wrap:anywhere}
+.owner-continue-type {display:block;font-size:12px;line-height:16px;color:#64748b;margin-top:3px}
+.owner-continue-logo {height:40px;width:40px;flex:none;object-fit:contain}
+.owner-work-question {display:flex;flex:1;min-height:0;flex-direction:column;gap:3px;width:100%;padding:6px 8px;border-radius:7px;background:#eef3f9aa}
+.owner-work-question>span:first-child {font-size:11px;line-height:14px;color:#64748b}
+.owner-work-question>span:last-child {display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;font-size:13px;line-height:18px;overflow-wrap:anywhere}
+.owner-work-empty {color:#94a3b8}
+.owner-work-footer {display:flex;align-items:center;justify-content:space-between;gap:4px;width:100%;font-size:12px;line-height:16px;color:#64748b;white-space:nowrap}
+.owner-work-footer>span {display:flex;align-items:center;gap:3px;color:#2563eb}
+.owner-continue-list>button:hover {background:#eff6ff;border-color:#bfdbfe}
+.owner-continue-list[data-count="4"]>button {flex-basis:calc((100% - 10px)/2)}
+@container(min-width:860px) {
+ .owner-continue-list[data-count="4"]>button {flex-basis:calc((100% - 30px)/4)}
+}
+@container(min-width:1080px) {
+ .owner-continue-list[data-count="5"]>button {flex-basis:calc((100% - 40px)/5)}
+}
+@container(max-width:599px) {
+ .owner-continue-list>button {flex-basis:calc((100% - 10px)/2)}
+}
+@container(max-width:359px) {
+ .owner-continue-list>button {flex-basis:100%!important;max-width:none}
+}
+.portal-instance-select {display:grid;grid-template-columns:48px minmax(0,1fr);grid-template-rows:1fr auto;column-gap:12px;row-gap:8px;min-height:116px;padding:14px 62px 14px 14px}
+.portal-instance-content {display:contents}
+.portal-instance-logo {height:48px;width:48px;padding:5px;grid-row:1/3;align-self:center}
+.portal-instance-name {padding-right:0;min-height:0}
+.portal-instance-meta {grid-column:2;display:flex;flex-wrap:wrap;gap:4px 10px;line-height:16px}
+.portal-instance-meta>span {white-space:nowrap}
+.portal-instance-actions {position:absolute;right:10px;top:8px;bottom:8px;width:42px;pointer-events:none}
+.portal-instance-enter {position:absolute;right:0;top:50%;transform:translateY(-50%);pointer-events:auto}
+.portal-instance-more {position:absolute;right:0;top:0;pointer-events:auto}
+@media(hover:hover) {
+ .portal-instance-actions {visibility:hidden}
+ .portal-instance-card:hover .portal-instance-actions,.portal-instance-card:focus-within .portal-instance-actions {visibility:visible}
+}
+.owner-growth-body {display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.05fr);gap:12px;min-height:0}
+.owner-task-panel {display:flex;flex-direction:column;min-height:0;border:1px solid #e2e8f0;border-radius:12px;padding:12px}
+.owner-task-tabs {display:flex;align-items:center;gap:6px;margin-bottom:10px}
+.owner-task-tabs button {font-size:14px;padding:6px 10px;border-radius:7px;background:#f8fafc}
+.owner-task-tabs button[aria-pressed=true] {background:#eff6ff;color:#2563eb}
+.owner-task-list {display:grid;gap:8px;align-content:start;flex:1}
+.owner-task {border:1px solid #edf2f7;border-radius:9px;padding:10px;background:#f8fafc}
+.owner-pager {display:flex;align-items:center;justify-content:center;gap:12px;font-size:13px;color:#64748b;margin-top:8px}
+.owner-pager button {padding:4px 8px;border:1px solid #e2e8f0;border-radius:6px}
+.owner-pager button:disabled {opacity:.4}
+.owner-growth-footer {display:flex;justify-content:space-between;gap:12px;font-size:13px;color:#64748b}
+.owner-report-tools {display:flex;align-items:center;flex-wrap:wrap;gap:8px;font-size:13px}
+.owner-report-tools button,.owner-report-tools input,.owner-report-tools select {border:1px solid #e2e8f0;border-radius:7px;padding:5px 8px}
+.owner-report-summary {border:1px solid #e2e8f0;border-radius:12px;padding:12px}
+.owner-report-stats {display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-top:10px}
+.owner-report-body {display:grid;grid-template-columns:minmax(0,1.5fr) minmax(280px,1fr);gap:12px;min-height:0}
+.owner-report-runtime {min-height:0;border:1px solid #e2e8f0;border-radius:12px;padding:12px;display:flex;flex-direction:column}
+.owner-report-runtime ul {flex:1}
+.owner-report-runtime li {padding:8px 0;border-top:1px solid #f1f5f9}
+.owner-report-footer {border-radius:10px;background:#f8fafc;padding:10px 12px;font-size:13px;color:#475569;display:flex;gap:12px;align-items:center;justify-content:space-between}
+.owner-modal {max-width:640px;width:calc(100% - 32px);max-height:80dvh;border:0;border-radius:16px;padding:0;color:#0f172a;box-shadow:0 20px 80px #0f172a33}
+.owner-modal::backdrop {background:#0f172a40}
+.owner-modal header {display:flex;justify-content:space-between;align-items:center;padding:16px 20px;border-bottom:1px solid #e2e8f0;font-weight:600}
+.owner-modal-body {padding:16px 20px;overflow:auto;max-height:calc(80dvh - 64px);font-size:14px;line-height:1.65}
+@media(min-width:1200px) and (min-height:760px) {
+ .portal-overview {height:100dvh;min-height:0}
+ .portal-overview>.portal-content {min-height:0;padding:12px 20px}
+ .portal-overview .portal-overview-grid {height:100%;min-height:0}
+ .portal-overview .portal-instance-sidebar {height:100%;max-height:none;min-height:0}
+ .portal-overview .portal-dashboard-host {height:100%;min-height:0}
+ .portal-overview .owner-dashboard {height:100%;min-height:0}
+ .portal-overview .owner-panel {flex:1}
+ .portal-overview .owner-overview {flex:1;display:grid;grid-template-rows:320px 280px auto;align-content:start;gap:10px}
+ .portal-overview .owner-growth {flex:1;display:grid;grid-template-rows:194px minmax(330px,1fr) 24px}
+ .portal-overview .owner-reports {flex:1;display:flex}
+ .portal-overview .owner-report-body {flex:1;min-height:230px}
+ .portal-overview .owner-chart-fit {min-height:100px}
+}
+@media(max-width:1199px),(max-height:759px) {
+ .owner-chart-fit {height:180px;flex:none}
+ .owner-dashboard {display:flex;flex-direction:column}
+ .owner-bookmarks {padding:0}
+ .owner-bookmarks [role=tablist] {flex-direction:row;justify-content:flex-end;gap:4px}
+ .owner-bookmarks [role=tab] {flex-direction:row;min-height:40px;width:auto;padding:8px 10px;border:1px solid #e2e8f0;border-radius:10px 10px 0 0}
+ .owner-bookmarks [role=tab][aria-selected=true]::after {display:none}
+ .owner-charts,.owner-growth-body,.owner-report-body {grid-template-columns:1fr}
+ .owner-task-list {min-height:280px}
+}
+@media(min-width:1200px) and (min-height:760px) and (max-height:850px) {
+ .portal-overview .owner-overview {grid-template-rows:214px 235px auto}
+ .owner-summary {grid-template-rows:106px 106px}
+ .owner-welcome {padding:18px 20px;display:grid;grid-template-columns:40px minmax(174px,.8fr) minmax(0,1fr);grid-template-rows:22px 44px;gap:2px 10px;align-content:center}
+ .owner-welcome-line {display:contents;font-size:17px}
+ .owner-welcome-line span {grid-column:2/4}
+ .owner-welcome-line svg {grid-row:1/3;align-self:center;width:40px;height:40px;padding:8px}
+ .owner-level-line {grid-column:2;gap:8px}
+ .owner-progress {grid-column:3;align-self:center}
+ .owner-level {font-size:40px}
+ .owner-title-badge {padding:3px 6px;font-size:11px}
+ .owner-progress {margin-top:0}
+ .owner-progress p {font-size:11px;margin-top:2px}
+ .owner-metric {padding:8px 16px;min-height:0}
+ .owner-metric-label {line-height:18px}
+ .owner-metric-value {font-size:24px;margin:3px 0}
+ .owner-metric-note,.owner-comparison {font-size:11px;line-height:16px}
+ .owner-comparison {margin-top:3px}
+ .owner-continue {padding:12px 16px}
+ .owner-continue-head {margin-bottom:8px}
+ .owner-continue-list>button {height:132px;padding:8px 10px;gap:4px}
+ .owner-work-identity {min-height:36px}
+ .owner-continue-logo {width:36px;height:36px}
+ .owner-work-question {padding:3px 6px}
+ .owner-work-question>span:last-child {line-height:16px;font-size:12px}
+ .portal-overview .owner-growth {grid-template-rows:150px minmax(330px,1fr) 24px}
+}
+@media(min-width:1200px) and (min-height:851px) and (max-height:1000px) {
+ .portal-overview .owner-overview {grid-template-rows:260px 280px auto}
+ .owner-summary {grid-template-rows:140px 118px}
+ .owner-welcome {padding:20px 24px;display:grid;grid-template-columns:40px minmax(0,1fr);grid-template-rows:24px 46px 24px;gap:3px 12px;align-content:center}
+ .owner-welcome-line {display:contents;font-size:18px}
+ .owner-welcome-line span {grid-column:2}
+ .owner-welcome-line svg {grid-row:1/3;align-self:center;width:40px;height:40px;padding:8px}
+ .owner-level-line,.owner-progress {grid-column:2}
+ .owner-level {font-size:42px}
+ .owner-progress {margin-top:0}
+ .owner-progress p {margin-top:3px}
+ .owner-metric {padding:12px 18px}
+ .owner-continue {padding:16px}
+ .owner-continue-head {margin-bottom:10px}
+ .owner-continue-list>button {height:160px;padding:10px 12px;gap:7px}
+}
+@media(max-width:639px) {
+ .owner-summary,.owner-growth-summary {grid-template-columns:repeat(2,minmax(0,1fr))}
+ .owner-growth-stat {border-top:1px solid #f1f5f9}
+ .owner-bookmarks [role=tab] {padding:8px 10px}
+ .owner-bookmarks .owner-tools {width:100%;justify-content:flex-end}
+ .owner-report-stats {grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+
+/* Compact, product-native hanging medals; never use the labelled preview sheet. */
+.owner-medal {display:block;flex:none;width:44px;height:48px}
+.owner-welcome-line svg.owner-medal {width:44px;height:48px;padding:0;border-radius:0;background:none}
+.owner-growth-body {grid-template-columns:minmax(0,.85fr) minmax(0,1.35fr)}
+.owner-growth .owner-task-list {min-height:0}
+.owner-task-group {padding:8px 10px}
+.owner-task-group-heading {display:flex;justify-content:space-between;gap:8px;font-size:13px}
+.owner-task-group-heading>span {color:#64748b;font-size:12px}
+.owner-task-track {height:4px;background:#e8eef6;border-radius:4px;margin:6px 0;overflow:hidden}
+.owner-task-track>div {height:100%;background:#3b82f6;border-radius:4px}
+.owner-task-nodes {display:flex;gap:8px;justify-content:space-between;font-size:11px;color:#64748b}
+.owner-task-nodes>span {display:flex;align-items:center;gap:2px}
+.owner-task-nodes .awarded {color:#0d9488}
+.owner-task small {display:block;font-size:11px;color:#64748b;margin-top:4px}
+.owner-rule-scheduled {text-align:left;font-size:11px;color:#1d4ed8;background:#eff6ff;padding:5px 8px;border-radius:6px;margin-bottom:6px}
+.owner-growth-path {border:1px solid #e2e8f0;border-radius:12px;padding:10px 12px;min-width:0;position:relative;background:linear-gradient(110deg,#f8fbff,#fff)}
+.owner-growth-path>header {display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px}
+.owner-growth-path h3 {font-size:15px;font-weight:600}
+.owner-growth-path header span {font-size:11px;color:#64748b;font-weight:400}
+.owner-path-stages {display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px}
+.owner-path-stage {min-width:0;padding:6px;border:1px solid transparent;border-radius:8px}
+.owner-path-stage.current {background:#edf5ff;border-color:#bfdbfe}
+.owner-path-stage-label {display:flex;align-items:center;justify-content:center;gap:7px;margin-bottom:8px}
+.owner-path-stage-label .owner-medal {width:34px;height:37px}
+.owner-path-stage-label strong {display:block;font-size:12px;white-space:nowrap}
+.owner-path-stage-label span {display:block;font-size:10px;color:#64748b}
+.owner-path-nodes {display:flex;justify-content:space-between;position:relative}
+.owner-path-nodes::before {content:'';position:absolute;top:7px;left:5px;right:5px;height:2px;background:#dbe5f3}
+.owner-path-nodes button {width:16px;height:22px;position:relative;z-index:1;font-size:9px;color:#64748b;display:flex;justify-content:center;align-items:flex-start;border-radius:4px}
+.owner-path-nodes button>span {display:flex;align-items:center;justify-content:center;background:#fff;border:1px solid #cbd5e1;width:15px;height:15px;border-radius:50%;line-height:1}
+.owner-path-nodes button.reached>span {background:#dbeafe;border-color:#93c5fd;color:#1d4ed8}
+.owner-path-nodes button.current>span {background:#2563eb;color:white;border-color:#2563eb;box-shadow:0 0 0 3px #bfdbfe}
+.owner-path-nodes button.current::after {content:'';position:absolute;bottom:0;border-left:3px solid transparent;border-right:3px solid transparent;border-bottom:4px solid #2563eb}
+.owner-path-nodes [role=tooltip] {display:none;position:absolute;bottom:28px;width:200px;background:#0f172a;color:white;font-size:12px;font-style:normal;padding:10px;border-radius:8px;box-shadow:0 5px 20px #0f172a22;pointer-events:none;text-align:left;line-height:1.5;z-index:20}
+.owner-path-nodes button:hover,.owner-path-nodes button:focus-visible {z-index:30;outline:2px solid #93c5fd}
+.owner-path-nodes button:hover [role=tooltip],.owner-path-nodes button:focus-visible [role=tooltip] {display:block}
+.owner-path-stage:first-child [role=tooltip] {left:0}
+.owner-path-stage:last-child [role=tooltip] {right:0}
+.owner-level-detail>.owner-medal {width:72px;height:78px;margin:0 auto 12px}
+@media(min-width:1200px) and (min-height:760px) {
+ .portal-overview .owner-growth {grid-template-rows:150px minmax(286px,360px) 170px 20px;gap:12px;align-content:start}
+ .owner-growth .owner-welcome {display:grid;grid-template-columns:44px minmax(0,1fr);grid-template-rows:24px 46px 24px;gap:3px 12px;padding:20px 24px;align-content:center}
+ .owner-growth .owner-welcome-line {display:contents}
+ .owner-growth .owner-welcome-line span {grid-column:2}
+ .owner-growth .owner-welcome-line .owner-medal {grid-column:1;grid-row:1/4;align-self:center}
+ .owner-growth .owner-level-line,.owner-growth .owner-progress {grid-column:2}
+ .owner-growth .owner-progress {margin-top:0}
+ .owner-growth .owner-task-panel {padding:10px}
+ .owner-growth .owner-task-tabs {margin-bottom:6px}
+ .owner-growth .owner-task-list {gap:5px}
+ .owner-growth .owner-task {padding:6px 9px}
+ .owner-growth .owner-task-tabs button {padding:4px 8px}
+ .owner-growth .owner-chart-fit {max-height:240px;margin:auto 0}
+}
+@media(min-width:1200px) and (min-height:760px) and (max-height:850px) {
+ .portal-overview .owner-growth {grid-template-rows:116px minmax(280px,1fr) 146px 18px;gap:8px}
+ .owner-growth .owner-welcome {padding:12px 18px;grid-template-rows:20px 38px 22px;gap:2px 10px}
+ .owner-growth-path {padding:8px 10px}
+ .owner-growth-path>header {margin-bottom:3px}
+ .owner-path-stage {padding:4px}
+}
+@media(max-width:1199px),(max-height:759px) {
+ .owner-growth-body {grid-template-columns:1fr}
+ .owner-path-stages {grid-template-columns:repeat(3,minmax(0,1fr))}
+ .owner-growth .owner-chart-fit {height:160px}
+ .owner-growth .owner-task-list {min-height:0}
+}
+@media(max-width:639px) {
+ .owner-path-stages {grid-template-columns:1fr}
+ .owner-path-stage-label {justify-content:flex-start}
+ .owner-path-nodes button {width:24px;height:26px;font-size:11px}
+ .owner-path-nodes button>span {width:20px;height:20px}
+ .owner-path-nodes::before {top:10px}
+ .owner-path-nodes [role=tooltip] {width:170px;left:auto;right:auto}
+ .owner-path-nodes button:nth-child(-n+5) [role=tooltip] {left:0;right:auto}
+ .owner-path-nodes button:nth-child(n+6) [role=tooltip] {right:0;left:auto}
+ .owner-growth-path>header {align-items:flex-start;flex-direction:column}
+}
+
+/* Growth identity is one horizontal block at every breakpoint; overview keeps its greeting. */
+.owner-growth .owner-welcome {display:flex;flex-direction:row;align-items:center;justify-content:flex-start;gap:18px;padding:18px 24px}
+.owner-growth .owner-welcome>.owner-medal {width:66px;height:72px;padding:0;flex:none}
+.owner-identity-copy {flex:1;min-width:0}
+.owner-identity-copy .owner-progress {margin-top:10px}
+.owner-path-nodes {height:36px}
+.owner-path-nodes::before {top:9px;left:0;right:0;height:1px;background:#cbd9eb}
+.owner-path-nodes button {flex:1;width:auto;height:34px;align-items:flex-start;padding-top:6px}
+.owner-path-nodes button>span {width:1px;height:7px;border:0;border-radius:0;background:#bdcadb}
+.owner-path-nodes button.major>span {height:12px;margin-top:-3px;width:2px}
+.owner-path-nodes button.reached>span {background:#60a5fa;border:0}
+.owner-path-nodes button.current>span {width:9px;height:9px;border:2px solid white;border-radius:50%;background:#2563eb;margin-top:-1px;box-shadow:0 0 0 2px #93c5fd}
+.owner-path-nodes button.current::after {display:none}
+.owner-path-locate {position:absolute;top:21px;left:50%;transform:translateX(-50%);font-size:11px;line-height:14px;white-space:nowrap;font-weight:600;color:#2563eb}
+.owner-path-stage:first-child .owner-path-nodes button:first-child .owner-path-locate {left:0;transform:none}
+.owner-path-stage:last-child .owner-path-nodes button:last-child .owner-path-locate {left:auto;right:0;transform:none}
+.owner-path-stage-label {margin-bottom:3px}
+@media(max-width:639px) {
+ .owner-growth .owner-welcome {padding:18px 14px;gap:12px}
+ .owner-growth .owner-level {font-size:36px}
+ .owner-growth .owner-level-line {gap:10px}
+}
+.owner-path-axis {margin-top:18px;display:flex;height:36px}
+.owner-path-axis button {flex:1;min-width:0}
+.owner-path-axis .owner-path-locate {top:-18px}
+.owner-axis-label {position:absolute;top:21px;left:50%;transform:translateX(-50%);font-size:11px;font-style:normal;line-height:14px;color:#64748b}
+.owner-path-axis button:first-child .owner-path-locate {left:0;transform:none}
+.owner-path-axis button:last-child .owner-path-locate {left:auto;right:0;transform:none}
+.owner-path-axis button:nth-child(-n+10) [role=tooltip] {left:0;right:auto}
+.owner-path-axis button:nth-child(n+41) [role=tooltip] {right:0;left:auto}
+.owner-path-axis button:nth-child(n+11):nth-child(-n+40) [role=tooltip] {left:50%;right:auto;transform:translateX(-50%)}
+@media(max-width:639px) {
+ .owner-growth-path .owner-path-stages {grid-template-columns:repeat(5,minmax(0,1fr));gap:2px}
+ .owner-path-stage-label {flex-direction:column;gap:2px;align-items:center}
+ .owner-path-stage-label strong {font-size:10px;white-space:normal;text-align:center}
+ .owner-path-axis {margin-top:22px}
+ .owner-path-axis button {width:auto;padding-top:6px}
+ .owner-path-axis button>span {width:1px;height:6px}
+ .owner-path-axis button.major>span {width:2px;height:12px}
+ .owner-path-axis button.current>span {width:9px;height:9px}
+}
+
+/* One continuous progress rail: completed gradient, milestone diamonds and a locator flag. */
+.owner-path-axis::before {left:1%;right:1%;top:8px;height:4px;border-radius:5px;background:#e5edf8;box-shadow:inset 0 1px 2px #cad7e755}
+.owner-path-axis::after {content:'';position:absolute;left:1%;top:8px;width:var(--growth-axis-progress);height:4px;border-radius:5px;background:linear-gradient(90deg,#3b82f6,#22c6d7);pointer-events:none}
+.owner-path-axis button {padding-top:7px}
+.owner-path-axis button>span {height:6px;background:#b8c8dc}
+.owner-path-axis button.reached>span {background:#60a5fa}
+.owner-path-axis button.major>span {width:8px;height:8px;margin-top:-1px;border:2px solid white;border-radius:2px;transform:rotate(45deg);background:#b9cde4;box-shadow:0 0 0 1px #cbd9e9}
+.owner-path-axis button.major.reached>span {background:#38bdf8;box-shadow:0 0 0 1px #7dd3fc}
+.owner-path-axis button.current>span {width:12px;height:12px;margin-top:-3px;transform:none;border:3px solid white;border-radius:50%;background:#2563eb;box-shadow:0 0 0 2px #60a5fa,0 0 0 5px #dbeafe}
+.owner-path-axis .owner-path-locate {top:-22px;padding:2px 7px;line-height:16px;border-radius:6px;background:#2563eb;color:white;font-size:10px;box-shadow:0 2px 6px #2563eb22}
+.owner-path-locate::after {content:'';position:absolute;bottom:-4px;left:50%;margin-left:-4px;border-left:4px solid transparent;border-right:4px solid transparent;border-top:4px solid #2563eb}
+.owner-path-axis button:first-child .owner-path-locate::after {left:7px}
+.owner-path-axis button:last-child .owner-path-locate::after {left:auto;right:3px}
+.owner-axis-label {top:23px;font-size:10px;padding:0 5px;border-radius:4px;background:#f1f5fa;color:#71839a}
+.owner-path-axis .reached .owner-axis-label,.owner-path-axis .current .owner-axis-label {color:#2563eb;background:#eaf3ff}
+.owner-path-axis [role=tooltip] {bottom:48px}
+
+/* Shared identity size, denser useful content, and six explicit daily goals. */
+.owner-summary .owner-welcome {display:flex;flex-direction:row;align-items:center;justify-content:flex-start;gap:18px;padding:18px 24px}
+.owner-summary .owner-welcome>.owner-medal {width:66px;height:72px;flex:none;padding:0;align-self:center}
+.owner-summary .owner-welcome-line {display:flex;margin-bottom:6px;font-size:20px;line-height:26px}
+.owner-summary .owner-identity-copy .owner-progress {margin-top:6px}
+.owner-summary .owner-identity-copy .owner-level-line {display:flex}
+.owner-task-list.owner-daily-grid {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));grid-template-rows:repeat(3,minmax(0,1fr));gap:10px;flex:1;align-content:stretch}
+.owner-task-list.owner-cumulative-grid {grid-template-columns:minmax(0,1fr);grid-template-rows:repeat(4,minmax(0,1fr));gap:8px;align-content:stretch;min-height:0}
+.owner-growth .owner-cumulative-grid .owner-task {display:flex;flex-direction:column;justify-content:center;padding:7px 12px;min-width:0}
+.owner-cumulative-grid .owner-task>div:first-child>span:last-child {font-size:12px}
+.owner-cumulative-grid .owner-task>.my-2 {height:4px;min-height:4px;flex:none;margin:5px 0}
+.owner-cumulative-grid .owner-task small {font-size:11px;line-height:14px;margin-top:3px}
+.owner-growth .owner-daily-grid .owner-task {display:flex;flex-direction:column;justify-content:center;padding:12px;min-width:0}
+.owner-task-condition {font-size:12px;color:#64748b;margin-top:5px}
+.owner-daily-grid .owner-task>.my-2 {height:4px;min-height:4px;flex:none;margin:5px 0}
+.owner-path-stage-label .owner-medal {width:62px;height:68px;flex:none}
+.owner-path-stage-label {gap:12px;min-height:82px}
+.owner-growth-path {padding:16px 18px}
+.owner-path-stage-label strong {font-size:14px}
+@media(min-width:1200px) and (min-height:760px) {
+ .portal-overview .owner-growth {grid-template-rows:150px minmax(300px,1fr) 210px 20px;gap:12px;align-content:stretch}
+ .portal-overview .owner-overview {grid-template-rows:minmax(260px,1fr) 280px auto;align-content:stretch}
+ .owner-summary {grid-template-rows:1.2fr 1fr}
+ .owner-summary .owner-metric {display:flex;flex-direction:column;justify-content:center}
+ .owner-growth .owner-task-panel {padding:12px}
+ .owner-growth .owner-task-list.owner-daily-grid {gap:10px}
+}
+@media(min-width:1200px) and (min-height:760px) and (max-height:850px) {
+ .portal-overview .owner-overview {grid-template-rows:minmax(214px,1fr) 235px auto}
+ .owner-summary .owner-welcome-line {font-size:19px;line-height:24px}
+ .owner-summary .owner-identity-copy {display:grid;grid-template-columns:minmax(130px,1fr) minmax(0,1fr);gap:3px 8px;align-items:center}
+ .owner-summary .owner-welcome-line {grid-column:1/3;margin-bottom:0}
+ .owner-summary .owner-identity-copy .owner-level-line {grid-column:1}
+ .owner-summary .owner-identity-copy .owner-progress {grid-column:2;margin-top:0}
+ .portal-overview .owner-growth {grid-template-rows:110px minmax(250px,1fr) 180px 18px;gap:8px}
+ .owner-growth .owner-daily-grid .owner-task {padding:6px 8px}
+ .owner-growth .owner-task-list.owner-daily-grid {gap:6px}
+ .owner-growth .owner-task-list.owner-cumulative-grid {gap:5px}
+ .owner-growth .owner-cumulative-grid .owner-task {padding:4px 8px}
+ .owner-cumulative-grid .owner-task>div:first-child {font-size:12px;line-height:16px}
+ .owner-cumulative-grid .owner-task>div:last-of-type {font-size:11px;line-height:14px}
+ .owner-cumulative-grid .owner-task>.my-2 {margin:3px 0}
+ .owner-cumulative-grid .owner-task small {margin-top:1px;font-size:10px;line-height:12px}
+ .owner-growth .owner-cumulative-grid~.owner-pager {margin-top:5px}
+ .owner-task-condition {margin-top:2px;font-size:11px}
+ .owner-daily-grid .owner-task>div:first-child {font-size:12px;line-height:16px}
+ .owner-daily-grid .owner-task>.my-2 {margin:4px 0}
+ .owner-growth-path {padding:10px 12px}
+ .owner-path-stage-label {min-height:72px}
+ .owner-path-stage-label .owner-medal {width:56px;height:62px}
+}
+@media(max-width:639px) {
+ .owner-summary .owner-welcome {padding:18px 14px;gap:12px}
+ .owner-path-stage-label .owner-medal {width:44px;height:48px}
+ .owner-path-stage-label {min-height:70px;gap:5px}
+ .owner-path-stage-label strong {font-size:10px}
+ .owner-growth-path {padding:12px 8px}
+ .owner-growth .owner-daily-grid .owner-task {padding:8px}
+ .owner-daily-grid .owner-task>div:first-child {flex-wrap:wrap;gap:3px}
+}

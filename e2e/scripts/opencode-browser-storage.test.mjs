@@ -1,0 +1,62 @@
+const {chromium} = await import(process.env.CLAW_MANAGER_PLAYWRIGHT_MODULE || '@playwright/test');
+import fs from 'node:fs/promises';
+import http from 'node:http';
+import assert from 'node:assert/strict';
+const template=await fs.readFile(new URL('../../backend/internal/services/opencode_browser_storage.js',import.meta.url),'utf8');
+const server=http.createServer((req,res)=>{
+ const scope=new URL(req.url,'http://127.0.0.1').pathname.slice(1);
+ res.setHeader('Content-Type','text/html');
+ res.end('<html><head>'+(scope==='raw'?'':'<script>'+template.replace('__CLAWMANAGER_OPENCODE_SCOPE__',JSON.stringify(scope))+'</script>')+'</head><body>test</body></html>');
+});
+await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+const port=server.address().port;
+const browser=await chromium.launch({headless:true,args:['--no-proxy-server'],...(process.env.CLAW_MANAGER_CHROME_EXECUTABLE ? {executablePath:process.env.CLAW_MANAGER_CHROME_EXECUTABLE} : {})});
+try {
+ const context=await browser.newContext();
+ const page=await context.newPage();
+ const errors=[];
+ page.on('pageerror',error=>errors.push(error.message));
+ const go=scope=>page.goto('http://127.0.0.1:'+port+'/'+scope);
+ const put=async(key,value)=>page.evaluate(async({key,value})=>{
+  const db=await new Promise((resolve,reject)=>{const req=indexedDB.open('opencode-drafts',1);req.onupgradeneeded=()=>req.result.createObjectStore('documents');req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);});
+  await new Promise((resolve,reject)=>{const tx=db.transaction('documents','readwrite');tx.objectStore('documents').put(value,key);tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);});
+  db.close();
+ },{key,value});
+ const get=async key=>page.evaluate(async key=>{
+  const db=await new Promise((resolve,reject)=>{const req=indexedDB.open('opencode-drafts',1);req.onupgradeneeded=()=>req.result.createObjectStore('documents');req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);});
+  const value=await new Promise((resolve,reject)=>{const req=db.transaction('documents','readonly').objectStore('documents').get(key);req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);});
+  db.close();return value;
+ },key);
+ await go('raw');
+ await page.evaluate(()=>{localStorage.setItem('opencode.global.dat:projects','mcpclient,mcpserver');sessionStorage.setItem('project','old');});
+ await put('legacy','old draft');
+ await go('instance-a');
+ assert.equal(await page.evaluate(()=>localStorage.getItem('opencode.global.dat:projects')),null);
+ assert.equal(await page.evaluate(()=>sessionStorage.getItem('project')),null);
+ assert.equal(await get('legacy'),undefined);
+ await page.evaluate(()=>{localStorage.setItem('opencode.global.dat:projects','project-a');localStorage.named='property';sessionStorage.setItem('project','session-a');});
+ await put('draft-a','draft for A');
+ assert.deepEqual(await page.evaluate(()=>Object.keys(localStorage).sort()),['named','opencode.global.dat:projects']);
+ assert.equal(await page.evaluate(()=>localStorage.length),2);
+ assert.equal(await page.evaluate(()=>localStorage.named),'property');
+ await go('instance-b');
+ assert.equal(await page.evaluate(()=>localStorage.getItem('opencode.global.dat:projects')),null);
+ assert.equal(await get('draft-a'),undefined);
+ await page.evaluate(()=>localStorage.setItem('opencode.global.dat:projects','project-b'));
+ await put('draft-b','draft for B');
+ await go('instance-a');
+ assert.equal(await page.evaluate(()=>localStorage.getItem('opencode.global.dat:projects')),'project-a');
+ assert.equal(await page.evaluate(()=>sessionStorage.getItem('project')),'session-a');
+ assert.equal(await get('draft-a'),'draft for A');
+ assert.deepEqual(await page.evaluate(async()=> (await indexedDB.databases()).map(info=>info.name)),['opencode-drafts']);
+ await page.evaluate(()=>{localStorage.clear();sessionStorage.clear();});
+ await page.evaluate(()=>new Promise((resolve,reject)=>{const req=indexedDB.deleteDatabase('opencode-drafts');req.onsuccess=resolve;req.onerror=()=>reject(req.error);}));
+ await go('instance-b');
+ assert.equal(await page.evaluate(()=>localStorage.getItem('opencode.global.dat:projects')),'project-b');
+ assert.equal(await get('draft-b'),'draft for B');
+ await go('raw');
+ assert.equal(await page.evaluate(()=>localStorage.getItem('opencode.global.dat:projects')),'mcpclient,mcpserver');
+ assert.equal(await get('legacy'),'old draft');
+ assert.equal(errors.length,0,errors.join('\n'));
+ console.log('PASS: legacy cache hidden; local/session storage and IndexedDB isolated; refresh preserves state; clear/delete preserve other instances and legacy data.');
+} finally {await browser.close();await new Promise(resolve=>server.close(resolve));}

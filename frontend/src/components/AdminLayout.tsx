@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
+  Archive,
   ArrowLeft,
   Bot,
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
   Gauge,
   Home,
@@ -17,6 +19,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useI18n } from '../contexts/I18nContext';
+import { useUiStore } from '../stores/uiStore';
 import AppVersion from './AppVersion';
 import LanguageSwitcher from './LanguageSwitcher';
 import { CATEGORIES } from '../pages/admin/protection/_data';
@@ -24,6 +27,7 @@ import { CATEGORIES } from '../pages/admin/protection/_data';
 interface AdminLayoutProps {
   children: React.ReactNode;
   title?: string;
+  fullHeight?: boolean;
 }
 
 interface NavItem {
@@ -38,11 +42,12 @@ interface NavItem {
 const shellContainerClass = 'w-full px-3 sm:px-4 lg:px-5 2xl:px-6';
 const appLogoSrc = '/lobster_logo.png';
 
-const AdminLayout: React.FC<AdminLayoutProps> = ({ children, title = '' }) => {
+const AdminLayout: React.FC<AdminLayoutProps> = ({ children, title = '', fullHeight = false }) => {
   const location = useLocation();
   const navigate = useNavigate();
   const { user, logout } = useAuth();
   const { t } = useI18n();
+  const { sidebarCollapsed, toggleSidebarCollapsed } = useUiStore();
   const [profileExpanded, setProfileExpanded] = useState(false);
   const [popoverItemPath, setPopoverItemPath] = useState<string | null>(null);
 
@@ -51,6 +56,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children, title = '' }) => {
 
   const navItems: NavItem[] = [
     { path: '/admin', label: t('nav.adminDashboard'), icon: Home, exact: true },
+    { path: '/admin/backups', label: t('nav.backups'), icon: Archive },
     { path: '/admin/users', label: t('nav.users'), icon: Users },
     { path: '/admin/instances', label: t('nav.instances'), icon: Monitor },
     { path: '/admin/runtime-pods', label: t('nav.runtime'), icon: Server },
@@ -122,10 +128,13 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children, title = '' }) => {
         <div key={item.path} className="relative">
           <Link
             to={item.path}
-            className={`app-nav-link ${isActive(item) ? 'app-nav-link-active' : ''}`}
+            title={sidebarCollapsed ? item.label : undefined}
+            className={`app-nav-link ${sidebarCollapsed ? 'justify-center' : ''} ${
+              isActive(item) ? 'app-nav-link-active' : ''
+            }`}
           >
             <Icon className="h-4 w-4 shrink-0" />
-            <span className="truncate">{item.label}</span>
+            {!sidebarCollapsed && <span className="truncate">{item.label}</span>}
           </Link>
         </div>
       );
@@ -139,11 +148,16 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children, title = '' }) => {
       >
         <Link
           to={item.path}
-          className={`app-nav-link ${isActive(item) ? 'app-nav-link-active' : ''}`}
+          title={sidebarCollapsed ? item.label : undefined}
+          className={`app-nav-link ${sidebarCollapsed ? 'justify-center' : ''} ${
+            isActive(item) ? 'app-nav-link-active' : ''
+          }`}
         >
           <Icon className="h-4 w-4 shrink-0" />
-          <span className="truncate">{item.label}</span>
-          <ChevronRight className="ml-auto h-3.5 w-3.5 shrink-0 opacity-60" />
+          {!sidebarCollapsed && <span className="truncate">{item.label}</span>}
+          {!sidebarCollapsed && (
+            <ChevronRight className="ml-auto h-3.5 w-3.5 shrink-0 opacity-60" />
+          )}
         </Link>
         {popoverItemPath === item.path && (
           <div className="absolute left-full top-0 z-40 ml-3 w-64 rounded-md border border-slate-200 bg-white p-2 shadow-lg">
@@ -223,35 +237,38 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children, title = '' }) => {
           </nav>
         </header>
 
-        <div className="app-subheader">
-          <div className={`${shellContainerClass} py-4`}>
-            <h1 className="text-xl font-semibold text-slate-950">{title}</h1>
-          </div>
-        </div>
-
-        <main className={`${shellContainerClass} py-6`}>{children}</main>
       </div>
 
-      <div className="hidden min-h-screen md:flex">
-        <aside className="w-64 shrink-0 border-r border-slate-200 bg-white">
+      <div className={`md:flex ${fullHeight ? 'md:h-dvh md:min-h-0' : 'md:min-h-screen'}`}>
+        <aside
+          className={`hidden shrink-0 border-r border-slate-200 bg-white transition-[width] duration-200 md:block ${
+            sidebarCollapsed ? 'w-16' : 'w-64'
+          }`}
+        >
           <div className="sticky top-0 flex h-screen flex-col">
-            <div className="flex h-20 items-center border-b border-slate-200 px-5">
+            <div
+              className={`flex h-20 items-center border-b border-slate-200 ${
+                sidebarCollapsed ? 'justify-center px-2' : 'px-5'
+              }`}
+            >
               <Link to="/admin" className="flex items-center gap-3 text-slate-950">
                 <img
                   src={appLogoSrc}
                   alt="ClawManager logo"
-                  className="h-9 w-9 object-contain"
+                  className="h-9 w-9 shrink-0 object-contain"
                 />
-                <div className="min-w-0">
-                  <div className="flex items-center gap-1 text-xs font-medium text-slate-500">
-                    <Gauge className="h-3.5 w-3.5" />
-                    {t('adminLayout.admin')}
+                {!sidebarCollapsed && (
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1 text-xs font-medium text-slate-500">
+                      <Gauge className="h-3.5 w-3.5" />
+                      {t('adminLayout.admin')}
+                    </div>
+                    <div className="text-lg font-semibold leading-tight">{t('app.name')}</div>
+                    <div className="mt-1 max-w-40">
+                      <AppVersion />
+                    </div>
                   </div>
-                  <div className="text-lg font-semibold leading-tight">{t('app.name')}</div>
-                  <div className="mt-1 max-w-40">
-                    <AppVersion />
-                  </div>
-                </div>
+                )}
               </Link>
             </div>
 
@@ -259,28 +276,59 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children, title = '' }) => {
               <div className="space-y-1">{navItems.map(renderNavItemWithPopup)}</div>
             </nav>
 
-            <div className="border-t border-slate-200 p-3">
+            <button
+              type="button"
+              onClick={toggleSidebarCollapsed}
+              title={t(sidebarCollapsed ? 'common.expandSidebar' : 'common.collapseSidebar')}
+              aria-label={t(
+                sidebarCollapsed ? 'common.expandSidebar' : 'common.collapseSidebar',
+              )}
+              className="absolute right-0 top-1/2 z-30 flex h-6 w-6 -translate-y-1/2 translate-x-1/2 cursor-pointer items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 shadow-sm transition-colors hover:bg-slate-50 hover:text-slate-950"
+            >
+              {sidebarCollapsed ? (
+                <ChevronRight className="h-4 w-4" />
+              ) : (
+                <ChevronLeft className="h-4 w-4" />
+              )}
+            </button>
+
+            <div
+              className={`relative border-t border-slate-200 ${sidebarCollapsed ? 'p-2' : 'p-3'}`}
+            >
               <button
                 type="button"
                 onClick={() => setProfileExpanded((current) => !current)}
-                className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-left hover:bg-slate-100"
+                title={sidebarCollapsed ? user?.username || undefined : undefined}
+                className={`flex w-full items-center gap-3 rounded-md px-3 py-2 text-left hover:bg-slate-100 ${
+                  sidebarCollapsed ? 'justify-center px-0' : ''
+                }`}
               >
-                <div className="flex h-9 w-9 items-center justify-center rounded-md bg-slate-900 text-sm font-semibold text-white">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-slate-900 text-sm font-semibold text-white">
                   {(user?.username?.[0] || 'A').toUpperCase()}
                 </div>
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-medium text-slate-950">{user?.username}</div>
-                  <div className="text-xs text-slate-500">{user?.role || 'admin'}</div>
-                </div>
-                <ChevronDown
-                  className={`h-4 w-4 text-slate-500 transition-transform ${
-                    profileExpanded ? 'rotate-180' : ''
-                  }`}
-                />
+                {!sidebarCollapsed && (
+                  <>
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm font-medium text-slate-950">{user?.username}</div>
+                      <div className="text-xs text-slate-500">{user?.role || 'admin'}</div>
+                    </div>
+                    <ChevronDown
+                      className={`h-4 w-4 text-slate-500 transition-transform ${
+                        profileExpanded ? 'rotate-180' : ''
+                      }`}
+                    />
+                  </>
+                )}
               </button>
 
               {profileExpanded && (
-                <div className="mt-2 space-y-2 rounded-md border border-slate-200 bg-slate-50 p-2">
+                <div
+                  className={
+                    sidebarCollapsed
+                      ? 'absolute bottom-0 left-full z-40 ml-3 w-56 space-y-2 rounded-md border border-slate-200 bg-white p-2 shadow-lg'
+                      : 'mt-2 space-y-2 rounded-md border border-slate-200 bg-slate-50 p-2'
+                  }
+                >
                   <LanguageSwitcher />
                   <Link to="/dashboard" className="app-button-secondary w-full">
                     <ArrowLeft className="h-4 w-4" />
@@ -296,14 +344,14 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children, title = '' }) => {
           </div>
         </aside>
 
-        <div className="flex min-w-0 flex-1 flex-col">
-          <div className="app-subheader">
-            <div className={`${shellContainerClass} flex h-20 items-center`}>
-              <h1 className="text-2xl font-semibold text-slate-950">{title}</h1>
+        <div className={`flex min-w-0 flex-1 flex-col ${fullHeight ? 'md:min-h-0' : ''}`}>
+          <div className="app-subheader shrink-0">
+            <div className={`${shellContainerClass} flex items-center py-4 md:h-20 md:py-0`}>
+              <h1 className="text-xl font-semibold text-slate-950 md:text-2xl">{title}</h1>
             </div>
           </div>
 
-          <main className={`${shellContainerClass} flex-1 py-6`}>{children}</main>
+          <main className={`${shellContainerClass} ${fullHeight ? 'flex min-h-0 flex-1 flex-col py-6 md:py-3' : 'flex-1 py-6'}`}>{children}</main>
         </div>
       </div>
     </div>

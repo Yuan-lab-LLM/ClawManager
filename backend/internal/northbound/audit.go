@@ -37,6 +37,9 @@ func AuditRequests(audit repository.AuditEventRepository) gin.HandlerFunc {
 			severity = models.AuditSeverityError
 		}
 		details, _ := json.Marshal(map[string]any{
+			"auth_type":           contextString(c, "northboundAuthType"),
+			"api_key_id":          contextString(c, "northboundKeyID"),
+			"operation_id":        contextString(c, "northboundOperationID"),
 			"route":               route,
 			"method":              c.Request.Method,
 			"status":              c.Writer.Status(),
@@ -98,10 +101,14 @@ func northboundEventType(method, route string) string {
 		return "northbound.lite.restart"
 	case "POST /api/northbound/v1/lite-instances/:id/reset":
 		return "northbound.lite.reset"
+	case "POST /api/northbound/v1/lite-instances/:id/delete":
+		return "northbound.lite.delete"
 	case "POST /api/northbound/v1/pro-instances/:id/restart":
 		return "northbound.pro.restart"
 	case "POST /api/northbound/v1/pro-instances/:id/reset":
 		return "northbound.pro.reset"
+	case "POST /api/northbound/v1/pro-instances/:id/delete":
+		return "northbound.pro.delete"
 	case "POST /api/northbound/v1/lite-instances/:id/external-access/password":
 		return "northbound.share_link.password_enabled"
 	case "POST /api/northbound/v1/lite-instances/:id/external-access/share-link/reset":
@@ -125,6 +132,8 @@ func (s *CoreService) auditOperation(item *models.NorthboundOperation, eventType
 	}
 	details, _ := json.Marshal(map[string]any{
 		"operation_id":  item.OperationID,
+		"api_key_id":    item.APIKeyID,
+		"auth_scope":    item.AuthScope,
 		"status":        item.Status,
 		"attempt_count": item.AttemptCount,
 		"error_code":    errorCode,
@@ -156,7 +165,7 @@ func operationInstanceMode(item *models.NorthboundOperation) string {
 	if item == nil {
 		return services.InstanceModeLite
 	}
-	if item.OperationType == OperationTypeProInstance || item.OperationType == OperationTypeProRestart || item.OperationType == OperationTypeProReset {
+	if item.OperationType == OperationTypeProInstance || item.OperationType == OperationTypeProRestart || item.OperationType == OperationTypeProReset || item.OperationType == OperationTypeProDelete {
 		return services.InstanceModePro
 	}
 	if item.OperationType == OperationTypeLiteInstance {

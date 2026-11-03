@@ -59,6 +59,7 @@
 
 这里展示最近的重要产品与文档更新。
 
+- [2026-10-16] 更新 Team 工作空间：连续协作式群聊、更清晰的成员分组与职能头像、共享文件在线编辑，以及 `@成员` 单成员任务；支持引用之前的工作继续修改产物，任务仍独立进入历史与 Kanban。详见 [Team 协作快速指南](./docs/team-workspaces-guide.md)。
 - [2026-09-08] 完善 OpenClaw Lite 数据安全滚动升级：增加版本感知预检、迁移校验、有界恢复和基于源身份的自动回退；未携带 8.1 能力标识的旧镜像继续使用原有滚动更新流程。
 - [2026-09-02] 扩展北向接口与 Owner 隔离门户，支持 OpenClaw、Hermes、OpenCode、DeepSeek Harness 的 Lite / Pro 创建、异步生命周期操作和受保护的 Share Link 管理。详见[北向接口使用说明](./docs/northbound-api-guide.md)。
 - [2026-09-01] 新增 LDAP 企业认证，扩展托管 Provider 模型目录，并为受管 OpenCode 与 DeepSeek Harness 实例提供独立浏览器域名。
@@ -213,13 +214,16 @@ Agent Control Plane 是受管 AI Agent 实例的运行时编排层。它让每�
 <a id="team-workspaces"></a>
 ### Team 协作
 
-Team 采用 Leader 中介协作流程。从 8 个不可修改的内置模板或用户自己的自定义模板创建 Team，在群聊中描述目标后，由 OpenClaw Lite Leader 制定计划、拆解任务、派发工作、核验成员交付并发布统一结果。
+从 8 个不可修改的内置模板或用户自己的自定义模板创建 Team。默认 `@Leader` 采用 Leader 中介协作：OpenClaw Lite Leader 制定计划、拆解任务、派发工作、核验成员交付并发布统一结果。也可 `@` 指定一个 Worker，由该成员独立执行本次任务，不再等待 Leader 汇总。
 
 - 每个 Team 只有一个 OpenClaw Lite Leader；每个 Worker 可在可用时选择 OpenClaw Lite 或 Hermes Lite
 - 自定义 Team 可根据自然语言意图生成，按角色细化、整体重新生成并重复使用
-- 团队群聊记录计划、派发、进度、验收、交付和最终汇总
-- Execution Kanban 跟踪当前问题、任务拆分和成员交付状态
-- 文件和共享产物保留协作结果；Hermes Lite Worker 可从实例界面查看原生 Team 会话
+- 连续协作式群聊采用明亮布局、清晰字号和成员消息分组，区分用户、Leader 与 Worker；成员栏、任务流程和文件面板可展开查看
+- 职能头像自动匹配预设或自定义角色；创建和自定义模板中的 Worker 头像可点击更换，不改变职责或 Runtime 配置
+- 输入 `@` 或点击输入框上方的成员选择器发起单成员任务；可引用历史任务继续修改产物，每次请求保持独立历史和 Kanban 记录
+- Execution Kanban 跟踪当前问题、任务拆分和成员交付；默认协作仍由 Leader 汇总，单成员任务由所选 Worker 正式交付后完成
+- 文件浏览器支持共享产物预览、下载及受支持文本的在线编辑，显式保存、远端变化提醒和版本冲突检查避免静默覆盖；不是自动保存或多人实时协同编辑
+- Hermes Lite Worker 可从实例界面查看原生 Team 会话；新功能需配套支持的 ClawManager App 与 Runtime，单独更新 Runtime 不会更新 Team UI
 
 参见 [Team 协作快速指南](./docs/team-workspaces-guide.md)，了解创建、协作阶段和查看交付结果的流程。
 
@@ -248,7 +252,9 @@ Pro 模式为每个实例创建专属 desktop runtime，并使用独立 Kubernet
 
 ### Team 工作空间
 
-Team 工作空间把真实协作过程集中在一个页面：左侧展示用户、Leader 和 Worker 的消息，右侧 Execution Kanban 展示当前问题、任务拆分、交付状态和产物详情。用户既能看到最终结果，也能跟踪中间过程。
+Team 工作空间把连续协作群聊、成员职能头像、可展开的 Execution Kanban 与文件浏览器集中在一个页面。默认由 Leader 协调，也能通过 `@成员` 单独追问或继续修改产物；共享文本文件可在页面内编辑并显式保存。
+
+下图为早期界面预览，仅供理解协作流程；当前版本采用上述连续协作布局。
 
 <p align="center">
   <img src="./docs/main/team-collaboration.png" alt="ClawManager Team 群聊与 Execution Kanban" width="100%" />

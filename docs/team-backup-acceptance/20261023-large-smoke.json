@@ -1,0 +1,23 @@
+{
+  "exit_code": 0,
+  "wall_seconds": 1237.1717517152429,
+  "max_rss_kib": 83944,
+  "user_seconds": 577.625308,
+  "system_seconds": 184.991647,
+  "budget_bytes": 4294967296,
+  "budget_items": 200000,
+  "test": "TestSixRealSourcesPublishAndDataOnlyRestore",
+  "code_commit": "a989ca13dca77c8e519f61e377513b5a4834ee82",
+  "test_binary_sha256": "7fb8951c355d4bfddc6dcc9c7befa993e15cf418d8d4f40ea6e83561b12c0e3f",
+  "job_image": "10.130.14.23:5000/clawmanager-hxc-app@sha256:9016d487cca64fc2cb14db1b1aa9b174fe13950c7e67f7b876877f6916764154",
+  "workspace_bytes": 2147483648,
+  "workspace_fragments": 2048,
+  "team_event_rows": 100000,
+  "restored_file_entries": 2052,
+  "restored_objects": 10001,
+  "restored_redis_records": 100001,
+  "purpose": "functional_test",
+  "consistency": "best_effort",
+  "acceptance_eligible": false,
+  "measurement_scope": "test executable process; excludes fixture database, object store, Redis and verifier Job resource use"
+}

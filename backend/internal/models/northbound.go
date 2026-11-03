@@ -39,6 +39,12 @@ type NorthboundSession struct {
 func (NorthboundSession) TableName() string { return "northbound_sessions" }
 
 type NorthboundOperation struct {
+	OwnerRequestKey    *string    `db:"owner_request_key" json:"-"`
+	Owner              *string    `db:"owner" json:"-"`
+	TeamID             *int       `db:"team_id" json:"team_id,omitempty"`
+	TemplateID         *int       `db:"template_id" json:"template_id,omitempty"`
+	APIKeyID           *string    `db:"api_key_id" json:"-"`
+	AuthScope          *string    `db:"auth_scope" json:"-"`
 	ID                 int64      `db:"id,primarykey,autoincrement" json:"-"`
 	OperationID        string     `db:"operation_id" json:"operation_id"`
 	UserID             int        `db:"user_id" json:"-"`

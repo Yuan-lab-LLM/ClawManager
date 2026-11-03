@@ -1,0 +1,10 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+const page = fs.readFileSync(new URL('../src/pages/admin/SystemSettingsPage.tsx', import.meta.url), 'utf8');
+const types = fs.readFileSync(new URL('../src/types/runtimePool.ts', import.meta.url), 'utf8');
+assert.ok(!page.includes("['restored', 'restart_ready']"), 'restart readiness is not recovery success');
+for (const label of ['恢复受阻，需要处理（升级隔离仍保留）', 'Gateway 已验证', '等待恢复', '等待启动验证', '升级验收完成', '下次重试：']) assert.ok(page.includes(label), label);
+for (const field of ['recovery_status?', 'recovery_error_code?', 'restart_attempts?', 'restart_deadline_at?', 'restart_next_retry_at?']) assert.ok(types.includes(field), field);
+assert.ok(page.includes('item.error_message'), 'retain original diagnostics');
+assert.ok(page.includes('rolloutDetails.pool_progress'), 'legacy sequential rollout rendering retained');
+console.log('PASS: upgrade recovery presentation contract');

@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -24,6 +25,30 @@ func NewAuditEventService(repo repository.AuditEventRepository) AuditEventServic
 }
 
 func (s *auditEventService) RecordEvent(event *models.AuditEvent) error {
+	if err := prepareAuditEvent(event); err != nil {
+		return err
+	}
+	return s.repo.Create(event)
+}
+
+// RecordEventContext never falls back to an unbounded repository write.
+func (s *auditEventService) RecordEventContext(ctx context.Context, event *models.AuditEvent) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := prepareAuditEvent(event); err != nil {
+		return err
+	}
+	writer, ok := s.repo.(interface {
+		CreateContext(context.Context, *models.AuditEvent) error
+	})
+	if !ok {
+		return fmt.Errorf("audit repository does not support context-aware writes")
+	}
+	return writer.CreateContext(ctx, event)
+}
+
+func prepareAuditEvent(event *models.AuditEvent) error {
 	if event == nil {
 		return fmt.Errorf("audit event is required")
 	}
@@ -43,7 +68,7 @@ func (s *auditEventService) RecordEvent(event *models.AuditEvent) error {
 		return fmt.Errorf("message is required")
 	}
 
-	return s.repo.Create(event)
+	return nil
 }
 
 func (s *auditEventService) ListEventsByTraceID(traceID string) ([]models.AuditEvent, error) {

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"database/sql"
 	"log"
 	"net/http"
 	"os"
@@ -11,10 +12,13 @@ import (
 	"syscall"
 	"time"
 
+	"clawreef/internal/backupgate"
 	"clawreef/internal/config"
 	"clawreef/internal/db"
+	"clawreef/internal/middleware"
 	"clawreef/internal/northbound"
 	"clawreef/internal/repository"
+	"clawreef/internal/systembackup"
 	"github.com/gin-gonic/gin"
 )
 
@@ -63,11 +67,26 @@ func main() {
 	}
 
 	gin.SetMode(gin.ReleaseMode)
+	var backupHTTPPool *sql.DB
+	if db.SQLGateScope() != "" {
+		openCtx, openCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		backupHTTPPool, err = systembackup.OpenControlDatabase(openCtx, os.Getenv("SYSTEM_BACKUP_CONTROL_DSN_FILE"))
+		if err == nil {
+			businessSQL, _ := database.Driver().(*sql.DB)
+			err = backupgate.RequireSameDatabase(openCtx, businessSQL, backupHTTPPool)
+		}
+		openCancel()
+		if err != nil {
+			log.Fatal("backup HTTP boundary requires the same installation control database")
+		}
+		backupHTTPPool.SetMaxOpenConns(64)
+		defer backupHTTPPool.Close()
+	}
 	router := gin.New()
 	if err := router.SetTrustedProxies(cfg.Northbound.GatewayTrustedProxies); err != nil {
 		log.Fatalf("configure northbound trusted proxies: %v", err)
 	}
-	router.Use(gin.Recovery(), northbound.RequestContext(), northbound.AuditRequests(auditRepo), northbound.RejectSuspiciousRequest(), northbound.BodyLimit(64<<10))
+	router.Use(gin.Recovery(), middleware.BackupRequestBoundary(backupHTTPPool, db.SQLGateScope()), northbound.RequestContext(), northbound.AuditRequests(auditRepo), northbound.RejectSuspiciousRequest(), northbound.BodyLimit(64<<10))
 	northbound.RegisterGatewayRoutes(router, northbound.NewAuthHandler(authService), coreClient, runtimeSettings)
 	router.NoRoute(northbound.NotFound)
 	router.NoMethod(northbound.NotFound)

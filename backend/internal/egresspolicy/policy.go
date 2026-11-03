@@ -1,9 +1,13 @@
 package egresspolicy
 
 import (
+	"errors"
+	"net"
 	"os"
 	"strings"
 )
+
+var ErrHostBlocked = errors.New("target host blocked by egress policy")
 
 type Mode string
 
@@ -86,10 +90,10 @@ func normalizeHost(host string) string {
 	if host == "" {
 		return ""
 	}
-	if idx := strings.Index(host, ":"); idx >= 0 {
-		host = host[:idx]
+	if name, _, err := net.SplitHostPort(host); err == nil {
+		host = name
 	}
-	return strings.Trim(host, ".")
+	return strings.Trim(strings.Trim(host, "[]"), ".")
 }
 
 func matchesAnySuffix(host string, suffixes []string) bool {

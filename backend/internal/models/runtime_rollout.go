@@ -11,6 +11,7 @@ type RuntimeRollout struct {
 	Status                   string     `db:"status" json:"status"`
 	Phase                    string     `db:"phase" json:"phase"`
 	PreflightID              *string    `db:"preflight_id" json:"preflight_id,omitempty"`
+	RecoveryKey              *string    `db:"recovery_key" json:"-"`
 	PlanFingerprint          *string    `db:"plan_fingerprint" json:"plan_fingerprint,omitempty"`
 	PreflightJSON            *string    `db:"preflight_json" json:"-"`
 	RequiredCapabilitiesJSON *string    `db:"required_capabilities_json" json:"-"`
@@ -32,6 +33,9 @@ func (RuntimeRollout) TableName() string {
 }
 
 type RuntimeUpgradeItem struct {
+	IsolatedAt              *time.Time `db:"isolated_at" json:"isolated_at,omitempty"`
+	IsolationPhase          *string    `db:"isolation_phase" json:"isolation_phase,omitempty"`
+	PhaseEnteredAt          *time.Time `db:"phase_entered_at" json:"phase_entered_at,omitempty"`
 	ID                      int64      `db:"id,primarykey,autoincrement" json:"id"`
 	RolloutID               int64      `db:"rollout_id" json:"rollout_id"`
 	TeamID                  *int       `db:"team_id" json:"team_id,omitempty"`
@@ -48,11 +52,27 @@ type RuntimeUpgradeItem struct {
 	SourceRuntimeVersion    *string    `db:"source_runtime_version" json:"source_runtime_version,omitempty"`
 	TargetRuntimeVersion    *string    `db:"target_runtime_version" json:"target_runtime_version,omitempty"`
 	State                   string     `db:"state" json:"state"`
+	OperationToken          *string    `db:"operation_token" json:"-"`
+	OperationPhase          *string    `db:"operation_phase" json:"operation_phase,omitempty"`
+	OperationStartedAt      *time.Time `db:"operation_started_at" json:"operation_started_at,omitempty"`
+	OperationDeadlineAt     *time.Time `db:"operation_deadline_at" json:"operation_deadline_at,omitempty"`
+	OperationAttempts       int        `db:"operation_attempts" json:"operation_attempts"`
+	OperationFailures       int        `db:"operation_failures" json:"operation_failures"`
+	OperationNextRetryAt    *time.Time `db:"operation_next_retry_at" json:"operation_next_retry_at,omitempty"`
+	OperationLastError      *string    `db:"operation_last_error" json:"operation_last_error,omitempty"`
 	WorkspaceManifestSHA256 *string    `db:"workspace_manifest_sha256" json:"workspace_manifest_sha256,omitempty"`
 	SnapshotRef             *string    `db:"snapshot_ref" json:"-"`
 	PreflightJSON           *string    `db:"preflight_json" json:"-"`
 	PostflightJSON          *string    `db:"postflight_json" json:"-"`
 	ErrorMessage            *string    `db:"error_message" json:"error_message,omitempty"`
+	RecoveryStartedAt       *time.Time `db:"recovery_started_at" json:"recovery_started_at,omitempty"`
+	RestartAttempts         int        `db:"restart_attempts" json:"restart_attempts"`
+	RestartTargetPodUID     *string    `db:"restart_target_pod_uid" json:"-"`
+	RestartStartedAt        *time.Time `db:"restart_started_at" json:"restart_started_at,omitempty"`
+	RestartDeadlineAt       *time.Time `db:"restart_deadline_at" json:"restart_deadline_at,omitempty"`
+	RestartNextRetryAt      *time.Time `db:"restart_next_retry_at" json:"restart_next_retry_at,omitempty"`
+	RecoveryStatus          *string    `db:"recovery_status" json:"recovery_status,omitempty"`
+	RecoveryErrorCode       *string    `db:"recovery_error_code" json:"recovery_error_code,omitempty"`
 	StartedAt               *time.Time `db:"started_at" json:"started_at,omitempty"`
 	FinishedAt              *time.Time `db:"finished_at" json:"finished_at,omitempty"`
 	CreatedAt               time.Time  `db:"created_at" json:"created_at"`

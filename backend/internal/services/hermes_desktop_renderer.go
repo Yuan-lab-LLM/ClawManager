@@ -282,20 +282,20 @@ func (s *HermesDesktopService) desktopRead(ctx context.Context, target *hermesDe
 		}
 	}
 	if path == "/config/schema" || path == "/config" || path == "/config/defaults" {
-		secrets := []string{*target.instance.AccessToken}
+		secrets := []string{target.platformCredential(), target.nativeCredential}
 		for _, cookie := range cookies {
 			secrets = append(secrets, cookie.Value)
 		}
 		return hermesDesktopRedactStringValues(body, secrets...)
 	}
 	if !project {
-		secrets := []string{*target.instance.AccessToken}
+		secrets := []string{target.platformCredential(), target.nativeCredential}
 		for _, cookie := range cookies {
 			secrets = append(secrets, cookie.Value)
 		}
 		return hermesDesktopRedactStringValues(body, secrets...)
 	}
-	return hermesDesktopSanitize(body, *target.instance.AccessToken, cookies)
+	return hermesDesktopSanitize(body, target.platformCredential(), cookies, target.nativeCredential)
 }
 
 // Schema keys describe configuration fields and must remain intact even when
@@ -377,7 +377,7 @@ func (s *HermesDesktopService) desktopCatalog(ctx context.Context, target *herme
 	// Cache is per instance, generation, endpoint AND managed credential hash,
 	// not per browser-supplied profile. No external/unconfigured provider wins.
 	key := target.authKey()
-	cacheKey := hermesGatewayCacheKey{allocation: key, target: target.url.String(), credential: sha256.Sum256([]byte(*target.instance.AccessToken))}
+	cacheKey := hermesGatewayCacheKey{allocation: key, target: target.url.String(), credential: sha256.Sum256([]byte(target.gatewayCredential()))}
 	s.mu.Lock()
 	entry := s.catalog[cacheKey]
 	s.mu.Unlock()

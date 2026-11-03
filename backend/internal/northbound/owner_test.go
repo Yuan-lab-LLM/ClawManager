@@ -282,18 +282,21 @@ func TestLifecycleHelpersUseNarrowRestartAndResetCapabilities(t *testing.T) {
 	if err := resetInstance(stub, 42); err != nil {
 		t.Fatalf("resetInstance returned error: %v", err)
 	}
-	if len(stub.restartCalls) != 1 || stub.restartCalls[0] != 41 || len(stub.resetCalls) != 1 || stub.resetCalls[0] != 42 {
-		t.Fatalf("unexpected lifecycle calls: restart=%v reset=%v", stub.restartCalls, stub.resetCalls)
+	if err := permanentlyDeleteInstance(stub, 43); err != nil {
+		t.Fatalf("permanentlyDeleteInstance returned error: %v", err)
+	}
+	if len(stub.restartCalls) != 1 || stub.restartCalls[0] != 41 || len(stub.resetCalls) != 1 || stub.resetCalls[0] != 42 || len(stub.deleteCalls) != 1 || stub.deleteCalls[0] != 43 {
+		t.Fatalf("unexpected lifecycle calls: restart=%v reset=%v delete=%v", stub.restartCalls, stub.resetCalls, stub.deleteCalls)
 	}
 }
 
 func TestLifecycleOperationModeIsPreservedForAudit(t *testing.T) {
-	for _, operationType := range []string{OperationTypeProRestart, OperationTypeProReset} {
+	for _, operationType := range []string{OperationTypeProRestart, OperationTypeProReset, OperationTypeProDelete} {
 		if mode := operationInstanceMode(&models.NorthboundOperation{OperationType: operationType}); mode != services.InstanceModePro {
 			t.Fatalf("operation %s mode = %s, want pro", operationType, mode)
 		}
 	}
-	for _, operationType := range []string{OperationTypeLiteRestart, OperationTypeLiteReset} {
+	for _, operationType := range []string{OperationTypeLiteRestart, OperationTypeLiteReset, OperationTypeLiteDelete} {
 		if mode := operationInstanceMode(&models.NorthboundOperation{OperationType: operationType}); mode != services.InstanceModeLite {
 			t.Fatalf("operation %s mode = %s, want lite", operationType, mode)
 		}

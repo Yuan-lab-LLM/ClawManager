@@ -20,6 +20,33 @@ func NewTeamHandler(teamService services.TeamService) *TeamHandler {
 	return &TeamHandler{teamService: teamService}
 }
 
+// ResourceScopeGuard is applied to every legacy CM Team route, including files
+// and history. Owner Teams use their separate authenticated adapter.
+func (h *TeamHandler) ResourceScopeGuard(c *gin.Context) {
+	if c.Param("id") == "" {
+		c.Next()
+		return
+	}
+	id, valid := parseTeamID(c)
+	if !valid {
+		c.Abort()
+		return
+	}
+	userID, ok := c.Get("userID")
+	checker, capable := h.teamService.(interface{ CheckCMTeam(int, int) error })
+	if !ok || !capable {
+		utils.Error(c, http.StatusNotFound, "Team not found")
+		c.Abort()
+		return
+	}
+	if err := checker.CheckCMTeam(userID.(int), id); err != nil {
+		utils.HandleError(c, err)
+		c.Abort()
+		return
+	}
+	c.Next()
+}
+
 func (h *TeamHandler) CreateTeam(c *gin.Context) {
 	userID, _ := c.Get("userID")
 	var req services.CreateTeamRequest

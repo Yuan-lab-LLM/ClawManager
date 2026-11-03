@@ -22,9 +22,8 @@ function assert(condition, message) {
 
 for (const marker of [
   "provider_models?: DiscoveredProviderModel[]",
-  "provider_models: card.discovered_models ?? []",
-  "discovered_models: item.provider_models ?? []",
-  "saved.provider_models ?? card.discovered_models ?? []",
+  "discovered_models: []",
+  "discovered_models: card.discovered_models ?? []",
 ]) {
   assert(
     pageSource.includes(marker) || serviceSource.includes(marker),
@@ -33,9 +32,12 @@ for (const marker of [
 }
 
 assert(
-  pageSource.includes("discoveredModels.map((model) =>") &&
-    pageSource.includes("{model.id}"),
-  "Managed provider cards must visibly render every discovered provider model.",
+  pageSource.includes("<ModelDiscoveryPlan") &&
+    pageSource.includes("onExcludedChange=") && pageSource.includes("onChange={(modelId, patch)"),
+  "Discovery must remain an editable selection plan, not implicitly deployed models.",
 );
+
+assert(!pageSource.includes("provider_models: card.discovered_models"),
+  "Saving one deployment must not implicitly authorize the discovered catalog.");
 
 console.log("Managed provider model catalog contract is valid.");

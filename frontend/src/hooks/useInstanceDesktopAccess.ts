@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { isAxiosError } from "axios";
 import { instanceService } from "../services/instanceService";
+import { refreshDedicatedRuntimeCookie } from "../lib/instanceAccess";
 
 interface RefreshAccessOptions {
   forceReload?: boolean;
@@ -210,9 +211,6 @@ export function useInstanceDesktopAccess({
 
   const scheduleRetry = useCallback(() => {
     clearRetryTimeout();
-    if (shouldPreserveSession()) {
-      return;
-    }
     if (!instanceId || !isRunning || document.hidden) {
       return;
     }
@@ -238,7 +236,7 @@ export function useInstanceDesktopAccess({
         silent: true,
       });
     }, nextDelay);
-  }, [clearRetryTimeout, instanceId, isRunning, retryDelayMs, shouldPreserveSession]);
+  }, [clearRetryTimeout, instanceId, isRunning, retryDelayMs]);
 
   const refreshAccess = useCallback(
     async ({ forceReload = false, silent = false }: RefreshAccessOptions = {}) => {
@@ -269,14 +267,23 @@ export function useInstanceDesktopAccess({
         const nextEmbedUrl = resolveEmbedUrl(data.access_url || data.proxy_url);
         const nextExpiresAt = new Date(data.expires_at);
         const previousEmbedUrl = embedUrlRef.current;
+        const shouldReloadFrame =
+          !previousEmbedUrl || forceReload || reloadOnAccessRefresh;
+
+        if (!shouldReloadFrame) {
+          // The management-origin cookie cannot renew a dedicated-origin
+          // iframe. Promote the fresh ?token= capability on that origin too.
+          await refreshDedicatedRuntimeCookie(nextEmbedUrl);
+          if (requestId !== requestIdRef.current) {
+            return;
+          }
+        }
 
         expiresAtRef.current = nextExpiresAt;
         retryAttemptRef.current = 0;
         setExpiresAt(nextExpiresAt);
         setError(null);
 
-        const shouldReloadFrame =
-          !previousEmbedUrl || forceReload || reloadOnAccessRefresh;
         if (shouldReloadFrame) {
           embedUrlRef.current = nextEmbedUrl;
           setEmbedUrl(nextEmbedUrl);

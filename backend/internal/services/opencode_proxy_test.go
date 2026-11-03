@@ -159,6 +159,18 @@ func TestShouldRewriteHTMLForProxyOpenCodeLite(t *testing.T) {
 	}
 }
 
+func TestIsOpenCodeEventStreamRequest(t *testing.T) {
+	if !isOpenCodeEventStreamRequest(true, "/api/event") {
+		t.Fatal("expected OpenCode V2 event stream to bypass the HTTP timeout")
+	}
+	if isOpenCodeEventStreamRequest(false, "/api/event") {
+		t.Fatal("non-Lite V2 requests must keep the standard HTTP timeout")
+	}
+	if !isOpenCodeEventStreamRequest(true, "/global/event") {
+		t.Fatal("expected OpenCode Lite global event stream to bypass the HTTP timeout")
+	}
+}
+
 type proxyRoundTripper func(*http.Request) (*http.Response, error)
 
 func (roundTrip proxyRoundTripper) RoundTrip(request *http.Request) (*http.Response, error) {

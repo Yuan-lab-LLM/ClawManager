@@ -62,6 +62,9 @@ export const customTeamTemplateService = {
       ),
     ),
 
+  updateMemberIcon: async (id: number, memberId: string, iconOverride: string, expectedRevision: number): Promise<CustomTeamTemplate> =>
+    unwrap(await api.put(`/custom-team-templates/${id}/members/${encodeURIComponent(memberId)}/icon`, { icon_override: iconOverride, expected_revision: expectedRevision })),
+
   regenerateMember: async (
     id: number,
     memberId: string,

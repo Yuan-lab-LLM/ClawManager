@@ -214,6 +214,7 @@ test.describe("lite/pro instance modes", () => {
       });
 
       await expect(summary.getByText(/^Pro$/)).toBeVisible();
+      await expect(summary.getByText(/^50 GB$/)).toBeVisible();
       await expect(summary.getByText(/^Desktop$/)).toBeVisible();
       await expect(page.getByRole("heading", { name: /quick configuration/i })).toBeVisible();
       await expect(page.getByRole("button", { name: /enable gpu/i })).toBeVisible();

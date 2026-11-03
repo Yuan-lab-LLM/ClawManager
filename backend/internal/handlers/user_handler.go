@@ -42,12 +42,12 @@ func NewUserHandler(userService services.UserService, quotaService services.Quot
 }
 
 type LDAPImportRequest struct {
-	Role         string  `json:"role" binding:"required,oneof=admin user"`
-	MaxInstances int     `json:"max_instances" binding:"min=0"`
-	MaxCPUCores  float64 `json:"max_cpu_cores" binding:"min=0"`
-	MaxMemoryGB  int     `json:"max_memory_gb" binding:"min=0"`
-	MaxStorageGB int     `json:"max_storage_gb" binding:"min=0"`
-	MaxGPUCount  int     `json:"max_gpu_count" binding:"min=0"`
+	Role         string   `json:"role" binding:"required,oneof=admin user"`
+	MaxInstances int      `json:"max_instances" binding:"min=0"`
+	MaxCPUCores  float64  `json:"max_cpu_cores" binding:"min=0"`
+	MaxMemoryGB  int      `json:"max_memory_gb" binding:"min=0"`
+	MaxStorageGB int      `json:"max_storage_gb" binding:"min=0"`
+	MaxGPUCount  int      `json:"max_gpu_count" binding:"min=0"`
 	Query        string   `json:"query"`
 	Limit        int      `json:"limit" binding:"min=0"`
 	ExternalIDs  []string `json:"external_ids"`
@@ -76,16 +76,20 @@ func (h *UserHandler) PreviewLDAPUsers(c *gin.Context) {
 		status := "ready"
 		if item.Error != "" || strings.TrimSpace(item.ExternalID) == "" {
 			status = "invalid"
-			if item.Error == "" { item.Error = "LDAP DN is required" }
+			if item.Error == "" {
+				item.Error = "LDAP DN is required"
+			}
 		} else if existing, lookupErr := h.userService.GetUserByExternalIdentity(services.AuthProviderLDAP, item.ExternalID); lookupErr != nil && !isUserNotFound(lookupErr) {
 			status = "invalid"
 			item.Error = lookupErr.Error()
 		} else if existing != nil {
-			if existing.LoginAlias == nil || strings.TrimSpace(stringPtrValue(existing.LoginAlias)) == "" {
-				status = "pending_alias"
-			} else {
-				status = "exists"
-			}
+			status = "exists"
+		} else if existing, lookupErr := h.userService.GetUserByUsername(item.Username); lookupErr != nil && !isUserNotFound(lookupErr) {
+			status = "invalid"
+			item.Error = lookupErr.Error()
+		} else if existing != nil {
+			status = "invalid"
+			item.Error = "username already exists"
 		} else if item.Email != "" {
 			if existing, lookupErr := h.userService.GetUserByEmail(item.Email); lookupErr != nil && !isUserNotFound(lookupErr) {
 				status = "invalid"
@@ -129,8 +133,12 @@ func (h *UserHandler) ImportLDAPUsers(c *gin.Context) {
 		}
 		if item.Error != "" || strings.TrimSpace(item.Username) == "" || strings.TrimSpace(item.ExternalID) == "" {
 			errorMessage := item.Error
-			if strings.TrimSpace(item.Username) == "" { errorMessage = "LDAP username is required" }
-			if strings.TrimSpace(item.ExternalID) == "" { errorMessage = "LDAP DN is required" }
+			if strings.TrimSpace(item.Username) == "" {
+				errorMessage = "LDAP username is required"
+			}
+			if strings.TrimSpace(item.ExternalID) == "" {
+				errorMessage = "LDAP DN is required"
+			}
 			failed = append(failed, importUserResult{Line: line, Username: item.Username, Error: firstNonEmpty(errorMessage, "LDAP username is required")})
 			continue
 		}
@@ -145,14 +153,6 @@ func (h *UserHandler) ImportLDAPUsers(c *gin.Context) {
 			continue
 		}
 		if existing != nil {
-			if existing.LoginAlias == nil || strings.TrimSpace(stringPtrValue(existing.LoginAlias)) == "" {
-				ensured, ensureErr := h.userService.EnsureLDAPLoginAlias(item.ExternalID)
-				if ensureErr != nil {
-					failed = append(failed, importUserResult{Line: line, Username: item.Username, Error: ensureErr.Error()})
-					continue
-				}
-				existing = ensured
-			}
 			if syncRole && (existing.Role != role || strings.EqualFold(role, "admin")) {
 				if updateErr := h.userService.UpdateUserRole(existing.ID, role); updateErr != nil {
 					failed = append(failed, importUserResult{Line: line, Username: item.Username, Error: updateErr.Error()})
@@ -163,6 +163,15 @@ func (h *UserHandler) ImportLDAPUsers(c *gin.Context) {
 				continue
 			}
 			skipped = append(skipped, importUserResult{Line: line, Username: item.Username, Error: "user already exists"})
+			continue
+		}
+		existing, lookupErr = h.userService.GetUserByUsername(item.Username)
+		if lookupErr != nil && !isUserNotFound(lookupErr) {
+			failed = append(failed, importUserResult{Line: line, Username: item.Username, Error: lookupErr.Error()})
+			continue
+		}
+		if existing != nil {
+			failed = append(failed, importUserResult{Line: line, Username: item.Username, Error: "username already exists"})
 			continue
 		}
 		existing, lookupErr = h.userService.GetUserByEmail(email)
@@ -267,9 +276,8 @@ func ldapImportEmail(username, externalID string) string {
 	if username == "" {
 		return ""
 	}
-	// LDAP directories commonly omit mail, and the same uid can occur in
-	// several OUs. Deriving the fallback from the DN keeps those imports
-	// globally unique without using a mutable counter.
+	// LDAP directories commonly omit mail. Deriving the fallback from the DN
+	// keeps it stable across imports without using a mutable counter.
 	digest := sha256.Sum256([]byte(strings.TrimSpace(externalID)))
 	return fmt.Sprintf("%s-%s@import.clawmanager.local", username, hex.EncodeToString(digest[:4]))
 }
@@ -296,8 +304,8 @@ type UpdateQuotaRequest struct {
 	MaxInstances int     `json:"max_instances" binding:"min=0"`
 	MaxCPUCores  float64 `json:"max_cpu_cores" binding:"min=0"`
 	MaxMemoryGB  int     `json:"max_memory_gb" binding:"min=0"`
-	MaxStorageGB int `json:"max_storage_gb" binding:"min=0"`
-	MaxGPUCount  int `json:"max_gpu_count" binding:"min=0"`
+	MaxStorageGB int     `json:"max_storage_gb" binding:"min=0"`
+	MaxGPUCount  int     `json:"max_gpu_count" binding:"min=0"`
 }
 
 // CreateUserRequest represents a create user request (admin only)
@@ -316,18 +324,18 @@ type importUserResult struct {
 }
 
 type importedUserCredential struct {
-	Username        string `json:"username"`
-	LoginAlias      string `json:"login_alias,omitempty"`
-	Email           string `json:"email"`
-	Role            string `json:"role"`
-	AuthProvider    string `json:"auth_provider"`
+	Username        string   `json:"username"`
+	LoginAlias      string   `json:"login_alias,omitempty"`
+	Email           string   `json:"email"`
+	Role            string   `json:"role"`
+	AuthProvider    string   `json:"auth_provider"`
 	WarningCodes    []string `json:"warning_codes,omitempty"`
-	MaxInstances    int     `json:"max_instances"`
-	MaxCPUCores     float64 `json:"max_cpu_cores"`
-	MaxMemoryGB     int     `json:"max_memory_gb"`
-	MaxStorageGB    int    `json:"max_storage_gb"`
-	MaxGPUCount     int    `json:"max_gpu_count"`
-	InitialPassword string `json:"initial_password,omitempty"`
+	MaxInstances    int      `json:"max_instances"`
+	MaxCPUCores     float64  `json:"max_cpu_cores"`
+	MaxMemoryGB     int      `json:"max_memory_gb"`
+	MaxStorageGB    int      `json:"max_storage_gb"`
+	MaxGPUCount     int      `json:"max_gpu_count"`
+	InitialPassword string   `json:"initial_password,omitempty"`
 }
 
 type updatedLDAPUser struct {
@@ -503,11 +511,11 @@ func (h *UserHandler) ImportUsers(c *gin.Context) {
 		}
 
 		importQuota := quotaForImportRole(role, models.UserQuota{
-			MaxInstances:  maxInstances,
-			MaxCPUCores:   maxCPUCores,
-			MaxMemoryGB:   maxMemoryGB,
-			MaxStorageGB:  maxStorageGB,
-			MaxGPUCount:   maxGPUCount,
+			MaxInstances: maxInstances,
+			MaxCPUCores:  maxCPUCores,
+			MaxMemoryGB:  maxMemoryGB,
+			MaxStorageGB: maxStorageGB,
+			MaxGPUCount:  maxGPUCount,
 		}, false)
 
 		initialPassword := ""
@@ -569,7 +577,9 @@ func (h *UserHandler) ImportUsers(c *gin.Context) {
 }
 
 func stringPtrValue(value *string) string {
-	if value == nil { return "" }
+	if value == nil {
+		return ""
+	}
 	return *value
 }
 
@@ -651,9 +661,6 @@ func validateImportedUser(username, email, password, role, authProvider, externa
 	}
 	if authProvider == services.AuthProviderLocal && password != "" && len(password) < 8 {
 		return "Password must be at least 8 characters"
-	}
-	if authProvider == services.AuthProviderLocal && strings.HasPrefix(strings.ToLower(strings.TrimSpace(username)), "ldap_") {
-		return "local usernames cannot start with ldap_"
 	}
 	return ""
 }

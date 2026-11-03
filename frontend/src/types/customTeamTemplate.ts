@@ -1,4 +1,7 @@
 export interface CustomTeamMemberSpec {
+  iconKey?: string;
+  autoIconKey?: string;
+  iconOverride?: string;
   memberId: string;
   displayName: string;
   role: string;

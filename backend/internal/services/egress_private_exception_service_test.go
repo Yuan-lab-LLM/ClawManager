@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"net/netip"
 	"testing"
 
@@ -15,7 +16,7 @@ type stubEgressPrivateExceptionRepo struct {
 func (s *stubEgressPrivateExceptionRepo) List(string, *int) ([]models.EgressPrivateException, error) {
 	return append([]models.EgressPrivateException(nil), s.items...), nil
 }
-func (s *stubEgressPrivateExceptionRepo) ListEnabled() ([]models.EgressPrivateException, error) {
+func (s *stubEgressPrivateExceptionRepo) ListEnabled(context.Context) ([]models.EgressPrivateException, error) {
 	var out []models.EgressPrivateException
 	for _, item := range s.items {
 		if item.Enabled {

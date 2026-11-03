@@ -21,7 +21,6 @@ const ENTERPRISE_AUTH_ERROR_KEYS: Array<[string, string]> = [
   ['external id is required for ldap users', 'enterpriseAuthErrors.ldapExternalIDRequired'],
   ['auth provider must be local or ldap', 'enterpriseAuthErrors.authProviderInvalid'],
   ['ldap users must be imported from ldap', 'enterpriseAuthErrors.ldapUsersMustBeImported'],
-  ['local usernames cannot start with ldap_', 'enterpriseAuthErrors.localLDAPUsernameReserved'],
   ['unknown ldap import error', 'enterpriseAuthErrors.unknownLDAPImportError'],
   ['user already exists', 'enterpriseAuthErrors.userAlreadyExists'],
   ['username already exists', 'enterpriseAuthErrors.usernameAlreadyExists'],

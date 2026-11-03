@@ -1,0 +1,12 @@
+const assert=require('node:assert/strict');
+const fs=require('node:fs');const vm=require('node:vm');const ts=require('typescript');
+const source=fs.readFileSync(require('node:path').join(__dirname,'../src/lib/ownerPortalNavigation.ts'),'utf8');
+const context={exports:{},URLSearchParams};vm.runInNewContext(ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText,context);
+const {ownerOverviewURL,expandedInstanceFromSearch}=context.exports;
+const url=new URL(ownerOverviewURL(269,'?view=instance&dashboard_tab=growth&q=办公&runtime=opencode&usage_range=30d&token=SECRET&redirect=https://example.com'),'https://portal.invalid');
+assert.equal(url.searchParams.get('view'),'overview');assert.equal(url.searchParams.get('dashboard_tab'),'overview');
+assert.equal(url.searchParams.get('q'),'办公');assert.equal(url.searchParams.get('runtime'),'opencode');
+assert.equal(url.searchParams.get('token'),null);assert.equal(url.searchParams.get('redirect'),null);
+assert.equal(expandedInstanceFromSearch(url.search),269);
+for(const value of ['', '-1','1.5','NaN','9007199254740992'])assert.equal(expandedInstanceFromSearch('?expanded_instance_id='+value),null);
+console.log('PASS: overview return, expanded target, preserved filters, no token/redirect propagation');

@@ -59,6 +59,7 @@
 
 Wichtige aktuelle Produkt- und Dokumentations-Updates.
 
+- [2026-10-16] Team-Workspaces mit einem fortlaufenden Chat-Layout, klarer Nachrichtengruppierung, Funktions-Avataren, Online-Bearbeitung gemeinsamer Dateien und Einzelaufgaben per `@Mitglied` aktualisiert. Frühere Arbeit kann zur Überarbeitung von Artefakten referenziert werden; jede Anfrage bleibt in Verlauf und Kanban eigenständig. Siehe [Team-Anleitung](./docs/team-workspaces-guide_de.md).
 - [2026-09-08] Datensichere OpenClaw-Lite-Rollouts mit versionsbewusster Vorpruefung, Migrationspruefung, begrenzter Wiederherstellung und Rollback ueber die gespeicherte Quellidentitaet gehaertet. Aeltere Images ohne 8.1-Faehigkeitsmerkmal verwenden weiterhin den etablierten Rolling-Update-Pfad.
 - [2026-09-02] Northbound API und Owner-isoliertes Portal um Lite/Pro-Provisionierung fuer OpenClaw, Hermes, OpenCode und DeepSeek Harness, asynchrone Lifecycle-Operationen und geschuetzte Share-Link-Verwaltung erweitert. Siehe [Northbound API Guide](./docs/northbound-api-guide.md).
 - [2026-09-01] LDAP-Unternehmensauthentifizierung, erweiterte verwaltete Provider-Modellkataloge und dedizierte Browser-Origins fuer verwaltete OpenCode- und DeepSeek-Harness-Instanzen hinzugefuegt.
@@ -210,13 +211,16 @@ Siehe [Resource Management Guide](./docs/resource-management_de.md) und [Skill H
 <a id="team-workspaces"></a>
 ### Team-Kollaboration
 
-Teams verwenden einen Leader-vermittelten Ablauf. Sie entstehen aus acht unveraenderlichen integrierten Vorlagen oder einer benutzereigenen Vorlage. Der OpenClaw Lite Leader plant, zerlegt Aufgaben, verteilt Arbeit, prueft Lieferungen und veroeffentlicht das gemeinsame Ergebnis.
+Teams entstehen aus acht unveränderlichen integrierten Vorlagen oder einer benutzereigenen Vorlage. Standardmäßig plant und delegiert der OpenClaw Lite Leader über `@Leader`, prüft Lieferungen und veröffentlicht das gemeinsame Ergebnis. Ein per `@` ausgewählter Worker bearbeitet die Anfrage dagegen allein, ohne auf eine Zusammenfassung des Leaders zu warten.
 
 - genau ein OpenClaw Lite Leader; OpenClaw Lite oder Hermes Lite je Worker
 - Custom Teams aus natuerlicher Sprache erzeugen, pro Rolle verfeinern, komplett regenerieren und wiederverwenden
-- Team Chat fuer Plan, Zuweisung, Fortschritt, Review, Lieferung und Zusammenfassung
-- Execution Kanban fuer aktuelle Anfrage, Task Breakdown und Delivery State
-- gemeinsame Dateien/Artefakte und native Hermes-Team-Sessions in der Instanzansicht
+- das helle, fortlaufende Chat-Layout bietet gut lesbare Schrift und gruppierte Mitgliedsnachrichten; Benutzer, Leader und Worker bleiben unterscheidbar, Mitglieder-, Ablauf- und Dateibereiche sind aufklappbar
+- Funktions-Avatare passen automatisch zu integrierten und benutzerdefinierten Rollen; Worker-Avatare lassen sich bei der Team-Erstellung oder Vorlagenbearbeitung anklicken und ändern, ohne Aufgaben oder Runtime-Einstellungen zu verändern
+- `@` oder die Empfängerauswahl startet eine Einzelaufgabe mit optionalem Bezug auf frühere Arbeit; jede Anfrage besitzt einen eigenen Verlauf und Kanban-Eintrag
+- Execution Kanban zeigt Anfragen, Arbeitsschritte und angenommene Lieferungen; gemeinsame Aufgaben behalten die Leader-Zusammenfassung, Einzelaufgaben enden nach der angenommenen Lieferung des ausgewählten Workers
+- der Dateibrowser bietet Vorschau, Download und Online-Bearbeitung unterstützter Textdateien mit explizitem Speichern, Hinweisen auf externe Änderungen und Versionskonfliktprüfung; kein automatisches Speichern oder gleichzeitiges Echtzeit-Editieren durch mehrere Benutzer
+- native Hermes-Team-Sessions bleiben in der Instanzansicht verfügbar; neue Funktionen benötigen passende ClawManager-App- und Runtime-Versionen, ein Runtime-Update allein aktualisiert die Team-Oberfläche nicht
 
 Siehe [Team Workspace Quick Guide](./docs/team-workspaces-guide_de.md) fuer Erstellung, Kollaborationsphasen und Ergebnisansicht.
 
@@ -245,7 +249,9 @@ Pro Mode stellt fuer jede Instanz eine dedizierte Desktop-Runtime bereit, gestue
 
 ### Team Workspace
 
-Der Team Workspace zeigt Nachrichten und Lieferungen links sowie die aktuelle Anfrage, Aufgabenteilung, Status und Artefaktdetails im Execution Kanban rechts.
+Der Team-Workspace vereint fortlaufenden Chat, Funktions-Avatare, ein aufklappbares Execution Kanban und den Dateibrowser. Neben der üblichen Leader-Koordination können Mitglieder per `@Mitglied` direkt um Änderungen an Ergebnissen gebeten und gemeinsame Textdateien online bearbeitet und explizit gespeichert werden.
+
+Das folgende Bild zeigt eine frühere Oberfläche zur Veranschaulichung des Ablaufs; die aktuelle Version verwendet das oben beschriebene fortlaufende Layout.
 
 <p align="center">
   <img src="./docs/main/team-collaboration.png" alt="ClawManager Team Workspace und Execution Kanban" width="100%" />

@@ -48,8 +48,10 @@ type HermesDesktopConfig struct {
 	Bindings        repository.InstanceRuntimeBindingRepository
 	Pods            repository.RuntimePodRepository
 	Teams           repository.HermesDesktopTeamGuard
+	ExternalAccess  InstanceExternalAccessService
 	Agent           RuntimeAgentClient
 	Redis           PlatformRedisClient
+	RuntimeSecurity *RuntimeSecurityAuthority
 }
 
 type HermesDesktopDescriptor struct {
@@ -64,21 +66,23 @@ type HermesDesktopDescriptor struct {
 }
 
 type HermesDesktopClaims struct {
-	UserID     int    `json:"uid"`
-	InstanceID int    `json:"iid"`
-	Generation int    `json:"gen"`
-	PodID      int64  `json:"pod"`
-	Port       int    `json:"port"`
-	SessionID  string `json:"sid"`
-	Epoch      string `json:"epoch"`
+	UserID                 int    `json:"uid"`
+	InstanceID             int    `json:"iid"`
+	Generation             int    `json:"gen"`
+	PodID                  int64  `json:"pod"`
+	Port                   int    `json:"port"`
+	SessionID              string `json:"sid"`
+	Epoch                  string `json:"epoch"`
+	ExternalSessionBinding string `json:"external_binding,omitempty"`
 	jwt.RegisteredClaims
 }
 
 type hermesDesktopTarget struct {
-	instance *models.Instance
-	binding  *models.InstanceRuntimeBinding
-	pod      *models.RuntimePod
-	url      *url.URL
+	instance         *models.Instance
+	binding          *models.InstanceRuntimeBinding
+	pod              *models.RuntimePod
+	url              *url.URL
+	nativeCredential string
 }
 
 type HermesDesktopService struct {
@@ -150,10 +154,17 @@ func (s *HermesDesktopService) resolveRuntime(ctx context.Context, userID, insta
 	if err != nil || pod == nil || pod.RuntimeType != "hermes" || pod.PodIP == nil || net.ParseIP(strings.TrimSpace(*pod.PodIP)) == nil || pod.AgentEndpoint == nil || (pod.State != "ready" && pod.State != "draining") {
 		return nil, "runtime_not_ready", nil
 	}
-	if instance.AccessToken == nil || strings.TrimSpace(*instance.AccessToken) == "" {
+	if instance.RuntimeSecurityProfile == "" && (instance.AccessToken == nil || strings.TrimSpace(*instance.AccessToken) == "") {
 		return nil, "runtime_auth_unavailable", nil
 	}
 	target := &hermesDesktopTarget{instance: instance, binding: binding, pod: pod, url: &url.URL{Scheme: "http", Host: net.JoinHostPort(strings.TrimSpace(*pod.PodIP), strconv.Itoa(binding.GatewayPort))}}
+	if instance.RuntimeSecurityProfile != "" {
+		credential, err := s.protectedHermesCredential(ctx, target)
+		if err != nil {
+			return nil, "runtime_auth_unavailable", nil
+		}
+		target.nativeCredential = credential
+	}
 	return target, "", nil
 }
 
@@ -240,6 +251,33 @@ func (s *HermesDesktopService) redisReady(ctx context.Context) bool {
 }
 
 func (s *HermesDesktopService) Activate(ctx context.Context, userID, instanceID int) (*HermesDesktopDescriptor, string, error) {
+	return s.activate(ctx, userID, instanceID, "")
+}
+
+// ActivateShared creates the same instance-scoped Desktop Web session used by
+// an owner, but binds it to the current external-access credential. The caller
+// must first authenticate the share/password session and pass the binding it
+// authenticated so a credential rotation racing activation fails closed.
+func (s *HermesDesktopService) ActivateShared(ctx context.Context, instanceID int, code, expectedBinding string) (*HermesDesktopDescriptor, string, error) {
+	if s == nil || s.config.ExternalAccess == nil || s.config.Instances == nil {
+		return nil, "", ErrHermesDesktopUnavailable
+	}
+	access, err := s.config.ExternalAccess.ResolveShortLink(ctx, code)
+	if err != nil || access == nil || access.InstanceID != instanceID {
+		return nil, "", ErrHermesDesktopUnauthorized
+	}
+	binding := ExternalAccessSessionBinding(code, access)
+	if binding == "" || binding != strings.TrimSpace(expectedBinding) {
+		return nil, "", ErrHermesDesktopUnauthorized
+	}
+	instance, err := s.config.Instances.GetByID(instanceID)
+	if err != nil || instance == nil {
+		return nil, "", ErrHermesDesktopForbidden
+	}
+	return s.activate(ctx, instance.UserID, instanceID, binding)
+}
+
+func (s *HermesDesktopService) activate(ctx context.Context, userID, instanceID int, externalBinding string) (*HermesDesktopDescriptor, string, error) {
 	// Capture the authorization epoch before health/login network calls. A
 	// logout racing a slow activation must not be adopted as its new epoch.
 	if _, reason, err := s.resolve(ctx, userID, instanceID); err != nil {
@@ -280,7 +318,7 @@ func (s *HermesDesktopService) Activate(ctx context.Context, userID, instanceID 
 	if currentEpoch != epoch {
 		return nil, "", ErrHermesDesktopUnauthorized
 	}
-	claims := HermesDesktopClaims{UserID: userID, InstanceID: instanceID, Generation: target.binding.Generation, PodID: target.pod.ID, Port: target.binding.GatewayPort, SessionID: id, Epoch: epoch}
+	claims := HermesDesktopClaims{UserID: userID, InstanceID: instanceID, Generation: target.binding.Generation, PodID: target.pod.ID, Port: target.binding.GatewayPort, SessionID: id, Epoch: epoch, ExternalSessionBinding: externalBinding}
 	token, err := s.sign(&claims, "session", HermesDesktopSessionTTL)
 	if err != nil {
 		return nil, "", err
@@ -344,6 +382,9 @@ func (s *HermesDesktopService) authorizeClaims(ctx context.Context, c *HermesDes
 	if c.Epoch != epoch {
 		return nil, ErrHermesDesktopUnauthorized
 	}
+	if c.ExternalSessionBinding != "" && !s.validExternalSessionBinding(ctx, c) {
+		return nil, ErrHermesDesktopUnauthorized
+	}
 	target, reason, err := s.resolveRuntime(ctx, c.UserID, c.InstanceID, true)
 	if err != nil {
 		return nil, err
@@ -358,6 +399,21 @@ func (s *HermesDesktopService) authorizeClaims(ctx context.Context, c *HermesDes
 		return nil, ErrHermesDesktopUnavailable
 	}
 	return target, nil
+}
+
+func (s *HermesDesktopService) validExternalSessionBinding(ctx context.Context, c *HermesDesktopClaims) bool {
+	if s == nil || c == nil || s.config.ExternalAccess == nil {
+		return false
+	}
+	access, err := s.config.ExternalAccess.Get(ctx, c.InstanceID)
+	if err != nil || access == nil || !access.Enabled || access.PublicSlug == nil {
+		return false
+	}
+	if access.ExpiresAt != nil && !time.Now().UTC().Before(*access.ExpiresAt) {
+		return false
+	}
+	code := strings.TrimSpace(*access.PublicSlug)
+	return code != "" && c.ExternalSessionBinding == ExternalAccessSessionBinding(code, access)
 }
 
 func (s *HermesDesktopService) MintTicket(c *HermesDesktopClaims) (string, time.Time, error) {
@@ -381,7 +437,7 @@ func (s *HermesDesktopService) redeemTicket(ctx context.Context, raw string, c *
 	if err != nil {
 		return err
 	}
-	if ticket.UserID != c.UserID || ticket.InstanceID != c.InstanceID || ticket.Generation != c.Generation || ticket.PodID != c.PodID || ticket.Port != c.Port || ticket.SessionID != c.SessionID || ticket.Epoch != c.Epoch {
+	if ticket.UserID != c.UserID || ticket.InstanceID != c.InstanceID || ticket.Generation != c.Generation || ticket.PodID != c.PodID || ticket.Port != c.Port || ticket.SessionID != c.SessionID || ticket.Epoch != c.Epoch || ticket.ExternalSessionBinding != c.ExternalSessionBinding {
 		return ErrHermesDesktopForbidden
 	}
 	if s.config.Redis == nil {
@@ -467,7 +523,15 @@ func (s *HermesDesktopService) upstreamCookies(ctx context.Context, t *hermesDes
 	if s.gatewayAuth == nil {
 		return nil, ErrHermesDesktopUnavailable
 	}
-	cookies, err := s.gatewayAuth.Cookie(ctx, t.authKey(), t.url, *t.instance.AccessToken)
+	var cookies []*http.Cookie
+	err := s.protectedHermesOperation(ctx, t, func(c context.Context) error {
+		bound, err := s.hermesUpstreamContext(c, t)
+		if err != nil {
+			return err
+		}
+		cookies, err = s.gatewayAuth.Cookie(bound, t.authKey(), t.url, t.gatewayCredential())
+		return err
+	})
 	if err != nil {
 		return nil, ErrHermesDesktopUpstream
 	}
@@ -483,10 +547,25 @@ func (s *HermesDesktopService) upstreamRequest(ctx context.Context, t *hermesDes
 }
 
 func (s *HermesDesktopService) upstreamRequestBody(ctx context.Context, t *hermesDesktopTarget, method, path, query string, body []byte) ([]byte, int, []*http.Cookie, error) {
-	return s.upstreamRequestAttempt(ctx, t, method, path, query, body, true)
+	var response []byte
+	var status int
+	var cookies []*http.Cookie
+	err := s.protectedHermesOperation(ctx, t, func(c context.Context) error {
+		var err error
+		response, status, cookies, err = s.upstreamRequestAttempt(c, t, method, path, query, body, true)
+		return err
+	})
+	if err != nil {
+		return nil, 0, nil, err
+	}
+	return response, status, cookies, nil
 }
 
 func (s *HermesDesktopService) upstreamRequestAttempt(ctx context.Context, t *hermesDesktopTarget, method, path, query string, body []byte, retry bool) ([]byte, int, []*http.Cookie, error) {
+	ctx, err := s.hermesUpstreamContext(ctx, t)
+	if err != nil {
+		return nil, 0, nil, ErrHermesDesktopUpstream
+	}
 	cookies, err := s.upstreamCookies(ctx, t)
 	if err != nil {
 		return nil, 0, nil, err
@@ -555,7 +634,7 @@ func (s *HermesDesktopService) ProxyAPIRequest(ctx context.Context, c *HermesDes
 		if err != nil {
 			return nil, err
 		}
-		return hermesDesktopSanitize(body, *target.instance.AccessToken, cookies)
+		return hermesDesktopSanitize(body, target.platformCredential(), cookies, target.nativeCredential)
 	}
 	if method == http.MethodGet && path == "/hermes/update/check" {
 		status, err := s.desktopRead(ctx, target, "/status", nil)
@@ -597,7 +676,7 @@ func (s *HermesDesktopService) ProxyAPIRequest(ctx context.Context, c *HermesDes
 		if err != nil {
 			return nil, err
 		}
-		secrets := []string{*target.instance.AccessToken}
+		secrets := []string{target.platformCredential(), target.nativeCredential}
 		for _, cookie := range cookies {
 			secrets = append(secrets, cookie.Value)
 		}

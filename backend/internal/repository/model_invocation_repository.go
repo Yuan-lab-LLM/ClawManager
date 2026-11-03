@@ -38,61 +38,10 @@ type modelInvocationRepository struct {
 	sess db.Session
 }
 
-// NewModelInvocationRepository creates a new invocation repository and ensures its table exists.
+// NewModelInvocationRepository creates a new invocation repository (schema is owned by embedded migrations).
 func NewModelInvocationRepository(sess db.Session) ModelInvocationRepository {
 	repo := &modelInvocationRepository{sess: sess}
-	repo.ensureTable()
 	return repo
-}
-
-func (r *modelInvocationRepository) ensureTable() {
-	const query = `
-CREATE TABLE IF NOT EXISTS model_invocations (
-  id INT AUTO_INCREMENT PRIMARY KEY,
-  trace_id VARCHAR(100) NOT NULL,
-  session_id VARCHAR(100) NULL,
-  request_id VARCHAR(100) NOT NULL,
-  user_id INT NULL,
-  instance_id INT NULL,
-  instance_mode VARCHAR(16) NULL,
-  runtime_type VARCHAR(32) NULL,
-  gateway_id VARCHAR(128) NULL,
-  runtime_pod_id BIGINT NULL,
-  model_id INT NULL,
-  provider_type VARCHAR(100) NOT NULL,
-  requested_model VARCHAR(255) NOT NULL,
-  actual_provider_model VARCHAR(255) NOT NULL,
-  traffic_class VARCHAR(50) NOT NULL,
-  request_payload LONGTEXT NULL,
-  response_payload LONGTEXT NULL,
-  prompt_tokens INT NOT NULL DEFAULT 0,
-  completion_tokens INT NOT NULL DEFAULT 0,
-  total_tokens INT NOT NULL DEFAULT 0,
-  cached_tokens INT NULL,
-  reasoning_tokens INT NULL,
-  latency_ms INT NULL,
-  is_streaming BOOLEAN NOT NULL DEFAULT FALSE,
-  status VARCHAR(50) NOT NULL,
-  error_message TEXT NULL,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  completed_at TIMESTAMP NULL,
-  INDEX idx_model_invocations_trace_id (trace_id),
-  INDEX idx_model_invocations_request_id (request_id),
-  INDEX idx_model_invocations_user_id (user_id),
-  INDEX idx_model_invocations_instance_id (instance_id),
-  INDEX idx_model_invocations_gateway_id (gateway_id),
-  INDEX idx_model_invocations_model_id (model_id),
-  INDEX idx_model_invocations_status (status),
-  INDEX idx_model_invocations_created_at (created_at)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-`
-
-	if _, err := r.sess.SQL().Exec(query); err != nil {
-		panic(fmt.Errorf("failed to ensure model_invocations table: %w", err))
-	}
-	if _, err := r.sess.SQL().Exec("ALTER TABLE model_invocations ADD INDEX idx_model_invocations_session_id (session_id)"); err != nil && !isDuplicateIndexError(err) {
-		panic(fmt.Errorf("failed to ensure session index on model_invocations: %w", err))
-	}
 }
 
 func (r *modelInvocationRepository) Create(invocation *models.ModelInvocation) error {
@@ -212,7 +161,7 @@ func (r *modelInvocationRepository) ListRecentByInstanceSession(instanceID int, 
 		limit = 20
 	}
 	query := `
-SELECT id, trace_id, session_id, request_id, user_id, instance_id, instance_mode, runtime_type, gateway_id, runtime_pod_id, model_id, provider_type, requested_model, actual_provider_model, traffic_class, request_payload, response_payload, prompt_tokens, completion_tokens, total_tokens, cached_tokens, reasoning_tokens, latency_ms, is_streaming, status, error_message, created_at, completed_at
+SELECT id, trace_id, session_id, request_id, user_id, instance_id, instance_mode, runtime_type, gateway_id, runtime_pod_id, gateway_key_id, model_id, provider_type, requested_model, actual_provider_model, traffic_class, request_payload, response_payload, prompt_tokens, completion_tokens, total_tokens, cached_tokens, reasoning_tokens, latency_ms, ttft_ms, generation_ms, tokens_per_second, attempt_no, is_streaming, status, error_message, created_at, completed_at
 FROM model_invocations
 WHERE instance_id = ?
   AND session_id = ?
@@ -244,6 +193,7 @@ LIMIT ?`
 			&item.RuntimeType,
 			&item.GatewayID,
 			&item.RuntimePodID,
+			&item.GatewayKeyID,
 			&item.ModelID,
 			&item.ProviderType,
 			&item.RequestedModel,
@@ -257,6 +207,10 @@ LIMIT ?`
 			&item.CachedTokens,
 			&item.ReasoningTokens,
 			&item.LatencyMs,
+			&item.TTFTMs,
+			&item.GenerationMs,
+			&item.TokensPerSecond,
+			&item.AttemptNo,
 			&item.IsStreaming,
 			&item.Status,
 			&item.ErrorMessage,

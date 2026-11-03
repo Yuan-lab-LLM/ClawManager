@@ -21,6 +21,7 @@ type redisStreamMessage struct {
 
 type redisBus struct {
 	address  string
+	username string
 	password string
 	db       int
 	useTLS   bool
@@ -39,6 +40,7 @@ const (
 // connection storm under normal heartbeat and gateway-report traffic.
 type redisConnPool struct {
 	address  string
+	username string
 	password string
 	db       int
 	useTLS   bool
@@ -72,6 +74,7 @@ func newRedisBus(rawURL string) (*redisBus, error) {
 		address += ":6379"
 	}
 	password, _ := parsed.User.Password()
+	username := parsed.User.Username()
 	dbIndex := 0
 	if path := strings.Trim(parsed.Path, "/"); path != "" {
 		parsedDB, err := strconv.Atoi(path)
@@ -82,11 +85,12 @@ func newRedisBus(rawURL string) (*redisBus, error) {
 	}
 	bus := &redisBus{
 		address:  address,
+		username: username,
 		password: password,
 		db:       dbIndex,
 		useTLS:   parsed.Scheme == "rediss",
 	}
-	bus.pool = sharedRedisConnPool(bus.address, bus.password, bus.db, bus.useTLS)
+	bus.pool = sharedRedisConnPool(bus.address, bus.username, bus.password, bus.db, bus.useTLS)
 	return bus, nil
 }
 
@@ -269,8 +273,8 @@ func (b *redisBus) do(ctx context.Context, args ...string) (interface{}, error) 
 	return reply, nil
 }
 
-func sharedRedisConnPool(address, password string, db int, useTLS bool) *redisConnPool {
-	key := fmt.Sprintf("%t|%s|%d|%s", useTLS, address, db, password)
+func sharedRedisConnPool(address, username, password string, db int, useTLS bool) *redisConnPool {
+	key := fmt.Sprintf("%t|%q|%d|%q|%q", useTLS, address, db, username, password)
 	redisConnPools.Lock()
 	defer redisConnPools.Unlock()
 	if pool := redisConnPools.byKey[key]; pool != nil {
@@ -278,6 +282,7 @@ func sharedRedisConnPool(address, password string, db int, useTLS bool) *redisCo
 	}
 	pool := &redisConnPool{
 		address:  address,
+		username: username,
 		password: password,
 		db:       db,
 		useTLS:   useTLS,
@@ -343,8 +348,12 @@ func (p *redisConnPool) dial(ctx context.Context) (*redisPooledConn, error) {
 		return nil, fmt.Errorf("failed to connect redis: %w", err)
 	}
 	reader := bufio.NewReader(conn)
-	if p.password != "" {
-		if err := writeRedisCommand(conn, "AUTH", p.password); err != nil {
+	if p.password != "" || p.username != "" {
+		auth := []string{"AUTH", p.password}
+		if p.username != "" {
+			auth = []string{"AUTH", p.username, p.password}
+		}
+		if err := writeRedisCommand(conn, auth...); err != nil {
 			_ = conn.Close()
 			return nil, err
 		}

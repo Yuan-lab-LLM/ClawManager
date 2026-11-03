@@ -1032,6 +1032,11 @@ func (s *skillService) rebindInstanceSkill(instanceID, oldSkillID, newSkillID in
 }
 
 func (s *skillService) RestoreInstanceSkill(actorUserID int, actorRole string, instanceID, skillID int) (*InstanceSkillPayload, error) {
+	release, err := acquireInstanceLifecycleOperation(context.Background(), s.instanceRepo, instanceID)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	instance, err := s.requireOwnedInstanceAccess(actorUserID, actorRole, instanceID)
 	if err != nil {
 		return nil, err

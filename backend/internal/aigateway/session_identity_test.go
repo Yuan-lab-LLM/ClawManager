@@ -26,6 +26,14 @@ func TestApplyManagedInstanceSessionDefaultsUsesMainForHermesInstanceToken(t *te
 	}
 }
 
+func TestApplyManagedInstanceSessionDefaultsUsesMainForManagedVirtualKey(t *testing.T) {
+	req := ChatCompletionRequest{}
+	ApplyManagedInstanceSessionDefaults(&req, "virtual_key", "openclaw")
+	if got := resolveSessionID(req); got != "agent:openclaw:main" {
+		t.Fatalf("expected managed virtual key default session, got %q", got)
+	}
+}
+
 func TestApplyManagedInstanceSessionDefaultsUsesMainForWorkbuddyInstanceToken(t *testing.T) {
 	req := ChatCompletionRequest{}
 	ApplyManagedInstanceSessionDefaults(&req, "instance", "workbuddy")

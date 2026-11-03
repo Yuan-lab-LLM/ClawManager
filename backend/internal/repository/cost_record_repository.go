@@ -32,52 +32,10 @@ type costRecordRepository struct {
 	sess db.Session
 }
 
-// NewCostRecordRepository creates a new cost record repository and ensures its table exists.
+// NewCostRecordRepository creates a new cost record repository (schema is owned by embedded migrations).
 func NewCostRecordRepository(sess db.Session) CostRecordRepository {
 	repo := &costRecordRepository{sess: sess}
-	repo.ensureTable()
 	return repo
-}
-
-func (r *costRecordRepository) ensureTable() {
-	const query = `
-CREATE TABLE IF NOT EXISTS cost_records (
-  id INT AUTO_INCREMENT PRIMARY KEY,
-  trace_id VARCHAR(100) NOT NULL,
-  session_id VARCHAR(100) NULL,
-  request_id VARCHAR(100) NULL,
-  user_id INT NULL,
-  instance_id INT NULL,
-  instance_mode VARCHAR(16) NULL,
-  runtime_type VARCHAR(32) NULL,
-  gateway_id VARCHAR(128) NULL,
-  runtime_pod_id BIGINT NULL,
-  invocation_id INT NULL,
-  model_id INT NULL,
-  provider_type VARCHAR(100) NOT NULL,
-  model_name VARCHAR(255) NOT NULL,
-  currency VARCHAR(16) NOT NULL DEFAULT 'USD',
-  prompt_tokens INT NOT NULL DEFAULT 0,
-  completion_tokens INT NOT NULL DEFAULT 0,
-  total_tokens INT NOT NULL DEFAULT 0,
-  input_unit_price DECIMAL(18,8) NOT NULL DEFAULT 0,
-  output_unit_price DECIMAL(18,8) NOT NULL DEFAULT 0,
-  estimated_cost DECIMAL(18,8) NOT NULL DEFAULT 0,
-  actual_cost DECIMAL(18,8) NULL,
-  internal_cost DECIMAL(18,8) NOT NULL DEFAULT 0,
-  recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  INDEX idx_cost_records_trace_id (trace_id),
-  INDEX idx_cost_records_user_id (user_id),
-  INDEX idx_cost_records_gateway_id (gateway_id),
-  INDEX idx_cost_records_model_id (model_id),
-  INDEX idx_cost_records_provider_type (provider_type),
-  INDEX idx_cost_records_recorded_at (recorded_at)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-`
-
-	if _, err := r.sess.SQL().Exec(query); err != nil {
-		panic(fmt.Errorf("failed to ensure cost_records table: %w", err))
-	}
 }
 
 func (r *costRecordRepository) Create(record *models.CostRecord) error {

@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -35,6 +36,15 @@ func (r *instanceDesiredStateRepository) GetByInstanceID(instanceID int) (*model
 }
 
 func (r *instanceDesiredStateRepository) Create(state *models.InstanceDesiredState) error {
+	if state == nil || state.InstanceID <= 0 {
+		return fmt.Errorf("invalid instance desired state")
+	}
+	return (&instanceRepository{r.sess}).withUnfencedInstance(context.Background(), state.InstanceID, func(tx *instanceRepository) error {
+		return (&instanceDesiredStateRepository{tx.sess}).create(state)
+	})
+}
+
+func (r *instanceDesiredStateRepository) create(state *models.InstanceDesiredState) error {
 	ensureTimestamps(&state.CreatedAt, &state.UpdatedAt)
 	res, err := r.sess.Collection("instance_desired_state").Insert(state)
 	if err != nil {
@@ -47,6 +57,23 @@ func (r *instanceDesiredStateRepository) Create(state *models.InstanceDesiredSta
 }
 
 func (r *instanceDesiredStateRepository) Update(state *models.InstanceDesiredState) error {
+	if state == nil || state.InstanceID <= 0 || state.ID <= 0 {
+		return fmt.Errorf("invalid instance desired state")
+	}
+	return (&instanceRepository{r.sess}).withUnfencedInstance(context.Background(), state.InstanceID, func(tx *instanceRepository) error {
+		store := &instanceDesiredStateRepository{tx.sess}
+		current, err := store.GetByInstanceID(state.InstanceID)
+		if err != nil {
+			return err
+		}
+		if current == nil || current.ID != state.ID {
+			return fmt.Errorf("instance desired state identity mismatch")
+		}
+		return store.update(state)
+	})
+}
+
+func (r *instanceDesiredStateRepository) update(state *models.InstanceDesiredState) error {
 	if state.UpdatedAt.IsZero() {
 		state.UpdatedAt = time.Now().UTC()
 	}

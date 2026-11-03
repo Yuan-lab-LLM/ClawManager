@@ -1,6 +1,6 @@
 import axios from "axios";
 import type { WorkspaceFileOperations } from "../components/WorkspaceFileManager";
-import type { WorkspaceEntry, WorkspacePreview } from "../types/workspace";
+import type { WorkspaceEntry, WorkspacePreview, WorkspaceSearchResponse } from "../types/workspace";
 
 export type SharedWorkspaceAccess = "none" | "read" | "write";
 
@@ -51,6 +51,11 @@ export function createSharedWorkspaceService(
     async list(_instanceId: number, path = ""): Promise<WorkspaceEntry[]> {
       const response = await sharedAPI.get(`${base}/files`, { params: { path } });
       return response.data.data.entries;
+    },
+
+    async search(_instanceId: number, query: string, limit?: number): Promise<WorkspaceSearchResponse> {
+      const response = await sharedAPI.get(`${base}/search`, { params: { q: query, ...(limit ? { limit } : {}) } });
+      return response.data.data;
     },
 
     async preview(_instanceId: number, path: string): Promise<WorkspacePreview> {

@@ -39,6 +39,10 @@ func NewPodService() *PodService {
 	}
 }
 
+func NewPodServiceWithClient(client *Client) *PodService {
+	return &PodService{client: client}
+}
+
 // GetClient returns the k8s client
 func (s *PodService) GetClient() *Client {
 	return s.client

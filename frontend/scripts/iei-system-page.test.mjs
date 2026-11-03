@@ -9,6 +9,7 @@ const listPage = read("../src/pages/instances/IEISystemListInstancesPage.tsx");
 const detailPage = read("../src/pages/instances/IEISystemInstancePage.tsx");
 const service = read("../src/services/ieiSystemService.ts");
 const renewalHook = read("../src/hooks/useExpiringResourceRenewal.ts");
+const instanceAccess = read("../src/lib/instanceAccess.ts");
 const workspaceManager = read("../src/components/WorkspaceFileManager.tsx");
 const translations = read("../src/lib/i18n.ts");
 const runtimeCatalog = read("../src/lib/ieiRuntimeCatalog.ts");
@@ -96,8 +97,8 @@ assert(
     detailPage.includes("refreshSession()") &&
     detailPage.includes("useExpiringResourceRenewal") &&
     detailPage.includes("refreshDedicatedRuntimeCookie") &&
-    detailPage.includes("__clawmanager_access_refresh") &&
-    detailPage.includes('mode: "no-cors"') &&
+    instanceAccess.includes("__clawmanager_access_refresh") &&
+    instanceAccess.includes('mode: "no-cors"') &&
     renewalHook.includes('"visibilitychange"') &&
     renewalHook.includes('"focus"') &&
     mockServer.includes('/api/v1/ieisystem/session/refresh'),

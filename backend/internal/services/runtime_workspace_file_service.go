@@ -34,6 +34,7 @@ type runtimeWorkspaceExecutor interface {
 type runtimeWorkspaceFileService struct {
 	auditRepo repository.WorkspaceFileAuditRepository
 	executor  runtimeWorkspaceExecutor
+	writes    repository.WorkspaceWriteRepository
 }
 
 type k8sRuntimeWorkspaceExecutor struct {
@@ -48,9 +49,10 @@ type runtimeWorkspaceEntryPayload struct {
 	ModifiedAt time.Time `json:"modified_at"`
 }
 
-func NewRuntimeWorkspaceFileService(auditRepo repository.WorkspaceFileAuditRepository) WorkspaceFileService {
+func NewRuntimeWorkspaceFileService(auditRepo repository.WorkspaceFileAuditRepository, writes repository.WorkspaceWriteRepository) WorkspaceFileService {
 	return &runtimeWorkspaceFileService{
 		auditRepo: auditRepo,
+		writes:    writes,
 		executor: &k8sRuntimeWorkspaceExecutor{
 			deploymentService: k8s.NewInstanceDeploymentService(),
 		},
@@ -87,6 +89,35 @@ func (s *runtimeWorkspaceFileService) List(ctx context.Context, scope WorkspaceF
 		}
 		return left < right
 	})
+	return entries, nil
+}
+
+func (s *runtimeWorkspaceFileService) Search(ctx context.Context, scope WorkspaceFileScope, query string, limit int) ([]WorkspaceEntry, error) {
+	limit = NormalizeWorkspaceSearchLimit(limit)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return []WorkspaceEntry{}, nil
+	}
+	var response struct {
+		Entries []runtimeWorkspaceEntryPayload `json:"entries"`
+	}
+	if err := s.runJSON(ctx, scope, []string{
+		"python3",
+		"-c",
+		runtimeWorkspaceSearchScript,
+		runtimeWorkspaceBase(scope),
+		query,
+		fmt.Sprintf("%d", limit),
+	}, nil, &response); err != nil {
+		return nil, err
+	}
+	entries := make([]WorkspaceEntry, 0, len(response.Entries))
+	for _, payload := range response.Entries {
+		entries = append(entries, runtimeWorkspaceEntryFromPayload(payload))
+	}
 	return entries, nil
 }
 
@@ -221,7 +252,7 @@ func (s *runtimeWorkspaceFileService) Upload(ctx context.Context, scope Workspac
 	targetRelative := joinWorkspaceRelative(dir, cleanName)
 	limited := io.LimitReader(reader, maxBytes+1)
 	var payload runtimeWorkspaceEntryPayload
-	if err := s.runJSON(ctx, scope, []string{
+	if err := s.runWriteJSON(ctx, scope, "upload", []string{
 		"python3",
 		"-c",
 		runtimeWorkspaceUploadScript,
@@ -248,7 +279,7 @@ func (s *runtimeWorkspaceFileService) Mkdir(ctx context.Context, scope Workspace
 		return nil, err
 	}
 	var payload runtimeWorkspaceEntryPayload
-	if err := s.runJSON(ctx, scope, []string{"python3", "-c", runtimeWorkspaceMkdirScript, runtimeWorkspaceBase(scope), relative}, nil, &payload); err != nil {
+	if err := s.runWriteJSON(ctx, scope, "mkdir", []string{"python3", "-c", runtimeWorkspaceMkdirScript, runtimeWorkspaceBase(scope), relative}, nil, &payload); err != nil {
 		return nil, err
 	}
 	if err := s.recordAudit(ctx, scope, "mkdir", relative, 0); err != nil {
@@ -271,7 +302,7 @@ func (s *runtimeWorkspaceFileService) Rename(ctx context.Context, scope Workspac
 		return nil, err
 	}
 	var payload runtimeWorkspaceEntryPayload
-	if err := s.runJSON(ctx, scope, []string{"python3", "-c", runtimeWorkspaceRenameScript, runtimeWorkspaceBase(scope), oldRelative, newRelative}, nil, &payload); err != nil {
+	if err := s.runWriteJSON(ctx, scope, "rename", []string{"python3", "-c", runtimeWorkspaceRenameScript, runtimeWorkspaceBase(scope), oldRelative, newRelative}, nil, &payload); err != nil {
 		return nil, err
 	}
 	if err := s.recordAudit(ctx, scope, "rename", oldRelative+" -> "+newRelative, 0); err != nil {
@@ -289,7 +320,7 @@ func (s *runtimeWorkspaceFileService) Delete(ctx context.Context, scope Workspac
 	if err != nil {
 		return err
 	}
-	if err := s.run(ctx, scope, []string{"python3", "-c", runtimeWorkspaceDeleteScript, runtimeWorkspaceBase(scope), relative}, nil, io.Discard); err != nil {
+	if err := s.runWrite(ctx, scope, "delete", []string{"python3", "-c", runtimeWorkspaceDeleteScript, runtimeWorkspaceBase(scope), relative}, nil, io.Discard); err != nil {
 		return err
 	}
 	return s.recordAudit(ctx, scope, "delete", relative, 0)
@@ -398,7 +429,7 @@ func (s *runtimeWorkspaceFileService) recordAudit(ctx context.Context, scope Wor
 func (e *k8sRuntimeWorkspaceExecutor) exec(ctx context.Context, userID, instanceID int, command []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	client := k8s.GetClient()
 	if client == nil || client.Clientset == nil || client.Config == nil {
-		return fmt.Errorf("k8s client not initialized")
+		return &workspaceExecNotStarted{fmt.Errorf("k8s client not initialized")}
 	}
 	deploymentService := e.deploymentService
 	if deploymentService == nil {
@@ -406,7 +437,7 @@ func (e *k8sRuntimeWorkspaceExecutor) exec(ctx context.Context, userID, instance
 	}
 	pod, err := deploymentService.GetActivePod(ctx, userID, instanceID)
 	if err != nil {
-		return fmt.Errorf("failed to get active instance pod: %w", err)
+		return &workspaceExecNotStarted{fmt.Errorf("failed to get active instance pod: %w", err)}
 	}
 	req := client.Clientset.CoreV1().RESTClient().Post().
 		Resource("pods").
@@ -423,7 +454,7 @@ func (e *k8sRuntimeWorkspaceExecutor) exec(ctx context.Context, userID, instance
 	}, scheme.ParameterCodec)
 	exec, err := remotecommand.NewSPDYExecutor(client.Config, "POST", req.URL())
 	if err != nil {
-		return fmt.Errorf("failed to initialize runtime workspace exec stream: %w", err)
+		return &workspaceExecNotStarted{fmt.Errorf("failed to initialize runtime workspace exec stream: %w", err)}
 	}
 	return exec.StreamWithContext(ctx, remotecommand.StreamOptions{
 		Stdin:  stdin,
@@ -454,6 +485,12 @@ func runtimeWorkspaceEntryFromPayload(payload runtimeWorkspaceEntryPayload) Work
 }
 
 func mapRuntimeWorkspaceError(execErr error, stderr string) error {
+	if runtimeWorkspaceErrorCode(stderr) == "text_conflict" {
+		return ErrWorkspaceTextConflict
+	}
+	if runtimeWorkspaceErrorCode(stderr) == "text_unsupported" {
+		return ErrWorkspaceTextUnsupported
+	}
 	code := runtimeWorkspaceErrorCode(stderr)
 	switch code {
 	case "not_found":
@@ -468,6 +505,8 @@ func mapRuntimeWorkspaceError(execErr error, stderr string) error {
 		return ErrWorkspaceEntryExists
 	case "upload_too_large":
 		return ErrWorkspaceUploadTooLarge
+	case "preview_too_large":
+		return ErrWorkspacePreviewTooLarge
 	case "filename_invalid", "invalid":
 		return ErrWorkspacePathInvalid
 	}
@@ -614,6 +653,52 @@ rel, target = target_for(base, sys.argv[2] if len(sys.argv) > 2 else "")
 json_out(entry_payload(base, rel, target))
 `
 
+var runtimeWorkspaceSearchScript = runtimeWorkspacePythonPrelude + `
+base = safe_base(sys.argv[1])
+query = (sys.argv[2] if len(sys.argv) > 2 else "").strip().lower()
+try:
+    max_results = max(1, int(sys.argv[3]) if len(sys.argv) > 3 else 200)
+except ValueError:
+    max_results = 200
+matches = []
+if query:
+    skipped_dirs = {".git", "node_modules"}
+    queue = [base]
+    index = 0
+    while index < len(queue) and len(matches) < max_results:
+        current = queue[index]
+        index += 1
+        try:
+            if not is_subpath(base, os.path.realpath(current)):
+                continue
+            with os.scandir(current) as scan:
+                children = list(scan)
+        except Exception:
+            continue
+        for entry in children:
+            if len(matches) >= max_results:
+                break
+            name = entry.name
+            if name == ".tmp" or name.startswith(".tmp-skill-") or entry.is_symlink():
+                continue
+            child_path = os.path.join(current, name)
+            try:
+                real = os.path.realpath(child_path)
+                if not is_subpath(base, real):
+                    continue
+            except Exception:
+                continue
+            if query in name.lower():
+                try:
+                    child_rel = os.path.relpath(child_path, base).replace(os.sep, "/")
+                except Exception:
+                    continue
+                matches.append(entry_payload(base, child_rel, child_path))
+            if name not in skipped_dirs and entry.is_dir(follow_symlinks=False):
+                queue.append(child_path)
+json_out({"entries": matches})
+`
+
 var runtimeWorkspaceStreamFileScript = runtimeWorkspacePythonPrelude + `
 base = safe_base(sys.argv[1])
 rel, target = target_for(base, sys.argv[2] if len(sys.argv) > 2 else "")
@@ -638,6 +723,8 @@ with zipfile.ZipFile(sys.stdout.buffer, mode="w", compression=zipfile.ZIP_DEFLAT
             name for name in directories
             if name != ".tmp"
             and not name.startswith(".tmp-skill-")
+            and name != ".clawmanager-editor-lock"
+            and not name.startswith(".clawmanager-edit-")
             and not os.path.islink(os.path.join(current, name))
         ]
         current_rel = os.path.relpath(current, target)

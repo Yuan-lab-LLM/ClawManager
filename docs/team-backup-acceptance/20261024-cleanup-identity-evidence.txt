@@ -1,0 +1,9 @@
+    pipeline_integration_test.go:128: capture and publication complete
+    pipeline_integration_test.go:137: independent artifact integrity verified
+    pipeline_integration_test.go:138: real Kubernetes verification Job: six parts decrypted, read-only object identity, immutable Secret, digest image, adopted UID, bounded report
+    pipeline_integration_test.go:138: real SQL controller + Kubernetes Job: leader replacement, single attempt, persisted report, foreground Job/Pod cleanup
+    pipeline_integration_test.go:165: restored and read back: files=4 objects=1 redis=1
+    pipeline_integration_test.go:202: independent restored-data verifier: SELECT-only SQL, read-only Redis ACL/object identity, all six data parts, encrypted-history tamper detected
+--- PASS: TestSixRealSourcesPublishAndDataOnlyRestore (96.84s)
+PASS
+ok  	clawreef/internal/systembackup	97.969s

@@ -1,0 +1,7545 @@
+[
+  {
+    "name": "audit_events",
+    "columns": [
+      {
+        "name": "id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": "auto_increment"
+      },
+      {
+        "name": "trace_id",
+        "type": "varchar(100)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "session_id",
+        "type": "varchar(100)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "request_id",
+        "type": "varchar(100)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "user_id",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "instance_id",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "instance_mode",
+        "type": "varchar(16)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "runtime_type",
+        "type": "varchar(32)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "gateway_id",
+        "type": "varchar(128)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "runtime_pod_id",
+        "type": "bigint",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "invocation_id",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "event_type",
+        "type": "varchar(100)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "traffic_class",
+        "type": "varchar(50)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "severity",
+        "type": "varchar(20)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "message",
+        "type": "varchar(500)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "details",
+        "type": "longtext",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED"
+      },
+      {
+        "name": "gateway_key_id",
+        "type": "bigint",
+        "nullable": "YES",
+        "extra": ""
+      }
+    ],
+    "primary_key": [
+      "id"
+    ]
+  },
+  {
+    "name": "audit_logs",
+    "columns": [
+      {
+        "name": "id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": "auto_increment"
+      },
+      {
+        "name": "user_id",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "action",
+        "type": "varchar(100)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "resource_type",
+        "type": "varchar(50)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "resource_id",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "details",
+        "type": "json",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "ip_address",
+        "type": "varchar(45)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ]
+  },
+  {
+    "name": "backup_schedules",
+    "columns": [
+      {
+        "name": "id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": "auto_increment"
+      },
+      {
+        "name": "instance_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "schedule_name",
+        "type": "varchar(255)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "cron_expression",
+        "type": "varchar(100)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "retention_days",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "is_active",
+        "type": "tinyint(1)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED"
+      },
+      {
+        "name": "updated_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ]
+  },
+  {
+    "name": "backups",
+    "columns": [
+      {
+        "name": "id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": "auto_increment"
+      },
+      {
+        "name": "instance_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "backup_name",
+        "type": "varchar(255)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "backup_size_gb",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "backup_path",
+        "type": "varchar(500)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "status",
+        "type": "enum('creating','completed','failed','deleted')",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "backup_type",
+        "type": "enum('manual','scheduled')",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED"
+      },
+      {
+        "name": "completed_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "expires_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": ""
+      }
+    ],
+    "primary_key": [
+      "id"
+    ]
+  },
+  {
+    "name": "chat_messages",
+    "columns": [
+      {
+        "name": "id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": "auto_increment"
+      },
+      {
+        "name": "trace_id",
+        "type": "varchar(100)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "session_id",
+        "type": "varchar(100)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "request_id",
+        "type": "varchar(100)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "user_id",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "instance_id",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "invocation_id",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "role",
+        "type": "varchar(50)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "content",
+        "type": "longtext",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "sequence_no",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ]
+  },
+  {
+    "name": "chat_sessions",
+    "columns": [
+      {
+        "name": "id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": "auto_increment"
+      },
+      {
+        "name": "session_id",
+        "type": "varchar(100)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "user_id",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "instance_id",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "title",
+        "type": "varchar(255)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "last_trace_id",
+        "type": "varchar(100)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "started_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED"
+      },
+      {
+        "name": "last_activity_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ]
+  },
+  {
+    "name": "cost_records",
+    "columns": [
+      {
+        "name": "id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": "auto_increment"
+      },
+      {
+        "name": "trace_id",
+        "type": "varchar(100)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "session_id",
+        "type": "varchar(100)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "request_id",
+        "type": "varchar(100)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "user_id",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "instance_id",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "instance_mode",
+        "type": "varchar(16)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "runtime_type",
+        "type": "varchar(32)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "gateway_id",
+        "type": "varchar(128)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "runtime_pod_id",
+        "type": "bigint",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "invocation_id",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "model_id",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "provider_type",
+        "type": "varchar(100)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "model_name",
+        "type": "varchar(255)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "currency",
+        "type": "varchar(16)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "prompt_tokens",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "completion_tokens",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "total_tokens",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "input_unit_price",
+        "type": "decimal(18,8)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "output_unit_price",
+        "type": "decimal(18,8)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "estimated_cost",
+        "type": "decimal(18,8)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "actual_cost",
+        "type": "decimal(18,8)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "internal_cost",
+        "type": "decimal(18,8)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "recorded_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED"
+      },
+      {
+        "name": "gateway_key_id",
+        "type": "bigint",
+        "nullable": "YES",
+        "extra": ""
+      }
+    ],
+    "primary_key": [
+      "id"
+    ]
+  },
+  {
+    "name": "custom_team_templates",
+    "columns": [
+      {
+        "name": "id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": "auto_increment"
+      },
+      {
+        "name": "user_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "name",
+        "type": "varchar(255)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "intent",
+        "type": "text",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "requested_member_count",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "resolved_member_count",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "spec_json",
+        "type": "longtext",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "revision",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "last_trace_id",
+        "type": "varchar(128)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED"
+      },
+      {
+        "name": "updated_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "resource_scope",
+        "type": "varchar(16)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "owner",
+        "type": "varchar(128)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "last_operation_id",
+        "type": "varchar(128)",
+        "nullable": "YES",
+        "extra": ""
+      }
+    ],
+    "primary_key": [
+      "id"
+    ]
+  },
+  {
+    "name": "egress_private_exceptions",
+    "columns": [
+      {
+        "name": "id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": "auto_increment"
+      },
+      {
+        "name": "scope_type",
+        "type": "varchar(20)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "scope_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "cidr",
+        "type": "varchar(64)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "port",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "enabled",
+        "type": "tinyint(1)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "description",
+        "type": "text",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "created_by",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED"
+      },
+      {
+        "name": "updated_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ]
+  },
+  {
+    "name": "enterprise_auth_settings",
+    "columns": [
+      {
+        "name": "id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": "auto_increment"
+      },
+      {
+        "name": "provider",
+        "type": "varchar(32)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "enabled",
+        "type": "tinyint(1)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "allow_local_fallback",
+        "type": "tinyint(1)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "sync_role",
+        "type": "tinyint(1)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "ldap_host",
+        "type": "varchar(255)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "ldap_port",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "ldap_use_tls",
+        "type": "tinyint(1)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "ldap_start_tls",
+        "type": "tinyint(1)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "ldap_skip_tls_verify",
+        "type": "tinyint(1)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "ldap_tls_ca_file",
+        "type": "varchar(1000)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "ldap_tls_server_name",
+        "type": "varchar(255)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "ldap_bind_dn",
+        "type": "varchar(500)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "ldap_bind_password_ciphertext",
+        "type": "text",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "ldap_base_dn",
+        "type": "varchar(500)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "ldap_user_filter",
+        "type": "varchar(1000)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "ldap_username_attribute",
+        "type": "varchar(100)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "ldap_email_attribute",
+        "type": "varchar(100)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "ldap_group_base_dn",
+        "type": "varchar(500)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "ldap_group_filter",
+        "type": "varchar(1000)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "ldap_admin_group_dns",
+        "type": "text",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "ldap_default_role",
+        "type": "varchar(32)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "version",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "updated_by",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED"
+      },
+      {
+        "name": "updated_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ]
+  },
+  {
+    "name": "gateway_image_artifacts",
+    "columns": [
+      {
+        "name": "id",
+        "type": "varchar(64)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "user_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "instance_id",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "gateway_key_id",
+        "type": "bigint",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "model_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "request_id",
+        "type": "varchar(100)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "media_type",
+        "type": "varchar(32)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "byte_size",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "encryption_key",
+        "type": "varbinary(32)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "ready",
+        "type": "tinyint(1)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "datetime",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "expires_at",
+        "type": "datetime",
+        "nullable": "NO",
+        "extra": ""
+      }
+    ],
+    "primary_key": [
+      "id"
+    ]
+  },
+  {
+    "name": "gateway_image_jobs",
+    "columns": [
+      {
+        "name": "request_id",
+        "type": "varchar(64)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "scope_hash",
+        "type": "char(64)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "idempotency_hash",
+        "type": "char(64)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "request_hash",
+        "type": "char(64)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "user_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "instance_id",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "gateway_key_id",
+        "type": "bigint",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "model_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "state",
+        "type": "varchar(16)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "reservation_id",
+        "type": "varchar(64)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "estimate",
+        "type": "decimal(18,8)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "charge",
+        "type": "decimal(18,8)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "settled",
+        "type": "tinyint(1)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "result_metadata",
+        "type": "longtext",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "error_code",
+        "type": "varchar(64)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "deadline_at",
+        "type": "datetime",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "datetime",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "updated_at",
+        "type": "datetime",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "analytics_context",
+        "type": "longtext",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "analytics_outcome",
+        "type": "longtext",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "analytics_recorded",
+        "type": "tinyint(1)",
+        "nullable": "NO",
+        "extra": ""
+      }
+    ],
+    "primary_key": [
+      "request_id"
+    ]
+  },
+  {
+    "name": "gateway_key_budget_ledger",
+    "columns": [
+      {
+        "name": "reservation_id",
+        "type": "varchar(64)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "gateway_key_id",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "actual_cost",
+        "type": "decimal(18,8)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "recorded_at",
+        "type": "timestamp",
+        "nullable": "NO",
+        "extra": "DEFAULT_GENERATED"
+      }
+    ],
+    "primary_key": [
+      "reservation_id"
+    ]
+  },
+  {
+    "name": "gateway_key_budget_reservations",
+    "columns": [
+      {
+        "name": "reservation_id",
+        "type": "varchar(64)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "gateway_key_id",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "reserved_cost",
+        "type": "decimal(18,8)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "actual_cost",
+        "type": "decimal(18,8)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "settlement_status",
+        "type": "varchar(16)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "expires_at",
+        "type": "timestamp",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp",
+        "nullable": "NO",
+        "extra": "DEFAULT_GENERATED"
+      }
+    ],
+    "primary_key": [
+      "reservation_id"
+    ]
+  },
+  {
+    "name": "gateway_keys",
+    "columns": [
+      {
+        "name": "id",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": "auto_increment"
+      },
+      {
+        "name": "key_id",
+        "type": "varchar(96)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "key_prefix",
+        "type": "varchar(128)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "token_hash",
+        "type": "char(64)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "key_type",
+        "type": "varchar(32)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "name",
+        "type": "varchar(160)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "description",
+        "type": "text",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "owner_user_id",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "instance_id",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "allowed_model_groups",
+        "type": "json",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "status",
+        "type": "varchar(24)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "expires_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "last_used_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "created_by_user_id",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "revoked_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "revoked_by_user_id",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "revocation_reason",
+        "type": "varchar(255)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp",
+        "nullable": "NO",
+        "extra": "DEFAULT_GENERATED"
+      },
+      {
+        "name": "updated_at",
+        "type": "timestamp",
+        "nullable": "NO",
+        "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "rpm_limit",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "tpm_limit",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "concurrent_requests_limit",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "budget_limit",
+        "type": "decimal(18,8)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "budget_period",
+        "type": "varchar(16)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "budget_spent",
+        "type": "decimal(18,8)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "budget_reset_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "budget_currency_review_required",
+        "type": "tinyint(1)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "budget_currency_reviewed_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": ""
+      }
+    ],
+    "primary_key": [
+      "id"
+    ]
+  },
+  {
+    "name": "iei_session_revocations",
+    "columns": [
+      {
+        "name": "session_hash",
+        "type": "char(64)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "expires_at",
+        "type": "datetime",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp",
+        "nullable": "NO",
+        "extra": "DEFAULT_GENERATED"
+      }
+    ],
+    "primary_key": [
+      "session_hash"
+    ]
+  },
+  {
+    "name": "instance_agents",
+    "columns": [
+      {
+        "name": "id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": "auto_increment"
+      },
+      {
+        "name": "instance_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "agent_id",
+        "type": "varchar(255)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "agent_version",
+        "type": "varchar(50)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "protocol_version",
+        "type": "varchar(50)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "status",
+        "type": "varchar(30)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "capabilities_json",
+        "type": "longtext",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "host_info_json",
+        "type": "longtext",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "session_token",
+        "type": "varchar(255)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "session_expires_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "last_heartbeat_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "last_reported_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "last_seen_ip",
+        "type": "varchar(45)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "registered_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED"
+      },
+      {
+        "name": "updated_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ]
+  },
+  {
+    "name": "instance_browser_workers",
+    "columns": [
+      {
+        "name": "instance_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "enabled",
+        "type": "tinyint(1)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "status",
+        "type": "varchar(32)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "resource_profile",
+        "type": "varchar(32)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "display_width",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "display_height",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "retain_profile",
+        "type": "tinyint(1)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "browser_image",
+        "type": "varchar(512)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "cdp_proxy_image",
+        "type": "varchar(512)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "generation",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "observed_generation",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "last_error",
+        "type": "text",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp",
+        "nullable": "NO",
+        "extra": "DEFAULT_GENERATED"
+      },
+      {
+        "name": "updated_at",
+        "type": "timestamp",
+        "nullable": "NO",
+        "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+      }
+    ],
+    "primary_key": [
+      "instance_id"
+    ]
+  },
+  {
+    "name": "instance_commands",
+    "columns": [
+      {
+        "name": "id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": "auto_increment"
+      },
+      {
+        "name": "instance_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "agent_id",
+        "type": "varchar(255)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "command_type",
+        "type": "varchar(50)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "payload_json",
+        "type": "longtext",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "status",
+        "type": "varchar(30)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "idempotency_key",
+        "type": "varchar(255)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "issued_by",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "issued_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED"
+      },
+      {
+        "name": "dispatched_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "started_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "finished_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "timeout_seconds",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "result_json",
+        "type": "longtext",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "error_message",
+        "type": "text",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED"
+      },
+      {
+        "name": "updated_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ]
+  },
+  {
+    "name": "instance_config_revisions",
+    "columns": [
+      {
+        "name": "id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": "auto_increment"
+      },
+      {
+        "name": "instance_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "source_snapshot_id",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "source_bundle_id",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "revision_no",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "content_json",
+        "type": "longtext",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "checksum",
+        "type": "varchar(255)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "status",
+        "type": "varchar(30)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "published_by",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "published_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "activated_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED"
+      },
+      {
+        "name": "updated_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ]
+  },
+  {
+    "name": "instance_desired_state",
+    "columns": [
+      {
+        "name": "id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": "auto_increment"
+      },
+      {
+        "name": "instance_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "desired_power_state",
+        "type": "varchar(30)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "desired_config_revision_id",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "desired_runtime_action",
+        "type": "varchar(50)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "updated_by",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "updated_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ]
+  },
+  {
+    "name": "instance_external_access",
+    "columns": [
+      {
+        "name": "id",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": "auto_increment"
+      },
+      {
+        "name": "instance_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "enabled",
+        "type": "tinyint(1)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "auth_mode",
+        "type": "varchar(32)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "workspace_access",
+        "type": "varchar(16)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "public_slug",
+        "type": "varchar(64)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "public_token_hash",
+        "type": "varchar(128)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "short_code_hash",
+        "type": "varchar(128)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "api_key_hash",
+        "type": "varchar(128)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "password_value",
+        "type": "varchar(128)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "api_key_prefix",
+        "type": "varchar(32)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "expires_at",
+        "type": "datetime",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "created_by",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "last_used_at",
+        "type": "datetime",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "datetime",
+        "nullable": "NO",
+        "extra": "DEFAULT_GENERATED"
+      },
+      {
+        "name": "updated_at",
+        "type": "datetime",
+        "nullable": "NO",
+        "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ]
+  },
+  {
+    "name": "instance_gateway_token_aliases",
+    "columns": [
+      {
+        "name": "id",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": "auto_increment"
+      },
+      {
+        "name": "instance_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "token_hash",
+        "type": "char(64)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "expires_at",
+        "type": "timestamp",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp",
+        "nullable": "NO",
+        "extra": "DEFAULT_GENERATED"
+      },
+      {
+        "name": "updated_at",
+        "type": "timestamp",
+        "nullable": "NO",
+        "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "last_used_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": ""
+      }
+    ],
+    "primary_key": [
+      "id"
+    ]
+  },
+  {
+    "name": "instance_lifecycle_batch_attempts",
+    "columns": [
+      {
+        "name": "item_id",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "attempt",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "operation_id",
+        "type": "varchar(64)",
+        "nullable": "NO",
+        "extra": ""
+      }
+    ],
+    "primary_key": [
+      "item_id",
+      "attempt"
+    ]
+  },
+  {
+    "name": "instance_lifecycle_batch_items",
+    "columns": [
+      {
+        "name": "id",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": "auto_increment"
+      },
+      {
+        "name": "batch_id",
+        "type": "varchar(64)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "source_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "source_name",
+        "type": "varchar(255)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "runtime_type",
+        "type": "varchar(64)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "operation_id",
+        "type": "varchar(64)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "runtime_pod_id",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "state",
+        "type": "varchar(32)",
+        "nullable": "NO",
+        "extra": ""
+      }
+    ],
+    "primary_key": [
+      "id"
+    ]
+  },
+  {
+    "name": "instance_lifecycle_batches",
+    "columns": [
+      {
+        "name": "batch_id",
+        "type": "varchar(64)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "user_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "action",
+        "type": "varchar(16)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "status",
+        "type": "varchar(32)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "request_hash",
+        "type": "char(64)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "datetime(6)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "updated_at",
+        "type": "datetime(6)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "policy_version",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "retry_round",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      }
+    ],
+    "primary_key": [
+      "batch_id"
+    ]
+  },
+  {
+    "name": "instance_lifecycle_manual_guards",
+    "columns": [
+      {
+        "name": "instance_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "token",
+        "type": "varchar(64)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "datetime(6)",
+        "nullable": "NO",
+        "extra": ""
+      }
+    ],
+    "primary_key": [
+      "instance_id"
+    ]
+  },
+  {
+    "name": "instance_lifecycle_scheduler",
+    "columns": [
+      {
+        "name": "id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "revision",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      }
+    ],
+    "primary_key": [
+      "id"
+    ]
+  },
+  {
+    "name": "instance_runtime_bindings",
+    "columns": [
+      {
+        "name": "id",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": "auto_increment"
+      },
+      {
+        "name": "instance_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "runtime_pod_id",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "runtime_type",
+        "type": "varchar(32)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "gateway_id",
+        "type": "varchar(128)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "gateway_port",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "gateway_pid",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "workspace_path",
+        "type": "varchar(1024)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "state",
+        "type": "varchar(32)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "generation",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "last_health_at",
+        "type": "datetime",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "error_message",
+        "type": "text",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "datetime",
+        "nullable": "NO",
+        "extra": "DEFAULT_GENERATED"
+      },
+      {
+        "name": "updated_at",
+        "type": "datetime",
+        "nullable": "NO",
+        "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ]
+  },
+  {
+    "name": "instance_runtime_status",
+    "columns": [
+      {
+        "name": "id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": "auto_increment"
+      },
+      {
+        "name": "instance_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "infra_status",
+        "type": "varchar(30)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "agent_status",
+        "type": "varchar(30)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "openclaw_status",
+        "type": "varchar(30)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "openclaw_pid",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "openclaw_version",
+        "type": "varchar(100)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "current_config_revision_id",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "desired_config_revision_id",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "summary_json",
+        "type": "longtext",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "system_info_json",
+        "type": "longtext",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "health_json",
+        "type": "longtext",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "last_reported_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED"
+      },
+      {
+        "name": "updated_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ]
+  },
+  {
+    "name": "instance_skills",
+    "columns": [
+      {
+        "name": "id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": "auto_increment"
+      },
+      {
+        "name": "instance_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "skill_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "skill_version_id",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "source_type",
+        "type": "varchar(40)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "install_path",
+        "type": "varchar(1024)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "workspace_dir",
+        "type": "varchar(120)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "observed_hash",
+        "type": "varchar(128)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "status",
+        "type": "varchar(30)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "last_seen_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "removed_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED"
+      },
+      {
+        "name": "updated_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ]
+  },
+  {
+    "name": "instance_usage",
+    "columns": [
+      {
+        "name": "id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": "auto_increment"
+      },
+      {
+        "name": "instance_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "cpu_usage_percent",
+        "type": "decimal(5,2)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "memory_usage_gb",
+        "type": "decimal(10,2)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "disk_usage_gb",
+        "type": "decimal(10,2)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "gpu_usage_percent",
+        "type": "decimal(5,2)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "uptime_seconds",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "recorded_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ]
+  },
+  {
+    "name": "instances",
+    "columns": [
+      {
+        "name": "id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": "auto_increment"
+      },
+      {
+        "name": "user_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "owner",
+        "type": "varchar(128)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "owner_normalized",
+        "type": "varchar(128)",
+        "nullable": "YES",
+        "extra": "STORED GENERATED",
+        "generation_expression": "lower(trim(`owner`))"
+      },
+      {
+        "name": "name",
+        "type": "varchar(255)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "alias",
+        "type": "varchar(128)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "description",
+        "type": "text",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "type",
+        "type": "enum('openclaw','ubuntu','debian','centos','custom','webtop','hermes','workbuddy','opencode','deepseek-harness','codex','claude-code')",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "runtime_type",
+        "type": "enum('desktop','shell','gateway')",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "runtime_variant",
+        "type": "varchar(32)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "instance_mode",
+        "type": "enum('lite','pro')",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "status",
+        "type": "enum('creating','running','stopped','error','deleting')",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "cpu_cores",
+        "type": "decimal(10,2)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "memory_gb",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "disk_gb",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "gpu_enabled",
+        "type": "tinyint(1)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "gpu_type",
+        "type": "varchar(100)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "gpu_count",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "os_type",
+        "type": "varchar(50)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "os_version",
+        "type": "varchar(50)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "image_registry",
+        "type": "varchar(255)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "image_tag",
+        "type": "varchar(100)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "environment_overrides_json",
+        "type": "longtext",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "storage_class",
+        "type": "varchar(50)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "pvc_name",
+        "type": "varchar(253)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "mount_path",
+        "type": "varchar(255)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "workspace_path",
+        "type": "varchar(1024)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "workspace_usage_bytes",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "runtime_generation",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "runtime_error_message",
+        "type": "text",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "provisioning_operation_id",
+        "type": "varchar(64)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "pod_name",
+        "type": "varchar(255)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "pod_namespace",
+        "type": "varchar(255)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "pod_ip",
+        "type": "varchar(45)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "access_url",
+        "type": "varchar(500)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "access_token",
+        "type": "varchar(255)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "agent_bootstrap_token",
+        "type": "varchar(255)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "openclaw_config_snapshot_id",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED"
+      },
+      {
+        "name": "updated_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "started_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "stopped_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "runtime_error_code",
+        "type": "varchar(64)",
+        "nullable": "YES",
+        "extra": ""
+      }
+    ],
+    "primary_key": [
+      "id"
+    ]
+  },
+  {
+    "name": "llm_model_user_grants",
+    "columns": [
+      {
+        "name": "model_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "user_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp",
+        "nullable": "NO",
+        "extra": "DEFAULT_GENERATED"
+      }
+    ],
+    "primary_key": [
+      "model_id",
+      "user_id"
+    ]
+  },
+  {
+    "name": "llm_models",
+    "columns": [
+      {
+        "name": "id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": "auto_increment"
+      },
+      {
+        "name": "display_name",
+        "type": "varchar(255)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "description",
+        "type": "text",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "provider_type",
+        "type": "varchar(100)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "protocol_type",
+        "type": "varchar(100)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "model_group",
+        "type": "varchar(100)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "deployment_priority",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "max_concurrent_requests",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "context_window_tokens",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "quality_tier",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "base_url",
+        "type": "varchar(500)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "provider_model_name",
+        "type": "varchar(255)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "provider_models_json",
+        "type": "text",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "reasoning_enabled",
+        "type": "tinyint(1)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "reasoning_control_mode",
+        "type": "varchar(40)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "supports_tools",
+        "type": "tinyint(1)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "tools_support_override",
+        "type": "tinyint(1)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "supports_vision",
+        "type": "tinyint(1)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "vision_support_override",
+        "type": "tinyint(1)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "capability_source",
+        "type": "varchar(64)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "api_key",
+        "type": "text",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "api_key_secret_ref",
+        "type": "varchar(255)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "is_secure",
+        "type": "tinyint(1)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "is_active",
+        "type": "tinyint(1)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "input_price",
+        "type": "decimal(18,8)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "output_price",
+        "type": "decimal(18,8)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "currency",
+        "type": "varchar(16)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED"
+      },
+      {
+        "name": "updated_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "visibility_scope",
+        "type": "varchar(24)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "access_policy_version",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "model_kind",
+        "type": "varchar(32)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "image_generation_enabled",
+        "type": "tinyint(1)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "image_edit_enabled",
+        "type": "tinyint(1)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "image_price_per_image",
+        "type": "decimal(18,8)",
+        "nullable": "YES",
+        "extra": ""
+      }
+    ],
+    "primary_key": [
+      "id"
+    ]
+  },
+  {
+    "name": "model_invocations",
+    "columns": [
+      {
+        "name": "id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": "auto_increment"
+      },
+      {
+        "name": "trace_id",
+        "type": "varchar(100)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "session_id",
+        "type": "varchar(100)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "request_id",
+        "type": "varchar(100)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "user_id",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "instance_id",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "instance_mode",
+        "type": "varchar(16)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "runtime_type",
+        "type": "varchar(32)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "gateway_id",
+        "type": "varchar(128)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "runtime_pod_id",
+        "type": "bigint",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "model_id",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "provider_type",
+        "type": "varchar(100)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "requested_model",
+        "type": "varchar(255)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "actual_provider_model",
+        "type": "varchar(255)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "traffic_class",
+        "type": "varchar(50)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "request_payload",
+        "type": "longtext",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "response_payload",
+        "type": "longtext",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "prompt_tokens",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "completion_tokens",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "total_tokens",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "cached_tokens",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "reasoning_tokens",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "latency_ms",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "ttft_ms",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "generation_ms",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "tokens_per_second",
+        "type": "decimal(12,4)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "attempt_no",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "is_streaming",
+        "type": "tinyint(1)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "status",
+        "type": "varchar(50)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "error_message",
+        "type": "text",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED"
+      },
+      {
+        "name": "completed_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "gateway_key_id",
+        "type": "bigint",
+        "nullable": "YES",
+        "extra": ""
+      }
+    ],
+    "primary_key": [
+      "id"
+    ]
+  },
+  {
+    "name": "northbound_admin_settings",
+    "columns": [
+      {
+        "name": "id",
+        "type": "tinyint",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "api_enabled",
+        "type": "tinyint(1)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "external_node_port",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "require_explicit_callers",
+        "type": "tinyint(1)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "challenge_ttl_seconds",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "access_token_ttl_seconds",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "refresh_token_ttl_seconds",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "core_request_timeout_seconds",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "challenge_rate_per_minute",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "login_rate_per_minute",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "account_login_rate_per_minute",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "create_rate_per_minute",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "query_rate_per_minute",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "share_rate_per_minute",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "max_pending_operations",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "operation_tick_milliseconds",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "operation_lease_seconds",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "operation_max_attempts",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "allowed_lite_types",
+        "type": "json",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "allowed_pro_types",
+        "type": "json",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "lite_cpu_cores",
+        "type": "decimal(4,2)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "lite_memory_gb",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "lite_disk_gb",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "pro_cpu_cores",
+        "type": "decimal(4,2)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "pro_memory_gb",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "pro_disk_gb",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "workbuddy_pro_cpu_cores",
+        "type": "decimal(4,2)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "workbuddy_pro_memory_gb",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "workbuddy_pro_disk_gb",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "version",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "updated_by",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "datetime(6)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "updated_at",
+        "type": "datetime(6)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "owner_teams_enabled",
+        "type": "tinyint(1)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "owner_team_creation_user_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      }
+    ],
+    "primary_key": [
+      "id"
+    ]
+  },
+  {
+    "name": "northbound_auth_challenges",
+    "columns": [
+      {
+        "name": "id",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": "auto_increment"
+      },
+      {
+        "name": "challenge_id",
+        "type": "varchar(64)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "nonce_hash",
+        "type": "char(64)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "key_id",
+        "type": "varchar(128)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "status",
+        "type": "varchar(32)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "source_ip",
+        "type": "varchar(64)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "expires_at",
+        "type": "datetime(6)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "used_at",
+        "type": "datetime(6)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "datetime(6)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "updated_at",
+        "type": "datetime(6)",
+        "nullable": "NO",
+        "extra": ""
+      }
+    ],
+    "primary_key": [
+      "id"
+    ]
+  },
+  {
+    "name": "northbound_caller_policies",
+    "columns": [
+      {
+        "name": "user_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "enabled",
+        "type": "tinyint(1)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "scopes_json",
+        "type": "json",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "datetime(6)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "updated_at",
+        "type": "datetime(6)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "updated_by",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "api_keys_json",
+        "type": "json",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "api_keys_version",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      }
+    ],
+    "primary_key": [
+      "user_id"
+    ]
+  },
+  {
+    "name": "northbound_operations",
+    "columns": [
+      {
+        "name": "id",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": "auto_increment"
+      },
+      {
+        "name": "operation_id",
+        "type": "varchar(64)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "user_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "session_id",
+        "type": "varchar(64)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "operation_type",
+        "type": "varchar(64)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "idempotency_key_hash",
+        "type": "char(64)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "request_hash",
+        "type": "char(64)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "request_payload",
+        "type": "json",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "status",
+        "type": "varchar(32)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "available_at",
+        "type": "datetime(6)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "instance_id",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "attempt_count",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "lease_owner",
+        "type": "varchar(128)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "lease_expires_at",
+        "type": "datetime(6)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "error_code",
+        "type": "varchar(64)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "error_message",
+        "type": "varchar(512)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "datetime(6)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "started_at",
+        "type": "datetime(6)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "finished_at",
+        "type": "datetime(6)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "updated_at",
+        "type": "datetime(6)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "api_key_id",
+        "type": "varchar(64)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "auth_scope",
+        "type": "varchar(64)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "owner",
+        "type": "varchar(128)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "team_id",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "template_id",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "owner_request_key",
+        "type": "char(64)",
+        "nullable": "YES",
+        "extra": ""
+      }
+    ],
+    "primary_key": [
+      "id"
+    ]
+  },
+  {
+    "name": "northbound_owner_records",
+    "columns": [
+      {
+        "name": "id",
+        "type": "bigint unsigned",
+        "nullable": "NO",
+        "extra": "auto_increment"
+      },
+      {
+        "name": "record_type",
+        "type": "varchar(24)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "record_key",
+        "type": "char(64)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "scope_id",
+        "type": "bigint unsigned",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "owner",
+        "type": "varchar(128)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "owner_normalized",
+        "type": "varchar(128)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "instance_id",
+        "type": "bigint unsigned",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "runtime_type",
+        "type": "varchar(32)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "instance_mode",
+        "type": "varchar(16)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "source_kind",
+        "type": "varchar(32)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "source_key",
+        "type": "varchar(255)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "session_key",
+        "type": "varchar(255)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "question_key",
+        "type": "varchar(255)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "status",
+        "type": "varchar(24)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "occurred_at",
+        "type": "datetime(6)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "datetime(6)",
+        "nullable": "NO",
+        "extra": "DEFAULT_GENERATED"
+      },
+      {
+        "name": "updated_at",
+        "type": "datetime(6)",
+        "nullable": "NO",
+        "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP(6)"
+      },
+      {
+        "name": "version",
+        "type": "bigint unsigned",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "schema_version",
+        "type": "smallint unsigned",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "rule_version",
+        "type": "varchar(64)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "payload",
+        "type": "json",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "prompt_tokens",
+        "type": "bigint unsigned",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "completion_tokens",
+        "type": "bigint unsigned",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "total_tokens",
+        "type": "bigint unsigned",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "invocation_count",
+        "type": "bigint unsigned",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "question_count",
+        "type": "bigint unsigned",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "session_count",
+        "type": "bigint unsigned",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "active_day_count",
+        "type": "int unsigned",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "xp_value",
+        "type": "bigint",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "level_value",
+        "type": "int unsigned",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "streak_days",
+        "type": "int unsigned",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "longest_streak_days",
+        "type": "int unsigned",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "rank_position",
+        "type": "bigint unsigned",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "rank_score",
+        "type": "decimal(24,6)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "last_activity_at",
+        "type": "datetime(6)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "business_date",
+        "type": "date",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "timezone",
+        "type": "varchar(64)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "period_type",
+        "type": "varchar(16)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "period_start",
+        "type": "date",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "period_end",
+        "type": "date",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "category_key",
+        "type": "varchar(64)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "revision",
+        "type": "int unsigned",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "expires_at",
+        "type": "datetime(6)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "active_work_seconds",
+        "type": "bigint unsigned",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "login_day_count",
+        "type": "int unsigned",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "login_streak_days",
+        "type": "int unsigned",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "last_login_date",
+        "type": "date",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "task_completed_count",
+        "type": "bigint unsigned",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "interval_start",
+        "type": "datetime(6)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "interval_end",
+        "type": "datetime(6)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "task_code",
+        "type": "varchar(64)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "definition_version",
+        "type": "varchar(64)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "progress_value",
+        "type": "bigint unsigned",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "target_value",
+        "type": "bigint unsigned",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "completed_at",
+        "type": "datetime(6)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "rewarded_at",
+        "type": "datetime(6)",
+        "nullable": "YES",
+        "extra": ""
+      }
+    ],
+    "primary_key": [
+      "id"
+    ]
+  },
+  {
+    "name": "northbound_sessions",
+    "columns": [
+      {
+        "name": "id",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": "auto_increment"
+      },
+      {
+        "name": "session_id",
+        "type": "varchar(64)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "user_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "refresh_token_hash",
+        "type": "char(64)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "previous_refresh_token_hash",
+        "type": "char(64)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "refresh_token_history",
+        "type": "json",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "scopes_json",
+        "type": "json",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "status",
+        "type": "varchar(32)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "access_expires_at",
+        "type": "datetime(6)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "refresh_expires_at",
+        "type": "datetime(6)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "last_used_at",
+        "type": "datetime(6)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "last_ip",
+        "type": "varchar(64)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "user_agent",
+        "type": "varchar(512)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "datetime(6)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "updated_at",
+        "type": "datetime(6)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "revoked_at",
+        "type": "datetime(6)",
+        "nullable": "YES",
+        "extra": ""
+      }
+    ],
+    "primary_key": [
+      "id"
+    ]
+  },
+  {
+    "name": "northbound_settings_audit",
+    "columns": [
+      {
+        "name": "id",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": "auto_increment"
+      },
+      {
+        "name": "actor_user_id",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "action",
+        "type": "varchar(64)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "before_json",
+        "type": "json",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "after_json",
+        "type": "json",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "datetime(6)",
+        "nullable": "NO",
+        "extra": ""
+      }
+    ],
+    "primary_key": [
+      "id"
+    ]
+  },
+  {
+    "name": "openclaw_config_bundle_items",
+    "columns": [
+      {
+        "name": "id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": "auto_increment"
+      },
+      {
+        "name": "bundle_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "resource_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "sort_order",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "required",
+        "type": "tinyint(1)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ]
+  },
+  {
+    "name": "openclaw_config_bundle_skills",
+    "columns": [
+      {
+        "name": "id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": "auto_increment"
+      },
+      {
+        "name": "bundle_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "skill_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "sort_order",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "required",
+        "type": "tinyint(1)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ]
+  },
+  {
+    "name": "openclaw_config_bundles",
+    "columns": [
+      {
+        "name": "id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": "auto_increment"
+      },
+      {
+        "name": "user_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "name",
+        "type": "varchar(255)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "description",
+        "type": "text",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "enabled",
+        "type": "tinyint(1)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "version",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED"
+      },
+      {
+        "name": "updated_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ]
+  },
+  {
+    "name": "openclaw_config_resources",
+    "columns": [
+      {
+        "name": "id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": "auto_increment"
+      },
+      {
+        "name": "user_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "resource_type",
+        "type": "varchar(50)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "resource_key",
+        "type": "varchar(100)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "name",
+        "type": "varchar(255)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "description",
+        "type": "text",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "enabled",
+        "type": "tinyint(1)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "version",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "tags_json",
+        "type": "longtext",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "content_json",
+        "type": "longtext",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED"
+      },
+      {
+        "name": "updated_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ]
+  },
+  {
+    "name": "openclaw_injection_snapshots",
+    "columns": [
+      {
+        "name": "id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": "auto_increment"
+      },
+      {
+        "name": "instance_id",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "user_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "mode",
+        "type": "varchar(20)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "bundle_id",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "selected_resource_ids_json",
+        "type": "longtext",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "resolved_resources_json",
+        "type": "longtext",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "rendered_manifest_json",
+        "type": "longtext",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "rendered_env_json",
+        "type": "longtext",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "secret_name",
+        "type": "varchar(255)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "status",
+        "type": "varchar(30)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "error_message",
+        "type": "text",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED"
+      },
+      {
+        "name": "updated_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "activated_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": ""
+      }
+    ],
+    "primary_key": [
+      "id"
+    ]
+  },
+  {
+    "name": "owner_team_admission_locks",
+    "columns": [
+      {
+        "name": "team_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      }
+    ],
+    "primary_key": [
+      "team_id"
+    ]
+  },
+  {
+    "name": "owner_team_provision_steps",
+    "columns": [
+      {
+        "name": "team_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "step_key",
+        "type": "varchar(100)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "operation_id",
+        "type": "varchar(128)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "status",
+        "type": "varchar(30)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "updated_at",
+        "type": "timestamp",
+        "nullable": "NO",
+        "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+      }
+    ],
+    "primary_key": [
+      "team_id",
+      "step_key"
+    ]
+  },
+  {
+    "name": "persistent_volumes",
+    "columns": [
+      {
+        "name": "id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": "auto_increment"
+      },
+      {
+        "name": "instance_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "pvc_name",
+        "type": "varchar(255)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "pvc_namespace",
+        "type": "varchar(255)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "storage_size_gb",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "storage_class",
+        "type": "varchar(50)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "mount_path",
+        "type": "varchar(255)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "status",
+        "type": "enum('pending','bound','released','failed')",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED"
+      },
+      {
+        "name": "updated_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ]
+  },
+  {
+    "name": "risk_hits",
+    "columns": [
+      {
+        "name": "id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": "auto_increment"
+      },
+      {
+        "name": "trace_id",
+        "type": "varchar(100)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "session_id",
+        "type": "varchar(100)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "request_id",
+        "type": "varchar(100)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "user_id",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "instance_id",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "instance_mode",
+        "type": "varchar(16)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "runtime_type",
+        "type": "varchar(32)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "gateway_id",
+        "type": "varchar(128)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "runtime_pod_id",
+        "type": "bigint",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "invocation_id",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "rule_id",
+        "type": "varchar(100)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "rule_name",
+        "type": "varchar(255)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "severity",
+        "type": "varchar(20)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "action",
+        "type": "varchar(50)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "match_summary",
+        "type": "varchar(500)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ]
+  },
+  {
+    "name": "risk_rules",
+    "columns": [
+      {
+        "name": "id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": "auto_increment"
+      },
+      {
+        "name": "rule_id",
+        "type": "varchar(100)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "display_name",
+        "type": "varchar(255)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "description",
+        "type": "text",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "pattern",
+        "type": "text",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "severity",
+        "type": "varchar(20)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "action",
+        "type": "varchar(50)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "is_enabled",
+        "type": "tinyint(1)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "sort_order",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED"
+      },
+      {
+        "name": "updated_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ]
+  },
+  {
+    "name": "routing_classifier_settings",
+    "columns": [
+      {
+        "name": "id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "base_url",
+        "type": "varchar(500)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "timeout_ms",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "encrypted_api_key",
+        "type": "text",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "updated_at",
+        "type": "timestamp",
+        "nullable": "NO",
+        "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "routing_mode",
+        "type": "varchar(16)",
+        "nullable": "NO",
+        "extra": ""
+      }
+    ],
+    "primary_key": [
+      "id"
+    ]
+  },
+  {
+    "name": "runtime_pods",
+    "columns": [
+      {
+        "name": "id",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": "auto_increment"
+      },
+      {
+        "name": "runtime_type",
+        "type": "varchar(32)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "namespace",
+        "type": "varchar(128)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "pod_name",
+        "type": "varchar(255)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "pod_uid",
+        "type": "varchar(128)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "pod_ip",
+        "type": "varchar(64)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "node_name",
+        "type": "varchar(255)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "deployment_name",
+        "type": "varchar(255)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "image_ref",
+        "type": "varchar(512)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "openclaw_version",
+        "type": "varchar(64)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "agent_protocol_version",
+        "type": "varchar(32)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "team_plugin_version",
+        "type": "varchar(64)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "session_store",
+        "type": "varchar(32)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "image_digest",
+        "type": "varchar(255)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "capabilities_json",
+        "type": "json",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "agent_endpoint",
+        "type": "varchar(255)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "state",
+        "type": "varchar(32)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "capacity",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "used_slots",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "draining",
+        "type": "tinyint(1)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "cpu_millis_used",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "memory_bytes_used",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "disk_bytes_used",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "network_rx_bytes",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "network_tx_bytes",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "metrics_json",
+        "type": "json",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "last_seen_at",
+        "type": "datetime",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "datetime",
+        "nullable": "NO",
+        "extra": "DEFAULT_GENERATED"
+      },
+      {
+        "name": "updated_at",
+        "type": "datetime",
+        "nullable": "NO",
+        "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ]
+  },
+  {
+    "name": "runtime_rollout_checkpoints",
+    "columns": [
+      {
+        "name": "rollout_id",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "state_json",
+        "type": "mediumtext",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "updated_at",
+        "type": "datetime(6)",
+        "nullable": "NO",
+        "extra": ""
+      }
+    ],
+    "primary_key": [
+      "rollout_id"
+    ]
+  },
+  {
+    "name": "runtime_rollouts",
+    "columns": [
+      {
+        "name": "id",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": "auto_increment"
+      },
+      {
+        "name": "runtime_type",
+        "type": "varchar(32)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "target_image_ref",
+        "type": "varchar(512)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "source_images_json",
+        "type": "json",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "target_image_digest",
+        "type": "varchar(255)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "preflight_id",
+        "type": "varchar(64)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "plan_fingerprint",
+        "type": "varchar(64)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "preflight_json",
+        "type": "json",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "required_capabilities_json",
+        "type": "json",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "auto_rollback",
+        "type": "tinyint(1)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "rollback_status",
+        "type": "varchar(32)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "rollback_error",
+        "type": "text",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "status",
+        "type": "varchar(32)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "phase",
+        "type": "varchar(32)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "batch_size",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "max_unavailable",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "started_by",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "started_at",
+        "type": "datetime",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "finished_at",
+        "type": "datetime",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "error_message",
+        "type": "text",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "datetime",
+        "nullable": "NO",
+        "extra": "DEFAULT_GENERATED"
+      },
+      {
+        "name": "updated_at",
+        "type": "datetime",
+        "nullable": "NO",
+        "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "recovery_key",
+        "type": "varchar(96)",
+        "nullable": "YES",
+        "extra": ""
+      }
+    ],
+    "primary_key": [
+      "id"
+    ]
+  },
+  {
+    "name": "runtime_upgrade_audits",
+    "columns": [
+      {
+        "name": "id",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": "auto_increment"
+      },
+      {
+        "name": "rollout_id",
+        "type": "bigint",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "actor_user_id",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "action",
+        "type": "varchar(64)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "phase",
+        "type": "varchar(32)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "outcome",
+        "type": "varchar(32)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "detail_json",
+        "type": "json",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "datetime(6)",
+        "nullable": "NO",
+        "extra": ""
+      }
+    ],
+    "primary_key": [
+      "id"
+    ]
+  },
+  {
+    "name": "runtime_upgrade_items",
+    "columns": [
+      {
+        "name": "id",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": "auto_increment"
+      },
+      {
+        "name": "rollout_id",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "team_id",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "team_member_id",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "instance_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "runtime_pod_id",
+        "type": "bigint",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "source_gateway_id",
+        "type": "varchar(128)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "source_generation",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "source_pod_uid",
+        "type": "varchar(128)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "source_deployment_name",
+        "type": "varchar(255)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "source_image_digest",
+        "type": "varchar(255)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "member_order",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "is_team_leader",
+        "type": "tinyint(1)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "source_runtime_version",
+        "type": "varchar(64)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "target_runtime_version",
+        "type": "varchar(64)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "state",
+        "type": "varchar(32)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "workspace_manifest_sha256",
+        "type": "varchar(64)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "snapshot_ref",
+        "type": "varchar(1024)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "preflight_json",
+        "type": "json",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "postflight_json",
+        "type": "json",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "error_message",
+        "type": "text",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "started_at",
+        "type": "datetime(6)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "finished_at",
+        "type": "datetime(6)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "datetime(6)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "updated_at",
+        "type": "datetime(6)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "recovery_started_at",
+        "type": "datetime(6)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "restart_attempts",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "restart_target_pod_uid",
+        "type": "varchar(128)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "restart_started_at",
+        "type": "datetime(6)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "restart_deadline_at",
+        "type": "datetime(6)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "restart_next_retry_at",
+        "type": "datetime(6)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "recovery_status",
+        "type": "varchar(32)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "recovery_error_code",
+        "type": "varchar(64)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "operation_token",
+        "type": "varchar(64)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "operation_phase",
+        "type": "varchar(32)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "operation_started_at",
+        "type": "datetime(6)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "operation_deadline_at",
+        "type": "datetime(6)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "operation_attempts",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "operation_failures",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "operation_next_retry_at",
+        "type": "datetime(6)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "operation_last_error",
+        "type": "text",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "isolated_at",
+        "type": "datetime(6)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "isolation_phase",
+        "type": "varchar(40)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "phase_entered_at",
+        "type": "datetime(6)",
+        "nullable": "YES",
+        "extra": ""
+      }
+    ],
+    "primary_key": [
+      "id"
+    ]
+  },
+  {
+    "name": "security_scan_configs",
+    "columns": [
+      {
+        "name": "id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": "auto_increment"
+      },
+      {
+        "name": "default_mode",
+        "type": "varchar(20)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "quick_analyzers_json",
+        "type": "longtext",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "deep_analyzers_json",
+        "type": "longtext",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "quick_timeout_seconds",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "deep_timeout_seconds",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "allow_fallback",
+        "type": "tinyint(1)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "updated_by",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED"
+      },
+      {
+        "name": "updated_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ]
+  },
+  {
+    "name": "security_scan_job_items",
+    "columns": [
+      {
+        "name": "id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": "auto_increment"
+      },
+      {
+        "name": "job_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "asset_type",
+        "type": "varchar(30)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "asset_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "asset_name",
+        "type": "varchar(255)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "status",
+        "type": "varchar(20)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "progress_pct",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "risk_level",
+        "type": "varchar(30)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "summary",
+        "type": "text",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "scan_result_id",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "cached_result",
+        "type": "tinyint(1)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "error_message",
+        "type": "text",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "started_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "finished_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED"
+      },
+      {
+        "name": "updated_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ]
+  },
+  {
+    "name": "security_scan_jobs",
+    "columns": [
+      {
+        "name": "id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": "auto_increment"
+      },
+      {
+        "name": "asset_type",
+        "type": "varchar(30)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "scan_mode",
+        "type": "varchar(20)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "status",
+        "type": "varchar(20)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "requested_by",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "scope_json",
+        "type": "longtext",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "total_items",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "completed_items",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "failed_items",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "current_item_name",
+        "type": "varchar(255)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "started_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "finished_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED"
+      },
+      {
+        "name": "updated_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ]
+  },
+  {
+    "name": "security_scan_reports",
+    "columns": [
+      {
+        "name": "id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": "auto_increment"
+      },
+      {
+        "name": "job_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "summary_json",
+        "type": "longtext",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED"
+      },
+      {
+        "name": "updated_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ]
+  },
+  {
+    "name": "skill_blobs",
+    "columns": [
+      {
+        "name": "id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": "auto_increment"
+      },
+      {
+        "name": "content_hash",
+        "type": "varchar(128)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "archive_hash",
+        "type": "varchar(128)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "object_key",
+        "type": "varchar(512)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "file_name",
+        "type": "varchar(255)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "media_type",
+        "type": "varchar(100)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "size_bytes",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "scan_status",
+        "type": "varchar(30)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "risk_level",
+        "type": "varchar(30)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "last_scanned_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "last_scan_result_id",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED"
+      },
+      {
+        "name": "updated_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ]
+  },
+  {
+    "name": "skill_hub_tag_assignments",
+    "columns": [
+      {
+        "name": "id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": "auto_increment"
+      },
+      {
+        "name": "skill_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "tag_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ]
+  },
+  {
+    "name": "skill_hub_tags",
+    "columns": [
+      {
+        "name": "id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": "auto_increment"
+      },
+      {
+        "name": "tag_key",
+        "type": "varchar(64)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "name",
+        "type": "varchar(120)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "description",
+        "type": "varchar(255)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "sort_order",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "admin_only",
+        "type": "tinyint(1)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED"
+      },
+      {
+        "name": "updated_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ]
+  },
+  {
+    "name": "skill_package_materialize_jobs",
+    "columns": [
+      {
+        "name": "id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": "auto_increment"
+      },
+      {
+        "name": "instance_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "skill_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "blob_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "workspace_dir",
+        "type": "varchar(120)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "content_hash",
+        "type": "varchar(128)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "status",
+        "type": "varchar(30)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "attempt_count",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "max_attempts",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "last_error",
+        "type": "text",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "idempotency_key",
+        "type": "varchar(255)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "trigger_source",
+        "type": "varchar(50)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "started_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "finished_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED"
+      },
+      {
+        "name": "updated_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ]
+  },
+  {
+    "name": "skill_scan_results",
+    "columns": [
+      {
+        "name": "id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": "auto_increment"
+      },
+      {
+        "name": "blob_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "engine",
+        "type": "varchar(60)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "risk_level",
+        "type": "varchar(30)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "status",
+        "type": "varchar(30)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "summary",
+        "type": "text",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "findings_json",
+        "type": "longtext",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "scanned_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED"
+      },
+      {
+        "name": "updated_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ]
+  },
+  {
+    "name": "skill_versions",
+    "columns": [
+      {
+        "name": "id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": "auto_increment"
+      },
+      {
+        "name": "skill_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "blob_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "version_no",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "manifest_json",
+        "type": "longtext",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "source_type",
+        "type": "varchar(30)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED"
+      },
+      {
+        "name": "updated_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ]
+  },
+  {
+    "name": "skills",
+    "columns": [
+      {
+        "name": "id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": "auto_increment"
+      },
+      {
+        "name": "user_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "skill_key",
+        "type": "varchar(120)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "name",
+        "type": "varchar(255)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "description",
+        "type": "text",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "current_version_id",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "source_type",
+        "type": "varchar(30)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "status",
+        "type": "varchar(30)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "visibility",
+        "type": "enum('private','public')",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "published_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "published_by",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "risk_level",
+        "type": "varchar(30)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "last_scanned_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "last_scan_result_id",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED"
+      },
+      {
+        "name": "updated_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ]
+  },
+  {
+    "name": "system_image_settings",
+    "columns": [
+      {
+        "name": "id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": "auto_increment"
+      },
+      {
+        "name": "instance_type",
+        "type": "varchar(50)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "runtime_type",
+        "type": "enum('desktop','shell','gateway')",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "runtime_variant",
+        "type": "varchar(32)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "display_name",
+        "type": "varchar(255)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "image",
+        "type": "varchar(500)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "is_enabled",
+        "type": "tinyint(1)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED"
+      },
+      {
+        "name": "updated_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ]
+  },
+  {
+    "name": "team_event_outbox",
+    "columns": [
+      {
+        "name": "id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": "auto_increment"
+      },
+      {
+        "name": "team_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "source_event_id",
+        "type": "varchar(255)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "destination",
+        "type": "varchar(255)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "message_id",
+        "type": "varchar(255)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "payload_json",
+        "type": "longtext",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "status",
+        "type": "varchar(30)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "attempts",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "available_at",
+        "type": "timestamp",
+        "nullable": "NO",
+        "extra": "DEFAULT_GENERATED"
+      },
+      {
+        "name": "last_error",
+        "type": "text",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "delivered_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp",
+        "nullable": "NO",
+        "extra": "DEFAULT_GENERATED"
+      },
+      {
+        "name": "updated_at",
+        "type": "timestamp",
+        "nullable": "NO",
+        "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ]
+  },
+  {
+    "name": "team_events",
+    "columns": [
+      {
+        "name": "id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": "auto_increment"
+      },
+      {
+        "name": "event_id",
+        "type": "varchar(128)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "completion_id",
+        "type": "varchar(255)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "sequence_no",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "team_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "member_id",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "task_id",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "message_id",
+        "type": "varchar(255)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "event_type",
+        "type": "varchar(100)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "payload_json",
+        "type": "longtext",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "redis_stream_id",
+        "type": "varchar(128)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "occurred_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ]
+  },
+  {
+    "name": "team_members",
+    "columns": [
+      {
+        "name": "id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": "auto_increment"
+      },
+      {
+        "name": "team_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "instance_id",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "user_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "member_key",
+        "type": "varchar(100)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "display_name",
+        "type": "varchar(255)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "role",
+        "type": "varchar(100)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "runtime_type",
+        "type": "varchar(30)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "instance_mode",
+        "type": "enum('lite','pro')",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "description",
+        "type": "text",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "status",
+        "type": "varchar(30)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "current_task_id",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "progress",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "last_seen_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "availability",
+        "type": "varchar(30)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "runtime_status",
+        "type": "varchar(50)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "runtime_task_id",
+        "type": "varchar(255)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "runtime_intent",
+        "type": "varchar(100)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "blocked_reason",
+        "type": "text",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "last_summary",
+        "type": "text",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED"
+      },
+      {
+        "name": "updated_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "icon_key",
+        "type": "varchar(32)",
+        "nullable": "YES",
+        "extra": ""
+      }
+    ],
+    "primary_key": [
+      "id"
+    ]
+  },
+  {
+    "name": "team_tasks",
+    "columns": [
+      {
+        "name": "id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": "auto_increment"
+      },
+      {
+        "name": "team_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "target_member_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "created_by",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "message_id",
+        "type": "varchar(255)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "status",
+        "type": "varchar(30)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "workflow_state",
+        "type": "varchar(40)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "plan_version",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "ledger_version",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "current_phase_id",
+        "type": "varchar(255)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "accepted_completion_id",
+        "type": "varchar(255)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "payload_json",
+        "type": "longtext",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "result_json",
+        "type": "longtext",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "error_message",
+        "type": "text",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "redis_stream_id",
+        "type": "varchar(128)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED"
+      },
+      {
+        "name": "dispatched_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "started_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "finished_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "updated_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ]
+  },
+  {
+    "name": "team_work_items",
+    "columns": [
+      {
+        "name": "id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": "auto_increment"
+      },
+      {
+        "name": "team_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "root_task_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "work_id",
+        "type": "varchar(255)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "assignment_id",
+        "type": "varchar(255)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "canonical_work_id",
+        "type": "varchar(255)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "phase_id",
+        "type": "varchar(255)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "revision",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "required_for_root",
+        "type": "tinyint(1)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "superseded_by",
+        "type": "varchar(255)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "review_required",
+        "type": "tinyint(1)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "validated_revision",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "review_target_assignment_id",
+        "type": "varchar(255)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "review_target_revision",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "owner_member_id",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "title",
+        "type": "varchar(500)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "status",
+        "type": "varchar(30)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "depends_on_json",
+        "type": "longtext",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "result_json",
+        "type": "longtext",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "artifact_refs_json",
+        "type": "longtext",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED"
+      },
+      {
+        "name": "started_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "finished_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "updated_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ]
+  },
+  {
+    "name": "team_workflow_phases",
+    "columns": [
+      {
+        "name": "id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": "auto_increment"
+      },
+      {
+        "name": "team_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "root_task_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "phase_id",
+        "type": "varchar(255)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "plan_version",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "sequence_no",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "status",
+        "type": "varchar(40)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "required_for_root",
+        "type": "tinyint(1)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "decision_required",
+        "type": "tinyint(1)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "depends_on_json",
+        "type": "longtext",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "next_phase_id",
+        "type": "varchar(255)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "completion_policy",
+        "type": "varchar(80)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp",
+        "nullable": "NO",
+        "extra": "DEFAULT_GENERATED"
+      },
+      {
+        "name": "completed_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "updated_at",
+        "type": "timestamp",
+        "nullable": "NO",
+        "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ]
+  },
+  {
+    "name": "team_workspace_file_audits",
+    "columns": [
+      {
+        "name": "id",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": "auto_increment"
+      },
+      {
+        "name": "team_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "user_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "action",
+        "type": "varchar(32)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "relative_path",
+        "type": "varchar(1024)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "bytes",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "datetime",
+        "nullable": "NO",
+        "extra": "DEFAULT_GENERATED"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ]
+  },
+  {
+    "name": "teams",
+    "columns": [
+      {
+        "name": "id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": "auto_increment"
+      },
+      {
+        "name": "user_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "name",
+        "type": "varchar(255)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "description",
+        "type": "text",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "status",
+        "type": "varchar(30)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "communication_mode",
+        "type": "varchar(50)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "redis_url_secret_name",
+        "type": "varchar(255)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "redis_url_secret_key",
+        "type": "varchar(255)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "team_token_secret_name",
+        "type": "varchar(255)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "team_token_secret_key",
+        "type": "varchar(255)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "redis_events_last_id",
+        "type": "varchar(128)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "shared_pvc_name",
+        "type": "varchar(255)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "shared_pvc_namespace",
+        "type": "varchar(255)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "shared_mount_path",
+        "type": "varchar(255)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "storage_class",
+        "type": "varchar(100)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED"
+      },
+      {
+        "name": "updated_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "resource_scope",
+        "type": "varchar(16)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "owner",
+        "type": "varchar(128)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "display_name",
+        "type": "varchar(255)",
+        "nullable": "YES",
+        "extra": ""
+      }
+    ],
+    "primary_key": [
+      "id"
+    ]
+  },
+  {
+    "name": "user_quotas",
+    "columns": [
+      {
+        "name": "id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": "auto_increment"
+      },
+      {
+        "name": "user_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "max_instances",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "max_cpu_cores",
+        "type": "decimal(10,2)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "max_memory_gb",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "max_storage_gb",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "max_gpu_count",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED"
+      },
+      {
+        "name": "updated_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ]
+  },
+  {
+    "name": "users",
+    "columns": [
+      {
+        "name": "id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": "auto_increment"
+      },
+      {
+        "name": "username",
+        "type": "varchar(255)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "email",
+        "type": "varchar(320)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "password_hash",
+        "type": "varchar(255)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "role",
+        "type": "enum('admin','user')",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "auth_provider",
+        "type": "varchar(32)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "login_alias",
+        "type": "varchar(255)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "external_id",
+        "type": "varchar(512)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "is_active",
+        "type": "tinyint(1)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED"
+      },
+      {
+        "name": "updated_at",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "last_login",
+        "type": "timestamp",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "local_username_key",
+        "type": "varchar(255)",
+        "nullable": "YES",
+        "extra": "STORED GENERATED",
+        "generation_expression": "(case when (`auth_provider` = _utf8mb4\\'local\\') then `username` else NULL end)"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ]
+  },
+  {
+    "name": "workspace_file_audits",
+    "columns": [
+      {
+        "name": "id",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": "auto_increment"
+      },
+      {
+        "name": "instance_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "user_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "action",
+        "type": "varchar(32)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "relative_path",
+        "type": "varchar(1024)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "bytes",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "datetime",
+        "nullable": "NO",
+        "extra": "DEFAULT_GENERATED"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ]
+  }
+]

@@ -21,6 +21,7 @@ import (
 	"unicode"
 
 	"clawreef/internal/models"
+	"clawreef/internal/ownerrecords"
 	"clawreef/internal/repository"
 	"clawreef/internal/services"
 	"clawreef/internal/utils"
@@ -53,34 +54,42 @@ type ChatMessage struct {
 
 // ChatCompletionRequest is the platform gateway request shape.
 type ChatCompletionRequest struct {
-	RawBody            []byte          `json:"-"`
-	Model              string          `json:"model"`
-	Messages           []ChatMessage   `json:"messages"`
-	Temperature        *float64        `json:"temperature,omitempty"`
-	TopP               *float64        `json:"top_p,omitempty"`
-	MaxTokens          *int            `json:"max_tokens,omitempty"`
-	Stream             bool            `json:"stream"`
-	Tools              json.RawMessage `json:"tools,omitempty"`
-	ToolChoice         json.RawMessage `json:"tool_choice,omitempty"`
-	ParallelToolCalls  *bool           `json:"parallel_tool_calls,omitempty"`
-	ResponseFormat     json.RawMessage `json:"response_format,omitempty"`
-	Stop               json.RawMessage `json:"stop,omitempty"`
-	N                  *int            `json:"n,omitempty"`
-	FrequencyPenalty   *float64        `json:"frequency_penalty,omitempty"`
-	PresencePenalty    *float64        `json:"presence_penalty,omitempty"`
-	ReasoningEffort    *string         `json:"reasoning_effort,omitempty"`
-	StreamOptions      json.RawMessage `json:"stream_options,omitempty"`
-	User               *string         `json:"user,omitempty"`
-	SessionID          *string         `json:"session_id,omitempty"`
-	OpenClawSessionKey *string         `json:"-"`
-	ManagedAgentType   *string         `json:"-"`
-	InstanceID         *int            `json:"instance_id,omitempty"`
-	InstanceMode       *string         `json:"instance_mode,omitempty"`
-	RuntimeType        *string         `json:"runtime_type,omitempty"`
-	GatewayID          *string         `json:"gateway_id,omitempty"`
-	RuntimePodID       *int64          `json:"runtime_pod_id,omitempty"`
-	TraceID            *string         `json:"trace_id,omitempty"`
-	RequestID          *string         `json:"request_id,omitempty"`
+	ImageIdempotencyKey string                            `json:"-"`
+	RuntimeTask         *models.GatewayTaskIdentity       `json:"-"`
+	RawBody             []byte                            `json:"-"`
+	Model               string                            `json:"model"`
+	Messages            []ChatMessage                     `json:"messages"`
+	Temperature         *float64                          `json:"temperature,omitempty"`
+	TopP                *float64                          `json:"top_p,omitempty"`
+	MaxTokens           *int                              `json:"max_tokens,omitempty"`
+	MaxCompletionTokens *int                              `json:"max_completion_tokens,omitempty"`
+	Stream              bool                              `json:"stream"`
+	Tools               json.RawMessage                   `json:"tools,omitempty"`
+	ToolChoice          json.RawMessage                   `json:"tool_choice,omitempty"`
+	ParallelToolCalls   *bool                             `json:"parallel_tool_calls,omitempty"`
+	ResponseFormat      json.RawMessage                   `json:"response_format,omitempty"`
+	Stop                json.RawMessage                   `json:"stop,omitempty"`
+	N                   *int                              `json:"n,omitempty"`
+	FrequencyPenalty    *float64                          `json:"frequency_penalty,omitempty"`
+	PresencePenalty     *float64                          `json:"presence_penalty,omitempty"`
+	ReasoningEffort     *string                           `json:"reasoning_effort,omitempty"`
+	Thinking            json.RawMessage                   `json:"thinking,omitempty"`
+	StreamOptions       json.RawMessage                   `json:"stream_options,omitempty"`
+	User                *string                           `json:"user,omitempty"`
+	SessionID           *string                           `json:"session_id,omitempty"`
+	OpenClawSessionKey  *string                           `json:"-"`
+	ManagedAgentType    *string                           `json:"-"`
+	InstanceID          *int                              `json:"instance_id,omitempty"`
+	InstanceMode        *string                           `json:"instance_mode,omitempty"`
+	RuntimeType         *string                           `json:"runtime_type,omitempty"`
+	GatewayID           *string                           `json:"gateway_id,omitempty"`
+	RuntimePodID        *int64                            `json:"runtime_pod_id,omitempty"`
+	TraceID             *string                           `json:"trace_id,omitempty"`
+	RequestID           *string                           `json:"request_id,omitempty"`
+	AllowedModelGroups  []string                          `json:"-"`
+	UsageFinalizer      func(int) error                   `json:"-"`
+	GatewayKeyID        *int                              `json:"-"`
+	BudgetController    *services.GatewayBudgetController `json:"-"`
 }
 
 // ChatCompletionResponse is used for audit parsing only.
@@ -125,23 +134,37 @@ type AvailableModel struct {
 const autoModelID = "auto"
 const maxStoredIdentifierLength = 100
 const anthropicVersionHeader = "2023-06-01"
-const defaultAnthropicMaxTokens = 4096
+const defaultAnthropicMaxTokens = defaultGatewayOutputTokens
 const providerRequestTimeout = 3 * time.Minute
 const upstreamStreamInterruptedCode = "upstream_stream_interrupted"
+const maxDeferredStreamPreludeBytes = 256 * 1024
 
 var providerVersionSegmentPattern = regexp.MustCompile(`(?i)^v\d+(?:[a-z0-9._-]*)?$`)
 
 type preparedChatRequest struct {
-	traceID       string
-	sessionID     string
-	sessionIDPtr  *string
-	requestID     string
-	requestIDPtr  *string
-	userID        int
-	userIDPtr     *int
-	selectedModel *models.LLMModel
-	resolvedModel *models.LLMModel
-	req           ChatCompletionRequest
+	traceID                 string
+	sessionID               string
+	sessionIDPtr            *string
+	requestID               string
+	requestIDPtr            *string
+	userID                  int
+	userIDPtr               *int
+	selectedModel           *models.LLMModel
+	resolvedModel           *models.LLMModel
+	deploymentCandidates    []*models.LLMModel
+	attemptNumber           int
+	attemptTTFTMs           int
+	attemptGenerationMs     int
+	attemptTokensPerSecond  float64
+	attemptStatusCode       int
+	attemptFailureResponse  *ProxyResponse
+	attemptSucceeded        bool
+	attemptDispatched       bool
+	attemptPromptTokens     int
+	attemptCompletionTokens int
+	priorAttemptTokens      int
+	priorAttemptCost        float64
+	req                     ChatCompletionRequest
 }
 
 type openAIStreamChunk struct {
@@ -152,10 +175,12 @@ type openAIStreamChunk struct {
 	Choices []struct {
 		Index int `json:"index"`
 		Delta struct {
-			Role      string      `json:"role,omitempty"`
-			Content   interface{} `json:"content,omitempty"`
-			ToolCalls []ToolCall  `json:"tool_calls,omitempty"`
-			Refusal   interface{} `json:"refusal,omitempty"`
+			Role             string      `json:"role,omitempty"`
+			Content          interface{} `json:"content,omitempty"`
+			ToolCalls        []ToolCall  `json:"tool_calls,omitempty"`
+			Refusal          interface{} `json:"refusal,omitempty"`
+			ReasoningContent interface{} `json:"reasoning_content,omitempty"`
+			Reasoning        interface{} `json:"reasoning,omitempty"`
 		} `json:"delta"`
 		FinishReason *string `json:"finish_reason,omitempty"`
 	} `json:"choices"`
@@ -174,6 +199,7 @@ type openAIStreamChunk struct {
 type openAIStreamInspection struct {
 	Done          bool
 	Finished      bool
+	Semantic      bool
 	ProviderError error
 }
 
@@ -186,6 +212,7 @@ type openAIStreamProxyResult struct {
 	SawDone          bool
 	SawFinishReason  bool
 	Terminal         bool
+	FirstTokenAt     time.Time
 }
 
 type upstreamStreamReadError struct {
@@ -218,6 +245,48 @@ func (e *downstreamStreamWriteError) Error() string {
 
 func (e *downstreamStreamWriteError) Unwrap() error {
 	return e.err
+}
+
+// deferredStreamWriter holds protocol prelude/heartbeat frames until either a
+// semantic token (text, reasoning, refusal or tool call) or a valid terminal event is observed.
+// This keeps the downstream response uncommitted while another deployment can
+// still be selected safely.
+type deferredStreamWriter struct {
+	writer    io.Writer
+	flusher   http.Flusher
+	pending   bytes.Buffer
+	committed bool
+}
+
+func (w *deferredStreamWriter) Write(payload []byte) (int, error) {
+	if w.committed {
+		return w.writer.Write(payload)
+	}
+	if w.pending.Len()+len(payload) > maxDeferredStreamPreludeBytes {
+		return 0, errors.New("upstream stream prelude exceeded the safety limit before producing a semantic token")
+	}
+	return w.pending.Write(payload)
+}
+
+func (w *deferredStreamWriter) Flush() {
+	if w.committed {
+		w.flusher.Flush()
+	}
+}
+
+func (w *deferredStreamWriter) Commit() error {
+	if w.committed {
+		return nil
+	}
+	w.committed = true
+	if w.pending.Len() > 0 {
+		if _, err := w.writer.Write(w.pending.Bytes()); err != nil {
+			return err
+		}
+		w.pending.Reset()
+	}
+	w.flusher.Flush()
+	return nil
 }
 
 type openAIStreamDelta struct {
@@ -271,6 +340,7 @@ type anthropicToolDefinition struct {
 
 type anthropicContentBlock struct {
 	Type      string      `json:"type"`
+	Source    interface{} `json:"source,omitempty"`
 	Text      string      `json:"text,omitempty"`
 	ID        string      `json:"id,omitempty"`
 	Name      string      `json:"name,omitempty"`
@@ -323,6 +393,7 @@ type anthropicStreamState struct {
 	AssistantText    strings.Builder
 	ToolCalls        map[int]*anthropicToolCallState
 	SentRole         bool
+	FirstTokenAt     time.Time
 }
 
 type anthropicToolCallState struct {
@@ -339,21 +410,43 @@ type Service interface {
 }
 
 type service struct {
-	modelRepo            repository.LLMModelRepository
-	expandedModelCatalog services.ExpandedLLMModelCatalog
-	invocationService    services.ModelInvocationService
-	auditEventService    services.AuditEventService
-	costRecordService    services.CostRecordService
-	riskDetector         services.RiskDetectionService
-	riskHitService       services.RiskHitService
-	chatSessionService   services.ChatSessionService
-	chatMessageService   services.ChatMessageService
-	secretRefService     services.SecretRefService
-	httpClient           *http.Client
-	streamHTTPClient     *http.Client
+	ownerUsage               *ownerrecords.Store
+	expandedModelCatalog     services.ExpandedLLMModelCatalog
+	runtimeTasks             repository.GatewayTaskRepository
+	imageArtifacts           services.GatewayImageArtifactService
+	imageJobs                services.GatewayImageJobStore
+	modelAccessChecker       repository.ModelAccessChecker
+	modelRepo                repository.LLMModelRepository
+	invocationService        services.ModelInvocationService
+	auditEventService        services.AuditEventService
+	costRecordService        services.CostRecordService
+	riskDetector             services.RiskDetectionService
+	riskHitService           services.RiskHitService
+	chatSessionService       services.ChatSessionService
+	chatMessageService       services.ChatMessageService
+	secretRefService         services.SecretRefService
+	deploymentStore          services.GatewayDeploymentStore
+	routingClassifier        *routingClassifierRunner
+	resolveRoutingClassifier func(context.Context) (*routingClassifierRunner, error)
+	httpClient               *http.Client
+	streamHTTPClient         *http.Client
 }
 
+// ServiceOption configures optional gateway runtime coordination.
 type ServiceOption func(*service)
+
+// WithDeploymentStore enables shared health and load-aware deployment routing.
+func WithDeploymentStore(store services.GatewayDeploymentStore) ServiceOption {
+	return func(target *service) {
+		if store != nil {
+			target.deploymentStore = store
+		}
+	}
+}
+
+func WithOwnerUsage(store *ownerrecords.Store) ServiceOption {
+	return func(s *service) { s.ownerUsage = store }
+}
 
 func WithExpandedLLMModelCatalog(catalog services.ExpandedLLMModelCatalog) ServiceOption {
 	return func(s *service) {
@@ -374,7 +467,7 @@ func NewService(
 	options ...ServiceOption,
 ) Service {
 	httpClient, streamHTTPClient := newGatewayHTTPClients()
-	result := &service{
+	target := &service{
 		modelRepo:          modelRepo,
 		invocationService:  invocationService,
 		auditEventService:  auditEventService,
@@ -384,15 +477,16 @@ func NewService(
 		chatSessionService: chatSessionService,
 		chatMessageService: chatMessageService,
 		secretRefService:   services.NewSecretRefService(),
+		deploymentStore:    services.NewNoopGatewayDeploymentStore(),
 		httpClient:         httpClient,
 		streamHTTPClient:   streamHTTPClient,
 	}
 	for _, option := range options {
 		if option != nil {
-			option(result)
+			option(target)
 		}
 	}
-	return result
+	return target
 }
 
 func newGatewayHTTPClients() (*http.Client, *http.Client) {
@@ -411,6 +505,7 @@ func (s *service) ListAvailableModels() ([]AvailableModel, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to list available models: %w", err)
 	}
+	items = models.ChatModels(items)
 	if len(items) == 0 {
 		return []AvailableModel{}, nil
 	}
@@ -452,18 +547,21 @@ func (s *service) ListAvailableModels() ([]AvailableModel, error) {
 }
 
 func (s *service) listActiveModels() ([]models.LLMModel, error) {
-	if s.expandedModelCatalog != nil {
-		return s.expandedModelCatalog.ListExpandedActiveModels()
-	}
-	items, err := s.modelRepo.ListActive()
-	if err != nil {
-		return nil, err
-	}
-	return models.ExpandLLMModelCatalog(items), nil
+	// The repository is scoped to the instance owner on request entry. A
+	// provider discovery catalog is not an authorization source: it must never
+	// add unconfigured models or bypass the scoped repository.
+	return s.modelRepo.ListActive()
 }
 
 func (s *service) ChatCompletions(ctx context.Context, userID int, req ChatCompletionRequest) (*ProxyResponse, string, error) {
-	prepared, err := s.prepareChatRequest(userID, req)
+	if err := s.checkRuntimeTask(ctx, req); err != nil {
+		return nil, "", err
+	}
+	scoped := *s
+	scoped.modelAccessChecker, _ = s.modelRepo.(repository.ModelAccessChecker)
+	scoped.modelRepo = repository.ForModelUser(s.modelRepo, userID)
+	s = &scoped
+	prepared, err := s.prepareChatRequest(ctx, userID, req)
 	if err != nil {
 		traceID := ""
 		if prepared != nil {
@@ -472,33 +570,141 @@ func (s *service) ChatCompletions(ctx context.Context, userID int, req ChatCompl
 		return nil, traceID, err
 	}
 
+	candidates := prepared.deploymentCandidates
+	if len(candidates) == 0 {
+		candidates = []*models.LLMModel{prepared.resolvedModel}
+	}
+	var lastResponse *ProxyResponse
+	var lastErr error
+	for index, candidate := range candidates {
+		prepared.resolvedModel = candidate
+		callCtx, stopGuard, accessErr := guardModelCall(ctx, s.taskAccessChecker(prepared.req), userID, candidate.ID)
+		if accessErr != nil {
+			s.finalizeFailedAttemptAccounting(prepared)
+			s.recordAccessInterruption(prepared, accessErr)
+			return nil, prepared.traceID, accessErr
+		}
+		lease, acquireErr := s.beginDeploymentAttempt(callCtx, prepared, candidate)
+		if errors.Is(acquireErr, services.ErrGatewayDeploymentUnavailable) {
+			stopGuard()
+			lastErr = acquireErr
+			if index+1 < len(candidates) {
+				s.recordDeploymentFailover(prepared, candidate, candidates[index+1], nil, acquireErr)
+			}
+			continue
+		}
+		// Capacity skips must not bind a deployment that this turn never called.
+		if err := s.bindRuntimeTask(callCtx, prepared.req, candidate.ID); err != nil {
+			stopGuard()
+			s.finishDeploymentAttempt(prepared, candidate, lease, 0, false, false)
+			s.finalizeFailedAttemptAccounting(prepared)
+			s.recordAccessInterruption(prepared, err)
+			return nil, prepared.traceID, err
+		}
+		attemptStartedAt := time.Now()
+		response, traceID, callErr := s.callNonStreamingDeployment(callCtx, prepared)
+		accessCause := context.Cause(callCtx)
+		stopGuard()
+		statusCode := 0
+		if response != nil {
+			statusCode = response.StatusCode
+		}
+		prepared.attemptStatusCode = statusCode
+		success := callErr == nil && statusCode >= http.StatusOK && statusCode < http.StatusMultipleChoices
+		s.finishDeploymentAttempt(prepared, candidate, lease, time.Since(attemptStartedAt), success && accessCause == nil, accessCause == nil && shouldPenalizeDeployment(ctx, statusCode, callErr, response))
+		if accessCause != nil {
+			s.finalizeFailedAttemptAccounting(prepared)
+			if ctx.Err() == nil {
+				s.recordAccessInterruption(prepared, accessCause)
+			}
+			return nil, traceID, accessCause
+		}
+		if callErr == nil && !isRetryableProviderResponse(response) {
+			if !success {
+				s.finalizeFailedAttemptAccounting(prepared)
+			}
+			return response, traceID, nil
+		}
+		lastResponse, lastErr = response, callErr
+		if index+1 < len(candidates) {
+			s.recordDeploymentFailover(prepared, candidate, candidates[index+1], response, callErr)
+			continue
+		}
+		if callErr != nil {
+			s.finalizeFailedAttemptAccounting(prepared)
+			return nil, traceID, callErr
+		}
+		s.finalizeFailedAttemptAccounting(prepared)
+		return response, traceID, nil
+	}
+	s.finalizeFailedAttemptAccounting(prepared)
+	return lastResponse, prepared.traceID, lastErr
+}
+
+func (s *service) callNonStreamingDeployment(ctx context.Context, prepared *preparedChatRequest) (*ProxyResponse, string, error) {
 	switch models.ResolveLLMProtocolTypeOrDefault(prepared.resolvedModel.ProviderType, prepared.resolvedModel.ProtocolType) {
 	case models.ProtocolTypeOpenAI, models.ProtocolTypeOpenAICompatible:
 		return s.callOpenAICompatible(ctx, prepared)
 	case models.ProtocolTypeAnthropic:
 		return s.callAnthropic(ctx, prepared)
 	default:
-		_ = s.auditEventService.RecordEvent(&models.AuditEvent{
-			TraceID:      prepared.traceID,
-			SessionID:    prepared.req.SessionID,
-			RequestID:    prepared.requestIDPtr,
-			UserID:       prepared.userIDPtr,
-			InstanceID:   prepared.req.InstanceID,
-			InstanceMode: runtimeAttributionString(prepared.req.InstanceMode),
-			RuntimeType:  runtimeAttributionString(prepared.req.RuntimeType),
-			GatewayID:    runtimeAttributionString(prepared.req.GatewayID),
-			RuntimePodID: runtimeAttributionInt64(prepared.req.RuntimePodID),
-			EventType:    "gateway.request.blocked",
-			TrafficClass: models.TrafficClassLLM,
-			Severity:     models.AuditSeverityWarn,
-			Message:      fmt.Sprintf("Provider type %s is not supported yet", prepared.resolvedModel.ProviderType),
-		})
-		return nil, prepared.traceID, errors.New("provider type is not supported yet")
+		return nil, prepared.traceID, fmt.Errorf("provider type %s is not supported yet", prepared.resolvedModel.ProviderType)
+	}
+}
+
+func isRetryableProviderResponse(response *ProxyResponse) bool {
+	if response == nil {
+		return false
+	}
+	return response.StatusCode == http.StatusRequestTimeout ||
+		isProviderModelPermissionDenied(response) ||
+		response.StatusCode == http.StatusUnauthorized ||
+		response.StatusCode == http.StatusPaymentRequired ||
+		response.StatusCode == http.StatusNotFound ||
+		response.StatusCode == http.StatusConflict ||
+		response.StatusCode == http.StatusTooEarly ||
+		response.StatusCode == http.StatusTooManyRequests ||
+		response.StatusCode >= http.StatusInternalServerError
+}
+
+func (s *service) recordDeploymentFailover(prepared *preparedChatRequest, failed, next *models.LLMModel, response *ProxyResponse, callErr error) {
+	if prepared == nil || failed == nil || next == nil {
+		return
+	}
+	reason := "provider call failed"
+	if callErr != nil {
+		reason = callErr.Error()
+	} else if response != nil {
+		reason = fmt.Sprintf("provider status %d", response.StatusCode)
+	}
+	details, _ := json.Marshal(map[string]interface{}{
+		"failed_attempt": prepared.attemptNumber,
+		"failed_model":   failed.ProviderModelName,
+		"next_model":     next.ProviderModelName,
+	})
+	if err := s.auditEventService.RecordEvent(&models.AuditEvent{
+		TraceID: prepared.traceID, SessionID: prepared.sessionIDPtr, RequestID: prepared.requestIDPtr,
+		UserID: prepared.userIDPtr, InstanceID: prepared.req.InstanceID,
+		GatewayKeyID: prepared.req.GatewayKeyID,
+		InstanceMode: runtimeAttributionString(prepared.req.InstanceMode), RuntimeType: runtimeAttributionString(prepared.req.RuntimeType),
+		GatewayID: runtimeAttributionString(prepared.req.GatewayID), RuntimePodID: runtimeAttributionInt64(prepared.req.RuntimePodID),
+		EventType: "gateway.deployment.failover", TrafficClass: models.TrafficClassLLM, Severity: models.AuditSeverityWarn,
+		Message: fmt.Sprintf("Failing over model group %s from %s to %s: %s", failed.ModelGroup, failed.DisplayName, next.DisplayName, reason),
+		Details: stringPtr(string(details)),
+	}); err != nil {
+		logPersistenceError("record gateway.deployment.failover", prepared.traceID, err)
 	}
 }
 
 func (s *service) StreamChatCompletions(ctx context.Context, userID int, req ChatCompletionRequest, w http.ResponseWriter) (string, error) {
-	prepared, err := s.prepareChatRequest(userID, req)
+	if err := s.checkRuntimeTask(ctx, req); err != nil {
+		return "", err
+	}
+	scoped := *s
+	scoped.modelAccessChecker, _ = s.modelRepo.(repository.ModelAccessChecker)
+	scoped.modelRepo = repository.ForModelUser(s.modelRepo, userID)
+	s = &scoped
+	prepared, err := s.prepareChatRequest(ctx, userID, req)
 	if err != nil {
 		traceID := ""
 		if prepared != nil {
@@ -506,19 +712,107 @@ func (s *service) StreamChatCompletions(ctx context.Context, userID int, req Cha
 		}
 		return traceID, err
 	}
+	return prepared.traceID, s.streamPreparedChatCompletions(ctx, prepared, w)
+}
 
+func (s *service) streamPreparedChatCompletions(ctx context.Context, prepared *preparedChatRequest, w http.ResponseWriter) (resultErr error) {
+	// An attempt failure is not necessarily a request failure. Record a separate
+	// terminal event so observers can distinguish failover from a stopped request.
+	defer func() {
+		if s.auditEventService == nil || (resultErr == nil && prepared.attemptSucceeded) {
+			return
+		}
+		_ = s.auditEventService.RecordEvent(&models.AuditEvent{
+			TraceID: prepared.traceID, RequestID: stringPtr(prepared.requestID),
+			InstanceID: prepared.req.InstanceID, SessionID: prepared.sessionIDPtr,
+			UserID: prepared.userIDPtr, GatewayKeyID: prepared.req.GatewayKeyID,
+			EventType: "gateway.request.stream_failed", TrafficClass: models.TrafficClassLLM,
+			Severity: models.AuditSeverityWarn, Message: "Streaming request ended without completing successfully; no further deployment retry is running.",
+		})
+	}()
+	candidates := prepared.deploymentCandidates
+	if len(candidates) == 0 {
+		candidates = []*models.LLMModel{prepared.resolvedModel}
+	}
+	trackedWriter := &trackingResponseWriter{ResponseWriter: w}
+	var lastErr error
+	for index, candidate := range candidates {
+		prepared.resolvedModel = candidate
+		callCtx, stopGuard, accessErr := guardModelCall(ctx, s.taskAccessChecker(prepared.req), prepared.userID, candidate.ID)
+		if accessErr != nil {
+			s.finalizeFailedAttemptAccounting(prepared)
+			s.recordAccessInterruption(prepared, accessErr)
+			return accessErr
+		}
+		lease, acquireErr := s.beginDeploymentAttempt(callCtx, prepared, candidate)
+		if errors.Is(acquireErr, services.ErrGatewayDeploymentUnavailable) {
+			stopGuard()
+			lastErr = acquireErr
+			if index+1 < len(candidates) {
+				s.recordDeploymentFailover(prepared, candidate, candidates[index+1], nil, acquireErr)
+			}
+			continue
+		}
+		if err := s.bindRuntimeTask(callCtx, prepared.req, candidate.ID); err != nil {
+			stopGuard()
+			s.finishDeploymentAttempt(prepared, candidate, lease, 0, false, false)
+			s.finalizeFailedAttemptAccounting(prepared)
+			s.recordAccessInterruption(prepared, err)
+			return err
+		}
+		attemptStartedAt := time.Now()
+		hasFallback := index+1 < len(candidates)
+		callErr := s.streamDeployment(callCtx, prepared, trackedWriter, hasFallback)
+		accessCause := context.Cause(callCtx)
+		stopGuard()
+		s.finishDeploymentAttempt(prepared, candidate, lease, time.Since(attemptStartedAt), prepared.attemptSucceeded && accessCause == nil, accessCause == nil && shouldPenalizeDeployment(ctx, prepared.attemptStatusCode, callErr, prepared.attemptFailureResponse))
+		if accessCause != nil {
+			s.finalizeFailedAttemptAccounting(prepared)
+			if ctx.Err() == nil {
+				s.recordAccessInterruption(prepared, accessCause)
+			}
+			if trackedWriter.committed() && errors.Is(accessCause, models.ErrModelUnavailable) {
+				writeModelAccessStreamError(w)
+			}
+			return accessCause
+		}
+		if callErr == nil {
+			if !prepared.attemptSucceeded {
+				s.finalizeFailedAttemptAccounting(prepared)
+			}
+			return nil
+		}
+		lastErr = callErr
+		if trackedWriter.committed() || !hasFallback {
+			s.finalizeFailedAttemptAccounting(prepared)
+			return callErr
+		}
+
+		var response *ProxyResponse
+		var statusErr *retryableStreamResponseError
+		if errors.As(callErr, &statusErr) {
+			response = &ProxyResponse{StatusCode: statusErr.StatusCode}
+		}
+		s.recordDeploymentFailover(prepared, candidate, candidates[index+1], response, callErr)
+	}
+	s.finalizeFailedAttemptAccounting(prepared)
+	return lastErr
+}
+
+func (s *service) streamDeployment(ctx context.Context, prepared *preparedChatRequest, w http.ResponseWriter, deferRetryableResponse bool) error {
 	switch models.ResolveLLMProtocolTypeOrDefault(prepared.resolvedModel.ProviderType, prepared.resolvedModel.ProtocolType) {
 	case models.ProtocolTypeOpenAI, models.ProtocolTypeOpenAICompatible:
-		return prepared.traceID, s.streamOpenAICompatible(ctx, prepared, w)
+		return s.streamOpenAICompatible(ctx, prepared, w, deferRetryableResponse)
 	case models.ProtocolTypeAnthropic:
-		return prepared.traceID, s.streamAnthropic(ctx, prepared, w)
+		return s.streamAnthropic(ctx, prepared, w, deferRetryableResponse)
 	default:
-		_ = s.auditEventService.RecordEvent(&models.AuditEvent{
+		if err := s.auditEventService.RecordEvent(&models.AuditEvent{
 			TraceID:      prepared.traceID,
 			SessionID:    prepared.req.SessionID,
 			RequestID:    prepared.requestIDPtr,
 			UserID:       prepared.userIDPtr,
 			InstanceID:   prepared.req.InstanceID,
+			GatewayKeyID: prepared.req.GatewayKeyID,
 			InstanceMode: runtimeAttributionString(prepared.req.InstanceMode),
 			RuntimeType:  runtimeAttributionString(prepared.req.RuntimeType),
 			GatewayID:    runtimeAttributionString(prepared.req.GatewayID),
@@ -527,12 +821,64 @@ func (s *service) StreamChatCompletions(ctx context.Context, userID int, req Cha
 			TrafficClass: models.TrafficClassLLM,
 			Severity:     models.AuditSeverityWarn,
 			Message:      fmt.Sprintf("Provider type %s is not supported yet", prepared.resolvedModel.ProviderType),
-		})
-		return prepared.traceID, errors.New("provider type is not supported yet")
+		}); err != nil {
+			logPersistenceError("record gateway.request.blocked", prepared.traceID, err)
+		}
+		return errors.New("provider type is not supported yet")
 	}
 }
 
-func (s *service) prepareChatRequest(userID int, req ChatCompletionRequest) (*preparedChatRequest, error) {
+type trackingResponseWriter struct {
+	http.ResponseWriter
+	wroteHeader bool
+	wroteBody   bool
+}
+
+func (w *trackingResponseWriter) WriteHeader(statusCode int) {
+	if w.wroteHeader {
+		return
+	}
+	w.wroteHeader = true
+	w.ResponseWriter.WriteHeader(statusCode)
+}
+
+func (w *trackingResponseWriter) Write(payload []byte) (int, error) {
+	if !w.wroteHeader {
+		w.WriteHeader(http.StatusOK)
+	}
+	w.wroteBody = true
+	return w.ResponseWriter.Write(payload)
+}
+
+func (w *trackingResponseWriter) Flush() {
+	if !w.wroteHeader {
+		w.WriteHeader(http.StatusOK)
+	}
+	if flusher, ok := w.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
+}
+
+func (w *trackingResponseWriter) committed() bool {
+	return w.wroteHeader || w.wroteBody
+}
+
+type retryableStreamResponseError struct {
+	StatusCode int
+	Message    string
+}
+
+func (e *retryableStreamResponseError) Error() string {
+	return fmt.Sprintf("provider returned retryable status %d: %s", e.StatusCode, e.Message)
+}
+
+func (s *service) prepareChatRequest(ctx context.Context, userID int, req ChatCompletionRequest) (*preparedChatRequest, error) {
+	if err := NormalizeVisionRequest(&req); err != nil {
+		return nil, err
+	}
+	if err := NormalizeGenerationLimits(&req); err != nil {
+		return nil, err
+	}
 	if strings.TrimSpace(req.Model) == "" {
 		return nil, errors.New("model is required")
 	}
@@ -541,9 +887,19 @@ func (s *service) prepareChatRequest(userID int, req ChatCompletionRequest) (*pr
 	}
 
 	requestedModel := strings.TrimSpace(req.Model)
-	selectedModel, err := s.resolveRequestedModel(requestedModel)
+	if s.ownerUsage != nil && req.InstanceID != nil && *req.InstanceID > 0 {
+		s.ownerUsage.QueueBinding(uint64(*req.InstanceID))
+	}
+	var selectedModel *models.LLMModel
+	var err error
+	if !isAutoModelRequest(requestedModel) {
+		selectedModel, err = s.resolveRequestedModel(requestedModel)
+	}
 	if err != nil {
 		return nil, err
+	}
+	if !modelAllowedForGatewayKey(selectedModel, req.AllowedModelGroups) {
+		return nil, errors.New("gateway key is not allowed to access the requested model group")
 	}
 
 	prepared := &preparedChatRequest{
@@ -576,6 +932,7 @@ func (s *service) prepareChatRequest(userID int, req ChatCompletionRequest) (*pr
 			RequestID:    prepared.requestIDPtr,
 			UserID:       prepared.userIDPtr,
 			InstanceID:   req.InstanceID,
+			GatewayKeyID: req.GatewayKeyID,
 			InstanceMode: runtimeAttributionString(req.InstanceMode),
 			RuntimeType:  runtimeAttributionString(req.RuntimeType),
 			GatewayID:    runtimeAttributionString(req.GatewayID),
@@ -611,6 +968,7 @@ func (s *service) prepareChatRequest(userID int, req ChatCompletionRequest) (*pr
 		RequestID:    prepared.requestIDPtr,
 		UserID:       prepared.userIDPtr,
 		InstanceID:   prepared.req.InstanceID,
+		GatewayKeyID: prepared.req.GatewayKeyID,
 		InstanceMode: runtimeAttributionString(prepared.req.InstanceMode),
 		RuntimeType:  runtimeAttributionString(prepared.req.RuntimeType),
 		GatewayID:    runtimeAttributionString(prepared.req.GatewayID),
@@ -631,6 +989,7 @@ func (s *service) prepareChatRequest(userID int, req ChatCompletionRequest) (*pr
 			RequestID:    prepared.requestIDPtr,
 			UserID:       prepared.userIDPtr,
 			InstanceID:   prepared.req.InstanceID,
+			GatewayKeyID: prepared.req.GatewayKeyID,
 			InstanceMode: runtimeAttributionString(prepared.req.InstanceMode),
 			RuntimeType:  runtimeAttributionString(prepared.req.RuntimeType),
 			GatewayID:    runtimeAttributionString(prepared.req.GatewayID),
@@ -644,7 +1003,46 @@ func (s *service) prepareChatRequest(userID int, req ChatCompletionRequest) (*pr
 		}
 	}
 
-	resolvedModel, riskAction, resolveErr := s.resolveTargetModel(prepared.selectedModel, riskAnalysis)
+	var resolvedModel *models.LLMModel
+	var resolveErr error
+	riskAction := models.RiskActionAllow
+	var routing *routingDecision
+	if isAutoModelRequest(requestedModel) {
+		if riskAnalysis.IsSensitive && (riskAnalysis.HighestAction == "require_approval" || riskAnalysis.HighestAction == models.RiskActionBlock) {
+			resolveErr = errors.New("request was blocked by risk policy")
+			d := classifyRoutingDifficulty(req.Messages)
+			d.SecureRequired = true
+			d.PromptTokens, d.OutputTokens = routingTokenEstimate(req)
+			routing = &d
+		} else {
+			secureRequired := riskAnalysis.IsSensitive && riskAnalysis.HighestAction == models.RiskActionRouteSecureModel
+			resolvedModel, routing, resolveErr = s.selectContentModel(ctx, prepared.req, secureRequired)
+			if secureRequired {
+				riskAction = models.RiskActionRouteSecureModel
+			}
+		}
+		if resolveErr != nil {
+			riskAction = models.RiskActionBlock
+			if routing != nil {
+				routing.FailureReason = resolveErr.Error()
+				s.recordRoutingDecision(prepared, routing)
+			}
+		}
+	} else {
+		resolvedModel, riskAction, resolveErr = s.resolveTargetModelForRequest(prepared.selectedModel, riskAnalysis, req)
+		if resolveErr == nil && requestRequiresVision(req) && (!models.LLMVisionSupported(prepared.selectedModel) || !models.LLMVisionSupported(resolvedModel)) {
+			resolveErr = models.ErrVisionNotSupported
+		}
+		if resolveErr == nil && !modelTransportSupported(resolvedModel, req) {
+			resolveErr = errors.New("provider protocol or completion count is not supported")
+			if requestRequiresVision(req) {
+				resolveErr = invalidImage("selected protocol cannot preserve this image role or detail option")
+			}
+		}
+		if resolveErr == nil && req.BudgetController != nil && routingCurrency(resolvedModel) != services.GatewayBudgetCurrency {
+			resolveErr = services.ErrGatewayBudgetCurrencyMismatch
+		}
+	}
 	if resolveErr != nil {
 		blockedInvocationID := s.recordBlockedInvocation(prepared.traceID, prepared.requestID, prepared.req, prepared.userID, prepared.selectedModel, resolveErr.Error())
 		if err := s.riskHitService.RecordHits(prepared.traceID, prepared.req.SessionID, prepared.requestIDPtr, prepared.userIDPtr, prepared.req.InstanceID, blockedInvocationID, riskHitAttribution(prepared.req), riskAction, riskAnalysis.Hits); err != nil {
@@ -656,6 +1054,7 @@ func (s *service) prepareChatRequest(userID int, req ChatCompletionRequest) (*pr
 			RequestID:    prepared.requestIDPtr,
 			UserID:       prepared.userIDPtr,
 			InstanceID:   prepared.req.InstanceID,
+			GatewayKeyID: prepared.req.GatewayKeyID,
 			InstanceMode: runtimeAttributionString(prepared.req.InstanceMode),
 			RuntimeType:  runtimeAttributionString(prepared.req.RuntimeType),
 			GatewayID:    runtimeAttributionString(prepared.req.GatewayID),
@@ -675,13 +1074,14 @@ func (s *service) prepareChatRequest(userID int, req ChatCompletionRequest) (*pr
 		if err := s.riskHitService.RecordHits(prepared.traceID, prepared.req.SessionID, prepared.requestIDPtr, prepared.userIDPtr, prepared.req.InstanceID, nil, riskHitAttribution(prepared.req), riskAction, riskAnalysis.Hits); err != nil {
 			logPersistenceError("record risk hits", prepared.traceID, err)
 		}
-		if riskAction == models.RiskActionRouteSecureModel && resolvedModel != nil && resolvedModel.ID != prepared.selectedModel.ID {
+		if riskAction == models.RiskActionRouteSecureModel && resolvedModel != nil && prepared.selectedModel != nil && resolvedModel.ID != prepared.selectedModel.ID {
 			if err := s.auditEventService.RecordEvent(&models.AuditEvent{
 				TraceID:      prepared.traceID,
 				SessionID:    prepared.req.SessionID,
 				RequestID:    prepared.requestIDPtr,
 				UserID:       prepared.userIDPtr,
 				InstanceID:   prepared.req.InstanceID,
+				GatewayKeyID: prepared.req.GatewayKeyID,
 				InstanceMode: runtimeAttributionString(prepared.req.InstanceMode),
 				RuntimeType:  runtimeAttributionString(prepared.req.RuntimeType),
 				GatewayID:    runtimeAttributionString(prepared.req.GatewayID),
@@ -697,6 +1097,72 @@ func (s *service) prepareChatRequest(userID int, req ChatCompletionRequest) (*pr
 	}
 
 	prepared.resolvedModel = resolvedModel
+	prepared.deploymentCandidates = s.deploymentCandidates(resolvedModel)
+	// Explicit routes must obey the same transport/currency constraints during failover.
+	usable := make([]*models.LLMModel, 0, len(prepared.deploymentCandidates))
+	for _, candidate := range prepared.deploymentCandidates {
+		if modelTransportSupported(candidate, req) && (!requestRequiresVision(req) || models.LLMVisionSupported(candidate)) && (req.BudgetController == nil || routingCurrency(candidate) == services.GatewayBudgetCurrency) {
+			usable = append(usable, candidate)
+		}
+	}
+	prepared.deploymentCandidates = usable
+	if routing != nil {
+		filtered := make([]*models.LLMModel, 0, len(prepared.deploymentCandidates))
+		for _, candidate := range prepared.deploymentCandidates {
+			if routingCandidateAllowed(candidate, prepared.req, *routing) {
+				filtered = append(filtered, candidate)
+			}
+		}
+		prepared.deploymentCandidates = prioritizeSelectedDeployment(filtered, resolvedModel)
+	}
+	if strings.EqualFold(strings.TrimSpace(requestedModel), strings.TrimSpace(resolvedModel.DisplayName)) {
+		prepared.deploymentCandidates = prioritizeSelectedDeployment(prepared.deploymentCandidates, resolvedModel)
+	}
+	if isAutoModelRequest(requestedModel) {
+		prepared.deploymentCandidates = s.orderAutoDeploymentGroups(ctx, prepared, routing, prepared.deploymentCandidates)
+		if len(prepared.deploymentCandidates) == 0 {
+			if routing != nil {
+				routing.FailureReason = services.ErrGatewayDeploymentUnavailable.Error()
+				s.recordRoutingDecision(prepared, routing)
+			}
+			return prepared, services.ErrGatewayDeploymentUnavailable
+		}
+		if len(prepared.deploymentCandidates) > 0 {
+			prepared.resolvedModel = prepared.deploymentCandidates[0]
+			resolvedModel = prepared.resolvedModel
+			if routing != nil {
+				contentSelectedGroup := routing.ModelGroup
+				routing.ModelID = resolvedModel.ID
+				routing.ModelGroup = routingModelGroup(resolvedModel)
+				routing.SelectedTier = effectiveQualityTier(resolvedModel)
+				routing.EstimatedCost = calculateEstimatedCost(resolvedModel, routing.PromptTokens, routing.OutputTokens)
+				routing.Currency = routingCurrency(resolvedModel)
+				if !strings.EqualFold(strings.TrimSpace(contentSelectedGroup), strings.TrimSpace(routing.ModelGroup)) {
+					routing.Warnings = append(routing.Warnings, "primary_group_unavailable_health_fallback")
+				}
+			}
+		}
+	}
+	if routing != nil {
+		s.recordRoutingDecision(prepared, routing)
+	}
+	if prepared.req.BudgetController != nil {
+		estimatedCost := estimateGatewayBudgetCost(prepared.req, prepared.deploymentCandidates)
+		if err := prepared.req.BudgetController.Reserve(ctx, estimatedCost, routingCurrency(resolvedModel)); err != nil {
+			reason := err.Error()
+			blockedInvocationID := s.recordBlockedInvocation(prepared.traceID, prepared.requestID, prepared.req, prepared.userID, prepared.resolvedModel, reason)
+			if auditErr := s.auditEventService.RecordEvent(&models.AuditEvent{
+				TraceID: prepared.traceID, SessionID: prepared.sessionIDPtr, RequestID: prepared.requestIDPtr,
+				UserID: prepared.userIDPtr, InstanceID: prepared.req.InstanceID, GatewayKeyID: prepared.req.GatewayKeyID,
+				InstanceMode: runtimeAttributionString(prepared.req.InstanceMode), RuntimeType: runtimeAttributionString(prepared.req.RuntimeType), GatewayID: runtimeAttributionString(prepared.req.GatewayID), RuntimePodID: runtimeAttributionInt64(prepared.req.RuntimePodID),
+				InvocationID: blockedInvocationID, EventType: "gateway.budget.exceeded", TrafficClass: models.TrafficClassLLM,
+				Severity: models.AuditSeverityWarn, Message: reason,
+			}); auditErr != nil {
+				logPersistenceError("record gateway.budget.exceeded", prepared.traceID, auditErr)
+			}
+			return prepared, err
+		}
+	}
 	return prepared, nil
 }
 
@@ -717,16 +1183,17 @@ func (s *service) callOpenAICompatible(ctx context.Context, prepared *preparedCh
 	}
 
 	startedAt := time.Now()
+	prepared.attemptDispatched = true
 	response, err := s.httpClient.Do(httpRequest)
 	if err != nil {
-		s.recordFailure(prepared.traceID, prepared.requestID, prepared.req, userIDOrZero(prepared.userIDPtr), prepared.resolvedModel, startedAt, fmt.Sprintf("provider call failed: %v", err), providerRequestBody)
+		s.recordFailure(prepared.traceID, prepared.requestID, prepared.req, userIDOrZero(prepared.userIDPtr), prepared.resolvedModel, startedAt, fmt.Sprintf("provider call failed: %v", err), providerRequestBody, prepared.attemptNumber, prepared.attemptPromptTokens, prepared.attemptCompletionTokens)
 		return nil, prepared.traceID, fmt.Errorf("failed to call provider: %w", err)
 	}
 	defer response.Body.Close()
 
 	responseBody, readErr := io.ReadAll(response.Body)
 	if readErr != nil {
-		s.recordFailure(prepared.traceID, prepared.requestID, prepared.req, userIDOrZero(prepared.userIDPtr), prepared.resolvedModel, startedAt, fmt.Sprintf("failed to read provider response: %v", readErr), providerRequestBody)
+		s.recordFailure(prepared.traceID, prepared.requestID, prepared.req, userIDOrZero(prepared.userIDPtr), prepared.resolvedModel, startedAt, fmt.Sprintf("failed to read provider response: %v", readErr), providerRequestBody, prepared.attemptNumber, prepared.attemptPromptTokens, prepared.attemptCompletionTokens)
 		return nil, prepared.traceID, fmt.Errorf("failed to read provider response: %w", readErr)
 	}
 
@@ -741,7 +1208,7 @@ func (s *service) callOpenAICompatible(ctx context.Context, prepared *preparedCh
 		if message == "" {
 			message = response.Status
 		}
-		s.recordFailure(prepared.traceID, prepared.requestID, prepared.req, userIDOrZero(prepared.userIDPtr), prepared.resolvedModel, startedAt, "provider returned non-success status: "+message, providerRequestBody)
+		s.recordFailure(prepared.traceID, prepared.requestID, prepared.req, userIDOrZero(prepared.userIDPtr), prepared.resolvedModel, startedAt, "provider returned non-success status: "+message, providerRequestBody, prepared.attemptNumber, prepared.attemptPromptTokens, prepared.attemptCompletionTokens)
 		return proxyResponse, prepared.traceID, nil
 	}
 
@@ -773,16 +1240,17 @@ func (s *service) callAnthropic(ctx context.Context, prepared *preparedChatReque
 	}
 
 	startedAt := time.Now()
+	prepared.attemptDispatched = true
 	response, err := s.httpClient.Do(httpRequest)
 	if err != nil {
-		s.recordFailure(prepared.traceID, prepared.requestID, prepared.req, userIDOrZero(prepared.userIDPtr), prepared.resolvedModel, startedAt, fmt.Sprintf("provider call failed: %v", err), providerRequestBody)
+		s.recordFailure(prepared.traceID, prepared.requestID, prepared.req, userIDOrZero(prepared.userIDPtr), prepared.resolvedModel, startedAt, fmt.Sprintf("provider call failed: %v", err), providerRequestBody, prepared.attemptNumber, prepared.attemptPromptTokens, prepared.attemptCompletionTokens)
 		return nil, prepared.traceID, fmt.Errorf("failed to call provider: %w", err)
 	}
 	defer response.Body.Close()
 
 	responseBody, readErr := io.ReadAll(response.Body)
 	if readErr != nil {
-		s.recordFailure(prepared.traceID, prepared.requestID, prepared.req, userIDOrZero(prepared.userIDPtr), prepared.resolvedModel, startedAt, fmt.Sprintf("failed to read provider response: %v", readErr), providerRequestBody)
+		s.recordFailure(prepared.traceID, prepared.requestID, prepared.req, userIDOrZero(prepared.userIDPtr), prepared.resolvedModel, startedAt, fmt.Sprintf("failed to read provider response: %v", readErr), providerRequestBody, prepared.attemptNumber, prepared.attemptPromptTokens, prepared.attemptCompletionTokens)
 		return nil, prepared.traceID, fmt.Errorf("failed to read provider response: %w", readErr)
 	}
 
@@ -797,7 +1265,7 @@ func (s *service) callAnthropic(ctx context.Context, prepared *preparedChatReque
 		if message == "" {
 			message = response.Status
 		}
-		s.recordFailure(prepared.traceID, prepared.requestID, prepared.req, userIDOrZero(prepared.userIDPtr), prepared.resolvedModel, startedAt, "provider returned non-success status: "+message, providerRequestBody)
+		s.recordFailure(prepared.traceID, prepared.requestID, prepared.req, userIDOrZero(prepared.userIDPtr), prepared.resolvedModel, startedAt, "provider returned non-success status: "+message, providerRequestBody, prepared.attemptNumber, prepared.attemptPromptTokens, prepared.attemptCompletionTokens)
 		return proxyResponse, prepared.traceID, nil
 	}
 
@@ -819,10 +1287,22 @@ func (s *service) callAnthropic(ctx context.Context, prepared *preparedChatReque
 	return proxyResponse, prepared.traceID, nil
 }
 
-func (s *service) recordFailure(traceID, requestID string, req ChatCompletionRequest, userID int, model *models.LLMModel, startedAt time.Time, failure string, providerRequestBody []byte) {
+func (s *service) recordFailure(traceID, requestID string, req ChatCompletionRequest, userID int, model *models.LLMModel, startedAt time.Time, failure string, providerRequestBody []byte, attemptNumbers ...int) {
 	completedAt := time.Now()
 	latencyMs := int(time.Since(startedAt).Milliseconds())
-	requestPayload := string(providerRequestBody)
+	attemptNo := 1
+	if len(attemptNumbers) > 0 && attemptNumbers[0] > 0 {
+		attemptNo = attemptNumbers[0]
+	}
+	promptTokens := 0
+	completionTokens := 0
+	if len(attemptNumbers) > 1 && attemptNumbers[1] > 0 {
+		promptTokens = attemptNumbers[1]
+	}
+	if len(attemptNumbers) > 2 && attemptNumbers[2] > 0 {
+		completionTokens = attemptNumbers[2]
+	}
+	requestPayload := visionSafePayload(providerRequestBody)
 	if strings.TrimSpace(requestPayload) == "" {
 		requestPayload = rawOrJSONRequestPayload(req)
 	}
@@ -837,6 +1317,7 @@ func (s *service) recordFailure(traceID, requestID string, req ChatCompletionReq
 		RuntimeType:         runtimeAttributionString(req.RuntimeType),
 		GatewayID:           runtimeAttributionString(req.GatewayID),
 		RuntimePodID:        runtimeAttributionInt64(req.RuntimePodID),
+		GatewayKeyID:        req.GatewayKeyID,
 		ModelID:             intPtr(model.ID),
 		ProviderType:        model.ProviderType,
 		RequestedModel:      req.Model,
@@ -844,7 +1325,11 @@ func (s *service) recordFailure(traceID, requestID string, req ChatCompletionReq
 		TrafficClass:        models.TrafficClassLLM,
 		RequestPayload:      &requestPayload,
 		ResponsePayload:     &responsePayload,
+		PromptTokens:        promptTokens,
+		CompletionTokens:    completionTokens,
+		TotalTokens:         promptTokens + completionTokens,
 		LatencyMs:           &latencyMs,
+		AttemptNo:           attemptNo,
 		IsStreaming:         req.Stream,
 		Status:              models.ModelInvocationStatusFailed,
 		ErrorMessage:        stringPtr(failure),
@@ -865,6 +1350,7 @@ func (s *service) recordFailure(traceID, requestID string, req ChatCompletionReq
 		RuntimeType:  runtimeAttributionString(req.RuntimeType),
 		GatewayID:    runtimeAttributionString(req.GatewayID),
 		RuntimePodID: runtimeAttributionInt64(req.RuntimePodID),
+		GatewayKeyID: req.GatewayKeyID,
 		InvocationID: intPtr(invocation.ID),
 		EventType:    "gateway.request.failed",
 		TrafficClass: models.TrafficClassLLM,
@@ -878,11 +1364,44 @@ func (s *service) recordFailure(traceID, requestID string, req ChatCompletionReq
 
 func (s *service) recordSuccess(prepared *preparedChatRequest, providerRequestBody []byte, responsePayload, assistantContent string, promptTokens, completionTokens, totalTokens, latencyMs int, isStreaming bool) {
 	completedAt := time.Now()
-	requestPayload := string(providerRequestBody)
+	requestPayload := visionSafePayload(providerRequestBody)
 	if strings.TrimSpace(requestPayload) == "" {
 		requestPayload = rawOrJSONRequestPayload(prepared.req)
 	}
-	promptTokens, completionTokens, totalTokens, usageEstimated := resolveUsage(prepared.req.Messages, assistantContent, promptTokens, completionTokens, totalTokens)
+	promptTokens, completionTokens, totalTokens, usageEstimated := resolveRequestUsage(prepared.req, assistantContent, promptTokens, completionTokens, totalTokens)
+	prepared.attemptPromptTokens = promptTokens
+	prepared.attemptCompletionTokens = completionTokens
+	if prepared.attemptNumber <= 0 {
+		prepared.attemptNumber = 1
+	}
+	prepared.attemptSucceeded = true
+	if isStreaming && prepared.attemptGenerationMs <= 0 {
+		prepared.attemptGenerationMs = latencyMs
+		if prepared.attemptTTFTMs > 0 && latencyMs > prepared.attemptTTFTMs {
+			prepared.attemptGenerationMs = latencyMs - prepared.attemptTTFTMs
+		}
+	}
+	if isStreaming && completionTokens > 0 && prepared.attemptGenerationMs > 0 {
+		prepared.attemptTokensPerSecond = float64(completionTokens) / (float64(prepared.attemptGenerationMs) / 1000.0)
+	}
+	var ttftMs *int
+	if prepared.attemptTTFTMs > 0 {
+		ttftMs = intPtr(prepared.attemptTTFTMs)
+	}
+	var generationMs *int
+	if prepared.attemptGenerationMs > 0 {
+		generationMs = intPtr(prepared.attemptGenerationMs)
+	}
+	var tokensPerSecond *float64
+	if prepared.attemptTokensPerSecond > 0 {
+		value := prepared.attemptTokensPerSecond
+		tokensPerSecond = &value
+	}
+	if prepared.req.UsageFinalizer != nil {
+		if err := prepared.req.UsageFinalizer(prepared.priorAttemptTokens + totalTokens); err != nil {
+			logPersistenceError("finalize gateway key token usage", prepared.traceID, err)
+		}
+	}
 	invocation := &models.ModelInvocation{
 		TraceID:             prepared.traceID,
 		SessionID:           prepared.sessionIDPtr,
@@ -893,6 +1412,7 @@ func (s *service) recordSuccess(prepared *preparedChatRequest, providerRequestBo
 		RuntimeType:         runtimeAttributionString(prepared.req.RuntimeType),
 		GatewayID:           runtimeAttributionString(prepared.req.GatewayID),
 		RuntimePodID:        runtimeAttributionInt64(prepared.req.RuntimePodID),
+		GatewayKeyID:        prepared.req.GatewayKeyID,
 		ModelID:             intPtr(prepared.resolvedModel.ID),
 		ProviderType:        prepared.resolvedModel.ProviderType,
 		RequestedModel:      prepared.req.Model,
@@ -904,6 +1424,10 @@ func (s *service) recordSuccess(prepared *preparedChatRequest, providerRequestBo
 		CompletionTokens:    completionTokens,
 		TotalTokens:         totalTokens,
 		LatencyMs:           &latencyMs,
+		TTFTMs:              ttftMs,
+		GenerationMs:        generationMs,
+		TokensPerSecond:     tokensPerSecond,
+		AttemptNo:           prepared.attemptNumber,
 		IsStreaming:         isStreaming,
 		Status:              models.ModelInvocationStatusCompleted,
 		CompletedAt:         &completedAt,
@@ -930,6 +1454,14 @@ func (s *service) recordSuccess(prepared *preparedChatRequest, providerRequestBo
 	}
 
 	estimatedCost := calculateEstimatedCost(prepared.resolvedModel, promptTokens, completionTokens)
+	settledCost := prepared.priorAttemptCost + estimatedCost
+	if prepared.req.BudgetController != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		if err := prepared.req.BudgetController.Finalize(ctx, settledCost, routingCurrency(prepared.resolvedModel)); err != nil {
+			logPersistenceError("finalize gateway key budget", prepared.traceID, err)
+		}
+		cancel()
+	}
 	internalCost := 0.0
 	if prepared.resolvedModel.IsSecure {
 		internalCost = estimatedCost
@@ -944,6 +1476,7 @@ func (s *service) recordSuccess(prepared *preparedChatRequest, providerRequestBo
 		RuntimeType:      runtimeAttributionString(prepared.req.RuntimeType),
 		GatewayID:        runtimeAttributionString(prepared.req.GatewayID),
 		RuntimePodID:     runtimeAttributionInt64(prepared.req.RuntimePodID),
+		GatewayKeyID:     prepared.req.GatewayKeyID,
 		InvocationID:     intPtr(invocation.ID),
 		ModelID:          intPtr(prepared.resolvedModel.ID),
 		ProviderType:     prepared.resolvedModel.ProviderType,
@@ -970,6 +1503,7 @@ func (s *service) recordSuccess(prepared *preparedChatRequest, providerRequestBo
 		RuntimeType:  runtimeAttributionString(prepared.req.RuntimeType),
 		GatewayID:    runtimeAttributionString(prepared.req.GatewayID),
 		RuntimePodID: runtimeAttributionInt64(prepared.req.RuntimePodID),
+		GatewayKeyID: prepared.req.GatewayKeyID,
 		InvocationID: intPtr(invocation.ID),
 		EventType:    "gateway.request.completed",
 		TrafficClass: models.TrafficClassLLM,
@@ -989,6 +1523,7 @@ func (s *service) recordSuccess(prepared *preparedChatRequest, providerRequestBo
 			RuntimeType:  runtimeAttributionString(prepared.req.RuntimeType),
 			GatewayID:    runtimeAttributionString(prepared.req.GatewayID),
 			RuntimePodID: runtimeAttributionInt64(prepared.req.RuntimePodID),
+			GatewayKeyID: prepared.req.GatewayKeyID,
 			InvocationID: intPtr(invocation.ID),
 			EventType:    "gateway.usage.estimated",
 			TrafficClass: models.TrafficClassLLM,
@@ -1000,7 +1535,21 @@ func (s *service) recordSuccess(prepared *preparedChatRequest, providerRequestBo
 	}
 }
 
-func (s *service) streamOpenAICompatible(ctx context.Context, prepared *preparedChatRequest, w http.ResponseWriter) error {
+func setPartialAttemptUsage(prepared *preparedChatRequest, assistantContent string, promptTokens, completionTokens int) {
+	if prepared == nil {
+		return
+	}
+	if promptTokens <= 0 {
+		promptTokens, _ = routingTokenEstimate(prepared.req)
+	}
+	if completionTokens <= 0 && strings.TrimSpace(assistantContent) != "" {
+		completionTokens = estimateGatewayInputTokens(assistantContent)
+	}
+	prepared.attemptPromptTokens = promptTokens
+	prepared.attemptCompletionTokens = completionTokens
+}
+
+func (s *service) streamOpenAICompatible(ctx context.Context, prepared *preparedChatRequest, w http.ResponseWriter, deferRetryableResponse bool) error {
 	resolvedAPIKey, err := s.secretRefService.ResolveString(ctx, prepared.resolvedModel.APIKey, prepared.resolvedModel.APIKeySecretRef)
 	if err != nil {
 		return err
@@ -1017,39 +1566,55 @@ func (s *service) streamOpenAICompatible(ctx context.Context, prepared *prepared
 	}
 
 	startedAt := time.Now()
+	prepared.attemptDispatched = true
 	response, err := s.streamHTTPClient.Do(httpRequest)
 	if err != nil {
-		s.recordFailure(prepared.traceID, prepared.requestID, prepared.req, userIDOrZero(prepared.userIDPtr), prepared.resolvedModel, startedAt, fmt.Sprintf("provider call failed: %v", err), providerRequestBody)
+		s.recordFailure(prepared.traceID, prepared.requestID, prepared.req, userIDOrZero(prepared.userIDPtr), prepared.resolvedModel, startedAt, fmt.Sprintf("provider call failed: %v", err), providerRequestBody, prepared.attemptNumber, prepared.attemptPromptTokens, prepared.attemptCompletionTokens)
 		return fmt.Errorf("failed to call provider: %w", err)
 	}
 	defer response.Body.Close()
+	prepared.attemptStatusCode = response.StatusCode
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		return errors.New("streaming response writer is not supported")
 	}
 
-	copyProxyHeaders(w.Header(), response.Header)
-	w.Header().Set("X-Trace-ID", prepared.traceID)
-	w.WriteHeader(response.StatusCode)
-	flusher.Flush()
-
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		responseBody, _ := io.ReadAll(response.Body)
-		if len(responseBody) > 0 {
-			_, _ = w.Write(responseBody)
-			flusher.Flush()
-		}
+		prepared.attemptFailureResponse = &ProxyResponse{StatusCode: response.StatusCode, Body: responseBody}
 		message := strings.TrimSpace(string(responseBody))
 		if message == "" {
 			message = response.Status
 		}
-		s.recordFailure(prepared.traceID, prepared.requestID, prepared.req, userIDOrZero(prepared.userIDPtr), prepared.resolvedModel, startedAt, "provider returned non-success status: "+message, providerRequestBody)
+		s.recordFailure(prepared.traceID, prepared.requestID, prepared.req, userIDOrZero(prepared.userIDPtr), prepared.resolvedModel, startedAt, "provider returned non-success status: "+message, providerRequestBody, prepared.attemptNumber, prepared.attemptPromptTokens, prepared.attemptCompletionTokens)
+		if deferRetryableResponse && isRetryableProviderResponse(prepared.attemptFailureResponse) {
+			return &retryableStreamResponseError{StatusCode: response.StatusCode, Message: message}
+		}
+		copyProxyHeaders(w.Header(), response.Header)
+		setGatewayModelHeaders(w.Header(), prepared)
+		w.Header().Set("X-Trace-ID", prepared.traceID)
+		w.WriteHeader(response.StatusCode)
+		if len(responseBody) > 0 {
+			_, _ = w.Write(responseBody)
+		}
+		flusher.Flush()
 		return nil
 	}
 
-	result, streamErr := proxyOpenAIStream(response.Body, w, flusher)
+	copyProxyHeaders(w.Header(), response.Header)
+	setGatewayModelHeaders(w.Header(), prepared)
+	w.Header().Set("X-Trace-ID", prepared.traceID)
+	// Do not commit the downstream 200 response until the first upstream stream
+	// event is available. This preserves same-group failover when a provider
+	// accepts a request but closes the body before producing any event.
+
+	result, streamErr := proxyOpenAIStream(response.Body, w, flusher, deferRetryableResponse)
+	if !result.FirstTokenAt.IsZero() {
+		prepared.attemptTTFTMs = int(result.FirstTokenAt.Sub(startedAt).Milliseconds())
+	}
 	if streamErr != nil {
+		setPartialAttemptUsage(prepared, result.AssistantText, result.PromptTokens, result.CompletionTokens)
 		s.recordFailure(
 			prepared.traceID,
 			prepared.requestID,
@@ -1059,12 +1624,16 @@ func (s *service) streamOpenAICompatible(ctx context.Context, prepared *prepared
 			startedAt,
 			streamErr.Error(),
 			providerRequestBody,
+			prepared.attemptNumber,
+			prepared.attemptPromptTokens,
+			prepared.attemptCompletionTokens,
 		)
 		var providerErr *upstreamStreamProviderError
 		var readErr *upstreamStreamReadError
 		if errors.As(streamErr, &readErr) &&
 			!errors.As(streamErr, &providerErr) &&
-			ctx.Err() == nil {
+			ctx.Err() == nil &&
+			(!deferRetryableResponse || !result.FirstTokenAt.IsZero()) {
 			if emitErr := emitOpenAIStreamError(w, flusher, prepared.traceID, streamErr); emitErr != nil {
 				return errors.Join(streamErr, emitErr)
 			}
@@ -1090,7 +1659,7 @@ func (s *service) streamOpenAICompatible(ctx context.Context, prepared *prepared
 	return nil
 }
 
-func (s *service) streamAnthropic(ctx context.Context, prepared *preparedChatRequest, w http.ResponseWriter) error {
+func (s *service) streamAnthropic(ctx context.Context, prepared *preparedChatRequest, w http.ResponseWriter, deferRetryableResponse bool) error {
 	resolvedAPIKey, err := s.secretRefService.ResolveString(ctx, prepared.resolvedModel.APIKey, prepared.resolvedModel.APIKeySecretRef)
 	if err != nil {
 		return err
@@ -1107,46 +1676,68 @@ func (s *service) streamAnthropic(ctx context.Context, prepared *preparedChatReq
 	}
 
 	startedAt := time.Now()
+	prepared.attemptDispatched = true
 	response, err := s.streamHTTPClient.Do(httpRequest)
 	if err != nil {
-		s.recordFailure(prepared.traceID, prepared.requestID, prepared.req, userIDOrZero(prepared.userIDPtr), prepared.resolvedModel, startedAt, fmt.Sprintf("provider call failed: %v", err), providerRequestBody)
+		s.recordFailure(prepared.traceID, prepared.requestID, prepared.req, userIDOrZero(prepared.userIDPtr), prepared.resolvedModel, startedAt, fmt.Sprintf("provider call failed: %v", err), providerRequestBody, prepared.attemptNumber, prepared.attemptPromptTokens, prepared.attemptCompletionTokens)
 		return fmt.Errorf("failed to call provider: %w", err)
 	}
 	defer response.Body.Close()
+	prepared.attemptStatusCode = response.StatusCode
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		return errors.New("streaming response writer is not supported")
 	}
 
-	copyProxyHeaders(w.Header(), response.Header)
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("X-Trace-ID", prepared.traceID)
-	w.WriteHeader(response.StatusCode)
-	flusher.Flush()
-
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		responseBody, _ := io.ReadAll(response.Body)
-		if len(responseBody) > 0 {
-			_, _ = w.Write(responseBody)
-			flusher.Flush()
-		}
+		prepared.attemptFailureResponse = &ProxyResponse{StatusCode: response.StatusCode, Body: responseBody}
 		message := strings.TrimSpace(string(responseBody))
 		if message == "" {
 			message = response.Status
 		}
-		s.recordFailure(prepared.traceID, prepared.requestID, prepared.req, userIDOrZero(prepared.userIDPtr), prepared.resolvedModel, startedAt, "provider returned non-success status: "+message, providerRequestBody)
+		s.recordFailure(prepared.traceID, prepared.requestID, prepared.req, userIDOrZero(prepared.userIDPtr), prepared.resolvedModel, startedAt, "provider returned non-success status: "+message, providerRequestBody, prepared.attemptNumber, prepared.attemptPromptTokens, prepared.attemptCompletionTokens)
+		if deferRetryableResponse && isRetryableProviderResponse(prepared.attemptFailureResponse) {
+			return &retryableStreamResponseError{StatusCode: response.StatusCode, Message: message}
+		}
+		copyProxyHeaders(w.Header(), response.Header)
+		setGatewayModelHeaders(w.Header(), prepared)
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		w.Header().Set("X-Trace-ID", prepared.traceID)
+		w.WriteHeader(response.StatusCode)
+		if len(responseBody) > 0 {
+			_, _ = w.Write(responseBody)
+		}
+		flusher.Flush()
 		return nil
 	}
+
+	copyProxyHeaders(w.Header(), response.Header)
+	setGatewayModelHeaders(w.Header(), prepared)
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Trace-ID", prepared.traceID)
+	// As above, the first translated event commits the response. An empty or
+	// broken upstream body can still fail over before the client sees headers.
 
 	state := &anthropicStreamState{
 		Created:   time.Now().Unix(),
 		ToolCalls: map[int]*anthropicToolCallState{},
 	}
-	rawStream, streamErr := proxyAnthropicStream(response.Body, w, flusher, state)
+	rawStream, streamErr := proxyAnthropicStream(response.Body, w, flusher, state, deferRetryableResponse)
+	if !state.FirstTokenAt.IsZero() {
+		prepared.attemptTTFTMs = int(state.FirstTokenAt.Sub(startedAt).Milliseconds())
+	}
 	if streamErr != nil {
+		partialContent := state.AssistantText.String()
+		if strings.TrimSpace(partialContent) == "" {
+			partialContent = renderAnthropicToolCalls(state)
+		}
+		setPartialAttemptUsage(prepared, partialContent, state.PromptTokens, state.CompletionTokens)
 		s.recordFailure(
 			prepared.traceID,
 			prepared.requestID,
@@ -1156,8 +1747,11 @@ func (s *service) streamAnthropic(ctx context.Context, prepared *preparedChatReq
 			startedAt,
 			streamErr.Error(),
 			providerRequestBody,
+			prepared.attemptNumber,
+			prepared.attemptPromptTokens,
+			prepared.attemptCompletionTokens,
 		)
-		if ctx.Err() == nil {
+		if ctx.Err() == nil && (!deferRetryableResponse || !state.FirstTokenAt.IsZero()) {
 			if emitErr := emitOpenAIStreamError(w, flusher, prepared.traceID, streamErr); emitErr != nil {
 				return errors.Join(streamErr, emitErr)
 			}
@@ -1188,12 +1782,14 @@ func (s *service) streamAnthropic(ctx context.Context, prepared *preparedChatReq
 	}
 	if err := emitOpenAIStreamPayload(w, flusher, finalChunk); err != nil {
 		streamErr := &downstreamStreamWriteError{err: err}
-		s.recordFailure(prepared.traceID, prepared.requestID, prepared.req, userIDOrZero(prepared.userIDPtr), prepared.resolvedModel, startedAt, streamErr.Error(), providerRequestBody)
+		setPartialAttemptUsage(prepared, state.AssistantText.String(), state.PromptTokens, state.CompletionTokens)
+		s.recordFailure(prepared.traceID, prepared.requestID, prepared.req, userIDOrZero(prepared.userIDPtr), prepared.resolvedModel, startedAt, streamErr.Error(), providerRequestBody, prepared.attemptNumber, prepared.attemptPromptTokens, prepared.attemptCompletionTokens)
 		return streamErr
 	}
 	if err := emitOpenAIStreamDone(w, flusher); err != nil {
 		streamErr := &downstreamStreamWriteError{err: err}
-		s.recordFailure(prepared.traceID, prepared.requestID, prepared.req, userIDOrZero(prepared.userIDPtr), prepared.resolvedModel, startedAt, streamErr.Error(), providerRequestBody)
+		setPartialAttemptUsage(prepared, state.AssistantText.String(), state.PromptTokens, state.CompletionTokens)
+		s.recordFailure(prepared.traceID, prepared.requestID, prepared.req, userIDOrZero(prepared.userIDPtr), prepared.resolvedModel, startedAt, streamErr.Error(), providerRequestBody, prepared.attemptNumber, prepared.attemptPromptTokens, prepared.attemptCompletionTokens)
 		return streamErr
 	}
 
@@ -1208,8 +1804,13 @@ func (s *service) streamAnthropic(ctx context.Context, prepared *preparedChatReq
 	return nil
 }
 
-func proxyAnthropicStream(reader io.Reader, writer io.Writer, flusher http.Flusher, state *anthropicStreamState) (string, error) {
+func proxyAnthropicStream(reader io.Reader, writer io.Writer, flusher http.Flusher, state *anthropicStreamState, deferUntilSemantic ...bool) (string, error) {
 	buffered := bufio.NewReader(reader)
+	var deferred *deferredStreamWriter
+	if len(deferUntilSemantic) > 0 && deferUntilSemantic[0] {
+		deferred = &deferredStreamWriter{writer: writer, flusher: flusher}
+		writer, flusher = deferred, deferred
+	}
 	var rawStream strings.Builder
 	eventType := ""
 	dataLines := make([]string, 0, 2)
@@ -1229,6 +1830,11 @@ func proxyAnthropicStream(reader io.Reader, writer io.Writer, flusher http.Flush
 		}
 		if finished {
 			done = true
+		}
+		if deferred != nil && (!state.FirstTokenAt.IsZero() || finished) {
+			if err := deferred.Commit(); err != nil {
+				return &downstreamStreamWriteError{err: err}
+			}
 		}
 		return nil
 	}
@@ -1266,8 +1872,13 @@ func proxyAnthropicStream(reader io.Reader, writer io.Writer, flusher http.Flush
 	return rawStream.String(), nil
 }
 
-func proxyOpenAIStream(reader io.Reader, writer io.Writer, flusher http.Flusher) (openAIStreamProxyResult, error) {
+func proxyOpenAIStream(reader io.Reader, writer io.Writer, flusher http.Flusher, deferUntilSemantic ...bool) (openAIStreamProxyResult, error) {
 	buffered := bufio.NewReader(reader)
+	var deferred *deferredStreamWriter
+	if len(deferUntilSemantic) > 0 && deferUntilSemantic[0] {
+		deferred = &deferredStreamWriter{writer: writer, flusher: flusher}
+		writer, flusher = deferred, deferred
+	}
 	var rawStream strings.Builder
 	var assistantText strings.Builder
 	promptTokens := 0
@@ -1276,6 +1887,7 @@ func proxyOpenAIStream(reader io.Reader, writer io.Writer, flusher http.Flusher)
 	sawDone := false
 	sawFinishReason := false
 	var pendingProviderError error
+	var firstTokenAt time.Time
 
 	result := func() openAIStreamProxyResult {
 		return openAIStreamProxyResult{
@@ -1287,6 +1899,7 @@ func proxyOpenAIStream(reader io.Reader, writer io.Writer, flusher http.Flusher)
 			SawDone:          sawDone,
 			SawFinishReason:  sawFinishReason,
 			Terminal:         sawDone || sawFinishReason,
+			FirstTokenAt:     firstTokenAt,
 		}
 	}
 
@@ -1302,8 +1915,25 @@ func proxyOpenAIStream(reader io.Reader, writer io.Writer, flusher http.Flusher)
 			)
 			sawDone = sawDone || inspection.Done
 			sawFinishReason = sawFinishReason || inspection.Finished
+			if inspection.Semantic && firstTokenAt.IsZero() {
+				firstTokenAt = time.Now()
+			}
 			rawStream.WriteString(line)
-			if _, err := io.WriteString(writer, line); err != nil {
+			// A few OpenAI-compatible providers emit chain-of-thought deltas as
+			// `delta.reasoning`. OpenCode and other clients generally consume the
+			// standard `delta.reasoning_content` spelling instead. Keep the
+			// provider payload in the audit stream unchanged, but add the standard
+			// alias on the downstream stream so clients can finish their thinking
+			// state and render the final content.
+			downstreamLine := normalizeOpenAIReasoningDelta(line)
+			// Commit BEFORE writing meaningful data: a single legitimate reasoning
+			// chunk may itself exceed the bounded heartbeat/prelude buffer.
+			if deferred != nil && pendingProviderError == nil && inspection.ProviderError == nil && (inspection.Semantic || inspection.Finished || inspection.Done) {
+				if err := deferred.Commit(); err != nil {
+					return result(), &downstreamStreamWriteError{err: err}
+				}
+			}
+			if _, err := io.WriteString(writer, downstreamLine); err != nil {
 				return result(), &downstreamStreamWriteError{err: err}
 			}
 			flusher.Flush()
@@ -1331,6 +1961,64 @@ func proxyOpenAIStream(reader io.Reader, writer io.Writer, flusher http.Flusher)
 			return result(), &upstreamStreamReadError{err: readErr}
 		}
 	}
+}
+
+// normalizeOpenAIReasoningDelta adds the OpenAI-compatible reasoning_content
+// alias to provider chunks that only expose reasoning. Invalid/non-data SSE
+// lines and chunks that already contain reasoning_content are returned byte
+// for byte unchanged.
+func normalizeOpenAIReasoningDelta(line string) string {
+	trimmed := strings.TrimSpace(line)
+	if !strings.HasPrefix(trimmed, "data:") {
+		return line
+	}
+	payload := strings.TrimSpace(strings.TrimPrefix(trimmed, "data:"))
+	if payload == "" || payload == "[DONE]" || !strings.HasPrefix(payload, "{") {
+		return line
+	}
+
+	var envelope map[string]interface{}
+	if err := json.Unmarshal([]byte(payload), &envelope); err != nil {
+		return line
+	}
+	choices, ok := envelope["choices"].([]interface{})
+	if !ok {
+		return line
+	}
+	changed := false
+	for _, rawChoice := range choices {
+		choice, ok := rawChoice.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		delta, ok := choice["delta"].(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if existing := delta["reasoning_content"]; existing != nil && existing != "" {
+			continue
+		}
+		if reasoning, ok := delta["reasoning"].(string); ok && reasoning != "" {
+			delta["reasoning_content"] = reasoning
+			changed = true
+		}
+	}
+	if !changed {
+		return line
+	}
+
+	encoded, err := json.Marshal(envelope)
+	if err != nil {
+		return line
+	}
+	// Preserve the SSE line ending style expected by the caller.
+	ending := ""
+	if strings.HasSuffix(line, "\r\n") {
+		ending = "\r\n"
+	} else if strings.HasSuffix(line, "\n") {
+		ending = "\n"
+	}
+	return "data: " + string(encoded) + ending
 }
 
 func inspectStreamLine(line string, assistantText *strings.Builder, promptTokens, completionTokens, totalTokens *int) openAIStreamInspection {
@@ -1368,16 +2056,28 @@ func inspectStreamLine(line string, assistantText *strings.Builder, promptTokens
 	}
 
 	finished := false
+	semantic := false
 	for _, choice := range chunk.Choices {
 		content := flattenMessageContent(choice.Delta.Content)
 		if content != "" {
 			assistantText.WriteString(content)
+			semantic = true
+		}
+		if len(choice.Delta.ToolCalls) > 0 {
+			semantic = true
+		}
+		// Reasoning is visible progress, not a heartbeat. Do not append it to
+		// AssistantText: that field represents the final answer, not thinking.
+		for _, value := range []interface{}{choice.Delta.ReasoningContent, choice.Delta.Reasoning, choice.Delta.Refusal} {
+			if text, ok := value.(string); ok && text != "" {
+				semantic = true
+			}
 		}
 		if choice.FinishReason != nil && strings.TrimSpace(*choice.FinishReason) != "" {
 			finished = true
 		}
 	}
-	return openAIStreamInspection{Finished: finished}
+	return openAIStreamInspection{Finished: finished, Semantic: semantic}
 }
 
 func buildProviderRequestBody(req ChatCompletionRequest, model *models.LLMModel) ([]byte, error) {
@@ -1438,6 +2138,9 @@ func processAnthropicStreamEvent(payload, eventType string, state *anthropicStre
 				return false, err
 			}
 		case "tool_use":
+			if state.FirstTokenAt.IsZero() {
+				state.FirstTokenAt = time.Now()
+			}
 			toolState := &anthropicToolCallState{
 				ID:   defaultIfBlank(event.ContentBlock.ID, fmt.Sprintf("call_%d", index)),
 				Name: strings.TrimSpace(event.ContentBlock.Name),
@@ -1484,6 +2187,9 @@ func processAnthropicStreamEvent(payload, eventType string, state *anthropicStre
 				return false, nil
 			}
 			state.AssistantText.WriteString(event.Delta.Text)
+			if state.FirstTokenAt.IsZero() {
+				state.FirstTokenAt = time.Now()
+			}
 			chunk := openAIStreamResponseChunk{
 				ID:      defaultIfBlank(state.ResponseID, "chatcmpl-anthropic"),
 				Object:  "chat.completion.chunk",
@@ -1616,6 +2322,9 @@ func conditionalAssistantRole(state *anthropicStreamState) string {
 }
 
 func buildOpenAICompatibleRequestBody(req ChatCompletionRequest, model *models.LLMModel) ([]byte, error) {
+	if err := NormalizeGenerationLimits(&req); err != nil {
+		return nil, err
+	}
 	if model == nil {
 		return nil, errors.New("model is not active or does not exist")
 	}
@@ -1653,6 +2362,14 @@ func buildOpenAICompatibleRequestBody(req ChatCompletionRequest, model *models.L
 		return nil, fmt.Errorf("failed to encode provider model name: %w", err)
 	}
 	payload["model"] = json.RawMessage(modelPayload)
+	limit, _ := json.Marshal(*req.MaxTokens)
+	if req.MaxCompletionTokens != nil {
+		payload["max_completion_tokens"] = limit
+		delete(payload, "max_tokens")
+	} else {
+		payload["max_tokens"] = limit
+		delete(payload, "max_completion_tokens")
+	}
 	if err := applyOpenAICompatibleProviderContract(payload, model, req.ManagedAgentType); err != nil {
 		return nil, err
 	}
@@ -1667,12 +2384,7 @@ func applyOpenAICompatibleProviderContract(payload map[string]json.RawMessage, m
 	if payload == nil || model == nil {
 		return nil
 	}
-	if models.ResolveLLMReasoningControl(
-		model.ProviderType,
-		model.ProtocolType,
-		model.BaseURL,
-		model.ProviderModelName,
-	) == models.ReasoningControlDeepSeekThinking {
+	if models.EffectiveLLMReasoningControl(model) == models.ReasoningControlDeepSeekThinking {
 		// DeepSeek's OpenAI-compatible API accepts max_tokens. OpenClaw uses
 		// max_completion_tokens for an opaque ClawManager proxy because it cannot
 		// see the resolved downstream provider. Normalize only after ClawManager
@@ -1698,6 +2410,20 @@ func openAICompatibleReasoningIntent(payload map[string]json.RawMessage) reasoni
 	if payload == nil {
 		return reasoningRequestIntent{}
 	}
+	if raw, ok := payload["enable_thinking"]; ok {
+		var enabled *bool
+		if json.Unmarshal(raw, &enabled) == nil && enabled != nil {
+			return reasoningRequestIntent{set: true, enabled: *enabled}
+		}
+	}
+	if raw, ok := payload["chat_template_kwargs"]; ok {
+		var options struct {
+			EnableThinking *bool `json:"enable_thinking"`
+		}
+		if json.Unmarshal(raw, &options) == nil && options.EnableThinking != nil {
+			return reasoningRequestIntent{set: true, enabled: *options.EnableThinking}
+		}
+	}
 	if raw, ok := payload["thinking"]; ok {
 		var thinking struct {
 			Type string `json:"type"`
@@ -1706,7 +2432,7 @@ func openAICompatibleReasoningIntent(payload map[string]json.RawMessage) reasoni
 			switch strings.ToLower(strings.TrimSpace(thinking.Type)) {
 			case "disabled", "off", "none":
 				return reasoningRequestIntent{set: true}
-			case "enabled", "on":
+			case "enabled", "on", "adaptive":
 				return reasoningRequestIntent{set: true, enabled: true}
 			}
 		}
@@ -1721,6 +2447,14 @@ func openAICompatibleReasoningIntent(payload map[string]json.RawMessage) reasoni
 			case "minimal", "low", "medium", "high", "xhigh", "max":
 				return reasoningRequestIntent{set: true, enabled: true, effort: effort}
 			}
+		}
+	}
+	if raw, ok := payload["reasoning"]; ok {
+		var reasoning struct {
+			Effort json.RawMessage `json:"effort"`
+		}
+		if json.Unmarshal(raw, &reasoning) == nil && len(reasoning.Effort) > 0 {
+			return openAICompatibleReasoningIntent(map[string]json.RawMessage{"reasoning_effort": reasoning.Effort})
 		}
 	}
 	return reasoningRequestIntent{}
@@ -1745,18 +2479,21 @@ func applyReasoningControl(payload map[string]json.RawMessage, model *models.LLM
 	if payload == nil || model == nil {
 		return nil
 	}
-	control := models.ResolveLLMReasoningControl(
-		model.ProviderType,
-		model.ProtocolType,
-		model.BaseURL,
-		model.ProviderModelName,
-	)
+	control := models.EffectiveLLMReasoningControl(model)
+	if control == models.ReasoningControlThinkingType || control == models.ReasoningControlEnableThinking || control == models.ReasoningControlChatTemplate {
+		return applyConfiguredReasoningControl(payload, model, managedAgentType, control)
+	}
 	switch control {
 	case models.ReasoningControlDeepSeekThinking:
 		// The model setting is the capability ceiling. Managed OpenClaw requests
 		// may further disable thinking for the current session/turn, but may never
 		// enable a model that the administrator disabled.
-		intent := openAICompatibleReasoningIntent(payload)
+		intent := combinedReasoningIntent(payload)
+		// Explicit DeepSeek adapters may receive switches intended for another
+		// provider. Remove those before writing the selected wire contract.
+		if err := clearAlternativeThinkingSwitches(payload); err != nil {
+			return err
+		}
 		enabled := model.ReasoningEnabled
 		if isManagedOpenClawRequest(managedAgentType) {
 			enabled = enabled && intent.set && intent.enabled
@@ -1789,6 +2526,15 @@ func applyReasoningControl(payload map[string]json.RawMessage, model *models.LLM
 }
 
 func buildAnthropicRequestBody(req ChatCompletionRequest, model *models.LLMModel) ([]byte, error) {
+	if err := NormalizeVisionRequest(&req); err != nil {
+		return nil, err
+	}
+	if !visionTransportSupported(models.ProtocolTypeAnthropic, req) {
+		return nil, invalidImage("Anthropic cannot preserve this image role or explicit detail option")
+	}
+	if err := NormalizeGenerationLimits(&req); err != nil {
+		return nil, err
+	}
 	systemPrompt, messages := convertChatMessagesToAnthropic(req.Messages)
 	tools, err := convertToolsToAnthropic(req.Tools)
 	if err != nil {
@@ -1987,6 +2733,9 @@ func convertAssistantMessageToAnthropicBlocks(message ChatMessage) []anthropicCo
 
 func convertToolMessageToAnthropicBlocks(message ChatMessage) []anthropicContentBlock {
 	toolUseID := strings.TrimSpace(message.ToolCallID)
+	if imageCount(message.Content) > 0 {
+		return []anthropicContentBlock{{Type: "tool_result", ToolUseID: toolUseID, Content: convertContentToAnthropicTextBlocks(message.Content)}}
+	}
 	content := strings.TrimSpace(flattenMessageContent(message.Content))
 	if content == "" {
 		content = mustJSONString(message.Content)
@@ -2004,6 +2753,9 @@ func convertToolMessageToAnthropicBlocks(message ChatMessage) []anthropicContent
 }
 
 func convertContentToAnthropicTextBlocks(content interface{}) []anthropicContentBlock {
+	if blocks, ok := visionAnthropicBlocks(content); ok {
+		return blocks
+	}
 	switch value := content.(type) {
 	case nil:
 		return nil
@@ -2301,7 +3053,13 @@ func defaultIfBlank(value, fallback string) string {
 }
 
 func (s *service) recordBlockedInvocation(traceID, requestID string, req ChatCompletionRequest, userID int, model *models.LLMModel, reason string) *int {
-	requestPayload := mustJSONString(req)
+	var modelID *int
+	if model != nil {
+		modelID = intPtr(model.ID)
+	} else {
+		model = &models.LLMModel{}
+	}
+	requestPayload := visionSafePayload([]byte(mustJSONString(req)))
 	responsePayload := reason
 	invocation := &models.ModelInvocation{
 		TraceID:             traceID,
@@ -2313,7 +3071,8 @@ func (s *service) recordBlockedInvocation(traceID, requestID string, req ChatCom
 		RuntimeType:         runtimeAttributionString(req.RuntimeType),
 		GatewayID:           runtimeAttributionString(req.GatewayID),
 		RuntimePodID:        runtimeAttributionInt64(req.RuntimePodID),
-		ModelID:             intPtr(model.ID),
+		GatewayKeyID:        req.GatewayKeyID,
+		ModelID:             modelID,
 		ProviderType:        model.ProviderType,
 		RequestedModel:      req.Model,
 		ActualProviderModel: model.ProviderModelName,
@@ -2330,7 +3089,11 @@ func (s *service) recordBlockedInvocation(traceID, requestID string, req ChatCom
 	return intPtr(invocation.ID)
 }
 
-func (s *service) resolveTargetModel(selectedModel *models.LLMModel, analysis services.RiskAnalysis) (*models.LLMModel, string, error) {
+func (s *service) resolveTargetModel(selectedModel *models.LLMModel, analysis services.RiskAnalysis, allowedGroups ...string) (*models.LLMModel, string, error) {
+	return s.resolveTargetModelForRequest(selectedModel, analysis, ChatCompletionRequest{AllowedModelGroups: allowedGroups})
+}
+
+func (s *service) resolveTargetModelForRequest(selectedModel *models.LLMModel, analysis services.RiskAnalysis, req ChatCompletionRequest) (*models.LLMModel, string, error) {
 	if selectedModel == nil {
 		return nil, models.RiskActionAllow, errors.New("model is not active or does not exist")
 	}
@@ -2340,8 +3103,11 @@ func (s *service) resolveTargetModel(selectedModel *models.LLMModel, analysis se
 	if analysis.HighestAction == "require_approval" || analysis.HighestAction == models.RiskActionBlock {
 		return nil, models.RiskActionBlock, errors.New("request was blocked by risk policy")
 	}
-	if selectedModel.IsSecure {
+	if analysis.HighestAction != models.RiskActionRouteSecureModel {
 		return selectedModel, models.RiskActionAllow, nil
+	}
+	if selectedModel.IsSecure {
+		return selectedModel, models.RiskActionRouteSecureModel, nil
 	}
 
 	activeModels, err := s.listActiveModels()
@@ -2349,7 +3115,7 @@ func (s *service) resolveTargetModel(selectedModel *models.LLMModel, analysis se
 		return nil, models.RiskActionBlock, fmt.Errorf("failed to list active secure models: %w", err)
 	}
 	for _, item := range activeModels {
-		if item.IsSecure {
+		if item.IsSecure && modelAllowedForGatewayKey(&item, req.AllowedModelGroups) && modelTransportSupported(&item, req) && (req.BudgetController == nil || routingCurrency(&item) == services.GatewayBudgetCurrency) {
 			resolved := item
 			return &resolved, models.RiskActionRouteSecureModel, nil
 		}
@@ -2362,6 +3128,18 @@ func (s *service) resolveRequestedModel(requestedModel string) (*models.LLMModel
 		return s.selectAutoModel()
 	}
 	requestedModel = strings.TrimSpace(requestedModel)
+	// Preserve the scoped repository's explicit denial (including its stable
+	// error code) before attempting logical-group aliases.
+	configured, lookupErr := s.modelRepo.GetByDisplayName(requestedModel)
+	if lookupErr != nil {
+		return nil, lookupErr
+	}
+	if configured != nil && configured.IsActive {
+		if !models.LLMChatAvailable(configured) {
+			return nil, models.ErrChatNotSupported
+		}
+		return configured, nil
+	}
 	items, err := s.listActiveModels()
 	if err != nil {
 		return nil, fmt.Errorf("failed to list active models: %w", err)
@@ -2369,16 +3147,22 @@ func (s *service) resolveRequestedModel(requestedModel string) (*models.LLMModel
 	for _, item := range items {
 		if strings.TrimSpace(item.DisplayName) == requestedModel {
 			selected := item
+			if !models.LLMChatAvailable(&selected) {
+				return nil, models.ErrChatNotSupported
+			}
 			return &selected, nil
 		}
 	}
 	for _, item := range items {
 		if strings.EqualFold(strings.TrimSpace(item.DisplayName), requestedModel) {
 			selected := item
+			if !models.LLMChatAvailable(&selected) {
+				return nil, models.ErrChatNotSupported
+			}
 			return &selected, nil
 		}
 	}
-	return nil, errors.New("model is not active or does not exist")
+	return s.selectModelGroup(requestedModel)
 }
 
 func (s *service) selectAutoModel() (*models.LLMModel, error) {
@@ -2386,11 +3170,12 @@ func (s *service) selectAutoModel() (*models.LLMModel, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to list active models: %w", err)
 	}
+	items = models.ChatModels(items)
 	if len(items) == 0 {
 		return nil, errors.New("no active models are configured")
 	}
 
-	for _, item := range items {
+	for _, item := range orderModelDeployments(items) {
 		if !item.IsSecure {
 			selected := item
 			return &selected, nil
@@ -2401,12 +3186,148 @@ func (s *service) selectAutoModel() (*models.LLMModel, error) {
 	return &selected, nil
 }
 
+func (s *service) selectAutoModelFromGroups(allowedGroups []string) (*models.LLMModel, error) {
+	items, err := s.modelRepo.ListActive()
+	if err != nil {
+		return nil, fmt.Errorf("failed to list active models: %w", err)
+	}
+	for _, item := range orderModelDeployments(models.ChatModels(items)) {
+		if !item.IsSecure && modelAllowedForGatewayKey(&item, allowedGroups) {
+			selected := item
+			return &selected, nil
+		}
+	}
+	for _, item := range orderModelDeployments(models.ChatModels(items)) {
+		if modelAllowedForGatewayKey(&item, allowedGroups) {
+			selected := item
+			return &selected, nil
+		}
+	}
+	return nil, errors.New("gateway key has no active allowed model groups")
+}
+
+func modelAllowedForGatewayKey(model *models.LLMModel, allowedGroups []string) bool {
+	if model == nil || len(allowedGroups) == 0 {
+		return true
+	}
+	group := strings.TrimSpace(model.ModelGroup)
+	if group == "" {
+		group = strings.TrimSpace(model.DisplayName)
+	}
+	for _, allowed := range allowedGroups {
+		if strings.EqualFold(group, strings.TrimSpace(allowed)) {
+			return true
+		}
+	}
+	return false
+}
+
+// selectModelGroup resolves a stable logical model name to its preferred
+// active deployment. This is intentionally compatible with legacy display
+// names: an exact display-name match always wins before group lookup.
+func (s *service) selectModelGroup(modelGroup string) (*models.LLMModel, error) {
+	items, err := s.modelRepo.ListActive()
+	if err != nil {
+		return nil, fmt.Errorf("failed to list active models: %w", err)
+	}
+	modelGroup = strings.TrimSpace(modelGroup)
+	for _, item := range orderModelDeployments(models.ChatModels(items)) {
+		if strings.EqualFold(strings.TrimSpace(item.ModelGroup), modelGroup) {
+			selected := item
+			return &selected, nil
+		}
+	}
+	return nil, errors.New("model is not active or does not exist")
+}
+
+func orderModelDeployments(items []models.LLMModel) []models.LLMModel {
+	ordered := append([]models.LLMModel(nil), items...)
+	sort.SliceStable(ordered, func(i, j int) bool {
+		if ordered[i].DeploymentPriority != ordered[j].DeploymentPriority {
+			return ordered[i].DeploymentPriority < ordered[j].DeploymentPriority
+		}
+		return strings.Compare(ordered[i].DisplayName, ordered[j].DisplayName) < 0
+	})
+	return ordered
+}
+
+func (s *service) deploymentCandidates(selected *models.LLMModel) []*models.LLMModel {
+	if !models.LLMChatAvailable(selected) {
+		return nil
+	}
+	items, err := s.modelRepo.ListActive()
+	if err != nil {
+		return []*models.LLMModel{selected}
+	}
+	group := strings.TrimSpace(selected.ModelGroup)
+	if group == "" {
+		group = selected.DisplayName
+	}
+	candidates := make([]*models.LLMModel, 0)
+	for _, item := range orderModelDeployments(items) {
+		itemGroup := strings.TrimSpace(item.ModelGroup)
+		if itemGroup == "" {
+			itemGroup = item.DisplayName
+		}
+		// A secure reroute may only fail over to other secure deployments.
+		if models.LLMChatAvailable(&item) && strings.EqualFold(itemGroup, group) && item.IsSecure == selected.IsSecure {
+			candidate := item
+			candidates = append(candidates, &candidate)
+		}
+	}
+	if len(candidates) == 0 {
+		return []*models.LLMModel{selected}
+	}
+	return candidates
+}
+
+func prioritizeSelectedDeployment(candidates []*models.LLMModel, selected *models.LLMModel) []*models.LLMModel {
+	if selected == nil || len(candidates) < 2 {
+		return candidates
+	}
+	ordered := make([]*models.LLMModel, 0, len(candidates))
+	for _, candidate := range candidates {
+		if candidate != nil && candidate.ID == selected.ID {
+			ordered = append(ordered, candidate)
+			break
+		}
+	}
+	for _, candidate := range candidates {
+		if candidate == nil || candidate.ID == selected.ID {
+			continue
+		}
+		ordered = append(ordered, candidate)
+	}
+	if len(ordered) == 0 {
+		return candidates
+	}
+	return ordered
+}
+
 func isAutoModelRequest(requestedModel string) bool {
 	return strings.EqualFold(strings.TrimSpace(requestedModel), autoModelID)
 }
 
 func calculateEstimatedCost(model *models.LLMModel, promptTokens, completionTokens int) float64 {
 	return (float64(promptTokens) * model.InputPrice / 1_000_000.0) + (float64(completionTokens) * model.OutputPrice / 1_000_000.0)
+}
+
+func estimateGatewayBudgetCost(req ChatCompletionRequest, candidates []*models.LLMModel) float64 {
+	promptTokens, completionTokens := routingTokenEstimate(req)
+	inputCost := 0.0
+	maxOutputCost := 0.0
+	for _, candidate := range candidates {
+		if candidate == nil {
+			continue
+		}
+		// A retry can submit the prompt to every candidate, while a full output
+		// should only be produced by the terminal successful deployment.
+		inputCost += float64(promptTokens) * candidate.InputPrice / 1_000_000.0
+		if cost := float64(completionTokens) * candidate.OutputPrice / 1_000_000.0; cost > maxOutputCost {
+			maxOutputCost = cost
+		}
+	}
+	return inputCost + maxOutputCost
 }
 
 func normalizeOrCreateID(value *string, prefix string) string {
@@ -2544,6 +3465,7 @@ func applyInvocationRuntimeAttribution(invocation *models.ModelInvocation, req C
 	invocation.RuntimeType = runtimeAttributionString(req.RuntimeType)
 	invocation.GatewayID = runtimeAttributionString(req.GatewayID)
 	invocation.RuntimePodID = runtimeAttributionInt64(req.RuntimePodID)
+	invocation.GatewayKeyID = req.GatewayKeyID
 }
 
 func applyAuditRuntimeAttribution(event *models.AuditEvent, req ChatCompletionRequest) {
@@ -2554,6 +3476,7 @@ func applyAuditRuntimeAttribution(event *models.AuditEvent, req ChatCompletionRe
 	event.RuntimeType = runtimeAttributionString(req.RuntimeType)
 	event.GatewayID = runtimeAttributionString(req.GatewayID)
 	event.RuntimePodID = runtimeAttributionInt64(req.RuntimePodID)
+	event.GatewayKeyID = req.GatewayKeyID
 }
 
 func applyCostRuntimeAttribution(record *models.CostRecord, req ChatCompletionRequest) {
@@ -2564,6 +3487,7 @@ func applyCostRuntimeAttribution(record *models.CostRecord, req ChatCompletionRe
 	record.RuntimeType = runtimeAttributionString(req.RuntimeType)
 	record.GatewayID = runtimeAttributionString(req.GatewayID)
 	record.RuntimePodID = runtimeAttributionInt64(req.RuntimePodID)
+	record.GatewayKeyID = req.GatewayKeyID
 }
 
 func riskHitAttribution(req ChatCompletionRequest) *services.RiskHitAttribution {
@@ -2607,15 +3531,40 @@ func mustJSONString(value interface{}) string {
 
 func rawOrJSONRequestPayload(req ChatCompletionRequest) string {
 	if len(req.RawBody) > 0 {
-		return string(req.RawBody)
+		return visionSafePayload(req.RawBody)
 	}
-	return mustJSONString(req)
+	return visionSafePayload([]byte(mustJSONString(req)))
 }
 
 func cloneProxyHeaders(headers http.Header) http.Header {
 	cloned := make(http.Header)
 	copyProxyHeaders(cloned, headers)
 	return cloned
+}
+
+// setGatewayModelHeaders exposes routing metadata without changing the model
+// selected in the client's model picker. This is consumed by runtime UIs to
+// show which deployment actually answered an `auto` request.
+func setGatewayModelHeaders(headers http.Header, prepared *preparedChatRequest) {
+	if prepared == nil || prepared.resolvedModel == nil {
+		return
+	}
+	requested := strings.TrimSpace(prepared.req.Model)
+	if requested != "" {
+		headers.Set("X-ClawManager-Requested-Model", requested)
+	}
+	actual := strings.TrimSpace(prepared.resolvedModel.ProviderModelName)
+	if actual == "" {
+		actual = strings.TrimSpace(prepared.resolvedModel.DisplayName)
+	}
+	if actual != "" {
+		headers.Set("X-ClawManager-Actual-Model", actual)
+	}
+	if strings.EqualFold(requested, "auto") {
+		headers.Set("X-ClawManager-Routing-Mode", "auto")
+	} else {
+		headers.Set("X-ClawManager-Routing-Mode", "explicit")
+	}
 }
 
 func copyProxyHeaders(dst, src http.Header) {
@@ -2737,6 +3686,13 @@ func estimateTokens(text string) int {
 		return 1
 	}
 	return tokens
+}
+
+// EstimateRequestTokens returns a conservative reservation for Gateway Key TPM
+// enforcement. Final usage replaces this reservation when the call completes.
+func EstimateRequestTokens(req ChatCompletionRequest) int {
+	input, output := routingTokenEstimate(req)
+	return input + output
 }
 
 func flattenMessages(messages []ChatMessage) string {
@@ -2956,6 +3912,9 @@ func flattenStructuredContentPart(content interface{}) string {
 	part, ok := content.(map[string]interface{})
 	if !ok {
 		return ""
+	}
+	if isImageBlock(part) {
+		return "[image omitted]"
 	}
 
 	if text, ok := part["text"].(string); ok {

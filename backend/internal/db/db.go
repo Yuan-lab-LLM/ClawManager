@@ -1,10 +1,18 @@
 package db
 
 import (
+	"context"
+	"database/sql"
 	"fmt"
 	"log"
+	"os"
+	"regexp"
+	"strings"
+	"time"
 
+	"clawreef/internal/backupgate"
 	"clawreef/internal/config"
+	mysqldriver "github.com/go-sql-driver/mysql"
 	"github.com/upper/db/v4"
 	"github.com/upper/db/v4/adapter/mysql"
 )
@@ -18,7 +26,13 @@ func Initialize(cfg config.DatabaseConfig) (db.Session, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := applyEmbeddedMigrations(session); err != nil {
+	var migrationErr error
+	if SQLGateScope() != "" {
+		migrationErr = verifyEmbeddedMigrationsApplied(session)
+	} else {
+		migrationErr = applyEmbeddedMigrations(session)
+	}
+	if err := migrationErr; err != nil {
 		_ = session.Close()
 		return nil, fmt.Errorf("failed to apply database migrations: %w", err)
 	}
@@ -43,6 +57,12 @@ func Connect(cfg config.DatabaseConfig) (db.Session, error) {
 }
 
 func connect(cfg config.DatabaseConfig) (db.Session, error) {
+	// P0 restored databases are data-only drill targets. Every official business
+	// process uses this connection path; none may start consumers, retry Owner
+	// operations, reconcile upgrades, seed data or migrate a restored copy.
+	if regexp.MustCompile(`^cm_restore_[a-f0-9]{32}$`).MatchString(cfg.Database) {
+		return nil, fmt.Errorf("isolated restore databases cannot run business services")
+	}
 	hostPort := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
 	settings := mysql.ConnectionURL{
 		Host:     hostPort,
@@ -56,7 +76,29 @@ func connect(cfg config.DatabaseConfig) (db.Session, error) {
 		},
 	}
 
-	session, err := mysql.Open(settings)
+	var session db.Session
+	var err error
+	if scope := SQLGateScope(); scope != "" {
+		driverConfig, e := mysqldriver.ParseDSN(settings.String())
+		if e != nil {
+			return nil, fmt.Errorf("invalid gated database configuration")
+		}
+		driverConfig.MultiStatements = false
+		connector, e := mysqldriver.NewConnector(driverConfig)
+		if e != nil {
+			return nil, e
+		}
+		pool, e := backupgate.Open(connector, scope)
+		if e != nil {
+			return nil, e
+		}
+		session, err = mysql.New(pool)
+		if err != nil {
+			pool.Close()
+		}
+	} else {
+		session, err = mysql.Open(settings)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
@@ -80,6 +122,47 @@ func connect(cfg config.DatabaseConfig) (db.Session, error) {
 		return nil, fmt.Errorf("failed to configure database connection charset: %w", err)
 	}
 	return session, nil
+}
+
+// SQLGateScope is opt-in until the full writer registry and Runtime protocols
+// are deployed. Enabling it never certifies non-SQL writers as drained.
+func SQLGateScope() string { return strings.TrimSpace(os.Getenv("SYSTEM_BACKUP_SQL_GATE_SCOPE")) }
+
+func verifyEmbeddedMigrationsApplied(session db.Session) error {
+	pool, ok := session.Driver().(*sql.DB)
+	if !ok {
+		return fmt.Errorf("SQL schema verifier unavailable")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	rows, e := pool.QueryContext(ctx, "SELECT filename FROM schema_migrations")
+	if e != nil {
+		return e
+	}
+	applied := map[string]bool{}
+	for rows.Next() {
+		var name string
+		if e = rows.Scan(&name); e != nil {
+			rows.Close()
+			return e
+		}
+		applied[name] = true
+	}
+	e = rows.Err()
+	rows.Close()
+	if e != nil {
+		return e
+	}
+	entries, e := embeddedMigrations.ReadDir("migrations")
+	if e != nil {
+		return e
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".sql") && !applied[entry.Name()] {
+			return fmt.Errorf("gated application requires offline migration: %s", entry.Name())
+		}
+	}
+	return nil
 }
 
 // Close closes the database connection

@@ -831,6 +831,27 @@ const AIAuditPage: React.FC = () => {
           </div>
         </div>
 
+        {selectedTrace.audit_events.some((event) => event.event_type === 'gateway.routing.selected' || event.event_type === 'gateway.routing.rejected') && (
+          <TraceSection
+            title={t('modelManagementPage.routingDecisions')}
+            subtitle={t('modelManagementPage.routingDecisionsHelp')}
+          >
+            <div className="space-y-3">
+              {selectedTrace.audit_events.filter((event) => event.event_type === 'gateway.routing.selected' || event.event_type === 'gateway.routing.rejected').map((event) => (
+                <details key={event.id} className={`rounded-xl border p-4 ${event.severity === 'warn' ? 'border-amber-300 bg-amber-50' : 'border-gray-200 bg-white'}`}>
+                  <summary className="cursor-pointer text-sm font-medium text-gray-800">
+                    {event.message}
+                    <span className="ml-3 text-xs font-normal text-gray-500">{formatRelativeTimestamp(event.created_at, locale)}</span>
+                  </summary>
+                  <div className="mt-3 max-h-96 overflow-auto rounded-lg bg-[#171c25] p-4 font-mono text-xs">
+                    {renderCodeBlock(event.details)}
+                  </div>
+                </details>
+              ))}
+            </div>
+          </TraceSection>
+        )}
+
         <TraceSection
           title={t('aiAuditPage.executionFlow')}
           subtitle={t('aiAuditPage.executionFlowSubtitle')}
@@ -1270,6 +1291,14 @@ const AIAuditPage: React.FC = () => {
                               <td className="px-4 py-4 align-top">
                                 <div className="font-medium text-[#171212]">{item.actual_provider_model}</div>
                                 <div className="mt-1 text-xs text-[#8f8681]">{item.latency_ms ? `${item.latency_ms} ms` : t('aiAuditPage.noLatency')}</div>
+                                {(item.ttft_ms != null || item.tokens_per_second != null) && (
+                                  <div className="mt-1 text-[11px] text-[#9a8f89]">
+                                    {item.ttft_ms != null ? `TTFT ${item.ttft_ms} ms` : 'TTFT -'}
+                                    {' · '}
+                                    {item.tokens_per_second != null ? `${item.tokens_per_second.toFixed(1)} tok/s` : '- tok/s'}
+                                    {(item.attempt_no ?? 1) > 1 ? ` · attempt ${item.attempt_no}` : ''}
+                                  </div>
+                                )}
                                 {errorSummary && (
                                   <div
                                     className="mt-2 max-w-[320px] break-words text-xs text-red-600"

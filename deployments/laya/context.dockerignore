@@ -1,0 +1,16 @@
+**
+!source/
+!source/laya/
+!source/laya/**
+!source/docker/
+!source/docker/check_torch.py
+!source/pyproject.toml
+!source/setup.py
+!source/README.md
+!source/LICENSE
+!model/
+!model/**
+!offline_server.py
+!smoke_test.py
+**/__pycache__
+**/*.pyc

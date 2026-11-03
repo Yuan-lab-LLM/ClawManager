@@ -23,13 +23,34 @@ import (
 // Chat Completions request.  Keeping the translation at the edge means the
 // router, auditing and provider adapters remain shared by all runtimes.
 func (h *AIGatewayHandler) Responses(c *gin.Context) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, aigateway.MaxVisionRequestBytes)
 	var payload responsesRequest
 	if err := c.ShouldBindJSON(&payload); err != nil {
 		utils.ValidationError(c, err)
 		return
 	}
+	normalized, normalizeErr := aigateway.NormalizeVisionContent(payload.Input)
+	var nativeTools []map[string]interface{}
+	if json.Unmarshal(payload.Tools, &nativeTools) == nil {
+		for _, tool := range nativeTools {
+			if tool["type"] == "image_generation" {
+				c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "invalid_request_error", "code": "unsupported_image_generation_tool", "message": "Native Responses image generation is not enabled on this gateway yet"}})
+				return
+			}
+		}
+	}
+	if normalizeErr != nil {
+		utils.HandleError(c, normalizeErr)
+		return
+	}
+	payload.Input = normalized
 	req := payload.chatRequest()
-	if !applyGatewayRequestContext(c, &req) {
+	if !h.applyGatewayRequestContext(c, &req) {
+		return
+	}
+	userID, ok := gatewayUserID(c)
+	if !ok {
+		utils.Error(c, http.StatusUnauthorized, "Unauthorized")
 		return
 	}
 	input, err := h.resolveWorkspaceInputFiles(c.Request.Context(), c, payload.Input)
@@ -42,10 +63,17 @@ func (h *AIGatewayHandler) Responses(c *gin.Context) {
 		req.Messages = append([]aigateway.ChatMessage{{Role: "system", Content: payload.Instructions}}, req.Messages...)
 	}
 	req.RawBody = canonicalChatBody(req)
+	lease, ok := h.acquireGatewayKeyLease(c, &req)
+	if !ok {
+		return
+	}
+	h.attachGatewayUsageFinalizer(&req, lease)
+	defer h.releaseGatewayKeyLease(lease)
+	defer h.releaseGatewayBudget(&req)
 	if payload.Stream {
 		c.Header("Content-Type", "text/event-stream")
 		c.Header("Cache-Control", "no-cache")
-		traceID, err := h.service.StreamChatCompletions(c.Request.Context(), gatewayUserID(c), req, &protocolStreamWriter{ResponseWriter: c.Writer, kind: "responses", model: payload.Model})
+		traceID, err := h.service.StreamChatCompletions(c.Request.Context(), userID, req, &protocolStreamWriter{ResponseWriter: c.Writer, kind: "responses", model: payload.Model})
 		if traceID != "" {
 			c.Header("X-Trace-ID", traceID)
 		}
@@ -54,7 +82,7 @@ func (h *AIGatewayHandler) Responses(c *gin.Context) {
 		}
 		return
 	}
-	response, traceID, err := h.service.ChatCompletions(c.Request.Context(), gatewayUserID(c), req)
+	response, traceID, err := h.service.ChatCompletions(c.Request.Context(), userID, req)
 	if err != nil {
 		c.Header("X-Trace-ID", traceID)
 		utils.HandleError(c, err)
@@ -200,19 +228,44 @@ func workspaceInputFilePath(reference string, instanceID int) (string, error) {
 // AnthropicMessages translates Messages requests, including tool_use and
 // tool_result blocks, to the same internal tool-call representation.
 func (h *AIGatewayHandler) AnthropicMessages(c *gin.Context) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, aigateway.MaxVisionRequestBytes)
 	var payload anthropicRequest
 	if err := c.ShouldBindJSON(&payload); err != nil {
 		utils.ValidationError(c, err)
 		return
 	}
-	req := payload.chatRequest()
-	if !applyGatewayRequestContext(c, &req) {
+	if aigateway.HasImageContent(payload.System) {
+		utils.Error(c, http.StatusBadRequest, "Images in system messages are not supported")
 		return
 	}
+	for i := range payload.Messages {
+		content, err := aigateway.NormalizeVisionContent(payload.Messages[i].Content)
+		if err != nil {
+			utils.HandleError(c, err)
+			return
+		}
+		payload.Messages[i].Content = content
+	}
+	req := payload.chatRequest()
+	if !h.applyGatewayRequestContext(c, &req) {
+		return
+	}
+	userID, ok := gatewayUserID(c)
+	if !ok {
+		utils.Error(c, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+	lease, ok := h.acquireGatewayKeyLease(c, &req)
+	if !ok {
+		return
+	}
+	h.attachGatewayUsageFinalizer(&req, lease)
+	defer h.releaseGatewayKeyLease(lease)
+	defer h.releaseGatewayBudget(&req)
 	if payload.Stream {
 		c.Header("Content-Type", "text/event-stream")
 		c.Header("Cache-Control", "no-cache")
-		traceID, err := h.service.StreamChatCompletions(c.Request.Context(), gatewayUserID(c), req, &protocolStreamWriter{ResponseWriter: c.Writer, kind: "anthropic", model: payload.Model})
+		traceID, err := h.service.StreamChatCompletions(c.Request.Context(), userID, req, &protocolStreamWriter{ResponseWriter: c.Writer, kind: "anthropic", model: payload.Model})
 		if traceID != "" {
 			c.Header("X-Trace-ID", traceID)
 		}
@@ -221,7 +274,7 @@ func (h *AIGatewayHandler) AnthropicMessages(c *gin.Context) {
 		}
 		return
 	}
-	response, traceID, err := h.service.ChatCompletions(c.Request.Context(), gatewayUserID(c), req)
+	response, traceID, err := h.service.ChatCompletions(c.Request.Context(), userID, req)
 	if err != nil {
 		c.Header("X-Trace-ID", traceID)
 		utils.HandleError(c, err)
@@ -267,6 +320,7 @@ type anthropicRequest struct {
 	Temperature   *float64        `json:"temperature"`
 	TopP          *float64        `json:"top_p"`
 	StopSequences json.RawMessage `json:"stop_sequences"`
+	Thinking      json.RawMessage `json:"thinking"`
 }
 
 func (p responsesRequest) chatRequest() aigateway.ChatCompletionRequest {
@@ -306,6 +360,7 @@ func (p anthropicRequest) chatRequest() aigateway.ChatCompletionRequest {
 		messages = append(messages, anthropicMessages(item.Role, item.Content)...)
 	}
 	req := aigateway.ChatCompletionRequest{Model: p.Model, Messages: messages, Stream: p.Stream, Tools: anthropicTools(p.Tools), ToolChoice: anthropicToolChoice(p.ToolChoice), MaxTokens: p.MaxTokens, Temperature: p.Temperature, TopP: p.TopP, Stop: p.StopSequences}
+	req.Thinking = p.Thinking
 	req.RawBody = canonicalChatBody(req)
 	return req
 }
@@ -371,16 +426,14 @@ func responseContent(value interface{}) interface{} {
 			if text, ok := block["text"].(string); ok {
 				out = append(out, map[string]interface{}{"type": "text", "text": text})
 			}
-		case "input_image":
-			url, _ := block["image_url"].(string)
-			if url == "" {
-				continue
+		case "input_image", "image_url":
+			// Validation also occurs before translation and before rate limiting.
+			image, err := aigateway.NormalizeVisionContent(block)
+			if err == nil {
+				out = append(out, image)
+			} else {
+				out = append(out, block)
 			}
-			image := map[string]interface{}{"url": url}
-			if detail, ok := block["detail"].(string); ok && detail != "" {
-				image["detail"] = detail
-			}
-			out = append(out, map[string]interface{}{"type": "image_url", "image_url": image})
 		default:
 			if text := protocolBlockText(block); text != "" {
 				out = append(out, map[string]interface{}{"type": "text", "text": text})
@@ -400,22 +453,41 @@ func anthropicMessages(role string, content interface{}) []aigateway.ChatMessage
 	message := aigateway.ChatMessage{Role: role}
 	toolResults := make([]aigateway.ChatMessage, 0)
 	var text []string
+	var imageContent []interface{}
 	for _, raw := range blocks {
 		block, ok := raw.(map[string]interface{})
 		if !ok {
 			text = append(text, protocolContentText(raw))
+			imageContent = append(imageContent, map[string]interface{}{"type": "text", "text": protocolContentText(raw)})
 			continue
 		}
 		switch block["type"] {
+		case "image", "image_url", "input_image":
+			imageContent = append(imageContent, block)
+		case "text":
+			text = append(text, protocolBlockText(block))
+			imageContent = append(imageContent, block)
 		case "tool_use":
 			message.ToolCalls = append(message.ToolCalls, aigateway.ToolCall{ID: fmt.Sprint(block["id"]), Type: "function", Function: &aigateway.ToolCallFunction{Name: fmt.Sprint(block["name"]), Arguments: jsonValue(block["input"])}})
 		case "tool_result":
-			toolResults = append(toolResults, aigateway.ChatMessage{Role: "tool", ToolCallID: fmt.Sprint(block["tool_use_id"]), Content: protocolBlockText(block["content"])})
+			content := block["content"]
+			if !aigateway.HasImageContent(content) {
+				content = protocolBlockText(content)
+			}
+			toolResults = append(toolResults, aigateway.ChatMessage{Role: "tool", ToolCallID: fmt.Sprint(block["tool_use_id"]), Content: content})
 		default:
 			text = append(text, protocolBlockText(block))
+			imageContent = append(imageContent, map[string]interface{}{"type": "text", "text": protocolBlockText(block)})
 		}
 	}
 	message.Content = strings.Join(text, "\n")
+	for _, item := range imageContent {
+		part, _ := item.(map[string]interface{})
+		if part["type"] != "text" {
+			message.Content = imageContent
+			break
+		}
+	}
 	result := make([]aigateway.ChatMessage, 0, len(toolResults)+1)
 	if message.Content != "" || len(message.ToolCalls) > 0 {
 		result = append(result, message)
@@ -563,9 +635,13 @@ type protocolStreamWriter struct {
 	responseCreatedAt      int64
 	responseText           strings.Builder
 	sequence               int
+	writeErr               error
 }
 
 func (w *protocolStreamWriter) Write(p []byte) (int, error) {
+	if w.writeErr != nil {
+		return 0, w.writeErr
+	}
 	w.buffer.Write(p)
 	for {
 		data := w.buffer.Bytes()
@@ -576,28 +652,53 @@ func (w *protocolStreamWriter) Write(p []byte) (int, error) {
 		event := string(data[:n])
 		w.buffer.Next(n + 2)
 		w.translate(event)
+		if w.writeErr != nil {
+			return 0, w.writeErr
+		}
 	}
 	return len(p), nil
 }
 func (w *protocolStreamWriter) Flush() {
+	if w.writeErr != nil {
+		return
+	}
 	if f, ok := w.ResponseWriter.(http.Flusher); ok {
 		f.Flush()
 	}
 }
 func (w *protocolStreamWriter) emit(event string, value interface{}) {
+	if w.writeErr != nil {
+		return
+	}
 	if payload, ok := value.(gin.H); ok {
 		w.sequence++
 		payload["sequence_number"] = w.sequence
 	}
 	b, _ := json.Marshal(value)
 	if event != "" {
-		_, _ = fmt.Fprintf(w.ResponseWriter, "event: %s\n", event)
+		if _, err := fmt.Fprintf(w.ResponseWriter, "event: %s\n", event); err != nil {
+			w.writeErr = err
+			return
+		}
 	}
-	_, _ = fmt.Fprintf(w.ResponseWriter, "data: %s\n\n", b)
+	if _, err := fmt.Fprintf(w.ResponseWriter, "data: %s\n\n", b); err != nil {
+		w.writeErr = err
+		return
+	}
 	w.Flush()
 }
 func (w *protocolStreamWriter) translate(raw string) {
-	line := strings.TrimSpace(strings.TrimPrefix(raw, "data:"))
+	// SSE may include an event name before data (e.g. revocation errors).
+	var dataLines []string
+	for _, part := range strings.Split(raw, "\n") {
+		if strings.HasPrefix(part, "data:") {
+			dataLines = append(dataLines, strings.TrimSpace(strings.TrimPrefix(part, "data:")))
+		}
+	}
+	line := strings.Join(dataLines, "\n")
+	if line == "" {
+		return
+	}
 	if line == "[DONE]" {
 		if w.kind == "anthropic" {
 			w.emit("message_stop", gin.H{"type": "message_stop"})
@@ -605,6 +706,11 @@ func (w *protocolStreamWriter) translate(raw string) {
 		return
 	}
 	var chunk struct {
+		Error *struct {
+			Code    string `json:"code"`
+			Type    string `json:"type"`
+			Message string `json:"message"`
+		} `json:"error"`
 		ID      string `json:"id"`
 		Model   string `json:"model"`
 		Choices []struct {
@@ -620,6 +726,14 @@ func (w *protocolStreamWriter) translate(raw string) {
 		} `json:"usage"`
 	}
 	if json.Unmarshal([]byte(line), &chunk) != nil {
+		return
+	}
+	if chunk.Error != nil {
+		if w.kind == "responses" {
+			w.emit("error", gin.H{"type": "error", "code": chunk.Error.Code, "message": chunk.Error.Message})
+		} else {
+			w.emit("error", gin.H{"type": "error", "error": gin.H{"type": chunk.Error.Type, "message": chunk.Error.Message, "code": chunk.Error.Code}})
+		}
 		return
 	}
 	if w.model == "" {
@@ -754,8 +868,14 @@ func (w *protocolStreamWriter) responsesSnapshot(status string, output []interfa
 	return gin.H{"id": w.responseID, "object": "response", "created_at": w.responseCreatedAt, "status": status, "error": nil, "incomplete_details": nil, "instructions": nil, "max_output_tokens": nil, "model": w.model, "output": output, "parallel_tool_calls": true, "tool_choice": "auto", "tools": []interface{}{}, "top_p": 1, "temperature": 1, "truncation": "disabled", "usage": nil, "user": nil, "metadata": gin.H{}}
 }
 
-func applyGatewayRequestContext(c *gin.Context, req *aigateway.ChatCompletionRequest) bool {
+func (h *AIGatewayHandler) applyGatewayRequestContext(c *gin.Context, req *aigateway.ChatCompletionRequest) bool {
 	if req == nil {
+		return false
+	}
+	if !attachRuntimeTask(c, req) {
+		return false
+	}
+	if !h.validateGatewayInstanceAttribution(c, req) {
 		return false
 	}
 	if id, ok := c.Get("instanceID"); ok {
@@ -763,6 +883,8 @@ func applyGatewayRequestContext(c *gin.Context, req *aigateway.ChatCompletionReq
 			req.InstanceID = &value
 		}
 	}
+	applyGatewayAllowedModelGroups(c, req)
+	h.applyGatewayBudgetContext(c, req)
 	if !setStringMetadata(c, &req.InstanceMode, "instanceMode") || !setStringMetadata(c, &req.RuntimeType, "runtimeType") || !setStringMetadata(c, &req.GatewayID, "gatewayID") || !setInt64Metadata(c, &req.RuntimePodID, "runtimePodID") {
 		utils.Error(c, http.StatusForbidden, "Gateway token metadata does not match request")
 		return false
@@ -772,7 +894,11 @@ func applyGatewayRequestContext(c *gin.Context, req *aigateway.ChatCompletionReq
 	aigateway.ApplyManagedInstanceSessionDefaults(req, stringValue(authType), stringValue(instanceType))
 	return true
 }
-func gatewayUserID(c *gin.Context) int { value, _ := c.Get("userID"); id, _ := value.(int); return id }
+func gatewayUserID(c *gin.Context) (int, bool) {
+	value, _ := c.Get("userID")
+	id, _ := value.(int)
+	return id, id > 0
+}
 func protocolContentText(value interface{}) string {
 	if value == nil {
 		return ""

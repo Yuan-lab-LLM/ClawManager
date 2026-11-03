@@ -72,6 +72,24 @@ func (h *CustomTeamTemplateHandler) UpdateMetadata(c *gin.Context) {
 	utils.Success(c, http.StatusOK, "Custom Team template updated successfully", payload)
 }
 
+func (h *CustomTeamTemplateHandler) UpdateMemberIcon(c *gin.Context) {
+	id, ok := parseCustomTeamTemplateID(c)
+	if !ok {
+		return
+	}
+	var req teamtemplate.UpdateMemberIconRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		utils.ValidationError(c, err)
+		return
+	}
+	payload, err := h.service.UpdateMemberIcon(currentUserID(c), id, c.Param("memberID"), req)
+	if err != nil {
+		utils.HandleError(c, err)
+		return
+	}
+	utils.Success(c, http.StatusOK, "Member icon updated successfully", payload)
+}
+
 func (h *CustomTeamTemplateHandler) Revise(c *gin.Context) {
 	id, ok := parseCustomTeamTemplateID(c)
 	if !ok {
