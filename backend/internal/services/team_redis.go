@@ -95,7 +95,13 @@ func newRedisBus(rawURL string) (*redisBus, error) {
 }
 
 func (b *redisBus) XAdd(ctx context.Context, key string, fields map[string]string) (string, error) {
-	args := []string{"XADD", key, "*"}
+	args := []string{"XADD", key}
+	// Runtime UI notifications retain only the newest events. Reliable Team
+	// streams keep their existing delivery and retention semantics.
+	if key == runtimeEventStreamKey {
+		args = append(args, "MAXLEN", "=", strconv.Itoa(runtimeEventStreamMaxLength))
+	}
+	args = append(args, "*")
 	for field, value := range fields {
 		args = append(args, field, value)
 	}
