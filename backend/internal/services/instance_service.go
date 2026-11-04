@@ -2041,7 +2041,9 @@ func (s *instanceService) resolveGatewayModelInjection(ownerID int) (*gatewayMod
 	if err != nil {
 		return nil, fmt.Errorf("failed to list active models: %w", err)
 	}
-	items = models.ChatModels(items)
+	// Expand only the persisted catalog after owner visibility filtering.
+	// Upstream discovery is not an authorization source.
+	items = models.ChatModels(models.ExpandLLMModelCatalog(items))
 	if len(items) == 0 {
 		return nil, ErrModelConfigurationRequired
 	}

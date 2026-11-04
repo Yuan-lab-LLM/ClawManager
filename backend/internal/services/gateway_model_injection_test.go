@@ -1,6 +1,7 @@
 package services
 
 import (
+	"clawreef/internal/models"
 	"encoding/json"
 	"slices"
 	"testing"
@@ -61,5 +62,34 @@ func TestBuildOpenCodeGatewayConfigDefaultsEmptyCatalogToAuto(t *testing.T) {
 func TestBuildOpenCodeGatewayConfigRejectsInvalidCatalog(t *testing.T) {
 	if _, err := buildOpenCodeGatewayConfig(`not-json`); err == nil {
 		t.Fatal("buildOpenCodeGatewayConfig() error = nil, want invalid catalogue error")
+	}
+}
+
+func TestProviderCatalogInjectedForVisibleOwner(t *testing.T) {
+	public := models.LLMModel{ID: 2, DisplayName: "icompify", ModelGroup: "icompify", ProviderModelName: "deepseek-flash", IsActive: true, VisibilityScope: "all"}
+	private := models.LLMModel{ID: 3, DisplayName: "private", ProviderModelName: "private-model", IsActive: true, VisibilityScope: "selected_users", AllowedUserIDs: []int{1}}
+	if err := models.SetLLMProviderModels(&public, []models.LLMProviderModel{{ID: "deepseek-flash"}, {ID: "glm-5.3"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := models.SetLLMProviderModels(&private, []models.LLMProviderModel{{ID: "secret-model"}}); err != nil {
+		t.Fatal(err)
+	}
+	s := &instanceService{llmModelRepo: &stubLLMModelRepository{active: []models.LLMModel{public, private}}}
+	got, err := s.resolveGatewayModelInjection(2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names, refs []string
+	if err = json.Unmarshal([]byte(got.modelsJSON), &names); err != nil {
+		t.Fatal(err)
+	}
+	if err = json.Unmarshal([]byte(got.providerModelsJSON), &refs); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(names, []string{"auto", "deepseek-flash", "glm-5.3"}) {
+		t.Fatalf("incomplete saved catalog or private model leak: %v", names)
+	}
+	if !slices.Equal(refs, []string{"auto/auto", "icompify/deepseek-flash", "icompify/glm-5.3"}) {
+		t.Fatalf("provider grouping lost: %v", refs)
 	}
 }
