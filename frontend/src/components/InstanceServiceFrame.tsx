@@ -124,6 +124,9 @@ function EmbeddedInstanceServiceFrame({
     loading,
     error,
     reconnecting,
+    frameRef,
+    frameRevision,
+    frameStatus,
     refreshAccess,
     handleFrameLoad,
     handleFrameError,
@@ -131,6 +134,7 @@ function EmbeddedInstanceServiceFrame({
     instanceId,
     isRunning: isAvailable,
     reloadOnAccessRefresh: normalizedType === "deepseek-harness",
+    monitorFrame: normalizedType === "openclaw",
     resolveEmbedUrl,
     failedMessage: "Failed to open instance service",
   });
@@ -448,8 +452,10 @@ function EmbeddedInstanceServiceFrame({
   }
 
   return renderFrameShell(
+    <div className="relative flex min-h-0 flex-1 flex-col">
       <iframe
-        key={`frame-${instanceId}-${reloadToken}`}
+        ref={frameRef}
+        key={`frame-${instanceId}-${reloadToken}-${frameRevision}`}
         title={`${instanceName} service`}
         src={frameSrc}
         className="min-h-0 w-full flex-1 border-0 bg-white"
@@ -457,6 +463,22 @@ function EmbeddedInstanceServiceFrame({
         allow="clipboard-read; clipboard-write; fullscreen; autoplay"
         onLoad={(event) => handleFrameLoad(event.currentTarget)}
         onError={handleFrameError}
-      />,
+      />
+      {frameStatus !== "ready" && (
+        <div
+          className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-white p-6 text-center text-sm text-slate-600"
+          role={frameStatus === "error" ? "alert" : "status"}
+          aria-live="polite"
+        >
+          {frameStatus === "recovering" && <RefreshCw className="h-5 w-5 animate-spin" aria-hidden="true" />}
+          <p>{t(frameStatus === "error" ? "common.connectionFailed" : "common.reconnecting")}</p>
+          {frameStatus === "error" && (
+            <button type="button" disabled={loading || reconnecting} onClick={handleRefresh} className="app-button-secondary disabled:opacity-50">
+              {t("common.retry")}
+            </button>
+          )}
+        </div>
+      )}
+    </div>,
   );
 }
