@@ -1,5 +1,7 @@
 # 四类 Agent 的供应商模型目录注入修复
 
+范围说明：本文的四类验证是完整模型目录的注入与解析，不是四类原生界面分组名称统一验收。后续 `ClawManager / icompify` 显示名及防合并修复只修改了 Hermes；OpenClaw、OpenCode、DSH 尚未同步统一分组显示名。
+
 2026-11-04，测试节点 10.130.81.54，命名空间 `clawmanager-system`。用户报告 DSH 及其他类型仅显示 auto / icompify，并确认可以更新实例。测试和构建全部在测试节点执行。
 
 ## 根因与范围

@@ -51,7 +51,7 @@ API 版本为 `lite-pod-elastic-20261104`；设置版本 7，`enabled=true`、�
 
 还不能将这一工作区标记为正式发布验收完成：
 
-1. [最新 OpenClaw 网络错误排查](2026-11-04-openclaw-network-error.md) 确认通知 WebSocket 用过期 access token 重连，以及独立的图像生成外部连接被拒绝；需要修复和专项验收。
+1. [最新 OpenClaw 网络错误排查](2026-11-04-openclaw-network-error.md) 确认通知 WebSocket 用过期 access token 重连，需要修复和专项验收。外部模型连接被拒绝属于正常安全策略，不列为缺陷。
 2. Hermes 新分组候选镜像仍待协调更新和实际桌面模型列表验收；保留已有镜像制品真实性检查，不能伪造 release acceptance。
 3. 整理两个仓库的提交时，逐项核对功能依赖及新增文件；不要直接 `git add .`，不要把 `.deploy`、集群 config、环境文件或诊断凭据打包。
 
@@ -61,4 +61,4 @@ Redis 现有持久化文件仍可能在重启加载时占较多资源，当前�
 
 ## 后续前端修复
 
-用户确认嵌入 OpenClaw 页面空白后刷新可恢复，并授权修复。[嵌入页恢复逻辑已修复、测试并部署](2026-11-04-openclaw-frame-recovery.md)。当前 CM 镜像更新为 `clawmanager.local/clawmanager@sha256:f52d375a8ee742e4c864c21c93a9dfa1d6560120a4369da61f72dd1a0dd2cc1a`，仅叠加前端文件；普通后端、日规则设置及 Runtime 均保持原值。前述镜像是恢复默认值时的快照。通知 token 和图像生成待办仍未关闭。
+用户确认嵌入 OpenClaw 页面空白后刷新可恢复，并授权修复。[嵌入页恢复逻辑已修复、测试并部署](2026-11-04-openclaw-frame-recovery.md)。当前 CM 镜像更新为 `clawmanager.local/clawmanager@sha256:f52d375a8ee742e4c864c21c93a9dfa1d6560120a4369da61f72dd1a0dd2cc1a`，仅叠加前端文件；普通后端、日规则设置及 Runtime 均保持原值。前述镜像是恢复默认值时的快照。通知 token 待办仍未关闭；外部模型直连被拒绝不列为问题。

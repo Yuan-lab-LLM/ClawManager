@@ -2,7 +2,7 @@
 
 日期：2026-11-04。只读排查测试节点 `10.130.81.54` 的 `clawmanager-system`；未重启、停止实例，未发送模型请求。下文时间均为北京时间。
 
-## 已确认的两个问题
+## 已确认的鉴权问题与正常拦截记录
 
 ### 通知 WebSocket 使用过期 token 重连
 
@@ -14,7 +14,7 @@ CM 当前 Pod 的访问日志中，`GET /api/v1/ws` 持续返回 401。只在节
 
 这证明当前版本存在通知鉴权的恢复缺口；尚不能据此断言用户截图内的聊天错误就是同一个问题，也没有足够证据确定它是某次历史修复的回归。
 
-### 图像生成请求被出站策略拒绝
+### 图像生成外部请求被出站策略正常拒绝
 
 19:37:51，OpenClaw `slot-0` 的 `[image-generation]` 模块记录固定错误：
 
@@ -25,7 +25,7 @@ Proxy response (403) !== 200 when HTTP Tunneling | UND_ERR_ABORTED
 
 同一秒，实例 154（`lite-openclaw-129`）的审计事件 `egress.llm.blocked` 明确记录：连接 `api.openai.com:443` 因 `llm provider host blocked` 被拒绝。因此该条错误属于图像生成走到外部模型地址，不能解释为浏览器登录 token 过期，也不能通过放开出站限制解决。
 
-只读取生成配置中的模型元数据，确认文本供应商 auto/icompify 都指向 CM 内部 Gateway，默认文本模型和 `imageModel.primary` 都是 `auto/auto`。但 `imageModel` 的配置并未阻止这次 `[image-generation]` 外部请求。后续需要沿安装版本的图像生成工具路径核对其独立 provider 解析，接入 CM 的受控图像接口，或在未支持时明确提示能力不可用。此轮未修改工具配置，也未放宽任何网络限制。
+只读取生成配置中的模型元数据，确认文本供应商 auto/icompify 都指向 CM 内部 Gateway，默认文本模型和 `imageModel.primary` 都是 `auto/auto`。此次外部请求被拒绝符合 CM 禁止直连外部模型的安全策略，属于正常行为，不是 CM 网络或鉴权缺陷，也不列为发布阻塞项。保留该记录仅用于解释对应工具请求的失败；不因此修改出网策略或新增路由。
 
 ## 排除休眠与更新时间的混淆
 
@@ -37,8 +37,7 @@ Proxy response (403) !== 200 when HTTP Tunneling | UND_ERR_ABORTED
 ## 待修与验收
 
 1. 通知连接复用统一会话刷新机制；重连取最新有效 token，刷新并发合并，刷新失败终止重连并进入现有登录失效流程。不要延长 token 有效期绕过问题，也不要记录凭据。
-2. 核对安装版 OpenClaw 图像生成工具的 provider 解析，与 CM 图像能力对接；不允许回退直连外部模型。
-3. 在测试集群覆盖：打开页面跨越 access token 到期、HTTP 与 WebSocket 同时刷新、CM 重启后重连、刷新失败、图像生成成功或明确提示不支持。不得以一条普通文本回复代替上述验证。
+2. 在测试集群覆盖：打开页面跨越 access token 到期、HTTP 与 WebSocket 同时刷新、CM 重启后重连、刷新失败。不得以一条普通文本回复代替上述验证。外部模型直连被拒绝不属于待修缺陷。
 
 节点证据目录：`/root/cm-pod-elastic-20261104`，`openclaw-129-network-diagnosis.json`、`openclaw-129-auth-metadata.json`。记录仅包含诊断元数据；未复制对话正文、完整请求载荷或凭据。
 
@@ -57,4 +56,4 @@ Proxy response (403) !== 200 when HTTP Tunneling | UND_ERR_ABORTED
 
 后续应验证已建立的 OpenClaw 页面在断连后能恢复，采用可靠的连接/页面健康信号、有限重试与可见的失败提示，避免因误判而持续刷新或丢失未发送输入。此轮没有修改上述逻辑，也没有对用户实例执行停止或重启。
 
-用户随后授权修复，嵌入页恢复缺口已修正并部署，验收见[嵌入页恢复修复记录](2026-11-04-openclaw-frame-recovery.md)。上述未修改的描述属于排查阶段快照；通知 WebSocket 和图像生成仍为独立待修项。
+用户随后授权修复，嵌入页恢复缺口已修正并部署，验收见[嵌入页恢复修复记录](2026-11-04-openclaw-frame-recovery.md)。上述未修改的描述属于排查阶段快照；通知 WebSocket 仍为独立待修项。用户再次明确，`api.openai.com` 被拦截是正常策略行为，不算问题，已据此修正本记录的分类。

@@ -47,4 +47,4 @@ clawmanager.local/clawmanager@sha256:f52d375a8ee742e4c864c21c93a9dfa1d6560120a43
 - `frame-browser-results/frame-browser.log` 及 `screenshots/`。
 - `app-frame-recovery-image.json`、`frame-ui-deployed.json`、`openclaw-ui-transport-verified.json`。
 
-部署前完整快照仅保存在节点的 0600 私有文件。未提交或推送代码。本轮只处理嵌入页恢复；CM 通知 WebSocket 的登录 token 刷新和 OpenClaw 图像生成直连尝试仍见[独立排查记录](2026-11-04-openclaw-network-error.md)。
+部署前完整快照仅保存在节点的 0600 私有文件。未提交或推送代码。本轮只处理嵌入页恢复；CM 通知 WebSocket 的登录 token 刷新仍为[独立待修项](2026-11-04-openclaw-network-error.md)。记录中的外部模型连接被拒绝属于正常安全策略，不是待修缺陷。
