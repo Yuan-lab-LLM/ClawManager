@@ -55,9 +55,9 @@ func TestRuntimeTaskMySQLRevocationLifecycle(t *testing.T) {
 		}
 	})
 	exec("CREATE TABLE users (id INT PRIMARY KEY,is_active BOOLEAN NOT NULL) ENGINE=InnoDB")
-	exec("CREATE TABLE instances (id INT PRIMARY KEY,user_id INT NOT NULL,runtime_generation INT NOT NULL) ENGINE=InnoDB")
+	exec("CREATE TABLE instances (id INT PRIMARY KEY,user_id INT NOT NULL,runtime_generation INT NOT NULL,instance_mode VARCHAR(16) NOT NULL DEFAULT 'pro',status VARCHAR(32) NOT NULL DEFAULT 'running') ENGINE=InnoDB")
 	exec("INSERT INTO users VALUES (1,TRUE),(2,TRUE)")
-	exec("INSERT INTO instances VALUES (10,1,5)")
+	exec("INSERT INTO instances(id,user_id,runtime_generation) VALUES (10,1,5)")
 	writeSchema, schemaErr := os.ReadFile("../db/migrations/068_add_workspace_write_intents.sql")
 	if schemaErr != nil {
 		t.Fatal(schemaErr)
@@ -77,6 +77,18 @@ func TestRuntimeTaskMySQLRevocationLifecycle(t *testing.T) {
 		}
 	}
 	modelRepo := NewLLMModelRepository(sess)
+	// Model repositories no longer create schemas on construction. Seed the
+	// migration-owned base table before applying this fixture's extra columns.
+	baseModelSchema, err := os.ReadFile("../db/migrations/045_add_llm_model_reasoning_control.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	exec(strings.Split(string(baseModelSchema), ";")[0])
+	exec(`ALTER TABLE llm_models ADD COLUMN reasoning_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+ ADD COLUMN model_group VARCHAR(100) NOT NULL DEFAULT '', ADD COLUMN deployment_priority INT NOT NULL DEFAULT 100,
+ ADD COLUMN max_concurrent_requests INT NOT NULL DEFAULT 0, ADD COLUMN context_window_tokens INT NOT NULL DEFAULT 0,
+ ADD COLUMN quality_tier INT NOT NULL DEFAULT 0, ADD COLUMN image_price_per_image DECIMAL(18,8) NULL,
+ ADD COLUMN provider_models_json LONGTEXT NULL`)
 	exec(`ALTER TABLE llm_models ADD COLUMN visibility_scope VARCHAR(24) NOT NULL DEFAULT 'all',
  ADD COLUMN access_policy_version INT NOT NULL DEFAULT 1, ADD COLUMN supports_tools BOOLEAN NOT NULL DEFAULT FALSE,
  ADD COLUMN supports_vision BOOLEAN NOT NULL DEFAULT FALSE, ADD COLUMN tools_support_override BOOLEAN NULL,
@@ -273,7 +285,7 @@ func TestRuntimeTaskMySQLRevocationLifecycle(t *testing.T) {
 	if _, err = maintenance.Poll(t.Context(), 10, 1, status); !errors.Is(err, models.ErrModelUnavailable) {
 		t.Fatal("stale generation report accepted", err)
 	}
-	exec("ALTER TABLE instances ADD COLUMN type VARCHAR(32) NOT NULL DEFAULT 'opencode', ADD COLUMN status VARCHAR(32) NOT NULL DEFAULT 'running'")
+	exec("ALTER TABLE instances ADD COLUMN type VARCHAR(32) NOT NULL DEFAULT 'opencode'")
 	upgrade := NewRuntimeUpgradeRepository(sess)
 	status.Generation = 7
 	drain, err = maintenance.Begin(t.Context(), 10, 1, 7, 1, time.Minute)

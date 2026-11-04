@@ -410,6 +410,7 @@ type Service interface {
 }
 
 type service struct {
+	modelActivity            ModelActivityRecorder
 	ownerUsage               *ownerrecords.Store
 	expandedModelCatalog     services.ExpandedLLMModelCatalog
 	runtimeTasks             repository.GatewayTaskRepository
@@ -554,6 +555,12 @@ func (s *service) listActiveModels() ([]models.LLMModel, error) {
 }
 
 func (s *service) ChatCompletions(ctx context.Context, userID int, req ChatCompletionRequest) (*ProxyResponse, string, error) {
+	finishActivity, activityErr := s.beginChatModelActivity(ctx, userID, &req)
+	if activityErr != nil {
+		return nil, "", activityErr
+	}
+	defer finishActivity()
+
 	if err := s.checkRuntimeTask(ctx, req); err != nil {
 		return nil, "", err
 	}
@@ -697,6 +704,12 @@ func (s *service) recordDeploymentFailover(prepared *preparedChatRequest, failed
 }
 
 func (s *service) StreamChatCompletions(ctx context.Context, userID int, req ChatCompletionRequest, w http.ResponseWriter) (string, error) {
+	finishActivity, activityErr := s.beginChatModelActivity(ctx, userID, &req)
+	if activityErr != nil {
+		return "", activityErr
+	}
+	defer finishActivity()
+
 	if err := s.checkRuntimeTask(ctx, req); err != nil {
 		return "", err
 	}

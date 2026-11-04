@@ -359,6 +359,7 @@ func main() {
 	if classifierErr != nil {
 		log.Fatal(classifierErr)
 	}
+	autoStopRepo := repository.NewInstanceAutoStopRepository(database)
 	runtimeTasks := repository.NewGatewayTaskRepository(database)
 	imageArtifacts, err := services.NewGatewayImageArtifactService(database, objectStorageService)
 	if err != nil {
@@ -369,7 +370,7 @@ func main() {
 	go imageArtifacts.RunCleanup(imageCleanupCtx)
 	imageJobs := services.NewGatewayImageJobService(database, gatewayBudgetService)
 	go imageJobs.RunRecovery(imageCleanupCtx)
-	aiGatewayService := aigateway.NewService(llmModelRepo, modelInvocationService, auditEventService, costRecordService, riskDetectionService, riskHitService, chatSessionService, chatMessageService, aigateway.WithExpandedLLMModelCatalog(llmModelService), aigateway.WithOwnerUsage(ownerStore), aigateway.WithDeploymentStore(deploymentStore), classifierOption, aigateway.WithRuntimeTasks(runtimeTasks), aigateway.WithImageArtifacts(imageArtifacts), aigateway.WithImageJobs(imageJobs))
+	aiGatewayService := aigateway.NewService(llmModelRepo, modelInvocationService, auditEventService, costRecordService, riskDetectionService, riskHitService, chatSessionService, chatMessageService, aigateway.WithExpandedLLMModelCatalog(llmModelService), aigateway.WithOwnerUsage(ownerStore), aigateway.WithDeploymentStore(deploymentStore), classifierOption, aigateway.WithRuntimeTasks(runtimeTasks), aigateway.WithModelActivity(autoStopRepo), aigateway.WithImageArtifacts(imageArtifacts), aigateway.WithImageJobs(imageJobs))
 	gatewayRuntimeHandler := handlers.NewGatewayRuntimeHandler(runtimeTasks, aiGatewayService, auditEventService)
 	runtimeProtocols := repository.NewRuntimeProtocolRepository(database)
 	runtimeProtocolHandler := handlers.NewRuntimeProtocolHandler(runtimeProtocols, instanceRepo)
@@ -621,6 +622,7 @@ func main() {
 			runtimeDeployments := k8s.NewRuntimeDeploymentService(k8sClient.Clientset)
 			runtimeSchedulerOptions := []services.RuntimeSchedulerOption{
 				services.WithRuntimeSchedulerWorkspaceRoot(cfg.Runtime.WorkspaceRoot),
+				services.WithRuntimeSchedulerAutoStopRepository(autoStopRepo),
 				services.WithRuntimeSchedulerNamespace(cfg.Runtime.Namespace),
 				services.WithRuntimeSchedulerGatewayPortRange(cfg.Runtime.GatewayPortStart, cfg.Runtime.GatewayPortEnd),
 				services.WithRuntimeSchedulerHeartbeatTimeout(cfg.Runtime.HeartbeatTimeout),
@@ -653,6 +655,12 @@ func main() {
 	} else {
 		log.Printf("runtime scheduler disabled by configuration")
 	}
+	var autoStopKube kubernetes.Interface
+	if client := k8s.GetClient(); client != nil {
+		autoStopKube = client.Clientset
+	}
+	autoStopService := services.NewInstanceAutoStopService(autoStopRepo, instanceService, autoStopKube)
+	autoStopHandler := handlers.NewInstanceAutoStopHandler(autoStopRepo)
 	runtimePoolHandler := handlers.NewRuntimePoolHandler(runtimePodRepo, bindingRepo, rolloutRepo, runtimeScheduler, runtimeEvents)
 	runtimePoolHandler.SetUpgradeService(runtimeUpgradeService)
 	runtimeManagementService := services.NewRuntimeManagementService(database, runtimeScheduler, northboundRepo)
@@ -691,6 +699,7 @@ func main() {
 	go db.RetryOwnerAnalytics(leaderCtx, database)
 
 	startBackground := func(ctx context.Context) {
+		go autoStopService.Run(ctx)
 		go ownerStore.Run(ctx)
 		go browserWorkerService.Run(ctx, 30*time.Second)
 		log.Printf("Starting leader-only background loops (identity=%s)", cfg.LeaderElection.Identity)
@@ -979,6 +988,9 @@ func main() {
 			adminRuntime.POST("/auth/enterprise/config/test", enterpriseAuthHandler.TestConfig)
 			adminRuntime.PUT("/auth/enterprise/config", enterpriseAuthHandler.UpdateConfig)
 			adminRuntime.GET("/auth/enterprise/status", enterpriseAuthHandler.Status)
+			adminRuntime.GET("/runtime-auto-stop", autoStopHandler.Get)
+			adminRuntime.PUT("/runtime-auto-stop", autoStopHandler.Update)
+			adminRuntime.PUT("/instances/:id/auto-stop", autoStopHandler.SetDisabled)
 			adminRuntime.GET("/runtime-pods", runtimePoolHandler.ListPods)
 			adminRuntime.GET("/runtime-pod-pools", runtimePodMaintenanceHandler.ManagedPools)
 			adminRuntime.GET("/runtime-pods/scale-options", runtimePodMaintenanceHandler.ScaleOptions)

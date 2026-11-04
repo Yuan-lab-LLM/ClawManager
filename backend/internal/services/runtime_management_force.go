@@ -111,6 +111,46 @@ func (s *RuntimeManagementService) stopSource(ctx context.Context, item RuntimeS
 	return nil
 }
 
+// A confirmed administrator move is an authorized restart of a previously live
+// instance. Commit its creating intent before target launch, without weakening
+// the general rule that a stopped instance cannot be revived by reports.
+func (s *RuntimeManagementService) prepareConfirmedMoveTarget(ctx context.Context, item RuntimeSchedulingItem, target *models.InstanceRuntimeBinding, ownerID string) error {
+	if target == nil || target.InstanceID != item.InstanceID || target.Generation != item.SourceGeneration+1 || target.State != "creating" {
+		return errors.New("confirmed move target reservation is unavailable")
+	}
+	return s.sess.TxContext(ctx, func(tx db.Session) error {
+		var owner, status string
+		row, err := tx.SQL().QueryRowContext(ctx, "SELECT owner_token,status FROM runtime_management_operations WHERE id=? FOR UPDATE", ownerID)
+		if err != nil {
+			return err
+		}
+		if err = row.Scan(&owner, &status); err != nil {
+			return err
+		}
+		if owner != s.token || status != "processing" {
+			return errors.New("move execution ownership lost; target held")
+		}
+		now := time.Now().UTC()
+		result, err := tx.SQL().ExecContext(ctx, `UPDATE instances SET status='creating',runtime_error_message=NULL,runtime_error_code=NULL,updated_at=?
+ WHERE id=? AND runtime_generation=? AND status='stopped'
+ AND EXISTS (SELECT 1 FROM instance_lifecycle_manual_guards WHERE instance_id=? AND token=?)
+ AND EXISTS (SELECT 1 FROM instance_runtime_bindings WHERE instance_id=? AND runtime_pod_id=? AND generation=? AND gateway_id=? AND state='creating')
+ AND NOT EXISTS (SELECT 1 FROM instance_model_activity WHERE instance_id=? AND (stop_operation_id<>'' OR stopped_reason<>'' OR start_deadline_at IS NOT NULL))`, now, item.InstanceID, target.Generation, item.InstanceID, ownerID, item.InstanceID, target.RuntimePodID, target.Generation, target.GatewayID, item.InstanceID)
+		if err != nil {
+			return err
+		}
+		changed, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if changed != 1 {
+			return errors.New("instance stop intent or target changed; move target held")
+		}
+		_, err = tx.SQL().ExecContext(ctx, `UPDATE instance_model_activity SET generation=?,monitoring_since=?,activity_version=activity_version+1,blocker='',updated_at=? WHERE instance_id=?`, target.Generation, now, now, item.InstanceID)
+		return err
+	}, nil)
+}
+
 // Commit the creating intent and source release together. A failed commit keeps
 // the old binding/occupancy; a crash cannot leave a released, unschedulable source.
 func (s *RuntimeManagementService) queueEvictedSource(ctx context.Context, item RuntimeSchedulingItem, binding *models.InstanceRuntimeBinding, ownerID string) error {

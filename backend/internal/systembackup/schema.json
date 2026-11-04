@@ -1510,6 +1510,74 @@
     ]
   },
   {
+    "name": "instance_auto_stop_settings",
+    "columns": [
+      {
+        "name": "id",
+        "type": "tinyint unsigned",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "enabled",
+        "type": "tinyint(1)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "check_interval_days",
+        "type": "int unsigned",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "idle_timeout_days",
+        "type": "int unsigned",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "version",
+        "type": "bigint unsigned",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "next_check_at",
+        "type": "datetime(6)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "updated_at",
+        "type": "datetime(6)",
+        "nullable": "NO",
+        "extra": "DEFAULT_GENERATED"
+      },
+      {
+        "name": "scan_token",
+        "type": "varchar(64)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "scan_cursor",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "scan_lease_until",
+        "type": "datetime(6)",
+        "nullable": "YES",
+        "extra": ""
+      }
+    ],
+    "primary_key": [
+      "id"
+    ]
+  },
+  {
     "name": "instance_browser_workers",
     "columns": [
       {
@@ -2199,6 +2267,92 @@
     ]
   },
   {
+    "name": "instance_model_activity",
+    "columns": [
+      {
+        "name": "instance_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "generation",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "monitoring_since",
+        "type": "datetime(6)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "last_gateway_activity_at",
+        "type": "datetime(6)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "activity_version",
+        "type": "bigint unsigned",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "auto_stop_disabled",
+        "type": "tinyint(1)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "stop_operation_id",
+        "type": "varchar(64)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "stop_phase",
+        "type": "varchar(32)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "stopped_reason",
+        "type": "varchar(32)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "stopped_at",
+        "type": "datetime(6)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "blocker",
+        "type": "varchar(512)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "start_deadline_at",
+        "type": "datetime(6)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "updated_at",
+        "type": "datetime(6)",
+        "nullable": "NO",
+        "extra": "DEFAULT_GENERATED"
+      }
+    ],
+    "primary_key": [
+      "instance_id"
+    ]
+  },
+  {
     "name": "instance_runtime_bindings",
     "columns": [
       {
@@ -2790,6 +2944,12 @@
         "name": "runtime_error_code",
         "type": "varchar(64)",
         "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "runtime_security_profile",
+        "type": "varchar(64)",
+        "nullable": "NO",
         "extra": ""
       }
     ],
@@ -5093,6 +5253,12 @@
         "type": "datetime",
         "nullable": "NO",
         "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "scheduling_paused",
+        "type": "tinyint(1)",
+        "nullable": "NO",
+        "extra": ""
       }
     ],
     "primary_key": [
@@ -7336,6 +7502,12 @@
         "name": "display_name",
         "type": "varchar(255)",
         "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "preview_security_profile",
+        "type": "varchar(64)",
+        "nullable": "NO",
         "extra": ""
       }
     ],

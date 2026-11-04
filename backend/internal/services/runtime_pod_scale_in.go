@@ -55,12 +55,13 @@ type RuntimePodScaleInPreflight struct {
 // never replayed as an increment/decrement or as a second instance move.
 type runtimePodScaleInJournal struct {
 	RuntimePodScaleInRequest
-	Plan         RuntimePodScaleInPreflight      `json:"plan"`
-	Target       k8s.RuntimePodScaleTarget       `json:"target"`
-	Snapshot     *k8s.RuntimePodScaleSnapshot    `json:"snapshot"`
-	Protection   k8s.RuntimePodScaleInProtection `json:"protection"`
-	Phase        string                          `json:"phase"`
-	ErrorMessage string                          `json:"error_message,omitempty"`
+	AutomaticIdle bool                            `json:"automatic_idle,omitempty"`
+	Plan          RuntimePodScaleInPreflight      `json:"plan"`
+	Target        k8s.RuntimePodScaleTarget       `json:"target"`
+	Snapshot      *k8s.RuntimePodScaleSnapshot    `json:"snapshot"`
+	Protection    k8s.RuntimePodScaleInProtection `json:"protection"`
+	Phase         string                          `json:"phase"`
+	ErrorMessage  string                          `json:"error_message,omitempty"`
 }
 
 func runtimeScaleInFreshPod(p models.RuntimePod, timeout time.Duration) error {
@@ -333,6 +334,10 @@ func (s *RuntimeManagementService) ScaleInSubmit(ctx context.Context, req Runtim
 	if req.PlanFingerprint == "" || req.PlanFingerprint != journal.Plan.PlanFingerprint {
 		return nil, errors.New("scale-in plan changed; run preflight again before confirming")
 	}
+	return s.submitScaleInJournal(ctx, journal, actor)
+}
+
+func (s *RuntimeManagementService) submitScaleInJournal(ctx context.Context, journal *runtimePodScaleInJournal, actor *int) (*RuntimeManagementOperation, error) {
 	if s.guards == nil {
 		return nil, errors.New("instance mutation reservation unavailable")
 	}
@@ -348,6 +353,10 @@ func (s *RuntimeManagementService) ScaleInSubmit(ctx context.Context, req Runtim
 	now := time.Now().UTC()
 	op := &RuntimeManagementOperation{ID: "runtime_mgmt_" + uuid.NewString(), Kind: "scale_in", Status: "pending", Items: append([]RuntimeSchedulingItem{}, journal.Plan.Items...), CreatedAt: now, UpdatedAt: now}
 	journal.Protection.OperationID = op.ID
+	if journal.AutomaticIdle {
+		journal.Protection.AutomaticIdle = true
+		journal.Snapshot.IdleSleepOperation = op.ID
+	}
 	for i := range op.Items {
 		op.Items[i].State = "pending"
 	}
@@ -360,6 +369,26 @@ func (s *RuntimeManagementService) ScaleInSubmit(ctx context.Context, req Runtim
 		if err := s.scaleInAdmission(ctx, tx); err != nil {
 			return err
 		}
+		if journal.AutomaticIdle {
+			var enabled bool
+			row, err := tx.SQL().QueryRowContext(ctx, "SELECT enabled FROM instance_auto_stop_settings WHERE id=1 FOR UPDATE")
+			if err != nil {
+				return err
+			}
+			if err = row.Scan(&enabled); err != nil {
+				return err
+			}
+			if !enabled {
+				return errors.New("automatic idle scale-in disabled")
+			}
+			if err := s.idlePoolDemandAdmission(ctx, tx); err != nil {
+				return err
+			}
+			if err := repository.CheckRuntimePodDeletionIntent(ctx, tx, journal.Target.Namespace, journal.Target.DeploymentName); err != nil {
+				return err
+			}
+		}
+
 		// Publish the source fence atomically with the pause after checking every
 		// original binding. Preclaimed publication then sees the same durable fence.
 		for _, source := range journal.Plan.SourcePods {

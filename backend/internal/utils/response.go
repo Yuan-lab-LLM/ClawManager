@@ -30,6 +30,15 @@ func Error(c *gin.Context, status int, message string) {
 
 // HandleError handles different types of errors and sends appropriate responses
 func HandleError(c *gin.Context, err error) {
+	if errors.Is(err, models.ErrInstanceStopping) || errors.Is(err, models.ErrAutoStopConflict) {
+		Error(c, http.StatusConflict, err.Error())
+		return
+	}
+	if errors.Is(err, models.ErrActivityUnavailable) {
+		Error(c, http.StatusServiceUnavailable, models.ErrActivityUnavailable.Error())
+		return
+	}
+
 	if errors.Is(err, models.ErrChatNotSupported) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"code": "model_operation_not_supported", "type": "invalid_request_error", "message": err.Error()}})
 		return

@@ -228,3 +228,39 @@ test("scale-in preflight and execution preserve the requested count and plan fin
     ['/admin/runtime-pods/scale-in', { ...request, plan_fingerprint: 'reviewed-plan' }],
   ]);
 });
+
+test("automatic stop services preserve settings version, disabled flag and response envelopes", async () => {
+  const calls = [];
+  const settings = { enabled: true, check_interval_days: 2, idle_timeout_days: 7, version: 5, next_check_at: '2026-11-03T20:00:00Z' };
+  const activity = { instance_id: 21, auto_stop_disabled: true, monitoring_since: '2026-11-01T00:00:00Z' };
+  const api = {
+    get: async (...args) => { calls.push(['get', ...args]); return { data: { data: settings } }; },
+    put: async (...args) => { calls.push(['put', ...args]); return { data: { data: args[0].includes('/instances/') ? activity : settings } }; },
+  };
+  const service = loadService(api);
+  const signal = new AbortController().signal;
+  assert.equal(await service.getAutoStopSettings(signal), settings);
+  const update = { enabled: false, check_interval_days: 2, idle_timeout_days: 7, version: 5 };
+  assert.equal(await service.updateAutoStopSettings(update), settings);
+  assert.equal(await service.setInstanceAutoStopDisabled(21, true), activity);
+  assert.equal(calls[0][1], '/admin/runtime-auto-stop');
+  assert.equal(calls[0][2].signal, signal);
+  assert.deepEqual(JSON.parse(JSON.stringify(calls.slice(1))), [
+    ['put', '/admin/runtime-auto-stop', update],
+    ['put', '/admin/instances/21/auto-stop', { auto_stop_disabled: true }],
+  ]);
+});
+
+test("automatic stop conflicts and mutation network failures propagate without retry", async () => {
+  for (const invoke of [
+    service => service.updateAutoStopSettings({ enabled: true, check_interval_days: 1, idle_timeout_days: 1, version: 1 }),
+    service => service.setInstanceAutoStopDisabled(21, true),
+  ]) {
+    for (const failure of [networkError(), new AxiosError('Refresh and retry', 'ERR_BAD_REQUEST', {}, undefined, { status: 409 })]) {
+      let calls = 0;
+      const api = { put: async () => { calls++; throw failure; } };
+      await assert.rejects(invoke(loadService(api)), error => error === failure);
+      assert.equal(calls, 1);
+    }
+  }
+});

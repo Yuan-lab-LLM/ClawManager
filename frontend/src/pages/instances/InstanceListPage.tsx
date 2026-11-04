@@ -3,6 +3,7 @@ import { Link, useNavigate, useLocation } from "react-router-dom";
 import { Monitor, MonitorPlay, Play, Plus, Search, Square, Trash2 } from "lucide-react";
 import ConfirmDialog from "../../components/ConfirmDialog";
 import InstanceLifecycleStatus from "../../components/InstanceLifecycleStatus";
+import InstanceAutoStopInfo from "../../components/InstanceAutoStopInfo";
 import { runtimeFailureSummary } from "../../lib/runtimeFailure";
 import InstanceLifecycleBatches from "../../components/InstanceLifecycleBatches";
 import { collectUnavailableLiteIds, pruneVisibleSelection } from "../../lib/unavailableInstanceSelection";
@@ -909,6 +910,7 @@ const InstanceListPage: React.FC = () => {
                     </td>
                     <td className="px-4 py-3">
                       <InstanceLifecycleStatus status={instance.status} availability={instance.availability} />
+                      <InstanceAutoStopInfo instance={instance} />
                     </td>
                     <td className="px-4 py-3 text-slate-600">
                       {formatBytes(instance.workspace_usage_bytes)}

@@ -118,6 +118,9 @@ func (s *instanceAgentService) Register(bootstrapToken string, req AgentRegister
 	if instance == nil || instance.ID != req.InstanceID {
 		return nil, fmt.Errorf("invalid agent bootstrap token")
 	}
+	if legacyAgentForbidden(instance) {
+		return nil, models.ErrInstanceStopping
+	}
 	if !supportsManagedRuntimeIntegration(instance.Type) {
 		return nil, fmt.Errorf("agent registration is only supported for managed runtime instances")
 	}
@@ -216,6 +219,9 @@ func (s *instanceAgentService) AuthenticateSession(sessionToken string) (*AgentS
 		return nil, fmt.Errorf("instance not found")
 	}
 
+	if legacyAgentForbidden(instance) {
+		return nil, models.ErrInstanceStopping
+	}
 	return &AgentSession{Instance: instance, Agent: agent}, nil
 }
 
@@ -227,6 +233,9 @@ func (s *instanceAgentService) Heartbeat(session *AgentSession, req AgentHeartbe
 		return nil, fmt.Errorf("agent id does not match session")
 	}
 
+	if legacyAgentForbidden(session.Instance) {
+		return nil, models.ErrInstanceStopping
+	}
 	now := time.Now().UTC()
 	session.Agent.Status = agentStatusOnline
 	session.Agent.LastHeartbeatAt = &now
@@ -421,4 +430,14 @@ func optionalString(value string) *string {
 	}
 	trimmed := strings.TrimSpace(value)
 	return &trimmed
+}
+
+// Native Lite uses generation-bound Runtime capabilities. Its reusable legacy
+// agent credentials must never authorize registration, renewal, or online reports.
+func legacyAgentForbidden(i *models.Instance) bool {
+	if i == nil || !strings.EqualFold(strings.TrimSpace(i.InstanceMode), "lite") {
+		return false
+	}
+	_, native := NormalizeV2RuntimeType(i.Type)
+	return native || strings.EqualFold(strings.TrimSpace(i.RuntimeType), "gateway") || i.RuntimeSecurityProfile != "" || (i.Status != "running" && i.Status != "creating")
 }

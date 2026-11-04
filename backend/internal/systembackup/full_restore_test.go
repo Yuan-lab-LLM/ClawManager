@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -86,8 +87,8 @@ func TestFullSchemaTeamRestorePreservesScopeHistoryAndInterruptedResults(t *test
 	if e != nil {
 		t.Fatal(e)
 	}
-	if len(capture.Tables) != 75 || len(normalizedResult.Tables) != 75 || len(evidence) < 10 {
-		t.Fatal("incomplete full capture/normalization")
+	if !slices.Contains(tables, "instance_model_activity") || !slices.Contains(tables, "instance_auto_stop_settings") || len(capture.Tables) != len(tables) || len(normalizedResult.Tables) != len(tables) || len(evidence) < 10 {
+		t.Fatalf("incomplete full capture/normalization: selected=%d captured=%d normalized=%d quarantined=%d", len(tables), len(capture.Tables), len(normalizedResult.Tables), len(evidence))
 	}
 	target, targetName := isolatedSchemaDB(t, source)
 	var sourceName string
