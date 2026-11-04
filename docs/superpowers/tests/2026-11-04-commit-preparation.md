@@ -4,6 +4,8 @@
 
 ## 提交拆分
 
+最初按下表整理 6 个功能提交。随后用户要求推送并核对部署，另补一个部署说明与[一致性核对记录](2026-11-04-deployment-consistency-audit.md)的文档提交；未改动已验证的功能代码或集群配置。
+
 | 仓库 | 提交主题 |
 | --- | --- |
 | AgentsRuntime | `feat(runtime): add graceful idle stop for Lite instances` |
