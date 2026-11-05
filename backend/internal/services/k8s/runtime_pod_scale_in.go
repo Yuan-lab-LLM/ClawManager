@@ -27,6 +27,7 @@ type RuntimePodScaleInIdentity struct {
 	DeletionCost *string `json:"deletion_cost,omitempty"`
 }
 type RuntimePodScaleInProtection struct {
+	AutomaticIdle    bool                        `json:"automatic_idle,omitempty"`
 	OperationID      string                      `json:"operation_id"`
 	Namespace        string                      `json:"namespace"`
 	DeploymentName   string                      `json:"deployment_name"`
@@ -120,7 +121,7 @@ func runtimeScaleInPodReady(p corev1.Pod) bool {
 	return false
 }
 func (s *runtimeDeploymentService) validateRuntimeScaleInSet(ctx context.Context, p RuntimePodScaleInProtection, readiness ...bool) (*appsv1.Deployment, []corev1.Pod, error) {
-	if p.OperationID == "" || p.DeploymentUID == "" || p.Replicas < 1 || p.PreviousReplicas <= p.Replicas || len(p.SourcePods) != int(p.PreviousReplicas-p.Replicas) || len(p.RetainedPods) != int(p.Replicas) {
+	if p.OperationID == "" || p.DeploymentUID == "" || p.Replicas < 0 || p.PreviousReplicas <= p.Replicas || len(p.SourcePods) != int(p.PreviousReplicas-p.Replicas) || len(p.RetainedPods) != int(p.Replicas) {
 		return nil, nil, fmt.Errorf("complete immutable scale-in proof required")
 	}
 	d, err := s.client.AppsV1().Deployments(p.Namespace).Get(ctx, p.DeploymentName, metav1.GetOptions{})
@@ -231,7 +232,17 @@ func (s *runtimeDeploymentService) ResizeRuntimeScaleIn(ctx context.Context, tar
 	if err = s.ConfirmRuntimeScaleInAssignmentsEmpty(ctx, p.Namespace, p.SourcePods); err != nil {
 		return err
 	}
-	patch, _ := json.Marshal([]map[string]any{{"op": "test", "path": "/metadata/uid", "value": p.DeploymentUID}, {"op": "test", "path": "/metadata/resourceVersion", "value": d.ResourceVersion}, {"op": "replace", "path": "/spec/replicas", "value": p.Replicas}})
+	patches := []map[string]any{{"op": "test", "path": "/metadata/uid", "value": p.DeploymentUID}, {"op": "test", "path": "/metadata/resourceVersion", "value": d.ResourceVersion}, {"op": "replace", "path": "/spec/replicas", "value": p.Replicas}}
+	if p.AutomaticIdle && p.Replicas == 0 {
+		annotations := d.Annotations
+		if annotations == nil {
+			annotations = map[string]string{}
+		}
+		annotations[runtimeIdleSleepAnnotation] = p.OperationID
+		delete(annotations, runtimeIdleWakeAnnotation)
+		patches = append(patches, map[string]any{"op": "add", "path": "/metadata/annotations", "value": annotations})
+	}
+	patch, _ := json.Marshal(patches)
 	_, err = s.client.AppsV1().Deployments(p.Namespace).Patch(ctx, p.DeploymentName, types.JSONPatchType, patch, metav1.PatchOptions{})
 	return err
 }

@@ -1440,7 +1440,10 @@ func (s *teamService) createTeamMemberInstance(userID int, team *models.Team, me
 		if instance == nil || instance.Owner == nil || !strings.EqualFold(*instance.Owner, *team.Owner) || instance.UserID != team.UserID {
 			return nil, fmt.Errorf("member instance ownership conflict")
 		}
-		if instance.Status == "error" || instance.Status == "stopped" {
+		if instance.Status == "stopped" {
+			return nil, models.ErrInstanceStopping
+		}
+		if instance.Status == "error" {
 			if err := s.instanceService.Start(instance.ID); err != nil {
 				return nil, err
 			}

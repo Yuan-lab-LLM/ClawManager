@@ -1,6 +1,7 @@
 ﻿import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import AdminLayout from '../../components/AdminLayout';
 import ConfirmDialog from '../../components/ConfirmDialog';
+import InstanceAutoStopInfo, { InstanceAutoStopControl } from '../../components/InstanceAutoStopInfo';
 import { useI18n } from '../../contexts/I18nContext';
 import { instanceService } from '../../services/instanceService';
 import { adminInstanceService } from '../../services/adminInstanceService';
@@ -398,6 +399,8 @@ const InstanceManagementPage: React.FC = () => {
                         <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${getStatusBadge(instance.status)}`}>
                           {t(`status.${instance.status}`)}
                         </span>
+                        <InstanceAutoStopInfo instance={instance} />
+                        <InstanceAutoStopControl instance={instance} onChanged={activity => setInstances(current => current.map(item => item.id === instance.id ? { ...item, last_gateway_activity_at: activity.last_gateway_activity_at, monitoring_since: activity.monitoring_since, auto_stop_disabled: activity.auto_stop_disabled, stopped_reason: activity.stopped_reason, auto_stop_blocker: activity.auto_stop_blocker, auto_stop_phase: activity.stop_phase } : item))} />
                       </td>
                       <td className="px-5 py-4 align-top">
                         <div className="flex justify-end gap-2">

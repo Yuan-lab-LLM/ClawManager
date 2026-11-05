@@ -32,6 +32,9 @@ function setup({
   dedicatedOrigin = true,
   cookieFailures = 0,
   reloadOnAccessRefresh = false,
+  monitorFrame = false,
+  accessFailures = 0,
+  accessDelayMs = 0,
 } = {}) {
   let now = Date.parse("2026-10-14T00:00:00Z");
   let timerId = 0;
@@ -84,6 +87,8 @@ function setup({
   const instanceService = {
     generateAccessToken: async (instanceId) => {
       calls.push(instanceId);
+      if (calls.length > 1 && accessDelayMs) await new Promise((resolve) => window.setTimeout(resolve, accessDelayMs));
+      if (calls.length > 1 && accessFailures-- > 0) throw new Error("Access temporarily unavailable");
       const token = `instance-capability-${calls.length}`;
       const expiresAt = now + HOUR_MS;
       managementCookie = { token, expiresAt };
@@ -155,6 +160,7 @@ function setup({
     isRunning: true,
     retainSessionOnStop: true,
     reloadOnAccessRefresh,
+    monitorFrame,
     resolveEmbedUrl: (url) => url,
     failedMessage: "Failed to renew access",
   };
@@ -198,6 +204,10 @@ function setup({
       for (const callback of listeners.get("focus") ?? []) callback();
       await settle();
     },
+    async focus() {
+      for (const callback of listeners.get("focus") ?? []) callback();
+      await settle();
+    },
     stop() {
       options.isRunning = false;
       render();
@@ -230,6 +240,200 @@ test("dedicated-origin cookies renew for multiple hours while the iframe URL sta
   assert.equal(options.cache, "no-store");
   assert.equal(options.referrerPolicy, "no-referrer");
   assert.ok(options.signal instanceof AbortSignal);
+  browser.unmount();
+});
+
+function frameWithText(text = "OpenClaw Main Session") {
+  const body = { innerText: text, textContent: text, querySelector: () => null };
+  return { contentDocument: { readyState: "complete", body }, isConnected: true };
+}
+
+test("explicit reload changes frame revision even when the same-origin URL is unchanged", async () => {
+  const browser = setup({ dedicatedOrigin: false });
+  await browser.advance(0);
+  const initialURL = browser.result.embedUrl;
+  const revision = browser.result.frameRevision;
+  await browser.result.refreshAccess({ forceReload: true });
+  await browser.advance(0);
+  assert.equal(browser.result.embedUrl, initialURL);
+  assert.equal(browser.result.frameRevision, revision + 1);
+  browser.unmount();
+});
+
+test("an established frame error renews credentials and reloads with backoff", async () => {
+  const browser = setup({ dedicatedOrigin: false, monitorFrame: true });
+  await browser.advance(0);
+  browser.result.handleFrameLoad(frameWithText());
+  await browser.advance(0);
+  browser.result.handleFrameError();
+  await browser.advance(0);
+  assert.equal(browser.result.frameStatus, "recovering");
+  await browser.advance(5000);
+  assert.equal(browser.calls.length, 2);
+  assert.equal(browser.result.frameRevision, 2);
+  browser.result.handleFrameLoad(frameWithText());
+  await browser.advance(0);
+  assert.equal(browser.result.frameStatus, "ready");
+  browser.unmount();
+});
+
+test("persistent blank frames stop after three reloads and manual retry resets the budget", async () => {
+  const browser = setup({ dedicatedOrigin: false, monitorFrame: true });
+  await browser.advance(0);
+  for (let i = 0; i < 4; i++) {
+    browser.result.handleFrameLoad(frameWithText(""));
+    await browser.advance(40_000);
+  }
+  assert.equal(browser.calls.length, 4, "Initial launch plus at most three recovery reloads");
+  assert.equal(browser.result.frameStatus, "error");
+  await browser.advance(120_000);
+  assert.equal(browser.calls.length, 4, "Exhaustion must stop background reloads");
+  await browser.result.refreshAccess({ forceReload: true });
+  await browser.advance(0);
+  assert.equal(browser.calls.length, 5);
+  browser.result.handleFrameLoad(frameWithText());
+  await browser.advance(0);
+  assert.equal(browser.result.frameStatus, "ready");
+  browser.unmount();
+});
+
+test("established proxy rejection recovers but normal chat quoting an error does not", async () => {
+  const browser = setup({ dedicatedOrigin: false, monitorFrame: true });
+  await browser.advance(0);
+  const healthy = frameWithText("Please explain: Access token expired or invalid");
+  healthy.contentDocument.body.querySelector = () => ({ shadowRoot: null, querySelector: () => ({}) });
+  browser.result.handleFrameLoad(healthy);
+  await browser.advance(20_000);
+  assert.equal(browser.calls.length, 1);
+  browser.result.handleFrameLoad(frameWithText('{"error":"Access token expired or invalid"}'));
+  await browser.advance(5000);
+  assert.equal(browser.calls.length, 2);
+  browser.unmount();
+});
+
+test("credential outages during frame recovery cannot create an unlimited retry loop", async () => {
+  const browser = setup({ dedicatedOrigin: false, monitorFrame: true, accessFailures: 20 });
+  await browser.advance(0);
+  browser.result.handleFrameLoad(frameWithText());
+  await browser.advance(0);
+  browser.result.handleFrameError();
+  await browser.advance(180_000);
+  assert.equal(browser.calls.length, 4);
+  assert.equal(browser.result.frameStatus, "error");
+  browser.unmount();
+});
+
+test("healthy frames and inaccessible cross-origin documents are never periodically reloaded", async () => {
+  const browser = setup({ monitorFrame: true });
+  await browser.advance(0);
+  browser.result.handleFrameLoad(frameWithText());
+  await browser.advance(60_000);
+  const inaccessible = { get contentDocument() { throw new Error("Cross origin"); } };
+  browser.result.handleFrameLoad(inaccessible);
+  await browser.advance(60_000);
+  assert.equal(browser.calls.length, 1);
+  browser.unmount();
+});
+
+test("stopping or unmounting cancels a pending frame recovery", async () => {
+  for (const action of ["stop", "unmount"]) {
+    const browser = setup({ dedicatedOrigin: false, monitorFrame: true });
+    await browser.advance(0);
+    browser.result.handleFrameLoad(frameWithText());
+    await browser.advance(0);
+    browser.result.handleFrameError();
+    browser[action]();
+    await browser.advance(60_000);
+    assert.equal(browser.calls.length, 1);
+    browser.unmount();
+  }
+});
+
+test("a blank application that recovers during backoff keeps its new input", async () => {
+  const browser = setup({ dedicatedOrigin: false, monitorFrame: true });
+  await browser.advance(0);
+  const frame = frameWithText("");
+  browser.result.handleFrameLoad(frame);
+  await browser.advance(15_000);
+  assert.equal(browser.result.frameStatus, "recovering");
+  frame.contentDocument.body.innerText = "OpenClaw Main Session";
+  await browser.advance(5000);
+  assert.equal(browser.calls.length, 1, "Do not reload a page that has already recovered");
+  assert.equal(browser.result.frameStatus, "ready");
+  browser.unmount();
+});
+
+test("a successful cross-origin load after recovery clears the blocking overlay", async () => {
+  const browser = setup({ monitorFrame: true });
+  await browser.advance(0);
+  browser.result.handleFrameError();
+  await browser.advance(5000);
+  browser.result.handleFrameLoad({ get contentDocument() { throw new Error("Cross origin"); } });
+  await browser.advance(0);
+  assert.equal(browser.result.frameStatus, "ready");
+  browser.unmount();
+});
+
+test("an unmounted load callback cannot recreate a recovery timer", async () => {
+  const browser = setup({ dedicatedOrigin: false, monitorFrame: true });
+  await browser.advance(0);
+  browser.result.handleFrameLoad(frameWithText('{"error":"Access token expired or invalid"}'));
+  browser.unmount();
+  await browser.advance(60_000);
+  assert.equal(browser.calls.length, 1);
+});
+
+test("focus events during one slow recovery do not consume additional attempts", async () => {
+  const browser = setup({ dedicatedOrigin: false, monitorFrame: true, accessDelayMs: 60_000 });
+  await browser.advance(0);
+  browser.result.handleFrameError();
+  await browser.advance(5000);
+  for (let i = 0; i < 5; i++) {
+    await browser.focus();
+    await browser.advance(10_000);
+  }
+  assert.equal(browser.calls.length, 2);
+  assert.equal(browser.result.frameStatus, "recovering");
+  await browser.advance(10_000);
+  browser.result.handleFrameLoad(frameWithText());
+  await browser.advance(0);
+  assert.equal(browser.result.frameStatus, "ready");
+  browser.unmount();
+});
+
+test("continuous healthy rendering resets the recovery budget", async () => {
+  const browser = setup({ dedicatedOrigin: false, monitorFrame: true });
+  await browser.advance(0);
+  for (let i = 0; i < 3; i++) {
+    browser.result.handleFrameError();
+    await browser.advance(30_000);
+    browser.result.handleFrameLoad(frameWithText());
+    await browser.advance(0);
+  }
+  await browser.advance(35_000);
+  browser.result.handleFrameError();
+  await browser.advance(5000);
+  assert.equal(browser.calls.length, 5);
+  assert.equal(browser.result.frameStatus, "recovering");
+  browser.unmount();
+});
+
+test("self-recovery is detected while a longer backoff is still pending", async () => {
+  const browser = setup({ dedicatedOrigin: false, monitorFrame: true });
+  await browser.advance(0);
+  for (let i = 0; i < 2; i++) {
+    browser.result.handleFrameError();
+    await browser.advance(10_000);
+    browser.result.handleFrameLoad(frameWithText());
+    await browser.advance(0);
+  }
+  const frame = frameWithText("");
+  browser.result.handleFrameLoad(frame);
+  await browser.advance(15_000);
+  frame.contentDocument.body.innerText = "OpenClaw recovered";
+  await browser.advance(5000);
+  assert.equal(browser.result.frameStatus, "ready", "Do not keep a recovered page covered until backoff expires");
+  assert.equal(browser.calls.length, 3);
   browser.unmount();
 });
 

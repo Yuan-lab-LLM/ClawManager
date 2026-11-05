@@ -123,6 +123,21 @@ func WithRuntimePodAssignmentAdmission(ctx context.Context, sess db.Session, act
 		if bound != 1 {
 			return fmt.Errorf("Runtime assignment publication requires its current durable generation binding")
 		}
+		row, err = tx.SQL().QueryRowContext(ctx, `SELECT runtime_generation,status FROM instances WHERE id=? FOR UPDATE`, instanceID)
+		if err != nil {
+			return err
+		}
+		var currentGeneration int
+		var currentStatus string
+		if err = row.Scan(&currentGeneration, &currentStatus); err != nil {
+			return err
+		}
+		if currentGeneration != generation || (currentStatus != "creating" && currentStatus != "running" && currentStatus != "error") {
+			return models.ErrInstanceStopping
+		}
+		if err = checkAutoStopRuntimeState(ctx, tx, instanceID, "creating", generation); err != nil {
+			return err
+		}
 		return publish()
 	}, nil)
 }

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -68,10 +69,11 @@ type runtimeAgentRegisterRequest struct {
 
 type runtimeAgentHeartbeatRequest struct {
 	runtimeAgentPodIdentity
-	State      string     `json:"state" binding:"required"`
-	UsedSlots  int        `json:"used_slots"`
-	Draining   bool       `json:"draining"`
-	ReportedAt *time.Time `json:"reported_at,omitempty"`
+	MaxGateways int        `json:"max_gateways,omitempty"`
+	State       string     `json:"state" binding:"required"`
+	UsedSlots   int        `json:"used_slots"`
+	Draining    bool       `json:"draining"`
+	ReportedAt  *time.Time `json:"reported_at,omitempty"`
 }
 
 type runtimeAgentMetricsRequest struct {
@@ -136,6 +138,13 @@ func (h *RuntimeAgentHandler) Register(c *gin.Context) {
 		state = "ready"
 	}
 	capacity := runtimePodCapacityFromReport(req.Capacity, h.cfg.MaxGatewaysPerPod)
+	if slices.Contains(req.Capabilities, "container-slots-v1") {
+		if req.Capacity <= 0 {
+			utils.Error(c, http.StatusBadRequest, "physical Runtime slot capacity is required")
+			return
+		}
+		capacity = boundedRuntimeSlotCapacity(req.Capacity, h.cfg.MaxGatewaysPerPod)
+	}
 	// Liveness is measured at the control plane. Agent clocks may drift and a
 	// request can sit behind a slow database or network path before it arrives.
 	// Using reported_at here can make a newly received report look stale and
@@ -222,6 +231,28 @@ func (h *RuntimeAgentHandler) Heartbeat(c *gin.Context) {
 	}
 	lastSeen := time.Now().UTC()
 	capacity := runtimePodCapacityFromReport(0, h.cfg.MaxGatewaysPerPod)
+	if h.cfg.ContainerSlots > 0 {
+		pod, err := h.podRepo.GetByID(c.Request.Context(), podID)
+		if err != nil {
+			utils.HandleError(c, err)
+			return
+		}
+		if pod == nil {
+			utils.Error(c, http.StatusNotFound, "runtime pod must register before heartbeats")
+			return
+		}
+		if slices.Contains(pod.Capabilities(), "container-slots-v1") {
+			physical := req.MaxGateways
+			if physical <= 0 {
+				physical = pod.Capacity
+			}
+			if physical <= 0 {
+				utils.Error(c, http.StatusConflict, "physical Runtime slot capacity is unavailable; register again")
+				return
+			}
+			capacity = boundedRuntimeSlotCapacity(physical, h.cfg.MaxGatewaysPerPod)
+		}
+	}
 	if err := h.podRepo.UpdateHeartbeat(c.Request.Context(), podID, strings.TrimSpace(req.State), req.UsedSlots, capacity, req.Draining, lastSeen); err != nil {
 		utils.HandleError(c, err)
 		return
@@ -578,6 +609,13 @@ func runtimePodCapacityFromReport(reported, configured int) int {
 		capacity = services.RuntimePodCapacity
 	}
 	return capacity
+}
+
+func boundedRuntimeSlotCapacity(physical, configured int) int {
+	if configured > 0 {
+		return min(physical, configured)
+	}
+	return physical
 }
 
 func trimStringPtr(value *string) *string {

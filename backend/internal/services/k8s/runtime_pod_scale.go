@@ -57,13 +57,17 @@ type RuntimePodScaleResult struct {
 // Server-side proof, resolved from the registered live Pod and committed rollout.
 type RuntimePodScaleTarget struct {
 	RuntimeType, Namespace, DeploymentName, PodName, PodUID string
+	IdlePool                                                bool // Internal only: permit ordinary custom pools for idle scale-in.
 	UpgradeID, SourceDeployment, ImageRef                   string
 }
 type RuntimePodScaleSnapshot struct {
-	Option           RuntimePodScaleOption
-	Template         corev1.PodTemplateSpec
-	ResourceVersion  string
-	ScaleInOperation string
+	Option                   RuntimePodScaleOption
+	Template                 corev1.PodTemplateSpec
+	ResourceVersion          string
+	ScaleInOperation         string
+	WorkspaceStorageIdentity string
+	IdleSleepOperation       string
+	DeploymentGeneration     int64
 }
 type RuntimePodScaleDeploymentService interface {
 	InspectRuntimeScale(context.Context, RuntimePodScaleTarget) (*RuntimePodScaleSnapshot, error)
@@ -79,7 +83,7 @@ func (s *runtimeDeploymentService) InspectRuntimeScale(ctx context.Context, targ
 		return nil, fmt.Errorf("current default Deployment identity and positive serving replicas required")
 	}
 	for _, labels := range []map[string]string{d.Labels, d.Spec.Template.Labels, p.Labels} {
-		if labels[runtimeManagedPoolLabel] == "true" || labels[upgradeLabPurposeLabel] == "runtime-managed-pool" {
+		if !target.IdlePool && (labels[runtimeManagedPoolLabel] == "true" || labels[upgradeLabPurposeLabel] == "runtime-managed-pool") {
 			return nil, fmt.Errorf("custom managed pools cannot be expanded as the default")
 		}
 	}
@@ -149,7 +153,11 @@ func (s *runtimeDeploymentService) InspectRuntimeScale(ctx context.Context, targ
 		}
 	}
 	option := RuntimePodScaleOption{RuntimeType: target.RuntimeType, Namespace: d.Namespace, DeploymentName: d.Name, DeploymentUID: string(d.UID), Replicas: *d.Spec.Replicas, SlotCount: len(spec.Containers) - 1, PodResources: runtimeResourceBudget(*resources), CoordinatorResources: runtimeResourceBudget(spec.Containers[0].Resources), SlotResources: runtimeResourceBudget(spec.Containers[1].Resources), ImageRef: spec.Containers[0].Image}
-	return &RuntimePodScaleSnapshot{Option: option, Template: *d.Spec.Template.DeepCopy(), ResourceVersion: d.ResourceVersion, ScaleInOperation: d.Labels[RuntimeScaleInOperationLabel]}, nil
+	storage, err := s.idleRuntimeStorageIdentity(ctx, d.Namespace, d.Spec.Template.Spec)
+	if err != nil {
+		return nil, err
+	}
+	return &RuntimePodScaleSnapshot{DeploymentGeneration: d.Generation, WorkspaceStorageIdentity: storage, Option: option, Template: *d.Spec.Template.DeepCopy(), ResourceVersion: d.ResourceVersion, ScaleInOperation: d.Labels[RuntimeScaleInOperationLabel]}, nil
 }
 
 func (s *runtimeDeploymentService) ExpandRuntimeScale(ctx context.Context, target RuntimePodScaleTarget, expected *RuntimePodScaleSnapshot, count int) (*RuntimePodScaleResult, error) {

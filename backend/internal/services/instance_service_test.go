@@ -132,7 +132,7 @@ func TestBuildGatewayEnvInjectsGatewayModelCatalog(t *testing.T) {
 	}
 }
 
-func TestResolveGatewayModelInjectionDoesNotGrantDiscoveredModels(t *testing.T) {
+func TestResolveGatewayModelInjectionUsesSavedProviderCatalog(t *testing.T) {
 	provider := models.LLMModel{
 		DisplayName:       "icompify",
 		ProviderType:      models.ProviderTypeOpenAICompatible,
@@ -147,22 +147,29 @@ func TestResolveGatewayModelInjectionDoesNotGrantDiscoveredModels(t *testing.T) 
 	}); err != nil {
 		t.Fatal(err)
 	}
+	// Neither an unsaved hydrated model nor a discovery-cache result may add
+	// to the explicitly saved provider_models_json catalog.
+	const discoveredOnly = "unsaved-discovery-model"
+	provider.ProviderModels = append(provider.ProviderModels, models.LLMProviderModel{ID: discoveredOnly})
 	service := &instanceService{
 		llmModelRepo: &stubLLMModelRepository{active: []models.LLMModel{provider}},
+		expandedModelCatalog: &expandedModelCatalogStub{active: []models.LLMModel{
+			{DisplayName: discoveredOnly, ProviderModelName: discoveredOnly, CatalogProviderName: provider.DisplayName},
+		}},
 	}
 
 	injection, err := service.resolveGatewayModelInjection(1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if injection.modelsJSON != `["auto","icompify"]` {
-		t.Fatalf("provider catalog was not expanded for instance injection: %s", injection.modelsJSON)
+	if injection.modelsJSON != `["auto","qwen3.8","glm-5.2","minimax-m3"]` {
+		t.Fatalf("saved provider catalog was not expanded or unsaved discovery leaked: %s", injection.modelsJSON)
 	}
-	if injection.providerModelsJSON != `["auto/auto","icompify/icompify"]` {
+	if injection.providerModelsJSON != `["auto/auto","icompify/qwen3.8","icompify/glm-5.2","icompify/minimax-m3"]` {
 		t.Fatalf("provider-qualified catalog was not injected: %s", injection.providerModelsJSON)
 	}
-	if injection.codingAgentDefaultModel != "icompify" {
-		t.Fatalf("coding agent default = %q, want icompify", injection.codingAgentDefaultModel)
+	if injection.codingAgentDefaultModel != "qwen3.8" {
+		t.Fatalf("coding agent default = %q, want qwen3.8", injection.codingAgentDefaultModel)
 	}
 }
 
@@ -214,11 +221,17 @@ func assertOpenCodeGatewayConfig(t *testing.T, raw string) {
 	if err := json.Unmarshal([]byte(raw), &config); err != nil {
 		t.Fatalf("OPENCODE_CONFIG_CONTENT is not valid JSON: %v", err)
 	}
-	if config.Model != "clawmanager/auto" { t.Fatalf("legacy provider reference changed: %s", raw) }
+	if config.Model != "clawmanager/auto" {
+		t.Fatalf("legacy provider reference changed: %s", raw)
+	}
 	provider, ok := config.Provider["clawmanager"]
-	if !ok || provider.NPM != "@ai-sdk/openai-compatible" || provider.Options["baseURL"] != "{env:CLAWMANAGER_LLM_BASE_URL}" || provider.Options["apiKey"] != "{env:CLAWMANAGER_LLM_API_KEY}" { t.Fatalf("missing governed provider: %s", raw) }
-	for _, name := range []string{"auto","GPT-4.1","Claude 3.7 Sonnet","deepseek-r1"} {
-		if _, ok := provider.Models[name]; !ok { t.Fatalf("missing model %q", name) }
+	if !ok || provider.NPM != "@ai-sdk/openai-compatible" || provider.Options["baseURL"] != "{env:CLAWMANAGER_LLM_BASE_URL}" || provider.Options["apiKey"] != "{env:CLAWMANAGER_LLM_API_KEY}" {
+		t.Fatalf("missing governed provider: %s", raw)
+	}
+	for _, name := range []string{"auto", "GPT-4.1", "Claude 3.7 Sonnet", "deepseek-r1"} {
+		if _, ok := provider.Models[name]; !ok {
+			t.Fatalf("missing model %q", name)
+		}
 	}
 	if provider.Models["auto"].Limit.Context != 32000 || provider.Models["GPT-4.1"].Limit.Context != 128000 || provider.Models["Claude 3.7 Sonnet"].Limit.Context != 128000 {
 		t.Fatalf("OpenCode config is missing model context limits: %s", raw)

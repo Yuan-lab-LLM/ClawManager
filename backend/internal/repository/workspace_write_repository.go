@@ -24,6 +24,9 @@ func (r *workspaceWriteRepository) Begin(ctx context.Context, w models.Workspace
 		return models.ErrRuntimeUpgradeConflict
 	}
 	return (&instanceRepository{r.sess}).withUnfencedInstance(ctx, w.InstanceID, func(tx *instanceRepository) error {
+		if err := checkInstanceAutoStopMutation(ctx, tx.sess, w.InstanceID); err != nil {
+			return err
+		}
 		row, err := tx.sess.SQL().QueryRowContext(ctx, `SELECT user_id,runtime_generation,status FROM instances WHERE id=?`, w.InstanceID)
 		if err != nil {
 			return err

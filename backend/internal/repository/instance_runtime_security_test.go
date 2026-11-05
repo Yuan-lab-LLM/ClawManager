@@ -66,7 +66,7 @@ func runtimeSecurityMySQL(t *testing.T) *instanceRepository {
 		case reflect.Bool:
 			sqlType = "BOOLEAN"
 		case reflect.String:
-			sqlType = "TEXT"
+			sqlType = "VARCHAR(255)"
 		default:
 			if columnType == reflect.TypeOf(time.Time{}) {
 				sqlType = "DATETIME(6)"
@@ -103,6 +103,7 @@ func runtimeSecurityMySQL(t *testing.T) *instanceRepository {
 	if _, err = sess.SQL().Exec("INSERT INTO instances (id,user_id,name,status,runtime_generation) VALUES (7,3,'before','creating',2)"); err != nil {
 		t.Fatal(err)
 	}
+	applyIdleStopFixtureSchema(t, sess)
 	return &instanceRepository{sess: sess}
 }
 

@@ -410,6 +410,7 @@ type Service interface {
 }
 
 type service struct {
+	modelActivity            ModelActivityRecorder
 	ownerUsage               *ownerrecords.Store
 	expandedModelCatalog     services.ExpandedLLMModelCatalog
 	runtimeTasks             repository.GatewayTaskRepository
@@ -491,13 +492,13 @@ func NewService(
 
 func newGatewayHTTPClients() (*http.Client, *http.Client) {
 	return &http.Client{
-			Timeout: providerRequestTimeout,
-		}, &http.Client{
-			// Streaming model calls are bounded by the incoming request context,
-			// not by a fixed whole-request deadline. A single Agent turn may
-			// legitimately take longer than an ordinary JSON request.
-			Timeout: 0,
-		}
+		Timeout: providerRequestTimeout,
+	}, &http.Client{
+		// Streaming model calls are bounded by the incoming request context,
+		// not by a fixed whole-request deadline. A single Agent turn may
+		// legitimately take longer than an ordinary JSON request.
+		Timeout: 0,
+	}
 }
 
 func (s *service) ListAvailableModels() ([]AvailableModel, error) {
@@ -554,6 +555,12 @@ func (s *service) listActiveModels() ([]models.LLMModel, error) {
 }
 
 func (s *service) ChatCompletions(ctx context.Context, userID int, req ChatCompletionRequest) (*ProxyResponse, string, error) {
+	finishActivity, activityErr := s.beginChatModelActivity(ctx, userID, &req)
+	if activityErr != nil {
+		return nil, "", activityErr
+	}
+	defer finishActivity()
+
 	if err := s.checkRuntimeTask(ctx, req); err != nil {
 		return nil, "", err
 	}
@@ -697,6 +704,12 @@ func (s *service) recordDeploymentFailover(prepared *preparedChatRequest, failed
 }
 
 func (s *service) StreamChatCompletions(ctx context.Context, userID int, req ChatCompletionRequest, w http.ResponseWriter) (string, error) {
+	finishActivity, activityErr := s.beginChatModelActivity(ctx, userID, &req)
+	if activityErr != nil {
+		return "", activityErr
+	}
+	defer finishActivity()
+
 	if err := s.checkRuntimeTask(ctx, req); err != nil {
 		return "", err
 	}
@@ -1117,6 +1130,11 @@ func (s *service) prepareChatRequest(ctx context.Context, userID int, req ChatCo
 	}
 	if strings.EqualFold(strings.TrimSpace(requestedModel), strings.TrimSpace(resolvedModel.DisplayName)) {
 		prepared.deploymentCandidates = prioritizeSelectedDeployment(prepared.deploymentCandidates, resolvedModel)
+	}
+	// A removed saved catalog member must not reach the dispatcher's legacy
+	// empty-list fallback, which would resurrect its stale selected snapshot.
+	if resolvedModel.CatalogProviderName != "" && len(prepared.deploymentCandidates) == 0 {
+		return nil, models.ErrModelUnavailable
 	}
 	if isAutoModelRequest(requestedModel) {
 		prepared.deploymentCandidates = s.orderAutoDeploymentGroups(ctx, prepared, routing, prepared.deploymentCandidates)
@@ -3144,6 +3162,7 @@ func (s *service) resolveRequestedModel(requestedModel string) (*models.LLMModel
 	if err != nil {
 		return nil, fmt.Errorf("failed to list active models: %w", err)
 	}
+	items = models.ExpandLLMModelCatalog(items)
 	for _, item := range items {
 		if strings.TrimSpace(item.DisplayName) == requestedModel {
 			selected := item
@@ -3255,9 +3274,16 @@ func (s *service) deploymentCandidates(selected *models.LLMModel) []*models.LLMM
 	if !models.LLMChatAvailable(selected) {
 		return nil
 	}
+	catalogSelection := strings.TrimSpace(selected.CatalogProviderName) != ""
 	items, err := s.modelRepo.ListActive()
 	if err != nil {
+		if catalogSelection {
+			return nil
+		}
 		return []*models.LLMModel{selected}
+	}
+	if catalogSelection {
+		items = models.ExpandLLMModelCatalog(items)
 	}
 	group := strings.TrimSpace(selected.ModelGroup)
 	if group == "" {
@@ -3265,6 +3291,11 @@ func (s *service) deploymentCandidates(selected *models.LLMModel) []*models.LLMM
 	}
 	candidates := make([]*models.LLMModel, 0)
 	for _, item := range orderModelDeployments(items) {
+		// A named catalog model must never silently revert to the provider's
+		// default or another sibling model during deployment/failover selection.
+		if catalogSelection && item.ProviderModelName != selected.ProviderModelName {
+			continue
+		}
 		itemGroup := strings.TrimSpace(item.ModelGroup)
 		if itemGroup == "" {
 			itemGroup = item.DisplayName
@@ -3275,7 +3306,7 @@ func (s *service) deploymentCandidates(selected *models.LLMModel) []*models.LLMM
 			candidates = append(candidates, &candidate)
 		}
 	}
-	if len(candidates) == 0 {
+	if len(candidates) == 0 && !catalogSelection {
 		return []*models.LLMModel{selected}
 	}
 	return candidates

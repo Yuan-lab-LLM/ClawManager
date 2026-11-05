@@ -65,3 +65,31 @@ func TestRuntimeLeaderServiceDifferentCallerCanAcquireExpiredLease(t *testing.T)
 func int32Ptr(value int32) *int32 {
 	return &value
 }
+
+func TestRuntimeIdlePoolLeaderObservationDistinguishesOwnershipFromRenewal(t *testing.T) {
+	for _, tc := range []struct {
+		name, holder string
+		age          time.Duration
+		held         bool
+	}{
+		{"same holder", "backend-a", 0, true},
+		{"different holder", "backend-b", 0, false},
+		{"expired", "backend-a", time.Minute, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			renew := metav1.NewMicroTime(time.Now().Add(-tc.age))
+			client := fake.NewSimpleClientset(&coordinationv1.Lease{
+				ObjectMeta: metav1.ObjectMeta{Name: runtimeLeaderLeaseName, Namespace: "runtime-system"},
+				Spec:       coordinationv1.LeaseSpec{HolderIdentity: &tc.holder, RenewTime: &renew, LeaseDurationSeconds: int32Ptr(15)},
+			})
+			service := NewRuntimeLeaderService(client, "runtime-system", "backend-a")
+			observer, ok := service.(interface{ HoldsLease(context.Context) bool })
+			if !ok {
+				t.Fatal("lease ownership cannot be distinguished from a renewal CAS conflict")
+			}
+			if observer.HoldsLease(context.Background()) != tc.held {
+				t.Fatal("incorrect current lease ownership")
+			}
+		})
+	}
+}

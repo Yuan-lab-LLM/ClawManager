@@ -57,6 +57,10 @@ func TestRuntimeFailureMySQLContract(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	if _, err := sess.SQL().Exec("ALTER TABLE instances ADD instance_mode VARCHAR(16) NOT NULL DEFAULT 'pro', ADD started_at DATETIME(6) NULL"); err != nil {
+		t.Fatal(err)
+	}
+	applyIdleStopFixtureSchema(t, sess)
 	r := &instanceRepository{sess: sess}
 	ctx := context.Background()
 	if claimed, err := r.FenceRuntimeRestart(ctx, 89, 8); err != nil || claimed {

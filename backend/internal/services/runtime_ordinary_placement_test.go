@@ -22,6 +22,22 @@ func ordinaryPlacementFixture() (models.RuntimePod, k8s.RuntimeDeploymentPod) {
 		k8s.RuntimeDeploymentPod{RuntimeType: "openclaw", Namespace: "tenant", DeploymentName: "pool", PodName: "current-pod", PodUID: uid, PodIP: &ip, ImageRef: image, ImageDigest: "sha256:" + strings.Repeat("b", 64), State: "ready", DesiredReplicas: 1}
 }
 
+func TestRuntimeIdlePoolPlacementCopiesOnlyAuthenticatedLiveStorage(t *testing.T) {
+	pod, live := ordinaryPlacementFixture()
+	live.WorkspaceStorageIdentity = "original-pvc"
+	dep := &fakeRuntimeDeploymentService{pods: []k8s.RuntimeDeploymentPod{live}}
+	s := NewRuntimeScheduler(nil, nil, nil, nil, nil, nil, nil, dep, time.Second, WithRuntimeSchedulerNamespace("tenant"))
+	got, err := s.verifiedOrdinaryRuntimePods(context.Background(), "openclaw", []models.RuntimePod{pod})
+	if err != nil || len(got) != 1 || got[0].WorkspaceStorageIdentity != live.WorkspaceStorageIdentity {
+		t.Fatalf("registered DB row did not receive verified live storage: %+v %v", got, err)
+	}
+	dep.pods[0].PodUID = "replacement"
+	got, err = s.verifiedOrdinaryRuntimePods(context.Background(), "openclaw", []models.RuntimePod{pod})
+	if err != nil || len(got) != 0 {
+		t.Fatal("copied storage from an unverified replacement Pod")
+	}
+}
+
 func TestOrdinaryPlacementMySQLDefaultScopeAndBirthFence(t *testing.T) {
 	sess := upgradeFlowDB(t)
 	ctx := context.Background()

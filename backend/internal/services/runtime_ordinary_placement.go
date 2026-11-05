@@ -40,6 +40,7 @@ func (s *RuntimeScheduler) currentOrdinaryRuntimePods(pods, inventory []models.R
 			reported.PoolRole, reported.PoolPurpose, reported.UpgradeID = live.PoolRole, live.PoolPurpose, live.UpgradeID
 			reported.SourceDeployment, reported.SchedulingEnabled, reported.DesiredReplicas = live.SourceDeployment, live.SchedulingEnabled, live.DesiredReplicas
 			reported.KubernetesPodUID, reported.KubernetesReady = live.PodUID, true
+			reported.WorkspaceStorageIdentity = live.WorkspaceStorageIdentity
 			if runtimePodEligibleForOrdinaryScheduling(reported) {
 				result = append(result, reported)
 			}
