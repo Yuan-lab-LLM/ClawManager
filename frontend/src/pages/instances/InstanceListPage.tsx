@@ -15,13 +15,15 @@ import {
   type SystemImageSetting,
 } from "../../services/systemSettingsService";
 import { teamService } from "../../services/teamService";
-import {
-  formatInstanceType,
-  type Instance,
-} from "../../types/instance";
+import { formatInstanceType, type Instance } from "../../types/instance";
 import type { Team, TeamMember } from "../../types/team";
+import {
+  INSTANCE_STATUS_FILTERS,
+  INSTANCE_TYPE_FILTERS,
+  instanceStatusFilterQuery,
+  type InstanceStatusFilter,
+} from "../../lib/instanceListFilters";
 
-import { INSTANCE_STATUS_FILTERS, INSTANCE_TYPE_FILTERS, instanceStatusFilterQuery, type InstanceStatusFilter } from "../../lib/instanceListFilters";
 type ModeFilter = "all" | Instance["instance_mode"];
 type TeamMembership = {
   team: Team;
@@ -148,13 +150,18 @@ const InstanceListPage: React.FC = () => {
   const [actionLoading, setActionLoading] = useState<number | null>(null);
   const [pendingDeleteId, setPendingDeleteId] = useState<number | null>(null);
   const [statusFilter, setStatusFilter] = useState<InstanceStatusFilter>(() => {
-    const status = initialQuery.get("status");
-    if (INSTANCE_STATUS_FILTERS.includes(status as (typeof INSTANCE_STATUS_FILTERS)[number])) return status as InstanceStatusFilter;
+    const status = INSTANCE_STATUS_FILTERS.find((value) => value === initialQuery.get("status"));
+    if (status) return status;
     const availability = initialQuery.get("availability");
     return availability === "available" ? "running" : availability === "starting" ? "creating" : "all";
   });
-  const [typeFilter, setTypeFilter] = useState(() => INSTANCE_TYPE_FILTERS.includes(initialQuery.get("type") as (typeof INSTANCE_TYPE_FILTERS)[number]) ? initialQuery.get("type")! : "all");
-  const [modeFilter, setModeFilter] = useState<ModeFilter>(() => (["lite", "pro"].includes(initialQuery.get("mode") || "") ? initialQuery.get("mode") : "all") as ModeFilter);
+  const [typeFilter, setTypeFilter] = useState<string>(
+    () => INSTANCE_TYPE_FILTERS.find((value) => value === initialQuery.get("type")) ?? "all",
+  );
+  const [modeFilter, setModeFilter] = useState<ModeFilter>(() => {
+    const mode = initialQuery.get("mode");
+    return mode === "lite" || mode === "pro" ? mode : "all";
+  });
   const [searchQuery, setSearchQuery] = useState(initialQuery.get("q") || "");
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState(initialQuery.get("q") || "");
   const [page, setPage] = useState(() => Math.max(1, Number(initialQuery.get("page")) || 1));
@@ -273,7 +280,6 @@ const InstanceListPage: React.FC = () => {
   }, [instances, loadInstances]);
 
   const filteredInstances = instances;
-  const typeOptions = INSTANCE_TYPE_FILTERS;
   const totalPages = Math.max(1, Math.ceil(total / INSTANCE_LIST_PAGE_SIZE));
   const resultFrom = total === 0 ? 0 : (page - 1) * INSTANCE_LIST_PAGE_SIZE + 1;
   const resultTo = total === 0 ? 0 : Math.min(page * INSTANCE_LIST_PAGE_SIZE, total);
@@ -725,7 +731,7 @@ const InstanceListPage: React.FC = () => {
             aria-label={t("instances.instanceTypeFilter")}
           >
             <option value="all">{t("instances.allTypes")}</option>
-            {typeOptions.map((type) => (
+            {INSTANCE_TYPE_FILTERS.map((type) => (
               <option key={type} value={type}>
                 {formatInstanceType(type)}
               </option>
