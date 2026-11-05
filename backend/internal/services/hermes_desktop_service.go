@@ -151,7 +151,7 @@ func (s *HermesDesktopService) resolveRuntime(ctx context.Context, userID, insta
 		return nil, "runtime_not_ready", nil
 	}
 	pod, err := s.config.Pods.GetByID(ctx, binding.RuntimePodID)
-	if err != nil || pod == nil || pod.RuntimeType != "hermes" || pod.PodIP == nil || net.ParseIP(strings.TrimSpace(*pod.PodIP)) == nil || pod.AgentEndpoint == nil || (pod.State != "ready" && pod.State != "draining") {
+	if err != nil || pod == nil || pod.RuntimeType != "hermes" || pod.PodIP == nil || net.ParseIP(strings.TrimSpace(*pod.PodIP)) == nil || pod.AgentEndpoint == nil || (instance.RuntimeSecurityProfile == "" && pod.State != "ready" && pod.State != "draining") {
 		return nil, "runtime_not_ready", nil
 	}
 	if instance.RuntimeSecurityProfile == "" && (instance.AccessToken == nil || strings.TrimSpace(*instance.AccessToken) == "") {

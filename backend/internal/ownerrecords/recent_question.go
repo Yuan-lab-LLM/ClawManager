@@ -152,7 +152,7 @@ type RecentQuestion struct {
 func (s *Store) cacheRecentQuestion(ctx context.Context, i Identity, workspace string) error {
 	checked := time.Now().UTC()
 	readCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-	qs, readErr := readNativeHistory(readCtx, s.HistoryRoot, workspace, i, true)
+	qs, readErr := s.NativeHistory(readCtx, workspace, i, true)
 	cancel()
 	// A failed read is not evidence that the last question was deleted.
 	if readErr != nil {

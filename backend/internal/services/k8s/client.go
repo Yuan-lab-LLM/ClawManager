@@ -45,6 +45,7 @@ type Client struct {
 	WorkspacePVCClaimName    string
 	WorkspaceNFSServer       string
 	WorkspaceNFSPath         string
+	RuntimeSandboxProfile    string
 	Mode                     ConnectionMode
 }
 
@@ -127,6 +128,7 @@ func Initialize(cfg *config.Config) error {
 		WorkspacePVCClaimName:    cfg.Runtime.WorkspacePVCClaimName,
 		WorkspaceNFSServer:       cfg.Runtime.WorkspaceNFSServer,
 		WorkspaceNFSPath:         cfg.Runtime.WorkspaceNFSPath,
+		RuntimeSandboxProfile:    cfg.Runtime.SandboxProfile,
 		Mode:                     detectedMode,
 	}
 

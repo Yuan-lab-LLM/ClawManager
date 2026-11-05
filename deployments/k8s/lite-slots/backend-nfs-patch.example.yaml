@@ -1,0 +1,40 @@
+# Strategic merge patch for a new/drained NFS multi-slot pool.
+# Replace namespace, claim, Pod CIDRs and all paired release images first.
+# Keep existing strong control/report credentials in your Secret configuration.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: clawmanager-app
+  namespace: clawmanager-system
+spec:
+  template:
+    spec:
+      containers:
+        - name: clawmanager-app
+          env:
+            - name: RUNTIME_SANDBOX_PROFILE
+              value: nfs-rootless-v1
+            - name: RUNTIME_CONTAINER_SLOTS
+              value: "2"
+            - name: RUNTIME_NETWORK_ISOLATION
+              value: "true"
+            - name: RUNTIME_POD_USER_NAMESPACES
+              value: "false"
+            - name: RUNTIME_NETWORK_POD_CIDRS
+              value: YOUR_ACTUAL_POD_CIDR
+            - name: RUNTIME_NAMESPACE
+              value: clawmanager-system
+            - name: RUNTIME_WORKSPACE_ROOT
+              value: /workspaces
+            - name: RUNTIME_WORKSPACE_PVC_CLAIM
+              value: clawmanager-workspaces
+            - name: RUNTIME_SCHEDULER_ENABLED
+              value: "true"
+            - name: OPENCLAW_RUNTIME_IMAGE
+              value: YOUR_REGISTRY/openclaw-lite:PAIRED_RELEASE
+            - name: HERMES_RUNTIME_IMAGE
+              value: YOUR_REGISTRY/hermes-lite:PAIRED_RELEASE
+            - name: OPENCODE_RUNTIME_IMAGE
+              value: YOUR_REGISTRY/opencode-lite:PAIRED_RELEASE
+            - name: DEEPSEEK_HARNESS_RUNTIME_IMAGE
+              value: YOUR_REGISTRY/deepseek-harness-lite:PAIRED_RELEASE

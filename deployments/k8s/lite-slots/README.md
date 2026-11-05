@@ -2,6 +2,8 @@
 
 此目录用于新 Lite 模式的显式启用。默认 `RUNTIME_CONTAINER_SLOTS=0` 继续使用原进程池；设置为 1–256 后，后端检查存储并初始化 OpenClaw、Hermes、OpenCode、DeepSeek Harness 四类池。每个 Pod 有一个协调 Agent 和 N 个固定容器槽位，空槽不启动 gateway。实例数据在 PVC；每个业务进程只挂载自己的目录及授权 Team 目录。
 
+NFS 使用显式的 `RUNTIME_SANDBOX_PROFILE=nfs-rootless-v1`，部署前阅读 [NFS 配置及迁移说明](nfs-rootless.md)。该配置使用普通 Pod、独立槽位容器和 rootless 网络，避免对 NFS 做 Pod idmapped mount。下文的旧配置限制（Pod user namespace、Unmasked proc、额外监督进程能力、仅 Longhorn）适用于默认配置；NFS 配置的前提和验收单独列在上述文档中。两种配置都不能直接覆盖正在服务的池。
+
 ## 启用条件
 
 - 使用同一发行批次的后端和四个 `Dockerfile.lite` 镜像，构建方法见 AgentsRuntime 的 `docs/lite-images.md`。禁止把旧 Lite 镜像混入槽位池。

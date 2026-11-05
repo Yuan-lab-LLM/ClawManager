@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -68,7 +69,8 @@ type PendingTeamDeletionRepository interface {
 }
 
 type teamRepository struct {
-	sess db.Session
+	sess            db.Session
+	nfsWriterFences bool
 }
 
 func NewTeamRepository(sess db.Session) TeamRepository {
@@ -97,6 +99,23 @@ func (r *teamRepository) CreateTeam(team *models.Team) error {
 }
 
 func (r *teamRepository) UpdateTeam(team *models.Team) error {
+	if r.nfsWriterFences {
+		return r.withNFSTeamRows([]int{team.ID}, func(tx *teamRepository) error {
+			previous, err := tx.GetTeamByID(team.ID)
+			if err != nil {
+				return err
+			}
+			if previous == nil {
+				return models.ErrRuntimeUpgradeConflict
+			}
+			if teamStorageIdentityChanged(previous, team) {
+				if err = requireNoTeamWorkspaceWrites(context.Background(), tx.sess, team.ID); err != nil {
+					return err
+				}
+			}
+			return tx.UpdateTeam(team)
+		})
+	}
 	if team.UpdatedAt.IsZero() {
 		team.UpdatedAt = time.Now().UTC()
 	}
@@ -179,6 +198,14 @@ func (r *teamRepository) CountTeamsByUserID(userID int) (int, error) {
 }
 
 func (r *teamRepository) CreateMember(member *models.TeamMember) error {
+	if r.nfsWriterFences {
+		return r.withNFSTeamRows([]int{member.TeamID}, func(tx *teamRepository) error {
+			if err := requireNoTeamWorkspaceWrites(context.Background(), tx.sess, member.TeamID); err != nil {
+				return err
+			}
+			return tx.CreateMember(member)
+		})
+	}
 	ensureTimestamps(&member.CreatedAt, &member.UpdatedAt)
 	res, err := r.sess.Collection("team_members").Insert(member)
 	if err != nil {
@@ -191,6 +218,32 @@ func (r *teamRepository) CreateMember(member *models.TeamMember) error {
 }
 
 func (r *teamRepository) UpdateMember(member *models.TeamMember) error {
+	if r.nfsWriterFences {
+		previous, err := r.GetMemberByID(member.ID)
+		if err != nil {
+			return err
+		}
+		if previous == nil {
+			return models.ErrRuntimeUpgradeConflict
+		}
+		return r.withNFSTeamRows([]int{previous.TeamID, member.TeamID}, func(tx *teamRepository) error {
+			current, err := tx.GetMemberByID(member.ID)
+			if err != nil {
+				return err
+			}
+			if current == nil || current.TeamID != previous.TeamID {
+				return models.ErrRuntimeUpgradeConflict
+			}
+			if teamMemberIdentityChanged(current, member) {
+				for _, id := range []int{current.TeamID, member.TeamID} {
+					if err = requireNoTeamWorkspaceWrites(context.Background(), tx.sess, id); err != nil {
+						return err
+					}
+				}
+			}
+			return tx.UpdateMember(member)
+		})
+	}
 	if member.UpdatedAt.IsZero() {
 		member.UpdatedAt = time.Now().UTC()
 	}

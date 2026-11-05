@@ -169,6 +169,9 @@ func validateRuntimeSlotTLSDeployment(deployment *appsv1.Deployment) error {
 			volumes[volume.Name] = true
 		}
 	}
+	if deployment.Spec.Template.Labels["clawmanager.io/sandbox-profile"] == RuntimeNFSRootlessProfile && nfsCoordinatorTLSCopy(pod, volumes) {
+		volumes["runtime-agent-tls"] = true
+	}
 	mounted := false
 	for _, mount := range coordinator.VolumeMounts {
 		if volumes[mount.Name] && mount.ReadOnly && mount.MountPath == runtimeSlotTLSDirectory {
@@ -195,4 +198,34 @@ func validateRuntimeSlotTLSDeployment(deployment *appsv1.Deployment) error {
 		}
 	}
 	return nil
+}
+
+// The NFS supervisor runs as management UID 10001. Its TLS files come from a
+// root-only Secret copied once into a private memory volume by trusted init.
+func nfsCoordinatorTLSCopy(pod corev1.PodSpec, secretVolumes map[string]bool) bool {
+	target := false
+	for _, volume := range pod.Volumes {
+		if volume.Name == "runtime-agent-tls" && volume.EmptyDir != nil && volume.EmptyDir.Medium == corev1.StorageMediumMemory {
+			target = true
+		}
+	}
+	if !target {
+		return false
+	}
+	for _, init := range pod.InitContainers {
+		if init.Name != "runtime-local-state" {
+			continue
+		}
+		source, destination := false, false
+		for _, mount := range init.VolumeMounts {
+			if secretVolumes[mount.Name] && mount.ReadOnly && mount.MountPath == "/initialize/tls-source" {
+				source = true
+			}
+			if mount.Name == "runtime-agent-tls" && !mount.ReadOnly && mount.MountPath == "/initialize/tls" {
+				destination = true
+			}
+		}
+		return source && destination
+	}
+	return false
 }

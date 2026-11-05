@@ -28,7 +28,7 @@ func upgradeFlowDB(t *testing.T) db.Session {
 			t.Fatal("invalid port")
 		}
 	}
-	u := mysql.ConnectionURL{Host: "127.0.0.1:" + port, User: "root", Database: "mysql", Options: map[string]string{"parseTime": "true"}}
+	u := mysql.ConnectionURL{Host: "127.0.0.1:" + port, User: "root", Password: os.Getenv("TEST_RUNTIME_MYSQL_PASSWORD"), Database: "mysql", Options: map[string]string{"parseTime": "true"}}
 	root, e := mysql.Open(u)
 	if e != nil {
 		t.Fatal(e)

@@ -44,7 +44,7 @@ func (s *Store) scanRecentQuestions(ctx context.Context, after uint64, fingerpri
 			return after, ctx.Err()
 		}
 		after = v.identity.Instance
-		fingerprint, e := historyFingerprint(ctx, s.HistoryRoot, v.workspace, v.identity)
+		fingerprint, e := s.NativeFingerprint(ctx, v.workspace, v.identity)
 		if e == nil && fingerprints[after] == fingerprint+v.generation {
 			continue
 		}
@@ -53,7 +53,7 @@ func (s *Store) scanRecentQuestions(ctx context.Context, after uint64, fingerpri
 			continue
 		}
 		if fingerprint != "" {
-			if verified, e := historyFingerprint(ctx, s.HistoryRoot, v.workspace, v.identity); e == nil && verified == fingerprint {
+			if verified, e := s.NativeFingerprint(ctx, v.workspace, v.identity); e == nil && verified == fingerprint {
 				if len(fingerprints) >= 4096 {
 					clear(fingerprints)
 				}

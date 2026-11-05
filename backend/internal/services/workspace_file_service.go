@@ -39,12 +39,14 @@ var (
 )
 
 type WorkspaceFileScope struct {
+	uploadIdentity    string
 	InstanceID        int
 	TeamID            int
 	UserID            int
 	RuntimeGeneration int
 	WorkspacePath     string
 	AuditActionPrefix string
+	credentialScoped  bool
 }
 
 type WorkspaceEntry struct {
@@ -78,9 +80,12 @@ type WorkspaceFileService interface {
 }
 
 type workspaceFileService struct {
-	auditRepo     repository.WorkspaceFileAuditRepository
-	teamAuditRepo repository.TeamWorkspaceFileAuditRepository
-	mutationGuard WorkspaceUpgradeMutationGuard
+	auditRepo           repository.WorkspaceFileAuditRepository
+	teamAuditRepo       repository.TeamWorkspaceFileAuditRepository
+	mutationGuard       WorkspaceUpgradeMutationGuard
+	nfsProfile, nfsRoot string
+	nfsWrites           repository.WorkspaceWriteRepository
+	auditHook           func(string, string, int64) error
 }
 
 func NewWorkspaceFileService(auditRepo repository.WorkspaceFileAuditRepository) WorkspaceFileService {
@@ -100,6 +105,10 @@ func WorkspaceUploadMaxBytes() int64 {
 }
 
 func (s *workspaceFileService) List(ctx context.Context, scope WorkspaceFileScope, relativePath string) ([]WorkspaceEntry, error) {
+	if s.useNFSIO(scope) {
+		r, _, err := s.nfsIO(ctx, scope, workspaceNFSRequest{Action: "list", Path: relativePath}, nil)
+		return r.Entries, err
+	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -190,6 +199,10 @@ var workspaceSearchSkippedDirs = map[string]struct{}{
 // NormalizeWorkspaceSearchLimit. The walk is best-effort: directories that
 // cannot be opened are skipped instead of failing the search.
 func (s *workspaceFileService) Search(ctx context.Context, scope WorkspaceFileScope, query string, limit int) ([]WorkspaceEntry, error) {
+	if s.useNFSIO(scope) {
+		r, _, err := s.nfsIO(ctx, scope, workspaceNFSRequest{Action: "search", Query: query, Limit: limit}, nil)
+		return r.Entries, err
+	}
 	limit = NormalizeWorkspaceSearchLimit(limit)
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -266,6 +279,10 @@ func (s *workspaceFileService) Search(ctx context.Context, scope WorkspaceFileSc
 }
 
 func (s *workspaceFileService) Preview(ctx context.Context, scope WorkspaceFileScope, relativePath string) (*WorkspacePreview, error) {
+	if s.useNFSIO(scope) {
+		r, _, err := s.nfsIO(ctx, scope, workspaceNFSRequest{Action: "preview", Path: relativePath}, nil)
+		return r.Preview, err
+	}
 	resolved, file, info, err := s.openExistingFile(ctx, scope, relativePath)
 	if err != nil {
 		return nil, err
@@ -309,6 +326,10 @@ func (s *workspaceFileService) Preview(ctx context.Context, scope WorkspaceFileS
 }
 
 func (s *workspaceFileService) OpenPreview(ctx context.Context, scope WorkspaceFileScope, relativePath string) (*os.File, string, int64, error) {
+	if s.useNFSIO(scope) {
+		r, f, err := s.nfsIO(ctx, scope, workspaceNFSRequest{Action: "open_preview", Path: relativePath}, nil)
+		return f, r.Name, r.Size, err
+	}
 	file, info, contentType, err := s.openPreviewableFile(ctx, scope, relativePath)
 	if err != nil {
 		return nil, "", 0, err
@@ -334,6 +355,13 @@ func (s *workspaceFileService) openPreviewableFile(ctx context.Context, scope Wo
 }
 
 func (s *workspaceFileService) OpenDownload(ctx context.Context, scope WorkspaceFileScope, relativePath string) (io.ReadCloser, string, int64, error) {
+	if s.useNFSIO(scope) {
+		r, f, err := s.nfsIO(ctx, scope, workspaceNFSRequest{Action: "download", Path: relativePath}, nil)
+		if err != nil {
+			return nil, "", 0, err
+		}
+		return f, r.Name, r.Size, nil
+	}
 	if err := ctx.Err(); err != nil {
 		return nil, "", 0, err
 	}
@@ -355,12 +383,16 @@ func (s *workspaceFileService) OpenDownload(ctx context.Context, scope Workspace
 		file.Close()
 		return nil, "", 0, err
 	}
+	if err := validateWorkspacePrivateInode(scope, info); err != nil {
+		file.Close()
+		return nil, "", 0, err
+	}
 	if info.IsDir() {
 		file.Close()
 		if resolved.RelativePath == "" {
 			return nil, "", 0, ErrWorkspaceFileExpected
 		}
-		archive, size, archiveErr := openWorkspaceDirectoryArchive(ctx, root, resolved.RelativePath, info)
+		archive, size, archiveErr := openWorkspaceDirectoryArchive(ctx, root, resolved.RelativePath, info, scope)
 		if archiveErr != nil {
 			return nil, "", 0, archiveErr
 		}
@@ -398,7 +430,7 @@ func (f *workspaceTemporaryDownload) Close() error {
 	return nil
 }
 
-func openWorkspaceDirectoryArchive(ctx context.Context, root *os.Root, relativePath string, info os.FileInfo) (io.ReadCloser, int64, error) {
+func openWorkspaceDirectoryArchive(ctx context.Context, root *os.Root, relativePath string, info os.FileInfo, scope WorkspaceFileScope) (io.ReadCloser, int64, error) {
 	temp, err := os.CreateTemp("", "clawmanager-workspace-*.zip")
 	if err != nil {
 		return nil, 0, err
@@ -419,7 +451,7 @@ func openWorkspaceDirectoryArchive(ctx context.Context, root *os.Root, relativeP
 		cleanup()
 		return nil, 0, err
 	}
-	if err := appendWorkspaceDirectoryToArchive(ctx, root, relativePath, archiveRoot, archive); err != nil {
+	if err := appendWorkspaceDirectoryToArchive(ctx, root, relativePath, archiveRoot, archive, scope); err != nil {
 		_ = archive.Close()
 		cleanup()
 		return nil, 0, err
@@ -440,7 +472,7 @@ func openWorkspaceDirectoryArchive(ctx context.Context, root *os.Root, relativeP
 	return &workspaceTemporaryDownload{File: temp, path: temp.Name()}, stat.Size(), nil
 }
 
-func appendWorkspaceDirectoryToArchive(ctx context.Context, root *os.Root, relativePath, archivePath string, archive *zip.Writer) error {
+func appendWorkspaceDirectoryToArchive(ctx context.Context, root *os.Root, relativePath, archivePath string, archive *zip.Writer, scope WorkspaceFileScope) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -477,7 +509,7 @@ func appendWorkspaceDirectoryToArchive(ctx context.Context, root *os.Root, relat
 			}); err != nil {
 				return err
 			}
-			if err := appendWorkspaceDirectoryToArchive(ctx, root, childRelative, childArchivePath, archive); err != nil {
+			if err := appendWorkspaceDirectoryToArchive(ctx, root, childRelative, childArchivePath, archive, scope); err != nil {
 				return err
 			}
 			continue
@@ -499,6 +531,14 @@ func appendWorkspaceDirectoryToArchive(ctx context.Context, root *os.Root, relat
 		if err != nil {
 			return err
 		}
+		actual, statErr := file.Stat()
+		if statErr == nil {
+			statErr = validateWorkspacePrivateInode(scope, actual)
+		}
+		if statErr != nil {
+			file.Close()
+			return statErr
+		}
 		_, copyErr := io.Copy(writer, file)
 		closeErr := file.Close()
 		if copyErr != nil {
@@ -512,6 +552,10 @@ func appendWorkspaceDirectoryToArchive(ctx context.Context, root *os.Root, relat
 }
 
 func (s *workspaceFileService) upload(ctx context.Context, scope WorkspaceFileScope, relativeDir string, filename string, reader io.Reader, size int64) (*WorkspaceEntry, error) {
+	if s.useNFSIO(scope) {
+		r, _, err := s.nfsIO(ctx, scope, workspaceNFSRequest{Action: "upload", Path: relativeDir, Name: filename, Size: size}, reader)
+		return r.Entry, err
+	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -549,7 +593,16 @@ func (s *workspaceFileService) upload(ctx context.Context, scope WorkspaceFileSc
 		return nil, err
 	}
 	targetName := workspaceRootName(target.RelativePath)
-	if targetInfo, statErr := root.Stat(targetName); statErr == nil && targetInfo.IsDir() {
+	var previous os.FileInfo
+	if scope.credentialScoped {
+		previous, err = inspectWorkspaceUpload(root, targetName)
+		if err != nil {
+			return nil, err
+		}
+		if scope.uploadIdentity != "" && workspaceUploadIdentity(previous) != scope.uploadIdentity {
+			return nil, ErrWorkspaceTextConflict
+		}
+	} else if targetInfo, statErr := root.Stat(targetName); statErr == nil && targetInfo.IsDir() {
 		return nil, ErrWorkspaceFileExpected
 	} else if statErr != nil && !os.IsNotExist(statErr) {
 		return nil, statErr
@@ -557,9 +610,23 @@ func (s *workspaceFileService) upload(ctx context.Context, scope WorkspaceFileSc
 
 	tempRelative := joinWorkspaceRelative(dir.RelativePath, fmt.Sprintf(".%s.tmp-%d", cleanName, time.Now().UnixNano()))
 	tempName := workspaceRootName(tempRelative)
-	file, err := root.OpenFile(tempName, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0640)
+	mode := os.FileMode(0640)
+	if scope.credentialScoped && scope.TeamID > 0 {
+		mode = 0660
+	}
+	file, err := root.OpenFile(tempName, os.O_CREATE|os.O_EXCL|os.O_WRONLY, mode)
 	if err != nil {
 		return nil, err
+	}
+	if previous != nil {
+		if err = preserveWorkspaceTextOwner(file, previous); err == nil {
+			err = file.Chmod(previous.Mode().Perm())
+		}
+		if err != nil {
+			file.Close()
+			root.Remove(tempName)
+			return nil, err
+		}
 	}
 	written, copyErr := io.Copy(file, io.LimitReader(reader, maxBytes+1))
 	closeErr := file.Close()
@@ -583,6 +650,16 @@ func (s *workspaceFileService) upload(ctx context.Context, scope WorkspaceFileSc
 		_ = root.Remove(tempName)
 		return nil, err
 	}
+	if scope.credentialScoped {
+		current, checkErr := inspectWorkspaceUpload(root, targetName)
+		if checkErr != nil || workspaceUploadIdentity(current) != workspaceUploadIdentity(previous) {
+			root.Remove(tempName)
+			if checkErr != nil {
+				return nil, checkErr
+			}
+			return nil, ErrWorkspaceTextConflict
+		}
+	}
 	if err := root.Rename(tempName, targetName); err != nil {
 		_ = root.Remove(tempName)
 		return nil, err
@@ -596,6 +673,10 @@ func (s *workspaceFileService) upload(ctx context.Context, scope WorkspaceFileSc
 }
 
 func (s *workspaceFileService) mkdir(ctx context.Context, scope WorkspaceFileScope, relativePath string) (*WorkspaceEntry, error) {
+	if s.useNFSIO(scope) {
+		r, _, err := s.nfsIO(ctx, scope, workspaceNFSRequest{Action: "mkdir", Path: relativePath}, nil)
+		return r.Entry, err
+	}
 	if isWorkspaceRootRelative(relativePath) {
 		return nil, ErrWorkspaceRootOperation
 	}
@@ -617,7 +698,13 @@ func (s *workspaceFileService) mkdir(ctx context.Context, scope WorkspaceFileSco
 	if err := s.recordAudit(ctx, scope, "mkdir", resolved.RelativePath, 0); err != nil {
 		return nil, err
 	}
-	if err := root.MkdirAll(resolvedName, 0750); err != nil {
+	mode := os.FileMode(0750)
+	// os.Root.MkdirAll accepts permission bits only. New Team directories
+	// inherit setgid from the provisioned 02770 Team root/parent.
+	if scope.credentialScoped && scope.TeamID > 0 {
+		mode = 0770
+	}
+	if err := root.MkdirAll(resolvedName, mode); err != nil {
 		return nil, err
 	}
 	if err := ensureWorkspaceRuntimeOwnership(scope, resolved.RelativePath); err != nil {
@@ -633,6 +720,10 @@ func (s *workspaceFileService) mkdir(ctx context.Context, scope WorkspaceFileSco
 }
 
 func (s *workspaceFileService) rename(ctx context.Context, scope WorkspaceFileScope, oldPath, newPath string) (*WorkspaceEntry, error) {
+	if s.useNFSIO(scope) {
+		r, _, err := s.nfsIO(ctx, scope, workspaceNFSRequest{Action: "rename", Path: oldPath, Next: newPath}, nil)
+		return r.Entry, err
+	}
 	if isWorkspaceRootRelative(oldPath) || isWorkspaceRootRelative(newPath) {
 		return nil, ErrWorkspaceRootOperation
 	}
@@ -678,6 +769,10 @@ func (s *workspaceFileService) rename(ctx context.Context, scope WorkspaceFileSc
 }
 
 func (s *workspaceFileService) delete(ctx context.Context, scope WorkspaceFileScope, relativePath string) error {
+	if s.useNFSIO(scope) {
+		_, _, err := s.nfsIO(ctx, scope, workspaceNFSRequest{Action: "delete", Path: relativePath}, nil)
+		return err
+	}
 	if isWorkspaceRootRelative(relativePath) {
 		return ErrWorkspaceRootOperation
 	}
@@ -718,6 +813,10 @@ func (s *workspaceFileService) openExistingFile(ctx context.Context, scope Works
 		file.Close()
 		return nil, nil, nil, err
 	}
+	if err := validateWorkspacePrivateInode(scope, info); err != nil {
+		file.Close()
+		return nil, nil, nil, err
+	}
 	if info.IsDir() {
 		file.Close()
 		return nil, nil, nil, ErrWorkspaceFileExpected
@@ -726,6 +825,9 @@ func (s *workspaceFileService) openExistingFile(ctx context.Context, scope Works
 }
 
 func (s *workspaceFileService) recordAudit(ctx context.Context, scope WorkspaceFileScope, action, relativePath string, bytes int64) error {
+	if s.auditHook != nil {
+		return s.auditHook(action, relativePath, bytes)
+	}
 	if scope.TeamID != 0 {
 		if s.teamAuditRepo == nil {
 			return nil
@@ -834,6 +936,9 @@ func joinWorkspaceRelative(base, name string) string {
 }
 
 func ensureWorkspaceRuntimeOwnership(scope WorkspaceFileScope, relativePath string) error {
+	if scope.credentialScoped {
+		return nil
+	}
 	if _, _, ok := runtimeWorkspaceOwner(scope); !ok {
 		return nil
 	}
@@ -868,6 +973,9 @@ func ensureWorkspaceRuntimeOwnership(scope WorkspaceFileScope, relativePath stri
 }
 
 func applyWorkspaceRuntimeOwnership(scope WorkspaceFileScope, relativePath string, mode os.FileMode) error {
+	if scope.credentialScoped {
+		return nil
+	}
 	if _, _, ok := runtimeWorkspaceOwner(scope); !ok {
 		return nil
 	}

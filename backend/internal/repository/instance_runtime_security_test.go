@@ -25,7 +25,7 @@ func runtimeSecurityMySQL(t *testing.T) *instanceRepository {
 	if err != nil || port < 1 || port > 65535 {
 		t.Fatal("invalid localhost MySQL port")
 	}
-	url := mysql.ConnectionURL{Host: "127.0.0.1:" + portText, User: "root", Database: "mysql", Options: map[string]string{"parseTime": "true"}}
+	url := mysql.ConnectionURL{Host: "127.0.0.1:" + portText, User: "root", Password: os.Getenv("TEST_RUNTIME_SECURITY_MYSQL_PASSWORD"), Database: "mysql", Options: map[string]string{"parseTime": "true"}}
 	root, err := mysql.Open(url)
 	if err != nil {
 		t.Fatal(err)

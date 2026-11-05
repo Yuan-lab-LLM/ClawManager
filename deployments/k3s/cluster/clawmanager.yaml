@@ -6004,6 +6004,8 @@ rules:
     resources:
       - deployments
       - deployments/scale
+      - statefulsets
+      - replicasets
     verbs:
       - get
       - list

@@ -302,6 +302,8 @@ type instanceService struct {
 	runtimeUpgradeGuard    RuntimeUpgradeDeletionGuard
 	resourceCleanup        func(context.Context, int) error
 	workspaceRoot          string
+	runtimeSandboxProfile  string
+	workspaceWrites        repository.WorkspaceWriteRepository
 	podService             *k8s.PodService
 	deploymentService      *k8s.InstanceDeploymentService
 	pvcService             *k8s.PVCService
@@ -1043,7 +1045,7 @@ func (s *instanceService) createV2Instance(ctx context.Context, userID int, req 
 		}
 	}
 
-	workspacePath, err := ensureRuntimeWorkspaceDirectories(workspaceRoot, runtimeType, userID, instance.ID)
+	workspacePath, err := s.allocateRuntimeWorkspace(workspaceRoot, runtimeType, userID, instance.ID)
 	if err != nil {
 		_ = s.instanceRepo.Delete(instance.ID)
 		return nil, fmt.Errorf("failed to create instance workspace: %w", err)
@@ -1312,7 +1314,7 @@ func (s *instanceService) startInstance(instanceID int) error {
 				return models.ErrInstanceStopping
 			}
 			if a != nil && a.StoppedReason == "idle_timeout" {
-				if err = verifyOriginalIdleWorkspace(s.runtimeWorkspaceRoot(), runtimeType, instance); err != nil {
+				if err = s.verifyOriginalWorkspace(ctx, runtimeType, instance); err != nil {
 					return err
 				}
 			}
@@ -2437,7 +2439,7 @@ func (s *instanceService) ensureV2Workspace(ctx context.Context, instance *model
 	if instance.WorkspacePath != nil && strings.TrimSpace(*instance.WorkspacePath) != "" {
 		return nil
 	}
-	workspacePath, err := ensureRuntimeWorkspaceDirectories(s.runtimeWorkspaceRoot(), runtimeType, instance.UserID, instance.ID)
+	workspacePath, err := s.allocateRuntimeWorkspace(s.runtimeWorkspaceRoot(), runtimeType, instance.UserID, instance.ID)
 	if err != nil {
 		return fmt.Errorf("failed to create instance workspace: %w", err)
 	}
@@ -2881,11 +2883,17 @@ func (s *instanceService) cleanupResetSource(ctx context.Context, instance *mode
 	if err := s.ValidateDelete(instance.ID); err != nil {
 		return err
 	}
+	if s.runtimeSandboxProfile == k8s.RuntimeNFSRootlessProfile && s.resourceCleanup != nil {
+		if err := s.resourceCleanup(ctx, instance.ID); err != nil {
+			return err
+		}
+	}
+
 	if runtimeType, ok := v2RuntimeTypeForInstance(instance); ok {
 		if err := s.cleanupV2GatewayBinding(ctx, instance); err != nil {
 			return err
 		}
-		if err := s.eraseV2Workspace(instance, runtimeType); err != nil {
+		if err := s.eraseV2WorkspaceContext(ctx, instance, runtimeType); err != nil {
 			return err
 		}
 	} else {
@@ -2972,6 +2980,12 @@ func (s *instanceService) Reset(instanceID int) error {
 	if runtimeType, ok := v2RuntimeTypeForInstance(instance); ok {
 		if err := s.claimReset(instanceID); err != nil {
 			return err
+		}
+		if s.runtimeSandboxProfile == k8s.RuntimeNFSRootlessProfile && s.resourceCleanup != nil {
+			if err := s.resourceCleanup(ctx, instance.ID); err != nil {
+				s.markResetError(instanceID)
+				return err
+			}
 		}
 		if err := s.cleanupV2GatewayBinding(ctx, instance); err != nil {
 			s.markResetError(instanceID)
@@ -3088,7 +3102,7 @@ func (s *instanceService) resetV2Workspace(instance *models.Instance, runtimeTyp
 	}
 	root := filepath.Clean(s.runtimeWorkspaceRoot())
 	expected := filepath.Clean(RuntimeWorkspacePathWithRoot(root, runtimeType, instance.UserID, instance.ID))
-	created, err := ensureRuntimeWorkspaceDirectories(root, runtimeType, instance.UserID, instance.ID)
+	created, err := s.allocateRuntimeWorkspace(root, runtimeType, instance.UserID, instance.ID)
 	if err != nil {
 		return fmt.Errorf("failed to create fresh Lite workspace: %w", err)
 	}
@@ -3099,6 +3113,13 @@ func (s *instanceService) resetV2Workspace(instance *models.Instance, runtimeTyp
 }
 
 func (s *instanceService) eraseV2Workspace(instance *models.Instance, runtimeType string) error {
+	return s.eraseV2WorkspaceContext(context.Background(), instance, runtimeType)
+}
+
+func (s *instanceService) eraseV2WorkspaceContext(ctx context.Context, instance *models.Instance, runtimeType string) error {
+	if s.runtimeSandboxProfile == k8s.RuntimeNFSRootlessProfile {
+		return EraseNFSInstanceWorkspace(ctx, s.runtimeWorkspaceRoot(), runtimeType, instance, s.workspaceWrites)
+	}
 	if instance == nil || instance.WorkspacePath == nil {
 		return fmt.Errorf("Lite workspace path is missing")
 	}

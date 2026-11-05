@@ -110,6 +110,9 @@ func readNativeHistory(ctx context.Context, root, workspace string, identity Ide
 			}
 		}
 		cmd := exec.CommandContext(ctx, "sqlite3", "-readonly", "-json", path, query)
+		if scoped, _ := ctx.Value(nativeHistoryHelperContextKey{}).(bool); scoped {
+			configureNativeHistoryCommand(cmd)
+		}
 		output := &cappedOutput{max: 4 << 20}
 		cmd.Stdout = output
 		if err := cmd.Run(); err != nil {
