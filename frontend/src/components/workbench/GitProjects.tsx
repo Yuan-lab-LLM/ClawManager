@@ -1,4 +1,4 @@
-import { useState, useId } from "react";
+import { useId } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowDown,
@@ -17,37 +17,40 @@ import {
   workbenchError,
 } from "../../services/instanceWorkbenchService";
 import type { GitChange, GitRequest } from "../../types/workbench";
+import type { GitViewState } from "./state";
 interface Props {
   instanceId: number;
   generation: number;
   enabled: boolean;
   visible: boolean;
+  view: GitViewState;
+  onChange: (patch: Partial<GitViewState>) => void;
 }
 export function GitProjects({
   instanceId,
   generation,
   enabled,
   visible,
+  view,
+  onChange,
 }: Props) {
   const { t } = useI18n();
   const viewID = useId();
   const cache = useQueryClient();
-  const [selected, setSelected] = useState<string | null>(null);
-  const [adding, setAdding] = useState<"clone" | "import" | null>(null);
-  const [path, setPath] = useState("");
-  const [name, setName] = useState("");
-  const [url, setURL] = useState("");
-  const [branch, setBranch] = useState("");
-  const [creatingBranch, setCreatingBranch] = useState(false);
-  const [message, setMessage] = useState("");
-  const [mode, setMode] = useState<"changes" | "history">("changes");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  const [selection, setSelection] = useState<{
-    repo: string;
-    path: string;
-    staged: boolean;
-  } | null>(null);
+  const {
+    selected,
+    adding,
+    path,
+    name,
+    url,
+    branch,
+    creatingBranch,
+    message,
+    mode,
+    busy,
+    error,
+    selection,
+  } = view;
   const prefix = ["workbench-git", instanceId, generation];
   const projects = useQuery({
     queryKey: [...prefix, "projects"],
@@ -113,18 +116,17 @@ export function GitProjects({
     await cache.invalidateQueries({ queryKey: prefix });
   };
   const perform = async (request: GitRequest) => {
-    setBusy(true);
-    setError("");
+    onChange({ busy: true, error: "" });
     try {
       const result = await service.git(instanceId, generation, request);
-      if (result.project) setSelected(result.project.path);
+      if (result.project) onChange({ selected: result.project.path });
       await refresh();
       return true;
     } catch (err) {
-      setError(workbenchError(err));
+      onChange({ error: workbenchError(err) });
       return false;
     } finally {
-      setBusy(false);
+      onChange({ busy: false });
     }
   };
   const changes = details.data?.status.changes ?? [];
@@ -146,10 +148,12 @@ export function GitProjects({
           <button
             className="wb-file-choice"
             onClick={() =>
-              setSelection({
-                repo: currentPath!,
-                path: change.path,
-                staged: isStaged,
+              onChange({
+                selection: {
+                  repo: currentPath!,
+                  path: change.path,
+                  staged: isStaged,
+                },
               })
             }
             title={
@@ -204,8 +208,7 @@ export function GitProjects({
           value={currentPath ?? ""}
           disabled={!projectList.length || busy}
           onChange={(e) => {
-            setSelected(e.target.value);
-            setSelection(null);
+            onChange({ selected: e.target.value, selection: null });
           }}
         >
           {!projectList.length && (
@@ -231,7 +234,10 @@ export function GitProjects({
             }
           />
         </button>
-        <button className="wb-button" onClick={() => setAdding("clone")}>
+        <button
+          className="wb-button"
+          onClick={() => onChange({ adding: "clone" })}
+        >
           <Plus size={14} />
           {t("workbench.addProject")}
         </button>
@@ -260,10 +266,7 @@ export function GitProjects({
                 url: adding === "clone" ? url.trim() : undefined,
               })
             ) {
-              setAdding(null);
-              setPath("");
-              setURL("");
-              setName("");
+              onChange({ adding: null, path: "", url: "", name: "" });
             }
           }}
         >
@@ -272,14 +275,14 @@ export function GitProjects({
               <button
                 type="button"
                 className={adding === "clone" ? "active" : ""}
-                onClick={() => setAdding("clone")}
+                onClick={() => onChange({ adding: "clone" })}
               >
                 {t("workbench.clone")}
               </button>
               <button
                 type="button"
                 className={adding === "import" ? "active" : ""}
-                onClick={() => setAdding("import")}
+                onClick={() => onChange({ adding: "import" })}
               >
                 {t("workbench.import")}
               </button>
@@ -288,7 +291,7 @@ export function GitProjects({
               type="button"
               className="wb-icon"
               aria-label={t("workbench.cancel")}
-              onClick={() => setAdding(null)}
+              onClick={() => onChange({ adding: null })}
               disabled={busy}
             >
               <X size={16} />
@@ -302,7 +305,7 @@ export function GitProjects({
                 required
                 placeholder="https://github.com/owner/project.git"
                 value={url}
-                onChange={(e) => setURL(e.target.value)}
+                onChange={(e) => onChange({ url: e.target.value })}
               />
             </label>
           )}
@@ -315,7 +318,7 @@ export function GitProjects({
               aria-describedby={`wb-project-path-hint-${viewID}`}
               placeholder={adding === "clone" ? "projects/my-project" : "."}
               value={path}
-              onChange={(e) => setPath(e.target.value)}
+              onChange={(e) => onChange({ path: e.target.value })}
             />
             <small id={`wb-project-path-hint-${viewID}`}>
               {t("workbench.pathHint")}
@@ -323,7 +326,10 @@ export function GitProjects({
           </label>
           <label>
             {t("workbench.projectName")}
-            <input value={name} onChange={(e) => setName(e.target.value)} />
+            <input
+              value={name}
+              onChange={(e) => onChange({ name: e.target.value })}
+            />
           </label>
           <button className="wb-button primary" disabled={busy}>
             {busy
@@ -339,7 +345,7 @@ export function GitProjects({
           <p>{t("workbench.pathHint")}</p>
           <button
             className="wb-button primary"
-            onClick={() => setAdding("clone")}
+            onClick={() => onChange({ adding: "clone" })}
           >
             {t("workbench.addProject")}
           </button>
@@ -399,7 +405,7 @@ export function GitProjects({
               title={t("workbench.newBranch")}
               aria-label={t("workbench.newBranch")}
               disabled={busy}
-              onClick={() => setCreatingBranch(!creatingBranch)}
+              onClick={() => onChange({ creatingBranch: !creatingBranch })}
             >
               <Plus size={14} />
             </button>
@@ -437,8 +443,7 @@ export function GitProjects({
                     branch: branch.trim(),
                   })
                 ) {
-                  setBranch("");
-                  setCreatingBranch(false);
+                  onChange({ branch: "", creatingBranch: false });
                 }
               }}
             >
@@ -448,7 +453,7 @@ export function GitProjects({
                 aria-label={t("workbench.branchName")}
                 placeholder={t("workbench.branchName")}
                 value={branch}
-                onChange={(e) => setBranch(e.target.value)}
+                onChange={(e) => onChange({ branch: e.target.value })}
               />
               <button className="wb-button" disabled={busy}>
                 {t("workbench.create")}
@@ -457,7 +462,7 @@ export function GitProjects({
                 type="button"
                 className="wb-icon"
                 aria-label={t("workbench.cancel")}
-                onClick={() => setCreatingBranch(false)}
+                onClick={() => onChange({ creatingBranch: false })}
               >
                 <X size={14} />
               </button>
@@ -466,13 +471,13 @@ export function GitProjects({
           <div className="wb-git-modes">
             <button
               className={mode === "changes" ? "active" : ""}
-              onClick={() => setMode("changes")}
+              onClick={() => onChange({ mode: "changes" })}
             >
               {t("workbench.changes")} <span>{changes.length}</span>
             </button>
             <button
               className={mode === "history" ? "active" : ""}
-              onClick={() => setMode("history")}
+              onClick={() => onChange({ mode: "history" })}
             >
               {t("workbench.history")}
             </button>
@@ -584,8 +589,7 @@ export function GitProjects({
                   message: message.trim(),
                 })
               ) {
-                setMessage("");
-                setSelection(null);
+                onChange({ message: "", selection: null });
               }
             }}
           >
@@ -597,7 +601,7 @@ export function GitProjects({
               rows={2}
               value={message}
               placeholder={t("workbench.commitMessage")}
-              onChange={(e) => setMessage(e.target.value)}
+              onChange={(e) => onChange({ message: e.target.value })}
               maxLength={64000}
             />
             <div>

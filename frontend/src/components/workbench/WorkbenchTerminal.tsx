@@ -28,6 +28,8 @@ export function WorkbenchTerminal({
   const terminal = useRef<Terminal | null>(null);
   const fit = useRef<FitAddon | null>(null);
   const cursor = useRef(0);
+  // Each view must replay retained output, even if the session already ended.
+  const outputComplete = useRef(false);
   const [error, setError] = useState("");
   const [retry, setRetry] = useState(0);
   const exitCallback = useRef(onExit);
@@ -38,6 +40,7 @@ export function WorkbenchTerminal({
     if (!host.current) return;
     const term = new Terminal({
       cursorBlink: true,
+      screenReaderMode: true,
       allowProposedApi: true,
       convertEol: false,
       fontSize: 12,
@@ -135,7 +138,7 @@ export function WorkbenchTerminal({
     instanceId,
   ]);
   useEffect(() => {
-    if (!visible || stale || session.exited) return;
+    if (!visible || stale || (session.exited && outputComplete.current)) return;
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
     const read = async () => {
@@ -157,8 +160,9 @@ export function WorkbenchTerminal({
           terminal.current?.write(bytes);
         }
         cursor.current = output.cursor;
-        if (output.exited) {
-          exitCallback.current({ ...session, exited: true });
+        if (output.exited || session.exited) {
+          outputComplete.current = true;
+          if (!session.exited) exitCallback.current({ ...session, exited: true });
           return;
         }
         timer = setTimeout(read, document.hidden ? 2500 : 300);

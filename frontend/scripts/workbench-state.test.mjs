@@ -103,3 +103,31 @@ test("tab storage is bounded and ending a view frees capacity", () => {
   assert.equal(state.tabs.length, 32);
   assert.equal(state.active, "new");
 });
+
+test("Git view patches preserve repository, diff and drafts across shared shells", () => {
+  let state = initialWorkbench(3);
+  assert.ok(state.git, "shared Git view state is missing");
+  assert.equal(state.git.selected, null);
+  state = workbenchReducer(state, {
+    type: "git.patch",
+    patch: {
+      selected: "second",
+      selection: { repo: "second", path: "other.txt", staged: false },
+      mode: "history",
+      message: "Commit draft",
+      adding: "clone",
+      path: "projects/draft",
+      name: "Draft",
+      url: "https://example.test/draft.git",
+      creatingBranch: true,
+      branch: "draft-branch",
+      busy: true,
+    },
+  });
+  const view = state.git;
+  state = workbenchReducer(state, { type: "panel", panel: "preview" });
+  state = workbenchReducer(state, { type: "git.patch", patch: { busy: false, error: "Retry" } });
+  assert.deepEqual(state.git, { ...view, busy: false, error: "Retry" });
+  assert.equal(state.panel, "preview");
+  assert.equal(state.tabs.length, 0);
+});

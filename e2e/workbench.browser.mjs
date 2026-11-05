@@ -80,6 +80,11 @@ let terminalCreates = 0;
 let previewCreates = 0;
 const gitOperations = [];
 const errors = [];
+const regressionFailures = [];
+async function regression(label, check) {
+  try { await check(); console.log(`PASS ${label}`); }
+  catch (error) { regressionFailures.push(`${label}: ${error.message}`); console.error(`FAIL ${label}: ${error.message}`); }
+}
 const json = (res, data, status = 200) => {
   res.writeHead(status, { "content-type": "application/json" });
   res.end(
@@ -118,6 +123,8 @@ function createTerminal(cwd = "") {
     child,
     cols: 100,
     rows: 30,
+    reads: 0, inputs: 0, resizes: 0,
+    pauseOutput: false, pendingReads: [],
   };
   sessions.set(id, session);
   readline.createInterface({ input: child.stdout }).on("line", (line) => {
@@ -266,16 +273,22 @@ try {
           return;
         }
         if (match[2] === "output") {
+          session.reads++;
           const cursor = Number(url.searchParams.get("cursor"));
-          json(res, {
+          const output = {
             data: session.buffer.subarray(cursor).toString("base64"),
             cursor: session.buffer.length,
             truncated: false,
             exited: session.exited,
-          });
+          };
+          // Model an in-flight read while real PTY output arrives before End.
+          if (session.pauseOutput && !session.exited)
+            await new Promise((resolve) => session.pendingReads.push(resolve));
+          json(res, output);
           return;
         }
         if (match[2] === "input") {
+          session.inputs++;
           session.child.stdin.write(
             JSON.stringify({ input: input.input }) + "\n",
           );
@@ -283,6 +296,7 @@ try {
           return;
         }
         if (match[2] === "resize") {
+          session.resizes++;
           session.cols = input.cols;
           session.rows = input.rows;
           session.child.stdin.write(JSON.stringify(input) + "\n");
@@ -292,6 +306,8 @@ try {
         if (req.method === "DELETE") {
           session.child.stdin.write('{"close":true}\n');
           session.exited = true;
+          session.pauseOutput = false;
+          session.pendingReads.splice(0).forEach((resolve) => resolve());
           json(res, serialize(session));
           return;
         }
@@ -423,6 +439,7 @@ try {
     () => sessions.get("session-1").buffer.toString().includes("UI_PTY_OK\r\n"),
     "real PTY command output",
   );
+  await assertWait(async () => (await page.locator(".wb-live-view:visible .xterm-accessibility-tree").allTextContents()).join("\n").includes("UI_PTY_OK"), "live rendered PTY output");
   await page.getByRole("tab", { name: "文件", exact: true }).click();
   assert.equal(await page.locator(".xterm").count(), 1);
   await page.getByRole("tab", { name: "预览与终端", exact: true }).click();
@@ -446,6 +463,57 @@ try {
     path: path.join(artifacts, "03-multiple-sessions.png"),
     fullPage: true,
   });
+  // Read the public screen-reader rows, which are derived from xterm's rendered buffer.
+  const renderedTerminal = () => page.locator(".wb-live-view:visible .xterm-accessibility-tree");
+  await page.getByRole("button", { name: "新建标签", exact: true }).click();
+  await page.getByRole("button", { name: "终端", exact: true }).click();
+  await assertWait(() => terminalCreates === 3, "third terminal");
+  await page.getByRole("button", { name: "隐藏标签 Terminal 3", exact: true }).click();
+  const hiddenSession = sessions.get("session-3");
+  hiddenSession.child.stdin.write(JSON.stringify({ input: "printf 'HIDDEN_%s\\n' FINAL; exit\n" }) + "\n");
+  await assertWait(() => hiddenSession.exited && hiddenSession.buffer.includes("HIDDEN_FINAL"), "hidden PTY exit and retained output");
+  await page.getByRole("button", { name: "会话与进程", exact: false }).click();
+  const hiddenRow = page.locator(".wb-session-row").filter({ hasText: "Terminal 3" });
+  // Discard the old view, then restore the ended server session into a fresh terminal.
+  await hiddenRow.getByRole("button", { name: "关闭标签" }).click();
+  await hiddenRow.getByRole("button", { name: "显示", exact: true }).click();
+  await regression("restore hidden exited session renders retained output", async () => {
+    await assertWait(async () => (await renderedTerminal().allTextContents()).join("\n").includes("HIDDEN_FINAL"), "rendered hidden terminal final bytes", 3000);
+  });
+  await page.getByRole("tab", { name: "Terminal 2", exact: true }).click();
+  const endingSession = sessions.get("session-2");
+  endingSession.pauseOutput = true;
+  await assertWait(() => endingSession.pendingReads.length > 0, "read in flight before End");
+  endingSession.child.stdin.write(JSON.stringify({ input: "printf 'END_%s\\n' TRAILER\n" }) + "\n");
+  await assertWait(() => endingSession.buffer.includes("END_TRAILER"), "unread real PTY trailing bytes");
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button", { name: "结束会话", exact: true }).click();
+  await regression("explicit End renders unread trailing output", async () => {
+    await assertWait(async () => (await renderedTerminal().allTextContents()).join("\n").includes("END_TRAILER"), "rendered End trailing bytes", 3000);
+  });
+  await regression("ended terminal stops reads, stdin and remote resize", async () => {
+    await page.waitForTimeout(400);
+    const counts = [endingSession.reads, endingSession.inputs, endingSession.resizes];
+    await page.locator(".wb-live-view:visible .xterm-helper-textarea").focus();
+    await page.keyboard.type("ignored after exit");
+    await page.setViewportSize({ width: 1400, height: 1000 });
+    await page.waitForTimeout(900);
+    assert.deepEqual([endingSession.reads, endingSession.inputs, endingSession.resizes], counts);
+  });
+  await page.getByRole("tab", { name: "Terminal 1", exact: true }).click();
+  await page.locator(".wb-live-view:visible .xterm-helper-textarea").focus();
+  await page.keyboard.type("printf 'LIVE_%s\\n' EXIT; exit");
+  await page.keyboard.press("Enter");
+  await regression("natural exit renders output and stops callback-driven rereads", async () => {
+    await assertWait(async () => (await renderedTerminal().allTextContents()).join("\n").includes("LIVE_EXIT"), "rendered natural exit output");
+    await page.locator(".wb-terminal-message:visible").filter({ hasText: "会话已结束" }).waitFor();
+    const count = sessions.get("session-1").reads;
+    await page.getByRole("tab", { name: "文件", exact: true }).click();
+    await page.getByRole("tab", { name: "预览与终端", exact: true }).click();
+    await page.waitForTimeout(700);
+    assert.equal(sessions.get("session-1").reads, count);
+  });
+  await page.setViewportSize({ width: 1440, height: 1000 });
   await page.getByRole("tab", { name: "Git 项目", exact: true }).click();
   await page
     .getByRole("button", { name: "添加项目", exact: true })
@@ -529,6 +597,14 @@ try {
     "mobile workspace overflows",
   );
   await page.getByRole("tab", { name: "预览与终端", exact: true }).click();
+  await regression("active program tab stays inside strip after narrowing", () => assertActiveTabVisible(page));
+  for (let index = 0; index < 3; index++) {
+    await page.getByRole("button", { name: "新建标签", exact: true }).click();
+    await page.getByRole("button", { name: "浏览器", exact: true }).click();
+    await regression(`active program tab visible after mobile create ${index + 1}`, () => assertActiveTabVisible(page));
+  }
+  await page.locator('.wb-program-tab [role="tab"]').first().click();
+  await regression("active program tab visible after manual selection", () => assertActiveTabVisible(page));
   await page.screenshot({
     path: path.join(artifacts, "07-mobile-tabs.png"),
     fullPage: true,
@@ -537,6 +613,7 @@ try {
     await page.getByRole("textbox", { name: "任务草稿" }).inputValue(),
     "保留草稿",
   );
+  await page.getByRole("tab", { name: "Terminal 2", exact: true }).click();
   generation = 4;
   await page.getByRole("button", { name: "模拟迁移" }).click();
   await page
@@ -562,6 +639,10 @@ try {
     path: path.join(artifacts, "08-instance-page-desktop.png"),
     fullPage: true,
   });
+  for (let index = 0; index < 3; index++) {
+    await page.locator(".wb-root:visible").getByRole("button", { name: "新建标签", exact: true }).click();
+    await page.locator(".wb-root:visible").getByRole("button", { name: "浏览器", exact: true }).click();
+  }
   await page.setViewportSize({ width: 390, height: 844 });
   await page
     .locator(".wb-root:visible")
@@ -573,9 +654,61 @@ try {
   });
   assert.equal(
     await page.locator(".wb-root:visible .wb-program-tab").count(),
-    1,
-    "responsive layout discarded manual browser tab",
+    4,
+    "responsive layout discarded manual browser tabs",
   );
+  await regression("responsive visible copy reveals shared active tab after narrowing", () => assertActiveTabVisible(page));
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.setViewportSize({ width: 320, height: 844 });
+  await regression("active tab remains visible at 320px with reduced motion", () => assertActiveTabVisible(page));
+  await page.setViewportSize({ width: 390, height: 844 });
+  await regression("responsive program tabs have linked panels", async () => {
+    for (const tab of await page.locator('.wb-root .wb-program-tab [role="tab"]').all()) {
+      const id = await tab.getAttribute("id"), controls = await tab.getAttribute("aria-controls");
+      assert.ok(id && controls, "program tab is missing id/aria-controls");
+      const panel = page.locator(`[id="${controls}"]`);
+      assert.equal(await panel.getAttribute("role"), "tabpanel");
+      assert.equal(await panel.getAttribute("aria-labelledby"), id);
+    }
+  });
+  // Exercise the actual duplicate UserLayout shells, not just a single resized component.
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  const visibleWorkbench = () => page.locator(".wb-root:visible");
+  await visibleWorkbench().getByRole("tab", { name: "Git 项目", exact: true }).click();
+  await visibleWorkbench().getByRole("combobox", { name: "选择仓库" }).selectOption("second");
+  fs.writeFileSync(path.join(second, "other.txt"), "draft diff across resize\n");
+  await visibleWorkbench().locator(".wb-project-bar").getByRole("button", { name: "刷新" }).click();
+  await visibleWorkbench().locator(".wb-file-choice").filter({ hasText: "other.txt" }).click();
+  await visibleWorkbench().getByText("+draft diff across resize", { exact: false }).waitFor();
+  await visibleWorkbench().getByRole("textbox", { name: "提交说明" }).fill("Preserve commit draft");
+  await visibleWorkbench().getByRole("button", { name: "创建分支", exact: true }).click();
+  await visibleWorkbench().getByRole("textbox", { name: "新分支名称", exact: true }).fill("draft-branch");
+  await visibleWorkbench().getByRole("button", { name: "添加项目", exact: true }).click();
+  await visibleWorkbench().getByRole("textbox", { name: "仓库地址" }).fill("https://example.test/draft.git");
+  await visibleWorkbench().getByRole("textbox", { name: "项目路径", exact: true }).fill("projects/draft");
+  await visibleWorkbench().getByRole("textbox", { name: "显示名称（选填）", exact: true }).fill("Draft project");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await regression("Git selection, diff and all drafts survive desktop to mobile", async () => {
+    assert.equal(await visibleWorkbench().getByRole("combobox", { name: "选择仓库" }).inputValue(), "second");
+    assert.equal(await visibleWorkbench().getByRole("textbox", { name: "提交说明" }).inputValue(), "Preserve commit draft");
+    assert.equal(await visibleWorkbench().getByRole("textbox", { name: "新分支名称", exact: true }).inputValue(), "draft-branch");
+    assert.equal(await visibleWorkbench().getByRole("textbox", { name: "仓库地址" }).inputValue(), "https://example.test/draft.git");
+    assert.equal(await visibleWorkbench().getByRole("textbox", { name: "项目路径", exact: true }).inputValue(), "projects/draft");
+    assert.equal(await visibleWorkbench().getByRole("textbox", { name: "显示名称（选填）", exact: true }).inputValue(), "Draft project");
+    await visibleWorkbench().getByText("+draft diff across resize", { exact: false }).waitFor();
+  });
+  await visibleWorkbench().getByRole("button", { name: "导入已有项目", exact: true }).first().click();
+  await visibleWorkbench().getByRole("textbox", { name: "项目路径", exact: true }).fill("existing/draft");
+  await visibleWorkbench().getByRole("button", { name: "历史", exact: true }).click();
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await regression("Git mode survives mobile to desktop", async () => {
+    await visibleWorkbench().getByText("Second initial", { exact: true }).waitFor();
+    assert.equal(await visibleWorkbench().getByRole("textbox", { name: "项目路径", exact: true }).inputValue(), "existing/draft");
+    assert.equal(await visibleWorkbench().getByRole("button", { name: "导入已有项目", exact: true }).first().getAttribute("class"), "active");
+    assert.equal(await visibleWorkbench().getByRole("textbox", { name: "提交说明" }).inputValue(), "Preserve commit draft");
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await visibleWorkbench().getByRole("tab", { name: "预览与终端", exact: true }).click();
   const duplicateIDs = await page
     .locator(".wb-root [id]")
     .evaluateAll((nodes) => {
@@ -608,6 +741,7 @@ try {
     layout.height >= 500 && layout.bottom <= layout.parentBottom + 1,
     `instance mobile workspace is clipped: ${JSON.stringify(layout)}`,
   );
+  assert.deepEqual(regressionFailures, [], "workbench review regressions");
   assert.equal(errors.length, 0, errors.join("\n"));
   assert.ok(
     gitOperations.includes("clone") &&
@@ -618,6 +752,7 @@ try {
     "PASS manual-only tabs, real PTY I/O and retention, two sessions, real Git clone/stage/commit/push/import, isolated iframe, desktop/mobile and generation fencing",
   );
 } finally {
+  for (const session of sessions.values()) session.pendingReads.splice(0).forEach((resolve) => resolve());
   for (const child of children) {
     if (child.exitCode === null) {
       child.stdin.write('{"close":true}\n');
@@ -636,11 +771,20 @@ try {
   );
   fs.rmSync(temp, { recursive: true, force: true });
 }
-async function assertWait(check, label) {
-  const deadline = Date.now() + 15000;
+async function assertWait(check, label, timeout = 15000) {
+  const deadline = Date.now() + timeout;
   while (Date.now() < deadline) {
     if (await check()) return;
     await new Promise((resolve) => setTimeout(resolve, 80));
   }
   throw Error(`Timed out: ${label}`);
+}
+
+async function assertActiveTabVisible(page) {
+  await assertWait(async () => page.locator(".wb-root:visible .wb-program-tabs").evaluate((strip) => {
+    const selected = strip.querySelector('.wb-program-tab.active');
+    if (!selected) return false;
+    const outer = strip.getBoundingClientRect(), tab = selected.getBoundingClientRect();
+    return tab.width > 0 && tab.left >= outer.left - 1 && tab.right <= outer.right + 1;
+  }), "active tab bounding box is outside its strip", 3000);
 }

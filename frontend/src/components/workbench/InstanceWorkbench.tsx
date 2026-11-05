@@ -90,6 +90,8 @@ export function InstanceWorkbench({
   const state = sharedState ?? localState;
   const dispatch = onWorkbenchEvent ?? localDispatch;
   const rootRef = useRef<HTMLElement>(null);
+  const programTabsRef = useRef<HTMLDivElement>(null);
+  const activeTabRef = useRef<HTMLDivElement>(null);
   const [rendered, setRendered] = useState(false);
   useEffect(() => {
     const node = rootRef.current;
@@ -130,6 +132,27 @@ export function InstanceWorkbench({
     (tab) => tab.id === state.active && !tab.hidden,
   );
   const hidden = state.tabs.filter((tab) => tab.hidden);
+  useEffect(() => {
+    const strip = programTabsRef.current;
+    if (!strip || !visible || !rendered || state.panel !== "preview") return;
+    const revealActiveTab = () => {
+      const active = activeTabRef.current;
+      if (!active || !strip.clientWidth || !strip.clientHeight) return;
+      const viewport = strip.getBoundingClientRect();
+      const tab = active.getBoundingClientRect();
+      const offset =
+        tab.left < viewport.left
+          ? tab.left - viewport.left
+          : tab.right > viewport.right
+            ? tab.right - viewport.right
+            : 0;
+      if (offset) strip.scrollBy({ left: offset, behavior: "instant" });
+    };
+    const observer = new ResizeObserver(revealActiveTab);
+    observer.observe(strip);
+    revealActiveTab();
+    return () => observer.disconnect();
+  }, [state.active, state.panel, state.tabs, visible, rendered]);
   const createTerminal = async () => {
     if (state.tabs.length >= MAX_WORKBENCH_TABS) {
       setError(t("workbench.sessionLimit"));
@@ -298,6 +321,8 @@ export function InstanceWorkbench({
             generation={generation}
             enabled={ready}
             visible={visible && rendered && state.panel === "git"}
+            view={state.git}
+            onChange={(patch) => dispatch({ type: "git.patch", patch })}
           />
         ) : (
           <div className="wb-empty">{t("workbench.upgrade")}</div>
@@ -312,6 +337,7 @@ export function InstanceWorkbench({
       >
         <div className="wb-tabs-row">
           <div
+            ref={programTabsRef}
             className="wb-program-tabs"
             onKeyDown={navigateTabs}
             role="tablist"
@@ -322,9 +348,12 @@ export function InstanceWorkbench({
               .map((tab) => (
                 <div
                   key={tab.id}
+                  ref={selected?.id === tab.id ? activeTabRef : undefined}
                   className={`wb-program-tab ${selected?.id === tab.id ? "active" : ""}`}
                 >
                   <button
+                    id={`wb-program-tab-${viewID}-${tab.id}`}
+                    aria-controls={`wb-program-panel-${viewID}-${tab.id}`}
                     role="tab"
                     aria-selected={selected?.id === tab.id}
                     tabIndex={selected?.id === tab.id ? 0 : -1}
@@ -583,6 +612,9 @@ export function InstanceWorkbench({
           {state.tabs.map((tab) => (
             <div
               key={tab.id}
+              id={`wb-program-panel-${viewID}-${tab.id}`}
+              role="tabpanel"
+              aria-labelledby={`wb-program-tab-${viewID}-${tab.id}`}
               hidden={selected?.id !== tab.id || showSessions}
               className="wb-live-view"
             >

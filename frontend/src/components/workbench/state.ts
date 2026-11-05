@@ -11,14 +11,30 @@ export interface WorkbenchTab {
   url?: string;
   session?: TerminalSession;
 }
+export interface GitViewState {
+  selected: string | null;
+  adding: "clone" | "import" | null;
+  path: string;
+  name: string;
+  url: string;
+  branch: string;
+  creatingBranch: boolean;
+  message: string;
+  mode: "changes" | "history";
+  busy: boolean;
+  error: string;
+  selection: { repo: string; path: string; staged: boolean } | null;
+}
 export interface WorkbenchState {
   generation: number;
   panel: WorkbenchPanel;
   tabs: WorkbenchTab[];
+  git: GitViewState;
   active?: string;
 }
 export type WorkbenchEvent =
   | { type: "panel"; panel: WorkbenchPanel }
+  | { type: "git.patch"; patch: Partial<GitViewState> }
   | { type: "browser.new"; id: string }
   | {
       type: "browser.navigate";
@@ -35,13 +51,33 @@ export type WorkbenchEvent =
   | { type: "terminal.update"; session: TerminalSession }
   | { type: "generation"; generation: number };
 export function initialWorkbench(generation: number): WorkbenchState {
-  return { generation, panel: "files", tabs: [] };
+  return {
+    generation,
+    panel: "files",
+    tabs: [],
+    git: {
+      selected: null,
+      adding: null,
+      path: "",
+      name: "",
+      url: "",
+      branch: "",
+      creatingBranch: false,
+      message: "",
+      mode: "changes",
+      busy: false,
+      error: "",
+      selection: null,
+    },
+  };
 }
 export function workbenchReducer(
   state: WorkbenchState,
   event: WorkbenchEvent,
 ): WorkbenchState {
   switch (event.type) {
+    case "git.patch":
+      return { ...state, git: { ...state.git, ...event.patch } };
     case "panel":
       return { ...state, panel: event.panel };
     case "browser.new":
