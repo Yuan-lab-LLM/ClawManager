@@ -27,3 +27,27 @@ CLAWMANAGER_WORKBENCH_PREVIEW_ORIGIN=https://p-{token}.preview.example.net
 切换工作台标签不会结束终端；明确点击结束才会停止该会话。自动休眠可以结束终端和调试服务，迁移会停止旧执行并拒绝旧页面继续写入。迁移保留代码和 Git 数据，不保证容器可写层中的依赖与系统文件迁移；必要时重新安装依赖。
 
 进程面板仅列出运行时能够证明归属的进程。Agent 启动的进程可以停止；只有存在可信启动信息的会话才提供重新启动，不能重启的进程请通过原 Agent 或终端重新执行启动命令。
+
+## 验证开发改动
+
+前端状态测试在 `frontend` 中运行 `npm run test:workbench`。在 `e2e` 中运行同名命令会打开真实 React 工作台和实例页，使用临时 Git 仓库、Python PTY 和本地测试应用检查交互；需要本机 Chrome、Go、Git 和 Python 3，不访问生产实例。
+
+跨仓库预览链路测试需要在同一 Linux 网络环境启动两个测试进程：
+
+```sh
+# AgentsRuntime/clawmanager-agent，先启动测试专用运行时
+CM_WORKBENCH_PREVIEW_HARNESS_FILE=/tmp/cm-preview-wire.json \
+  go test ./slots -run '^TestWorkbenchPreviewExternalHarness$' -count=1 -v
+
+# ClawManager/backend，等待上面的元数据文件出现后运行
+CM_WORKBENCH_PREVIEW_HARNESS_FILE=/tmp/cm-preview-wire.json \
+  go test -race ./internal/services \
+  -run '^TestWorkbenchPreviewExternalRuntimeRoundTrip$' -count=1 -v
+
+# 结束测试运行时（它也会在 90 秒后自动结束）
+touch /tmp/cm-preview-wire.json.stop
+```
+
+首次构建耗时较长时，请先编译两个测试二进制，再启动运行时测试进程。该测试覆盖 CM 能力查询和预览创建、运行池、私有 Unix Worker/网络 Helper，以及真实 HTTP/WebSocket 应用，检查路径、查询、认证、Cookie、控制头隔离和代次变更后的断连。真实网络命名空间、业务 UID、终端子进程清理及容器重置协议有各自的 Linux 验收测试；本地测试桥接器不替代真实集群的发布验收。
+
+预览的 HTTPS 上游使用正常证书校验，不会自动信任调试服务的自签名证书。
