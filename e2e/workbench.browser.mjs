@@ -532,6 +532,59 @@ try {
     .selectOption("projects/demo");
   const repo = path.join(workspace, "projects/demo");
   await assertWait(() => fs.existsSync(path.join(repo, ".git")), "real clone");
+  const renameSource = "README.md", renameDestination = "renamed [literal]*\nfile.md";
+  const renamedBytes = fs.readFileSync(path.join(repo, renameSource));
+  fs.writeFileSync(path.join(repo, "app.py"), 'print("unrelated staged change")\n');
+  git(repo, "add", "--", "app.py");
+  git(repo, "mv", "--", renameSource, renameDestination);
+  try {
+    await page.locator(".wb-project-bar").getByRole("button", { name: "刷新" }).click();
+    const renameUnstage = page.getByRole("button", { name: `取消暂存 ${renameDestination}`, exact: true });
+    await renameUnstage.waitFor();
+    await page.locator(".wb-file-choice").filter({ hasText: renameDestination }).click();
+    await regression("staged literal rename diff includes both paths", async () => {
+      await assertWait(async () => (await page.locator(".wb-diff").textContent()).includes("rename from README.md"), "paired rename diff", 3000);
+    });
+    await renameUnstage.click();
+    await assertWait(async () => await renameUnstage.count() === 0, "rename Unstage refresh");
+    await regression("real Git rename Unstage preserves bytes and unrelated staged file", async () => {
+      assert.equal(git(repo, "diff", "--cached", "--name-only", "-z"), "app.py\0", "rename source deletion or destination add remains staged");
+      assert.equal(git(repo, "ls-files", "--error-unmatch", "--", renameSource), renameSource);
+      assert.deepEqual(fs.readFileSync(path.join(repo, renameDestination)), renamedBytes);
+      assert.equal(fs.existsSync(path.join(repo, renameSource)), false);
+      assert.equal(git(repo, "show", ":app.py"), 'print("unrelated staged change")');
+    });
+  } finally {
+    // Restore only this regression's fixture paths before the existing commit/push cases.
+    git(repo, "--literal-pathspecs", "reset", "HEAD", "--", renameSource, renameDestination, "app.py");
+    fs.renameSync(path.join(repo, renameDestination), path.join(repo, renameSource));
+    git(repo, "restore", "--worktree", "--", "app.py");
+    assert.equal(git(repo, "status", "--porcelain"), "");
+  }
+  const copyDestination = "copy.md";
+  git(repo, "config", "status.renames", "copies");
+  fs.copyFileSync(path.join(repo, renameSource), path.join(repo, copyDestination));
+  fs.appendFileSync(path.join(repo, renameSource), "# source change\n");
+  git(repo, "add", "--", renameSource, copyDestination);
+  try {
+    assert.ok(git(repo, "status", "--porcelain=v1", "-z").includes(`C  ${copyDestination}\0${renameSource}\0`), "fixture must be a real Git copy record");
+    await page.locator(".wb-project-bar").getByRole("button", { name: "刷新" }).click();
+    const copyUnstage = page.getByRole("button", { name: `取消暂存 ${copyDestination}`, exact: true });
+    await copyUnstage.waitFor();
+    await copyUnstage.click();
+    await assertWait(async () => await copyUnstage.count() === 0, "copy Unstage refresh");
+    await regression("real Git copy Unstage preserves staged source changes", async () => {
+      assert.equal(git(repo, "diff", "--cached", "--name-only", "-z"), `${renameSource}\0`);
+      assert.equal(git(repo, "show", `:${renameSource}`), "# Example\n# source change");
+      assert.deepEqual(fs.readFileSync(path.join(repo, copyDestination)), renamedBytes);
+    });
+  } finally {
+    git(repo, "reset", "HEAD", "--", renameSource, copyDestination);
+    fs.unlinkSync(path.join(repo, copyDestination));
+    git(repo, "restore", "--worktree", "--", renameSource);
+    git(repo, "config", "--unset", "status.renames");
+    assert.equal(git(repo, "status", "--porcelain"), "");
+  }
   fs.writeFileSync(path.join(repo, "app.py"), 'print("changed")\n');
   fs.writeFileSync(path.join(repo, "README.md"), "# Changed\n");
   await page

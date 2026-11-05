@@ -26,6 +26,11 @@ interface Props {
   view: GitViewState;
   onChange: (patch: Partial<GitViewState>) => void;
 }
+function stagedPaths(change: GitChange) {
+  return change.index_status === "R" && change.previous_path
+    ? [change.previous_path, change.path]
+    : [change.path];
+}
 export function GitProjects({
   instanceId,
   generation,
@@ -89,13 +94,20 @@ export function GitProjects({
     enabled: enabled && visible && currentPath !== null,
     staleTime: 10000,
   });
+  const changes = details.data?.status.changes ?? [];
   const selectedFile = selection?.repo === currentPath ? selection : null;
+  const selectedChange = changes.find((change) => change.path === selectedFile?.path);
+  const diffPaths = selectedFile
+    ? selectedFile.staged && selectedChange
+      ? stagedPaths(selectedChange)
+      : [selectedFile.path]
+    : [];
   const diff = useQuery({
     queryKey: [
       ...prefix,
       currentPath,
       "diff",
-      selectedFile?.path,
+      diffPaths,
       selectedFile?.staged,
     ],
     queryFn: ({ signal }) =>
@@ -105,7 +117,7 @@ export function GitProjects({
         {
           operation: "diff",
           path: currentPath!,
-          paths: [selectedFile!.path],
+          paths: diffPaths,
           staged: selectedFile!.staged,
         },
         signal,
@@ -129,7 +141,6 @@ export function GitProjects({
       onChange({ busy: false });
     }
   };
-  const changes = details.data?.status.changes ?? [];
   const staged = changes.filter((c) => c.staged);
   const unstaged = changes.filter(
     (c) => c.untracked || !!c.worktree_status.trim(),
@@ -187,7 +198,7 @@ export function GitProjects({
               void perform({
                 operation: isStaged ? "unstage" : "stage",
                 path: currentPath!,
-                paths: [change.path],
+                paths: isStaged ? stagedPaths(change) : [change.path],
               })
             }
           >
