@@ -123,8 +123,8 @@ Operations are `projects`, `import`, `clone`, `status`, `diff`, `stage`, `unstag
 - [x] Verify a real PTY and real HTTP/WebSocket echo server through runtime/CM transport; check two terminal sessions and multiple browser origins do not cross streams.
 - [x] Exercise idle stop, migration/stale generation and native container reset with workbench activity; assert preserved repository state and terminated source execution.
 - [x] Run existing relevant backend/runtime regressions, frontend build/behavior checks and Linux image builds. Document environment-dependent checks and complete all executable checks before claiming completion.
-- [ ] Obtain task and final code review, fix material findings, inspect final diffs and reconcile every approved requirement with authoritative test/render evidence.
-- [ ] Integrate the reviewed feature branches into the user's working checkouts without overwriting their untracked documents; provide changed behavior, validation and any required preview-domain/runtime-image setup.
+- [x] Obtain task and final code review, fix material findings, inspect final diffs and reconcile every approved requirement with authoritative test/render evidence.
+- [x] Integrate the reviewed feature branches into the user's working checkouts without overwriting their untracked documents; provide changed behavior, validation and any required preview-domain/runtime-image setup.
 
 
 ## Progress
@@ -146,4 +146,7 @@ Operations are `projects`, `import`, `clone`, `status`, `diff`, `stage`, `unstag
 | Existing regressions and builds | LinuxCMservices/handlers/workbench broad relevant race tests; sixRuntimepackages+fourracescopes; allRuntimeLinuxentrybinarybuilds; CM Linuxserverbuild; frontendlint/tsc/Vite/OpenCodeentry |
 | Validation scope | LocaldisposableLinuxcontainers/actualnamespaces/realprocesses and controlleddata; no productionclusterdeployment/migration performed; productioningress/DNS/TLS setup documented |
 
-Task reviews are approved for exact committed artifacts. Final cross-repository review and integration into the original checkouts are the remaining completion gates. Build warning noise was reproduced on the untouched CM base `cd7b74a` (Vite8.0.11 baseline3.73s), including CSS plugin timing; no dependency or build-plugin changes were made.
+Task reviews are approved for exact committed artifacts. Final cross-repository review approved CM `95d9858` and Runtime `01df177`; both branches were fast-forwarded into the original `preview` checkouts. Post-merge verification passed: frontend5state cases/OpenCodeentry/productionbuild/expandedrealGit+PTYbrowser, all6Runtimepackages under race, and CM→Runtime HTTP/WS wire gate (0.05s). All43pre-existing untracked files were verified byte-for-byte unchanged. Build warning noise was reproduced on the untouched CM base `cd7b74a` (Vite8.0.11 baseline3.73s), including CSS plugin timing; no dependency or build-plugin changes were made.
+
+
+Completion: implemented and locally integrated on 2026-11-06. Production rollout remains a separate operator action: update compatible Runtime images, apply database migration101 through normal startup, and configure wildcard preview DNS/TLS/ingress. Full dependency-environment migration remains outside the agreed first-version scope.
