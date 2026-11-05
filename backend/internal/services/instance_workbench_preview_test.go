@@ -5,7 +5,9 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -39,9 +41,68 @@ func (s *previewTestStore) Get(_ context.Context, k string) (workbench.PreviewLe
 	}
 	return v, nil
 }
+
+func TestWorkbenchPreviewRedirectsStayOnCapabilityOrigin(t *testing.T) {
+	for _, tc := range []struct {
+		name, target, location, want string
+	}{
+		{"absolute", "http://localhost:4321", "http://localhost:4321/login", "{origin}/login"},
+		{"network localhost", "http://localhost:4321", "//localhost:4321/login", "{origin}/login"},
+		{"network IPv4", "http://127.0.0.1:4321", "//127.0.0.1:4321/login", "{origin}/login"},
+		{"network IPv6", "http://[::1]:4321", "//[::1]:4321/login", "{origin}/login"},
+		{"network escaped", "http://localhost:4321", "//localhost:4321/a%2Fb?q=%2f&x=1&x=2#part%2Ftwo", "{origin}/a%2Fb?q=%2f&x=1&x=2#part%2Ftwo"},
+		{"network HTTPS default port", "https://localhost", "//localhost/login", "{origin}/login"},
+		{"relative", "http://localhost:4321", "/login?q=%2f#part", "/login?q=%2f#part"},
+		{"relative path", "http://localhost:4321", "login", "login"},
+		{"external", "http://localhost:4321", "//example.com:4321/login", "//example.com:4321/login"},
+		{"different port", "http://localhost:4321", "//localhost:4322/login", "//localhost:4322/login"},
+		{"credentials", "http://localhost:4321", "//user@localhost:4321/login", "//user@localhost:4321/login"},
+		{"invalid scheme", "http://localhost:4321", "ftp://localhost:4321/login", "ftp://localhost:4321/login"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			runtime := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Location", tc.location)
+				w.WriteHeader(http.StatusFound)
+			}))
+			defer runtime.Close()
+			instance := &models.Instance{ID: 42, UserID: 7, Status: "running", RuntimeGeneration: 3}
+			binding := &models.InstanceRuntimeBinding{InstanceID: 42, RuntimePodID: 9, Generation: 3, GatewayID: "gw-42-3", GatewayPort: 3000, WorkspacePath: "/workspace"}
+			previews, err := workbench.NewPreviews("https://p-{token}.preview.example:8443", &previewTestStore{values: map[string]workbench.PreviewLease{}}, time.Hour)
+			if err != nil {
+				t.Fatal(err)
+			}
+			service := NewInstanceWorkbenchService(workbenchTestInstances{instance: instance}, workbenchTestBindings{binding}, workbenchTestPods{&models.RuntimePod{ID: 9, AgentEndpoint: &runtime.URL}}, NewRuntimeAgentClientWithHTTPClient("test-control", runtime.Client()).(WorkbenchAgent), previews)
+			lease, err := previews.Create(context.Background(), workbench.PreviewScope{InstanceID: 42, UserID: 7, Generation: 3, GatewayID: "gw-42-3"}, tc.target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			publicURL, _ := url.Parse(previews.URL(lease))
+			// The configured public scheme must win even when ingress forwards HTTP.
+			request := httptest.NewRequest("GET", "http://"+publicURL.Host+"/", nil)
+			recorder := httptest.NewRecorder()
+			service.ServePreview(recorder, request)
+			want := strings.ReplaceAll(tc.want, "{origin}", "https://"+publicURL.Host)
+			if recorder.Code != http.StatusFound || recorder.Header().Get("Location") != want {
+				t.Fatalf("redirect = %d %q, want %d %q", recorder.Code, recorder.Header().Get("Location"), http.StatusFound, want)
+			}
+		})
+	}
+}
+
 func TestWorkbenchPreviewStreamsBodyAndWebSocketWithScopedControlRoute(t *testing.T) {
+	t.Run("generation change", func(t *testing.T) {
+		testWorkbenchPreviewStreamsBodyAndWebSocket(t, false)
+	})
+	t.Run("expiry", func(t *testing.T) {
+		testWorkbenchPreviewStreamsBodyAndWebSocket(t, true)
+	})
+}
+
+func testWorkbenchPreviewStreamsBodyAndWebSocket(t *testing.T, expire bool) {
+	t.Helper()
 	var routes []workbenchPreviewRoute
 	var mu sync.Mutex
+	upstreamClosed := make(chan error, 1)
 	runtime := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/workbench/preview" || r.Header.Get("X-ClawManager-Control-Token") != "test-control" {
 			t.Error("untrusted preview transport")
@@ -72,6 +133,7 @@ func TestWorkbenchPreviewStreamsBodyAndWebSocketWithScopedControlRoute(t *testin
 			for {
 				kind, payload, err := conn.ReadMessage()
 				if err != nil {
+					upstreamClosed <- err
 					return
 				}
 				if err = conn.WriteMessage(kind, payload); err != nil {
@@ -89,7 +151,11 @@ func TestWorkbenchPreviewStreamsBodyAndWebSocketWithScopedControlRoute(t *testin
 	defer runtime.Close()
 	instance := &models.Instance{ID: 42, UserID: 7, Status: "running", RuntimeGeneration: 3}
 	binding := &models.InstanceRuntimeBinding{InstanceID: 42, RuntimePodID: 9, Generation: 3, GatewayID: "gw-42-3", GatewayPort: 3000, WorkspacePath: "/workspace"}
-	previews, _ := workbench.NewPreviews("http://p-{token}.localhost", &previewTestStore{values: map[string]workbench.PreviewLease{}}, time.Hour)
+	ttl := time.Hour
+	if expire {
+		ttl = 2 * time.Second
+	}
+	previews, _ := workbench.NewPreviews("http://p-{token}.localhost", &previewTestStore{values: map[string]workbench.PreviewLease{}}, ttl)
 	var instanceMu sync.RWMutex
 	service := NewInstanceWorkbenchService(workbenchTestInstances{instance: instance, mu: &instanceMu}, workbenchTestBindings{binding}, workbenchTestPods{&models.RuntimePod{ID: 9, AgentEndpoint: &runtime.URL}}, NewRuntimeAgentClientWithHTTPClient("test-control", runtime.Client()).(WorkbenchAgent), previews)
 	service.previewRecheckInterval = 10 * time.Millisecond
@@ -131,16 +197,38 @@ func TestWorkbenchPreviewStreamsBodyAndWebSocketWithScopedControlRoute(t *testin
 	if err != nil || !bytes.Equal(output, body) {
 		t.Fatalf("websocket corrupted: %q %v", output, err)
 	}
-	instanceMu.Lock()
-	instance.RuntimeGeneration = 4
-	instanceMu.Unlock()
-	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
-	if _, _, err := conn.ReadMessage(); err == nil {
-		t.Fatal("stale WebSocket remained open")
+	if !expire {
+		instanceMu.Lock()
+		instance.RuntimeGeneration = 4
+		instanceMu.Unlock()
+	}
+	_ = conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+	_, _, err = conn.ReadMessage()
+	requirePreviewWebSocketClosed(t, err)
+	select {
+	case err := <-upstreamClosed:
+		requirePreviewWebSocketClosed(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("runtime upstream WebSocket remained open")
 	}
 	denied := httptest.NewRecorder()
 	service.ServePreview(denied, httptest.NewRequest("GET", "http://"+host.Host+"/", nil))
 	if denied.Code != 404 {
 		t.Fatalf("stale preview accepted: %d", denied.Code)
+	}
+}
+
+func requirePreviewWebSocketClosed(t *testing.T, err error) {
+	t.Helper()
+	if err == nil {
+		t.Fatal("stale WebSocket remained open")
+	}
+	var networkError net.Error
+	if errors.As(err, &networkError) && networkError.Timeout() {
+		t.Fatalf("timed out waiting for WebSocket closure: %v", err)
+	}
+	var closeError *websocket.CloseError
+	if !errors.Is(err, io.EOF) && !errors.As(err, &closeError) {
+		t.Fatalf("expected EOF or WebSocket close error, got %T: %v", err, err)
 	}
 }

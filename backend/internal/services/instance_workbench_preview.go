@@ -119,11 +119,15 @@ func (s *InstanceWorkbenchService) ServePreview(w http.ResponseWriter, r *http.R
 				}
 			}
 			if location := resp.Header.Get("Location"); location != "" {
-				if parsed, err := workbench.ParsePreviewURL(location); err == nil && parsed.Port == lease.Target.Port {
-					u, _ := url.Parse(location)
-					u.Scheme = publicURL.Scheme
-					u.Host = r.Host
-					resp.Header.Set("Location", u.String())
+				if u, err := url.Parse(location); err == nil && u.Host != "" {
+					if u.Scheme == "" {
+						u.Scheme = lease.Target.Scheme
+					}
+					if parsed, err := workbench.ParsePreviewURL(u.String()); err == nil && parsed.Port == lease.Target.Port {
+						u.Scheme = publicURL.Scheme
+						u.Host = r.Host
+						resp.Header.Set("Location", u.String())
+					}
 				}
 			}
 			cookies := resp.Header.Values("Set-Cookie")
