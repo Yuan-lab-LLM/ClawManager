@@ -909,7 +909,7 @@ const InstanceListPage: React.FC = () => {
                       </div>}
                     </td>
                     <td className="px-4 py-3">
-                      <InstanceLifecycleStatus status={instance.status} availability={instance.availability} />
+                      <InstanceLifecycleStatus status={instance.status} availability={instance.availability} stoppedReason={instance.stopped_reason} />
                       <InstanceAutoStopInfo instance={instance} />
                     </td>
                     <td className="px-4 py-3 text-slate-600">

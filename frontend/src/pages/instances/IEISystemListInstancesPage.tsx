@@ -1,6 +1,7 @@
 import axios from "axios";
 import {useOwnerPortalVisit} from '../../hooks/useOwnerPortalVisit';
 import { OwnerInstanceCard } from "../../components/OwnerInstanceCard";
+import { getInstanceDisplayStatus } from "../../lib/instanceStatus";
 import { expandedInstanceFromSearch } from "../../lib/ownerPortalNavigation";
 import { OwnerDashboard } from "../../components/OwnerDashboard";
 import { useOwnerTeams } from '../../hooks/useOwnerTeams';
@@ -53,8 +54,8 @@ function statusClass(status: string) {
   }
 }
 
-function statusLabel(status: string) {
-  switch (status.toLowerCase()) {
+function statusLabel(status: string, stoppedReason?: string) {
+  switch (getInstanceDisplayStatus(status, stoppedReason)) {
     case "running":
       return "运行中";
     case "creating":
@@ -65,6 +66,8 @@ function statusLabel(status: string) {
       return "重启中";
     case "stopped":
       return "已停止";
+    case "auto_sleep":
+      return "自动休眠";
     case "error":
       return "异常";
     default:
@@ -709,7 +712,7 @@ export default function IEISystemListInstancesPage() {
                     );
                     return (
                       <div key={instance.id}>
-                        <OwnerInstanceCard instance={instance} expanded={expandedInstanceID===instance.id} selected={selected} status={statusLabel(displayStatus)} pending={operationIsPending(lifecycleOperations[instance.id],instance.status)} menuOpen={menuInstanceID===instance.id}
+                        <OwnerInstanceCard instance={instance} expanded={expandedInstanceID===instance.id} selected={selected} status={statusLabel(displayStatus, instance.stopped_reason)} pending={operationIsPending(lifecycleOperations[instance.id],instance.status)} menuOpen={menuInstanceID===instance.id}
                           onToggle={()=>{setExpandedInstanceID(current=>current===instance.id?null:instance.id);setMenuInstanceID(null)}}
                           onMenu={()=>setMenuInstanceID(current=>current===instance.id?null:instance.id)} onCloseMenu={()=>setMenuInstanceID(null)}
                           onDetails={()=>{setSelectedID(instance.id);setView('instance')}}
@@ -757,7 +760,7 @@ export default function IEISystemListInstancesPage() {
                       <span
                         className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${statusClass(selectedDisplayStatus)}`}
                       >
-                        {statusLabel(selectedDisplayStatus)}
+                        {statusLabel(selectedDisplayStatus, selectedInstance.stopped_reason)}
                       </span>
                     </div>
                     <p className="mt-2 text-base text-slate-500">
@@ -917,7 +920,7 @@ export default function IEISystemListInstancesPage() {
                   <span
                     className={`mt-3 inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${statusClass(selectedInstance.status)}`}
                   >
-                    {statusLabel(selectedInstance.status)}
+                    {statusLabel(selectedInstance.status, selectedInstance.stopped_reason)}
                   </span>
                 </div>
 
@@ -929,7 +932,7 @@ export default function IEISystemListInstancesPage() {
                       ["实例 ID", `#${selectedInstance.id}`],
                       ["运行时", selectedRuntime.name],
                       ["运行时类型", selectedRuntime.category],
-                      ["状态", statusLabel(selectedInstance.status)],
+                      ["状态", statusLabel(selectedInstance.status, selectedInstance.stopped_reason)],
                       ["更新时间", formatTime(selectedInstance.updated_at)],
                     ].map(([label, value]) => (
                       <div key={label} className="py-3 text-sm">

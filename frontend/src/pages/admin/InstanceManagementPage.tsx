@@ -8,6 +8,7 @@ import { adminInstanceService } from '../../services/adminInstanceService';
 import { userService } from '../../services/userService';
 import type { Instance } from '../../types/instance';
 import type { User } from '../../types/user';
+import { getInstanceDisplayStatus } from '../../lib/instanceStatus';
 
 const InstanceManagementPage: React.FC = () => {
   const { t } = useI18n();
@@ -397,7 +398,7 @@ const InstanceManagementPage: React.FC = () => {
                       </td>
                       <td className="px-5 py-4 align-top">
                         <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${getStatusBadge(instance.status)}`}>
-                          {t(`status.${instance.status}`)}
+                          {t(`status.${getInstanceDisplayStatus(instance.status, instance.stopped_reason)}`)}
                         </span>
                         <InstanceAutoStopInfo instance={instance} />
                         <InstanceAutoStopControl instance={instance} onChanged={activity => setInstances(current => current.map(item => item.id === instance.id ? { ...item, last_gateway_activity_at: activity.last_gateway_activity_at, monitoring_since: activity.monitoring_since, auto_stop_disabled: activity.auto_stop_disabled, stopped_reason: activity.stopped_reason, auto_stop_blocker: activity.auto_stop_blocker, auto_stop_phase: activity.stop_phase } : item))} />
