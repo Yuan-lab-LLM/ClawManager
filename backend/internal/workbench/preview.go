@@ -20,6 +20,7 @@ var (
 	ErrInvalidPreviewURL = errors.New("preview address must be an HTTP or HTTPS service in the current instance")
 	ErrPreviewNotFound   = errors.New("preview is unavailable or expired")
 	ErrPreviewScope      = errors.New("preview requires the current instance generation")
+	ErrPreviewLimit      = errors.New("too many active previews for this instance")
 )
 
 // PreviewTarget is a logical business-loopback address, never a Pod or host IP.
