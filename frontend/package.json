@@ -11,7 +11,8 @@
     "test:instance-access": "node --test src/hooks/useInstanceDesktopAccess.test.mjs",
     "test:runtime-management": "node --experimental-strip-types --test scripts/runtime-management.test.mjs",
     "test:opencode-default-entry": "node scripts/opencode-default-entry.test.mjs",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:workbench": "node --disable-warning=ExperimentalWarning --experimental-strip-types --test scripts/workbench-state.test.mjs"
   },
   "dependencies": {
     "@codemirror/lang-json": "^6.0.2",

@@ -1,4 +1,5 @@
-﻿export type Locale = "en" | "zh" | "ja" | "ko" | "de";
+﻿import { workbenchTranslations } from "./workbenchI18n";
+export type Locale = "en" | "zh" | "ja" | "ko" | "de";
 
 import { hermesDesktopTranslations } from "./hermesDesktopI18n";
 
@@ -1868,6 +1869,7 @@ export const translations: Record<Locale, TranslationTree> = {
     },
     adminLayout: adminLayoutTranslations.en,
     hermesDesktop: hermesDesktopTranslations.en,
+    workbench: workbenchTranslations.en,
     securityCenter: securityCenterTranslations.en,
     secplane: secplaneTranslations.en,
     skillHubPage: skillHubTranslations.en,
@@ -3991,6 +3993,7 @@ export const translations: Record<Locale, TranslationTree> = {
     },
     adminLayout: adminLayoutTranslations.zh,
     hermesDesktop: hermesDesktopTranslations.zh,
+    workbench: workbenchTranslations.zh,
     securityCenter: securityCenterTranslations.zh,
     secplane: secplaneTranslations.zh,
     skillHubPage: skillHubTranslations.zh,
@@ -6024,6 +6027,7 @@ export const translations: Record<Locale, TranslationTree> = {
     },
     adminLayout: adminLayoutTranslations.ja,
     hermesDesktop: hermesDesktopTranslations.ja,
+    workbench: workbenchTranslations.ja,
     securityCenter: securityCenterTranslations.ja,
     secplane: secplaneTranslations.ja,
     skillHubPage: skillHubTranslations.ja,
@@ -7673,6 +7677,7 @@ export const translations: Record<Locale, TranslationTree> = {
     },
     adminLayout: adminLayoutTranslations.ko,
     hermesDesktop: hermesDesktopTranslations.ko,
+    workbench: workbenchTranslations.ko,
     securityCenter: securityCenterTranslations.ko,
     secplane: secplaneTranslations.ko,
     skillHubPage: skillHubTranslations.ko,
@@ -9301,6 +9306,7 @@ export const translations: Record<Locale, TranslationTree> = {
     },
     adminLayout: adminLayoutTranslations.de,
     hermesDesktop: hermesDesktopTranslations.de,
+    workbench: workbenchTranslations.de,
     securityCenter: securityCenterTranslations.de,
     secplane: secplaneTranslations.de,
     skillHubPage: skillHubTranslations.de,

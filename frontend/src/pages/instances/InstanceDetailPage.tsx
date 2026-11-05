@@ -42,7 +42,8 @@ import { InstanceServiceFrame } from "../../components/InstanceServiceFrame";
 import RestartWithEnvironmentDialog from "../../components/RestartWithEnvironmentDialog";
 import UserLayout from "../../components/UserLayout";
 import UpgradeRecoveryActions from "../../components/UpgradeRecoveryActions";
-import { WorkspaceFileManager } from "../../components/WorkspaceFileManager";
+import { InstanceWorkbench } from "../../components/workbench/InstanceWorkbench";
+import {initialWorkbench,workbenchReducer,type WorkbenchState,type WorkbenchEvent} from "../../components/workbench/state";
 import { useI18n } from "../../contexts/I18nContext";
 import { useInstanceStatusWebSocket } from "../../hooks/useWebSocket";
 import type { InstanceStatusUpdate } from "../../hooks/useWebSocket";
@@ -406,6 +407,17 @@ const InstanceDetailPage: React.FC = () => {
     null,
   );
   const [workspaceVisible, setWorkspaceVisible] = useState(true);
+  // UserLayout renders desktop and mobile shells; both share one tab model.
+  const [workbenchViews,setWorkbenchViews]=useState<Record<number,WorkbenchState>>({});
+  const onWorkbenchEvent = useCallback((event: WorkbenchEvent) => {
+    if (!instanceId) return;
+    setWorkbenchViews((previous) => {
+      const current = previous[instanceId] ?? initialWorkbench(instance?.runtime_generation ?? 0);
+      const next = workbenchReducer(current, event);
+      return next === current ? previous : { ...previous, [instanceId]: next };
+    });
+  }, [instanceId, instance?.runtime_generation]);
+
   const [collapsedBottomHeightPx, setCollapsedBottomHeightPx] = useState<
     number | null
   >(null);
@@ -1564,13 +1576,15 @@ const InstanceDetailPage: React.FC = () => {
     </div>
   );
 
+  const sharedWorkbenchState=workbenchViews[instance.id]??initialWorkbench(instance.runtime_generation??0);
+
   const renderLiteWorkspace = () => {
     const pinnedWorkspaceHeight = workspaceHeightPx;
 
     return (
       <div
         ref={liteRootRef}
-        className={`flex min-h-0 flex-1 flex-col gap-2 ${
+        className={`${workspaceVisible&&supportsWorkspace(instance)?"wb-instance-stack":""} flex min-h-0 flex-1 flex-col gap-2 ${
           bottomPanelExpanded ? "" : "overflow-hidden"
         }`}
       >
@@ -1589,9 +1603,9 @@ const InstanceDetailPage: React.FC = () => {
                 }
               : { minHeight: 420, flex: 1 }
           }
-          className={`grid shrink-0 grid-cols-1 grid-rows-[minmax(0,1fr)] gap-4 overflow-hidden min-h-[420px] ${workspaceVisible ? "xl:grid-cols-[minmax(0,1fr)_minmax(360px,28rem)]" : "xl:grid-cols-1"}`}
+          className={`wb-instance-section grid shrink-0 grid-cols-1 grid-rows-[minmax(0,1fr)] gap-4 overflow-hidden min-h-[420px] ${workspaceVisible ? "xl:grid-cols-[minmax(360px,1fr)_minmax(420px,1.05fr)]" : "xl:grid-cols-1"}`}
         >
-          <div className="h-full min-h-0 min-w-0">
+          <div className="wb-instance-agent h-full min-h-0 min-w-0">
             <InstanceServiceFrame
               instanceId={instance.id}
               instanceName={instance.name}
@@ -1604,24 +1618,20 @@ const InstanceDetailPage: React.FC = () => {
               onWorkspaceVisibilityChange={supportsWorkspace(instance) ? setWorkspaceVisible : undefined}
             />
           </div>
-          {workspaceVisible &&
-            (supportsWorkspace(instance) ? (
-              <div className="h-full min-h-0 min-w-0">
-                <WorkspaceFileManager
-                  instanceId={instance.id}
-                  initialPath={
-                    instance.type === "opencode" &&
-                    instance.instance_mode === "lite"
-                      ? "starter"
-                      : undefined
-                  }
-                />
-              </div>
-            ) : (
-              <div className="cm-surface flex h-full min-h-[420px] items-center justify-center text-sm text-slate-500">
-                No workspace
-              </div>
-            ))}
+          {supportsWorkspace(instance) && (
+            <div className={`wb-instance-tools h-full min-h-0 min-w-0 ${workspaceVisible ? "" : "hidden"}`}>
+              <InstanceWorkbench
+                key={instance.id}
+                sharedState={sharedWorkbenchState}
+                onWorkbenchEvent={onWorkbenchEvent}
+                instanceId={instance.id}
+                runtimeGeneration={instance.runtime_generation ?? 0}
+                isRunning={instance.status === "running"}
+                visible={workspaceVisible}
+                initialPath={instance.type === "opencode" && instance.instance_mode === "lite" ? "starter" : undefined}
+              />
+            </div>
+          )}
         </section>
         <div ref={liteBottomRef} className="flex shrink-0 flex-col gap-2">
           <InstanceSkillHubPanel
@@ -1704,7 +1714,7 @@ const InstanceDetailPage: React.FC = () => {
       {renderActionMessage()}
       <section
         data-layout="pro-desktop-workspace"
-        className={`grid items-start gap-4 ${workspaceVisible ? "xl:grid-cols-[minmax(0,7fr)_minmax(380px,3fr)]" : "xl:grid-cols-1"}`}
+        className={`grid items-start gap-4 ${workspaceVisible ? "xl:grid-cols-[minmax(360px,1fr)_minmax(420px,1.05fr)]" : "xl:grid-cols-1"}`}
       >
         <div className="h-[clamp(520px,calc(100vh-10rem),760px)] min-w-0 overflow-hidden">
           <InstanceServiceFrame
@@ -1719,26 +1729,22 @@ const InstanceDetailPage: React.FC = () => {
           />
         </div>
 
-        {workspaceVisible &&
-          (supportsWorkspace(instance) ? (
-            <div className="h-[clamp(520px,calc(100vh-10rem),760px)] min-w-0 overflow-hidden">
-              <WorkspaceFileManager
-                instanceId={instance.id}
-                initialPath="/config"
-                onSelectDirectory={
-                  instance.type === "opencode" &&
-                  instance.instance_mode === "pro"
-                    ? handleSelectOpenCodeProject
-                    : undefined
-                }
-                selectingDirectory={actionLoading !== null}
-              />
-            </div>
-          ) : (
-            <div className="cm-surface flex h-[clamp(520px,calc(100vh-10rem),760px)] min-w-0 items-center justify-center text-sm text-slate-500">
-              No workspace
-            </div>
-          ))}
+        {supportsWorkspace(instance) && (
+          <div className={`h-[clamp(520px,calc(100vh-10rem),760px)] min-w-0 overflow-hidden ${workspaceVisible ? "" : "hidden"}`}>
+            <InstanceWorkbench
+              key={instance.id}
+              sharedState={sharedWorkbenchState}
+              onWorkbenchEvent={onWorkbenchEvent}
+              instanceId={instance.id}
+              runtimeGeneration={instance.runtime_generation ?? 0}
+              isRunning={instance.status === "running"}
+              visible={workspaceVisible}
+              initialPath="/config"
+              onSelectDirectory={instance.type === "opencode" && instance.instance_mode === "pro" ? handleSelectOpenCodeProject : undefined}
+              selectingDirectory={actionLoading !== null}
+            />
+          </div>
+        )}
       </section>
 
       {(instance.runtime_type || "desktop") === "desktop" && (

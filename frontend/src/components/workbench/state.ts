@@ -1,0 +1,157 @@
+import type { TerminalSession } from "../../types/workbench";
+export const MAX_WORKBENCH_TABS = 32;
+export type WorkbenchPanel = "files" | "git" | "preview";
+export interface WorkbenchTab {
+  id: string;
+  kind: "browser" | "terminal";
+  title: string;
+  hidden: boolean;
+  stale: boolean;
+  address?: string;
+  url?: string;
+  session?: TerminalSession;
+}
+export interface WorkbenchState {
+  generation: number;
+  panel: WorkbenchPanel;
+  tabs: WorkbenchTab[];
+  active?: string;
+}
+export type WorkbenchEvent =
+  | { type: "panel"; panel: WorkbenchPanel }
+  | { type: "browser.new"; id: string }
+  | {
+      type: "browser.navigate";
+      id: string;
+      address: string;
+      url: string;
+      generation: number;
+    }
+  | { type: "terminal.open"; session: TerminalSession }
+  | {
+      type: "tab.select" | "tab.restore" | "tab.hide" | "tab.remove";
+      id: string;
+    }
+  | { type: "terminal.update"; session: TerminalSession }
+  | { type: "generation"; generation: number };
+export function initialWorkbench(generation: number): WorkbenchState {
+  return { generation, panel: "files", tabs: [] };
+}
+export function workbenchReducer(
+  state: WorkbenchState,
+  event: WorkbenchEvent,
+): WorkbenchState {
+  switch (event.type) {
+    case "panel":
+      return { ...state, panel: event.panel };
+    case "browser.new":
+      if (state.tabs.length >= MAX_WORKBENCH_TABS) return state;
+      return {
+        ...state,
+        panel: "preview",
+        active: event.id,
+        tabs: [
+          ...state.tabs,
+          {
+            id: event.id,
+            kind: "browser",
+            title: "",
+            address: "",
+            hidden: false,
+            stale: false,
+          },
+        ],
+      };
+    case "browser.navigate":
+      if (event.generation !== state.generation) return state;
+      return {
+        ...state,
+        tabs: state.tabs.map((tab) =>
+          tab.id === event.id
+            ? {
+                ...tab,
+                address: event.address,
+                url: event.url,
+                title: event.address,
+                stale: false,
+              }
+            : tab,
+        ),
+      };
+    case "terminal.open": {
+      if (event.session.generation !== state.generation) return state;
+      const existing = state.tabs.some((tab) => tab.id === event.session.id);
+      if (!existing && state.tabs.length >= MAX_WORKBENCH_TABS) return state;
+      return {
+        ...state,
+        panel: "preview",
+        active: event.session.id,
+        tabs: existing
+          ? state.tabs.map((tab) =>
+              tab.id === event.session.id ? { ...tab, hidden: false } : tab,
+            )
+          : [
+              ...state.tabs,
+              {
+                id: event.session.id,
+                kind: "terminal",
+                title: event.session.name,
+                session: event.session,
+                hidden: false,
+                stale: false,
+              },
+            ],
+      };
+    }
+    case "terminal.update":
+      return {
+        ...state,
+        tabs: state.tabs.map((tab) =>
+          tab.id === event.session.id
+            ? { ...tab, session: event.session }
+            : tab,
+        ),
+      };
+    case "tab.select":
+    case "tab.restore":
+      return {
+        ...state,
+        panel: "preview",
+        active: event.id,
+        tabs: state.tabs.map((tab) =>
+          tab.id === event.id ? { ...tab, hidden: false } : tab,
+        ),
+      };
+    case "tab.hide":
+    case "tab.remove": {
+      const tabs =
+        event.type === "tab.remove"
+          ? state.tabs.filter((tab) => tab.id !== event.id)
+          : state.tabs.map((tab) =>
+              tab.id === event.id ? { ...tab, hidden: true } : tab,
+            );
+      return {
+        ...state,
+        tabs,
+        active:
+          state.active === event.id
+            ? tabs.find((tab) => !tab.hidden)?.id
+            : state.active,
+      };
+    }
+    case "generation":
+      return event.generation === state.generation
+        ? state
+        : {
+            ...state,
+            generation: event.generation,
+            tabs: state.tabs.map((tab) => ({
+              ...tab,
+              stale: true,
+              url: undefined,
+            })),
+          };
+    default:
+      return state;
+  }
+}
