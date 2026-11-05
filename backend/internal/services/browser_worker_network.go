@@ -108,12 +108,19 @@ func (s *BrowserWorkerService) protectedNetworkSnapshot(ctx context.Context, ins
 	if err != nil || !reflect.DeepEqual(policy.Spec, desired.Spec) {
 		return nil, errRuntimeBrowser
 	}
-	deployment, err := s.client.Clientset.AppsV1().Deployments(namespace).Get(ctx, name, metav1.GetOptions{})
+	deployment, err := s.getBrowserWorkload(ctx, instance.ID, s.browserControllerKind())
 	if err != nil || deployment.DeletionTimestamp != nil || deployment.Spec.Replicas == nil || *deployment.Spec.Replicas != 1 || deployment.Spec.Template.Annotations[browserNetworkAnnotation] != browserPolicyHash(desired) || deployment.Spec.Template.Annotations[browserRuntimeAnnotation] != browserRuntimeScope(id) || deployment.Status.ObservedGeneration != deployment.Generation || deployment.Status.UpdatedReplicas != 1 || deployment.Status.ReadyReplicas != 1 || deployment.Status.Replicas != 1 {
 		return nil, errRuntimeBrowser
 	}
 	service, err := s.client.Clientset.CoreV1().Services(namespace).Get(ctx, name, metav1.GetOptions{})
 	expectedSelector := map[string]string{"app": "clawbrowser", "instance-id": strconv.Itoa(instance.ID), "user-id": strconv.Itoa(instance.UserID)}
+	if s.browserControllerKind() == "StatefulSet" {
+		evidence, _, err := s.loadNFSBrowserRegistry(ctx, instance.ID, false)
+		if err != nil {
+			return nil, errRuntimeBrowser
+		}
+		expectedSelector[nfsBrowserEpochAnnotation] = evidence.Epoch
+	}
 	if err != nil || service.DeletionTimestamp != nil || service.Spec.Type != corev1.ServiceTypeClusterIP || service.Spec.ExternalName != "" || len(service.Spec.ExternalIPs) != 0 || !reflect.DeepEqual(service.Spec.Selector, expectedSelector) {
 		return nil, errRuntimeBrowser
 	}
@@ -159,6 +166,12 @@ func (s *BrowserWorkerService) protectedNetworkSnapshot(ctx context.Context, ins
 	}
 	if selected == nil {
 		return nil, errRuntimeBrowser
+	}
+	if s.browserControllerKind() == "StatefulSet" {
+		evidence, _, err := s.loadNFSBrowserRegistry(ctx, instance.ID, false)
+		if err != nil || s.verifyNFSBrowserTombstones(ctx, instance.ID, evidence) != nil || !evidence.Admitted || evidence.Stopping || evidence.Stopped || evidence.DeploymentUID != string(deployment.UID) || validateNFSBrowserOrdinal(evidence, selected, s.nfsBrowserControllerName(instance.ID, evidence)) != nil {
+			return nil, errRuntimeBrowser
+		}
 	}
 	current, err := s.protectedBrowserIdentity(ctx, instance)
 	if err != nil || current != id {

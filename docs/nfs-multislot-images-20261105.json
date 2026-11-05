@@ -1,0 +1,33 @@
+{
+  "purpose": "Linux54 isolated NFS multi-slot test images; local test registry names are not production deployment references",
+  "platform": "linux/amd64",
+  "build_host": "10.130.81.54",
+  "source_branch": "mount",
+  "images": {
+    "openclaw-runtime": {
+      "image": "clawmanager.local/openclaw-lite@sha256:619af82a92a4104f25d65e4c4b757ab018424a6d16b278e74f0ef6f649f04666",
+      "base": "clawmanager.local/openclaw-lite@sha256:2e617606c437732d56a5a53d00947eb4e1bab3a385003de30dcc2aea07b0764b",
+      "binary_sha256": "e4964351a5006035726b776ac4a40b8cb7e7e59f915b574fbc240a3bbafee301"
+    },
+    "hermes-runtime": {
+      "image": "clawmanager.local/hermes-lite@sha256:ade8fefb54248834e1ba7e86195ed149ce82cdb63da16fd2241297dbfa3a61bb",
+      "base": "clawmanager.local/hermes-lite@sha256:52c63fdd0908d638aa0a5ea5bfbef7b2fa4486907ce49a1036a904f04a2e4de3",
+      "binary_sha256": "71c69ddc9ecb05fdfb6708a7f6285b3f7f78f8688593dd8cff8350a163ea0b51"
+    },
+    "opencode-runtime": {
+      "image": "clawmanager.local/opencode-lite@sha256:774d3fa2e0a284419cedc58c697f54dc7a3651a7d354f43677a4c5a00a01e74b",
+      "base": "clawmanager.local/opencode-lite@sha256:8272d3be32d26821658ac3220aa3119758fcf7b8a39b836320d2d333d827ae7a",
+      "binary_sha256": "2e44c9978cc786b4fd481a95bc50c182fb42c570ada21f7f9741e94c503b721a"
+    },
+    "deepseek-harness-runtime": {
+      "image": "clawmanager.local/deepseek-harness-lite@sha256:41f105cd7b621d090c1afffb27dc32f43e1b6ef741aa6553cc7d4465dd428661",
+      "base": "clawmanager.local/deepseek-harness-lite@sha256:c4c5e406bf9e381e75585ba3da6fd9f9362b246b8ba2671834d222b6bbb2a41c",
+      "binary_sha256": "78013bb9932e061b0c20b02123e7dc6d6864407f7c1b0b5ee76fe065818dc778"
+    },
+    "clawmanager-app": {
+      "image": "clawmanager.local/clawmanager@sha256:5856234ce5b54a0b7400cd5d6af6d82bc41bbd4aef648cea0fbdf5573bccaf80",
+      "base": "clawmanager.local/clawmanager@sha256:f52d375a8ee742e4c864c21c93a9dfa1d6560120a4369da61f72dd1a0dd2cc1a",
+      "binary_sha256": "c7f31fb3e7c4ca2f0fb75c0baee7e2755ec546de02710a4838eccb2545d2f07d"
+    }
+  }
+}

@@ -120,6 +120,26 @@ func (s *fakeIEIInstanceService) Reset(instanceID int) error {
 	return s.resetErr
 }
 
+func TestIEIInstanceViewPreservesStopReasonForDisplay(t *testing.T) {
+	for _, reason := range []string{"idle_timeout", "manual", ""} {
+		instance := &models.Instance{ID: 1, Status: "stopped", StoppedReason: reason}
+		payload, err := json.Marshal(newIEIInstanceView(instance))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var view map[string]any
+		if err := json.Unmarshal(payload, &view); err != nil {
+			t.Fatal(err)
+		}
+		if view["status"] != "stopped" {
+			t.Fatal("display reason changed the lifecycle state")
+		}
+		if reason != "" && view["stopped_reason"] != reason {
+			t.Fatalf("stop reason missing from owner portal view: %s", payload)
+		}
+	}
+}
+
 func TestIEISystemRestartRequiresSessionOwnerAndRunningInstance(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	cfg := testIEIHandlerConfig()

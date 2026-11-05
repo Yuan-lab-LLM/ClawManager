@@ -18,6 +18,7 @@ const runtimeSlotSocketVolume = "runtime-slot-sockets"
 const runtimeSlotSocketDirectory = "/run/clawmanager-slots"
 const runtimeSlotServiceAccountName = "clawmanager-lite-runtime"
 const RuntimeNetworkSecurityProfile = "isolated-network-v1"
+const RuntimeNFSRootlessProfile = "nfs-rootless-v1"
 
 func runtimeSlotPortBlock(runtimeType string) int {
 	switch runtimeType {
@@ -36,7 +37,7 @@ func configureRuntimeSlots(deployment *appsv1.Deployment, spec RuntimeDeployment
 	if spec.PodResources != nil {
 		pod.Resources = spec.PodResources.DeepCopy()
 	}
-	if spec.PodUserNamespaces || spec.NetworkIsolation {
+	if spec.SandboxProfile != RuntimeNFSRootlessProfile && (spec.PodUserNamespaces || spec.NetworkIsolation) {
 		pod.HostUsers = &no
 	}
 	if pod.SecurityContext == nil {
@@ -137,6 +138,9 @@ func configureRuntimeSlots(deployment *appsv1.Deployment, spec RuntimeDeployment
 		slot.VolumeMounts = append(slot.VolumeMounts, corev1.VolumeMount{Name: stateVolume, MountPath: "/var/lib/clawmanager-slot"})
 		pod.Containers = append(pod.Containers, *slot)
 	}
+	if spec.SandboxProfile == RuntimeNFSRootlessProfile {
+		configureNFSRootlessSlots(deployment)
+	}
 }
 
 func filterRuntimeSlotEnv(env []corev1.EnvVar) []corev1.EnvVar {
@@ -215,6 +219,9 @@ func (s *runtimeDeploymentService) validateRuntimeSlotStorage(ctx context.Contex
 	if pv.DeletionTimestamp != nil || pv.Status.Phase != corev1.VolumeBound || pv.Spec.ClaimRef == nil || pv.Spec.ClaimRef.Namespace != spec.Namespace || pv.Spec.ClaimRef.Name != claim || (pvc.UID != "" && pv.Spec.ClaimRef.UID != pvc.UID) {
 		return fmt.Errorf("runtime workspace PV binding is unavailable or inconsistent")
 	}
+	if spec.SandboxProfile == RuntimeNFSRootlessProfile {
+		return s.validateNFSRootlessStorage(ctx, spec, pvc, pv)
+	}
 	if pvc.Spec.StorageClassName == nil || *pvc.Spec.StorageClassName == "" || *pvc.Spec.StorageClassName != pv.Spec.StorageClassName {
 		return fmt.Errorf("runtime workspace storage class is unavailable or inconsistent")
 	}
@@ -223,6 +230,9 @@ func (s *runtimeDeploymentService) validateRuntimeSlotStorage(ctx context.Contex
 		return fmt.Errorf("inspect runtime workspace storage class: %w", err)
 	}
 	longhorn := sc.Provisioner == "driver.longhorn.io" && pv.Spec.CSI != nil && pv.Spec.CSI.Driver == "driver.longhorn.io"
+	if spec.PodUserNamespaces && longhorn && runtimeVolumeHasMode(pv.Spec.AccessModes, corev1.ReadWriteMany) {
+		return fmt.Errorf("Longhorn RWX uses NFS and cannot use Pod idmapped mounts; use the NFS rootless sandbox profile")
+	}
 	if len(nodes.Items) > 1 {
 		if !longhorn || !runtimeVolumeHasMode(pvc.Spec.AccessModes, corev1.ReadWriteMany) || !runtimeVolumeHasMode(pv.Spec.AccessModes, corev1.ReadWriteMany) {
 			return fmt.Errorf("multi-node container slots require Longhorn RWX workspace storage")
@@ -273,7 +283,14 @@ func syncRuntimeSlotImageAndIdentity(deployment *appsv1.Deployment, coordinator 
 // RuntimeSlotDeploymentSpecs builds only explicitly opted-in container pools.
 // Limits are configurable budgets, not measured density guarantees.
 func RuntimeSlotDeploymentSpecs(cfg config.RuntimePoolConfig, agentSecretName string) ([]RuntimeDeploymentSpec, error) {
-	if cfg.NetworkIsolation && (cfg.ContainerSlots < 1 || !cfg.PodUserNamespaces) {
+	rootless := cfg.SandboxProfile == RuntimeNFSRootlessProfile
+	if cfg.SandboxProfile != "" && !rootless {
+		return nil, fmt.Errorf("unknown runtime sandbox profile %q", cfg.SandboxProfile)
+	}
+	if rootless && (cfg.PodUserNamespaces || !cfg.NetworkIsolation || cfg.ContainerSlots < 1) {
+		return nil, fmt.Errorf("NFS rootless slots require isolated networking and no Pod user namespace")
+	}
+	if cfg.NetworkIsolation && (cfg.ContainerSlots < 1 || (!rootless && !cfg.PodUserNamespaces)) {
 		return nil, fmt.Errorf("network-isolated slots require Pod user namespaces and configured container slots")
 	}
 	if cfg.ContainerSlots == 0 {
@@ -333,7 +350,7 @@ func RuntimeSlotDeploymentSpecs(cfg config.RuntimePoolConfig, agentSecretName st
 		if strings.TrimSpace(runtime.image) == "" {
 			return nil, fmt.Errorf("container slots require %s image", runtime.kind)
 		}
-		specs = append(specs, RuntimeDeploymentSpec{Name: runtime.kind + "-runtime", Namespace: namespace, RuntimeType: runtime.kind, Image: runtime.image, Replicas: 1, WorkspacePVCClaimName: cfg.WorkspacePVCClaimName, WorkspaceMountPath: cfg.WorkspaceRoot, GatewayPortStart: cfg.GatewayPortStart, GatewayPortEnd: cfg.GatewayPortEnd, SlotCount: cfg.ContainerSlots, SlotResources: *resources.DeepCopy(), PodResources: podResources.DeepCopy(), PodUserNamespaces: cfg.PodUserNamespaces, NetworkIsolation: cfg.NetworkIsolation, AgentTokenSecretName: agentSecretName, HermesDesktopWeb: runtime.kind == "hermes"})
+		specs = append(specs, RuntimeDeploymentSpec{Name: runtime.kind + "-runtime", Namespace: namespace, RuntimeType: runtime.kind, Image: runtime.image, Replicas: 1, WorkspacePVCClaimName: cfg.WorkspacePVCClaimName, WorkspaceMountPath: cfg.WorkspaceRoot, GatewayPortStart: cfg.GatewayPortStart, GatewayPortEnd: cfg.GatewayPortEnd, SlotCount: cfg.ContainerSlots, SlotResources: *resources.DeepCopy(), PodResources: podResources.DeepCopy(), PodUserNamespaces: cfg.PodUserNamespaces, SandboxProfile: cfg.SandboxProfile, NetworkIsolation: cfg.NetworkIsolation, AgentTokenSecretName: agentSecretName, HermesDesktopWeb: runtime.kind == "hermes"})
 	}
 	return specs, nil
 }

@@ -5,17 +5,18 @@ package models
 type WorkspaceWriteIntent struct {
 	Operation  string
 	InstanceID int
+	TeamID     int
 	OwnerID    int
 	Generation int
 	Action     string
 }
 
 func (w WorkspaceWriteIntent) Valid() bool {
-	if !ValidRuntimeOperation(w.Operation) || w.InstanceID <= 0 || w.OwnerID <= 0 || w.Generation < 0 {
+	if !ValidRuntimeOperation(w.Operation) || (w.InstanceID <= 0 && w.TeamID <= 0) || (w.InstanceID > 0 && w.TeamID > 0) || w.OwnerID <= 0 || w.Generation < 0 {
 		return false
 	}
 	switch w.Action {
-	case "upload", "mkdir", "rename", "delete":
+	case "upload", "mkdir", "rename", "delete", "edit", "erase":
 		return true
 	}
 	return false

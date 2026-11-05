@@ -58,6 +58,9 @@ func TestRuntimeManagementCoordinationIsReferenceOnly(t *testing.T) {
 		"runtime_management_operations":     "secret",
 		"runtime_management_admission_lock": "internal",
 		"runtime_pod_deletion_intents":      "secret",
+		"instance_workspace_write_fences":   "secret",
+		"team_workspace_write_intents":      "secret",
+		"browser_writer_registry":           "secret",
 	} {
 		policy, ok := Policy(name)
 		if !ok || policy.Category != "system_backup" || policy.Classification != classification || policy.BackupStrategy != "metadata_only" || policy.RestoreStrategy != "reference_only" {

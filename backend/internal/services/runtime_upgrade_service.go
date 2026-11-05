@@ -189,6 +189,7 @@ type RuntimeUpgradeService struct {
 	bindings         repository.InstanceRuntimeBindingRepository
 	agent            RuntimeAgentClient
 	workspaceRoot    string
+	nfsIOProfile     string
 	redisURL         string
 	teamMaintenance  TeamUpgradeMaintenanceController
 	deployments      RuntimeDeploymentInventoryProvider

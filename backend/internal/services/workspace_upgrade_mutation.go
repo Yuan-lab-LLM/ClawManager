@@ -116,6 +116,31 @@ func (s *RuntimeUpgradeService) WithInstanceMutation(ctx context.Context, id int
 	return s.WithWorkspaceMutation(ctx, WorkspaceFileScope{InstanceID: id}, run)
 }
 
+// Called while WithWorkspaceMutation holds the ordered Team workspace fences.
+// Only active members with an open matching generation receive intents. Stopped
+// members must not prevent authorized writers using their Team shared directory.
+// Each active member gets its own durable intent because slot/container teardown cannot
+// establish completion of an independently running management file writer.
+func (s *RuntimeUpgradeService) WorkspaceTeamWriteScopes(ctx context.Context, scope WorkspaceFileScope) ([]WorkspaceFileScope, error) {
+	if scope.TeamID <= 0 || scope.UserID <= 0 {
+		return nil, ErrWorkspacePathInvalid
+	}
+	rows, err := s.sess.SQL().QueryContext(ctx, `SELECT DISTINCT i.id,i.user_id,i.runtime_generation FROM instances i JOIN team_members m ON m.instance_id=i.id JOIN teams t ON t.id=m.team_id JOIN instance_workspace_write_fences f ON f.instance_id=i.id AND f.owner_user_id=i.user_id AND f.generation=i.runtime_generation AND f.state='open' WHERE m.team_id=? AND t.user_id=? AND m.status NOT IN ('deleted','deleting') AND i.status IN ('creating','running') ORDER BY i.id`, scope.TeamID, scope.UserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var scopes []WorkspaceFileScope
+	for rows.Next() {
+		var member WorkspaceFileScope
+		if err = rows.Scan(&member.InstanceID, &member.UserID, &member.RuntimeGeneration); err != nil {
+			return nil, err
+		}
+		scopes = append(scopes, member)
+	}
+	return scopes, rows.Err()
+}
+
 // Shared by lifecycle execution and management preflight. The execution caller
 // also holds the workspace fence for the complete mutation.
 func (s *RuntimeUpgradeService) validateInstanceMutation(ctx context.Context, sess db.Session, id int) error {

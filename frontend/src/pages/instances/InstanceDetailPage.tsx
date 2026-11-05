@@ -1150,7 +1150,7 @@ const InstanceDetailPage: React.FC = () => {
           <h1 className="truncate text-2xl font-semibold text-slate-950">
             {instance.name}
           </h1>
-          <InstanceLifecycleStatus status={status?.status || instance.status} availability={status?.availability} />
+          <InstanceLifecycleStatus status={status?.status || instance.status} availability={status?.availability} stoppedReason={instance.stopped_reason} />
         </div>
         <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm text-slate-500">
           <span>{formatInstanceType(instance.type)}</span>

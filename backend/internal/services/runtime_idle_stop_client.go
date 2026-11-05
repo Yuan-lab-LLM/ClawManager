@@ -34,6 +34,9 @@ func (c *slotRuntimeAgentClient) verifyIdleTarget(ctx context.Context, endpoint,
 	if req.InstanceID <= 0 || req.Generation <= 0 || req.PodUID == "" || gatewayID != fmt.Sprintf("gw-%d-%d", req.InstanceID, req.Generation) {
 		return fmt.Errorf("invalid idle-stop identity")
 	}
+	if pod, err := c.containerStopPod(ctx, endpoint, req.PodUID); err == nil && pod.Labels["clawmanager.io/sandbox-profile"] == "nfs-rootless-v1" {
+		return nil
+	}
 	uid, err := c.targetPodUID(ctx, endpoint)
 	if err != nil {
 		return err
@@ -60,6 +63,12 @@ func (c *slotRuntimeAgentClient) IdleStop(ctx context.Context, endpoint, gateway
 	if err := c.verifyIdleTarget(ctx, endpoint, gatewayID, req); err != nil {
 		return err
 	}
+	if pod, err := c.containerStopPod(ctx, endpoint, req.PodUID); err == nil && pod.Labels["clawmanager.io/sandbox-profile"] == "nfs-rootless-v1" {
+		if err = c.assignments.MarkDraining(ctx, endpoint, gatewayID); err != nil {
+			return err
+		}
+		return c.stopContainerGateway(ctx, endpoint, gatewayID, true)
+	}
 	var receipt struct {
 		RuntimeIdleStopRequest
 		GatewayID string `json:"gateway_id"`
@@ -82,6 +91,9 @@ func (c *slotRuntimeAgentClient) IdleStop(ctx context.Context, endpoint, gateway
 func (c *slotRuntimeAgentClient) ConfirmIdleStop(ctx context.Context, endpoint, gatewayID string, req RuntimeIdleStopRequest) error {
 	if err := c.verifyIdleTarget(ctx, endpoint, gatewayID, req); err != nil {
 		return err
+	}
+	if pod, err := c.containerStopPod(ctx, endpoint, req.PodUID); err == nil && pod.Labels["clawmanager.io/sandbox-profile"] == "nfs-rootless-v1" {
+		return c.stopContainerGateway(ctx, endpoint, gatewayID, true)
 	}
 	if err := c.assignments.MarkDraining(ctx, endpoint, gatewayID); err != nil {
 		return err

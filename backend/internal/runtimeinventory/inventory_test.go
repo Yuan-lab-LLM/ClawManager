@@ -108,3 +108,25 @@ func TestInventoryExportsSameProtectedRangesForNamedWorkers(t *testing.T) {
 		t.Fatal("unavailableinventoryexportedpermissivepolicy")
 	}
 }
+
+func TestInventoryHardDeniesPinnedNFSOutsideClusterRanges(t *testing.T) {
+	i, err := newInventory([]string{"10.244.0.0/16"}, []string{"203.0.113.20", "2001:db8::20"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, store := range []*objectStore{&i.assignments, &i.pods, &i.nodes, &i.services} {
+		store.replace(nil)
+		store.healthy(time.Now())
+	}
+	i.nodes.replace([]runtime.Object{&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node"}}})
+	i.services.replace([]runtime.Object{&unstructured.Unstructured{Object: map[string]interface{}{"metadata": map[string]interface{}{"name": "service"}, "spec": map[string]interface{}{"cidrs": []interface{}{"10.96.0.0/12"}}}}})
+	for _, ip := range []string{"203.0.113.20", "2001:db8::20", "::ffff:203.0.113.20"} {
+		denied, err := i.Deny(context.Background(), netip.MustParseAddr(ip))
+		if err != nil || !denied {
+			t.Fatal("direct external NFS/RPC boundary missed", ip, err)
+		}
+	}
+	if denied, err := i.Deny(context.Background(), netip.MustParseAddr("203.0.113.21")); err != nil || denied {
+		t.Fatal("unrelated public server denied", err)
+	}
+}

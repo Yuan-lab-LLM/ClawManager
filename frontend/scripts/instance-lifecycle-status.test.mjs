@@ -21,10 +21,26 @@ function loadModule(url) {
 }
 const { translate } = loadModule(new URL('../src/lib/i18n.ts', import.meta.url));
 const { default: InstanceLifecycleStatus } = loadModule(new URL('../src/components/InstanceLifecycleStatus.tsx', import.meta.url));
-function render(status, availability, language = 'en') {
+function render(status, availability, language = 'en', stoppedReason) {
   locale = language;
-  return renderToStaticMarkup(createElement(InstanceLifecycleStatus, { status, availability }));
+  return renderToStaticMarkup(createElement(InstanceLifecycleStatus, { status, availability, stoppedReason }));
 }
+
+test('idle-timeout stops display Auto Sleep while manual and unknown stops remain Stopped', () => {
+  for (const [locale, sleeping, stopped] of [['en', 'Auto Sleep', 'Stopped'], ['zh', '自动休眠', '已停止']]) {
+    assert.match(render('stopped', 'unavailable', locale, 'idle_timeout'), new RegExp(`>${sleeping}</span>`));
+    for (const reason of ['manual', undefined]) {
+      assert.match(render('stopped', 'unavailable', locale, reason), new RegExp(`>${stopped}</span>`));
+    }
+  }
+});
+
+test('previous auto-sleep reason never masks a running or pending lifecycle state', () => {
+  for (const status of ['running', 'starting', 'stopping', 'restarting', 'error']) {
+    assert.doesNotMatch(render(status, undefined, 'en', 'idle_timeout'), /Auto Sleep/);
+    assert.match(render(status, undefined, 'en', 'idle_timeout'), new RegExp(`>${status[0].toUpperCase() + status.slice(1)}</span>`));
+  }
+});
 
 test('stopped remains an explicit lifecycle state even when access is unavailable', () => {
   for (const [locale, expected] of [['en', 'Stopped'], ['zh', '已停止']]) {

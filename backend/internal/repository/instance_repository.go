@@ -380,6 +380,14 @@ func (r *instanceRepository) filteredByUserID(userID int, filter models.Instance
 			result = result.And(db.Cond{"status IN": []string{"stopped", "error", "deleting"}})
 		}
 	}
+	if filter.AutoSleep != nil {
+		result = result.And(db.Cond{"status": "stopped"})
+		predicate := "EXISTS (SELECT 1 FROM instance_model_activity a WHERE a.instance_id = instances.id AND a.stopped_reason = ?)"
+		if !*filter.AutoSleep {
+			predicate = "NOT " + predicate
+		}
+		result = result.And(predicate, "idle_timeout")
+	}
 	if value := strings.ToLower(strings.TrimSpace(filter.Query)); value != "" {
 		id, _ := strconv.Atoi(strings.TrimPrefix(value, "#"))
 		if strings.HasPrefix(value, "#") {

@@ -1296,6 +1296,10 @@ func (s *teamService) writeSharedTeamRosterConfig(userID int, team *models.Team,
 	if s == nil || team == nil || strings.TrimSpace(rosterJSON) == "" {
 		return nil
 	}
+	if s.nativeTeamIO() {
+		return s.nativeTeamShared(context.Background(), userID, team.ID, []string{"results", "tasks", "inbox", "status", "artifacts", "tmp"}, teamNativeDocuments(rosterJSON, ""))
+	}
+
 	root := filepath.Clean(s.teamRuntimeSharedPathFor(userID, team.ID))
 	if root == "." || root == string(filepath.Separator) {
 		return fmt.Errorf("invalid Team shared workspace root for Team %d: %q", team.ID, root)
@@ -1752,6 +1756,9 @@ func (s *teamService) ListTeamEvents(userID, teamID, beforeID, limit int) (*Team
 }
 
 func (s *teamService) ListWorkspaceFiles(ctx context.Context, userID, teamID int, relPath string) (*TeamWorkspaceListPayload, error) {
+	if s.useNFSTeamFiles() {
+		return s.listNFSWorkspaceFiles(ctx, userID, teamID, relPath)
+	}
 	cleanPath, err := cleanTeamWorkspacePath(relPath)
 	if err != nil {
 		return nil, err
@@ -1797,6 +1804,9 @@ func (s *teamService) ListWorkspaceFiles(ctx context.Context, userID, teamID int
 }
 
 func (s *teamService) PreviewWorkspaceFile(ctx context.Context, userID, teamID int, relPath string) (*TeamWorkspacePreviewPayload, error) {
+	if s.useNFSTeamFiles() {
+		return s.previewNFSWorkspaceFile(ctx, userID, teamID, relPath)
+	}
 	cleanPath, err := cleanTeamWorkspacePath(relPath)
 	if err != nil {
 		return nil, err
@@ -1833,6 +1843,9 @@ func (s *teamService) PreviewWorkspaceFile(ctx context.Context, userID, teamID i
 }
 
 func (s *teamService) DownloadWorkspaceFile(ctx context.Context, userID, teamID int, relPath string) (*TeamWorkspaceDownloadPayload, error) {
+	if s.useNFSTeamFiles() {
+		return s.downloadNFSWorkspaceFile(ctx, userID, teamID, relPath)
+	}
 	cleanPath, err := cleanTeamWorkspacePath(relPath)
 	if err != nil {
 		return nil, err
@@ -1876,6 +1889,9 @@ func (s *teamService) DownloadWorkspaceFile(ctx context.Context, userID, teamID 
 }
 
 func (s *teamService) CreateWorkspaceFolder(ctx context.Context, userID, teamID int, req TeamWorkspaceFolderRequest) error {
+	if s.useNFSTeamFiles() {
+		return s.mkdirNFSWorkspace(ctx, userID, teamID, req)
+	}
 	parent, err := cleanTeamWorkspacePath(req.Path)
 	if err != nil {
 		return err
@@ -1895,6 +1911,9 @@ func (s *teamService) CreateWorkspaceFolder(ctx context.Context, userID, teamID 
 }
 
 func (s *teamService) RenameWorkspaceEntry(ctx context.Context, userID, teamID int, req TeamWorkspaceRenameRequest) error {
+	if s.useNFSTeamFiles() {
+		return s.renameNFSWorkspace(ctx, userID, teamID, req)
+	}
 	cleanPath, err := cleanTeamWorkspacePath(req.Path)
 	if err != nil {
 		return err
@@ -1936,6 +1955,9 @@ func (s *teamService) RenameWorkspaceEntry(ctx context.Context, userID, teamID i
 }
 
 func (s *teamService) DeleteWorkspaceEntry(ctx context.Context, userID, teamID int, relPath string) error {
+	if s.useNFSTeamFiles() {
+		return s.deleteNFSWorkspace(ctx, userID, teamID, relPath)
+	}
 	cleanPath, err := cleanTeamWorkspacePath(relPath)
 	if err != nil {
 		return err
@@ -1960,6 +1982,9 @@ func (s *teamService) DeleteWorkspaceEntry(ctx context.Context, userID, teamID i
 }
 
 func (s *teamService) UploadWorkspaceFiles(ctx context.Context, userID, teamID int, targetPath string, files []*multipart.FileHeader, relativePaths []string) error {
+	if s.useNFSTeamFiles() {
+		return s.uploadNFSWorkspace(ctx, userID, teamID, targetPath, files, relativePaths)
+	}
 	if len(files) == 0 {
 		return fmt.Errorf("no files uploaded")
 	}
@@ -2070,8 +2095,10 @@ func (s *teamService) DispatchTask(userID, teamID int, req DispatchTeamTaskReque
 	// temporarily unavailable; task dispatch must not acquire a new dependency
 	// on that lookup.
 	memberInstance, _ := s.teamMemberInstance(member)
-	if err := repairLitePromptWorkspaceOwnership(memberInstance); err != nil {
-		return nil, err
+	if !s.nativeTeamIO() {
+		if err := repairLitePromptWorkspaceOwnership(memberInstance); err != nil {
+			return nil, err
+		}
 	}
 
 	messageID := strings.TrimSpace(req.MessageID)
@@ -2364,8 +2391,10 @@ func (s *teamService) completeInitialLeaderTaskFromSnapshot(userID int, team *mo
 	taskRef := fmt.Sprintf("team-%d-task-%d", team.ID, task.ID)
 	reportRel := filepath.ToSlash(filepath.Join("results", taskRef, "team-introduction.md"))
 	reportPath := filepath.Join(filepath.Clean(s.teamRuntimeSharedPathFor(userID, team.ID)), filepath.FromSlash(reportRel))
-	if err := ensureTeamWorkspaceDirectory(filepath.Dir(reportPath)); err != nil {
-		return nil, err
+	if !s.nativeTeamIO() {
+		if err := ensureTeamWorkspaceDirectory(filepath.Dir(reportPath)); err != nil {
+			return nil, err
+		}
 	}
 	reportMembers := append([]models.TeamMember(nil), activeMembers...)
 	for idx := range reportMembers {
@@ -2378,11 +2407,21 @@ func (s *teamService) completeInitialLeaderTaskFromSnapshot(userID int, team *mo
 		reportMembers[idx].CurrentTaskID = nil
 	}
 	resultMarkdown := buildBackendBootstrapReport(team, reportMembers, taskRef, taskPayload)
-	if err := writeManagedTeamContextFile(reportPath, []byte(resultMarkdown), 0o664); err != nil {
-		return nil, fmt.Errorf("failed to write bootstrap report: %w", err)
+	var reportErr error
+	if s.nativeTeamIO() {
+		reportErr = s.writeNativeBootstrapReport(context.Background(), userID, team.ID, reportRel, resultMarkdown)
+	} else {
+		reportErr = writeManagedTeamContextFile(reportPath, []byte(resultMarkdown), 0o664)
 	}
-	rosterPath := filepath.Join(filepath.Clean(s.teamRuntimeSharedPathFor(userID, team.ID)), teamConfigFileName)
-	rosterBytes, rosterReadErr := os.ReadFile(rosterPath)
+	if reportErr != nil {
+		return nil, fmt.Errorf("failed to write bootstrap report: %w", reportErr)
+	}
+	var rosterBytes []byte
+	var rosterReadErr error
+	if !s.nativeTeamIO() {
+		rosterPath := filepath.Join(filepath.Clean(s.teamRuntimeSharedPathFor(userID, team.ID)), teamConfigFileName)
+		rosterBytes, rosterReadErr = os.ReadFile(rosterPath)
+	}
 	if rosterReadErr != nil || strings.TrimSpace(string(rosterBytes)) == "" {
 		rosterJSON, rosterBuildErr := buildTeamRosterConfigFromMembers(team, activeMembers)
 		if rosterBuildErr != nil {
@@ -2573,6 +2612,9 @@ func (s *teamService) prepareTeamTaskWorkspace(userID, teamID, taskID int) error
 				filepath.ToSlash(filepath.Join("tmp", memberKey)),
 			)
 		}
+	}
+	if s.nativeTeamIO() {
+		return s.nativeTeamShared(context.Background(), userID, teamID, standardDirs, nil)
 	}
 	for _, rel := range standardDirs {
 		target := root
@@ -2929,6 +2971,11 @@ func (s *teamService) writeLiteTeamMemberIdentityFiles(instance *models.Instance
 	if workspacePath == "" {
 		return fmt.Errorf("failed to write Lite Team identity files: workspace path is empty")
 	}
+	if s.nativeTeamIO() {
+		identity := map[string]string{teamAgentsFileName: buildTeamMemberAgentsMarkdown(team, member), teamSoulFileName: buildTeamMemberSoulMarkdown(member, normalizedTeamCommunicationMode(team.CommunicationMode))}
+		return s.nativeTeamPrivate(context.Background(), instance, "identity", identity, teamNativeDocuments(rosterJSON, ""))
+	}
+
 	if err := os.MkdirAll(workspacePath, 0755); err != nil {
 		return fmt.Errorf("failed to prepare Lite Team identity workspace: %w", err)
 	}
@@ -3205,6 +3252,10 @@ func (s *teamService) syncLeaderTeamContextFiles(userID int, team *models.Team, 
 	if s == nil || team == nil {
 		return nil
 	}
+	if s.nativeTeamIO() {
+		return s.syncNativeLeaderContext(userID, team, members, rosterJSON, introduction)
+	}
+
 	sharedRoot := filepath.Clean(s.teamRuntimeSharedPathFor(userID, team.ID))
 	if sharedRoot == "." || sharedRoot == string(filepath.Separator) {
 		return fmt.Errorf("invalid Team shared workspace root for Team %d: %q", team.ID, sharedRoot)

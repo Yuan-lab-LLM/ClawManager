@@ -338,6 +338,7 @@ type ListInstancesRequest struct {
 	InstanceMode string `form:"instance_mode,omitempty"`
 	Availability string `form:"availability,omitempty"`
 	Status       string `form:"status,omitempty"`
+	AutoSleep    *bool  `form:"auto_sleep"`
 }
 
 // ListInstances lists instances owned by the current user (workspace view).
@@ -372,6 +373,11 @@ func (h *InstanceHandler) ListInstances(c *gin.Context) {
 		return
 	}
 
+	if req.AutoSleep != nil && strings.ToLower(strings.TrimSpace(req.Status)) != "stopped" {
+		utils.ValidationError(c, fmt.Errorf("auto_sleep requires status=stopped"))
+		return
+	}
+
 	// Calculate offset
 	offset := (req.Page - 1) * req.Limit
 
@@ -386,6 +392,7 @@ func (h *InstanceHandler) ListInstances(c *gin.Context) {
 			InstanceMode: req.InstanceMode,
 			Availability: req.Availability,
 			Status:       req.Status,
+			AutoSleep:    req.AutoSleep,
 		}, offset, req.Limit)
 	} else {
 		instances, total, err = h.instanceService.GetByUserID(userID.(int), offset, req.Limit)

@@ -58,11 +58,14 @@ type RuntimeDeploymentSpec struct {
 	SlotResources        corev1.ResourceRequirements
 	PodResources         *corev1.ResourceRequirements
 	PodUserNamespaces    bool
+	SandboxProfile       string
 	NetworkIsolation     bool
 	AgentTokenSecretName string
 }
 
 type RuntimeDeploymentPod struct {
+	SandboxProfile                string       `json:"-"`
+	ReadyGatewayPorts             map[int]bool `json:"-"`
 	RuntimeType                   string
 	Namespace                     string
 	DeploymentName                string
@@ -660,7 +663,14 @@ func (s *runtimeDeploymentService) Ensure(ctx context.Context, spec RuntimeDeplo
 }
 
 func (s *runtimeDeploymentService) validateRuntimePodCapabilities(spec RuntimeDeploymentSpec) error {
-	if spec.NetworkIsolation && (!spec.PodUserNamespaces || spec.SlotCount < 1 || spec.SlotCount > 256) {
+	rootless := spec.SandboxProfile == RuntimeNFSRootlessProfile
+	if spec.SandboxProfile != "" && !rootless {
+		return fmt.Errorf("unknown runtime sandbox profile %q", spec.SandboxProfile)
+	}
+	if rootless && (spec.PodUserNamespaces || !spec.NetworkIsolation || spec.SlotCount < 1) {
+		return fmt.Errorf("NFS rootless runtime requires isolated container slots without Pod user namespaces")
+	}
+	if spec.NetworkIsolation && ((!rootless && !spec.PodUserNamespaces) || spec.SlotCount < 1 || spec.SlotCount > 256) {
 		return fmt.Errorf("network-isolated runtime requires configured slots and Pod user namespaces")
 	}
 	if spec.PodResources == nil && !spec.PodUserNamespaces {
@@ -971,6 +981,15 @@ func (s *runtimeDeploymentService) renderDeploymentPods(ctx context.Context, dep
 		})
 		inventory := &result[len(result)-1]
 		inventory.Slots = runtimePodSlots(pod)
+		inventory.SandboxProfile = pod.Labels["clawmanager.io/sandbox-profile"]
+		if inventory.SandboxProfile == RuntimeNFSRootlessProfile {
+			inventory.ReadyGatewayPorts = make(map[int]bool)
+			for _, slot := range inventory.Slots {
+				if slot.GatewayPort != nil && RuntimeAssignmentReady(&pod, *slot.GatewayPort, runtimeSlotPortBlock(deploymentRuntimeType)) {
+					inventory.ReadyGatewayPorts[*slot.GatewayPort] = true
+				}
+			}
+		}
 		inventory.Capacity = len(inventory.Slots)
 		inventory.CPUMillisLimit, inventory.MemoryBytesLimit = runtimePodLimits(pod)
 		inventory.CPUMillisRequest, inventory.MemoryBytesRequest = runtimePodRequests(pod)

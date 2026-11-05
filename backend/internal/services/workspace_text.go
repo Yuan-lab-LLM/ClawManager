@@ -47,11 +47,17 @@ func textVersion(data []byte, info os.FileInfo) string {
 
 // Pin the parent directory and refuse symlinks on the entire editing path.
 func openTextParent(scope WorkspaceFileScope, relative string) (*os.Root, string, error) {
+	if !workspaceTextName(path.Base(relative)) {
+		return nil, "", ErrWorkspaceTextUnsupported
+	}
+	return openWorkspaceFileParent(scope, relative)
+}
+func openWorkspaceFileParent(scope WorkspaceFileScope, relative string) (*os.Root, string, error) {
 	rel, err := cleanWorkspaceRelativePath(relative)
 	if err != nil {
 		return nil, "", err
 	}
-	if rel == "" || !workspaceTextName(path.Base(rel)) {
+	if rel == "" {
 		return nil, "", ErrWorkspaceTextUnsupported
 	}
 	root, err := openWorkspaceRoot(scope.WorkspacePath)
@@ -78,7 +84,7 @@ func openTextParent(scope WorkspaceFileScope, relative string) (*os.Root, string
 	}
 	return root, parts[len(parts)-1], nil
 }
-func readTextAt(root *os.Root, name string) (*WorkspaceText, os.FileInfo, error) {
+func readTextAt(root *os.Root, name string, scopes ...WorkspaceFileScope) (*WorkspaceText, os.FileInfo, error) {
 	st, err := root.Lstat(name)
 	if err != nil {
 		return nil, nil, err
@@ -97,6 +103,11 @@ func readTextAt(root *os.Root, name string) (*WorkspaceText, os.FileInfo, error)
 	actual, err := file.Stat()
 	if err != nil {
 		return nil, nil, err
+	}
+	for _, scope := range scopes {
+		if err := validateWorkspacePrivateInode(scope, actual); err != nil {
+			return nil, nil, err
+		}
 	}
 	if !os.SameFile(st, actual) {
 		return nil, nil, ErrWorkspaceTextConflict
@@ -121,6 +132,10 @@ func readTextAt(root *os.Root, name string) (*WorkspaceText, os.FileInfo, error)
 	return &WorkspaceText{Text: string(data), Version: textVersion(data, after)}, after, nil
 }
 func (s *workspaceFileService) ReadText(ctx context.Context, scope WorkspaceFileScope, relative string) (*WorkspaceText, error) {
+	if s.useNFSIO(scope) {
+		r, _, err := s.nfsIO(ctx, scope, workspaceNFSRequest{Action: "read_text", Path: relative}, nil)
+		return r.Text, err
+	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -129,10 +144,14 @@ func (s *workspaceFileService) ReadText(ctx context.Context, scope WorkspaceFile
 		return nil, err
 	}
 	defer root.Close()
-	doc, _, err := readTextAt(root, name)
+	doc, _, err := readTextAt(root, name, scope)
 	return doc, err
 }
 func (s *workspaceFileService) saveText(ctx context.Context, scope WorkspaceFileScope, relative, text, version string) (*WorkspaceText, error) {
+	if s.useNFSIO(scope) {
+		r, _, err := s.nfsIO(ctx, scope, workspaceNFSRequest{Action: "save_text", Path: relative, Text: text, Version: version}, nil)
+		return r.Text, err
+	}
 	if len(text) > int(textPreviewMaxBytes) {
 		return nil, ErrWorkspacePreviewTooLarge
 	}
@@ -147,12 +166,16 @@ func (s *workspaceFileService) saveText(ctx context.Context, scope WorkspaceFile
 		return nil, err
 	}
 	defer root.Close()
-	unlock, err := lockWorkspaceEditor(ctx, root)
+	lockMode := os.FileMode(0600)
+	if scope.credentialScoped && scope.TeamID > 0 {
+		lockMode = 0660
+	}
+	unlock, err := lockWorkspaceEditor(ctx, root, lockMode)
 	if err != nil {
 		return nil, err
 	}
 	defer unlock()
-	old, info, err := readTextAt(root, name)
+	old, info, err := readTextAt(root, name, scope)
 	if err != nil {
 		return nil, err
 	}
@@ -182,7 +205,7 @@ func (s *workspaceFileService) saveText(ctx context.Context, scope WorkspaceFile
 		return nil, closeErr
 	}
 	// External writers may not honor our lock. Check again immediately before replace.
-	current, _, err := readTextAt(root, name)
+	current, _, err := readTextAt(root, name, scope)
 	if err != nil {
 		return nil, err
 	}
@@ -198,7 +221,7 @@ func (s *workspaceFileService) saveText(ctx context.Context, scope WorkspaceFile
 	if err = root.Rename(temp, name); err != nil {
 		return nil, err
 	}
-	doc, _, err := readTextAt(root, name)
+	doc, _, err := readTextAt(root, name, scope)
 	// A non-cooperating writer may replace the file after our commit. Never acknowledge
 	// its different contents as the user's successfully saved document.
 	if err == nil && doc.Text != text {

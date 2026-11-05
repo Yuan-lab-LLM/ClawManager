@@ -2516,7 +2516,16 @@ func (s *RuntimeScheduler) prepareGatewayStartParameters(ctx context.Context, in
 			return nil, err
 		}
 		if source != "" {
-			if err = verifyOriginalIdleWorkspace(s.workspaceRoot, runtimeType, &instance); err != nil {
+			_, _, profile, profileErr := s.gatewayLinuxIDs(ctx, instance.ID, nil, pod)
+			if profileErr != nil {
+				return nil, profileErr
+			}
+			if profile == k8s.RuntimeNFSRootlessProfile {
+				err = ProbeNFSInstanceWorkspace(ctx, s.workspaceRoot, runtimeType, &instance)
+			} else {
+				err = verifyOriginalIdleWorkspace(s.workspaceRoot, runtimeType, &instance)
+			}
+			if err != nil {
 				return nil, err
 			}
 			slotClient, ok := s.agentClient.(*slotRuntimeAgentClient)
@@ -2561,8 +2570,13 @@ func (s *RuntimeScheduler) prepareGatewayStartParameters(ctx context.Context, in
 			}
 		}
 	}
-	uid, gid := runtimeGatewayLinuxIDs(instance.ID, environment)
-	if runtimeType == RuntimeTypeOpenClaw {
+	uid, gid, sandboxProfile, err := s.gatewayLinuxIDs(ctx, instance.ID, environment, pod)
+	if err != nil {
+		return nil, err
+	}
+	// NFS private native data is prepared under the instance identity by the
+	// Runtime helper. Squashed backend root must not repair those directories.
+	if runtimeType == RuntimeTypeOpenClaw && sandboxProfile != k8s.RuntimeNFSRootlessProfile {
 		if err := ensureOpenClawPluginLayoutCompatibility(workspacePath, uid, gid); err != nil {
 			return nil, fmt.Errorf("prepare OpenClaw workspace compatibility: %w", err)
 		}

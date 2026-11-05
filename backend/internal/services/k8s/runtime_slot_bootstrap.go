@@ -57,6 +57,9 @@ func EnsureRuntimeSlotPools(ctx context.Context, client kubernetes.Interface, cf
 		if existing.Spec.Template.Labels["clawmanager.io/runtime-security"] != profile {
 			return fmt.Errorf("serving %s network security change requires a coordinated rollout", spec.Name)
 		}
+		if existing.Spec.Template.Labels["clawmanager.io/sandbox-profile"] != spec.SandboxProfile {
+			return fmt.Errorf("serving %s sandbox profile change requires a coordinated rollout", spec.Name)
+		}
 		if err := validateRuntimeSlotTLSDeployment(existing); err != nil {
 			return err
 		}

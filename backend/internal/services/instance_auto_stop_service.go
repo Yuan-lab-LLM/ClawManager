@@ -165,7 +165,7 @@ func (s *InstanceAutoStopService) tryStopGuarded(ctx context.Context, cfg models
 	if !ok {
 		return fmt.Errorf("this Lite runtime is unsupported")
 	}
-	if err = verifyOriginalIdleWorkspace(s.lifecycle.runtimeWorkspaceRoot(), runtimeType, i); err != nil {
+	if err = s.lifecycle.verifyOriginalWorkspace(ctx, runtimeType, i); err != nil {
 		return err
 	}
 	b, err := s.lifecycle.bindingRepo.GetByInstanceID(ctx, i.ID)
