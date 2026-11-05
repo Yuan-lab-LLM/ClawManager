@@ -6,7 +6,8 @@ import { useI18n } from '../../contexts/I18nContext';
 import { instanceService } from '../../services/instanceService';
 import { adminInstanceService } from '../../services/adminInstanceService';
 import { userService } from '../../services/userService';
-import type { Instance } from '../../types/instance';
+import { formatInstanceType, type Instance } from '../../types/instance';
+import { INSTANCE_STATUS_FILTERS, type InstanceStatusFilter } from '../../lib/instanceListFilters';
 import type { User } from '../../types/user';
 import { getInstanceDisplayStatus } from '../../lib/instanceStatus';
 
@@ -17,7 +18,7 @@ const InstanceManagementPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'all' | Instance['status']>('all');
+  const [statusFilter, setStatusFilter] = useState<InstanceStatusFilter>('all');
   const [typeFilter, setTypeFilter] = useState<'all' | Instance['type']>('all');
   const [modeFilter, setModeFilter] = useState<'all' | Instance['instance_mode']>('all');
   const [runtimeFilter, setRuntimeFilter] = useState<'all' | Instance['runtime_type']>('all');
@@ -69,7 +70,7 @@ const InstanceManagementPage: React.FC = () => {
 
   const filteredInstances = useMemo(() => {
     return instances.filter((instance) => {
-      if (statusFilter !== 'all' && instance.status !== statusFilter) {
+      if (statusFilter !== 'all' && getInstanceDisplayStatus(instance.status, instance.stopped_reason) !== statusFilter) {
         return false;
       }
       if (typeFilter !== 'all' && instance.type !== typeFilter) {
@@ -242,18 +243,18 @@ const InstanceManagementPage: React.FC = () => {
               className="app-input min-w-[280px]"
             />
             <select
+              aria-label={t("instances.statusFilter")}
               value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value as 'all' | Instance['status'])}
+              onChange={(e) => setStatusFilter(e.target.value as InstanceStatusFilter)}
               className="app-input"
             >
               <option value="all">{t('admin.allStatuses')}</option>
-              <option value="running">{t('status.running')}</option>
-              <option value="stopped">{t('status.stopped')}</option>
-              <option value="creating">{t('status.creating')}</option>
-              <option value="error">{t('status.error')}</option>
-              <option value="deleting">{t('status.deleting')}</option>
+              {INSTANCE_STATUS_FILTERS.map((status) => (
+                <option key={status} value={status}>{t(`status.${status}`)}</option>
+              ))}
             </select>
             <select
+              aria-label={t("instances.instanceTypeFilter")}
               value={typeFilter}
               onChange={(e) => setTypeFilter(e.target.value as 'all' | Instance['type'])}
               className="app-input"
@@ -261,7 +262,7 @@ const InstanceManagementPage: React.FC = () => {
               <option value="all">{t('admin.allTypes')}</option>
               {typeOptions.map((type) => (
                 <option key={type} value={type}>
-                  {type}
+                  {formatInstanceType(type)}
                 </option>
               ))}
             </select>

@@ -71,6 +71,7 @@ type InstanceListFilter struct {
 	InstanceMode string
 	Availability string
 	Status       string
+	AutoSleep    *bool
 }
 
 // InstanceSummary is the aggregate instance data used by the user dashboard.

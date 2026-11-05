@@ -343,6 +343,8 @@ export interface InstanceListFilters {
   type?: string;
   instance_mode?: "lite" | "pro";
   availability?: InstanceAvailability;
+  status?: string;
+  auto_sleep?: boolean;
 }
 
 export interface InstanceSummary {
