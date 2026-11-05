@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"log"
+	"net"
 	"net/http"
 	"net/netip"
 	"net/url"
@@ -32,6 +33,7 @@ import (
 	"clawreef/internal/services/leader"
 	"clawreef/internal/systembackup"
 	"clawreef/internal/teamtemplate"
+	"clawreef/internal/workbench"
 
 	"github.com/gin-gonic/gin"
 	"k8s.io/client-go/dynamic"
@@ -630,6 +632,21 @@ func main() {
 		log.Printf("skill inventory report persistence is disabled; reports will be acknowledged without database synchronization")
 	}
 	teamHandler := handlers.NewTeamHandler(teamService)
+	previewOrigin := strings.TrimSpace(os.Getenv("CLAWMANAGER_WORKBENCH_PREVIEW_ORIGIN"))
+	if previewOrigin == "" {
+		_, port, splitErr := net.SplitHostPort(cfg.Server.Address)
+		if splitErr != nil || port == "" {
+			port = "9001"
+		}
+		previewOrigin = "http://p-{token}.localhost:" + port
+	}
+	workbenchPreviews, err := workbench.NewPreviews(previewOrigin, repository.NewWorkbenchPreviewStore(database), 8*time.Hour)
+	if err != nil {
+		log.Fatalf("invalid workbench preview origin: %v", err)
+	}
+	workbenchAgent, _ := runtimeAgentClient.(services.WorkbenchAgent)
+	instanceWorkbenchService := services.NewInstanceWorkbenchService(instanceRepo, bindingRepo, runtimePodRepo, workbenchAgent, workbenchPreviews)
+	instanceWorkbenchHandler := handlers.NewInstanceWorkbenchHandler(instanceWorkbenchService)
 	workspaceFileHandler := handlers.NewWorkspaceFileHandler(instanceService, workspaceFileService, runtimeWorkspaceFileService)
 	workspaceFileHandler.SetSkillRepository(skillRepo)
 	workspaceFileHandler.SetExternalAccessServices(externalAccessService, instanceHandler.InstanceAccessService())
@@ -816,6 +833,14 @@ func main() {
 	r.Use(middleware.BackupRequestBoundary(backupHTTPPool, db.SQLGateScope()))
 
 	// Middleware
+	r.Use(func(c *gin.Context) {
+		if instanceWorkbenchService.IsPreviewHost(c.Request.Host) {
+			instanceWorkbenchService.ServePreview(c.Writer, c.Request)
+			c.Abort()
+			return
+		}
+		c.Next()
+	})
 	r.Use(middleware.CORS())
 	r.Use(middleware.ErrorHandler())
 	r.NoRoute(egressProxyHandler.Handle)
@@ -982,6 +1007,7 @@ func main() {
 			instances.GET("/:id/browser-worker", instanceHandler.GetBrowserWorker)
 			instances.POST("/:id/browser-worker/access", instanceHandler.GenerateBrowserWorkerAccess)
 			instances.GET("/:id/shell", instanceHandler.StreamShell)
+			instanceWorkbenchHandler.Register(instances.Group("/:id/workbench"))
 			instances.POST("/:id/sync", instanceHandler.ForceSync)
 			instances.GET("/:id/openclaw/export", instanceHandler.ExportOpenClaw)
 			instances.POST("/:id/openclaw/import", instanceHandler.ImportOpenClaw)

@@ -1,0 +1,27 @@
+# Example for ingress-nginx. Supply wildcard DNS and the wildcard TLS Secret.
+# Forward all paths directly to the backend, including WebSocket upgrades.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: clawmanager-workbench-preview
+  namespace: clawmanager-system
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "28800"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "28800"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - "*.preview.example.net"
+      secretName: workbench-preview-wildcard-tls
+  rules:
+    - host: "*.preview.example.net"
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: clawmanager-gateway
+                port:
+                  number: 9001

@@ -1,0 +1,29 @@
+# 实例工作台
+
+工作台为实例所有者和管理员提供 Git 项目、交互终端和手动网页预览。更新控制面和运行镜像后生效；旧运行镜像显示“需要升级”，不会回退到管理容器执行命令。数据库迁移 101 保存预览凭证的哈希，支持多个控制面副本。
+
+## 网页预览域名
+
+开发环境默认使用 `http://p-{token}.localhost:<后端端口>`，后端端口默认 9001。浏览器需要能解析 `*.localhost`；部分系统需要本地通配 DNS。预览请求直接到后端，不能只代理 `/api`。每个预览使用独立来源，支持根路径资源、重定向和 WebSocket。
+
+生产环境设置后端环境变量：
+
+```sh
+CLAWMANAGER_WORKBENCH_PREVIEW_ORIGIN=https://p-{token}.preview.example.net
+```
+
+可参考 `deployments/k8s/workbench/backend-patch.example.yaml` 和 `deployments/k8s/workbench/ingress.example.yaml`，并按实际后端 Service 名称、端口和 Ingress 控制器调整。
+
+为 `*.preview.example.net` 设置通配 DNS、TLS 证书和到 CM 后端的 Ingress。必须允许任意请求路径、流式响应和 WebSocket Upgrade，并为长连接配置合适的超时。域名模板中必须恰好包含一个 `{token}`，不能包含路径、查询参数或账号信息。可以在现有后端 Deployment 中添加环境变量，在 Ingress 中添加通配主机规则；无需为每个预览创建 Kubernetes Service 或 Ingress。
+
+建议使用与 CM 登录站点不同的可注册域，避免登录站点的父域 Cookie 被发送给用户应用。预览域不要承载 CM UI/API，也不要配置平台登录 Cookie。HTTPS 的 CM 页面需要 HTTPS 预览地址。
+
+预览地址是临时访问凭证，默认八小时后过期；请勿公开分享。它只能访问创建时指定的实例内 loopback HTTP/HTTPS 端口。实例停止、所有者变化或运行代次变化后失效；已建立的长连接也会关闭。重新启动服务后，通过工作台手动新建预览。
+
+## Git 和终端
+
+项目登记和 `.git` 保存在实例持久工作区。Git 命令及其凭证助手、终端、依赖安装均在业务沙箱身份与网络中执行。提交和推送是两个独立动作。界面不提供强制推送、丢弃修改或自动 stash。首次提交需要实例自己的 `git config user.name` 和 `git config user.email`；私有仓库使用实例已有的 Git 凭证。
+
+切换工作台标签不会结束终端；明确点击结束才会停止该会话。自动休眠可以结束终端和调试服务，迁移会停止旧执行并拒绝旧页面继续写入。迁移保留代码和 Git 数据，不保证容器可写层中的依赖与系统文件迁移；必要时重新安装依赖。
+
+进程面板仅列出运行时能够证明归属的进程。Agent 启动的进程可以停止；只有存在可信启动信息的会话才提供重新启动，不能重启的进程请通过原 Agent 或终端重新执行启动命令。

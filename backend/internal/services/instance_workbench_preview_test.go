@@ -1,0 +1,146 @@
+package services
+
+import (
+	"bytes"
+	"context"
+	"encoding/base64"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"clawreef/internal/models"
+	"clawreef/internal/workbench"
+	"github.com/gorilla/websocket"
+)
+
+type previewTestStore struct {
+	sync.Mutex
+	values map[string]workbench.PreviewLease
+}
+
+func (s *previewTestStore) Put(_ context.Context, k string, v workbench.PreviewLease) error {
+	s.Lock()
+	defer s.Unlock()
+	s.values[k] = v
+	return nil
+}
+func (s *previewTestStore) Get(_ context.Context, k string) (workbench.PreviewLease, error) {
+	s.Lock()
+	defer s.Unlock()
+	v, ok := s.values[k]
+	if !ok {
+		return v, workbench.ErrPreviewNotFound
+	}
+	return v, nil
+}
+func TestWorkbenchPreviewStreamsBodyAndWebSocketWithScopedControlRoute(t *testing.T) {
+	var routes []workbenchPreviewRoute
+	var mu sync.Mutex
+	runtime := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/workbench/preview" || r.Header.Get("X-ClawManager-Control-Token") != "test-control" {
+			t.Error("untrusted preview transport")
+			w.WriteHeader(403)
+			return
+		}
+		encoded, err := base64.RawURLEncoding.DecodeString(r.Header.Get(workbenchPreviewHeader))
+		var route workbenchPreviewRoute
+		if err != nil || json.Unmarshal(encoded, &route) != nil {
+			t.Error("missing preview route")
+			w.WriteHeader(400)
+			return
+		}
+		mu.Lock()
+		routes = append(routes, route)
+		mu.Unlock()
+		if r.Header.Get("X-ClawManager-Other") != "" || r.Header.Get("Referer") != "" {
+			t.Error("CM metadata leaked")
+		}
+		if route.Path == "/ws" {
+			upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+			conn, err := upgrader.Upgrade(w, r, nil)
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			defer conn.Close()
+			for {
+				kind, payload, err := conn.ReadMessage()
+				if err != nil {
+					return
+				}
+				if err = conn.WriteMessage(kind, payload); err != nil {
+					return
+				}
+			}
+			return
+		}
+		w.Header().Set("Location", "http://localhost:4321/login?from=app")
+		w.Header().Set("Set-Cookie", "app=1; Domain=localhost; HttpOnly")
+		w.Header().Set("X-ClawManager-Internal", "secret")
+		w.WriteHeader(201)
+		_, _ = io.Copy(w, r.Body)
+	}))
+	defer runtime.Close()
+	instance := &models.Instance{ID: 42, UserID: 7, Status: "running", RuntimeGeneration: 3}
+	binding := &models.InstanceRuntimeBinding{InstanceID: 42, RuntimePodID: 9, Generation: 3, GatewayID: "gw-42-3", GatewayPort: 3000, WorkspacePath: "/workspace"}
+	previews, _ := workbench.NewPreviews("http://p-{token}.localhost", &previewTestStore{values: map[string]workbench.PreviewLease{}}, time.Hour)
+	var instanceMu sync.RWMutex
+	service := NewInstanceWorkbenchService(workbenchTestInstances{instance: instance, mu: &instanceMu}, workbenchTestBindings{binding}, workbenchTestPods{&models.RuntimePod{ID: 9, AgentEndpoint: &runtime.URL}}, NewRuntimeAgentClientWithHTTPClient("test-control", runtime.Client()).(WorkbenchAgent), previews)
+	service.previewRecheckInterval = 10 * time.Millisecond
+	lease, err := previews.Create(context.Background(), workbench.PreviewScope{InstanceID: 42, UserID: 7, Generation: 3, GatewayID: "gw-42-3"}, "localhost:4321")
+	if err != nil {
+		t.Fatal(err)
+	}
+	host, _ := url.Parse(previews.URL(lease))
+	body := []byte{0, 255, 1, 2, 3}
+	request := httptest.NewRequest("POST", "http://"+host.Host+"/a%2Fb?q=%2f&x=1&x=2", bytes.NewReader(body))
+	request.Header.Set("X-ClawManager-Other", "secret")
+	request.Header.Set("Referer", "http://cm.example/private")
+	recorder := httptest.NewRecorder()
+	service.ServePreview(recorder, request)
+	if recorder.Code != 201 || !bytes.Equal(recorder.Body.Bytes(), body) {
+		t.Fatalf("stream corrupted: %d %q", recorder.Code, recorder.Body.Bytes())
+	}
+	if recorder.Header().Get("Location") != "http://"+host.Host+"/login?from=app" || strings.Contains(recorder.Header().Get("Set-Cookie"), "Domain=") || recorder.Header().Get("X-ClawManager-Internal") != "" {
+		t.Fatalf("origin boundary incorrect: %+v", recorder.Header())
+	}
+	mu.Lock()
+	route := routes[0]
+	mu.Unlock()
+	if route.InstanceID != 42 || route.Generation != 3 || route.Port != 4321 || route.RawPath != "/a%2Fb" || route.RawQuery != "q=%2f&x=1&x=2" {
+		t.Fatalf("route corrupted: %+v", route)
+	}
+	proxy := httptest.NewServer(http.HandlerFunc(service.ServePreview))
+	defer proxy.Close()
+	header := http.Header{"Host": []string{host.Host}}
+	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(proxy.URL, "http")+"/ws", header)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if err = conn.WriteMessage(websocket.BinaryMessage, body); err != nil {
+		t.Fatal(err)
+	}
+	_, output, err := conn.ReadMessage()
+	if err != nil || !bytes.Equal(output, body) {
+		t.Fatalf("websocket corrupted: %q %v", output, err)
+	}
+	instanceMu.Lock()
+	instance.RuntimeGeneration = 4
+	instanceMu.Unlock()
+	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	if _, _, err := conn.ReadMessage(); err == nil {
+		t.Fatal("stale WebSocket remained open")
+	}
+	denied := httptest.NewRecorder()
+	service.ServePreview(denied, httptest.NewRequest("GET", "http://"+host.Host+"/", nil))
+	if denied.Code != 404 {
+		t.Fatalf("stale preview accepted: %d", denied.Code)
+	}
+}

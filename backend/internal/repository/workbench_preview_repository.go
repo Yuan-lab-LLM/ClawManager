@@ -63,6 +63,11 @@ func (s *workbenchPreviewStore) Put(ctx context.Context, key string, lease workb
 		if _, err := tx.SQL().ExecContext(ctx, "DELETE FROM instance_workbench_previews WHERE expires_at<=? LIMIT 256", time.Now().UTC()); err != nil {
 			return errWorkbenchPreviewStorage
 		}
+		// Always release this instance's expired slots even if the global
+		// expiry batch was filled by other instances.
+		if err := collection.Find(db.Cond{"instance_id": row.InstanceID, "expires_at <=": time.Now().UTC()}).Delete(); err != nil {
+			return errWorkbenchPreviewStorage
+		}
 		if err := collection.Find(db.Cond{"instance_id": row.InstanceID, "generation !=": row.Generation}).Delete(); err != nil {
 			return errWorkbenchPreviewStorage
 		}
