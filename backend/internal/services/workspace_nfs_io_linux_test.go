@@ -356,16 +356,27 @@ func (emptyNFSTeamGuard) WorkspaceTeamWriteScopes(context.Context, WorkspaceFile
 	return nil, nil
 }
 func TestNFSTeamStoppedMutationStillTracksIntent(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("credential switching requires trusted root")
+	}
 	base, err := os.MkdirTemp("/tmp", "cm-team-empty-")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(base)
-	os.Chmod(base, 0755)
+	if err = os.Chmod(base, 0755); err != nil {
+		t.Fatal(err)
+	}
 	root := filepath.Join(base, "teams", "user-3", "team-7-shared")
-	os.MkdirAll(root, 0755)
-	os.Chown(root, 10001, 1000)
-	os.Chmod(root, 0770|os.ModeSetgid)
+	if err = os.MkdirAll(root, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.Chown(root, 10001, 1000); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.Chmod(root, 0770|os.ModeSetgid); err != nil {
+		t.Fatal(err)
+	}
 	writes := &workspaceWriteFake{}
 	s := NewWorkspaceFileService(nil).(*workspaceFileService)
 	ConfigureWorkspaceNFSIO(s, "nfs-rootless-v1", base, writes)
