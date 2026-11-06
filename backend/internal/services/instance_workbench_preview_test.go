@@ -232,3 +232,56 @@ func requirePreviewWebSocketClosed(t *testing.T, err error) {
 		t.Fatalf("expected EOF or WebSocket close error, got %T: %v", err, err)
 	}
 }
+
+func TestWorkbenchPreviewCertificateEndpointsDoNotContactApp(t *testing.T) {
+	calls := 0
+	runtime := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { calls++; http.Error(w, "application unavailable", 502) }))
+	defer runtime.Close()
+	instance := &models.Instance{ID: 42, UserID: 7, Status: "running", RuntimeGeneration: 3}
+	binding := &models.InstanceRuntimeBinding{InstanceID: 42, RuntimePodID: 9, Generation: 3, GatewayID: "gw-42-3", GatewayPort: 3000, WorkspacePath: "/workspace"}
+	previews, _ := workbench.NewPreviews("https://p-{token}.preview.example:8443", &previewTestStore{values: map[string]workbench.PreviewLease{}}, time.Hour)
+	service := NewInstanceWorkbenchService(workbenchTestInstances{instance: instance}, workbenchTestBindings{binding}, workbenchTestPods{&models.RuntimePod{ID: 9, AgentEndpoint: &runtime.URL}}, NewRuntimeAgentClientWithHTTPClient("test-control", runtime.Client()).(WorkbenchAgent), previews)
+	lease, err := previews.Create(context.Background(), workbench.PreviewScope{InstanceID: 42, UserID: 7, Generation: 3, GatewayID: "gw-42-3"}, "http://localhost:4321")
+	if err != nil {
+		t.Fatal(err)
+	}
+	origin := previews.URL(lease)
+	for _, tc := range []struct {
+		path   string
+		status int
+	}{{"/__clawmanager_cert_check", 204}, {"/__clawmanager_cert_trust", 200}} {
+		for _, method := range []string{"GET", "HEAD"} {
+			rec := httptest.NewRecorder()
+			service.ServePreview(rec, httptest.NewRequest(method, origin+strings.TrimPrefix(tc.path, "/"), nil))
+			if rec.Code != tc.status || rec.Header().Get("Cache-Control") != "no-store" {
+				t.Fatalf("certificate endpoint = %d; want %d without caching", rec.Code, tc.status)
+			}
+			if rec.Header().Get("Access-Control-Allow-Origin") != "*" || rec.Header().Get("Cross-Origin-Resource-Policy") != "cross-origin" {
+				t.Fatal("TLS probe must be readable across origins")
+			}
+			if method == "HEAD" && rec.Body.Len() != 0 {
+				t.Fatal("HEAD confirmation must not write HTML")
+			}
+			if method == "GET" && tc.status == 200 && !strings.Contains(rec.Body.String(), "Close this tab and return to ClawManager.") {
+				t.Fatal("confirmation page lacks close-tab instructions")
+			}
+		}
+	}
+	if calls != 0 {
+		t.Fatal("certificate confirmation must not depend on the app/runtime being available")
+	}
+	rec := httptest.NewRecorder()
+	service.ServePreview(rec, httptest.NewRequest("GET", origin, nil))
+	if rec.Code != 502 {
+		t.Fatal("actual app failure must remain a service error")
+	}
+	instance.RuntimeGeneration++
+	rec = httptest.NewRecorder()
+	service.ServePreview(rec, httptest.NewRequest("GET", origin+"__clawmanager_cert_check", nil))
+	if rec.Code != 404 {
+		t.Fatal("stale capability must remain fenced")
+	}
+	if calls != 1 {
+		t.Fatal("stale certificate probe reached app")
+	}
+}

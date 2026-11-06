@@ -2,6 +2,7 @@ import { Maximize2, MessageSquare, Minimize2, Monitor, PanelRightClose, PanelRig
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useI18n } from "../contexts/I18nContext";
 import { useInstanceDesktopAccess } from "../hooks/useInstanceDesktopAccess";
+import { attachNativePreviewBridge } from "../lib/nativePreviewBridge";
 import { useRuntimeCertificateTrust } from "../hooks/useRuntimeCertificateTrust";
 import { prepareOpenClawControlUIStorage } from "../lib/openclawControlStorage";
 import { browserWorkerAccessIsFresh, browserWorkerRenewalDelay, refreshBrowserWorkerAccess } from "../lib/browserWorkerAccess";
@@ -17,6 +18,8 @@ export interface InstanceServiceFrameProps {
   instanceMode: string;
   availability: InstanceAvailability;
   reloadToken?: number;
+  runtimeGeneration?: number;
+  onOpenWorkbenchPreview?: (address: string, isCurrent: () => boolean) => void;
   openCodeInitialDirectory?: string;
   workspaceVisible?: boolean;
   onWorkspaceVisibilityChange?: (visible: boolean) => void;
@@ -99,6 +102,8 @@ function EmbeddedInstanceServiceFrame({
   instanceMode,
   availability,
   reloadToken = 0,
+  runtimeGeneration = 0,
+  onOpenWorkbenchPreview,
   openCodeInitialDirectory,
   workspaceVisible,
   onWorkspaceVisibilityChange,
@@ -283,6 +288,13 @@ function EmbeddedInstanceServiceFrame({
       ? preparedFrame.src
       : null;
 
+  useEffect(() => {
+    const frame = frameRef.current;
+    if (!frame || !frameSrc || !onOpenWorkbenchPreview ||
+        !["opencode", "deepseek-harness"].includes(normalizedType)) return;
+    return attachNativePreviewBridge(frame, frameSrc, onOpenWorkbenchPreview);
+  }, [frameRef, frameSrc, instanceId, runtimeGeneration, reloadToken, frameRevision, normalizedType, onOpenWorkbenchPreview]);
+
   const renderFrameShell = (content: ReactNode) => (
     <section
       ref={frameContainerRef}
@@ -456,7 +468,7 @@ function EmbeddedInstanceServiceFrame({
     <div className="relative flex min-h-0 flex-1 flex-col">
       <iframe
         ref={frameRef}
-        key={`frame-${instanceId}-${reloadToken}-${frameRevision}`}
+        key={`frame-${instanceId}-${runtimeGeneration}-${reloadToken}-${frameRevision}`}
         title={`${instanceName} service`}
         src={frameSrc}
         className="min-h-0 w-full flex-1 border-0 bg-white"

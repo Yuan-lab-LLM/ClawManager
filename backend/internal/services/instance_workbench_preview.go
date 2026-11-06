@@ -48,6 +48,26 @@ func (s *InstanceWorkbenchService) ServePreview(w http.ResponseWriter, r *http.R
 		http.Error(w, "Preview expired or instance environment changed. Reopen the preview from the workbench.", 404)
 		return
 	}
+	if r.URL.Path == "/__clawmanager_cert_check" || r.URL.Path == "/__clawmanager_cert_trust" {
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Cross-Origin-Resource-Policy", "cross-origin")
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			w.Header().Set("Allow", "GET, HEAD")
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		} else if r.URL.Path == "/__clawmanager_cert_check" {
+			w.WriteHeader(http.StatusNoContent)
+		} else {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.Header().Set("X-Content-Type-Options", "nosniff")
+			w.Header().Set("Content-Security-Policy", "default-src 'none'; base-uri 'none'; frame-ancestors 'none'")
+			w.Header().Set("X-Frame-Options", "DENY")
+			if r.Method == http.MethodGet {
+				_, _ = io.WriteString(w, `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Certificate confirmed</title></head><body><h1>证书确认完成 / Certificate confirmed</h1><p>请关闭此标签页并返回 ClawManager。</p><p>Close this tab and return to ClawManager.</p></body></html>`)
+			}
+		}
+		return
+	}
 	provider, ok := s.agent.(workbenchPreviewTransport)
 	if !ok {
 		http.Error(w, "Preview requires an updated runtime", 503)

@@ -29,7 +29,6 @@ import {
 } from "lucide-react";
 import ConfirmDialog from "../../components/ConfirmDialog";
 import InstanceLifecycleStatus from "../../components/InstanceLifecycleStatus";
-import InstanceAutoStopInfo from "../../components/InstanceAutoStopInfo";
 import {
   instancePanelStorageKey,
   readStoredCollapsed,
@@ -42,10 +41,11 @@ import RestartWithEnvironmentDialog from "../../components/RestartWithEnvironmen
 import UserLayout from "../../components/UserLayout";
 import UpgradeRecoveryActions from "../../components/UpgradeRecoveryActions";
 import { InstanceWorkbench } from "../../components/workbench/InstanceWorkbench";
-import {initialWorkbench,workbenchReducer,type WorkbenchState,type WorkbenchEvent} from "../../components/workbench/state";
+import {initialWorkbench,workbenchReducer,MAX_WORKBENCH_TABS,type WorkbenchState,type WorkbenchEvent} from "../../components/workbench/state";
 import { useI18n } from "../../contexts/I18nContext";
 import { useInstanceStatusWebSocket } from "../../hooks/useWebSocket";
 import type { InstanceStatusUpdate } from "../../hooks/useWebSocket";
+import { instanceWorkbenchService, workbenchError } from "../../services/instanceWorkbenchService";
 import { instanceService } from "../../services/instanceService";
 import {
   formatInstanceType,
@@ -406,16 +406,55 @@ const InstanceDetailPage: React.FC = () => {
     null,
   );
   const [workspaceVisible, setWorkspaceVisible] = useState(true);
-  // UserLayout renders desktop and mobile shells; both share one tab model.
+  // Keep workbench tabs and drafts across layout changes.
   const [workbenchViews,setWorkbenchViews]=useState<Record<number,WorkbenchState>>({});
+  const workbenchViewsRef = useRef(workbenchViews);
   const onWorkbenchEvent = useCallback((event: WorkbenchEvent) => {
     if (!instanceId) return;
-    setWorkbenchViews((previous) => {
-      const current = previous[instanceId] ?? initialWorkbench(instance?.runtime_generation ?? 0);
-      const next = workbenchReducer(current, event);
-      return next === current ? previous : { ...previous, [instanceId]: next };
-    });
+    const previous = workbenchViewsRef.current;
+    const current = previous[instanceId] ?? initialWorkbench(instance?.runtime_generation ?? 0);
+    const next = workbenchReducer(current, event);
+    if (next !== current) {
+      workbenchViewsRef.current = { ...previous, [instanceId]: next };
+      setWorkbenchViews(workbenchViewsRef.current);
+    }
   }, [instanceId, instance?.runtime_generation]);
+
+  const nativePreviewInstanceId = instance?.id;
+  const nativePreviewGeneration = instance?.runtime_generation ?? 0;
+  const handleNativePreview = useCallback(async (address: string, isCurrent: () => boolean) => {
+    if (!nativePreviewInstanceId || nativePreviewInstanceId !== instanceId || !isCurrent()) return;
+    const id = nativePreviewInstanceId;
+    const generation = nativePreviewGeneration;
+    const view = workbenchViewsRef.current[id] ?? initialWorkbench(generation);
+    if (view.generation !== generation) return;
+    const existing = view.tabs.find((tab) => tab.kind === "browser" && tab.address === address && !tab.stale);
+    if (existing) {
+      setWorkspaceVisible(true);
+      onWorkbenchEvent({ type: "tab.select", id: existing.id });
+      return;
+    }
+    if (view.tabs.length >= MAX_WORKBENCH_TABS) {
+      setActionMessage(t("workbench.sessionLimit"));
+      return;
+    }
+    const tab = crypto.randomUUID();
+    // Reserve before awaiting allocation so concurrent clicks obey the tab limit.
+    onWorkbenchEvent({ type: "browser.new", id: tab });
+    onWorkbenchEvent({ type: "browser.navigate", id: tab, address, url: "", generation });
+    setWorkspaceVisible(true);
+    try {
+      const result = await instanceWorkbenchService.preview(id, generation, address);
+      if (!isCurrent() || result.generation !== generation || workbenchViewsRef.current[id]?.generation !== generation) {
+        onWorkbenchEvent({ type: "tab.remove", id: tab });
+        return;
+      }
+      onWorkbenchEvent({ type: "browser.navigate", id: tab, address, url: result.url, generation });
+    } catch (error) {
+      onWorkbenchEvent({ type: "tab.remove", id: tab });
+      if (isCurrent()) setActionMessage(workbenchError(error));
+    }
+  }, [instanceId, nativePreviewInstanceId, nativePreviewGeneration, onWorkbenchEvent, t]);
 
   const [collapsedBottomHeightPx, setCollapsedBottomHeightPx] = useState<
     number | null
@@ -1175,7 +1214,6 @@ const InstanceDetailPage: React.FC = () => {
           </span>
           <span>{formatDateTime(instance.updated_at, locale)}</span>
         </div>
-        <InstanceAutoStopInfo instance={instance} />
       </div>
 
       <div className="flex flex-col items-start gap-2 lg:items-end">
@@ -1606,6 +1644,8 @@ const InstanceDetailPage: React.FC = () => {
           <div className="wb-instance-agent h-full min-h-0 min-w-0">
             <InstanceServiceFrame
               instanceId={instance.id}
+              runtimeGeneration={instance.runtime_generation ?? 0}
+              onOpenWorkbenchPreview={handleNativePreview}
               instanceName={instance.name}
               instanceType={instance.type}
               instanceMode={instance.instance_mode}
@@ -1717,6 +1757,8 @@ const InstanceDetailPage: React.FC = () => {
         <div className="h-[clamp(520px,calc(100vh-10rem),760px)] min-w-0 overflow-hidden">
           <InstanceServiceFrame
             instanceId={instance.id}
+            runtimeGeneration={instance.runtime_generation ?? 0}
+            onOpenWorkbenchPreview={handleNativePreview}
             instanceName={instance.name}
             instanceType={instance.type}
             instanceMode={instance.instance_mode}

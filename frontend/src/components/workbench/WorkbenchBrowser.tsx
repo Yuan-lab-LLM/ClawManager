@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
-import { ExternalLink, Globe, RefreshCw, ArrowRight } from "lucide-react";
+import { ExternalLink, Globe, RefreshCw, ArrowRight, ShieldAlert } from "lucide-react";
+import { useRuntimeCertificateTrust } from "../../hooks/useRuntimeCertificateTrust";
 import { useI18n } from "../../contexts/I18nContext";
 import {
   instanceWorkbenchService as service,
@@ -35,6 +36,8 @@ export function WorkbenchBrowser({
   const input = useRef<HTMLInputElement>(null);
   const [activated, setActivated] = useState(false);
   if (rendered && !activated) setActivated(true);
+  const { frameUrl, checkingCertificate, certificateConfirmationRequired, certificateOrigin, confirmCertificate } =
+    useRuntimeCertificateTrust(tab.url ?? null, activated);
   return (
     <div className="wb-browser">
       <form
@@ -115,16 +118,27 @@ export function WorkbenchBrowser({
           {t("workbench.loading")}
         </div>
       )}
-      {tab.url && activated ? (
+      {tab.url && activated ? (frameUrl ? (
         <iframe
           key={reload}
           className="wb-preview-frame"
-          src={tab.url}
+          src={frameUrl}
           title={`${t("workbench.servicePreview")} · ${tab.address}`}
           sandbox="allow-scripts allow-forms allow-same-origin allow-modals allow-downloads allow-popups"
           referrerPolicy="no-referrer"
         />
       ) : (
+        <div className="wb-empty" role="status">
+          <ShieldAlert size={32} />
+          <h3>{t(certificateConfirmationRequired ? "instances.certificateConfirmationRequired" : "instances.checkingCertificate")}</h3>
+          {certificateConfirmationRequired && <>
+            <p className="max-w-lg break-words">{t("instances.certificateConfirmationDescription", { origin: certificateOrigin })}</p>
+            <button type="button" className="wb-button primary" onClick={confirmCertificate} disabled={checkingCertificate}>
+              {t("instances.continueCertificateConfirmation")}
+            </button>
+          </>}
+        </div>
+      )) : (
         <div className="wb-empty">
           <Globe size={32} />
           <h3>

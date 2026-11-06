@@ -175,6 +175,7 @@ func (s *InstanceProxyService) ProxyRequest(ctx context.Context, instanceID int,
 	targetPath := s.extractTargetPath(effectiveRequestPath, instanceID, accessToken.InstanceType, accessToken.TargetPort)
 	targetPort := s.resolveTargetPort(accessToken.InstanceType, accessToken.TargetPort, targetPath)
 	shouldRewriteHTML := s.shouldRewriteHTMLForProxy(instanceID, accessToken.InstanceType, targetPort) && !dedicatedRuntimeOrigin
+	previewBridgeDocument := nativePreviewBridgeDocument(r, opencodeLite, accessToken.InstanceType)
 
 	// Build target URL
 	targetURL, runtimeGateway, err := s.resolveHTTPProxyTarget(ctx, accessToken, instanceID, targetPort, targetPath, effectiveRequestPath)
@@ -272,10 +273,13 @@ func (s *InstanceProxyService) ProxyRequest(ctx context.Context, instanceID int,
 	} else if !isRuntimePublicAuthPath(bootstrapPath) {
 		setManagedRuntimeGatewayAuthHeaders(proxyReq.Header, managedGatewayToken)
 	}
-	if shouldRewriteHTML || openCodeStorageScope != "" {
+	if shouldRewriteHTML || openCodeStorageScope != "" || previewBridgeDocument {
 		proxyReq.Header.Del("Accept-Encoding")
 	}
-	if openCodeStorageScope != "" {
+	if previewBridgeDocument {
+		proxyReq.Header.Set("Accept-Encoding", "gzip")
+	}
+	if openCodeStorageScope != "" || previewBridgeDocument {
 		// Cached upstream HTML predates our instance-specific bootstrap.
 		proxyReq.Header.Del("If-None-Match")
 		proxyReq.Header.Del("If-Modified-Since")
@@ -326,8 +330,9 @@ func (s *InstanceProxyService) ProxyRequest(ctx context.Context, instanceID int,
 		resp.Header.Set("Content-Length", strconv.Itoa(len(body)))
 	}
 
-	if (shouldRewriteHTML || openCodeStorageScope != "") && strings.Contains(resp.Header.Get("Content-Type"), "text/html") {
-		body, readErr := io.ReadAll(resp.Body)
+	if (shouldRewriteHTML || openCodeStorageScope != "" || previewBridgeDocument) && strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/html") && nativeProxyHTMLCanRewrite(resp) {
+		bridge := previewBridgeDocument && resp.StatusCode >= 200 && resp.StatusCode < 300
+		body, readErr := readNativeProxyHTML(resp, previewBridgeDocument)
 		if readErr != nil {
 			return fmt.Errorf("failed to read upstream html: %w", readErr)
 		}
@@ -336,6 +341,10 @@ func (s *InstanceProxyService) ProxyRequest(ctx context.Context, instanceID int,
 		}
 
 		modifiedBody := string(body)
+		if bridge {
+			modifiedBody = injectNativePreviewBridge(modifiedBody)
+			resp.Header.Set("Cache-Control", "no-store")
+		}
 		if shouldRewriteHTML {
 			modifiedBody = injectProxyBase(modifiedBody, proxyBaseForRequestPath(effectiveRequestPath, instanceID))
 			if opencodeLite {
