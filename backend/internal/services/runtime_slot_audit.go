@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"clawreef/internal/models"
+	"clawreef/internal/repository"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -45,6 +46,7 @@ type runtimeSlotAuditSnapshot struct {
 type runtimeSlotAuditObservation struct {
 	Name     string
 	Port     int
+	Block    int
 	Snapshot runtimeSlotAuditSnapshot
 	Err      error
 }
@@ -64,45 +66,120 @@ func (o runtimeSlotAuditObservation) free() bool {
 
 // Physical inventory comes from the current Pod spec, never a historical SQL
 // port range. Missing/ambiguous inventory grants no allocation authority.
+func runtimeAuditRoutingEnv(container corev1.Container, names ...string) (map[string]string, error) {
+	values := map[string]string{}
+	wanted := map[string]bool{}
+	for _, name := range names {
+		wanted[name] = true
+	}
+	for _, env := range container.Env {
+		if !wanted[env.Name] {
+			continue
+		}
+		if _, seen := values[env.Name]; seen || env.ValueFrom != nil {
+			return nil, fmt.Errorf("ambiguous routing environment in %s", container.Name)
+		}
+		values[env.Name] = env.Value
+	}
+	if len(values) != len(wanted) {
+		return nil, fmt.Errorf("incomplete routing environment in %s", container.Name)
+	}
+	return values, nil
+}
 func runtimeAuditPhysicalSlots(pod *corev1.Pod, capacity int) ([]runtimeSlotAuditObservation, error) {
+	if pod == nil || capacity < 1 || capacity > 256 {
+		return nil, fmt.Errorf("invalid physical slot capacity")
+	}
+	var coordinator *corev1.Container
+	for i := range pod.Spec.Containers {
+		container := &pod.Spec.Containers[i]
+		hasRole := false
+		for _, env := range container.Env {
+			if env.Name == "RUNTIME_AGENT_ROLE" {
+				hasRole = true
+			}
+		}
+		if !hasRole {
+			continue
+		}
+		role, err := runtimeAuditRoutingEnv(*container, "RUNTIME_AGENT_ROLE")
+		if err != nil {
+			return nil, err
+		}
+		if role["RUNTIME_AGENT_ROLE"] == "pool" {
+			if coordinator != nil {
+				return nil, fmt.Errorf("ambiguous slot coordinator")
+			}
+			coordinator = container
+		}
+		if role["RUNTIME_AGENT_ROLE"] == "slot" && !strings.HasPrefix(container.Name, "slot-") {
+			return nil, fmt.Errorf("worker container has no physical slot identity")
+		}
+	}
+	if coordinator == nil {
+		return nil, fmt.Errorf("slot coordinator is missing")
+	}
+	route, err := runtimeAuditRoutingEnv(*coordinator, "RUNTIME_GATEWAY_PORT_START", "RUNTIME_GATEWAY_PORT_END", "RUNTIME_GATEWAY_PORT_BLOCK_SIZE", "RUNTIME_SLOT_COUNT", "RUNTIME_SLOT_SOCKET_DIR")
+	if err != nil {
+		return nil, err
+	}
+	start, startErr := strconv.Atoi(route["RUNTIME_GATEWAY_PORT_START"])
+	end, endErr := strconv.Atoi(route["RUNTIME_GATEWAY_PORT_END"])
+	block, blockErr := strconv.Atoi(route["RUNTIME_GATEWAY_PORT_BLOCK_SIZE"])
+	if startErr != nil || endErr != nil || blockErr != nil || start < 1 || end > 65535 || block < 1 || block > 65535/capacity || start > 65535-capacity*block+1 || end < start+capacity*block-1 || route["RUNTIME_SLOT_COUNT"] != strconv.Itoa(capacity) || route["RUNTIME_SLOT_SOCKET_DIR"] != "/run/clawmanager-slots" {
+		return nil, fmt.Errorf("coordinator slot routing is invalid")
+	}
 	var slots []runtimeSlotAuditObservation
-	ports := map[int]bool{}
 	names := map[string]bool{}
 	for _, container := range pod.Spec.Containers {
 		if !strings.HasPrefix(container.Name, "slot-") {
 			continue
 		}
-		index, err := strconv.Atoi(strings.TrimPrefix(container.Name, "slot-"))
-		if err != nil || index < 0 || index >= capacity || index >= 256 || names[container.Name] || container.Name != fmt.Sprintf("slot-%d", index) {
+		index, indexErr := strconv.Atoi(strings.TrimPrefix(container.Name, "slot-"))
+		if indexErr != nil || index < 0 || index >= capacity || names[container.Name] || container.Name != fmt.Sprintf("slot-%d", index) {
 			return nil, fmt.Errorf("invalid physical slot identity")
 		}
 		names[container.Name] = true
-		port := 0
-		found := false
-		for _, env := range container.Env {
-			if env.Name == "RUNTIME_GATEWAY_PORT_START" {
-				if found || env.ValueFrom != nil {
-					return nil, fmt.Errorf("ambiguous physical slot port")
-				}
-				found = true
-				port, err = strconv.Atoi(env.Value)
-				if err != nil {
-					return nil, fmt.Errorf("unknown physical slot port")
-				}
-			}
+		worker, err := runtimeAuditRoutingEnv(container, "RUNTIME_AGENT_ROLE", "RUNTIME_SLOT_INDEX", "RUNTIME_SLOT_SOCKET", "RUNTIME_GATEWAY_PORT_START", "RUNTIME_GATEWAY_PORT_END", "RUNTIME_GATEWAY_PORT_BLOCK_SIZE")
+		if err != nil {
+			return nil, err
 		}
-		if port < 1 || port > 65535 || ports[port] {
-			return nil, fmt.Errorf("missing or duplicate physical slot port")
+		port := start + index*block
+		if worker["RUNTIME_AGENT_ROLE"] != "slot" || worker["RUNTIME_SLOT_INDEX"] != strconv.Itoa(index) || worker["RUNTIME_SLOT_SOCKET"] != fmt.Sprintf("%s/slot-%d.sock", route["RUNTIME_SLOT_SOCKET_DIR"], index) || worker["RUNTIME_GATEWAY_PORT_START"] != strconv.Itoa(port) || worker["RUNTIME_GATEWAY_PORT_END"] != strconv.Itoa(port+block-1) || worker["RUNTIME_GATEWAY_PORT_BLOCK_SIZE"] != strconv.Itoa(block) {
+			return nil, fmt.Errorf("worker routing differs from the coordinator in %s", container.Name)
 		}
-		ports[port] = true
-		slots = append(slots, runtimeSlotAuditObservation{Name: container.Name, Port: port})
+		slots = append(slots, runtimeSlotAuditObservation{Name: container.Name, Port: port, Block: block})
 	}
-	if capacity < 1 || capacity > 256 || len(slots) != capacity {
+	if len(slots) != capacity {
 		return nil, fmt.Errorf("physical slot capacity does not match registered Pod")
 	}
 	sort.Slice(slots, func(i, j int) bool { return slots[i].Port < slots[j].Port })
 	return slots, nil
 }
+
+// This set describes addressable physical blocks, not a cached free grant.
+func (c *slotRuntimeAgentClient) physicalGatewayPorts(ctx context.Context, pod models.RuntimePod) (map[int]struct{}, error) {
+	if pod.AgentEndpoint == nil || pod.PodUID == nil || *pod.PodUID == "" {
+		return nil, fmt.Errorf("registered slot target identity is required")
+	}
+	current, err := c.containerStopPod(ctx, *pod.AgentEndpoint, *pod.PodUID)
+	if err != nil {
+		return nil, err
+	}
+	slots, err := runtimeAuditPhysicalSlots(current, pod.Capacity)
+	if err != nil {
+		return nil, err
+	}
+	ports := make(map[int]struct{}, len(slots))
+	for _, slot := range slots {
+		if slot.Block != RuntimeGatewayPortBlockSize(pod.RuntimeType) {
+			return nil, fmt.Errorf("registered Runtime type differs from physical slot block size")
+		}
+		ports[slot.Port] = struct{}{}
+	}
+	return ports, nil
+}
+
 func (c *slotRuntimeAgentClient) observeRuntimeSlots(ctx context.Context, pod models.RuntimePod) ([]runtimeSlotAuditObservation, error) {
 	if pod.AgentEndpoint == nil || pod.PodUID == nil || *pod.PodUID == "" {
 		return nil, fmt.Errorf("registered slot target identity is required")
@@ -116,6 +193,9 @@ func (c *slotRuntimeAgentClient) observeRuntimeSlots(ctx context.Context, pod mo
 		return nil, err
 	}
 	for i := range slots {
+		if slots[i].Block != RuntimeGatewayPortBlockSize(pod.RuntimeType) {
+			return nil, fmt.Errorf("registered Runtime type differs from physical slot block size")
+		}
 		c.observeRuntimeSlot(ctx, pod, &slots[i])
 	}
 
@@ -287,11 +367,11 @@ func (s *RuntimeScheduler) auditRuntimePodSlots(ctx context.Context, c *slotRunt
 			continue
 		}
 		b, bound := byPort[o.Port]
-		if o.free() {
-			if bound {
-				record.Ports[o.Port] = "SQL binding still reserves runtime slot"
-			}
+		if o.free() && !bound {
 			continue
+		}
+		if o.free() {
+			record.Ports[o.Port] = "SQL binding still reserves runtime slot"
 		}
 		owner := o.Snapshot.Assignment
 		if owner == nil {
@@ -369,5 +449,22 @@ func (s *RuntimeScheduler) auditStoppedRuntimeSlot(ctx context.Context, c *slotR
 	}
 	// DeleteGateway itself rechecks the physical runtime owner and requires the
 	// existing matching teardown/termination/reset receipts. Never synthesize any.
-	return c.DeleteGateway(ctx, *pod.AgentEndpoint, owner.GatewayID)
+	if err := c.DeleteGateway(ctx, *pod.AgentEndpoint, owner.GatewayID); err != nil {
+		return err
+	}
+	if current == nil {
+		return nil
+	}
+	releaser, ok := s.bindingRepo.(repository.ConfirmedStoppedSlotBindingReleaser)
+	if !ok {
+		return fmt.Errorf("confirmed stopped slot requires an exact conditional binding release")
+	}
+	deleted, err := releaser.DeleteConfirmedStoppedSlotBinding(ctx, *instance, *current)
+	if err != nil {
+		return err
+	}
+	if !deleted {
+		return fmt.Errorf("stopped slot binding or instance changed after confirmed teardown")
+	}
+	return nil
 }

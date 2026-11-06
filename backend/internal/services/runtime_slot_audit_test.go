@@ -25,11 +25,16 @@ import (
 	k8stesting "k8s.io/client-go/testing"
 )
 
-func auditTestPod() *corev1.Pod {
+func auditRoutingPod(count, block int) *corev1.Pod {
 	p := slotTestPod()
-	p.Spec.Containers = []corev1.Container{{Name: "slot-0", Env: []corev1.EnvVar{{Name: "RUNTIME_GATEWAY_PORT_START", Value: "20000"}}}}
+	env := func(name, value string) corev1.EnvVar { return corev1.EnvVar{Name: name, Value: value} }
+	p.Spec.Containers = []corev1.Container{{Name: "runtime", Env: []corev1.EnvVar{env("RUNTIME_AGENT_ROLE", "pool"), env("RUNTIME_SLOT_COUNT", fmt.Sprint(count)), env("RUNTIME_SLOT_SOCKET_DIR", "/run/clawmanager-slots"), env("RUNTIME_GATEWAY_PORT_START", "20000"), env("RUNTIME_GATEWAY_PORT_END", "20299"), env("RUNTIME_GATEWAY_PORT_BLOCK_SIZE", fmt.Sprint(block))}}}
+	for i := 0; i < count; i++ {
+		p.Spec.Containers = append(p.Spec.Containers, corev1.Container{Name: fmt.Sprintf("slot-%d", i), Env: []corev1.EnvVar{env("RUNTIME_AGENT_ROLE", "slot"), env("RUNTIME_SLOT_INDEX", fmt.Sprint(i)), env("RUNTIME_SLOT_SOCKET", fmt.Sprintf("/run/clawmanager-slots/slot-%d.sock", i)), env("RUNTIME_GATEWAY_PORT_START", fmt.Sprint(20000+i*block)), env("RUNTIME_GATEWAY_PORT_END", fmt.Sprint(20000+(i+1)*block-1)), env("RUNTIME_GATEWAY_PORT_BLOCK_SIZE", fmt.Sprint(block))}})
+	}
 	return p
 }
+func auditTestPod() *corev1.Pod { return auditRoutingPod(1, 3) }
 func auditFreeSnapshot() map[string]any {
 	return map[string]any{"pod_uid": "pod-uid", "worker_epoch": strings.Repeat("a", 32), "idle_confirmed": true, "quarantined": false, "gateways": []any{}}
 }
@@ -89,6 +94,7 @@ func TestSlotAllocationRequiresFreshRuntimeExitProof(t *testing.T) {
 type auditBindingRepository struct {
 	repository.InstanceRuntimeBindingRepository
 	bindings []models.InstanceRuntimeBinding
+	releases int
 }
 
 func (r *auditBindingRepository) ListByRuntimePodID(context.Context, int64) ([]models.InstanceRuntimeBinding, error) {
@@ -101,6 +107,17 @@ func (r *auditBindingRepository) GetByInstanceID(_ context.Context, id int) (*mo
 		}
 	}
 	return nil, nil
+}
+
+func (r *auditBindingRepository) DeleteConfirmedStoppedSlotBinding(_ context.Context, expected models.Instance, b models.InstanceRuntimeBinding) (bool, error) {
+	for i, current := range r.bindings {
+		if current.InstanceID == b.InstanceID && current.RuntimePodID == b.RuntimePodID && current.Generation == b.Generation && current.GatewayID == b.GatewayID && current.GatewayPort == b.GatewayPort {
+			r.bindings = append(r.bindings[:i], r.bindings[i+1:]...)
+			r.releases++
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 type auditInstanceRepository struct {
@@ -413,11 +430,11 @@ func TestRuntimeSlotAuditRejectsAmbiguousPhysicalInventory(t *testing.T) {
 			case "missing-slots":
 				p.Spec.Containers = nil
 			case "duplicate-env":
-				p.Spec.Containers[0].Env = append([]corev1.EnvVar{{Name: "RUNTIME_GATEWAY_PORT_START", Value: "0"}}, p.Spec.Containers[0].Env...)
+				p.Spec.Containers[1].Env = append([]corev1.EnvVar{{Name: "RUNTIME_GATEWAY_PORT_START", Value: "0"}}, p.Spec.Containers[1].Env...)
 			case "value-from":
-				p.Spec.Containers[0].Env[0].ValueFrom = &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.name"}}
+				p.Spec.Containers[1].Env[0].ValueFrom = &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.name"}}
 			case "missing-index":
-				p.Spec.Containers[0].Name = "slot-1"
+				p.Spec.Containers[1].Name = "slot-1"
 			case "duplicate-name":
 				capacity = 2
 				p.Spec.Containers = append(p.Spec.Containers, corev1.Container{Name: "slot-0", Env: []corev1.EnvVar{{Name: "RUNTIME_GATEWAY_PORT_START", Value: "20001"}}})
@@ -426,5 +443,141 @@ func TestRuntimeSlotAuditRejectsAmbiguousPhysicalInventory(t *testing.T) {
 				t.Fatalf("ambiguous physical inventory was accepted: %+v", slots)
 			}
 		})
+	}
+}
+
+func TestRuntimeSlotAuditRejectsMisdirectedWorkerRouting(t *testing.T) {
+	for _, scenario := range []string{"worker-role", "worker-index", "worker-socket", "worker-port-start", "worker-port-end", "worker-block", "coordinator-role", "coordinator-count", "coordinator-socket-dir", "coordinator-start", "coordinator-end", "coordinator-block", "duplicate-coordinator-env", "indirect-worker-index"} {
+		t.Run(scenario, func(t *testing.T) {
+			p := auditRoutingPod(2, 3)
+			change := func(container int, name, value string) {
+				for i := range p.Spec.Containers[container].Env {
+					if p.Spec.Containers[container].Env[i].Name == name {
+						p.Spec.Containers[container].Env[i].Value = value
+						return
+					}
+				}
+				t.Fatalf("missing fixture env %s", name)
+			}
+			switch scenario {
+			case "worker-role":
+				change(1, "RUNTIME_AGENT_ROLE", "pool")
+			case "worker-index":
+				change(1, "RUNTIME_SLOT_INDEX", "1")
+			case "worker-socket":
+				change(1, "RUNTIME_SLOT_SOCKET", "/run/clawmanager-slots/slot-1.sock")
+			case "worker-port-start":
+				change(1, "RUNTIME_GATEWAY_PORT_START", "20003")
+			case "worker-port-end":
+				change(1, "RUNTIME_GATEWAY_PORT_END", "20003")
+			case "worker-block":
+				change(1, "RUNTIME_GATEWAY_PORT_BLOCK_SIZE", "1")
+			case "coordinator-role":
+				change(0, "RUNTIME_AGENT_ROLE", "slot")
+			case "coordinator-count":
+				change(0, "RUNTIME_SLOT_COUNT", "3")
+			case "coordinator-socket-dir":
+				change(0, "RUNTIME_SLOT_SOCKET_DIR", "/other")
+			case "coordinator-start":
+				change(0, "RUNTIME_GATEWAY_PORT_START", "21000")
+			case "coordinator-end":
+				change(0, "RUNTIME_GATEWAY_PORT_END", "20000")
+			case "coordinator-block":
+				change(0, "RUNTIME_GATEWAY_PORT_BLOCK_SIZE", "1")
+			case "duplicate-coordinator-env":
+				p.Spec.Containers[0].Env = append(p.Spec.Containers[0].Env, corev1.EnvVar{Name: "RUNTIME_SLOT_COUNT", Value: "2"})
+			case "indirect-worker-index":
+				for i := range p.Spec.Containers[1].Env {
+					if p.Spec.Containers[1].Env[i].Name == "RUNTIME_SLOT_INDEX" {
+						p.Spec.Containers[1].Env[i].ValueFrom = &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.name"}}
+					}
+				}
+			}
+			if _, err := runtimeAuditPhysicalSlots(p, 2); err == nil {
+				t.Fatal("misdirected routing granted slot proof")
+			}
+		})
+	}
+}
+
+func TestRuntimeSlotAuditReleasesOnlyExactStoppedSQLBinding(t *testing.T) {
+	for _, scenario := range []string{"physically-free", "cleanup-pending", "concurrent-binding-change"} {
+		t.Run(scenario, func(t *testing.T) {
+			kube := fake.NewSimpleClientset(auditTestPod())
+			snapshot := auditOccupiedSnapshot("stopped")
+			if scenario == "physically-free" {
+				snapshot["idle_confirmed"] = true
+			} else {
+				snapshot["quarantined"] = true
+			}
+			deletes := 0
+			client := NewSlotRuntimeAgentClientWithHTTPClient("token", kube, "runtime", &http.Client{Transport: slotRoundTripper(func(r *http.Request) (*http.Response, error) {
+				if r.Method == http.MethodGet {
+					b, _ := json.Marshal(snapshot)
+					return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(string(b)))}, nil
+				}
+				deletes++
+				snapshot["idle_confirmed"] = true
+				snapshot["quarantined"] = false
+				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"gateway_id":"gw-7-1","stopped":true,"confirmed":true,"unmounted":true}`))}, nil
+			})}).(*slotRuntimeAgentClient)
+			endpoint, uid := "https://10.0.0.2:19090", "pod-uid"
+			req, _ := json.Marshal(RuntimeAgentCreateGatewayRequest{InstanceID: 7, UserID: 2, Generation: 1, AgentType: "openclaw", PodUID: uid, GatewayPort: 20000})
+			if err := client.assignments.EnsureDesired(context.Background(), k8sservice.RuntimeAssignment{InstanceID: 7, UserID: 2, Generation: 1, RuntimeType: "openclaw", PodUID: uid, Endpoint: endpoint, GatewayID: "gw-7-1", Request: req}); err != nil {
+				t.Fatal(err)
+			}
+			cm, _ := kube.CoreV1().ConfigMaps("runtime").Get(context.Background(), "lite-instance-7", metav1.GetOptions{})
+			cm.Data["desired_state"] = "stopped"
+			_, _ = kube.CoreV1().ConfigMaps("runtime").Update(context.Background(), cm, metav1.UpdateOptions{})
+			bindings := &auditBindingRepository{bindings: []models.InstanceRuntimeBinding{{InstanceID: 7, RuntimePodID: 1, Generation: 1, GatewayID: "gw-7-1", GatewayPort: 20000, State: "running"}}}
+			instances := &auditInstanceRepository{instance: &models.Instance{ID: 7, UserID: 2, RuntimeGeneration: 1, Status: "stopped"}}
+			if scenario == "concurrent-binding-change" {
+				instances.onLock = func() { bindings.bindings[0].GatewayID = "gw-7-2"; bindings.bindings[0].Generation = 2 }
+			}
+			pod := models.RuntimePod{ID: 1, RuntimeType: "openclaw", Capacity: 1, AgentEndpoint: &endpoint, PodUID: &uid}
+			s := &RuntimeScheduler{agentClient: client, bindingRepo: bindings, instanceRepo: instances}
+			if err := s.auditRuntimePodSlots(context.Background(), client, pod); err != nil {
+				t.Fatal(err)
+			}
+			if scenario == "concurrent-binding-change" {
+				if deletes != 0 || bindings.releases != 0 || len(bindings.bindings) != 1 {
+					t.Fatal("changed binding was stopped or released")
+				}
+				return
+			}
+			if deletes != 1 || bindings.releases != 1 || len(bindings.bindings) != 0 {
+				t.Fatalf("confirmed stopped binding leaked: deletes=%d releases=%d bindings=%+v", deletes, bindings.releases, bindings.bindings)
+			}
+			if err := s.auditRuntimePodSlots(context.Background(), client, pod); err != nil {
+				t.Fatal(err)
+			}
+			_, record, err := client.readSlotAudit(context.Background(), pod)
+			if err != nil || len(record.Ports) != 0 {
+				t.Fatalf("quarantine never cleared: %+v %v", record, err)
+			}
+		})
+	}
+}
+
+func TestSlotPhysicalGatewayPortsUsesVerifiedSpecWithoutRuntimeHTTP(t *testing.T) {
+	kube := fake.NewSimpleClientset(auditRoutingPod(2, 3))
+	client := NewSlotRuntimeAgentClientWithHTTPClient("token", kube, "runtime", &http.Client{Transport: slotRoundTripper(func(*http.Request) (*http.Response, error) {
+		t.Fatal("physical routing inventory contacted runtime HTTP")
+		return nil, errors.New("unexpected HTTP")
+	})}).(*slotRuntimeAgentClient)
+	endpoint, uid := "https://10.0.0.2:19090", "pod-uid"
+	pod := models.RuntimePod{RuntimeType: "openclaw", Capacity: 2, AgentEndpoint: &endpoint, PodUID: &uid}
+	ports, err := client.physicalGatewayPorts(context.Background(), pod)
+	if err != nil || len(ports) != 2 {
+		t.Fatalf("physical inventory failed: %v %v", ports, err)
+	}
+	for _, port := range []int{20000, 20003} {
+		if _, ok := ports[port]; !ok {
+			t.Fatalf("missing physical port %d", port)
+		}
+	}
+	pod.RuntimeType = "hermes"
+	if _, err := client.physicalGatewayPorts(context.Background(), pod); err == nil {
+		t.Fatal("registered runtime block mismatch admitted")
 	}
 }
