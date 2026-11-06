@@ -6,7 +6,7 @@ import { useRuntimeCertificateTrust } from "../../hooks/useRuntimeCertificateTru
 import { useI18n } from "../../contexts/I18nContext";
 import {
   instanceWorkbenchService as service,
-  workbenchError,
+  workbenchPreviewError,
 } from "../../services/instanceWorkbenchService";
 import type { WorkbenchTab } from "./state";
 export function WorkbenchBrowser({
@@ -37,7 +37,9 @@ export function WorkbenchBrowser({
     setDraft({ value: tab.address ?? "", loaded: tab.address ?? "" });
   const address = draft.value;
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const [requestError, setError] = useState("");
+  const pending = busy || !!tab.previewPending;
+  const error = busy ? "" : requestError || tab.previewError || "";
   const [reload, setReload] = useState(0);
   const input = useRef<HTMLInputElement>(null);
   const [activated, setActivated] = useState(false);
@@ -55,7 +57,7 @@ export function WorkbenchBrowser({
         className="wb-browser-toolbar"
         onSubmit={async (e) => {
           e.preventDefault();
-          if (!address.trim()) return;
+          if (!enabled || !supported || !scopeAllowed || pending || !address.trim()) return;
           setBusy(true);
           setError("");
           try {
@@ -66,7 +68,7 @@ export function WorkbenchBrowser({
             );
             onNavigate(address.trim(), result.url, result.generation, result);
           } catch (err) {
-            setError(workbenchError(err));
+            setError(workbenchPreviewError(err, t));
             input.current?.focus();
           } finally {
             setBusy(false);
@@ -102,7 +104,7 @@ export function WorkbenchBrowser({
           className="wb-icon"
           title={t("workbench.open")}
           aria-label={t("workbench.open")}
-          disabled={!enabled || !supported || !scopeAllowed || busy || !address.trim()}
+          disabled={!enabled || !supported || !scopeAllowed || pending || !address.trim()}
         >
           <ArrowRight size={16} />
         </button>
@@ -121,10 +123,18 @@ export function WorkbenchBrowser({
       </form>
       {error && (
         <div role="alert" className="wb-error">
-          {error}
+          <span>{error}</span>{" "}
+          <button
+            type="button"
+            className="wb-button"
+            disabled={!enabled || !supported || !scopeAllowed || pending || !address.trim()}
+            onClick={() => input.current?.form?.requestSubmit()}
+          >
+            {t("workbench.retry")}
+          </button>
         </div>
       )}
-      {busy && (
+      {pending && (
         <div role="status" className="wb-loading">
           {t("workbench.loading")}
         </div>
@@ -157,7 +167,7 @@ export function WorkbenchBrowser({
             </button>
           </>}
         </div>
-      )) : (
+      )) : !pending && !error ? (
         <div className="wb-empty">
           <Globe size={32} />
           <h3>
@@ -165,7 +175,7 @@ export function WorkbenchBrowser({
           </h3>
           <p>{t("workbench.addressHint")}</p>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

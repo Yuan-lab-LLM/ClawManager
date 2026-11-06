@@ -17,6 +17,10 @@ export function workbenchError(error: unknown): string {
       ? error.message
       : String(error);
 }
+export function workbenchPreviewError(error: unknown, t: (key: string) => string): string {
+  const code = (error as { response?: { data?: { error_code?: string } } })?.response?.data?.error_code;
+  return code === "instance_busy" ? t("workbench.previewBusy") : workbenchError(error);
+}
 const base = (id: number) => `/instances/${id}/workbench`;
 const config = (generation: number, signal?: AbortSignal) => ({
   params: { generation },

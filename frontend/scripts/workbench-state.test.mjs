@@ -156,3 +156,24 @@ test("enabling browser-origin mode expires legacy previews while preserving thei
   assert.equal(migrated.tabs[0].title, state.tabs[0].title);
   assert.equal(workbenchReducer(migrated, { type: "browser.expireLegacy" }), migrated);
 });
+
+test("preview allocation keeps pending and failed addresses, recovery and generation clear request state", () => {
+  const address = "http://localhost:3000/blog";
+  let state = workbenchReducer(initialWorkbench(3), { type: "browser.new", id: "clicked" });
+  state = workbenchReducer(state, { type: "browser.navigate", id: "clicked", address, url: "", previewPending: true, generation: 3 });
+  assert.equal(state.tabs[0].previewPending, true);
+  assert.equal(state.tabs[0].address, address);
+  state = workbenchReducer(state, { type: "browser.navigate", id: "clicked", address, url: "", previewError: "Instance busy", generation: 3 });
+  assert.equal(state.tabs[0].previewPending, undefined);
+  assert.equal(state.tabs[0].previewError, "Instance busy");
+  assert.equal(state.active, "clicked");
+  state = workbenchReducer(state, { type: "browser.navigate", id: "clicked", address, url: "https://app.invalid/", generation: 3 });
+  assert.equal(state.tabs[0].previewError, undefined);
+  state = workbenchReducer(state, { type: "browser.navigate", id: "clicked", address, url: "", previewPending: true, generation: 3 });
+  state = workbenchReducer(state, { type: "generation", generation: 4 });
+  assert.equal(state.tabs[0].previewPending, undefined);
+  assert.equal(state.tabs[0].previewError, undefined);
+  const migrated = state;
+  state = workbenchReducer(state, { type: "browser.navigate", id: "clicked", address, url: "", previewError: "Old rejection", generation: 3 });
+  assert.equal(state, migrated);
+});

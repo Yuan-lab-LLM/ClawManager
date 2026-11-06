@@ -11,6 +11,8 @@ export interface WorkbenchTab {
   url?: string;
   viewer_url?: string;
   credentialless?: boolean;
+  previewPending?: boolean;
+  previewError?: string;
   session?: TerminalSession;
 }
 export interface GitViewState {
@@ -47,6 +49,8 @@ export type WorkbenchEvent =
       url: string;
       viewer_url?: string;
       credentialless?: boolean;
+      previewPending?: boolean;
+      previewError?: string;
       generation: number;
     }
   | { type: "terminal.open"; session: TerminalSession }
@@ -127,6 +131,8 @@ export function workbenchReducer(
                 url: event.url,
                 viewer_url: event.viewer_url,
                 credentialless: event.credentialless,
+                previewPending: event.previewPending,
+                previewError: event.previewError,
                 title: event.address,
                 stale: false,
               }
@@ -206,6 +212,8 @@ export function workbenchReducer(
               url: undefined,
               viewer_url: undefined,
               credentialless: undefined,
+              previewPending: undefined,
+              previewError: undefined,
             })),
           };
     default:

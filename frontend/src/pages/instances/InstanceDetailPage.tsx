@@ -46,7 +46,7 @@ import {initialWorkbench,workbenchReducer,MAX_WORKBENCH_TABS,type WorkbenchState
 import { useI18n } from "../../contexts/I18nContext";
 import { useInstanceStatusWebSocket } from "../../hooks/useWebSocket";
 import type { InstanceStatusUpdate } from "../../hooks/useWebSocket";
-import { instanceWorkbenchService, workbenchError } from "../../services/instanceWorkbenchService";
+import { instanceWorkbenchService, workbenchPreviewError } from "../../services/instanceWorkbenchService";
 import { instanceService } from "../../services/instanceService";
 import {
   formatInstanceType,
@@ -442,7 +442,7 @@ const InstanceDetailPage: React.FC = () => {
     const tab = crypto.randomUUID();
     // Reserve before awaiting allocation so concurrent clicks obey the tab limit.
     onWorkbenchEvent({ type: "browser.new", id: tab });
-    onWorkbenchEvent({ type: "browser.navigate", id: tab, address, url: "", generation });
+    onWorkbenchEvent({ type: "browser.navigate", id: tab, address, url: "", previewPending: true, generation });
     setWorkspaceVisible(true);
     try {
       const result = await instanceWorkbenchService.preview(id, generation, address);
@@ -452,8 +452,11 @@ const InstanceDetailPage: React.FC = () => {
       }
       onWorkbenchEvent({ type: "browser.navigate", id: tab, address, url: result.url, viewer_url: result.viewer_url, credentialless: result.credentialless, generation });
     } catch (error) {
-      onWorkbenchEvent({ type: "tab.remove", id: tab });
-      if (isCurrent()) setActionMessage(workbenchError(error));
+      if (!isCurrent() || workbenchViewsRef.current[id]?.generation !== generation) {
+        onWorkbenchEvent({ type: "tab.remove", id: tab });
+        return;
+      }
+      onWorkbenchEvent({ type: "browser.navigate", id: tab, address, url: "", previewError: workbenchPreviewError(error, t), generation });
     }
   }, [instanceId, nativePreviewInstanceId, nativePreviewGeneration, onWorkbenchEvent, t]);
 
