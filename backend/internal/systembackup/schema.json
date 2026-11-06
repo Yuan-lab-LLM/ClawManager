@@ -296,6 +296,44 @@
     ]
   },
   {
+    "name": "browser_origin_ports",
+    "columns": [
+      {
+        "name": "port",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "instance_id",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "identity_hash",
+        "type": "char(64)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "kind",
+        "type": "varchar(16)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "target",
+        "type": "varchar(512)",
+        "nullable": "YES",
+        "extra": ""
+      }
+    ],
+    "primary_key": [
+      "port"
+    ]
+  },
+  {
     "name": "chat_messages",
     "columns": [
       {

@@ -3,8 +3,12 @@ package systembackup
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"testing"
+	"time"
+
+	"clawreef/internal/systembackup/team"
 )
 
 func TestRegistryCoversEmbeddedTableMigrations(t *testing.T) {
@@ -65,6 +69,28 @@ func TestRuntimeManagementCoordinationIsReferenceOnly(t *testing.T) {
 		policy, ok := Policy(name)
 		if !ok || policy.Category != "system_backup" || policy.Classification != classification || policy.BackupStrategy != "metadata_only" || policy.RestoreStrategy != "reference_only" {
 			t.Errorf("live runtime coordination %s must not be captured or replayed: %+v", name, policy)
+		}
+	}
+}
+
+func TestBrowserOriginBackupPolicies(t *testing.T) {
+	ledger, ok := Policy("browser_origin_ports")
+	if !ok || ledger.Category != "instances" || ledger.Classification != "secret" || ledger.BackupStrategy != "mysql_dump" || ledger.RestoreStrategy != "normalize" {
+		t.Errorf("permanent origin ledger must survive data-only backup/restore: %+v", ledger)
+	}
+	preview, ok := Policy("instance_workbench_previews")
+	if !ok || preview.Category != "system_backup" || preview.Classification != "secret" || preview.BackupStrategy != "metadata_only" || preview.RestoreStrategy != "reference_only" {
+		t.Errorf("live preview grants must never be restored: %+v", preview)
+	}
+	// Tombstones are business security history even if their original instance
+	// no longer exists. Neither normalization nor restore may release the port.
+	for _, row := range []team.Row{
+		{"port": team.Value("31000"), "instance_id": team.Value("42"), "identity_hash": team.Value("abcdef"), "kind": team.Value("native"), "target": team.Value("opencode")},
+		{"port": team.Value("31001"), "instance_id": team.Null(), "identity_hash": team.Null(), "kind": team.Null(), "target": team.Null()},
+	} {
+		change, err := NormalizeDataRow(SQLTable{Name: "browser_origin_ports"}, row, time.Now().UTC())
+		if err != nil || change.Reason != "preserved" || change.Quarantined || !reflect.DeepEqual(change.Before, row) || !reflect.DeepEqual(change.After, row) {
+			t.Errorf("origin ledger altered during isolated restore: %+v %v", change, err)
 		}
 	}
 }
