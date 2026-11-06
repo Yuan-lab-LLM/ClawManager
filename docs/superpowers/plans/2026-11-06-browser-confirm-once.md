@@ -44,7 +44,7 @@ Files: new services browser-origin router/preview bootstrap helper with tests, n
 - [x] Add failing HTTP/WS tests for cookie stripping, Set-Cookie filtering, exact Origin/Fetch Metadata fences, bootstrap capability rejection, top-level preview wrapping, expiration and generation changes.
 - [x] Integrate registry. Route browser origin before CM CORS/API router; call existing native authentication and proxy handlers after route-specific validation. Add native port binding as the final access URL projection for every access issuer, including IEI/share.
 - [x] Reuse PreviewStore capability validation; bootstrap/cookie carries capability, port binding must match instance and target. Recheck owner/generation on streams. Manager viewer serves only static trusted wrapper; redirect top-level previews to it.
-- [ ] Add nginx8444 forwarding server, shared certificate and WS support; measure native JWT cookie size. Document pool limits and optional NodePort manifest.
-- [ ] Linux Go race/isolated MySQL tests, merged frontend suites and independent security review; fix all Important findings.
-- [ ] Build on54 over current manager image, snapshot fresh deployment/runtime UID baseline, create only owned128-port Service, deploy manager/env with bounded HTTPS readiness retry and rollback.
-- [ ] Real Chrome one-approval acceptance using actual118 localhost3000 read-only and owned fixtures; verify manager/native/preview isolation, source/file/Pod/generation preservation; save sanitized report.
+- [x] Add nginx8444 forwarding server, shared certificate and WS support; measure native JWT cookie size. Document pool limits and optional NodePort manifest.
+- [x] Linux Go race/isolated MySQL tests, merged frontend suites and independent security review; fix all Important findings.
+- [x] Build on54 over current manager image, snapshot fresh deployment/runtime UID baseline, create only owned128-port Service, deploy manager/env with bounded HTTPS readiness retry and rollback.
+- [x] Real Chrome one-approval acceptance using actual118 localhost3000 read-only and owned fixtures; verify manager/native/preview isolation, source/file/Pod/generation preservation; save sanitized report.
