@@ -440,3 +440,31 @@ func TestBrowserNativeBootstrapStartsSameOriginNavigation(t *testing.T) {
 		}
 	}
 }
+
+func TestBrowserNativeBootstrapOverridesGinNoRouteStatus(t *testing.T) {
+	for _, runtimeType := range []string{services.RuntimeTypeOpenCode, services.RuntimeTypeDeepSeekHarness} {
+		t.Run(runtimeType, func(t *testing.T) {
+			registered, _, token := nativeRouteFixture(t, runtimeType)
+			// Production application-port paths run in middleware without matching
+			// a manager route. Gin selects its 404 handler before this middleware.
+			router := gin.New()
+			router.Use(registered.Handlers...)
+			router.GET("/api/v1/manager-route", func(c *gin.Context) { c.Status(202) })
+			r := httptest.NewRequest("GET", "https://10.130.81.54:31400/app?token="+token, nil)
+			r.Header.Set("Sec-Fetch-Site", "same-site")
+			r.Header.Set("Sec-Fetch-Dest", "iframe")
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, r)
+			if w.Code != http.StatusOK {
+				t.Fatalf("bootstrap inherited Gin NoRoute status: got %d, want 200", w.Code)
+			}
+			if !strings.Contains(w.Body.String(), "location.replace(") || !strings.Contains(w.Header().Get("Content-Security-Policy"), "script-src 'sha256-") {
+				t.Fatalf("bootstrap document or CSP missing: %v %s", w.Header(), w.Body.String())
+			}
+			cookies := w.Result().Cookies()
+			if len(cookies) != 1 || cookies[0].Value != token || !cookies[0].Secure || !cookies[0].HttpOnly || !cookies[0].Partitioned {
+				t.Fatalf("bootstrap cookie missing: %+v", cookies)
+			}
+		})
+	}
+}

@@ -35,6 +35,7 @@ func ServeBootstrapDocument(w http.ResponseWriter, r *http.Request, location str
 	hash := sha256.Sum256([]byte(script))
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'sha256-"+base64.StdEncoding.EncodeToString(hash[:])+"'; base-uri 'none'; form-action 'none'")
+	w.WriteHeader(http.StatusOK)
 	_, _ = io.WriteString(w, `<!doctype html><meta charset="utf-8"><title>Opening application</title><script>`+script+`</script>`)
 	return true
 }
