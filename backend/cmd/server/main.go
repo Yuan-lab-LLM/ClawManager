@@ -332,7 +332,7 @@ func main() {
 		coreHandler := northbound.NewCoreHandler(northboundCoreService, cfg.Northbound.InternalJWTSecret)
 		coreRouter := gin.New()
 		_ = coreRouter.SetTrustedProxies(nil)
-		coreRouter.Use(gin.Logger(), gin.Recovery(), northbound.RequestContext(), northbound.BodyLimit(64<<10))
+		coreRouter.Use(handlers.SafeAccessLogger(), gin.Recovery(), northbound.RequestContext(), northbound.BodyLimit(64<<10))
 		northbound.RegisterCoreRoutes(coreRouter, coreHandler)
 		northboundCoreServer = &http.Server{
 			Addr:              cfg.Northbound.CoreInternalAddress,
