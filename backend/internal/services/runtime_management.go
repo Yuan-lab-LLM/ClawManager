@@ -63,10 +63,12 @@ type RuntimeManagementOperation struct {
 }
 
 type RuntimeManagementService struct {
-	sess      db.Session
-	scheduler *RuntimeScheduler
-	guards    *repository.NorthboundRepository
-	token     string
+	sess             db.Session
+	scheduler        *RuntimeScheduler
+	guards           *repository.NorthboundRepository
+	token            string
+	idlePodSince     map[string]time.Time
+	lastIdlePoolScan time.Time
 }
 
 func NewRuntimeManagementService(sess db.Session, scheduler *RuntimeScheduler, guards *repository.NorthboundRepository) *RuntimeManagementService {
@@ -964,6 +966,9 @@ func (s *RuntimeManagementService) move(ctx context.Context, item RuntimeSchedul
 	// Do not free an ambiguous create reservation: the existing lifecycle engine
 	// reconciles only this exact target identity after a lost HTTP response.
 	if err := s.assertOwner(ctx, ownerID); err != nil {
+		return err
+	}
+	if err := s.prepareConfirmedMoveTarget(ctx, item, reserved, ownerID); err != nil {
 		return err
 	}
 	return sch.createGatewayOnPod(ctx, instanceCopy, target.RuntimeType, *target, start)

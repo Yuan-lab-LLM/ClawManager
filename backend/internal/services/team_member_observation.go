@@ -152,7 +152,7 @@ func (s *teamService) observeMemberGateway(ctx context.Context, f models.TeamMem
 	}
 	b, p := f.Binding, f.Runtime
 	runtimeType, _ := v2RuntimeTypeForInstance(&i)
-	if b == nil || b.RuntimeType != runtimeType || b.Generation != i.RuntimeGeneration || b.State != "running" || b.GatewayID == "" || b.GatewayPort <= 0 || p == nil || p.RuntimeType != runtimeType || p.State != "ready" || !observationFresh(p.LastSeenAt, now, heartbeat.Timeout) || !observationFresh(b.LastHealthAt, now, heartbeat.Timeout) {
+	if b == nil || b.RuntimeType != runtimeType || b.Generation != i.RuntimeGeneration || b.State != "running" || b.GatewayID == "" || b.GatewayPort <= 0 || p == nil || p.RuntimeType != runtimeType || (p.State != "ready" && i.RuntimeSecurityProfile != RuntimeSecurityProfile) || !observationFresh(p.LastSeenAt, now, heartbeat.Timeout) || !observationFresh(b.LastHealthAt, now, heartbeat.Timeout) {
 		return result
 	}
 	live, err := s.observationLivePods(ctx, p)
@@ -160,7 +160,7 @@ func (s *teamService) observeMemberGateway(ctx context.Context, f models.TeamMem
 		return result
 	}
 	for _, actual := range live {
-		if actual.State == "ready" && runtimeRolloutAgentMatchesPod(*p, actual) && runtimePodMatchesImage(*p, actual.ImageRef) {
+		if actual.ReadyForGateway(b.GatewayPort) && runtimeRolloutAgentMatchesPod(*p, actual) && runtimePodMatchesImage(*p, actual.ImageRef) {
 			result.State, result.Reason, result.ObservedAt = "online", "", b.LastHealthAt
 			return result
 		}

@@ -138,6 +138,9 @@ func (r *instanceRepository) GetByID(id int) (*models.Instance, error) {
 		}
 		return nil, fmt.Errorf("failed to get instance: %w", err)
 	}
+	if err := r.hydrateAutoStop([]*models.Instance{&instance}); err != nil {
+		return nil, err
+	}
 	return &instance, nil
 }
 
@@ -301,6 +304,9 @@ func (r *instanceRepository) GetAll(offset, limit int) ([]models.Instance, error
 	if err != nil {
 		return nil, fmt.Errorf("failed to get all instances: %w", err)
 	}
+	if err := r.hydrateAutoStopSlice(instances); err != nil {
+		return nil, err
+	}
 	return instances, nil
 }
 
@@ -317,6 +323,9 @@ func (r *instanceRepository) GetByStatus(ctx context.Context, status string, lim
 	err := result.All(&instances)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get instances by status: %w", err)
+	}
+	if err := r.hydrateAutoStopSlice(instances); err != nil {
+		return nil, err
 	}
 	return instances, nil
 }
@@ -335,6 +344,9 @@ func (r *instanceRepository) GetByUserID(userID int, offset, limit int) ([]model
 	err := r.sess.Collection("instances").Find(db.Cond{"user_id": userID}).OrderBy("-created_at", "-id").Offset(offset).Limit(limit).All(&instances)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get instances: %w", err)
+	}
+	if err := r.hydrateAutoStopSlice(instances); err != nil {
+		return nil, err
 	}
 	return instances, nil
 }
@@ -367,6 +379,14 @@ func (r *instanceRepository) filteredByUserID(userID int, filter models.Instance
 		case "unavailable":
 			result = result.And(db.Cond{"status IN": []string{"stopped", "error", "deleting"}})
 		}
+	}
+	if filter.AutoSleep != nil {
+		result = result.And(db.Cond{"status": "stopped"})
+		predicate := "EXISTS (SELECT 1 FROM instance_model_activity a WHERE a.instance_id = instances.id AND a.stopped_reason = ?)"
+		if !*filter.AutoSleep {
+			predicate = "NOT " + predicate
+		}
+		result = result.And(predicate, "idle_timeout")
 	}
 	if value := strings.ToLower(strings.TrimSpace(filter.Query)); value != "" {
 		id, _ := strconv.Atoi(strings.TrimPrefix(value, "#"))
@@ -425,6 +445,9 @@ func (r *instanceRepository) GetFilteredByUserID(userID int, filter models.Insta
 			}
 		}
 	}
+	if err := r.hydrateAutoStopSlice(instances); err != nil {
+		return nil, err
+	}
 	return instances, nil
 }
 
@@ -481,6 +504,9 @@ func (r *instanceRepository) GetLiteByUserIDAndOwner(userID int, owner string, o
 	if err != nil {
 		return nil, fmt.Errorf("failed to get owner Lite instances: %w", err)
 	}
+	if err := r.hydrateAutoStopSlice(instances); err != nil {
+		return nil, err
+	}
 	return instances, nil
 }
 
@@ -509,6 +535,9 @@ func (r *instanceRepository) GetWorkbuddyProByUserIDAndOwner(userID int, owner s
 	}).OrderBy("-created_at", "-id").Offset(offset).Limit(limit).All(&instances)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get owner WorkBuddy Pro instances: %w", err)
+	}
+	if err := r.hydrateAutoStopSlice(instances); err != nil {
+		return nil, err
 	}
 	return instances, nil
 }
@@ -544,6 +573,9 @@ func (r *instanceRepository) GetProByUserIDAndOwner(userID int, owner string, of
 		OrderBy("-created_at", "-id").Offset(offset).Limit(limit).All(&instances)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get owner Pro instances: %w", err)
+	}
+	if err := r.hydrateAutoStopSlice(instances); err != nil {
+		return nil, err
 	}
 	return instances, nil
 }
@@ -585,6 +617,9 @@ func (r *instanceRepository) GetNorthboundByUserIDAndOwner(userID int, owner str
 	if err != nil {
 		return nil, fmt.Errorf("failed to get owner northbound instances: %w", err)
 	}
+	if err := r.hydrateAutoStopSlice(instances); err != nil {
+		return nil, err
+	}
 	return instances, nil
 }
 
@@ -624,6 +659,9 @@ func (r *instanceRepository) GetSupportedByOwnerEmail(owner string, offset, limi
 		OrderBy("-created_at", "-id").Offset(offset).Limit(limit).All(&instances)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get IEI owner instances: %w", err)
+	}
+	if err := r.hydrateAutoStopSlice(instances); err != nil {
+		return nil, err
 	}
 	return instances, nil
 }
@@ -688,6 +726,9 @@ func (r *instanceRepository) GetAllRunning() ([]models.Instance, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to get running instances: %w", err)
 	}
+	if err := r.hydrateAutoStopSlice(instances); err != nil {
+		return nil, err
+	}
 	return instances, nil
 }
 
@@ -704,6 +745,9 @@ func (r *instanceRepository) GetV2DesiredRunning(ctx context.Context, limit int)
 	defer iter.Close()
 	if err := iter.All(&instances); err != nil {
 		return nil, fmt.Errorf("failed to get v2 desired running instances: %w", err)
+	}
+	if err := r.hydrateAutoStopSlice(instances); err != nil {
+		return nil, err
 	}
 	return instances, nil
 }
@@ -725,6 +769,9 @@ func (r *instanceRepository) GetV2Creating(ctx context.Context, limit int) ([]mo
 	defer iter.Close()
 	if err := iter.All(&instances); err != nil {
 		return nil, fmt.Errorf("failed to get v2 creating instances: %w", err)
+	}
+	if err := r.hydrateAutoStopSlice(instances); err != nil {
+		return nil, err
 	}
 	return instances, nil
 }
@@ -789,6 +836,9 @@ func (r *instanceRepository) updateRuntimeStateWithCode(ctx context.Context, id 
 }
 
 func (r *instanceRepository) updateRuntimeStateWithCodeLocked(ctx context.Context, id int, status string, generation int, message, code *string) error {
+	if err := checkAutoStopRuntimeState(ctx, r.sess, id, status, generation); err != nil {
+		return err
+	}
 	res, err := r.sess.SQL().ExecContext(ctx, `
 		UPDATE instances
 		SET status = ?, runtime_generation = ?, runtime_error_message = ?, runtime_error_code = ?, updated_at = ?
@@ -813,6 +863,9 @@ func (r *instanceRepository) updateRuntimeStateWithCodeLocked(ctx context.Contex
 		if currentGeneration > generation {
 			return ErrStaleRuntimeGeneration
 		}
+	}
+	if status == "running" {
+		return confirmAutoStopRunning(ctx, r.sess, id, generation)
 	}
 	return nil
 }
@@ -962,7 +1015,11 @@ func (r *instanceRepository) PromoteResetReplacement(ctx context.Context, source
 
 // Update updates an instance
 func (r *instanceRepository) Update(instance *models.Instance) error {
+
 	return r.withUnfencedInstance(context.Background(), instance.ID, func(local *instanceRepository) error {
+		if err := checkAutoStopRuntimeState(context.Background(), local.sess, instance.ID, instance.Status, instance.RuntimeGeneration); err != nil {
+			return err
+		}
 		// Only ProtectRuntimeGeneration may write the sticky security marker.
 		// The omitempty tag excludes it even when updating a stale snapshot.
 		update := *instance
@@ -970,6 +1027,9 @@ func (r *instanceRepository) Update(instance *models.Instance) error {
 		err := local.sess.Collection("instances").Find(db.Cond{"id": instance.ID}).Update(&update)
 		if err != nil {
 			return fmt.Errorf("failed to update instance: %w", err)
+		}
+		if instance.Status == "running" {
+			return confirmAutoStopRunning(context.Background(), local.sess, instance.ID, instance.RuntimeGeneration)
 		}
 		return nil
 	})

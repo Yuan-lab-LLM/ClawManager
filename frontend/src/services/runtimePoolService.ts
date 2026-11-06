@@ -1,6 +1,9 @@
 import axios from "axios";
 import api from "./api";
 import type {
+  RuntimeAutoStopSettings,
+  UpdateRuntimeAutoStopSettings,
+  RuntimeAutoStopActivity,
   RuntimeGateway,
   RuntimePod,
   RuntimeRollout,
@@ -23,6 +26,21 @@ import type {
 } from "../types/runtimePool";
 
 export const runtimePoolService = {
+  async getAutoStopSettings(signal?: AbortSignal): Promise<RuntimeAutoStopSettings> {
+    const response = await api.get('/admin/runtime-auto-stop', { signal });
+    return response.data.data;
+  },
+
+  async updateAutoStopSettings(request: UpdateRuntimeAutoStopSettings): Promise<RuntimeAutoStopSettings> {
+    const response = await api.put('/admin/runtime-auto-stop', request);
+    return response.data.data;
+  },
+
+  async setInstanceAutoStopDisabled(id: number, disabled: boolean): Promise<RuntimeAutoStopActivity> {
+    const response = await api.put(`/admin/instances/${id}/auto-stop`, { auto_stop_disabled: disabled });
+    return response.data.data;
+  },
+
   async listManagedPools(signal?: AbortSignal): Promise<{ items: RuntimeManagedPool[] }> {
     const response = await api.get('/admin/runtime-pod-pools', { signal });
     return response.data.data;

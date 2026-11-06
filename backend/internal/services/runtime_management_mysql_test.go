@@ -411,6 +411,44 @@ func TestRuntimeManagementMySQLBindingCreateKeepsFenceOnOneConnection(t *testing
 	}
 }
 
+func TestRuntimeManagementMySQLConfirmedMoveCannotOverrideStopIntent(t *testing.T) {
+	for _, reason := range []string{"manual", "idle_timeout"} {
+		t.Run(reason, func(t *testing.T) {
+			sess, service, _ := runtimeManagementMySQLMoveFixture(t)
+			ctx := context.Background()
+			op, err := service.enqueue(ctx, "migration", RuntimeSchedulingRequest{InstanceIDs: []int{101}, TargetPodID: 2}, []RuntimeSchedulingItem{{InstanceID: 101, SourcePodID: 1, SourceGeneration: 1, TargetPodID: 2}}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, query := range []string{
+				"UPDATE instances SET status='stopped',runtime_generation=2 WHERE id=101",
+				"UPDATE instance_runtime_bindings SET runtime_pod_id=2,generation=2,gateway_id='gw-101-2',state='creating' WHERE instance_id=101",
+			} {
+				if _, err = sess.SQL().Exec(query); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err = sess.SQL().Exec("UPDATE runtime_management_operations SET status='processing',owner_token=? WHERE id=?", service.token, op.ID); err != nil {
+				t.Fatal(err)
+			}
+			if _, err = sess.SQL().Exec("INSERT INTO instance_model_activity(instance_id,generation,monitoring_since,stopped_reason) VALUES(101,2,NOW(),?)", reason); err != nil {
+				t.Fatal(err)
+			}
+			target, err := service.scheduler.bindingRepo.GetByInstanceID(ctx, 101)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = service.prepareConfirmedMoveTarget(ctx, RuntimeSchedulingItem{InstanceID: 101, SourceGeneration: 1}, target, op.ID); err == nil {
+				t.Fatal("administrator move overrode a later stop intent")
+			}
+			instance, err := service.scheduler.instanceRepo.GetByID(101)
+			if err != nil || instance.Status != "stopped" || instance.RuntimeGeneration != 2 {
+				t.Fatalf("stop intent changed: %+v %v", instance, err)
+			}
+		})
+	}
+}
+
 func TestRuntimeManagementMySQLSuccessfulMoveUsesExactSlotAndNewGeneration(t *testing.T) {
 	sess, service, agent := runtimeManagementMySQLMoveFixture(t)
 	ctx := context.Background()
@@ -430,7 +468,11 @@ func TestRuntimeManagementMySQLSuccessfulMoveUsesExactSlotAndNewGeneration(t *te
 	}
 	binding, err := repository.NewInstanceRuntimeBindingRepository(sess).GetByInstanceID(ctx, 101)
 	if err != nil || binding == nil || binding.RuntimePodID != 2 || binding.Generation != 2 || binding.GatewayPort != 20003 || binding.State != "running" {
-		t.Fatalf("target binding=%+v %v", binding, err)
+		message := ""
+		if binding != nil {
+			message = stringValue(binding.ErrorMessage)
+		}
+		t.Fatalf("target binding=%+v err=%v message=%s", binding, err, message)
 	}
 	instance, err := repository.NewInstanceRepository(sess).GetByID(101)
 	if err != nil || instance.RuntimeGeneration != 2 || instance.Status != "running" {

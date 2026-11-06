@@ -103,3 +103,22 @@ func TestRestoredGatewayStateCannotAuthenticateOrReplay(t *testing.T) {
 		}
 	}
 }
+
+func TestIdleStopRestoreDoesNotReplayLiveOperations(t *testing.T) {
+	for _, name := range []string{"instance_model_activity_requests", "instance_idle_stop_operations"} {
+		p, ok := Policy(name)
+		if !ok || p.BackupStrategy != "metadata_only" || p.RestoreStrategy != "reference_only" {
+			t.Fatalf("live idle state may replay after restore: %s %+v", name, p)
+		}
+	}
+	now := time.Date(2026, 11, 2, 1, 2, 3, 0, time.UTC)
+	table := SQLTable{Name: "instance_model_activity", Columns: []SQLColumn{{Name: "start_deadline_at", Nullable: "YES"}, {Name: "stop_operation_id", Nullable: "NO"}}}
+	row := team.Row{"auto_stop_disabled": team.Value("1"), "monitoring_since": team.Value("2020-01-01 00:00:00"), "stop_operation_id": team.Value("old-live-op"), "stop_phase": team.Value("stopping"), "start_deadline_at": team.Value("2020-01-01 00:00:00")}
+	change, err := NormalizeDataRow(table, row, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(change.After["auto_stop_disabled"].Data) != "1" || string(change.After["stop_operation_id"].Data) != "" || !change.After["start_deadline_at"].IsNull || string(change.After["monitoring_since"].Data) != "2026-11-02 01:02:03.000000" {
+		t.Fatalf("unsafe restored idle metadata: %+v", change.After)
+	}
+}

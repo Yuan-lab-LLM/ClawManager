@@ -252,6 +252,7 @@ type RuntimeSlotResources struct {
 }
 
 type RuntimePoolConfig struct {
+	SandboxProfile            string               `yaml:"sandboxProfile"`
 	ContainerSlots            int                  `yaml:"containerSlots"`
 	SlotResources             RuntimeSlotResources `yaml:"slotResources"`
 	PodResources              RuntimeSlotResources `yaml:"podResources"`
@@ -437,6 +438,7 @@ func Load() (*Config, error) {
 			WorkspaceAccessMode:      getEnv("K8S_WORKSPACE_ACCESS_MODE", "ReadWriteMany"),
 		},
 		Runtime: RuntimePoolConfig{
+			SandboxProfile:            getEnv("RUNTIME_SANDBOX_PROFILE", ""),
 			ContainerSlots:            getEnvInt("RUNTIME_CONTAINER_SLOTS", 0),
 			DeepSeekHarnessImage:      getEnv("DEEPSEEK_HARNESS_RUNTIME_IMAGE", "ghcr.io/yuan-lab-llm/agentsruntime/deepseek-harness-lite:latest"),
 			SlotResources:             RuntimeSlotResources{CPURequest: getEnv("RUNTIME_SLOT_CPU_REQUEST", "100m"), MemoryRequest: getEnv("RUNTIME_SLOT_MEMORY_REQUEST", "256Mi"), CPULimit: getEnv("RUNTIME_SLOT_CPU_LIMIT", "2"), MemoryLimit: getEnv("RUNTIME_SLOT_MEMORY_LIMIT", "4Gi")},
@@ -557,7 +559,14 @@ func Load() (*Config, error) {
 			return nil, fmt.Errorf("invalid RUNTIME_NETWORK_ISOLATION: %w", err)
 		}
 	}
-	if config.Runtime.NetworkIsolation && (config.Runtime.ContainerSlots < 1 || !config.Runtime.PodUserNamespaces || len(config.Runtime.AgentControlToken) < 32) {
+	rootless := config.Runtime.SandboxProfile == "nfs-rootless-v1"
+	if config.Runtime.SandboxProfile != "" && !rootless {
+		return nil, fmt.Errorf("unknown runtime sandbox profile %q", config.Runtime.SandboxProfile)
+	}
+	if rootless && (config.Runtime.PodUserNamespaces || !config.Runtime.NetworkIsolation || config.Runtime.ContainerSlots < 1) {
+		return nil, fmt.Errorf("NFS rootless sandbox requires container slots, network isolation and no Pod user namespace")
+	}
+	if config.Runtime.NetworkIsolation && (config.Runtime.ContainerSlots < 1 || (!rootless && !config.Runtime.PodUserNamespaces) || len(config.Runtime.AgentControlToken) < 32) {
 		return nil, fmt.Errorf("runtime network isolation requires container slots, Pod user namespaces and a control credential of at least 32 bytes")
 	}
 	if config.Runtime.NetworkIsolation && len(config.Runtime.NetworkPodCIDRs) == 0 {
@@ -754,6 +763,7 @@ func applyEnvOverrides(config *Config) {
 	}
 
 	config.Runtime.ContainerSlots = getEnvInt("RUNTIME_CONTAINER_SLOTS", config.Runtime.ContainerSlots)
+	config.Runtime.SandboxProfile = getEnv("RUNTIME_SANDBOX_PROFILE", config.Runtime.SandboxProfile)
 	config.Runtime.DeepSeekHarnessImage = getEnv("DEEPSEEK_HARNESS_RUNTIME_IMAGE", config.Runtime.DeepSeekHarnessImage)
 	config.Runtime.SlotResources.CPURequest = getEnv("RUNTIME_SLOT_CPU_REQUEST", config.Runtime.SlotResources.CPURequest)
 	config.Runtime.SlotResources.MemoryRequest = getEnv("RUNTIME_SLOT_MEMORY_REQUEST", config.Runtime.SlotResources.MemoryRequest)

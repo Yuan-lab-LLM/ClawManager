@@ -15,13 +15,18 @@ func (r *catalogModelRepository) ListActive() ([]models.LLMModel, error) {
 	return r.active, nil
 }
 func (r *catalogModelRepository) GetByID(int) (*models.LLMModel, error) { return nil, nil }
-func (r *catalogModelRepository) GetByDisplayName(string) (*models.LLMModel, error) {
+func (r *catalogModelRepository) GetByDisplayName(name string) (*models.LLMModel, error) {
+	for _, model := range r.active {
+		if model.DisplayName == name {
+			return &model, nil
+		}
+	}
 	return nil, nil
 }
 func (r *catalogModelRepository) Save(*models.LLMModel) error { return nil }
 func (r *catalogModelRepository) Delete(int) error            { return nil }
 
-func TestAvailableAndRequestedModelsRequireExplicitDeployment(t *testing.T) {
+func TestAvailableAliasesAndRequestsUseSavedProviderCatalog(t *testing.T) {
 	configured := models.LLMModel{
 		ID:                2,
 		DisplayName:       "icompify",
@@ -37,14 +42,33 @@ func TestAvailableAndRequestedModelsRequireExplicitDeployment(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	service := &service{modelRepo: &catalogModelRepository{active: []models.LLMModel{configured}}}
+	// A discovered-only entry is not persisted and must remain unauthorized,
+	// even when both the hydrated field and discovery cache contain it.
+	const discoveredOnly = "unsaved-discovery-model"
+	configured.ProviderModels = append(configured.ProviderModels, models.LLMProviderModel{ID: discoveredOnly})
+	service := &service{
+		modelRepo: &catalogModelRepository{active: []models.LLMModel{configured}},
+		expandedModelCatalog: &availableExpandedModelCatalogStub{active: []models.LLMModel{
+			{ID: configured.ID, DisplayName: discoveredOnly, ProviderModelName: discoveredOnly, IsActive: true},
+		}},
+	}
 
 	available, err := service.ListAvailableModels()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(available) != 2 || available[0].DisplayName != "Auto" || available[1].DisplayName != "icompify" { t.Fatalf("unapproved model exposed: %#v", available) }
-	if selected, err := service.resolveRequestedModel("glm-5.2"); err == nil || selected != nil { t.Fatalf("discovery must not authorize a model: %#v, %v", selected, err) }
-	selected, err := service.resolveRequestedModel("icompify")
-	if err != nil || selected == nil || selected.ID != 2 || selected.ProviderModelName != "qwen3.8" { t.Fatalf("configured alias unavailable: %#v, %v", selected, err) }
+	if len(available) != 2 || available[0].DisplayName != "Auto" || available[1].DisplayName != "icompify" {
+		t.Fatalf("available aliases changed: %#v", available)
+	}
+	selected, err := service.resolveRequestedModel("glm-5.2")
+	if err != nil || selected == nil || selected.ID != configured.ID || selected.ProviderModelName != "glm-5.2" || selected.CatalogProviderName != "icompify" {
+		t.Fatalf("saved catalog member lost its provider identity: %#v, %v", selected, err)
+	}
+	if selected, err := service.resolveRequestedModel(discoveredOnly); err == nil || selected != nil {
+		t.Fatalf("unsaved discovery authorized a model: %#v, %v", selected, err)
+	}
+	selected, err = service.resolveRequestedModel("icompify")
+	if err != nil || selected == nil || selected.ID != configured.ID || selected.ProviderModelName != "qwen3.8" {
+		t.Fatalf("configured alias unavailable: %#v, %v", selected, err)
+	}
 }

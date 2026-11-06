@@ -20,6 +20,7 @@ import {
   type InstanceSessionUsageSummary,
 } from "../../types/instance";
 import { useI18n } from "../../contexts/I18nContext";
+import { getInstanceDisplayStatus } from "../../lib/instanceStatus";
 
 const PORTAL_RUNTIME_POLL_INTERVAL_MS = 10000;
 const PORTAL_RUNTIME_BURST_POLL_INTERVAL_MS = 2500;
@@ -526,7 +527,7 @@ const InstancePortalPage: React.FC = () => {
                                     : "bg-[#f7ece6] text-[#8f5b4b]"
                                 }`}
                               >
-                                {t(`status.${instance.status}`)}
+                                {t(`status.${getInstanceDisplayStatus(instance.status, instance.stopped_reason)}`)}
                               </span>
                             </div>
                             <p className="mt-1 text-xs text-[#8f8681]">

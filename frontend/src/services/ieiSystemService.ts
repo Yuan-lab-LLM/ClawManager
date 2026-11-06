@@ -40,6 +40,7 @@ export interface IEISystemInstance {
   runtime_variant?: "linux" | "windows" | string;
   instance_mode: string;
   status: string;
+  stopped_reason?: "manual" | "idle_timeout";
   created_at: string;
   updated_at: string;
   started_at?: string;

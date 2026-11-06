@@ -113,6 +113,9 @@ func (s *RuntimeAssignmentService) EnsureDesired(ctx context.Context, a RuntimeA
 			if state != "stopped" {
 				return fmt.Errorf("new runtime assignment generation requires confirmed source stop")
 			}
+			if cm.Data["container_termination_proof"] != "" && cm.Data["container_stop_released"] != "true" {
+				return fmt.Errorf("new runtime assignment generation requires finalized source slot release")
+			}
 		}
 		// Validate current identity and migration authority before creating a Secret.
 		if err := s.ensureRuntimeAssignmentSecret(ctx, a); err != nil {
@@ -207,6 +210,9 @@ func (s *RuntimeAssignmentService) ListPending(ctx context.Context) ([]RuntimeDe
 			continue
 		}
 		if state == "stopped" {
+			if cm.Data["container_termination_proof"] != "" && cm.Data["container_stop_released"] != "true" {
+				result = append(result, RuntimeDesiredAssignment{RuntimeAssignment: a, State: state})
+			}
 			continue
 		}
 		if state == "running" {
@@ -335,7 +341,7 @@ func (s *RuntimeAssignmentService) transition(ctx context.Context, endpoint, gat
 		if cm.Labels == nil {
 			cm.Labels = map[string]string{}
 		}
-		cm.Labels["clawmanager.io/needs-reconcile"] = strconv.FormatBool(nextState != "stopped")
+		cm.Labels["clawmanager.io/needs-reconcile"] = strconv.FormatBool(nextState != "stopped" || cm.Data["container_termination_proof"] != "" && cm.Data["container_stop_released"] != "true")
 		_, err = s.client.CoreV1().ConfigMaps(s.namespace).Update(ctx, cm, metav1.UpdateOptions{})
 		return err
 	})

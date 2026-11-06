@@ -19,6 +19,7 @@ import RuntimePodDetails from "./RuntimePodDetails";
 import RuntimeActions from "./RuntimeActions";
 import RuntimeMaintenanceDialog from "./RuntimeMaintenanceDialog";
 import RuntimeBalanceDialog from "./RuntimeBalanceDialog";
+import RuntimeAutoStopDialog from "./RuntimeAutoStopDialog";
 import {
   buttonClass,
   primaryClass,
@@ -32,7 +33,7 @@ import {
 import "../../styles/runtime-pods.css";
 
 type Dialog = {
-  kind: "schedule" | "evict" | "events" | "history" | "maintenance" | "balance";
+  kind: "schedule" | "evict" | "events" | "history" | "maintenance" | "balance" | "auto-stop";
   pod?: RuntimePod;
   ids?: number[];
 };
@@ -90,7 +91,7 @@ export default function RuntimePodsPage() {
     refetchOnWindowFocus: "always",
     refetchOnReconnect: "always",
   });
-  const needsFullInventory = !!selectedPod || (!!dialog && dialog.kind !== "maintenance" && dialog.kind !== "balance");
+  const needsFullInventory = !!selectedPod || (!!dialog && dialog.kind !== "maintenance" && dialog.kind !== "balance" && dialog.kind !== "auto-stop");
   const fullQuery = useQuery({
     queryKey: ["runtime-pods", "all"],
     queryFn: ({ signal }) => runtimePoolService.listPods(undefined, signal),
@@ -216,6 +217,7 @@ export default function RuntimePodsPage() {
                 ))}
               </div>
               <div className="runtime-toolbar-actions flex-wrap">
+                <button type="button" className={`${buttonClass} !px-2 !py-1.5`} onClick={() => setDialog({ kind: "auto-stop" })}>{t("autoStop.title")}</button>
                 <button type="button" className={`${buttonClass} !px-2 !py-1.5`} onClick={() => setDialog({ kind: "maintenance" })}>{t("runtimePods.maintenance")}</button>
                 <button type="button" className={`${buttonClass} !px-2 !py-1.5`} onClick={() => setDialog({ kind: "balance" })}>{t("runtimePods.balance")}</button>
                 <button
@@ -434,7 +436,9 @@ export default function RuntimePodsPage() {
             </div>
           </>
         )}
-        {dialog?.kind === "maintenance" ? (
+        {dialog?.kind === "auto-stop" ? (
+          <RuntimeAutoStopDialog onClose={() => setDialog(null)} />
+        ) : dialog?.kind === "maintenance" ? (
           <RuntimeMaintenanceDialog onClose={() => setDialog(null)} onChanged={refresh} onViewScheduling={() => setDialog({ kind: "history" })} />
         ) : dialog?.kind === "balance" ? (
           <RuntimeBalanceDialog onClose={() => setDialog(null)} onSubmitted={() => { refresh(); setDialog({ kind: "history" }); }} />

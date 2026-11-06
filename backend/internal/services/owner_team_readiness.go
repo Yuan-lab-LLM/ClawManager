@@ -45,7 +45,7 @@ func (s *instanceService) OwnerTeamRuntimeReady(ctx context.Context, instance *m
 		if err != nil {
 			return false, err
 		}
-		if pod == nil || pod.State != "ready" || pod.Draining || pod.LastSeenAt == nil || time.Since(*pod.LastSeenAt) > heartbeat.Timeout {
+		if pod == nil || (pod.State != "ready" && instance.RuntimeSecurityProfile != RuntimeSecurityProfile) || pod.Draining || pod.LastSeenAt == nil || time.Since(*pod.LastSeenAt) > heartbeat.Timeout {
 			return false, nil
 		}
 		deployments := k8s.NewRuntimeDeploymentService(s.podService.GetClient().Clientset)
@@ -55,7 +55,7 @@ func (s *instanceService) OwnerTeamRuntimeReady(ctx context.Context, instance *m
 		}
 		matched := false
 		for _, p := range live {
-			if p.State == "ready" && p.PodUID != "" && runtimeRolloutAgentMatchesPod(*pod, p) && runtimePodMatchesImage(*pod, p.ImageRef) {
+			if p.ReadyForGateway(binding.GatewayPort) && p.PodUID != "" && runtimeRolloutAgentMatchesPod(*pod, p) && runtimePodMatchesImage(*pod, p.ImageRef) {
 				matched = true
 			}
 		}

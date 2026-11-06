@@ -96,6 +96,11 @@ func (s *service) ExecuteImage(ctx context.Context, userID int, req *ImageOperat
 	if responseFormat != "" && responseFormat != "b64_json" {
 		return nil, imageError(400, "image_url_output_not_supported", "Use b64_json output; upstream image URL downloads are not enabled")
 	}
+	finishActivity, activityErr := s.beginModelActivity(ctx, userID, attribution)
+	if activityErr != nil {
+		return nil, activityErr
+	}
+	defer finishActivity()
 	if s.imageArtifacts == nil || s.imageJobs == nil || s.auditEventService == nil || s.invocationService == nil || s.costRecordService == nil || s.riskDetector == nil || s.deploymentStore == nil {
 		return nil, imageError(503, "image_governance_unavailable", "Image governance dependencies are unavailable")
 	}

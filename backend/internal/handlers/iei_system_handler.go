@@ -69,6 +69,7 @@ type ieiInstanceView struct {
 	RuntimeVariant     string     `json:"runtime_variant,omitempty"`
 	InstanceMode       string     `json:"instance_mode"`
 	Status             string     `json:"status"`
+	StoppedReason      string     `json:"stopped_reason,omitempty"`
 	CreatedAt          time.Time  `json:"created_at"`
 	UpdatedAt          time.Time  `json:"updated_at"`
 	StartedAt          *time.Time `json:"started_at,omitempty"`
@@ -737,6 +738,7 @@ func newIEIInstanceView(instance *models.Instance) ieiInstanceView {
 		RuntimeVariant: instance.RuntimeVariant,
 		InstanceMode:   instance.InstanceMode,
 		Status:         instance.Status,
+		StoppedReason:  instance.StoppedReason,
 		CreatedAt:      instance.CreatedAt,
 		UpdatedAt:      instance.UpdatedAt,
 		StartedAt:      instance.StartedAt,

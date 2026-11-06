@@ -65,7 +65,7 @@ func (s *Store) ScanHistories(ctx context.Context, after uint64) (uint64, error)
 		after = i.id
 		i.current.Mode = "lite"
 		key := Key("history_scan", strconv.FormatUint(i.id, 10))
-		before, fingerprintErr := historyFingerprint(ctx, s.HistoryRoot, i.path, i.current)
+		before, fingerprintErr := s.NativeFingerprint(ctx, i.path, i.current)
 		if fingerprintErr == nil {
 			row, e := s.Session.SQL().QueryRowContext(ctx, `SELECT COALESCE(JSON_UNQUOTE(JSON_EXTRACT(payload,'$.fingerprint')),''),occurred_at FROM northbound_owner_records WHERE record_type='history_scan' AND record_key=? AND status='ready'`, key)
 			var fingerprint string
@@ -83,9 +83,9 @@ func (s *Store) ScanHistories(ctx context.Context, after uint64) (uint64, error)
 		var facts []NativeQuestion
 		var readErr error
 		if epoch == nil {
-			facts, readErr = ReadNativeHistory(readCtx, s.HistoryRoot, i.path, *identity)
+			facts, readErr = s.NativeHistory(readCtx, i.path, *identity, false)
 		} else {
-			facts, readErr = readNativeHistory(readCtx, s.HistoryRoot, i.path, *identity, false, epoch.Start)
+			facts, readErr = s.NativeHistory(readCtx, i.path, *identity, false, epoch.Start)
 		}
 		cancel()
 		state := "ready"
@@ -105,7 +105,7 @@ func (s *Store) ScanHistories(ctx context.Context, after uint64) (uint64, error)
 		}
 		fingerprint := ""
 		if fingerprintErr == nil && state == "ready" {
-			if afterRead, e := historyFingerprint(ctx, s.HistoryRoot, i.path, i.current); e == nil && afterRead == before {
+			if afterRead, e := s.NativeFingerprint(ctx, i.path, i.current); e == nil && afterRead == before {
 				fingerprint = before
 			}
 		}

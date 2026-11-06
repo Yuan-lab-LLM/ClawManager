@@ -287,6 +287,7 @@ type InstanceStatus struct {
 
 // instanceService implements InstanceService
 type instanceService struct {
+	autoStopRepo           *repository.InstanceAutoStopRepository
 	ownerTeamMutationGuard func(instanceID int, action string, teamID int) error
 	instanceRepo           repository.InstanceRepository
 	quotaRepo              repository.QuotaRepository
@@ -301,6 +302,8 @@ type instanceService struct {
 	runtimeUpgradeGuard    RuntimeUpgradeDeletionGuard
 	resourceCleanup        func(context.Context, int) error
 	workspaceRoot          string
+	runtimeSandboxProfile  string
+	workspaceWrites        repository.WorkspaceWriteRepository
 	podService             *k8s.PodService
 	deploymentService      *k8s.InstanceDeploymentService
 	pvcService             *k8s.PVCService
@@ -1042,7 +1045,7 @@ func (s *instanceService) createV2Instance(ctx context.Context, userID int, req 
 		}
 	}
 
-	workspacePath, err := ensureRuntimeWorkspaceDirectories(workspaceRoot, runtimeType, userID, instance.ID)
+	workspacePath, err := s.allocateRuntimeWorkspace(workspaceRoot, runtimeType, userID, instance.ID)
 	if err != nil {
 		_ = s.instanceRepo.Delete(instance.ID)
 		return nil, fmt.Errorf("failed to create instance workspace: %w", err)
@@ -1302,10 +1305,36 @@ func (s *instanceService) startInstance(instanceID int) error {
 		if err := s.validateInstanceStartConfiguration(ctx, instance); err != nil {
 			return err
 		}
+		if s.autoStopRepo != nil && instance.InstanceMode == "lite" {
+			a, err := s.autoStopRepo.GetActivity(ctx, instance.ID)
+			if err != nil {
+				return err
+			}
+			if a != nil && a.StopOperationID != "" {
+				return models.ErrInstanceStopping
+			}
+			if a != nil && a.StoppedReason == "idle_timeout" {
+				if err = s.verifyOriginalWorkspace(ctx, runtimeType, instance); err != nil {
+					return err
+				}
+			}
+			if err = s.autoStopRepo.BeginManualStart(ctx, instance.ID, time.Now().UTC().Add(120*time.Second)); err != nil {
+				return err
+			}
+		}
 		if err := s.prepareV2InstanceStart(ctx, instance); err != nil {
+			if s.autoStopRepo != nil {
+				_ = s.autoStopRepo.ClearStartDeadline(ctx, instance.ID)
+			}
 			return err
 		}
-		return s.startV2Instance(ctx, instance, runtimeType)
+		if err := s.startV2Instance(ctx, instance, runtimeType); err != nil {
+			if s.autoStopRepo != nil {
+				_ = s.autoStopRepo.ClearStartDeadline(ctx, instance.ID)
+			}
+			return err
+		}
+		return nil
 	}
 
 	if _, err := s.ensureGatewayToken(instance); err != nil {
@@ -2041,7 +2070,9 @@ func (s *instanceService) resolveGatewayModelInjection(ownerID int) (*gatewayMod
 	if err != nil {
 		return nil, fmt.Errorf("failed to list active models: %w", err)
 	}
-	items = models.ChatModels(items)
+	// Expand only the persisted catalog after owner visibility filtering.
+	// Upstream discovery is not an authorization source.
+	items = models.ChatModels(models.ExpandLLMModelCatalog(items))
 	if len(items) == 0 {
 		return nil, ErrModelConfigurationRequired
 	}
@@ -2229,8 +2260,50 @@ func (s *instanceService) prepareV2InstanceStart(ctx context.Context, instance *
 }
 
 func (s *instanceService) stopV2Instance(ctx context.Context, instance *models.Instance) error {
+	if s.autoStopRepo != nil && instance.InstanceMode == "lite" {
+		input := models.InstanceIdleStopOperation{InstanceID: instance.ID, UserID: instance.UserID, Generation: instance.RuntimeGeneration}
+		if instance.WorkspacePath != nil {
+			input.WorkspacePath = *instance.WorkspacePath
+		}
+		if s.bindingRepo == nil {
+			return fmt.Errorf("runtime binding repository unavailable")
+		}
+		b, err := s.bindingRepo.GetByInstanceID(ctx, instance.ID)
+		if err != nil {
+			return err
+		}
+		if b != nil {
+			if b.Generation != instance.RuntimeGeneration || s.runtimePodRepo == nil {
+				return fmt.Errorf("runtime binding identity mismatch")
+			}
+			pod, err := s.runtimePodRepo.GetByID(ctx, b.RuntimePodID)
+			if err != nil {
+				return err
+			}
+			if pod == nil || pod.PodUID == nil || *pod.PodUID == "" || pod.AgentEndpoint == nil || *pod.AgentEndpoint == "" {
+				return fmt.Errorf("runtime source identity unavailable")
+			}
+			input.RuntimePodID = b.RuntimePodID
+			input.GatewayID = b.GatewayID
+			input.PodUID = *pod.PodUID
+			input.Endpoint = *pod.AgentEndpoint
+		}
+		op, err := s.autoStopRepo.BeginManualStop(ctx, input)
+		if err != nil {
+			return err
+		}
+		if current, e := s.instanceRepo.GetByID(instance.ID); e == nil && current != nil {
+			GetHub().BroadcastInstanceStatus(current.UserID, current)
+		}
+		if err = s.resumeManualStop(ctx, *op); err != nil {
+			op.ErrorMessage = err.Error()
+			_ = s.autoStopRepo.FailStop(ctx, *op)
+			return err
+		}
+		return nil
+	}
 	if err := s.instanceRepo.UpdateRuntimeState(ctx, instance.ID, "stopped", instance.RuntimeGeneration, nil); err != nil {
-		return fmt.Errorf("failed to mark v2 instance stopped: %w", err)
+		return err
 	}
 	now := time.Now()
 	instance.Status = "stopped"
@@ -2241,6 +2314,53 @@ func (s *instanceService) stopV2Instance(ctx context.Context, instance *models.I
 	instance.UpdatedAt = now
 	GetHub().BroadcastInstanceStatus(instance.UserID, instance)
 	return s.cleanupV2GatewayBinding(ctx, instance)
+}
+
+func (s *instanceService) resumeManualStop(ctx context.Context, op models.InstanceIdleStopOperation) error {
+	b, err := s.bindingRepo.GetByInstanceID(ctx, op.InstanceID)
+	if err != nil {
+		return err
+	}
+	if b != nil {
+		if b.RuntimePodID != op.RuntimePodID || b.Generation != op.Generation || b.GatewayID != op.GatewayID {
+			return fmt.Errorf("manual stop source binding changed")
+		}
+		pod, err := s.runtimePodRepo.GetByID(ctx, op.RuntimePodID)
+		if err != nil {
+			return err
+		}
+		if pod == nil || pod.PodUID == nil || *pod.PodUID != op.PodUID || pod.AgentEndpoint == nil || *pod.AgentEndpoint != op.Endpoint {
+			return fmt.Errorf("manual stop source Pod identity changed")
+		}
+		if op.Phase != "teardown_confirmed" {
+			if s.agentClient == nil {
+				return fmt.Errorf("runtime agent unavailable")
+			}
+			if err = s.agentClient.DeleteGateway(ctx, op.Endpoint, op.GatewayID); err != nil {
+				return err
+			}
+			if err = s.autoStopRepo.ConfirmTeardown(ctx, op); err != nil {
+				return err
+			}
+		}
+		if err = s.bindingRepo.DeleteByInstanceIDAndReleaseSlot(ctx, op.InstanceID, op.RuntimePodID); err != nil {
+			return err
+		}
+	} else if op.Phase != "teardown_confirmed" {
+		if op.RuntimePodID != 0 {
+			return fmt.Errorf("manual stop binding disappeared without durable teardown proof")
+		}
+		if err = s.autoStopRepo.ConfirmTeardown(ctx, op); err != nil {
+			return err
+		}
+	}
+	if err = s.autoStopRepo.CompleteManualStop(ctx, op); err != nil {
+		return err
+	}
+	if i, e := s.instanceRepo.GetByID(op.InstanceID); e == nil && i != nil {
+		GetHub().BroadcastInstanceStatus(i.UserID, i)
+	}
+	return nil
 }
 
 func (s *instanceService) deleteV2Instance(ctx context.Context, instance *models.Instance) error {
@@ -2270,6 +2390,15 @@ func (s *instanceService) deleteV2Instance(ctx context.Context, instance *models
 }
 
 func (s *instanceService) cleanupV2GatewayBinding(ctx context.Context, instance *models.Instance) error {
+	if s.autoStopRepo != nil && instance.InstanceMode == "lite" {
+		a, err := s.autoStopRepo.GetActivity(ctx, instance.ID)
+		if err != nil {
+			return err
+		}
+		if a != nil && a.StopOperationID != "" {
+			return models.ErrInstanceStopping
+		}
+	}
 	if s.bindingRepo == nil {
 		return nil
 	}
@@ -2310,7 +2439,7 @@ func (s *instanceService) ensureV2Workspace(ctx context.Context, instance *model
 	if instance.WorkspacePath != nil && strings.TrimSpace(*instance.WorkspacePath) != "" {
 		return nil
 	}
-	workspacePath, err := ensureRuntimeWorkspaceDirectories(s.runtimeWorkspaceRoot(), runtimeType, instance.UserID, instance.ID)
+	workspacePath, err := s.allocateRuntimeWorkspace(s.runtimeWorkspaceRoot(), runtimeType, instance.UserID, instance.ID)
 	if err != nil {
 		return fmt.Errorf("failed to create instance workspace: %w", err)
 	}
@@ -2754,11 +2883,17 @@ func (s *instanceService) cleanupResetSource(ctx context.Context, instance *mode
 	if err := s.ValidateDelete(instance.ID); err != nil {
 		return err
 	}
+	if s.runtimeSandboxProfile == k8s.RuntimeNFSRootlessProfile && s.resourceCleanup != nil {
+		if err := s.resourceCleanup(ctx, instance.ID); err != nil {
+			return err
+		}
+	}
+
 	if runtimeType, ok := v2RuntimeTypeForInstance(instance); ok {
 		if err := s.cleanupV2GatewayBinding(ctx, instance); err != nil {
 			return err
 		}
-		if err := s.eraseV2Workspace(instance, runtimeType); err != nil {
+		if err := s.eraseV2WorkspaceContext(ctx, instance, runtimeType); err != nil {
 			return err
 		}
 	} else {
@@ -2845,6 +2980,12 @@ func (s *instanceService) Reset(instanceID int) error {
 	if runtimeType, ok := v2RuntimeTypeForInstance(instance); ok {
 		if err := s.claimReset(instanceID); err != nil {
 			return err
+		}
+		if s.runtimeSandboxProfile == k8s.RuntimeNFSRootlessProfile && s.resourceCleanup != nil {
+			if err := s.resourceCleanup(ctx, instance.ID); err != nil {
+				s.markResetError(instanceID)
+				return err
+			}
 		}
 		if err := s.cleanupV2GatewayBinding(ctx, instance); err != nil {
 			s.markResetError(instanceID)
@@ -2961,7 +3102,7 @@ func (s *instanceService) resetV2Workspace(instance *models.Instance, runtimeTyp
 	}
 	root := filepath.Clean(s.runtimeWorkspaceRoot())
 	expected := filepath.Clean(RuntimeWorkspacePathWithRoot(root, runtimeType, instance.UserID, instance.ID))
-	created, err := ensureRuntimeWorkspaceDirectories(root, runtimeType, instance.UserID, instance.ID)
+	created, err := s.allocateRuntimeWorkspace(root, runtimeType, instance.UserID, instance.ID)
 	if err != nil {
 		return fmt.Errorf("failed to create fresh Lite workspace: %w", err)
 	}
@@ -2972,6 +3113,13 @@ func (s *instanceService) resetV2Workspace(instance *models.Instance, runtimeTyp
 }
 
 func (s *instanceService) eraseV2Workspace(instance *models.Instance, runtimeType string) error {
+	return s.eraseV2WorkspaceContext(context.Background(), instance, runtimeType)
+}
+
+func (s *instanceService) eraseV2WorkspaceContext(ctx context.Context, instance *models.Instance, runtimeType string) error {
+	if s.runtimeSandboxProfile == k8s.RuntimeNFSRootlessProfile {
+		return EraseNFSInstanceWorkspace(ctx, s.runtimeWorkspaceRoot(), runtimeType, instance, s.workspaceWrites)
+	}
 	if instance == nil || instance.WorkspacePath == nil {
 		return fmt.Errorf("Lite workspace path is missing")
 	}

@@ -25,15 +25,18 @@ import (
 // while requiring persisted ownership and teardown evidence for slot lifecycle.
 type slotRuntimeAgentClient struct {
 	*runtimeAgentHTTPClient
-	kube                kubernetes.Interface
-	namespace           string
-	assignments         *k8sservice.RuntimeAssignmentService
-	reconcileMu         sync.Mutex
-	reconcileCursor     int
-	security            *RuntimeSecurityAuthority
-	protectTeamPreview  func(context.Context, runtimeauth.Identity) error
-	admissionMu         sync.RWMutex
-	assignmentAdmission func(context.Context, string, string, int, int, func() error) error
+	kube                     kubernetes.Interface
+	namespace                string
+	assignments              *k8sservice.RuntimeAssignmentService
+	reconcileMu              sync.Mutex
+	reconcileCursor          int
+	security                 *RuntimeSecurityAuthority
+	protectTeamPreview       func(context.Context, runtimeauth.Identity) error
+	admissionMu              sync.RWMutex
+	assignmentAdmission      func(context.Context, string, string, int, int, func() error) error
+	workspaceWriteFence      func(context.Context, runtimeauth.Identity) error
+	workspaceWriteActivation func(context.Context, runtimeauth.Identity) error
+	workspaceExternalStop    func(context.Context, runtimeauth.Identity) error
 }
 
 // Legacy callers must never infer slot teardown from a 404 or an absent process
@@ -100,7 +103,7 @@ func (c *slotRuntimeAgentClient) reconcileAssignment(ctx context.Context, desire
 	requestCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	var err error
-	if desired.State == "draining" {
+	if desired.State == "draining" || desired.State == "stopped" {
 		err = c.DeleteGateway(requestCtx, desired.Endpoint, desired.GatewayID)
 	} else {
 		var req RuntimeAgentCreateGatewayRequest
@@ -208,6 +211,15 @@ func (c *slotRuntimeAgentClient) CreateGateway(ctx context.Context, endpoint str
 	if err := c.assignments.CanStart(ctx, endpoint, gatewayID); err != nil {
 		return nil, err
 	}
+	currentPod, err := c.containerStopPod(ctx, endpoint, podUID)
+	if err != nil {
+		return nil, err
+	}
+	if currentPod.Labels["clawmanager.io/sandbox-profile"] == "nfs-rootless-v1" {
+		if err = c.requireWorkspaceWriteActivation(ctx, runtimeauth.Identity{InstanceID: req.InstanceID, UserID: req.UserID, Generation: req.Generation, PodUID: podUID}); err != nil {
+			return nil, err
+		}
+	}
 	response, err := c.runtimeAgentHTTPClient.createGateway(ctx, endpoint, req)
 	if err != nil {
 		return nil, err
@@ -229,6 +241,17 @@ func (c *slotRuntimeAgentClient) DeleteGateway(ctx context.Context, endpoint, ga
 	}
 	if err := c.assignments.MarkDraining(ctx, endpoint, gatewayID); err != nil {
 		return err
+	}
+	assignment, _, _, _, lookupErr := c.assignments.ReadContainerStop(ctx, endpoint, gatewayID)
+	if lookupErr != nil {
+		return lookupErr
+	}
+	pod, lookupErr := c.containerStopPod(ctx, endpoint, assignment.PodUID)
+	if lookupErr != nil {
+		return lookupErr
+	}
+	if pod.Labels["clawmanager.io/sandbox-profile"] == "nfs-rootless-v1" {
+		return c.stopContainerGateway(ctx, endpoint, gatewayID, false)
 	}
 	var receipt struct {
 		GatewayID string `json:"gateway_id"`

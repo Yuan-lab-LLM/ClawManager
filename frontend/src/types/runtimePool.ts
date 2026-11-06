@@ -1,3 +1,22 @@
+import type { InstanceAutoStopActivity } from "./instance";
+
+export interface RuntimeAutoStopSettings {
+  enabled: boolean;
+  check_interval_days: number;
+  idle_timeout_days: number;
+  version: number;
+  next_check_at: string;
+}
+
+export type UpdateRuntimeAutoStopSettings = Omit<RuntimeAutoStopSettings, "next_check_at">;
+
+export interface RuntimeAutoStopActivity extends InstanceAutoStopActivity {
+  instance_id: number;
+  auto_stop_disabled: boolean;
+  stop_phase?: string;
+  active_requests?: number;
+}
+
 export type RuntimeType =
   | "openclaw"
   | "hermes"

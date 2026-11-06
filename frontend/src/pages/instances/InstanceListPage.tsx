@@ -3,6 +3,7 @@ import { Link, useNavigate, useLocation } from "react-router-dom";
 import { Monitor, MonitorPlay, Play, Plus, Search, Square, Trash2 } from "lucide-react";
 import ConfirmDialog from "../../components/ConfirmDialog";
 import InstanceLifecycleStatus from "../../components/InstanceLifecycleStatus";
+import InstanceAutoStopInfo from "../../components/InstanceAutoStopInfo";
 import { runtimeFailureSummary } from "../../lib/runtimeFailure";
 import InstanceLifecycleBatches from "../../components/InstanceLifecycleBatches";
 import { collectUnavailableLiteIds, pruneVisibleSelection } from "../../lib/unavailableInstanceSelection";
@@ -14,15 +15,15 @@ import {
   type SystemImageSetting,
 } from "../../services/systemSettingsService";
 import { teamService } from "../../services/teamService";
-import {
-  formatInstanceType,
-  INSTANCE_TYPES,
-  type Instance,
-  type InstanceAvailability,
-} from "../../types/instance";
+import { formatInstanceType, type Instance } from "../../types/instance";
 import type { Team, TeamMember } from "../../types/team";
+import {
+  INSTANCE_STATUS_FILTERS,
+  INSTANCE_TYPE_FILTERS,
+  instanceStatusFilterQuery,
+  type InstanceStatusFilter,
+} from "../../lib/instanceListFilters";
 
-type AvailabilityFilter = "all" | InstanceAvailability;
 type ModeFilter = "all" | Instance["instance_mode"];
 type TeamMembership = {
   team: Team;
@@ -148,9 +149,19 @@ const InstanceListPage: React.FC = () => {
   const [deletingIds, setDeletingIds] = useState<number[]>([]);
   const [actionLoading, setActionLoading] = useState<number | null>(null);
   const [pendingDeleteId, setPendingDeleteId] = useState<number | null>(null);
-  const [availabilityFilter, setAvailabilityFilter] = useState<AvailabilityFilter>(() => (["available", "starting", "unavailable"].includes(initialQuery.get("availability") || "") ? initialQuery.get("availability") : "all") as AvailabilityFilter);
-  const [typeFilter, setTypeFilter] = useState(initialQuery.get("type") || "all");
-  const [modeFilter, setModeFilter] = useState<ModeFilter>(() => (["lite", "pro"].includes(initialQuery.get("mode") || "") ? initialQuery.get("mode") : "all") as ModeFilter);
+  const [statusFilter, setStatusFilter] = useState<InstanceStatusFilter>(() => {
+    const status = INSTANCE_STATUS_FILTERS.find((value) => value === initialQuery.get("status"));
+    if (status) return status;
+    const availability = initialQuery.get("availability");
+    return availability === "available" ? "running" : availability === "starting" ? "creating" : "all";
+  });
+  const [typeFilter, setTypeFilter] = useState<string>(
+    () => INSTANCE_TYPE_FILTERS.find((value) => value === initialQuery.get("type")) ?? "all",
+  );
+  const [modeFilter, setModeFilter] = useState<ModeFilter>(() => {
+    const mode = initialQuery.get("mode");
+    return mode === "lite" || mode === "pro" ? mode : "all";
+  });
   const [searchQuery, setSearchQuery] = useState(initialQuery.get("q") || "");
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState(initialQuery.get("q") || "");
   const [page, setPage] = useState(() => Math.max(1, Number(initialQuery.get("page")) || 1));
@@ -195,7 +206,7 @@ const InstanceListPage: React.FC = () => {
           query: debouncedSearchQuery.trim() || undefined,
           type: typeFilter === "all" ? undefined : typeFilter,
           instance_mode: modeFilter === "all" ? undefined : modeFilter,
-          availability: availabilityFilter === "all" ? undefined : availabilityFilter,
+          ...instanceStatusFilterQuery(statusFilter),
         });
         setInstances(sortInstances(data.instances || []));
         setTotal(data.total || 0);
@@ -213,7 +224,7 @@ const InstanceListPage: React.FC = () => {
         }
       }
     },
-    [availabilityFilter, debouncedSearchQuery, modeFilter, page, refreshTeamMemberships, t, typeFilter],
+    [statusFilter, debouncedSearchQuery, modeFilter, page, refreshTeamMemberships, t, typeFilter],
   );
 
   useEffect(() => {
@@ -232,13 +243,13 @@ const InstanceListPage: React.FC = () => {
     if (searchQuery) params.set("q", searchQuery);
     if (typeFilter !== "all") params.set("type", typeFilter);
     if (modeFilter !== "all") params.set("mode", modeFilter);
-    if (availabilityFilter !== "all") params.set("availability", availabilityFilter);
+    if (statusFilter !== "all") params.set("status", statusFilter);
     if (page > 1) params.set("page", String(page));
     const search = params.toString();
     if (location.search.replace(/^\?/, "") !== search) {
       navigate({ pathname: location.pathname, search }, { replace: true });
     }
-  }, [searchQuery, typeFilter, modeFilter, availabilityFilter, page, navigate, location.pathname, location.search]);
+  }, [searchQuery, typeFilter, modeFilter, statusFilter, page, navigate, location.pathname, location.search]);
   useEffect(() => {
     let cancelled = false;
     systemSettingsService
@@ -269,14 +280,6 @@ const InstanceListPage: React.FC = () => {
   }, [instances, loadInstances]);
 
   const filteredInstances = instances;
-  const typeOptions = useMemo(() => {
-    const values = new Set(INSTANCE_TYPES.map((item) => item.id));
-    runtimeImageSettings.forEach((item) => values.add(item.instance_type));
-    instances.forEach((instance) => values.add(instance.type));
-    return Array.from(values).sort((left, right) =>
-      formatInstanceType(left).localeCompare(formatInstanceType(right), locale),
-    );
-  }, [instances, locale, runtimeImageSettings]);
   const totalPages = Math.max(1, Math.ceil(total / INSTANCE_LIST_PAGE_SIZE));
   const resultFrom = total === 0 ? 0 : (page - 1) * INSTANCE_LIST_PAGE_SIZE + 1;
   const resultTo = total === 0 ? 0 : Math.min(page * INSTANCE_LIST_PAGE_SIZE, total);
@@ -284,14 +287,14 @@ const InstanceListPage: React.FC = () => {
     searchQuery.trim() !== "" ||
     typeFilter !== "all" ||
     modeFilter !== "all" ||
-    availabilityFilter !== "all";
+    statusFilter !== "all";
 
   const clearFilters = useCallback(() => {
     setSearchQuery("");
     setDebouncedSearchQuery("");
     setTypeFilter("all");
     setModeFilter("all");
-    setAvailabilityFilter("all");
+    setStatusFilter("all");
     setPage(1);
   }, []);
 
@@ -728,7 +731,7 @@ const InstanceListPage: React.FC = () => {
             aria-label={t("instances.instanceTypeFilter")}
           >
             <option value="all">{t("instances.allTypes")}</option>
-            {typeOptions.map((type) => (
+            {INSTANCE_TYPE_FILTERS.map((type) => (
               <option key={type} value={type}>
                 {formatInstanceType(type)}
               </option>
@@ -748,18 +751,18 @@ const InstanceListPage: React.FC = () => {
             <option value="pro">Pro</option>
           </select>
           <select
-            value={availabilityFilter}
+            value={statusFilter}
             onChange={(event) => {
-              setAvailabilityFilter(event.target.value as AvailabilityFilter);
+              setStatusFilter(event.target.value as InstanceStatusFilter);
               setPage(1);
             }}
             className="app-input"
-            aria-label={t("instances.availabilityFilter")}
+            aria-label={t("instances.statusFilter")}
           >
-            <option value="all">{t("instances.allAvailability")}</option>
-            <option value="available">Available</option>
-            <option value="starting">Starting</option>
-            <option value="unavailable">Unavailable</option>
+            <option value="all">{t("instances.allStatuses")}</option>
+            {INSTANCE_STATUS_FILTERS.map((status) => (
+              <option key={status} value={status}>{t(`status.${status}`)}</option>
+            ))}
           </select>
           {filtersActive ? (
             <button type="button" onClick={clearFilters} className="app-button-secondary">
@@ -908,7 +911,8 @@ const InstanceListPage: React.FC = () => {
                       </div>}
                     </td>
                     <td className="px-4 py-3">
-                      <InstanceLifecycleStatus status={instance.status} availability={instance.availability} />
+                      <InstanceLifecycleStatus status={instance.status} availability={instance.availability} stoppedReason={instance.stopped_reason} />
+                      <InstanceAutoStopInfo instance={instance} />
                     </td>
                     <td className="px-4 py-3 text-slate-600">
                       {formatBytes(instance.workspace_usage_bytes)}

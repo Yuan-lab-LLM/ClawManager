@@ -2,9 +2,11 @@
 
 此目录用于新 Lite 模式的显式启用。默认 `RUNTIME_CONTAINER_SLOTS=0` 继续使用原进程池；设置为 1–256 后，后端检查存储并初始化 OpenClaw、Hermes、OpenCode、DeepSeek Harness 四类池。每个 Pod 有一个协调 Agent 和 N 个固定容器槽位，空槽不启动 gateway。实例数据在 PVC；每个业务进程只挂载自己的目录及授权 Team 目录。
 
+NFS 使用显式的 `RUNTIME_SANDBOX_PROFILE=nfs-rootless-v1`，部署前阅读 [NFS 配置及迁移说明](nfs-rootless.md)。该配置使用普通 Pod、独立槽位容器和 rootless 网络，避免对 NFS 做 Pod idmapped mount。下文的旧配置限制（Pod user namespace、Unmasked proc、额外监督进程能力、仅 Longhorn）适用于默认配置；NFS 配置的前提和验收单独列在上述文档中。两种配置都不能直接覆盖正在服务的池。
+
 ## 启用条件
 
-- 使用同一 `container` 分支构建的后端和四个 `Dockerfile.lite` 镜像，构建方法见 AgentsRuntime 的 `docs/lite-images.md`。禁止把旧 Lite 镜像混入槽位池。
+- 使用同一发行批次的后端和四个 `Dockerfile.lite` 镜像，构建方法见 AgentsRuntime 的 `docs/lite-images.md`。禁止把旧 Lite 镜像混入槽位池。
 - PVC 已绑定且 PV、StorageClass、claim 身份一致。单节点可用有节点亲和性的本地 PV 或 Longhorn；集群存在两个及以上节点时，必须使用真实 Longhorn CSI + RWX，检查包括暂不可用节点。仅把 StorageClass 命名为 longhorn 不够。
 - 节点支持 bubblewrap 需要的非特权 user namespace、PID namespace 和 seccomp。业务进程安装架构校验的 syscall 策略；可信 supervisor 的 SYS_PTRACE/KILL 用于监听端口归属检查及跨 UID 停机，业务进程没有这些能力。不能降级到直接执行 gateway。Linux 实机验收通过后再部署业务。
 - 后端有节点/PV/PVC/StorageClass 只读权限，以及运行命名空间内 ConfigMap、Secret、Deployment 和 Pod 的必要权限；两个标准部署清单中的 runtime-manager 角色已补充相应规则。Hermes Web 还读取管理 Service 的 Endpoints。
@@ -57,6 +59,20 @@
 隔离模式的短期权限校验需要多次读取 Kubernetes 身份和策略。后端 Kubernetes 客户端默认使用 100 QPS / 200 burst，可通过 `K8S_API_QPS`、`K8S_API_BURST` 或 `kubernetes.apiQPS/apiBurst` 调整；其他模式未配置时保留 client-go 默认值。该配置只调整客户端排队预算，2 秒校验期限、实时校验和失败即拒绝保持不变。按实际并发连接数和 API Server 容量压测后调整，默认值不代表海量部署容量承诺。
 
 启动检查不会原地改变已有池的安全配置。切换网络隔离、镜像或槽位配置仍需走前述停止确认及受控升级。OpenClaw 停止维护使用无外网的独立网络和操作范围；清理不确定时保留隔离标记。
+
+## Lite 空闲停止与自动缩至 0
+
+普通后端构建默认开启 Lite 空闲自动停止，检查周期与空闲超时均默认 1 天、最小 1 天，检查锚点为北京时间 04:00。配置保存在数据库，由管理端“Lite 自动停止”修改，不需要增加部署环境变量。迁移 `096`、`097`、`098` 随后端二进制嵌入，在启动时由现有迁移机制执行；升级前仍应备份数据库与实例 PVC。
+
+四类 Runtime 都必须具备本轮公共的、绑定实例/代次/Pod 身份的优雅停止和清理回执协议。旧镜像缺少协议时会阻断回收，不能只更新 CM 就视为完成部署。逐池通过已有受控升级流程更新镜像，并保持 CM 的 `*_RUNTIME_IMAGE` 配置与对应默认池模板一致；启动检查不会原地覆盖正在服务的池。不要把测试节点的 `clawmanager.local/*` 本地镜像引用直接写入通用或生产清单。
+
+实例停止并确认清理后，空 Pod 满足连续 60 秒的实际空闲校验，才进入自动回收。自动路径允许最后一个副本缩至 0；手动扩缩容仍沿用下一节的限制。Deployment、PVC 和实例工作空间保留，用户点击现有“启动”按钮才恢复容量，访问页面不会自动唤醒。纯终端操作或低频后台业务按实际需要使用实例“保持运行”。
+
+下面的 Pod 删除保护策略和相应权限也适用于自动缩容。已有池模板、Deployment/PVC 身份变化会使原自动休眠证明失效；不要手动设置 `replicas=0` 或伪造数据库记录替代正常回收。升级已归零的池时按受控升级流程重新生成真实的容量及休眠证明，再验证人工启动。
+
+分钟级测试只由显式构建标签 `cm_idle_stop_test_timing` 启用，正式镜像不得带该标签。测试后恢复：通过管理 API 关闭自动停止，等待已开始的停止操作确认完成，部署普通后端构建，再通过管理 API 开启并确认两项均为 1 天、下一次检查回到北京时间 04:00。页面显示的天数本身不能证明二进制已退出测试计时模式。
+
+Hermes 的受管模型分组修复需要更新其 Runtime 镜像；仅更新 CM 不会替换已安装的原生配置生成器。镜像构建完成与源码推送也不等于池已更新，部署后还应检查实际桌面的 `ClawManager → auto` 和供应商模型分组。
 
 ## Runtime 手动扩缩容
 

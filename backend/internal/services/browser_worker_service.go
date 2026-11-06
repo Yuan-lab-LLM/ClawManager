@@ -51,6 +51,7 @@ type BrowserWorkerService struct {
 	client          *cmk8s.Client
 	mu              sync.Mutex
 	networkIdentity runtimeauth.Lookup
+	nfsWorkspace    *workspaceFileService
 }
 
 func NewBrowserWorkerService(repo repository.BrowserWorkerRepository, instances repository.InstanceRepository, client *cmk8s.Client) *BrowserWorkerService {
@@ -112,6 +113,11 @@ func (s *BrowserWorkerService) ValidateCreateRequest(req CreateInstanceRequest, 
 func (s *BrowserWorkerService) Update(ctx context.Context, instance *models.Instance, update BrowserWorkerUpdate) (*models.InstanceBrowserWorker, error) {
 	if !browserWorkerSupportedInstance(instance) {
 		return nil, fmt.Errorf("browser worker supports OpenClaw Lite instances only")
+	}
+	if s.client != nil && s.client.RuntimeSandboxProfile == cmk8s.RuntimeNFSRootlessProfile {
+		if _, _, err := s.loadNFSBrowserRegistry(ctx, instance.ID, true); err != nil {
+			return nil, err
+		}
 	}
 	config, err := s.Get(instance.ID)
 	if err != nil {
@@ -191,7 +197,7 @@ func (s *BrowserWorkerService) Reconcile(ctx context.Context, instance *models.I
 	}
 	if !config.Enabled {
 		if config.Generation != config.ObservedGeneration {
-			if err := s.patchOpenClawConfig(instance, false, ""); err != nil && !errors.Is(err, os.ErrNotExist) {
+			if err := s.patchOpenClawConfigContext(ctx, instance, false, ""); err != nil && !errors.Is(err, os.ErrNotExist) {
 				return err
 			}
 		}
@@ -199,6 +205,12 @@ func (s *BrowserWorkerService) Reconcile(ctx context.Context, instance *models.I
 			return err
 		}
 		return s.repo.UpdateObserved(instance.ID, config.Generation, models.BrowserWorkerStatusDisabled, nil)
+	}
+	if s.client.RuntimeSandboxProfile == cmk8s.RuntimeNFSRootlessProfile && instance.RuntimeSecurityProfile != RuntimeSecurityProfile {
+		if instance.Status == "creating" && instance.RuntimeSecurityProfile == "" {
+			return s.repo.UpdateStatus(instance.ID, config.Generation, models.BrowserWorkerStatusProvisioning, nil)
+		}
+		return fmt.Errorf("NFS browser requires a published protected runtime generation")
 	}
 	if config.BrowserImage == "" || config.CDPProxyImage == "" {
 		return fmt.Errorf("browser worker images are not configured")
@@ -216,7 +228,7 @@ func (s *BrowserWorkerService) Reconcile(ctx context.Context, instance *models.I
 		return s.repo.UpdateStatus(instance.ID, config.Generation, models.BrowserWorkerStatusProvisioning, nil)
 	}
 	if config.Generation != config.ObservedGeneration {
-		if err := s.patchOpenClawConfig(instance, true, token); err != nil {
+		if err := s.patchOpenClawConfigContext(ctx, instance, true, token); err != nil {
 			return err
 		}
 	}
@@ -228,7 +240,7 @@ func (s *BrowserWorkerService) Reconcile(ctx context.Context, instance *models.I
 }
 
 func (s *BrowserWorkerService) resourcesReady(ctx context.Context, instanceID int) bool {
-	deployment, err := s.client.Clientset.AppsV1().Deployments(s.namespace()).Get(ctx, s.name(instanceID), metav1.GetOptions{})
+	deployment, err := s.getBrowserWorkload(ctx, instanceID, s.browserControllerKind())
 	return err == nil && deployment.Status.AvailableReplicas > 0
 }
 
@@ -260,11 +272,11 @@ func (s *BrowserWorkerService) DeleteForInstance(ctx context.Context, instanceID
 	if err != nil {
 		return err
 	}
-	if config == nil {
+	if config == nil && (s.client == nil || s.client.RuntimeSandboxProfile != cmk8s.RuntimeNFSRootlessProfile) {
 		return nil
-	} // Normal instance deletion has no component/API dependency.
+	} // NFS must also reconcile orphan browser writers before profile erasure.
 	if s.client == nil || s.client.Clientset == nil {
-		if !config.Enabled {
+		if config != nil && !config.Enabled && (s.client == nil || s.client.RuntimeSandboxProfile != cmk8s.RuntimeNFSRootlessProfile) {
 			return nil
 		}
 		return fmt.Errorf("kubernetes client is unavailable")
@@ -359,6 +371,28 @@ func browserWorkerLabels(instance *models.Instance) map[string]string {
 }
 
 func (s *BrowserWorkerService) ensureResources(ctx context.Context, instance *models.Instance, config *models.InstanceBrowserWorker) error {
+	if s.client.RuntimeSandboxProfile == cmk8s.RuntimeNFSRootlessProfile {
+		if instance.RuntimeSecurityProfile != RuntimeSecurityProfile {
+			return fmt.Errorf("NFS browser requires a protected runtime generation")
+		}
+		if !strings.EqualFold(instance.Status, "running") {
+			return s.stopNFSBrowserWriter(ctx, instance.ID, false)
+		}
+		return s.withNFSBrowserMutation(ctx, instance, func() (bool, error) {
+			if err := s.stopNFSBrowserWriter(ctx, instance.ID, true); err != nil {
+				return true, err
+			}
+			ended, err := PrepareNFSBrowserProfile(ctx, s.nfsWorkspace.nfsRoot, instance)
+			if err != nil || !ended {
+				return ended, err
+			}
+			return true, s.applyBrowserResources(ctx, instance, config)
+		})
+	}
+	return s.applyBrowserResources(ctx, instance, config)
+}
+
+func (s *BrowserWorkerService) applyBrowserResources(ctx context.Context, instance *models.Instance, config *models.InstanceBrowserWorker) error {
 	name, namespace := s.name(instance.ID), s.namespace()
 	labels := browserWorkerLabels(instance)
 	workspaceSubPath := fmt.Sprintf("openclaw/user-%d/instance-%d/home/.openclaw/browser-worker", instance.UserID, instance.ID)
@@ -384,9 +418,11 @@ func (s *BrowserWorkerService) ensureResources(ctx context.Context, instance *mo
 	existingPolicy, policyErr := policies.Get(ctx, name, metav1.GetOptions{})
 	if apierrors.IsNotFound(policyErr) {
 		_, policyErr = policies.Create(ctx, policy, metav1.CreateOptions{})
+		policyErr = s.nfsBrowserResourceMutationError(policyErr)
 	} else if policyErr == nil {
 		policy.ResourceVersion = existingPolicy.ResourceVersion
 		_, policyErr = policies.Update(ctx, policy, metav1.UpdateOptions{})
+		policyErr = s.nfsBrowserResourceMutationError(policyErr)
 	}
 	if policyErr != nil {
 		return policyErr
@@ -416,34 +452,53 @@ func (s *BrowserWorkerService) ensureResources(ctx context.Context, instance *mo
 		prepare := &deployment.Spec.Template.Spec.InitContainers[0]
 		prepare.VolumeMounts[0].SubPath = fmt.Sprintf("openclaw/user-%d/instance-%d", instance.UserID, instance.ID)
 		prepare.Args = []string{"mkdir -p /workspace/home/.openclaw/browser-worker && chown -R 1000:1000 /workspace/home/.openclaw/browser-worker"}
-	}
-	deployments := s.client.Clientset.AppsV1().Deployments(namespace)
-	existing, err := deployments.Get(ctx, name, metav1.GetOptions{})
-	if apierrors.IsNotFound(err) {
-		if _, err = deployments.Create(ctx, deployment, metav1.CreateOptions{}); err != nil {
-			return err
+		if s.client.RuntimeSandboxProfile == cmk8s.RuntimeNFSRootlessProfile {
+			if err := configureNFSBrowserWorker(deployment, instance); err != nil {
+				return err
+			}
 		}
-	} else if err != nil {
-		return err
+	}
+	var err error
+	if s.client.RuntimeSandboxProfile == cmk8s.RuntimeNFSRootlessProfile {
+		err = s.applyNFSBrowserWorkload(ctx, instance, deployment)
 	} else {
-		deployment.ResourceVersion = existing.ResourceVersion
-		if _, err = deployments.Update(ctx, deployment, metav1.UpdateOptions{}); err != nil {
-			return err
+		deployments := s.client.Clientset.AppsV1().Deployments(namespace)
+		existing, getErr := deployments.Get(ctx, name, metav1.GetOptions{})
+		if apierrors.IsNotFound(getErr) {
+			_, err = deployments.Create(ctx, deployment, metav1.CreateOptions{})
+		} else if getErr != nil {
+			return getErr
+		} else {
+			deployment.ResourceVersion = existing.ResourceVersion
+			_, err = deployments.Update(ctx, deployment, metav1.UpdateOptions{})
 		}
 	}
+	if err != nil {
+		return err
+	}
+
 	service := desiredBrowserWorkerService(name, namespace, labels, instance.ID)
 	if instance.RuntimeSecurityProfile == RuntimeSecurityProfile {
 		service.Spec.Selector["user-id"] = strconv.Itoa(instance.UserID)
+	}
+	if s.client.RuntimeSandboxProfile == cmk8s.RuntimeNFSRootlessProfile {
+		evidence, _, err := s.loadNFSBrowserRegistry(ctx, instance.ID, false)
+		if err != nil {
+			return err
+		}
+		service.Spec.Selector[nfsBrowserEpochAnnotation] = evidence.Epoch
 	}
 	services := s.client.Clientset.CoreV1().Services(namespace)
 	existingService, err := services.Get(ctx, name, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
 		_, err = services.Create(ctx, service, metav1.CreateOptions{})
+		err = s.nfsBrowserResourceMutationError(err)
 	} else if err == nil {
 		service.ResourceVersion = existingService.ResourceVersion
 		service.Spec.ClusterIP = existingService.Spec.ClusterIP
 		service.Spec.ClusterIPs = existingService.Spec.ClusterIPs
 		_, err = services.Update(ctx, service, metav1.UpdateOptions{})
+		err = s.nfsBrowserResourceMutationError(err)
 	}
 	return err
 }
@@ -528,7 +583,13 @@ func desiredBrowserWorkerService(name, namespace string, labels map[string]strin
 }
 
 func (s *BrowserWorkerService) deleteResources(ctx context.Context, instanceID int) error {
+	if s.client.RuntimeSandboxProfile == cmk8s.RuntimeNFSRootlessProfile {
+		if err := s.stopNFSBrowserWriter(ctx, instanceID, false); err != nil {
+			return err
+		}
+	}
 	name, namespace := s.name(instanceID), s.namespace()
+
 	if err := s.client.Clientset.AppsV1().Deployments(namespace).Delete(ctx, name, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
 		return err
 	}
@@ -577,6 +638,13 @@ func (s *BrowserWorkerService) cleanupOrphans(ctx context.Context) error {
 	for _, item := range deployments.Items {
 		collect(item.Labels)
 	}
+	sets, err := s.client.Clientset.AppsV1().StatefulSets(s.namespace()).List(ctx, options)
+	if err != nil {
+		return err
+	}
+	for _, item := range sets.Items {
+		collect(item.Labels)
+	}
 	services, err := s.client.Clientset.CoreV1().Services(s.namespace()).List(ctx, options)
 	if err != nil {
 		return err
@@ -617,6 +685,13 @@ func (s *BrowserWorkerService) cleanupOrphans(ctx context.Context) error {
 }
 
 func (s *BrowserWorkerService) patchOpenClawConfig(instance *models.Instance, enabled bool, token string) error {
+	return s.patchOpenClawConfigContext(context.Background(), instance, enabled, token)
+}
+
+func (s *BrowserWorkerService) patchOpenClawConfigContext(ctx context.Context, instance *models.Instance, enabled bool, token string) error {
+	if s.client.RuntimeSandboxProfile == cmk8s.RuntimeNFSRootlessProfile {
+		return s.patchNFSBrowserConfig(ctx, instance, enabled)
+	}
 	workspace := ""
 	if instance.WorkspacePath != nil {
 		workspace = strings.TrimSpace(*instance.WorkspacePath)

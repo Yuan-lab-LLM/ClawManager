@@ -173,13 +173,7 @@ func validateRuntimeSecuritySnapshot(ctx context.Context, id int, instance *mode
 		if string(pod.UID) != request.PodUID || pod.DeletionTimestamp != nil || pod.Status.Phase != corev1.PodRunning || pod.Labels["clawmanager.io/runtime-security"] != RuntimeSecurityProfile {
 			return fail()
 		}
-		ready := false
-		for _, condition := range pod.Status.Conditions {
-			if condition.Type == corev1.PodReady && condition.Status == corev1.ConditionTrue {
-				ready = true
-			}
-		}
-		if !ready {
+		if !runtimeAssignmentReady(&pod, request) {
 			return fail()
 		}
 		matchedPod = pod.DeepCopy()

@@ -207,7 +207,7 @@ func (s *RuntimeScheduler) renewRuntimeProxyPolicies(ctx context.Context) error 
 	var failures []error
 	for _, pod := range pods {
 		if pod.Namespace != s.runtimeNamespace || (pod.RuntimeType != RuntimeTypeOpenClaw && pod.RuntimeType != RuntimeTypeHermes) || pod.AgentEndpoint == nil ||
-			(pod.State != "ready" && !(pod.Draining && pod.UsedSlots > 0)) {
+			(pod.State != "ready" && !(pod.Draining && pod.UsedSlots > 0) && !s.proxyPolicy.servingNFSGateway(ctx, &pod)) {
 			continue
 		}
 		if err := s.proxyPolicy.Ensure(ctx, &pod); err != nil {
@@ -217,4 +217,28 @@ func (s *RuntimeScheduler) renewRuntimeProxyPolicies(ctx context.Context) error 
 	// Failure never removes a binding or restarts a running Gateway. Expiry
 	// continues to fail closed; the next successful renewal repairs access.
 	return errors.Join(failures...)
+}
+
+// A peer container reset must not expire an existing instance's native proxy
+// policy. This exception requires a fresh, UID/image-pinned healthy NFS slot;
+// it never makes the pool eligible for ordinary placement.
+func (c *RuntimeProxyPolicyCoordinator) servingNFSGateway(ctx context.Context, pod *models.RuntimePod) bool {
+	if c.client == nil || pod == nil || pod.State != "pending" || pod.UsedSlots <= 0 || pod.PodUID == nil || *pod.PodUID == "" {
+		return false
+	}
+	observations, err := k8s.NewRuntimeDeploymentService(c.client).ListDeploymentPods(ctx, []k8s.RuntimeDeploymentRef{{Namespace: pod.Namespace, Name: pod.DeploymentName}})
+	if err != nil {
+		return false
+	}
+	for _, actual := range observations {
+		if actual.SandboxProfile != k8s.RuntimeNFSRootlessProfile || !runtimeRolloutAgentMatchesPod(*pod, actual) || !runtimePodMatchesImage(*pod, actual.ImageRef) {
+			continue
+		}
+		for _, ready := range actual.ReadyGatewayPorts {
+			if ready {
+				return true
+			}
+		}
+	}
+	return false
 }

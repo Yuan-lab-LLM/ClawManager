@@ -29,6 +29,7 @@ import {
 } from "lucide-react";
 import ConfirmDialog from "../../components/ConfirmDialog";
 import InstanceLifecycleStatus from "../../components/InstanceLifecycleStatus";
+import InstanceAutoStopInfo from "../../components/InstanceAutoStopInfo";
 import {
   instancePanelStorageKey,
   readStoredCollapsed,
@@ -1149,7 +1150,7 @@ const InstanceDetailPage: React.FC = () => {
           <h1 className="truncate text-2xl font-semibold text-slate-950">
             {instance.name}
           </h1>
-          <InstanceLifecycleStatus status={status?.status || instance.status} availability={status?.availability} />
+          <InstanceLifecycleStatus status={status?.status || instance.status} availability={status?.availability} stoppedReason={instance.stopped_reason} />
         </div>
         <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm text-slate-500">
           <span>{formatInstanceType(instance.type)}</span>
@@ -1164,6 +1165,7 @@ const InstanceDetailPage: React.FC = () => {
           <span>{formatDateTime(instance.updated_at, locale)}</span>
           {instance.type === "opencode" && <RuntimeMaintenancePanel key={instance.id} instanceId={instance.id} />}
         </div>
+        <InstanceAutoStopInfo instance={instance} />
       </div>
 
       <div className="flex flex-col items-start gap-2 lg:items-end">

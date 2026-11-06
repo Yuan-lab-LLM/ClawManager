@@ -23,7 +23,19 @@ func (r *workspaceWriteRepository) Begin(ctx context.Context, w models.Workspace
 	if !w.Valid() {
 		return models.ErrRuntimeUpgradeConflict
 	}
+	if w.TeamID > 0 {
+		return r.beginTeam(ctx, w)
+	}
+	if w.Action == "erase" {
+		return r.beginLifecycleErase(ctx, w)
+	}
 	return (&instanceRepository{r.sess}).withUnfencedInstance(ctx, w.InstanceID, func(tx *instanceRepository) error {
+		if err := checkWorkspaceWriteAdmission(ctx, tx.sess, w); err != nil {
+			return err
+		}
+		if err := checkInstanceAutoStopMutation(ctx, tx.sess, w.InstanceID); err != nil {
+			return err
+		}
 		row, err := tx.sess.SQL().QueryRowContext(ctx, `SELECT user_id,runtime_generation,status FROM instances WHERE id=?`, w.InstanceID)
 		if err != nil {
 			return err
@@ -37,14 +49,21 @@ func (r *workspaceWriteRepository) Begin(ctx context.Context, w models.Workspace
 			return models.ErrRuntimeUpgradeConflict
 		}
 		// No upsert: a duplicate ID cannot overwrite another operation or authorize redispatch.
-		_, err = tx.sess.SQL().ExecContext(ctx, `INSERT INTO instance_workspace_write_intents(operation_id,instance_id,owner_user_id,generation,action,created_at) VALUES(?,?,?,?,?,?)`, w.Operation, w.InstanceID, w.OwnerID, w.Generation, w.Action, time.Now().UTC())
-		return err
+		return insertWorkspaceWriteIntent(ctx, tx.sess, w)
 	})
+}
+
+func insertWorkspaceWriteIntent(ctx context.Context, s db.Session, w models.WorkspaceWriteIntent) error {
+	_, err := s.SQL().ExecContext(ctx, `INSERT INTO instance_workspace_write_intents(operation_id,instance_id,owner_user_id,generation,action,created_at) VALUES(?,?,?,?,?,?)`, w.Operation, w.InstanceID, w.OwnerID, w.Generation, w.Action, time.Now().UTC())
+	return err
 }
 
 func (r *workspaceWriteRepository) Complete(ctx context.Context, w models.WorkspaceWriteIntent) error {
 	if !w.Valid() {
 		return models.ErrRuntimeUpgradeConflict
+	}
+	if w.TeamID > 0 {
+		return r.completeTeam(ctx, w)
 	}
 	// May settle under a fence or after a generation change, but only for the exact
 	// originally dispatched operation. No public manual-clear or expiry mechanism.

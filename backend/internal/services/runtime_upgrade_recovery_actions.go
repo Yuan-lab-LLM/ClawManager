@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"clawreef/internal/models"
+	"clawreef/internal/repository"
 	"github.com/upper/db/v4"
 )
 
@@ -268,6 +269,11 @@ func (s *RuntimeUpgradeService) lockUpgradeScope(ctx context.Context, tx db.Sess
 		return err
 	}
 	for _, id := range ids {
+		if s.nfsIOProfile == "nfs-rootless-v1" {
+			if err := repository.RequireNoInstanceTeamWorkspaceWriters(ctx, tx, id); err != nil {
+				return err
+			}
+		}
 		var count int
 		row, e := tx.SQL().QueryRowContext(ctx, `SELECT COUNT(*) FROM runtime_upgrade_items ui JOIN runtime_rollouts r ON r.id=ui.rollout_id WHERE ui.instance_id=? AND r.id<>? AND r.status IN ('pending','running')`, id, rolloutID)
 		if e != nil {

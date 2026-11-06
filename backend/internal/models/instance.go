@@ -6,6 +6,16 @@ import (
 
 // Instance represents a virtual desktop instance
 type Instance struct {
+	DefaultsPolicyVersion string `db:"-" json:"defaults_policy_version,omitempty"`
+	DefaultsPolicyStatus  string `db:"-" json:"defaults_policy_status,omitempty"`
+
+	LastGatewayActivityAt *time.Time `db:"-" json:"last_gateway_activity_at,omitempty"`
+	MonitoringSince       *time.Time `db:"-" json:"monitoring_since,omitempty"`
+	AutoStopDisabled      bool       `db:"-" json:"auto_stop_disabled"`
+	StoppedReason         string     `db:"-" json:"stopped_reason,omitempty"`
+	AutoStopBlocker       string     `db:"-" json:"auto_stop_blocker,omitempty"`
+	AutoStopPhase         string     `db:"-" json:"auto_stop_phase,omitempty"`
+
 	ID                       int        `db:"id,primarykey,autoincrement" json:"id"`
 	LastOnlineAt             *time.Time `db:"-" json:"last_online_at,omitempty"`
 	UserID                   int        `db:"user_id" json:"user_id"`
@@ -61,6 +71,7 @@ type InstanceListFilter struct {
 	InstanceMode string
 	Availability string
 	Status       string
+	AutoSleep    *bool
 }
 
 // InstanceSummary is the aggregate instance data used by the user dashboard.

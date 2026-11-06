@@ -63,13 +63,40 @@ func (r *gatewayTaskRepository) Check(ctx context.Context, t models.GatewayTaskI
 	}
 	// Instance generation and owner are checked again in SQL, covering restarts
 	// and ownership changes racing with middleware authentication.
-	_, err = r.sess.SQL().ExecContext(ctx, `INSERT IGNORE INTO gateway_runtime_tasks
+	err = r.sess.TxContext(ctx, func(sess db.Session) error {
+		i, err := lockActivityInstance(ctx, sess, t.InstanceID)
+		if err != nil {
+			return err
+		}
+		if i.mode == "lite" {
+			if err = checkInstanceAutoStopMutation(ctx, sess, t.InstanceID); err != nil {
+				return err
+			}
+		}
+		if i.userID != t.UserID || i.generation != t.Generation {
+			var n int
+			row, e := sess.SQL().QueryRowContext(ctx, `SELECT COUNT(*) FROM gateway_runtime_tasks WHERE task_key=?`, key)
+			if e != nil {
+				return e
+			}
+			if e = row.Scan(&n); e != nil {
+				return e
+			}
+			if n == 0 {
+				return models.ErrModelUnavailable
+			}
+			return nil
+		}
+		_, err = sess.SQL().ExecContext(ctx, `INSERT IGNORE INTO gateway_runtime_tasks
  (task_key,instance_id,owner_user_id,generation,session_id,task_id)
  SELECT ?,i.id,i.user_id,?,?,? FROM instances i JOIN users u ON u.id=i.user_id
  WHERE i.id=? AND i.user_id=? AND i.runtime_generation=? AND u.is_active=TRUE`, key, t.Generation, t.SessionID, t.TaskID, t.InstanceID, t.UserID, t.Generation)
+		return err
+	}, nil)
 	if err != nil {
 		return nil, err
 	}
+
 	_, err = r.sess.SQL().ExecContext(ctx, `UPDATE gateway_runtime_tasks t
  LEFT JOIN gateway_runtime_tasks previous ON previous.instance_id=t.instance_id AND previous.owner_user_id=t.owner_user_id
  AND previous.session_id=t.session_id AND previous.task_id=t.task_id AND previous.generation<t.generation AND previous.revoked=TRUE

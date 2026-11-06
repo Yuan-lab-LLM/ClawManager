@@ -25,6 +25,7 @@ import (
 )
 
 type RuntimeScheduler struct {
+	autoStopRepo *repository.InstanceAutoStopRepository
 	management   *RuntimeManagementService
 	instanceRepo repository.InstanceRepository
 	podRepo      repository.RuntimePodRepository
@@ -73,6 +74,10 @@ const (
 type RuntimeGatewayEnvBuilder func(*models.Instance) (map[string]string, error)
 
 type RuntimeSchedulerOption func(*RuntimeScheduler)
+
+func WithRuntimeSchedulerAutoStopRepository(repo *repository.InstanceAutoStopRepository) RuntimeSchedulerOption {
+	return func(s *RuntimeScheduler) { s.autoStopRepo = repo }
+}
 
 func WithRuntimeSchedulerWorkspaceRoot(root string) RuntimeSchedulerOption {
 	return func(s *RuntimeScheduler) {
@@ -1501,10 +1506,20 @@ func runtimePodsAlreadyAtImage(pods []models.RuntimePod, runtimeType, targetImag
 func (s *RuntimeScheduler) reconcileIfLeader(ctx context.Context) {
 	release, gateErr := backupgate.HoldWorkUnit(ctx, "runtime.scheduler")
 	if gateErr != nil {
+		if s.management != nil {
+			s.management.idlePodSince = nil
+		}
 		return
 	}
 	defer release()
 	if s.leader != nil && !s.leader.IsLeader(ctx) {
+		// A renewal CAS conflict is not a leadership transfer. Preserve the
+		// observation only when the API still confirms our unexpired lease;
+		// no scheduling work runs without a successful renewal.
+		observer, ok := s.leader.(interface{ HoldsLease(context.Context) bool })
+		if s.management != nil && (!ok || !observer.HoldsLease(ctx)) {
+			s.management.idlePodSince = nil
+		}
 		return
 	}
 	if err := s.reconcile(ctx); err != nil {
@@ -1544,6 +1559,11 @@ func (s *RuntimeScheduler) reconcile(ctx context.Context) error {
 		}
 		for _, instance := range desired {
 			errs = append(errs, s.reconcileDesiredInstance(ctx, instance)...)
+		}
+	}
+	if s.management != nil {
+		if err := s.management.reconcileIdleRuntimePools(ctx, time.Now().UTC()); err != nil {
+			errs = append(errs, err)
 		}
 	}
 	return errors.Join(errs...)
@@ -2095,6 +2115,21 @@ func (s *RuntimeScheduler) assignInstance(ctx context.Context, instance models.I
 		}
 		return fmt.Errorf("classify schedulable %s runtime pods: %w", runtimeType, err)
 	}
+	if s.autoStopRepo != nil {
+		storage, storageErr := s.autoStopRepo.PreviousIdleStorage(ctx, instance.ID)
+		if storageErr != nil {
+			return storageErr
+		}
+		if storage != "" {
+			matching := make([]models.RuntimePod, 0, len(pods))
+			for _, p := range pods {
+				if runtimeWorkspaceStorageCompatible(storage, p.WorkspaceStorageIdentity) {
+					matching = append(matching, p)
+				}
+			}
+			pods = matching
+		}
+	}
 	if runtimeType == RuntimeTypeOpenClaw && s.upgrade != nil {
 		verifiedCount := len(pods)
 		pods, err = s.upgrade.filterUpgradePlacement(ctx, instance.ID, pods)
@@ -2102,10 +2137,16 @@ func (s *RuntimeScheduler) assignInstance(ctx context.Context, instance models.I
 			return err
 		}
 		if verifiedCount > 0 && len(pods) == 0 {
+			if pending, wakeErr := s.restoreIdleRuntimeCapacity(ctx, instance, runtimeType); pending || wakeErr != nil {
+				return runtimeIdleWakeResult(wakeErr)
+			}
 			return fmt.Errorf("%w: no verified Runtime matches this instance's committed upgrade placement (healthy candidates=%d)", errRuntimeControlPlanePending, verifiedCount)
 		}
 	}
 	if len(pods) == 0 {
+		if pending, wakeErr := s.restoreIdleRuntimeCapacity(ctx, instance, runtimeType); pending || wakeErr != nil {
+			return runtimeIdleWakeResult(wakeErr)
+		}
 		scaled, err := s.scaleOutIfAtCapacity(ctx, runtimeType)
 		if err != nil {
 			if runtimeUpgradeInfrastructureRetryable(err) {
@@ -2469,6 +2510,37 @@ func (s *RuntimeScheduler) prepareGatewayStartParameters(ctx context.Context, in
 	if s.agentClient == nil || s.bindingRepo == nil || s.instanceRepo == nil {
 		return nil, fmt.Errorf("runtime scheduler gateway dependencies are not configured")
 	}
+	if s.autoStopRepo != nil && instance.InstanceMode == "lite" {
+		source, err := s.autoStopRepo.PreviousIdleStorage(ctx, instance.ID)
+		if err != nil {
+			return nil, err
+		}
+		if source != "" {
+			_, _, profile, profileErr := s.gatewayLinuxIDs(ctx, instance.ID, nil, pod)
+			if profileErr != nil {
+				return nil, profileErr
+			}
+			if profile == k8s.RuntimeNFSRootlessProfile {
+				err = ProbeNFSInstanceWorkspace(ctx, s.workspaceRoot, runtimeType, &instance)
+			} else {
+				err = verifyOriginalIdleWorkspace(s.workspaceRoot, runtimeType, &instance)
+			}
+			if err != nil {
+				return nil, err
+			}
+			slotClient, ok := s.agentClient.(*slotRuntimeAgentClient)
+			if !ok || pod.PodUID == nil {
+				return nil, fmt.Errorf("original workspace storage cannot be verified on target")
+			}
+			target, err := k8s.ResolveRuntimePersistentStorage(ctx, slotClient.kube, pod.Namespace, pod.PodName, *pod.PodUID, *instance.WorkspacePath)
+			if err != nil {
+				return nil, err
+			}
+			if !runtimeWorkspaceStorageCompatible(source, target) {
+				return nil, fmt.Errorf("target Runtime does not mount the original persistent workspace")
+			}
+		}
+	}
 	// Shared by ordinary creation, restart and upgrade recovery. Publish before
 	// writing a workspace, reserving ports, or starting any Gateway process.
 	if runtimeType == RuntimeTypeOpenClaw || runtimeType == RuntimeTypeHermes {
@@ -2498,8 +2570,13 @@ func (s *RuntimeScheduler) prepareGatewayStartParameters(ctx context.Context, in
 			}
 		}
 	}
-	uid, gid := runtimeGatewayLinuxIDs(instance.ID, environment)
-	if runtimeType == RuntimeTypeOpenClaw {
+	uid, gid, sandboxProfile, err := s.gatewayLinuxIDs(ctx, instance.ID, environment, pod)
+	if err != nil {
+		return nil, err
+	}
+	// NFS private native data is prepared under the instance identity by the
+	// Runtime helper. Squashed backend root must not repair those directories.
+	if runtimeType == RuntimeTypeOpenClaw && sandboxProfile != k8s.RuntimeNFSRootlessProfile {
 		if err := ensureOpenClawPluginLayoutCompatibility(workspacePath, uid, gid); err != nil {
 			return nil, fmt.Errorf("prepare OpenClaw workspace compatibility: %w", err)
 		}

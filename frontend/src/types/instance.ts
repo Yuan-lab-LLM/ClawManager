@@ -14,7 +14,19 @@ export interface RuntimeGovernanceStatus {
   } | null;
 }
 
-export interface Instance {
+export interface InstanceAutoStopActivity {
+  defaults_policy_version?: string;
+  defaults_policy_status?: string;
+
+  last_gateway_activity_at?: string;
+  monitoring_since?: string;
+  auto_stop_disabled?: boolean;
+  stopped_reason?: "manual" | "idle_timeout";
+  auto_stop_blocker?: string;
+  auto_stop_phase?: string;
+}
+
+export interface Instance extends InstanceAutoStopActivity {
   id: number;
   user_id: number;
   owner?: string;
@@ -331,6 +343,8 @@ export interface InstanceListFilters {
   type?: string;
   instance_mode?: "lite" | "pro";
   availability?: InstanceAvailability;
+  status?: Instance["status"];
+  auto_sleep?: boolean;
 }
 
 export interface InstanceSummary {

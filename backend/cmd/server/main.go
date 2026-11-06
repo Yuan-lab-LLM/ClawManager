@@ -41,6 +41,18 @@ import (
 )
 
 func main() {
+	if handled, err := services.RunTeamWorkspaceHelper(os.Args[1:], os.Stdin, os.Stdout); handled {
+		if err != nil {
+			os.Exit(1)
+		}
+		return
+	}
+	if handled, err := services.RunWorkspaceIOHelper(os.Args[1:], os.Stdin, os.Stdout); handled {
+		if err != nil {
+			os.Exit(1)
+		}
+		return
+	}
 	build := buildinfo.Current()
 	log.Printf("Starting ClawManager version=%s commit=%s build_time=%s", build.Version, build.Commit, build.BuildTime)
 
@@ -95,6 +107,7 @@ func main() {
 	rolloutRepo := repository.NewRuntimeRolloutRepository(database)
 	workspaceFileAuditRepo := repository.NewWorkspaceFileAuditRepository(database)
 	teamRepo := repository.NewTeamRepository(database)
+	repository.ConfigureTeamNFSWriteFences(teamRepo, cfg.Runtime.SandboxProfile)
 	customTeamTemplateRepo := repository.NewCustomTeamTemplateRepository(database)
 	skillRepo := repository.NewSkillRepository(database)
 	securityScanRepo := repository.NewSecurityScanRepository(database)
@@ -196,6 +209,17 @@ func main() {
 			log.Fatalf("Failed to trust Lite container slot management TLS: %v", trustErr)
 		}
 		runtimeAgentClient = services.NewSlotRuntimeAgentClientWithHTTPClient(cfg.Runtime.AgentControlToken, slotKubeClient.Clientset, slotNamespace, &http.Client{Transport: &http.Transport{TLSClientConfig: slotTrust}, Timeout: 30 * time.Second})
+		workspaceFences := repository.NewWorkspaceWriteFenceRepository(database)
+		if err := services.ConfigureSlotWorkspaceWriteFence(runtimeAgentClient, func(ctx context.Context, id runtimeauth.Identity) error {
+			return workspaceFences.Fence(ctx, id.InstanceID, id.UserID, id.Generation, id.PodUID)
+		}); err != nil {
+			log.Fatal("Failed to configure Runtime management write fencing")
+		}
+		if err := services.ConfigureSlotWorkspaceWriteActivation(runtimeAgentClient, func(ctx context.Context, id runtimeauth.Identity) error {
+			return workspaceFences.Activate(ctx, id.InstanceID, id.UserID, id.Generation, id.PodUID)
+		}); err != nil {
+			log.Fatal("Failed to configure Runtime management write activation")
+		}
 		securityCtx, securityCancel := context.WithTimeout(context.Background(), 10*time.Second)
 		signingKey, securityErr := k8s.RuntimeCapabilitySigningKey(securityCtx, slotKubeClient.Clientset, slotNamespace)
 		securityCancel()
@@ -225,7 +249,17 @@ func main() {
 			if watchErr != nil {
 				log.Fatal("Failed to initialize protected runtime metadata proof client")
 			}
-			runtimeInventory, watchErr = runtimeinventory.Start(context.Background(), watchKube, watchDynamic, watchMetadata, slotNamespace, cfg.Runtime.NetworkPodCIDRs, []string{apiAddress.String()})
+			controlAddresses := []string{apiAddress.String()}
+			if cfg.Runtime.SandboxProfile == k8s.RuntimeNFSRootlessProfile {
+				storageCtx, storageCancel := context.WithTimeout(context.Background(), 10*time.Second)
+				storageAddresses, storageErr := k8s.RuntimeNFSStorageEndpoints(storageCtx, slotKubeClient.Clientset, slotNamespace, cfg.Runtime.WorkspacePVCClaimName)
+				storageCancel()
+				if storageErr != nil {
+					log.Fatalf("Failed to pin NFS storage egress boundary: %v", storageErr)
+				}
+				controlAddresses = append(controlAddresses, storageAddresses...)
+			}
+			runtimeInventory, watchErr = runtimeinventory.Start(context.Background(), watchKube, watchDynamic, watchMetadata, slotNamespace, cfg.Runtime.NetworkPodCIDRs, controlAddresses)
 			if watchErr != nil {
 				log.Fatal("Failed to initialize protected runtime inventory")
 			}
@@ -246,7 +280,16 @@ func main() {
 		}
 	}
 	runtimeUpgradeService := services.NewRuntimeUpgradeService(database, rolloutRepo, runtimePodRepo, bindingRepo, runtimeAgentClient, cfg.Runtime.WorkspaceRoot, cfg.Runtime.RedisURL)
+	services.ConfigureRuntimeUpgradeNFSIO(runtimeUpgradeService, cfg.Runtime.SandboxProfile)
 	browserWorkerService := services.NewBrowserWorkerService(browserWorkerRepo, instanceRepo, k8s.GetClient())
+	if cfg.Runtime.ContainerSlots > 0 {
+		if err := services.ConfigureSlotExternalWriterCleanup(runtimeAgentClient, func(ctx context.Context, id runtimeauth.Identity) error {
+			return browserWorkerService.DeleteForInstance(ctx, id.InstanceID)
+		}); err != nil {
+			log.Fatal("Failed to configure external Runtime writer cleanup")
+		}
+	}
+	services.ConfigureBrowserWorkspaceNFSIO(browserWorkerService, cfg.Runtime.SandboxProfile, cfg.Runtime.WorkspaceRoot, repository.NewWorkspaceWriteRepository(database), runtimeUpgradeService)
 	if runtimeSecurity != nil {
 		if err := services.ConfigureBrowserRuntimeSecurity(browserWorkerService, runtimeSecurity.CurrentIdentity); err != nil {
 			log.Fatal("Failed to configure protected Browser Worker authority")
@@ -260,6 +303,8 @@ func main() {
 		services.WithPrivilegedInstancePods(cfg.Kubernetes.Runtime.Pod.Privileged),
 		services.WithGatewayKeyRepository(gatewayKeyRepo),
 		services.WithV2RuntimeLifecycle(runtimePodRepo, bindingRepo, runtimeAgentClient, cfg.Runtime.WorkspaceRoot),
+		services.WithRuntimeSandboxProfile(cfg.Runtime.SandboxProfile),
+		services.WithWorkspaceWriteRepository(repository.NewWorkspaceWriteRepository(database)),
 		services.WithRuntimeUpgradeDeletionGuard(runtimeUpgradeService),
 		services.WithExpandedLLMModelCatalog(llmModelService),
 		services.WithInstanceResourceCleanup(browserWorkerService.DeleteForInstance),
@@ -308,6 +353,7 @@ func main() {
 		services.WithTeamOpenClawConfigService(openClawConfigService),
 		services.WithTeamWorkspaceAuditRepository(repository.NewTeamWorkspaceFileAuditRepository(database)),
 	)
+	services.ConfigureTeamWorkspaceNFSIO(teamService, cfg.Runtime.SandboxProfile, cfg.Runtime.WorkspaceRoot, repository.NewWorkspaceWriteRepository(database), runtimeUpgradeService)
 	var platformRedis services.PlatformRedisClient
 	if redisURL := strings.TrimSpace(cfg.Runtime.RedisURL); redisURL != "" {
 		var redisErr error
@@ -320,6 +366,7 @@ func main() {
 	}
 	runtimeEvents := services.NewRuntimeEventService(platformRedis)
 	baseWorkspaceFileService := services.NewWorkspaceFileService(workspaceFileAuditRepo)
+	services.ConfigureWorkspaceNFSIO(baseWorkspaceFileService, cfg.Runtime.SandboxProfile, cfg.Runtime.WorkspaceRoot, repository.NewWorkspaceWriteRepository(database))
 	services.ConfigureWorkspaceUpgradeGuard(baseWorkspaceFileService, runtimeUpgradeService)
 	workspaceFileService := services.WithWorkspaceUpgradeGuard(baseWorkspaceFileService, instanceRepo, false)
 	runtimeWorkspaceFileService := services.WithWorkspaceUpgradeGuard(services.NewRuntimeWorkspaceFileService(workspaceFileAuditRepo, repository.NewWorkspaceWriteRepository(database)), instanceRepo, true)
@@ -338,6 +385,7 @@ func main() {
 	services.ConfigureSkillRuntimeSync(skillService, bindingRepo, runtimePodRepo, runtimeAgentClient)
 	securityScanService := services.NewSecurityScanService(securityScanRepo, skillRepo, objectStorageService, skillScannerClient)
 	ownerStore := &ownerrecords.Store{Session: database, HistoryRoot: cfg.Runtime.WorkspaceRoot, Availability: db.OwnerAnalyticsAvailable}
+	services.ConfigureOwnerHistoryNFSIO(ownerStore, cfg.Runtime.SandboxProfile)
 	gatewayCoordinationRedisURL := strings.TrimSpace(os.Getenv("GATEWAY_RATE_LIMIT_REDIS_URL"))
 	if gatewayCoordinationRedisURL == "" {
 		gatewayCoordinationRedisURL = strings.TrimSpace(cfg.Runtime.RedisURL)
@@ -359,6 +407,7 @@ func main() {
 	if classifierErr != nil {
 		log.Fatal(classifierErr)
 	}
+	autoStopRepo := repository.NewInstanceAutoStopRepository(database)
 	runtimeTasks := repository.NewGatewayTaskRepository(database)
 	imageArtifacts, err := services.NewGatewayImageArtifactService(database, objectStorageService)
 	if err != nil {
@@ -369,7 +418,7 @@ func main() {
 	go imageArtifacts.RunCleanup(imageCleanupCtx)
 	imageJobs := services.NewGatewayImageJobService(database, gatewayBudgetService)
 	go imageJobs.RunRecovery(imageCleanupCtx)
-	aiGatewayService := aigateway.NewService(llmModelRepo, modelInvocationService, auditEventService, costRecordService, riskDetectionService, riskHitService, chatSessionService, chatMessageService, aigateway.WithExpandedLLMModelCatalog(llmModelService), aigateway.WithOwnerUsage(ownerStore), aigateway.WithDeploymentStore(deploymentStore), classifierOption, aigateway.WithRuntimeTasks(runtimeTasks), aigateway.WithImageArtifacts(imageArtifacts), aigateway.WithImageJobs(imageJobs))
+	aiGatewayService := aigateway.NewService(llmModelRepo, modelInvocationService, auditEventService, costRecordService, riskDetectionService, riskHitService, chatSessionService, chatMessageService, aigateway.WithExpandedLLMModelCatalog(llmModelService), aigateway.WithOwnerUsage(ownerStore), aigateway.WithDeploymentStore(deploymentStore), classifierOption, aigateway.WithRuntimeTasks(runtimeTasks), aigateway.WithModelActivity(autoStopRepo), aigateway.WithImageArtifacts(imageArtifacts), aigateway.WithImageJobs(imageJobs))
 	gatewayRuntimeHandler := handlers.NewGatewayRuntimeHandler(runtimeTasks, aiGatewayService, auditEventService)
 	runtimeProtocols := repository.NewRuntimeProtocolRepository(database)
 	runtimeProtocolHandler := handlers.NewRuntimeProtocolHandler(runtimeProtocols, instanceRepo)
@@ -621,6 +670,7 @@ func main() {
 			runtimeDeployments := k8s.NewRuntimeDeploymentService(k8sClient.Clientset)
 			runtimeSchedulerOptions := []services.RuntimeSchedulerOption{
 				services.WithRuntimeSchedulerWorkspaceRoot(cfg.Runtime.WorkspaceRoot),
+				services.WithRuntimeSchedulerAutoStopRepository(autoStopRepo),
 				services.WithRuntimeSchedulerNamespace(cfg.Runtime.Namespace),
 				services.WithRuntimeSchedulerGatewayPortRange(cfg.Runtime.GatewayPortStart, cfg.Runtime.GatewayPortEnd),
 				services.WithRuntimeSchedulerHeartbeatTimeout(cfg.Runtime.HeartbeatTimeout),
@@ -653,6 +703,12 @@ func main() {
 	} else {
 		log.Printf("runtime scheduler disabled by configuration")
 	}
+	var autoStopKube kubernetes.Interface
+	if client := k8s.GetClient(); client != nil {
+		autoStopKube = client.Clientset
+	}
+	autoStopService := services.NewInstanceAutoStopService(autoStopRepo, instanceService, autoStopKube)
+	autoStopHandler := handlers.NewInstanceAutoStopHandler(autoStopRepo)
 	runtimePoolHandler := handlers.NewRuntimePoolHandler(runtimePodRepo, bindingRepo, rolloutRepo, runtimeScheduler, runtimeEvents)
 	runtimePoolHandler.SetUpgradeService(runtimeUpgradeService)
 	runtimeManagementService := services.NewRuntimeManagementService(database, runtimeScheduler, northboundRepo)
@@ -691,6 +747,7 @@ func main() {
 	go db.RetryOwnerAnalytics(leaderCtx, database)
 
 	startBackground := func(ctx context.Context) {
+		go autoStopService.Run(ctx)
 		go ownerStore.Run(ctx)
 		go browserWorkerService.Run(ctx, 30*time.Second)
 		log.Printf("Starting leader-only background loops (identity=%s)", cfg.LeaderElection.Identity)
@@ -979,6 +1036,9 @@ func main() {
 			adminRuntime.POST("/auth/enterprise/config/test", enterpriseAuthHandler.TestConfig)
 			adminRuntime.PUT("/auth/enterprise/config", enterpriseAuthHandler.UpdateConfig)
 			adminRuntime.GET("/auth/enterprise/status", enterpriseAuthHandler.Status)
+			adminRuntime.GET("/runtime-auto-stop", autoStopHandler.Get)
+			adminRuntime.PUT("/runtime-auto-stop", autoStopHandler.Update)
+			adminRuntime.PUT("/instances/:id/auto-stop", autoStopHandler.SetDisabled)
 			adminRuntime.GET("/runtime-pods", runtimePoolHandler.ListPods)
 			adminRuntime.GET("/runtime-pod-pools", runtimePodMaintenanceHandler.ManagedPools)
 			adminRuntime.GET("/runtime-pods/scale-options", runtimePodMaintenanceHandler.ScaleOptions)

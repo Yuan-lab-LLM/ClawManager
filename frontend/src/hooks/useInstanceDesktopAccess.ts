@@ -6,6 +6,7 @@ import { refreshDedicatedRuntimeCookie } from "../lib/instanceAccess";
 interface RefreshAccessOptions {
   forceReload?: boolean;
   silent?: boolean;
+  frameRecovery?: boolean;
 }
 
 interface UseInstanceDesktopAccessOptions {
@@ -13,6 +14,7 @@ interface UseInstanceDesktopAccessOptions {
   isRunning: boolean;
   retainSessionOnStop?: boolean;
   reloadOnAccessRefresh?: boolean;
+  monitorFrame?: boolean;
   resolveEmbedUrl: (url: string | null) => string | null;
   failedMessage: string;
   refreshLeadMs?: number;
@@ -25,6 +27,25 @@ const MAX_RETRY_DELAY_MS = 30 * 1000;
 const RETRY_JITTER_RATIO = 0.25;
 const FRAME_ERROR_PATTERN =
   /(access token expired or invalid|access token required|token does not match instance|failed to proxy request)/i;
+
+function inspectFrame(frame: HTMLIFrameElement | null) {
+  try {
+    const doc = frame?.contentDocument;
+    const body = doc?.body;
+    if (!body || doc?.readyState !== "complete") return "unknown";
+    const app = body.querySelector("openclaw-app");
+    const root = app?.shadowRoot ?? app ?? body;
+    const text = body.innerText?.trim() ?? "";
+    // Chat messages can quote these errors. Only treat a plain proxy error
+    // document as a rejected launch, never text inside the running application.
+    if (!app && text.length < 1024 && FRAME_ERROR_PATTERN.test(text)) return "error";
+    if (text || root.querySelector("button, input, textarea, canvas, video, iframe, [role=main]")) return "ready";
+    return "blank";
+  } catch {
+    // A cross-origin document cannot be inspected; that is not a failure.
+    return "unknown";
+  }
+}
 
 type DesktopSessionSnapshot = {
   embedUrl: string | null;
@@ -63,6 +84,7 @@ export function useInstanceDesktopAccess({
   isRunning,
   retainSessionOnStop = false,
   reloadOnAccessRefresh = false,
+  monitorFrame = false,
   resolveEmbedUrl,
   failedMessage,
   refreshLeadMs = DEFAULT_REFRESH_LEAD_MS,
@@ -83,6 +105,17 @@ export function useInstanceDesktopAccess({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [reconnecting, setReconnecting] = useState(false);
+  const [frameRevision, setFrameRevision] = useState(0);
+  const [frameStatus, setFrameStatus] = useState<"ready" | "recovering" | "error">("ready");
+  const frameRef = useRef<HTMLIFrameElement | null>(null);
+  const frameRetryTimeoutRef = useRef<number | null>(null);
+  const frameRetryCountRef = useRef(0);
+  const frameFailedRef = useRef(false);
+  const frameHealthySinceRef = useRef<number | null>(null);
+  const frameFailureKindRef = useRef<"blank" | "error" | "load">("load");
+  const frameRequestInFlightRef = useRef(false);
+  const frameLifetimeRef = useRef(0);
+  const frameActiveRef = useRef(isRunning);
 
   const requestIdRef = useRef(0);
   const embedUrlRef = useRef<string | null>(initialCachedSession?.embedUrl ?? null);
@@ -151,6 +184,69 @@ export function useInstanceDesktopAccess({
     }
   }, []);
 
+  const clearFrameRetry = useCallback(() => {
+    if (frameRetryTimeoutRef.current !== null) {
+      window.clearTimeout(frameRetryTimeoutRef.current);
+      frameRetryTimeoutRef.current = null;
+    }
+  }, []);
+
+  const markFrameReady = useCallback(() => {
+    clearFrameRetry();
+    frameFailedRef.current = false;
+    hasEstablishedSessionRef.current = true;
+    setFrameStatus("ready");
+    syncSessionStore({ hasEstablishedSession: true });
+    frameHealthySinceRef.current ??= Date.now();
+    if (Date.now() - frameHealthySinceRef.current >= 30_000) frameRetryCountRef.current = 0;
+  }, [clearFrameRetry, syncSessionStore]);
+
+  const recoverFrame = useCallback((kind?: "blank" | "error" | "load"): void => {
+    if (!instanceId || !isRunning || !frameActiveRef.current || frameRequestInFlightRef.current) return;
+    if (kind) frameFailureKindRef.current = kind;
+    frameFailedRef.current = true;
+    frameHealthySinceRef.current = null;
+    if (frameRetryCountRef.current >= 3) {
+      setFrameStatus("error");
+      return;
+    }
+    setFrameStatus("recovering");
+    if (document.hidden || frameRetryTimeoutRef.current !== null) return;
+    frameRetryTimeoutRef.current = window.setTimeout(async () => {
+      frameRetryTimeoutRef.current = null;
+      // A slow SPA can finish rendering during backoff. Preserve its inputs.
+      if (frameFailureKindRef.current === "blank" && inspectFrame(frameRef.current) === "ready") {
+        markFrameReady();
+        return;
+      }
+      const lifetime = frameLifetimeRef.current;
+      frameRequestInFlightRef.current = true;
+      frameRetryCountRef.current += 1;
+      try {
+        await refreshAccessRef.current?.({ forceReload: true, silent: true, frameRecovery: true });
+      } finally {
+        if (lifetime === frameLifetimeRef.current) {
+          frameRequestInFlightRef.current = false;
+          if (frameFailedRef.current) recoverFrame();
+        }
+      }
+    }, Math.min(retryDelayMs * 2 ** frameRetryCountRef.current, MAX_RETRY_DELAY_MS));
+  }, [instanceId, isRunning, markFrameReady, retryDelayMs]);
+
+  useEffect(() => {
+    frameActiveRef.current = isRunning;
+    frameLifetimeRef.current += 1;
+    frameRequestInFlightRef.current = false;
+    frameRetryCountRef.current = 0;
+    frameFailedRef.current = false;
+    frameHealthySinceRef.current = null;
+    return () => {
+      frameActiveRef.current = false;
+      frameLifetimeRef.current += 1;
+      clearFrameRetry();
+    };
+  }, [clearFrameRetry, instanceId, isRunning]);
+
   const clearAccessState = useCallback(() => {
     clearRetryTimeout();
     clearRefreshTimeout();
@@ -196,6 +292,7 @@ export function useInstanceDesktopAccess({
       setError(null);
       setLoading(false);
       setReconnecting(false);
+      setFrameStatus("ready");
     });
     return () => {
       cancelled = true;
@@ -239,13 +336,18 @@ export function useInstanceDesktopAccess({
   }, [clearRetryTimeout, instanceId, isRunning, retryDelayMs]);
 
   const refreshAccess = useCallback(
-    async ({ forceReload = false, silent = false }: RefreshAccessOptions = {}) => {
+    async ({ forceReload = false, silent = false, frameRecovery = false }: RefreshAccessOptions = {}) => {
       if (!instanceId || !isRunning) {
         if (shouldPreserveSession()) {
           return;
         }
         clearAccessState();
         return;
+      }
+
+      if (forceReload && !frameRecovery) {
+        clearFrameRetry();
+        frameRetryCountRef.current = 0;
       }
 
       const requestId = requestIdRef.current + 1;
@@ -268,7 +370,8 @@ export function useInstanceDesktopAccess({
         const nextExpiresAt = new Date(data.expires_at);
         const previousEmbedUrl = embedUrlRef.current;
         const shouldReloadFrame =
-          !previousEmbedUrl || forceReload || reloadOnAccessRefresh;
+          (!previousEmbedUrl || forceReload || reloadOnAccessRefresh) &&
+          !(frameRecovery && frameFailureKindRef.current === "blank" && inspectFrame(frameRef.current) === "ready");
 
         if (!shouldReloadFrame) {
           // The management-origin cookie cannot renew a dedicated-origin
@@ -285,10 +388,14 @@ export function useInstanceDesktopAccess({
         setError(null);
 
         if (shouldReloadFrame) {
+          frameFailedRef.current = false;
+          frameHealthySinceRef.current = null;
           embedUrlRef.current = nextEmbedUrl;
           setEmbedUrl(nextEmbedUrl);
+          setFrameRevision((revision) => revision + 1);
         } else {
           setEmbedUrl(previousEmbedUrl);
+          if (frameRecovery) markFrameReady();
         }
 
         syncSessionStore({
@@ -305,7 +412,8 @@ export function useInstanceDesktopAccess({
           setEmbedUrl(null);
           setExpiresAt(null);
         }
-        scheduleRetry();
+        if (frameFailedRef.current) recoverFrame();
+        else scheduleRetry();
       } finally {
         if (requestId === requestIdRef.current) {
           setLoading(false);
@@ -315,11 +423,14 @@ export function useInstanceDesktopAccess({
     },
     [
       clearAccessState,
+      clearFrameRetry,
       clearRetryTimeout,
       failedMessage,
       instanceId,
       isRunning,
+      markFrameReady,
       reloadOnAccessRefresh,
+      recoverFrame,
       resolveEmbedUrl,
       scheduleRetry,
       shouldPreserveSession,
@@ -403,6 +514,10 @@ export function useInstanceDesktopAccess({
       }
 
       const currentExpiry = expiresAtRef.current?.getTime() ?? 0;
+      if (frameFailedRef.current) {
+        recoverFrame();
+        return;
+      }
       const hasActiveFrame = Boolean(embedUrlRef.current);
       const isNearExpiry =
         currentExpiry === 0 || currentExpiry - Date.now() <= refreshLeadMs;
@@ -434,39 +549,50 @@ export function useInstanceDesktopAccess({
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       window.removeEventListener("focus", handleFocus);
     };
-  }, [instanceId, isRunning, refreshLeadMs]);
+  }, [instanceId, isRunning, recoverFrame, refreshLeadMs]);
+
+  useEffect(() => {
+    if (!monitorFrame || !isRunning || !embedUrl) return;
+    let timer: number;
+    let blankSince: number | null = null;
+    const check = () => {
+      if (!document.hidden && (!frameFailedRef.current || frameFailureKindRef.current === "blank")) {
+        const state = inspectFrame(frameRef.current);
+        if (state === "ready") {
+          blankSince = null;
+          markFrameReady();
+        } else if (state === "error") {
+          recoverFrame("error");
+        } else if (state === "blank") {
+          frameHealthySinceRef.current = null;
+          blankSince ??= Date.now();
+          if (Date.now() - blankSince >= 10_000) recoverFrame("blank");
+        } else {
+          blankSince = null;
+        }
+      }
+      timer = window.setTimeout(check, 5000);
+    };
+    timer = window.setTimeout(check, 5000);
+    return () => window.clearTimeout(timer);
+  }, [embedUrl, frameRevision, isRunning, markFrameReady, monitorFrame, recoverFrame]);
 
   const handleFrameLoad = useCallback(
     (frame: HTMLIFrameElement | null) => {
-      if (!frame) {
+      if (!frame || !frameActiveRef.current) {
         return;
       }
-
-      window.setTimeout(() => {
-        try {
-          const frameText = frame.contentDocument?.body?.textContent?.trim() ?? "";
-          if (frameText && FRAME_ERROR_PATTERN.test(frameText)) {
-            if (!hasEstablishedSessionRef.current) {
-              void refreshAccessRef.current?.({ forceReload: true, silent: true });
-            }
-            return;
-          }
-
-          hasEstablishedSessionRef.current = true;
-          syncSessionStore({ hasEstablishedSession: true });
-        } catch (frameError) {
-          console.error("Failed to inspect desktop frame state", frameError);
-        }
-      }, 0);
+      frameRef.current = frame;
+      const state = inspectFrame(frame);
+      if (state === "error") recoverFrame("error");
+      // A completed cross-origin navigation is allowed. Inability to inspect
+      // its document must never leave a blocking recovery overlay behind.
+      else if (state === "ready" || state === "unknown") markFrameReady();
     },
-    [syncSessionStore],
+    [markFrameReady, recoverFrame],
   );
 
-  const handleFrameError = useCallback(() => {
-    if (!hasEstablishedSessionRef.current) {
-      void refreshAccessRef.current?.({ forceReload: true, silent: true });
-    }
-  }, []);
+  const handleFrameError = useCallback(() => recoverFrame("load"), [recoverFrame]);
 
   return {
     embedUrl,
@@ -474,6 +600,9 @@ export function useInstanceDesktopAccess({
     loading,
     error,
     reconnecting,
+    frameRef,
+    frameRevision,
+    frameStatus,
     refreshAccess,
     handleFrameLoad,
     handleFrameError,

@@ -153,6 +153,17 @@ func TestFinalWriteAdoptsResponseLossAndDoesNotDispatchAfterDeadline(t *testing.
 	if done, err := d.Tick(ctx, s, l, x, a); err != nil || !done || p.puts != 1 {
 		t.Fatal("successful action dispatched again", done, err, p.puts)
 	}
+	// The final marker requires a confirmed index predecessor. Seed that
+	// receipt before testing the marker's expired dispatch deadline.
+	r.Type = "index_put"
+	r.Key = artifactPrefix(s.InstallationID, x.ID) + "index.json"
+	a, x, err = s.PrepareExternalAction(ctx, l, x, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = s.ResolveExternalAction(ctx, l, x, a, "confirmed_present", ObjectReference{r.Key, "fixture-index", int64(len(r.Payload)), a.Request.SHA256}); err != nil {
+		t.Fatal(err)
+	}
 	r.Type = "marker_put"
 	r.Key = artifactPrefix(s.InstallationID, x.ID) + "_COMMITTED"
 	a, x, err = s.PrepareExternalAction(ctx, l, x, r)

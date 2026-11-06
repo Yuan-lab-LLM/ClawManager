@@ -93,6 +93,14 @@ func NormalizeDataRow(table SQLTable, row team.Row, now time.Time) (team.Change,
 		err = stopState("status", "stopped", []string{"creating", "running", "deleting"}, []string{"stopped", "error"})
 		erase("access_token", "agent_bootstrap_token", "pod_name", "pod_namespace", "pod_ip", "access_url")
 		set("environment_overrides_json", "{}")
+	case "instance_auto_stop_settings":
+		set("enabled", "0")
+		erase("next_check_at")
+	case "instance_model_activity":
+		set("monitoring_since", now.UTC().Format("2006-01-02 15:04:05.000000"))
+		erase("stop_operation_id", "start_deadline_at")
+		set("stop_phase", "restored")
+		set("blocker", "Monitoring restarted after isolated restore")
 	case "instance_agents":
 		set("status", "offline")
 		erase("session_token", "session_expires_at")
