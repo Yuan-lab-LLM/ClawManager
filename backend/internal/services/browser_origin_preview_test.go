@@ -82,7 +82,7 @@ func TestBrowserPreviewBootstrapAndCookieBoundary(t *testing.T) {
 	r.Header.Set("Sec-Fetch-Site", "same-site")
 	w := httptest.NewRecorder()
 	s.ServePreview(w, r)
-	if w.Code != http.StatusSeeOther || w.Header().Get("Location") != "/a%2Fb?q=1#part" || len(*seen) != 0 {
+	if w.Code != http.StatusOK || w.Header().Get("Location") != "" || !strings.Contains(w.Body.String(), `location.replace(`) || !strings.Contains(w.Body.String(), `"/a%2Fb?q=1#part"`) || strings.Contains(w.Body.String(), lease.ID) || len(*seen) != 0 {
 		t.Fatalf("bootstrap %d %s calls%d", w.Code, w.Header().Get("Location"), len(*seen))
 	}
 	cookies := w.Result().Cookies()
@@ -111,6 +111,7 @@ func TestBrowserPreviewDeniesGuessablePortAndForeignSource(t *testing.T) {
 		{"wrong port", strings.Replace(boot, ":31400", ":31401", 1), "same-site", "", "iframe", ""},
 		{"foreign bootstrap", boot, "cross-site", "https://evil.test", "iframe", ""},
 		{"foreign cookie request", "https://cm.test:31400/api", "same-site", "https://cm.test:31401", "empty", "cm_preview_31400=" + lease.ID},
+		{"same-site cookie iframe", "https://cm.test:31400/", "same-site", "", "iframe", "cm_preview_31400=" + lease.ID},
 		{"missing origin image", "https://cm.test:31400/", "same-site", "", "image", "cm_preview_31400=" + lease.ID},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -204,4 +205,19 @@ func TestBrowserPreviewWebSocketCookieAndGenerationFence(t *testing.T) {
 	_ = conn.SetReadDeadline(time.Now().Add(time.Second))
 	_, _, err = conn.ReadMessage()
 	requirePreviewWebSocketClosed(t, err)
+}
+
+func TestBrowserPreviewNonDocumentBootstrapKeepsRedirect(t *testing.T) {
+	for _, method := range []string{"GET", "HEAD"} {
+		t.Run(method, func(t *testing.T) {
+			s, lease, route, _, seen, _ := chromePreviewFixture(t)
+			r := httptest.NewRequest(method, s.browserPreviewURL(route, lease), nil)
+			r.Header.Set("Sec-Fetch-Site", "same-site")
+			w := httptest.NewRecorder()
+			s.ServePreview(w, r)
+			if w.Code != http.StatusSeeOther || w.Header().Get("Location") != "/a%2Fb?q=1#part" || len(*seen) != 0 {
+				t.Fatalf("non-document bootstrap changed: status=%d location=%q", w.Code, w.Header().Get("Location"))
+			}
+		})
+	}
 }

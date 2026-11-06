@@ -92,6 +92,9 @@ func (s *InstanceWorkbenchService) prepareBrowserPreview(w http.ResponseWriter, 
 		http.SetCookie(w, &http.Cookie{Name: browserPreviewCookie(binding.Port), Value: lease.ID, Path: "/", HttpOnly: true, Secure: true, SameSite: http.SameSiteNoneMode, Partitioned: true, MaxAge: maxAge, Expires: lease.ExpiresAt})
 		w.Header().Set("Cache-Control", "no-store")
 		location := (&url.URL{Path: lease.Target.Path, RawPath: lease.Target.RawPath, RawQuery: lease.Target.RawQuery, Fragment: lease.Target.Fragment}).String()
+		if browserorigin.ServeBootstrapDocument(w, r, location) {
+			return true
+		}
 		http.Redirect(w, r, location, http.StatusSeeOther)
 		return true
 	}

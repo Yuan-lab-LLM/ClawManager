@@ -969,6 +969,7 @@ func TestProxyAccessTokenBootstrapsDedicatedOpenCodeOriginCookie(t *testing.T) {
 	requestURL := "/api/v1/instances/171/proxy/?token=" + url.QueryEscape(token.Token) + "&token=runtime-session&view=compact"
 	c.Request = httptest.NewRequest(http.MethodGet, requestURL, nil)
 	c.Request.Header.Set(services.DedicatedRuntimeOriginHeader, services.RuntimeTypeOpenCode)
+	c.Request.Header.Set("Sec-Fetch-Dest", "iframe")
 
 	handler := &InstanceHandler{accessService: accessService}
 	if got, ok := handler.proxyAccessToken(c, 171); ok || got != "" {

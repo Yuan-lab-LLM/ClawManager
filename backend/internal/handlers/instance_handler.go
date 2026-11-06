@@ -1870,6 +1870,10 @@ func (h *InstanceHandler) promoteProxyAccessToken(c *gin.Context, id int, queryT
 			true,
 		)
 	}
+	if dedicatedOrigin && browserorigin.IsNativeContext(c.Request.Context()) && !isDedicatedAccessRefreshPath(c, id) &&
+		browserorigin.ServeBootstrapDocument(c.Writer, c.Request, dedicatedRuntimeCleanLocation(originalInstanceProxyRequest(c).URL, id, queryToken)) {
+		return "", false
+	}
 	if dedicatedOrigin && !isDedicatedAccessRefreshPath(c, id) && originRuntimeType == services.RuntimeTypeOpenCode &&
 		(c.Request.Method == http.MethodGet || c.Request.Method == http.MethodHead) {
 		c.Redirect(http.StatusTemporaryRedirect, dedicatedRuntimeCleanLocation(originalInstanceProxyRequest(c).URL, id, queryToken))

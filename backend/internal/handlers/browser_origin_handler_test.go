@@ -27,10 +27,14 @@ func (s *browserRouteStore) ByPort(_ context.Context, p int) (browserorigin.Bind
 	}
 	return s.binding, nil
 }
-func nativeRouteFixture(t *testing.T) (*gin.Engine, *InstanceHandler, string) {
+func nativeRouteFixture(t *testing.T, runtimeTypes ...string) (*gin.Engine, *InstanceHandler, string) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
-	reg, e := browserorigin.New("https://10.130.81.54:30443", "31400-31527", &browserRouteStore{browserorigin.Binding{Port: 31400, InstanceID: 118, Kind: browserorigin.Native, Target: services.RuntimeTypeOpenCode}})
+	runtimeType := services.RuntimeTypeOpenCode
+	if len(runtimeTypes) > 0 {
+		runtimeType = runtimeTypes[0]
+	}
+	reg, e := browserorigin.New("https://10.130.81.54:30443", "31400-31527", &browserRouteStore{browserorigin.Binding{Port: 31400, InstanceID: 118, Kind: browserorigin.Native, Target: runtimeType}})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -38,7 +42,7 @@ func nativeRouteFixture(t *testing.T) (*gin.Engine, *InstanceHandler, string) {
 	t.Cleanup(access.Stop)
 	h := &InstanceHandler{accessService: access, proxyService: services.NewInstanceProxyService(access)}
 	h.SetBrowserOrigins(reg)
-	token, e := access.GenerateToken(1, 118, services.RuntimeTypeOpenCode, reg.URL(browserorigin.Binding{Port: 31400}), "", 3000, time.Hour)
+	token, e := access.GenerateToken(1, 118, runtimeType, reg.URL(browserorigin.Binding{Port: 31400}), "", 3000, time.Hour)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -69,6 +73,9 @@ func TestBrowserNativeBootstrapAndRenewal(t *testing.T) {
 			r := httptest.NewRequest("GET", path, nil)
 			r.Header.Set("Origin", tc.origin)
 			r.Header.Set("Sec-Fetch-Site", tc.site)
+			if strings.Contains(tc.path, dedicatedAccessRefreshPath) {
+				r.Header.Set("Sec-Fetch-Dest", "iframe")
+			}
 			if tc.cookie != "" {
 				r.AddCookie(&http.Cookie{Name: "instance_access_118", Value: tc.cookie})
 			}
@@ -393,5 +400,43 @@ func assertBrowserCapacityResponse(t *testing.T, w *httptest.ResponseRecorder) {
 		!strings.Contains(payload.Error, "permanent") || !strings.Contains(payload.Error, "administrator") || !strings.Contains(payload.Error, "target limit") ||
 		strings.Contains(strings.ToLower(payload.Error), "retry") || strings.Contains(strings.ToLower(payload.Error), "delete") {
 		t.Fatalf("capacity response = %d %s", w.Code, w.Body.String())
+	}
+}
+
+func TestBrowserNativeBootstrapStartsSameOriginNavigation(t *testing.T) {
+	for _, runtimeType := range []string{services.RuntimeTypeOpenCode, services.RuntimeTypeDeepSeekHarness} {
+		for _, dest := range []string{"iframe", "document"} {
+			t.Run(runtimeType+"/"+dest, func(t *testing.T) {
+				router, _, token := nativeRouteFixture(t, runtimeType)
+				r := httptest.NewRequest("GET", "https://10.130.81.54:31400/app?token="+token+"&keep=yes", nil)
+				r.Header.Set("Sec-Fetch-Site", "same-site")
+				r.Header.Set("Sec-Fetch-Dest", dest)
+				w := httptest.NewRecorder()
+				router.ServeHTTP(w, r)
+				if w.Code != http.StatusOK || w.Header().Get("Location") != "" || !strings.Contains(w.Body.String(), `location.replace(`) || !strings.Contains(w.Body.String(), `"/app?keep=yes"`) || strings.Contains(w.Body.String(), token) {
+					t.Fatalf("bootstrap must start a clean navigation from trusted HTML: status=%d headers=%v body=%s", w.Code, w.Header(), w.Body.String())
+				}
+				cookies := w.Result().Cookies()
+				if len(cookies) != 1 || !cookies[0].Secure || !cookies[0].HttpOnly || !cookies[0].Partitioned {
+					t.Fatalf("bad bootstrap cookies: %+v", cookies)
+				}
+				// Redirects inherit same-site metadata; cookie-only requests with it
+				// must remain forbidden even after successful bootstrap.
+				for _, site := range []string{"same-site", "same-origin"} {
+					next := httptest.NewRequest("GET", "https://10.130.81.54:31400/__clawmanager_access_refresh", nil)
+					next.Header.Set("Sec-Fetch-Site", site)
+					next.AddCookie(cookies[0])
+					got := httptest.NewRecorder()
+					router.ServeHTTP(got, next)
+					want := http.StatusNoContent
+					if site == "same-site" {
+						want = http.StatusForbidden
+					}
+					if got.Code != want {
+						t.Fatalf("cookie-only %s status=%d want=%d", site, got.Code, want)
+					}
+				}
+			})
+		}
 	}
 }
