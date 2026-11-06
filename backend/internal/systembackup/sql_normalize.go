@@ -114,6 +114,12 @@ func NormalizeDataRow(table SQLTable, row team.Row, now time.Time) (team.Change,
 		set("infra_status", "stopped")
 		set("agent_status", "offline")
 		set("openclaw_status", "stopped")
+	case "instance_runtime_recovery":
+		// Retain the failure budget/history while removing runnable timers and
+		// source-slot identities belonging to the original installation.
+		erase("next_retry_at", "healthy_since")
+		set("source_pod_id", "0")
+		set("source_gateway_port", "0")
 	case "instance_runtime_bindings":
 		set("state", "failed")
 		erase("gateway_pid")

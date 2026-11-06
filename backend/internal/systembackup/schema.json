@@ -2483,6 +2483,68 @@
     ]
   },
   {
+    "name": "instance_runtime_recovery",
+    "columns": [
+      {
+        "name": "instance_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "attempts",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "next_retry_at",
+        "type": "datetime(6)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "reason",
+        "type": "text",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "healthy_since",
+        "type": "datetime(6)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "source_pod_id",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "source_gateway_port",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "generation",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "updated_at",
+        "type": "datetime(6)",
+        "nullable": "NO",
+        "extra": ""
+      }
+    ],
+    "primary_key": [
+      "instance_id"
+    ]
+  },
+  {
     "name": "instance_runtime_status",
     "columns": [
       {
