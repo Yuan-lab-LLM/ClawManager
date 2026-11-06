@@ -29,7 +29,7 @@ type WorkspaceText struct {
 func workspaceTextName(name string) bool {
 	name = path.Base(name)
 	lower := strings.ToLower(name)
-	if lower == ".env" || strings.HasPrefix(lower, ".env.") || lower == "dockerfile" || lower == "makefile" {
+	if lower == "config" || lower == ".env" || strings.HasPrefix(lower, ".env.") || lower == "dockerfile" || lower == "makefile" {
 		return true
 	}
 	switch strings.ToLower(path.Ext(name)) {

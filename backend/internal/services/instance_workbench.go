@@ -41,6 +41,7 @@ type InstanceWorkbenchService struct {
 	bindings               workbenchBindings
 	pods                   workbenchPods
 	agent                  WorkbenchAgent
+	gitFiles               WorkspaceFileService
 	previews               *workbench.Previews
 	browserOrigins         *browserorigin.Registry
 	previewRecheckInterval time.Duration
@@ -100,6 +101,12 @@ func (s *InstanceWorkbenchService) Execute(ctx context.Context, userID int, admi
 	return s.execute(ctx, target, operation, data)
 }
 func (s *InstanceWorkbenchService) execute(ctx context.Context, target workbenchTarget, operation string, data json.RawMessage) (json.RawMessage, error) {
+	if operation == "git" {
+		return s.executeGit(ctx, target, data)
+	}
+	return s.executeAgent(ctx, target, operation, data)
+}
+func (s *InstanceWorkbenchService) executeAgent(ctx context.Context, target workbenchTarget, operation string, data json.RawMessage) (json.RawMessage, error) {
 	if s.agent == nil {
 		return nil, ErrRuntimeAgentUnsupported
 	}

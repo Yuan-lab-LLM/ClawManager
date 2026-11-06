@@ -41,6 +41,7 @@ type workspaceNFSRequest struct {
 	Size, UploadMax                                int64
 }
 type workspaceNFSResponse struct {
+	GitData        []byte
 	Questions      []ownerrecords.NativeQuestion
 	Fingerprint    string
 	UploadIdentity string

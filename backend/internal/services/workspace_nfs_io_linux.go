@@ -376,6 +376,8 @@ func RunWorkspaceIOHelper(args []string, input io.Reader, output io.Writer) (boo
 		response.Entries, err = s.Search(ctx, scope, request.Query, request.Limit)
 	case "preview":
 		response.Preview, err = s.Preview(ctx, scope, request.Path)
+	case "git_read":
+		response.GitData, err = s.ReadGitFile(ctx, scope, request.Path)
 	case "read_text":
 		response.Text, err = s.ReadText(ctx, scope, request.Path)
 	case "save_text":
