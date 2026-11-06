@@ -50,8 +50,8 @@ func browserOriginMySQL(t *testing.T) (db.Session, mysql.ConnectionURL) {
 		}
 	})
 	for _, statement := range []string{
-		"CREATE TABLE instances (id INT PRIMARY KEY) ENGINE=InnoDB",
-		"INSERT INTO instances VALUES (42),(43),(44),(45)",
+		"CREATE TABLE instances (id INT PRIMARY KEY,user_id INT NOT NULL DEFAULT 7,created_at DATETIME(6) NOT NULL DEFAULT '2026-11-06 00:00:00',workspace_path VARCHAR(512) NULL,runtime_generation INT NOT NULL DEFAULT 1) ENGINE=InnoDB",
+		"INSERT INTO instances(id) VALUES (42),(43),(44),(45)",
 	} {
 		if _, err = sess.SQL().Exec(statement); err != nil {
 			t.Fatal(err)
@@ -65,6 +65,64 @@ func browserOriginMySQL(t *testing.T) (db.Session, mysql.ConnectionURL) {
 		t.Fatal(err)
 	}
 	return sess, connection
+}
+
+func TestBrowserOriginMySQLCreationIdentity(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		changes []string
+		reject  bool
+	}{
+		{"recreated ID", []string{"DELETE FROM instances WHERE id=42", "INSERT INTO instances(id,user_id,created_at) VALUES(42,7,'2026-11-06 00:00:00.000001')"}, true},
+		{"owner transfer", []string{"UPDATE instances SET user_id=8 WHERE id=42"}, true},
+		{"workspace relocation", []string{"UPDATE instances SET workspace_path='/relocated/workspaces/instance42' WHERE id=42"}, false},
+		{"runtime generation", []string{"UPDATE instances SET runtime_generation=runtime_generation+1 WHERE id=42"}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			session, _ := browserOriginMySQL(t)
+			store := NewBrowserOriginStore(session)
+			ctx := context.Background()
+			const first, last = 31000, 31009
+			native, err := store.Bind(ctx, 42, browserorigin.Native, "opencode", first, last)
+			if err != nil {
+				t.Fatal(err)
+			}
+			preview, err := store.Bind(ctx, 42, browserorigin.Preview, "http://localhost:3000/", first, last)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, query := range tc.changes {
+				if _, err := session.SQL().Exec(query); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for _, binding := range []browserorigin.Binding{native, preview} {
+				got, lookupErr := store.ByPort(ctx, binding.Port)
+				rebound, bindErr := store.Bind(ctx, 42, binding.Kind, binding.Target, first, last)
+				if tc.reject {
+					if !errors.Is(lookupErr, browserorigin.ErrNotFound) {
+						t.Errorf("changed identity resolved old origin %+v: %v", got, lookupErr)
+					}
+					if !errors.Is(bindErr, browserorigin.ErrNotFound) {
+						t.Errorf("changed identity rebound old origin %+v: %v", rebound, bindErr)
+					}
+				} else if lookupErr != nil || bindErr != nil || got != binding || rebound != binding {
+					t.Errorf("stable identity lost origin: lookup=%+v %v bind=%+v %v", got, lookupErr, rebound, bindErr)
+				}
+			}
+			newBinding, err := store.Bind(ctx, 42, browserorigin.Native, "deepseek-harness", first, last)
+			if tc.reject {
+				if !errors.Is(err, browserorigin.ErrNotFound) {
+					t.Errorf("changed identity allocated unseen target %+v: %v", newBinding, err)
+				}
+				if _, err = store.Bind(ctx, 43, browserorigin.Native, "opencode", first, first); !errors.Is(err, browserorigin.ErrCapacity) {
+					t.Errorf("old origin recycled: %v", err)
+				}
+			} else if err != nil {
+				t.Fatalf("stable identity cannot allocate target: %v", err)
+			}
+		})
+	}
 }
 
 func TestBrowserOriginStoreInvalidInput(t *testing.T) {

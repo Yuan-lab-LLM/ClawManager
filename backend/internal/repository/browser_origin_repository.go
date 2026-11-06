@@ -2,16 +2,36 @@ package repository
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"clawreef/internal/browserorigin"
 	"github.com/upper/db/v4"
 )
 
 type browserOriginStore struct{ session db.Session }
+
+type browserOriginRow struct {
+	Port         int    `db:"port"`
+	InstanceID   int    `db:"instance_id"`
+	Kind         string `db:"kind"`
+	Target       string `db:"target"`
+	IdentityHash string `db:"identity_hash"`
+}
+
+// Creation and owner identify the security principal independently of mutable
+// runtime generations and physical workspace locations.
+func browserOriginIdentity(instanceID, userID int, createdAt time.Time) string {
+	identity, _ := json.Marshal([]any{instanceID, userID, createdAt.UTC().Format(time.RFC3339Nano)})
+	digest := sha256.Sum256(identity)
+	return hex.EncodeToString(digest[:])
+}
 
 func NewBrowserOriginStore(session db.Session) browserorigin.Store {
 	return &browserOriginStore{session: session}
@@ -65,33 +85,52 @@ func (s *browserOriginStore) Bind(ctx context.Context, instanceID int, kind, tar
 		}
 		// Validate against the live identity even when a permanent binding exists.
 		// Retained tombstones must never resurrect an instance after deletion.
-		if err = lockUpgradeRow(ctx, tx, "SELECT id FROM instances WHERE id=? FOR UPDATE", instanceID); err != nil {
+		row, err := tx.SQL().QueryRowContext(ctx, "SELECT user_id,created_at FROM instances WHERE id=? FOR UPDATE", instanceID)
+		var userID int
+		var createdAt time.Time
+		if err == nil {
+			err = row.Scan(&userID, &createdAt)
+		}
+		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) || errors.Is(err, db.ErrNoMoreRows) {
 				return browserorigin.ErrNotFound
 			}
 			return err
 		}
-		var existing []browserorigin.Binding
+		if userID <= 0 || createdAt.IsZero() {
+			return browserorigin.ErrNotFound
+		}
+		identityHash := browserOriginIdentity(instanceID, userID, createdAt)
+		var existing []browserOriginRow
 		if err = tx.Collection("browser_origin_ports").Find(db.Cond{"instance_id": instanceID}).All(&existing); err != nil {
 			return err
 		}
 		previewCount := 0
+		var matched browserorigin.Binding
 		for _, b := range existing {
+			// A reused numeric ID or transferred owner must not inherit any old
+			// origin, including a previously unseen target for that stale ID.
+			if b.IdentityHash != identityHash {
+				return browserorigin.ErrNotFound
+			}
 			if b.Kind == kind && b.Target == target {
 				if b.Port < first || b.Port > last {
 					return browserorigin.ErrCapacity
 				}
-				binding = b
-				return nil
+				matched = browserorigin.Binding{Port: b.Port, InstanceID: b.InstanceID, Kind: b.Kind, Target: b.Target}
 			}
 			if b.Kind == browserorigin.Preview {
 				previewCount++
 			}
 		}
+		if matched.Port != 0 {
+			binding = matched
+			return nil
+		}
 		if freePort == 0 || (kind == browserorigin.Preview && previewCount >= 32) {
 			return browserorigin.ErrCapacity
 		}
-		result, err := tx.SQL().ExecContext(ctx, "UPDATE browser_origin_ports SET instance_id=?,kind=?,target=? WHERE port=? AND instance_id IS NULL", instanceID, kind, target, freePort)
+		result, err := tx.SQL().ExecContext(ctx, "UPDATE browser_origin_ports SET instance_id=?,identity_hash=?,kind=?,target=? WHERE port=? AND instance_id IS NULL", instanceID, identityHash, kind, target, freePort)
 		if err != nil {
 			return err
 		}
@@ -120,16 +159,22 @@ func (s *browserOriginStore) ByPort(ctx context.Context, port int) (browserorigi
 	}
 	// Joining the live instance suppresses deleted identities without releasing
 	// their assigned browser origins back into the pool.
-	row, err := s.session.SQL().QueryRowContext(ctx, "SELECT p.port,p.instance_id,p.kind,p.target FROM browser_origin_ports p JOIN instances i ON i.id=p.instance_id WHERE p.port=?", port)
+	row, err := s.session.SQL().QueryRowContext(ctx, "SELECT p.port,p.instance_id,p.kind,p.target,p.identity_hash,i.user_id,i.created_at FROM browser_origin_ports p JOIN instances i ON i.id=p.instance_id WHERE p.port=?", port)
 	var binding browserorigin.Binding
+	var identityHash sql.NullString
+	var userID int
+	var createdAt time.Time
 	if err == nil {
-		err = row.Scan(&binding.Port, &binding.InstanceID, &binding.Kind, &binding.Target)
+		err = row.Scan(&binding.Port, &binding.InstanceID, &binding.Kind, &binding.Target, &identityHash, &userID, &createdAt)
 	}
 	if errors.Is(err, sql.ErrNoRows) || errors.Is(err, db.ErrNoMoreRows) {
 		return browserorigin.Binding{}, browserorigin.ErrNotFound
 	}
 	if err != nil {
 		return browserorigin.Binding{}, fmt.Errorf("lookup browser origin: %w", err)
+	}
+	if userID <= 0 || createdAt.IsZero() || !identityHash.Valid || identityHash.String != browserOriginIdentity(binding.InstanceID, userID, createdAt) {
+		return browserorigin.Binding{}, browserorigin.ErrNotFound
 	}
 	return binding, nil
 }
