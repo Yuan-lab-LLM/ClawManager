@@ -12,7 +12,7 @@ import (
 )
 
 func TestStoppedSourceRecoveryRequiresExactUnpublishedAssignmentCAS(t *testing.T) {
-	for _, change := range []string{"none", "version", "intent", "successor-secret", "identity"} {
+	for _, change := range []string{"none", "version", "intent", "successor-secret", "identity", "team-source"} {
 		t.Run(change, func(t *testing.T) {
 			ctx := context.Background()
 			client := fake.NewSimpleClientset()
@@ -43,6 +43,10 @@ func TestStoppedSourceRecoveryRequiresExactUnpublishedAssignmentCAS(t *testing.T
 				if err != nil {
 					t.Fatal(err)
 				}
+			case "team-source":
+				secret, _ := client.CoreV1().Secrets("tenant").Get(ctx, runtimeAssignmentSecretName(7, 3), metav1.GetOptions{})
+				secret.Data["CLAWMANAGER_TEAM_SHARED_DIR"] = []byte("/team")
+				_, _ = client.CoreV1().Secrets("tenant").Update(ctx, secret, metav1.UpdateOptions{})
 			}
 			if _, err = client.CoreV1().ConfigMaps("tenant").Update(ctx, cm, metav1.UpdateOptions{}); err != nil {
 				t.Fatal(err)

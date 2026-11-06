@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"strconv"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -19,6 +21,7 @@ type RuntimeStoppedRecoverySource struct {
 	RuntimeAssignment
 	SuccessorGeneration int
 	cm                  *corev1.ConfigMap
+	secretIdentity      string
 }
 
 // Snapshot only an exact unpublished successor's predecessor. Unresolved native
@@ -41,7 +44,24 @@ func (s *RuntimeAssignmentService) StoppedRecoverySource(ctx context.Context, id
 	if err = s.requireUnpublishedSuccessor(ctx, id, successor); err != nil {
 		return nil, err
 	}
-	return &RuntimeStoppedRecoverySource{RuntimeAssignment: a, SuccessorGeneration: successor, cm: cm.DeepCopy()}, nil
+	secret, err := s.client.CoreV1().Secrets(s.namespace).Get(ctx, cm.Data["secret_ref"], metav1.GetOptions{})
+	if err != nil {
+		return nil, err
+	}
+	if secret.Immutable == nil || !*secret.Immutable || secret.Type != corev1.SecretTypeOpaque || secret.DeletionTimestamp != nil {
+		return nil, fmt.Errorf("source generation credentials are not immutable")
+	}
+	for key, want := range map[string]string{"clawmanager.io/instance-id": strconv.Itoa(a.InstanceID), "clawmanager.io/user-id": strconv.Itoa(a.UserID), "clawmanager.io/generation": strconv.Itoa(a.Generation), "clawmanager.io/runtime-type": a.RuntimeType} {
+		if secret.Labels[key] != want {
+			return nil, fmt.Errorf("source generation credential identity differs")
+		}
+	}
+	for key := range secret.Data {
+		if strings.HasPrefix(strings.ToUpper(key), "CLAWMANAGER_TEAM_") {
+			return nil, fmt.Errorf("Team source requires coordinated shared-writer teardown")
+		}
+	}
+	return &RuntimeStoppedRecoverySource{RuntimeAssignment: a, SuccessorGeneration: successor, cm: cm.DeepCopy(), secretIdentity: string(secret.UID) + "/" + secret.ResourceVersion}, nil
 }
 
 func (s *RuntimeAssignmentService) requireUnpublishedSuccessor(ctx context.Context, id, generation int) error {
@@ -70,7 +90,7 @@ func (s *RuntimeAssignmentService) ConfirmRecoveredStopped(ctx context.Context, 
 	if err != nil {
 		return err
 	}
-	if current.cm.ResourceVersion != source.cm.ResourceVersion || current.cm.UID != source.cm.UID || !reflect.DeepEqual(current.cm.Data, source.cm.Data) || !reflect.DeepEqual(current.RuntimeAssignment, source.RuntimeAssignment) {
+	if current.cm.ResourceVersion != source.cm.ResourceVersion || current.cm.UID != source.cm.UID || current.secretIdentity != source.secretIdentity || !reflect.DeepEqual(current.cm.Data, source.cm.Data) || !reflect.DeepEqual(current.RuntimeAssignment, source.RuntimeAssignment) {
 		return fmt.Errorf("stopped source assignment changed during verification")
 	}
 	cm := current.cm.DeepCopy()

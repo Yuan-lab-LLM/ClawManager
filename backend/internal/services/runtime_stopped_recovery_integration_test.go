@@ -7,10 +7,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"hash/fnv"
 	"io"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/dump"
+	krand "k8s.io/apimachinery/pkg/util/rand"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
 	"net/http"
 	"strings"
@@ -19,7 +24,7 @@ import (
 )
 
 func TestRecoverStoppedSourceJoinsProofsWithoutLaunchingSuccessor(t *testing.T) {
-	for _, change := range []string{"none", "fence-failed", "external-failed", "running-writer", "nonce-mismatch", "assignment-changed", "successor-published", "observer-changed", "target-changed", "foreign-storage"} {
+	for _, change := range []string{"none", "fence-failed", "external-failed", "running-writer", "nonce-mismatch", "assignment-changed", "successor-published", "observer-changed", "target-changed", "foreign-storage", "absence-unavailable", "late-external-writer"} {
 		t.Run(change, func(t *testing.T) {
 			ctx := t.Context()
 			yes := true
@@ -37,6 +42,15 @@ func TestRecoverStoppedSourceJoinsProofsWithoutLaunchingSuccessor(t *testing.T) 
 			observer.AgentEndpoint = str("https://10.1.0.4:19090")
 			spec := corev1.PodSpec{NodeName: "node", Volumes: []corev1.Volume{{Name: "workspaces", VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: "data"}}}}, Containers: []corev1.Container{{Name: "slot-0", Image: source.ImageRef, Env: []corev1.EnvVar{{Name: "RUNTIME_GATEWAY_PORT_START", Value: "20000"}, {Name: "RUNTIME_WORKSPACE_ROOT", Value: "/workspaces"}}, VolumeMounts: []corev1.VolumeMount{{Name: "workspaces", MountPath: "/workspaces"}}}}}
 			rs := &appsv1.ReplicaSet{ObjectMeta: metav1.ObjectMeta{Name: "pool-abc", Namespace: "runtime", UID: "rs", CreationTimestamp: before, Labels: map[string]string{"pod-template-hash": "abc"}, OwnerReferences: []metav1.OwnerReference{{Kind: "Deployment", Name: "pool", UID: "dep", Controller: &yes}}}, Spec: appsv1.ReplicaSetSpec{Template: corev1.PodTemplateSpec{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"pod-template-hash": "abc"}}, Spec: spec}}}
+			original := rs.Spec.Template.DeepCopy()
+			delete(original.Labels, "pod-template-hash")
+			hasher := fnv.New32a()
+			fmt.Fprint(hasher, dump.ForHash(*original))
+			hash := krand.SafeEncodeString(fmt.Sprint(hasher.Sum32()))
+			rs.Name = "pool-" + hash
+			rs.Labels["pod-template-hash"] = hash
+			rs.Spec.Template.Labels["pod-template-hash"] = hash
+			source.PodName = rs.Name + "-old"
 			pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pool-new", Namespace: "runtime", UID: "new", Labels: map[string]string{"clawmanager.io/runtime-protocol": "container-slots-v1"}}, Spec: spec, Status: corev1.PodStatus{PodIP: "10.1.0.3", Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}}}}
 			claim := &corev1.PersistentVolumeClaim{ObjectMeta: metav1.ObjectMeta{Name: "data", Namespace: "runtime", UID: "claim", CreationTimestamp: before}, Spec: corev1.PersistentVolumeClaimSpec{VolumeName: "pv"}, Status: corev1.PersistentVolumeClaimStatus{Phase: corev1.ClaimBound}}
 			pv := &corev1.PersistentVolume{ObjectMeta: metav1.ObjectMeta{Name: "pv", UID: "pv-uid", CreationTimestamp: before}, Spec: corev1.PersistentVolumeSpec{ClaimRef: &corev1.ObjectReference{Namespace: "runtime", Name: "data", UID: "claim"}, PersistentVolumeSource: corev1.PersistentVolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/data"}}}}
@@ -95,6 +109,22 @@ func TestRecoverStoppedSourceJoinsProofsWithoutLaunchingSuccessor(t *testing.T) 
 				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(string(body))), Header: http.Header{}}, nil
 			})
 			client := NewSlotRuntimeAgentClientWithHTTPClient("control", kube, "runtime", &http.Client{Transport: transport}).(*slotRuntimeAgentClient)
+			client.recoveryStorageProof = func(context.Context, kubernetes.Interface, models.RuntimePod, models.RuntimePod, string, int) (k8s.StoppedSourceStorage, error) {
+				if change == "foreign-storage" {
+					return k8s.StoppedSourceStorage{}, errors.New("foreign storage")
+				}
+				return k8s.StoppedSourceStorage{Identity: "verified-storage", Slot: "slot-0"}, nil
+			}
+			absenceCalls := 0
+			if change != "absence-unavailable" {
+				client.workspaceExternalAbsence = func(context.Context, runtimeauth.Identity) error {
+					absenceCalls++
+					if change == "late-external-writer" && absenceCalls > 1 {
+						return errors.New("external writer appeared")
+					}
+					return nil
+				}
+			}
 			client.workspaceWriteFence = func(context.Context, runtimeauth.Identity) error {
 				if change == "fence-failed" {
 					return errors.New("fence failed")

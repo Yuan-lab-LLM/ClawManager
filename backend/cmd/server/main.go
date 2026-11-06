@@ -286,6 +286,9 @@ func main() {
 	services.ConfigureRuntimeUpgradeNFSIO(runtimeUpgradeService, cfg.Runtime.SandboxProfile)
 	browserWorkerService := services.NewBrowserWorkerService(browserWorkerRepo, instanceRepo, k8s.GetClient())
 	if cfg.Runtime.ContainerSlots > 0 {
+		if err := services.ConfigureSlotExternalWriterAbsence(runtimeAgentClient, browserWorkerService.VerifyNoBrowserWriterHistory); err != nil {
+			log.Fatal("Failed to configure external Runtime writer absence authority")
+		}
 		if err := services.ConfigureSlotExternalWriterCleanup(runtimeAgentClient, func(ctx context.Context, id runtimeauth.Identity) error {
 			return browserWorkerService.DeleteForInstance(ctx, id.InstanceID)
 		}); err != nil {

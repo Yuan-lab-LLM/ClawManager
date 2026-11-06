@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"clawreef/internal/models"
 	"clawreef/internal/runtimeauth"
 	k8sservice "clawreef/internal/services/k8s"
 	corev1 "k8s.io/api/core/v1"
@@ -37,6 +38,8 @@ type slotRuntimeAgentClient struct {
 	workspaceWriteFence      func(context.Context, runtimeauth.Identity) error
 	workspaceWriteActivation func(context.Context, runtimeauth.Identity) error
 	workspaceExternalStop    func(context.Context, runtimeauth.Identity) error
+	workspaceExternalAbsence func(context.Context, runtimeauth.Identity) error
+	recoveryStorageProof     func(context.Context, kubernetes.Interface, models.RuntimePod, models.RuntimePod, string, int) (k8sservice.StoppedSourceStorage, error)
 }
 
 // Legacy callers must never infer slot teardown from a 404 or an absent process
@@ -140,6 +143,7 @@ func NewSlotRuntimeAgentClientWithHTTPClient(controlToken string, kube kubernete
 	}
 	return &slotRuntimeAgentClient{
 		runtimeAgentHTTPClient: embedded,
+		recoveryStorageProof:   k8sservice.ResolveStoppedSourceStorage,
 		kube:                   kube, namespace: namespace, assignments: k8sservice.NewRuntimeAssignmentService(kube, namespace),
 	}
 }

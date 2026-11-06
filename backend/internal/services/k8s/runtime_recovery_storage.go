@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"clawreef/internal/models"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -25,6 +26,10 @@ type StoppedSourceStorage struct{ Identity, Slot string }
 // The absent Pod is eligibility only; the authenticated writer record supplies
 // the separate positive stopped proof.
 func ResolveStoppedSourceStorage(ctx context.Context, client kubernetes.Interface, source, observer models.RuntimePod, workspace string, port int) (StoppedSourceStorage, error) {
+	return resolveStoppedSourceStorage(ctx, client, source, observer, workspace, port, verifyRetainedRuntimeTemplate)
+}
+
+func resolveStoppedSourceStorage(ctx context.Context, client kubernetes.Interface, source, observer models.RuntimePod, workspace string, port int, verifyTemplate func(context.Context, kubernetes.Interface, *appsv1.ReplicaSet, *appsv1.Deployment) error) (StoppedSourceStorage, error) {
 	fail := func(message string) (StoppedSourceStorage, error) {
 		return StoppedSourceStorage{}, fmt.Errorf("stopped source storage: %s", message)
 	}
@@ -63,6 +68,9 @@ func ResolveStoppedSourceStorage(ctx context.Context, client kubernetes.Interfac
 	owner := metav1.GetControllerOf(rs)
 	if owner == nil || owner.Kind != "Deployment" || owner.Name != dep.Name || owner.UID != dep.UID || dep.UID == "" {
 		return fail("original ReplicaSet owner changed")
+	}
+	if err = verifyTemplate(ctx, client, rs, dep); err != nil {
+		return StoppedSourceStorage{}, err
 	}
 	original := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: source.Namespace}, Spec: *rs.Spec.Template.Spec.DeepCopy()}
 	slot := ""

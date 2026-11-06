@@ -21,6 +21,11 @@ func TestStoppedRecoveryStorageRequiresRetainedSourceAndSameBacking(t *testing.T
 			observer := models.RuntimePod{Namespace: "runtime", PodName: "pool-new", PodUID: str("new"), NodeName: str("node"), RuntimeType: "opencode"}
 			spec := corev1.PodSpec{NodeName: "node", Volumes: []corev1.Volume{{Name: "workspaces", VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: "data"}}}}, Containers: []corev1.Container{{Name: "slot-0", Image: source.ImageRef, Env: []corev1.EnvVar{{Name: "RUNTIME_GATEWAY_PORT_START", Value: "20000"}, {Name: "RUNTIME_WORKSPACE_ROOT", Value: "/workspaces"}}, VolumeMounts: []corev1.VolumeMount{{Name: "workspaces", MountPath: "/workspaces"}}}}}
 			rs := &appsv1.ReplicaSet{ObjectMeta: metav1.ObjectMeta{Name: "pool-abc", Namespace: "runtime", UID: "rs", CreationTimestamp: before, Labels: map[string]string{"pod-template-hash": "abc"}, OwnerReferences: []metav1.OwnerReference{{Kind: "Deployment", Name: "pool", UID: "dep", Controller: &yes}}}, Spec: appsv1.ReplicaSetSpec{Template: corev1.PodTemplateSpec{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"pod-template-hash": "abc"}}, Spec: spec}}}
+			hash := retainedRuntimeTemplateHash(&rs.Spec.Template)
+			rs.Name = "pool-" + hash
+			rs.Labels["pod-template-hash"] = hash
+			rs.Spec.Template.Labels["pod-template-hash"] = hash
+			source.PodName = rs.Name + "-old"
 			dep := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "pool", Namespace: "runtime", UID: "dep"}}
 			pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: observer.PodName, Namespace: "runtime", UID: types.UID("new")}, Spec: *spec.DeepCopy()}
 			claim := &corev1.PersistentVolumeClaim{ObjectMeta: metav1.ObjectMeta{Name: "data", Namespace: "runtime", UID: "claim", CreationTimestamp: before}, Spec: corev1.PersistentVolumeClaimSpec{VolumeName: "pv"}, Status: corev1.PersistentVolumeClaimStatus{Phase: corev1.ClaimBound}}
@@ -57,7 +62,7 @@ func TestStoppedRecoveryStorageRequiresRetainedSourceAndSameBacking(t *testing.T
 			if change == "source-live" {
 				_, _ = kube.CoreV1().Pods("runtime").Create(t.Context(), &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: source.PodName, Namespace: "runtime", UID: "old"}}, metav1.CreateOptions{})
 			}
-			proof, err := ResolveStoppedSourceStorage(t.Context(), kube, source, observer, "/workspaces/opencode/user-1/instance-155", 20000)
+			proof, err := resolveStoppedSourceStorage(t.Context(), kube, source, observer, "/workspaces/opencode/user-1/instance-155", 20000, fixtureRuntimeTemplateProof)
 			if change != "none" {
 				if err == nil {
 					t.Fatal("accepted unsafe provenance")

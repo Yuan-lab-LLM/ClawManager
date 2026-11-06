@@ -72,7 +72,7 @@ func (s *RuntimeScheduler) RecoverStoppedSource(ctx context.Context, id int, req
 		return fmt.Errorf("recovery authority is unavailable")
 	}
 	c, ok := s.agentClient.(*slotRuntimeAgentClient)
-	if !ok || c.assignments == nil {
+	if !ok || c.assignments == nil || c.recoveryStorageProof == nil {
 		return fmt.Errorf("recovery requires the slot runtime protocol")
 	}
 	release, err := acquireInstanceLifecycleOperation(ctx, s.instanceRepo, id)
@@ -148,7 +148,7 @@ func (s *RuntimeScheduler) RecoverStoppedSource(ctx context.Context, id int, req
 		if err = s.verifyStoppedRecoveryPod(ctx, c, pod, runtimeType); err != nil {
 			return err
 		}
-		candidate, e := k8s.ResolveStoppedSourceStorage(ctx, c.kube, *source, pod, workspace, start.GatewayPort)
+		candidate, e := c.recoveryStorageProof(ctx, c.kube, *source, pod, workspace, start.GatewayPort)
 		if e != nil {
 			return e
 		}
@@ -159,6 +159,9 @@ func (s *RuntimeScheduler) RecoverStoppedSource(ctx context.Context, id int, req
 		}
 	}
 	identity := runtimeauth.Identity{InstanceID: id, UserID: instance.UserID, Generation: prior.Generation, PodUID: prior.PodUID}
+	if err = c.requireExternalWriterAbsence(ctx, identity); err != nil {
+		return err
+	}
 	if err = c.requireWorkspaceWriteFence(ctx, identity); err != nil {
 		return err
 	}
@@ -210,13 +213,16 @@ func (s *RuntimeScheduler) RecoverStoppedSource(ctx context.Context, id int, req
 		if err = s.verifyStoppedRecoveryPod(ctx, c, *current, runtimeType); err != nil {
 			return err
 		}
-		rechecked, e := k8s.ResolveStoppedSourceStorage(ctx, c.kube, *latestSource, *current, workspace, start.GatewayPort)
+		rechecked, e := c.recoveryStorageProof(ctx, c.kube, *latestSource, *current, workspace, start.GatewayPort)
 		if e != nil {
 			return e
 		}
 		if rechecked != storage {
 			return fmt.Errorf("storage provenance changed during proof")
 		}
+	}
+	if err = c.requireExternalWriterAbsence(ctx, identity); err != nil {
+		return err
 	}
 	return c.assignments.ConfirmRecoveredStopped(ctx, prior, actor, observerUID, scope.Nonce, proof.SourceRecordDigest, storage.Identity)
 }
