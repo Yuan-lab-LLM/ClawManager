@@ -1,3 +1,4 @@
+import { allowBrowserInstance } from "../lib/browserOrigin";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { isAxiosError } from "axios";
 import { instanceService } from "../services/instanceService";
@@ -366,6 +367,7 @@ export function useInstanceDesktopAccess({
           return;
         }
 
+        if (!allowBrowserInstance(instanceId, data)) return;
         const nextEmbedUrl = resolveEmbedUrl(data.access_url || data.proxy_url);
         const nextExpiresAt = new Date(data.expires_at);
         const previousEmbedUrl = embedUrlRef.current;
@@ -595,7 +597,7 @@ export function useInstanceDesktopAccess({
   const handleFrameError = useCallback(() => recoverFrame("load"), [recoverFrame]);
 
   return {
-    embedUrl,
+    embedUrl: allowBrowserInstance(instanceId) ? embedUrl : null,
     expiresAt,
     loading,
     error,

@@ -1,3 +1,4 @@
+import { allowBrowserInstance } from "../../lib/browserOrigin";
 import React, {
   useCallback,
   useEffect,
@@ -449,7 +450,7 @@ const InstanceDetailPage: React.FC = () => {
         onWorkbenchEvent({ type: "tab.remove", id: tab });
         return;
       }
-      onWorkbenchEvent({ type: "browser.navigate", id: tab, address, url: result.url, generation });
+      onWorkbenchEvent({ type: "browser.navigate", id: tab, address, url: result.url, viewer_url: result.viewer_url, credentialless: result.credentialless, generation });
     } catch (error) {
       onWorkbenchEvent({ type: "tab.remove", id: tab });
       if (isCurrent()) setActionMessage(workbenchError(error));
@@ -1165,6 +1166,8 @@ const InstanceDetailPage: React.FC = () => {
       setExternalError(getErrorMessage(err, "Copy failed"));
     }
   };
+
+  if (!allowBrowserInstance(instanceId)) return null;
 
   if (loading) {
     return (

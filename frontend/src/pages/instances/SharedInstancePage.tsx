@@ -1,3 +1,4 @@
+import { allowBrowserInstance } from "../../lib/browserOrigin";
 import axios from "axios";
 import { Maximize2, Minimize2, PanelRightClose, PanelRightOpen, RefreshCw, ShieldAlert } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -138,7 +139,7 @@ export default function SharedInstancePage() {
   );
 
   const accessFrameUrl = useMemo(() => {
-    if (!session?.access_url) {
+    if (!session?.access_url || !allowBrowserInstance(session.instance.id, session)) {
       return "";
     }
     const url = resolveEmbedUrl(session.access_url);

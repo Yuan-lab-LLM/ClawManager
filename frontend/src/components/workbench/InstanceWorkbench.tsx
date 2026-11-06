@@ -1,3 +1,4 @@
+import { allowBrowserInstance } from "../../lib/browserOrigin";
 import type { KeyboardEvent } from "react";
 import { useEffect, useReducer, useState, useRef, useId } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -117,7 +118,11 @@ export function InstanceWorkbench({
       runtimeGeneration,
       isRunning,
     ],
-    queryFn: ({ signal }) => service.capabilities(instanceId, signal),
+    queryFn: async ({ signal }) => {
+      const result = await service.capabilities(instanceId, signal);
+      if (!allowBrowserInstance(instanceId, result)) throw new Error("Instance navigation in progress");
+      return result;
+    },
     enabled: isRunning,
     staleTime: 30000,
     retry: false,
@@ -126,8 +131,12 @@ export function InstanceWorkbench({
   useEffect(() => {
     dispatch({ type: "generation", generation });
   }, [generation, dispatch]);
+  useEffect(() => {
+    if (caps.data?.browser_origin_mode === "chrome-single-host") dispatch({ type: "browser.expireLegacy" });
+  }, [caps.data?.browser_origin_mode, state.tabs, dispatch]);
   if (!visible && full) setFull(false);
-  const ready = isRunning && !!caps.data;
+  const scopeAllowed = allowBrowserInstance(instanceId, caps.data);
+  const ready = isRunning && !!caps.data && scopeAllowed;
   const selected = state.tabs.find(
     (tab) => tab.id === state.active && !tab.hidden,
   );
@@ -609,7 +618,7 @@ export function InstanceWorkbench({
           </div>
         )}
         <div className="wb-live-views">
-          {state.tabs.map((tab) => (
+          {scopeAllowed && state.tabs.map((tab) => (
             <div
               key={tab.id}
               id={`wb-program-panel-${viewID}-${tab.id}`}
@@ -621,16 +630,20 @@ export function InstanceWorkbench({
               {tab.kind === "browser" ? (
                 <WorkbenchBrowser
                   instanceId={instanceId}
+                  browserOrigin={caps.data}
+                  metadataPending={!caps.data}
                   generation={generation}
                   tab={tab}
                   rendered={rendered}
                   enabled={ready && !!caps.data?.preview}
-                  onNavigate={(address, url, current) =>
+                  onNavigate={(address, url, current, preview) =>
                     dispatch({
                       type: "browser.navigate",
                       id: tab.id,
                       address,
                       url,
+                      viewer_url: preview.viewer_url,
+                      credentialless: preview.credentialless,
                       generation: current,
                     })
                   }

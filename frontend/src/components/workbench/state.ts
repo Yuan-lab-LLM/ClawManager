@@ -9,6 +9,8 @@ export interface WorkbenchTab {
   stale: boolean;
   address?: string;
   url?: string;
+  viewer_url?: string;
+  credentialless?: boolean;
   session?: TerminalSession;
 }
 export interface GitViewState {
@@ -37,11 +39,14 @@ export type WorkbenchEvent =
   | { type: "panel"; panel: WorkbenchPanel }
   | { type: "git.patch"; patch: Partial<GitViewState> }
   | { type: "browser.new"; id: string }
+  | { type: "browser.expireLegacy" }
   | {
       type: "browser.navigate";
       id: string;
       address: string;
       url: string;
+      viewer_url?: string;
+      credentialless?: boolean;
       generation: number;
     }
   | { type: "terminal.open"; session: TerminalSession }
@@ -100,6 +105,16 @@ export function workbenchReducer(
           },
         ],
       };
+    case "browser.expireLegacy": {
+      const legacy = (tab: WorkbenchTab) => tab.kind === "browser" && !!tab.url && tab.credentialless !== true;
+      if (!state.tabs.some(legacy)) return state;
+      return {
+        ...state,
+        tabs: state.tabs.map((tab) => legacy(tab)
+          ? { ...tab, stale: true, url: undefined, viewer_url: undefined, credentialless: undefined }
+          : tab),
+      };
+    }
     case "browser.navigate":
       if (event.generation !== state.generation) return state;
       return {
@@ -110,6 +125,8 @@ export function workbenchReducer(
                 ...tab,
                 address: event.address,
                 url: event.url,
+                viewer_url: event.viewer_url,
+                credentialless: event.credentialless,
                 title: event.address,
                 stale: false,
               }
@@ -187,6 +204,8 @@ export function workbenchReducer(
               ...tab,
               stale: true,
               url: undefined,
+              viewer_url: undefined,
+              credentialless: undefined,
             })),
           };
     default:

@@ -1,3 +1,5 @@
+import { allowBrowserInstance, supportsCredentiallessPreview, trustedPreviewViewer, type BrowserOriginMetadata } from "../../lib/browserOrigin";
+import type { WorkbenchPreview } from "../../types/workbench";
 import { useRef, useState } from "react";
 import { ExternalLink, Globe, RefreshCw, ArrowRight, ShieldAlert } from "lucide-react";
 import { useRuntimeCertificateTrust } from "../../hooks/useRuntimeCertificateTrust";
@@ -14,13 +16,17 @@ export function WorkbenchBrowser({
   enabled,
   rendered,
   onNavigate,
+  browserOrigin,
+  metadataPending = false,
 }: {
   instanceId: number;
   generation: number;
   tab: WorkbenchTab;
   enabled: boolean;
   rendered: boolean;
-  onNavigate: (address: string, url: string, generation: number) => void;
+  browserOrigin?: BrowserOriginMetadata;
+  metadataPending?: boolean;
+  onNavigate: (address: string, url: string, generation: number, preview: WorkbenchPreview) => void;
 }) {
   const { t } = useI18n();
   const [draft, setDraft] = useState({
@@ -36,8 +42,13 @@ export function WorkbenchBrowser({
   const input = useRef<HTMLInputElement>(null);
   const [activated, setActivated] = useState(false);
   if (rendered && !activated) setActivated(true);
+  const isolated = browserOrigin?.browser_origin_mode === "chrome-single-host" || tab.credentialless === true;
+  const supported = !isolated || supportsCredentiallessPreview();
+  const scopeAllowed = allowBrowserInstance(instanceId, browserOrigin);
+  const viewerUrl = isolated ? trustedPreviewViewer(tab.viewer_url, browserOrigin) : tab.url;
+  const previewAllowed = !metadataPending && scopeAllowed && supported && (!isolated || tab.credentialless === true);
   const { frameUrl, checkingCertificate, certificateConfirmationRequired, certificateOrigin, confirmCertificate } =
-    useRuntimeCertificateTrust(tab.url ?? null, activated);
+    useRuntimeCertificateTrust(previewAllowed ? tab.url ?? null : null, activated && !isolated);
   return (
     <div className="wb-browser">
       <form
@@ -53,7 +64,7 @@ export function WorkbenchBrowser({
               generation,
               address.trim(),
             );
-            onNavigate(address.trim(), result.url, result.generation);
+            onNavigate(address.trim(), result.url, result.generation, result);
           } catch (err) {
             setError(workbenchError(err));
             input.current?.focus();
@@ -91,14 +102,14 @@ export function WorkbenchBrowser({
           className="wb-icon"
           title={t("workbench.open")}
           aria-label={t("workbench.open")}
-          disabled={!enabled || busy || !address.trim()}
+          disabled={!enabled || !supported || !scopeAllowed || busy || !address.trim()}
         >
           <ArrowRight size={16} />
         </button>
-        {tab.url && (
+        {tab.url && viewerUrl && previewAllowed && (
           <a
             className="wb-icon"
-            href={tab.url}
+            href={viewerUrl}
             target="_blank"
             rel="noopener noreferrer"
             title={t("workbench.openExternal")}
@@ -118,13 +129,21 @@ export function WorkbenchBrowser({
           {t("workbench.loading")}
         </div>
       )}
-      {tab.url && activated ? (frameUrl ? (
+      {!supported ? (
+        <div className="wb-empty" role="alert">
+          <ShieldAlert size={32} />
+          <p>{t("workbench.credentiallessUnsupported")}</p>
+        </div>
+      ) : tab.url && activated && previewAllowed ? (frameUrl ? (
         <iframe
           key={reload}
           className="wb-preview-frame"
           src={frameUrl}
+          {...(isolated ? { credentialless: "" } : {})}
           title={`${t("workbench.servicePreview")} · ${tab.address}`}
-          sandbox="allow-scripts allow-forms allow-same-origin allow-modals allow-downloads allow-popups"
+          sandbox={isolated
+            ? "allow-scripts allow-forms allow-same-origin allow-modals allow-downloads"
+            : "allow-scripts allow-forms allow-same-origin allow-modals allow-downloads allow-popups"}
           referrerPolicy="no-referrer"
         />
       ) : (

@@ -6,6 +6,7 @@ import type {
   TerminalOutput,
   WorkbenchCapabilities,
   WorkbenchProcess,
+  WorkbenchPreview,
 } from "../types/workbench";
 export function workbenchError(error: unknown): string {
   const data = (error as { response?: { data?: { error?: string } } })?.response
@@ -117,7 +118,7 @@ export const instanceWorkbenchService = {
     id: number,
     generation: number,
     url: string,
-  ): Promise<{ id: string; url: string; generation: number }> {
+  ): Promise<WorkbenchPreview> {
     return (await api.post(`${base(id)}/previews`, { url }, config(generation)))
       .data.data;
   },

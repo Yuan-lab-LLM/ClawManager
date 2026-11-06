@@ -1,10 +1,11 @@
+import type { BrowserOriginMetadata } from "../lib/browserOrigin";
 import axios from "axios";
 import type { WorkspaceFileOperations } from "../components/WorkspaceFileManager";
 import type { WorkspaceEntry, WorkspacePreview, WorkspaceSearchResponse } from "../types/workspace";
 
 export type SharedWorkspaceAccess = "none" | "read" | "write";
 
-export interface SharedInstanceSession {
+export interface SharedInstanceSession extends BrowserOriginMetadata {
   instance: {
     id: number;
     name: string;

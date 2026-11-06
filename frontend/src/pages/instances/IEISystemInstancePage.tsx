@@ -1,3 +1,4 @@
+import { allowBrowserInstance } from "../../lib/browserOrigin";
 import axios from "axios";
 import { ArrowLeft, Maximize2, Minimize2, RefreshCw, RotateCw, ShieldAlert } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -167,12 +168,12 @@ export default function IEISystemInstancePage() {
   }, []);
 
   const accessFrameUrl = useMemo(() => {
-    if (!instance || !access?.access_url) return "";
+    if (!instance || !access?.access_url || !allowBrowserInstance(instanceID, access)) return "";
     const url = resolveEmbedUrl(access.access_url);
     return instance.type.toLowerCase() === "openclaw"
       ? prepareOpenClawControlUIStorage(instance.id, url)
       : url;
-  }, [access, instance]);
+  }, [access, instance, instanceID]);
   const normalizedType = instance?.type.trim().toLowerCase() ?? "";
   const requiresRuntimeCertificateTrust =
     normalizedType === "opencode" || normalizedType === "deepseek-harness";
@@ -358,7 +359,7 @@ export default function IEISystemInstancePage() {
               <p className="max-w-md text-sm leading-6 text-slate-600">工作区独立于运行界面加载。可在右侧检查并修改文件；保存后如需生效，请确认配置并手动重启。</p>
               <button className="app-button-secondary" disabled={loading} onClick={() => void openInstance()}>重新连接</button>
             </div>
-          ) : frameSrc ? (
+          ) : frameSrc && allowBrowserInstance(instanceID, access ?? undefined) ? (
             <iframe
               key={`${frameSrc}:${frameVersion}`}
               onLoad={event=>onFrameLoad(event.currentTarget)}

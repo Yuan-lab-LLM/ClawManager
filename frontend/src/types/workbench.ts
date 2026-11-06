@@ -1,4 +1,5 @@
-export interface WorkbenchCapabilities {
+import type { BrowserOriginMetadata } from "../lib/browserOrigin";
+export interface WorkbenchCapabilities extends BrowserOriginMetadata {
   generation: number;
   workspace: string;
   git: boolean;
@@ -88,4 +89,12 @@ export interface GitResponse {
   diff?: string;
   truncated?: boolean;
   message?: string;
+}
+
+export interface WorkbenchPreview {
+  id: string;
+  url: string;
+  generation: number;
+  viewer_url?: string;
+  credentialless?: boolean;
 }

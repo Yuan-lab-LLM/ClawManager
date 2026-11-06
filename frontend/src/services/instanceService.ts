@@ -1,3 +1,4 @@
+import type { BrowserOriginMetadata } from "../lib/browserOrigin";
 import api from "./api";
 import type {
   Instance,
@@ -185,7 +186,7 @@ export const instanceService = {
   // Generate access token
   generateAccessToken: async (
     id: number,
-  ): Promise<{
+  ): Promise<BrowserOriginMetadata & {
     token: string;
     access_url: string;
     proxy_url: string;

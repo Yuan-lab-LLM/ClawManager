@@ -52,12 +52,21 @@ test("migration fences old sessions and preview URLs, delayed old responses cann
     type: "browser.new",
     id: "b",
   });
+  state = workbenchReducer(state, {
+    type: "browser.navigate", id: "b", address: "localhost:3000",
+    url: "https://preview/bootstrap", viewer_url: "https://manager/__clawmanager_browser/view#opaque",
+    credentialless: true, generation: 3,
+  });
+  assert.equal(state.tabs[0].credentialless, true);
+  assert.equal(state.tabs[0].viewer_url, "https://manager/__clawmanager_browser/view#opaque");
   state = workbenchReducer(state, { type: "generation", generation: 4 });
   state = workbenchReducer(state, {
     type: "browser.navigate",
     id: "b",
     address: "localhost:3000",
     url: "http://old-preview",
+    viewer_url: "https://manager/__clawmanager_browser/view#old",
+    credentialless: true,
     generation: 3,
   });
   state = workbenchReducer(state, {
@@ -73,6 +82,8 @@ test("migration fences old sessions and preview URLs, delayed old responses cann
   });
   assert.equal(state.tabs.length, 1);
   assert.equal(state.tabs[0].url, undefined);
+  assert.equal(state.tabs[0].viewer_url, undefined);
+  assert.equal(state.tabs[0].credentialless, undefined);
   assert.equal(state.tabs[0].stale, true);
 });
 
@@ -132,4 +143,16 @@ test("Git view patches preserve repository, diff and drafts across shared shells
   assert.deepEqual(state.git, { ...view, busy: false, error: "Retry" });
   assert.equal(state.panel, "preview");
   assert.equal(state.tabs.length, 0);
+});
+
+test("enabling browser-origin mode expires legacy previews while preserving their drafts and identity", () => {
+  let state = workbenchReducer(initialWorkbench(3), { type: "browser.new", id: "saved" });
+  state = workbenchReducer(state, { type: "browser.navigate", id: "saved", address: "http://localhost:3000/draft", url: "https://p-legacy.invalid/bootstrap", generation: 3 });
+  const migrated = workbenchReducer(state, { type: "browser.expireLegacy" });
+  assert.equal(migrated.tabs[0].url, undefined);
+  assert.equal(migrated.tabs[0].stale, true);
+  assert.equal(migrated.tabs[0].id, "saved");
+  assert.equal(migrated.tabs[0].address, "http://localhost:3000/draft");
+  assert.equal(migrated.tabs[0].title, state.tabs[0].title);
+  assert.equal(workbenchReducer(migrated, { type: "browser.expireLegacy" }), migrated);
 });

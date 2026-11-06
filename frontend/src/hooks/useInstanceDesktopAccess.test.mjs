@@ -84,6 +84,7 @@ function setup({
     window, document, URL, AbortSignal, Date: BrowserDate, queueMicrotask, console,
   };
   const { refreshDedicatedRuntimeCookie } = loadModule("../lib/instanceAccess.ts", globals);
+  const browserOrigin = loadModule("../lib/browserOrigin.ts", globals);
   const instanceService = {
     generateAccessToken: async (instanceId) => {
       calls.push(instanceId);
@@ -154,6 +155,7 @@ function setup({
     axios: { isAxiosError: (error) => Boolean(error.response) },
     "../services/instanceService": { instanceService },
     "../lib/instanceAccess": { refreshDedicatedRuntimeCookie },
+    "../lib/browserOrigin": browserOrigin,
   });
   const options = {
     instanceId: 42,
