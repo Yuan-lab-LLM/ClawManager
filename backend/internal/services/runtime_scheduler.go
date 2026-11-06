@@ -2797,6 +2797,25 @@ func (s *RuntimeScheduler) reserveGatewayPortExcludingPorts(
 	if blockSize <= 0 {
 		blockSize = 1
 	}
+	if inventory, ok := s.agentClient.(interface {
+		reservedGatewayPorts(context.Context, models.RuntimePod) (map[int]struct{}, error)
+	}); ok {
+		reserved, err := inventory.reservedGatewayPorts(ctx, pod)
+		if err != nil {
+			return nil, fmt.Errorf("read persisted slot reservations: %w", err)
+		}
+		merged := make(map[int]struct{}, len(reserved)+len(excludedPorts))
+		for port := range reserved {
+			if port < s.gatewayPortStart || port+blockSize-1 > s.gatewayPortEndForPod(pod, runtimeType) || (port-s.gatewayPortStart)%blockSize != 0 {
+				return nil, fmt.Errorf("persisted reservation does not identify a current slot block")
+			}
+			merged[port] = struct{}{}
+		}
+		for port := range excludedPorts {
+			merged[port] = struct{}{}
+		}
+		excludedPorts = merged
+	}
 	existingBindings, err := s.bindingRepo.ListByRuntimePodID(ctx, pod.ID)
 	if err != nil {
 		return nil, fmt.Errorf("list runtime pod %d bindings for gateway port allocation: %w", pod.ID, err)
@@ -2807,6 +2826,9 @@ func (s *RuntimeScheduler) reserveGatewayPortExcludingPorts(
 			continue
 		}
 		if runtimeGatewayPortBlockOccupied(existingBindings, port, blockSize) {
+			if requiresConfirmedGatewayStop(s.agentClient) {
+				continue // An error is not a confirmed writer-stop receipt.
+			}
 			deleted, err := s.bindingRepo.DeleteErrorByRuntimePodIDAndGatewayPort(ctx, pod.ID, port)
 			if err != nil {
 				return nil, fmt.Errorf("clear stale gateway port %d on runtime pod %d: %w", port, pod.ID, err)
@@ -2849,6 +2871,9 @@ func runtimeGatewayPortBlockOccupied(bindings []models.InstanceRuntimeBinding, r
 
 func (s *RuntimeScheduler) createRuntimeBindingWithStalePortRecovery(ctx context.Context, binding *models.InstanceRuntimeBinding) error {
 	if err := s.bindingRepo.Create(ctx, binding); err != nil {
+		if requiresConfirmedGatewayStop(s.agentClient) {
+			return err
+		}
 		deleted, deleteErr := s.bindingRepo.DeleteErrorByRuntimePodIDAndGatewayPort(ctx, binding.RuntimePodID, binding.GatewayPort)
 		if deleteErr != nil {
 			return errors.Join(err, deleteErr)
