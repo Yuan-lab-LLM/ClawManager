@@ -48,6 +48,10 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -trimpat
     && CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -trimpath -buildvcs=false -ldflags="-s -w -buildid=" -o /out/system-backup-controller ./cmd/system-backup-controller \
     && CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -trimpath -buildvcs=false -ldflags="-s -w -buildid=" -o /out/system-backup-artifact ./cmd/system-backup-artifact
 
+COPY tools/runtime-template-hash/ /app/tools/runtime-template-hash/
+RUN cd /app/tools/runtime-template-hash \
+    && CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -trimpath -buildvcs=false -ldflags="-s -w -buildid=" -o /out/cm-runtime-template-hash-v1.35 .
+
 FROM nginx:1.27-alpine
 
 # nginx-module-njs provides ngx_http_js_module.so, loaded by nginx.conf to run
@@ -60,6 +64,7 @@ COPY --from=backend-builder /out/clawreef-server /usr/local/bin/clawreef-server
 COPY --from=backend-builder /out/clawreef-northbound-gateway /usr/local/bin/clawreef-northbound-gateway
 COPY --from=backend-builder /out/system-backup-controller /usr/local/bin/system-backup-controller
 COPY --from=backend-builder /out/system-backup-artifact /usr/local/bin/system-backup-artifact
+COPY --from=backend-builder --chmod=0755 /out/cm-runtime-template-hash-v1.35 /usr/local/bin/cm-runtime-template-hash-v1.35
 COPY --from=frontend-builder /app/frontend/dist /usr/share/nginx/html
 COPY --from=hermes-desktop-builder /app/frontend/public/hermes-desktop-web /usr/share/nginx/html/hermes-desktop-web
 COPY deployments/nginx/nginx.conf /etc/nginx/nginx.conf
