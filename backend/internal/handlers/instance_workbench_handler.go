@@ -58,6 +58,9 @@ func workbenchIdentity(c *gin.Context) (userID, instanceID int, admin, ok bool) 
 	return
 }
 func workbenchFailure(c *gin.Context, err error) {
+	if browserOriginCapacityFailure(c, err) {
+		return
+	}
 	status := http.StatusServiceUnavailable
 	code := "workbench_unavailable"
 	message := "实例环境暂不可用，请刷新后重试"

@@ -1578,10 +1578,10 @@ func (h *InstanceHandler) GenerateAccessToken(c *gin.Context) {
 	}
 
 	// Generate proxy entry URL. The actual Service remains internal-only.
-	accessURL := h.proxyService.GetProxyURLForInstance(instance, "")
+	accessURL, err := h.proxyService.GetProxyURLForInstanceWithError(instance, "")
 
-	if accessURL == "" {
-		utils.Error(c, http.StatusServiceUnavailable, "Unable to generate access URL")
+	if err != nil || accessURL == "" {
+		instanceAccessURLFailure(c, err)
 		return
 	}
 
@@ -1621,7 +1621,11 @@ func (h *InstanceHandler) GenerateAccessToken(c *gin.Context) {
 		true,
 	)
 
-	proxyURL := h.proxyService.GetProxyURLForInstance(instance, token.Token)
+	proxyURL, err := h.proxyService.GetProxyURLForInstanceWithError(instance, token.Token)
+	if err != nil {
+		instanceAccessURLFailure(c, err)
+		return
+	}
 
 	// Dedicated runtime origins cannot reuse the HttpOnly cookie set on the
 	// ClawManager origin. Their first navigation must carry the short-lived
@@ -2651,7 +2655,11 @@ func (h *InstanceHandler) OpenShortExternalAccess(c *gin.Context) {
 		canonicalAccessURL = instanceToken.AccessURL
 	} else {
 		setShortExternalAccessCookies(c, instance.ID, code, token, int(time.Hour.Seconds()))
-		canonicalAccessURL = h.externalAccessEntryURL(instance)
+		canonicalAccessURL, err = h.externalAccessEntryURL(instance)
+		if err != nil {
+			instanceAccessURLFailure(c, err)
+			return
+		}
 	}
 
 	originalPath := c.Request.URL.Path
@@ -2720,7 +2728,11 @@ func (h *InstanceHandler) GetSharedInstanceSession(c *gin.Context) {
 	if !ok {
 		return
 	}
-	proxyURL := h.proxyService.GetProxyURLForInstance(instance, instanceToken.Token)
+	proxyURL, err := h.proxyService.GetProxyURLForInstanceWithError(instance, instanceToken.Token)
+	if err != nil {
+		instanceAccessURLFailure(c, err)
+		return
+	}
 	accessURL := browserAccessEntryURL(instanceToken.AccessURL, proxyURL)
 	sessionExpiresAt := instanceToken.ExpiresAt
 	if isSharedHermesDesktopInstance(instance) {
@@ -2839,9 +2851,9 @@ func (h *InstanceHandler) requireExternalAccessInstance(c *gin.Context, access *
 }
 
 func (h *InstanceHandler) issueShortExternalAccessToken(c *gin.Context, instance *models.Instance, code string, access *models.InstanceExternalAccess) (*services.AccessToken, bool) {
-	accessURL := h.externalAccessEntryURL(instance)
-	if accessURL == "" {
-		utils.Error(c, http.StatusServiceUnavailable, "Unable to generate access URL")
+	accessURL, err := h.externalAccessEntryURL(instance)
+	if err != nil || accessURL == "" {
+		instanceAccessURLFailure(c, err)
 		return nil, false
 	}
 	targetPort := h.proxyService.GetTargetPortForInstance(instance)
@@ -2864,15 +2876,18 @@ func (h *InstanceHandler) issueShortExternalAccessToken(c *gin.Context, instance
 	return instanceToken, true
 }
 
-func (h *InstanceHandler) externalAccessEntryURL(instance *models.Instance) string {
+func (h *InstanceHandler) externalAccessEntryURL(instance *models.Instance) (string, error) {
 	if h == nil || h.proxyService == nil || instance == nil {
-		return ""
+		return "", nil
 	}
-	accessURL := h.proxyService.GetProxyURLForInstance(instance, "")
+	accessURL, err := h.proxyService.GetProxyURLForInstanceWithError(instance, "")
+	if err != nil {
+		return "", err
+	}
 	if accessURL == "" && isSharedHermesDesktopInstance(instance) {
-		return sharedHermesDesktopEntryURL(instance.ID)
+		return sharedHermesDesktopEntryURL(instance.ID), nil
 	}
-	return accessURL
+	return accessURL, nil
 }
 
 func (h *InstanceHandler) validShortLinkAccessToken(c *gin.Context, code string, access *models.InstanceExternalAccess) string {

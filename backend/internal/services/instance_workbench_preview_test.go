@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"clawreef/internal/browserorigin"
 	"clawreef/internal/models"
 	"clawreef/internal/workbench"
 	"github.com/gorilla/websocket"
@@ -86,6 +87,77 @@ func TestWorkbenchPreviewRedirectsStayOnCapabilityOrigin(t *testing.T) {
 				t.Fatalf("redirect = %d %q, want %d %q", recorder.Code, recorder.Header().Get("Location"), http.StatusFound, want)
 			}
 		})
+	}
+}
+
+func TestBrowserPreviewRedirectsUsePublicOrigin(t *testing.T) {
+	for _, browserMode := range []bool{false, true} {
+		for _, tc := range []struct {
+			name, target, location, want string
+		}{
+			{"absolute", "http://localhost:4321", "http://localhost:4321/login", "{origin}/login"},
+			{"network localhost", "http://localhost:4321", "//localhost:4321/login", "{origin}/login"},
+			{"network IPv4", "http://127.0.0.1:4321", "//127.0.0.1:4321/login", "{origin}/login"},
+			{"network IPv6", "http://[::1]:4321", "//[::1]:4321/login", "{origin}/login"},
+			{"network escaped", "http://localhost:4321", "//localhost:4321/a%2Fb?q=%2f&x=1&x=2#part%2Ftwo", "{origin}/a%2Fb?q=%2f&x=1&x=2#part%2Ftwo"},
+			{"network HTTPS default port", "https://localhost", "//localhost/login", "{origin}/login"},
+			{"relative", "http://localhost:4321", "/login?q=%2f#part", "/login?q=%2f#part"},
+			{"relative path", "http://localhost:4321", "login", "login"},
+			{"external", "http://localhost:4321", "//example.com:4321/login", "//example.com:4321/login"},
+			{"different port", "http://localhost:4321", "//localhost:4322/login", "//localhost:4322/login"},
+			{"credentials", "http://localhost:4321", "//user@localhost:4321/login", "//user@localhost:4321/login"},
+			{"invalid scheme", "http://localhost:4321", "ftp://localhost:4321/login", "ftp://localhost:4321/login"},
+		} {
+			mode := "legacy HTTP/"
+			if browserMode {
+				mode = "browser HTTPS/"
+			}
+			t.Run(mode+tc.name, func(t *testing.T) {
+				runtime := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Set("Location", tc.location)
+					w.WriteHeader(http.StatusFound)
+				}))
+				defer runtime.Close()
+				instance := &models.Instance{ID: 42, UserID: 7, Status: "running", RuntimeGeneration: 3}
+				binding := &models.InstanceRuntimeBinding{InstanceID: 42, RuntimePodID: 9, Generation: 3, GatewayID: "gw-42-3", GatewayPort: 3000, WorkspacePath: "/workspace"}
+				previews, err := workbench.NewPreviews("http://p-{token}.preview.example:8080", &previewTestStore{values: map[string]workbench.PreviewLease{}}, time.Hour)
+				if err != nil {
+					t.Fatal(err)
+				}
+				service := NewInstanceWorkbenchService(workbenchTestInstances{instance: instance}, workbenchTestBindings{binding}, workbenchTestPods{&models.RuntimePod{ID: 9, AgentEndpoint: &runtime.URL}}, NewRuntimeAgentClientWithHTTPClient("test-control", runtime.Client()).(WorkbenchAgent), previews)
+				lease, err := previews.Create(context.Background(), workbench.PreviewScope{InstanceID: 42, UserID: 7, Generation: 3, GatewayID: "gw-42-3"}, tc.target)
+				if err != nil {
+					t.Fatal(err)
+				}
+				publicURL, _ := url.Parse(previews.URL(lease))
+				var route browserorigin.Binding
+				if browserMode {
+					origins, err := browserorigin.New("https://cm.test:30443", "31400-31401", &browserPreviewStore{})
+					if err != nil {
+						t.Fatal(err)
+					}
+					service.SetBrowserOrigins(origins)
+					route, err = origins.Bind(context.Background(), 42, browserorigin.Preview, browserPreviewTargetKey(lease.Target))
+					if err != nil {
+						t.Fatal(err)
+					}
+					publicURL, _ = url.Parse(origins.URL(route))
+				}
+				// Ingress may forward HTTP; the configured public origin wins.
+				request := httptest.NewRequest("GET", "http://"+publicURL.Host+"/", nil)
+				if browserMode {
+					request.AddCookie(&http.Cookie{Name: browserPreviewCookie(route.Port), Value: lease.ID})
+					request.Header.Set("Sec-Fetch-Site", "same-origin")
+					request.Header.Set("Origin", service.browserOrigins.URL(route))
+				}
+				recorder := httptest.NewRecorder()
+				service.ServePreview(recorder, request)
+				want := strings.ReplaceAll(tc.want, "{origin}", publicURL.Scheme+"://"+publicURL.Host)
+				if recorder.Code != http.StatusFound || recorder.Header().Get("Location") != want {
+					t.Fatalf("redirect = %d %q, want %d %q", recorder.Code, recorder.Header().Get("Location"), http.StatusFound, want)
+				}
+			})
+		}
 	}
 }
 

@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -158,5 +159,24 @@ func BrowserOriginRoutes(reg *browserorigin.Registry, instances *InstanceHandler
 		}
 		instances.ProxyInstance(c)
 		c.Abort()
+	}
+}
+
+// Permanent assignments cannot be reclaimed by waiting or removing instances.
+func browserOriginCapacityFailure(c *gin.Context, err error) bool {
+	if !errors.Is(err, browserorigin.ErrCapacity) {
+		return false
+	}
+	c.JSON(http.StatusConflict, gin.H{
+		"success":    false,
+		"error_code": "browser_origin_capacity_exhausted",
+		"error":      "The permanent browser-origin pool or per-instance target limit is exhausted. Reuse an existing assigned target, or contact the administrator to expand the port pool if the instance target limit has not been reached.",
+	})
+	return true
+}
+
+func instanceAccessURLFailure(c *gin.Context, err error) {
+	if !browserOriginCapacityFailure(c, err) {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"success": false, "error": "Unable to generate access URL"})
 	}
 }

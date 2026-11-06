@@ -1259,8 +1259,14 @@ func (s *InstanceProxyService) BrowserOrigins() *browserorigin.Registry       { 
 
 // GetProxyURLForInstance generates the best frontend entry URL for an instance.
 func (s *InstanceProxyService) GetProxyURLForInstance(instance *models.Instance, token string) string {
+	publicURL, _ := s.GetProxyURLForInstanceWithError(instance, token)
+	return publicURL
+}
+
+// GetProxyURLForInstanceWithError preserves binding failures for access issuers.
+func (s *InstanceProxyService) GetProxyURLForInstanceWithError(instance *models.Instance, token string) (string, error) {
 	if instance == nil {
-		return ""
+		return "", nil
 	}
 	if runtimeType, ok := v2RuntimeTypeForInstance(instance); ok && s.browserOrigins != nil &&
 		(runtimeType == RuntimeTypeOpenCode || runtimeType == RuntimeTypeDeepSeekHarness) {
@@ -1268,29 +1274,29 @@ func (s *InstanceProxyService) GetProxyURLForInstance(instance *models.Instance,
 		defer cancel()
 		binding, err := s.browserOrigins.Bind(ctx, instance.ID, browserorigin.Native, runtimeType)
 		if err != nil {
-			return ""
+			return "", err
 		}
 		publicURL := s.browserOrigins.URL(binding) + "/"
 		if token != "" {
 			publicURL += "?token=" + url.QueryEscape(token)
 		}
-		return publicURL
+		return publicURL, nil
 	}
 	if runtimeType, ok := v2RuntimeTypeForInstance(instance); ok && runtimeType == RuntimeTypeOpenCode {
 		// OpenCode's web UI owns the root of its origin. Do not fall back to the
 		// legacy /instances/{id}/proxy subpath when the deployment forgot its
 		// dedicated-origin template; fail access generation instead.
-		return managedRuntimePublicURL(runtimeType, instance.ID, token)
+		return managedRuntimePublicURL(runtimeType, instance.ID, token), nil
 	}
 	if runtimeType, ok := v2RuntimeTypeForInstance(instance); ok && runtimeType == RuntimeTypeDeepSeekHarness {
 		if publicURL := managedRuntimePublicURL(runtimeType, instance.ID, token); publicURL != "" {
-			return publicURL
+			return publicURL, nil
 		}
 	}
 	if runtimeType, ok := v2RuntimeTypeForInstance(instance); ok && runtimeType == RuntimeTypeHermes {
-		return ""
+		return "", nil
 	}
-	return proxyURLWithPath(instance.ID, "/", token)
+	return proxyURLWithPath(instance.ID, "/", token), nil
 }
 
 func managedRuntimePublicURL(runtimeType string, instanceID int, token string) string {

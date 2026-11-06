@@ -83,6 +83,14 @@ func (s *InstanceWorkbenchService) ServePreview(w http.ResponseWriter, r *http.R
 		return
 	}
 	publicURL, _ := url.Parse(s.previews.URL(lease))
+	if s.browserOrigins != nil && s.browserOrigins.Matches(r.Host) {
+		binding, err := s.browserOrigins.Lookup(r.Context(), r.Host)
+		if err != nil {
+			http.Error(w, "Preview unavailable", http.StatusNotFound)
+			return
+		}
+		publicURL, _ = url.Parse(s.browserOrigins.URL(binding))
+	}
 	transport, controlToken := provider.workbenchTransport()
 	ctx, cancel := context.WithDeadline(r.Context(), lease.ExpiresAt)
 	defer cancel()

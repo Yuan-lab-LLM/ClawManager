@@ -183,6 +183,59 @@ func TestBrowserAccessMetadataResponses(t *testing.T) {
 	}
 }
 
+func TestBrowserAccessCapacityResponses(t *testing.T) {
+	for _, successfulBinds := range []int{0, 1} {
+		for _, kind := range []string{services.RuntimeTypeOpenCode, services.RuntimeTypeDeepSeekHarness} {
+			for _, entry := range []string{"normal", "iei", "share"} {
+				stage := "initial URL/"
+				if successfulBinds == 1 {
+					stage = "token URL/"
+				}
+				t.Run(stage+kind+"/"+entry, func(t *testing.T) {
+					owner := "owner@example.com"
+					instance := &models.Instance{ID: 118, UserID: 10, Owner: &owner, Type: kind, RuntimeType: "gateway", InstanceMode: "lite", Status: "running"}
+					fake := &fakeWorkspaceHandlerInstanceService{instances: map[int]*models.Instance{118: instance}}
+					access := services.NewInstanceAccessService()
+					defer access.Stop()
+					h := &InstanceHandler{instanceService: fake, accessService: access, proxyService: services.NewInstanceProxyService(access)}
+					reg, e := browserorigin.New("https://10.130.81.54:30443", "31400-31527", &fullBrowserOriginStore{successfulBinds: successfulBinds})
+					if e != nil {
+						t.Fatal(e)
+					}
+					h.SetBrowserOrigins(reg)
+					router := gin.New()
+					var request *http.Request
+					switch entry {
+					case "normal":
+						router.Use(func(c *gin.Context) { c.Set("userID", 10); c.Set("userRole", "user") })
+						router.POST("/instances/:id/access", h.GenerateAccessToken)
+						request = httptest.NewRequest("POST", "/instances/118/access", nil)
+					case "share":
+						h.externalAccessService = &fakeSharedExternalAccessService{access: &models.InstanceExternalAccess{InstanceID: 118, Enabled: true, AuthMode: services.ExternalAccessModeShareLink, WorkspaceAccess: services.ExternalWorkspaceAccessWrite}}
+						router.GET("/shared/:code/session", h.GetSharedInstanceSession)
+						request = httptest.NewRequest("GET", "/shared/sl_test/session", nil)
+					case "iei":
+						cfg := testIEIHandlerConfig()
+						sso, e := services.NewIEISSOService(cfg)
+						if e != nil {
+							t.Fatal(e)
+						}
+						iei := NewIEISystemHandler(cfg, sso, &fakeIEIInstanceService{fakeWorkspaceHandlerInstanceService: fake}, h)
+						router.POST("/api/v1/ieisystem/session", iei.ExchangeSession)
+						router.POST("/instances/:id/access", iei.GenerateInstanceAccess)
+						cookie := exchangeIEITestSession(t, router, cfg, owner)
+						request = httptest.NewRequest("POST", "/instances/118/access", nil)
+						request.AddCookie(cookie)
+					}
+					w := httptest.NewRecorder()
+					router.ServeHTTP(w, request)
+					assertBrowserCapacityResponse(t, w)
+				})
+			}
+		}
+	}
+}
+
 func TestBrowserNativeHeaderRenewal(t *testing.T) {
 	router, _, token := nativeRouteFixture(t)
 	r := httptest.NewRequest("GET", "https://10.130.81.54:31400/__clawmanager_access_refresh", nil)
@@ -310,5 +363,35 @@ func TestBrowserOriginIngressNeverFallsThroughManager(t *testing.T) {
 		if w.Code != 404 {
 			t.Fatalf("browser ingress reached manager: enabled=%v status=%d", registry != nil, w.Code)
 		}
+	}
+}
+
+// A full permanent ledger returns the same cause for global and per-instance limits.
+type fullBrowserOriginStore struct{ successfulBinds, calls int }
+
+func (s *fullBrowserOriginStore) Bind(_ context.Context, id int, kind, target string, first, _ int) (browserorigin.Binding, error) {
+	if s.calls < s.successfulBinds {
+		s.calls++
+		return browserorigin.Binding{Port: first, InstanceID: id, Kind: kind, Target: target}, nil
+	}
+	return browserorigin.Binding{}, browserorigin.ErrCapacity
+}
+func (*fullBrowserOriginStore) ByPort(context.Context, int) (browserorigin.Binding, error) {
+	return browserorigin.Binding{}, browserorigin.ErrNotFound
+}
+func assertBrowserCapacityResponse(t *testing.T, w *httptest.ResponseRecorder) {
+	t.Helper()
+	var payload struct {
+		Success bool   `json:"success"`
+		Code    string `json:"error_code"`
+		Error   string `json:"error"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if w.Code != http.StatusConflict || payload.Success || payload.Code != "browser_origin_capacity_exhausted" ||
+		!strings.Contains(payload.Error, "permanent") || !strings.Contains(payload.Error, "administrator") || !strings.Contains(payload.Error, "target limit") ||
+		strings.Contains(strings.ToLower(payload.Error), "retry") || strings.Contains(strings.ToLower(payload.Error), "delete") {
+		t.Fatalf("capacity response = %d %s", w.Code, w.Body.String())
 	}
 }

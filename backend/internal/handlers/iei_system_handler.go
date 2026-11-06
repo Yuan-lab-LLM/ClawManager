@@ -507,9 +507,9 @@ func (h *IEISystemHandler) GenerateInstanceAccess(c *gin.Context) {
 		return
 	}
 
-	accessURL := h.instanceHandler.proxyService.GetProxyURLForInstance(instance, "")
-	if strings.TrimSpace(accessURL) == "" {
-		utils.Error(c, http.StatusServiceUnavailable, "Unable to generate access URL")
+	accessURL, err := h.instanceHandler.proxyService.GetProxyURLForInstanceWithError(instance, "")
+	if err != nil || strings.TrimSpace(accessURL) == "" {
+		instanceAccessURLFailure(c, err)
 		return
 	}
 	targetPort := h.instanceHandler.proxyService.GetTargetPortForInstance(instance)
@@ -543,7 +543,11 @@ func (h *IEISystemHandler) GenerateInstanceAccess(c *gin.Context) {
 		utils.HandleError(c, err)
 		return
 	}
-	proxyURL := h.instanceHandler.proxyService.GetProxyURLForInstance(instance, accessToken.Token)
+	proxyURL, err := h.instanceHandler.proxyService.GetProxyURLForInstanceWithError(instance, accessToken.Token)
+	if err != nil {
+		instanceAccessURLFailure(c, err)
+		return
+	}
 	browserURL := browserAccessEntryURL(accessURL, proxyURL)
 	// OpenClaw Lite bootstraps its control UI through the shared proxy and can
 	// issue early navigation/subresource requests before the path-scoped
