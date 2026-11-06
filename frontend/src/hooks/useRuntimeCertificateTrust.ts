@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 const CERTIFICATE_CHECK_PATH = "/__clawmanager_cert_check";
 const CERTIFICATE_TRUST_PATH = "/__clawmanager_cert_trust";
@@ -97,6 +97,7 @@ export function useRuntimeCertificateTrust(
   const [approvedOrigin, setApprovedOrigin] = useState<string | null>(null);
   const [requiredOrigin, setRequiredOrigin] = useState<string | null>(null);
   const [probeRevision, setProbeRevision] = useState(0);
+  const pendingOrigin = useRef<string | null>(null);
 
   useEffect(() => {
     if (!target) {
@@ -123,6 +124,7 @@ export function useRuntimeCertificateTrust(
         }
         trustedRuntimeOrigins.add(target.origin);
         clearPendingCertificateTrust(target.origin);
+        pendingOrigin.current = null;
         setApprovedOrigin(target.origin);
         setRequiredOrigin(null);
       })
@@ -131,13 +133,6 @@ export function useRuntimeCertificateTrust(
           return;
         }
         setRequiredOrigin(target.origin);
-        const pending = readPendingCertificateTrust();
-        if (pending?.origin === target.origin) {
-          return;
-        }
-
-        rememberPendingCertificateTrust(target.origin);
-        window.location.assign(target.trustUrl);
       });
 
     return () => {
@@ -150,14 +145,26 @@ export function useRuntimeCertificateTrust(
       return;
     }
 
-    const handlePageShow = () => {
-      if (readPendingCertificateTrust()?.origin === target.origin) {
+    const handleReturn = () => {
+      if (document.visibilityState === "hidden") {
+        return;
+      }
+      if (
+        pendingOrigin.current === target.origin ||
+        readPendingCertificateTrust()?.origin === target.origin
+      ) {
         setProbeRevision((revision) => revision + 1);
       }
     };
 
-    window.addEventListener("pageshow", handlePageShow);
-    return () => window.removeEventListener("pageshow", handlePageShow);
+    window.addEventListener("pageshow", handleReturn);
+    window.addEventListener("focus", handleReturn);
+    document.addEventListener("visibilitychange", handleReturn);
+    return () => {
+      window.removeEventListener("pageshow", handleReturn);
+      window.removeEventListener("focus", handleReturn);
+      document.removeEventListener("visibilitychange", handleReturn);
+    };
   }, [target]);
 
   const confirmCertificate = useCallback(() => {
@@ -165,8 +172,9 @@ export function useRuntimeCertificateTrust(
       return;
     }
 
+    pendingOrigin.current = target.origin;
     rememberPendingCertificateTrust(target.origin);
-    window.location.assign(target.trustUrl);
+    window.open(target.trustUrl, "_blank", "noopener,noreferrer");
   }, [target]);
 
   const isReady =
@@ -175,6 +183,7 @@ export function useRuntimeCertificateTrust(
     trustedRuntimeOrigins.has(target.origin);
 
   return {
+    certificateOrigin: target?.origin ?? "",
     frameUrl: isReady ? frameUrl : null,
     checkingCertificate:
       Boolean(target) && !isReady && requiredOrigin !== target?.origin,

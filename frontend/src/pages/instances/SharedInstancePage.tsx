@@ -153,6 +153,7 @@ export default function SharedInstancePage() {
     frameUrl: frameSrc,
     checkingCertificate,
     certificateConfirmationRequired,
+    certificateOrigin,
     confirmCertificate,
   } = useRuntimeCertificateTrust(
     accessFrameUrl || null,
@@ -284,9 +285,10 @@ export default function SharedInstancePage() {
                 <p className="text-sm font-semibold text-slate-900">
                   Confirm the runtime HTTPS certificate
                 </p>
-                <p className="mt-1 max-w-lg text-sm leading-6 text-slate-600">
-                  Continue once to trust this runtime origin. After confirmation, the browser
-                  will automatically return to this shared instance.
+                <p className="mt-1 max-w-lg break-words text-sm leading-6 text-slate-600">
+                  Your browser has not approved the certificate for {certificateOrigin}. Open
+                  confirmation in a new tab, review the browser warning, then close that tab and
+                  return here. If no tab opens, allow pop-ups for ClawManager and try again.
                 </p>
               </div>
               <button
@@ -294,7 +296,7 @@ export default function SharedInstancePage() {
                 className="app-button-primary"
                 onClick={confirmCertificate}
               >
-                Continue
+                Confirm certificate in new tab
               </button>
             </div>
           ) : (

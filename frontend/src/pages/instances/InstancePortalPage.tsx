@@ -263,6 +263,7 @@ const InstancePortalPage: React.FC = () => {
     frameUrl: embedUrl,
     checkingCertificate,
     certificateConfirmationRequired,
+    certificateOrigin,
     confirmCertificate,
   } = useRuntimeCertificateTrust(
     accessEmbedUrl,
@@ -713,7 +714,6 @@ const InstancePortalPage: React.FC = () => {
                     <button
                       type="button"
                       onClick={retryAccess}
-                      onPointerUp={retryAccess}
                       disabled={accessLoading || checkingCertificate}
                       aria-label={
                         certificateConfirmationRequired
@@ -741,11 +741,11 @@ const InstancePortalPage: React.FC = () => {
                         ? t("instances.certificateConfirmationRequired")
                         : t("instances.readyToAccess")}
                     </h3>
-                    <p className="mt-2 max-w-md text-sm leading-6 text-[#b7c1cf]">
+                    <p className="mt-2 max-w-md break-words text-sm leading-6 text-[#b7c1cf]">
                       {checkingCertificate
                         ? t("instances.checkingCertificate")
                         : certificateConfirmationRequired
-                          ? t("instances.certificateConfirmationDescription")
+                          ? t("instances.certificateConfirmationDescription", { origin: certificateOrigin })
                           : accessLoading
                         ? t("instances.generatingToken")
                         : accessError ||

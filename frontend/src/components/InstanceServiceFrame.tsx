@@ -144,6 +144,7 @@ function EmbeddedInstanceServiceFrame({
     frameUrl: embedUrl,
     checkingCertificate,
     certificateConfirmationRequired,
+    certificateOrigin,
     confirmCertificate,
   } = useRuntimeCertificateTrust(
     accessEmbedUrl,
@@ -426,8 +427,8 @@ function EmbeddedInstanceServiceFrame({
             <p className="text-sm font-semibold text-slate-900">
               {t("instances.certificateConfirmationRequired")}
             </p>
-            <p className="mt-1 max-w-lg text-sm leading-6 text-slate-600">
-              {t("instances.certificateConfirmationDescription")}
+            <p className="mt-1 max-w-lg break-words text-sm leading-6 text-slate-600">
+              {t("instances.certificateConfirmationDescription", { origin: certificateOrigin })}
             </p>
           </div>
           <button
