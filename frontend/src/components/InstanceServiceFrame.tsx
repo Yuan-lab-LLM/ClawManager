@@ -290,8 +290,7 @@ function EmbeddedInstanceServiceFrame({
 
   useEffect(() => {
     const frame = frameRef.current;
-    if (!frame || !frameSrc || !onOpenWorkbenchPreview ||
-        !["opencode", "deepseek-harness"].includes(normalizedType)) return;
+    if (!frame || !frameSrc || !onOpenWorkbenchPreview) return;
     return attachNativePreviewBridge(frame, frameSrc, onOpenWorkbenchPreview);
   }, [frameRef, frameSrc, instanceId, runtimeGeneration, reloadToken, frameRevision, normalizedType, onOpenWorkbenchPreview]);
 

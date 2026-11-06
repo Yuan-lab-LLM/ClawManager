@@ -4,7 +4,7 @@ import path from 'node:path'
 import { importUpstream, lock, root } from './import-upstream.mjs'
 
 async function buildInputDigest() {
-  const files = ['index.html', 'package.json', 'package-lock.json', 'upstream.lock.json', 'vite.config.ts', 'tsconfig.json']
+  const files = ['index.html', 'package.json', 'package-lock.json', 'upstream.lock.json', 'vite.config.ts', 'tsconfig.json', '../backend/internal/services/native_preview_bridge.js']
   async function walk(directory) {
     for (const entry of await readdir(path.join(root, directory), { withFileTypes: true })) {
       const relative = `${directory}/${entry.name}`

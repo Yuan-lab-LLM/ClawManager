@@ -11,7 +11,7 @@ import (
 )
 
 func TestNativePreviewBridgeOnlyAuthenticatedBrowserHTML(t *testing.T) {
-	for _, native := range []string{RuntimeTypeOpenCode, RuntimeTypeDeepSeekHarness} {
+	for _, native := range []string{RuntimeTypeOpenCode, RuntimeTypeDeepSeekHarness, RuntimeTypeOpenClaw} {
 		for _, test := range []struct {
 			name, contentType, body, dest string
 			gzip                          bool
@@ -46,8 +46,10 @@ func TestNativePreviewBridgeOnlyAuthenticatedBrowserHTML(t *testing.T) {
 				var token *AccessToken
 				if native == RuntimeTypeOpenCode {
 					service, token = newOpenCodeV2ProxyTestService(t, upstream.URL, 170, "fixture-only")
-				} else {
+				} else if native == RuntimeTypeDeepSeekHarness {
 					service, token = newDeepSeekHarnessV2ProxyTestService(t, upstream.URL, 170, "fixture-only")
+				} else {
+					service, token = newOpenClawV2ProxyTestService(t, upstream.URL, 170)
 				}
 				service.httpClient = upstream.Client()
 				target := "/"
@@ -118,7 +120,7 @@ func TestNativePreviewHTMLBoundAndIdempotentInjection(t *testing.T) {
 	}
 	req := httptest.NewRequest("GET", "/", nil)
 	req.Header.Set("Sec-Fetch-Dest", "iframe")
-	if nativePreviewBridgeDocument(req, false, "shell") {
+	if nativePreviewBridgeDocument(req, "shell") {
 		t.Fatal("arbitrary app/preview responses must never receive native bridge")
 	}
 }

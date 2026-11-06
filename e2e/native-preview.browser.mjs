@@ -4,6 +4,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { chromium } from '@playwright/test';
 const root=path.resolve(import.meta.dirname,'../frontend'),require=createRequire(path.join(root,'package.json')),{createServer}=require('vite');
+const nativeType=process.env.NATIVE_PREVIEW_AGENT||'opencode';
 process.chdir(root);
 const bridge=await fs.readFile(path.resolve(root,'../backend/internal/services/native_preview_bridge.js'),'utf8');
 const fixture=`
@@ -54,7 +55,7 @@ try{
  await detail.route('https://native-detail.invalid/**',route=>new URL(route.request().url()).pathname==='/__clawmanager_cert_check'?route.fulfill({status:204,headers:{'Access-Control-Allow-Origin':'*'}}):route.fulfill({contentType:'text/html',body:'<script>window.addEventListener("message",event=>{if(event.source===parent)window.activationTag=event.data.type})</script><script>'+bridge+'</script><a target="_blank" href="http://127.0.0.1:3000/hello">Local app</a><a target="_blank" href="http://localhost:3000/other">Other app</a>'}));
  await detail.route('**/api/v1/**',async route=>{
   const path=new URL(route.request().url()).pathname;let data=[];
-  if(path==='/api/v1/instances/155')data={instance:{id:155,user_id:7,name:'Bridge integration',type:'opencode',instance_mode:'lite',runtime_type:'gateway',status:'running',runtime_generation:6,workspace_path:'/workspace',created_at:new Date().toISOString()}};
+  if(path==='/api/v1/instances/155')data={instance:{id:155,user_id:7,name:'Bridge integration',type:nativeType,instance_mode:'lite',runtime_type:'gateway',status:'running',runtime_generation:6,workspace_path:'/workspace',created_at:new Date().toISOString()}};
   else if(path.endsWith('/status'))data={instance_status:{instance_id:155,status:'running',availability:'available'}};
   else if(path.endsWith('/runtime'))data={commands:[],skills:[]};
   else if(path.endsWith('/session-usage'))data={summary:{session_count:0,total_tokens:0,total_prompt_tokens:0,total_completion_tokens:0,total_estimated_cost:0,currency:'USD'},compliance:{fallback_session_count:0,has_fallback_sessions:false,recent_fallback_audit_count:0},items:[],total:0,page:1,limit:20};

@@ -14,8 +14,9 @@ var nativePreviewBridgeScript string
 
 const nativePreviewHTMLLimit = 8 << 20
 
-func nativePreviewBridgeDocument(r *http.Request, opencodeLite bool, instanceType string) bool {
-	if r.Method != http.MethodGet || !(opencodeLite || isDeepSeekHarnessRuntimeType(instanceType)) {
+func nativePreviewBridgeDocument(r *http.Request, instanceType string) bool {
+	_, managed := NormalizeV2RuntimeType(instanceType)
+	if r.Method != http.MethodGet || !managed {
 		return false
 	}
 	dest := r.Header.Get("Sec-Fetch-Dest")

@@ -179,7 +179,7 @@ func (s *InstanceProxyService) ProxyRequest(ctx context.Context, instanceID int,
 	targetPath := s.extractTargetPath(effectiveRequestPath, instanceID, accessToken.InstanceType, accessToken.TargetPort)
 	targetPort := s.resolveTargetPort(accessToken.InstanceType, accessToken.TargetPort, targetPath)
 	shouldRewriteHTML := s.shouldRewriteHTMLForProxy(instanceID, accessToken.InstanceType, targetPort) && !dedicatedRuntimeOrigin
-	previewBridgeDocument := nativePreviewBridgeDocument(r, opencodeLite, accessToken.InstanceType)
+	previewBridgeDocument := nativePreviewBridgeDocument(r, accessToken.InstanceType)
 
 	// Build target URL
 	targetURL, runtimeGateway, err := s.resolveHTTPProxyTarget(ctx, accessToken, instanceID, targetPort, targetPath, effectiveRequestPath)

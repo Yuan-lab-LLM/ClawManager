@@ -7,6 +7,7 @@ RUN --mount=type=cache,id=clawmanager-hermes-npm,target=/root/.npm,sharing=locke
 
 FROM hermes-desktop-deps AS hermes-desktop-builder
 COPY hermes-desktop-web/ ./hermes-desktop-web/
+COPY backend/internal/services/native_preview_bridge.js ./backend/internal/services/native_preview_bridge.js
 RUN node hermes-desktop-web/scripts/build.mjs
 
 FROM --platform=$BUILDPLATFORM node:24-alpine AS frontend-builder

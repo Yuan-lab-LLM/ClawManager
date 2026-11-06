@@ -3,6 +3,7 @@ import { RefreshCw } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useI18n } from "../contexts/I18nContext";
 import { hermesDesktopRenewalDelay, isHermesDesktopFrameMessage, resolveHermesDesktopRendererUrl, resolveHermesDesktopView } from "../lib/hermesDesktopFrame";
+import { attachNativePreviewBridge } from "../lib/nativePreviewBridge";
 import { hermesDesktopService } from "../services/hermesDesktopService";
 import type { InstanceServiceFrameProps } from "./InstanceServiceFrame";
 import { InstanceServiceFrameShell } from "./InstanceServiceFrameShell";
@@ -75,6 +76,7 @@ function HermesDesktopFrame({
   reloadToken = 0,
   workspaceVisible,
   onWorkspaceVisibilityChange,
+  onOpenWorkbenchPreview,
 }: InstanceServiceFrameProps) {
   const { t } = useI18n();
   const frameRef = useRef<HTMLIFrameElement | null>(null);
@@ -83,6 +85,12 @@ function HermesDesktopFrame({
   const launchKey = `${instanceId}-${reloadToken}-${revision}`;
   const current = state?.key === launchKey ? state : null;
   const src = current?.src ?? null;
+
+  useEffect(() => {
+    const frame = frameRef.current;
+    if (!frame || !src || !onOpenWorkbenchPreview) return;
+    return attachNativePreviewBridge(frame, src, onOpenWorkbenchPreview);
+  }, [src, launchKey, onOpenWorkbenchPreview]);
 
   useEffect(() => {
     const controller = new AbortController();
