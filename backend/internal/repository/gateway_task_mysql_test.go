@@ -248,21 +248,19 @@ func TestRuntimeTaskMySQLRevocationLifecycle(t *testing.T) {
 		}
 	}
 	maintenance := NewRuntimeMaintenanceRepository(sess)
-	if _, err = maintenance.Begin(t.Context(), 10, 1, 7, 1, time.Minute); !errors.Is(err, models.ErrRuntimeMaintenanceConflict) {
-		t.Fatalf("stale/non-drain runtime accepted: %v", err)
-	}
 	report.Protocol = 1
 	report.Capabilities = append(report.Capabilities, "maintenance_drain")
 	if err = protocols.Negotiate(t.Context(), 10, 1, report); err != nil {
 		t.Fatal(err)
 	}
-	drain, err := maintenance.Begin(t.Context(), 10, 1, 7, 1, time.Minute)
-	if err != nil || drain.Drained(time.Now()) {
-		t.Fatalf("drain before receipt: %+v %v", drain, err)
+	// Seed internal drain evidence directly: manual Begin/Cancel controls were removed.
+	seedDrain := func(id, owner, generation int, operation string) *models.RuntimeMaintenance {
+		t.Helper()
+		deadline := time.Now().UTC().Add(time.Minute)
+		exec("REPLACE INTO gateway_runtime_maintenance(instance_id,owner_user_id,generation,operation_id,requested_by,deadline) VALUES(?,?,?,?,?,?)", id, owner, generation, operation, owner, deadline)
+		return &models.RuntimeMaintenance{InstanceID: id, OwnerID: owner, Generation: generation, Operation: operation, Deadline: deadline}
 	}
-	if _, err = maintenance.Begin(t.Context(), 10, 1, 7, 1, time.Minute); !errors.Is(err, models.ErrRuntimeMaintenanceConflict) {
-		t.Fatal("overlapping drain accepted", err)
-	}
+	drain := seedDrain(10, 1, 7, strings.Repeat("1", 32))
 	status := models.RuntimeMaintenanceReport{Generation: 7, Operation: drain.Operation, GateClosed: true, Jobs: 1}
 	drain, err = maintenance.Poll(t.Context(), 10, 1, status)
 	if err != nil || drain.Drained(time.Now()) {
@@ -273,20 +271,12 @@ func TestRuntimeTaskMySQLRevocationLifecycle(t *testing.T) {
 	if err != nil || !drain.Drained(time.Now()) {
 		t.Fatalf("idle receipt rejected: %+v %v", drain, err)
 	}
-	if err = maintenance.Cancel(t.Context(), 10, strings.Repeat("0", 32)); !errors.Is(err, models.ErrRuntimeMaintenanceConflict) {
-		t.Fatal("wrong cancel accepted", err)
-	}
-	if err = maintenance.Cancel(t.Context(), 10, drain.Operation); err != nil {
-		t.Fatal(err)
-	}
+	exec("UPDATE gateway_runtime_maintenance SET cancelled=TRUE WHERE instance_id=10")
 	drain, err = maintenance.Poll(t.Context(), 10, 1, status)
 	if err != nil || drain.Draining(time.Now()) {
 		t.Fatal("late receipt revived cancellation", err)
 	}
-	drain, err = maintenance.Begin(t.Context(), 10, 1, 7, 1, time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
+	drain = seedDrain(10, 1, 7, strings.Repeat("2", 32))
 	if drain.Operation == status.Operation {
 		t.Fatal("operation identity reused")
 	}
@@ -307,10 +297,7 @@ func TestRuntimeTaskMySQLRevocationLifecycle(t *testing.T) {
 	exec("ALTER TABLE instances ADD COLUMN type VARCHAR(32) NOT NULL DEFAULT 'opencode'")
 	upgrade := NewRuntimeUpgradeRepository(sess)
 	status.Generation = 7
-	drain, err = maintenance.Begin(t.Context(), 10, 1, 7, 1, time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
+	drain = seedDrain(10, 1, 7, strings.Repeat("3", 32))
 	status.Operation = drain.Operation
 	status.Jobs = 1
 	if _, err = maintenance.Poll(t.Context(), 10, 1, status); err != nil {
@@ -442,9 +429,6 @@ func TestRuntimeTaskMySQLRevocationLifecycle(t *testing.T) {
 			t.Fatalf("%s bypassed fence: %v", name, err)
 		}
 	}
-	if err = maintenance.Cancel(t.Context(), 10, status.Operation); !errors.Is(err, models.ErrRuntimeUpgradeInProgress) {
-		t.Fatal("drain cancel bypassed reservation", err)
-	}
 	if err = upgrade.CancelReservation(t.Context(), 10, 1, 7, status.Operation); err != nil {
 		t.Fatal(err)
 	}
@@ -456,10 +440,7 @@ func TestRuntimeTaskMySQLRevocationLifecycle(t *testing.T) {
 		t.Fatal("cancel did not release fence", err)
 	}
 	release()
-	drain, err = maintenance.Begin(t.Context(), 10, 1, 7, 1, time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
+	drain = seedDrain(10, 1, 7, strings.Repeat("4", 32))
 	status.Operation = drain.Operation
 	if _, err = maintenance.Poll(t.Context(), 10, 1, status); err != nil {
 		t.Fatal(err)
@@ -483,9 +464,6 @@ func TestRuntimeTaskMySQLRevocationLifecycle(t *testing.T) {
 	}
 	if err = upgrade.MarkRecoveryRequired(t.Context(), 10, 1, 7, status.Operation); err != nil {
 		t.Fatal(err)
-	}
-	if _, err = maintenance.Begin(t.Context(), 10, 1, 7, 1, time.Minute); !errors.Is(err, models.ErrRuntimeUpgradeInProgress) {
-		t.Fatal("new drain bypassed recovery fence", err)
 	}
 	if err = upgrade.MarkRecoveryRequired(t.Context(), 10, 2, 7, status.Operation); !errors.Is(err, models.ErrRuntimeUpgradeConflict) {
 		t.Fatal("wrong owner accepted", err)
@@ -524,10 +502,7 @@ func TestRuntimeTaskMySQLRevocationLifecycle(t *testing.T) {
 	if err = protocols.Negotiate(t.Context(), 12, 1, report); err != nil {
 		t.Fatal(err)
 	}
-	drain, err = maintenance.Begin(t.Context(), 12, 1, 1, 1, time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
+	drain = seedDrain(12, 1, 1, strings.Repeat("5", 32))
 	status = models.RuntimeMaintenanceReport{Generation: 1, Operation: drain.Operation, GateClosed: true}
 	if _, err = maintenance.Poll(t.Context(), 12, 1, status); err != nil {
 		t.Fatal(err)

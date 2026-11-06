@@ -37,7 +37,6 @@ import {
 import InstanceSkillHubPanel from "../../components/InstanceSkillHubPanel";
 import InstanceSessionUsagePanel from "../../components/InstanceSessionUsagePanel";
 import RuntimeGovernanceBadge from "../../components/RuntimeGovernanceBadge";
-import RuntimeMaintenancePanel from "../../components/RuntimeMaintenancePanel";
 import { InstanceServiceFrame } from "../../components/InstanceServiceFrame";
 import RestartWithEnvironmentDialog from "../../components/RestartWithEnvironmentDialog";
 import UserLayout from "../../components/UserLayout";
@@ -1175,7 +1174,6 @@ const InstanceDetailPage: React.FC = () => {
             )}
           </span>
           <span>{formatDateTime(instance.updated_at, locale)}</span>
-          {instance.type === "opencode" && <RuntimeMaintenancePanel key={instance.id} instanceId={instance.id} />}
         </div>
         <InstanceAutoStopInfo instance={instance} />
       </div>
