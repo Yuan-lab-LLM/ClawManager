@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -53,6 +54,12 @@ func TestProtectedSchedulerRestoresDurableCreatingBeforeRealSlotRetry(t *testing
 		t.Run(scenario, func(t *testing.T) {
 			ctx := context.Background()
 			a, _, kube, cm, pod := securityFixture(t)
+			// This test exercises actual allocation as well as security admission:
+			// the registered Pod must expose the coordinator's physical routes.
+			pod.Spec.Containers = auditRoutingPod(2, RuntimeGatewayPortBlockSize("opencode")).Spec.Containers
+			if _, err := kube.CoreV1().Pods("test").Update(ctx, pod, metav1.UpdateOptions{}); err != nil {
+				t.Fatal(err)
+			}
 			if err := kube.CoreV1().ConfigMaps("test").Delete(ctx, cm.Name, metav1.DeleteOptions{}); err != nil {
 				t.Fatal(err)
 			}
@@ -69,13 +76,27 @@ func TestProtectedSchedulerRestoresDurableCreatingBeforeRealSlotRetry(t *testing
 			a.instances = repo
 			calls := 0
 			client := NewSlotRuntimeAgentClientWithHTTPClient("control", kube, "test", &http.Client{Transport: slotRoundTripper(func(r *http.Request) (*http.Response, error) {
-				if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/gateways") {
+				if r.Header.Get("X-ClawManager-Control-Token") != "control" {
+					t.Error("runtime control request was not authenticated")
+				}
+				switch {
+				case r.Method == http.MethodGet && (r.URL.Path == "/v1/slots/slot-0/state" || r.URL.Path == "/v1/slots/slot-1/state"):
+					// Audits run before durable retry restores creating. Reading
+					// this proof must not perform a native launch or require it.
+					snapshot := auditFreeSnapshot()
+					snapshot["pod_uid"] = string(pod.UID)
+					data, _ := json.Marshal(snapshot)
+					return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(string(data)))}, nil
+				case r.Method == http.MethodPost && r.URL.Path == "/v1/gateways":
 					calls++
+					if repo.byID[7].Status != "creating" {
+						t.Error("native launch before durable creating")
+					}
+					return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"gateway_id":"gw-7-2","port":20000,"status":"running"}`))}, nil
+				default:
+					t.Errorf("unexpected runtime request: %s %s", r.Method, r.URL.Path)
+					return nil, errors.New("unexpected runtime control request")
 				}
-				if repo.byID[7].Status != "creating" {
-					t.Error("native launch before durable creating")
-				}
-				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"gateway_id":"gw-7-2","gateway_port":20000,"status":"running"}`))}, nil
 			})}).(*slotRuntimeAgentClient)
 			client.security = a
 			endpoint, uid := "https://"+pod.Status.PodIP+":19090", string(pod.UID)
@@ -94,6 +115,10 @@ func TestProtectedSchedulerRestoresDurableCreatingBeforeRealSlotRetry(t *testing
 			if scenario == "recover" {
 				if calls != 1 || repo.resets != 1 {
 					t.Fatalf("protected retry never reached actual slot client: resets=%d native_calls=%d", repo.resets, calls)
+				}
+				binding := bindings.bindings[7]
+				if binding == nil || binding.State != RuntimeGatewayBindingRunning || binding.GatewayID != "gw-7-2" || repo.runtimeStates[7].status != "running" {
+					t.Fatal("protected retry did not persist the admitted running gateway")
 				}
 				if _, err := kube.CoreV1().ConfigMaps("test").Get(ctx, "lite-instance-7", metav1.GetOptions{}); err != nil {
 					t.Fatal("retry failed to publish current assignment")
