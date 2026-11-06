@@ -22,6 +22,7 @@ import { WorkspaceFileManager } from "../WorkspaceFileManager";
 import {
   instanceWorkbenchService as service,
   workbenchError,
+  workbenchPreviewError,
 } from "../../services/instanceWorkbenchService";
 import type { TerminalSession, WorkbenchProcess } from "../../types/workbench";
 import {
@@ -33,6 +34,7 @@ import { GitProjects } from "./GitProjects";
 import { WorkbenchTerminal } from "./WorkbenchTerminal";
 import { WorkbenchBrowser } from "./WorkbenchBrowser";
 import type { WorkbenchState, WorkbenchEvent } from "./state";
+import { isRestoredPreviewCurrent } from "./persistence";
 import "./workbench.css";
 function navigateTabs(event: KeyboardEvent<HTMLDivElement>) {
   if (
@@ -144,6 +146,34 @@ export function InstanceWorkbench({
   if (!visible && full) setFull(false);
   const scopeAllowed = allowBrowserInstance(instanceId, caps.data);
   const ready = isRunning && !!caps.data && scopeAllowed;
+  const currentView = useRef(state);
+  currentView.current = state;
+  const previewScope = useRef({ instanceId, generation, isRunning });
+  previewScope.current = { instanceId, generation, isRunning };
+  const mounted = useRef(false);
+  const restoredRequests = useRef(new Set<string>());
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
+  useEffect(() => {
+    if (!ready || !caps.data?.preview || state.generation !== generation) return;
+    for (const tab of state.tabs) {
+      if (!tab.restorePreview || tab.hidden || tab.stale || !tab.address) continue;
+      const address = tab.address;
+      const requestKey = `${generation}:${tab.id}:${address}`;
+      if (restoredRequests.current.has(requestKey)) continue;
+      restoredRequests.current.add(requestKey);
+      dispatch({ type: "browser.navigate", id: tab.id, address, url: "", previewPending: true, generation });
+      const isCurrent = () => mounted.current && previewScope.current.instanceId === instanceId && previewScope.current.generation === generation && previewScope.current.isRunning && isRestoredPreviewCurrent(currentView.current, tab.id, address, generation);
+      void service.preview(instanceId, generation, address).then(result => {
+        if (!isCurrent() || result.generation !== generation) return;
+        dispatch({ type: "browser.navigate", id: tab.id, address, url: result.url, viewer_url: result.viewer_url, credentialless: result.credentialless, generation });
+      }, error => {
+        if (isCurrent()) dispatch({ type: "browser.navigate", id: tab.id, address, url: "", previewError: workbenchPreviewError(error, t), generation });
+      });
+    }
+  }, [ready, caps.data?.preview, state.generation, state.tabs, generation, instanceId, dispatch, t]);
   const selected = state.tabs.find(
     (tab) => tab.id === state.active && !tab.hidden,
   );

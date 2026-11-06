@@ -13,6 +13,7 @@ export interface WorkbenchTab {
   credentialless?: boolean;
   previewPending?: boolean;
   previewError?: string;
+  restorePreview?: boolean;
   session?: TerminalSession;
 }
 export interface GitViewState {
@@ -133,6 +134,7 @@ export function workbenchReducer(
                 credentialless: event.credentialless,
                 previewPending: event.previewPending,
                 previewError: event.previewError,
+                restorePreview: undefined,
                 title: event.address,
                 stale: false,
               }
@@ -189,7 +191,7 @@ export function workbenchReducer(
         event.type === "tab.remove"
           ? state.tabs.filter((tab) => tab.id !== event.id)
           : state.tabs.map((tab) =>
-              tab.id === event.id ? { ...tab, hidden: true } : tab,
+              tab.id === event.id ? { ...tab, hidden: true, previewPending: undefined } : tab,
             );
       return {
         ...state,
@@ -214,6 +216,7 @@ export function workbenchReducer(
               credentialless: undefined,
               previewPending: undefined,
               previewError: undefined,
+              restorePreview: undefined,
             })),
           };
     default:

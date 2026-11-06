@@ -42,7 +42,9 @@ import RestartWithEnvironmentDialog from "../../components/RestartWithEnvironmen
 import UserLayout from "../../components/UserLayout";
 import UpgradeRecoveryActions from "../../components/UpgradeRecoveryActions";
 import { InstanceWorkbench } from "../../components/workbench/InstanceWorkbench";
-import {initialWorkbench,workbenchReducer,MAX_WORKBENCH_TABS,type WorkbenchState,type WorkbenchEvent} from "../../components/workbench/state";
+import {workbenchReducer,MAX_WORKBENCH_TABS,type WorkbenchState,type WorkbenchEvent} from "../../components/workbench/state";
+import { readWorkbenchView, writeWorkbenchView, workbenchViewKey } from "../../components/workbench/persistence";
+import { useAuthStore } from "../../stores/authStore";
 import { useI18n } from "../../contexts/I18nContext";
 import { useInstanceStatusWebSocket } from "../../hooks/useWebSocket";
 import type { InstanceStatusUpdate } from "../../hooks/useWebSocket";
@@ -406,20 +408,34 @@ const InstanceDetailPage: React.FC = () => {
   const [workspaceHeightPx, setWorkspaceHeightPx] = useState<number | null>(
     null,
   );
-  const [workspaceVisible, setWorkspaceVisible] = useState(true);
-  // Keep workbench tabs and drafts across layout changes.
-  const [workbenchViews,setWorkbenchViews]=useState<Record<number,WorkbenchState>>({});
+  const workbenchUserId = useAuthStore((auth) => auth.isAuthenticated ? auth.user?.id : undefined);
+  const workbenchScope = workbenchViewKey(workbenchUserId, instanceId);
+  const activeWorkbenchScope = useRef(workbenchScope);
+  activeWorkbenchScope.current = workbenchScope;
+  const restoredWorkbench = useMemo(() => readWorkbenchView(workbenchScope), [workbenchScope]);
+  // Only browser definitions are durable; capabilities and drafts remain in memory.
+  const [workbenchViews,setWorkbenchViews]=useState<Record<string,WorkbenchState>>({});
+  const [workspaceVisibility, setWorkspaceVisibility] = useState<Record<string, boolean>>({});
   const workbenchViewsRef = useRef(workbenchViews);
+  const workspaceVisibilityRef = useRef(workspaceVisibility);
+  const workspaceVisible = (workbenchScope ? workspaceVisibility[workbenchScope] : undefined) ?? restoredWorkbench.visible;
+  const setWorkspaceVisible = useCallback((visible: boolean) => {
+    if (!workbenchScope || activeWorkbenchScope.current !== workbenchScope) return;
+    workspaceVisibilityRef.current = { ...workspaceVisibilityRef.current, [workbenchScope]: visible };
+    setWorkspaceVisibility(workspaceVisibilityRef.current);
+    writeWorkbenchView(workbenchScope, { state: workbenchViewsRef.current[workbenchScope] ?? restoredWorkbench.state, visible });
+  }, [workbenchScope, restoredWorkbench]);
   const onWorkbenchEvent = useCallback((event: WorkbenchEvent) => {
-    if (!instanceId) return;
+    if (!instanceId || !workbenchScope || activeWorkbenchScope.current !== workbenchScope) return;
     const previous = workbenchViewsRef.current;
-    const current = previous[instanceId] ?? initialWorkbench(instance?.runtime_generation ?? 0);
+    const current = previous[workbenchScope] ?? restoredWorkbench.state;
     const next = workbenchReducer(current, event);
     if (next !== current) {
-      workbenchViewsRef.current = { ...previous, [instanceId]: next };
+      workbenchViewsRef.current = { ...previous, [workbenchScope]: next };
       setWorkbenchViews(workbenchViewsRef.current);
+      writeWorkbenchView(workbenchScope, { state: next, visible: workspaceVisibilityRef.current[workbenchScope] ?? restoredWorkbench.visible });
     }
-  }, [instanceId, instance?.runtime_generation]);
+  }, [instanceId, workbenchScope, restoredWorkbench]);
 
   const nativePreviewInstanceId = instance?.id;
   const nativePreviewGeneration = instance?.runtime_generation ?? 0;
@@ -427,7 +443,8 @@ const InstanceDetailPage: React.FC = () => {
     if (!nativePreviewInstanceId || nativePreviewInstanceId !== instanceId || !isCurrent()) return;
     const id = nativePreviewInstanceId;
     const generation = nativePreviewGeneration;
-    const view = workbenchViewsRef.current[id] ?? initialWorkbench(generation);
+    if (!workbenchScope || activeWorkbenchScope.current !== workbenchScope) return;
+    const view = workbenchViewsRef.current[workbenchScope] ?? restoredWorkbench.state;
     if (view.generation !== generation) return;
     const existing = view.tabs.find((tab) => tab.kind === "browser" && tab.address === address && !tab.stale);
     if (existing) {
@@ -446,19 +463,19 @@ const InstanceDetailPage: React.FC = () => {
     setWorkspaceVisible(true);
     try {
       const result = await instanceWorkbenchService.preview(id, generation, address);
-      if (!isCurrent() || result.generation !== generation || workbenchViewsRef.current[id]?.generation !== generation) {
+      if (!isCurrent() || activeWorkbenchScope.current !== workbenchScope || result.generation !== generation || workbenchViewsRef.current[workbenchScope]?.generation !== generation) {
         onWorkbenchEvent({ type: "tab.remove", id: tab });
         return;
       }
       onWorkbenchEvent({ type: "browser.navigate", id: tab, address, url: result.url, viewer_url: result.viewer_url, credentialless: result.credentialless, generation });
     } catch (error) {
-      if (!isCurrent() || workbenchViewsRef.current[id]?.generation !== generation) {
+      if (!isCurrent() || activeWorkbenchScope.current !== workbenchScope || workbenchViewsRef.current[workbenchScope]?.generation !== generation) {
         onWorkbenchEvent({ type: "tab.remove", id: tab });
         return;
       }
       onWorkbenchEvent({ type: "browser.navigate", id: tab, address, url: "", previewError: workbenchPreviewError(error, t), generation });
     }
-  }, [instanceId, nativePreviewInstanceId, nativePreviewGeneration, onWorkbenchEvent, t]);
+  }, [instanceId, nativePreviewInstanceId, nativePreviewGeneration, workbenchScope, restoredWorkbench, setWorkspaceVisible, onWorkbenchEvent, t]);
 
   const [collapsedBottomHeightPx, setCollapsedBottomHeightPx] = useState<
     number | null
@@ -1172,7 +1189,7 @@ const InstanceDetailPage: React.FC = () => {
 
   if (!allowBrowserInstance(instanceId)) return null;
 
-  if (loading) {
+  if (loading || (instance !== null && instance.id !== instanceId)) {
     return (
       <UserLayout title={t("instances.details")}>
         <div className="flex h-64 items-center justify-center text-sm text-slate-500">
@@ -1618,7 +1635,7 @@ const InstanceDetailPage: React.FC = () => {
     </div>
   );
 
-  const sharedWorkbenchState=workbenchViews[instance.id]??initialWorkbench(instance.runtime_generation??0);
+  const sharedWorkbenchState=(workbenchScope ? workbenchViews[workbenchScope] : undefined)??restoredWorkbench.state;
 
   const renderLiteWorkspace = () => {
     const pinnedWorkspaceHeight = workspaceHeightPx;
@@ -1665,7 +1682,7 @@ const InstanceDetailPage: React.FC = () => {
           {supportsWorkspace(instance) && (
             <div className={`wb-instance-tools h-full min-h-0 min-w-0 ${workspaceVisible ? "" : "hidden"}`}>
               <InstanceWorkbench
-                key={instance.id}
+                key={workbenchScope}
                 sharedState={sharedWorkbenchState}
                 onWorkbenchEvent={onWorkbenchEvent}
                 instanceId={instance.id}
@@ -1778,7 +1795,7 @@ const InstanceDetailPage: React.FC = () => {
         {supportsWorkspace(instance) && (
           <div className={`h-[clamp(520px,calc(100vh-10rem),760px)] min-w-0 overflow-hidden ${workspaceVisible ? "" : "hidden"}`}>
             <InstanceWorkbench
-              key={instance.id}
+              key={workbenchScope}
               sharedState={sharedWorkbenchState}
               onWorkbenchEvent={onWorkbenchEvent}
               instanceId={instance.id}
