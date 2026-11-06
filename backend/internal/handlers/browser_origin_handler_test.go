@@ -468,3 +468,21 @@ func TestBrowserNativeBootstrapOverridesGinNoRouteStatus(t *testing.T) {
 		})
 	}
 }
+
+func TestNativeWebSocketWithoutMetadataStillRequiresInstanceCapability(t *testing.T) {
+	router, _, _ := nativeRouteFixture(t, services.RuntimeTypeDeepSeekHarness)
+	for _, cookie := range []string{"", "invalid-instance-capability"} {
+		r := httptest.NewRequest("GET", "https://10.130.81.54:31400/api/remote.mux", nil)
+		r.Header.Set("Origin", "https://10.130.81.54:31400")
+		r.Header.Set("Connection", "Upgrade")
+		r.Header.Set("Upgrade", "websocket")
+		if cookie != "" {
+			r.AddCookie(&http.Cookie{Name: "instance_access_118", Value: cookie})
+		}
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, r)
+		if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "Access token required") {
+			t.Fatalf("socket must reach the unchanged capability check: HTTP %d", w.Code)
+		}
+	}
+}

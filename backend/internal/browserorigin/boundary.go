@@ -6,6 +6,8 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+
+	"github.com/gorilla/websocket"
 )
 
 type nativeContextKey struct{}
@@ -29,6 +31,11 @@ func AllowNativeRequest(r *http.Request, origin, manager string, bootstrap bool)
 	}
 	if site == "same-origin" {
 		return source == "" || source == origin
+	}
+	// Chrome can omit Fetch Metadata on WebSocket handshakes. Its Origin still
+	// identifies the exact native port; the instance capability is checked next.
+	if site == "" && source == origin && r.Method == http.MethodGet && websocket.IsWebSocketUpgrade(r) {
+		return true
 	}
 	if bootstrap && (r.Method == http.MethodGet || r.Method == http.MethodHead) {
 		if source != "" && source != manager {
