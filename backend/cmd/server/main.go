@@ -1082,6 +1082,7 @@ func main() {
 			adminRuntime.GET("/runtime-auto-stop", autoStopHandler.Get)
 			adminRuntime.PUT("/runtime-auto-stop", autoStopHandler.Update)
 			adminRuntime.PUT("/instances/:id/auto-stop", autoStopHandler.SetDisabled)
+			adminRuntime.POST("/instances/:id/recover-stopped-source", runtimePoolHandler.RecoverStoppedSource)
 			adminRuntime.GET("/runtime-pods", runtimePoolHandler.ListPods)
 			adminRuntime.GET("/runtime-pod-pools", runtimePodMaintenanceHandler.ManagedPools)
 			adminRuntime.GET("/runtime-pods/scale-options", runtimePodMaintenanceHandler.ScaleOptions)
