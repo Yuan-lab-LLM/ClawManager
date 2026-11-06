@@ -317,3 +317,46 @@ func TestWorkbenchGitPathNeverNormalizesToDifferentFile(t *testing.T) {
 		}
 	}
 }
+
+func TestWorkbenchGitIdentityPreservesExternallyEditedManagedBlock(t *testing.T) {
+	root := t.TempDir()
+	repo := filepath.Join(root, "repo")
+	if out, e := exec.Command("git", "init", repo).CombinedOutput(); e != nil {
+		t.Fatalf("init %s %v", out, e)
+	}
+	s, target := gitRepairService(t, root, &gitRepairAgent{})
+	req := map[string]any{"operation": "set-identity", "path": "repo", "name": "Person", "email": "person@example.test"}
+	gitRepairExecute(t, s, target, req)
+	config := filepath.Join(repo, ".git/config")
+	for _, args := range [][]string{{"--unset", "user.email"}, {"--add", "user.signingkey", "KEY-ID"}} {
+		cmd := exec.Command("git", append([]string{"config", "--file", config}, args...)...)
+		if out, e := cmd.CombinedOutput(); e != nil {
+			t.Fatalf("external config %s %v", out, e)
+		}
+	}
+	original, e := os.ReadFile(config)
+	if e != nil {
+		t.Fatal(e)
+	}
+	req["email"] = "new@example.test"
+	gitRepairExecute(t, s, target, req)
+	updated, e := os.ReadFile(config)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if !strings.HasPrefix(string(updated), string(original)) {
+		t.Fatal("removed unrelated externally modified config bytes")
+	}
+	if out, e := exec.Command("git", "config", "--file", config, "--get", "user.signingkey").CombinedOutput(); e != nil || strings.TrimSpace(string(out)) != "KEY-ID" {
+		t.Fatalf("lost signing key %q %v", out, e)
+	}
+}
+func TestWorkbenchGitImageFormatsMatchWorkspacePreview(t *testing.T) {
+	for _, ext := range []string{"png", "jpg", "jpeg", "gif", "webp", "avif", "bmp", "ico", "svg"} {
+		name := "asset." + ext
+		kind, _, previewable, _ := workspacePreviewKind(name, 1)
+		if gitImagePath(name) != (kind == "image" && previewable) {
+			t.Fatalf("Git advertises unsupported image %s", name)
+		}
+	}
+}

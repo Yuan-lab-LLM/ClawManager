@@ -44,7 +44,7 @@ export function parseUnifiedDiff(diff: string): DiffLine[] {
 }
 export function imagePreviewPath(repo: string, file: string, previewPath?: string) {
   const path = previewPath ?? [repo, file].filter(Boolean).join('/');
-  if (path.startsWith('/') || path.split('/').includes('..') || !/\.(png|jpe?g|gif|webp|avif|bmp|ico)$/i.test(path)) return null;
+  if (path.startsWith('/') || path.split('/').includes('..') || !/\.(png|jpe?g|gif|webp)$/i.test(path)) return null;
   return path;
 }
-export const safeImageMime = (mime: string) => /^image\/(png|jpeg|gif|webp|avif|bmp|x-icon|vnd.microsoft.icon)$/i.test(mime);
+export const safeImageMime = (mime: string) => /^image\/(png|jpeg|gif|webp)$/i.test(mime);

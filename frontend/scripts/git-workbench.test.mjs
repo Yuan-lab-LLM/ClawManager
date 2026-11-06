@@ -36,3 +36,10 @@ test('image preview paths are workspace relative and MIME allowlist excludes SVG
   assert.equal(helpers.safeImageMime('image/svg+xml'),false);
   assert.equal(helpers.safeImageMime('image/png'),true);
 });
+
+ test('Git image previews match the workspace PNG/JPEG/GIF/WebP capabilities', () => {
+  for (const ext of ['png','jpg','jpeg','gif','webp']) assert.equal(helpers.imagePreviewPath('repo', `asset.${ext}`), `repo/asset.${ext}`);
+  for (const ext of ['avif','bmp','ico','svg']) assert.equal(helpers.imagePreviewPath('repo', `asset.${ext}`), null);
+  for (const mime of ['image/png','image/jpeg','image/gif','image/webp']) assert.equal(helpers.safeImageMime(mime),true);
+  for (const mime of ['image/avif','image/bmp','image/x-icon','image/vnd.microsoft.icon']) assert.equal(helpers.safeImageMime(mime),false);
+ });

@@ -218,7 +218,7 @@ func gitLineCount(text string) int {
 }
 func gitImagePath(p string) bool {
 	switch strings.ToLower(path.Ext(p)) {
-	case ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".ico":
+	case ".png", ".jpg", ".jpeg", ".gif", ".webp":
 		return true
 	}
 	return false
@@ -528,7 +528,8 @@ func (s *InstanceWorkbenchService) gitIdentity(ctx context.Context, target workb
 		const marker = "\n# ClawManager repository identity\n"
 		if i := strings.LastIndex(updated, marker); i >= 0 {
 			suffix := updated[i+len(marker):]
-			if strings.HasPrefix(suffix, "[user]\n") && len(strings.Split(strings.TrimSuffix(suffix, "\n"), "\n")) == 3 {
+			canonical := "[user]\n\tname = " + quote(identity.Name) + "\n\temail = " + quote(identity.Email) + "\n"
+			if suffix == canonical {
 				updated = updated[:i]
 			}
 		}
