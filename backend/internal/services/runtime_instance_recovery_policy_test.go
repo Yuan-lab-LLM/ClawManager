@@ -84,3 +84,22 @@ func TestRuntimeRecoveryClassificationRequiresReportedFailure(t *testing.T) {
 		})
 	}
 }
+
+func TestRuntimeRecoveryFreshDetailsRequireConcreteFailureWithoutExposingErrors(t *testing.T) {
+	for _, tt := range []struct {
+		code, message string
+		blocked       bool
+	}{
+		{"", "", false},
+		{"missing_llm_credentials", "", true},
+		{"INVALID_CREDENTIALS", "gateway_process_exited", true},
+		{"", "gateway_start_failed", true},
+		{"gateway_process_exited", "", false},
+		{"", "port_conflict", false},
+		{"", "invalid configuration: sensitive value", true},
+	} {
+		if got := runtimeRecoveryFreshFailureBlocked(tt.code, tt.message); got != tt.blocked {
+			t.Fatalf("classification mismatch for %q: %v", tt.code, got)
+		}
+	}
+}

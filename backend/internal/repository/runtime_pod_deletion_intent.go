@@ -135,6 +135,21 @@ func WithRuntimePodAssignmentAdmission(ctx context.Context, sess db.Session, act
 		if currentGeneration != generation || (currentStatus != "creating" && currentStatus != "running" && currentStatus != "error") {
 			return models.ErrInstanceStopping
 		}
+		// Command stop intent may commit after recovery advances the generation.
+		// Use a current locking read: earlier inventory SELECTs may have opened
+		// a repeatable-read snapshot before that intent committed. Desired-state
+		// writers take this same instance row lock before updating their row.
+		row, err = tx.SQL().QueryRowContext(ctx, `SELECT desired_power_state FROM instance_desired_state WHERE instance_id=? FOR UPDATE`, instanceID)
+		if err != nil {
+			return err
+		}
+		var desiredPower string
+		if err = row.Scan(&desiredPower); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		if err == nil && desiredPower != "running" {
+			return models.ErrInstanceStopping
+		}
 		if err = checkAutoStopRuntimeState(ctx, tx, instanceID, "creating", generation); err != nil {
 			return err
 		}

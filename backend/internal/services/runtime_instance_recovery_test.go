@@ -2,7 +2,9 @@ package services
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -236,5 +238,73 @@ func TestRuntimeRecoveryOpaqueStartupFailureDoesNotEnterLegacyRetryLoop(t *testi
 	handled, errs := s.reconcileInstanceRecoveryLocked(context.Background(), i, now)
 	if !handled || len(errs) > 0 || r.state != nil || len(a.deleteRequests) > 0 {
 		t.Fatal("opaque startup error re-entered automatic legacy retry")
+	}
+}
+
+func TestRuntimeRecoveryFreshPermanentNativeFailureOverridesStaleSQLCrash(t *testing.T) {
+	for _, field := range []string{"error_message", "error_code"} {
+		t.Run(field, func(t *testing.T) {
+			s, r, b, a, i, now := recoveryFixture()
+			wire := map[string]any{"gateway_id": "gw-7-2", "instance_id": 7, "generation": 2, "state": "error", field: "missing_llm_credentials: secret-test-credential"}
+			if field == "error_code" {
+				wire[field] = "INVALID_CREDENTIALS"
+			}
+			encoded, _ := json.Marshal(wire)
+			var fresh RuntimeAgentGatewayState
+			if err := json.Unmarshal(encoded, &fresh); err != nil {
+				t.Fatal(err)
+			}
+			s.agentClient = &recoveryGatewayStateAgent{fakeRuntimeAgentClient: a, state: &fresh}
+			s.reconcileInstanceRecoveryLocked(context.Background(), i, now)
+			_, errs := s.reconcileInstanceRecoveryLocked(context.Background(), i, now.Add(30*time.Second))
+			s.reconcileInstanceRecoveryLocked(context.Background(), i, now.Add(time.Hour))
+			current, _ := r.GetByID(i.ID)
+			if len(a.deleteRequests) != 0 || b.bindings[i.ID] == nil || current.RuntimeGeneration != 2 {
+				t.Fatal("stale SQL crash reset current permanent failure")
+			}
+			if r.state.Attempts != 1 || r.state.NextRetryAt != nil {
+				t.Fatal("fresh permanent failure did not halt bounded recovery")
+			}
+			inspected, _ := json.Marshal(r.state)
+			stateJSON, _ := json.Marshal(fresh)
+			if strings.Contains(string(inspected), "secret-test-credential") || strings.Contains(string(stateJSON), "secret-test-credential") {
+				t.Fatal("fresh runtime credentials escaped into inspection")
+			}
+			for _, err := range errs {
+				if strings.Contains(err.Error(), "secret-test-credential") {
+					t.Fatal("runtime credentials escaped into recovery error")
+				}
+			}
+		})
+	}
+}
+
+func TestRuntimeRecoveryFreshOpaqueFailureCannotBorrowStaleCrashAuthority(t *testing.T) {
+	s, r, b, a, i, now := recoveryFixture()
+	var fresh RuntimeAgentGatewayState
+	if err := json.Unmarshal([]byte(`{"gateway_id":"gw-7-2","instance_id":7,"generation":2,"state":"error","error_message":"gateway_start_failed"}`), &fresh); err != nil {
+		t.Fatal(err)
+	}
+	s.agentClient = &recoveryGatewayStateAgent{fakeRuntimeAgentClient: a, state: &fresh}
+	s.reconcileInstanceRecoveryLocked(context.Background(), i, now)
+	s.reconcileInstanceRecoveryLocked(context.Background(), i, now.Add(30*time.Second))
+	current, _ := r.GetByID(i.ID)
+	if len(a.deleteRequests) != 0 || b.bindings[i.ID] == nil || current.RuntimeGeneration != 2 || r.state.NextRetryAt != nil {
+		t.Fatal("opaque current failure borrowed stale crash permission")
+	}
+}
+
+func TestRuntimeRecoveryFreshNativeCrashRetainsBoundedBudget(t *testing.T) {
+	s, r, _, a, i, now := recoveryFixture()
+	var fresh RuntimeAgentGatewayState
+	if err := json.Unmarshal([]byte(`{"gateway_id":"gw-7-2","instance_id":7,"generation":2,"state":"error","error_message":"gateway_process_exited"}`), &fresh); err != nil {
+		t.Fatal(err)
+	}
+	s.agentClient = &recoveryGatewayStateAgent{fakeRuntimeAgentClient: a, state: &fresh}
+	s.reconcileInstanceRecoveryLocked(context.Background(), i, now)
+	s.reconcileInstanceRecoveryLocked(context.Background(), i, now.Add(30*time.Second))
+	current, _ := r.GetByID(i.ID)
+	if len(a.deleteRequests) != 1 || current.RuntimeGeneration != 3 || r.state.Attempts != 1 || r.state.NextRetryAt == nil {
+		t.Fatal("fresh crash was blocked or budget was reset")
 	}
 }

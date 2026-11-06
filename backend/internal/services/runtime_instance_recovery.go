@@ -11,6 +11,10 @@ import (
 	"clawreef/internal/repository"
 )
 
+const runtimeRecoveryPermanentReason = "automatic recovery blocked: runtime configuration or credentials require attention"
+
+var errRuntimeRecoveryPermanentFailure = errors.New(runtimeRecoveryPermanentReason)
+
 type runtimeRecoverySourceKey struct{}
 type runtimeRecoveryPlacementSource struct {
 	podID       int64
@@ -66,6 +70,9 @@ func (s *RuntimeScheduler) reconcileInstanceRecoveryLocked(ctx context.Context, 
 			return true, []error{err}
 		}
 		return false, nil
+	}
+	if state != nil && state.Reason == runtimeRecoveryPermanentReason {
+		return true, nil
 	}
 	if runtimeRecoveryPermanentFailure(instance, binding) {
 		if state != nil {
@@ -123,6 +130,13 @@ func (s *RuntimeScheduler) reconcileInstanceRecoveryLocked(ctx context.Context, 
 	}
 	if binding != nil {
 		if err = s.confirmRecoverySourceStopped(ctx, instance, binding); err != nil {
+			if errors.Is(err, errRuntimeRecoveryPermanentFailure) {
+				next.Reason = runtimeRecoveryPermanentReason
+				next.NextRetryAt = nil
+				if _, saveErr := store.SaveRuntimeRecovery(ctx, instance, next); saveErr != nil {
+					return true, []error{err, saveErr}
+				}
+			}
 			return true, []error{err}
 		}
 	}
@@ -176,6 +190,9 @@ func (s *RuntimeScheduler) confirmRecoverySourceStopped(ctx context.Context, ins
 		if readErr == nil {
 			if fresh == nil || fresh.InstanceID != instance.ID || fresh.Generation != binding.Generation || fresh.GatewayID != binding.GatewayID {
 				return fmt.Errorf("recovery source state does not match the exact owner/generation")
+			}
+			if fresh.recoveryFailureBlocked {
+				return errRuntimeRecoveryPermanentFailure
 			}
 			switch strings.ToLower(strings.TrimSpace(fresh.State)) {
 			case "error", "failed", "unhealthy", "stopped", "deleted":

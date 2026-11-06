@@ -41,6 +41,28 @@ func runtimeRecoveryHealthy(state models.InstanceRuntimeRecovery, now time.Time,
 	return state
 }
 
+// Fresh nonempty runtime details must establish their own retryable failure.
+// An old SQL crash cannot authorize reset of a new opaque startup error.
+func runtimeRecoveryFreshFailureBlocked(code, message string) bool {
+	if runtimeRecoveryPermanentDetails(code, message) {
+		return true
+	}
+	if strings.TrimSpace(code) == "" && strings.TrimSpace(message) == "" {
+		return false
+	}
+	for _, detail := range []string{code, message} {
+		if _, retryable := runtimeRecoveryFailureReason(models.Instance{Status: "error"}, &models.InstanceRuntimeBinding{State: "error", ErrorMessage: &detail}); retryable {
+			return false
+		}
+	}
+	return true
+}
+
+func runtimeRecoveryPermanentDetails(code, message string) bool {
+	details := code + " " + message
+	return runtimeRecoveryPermanentFailure(models.Instance{RuntimeErrorCode: &code, RuntimeErrorMessage: &details}, nil)
+}
+
 func runtimeRecoveryPermanentFailure(instance models.Instance, binding *models.InstanceRuntimeBinding) bool {
 	code := ""
 	if instance.RuntimeErrorCode != nil {

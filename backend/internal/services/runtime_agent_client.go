@@ -158,6 +158,25 @@ type RuntimeAgentGatewayState struct {
 	InstanceID int    `json:"instance_id"`
 	Generation int    `json:"generation"`
 	State      string `json:"state"`
+
+	// Runtime errors may include credentials. Decode only the classification;
+	// neither raw details nor the private verdict can enter inspection JSON.
+	recoveryFailureBlocked bool
+}
+
+func (state *RuntimeAgentGatewayState) UnmarshalJSON(data []byte) error {
+	type identity RuntimeAgentGatewayState
+	var wire struct {
+		identity
+		ErrorCode    string `json:"error_code"`
+		ErrorMessage string `json:"error_message"`
+	}
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	*state = RuntimeAgentGatewayState(wire.identity)
+	state.recoveryFailureBlocked = runtimeRecoveryFreshFailureBlocked(wire.ErrorCode, wire.ErrorMessage)
+	return nil
 }
 
 type RuntimeAgentPortRange struct {
