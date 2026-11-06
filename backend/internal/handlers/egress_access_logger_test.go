@@ -20,6 +20,7 @@ func TestEgressAccessLoggerDoesNotRecordPreviewGrants(t *testing.T) {
 	for _, path := range []string{
 		"http://clawmanager-team-preview.invalid/v3/static/12/_/grant-secret-sentinel/index.html",
 		"http://p-grant.clawmanager-team-preview.invalid/v3/interactive/12/_/grant-secret-sentinel/index.html",
+		"/__clawmanager_preview/grant-secret-sentinel",
 		"/api/v1/build",
 	} {
 		router.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, path, nil))

@@ -191,6 +191,12 @@ func (p *Previews) LookupHost(ctx context.Context, host string) (PreviewLease, e
 	u, _ := url.Parse("//" + host)
 	hostname := strings.ToLower(u.Hostname())
 	id := strings.TrimSuffix(strings.TrimPrefix(hostname, "p-"), "."+p.domain)
+	return p.LookupCapability(ctx, id)
+}
+
+// LookupCapability authenticates the same opaque capability when a deployment
+// routes by a fixed browser origin rather than its bearer subdomain.
+func (p *Previews) LookupCapability(ctx context.Context, id string) (PreviewLease, error) {
 	decoded, err := hex.DecodeString(id)
 	if err != nil || len(decoded) != 24 {
 		return PreviewLease{}, ErrPreviewNotFound

@@ -18,11 +18,19 @@ import (
 func BrowserOriginRoutes(reg *browserorigin.Registry, instances *InstanceHandler, wb *services.InstanceWorkbenchService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if reg == nil {
+			if c.GetHeader("X-ClawManager-Browser-Port") == "1" {
+				c.AbortWithStatus(http.StatusNotFound)
+				return
+			}
 			c.Next()
 			return
 		}
 		manager, _ := url.Parse(reg.ManagerOrigin())
 		if !reg.Matches(c.Request.Host) {
+			if c.GetHeader("X-ClawManager-Browser-Port") == "1" {
+				c.AbortWithStatus(http.StatusNotFound)
+				return
+			}
 			if strings.EqualFold(c.Request.Host, manager.Host) && c.Request.URL.Path == "/__clawmanager_browser/view" {
 				if wb == nil {
 					c.AbortWithStatus(http.StatusServiceUnavailable)
@@ -84,7 +92,15 @@ func BrowserOriginRoutes(reg *browserorigin.Registry, instances *InstanceHandler
 				c.AbortWithStatus(http.StatusNotFound)
 				return
 			}
-			wb.ServePreview(c.Writer, c.Request)
+			privateRequest := c.Request.Clone(c.Request.Context())
+			c.Request.URL.Path = "/__clawmanager_browser/request"
+			c.Request.URL.RawPath = ""
+			c.Request.URL.RawQuery = ""
+			c.Request.RequestURI = c.Request.URL.Path
+			c.Request.Header.Del("Cookie")
+			c.Request.Header.Del("Authorization")
+			c.Request.Header.Del("Referer")
+			wb.ServePreview(c.Writer, privateRequest)
 			c.Abort()
 			return
 		}

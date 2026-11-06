@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"clawreef/internal/browserorigin"
 	"clawreef/internal/models"
 	"clawreef/internal/workbench"
 )
@@ -41,6 +42,7 @@ type InstanceWorkbenchService struct {
 	pods                   workbenchPods
 	agent                  WorkbenchAgent
 	previews               *workbench.Previews
+	browserOrigins         *browserorigin.Registry
 	previewRecheckInterval time.Duration
 }
 type workbenchTarget struct {
@@ -118,6 +120,10 @@ func (s *InstanceWorkbenchService) Capabilities(ctx context.Context, userID int,
 	if err = json.Unmarshal(response, &caps); err != nil || caps == nil {
 		return nil, ErrWorkbenchUnavailable
 	}
+	if s.browserOrigins != nil {
+		caps["browser_origin_mode"] = "chrome-single-host"
+		caps["manager_origin"] = s.browserOrigins.ManagerOrigin()
+	}
 	caps["generation"] = target.scope.Generation
 	caps["workspace"] = target.workspace
 	caps["preview"] = caps["preview"] == true && s.previews != nil
@@ -151,11 +157,24 @@ func (s *InstanceWorkbenchService) CreatePreview(ctx context.Context, userID int
 	if json.Unmarshal(response, &caps) != nil || !caps.Preview {
 		return nil, ErrRuntimeAgentUnsupported
 	}
+	var originBinding browserorigin.Binding
+	if s.browserOrigins != nil {
+		originBinding, err = s.browserOrigins.Bind(ctx, instanceID, browserorigin.Preview, browserPreviewTargetKey(parsed))
+		if err != nil {
+			return nil, err
+		}
+	}
 	lease, err := s.previews.Create(ctx, target.scope, rawURL)
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{"id": lease.ID, "url": s.previews.URL(lease), "generation": generation}, nil
+	result := map[string]any{"id": lease.ID, "url": s.previews.URL(lease), "generation": generation}
+	if s.browserOrigins != nil {
+		result["url"] = s.browserPreviewURL(originBinding, lease)
+		result["viewer_url"] = s.browserPreviewViewerURL(originBinding, lease)
+		result["credentialless"] = true
+	}
+	return result, nil
 }
 func (s *InstanceWorkbenchService) previewTarget(ctx context.Context, host string) (workbench.PreviewLease, workbenchTarget, error) {
 	lease, err := s.previews.LookupHost(ctx, host)

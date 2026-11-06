@@ -841,14 +841,17 @@ func main() {
 
 	// Setup router
 	r := gin.New()
-	r.Use(handlers.HermesDesktopRedactTickets(), egressProxyHandler.AccessLogger(gin.DefaultWriter), gin.CustomRecovery(func(c *gin.Context, _ any) {
+	r.Use(handlers.HermesDesktopRedactTickets(), gin.CustomRecovery(func(c *gin.Context, _ any) {
 		log.Print("HTTP request failed")
 		c.AbortWithStatus(http.StatusInternalServerError)
 	}))
 	r.Use(middleware.BackupRequestBoundary(backupHTTPPool, db.SQLGateScope()))
 
 	// Middleware
+	// Browser-origin routes can carry a bearer capability in their path. Handle
+	// them before the general logger; nginx8444 records statuses without URLs.
 	r.Use(handlers.BrowserOriginRoutes(browserOrigins, instanceHandler, instanceWorkbenchService))
+	r.Use(egressProxyHandler.AccessLogger(gin.DefaultWriter))
 	r.Use(func(c *gin.Context) {
 		if instanceWorkbenchService.IsPreviewHost(c.Request.Host) {
 			instanceWorkbenchService.ServePreview(c.Writer, c.Request)

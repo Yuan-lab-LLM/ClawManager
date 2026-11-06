@@ -293,3 +293,22 @@ func TestBrowserModeOffLeavesRoutingAlone(t *testing.T) {
 		t.Fatal(w.Code)
 	}
 }
+
+func TestBrowserOriginIngressNeverFallsThroughManager(t *testing.T) {
+	reg, err := browserorigin.New("https://10.130.81.54:30443", "31400-31527", &browserRouteStore{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, registry := range []*browserorigin.Registry{nil, reg} {
+		router := gin.New()
+		router.Use(BrowserOriginRoutes(registry, nil, nil))
+		router.GET("/api/v1/me", func(c *gin.Context) { c.Status(200) })
+		r := httptest.NewRequest("GET", "https://10.130.81.54:30443/api/v1/me", nil)
+		r.Header.Set("X-ClawManager-Browser-Port", "1")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, r)
+		if w.Code != 404 {
+			t.Fatalf("browser ingress reached manager: enabled=%v status=%d", registry != nil, w.Code)
+		}
+	}
+}

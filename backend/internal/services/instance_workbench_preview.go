@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"clawreef/internal/browserorigin"
 	"clawreef/internal/workbench"
 )
 
@@ -43,9 +44,12 @@ func (s *InstanceWorkbenchService) IsPreviewHost(host string) bool {
 func (s *InstanceWorkbenchService) ServePreview(w http.ResponseWriter, r *http.Request) {
 	// App requests never enter the CM API router, authentication middleware or CORS.
 	w.Header().Set("Referrer-Policy", "no-referrer")
-	lease, target, err := s.previewTarget(r.Context(), r.Host)
+	lease, target, err := s.previewRequestTarget(r.Context(), r)
 	if err != nil {
 		http.Error(w, "Preview expired or instance environment changed. Reopen the preview from the workbench.", 404)
+		return
+	}
+	if s.prepareBrowserPreview(w, r, lease) {
 		return
 	}
 	if r.URL.Path == "/__clawmanager_cert_check" || r.URL.Path == "/__clawmanager_cert_trust" {
@@ -95,7 +99,7 @@ func (s *InstanceWorkbenchService) ServePreview(w http.ResponseWriter, r *http.R
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				if _, _, err := s.previewTarget(ctx, r.Host); err != nil {
+				if _, _, err := s.previewRequestTarget(ctx, r); err != nil {
 					cancel()
 					return
 				}
@@ -123,6 +127,9 @@ func (s *InstanceWorkbenchService) ServePreview(w http.ResponseWriter, r *http.R
 			// Application auth belongs to its isolated origin; CM credentials are never injected.
 			p.Out.Header.Set("X-ClawManager-Control-Token", controlToken)
 			p.Out.Header.Set(workbenchPreviewHeader, base64.RawURLEncoding.EncodeToString(encoded))
+			if s.browserOrigins != nil && s.browserOrigins.Matches(r.Host) {
+				browserorigin.FilterPlatformCookies(p.Out.Header)
+			}
 			p.Out.Header.Del("Referer")
 			p.Out.Header.Del("X-Forwarded-Host")
 			p.Out.Header.Del("X-Forwarded-For")
@@ -153,6 +160,12 @@ func (s *InstanceWorkbenchService) ServePreview(w http.ResponseWriter, r *http.R
 			cookies := resp.Header.Values("Set-Cookie")
 			resp.Header.Del("Set-Cookie")
 			for _, raw := range cookies { // A localhost Domain cannot apply to a capability origin.
+				if s.browserOrigins != nil && s.browserOrigins.Matches(r.Host) {
+					name, _, _ := strings.Cut(raw, "=")
+					if browserorigin.PlatformCookie(strings.TrimSpace(name)) {
+						continue
+					}
+				}
 				parts := strings.Split(raw, ";")
 				kept := parts[:0]
 				for _, part := range parts {
