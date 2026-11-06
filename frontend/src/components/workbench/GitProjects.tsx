@@ -4,6 +4,9 @@ import {
   ArrowDown,
   ArrowUp,
   GitBranch,
+  Folder,
+  ChevronRight,
+  Home,
   Plus,
   RefreshCw,
   GitCommitHorizontal,
@@ -16,6 +19,7 @@ import {
   instanceWorkbenchService as service,
   workbenchError,
 } from "../../services/instanceWorkbenchService";
+import { workspaceService } from "../../services/workspaceService";
 import type { GitChange, GitRequest } from "../../types/workbench";
 import type { GitViewState } from "./state";
 interface Props {
@@ -44,7 +48,8 @@ export function GitProjects({
   const cache = useQueryClient();
   const {
     selected,
-    adding,
+    folderPath,
+    adding: requestedAdding,
     path,
     name,
     url,
@@ -70,6 +75,24 @@ export function GitProjects({
       ? selected
       : (projectList[0]?.path ?? null);
   const repository = projectList.find((p) => p.path === currentPath);
+  const adding = requestedAdding ?? (
+    currentPath === null && !projects.isLoading && !projects.error ? "import" : null
+  );
+  const folders = useQuery({
+    queryKey: ["workspace", instanceId, folderPath],
+    queryFn: () => workspaceService.list(instanceId, folderPath),
+    enabled: enabled && visible && !!adding,
+    staleTime: 0,
+    retry: false,
+  });
+  const hasGit = folders.data?.some((entry) => entry.name === ".git") ?? false;
+  const navigateFolder = (next: string) =>
+    onChange({
+      folderPath: next,
+      ...(adding === "import" ? { path: next } : {}),
+      error: "",
+    });
+
   const details = useQuery({
     queryKey: [...prefix, currentPath, "details"],
     queryFn: async ({ signal }) => {
@@ -133,6 +156,10 @@ export function GitProjects({
       const result = await service.git(instanceId, generation, request);
       if (result.project) onChange({ selected: result.project.path });
       await refresh();
+      if (request.operation === "clone") {
+        await cache.invalidateQueries({ queryKey: ["workspace", instanceId] });
+        await cache.invalidateQueries({ queryKey: ["workspace-search", instanceId] });
+      }
       return true;
     } catch (err) {
       onChange({ error: workbenchError(err) });
@@ -247,7 +274,7 @@ export function GitProjects({
         </button>
         <button
           className="wb-button"
-          onClick={() => onChange({ adding: "clone" })}
+          onClick={() => onChange({ adding: "import", path: folderPath, error: "" })}
         >
           <Plus size={14} />
           {t("workbench.addProject")}
@@ -286,27 +313,29 @@ export function GitProjects({
               <button
                 type="button"
                 className={adding === "clone" ? "active" : ""}
-                onClick={() => onChange({ adding: "clone" })}
+                onClick={() => onChange({ adding: "clone", error: "" })}
               >
                 {t("workbench.clone")}
               </button>
               <button
                 type="button"
                 className={adding === "import" ? "active" : ""}
-                onClick={() => onChange({ adding: "import" })}
+                onClick={() => onChange({ adding: "import", path: folderPath, error: "" })}
               >
                 {t("workbench.import")}
               </button>
             </div>
-            <button
-              type="button"
-              className="wb-icon"
-              aria-label={t("workbench.cancel")}
-              onClick={() => onChange({ adding: null })}
-              disabled={busy}
-            >
-              <X size={16} />
-            </button>
+            {requestedAdding && (
+              <button
+                type="button"
+                className="wb-icon"
+                aria-label={t("workbench.cancel")}
+                onClick={() => onChange({ adding: null })}
+                disabled={busy}
+              >
+                <X size={16} />
+              </button>
+            )}
           </div>
           {adding === "clone" && (
             <label>
@@ -320,10 +349,59 @@ export function GitProjects({
               />
             </label>
           )}
+          {!repository && <p className="wb-folder-intro">{t("workbench.browseHint")}</p>}
+          <div className="wb-folder-picker" role="group" aria-label={t("workbench.workspaceFolders")}>
+            <div className="wb-folder-toolbar">
+              <button type="button" className="wb-icon" title={t("workbench.root")} aria-label={t("workbench.root")}
+                disabled={busy} onClick={() => { navigateFolder(""); void cache.invalidateQueries({ queryKey: ["workspace", instanceId, ""], exact: true }); }}>
+                <Home size={15} />
+              </button>
+              <button type="button" className="wb-icon" title={t("workbench.parentFolder")} aria-label={t("workbench.parentFolder")}
+                disabled={busy || !folderPath} onClick={() => navigateFolder(folderPath.split("/").slice(0, -1).join("/"))}>
+                <ArrowUp size={15} />
+              </button>
+              <code title={folderPath || t("workbench.root")}>{folderPath || t("workbench.root")}</code>
+              <button type="button" className="wb-icon" title={t("workbench.refreshFolders")} aria-label={t("workbench.refreshFolders")}
+                disabled={busy || folders.isFetching} onClick={() => void folders.refetch()}>
+                <RefreshCw size={15} className={folders.isFetching ? "animate-spin" : ""} />
+              </button>
+            </div>
+            {folders.error ? (
+              <div className="wb-error" role="alert">{workbenchError(folders.error)}</div>
+            ) : folders.isLoading ? (
+              <div className="wb-loading" role="status">{t("workbench.loading")}</div>
+            ) : (
+              <>
+                <div className="wb-folder-list">
+                  {folders.data?.filter((entry) => entry.is_dir && entry.name !== ".git").map((entry) => (
+                    <button type="button" key={entry.path} disabled={busy} className="wb-folder-row"
+                      aria-label={t("workbench.openFolder", { name: entry.name })} title={entry.path}
+                      onClick={() => navigateFolder(entry.path)}>
+                      <Folder size={15} /><span>{entry.name}</span><ChevronRight size={14} />
+                    </button>
+                  ))}
+                  {folders.data && !folders.data.some((entry) => entry.is_dir && entry.name !== ".git") && (
+                    <p className="wb-folder-hint">{t("workbench.noFolders")}</p>
+                  )}
+                </div>
+                {adding === "import" && folders.data && (
+                  <p className="wb-folder-hint" role="status">{t(hasGit ? "workbench.repositoryFound" : "workbench.notRepository")}</p>
+                )}
+              </>
+            )}
+            {adding === "clone" && (
+              <button type="button" className="wb-button" disabled={busy || !folders.data || !!folders.error}
+                onClick={() => {
+                  const dirname = url.trim().split(/[/:]/).pop()?.replace(/\.git$/, "") || path.split("/").filter(Boolean).pop() || "project";
+                  onChange({ path: [folderPath, dirname].filter(Boolean).join("/") });
+                }}>{t("workbench.useCloneParent")}</button>
+            )}
+          </div>
+
           <label>
             {t("workbench.projectPath")}
             <input
-              autoFocus={adding === "import"}
+              autoFocus={requestedAdding === "import"}
               required={adding === "clone"}
               aria-label={t("workbench.projectPath")}
               aria-describedby={`wb-project-path-hint-${viewID}`}
@@ -332,7 +410,7 @@ export function GitProjects({
               onChange={(e) => onChange({ path: e.target.value })}
             />
             <small id={`wb-project-path-hint-${viewID}`}>
-              {t("workbench.pathHint")}
+              {t(adding === "clone" ? "workbench.clonePathHint" : "workbench.pathHint")}
             </small>
           </label>
           <label>
@@ -342,25 +420,12 @@ export function GitProjects({
               onChange={(e) => onChange({ name: e.target.value })}
             />
           </label>
-          <button className="wb-button primary" disabled={busy}>
+          <button className="wb-button primary" disabled={busy || (adding === "import" && path === folderPath && (!hasGit || !!folders.error || folders.isFetching))}>
             {busy
               ? t(adding === "clone" ? "workbench.cloning" : "workbench.saving")
               : t(`workbench.${adding}`)}
           </button>
         </form>
-      )}
-      {!repository && !adding && !projects.isLoading && (
-        <div className="wb-empty">
-          <GitBranch size={30} />
-          <h3>{t("workbench.noProjects")}</h3>
-          <p>{t("workbench.pathHint")}</p>
-          <button
-            className="wb-button primary"
-            onClick={() => onChange({ adding: "clone" })}
-          >
-            {t("workbench.addProject")}
-          </button>
-        </div>
       )}
       {repository && (
         <>

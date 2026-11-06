@@ -15,6 +15,7 @@ const runtime =
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), "cm-workbench-browser-"));
 const workspace = path.join(temp, "workspace");
 fs.mkdirSync(workspace);
+fs.mkdirSync(path.join(workspace, "starter"));
 const artifacts =
   process.env.WORKBENCH_SCREENSHOTS ||
   path.resolve(cm, "../artifacts/workbench-v4-browser");
@@ -76,6 +77,8 @@ let vite, browser, api;
 const children = [];
 const sessions = new Map();
 let generation = 3;
+let directoryFailure = false;
+const listedDirectories = [];
 let terminalCreates = 0;
 let previewCreates = 0;
 const gitOperations = [];
@@ -223,6 +226,19 @@ try {
           preview: true,
           processes: true,
         });
+        return;
+      }
+      if (url.pathname.endsWith("/workspace/files")) {
+        const relative = url.searchParams.get("path") || "";
+        listedDirectories.push(relative);
+        if (directoryFailure) { json(res, "Folder service unavailable", 503); return; }
+        const directory = path.resolve(workspace, relative);
+        assert.ok(directory === workspace || directory.startsWith(workspace + path.sep));
+        const entries = fs.readdirSync(directory, { withFileTypes: true }).map((entry) => ({
+          name: entry.name, path: path.posix.join(relative, entry.name), is_dir: entry.isDirectory(),
+          size: 0, modified_at: new Date().toISOString(), previewable: false, downloadable: false,
+        }));
+        json(res, { entries });
         return;
       }
       if (Number(url.searchParams.get("generation")) !== generation) {
@@ -515,23 +531,71 @@ try {
   });
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.getByRole("tab", { name: "Git 项目", exact: true }).click();
-  await page
-    .getByRole("button", { name: "添加项目", exact: true })
-    .first()
-    .click();
+  const folders = page.getByRole("group", { name: "工作区文件夹", exact: true });
+  await folders.waitFor({ timeout: 3000 });
+  await folders.getByRole("button", { name: "打开文件夹 second", exact: true }).waitFor();
+  assert.ok(listedDirectories.every((dir) => dir === ""), "must not recursively scan folders");
+  await page.screenshot({ path: path.join(artifacts, "10-git-folder-browser.png"), fullPage: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  assert.ok(await page.locator(".wb-root").evaluate((node) => node.scrollWidth <= node.clientWidth + 1), "mobile folder browser overflows");
+  await page.screenshot({ path: path.join(artifacts, "11-mobile-folder-browser.png"), fullPage: true });
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  assert.ok(await folders.getByText("此文件夹不是 Git 仓库，请选择包含 .git 的项目文件夹。", { exact: true }).isVisible());
+  fs.mkdirSync(path.join(workspace, "Agent-created"));
+  await folders.getByRole("button", { name: "刷新文件夹", exact: true }).click();
+  await folders.getByRole("button", { name: "打开文件夹 Agent-created", exact: true }).waitFor();
+  await page.getByRole("tab", { name: "文件", exact: true }).click();
+  await page.locator(".workspace-files-table").getByRole("button", { name: "Agent-created", exact: true }).waitFor();
+  await page.getByRole("tab", { name: "Git 项目", exact: true }).click();
+  await page.getByRole("textbox", { name: "显示名称（选填）", exact: true }).fill("Preserve folder draft");
+  directoryFailure = true;
+  await folders.getByRole("button", { name: "刷新文件夹", exact: true }).click();
+  await folders.getByRole("alert").filter({ hasText: "Folder service unavailable" }).waitFor();
+  assert.equal(await folders.getByText("此文件夹不是 Git 仓库，请选择包含 .git 的项目文件夹。", { exact: true }).count(), 0);
+  assert.equal(await page.getByRole("textbox", { name: "显示名称（选填）", exact: true }).inputValue(), "Preserve folder draft");
+  await page.getByRole("textbox", { name: "显示名称（选填）", exact: true }).fill("");
+  directoryFailure = false;
+  await folders.getByRole("button", { name: "刷新文件夹", exact: true }).click();
+  await folders.getByRole("button", { name: "打开文件夹 second", exact: true }).click();
+  assert.equal(await page.getByRole("textbox", { name: "项目路径", exact: true }).inputValue(), "second");
+  await folders.getByText("已识别 Git 仓库，可以导入。", { exact: true }).waitFor();
+  await folders.getByRole("button", { name: "上级文件夹", exact: true }).click();
+  assert.equal(await page.getByRole("textbox", { name: "项目路径", exact: true }).inputValue(), "");
+  // A real worktree stores .git as a file; hidden project folders remain browsable.
+  git(seed, "worktree", "add", "-b", "hidden-worktree", path.join(workspace, ".hidden-project"));
+  await folders.getByRole("button", { name: "刷新文件夹", exact: true }).click();
+  await folders.getByRole("button", { name: "打开文件夹 .hidden-project", exact: true }).click();
+  await folders.getByText("已识别 Git 仓库，可以导入。", { exact: true }).waitFor();
+  await page.getByRole("button", { name: "导入已有项目", exact: true }).last().click();
+  await page.getByRole("combobox", { name: "选择仓库" }).selectOption(".hidden-project");
+  // The root can itself be a repository, without a parent to navigate to.
+  git(workspace, "init");
+  await page.getByRole("button", { name: "添加项目", exact: true }).click();
+  await folders.getByRole("button", { name: "工作区根目录", exact: true }).click();
+  await folders.getByText("已识别 Git 仓库，可以导入。", { exact: true }).waitFor();
+  assert.equal(await folders.getByRole("button", { name: "上级文件夹", exact: true }).isDisabled(), true);
+  fs.rmSync(path.join(workspace, ".git"), { recursive: true });
+  await page.getByRole("button", { name: "克隆仓库", exact: true }).first().click();
+
   await page.getByRole("textbox", { name: "仓库地址" }).fill(remote);
-  await page
-    .getByRole("textbox", { name: "项目路径", exact: true })
-    .fill("projects/demo");
+  await page.getByRole("textbox", { name: "项目路径", exact: true }).fill("seed");
+  await page.getByRole("button", { name: "克隆仓库", exact: true }).last().click();
+  await page.locator(".wb-git > .wb-error").waitFor();
+  assert.equal(fs.readFileSync(path.join(seed, "app.py"), "utf8"), 'print("one")\n');
+  assert.equal(await page.getByRole("textbox", { name: "仓库地址" }).inputValue(), remote);
+  await folders.getByRole("button", { name: "打开文件夹 Agent-created", exact: true }).click();
+  await folders.getByRole("button", { name: "克隆到此文件夹下", exact: true }).click();
+  assert.equal(await page.getByRole("textbox", { name: "项目路径", exact: true }).inputValue(), "Agent-created/origin");
   await page
     .getByRole("button", { name: "克隆仓库", exact: true })
     .last()
     .click();
   await page
     .getByRole("combobox", { name: "选择仓库" })
-    .selectOption("projects/demo");
-  const repo = path.join(workspace, "projects/demo");
+    .selectOption("Agent-created/origin");
+  const repo = path.join(workspace, "Agent-created/origin");
   await assertWait(() => fs.existsSync(path.join(repo, ".git")), "real clone");
+  console.log("PASS real folder browsing, external creation refresh, shared Files cache, read failure recovery, hidden worktree import, root detection and safe chosen clone destination");
   const renameSource = "README.md", renameDestination = "renamed [literal]*\nfile.md";
   const renamedBytes = fs.readFileSync(path.join(repo, renameSource));
   fs.writeFileSync(path.join(repo, "app.py"), 'print("unrelated staged change")\n');
@@ -737,6 +801,8 @@ try {
   await visibleWorkbench().getByRole("button", { name: "创建分支", exact: true }).click();
   await visibleWorkbench().getByRole("textbox", { name: "新分支名称", exact: true }).fill("draft-branch");
   await visibleWorkbench().getByRole("button", { name: "添加项目", exact: true }).click();
+  await visibleWorkbench().getByRole("button", { name: "克隆仓库", exact: true }).first().click();
+  await visibleWorkbench().getByRole("group", { name: "工作区文件夹", exact: true }).getByRole("button", { name: "打开文件夹 Agent-created", exact: true }).click();
   await visibleWorkbench().getByRole("textbox", { name: "仓库地址" }).fill("https://example.test/draft.git");
   await visibleWorkbench().getByRole("textbox", { name: "项目路径", exact: true }).fill("projects/draft");
   await visibleWorkbench().getByRole("textbox", { name: "显示名称（选填）", exact: true }).fill("Draft project");
@@ -745,6 +811,7 @@ try {
     assert.equal(await visibleWorkbench().getByRole("combobox", { name: "选择仓库" }).inputValue(), "second");
     assert.equal(await visibleWorkbench().getByRole("textbox", { name: "提交说明" }).inputValue(), "Preserve commit draft");
     assert.equal(await visibleWorkbench().getByRole("textbox", { name: "新分支名称", exact: true }).inputValue(), "draft-branch");
+    assert.equal(await visibleWorkbench().getByRole("group", { name: "工作区文件夹", exact: true }).locator(".wb-folder-toolbar code").textContent(), "Agent-created");
     assert.equal(await visibleWorkbench().getByRole("textbox", { name: "仓库地址" }).inputValue(), "https://example.test/draft.git");
     assert.equal(await visibleWorkbench().getByRole("textbox", { name: "项目路径", exact: true }).inputValue(), "projects/draft");
     assert.equal(await visibleWorkbench().getByRole("textbox", { name: "显示名称（选填）", exact: true }).inputValue(), "Draft project");

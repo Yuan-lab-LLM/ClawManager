@@ -108,10 +108,12 @@ test("Git view patches preserve repository, diff and drafts across shared shells
   let state = initialWorkbench(3);
   assert.ok(state.git, "shared Git view state is missing");
   assert.equal(state.git.selected, null);
+  assert.equal(state.git.folderPath, "");
   state = workbenchReducer(state, {
     type: "git.patch",
     patch: {
       selected: "second",
+      folderPath: "projects/Agent-created",
       selection: { repo: "second", path: "other.txt", staged: false },
       mode: "history",
       message: "Commit draft",

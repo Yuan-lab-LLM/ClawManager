@@ -13,6 +13,7 @@ export interface WorkbenchTab {
 }
 export interface GitViewState {
   selected: string | null;
+  folderPath: string;
   adding: "clone" | "import" | null;
   path: string;
   name: string;
@@ -57,6 +58,7 @@ export function initialWorkbench(generation: number): WorkbenchState {
     tabs: [],
     git: {
       selected: null,
+      folderPath: "",
       adding: null,
       path: "",
       name: "",

@@ -973,3 +973,62 @@
     overflow-y: auto !important;
   }
 }
+
+.wb-folder-intro,
+.wb-folder-hint {
+  margin: 8px 0;
+  color: var(--text);
+  font-size: 11px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.wb-folder-picker {
+  margin-bottom: 12px;
+}
+.wb-folder-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding-block: 6px;
+  border-bottom: 1px solid var(--border);
+}
+.wb-folder-toolbar code {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+}
+.wb-folder-list {
+  max-height: 200px;
+  overflow: auto;
+  scrollbar-width: thin;
+}
+.wb-folder-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 34px;
+  padding: 6px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  text-align: start;
+}
+.wb-folder-row:hover {
+  background: var(--surface);
+}
+.wb-folder-row span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wb-folder-row svg {
+  flex-shrink: 0;
+}
