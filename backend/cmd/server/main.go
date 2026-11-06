@@ -17,6 +17,7 @@ import (
 
 	"clawreef/internal/aigateway"
 	"clawreef/internal/backupgate"
+	"clawreef/internal/browserorigin"
 	"clawreef/internal/buildinfo"
 	"clawreef/internal/config"
 	"clawreef/internal/db"
@@ -646,6 +647,20 @@ func main() {
 	}
 	workbenchAgent, _ := runtimeAgentClient.(services.WorkbenchAgent)
 	instanceWorkbenchService := services.NewInstanceWorkbenchService(instanceRepo, bindingRepo, runtimePodRepo, workbenchAgent, workbenchPreviews)
+	browserOrigin := strings.TrimSpace(os.Getenv("CLAWMANAGER_BROWSER_ORIGIN"))
+	browserPorts := strings.TrimSpace(os.Getenv("CLAWMANAGER_BROWSER_PORT_RANGE"))
+	var browserOrigins *browserorigin.Registry
+	if (browserOrigin == "") != (browserPorts == "") {
+		log.Fatal("CLAWMANAGER_BROWSER_ORIGIN and CLAWMANAGER_BROWSER_PORT_RANGE must both be configured")
+	}
+	if browserOrigin != "" {
+		browserOrigins, err = browserorigin.New(browserOrigin, browserPorts, repository.NewBrowserOriginStore(database))
+		if err != nil {
+			log.Fatalf("invalid browser origin configuration: %v", err)
+		}
+		instanceHandler.SetBrowserOrigins(browserOrigins)
+		instanceWorkbenchService.SetBrowserOrigins(browserOrigins)
+	}
 	instanceWorkbenchHandler := handlers.NewInstanceWorkbenchHandler(instanceWorkbenchService)
 	workspaceFileHandler := handlers.NewWorkspaceFileHandler(instanceService, workspaceFileService, runtimeWorkspaceFileService)
 	workspaceFileHandler.SetSkillRepository(skillRepo)
@@ -833,6 +848,7 @@ func main() {
 	r.Use(middleware.BackupRequestBoundary(backupHTTPPool, db.SQLGateScope()))
 
 	// Middleware
+	r.Use(handlers.BrowserOriginRoutes(browserOrigins, instanceHandler, instanceWorkbenchService))
 	r.Use(func(c *gin.Context) {
 		if instanceWorkbenchService.IsPreviewHost(c.Request.Host) {
 			instanceWorkbenchService.ServePreview(c.Writer, c.Request)

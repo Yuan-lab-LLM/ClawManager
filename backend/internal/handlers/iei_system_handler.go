@@ -562,14 +562,14 @@ func (h *IEISystemHandler) GenerateInstanceAccess(c *gin.Context) {
 		workspaceRoot = "/config"
 	}
 	h.setInstanceAccessCookie(c, instance.ID, accessToken.Token, accessToken.ExpiresAt)
-	utils.Success(c, http.StatusOK, "IEI instance access granted", gin.H{
+	utils.Success(c, http.StatusOK, "IEI instance access granted", h.instanceHandler.browserOriginMetadata(instance, gin.H{
 		"access_url":               browserURL,
 		"expires_at":               accessToken.ExpiresAt,
 		"desktop_proxy_mode":       desktopProxyMode(directProxyEnabled, upstream),
 		"desktop_upstream_present": upstream != "",
 		"workspace_available":      workspaceAvailable,
 		"workspace_root":           workspaceRoot,
-	})
+	}))
 }
 
 func (h *IEISystemHandler) ListWorkspace(c *gin.Context) {

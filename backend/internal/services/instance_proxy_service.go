@@ -19,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"clawreef/internal/browserorigin"
 	"clawreef/internal/models"
 	"clawreef/internal/ownerrecords"
 	"clawreef/internal/repository"
@@ -29,6 +30,7 @@ import (
 
 // InstanceProxyService handles proxying requests to instance pods
 type InstanceProxyService struct {
+	browserOrigins           *browserorigin.Registry
 	serviceService           *k8s.ServiceService
 	accessService            *InstanceAccessService
 	instanceRepo             repository.InstanceRepository
@@ -140,7 +142,9 @@ func NewInstanceProxyService(accessService *InstanceAccessService, options ...In
 func (s *InstanceProxyService) ProxyRequest(ctx context.Context, instanceID int, token string, w http.ResponseWriter, r *http.Request) error {
 	// Handle CORS preflight request
 	if r.Method == "OPTIONS" {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
+		if !browserorigin.IsNativeContext(ctx) {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+		}
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, HEAD, PATCH")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With")
 		w.Header().Set("Access-Control-Allow-Credentials", "true")
@@ -241,6 +245,9 @@ func (s *InstanceProxyService) ProxyRequest(ctx context.Context, instanceID int,
 			proxyReq.Header.Add(key, value)
 		}
 	}
+	if browserorigin.IsNativeContext(ctx) {
+		proxyReq.Header.Del("Cookie")
+	}
 	if dedicatedRuntimeOrigin && isDeepSeekHarnessRuntimeType(accessToken.InstanceType) {
 		// DeepSeek Harness validates every /api request against Host and Origin.
 		// The browser uses a per-instance public origin while the upstream sees
@@ -300,8 +307,10 @@ func (s *InstanceProxyService) ProxyRequest(ctx context.Context, instanceID int,
 	defer resp.Body.Close()
 
 	// Add CORS headers to response
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Credentials", "true")
+	if !browserorigin.IsNativeContext(ctx) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Credentials", "true")
+	}
 
 	if location := resp.Header.Get("Location"); location != "" && !dedicatedRuntimeOrigin {
 		resp.Header.Set("Location", s.rewriteRedirectLocation(instanceID, location))
@@ -364,6 +373,12 @@ func (s *InstanceProxyService) ProxyRequest(ctx context.Context, instanceID int,
 		resp.Header.Del("Last-Modified")
 	}
 
+	// Keep CM's access cookie already on w; native applications cannot set any.
+	if browserorigin.IsNativeContext(ctx) {
+		resp.Header.Del("Set-Cookie")
+		resp.Header.Del("Access-Control-Allow-Origin")
+		resp.Header.Del("Access-Control-Allow-Credentials")
+	}
 	// Copy response headers
 	for key, values := range resp.Header {
 		for _, value := range values {
@@ -429,7 +444,9 @@ func copyEventStream(w http.ResponseWriter, body io.Reader) error {
 func (s *InstanceProxyService) ProxyWebSocket(ctx context.Context, instanceID int, token string, w http.ResponseWriter, r *http.Request) error {
 	// Handle CORS preflight request
 	if r.Method == "OPTIONS" {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
+		if !browserorigin.IsNativeContext(ctx) {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+		}
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, HEAD, PATCH")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With")
 		w.Header().Set("Access-Control-Allow-Credentials", "true")
@@ -489,6 +506,9 @@ func (s *InstanceProxyService) ProxyWebSocket(ctx context.Context, instanceID in
 		for _, value := range values {
 			upstreamHeader.Add(key, value)
 		}
+	}
+	if browserorigin.IsNativeContext(ctx) {
+		upstreamHeader.Del("Cookie")
 	}
 	upstreamHeader.Del("Host")
 	upstreamHeader.Del("Connection")
@@ -555,6 +575,11 @@ func (s *InstanceProxyService) ProxyWebSocket(ctx context.Context, instanceID in
 	}
 
 	responseHeader := http.Header{}
+	// Gorilla writes its own 101 response, so explicitly carry CM's authenticated
+	// handler cookies across the upgrade. Upstream cookies are never copied here.
+	for _, cookie := range w.Header().Values("Set-Cookie") {
+		responseHeader.Add("Set-Cookie", cookie)
+	}
 	if protocol := upstreamConn.Subprotocol(); protocol != "" {
 		responseHeader.Set("Sec-WebSocket-Protocol", protocol)
 	}
@@ -1229,10 +1254,27 @@ func (s *InstanceProxyService) GetProxyURL(instanceID int, token string) string 
 	return proxyURLWithPath(instanceID, "/", token)
 }
 
+func (s *InstanceProxyService) SetBrowserOrigins(reg *browserorigin.Registry) { s.browserOrigins = reg }
+func (s *InstanceProxyService) BrowserOrigins() *browserorigin.Registry       { return s.browserOrigins }
+
 // GetProxyURLForInstance generates the best frontend entry URL for an instance.
 func (s *InstanceProxyService) GetProxyURLForInstance(instance *models.Instance, token string) string {
 	if instance == nil {
 		return ""
+	}
+	if runtimeType, ok := v2RuntimeTypeForInstance(instance); ok && s.browserOrigins != nil &&
+		(runtimeType == RuntimeTypeOpenCode || runtimeType == RuntimeTypeDeepSeekHarness) {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		binding, err := s.browserOrigins.Bind(ctx, instance.ID, browserorigin.Native, runtimeType)
+		if err != nil {
+			return ""
+		}
+		publicURL := s.browserOrigins.URL(binding) + "/"
+		if token != "" {
+			publicURL += "?token=" + url.QueryEscape(token)
+		}
+		return publicURL
 	}
 	if runtimeType, ok := v2RuntimeTypeForInstance(instance); ok && runtimeType == RuntimeTypeOpenCode {
 		// OpenCode's web UI owns the root of its origin. Do not fall back to the

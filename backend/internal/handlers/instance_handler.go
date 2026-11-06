@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"clawreef/internal/browserorigin"
 	"clawreef/internal/models"
 	"clawreef/internal/repository"
 	"clawreef/internal/services"
@@ -1627,7 +1628,7 @@ func (h *InstanceHandler) GenerateAccessToken(c *gin.Context) {
 	// token so the dedicated origin can validate it and promote it to its own
 	// origin-scoped cookie. Same-origin proxy URLs continue to use the clean,
 	// token-free entry URL.
-	response := map[string]interface{}{
+	response := gin.H{
 		"token":                    token.Token,
 		"access_url":               browserAccessEntryURL(accessURL, proxyURL),
 		"proxy_url":                proxyURL,
@@ -1636,7 +1637,23 @@ func (h *InstanceHandler) GenerateAccessToken(c *gin.Context) {
 		"desktop_upstream_present": upstream != "",
 	}
 
-	utils.Success(c, http.StatusOK, "Access token generated successfully", response)
+	utils.Success(c, http.StatusOK, "Access token generated successfully", h.browserOriginMetadata(instance, response))
+}
+
+func (h *InstanceHandler) SetBrowserOrigins(reg *browserorigin.Registry) {
+	h.proxyService.SetBrowserOrigins(reg)
+}
+
+func (h *InstanceHandler) browserOriginMetadata(instance *models.Instance, response gin.H) gin.H {
+	reg := h.proxyService.BrowserOrigins()
+	runtimeType, managed := services.NormalizeV2RuntimeType(instance.Type)
+	mode, _ := services.NormalizeInstanceMode(instance.InstanceMode)
+	if reg != nil && managed && (strings.EqualFold(strings.TrimSpace(instance.RuntimeType), "gateway") || mode == services.InstanceModeLite) &&
+		(runtimeType == services.RuntimeTypeOpenCode || runtimeType == services.RuntimeTypeDeepSeekHarness) {
+		response["browser_origin_mode"] = "chrome-single-host"
+		response["manager_origin"] = reg.ManagerOrigin()
+	}
+	return response
 }
 
 func browserAccessEntryURL(accessURL, proxyURL string) string {
@@ -1775,7 +1792,7 @@ func (h *InstanceHandler) proxyAccessToken(c *gin.Context, id int) (string, bool
 	original := originalInstanceProxyRequest(c)
 	queryToken := strings.TrimSpace(original.URL.Query().Get("token"))
 	if queryToken == "" && isDedicatedAccessRefreshPath(c, id) {
-		queryToken = strings.TrimSpace(c.GetHeader(dedicatedAccessRefreshHeader))
+		queryToken = strings.TrimSpace(original.Header.Get(dedicatedAccessRefreshHeader))
 	}
 	// A freshly issued ClawManager token must be allowed to replace an expired
 	// dedicated-origin cookie. Runtime applications can also own a `token`
@@ -1849,7 +1866,7 @@ func (h *InstanceHandler) promoteProxyAccessToken(c *gin.Context, id int, queryT
 			true,
 		)
 	}
-	if dedicatedOrigin && originRuntimeType == services.RuntimeTypeOpenCode &&
+	if dedicatedOrigin && !isDedicatedAccessRefreshPath(c, id) && originRuntimeType == services.RuntimeTypeOpenCode &&
 		(c.Request.Method == http.MethodGet || c.Request.Method == http.MethodHead) {
 		c.Redirect(http.StatusTemporaryRedirect, dedicatedRuntimeCleanLocation(originalInstanceProxyRequest(c).URL, id, queryToken))
 		return "", false
@@ -1895,6 +1912,12 @@ func dedicatedRuntimeCleanLocation(requestURL *url.URL, instanceID int, accessTo
 func (h *InstanceHandler) validCurrentExternalSession(c *gin.Context, accessToken *services.AccessToken) bool {
 	if accessToken == nil {
 		return false
+	}
+	if browserorigin.IsNativeContext(c.Request.Context()) {
+		runtimeType, managed := services.NormalizeV2RuntimeType(accessToken.InstanceType)
+		if !managed || runtimeType != c.GetHeader(services.DedicatedRuntimeOriginHeader) {
+			return false
+		}
 	}
 	if strings.TrimSpace(accessToken.SessionBinding) == "" {
 		return true
@@ -1943,6 +1966,10 @@ func isDedicatedIEIRuntimeOrigin(c *gin.Context, accessToken *services.AccessTok
 	if !originManaged || !instanceManaged || originRuntimeType != instanceRuntimeType ||
 		(originRuntimeType != services.RuntimeTypeOpenCode && originRuntimeType != services.RuntimeTypeDeepSeekHarness) {
 		return false
+	}
+
+	if browserorigin.IsNativeContext(c.Request.Context()) {
+		return true
 	}
 
 	host := strings.TrimSpace(c.Request.Host)
@@ -2740,7 +2767,7 @@ func (h *InstanceHandler) GetSharedInstanceSession(c *gin.Context) {
 		workspaceRoot = "/config"
 	}
 
-	utils.Success(c, http.StatusOK, "Shared instance session created", gin.H{
+	utils.Success(c, http.StatusOK, "Shared instance session created", h.browserOriginMetadata(instance, gin.H{
 		"instance": gin.H{
 			"id":            instance.ID,
 			"name":          instance.Name,
@@ -2756,7 +2783,7 @@ func (h *InstanceHandler) GetSharedInstanceSession(c *gin.Context) {
 		"workspace_available": workspaceAvailable,
 		"workspace_root":      workspaceRoot,
 		"csrf_token":          sharedExternalAccessCSRFToken(code, instanceToken.Token),
-	})
+	}))
 }
 
 func bearerToken(header string) string {
