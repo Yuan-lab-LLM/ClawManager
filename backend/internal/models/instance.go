@@ -6,8 +6,9 @@ import (
 
 // Instance represents a virtual desktop instance
 type Instance struct {
-	DefaultsPolicyVersion string `db:"-" json:"defaults_policy_version,omitempty"`
-	DefaultsPolicyStatus  string `db:"-" json:"defaults_policy_status,omitempty"`
+	RuntimeRecovery       *InstanceRuntimeRecovery `db:"-" json:"runtime_recovery,omitempty"`
+	DefaultsPolicyVersion string                   `db:"-" json:"defaults_policy_version,omitempty"`
+	DefaultsPolicyStatus  string                   `db:"-" json:"defaults_policy_status,omitempty"`
 
 	LastGatewayActivityAt *time.Time `db:"-" json:"last_gateway_activity_at,omitempty"`
 	MonitoringSince       *time.Time `db:"-" json:"monitoring_since,omitempty"`

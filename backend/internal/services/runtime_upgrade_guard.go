@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"clawreef/internal/models"
 	"clawreef/internal/repository"
@@ -44,6 +45,9 @@ func (s *RuntimeScheduler) reconcileDesiredInstance(ctx context.Context, snapsho
 	instance := *current
 	if instance.Status != "creating" && instance.Status != "running" && instance.Status != "error" {
 		return nil
+	}
+	if handled, errs := s.reconcileInstanceRecoveryLocked(ctx, instance, time.Now().UTC()); handled {
+		return errs
 	}
 	if isRuntimeErrorInstance(instance) && !isRecoverableRuntimeSchedulingError(instance) {
 		return nil

@@ -2604,6 +2604,13 @@ func (s *instanceService) restartInstance(instanceID int) error {
 			return fmt.Errorf("failed to fence previous runtime generation: %w", err)
 		}
 	}
+	if isV2 {
+		if recovery, ok := s.instanceRepo.(repository.InstanceRuntimeRecoveryRepository); ok {
+			if err := recovery.ResetRuntimeRecovery(ctx, instanceID); err != nil {
+				return fmt.Errorf("reset explicit restart recovery budget: %w", err)
+			}
+		}
+	}
 	if err := s.stopInstance(instanceID); err != nil {
 		return fmt.Errorf("failed to stop instance: %w", err)
 	}

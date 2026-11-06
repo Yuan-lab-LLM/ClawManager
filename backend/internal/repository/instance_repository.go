@@ -141,6 +141,12 @@ func (r *instanceRepository) GetByID(id int) (*models.Instance, error) {
 	if err := r.hydrateAutoStop([]*models.Instance{&instance}); err != nil {
 		return nil, err
 	}
+	if instance.InstanceMode == "lite" {
+		instance.RuntimeRecovery, err = r.GetRuntimeRecovery(context.Background(), id)
+		if err != nil && !missingAutoStopTable(err) {
+			return nil, err
+		}
+	}
 	return &instance, nil
 }
 
