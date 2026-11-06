@@ -93,6 +93,10 @@ export function InstanceWorkbench({
   );
   const state = sharedState ?? localState;
   const dispatch = onWorkbenchEvent ?? localDispatch;
+  const full = state.full && visible;
+  const showSessions = state.showSessions;
+  const setFull = useCallback((full: boolean) => dispatch({ type: "view.patch", patch: { full } }), [dispatch]);
+  const setShowSessions = useCallback((showSessions: boolean) => dispatch({ type: "view.patch", patch: { showSessions } }), [dispatch]);
   const onFilesChange = useCallback((view: WorkspaceFileView) => dispatch({ type: "files.patch", patch: view }), [dispatch]);
   const userId = useAuthStore(auth => auth.user?.id);
   const rootRef = useRef<HTMLElement>(null);
@@ -110,10 +114,8 @@ export function InstanceWorkbench({
     return () => observer.disconnect();
   }, []);
   const [newMenu, setNewMenu] = useState(false);
-  const [full, setFull] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [showSessions, setShowSessions] = useState(false);
   const [sessions, setSessions] = useState<TerminalSession[]>([]);
   const [processes, setProcesses] = useState<WorkbenchProcess[]>([]);
   const caps = useQuery({
@@ -146,7 +148,6 @@ export function InstanceWorkbench({
   useEffect(() => {
     if (caps.data?.browser_origin_mode === "chrome-single-host") dispatch({ type: "browser.expireLegacy" });
   }, [caps.data?.browser_origin_mode, state.tabs, dispatch]);
-  if (!visible && full) setFull(false);
   const scopeAllowed = allowBrowserInstance(instanceId, caps.data);
   const ready = isRunning && !!caps.data && scopeAllowed;
   const restoringTerminals = state.tabs.some(tab => tab.restoreTerminal && !tab.stale && tab.terminalGeneration === generation);
@@ -234,8 +235,7 @@ export function InstanceWorkbench({
       setBusy(false);
     }
   };
-  const sessionList = async () => {
-    setShowSessions(true);
+  const sessionList = useCallback(async () => {
     setBusy(true);
     setError("");
     try {
@@ -254,7 +254,10 @@ export function InstanceWorkbench({
     } finally {
       setBusy(false);
     }
-  };
+  }, [caps.data?.terminal, caps.data?.processes, instanceId, generation]);
+  useEffect(() => {
+    if (showSessions && ready) void sessionList();
+  }, [showSessions, ready, sessionList]);
   const endSession = async (session: TerminalSession) => {
     if (!window.confirm(t("workbench.endingConfirm"))) return;
     setBusy(true);
@@ -486,9 +489,7 @@ export function InstanceWorkbench({
           <button
             className="wb-subtle"
             disabled={!ready || busy}
-            onClick={() =>
-              showSessions ? setShowSessions(false) : void sessionList()
-            }
+            onClick={() => setShowSessions(!showSessions)}
             aria-expanded={showSessions}
           >
             <Activity size={13} />

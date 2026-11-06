@@ -48,6 +48,8 @@ export interface WorkspaceFileView {
 export interface WorkbenchState {
   generation: number;
   panel: WorkbenchPanel;
+  full: boolean;
+  showSessions: boolean;
   tabs: WorkbenchTab[];
   git: GitViewState;
   files: WorkspaceFileView;
@@ -55,6 +57,7 @@ export interface WorkbenchState {
 }
 export type WorkbenchEvent =
   | { type: "panel"; panel: WorkbenchPanel }
+  | { type: "view.patch"; patch: Partial<Pick<WorkbenchState, "full" | "showSessions">> }
   | { type: "git.patch"; patch: Partial<GitViewState> }
   | { type: "files.patch"; patch: Partial<WorkspaceFileView> }
   | { type: "browser.new"; id: string }
@@ -82,6 +85,8 @@ export function initialWorkbench(generation: number): WorkbenchState {
   return {
     generation,
     panel: "files",
+    full: false,
+    showSessions: false,
     tabs: [],
     files: { previewPath: null, editPath: null, pageIndex: 0, sortColumn: "name", sortDirection: "asc", expanded: false, searchOpen: false, searchInput: "" },
     git: {
@@ -106,6 +111,8 @@ export function workbenchReducer(
   event: WorkbenchEvent,
 ): WorkbenchState {
   switch (event.type) {
+    case "view.patch":
+      return { ...state, ...event.patch };
     case "git.patch":
       return { ...state, git: { ...state.git, ...event.patch } };
     case "files.patch":

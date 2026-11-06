@@ -100,6 +100,8 @@ export function readWorkbenchView(key: string | null, generation?: number, stora
     }
     state.git = storedGit(saved.git);
     state.files = storedFiles(saved.files);
+    state.full = saved.full === true;
+    state.showSessions = saved.showSessions === true;
     if (["files", "git", "preview"].includes(saved.panel)) state.panel = saved.panel;
     state.active = state.tabs.find(tab => tab.id === saved.active && !tab.hidden)?.id ?? state.tabs.find(tab => !tab.hidden)?.id;
     return { state: generation === undefined ? state : workbenchReducer(state, { type: "generation", generation }), visible: saved.visible !== false };
@@ -114,6 +116,6 @@ export function writeWorkbenchView(key: string | null, view: WorkbenchView, stor
     return address === null ? [] : [{ id: tab.id, address, hidden: tab.hidden, stale: tab.stale }];
   });
   try {
-    (storage ?? window.localStorage).setItem(key, JSON.stringify({ version: 1, generation: view.state.generation, panel: view.state.panel, active: view.state.active, visible: view.visible, tabs, git: storedGit(view.state.git), files: storedFiles(view.state.files) }));
+    (storage ?? window.localStorage).setItem(key, JSON.stringify({ version: 1, generation: view.state.generation, panel: view.state.panel, full: view.state.full, showSessions: view.state.showSessions, active: view.state.active, visible: view.visible, tabs, git: storedGit(view.state.git), files: storedFiles(view.state.files) }));
   } catch { /* Storage can be disabled or full; the current workbench remains usable. */ }
 }

@@ -8,6 +8,7 @@ import { createRequire } from 'node:module';
 import { chromium } from '@playwright/test';
 
 const root = path.resolve(import.meta.dirname, '../frontend');
+const presentationOnly = process.env.WORKBENCH_PRESENTATION_ONLY === '1';
 const require = createRequire(path.join(root, 'package.json'));
 const { createServer } = require('vite');
 process.chdir(root);
@@ -49,6 +50,7 @@ try {
   await context.addInitScript(() => { localStorage.setItem('clawmanager_locale', 'en'); localStorage.setItem('access_token', 'fixture-manager-credential'); });
   await context.addCookies([{ name: 'manager-session', value: 'fixture-manager-cookie', url: origin }]);
   const allocations = [], mutations = [];
+  let sessionLists = 0, processLists = 0;
   let generation = 6, running = true;
   await context.route('https://native-persistence.invalid/**', route => route.fulfill({ headers: { 'Access-Control-Allow-Origin': '*' }, contentType: 'text/html', body: '<h1>Native service</h1>' }));
   await context.route('https://app-persistence.invalid/**', route => {
@@ -66,7 +68,7 @@ try {
     else if (pathname.endsWith('/status')) data = { instance_status: { instance_id: id, status: running ? 'running' : 'stopped', availability: running ? 'available' : 'unavailable' } };
     else if (pathname.endsWith('/access')) data = { access_url: 'https://native-persistence.invalid/', expires_at: new Date(Date.now() + 3600000).toISOString() };
     else if (pathname.endsWith('/runtime')) data = { commands: [], skills: [] };
-    else if (pathname.endsWith('/capabilities')) data = { generation, workspace: '/workspace', git: true, terminal: true, preview: true };
+    else if (pathname.endsWith('/capabilities')) data = { generation, workspace: '/workspace', git: true, terminal: true, preview: true, processes: true };
     else if (pathname.endsWith('/workspace/files')) {
       const current = new URL(request.url()).searchParams.get('path') || '';
       data = { entries: [{ name: current === 'starter' ? 'nested' : 'leaf.txt', path: current === 'starter' ? 'starter/nested' : current + '/leaf.txt', is_dir: current === 'starter', size: 12, modified_at: new Date().toISOString(), previewable: true, downloadable: true }] };
@@ -79,7 +81,8 @@ try {
       else if (operation === 'history') data = { history: [] };
       else if (operation === 'diff') data = { diff: '--- a/main.ts\n+++ b/main.ts\n@@ -1 +1 @@\n-old\n+restored diff body\n' };
     }
-    else if (pathname.endsWith('/workbench/terminals')) data = request.method() === 'POST' ? createTerminal(generation) : { sessions: [...terminalSessions.values()].map(session => session.info) };
+    else if (pathname.endsWith('/workbench/terminals')) { if (request.method() === 'GET') sessionLists++; data = request.method() === 'POST' ? createTerminal(generation) : { sessions: [...terminalSessions.values()].map(session => session.info) }; }
+    else if (pathname.endsWith('/workbench/processes')) { processLists++; data = { processes: [{ id: 'retained-process', name: 'Retained process', command: 'fixture', state: 'running', can_stop: false, can_restart: false }] }; }
     else if (/\/terminals\/[^/]+\/(?:output|input|resize)$/.test(pathname)) {
       const [, sessionId, operation] = pathname.match(/\/terminals\/([^/]+)\/(output|input|resize)$/);
       const session = terminalSessions.get(sessionId);
@@ -116,6 +119,28 @@ try {
     await page.frameLocator('.wb-live-view:not([hidden]) .wb-preview-frame').getByRole('heading', { name: 'Fresh restored app' }).waitFor();
   };
   await page.goto(origin + '/instances/42');
+  if (presentationOnly) {
+    const wb = page.locator('.wb-root');
+    await wb.locator('.wb-panels').getByRole('tab', { name: 'Preview & terminals', exact: true }).click();
+    await wb.getByRole('button', { name: 'Sessions & processes', exact: true }).click();
+    await wb.locator('.wb-session-drawer').getByText('Retained process', { exact: true }).waitFor();
+    await wb.getByRole('button', { name: 'Expand workspace', exact: true }).click();
+    await page.locator('.wb-root.wb-fullscreen').waitFor();
+    const beforeSessions = sessionLists, beforeProcesses = processLists;
+    await page.goto(origin + '/instances'); await nav('/instances/42');
+    await page.locator('.wb-root.wb-fullscreen .wb-session-drawer').getByText('Retained process', { exact: true }).waitFor();
+    assert(sessionLists > beforeSessions && processLists > beforeProcesses, 'A restored open drawer must fetch current backend rows');
+    await page.reload();
+    await page.locator('.wb-root.wb-fullscreen .wb-session-drawer').getByText('Retained process', { exact: true }).waitFor();
+    await wb.getByRole('button', { name: 'Exit full screen', exact: true }).focus();
+    await page.keyboard.press('Escape');
+    await page.waitForFunction(() => !document.querySelector('.wb-fullscreen') && !document.querySelector('.wb-session-drawer'));
+    await page.goto(origin + '/instances'); await nav('/instances/42');
+    assert.equal(await page.locator('.wb-fullscreen, .wb-session-drawer').count(), 0, 'Explicit dismissal must also persist');
+    assert.equal(terminalCreates, 0);
+    assert.equal(allocations.length, 0);
+    console.log('PASS presentation: internal expanded workspace and Sessions/processes drawer persist on reentry/reload; restored drawer fetches fresh rows, dismissal persists, no terminal/service creation');
+  } else {
   await newBrowser('http://localhost:3000/one?view=clock#/settings');
   await newBrowser('http://localhost:3000/two');
   const firstTab = page.locator('.wb-program-tab').first().getByRole('tab');
@@ -220,5 +245,6 @@ try {
   assert.equal(mutations.filter(path => path.endsWith('/workbench/terminals')).length, 1, 'Only the explicit New terminal click may create a shell');
   assert.equal(context.pages().length, 1);
   console.log('PASS actual InstanceDetailPage: browser state/fresh capabilities; original real PTY PID, variables and replay after reentry/reload with one explicit creation; ended/pruned sessions stay ended; Files folder and Git repository/diff/draft restore on reentry/reload; scoped isolation and generation/stopped fences');
+  }
 } catch (error) { console.error(error); throw error; }
 finally { await browser?.close(); for (const child of children) child.stdin.end(); vite.httpServer?.closeAllConnections(); await vite.close(); fs.rmSync(workspace, { recursive: true, force: true }); }

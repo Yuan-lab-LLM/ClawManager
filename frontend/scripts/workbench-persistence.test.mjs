@@ -7,6 +7,19 @@ const storage = () => {
   const values = new Map();
   return { getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value), values };
 };
+test('expanded workspace and sessions drawer restore and persist explicit dismissal', () => {
+  const db = storage(), key = workbenchViewKey(7, 42);
+  let state = initialWorkbench(6);
+  state = workbenchReducer(state, { type: 'view.patch', patch: { full: true, showSessions: true } });
+  writeWorkbenchView(key, { state, visible: true }, db);
+  const restored = readWorkbenchView(key, 6, db).state;
+  assert.equal(restored.full, true);
+  assert.equal(restored.showSessions, true);
+  state = workbenchReducer(restored, { type: 'view.patch', patch: { full: false, showSessions: false } });
+  writeWorkbenchView(key, { state, visible: true }, db);
+  assert.equal(readWorkbenchView(key, 6, db).state.full, false);
+  assert.equal(readWorkbenchView(key, 6, db).state.showSessions, false);
+});
 function browserState() {
   let state = workbenchReducer(initialWorkbench(6), { type: 'browser.new', id: 'first' });
   state = workbenchReducer(state, { type: 'browser.navigate', id: 'first', address: 'http://localhost:3000/app?sort=asc&token=private-query#access_token=private-fragment', url: 'https://p-private-capability.invalid/', viewer_url: 'https://manager.test/view#private-viewer', credentialless: true, previewError: 'private-error', generation: 6 });
