@@ -44,7 +44,7 @@ func TestStoppedSourceProofRequiresEveryIdentityEcho(t *testing.T) {
 func TestStoppedRecoveryRequiresPendingExactSuccessor(t *testing.T) {
 	for _, change := range []string{"none", "state", "generation", "gateway", "binding-id", "owner"} {
 		t.Run(change, func(t *testing.T) {
-			instance := &models.Instance{ID: 155, UserID: 1, RuntimeType: "opencode", Status: "creating", RuntimeGeneration: 8}
+			instance := &models.Instance{ID: 155, UserID: 1, Type: "opencode", RuntimeType: "gateway", InstanceMode: "lite", Status: "creating", RuntimeGeneration: 8}
 			binding := &models.InstanceRuntimeBinding{InstanceID: 155, RuntimeType: "opencode", Generation: 8, State: "creating", GatewayID: "pending-155-8", RuntimePodID: 153}
 			req := StoppedSourceRecoveryRequest{SuccessorGeneration: 8, SourcePodUID: "old", ObserverRuntimePodID: 153}
 			switch change {

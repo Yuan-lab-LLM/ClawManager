@@ -54,7 +54,11 @@ func validateStoppedRecoveryReservation(instance *models.Instance, binding *mode
 	if err := req.Validate(); err != nil {
 		return err
 	}
-	if instance == nil || binding == nil || instance.UserID < 1 || instance.Status != "creating" || instance.RuntimeGeneration != req.SuccessorGeneration || binding.InstanceID != instance.ID || binding.RuntimeType != instance.RuntimeType || binding.Generation != req.SuccessorGeneration || binding.State != "creating" || binding.GatewayID != fmt.Sprintf("pending-%d-%d", instance.ID, req.SuccessorGeneration) || binding.RuntimePodID < 1 {
+	if instance == nil {
+		return fmt.Errorf("recovery instance is unavailable")
+	}
+	runtimeType, known := schedulerRuntimeType(*instance)
+	if !known || normalizeInstanceRuntimeType(instance.RuntimeType) != RuntimeBackendGateway || instance.InstanceMode != InstanceModeLite || binding == nil || instance.UserID < 1 || instance.Status != "creating" || instance.RuntimeGeneration != req.SuccessorGeneration || binding.InstanceID != instance.ID || binding.RuntimeType != runtimeType || binding.Generation != req.SuccessorGeneration || binding.State != "creating" || binding.GatewayID != fmt.Sprintf("pending-%d-%d", instance.ID, req.SuccessorGeneration) || binding.RuntimePodID < 1 {
 		return fmt.Errorf("recovery requires the exact unpublished pending successor")
 	}
 	return nil
@@ -89,23 +93,24 @@ func (s *RuntimeScheduler) RecoverStoppedSource(ctx context.Context, id int, req
 	}
 	instanceCopy, bindingCopy := *instance, *binding
 	instance, binding = &instanceCopy, &bindingCopy
+	runtimeType, _ := schedulerRuntimeType(*instance)
 	// Snapshot requires successor Secret absence before any worker action.
 	prior, err := c.assignments.StoppedRecoverySource(ctx, id, req.SuccessorGeneration)
 	if err != nil {
 		return err
 	}
-	if prior.PodUID != req.SourcePodUID || prior.UserID != instance.UserID || prior.RuntimeType != instance.RuntimeType {
+	if prior.PodUID != req.SourcePodUID || prior.UserID != instance.UserID || prior.RuntimeType != runtimeType {
 		return fmt.Errorf("predecessor does not match requested owner and source")
 	}
 	var start RuntimeAgentCreateGatewayRequest
 	if err = json.Unmarshal(prior.Request, &start); err != nil {
 		return err
 	}
-	workspace := RuntimeWorkspacePathWithRoot(s.workspaceRoot, instance.RuntimeType, instance.UserID, id)
+	workspace := RuntimeWorkspacePathWithRoot(s.workspaceRoot, runtimeType, instance.UserID, id)
 	if start.InstanceID != id || start.UserID != instance.UserID || start.Generation != prior.Generation || start.PodUID != prior.PodUID || start.AgentType != prior.RuntimeType || start.WorkspacePath != workspace || binding.WorkspacePath != workspace || start.GatewayPort < 1 {
 		return fmt.Errorf("predecessor workspace or launch identity is inconsistent")
 	}
-	pods, err := s.podRepo.List(ctx, instance.RuntimeType)
+	pods, err := s.podRepo.List(ctx, runtimeType)
 	if err != nil {
 		return err
 	}
@@ -140,7 +145,7 @@ func (s *RuntimeScheduler) RecoverStoppedSource(ctx context.Context, id int, req
 	observerUID := stringValue(observer.PodUID)
 	var storage k8s.StoppedSourceStorage
 	for i, pod := range pinned {
-		if err = s.verifyStoppedRecoveryPod(ctx, c, pod, instance.RuntimeType); err != nil {
+		if err = s.verifyStoppedRecoveryPod(ctx, c, pod, runtimeType); err != nil {
 			return err
 		}
 		candidate, e := k8s.ResolveStoppedSourceStorage(ctx, c.kube, *source, pod, workspace, start.GatewayPort)
@@ -183,7 +188,8 @@ func (s *RuntimeScheduler) RecoverStoppedSource(ctx context.Context, id int, req
 	if err = validateStoppedRecoveryReservation(latest, reservation, req); err != nil {
 		return err
 	}
-	if latest.UserID != instance.UserID || latest.RuntimeType != instance.RuntimeType || reservation.WorkspacePath != workspace || reservation.GatewayPort != binding.GatewayPort || reservation.ID != binding.ID || reservation.RuntimePodID != binding.RuntimePodID {
+	latestRuntimeType, _ := schedulerRuntimeType(*latest)
+	if latest.UserID != instance.UserID || latestRuntimeType != runtimeType || latest.RuntimeType != instance.RuntimeType || reservation.WorkspacePath != workspace || reservation.GatewayPort != binding.GatewayPort || reservation.ID != binding.ID || reservation.RuntimePodID != binding.RuntimePodID {
 		return fmt.Errorf("pending reservation changed during proof")
 	}
 	latestSource, err := s.podRepo.GetByID(ctx, source.ID)
@@ -201,7 +207,7 @@ func (s *RuntimeScheduler) RecoverStoppedSource(ctx context.Context, id int, req
 		if current == nil || stringValue(current.PodUID) != stringValue(pod.PodUID) || stringValue(current.AgentEndpoint) != stringValue(pod.AgentEndpoint) {
 			return fmt.Errorf("pending target or observer registration changed during proof")
 		}
-		if err = s.verifyStoppedRecoveryPod(ctx, c, *current, instance.RuntimeType); err != nil {
+		if err = s.verifyStoppedRecoveryPod(ctx, c, *current, runtimeType); err != nil {
 			return err
 		}
 		rechecked, e := k8s.ResolveStoppedSourceStorage(ctx, c.kube, *latestSource, *current, workspace, start.GatewayPort)

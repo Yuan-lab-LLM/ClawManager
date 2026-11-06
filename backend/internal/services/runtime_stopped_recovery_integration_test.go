@@ -110,7 +110,7 @@ func TestRecoverStoppedSourceJoinsProofsWithoutLaunchingSuccessor(t *testing.T) 
 				return nil
 			}
 			instances := newFakeRuntimeInstanceRepo()
-			instances.byID[155] = &models.Instance{ID: 155, UserID: 1, RuntimeType: "opencode", Status: "creating", RuntimeGeneration: 8}
+			instances.byID[155] = &models.Instance{ID: 155, UserID: 1, Type: "opencode", RuntimeType: "gateway", InstanceMode: "lite", Status: "creating", RuntimeGeneration: 8}
 			bindings := newFakeRuntimeBindingRepo()
 			bindings.bindings[155] = &models.InstanceRuntimeBinding{InstanceID: 155, RuntimeType: "opencode", Generation: 8, State: "creating", GatewayID: "pending-155-8", RuntimePodID: 153, WorkspacePath: workspace, GatewayPort: 20000}
 			pods := &fakeRuntimePodRepo{pods: map[int64]*models.RuntimePod{151: source, 153: target, 154: observer}}
