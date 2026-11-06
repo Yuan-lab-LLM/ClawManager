@@ -1,5 +1,9 @@
 import assert from 'node:assert/strict';
 import path from 'node:path';
+import fs from 'node:fs';
+import os from 'node:os';
+import readline from 'node:readline';
+import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { chromium } from '@playwright/test';
 
@@ -24,6 +28,19 @@ const vite = await createServer({ root, server: { port: 0 }, plugins: [{
   }); },
 }] });
 let browser;
+const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-persist-pty-'));
+const terminalSessions = new Map(), children = [], terminalReads = [];
+let terminalCreates = 0;
+function createTerminal(generation) {
+  const child = spawn('python3', ['-u', path.resolve(import.meta.dirname, 'fixtures/workbench-pty.py')], { cwd: workspace, stdio: ['pipe', 'pipe', 'pipe'] });
+  children.push(child);
+  const info = { id: 'shell-' + ++terminalCreates, name: 'Original shell', generation, cwd: '', exited: false, created_at: new Date().toISOString() };
+  const session = { info, child, output: Buffer.alloc(0) };
+  terminalSessions.set(info.id, session);
+  readline.createInterface({ input: child.stdout }).on('line', line => { const message = JSON.parse(line); if (message.data) session.output = Buffer.concat([session.output, Buffer.from(message.data, 'base64')]); if (message.exited) info.exited = true; });
+  child.on('exit', () => { info.exited = true; });
+  return info;
+}
 try {
   await vite.listen();
   const origin = 'http://127.0.0.1:' + vite.httpServer.address().port;
@@ -50,7 +67,29 @@ try {
     else if (pathname.endsWith('/access')) data = { access_url: 'https://native-persistence.invalid/', expires_at: new Date(Date.now() + 3600000).toISOString() };
     else if (pathname.endsWith('/runtime')) data = { commands: [], skills: [] };
     else if (pathname.endsWith('/capabilities')) data = { generation, workspace: '/workspace', git: true, terminal: true, preview: true };
-    else if (pathname.endsWith('/workspace/files')) data = { entries: [] };
+    else if (pathname.endsWith('/workspace/files')) {
+      const current = new URL(request.url()).searchParams.get('path') || '';
+      data = { entries: [{ name: current === 'starter' ? 'nested' : 'leaf.txt', path: current === 'starter' ? 'starter/nested' : current + '/leaf.txt', is_dir: current === 'starter', size: 12, modified_at: new Date().toISOString(), previewable: true, downloadable: true }] };
+    }
+    else if (pathname.endsWith('/workbench/git')) {
+      const operation = request.postDataJSON().operation;
+      if (operation === 'projects') data = { projects: [{ path: 'first', name: 'First' }, { path: 'second', name: 'Second' }] };
+      else if (operation === 'status') data = { status: { branch: 'main', detached: false, ahead: 0, behind: 0, changes: [{ path: 'main.ts', index_status: 'M', worktree_status: '', staged: true, untracked: false, binary: false, stats_known: true, staged_additions: 1, staged_deletions: 1 }] } };
+      else if (operation === 'branches') data = { branches: [{ name: 'main', current: true }] };
+      else if (operation === 'history') data = { history: [] };
+      else if (operation === 'diff') data = { diff: '--- a/main.ts\n+++ b/main.ts\n@@ -1 +1 @@\n-old\n+restored diff body\n' };
+    }
+    else if (pathname.endsWith('/workbench/terminals')) data = request.method() === 'POST' ? createTerminal(generation) : { sessions: [...terminalSessions.values()].map(session => session.info) };
+    else if (/\/terminals\/[^/]+\/(?:output|input|resize)$/.test(pathname)) {
+      const [, sessionId, operation] = pathname.match(/\/terminals\/([^/]+)\/(output|input|resize)$/);
+      const session = terminalSessions.get(sessionId);
+      assert(session, 'Only an actual original session can receive terminal operations');
+      if (operation === 'output') {
+        const cursor = Number(new URL(request.url()).searchParams.get('cursor') || 0);
+        terminalReads.push({ id: sessionId, cursor });
+        data = { data: session.output.subarray(cursor).toString('base64'), cursor: session.output.length, exited: session.info.exited, truncated: false };
+      } else { session.child.stdin.write(JSON.stringify(request.postDataJSON()) + '\n'); data = {}; }
+    }
     else if (pathname.endsWith('/session-usage')) data = { summary: { session_count: 0, total_tokens: 0, total_prompt_tokens: 0, total_completion_tokens: 0, total_estimated_cost: 0, currency: 'USD' }, compliance: { fallback_session_count: 0, has_fallback_sessions: false, recent_fallback_audit_count: 0 }, items: [], total: 0, page: 1, limit: 20 };
     else if (pathname.endsWith('/previews')) {
       assert.equal(request.method(), 'POST');
@@ -113,6 +152,62 @@ try {
   await page.evaluate(() => window.fixtureUser(7));
   await page.waitForFunction(() => document.querySelector('.wb-address input')?.value.includes('/one'));
   await page.locator('.wb-preview-frame').first().waitFor();
+  const wb = page.locator('.wb-root');
+  await wb.getByRole('button', { name: 'New tab', exact: true }).click();
+  await wb.getByRole('button', { name: 'Terminal', exact: true }).click();
+  const input = () => page.locator('.wb-live-view:not([hidden]) .xterm-helper-textarea');
+  const send = async command => { await input().focus(); await page.keyboard.type(command); await page.keyboard.press('Enter'); };
+  await input().waitFor();
+  await send('CM_PERSIST=kept; printf "SHELL_ID:%s:%s\\nTTY_PRIVATE_MARKER\\n" "$$" "$CM_PERSIST"');
+  await page.waitForFunction(() => document.querySelector('.wb-live-view:not([hidden]) .xterm-accessibility-tree')?.textContent.includes('TTY_PRIVATE_MARKER'));
+  const original = terminalSessions.get('shell-1');
+  const shellPid = original.output.toString().match(/SHELL_ID:(\d+):kept/)[1];
+  await nav('/instances'); await nav('/instances/42');
+  await input().waitFor();
+  await page.waitForFunction(() => document.querySelector('.wb-live-view:not([hidden]) .xterm-accessibility-tree')?.textContent.includes('TTY_PRIVATE_MARKER'));
+  await send('printf "REATTACHED:%s:%s\\n" "$$" "$CM_PERSIST"');
+  await page.waitForFunction(() => document.querySelector('.wb-live-view:not([hidden]) .xterm-accessibility-tree')?.textContent.includes('REATTACHED:'));
+  assert(original.output.toString().includes('REATTACHED:' + shellPid + ':kept'), 'Reentry must join the same shell PID and variables');
+  assert.equal(terminalCreates, 1);
+  await page.reload(); await input().waitFor();
+  await page.waitForFunction(() => document.querySelector('.wb-live-view:not([hidden]) .xterm-accessibility-tree')?.textContent.includes('TTY_PRIVATE_MARKER'));
+  await send('printf "RELOADED:%s:%s\\n" "$$" "$CM_PERSIST"');
+  await page.waitForFunction(() => document.querySelector('.wb-live-view:not([hidden]) .xterm-accessibility-tree')?.textContent.includes('RELOADED:'));
+  assert(original.output.toString().includes('RELOADED:' + shellPid + ':kept'));
+  assert(terminalReads.filter(read => read.id === 'shell-1' && read.cursor === 0).length >= 3, 'Each fresh xterm must replay retained backend output from cursor zero');
+  assert.equal(terminalCreates, 1);
+  assert(!(await page.evaluate(() => localStorage.getItem('cm:workbench:v1:7:42'))).includes('TTY_PRIVATE_MARKER'), 'TTY contents must stay in backend replay, never browser storage');
+  await wb.locator('.wb-panels').getByRole('tab', { name: 'Git projects', exact: true }).click();
+  await wb.locator('.wb-project-bar select').selectOption('second');
+  await wb.locator('.wb-file-choice').first().click();
+  await wb.locator('.wb-diff').getByText('+restored diff body', { exact: true }).waitFor();
+  await wb.getByRole('textbox', { name: 'Commit message', exact: true }).fill('Retained commit draft');
+  await nav('/instances'); await nav('/instances/42');
+  await wb.locator('.wb-diff').getByText('+restored diff body', { exact: true }).waitFor();
+  assert.equal(await wb.locator('.wb-project-bar select').inputValue(), 'second');
+  assert.equal(await wb.getByRole('textbox', { name: 'Commit message', exact: true }).inputValue(), 'Retained commit draft');
+  await page.reload();
+  await wb.locator('.wb-diff').getByText('+restored diff body', { exact: true }).waitFor();
+  assert.equal(await wb.locator('.wb-project-bar select').inputValue(), 'second');
+  assert.equal(await wb.getByRole('textbox', { name: 'Commit message', exact: true }).inputValue(), 'Retained commit draft');
+  await wb.locator('.wb-panels').getByRole('tab', { name: 'Files', exact: true }).click();
+  await wb.locator('.wb-files').getByRole('button', { name: 'nested', exact: true }).click();
+  await wb.locator('.wb-files').getByRole('button', { name: 'leaf.txt', exact: true }).waitFor();
+  await nav('/instances'); await nav('/instances/42');
+  await wb.locator('.wb-files').getByRole('button', { name: 'leaf.txt', exact: true }).waitFor();
+  assert.equal(await wb.locator('.wb-panels').getByRole('tab', { name: 'Files', exact: true }).getAttribute('aria-selected'), 'true');
+  await page.reload();
+  await wb.locator('.wb-files').getByRole('button', { name: 'leaf.txt', exact: true }).waitFor();
+  assert.equal(await wb.locator('.wb-panels').getByRole('tab', { name: 'Files', exact: true }).getAttribute('aria-selected'), 'true');
+  await wb.locator('.wb-panels').getByRole('tab', { name: 'Preview & terminals', exact: true }).click();
+  await send('exit');
+  await page.locator('.wb-live-view:not([hidden]) .wb-terminal-message').getByText('Session ended', { exact: true }).waitFor();
+  await page.reload();
+  await page.locator('.wb-live-view:not([hidden]) .wb-terminal-message').getByText('Session ended', { exact: true }).waitFor();
+  await page.waitForFunction(() => document.querySelector('.wb-live-view:not([hidden]) .xterm-accessibility-tree')?.textContent.includes('TTY_PRIVATE_MARKER'));
+  terminalSessions.delete('shell-1'); await page.reload();
+  await page.locator('.wb-live-view:not([hidden])').getByText('Session ended', { exact: true }).waitFor();
+  assert.equal(terminalCreates, 1, 'Ended or pruned shells must retain ended tabs without creating replacements');
   const beforeGeneration = allocations.length;
   generation = 7; await page.reload(); await page.locator('.wb-root').waitFor();
   assert.equal(await page.locator('.wb-address input').first().inputValue(), 'http://localhost:3000/one?view=clock#/settings');
@@ -121,8 +216,9 @@ try {
   running = false; await page.reload(); await page.locator('.wb-root').waitFor();
   assert.equal(await page.locator('.wb-preview-frame').count(), 0);
   assert.equal(allocations.length, beforeGeneration);
-  assert(!mutations.some(path => /\/(?:start|stop|restart|terminals)(?:\/|$)/.test(path)), 'Reentry must never create terminals or start/restart services');
+  assert(!mutations.some(path => /\/(?:start|stop|restart)(?:\/|$)/.test(path)), 'Reentry must never start/restart services');
+  assert.equal(mutations.filter(path => path.endsWith('/workbench/terminals')).length, 1, 'Only the explicit New terminal click may create a shell');
   assert.equal(context.pages().length, 1);
-  console.log('PASS actual InstanceDetailPage: leave/reenter, reload, tab order/selection/closing, fresh once-only capabilities, instance/account isolation, generation and stopped fences; no credential forwarding or lifecycle mutations');
+  console.log('PASS actual InstanceDetailPage: browser state/fresh capabilities; original real PTY PID, variables and replay after reentry/reload with one explicit creation; ended/pruned sessions stay ended; Files folder and Git repository/diff/draft restore on reentry/reload; scoped isolation and generation/stopped fences');
 } catch (error) { console.error(error); throw error; }
-finally { await browser?.close(); vite.httpServer?.closeAllConnections(); await vite.close(); }
+finally { await browser?.close(); for (const child of children) child.stdin.end(); vite.httpServer?.closeAllConnections(); await vite.close(); fs.rmSync(workspace, { recursive: true, force: true }); }

@@ -1,6 +1,6 @@
 import { allowBrowserInstance } from "../../lib/browserOrigin";
 import type { KeyboardEvent } from "react";
-import { useEffect, useReducer, useState, useRef, useId } from "react";
+import { useCallback, useEffect, useReducer, useState, useRef, useId } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   Files,
@@ -18,6 +18,7 @@ import {
   Activity,
 } from "lucide-react";
 import { useI18n } from "../../contexts/I18nContext";
+import { useAuthStore } from "../../stores/authStore";
 import { WorkspaceFileManager } from "../WorkspaceFileManager";
 import {
   instanceWorkbenchService as service,
@@ -33,7 +34,7 @@ import {
 import { GitProjects } from "./GitProjects";
 import { WorkbenchTerminal } from "./WorkbenchTerminal";
 import { WorkbenchBrowser } from "./WorkbenchBrowser";
-import type { WorkbenchState, WorkbenchEvent } from "./state";
+import type { WorkbenchState, WorkbenchEvent, WorkspaceFileView } from "./state";
 import { isRestoredPreviewCurrent } from "./persistence";
 import "./workbench.css";
 function navigateTabs(event: KeyboardEvent<HTMLDivElement>) {
@@ -92,6 +93,8 @@ export function InstanceWorkbench({
   );
   const state = sharedState ?? localState;
   const dispatch = onWorkbenchEvent ?? localDispatch;
+  const onFilesChange = useCallback((view: WorkspaceFileView) => dispatch({ type: "files.patch", patch: view }), [dispatch]);
+  const userId = useAuthStore(auth => auth.user?.id);
   const rootRef = useRef<HTMLElement>(null);
   const programTabsRef = useRef<HTMLDivElement>(null);
   const activeTabRef = useRef<HTMLDivElement>(null);
@@ -146,6 +149,20 @@ export function InstanceWorkbench({
   if (!visible && full) setFull(false);
   const scopeAllowed = allowBrowserInstance(instanceId, caps.data);
   const ready = isRunning && !!caps.data && scopeAllowed;
+  const restoringTerminals = state.tabs.some(tab => tab.restoreTerminal && !tab.stale && tab.terminalGeneration === generation);
+  const terminalRestoration = useQuery({
+    queryKey: ["workbench-terminal-restore", userId, instanceId, generation],
+    queryFn: ({ signal }) => service.terminals(instanceId, generation, signal),
+    enabled: ready && !!caps.data?.terminal && state.generation === generation && restoringTerminals,
+    staleTime: 0,
+    refetchOnMount: "always",
+    retry: false,
+  });
+  useEffect(() => {
+    if (terminalRestoration.data && terminalRestoration.isFetchedAfterMount && !terminalRestoration.isFetching && !terminalRestoration.isError && state.generation === generation) {
+      dispatch({ type: "terminal.reconcile", generation, sessions: terminalRestoration.data });
+    }
+  }, [terminalRestoration.data, terminalRestoration.isFetchedAfterMount, terminalRestoration.isFetching, terminalRestoration.isError, state.generation, generation, dispatch]);
   const currentView = useRef(state);
   currentView.current = state;
   const previewScope = useRef({ instanceId, generation, isRunning });
@@ -343,7 +360,7 @@ export function InstanceWorkbench({
         hidden={state.panel !== "files"}
         className="wb-panel wb-files"
       >
-        <WorkspaceFileManager instanceId={instanceId} {...files} />
+        <WorkspaceFileManager instanceId={instanceId} {...files} view={state.files} onViewChange={onFilesChange} />
       </div>
       <div
         id={`wb-panel-${viewID}-git`}
@@ -415,7 +432,7 @@ export function InstanceWorkbench({
                     {tab.kind === "terminal" && (
                       <i
                         className={
-                          tab.stale || tab.session?.exited ? "ended" : ""
+                          tab.stale || !tab.session || tab.session.exited ? "ended" : ""
                         }
                       />
                     )}
@@ -686,7 +703,7 @@ export function InstanceWorkbench({
                   }
                 />
               ) : (
-                tab.session && (
+                tab.session ? (
                   <WorkbenchTerminal
                     instanceId={instanceId}
                     session={tab.session}
@@ -702,6 +719,12 @@ export function InstanceWorkbench({
                       dispatch({ type: "terminal.update", session })
                     }
                   />
+                ) : (
+                  <div className="wb-empty" role={terminalRestoration.error && tab.restoreTerminal ? "alert" : "status"}>
+                    <Terminal size={32} />
+                    <p>{tab.stale ? t("workbench.changed") : tab.restoreTerminal ? terminalRestoration.error ? workbenchError(terminalRestoration.error) : t("workbench.loading") : t("workbench.ended")}</p>
+                    {tab.restoreTerminal && terminalRestoration.error && <button className="wb-button" disabled={!ready || !caps.data?.terminal || terminalRestoration.isFetching} onClick={() => void terminalRestoration.refetch()}>{t("workbench.reconnect")}</button>}
+                  </div>
                 )
               )}
             </div>

@@ -14,6 +14,9 @@ export interface WorkbenchTab {
   previewPending?: boolean;
   previewError?: string;
   restorePreview?: boolean;
+  restoreTerminal?: boolean;
+  terminalGeneration?: number;
+  terminalEnded?: boolean;
   session?: TerminalSession;
 }
 export interface GitViewState {
@@ -31,16 +34,29 @@ export interface GitViewState {
   error: string;
   selection: { repo: string; path: string; staged: boolean } | null;
 }
+export interface WorkspaceFileView {
+  currentPath?: string;
+  previewPath: string | null;
+  editPath: string | null;
+  pageIndex: number;
+  sortColumn: "name" | "size" | "modified";
+  sortDirection: "asc" | "desc";
+  expanded: boolean;
+  searchOpen: boolean;
+  searchInput: string;
+}
 export interface WorkbenchState {
   generation: number;
   panel: WorkbenchPanel;
   tabs: WorkbenchTab[];
   git: GitViewState;
+  files: WorkspaceFileView;
   active?: string;
 }
 export type WorkbenchEvent =
   | { type: "panel"; panel: WorkbenchPanel }
   | { type: "git.patch"; patch: Partial<GitViewState> }
+  | { type: "files.patch"; patch: Partial<WorkspaceFileView> }
   | { type: "browser.new"; id: string }
   | { type: "browser.expireLegacy" }
   | {
@@ -60,12 +76,14 @@ export type WorkbenchEvent =
       id: string;
     }
   | { type: "terminal.update"; session: TerminalSession }
+  | { type: "terminal.reconcile"; generation: number; sessions: TerminalSession[] }
   | { type: "generation"; generation: number };
 export function initialWorkbench(generation: number): WorkbenchState {
   return {
     generation,
     panel: "files",
     tabs: [],
+    files: { previewPath: null, editPath: null, pageIndex: 0, sortColumn: "name", sortDirection: "asc", expanded: false, searchOpen: false, searchInput: "" },
     git: {
       selected: null,
       folderPath: "",
@@ -90,6 +108,8 @@ export function workbenchReducer(
   switch (event.type) {
     case "git.patch":
       return { ...state, git: { ...state.git, ...event.patch } };
+    case "files.patch":
+      return { ...state, files: { ...state.files, ...event.patch } };
     case "panel":
       return { ...state, panel: event.panel };
     case "browser.new":
@@ -151,7 +171,7 @@ export function workbenchReducer(
         active: event.session.id,
         tabs: existing
           ? state.tabs.map((tab) =>
-              tab.id === event.session.id ? { ...tab, hidden: false } : tab,
+              tab.id === event.session.id ? { ...tab, session: event.session, hidden: false, restoreTerminal: undefined, terminalEnded: event.session.exited, terminalGeneration: event.session.generation } : tab,
             )
           : [
               ...state.tabs,
@@ -165,6 +185,14 @@ export function workbenchReducer(
               },
             ],
       };
+    }
+    case "terminal.reconcile": {
+      if (event.generation !== state.generation || !state.tabs.some(tab => tab.restoreTerminal)) return state;
+      return { ...state, tabs: state.tabs.map(tab => {
+        if (!tab.restoreTerminal || tab.kind !== "terminal" || tab.stale || tab.terminalGeneration !== event.generation) return tab;
+        const session = event.sessions.find(session => session.id === tab.id && session.generation === event.generation);
+        return { ...tab, session, title: session?.name ?? tab.title, restoreTerminal: undefined, terminalEnded: session?.exited ?? true };
+      }) };
     }
     case "terminal.update":
       return {
@@ -217,6 +245,7 @@ export function workbenchReducer(
               previewPending: undefined,
               previewError: undefined,
               restorePreview: undefined,
+              restoreTerminal: undefined,
             })),
           };
     default:
