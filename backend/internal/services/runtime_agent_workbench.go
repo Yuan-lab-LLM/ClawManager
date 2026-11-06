@@ -42,14 +42,14 @@ func (c *runtimeAgentHTTPClient) Workbench(ctx context.Context, endpoint string,
 	if resp.StatusCode == 404 || resp.StatusCode == 405 || resp.StatusCode == 501 {
 		return nil, ErrRuntimeAgentUnsupported
 	}
-	if resp.StatusCode == 409 || resp.StatusCode == 423 {
-		return nil, ErrWorkbenchStale
-	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		var failure struct {
 			Error WorkbenchOperationError `json:"error"`
 		}
 		if json.Unmarshal(body, &failure) == nil && failure.Error.Code != "" && len(failure.Error.Message) <= 512 {
+			if failure.Error.Code == "stale_generation" {
+				return nil, ErrWorkbenchStale
+			}
 			return nil, &failure.Error
 		}
 		return nil, ErrWorkbenchUnavailable

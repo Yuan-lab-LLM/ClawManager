@@ -125,7 +125,14 @@ export function InstanceWorkbench({
     },
     enabled: isRunning,
     staleTime: 30000,
-    retry: false,
+    // Only this read-only probe can be replayed; mutations keep explicit user retries.
+    retry: (failureCount, error) => {
+      const code = (error as { response?: { data?: { error_code?: string } } })
+        ?.response?.data?.error_code;
+      return failureCount < 3 && !!code &&
+        ["instance_busy", "stop_unconfirmed", "cancelled", "timeout"].includes(code);
+    },
+    retryDelay: (attempt) => 2000 * 2 ** attempt,
   });
   const generation = caps.data?.generation ?? runtimeGeneration;
   useEffect(() => {

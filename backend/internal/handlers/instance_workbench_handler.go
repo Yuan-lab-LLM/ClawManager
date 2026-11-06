@@ -93,6 +93,14 @@ func workbenchFailure(c *gin.Context, err error) {
 			status = 400
 			code = operation.Code
 			message = operation.Message
+			switch operation.Code {
+			case "instance_busy", "stop_unconfirmed":
+				status = http.StatusLocked
+			case "cancelled":
+				status = http.StatusConflict
+			case "timeout":
+				status = http.StatusGatewayTimeout
+			}
 		}
 	}
 	c.JSON(status, gin.H{"success": false, "error": message, "error_code": code})

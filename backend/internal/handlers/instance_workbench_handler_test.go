@@ -87,3 +87,26 @@ func TestWorkbenchHandlerPinsSessionFromRouteAndPassesRawInput(t *testing.T) {
 		t.Fatalf("wrong payload: %s", service.data)
 	}
 }
+
+func TestWorkbenchFailurePreservesTransientCodes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, tc := range []struct {
+		code   string
+		status int
+	}{
+		{"instance_busy", 423}, {"stop_unconfirmed", 423}, {"cancelled", 409}, {"timeout", 504}, {"execution_failed", 400}, {"invalid_request", 400},
+	} {
+		t.Run(tc.code, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			ctx, _ := gin.CreateTestContext(recorder)
+			workbenchFailure(ctx, &services.WorkbenchOperationError{Code: tc.code, Message: "Worker supplied explanation"})
+			if recorder.Code != tc.status {
+				t.Fatalf("status=%d want %d: %s", recorder.Code, tc.status, recorder.Body.String())
+			}
+			var data map[string]any
+			if json.Unmarshal(recorder.Body.Bytes(), &data) != nil || data["error_code"] != tc.code || data["error"] != "Worker supplied explanation" {
+				t.Fatalf("lost worker failure: %s", recorder.Body.String())
+			}
+		})
+	}
+}
