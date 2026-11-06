@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"clawreef/internal/models"
 )
@@ -27,6 +28,28 @@ func (c *slotRuntimeAgentClient) reservedGatewayPorts(ctx context.Context, pod m
 			return nil, fmt.Errorf("persisted slot request does not match assignment identity")
 		}
 		ports[req.GatewayPort] = struct{}{}
+	}
+
+	inspectionCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	defer cancel()
+	_, quarantine, err := c.readSlotAudit(inspectionCtx, pod)
+	if err != nil {
+		return nil, err
+	}
+	if quarantine.PodError != "" {
+		return nil, fmt.Errorf("runtime slot audit quarantine: %s", quarantine.PodError)
+	}
+	for port := range quarantine.Ports {
+		ports[port] = struct{}{}
+	}
+	observations, err := c.observeRuntimeSlots(inspectionCtx, pod)
+	if err != nil {
+		return nil, err
+	}
+	for _, observation := range observations {
+		if !observation.free() {
+			ports[observation.Port] = struct{}{}
+		}
 	}
 	return ports, nil
 }

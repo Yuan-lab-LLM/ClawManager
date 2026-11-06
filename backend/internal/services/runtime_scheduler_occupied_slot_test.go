@@ -5,11 +5,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
 	"net/http"
+	"strings"
 	"testing"
 
 	"clawreef/internal/models"
@@ -76,9 +80,18 @@ func TestSlotClientAllocationUsesFrozenCurrentPodAssignments(t *testing.T) {
 		t.Run(scenario, func(t *testing.T) {
 			ctx := context.Background()
 			pod := slotTestPod()
+			for i := 0; i < 8; i++ {
+				pod.Spec.Containers = append(pod.Spec.Containers, corev1.Container{Name: fmt.Sprintf("slot-%d", i), Env: []corev1.EnvVar{{Name: "RUNTIME_GATEWAY_PORT_START", Value: fmt.Sprint(20000 + i)}}})
+			}
 			kube := fake.NewSimpleClientset(pod)
 			endpoint, uid := "https://10.0.0.2:19090", string(pod.UID)
-			client := NewSlotRuntimeAgentClientWithHTTPClient("control", kube, "runtime", &http.Client{}).(*slotRuntimeAgentClient)
+			client := NewSlotRuntimeAgentClientWithHTTPClient("control", kube, "runtime", &http.Client{Transport: slotRoundTripper(func(r *http.Request) (*http.Response, error) {
+				if r.Method != http.MethodGet || !strings.HasSuffix(r.URL.Path, "/state") {
+					t.Fatalf("unexpected runtime mutation: %s %s", r.Method, r.URL.Path)
+				}
+				data, _ := json.Marshal(auditFreeSnapshot())
+				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(string(data)))}, nil
+			})}).(*slotRuntimeAgentClient)
 			req := RuntimeAgentCreateGatewayRequest{InstanceID: 25, UserID: 1, Generation: 14, PodUID: uid, AgentType: RuntimeTypeHermes, GatewayPort: 20000}
 			raw, _ := json.Marshal(req)
 			if err := client.assignments.EnsureDesired(ctx, k8sservice.RuntimeAssignment{InstanceID: 25, UserID: 1, Generation: 14, PodUID: uid, RuntimeType: RuntimeTypeHermes, Endpoint: endpoint, GatewayID: "gw-25-14", Request: raw}); err != nil {
