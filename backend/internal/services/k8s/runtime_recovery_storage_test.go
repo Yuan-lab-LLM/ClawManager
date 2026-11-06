@@ -12,7 +12,7 @@ import (
 )
 
 func TestStoppedRecoveryStorageRequiresRetainedSourceAndSameBacking(t *testing.T) {
-	for _, change := range []string{"none", "missing-rs", "source-live", "wrong-node", "recreated-claim", "unknown-node", "wrong-image", "different-mount", "unbound-pv", "ledger-overlay", "ledger-root"} {
+	for _, change := range []string{"none", "missing-rs", "source-live", "wrong-node", "recreated-claim", "unknown-node", "wrong-image", "different-mount", "unbound-pv", "ledger-overlay", "ledger-root", "decoy-workspace", "decoy-ledger"} {
 		t.Run(change, func(t *testing.T) {
 			str := func(s string) *string { return &s }
 			yes := true
@@ -27,6 +27,12 @@ func TestStoppedRecoveryStorageRequiresRetainedSourceAndSameBacking(t *testing.T
 			pv := &corev1.PersistentVolume{ObjectMeta: metav1.ObjectMeta{Name: "pv", UID: "pv-uid", CreationTimestamp: before}, Spec: corev1.PersistentVolumeSpec{ClaimRef: &corev1.ObjectReference{Namespace: "runtime", Name: "data", UID: "claim"}, PersistentVolumeSource: corev1.PersistentVolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/data"}}}}
 			node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node", UID: "node-uid", CreationTimestamp: before}, Spec: corev1.NodeSpec{PodCIDR: "10.1.0.0/24"}}
 			switch change {
+			case "decoy-workspace":
+				rs.Spec.Template.Spec.Containers[0].VolumeMounts = []corev1.VolumeMount{{Name: "workspaces", MountPath: "/decoy"}, {Name: "workspaces", MountPath: "/workspaces", SubPath: "source"}}
+				pod.Spec.Containers[0].VolumeMounts = []corev1.VolumeMount{{Name: "workspaces", MountPath: "/decoy"}, {Name: "workspaces", MountPath: "/workspaces", SubPath: "observer"}}
+			case "decoy-ledger":
+				rs.Spec.Template.Spec.Containers[0].VolumeMounts = []corev1.VolumeMount{{Name: "workspaces", MountPath: "/decoy"}, {Name: "workspaces", MountPath: "/workspaces/opencode/user-1/instance-155", SubPath: "business"}, {Name: "workspaces", MountPath: "/workspaces/.clawmanager-slot-locks", SubPath: "source-ledger"}}
+				pod.Spec.Containers[0].VolumeMounts = []corev1.VolumeMount{{Name: "workspaces", MountPath: "/decoy"}, {Name: "workspaces", MountPath: "/workspaces/opencode/user-1/instance-155", SubPath: "business"}, {Name: "workspaces", MountPath: "/workspaces/.clawmanager-slot-locks", SubPath: "observer-ledger"}}
 			case "wrong-node":
 				pod.Spec.NodeName = "other"
 			case "recreated-claim":

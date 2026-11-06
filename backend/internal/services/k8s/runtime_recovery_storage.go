@@ -174,8 +174,9 @@ func ResolveStoppedSourceStorage(ctx context.Context, client kubernetes.Interfac
 	} else if pv.Spec.NFS == nil || pv.Spec.NFS.ReadOnly {
 		return fail("unsupported workspace volume provenance")
 	}
-	identity := recoveryWorkspaceMapping(original, claim)
-	if identity == "" || identity != recoveryWorkspaceMapping(live, claim) {
+	ledger := path.Join(workspaceRoot, ".clawmanager-slot-locks")
+	identity := recoveryWorkspaceMapping(original, claim, workspace, ledger)
+	if identity == "" || identity != recoveryWorkspaceMapping(live, claim, workspace, ledger) {
 		return fail("workspace mappings changed")
 	}
 	raw, err := json.Marshal([]any{identity, rs.UID, dep.UID, node.UID, allocation, pv.UID, pv.Spec.PersistentVolumeSource})
@@ -212,17 +213,34 @@ func verifyRecoveryLedgerCoverage(pod *corev1.Pod, root string) error {
 
 // Coverage above proves every slot has the same mapping. A read-only observer
 // may have fewer slots; container count does not change the filesystem identity.
-func recoveryWorkspaceMapping(pod *corev1.Pod, claim *corev1.PersistentVolumeClaim) string {
+func recoveryWorkspaceMapping(pod *corev1.Pod, claim *corev1.PersistentVolumeClaim, targets ...string) string {
 	for _, container := range pod.Spec.Containers {
 		if container.Name != "runtime" && !strings.HasPrefix(container.Name, "slot-") {
 			continue
 		}
-		for _, mount := range container.VolumeMounts {
-			if mount.Name == runtimeWorkspaceVolume {
-				raw, _ := json.Marshal([]string{pod.Namespace, claim.Name, string(claim.UID), claim.Spec.VolumeName, mount.MountPath, mount.SubPath})
-				return string(raw)
+		mapping := []string{pod.Namespace, claim.Name, string(claim.UID), claim.Spec.VolumeName}
+		for _, target := range targets {
+			var backing *corev1.VolumeMount
+			for i := range container.VolumeMounts {
+				mount := &container.VolumeMounts[i]
+				if !mountCoversPath(mount.MountPath, target) {
+					continue
+				}
+				if backing != nil && len(backing.MountPath) == len(mount.MountPath) {
+					return ""
+				}
+				if backing == nil || len(mount.MountPath) > len(backing.MountPath) {
+					backing = mount
+				}
 			}
+			if backing == nil || backing.Name != runtimeWorkspaceVolume || backing.ReadOnly || backing.SubPathExpr != "" {
+				return ""
+			}
+			relative := strings.TrimPrefix(strings.TrimPrefix(target, backing.MountPath), "/")
+			mapping = append(mapping, path.Join(backing.SubPath, relative))
 		}
+		raw, _ := json.Marshal(mapping)
+		return string(raw)
 	}
 	return ""
 }
