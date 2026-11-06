@@ -1,4 +1,4 @@
-import { useId } from "react";
+import { useId, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowDown,
@@ -13,6 +13,10 @@ import {
   Check,
   Minus,
   X,
+  FileCode,
+  FileImage,
+  File,
+  UserRound,
 } from "lucide-react";
 import { useI18n } from "../../contexts/I18nContext";
 import {
@@ -22,6 +26,8 @@ import {
 import { workspaceService } from "../../services/workspaceService";
 import type { GitChange, GitRequest } from "../../types/workbench";
 import type { GitViewState } from "./state";
+import { bulkPaths, changePaths, changeStats, imagePreviewPath } from "./gitPresentation";
+import { GitDiff } from "./GitDiff";
 interface Props {
   instanceId: number;
   generation: number;
@@ -29,11 +35,6 @@ interface Props {
   visible: boolean;
   view: GitViewState;
   onChange: (patch: Partial<GitViewState>) => void;
-}
-function stagedPaths(change: GitChange) {
-  return change.index_status === "R" && change.previous_path
-    ? [change.previous_path, change.path]
-    : [change.path];
 }
 export function GitProjects({
   instanceId,
@@ -43,9 +44,10 @@ export function GitProjects({
   view,
   onChange,
 }: Props) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const viewID = useId();
   const cache = useQueryClient();
+  const [identity, setIdentity] = useState({ repo: null as string | null, open: false, name: "", email: "", error: "", loading: false });
   const {
     selected,
     folderPath,
@@ -122,7 +124,7 @@ export function GitProjects({
   const selectedChange = changes.find((change) => change.path === selectedFile?.path);
   const diffPaths = selectedFile
     ? selectedFile.staged && selectedChange
-      ? stagedPaths(selectedChange)
+      ? changePaths(selectedChange, true)
       : [selectedFile.path]
     : [];
   const diff = useQuery({
@@ -162,7 +164,11 @@ export function GitProjects({
       }
       return true;
     } catch (err) {
-      onChange({ error: workbenchError(err) });
+      const data = (err as { response?: { data?: { code?: string; error_code?: string; error?: string | { code?: string } } } })?.response?.data;
+      if (request.operation === "commit" && (data?.code === "missing_identity" || data?.error_code === "missing_identity" || (typeof data?.error === "object" && data.error?.code === "missing_identity") || /missing_identity|author identity unknown|unable to auto-detect email/i.test(workbenchError(err)))) {
+        setIdentity(previous => ({ ...previous, ...(previous.repo !== currentPath ? { name: "", email: "" } : {}), repo: currentPath, open: true, loading: false, error: t("workbench.identityRequired") }));
+        onChange({ error: t("workbench.identityRequired") });
+      } else onChange({ error: workbenchError(err) });
       return false;
     } finally {
       onChange({ busy: false });
@@ -172,69 +178,53 @@ export function GitProjects({
   const unstaged = changes.filter(
     (c) => c.untracked || !!c.worktree_status.trim(),
   );
-  const files = (items: GitChange[], isStaged: boolean) => (
-    <div className="wb-change-group">
+  const openIdentity = async () => {
+    const repo = currentPath;
+    setIdentity({ repo, open: true, name: "", email: "", error: "", loading: true });
+    try {
+      const result = await service.git(instanceId, generation, { operation: "identity", path: repo! });
+      setIdentity(previous => previous.repo === repo && previous.loading ? { ...previous, name: result.identity?.name ?? "", email: result.identity?.email ?? "", loading: false } : previous);
+    } catch {
+      setIdentity(previous => previous.repo === repo ? { ...previous, loading: false } : previous);
+    }
+  };
+  const files = (items: GitChange[], isStaged: boolean) => {
+    const paths = bulkPaths(items, isStaged);
+    return <div className="wb-change-group">
       <div className="wb-section-label">
-        {t(`workbench.${isStaged ? "staged" : "unstaged"}`)}
-        <span>{items.length}</span>
+        {t(`workbench.${isStaged ? "staged" : "unstaged"}`)}<span>{items.length}</span>
+        <button className="wb-button wb-bulk" disabled={busy || !paths?.length}
+          title={!paths ? t("workbench.bulkLimit") : undefined}
+          onClick={() => paths && void perform({ operation: isStaged ? "unstage" : "stage", path: currentPath!, paths })}>
+          {isStaged ? <Minus size={13} /> : <Plus size={13} />}{t(`workbench.${isStaged ? "unstageAll" : "stageAll"}`)}
+        </button>
       </div>
-      {items.map((change) => (
-        <div
-          key={change.path}
-          className={`wb-change-row ${selectedFile?.path === change.path && selectedFile.staged === isStaged ? "selected" : ""}`}
-        >
-          <button
-            className="wb-file-choice"
-            onClick={() =>
-              onChange({
-                selection: {
-                  repo: currentPath!,
-                  path: change.path,
-                  staged: isStaged,
-                },
-              })
-            }
-            title={
-              change.previous_path
-                ? `${change.previous_path} → ${change.path}`
-                : change.path
-            }
-          >
-            <span
-              className={`wb-git-status ${change.untracked ? "untracked" : ""}`}
-            >
-              {isStaged
-                ? change.index_status
-                : change.untracked
-                  ? "U"
-                  : change.worktree_status}
-            </span>
-            <span className="wb-file-path">{change.path}</span>
-            {!(change.staged && change.worktree_status.trim()) && (
-              <span className="wb-line-count">
-                <b>+{change.additions}</b> −{change.deletions}
-              </span>
-            )}
+      {!paths && <p className="wb-warning">{t("workbench.bulkLimit")}</p>}
+      {items.map(change => {
+        const stats = changeStats(change, isStaged);
+        const status = change.untracked ? "untracked" : ({ A: "added", M: "modified", D: "deleted", R: "renamed", C: "copied", U: "conflicted", T: "typeChanged" }[isStaged ? change.index_status : change.worktree_status] ?? "modified");
+        const parent = change.path.split("/").slice(0, -1).join("/");
+        const image = imagePreviewPath("", change.path);
+        const Icon = image ? FileImage : /\.(ts|tsx|js|jsx|go|py|json|md|css|html|yaml|yml)$/i.test(change.path) ? FileCode : File;
+        return <div key={change.path} className={`wb-change-row ${selectedFile?.path === change.path && selectedFile.staged === isStaged ? "selected" : ""}`}>
+          <button className="wb-file-choice" onClick={() => onChange({ selection: { repo: currentPath!, path: change.path, staged: isStaged } })}
+            title={change.previous_path ? `${change.previous_path} → ${change.path}` : change.path}>
+            <Icon size={15} className="wb-file-type" aria-hidden="true" />
+            <span className="wb-file-path"><strong>{change.path.split("/").pop()}</strong>{parent && <small>{parent}</small>}</span>
+            <span className={`wb-git-status ${change.untracked ? "untracked" : ""}`}>{t(`workbench.${status}`)}</span>
+            {change.binary ? <span className="wb-file-marker">{t("workbench.binary")}</span> : stats ?
+              <span className="wb-line-count"><b>+{stats.additions}</b> −{stats.deletions}</span> :
+              <span className="wb-file-marker" title={t("workbench.unknownStats")}>—</span>}
           </button>
-          <button
-            className="wb-icon"
-            disabled={busy}
-            title={t(`workbench.${isStaged ? "unstage" : "stage"}`)}
+          <button className="wb-icon" disabled={busy} title={t(`workbench.${isStaged ? "unstage" : "stage"}`)}
             aria-label={`${t(`workbench.${isStaged ? "unstage" : "stage"}`)} ${change.path}`}
-            onClick={() =>
-              void perform({
-                operation: isStaged ? "unstage" : "stage",
-                path: currentPath!,
-                paths: isStaged ? stagedPaths(change) : [change.path],
-              })
-            }
-          >
+            onClick={() => void perform({ operation: isStaged ? "unstage" : "stage", path: currentPath!, paths: changePaths(change, isStaged) })}>
             {isStaged ? <Minus size={14} /> : <Plus size={14} />}
           </button>
-        </div>
-      ))}
-    </div>
-  );
+        </div>;
+      })}
+    </div>;
+  };
   return (
     <div className="wb-git">
       <div className="wb-project-bar">
@@ -569,7 +559,7 @@ export function GitProjects({
           )}
           {mode === "changes" ? (
             <div className="wb-changes-body">
-              <div className="wb-changes-list">
+              <div className="wb-changes-list" role="region" aria-label={t("workbench.fileChanges")} tabIndex={0}>
                 {staged.length > 0 && files(staged, true)}
                 {unstaged.length > 0 && files(unstaged, false)}
                 {!changes.length && details.data && (
@@ -579,6 +569,7 @@ export function GitProjects({
                   </div>
                 )}
               </div>
+              {staged.length + unstaged.length > 4 && <div className="wb-scroll-hint">{t("workbench.scrollChanges")}</div>}
               <div className="wb-diff-panel">
                 {selectedFile ? (
                   <>
@@ -599,29 +590,9 @@ export function GitProjects({
                         {workbenchError(diff.error)}
                       </div>
                     ) : (
-                      <pre className="wb-diff">
-                        {diff.data?.diff
-                          ? diff.data.diff.split("\n").map((line, i) => (
-                              <span
-                                key={i}
-                                className={
-                                  line.startsWith("+") &&
-                                  !line.startsWith("+++")
-                                    ? "addition"
-                                    : line.startsWith("-") &&
-                                        !line.startsWith("---")
-                                      ? "deletion"
-                                      : line.startsWith("@@")
-                                        ? "hunk"
-                                        : ""
-                                }
-                              >
-                                {line}
-                                {"\n"}
-                              </span>
-                            ))
-                          : t("workbench.noDiff")}
-                      </pre>
+                      <GitDiff key={`${currentPath}:${selectedFile.path}:${selectedFile.staged}:${diff.dataUpdatedAt}:${locale}`} instanceId={instanceId}
+                        imagePath={imagePreviewPath(currentPath!, selectedFile.path, diff.data?.preview_path)}
+                        binary={!!diff.data?.binary || !!selectedChange?.binary} diff={diff.data?.diff ?? ""} />
                     )}
                     {diff.data?.truncated && (
                       <p className="wb-warning">{t("workbench.truncated")}</p>
@@ -654,6 +625,31 @@ export function GitProjects({
               )}
             </div>
           )}
+          {identity.open && identity.repo === currentPath && (
+            <form className="wb-identity-form" onSubmit={async e => {
+              e.preventDefault();
+              if (!identity.name.trim() || !identity.email.trim()) { setIdentity(previous => ({...previous,error:t("workbench.identityRequired")})); return; }
+              onChange({busy:true,error:""});
+              setIdentity(previous => ({...previous,error:""}));
+              try {
+                await service.git(instanceId, generation, {operation:"set-identity",path:currentPath!,name:identity.name.trim(),email:identity.email.trim()});
+                setIdentity(previous => ({...previous,open:false}));
+              } catch (err) { setIdentity(previous => ({...previous,error:workbenchError(err)})); }
+              finally { onChange({busy:false}); }
+            }}>
+              <div className="wb-form-heading"><strong>{t("workbench.commitIdentity")}</strong>
+                <button type="button" className="wb-icon" disabled={busy} aria-label={t("workbench.cancel")}
+                  onClick={() => setIdentity(previous => ({...previous,open:false}))}><X size={15}/></button>
+              </div>
+              <small>{t("workbench.identityHint")}</small>
+              {identity.error && <div className="wb-error" role="alert">{identity.error}</div>}
+              <label>{t("workbench.identityName")}<input required autoComplete="name" disabled={busy || identity.loading} value={identity.name}
+                onChange={e => setIdentity(previous => ({...previous,name:e.target.value}))}/></label>
+              <label>{t("workbench.identityEmail")}<input required type="email" autoComplete="email" disabled={busy || identity.loading} value={identity.email}
+                onChange={e => setIdentity(previous => ({...previous,email:e.target.value}))}/></label>
+              <button className="wb-button" disabled={busy || identity.loading}>{t(identity.loading ? "workbench.loading" : busy ? "workbench.saving" : "workbench.saveIdentity")}</button>
+            </form>
+          )}
           <form
             className="wb-commit-form"
             onSubmit={async (e) => {
@@ -682,6 +678,8 @@ export function GitProjects({
             />
             <div>
               <small>{t("workbench.commitHint")}</small>
+              <button type="button" className="wb-icon" disabled={busy} title={t("workbench.commitIdentity")} aria-label={t("workbench.commitIdentity")}
+                onClick={() => void openIdentity()}><UserRound size={16}/></button>
               <button
                 className="wb-button primary"
                 disabled={busy || !staged.length || !message.trim()}

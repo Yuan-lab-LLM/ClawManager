@@ -46,6 +46,12 @@ export interface GitChange {
   worktree_status: string;
   staged: boolean;
   untracked: boolean;
+  binary?: boolean;
+  stats_known?: boolean;
+  staged_additions?: number;
+  staged_deletions?: number;
+  worktree_additions?: number;
+  worktree_deletions?: number;
   additions: number;
   deletions: number;
 }
@@ -73,6 +79,7 @@ export interface GitRequest {
   operation: string;
   path?: string;
   name?: string;
+  email?: string;
   url?: string;
   branch?: string;
   paths?: string[];
@@ -87,6 +94,9 @@ export interface GitResponse {
   branches?: GitBranch[];
   history?: GitCommit[];
   diff?: string;
+  binary?: boolean;
+  preview_path?: string;
+  identity?: { name: string; email: string; scope: "repository" };
   truncated?: boolean;
   message?: string;
 }

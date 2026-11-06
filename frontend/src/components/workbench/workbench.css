@@ -624,12 +624,16 @@
 }
 .wb-changes-list {
   flex-shrink: 0;
-  max-height: 40%;
-  min-height: 70px;
+  height: 40%;
+  max-height: 65%;
+  min-height: 100px;
+  resize: vertical;
+  scrollbar-gutter: stable;
   overflow: auto;
   padding: 0 12px;
   border-bottom: 1px solid var(--border);
 }
+.wb-scroll-hint { padding: 3px 12px; color: var(--text); font-size: 11px; background: var(--surface-muted); border-bottom: 1px solid var(--border); }
 .wb-change-row {
   display: flex;
   align-items: center;
@@ -656,9 +660,10 @@
 }
 .wb-git-status {
   font-family: ui-monospace, monospace;
-  font-size: 10px;
-  width: 14px;
-  color: #b45309;
+  font-size: 11px;
+  width: auto;
+  white-space: nowrap;
+  color: #92400e;
   flex-shrink: 0;
 }
 .wb-git-status.untracked {
@@ -670,8 +675,13 @@
   white-space: nowrap;
   text-overflow: ellipsis;
   font-family: ui-monospace, monospace;
-  font-size: 11px;
+  font-size: 12px;
 }
+.wb-file-path strong { font-weight: 600; }
+.wb-file-path small { display: block; overflow: hidden; text-overflow: ellipsis; font-size: 11px; line-height: 1.5; color: var(--text); opacity: .75; }
+.wb-file-type { flex-shrink: 0; color: var(--text); }
+.wb-file-marker { font-size: 11px; color: var(--text); white-space: nowrap; }
+.wb-bulk { margin-inline-start: auto; }
 .wb-line-count {
   white-space: nowrap;
   color: #b91c1c;
@@ -724,21 +734,32 @@
   padding: 10px 0;
   margin: 0;
   font:
-    11px/1.8 ui-monospace,
+    13px/1.7 ui-monospace,
     SFMono-Regular,
     Menlo,
     monospace;
   tab-size: 4;
   color: var(--text);
 }
-.wb-diff > span {
-  display: block;
-  padding: 0 13px;
-  min-height: 19px;
+.wb-diff-line {
+  display: flex;
+  min-height: 22px;
   width: max-content;
   min-width: 100%;
   white-space: pre;
 }
+.wb-diff-line code { padding-inline: 10px; font: inherit; white-space: pre; }
+.wb-diff-number { flex: 0 0 4.5ch; width: 4.5ch; padding-inline: 5px; text-align: end; color: #596579; border-inline-end: 1px solid var(--border); user-select: none; font-variant-numeric: tabular-nums; }
+.wb-diff-summary { padding: 5px 13px; font-size: 11px; color: var(--text); border-bottom: 1px solid var(--border); }
+.wb-diff-summary b { color: #166534; font-weight: 500; }
+.wb-image-preview { padding: 12px; overflow: auto; color: var(--text); font-size: 12px; }
+.wb-image-preview p { margin-bottom: 10px; }
+.wb-image-preview img { display: block; max-width: 100%; max-height: 500px; object-fit: contain; }
+.wb-identity-form { flex-shrink: 0; max-height: 45%; overflow: auto; padding: 10px 12px; border-top: 1px solid var(--border); background: var(--surface); }
+.wb-identity-form label { display: flex; align-items: center; gap: 8px; margin: 7px 0; font-size: 12px; }
+.wb-identity-form input { flex: 1; min-width: 0; padding: 5px 7px; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 4px; }
+.wb-identity-form small { display: block; color: var(--text); font-size: 11px; }
+.wb-commit-form > div > small { flex: 1; }
 .wb-diff .addition {
   background: #f0fdf4;
   color: #166534;
