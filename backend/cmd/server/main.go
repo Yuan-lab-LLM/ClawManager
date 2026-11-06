@@ -647,6 +647,7 @@ func main() {
 	}
 	workbenchAgent, _ := runtimeAgentClient.(services.WorkbenchAgent)
 	instanceWorkbenchService := services.NewInstanceWorkbenchService(instanceRepo, bindingRepo, runtimePodRepo, workbenchAgent, workbenchPreviews)
+	instanceWorkbenchService.SetGitFiles(workspaceFileService)
 	browserOrigin := strings.TrimSpace(os.Getenv("CLAWMANAGER_BROWSER_ORIGIN"))
 	browserPorts := strings.TrimSpace(os.Getenv("CLAWMANAGER_BROWSER_PORT_RANGE"))
 	var browserOrigins *browserorigin.Registry
