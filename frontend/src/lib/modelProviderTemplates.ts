@@ -40,6 +40,15 @@ export const BUILTIN_PROVIDER_TEMPLATES: ProviderTemplate[] = [
     suggestedModels: ['minimax/minimax-m3.1-flash', 'minimax/minimax-m3'],
   },
   {
+    id: 'orcarouter',
+    label: 'OrcaRouter',
+    providerType: 'openai-compatible',
+    protocolType: 'openai-compatible',
+    baseUrl: 'https://api.orcarouter.ai/v1',
+    requiresApiKey: true,
+    keywords: ['router', 'gateway', 'aggregator', 'failover'],
+  },
+  {
     id: 'deepseek',
     label: 'DeepSeek',
     providerType: 'openai-compatible',
