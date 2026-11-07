@@ -53,6 +53,7 @@ type RuntimeScheduler struct {
 	lastPoolCleanupAt    time.Time
 	configurationRetryMu sync.Mutex
 	configurationRetryAt map[string]time.Time
+	slotAudit            runtimeSlotAuditor
 }
 
 var (
@@ -1532,6 +1533,9 @@ func (s *RuntimeScheduler) reconcile(ctx context.Context) error {
 		return fmt.Errorf("runtime scheduler dependencies are not configured")
 	}
 	var errs []error
+	if err := s.slotAudit.Reconcile(ctx, s); err != nil {
+		errs = append(errs, err)
+	}
 	if s.management != nil {
 		if err := s.management.Process(ctx); err != nil {
 			errs = append(errs, err)
@@ -1664,6 +1668,9 @@ func (s *RuntimeScheduler) reconcileCreatingInstance(ctx context.Context, instan
 }
 
 func (s *RuntimeScheduler) reconcileCreatingInstanceLocked(ctx context.Context, instance models.Instance) []error {
+	if handled, errs := s.reconcileInstanceRecoveryLocked(ctx, instance, time.Now().UTC()); handled {
+		return errs
+	}
 	binding, err := s.bindingRepo.GetByInstanceID(ctx, instance.ID)
 	if err != nil {
 		return []error{fmt.Errorf("get binding for creating instance %d: %w", instance.ID, err)}
@@ -2797,12 +2804,30 @@ func (s *RuntimeScheduler) reserveGatewayPortExcludingPorts(
 	if blockSize <= 0 {
 		blockSize = 1
 	}
+	if layout, ok := s.agentClient.(interface {
+		physicalGatewayPorts(context.Context, models.RuntimePod) (map[int]struct{}, error)
+	}); ok {
+		ports, err := layout.physicalGatewayPorts(ctx, pod)
+		if err != nil {
+			return nil, fmt.Errorf("%w: physical slot layout unavailable: %w", errRuntimeControlPlanePending, err)
+		}
+		count := 0
+		for port := s.gatewayPortStart; port+blockSize-1 <= s.gatewayPortEndForPod(pod, runtimeType); port += blockSize {
+			if _, present := ports[port]; !present {
+				return nil, fmt.Errorf("%w: allocator port range does not match physical slots", errRuntimeControlPlanePending)
+			}
+			count++
+		}
+		if count == 0 || count != len(ports) {
+			return nil, fmt.Errorf("%w: allocator capacity does not match physical slots", errRuntimeControlPlanePending)
+		}
+	}
 	if inventory, ok := s.agentClient.(interface {
 		reservedGatewayPorts(context.Context, models.RuntimePod) (map[int]struct{}, error)
 	}); ok {
 		reserved, err := inventory.reservedGatewayPorts(ctx, pod)
 		if err != nil {
-			return nil, fmt.Errorf("read persisted slot reservations: %w", err)
+			return nil, fmt.Errorf("%w: read persisted slot reservations: %w", errRuntimeControlPlanePending, err)
 		}
 		merged := make(map[int]struct{}, len(reserved)+len(excludedPorts))
 		for port := range reserved {
@@ -2814,6 +2839,14 @@ func (s *RuntimeScheduler) reserveGatewayPortExcludingPorts(
 		for port := range excludedPorts {
 			merged[port] = struct{}{}
 		}
+		excludedPorts = merged
+	}
+	if sourcePod, sourcePort := runtimeRecoverySource(ctx); sourcePod == pod.ID && sourcePort > 0 {
+		merged := make(map[int]struct{}, len(excludedPorts)+1)
+		for port := range excludedPorts {
+			merged[port] = struct{}{}
+		}
+		merged[sourcePort] = struct{}{}
 		excludedPorts = merged
 	}
 	existingBindings, err := s.bindingRepo.ListByRuntimePodID(ctx, pod.ID)
