@@ -189,10 +189,8 @@ func TestRuntimeSlotAuditPersistsUnknownOwnerAcrossManagerRestart(t *testing.T) 
 			if scenario == "free" && (record.PodError != "" || len(record.Ports) != 0) {
 				t.Fatalf("free slot quarantined: %+v", record)
 			}
-			// Simulate a new manager and a worker that now claims idle. Persisted
-			// quarantine survives until a fresh periodic audit explicitly resolves it.
-			snapshot = auditFreeSnapshot()
-			scenario = "after-restart"
+			// A restart with unchanged uncertain runtime evidence must retain the
+			// durable quarantine; a fresh positive proof is covered separately.
 			restarted := NewSlotRuntimeAgentClientWithHTTPClient("token", kube, "runtime", &http.Client{Transport: transport}).(*slotRuntimeAgentClient)
 			ports, err := restarted.reservedGatewayPorts(context.Background(), pod)
 			if len(record.Ports) > 0 && err == nil {
@@ -377,7 +375,8 @@ func TestRuntimeSlotAuditCadenceBatchAndConcurrency(t *testing.T) {
 		}
 		uid, endpoint := string(p.UID), "https://"+p.Status.PodIP+":19090"
 		uidByIP[p.Status.PodIP] = uid
-		pods = append(pods, models.RuntimePod{ID: int64(i), RuntimeType: "openclaw", Capacity: 1, AgentEndpoint: &endpoint, PodUID: &uid})
+		now := time.Now()
+		pods = append(pods, models.RuntimePod{ID: int64(i), RuntimeType: "openclaw", Capacity: 1, AgentEndpoint: &endpoint, PodUID: &uid, State: "ready", LastSeenAt: &now})
 	}
 	var calls, inflight, peak atomic.Int32
 	client := NewSlotRuntimeAgentClientWithHTTPClient("token", kube, "runtime", &http.Client{Transport: slotRoundTripper(func(r *http.Request) (*http.Response, error) {
@@ -579,5 +578,71 @@ func TestSlotPhysicalGatewayPortsUsesVerifiedSpecWithoutRuntimeHTTP(t *testing.T
 	pod.RuntimeType = "hermes"
 	if _, err := client.physicalGatewayPorts(context.Background(), pod); err == nil {
 		t.Fatal("registered runtime block mismatch admitted")
+	}
+}
+
+func TestRuntimeSlotAuditFiltersHistoryBeforeCursorAndBudget(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now()
+	stale := now.Add(-4 * time.Minute)
+	future := now.Add(2 * time.Minute)
+	endpoint, uid := "https://10.0.0.200:19090", "historical-uid"
+	disabled := false
+	historical := models.RuntimePod{ID: 1, RuntimeType: "openclaw", State: "ready", Capacity: 1, AgentEndpoint: &endpoint, PodUID: &uid, LastSeenAt: &now}
+	mutations := []func(*models.RuntimePod){
+		func(p *models.RuntimePod) { p.State = "unknown" }, func(p *models.RuntimePod) { p.SchedulingPaused = true }, func(p *models.RuntimePod) { p.Draining = true },
+		func(p *models.RuntimePod) { p.SchedulingEnabled = &disabled }, func(p *models.RuntimePod) { p.LastSeenAt = &stale }, func(p *models.RuntimePod) { p.LastSeenAt = &future },
+		func(p *models.RuntimePod) { p.LastSeenAt = nil }, func(p *models.RuntimePod) { p.PodUID = nil }, func(p *models.RuntimePod) { p.AgentEndpoint = nil },
+		func(p *models.RuntimePod) { p.Capacity = 0 }, func(p *models.RuntimePod) { p.PodUID = new(string) }, func(p *models.RuntimePod) { p.AgentEndpoint = new(string) },
+	}
+	pods := make([]models.RuntimePod, 0, 50)
+	for i := 0; i < 48; i++ {
+		p := historical
+		p.ID = int64(i + 1)
+		mutations[i%len(mutations)](&p)
+		pods = append(pods, p)
+	}
+	kube := fake.NewSimpleClientset()
+	allowed := map[string]string{}
+	for i := 1; i <= 2; i++ {
+		p := auditTestPod()
+		p.Name = fmt.Sprintf("active-%d", i)
+		p.UID = types.UID(fmt.Sprintf("active-uid-%d", i))
+		p.Status.PodIP = fmt.Sprintf("10.0.0.%d", i)
+		if _, err := kube.CoreV1().Pods("runtime").Create(ctx, p, metav1.CreateOptions{}); err != nil {
+			t.Fatal(err)
+		}
+		currentUID, currentEndpoint := string(p.UID), "https://"+p.Status.PodIP+":19090"
+		allowed[p.Status.PodIP] = currentUID
+		pods = append(pods, models.RuntimePod{ID: int64(100 + i), RuntimeType: "openclaw", State: "ready", Capacity: 1, AgentEndpoint: &currentEndpoint, PodUID: &currentUID, LastSeenAt: &now})
+	}
+	var calls atomic.Int32
+	client := NewSlotRuntimeAgentClientWithHTTPClient("token", kube, "runtime", &http.Client{Transport: slotRoundTripper(func(r *http.Request) (*http.Response, error) {
+		calls.Add(1)
+		snapshot := auditFreeSnapshot()
+		snapshot["pod_uid"] = allowed[r.URL.Hostname()]
+		b, _ := json.Marshal(snapshot)
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(string(b)))}, nil
+	})}).(*slotRuntimeAgentClient)
+	frozen := runtimeSlotAuditRecord{PodUID: uid, Endpoint: endpoint, RuntimeType: "openclaw", PodError: "historical unknown owner", Ports: map[int]string{20000: "frozen"}}
+	if err := client.writeSlotAudit(ctx, historical, nil, frozen); err != nil {
+		t.Fatal(err)
+	}
+	before, _, err := client.readSlotAudit(ctx, historical)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kube.ClearActions()
+	scheduler := &RuntimeScheduler{agentClient: client, podRepo: &auditPodRepository{pods: pods}, bindingRepo: &auditBindingRepository{}, instanceRepo: &auditInstanceRepository{}, heartbeatTimeout: time.Minute}
+	auditor := runtimeSlotAuditor{cursor: 20}
+	if err := auditor.Reconcile(ctx, scheduler); err != nil {
+		t.Fatalf("excluded history consumed audit requests: %v", err)
+	}
+	if calls.Load() != 2 || auditor.cursor != 102 {
+		t.Fatalf("active pools starved by history: calls=%d cursor=%d", calls.Load(), auditor.cursor)
+	}
+	after, _, err := client.readSlotAudit(ctx, historical)
+	if err != nil || after.Data["record"] != before.Data["record"] {
+		t.Fatalf("skipping history changed its durable quarantine: %v", err)
 	}
 }

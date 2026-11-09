@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"clawreef/internal/heartbeat"
 	"clawreef/internal/models"
 	"clawreef/internal/repository"
 	corev1 "k8s.io/api/core/v1"
@@ -298,6 +299,21 @@ func (a *runtimeSlotAuditor) Reconcile(ctx context.Context, s *RuntimeScheduler)
 	if err != nil {
 		return err
 	}
+	// Historical, paused and stale reports cannot receive ordinary placements.
+	// Leave their durable quarantine untouched and spend this pass's bounded
+	// requests on current candidates. Allocation still inspects the exact live UID.
+	timeout := s.heartbeatTimeout
+	if timeout <= 0 {
+		timeout = heartbeat.Timeout
+	}
+	eligible := make([]models.RuntimePod, 0, len(pods))
+	for _, pod := range pods {
+		if pod.State != "ready" || pod.Draining || pod.SchedulingPaused || !runtimePodEligibleForOrdinaryScheduling(pod) || pod.Capacity < 1 || pod.PodUID == nil || strings.TrimSpace(*pod.PodUID) == "" || pod.AgentEndpoint == nil || strings.TrimSpace(*pod.AgentEndpoint) == "" || pod.LastSeenAt == nil || now.Sub(*pod.LastSeenAt) > 3*timeout || pod.LastSeenAt.After(now.Add(time.Minute)) {
+			continue
+		}
+		eligible = append(eligible, pod)
+	}
+	pods = eligible
 	sort.Slice(pods, func(i, j int) bool { return pods[i].ID < pods[j].ID })
 	if len(pods) == 0 {
 		return nil

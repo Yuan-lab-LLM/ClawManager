@@ -32,19 +32,45 @@ func (c *slotRuntimeAgentClient) reservedGatewayPorts(ctx context.Context, pod m
 
 	inspectionCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
-	_, quarantine, err := c.readSlotAudit(inspectionCtx, pod)
+	prior, quarantine, err := c.readSlotAudit(inspectionCtx, pod)
 	if err != nil {
 		return nil, err
+	}
+	observations, err := c.observeRuntimeSlots(inspectionCtx, pod)
+	if err != nil {
+		return nil, err
+	}
+	// A later authenticated full-exit proof may resolve an old quarantine without
+	// waiting for the periodic cursor. Unknown ports and incomplete proofs retain
+	// their exclusions; this grants no authority to stop owners or release bindings.
+	changed, complete := false, true
+	for _, observation := range observations {
+		if observation.Err != nil {
+			complete = false
+		}
+		if observation.free() {
+			if _, exists := quarantine.Ports[observation.Port]; exists {
+				delete(quarantine.Ports, observation.Port)
+				changed = true
+			}
+		}
+	}
+	if complete && quarantine.PodError != "" {
+		quarantine.PodError = ""
+		changed = true
+	}
+	if prior != nil && changed {
+		quarantine.InspectedAt = time.Now().UTC()
+		// Do not retry stale evidence after a CAS conflict: newer quarantine wins.
+		if err := c.writeSlotAudit(inspectionCtx, pod, prior, quarantine); err != nil {
+			return nil, err
+		}
 	}
 	if quarantine.PodError != "" {
 		return nil, fmt.Errorf("runtime slot audit quarantine: %s", quarantine.PodError)
 	}
 	for port := range quarantine.Ports {
 		ports[port] = struct{}{}
-	}
-	observations, err := c.observeRuntimeSlots(inspectionCtx, pod)
-	if err != nil {
-		return nil, err
 	}
 	for _, observation := range observations {
 		if !observation.free() {
