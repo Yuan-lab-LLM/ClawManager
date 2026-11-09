@@ -20,3 +20,14 @@ func TestRuntimeRecoveryMigrationOnlyAddsEmptyRecoveryJournal(t *testing.T) {
 		}
 	}
 }
+
+func TestRuntimeRecoveryPhaseMigrationPreservesExistingAttempts(t *testing.T) {
+	raw, err := embeddedMigrations.ReadFile("migrations/106_add_runtime_recovery_phase.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	statements := splitSQLStatements(string(raw))
+	if len(statements) != 1 || !strings.Contains(statements[0], "ADD COLUMN phase VARCHAR(32) NOT NULL DEFAULT ''") || strings.Contains(strings.ToUpper(string(raw)), "UPDATE ") {
+		t.Fatal("phase migration must preserve existing lifecycle and retry budgets")
+	}
+}

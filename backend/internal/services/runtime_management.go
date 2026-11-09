@@ -52,6 +52,7 @@ type RuntimeSchedulingPreflight struct {
 }
 
 type RuntimeManagementOperation struct {
+	RetryRequested  bool                    `json:"retry_requested"`
 	CancelRequested bool                    `json:"cancel_requested"`
 	ErrorMessage    string                  `json:"error_message,omitempty"`
 	Phase           string                  `json:"phase,omitempty"`
@@ -64,6 +65,7 @@ type RuntimeManagementOperation struct {
 }
 
 type RuntimeManagementService struct {
+	processMu        sync.Mutex
 	sess             db.Session
 	scheduler        *RuntimeScheduler
 	guards           *repository.NorthboundRepository
@@ -657,7 +659,7 @@ func (s *RuntimeManagementService) save(ctx context.Context, op *RuntimeManageme
 	if err != nil {
 		return err
 	}
-	result, err := s.sess.SQL().ExecContext(ctx, `UPDATE runtime_management_operations SET status=?,items_json=?,updated_at=? WHERE id=? AND (status IN ('starting','partial_failure') OR (status='processing' AND owner_token=?))`, op.Status, string(data), op.UpdatedAt, op.ID, s.token)
+	result, err := s.sess.SQL().ExecContext(ctx, `UPDATE runtime_management_operations SET status=?,items_json=?,updated_at=? WHERE id=? AND (status IN ('starting','partial_failure') OR (status IN ('processing','needs_attention') AND owner_token=?))`, op.Status, string(data), op.UpdatedAt, op.ID, s.token)
 	if err != nil {
 		return err
 	}
@@ -677,7 +679,7 @@ func (s *RuntimeManagementService) History(ctx context.Context) ([]RuntimeManage
 
 func (s *RuntimeManagementService) operations(ctx context.Context, activeOnly bool) ([]RuntimeManagementOperation, error) {
 	items := []RuntimeManagementOperation{}
-	query := `SELECT id,kind,status,items_json,created_at,updated_at,cancel_requested,request_json FROM runtime_management_operations`
+	query := `SELECT id,kind,status,items_json,created_at,updated_at,cancel_requested,request_json,retry_requested FROM runtime_management_operations`
 	if activeOnly {
 		query += ` WHERE status IN ('starting','partial_failure') ORDER BY created_at`
 	} else {
@@ -691,7 +693,7 @@ func (s *RuntimeManagementService) operations(ctx context.Context, activeOnly bo
 	for rows.Next() {
 		var op RuntimeManagementOperation
 		var raw, requestRaw string
-		if err = rows.Scan(&op.ID, &op.Kind, &op.Status, &raw, &op.CreatedAt, &op.UpdatedAt, &op.CancelRequested, &requestRaw); err != nil {
+		if err = rows.Scan(&op.ID, &op.Kind, &op.Status, &raw, &op.CreatedAt, &op.UpdatedAt, &op.CancelRequested, &requestRaw, &op.RetryRequested); err != nil {
 			return nil, err
 		}
 		if err = json.Unmarshal([]byte(raw), &op.Items); err != nil {
@@ -705,6 +707,17 @@ func (s *RuntimeManagementService) operations(ctx context.Context, activeOnly bo
 			op.ErrorMessage = journal.ErrorMessage
 			op.Phase = journal.Phase
 		}
+		if op.Kind != "scale_in" && op.Status == "needs_attention" {
+			for _, item := range op.Items {
+				if item.ErrorMessage != "" {
+					op.ErrorMessage = item.ErrorMessage
+					break
+				}
+			}
+			if op.ErrorMessage == "" {
+				op.ErrorMessage = "interrupted operation requires administrator recheck"
+			}
+		}
 		items = append(items, op)
 	}
 	return items, rows.Err()
@@ -713,11 +726,21 @@ func (s *RuntimeManagementService) operations(ctx context.Context, activeOnly bo
 // Process runs inside the elected scheduler before taking an instance snapshot.
 // An interrupted processing item is held for inspection; it is never replayed.
 func (s *RuntimeManagementService) Process(ctx context.Context) error {
-	if err := s.refresh(ctx); err != nil {
+	s.processMu.Lock()
+	defer s.processMu.Unlock()
+	if s.scheduler.leader != nil && !s.scheduler.leader.IsLeader(ctx) {
+		return errors.New("Runtime management reconciliation requires the scheduler leader")
+	}
+	// Process returns only after every worker exits. A processing row left by
+	// this owner is interrupted too (for example SQL failed after a replica CAS).
+	_, err := s.sess.SQL().ExecContext(ctx, `UPDATE runtime_management_operations SET status='needs_attention',owner_token='',updated_at=? WHERE status='processing'`, time.Now().UTC())
+	if err != nil {
 		return err
 	}
-	_, err := s.sess.SQL().ExecContext(ctx, `UPDATE runtime_management_operations SET status='needs_attention',owner_token='',updated_at=? WHERE status='processing' AND owner_token<>?`, time.Now().UTC(), s.token)
-	if err != nil {
+	if err := s.consumeRuntimeOperationRetries(ctx); err != nil {
+		return err
+	}
+	if err := s.refresh(ctx); err != nil {
 		return err
 	}
 	var id, raw, kind string
@@ -1263,4 +1286,195 @@ func (s *RuntimeManagementService) Cancel(ctx context.Context, id string) error 
 		return errors.New("operation is not pending or processing")
 	}
 	return nil
+}
+
+// RetryOperation queues a fresh observation without taking over an active worker.
+// Any authenticated API replica can record it; only the elected Process consumes it.
+func (s *RuntimeManagementService) RetryOperation(ctx context.Context, id string) (*RuntimeManagementOperation, error) {
+	if s == nil || s.sess == nil || s.scheduler == nil {
+		return nil, errors.New("Runtime management recovery unavailable")
+	}
+	result, err := s.sess.SQL().ExecContext(ctx, "UPDATE runtime_management_operations SET retry_requested=1,updated_at=? WHERE id=? AND status IN ('pending','processing','starting','needs_attention')", time.Now().UTC(), id)
+	if err != nil {
+		return nil, err
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+	if n != 1 {
+		return nil, errors.New("operation is terminal or missing; create a new preflight for further mutations")
+	}
+	op, _, _, err := s.runtimeManagementOperation(ctx, id)
+	return op, err
+}
+
+func (s *RuntimeManagementService) runtimeManagementOperation(ctx context.Context, id string) (*RuntimeManagementOperation, string, string, error) {
+	op := &RuntimeManagementOperation{}
+	var raw, items, owner string
+	row, err := s.sess.SQL().QueryRowContext(ctx, "SELECT id,kind,status,request_json,items_json,created_at,updated_at,cancel_requested,owner_token,retry_requested FROM runtime_management_operations WHERE id=?", id)
+	if err == nil {
+		err = row.Scan(&op.ID, &op.Kind, &op.Status, &raw, &items, &op.CreatedAt, &op.UpdatedAt, &op.CancelRequested, &owner, &op.RetryRequested)
+	}
+	if err != nil {
+		return nil, "", "", err
+	}
+	if err = json.Unmarshal([]byte(items), &op.Items); err != nil {
+		return nil, "", "", err
+	}
+	if op.Kind == "scale_in" {
+		var journal runtimePodScaleInJournal
+		if err := json.Unmarshal([]byte(raw), &journal); err != nil {
+			return nil, "", "", err
+		}
+		op.Phase, op.ErrorMessage = journal.Phase, journal.ErrorMessage
+	} else if op.Status == "needs_attention" {
+		op.ErrorMessage = "interrupted operation requires administrator recheck"
+		for _, item := range op.Items {
+			if item.ErrorMessage != "" {
+				op.ErrorMessage = item.ErrorMessage
+				break
+			}
+		}
+	}
+	return op, raw, owner, nil
+}
+
+func (s *RuntimeManagementService) consumeRuntimeOperationRetries(ctx context.Context) error {
+	rows, err := s.sess.SQL().QueryContext(ctx, "SELECT id FROM runtime_management_operations WHERE retry_requested=1 ORDER BY updated_at,id LIMIT 10")
+	if err != nil {
+		return err
+	}
+	ids := []string{}
+	for rows.Next() {
+		var id string
+		if err = rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		ids = append(ids, id)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	for _, id := range ids {
+		if _, err = s.retryOperation(ctx, id); err != nil {
+			return err
+		}
+		if _, err = s.sess.SQL().ExecContext(ctx, "UPDATE runtime_management_operations SET retry_requested=0 WHERE id=?", id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Caller holds processMu and the elected scheduler term. Observe only the
+// persisted phase; uncertain moves and replica writes are never replayed.
+func (s *RuntimeManagementService) retryOperation(ctx context.Context, id string) (*RuntimeManagementOperation, error) {
+	var items string
+	op, raw, owner, err := s.runtimeManagementOperation(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	switch op.Status {
+	case "pending":
+		return op, nil
+	case "completed", "failed", "partial_failure", "cancelled":
+		return op, nil
+	case "processing", "starting", "needs_attention":
+	default:
+		return nil, errors.New("operation phase is not recoverable")
+	}
+	// Claim by exact durable phase and owner. The elected reconciler and this
+	// endpoint share processMu; another term must serialize on this same row.
+	result, err := s.sess.SQL().ExecContext(ctx, "UPDATE runtime_management_operations SET status='needs_attention',owner_token=?,updated_at=? WHERE id=? AND status=? AND owner_token=? AND request_json=?", s.token, time.Now().UTC(), id, op.Status, owner, raw)
+	if err != nil {
+		return nil, err
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+	if n != 1 {
+		return nil, errors.New("operation changed while retry was requested; recheck current status")
+	}
+	previousStatus := op.Status
+	op.Status = "needs_attention"
+	if op.Kind == "scale_in" {
+		var journal runtimePodScaleInJournal
+		if err = json.Unmarshal([]byte(raw), &journal); err != nil {
+			return nil, err
+		}
+		if journal.Phase == "resizing" || journal.Phase == "observing" || journal.Phase == "cleanup" || previousStatus == "starting" {
+			op.Status = "starting"
+			err = s.advanceScaleIn(ctx, op, &journal)
+		} else {
+			err = s.failScaleInBeforeResize(ctx, op, &journal, errors.New("interrupted source migration cannot be replayed; inspect instance recovery before submitting a new plan"))
+		}
+		op.Phase, op.ErrorMessage = journal.Phase, journal.ErrorMessage
+		return op, err
+	}
+	// A successor already published by the interrupted move can be observed.
+	// All other uncertain source states remain held for explicit inspection.
+	blocked := false
+	for i := range op.Items {
+		item := &op.Items[i]
+		if item.State != "processing" && item.State != "pending" {
+			continue
+		}
+		instance, e := s.scheduler.instanceRepo.GetByID(item.InstanceID)
+		if e != nil {
+			return nil, e
+		}
+		binding, e := s.scheduler.bindingRepo.GetByInstanceID(ctx, item.InstanceID)
+		if e != nil {
+			return nil, e
+		}
+		targetID := item.TargetPodID
+		if targetID == 0 && op.Kind == "eviction" && binding != nil {
+			targetID = binding.RuntimePodID
+		}
+		target, e := s.scheduler.podRepo.GetByID(ctx, targetID)
+		if e != nil {
+			return nil, e
+		}
+		targetMatches := target != nil && stringValue(target.PodUID) != "" && (stringValue(target.PodUID) == item.TargetPodUID || (item.TargetPodID == 0 && op.Kind == "eviction"))
+		if instance != nil && instance.RuntimeGeneration == item.SourceGeneration+1 && instance.Status != "stopped" && instance.Status != "deleting" && instance.Status != "deleted" && binding != nil && targetMatches && binding.Generation == instance.RuntimeGeneration && binding.RuntimePodID == targetID {
+			if item.TargetPodID == 0 {
+				item.TargetPodID, item.TargetPodUID = targetID, stringValue(target.PodUID)
+				item.TargetSlot = (binding.GatewayPort-s.scheduler.gatewayPortStart)/RuntimeGatewayPortBlockSize(target.RuntimeType) + 1
+			}
+			item.State = "starting"
+			item.ErrorMessage = ""
+			continue
+		}
+		blocked = true
+		item.ErrorMessage = "interrupted migration has no verified successor; source ownership and instance recovery require inspection"
+	}
+	if !blocked {
+		op.Status = runtimeManagementStatus(op.Items)
+	} else {
+		op.ErrorMessage = "interrupted migrations remain held until source ownership and instance recovery are verified"
+	}
+	if err = s.save(ctx, op); err != nil {
+		return nil, err
+	}
+	if !blocked {
+		if err = s.refresh(ctx); err != nil {
+			return nil, err
+		}
+		row, err := s.sess.SQL().QueryRowContext(ctx, "SELECT status,items_json,updated_at,cancel_requested FROM runtime_management_operations WHERE id=?", id)
+		if err == nil {
+			err = row.Scan(&op.Status, &items, &op.UpdatedAt, &op.CancelRequested)
+		}
+		if err != nil {
+			return nil, err
+		}
+		if err = json.Unmarshal([]byte(items), &op.Items); err != nil {
+			return nil, err
+		}
+	}
+	return op, nil
 }

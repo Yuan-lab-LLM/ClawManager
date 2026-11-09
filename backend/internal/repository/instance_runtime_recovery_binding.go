@@ -37,6 +37,19 @@ func (r *instanceRuntimeBindingRepository) DeleteConfirmedRecoveryBinding(ctx co
 		if err != nil {
 			return fmt.Errorf("release confirmed recovery source slot: %w", err)
 		}
+		// The receipt and release commit together. A crash after this transaction
+		// must resume generation advance even when the retry budget is exhausted.
+		result, err = tx.SQL().ExecContext(ctx, "UPDATE instance_runtime_recovery SET phase='source_stopped',updated_at=? WHERE instance_id=? AND generation=? AND attempts>0", time.Now().UTC(), expected.InstanceID, expected.Generation)
+		if err != nil {
+			return err
+		}
+		n, err = result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if n != 1 {
+			return fmt.Errorf("confirmed source release requires its durable recovery intent")
+		}
 		deleted = true
 		return nil
 	}, nil)

@@ -1,0 +1,54 @@
+# Runtime consistency and administrator recovery
+
+Runtime desired state and observed state are separate facts. An omitted heartbeat/report is not proof that a process exited. Unknown, residual and conflicting slots remain unavailable until a fresh observation and matching authority resolve them. Workspace/PVC content is not deleted by reconciliation or recovery.
+
+## Administrator controls
+
+Open **Runtime → Recovery / 异常恢复**. Enter an instance ID and choose **Inspect instance / 检查实例** to read the current generation, binding, recovery phase, attempts and blocker. Inspection is read-only. Editing the ID invalidates the previous inspection.
+
+Choose a Runtime Pod and **Recheck physical slots / 重新核验现场槽位** to run the same exact-UID physical audit immediately, without waiting for the periodic timer. This can repair proven stopped reservations and clear resolved quarantine. Some cleanup requires a second fresh check after the first pass has confirmed teardown; unknown writers are never released just because the user clicked Recheck.
+
+Use **Retry instance recovery / 重试实例恢复** after addressing the displayed cause. This explicitly re-arms exhausted crash/health recovery, or continues the original failover intent. The request is bound to the inspected generation and reacquires the distributed lifecycle lock. An already confirmed source stop continues from its checkpoint without another stop or another generation increment. A failed replacement allocation can be retried in the same generation. Manual stop, sleep, delete, upgrade and pending stop guards retain priority.
+
+Open **Scheduling records / 调度记录** and choose **Recheck and continue / 重新核验并继续** for interrupted management operations. The request is persisted, so any API replica can accept it; the elected scheduler consumes it. An active worker is not taken over by the API. A replica write with an uncertain outcome is observed, not replayed. Terminal operations require a new preflight. Generic moves without an exact published successor remain blocked rather than replaying an uncertain source stop.
+
+If a source is unreachable, repair the source/network/control plane and recheck. If an older Runtime cannot supply complete Pod UID/worker epoch/exit proof, repair or upgrade that Runtime through the existing maintenance procedure before retrying. The separately restricted `recover-stopped-source` API remains for an exact unpublished successor with independent stopped-source/storage/external-writer proofs; it is not a general force-release API. Do not clear bindings, counters, assignment ConfigMaps or writer fences by SQL to make the screen appear idle.
+
+## Admin APIs
+
+All routes require the normal authenticated administrator middleware. Mutations also require an actor identity. Unknown fields/trailing JSON are rejected for identity-bearing recovery requests.
+
+- `GET /api/v1/admin/instances/:id/runtime-recovery`: read inspection.
+- `POST /api/v1/admin/instances/:id/runtime-recovery`, body `{"generation":3}`: retry the exact inspected generation.
+- `POST /api/v1/admin/runtime-pods/:id/recheck`, body `{"pod_uid":"current-uid"}`: immediate physical audit of that exact registered Pod.
+- `POST /api/v1/admin/runtime-scheduling/:id/retry`: persist an operation recheck request; response includes `retry_requested`, phase and blocker.
+
+A successful request means the check/retry was accepted or performed; it does not promise that the instance is already running. Follow instance status or scheduling records. A 409 retains its explicit blocker, and no unknown source ownership is discarded.
+
+## Implemented safeguards
+
+- Manual/automatic scale-in and managed-pool deletion require fresh physical emptiness, with exact observation rows locked through the destructive write. Paused source Pods receive an explicit fresh scan after moves.
+- Interrupted processing journals, including same-owner post-PATCH save failures, continue through phase-aware observation/cleanup.
+- Capacity uses allocatable physical slots; a ready but unusable awakened pool does not hide other eligible sleeping pools. Unsupported physical proof cannot justify cloning an incompatible pool.
+- First-generation unpublished reservations may retry only with authoritative assignment/credential absence. Repeated retries do not extend reservation cleanup age.
+- Source-bound failover intents retain the original UID, endpoint, gateway, owner and generation. Stop retries are bounded; the administrator can re-arm the same intent.
+- Scheduler scans rotate through a fixed high watermark instead of repeatedly reading only the first 1,000 instances.
+- Protected report omissions retain binding/health/state/capacity. Missing binding adoption requires fresh current authority plus transactional owner, profile, generation, workspace, desired-power, admission and port-conflict checks.
+- Physical capacity above the configured admission limit is rejected explicitly instead of silently truncating the physical layout.
+- Recovery source-stop receipts and binding release commit together; replacement generation and placement checkpoint also commit together. Exhausted attempts cannot prevent continuation of an already completed stop.
+
+## Database changes and rollout
+
+Migrations 106–108 add recovery phase, exact-source failover intent, and management retry-request state. They preserve existing workspaces, retry budgets and lifecycle state. Deploy the normal migration-enabled application with these migrations; do not run a new controller against an unmigrated database. This change does not upgrade older Runtime images or grant legacy observations authority.
+
+## Verification (2026-11-10)
+
+Independent review found and verified fixes for the additional awake-pool/full-pool physical-capacity paths, incomplete allocator layout, stale queued stop phase, and superseded failover intent. The omission rule was extended to all profiles and unavailable metadata; healthy adoption also clears stale error codes.
+
+- Backend broad regression: 4839 tests/subtests passed, 373 skipped, zero failures, 25 packages passed. On Darwin the existing linux-only `browser_worker_nfs_test.go` compile issue was excluded with a temporary Go overlay; the existing native-script relative sibling path was provided for this linked worktree.
+- Focused recovery race: 79 passed; handler race after all-profile omission fix: 144 passed.
+- Real isolated SQL: recovery checkpoint/manual placement 10 passed; report/adoption 28 cases plus healthy-error-code regression; source failover/current-read/supersession, same-owner post-PATCH SQL failure, final proof invalidation, follower retry queue, unknown/quarantined wake, and concurrent maintenance admission passed.
+- Actual Linux + MySQL 8.4.8: all four fresh-schema/full restore/recovery-normalization/failover-reference-policy tests passed. The same full-restore fixture exceeded its 120-second deadline over a forwarded remote SQL connection; running the Linux test binary beside the disposable database passed full restore in 13.06 seconds and schema validation in 6.90 seconds. No product timeout was relaxed.
+- Frontend: 13 service tests and 16 management tests passed; TypeScript/Vite build passed. Chrome component regression passed English/Chinese at widths 1280 and 390, including failed-stop retention, exact generation/UID requests, invalidated inspection after ID edits, operation continuation and fitting layout. Mechanical UI detector found no issues.
+
+SQL fixtures were isolated databases, not application business databases. No Kubernetes test Pods were created. Deployment receipt and cleanup verification are recorded separately after rollout.

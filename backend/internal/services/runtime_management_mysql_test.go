@@ -63,6 +63,7 @@ func runtimeManagementMySQLDB(t *testing.T) db.Session {
 	if installed == 0 {
 		apply("079_add_runtime_management.sql")
 	}
+	apply("108_add_runtime_management_retry.sql")
 	return sess
 }
 

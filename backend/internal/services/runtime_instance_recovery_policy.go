@@ -29,6 +29,7 @@ func runtimeRecoveryHealthy(state models.InstanceRuntimeRecovery, now time.Time,
 		return state
 	}
 	state.NextRetryAt = nil
+	state.Phase = ""
 	if state.HealthySince == nil {
 		state.HealthySince = &now
 	}

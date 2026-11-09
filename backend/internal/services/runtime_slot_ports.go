@@ -10,6 +10,10 @@ import (
 )
 
 func (c *slotRuntimeAgentClient) reservedGatewayPorts(ctx context.Context, pod models.RuntimePod) (map[int]struct{}, error) {
+	return c.reservedGatewayPortsInspected(ctx, pod, false)
+}
+
+func (c *slotRuntimeAgentClient) reservedGatewayPortsInspected(ctx context.Context, pod models.RuntimePod, requireCapacityProof bool) (map[int]struct{}, error) {
 	if pod.AgentEndpoint == nil || pod.PodUID == nil || pod.Capacity < 1 {
 		return nil, fmt.Errorf("registered slot target identity is required")
 	}
@@ -46,6 +50,11 @@ func (c *slotRuntimeAgentClient) reservedGatewayPorts(ctx context.Context, pod m
 	changed, complete := false, true
 	for _, observation := range observations {
 		if observation.Err != nil {
+			if requireCapacityProof {
+				// Unknown/legacy proof reserves the port defensively, but cannot
+				// justify expanding another replica of the same pool.
+				return nil, fmt.Errorf("runtime capacity proof unavailable: %w", observation.Err)
+			}
 			complete = false
 		}
 		if observation.free() {

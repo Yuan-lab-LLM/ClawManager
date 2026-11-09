@@ -71,6 +71,10 @@ func (s *RuntimeScheduler) reconcileInstanceRecoveryLocked(ctx context.Context, 
 		}
 		return false, nil
 	}
+	if state != nil && state.Generation == instance.RuntimeGeneration && binding == nil &&
+		(state.Phase == "source_stopped" || state.Phase == "placing" && instance.Status == "creating") {
+		return s.resumeRuntimeRecovery(ctx, store, instance, *state)
+	}
 	if state != nil && state.Reason == runtimeRecoveryPermanentReason {
 		return true, nil
 	}
@@ -140,26 +144,48 @@ func (s *RuntimeScheduler) reconcileInstanceRecoveryLocked(ctx context.Context, 
 			return true, []error{err}
 		}
 	}
-	// Recheck the exact status and generation after stop. No workspace content is
-	// touched; a committed manual stop/sleep/delete cannot become creating here.
-	advanced, err := store.AdvanceRuntimeRecovery(ctx, instance)
+	// Production binding release checkpoints this in the same SQL transaction.
+	// Persist it here as well for stores using the older conditional release API.
+	next.Phase = "source_stopped"
+	saved, err = store.SaveRuntimeRecovery(ctx, instance, next)
 	if err != nil {
 		return true, []error{err}
 	}
-	if !advanced {
+	if !saved {
 		return true, nil
 	}
-	current, err := s.instanceRepo.GetByID(instance.ID)
-	if err != nil {
-		return true, []error{err}
+	return s.resumeRuntimeRecovery(ctx, store, instance, next)
+}
+
+func (s *RuntimeScheduler) resumeRuntimeRecovery(ctx context.Context, store repository.InstanceRuntimeRecoveryRepository, instance models.Instance, state models.InstanceRuntimeRecovery) (bool, []error) {
+	if state.Phase == "source_stopped" {
+		advanced, err := store.AdvanceRuntimeRecovery(ctx, instance)
+		if err != nil {
+			return true, []error{err}
+		}
+		if !advanced {
+			return true, nil
+		}
+		current, err := s.instanceRepo.GetByID(instance.ID)
+		if err != nil {
+			return true, []error{err}
+		}
+		if current == nil || current.Status != "creating" || current.RuntimeGeneration != instance.RuntimeGeneration+1 {
+			return true, nil
+		}
+		instance = *current
 	}
-	if current == nil || current.Status != "creating" || current.RuntimeGeneration != instance.RuntimeGeneration+1 {
-		return true, nil
-	}
-	placement := context.WithValue(ctx, runtimeRecoverySourceKey{}, runtimeRecoveryPlacementSource{next.SourcePodID, next.SourceGatewayPort})
-	if err = s.assignInstance(placement, *current); err != nil && !isRuntimeAssignmentPending(err) {
-		errs := []error{fmt.Errorf("recover instance %d attempt %d: %w", instance.ID, next.Attempts, err)}
-		s.markInstanceError(ctx, *current, err, &errs)
+	placement := context.WithValue(ctx, runtimeRecoverySourceKey{}, runtimeRecoveryPlacementSource{state.SourcePodID, state.SourceGatewayPort})
+	if err := s.assignInstance(placement, instance); err != nil && !isRuntimeAssignmentPending(err) {
+		state.Phase = "placing"
+		state.Generation = instance.RuntimeGeneration
+		state.UpdatedAt = time.Now().UTC()
+		_, saveErr := store.SaveRuntimeRecovery(ctx, instance, state)
+		errs := []error{fmt.Errorf("recover instance %d attempt %d: %w", instance.ID, state.Attempts, err)}
+		if saveErr != nil {
+			errs = append(errs, saveErr)
+		}
+		s.markInstanceError(ctx, instance, err, &errs)
 		return true, errs
 	}
 	return true, nil

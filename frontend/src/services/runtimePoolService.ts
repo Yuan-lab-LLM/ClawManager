@@ -1,6 +1,7 @@
 import axios from "axios";
 import api from "./api";
 import type {
+  RuntimeRecoveryInspection,
   RuntimeAutoStopSettings,
   UpdateRuntimeAutoStopSettings,
   RuntimeAutoStopActivity,
@@ -26,6 +27,22 @@ import type {
 } from "../types/runtimePool";
 
 export const runtimePoolService = {
+  async inspectInstanceRecovery(id: number): Promise<RuntimeRecoveryInspection> {
+    const response = await api.get(`/admin/instances/${id}/runtime-recovery`);
+    return response.data.data;
+  },
+  async retryInstanceRecovery(id: number, generation: number): Promise<RuntimeRecoveryInspection> {
+    const response = await api.post(`/admin/instances/${id}/runtime-recovery`, { generation });
+    return response.data.data;
+  },
+  async recheckPod(id: number, podUid: string): Promise<RuntimePod> {
+    const response = await api.post(`/admin/runtime-pods/${id}/recheck`, { pod_uid: podUid });
+    return response.data.data;
+  },
+  async retryOperation(id: string): Promise<RuntimeSchedulingOperation> {
+    const response = await api.post(`/admin/runtime-scheduling/${encodeURIComponent(id)}/retry`);
+    return response.data.data;
+  },
   async getAutoStopSettings(signal?: AbortSignal): Promise<RuntimeAutoStopSettings> {
     const response = await api.get('/admin/runtime-auto-stop', { signal });
     return response.data.data;

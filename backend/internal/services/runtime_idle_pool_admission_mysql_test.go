@@ -195,6 +195,11 @@ func TestRuntimeIdlePoolMySQLRechecksLatestObservation(t *testing.T) {
 					}
 					if stage == "execution" {
 						change()
+						physicalState := state
+						if state == "stale" {
+							physicalState = "unknown"
+						}
+						s.scheduler.agentClient = scaleInPhysicalAgent(t, kube, physicalState)
 					} else {
 						// The final assignment read follows the ordinary SQL empty check.
 						// Inject new facts here; only the locked final guard can reject them.
@@ -211,7 +216,13 @@ func TestRuntimeIdlePoolMySQLRechecksLatestObservation(t *testing.T) {
 							if e = json.Unmarshal([]byte(raw), &current); e != nil {
 								t.Fatal(e)
 							}
-							if current.Phase == "migrating" {
+							observed, e := s.scheduler.podRepo.GetByID(ctx, pods[0].ID)
+							if e != nil {
+								t.Fatal(e)
+							}
+							// The dedicated paused-source scan supersedes old cached facts.
+							// Inject only after that fresh scan has persisted its result.
+							if current.Phase == "migrating" && observed.ObservationAt != nil && observed.ObservationAt.After(op.CreatedAt) {
 								change()
 							}
 							return false, nil, nil
@@ -221,7 +232,11 @@ func TestRuntimeIdlePoolMySQLRechecksLatestObservation(t *testing.T) {
 						t.Fatal(err)
 					}
 					current, _ := scaleInRead(t, s, op.ID)
-					if current.Status != "failed" {
+					if stage == "execution" {
+						if current.Status != "starting" || current.ErrorMessage == "" {
+							t.Fatalf("physical source inspection did not hold resize: %+v", current)
+						}
+					} else if current.Status != "failed" {
 						t.Fatalf("changed observation did not stop resize: %+v", current)
 					}
 				}
@@ -239,15 +254,16 @@ func TestRuntimeIdlePoolMySQLRechecksLatestObservation(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if p.SchedulingPaused {
-					t.Fatal("rejected reclaim leaked source pause")
+				if p.SchedulingPaused != (stage == "execution") {
+					t.Fatalf("source pause does not match held/finished operation: stage=%s paused=%v", stage, p.SchedulingPaused)
 				}
 				retained, err := kube.CoreV1().Pods("runtime").Get(ctx, "hermes-runtime-pod-2", metav1.GetOptions{})
 				if err != nil {
 					t.Fatal(err)
 				}
-				if retained.Labels["clawmanager.io/scale-in-protected"] != "" {
-					t.Fatal("rejected reclaim leaked retained protection")
+				protected := retained.Labels["clawmanager.io/scale-in-protected"] != ""
+				if protected != (stage == "execution") {
+					t.Fatalf("retained protection does not match held/finished operation: stage=%s protected=%v", stage, protected)
 				}
 			})
 		}

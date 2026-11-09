@@ -2550,6 +2550,12 @@
         "type": "datetime(6)",
         "nullable": "NO",
         "extra": ""
+      },
+      {
+        "name": "phase",
+        "type": "varchar(32)",
+        "nullable": "NO",
+        "extra": ""
       }
     ],
     "primary_key": [

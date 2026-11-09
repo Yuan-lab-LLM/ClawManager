@@ -233,6 +233,7 @@ export interface RuntimeSchedulingItem {
 }
 
 export interface RuntimeSchedulingOperation {
+  retry_requested?: boolean;
   id: string;
   kind?: string;
   status: string;
@@ -347,4 +348,16 @@ export interface RuntimeUpgradeDetails {
   rollout: RuntimeRollout;
   items: RuntimeUpgradeItem[];
   audits: Array<{ id: number; action: string; phase: string; outcome: string; created_at: string }>;
+}
+
+export interface RuntimeRecoveryInspection {
+  failover?: { attempts: number; source_stopped: boolean; reason: string };
+  instance_id: number;
+  generation: number;
+  status: string;
+  blocker?: string;
+  blocker_code?: string;
+  recovery?: { attempts: number; phase?: string; reason?: string; next_retry_at?: string };
+  binding?: { runtime_pod_id: number; generation: number; state: string; gateway_id: string };
+  pod?: RuntimePod;
 }

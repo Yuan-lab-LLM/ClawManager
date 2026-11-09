@@ -5,6 +5,7 @@ import "time"
 // InstanceRuntimeRecovery is independent of instances.updated_at: runtime
 // heartbeats must neither postpone recovery nor replenish its retry budget.
 type InstanceRuntimeRecovery struct {
+	Phase             string     `db:"phase" json:"phase,omitempty"`
 	InstanceID        int        `db:"instance_id" json:"instance_id"`
 	Attempts          int        `db:"attempts" json:"attempts"`
 	NextRetryAt       *time.Time `db:"next_retry_at" json:"next_retry_at,omitempty"`

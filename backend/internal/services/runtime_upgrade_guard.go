@@ -107,6 +107,9 @@ func (s *RuntimeScheduler) failoverBinding(ctx context.Context, podID int64, sna
 		if pod == nil || stringValue(pod.PodUID) == "" || stringValue(pod.AgentEndpoint) == "" || current.GatewayID == "" {
 			return fmt.Errorf("failover requires the exact source runtime identity")
 		}
+		if store, ok := s.instanceRepo.(repository.RuntimeFailoverRepository); ok {
+			return s.beginOwnedRuntimeFailover(ctx, store, *instance, *current, *pod, reason)
+		}
 		// Heartbeat loss and Pod disappearance do not retire the durable writer
 		// assignment. Keep SQL ownership until the normal stop path proves it.
 		if err := s.agentClient.DeleteGateway(ctx, *pod.AgentEndpoint, current.GatewayID); err != nil {

@@ -17,6 +17,7 @@ type recoveryTestRepo struct {
 	lifecycle  sync.Mutex
 	state      *models.InstanceRuntimeRecovery
 	beforeSave func()
+	advanceErr error
 }
 
 func (r *recoveryTestRepo) AcquireLifecycleLock(context.Context, int) (func(), error) {
@@ -43,6 +44,11 @@ func (r *recoveryTestRepo) SaveRuntimeRecovery(_ context.Context, i models.Insta
 	return true, nil
 }
 func (r *recoveryTestRepo) AdvanceRuntimeRecovery(_ context.Context, i models.Instance) (bool, error) {
+	if r.advanceErr != nil {
+		err := r.advanceErr
+		r.advanceErr = nil
+		return false, err
+	}
 	current, _ := r.GetByID(i.ID)
 	if current == nil || current.Status != i.Status || current.RuntimeGeneration != i.RuntimeGeneration {
 		return false, nil
@@ -50,6 +56,10 @@ func (r *recoveryTestRepo) AdvanceRuntimeRecovery(_ context.Context, i models.In
 	copy := *current
 	copy.Status = "creating"
 	copy.RuntimeGeneration++
+	if r.state != nil {
+		r.state.Phase = "placing"
+		r.state.Generation = copy.RuntimeGeneration
+	}
 	copy.RuntimeErrorMessage = nil
 	copy.RuntimeErrorCode = nil
 	r.byID[i.ID] = &copy
@@ -307,4 +317,41 @@ func TestRuntimeRecoveryFreshNativeCrashRetainsBoundedBudget(t *testing.T) {
 	if len(a.deleteRequests) != 1 || current.RuntimeGeneration != 3 || r.state.Attempts != 1 || r.state.NextRetryAt == nil {
 		t.Fatal("fresh crash was blocked or budget was reset")
 	}
+}
+
+func TestRuntimeRecoveryCompletedStopResumesAfterFinalAttemptAdvanceFailure(t *testing.T) {
+	s, r, b, a, i, now := recoveryFixture()
+	delete(b.bindings, i.ID)
+	r.state = &models.InstanceRuntimeRecovery{InstanceID: i.ID, Generation: i.RuntimeGeneration, Attempts: 3, Phase: "source_stopped", Reason: "gateway_process_exited", UpdatedAt: now}
+	r.advanceErr = errors.New("temporary SQL failure after confirmed stop")
+	_, errs := s.reconcileInstanceRecoveryLocked(context.Background(), i, now)
+	if len(errs) == 0 {
+		t.Fatal("confirmed final stop did not attempt generation advance")
+	}
+	_, _ = s.reconcileInstanceRecoveryLocked(context.Background(), i, now.Add(time.Hour))
+	current, _ := r.GetByID(i.ID)
+	if current.RuntimeGeneration != i.RuntimeGeneration+1 || r.state.Attempts != 3 || len(a.deleteRequests) != 0 {
+		t.Fatalf("durable stop could not resume without another attempt: instance=%+v state=%+v", current, r.state)
+	}
+}
+func TestRuntimeRecoveryStopCheckpointCannotAuthorizeDifferentGeneration(t *testing.T) {
+	s, r, b, a, i, now := recoveryFixture()
+	delete(b.bindings, i.ID)
+	r.state = &models.InstanceRuntimeRecovery{InstanceID: i.ID, Generation: i.RuntimeGeneration - 1, Attempts: 3, Phase: "source_stopped", UpdatedAt: now}
+	_, _ = s.reconcileInstanceRecoveryLocked(context.Background(), i, now)
+	current, _ := r.GetByID(i.ID)
+	if current.RuntimeGeneration != i.RuntimeGeneration || len(a.deleteRequests) != 0 {
+		t.Fatal("old stop receipt authorized current generation")
+	}
+}
+
+func (r *recoveryTestRepo) ResumeRuntimeRecoveryPlacement(ctx context.Context, i models.Instance) (bool, error) {
+	current, _ := r.GetByID(i.ID)
+	if current == nil || current.Status != i.Status || current.RuntimeGeneration != i.RuntimeGeneration || r.state == nil || r.state.Phase != "placing" || r.state.Generation != i.RuntimeGeneration {
+		return false, nil
+	}
+	copy := *current
+	copy.Status = "creating"
+	r.byID[i.ID] = &copy
+	return true, nil
 }

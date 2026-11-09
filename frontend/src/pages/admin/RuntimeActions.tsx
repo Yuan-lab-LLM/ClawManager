@@ -214,6 +214,13 @@ export default function RuntimeActions({
       setBusy(false);
     }
   };
+  const retryOperation = async (id: string) => {
+    if (busy) return;
+    setBusy(true); setError(undefined);
+    try { await runtimePoolService.retryOperation(id); await history.refetch(); }
+    catch (err) { setError(runtimeError(err)); }
+    finally { setBusy(false); }
+  };
   const titleKey =
     kind === "schedule"
       ? "manual"
@@ -678,7 +685,9 @@ export default function RuntimeActions({
                     ? new Date(operation.created_at).toLocaleString()
                     : ""}
                 </p>
+                {operation.phase && <p className="mt-2 text-xs text-slate-600">{t("runtimePods.recoveryPhase")}: {operation.phase}</p>}
                 {operation.error_message && <ErrorMessage>{operation.error_message}</ErrorMessage>}
+                {["processing", "needs_attention"].includes(operation.status) && <button type="button" className={`${buttonClass} mt-3`} disabled={busy || operation.retry_requested} onClick={() => void retryOperation(operation.id)}>{t(operation.retry_requested ? "runtimePods.recoveryQueued" : "runtimePods.recoveryContinue")}</button>}
                 <div className="mt-3 divide-y divide-slate-100">
                   {operation.items?.map((item) => (
                     <div

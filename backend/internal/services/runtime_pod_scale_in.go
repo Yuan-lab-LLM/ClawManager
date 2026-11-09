@@ -120,6 +120,11 @@ func (s *RuntimeManagementService) runtimeScaleInPlanItems(ctx context.Context, 
 		if err != nil {
 			return nil, err
 		}
+		if len(bindings) == 0 {
+			if err := models.ConfirmedEmptyRuntimeObservation(source, time.Now().UTC()); err != nil {
+				return nil, fmt.Errorf("source Pod %s has no verified physical emptiness: %w", source.PodName, err)
+			}
+		}
 		if source.UsedSlots != len(bindings) {
 			return nil, fmt.Errorf("source Pod %s has unsettled slot claims; retry after starts settle", source.PodName)
 		}
@@ -405,7 +410,7 @@ func (s *RuntimeManagementService) submitScaleInJournal(ctx context.Context, jou
 			if uid != source.PodUID || paused || used != source.InstanceCount {
 				return errors.New("source occupancy or identity changed; refresh preflight")
 			}
-			if journal.AutomaticIdle {
+			if source.InstanceCount == 0 {
 				if err := repository.CheckRuntimePodEmptyObservation(ctx, tx, source.ID, source.PodUID); err != nil {
 					return err
 				}

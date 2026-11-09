@@ -19,6 +19,7 @@ import {
 } from "../../lib/runtimeManagement";
 import RuntimePodDetails from "./RuntimePodDetails";
 import RuntimeActions from "./RuntimeActions";
+import RuntimeRecoveryDialog from "./RuntimeRecoveryDialog";
 import RuntimeMaintenanceDialog from "./RuntimeMaintenanceDialog";
 import RuntimeBalanceDialog from "./RuntimeBalanceDialog";
 import RuntimeAutoStopDialog from "./RuntimeAutoStopDialog";
@@ -35,7 +36,7 @@ import {
 import "../../styles/runtime-pods.css";
 
 type Dialog = {
-  kind: "schedule" | "evict" | "events" | "history" | "maintenance" | "balance" | "auto-stop";
+  kind: "schedule" | "evict" | "events" | "history" | "maintenance" | "balance" | "auto-stop" | "recovery";
   pod?: RuntimePod;
   ids?: number[];
 };
@@ -220,6 +221,7 @@ export default function RuntimePodsPage() {
                 ))}
               </div>
               <div className="runtime-toolbar-actions flex-wrap">
+ <button type="button" className={`${buttonClass} !px-2 !py-1.5`} onClick={() => setDialog({ kind: "recovery" })}>{t("runtimePods.recoveryTitle")}</button>
                 <button type="button" className={`${buttonClass} !px-2 !py-1.5`} onClick={() => setDialog({ kind: "auto-stop" })}>{t("autoStop.title")}</button>
                 <button type="button" className={`${buttonClass} !px-2 !py-1.5`} onClick={() => setDialog({ kind: "maintenance" })}>{t("runtimePods.maintenance")}</button>
                 <button type="button" className={`${buttonClass} !px-2 !py-1.5`} onClick={() => setDialog({ kind: "balance" })}>{t("runtimePods.balance")}</button>
@@ -441,7 +443,9 @@ export default function RuntimePodsPage() {
             </div>
           </>
         )}
-        {dialog?.kind === "auto-stop" ? (
+        {dialog?.kind === "recovery" ? (
+ <RuntimeRecoveryDialog pods={actionPods} onClose={() => setDialog(null)} onChanged={refresh} />
+ ) : dialog?.kind === "auto-stop" ? (
           <RuntimeAutoStopDialog onClose={() => setDialog(null)} />
         ) : dialog?.kind === "maintenance" ? (
           <RuntimeMaintenanceDialog onClose={() => setDialog(null)} onChanged={refresh} onViewScheduling={() => setDialog({ kind: "history" })} />

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,13 +13,8 @@ import (
 
 func TestRuntimeRecoveryMySQLPersistsBudgetAndRejectsStoppedOrStaleGeneration(t *testing.T) {
 	r := runtimeSecurityMySQL(t)
-	raw, err := os.ReadFile("../db/migrations/103_add_instance_runtime_recovery.sql")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err = r.sess.SQL().Exec(string(raw)); err != nil {
-		t.Fatal(err)
-	}
+	createRecoveryJournalForTest(t, r)
+	var err error
 	if _, err = r.sess.SQL().Exec(`CREATE TABLE instance_desired_state (instance_id INT PRIMARY KEY,desired_power_state VARCHAR(32))`); err != nil {
 		t.Fatal(err)
 	}
@@ -69,6 +65,11 @@ func TestRuntimeRecoveryMySQLPersistsBudgetAndRejectsStoppedOrStaleGeneration(t 
 	if _, err = r.sess.SQL().Exec(`DELETE FROM instance_desired_state`); err != nil {
 		t.Fatal(err)
 	}
+	state.Attempts = 2
+	state.Phase = "source_stopped"
+	if saved, saveErr := r.SaveRuntimeRecovery(ctx, *snapshot, state); saveErr != nil || !saved {
+		t.Fatalf("checkpoint: %v %v", saved, saveErr)
+	}
 	advanced, err := r.AdvanceRuntimeRecovery(ctx, *snapshot)
 	if err != nil || !advanced {
 		t.Fatalf("confirmed unbound recovery did not advance: %v %v", advanced, err)
@@ -89,6 +90,10 @@ func TestRuntimeRecoveryMySQLPersistsBudgetAndRejectsStoppedOrStaleGeneration(t 
 
 func TestRuntimeRecoveryBindingMySQLExactSourceAssignment(t *testing.T) {
 	r := runtimeSecurityMySQL(t)
+	createRecoveryJournalForTest(t, r)
+	if _, err := r.sess.SQL().Exec("INSERT INTO instance_runtime_recovery(instance_id,attempts,reason,generation,updated_at) VALUES(7,1,'gateway_process_exited',2,NOW(6))"); err != nil {
+		t.Fatal(err)
+	}
 	for _, ddl := range []string{`CREATE TABLE runtime_pods (id BIGINT PRIMARY KEY,used_slots INT,updated_at DATETIME(6))`, `CREATE TABLE instance_runtime_bindings (instance_id INT PRIMARY KEY,runtime_pod_id BIGINT,generation INT,gateway_id VARCHAR(255),gateway_port INT,state VARCHAR(32))`, `INSERT INTO runtime_pods VALUES (9,1,NOW(6))`} {
 		if _, err := r.sess.SQL().Exec(ddl); err != nil {
 			t.Fatal(err)
@@ -119,12 +124,20 @@ func TestRuntimeRecoveryBindingMySQLExactSourceAssignment(t *testing.T) {
 			if err != nil || deleted != (scenario == "exact") {
 				t.Fatalf("source identity was not fenced: %v %v", deleted, err)
 			}
+			checkpoint, readErr := r.GetRuntimeRecovery(context.Background(), 7)
+			if readErr != nil || (scenario == "exact" && checkpoint.Phase != "source_stopped") || (scenario != "exact" && checkpoint.Phase != "") {
+				t.Fatalf("stop checkpoint not atomic with exact release: %+v %v", checkpoint, readErr)
+			}
 		})
 	}
 }
 
 func TestRuntimeRecoveryMySQLDesiredStopAfterAdvanceBlocksPublication(t *testing.T) {
 	r := runtimeSecurityMySQL(t)
+	createRecoveryJournalForTest(t, r)
+	if _, err := r.sess.SQL().Exec("INSERT INTO instance_runtime_recovery(instance_id,attempts,reason,generation,updated_at,phase) VALUES(7,1,'gateway_process_exited',2,NOW(6),'source_stopped')"); err != nil {
+		t.Fatal(err)
+	}
 	for _, ddl := range []string{
 		`CREATE TABLE instance_desired_state (id INT AUTO_INCREMENT PRIMARY KEY,instance_id INT UNIQUE,desired_power_state VARCHAR(32),desired_config_revision_id INT NULL,desired_runtime_action VARCHAR(50) NULL,updated_by INT NULL,created_at DATETIME(6),updated_at DATETIME(6))`,
 		`CREATE TABLE runtime_pods (id BIGINT PRIMARY KEY,pod_uid VARCHAR(64),namespace VARCHAR(64),pod_name VARCHAR(64),deployment_name VARCHAR(64),runtime_type VARCHAR(32))`,
@@ -176,5 +189,89 @@ func TestRuntimeRecoveryMySQLDesiredStopAfterAdvanceBlocksPublication(t *testing
 	err = WithRuntimePodAssignmentAdmission(ctx, r.sess, models.RuntimePod{PodUID: &uid, Namespace: "runtime", PodName: "runtime-pod", DeploymentName: "pool", RuntimeType: "openclaw"}, 7, 3, func() error { published = true; return nil })
 	if published || !errors.Is(err, models.ErrInstanceStopping) {
 		t.Fatalf("committed desired stop admitted replacement: published=%v err=%v", published, err)
+	}
+}
+
+func createRecoveryJournalForTest(t *testing.T, r *instanceRepository) {
+	t.Helper()
+	for _, name := range []string{"103_add_instance_runtime_recovery.sql", "106_add_runtime_recovery_phase.sql"} {
+		raw, err := os.ReadFile("../db/migrations/" + name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, statement := range strings.Split(string(raw), ";") {
+			if strings.TrimSpace(statement) != "" {
+				if _, err = r.sess.SQL().Exec(statement); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+	}
+}
+
+func TestRuntimeRecoveryBindingMySQLMissingCheckpointRollsBackRelease(t *testing.T) {
+	r := runtimeSecurityMySQL(t)
+	createRecoveryJournalForTest(t, r)
+	for _, ddl := range []string{
+		"CREATE TABLE runtime_pods(id BIGINT PRIMARY KEY,used_slots INT,updated_at DATETIME(6))",
+		"CREATE TABLE instance_runtime_bindings(instance_id INT PRIMARY KEY,runtime_pod_id BIGINT,generation INT,gateway_id VARCHAR(255),gateway_port INT,state VARCHAR(32))",
+		"INSERT INTO runtime_pods VALUES(9,1,NOW(6))",
+		"INSERT INTO instance_runtime_bindings VALUES(7,9,2,'gw-7-2',19000,'error')",
+	} {
+		if _, err := r.sess.SQL().Exec(ddl); err != nil {
+			t.Fatal(err)
+		}
+	}
+	b := &instanceRuntimeBindingRepository{sess: r.sess}
+	_, err := b.DeleteConfirmedRecoveryBinding(context.Background(), models.InstanceRuntimeBinding{InstanceID: 7, RuntimePodID: 9, Generation: 2, GatewayID: "gw-7-2", GatewayPort: 19000})
+	if err == nil {
+		t.Fatal("missing durable intent permitted release")
+	}
+	row, _ := r.sess.SQL().QueryRow("SELECT used_slots,(SELECT COUNT(*) FROM instance_runtime_bindings) FROM runtime_pods WHERE id=9")
+	var used, bindings int
+	if scanErr := row.Scan(&used, &bindings); scanErr != nil || used != 1 || bindings != 1 {
+		t.Fatalf("transaction lost source without checkpoint: used=%d bindings=%d err=%v", used, bindings, scanErr)
+	}
+}
+
+func TestRuntimeRecoveryMySQLManualPlacementResumeKeepsGenerationAndStopIntent(t *testing.T) {
+	r := runtimeSecurityMySQL(t)
+	createRecoveryJournalForTest(t, r)
+	for _, ddl := range []string{
+		"CREATE TABLE instance_desired_state(instance_id INT PRIMARY KEY,desired_power_state VARCHAR(32))",
+		"CREATE TABLE instance_runtime_bindings(instance_id INT PRIMARY KEY)",
+		"UPDATE instances SET status='error' WHERE id=7",
+		"INSERT INTO instance_runtime_recovery(instance_id,attempts,reason,generation,updated_at,phase) VALUES(7,3,'gateway_process_exited',2,NOW(6),'placing')",
+	} {
+		if _, err := r.sess.SQL().Exec(ddl); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ctx := context.Background()
+	before, err := r.GetByIDContext(ctx, 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resumed, err := r.ResumeRuntimeRecoveryPlacement(ctx, *before)
+	if err != nil || !resumed {
+		t.Fatalf("manual continuation failed: %v %v", resumed, err)
+	}
+	after, err := r.GetByIDContext(ctx, 7)
+	if err != nil || after.Status != "creating" || after.RuntimeGeneration != 2 {
+		t.Fatalf("continuation changed generation: %+v %v", after, err)
+	}
+	state, err := r.GetRuntimeRecovery(ctx, 7)
+	if err != nil || state.Attempts != 3 || state.Phase != "placing" {
+		t.Fatalf("continuation reset budget/proof: %+v %v", state, err)
+	}
+	if _, err = r.sess.SQL().Exec("UPDATE instances SET status='error' WHERE id=7"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = r.sess.SQL().Exec("INSERT INTO instance_desired_state VALUES(7,'stopped')"); err != nil {
+		t.Fatal(err)
+	}
+	resumed, err = r.ResumeRuntimeRecoveryPlacement(ctx, *before)
+	if err != nil || resumed {
+		t.Fatalf("manual continuation resurrected desired stop: %v %v", resumed, err)
 	}
 }

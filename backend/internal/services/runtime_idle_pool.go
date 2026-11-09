@@ -316,12 +316,33 @@ func (s *RuntimeScheduler) restoreIdleRuntimeCapacity(ctx context.Context, insta
 				return false, readErr
 			}
 			registered := false
-			for _, pod := range verified {
+			inventory, readErr := s.RuntimeDeploymentPods(ctx, runtimeType)
+			if readErr != nil {
+				return false, readErr
+			}
+			// Readiness/admission filters deliberately exclude paused registrations.
+			// Check current identity separately so an unusable registered Pod cannot
+			// indefinitely prevent restoring a different compatible sleeping pool.
+			for _, pod := range reported {
 				if pod.Namespace != candidate.Namespace || pod.DeploymentName != candidate.DeploymentName {
 					continue
 				}
-				registered = true
-				if pod.Capacity <= 0 || pod.UsedSlots < pod.Capacity {
+				for _, live := range inventory {
+					if stringValue(pod.PodUID) != "" && ordinaryRuntimeIdentityMatches(pod, live) {
+						registered = true
+						break
+					}
+				}
+			}
+			for _, pod := range verified {
+				if pod.Namespace != candidate.Namespace || pod.DeploymentName != candidate.DeploymentName || pod.SchedulingPaused || pod.Draining {
+					continue
+				}
+				free, capacityErr := s.allocatableGatewaySlots(ctx, pod)
+				if capacityErr != nil {
+					return false, fmt.Errorf("Runtime pool %s physical capacity unavailable: %w", candidate.DeploymentName, capacityErr)
+				}
+				if free > 0 {
 					return true, nil
 				}
 			}

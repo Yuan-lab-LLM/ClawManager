@@ -53,6 +53,8 @@ type RuntimeScheduler struct {
 	lastPoolCleanupAt    time.Time
 	configurationRetryMu sync.Mutex
 	configurationRetryAt map[string]time.Time
+	creatingScan         runtimeSchedulerScan
+	desiredScan          runtimeSchedulerScan
 	slotAudit            runtimeSlotAuditor
 }
 
@@ -237,11 +239,12 @@ func (s *RuntimeScheduler) FailoverPod(ctx context.Context, podID int64, reason 
 	if s == nil || s.podRepo == nil || s.bindingRepo == nil || s.instanceRepo == nil {
 		return fmt.Errorf("runtime scheduler dependencies are not configured")
 	}
-	var errs []error
-	if err := s.podRepo.MarkState(ctx, podID, "unhealthy", false); err != nil {
-		errs = append(errs, err)
+	// Draining remains eligible for the stale-pod confirmation loop if listing
+	// bindings or persisting an intent fails before every writer is captured.
+	if err := s.podRepo.MarkState(ctx, podID, "draining", true); err != nil {
+		return err
 	}
-
+	var errs []error
 	bindings, err := s.bindingRepo.ListByRuntimePodID(ctx, podID)
 	if err != nil {
 		errs = append(errs, err)
@@ -250,6 +253,16 @@ func (s *RuntimeScheduler) FailoverPod(ctx context.Context, podID int64, reason 
 	for _, binding := range bindings {
 		if err := s.failoverBinding(ctx, podID, binding, reason); err != nil {
 			errs = append(errs, err)
+		}
+	}
+	if len(errs) == 0 {
+		remaining, err := s.bindingRepo.ListByRuntimePodID(ctx, podID)
+		if err != nil {
+			errs = append(errs, err)
+		} else if len(remaining) == 0 {
+			if err := s.podRepo.MarkState(ctx, podID, "unhealthy", false); err != nil {
+				errs = append(errs, err)
+			}
 		}
 	}
 	return errors.Join(errs...)
@@ -1548,14 +1561,14 @@ func (s *RuntimeScheduler) reconcile(ctx context.Context) error {
 	if err := s.reconcileRollouts(ctx); err != nil {
 		errs = append(errs, err)
 	}
-	creating, err := s.instanceRepo.GetV2Creating(ctx, runtimeSchedulerBatchLimit)
+	creating, err := s.schedulerInstanceBatch(ctx, true)
 	if err != nil {
 		errs = append(errs, err)
 	} else {
 		errs = append(errs, s.reconcileCreatingInstances(ctx, creating)...)
 	}
 
-	desired, err := s.instanceRepo.GetV2DesiredRunning(ctx, runtimeSchedulerBatchLimit)
+	desired, err := s.schedulerInstanceBatch(ctx, false)
 	if err != nil {
 		errs = append(errs, err)
 	} else {
@@ -1828,8 +1841,9 @@ func (s *RuntimeScheduler) syncInstanceStateFromBinding(ctx context.Context, ins
 }
 
 func (s *RuntimeScheduler) failoverStalePods(ctx context.Context) error {
+	resumeErr := s.resumeOwnedRuntimeFailovers(ctx)
 	if s.heartbeatTimeout <= 0 {
-		return nil
+		return resumeErr
 	}
 	pods, err := s.podRepo.List(ctx, "")
 	if err != nil {
@@ -1842,6 +1856,9 @@ func (s *RuntimeScheduler) failoverStalePods(ctx context.Context) error {
 	cutoff := time.Now().UTC().Add(-time.Duration(runtimeHeartbeatFailoverMultiplier) * s.heartbeatTimeout)
 	kubernetesPodsByType := map[string][]k8s.RuntimeDeploymentPod{}
 	var errs []error
+	if resumeErr != nil {
+		errs = append(errs, resumeErr)
+	}
 	for _, pod := range pods {
 		if pod.State == "unhealthy" || pod.State == "pending" {
 			continue
@@ -2018,12 +2035,17 @@ func (s *RuntimeScheduler) scaleOutIfBacklogExceedsCapacity(ctx context.Context,
 			continue
 		}
 		group.active++
+		free, capacityErr := s.allocatableGatewaySlots(ctx, pod)
+		if capacityErr != nil {
+			group.capacityUnknown = true
+			continue
+		}
 		group.capacityTotal += pod.Capacity
-		group.usedSlots += minInt(pod.UsedSlots, pod.Capacity)
+		group.usedSlots += pod.Capacity - free
 	}
 	var target *runtimeDeploymentCapacity
 	for _, group := range groups {
-		if (group.active == 0 && group.draining == 0) || group.capacityPerPod <= 0 {
+		if group.capacityUnknown || (group.active == 0 && group.draining == 0) || group.capacityPerPod <= 0 {
 			continue
 		}
 		if target == nil || group.active > target.active {
@@ -2226,6 +2248,16 @@ func (s *RuntimeScheduler) assignInstance(ctx context.Context, instance models.I
 		}
 	}
 	if lastErr != nil {
+		if errors.Is(lastErr, errRuntimeScaleOutPending) {
+			scaled, scaleErr := s.scaleOutIfBacklogExceedsCapacity(ctx, runtimeType, 1)
+			if scaleErr != nil {
+				return errors.Join(errRuntimeControlPlanePending, scaleErr)
+			}
+			if scaled {
+				return errRuntimeScaleOutPending
+			}
+			return fmt.Errorf("%w: physical capacity is unavailable and no compatible expansion is confirmed: %v", errRuntimeControlPlanePending, lastErr)
+		}
 		if isRuntimeAssignmentPending(lastErr) {
 			return lastErr
 		}
@@ -2255,6 +2287,7 @@ type runtimeDeploymentCapacity struct {
 	capacityPerPod  int
 	usedSlots       int
 	desiredReplicas int
+	capacityUnknown bool
 }
 
 // Automatic scale requests are floors; stale inventory must not undo newer capacity.
@@ -2303,13 +2336,18 @@ func (s *RuntimeScheduler) scaleOutIfAtCapacity(ctx context.Context, runtimeType
 			continue
 		}
 		group.active++
-		if pod.UsedSlots >= pod.Capacity {
+		free, capacityErr := s.allocatableGatewaySlots(ctx, pod)
+		if capacityErr != nil {
+			group.capacityUnknown = true
+			continue
+		}
+		if free == 0 {
 			group.full++
 		}
 	}
 	var target *runtimeDeploymentCapacity
 	for _, group := range groups {
-		if group.active == 0 && group.draining == 0 {
+		if group.capacityUnknown || (group.active == 0 && group.draining == 0) {
 			continue
 		}
 		if group.active > 0 && group.active != group.full {
@@ -3007,6 +3045,15 @@ func (s *RuntimeScheduler) preservePendingGatewayStart(ctx context.Context, inst
 	}
 	message := cause.Error()
 	if s != nil && s.bindingRepo != nil && generation > 0 {
+		binding, readErr := s.bindingRepo.GetByInstanceID(ctx, instanceID)
+		if readErr != nil {
+			return errors.Join(errRuntimeGatewayStartPending, cause, readErr)
+		}
+		// Keep the reservation's timeout origin stable. Repeated observation of
+		// an uncertain create must not renew the grace period indefinitely.
+		if binding != nil && binding.Generation == generation && binding.State == RuntimeGatewayBindingCreating {
+			return fmt.Errorf("instance %d Gateway start awaits Agent reconciliation: %w", instanceID, errors.Join(errRuntimeGatewayStartPending, cause))
+		}
 		if err := s.bindingRepo.UpdateState(ctx, instanceID, generation, RuntimeGatewayBindingCreating, &message); err != nil && !errors.Is(err, repository.ErrStaleRuntimeGeneration) {
 			cause = errors.Join(cause, fmt.Errorf("preserve pending binding for instance %d: %w", instanceID, err))
 		}
