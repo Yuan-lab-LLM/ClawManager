@@ -8,7 +8,39 @@ import (
 const (
 	ReasoningControlNone             = ""
 	ReasoningControlDeepSeekThinking = "deepseek-thinking"
+	ReasoningControlThinkingType     = "thinking-type"
+	ReasoningControlEnableThinking   = "enable-thinking"
+	ReasoningControlChatTemplate     = "chat-template-kwargs"
 )
+
+// Explicit modes are administrator assertions about the endpoint's wire format,
+// not inferred model capabilities. Empty retains legacy automatic behavior.
+func ValidReasoningControlMode(mode string) bool {
+	switch mode {
+	case "", "none", ReasoningControlDeepSeekThinking, ReasoningControlThinkingType,
+		ReasoningControlEnableThinking, ReasoningControlChatTemplate:
+		return true
+	}
+	return false
+}
+
+func EffectiveLLMReasoningControl(model *LLMModel) string {
+	if model == nil {
+		return ReasoningControlNone
+	}
+	protocol := ResolveLLMProtocolTypeOrDefault(model.ProviderType, model.ProtocolType)
+	if protocol != ProtocolTypeOpenAI && protocol != ProtocolTypeOpenAICompatible {
+		return ReasoningControlNone
+	}
+	mode := strings.TrimSpace(model.ReasoningControlMode)
+	if mode == "none" || !ValidReasoningControlMode(mode) {
+		return ReasoningControlNone
+	}
+	if mode != "" {
+		return mode
+	}
+	return ResolveLLMReasoningControl(model.ProviderType, model.ProtocolType, model.BaseURL, model.ProviderModelName)
+}
 
 // ResolveLLMReasoningControl returns only reasoning controls whose enable and
 // disable semantics ClawManager can enforce on the provider wire protocol.
@@ -36,11 +68,11 @@ func PopulateLLMReasoningCapability(model *LLMModel) {
 	if model == nil {
 		return
 	}
-	model.ReasoningControl = ResolveLLMReasoningControl(
-		model.ProviderType,
-		model.ProtocolType,
-		model.BaseURL,
-		model.ProviderModelName,
-	)
+	if !LLMChatAvailable(model) {
+		model.ReasoningControl = ReasoningControlNone
+		model.SupportsReasoning = false
+		return
+	}
+	model.ReasoningControl = EffectiveLLMReasoningControl(model)
 	model.SupportsReasoning = model.ReasoningControl != ReasoningControlNone
 }

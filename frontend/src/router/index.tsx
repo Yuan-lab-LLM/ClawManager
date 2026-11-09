@@ -24,6 +24,7 @@ import AdminSecurityScannerConfigPage from '../pages/admin/security/AdminSecurit
 import RiskRulesPage from '../pages/admin/RiskRulesPage';
 import ModelManagementPage from '../pages/admin/ModelManagementPage';
 import SystemSettingsPage from '../pages/admin/SystemSettingsPage';
+import BackupsPage from '../pages/admin/backups/TeamDataBackupsPage';
 import NorthboundSettingsPage from '../pages/admin/NorthboundSettingsPage';
 import RuntimePodsPage from '../pages/admin/RuntimePodsPage';
 import UserSettingsPage from '../pages/settings/UserSettingsPage';
@@ -62,6 +63,7 @@ import TeamListPage from '../pages/teams/TeamListPage';
 import CreateTeamPage from '../pages/teams/CreateTeamPage';
 import CustomTeamTemplatesPage from '../pages/teams/CustomTeamTemplatesPage';
 import TeamDetailPage from '../pages/teams/TeamDetailPage';
+import IEISystemTeamPage from '../pages/teams/IEISystemTeamPage';
 import SkillHubPage from '../pages/skill-hub/SkillHubPage';
 
 // Protected Route Component
@@ -174,6 +176,7 @@ function AppRoutes() {
       <Route path="/share/:code" element={<SharedInstancePage />} />
       <Route path="/ieisystem/list-instances" element={<IEISystemListInstancesPage />} />
       <Route path="/ieisystem/instances/:id" element={<IEISystemInstancePage />} />
+      <Route path="/ieisystem/teams/:id" element={<IEISystemTeamPage />} />
 
       {/* User Routes */}
       <Route
@@ -276,6 +279,8 @@ function AppRoutes() {
       />
 
       {/* Admin Routes */}
+      <Route path="/admin/backups" element={<AdminRoute><BackupsPage /></AdminRoute>} />
+      <Route path="/admin/backups/:id" element={<AdminRoute><BackupsPage /></AdminRoute>} />
       <Route
         path="/admin"
         element={

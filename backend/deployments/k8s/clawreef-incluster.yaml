@@ -43,6 +43,7 @@ data:
       id INT AUTO_INCREMENT PRIMARY KEY,
       user_id INT NOT NULL,
       name VARCHAR(255) NOT NULL,
+      alias VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL,
       description TEXT,
       type ENUM('openclaw', 'ubuntu', 'debian', 'centos', 'custom', 'webtop', 'hermes') DEFAULT 'ubuntu',
       runtime_type ENUM('desktop', 'shell') NOT NULL DEFAULT 'desktop',
@@ -640,6 +641,15 @@ spec:
           ports:
             - containerPort: 9001
           env:
+            # Enable only with the matching upstream Hermes Lite runtime.
+            - name: CLAWMANAGER_HERMES_DESKTOP_WEB_ENABLED
+              value: "true"
+            - name: HERMES_DEPLOYMENT_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: CLAWMANAGER_CONTROL_UI_ORIGIN
+              value: "http://clawmanager-gateway.$(HERMES_DEPLOYMENT_NAMESPACE).svc.cluster.local:9001"
             - name: SERVER_ADDRESS
               value: ":9001"
             - name: SERVER_MODE

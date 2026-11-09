@@ -16,6 +16,7 @@ import (
 	"clawreef/internal/aigateway"
 	"clawreef/internal/models"
 	"clawreef/internal/repository"
+	"clawreef/internal/teampresentation"
 )
 
 const (
@@ -35,6 +36,7 @@ type Service interface {
 	List(userID int) ([]Payload, error)
 	Get(userID, id int) (*Payload, error)
 	UpdateMetadata(userID, id int, req UpdateMetadataRequest) (*Payload, error)
+	UpdateMemberIcon(userID, id int, memberID string, req UpdateMemberIconRequest) (*Payload, error)
 	Revise(ctx context.Context, userID, id int, req ReviseRequest) (*Payload, error)
 	AdjustMember(ctx context.Context, userID, id int, memberID string, req AdjustMemberRequest) (*Payload, error)
 	RegenerateMember(ctx context.Context, userID, id int, memberID string, req RegenerateMemberRequest) (*Payload, error)
@@ -49,6 +51,11 @@ type GenerateRequest struct {
 
 type UpdateMetadataRequest struct {
 	Name             string `json:"name"`
+	ExpectedRevision int    `json:"expected_revision"`
+}
+
+type UpdateMemberIconRequest struct {
+	IconOverride     string `json:"icon_override"`
 	ExpectedRevision int    `json:"expected_revision"`
 }
 
@@ -81,6 +88,9 @@ type TemplateSpec struct {
 }
 
 type MemberSpec struct {
+	IconKey            string   `json:"iconKey,omitempty"`
+	AutoIconKey        string   `json:"autoIconKey,omitempty"`
+	IconOverride       string   `json:"iconOverride,omitempty"`
 	MemberID           string   `json:"memberId"`
 	DisplayName        string   `json:"displayName"`
 	Role               string   `json:"role"`
@@ -201,6 +211,9 @@ func (spec *TemplateSpec) UnmarshalJSON(data []byte) error {
 
 func (member *MemberSpec) UnmarshalJSON(data []byte) error {
 	var wire struct {
+		IconKey            string             `json:"iconKey"`
+		AutoIconKey        string             `json:"autoIconKey"`
+		IconOverride       string             `json:"iconOverride"`
 		MemberID           string             `json:"memberId"`
 		DisplayName        string             `json:"displayName"`
 		Role               string             `json:"role"`
@@ -219,6 +232,7 @@ func (member *MemberSpec) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	*member = MemberSpec{
+		IconKey: wire.IconKey, AutoIconKey: wire.AutoIconKey, IconOverride: wire.IconOverride,
 		MemberID: wire.MemberID, DisplayName: wire.DisplayName, Role: wire.Role,
 		IsLeader: bool(wire.IsLeader), Summary: wire.Summary, Mission: wire.Mission,
 		Responsibilities: []string(wire.Responsibilities), Boundaries: []string(wire.Boundaries),
@@ -332,6 +346,44 @@ func (s *service) UpdateMetadata(userID, id int, req UpdateMetadataRequest) (*Pa
 		return nil, err
 	}
 	spec.Name = name
+	if err := s.persistSpec(item, spec, ""); err != nil {
+		return nil, err
+	}
+	return payloadFromModel(item)
+}
+
+// Decoration edits require no model and do not modify the role/protocol layer.
+func (s *service) UpdateMemberIcon(userID, id int, memberID string, req UpdateMemberIconRequest) (*Payload, error) {
+	item, err := s.getModel(userID, id)
+	if err != nil {
+		return nil, err
+	}
+	if err := ensureExpectedRevision(item, req.ExpectedRevision); err != nil {
+		return nil, err
+	}
+	if !teampresentation.ValidOverride(req.IconOverride) {
+		return nil, errors.New("invalid member icon")
+	}
+	spec, err := decodeSpec(item.SpecJSON)
+	if err != nil {
+		return nil, err
+	}
+	found := false
+	for i := range spec.Members {
+		member := &spec.Members[i]
+		if member.MemberID != strings.TrimSpace(memberID) {
+			continue
+		}
+		found = true
+		if member.IsLeader && req.IconOverride != "" {
+			return nil, errors.New("leader identity icon is fixed")
+		}
+		member.IconOverride = req.IconOverride
+		resolveMemberIcon(member, false)
+	}
+	if !found {
+		return nil, errors.New("custom team template member not found")
+	}
 	if err := s.persistSpec(item, spec, ""); err != nil {
 		return nil, err
 	}
@@ -458,6 +510,8 @@ func (s *service) replaceMember(ctx context.Context, userID, id int, memberID st
 		return nil, err
 	}
 	member.MemberID = current.MemberID
+	// Model output cannot set decoration or remove a user's explicit selection.
+	member.IconKey, member.AutoIconKey, member.IconOverride = "", "", current.IconOverride
 	if current.IsLeader {
 		// The model only edits the domain overlay. Identity and the immutable
 		// orchestrator base are selected later from these canonical fields.
@@ -537,6 +591,9 @@ JSON 字段必须严格包含：schemaVersion、name、summary、resolvedMemberC
 	var spec TemplateSpec
 	if err := decodeModelJSON(content, &spec); err != nil {
 		return TemplateSpec{}, traceID, fmt.Errorf("failed to parse generated custom team template: %w", err)
+	}
+	for i := range spec.Members {
+		spec.Members[i].IconKey, spec.Members[i].AutoIconKey, spec.Members[i].IconOverride = "", "", ""
 	}
 	if err := validateAndNormalizeSpec(&spec, requestedCount); err != nil {
 		return TemplateSpec{}, traceID, err
@@ -744,6 +801,8 @@ func validateAndNormalizeSpec(spec *TemplateSpec, requestedCount *int) error {
 }
 
 func normalizeMember(member MemberSpec, index int) MemberSpec {
+	// Resolve before slug normalization loses a Chinese role hint.
+	resolveMemberIcon(&member, false)
 	member.MemberID = normalizeMemberID(member.MemberID)
 	if member.MemberID == "" {
 		member.MemberID = fmt.Sprintf("worker-%d", index)
@@ -825,6 +884,9 @@ func payloadFromModel(item *models.CustomTeamTemplate) (*Payload, error) {
 	if err != nil {
 		return nil, err
 	}
+	for i := range spec.Members {
+		resolveMemberIcon(&spec.Members[i], false)
+	}
 	return &Payload{
 		ID: item.ID, Name: item.Name, Intent: item.Intent,
 		RequestedMemberCount: item.RequestedMemberCount,
@@ -832,6 +894,19 @@ func payloadFromModel(item *models.CustomTeamTemplate) (*Payload, error) {
 		Revision:             item.Revision, Spec: spec,
 		CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt,
 	}, nil
+}
+
+func resolveMemberIcon(member *MemberSpec, recompute bool) {
+	if recompute || !teampresentation.ValidOverride(member.AutoIconKey) || member.AutoIconKey == "" {
+		member.AutoIconKey = teampresentation.Resolve(teampresentation.Input{Leader: member.IsLeader, Role: member.Role, Name: member.DisplayName, Tags: member.CapabilityTags})
+	}
+	if !teampresentation.ValidOverride(member.IconOverride) {
+		member.IconOverride = ""
+	}
+	member.IconKey = teampresentation.Resolve(teampresentation.Input{Leader: member.IsLeader, Override: member.IconOverride})
+	if !member.IsLeader && member.IconOverride == "" {
+		member.IconKey = member.AutoIconKey
+	}
 }
 
 func decodeSpec(raw string) (TemplateSpec, error) {

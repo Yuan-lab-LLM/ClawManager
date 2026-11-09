@@ -3,6 +3,7 @@ package k8s
 import (
 	"context"
 	"fmt"
+	"strconv"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -40,6 +41,40 @@ func (s *SecretService) GetSecretValue(ctx context.Context, namespace, name, key
 	}
 
 	return string(value), nil
+}
+
+// CreateOwnerTeamSecret never rotates a token on replay. Only an exact,
+// labelled Team secret may be reused; name equality alone is not ownership.
+func (s *SecretService) CreateOwnerTeamSecret(ctx context.Context, userID, teamID int, name string, data map[string]string) (map[string]string, error) {
+	if s.client == nil || s.client.Clientset == nil {
+		return nil, fmt.Errorf("k8s client not initialized")
+	}
+	namespace := s.client.GetNamespace(userID)
+	secret, err := s.client.Clientset.CoreV1().Secrets(namespace).Get(ctx, name, metav1.GetOptions{})
+	if errors.IsNotFound(err) {
+		values := map[string][]byte{}
+		for k, v := range data {
+			values[k] = []byte(v)
+		}
+		secret, err = s.client.Clientset.CoreV1().Secrets(namespace).Create(ctx, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace, Labels: map[string]string{"app": "clawreef", "managed-by": "clawreef", "team-id": strconv.Itoa(teamID)}}, Type: corev1.SecretTypeOpaque, Data: values}, metav1.CreateOptions{})
+		if errors.IsAlreadyExists(err) {
+			secret, err = s.client.Clientset.CoreV1().Secrets(namespace).Get(ctx, name, metav1.GetOptions{})
+		}
+	}
+	if err != nil {
+		return nil, err
+	}
+	if secret.Labels["team-id"] != strconv.Itoa(teamID) || secret.Labels["managed-by"] != "clawreef" {
+		return nil, fmt.Errorf("Owner Team secret ownership conflict")
+	}
+	result := map[string]string{}
+	for k := range data {
+		if len(secret.Data[k]) == 0 {
+			return nil, fmt.Errorf("Owner Team secret is incomplete")
+		}
+		result[k] = string(secret.Data[k])
+	}
+	return result, nil
 }
 
 // UpsertSecret creates or updates a secret in the user's namespace.

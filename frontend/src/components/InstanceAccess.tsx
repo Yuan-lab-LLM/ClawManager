@@ -110,6 +110,7 @@ function DesktopInstanceAccess({
 
   const {
     embedUrl,
+    frameRevision,
     loading,
     error,
     reconnecting,
@@ -325,6 +326,7 @@ function DesktopInstanceAccess({
       </div>
 
       <DesktopIframeSurface
+        key={frameRevision}
         frameHeightClass={frameHeightClass}
         iframeRef={iframeRef}
         embedUrl={embedUrl}

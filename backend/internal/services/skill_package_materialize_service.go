@@ -11,15 +11,15 @@ import (
 
 const (
 	MaterializeJobStatusPending   = "pending"
-	MaterializeJobStatusRunning     = "running"
-	MaterializeJobStatusSucceeded   = "succeeded"
-	MaterializeJobStatusFailed      = "failed"
-	MaterializeJobStatusCancelled   = "cancelled"
-	MaterializeTriggerSync          = "sync"
-	MaterializeTriggerRetry         = "retry"
-	MaterializeTriggerImport        = "import"
-	MaterializeTriggerPublish       = "publish"
-	MaterializeTriggerBackfill      = "backfill"
+	MaterializeJobStatusRunning   = "running"
+	MaterializeJobStatusSucceeded = "succeeded"
+	MaterializeJobStatusFailed    = "failed"
+	MaterializeJobStatusCancelled = "cancelled"
+	MaterializeTriggerSync        = "sync"
+	MaterializeTriggerRetry       = "retry"
+	MaterializeTriggerImport      = "import"
+	MaterializeTriggerPublish     = "publish"
+	MaterializeTriggerBackfill    = "backfill"
 )
 
 type EnqueueMaterializeRequest struct {

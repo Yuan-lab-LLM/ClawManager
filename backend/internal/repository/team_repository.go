@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -53,7 +54,7 @@ type TeamRepository interface {
 	ListWorkflowPhasesByRootTaskID(rootTaskID int) ([]models.TeamWorkflowPhase, error)
 	AcceptRootCompletion(task *models.TeamTask, expectedLedgerVersion int64, event *models.TeamEvent, outbox *models.TeamEventOutbox) (bool, error)
 	ConfirmWorkItemResult(item *models.TeamWorkItem, event *models.TeamEvent, outbox *models.TeamEventOutbox) error
-	CreateEventWithOutbox(event *models.TeamEvent, outbox *models.TeamEventOutbox) error
+	CreateEventWithOutbox(event *models.TeamEvent, outbox *models.TeamEventOutbox, observations ...*models.TeamEvent) error
 	CreateEventOutbox(outbox *models.TeamEventOutbox) error
 	ListPendingEventOutbox(now time.Time, limit int) ([]models.TeamEventOutbox, error)
 	MarkEventOutboxDelivered(id int, deliveredAt time.Time) error
@@ -68,7 +69,8 @@ type PendingTeamDeletionRepository interface {
 }
 
 type teamRepository struct {
-	sess db.Session
+	sess            db.Session
+	nfsWriterFences bool
 }
 
 func NewTeamRepository(sess db.Session) TeamRepository {
@@ -76,6 +78,12 @@ func NewTeamRepository(sess db.Session) TeamRepository {
 }
 
 func (r *teamRepository) CreateTeam(team *models.Team) error {
+	if team.ResourceScope == "" {
+		team.ResourceScope = models.TeamScopeCM
+	}
+	if err := team.ValidateScope(); err != nil {
+		return err
+	}
 	ensureTimestamps(&team.CreatedAt, &team.UpdatedAt)
 	res, err := r.sess.Collection("teams").Insert(team)
 	if err != nil {
@@ -91,10 +99,30 @@ func (r *teamRepository) CreateTeam(team *models.Team) error {
 }
 
 func (r *teamRepository) UpdateTeam(team *models.Team) error {
+	if r.nfsWriterFences {
+		return r.withNFSTeamRows([]int{team.ID}, func(tx *teamRepository) error {
+			previous, err := tx.GetTeamByID(team.ID)
+			if err != nil {
+				return err
+			}
+			if previous == nil {
+				return models.ErrRuntimeUpgradeConflict
+			}
+			if teamStorageIdentityChanged(previous, team) {
+				if err = requireNoTeamWorkspaceWrites(context.Background(), tx.sess, team.ID); err != nil {
+					return err
+				}
+			}
+			return tx.UpdateTeam(team)
+		})
+	}
 	if team.UpdatedAt.IsZero() {
 		team.UpdatedAt = time.Now().UTC()
 	}
-	if err := r.sess.Collection("teams").Find(db.Cond{"id": team.ID}).Update(team); err != nil {
+	// Only the contextual monotonic protection transition may write this marker.
+	update := *team
+	update.PreviewSecurityProfile = ""
+	if err := r.sess.Collection("teams").Find(db.Cond{"id": team.ID}).Update(&update); err != nil {
 		return fmt.Errorf("failed to update team: %w", err)
 	}
 	return nil
@@ -135,7 +163,7 @@ func (r *teamRepository) ListTeamsByUserID(userID int, offset, limit int) ([]mod
 		limit = 20
 	}
 	var teams []models.Team
-	if err := r.sess.Collection("teams").Find(db.Cond{"user_id": userID}).OrderBy("-created_at", "-id").Offset(offset).Limit(limit).All(&teams); err != nil {
+	if err := r.sess.Collection("teams").Find(db.Cond{"user_id": userID, "resource_scope": models.TeamScopeCM}).OrderBy("-created_at", "-id").Offset(offset).Limit(limit).All(&teams); err != nil {
 		return nil, fmt.Errorf("failed to list teams: %w", err)
 	}
 	return teams, nil
@@ -162,7 +190,7 @@ func (r *teamRepository) ListTeamsByStatus(status string) ([]models.Team, error)
 }
 
 func (r *teamRepository) CountTeamsByUserID(userID int) (int, error) {
-	count, err := r.sess.Collection("teams").Find(db.Cond{"user_id": userID}).Count()
+	count, err := r.sess.Collection("teams").Find(db.Cond{"user_id": userID, "resource_scope": models.TeamScopeCM}).Count()
 	if err != nil {
 		return 0, fmt.Errorf("failed to count teams: %w", err)
 	}
@@ -170,6 +198,14 @@ func (r *teamRepository) CountTeamsByUserID(userID int) (int, error) {
 }
 
 func (r *teamRepository) CreateMember(member *models.TeamMember) error {
+	if r.nfsWriterFences {
+		return r.withNFSTeamRows([]int{member.TeamID}, func(tx *teamRepository) error {
+			if err := requireNoTeamWorkspaceWrites(context.Background(), tx.sess, member.TeamID); err != nil {
+				return err
+			}
+			return tx.CreateMember(member)
+		})
+	}
 	ensureTimestamps(&member.CreatedAt, &member.UpdatedAt)
 	res, err := r.sess.Collection("team_members").Insert(member)
 	if err != nil {
@@ -182,6 +218,32 @@ func (r *teamRepository) CreateMember(member *models.TeamMember) error {
 }
 
 func (r *teamRepository) UpdateMember(member *models.TeamMember) error {
+	if r.nfsWriterFences {
+		previous, err := r.GetMemberByID(member.ID)
+		if err != nil {
+			return err
+		}
+		if previous == nil {
+			return models.ErrRuntimeUpgradeConflict
+		}
+		return r.withNFSTeamRows([]int{previous.TeamID, member.TeamID}, func(tx *teamRepository) error {
+			current, err := tx.GetMemberByID(member.ID)
+			if err != nil {
+				return err
+			}
+			if current == nil || current.TeamID != previous.TeamID {
+				return models.ErrRuntimeUpgradeConflict
+			}
+			if teamMemberIdentityChanged(current, member) {
+				for _, id := range []int{current.TeamID, member.TeamID} {
+					if err = requireNoTeamWorkspaceWrites(context.Background(), tx.sess, id); err != nil {
+						return err
+					}
+				}
+			}
+			return tx.UpdateMember(member)
+		})
+	}
 	if member.UpdatedAt.IsZero() {
 		member.UpdatedAt = time.Now().UTC()
 	}
@@ -409,12 +471,28 @@ func (r *teamRepository) ConfirmWorkItemResult(item *models.TeamWorkItem, event 
 	})
 }
 
-func (r *teamRepository) CreateEventWithOutbox(event *models.TeamEvent, outbox *models.TeamEventOutbox) error {
+func (r *teamRepository) CreateEventWithOutbox(event *models.TeamEvent, outbox *models.TeamEventOutbox, observations ...*models.TeamEvent) error {
 	if event == nil || outbox == nil {
 		return fmt.Errorf("event and outbox are required")
 	}
 	return r.sess.Tx(func(sess db.Session) error {
 		txRepo := &teamRepository{sess: sess}
+		// Commit the source observation with its recovery action. Otherwise a
+		// crash between the two writes makes stream deduplication lose recovery.
+		for _, observation := range observations {
+			if observation != nil {
+				// A periodic Monitor may pass an already-persisted observation.
+				// Replay by its event/stream identity, never its auto-increment PK.
+				pending := *observation
+				pending.ID = 0
+				pending.SequenceNo = 0
+				if err := txRepo.CreateEvent(&pending); err != nil && !errors.Is(err, ErrDuplicateTeamEvent) {
+					return err
+				} else if err == nil {
+					*observation = pending
+				}
+			}
+		}
 		if err := txRepo.CreateEvent(event); err != nil && !errors.Is(err, ErrDuplicateTeamEvent) {
 			return err
 		}
@@ -504,6 +582,10 @@ func (r *teamRepository) ListWorkflowPhasesByRootTaskID(rootTaskID int) ([]model
 }
 
 func (r *teamRepository) AcceptRootCompletion(task *models.TeamTask, expectedLedgerVersion int64, event *models.TeamEvent, outbox *models.TeamEventOutbox) (bool, error) {
+	return r.acceptRootCompletion(task, expectedLedgerVersion, event, outbox, nil)
+}
+
+func (r *teamRepository) acceptRootCompletion(task *models.TeamTask, expectedLedgerVersion int64, event *models.TeamEvent, outbox *models.TeamEventOutbox, singleItem *models.TeamWorkItem) (bool, error) {
 	if task == nil || event == nil || outbox == nil || task.ID <= 0 {
 		return false, fmt.Errorf("task, accepted completion event and outbox are required")
 	}
@@ -542,6 +624,11 @@ WHERE id = ? AND ledger_version = ? AND accepted_completion_id IS NULL
 			return nil
 		}
 		accepted = true
+		if singleItem != nil {
+			if err := (&teamRepository{sess: sess}).UpsertWorkItem(singleItem); err != nil {
+				return err
+			}
+		}
 		if _, err := sess.SQL().Exec(`
 UPDATE team_workflow_phases
 SET status = 'completed', completed_at = ?, updated_at = ?
@@ -555,16 +642,25 @@ WHERE root_task_id = ? AND (? = 0 OR plan_version = ?)
 		// if a member already started a newer task, a late completion cannot reset
 		// that member back to idle. Keeping this in the same transaction prevents a
 		// succeeded root from leaving 8.1 workers permanently busy after restart.
+		progress := 100
+		runtimeStatus := models.TeamTaskStatusSucceeded
+		if singleItem != nil {
+			runtimeStatus = task.Status
+			if task.Status != models.TeamTaskStatusSucceeded {
+				progress = 0
+			}
+		}
 		if _, err := sess.SQL().Exec(`
 UPDATE team_members
-SET status = ?, current_task_id = NULL, progress = 100, availability = ?,
+SET status = ?, current_task_id = NULL, progress = ?, availability = ?,
     runtime_status = ?, runtime_task_id = NULL, runtime_intent = NULL,
     blocked_reason = NULL, updated_at = ?
 WHERE team_id = ? AND current_task_id = ?
 `,
 			models.TeamMemberStatusIdle,
+			progress,
 			models.TeamMemberAvailabilityIdle,
-			models.TeamTaskStatusSucceeded,
+			runtimeStatus,
 			task.UpdatedAt,
 			task.TeamID,
 			task.ID,

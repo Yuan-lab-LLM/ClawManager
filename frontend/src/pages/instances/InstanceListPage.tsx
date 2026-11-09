@@ -1,7 +1,12 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Link, useNavigate, useLocation } from "react-router-dom";
 import { Monitor, MonitorPlay, Play, Plus, Search, Square, Trash2 } from "lucide-react";
 import ConfirmDialog from "../../components/ConfirmDialog";
+import InstanceLifecycleStatus from "../../components/InstanceLifecycleStatus";
+import InstanceAutoStopInfo from "../../components/InstanceAutoStopInfo";
+import { runtimeFailureSummary } from "../../lib/runtimeFailure";
+import InstanceLifecycleBatches from "../../components/InstanceLifecycleBatches";
+import { collectUnavailableLiteIds, pruneVisibleSelection } from "../../lib/unavailableInstanceSelection";
 import UserLayout from "../../components/UserLayout";
 import { useI18n } from "../../contexts/I18nContext";
 import { instanceService } from "../../services/instanceService";
@@ -10,15 +15,15 @@ import {
   type SystemImageSetting,
 } from "../../services/systemSettingsService";
 import { teamService } from "../../services/teamService";
-import {
-  formatInstanceType,
-  INSTANCE_TYPES,
-  type Instance,
-  type InstanceAvailability,
-} from "../../types/instance";
+import { formatInstanceType, type Instance } from "../../types/instance";
 import type { Team, TeamMember } from "../../types/team";
+import {
+  INSTANCE_STATUS_FILTERS,
+  INSTANCE_TYPE_FILTERS,
+  instanceStatusFilterQuery,
+  type InstanceStatusFilter,
+} from "../../lib/instanceListFilters";
 
-type AvailabilityFilter = "all" | InstanceAvailability;
 type ModeFilter = "all" | Instance["instance_mode"];
 type TeamMembership = {
   team: Team;
@@ -61,10 +66,10 @@ const loadAllTeams = async () => {
   return teams;
 };
 
-const loadTeamMemberships = async () => {
+const loadTeamMemberships = async (strict = false) => {
   const teams = await loadAllTeams();
   const details = await Promise.all(
-    teams.map((team) => teamService.getTeam(team.id).catch(() => null)),
+    teams.map((team) => strict ? teamService.getTeam(team.id) : teamService.getTeam(team.id).catch(() => null)),
   );
   const memberships = new Map<number, TeamMembership[]>();
 
@@ -89,38 +94,6 @@ const loadTeamMemberships = async () => {
 
   return memberships;
 };
-
-function availabilityForStatus(status: string): InstanceAvailability {
-  if (status === "running") {
-    return "available";
-  }
-  if (status === "creating") {
-    return "starting";
-  }
-  return "unavailable";
-}
-
-function availabilityLabel(availability: InstanceAvailability) {
-  switch (availability) {
-    case "available":
-      return "Available";
-    case "starting":
-      return "Starting";
-    default:
-      return "Unavailable";
-  }
-}
-
-function availabilityClass(availability: InstanceAvailability) {
-  switch (availability) {
-    case "available":
-      return "border-emerald-200 bg-emerald-50 text-emerald-700";
-    case "starting":
-      return "border-amber-200 bg-amber-50 text-amber-700";
-    default:
-      return "border-slate-200 bg-slate-50 text-slate-600";
-  }
-}
 
 function modeLabel(mode: Instance["instance_mode"]) {
   return mode === "pro" ? "Pro" : "Lite";
@@ -164,6 +137,9 @@ function getErrorMessage(err: unknown, fallback: string) {
 const InstanceListPage: React.FC = () => {
   const { t, locale } = useI18n();
   const navigate = useNavigate();
+  const location = useLocation();
+  const initialQuery = new URLSearchParams(location.search);
+  const detailState = { returnTo: location.pathname + location.search };
   const [instances, setInstances] = useState<Instance[]>([]);
   const [teamMemberships, setTeamMemberships] = useState<Map<number, TeamMembership[]>>(
     new Map(),
@@ -173,14 +149,29 @@ const InstanceListPage: React.FC = () => {
   const [deletingIds, setDeletingIds] = useState<number[]>([]);
   const [actionLoading, setActionLoading] = useState<number | null>(null);
   const [pendingDeleteId, setPendingDeleteId] = useState<number | null>(null);
-  const [availabilityFilter, setAvailabilityFilter] = useState<AvailabilityFilter>("all");
-  const [typeFilter, setTypeFilter] = useState("all");
-  const [modeFilter, setModeFilter] = useState<ModeFilter>("all");
-  const [searchQuery, setSearchQuery] = useState("");
-  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
-  const [page, setPage] = useState(1);
+  const [statusFilter, setStatusFilter] = useState<InstanceStatusFilter>(() => {
+    const status = INSTANCE_STATUS_FILTERS.find((value) => value === initialQuery.get("status"));
+    if (status) return status;
+    const availability = initialQuery.get("availability");
+    return availability === "available" ? "running" : availability === "starting" ? "creating" : "all";
+  });
+  const [typeFilter, setTypeFilter] = useState<string>(
+    () => INSTANCE_TYPE_FILTERS.find((value) => value === initialQuery.get("type")) ?? "all",
+  );
+  const [modeFilter, setModeFilter] = useState<ModeFilter>(() => {
+    const mode = initialQuery.get("mode");
+    return mode === "lite" || mode === "pro" ? mode : "all";
+  });
+  const [searchQuery, setSearchQuery] = useState(initialQuery.get("q") || "");
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState(initialQuery.get("q") || "");
+  const [page, setPage] = useState(() => Math.max(1, Number(initialQuery.get("page")) || 1));
   const [total, setTotal] = useState(0);
   const [selectedLiteIds, setSelectedLiteIds] = useState<number[]>([]);
+  const [allUnavailableSelected, setAllUnavailableSelected] = useState(false);
+  const [selectingUnavailable, setSelectingUnavailable] = useState(false);
+  const [unavailableSelectionNotice, setUnavailableSelectionNotice] = useState("");
+  const selectionRequest = useRef(0);
+  useEffect(() => () => { selectionRequest.current++; }, []);
   const [batchCreateOpen, setBatchCreateOpen] = useState(false);
   const [batchCreatePrefix, setBatchCreatePrefix] = useState("lite-openclaw");
   const [batchCreateCount, setBatchCreateCount] = useState(3);
@@ -215,7 +206,7 @@ const InstanceListPage: React.FC = () => {
           query: debouncedSearchQuery.trim() || undefined,
           type: typeFilter === "all" ? undefined : typeFilter,
           instance_mode: modeFilter === "all" ? undefined : modeFilter,
-          availability: availabilityFilter === "all" ? undefined : availabilityFilter,
+          ...instanceStatusFilterQuery(statusFilter),
         });
         setInstances(sortInstances(data.instances || []));
         setTotal(data.total || 0);
@@ -233,19 +224,32 @@ const InstanceListPage: React.FC = () => {
         }
       }
     },
-    [availabilityFilter, debouncedSearchQuery, modeFilter, page, refreshTeamMemberships, t, typeFilter],
+    [statusFilter, debouncedSearchQuery, modeFilter, page, refreshTeamMemberships, t, typeFilter],
   );
 
   useEffect(() => {
     void loadInstances();
   }, [loadInstances]);
   useEffect(() => {
+    if (searchQuery === debouncedSearchQuery) return;
     const timeoutId = window.setTimeout(() => {
       setPage(1);
       setDebouncedSearchQuery(searchQuery);
     }, 250);
     return () => window.clearTimeout(timeoutId);
-  }, [searchQuery]);
+  }, [searchQuery, debouncedSearchQuery]);
+  useEffect(() => {
+    const params = new URLSearchParams();
+    if (searchQuery) params.set("q", searchQuery);
+    if (typeFilter !== "all") params.set("type", typeFilter);
+    if (modeFilter !== "all") params.set("mode", modeFilter);
+    if (statusFilter !== "all") params.set("status", statusFilter);
+    if (page > 1) params.set("page", String(page));
+    const search = params.toString();
+    if (location.search.replace(/^\?/, "") !== search) {
+      navigate({ pathname: location.pathname, search }, { replace: true });
+    }
+  }, [searchQuery, typeFilter, modeFilter, statusFilter, page, navigate, location.pathname, location.search]);
   useEffect(() => {
     let cancelled = false;
     systemSettingsService
@@ -276,14 +280,6 @@ const InstanceListPage: React.FC = () => {
   }, [instances, loadInstances]);
 
   const filteredInstances = instances;
-  const typeOptions = useMemo(() => {
-    const values = new Set(INSTANCE_TYPES.map((item) => item.id));
-    runtimeImageSettings.forEach((item) => values.add(item.instance_type));
-    instances.forEach((instance) => values.add(instance.type));
-    return Array.from(values).sort((left, right) =>
-      formatInstanceType(left).localeCompare(formatInstanceType(right), locale),
-    );
-  }, [instances, locale, runtimeImageSettings]);
   const totalPages = Math.max(1, Math.ceil(total / INSTANCE_LIST_PAGE_SIZE));
   const resultFrom = total === 0 ? 0 : (page - 1) * INSTANCE_LIST_PAGE_SIZE + 1;
   const resultTo = total === 0 ? 0 : Math.min(page * INSTANCE_LIST_PAGE_SIZE, total);
@@ -291,14 +287,14 @@ const InstanceListPage: React.FC = () => {
     searchQuery.trim() !== "" ||
     typeFilter !== "all" ||
     modeFilter !== "all" ||
-    availabilityFilter !== "all";
+    statusFilter !== "all";
 
   const clearFilters = useCallback(() => {
     setSearchQuery("");
     setDebouncedSearchQuery("");
     setTypeFilter("all");
     setModeFilter("all");
-    setAvailabilityFilter("all");
+    setStatusFilter("all");
     setPage(1);
   }, []);
 
@@ -335,16 +331,44 @@ const InstanceListPage: React.FC = () => {
     selectableLiteIds.length > 0 && selectableLiteIds.every((id) => selectedLiteSet.has(id));
 
   useEffect(() => {
-    setSelectedLiteIds((ids) => ids.filter((id) => instances.some((instance) => instance.id === id && isLiteInstance(instance))));
+    setSelectedLiteIds((ids) => pruneVisibleSelection(ids, instances));
   }, [instances]);
 
+  const selectAllUnavailable = async (checked: boolean) => {
+    const request = ++selectionRequest.current;
+    setAllUnavailableSelected(false);
+    setSelectingUnavailable(checked);
+    setUnavailableSelectionNotice("");
+    if (!checked) { setSelectedLiteIds([]); return; }
+    try {
+      const memberships = await loadTeamMemberships(true);
+      const ids = await collectUnavailableLiteIds(instanceService.getInstances, new Set(memberships.keys()), () => request !== selectionRequest.current);
+      if (request !== selectionRequest.current) return;
+      setSelectedLiteIds(ids);
+      setAllUnavailableSelected(ids.length > 0);
+      setUnavailableSelectionNotice(ids.length ? `已跨页选中 ${ids.length} 个不可用 Lite 实例；不受当前搜索、类型筛选限制。${ids.length > 500 ? "单次批量重启/重置最多选择 500 个，请减少选择。" : ""}` : "没有可选的不可用 Lite 实例。");
+    } catch (err) {
+      if (request === selectionRequest.current) setUnavailableSelectionNotice(getErrorMessage(err, "全选失败，原选择已保留，请重试。"));
+    } finally {
+      if (request === selectionRequest.current) setSelectingUnavailable(false);
+    }
+  };
+
   const toggleLiteSelection = useCallback((id: number) => {
+    selectionRequest.current++;
+    setSelectingUnavailable(false);
+    setAllUnavailableSelected(false);
+    setUnavailableSelectionNotice("");
     setSelectedLiteIds((ids) =>
       ids.includes(id) ? ids.filter((selectedId) => selectedId !== id) : [...ids, id],
     );
   }, []);
 
   const toggleAllVisibleLite = useCallback(() => {
+    selectionRequest.current++;
+    setSelectingUnavailable(false);
+    setAllUnavailableSelected(false);
+    setUnavailableSelectionNotice("");
     setSelectedLiteIds((ids) => {
       const visible = new Set(selectableLiteIds);
       if (selectableLiteIds.length > 0 && selectableLiteIds.every((id) => ids.includes(id))) {
@@ -645,6 +669,13 @@ const InstanceListPage: React.FC = () => {
           </div>
         </div>
       ) : null}
+      <InstanceLifecycleBatches selectedIds={selectedLiteIds} selectionBusy={selectingUnavailable} onChanged={() => void loadInstances({ silent: true })} selectionControl={<>
+        <label className="flex items-center gap-2 text-sm text-slate-600" title="跨所有页面选择当前账号的不可用独立 Lite 实例；排除删除中、清理残留及团队实例，不受当前筛选限制。">
+          <input type="checkbox" checked={allUnavailableSelected || selectingUnavailable} onChange={e => void selectAllUnavailable(e.target.checked)} />
+          {selectingUnavailable ? "正在跨页获取…（取消勾选可中止）" : "选中所有不可用实例"}
+        </label>
+        {unavailableSelectionNotice && <span role="status" className="text-xs text-slate-500">{unavailableSelectionNotice}</span>}
+      </>} />
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex flex-wrap gap-2">
           <Link to="/instances/new" className="app-button-primary self-start">
@@ -665,7 +696,7 @@ const InstanceListPage: React.FC = () => {
           <button
             type="button"
             onClick={() => setPendingBatchDelete(true)}
-            disabled={selectedLiteCount === 0 || batchDeleteLoading}
+            disabled={selectedLiteCount === 0 || batchDeleteLoading || selectingUnavailable}
             className="app-button-secondary self-start border-red-200 text-red-600 hover:border-red-300 hover:bg-red-50 hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <Trash2 className="h-4 w-4" />
@@ -684,7 +715,7 @@ const InstanceListPage: React.FC = () => {
             <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
             <input
               type="text"
-              placeholder={t("instances.searchPlaceholder")}
+              placeholder={`ID / ${t("instances.searchPlaceholder")}`}
               value={searchQuery}
               onChange={(event) => setSearchQuery(event.target.value)}
               className="app-input w-full pl-9 sm:w-64"
@@ -700,7 +731,7 @@ const InstanceListPage: React.FC = () => {
             aria-label={t("instances.instanceTypeFilter")}
           >
             <option value="all">{t("instances.allTypes")}</option>
-            {typeOptions.map((type) => (
+            {INSTANCE_TYPE_FILTERS.map((type) => (
               <option key={type} value={type}>
                 {formatInstanceType(type)}
               </option>
@@ -720,18 +751,18 @@ const InstanceListPage: React.FC = () => {
             <option value="pro">Pro</option>
           </select>
           <select
-            value={availabilityFilter}
+            value={statusFilter}
             onChange={(event) => {
-              setAvailabilityFilter(event.target.value as AvailabilityFilter);
+              setStatusFilter(event.target.value as InstanceStatusFilter);
               setPage(1);
             }}
             className="app-input"
-            aria-label={t("instances.availabilityFilter")}
+            aria-label={t("instances.statusFilter")}
           >
-            <option value="all">{t("instances.allAvailability")}</option>
-            <option value="available">Available</option>
-            <option value="starting">Starting</option>
-            <option value="unavailable">Unavailable</option>
+            <option value="all">{t("instances.allStatuses")}</option>
+            {INSTANCE_STATUS_FILTERS.map((status) => (
+              <option key={status} value={status}>{t(`status.${status}`)}</option>
+            ))}
           </select>
           {filtersActive ? (
             <button type="button" onClick={clearFilters} className="app-button-secondary">
@@ -793,15 +824,14 @@ const InstanceListPage: React.FC = () => {
                 </th>
                 <th className="w-[28%] px-4 py-3">Instance</th>
                 <th className="w-[13%] px-4 py-3">Type</th>
-                <th className="w-[20%] px-4 py-3">Team</th>
-                <th className="w-[16%] px-4 py-3">Availability</th>
+                <th className="w-[20%] px-4 py-3">Information</th>
+                <th className="w-[16%] px-4 py-3">{t("common.status")}</th>
                 <th className="w-[10%] px-4 py-3">Workspace</th>
                 <th className="w-[10%] px-4 py-3 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 bg-white">
               {filteredInstances.map((instance) => {
-                const availability = availabilityForStatus(instance.status);
                 const memberships = teamMemberships.get(instance.id) || [];
                 const primaryMembership = memberships[0];
                 const canSelectLite = isLiteInstance(instance) && instance.status !== "deleting";
@@ -811,11 +841,11 @@ const InstanceListPage: React.FC = () => {
                     key={instance.id}
                     role="link"
                     tabIndex={0}
-                    onClick={() => navigate(`/instances/${instance.id}`)}
+                    onClick={() => navigate(`/instances/${instance.id}`, { state: detailState })}
                     onKeyDown={(event) => {
                       if (event.key === "Enter" || event.key === " ") {
                         event.preventDefault();
-                        navigate(`/instances/${instance.id}`);
+                        navigate(`/instances/${instance.id}`, { state: detailState });
                       }
                     }}
                     className={`cursor-pointer focus:outline-none focus-visible:bg-slate-50 ${
@@ -839,6 +869,7 @@ const InstanceListPage: React.FC = () => {
                     <td className="max-w-[280px] px-4 py-3">
                       <Link
                         to={`/instances/${instance.id}`}
+                        state={detailState}
                         onClick={(event) => event.stopPropagation()}
                         className="block truncate font-medium text-slate-950 hover:text-red-700"
                       >
@@ -851,6 +882,12 @@ const InstanceListPage: React.FC = () => {
                             : "-",
                         })}
                       </div>
+                      {primaryMembership && <Link
+                        to={`/teams/${primaryMembership.team.id}`}
+                        title={`${primaryMembership.team.name} / ${primaryMembership.member.display_name || primaryMembership.member.member_key} / ${primaryMembership.member.role}`}
+                        onClick={(event) => event.stopPropagation()}
+                        className="mt-1 block truncate text-xs text-violet-700 hover:underline"
+                      >Team: {primaryMembership.team.name}{memberships.length > 1 ? ` (+${memberships.length - 1})` : ""}</Link>}
                     </td>
                     <td className="px-4 py-3 text-slate-600">
                       <div className="flex min-w-0 flex-wrap items-center gap-2">
@@ -865,39 +902,17 @@ const InstanceListPage: React.FC = () => {
                       </div>
                     </td>
                     <td className="px-4 py-3 text-slate-600">
-                      {primaryMembership ? (
-                        <div className="min-w-0">
-                          <div className="flex min-w-0 items-center gap-2">
-                            <span className="inline-flex shrink-0 rounded-md border border-violet-200 bg-violet-50 px-2 py-0.5 text-xs font-medium text-violet-700">
-                              Team
-                            </span>
-                            <Link
-                              to={`/teams/${primaryMembership.team.id}`}
-                              onClick={(event) => event.stopPropagation()}
-                              className="truncate font-medium text-slate-700 hover:text-red-700"
-                            >
-                              {primaryMembership.team.name}
-                            </Link>
-                          </div>
-                          <div className="mt-1 truncate text-xs text-slate-500">
-                            {primaryMembership.member.display_name ||
-                              primaryMembership.member.member_key}{" "}
-                            / {primaryMembership.member.role}
-                            {memberships.length > 1 ? ` / +${memberships.length - 1}` : ""}
-                          </div>
-                        </div>
-                      ) : (
-                        <span className="text-slate-400">-</span>
-                      )}
+                      <div className="text-xs">ID: {instance.id}</div>
+                      <div className="mt-1 text-xs text-slate-500">最后在线：{instance.last_online_at ? new Date(instance.last_online_at).toLocaleString(locale) : "暂无记录"}</div>
+                      {instance.status === "error" && <div tabIndex={0}
+                        className="group relative mt-1 text-xs text-red-600"
+                      ><div className="truncate">错误：{runtimeFailureSummary(instance)}</div>
+                        <div role="tooltip" className="absolute left-0 top-full z-50 hidden max-h-64 w-80 max-w-[75vw] overflow-auto whitespace-pre-wrap break-words rounded border border-red-100 bg-white p-3 text-slate-700 shadow-lg group-hover:block group-focus-within:block">{instance.runtime_error_message || "原因未记录"}</div>
+                      </div>}
                     </td>
                     <td className="px-4 py-3">
-                      <span
-                        className={`inline-flex rounded-md border px-2 py-1 text-xs font-medium ${availabilityClass(
-                          availability,
-                        )}`}
-                      >
-                        {availabilityLabel(availability)}
-                      </span>
+                      <InstanceLifecycleStatus status={instance.status} availability={instance.availability} stoppedReason={instance.stopped_reason} />
+                      <InstanceAutoStopInfo instance={instance} />
                     </td>
                     <td className="px-4 py-3 text-slate-600">
                       {formatBytes(instance.workspace_usage_bytes)}

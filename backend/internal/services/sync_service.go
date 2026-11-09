@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"clawreef/internal/backupgate"
 	"clawreef/internal/models"
 	"clawreef/internal/repository"
 	"clawreef/internal/services/k8s"
@@ -93,6 +94,11 @@ func (s *SyncService) syncLoop(stop <-chan struct{}) {
 // syncAllInstances synchronizes the state of all instances
 func (s *SyncService) syncAllInstances() {
 	ctx := context.Background()
+	release, gateErr := backupgate.HoldWorkUnit(ctx, "instance.sync")
+	if gateErr != nil {
+		return
+	}
+	defer release()
 
 	fmt.Println("[SyncService] Fetching all instances from database...")
 	// Get all running instances from database
@@ -120,6 +126,16 @@ func (s *SyncService) syncAllInstances() {
 
 // syncInstance synchronizes a single instance's state
 func (s *SyncService) syncInstance(ctx context.Context, instance *models.Instance) {
+	release, err := acquireInstanceLifecycleOperation(ctx, s.instanceRepo, instance.ID)
+	if err != nil {
+		return
+	}
+	defer release()
+	current, err := currentLifecycleSnapshot(s.instanceRepo, *instance)
+	if err != nil || current == nil || current.Status == "deleting" {
+		return
+	}
+	instance = current
 	if _, ok := v2RuntimeTypeForInstance(instance); ok {
 		s.updateInfraStatus(instance.ID, instance.Status)
 		return

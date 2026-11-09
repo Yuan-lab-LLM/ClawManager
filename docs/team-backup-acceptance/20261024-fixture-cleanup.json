@@ -1,0 +1,20 @@
+{
+  "namespace": "cm-backup-test-20261023-1209",
+  "namespace_uid": "3ec645c2-f760-481b-9d1c-af12248257c0",
+  "owner": "cm-20261023-1209",
+  "verification_jobs_before": 0,
+  "deleted_cluster_rbac": [
+    {
+      "kind": "clusterrolebindings",
+      "name": "cm-backup-fixture-20261023-1209-namespace",
+      "uid": "34ed82ea-915e-44d8-aa1c-4e73c95206d0"
+    },
+    {
+      "kind": "clusterroles",
+      "name": "cm-backup-fixture-20261023-1209-namespace",
+      "uid": "331a14c2-c634-45e9-8b32-3492a2d1307a"
+    }
+  ],
+  "namespace_deleted": true,
+  "cluster_rbac_absent": true
+}

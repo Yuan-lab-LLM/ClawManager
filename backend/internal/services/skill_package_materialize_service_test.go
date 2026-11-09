@@ -252,7 +252,9 @@ func (c *capturingInstanceCommandService) Create(_ int, _ *int, req CreateInstan
 func (c *capturingInstanceCommandService) GetNextForAgent(*AgentSession) (*AgentCommandEnvelope, error) {
 	return nil, nil
 }
-func (c *capturingInstanceCommandService) MarkStarted(*AgentSession, int, *time.Time) error { return nil }
+func (c *capturingInstanceCommandService) MarkStarted(*AgentSession, int, *time.Time) error {
+	return nil
+}
 func (c *capturingInstanceCommandService) MarkFinished(*AgentSession, int, AgentCommandFinishRequest) error {
 	return nil
 }
@@ -324,8 +326,8 @@ func (s *materializeJobRepoStub) MarkRunning(id int) error {
 	}
 	return nil
 }
-func (s *materializeJobRepoStub) ReleaseToPending(int) error          { return nil }
-func (s *materializeJobRepoStub) ResetForRetry(int) error             { return nil }
+func (s *materializeJobRepoStub) ReleaseToPending(int) error { return nil }
+func (s *materializeJobRepoStub) ResetForRetry(int) error    { return nil }
 func (s *materializeJobRepoStub) RequeueExisting(id, blobID int, contentHash, workspaceDir string) error {
 	for _, job := range s.created {
 		if job.ID == id {

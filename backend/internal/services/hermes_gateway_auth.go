@@ -154,6 +154,7 @@ func (a *HermesGatewayAuth) SetHeaders(req *http.Request) {
 	if req.Header == nil {
 		req.Header = make(http.Header)
 	}
+	setHermesNativeIngress(req)
 	for _, name := range []string{"Origin", "Forwarded", "X-Forwarded-Host", "X-Forwarded-Proto", "X-Forwarded-For", "X-Forwarded-Prefix", "Host", "Referer"} {
 		req.Header.Del(name)
 	}

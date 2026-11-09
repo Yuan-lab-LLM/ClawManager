@@ -43,6 +43,29 @@ func TestRuntimeManifestsAreValidYAML(t *testing.T) {
 	}
 }
 
+func TestClawManagerReadinessWaitsForBackend(t *testing.T) {
+	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
+	manifests := append(deploymentRuntimeManifests(repoRoot), filepath.Join(repoRoot, "deployments", "k8s", "sites", "nine-node-production", "20-clawmanager-production.yaml"))
+	for _, manifest := range manifests {
+		t.Run(manifest, func(t *testing.T) {
+			raw, err := os.ReadFile(manifest)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// The edge /healthz returns a static 200 before migrations and backend
+			// initialization finish. Readiness must cross the actual API upstream.
+			ready := regexp.MustCompile(`readinessProbe:\s+httpGet:\s+scheme: HTTPS\s+path: /api/v1/version\s+port: https`)
+			if !ready.Match(raw) {
+				t.Fatal("ClawManager readiness must probe the backend through the HTTPS edge")
+			}
+			live := regexp.MustCompile(`livenessProbe:\s+httpGet:\s+scheme: HTTPS\s+path: /healthz\s+port: https`)
+			if !live.Match(raw) {
+				t.Fatal("liveness must allow backend initialization to complete")
+			}
+		})
+	}
+}
+
 func TestDeploymentManifestsConfigureHermesDesktopWeb(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	wantDeployments := map[string]string{
@@ -269,6 +292,26 @@ func TestRuntimeManifestsExposeOpenCodePublicURLTemplate(t *testing.T) {
 	}
 }
 
+func TestNginxRoutesOpenCodePerInstanceOrigins(t *testing.T) {
+	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
+	raw, err := os.ReadFile(filepath.Join(repoRoot, "deployments", "nginx", "nginx.conf"))
+	if err != nil {
+		t.Fatalf("read nginx config: %v", err)
+	}
+	text := string(raw)
+	for _, required := range []string{
+		"server_name ~^opencode-(?<runtime_inst_id>[0-9]+)\\..+$;",
+		"X-ClawManager-Runtime-Origin opencode",
+		"/api/v1/instances/$runtime_inst_id/proxy$1",
+	} {
+		if !strings.Contains(text, required) {
+			t.Fatalf("nginx config must contain %q", required)
+		}
+	}
+	if got := strings.Count(text, "proxy_set_header X-ClawManager-Runtime-Origin \"\";"); got < 2 {
+		t.Fatalf("public nginx routes must clear the dedicated-origin marker, got %d guards", got)
+	}
+}
 func TestDesktopAuthAcceptsDedicatedRuntimeInstanceVariable(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	raw, err := os.ReadFile(filepath.Join(repoRoot, "deployments", "nginx", "njs", "desktop_auth.js"))
@@ -303,6 +346,26 @@ func TestNginxRoutesOpenCodeDedicatedOrigins(t *testing.T) {
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("nginx config must contain %q", want)
+		}
+	}
+}
+
+func TestNginxBrowserWorkerPreservesPublicOriginAndWebSocket(t *testing.T) {
+	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
+	raw, err := os.ReadFile(filepath.Join(repoRoot, "deployments", "nginx", "nginx.conf"))
+	if err != nil {
+		t.Fatalf("read nginx config: %v", err)
+	}
+	text := string(raw)
+	for _, want := range []string{
+		`location ~ ^/api/v1/instances/[0-9]+/browser-proxy(?:/|$)`,
+		"proxy_set_header Host $http_host;",
+		"proxy_set_header X-Forwarded-Host $http_host;",
+		"proxy_set_header Upgrade $http_upgrade;",
+		"proxy_read_timeout 86400s;",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("browser worker nginx route must contain %q", want)
 		}
 	}
 }
@@ -368,8 +431,8 @@ func TestNginxAgentRoutesSupportSilentRenewalAndLongRunningWork(t *testing.T) {
 		"proxy_read_timeout 86400s;",
 		"proxy_send_timeout 86400s;",
 	} {
-		if count := strings.Count(text, want); count != 4 {
-			t.Fatalf("nginx agent routes must contain %q four times, got %d", want, count)
+		if count := strings.Count(text, want); count != 5 {
+			t.Fatalf("nginx long-running routes must contain %q five times, got %d", want, count)
 		}
 	}
 }
@@ -467,7 +530,7 @@ func deploymentRuntimeManifests(repoRoot string) []string {
 	}
 }
 
-func TestNginxRoutesOpenCodePerInstanceOrigins(t *testing.T) {
+func TestNginxRoutesOpenCodePerInstanceOriginsAndClearsPublicHeader(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	raw, err := os.ReadFile(filepath.Join(repoRoot, "deployments", "nginx", "nginx.conf"))
 	if err != nil {
@@ -485,5 +548,42 @@ func TestNginxRoutesOpenCodePerInstanceOrigins(t *testing.T) {
 	}
 	if got := strings.Count(text, "proxy_set_header X-ClawManager-Runtime-Origin \"\";"); got < 2 {
 		t.Fatalf("public nginx routes must clear the dedicated-origin marker, got %d guards", got)
+	}
+}
+
+func TestInitialSchemasIncludeOptionalInstanceAlias(t *testing.T) {
+	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
+	manifests := append(
+		deploymentRuntimeManifests(repoRoot),
+		filepath.Join(repoRoot, "backend", "deployments", "k8s", "clawreef-incluster.yaml"),
+		filepath.Join(repoRoot, "deployments", "k8s", "sites", "nine-node-production", "20-clawmanager-production.yaml"),
+	)
+	for _, manifest := range manifests {
+		raw, err := os.ReadFile(manifest)
+		if err != nil {
+			t.Fatalf("read manifest %s: %v", manifest, err)
+		}
+		if !strings.Contains(string(raw), "alias VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL") {
+			t.Fatalf("manifest %s must include the optional instance alias column", manifest)
+		}
+	}
+}
+
+func TestNorthboundGatewayBootstrapIncludesDynamicSettingsReadGrants(t *testing.T) {
+	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
+	for _, relative := range []string{
+		filepath.Join("deployments", "k8s", "sites", "nine-node-production", "scripts", "bootstrap-northbound-secrets.sh"),
+		filepath.Join("deployments", "k8s", "northbound", "README.md"),
+		filepath.Join("docs", "northbound-upgrade-guide.md"),
+	} {
+		raw, err := os.ReadFile(filepath.Join(repoRoot, relative))
+		if err != nil {
+			t.Fatalf("read %s: %v", relative, err)
+		}
+		for _, table := range []string{"northbound_admin_settings", "northbound_caller_policies"} {
+			if !strings.Contains(string(raw), "GRANT SELECT ON clawmanager."+table) {
+				t.Fatalf("%s must grant Gateway read access to %s", relative, table)
+			}
+		}
 	}
 }

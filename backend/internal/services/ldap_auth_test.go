@@ -16,8 +16,8 @@ func TestNewLDAPAuthenticatorValidatesRequiredConfig(t *testing.T) {
 		{
 			name: "host required",
 			cfg: config.LDAPConfig{
-				BaseDN:     "dc=example,dc=com",
-				UserFilter: "(&(objectClass=person)(uid=%s))",
+				BaseDN:      "dc=example,dc=com",
+				UserFilter:  "(&(objectClass=person)(uid=%s))",
 				GroupFilter: "(member=%s)",
 			},
 			want: "ldap host is required",

@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -21,10 +22,9 @@ type auditEventRepository struct {
 	sess db.Session
 }
 
-// NewAuditEventRepository creates a new audit event repository and ensures its table exists.
+// NewAuditEventRepository creates a new audit event repository (schema is owned by embedded migrations).
 func NewAuditEventRepository(sess db.Session) AuditEventRepository {
 	repo := &auditEventRepository{sess: sess}
-	repo.ensureTable()
 	return repo
 }
 
@@ -34,46 +34,15 @@ func NewAuditEventRepositoryExistingTable(sess db.Session) AuditEventRepository 
 	return &auditEventRepository{sess: sess}
 }
 
-func (r *auditEventRepository) ensureTable() {
-	const query = `
-CREATE TABLE IF NOT EXISTS audit_events (
-  id INT AUTO_INCREMENT PRIMARY KEY,
-  trace_id VARCHAR(100) NOT NULL,
-  session_id VARCHAR(100) NULL,
-  request_id VARCHAR(100) NULL,
-  user_id INT NULL,
-  instance_id INT NULL,
-  instance_mode VARCHAR(16) NULL,
-  runtime_type VARCHAR(32) NULL,
-  gateway_id VARCHAR(128) NULL,
-  runtime_pod_id BIGINT NULL,
-  invocation_id INT NULL,
-  event_type VARCHAR(100) NOT NULL,
-  traffic_class VARCHAR(50) NOT NULL,
-  severity VARCHAR(20) NOT NULL,
-  message VARCHAR(500) NOT NULL,
-  details LONGTEXT NULL,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  INDEX idx_audit_events_trace_id (trace_id),
-  INDEX idx_audit_events_request_id (request_id),
-  INDEX idx_audit_events_user_id (user_id),
-  INDEX idx_audit_events_gateway_id (gateway_id),
-  INDEX idx_audit_events_invocation_id (invocation_id),
-  INDEX idx_audit_events_event_type (event_type),
-  INDEX idx_audit_events_created_at (created_at)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-`
-
-	if _, err := r.sess.SQL().Exec(query); err != nil {
-		panic(fmt.Errorf("failed to ensure audit_events table: %w", err))
-	}
+func (r *auditEventRepository) Create(event *models.AuditEvent) error {
+	return r.CreateContext(context.Background(), event)
 }
 
-func (r *auditEventRepository) Create(event *models.AuditEvent) error {
+func (r *auditEventRepository) CreateContext(ctx context.Context, event *models.AuditEvent) error {
 	if event.CreatedAt.IsZero() {
 		event.CreatedAt = time.Now()
 	}
-	res, err := r.sess.Collection("audit_events").Insert(event)
+	res, err := r.sess.WithContext(ctx).Collection("audit_events").Insert(event)
 	if err != nil {
 		return fmt.Errorf("failed to create audit event: %w", err)
 	}

@@ -50,8 +50,10 @@ func TestNorthboundOpenAPIContainsShareLinkPaths(t *testing.T) {
 		"/api/northbound/v1/pro-instances/{id}:",
 		"/api/northbound/v1/lite-instances/{id}/restart:",
 		"/api/northbound/v1/lite-instances/{id}/reset:",
+		"/api/northbound/v1/lite-instances/{id}/delete:",
 		"/api/northbound/v1/pro-instances/{id}/restart:",
 		"/api/northbound/v1/pro-instances/{id}/reset:",
+		"/api/northbound/v1/pro-instances/{id}/delete:",
 		"/api/northbound/v1/lite-instances/{id}/external-access/password:",
 		"/api/northbound/v1/lite-instances/{id}/external-access/share-link/reset:",
 		"/api/northbound/v1/lite-instances/{id}/external-access/password/reset:",
@@ -75,12 +77,13 @@ func TestNorthboundOpenAPIContainsShareLinkPaths(t *testing.T) {
 		"Exact, case-sensitive owner identifier",
 		"enum: [openclaw, hermes, opencode, deepseek-harness]",
 		"resolves the enabled DESKTOP image saved in ClawManager",
+		"Optional user-facing alias",
 	} {
 		if !strings.Contains(content, required) {
 			t.Fatalf("northbound OpenAPI is missing owner contract %q", required)
 		}
 	}
-	for _, scope := range []string{ScopeLiteRestart, ScopeLiteReset, ScopeProRestart, ScopeProReset} {
+	for _, scope := range []string{ScopeLiteRestart, ScopeLiteReset, ScopeLiteDelete, ScopeProRestart, ScopeProReset, ScopeProDelete} {
 		if !strings.Contains(content, scope) {
 			t.Fatalf("northbound OpenAPI is missing lifecycle scope %s", scope)
 		}

@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -136,6 +137,9 @@ func (r *instanceRepository) GetByID(id int) (*models.Instance, error) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("failed to get instance: %w", err)
+	}
+	if err := r.hydrateAutoStop([]*models.Instance{&instance}); err != nil {
+		return nil, err
 	}
 	return &instance, nil
 }
@@ -300,6 +304,9 @@ func (r *instanceRepository) GetAll(offset, limit int) ([]models.Instance, error
 	if err != nil {
 		return nil, fmt.Errorf("failed to get all instances: %w", err)
 	}
+	if err := r.hydrateAutoStopSlice(instances); err != nil {
+		return nil, err
+	}
 	return instances, nil
 }
 
@@ -316,6 +323,9 @@ func (r *instanceRepository) GetByStatus(ctx context.Context, status string, lim
 	err := result.All(&instances)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get instances by status: %w", err)
+	}
+	if err := r.hydrateAutoStopSlice(instances); err != nil {
+		return nil, err
 	}
 	return instances, nil
 }
@@ -334,6 +344,9 @@ func (r *instanceRepository) GetByUserID(userID int, offset, limit int) ([]model
 	err := r.sess.Collection("instances").Find(db.Cond{"user_id": userID}).OrderBy("-created_at", "-id").Offset(offset).Limit(limit).All(&instances)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get instances: %w", err)
+	}
+	if err := r.hydrateAutoStopSlice(instances); err != nil {
+		return nil, err
 	}
 	return instances, nil
 }
@@ -367,10 +380,22 @@ func (r *instanceRepository) filteredByUserID(userID int, filter models.Instance
 			result = result.And(db.Cond{"status IN": []string{"stopped", "error", "deleting"}})
 		}
 	}
+	if filter.AutoSleep != nil {
+		result = result.And(db.Cond{"status": "stopped"})
+		predicate := "EXISTS (SELECT 1 FROM instance_model_activity a WHERE a.instance_id = instances.id AND a.stopped_reason = ?)"
+		if !*filter.AutoSleep {
+			predicate = "NOT " + predicate
+		}
+		result = result.And(predicate, "idle_timeout")
+	}
 	if value := strings.ToLower(strings.TrimSpace(filter.Query)); value != "" {
+		id, _ := strconv.Atoi(strings.TrimPrefix(value, "#"))
+		if strings.HasPrefix(value, "#") {
+			return result.And(db.Cond{"id": id})
+		}
 		pattern := "%" + value + "%"
 		result = result.And(`(
-			LOWER(name) LIKE ? OR LOWER(type) LIKE ? OR LOWER(instance_mode) LIKE ? OR
+			id = ? OR LOWER(name) LIKE ? OR LOWER(type) LIKE ? OR LOWER(instance_mode) LIKE ? OR
 			EXISTS (
 				SELECT 1
 				FROM team_members tm
@@ -378,7 +403,7 @@ func (r *instanceRepository) filteredByUserID(userID int, filter models.Instance
 				WHERE tm.instance_id = instances.id
 				  AND (LOWER(t.name) LIKE ? OR LOWER(tm.display_name) LIKE ? OR LOWER(tm.member_key) LIKE ? OR LOWER(tm.role) LIKE ?)
 			)
-		)`, pattern, pattern, pattern, pattern, pattern, pattern, pattern)
+		)`, id, pattern, pattern, pattern, pattern, pattern, pattern, pattern)
 	}
 	return result
 }
@@ -387,6 +412,41 @@ func (r *instanceRepository) GetFilteredByUserID(userID int, filter models.Insta
 	var instances []models.Instance
 	if err := r.filteredByUserID(userID, filter).OrderBy("-created_at", "-id").Offset(offset).Limit(limit).All(&instances); err != nil {
 		return nil, fmt.Errorf("failed to get filtered instances: %w", err)
+	}
+	if len(instances) > 0 {
+		ids := make([]int, 0, len(instances))
+		for _, item := range instances {
+			ids = append(ids, item.ID)
+		}
+		var bindings []models.InstanceRuntimeBinding
+		if err := r.sess.Collection("instance_runtime_bindings").Find(db.Cond{"instance_id IN": ids}).All(&bindings); err != nil {
+			return nil, err
+		}
+		var agents []models.InstanceAgent
+		if err := r.sess.Collection("instance_agents").Find(db.Cond{"instance_id IN": ids}).All(&agents); err != nil {
+			return nil, err
+		}
+		last := map[int]*time.Time{}
+		for _, b := range bindings {
+			if b.LastHealthAt != nil && (last[b.InstanceID] == nil || b.LastHealthAt.After(*last[b.InstanceID])) {
+				last[b.InstanceID] = b.LastHealthAt
+			}
+		}
+		for _, a := range agents {
+			if a.LastHeartbeatAt != nil && (last[a.InstanceID] == nil || a.LastHeartbeatAt.After(*last[a.InstanceID])) {
+				last[a.InstanceID] = a.LastHeartbeatAt
+			}
+		}
+		for i := range instances {
+			instances[i].LastOnlineAt = last[instances[i].ID]
+			if instances[i].RuntimeErrorMessage != nil {
+				message := models.SanitizeInstanceError(*instances[i].RuntimeErrorMessage)
+				instances[i].RuntimeErrorMessage = &message
+			}
+		}
+	}
+	if err := r.hydrateAutoStopSlice(instances); err != nil {
+		return nil, err
 	}
 	return instances, nil
 }
@@ -444,6 +504,9 @@ func (r *instanceRepository) GetLiteByUserIDAndOwner(userID int, owner string, o
 	if err != nil {
 		return nil, fmt.Errorf("failed to get owner Lite instances: %w", err)
 	}
+	if err := r.hydrateAutoStopSlice(instances); err != nil {
+		return nil, err
+	}
 	return instances, nil
 }
 
@@ -473,6 +536,9 @@ func (r *instanceRepository) GetWorkbuddyProByUserIDAndOwner(userID int, owner s
 	if err != nil {
 		return nil, fmt.Errorf("failed to get owner WorkBuddy Pro instances: %w", err)
 	}
+	if err := r.hydrateAutoStopSlice(instances); err != nil {
+		return nil, err
+	}
 	return instances, nil
 }
 
@@ -492,6 +558,7 @@ func (r *instanceRepository) CountWorkbuddyProByUserIDAndOwner(userID int, owner
 
 func supportedNorthboundProOwnerInstances(userID int, owner string) db.LogicalExpr {
 	return db.And(
+		db.Raw("NOT EXISTS (SELECT 1 FROM team_members otm JOIN teams ott ON ott.id=otm.team_id WHERE (otm.instance_id=instances.id OR instances.provisioning_operation_id=SHA2(CONCAT('owner-team-',ott.id,'-member-',otm.member_key),256)) AND otm.status<>'deleted' AND ott.resource_scope='northbound' AND ott.status<>'deleted')"),
 		db.Cond{"user_id": userID, "owner": owner, "instance_mode": "pro"},
 		db.Or(
 			db.Cond{"type IN": []string{"openclaw", "hermes", "opencode", "deepseek-harness"}},
@@ -507,6 +574,9 @@ func (r *instanceRepository) GetProByUserIDAndOwner(userID int, owner string, of
 	if err != nil {
 		return nil, fmt.Errorf("failed to get owner Pro instances: %w", err)
 	}
+	if err := r.hydrateAutoStopSlice(instances); err != nil {
+		return nil, err
+	}
 	return instances, nil
 }
 
@@ -520,6 +590,7 @@ func (r *instanceRepository) CountProByUserIDAndOwner(userID int, owner string) 
 
 func supportedNorthboundOwnerInstances(userID int, owner string) db.LogicalExpr {
 	return db.And(
+		db.Raw("NOT EXISTS (SELECT 1 FROM team_members otm JOIN teams ott ON ott.id=otm.team_id WHERE (otm.instance_id=instances.id OR instances.provisioning_operation_id=SHA2(CONCAT('owner-team-',ott.id,'-member-',otm.member_key),256)) AND otm.status<>'deleted' AND ott.resource_scope='northbound' AND ott.status<>'deleted')"),
 		db.Cond{"user_id": userID, "owner": owner},
 		db.Or(
 			db.Cond{
@@ -546,6 +617,9 @@ func (r *instanceRepository) GetNorthboundByUserIDAndOwner(userID int, owner str
 	if err != nil {
 		return nil, fmt.Errorf("failed to get owner northbound instances: %w", err)
 	}
+	if err := r.hydrateAutoStopSlice(instances); err != nil {
+		return nil, err
+	}
 	return instances, nil
 }
 
@@ -559,6 +633,7 @@ func (r *instanceRepository) CountNorthboundByUserIDAndOwner(userID int, owner s
 
 func supportedIEIOwnerInstances(owner string) db.LogicalExpr {
 	return db.And(
+		db.Raw("NOT EXISTS (SELECT 1 FROM team_members otm JOIN teams ott ON ott.id=otm.team_id WHERE (otm.instance_id=instances.id OR instances.provisioning_operation_id=SHA2(CONCAT('owner-team-',ott.id,'-member-',otm.member_key),256)) AND otm.status<>'deleted' AND ott.resource_scope='northbound' AND ott.status<>'deleted')"),
 		db.Cond{"owner_normalized": strings.ToLower(strings.TrimSpace(owner))},
 		db.Or(
 			db.Cond{
@@ -584,6 +659,9 @@ func (r *instanceRepository) GetSupportedByOwnerEmail(owner string, offset, limi
 		OrderBy("-created_at", "-id").Offset(offset).Limit(limit).All(&instances)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get IEI owner instances: %w", err)
+	}
+	if err := r.hydrateAutoStopSlice(instances); err != nil {
+		return nil, err
 	}
 	return instances, nil
 }
@@ -648,6 +726,9 @@ func (r *instanceRepository) GetAllRunning() ([]models.Instance, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to get running instances: %w", err)
 	}
+	if err := r.hydrateAutoStopSlice(instances); err != nil {
+		return nil, err
+	}
 	return instances, nil
 }
 
@@ -664,6 +745,9 @@ func (r *instanceRepository) GetV2DesiredRunning(ctx context.Context, limit int)
 	defer iter.Close()
 	if err := iter.All(&instances); err != nil {
 		return nil, fmt.Errorf("failed to get v2 desired running instances: %w", err)
+	}
+	if err := r.hydrateAutoStopSlice(instances); err != nil {
+		return nil, err
 	}
 	return instances, nil
 }
@@ -686,6 +770,9 @@ func (r *instanceRepository) GetV2Creating(ctx context.Context, limit int) ([]mo
 	if err := iter.All(&instances); err != nil {
 		return nil, fmt.Errorf("failed to get v2 creating instances: %w", err)
 	}
+	if err := r.hydrateAutoStopSlice(instances); err != nil {
+		return nil, err
+	}
 	return instances, nil
 }
 
@@ -707,26 +794,60 @@ func buildV2SchedulerInstanceQuery(statuses []string, limit int) (string, []any)
 		FROM instances
 		WHERE status IN (%s)
 			AND LOWER(TRIM(COALESCE(description, ''))) NOT LIKE 'openclaw-upgrade-lab:%%'
+            AND NOT EXISTS (SELECT 1 FROM instance_lifecycle_manual_guards mg WHERE mg.instance_id=instances.id AND mg.token LIKE 'runtime_mgmt_%%')
 			AND runtime_type = ?
 			AND instance_mode = ?
 			AND workspace_path IS NOT NULL
 			AND TRIM(workspace_path) <> ''
 			AND type IN (?, ?, ?, ?)
+			AND NOT EXISTS (SELECT 1 FROM gateway_runtime_upgrades u WHERE u.instance_id=instances.id AND u.state NOT IN ('cancelled','completed'))
 		ORDER BY id
 		LIMIT ?
 	`, statusPlaceholders), args
 }
 
 func (r *instanceRepository) UpdateRuntimeState(ctx context.Context, id int, status string, generation int, message *string) error {
+	return r.updateRuntimeStateWithCode(ctx, id, status, generation, message, nil)
+}
+
+// Optional capability keeps old repository adapters compatible. The code and
+// message are committed atomically with the existing generation fence.
+func (r *instanceRepository) UpdateRuntimeFailure(ctx context.Context, id, generation int, message, code string) error {
+	return r.updateRuntimeStateWithCode(ctx, id, "error", generation, &message, &code)
+}
+
+func (r *instanceRepository) FenceRuntimeRestart(ctx context.Context, id, expectedGeneration int) (bool, error) {
+	result, err := r.sess.SQL().ExecContext(ctx, `UPDATE instances SET status = 'stopped', runtime_generation = runtime_generation + 1, runtime_error_message = NULL, runtime_error_code = NULL, updated_at = ? WHERE id = ? AND runtime_generation = ? AND status IN ('running','stopped','error') AND EXISTS (SELECT 1 FROM llm_models WHERE is_active = 1)`, time.Now().UTC(), id, expectedGeneration)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	return rows == 1, err
+}
+
+func (r *instanceRepository) updateRuntimeState(ctx context.Context, id int, status string, generation int, message *string) error {
+	return r.updateRuntimeStateWithCodeLocked(ctx, id, status, generation, message, nil)
+}
+
+func (r *instanceRepository) updateRuntimeStateWithCode(ctx context.Context, id int, status string, generation int, message, code *string) error {
+	return r.withUnfencedInstance(ctx, id, func(local *instanceRepository) error {
+		return local.updateRuntimeStateWithCodeLocked(ctx, id, status, generation, message, code)
+	})
+}
+
+func (r *instanceRepository) updateRuntimeStateWithCodeLocked(ctx context.Context, id int, status string, generation int, message, code *string) error {
+	if err := checkAutoStopRuntimeState(ctx, r.sess, id, status, generation); err != nil {
+		return err
+	}
 	res, err := r.sess.SQL().ExecContext(ctx, `
 		UPDATE instances
-		SET status = ?, runtime_generation = ?, runtime_error_message = ?, updated_at = ?
+		SET status = ?, runtime_generation = ?, runtime_error_message = ?, runtime_error_code = ?, updated_at = ?
 		WHERE id = ? AND runtime_generation <= ?
 		  AND (
 			status <> ? OR runtime_generation <> ? OR
-			NOT (runtime_error_message <=> ?)
+			NOT (runtime_error_message <=> ?) OR NOT (runtime_error_code <=> ?)
 		  )
-	`, status, generation, message, time.Now().UTC(), id, generation, status, generation, message)
+	`, status, generation, message, code, time.Now().UTC(), id, generation, status, generation, message, code)
 	if err != nil {
 		return fmt.Errorf("failed to update instance runtime state: %w", err)
 	}
@@ -742,6 +863,9 @@ func (r *instanceRepository) UpdateRuntimeState(ctx context.Context, id int, sta
 		if currentGeneration > generation {
 			return ErrStaleRuntimeGeneration
 		}
+	}
+	if status == "running" {
+		return confirmAutoStopRunning(ctx, r.sess, id, generation)
 	}
 	return nil
 }
@@ -766,15 +890,17 @@ func (r *instanceRepository) getRuntimeGeneration(ctx context.Context, id int) (
 }
 
 func (r *instanceRepository) SetWorkspacePath(ctx context.Context, id int, workspacePath string) error {
-	_, err := r.sess.SQL().ExecContext(ctx, `
+	return r.withUnfencedInstance(ctx, id, func(local *instanceRepository) error {
+		_, err := local.sess.SQL().ExecContext(ctx, `
 		UPDATE instances
 		SET workspace_path = ?, updated_at = ?
 		WHERE id = ?
 	`, workspacePath, time.Now().UTC(), id)
-	if err != nil {
-		return fmt.Errorf("failed to set instance workspace path: %w", err)
-	}
-	return nil
+		if err != nil {
+			return fmt.Errorf("failed to set instance workspace path: %w", err)
+		}
+		return nil
+	})
 }
 
 func (r *instanceRepository) UpdateWorkspaceUsage(ctx context.Context, id int, usageBytes int64) error {
@@ -840,7 +966,7 @@ func (r *instanceRepository) PromoteResetReplacement(ctx context.Context, source
 	name = strings.TrimSpace(name)
 	quarantineOwner = strings.TrimSpace(quarantineOwner)
 	quarantineName = strings.TrimSpace(quarantineName)
-	if owner == "" || name == "" || quarantineOwner == "" || quarantineName == "" {
+	if name == "" || quarantineOwner == "" || quarantineName == "" {
 		return fmt.Errorf("invalid factory-reset replacement identity")
 	}
 	return r.sess.TxContext(ctx, func(tx db.Session) error {
@@ -889,18 +1015,38 @@ func (r *instanceRepository) PromoteResetReplacement(ctx context.Context, source
 
 // Update updates an instance
 func (r *instanceRepository) Update(instance *models.Instance) error {
-	err := r.sess.Collection("instances").Find(db.Cond{"id": instance.ID}).Update(instance)
-	if err != nil {
-		return fmt.Errorf("failed to update instance: %w", err)
-	}
-	return nil
+
+	return r.withUnfencedInstance(context.Background(), instance.ID, func(local *instanceRepository) error {
+		if err := checkAutoStopRuntimeState(context.Background(), local.sess, instance.ID, instance.Status, instance.RuntimeGeneration); err != nil {
+			return err
+		}
+		// Only ProtectRuntimeGeneration may write the sticky security marker.
+		// The omitempty tag excludes it even when updating a stale snapshot.
+		update := *instance
+		update.RuntimeSecurityProfile = ""
+		err := local.sess.Collection("instances").Find(db.Cond{"id": instance.ID}).Update(&update)
+		if err != nil {
+			return fmt.Errorf("failed to update instance: %w", err)
+		}
+		if instance.Status == "running" {
+			return confirmAutoStopRunning(context.Background(), local.sess, instance.ID, instance.RuntimeGeneration)
+		}
+		return nil
+	})
 }
 
 // Delete deletes an instance
 func (r *instanceRepository) Delete(id int) error {
-	err := r.sess.Collection("instances").Find(db.Cond{"id": id}).Delete()
-	if err != nil {
-		return fmt.Errorf("failed to delete instance: %w", err)
-	}
-	return nil
+	return r.withUnfencedInstance(context.Background(), id, func(local *instanceRepository) error {
+		// Only terminal fences reach here. Remove them in the same transaction;
+		// the FK protects active operations from accidental cascading deletion.
+		if err := local.sess.Collection("gateway_runtime_upgrades").Find(db.Cond{"instance_id": id}).Delete(); err != nil {
+			return err
+		}
+		err := local.sess.Collection("instances").Find(db.Cond{"id": id}).Delete()
+		if err != nil {
+			return fmt.Errorf("failed to delete instance: %w", err)
+		}
+		return nil
+	})
 }

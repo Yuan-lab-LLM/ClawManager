@@ -13,6 +13,8 @@ func TestHermesDesktopVerifiedProtocolContract(t *testing.T) {
 		available bool
 	}{
 		{"verified unsigned release", nil, true},
+		{"serve backend", func(c *HermesDesktopRuntimeCapability) { c.BackendMode = "serve" }, true},
+		{"unknown backend", func(c *HermesDesktopRuntimeCapability) { c.BackendMode = "unknown" }, false},
 		{"verified accepted release", func(c *HermesDesktopRuntimeCapability) { accepted := true; c.ReleaseAccepted = &accepted }, true},
 		{"legacy accepted contract", func(c *HermesDesktopRuntimeCapability) {
 			c.ContractVersion = 1

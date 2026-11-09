@@ -25,6 +25,8 @@ type accessClaims struct {
 }
 
 type internalClaims struct {
+	AuthType  string   `json:"auth_type,omitempty"`
+	KeyID     string   `json:"key_id,omitempty"`
 	TokenType string   `json:"typ"`
 	UserID    int      `json:"user_id"`
 	SessionID string   `json:"sid"`
@@ -76,6 +78,8 @@ func parseAccessToken(secret, encoded string) (*accessClaims, error) {
 func issueInternalToken(secret string, principal Principal, requestID string) (string, error) {
 	now := time.Now().UTC()
 	claims := internalClaims{
+		AuthType:  principal.AuthType,
+		KeyID:     principal.KeyID,
 		TokenType: northboundInternalType,
 		UserID:    principal.UserID,
 		SessionID: principal.SessionID,

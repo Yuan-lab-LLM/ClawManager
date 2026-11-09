@@ -15,3 +15,8 @@ export interface WorkspacePreview {
   preview_url?: string;
   download_url?: string;
 }
+
+export interface WorkspaceSearchResponse {
+  entries: WorkspaceEntry[];
+  limit?: number;
+}

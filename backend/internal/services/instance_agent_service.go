@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"clawreef/internal/heartbeat"
 	"clawreef/internal/models"
 	"clawreef/internal/repository"
 )
@@ -48,10 +49,11 @@ type AgentHeartbeatRequest struct {
 }
 
 type AgentHeartbeatResponse struct {
-	ServerTime              time.Time `json:"server_time"`
-	HasPendingCommand       bool      `json:"has_pending_command"`
-	DesiredPowerState       string    `json:"desired_power_state"`
-	DesiredConfigRevisionID *int      `json:"desired_config_revision_id,omitempty"`
+	HeartbeatIntervalSeconds int       `json:"heartbeat_interval_seconds"`
+	ServerTime               time.Time `json:"server_time"`
+	HasPendingCommand        bool      `json:"has_pending_command"`
+	DesiredPowerState        string    `json:"desired_power_state"`
+	DesiredConfigRevisionID  *int      `json:"desired_config_revision_id,omitempty"`
 }
 
 type InstanceAgentPayload struct {
@@ -115,6 +117,9 @@ func (s *instanceAgentService) Register(bootstrapToken string, req AgentRegister
 	}
 	if instance == nil || instance.ID != req.InstanceID {
 		return nil, fmt.Errorf("invalid agent bootstrap token")
+	}
+	if legacyAgentForbidden(instance) {
+		return nil, models.ErrInstanceStopping
 	}
 	if !supportsManagedRuntimeIntegration(instance.Type) {
 		return nil, fmt.Errorf("agent registration is only supported for managed runtime instances")
@@ -186,7 +191,7 @@ func (s *instanceAgentService) Register(bootstrapToken string, req AgentRegister
 	return &AgentRegisterResponse{
 		SessionToken:               sessionToken,
 		SessionExpiresAt:           sessionExpiresAt,
-		HeartbeatIntervalSeconds:   15,
+		HeartbeatIntervalSeconds:   heartbeat.ReportIntervalSeconds(),
 		CommandPollIntervalSeconds: 5,
 		ServerTime:                 now,
 	}, nil
@@ -214,6 +219,9 @@ func (s *instanceAgentService) AuthenticateSession(sessionToken string) (*AgentS
 		return nil, fmt.Errorf("instance not found")
 	}
 
+	if legacyAgentForbidden(instance) {
+		return nil, models.ErrInstanceStopping
+	}
 	return &AgentSession{Instance: instance, Agent: agent}, nil
 }
 
@@ -225,6 +233,9 @@ func (s *instanceAgentService) Heartbeat(session *AgentSession, req AgentHeartbe
 		return nil, fmt.Errorf("agent id does not match session")
 	}
 
+	if legacyAgentForbidden(session.Instance) {
+		return nil, models.ErrInstanceStopping
+	}
 	now := time.Now().UTC()
 	session.Agent.Status = agentStatusOnline
 	session.Agent.LastHeartbeatAt = &now
@@ -275,10 +286,11 @@ func (s *instanceAgentService) Heartbeat(session *AgentSession, req AgentHeartbe
 	}
 
 	return &AgentHeartbeatResponse{
-		ServerTime:              now,
-		HasPendingCommand:       nextCommand != nil,
-		DesiredPowerState:       desiredState.DesiredPowerState,
-		DesiredConfigRevisionID: desiredState.DesiredConfigRevisionID,
+		HeartbeatIntervalSeconds: heartbeat.ReportIntervalSeconds(),
+		ServerTime:               now,
+		HasPendingCommand:        nextCommand != nil,
+		DesiredPowerState:        desiredState.DesiredPowerState,
+		DesiredConfigRevisionID:  desiredState.DesiredConfigRevisionID,
 	}, nil
 }
 
@@ -368,9 +380,9 @@ func deriveAgentStatus(agent *models.InstanceAgent) string {
 	}
 	age := time.Since(*agent.LastHeartbeatAt)
 	switch {
-	case age <= 45*time.Second:
+	case age <= heartbeat.OnlineWindow:
 		return agentStatusOnline
-	case age <= 120*time.Second:
+	case age <= heartbeat.Timeout:
 		return agentStatusStale
 	default:
 		return agentStatusOffline
@@ -418,4 +430,14 @@ func optionalString(value string) *string {
 	}
 	trimmed := strings.TrimSpace(value)
 	return &trimmed
+}
+
+// Native Lite uses generation-bound Runtime capabilities. Its reusable legacy
+// agent credentials must never authorize registration, renewal, or online reports.
+func legacyAgentForbidden(i *models.Instance) bool {
+	if i == nil || !strings.EqualFold(strings.TrimSpace(i.InstanceMode), "lite") {
+		return false
+	}
+	_, native := NormalizeV2RuntimeType(i.Type)
+	return native || strings.EqualFold(strings.TrimSpace(i.RuntimeType), "gateway") || i.RuntimeSecurityProfile != "" || (i.Status != "running" && i.Status != "creating")
 }

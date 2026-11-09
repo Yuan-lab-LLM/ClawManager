@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -63,7 +64,7 @@ func TestLoginEnterpriseAllowsProvisionedLDAPUser(t *testing.T) {
 		},
 	})
 
-	tokenPair, err := auth.Login("ldap_alice", "secret")
+	tokenPair, err := auth.Login("alice", "secret")
 	if err != nil {
 		t.Fatalf("Login returned error: %v", err)
 	}
@@ -117,54 +118,19 @@ func TestLoginEnterpriseRejectsDisabledProvisionedLDAPUser(t *testing.T) {
 		},
 	})
 
-	if _, err := auth.Login("ldap_alice", "secret"); err == nil || err.Error() != "invalid username or password" {
+	if _, err := auth.Login("alice", "secret"); err == nil || err.Error() != "invalid username or password" {
 		t.Fatalf("Login error = %v, want account is disabled", err)
 	}
 }
 
 func TestLoginEnterpriseRejectsExternalIdentityConflict(t *testing.T) {
-	userRepo := newFakeUserRepo()
-	conflictingDN := "uid=alice,ou=People,dc=example,dc=com"
-	if err := userRepo.Create(&models.User{
-		Username:     "alice",
-		Email:        "alice@example.com",
-		PasswordHash: "external:ldap",
-		Role:         "user",
-		AuthProvider: AuthProviderLDAP,
-		LoginAlias:   stringPtr("ldap_alice"),
-		ExternalID:   &conflictingDN,
-		IsActive:     true,
-		CreatedAt:    time.Now(),
-		UpdatedAt:    time.Now(),
-	}); err != nil {
-		t.Fatalf("Create returned error: %v", err)
-	}
-	if err := userRepo.Create(&models.User{
-		Username:     "mallory",
-		Email:        "mallory@example.com",
-		PasswordHash: "external:ldap",
-		Role:         "user",
-		AuthProvider: AuthProviderLDAP,
-		LoginAlias:   stringPtr("ldap_alice"),
-		ExternalID:   stringPtr("uid=alice,ou=People,dc=example,dc=com"),
-		IsActive:     true,
-		CreatedAt:    time.Now(),
-		UpdatedAt:    time.Now(),
-	}); err != nil {
-		t.Fatalf("Create returned error: %v", err)
-	}
-
-	auth := NewAuthService(userRepo, testJWTConfig(), fakeEnterpriseAuth{
-		user: &EnterpriseUser{
-			Provider:   AuthProviderLDAP,
-			ExternalID: conflictingDN,
-			Username:   "mallory",
-			Email:      "mallory@example.com",
-			Role:       "user",
-		},
-	})
-	if _, err := auth.Login("mallory", "secret"); err == nil || err.Error() != "invalid username or password" {
-		t.Fatalf("Login error = %v, want invalid username or password", err)
+	repo := newFakeUserRepo()
+	_ = repo.Create(&models.User{Username: "alice", AuthProvider: AuthProviderLDAP, IsActive: true, ExternalID: stringPtr("uid=alice,dc=example")})
+	auth := NewAuthService(repo, testJWTConfig(), enterpriseAuthFunc(func(_ context.Context, dn, password string) (*EnterpriseUser, error) {
+		return &EnterpriseUser{Provider: AuthProviderLDAP, ExternalID: "uid=mallory,dc=example"}, nil
+	}))
+	if _, err := auth.Login("alice", "secret"); err == nil {
+		t.Fatal("mismatched DN must not authenticate")
 	}
 }
 
@@ -201,7 +167,7 @@ func TestLoginEnterpriseSyncsRoleWhenEnabled(t *testing.T) {
 		WithEnterpriseAuthPolicy(config.EnterpriseAuthConfig{AllowLocalFallback: true, SyncRole: true}),
 		WithQuotaRepository(quotaRepo),
 	)
-	if _, err := auth.Login("ldap_alice", "secret"); err != nil {
+	if _, err := auth.Login("alice", "secret"); err != nil {
 		t.Fatalf("Login returned error: %v", err)
 	}
 	user, err := userRepo.GetByUsername("alice")
@@ -220,7 +186,7 @@ func TestLoginEnterpriseSyncsRoleWhenEnabled(t *testing.T) {
 	}
 }
 
-func TestLoginFallsBackToLocalUser(t *testing.T) {
+func TestLocalLoginDoesNotRequireLDAPAvailability(t *testing.T) {
 	userRepo := newFakeUserRepo()
 	passwordHash, err := utils.HashPassword("local-password")
 	if err != nil {
@@ -249,7 +215,7 @@ func TestLoginFallsBackToLocalUser(t *testing.T) {
 	}
 }
 
-func TestLoginWithoutPrefixIgnoresEnterpriseFallbackPolicy(t *testing.T) {
+func TestLocalLoginIgnoresEnterpriseFallbackPolicy(t *testing.T) {
 	userRepo := newFakeUserRepo()
 	passwordHash, err := utils.HashPassword("local-password")
 	if err != nil {
@@ -279,7 +245,7 @@ func TestLoginWithoutPrefixIgnoresEnterpriseFallbackPolicy(t *testing.T) {
 	}
 }
 
-func TestLoginFallsBackToLocalUserWhenLDAPUserNotFound(t *testing.T) {
+func TestLocalLoginDoesNotRequireLDAPUser(t *testing.T) {
 	userRepo := newFakeUserRepo()
 	passwordHash, err := utils.HashPassword("local-password")
 	if err != nil {
@@ -309,7 +275,7 @@ func TestLoginFallsBackToLocalUserWhenLDAPUserNotFound(t *testing.T) {
 	}
 }
 
-func TestLoginWithoutPrefixUsesLocalAuthentication(t *testing.T) {
+func TestLocalLoginUsesAccountProvider(t *testing.T) {
 	userRepo := newFakeUserRepo()
 	passwordHash, err := utils.HashPassword("local-password")
 	if err != nil {
@@ -518,7 +484,7 @@ func (r *fakeUserRepo) GetByID(id int) (*models.User, error) {
 
 func (r *fakeUserRepo) GetByUsername(username string) (*models.User, error) {
 	for _, user := range r.users {
-		if user.Username == username {
+		if strings.EqualFold(user.Username, username) {
 			clone := *user
 			return &clone, nil
 		}
@@ -539,8 +505,13 @@ func (a fakeEnterpriseAuth) AuthenticateByIdentity(_ context.Context, externalID
 func (r *fakeUserRepo) GetByAuthProviderUsername(authProvider, username string) (*models.User, error) {
 	for _, user := range r.users {
 		provider := user.AuthProvider
-		if provider == "" { provider = AuthProviderLocal }
-		if provider == authProvider && user.Username == username { clone := *user; return &clone, nil }
+		if provider == "" {
+			provider = AuthProviderLocal
+		}
+		if provider == authProvider && user.Username == username {
+			clone := *user
+			return &clone, nil
+		}
 	}
 	return nil, nil
 }
@@ -549,15 +520,22 @@ func (r *fakeUserRepo) CountByAuthProviderUsername(authProvider, username string
 	count := 0
 	for _, user := range r.users {
 		provider := user.AuthProvider
-		if provider == "" { provider = AuthProviderLocal }
-		if provider == authProvider && user.Username == username { count++ }
+		if provider == "" {
+			provider = AuthProviderLocal
+		}
+		if provider == authProvider && user.Username == username {
+			count++
+		}
 	}
 	return count, nil
 }
 
 func (r *fakeUserRepo) GetByLoginAlias(authProvider, loginAlias string) (*models.User, error) {
 	for _, user := range r.users {
-		if user.AuthProvider == authProvider && user.LoginAlias != nil && *user.LoginAlias == loginAlias { clone := *user; return &clone, nil }
+		if user.AuthProvider == authProvider && user.LoginAlias != nil && *user.LoginAlias == loginAlias {
+			clone := *user
+			return &clone, nil
+		}
 	}
 	return nil, nil
 }
@@ -634,4 +612,3 @@ func (r *fakeQuotaRepo) CreateDefaultQuota(userID int) (*models.UserQuota, error
 	r.createdFor = userID
 	return &models.UserQuota{UserID: userID}, nil
 }
-

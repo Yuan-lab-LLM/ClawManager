@@ -256,6 +256,26 @@ func NormalizeExternalWorkspaceAccess(value string) (string, error) {
 	}
 }
 
+// ExternalAccessSessionBinding returns a non-secret fingerprint of the current
+// share credential. Tokens carrying this binding can be rejected immediately
+// after a link is disabled, reset, expired, or has its password rotated.
+func ExternalAccessSessionBinding(code string, accesses ...*models.InstanceExternalAccess) string {
+	code = strings.Trim(strings.TrimSpace(code), "/")
+	if code == "" {
+		return ""
+	}
+	credentialVersion := ""
+	if len(accesses) > 0 && accesses[0] != nil && accesses[0].AuthMode == ExternalAccessModePassword && accesses[0].PasswordHash != nil {
+		credentialVersion = strings.TrimSpace(*accesses[0].PasswordHash)
+	}
+	payload := "shared-instance-session\x00" + code
+	if credentialVersion != "" {
+		payload += "\x00" + credentialVersion
+	}
+	sum := sha256.Sum256([]byte(payload))
+	return hex.EncodeToString(sum[:])
+}
+
 func (s *instanceExternalAccessService) Disable(ctx context.Context, instanceID int) error {
 	if s == nil || s.repo == nil {
 		return fmt.Errorf("instance external access repository is not configured")

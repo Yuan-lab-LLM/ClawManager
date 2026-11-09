@@ -22,6 +22,7 @@ export interface Team {
 }
 
 export interface TeamMember {
+  icon_key?: string;
   id: number;
   team_id: number;
   instance_id?: number;
@@ -43,6 +44,7 @@ export interface TeamMember {
   current_task_id?: number;
   progress: number;
   last_seen_at?: string;
+  runtime_observation?: { state: 'online' | 'starting' | 'offline' | 'unknown'; reason?: string; observed_at?: string };
   availability?: "unknown" | "idle" | "busy" | "blocked" | "offline";
   runtime_status?: string;
   runtime_task_id?: string;
@@ -133,6 +135,7 @@ export interface TeamWorkItem {
 }
 
 export interface CreateTeamMemberRequest {
+  icon_key?: string;
   member_id?: string;
   name?: string;
   role: string;
@@ -179,6 +182,9 @@ export interface CreateTeamRequest {
 }
 
 export interface TeamDetails {
+	// Northbound filtering advances the raw cursor even through hidden events.
+	events_has_more?: boolean;
+	events_next_before_id?: number;
   team: Team;
   leader_member_id?: string;
   leader?: TeamMember;
@@ -208,6 +214,7 @@ export interface TeamListResponse {
 }
 
 export interface TeamWorkspaceFileEntry {
+  editable?: boolean;
   name: string;
   path: string;
   type: "file" | "directory";
@@ -229,6 +236,8 @@ export interface TeamWorkspacePreviewResponse {
 }
 
 export interface DispatchTeamTaskRequest {
+  execution_type?: 'team' | 'single_member';
+  context_task_id?: number;
   target_member_id: string;
   message_id?: string;
   payload: Record<string, unknown>;

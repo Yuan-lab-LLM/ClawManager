@@ -2,13 +2,18 @@ package services
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
-	"clawreef/internal/models"
 )
 
 const managedAutoModelRef = "auto/auto"
+
+// ErrModelConfigurationRequired is a configuration failure, not a pool or
+// capacity failure. Keep the message for older API consumers; callers should
+// classify it using errors.Is rather than inspecting wrapped text.
+var ErrModelConfigurationRequired = &runtimeFailure{code: "MODEL_CONFIGURATION_REQUIRED", cause: errors.New("no active models are configured")}
 
 var openCodeBuiltInProviders = []string{
 	"openai",
@@ -22,6 +27,9 @@ var openCodeBuiltInProviders = []string{
 }
 
 type gatewayModelInjection struct {
+	defaultContextWindow    int
+	contextWindowsJSON      string
+	visionJSON              string
 	defaultModel            string
 	codingAgentDefaultModel string
 	modelsJSON              string
@@ -60,104 +68,6 @@ type openCodeModelConfig struct {
 	Name string `json:"name"`
 }
 
-func (s *instanceService) resolveGatewayModelInjection() (*gatewayModelInjection, error) {
-	items, err := s.listGatewayModels()
-	if err != nil {
-		return nil, err
-	}
-
-	modelIDs := []string{"auto"}
-	providerModelRefs := []string{managedAutoModelRef}
-	reasoning := map[string]bool{"auto": false}
-	reasoningControl := map[string]string{"auto": models.ReasoningControlNone}
-	seen := map[string]struct{}{"auto": {}}
-
-	for _, item := range items {
-		displayName := firstNonEmptyCatalogValue(item.DisplayName, item.ProviderModelName)
-		if displayName == "" {
-			continue
-		}
-		normalizedName := strings.ToLower(displayName)
-		if _, exists := seen[normalizedName]; exists {
-			continue
-		}
-		seen[normalizedName] = struct{}{}
-
-		providerName := firstNonEmptyCatalogValue(item.CatalogProviderName, modelCatalogProviderName(item))
-		qualifiedName := providerName + "/" + displayName
-		modelIDs = append(modelIDs, displayName)
-		providerModelRefs = append(providerModelRefs, qualifiedName)
-
-		models.PopulateLLMReasoningCapability(&item)
-		reasoningEnabled := item.SupportsReasoning && item.ReasoningEnabled
-		reasoning[displayName] = reasoningEnabled
-		reasoning[qualifiedName] = reasoningEnabled
-		reasoningControl[displayName] = item.ReasoningControl
-		reasoningControl[qualifiedName] = item.ReasoningControl
-	}
-
-	modelsJSON, err := marshalGatewayModelSetting("model list", modelIDs)
-	if err != nil {
-		return nil, err
-	}
-	providerModelsJSON, err := marshalGatewayModelSetting("provider model list", providerModelRefs)
-	if err != nil {
-		return nil, err
-	}
-	reasoningJSON, err := marshalGatewayModelSetting("model reasoning settings", reasoning)
-	if err != nil {
-		return nil, err
-	}
-	reasoningControlJSON, err := marshalGatewayModelSetting("model reasoning controls", reasoningControl)
-	if err != nil {
-		return nil, err
-	}
-	codingAgentDefaultModel := ""
-	if len(modelIDs) > 1 {
-		codingAgentDefaultModel = modelIDs[1]
-	}
-
-	return &gatewayModelInjection{
-		defaultModel:            "auto",
-		codingAgentDefaultModel: codingAgentDefaultModel,
-		modelsJSON:              modelsJSON,
-		providerModelsJSON:      providerModelsJSON,
-		reasoningJSON:           reasoningJSON,
-		reasoningControlJSON:    reasoningControlJSON,
-	}, nil
-}
-
-func (s *instanceService) listGatewayModels() ([]models.LLMModel, error) {
-	if s == nil || s.llmModelRepo == nil {
-		return nil, fmt.Errorf("llm model repository not configured")
-	}
-
-	var (
-		items []models.LLMModel
-		err   error
-	)
-	if s.expandedModelCatalog != nil {
-		items, err = s.expandedModelCatalog.ListExpandedActiveModels()
-	} else {
-		items, err = s.llmModelRepo.ListActive()
-		if err == nil {
-			for index := range items {
-				if strings.TrimSpace(items[index].CatalogProviderName) == "" {
-					items[index].CatalogProviderName = modelCatalogProviderName(items[index])
-				}
-			}
-			items = models.ExpandLLMModelCatalog(items)
-		}
-	}
-	if err != nil {
-		return nil, fmt.Errorf("failed to list active models: %w", err)
-	}
-	if len(items) == 0 {
-		return nil, fmt.Errorf("no active models are configured")
-	}
-	return items, nil
-}
-
 func marshalGatewayModelSetting(name string, value any) (string, error) {
 	raw, err := json.Marshal(value)
 	if err != nil {
@@ -177,7 +87,7 @@ func firstNonEmptyCatalogValue(values ...string) string {
 
 // buildOpenCodeGatewayConfig translates provider-qualified model references
 // into OpenCode custom providers backed by the managed ClawManager gateway.
-func buildOpenCodeGatewayConfig(providerModelsJSON string) (string, error) {
+func buildProviderOpenCodeGatewayConfig(providerModelsJSON string) (string, error) {
 	refs, err := parseProviderModelRefs(providerModelsJSON)
 	if err != nil {
 		return "", err

@@ -99,3 +99,33 @@ func TestGetInstanceSummaryUsesCurrentUser(t *testing.T) {
 		t.Fatalf("unexpected summary: %#v", response.Data)
 	}
 }
+
+func TestListInstancesPassesAutoSleepFilter(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, value := range []string{"true", "false"} {
+		service := &queryRecordingInstanceService{}
+		recorder := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(recorder)
+		c.Request = httptest.NewRequest(http.MethodGet, "/api/v1/instances?status=stopped&auto_sleep="+value, nil)
+		c.Set("userID", 17)
+		(&InstanceHandler{instanceService: service}).ListInstances(c)
+		if recorder.Code != http.StatusOK || service.filter.AutoSleep == nil || *service.filter.AutoSleep != (value == "true") {
+			t.Fatalf("auto_sleep=%s not passed to caller-scoped query: %#v", value, service.filter)
+		}
+	}
+}
+
+func TestListInstancesRejectsInvalidAutoSleepFilter(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, query := range []string{"auto_sleep=true", "status=running&auto_sleep=false", "status=stopped&auto_sleep=invalid"} {
+		service := &queryRecordingInstanceService{}
+		recorder := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(recorder)
+		c.Request = httptest.NewRequest(http.MethodGet, "/api/v1/instances?"+query, nil)
+		c.Set("userID", 17)
+		(&InstanceHandler{instanceService: service}).ListInstances(c)
+		if recorder.Code != http.StatusBadRequest || service.userID != 0 {
+			t.Fatalf("query %q accepted: status=%d user=%d", query, recorder.Code, service.userID)
+		}
+	}
+}

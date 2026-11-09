@@ -565,6 +565,11 @@ func commandFinishedAt(command InstanceCommandPayload) time.Time {
 }
 
 func (s *skillService) AttachSkillToInstance(actorUserID int, actorRole string, instanceID int, skillID int) (*InstanceSkillPayload, error) {
+	release, err := acquireInstanceLifecycleOperation(context.Background(), s.instanceRepo, instanceID)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	instance, err := s.instanceRepo.GetByID(instanceID)
 	if err != nil {
 		return nil, err
@@ -642,6 +647,8 @@ func (s *skillService) AttachSkillToInstance(actorUserID int, actorRole string, 
 	return nil, fmt.Errorf("instance skill not found after attach")
 }
 
+// Production callers must hold the instance lifecycle lock through filesystem
+// materialization, ownership repair, metadata updates and command enqueueing.
 func (s *skillService) materializeLiteInstanceSkill(ctx context.Context, instanceID int, skill *models.Skill, blob *models.SkillBlob) error {
 	if s == nil || s.instanceRepo == nil || s.storage == nil || skill == nil || blob == nil {
 		return nil
@@ -950,6 +957,11 @@ func isPathWithin(root, target string) bool {
 }
 
 func (s *skillService) RemoveSkillFromInstance(instanceID int, skillID int) error {
+	release, err := acquireInstanceLifecycleOperation(context.Background(), s.instanceRepo, instanceID)
+	if err != nil {
+		return err
+	}
+	defer release()
 	instance, err := s.instanceRepo.GetByID(instanceID)
 	if err != nil {
 		return err
@@ -987,6 +999,7 @@ func (s *skillService) RemoveSkillFromInstance(instanceID int, skillID int) erro
 	return nil
 }
 
+// Called under the public remove operation's lifecycle lock.
 func (s *skillService) removeRuntimeInstanceSkillDirectory(instanceID int, item *models.InstanceSkill) error {
 	if s == nil || s.instanceRepo == nil || item == nil {
 		return nil

@@ -91,7 +91,10 @@ func (s *runtimeDeploymentService) hermesWebEnvironment(ctx context.Context, nam
 		}
 		unique := map[string]bool{}
 		for _, subset := range endpoints.Subsets {
-			for _, address := range subset.Addresses {
+			// Service membership establishes proxy identity independently of HTTP
+			// readiness. Bootstrap runs before this control plane starts serving.
+			addresses := append(append([]corev1.EndpointAddress(nil), subset.Addresses...), subset.NotReadyAddresses...)
+			for _, address := range addresses {
 				if address.TargetRef == nil || address.TargetRef.Kind != "Pod" || (address.TargetRef.Namespace != "" && address.TargetRef.Namespace != namespace) {
 					continue
 				}
@@ -108,7 +111,7 @@ func (s *runtimeDeploymentService) hermesWebEnvironment(ctx context.Context, nam
 		proxies, source = strings.Join(addresses, ","), "service-endpoints"
 	}
 	if proxies == "" {
-		return nil, fmt.Errorf("invalid_trusted_proxies: no ready control-plane Pod endpoints")
+		return nil, fmt.Errorf("invalid_trusted_proxies: no control-plane Pod endpoints")
 	}
 	for _, value := range strings.Split(proxies, ",") {
 		value = strings.TrimSpace(value)

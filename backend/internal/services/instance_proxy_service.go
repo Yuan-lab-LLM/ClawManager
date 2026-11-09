@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"clawreef/internal/models"
+	"clawreef/internal/ownerrecords"
 	"clawreef/internal/repository"
 	"clawreef/internal/services/k8s"
 
@@ -28,19 +29,25 @@ import (
 
 // InstanceProxyService handles proxying requests to instance pods
 type InstanceProxyService struct {
-	serviceService       *k8s.ServiceService
-	accessService        *InstanceAccessService
-	instanceRepo         repository.InstanceRepository
-	runtimePodRepo       repository.RuntimePodRepository
-	bindingRepo          repository.InstanceRuntimeBindingRepository
-	httpClient           *http.Client
-	openClawGatewayToken string
-	openClawProxyOrigin  string
-	serviceCache         map[serviceCacheKey]serviceCacheEntry
-	serviceLookups       map[serviceCacheKey]*serviceLookupCall
-	cacheMu              sync.RWMutex
-	lookupMu             sync.Mutex
-	serviceTTL           time.Duration
+	serviceService           *k8s.ServiceService
+	accessService            *InstanceAccessService
+	instanceRepo             repository.InstanceRepository
+	runtimePodRepo           repository.RuntimePodRepository
+	bindingRepo              repository.InstanceRuntimeBindingRepository
+	httpClient               *http.Client
+	openClawGatewayToken     string
+	openClawProxyOrigin      string
+	serviceCache             map[serviceCacheKey]serviceCacheEntry
+	serviceLookups           map[serviceCacheKey]*serviceLookupCall
+	cacheMu                  sync.RWMutex
+	lookupMu                 sync.Mutex
+	serviceTTL               time.Duration
+	openCodeBootstrapEnabled bool
+	openCodeBootstrapMu      sync.Mutex
+	openCodeBootstraps       map[string]*openCodeBootstrapCall
+	ownerUsage               *ownerrecords.Store
+	proxyPolicy              *RuntimeProxyPolicyCoordinator
+	runtimeSecurity          *RuntimeSecurityAuthority
 }
 
 type serviceCacheKey struct {
@@ -69,12 +76,20 @@ const (
 // DedicatedRuntimeOriginHeader marks requests routed through a runtime-specific browser origin.
 const DedicatedRuntimeOriginHeader = "X-ClawManager-Runtime-Origin"
 
+// NativeIngressTokenHeader authenticates protected root ingress before native
+// loopback dialing. The ingress relay consumes it rather than forwarding it.
+const NativeIngressTokenHeader = "X-ClawManager-Ingress-Token"
+
 var (
 	ErrInstanceGatewayUnavailable      = errors.New("instance gateway is not available")
 	ErrOpenCodeDedicatedOriginRequired = errors.New("OpenCode Lite requires its dedicated instance origin")
 )
 
 type InstanceProxyServiceOption func(*InstanceProxyService)
+
+func WithInstanceProxyRuntimeSecurity(authority *RuntimeSecurityAuthority) InstanceProxyServiceOption {
+	return func(s *InstanceProxyService) { s.runtimeSecurity = authority }
+}
 
 func WithInstanceProxyRuntimeRepositories(instanceRepo repository.InstanceRepository, runtimePodRepo repository.RuntimePodRepository, bindingRepo repository.InstanceRuntimeBindingRepository) InstanceProxyServiceOption {
 	return func(s *InstanceProxyService) {
@@ -167,9 +182,20 @@ func (s *InstanceProxyService) ProxyRequest(ctx context.Context, instanceID int,
 		return err
 	}
 
-	managedGatewayToken := s.managedRuntimeGatewayBearerToken(ctx, instanceID, accessToken.InstanceType)
+	managedGatewayToken, protectedGateway, err := s.managedRuntimeGatewayBearerToken(ctx, instanceID, accessToken.InstanceType, targetURL, runtimeGateway)
+	if err != nil {
+		return err
+	}
 	proxyPrefix := instanceProxyPrefix(instanceID)
 	bootstrapPath := stripInstanceProxyPrefix(targetPath, instanceID)
+	openCodeStorageScope := ""
+	if opencodeLite && isOpenCodeBrowserDocumentRequest(r, bootstrapPath) {
+		instance, lookupErr := s.instanceRepo.GetByID(instanceID)
+		if lookupErr != nil || instance == nil {
+			return fmt.Errorf("failed to resolve OpenCode browser storage identity")
+		}
+		openCodeStorageScope = openCodeBrowserStorageScope(instance)
+	}
 
 	// Copy query parameters, excluding ClawManager-owned proxy/gateway tokens.
 	// DSH's plugin loader uses a significant leading '?' inside RawQuery
@@ -185,6 +211,17 @@ func (s *InstanceProxyService) ProxyRequest(ctx context.Context, instanceID int,
 		openCodeProjectSearchRewritten = s.rewriteOpenCodeProjectSearchDirectory(ctx, instanceID, accessToken.InstanceType, bootstrapPath, queryParams)
 		if len(queryParams) > 0 {
 			targetURL.RawQuery = queryParams.Encode()
+		}
+	}
+	if s.openCodeBootstrapEnabled && opencodeLite && openCodeStorageScope != "" && bootstrapPath == "/" && len(queryParams) == 0 {
+		sessionID, bootstrapErr := s.ensureOpenCodeInitialSession(ctx, instanceID, targetURL, managedGatewayToken)
+		if bootstrapErr != nil {
+			return fmt.Errorf("failed to initialize OpenCode session: %w", bootstrapErr)
+		}
+		if sessionID != "" {
+			w.Header().Set("Cache-Control", "no-store")
+			http.Redirect(w, r, openCodeSessionBrowserRoute(r, sessionID), http.StatusTemporaryRedirect)
+			return nil
 		}
 	}
 
@@ -235,8 +272,13 @@ func (s *InstanceProxyService) ProxyRequest(ctx context.Context, instanceID int,
 	} else if !isRuntimePublicAuthPath(bootstrapPath) {
 		setManagedRuntimeGatewayAuthHeaders(proxyReq.Header, managedGatewayToken)
 	}
-	if shouldRewriteHTML {
+	if shouldRewriteHTML || openCodeStorageScope != "" {
 		proxyReq.Header.Del("Accept-Encoding")
+	}
+	if openCodeStorageScope != "" {
+		// Cached upstream HTML predates our instance-specific bootstrap.
+		proxyReq.Header.Del("If-None-Match")
+		proxyReq.Header.Del("If-Modified-Since")
 	}
 	if openCodeProjectSearchRewritten {
 		proxyReq.Header.Del("Accept-Encoding")
@@ -244,6 +286,7 @@ func (s *InstanceProxyService) ProxyRequest(ctx context.Context, instanceID int,
 
 	// Remove hop-by-hop headers
 	s.removeHopByHopHeaders(proxyReq.Header)
+	setNativeIngressToken(proxyReq.Header, managedGatewayToken, protectedGateway)
 
 	// Execute request
 	resp, err := s.httpClient.Do(proxyReq)
@@ -283,7 +326,7 @@ func (s *InstanceProxyService) ProxyRequest(ctx context.Context, instanceID int,
 		resp.Header.Set("Content-Length", strconv.Itoa(len(body)))
 	}
 
-	if shouldRewriteHTML && strings.Contains(resp.Header.Get("Content-Type"), "text/html") {
+	if (shouldRewriteHTML || openCodeStorageScope != "") && strings.Contains(resp.Header.Get("Content-Type"), "text/html") {
 		body, readErr := io.ReadAll(resp.Body)
 		if readErr != nil {
 			return fmt.Errorf("failed to read upstream html: %w", readErr)
@@ -292,10 +335,18 @@ func (s *InstanceProxyService) ProxyRequest(ctx context.Context, instanceID int,
 			return fmt.Errorf("failed to close upstream html body: %w", closeErr)
 		}
 
-		modifiedBody := injectProxyBase(string(body), proxyBaseForRequestPath(effectiveRequestPath, instanceID))
-		if opencodeLite {
-			modifiedBody = rewriteOpenCodeHTMLRootAssets(modifiedBody, proxyPrefix)
-			modifiedBody = injectOpenCodeAbsolutePathPatch(modifiedBody, proxyPrefix)
+		modifiedBody := string(body)
+		if shouldRewriteHTML {
+			modifiedBody = injectProxyBase(modifiedBody, proxyBaseForRequestPath(effectiveRequestPath, instanceID))
+			if opencodeLite {
+				modifiedBody = rewriteOpenCodeHTMLRootAssets(modifiedBody, proxyPrefix)
+				modifiedBody = injectOpenCodeAbsolutePathPatch(modifiedBody, proxyPrefix)
+			}
+		}
+		if openCodeStorageScope != "" {
+			modifiedBody = injectOpenCodeBrowserStorageScope(modifiedBody, openCodeStorageScope)
+			resp.Header.Set("Cache-Control", "no-store")
+			resp.Header.Del("Last-Modified")
 		}
 		resp.Body = io.NopCloser(bytes.NewReader([]byte(modifiedBody)))
 		resp.ContentLength = int64(len(modifiedBody))
@@ -332,6 +383,17 @@ func (s *InstanceProxyService) ProxyRequest(ctx context.Context, instanceID int,
 	return nil
 }
 
+func isOpenCodeEventStreamRequest(opencodeLite bool, targetPath string) bool {
+	if !opencodeLite {
+		return false
+	}
+	switch strings.TrimSpace(targetPath) {
+	case "/global/event", "/api/event":
+		return true
+	default:
+		return false
+	}
+}
 func copyEventStream(w http.ResponseWriter, body io.Reader) error {
 	buffer := make([]byte, 32*1024)
 	flusher, _ := w.(http.Flusher)
@@ -396,7 +458,10 @@ func (s *InstanceProxyService) ProxyWebSocket(ctx context.Context, instanceID in
 		return err
 	}
 
-	managedGatewayToken := s.managedRuntimeGatewayBearerToken(ctx, instanceID, accessToken.InstanceType)
+	managedGatewayToken, protectedGateway, err := s.managedRuntimeGatewayBearerToken(ctx, instanceID, accessToken.InstanceType, targetURL, runtimeGateway)
+	if err != nil {
+		return err
+	}
 
 	// Copy query parameters, excluding ClawManager-owned proxy/gateway tokens.
 	// Preserve DSH's significant leading '?' in plugin-loader batch queries.
@@ -448,6 +513,7 @@ func (s *InstanceProxyService) ProxyWebSocket(ctx context.Context, instanceID in
 		}
 	}
 
+	setNativeIngressToken(upstreamHeader, managedGatewayToken, protectedGateway)
 	// Keep the pipe alive for the full WebSocket lifetime; do not inherit any
 	// short deadlines that may be attached to the inbound request context.
 	proxyCtx := ctx
@@ -492,7 +558,7 @@ func (s *InstanceProxyService) ProxyWebSocket(ctx context.Context, instanceID in
 	clientConn.SetReadLimit(instanceProxyWebSocketMaxMessageBytes)
 
 	errCh := make(chan error, 2)
-	pipe := func(dst, src *websocket.Conn) {
+	pipe := func(dst, src *websocket.Conn, upstream bool) {
 		for {
 			messageType, reader, readErr := src.NextReader()
 			if readErr != nil {
@@ -504,10 +570,20 @@ func (s *InstanceProxyService) ProxyWebSocket(ctx context.Context, instanceID in
 				errCh <- writeErr
 				return
 			}
-			if _, copyErr := io.Copy(writer, reader); copyErr != nil {
+			var observed boundedUsageFrame
+			var source io.Reader = reader
+			if s.ownerUsage != nil && accessToken.InstanceType == "openclaw" && messageType == websocket.TextMessage {
+				source = io.TeeReader(reader, &observed)
+			}
+			if _, copyErr := io.Copy(writer, source); copyErr != nil {
 				_ = writer.Close()
 				errCh <- copyErr
 				return
+			}
+			// Persist a bounded submission observation before the final frame is
+			// flushed, so a fast upstream final cannot race its submission record.
+			if len(observed.data) > 0 {
+				s.observeOwnerFrame(instanceID, upstream, &observed)
 			}
 			if closeErr := writer.Close(); closeErr != nil {
 				errCh <- closeErr
@@ -516,8 +592,8 @@ func (s *InstanceProxyService) ProxyWebSocket(ctx context.Context, instanceID in
 		}
 	}
 
-	go pipe(upstreamConn, clientConn)
-	go pipe(clientConn, upstreamConn)
+	go pipe(upstreamConn, clientConn, false)
+	go pipe(clientConn, upstreamConn, true)
 
 	select {
 	case <-ctx.Done():
@@ -619,6 +695,8 @@ func setOpenClawRuntimeForwardedClient(header http.Header, request *http.Request
 	if header == nil || request == nil {
 		return
 	}
+	// Never carry a second, caller-controlled attribution chain alongside XFF.
+	header.Del("Forwarded")
 	peer := parseProxyPeerIP(request.RemoteAddr)
 	client := peer
 	if peer != nil && peer.IsLoopback() {
@@ -872,27 +950,42 @@ func injectOpenCodeAbsolutePathPatch(html, proxyPrefix string) string {
 	return script + html
 }
 
-func (s *InstanceProxyService) managedRuntimeGatewayBearerToken(ctx context.Context, instanceID int, instanceType string) string {
+func (s *InstanceProxyService) managedRuntimeGatewayBearerToken(ctx context.Context, instanceID int, instanceType string, target *url.URL, runtimeGateway bool) (string, bool, error) {
 	if s == nil || s.instanceRepo == nil {
-		return ""
+		return "", false, nil
 	}
 	normalizedType, managedType := NormalizeV2RuntimeType(instanceType)
 	if !managedType {
-		return ""
+		return "", false, nil
 	}
 	instance, err := s.instanceRepo.GetByID(instanceID)
 	if err != nil || instance == nil {
-		return ""
+		return "", false, ErrInstanceGatewayUnavailable
+	}
+	if instance.RuntimeSecurityProfile != "" {
+		runtimeType, ok := v2RuntimeTypeForInstance(instance)
+		if s.runtimeSecurity == nil || !runtimeGateway || !ok || runtimeType != normalizedType {
+			return "", false, ErrInstanceGatewayUnavailable
+		}
+		credential, err := s.runtimeSecurity.NativeGatewayCredentialForTarget(ctx, instanceID, target)
+		return credential, true, err
 	}
 	if runtimeType, ok := v2RuntimeTypeForInstance(instance); ok && runtimeType == normalizedType {
 		if instance.AccessToken != nil && strings.TrimSpace(*instance.AccessToken) != "" {
-			return strings.TrimSpace(*instance.AccessToken)
+			return strings.TrimSpace(*instance.AccessToken), false, nil
 		}
 	}
 	if normalizedType == RuntimeTypeOpenClaw && s.openClawGatewayToken != "" {
-		return s.openClawGatewayToken
+		return s.openClawGatewayToken, false, nil
 	}
-	return ""
+	return "", false, nil
+}
+
+func setNativeIngressToken(header http.Header, credential string, protected bool) {
+	header.Del(NativeIngressTokenHeader)
+	if protected {
+		header.Set(NativeIngressTokenHeader, credential)
+	}
 }
 
 func (s *InstanceProxyService) resolveHTTPProxyTarget(ctx context.Context, accessToken *AccessToken, instanceID int, targetPort int32, targetPath, requestPath string) (*url.URL, bool, error) {
@@ -962,6 +1055,11 @@ func (s *InstanceProxyService) resolveV2ProxyTarget(ctx context.Context, accessT
 	}
 	if pod == nil || pod.PodIP == nil || strings.TrimSpace(*pod.PodIP) == "" || binding.GatewayPort <= 0 {
 		return nil, true, ErrInstanceGatewayUnavailable
+	}
+	if isOpenClawRuntimeType(instance.Type) || strings.EqualFold(instance.Type, RuntimeTypeHermes) {
+		if err := s.proxyPolicy.Ensure(ctx, pod); err != nil {
+			return nil, true, &runtimeFailure{code: "PROXY_POLICY_NOT_READY", cause: fmt.Errorf("proxy policy is not ready: %w", err)}
+		}
 	}
 	scheme := "http"
 	if websocket {
@@ -1128,8 +1226,9 @@ func (s *InstanceProxyService) GetProxyURLForInstance(instance *models.Instance,
 		return ""
 	}
 	if runtimeType, ok := v2RuntimeTypeForInstance(instance); ok && runtimeType == RuntimeTypeOpenCode {
-		// OpenCode owns the root of its dedicated origin. Falling back to the
-		// legacy subpath produces broken asset and WebSocket URLs.
+		// OpenCode's web UI owns the root of its origin. Do not fall back to the
+		// legacy /instances/{id}/proxy subpath when the deployment forgot its
+		// dedicated-origin template; fail access generation instead.
 		return managedRuntimePublicURL(runtimeType, instance.ID, token)
 	}
 	if runtimeType, ok := v2RuntimeTypeForInstance(instance); ok && runtimeType == RuntimeTypeDeepSeekHarness {

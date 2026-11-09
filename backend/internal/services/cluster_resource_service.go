@@ -38,7 +38,7 @@ type NodeResourceDetail struct {
 	Name           string          `json:"name"`
 	Ready          bool            `json:"ready"`
 	Roles          []string        `json:"roles"`
-	KubeletVersion string         `json:"kubelet_version"`
+	KubeletVersion string          `json:"kubelet_version"`
 	InternalIP     string          `json:"internal_ip"`
 	PodCount       int             `json:"pod_count"`
 	CPU            ResourceSummary `json:"cpu"`

@@ -27,7 +27,7 @@ func (s *stubGovernanceInstanceRepo) GetByAgentBootstrapToken(string) (*models.I
 	panic("not used")
 }
 func (s *stubGovernanceInstanceRepo) GetAll(int, int) ([]models.Instance, error) { panic("not used") }
-func (s *stubGovernanceInstanceRepo) CountAll() (int, error)                   { panic("not used") }
+func (s *stubGovernanceInstanceRepo) CountAll() (int, error)                     { panic("not used") }
 func (s *stubGovernanceInstanceRepo) GetByUserID(int, int, int) ([]models.Instance, error) {
 	panic("not used")
 }
@@ -70,8 +70,12 @@ func (s *stubGovernanceRuntimeStatusRepo) GetByInstanceID(instanceID int) (*mode
 	}
 	return nil, nil
 }
-func (s *stubGovernanceRuntimeStatusRepo) Create(*models.InstanceRuntimeStatus) error { panic("not used") }
-func (s *stubGovernanceRuntimeStatusRepo) Update(*models.InstanceRuntimeStatus) error { panic("not used") }
+func (s *stubGovernanceRuntimeStatusRepo) Create(*models.InstanceRuntimeStatus) error {
+	panic("not used")
+}
+func (s *stubGovernanceRuntimeStatusRepo) Update(*models.InstanceRuntimeStatus) error {
+	panic("not used")
+}
 
 func TestGetLLMGovernanceOverviewSummarizesManagedRuntimeInstances(t *testing.T) {
 	now := time.Now().UTC()

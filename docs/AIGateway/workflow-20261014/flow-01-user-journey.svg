@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1040" viewBox="0 0 1200 1040" role="img" aria-labelledby="title desc">
+<title id="title">ClawManager Gateway 使用全流程</title><desc id="desc">管理员配置模型和路由，用户通过实例使用 Auto，再通过实际模型提示、审计和费用查看结果。</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10Z" fill="#64748b"/></marker></defs>
+<rect width="1200" height="1040" fill="#f8fafc"/>
+<g font-family="Microsoft YaHei, Arial, sans-serif" fill="#17243b">
+<text x="50" y="54" font-size="28" font-weight="700">使用全流程：从接入模型到验证调用结果</text>
+<text x="50" y="88" font-size="17" fill="#526277">实线表示操作顺序；右侧列出每一步的检查要点。</text>
+<g fill="#fff" stroke="#cad5e2"><rect x="50" y="120" width="720" height="112" rx="12"/><rect x="50" y="268" width="720" height="112" rx="12"/><rect x="50" y="416" width="720" height="112" rx="12"/><rect x="50" y="564" width="720" height="112" rx="12"/><rect x="50" y="712" width="720" height="112" rx="12"/><rect x="50" y="860" width="720" height="112" rx="12"/></g>
+<g fill="none" stroke="#64748b" stroke-width="2" marker-end="url(#arrow)"><path d="M410 232V258"/><path d="M410 380V406"/><path d="M410 528V554"/><path d="M410 676V702"/><path d="M410 824V850"/></g>
+<g font-size="22" font-weight="700"><text x="75" y="157">01　接入供应商</text><text x="75" y="305">02　逐模型规划并保存</text><text x="75" y="453">03　选择真实路由模式</text><text x="75" y="601">04　创建或更新实例配置</text><text x="75" y="749">05　用户选择 Auto 并发送任务</text><text x="75" y="897">06　核对结果与治理记录</text></g>
+<g font-size="18" fill="#40516a"><text x="75" y="193">AI 网关 → 模型 → 添加模型 → 模板 / 协议 / URL / 凭据</text><text x="75" y="341">发现列表 → 调整分组、档位与能力 → 勾选 → 保存</text><text x="75" y="489">设置 → 本地规则 / 规则优先 + Laya / Laya</text><text x="75" y="637">我的实例 → 创建；已有实例按运行模式更新配置</text><text x="75" y="785">Gateway 分类、筛选、准入并调用实际 Provider Model</text><text x="75" y="933">最近调用提示 → 会话用量 → AI 审计 → 成本</text></g>
+<g font-size="17" fill="#526277"><text x="812" y="158">目录可见 ≠ 有推理权限</text><text x="812" y="189">API Key 不应出现在截图中</text><text x="812" y="306">建议档位需要人工确认</text><text x="812" y="337">未选中不导入，也不删除旧模型</text><text x="812" y="454">保存连接 ≠ 启用外部路由</text><text x="812" y="485">启用前确认外发范围</text><text x="812" y="602">浏览器刷新 ≠ 重建运行配置</text><text x="812" y="633">确认实例及 Gateway 可达</text><text x="812" y="750">用户选择仍显示 Auto</text><text x="812" y="781">工具任务可能含多次模型调用</text><text x="812" y="898">最近调用是实例级，不是逐气泡</text><text x="812" y="929">按 Request / Trace 查完整过程</text></g>
+<text x="50" y="1011" font-size="15" fill="#64748b">流程说明，不表示本机已完成所有步骤。真实截图与历史截图在正文分别标注。</text>
+</g></svg>

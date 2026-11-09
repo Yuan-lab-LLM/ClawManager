@@ -7,12 +7,41 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
 	"clawreef/internal/models"
+	"clawreef/internal/services"
 )
+
+type stubLLMModelRepository struct {
+	active []models.LLMModel
+}
+
+func (s *stubLLMModelRepository) List() ([]models.LLMModel, error)       { return s.active, nil }
+func (s *stubLLMModelRepository) ListActive() ([]models.LLMModel, error) { return s.active, nil }
+func (s *stubLLMModelRepository) GetByID(id int) (*models.LLMModel, error) {
+	for _, m := range s.active {
+		if m.ID == id {
+			copy := m
+			return &copy, nil
+		}
+	}
+	return nil, nil
+}
+func (s *stubLLMModelRepository) GetByDisplayName(name string) (*models.LLMModel, error) {
+	for index := range s.active {
+		if s.active[index].DisplayName == name {
+			item := s.active[index]
+			return &item, nil
+		}
+	}
+	return nil, nil
+}
+func (s *stubLLMModelRepository) Save(*models.LLMModel) error { return nil }
+func (s *stubLLMModelRepository) Delete(int) error            { return nil }
 
 type availableModelRepositoryStub struct {
 	active []models.LLMModel
@@ -91,7 +120,7 @@ func TestListAvailableModelsReturnsEmptyCatalogWhenNoModelsAreActive(t *testing.
 	}
 }
 
-func TestGatewayListsAndResolvesEveryExpandedProviderModel(t *testing.T) {
+func TestGatewayDoesNotRouteUnapprovedExpandedProviderModels(t *testing.T) {
 	expanded := make([]models.LLMModel, 0, 7)
 	for index := 1; index <= 7; index++ {
 		expanded = append(expanded, models.LLMModel{
@@ -111,21 +140,305 @@ func TestGatewayListsAndResolvesEveryExpandedProviderModel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListAvailableModels returned error: %v", err)
 	}
-	if len(items) != 8 {
-		t.Fatalf("available model count = %d, want Auto plus 7 provider models: %#v", len(items), items)
-	}
-
-	selected, err := service.resolveRequestedModel("model-7")
-	if err != nil {
-		t.Fatalf("resolveRequestedModel returned error: %v", err)
-	}
-	if selected.ProviderModelName != "provider-model-7" {
-		t.Fatalf("resolved provider model = %q, want provider-model-7", selected.ProviderModelName)
-	}
+	if len(items) != 2 || items[1].DisplayName != "model-1" { t.Fatalf("unapproved model exposed: %#v", items) }
+	if selected, err := service.resolveRequestedModel("model-7"); err == nil || selected != nil { t.Fatalf("unapproved model resolved: %#v, %v", selected, err) }
 }
 
 type stubModelInvocationService struct {
 	items []models.ModelInvocation
+}
+
+type stubAuditEventService struct {
+	events []models.AuditEvent
+}
+
+func (s *stubAuditEventService) RecordEvent(event *models.AuditEvent) error {
+	if event != nil {
+		s.events = append(s.events, *event)
+	}
+	return nil
+}
+
+func (s *stubAuditEventService) ListEventsByTraceID(string) ([]models.AuditEvent, error) {
+	return s.events, nil
+}
+
+func TestResolveRequestedModelUsesModelGroupPriority(t *testing.T) {
+	t.Parallel()
+	gateway := &service{modelRepo: &stubLLMModelRepository{active: []models.LLMModel{
+		{ID: 1, DisplayName: "general-fallback", ModelGroup: "general", DeploymentPriority: 200, IsActive: true},
+		{ID: 2, DisplayName: "general-primary", ModelGroup: "general", DeploymentPriority: 10, IsActive: true},
+		{ID: 3, DisplayName: "reasoning-primary", ModelGroup: "reasoning", DeploymentPriority: 1, IsActive: true},
+	}}}
+
+	resolved, err := gateway.resolveRequestedModel("general")
+	if err != nil {
+		t.Fatalf("resolveRequestedModel returned error: %v", err)
+	}
+	if resolved == nil || resolved.ID != 2 {
+		t.Fatalf("resolved model = %#v, want priority deployment id 2", resolved)
+	}
+}
+
+func TestSelectAutoModelFromGroupsHonorsGatewayKeyAllowList(t *testing.T) {
+	t.Parallel()
+	gateway := &service{modelRepo: &stubLLMModelRepository{active: []models.LLMModel{
+		{ID: 1, DisplayName: "general-primary", ModelGroup: "general", DeploymentPriority: 1, IsActive: true},
+		{ID: 2, DisplayName: "reasoning-primary", ModelGroup: "reasoning", DeploymentPriority: 20, IsActive: true},
+	}}}
+
+	resolved, err := gateway.selectAutoModelFromGroups([]string{"reasoning"})
+	if err != nil {
+		t.Fatalf("selectAutoModelFromGroups returned error: %v", err)
+	}
+	if resolved == nil || resolved.ID != 2 {
+		t.Fatalf("resolved = %#v, want allowed reasoning model", resolved)
+	}
+	if modelAllowedForGatewayKey(&models.LLMModel{ModelGroup: "general"}, []string{"reasoning"}) {
+		t.Fatal("general group must not be allowed by reasoning-only key")
+	}
+}
+
+func TestDeploymentCandidatesStayInGroupAndSecurityBoundary(t *testing.T) {
+	t.Parallel()
+	selected := &models.LLMModel{ID: 1, DisplayName: "secure-primary", ModelGroup: "secure", DeploymentPriority: 10, IsSecure: true, IsActive: true}
+	gateway := &service{modelRepo: &stubLLMModelRepository{active: []models.LLMModel{
+		*selected,
+		{ID: 2, DisplayName: "secure-fallback", ModelGroup: "secure", DeploymentPriority: 20, IsSecure: true, IsActive: true},
+		{ID: 3, DisplayName: "insecure-same-group", ModelGroup: "secure", DeploymentPriority: 1, IsSecure: false, IsActive: true},
+		{ID: 4, DisplayName: "other-group", ModelGroup: "general", DeploymentPriority: 1, IsSecure: true, IsActive: true},
+	}}}
+
+	candidates := gateway.deploymentCandidates(selected)
+	if len(candidates) != 2 || candidates[0].ID != 1 || candidates[1].ID != 2 {
+		t.Fatalf("candidates = %#v, want secure primary then fallback", candidates)
+	}
+}
+
+func TestRiskActionControlsSecureModelRouting(t *testing.T) {
+	t.Parallel()
+	selected := &models.LLMModel{ID: 1, DisplayName: "general", ModelGroup: "general", IsActive: true}
+	gateway := &service{modelRepo: &stubLLMModelRepository{active: []models.LLMModel{
+		*selected,
+		{ID: 2, DisplayName: "secure", ModelGroup: "secure", IsSecure: true, IsActive: true, ProviderType: models.ProviderTypeOpenAICompatible},
+	}}}
+
+	resolved, action, err := gateway.resolveTargetModelForRequest(selected, services.RiskAnalysis{
+		IsSensitive: true, HighestAction: models.RiskActionAllow,
+	}, ChatCompletionRequest{})
+	if err != nil || resolved.ID != selected.ID || action != models.RiskActionAllow {
+		t.Fatalf("allow hit was rerouted: model=%#v action=%q err=%v", resolved, action, err)
+	}
+
+	resolved, action, err = gateway.resolveTargetModelForRequest(selected, services.RiskAnalysis{
+		IsSensitive: true, HighestAction: models.RiskActionRouteSecureModel,
+	}, ChatCompletionRequest{})
+	if err != nil || resolved.ID != 2 || action != models.RiskActionRouteSecureModel {
+		t.Fatalf("secure-route hit was not rerouted: model=%#v action=%q err=%v", resolved, action, err)
+	}
+}
+
+func TestPrioritizeExplicitlySelectedDeployment(t *testing.T) {
+	t.Parallel()
+	primary := &models.LLMModel{ID: 1, DisplayName: "group-primary", DeploymentPriority: 1}
+	selected := &models.LLMModel{ID: 2, DisplayName: "explicit-deployment", DeploymentPriority: 100}
+
+	candidates := prioritizeSelectedDeployment([]*models.LLMModel{primary, selected}, selected)
+	if len(candidates) != 2 || candidates[0].ID != selected.ID || candidates[1].ID != primary.ID {
+		t.Fatalf("candidates = %#v, want explicitly selected deployment first", candidates)
+	}
+}
+
+func TestStreamFailoverBeforeDownstreamCommit(t *testing.T) {
+	t.Parallel()
+	firstCalls := 0
+	first := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		firstCalls++
+		http.Error(w, "retryable deployment failure", http.StatusServiceUnavailable)
+	}))
+	defer first.Close()
+	secondCalls := 0
+	second := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		secondCalls++
+		http.Error(w, "terminal client error", http.StatusBadRequest)
+	}))
+	defer second.Close()
+
+	audit := &stubAuditEventService{}
+	gateway := &service{
+		invocationService: &stubModelInvocationService{},
+		auditEventService: audit,
+		secretRefService:  services.NewSecretRefService(),
+		streamHTTPClient:  first.Client(),
+	}
+	prepared := &preparedChatRequest{
+		traceID:   "trace-stream-failover",
+		requestID: "request-stream-failover",
+		req: ChatCompletionRequest{
+			Model:    "general",
+			Messages: []ChatMessage{{Role: "user", Content: "hello"}},
+			Stream:   true,
+		},
+		deploymentCandidates: []*models.LLMModel{
+			{ID: 1, DisplayName: "primary", ModelGroup: "general", ProviderType: models.ProviderTypeOpenAICompatible, ProtocolType: models.ProtocolTypeOpenAICompatible, ProviderModelName: "provider-primary", BaseURL: first.URL},
+			{ID: 2, DisplayName: "fallback", ModelGroup: "general", ProviderType: models.ProviderTypeOpenAICompatible, ProtocolType: models.ProtocolTypeOpenAICompatible, ProviderModelName: "provider-fallback", BaseURL: second.URL},
+		},
+	}
+	recorder := httptest.NewRecorder()
+
+	if err := gateway.streamPreparedChatCompletions(t.Context(), prepared, recorder); err != nil {
+		t.Fatalf("streamPreparedChatCompletions returned error: %v", err)
+	}
+	if firstCalls != 1 || secondCalls != 1 {
+		t.Fatalf("provider calls = %d/%d, want 1/1", firstCalls, secondCalls)
+	}
+	if recorder.Code != http.StatusBadRequest || !strings.Contains(recorder.Body.String(), "terminal client error") {
+		t.Fatalf("downstream response = %d %q, want fallback 400 body", recorder.Code, recorder.Body.String())
+	}
+	if strings.Contains(recorder.Body.String(), "retryable deployment failure") {
+		t.Fatalf("retryable response leaked downstream: %q", recorder.Body.String())
+	}
+	foundFailover := false
+	for _, event := range audit.events {
+		if event.EventType == "gateway.deployment.failover" {
+			foundFailover = true
+			break
+		}
+	}
+	if !foundFailover {
+		t.Fatal("expected deployment failover audit event")
+	}
+}
+
+func TestStreamFailoverBeforeFirstSemanticToken(t *testing.T) {
+	t.Parallel()
+	first := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, ": heartbeat\n\ndata: {\"choices\":[{\"delta\":{\"role\":\"assistant\"}}]}\n\n")
+	}))
+	defer first.Close()
+	secondCalls := 0
+	second := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		secondCalls++
+		http.Error(w, "fallback selected", http.StatusBadRequest)
+	}))
+	defer second.Close()
+
+	gateway := &service{
+		invocationService: &stubModelInvocationService{}, auditEventService: &stubAuditEventService{},
+		secretRefService: services.NewSecretRefService(), streamHTTPClient: first.Client(),
+	}
+	prepared := &preparedChatRequest{
+		traceID: "trace-pre-token", requestID: "request-pre-token",
+		req: ChatCompletionRequest{Model: "general", Messages: []ChatMessage{{Role: "user", Content: "hello"}}, Stream: true},
+		deploymentCandidates: []*models.LLMModel{
+			{ID: 1, DisplayName: "primary", ModelGroup: "general", ProviderType: models.ProviderTypeOpenAICompatible, ProviderModelName: "primary", BaseURL: first.URL},
+			{ID: 2, DisplayName: "fallback", ModelGroup: "general", ProviderType: models.ProviderTypeOpenAICompatible, ProviderModelName: "fallback", BaseURL: second.URL},
+		},
+	}
+	recorder := httptest.NewRecorder()
+	if err := gateway.streamPreparedChatCompletions(t.Context(), prepared, recorder); err != nil {
+		t.Fatalf("stream failover returned error: %v", err)
+	}
+	if secondCalls != 1 || recorder.Code != http.StatusBadRequest || !strings.Contains(recorder.Body.String(), "fallback selected") {
+		t.Fatalf("fallback response = calls:%d status:%d body:%q", secondCalls, recorder.Code, recorder.Body.String())
+	}
+	if strings.Contains(recorder.Body.String(), "heartbeat") || strings.Contains(recorder.Body.String(), "assistant") {
+		t.Fatalf("pre-token frames leaked downstream: %q", recorder.Body.String())
+	}
+}
+
+func TestStreamDoesNotFailoverAfterDownstreamCommit(t *testing.T) {
+	t.Parallel()
+	first := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, "data: {\"id\":\"chunk-1\",\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n")
+	}))
+	defer first.Close()
+	secondCalls := 0
+	second := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		secondCalls++
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer second.Close()
+
+	gateway := &service{
+		invocationService: &stubModelInvocationService{},
+		auditEventService: &stubAuditEventService{},
+		secretRefService:  services.NewSecretRefService(),
+		streamHTTPClient:  first.Client(),
+	}
+	prepared := &preparedChatRequest{
+		traceID:   "trace-stream-committed",
+		requestID: "request-stream-committed",
+		req:       ChatCompletionRequest{Model: "general", Messages: []ChatMessage{{Role: "user", Content: "hello"}}, Stream: true},
+		deploymentCandidates: []*models.LLMModel{
+			{ID: 1, DisplayName: "primary", ModelGroup: "general", ProviderType: models.ProviderTypeOpenAICompatible, ProtocolType: models.ProtocolTypeOpenAICompatible, ProviderModelName: "provider-primary", BaseURL: first.URL},
+			{ID: 2, DisplayName: "fallback", ModelGroup: "general", ProviderType: models.ProviderTypeOpenAICompatible, ProtocolType: models.ProtocolTypeOpenAICompatible, ProviderModelName: "provider-fallback", BaseURL: second.URL},
+		},
+	}
+
+	err := gateway.streamPreparedChatCompletions(t.Context(), prepared, httptest.NewRecorder())
+	if err == nil {
+		t.Fatal("expected incomplete committed stream to return an error")
+	}
+	if secondCalls != 0 {
+		t.Fatalf("fallback calls = %d, want 0 after downstream commit", secondCalls)
+	}
+}
+
+func TestRetryableProviderResponse(t *testing.T) {
+	t.Parallel()
+	if !isRetryableProviderResponse(&ProxyResponse{StatusCode: http.StatusTooManyRequests}) {
+		t.Fatal("429 should be eligible for deployment failover")
+	}
+	if isRetryableProviderResponse(&ProxyResponse{StatusCode: http.StatusBadRequest}) {
+		t.Fatal("400 must not fail over to a different deployment")
+	}
+	for _, status := range []int{http.StatusUnauthorized, http.StatusPaymentRequired, http.StatusNotFound} {
+		if !isRetryableProviderResponse(&ProxyResponse{StatusCode: status}) || !shouldPenalizeDeployment(t.Context(), status, nil) {
+			t.Fatalf("deployment configuration status %d should fail over and affect circuit health", status)
+		}
+	}
+}
+
+func TestEstimateRequestTokensReservesRequestedOutput(t *testing.T) {
+	t.Parallel()
+	maxTokens := 250
+	req := ChatCompletionRequest{
+		RawBody:   []byte(`{"model":"general","messages":[{"role":"user","content":"hello"}]}`),
+		Messages:  []ChatMessage{{Role: "user", Content: "hello"}},
+		MaxTokens: &maxTokens,
+	}
+	got := EstimateRequestTokens(req)
+	input, _ := routingTokenEstimate(req)
+	wantMinimum := input + maxTokens
+	if got != wantMinimum {
+		t.Fatalf("EstimateRequestTokens = %d, want %d", got, wantMinimum)
+	}
+}
+
+func TestEstimateRequestTokensUsesDefaultOutputReservation(t *testing.T) {
+	t.Parallel()
+	req := ChatCompletionRequest{Messages: []ChatMessage{{Role: "user", Content: "hello"}}}
+	if got := EstimateRequestTokens(req); got <= 1024 {
+		t.Fatalf("EstimateRequestTokens = %d, want input tokens plus default output reservation", got)
+	}
+}
+
+func TestEstimateGatewayBudgetCostReservesRetryInputsAndLargestOutput(t *testing.T) {
+	maxTokens := 1000
+	req := ChatCompletionRequest{Messages: []ChatMessage{{Role: "user", Content: "hello"}}, MaxTokens: &maxTokens}
+	cheap := &models.LLMModel{InputPrice: 1, OutputPrice: 2}
+	expensive := &models.LLMModel{InputPrice: 3, OutputPrice: 8}
+	got := estimateGatewayBudgetCost(req, []*models.LLMModel{cheap, expensive})
+	input, _ := routingTokenEstimate(req)
+	want := float64(input)*(cheap.InputPrice+expensive.InputPrice)/1_000_000.0 + float64(maxTokens)*expensive.OutputPrice/1_000_000.0
+	if got != want {
+		t.Fatalf("budget estimate = %f, want %f", got, want)
+	}
 }
 
 func (s *stubModelInvocationService) RecordInvocation(invocation *models.ModelInvocation) error {
@@ -526,11 +839,13 @@ func TestRuntimeAttributionHelpersPopulateRecords(t *testing.T) {
 	runtimeType := "gateway"
 	gatewayID := "gw_instance_1"
 	runtimePodID := int64(17)
+	gatewayKeyID := 23
 	req := ChatCompletionRequest{
 		InstanceMode: &mode,
 		RuntimeType:  &runtimeType,
 		GatewayID:    &gatewayID,
 		RuntimePodID: &runtimePodID,
+		GatewayKeyID: &gatewayKeyID,
 	}
 
 	invocation := &models.ModelInvocation{}
@@ -541,6 +856,9 @@ func TestRuntimeAttributionHelpersPopulateRecords(t *testing.T) {
 	if invocation.GatewayID == nil || *invocation.GatewayID != gatewayID {
 		t.Fatalf("invocation gateway ID not populated")
 	}
+	if invocation.GatewayKeyID == nil || *invocation.GatewayKeyID != gatewayKeyID {
+		t.Fatalf("invocation gateway key ID not populated")
+	}
 
 	audit := &models.AuditEvent{}
 	applyAuditRuntimeAttribution(audit, req)
@@ -550,11 +868,17 @@ func TestRuntimeAttributionHelpersPopulateRecords(t *testing.T) {
 	if audit.RuntimePodID == nil || *audit.RuntimePodID != runtimePodID {
 		t.Fatalf("audit runtime pod ID not populated")
 	}
+	if audit.GatewayKeyID == nil || *audit.GatewayKeyID != gatewayKeyID {
+		t.Fatalf("audit gateway key ID not populated")
+	}
 
 	cost := &models.CostRecord{}
 	applyCostRuntimeAttribution(cost, req)
 	if cost.GatewayID == nil || *cost.GatewayID != gatewayID {
 		t.Fatalf("cost gateway ID not populated")
+	}
+	if cost.GatewayKeyID == nil || *cost.GatewayKeyID != gatewayKeyID {
+		t.Fatalf("cost gateway key ID not populated")
 	}
 
 	risk := riskHitAttribution(req)
@@ -658,6 +982,45 @@ func TestProxyOpenAIStreamRejectsTruncatedEOF(t *testing.T) {
 	}
 }
 
+func TestProxyOpenAIStreamDefersPreludeUntilSemanticToken(t *testing.T) {
+	input := ": heartbeat\n\ndata: {\"choices\":[{\"delta\":{\"role\":\"assistant\"}}]}\n\n"
+	output := &flushBuffer{}
+
+	result, err := proxyOpenAIStream(strings.NewReader(input), output, output, true)
+	if !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("expected incomplete stream error, got %#v %v", result, err)
+	}
+	if output.Len() != 0 || output.flushes != 0 {
+		t.Fatalf("pre-token output was committed: %q", output.String())
+	}
+}
+
+func TestProxyOpenAIStreamBoundsDeferredPrelude(t *testing.T) {
+	input := ": " + strings.Repeat("x", maxDeferredStreamPreludeBytes+1) + "\n"
+	output := &flushBuffer{}
+
+	_, err := proxyOpenAIStream(strings.NewReader(input), output, output, true)
+	if err == nil || !strings.Contains(err.Error(), "safety limit") {
+		t.Fatalf("expected bounded pre-token buffering error, got %v", err)
+	}
+	if output.Len() != 0 {
+		t.Fatalf("oversized prelude leaked downstream")
+	}
+}
+
+func TestProxyOpenAIStreamRecordsFirstSemanticToken(t *testing.T) {
+	input := "data: {\"choices\":[{\"delta\":{\"content\":\"hello\"},\"finish_reason\":\"stop\"}]}\n\n"
+	output := &flushBuffer{}
+
+	result, err := proxyOpenAIStream(strings.NewReader(input), output, output, true)
+	if err != nil || result.FirstTokenAt.IsZero() {
+		t.Fatalf("semantic TTFT marker missing: %#v %v", result, err)
+	}
+	if output.String() != input {
+		t.Fatalf("semantic stream was not released: %q", output.String())
+	}
+}
+
 func TestProxyOpenAIStreamPreservesProviderErrorFrame(t *testing.T) {
 	input := "data: {\"error\":{\"message\":\"provider overloaded\",\"type\":\"server_error\",\"code\":\"overloaded\"}}\n\n"
 	output := &flushBuffer{}
@@ -734,6 +1097,43 @@ func TestProxyOpenAIStreamReturnsDownstreamWriteFailure(t *testing.T) {
 	)
 	if !errors.Is(err, writeErr) {
 		t.Fatalf("expected downstream write error, got %v", err)
+	}
+}
+
+func TestNormalizeOpenAIReasoningDeltaAddsStandardAlias(t *testing.T) {
+	line := "data: {\"choices\":[{\"delta\":{\"reasoning\":\"step\"}}]}\n"
+	got := normalizeOpenAIReasoningDelta(line)
+	if !strings.Contains(got, `"reasoning":"step"`) || !strings.Contains(got, `"reasoning_content":"step"`) {
+		t.Fatalf("expected reasoning alias in downstream SSE line, got %q", got)
+	}
+	if !strings.HasSuffix(got, "\n") {
+		t.Fatalf("expected SSE line ending to be preserved, got %q", got)
+	}
+}
+
+func TestNormalizeOpenAIReasoningDeltaPreservesExistingAlias(t *testing.T) {
+	line := "data: {\"choices\":[{\"delta\":{\"reasoning\":\"provider\",\"reasoning_content\":\"standard\"}}]}\n"
+	if got := normalizeOpenAIReasoningDelta(line); got != line {
+		t.Fatalf("chunks with standard reasoning_content must remain unchanged, got %q", got)
+	}
+}
+
+func TestSetGatewayModelHeadersExposesAutoRoutingResult(t *testing.T) {
+	requested := "auto"
+	prepared := &preparedChatRequest{
+		req:           ChatCompletionRequest{Model: requested},
+		resolvedModel: &models.LLMModel{DisplayName: "DeepSeek V4", ProviderModelName: "deepseek-v4-pro"},
+	}
+	headers := make(http.Header)
+	setGatewayModelHeaders(headers, prepared)
+	if got := headers.Get("X-ClawManager-Requested-Model"); got != requested {
+		t.Fatalf("requested model = %q, want %q", got, requested)
+	}
+	if got := headers.Get("X-ClawManager-Actual-Model"); got != "deepseek-v4-pro" {
+		t.Fatalf("actual model = %q, want provider model", got)
+	}
+	if got := headers.Get("X-ClawManager-Routing-Mode"); got != "auto" {
+		t.Fatalf("routing mode = %q, want auto", got)
 	}
 }
 

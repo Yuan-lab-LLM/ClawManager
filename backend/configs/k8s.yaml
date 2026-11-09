@@ -7,6 +7,11 @@ kubernetes:
   # incluster: 强制使用 in-cluster 配置（适用于 Pod 内运行）
   # outofcluster: 强制使用 kubeconfig（适用于本地开发）
   mode: "auto"
+  # 0 使用默认值：启用 runtime.networkIsolation 时为 100 QPS / 200 burst，
+  # 其他模式保留 client-go 默认值。也可用 K8S_API_QPS / K8S_API_BURST 覆盖。
+  # 只配置正 QPS 时，非隔离模式补 client-go 默认 burst；负数不允许关闭限流。
+  apiQPS: 0
+  apiBurst: 0
   
   # Out-of-cluster 配置（当 mode 为 outofcluster 或 auto 回退时使用）
   outOfCluster:

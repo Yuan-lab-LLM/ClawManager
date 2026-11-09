@@ -3,6 +3,7 @@ package handlers
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -380,6 +381,34 @@ func TestRuntimeAgentHandlerGatewayReportIsolatesStaleInstanceGeneration(t *test
 	}
 }
 
+func TestRuntimeAgentHandlerUnhealthyReportRetainsBindingAndRecovers(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	pid := 1234
+	binding := &models.InstanceRuntimeBinding{InstanceID: 10, RuntimePodID: 9, Generation: 2, GatewayID: "gw-10-2", GatewayPort: 20010, GatewayPID: &pid, State: "running"}
+	bindingRepo := &runtimeAgentHandlerBindingRepo{bindings: map[int]*models.InstanceRuntimeBinding{10: binding}}
+	instanceRepo := &runtimeAgentHandlerInstanceRepo{}
+	handler := NewRuntimeAgentHandler(config.RuntimePoolConfig{AgentReportToken: "secret"}, &runtimeAgentHandlerPodRepo{}, bindingRepo, instanceRepo, &runtimeAgentHandlerEvents{}, nil)
+	router := gin.New()
+	router.POST("/api/v1/runtime-agent/gateways/report", handler.ReportGateways)
+	for _, state := range []string{"unhealthy", "running"} {
+		body := fmt.Sprintf(`{"pod_id":9,"gateways":[{"instance_id":10,"gateway_id":"gw-10-2","gateway_port":20010,"gateway_pid":1234,"state":%q,"generation":2,"error_message":"gateway_health_unavailable"}]}`, state)
+		recorder := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodPost, "/api/v1/runtime-agent/gateways/report", bytes.NewBufferString(body))
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("X-ClawManager-Agent-Token", "secret")
+		router.ServeHTTP(recorder, request)
+		if recorder.Code != http.StatusOK || len(bindingRepo.deletedInstanceIDs) != 0 {
+			t.Fatalf("report lost the writer: status=%d deleted=%v", recorder.Code, bindingRepo.deletedInstanceIDs)
+		}
+		if state == "unhealthy" && (bindingRepo.updateStateCalls != 1 || bindingRepo.lastUpdatedState != "unhealthy" || bindingRepo.lastUpdatedGeneration != 2 || bindingRepo.bindings[10] != binding || instanceRepo.statusByID[10] != "error") {
+			t.Fatal("unhealthy was not projected as a retained unhealthy binding")
+		}
+	}
+	if instanceRepo.statusByID[10] != "running" || instanceRepo.messageByID[10] != nil {
+		t.Fatal("healthy heartbeat did not recover the same instance")
+	}
+}
+
 func TestRuntimeAgentHandlerReconcilesExactPreviousOpenClawGateway(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	capabilities := `["openclaw.upgrade-preflight-v3"]`
@@ -659,12 +688,14 @@ func (r *runtimeAgentHandlerPodRepo) UpdateMetrics(ctx context.Context, podID in
 }
 
 type runtimeAgentHandlerBindingRepo struct {
-	updateRunningCalls   int
-	updateStateCalls     int
-	bindings             map[int]*models.InstanceRuntimeBinding
-	deletedInstanceIDs   []int
-	deletedRuntimePodIDs []int64
-	reconcileCalls       int
+	updateRunningCalls    int
+	updateStateCalls      int
+	lastUpdatedState      string
+	lastUpdatedGeneration int
+	bindings              map[int]*models.InstanceRuntimeBinding
+	deletedInstanceIDs    []int
+	deletedRuntimePodIDs  []int64
+	reconcileCalls        int
 }
 
 func (r *runtimeAgentHandlerBindingRepo) ReconcileReportedGateway(ctx context.Context, binding *models.InstanceRuntimeBinding, expectedInstanceGeneration, portBlockSize int) (bool, error) {
@@ -725,6 +756,8 @@ func (r *runtimeAgentHandlerBindingRepo) UpdateGatewayAssignment(ctx context.Con
 
 func (r *runtimeAgentHandlerBindingRepo) UpdateState(ctx context.Context, instanceID int, generation int, state string, message *string) error {
 	r.updateStateCalls++
+	r.lastUpdatedState = state
+	r.lastUpdatedGeneration = generation
 	return nil
 }
 

@@ -6,6 +6,10 @@ import type { InstanceListResponse } from "../types/instance";
 // middleware on the backend. The regular instanceService.getInstances
 // hits /instances and is always caller-scoped regardless of role.
 export const adminInstanceService = {
+  getSummary: async (): Promise<{total:number;running:number;allocated_storage_gb:number}> => {
+    const response = await api.get("/admin/instances/summary");
+    return response.data.data;
+  },
   getInstances: async (
     page: number = 1,
     limit: number = 20,

@@ -258,14 +258,14 @@ func (s *skillRepoStub) MarkInstanceSkillRemovedBySkillKey(int, string, time.Tim
 func (s *skillRepoStub) MarkInstanceSkillsRemovedByWorkspacePath(int, string, time.Time) error {
 	return nil
 }
-func (s *skillRepoStub) MarkMissingInstanceSkills(int, []int, time.Time) error      { return nil }
+func (s *skillRepoStub) MarkMissingInstanceSkills(int, []int, time.Time) error { return nil }
 func (s *skillRepoStub) CreateScanResult(result *models.SkillScanResult) error {
 	if result.ID == 0 {
 		result.ID = 99
 	}
 	return nil
 }
-func (s *skillRepoStub) GetScanResultByID(int) (*models.SkillScanResult, error)     { return nil, nil }
+func (s *skillRepoStub) GetScanResultByID(int) (*models.SkillScanResult, error) { return nil, nil }
 func (s *skillRepoStub) ListScanResultsByBlobID(int) ([]models.SkillScanResult, error) {
 	return nil, nil
 }
@@ -353,17 +353,17 @@ func (s *hubTagRepoStub) ListActiveInstanceSkillsBySkillID(int) ([]models.Instan
 	return nil, nil
 }
 func (s *hubTagRepoStub) GetInstanceSkill(int, int) (*models.InstanceSkill, error) { return nil, nil }
-func (s *hubTagRepoStub) UpsertInstanceSkill(*models.InstanceSkill) error            { return nil }
-func (s *hubTagRepoStub) MarkInstanceSkillRemoved(int, int, time.Time) error         { return nil }
+func (s *hubTagRepoStub) UpsertInstanceSkill(*models.InstanceSkill) error          { return nil }
+func (s *hubTagRepoStub) MarkInstanceSkillRemoved(int, int, time.Time) error       { return nil }
 func (s *hubTagRepoStub) MarkInstanceSkillRemovedBySkillKey(int, string, time.Time) error {
 	return nil
 }
 func (s *hubTagRepoStub) MarkInstanceSkillsRemovedByWorkspacePath(int, string, time.Time) error {
 	return nil
 }
-func (s *hubTagRepoStub) MarkMissingInstanceSkills(int, []int, time.Time) error      { return nil }
-func (s *hubTagRepoStub) CreateScanResult(*models.SkillScanResult) error               { return nil }
-func (s *hubTagRepoStub) GetScanResultByID(int) (*models.SkillScanResult, error)     { return nil, nil }
+func (s *hubTagRepoStub) MarkMissingInstanceSkills(int, []int, time.Time) error  { return nil }
+func (s *hubTagRepoStub) CreateScanResult(*models.SkillScanResult) error         { return nil }
+func (s *hubTagRepoStub) GetScanResultByID(int) (*models.SkillScanResult, error) { return nil, nil }
 func (s *hubTagRepoStub) ListScanResultsByBlobID(int) ([]models.SkillScanResult, error) {
 	return nil, nil
 }
@@ -381,6 +381,6 @@ func (s *hubTagRepoStub) GetHubTagByID(id int) (*models.SkillHubTag, error) {
 	return nil, nil
 }
 func (s *hubTagRepoStub) ListHubTagsBySkillID(int) ([]models.SkillHubTag, error) { return nil, nil }
-func (s *hubTagRepoStub) ReplaceSkillTagAssignments(int, []int) error              { return nil }
-func (s *hubTagRepoStub) ListPublicHubSkills() ([]models.Skill, error)             { return nil, nil }
-func (s *hubTagRepoStub) ListSkillsForHubAdmin() ([]models.Skill, error)           { return nil, nil }
+func (s *hubTagRepoStub) ReplaceSkillTagAssignments(int, []int) error            { return nil }
+func (s *hubTagRepoStub) ListPublicHubSkills() ([]models.Skill, error)           { return nil, nil }
+func (s *hubTagRepoStub) ListSkillsForHubAdmin() ([]models.Skill, error)         { return nil, nil }

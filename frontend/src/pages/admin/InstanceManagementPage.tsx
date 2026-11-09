@@ -1,12 +1,15 @@
 ﻿import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import AdminLayout from '../../components/AdminLayout';
 import ConfirmDialog from '../../components/ConfirmDialog';
+import InstanceAutoStopInfo, { InstanceAutoStopControl } from '../../components/InstanceAutoStopInfo';
 import { useI18n } from '../../contexts/I18nContext';
 import { instanceService } from '../../services/instanceService';
 import { adminInstanceService } from '../../services/adminInstanceService';
 import { userService } from '../../services/userService';
-import type { Instance } from '../../types/instance';
+import { formatInstanceType, type Instance } from '../../types/instance';
+import { INSTANCE_STATUS_FILTERS, type InstanceStatusFilter } from '../../lib/instanceListFilters';
 import type { User } from '../../types/user';
+import { getInstanceDisplayStatus } from '../../lib/instanceStatus';
 
 const InstanceManagementPage: React.FC = () => {
   const { t } = useI18n();
@@ -15,7 +18,7 @@ const InstanceManagementPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'all' | Instance['status']>('all');
+  const [statusFilter, setStatusFilter] = useState<InstanceStatusFilter>('all');
   const [typeFilter, setTypeFilter] = useState<'all' | Instance['type']>('all');
   const [modeFilter, setModeFilter] = useState<'all' | Instance['instance_mode']>('all');
   const [runtimeFilter, setRuntimeFilter] = useState<'all' | Instance['runtime_type']>('all');
@@ -67,7 +70,7 @@ const InstanceManagementPage: React.FC = () => {
 
   const filteredInstances = useMemo(() => {
     return instances.filter((instance) => {
-      if (statusFilter !== 'all' && instance.status !== statusFilter) {
+      if (statusFilter !== 'all' && getInstanceDisplayStatus(instance.status, instance.stopped_reason) !== statusFilter) {
         return false;
       }
       if (typeFilter !== 'all' && instance.type !== typeFilter) {
@@ -240,18 +243,18 @@ const InstanceManagementPage: React.FC = () => {
               className="app-input min-w-[280px]"
             />
             <select
+              aria-label={t("instances.statusFilter")}
               value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value as 'all' | Instance['status'])}
+              onChange={(e) => setStatusFilter(e.target.value as InstanceStatusFilter)}
               className="app-input"
             >
               <option value="all">{t('admin.allStatuses')}</option>
-              <option value="running">{t('status.running')}</option>
-              <option value="stopped">{t('status.stopped')}</option>
-              <option value="creating">{t('status.creating')}</option>
-              <option value="error">{t('status.error')}</option>
-              <option value="deleting">{t('status.deleting')}</option>
+              {INSTANCE_STATUS_FILTERS.map((status) => (
+                <option key={status} value={status}>{t(`status.${status}`)}</option>
+              ))}
             </select>
             <select
+              aria-label={t("instances.instanceTypeFilter")}
               value={typeFilter}
               onChange={(e) => setTypeFilter(e.target.value as 'all' | Instance['type'])}
               className="app-input"
@@ -259,7 +262,7 @@ const InstanceManagementPage: React.FC = () => {
               <option value="all">{t('admin.allTypes')}</option>
               {typeOptions.map((type) => (
                 <option key={type} value={type}>
-                  {type}
+                  {formatInstanceType(type)}
                 </option>
               ))}
             </select>
@@ -396,8 +399,10 @@ const InstanceManagementPage: React.FC = () => {
                       </td>
                       <td className="px-5 py-4 align-top">
                         <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${getStatusBadge(instance.status)}`}>
-                          {t(`status.${instance.status}`)}
+                          {t(`status.${getInstanceDisplayStatus(instance.status, instance.stopped_reason)}`)}
                         </span>
+                        <InstanceAutoStopInfo instance={instance} />
+                        <InstanceAutoStopControl instance={instance} onChanged={activity => setInstances(current => current.map(item => item.id === instance.id ? { ...item, last_gateway_activity_at: activity.last_gateway_activity_at, monitoring_since: activity.monitoring_since, auto_stop_disabled: activity.auto_stop_disabled, stopped_reason: activity.stopped_reason, auto_stop_blocker: activity.auto_stop_blocker, auto_stop_phase: activity.stop_phase } : item))} />
                       </td>
                       <td className="px-5 py-4 align-top">
                         <div className="flex justify-end gap-2">

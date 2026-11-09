@@ -1,0 +1,105 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: laya-system
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: laya
+  namespace: laya-system
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: laya
+  template:
+    metadata:
+      labels:
+        app: laya
+    spec:
+      automountServiceAccountToken: false
+      nodeSelector:
+        kubernetes.io/arch: amd64
+        kubernetes.io/hostname: node1
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: laya
+          image: 10.130.14.23:5000/laya-hsr:cpu-offline-20260928-v1@sha256:c8baa39f0f5b03f033a2a34ef694709a026c0a00332b7ef98f749a6f2d45e1e4
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8000
+          env:
+            - name: LAYA_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: laya-api
+                  key: api-key
+            - name: LAYA_THREADS
+              value: "4"
+            - name: LAYA_MAX_CONCURRENT
+              value: "4"
+            - name: LAYA_MAX_TOKEN_BUDGET
+              value: "2048"
+          resources:
+            requests:
+              cpu: "2"
+              memory: 4Gi
+            limits:
+              cpu: "4"
+              memory: 8Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 120
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 6
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: laya
+  namespace: laya-system
+spec:
+  type: ClusterIP
+  selector:
+    app: laya
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http

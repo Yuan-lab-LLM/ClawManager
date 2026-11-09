@@ -422,6 +422,7 @@ def build_parser() -> argparse.ArgumentParser:
             "operation",
             "restart-instance",
             "reset-instance",
+            "delete-instance",
             "enable-password",
             "reset-url",
             "reset-password",
@@ -490,6 +491,8 @@ def run(command: str) -> None:
         }
         if os.getenv("NORTHBOUND_DESCRIPTION"):
             payload["description"] = os.environ["NORTHBOUND_DESCRIPTION"]
+        if os.getenv("NORTHBOUND_INSTANCE_ALIAS", "").strip():
+            payload["alias"] = os.environ["NORTHBOUND_INSTANCE_ALIAS"].strip()
         idempotency_key = os.getenv(
             "NORTHBOUND_IDEMPOTENCY_KEY", f"demo-{uuid.uuid4()}"
         )
@@ -546,13 +549,13 @@ def run(command: str) -> None:
         print_result(client, result)
         return
 
-    if command in {"restart-instance", "reset-instance"}:
+    if command in {"restart-instance", "reset-instance", "delete-instance"}:
         instance_id = required_positive_int("NORTHBOUND_INSTANCE_ID")
-        action = "restart" if command == "restart-instance" else "reset"
+        action = command.removesuffix("-instance")
         idempotency_key = os.getenv(
             "NORTHBOUND_IDEMPOTENCY_KEY", f"demo-{action}-{uuid.uuid4()}"
         )
-        body = {"confirm_data_loss": True} if action == "reset" else {}
+        body = {"confirm_data_loss": True} if action in {"reset", "delete"} else {}
         operation, headers = client.authenticated_request(
             "POST",
             f"{instance_collection_path()}/{instance_id}/{action}",

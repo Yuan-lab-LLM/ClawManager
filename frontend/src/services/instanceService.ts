@@ -21,10 +21,39 @@ import type {
   BatchDeleteLiteInstancesResponse,
   InstanceSessionUsageDetail,
   InstanceSessionUsageResult,
+  RuntimeMaintenanceStatus,
 } from "../types/instance";
 import type { InstanceSkill } from "../types/skill";
 
+export interface BrowserWorkerStatus {
+  enabled: boolean;
+  available: boolean;
+  instance_id: number;
+  access_url?: string;
+  reason?: string;
+  expires_at?: string;
+  status?: "disabled" | "provisioning" | "ready" | "degraded" | "error";
+  last_error?: string;
+  display_width?: number;
+  display_height?: number;
+}
+
 export const instanceService = {
+  getRuntimeMaintenance: async (id: number): Promise<RuntimeMaintenanceStatus> => {
+    const response = await api.get(`/instances/${id}/runtime-maintenance`);
+    return response.data.data;
+  },
+  beginRuntimeMaintenance: async (id: number): Promise<RuntimeMaintenanceStatus> => {
+    const response = await api.post(`/instances/${id}/runtime-maintenance`, { timeout_seconds: 300 });
+    return response.data.data;
+  },
+  cancelRuntimeMaintenance: async (id: number, operationId: string): Promise<void> => {
+    await api.post(`/instances/${id}/runtime-maintenance/cancel`, { operation_id: operationId });
+  },
+  getRuntimeGovernance: async (id: number): Promise<import("../types/instance").RuntimeGovernanceStatus> => {
+    const response = await api.get(`/instances/${id}/runtime-governance`);
+    return response.data.data;
+  },
   // Get instance list
   getInstances: async (
     page: number = 1,
@@ -177,6 +206,18 @@ export const instanceService = {
     desktop_upstream_present?: boolean;
   }> => {
     const response = await api.post(`/instances/${id}/access`);
+    return response.data.data;
+  },
+
+  getBrowserWorker: async (id: number): Promise<BrowserWorkerStatus> => {
+    const response = await api.get(`/instances/${id}/browser-worker`);
+    return response.data.data;
+  },
+
+  generateBrowserWorkerAccess: async (
+    id: number,
+  ): Promise<BrowserWorkerStatus> => {
+    const response = await api.post(`/instances/${id}/browser-worker/access`);
     return response.data.data;
   },
 

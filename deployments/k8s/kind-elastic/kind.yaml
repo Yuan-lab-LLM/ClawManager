@@ -1,0 +1,33 @@
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: cm-elastic
+featureGates:
+  PodLevelResources: true
+  MemoryQoS: true
+  UserNamespacesSupport: true
+networking:
+  apiServerAddress: 127.0.0.1
+nodes:
+  - role: control-plane
+    image: kindest/node:v1.35.0@sha256:452d707d4862f52530247495d180205e029056831160e22870e37e3f6c1ac31f
+    extraPortMappings:
+      - containerPort: 30443
+        hostPort: 18443
+        listenAddress: 127.0.0.1
+        protocol: TCP
+kubeadmConfigPatches:
+  - |
+    kind: KubeletConfiguration
+    featureGates:
+      PodLevelResources: true
+      MemoryQoS: true
+      UserNamespacesSupport: true
+    memoryThrottlingFactor: 1.0
+    userNamespaces:
+      idsPerPod: 1048576
+    kubeReserved:
+      cpu: 200m
+      memory: 512Mi
+    systemReserved:
+      cpu: 200m
+      memory: 256Mi
