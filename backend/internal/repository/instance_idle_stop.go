@@ -228,6 +228,12 @@ func (r *InstanceAutoStopRepository) BeginManualStart(ctx context.Context, id in
 			return models.ErrInstanceStopping
 		}
 		_, err = s.SQL().ExecContext(ctx, `UPDATE instance_model_activity SET monitoring_since=?,start_deadline_at=?,blocker='',updated_at=? WHERE instance_id=?`, now, deadline.UTC(), now, id)
+		if err != nil {
+			return err
+		}
+		// Publish the explicit Start intent under the same instance row lock as
+		// Stop. A later committed Stop must still revoke publication authority.
+		_, err = s.SQL().ExecContext(ctx, `INSERT INTO instance_desired_state(instance_id,desired_power_state,created_at,updated_at) VALUES(?,'running',?,?) ON DUPLICATE KEY UPDATE desired_power_state='running',updated_at=VALUES(updated_at)`, id, now, now)
 		return err
 	})
 }
