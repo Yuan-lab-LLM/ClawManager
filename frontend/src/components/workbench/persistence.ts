@@ -19,6 +19,13 @@ export function workbenchViewKey(userId: number | null | undefined, instanceId: 
     ? `cm:workbench:v1:${userId}:${instanceId}` : null;
 }
 
+// The server fingerprint is non-secret and changes when share authority changes.
+// Never use a bearer share code, signed cookie, or owner scope as a durable key.
+export function sharedWorkbenchViewKey(scope: unknown, instanceId: number | undefined): string | null {
+  return typeof scope === "string" && /^[a-f0-9]{64}$/.test(scope) && Number.isSafeInteger(instanceId) && instanceId! > 0
+    ? `cm:workbench:share:v1:${scope}:${instanceId}` : null;
+}
+
 function storedAddress(value: unknown): string | null {
   if (value === "" || value === undefined) return "";
   if (typeof value !== "string") return null;

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useI18n } from '../../contexts/I18nContext';
-import { workspaceService } from '../../services/workspaceService';
+import { useWorkbenchServices } from './WorkbenchServices';
 import { workbenchError } from '../../services/instanceWorkbenchService';
 import { parseUnifiedDiff, safeImageMime } from './gitPresentation';
 
@@ -8,6 +8,7 @@ export function GitDiff({ instanceId, imagePath, diff, binary }: {
   instanceId: number; imagePath: string | null; diff: string; binary: boolean;
 }) {
   const { t } = useI18n();
+  const { workspace: workspaceService } = useWorkbenchServices();
   const [image, setImage] = useState<{ url?: string; error?: string }>({});
   useEffect(() => {
     let active = true, objectURL: string | undefined;
@@ -20,7 +21,7 @@ export function GitDiff({ instanceId, imagePath, diff, binary }: {
       }).catch(error => { if (active) setImage({ error: workbenchError(error) }); });
     }
     return () => { active = false; if (objectURL) URL.revokeObjectURL(objectURL); };
-  }, [instanceId, imagePath, t]);
+  }, [instanceId, imagePath, workspaceService, t]);
   if (imagePath) return <div className="wb-image-preview">
     <p>{t('workbench.workingCopyPreview')}</p>
     {image.error ? <div className="wb-error" role="alert">{image.error}</div> : image.url ?

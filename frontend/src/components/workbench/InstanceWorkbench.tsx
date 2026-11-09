@@ -1,3 +1,4 @@
+import { useWorkbenchServices } from "./WorkbenchServices";
 import { allowBrowserInstance } from "../../lib/browserOrigin";
 import type { KeyboardEvent } from "react";
 import { useCallback, useEffect, useReducer, useState, useRef, useId } from "react";
@@ -21,7 +22,6 @@ import { useI18n } from "../../contexts/I18nContext";
 import { useAuthStore } from "../../stores/authStore";
 import { WorkspaceFileManager } from "../WorkspaceFileManager";
 import {
-  instanceWorkbenchService as service,
   workbenchError,
   workbenchPreviewError,
 } from "../../services/instanceWorkbenchService";
@@ -85,6 +85,7 @@ export function InstanceWorkbench({
   ...files
 }: Props) {
   const { t } = useI18n();
+  const { service, workspace, scope, canWrite, workspaceKey } = useWorkbenchServices();
   const viewID = useId();
   const [localState, localDispatch] = useReducer(
     workbenchReducer,
@@ -121,6 +122,7 @@ export function InstanceWorkbench({
   const caps = useQuery({
     queryKey: [
       "workbench-capabilities",
+      scope,
       instanceId,
       runtimeGeneration,
       isRunning,
@@ -152,7 +154,7 @@ export function InstanceWorkbench({
   const ready = isRunning && !!caps.data && scopeAllowed;
   const restoringTerminals = state.tabs.some(tab => tab.restoreTerminal && !tab.stale && tab.terminalGeneration === generation);
   const terminalRestoration = useQuery({
-    queryKey: ["workbench-terminal-restore", userId, instanceId, generation],
+    queryKey: ["workbench-terminal-restore", scope, userId, instanceId, generation],
     queryFn: ({ signal }) => service.terminals(instanceId, generation, signal),
     enabled: ready && !!caps.data?.terminal && state.generation === generation && restoringTerminals,
     staleTime: 0,
@@ -191,7 +193,7 @@ export function InstanceWorkbench({
         if (isCurrent()) dispatch({ type: "browser.navigate", id: tab.id, address, url: "", previewError: workbenchPreviewError(error, t), generation });
       });
     }
-  }, [ready, caps.data?.preview, state.generation, state.tabs, generation, instanceId, dispatch, t]);
+  }, [service, ready, caps.data?.preview, state.generation, state.tabs, generation, instanceId, dispatch, t]);
   const selected = state.tabs.find(
     (tab) => tab.id === state.active && !tab.hidden,
   );
@@ -363,7 +365,7 @@ export function InstanceWorkbench({
         hidden={state.panel !== "files"}
         className="wb-panel wb-files"
       >
-        <WorkspaceFileManager instanceId={instanceId} {...files} view={state.files} onViewChange={onFilesChange} />
+        <WorkspaceFileManager instanceId={instanceId} {...files} service={workspace} canWrite={canWrite} workspaceKey={workspaceKey} view={state.files} onViewChange={onFilesChange} />
       </div>
       <div
         id={`wb-panel-${viewID}-git`}

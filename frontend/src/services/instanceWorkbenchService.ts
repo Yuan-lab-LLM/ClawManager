@@ -1,4 +1,5 @@
 import api from "./api";
+import type { AxiosInstance } from "axios";
 import type {
   GitRequest,
   GitResponse,
@@ -21,18 +22,20 @@ export function workbenchPreviewError(error: unknown, t: (key: string) => string
   const code = (error as { response?: { data?: { error_code?: string } } })?.response?.data?.error_code;
   return code === "instance_busy" ? t("workbench.previewBusy") : workbenchError(error);
 }
-const base = (id: number) => `/instances/${id}/workbench`;
-const config = (generation: number, signal?: AbortSignal) => ({
-  params: { generation },
-  signal,
-  timeout: 130000,
-});
-export const instanceWorkbenchService = {
+export function createWorkbenchService(
+  client: Pick<AxiosInstance, "get" | "post" | "delete">,
+  base: (id: number) => string,
+  headers?: Record<string, string>,
+) {
+ const config = (generation: number, signal?: AbortSignal) => ({
+  params: { generation }, signal, timeout: 130000, ...(headers ? { headers } : {}),
+ });
+ return {
   async capabilities(
     id: number,
     signal?: AbortSignal,
   ): Promise<WorkbenchCapabilities> {
-    return (await api.get(`${base(id)}/capabilities`, { signal })).data.data;
+    return (await client.get(`${base(id)}/capabilities`, { signal, ...(headers ? { headers } : {}) })).data.data;
   },
   async git(
     id: number,
@@ -41,7 +44,7 @@ export const instanceWorkbenchService = {
     signal?: AbortSignal,
   ): Promise<GitResponse> {
     return (
-      await api.post(`${base(id)}/git`, request, config(generation, signal))
+      await client.post(`${base(id)}/git`, request, config(generation, signal))
     ).data.data;
   },
   async terminals(
@@ -50,7 +53,7 @@ export const instanceWorkbenchService = {
     signal?: AbortSignal,
   ): Promise<TerminalSession[]> {
     return (
-      (await api.get(`${base(id)}/terminals`, config(generation, signal))).data
+      (await client.get(`${base(id)}/terminals`, config(generation, signal))).data
         .data.sessions ?? []
     );
   },
@@ -60,7 +63,7 @@ export const instanceWorkbenchService = {
     cwd = "",
   ): Promise<TerminalSession> {
     return (
-      await api.post(
+      await client.post(
         `${base(id)}/terminals`,
         { cwd, cols: 100, rows: 30 },
         config(generation),
@@ -75,7 +78,7 @@ export const instanceWorkbenchService = {
     signal?: AbortSignal,
   ): Promise<TerminalOutput> {
     return (
-      await api.get(
+      await client.get(
         `${base(id)}/terminals/${encodeURIComponent(session)}/output`,
         { ...config(generation, signal), params: { generation, cursor } },
       )
@@ -87,7 +90,7 @@ export const instanceWorkbenchService = {
     session: string,
     input: string,
   ): Promise<void> {
-    await api.post(
+    await client.post(
       `${base(id)}/terminals/${encodeURIComponent(session)}/input`,
       { input },
       config(generation),
@@ -100,7 +103,7 @@ export const instanceWorkbenchService = {
     cols: number,
     rows: number,
   ): Promise<void> {
-    await api.post(
+    await client.post(
       `${base(id)}/terminals/${encodeURIComponent(session)}/resize`,
       { cols, rows },
       config(generation),
@@ -112,7 +115,7 @@ export const instanceWorkbenchService = {
     session: string,
   ): Promise<TerminalSession> {
     return (
-      await api.delete(
+      await client.delete(
         `${base(id)}/terminals/${encodeURIComponent(session)}`,
         config(generation),
       )
@@ -123,12 +126,12 @@ export const instanceWorkbenchService = {
     generation: number,
     url: string,
   ): Promise<WorkbenchPreview> {
-    return (await api.post(`${base(id)}/previews`, { url }, config(generation)))
+    return (await client.post(`${base(id)}/previews`, { url }, config(generation)))
       .data.data;
   },
   async processes(id: number, generation: number): Promise<WorkbenchProcess[]> {
     return (
-      (await api.get(`${base(id)}/processes`, config(generation))).data.data
+      (await client.get(`${base(id)}/processes`, config(generation))).data.data
         .processes ?? []
     );
   },
@@ -139,11 +142,14 @@ export const instanceWorkbenchService = {
     action: "stop" | "restart",
   ): Promise<unknown> {
     return (
-      await api.post(
+      await client.post(
         `${base(id)}/processes/${encodeURIComponent(process)}/${action}`,
         {},
         config(generation),
       )
     ).data.data;
   },
-};
+ };
+}
+export const instanceWorkbenchService = createWorkbenchService(api, (id) => `/instances/${id}/workbench`);
+export type WorkbenchService = ReturnType<typeof createWorkbenchService>;

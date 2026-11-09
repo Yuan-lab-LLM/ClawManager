@@ -1,3 +1,4 @@
+import { useWorkbenchServices } from "./WorkbenchServices";
 import { allowBrowserInstance, supportsCredentiallessPreview, trustedPreviewViewer, type BrowserOriginMetadata } from "../../lib/browserOrigin";
 import type { WorkbenchPreview } from "../../types/workbench";
 import { useRef, useState } from "react";
@@ -5,7 +6,6 @@ import { ExternalLink, Globe, RefreshCw, ArrowRight, ShieldAlert } from "lucide-
 import { useRuntimeCertificateTrust } from "../../hooks/useRuntimeCertificateTrust";
 import { useI18n } from "../../contexts/I18nContext";
 import {
-  instanceWorkbenchService as service,
   workbenchPreviewError,
 } from "../../services/instanceWorkbenchService";
 import type { WorkbenchTab } from "./state";
@@ -29,6 +29,7 @@ export function WorkbenchBrowser({
   onNavigate: (address: string, url: string, generation: number, preview: WorkbenchPreview) => void;
 }) {
   const { t } = useI18n();
+  const { service } = useWorkbenchServices();
   const [draft, setDraft] = useState({
     value: tab.address ?? "",
     loaded: tab.address ?? "",

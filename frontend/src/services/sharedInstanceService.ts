@@ -1,5 +1,6 @@
 import type { BrowserOriginMetadata } from "../lib/browserOrigin";
 import axios from "axios";
+import { createWorkbenchService } from "./instanceWorkbenchService";
 import type { WorkspaceFileOperations } from "../components/WorkspaceFileManager";
 import type { WorkspaceEntry, WorkspacePreview, WorkspaceSearchResponse } from "../types/workspace";
 
@@ -13,6 +14,7 @@ export interface SharedInstanceSession extends BrowserOriginMetadata {
     status: string;
     instance_mode?: string;
     runtime_type?: string;
+    runtime_generation?: number;
   };
   access_url: string;
   session_expires_at: string;
@@ -21,6 +23,7 @@ export interface SharedInstanceSession extends BrowserOriginMetadata {
   workspace_available: boolean;
   workspace_root: string;
   csrf_token: string;
+  workbench_scope?: string;
 }
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || "/api/v1";
@@ -115,4 +118,10 @@ export function createSharedWorkspaceService(
       });
     },
   };
+}
+
+export function createSharedWorkbenchService(code: string, csrfToken: string) {
+  return createWorkbenchService(sharedAPI, () => `${shareBase(code)}/workbench`, {
+    "X-ClawManager-Share-CSRF": csrfToken,
+  });
 }

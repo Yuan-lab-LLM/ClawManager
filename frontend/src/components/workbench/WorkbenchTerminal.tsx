@@ -1,3 +1,4 @@
+import { useWorkbenchServices } from "./WorkbenchServices";
 import { useEffect, useRef, useState } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
@@ -5,7 +6,6 @@ import { Unicode11Addon } from "@xterm/addon-unicode11";
 import "@xterm/xterm/css/xterm.css";
 import { useI18n } from "../../contexts/I18nContext";
 import {
-  instanceWorkbenchService as service,
   workbenchError,
 } from "../../services/instanceWorkbenchService";
 import type { TerminalSession } from "../../types/workbench";
@@ -24,6 +24,7 @@ export function WorkbenchTerminal({
   onExit,
 }: Props) {
   const { t } = useI18n();
+  const { service } = useWorkbenchServices();
   const host = useRef<HTMLDivElement>(null);
   const terminal = useRef<Terminal | null>(null);
   const fit = useRef<FitAddon | null>(null);
@@ -95,7 +96,7 @@ export function WorkbenchTerminal({
       if (timer) clearTimeout(timer);
       subscription.dispose();
     };
-  }, [instanceId, session.id, session.generation, session.exited, stale]);
+  }, [service, instanceId, session.id, session.generation, session.exited, stale]);
   useEffect(() => {
     if (!visible || stale || !host.current) return;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -130,6 +131,7 @@ export function WorkbenchTerminal({
       if (timer) clearTimeout(timer);
     };
   }, [
+    service,
     visible,
     stale,
     session.id,
@@ -176,6 +178,7 @@ export function WorkbenchTerminal({
       if (timer) clearTimeout(timer);
     };
   }, [
+    service,
     instanceId,
     session.id,
     session.generation,

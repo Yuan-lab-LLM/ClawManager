@@ -1,3 +1,4 @@
+import { useWorkbenchServices } from "./WorkbenchServices";
 import { useId, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -20,10 +21,8 @@ import {
 } from "lucide-react";
 import { useI18n } from "../../contexts/I18nContext";
 import {
-  instanceWorkbenchService as service,
   workbenchError,
 } from "../../services/instanceWorkbenchService";
-import { workspaceService } from "../../services/workspaceService";
 import type { GitChange, GitRequest } from "../../types/workbench";
 import type { GitViewState } from "./state";
 import { bulkPaths, changePaths, changeStats, imagePreviewPath } from "./gitPresentation";
@@ -45,6 +44,8 @@ export function GitProjects({
   onChange,
 }: Props) {
   const { t, locale } = useI18n();
+  const { service, workspace: workspaceService, scope, canWrite, workspaceKey } = useWorkbenchServices();
+  const fileScope = workspaceKey ?? instanceId;
   const viewID = useId();
   const cache = useQueryClient();
   const [identity, setIdentity] = useState({ repo: null as string | null, open: false, name: "", email: "", error: "", loading: false });
@@ -63,7 +64,7 @@ export function GitProjects({
     error,
     selection,
   } = view;
-  const prefix = ["workbench-git", instanceId, generation];
+  const prefix = ["workbench-git", scope, instanceId, generation];
   const projects = useQuery({
     queryKey: [...prefix, "projects"],
     queryFn: ({ signal }) =>
@@ -78,10 +79,10 @@ export function GitProjects({
       : (projectList[0]?.path ?? null);
   const repository = projectList.find((p) => p.path === currentPath);
   const adding = requestedAdding ?? (
-    currentPath === null && !projects.isLoading && !projects.error ? "import" : null
+    canWrite && currentPath === null && !projects.isLoading && !projects.error ? "import" : null
   );
   const folders = useQuery({
-    queryKey: ["workspace", instanceId, folderPath],
+    queryKey: ["workspace", fileScope, folderPath],
     queryFn: () => workspaceService.list(instanceId, folderPath),
     enabled: enabled && visible && !!adding,
     staleTime: 0,
@@ -153,14 +154,15 @@ export function GitProjects({
     await cache.invalidateQueries({ queryKey: prefix });
   };
   const perform = async (request: GitRequest) => {
+    if (!canWrite) return false;
     onChange({ busy: true, error: "" });
     try {
       const result = await service.git(instanceId, generation, request);
       if (result.project) onChange({ selected: result.project.path });
       await refresh();
       if (request.operation === "clone") {
-        await cache.invalidateQueries({ queryKey: ["workspace", instanceId] });
-        await cache.invalidateQueries({ queryKey: ["workspace-search", instanceId] });
+        await cache.invalidateQueries({ queryKey: ["workspace", fileScope] });
+        await cache.invalidateQueries({ queryKey: ["workspace-search", fileScope] });
       }
       return true;
     } catch (err) {
@@ -193,7 +195,7 @@ export function GitProjects({
     return <div className="wb-change-group">
       <div className="wb-section-label">
         {t(`workbench.${isStaged ? "staged" : "unstaged"}`)}<span>{items.length}</span>
-        <button className="wb-button wb-bulk" disabled={busy || !paths?.length}
+        <button className="wb-button wb-bulk" disabled={busy || !canWrite || !paths?.length}
           title={!paths ? t("workbench.bulkLimit") : undefined}
           onClick={() => paths && void perform({ operation: isStaged ? "unstage" : "stage", path: currentPath!, paths })}>
           {isStaged ? <Minus size={13} /> : <Plus size={13} />}{t(`workbench.${isStaged ? "unstageAll" : "stageAll"}`)}
@@ -216,7 +218,7 @@ export function GitProjects({
               <span className="wb-line-count"><b>+{stats.additions}</b> −{stats.deletions}</span> :
               <span className="wb-file-marker" title={t("workbench.unknownStats")}>—</span>}
           </button>
-          <button className="wb-icon" disabled={busy} title={t(`workbench.${isStaged ? "unstage" : "stage"}`)}
+          <button className="wb-icon" disabled={busy || !canWrite} title={t(`workbench.${isStaged ? "unstage" : "stage"}`)}
             aria-label={`${t(`workbench.${isStaged ? "unstage" : "stage"}`)} ${change.path}`}
             onClick={() => void perform({ operation: isStaged ? "unstage" : "stage", path: currentPath!, paths: changePaths(change, isStaged) })}>
             {isStaged ? <Minus size={14} /> : <Plus size={14} />}
@@ -264,7 +266,7 @@ export function GitProjects({
         </button>
         <button
           className="wb-button"
-          onClick={() => onChange({ adding: "import", path: folderPath, error: "" })}
+          disabled={!canWrite} onClick={() => onChange({ adding: "import", path: folderPath, error: "" })}
         >
           <Plus size={14} />
           {t("workbench.addProject")}
@@ -281,7 +283,7 @@ export function GitProjects({
           {t("workbench.loading")}
         </div>
       )}
-      {adding && (
+      {canWrite && adding && (
         <form
           className="wb-add-project"
           onSubmit={async (e) => {
@@ -310,7 +312,7 @@ export function GitProjects({
               <button
                 type="button"
                 className={adding === "import" ? "active" : ""}
-                onClick={() => onChange({ adding: "import", path: folderPath, error: "" })}
+                disabled={!canWrite} onClick={() => onChange({ adding: "import", path: folderPath, error: "" })}
               >
                 {t("workbench.import")}
               </button>
@@ -321,7 +323,7 @@ export function GitProjects({
                 className="wb-icon"
                 aria-label={t("workbench.cancel")}
                 onClick={() => onChange({ adding: null })}
-                disabled={busy}
+                disabled={busy || !canWrite}
               >
                 <X size={16} />
               </button>
@@ -343,7 +345,7 @@ export function GitProjects({
           <div className="wb-folder-picker" role="group" aria-label={t("workbench.workspaceFolders")}>
             <div className="wb-folder-toolbar">
               <button type="button" className="wb-icon" title={t("workbench.root")} aria-label={t("workbench.root")}
-                disabled={busy} onClick={() => { navigateFolder(""); void cache.invalidateQueries({ queryKey: ["workspace", instanceId, ""], exact: true }); }}>
+                disabled={busy || !canWrite} onClick={() => { navigateFolder(""); void cache.invalidateQueries({ queryKey: ["workspace", fileScope, ""], exact: true }); }}>
                 <Home size={15} />
               </button>
               <button type="button" className="wb-icon" title={t("workbench.parentFolder")} aria-label={t("workbench.parentFolder")}
@@ -364,7 +366,7 @@ export function GitProjects({
               <>
                 <div className="wb-folder-list">
                   {folders.data?.filter((entry) => entry.is_dir && entry.name !== ".git").map((entry) => (
-                    <button type="button" key={entry.path} disabled={busy} className="wb-folder-row"
+                    <button type="button" key={entry.path} disabled={busy || !canWrite} className="wb-folder-row"
                       aria-label={t("workbench.openFolder", { name: entry.name })} title={entry.path}
                       onClick={() => navigateFolder(entry.path)}>
                       <Folder size={15} /><span>{entry.name}</span><ChevronRight size={14} />
@@ -435,7 +437,7 @@ export function GitProjects({
             <select
               id={`wb-branch-${viewID}`}
               value={details.data?.status.branch ?? ""}
-              disabled={busy || !details.data}
+              disabled={busy || !canWrite || !details.data}
               onChange={(e) =>
                 void perform({
                   operation: "checkout",
@@ -470,7 +472,7 @@ export function GitProjects({
               className="wb-icon"
               title={t("workbench.newBranch")}
               aria-label={t("workbench.newBranch")}
-              disabled={busy}
+              disabled={busy || !canWrite}
               onClick={() => onChange({ creatingBranch: !creatingBranch })}
             >
               <Plus size={14} />
@@ -478,7 +480,7 @@ export function GitProjects({
             <span className="wb-spacer" />
             <button
               className="wb-button"
-              disabled={busy}
+              disabled={busy || !canWrite}
               onClick={() =>
                 void perform({ operation: "pull", path: currentPath! })
               }
@@ -488,7 +490,7 @@ export function GitProjects({
             </button>
             <button
               className="wb-button"
-              disabled={busy}
+              disabled={busy || !canWrite}
               onClick={() =>
                 void perform({ operation: "push", path: currentPath! })
               }
@@ -497,7 +499,7 @@ export function GitProjects({
               {t("workbench.push")}
             </button>
           </div>
-          {creatingBranch && (
+          {canWrite && creatingBranch && (
             <form
               className="wb-inline-form"
               onSubmit={async (e) => {
@@ -521,7 +523,7 @@ export function GitProjects({
                 value={branch}
                 onChange={(e) => onChange({ branch: e.target.value })}
               />
-              <button className="wb-button" disabled={busy}>
+              <button className="wb-button" disabled={busy || !canWrite}>
                 {t("workbench.create")}
               </button>
               <button
@@ -625,7 +627,7 @@ export function GitProjects({
               )}
             </div>
           )}
-          {identity.open && identity.repo === currentPath && (
+          {canWrite && identity.open && identity.repo === currentPath && (
             <form className="wb-identity-form" onSubmit={async e => {
               e.preventDefault();
               if (!identity.name.trim() || !identity.email.trim()) { setIdentity(previous => ({...previous,error:t("workbench.identityRequired")})); return; }
@@ -638,19 +640,19 @@ export function GitProjects({
               finally { onChange({busy:false}); }
             }}>
               <div className="wb-form-heading"><strong>{t("workbench.commitIdentity")}</strong>
-                <button type="button" className="wb-icon" disabled={busy} aria-label={t("workbench.cancel")}
+                <button type="button" className="wb-icon" disabled={busy || !canWrite} aria-label={t("workbench.cancel")}
                   onClick={() => setIdentity(previous => ({...previous,open:false}))}><X size={15}/></button>
               </div>
               <small>{t("workbench.identityHint")}</small>
               {identity.error && <div className="wb-error" role="alert">{identity.error}</div>}
-              <label>{t("workbench.identityName")}<input required autoComplete="name" disabled={busy || identity.loading} value={identity.name}
+              <label>{t("workbench.identityName")}<input required autoComplete="name" disabled={busy || !canWrite || identity.loading} value={identity.name}
                 onChange={e => setIdentity(previous => ({...previous,name:e.target.value}))}/></label>
-              <label>{t("workbench.identityEmail")}<input required type="email" autoComplete="email" disabled={busy || identity.loading} value={identity.email}
+              <label>{t("workbench.identityEmail")}<input required type="email" autoComplete="email" disabled={busy || !canWrite || identity.loading} value={identity.email}
                 onChange={e => setIdentity(previous => ({...previous,email:e.target.value}))}/></label>
-              <button className="wb-button" disabled={busy || identity.loading}>{t(identity.loading ? "workbench.loading" : busy ? "workbench.saving" : "workbench.saveIdentity")}</button>
+              <button className="wb-button" disabled={busy || !canWrite || identity.loading}>{t(identity.loading ? "workbench.loading" : busy ? "workbench.saving" : "workbench.saveIdentity")}</button>
             </form>
           )}
-          <form
+          {canWrite && <form
             className="wb-commit-form"
             onSubmit={async (e) => {
               e.preventDefault();
@@ -678,7 +680,7 @@ export function GitProjects({
             />
             <div>
               <small>{t("workbench.commitHint")}</small>
-              <button type="button" className="wb-icon" disabled={busy} title={t("workbench.commitIdentity")} aria-label={t("workbench.commitIdentity")}
+              <button type="button" className="wb-icon" disabled={busy || !canWrite} title={t("workbench.commitIdentity")} aria-label={t("workbench.commitIdentity")}
                 onClick={() => void openIdentity()}><UserRound size={16}/></button>
               <button
                 className="wb-button primary"
@@ -689,7 +691,7 @@ export function GitProjects({
                 {staged.length > 0 && `(${staged.length})`}
               </button>
             </div>
-          </form>
+          </form>}
         </>
       )}
     </div>

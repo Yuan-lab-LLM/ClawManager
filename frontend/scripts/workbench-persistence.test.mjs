@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { initialWorkbench, workbenchReducer } from '../src/components/workbench/state.ts';
-import { readWorkbenchView, writeWorkbenchView, workbenchViewKey, isRestoredPreviewCurrent } from '../src/components/workbench/persistence.ts';
+import { readWorkbenchView, writeWorkbenchView, workbenchViewKey, sharedWorkbenchViewKey, isRestoredPreviewCurrent } from '../src/components/workbench/persistence.ts';
 
 const storage = () => {
   const values = new Map();
@@ -166,4 +166,15 @@ test('a deferred restore cannot replace a newer navigation or a closed tab in th
   assert.equal(state.tabs[0].previewPending, undefined, 'Closing a pending restore must leave the tab retryable');
   state = workbenchReducer(state, { type: 'tab.remove', id: 'first' });
   assert.equal(isRestoredPreviewCurrent(state, 'first', address, 6), false);
+});
+
+test('share view keys isolate links, rotations and owner UI without retaining credentials', () => {
+  const db = storage();
+  const key = sharedWorkbenchViewKey('a'.repeat(64), 42);
+  writeWorkbenchView(key, { state: browserState(), visible: true }, db);
+  assert.equal(readWorkbenchView(key, 6, db).state.tabs.length, 2);
+  assert.equal(readWorkbenchView(sharedWorkbenchViewKey('b'.repeat(64), 42), 6, db).state.tabs.length, 0);
+  assert.equal(readWorkbenchView(workbenchViewKey(7, 42), 6, db).state.tabs.length, 0);
+  assert.equal(sharedWorkbenchViewKey('sl_bearer_code', 42), null);
+  assert.equal(sharedWorkbenchViewKey('a'.repeat(64), undefined), null);
 });
