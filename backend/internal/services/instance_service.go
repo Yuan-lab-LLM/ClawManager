@@ -1322,6 +1322,12 @@ func (s *instanceService) startInstance(instanceID int) error {
 				return err
 			}
 		}
+		if resumed, err := s.resumeUnpublishedV2Start(ctx, instance, runtimeType); resumed || err != nil {
+			if err != nil && s.autoStopRepo != nil {
+				_ = s.autoStopRepo.ClearStartDeadline(ctx, instance.ID)
+			}
+			return err
+		}
 		if err := s.prepareV2InstanceStart(ctx, instance); err != nil {
 			if s.autoStopRepo != nil {
 				_ = s.autoStopRepo.ClearStartDeadline(ctx, instance.ID)
