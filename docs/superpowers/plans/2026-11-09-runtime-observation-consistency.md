@@ -20,7 +20,7 @@
 
 - [x] Add migration105, matching backup schema and typed fields. Preserve observations across heartbeat updates and clear them if registration replaces the Pod UID.
 - [x] Implement conditional observation persistence and tests for stale observations, replacement UIDs and unchanged allocation counters.
-- [ ] Verify backup compatibility and rebuild backup helpers if their compiled schema changes.
+- [x] Verify backup compatibility and rebuild backup helpers if their compiled schema changes.
 
 ## Runtime observation and safe reconciliation
 
@@ -32,15 +32,15 @@
 
 - [x] Merge observed slot ownership and SQL bindings without losing either side of a conflict. Missing/stale evidence produces an explicit unresolved state instead of idle.
 - [x] Update slot colors, details, summaries and action enablement to reflect reconciliation state. Show reported and expected instance IDs and the reason when they disagree.
-- [ ] Add tests for the live Hermes25 case (reported owner without a binding), OpenCode118, true emptiness, stale evidence and concurrent binding publication.
+- [x] Add tests for the live Hermes25 case (reported owner without a binding), OpenCode118, true emptiness, stale evidence and concurrent binding publication.
 
 ## Verification and delivery
 
-- [ ] Run focused red/green, unit/race, isolated MySQL, frontend checks and an independent review. Preserve any unrelated baseline failures as separately identified limitations.
-- [ ] Build pinned manager/backup binaries and frontend on54; inspect image changes and schema completeness.
-- [ ] Update the manager only and verify SQL observations match live reported identities, unknown slots are no longer shown as idle, protected Pods do not restart, and verified empty capacity can be reclaimed.
-- [ ] Remove the temporary container/database/credentials, verify no test Pods remain, document evidence and integrate locally without pushing.
+- [x] Run focused red/green, unit/race, isolated MySQL, frontend checks and an independent review. Preserve any unrelated baseline failures as separately identified limitations.
+- [x] Build pinned manager/backup binaries and frontend on54; inspect image changes and schema completeness.
+- [x] Update the manager only and verify SQL observations match live reported identities, unknown slots are no longer shown as idle, protected Pods do not restart, and verified empty capacity can be reclaimed.
+- [x] Remove the temporary container/database/credentials, verify no test Pods remain, document evidence and push `preview` without creating a PR.
 
 ## Handoff checkpoint
 
-The implementation is committed for transfer, not deployed or certified complete. See [the handoff record](../handoffs/2026-11-09-runtime-observation-consistency.md) for validation results, pending Linux/MySQL checks, live environment baseline, and the owned temporary container that still needs cleanup. No PR is requested.
+Implementation and delivery are complete as of 2026-11-10. See [the verified deployment record](../handoffs/2026-11-10-runtime-observation-consistency.md) for Linux/MySQL/frontend/Chrome results, the final image and live acceptance. The owned temporary container and credentials were removed. Older protocols remain explicitly unknown when they cannot provide writer-exit proof; no binding or cleanup authority is fabricated. No PR was created.
