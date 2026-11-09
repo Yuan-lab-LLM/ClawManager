@@ -108,6 +108,9 @@ func TestSharedWorkbenchPermissionsAndSessionScope(t *testing.T) {
 			if rec.Code != tc.status {
 				t.Fatalf("status=%d want=%d: %s", rec.Code, tc.status, rec.Body.String())
 			}
+			if (tc.name == "git read requires csrf" || tc.name == "preview requires csrf" || tc.name == "write requires csrf") && !strings.Contains(rec.Body.String(), `"error_code":"share_csrf_invalid"`) {
+				t.Fatalf("CSRF denial cannot be safely renewed: %s", rec.Body.String())
+			}
 			if tc.status != 200 && service.calls != 0 {
 				t.Fatal("denied request reached runtime")
 			}

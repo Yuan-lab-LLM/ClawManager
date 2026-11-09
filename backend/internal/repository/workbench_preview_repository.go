@@ -84,7 +84,7 @@ func (s *workbenchPreviewStore) Put(ctx context.Context, key string, lease workb
 	if err != nil {
 		return err
 	}
-	row := workbenchPreviewRow{TokenHash: key, InstanceID: lease.Scope.InstanceID, UserID: lease.Scope.UserID, Generation: lease.Scope.Generation, GatewayID: lease.Scope.GatewayID, TargetURL: targetURL, CreatedAt: lease.CreatedAt.UTC(), ExpiresAt: lease.ExpiresAt.UTC()}
+	row := workbenchPreviewRow{TokenHash: key, InstanceID: lease.Scope.InstanceID, UserID: lease.Scope.UserID, Generation: lease.Scope.Generation, GatewayID: lease.Scope.GatewayID, TargetURL: targetURL, CreatedAt: lease.CreatedAt.UTC(), ExpiresAt: lease.ExpiresAt.UTC().Truncate(time.Microsecond)}
 	return s.session.TxContext(ctx, func(tx db.Session) error {
 		// Serialize per-instance admission and verify the current ownership and
 		// generation again at persistence time, including cross-replica callers.

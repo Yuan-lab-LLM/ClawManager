@@ -82,7 +82,7 @@ func TestWorkbenchPreviewPersistsAcrossReplicasWithoutRawCapabilities(t *testing
 	if _, err := first.Create(context.Background(), workbench.PreviewScope{InstanceID: 42, UserID: 8, Generation: 3, GatewayID: "gw-42-3"}, "localhost:3000"); !errors.Is(err, workbench.ErrPreviewScope) {
 		t.Fatalf("storage accepted an unrelated owner: %v", err)
 	}
-	shared := workbench.SharedPreviewAccess{Code: "sl_test", SessionBinding: strings.Repeat("a", 64), WorkspaceAccess: "read", ExpiresAt: time.Now().Add(10 * time.Minute).UTC()}
+	shared := workbench.SharedPreviewAccess{Code: "sl_test", SessionBinding: strings.Repeat("a", 64), WorkspaceAccess: "read", ExpiresAt: time.Now().UTC().Truncate(time.Second).Add(10*time.Minute + 999999*time.Nanosecond)}
 	sharedLease, err := first.CreateShared(context.Background(), scope, "http://localhost:4000/shared", shared)
 	if err != nil {
 		t.Fatal(err)

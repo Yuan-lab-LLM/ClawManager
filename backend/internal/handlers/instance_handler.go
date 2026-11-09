@@ -2864,6 +2864,18 @@ func (h *InstanceHandler) issueShortExternalAccessToken(c *gin.Context, instance
 	}
 	targetPort := h.proxyService.GetTargetPortForInstance(instance)
 	upstream, _ := h.desktopAccessUpstream(c, instance, targetPort)
+	// Opening another tab must retain the existing CSRF proof until renewal is due.
+	// Recheck all routing/owner fields before reusing a signed share session.
+	if cookie, cookieErr := c.Cookie(shortExternalAccessCookieName(code)); cookieErr == nil {
+		existing, tokenErr := h.accessService.ValidateToken(cookie)
+		if tokenErr == nil && existing.InstanceID == instance.ID && existing.UserID == instance.UserID &&
+			existing.InstanceType == instance.Type && existing.AccessURL == accessURL && existing.Upstream == upstream &&
+			existing.TargetPort == targetPort && existing.SessionBinding == sharedExternalAccessSessionBinding(code, access) &&
+			time.Until(existing.ExpiresAt) > 5*time.Minute {
+			setShortExternalAccessCookies(c, instance.ID, code, existing.Token, int(time.Until(existing.ExpiresAt).Seconds()))
+			return existing, true
+		}
+	}
 	instanceToken, err := h.accessService.GenerateBoundToken(
 		instance.UserID,
 		instance.ID,

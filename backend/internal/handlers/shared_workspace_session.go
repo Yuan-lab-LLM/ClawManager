@@ -58,7 +58,8 @@ func resolveSharedWorkspaceSession(c *gin.Context, instances sharedWorkspaceInst
 		expected := sharedExternalAccessCSRFToken(code, cookie)
 		actual := strings.TrimSpace(c.GetHeader(sharedWorkspaceCSRFHeader))
 		if expected == "" || subtle.ConstantTimeCompare([]byte(expected), []byte(actual)) != 1 {
-			return fail(http.StatusForbidden, "Invalid share request")
+			c.JSON(http.StatusForbidden, gin.H{"success": false, "error": "Invalid share request", "error_code": "share_csrf_invalid"})
+			return nil, false
 		}
 	}
 	instance, err := instances.GetByID(access.InstanceID)

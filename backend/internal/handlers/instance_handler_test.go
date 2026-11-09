@@ -1253,3 +1253,106 @@ func TestGetInstanceSessionUsageDetailNotFound(t *testing.T) {
 		t.Fatalf("status = %d, want %d, body = %s", recorder.Code, http.StatusNotFound, recorder.Body.String())
 	}
 }
+
+func TestSharedInstanceSessionReusesCurrentCookieUntilRenewalWindow(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, tc := range []struct {
+		name       string
+		remaining  time.Duration
+		wrongOwner bool
+		reuse      bool
+	}{
+		{"second tab retains CSRF", 30 * time.Minute, false, true},
+		{"near expiry renews", time.Minute, false, false},
+		{"wrong owner never reused", 30 * time.Minute, true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := t.TempDir()
+			instances := &fakeWorkspaceHandlerInstanceService{instances: map[int]*models.Instance{77: {ID: 77, UserID: 20, Type: "openclaw", Status: "running", RuntimeType: services.RuntimeBackendGateway, InstanceMode: services.InstanceModeLite, WorkspacePath: &path}}}
+			access := &models.InstanceExternalAccess{InstanceID: 77, Enabled: true, AuthMode: services.ExternalAccessModeShareLink, WorkspaceAccess: services.ExternalWorkspaceAccessWrite}
+			tokens := services.NewInstanceAccessService()
+			defer tokens.Stop()
+			handler := &InstanceHandler{instanceService: instances, externalAccessService: &fakeSharedExternalAccessService{access: access}, accessService: tokens, proxyService: services.NewInstanceProxyService(tokens)}
+			router := gin.New()
+			router.GET("/shared/:code/session", handler.GetSharedInstanceSession)
+			executor := &sharedWorkbenchHandlerService{}
+			NewSharedInstanceWorkbenchHandler(executor, instances, handler.externalAccessService, tokens).Register(router.Group("/shared/:code/workbench"))
+			first := httptest.NewRecorder()
+			router.ServeHTTP(first, httptest.NewRequest("GET", "/shared/sl_test/session", nil))
+			if first.Code != 200 {
+				t.Fatalf("initial session: %d %s", first.Code, first.Body.String())
+			}
+			var issued string
+			for _, cookie := range first.Result().Cookies() {
+				if cookie.Name == shortExternalAccessCookieName("sl_test") {
+					issued = cookie.Value
+					break
+				}
+			}
+			original, err := tokens.ValidateToken(issued)
+			if err != nil {
+				t.Fatal(err)
+			}
+			user := 20
+			if tc.wrongOwner {
+				user = 21
+			}
+			old, err := tokens.GenerateBoundToken(user, 77, original.InstanceType, original.AccessURL, original.Upstream, original.TargetPort, tc.remaining, original.SessionBinding)
+			if err != nil {
+				t.Fatal(err)
+			}
+			request := httptest.NewRequest("GET", "/shared/sl_test/session", nil)
+			request.AddCookie(&http.Cookie{Name: shortExternalAccessCookieName("sl_test"), Value: old.Token})
+			second := httptest.NewRecorder()
+			router.ServeHTTP(second, request)
+			if second.Code != 200 {
+				t.Fatalf("second session: %d %s", second.Code, second.Body.String())
+			}
+			current := old.Token
+			for _, cookie := range second.Result().Cookies() {
+				if cookie.Name == shortExternalAccessCookieName("sl_test") {
+					current = cookie.Value
+					break
+				}
+			}
+			if (current == old.Token) != tc.reuse {
+				t.Fatalf("cookie reuse=%v want=%v", current == old.Token, tc.reuse)
+			}
+			var response struct {
+				Data struct {
+					CSRF string `json:"csrf_token"`
+				} `json:"data"`
+			}
+			if err := json.Unmarshal(second.Body.Bytes(), &response); err != nil {
+				t.Fatal(err)
+			}
+			if tc.reuse && response.Data.CSRF != sharedExternalAccessCSRFToken("sl_test", old.Token) {
+				t.Fatal("opening another tab invalidated existing tab CSRF")
+			}
+			// A renewed cookie rejects the previous proof before execution; the refreshed
+			// proof can then be retried without replaying a successful mutation.
+			post := func(csrf string) *httptest.ResponseRecorder {
+				request := httptest.NewRequest("POST", "/shared/sl_test/workbench/git?generation=3", strings.NewReader(`{"operation":"projects"}`))
+				request.AddCookie(&http.Cookie{Name: shortExternalAccessCookieName("sl_test"), Value: current})
+				request.Header.Set(sharedWorkspaceCSRFHeader, csrf)
+				result := httptest.NewRecorder()
+				router.ServeHTTP(result, request)
+				return result
+			}
+			previous := post(sharedExternalAccessCSRFToken("sl_test", old.Token))
+			if tc.reuse {
+				if previous.Code != 200 || executor.calls != 1 {
+					t.Fatalf("unchanged tab lost workbench access: %d %s", previous.Code, previous.Body.String())
+				}
+			} else {
+				if previous.Code != 403 || executor.calls != 0 || !strings.Contains(previous.Body.String(), `"error_code":"share_csrf_invalid"`) {
+					t.Fatalf("stale proof reached executor or cannot renew: %d %s", previous.Code, previous.Body.String())
+				}
+				refreshed := post(response.Data.CSRF)
+				if refreshed.Code != 200 || executor.calls != 1 {
+					t.Fatalf("renewed proof failed: %d %s", refreshed.Code, refreshed.Body.String())
+				}
+			}
+		})
+	}
+}
