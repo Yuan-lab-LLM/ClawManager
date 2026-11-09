@@ -32,6 +32,7 @@ export default function RuntimeActions({
   kind,
   pod,
   initialIds,
+  retryOperationId,
   pods,
   onClose,
   onSubmitted,
@@ -40,10 +41,11 @@ export default function RuntimeActions({
   kind: "schedule" | "evict" | "events" | "history";
   pod?: RuntimePod;
   initialIds?: number[];
+  retryOperationId?: string;
   pods: RuntimePod[];
   onClose: () => void;
   onSubmitted: () => void;
-  onRetry: (ids: number[]) => void;
+  onRetry: (ids: number[], operationId: string) => void;
 }) {
   const { t } = useI18n();
   const instances = [
@@ -124,6 +126,7 @@ export default function RuntimeActions({
     : availableTargets(pods, sources);
   const target = candidates.find((item) => item.id === Number(targetId));
   const request: RuntimeSchedulingRequest = {
+    ...(retryOperationId ? { retry_operation_id: retryOperationId } : {}),
     instance_ids: ids,
     target_pod_id: Number(targetId),
     ...(slot && ids.length === 1 ? { target_slot: Number(slot) } : {}),
@@ -692,7 +695,7 @@ export default function RuntimeActions({
                           <button
                             type="button"
                             className="text-slate-700 underline"
-                            onClick={() => onRetry([item.instance_id])}
+                            onClick={() => onRetry([item.instance_id], operation.id)}
                           >
                             {t("runtimePods.retry")}
                           </button>

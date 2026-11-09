@@ -36,6 +36,7 @@ type Dialog = {
   kind: "schedule" | "evict" | "events" | "history" | "maintenance" | "balance" | "auto-stop";
   pod?: RuntimePod;
   ids?: number[];
+  retryOperationId?: string;
 };
 const types = ["all", "openclaw", "hermes", "opencode", "deepseek-harness"];
 const emptySummary: RuntimePodSummary = {
@@ -452,9 +453,10 @@ export default function RuntimePodsPage() {
             kind={dialog.kind}
             pod={dialogPod}
             initialIds={dialog.ids}
+            retryOperationId={dialog.retryOperationId}
             pods={actionPods}
             onClose={() => setDialog(null)}
-            onRetry={(ids) => setDialog({ kind: "schedule", ids })}
+            onRetry={(ids, retryOperationId) => setDialog({ kind: "schedule", ids, retryOperationId })}
             onSubmitted={() => {
               refresh();
               setDialog({ kind: "history" });

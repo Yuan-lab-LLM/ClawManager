@@ -202,6 +202,7 @@ export interface RuntimePodEvent {
 }
 
 export interface RuntimeSchedulingRequest {
+  retry_operation_id?: string;
   instance_ids: number[];
   target_pod_id: number;
   target_slot?: number;

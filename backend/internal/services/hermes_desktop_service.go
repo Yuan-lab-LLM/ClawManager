@@ -25,8 +25,8 @@ import (
 )
 
 const (
-	HermesDesktopRef        = "v2026.8.31"
-	HermesDesktopCommit     = "29112bef099274229cadff79cdff7bf7b99c4b77"
+	HermesDesktopRef        = "v0.22.5"
+	HermesDesktopCommit     = "bf0203a794a07aac3ff764972ab9087baa4e4f4e"
 	HermesDesktopSessionTTL = 10 * time.Minute
 	hermesDesktopTicketTTL  = 30 * time.Second
 	hermesDesktopMaxBody    = 4 << 20
@@ -98,7 +98,7 @@ type HermesDesktopService struct {
 func NewHermesDesktopService(config HermesDesktopConfig) *HermesDesktopService {
 	key := sha256.Sum256([]byte("clawmanager/hermes-desktop/v1/" + config.Secret))
 	auth, _ := NewHermesGatewayAuth(config.ControlUIOrigin)
-	return &HermesDesktopService{config: config, gatewayAuth: auth, key: key[:], client: &http.Client{Timeout: 15 * time.Second, Transport: &http.Transport{Proxy: nil, DialContext: (&net.Dialer{Timeout: 5 * time.Second}).DialContext, MaxIdleConns: 128, MaxIdleConnsPerHost: 8, IdleConnTimeout: 60 * time.Second, ResponseHeaderTimeout: 10 * time.Second}, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, health: make(map[string]time.Time), catalog: make(map[hermesGatewayCacheKey]hermesDesktopCatalogEntry)}
+	return &HermesDesktopService{config: config, gatewayAuth: auth, key: key[:], client: &http.Client{Timeout: 50 * time.Second, Transport: &http.Transport{Proxy: nil, DialContext: (&net.Dialer{Timeout: 5 * time.Second}).DialContext, MaxIdleConns: 128, MaxIdleConnsPerHost: 8, IdleConnTimeout: 60 * time.Second, ResponseHeaderTimeout: 45 * time.Second}, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, health: make(map[string]time.Time), catalog: make(map[hermesGatewayCacheKey]hermesDesktopCatalogEntry)}
 }
 
 func HermesDesktopBase(instanceID int) string {
@@ -637,18 +637,11 @@ func (s *HermesDesktopService) ProxyAPIRequest(ctx context.Context, c *HermesDes
 		return hermesDesktopSanitize(body, target.platformCredential(), cookies, target.nativeCredential)
 	}
 	if method == http.MethodGet && path == "/hermes/update/check" {
-		status, err := s.desktopRead(ctx, target, "/status", nil)
-		if err != nil {
-			return nil, err
-		}
-		var current struct {
-			Version string `json:"version"`
-		}
-		if json.Unmarshal(status, &current) != nil {
-			return nil, ErrHermesDesktopUpstream
-		}
+		// authorizeClaims has already verified the pinned runtime identity and
+		// current instance generation. A managed update check needs no session,
+		// filesystem, gateway-topology or database probes from /api/status.
 		return json.Marshal(map[string]any{
-			"install_method": "clawmanager", "current_version": current.Version,
+			"install_method": "clawmanager", "current_version": strings.TrimPrefix(HermesDesktopRef, "v"),
 			"behind": nil, "update_available": false, "can_apply": false,
 			"update_command": nil, "message": "Runtime updates are managed by ClawManager.",
 		})

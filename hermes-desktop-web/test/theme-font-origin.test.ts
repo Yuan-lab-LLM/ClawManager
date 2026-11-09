@@ -63,7 +63,7 @@ test('same-origin theme fonts are canonicalized and loaded once while bundled/sy
     assert.equal(link.rel, 'stylesheet')
     assert.equal(link.dataset.hermesThemeFont, 'true')
   }
-  for (const line of ["    '--dt-font-sans': typo.fontSans,", "    '--dt-font-mono': typo.fontMono,"]) {
+  for (const line of ["    '--dt-font-sans': resolveChatFontFamily(chatFontFamily, typo.fontSans),", "    '--dt-font-mono': typo.fontMono,"]) {
     assert.ok(original.includes(line))
     assert.ok(patched.includes(line))
   }

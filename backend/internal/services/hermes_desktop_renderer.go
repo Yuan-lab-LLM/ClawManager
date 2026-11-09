@@ -393,6 +393,7 @@ func (s *HermesDesktopService) desktopCatalog(ctx context.Context, target *herme
 		Provider  string `json:"provider"`
 		Providers []struct {
 			Slug          string   `json:"slug"`
+			Aliases       []string `json:"aliases"`
 			Models        []string `json:"models"`
 			Authenticated bool     `json:"authenticated"`
 		} `json:"providers"`
@@ -412,12 +413,26 @@ func (s *HermesDesktopService) desktopCatalog(ctx context.Context, target *herme
 		if !p.Authenticated && p.Slug != payload.Provider {
 			continue
 		}
-		if hermesDesktopModelName.MatchString(p.Slug) && len(entry.providers) < 512 {
-			entry.providers[p.Slug] = true
+		// The Desktop picker uses custom:<slug> for user-defined providers.
+		// Only aliases advertised by this authenticated Runtime catalogue may
+		// authorize the same provider's models; never strip an arbitrary prefix
+		// or take aliases from a browser-supplied request.
+		if !hermesDesktopModelName.MatchString(p.Slug) {
+			continue
 		}
-		for _, m := range p.Models {
-			if hermesDesktopModelName.MatchString(m) && len(entry.choices) < 10000 {
-				entry.choices[p.Slug+"\x00"+m] = true
+		aliases := append([]string{p.Slug}, p.Aliases...)
+		if len(aliases) > 33 {
+			aliases = aliases[:33]
+		}
+		for _, alias := range aliases {
+			if !hermesDesktopModelName.MatchString(alias) || len(entry.providers) >= 512 {
+				continue
+			}
+			entry.providers[alias] = true
+			for _, m := range p.Models {
+				if hermesDesktopModelName.MatchString(m) && len(entry.choices) < 10000 {
+					entry.choices[alias+"\x00"+m] = true
+				}
 			}
 		}
 	}
@@ -464,15 +479,16 @@ func (s *HermesDesktopService) desktopRPCModelAllowed(ctx context.Context, targe
 // received. Reconnecting renderers re-resume stored IDs; warm activation of an
 // unknown runtime fails, invoking the renderer's existing resume fallback.
 type hermesDesktopRPCScope struct {
-	mu        sync.Mutex
-	live      map[string]bool
-	pending   map[string]hermesDesktopPendingRPC
-	approvals map[string]map[string]bool // session -> request -> deny-only replay
+	mu             sync.Mutex
+	live           map[string]bool
+	pending        map[string]hermesDesktopPendingRPC
+	approvals      map[string]map[string]bool // session -> request -> deny-only replay
+	serverRequests map[string]hermesDesktopServerRequest
 }
 type hermesDesktopPendingRPC struct{ method, sessionID string }
 
 func newHermesDesktopRPCScope() *hermesDesktopRPCScope {
-	return &hermesDesktopRPCScope{live: map[string]bool{}, pending: map[string]hermesDesktopPendingRPC{}, approvals: map[string]map[string]bool{}}
+	return &hermesDesktopRPCScope{live: map[string]bool{}, pending: map[string]hermesDesktopPendingRPC{}, approvals: map[string]map[string]bool{}, serverRequests: map[string]hermesDesktopServerRequest{}}
 }
 
 func (scope *hermesDesktopRPCScope) admit(frame []byte) error {
@@ -490,11 +506,30 @@ func (scope *hermesDesktopRPCScope) admit(frame []byte) error {
 	}
 	scope.mu.Lock()
 	defer scope.mu.Unlock()
+	if request.Method == "" {
+		return scope.admitServerResponse(frame, string(request.ID))
+	}
 	if len(scope.pending) >= 256 {
 		return ErrHermesDesktopForbidden
 	}
 	if _, exists := scope.pending[string(request.ID)]; exists {
 		return ErrHermesDesktopForbidden
+	}
+	if request.Method == "request.answer" {
+		return ErrHermesDesktopForbidden
+	}
+	if request.Method == "clarify.lock" {
+		var params struct {
+			Params struct {
+				QuestionID string `json:"question_id"`
+			} `json:"params"`
+		}
+		_ = json.Unmarshal(frame, &params)
+		key, _ := json.Marshal(request.Params.RequestID)
+		pending, found := scope.serverRequests[string(key)]
+		if !found || pending.method != "clarify" || !scope.live[pending.sessionID] || !pending.questions[params.Params.QuestionID] {
+			return ErrHermesDesktopForbidden
+		}
 	}
 	// Reads are scoped by the CM-authenticated isolated target. Replay runs
 	// immediately on reconnect, before the App's stored-ID resume completes.
@@ -502,8 +537,15 @@ func (scope *hermesDesktopRPCScope) admit(frame []byte) error {
 		return errHermesDesktopUnboundSession
 	}
 	if request.Method == "approval.received" || request.Method == "approval.respond" {
+		var packet struct {
+			Params map[string]json.RawMessage `json:"params"`
+		}
+		_ = json.Unmarshal(frame, &packet)
+		if value := packet.Params["all"]; value != nil && string(value) != "false" {
+			return ErrHermesDesktopForbidden
+		}
 		denyOnly, known := scope.approvals[request.Params.SessionID][request.Params.RequestID]
-		if !known || (request.Method == "approval.respond" && denyOnly && request.Params.Choice != "deny") {
+		if !known || (request.Method == "approval.respond" && (request.Params.Choice != "once" && request.Params.Choice != "deny" || denyOnly && request.Params.Choice != "deny")) {
 			return ErrHermesDesktopForbidden
 		}
 	}
@@ -519,7 +561,11 @@ func (scope *hermesDesktopRPCScope) observe(frame []byte) ([]byte, error) {
 	scope.mu.Lock()
 	defer scope.mu.Unlock()
 	if string(packet["method"]) == `"event"` {
+		scope.cancelServerRequest(packet)
 		return scope.projectApprovalEvent(packet)
+	}
+	if len(packet["method"]) > 0 && len(packet["id"]) > 0 {
+		return scope.observeServerRequest(packet, "")
 	}
 	request, found := scope.pending[string(packet["id"])]
 	if !found {
@@ -548,6 +594,11 @@ func (scope *hermesDesktopRPCScope) observe(frame []byte) ([]byte, error) {
 	if request.method == "session.close" {
 		delete(scope.live, request.sessionID)
 		delete(scope.approvals, request.sessionID)
+		for id, pending := range scope.serverRequests {
+			if pending.sessionID == request.sessionID {
+				delete(scope.serverRequests, id)
+			}
+		}
 	}
 	if request.method == "model.options" {
 		projected, err := hermesDesktopProjectHTTP("/model/options", packet["result"])
@@ -569,6 +620,25 @@ func (scope *hermesDesktopRPCScope) observe(frame []byte) ([]byte, error) {
 	if request.method == "approval.pending" || request.method == "session.events.since" || request.method == "session.create" || request.method == "session.resume" || request.method == "session.activate" {
 		if json.Unmarshal(packet["result"], &object) != nil || object == nil {
 			return nil, ErrHermesDesktopUpstream
+		}
+		if raw, ok := object["open_requests"]; ok {
+			var requests []map[string]json.RawMessage
+			if json.Unmarshal(raw, &requests) != nil || len(requests) > 256 {
+				return nil, ErrHermesDesktopUpstream
+			}
+			sid := result.SessionID
+			if sid == "" {
+				sid = request.sessionID
+			}
+			projected := make([]json.RawMessage, 0, len(requests))
+			for _, pending := range requests {
+				value, err := scope.observeServerRequest(pending, sid)
+				if err != nil {
+					return nil, err
+				}
+				projected = append(projected, value)
+			}
+			object["open_requests"], _ = json.Marshal(projected)
 		}
 		if request.method == "approval.pending" {
 			var approvals []json.RawMessage

@@ -4,6 +4,7 @@ import (
 	"clawreef/internal/runtimeauth"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -12,8 +13,10 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
+	ktesting "k8s.io/client-go/testing"
 )
 
 func configureNoExternalWorkspaceWrites(t *testing.T, client RuntimeAgentClient) {
@@ -97,13 +100,38 @@ func TestNFSProfileGracefulStopUsesTerminatedContainerProof(t *testing.T) {
 	testNFSContainerStop(t, true)
 }
 
-func testNFSContainerStop(t *testing.T, graceful bool) {
+func TestNFSContainerStopWaitsForKubeletAndReplacementWorker(t *testing.T) {
+	testNFSContainerStop(t, false, "delayed")
+}
+
+func TestNFSContainerStopTimeoutRetainsIntentForRetry(t *testing.T) {
+	testNFSContainerStop(t, false, "retry")
+}
+
+func testNFSContainerStop(t *testing.T, graceful bool, mode ...string) {
 	t.Helper()
 	pod := slotTestPod()
 	pod.Labels["clawmanager.io/sandbox-profile"] = "nfs-rootless-v1"
 	pod.Spec.Containers = []corev1.Container{{Name: "slot-0", Env: []corev1.EnvVar{{Name: "RUNTIME_GATEWAY_PORT_START", Value: "20000"}}}}
 	pod.Status.ContainerStatuses = []corev1.ContainerStatus{{Name: "slot-0", ContainerID: "containerd://old"}, {Name: "slot-1", ContainerID: "containerd://other"}}
 	kube := fake.NewSimpleClientset(pod)
+	reads := 0
+	if len(mode) > 0 {
+		kube.PrependReactor("get", "pods", func(action ktesting.Action) (bool, runtime.Object, error) {
+			obj, err := kube.Tracker().Get(corev1.SchemeGroupVersion.WithResource("pods"), "runtime", pod.Name)
+			if err != nil {
+				return true, nil, err
+			}
+			p := obj.(*corev1.Pod).DeepCopy()
+			if p.Status.ContainerStatuses[0].LastTerminationState.Terminated != nil && reads < 3 {
+				reads++
+				p.Status.ContainerStatuses[0].LastTerminationState.Terminated = nil
+			}
+			return true, p, nil
+		})
+	}
+	reconcileCalls := 0
+	var previousIntent *runtimeSlotStopIntent
 	reconciled := false
 	client := NewSlotRuntimeAgentClientWithHTTPClient("token", kube, "runtime", &http.Client{Transport: slotRoundTripper(func(r *http.Request) (*http.Response, error) {
 		body := `{"gateway_id":"gw-7-1"}`
@@ -119,6 +147,10 @@ func testNFSContainerStop(t *testing.T, graceful bool) {
 			if intent.Graceful != graceful {
 				t.Fatal("graceful policy changed before reset")
 			}
+			if previousIntent != nil && *previousIntent != intent {
+				t.Fatal("retry changed persisted stop identity")
+			}
+			previousIntent = &intent
 			message, _ := containerTerminationCommitment(runtimeSlotTerminationMessage{runtimeSlotStopIntent: intent, CleanupConfirmed: true})
 			current, err := kube.CoreV1().Pods("runtime").Get(r.Context(), pod.Name, metav1.GetOptions{})
 			if err != nil {
@@ -134,6 +166,10 @@ func testNFSContainerStop(t *testing.T, graceful bool) {
 			}
 			body = `{"pending":true,"confirmed":false,"stopped":false}`
 		case strings.HasSuffix(r.URL.Path, "/reconcile-stop"):
+			reconcileCalls++
+			if len(mode) > 0 && reconcileCalls == 1 {
+				return &http.Response{StatusCode: 503, Body: io.NopCloser(strings.NewReader("slot unavailable"))}, nil
+			}
 			var proof runtimeSlotContainerProof
 			if err := json.NewDecoder(r.Body).Decode(&proof); err != nil {
 				t.Fatal(err)
@@ -164,6 +200,18 @@ func testNFSContainerStop(t *testing.T, graceful bool) {
 		t.Fatal(err)
 	}
 	var stopErr error
+	if len(mode) > 0 && mode[0] == "retry" {
+		bounded, cancel := context.WithTimeout(ctx, 20*time.Millisecond)
+		err := client.DeleteGateway(bounded, "https://10.0.0.2:19090", "gw-7-1")
+		cancel()
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("missing bounded pending stop: %v", err)
+		}
+		cm, err := kube.CoreV1().ConfigMaps("runtime").Get(ctx, "lite-instance-7", metav1.GetOptions{})
+		if err != nil || reconciled || cm.Data["desired_state"] != "draining" || cm.Data["container_termination_proof"] != "" || cm.Data["container_stop_intent"] == "" {
+			t.Fatal("timeout released unconfirmed writer or lost recovery intent")
+		}
+	}
 	if graceful {
 		stopErr = client.(RuntimeIdleStopClient).IdleStop(ctx, "https://10.0.0.2:19090", "gw-7-1", RuntimeIdleStopRequest{InstanceID: 7, Generation: 1, PodUID: "pod-uid"})
 	} else {
