@@ -10,6 +10,8 @@ import type { RuntimePod, RuntimePodSummary } from "../../types/runtimePool";
 import {
   isSchedulable,
   canManageScheduling,
+  canManageSlot,
+  canEvictPod,
   runtimeError,
   summarizePod,
   formatCPU,
@@ -40,7 +42,7 @@ type Dialog = {
 const types = ["all", "openclaw", "hermes", "opencode", "deepseek-harness"];
 const emptySummary: RuntimePodSummary = {
   pods: 0, online: 0, schedulable: 0, capacity: 0, ready: 0, occupied: 0,
-  available: 0, running: 0, starting: 0, migrating: 0, error: 0, idle: 0, unavailable: 0,
+  available: 0, running: 0, starting: 0, migrating: 0, error: 0, idle: 0, unknown: 0, unavailable: 0,
 };
 
 export default function RuntimePodsPage() {
@@ -170,6 +172,7 @@ export default function RuntimePodsPage() {
         "migrating",
         "error",
         "idle",
+        "unknown",
         "unavailable",
       ] as const
     )
@@ -248,8 +251,8 @@ export default function RuntimePodsPage() {
                 compact
                 label={t("runtimePods.agentReady")}
                 value={`${summary.ready} / ${summary.capacity}`}
-                detail={`${t("runtimePods.ready")} ${summary.ready} · ${t("runtimePods.unavailable")} ${summary.unavailable}`}
-                warning={summary.unavailable > 0}
+                detail={`${t("runtimePods.ready")} ${summary.ready} · ${t("runtimePods.unavailable")} ${summary.unavailable} · ${t("runtimePods.unknown")} ${summary.unknown ?? 0}`}
+                warning={summary.unavailable > 0 || (summary.unknown ?? 0) > 0}
               />
               <Metric
                 compact
@@ -261,7 +264,7 @@ export default function RuntimePodsPage() {
                 compact
                 label={t("runtimePods.incoming")}
                 value={summary.available}
-                detail={`${t("runtimePods.idle")} ${summary.idle} · ${t("runtimePods.unavailable")} ${summary.unavailable}`}
+                detail={`${t("runtimePods.idle")} ${summary.idle} · ${t("runtimePods.unknown")} ${summary.unknown ?? 0}`}
               />
             </div>
             <div className="runtime-filters">
@@ -357,6 +360,7 @@ export default function RuntimePodsPage() {
                   const warning =
                     summary.unavailable > 0 ||
                     summary.error > 0 ||
+                    summary.unknown > 0 ||
                     !isSchedulable(pod);
                   const canOperate = pod.id > 0 && pod.agent_reported !== false;
                   return (
@@ -388,6 +392,7 @@ export default function RuntimePodsPage() {
                       <div className="runtime-card-actions" onClick={event => event.stopPropagation()}>
                         <span className="mr-auto min-w-0 truncate tabular-nums text-slate-600" title={`Agent ${summary.ready}/${pod.capacity} · ${stateCounts(pod)}`}>
                           {t("runtimePods.cardUsed")} {summary.occupied}/{pod.capacity} · {t("runtimePods.cardFree")} {summary.available}
+                          {summary.unknown > 0 && ` · ${t("runtimePods.unknown")} ${summary.unknown}`}
                         </span>
                         <button type="button" className="shrink-0 text-slate-600 hover:text-slate-950" aria-label={t("runtimePods.viewAgents", { count: pod.capacity })} title={t("runtimePods.viewAgents", { count: pod.capacity })} onClick={() => selectRuntimePod(pod)}>{t("runtimePods.cardView")}</button>
                         <button type="button" className="runtime-card-menu-trigger" popoverTarget={`runtime-actions-${pod.namespace}-${pod.pod_name}`} aria-label={t("runtimePods.cardActions")} onClick={event => {
@@ -396,9 +401,9 @@ export default function RuntimePodsPage() {
                         }}>{t("runtimePods.cardActions")} ▾</button>
                         <div id={`runtime-actions-${pod.namespace}-${pod.pod_name}`} popover="auto" className="runtime-card-popover" style={menuPosition}>
                           <button type="button" disabled={!canOperate} onClick={event => { event.currentTarget.closest<HTMLElement>("[popover]")?.hidePopover(); setDialog({ kind: "events", pod }); }}>{t("runtimePods.events")}</button>
-                          <button type="button" className="text-red-600" disabled={!canOperate || !summary.occupied} onClick={event => { event.currentTarget.closest<HTMLElement>("[popover]")?.hidePopover(); setDialog({ kind: "evict", pod }); }}>{t("runtimePods.evict")}</button>
+                          <button type="button" className="text-red-600" disabled={!canEvictPod(pod)} onClick={event => { event.currentTarget.closest<HTMLElement>("[popover]")?.hidePopover(); setDialog({ kind: "evict", pod }); }}>{t("runtimePods.evict")}</button>
                           <button type="button" disabled={!canManageScheduling(pod) || busyPod === pod.id} onClick={event => { event.currentTarget.closest<HTMLElement>("[popover]")?.hidePopover(); void toggleScheduling(pod); }}>{t(`runtimePods.${paused ? "resume" : "pause"}`)}</button>
-                          <button type="button" disabled={!canOperate || !summary.occupied} onClick={event => { event.currentTarget.closest<HTMLElement>("[popover]")?.hidePopover(); openSchedule(pod); }}>{t("runtimePods.manual")}</button>
+                          <button type="button" disabled={!canOperate || !pod.slots?.some(canManageSlot)} onClick={event => { event.currentTarget.closest<HTMLElement>("[popover]")?.hidePopover(); openSchedule(pod); }}>{t("runtimePods.manual")}</button>
                         </div>
                       </div>
                     </article>

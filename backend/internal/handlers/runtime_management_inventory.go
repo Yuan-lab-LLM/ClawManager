@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"time"
 
 	"clawreef/internal/models"
 	"clawreef/internal/services"
@@ -111,6 +112,7 @@ func (h *RuntimePoolHandler) enrichRuntimeInventory(ctx context.Context, items [
 			}
 		}
 		if !reported[pod.ID] {
+			models.ReconcileRuntimePodObservation(&pod.RuntimePod, nil, false, time.Now().UTC())
 			continue
 		}
 		pod.BindingsReported = true
@@ -151,5 +153,6 @@ func (h *RuntimePoolHandler) enrichRuntimeInventory(ctx context.Context, items [
 			slot.InstanceState = gateway.InstanceState
 			slot.ErrorMessage = binding.ErrorMessage
 		}
+		models.ReconcileRuntimePodObservation(&pod.RuntimePod, byPod[pod.ID], true, time.Now().UTC())
 	}
 }

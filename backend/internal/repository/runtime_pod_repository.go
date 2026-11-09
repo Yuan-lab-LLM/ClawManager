@@ -98,6 +98,7 @@ func (r *runtimePodRepository) UpsertFromAgent(ctx context.Context, pod *models.
 			}
 		}
 		ensureTimestamps(&pod.CreatedAt, &pod.UpdatedAt)
+		// MySQL evaluates updates left to right: reset observations before replacing pod_uid.
 		res, err := tx.SQL().ExecContext(ctx, `
 		INSERT INTO runtime_pods (
 			runtime_type, namespace, pod_name, pod_uid, pod_ip, node_name, deployment_name,
@@ -109,6 +110,8 @@ func (r *runtimePodRepository) UpsertFromAgent(ctx context.Context, pod *models.
 		ON DUPLICATE KEY UPDATE
 			id = LAST_INSERT_ID(id),
 			runtime_type = VALUES(runtime_type),
+			observation_json = IF(BINARY pod_uid <=> BINARY VALUES(pod_uid), observation_json, NULL),
+			observation_at = IF(BINARY pod_uid <=> BINARY VALUES(pod_uid), observation_at, NULL),
 			pod_uid = VALUES(pod_uid),
 			pod_ip = VALUES(pod_ip),
 			node_name = VALUES(node_name),

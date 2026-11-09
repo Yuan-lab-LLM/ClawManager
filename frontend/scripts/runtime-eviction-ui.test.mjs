@@ -683,3 +683,33 @@ test('scale-in history exposes cancellation while starting or needing attention 
   const tree = setup({ kind: 'history', historyItems: [{ id: 'migration', kind: 'migration', status: 'starting', items: [] }] }).render();
   assert.equal(button(tree, 'Stop further moves'), undefined);
 });
+
+
+test('unresolved observations cannot be selected for migration or evicted, including force', async () => {
+  for (const reconciliation_state of ['residual', 'conflict', 'unknown', 'consistent']) {
+    const unsafe = { ...source, reconciliation_state, slots: [{ index: 1, ready: true, instance_id: 25, expected_instance_id: 118, reconciliation_state, binding_confirmed: false }] };
+    const schedule = setup({ kind: 'schedule', pod: unsafe, pods: [unsafe, target], initialIds: [25] });
+    assert.equal(find(schedule.render(), node => node.type === 'input' && node.props.type === 'checkbox').length, 0);
+    assert.equal(button(schedule.render(), 'Validate target').props.disabled, true);
+    const evict = setup({ pod: unsafe, pods: [unsafe, target] });
+    input(evict.render(), 'radio', 'force').props.onChange(); acknowledge(evict);
+    assert.equal(button(evict.render(), 'Start eviction').props.disabled, true);
+    button(evict.render(), 'Start eviction').props.onClick(); await tick();
+    assert.equal(evict.calls(), 0);
+  }
+});
+
+test('slot details show observed and expected owners and explicit unknown without offering migration', () => {
+  const view = setup({ component: 'RuntimePodDetails', pod: { ...source, slots: [
+    { index: 1, ready: true, instance_id: 25, expected_instance_id: 118, reconciliation_state: 'conflict', binding_confirmed: false, observation_message: 'owner mismatch' },
+    { index: 2, ready: true, reconciliation_state: 'unknown', observation_message: 'observation expired' },
+  ] } });
+  const markup = renderToStaticMarkup(view.render());
+  assert.match(markup, /Reported instance.*#25/);
+  assert.match(markup, /Expected binding.*#118/);
+  assert.match(markup, /owner mismatch/);
+  assert.match(markup, /observation expired/);
+  assert.match(markup, /Unknown/);
+  assert.equal(button(view.render(), 'Manual scheduling'), undefined);
+  assert.equal(find(view.render(), node => node.type === 'input' && node.props.type === 'checkbox' && !node.props.disabled).length, 0);
+});

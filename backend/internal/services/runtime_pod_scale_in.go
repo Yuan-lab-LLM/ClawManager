@@ -381,7 +381,7 @@ func (s *RuntimeManagementService) submitScaleInJournal(ctx context.Context, jou
 			if !enabled {
 				return errors.New("automatic idle scale-in disabled")
 			}
-			if err := s.idlePoolDemandAdmission(ctx, tx, journal.Target.RuntimeType, journal.Plan.SourcePods); err != nil {
+			if err := s.idlePoolDemandAdmission(ctx, tx, journal.Plan.SourcePods); err != nil {
 				return err
 			}
 			if err := repository.CheckRuntimePodDeletionIntent(ctx, tx, journal.Target.Namespace, journal.Target.DeploymentName); err != nil {
@@ -404,6 +404,11 @@ func (s *RuntimeManagementService) submitScaleInJournal(ctx context.Context, jou
 			}
 			if uid != source.PodUID || paused || used != source.InstanceCount {
 				return errors.New("source occupancy or identity changed; refresh preflight")
+			}
+			if journal.AutomaticIdle {
+				if err := repository.CheckRuntimePodEmptyObservation(ctx, tx, source.ID, source.PodUID); err != nil {
+					return err
+				}
 			}
 			bindings, err := repository.NewInstanceRuntimeBindingRepository(tx).ListByRuntimePodID(ctx, source.ID)
 			if err != nil {

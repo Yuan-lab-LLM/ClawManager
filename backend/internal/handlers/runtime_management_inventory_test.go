@@ -6,10 +6,43 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"clawreef/internal/models"
 	"github.com/gin-gonic/gin"
 )
+
+func TestRuntimeInventoryShowsReportedOwnerMissingFromDatabase(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	uid, first, second := "hermes-pod", 20000, 20001
+	snapshot := models.RuntimePodObservation{PodUID: uid, ObservedAt: now, Slots: []models.RuntimeSlotObservation{
+		{ContainerName: "slot-0", GatewayPort: first, State: "occupied", InstanceID: 25, UserID: 1, GatewayID: "gw-25-14", Generation: 14, InstanceState: "starting", GatewayState: "error", Error: "legacy owner proof unavailable"},
+		{ContainerName: "slot-1", GatewayPort: second, State: "free"},
+	}}
+	data, err := json.Marshal(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := string(data)
+	pod := models.RuntimePod{ID: 132, RuntimeType: "hermes", PodUID: &uid, State: "ready", Capacity: 2, UsedSlots: 1, LastSeenAt: &now, ObservationAt: &now, ObservationJSON: &raw, Slots: []models.RuntimeSlot{
+		{Index: 1, ContainerName: "slot-0", GatewayPort: &first, Ready: true},
+		{Index: 2, ContainerName: "slot-1", GatewayPort: &second, Ready: true},
+	}}
+	handler := NewRuntimePoolHandler(&runtimePoolHandlerPodRepo{pods: []models.RuntimePod{pod}}, &runtimePoolHandlerBindingRepo{}, nil, nil, nil)
+	router := runtimePoolHandlerRouter(1, "admin", handler)
+	response := runtimePageRequest(t, router, "?page=1")
+	if len(response.Data.Pods) != 1 {
+		t.Fatal("reported Pod disappeared")
+	}
+	actual := response.Data.Pods[0]
+	slot := actual.Slots[0]
+	if slot.InstanceID == nil || *slot.InstanceID != 25 || slot.InstanceState != "error" || slot.ReconciliationState != "residual" || slot.BindingConfirmed {
+		t.Fatalf("runtime owner was hidden by absent database binding: %+v", slot)
+	}
+	if response.Data.Summary["error"] != 1 || response.Data.Summary["occupied"] != 1 || response.Data.Summary["idle"] != 1 {
+		t.Fatalf("summary disagrees with slot facts: %+v", response.Data.Summary)
+	}
+}
 
 func TestRuntimeInventorySlotsKeepContainerHealthSeparateFromBinding(t *testing.T) {
 	gin.SetMode(gin.TestMode)

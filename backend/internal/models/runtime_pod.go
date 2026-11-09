@@ -32,6 +32,8 @@ type RuntimePod struct {
 	DiskBytesUsed        int64      `db:"disk_bytes_used" json:"disk_bytes_used"`
 	NetworkRXBytes       int64      `db:"network_rx_bytes" json:"network_rx_bytes"`
 	NetworkTXBytes       int64      `db:"network_tx_bytes" json:"network_tx_bytes"`
+	ObservationJSON      *string    `db:"observation_json" json:"-"`
+	ObservationAt        *time.Time `db:"observation_at" json:"observation_at,omitempty"`
 	MetricsJSON          *string    `db:"metrics_json" json:"-"`
 	LastSeenAt           *time.Time `db:"last_seen_at" json:"last_seen_at,omitempty"`
 	CreatedAt            time.Time  `db:"created_at" json:"created_at"`
@@ -59,6 +61,9 @@ type RuntimePod struct {
 	CoordinatorCPUMillisRequest   *int64        `db:"-" json:"-"`
 	CoordinatorMemoryBytesRequest *int64        `db:"-" json:"-"`
 	StorageClass                  string        `db:"-" json:"storage_class,omitempty"`
+	ReconciliationState           string        `db:"-" json:"reconciliation_state"`
+	ReconciliationMessage         string        `db:"-" json:"reconciliation_message,omitempty"`
+	UnknownSlots                  int           `db:"-" json:"unknown_slots"`
 	Slots                         []RuntimeSlot `db:"-" json:"slots"`
 	WorkspaceStorageIdentity      string        `db:"-" json:"-"`
 	CoordinatorCPUMillis          *int64        `db:"-" json:"-"`
@@ -67,26 +72,30 @@ type RuntimePod struct {
 
 // RuntimeSlot keeps Kubernetes container health separate from its assigned instance.
 type RuntimeSlot struct {
-	Index              int     `json:"index"`
-	ContainerName      string  `json:"container_name"`
-	Ready              bool    `json:"ready"`
-	RestartCount       int32   `json:"restart_count"`
-	Reason             string  `json:"reason,omitempty"`
-	State              string  `json:"state"`
-	CPUMillisUsed      *int64  `json:"cpu_millis_used,omitempty"`
-	MemoryBytesUsed    *int64  `json:"memory_bytes_used,omitempty"`
-	CPUMillisLimit     *int64  `json:"cpu_millis_limit,omitempty"`
-	MemoryBytesLimit   *int64  `json:"memory_bytes_limit,omitempty"`
-	CPUMillisRequest   *int64  `json:"-"`
-	MemoryBytesRequest *int64  `json:"-"`
-	InstanceID         *int    `json:"instance_id,omitempty"`
-	InstanceName       string  `json:"instance_name,omitempty"`
-	Owner              *string `json:"owner,omitempty"`
-	InstanceState      string  `json:"instance_state,omitempty"`
-	GatewayID          string  `json:"gateway_id,omitempty"`
-	GatewayPort        *int    `json:"gateway_port,omitempty"`
-	Generation         *int    `json:"generation,omitempty"`
-	ErrorMessage       *string `json:"error_message,omitempty"`
+	Index               int     `json:"index"`
+	ContainerName       string  `json:"container_name"`
+	Ready               bool    `json:"ready"`
+	RestartCount        int32   `json:"restart_count"`
+	Reason              string  `json:"reason,omitempty"`
+	State               string  `json:"state"`
+	CPUMillisUsed       *int64  `json:"cpu_millis_used,omitempty"`
+	MemoryBytesUsed     *int64  `json:"memory_bytes_used,omitempty"`
+	CPUMillisLimit      *int64  `json:"cpu_millis_limit,omitempty"`
+	MemoryBytesLimit    *int64  `json:"memory_bytes_limit,omitempty"`
+	CPUMillisRequest    *int64  `json:"-"`
+	MemoryBytesRequest  *int64  `json:"-"`
+	InstanceID          *int    `json:"instance_id,omitempty"`
+	InstanceName        string  `json:"instance_name,omitempty"`
+	Owner               *string `json:"owner,omitempty"`
+	InstanceState       string  `json:"instance_state,omitempty"`
+	GatewayID           string  `json:"gateway_id,omitempty"`
+	GatewayPort         *int    `json:"gateway_port,omitempty"`
+	Generation          *int    `json:"generation,omitempty"`
+	ErrorMessage        *string `json:"error_message,omitempty"`
+	ReconciliationState string  `json:"reconciliation_state"`
+	ExpectedInstanceID  *int    `json:"expected_instance_id,omitempty"`
+	BindingConfirmed    bool    `json:"binding_confirmed"`
+	ObservationMessage  string  `json:"observation_message,omitempty"`
 }
 
 func (p RuntimePod) Capabilities() []string {

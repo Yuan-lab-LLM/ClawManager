@@ -55,6 +55,27 @@ func scaleInMySQLFixture(t *testing.T) (db.Session, *RuntimeManagementService, *
 	if _, err = sess.SQL().Exec("UPDATE runtime_pods SET agent_endpoint='https://agent-1' WHERE id=1"); err != nil {
 		t.Fatal(err)
 	}
+	// Automatic reclamation consumes the same fresh facts as inventory. This
+	// fixture starts with two physically empty native Pods before each test adds
+	// any claims, stopped owners, or conflicting database state.
+	for index, physical := range []*corev1.Pod{p, q} {
+		observedAt := time.Now().UTC().Truncate(time.Microsecond)
+		observation := models.RuntimePodObservation{PodUID: string(physical.UID), ObservedAt: observedAt}
+		slots, err := runtimeAuditPhysicalSlots(physical, 8)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, slot := range slots {
+			observation.Slots = append(observation.Slots, models.RuntimeSlotObservation{ContainerName: slot.Name, GatewayPort: slot.Port, State: "free"})
+		}
+		data, err := json.Marshal(observation)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err = sess.SQL().Exec("UPDATE runtime_pods SET observation_json=?,observation_at=? WHERE id=?", string(data), observedAt, index+1); err != nil {
+			t.Fatal(err)
+		}
+	}
 	scheduler := maintenance.scheduler
 	scheduler.agentClient = &strictStopRuntimeAgent{fakeRuntimeAgentClient: &fakeRuntimeAgentClient{}, strict: true}
 	scheduler.heartbeatTimeout = time.Minute

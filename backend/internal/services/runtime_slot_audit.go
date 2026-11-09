@@ -41,15 +41,18 @@ type runtimeSlotAuditSnapshot struct {
 	MaintenanceOperationID string                 `json:"maintenance_operation_id"`
 	Assignment             *runtimeSlotAuditOwner `json:"assignment"`
 	Gateways               []struct {
-		State string `json:"state"`
+		GatewayID string `json:"gateway_id"`
+		State     string `json:"state"`
 	} `json:"gateways"`
 }
 type runtimeSlotAuditObservation struct {
-	Name     string
-	Port     int
-	Block    int
-	Snapshot runtimeSlotAuditSnapshot
-	Err      error
+	Name       string
+	Port       int
+	Block      int
+	Snapshot   runtimeSlotAuditSnapshot
+	Err        error
+	ReadOK     bool
+	Diagnostic string
 }
 
 func (o runtimeSlotAuditObservation) free() bool {
@@ -182,43 +185,150 @@ func (c *slotRuntimeAgentClient) physicalGatewayPorts(ctx context.Context, pod m
 }
 
 func (c *slotRuntimeAgentClient) observeRuntimeSlots(ctx context.Context, pod models.RuntimePod) ([]runtimeSlotAuditObservation, error) {
+	observations, err, _ := c.observeRuntimeSlotsForAudit(ctx, pod)
+	return observations, err
+}
+
+// Source verification is separate from protocol proof: even a failed/legacy
+// response can explain inventory, but only a stable current Pod UID may persist it.
+func (c *slotRuntimeAgentClient) observeRuntimeSlotsForAudit(ctx context.Context, pod models.RuntimePod) ([]runtimeSlotAuditObservation, error, bool) {
 	if pod.AgentEndpoint == nil || pod.PodUID == nil || *pod.PodUID == "" {
-		return nil, fmt.Errorf("registered slot target identity is required")
+		return nil, fmt.Errorf("registered slot target identity is required"), false
 	}
 	current, err := c.containerStopPod(ctx, *pod.AgentEndpoint, *pod.PodUID)
 	if err != nil {
-		return nil, err
+		return nil, err, false
 	}
 	slots, err := runtimeAuditPhysicalSlots(current, pod.Capacity)
-	if err != nil {
-		return nil, err
-	}
-	for i := range slots {
-		if slots[i].Block != RuntimeGatewayPortBlockSize(pod.RuntimeType) {
-			return nil, fmt.Errorf("registered Runtime type differs from physical slot block size")
+	if err == nil {
+		for i := range slots {
+			if slots[i].Block != RuntimeGatewayPortBlockSize(pod.RuntimeType) {
+				err = fmt.Errorf("registered Runtime type differs from physical slot block size")
+				break
+			}
 		}
-		c.observeRuntimeSlot(ctx, pod, &slots[i])
+		if err == nil {
+			for i := range slots {
+				c.observeRuntimeSlot(ctx, pod, &slots[i])
+			}
+		}
 	}
 
 	// An IP-reused replacement must not turn an old observation into admission.
-	after, err := c.containerStopPod(ctx, *pod.AgentEndpoint, *pod.PodUID)
-	if err != nil || after.UID != current.UID {
-		return nil, fmt.Errorf("runtime slot Pod identity changed during inspection")
+	after, sourceErr := c.containerStopPod(ctx, *pod.AgentEndpoint, *pod.PodUID)
+	if sourceErr != nil || after.UID != current.UID {
+		return nil, fmt.Errorf("runtime slot Pod identity changed during inspection"), false
 	}
-	return slots, nil
+	if err != nil {
+		return nil, err, true
+	}
+	return slots, nil, true
 }
 
 func (c *slotRuntimeAgentClient) observeRuntimeSlot(ctx context.Context, pod models.RuntimePod, o *runtimeSlotAuditObservation) {
 	requestCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	o.Err = c.do(requestCtx, http.MethodGet, *pod.AgentEndpoint, "/v1/slots/"+o.Name+"/state", nil, &o.Snapshot)
+	o.ReadOK = o.Err == nil
+	if o.Err != nil {
+		o.Diagnostic = "runtime slot inspection unavailable"
+		return
+	}
 	s := o.Snapshot
 	if o.Err == nil && (s.PodUID != *pod.PodUID || !stopTokenValid(s.WorkerEpoch) || s.IdleConfirmed == nil || s.Quarantined == nil || s.Gateways == nil) {
 		o.Err = fmt.Errorf("runtime slot exit proof is unavailable or belongs to another Pod")
+		o.Diagnostic = "runtime slot exit proof unavailable or Pod identity differs"
 	}
-	if a := s.Assignment; a != nil && (a.PodUID != *pod.PodUID || a.InstanceID < 1 || a.UserID < 1 || a.Generation < 1 || a.GatewayID != fmt.Sprintf("gw-%d-%d", a.InstanceID, a.Generation) || !stopTokenValid(a.WorkerEpoch)) {
+	if a := s.Assignment; a != nil && (a.PodUID != *pod.PodUID || a.InstanceID < 1 || a.UserID < 1 || a.Generation < 1 || a.GatewayID != fmt.Sprintf("gw-%d-%d", a.InstanceID, a.Generation) || !stopTokenValid(a.WorkerEpoch) || a.WorkerEpoch != s.WorkerEpoch) {
 		o.Err = fmt.Errorf("runtime slot owner identity is invalid")
+		o.Diagnostic = "runtime slot owner identity invalid"
 	}
+	if runtimeSlotGatewayOwnershipAmbiguous(s) {
+		o.Err = fmt.Errorf("runtime slot gateway ownership is ambiguous")
+		o.Diagnostic = "runtime slot gateway ownership ambiguous"
+	}
+}
+
+func runtimeSlotGatewayOwnershipAmbiguous(s runtimeSlotAuditSnapshot) bool {
+	active := 0
+	for _, gateway := range s.Gateways {
+		if gateway.State == "stopped" {
+			continue
+		}
+		active++
+		if s.Assignment != nil && gateway.GatewayID != "" && gateway.GatewayID != s.Assignment.GatewayID {
+			return true
+		}
+	}
+	return active > 1
+}
+
+func runtimeSlotReportedState(state string) string {
+	switch state {
+	case "creating", "pending", "starting", "running", "ready", "stopping", "draining", "stopped", "error", "failed", "idle", "unknown":
+		return state
+	default:
+		return "unknown"
+	}
+}
+
+func runtimeSlotReportedOwner(slot *models.RuntimeSlotObservation, owner *runtimeSlotAuditOwner) {
+	if owner == nil {
+		return
+	}
+	if owner.InstanceID > 0 {
+		slot.InstanceID = owner.InstanceID
+	}
+	if owner.UserID > 0 {
+		slot.UserID = owner.UserID
+	}
+	if owner.Generation > 0 {
+		slot.Generation = owner.Generation
+	}
+	var instanceID, generation int
+	if _, err := fmt.Sscanf(owner.GatewayID, "gw-%d-%d", &instanceID, &generation); err == nil && instanceID > 0 && generation > 0 && owner.GatewayID == fmt.Sprintf("gw-%d-%d", instanceID, generation) {
+		slot.GatewayID = owner.GatewayID
+	}
+	slot.InstanceState = runtimeSlotReportedState(owner.State)
+}
+
+func runtimeSlotInventoryObservation(o runtimeSlotAuditObservation, uid string) models.RuntimeSlotObservation {
+	slot := models.RuntimeSlotObservation{ContainerName: o.Name, GatewayPort: o.Port, State: "unknown", Error: o.Diagnostic}
+	if !o.ReadOK || o.Snapshot.PodUID != uid {
+		if slot.Error == "" {
+			slot.Error = "runtime slot inspection unavailable"
+		}
+		return slot
+	}
+	if o.free() {
+		slot.State = "free"
+		return slot
+	}
+	snapshot := o.Snapshot
+	runtimeSlotReportedOwner(&slot, snapshot.Assignment)
+	if owner := snapshot.Assignment; owner != nil {
+		if owner.State != "stopped" {
+			slot.State = "occupied"
+		}
+	}
+	for _, gateway := range snapshot.Gateways {
+		if gateway.State != "stopped" {
+			slot.State = "occupied"
+		}
+		if snapshot.Assignment != nil && gateway.GatewayID != "" && gateway.GatewayID == snapshot.Assignment.GatewayID {
+			slot.GatewayState = runtimeSlotReportedState(gateway.State)
+		} else if len(snapshot.Gateways) == 1 {
+			slot.GatewayState = runtimeSlotReportedState(gateway.State)
+		}
+	}
+	if runtimeSlotGatewayOwnershipAmbiguous(snapshot) {
+		slot.State, slot.GatewayState = "unknown", "unknown"
+	}
+	slot.IdentityVerified = o.Err == nil && slot.State == "occupied" && snapshot.Assignment != nil
+	if slot.State == "unknown" && slot.Error == "" {
+		slot.Error = "runtime slot cleanup incomplete without confirmed exit proof"
+	}
+	return slot
 }
 
 func runtimeSlotAuditName(uid string) string {
@@ -356,25 +466,58 @@ dispatch:
 	wg.Wait()
 	return errors.Join(append(failures, passCtx.Err())...)
 }
+
+// Match the assignment reservations used by admission. A Runtime exit proof
+// cannot release a persisted writer reservation or repair its identity.
+func (c *slotRuntimeAgentClient) runtimeAuditReservedPorts(ctx context.Context, pod models.RuntimePod) (map[int]struct{}, error) {
+	assignments, err := c.assignments.ReservedAssignments(ctx, *pod.AgentEndpoint, *pod.PodUID, pod.RuntimeType)
+	if err != nil {
+		return nil, err
+	}
+	ports := make(map[int]struct{}, len(assignments))
+	for _, assignment := range assignments {
+		var req RuntimeAgentCreateGatewayRequest
+		if json.Unmarshal(assignment.Request, &req) != nil || req.InstanceID != assignment.InstanceID || req.UserID != assignment.UserID || req.Generation != assignment.Generation || req.PodUID != *pod.PodUID || req.AgentType != assignment.RuntimeType || req.GatewayPort < 1 || req.GatewayPort > 65535 {
+			return nil, fmt.Errorf("persisted slot request does not match assignment identity")
+		}
+		ports[req.GatewayPort] = struct{}{}
+	}
+	return ports, nil
+}
+
 func (s *RuntimeScheduler) auditRuntimePodSlots(ctx context.Context, c *slotRuntimeAgentClient, pod models.RuntimePod) error {
 	if pod.PodUID == nil || pod.AgentEndpoint == nil || *pod.PodUID == "" || *pod.AgentEndpoint == "" {
 		return fmt.Errorf("registered runtime Pod identity is missing")
 	}
-	prior, _, err := c.readSlotAudit(ctx, pod)
-	if err != nil {
-		return err
-	}
 	record := runtimeSlotAuditRecord{PodUID: *pod.PodUID, Endpoint: *pod.AgentEndpoint, RuntimeType: pod.RuntimeType, Ports: map[int]string{}, InspectedAt: time.Now().UTC()}
-	observations, inspectErr := c.observeRuntimeSlots(ctx, pod)
+	prior, quarantine, priorErr := c.readSlotAudit(ctx, pod)
+	// Preserve exclusions for ports without fresh evidence. Admission also keeps
+	// a pod-wide quarantine when any physical slot remains uninspectable.
+	for port, reason := range quarantine.Ports {
+		record.Ports[port] = reason
+	}
+	record.PodError = quarantine.PodError
+	observations, inspectErr, sourceVerified := c.observeRuntimeSlotsForAudit(ctx, pod)
+	complete := inspectErr == nil
+	for _, o := range observations {
+		if o.Err != nil {
+			complete = false
+		}
+	}
+	if complete {
+		record.PodError = ""
+	}
 	bindings, bindingsErr := s.bindingRepo.ListByRuntimePodID(ctx, pod.ID)
-	if inspectErr != nil || bindingsErr != nil {
-		record.PodError = "runtime slot inventory unavailable"
-		return errors.Join(inspectErr, bindingsErr, c.writeSlotAudit(ctx, pod, prior, record))
+	reserved, reservationsErr := c.runtimeAuditReservedPorts(ctx, pod)
+	if priorErr != nil || inspectErr != nil || bindingsErr != nil || reservationsErr != nil {
+		record.PodError = "runtime slot inventory or reservations unavailable"
 	}
 	byPort := map[int]models.InstanceRuntimeBinding{}
-	for _, b := range bindings {
-		byPort[b.GatewayPort] = b
+	for _, binding := range bindings {
+		byPort[binding.GatewayPort] = binding
 	}
+	canCleanup := record.PodError == ""
+	var cleanup []func() error
 	var failures []error
 	for _, o := range observations {
 		if o.Err != nil {
@@ -382,12 +525,18 @@ func (s *RuntimeScheduler) auditRuntimePodSlots(ctx context.Context, c *slotRunt
 			failures = append(failures, o.Err)
 			continue
 		}
-		b, bound := byPort[o.Port]
-		if o.free() && !bound {
-			continue
-		}
+		binding, bound := byPort[o.Port]
 		if o.free() {
-			record.Ports[o.Port] = "SQL binding still reserves runtime slot"
+			delete(record.Ports, o.Port)
+			if bound {
+				record.Ports[o.Port] = "SQL binding still reserves runtime slot"
+				if canCleanup {
+					cleanup = append(cleanup, func() error { return s.auditFreeStoppedRuntimeSlot(ctx, c, pod, o, binding) })
+				}
+			} else if _, assigned := reserved[o.Port]; assigned {
+				record.Ports[o.Port] = "persisted runtime assignment still reserves slot"
+			}
+			continue
 		}
 		owner := o.Snapshot.Assignment
 		if owner == nil {
@@ -404,21 +553,118 @@ func (s *RuntimeScheduler) auditRuntimePodSlots(ctx context.Context, c *slotRunt
 			record.Ports[o.Port] = "persisted runtime owner port does not match"
 			continue
 		}
-		if state == "running" && bound && b.InstanceID == owner.InstanceID && b.Generation == owner.Generation && b.GatewayID == owner.GatewayID && !*o.Snapshot.Quarantined && o.Snapshot.MaintenanceOperationID == "" && owner.State != "stopped" {
+		if state == "running" && bound && binding.InstanceID == owner.InstanceID && binding.Generation == owner.Generation && binding.GatewayID == owner.GatewayID && !*o.Snapshot.Quarantined && o.Snapshot.MaintenanceOperationID == "" && owner.State != "stopped" {
+			delete(record.Ports, o.Port)
 			continue
 		}
 		record.Ports[o.Port] = "runtime owner remains occupied or cleanup is pending"
-		if state != "draining" && state != "stopped" {
-			continue
+		if canCleanup && (state == "draining" || state == "stopped") {
+			cleanup = append(cleanup, func() error { return s.auditStoppedRuntimeSlot(ctx, c, pod, o) })
 		}
-		if err := s.auditStoppedRuntimeSlot(ctx, c, pod, o); err != nil {
+	}
+
+	// Publish the same unresolved reservations as admission before attempting any
+	// lifecycle cleanup. The original scan timestamp makes superseded saves fail.
+	observation := models.RuntimePodObservation{PodUID: *pod.PodUID, ObservedAt: record.InspectedAt, Slots: make([]models.RuntimeSlotObservation, 0, len(observations))}
+	if record.PodError != "" {
+		observation.Error = "runtime slot inventory or quarantine unresolved"
+	}
+	for _, o := range observations {
+		slot := runtimeSlotInventoryObservation(o, *pod.PodUID)
+		reason := record.Ports[o.Port]
+		if record.PodError != "" {
+			reason = observation.Error
+		} else if slot.State == "free" && reason == "" && (quarantine.PodError != "" || quarantine.Ports[o.Port] != "") {
+			// The pending ConfigMap CAS may fail. A following fresh scan can
+			// publish free only after it observes that this exclusion is gone.
+			reason = "runtime slot quarantine release pending"
+		}
+		if reason != "" {
+			if slot.State == "free" {
+				slot.State = "unknown"
+				runtimeSlotReportedOwner(&slot, o.Snapshot.Assignment)
+			}
+			if slot.Error == "" {
+				slot.Error = reason
+			}
+		}
+		observation.Slots = append(observation.Slots, slot)
+	}
+	var saveErr error
+	if store, ok := s.podRepo.(repository.RuntimePodObservationStore); ok && sourceVerified {
+		var saved bool
+		saved, saveErr = store.SaveRuntimeObservation(ctx, pod.ID, *pod.PodUID, observation)
+		if saveErr == nil && !saved {
+			saveErr = fmt.Errorf("runtime slot observation was superseded or Pod identity changed")
+		}
+	}
+	if priorErr != nil {
+		return errors.Join(inspectErr, bindingsErr, reservationsErr, saveErr, priorErr)
+	}
+	if saveErr != nil {
+		return errors.Join(append(failures, inspectErr, bindingsErr, reservationsErr, saveErr)...)
+	}
+	writeErr := c.writeSlotAudit(ctx, pod, prior, record)
+	if inspectErr != nil || bindingsErr != nil || reservationsErr != nil || writeErr != nil {
+		return errors.Join(append(failures, inspectErr, bindingsErr, reservationsErr, writeErr)...)
+	}
+	for _, action := range cleanup {
+		if err := action(); err != nil {
 			failures = append(failures, err)
 		}
 	}
-	// Persist all unresolved slots, including a successfully requested stop. Only
-	// a later fresh full-exit proof can remove quarantine.
-	return errors.Join(append(failures, c.writeSlotAudit(ctx, pod, prior, record))...)
+	// Requested stops remain quarantined until a later fresh full-exit proof.
+	return errors.Join(failures...)
 }
+
+// A fresh full-exit proof permits releasing an exact stopped SQL reservation.
+// This never sends cancellation or reset requests to the Runtime.
+func (s *RuntimeScheduler) auditFreeStoppedRuntimeSlot(ctx context.Context, c *slotRuntimeAgentClient, pod models.RuntimePod, o runtimeSlotAuditObservation, expected models.InstanceRuntimeBinding) error {
+	release, err := acquireInstanceLifecycleOperation(ctx, s.instanceRepo, expected.InstanceID)
+	if err != nil {
+		return err
+	}
+	defer release()
+	instance, err := s.instanceRepo.GetByID(expected.InstanceID)
+	if err != nil {
+		return err
+	}
+	if instance == nil || instance.ID != expected.InstanceID || instance.Status != "stopped" || instance.RuntimeGeneration != expected.Generation || instance.UserID < 1 {
+		return nil
+	}
+	current, err := s.bindingRepo.GetByInstanceID(ctx, expected.InstanceID)
+	if err != nil {
+		return err
+	}
+	if current == nil || current.InstanceID != expected.InstanceID || current.RuntimePodID != pod.ID || current.Generation != expected.Generation || current.GatewayPort != o.Port || current.GatewayID != expected.GatewayID || expected.GatewayID != fmt.Sprintf("gw-%d-%d", expected.InstanceID, expected.Generation) {
+		return nil
+	}
+	binding := *current
+	if _, err = c.containerStopPod(ctx, *pod.AgentEndpoint, *pod.PodUID); err != nil {
+		return err
+	}
+	fresh := runtimeSlotAuditObservation{Name: o.Name, Port: o.Port}
+	c.observeRuntimeSlot(ctx, pod, &fresh)
+	if _, err = c.containerStopPod(ctx, *pod.AgentEndpoint, *pod.PodUID); err != nil {
+		return err
+	}
+	if !fresh.free() || fresh.Snapshot.WorkerEpoch != o.Snapshot.WorkerEpoch {
+		return fresh.Err
+	}
+	releaser, ok := s.bindingRepo.(repository.ConfirmedStoppedSlotBindingReleaser)
+	if !ok {
+		return fmt.Errorf("confirmed free slot requires an exact conditional binding release")
+	}
+	deleted, err := releaser.DeleteConfirmedStoppedSlotBinding(ctx, *instance, binding)
+	if err != nil {
+		return err
+	}
+	if !deleted {
+		return fmt.Errorf("stopped slot binding or instance changed after fresh exit proof")
+	}
+	return nil
+}
+
 func (s *RuntimeScheduler) auditStoppedRuntimeSlot(ctx context.Context, c *slotRuntimeAgentClient, pod models.RuntimePod, o runtimeSlotAuditObservation) error {
 	owner := o.Snapshot.Assignment
 	release, err := acquireInstanceLifecycleOperation(ctx, s.instanceRepo, owner.InstanceID)

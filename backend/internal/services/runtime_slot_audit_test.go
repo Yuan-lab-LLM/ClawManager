@@ -9,6 +9,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"net/http"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -95,10 +96,11 @@ type auditBindingRepository struct {
 	repository.InstanceRuntimeBindingRepository
 	bindings []models.InstanceRuntimeBinding
 	releases int
+	listErr  error
 }
 
 func (r *auditBindingRepository) ListByRuntimePodID(context.Context, int64) ([]models.InstanceRuntimeBinding, error) {
-	return r.bindings, nil
+	return r.bindings, r.listErr
 }
 func (r *auditBindingRepository) GetByInstanceID(_ context.Context, id int) (*models.InstanceRuntimeBinding, error) {
 	for i := range r.bindings {
@@ -544,7 +546,11 @@ func TestRuntimeSlotAuditReleasesOnlyExactStoppedSQLBinding(t *testing.T) {
 				}
 				return
 			}
-			if deletes != 1 || bindings.releases != 1 || len(bindings.bindings) != 0 {
+			wantDeletes := 1
+			if scenario == "physically-free" {
+				wantDeletes = 0
+			}
+			if deletes != wantDeletes || bindings.releases != 1 || len(bindings.bindings) != 0 {
 				t.Fatalf("confirmed stopped binding leaked: deletes=%d releases=%d bindings=%+v", deletes, bindings.releases, bindings.bindings)
 			}
 			if err := s.auditRuntimePodSlots(context.Background(), client, pod); err != nil {
@@ -644,5 +650,436 @@ func TestRuntimeSlotAuditFiltersHistoryBeforeCursorAndBudget(t *testing.T) {
 	after, _, err := client.readSlotAudit(ctx, historical)
 	if err != nil || after.Data["record"] != before.Data["record"] {
 		t.Fatalf("skipping history changed its durable quarantine: %v", err)
+	}
+}
+
+func TestRuntimeSlotAuditReleasesExactStoppedBindingAfterFreshFreeProof(t *testing.T) {
+	for _, scenario := range []string{"stopped", "desired-running", "generation-changed", "binding-changed", "became-occupied", "pod-replaced"} {
+		t.Run(scenario, func(t *testing.T) {
+			p := auditTestPod()
+			kube := fake.NewSimpleClientset(p)
+			reads := 0
+			client := NewSlotRuntimeAgentClientWithHTTPClient("token", kube, "runtime", &http.Client{Transport: slotRoundTripper(func(r *http.Request) (*http.Response, error) {
+				if r.Method != http.MethodGet {
+					t.Fatalf("free slot caused runtime mutation: %s %s", r.Method, r.URL.Path)
+				}
+				reads++
+				snapshot := auditFreeSnapshot()
+				if reads > 1 && scenario == "became-occupied" {
+					snapshot = auditOccupiedSnapshot("running")
+				}
+				if reads > 1 && scenario == "pod-replaced" {
+					p.UID = "replacement"
+					_, _ = kube.CoreV1().Pods("runtime").Update(r.Context(), p, metav1.UpdateOptions{})
+				}
+				b, _ := json.Marshal(snapshot)
+				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(string(b)))}, nil
+			})}).(*slotRuntimeAgentClient)
+			endpoint, uid := "https://10.0.0.2:19090", "pod-uid"
+			pod := models.RuntimePod{ID: 1, RuntimeType: "openclaw", Capacity: 1, AgentEndpoint: &endpoint, PodUID: &uid}
+			bindings := &auditBindingRepository{bindings: []models.InstanceRuntimeBinding{{InstanceID: 7, RuntimePodID: 1, Generation: 1, GatewayID: "gw-7-1", GatewayPort: 20000, State: "running"}}}
+			instances := &auditInstanceRepository{instance: &models.Instance{ID: 7, UserID: 2, RuntimeGeneration: 1, Status: "stopped"}}
+			switch scenario {
+			case "desired-running":
+				instances.instance.Status = "running"
+			case "generation-changed":
+				instances.instance.RuntimeGeneration = 2
+			case "binding-changed":
+				instances.onLock = func() { bindings.bindings[0].Generation = 2; bindings.bindings[0].GatewayID = "gw-7-2" }
+			}
+			s := &RuntimeScheduler{agentClient: client, bindingRepo: bindings, instanceRepo: instances}
+			_ = s.auditRuntimePodSlots(context.Background(), client, pod)
+			wantRelease := 0
+			if scenario == "stopped" {
+				wantRelease = 1
+			}
+			if bindings.releases != wantRelease {
+				t.Fatalf("releases=%d, want %d (reads=%d)", bindings.releases, wantRelease, reads)
+			}
+		})
+	}
+}
+
+type auditObservationRepository struct {
+	auditPodRepository
+	observations []models.RuntimePodObservation
+	accept       bool
+}
+
+func (r *auditObservationRepository) SaveRuntimeObservation(_ context.Context, id int64, uid string, observation models.RuntimePodObservation) (bool, error) {
+	if id != 1 || uid != "pod-uid" || observation.PodUID != uid {
+		return false, errors.New("unexpected observation target")
+	}
+	r.observations = append(r.observations, observation)
+	return r.accept, nil
+}
+
+func TestRuntimeSlotAuditPersistsSanitizedFactsWithoutUpgradingLegacyProof(t *testing.T) {
+	for _, scenario := range []string{"free", "legacy-owner", "old-worker-owner", "malformed-owner", "missing-idle-proof", "read-failure", "wrong-response-uid", "stopped-tombstone", "legacy-stopped-tombstone", "conflicting-gateways", "matching-gateway", "binding-read-failure"} {
+		t.Run(scenario, func(t *testing.T) {
+			kube := fake.NewSimpleClientset(auditTestPod())
+			snapshot := auditOccupiedSnapshot("starting")
+			snapshot["secret"] = "DO-NOT-PERSIST"
+			snapshot["gateways"] = []any{map[string]any{"gateway_id": "gw-7-1", "state": "error", "credential": "DO-NOT-PERSIST"}}
+			wantState, wantVerified, wantErr := "occupied", true, false
+			switch scenario {
+			case "free":
+				snapshot = auditFreeSnapshot()
+				wantState, wantVerified = "free", false
+			case "legacy-owner":
+				delete(snapshot["assignment"].(map[string]any), "worker_epoch")
+				wantVerified, wantErr = false, true
+			case "old-worker-owner":
+				snapshot["assignment"].(map[string]any)["worker_epoch"] = strings.Repeat("b", 32)
+				wantVerified, wantErr = false, true
+			case "malformed-owner":
+				snapshot["assignment"].(map[string]any)["generation"] = 0
+				wantVerified, wantErr = false, true
+			case "missing-idle-proof":
+				delete(snapshot, "idle_confirmed")
+				wantVerified, wantErr = false, true
+			case "read-failure", "wrong-response-uid":
+				wantState, wantVerified, wantErr = "unknown", false, true
+				if scenario == "wrong-response-uid" {
+					snapshot["pod_uid"] = "other-pod"
+				}
+			case "stopped-tombstone":
+				snapshot = auditOccupiedSnapshot("stopped")
+				snapshot["idle_confirmed"] = true
+				wantState, wantVerified = "free", false
+			case "legacy-stopped-tombstone":
+				snapshot = auditOccupiedSnapshot("stopped")
+				delete(snapshot["assignment"].(map[string]any), "worker_epoch")
+				wantState, wantVerified, wantErr = "unknown", false, true
+			case "conflicting-gateways":
+				snapshot["gateways"] = []any{map[string]any{"gateway_id": "gw-7-1", "state": "running"}, map[string]any{"gateway_id": "gw-8-2", "state": "running"}}
+				wantState, wantVerified, wantErr = "unknown", false, true
+			case "matching-gateway":
+				snapshot["gateways"] = []any{map[string]any{"gateway_id": "gw-8-2", "state": "stopped"}, map[string]any{"gateway_id": "gw-7-1", "state": "error"}}
+				wantErr = true // The reported owner has no persisted assignment.
+			case "binding-read-failure":
+				wantErr = true
+			}
+			mutations := 0
+			client := NewSlotRuntimeAgentClientWithHTTPClient("token", kube, "runtime", &http.Client{Transport: slotRoundTripper(func(r *http.Request) (*http.Response, error) {
+				if r.Method != http.MethodGet {
+					mutations++
+					return nil, errors.New("unexpected mutation")
+				}
+				if scenario == "read-failure" {
+					return nil, errors.New("credential=DO-NOT-PERSIST")
+				}
+				b, _ := json.Marshal(snapshot)
+				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(string(b)))}, nil
+			})}).(*slotRuntimeAgentClient)
+			endpoint, uid := "https://10.0.0.2:19090", "pod-uid"
+			pod := models.RuntimePod{ID: 1, RuntimeType: "openclaw", Capacity: 1, AgentEndpoint: &endpoint, PodUID: &uid}
+			store := &auditObservationRepository{accept: true}
+			bindings := &auditBindingRepository{}
+			if scenario == "binding-read-failure" {
+				bindings.listErr = errors.New("SQL unavailable")
+			}
+			s := &RuntimeScheduler{agentClient: client, podRepo: store, bindingRepo: bindings, instanceRepo: &auditInstanceRepository{}}
+			_ = s.auditRuntimePodSlots(context.Background(), client, pod)
+			if len(store.observations) != 1 || len(store.observations[0].Slots) != 1 {
+				t.Fatalf("fresh facts were not persisted: %+v", store.observations)
+			}
+			o := store.observations[0]
+			slot := o.Slots[0]
+			if o.ObservedAt.IsZero() || slot.State != wantState || slot.IdentityVerified != wantVerified || (slot.Error != "") != wantErr {
+				t.Fatalf("unexpected sanitized facts: %+v", o)
+			}
+			if scenario == "legacy-owner" && (slot.InstanceID != 7 || slot.UserID != 2 || slot.Generation != 1 || slot.GatewayID != "gw-7-1" || slot.InstanceState != "starting" || slot.GatewayState != "error") {
+				t.Fatalf("legacy reported owner disappeared: %+v", slot)
+			}
+			if scenario == "matching-gateway" && slot.GatewayState != "error" {
+				t.Fatalf("wrong gateway state: %+v", slot)
+			}
+			b, _ := json.Marshal(o)
+			if strings.Contains(string(b), "DO-NOT-PERSIST") || strings.Contains(string(b), "worker_epoch") || mutations != 0 {
+				t.Fatalf("unsafe observation or mutation: %s (mutations=%d)", b, mutations)
+			}
+		})
+	}
+}
+
+func TestRuntimeSlotAuditDoesNotPersistUnverifiedSourceUID(t *testing.T) {
+	for _, scenario := range []string{"before-success", "after-success", "after-failure"} {
+		t.Run(scenario, func(t *testing.T) {
+			p := auditTestPod()
+			if scenario == "before-success" {
+				p.UID = "replacement"
+			}
+			kube := fake.NewSimpleClientset(p)
+			client := NewSlotRuntimeAgentClientWithHTTPClient("token", kube, "runtime", &http.Client{Transport: slotRoundTripper(func(r *http.Request) (*http.Response, error) {
+				if r.Method != http.MethodGet {
+					t.Fatal("changed source was mutated")
+				}
+				p.UID = "replacement"
+				_, _ = kube.CoreV1().Pods("runtime").Update(r.Context(), p, metav1.UpdateOptions{})
+				if scenario == "after-failure" {
+					return nil, errors.New("connection interrupted")
+				}
+				b, _ := json.Marshal(auditFreeSnapshot())
+				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(string(b)))}, nil
+			})}).(*slotRuntimeAgentClient)
+			endpoint, uid := "https://10.0.0.2:19090", "pod-uid"
+			pod := models.RuntimePod{ID: 1, RuntimeType: "openclaw", Capacity: 1, AgentEndpoint: &endpoint, PodUID: &uid}
+			store := &auditObservationRepository{accept: true}
+			s := &RuntimeScheduler{agentClient: client, podRepo: store, bindingRepo: &auditBindingRepository{}, instanceRepo: &auditInstanceRepository{}}
+			if err := s.auditRuntimePodSlots(context.Background(), client, pod); err == nil {
+				t.Fatal("changed source UID was accepted")
+			}
+			if len(store.observations) != 0 {
+				t.Fatalf("changed source persisted stale evidence: %+v", store.observations)
+			}
+		})
+	}
+}
+
+type auditOrderedObservationRepository struct {
+	auditPodRepository
+	mu       sync.Mutex
+	latest   models.RuntimePodObservation
+	attempts []time.Time
+}
+
+func (r *auditOrderedObservationRepository) SaveRuntimeObservation(_ context.Context, _ int64, _ string, observation models.RuntimePodObservation) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.attempts = append(r.attempts, observation.ObservedAt)
+	if !observation.ObservedAt.After(r.latest.ObservedAt) {
+		return false, nil
+	}
+	r.latest = observation
+	return true, nil
+}
+
+func TestRuntimeSlotAuditRejectsOlderScanCompletingAfterNewerFacts(t *testing.T) {
+	kube := fake.NewSimpleClientset(auditTestPod())
+	started, resume := make(chan struct{}), make(chan struct{})
+	var reads atomic.Int32
+	client := NewSlotRuntimeAgentClientWithHTTPClient("token", kube, "runtime", &http.Client{Transport: slotRoundTripper(func(r *http.Request) (*http.Response, error) {
+		if r.Method != http.MethodGet {
+			t.Errorf("superseded observation mutated runtime: %s", r.Method)
+		}
+		snapshot := auditOccupiedSnapshot("running")
+		if reads.Add(1) == 1 {
+			close(started)
+			select {
+			case <-resume:
+			case <-r.Context().Done():
+				return nil, r.Context().Err()
+			}
+			snapshot = auditFreeSnapshot()
+		}
+		b, _ := json.Marshal(snapshot)
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(string(b)))}, nil
+	})}).(*slotRuntimeAgentClient)
+	endpoint, uid := "https://10.0.0.2:19090", "pod-uid"
+	pod := models.RuntimePod{ID: 1, RuntimeType: "openclaw", Capacity: 1, AgentEndpoint: &endpoint, PodUID: &uid}
+	store := &auditOrderedObservationRepository{}
+	s := &RuntimeScheduler{agentClient: client, podRepo: store, bindingRepo: &auditBindingRepository{}, instanceRepo: &auditInstanceRepository{}}
+	olderResult := make(chan error, 1)
+	go func() { olderResult <- s.auditRuntimePodSlots(context.Background(), client, pod) }()
+	<-started
+	if err := s.auditRuntimePodSlots(context.Background(), client, pod); err != nil {
+		t.Fatal(err)
+	}
+	close(resume)
+	if err := <-olderResult; err == nil {
+		t.Fatal("superseded inspection accepted")
+	}
+	if len(store.attempts) != 2 || !store.attempts[1].Before(store.attempts[0]) || store.latest.Slots[0].State != "occupied" {
+		t.Fatalf("older free snapshot hid newer owner: attempts=%v latest=%+v", store.attempts, store.latest)
+	}
+	_, record, err := client.readSlotAudit(context.Background(), pod)
+	if err != nil || record.Ports[20000] == "" {
+		t.Fatalf("older result cleared newer quarantine: %+v %v", record, err)
+	}
+}
+
+func TestRuntimeSlotAuditObservationRejectionPreventsCleanup(t *testing.T) {
+	kube := fake.NewSimpleClientset(auditTestPod())
+	reads := 0
+	client := NewSlotRuntimeAgentClientWithHTTPClient("token", kube, "runtime", &http.Client{Transport: slotRoundTripper(func(r *http.Request) (*http.Response, error) {
+		if r.Method != http.MethodGet {
+			t.Fatal("rejected observation mutated runtime")
+		}
+		reads++
+		b, _ := json.Marshal(auditFreeSnapshot())
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(string(b)))}, nil
+	})}).(*slotRuntimeAgentClient)
+	endpoint, uid := "https://10.0.0.2:19090", "pod-uid"
+	pod := models.RuntimePod{ID: 1, RuntimeType: "openclaw", Capacity: 1, AgentEndpoint: &endpoint, PodUID: &uid}
+	bindings := &auditBindingRepository{bindings: []models.InstanceRuntimeBinding{{InstanceID: 7, RuntimePodID: 1, Generation: 1, GatewayID: "gw-7-1", GatewayPort: 20000, State: "running"}}}
+	store := &auditObservationRepository{accept: false}
+	s := &RuntimeScheduler{agentClient: client, podRepo: store, bindingRepo: bindings, instanceRepo: &auditInstanceRepository{instance: &models.Instance{ID: 7, UserID: 2, RuntimeGeneration: 1, Status: "stopped"}}}
+	if err := s.auditRuntimePodSlots(context.Background(), client, pod); err == nil {
+		t.Fatal("observation rejection ignored")
+	}
+	if reads != 1 || bindings.releases != 0 {
+		t.Fatalf("superseded scan continued cleanup: reads=%d releases=%d", reads, bindings.releases)
+	}
+	for _, action := range kube.Actions() {
+		if action.GetResource().Resource == "configmaps" && (action.GetVerb() == "create" || action.GetVerb() == "update") {
+			t.Fatal("superseded scan changed quarantine after observation rejection")
+		}
+	}
+}
+
+func TestRuntimeSlotAuditPersistsPhysicalInventoryFailureForCurrentUID(t *testing.T) {
+	p := auditTestPod()
+	p.Spec.Containers = nil
+	kube := fake.NewSimpleClientset(p)
+	client := NewSlotRuntimeAgentClientWithHTTPClient("token", kube, "runtime", &http.Client{Transport: slotRoundTripper(func(*http.Request) (*http.Response, error) {
+		t.Fatal("invalid physical inventory contacted Runtime")
+		return nil, errors.New("unexpected Runtime request")
+	})}).(*slotRuntimeAgentClient)
+	endpoint, uid := "https://10.0.0.2:19090", "pod-uid"
+	pod := models.RuntimePod{ID: 1, RuntimeType: "openclaw", Capacity: 1, AgentEndpoint: &endpoint, PodUID: &uid}
+	store := &auditObservationRepository{accept: true}
+	s := &RuntimeScheduler{agentClient: client, podRepo: store, bindingRepo: &auditBindingRepository{}, instanceRepo: &auditInstanceRepository{}}
+	if err := s.auditRuntimePodSlots(context.Background(), client, pod); err == nil {
+		t.Fatal("invalid inventory accepted")
+	}
+	if len(store.observations) != 1 || store.observations[0].Error == "" || len(store.observations[0].Slots) != 0 {
+		t.Fatalf("invalid inventory lost diagnostic: %+v", store.observations)
+	}
+}
+
+func TestRuntimeSlotAuditPreservesHermesLegacyReportedOwnerWithoutSQLBinding(t *testing.T) {
+	kube := fake.NewSimpleClientset(auditRoutingPod(2, 1))
+	mutations := 0
+	client := NewSlotRuntimeAgentClientWithHTTPClient("token", kube, "runtime", &http.Client{Transport: slotRoundTripper(func(r *http.Request) (*http.Response, error) {
+		if r.Method != http.MethodGet {
+			mutations++
+			return nil, errors.New("unexpected Runtime mutation")
+		}
+		snapshot := auditFreeSnapshot()
+		if r.URL.Path == "/v1/slots/slot-0/state" {
+			snapshot["idle_confirmed"] = false
+			snapshot["assignment"] = map[string]any{"pod_uid": "pod-uid", "instance_id": 25, "user_id": 1, "generation": 14, "gateway_id": "gw-25-14", "state": "starting"}
+			snapshot["gateways"] = []any{map[string]any{"gateway_id": "gw-25-14", "state": "error"}}
+		} else {
+			snapshot["assignment"] = map[string]any{"pod_uid": "pod-uid", "instance_id": 161, "user_id": 1, "generation": 2, "gateway_id": "gw-161-2", "state": "stopped"}
+		}
+		b, _ := json.Marshal(snapshot)
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(string(b)))}, nil
+	})}).(*slotRuntimeAgentClient)
+	endpoint, uid := "https://10.0.0.2:19090", "pod-uid"
+	pod := models.RuntimePod{ID: 132, RuntimeType: "hermes", Capacity: 2, AgentEndpoint: &endpoint, PodUID: &uid}
+	store := &auditOrderedObservationRepository{}
+	bindings := &auditBindingRepository{}
+	s := &RuntimeScheduler{agentClient: client, podRepo: store, bindingRepo: bindings, instanceRepo: &auditInstanceRepository{}}
+	if err := s.auditRuntimePodSlots(context.Background(), client, pod); err == nil {
+		t.Fatal("legacy owner gained strict exit proof")
+	}
+	if len(store.latest.Slots) != 2 {
+		t.Fatalf("Hermes facts lost: %+v", store.latest)
+	}
+	owner, tombstone := store.latest.Slots[0], store.latest.Slots[1]
+	if owner.State != "occupied" || owner.InstanceID != 25 || owner.UserID != 1 || owner.Generation != 14 || owner.GatewayID != "gw-25-14" || owner.InstanceState != "starting" || owner.GatewayState != "error" || owner.IdentityVerified || owner.Error == "" {
+		t.Fatalf("Hermes residual owner hidden or trusted: %+v", owner)
+	}
+	if tombstone.State == "occupied" || tombstone.IdentityVerified || mutations != 0 || bindings.releases != 0 || len(bindings.bindings) != 0 {
+		t.Fatalf("legacy facts granted mutation authority: tombstone=%+v mutations=%d bindings=%+v", tombstone, mutations, bindings)
+	}
+}
+
+func TestRuntimeSlotAuditPersistsReservationAndQuarantineDecisions(t *testing.T) {
+	for _, scenario := range []string{"free", "sql-binding", "running-assignment", "stopped-assignment", "malformed-assignment", "assignment-read-failure", "binding-read-failure", "prior-quarantine", "prior-quarantine-stopped-owner", "prior-pod-quarantine", "quarantine-clear-conflict"} {
+		t.Run(scenario, func(t *testing.T) {
+			ctx := context.Background()
+			kube := fake.NewSimpleClientset(auditTestPod())
+			client := NewSlotRuntimeAgentClientWithHTTPClient("token", kube, "runtime", &http.Client{Transport: slotRoundTripper(func(r *http.Request) (*http.Response, error) {
+				if r.Method != http.MethodGet {
+					t.Fatal("reservation classification mutated Runtime")
+				}
+				snapshot := auditFreeSnapshot()
+				if scenario == "prior-quarantine-stopped-owner" {
+					snapshot = auditOccupiedSnapshot("stopped")
+					snapshot["idle_confirmed"] = true
+				}
+				b, _ := json.Marshal(snapshot)
+				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(string(b)))}, nil
+			})}).(*slotRuntimeAgentClient)
+			endpoint, uid := "https://10.0.0.2:19090", "pod-uid"
+			pod := models.RuntimePod{ID: 1, RuntimeType: "openclaw", Capacity: 1, AgentEndpoint: &endpoint, PodUID: &uid}
+			if scenario == "running-assignment" || scenario == "stopped-assignment" || scenario == "malformed-assignment" {
+				req, _ := json.Marshal(RuntimeAgentCreateGatewayRequest{InstanceID: 7, UserID: 2, Generation: 1, AgentType: pod.RuntimeType, PodUID: uid, GatewayPort: 20000})
+				if err := client.assignments.EnsureDesired(ctx, k8sservice.RuntimeAssignment{InstanceID: 7, UserID: 2, Generation: 1, RuntimeType: pod.RuntimeType, PodUID: uid, Endpoint: endpoint, GatewayID: "gw-7-1", Request: req}); err != nil {
+					t.Fatal(err)
+				}
+				if scenario == "stopped-assignment" {
+					cm, _ := kube.CoreV1().ConfigMaps("runtime").Get(ctx, "lite-instance-7", metav1.GetOptions{})
+					cm.Data["desired_state"] = "stopped"
+					_, _ = kube.CoreV1().ConfigMaps("runtime").Update(ctx, cm, metav1.UpdateOptions{})
+				}
+				if scenario == "malformed-assignment" {
+					cm, _ := kube.CoreV1().ConfigMaps("runtime").Get(ctx, "lite-instance-7", metav1.GetOptions{})
+					delete(cm.Data, "generation")
+					_, _ = kube.CoreV1().ConfigMaps("runtime").Update(ctx, cm, metav1.UpdateOptions{})
+				}
+			}
+			if scenario == "prior-quarantine" || scenario == "prior-quarantine-stopped-owner" || scenario == "quarantine-clear-conflict" {
+				if err := client.writeSlotAudit(ctx, pod, nil, runtimeSlotAuditRecord{PodUID: uid, Endpoint: endpoint, RuntimeType: pod.RuntimeType, Ports: map[int]string{20000: "old cleanup pending"}}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if scenario == "prior-pod-quarantine" {
+				if err := client.writeSlotAudit(ctx, pod, nil, runtimeSlotAuditRecord{PodUID: uid, Endpoint: endpoint, RuntimeType: pod.RuntimeType, Ports: map[int]string{}, PodError: "old inventory unavailable"}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if scenario == "quarantine-clear-conflict" {
+				kube.PrependReactor("update", "configmaps", func(k8stesting.Action) (bool, runtime.Object, error) {
+					return true, nil, apierrors.NewConflict(schema.GroupResource{Resource: "configmaps"}, runtimeSlotAuditName(uid), errors.New("newer quarantine"))
+				})
+			}
+			if scenario == "assignment-read-failure" {
+				kube.PrependReactor("list", "configmaps", func(k8stesting.Action) (bool, runtime.Object, error) {
+					return true, nil, errors.New("assignment inventory unavailable")
+				})
+			}
+			bindings := &auditBindingRepository{}
+			if scenario == "sql-binding" {
+				bindings.bindings = []models.InstanceRuntimeBinding{{InstanceID: 7, RuntimePodID: 1, Generation: 1, GatewayID: "gw-7-1", GatewayPort: 20000}}
+			}
+			if scenario == "binding-read-failure" {
+				bindings.listErr = errors.New("SQL unavailable")
+			}
+			store := &auditObservationRepository{accept: true}
+			s := &RuntimeScheduler{agentClient: client, podRepo: store, bindingRepo: bindings, instanceRepo: &auditInstanceRepository{}}
+			_ = s.auditRuntimePodSlots(ctx, client, pod)
+			if len(store.observations) != 1 || len(store.observations[0].Slots) != 1 {
+				t.Fatalf("missing classified observation: %+v", store.observations)
+			}
+			slot := store.observations[0].Slots[0]
+			wantState := "unknown"
+			if scenario == "free" || scenario == "stopped-assignment" {
+				wantState = "free"
+			}
+			if slot.State != wantState || (wantState == "unknown" && slot.Error == "") {
+				t.Fatalf("saved facts disagree with reservations/quarantine: %+v", store.observations[0])
+			}
+			if scenario == "prior-quarantine-stopped-owner" && (slot.InstanceID != 7 || slot.GatewayID != "gw-7-1" || slot.InstanceState != "stopped" || slot.IdentityVerified) {
+				t.Fatalf("unknown slot lost its reported stopped owner or gained authority: %+v", slot)
+			}
+			if scenario == "prior-quarantine" || scenario == "prior-pod-quarantine" {
+				if err := s.auditRuntimePodSlots(ctx, client, pod); err != nil {
+					t.Fatal(err)
+				}
+				if store.observations[1].Slots[0].State != "free" {
+					t.Fatalf("persisted quarantine release never became free: %+v", store.observations)
+				}
+			}
+			if scenario == "running-assignment" {
+				ports, err := client.reservedGatewayPorts(ctx, pod)
+				if _, reserved := ports[20000]; err != nil || !reserved {
+					t.Fatalf("running CM reservation lost: ports=%v err=%v", ports, err)
+				}
+			}
+		})
 	}
 }

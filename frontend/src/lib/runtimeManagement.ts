@@ -6,9 +6,12 @@ export type SlotState =
   | "migrating"
   | "error"
   | "idle"
+  | "unknown"
   | "unavailable";
 
 export function slotState(slot: RuntimeSlot): SlotState {
+  if (slot.reconciliation_state === "unknown") return "unknown";
+  if (slot.reconciliation_state === "residual" || slot.reconciliation_state === "conflict") return "error";
   if (!slot.ready) return "unavailable";
   if (!slot.instance_id) return "idle";
   const state = slot.instance_state ?? "";
@@ -18,6 +21,22 @@ export function slotState(slot: RuntimeSlot): SlotState {
   if (["migrating", "upgrading", "draining", "stopping"].includes(state))
     return "migrating";
   return "error";
+}
+
+export function canManageSlot(slot: RuntimeSlot) {
+  return !!slot.instance_id && (slot.reconciliation_state === undefined
+    ? slot.binding_confirmed !== false
+    : slot.reconciliation_state === "consistent" && slot.binding_confirmed === true);
+}
+
+export function canEvictPod(pod: RuntimePod) {
+  const slots = pod.slots ?? [];
+  return pod.id > 0 && pod.agent_reported !== false && pod.bindings_reported !== false &&
+    (pod.reconciliation_state === undefined || pod.reconciliation_state === "consistent") &&
+    !pod.unknown_slots && slots.some(canManageSlot) &&
+    slots.every((slot) => slot.reconciliation_state === undefined || slot.reconciliation_state === "consistent") &&
+    slots.filter((slot) => slot.instance_id).every(canManageSlot) &&
+    slots.filter(canManageSlot).length >= pod.used_slots;
 }
 
 export function isSchedulable(pod: RuntimePod) {
@@ -51,7 +70,7 @@ export function summarizePod(pod: RuntimePod) {
   const count = (state: SlotState) =>
     slots.filter((slot) => slotState(slot) === state).length;
   const ready = slots.filter((slot) => slot.ready).length;
-  const bound = slots.filter((slot) => slot.instance_id).length;
+  const bound = slots.filter((slot) => slot.instance_id || slot.expected_instance_id).length;
   const occupied = Math.max(bound, pod.used_slots);
   const idle = count("idle");
   return {
@@ -64,6 +83,7 @@ export function summarizePod(pod: RuntimePod) {
     migrating: count("migrating"),
     error: count("error"),
     idle,
+    unknown: Math.max(count("unknown"), pod.unknown_slots ?? 0),
     unavailable: Math.max(0, pod.capacity - ready),
   };
 }
@@ -98,6 +118,7 @@ export function filterPods(
             slot.instance_name,
             slot.owner,
             slot.instance_id,
+            slot.expected_instance_id,
           ]),
         ].some((value) =>
           String(value ?? "")

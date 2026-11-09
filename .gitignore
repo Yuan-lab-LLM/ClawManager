@@ -73,6 +73,7 @@ Thumbs.db
 /docs/deployment-storage-remediation-plan.zh-CN.md
 
 # Local API / debug artifacts (do not commit)
+/.deploy/
 /_*.json
 /_*.txt
 /_test_*.js

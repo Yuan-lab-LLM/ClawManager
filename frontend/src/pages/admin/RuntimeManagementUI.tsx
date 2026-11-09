@@ -22,6 +22,7 @@ const slotStyles: Record<SlotState, string> = {
   error: "border-red-100 bg-red-50 text-red-500",
   idle: "border-slate-200 bg-slate-50 text-slate-400",
   unavailable: "border-slate-300 bg-slate-200 text-slate-500",
+  unknown: "border-amber-200 bg-amber-50 text-amber-800",
 };
 const symbols: Record<SlotState, string> = {
   running: "●",
@@ -30,6 +31,7 @@ const symbols: Record<SlotState, string> = {
   error: "!",
   idle: "−",
   unavailable: "×",
+  unknown: "?",
 };
 
 export function SlotGrid({
@@ -62,7 +64,7 @@ export function SlotGrid({
           type="button"
           aria-pressed={selected === slot.index}
           aria-label={`${t("runtimePods.slot")} ${slot.index} · ${t(`runtimePods.${slotState(slot)}`)}`}
-          title={`${t("runtimePods.slot")} ${slot.index} · ${slot.container_name} · ${t(`runtimePods.${slotState(slot)}`)}${slot.instance_id ? ` · ${slot.instance_name ?? "#" + slot.instance_id}` : ""}`}
+          title={`${t("runtimePods.slot")} ${slot.index} · ${slot.container_name} · ${t(`runtimePods.${slotState(slot)}`)}${slot.instance_id ? ` · ${slot.instance_name ?? "#" + slot.instance_id}` : ""}${slot.expected_instance_id ? ` · ${t("runtimePods.expectedBinding")} #${slot.expected_instance_id}` : ""}${slot.observation_message ? ` · ${slot.observation_message}` : ""}`}
           onClick={(event) => {
             event.stopPropagation();
             onSelect(slot);
@@ -85,7 +87,7 @@ export function Legend({ compact = false }: { compact?: boolean }) {
         <span key={state} className="inline-flex items-center gap-1.5">
           <span
             aria-hidden="true"
-            className={`h-2 w-2 rounded-full ${state === "running" ? "bg-emerald-500" : state === "starting" ? "bg-blue-500" : state === "migrating" ? "bg-violet-500" : state === "error" ? "bg-red-500" : state === "idle" ? "bg-slate-300" : "bg-slate-500"}`}
+            className={`h-2 w-2 rounded-full ${state === "running" ? "bg-emerald-500" : state === "starting" ? "bg-blue-500" : state === "migrating" ? "bg-violet-500" : state === "error" ? "bg-red-500" : state === "unknown" ? "bg-amber-500" : state === "idle" ? "bg-slate-300" : "bg-slate-500"}`}
           />
           {t(`runtimePods.${state}`)}
         </span>

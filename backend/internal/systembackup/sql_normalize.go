@@ -126,7 +126,7 @@ func NormalizeDataRow(table SQLTable, row team.Row, now time.Time) (team.Change,
 	case "runtime_pods":
 		set("state", "offline")
 		set("draining", "1")
-		erase("pod_uid", "pod_ip", "agent_endpoint")
+		erase("pod_uid", "pod_ip", "agent_endpoint", "observation_json", "observation_at")
 	case "instance_commands":
 		err = stopState("status", "failed", []string{"pending", "dispatched", "running", "accepted", "batch_pending"}, []string{"succeeded", "failed", "cancelled", "canceled", "timeout", "timed_out", "expired"})
 	case "runtime_rollouts":

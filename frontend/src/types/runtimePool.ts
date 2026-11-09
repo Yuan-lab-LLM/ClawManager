@@ -28,6 +28,8 @@ export type RuntimeType =
   | "opencode"
   | "deepseek-harness";
 
+export type RuntimeReconciliationState = "consistent" | "residual" | "conflict" | "unknown";
+
 export interface RuntimePod {
   id: number;
   runtime_type: RuntimeType;
@@ -57,6 +59,10 @@ export interface RuntimePod {
   updated_at?: string;
   agent_reported?: boolean;
   bindings_reported?: boolean;
+  reconciliation_state?: RuntimeReconciliationState;
+  reconciliation_message?: string;
+  unknown_slots?: number;
+  observation_at?: string;
   pool_role?: "upgrade-target" | "upgrade-lab" | string;
   pool_purpose?: string;
   upgrade_id?: string;
@@ -88,6 +94,10 @@ export interface RuntimeSlot {
   gateway_port?: number;
   generation?: number;
   error_message?: string;
+  reconciliation_state?: RuntimeReconciliationState;
+  expected_instance_id?: number;
+  binding_confirmed?: boolean;
+  observation_message?: string;
 }
 
 export interface RuntimePodPageRequest {
@@ -112,6 +122,7 @@ export interface RuntimePodSummary {
   migrating: number;
   error: number;
   idle: number;
+  unknown?: number;
   unavailable: number;
 }
 

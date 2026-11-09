@@ -7,7 +7,12 @@ import (
 	"testing"
 	"time"
 
+	"clawreef/internal/models"
 	"clawreef/internal/repository"
+	"encoding/json"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	ktesting "k8s.io/client-go/testing"
 )
 
 func TestRuntimeIdlePoolMySQLScopesPendingDemand(t *testing.T) {
@@ -17,8 +22,8 @@ func TestRuntimeIdlePoolMySQLScopesPendingDemand(t *testing.T) {
 		blocked                             bool
 	}{
 		{"other agent creating", "openclaw", "creating", "", 0, false},
-		{"same agent creating", "hermes", "creating", "", 0, true},
-		{"same agent unbound running", "hermes", "running", "", 0, true},
+		{"same agent creating", "hermes", "creating", "", 0, false},
+		{"same agent unbound running", "hermes", "running", "", 0, false},
 		{"other pool stop", "hermes", "stopped", "other-pod-uid", 999, false},
 		{"current source stop", "hermes", "stopped", "hermes-runtime-pod-uid", 1, true},
 		{"replaced source stop", "hermes", "stopped", "previous-pod-uid", 1, false},
@@ -68,7 +73,7 @@ func TestRuntimeIdlePoolMySQLScopesPendingDemand(t *testing.T) {
 }
 
 func TestRuntimeIdlePoolMySQLRechecksDemandBeforePublishing(t *testing.T) {
-	for _, scenario := range []string{"start", "stop"} {
+	for _, scenario := range []string{"reservation", "stop"} {
 		t.Run(scenario, func(t *testing.T) {
 			sess, service, _ := scaleInMySQLFixture(t)
 			ctx := context.Background()
@@ -96,7 +101,20 @@ func TestRuntimeIdlePoolMySQLRechecksDemandBeforePublishing(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if _, err = service.submitScaleInJournal(ctx, journal, nil); err == nil || !strings.Contains(err.Error(), "instance start or unconfirmed stop exists") {
+			if scenario == "reservation" {
+				if _, err = sess.SQL().Exec("INSERT INTO instance_runtime_bindings(instance_id,runtime_pod_id,runtime_type,gateway_id,gateway_port,state,generation,workspace_path) VALUES(902,?,'hermes','pending-902-1',20000,'creating',1,'/workspace')", pods[0].ID); err != nil {
+					t.Fatal(err)
+				}
+				if _, err = sess.SQL().Exec("UPDATE runtime_pods SET used_slots=used_slots+1 WHERE id=?", pods[0].ID); err != nil {
+					t.Fatal(err)
+				}
+			}
+			_, err = service.submitScaleInJournal(ctx, journal, nil)
+			expected := "source occupancy or identity changed"
+			if scenario == "stop" {
+				expected = "unconfirmed stop"
+			}
+			if err == nil || !strings.Contains(err.Error(), expected) {
 				t.Fatalf("related demand was not rechecked before publishing: %v", err)
 			}
 			pod, err := service.scheduler.podRepo.GetByID(ctx, pods[0].ID)
@@ -107,5 +125,131 @@ func TestRuntimeIdlePoolMySQLRechecksDemandBeforePublishing(t *testing.T) {
 				t.Fatal("denied idle reclamation changed source admission")
 			}
 		})
+	}
+}
+
+func TestRuntimeIdlePoolMySQLRechecksLatestObservation(t *testing.T) {
+	for _, stage := range []string{"publication", "execution", "final replica write"} {
+		for _, state := range []string{"occupied", "unknown", "stale"} {
+			t.Run(stage+"/"+state, func(t *testing.T) {
+				sess, s, kube := scaleInMySQLFixture(t)
+				ctx := context.Background()
+				pods, err := s.scheduler.RuntimeDeploymentPods(ctx, "hermes")
+				if err != nil {
+					t.Fatal(err)
+				}
+				control, err := s.scaleInKube()
+				if err != nil {
+					t.Fatal(err)
+				}
+				journal, err := s.idleRuntimeScaleInPlan(ctx, control, pods, map[string]bool{stringValue(pods[0].PodUID): true})
+				if err != nil {
+					t.Fatal(err)
+				}
+				changed := false
+				change := func() {
+					if changed {
+						return
+					}
+					changed = true
+					p, err := s.scheduler.podRepo.GetByID(ctx, pods[0].ID)
+					if err != nil {
+						t.Fatal(err)
+					}
+					var o models.RuntimePodObservation
+					if err = json.Unmarshal([]byte(*p.ObservationJSON), &o); err != nil {
+						t.Fatal(err)
+					}
+					if state == "stale" {
+						o.ObservedAt = time.Now().Add(-3 * time.Minute).UTC()
+					} else {
+						o.Slots[0].State = state
+						o.Slots[0].Error = "new Runtime state"
+					}
+					if state == "occupied" {
+						o.Slots[0].InstanceID = 25
+						o.Slots[0].UserID = 1
+						o.Slots[0].GatewayID = "gw-25-14"
+						o.Slots[0].Generation = 14
+						o.Slots[0].GatewayState = "error"
+					}
+					data, err := json.Marshal(o)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if _, err = sess.SQL().Exec("UPDATE runtime_pods SET observation_json=?,observation_at=? WHERE id=?", string(data), o.ObservedAt, p.ID); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if stage == "publication" {
+					change()
+				}
+				op, err := s.submitScaleInJournal(ctx, journal, nil)
+				if stage == "publication" {
+					if err == nil {
+						t.Fatal("published reclamation using superseded empty facts")
+					}
+				} else {
+					if err != nil {
+						t.Fatal(err)
+					}
+					if stage == "execution" {
+						change()
+					} else {
+						// The final assignment read follows the ordinary SQL empty check.
+						// Inject new facts here; only the locked final guard can reject them.
+						kube.PrependReactor("list", "configmaps", func(a ktesting.Action) (bool, runtime.Object, error) {
+							var raw string
+							row, e := sess.SQL().QueryRow("SELECT request_json FROM runtime_management_operations WHERE id=?", op.ID)
+							if e == nil {
+								e = row.Scan(&raw)
+							}
+							if e != nil {
+								t.Fatal(e)
+							}
+							var current runtimePodScaleInJournal
+							if e = json.Unmarshal([]byte(raw), &current); e != nil {
+								t.Fatal(e)
+							}
+							if current.Phase == "migrating" {
+								change()
+							}
+							return false, nil, nil
+						})
+					}
+					if err = s.Process(ctx); err != nil {
+						t.Fatal(err)
+					}
+					current, _ := scaleInRead(t, s, op.ID)
+					if current.Status != "failed" {
+						t.Fatalf("changed observation did not stop resize: %+v", current)
+					}
+				}
+				if !changed {
+					t.Fatal("race injection did not execute")
+				}
+				d, err := kube.AppsV1().Deployments("runtime").Get(ctx, "hermes-runtime", metav1.GetOptions{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if *d.Spec.Replicas != 2 {
+					t.Fatal("resized using old observation")
+				}
+				p, err := s.scheduler.podRepo.GetByID(ctx, pods[0].ID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if p.SchedulingPaused {
+					t.Fatal("rejected reclaim leaked source pause")
+				}
+				retained, err := kube.CoreV1().Pods("runtime").Get(ctx, "hermes-runtime-pod-2", metav1.GetOptions{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if retained.Labels["clawmanager.io/scale-in-protected"] != "" {
+					t.Fatal("rejected reclaim leaked retained protection")
+				}
+			})
+		}
 	}
 }

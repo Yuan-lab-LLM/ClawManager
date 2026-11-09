@@ -13,6 +13,8 @@ import (
 	"github.com/upper/db/v4"
 )
 
+var errAutomaticIdleObservation = errors.New("automatic idle observation changed before replica write")
+
 func (s *RuntimeManagementService) saveScaleIn(ctx context.Context, op *RuntimeManagementOperation, journal *runtimePodScaleInJournal) error {
 	op.UpdatedAt = time.Now().UTC()
 	op.ErrorMessage = journal.ErrorMessage
@@ -86,7 +88,7 @@ func (s *RuntimeManagementService) failScaleInBeforeResize(ctx context.Context, 
 	if journal.Phase != "pending" {
 		kube, err := s.scaleInKube()
 		if err == nil {
-			err = s.withScaleInKubeMutation(ctx, op, journal, func() error { return kube.ReleaseRuntimeScaleIn(ctx, journal.Protection, true) })
+			err = s.withScaleInKubeMutation(ctx, op, journal, func(_ db.Session) error { return kube.ReleaseRuntimeScaleIn(ctx, journal.Protection, true) })
 		}
 		if err != nil {
 			op.Status = "needs_attention"
@@ -135,7 +137,7 @@ func (s *RuntimeManagementService) processScaleIn(ctx context.Context, op *Runti
 	if err = s.saveScaleIn(ctx, op, &journal); err != nil {
 		return err
 	}
-	if err = s.withScaleInKubeMutation(ctx, op, &journal, func() error { return kube.ProtectRuntimeScaleIn(ctx, journal.Protection) }); err != nil {
+	if err = s.withScaleInKubeMutation(ctx, op, &journal, func(_ db.Session) error { return kube.ProtectRuntimeScaleIn(ctx, journal.Protection) }); err != nil {
 		return s.failScaleInBeforeResize(ctx, op, &journal, err)
 	}
 	journal.Phase = "migrating"
@@ -283,7 +285,7 @@ func (s *RuntimeManagementService) advanceScaleIn(ctx context.Context, op *Runti
 				return err
 			}
 		}
-		if err = s.withScaleInKubeMutation(ctx, op, journal, func() error { return kube.ReleaseRuntimeScaleIn(ctx, journal.Protection, false) }); err != nil {
+		if err = s.withScaleInKubeMutation(ctx, op, journal, func(_ db.Session) error { return kube.ReleaseRuntimeScaleIn(ctx, journal.Protection, false) }); err != nil {
 			op.Status = "needs_attention"
 			journal.ErrorMessage = err.Error()
 			return s.saveScaleIn(ctx, op, journal)
@@ -377,6 +379,11 @@ func (s *RuntimeManagementService) advanceScaleIn(ctx context.Context, op *Runti
 			journal.ErrorMessage = "waiting for fresh empty source report: " + e.Error()
 			return s.saveScaleIn(ctx, op, journal)
 		}
+		if journal.AutomaticIdle {
+			if e = models.ConfirmedEmptyRuntimeObservation(*pod, time.Now().UTC()); e != nil {
+				return s.failScaleInBeforeResize(ctx, op, journal, e)
+			}
+		}
 		if !pod.SchedulingPaused {
 			return s.failScaleInBeforeResize(ctx, op, journal, errors.New("scale-in source scheduling pause changed"))
 		}
@@ -425,9 +432,19 @@ func (s *RuntimeManagementService) advanceScaleIn(ctx context.Context, op *Runti
 	if err = s.assertOwner(ctx, op.ID); err != nil {
 		return err
 	}
-	if err = s.withScaleInKubeMutation(ctx, op, journal, func() error {
+	if err = s.withScaleInKubeMutation(ctx, op, journal, func(tx db.Session) error {
+		if journal.AutomaticIdle {
+			for _, source := range journal.Plan.SourcePods {
+				if err := repository.CheckRuntimePodEmptyObservation(ctx, tx, source.ID, source.PodUID); err != nil {
+					return fmt.Errorf("%w: %v", errAutomaticIdleObservation, err)
+				}
+			}
+		}
 		return kube.ResizeRuntimeScaleIn(ctx, journal.Target, journal.Snapshot, journal.Protection)
 	}); err != nil {
+		if errors.Is(err, errAutomaticIdleObservation) {
+			return s.failScaleInBeforeResize(ctx, op, journal, err)
+		}
 		op.Status = "needs_attention"
 		journal.ErrorMessage = "replica write result requires observation: " + err.Error()
 		return s.saveScaleIn(ctx, op, journal)
@@ -440,7 +457,7 @@ func (s *RuntimeManagementService) advanceScaleIn(ctx context.Context, op *Runti
 // Operation-row serialization covers the external controller mutations. A
 // scheduler replacement cannot unprotect retained Pods while an old term's
 // replica CAS is in flight, even after it requested cancellation or recovery.
-func (s *RuntimeManagementService) withScaleInKubeMutation(ctx context.Context, op *RuntimeManagementOperation, journal *runtimePodScaleInJournal, fn func() error) error {
+func (s *RuntimeManagementService) withScaleInKubeMutation(ctx context.Context, op *RuntimeManagementOperation, journal *runtimePodScaleInJournal, fn func(db.Session) error) error {
 	return s.sess.TxContext(ctx, func(tx db.Session) error {
 		var status, owner, raw string
 		row, err := tx.SQL().QueryRowContext(ctx, "SELECT status,owner_token,request_json FROM runtime_management_operations WHERE id=? FOR UPDATE", op.ID)
@@ -457,6 +474,6 @@ func (s *RuntimeManagementService) withScaleInKubeMutation(ctx context.Context, 
 		if owner != s.token || (status != "processing" && status != "starting" && status != "needs_attention") || current.Phase != journal.Phase {
 			return errors.New("scale-in execution owner or phase changed; Kubernetes mutation held")
 		}
-		return fn()
+		return fn(tx)
 	}, nil)
 }

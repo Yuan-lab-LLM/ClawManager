@@ -20,13 +20,17 @@ const runtimeIdlePodGrace = time.Minute
 
 func idleRuntimePodEmpty(pod models.RuntimePod, now time.Time) error {
 	pod.State = pod.AgentState // Inventory keeps Kubernetes and Agent states separate.
-	return runtimeMaintenanceEmptyReport(&pod, stringValue(pod.PodUID), now)
+	if err := runtimeMaintenanceEmptyReport(&pod, stringValue(pod.PodUID), now); err != nil {
+		return err
+	}
+	return models.ConfirmedEmptyRuntimeObservation(pod, now)
 }
 
-// New intent must settle before removing capacity. This is checked again under
-// the shared admission lock immediately before publishing the source fence.
-func (s *RuntimeManagementService) idlePoolDemandAdmission(ctx context.Context, tx db.Session, runtimeType string, sources []RuntimePodScaleInSource) error {
-	if runtimeType == "" || len(sources) == 0 {
+// Protect concrete stop identities, not every pool of an unbound Creating row.
+// Claims and bindings are rechecked under the admission lock before publication;
+// a later start can restore sleeping capacity through the ordinary scheduler.
+func (s *RuntimeManagementService) idlePoolDemandAdmission(ctx context.Context, tx db.Session, sources []RuntimePodScaleInSource) error {
+	if len(sources) == 0 {
 		return fmt.Errorf("idle pool source identity required")
 	}
 	conditions := make([]string, 0, len(sources))
@@ -38,27 +42,16 @@ func (s *RuntimeManagementService) idlePoolDemandAdmission(ctx context.Context, 
 		conditions = append(conditions, "(pod_uid=? OR (runtime_pod_id=? AND pod_uid=''))")
 		stopArgs = append(stopArgs, source.PodUID, source.ID)
 	}
-	// A pending start needs capacity of its own agent type. An unconfirmed stop
-	// protects its original Pod identity, including a missing-UID legacy receipt;
-	// unrelated pools and verified replacement UIDs can still become idle.
-	for _, query := range []struct {
-		sql  string
-		args []any
-	}{
-		{`SELECT COUNT(*) FROM instances i WHERE i.type=? AND i.instance_mode='lite' AND i.runtime_type='gateway' AND i.status IN ('creating','running') AND (i.status='creating' OR NOT EXISTS (SELECT 1 FROM instance_runtime_bindings b WHERE b.instance_id=i.id))`, []any{runtimeType}},
-		{`SELECT COUNT(*) FROM instance_idle_stop_operations WHERE phase NOT IN ('completed','failed') AND (` + strings.Join(conditions, " OR ") + `)`, stopArgs},
-	} {
-		var count int
-		row, err := tx.SQL().QueryRowContext(ctx, query.sql, query.args...)
-		if err != nil {
-			return err
-		}
-		if err = row.Scan(&count); err != nil {
-			return err
-		}
-		if count > 0 {
-			return fmt.Errorf("idle pool removal postponed: instance start or unconfirmed stop exists")
-		}
+	var count int
+	row, err := tx.SQL().QueryRowContext(ctx, `SELECT COUNT(*) FROM instance_idle_stop_operations WHERE phase NOT IN ('completed','failed') AND (`+strings.Join(conditions, " OR ")+`)`, stopArgs...)
+	if err != nil {
+		return err
+	}
+	if err = row.Scan(&count); err != nil {
+		return err
+	}
+	if count > 0 {
+		return fmt.Errorf("idle pool removal postponed: instance start or unconfirmed stop exists")
 	}
 	return nil
 }
@@ -145,7 +138,7 @@ func (s *RuntimeManagementService) reconcileIdleRuntimePools(ctx context.Context
 		if len(selected) == 0 {
 			continue
 		}
-		if err := s.idlePoolDemandAdmission(ctx, s.sess, pods[0].RuntimeType, sources); err != nil {
+		if err := s.idlePoolDemandAdmission(ctx, s.sess, sources); err != nil {
 			log.Printf("runtime idle pool %s removal postponed: %v", key, err)
 			continue
 		}

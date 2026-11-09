@@ -487,6 +487,7 @@ func mergeRuntimePoolDeploymentPods(items []runtimePoolPodListItem, deploymentPo
 			pod.AgentState, pod.Draining = "", false
 			pod.OpenClawVersion, pod.AgentProtocolVersion, pod.TeamPluginVersion = nil, nil, nil
 			pod.SessionStore, pod.CapabilitiesJSON, pod.MetricsJSON = nil, nil, nil
+			pod.ObservationJSON, pod.ObservationAt = nil, nil
 			pod.CPUMillisUsed, pod.MemoryBytesUsed, pod.DiskBytesUsed = 0, 0, 0
 			pod.NetworkRXBytes, pod.NetworkTXBytes = 0, 0
 			pod.Slots = append([]models.RuntimeSlot(nil), pod.Slots...)

@@ -9,6 +9,9 @@ import {
   formatMemory,
   runtimeError,
   summarizePod,
+  slotState,
+  canManageSlot,
+  canEvictPod,
 } from "../../lib/runtimeManagement";
 import { runtimePoolService } from "../../services/runtimePoolService";
 import { formatInstanceType } from "../../types/instance";
@@ -50,7 +53,7 @@ export default function RuntimeActions({
     ...new Map(
       pods.flatMap((source) =>
         (source.slots ?? [])
-          .filter((item) => item.instance_id)
+          .filter(canManageSlot)
           .map((item) => [item.instance_id!, { slot: item, source }] as const),
       ),
     ).values(),
@@ -145,7 +148,7 @@ export default function RuntimeActions({
       target.memory_bytes_limit,
       target.scheduling_enabled,
       target.slots
-        ?.filter((item) => item.ready && !item.instance_id)
+        ?.filter((item) => slotState(item) === "idle")
         .map((item) => item.index),
     ],
   });
@@ -162,7 +165,9 @@ export default function RuntimeActions({
   );
   const insufficientEvictionCapacity =
     evictionMode === "graceful" && incoming < occupied;
+  const evictionAllowed = !!pod && canEvictPod(pod);
   const submit = async (check = false) => {
+    if (kind === "evict" && (!evictionAllowed || !acknowledged || busy || insufficientEvictionCapacity || (evictionMode === "force" && !forceSupported))) return;
     if (kind === "schedule" && (
       typeVersion !== typeVersionRef.current || !canCheck || busy || (!check && !validated)
     )) return;
@@ -366,7 +371,7 @@ export default function RuntimeActions({
                   >
                     <option value="">{t("runtimePods.automaticSlot")}</option>
                     {target.slots
-                      ?.filter((item) => item.ready && !item.instance_id)
+                      ?.filter((item) => slotState(item) === "idle")
                       .map((item) => (
                         <option key={item.index} value={item.index}>
                           {t("runtimePods.slot")} {item.index} ·{" "}
@@ -451,6 +456,11 @@ export default function RuntimeActions({
           <p className="text-xs leading-5 text-slate-500">
             {t("runtimePods.evictDescription")}
           </p>
+          {!evictionAllowed && (
+            <p role="status" className="rounded bg-amber-50 p-3 text-xs text-amber-800">
+              {t("runtimePods.reconciliationBlocked")}
+            </p>
+          )}
           <div className="rounded border border-slate-200 p-4">
             <p className="text-sm font-medium">{pod.pod_name}</p>
             <p className="mt-2 text-xs text-slate-500">
@@ -582,7 +592,7 @@ export default function RuntimeActions({
             <button
               type="button"
               className={`${primaryClass} !border-red-600 !bg-red-600`}
-              disabled={!acknowledged || busy || !occupied || insufficientEvictionCapacity || (evictionMode === "force" && !forceSupported)}
+              disabled={!evictionAllowed || !acknowledged || busy || !occupied || insufficientEvictionCapacity || (evictionMode === "force" && !forceSupported)}
               onClick={() => void submit()}
             >
               {t(busy ? "runtimePods.startingOp" : "runtimePods.startEviction")}{" "}

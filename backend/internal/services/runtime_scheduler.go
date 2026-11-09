@@ -772,6 +772,7 @@ func (s *RuntimeScheduler) RuntimeDeploymentPods(ctx context.Context, runtimeTyp
 			}
 			result[index].UsedSlots = pod.UsedSlots
 			result[index].LastSeenAt = pod.LastSeenAt
+			result[index].ObservationJSON, result[index].ObservationAt = pod.ObservationJSON, pod.ObservationAt
 		}
 	}
 	return result, nil

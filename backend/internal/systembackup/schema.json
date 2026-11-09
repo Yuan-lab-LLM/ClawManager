@@ -5371,6 +5371,18 @@
         "type": "tinyint(1)",
         "nullable": "NO",
         "extra": ""
+      },
+      {
+        "name": "observation_json",
+        "type": "json",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "observation_at",
+        "type": "datetime(6)",
+        "nullable": "YES",
+        "extra": ""
       }
     ],
     "primary_key": [
