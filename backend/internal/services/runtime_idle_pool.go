@@ -25,13 +25,31 @@ func idleRuntimePodEmpty(pod models.RuntimePod, now time.Time) error {
 
 // New intent must settle before removing capacity. This is checked again under
 // the shared admission lock immediately before publishing the source fence.
-func (s *RuntimeManagementService) idlePoolDemandAdmission(ctx context.Context, tx db.Session) error {
-	for _, query := range []string{
-		`SELECT COUNT(*) FROM instances i WHERE i.instance_mode='lite' AND i.runtime_type='gateway' AND i.status IN ('creating','running') AND (i.status='creating' OR NOT EXISTS (SELECT 1 FROM instance_runtime_bindings b WHERE b.instance_id=i.id))`,
-		`SELECT COUNT(*) FROM instance_idle_stop_operations WHERE phase NOT IN ('completed','failed')`,
+func (s *RuntimeManagementService) idlePoolDemandAdmission(ctx context.Context, tx db.Session, runtimeType string, sources []RuntimePodScaleInSource) error {
+	if runtimeType == "" || len(sources) == 0 {
+		return fmt.Errorf("idle pool source identity required")
+	}
+	conditions := make([]string, 0, len(sources))
+	stopArgs := make([]any, 0, 2*len(sources))
+	for _, source := range sources {
+		if source.ID <= 0 || source.PodUID == "" {
+			return fmt.Errorf("idle pool source identity required")
+		}
+		conditions = append(conditions, "(pod_uid=? OR (runtime_pod_id=? AND pod_uid=''))")
+		stopArgs = append(stopArgs, source.PodUID, source.ID)
+	}
+	// A pending start needs capacity of its own agent type. An unconfirmed stop
+	// protects its original Pod identity, including a missing-UID legacy receipt;
+	// unrelated pools and verified replacement UIDs can still become idle.
+	for _, query := range []struct {
+		sql  string
+		args []any
+	}{
+		{`SELECT COUNT(*) FROM instances i WHERE i.type=? AND i.instance_mode='lite' AND i.runtime_type='gateway' AND i.status IN ('creating','running') AND (i.status='creating' OR NOT EXISTS (SELECT 1 FROM instance_runtime_bindings b WHERE b.instance_id=i.id))`, []any{runtimeType}},
+		{`SELECT COUNT(*) FROM instance_idle_stop_operations WHERE phase NOT IN ('completed','failed') AND (` + strings.Join(conditions, " OR ") + `)`, stopArgs},
 	} {
 		var count int
-		row, err := tx.SQL().QueryRowContext(ctx, query)
+		row, err := tx.SQL().QueryRowContext(ctx, query.sql, query.args...)
 		if err != nil {
 			return err
 		}
@@ -68,9 +86,6 @@ func (s *RuntimeManagementService) reconcileIdleRuntimePools(ctx context.Context
 	// A busy pool loses its own observation below; unrelated pools retain their
 	// continuously verified grace instead of starting over after each drain.
 	admissionErr := s.scaleInAdmission(ctx, s.sess)
-	if admissionErr == nil {
-		admissionErr = s.idlePoolDemandAdmission(ctx, s.sess)
-	}
 	kube, err := s.scaleInKube()
 	if err != nil {
 		s.idlePodSince = nil
@@ -119,13 +134,19 @@ func (s *RuntimeManagementService) reconcileIdleRuntimePools(ctx context.Context
 	for _, key := range keys {
 		pods := groups[key]
 		selected := map[string]bool{}
+		sources := []RuntimePodScaleInSource{}
 		for _, pod := range pods {
 			uid := stringValue(pod.PodUID)
 			if since, ok := seen[uid]; ok && now.Sub(since) >= runtimeIdlePodGrace && len(selected) < 10 {
 				selected[uid] = true
+				sources = append(sources, RuntimePodScaleInSource{ID: pod.ID, PodUID: uid})
 			}
 		}
 		if len(selected) == 0 {
+			continue
+		}
+		if err := s.idlePoolDemandAdmission(ctx, s.sess, pods[0].RuntimeType, sources); err != nil {
+			log.Printf("runtime idle pool %s removal postponed: %v", key, err)
 			continue
 		}
 		journal, err := s.idleRuntimeScaleInPlan(ctx, kube, pods, selected)

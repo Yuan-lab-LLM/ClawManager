@@ -381,7 +381,7 @@ func (s *RuntimeManagementService) submitScaleInJournal(ctx context.Context, jou
 			if !enabled {
 				return errors.New("automatic idle scale-in disabled")
 			}
-			if err := s.idlePoolDemandAdmission(ctx, tx); err != nil {
+			if err := s.idlePoolDemandAdmission(ctx, tx, journal.Target.RuntimeType, journal.Plan.SourcePods); err != nil {
 				return err
 			}
 			if err := repository.CheckRuntimePodDeletionIntent(ctx, tx, journal.Target.Namespace, journal.Target.DeploymentName); err != nil {
