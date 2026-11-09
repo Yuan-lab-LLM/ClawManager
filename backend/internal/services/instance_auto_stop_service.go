@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"clawreef/internal/backupgate"
@@ -18,9 +19,10 @@ import (
 )
 
 type InstanceAutoStopService struct {
-	store     *repository.InstanceAutoStopRepository
-	lifecycle *instanceService
-	kube      kubernetes.Interface
+	initialized atomic.Bool
+	store       *repository.InstanceAutoStopRepository
+	lifecycle   *instanceService
+	kube        kubernetes.Interface
 }
 
 func NewInstanceAutoStopService(store *repository.InstanceAutoStopRepository, instances InstanceService, kube kubernetes.Interface) *InstanceAutoStopService {
@@ -32,10 +34,10 @@ func NewInstanceAutoStopService(store *repository.InstanceAutoStopRepository, in
 }
 func (s *InstanceAutoStopService) Run(ctx context.Context) {
 	if models.AutoStopTestTiming {
-		log.Print("automatic Lite stop: TEST BUILD; scan interval=1m, idle timeout=5m; rebuild without cm_idle_stop_test_timing for production")
+		log.Print("automatic Lite stop: TEST BUILD; legacy defaults: scan interval=1m, idle timeout=5m; explicitly configured seconds take precedence")
 	}
 	// Capacity deadlines are control-plane recovery, independent of the
-	// administrator's day-scale idle scan and potentially slow native stops.
+	// administrator's idle scan and potentially slow native stops.
 	deadlineCtx, deadlineCancel := context.WithCancel(ctx)
 	defer deadlineCancel()
 	go func() {
@@ -55,7 +57,7 @@ func (s *InstanceAutoStopService) Run(ctx context.Context) {
 			}
 		}
 	}()
-	tick := time.NewTicker(30 * time.Second)
+	tick := time.NewTicker(time.Second)
 	defer tick.Stop()
 	for {
 		if err := s.Tick(ctx); err != nil && ctx.Err() == nil {
@@ -77,8 +79,13 @@ func (s *InstanceAutoStopService) Tick(ctx context.Context) error {
 	if s.lifecycle == nil {
 		return fmt.Errorf("instance lifecycle unavailable")
 	}
-	if err = s.store.Initialize(ctx); err != nil {
-		return err
+	initializedNow := false
+	if !s.initialized.Load() {
+		if err = s.store.Initialize(ctx); err != nil {
+			return err
+		}
+		s.initialized.Store(true)
+		initializedNow = true
 	}
 	pending, err := s.store.PendingStops(ctx)
 	if err != nil {
@@ -113,9 +120,16 @@ func (s *InstanceAutoStopService) Tick(ctx context.Context) error {
 	if err != nil || cfg == nil {
 		return err
 	}
+	// Establish missing observation windows at startup and on due scans, rather
+	// than traversing every Lite instance during each one-second deadline poll.
+	if !initializedNow {
+		if err = s.store.Initialize(ctx); err != nil {
+			return err
+		}
+	}
 	after := cfg.ScanCursor
 	for {
-		candidates, err := s.store.Candidates(ctx, time.Now().UTC(), cfg.IdleTimeoutDays, after, 100)
+		candidates, err := s.store.CandidatesForTimeout(ctx, time.Now().UTC(), cfg.IdleTimeout(), after, 100)
 		if err != nil {
 			return err
 		}

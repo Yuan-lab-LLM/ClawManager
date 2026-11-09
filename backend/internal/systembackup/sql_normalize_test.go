@@ -122,3 +122,22 @@ func TestIdleStopRestoreDoesNotReplayLiveOperations(t *testing.T) {
 		t.Fatalf("unsafe restored idle metadata: %+v", change.After)
 	}
 }
+
+func TestAutoStopRestorePreservesExactDurationsWhileDisablingExecution(t *testing.T) {
+	for _, seconds := range []team.Cell{team.Null(), team.Value("1"), team.Value("9223372036")} {
+		row := team.Row{"enabled": team.Value("1"), "next_check_at": team.Value("2026-11-09 01:02:03.000000"), "check_interval_days": team.Value("2"), "idle_timeout_days": team.Value("7"), "check_interval_seconds": seconds, "idle_timeout_seconds": seconds}
+		table := SQLTable{Name: "instance_auto_stop_settings", Columns: []SQLColumn{{Name: "next_check_at", Nullable: "YES"}}}
+		change, err := NormalizeDataRow(table, row, time.Now().UTC())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(change.After["enabled"].Data) != "0" || !change.After["next_check_at"].IsNull {
+			t.Fatalf("restored automatic stop can execute: %+v", change.After)
+		}
+		for _, name := range []string{"check_interval_days", "idle_timeout_days", "check_interval_seconds", "idle_timeout_seconds"} {
+			if !bytes.Equal(change.After[name].Data, row[name].Data) || change.After[name].IsNull != row[name].IsNull {
+				t.Fatalf("restore changed %s", name)
+			}
+		}
+	}
+}

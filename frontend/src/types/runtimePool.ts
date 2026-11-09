@@ -4,11 +4,16 @@ export interface RuntimeAutoStopSettings {
   enabled: boolean;
   check_interval_days: number;
   idle_timeout_days: number;
+  check_interval_seconds?: number;
+  idle_timeout_seconds?: number;
   version: number;
   next_check_at: string;
 }
 
-export type UpdateRuntimeAutoStopSettings = Omit<RuntimeAutoStopSettings, "next_check_at">;
+export type UpdateRuntimeAutoStopSettings = Pick<RuntimeAutoStopSettings, "enabled" | "version"> & (
+  | { check_interval_seconds: number; idle_timeout_seconds: number }
+  | { check_interval_days: number; idle_timeout_days: number }
+);
 
 export interface RuntimeAutoStopActivity extends InstanceAutoStopActivity {
   instance_id: number;

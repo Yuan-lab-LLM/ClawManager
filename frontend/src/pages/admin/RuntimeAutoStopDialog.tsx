@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import axios from "axios";
 import { useI18n } from "../../contexts/I18nContext";
-import { MAX_AUTO_STOP_DAYS, parseAutoStopDays } from "../../lib/runtimeAutoStop";
+import { AUTO_STOP_UNITS, MAX_AUTO_STOP_SECONDS, autoStopDuration, parseAutoStopSeconds, type AutoStopUnit } from "../../lib/runtimeAutoStop";
 import { runtimeError } from "../../lib/runtimeManagement";
 import { runtimePoolService } from "../../services/runtimePoolService";
 import type { RuntimeAutoStopSettings } from "../../types/runtimePool";
@@ -21,21 +21,25 @@ function SettingsForm({ settings, onClose, onRefresh, refreshing }: { settings: 
   const { t, locale } = useI18n();
   const [saved, setSaved] = useState(settings);
   const [enabled, setEnabled] = useState(settings.enabled);
-  const [interval, setInterval] = useState(String(settings.check_interval_days ?? 1));
-  const [timeout, setTimeoutDays] = useState(String(settings.idle_timeout_days ?? 1));
+  const initialInterval = autoStopDuration(settings.check_interval_seconds ?? settings.check_interval_days * 86400);
+  const initialTimeout = autoStopDuration(settings.idle_timeout_seconds ?? settings.idle_timeout_days * 86400);
+  const [interval, setInterval] = useState(initialInterval.value);
+  const [intervalUnit, setIntervalUnit] = useState<AutoStopUnit>(initialInterval.unit);
+  const [timeout, setTimeoutValue] = useState(initialTimeout.value);
+  const [timeoutUnit, setTimeoutUnit] = useState<AutoStopUnit>(initialTimeout.unit);
   const [busy, setBusy] = useState(false);
   const pending = useRef(false);
   const [error, setError] = useState<string>();
   const [notice, setNotice] = useState(false);
   const [conflict, setConflict] = useState(false);
-  const checkDays = parseAutoStopDays(interval);
-  const idleDays = parseAutoStopDays(timeout);
-  const valid = checkDays !== undefined && idleDays !== undefined;
+  const checkSeconds = parseAutoStopSeconds(interval, intervalUnit);
+  const idleSeconds = parseAutoStopSeconds(timeout, timeoutUnit);
+  const valid = checkSeconds !== undefined && idleSeconds !== undefined;
   const save = async () => {
     if (pending.current || refreshing || !valid || conflict) return;
     pending.current = true; setBusy(true); setError(undefined); setNotice(false);
     try {
-      const result = await runtimePoolService.updateAutoStopSettings({ enabled, check_interval_days: checkDays, idle_timeout_days: idleDays, version: saved.version });
+      const result = await runtimePoolService.updateAutoStopSettings({ enabled, check_interval_seconds: checkSeconds, idle_timeout_seconds: idleSeconds, version: saved.version });
       setSaved(result); setNotice(true);
     } catch (err) {
       const stale = axios.isAxiosError(err) && err.response?.status === 409;
@@ -56,10 +60,20 @@ function SettingsForm({ settings, onClose, onRefresh, refreshing }: { settings: 
     <form id="runtime-auto-stop-settings" className="space-y-4" onSubmit={event => { event.preventDefault(); void save(); }}>
       <label className="flex items-center gap-2 text-sm"><input type="checkbox" role="switch" checked={enabled} disabled={busy || refreshing} onChange={event => { setEnabled(event.target.checked); changed(); }} />{t("autoStop.enabled")}</label>
       <div className="grid gap-3 sm:grid-cols-2">
-        <label className="space-y-1 text-xs"><span>{t("autoStop.checkInterval")}</span><input className={`${inputClass} w-full`} type="number" min={1} max={MAX_AUTO_STOP_DAYS} step={1} required value={interval} disabled={busy || refreshing} aria-invalid={checkDays === undefined} aria-describedby={!valid ? "auto-stop-days-error" : undefined} onChange={event => { setInterval(event.target.value); changed(); }} /></label>
-        <label className="space-y-1 text-xs"><span>{t("autoStop.idleTimeout")}</span><input className={`${inputClass} w-full`} type="number" min={1} max={MAX_AUTO_STOP_DAYS} step={1} required value={timeout} disabled={busy || refreshing} aria-invalid={idleDays === undefined} aria-describedby={!valid ? "auto-stop-days-error" : undefined} onChange={event => { setTimeoutDays(event.target.value); changed(); }} /></label>
+        {([
+          { label: "autoStop.checkInterval", unitLabel: "autoStop.checkIntervalUnit", value: interval, unit: intervalUnit, seconds: checkSeconds, setValue: setInterval, setUnit: setIntervalUnit },
+          { label: "autoStop.idleTimeout", unitLabel: "autoStop.idleTimeoutUnit", value: timeout, unit: timeoutUnit, seconds: idleSeconds, setValue: setTimeoutValue, setUnit: setTimeoutUnit },
+        ]).map(field => <fieldset key={field.label} className="min-w-0 space-y-1 text-xs">
+          <legend>{t(field.label)}</legend>
+          <div className="flex gap-2">
+            <input className={`${inputClass} min-w-0 flex-1`} aria-label={t(field.label)} type="number" min={1} max={Math.floor(MAX_AUTO_STOP_SECONDS / AUTO_STOP_UNITS[field.unit])} step={1} required value={field.value} disabled={busy || refreshing} aria-invalid={field.seconds === undefined} aria-describedby={field.seconds === undefined ? "auto-stop-duration-error" : undefined} onChange={event => { field.setValue(event.target.value); changed(); }} />
+            <select className={inputClass} aria-label={t(field.unitLabel)} value={field.unit} disabled={busy || refreshing} onChange={event => { field.setUnit(event.target.value as AutoStopUnit); changed(); }}>
+              {(Object.keys(AUTO_STOP_UNITS) as AutoStopUnit[]).map(unit => <option key={unit} value={unit}>{t(`autoStop.unit_${unit}`)}</option>)}
+            </select>
+          </div>
+        </fieldset>)}
       </div>
-      {!valid && <p id="auto-stop-days-error" role="alert" className="text-xs text-red-700">{t("autoStop.invalidDays", { max: MAX_AUTO_STOP_DAYS })}</p>}
+      {!valid && <p id="auto-stop-duration-error" role="alert" className="text-xs text-red-700">{t("autoStop.invalidDuration")}</p>}
       <p className="text-xs text-slate-600">{t("autoStop.nextCheck")}: {saved.next_check_at ? new Date(saved.next_check_at).toLocaleString(locale, { timeZone: "Asia/Shanghai" }) : "—"} · Asia/Shanghai{!saved.enabled && ` · ${t("autoStop.paused")}`}</p>
     </form>
   </RuntimeDialog>;

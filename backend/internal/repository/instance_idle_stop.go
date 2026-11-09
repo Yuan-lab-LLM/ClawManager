@@ -37,7 +37,7 @@ func (r *InstanceAutoStopRepository) ClaimStop(ctx context.Context, settingsVers
 			return err
 		}
 		now := time.Now().UTC()
-		if a == nil || a.Generation != i.generation || a.ActivityVersion != activityVersion || !a.IdleAt(now, cfg.IdleTimeoutDays) {
+		if a == nil || a.Generation != i.generation || a.ActivityVersion != activityVersion || !a.IdleAtDuration(now, cfg.IdleTimeout()) {
 			return models.ErrAutoStopConflict
 		}
 		workRow, err := s.SQL().QueryRowContext(ctx, `SELECT
@@ -66,7 +66,7 @@ func (r *InstanceAutoStopRepository) ClaimStop(ctx context.Context, settingsVers
 			return models.ErrAutoStopConflict
 		}
 		// A restart after observation cannot shorten the mandatory idle window.
-		row, err = s.SQL().QueryRowContext(ctx, `SELECT COUNT(*) FROM instances WHERE id=? AND (started_at IS NULL OR started_at<=?)`, input.InstanceID, now.Add(-models.InstanceAutoStopIdleTimeout(cfg.IdleTimeoutDays)))
+		row, err = s.SQL().QueryRowContext(ctx, `SELECT COUNT(*) FROM instances WHERE id=? AND (started_at IS NULL OR started_at<=?)`, input.InstanceID, now.Add(-cfg.IdleTimeout()))
 		if err != nil {
 			return err
 		}

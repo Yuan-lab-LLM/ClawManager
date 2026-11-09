@@ -1575,6 +1575,18 @@
         "extra": ""
       },
       {
+        "name": "check_interval_seconds",
+        "type": "bigint unsigned",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "idle_timeout_seconds",
+        "type": "bigint unsigned",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
         "name": "version",
         "type": "bigint unsigned",
         "nullable": "NO",

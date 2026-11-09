@@ -26,20 +26,28 @@ func (h *InstanceAutoStopHandler) Get(c *gin.Context) {
 }
 func (h *InstanceAutoStopHandler) Update(c *gin.Context) {
 	var req struct {
-		Enabled           *bool  `json:"enabled"`
-		CheckIntervalDays *int   `json:"check_interval_days"`
-		IdleTimeoutDays   *int   `json:"idle_timeout_days"`
-		Version           *int64 `json:"version"`
+		Enabled              *bool  `json:"enabled"`
+		CheckIntervalDays    *int   `json:"check_interval_days"`
+		CheckIntervalSeconds *int64 `json:"check_interval_seconds"`
+		IdleTimeoutDays      *int   `json:"idle_timeout_days"`
+		IdleTimeoutSeconds   *int64 `json:"idle_timeout_seconds"`
+		Version              *int64 `json:"version"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		utils.ValidationError(c, err)
 		return
 	}
-	if req.Enabled == nil || req.CheckIntervalDays == nil || req.IdleTimeoutDays == nil || req.Version == nil {
-		utils.Error(c, http.StatusBadRequest, "enabled, check_interval_days, idle_timeout_days and version are required")
+	if req.Enabled == nil || (req.CheckIntervalDays == nil && req.CheckIntervalSeconds == nil) || (req.IdleTimeoutDays == nil && req.IdleTimeoutSeconds == nil) || req.Version == nil {
+		utils.Error(c, http.StatusBadRequest, "enabled, version, and both check interval and idle timeout (seconds or legacy days) are required")
 		return
 	}
-	cfg := models.InstanceAutoStopSettings{Enabled: *req.Enabled, CheckIntervalDays: *req.CheckIntervalDays, IdleTimeoutDays: *req.IdleTimeoutDays, Version: *req.Version}
+	cfg := models.InstanceAutoStopSettings{Enabled: *req.Enabled, CheckIntervalSeconds: req.CheckIntervalSeconds, IdleTimeoutSeconds: req.IdleTimeoutSeconds, Version: *req.Version}
+	if req.CheckIntervalDays != nil {
+		cfg.CheckIntervalDays = *req.CheckIntervalDays
+	}
+	if req.IdleTimeoutDays != nil {
+		cfg.IdleTimeoutDays = *req.IdleTimeoutDays
+	}
 	if err := cfg.Validate(); err != nil {
 		utils.Error(c, http.StatusBadRequest, err.Error())
 		return
