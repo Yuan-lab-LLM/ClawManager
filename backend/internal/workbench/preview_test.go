@@ -117,3 +117,28 @@ func (s *previewMemoryStore) Get(_ context.Context, key string) (PreviewLease, e
 	}
 	return lease, nil
 }
+
+func TestSharedPreviewLeaseNeverOutlivesShareSession(t *testing.T) {
+	store := &previewMemoryStore{values: map[string]PreviewLease{}}
+	registry, _ := NewPreviews("https://p-{token}.preview.test", store, time.Hour)
+	now := time.Now()
+	registry.now = func() time.Time { return now }
+	shared := SharedPreviewAccess{Code: "sl_test", SessionBinding: strings.Repeat("a", 64), WorkspaceAccess: "read", ExpiresAt: now.Add(time.Minute)}
+	scope := PreviewScope{InstanceID: 1, UserID: 2, Generation: 3, GatewayID: "gw-1-3"}
+	lease, err := registry.CreateShared(context.Background(), scope, "localhost:4000", shared)
+	if err != nil || lease.Shared == nil || !lease.ExpiresAt.Equal(shared.ExpiresAt) {
+		t.Fatalf("share expiry not enforced: %+v %v", lease, err)
+	}
+	shared.WorkspaceAccess = "none"
+	if _, err := registry.CreateShared(context.Background(), scope, "localhost:4000", shared); !errors.Is(err, ErrPreviewScope) {
+		t.Fatalf("none permission accepted: %v", err)
+	}
+	registry.now = func() time.Time { return now.Add(time.Minute) }
+	if _, err := registry.LookupCapability(context.Background(), lease.ID); !errors.Is(err, ErrPreviewNotFound) {
+		t.Fatalf("expired share session accepted: %v", err)
+	}
+	shared.WorkspaceAccess = "read"
+	if _, err := registry.CreateShared(context.Background(), scope, "localhost:4000", shared); !errors.Is(err, ErrPreviewScope) {
+		t.Fatalf("expired share session minted preview: %v", err)
+	}
+}

@@ -53,11 +53,7 @@ func (s *InstanceWorkbenchService) previewRequestTarget(ctx context.Context, r *
 	if err != nil || lease.Scope.InstanceID != binding.InstanceID || browserPreviewTargetKey(lease.Target) != binding.Target {
 		return lease, workbenchTarget{}, workbench.ErrPreviewNotFound
 	}
-	target, err := s.resolve(ctx, lease.Scope.UserID, false, lease.Scope.InstanceID, lease.Scope.Generation)
-	if err != nil || target.scope != lease.Scope || lease.Target.Port == target.gatewayPort {
-		return lease, target, workbench.ErrPreviewNotFound
-	}
-	return lease, target, nil
+	return s.resolvePreviewLease(ctx, lease)
 }
 
 // Browser ports only select routes. A secret capability is required both for

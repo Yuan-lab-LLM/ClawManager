@@ -20,7 +20,47 @@ type instanceWorkbench interface {
 	Execute(context.Context, int, bool, int, int, string, json.RawMessage) (json.RawMessage, error)
 	CreatePreview(context.Context, int, bool, int, int, string) (map[string]any, error)
 }
-type InstanceWorkbenchHandler struct{ service instanceWorkbench }
+type InstanceWorkbenchHandler struct {
+	service         instanceWorkbench
+	sharedInstances sharedWorkspaceInstances
+	sharedExternal  services.InstanceExternalAccessService
+	sharedTokens    *services.InstanceAccessService
+}
+
+const sharedWorkbenchSessionKey = "validated-shared-workbench-session"
+
+func NewSharedInstanceWorkbenchHandler(service instanceWorkbench, instances sharedWorkspaceInstances, external services.InstanceExternalAccessService, tokens *services.InstanceAccessService) *InstanceWorkbenchHandler {
+	return &InstanceWorkbenchHandler{service: service, sharedInstances: instances, sharedExternal: external, sharedTokens: tokens}
+}
+func (h *InstanceWorkbenchHandler) identity(c *gin.Context, requireWrite bool) (userID, instanceID int, admin, ok bool) {
+	if h.sharedInstances == nil {
+		return workbenchIdentity(c)
+	}
+	c.Header("Cache-Control", "no-store")
+	c.Header("Referrer-Policy", "no-referrer")
+	session, valid := resolveSharedWorkspaceSession(c, h.sharedInstances, h.sharedExternal, h.sharedTokens, requireWrite)
+	if !valid {
+		return
+	}
+	c.Set(sharedWorkbenchSessionKey, session)
+	return session.instance.UserID, session.instance.ID, false, true
+}
+func sharedWorkbenchSession(c *gin.Context) *sharedWorkspaceSession {
+	value, _ := c.Get(sharedWorkbenchSessionKey)
+	session, _ := value.(*sharedWorkspaceSession)
+	return session
+}
+func sharedReadGit(data map[string]json.RawMessage) bool {
+	var operation string
+	if json.Unmarshal(data["operation"], &operation) != nil {
+		return false
+	}
+	switch operation {
+	case "projects", "status", "diff", "branches", "history", "identity":
+		return true
+	}
+	return false
+}
 
 func NewInstanceWorkbenchHandler(service instanceWorkbench) *InstanceWorkbenchHandler {
 	return &InstanceWorkbenchHandler{service: service}
@@ -132,7 +172,7 @@ func workbenchBody(c *gin.Context) (map[string]json.RawMessage, bool) {
 	return data, true
 }
 func (h *InstanceWorkbenchHandler) capabilities(c *gin.Context) {
-	user, id, admin, ok := workbenchIdentity(c)
+	user, id, admin, ok := h.identity(c, false)
 	if !ok {
 		return
 	}
@@ -141,11 +181,15 @@ func (h *InstanceWorkbenchHandler) capabilities(c *gin.Context) {
 		workbenchFailure(c, err)
 		return
 	}
+	if session := sharedWorkbenchSession(c); session != nil && session.preview.WorkspaceAccess != services.ExternalWorkspaceAccessWrite {
+		result["terminal"] = false
+		result["processes"] = false
+	}
 	utils.Success(c, 200, "", result)
 }
 func (h *InstanceWorkbenchHandler) operation(operation string) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		user, id, admin, ok := workbenchIdentity(c)
+		user, id, admin, ok := h.identity(c, operation != "git")
 		if !ok {
 			return
 		}
@@ -155,6 +199,10 @@ func (h *InstanceWorkbenchHandler) operation(operation string) gin.HandlerFunc {
 		}
 		data, ok := workbenchBody(c)
 		if !ok {
+			return
+		}
+		if session := sharedWorkbenchSession(c); session != nil && session.preview.WorkspaceAccess != services.ExternalWorkspaceAccessWrite && !sharedReadGit(data) {
+			utils.Error(c, http.StatusForbidden, "This share link has read-only workspace access")
 			return
 		}
 		for _, key := range []string{"session", "process"} {
@@ -184,7 +232,7 @@ func (h *InstanceWorkbenchHandler) operation(operation string) gin.HandlerFunc {
 	}
 }
 func (h *InstanceWorkbenchHandler) preview(c *gin.Context) {
-	user, id, admin, ok := workbenchIdentity(c)
+	user, id, admin, ok := h.identity(c, false)
 	if !ok {
 		return
 	}
@@ -201,7 +249,20 @@ func (h *InstanceWorkbenchHandler) preview(c *gin.Context) {
 		workbenchFailure(c, workbench.ErrInvalidPreviewURL)
 		return
 	}
-	result, err := h.service.CreatePreview(c.Request.Context(), user, admin, id, generation, address)
+	var result map[string]any
+	var err error
+	if session := sharedWorkbenchSession(c); session != nil {
+		creator, supported := h.service.(interface {
+			CreateSharedPreview(context.Context, int, int, int, string, workbench.SharedPreviewAccess) (map[string]any, error)
+		})
+		if !supported {
+			workbenchFailure(c, services.ErrWorkbenchDenied)
+			return
+		}
+		result, err = creator.CreateSharedPreview(c.Request.Context(), user, id, generation, address, session.preview)
+	} else {
+		result, err = h.service.CreatePreview(c.Request.Context(), user, admin, id, generation, address)
+	}
 	if err != nil {
 		workbenchFailure(c, err)
 		return

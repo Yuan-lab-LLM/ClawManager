@@ -89,13 +89,27 @@ func (s PreviewScope) Valid() bool {
 	return s.InstanceID > 0 && s.UserID > 0 && s.Generation > 0 && s.GatewayID == fmt.Sprintf("gw-%d-%d", s.InstanceID, s.Generation)
 }
 
+// SharedPreviewAccess remains control-plane metadata and is never embedded in
+// PreviewScope or sent to the runtime agent.
+type SharedPreviewAccess struct {
+	Code            string    `json:"code"`
+	SessionBinding  string    `json:"session_binding"`
+	WorkspaceAccess string    `json:"workspace_access"`
+	ExpiresAt       time.Time `json:"expires_at"`
+}
+
+func (a SharedPreviewAccess) Valid() bool {
+	return strings.TrimSpace(a.Code) != "" && len(a.Code) <= 256 && len(a.SessionBinding) == 64 && (a.WorkspaceAccess == "read" || a.WorkspaceAccess == "write") && !a.ExpiresAt.IsZero()
+}
+
 type PreviewLease struct {
 	// ID is the bearer capability returned to the caller, and is never persisted.
-	ID        string        `json:"id,omitempty"`
-	Scope     PreviewScope  `json:"scope"`
-	Target    PreviewTarget `json:"target"`
-	CreatedAt time.Time     `json:"created_at"`
-	ExpiresAt time.Time     `json:"expires_at"`
+	ID        string               `json:"id,omitempty"`
+	Shared    *SharedPreviewAccess `json:"shared,omitempty"`
+	Scope     PreviewScope         `json:"scope"`
+	Target    PreviewTarget        `json:"target"`
+	CreatedAt time.Time            `json:"created_at"`
+	ExpiresAt time.Time            `json:"expires_at"`
 }
 
 // PreviewStore must be shared between control-plane replicas. Implementations
@@ -141,6 +155,15 @@ func previewKey(id string) string {
 }
 
 func (p *Previews) Create(ctx context.Context, scope PreviewScope, rawURL string) (PreviewLease, error) {
+	return p.create(ctx, scope, rawURL, nil)
+}
+func (p *Previews) CreateShared(ctx context.Context, scope PreviewScope, rawURL string, shared SharedPreviewAccess) (PreviewLease, error) {
+	if !shared.Valid() || !p.now().Before(shared.ExpiresAt) {
+		return PreviewLease{}, ErrPreviewScope
+	}
+	return p.create(ctx, scope, rawURL, &shared)
+}
+func (p *Previews) create(ctx context.Context, scope PreviewScope, rawURL string, shared *SharedPreviewAccess) (PreviewLease, error) {
 	if err := ctx.Err(); err != nil {
 		return PreviewLease{}, err
 	}
@@ -156,7 +179,10 @@ func (p *Previews) Create(ctx context.Context, scope PreviewScope, rawURL string
 		return PreviewLease{}, errors.New("could not create preview capability")
 	}
 	id, now := hex.EncodeToString(random), p.now()
-	lease := PreviewLease{Scope: scope, Target: target, CreatedAt: now, ExpiresAt: now.Add(p.ttl)}
+	lease := PreviewLease{Scope: scope, Target: target, CreatedAt: now, ExpiresAt: now.Add(p.ttl), Shared: shared}
+	if shared != nil && shared.ExpiresAt.Before(lease.ExpiresAt) {
+		lease.ExpiresAt = shared.ExpiresAt
+	}
 	if err := p.store.Put(ctx, previewKey(id), lease); err != nil {
 		return PreviewLease{}, err
 	}
@@ -205,7 +231,7 @@ func (p *Previews) LookupCapability(ctx context.Context, id string) (PreviewLeas
 	if err != nil {
 		return PreviewLease{}, err
 	}
-	if !lease.Scope.Valid() || !p.now().Before(lease.ExpiresAt) {
+	if !lease.Scope.Valid() || !p.now().Before(lease.ExpiresAt) || (lease.Shared != nil && (!lease.Shared.Valid() || !p.now().Before(lease.Shared.ExpiresAt))) {
 		return PreviewLease{}, ErrPreviewNotFound
 	}
 	// Persistent records are metadata, not authority to bypass URL validation.

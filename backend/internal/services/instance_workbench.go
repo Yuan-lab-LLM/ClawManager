@@ -45,6 +45,9 @@ type InstanceWorkbenchService struct {
 	previews               *workbench.Previews
 	browserOrigins         *browserorigin.Registry
 	previewRecheckInterval time.Duration
+	sharedPreviewAccess    interface {
+		ResolveShortLink(context.Context, string) (*models.InstanceExternalAccess, error)
+	}
 }
 type workbenchTarget struct {
 	scope               workbench.PreviewScope
@@ -136,7 +139,36 @@ func (s *InstanceWorkbenchService) Capabilities(ctx context.Context, userID int,
 	caps["preview"] = caps["preview"] == true && s.previews != nil
 	return caps, nil
 }
+func (s *InstanceWorkbenchService) SetSharedPreviewAccess(access interface {
+	ResolveShortLink(context.Context, string) (*models.InstanceExternalAccess, error)
+}) { s.sharedPreviewAccess = access }
 func (s *InstanceWorkbenchService) CreatePreview(ctx context.Context, userID int, admin bool, instanceID, generation int, rawURL string) (map[string]any, error) {
+	return s.createPreview(ctx, userID, admin, instanceID, generation, rawURL, nil)
+}
+func (s *InstanceWorkbenchService) CreateSharedPreview(ctx context.Context, userID, instanceID, generation int, rawURL string, shared workbench.SharedPreviewAccess) (map[string]any, error) {
+	if !s.validSharedPreview(ctx, instanceID, &shared) {
+		return nil, ErrWorkbenchDenied
+	}
+	return s.createPreview(ctx, userID, false, instanceID, generation, rawURL, &shared)
+}
+func (s *InstanceWorkbenchService) validSharedPreview(ctx context.Context, instanceID int, shared *workbench.SharedPreviewAccess) bool {
+	if shared == nil {
+		return true
+	}
+	if s.sharedPreviewAccess == nil || !shared.Valid() || !time.Now().Before(shared.ExpiresAt) {
+		return false
+	}
+	access, err := s.sharedPreviewAccess.ResolveShortLink(ctx, shared.Code)
+	if err != nil || access == nil || !access.Enabled || access.InstanceID != instanceID || (access.ExpiresAt != nil && !time.Now().Before(*access.ExpiresAt)) {
+		return false
+	}
+	if access.AuthMode != ExternalAccessModeShareLink && access.AuthMode != ExternalAccessModePassword {
+		return false
+	}
+	permission, err := NormalizeExternalWorkspaceAccess(access.WorkspaceAccess)
+	return err == nil && permission == shared.WorkspaceAccess && ExternalAccessSessionBinding(shared.Code, access) == shared.SessionBinding
+}
+func (s *InstanceWorkbenchService) createPreview(ctx context.Context, userID int, admin bool, instanceID, generation int, rawURL string, shared *workbench.SharedPreviewAccess) (map[string]any, error) {
 	if generation <= 0 {
 		return nil, ErrWorkbenchStale
 	}
@@ -171,7 +203,12 @@ func (s *InstanceWorkbenchService) CreatePreview(ctx context.Context, userID int
 			return nil, err
 		}
 	}
-	lease, err := s.previews.Create(ctx, target.scope, rawURL)
+	var lease workbench.PreviewLease
+	if shared != nil {
+		lease, err = s.previews.CreateShared(ctx, target.scope, rawURL, *shared)
+	} else {
+		lease, err = s.previews.Create(ctx, target.scope, rawURL)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -187,6 +224,12 @@ func (s *InstanceWorkbenchService) previewTarget(ctx context.Context, host strin
 	lease, err := s.previews.LookupHost(ctx, host)
 	if err != nil {
 		return lease, workbenchTarget{}, err
+	}
+	return s.resolvePreviewLease(ctx, lease)
+}
+func (s *InstanceWorkbenchService) resolvePreviewLease(ctx context.Context, lease workbench.PreviewLease) (workbench.PreviewLease, workbenchTarget, error) {
+	if !s.validSharedPreview(ctx, lease.Scope.InstanceID, lease.Shared) {
+		return lease, workbenchTarget{}, workbench.ErrPreviewNotFound
 	}
 	target, err := s.resolve(ctx, lease.Scope.UserID, false, lease.Scope.InstanceID, lease.Scope.Generation)
 	if err != nil || target.scope != lease.Scope || lease.Target.Port == target.gatewayPort {

@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"crypto/subtle"
 	"errors"
 	"fmt"
 	"io"
@@ -336,66 +335,12 @@ func (h *WorkspaceFileHandler) workspaceScope(c *gin.Context) (*models.Instance,
 }
 
 func (h *WorkspaceFileHandler) sharedWorkspaceScope(c *gin.Context) (*models.Instance, services.WorkspaceFileService, services.WorkspaceFileScope, bool) {
-	if h.externalAccessService == nil || h.instanceAccessService == nil {
-		utils.Error(c, http.StatusServiceUnavailable, "Shared workspace access is not configured")
+	write := c.Request.Method != http.MethodGet && c.Request.Method != http.MethodHead
+	session, ok := resolveSharedWorkspaceSession(c, h.instanceService, h.externalAccessService, h.instanceAccessService, write)
+	if !ok {
 		return nil, nil, services.WorkspaceFileScope{}, false
 	}
-	code := strings.TrimSpace(c.Param("code"))
-	access, err := h.externalAccessService.ResolveShortLink(c.Request.Context(), code)
-	if err != nil {
-		utils.Error(c, http.StatusUnauthorized, err.Error())
-		return nil, nil, services.WorkspaceFileScope{}, false
-	}
-	if access.AuthMode != services.ExternalAccessModeShareLink &&
-		access.AuthMode != services.ExternalAccessModePassword {
-		utils.Error(c, http.StatusBadRequest, "Unsupported share link mode")
-		return nil, nil, services.WorkspaceFileScope{}, false
-	}
-	workspaceAccess, err := services.NormalizeExternalWorkspaceAccess(access.WorkspaceAccess)
-	if err != nil || workspaceAccess == services.ExternalWorkspaceAccessNone {
-		utils.Error(c, http.StatusForbidden, "Workspace access is not enabled for this share link")
-		return nil, nil, services.WorkspaceFileScope{}, false
-	}
-	isWrite := c.Request.Method != http.MethodGet && c.Request.Method != http.MethodHead
-	if isWrite && workspaceAccess != services.ExternalWorkspaceAccessWrite {
-		utils.Error(c, http.StatusForbidden, "This share link has read-only workspace access")
-		return nil, nil, services.WorkspaceFileScope{}, false
-	}
-
-	token, cookieErr := c.Cookie(shortExternalAccessCookieName(code))
-	if cookieErr != nil || strings.TrimSpace(token) == "" {
-		utils.Error(c, http.StatusUnauthorized, "Open the share link before accessing workspace files")
-		return nil, nil, services.WorkspaceFileScope{}, false
-	}
-	accessToken, tokenErr := h.instanceAccessService.ValidateToken(token)
-	if tokenErr != nil ||
-		accessToken.InstanceID != access.InstanceID ||
-		accessToken.SessionBinding != sharedExternalAccessSessionBinding(code, access) {
-		utils.Error(c, http.StatusUnauthorized, "Share session expired or invalid")
-		return nil, nil, services.WorkspaceFileScope{}, false
-	}
-	if isWrite {
-		expected := sharedExternalAccessCSRFToken(code, token)
-		actual := strings.TrimSpace(c.GetHeader(sharedWorkspaceCSRFHeader))
-		if expected == "" || subtle.ConstantTimeCompare([]byte(expected), []byte(actual)) != 1 {
-			utils.Error(c, http.StatusForbidden, "Invalid share request")
-			return nil, nil, services.WorkspaceFileScope{}, false
-		}
-	}
-
-	instance, err := h.instanceService.GetByID(access.InstanceID)
-	if err != nil {
-		utils.HandleError(c, err)
-		return nil, nil, services.WorkspaceFileScope{}, false
-	}
-	if instance == nil {
-		utils.Error(c, http.StatusNotFound, "Instance not found")
-		return nil, nil, services.WorkspaceFileScope{}, false
-	}
-	if accessToken.UserID != instance.UserID {
-		utils.Error(c, http.StatusUnauthorized, "Share session does not match instance owner")
-		return nil, nil, services.WorkspaceFileScope{}, false
-	}
+	instance := session.instance
 	return h.instanceWorkspaceScope(c, instance, "share_")
 }
 

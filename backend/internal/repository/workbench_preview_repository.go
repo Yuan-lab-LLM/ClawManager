@@ -4,7 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"clawreef/internal/workbench"
@@ -37,6 +39,37 @@ func validPreviewHash(key string) bool {
 	return err == nil && len(decoded) == 32
 }
 
+// Shared records use a versioned envelope in the existing TEXT field. Legacy
+// owner records remain plain URLs; old replicas safely reject the new format.
+type workbenchPreviewTargetRecord struct {
+	Version int                            `json:"version"`
+	URL     string                         `json:"url"`
+	Shared  *workbench.SharedPreviewAccess `json:"shared"`
+}
+
+func encodeWorkbenchPreviewTarget(lease workbench.PreviewLease) (string, error) {
+	if lease.Shared == nil {
+		return lease.Target.URL(), nil
+	}
+	if !lease.Shared.Valid() || lease.ExpiresAt.After(lease.Shared.ExpiresAt) {
+		return "", workbench.ErrPreviewScope
+	}
+	raw, err := json.Marshal(workbenchPreviewTargetRecord{Version: 1, URL: lease.Target.URL(), Shared: lease.Shared})
+	return string(raw), err
+}
+func decodeWorkbenchPreviewTarget(raw string) (workbench.PreviewTarget, *workbench.SharedPreviewAccess, error) {
+	var shared *workbench.SharedPreviewAccess
+	if strings.HasPrefix(raw, "{") {
+		var record workbenchPreviewTargetRecord
+		if json.Unmarshal([]byte(raw), &record) != nil || record.Version != 1 || record.Shared == nil || !record.Shared.Valid() {
+			return workbench.PreviewTarget{}, nil, workbench.ErrPreviewNotFound
+		}
+		raw, shared = record.URL, record.Shared
+	}
+	target, err := workbench.ParsePreviewURL(raw)
+	return target, shared, err
+}
+
 func (s *workbenchPreviewStore) Put(ctx context.Context, key string, lease workbench.PreviewLease) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -47,7 +80,11 @@ func (s *workbenchPreviewStore) Put(ctx context.Context, key string, lease workb
 	if _, err := workbench.ParsePreviewURL(lease.Target.URL()); err != nil {
 		return err
 	}
-	row := workbenchPreviewRow{TokenHash: key, InstanceID: lease.Scope.InstanceID, UserID: lease.Scope.UserID, Generation: lease.Scope.Generation, GatewayID: lease.Scope.GatewayID, TargetURL: lease.Target.URL(), CreatedAt: lease.CreatedAt.UTC(), ExpiresAt: lease.ExpiresAt.UTC()}
+	targetURL, err := encodeWorkbenchPreviewTarget(lease)
+	if err != nil {
+		return err
+	}
+	row := workbenchPreviewRow{TokenHash: key, InstanceID: lease.Scope.InstanceID, UserID: lease.Scope.UserID, Generation: lease.Scope.Generation, GatewayID: lease.Scope.GatewayID, TargetURL: targetURL, CreatedAt: lease.CreatedAt.UTC(), ExpiresAt: lease.ExpiresAt.UTC()}
 	return s.session.TxContext(ctx, func(tx db.Session) error {
 		// Serialize per-instance admission and verify the current ownership and
 		// generation again at persistence time, including cross-replica callers.
@@ -99,9 +136,9 @@ func (s *workbenchPreviewStore) Get(ctx context.Context, key string) (workbench.
 		}
 		return workbench.PreviewLease{}, errWorkbenchPreviewStorage
 	}
-	target, err := workbench.ParsePreviewURL(row.TargetURL)
+	target, shared, err := decodeWorkbenchPreviewTarget(row.TargetURL)
 	if err != nil {
 		return workbench.PreviewLease{}, workbench.ErrPreviewNotFound
 	}
-	return workbench.PreviewLease{Scope: workbench.PreviewScope{InstanceID: row.InstanceID, UserID: row.UserID, Generation: row.Generation, GatewayID: row.GatewayID}, Target: target, CreatedAt: row.CreatedAt, ExpiresAt: row.ExpiresAt}, nil
+	return workbench.PreviewLease{Scope: workbench.PreviewScope{InstanceID: row.InstanceID, UserID: row.UserID, Generation: row.Generation, GatewayID: row.GatewayID}, Target: target, Shared: shared, CreatedAt: row.CreatedAt, ExpiresAt: row.ExpiresAt}, nil
 }

@@ -82,7 +82,16 @@ func TestWorkbenchPreviewPersistsAcrossReplicasWithoutRawCapabilities(t *testing
 	if _, err := first.Create(context.Background(), workbench.PreviewScope{InstanceID: 42, UserID: 8, Generation: 3, GatewayID: "gw-42-3"}, "localhost:3000"); !errors.Is(err, workbench.ErrPreviewScope) {
 		t.Fatalf("storage accepted an unrelated owner: %v", err)
 	}
-	for i := 1; i < maxWorkbenchPreviewsPerInstance; i++ {
+	shared := workbench.SharedPreviewAccess{Code: "sl_test", SessionBinding: strings.Repeat("a", 64), WorkspaceAccess: "read", ExpiresAt: time.Now().Add(10 * time.Minute).UTC()}
+	sharedLease, err := first.CreateShared(context.Background(), scope, "http://localhost:4000/shared", shared)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, err = second.LookupCapability(context.Background(), sharedLease.ID)
+	if err != nil || resolved.Shared == nil || *resolved.Shared != shared || resolved.Target.Port != 4000 || resolved.ExpiresAt.After(shared.ExpiresAt) {
+		t.Fatalf("shared metadata lost across database replicas: %+v %v", resolved, err)
+	}
+	for i := 2; i < maxWorkbenchPreviewsPerInstance; i++ {
 		if _, err := first.Create(context.Background(), scope, "localhost:3000"); err != nil {
 			t.Fatalf("preview %d rejected before limit: %v", i, err)
 		}
@@ -98,5 +107,28 @@ func TestWorkbenchPreviewPersistsAcrossReplicasWithoutRawCapabilities(t *testing
 	}
 	if _, err := first.Create(context.Background(), scope, "localhost:3000"); err != nil {
 		t.Fatalf("expired previews were not released: %v", err)
+	}
+}
+
+func TestWorkbenchSharedPreviewMetadataRoundTrip(t *testing.T) {
+	target, _ := workbench.ParsePreviewURL("http://localhost:4000/path?q=1")
+	shared := &workbench.SharedPreviewAccess{Code: "sl_test", SessionBinding: strings.Repeat("a", 64), WorkspaceAccess: "read", ExpiresAt: time.Now().Add(time.Hour).UTC()}
+	for _, binding := range []*workbench.SharedPreviewAccess{nil, shared} {
+		raw, err := encodeWorkbenchPreviewTarget(workbench.PreviewLease{Target: target, Shared: binding})
+		if err != nil {
+			t.Fatal(err)
+		}
+		actual, metadata, err := decodeWorkbenchPreviewTarget(raw)
+		if err != nil || actual != target || (metadata == nil) != (binding == nil) {
+			t.Fatalf("metadata lost: %q %+v %v", raw, metadata, err)
+		}
+		if binding != nil && (*metadata != *binding) {
+			t.Fatalf("metadata changed: %+v", metadata)
+		}
+	}
+	for _, raw := range []string{`{"version":1,"url":"http://localhost:4000"}`, `{"version":2,"url":"http://localhost:4000","shared":{}}`, `{"version":1,"url":"https://external.test","shared":{}}`} {
+		if _, _, err := decodeWorkbenchPreviewTarget(raw); err == nil {
+			t.Fatalf("malformed metadata accepted: %s", raw)
+		}
 	}
 }

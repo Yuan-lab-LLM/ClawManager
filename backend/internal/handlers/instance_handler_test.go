@@ -567,14 +567,15 @@ func TestSharedInstanceSessionIssuesScopedRuntimeAndWorkspaceSession(t *testing.
 	workspacePath := t.TempDir()
 	instanceService := &fakeWorkspaceHandlerInstanceService{instances: map[int]*models.Instance{
 		77: {
-			ID:            77,
-			UserID:        20,
-			Name:          "shared-openclaw",
-			Type:          "openclaw",
-			Status:        "running",
-			RuntimeType:   services.RuntimeBackendGateway,
-			InstanceMode:  services.InstanceModeLite,
-			WorkspacePath: &workspacePath,
+			ID:                77,
+			RuntimeGeneration: 3,
+			UserID:            20,
+			Name:              "shared-openclaw",
+			Type:              "openclaw",
+			Status:            "running",
+			RuntimeType:       services.RuntimeBackendGateway,
+			InstanceMode:      services.InstanceModeLite,
+			WorkspacePath:     &workspacePath,
 		},
 	}}
 	accessTokens := services.NewInstanceAccessService()
@@ -602,6 +603,8 @@ func TestSharedInstanceSessionIssuesScopedRuntimeAndWorkspaceSession(t *testing.
 	}
 	for _, value := range []string{
 		`"workspace_access":"write"`,
+		`"runtime_generation":3`,
+		`"workbench_scope":"` + services.SharedWorkbenchScope("sl_test", &models.InstanceExternalAccess{AuthMode: services.ExternalAccessModeShareLink, WorkspaceAccess: services.ExternalWorkspaceAccessWrite}) + `"`,
 		`"workspace_available":true`,
 		`"csrf_token":"`,
 		`"access_url":"`,
@@ -921,8 +924,6 @@ func TestProxyAccessTokenRejectsRuntimeQueryTokenWithoutCookie(t *testing.T) {
 		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusUnauthorized)
 	}
 }
-
-
 
 func TestBrowserAccessEntryURLBootstrapsDedicatedOrigin(t *testing.T) {
 	for _, tc := range []struct {

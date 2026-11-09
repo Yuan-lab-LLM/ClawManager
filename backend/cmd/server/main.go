@@ -651,6 +651,7 @@ func main() {
 	workbenchAgent, _ := runtimeAgentClient.(services.WorkbenchAgent)
 	instanceWorkbenchService := services.NewInstanceWorkbenchService(instanceRepo, bindingRepo, runtimePodRepo, workbenchAgent, workbenchPreviews)
 	instanceWorkbenchService.SetGitFiles(workspaceFileService)
+	instanceWorkbenchService.SetSharedPreviewAccess(externalAccessService)
 	browserOrigin := strings.TrimSpace(os.Getenv("CLAWMANAGER_BROWSER_ORIGIN"))
 	browserPorts := strings.TrimSpace(os.Getenv("CLAWMANAGER_BROWSER_PORT_RANGE"))
 	var browserOrigins *browserorigin.Registry
@@ -916,6 +917,7 @@ func main() {
 		sharedInstances := api.Group("/shared-instances")
 		{
 			sharedInstances.GET("/:code/session", instanceHandler.GetSharedInstanceSession)
+			handlers.NewSharedInstanceWorkbenchHandler(instanceWorkbenchService, instanceService, externalAccessService, instanceHandler.InstanceAccessService()).Register(sharedInstances.Group("/:code/workbench"))
 			sharedInstances.GET("/:code/workspace/files", workspaceFileHandler.SharedList)
 			sharedInstances.GET("/:code/workspace/search", workspaceFileHandler.SharedSearch)
 			sharedInstances.GET("/:code/workspace/preview", workspaceFileHandler.SharedPreview)
