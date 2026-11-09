@@ -2217,6 +2217,14 @@ func (s *RuntimeScheduler) assignInstance(ctx context.Context, instance models.I
 		}
 		return nil
 	}
+	// Heartbeat capacity may include quarantined or reserved physical slots.
+	// No gateway publication is pending here: uncertain creates returned above.
+	// Try proven sleeping capacity before waiting on the unusable live pool.
+	if len(pods) > 0 && (lastErr == nil || isRuntimeAssignmentPending(lastErr)) {
+		if pending, wakeErr := s.restoreIdleRuntimeCapacity(ctx, instance, runtimeType); pending || wakeErr != nil {
+			return runtimeIdleWakeResult(wakeErr)
+		}
+	}
 	if lastErr != nil {
 		if isRuntimeAssignmentPending(lastErr) {
 			return lastErr
