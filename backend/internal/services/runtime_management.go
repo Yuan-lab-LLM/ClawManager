@@ -12,6 +12,7 @@ import (
 
 	"clawreef/internal/models"
 	"clawreef/internal/repository"
+	"clawreef/internal/services/k8s"
 	"github.com/google/uuid"
 	"github.com/upper/db/v4"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -180,6 +181,28 @@ func (s *RuntimeManagementService) Scheduling(ctx context.Context, podID int64, 
 	})
 	if !ok {
 		return errors.New("persistent scheduling control unavailable")
+	}
+	if enabled {
+		if pod.State != "ready" || pod.Draining || pod.PodUID == nil || *pod.PodUID == "" {
+			return errors.New("resume requires a ready Runtime Pod with a current identity outside maintenance")
+		}
+		live, ok := s.scheduler.deployments.(interface {
+			EnableRuntimePodScheduling(context.Context, k8s.RuntimePodControllerIdentity) error
+		})
+		if !ok {
+			return errors.New("live Kubernetes scheduling control unavailable")
+		}
+		// Keep this Pod closed until both control-plane gates agree. In particular,
+		// an API/RBAC failure must not report success after only clearing SQL pause.
+		if err := setter.SetSchedulingPaused(ctx, podID, true); err != nil {
+			return err
+		}
+		if err := live.EnableRuntimePodScheduling(ctx, k8s.RuntimePodControllerIdentity{
+			Namespace: pod.Namespace, PodName: pod.PodName, PodUID: *pod.PodUID,
+			DeploymentName: pod.DeploymentName, RuntimeType: pod.RuntimeType,
+		}); err != nil {
+			return err
+		}
 	}
 	return setter.SetSchedulingPaused(ctx, podID, !enabled)
 }

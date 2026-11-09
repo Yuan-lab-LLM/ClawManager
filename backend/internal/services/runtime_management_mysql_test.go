@@ -118,7 +118,7 @@ func TestRuntimeManagementMySQLSchedulingPauseSurvivesHeartbeat(t *testing.T) {
 	sess := runtimeManagementMySQLDB(t)
 	ctx := context.Background()
 	service := runtimeManagementMySQLService(sess)
-	if _, err := sess.SQL().Exec("INSERT INTO runtime_pods (id,runtime_type,namespace,pod_name,deployment_name,image_ref,state,capacity) VALUES (9,'openclaw','runtime','runtime-a','runtime','image','ready',2)"); err != nil {
+	if _, err := sess.SQL().Exec("INSERT INTO runtime_pods (id,runtime_type,namespace,pod_name,pod_uid,deployment_name,image_ref,state,capacity) VALUES (9,'openclaw','runtime','runtime-a','runtime-a-uid','runtime','image','ready',2)"); err != nil {
 		t.Fatal(err)
 	}
 	pods := repository.NewRuntimePodRepository(sess)
@@ -138,6 +138,7 @@ func TestRuntimeManagementMySQLSchedulingPauseSurvivesHeartbeat(t *testing.T) {
 	if claimed, err := pods.TryClaimSlot(ctx, 9); err != nil || claimed {
 		t.Fatalf("heartbeat reopened paused admission: %v %v", claimed, err)
 	}
+	withSchedulingResumeTestControl(service)
 	if err := service.Scheduling(ctx, 9, true); err != nil {
 		t.Fatal(err)
 	}
@@ -686,6 +687,7 @@ func TestRuntimeManagementMySQLForceEvictionWaitsAndRecovers(t *testing.T) {
 	if err = recovered.Process(ctx); err != nil {
 		t.Fatal(err)
 	}
+	withSchedulingResumeTestControl(recovered)
 	if err = recovered.Scheduling(ctx, 2, true); err != nil {
 		t.Fatal(err)
 	}
