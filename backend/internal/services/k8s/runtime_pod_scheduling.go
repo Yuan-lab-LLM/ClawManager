@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
@@ -54,10 +55,21 @@ func (s *runtimeDeploymentService) EnableRuntimePodScheduling(ctx context.Contex
 			return fmt.Errorf("upgrade or laboratory pool must be activated through its rollout before scheduling can resume")
 		}
 	}
-	if d.Labels[RuntimeScaleInOperationLabel] != "" || d.Annotations[runtimeIdleSleepAnnotation] != "" || d.Annotations[runtimeIdleWakeAnnotation] != "" || d.Annotations[runtimeScaleInCleanupBarrierAnnotation] != "" {
+	if d.Labels[RuntimeScaleInOperationLabel] != "" || d.Annotations[runtimeIdleSleepAnnotation] != "" || d.Annotations[runtimeScaleInCleanupBarrierAnnotation] != "" {
 		return fmt.Errorf("Runtime Deployment maintenance is active; scheduling cannot be resumed")
 	}
-	if d.Labels[runtimeSchedulingLabel] != "false" {
+	// The wake annotation is a retained journal, not an in-progress operation.
+	// Match inventory's boolean parsing so "False" and "0" cannot report a
+	// successful resume while leaving the effective gate disabled.
+	raw, exists := d.Labels[runtimeSchedulingLabel]
+	if !exists {
+		return nil
+	}
+	enabled, err := strconv.ParseBool(raw)
+	if err != nil {
+		return fmt.Errorf("invalid Runtime Deployment scheduling label: %w", err)
+	}
+	if enabled {
 		return nil
 	}
 	patch, err := json.Marshal([]map[string]any{

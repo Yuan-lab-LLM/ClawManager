@@ -149,3 +149,38 @@ func TestRuntimePodSchedulingPropagatesPatchConflict(t *testing.T) {
 		t.Fatalf("conflict not returned: %v", err)
 	}
 }
+
+func TestRuntimePodSchedulingResumesWokenAndNoncanonicalDisabledPools(t *testing.T) {
+	for _, tc := range []struct {
+		label string
+		woken bool
+	}{{"false", true}, {"False", false}, {"FALSE", false}, {"0", false}} {
+		t.Run(tc.label+map[bool]string{true: " after wake", false: ""}[tc.woken], func(t *testing.T) {
+			ctx := context.Background()
+			svc, kube, d, p := maintenanceSourceFixture()
+			one := int32(1)
+			d.Spec.Replicas = &one
+			d.ResourceVersion = "7"
+			d.Labels[runtimeSchedulingLabel] = tc.label
+			if tc.woken {
+				d.Annotations = map[string]string{runtimeIdleWakeAnnotation: "completed-sleep-journal"}
+			}
+			if _, err := kube.AppsV1().Deployments("ns").Update(ctx, d, metav1.UpdateOptions{}); err != nil {
+				t.Fatal(err)
+			}
+			if err := svc.EnableRuntimePodScheduling(ctx, RuntimePodControllerIdentity{Namespace: "ns", PodName: p.Name, PodUID: string(p.UID), DeploymentName: d.Name, RuntimeType: "openclaw"}); err != nil {
+				t.Fatal(err)
+			}
+			after, err := kube.AppsV1().Deployments("ns").Get(ctx, d.Name, metav1.GetOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if after.Labels[runtimeSchedulingLabel] != "true" {
+				t.Fatal("successful resume left live gate disabled")
+			}
+			if !reflect.DeepEqual(d.Annotations, after.Annotations) {
+				t.Fatal("resume removed the historical wake journal")
+			}
+		})
+	}
+}
