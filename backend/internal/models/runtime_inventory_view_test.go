@@ -172,3 +172,86 @@ func TestRuntimeInventoryPartialOwnerDoesNotInheritDatabaseIdentity(t *testing.T
 		t.Fatalf("mixed observed/database identities: %+v", slot)
 	}
 }
+
+func TestRuntimeInventoryUnknownReportedOwnerRemainsDisplayOnly(t *testing.T) {
+	for _, scenario := range []string{"unbound", "bound", "incomplete-generation", "incomplete-user", "incomplete-gateway"} {
+		t.Run(scenario, func(t *testing.T) {
+			p, o, now := observationViewFixture(t)
+			o.Slots[0] = RuntimeSlotObservation{ContainerName: "slot-0", GatewayPort: 20000, State: "unknown", InstanceID: 25, UserID: 1, Generation: 14, GatewayID: "gw-25-14", InstanceState: "starting", GatewayState: "error", Error: "gateway ownership ambiguous"}
+			bindings := []InstanceRuntimeBinding{}
+			if scenario != "unbound" {
+				bindings = append(bindings, InstanceRuntimeBinding{InstanceID: 7, Generation: 3, GatewayID: "gw-7-3", GatewayPort: 20000, State: "running"})
+			}
+			switch scenario {
+			case "incomplete-generation":
+				o.Slots[0].Generation = 0
+			case "incomplete-user":
+				o.Slots[0].UserID = 0
+			case "incomplete-gateway":
+				o.Slots[0].GatewayID = ""
+			}
+			setViewObservation(t, &p, o)
+			ReconcileRuntimePodObservation(&p, bindings, true, now)
+			slot := p.Slots[0]
+			if slot.InstanceID == nil || *slot.InstanceID != 25 || slot.InstanceState != "error" || slot.ReconciliationState != "unknown" || slot.BindingConfirmed || p.UnknownSlots != 1 {
+				t.Fatalf("unknown owner was hidden or granted authority: %+v / %+v", slot, p)
+			}
+			if scenario != "unbound" && (slot.ExpectedInstanceID == nil || *slot.ExpectedInstanceID != 7) {
+				t.Fatalf("expected SQL owner was lost: %+v", slot)
+			}
+			if scenario == "unbound" || scenario == "bound" {
+				if slot.Generation == nil || *slot.Generation != 14 || slot.GatewayID != "gw-25-14" {
+					t.Fatalf("complete reported tuple was lost: %+v", slot)
+				}
+			} else if slot.Generation != nil || slot.GatewayID != "" {
+				t.Fatalf("incomplete report inherited SQL generation or gateway: %+v", slot)
+			}
+			if err := ConfirmedEmptyRuntimeObservation(p, now); err == nil {
+				t.Fatal("unknown reported owner enabled empty admission")
+			}
+		})
+	}
+}
+
+func TestRuntimeInventoryGlobalFailureRetainsOnlyCurrentMappedReportedOwner(t *testing.T) {
+	for _, scenario := range []string{"fresh", "stale", "wrong UID", "unreadable", "mismatched port", "mismatched name"} {
+		t.Run(scenario, func(t *testing.T) {
+			p, o, now := observationViewFixture(t)
+			o.Error = "assignment inventory unavailable"
+			o.Slots[0] = RuntimeSlotObservation{ContainerName: "slot-0", GatewayPort: 20000, State: "occupied", InstanceID: 25, UserID: 1, Generation: 14, GatewayID: "gw-25-14", InstanceState: "starting", GatewayState: "error", IdentityVerified: true}
+			switch scenario {
+			case "stale":
+				old := now.Add(-3 * time.Minute)
+				p.ObservationAt = &old
+				o.ObservedAt = old
+			case "wrong UID":
+				o.PodUID = "replacement"
+			case "mismatched port":
+				o.Slots[1].GatewayPort = 20999
+			case "mismatched name":
+				o.Slots[1].ContainerName = "slot-9"
+			}
+			setViewObservation(t, &p, o)
+			if scenario == "unreadable" {
+				raw := "{"
+				p.ObservationJSON = &raw
+			}
+			bindings := []InstanceRuntimeBinding{{InstanceID: 7, Generation: 3, GatewayID: "gw-7-3", GatewayPort: 20000, State: "running"}}
+			ReconcileRuntimePodObservation(&p, bindings, true, now)
+			slot := p.Slots[0]
+			if p.UnknownSlots != 2 || slot.ReconciliationState != "unknown" || slot.BindingConfirmed || slot.ExpectedInstanceID == nil || *slot.ExpectedInstanceID != 7 {
+				t.Fatalf("global failure enabled a slot or hid SQL reservation: %+v", p)
+			}
+			if scenario == "fresh" {
+				if slot.InstanceID == nil || *slot.InstanceID != 25 || slot.Generation == nil || *slot.Generation != 14 || slot.GatewayID != "gw-25-14" || slot.InstanceState != "error" {
+					t.Fatalf("fresh scoped report disappeared behind lookup failure: %+v", slot)
+				}
+			} else if slot.InstanceID != nil && *slot.InstanceID == 25 {
+				t.Fatalf("invalid envelope exposed retained owner as current: %+v", slot)
+			}
+			if err := ConfirmedEmptyRuntimeObservation(p, now); err == nil {
+				t.Fatal("global failure enabled empty admission")
+			}
+		})
+	}
+}

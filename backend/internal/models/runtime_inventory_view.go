@@ -35,8 +35,6 @@ func ReconcileRuntimePodObservation(p *RuntimePod, bindings []InstanceRuntimeBin
 		problem = "Runtime observation timestamp does not match its database record"
 	case now.Sub(observation.ObservedAt) > RuntimeObservationFreshness || observation.ObservedAt.After(now.Add(5*time.Second)):
 		problem = "Runtime observation is stale"
-	case observation.Error != "":
-		problem = observation.Error
 	}
 	observed := make(map[int]RuntimeSlotObservation, len(observation.Slots))
 	if problem == "" {
@@ -49,6 +47,12 @@ func ReconcileRuntimePodObservation(p *RuntimePod, bindings []InstanceRuntimeBin
 			}
 			observed[slot.GatewayPort] = slot
 		}
+	}
+	// Lookup failures with a current, physically mapped snapshot disable actions
+	// without discarding the reported owner needed to explain the divergence.
+	envelopeValid := problem == ""
+	if envelopeValid && observation.Error != "" {
+		problem = observation.Error
 	}
 	occupied := 0
 	for index := range p.Slots {
@@ -72,6 +76,9 @@ func ReconcileRuntimePodObservation(p *RuntimePod, bindings []InstanceRuntimeBin
 			slot.InstanceName, slot.Owner = "", nil
 		}
 		fact, present := observed[port]
+		if envelopeValid && present && (fact.State == "occupied" || fact.State == "unknown") && fact.InstanceID > 0 {
+			inventoryReportedOwner(slot, fact)
+		}
 		switch {
 		case problem != "":
 			slot.ObservationMessage = problem
@@ -87,30 +94,9 @@ func ReconcileRuntimePodObservation(p *RuntimePod, bindings []InstanceRuntimeBin
 			}
 		case fact.State == "occupied":
 			occupied++
-			// A reported numeric owner remains useful for diagnosis even when its
-			// remaining proof is incomplete. It never enables a lifecycle action.
-			if fact.InstanceID > 0 {
-				if slot.InstanceID == nil || *slot.InstanceID != fact.InstanceID {
-					slot.InstanceName, slot.Owner = "", nil
-				}
-				slot.InstanceID = inventoryInt(fact.InstanceID)
-				slot.Generation, slot.GatewayID = nil, ""
-				slot.InstanceState = fact.GatewayState
-				if slot.InstanceState == "" {
-					slot.InstanceState = fact.InstanceState
-				}
-			}
 			if fact.InstanceID <= 0 || fact.UserID <= 0 || fact.Generation <= 0 || fact.GatewayID != fmt.Sprintf("gw-%d-%d", fact.InstanceID, fact.Generation) {
 				slot.ObservationMessage = "Runtime reports occupancy without a usable owner identity"
 				break
-			}
-			if slot.InstanceID == nil || *slot.InstanceID != fact.InstanceID {
-				slot.InstanceName, slot.Owner = "", nil
-			}
-			slot.InstanceID, slot.Generation, slot.GatewayID = inventoryInt(fact.InstanceID), inventoryInt(fact.Generation), fact.GatewayID
-			slot.InstanceState = fact.GatewayState
-			if slot.InstanceState == "" {
-				slot.InstanceState = fact.InstanceState
 			}
 			switch {
 			case !bindingsKnown:
@@ -165,6 +151,22 @@ func ReconcileRuntimePodObservation(p *RuntimePod, bindings []InstanceRuntimeBin
 	}
 	if len(p.Slots) == 0 {
 		p.ReconciliationState, p.ReconciliationMessage = "unknown", "Physical slot inventory is unavailable"
+	}
+}
+
+// Reported identity is display data. Only the reconciliation branch above may
+// confirm a binding; incomplete tuples cannot inherit SQL writer identifiers.
+func inventoryReportedOwner(slot *RuntimeSlot, fact RuntimeSlotObservation) {
+	if slot.InstanceID == nil || *slot.InstanceID != fact.InstanceID {
+		slot.InstanceName, slot.Owner = "", nil
+	}
+	slot.InstanceID, slot.Generation, slot.GatewayID = inventoryInt(fact.InstanceID), nil, ""
+	slot.InstanceState = fact.GatewayState
+	if slot.InstanceState == "" {
+		slot.InstanceState = fact.InstanceState
+	}
+	if fact.UserID > 0 && fact.Generation > 0 && fact.GatewayID == fmt.Sprintf("gw-%d-%d", fact.InstanceID, fact.Generation) {
+		slot.Generation, slot.GatewayID = inventoryInt(fact.Generation), fact.GatewayID
 	}
 }
 
