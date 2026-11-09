@@ -1083,3 +1083,86 @@ func TestRuntimeSlotAuditPersistsReservationAndQuarantineDecisions(t *testing.T)
 		})
 	}
 }
+
+func TestRuntimeSlotAuditDisplaysOnlyCurrentUIDLegacyEnvelope(t *testing.T) {
+	for _, runtime := range []struct {
+		name                   string
+		podID                  int64
+		instanceID, generation int
+		uid                    string
+	}{
+		{"hermes", 132, 25, 14, "7ab50b09-bfcc-4068-89cf-7671fcffd385"},
+		{"opencode", 135, 118, 9, "opencode-current-uid"},
+	} {
+		for _, scenario := range []string{"current nested UID", "foreign top UID", "missing nested UID", "foreign nested UID", "missing assignment", "modern foreign nested UID", "modern missing nested UID"} {
+			t.Run(runtime.name+"/"+scenario, func(t *testing.T) {
+				physical := auditRoutingPod(1, RuntimeGatewayPortBlockSize(runtime.name))
+				physical.UID = types.UID(runtime.uid)
+				kube := fake.NewSimpleClientset(physical)
+				gatewayID := fmt.Sprintf("gw-%d-%d", runtime.instanceID, runtime.generation)
+				// The authenticated live legacy envelope has exactly these top-level
+				// keys: no pod_uid, worker_epoch, or idle_confirmed proof exists.
+				envelope := map[string]any{
+					"digest":      "legacy-digest-DO-NOT-PERSIST",
+					"gateways":    []any{map[string]any{"gateway_id": gatewayID, "state": "error"}},
+					"assignment":  map[string]any{"pod_uid": runtime.uid, "instance_id": runtime.instanceID, "user_id": 1, "generation": runtime.generation, "gateway_id": gatewayID, "state": "starting"},
+					"skills":      []any{},
+					"quarantined": false,
+				}
+				switch scenario {
+				case "foreign top UID":
+					envelope["pod_uid"] = "another-pod"
+				case "missing nested UID":
+					delete(envelope["assignment"].(map[string]any), "pod_uid")
+				case "foreign nested UID":
+					envelope["assignment"].(map[string]any)["pod_uid"] = "another-pod"
+				case "missing assignment":
+					envelope["assignment"] = nil
+				case "modern foreign nested UID":
+					envelope["pod_uid"] = runtime.uid
+					envelope["assignment"].(map[string]any)["pod_uid"] = "another-pod"
+				case "modern missing nested UID":
+					envelope["pod_uid"] = runtime.uid
+					delete(envelope["assignment"].(map[string]any), "pod_uid")
+				}
+				client := NewSlotRuntimeAgentClientWithHTTPClient("token", kube, "runtime", &http.Client{Transport: slotRoundTripper(func(r *http.Request) (*http.Response, error) {
+					if r.Method != http.MethodGet {
+						t.Fatalf("legacy proof caused mutation: %s %s", r.Method, r.URL.Path)
+					}
+					b, _ := json.Marshal(envelope)
+					return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(string(b)))}, nil
+				})}).(*slotRuntimeAgentClient)
+				endpoint, uid := "https://10.0.0.2:19090", runtime.uid
+				pod := models.RuntimePod{ID: runtime.podID, RuntimeType: runtime.name, Capacity: 1, AgentEndpoint: &endpoint, PodUID: &uid}
+				store := &auditOrderedObservationRepository{}
+				bindings := &auditBindingRepository{}
+				s := &RuntimeScheduler{agentClient: client, podRepo: store, bindingRepo: bindings, instanceRepo: &auditInstanceRepository{}}
+				if err := s.auditRuntimePodSlots(context.Background(), client, pod); err == nil {
+					t.Fatal("legacy envelope gained strict exit proof")
+				}
+				if len(store.latest.Slots) != 1 {
+					t.Fatalf("legacy facts were not persisted: %+v", store.latest)
+				}
+				slot := store.latest.Slots[0]
+				if scenario == "current nested UID" {
+					if slot.State != "occupied" || slot.InstanceID != runtime.instanceID || slot.UserID != 1 || slot.Generation != runtime.generation || slot.GatewayID != gatewayID || slot.InstanceState != "starting" || slot.GatewayState != "error" {
+						t.Fatalf("authenticated legacy owner disappeared: %+v", slot)
+					}
+				} else if slot.State != "unknown" || slot.InstanceID != 0 || slot.UserID != 0 || slot.Generation != 0 || slot.GatewayID != "" {
+					t.Fatalf("unscoped legacy response exposed current owner: %+v", slot)
+				}
+				if slot.IdentityVerified || slot.Error == "" || bindings.releases != 0 {
+					t.Fatalf("legacy envelope gained cleanup authority: %+v", slot)
+				}
+				ports, err := client.reservedGatewayPorts(context.Background(), pod)
+				if _, blocked := ports[20000]; err == nil && !blocked {
+					t.Fatalf("legacy envelope gained allocation authority: %+v", slot)
+				}
+				b, _ := json.Marshal(store.latest)
+				if strings.Contains(string(b), "DO-NOT-PERSIST") {
+					t.Fatalf("raw legacy envelope leaked: %s", b)
+				}
+			})
+		}
+	}
+}

@@ -294,7 +294,14 @@ func runtimeSlotReportedOwner(slot *models.RuntimeSlotObservation, owner *runtim
 
 func runtimeSlotInventoryObservation(o runtimeSlotAuditObservation, uid string) models.RuntimeSlotObservation {
 	slot := models.RuntimeSlotObservation{ContainerName: o.Name, GatewayPort: o.Port, State: "unknown", Error: o.Diagnostic}
-	if !o.ReadOK || o.Snapshot.PodUID != uid {
+	snapshot := o.Snapshot
+	reportedUID := snapshot.PodUID
+	// Legacy responses scope only the assignment. This fallback is display-only:
+	// the missing top-level proof still leaves o.Err nonnil and free() false.
+	if reportedUID == "" && snapshot.Assignment != nil {
+		reportedUID = snapshot.Assignment.PodUID
+	}
+	if !o.ReadOK || reportedUID != uid || snapshot.Assignment != nil && snapshot.Assignment.PodUID != uid {
 		if slot.Error == "" {
 			slot.Error = "runtime slot inspection unavailable"
 		}
@@ -304,7 +311,6 @@ func runtimeSlotInventoryObservation(o runtimeSlotAuditObservation, uid string) 
 		slot.State = "free"
 		return slot
 	}
-	snapshot := o.Snapshot
 	runtimeSlotReportedOwner(&slot, snapshot.Assignment)
 	if owner := snapshot.Assignment; owner != nil {
 		if owner.State != "stopped" {
