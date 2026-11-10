@@ -147,7 +147,7 @@ const InstanceListPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [deletingIds, setDeletingIds] = useState<number[]>([]);
-  const [actionLoading, setActionLoading] = useState<number | null>(null);
+  const [actionLoadingIds, setActionLoadingIds] = useState<number[]>([]);
   const [pendingDeleteId, setPendingDeleteId] = useState<number | null>(null);
   const [statusFilter, setStatusFilter] = useState<InstanceStatusFilter>(() => {
     const status = INSTANCE_STATUS_FILTERS.find((value) => value === initialQuery.get("status"));
@@ -458,13 +458,13 @@ const InstanceListPage: React.FC = () => {
   const handleStart = useCallback(
     async (id: number) => {
       try {
-        setActionLoading(id);
+        setActionLoadingIds((ids) => ids.includes(id) ? ids : [...ids, id]);
         await instanceService.startInstance(id);
         await loadInstances({ silent: true, refreshTeams: false });
       } catch (err: unknown) {
         alert(getErrorMessage(err, t("instances.failedToStart")));
       } finally {
-        setActionLoading(null);
+        setActionLoadingIds((ids) => ids.filter((pendingId) => pendingId !== id));
       }
     },
     [loadInstances, t],
@@ -473,13 +473,13 @@ const InstanceListPage: React.FC = () => {
   const handleRestart = useCallback(
     async (id: number) => {
       try {
-        setActionLoading(id);
+        setActionLoadingIds((ids) => ids.includes(id) ? ids : [...ids, id]);
         await instanceService.restartInstance(id);
         await loadInstances({ silent: true, refreshTeams: false });
       } catch (err: unknown) {
         alert(getErrorMessage(err, t("instances.failedToRestart")));
       } finally {
-        setActionLoading(null);
+        setActionLoadingIds((ids) => ids.filter((pendingId) => pendingId !== id));
       }
     },
     [loadInstances, t],
@@ -488,13 +488,13 @@ const InstanceListPage: React.FC = () => {
   const handleStop = useCallback(
     async (id: number) => {
       try {
-        setActionLoading(id);
+        setActionLoadingIds((ids) => ids.includes(id) ? ids : [...ids, id]);
         await instanceService.stopInstance(id);
         await loadInstances({ silent: true, refreshTeams: false });
       } catch (err: unknown) {
         alert(getErrorMessage(err, t("instances.failedToStop")));
       } finally {
-        setActionLoading(null);
+        setActionLoadingIds((ids) => ids.filter((pendingId) => pendingId !== id));
       }
     },
     [loadInstances, t],
@@ -942,7 +942,7 @@ const InstanceListPage: React.FC = () => {
                           <button
                             type="button"
                             onClick={() => void handleStop(instance.id)}
-                            disabled={actionLoading === instance.id}
+                            disabled={actionLoadingIds.includes(instance.id)}
                             className="cm-icon-button"
                             title={t("common.stop")}
                           >
@@ -952,7 +952,7 @@ const InstanceListPage: React.FC = () => {
                           <button
                             type="button"
                             onClick={() => void handleStart(instance.id)}
-                            disabled={actionLoading === instance.id}
+                            disabled={actionLoadingIds.includes(instance.id)}
                             className="cm-icon-button"
                             title={t("common.start")}
                           >
@@ -962,19 +962,19 @@ const InstanceListPage: React.FC = () => {
                           <button
                             type="button"
                             onClick={() => void handleRestart(instance.id)}
-                            disabled={actionLoading === instance.id || deletingIds.includes(instance.id)}
+                            disabled={actionLoadingIds.includes(instance.id) || deletingIds.includes(instance.id)}
                             className="cm-icon-button"
                             title={t("common.restart")}
                             aria-label={`${t("common.restart")} ${instance.name}`}
-                            aria-busy={actionLoading === instance.id}
+                            aria-busy={actionLoadingIds.includes(instance.id)}
                           >
-                            <RotateCw className={`h-4 w-4${actionLoading === instance.id ? " animate-spin" : ""}`} />
+                            <RotateCw className={`h-4 w-4${actionLoadingIds.includes(instance.id) ? " animate-spin" : ""}`} />
                           </button>
                         ) : null}
                         <button
                           type="button"
                           onClick={() => setPendingDeleteId(instance.id)}
-                          disabled={deletingIds.includes(instance.id) || instance.status === "deleting" || actionLoading === instance.id}
+                          disabled={deletingIds.includes(instance.id) || instance.status === "deleting" || actionLoadingIds.includes(instance.id)}
                           className="cm-icon-button border-red-200 text-red-600 hover:border-red-300 hover:bg-red-50 hover:text-red-700"
                           title={t("common.delete")}
                         >
