@@ -2,7 +2,8 @@ import { useQuery } from "@tanstack/react-query";
 import { RefreshCw } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useI18n } from "../contexts/I18nContext";
-import { hermesDesktopRenewalDelay, isHermesDesktopFrameMessage, resolveHermesDesktopRendererUrl, resolveHermesDesktopView } from "../lib/hermesDesktopFrame";
+import { hermesDesktopRenewalDelay, hermesSessionRoute, isHermesDesktopFrameMessage, readHermesSessionRoute, rememberHermesSession, resolveHermesDesktopRendererUrl, resolveHermesDesktopView } from "../lib/hermesDesktopFrame";
+import { useAuthStore } from "../stores/authStore";
 import { attachNativePreviewBridge } from "../lib/nativePreviewBridge";
 import { hermesDesktopService } from "../services/hermesDesktopService";
 import type { InstanceServiceFrameProps } from "./InstanceServiceFrame";
@@ -80,11 +81,18 @@ function HermesDesktopFrame({
 }: InstanceServiceFrameProps) {
   const { t } = useI18n();
   const frameRef = useRef<HTMLIFrameElement | null>(null);
+  const userId = useAuthStore((auth) => auth.isAuthenticated ? auth.user?.id : undefined);
   const [revision, setRevision] = useState(0);
   const [state, setState] = useState<FrameState | null>(null);
-  const launchKey = `${instanceId}-${reloadToken}-${revision}`;
+  const launchKey = `${userId ?? "shared"}-${instanceId}-${reloadToken}-${revision}`;
   const current = state?.key === launchKey ? state : null;
   const src = current?.src ?? null;
+
+  useEffect(() => {
+    const frame = frameRef.current;
+    if (!frame || !src) return;
+    return rememberHermesSession(frame, window.localStorage, userId, instanceId);
+  }, [src, launchKey, userId, instanceId]);
 
   useEffect(() => {
     const frame = frameRef.current;
@@ -116,7 +124,17 @@ function HermesDesktopFrame({
           return;
         }
         expiresAt = Date.parse(response.expires_at!);
-        if (!renew) setState({ key: launchKey, src: nextSrc, status: "opening" });
+        if (!renew) {
+          let route = readHermesSessionRoute(window.localStorage, userId, instanceId);
+          if (route === null) {
+            try {
+              const recent = await hermesDesktopService.recentSession(instanceId, controller.signal);
+              if (recent) route = hermesSessionRoute(`#/${encodeURIComponent(recent)}`);
+            } catch { /* Optional selection recovery must not block a usable renderer. */ }
+          }
+          if (disposed) return;
+          setState({ key: launchKey, src: nextSrc + (route ?? ""), status: "opening" });
+        }
         window.clearTimeout(renewalTimer);
         renewalTimer = window.setTimeout(() => void bootstrap(true), renewalDelay);
       } catch {
@@ -139,7 +157,7 @@ function HermesDesktopFrame({
       window.removeEventListener("focus", renewOnFocus);
       document.removeEventListener("visibilitychange", renewOnFocus);
     };
-  }, [instanceId, launchKey]);
+  }, [instanceId, launchKey, userId]);
 
   useEffect(() => {
     if (!src) return;
