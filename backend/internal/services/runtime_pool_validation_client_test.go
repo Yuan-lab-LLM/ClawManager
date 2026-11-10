@@ -39,6 +39,9 @@ func TestNativeValidationUsesProtectedSupervisorWithoutBusinessPublication(t *te
 	kube.AppsV1().ReplicaSets("runtime").Create(ctx, rs, metav1.CreateOptions{})
 	kube.CoreV1().Pods("runtime").Create(ctx, pod, metav1.CreateOptions{})
 	calls := 0
+	creates := 0
+	slotState := `{"pod_uid":"probe-uid","worker_epoch":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","idle_confirmed":true,"quarantined":false,"gateways":[]}`
+	badSlotState, badSlot, retrySlotState := "", "", ""
 	if e := k8s.EnsureRuntimeSlotTLS(ctx, kube, "runtime"); e != nil {
 		t.Fatal(e)
 	}
@@ -53,14 +56,30 @@ func TestNativeValidationUsesProtectedSupervisorWithoutBusinessPublication(t *te
 		if r.TLS == nil || r.TLS.Version < tls.VersionTLS13 || r.Header.Get("X-ClawManager-Control-Token") == "" {
 			t.Fatal("native validation lost authenticated transport")
 		}
+		if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1/slots/") {
+			body := slotState
+			if r.URL.Path == "/v1/slots/slot-0/state" && retrySlotState != "" {
+				body = retrySlotState
+			}
+			if r.URL.Path == "/v1/slots/"+badSlot+"/state" {
+				body = badSlotState
+			}
+			w.Header().Set("Content-Type", "application/json")
+			io.WriteString(w, body)
+			return
+		}
 		body := fmt.Sprintf(`{"gateway_id":"gw-%d-1","port":20000,"status":"running"}`, poolProbeInstanceID)
 		if r.Method == http.MethodPost {
+			creates++
 			var req RuntimeAgentCreateGatewayRequest
 			if e := json.NewDecoder(r.Body).Decode(&req); e != nil {
 				t.Fatal(e)
 			}
 			if req.SecurityProfile != RuntimeSecurityProfile || req.PodUID != "probe-uid" || req.UID < 200000 || !strings.HasPrefix(req.Environment["CLAWMANAGER_INSTANCE_TOKEN"], "ui1_") {
 				t.Fatal("native security request missing")
+			}
+			if req.Environment[OpenClawScheduledTasksEnv] != `{"schemaVersion":1,"items":[]}` {
+				t.Error("probe scheduled tasks did not use the canonical empty envelope")
 			}
 			if req.Environment["CLAWMANAGER_LLM_API_KEY"] != "cm-local-model" {
 				t.Fatal("shared native sanitizer was bypassed")
@@ -99,14 +118,55 @@ func TestNativeValidationUsesProtectedSupervisorWithoutBusinessPublication(t *te
 		t.Fatal("native probe still requires a business SQL instance")
 	}
 	scope := k8s.RuntimePoolValidationScope{Namespace: "runtime", DeploymentName: d.Name, DeploymentUID: string(d.UID), SourceName: "source", SourceUID: "source-uid", Operation: "21", PodUID: string(pod.UID), Endpoint: "https://10.0.0.2:19090", ImageRef: image, WorkspaceRoot: "/workspaces"}
+	ownedSlotState := fmt.Sprintf(`{"pod_uid":"probe-uid","worker_epoch":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","idle_confirmed":false,"quarantined":false,"gateways":[{"gateway_id":"gw-%d-1","state":"starting"}],"assignment":{"pod_uid":"probe-uid","worker_epoch":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","gateway_id":"gw-%d-1","instance_id":%d,"user_id":1,"generation":1,"state":"starting"}}`, poolProbeInstanceID, poolProbeInstanceID, poolProbeInstanceID)
+	for _, test := range []struct{ name, body string }{
+		{"live-old-agent", `{"gateways":[],"quarantined":false,"skills":{}}`},
+		{"wrong-pod", strings.Replace(slotState, "probe-uid", "other-pod", 1)},
+		{"missing-pod", strings.Replace(slotState, `"pod_uid":"probe-uid",`, "", 1)},
+		{"invalid-epoch", strings.Replace(slotState, strings.Repeat("e", 32), "invalid", 1)},
+		{"missing-idle", strings.Replace(slotState, `"idle_confirmed":true,`, "", 1)},
+		{"missing-quarantine", strings.Replace(slotState, `"quarantined":false,`, "", 1)},
+		{"null-gateways", strings.Replace(slotState, `"gateways":[]`, `"gateways":null`, 1)},
+		{"not-idle-without-owner", strings.Replace(slotState, `"idle_confirmed":true`, `"idle_confirmed":false`, 1)},
+		{"quarantined", strings.Replace(slotState, `"quarantined":false`, `"quarantined":true`, 1)},
+		{"malformed", `{`},
+		{"startup-on-wrong-slot", ownedSlotState},
+		{"owner-foreign-user", strings.Replace(ownedSlotState, `"user_id":1`, `"user_id":2`, 1)},
+		{"owner-foreign-pod", strings.Replace(ownedSlotState, `"assignment":{"pod_uid":"probe-uid"`, `"assignment":{"pod_uid":"other-pod"`, 1)},
+		{"owner-different-epoch", strings.Replace(ownedSlotState, strings.Repeat("e", 32), strings.Repeat("f", 32), 1)},
+		{"owner-ambiguous-gateways", strings.Replace(ownedSlotState, `"gateways":[`, `"gateways":[{"gateway_id":"gw-foreign","state":"running"},`, 1)},
+	} {
+		t.Run("slot-proof-"+test.name, func(t *testing.T) {
+			// A compatible first slot cannot hide an incompatible later worker.
+			badSlot, badSlotState = "slot-7", test.body
+			if strings.HasPrefix(test.name, "owner-") {
+				badSlot = "slot-0"
+			}
+			before := creates
+			if _, err := adapter.CreatePoolValidationGateway(ctx, scope); err == nil || creates != before {
+				t.Fatal("incompatible physical proof reached Gateway creation", err)
+			}
+		})
+	}
+	badSlot, badSlotState = "", ""
+	beforeValid := calls
 	response, e := adapter.CreatePoolValidationGateway(ctx, scope)
 	if e != nil {
 		t.Fatal(e)
 	}
+	// Starting probes are polled through the same method. Their exact existing
+	// native assignment must remain admissible without a false idle assertion.
+	for _, state := range []string{"starting", "running"} {
+		retrySlotState = strings.ReplaceAll(ownedSlotState, "starting", state)
+		if _, e = adapter.CreatePoolValidationGateway(ctx, scope); e != nil {
+			t.Fatal("same owned probe could not resume startup", state, e)
+		}
+	}
+	retrySlotState = ""
 	if e = adapter.DeletePoolValidationGateway(ctx, scope, response.GatewayID); e != nil {
 		t.Fatal(e)
 	}
-	if calls != 2 {
+	if calls != beforeValid+28 {
 		t.Fatal(calls)
 	}
 	cms, _ := kube.CoreV1().ConfigMaps("runtime").List(ctx, metav1.ListOptions{})
@@ -126,7 +186,7 @@ func TestNativeValidationUsesProtectedSupervisorWithoutBusinessPublication(t *te
 	if e = scheduler.advanceOpenClawPoolReplacement(ctx, r, p); e != nil || p.ProbePodUID != scope.PodUID || p.ProbeDeploymentUID != scope.DeploymentUID || calls != beforeController {
 		t.Fatal("probe identity was not frozen before native startup", e)
 	}
-	if e = scheduler.advanceOpenClawPoolReplacement(ctx, r, p); e != nil || p.ProbeIndex != 1 || calls != beforeController+3 || !dep.stopped {
+	if e = scheduler.advanceOpenClawPoolReplacement(ctx, r, p); e != nil || p.ProbeIndex != 1 || calls != beforeController+11 || !dep.stopped {
 		t.Fatal("native rollout validation dispatch failed", p, e)
 	}
 	protectedCalls := calls
