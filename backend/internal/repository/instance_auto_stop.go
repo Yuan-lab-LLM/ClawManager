@@ -189,7 +189,7 @@ func ensureActivity(ctx context.Context, s db.Session, id, generation int, now t
 	return err
 }
 func readActivity(ctx context.Context, s db.Session, id int, lock bool) (*models.InstanceModelActivity, error) {
-	query := `SELECT a.instance_id,a.generation,a.monitoring_since,a.last_gateway_activity_at,a.activity_version,a.auto_stop_disabled,a.stop_operation_id,a.stop_phase,a.stopped_reason,a.stopped_at,a.blocker,a.start_deadline_at,(SELECT COUNT(*) FROM instance_model_activity_requests q WHERE q.instance_id=a.instance_id AND q.generation=a.generation AND q.finished_at IS NULL) FROM instance_model_activity a WHERE a.instance_id=?`
+	query := `SELECT a.instance_id,a.generation,a.monitoring_since,a.last_gateway_activity_at,a.activity_version,a.auto_stop_disabled,a.stop_operation_id,a.stop_phase,a.stopped_reason,a.stopped_at,a.blocker,a.start_deadline_at,(SELECT COUNT(*) FROM instance_model_activity_requests q WHERE q.instance_id=a.instance_id AND q.generation=a.generation AND q.finished_at IS NULL AND (q.lease_expires_at IS NULL OR q.lease_expires_at>UTC_TIMESTAMP(6))) FROM instance_model_activity a WHERE a.instance_id=?`
 	if lock {
 		query += " FOR UPDATE"
 	}
@@ -251,7 +251,7 @@ func (r *InstanceAutoStopRepository) BeginModelActivity(ctx context.Context, use
 			return models.ErrInstanceStopping
 		}
 		key = uuid.NewString()
-		if _, err = s.SQL().ExecContext(ctx, `INSERT INTO instance_model_activity_requests(request_id,instance_id,generation,started_at) VALUES(?,?,?,?)`, key, id, i.generation, now); err != nil {
+		if _, err = s.SQL().ExecContext(ctx, `INSERT INTO instance_model_activity_requests(request_id,instance_id,generation,started_at,last_heartbeat_at,lease_expires_at) VALUES(?,?,?,?,?,?)`, key, id, i.generation, now, now, now.Add(models.ModelActivityLeaseDuration)); err != nil {
 			return err
 		}
 		_, err = s.SQL().ExecContext(ctx, `UPDATE instance_model_activity SET last_gateway_activity_at=GREATEST(COALESCE(last_gateway_activity_at,?),?),activity_version=activity_version+1,updated_at=? WHERE instance_id=?`, now, now, now, id)
@@ -261,40 +261,6 @@ func (r *InstanceAutoStopRepository) BeginModelActivity(ctx context.Context, use
 		return "", err
 	}
 	return key, nil
-}
-func (r *InstanceAutoStopRepository) FinishModelActivity(ctx context.Context, key string) error {
-	if key == "" {
-		return nil
-	}
-	// Resolve immutable scope ownership first; all mutations then take the same
-	// instance -> activity order as Begin and stop claims.
-	row, err := r.sess.SQL().QueryRowContext(ctx, `SELECT instance_id,generation FROM instance_model_activity_requests WHERE request_id=?`, key)
-	if err != nil {
-		return err
-	}
-	var id, generation int
-	if err = row.Scan(&id, &generation); err != nil {
-		return err
-	}
-	return r.sess.Tx(func(s db.Session) error {
-		if _, err := lockActivityInstance(ctx, s, id); err != nil {
-			return err
-		}
-		now := time.Now().UTC()
-		res, err := s.SQL().ExecContext(ctx, `UPDATE instance_model_activity_requests SET finished_at=? WHERE request_id=? AND finished_at IS NULL`, now, key)
-		if err != nil {
-			return err
-		}
-		n, err := res.RowsAffected()
-		if err != nil {
-			return err
-		}
-		if n == 0 {
-			return nil
-		}
-		_, err = s.SQL().ExecContext(ctx, `UPDATE instance_model_activity SET last_gateway_activity_at=GREATEST(COALESCE(last_gateway_activity_at,?),?),activity_version=activity_version+1,updated_at=? WHERE instance_id=? AND generation=?`, now, now, now, id, generation)
-		return err
-	})
 }
 func (r *InstanceAutoStopRepository) SetDisabled(ctx context.Context, id int, disabled bool) error {
 	return r.sess.Tx(func(s db.Session) error {

@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -19,10 +20,16 @@ import (
 )
 
 type InstanceAutoStopService struct {
-	initialized atomic.Bool
-	store       *repository.InstanceAutoStopRepository
-	lifecycle   *instanceService
-	kube        kubernetes.Interface
+	initialized  atomic.Bool
+	store        *repository.InstanceAutoStopRepository
+	lifecycle    *instanceService
+	kube         kubernetes.Interface
+	appNamespace string
+	appPodName   string
+}
+
+func (s *InstanceAutoStopService) SetApplicationPodIdentity(namespace, podName string) {
+	s.appNamespace, s.appPodName = strings.TrimSpace(namespace), strings.TrimSpace(podName)
 }
 
 func NewInstanceAutoStopService(store *repository.InstanceAutoStopRepository, instances InstanceService, kube kubernetes.Interface) *InstanceAutoStopService {
@@ -127,6 +134,20 @@ func (s *InstanceAutoStopService) Tick(ctx context.Context) error {
 			return err
 		}
 	}
+	var legacyCutoff *time.Time
+	var legacyProofErr error
+	legacy, err := s.store.HasLegacyModelActivities(ctx)
+	if err != nil {
+		return err
+	}
+	if legacy {
+		proofCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		legacyCutoff, legacyProofErr = modelActivityLegacyCutoff(proofCtx, s.kube, s.appNamespace, s.appPodName)
+		cancel()
+	}
+	if err = s.store.ReconcileModelActivities(ctx, legacyCutoff); err != nil {
+		return err
+	}
 	after := cfg.ScanCursor
 	for {
 		candidates, err := s.store.CandidatesForTimeout(ctx, time.Now().UTC(), cfg.IdleTimeout(), after, 100)
@@ -145,6 +166,9 @@ func (s *InstanceAutoStopService) Tick(ctx context.Context) error {
 				return ctx.Err()
 			}
 			if err = s.tryStop(ctx, *cfg, a); err != nil {
+				if errors.Is(err, models.ErrLegacyModelActivityUnverified) && legacyProofErr != nil {
+					err = fmt.Errorf("%w: %v", err, legacyProofErr)
+				}
 				_ = s.store.RecordBlocker(ctx, a.InstanceID, err.Error())
 			}
 			if err = s.store.CheckpointScan(ctx, *cfg, after); err != nil {

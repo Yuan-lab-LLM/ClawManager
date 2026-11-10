@@ -37,7 +37,24 @@ func (r *InstanceAutoStopRepository) ClaimStop(ctx context.Context, settingsVers
 			return err
 		}
 		now := time.Now().UTC()
-		if a == nil || a.Generation != i.generation || a.ActivityVersion != activityVersion || !a.IdleAtDuration(now, cfg.IdleTimeout()) {
+		if a == nil || a.Generation != i.generation || a.ActivityVersion != activityVersion {
+			return models.ErrAutoStopConflict
+		}
+		if a.ActiveRequests != 0 {
+			row, err := s.SQL().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM instance_model_activity_requests WHERE instance_id=? AND generation=? AND finished_at IS NULL AND lease_expires_at IS NULL)`, input.InstanceID, input.Generation)
+			if err != nil {
+				return err
+			}
+			var legacy bool
+			if err = row.Scan(&legacy); err != nil {
+				return err
+			}
+			if legacy {
+				return models.ErrLegacyModelActivityUnverified
+			}
+			return models.ErrModelActivityInProgress
+		}
+		if !a.IdleAtDuration(now, cfg.IdleTimeout()) {
 			return models.ErrAutoStopConflict
 		}
 		workRow, err := s.SQL().QueryRowContext(ctx, `SELECT

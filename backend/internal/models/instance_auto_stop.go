@@ -9,12 +9,19 @@ import (
 )
 
 var (
-	ErrAutoStopConflict    = errors.New("automatic stop settings or instance changed; refresh and retry")
-	ErrInstanceStopping    = errors.New("instance is stopping or stopped; start it manually before retrying")
-	ErrActivityUnavailable = errors.New("model activity could not be durably recorded; retry later")
+	ErrAutoStopConflict              = errors.New("automatic stop settings or instance changed; refresh and retry")
+	ErrInstanceStopping              = errors.New("instance is stopping or stopped; start it manually before retrying")
+	ErrActivityUnavailable           = errors.New("model activity could not be durably recorded; retry later")
+	ErrModelActivityInProgress       = errors.New("live model requests are still active; waiting for completion or lease expiry")
+	ErrLegacyModelActivityUnverified = errors.New("legacy model request awaits verification that prior application processes exited")
 )
 
 const AutoStopDay = 24 * time.Hour
+
+const (
+	ModelActivityLeaseDuration = 90 * time.Second
+	ModelActivityRenewInterval = 15 * time.Second
+)
 
 // Legacy day-only configurations retain the accelerated idle window in test builds.
 func InstanceAutoStopIdleTimeout(days int) time.Duration {

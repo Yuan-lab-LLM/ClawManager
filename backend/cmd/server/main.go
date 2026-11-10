@@ -745,6 +745,20 @@ func main() {
 		autoStopKube = client.Clientset
 	}
 	autoStopService := services.NewInstanceAutoStopService(autoStopRepo, instanceService, autoStopKube)
+	appNamespace := strings.TrimSpace(os.Getenv("POD_NAMESPACE"))
+	if appNamespace == "" {
+		if raw, err := os.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/namespace"); err == nil {
+			appNamespace = strings.TrimSpace(string(raw))
+		}
+	}
+	if appNamespace == "" {
+		appNamespace = cfg.Runtime.Namespace
+	}
+	appPodName := os.Getenv("POD_NAME")
+	if appPodName == "" {
+		appPodName = os.Getenv("HOSTNAME")
+	}
+	autoStopService.SetApplicationPodIdentity(appNamespace, appPodName)
 	autoStopHandler := handlers.NewInstanceAutoStopHandler(autoStopRepo)
 	runtimePoolHandler := handlers.NewRuntimePoolHandler(runtimePodRepo, bindingRepo, rolloutRepo, runtimeScheduler, runtimeEvents)
 	runtimePoolHandler.SetUpgradeService(runtimeUpgradeService)

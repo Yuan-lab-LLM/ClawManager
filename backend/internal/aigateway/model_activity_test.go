@@ -16,11 +16,20 @@ type activityRecorder struct {
 	finishes    atomic.Int32
 	beginError  error
 	finishError error
+	renew       func(context.Context, string) error
+	renews      atomic.Int32
 }
 
 func (a *activityRecorder) BeginModelActivity(context.Context, int, int, int, string) (string, error) {
 	a.begins.Add(1)
 	return "server-scope", a.beginError
+}
+func (a *activityRecorder) RenewModelActivity(ctx context.Context, key string) error {
+	a.renews.Add(1)
+	if a.renew != nil {
+		return a.renew(ctx, key)
+	}
+	return nil
 }
 func (a *activityRecorder) FinishModelActivity(context.Context, string) error {
 	a.finishes.Add(1)
@@ -130,7 +139,7 @@ func TestModelActivityHTTPScopedRequestRecordsOnlyOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	inner, err := s.beginChatModelActivity(ctx, 1, &req)
+	_, inner, err := s.beginChatModelActivity(ctx, 1, &req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +147,7 @@ func TestModelActivityHTTPScopedRequestRecordsOnlyOnce(t *testing.T) {
 	if activity.begins.Load() != 1 || activity.finishes.Load() != 0 {
 		t.Fatal("inference duplicated or prematurely finished HTTP scope")
 	}
-	if _, err = s.beginModelActivity(ctx, 2, req); !errors.Is(err, models.ErrInstanceStopping) {
+	if _, _, err = s.beginModelActivity(ctx, 2, req); !errors.Is(err, models.ErrInstanceStopping) {
 		t.Fatal("scope reused for another identity")
 	}
 	finish()

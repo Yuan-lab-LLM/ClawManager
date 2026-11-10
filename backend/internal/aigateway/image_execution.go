@@ -96,7 +96,7 @@ func (s *service) ExecuteImage(ctx context.Context, userID int, req *ImageOperat
 	if responseFormat != "" && responseFormat != "b64_json" {
 		return nil, imageError(400, "image_url_output_not_supported", "Use b64_json output; upstream image URL downloads are not enabled")
 	}
-	finishActivity, activityErr := s.beginModelActivity(ctx, userID, attribution)
+	ctx, finishActivity, activityErr := s.beginModelActivity(ctx, userID, attribution)
 	if activityErr != nil {
 		return nil, activityErr
 	}

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"strconv"
 	"strings"
 	"time"
@@ -14,13 +13,14 @@ import (
 
 type ModelActivityRecorder interface {
 	BeginModelActivity(context.Context, int, int, int, string) (string, error)
+	RenewModelActivity(context.Context, string) error
 	FinishModelActivity(context.Context, string) error
 }
 
 func WithModelActivity(recorder ModelActivityRecorder) ServiceOption {
 	return func(s *service) { s.modelActivity = recorder }
 }
-func (s *service) beginModelActivity(ctx context.Context, userID int, req ChatCompletionRequest) (func(), error) {
+func (s *service) beginModelActivity(ctx context.Context, userID int, req ChatCompletionRequest) (context.Context, func(), error) {
 	noop := func() {}
 	if scope, ok := ctx.Value(modelActivityScopeKey{}).(modelActivityScope); ok {
 		id := 0
@@ -36,12 +36,12 @@ func (s *service) beginModelActivity(ctx context.Context, userID int, req ChatCo
 			generation = req.RuntimeTask.Generation
 		}
 		if scope.userID != userID || scope.instanceID != id || scope.gatewayID != gateway || scope.generation != generation {
-			return noop, models.ErrInstanceStopping
+			return ctx, noop, models.ErrInstanceStopping
 		}
-		return noop, nil
+		return ctx, noop, nil
 	}
 	if s.modelActivity == nil || req.InstanceID == nil || *req.InstanceID <= 0 {
-		return noop, nil
+		return ctx, noop, nil
 	}
 	generation := 0
 	if req.RuntimeTask != nil {
@@ -54,44 +54,37 @@ func (s *service) beginModelActivity(ctx context.Context, userID int, req ChatCo
 	if gatewayID != "" {
 		prefix := fmt.Sprintf("gw-%d-", *req.InstanceID)
 		if !strings.HasPrefix(gatewayID, prefix) {
-			return noop, models.ErrInstanceStopping
+			return ctx, noop, models.ErrInstanceStopping
 		}
 		n, err := strconv.Atoi(strings.TrimPrefix(gatewayID, prefix))
 		if err != nil || n < 1 || (generation > 0 && generation != n) {
-			return noop, models.ErrInstanceStopping
+			return ctx, noop, models.ErrInstanceStopping
 		}
 		generation = n
 	}
+	started := time.Now()
 	key, err := s.modelActivity.BeginModelActivity(ctx, userID, *req.InstanceID, generation, gatewayID)
 	if err != nil {
 		if errors.Is(err, models.ErrInstanceStopping) {
-			return noop, err
+			return ctx, noop, err
 		}
-		return noop, fmt.Errorf("%w: activity admission failed", models.ErrActivityUnavailable)
+		return ctx, noop, fmt.Errorf("%w: activity admission failed", models.ErrActivityUnavailable)
 	}
-	return func() {
-		if key == "" {
-			return
-		}
-		finishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-		defer cancel()
-		if err := s.modelActivity.FinishModelActivity(finishCtx, key); err != nil {
-			// The durable unfinished scope remains a stop blocker. Never release it
-			// merely because a client disconnected or this process is restarting.
-			log.Printf("model activity completion pending for instance %d: %T", *req.InstanceID, err)
-		}
-	}, nil
+	if key == "" {
+		return ctx, noop, nil
+	}
+	return s.renewModelActivityScope(ctx, key, *req.InstanceID, started)
 }
-func (s *service) beginChatModelActivity(ctx context.Context, userID int, req *ChatCompletionRequest) (func(), error) {
+func (s *service) beginChatModelActivity(ctx context.Context, userID int, req *ChatCompletionRequest) (context.Context, func(), error) {
 	if s.modelActivity != nil && req.InstanceID != nil {
 		if err := NormalizeVisionRequest(req); err != nil {
-			return func() {}, err
+			return ctx, func() {}, err
 		}
 		if err := NormalizeGenerationLimits(req); err != nil {
-			return func() {}, err
+			return ctx, func() {}, err
 		}
 		if strings.TrimSpace(req.Model) == "" || len(req.Messages) == 0 {
-			return func() {}, errors.New("model and messages are required")
+			return ctx, func() {}, errors.New("model and messages are required")
 		}
 	}
 	return s.beginModelActivity(ctx, userID, *req)
@@ -106,7 +99,7 @@ type modelActivityScope struct {
 // BeginModelActivityScope lets validated HTTP requests count before quota
 // rejection while inference reuses that exact scope without double recording.
 func (s *service) BeginModelActivityScope(ctx context.Context, userID int, req ChatCompletionRequest) (context.Context, func(), error) {
-	finish, err := s.beginModelActivity(ctx, userID, req)
+	ctx, finish, err := s.beginModelActivity(ctx, userID, req)
 	if err != nil {
 		return ctx, finish, err
 	}
