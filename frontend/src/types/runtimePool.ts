@@ -223,12 +223,16 @@ export interface RuntimeSchedulingRequest {
   mode?: "orphan-recovery";
   source_pod_id?: number;
   source_pod_uid?: string;
+  retry_operation_id?: string;
   instance_ids: number[];
   target_pod_id: number;
   target_slot?: number;
 }
 
 export interface RuntimeSchedulingItem {
+  source_pod_uid?: string;
+  source_generation?: number;
+  source_gateway_id?: string;
   orphan_recovery?: { phase: string; receipt?: Record<string, unknown> };
   recovery?: { phase: string; scope: Record<string, unknown>; receipt?: Record<string, unknown> };
   instance_id: number;

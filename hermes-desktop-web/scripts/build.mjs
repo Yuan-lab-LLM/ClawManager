@@ -34,7 +34,7 @@ async function auditDependencies(imported) {
   // These are upstream-declared dependencies used only by the CSS/build
   // pipeline. They remain exact direct pins and are audited separately below.
   const buildOnly = new Set(['@tailwindcss/typography', '@tailwindcss/vite', 'tailwindcss'])
-  const sourceOrHost = new Set(['@hermes/shared', 'node-pty', 'simple-git'])
+  const sourceOrHost = new Set(["@hermes/shared", "@simple-git/argv-parser", "dbus-native", "electron-updater", "https-proxy-agent", "node-pty", "proxy-from-env", "simple-git", "ws"])
   function resolve(packages, from, name) {
     for (let at = from; ; at = path.posix.dirname(at)) {
       const key = `${at && at !== '.' ? `${at}/` : ''}node_modules/${name}`

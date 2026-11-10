@@ -10,6 +10,7 @@
     "test:version": "node scripts/app-version-display.test.mjs",
     "test:instance-access": "node --test src/hooks/useInstanceDesktopAccess.test.mjs",
     "test:runtime-management": "node --experimental-strip-types --test scripts/runtime-management.test.mjs",
+    "test:runtime-move-retry": "node scripts/runtime-move-retry.browser.mjs",
     "test:runtime-refresh": "node scripts/runtime-refresh.browser.mjs",
     "test:instance-refresh": "node scripts/instance-list-refresh.browser.mjs",
     "test:hermes-session-navigation": "node --experimental-strip-types --test src/lib/hermesDesktopFrame.test.mjs src/lib/hermesSessionNavigation.test.mjs && node scripts/hermes-session-navigation.browser.mjs",

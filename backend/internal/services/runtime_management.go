@@ -22,6 +22,7 @@ const RuntimeForceEvictionUnavailable = "Runtime management requires the confirm
 
 type RuntimeSchedulingRequest struct {
 	SourcePodUID       string `json:"source_pod_uid,omitempty"`
+	RetryOperationID   string `json:"retry_operation_id,omitempty"`
 	SourcePodID        int64  `json:"source_pod_id,omitempty"`
 	InstanceIDs        []int  `json:"instance_ids"`
 	TargetPodID        int64  `json:"target_pod_id"`
@@ -32,6 +33,7 @@ type RuntimeSchedulingRequest struct {
 }
 
 type RuntimeSchedulingItem struct {
+	RetryOperationID string                        `json:"retry_operation_id,omitempty"`
 	OrphanRecovery   *RuntimeOrphanRecoveryJournal `json:"orphan_recovery,omitempty"`
 	Recovery         *RuntimeFaultEvictionJournal  `json:"recovery,omitempty"`
 	SourcePlacement  *RuntimeEvictionPlacement     `json:"source_placement,omitempty"`
@@ -285,7 +287,7 @@ func (s *RuntimeManagementService) preflightWithInventory(ctx context.Context, r
 		if err != nil {
 			return nil, err
 		}
-		if instance == nil || instance.InstanceMode != "lite" || (instance.Status != "running" && instance.Status != "error") {
+		if instance == nil || instance.InstanceMode != "lite" || (instance.Status != "running" && instance.Status != "error" && !(instance.Status == "stopped" && req.RetryOperationID != "")) {
 			fail(errors.New("instance must be a running or errored Lite instance"))
 			result.Items = append(result.Items, item)
 			continue
@@ -319,7 +321,16 @@ func (s *RuntimeManagementService) preflightWithInventory(ctx context.Context, r
 		if err != nil {
 			return nil, err
 		}
-		if binding == nil || !runtimeManagementSourceState(binding.State) || binding.Generation != instance.RuntimeGeneration {
+		retryingStop := instance.Status == "stopped" && req.RetryOperationID != ""
+		if req.RetryOperationID != "" {
+			if err := s.validateMoveRetry(ctx, req.RetryOperationID, instance, binding); err != nil {
+				fail(err)
+				result.Items = append(result.Items, item)
+				continue
+			}
+			item.RetryOperationID = req.RetryOperationID
+		}
+		if binding == nil || (!retryingStop && (!runtimeManagementSourceState(binding.State) || binding.Generation != instance.RuntimeGeneration)) {
 			fail(errors.New("source running binding is missing or stale"))
 			result.Items = append(result.Items, item)
 			continue
@@ -978,7 +989,7 @@ func (s *RuntimeManagementService) move(ctx context.Context, item RuntimeSchedul
 	sch := s.scheduler
 	unlock := sch.lockGatewayCreateForPod(item.TargetPodID)
 	defer unlock()
-	plan, err := s.Preflight(ctx, RuntimeSchedulingRequest{InstanceIDs: []int{item.InstanceID}, TargetPodID: item.TargetPodID, TargetSlot: item.TargetSlot})
+	plan, err := s.Preflight(ctx, RuntimeSchedulingRequest{InstanceIDs: []int{item.InstanceID}, TargetPodID: item.TargetPodID, TargetSlot: item.TargetSlot, RetryOperationID: item.RetryOperationID})
 	if err != nil {
 		return err
 	}
@@ -997,7 +1008,7 @@ func (s *RuntimeManagementService) move(ctx context.Context, item RuntimeSchedul
 	if err != nil {
 		return err
 	}
-	if instance == nil || binding == nil || binding.RuntimePodID != item.SourcePodID || binding.Generation != item.SourceGeneration || binding.GatewayID != item.SourceGatewayID || instance.RuntimeGeneration != item.SourceGeneration {
+	if instance == nil || binding == nil || binding.RuntimePodID != item.SourcePodID || binding.Generation != item.SourceGeneration || binding.GatewayID != item.SourceGatewayID || (item.RetryOperationID == "" && instance.RuntimeGeneration != item.SourceGeneration) {
 		return errors.New("source binding changed since preflight")
 	}
 	source, err := sch.podRepo.GetByID(ctx, item.SourcePodID)
@@ -1028,7 +1039,7 @@ func (s *RuntimeManagementService) move(ctx context.Context, item RuntimeSchedul
 		}
 	}()
 	instanceCopy := *instance
-	instanceCopy.RuntimeGeneration++
+	instanceCopy.RuntimeGeneration = item.SourceGeneration + 1
 	instanceCopy.Status = "stopped"
 	start, err := sch.prepareGatewayStartParameters(ctx, instanceCopy, target.RuntimeType, *target)
 	if err != nil {

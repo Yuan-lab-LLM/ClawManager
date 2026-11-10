@@ -1,4 +1,4 @@
-import type { RuntimePod, RuntimeSlot } from "../types/runtimePool";
+import type { RuntimePod, RuntimeSlot, RuntimeSchedulingOperation } from "../types/runtimePool";
 
 export type SlotState =
   | "running"
@@ -27,6 +27,25 @@ export function canManageSlot(slot: RuntimeSlot) {
   return !!slot.instance_id && (slot.reconciliation_state === undefined
     ? slot.binding_confirmed !== false
     : slot.reconciliation_state === "consistent" && slot.binding_confirmed === true);
+}
+
+// A delayed stop can leave a SQL reservation on a physically empty slot.
+// This projection is only for retrying its original failed move; server preflight
+// still revalidates the binding, generation and stop proof before any mutation.
+export function failedMoveRetrySelections(pods: RuntimePod[], operation?: RuntimeSchedulingOperation) {
+  if (!operation || !["failed", "partial_failure"].includes(operation.status) ||
+      !["migration", "balance", "eviction"].includes(operation.kind ?? "")) return [];
+  return operation.items.flatMap(item => {
+    if (item.state !== "failed" || item.recovery || item.orphan_recovery ||
+        !item.source_pod_uid || !item.source_generation ||
+        item.source_gateway_id !== `gw-${item.instance_id}-${item.source_generation}`) return [];
+    const source = pods.find(pod => pod.id === item.source_pod_id && pod.pod_uid === item.source_pod_uid);
+    if (!source || source.agent_reported !== true || source.bindings_reported !== true) return [];
+    const slot = source.slots?.find(slot => slot.ready && !slot.instance_id &&
+      slot.reconciliation_state === "conflict" && slot.expected_instance_id === item.instance_id);
+    return slot ? [{ source, slot: { ...slot, instance_id: item.instance_id,
+      generation: item.source_generation, gateway_id: item.source_gateway_id } }] : [];
+  });
 }
 
 export function recoveryInstanceIds(pod: RuntimePod): number[] {

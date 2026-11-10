@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { summarizePod, filterPods, slotState, availableTargets, canManageSlot, canEvictPod, recoveryInstanceIds } from '../src/lib/runtimeManagement.ts';
+import { summarizePod, filterPods, slotState, availableTargets, canManageSlot, canEvictPod, recoveryInstanceIds, failedMoveRetrySelections } from '../src/lib/runtimeManagement.ts';
 
 const pod = { id: 1, runtime_type: 'opencode', namespace: 'runtime', deployment_name: 'code', pod_name: 'code-a', node_name: 'node-a', state: 'ready', agent_reported: true, capacity: 4, used_slots: 2, draining: false, slots: [
   { index: 1, ready: true, instance_id: 10, instance_name: 'builder', owner: 'alice', instance_state: 'running' },
@@ -167,4 +167,24 @@ test('SQL binding count is separate from unconfirmed residual owners', () => {
  assert.equal(summary.residual,2);
  assert.equal(summary.occupied,2);
  assert.equal(summary.available,0);
+});
+
+
+test('failed move retry resolves only the original reserved empty slot without granting ordinary management', () => {
+  const slot = { index: 1, ready: true, reconciliation_state: 'conflict', binding_confirmed: false, expected_instance_id: 101 };
+  const source = { ...pod, pod_uid: 'source-uid', agent_reported: true, bindings_reported: true, slots: [slot] };
+  const operation = { id: 'failed-move', kind: 'migration', status: 'failed', items: [{ instance_id: 101, source_pod_id: 1, source_pod_uid: 'source-uid', source_generation: 2, source_gateway_id: 'gw-101-2', state: 'failed' }] };
+  const [selection] = failedMoveRetrySelections([source], operation);
+  assert.equal(selection.slot.instance_id, 101);
+  assert.equal(selection.slot.generation, 2);
+  assert.equal(selection.slot.gateway_id, 'gw-101-2');
+  assert.equal(canManageSlot(slot), false);
+  assert.equal(canManageSlot(selection.slot), false);
+  assert.equal(source.slots[0].instance_id, undefined, 'retry must not alter inventory');
+  assert.deepEqual(failedMoveRetrySelections([source], undefined), []);
+  for (const extra of [{ status: 'completed' }, { kind: 'scale_in' }]) assert.deepEqual(failedMoveRetrySelections([source], { ...operation, ...extra }), []);
+  for (const extra of [{ pod_uid: 'replacement' }, { bindings_reported: false }, { slots: [{ ...slot, expected_instance_id: 102 }] }, { slots: [{ ...slot, instance_id: 102 }] }, { slots: [{ ...slot, reconciliation_state: 'unknown' }] }]) {
+    assert.deepEqual(failedMoveRetrySelections([{ ...source, ...extra }], operation), []);
+  }
+  for (const extra of [{ source_gateway_id: 'gw-101-9' }, { state: 'completed' }, { recovery: {} }, { orphan_recovery: {} }]) assert.deepEqual(failedMoveRetrySelections([source], { ...operation, items: [{ ...operation.items[0], ...extra }] }), []);
 });

@@ -13,6 +13,7 @@ import {
   canManageSlot,
   canEvictPod,
   recoveryInstanceIds,
+  failedMoveRetrySelections,
 } from "../../lib/runtimeManagement";
 import { runtimePoolService } from "../../services/runtimePoolService";
 import { formatInstanceType } from "../../types/instance";
@@ -38,6 +39,7 @@ export default function RuntimeActions({
   initialIds,
   verifiedRecoveryIds = [],
   initialEvictionMode = "graceful",
+  retryOperationId,
   pods,
   onClose,
   onSubmitted,
@@ -48,19 +50,29 @@ export default function RuntimeActions({
   initialIds?: number[];
   verifiedRecoveryIds?: number[];
   initialEvictionMode?: "graceful" | "force" | "recovery" | "orphan-recovery";
+  retryOperationId?: string;
   pods: RuntimePod[];
   onClose: () => void;
   onSubmitted: () => void;
-  onRetry: (ids: number[]) => void;
+  onRetry: (ids: number[], operationId: string) => void;
 }) {
   const { t } = useI18n();
+  const history = useQuery({
+    queryKey: ["runtime-scheduling"],
+    queryFn: () => runtimePoolService.schedulingHistory(),
+    enabled: kind === "history" || kind === "evict" || !!retryOperationId,
+    refetchInterval: kind === "history" ? 3000 : false,
+  });
   const instances = [
     ...new Map(
       pods.flatMap((source) =>
         (source.slots ?? [])
           .filter(canManageSlot)
           .map((item) => [item.instance_id!, { slot: item, source }] as const),
-      ),
+      ).concat(retryOperationId
+        ? failedMoveRetrySelections(pods, history.data?.items.find(item => item.id === retryOperationId))
+            .map(item => [item.slot.instance_id, item] as const)
+        : []),
     ).values(),
   ];
   const initialSelection = instances.filter((item) => initialIds?.includes(item.slot.instance_id!));
@@ -100,12 +112,6 @@ export default function RuntimeActions({
     if (invalidInitial) setIds([]);
     setError(invalidInitial ? t("runtimePods.invalidInitialSelection") : undefined);
   }
-  const history = useQuery({
-    queryKey: ["runtime-scheduling"],
-    queryFn: () => runtimePoolService.schedulingHistory(),
-    enabled: kind === "history" || kind === "evict",
-    refetchInterval: kind === "history" ? 3000 : false,
-  });
   const forceSupported =
     history.data?.supported_modes.includes("force") === true;
   const events = useQuery({
@@ -132,6 +138,7 @@ export default function RuntimeActions({
     : availableTargets(pods, sources);
   const target = candidates.find((item) => item.id === Number(targetId));
   const request: RuntimeSchedulingRequest = {
+    ...(retryOperationId ? { retry_operation_id: retryOperationId } : {}),
     instance_ids: ids,
     target_pod_id: Number(targetId),
     ...(slot && ids.length === 1 ? { target_slot: Number(slot) } : {}),
@@ -746,15 +753,15 @@ export default function RuntimeActions({
                           {item.error_message}
                         </p>
                       )}
-                      {item.state === "failed" && !item.recovery &&
+                      {item.state === "failed" && !item.recovery && (
                         instances.some(
                           (current) =>
                             current.slot.instance_id === item.instance_id,
-                        ) && (
+                        ) || failedMoveRetrySelections(pods, operation).some(current => current.slot.instance_id === item.instance_id)) && (
                           <button
                             type="button"
                             className="text-slate-700 underline"
-                            onClick={() => onRetry([item.instance_id])}
+                            onClick={() => onRetry([item.instance_id], operation.id)}
                           >
                             {t("runtimePods.retry")}
                           </button>

@@ -17,6 +17,7 @@ var (
 	ErrRuntimeAgentConflict    = errors.New("runtime agent conflict")
 	ErrRuntimeAgentNotFound    = errors.New("runtime agent resource not found")
 	ErrRuntimeAgentUnsupported = errors.New("runtime agent operation unsupported")
+	ErrRuntimeAgentUnavailable = errors.New("runtime agent temporarily unavailable")
 	ErrRuntimeUpgradeBusy      = errors.New("runtime upgrade operation is still in flight")
 )
 
@@ -431,6 +432,9 @@ func (c *runtimeAgentHTTPClient) doWithClient(ctx context.Context, httpClient *h
 		}
 		if resp.StatusCode == http.StatusNotFound {
 			return fmt.Errorf("%w: %s", ErrRuntimeAgentNotFound, string(msg))
+		}
+		if resp.StatusCode == http.StatusBadGateway || resp.StatusCode == http.StatusServiceUnavailable || resp.StatusCode == http.StatusGatewayTimeout {
+			return fmt.Errorf("%w: runtime agent status %d: %s", ErrRuntimeAgentUnavailable, resp.StatusCode, string(msg))
 		}
 		return fmt.Errorf("runtime agent status %d: %s", resp.StatusCode, string(msg))
 	}

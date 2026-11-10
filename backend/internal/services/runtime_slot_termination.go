@@ -26,6 +26,8 @@ import (
 
 type runtimeSlotStopIntent = k8sservice.RuntimeContainerStopIntent
 
+var errContainerTerminationPending = errors.New("matching old slot container termination is not confirmed")
+
 type runtimeSlotTerminationMessage struct {
 	runtimeSlotStopIntent
 	CleanupConfirmed bool `json:"cleanup_confirmed"`
@@ -91,7 +93,7 @@ func runtimeSlotTerminationProof(pod *corev1.Pod, intent runtimeSlotStopIntent) 
 		}
 	}
 	if found == nil {
-		return nil, fmt.Errorf("matching old slot container termination is not confirmed")
+		return nil, errContainerTerminationPending
 	}
 	return found, nil
 }
@@ -174,6 +176,11 @@ func containerSlotName(pod *corev1.Pod, request []byte) (string, error) {
 }
 
 func (c *slotRuntimeAgentClient) stopContainerGateway(ctx context.Context, endpoint, gatewayID string, graceful bool) error {
+	if _, bounded := ctx.Deadline(); !bounded {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, runtimeAgentControlTimeout)
+		defer cancel()
+	}
 	a, state, intent, saved, err := c.assignments.ReadContainerStop(ctx, endpoint, gatewayID)
 	if err != nil {
 		return err
@@ -248,11 +255,7 @@ func (c *slotRuntimeAgentClient) stopContainerGateway(ctx context.Context, endpo
 		// HTTP result is retried after inspecting Kubernetes, never treated as stop.
 		var pending any
 		stopErr := c.do(ctx, http.MethodDelete, endpoint, "/v1/gateways/"+url.PathEscape(gatewayID), intent, &pending)
-		pod, err = c.kube.CoreV1().Pods(c.namespace).Get(ctx, pod.Name, metav1.GetOptions{})
-		if err != nil {
-			return errors.Join(stopErr, err)
-		}
-		observed, err := runtimeSlotTerminationProof(pod, *intent)
+		observed, err := c.waitContainerTermination(ctx, pod.Name, *intent)
 		if err != nil {
 			return errors.Join(stopErr, err)
 		}
@@ -278,7 +281,7 @@ func (c *slotRuntimeAgentClient) stopContainerGateway(ctx context.Context, endpo
 		Unmounted   bool   `json:"unmounted"`
 		Graceful    bool   `json:"graceful"`
 	}
-	if err = c.do(ctx, http.MethodPost, endpoint, "/v1/slots/"+intent.Slot+"/reconcile-stop", proof, &receipt); err != nil {
+	if err = c.containerStopRequest(ctx, endpoint, "/v1/slots/"+intent.Slot+"/reconcile-stop", proof, &receipt); err != nil {
 		return err
 	}
 	if receipt.GatewayID != gatewayID || receipt.OperationID != intent.OperationID || receipt.WorkerEpoch != intent.WorkerEpoch || receipt.ContainerID != proof.ContainerID || !receipt.Stopped || !receipt.Confirmed || !receipt.Unmounted || intent.Graceful && !receipt.Graceful {
@@ -310,13 +313,59 @@ func (c *slotRuntimeAgentClient) releaseStoppedContainer(ctx context.Context, en
 		ContainerID string `json:"container_id"`
 		Released    bool   `json:"released"`
 	}
-	if err := c.do(ctx, http.MethodPost, endpoint, "/v1/slots/"+intent.Slot+"/release-stop", proof, &receipt); err != nil {
+	if err := c.containerStopRequest(ctx, endpoint, "/v1/slots/"+intent.Slot+"/release-stop", proof, &receipt); err != nil {
 		return err
 	}
 	if receipt.GatewayID != intent.GatewayID || receipt.OperationID != intent.OperationID || receipt.WorkerEpoch != intent.WorkerEpoch || receipt.ContainerID != proof.ContainerID || !receipt.Released {
 		return fmt.Errorf("slot release acknowledgement does not match confirmed stop")
 	}
 	return c.assignments.CompleteContainerRelease(ctx, endpoint, intent)
+}
+
+// Kubelet publishes termination asynchronously after the worker's HTTP 202.
+// Poll only the pinned Pod and exact persisted execution commitment. Missing
+// evidence is pending; replacement Pods and ambiguous evidence fail closed.
+func (c *slotRuntimeAgentClient) waitContainerTermination(ctx context.Context, name string, intent runtimeSlotStopIntent) (*runtimeSlotContainerProof, error) {
+	for {
+		pod, err := c.kube.CoreV1().Pods(c.namespace).Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return nil, err
+		}
+		proof, err := runtimeSlotTerminationProof(pod, intent)
+		if !errors.Is(err, errContainerTerminationPending) {
+			return proof, err
+		}
+		if err = waitContainerStopPoll(ctx, err); err != nil {
+			return nil, err
+		}
+	}
+}
+
+// The termination record can arrive before the replacement worker is listening.
+// Retry transport/unavailability errors with the SAME proof, never conflicts or
+// invalid receipts, and never infer success from a new worker's readiness.
+func (c *slotRuntimeAgentClient) containerStopRequest(ctx context.Context, endpoint, path string, proof runtimeSlotContainerProof, receipt any) error {
+	for {
+		err := c.do(ctx, http.MethodPost, endpoint, path, proof, receipt)
+		var transport *url.Error
+		if !errors.Is(err, ErrRuntimeAgentUnavailable) && !errors.As(err, &transport) && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
+			return err
+		}
+		if err = waitContainerStopPoll(ctx, err); err != nil {
+			return err
+		}
+	}
+}
+
+func waitContainerStopPoll(ctx context.Context, pending error) error {
+	timer := time.NewTimer(250 * time.Millisecond)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return errors.Join(pending, ctx.Err())
+	case <-timer.C:
+		return nil
+	}
 }
 
 // This separate receipt fences a generation which never acquired a worker.

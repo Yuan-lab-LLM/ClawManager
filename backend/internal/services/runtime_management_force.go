@@ -2,7 +2,6 @@ package services
 
 import (
 	"clawreef/internal/models"
-	"clawreef/internal/repository"
 	"context"
 	"errors"
 	"fmt"
@@ -71,12 +70,19 @@ func (s *RuntimeManagementService) stopSource(ctx context.Context, item RuntimeS
 	if err := s.assertOwner(ctx, ownerID); err != nil {
 		return err
 	}
-	fenced, err := fence.FenceRuntimeRestart(ctx, item.InstanceID, instance.RuntimeGeneration)
-	if err != nil {
-		return err
+	if item.RetryOperationID != "" {
+		if err := s.validateMoveRetry(ctx, item.RetryOperationID, instance, binding); err != nil {
+			return err
+		}
 	}
-	if !fenced {
-		return errors.New("instance changed during Runtime move; source preserved")
+	if item.RetryOperationID == "" || instance.Status != "stopped" {
+		fenced, err := fence.FenceRuntimeRestart(ctx, item.InstanceID, instance.RuntimeGeneration)
+		if err != nil {
+			return err
+		}
+		if !fenced {
+			return errors.New("instance changed during Runtime move; source preserved")
+		}
 	}
 	// The slot client only returns nil after persisted matching stop + unmount evidence.
 	if err := s.assertOwner(ctx, ownerID); err != nil {
@@ -90,31 +96,12 @@ func (s *RuntimeManagementService) stopSource(ctx context.Context, item RuntimeS
 	stopErr := sch.agentClient.DeleteGateway(stopCtx, *source.AgentEndpoint, binding.GatewayID)
 	cancelStop()
 	if stopErr != nil {
-		err = stopErr
-		return fmt.Errorf("source stop unconfirmed; target was not started: %w", err)
+		return fmt.Errorf("source stop unconfirmed; target was not started: %w", stopErr)
 	}
 	if err := s.assertOwner(ctx, ownerID); err != nil {
 		return err
 	}
-	if queue {
-		return s.queueEvictedSource(ctx, item, binding, ownerID)
-	}
-	var deleted bool
-	if binding.State == "running" {
-		deleted, err = sch.bindingRepo.DeleteRunningByInstanceIDGenerationAndReleaseSlot(ctx, item.InstanceID, item.SourcePodID, binding.Generation)
-	} else if releaser, ok := sch.bindingRepo.(repository.FailedGatewayBindingReleaser); ok {
-		deleted, err = releaser.DeleteFailedByInstanceIDGenerationAndReleaseSlot(ctx, item.InstanceID, item.SourcePodID, binding.Generation)
-	} else {
-		return errors.New("conditional failed binding release unavailable")
-	}
-	if err != nil {
-		return err
-	}
-	if !deleted {
-		return errors.New("source binding changed after stop; move held")
-	}
-
-	return nil
+	return s.finishStoppedSource(ctx, item, binding, ownerID, queue)
 }
 
 // A confirmed administrator move is an authorized restart of a previously live
@@ -160,6 +147,10 @@ func (s *RuntimeManagementService) prepareConfirmedMoveTarget(ctx context.Contex
 // Commit the creating intent and source release together. A failed commit keeps
 // the old binding/occupancy; a crash cannot leave a released, unschedulable source.
 func (s *RuntimeManagementService) queueEvictedSource(ctx context.Context, item RuntimeSchedulingItem, binding *models.InstanceRuntimeBinding, ownerID string) error {
+	return s.finishStoppedSource(ctx, item, binding, ownerID, true)
+}
+
+func (s *RuntimeManagementService) finishStoppedSource(ctx context.Context, item RuntimeSchedulingItem, binding *models.InstanceRuntimeBinding, ownerID string, queue bool) error {
 	return s.sess.TxContext(ctx, func(tx db.Session) error {
 		var owner, status string
 		row, err := tx.SQL().QueryRowContext(ctx, "SELECT owner_token,status FROM runtime_management_operations WHERE id=? FOR UPDATE", ownerID)
@@ -173,7 +164,11 @@ func (s *RuntimeManagementService) queueEvictedSource(ctx context.Context, item 
 			return errors.New("operation execution ownership lost; eviction held")
 		}
 		now := time.Now().UTC()
-		result, err := tx.SQL().ExecContext(ctx, `UPDATE instances SET status='creating',runtime_error_message=NULL,runtime_error_code=NULL,updated_at=? WHERE id=? AND runtime_generation=? AND status='stopped' AND EXISTS (SELECT 1 FROM instance_lifecycle_manual_guards WHERE instance_id=? AND token=?)`, now, item.InstanceID, item.SourceGeneration+1, item.InstanceID, ownerID)
+		nextStatus := "stopped"
+		if queue {
+			nextStatus = "creating"
+		}
+		result, err := tx.SQL().ExecContext(ctx, `UPDATE instances SET status=?,runtime_error_message=NULL,runtime_error_code=NULL,updated_at=? WHERE id=? AND runtime_generation=? AND status='stopped' AND EXISTS (SELECT 1 FROM instance_lifecycle_manual_guards WHERE instance_id=? AND token=?)`, nextStatus, now, item.InstanceID, item.SourceGeneration+1, item.InstanceID, ownerID)
 		if err != nil {
 			return err
 		}

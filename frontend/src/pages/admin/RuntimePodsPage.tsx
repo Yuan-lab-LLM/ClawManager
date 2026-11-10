@@ -42,6 +42,7 @@ type Dialog = {
   ids?: number[];
   evictionMode?: "recovery" | "orphan-recovery";
   verifiedRecoveryIds?: number[];
+  retryOperationId?: string;
 };
 const types = ["all", "openclaw", "hermes", "opencode", "deepseek-harness"];
 const emptySummary: RuntimePodSummary = {
@@ -474,9 +475,10 @@ export default function RuntimePodsPage() {
             initialIds={dialog.ids}
             verifiedRecoveryIds={dialog.verifiedRecoveryIds}
             initialEvictionMode={dialog.evictionMode}
+            retryOperationId={dialog.retryOperationId}
             pods={actionPods}
             onClose={() => setDialog(null)}
-            onRetry={(ids) => setDialog({ kind: "schedule", ids })}
+            onRetry={(ids, retryOperationId) => setDialog({ kind: "schedule", ids, retryOperationId })}
             onSubmitted={() => {
               refresh();
               setDialog({ kind: "history" });

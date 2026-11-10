@@ -42,8 +42,8 @@ export const adaptations = [
       ["  const allowSession = choices ? choices.includes('session') : true", "  const allowOnce = choices ? choices.includes('once') : true\n  const allowSession = false // CM never offers a standing approval."],
       ["  const allowAlways = choices ? choices.includes('always') : allowPermanent", "  const allowAlways = false // CM never offers permanent approval."],
       ["    async (choice: ApprovalChoice) => {", "    async (choice: ApprovalChoice) => {\n      if (choice !== 'deny' && (choice !== 'once' || !allowOnce)) return"],
-      ["    [busy, copy.gatewayDisconnected, copy.sendFailed, gateway, request.requestId, request.sessionId]", "    [allowOnce, busy, copy.gatewayDisconnected, copy.sendFailed, gateway, request.requestId, request.sessionId]"],
-      ["            disabled={busy}\n            onClick={() => void respond('once')}", "            disabled={busy || !allowOnce}\n            title={!allowOnce ? '恢复的审批未包含可安全展示的命令，请拒绝后重试。' : undefined}\n            onClick={() => void respond('once')}"]
+      ["    [copy.gatewayDisconnected, copy.sendFailed, gateway, request, restoreFocusOrigin, stack]", "    [allowOnce, copy.gatewayDisconnected, copy.sendFailed, gateway, request, restoreFocusOrigin, stack]"],
+      ['<Button data-approval-run="" disabled={busy}', '<Button data-approval-run="" disabled={busy || !allowOnce}']
     ]
   },
   {
@@ -79,16 +79,11 @@ export const adaptations = [
     edits: [['  return requestForSessionProfile<T>(owner, ambientRequest, method, params, timeoutMs, signal)', "  if (method === 'clarify.respond') params = cmScopedClarify(sessionId, params)\n  return requestForSessionProfile<T>(owner, ambientRequest, method, params, timeoutMs, signal)"]]
   },
   {
-    file: 'store/clarify.ts', reason: 'A composer skip must carry the same explicit session as its pending clarification.',
-    prepend: clarifyImport,
-    edits: [["await $gateway.get()?.request('clarify.respond', { request_id: request.requestId, answer: '' })", "await $gateway.get()?.request('clarify.respond', cmScopedClarify(request.sessionId, { request_id: request.requestId, answer: '' }))"]]
-  },
-  {
     file: 'store/quick-entry.ts', reason: 'Required bridge method declarations do not imply an available native global-hotkey window.',
     edits: [['export function canUseQuickEntry(): boolean {', 'export function canUseQuickEntry(): boolean {\n  return false // CM Web has no native Quick Entry window.']]
   },
   {
-    file: 'app/session/hooks/use-session-actions/index.ts', reason: 'Create chat in the managed instance workspace, without enabling native Desktop tools.',
+    file: 'app/session/hooks/use-session-actions/session-create-request.ts', reason: 'Create chat in the managed instance workspace, without enabling native Desktop tools.',
     edits: [["  return {\n    cols: 96,\n    source: 'desktop',\n    ...(cwd && { cwd }),", "  return {\n    cols: 96,\n    source: 'web', // Workspace selection belongs to the managed Runtime."]]
   },
   {
@@ -102,7 +97,7 @@ export const adaptations = [
   },
   {
     file: 'app/contrib/hooks/use-quick-entry-bridge.ts', reason: 'No native global-hotkey window or outbound state push.',
-    edits: [['export function useQuickEntryBridge({ startFreshSessionDraft, submitText }: QuickEntryBridgeParams): void {', 'export function useQuickEntryBridge({ startFreshSessionDraft, submitText }: QuickEntryBridgeParams): void {\n  return // Quick Entry is a native-window-only capability.']]
+    edits: [['export function useQuickEntryBridge({ submitText, submitTextToNewSession }: QuickEntryBridgeParams): void {', 'export function useQuickEntryBridge({ submitText, submitTextToNewSession }: QuickEntryBridgeParams): void {\n  return // Quick Entry is a native-window-only capability.']]
   },
   {
     file: 'app/contrib/hooks/use-pet-bridge.ts', reason: 'No native pet overlay window or outbound state push.',
@@ -113,7 +108,7 @@ export const adaptations = [
     edits: [
       ['export function watchRuntimePlugins(): void {', 'export function watchRuntimePlugins(): void {\n  return // CM Web has no runtime code-loading capability.'],
       ['): Promise<null | string> {\n  installPluginSdk()', '): Promise<null | string> {\n  throw new Error("ClawManager Web does not execute runtime desktop plugins")\n  installPluginSdk()'],
-      ['export const discoverRuntimePlugins = scanDiskPlugins', 'export const discoverRuntimePlugins = async () => { throw new Error("Runtime desktop plugins are unavailable in ClawManager Web") }']
+      ['export const discoverRuntimePlugins = (): Promise<void> => scanDiskPlugins(true)', 'export const discoverRuntimePlugins = async (): Promise<void> => { throw new Error("Runtime desktop plugins are unavailable in ClawManager Web") }']
     ]
   },
   {
@@ -140,7 +135,7 @@ export const adaptations = [
   {
     file: 'app/chat/right-rail/preview-pane.tsx', reason: 'Electron webview/host preview is not an ordinary web iframe capability.',
     prepend: noticeImport,
-    edits: [['export function PreviewPane({ embedded = false, onRestartServer, reloadRequest = 0, tabId, target }: PreviewPaneProps) {', `export function PreviewPane({ embedded = false, onRestartServer, reloadRequest = 0, tabId, target }: PreviewPaneProps) {\n  return ${notice('Electron 内嵌浏览器 / 原生预览')}`]]
+    edits: [['}: PreviewPaneProps) {', `}: PreviewPaneProps) {\n  return ${notice('Electron 内嵌浏览器 / 原生预览')}`]]
   },
 ]
 
