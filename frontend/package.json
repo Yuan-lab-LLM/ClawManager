@@ -11,6 +11,7 @@
     "test:instance-access": "node --test src/hooks/useInstanceDesktopAccess.test.mjs",
     "test:runtime-management": "node --experimental-strip-types --test scripts/runtime-management.test.mjs",
     "test:runtime-refresh": "node scripts/runtime-refresh.browser.mjs",
+    "test:instance-refresh": "node scripts/instance-list-refresh.browser.mjs",
     "test:hermes-session-navigation": "node --experimental-strip-types --test src/lib/hermesDesktopFrame.test.mjs src/lib/hermesSessionNavigation.test.mjs && node scripts/hermes-session-navigation.browser.mjs",
     "test:opencode-default-entry": "node scripts/opencode-default-entry.test.mjs",
     "preview": "vite preview",

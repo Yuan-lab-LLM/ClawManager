@@ -144,7 +144,7 @@ export const runtimePoolService = {
     return response.data.data;
   },
   async listPodsPage(params: RuntimePodPageRequest, signal?: AbortSignal): Promise<RuntimePodPage> {
-    const response = await api.get("/admin/runtime-pods", { params, signal });
+    const response = await api.get("/admin/runtime-pods", { params, signal, timeout: 15000 });
     return response.data.data;
   },
 
@@ -152,6 +152,7 @@ export const runtimePoolService = {
     const response = await api.get("/admin/runtime-pods", {
       params: runtimeType ? { runtime_type: runtimeType } : undefined,
       signal,
+      timeout: 15000,
     });
     const pods = response.data.data?.pods;
     return Array.isArray(pods) ? pods : [];

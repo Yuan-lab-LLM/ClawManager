@@ -48,9 +48,12 @@ export const instanceService = {
     page: number = 1,
     limit: number = 20,
     filters?: InstanceListFilters,
+    signal?: AbortSignal,
   ): Promise<InstanceListResponse> => {
     const response = await api.get("/instances", {
       params: { page, limit, ...filters },
+      signal,
+      timeout: 15000,
     });
     return response.data.data;
   },

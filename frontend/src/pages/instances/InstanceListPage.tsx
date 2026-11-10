@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useLocation } from "react-router-dom";
-import { Monitor, MonitorPlay, Play, Plus, RotateCw, Search, Square, Trash2 } from "lucide-react";
+import { Monitor, MonitorPlay, Play, Plus, RefreshCw, RotateCw, Search, Square, Trash2 } from "lucide-react";
+import { useAuthStore } from "../../stores/authStore";
 import ConfirmDialog from "../../components/ConfirmDialog";
 import InstanceLifecycleStatus from "../../components/InstanceLifecycleStatus";
 import InstanceAutoStopInfo from "../../components/InstanceAutoStopInfo";
@@ -30,7 +32,6 @@ type TeamMembership = {
   member: TeamMember;
 };
 type LoadInstancesOptions = {
-  silent?: boolean;
   refreshTeams?: boolean;
 };
 
@@ -140,12 +141,10 @@ const InstanceListPage: React.FC = () => {
   const location = useLocation();
   const initialQuery = new URLSearchParams(location.search);
   const detailState = { returnTo: location.pathname + location.search };
-  const [instances, setInstances] = useState<Instance[]>([]);
+  const userId = useAuthStore((auth) => auth.isAuthenticated ? auth.user?.id : undefined);
   const [teamMemberships, setTeamMemberships] = useState<Map<number, TeamMembership[]>>(
     new Map(),
   );
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [deletingIds, setDeletingIds] = useState<number[]>([]);
   const [actionLoadingIds, setActionLoadingIds] = useState<number[]>([]);
   const [pendingDeleteId, setPendingDeleteId] = useState<number | null>(null);
@@ -165,7 +164,6 @@ const InstanceListPage: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState(initialQuery.get("q") || "");
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState(initialQuery.get("q") || "");
   const [page, setPage] = useState(() => Math.max(1, Number(initialQuery.get("page")) || 1));
-  const [total, setTotal] = useState(0);
   const [selectedLiteIds, setSelectedLiteIds] = useState<number[]>([]);
   const [allUnavailableSelected, setAllUnavailableSelected] = useState(false);
   const [selectingUnavailable, setSelectingUnavailable] = useState(false);
@@ -195,41 +193,39 @@ const InstanceListPage: React.FC = () => {
     }
   }, []);
 
-  const loadInstances = useCallback(
-    async (options?: LoadInstancesOptions) => {
-      try {
-        if (!options?.silent) {
-          setLoading(true);
-        }
-        setError(null);
-        const data = await instanceService.getInstances(page, INSTANCE_LIST_PAGE_SIZE, {
-          query: debouncedSearchQuery.trim() || undefined,
-          type: typeFilter === "all" ? undefined : typeFilter,
-          instance_mode: modeFilter === "all" ? undefined : modeFilter,
-          ...instanceStatusFilterQuery(statusFilter),
-        });
-        setInstances(sortInstances(data.instances || []));
-        setTotal(data.total || 0);
-        if ((data.instances || []).length === 0 && data.total > 0 && page > 1) {
-          setPage(Math.max(1, Math.ceil(data.total / INSTANCE_LIST_PAGE_SIZE)));
-        }
-        if (options?.refreshTeams !== false) {
-          void refreshTeamMemberships();
-        }
-      } catch (err: unknown) {
-        setError(getErrorMessage(err, t("instances.failedToLoad")));
-      } finally {
-        if (!options?.silent) {
-          setLoading(false);
-        }
-      }
-    },
-    [statusFilter, debouncedSearchQuery, modeFilter, page, refreshTeamMemberships, t, typeFilter],
-  );
-
+  const filters = {
+    query: debouncedSearchQuery.trim() || undefined,
+    type: typeFilter === "all" ? undefined : typeFilter,
+    instance_mode: modeFilter === "all" ? undefined : modeFilter,
+    ...instanceStatusFilterQuery(statusFilter),
+  };
+  const query = useQuery({
+    queryKey: ["instances", "list", userId, page, filters],
+    queryFn: ({ signal }) => instanceService.getInstances(page, INSTANCE_LIST_PAGE_SIZE, filters, signal),
+    enabled: !!userId,
+    // Keep rows during a filter change, but never inherit another user's cache.
+    placeholderData: (previous, previousQuery) => previousQuery?.queryKey[2] === userId ? previous : undefined,
+    refetchInterval: 5000,
+    refetchIntervalInBackground: true,
+    refetchOnWindowFocus: "always",
+    refetchOnReconnect: "always",
+    retry: 1,
+  });
+  const instances = useMemo(() => sortInstances(query.data?.instances ?? []), [query.data]);
+  const total = query.data?.total ?? 0;
+  const loading = query.isPending;
+  const error = query.isError && !query.data ? getErrorMessage(query.error, t("instances.failedToLoad")) : null;
+  const { refetch } = query;
+  const loadInstances = useCallback(async (options?: LoadInstancesOptions) => {
+    await refetch();
+    if (options?.refreshTeams !== false) void refreshTeamMemberships();
+  }, [refetch, refreshTeamMemberships]);
+  useEffect(() => { if (userId) void refreshTeamMemberships(); }, [userId, refreshTeamMemberships]);
   useEffect(() => {
-    void loadInstances();
-  }, [loadInstances]);
+    if (!query.data || query.isPlaceholderData) return;
+    const lastPage = Math.max(1, Math.ceil(total / INSTANCE_LIST_PAGE_SIZE));
+    if (page > lastPage) setPage(lastPage);
+  }, [query.data, query.isPlaceholderData, total, page]);
   useEffect(() => {
     if (searchQuery === debouncedSearchQuery) return;
     const timeoutId = window.setTimeout(() => {
@@ -266,18 +262,6 @@ const InstanceListPage: React.FC = () => {
       cancelled = true;
     };
   }, []);
-
-  useEffect(() => {
-    if (!instances.some((instance) => instance.status === "creating" || instance.status === "deleting")) {
-      return;
-    }
-
-    const intervalId = window.setInterval(() => {
-      void loadInstances({ silent: true, refreshTeams: false });
-    }, 5000);
-
-    return () => window.clearInterval(intervalId);
-  }, [instances, loadInstances]);
 
   const filteredInstances = instances;
   const totalPages = Math.max(1, Math.ceil(total / INSTANCE_LIST_PAGE_SIZE));
@@ -404,7 +388,7 @@ const InstanceListPage: React.FC = () => {
           failed: result.failed,
         }),
       );
-      await loadInstances({ silent: true });
+      await loadInstances();
       if (result.failed === 0) {
         setBatchCreateOpen(false);
       }
@@ -432,7 +416,7 @@ const InstanceListPage: React.FC = () => {
       }
       setSelectedLiteIds([]);
       setPendingBatchDelete(false);
-      await loadInstances({ silent: true });
+      await loadInstances();
     } catch (err: unknown) {
       alert(getErrorMessage(err, t("instances.batchDeleteFailed")));
     } finally {
@@ -445,7 +429,7 @@ const InstanceListPage: React.FC = () => {
         setDeletingIds((prevIds) => [...prevIds, id]);
         await instanceService.deleteInstance(id);
         setPendingDeleteId(null);
-        await loadInstances({ silent: true });
+        await loadInstances();
       } catch (err: unknown) {
         alert(getErrorMessage(err, t("instances.failedToDelete")));
       } finally {
@@ -460,7 +444,7 @@ const InstanceListPage: React.FC = () => {
       try {
         setActionLoadingIds((ids) => ids.includes(id) ? ids : [...ids, id]);
         await instanceService.startInstance(id);
-        await loadInstances({ silent: true, refreshTeams: false });
+        await loadInstances({ refreshTeams: false });
       } catch (err: unknown) {
         alert(getErrorMessage(err, t("instances.failedToStart")));
       } finally {
@@ -475,7 +459,7 @@ const InstanceListPage: React.FC = () => {
       try {
         setActionLoadingIds((ids) => ids.includes(id) ? ids : [...ids, id]);
         await instanceService.restartInstance(id);
-        await loadInstances({ silent: true, refreshTeams: false });
+        await loadInstances({ refreshTeams: false });
       } catch (err: unknown) {
         alert(getErrorMessage(err, t("instances.failedToRestart")));
       } finally {
@@ -490,7 +474,7 @@ const InstanceListPage: React.FC = () => {
       try {
         setActionLoadingIds((ids) => ids.includes(id) ? ids : [...ids, id]);
         await instanceService.stopInstance(id);
-        await loadInstances({ silent: true, refreshTeams: false });
+        await loadInstances({ refreshTeams: false });
       } catch (err: unknown) {
         alert(getErrorMessage(err, t("instances.failedToStop")));
       } finally {
@@ -684,7 +668,7 @@ const InstanceListPage: React.FC = () => {
           </div>
         </div>
       ) : null}
-      <InstanceLifecycleBatches selectedIds={selectedLiteIds} selectionBusy={selectingUnavailable} onChanged={() => void loadInstances({ silent: true })} selectionControl={<>
+      <InstanceLifecycleBatches selectedIds={selectedLiteIds} selectionBusy={selectingUnavailable} onChanged={() => void loadInstances()} selectionControl={<>
         <label className="flex items-center gap-2 text-sm text-slate-600" title="跨所有页面选择当前账号的不可用独立 Lite 实例；排除删除中、清理残留及团队实例，不受当前筛选限制。">
           <input type="checkbox" checked={allUnavailableSelected || selectingUnavailable} onChange={e => void selectAllUnavailable(e.target.checked)} />
           {selectingUnavailable ? "正在跨页获取…（取消勾选可中止）" : "选中所有不可用实例"}
@@ -784,9 +768,23 @@ const InstanceListPage: React.FC = () => {
               {t("instances.clearFilters")}
             </button>
           ) : null}
+          {!!query.dataUpdatedAt && (
+            <span className="self-center text-xs text-slate-500">
+              {t("runtimePods.updated", { time: new Date(query.dataUpdatedAt).toLocaleTimeString() })}
+            </span>
+          )}
+          <button type="button" onClick={() => void refetch({ cancelRefetch: false })}
+            disabled={query.isFetching} className="app-button-secondary" aria-label={t("common.refresh")}>
+            <RefreshCw className={`h-4 w-4 ${query.isFetching ? "animate-spin" : ""}`} />
+          </button>
         </div>
       </div>
 
+      {query.isRefetchError && query.data && (
+        <div role="status" className="rounded-md border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800">
+          {t("instances.failedToLoad")}
+        </div>
+      )}
       {!loading && !error && total > 0 ? (
         <div className="flex items-center justify-between text-xs text-slate-500">
           <span>
