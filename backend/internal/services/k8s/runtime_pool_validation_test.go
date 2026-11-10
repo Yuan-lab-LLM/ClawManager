@@ -83,3 +83,48 @@ func TestPoolValidationObservesCrashAndStopsOnlyItsPool(t *testing.T) {
 		t.Fatal("probe kept running")
 	}
 }
+
+func TestNativePoolValidationPreservesIsolatedSlotsAndTLS(t *testing.T) {
+	ctx := context.Background()
+	old := "repo@sha256:" + strings.Repeat("a", 64)
+	image := "repo@sha256:" + strings.Repeat("b", 64)
+	source := BuildRuntimeDeployment(RuntimeDeploymentSpec{Name: "source", Namespace: "tenant", RuntimeType: "openclaw", Image: old, Replicas: 1, SlotCount: 8, AgentTokenSecretName: "agent", WorkspacePVCClaimName: "business", WorkspaceMountPath: "/workspaces", PodUserNamespaces: true, NetworkIsolation: true})
+	source.UID = "source-uid"
+	client := fake.NewSimpleClientset(source)
+	service := &runtimeDeploymentService{client: client}
+	if err := service.EnsurePoolValidation(ctx, RuntimeRolloutTarget{Namespace: "tenant", Name: "source", UID: "source-uid"}, "validation", image, "20"); err != nil {
+		t.Fatal(err)
+	}
+	d, _ := client.AppsV1().Deployments("tenant").Get(ctx, "validation", metav1.GetOptions{})
+	d.UID = "validation-uid"
+	if d.Spec.Template.Spec.Containers[0].ReadinessProbe.SuccessThreshold != 1 {
+		t.Fatal("native readiness does not encode API default")
+	}
+	client.AppsV1().Deployments("tenant").Update(ctx, d, metav1.UpdateOptions{})
+	if err := service.EnsurePoolValidation(ctx, RuntimeRolloutTarget{Namespace: "tenant", Name: "source", UID: "source-uid"}, "validation", image, "20"); err != nil {
+		t.Fatal("API-defaulted probe could not be resumed", err)
+	}
+	for _, labels := range []map[string]string{d.Labels, d.Spec.Template.Labels} {
+		if labels["clawmanager.io/runtime-protocol"] != "container-slots-v1" || labels["clawmanager.io/runtime-security"] != RuntimeNetworkSecurityProfile || labels[runtimeSchedulingLabel] != "false" {
+			t.Fatal("native probe lost its isolation protocol", labels)
+		}
+	}
+	for _, c := range d.Spec.Template.Spec.Containers {
+		if c.Image != image {
+			t.Fatal("probe slot retained source binary")
+		}
+		for _, e := range c.Env {
+			if e.Name == "CLAWMANAGER_RUNTIME_UPGRADE_ID" && e.Value != "" {
+				t.Fatal("probe worker starts in unrelated upgrade standby")
+			}
+		}
+	}
+	rs := &appsv1.ReplicaSet{ObjectMeta: metav1.ObjectMeta{Name: "validation-rs", Namespace: "tenant", UID: "rs", OwnerReferences: []metav1.OwnerReference{{Kind: "Deployment", UID: d.UID}}}}
+	client.AppsV1().ReplicaSets("tenant").Create(ctx, rs, metav1.CreateOptions{})
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "probe", Namespace: "tenant", UID: "probe-uid", Labels: d.Spec.Template.Labels, OwnerReferences: []metav1.OwnerReference{{Kind: "ReplicaSet", Name: rs.Name, UID: rs.UID}}}, Spec: *d.Spec.Template.Spec.DeepCopy(), Status: corev1.PodStatus{PodIP: "10.0.0.2", ContainerStatuses: []corev1.ContainerStatus{{Name: "runtime", Ready: true, State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}}}}}}
+	client.CoreV1().Pods("tenant").Create(ctx, pod, metav1.CreateOptions{})
+	observed, err := service.ObservePoolValidation(ctx, "tenant", "validation", "20")
+	if err != nil || observed.Endpoint != "https://10.0.0.2:19090" {
+		t.Fatal("native validation did not select authenticated TLS", observed, err)
+	}
+}

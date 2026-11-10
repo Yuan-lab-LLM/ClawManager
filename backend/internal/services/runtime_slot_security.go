@@ -86,6 +86,12 @@ func (c *slotRuntimeAgentClient) prepareSecurity(ctx context.Context, podUID str
 	req.SecurityProfile = RuntimeSecurityProfile
 	identity := runtimeauth.Identity{InstanceID: req.InstanceID, UserID: req.UserID, Generation: req.Generation, PodUID: podUID}
 	credential := c.security.nativeCredential(identity)
+	return prepareIsolatedRuntimeEnvironment(req, credential)
+}
+
+func prepareIsolatedRuntimeEnvironment(req RuntimeAgentCreateGatewayRequest, credential string) (RuntimeAgentCreateGatewayRequest, error) {
+	fail := errors.New("runtime security target or generation is unavailable")
+	req.SecurityProfile = RuntimeSecurityProfile
 	env := make(map[string]string, len(req.Environment)+12)
 	for key, value := range req.Environment {
 		if (strings.HasPrefix(key, "CLAWMANAGER_AGENT_") && key != "CLAWMANAGER_AGENT_PERSISTENT_DIR") || strings.HasPrefix(key, "RUNTIME_AGENT_") || strings.HasPrefix(key, "RUNTIME_SLOT_") || strings.HasPrefix(key, "KUBERNETES_") || strings.HasPrefix(key, "POD_") {

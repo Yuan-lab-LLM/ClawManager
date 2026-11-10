@@ -315,7 +315,17 @@ func (s *RuntimeScheduler) advanceOpenClawPoolReplacement(ctx context.Context, r
 		}
 		// The complete native startup writes config/session files only to emptyDir.
 		// Dummy LLM credentials never invoke a provider or charge an account.
-		response, err := s.agentClient.CreateGateway(probeCtx, observed.Endpoint, RuntimeAgentCreateGatewayRequest{InstanceID: poolProbeInstanceID, UserID: 1, AgentType: RuntimeTypeOpenClaw, WorkspacePath: RuntimeWorkspacePathWithRoot(s.workspaceRoot, RuntimeTypeOpenClaw, 1, poolProbeInstanceID), Generation: 1, GatewayPort: 20000, PortRange: RuntimeAgentPortRange{Start: 20000, End: 20002}, UID: 1000, GID: 1000, MemoryMB: 512, DiskQuotaMB: 64, Environment: map[string]string{"CLAWMANAGER_LLM_BASE_URL": "http://127.0.0.1:9/v1", "CLAWMANAGER_LLM_API_KEY": "isolated-validation-only", "CLAWMANAGER_LLM_MODEL": "[\"auto\"]", "CLAWMANAGER_OPENCLAW_SCHEDULED_TASKS_JSON": "[]"}})
+		scope := k8s.RuntimePoolValidationScope{Namespace: source.Namespace, DeploymentName: name, DeploymentUID: observed.UID, SourceName: source.Name, SourceUID: source.UID, Operation: operation, PodUID: observed.PodUID, Endpoint: observed.Endpoint, ImageRef: r.TargetImageRef, WorkspaceRoot: s.workspaceRoot}
+		var response *RuntimeAgentCreateGatewayResponse
+		if observed.Protocol == "container-slots-v1" {
+			native, ok := s.agentClient.(nativePoolValidationClient)
+			if !ok {
+				return fail("原生 Runtime 验证客户端不可用")
+			}
+			response, err = native.CreatePoolValidationGateway(probeCtx, scope)
+		} else {
+			response, err = s.agentClient.CreateGateway(probeCtx, observed.Endpoint, RuntimeAgentCreateGatewayRequest{InstanceID: poolProbeInstanceID, UserID: 1, AgentType: RuntimeTypeOpenClaw, WorkspacePath: RuntimeWorkspacePathWithRoot(s.workspaceRoot, RuntimeTypeOpenClaw, 1, poolProbeInstanceID), Generation: 1, GatewayPort: 20000, PortRange: RuntimeAgentPortRange{Start: 20000, End: 20002}, UID: 1000, GID: 1000, MemoryMB: 512, DiskQuotaMB: 64, Environment: map[string]string{"CLAWMANAGER_LLM_BASE_URL": "http://127.0.0.1:9/v1", "CLAWMANAGER_LLM_API_KEY": "isolated-validation-only", "CLAWMANAGER_LLM_MODEL": "[\"auto\"]", "CLAWMANAGER_OPENCLAW_SCHEDULED_TASKS_JSON": "[]"}})
+		}
 		if err != nil {
 			if ctx.Err() != nil {
 				return ctx.Err()
@@ -328,7 +338,12 @@ func (s *RuntimeScheduler) advanceOpenClawPoolReplacement(ctx context.Context, r
 		if !NormalizeRuntimeGatewayLifecycle(response.Status, nil).Running {
 			return report("正在等待验证 Gateway 启动；保持同一实例和代数，不重复创建")
 		}
-		if err = s.agentClient.DeleteGateway(probeCtx, observed.Endpoint, response.GatewayID); err != nil {
+		if observed.Protocol == "container-slots-v1" {
+			err = s.agentClient.(nativePoolValidationClient).DeletePoolValidationGateway(probeCtx, scope, response.GatewayID)
+		} else {
+			err = s.agentClient.DeleteGateway(probeCtx, observed.Endpoint, response.GatewayID)
+		}
+		if err != nil {
 			return fail("目标验证进程等待清理")
 		}
 		if err = service.StopPoolValidation(ctx, source.Namespace, name, operation); err != nil {

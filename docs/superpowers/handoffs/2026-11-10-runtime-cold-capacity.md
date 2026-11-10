@@ -21,3 +21,11 @@ For a fully retired canonical OpenClaw default, POST `/api/v1/admin/runtime-roll
 Real local MariaDB regression runs cover cold admission/commit/failure isolation, committed controller UID scaling, pinned source/image, full-pool burst behavior, approved cold fallback, conflicting contracts, and existing idle pool behavior. Full K8s tests and protected-ledger race tests pass. Local Darwin service tests use the pre-existing compile overlay for an unrelated Linux-only NFS test.
 
 Deployment and live verification receipts will be appended after staging acceptance.
+
+## Native validation compatibility found during staging
+
+The historical image-validation path assumed a legacy HTTP supervisor and business Gateway admission. Native container slots require TLS1.3 with the authenticated control header. Validation now retains native/security labels, init setup, and all slot images/identity, and uses a dedicated owned-probe adapter. It checks the source transformation, exact Deployment/ReplicaSet/Pod identity and execution contract, user namespace or approved rootless isolation, and emptyDir-only business storage. It reuses environment sanitization with a sentinel credential that has no SQL instance/provider authority. It never publishes a business assignment or generation. Matching native teardown flags are required before completing validation.
+
+The probe keeps its sentinel instance ID but uses mapped Linux UID/GID200001. A real API server dry-run identified only enableServiceLinks, priority, preemptionPolicy, and standard toleration injection as Pod-spec differences; comparison normalizes those documented defaults. TLS readiness explicitly sets successThreshold1 to match persisted API defaults. Real TLS1.3, namespace CA, authenticated control header, thirteen negative contract mutations, existing protected-slot behavior, and race checks pass.
+
+Staging rollout20 exposed the legacy HTTP incompatibility, failed validation, and automatically removed all of its temporary Pods. Retired source identity and fences remained intact; no business Gateway was created by this failed probe. A new rollout is required after deploying the native validation compatibility fix.

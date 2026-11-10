@@ -3,6 +3,7 @@ package k8s
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"strings"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -17,6 +18,7 @@ const poolValidationRole = "image-validation"
 
 type RuntimeValidationStatus struct {
 	UID, PodUID, Endpoint, Reason string
+	Protocol                      string
 	Ready, Failed, Gone           bool
 }
 
@@ -71,14 +73,6 @@ func (s *runtimeDeploymentService) PoolRetirementReason(ctx context.Context, tar
 
 func (s *runtimeDeploymentService) EnsurePoolValidation(ctx context.Context, source RuntimeRolloutTarget, name, image, operation string) error {
 	deployments := s.client.AppsV1().Deployments(source.Namespace)
-	if existing, err := deployments.Get(ctx, name, metav1.GetOptions{}); err == nil {
-		if existing.Labels[runtimePoolRoleLabel] != poolValidationRole || existing.Labels[runtimeUpgradeIDLabel] != operation || existing.Annotations["clawmanager.io/source-uid"] != source.UID || runtimeContainerImage(existing.Spec.Template.Spec.Containers) != image {
-			return fmt.Errorf("validation pool ownership changed")
-		}
-		return nil
-	} else if !apierrors.IsNotFound(err) {
-		return err
-	}
 	original, err := deployments.Get(ctx, source.Name, metav1.GetOptions{})
 	if err != nil {
 		return err
@@ -86,22 +80,43 @@ func (s *runtimeDeploymentService) EnsurePoolValidation(ctx context.Context, sou
 	if string(original.UID) != source.UID {
 		return fmt.Errorf("source deployment identity changed before validation")
 	}
+	expected, err := buildPoolValidationDeployment(original, source, name, image, operation)
+	if err != nil {
+		return err
+	}
+	if existing, e := deployments.Get(ctx, name, metav1.GetOptions{}); e == nil {
+		if existing.DeletionTimestamp != nil || existing.Labels[runtimePoolRoleLabel] != poolValidationRole || existing.Labels[runtimeUpgradeIDLabel] != operation || existing.Annotations["clawmanager.io/source-uid"] != source.UID || !reflect.DeepEqual(existing.Spec.Template, expected.Spec.Template) || !reflect.DeepEqual(existing.Spec.Selector, expected.Spec.Selector) {
+			return fmt.Errorf("validation pool ownership or native template changed")
+		}
+		return nil
+	} else if !apierrors.IsNotFound(e) {
+		return e
+	}
+	_, err = deployments.Create(ctx, expected, metav1.CreateOptions{})
+	return err
+}
+
+func buildPoolValidationDeployment(original *appsv1.Deployment, source RuntimeRolloutTarget, name, image, operation string) (*appsv1.Deployment, error) {
 	d := original.DeepCopy()
 	d.TypeMeta = metav1.TypeMeta{}
-	identity := map[string]string{"app": name, "clawmanager.io/runtime-type": "openclaw", runtimePoolRoleLabel: poolValidationRole, runtimeSchedulingLabel: "false", runtimeUpgradeIDLabel: operation}
+	identity := copyStringMap(original.Spec.Template.Labels)
+	delete(identity, "pod-template-hash")
+	delete(identity, runtimeSourceLabel)
+	for key, value := range map[string]string{"app": name, "clawmanager.io/runtime-type": "openclaw", runtimePoolRoleLabel: poolValidationRole, runtimeSchedulingLabel: "false", runtimeUpgradeIDLabel: operation} {
+		identity[key] = value
+	}
 	d.ObjectMeta = metav1.ObjectMeta{Name: name, Namespace: source.Namespace, Labels: copyStringMap(identity), Annotations: map[string]string{"clawmanager.io/source-uid": source.UID}}
 	d.Spec.Selector = &metav1.LabelSelector{MatchLabels: map[string]string{"app": name}}
 	one := int32(1)
 	d.Spec.Replicas = &one
 	d.Spec.Strategy = appsv1.DeploymentStrategy{Type: appsv1.RecreateDeploymentStrategyType}
-	d.Spec.Template.ObjectMeta = metav1.ObjectMeta{Labels: copyStringMap(identity)}
+	d.Spec.Template.ObjectMeta = metav1.ObjectMeta{Labels: copyStringMap(identity), Annotations: copyStringMap(original.Spec.Template.Annotations)}
 	d.Spec.Template.Spec.TopologySpreadConstraints = nil
 	d.Spec.Template.Spec.Affinity = nil
 	d.Spec.Template.Spec.NodeName = ""
 	d.Spec.Template.Spec.HostNetwork = false
 	d.Spec.Template.Spec.HostPID = false
 	d.Spec.Template.Spec.HostIPC = false
-	d.Spec.Template.Spec.InitContainers = nil
 	// Every writable business volume is replaced, including secondary mounts.
 	// Probe Gateway/file operations can never reach an instance PVC or NFS path.
 	for i := range d.Spec.Template.Spec.Volumes {
@@ -118,7 +133,7 @@ func (s *runtimeDeploymentService) EnsurePoolValidation(ctx context.Context, sou
 		}
 	}
 	if container == nil {
-		return fmt.Errorf("runtime container missing")
+		return nil, fmt.Errorf("runtime container missing")
 	}
 	container.Image = image
 	upsertEnvVar(container, "CLAWMANAGER_RUNTIME_IMAGE_REF", image)
@@ -129,20 +144,28 @@ func (s *runtimeDeploymentService) EnsurePoolValidation(ctx context.Context, sou
 	upsertEnvVar(container, "POD_UID", "")
 	for i := range container.Env {
 		if container.Env[i].Name == "POD_UID" {
-			container.Env[i] = corev1.EnvVar{Name: "POD_UID", ValueFrom: &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.uid"}}}
+			container.Env[i] = corev1.EnvVar{Name: "POD_UID", ValueFrom: &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{APIVersion: "v1", FieldPath: "metadata.uid"}}}
 		}
 	}
 	for key, field := range map[string]string{"POD_NAME": "metadata.name", "POD_NAMESPACE": "metadata.namespace", "POD_IP": "status.podIP"} {
 		upsertEnvVar(container, key, "")
 		for i := range container.Env {
 			if container.Env[i].Name == key {
-				container.Env[i] = corev1.EnvVar{Name: key, ValueFrom: &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{FieldPath: field}}}
+				container.Env[i] = corev1.EnvVar{Name: key, ValueFrom: &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{APIVersion: "v1", FieldPath: field}}}
 			}
 		}
 	}
-	container.ReadinessProbe = &corev1.Probe{ProbeHandler: corev1.ProbeHandler{TCPSocket: &corev1.TCPSocketAction{Port: intstr.FromInt32(runtimeAgentPort)}}, PeriodSeconds: 2, TimeoutSeconds: 2, FailureThreshold: 3}
-	_, err = deployments.Create(ctx, d, metav1.CreateOptions{})
-	return err
+	syncRuntimeSlotImageAndIdentity(d, container)
+	for i := range d.Spec.Template.Spec.InitContainers {
+		if d.Spec.Template.Spec.InitContainers[i].Image == runtimeContainerImage(original.Spec.Template.Spec.Containers) {
+			d.Spec.Template.Spec.InitContainers[i].Image = image
+		}
+	}
+	container.ReadinessProbe = &corev1.Probe{ProbeHandler: corev1.ProbeHandler{TCPSocket: &corev1.TCPSocketAction{Port: intstr.FromInt32(runtimeAgentPort)}}, PeriodSeconds: 2, TimeoutSeconds: 2, FailureThreshold: 3, SuccessThreshold: 1}
+	if identity["clawmanager.io/runtime-protocol"] == "container-slots-v1" {
+		setRuntimeSlotTLSReadiness(container)
+	}
+	return d, nil
 }
 
 func (s *runtimeDeploymentService) ObservePoolValidation(ctx context.Context, namespace, name, operation string) (*RuntimeValidationStatus, error) {
@@ -160,7 +183,7 @@ func (s *runtimeDeploymentService) ObservePoolValidation(ctx context.Context, na
 	if err != nil {
 		return nil, err
 	}
-	state := &RuntimeValidationStatus{UID: string(d.UID), Reason: "正在启动验证 Runtime", Gone: len(pods.Items) == 0 && d.Spec.Replicas != nil && *d.Spec.Replicas == 0}
+	state := &RuntimeValidationStatus{UID: string(d.UID), Protocol: d.Spec.Template.Labels["clawmanager.io/runtime-protocol"], Reason: "正在启动验证 Runtime", Gone: len(pods.Items) == 0 && d.Spec.Replicas != nil && *d.Spec.Replicas == 0}
 	for _, p := range pods.Items {
 		if p.DeletionTimestamp != nil {
 			continue
@@ -200,7 +223,11 @@ func (s *runtimeDeploymentService) ObservePoolValidation(ctx context.Context, na
 			if c.Ready && c.State.Running != nil && p.Status.PodIP != "" {
 				state.Ready = true
 				state.PodUID = string(p.UID)
-				state.Endpoint = "http://" + p.Status.PodIP + ":19090"
+				scheme := "http"
+				if state.Protocol == "container-slots-v1" {
+					scheme = "https"
+				}
+				state.Endpoint = scheme + "://" + p.Status.PodIP + ":19090"
 				state.Reason = ""
 			}
 		}
