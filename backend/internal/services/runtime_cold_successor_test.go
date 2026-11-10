@@ -87,6 +87,9 @@ func (d *coldFlowDeployment) EnsureColdRuntimeSuccessor(_ context.Context, sourc
 	v := *d.target
 	return &v, nil
 }
+func (d *coldFlowDeployment) ColdRuntimeStandbyReady(context.Context, k8s.RuntimeRolloutTarget, string) (bool, error) {
+	return true, nil
+}
 func (d *coldFlowDeployment) InspectColdRuntimeSuccessor(_ context.Context, target, source k8s.RuntimeRolloutTarget, hash, id string) error {
 	if d.target == nil || d.target.UID != target.UID {
 		return fmt.Errorf("target replaced")
@@ -304,5 +307,69 @@ func TestColdSuccessorRejectsUnapprovedImageAndIncompleteRetirement(t *testing.T
 	}
 	if dep.creates != 0 || dep.originalWrites != 0 || dep.scaleCalls != 0 {
 		t.Fatal("retirement rejection mutated serving resources")
+	}
+}
+
+func TestColdSuccessorMySQLActivatesStandbyBeforePublicReadiness(t *testing.T) {
+	s, dep, r := coldFlowFixture(t)
+	ctx := context.Background()
+	if e := s.StartRollout(ctx, r.ID); e != nil {
+		t.Fatal(e)
+	}
+	for step := 0; step < 12; step++ {
+		current, e := s.rolloutRepo.GetByID(ctx, r.ID)
+		if e != nil {
+			t.Fatal(e)
+		}
+		p, e := s.loadPoolReplacement(ctx, r.ID)
+		if e != nil {
+			t.Fatal(e)
+		}
+		if p.Stage == "cold_activate" {
+			r = current
+			break
+		}
+		if e = s.finishRolloutIfReady(ctx, *current); e != nil {
+			t.Fatal(e)
+		}
+	}
+	if len(dep.pods) != 1 {
+		t.Fatal("successor was not created")
+	}
+	dep.pods[0].State = "starting" // Eight native workers are healthy; /readyz remains 503 in standby.
+	agent := s.agentClient.(*coldFlowAgent)
+	agent.healthErr = fmt.Errorf("management health unavailable")
+	if e := s.finishRolloutIfReady(ctx, *r); e != nil {
+		t.Fatal(e)
+	}
+	if dep.activations != 0 {
+		t.Fatal("unauthenticated management health admitted activation")
+	}
+	agent.healthErr = nil
+	if e := s.finishRolloutIfReady(ctx, *r); e != nil {
+		t.Fatal(e)
+	}
+	if dep.activations != 1 {
+		t.Fatal("healthy standby waits for readiness that requires ActivateUpgrade")
+	}
+	if dep.pods[0].SchedulingEnabled == nil || *dep.pods[0].SchedulingEnabled {
+		t.Fatal("standby activation published ordinary capacity before readiness")
+	}
+	p, e := s.loadPoolReplacement(ctx, r.ID)
+	if e != nil || p.Stage != "cold_activate" {
+		t.Fatal("cold activation must observe post-activation readiness", p, e)
+	}
+	if e = s.finishRolloutIfReady(ctx, *r); e != nil {
+		t.Fatal(e)
+	}
+	if dep.activations != 1 || *dep.pods[0].SchedulingEnabled {
+		t.Fatal("agent-ready heartbeat bypassed public Kubernetes readiness")
+	}
+	dep.pods[0].State = "ready"
+	if e = s.finishRolloutIfReady(ctx, *r); e != nil {
+		t.Fatal(e)
+	}
+	if !*dep.pods[0].SchedulingEnabled {
+		t.Fatal("post-activation ready successor was not released")
 	}
 }

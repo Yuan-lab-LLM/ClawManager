@@ -20,6 +20,7 @@ const coldSourceHashAnnotation = "clawmanager.io/cold-source-template"
 
 // This is an internal controller boundary, never a caller-supplied Pod template.
 type RuntimeColdSuccessorService interface {
+	ColdRuntimeStandbyReady(context.Context, RuntimeRolloutTarget, string) (bool, error)
 	InspectColdRuntimeSuccessor(context.Context, RuntimeRolloutTarget, RuntimeRolloutTarget, string, string) error
 	RetireColdRuntimeSuccessor(context.Context, RuntimeRolloutTarget, string, string, string, string) (bool, error)
 	InspectRetiredRuntimePool(context.Context, RuntimeRolloutTarget, string) (string, error)
@@ -227,4 +228,45 @@ func (s *runtimeDeploymentService) verifyColdSuccessorTemplate(ctx context.Conte
 		return fmt.Errorf("cold successor native template differs from approved source transformation")
 	}
 	return nil
+}
+
+// Standby deliberately fails public /readyz until activation. Prove every
+// native worker is running independently of that coordinator readiness gate.
+func (s *runtimeDeploymentService) ColdRuntimeStandbyReady(ctx context.Context, target RuntimeRolloutTarget, podUID string) (bool, error) {
+	d, err := s.client.AppsV1().Deployments(target.Namespace).Get(ctx, target.Name, metav1.GetOptions{})
+	if err != nil {
+		return false, err
+	}
+	if target.UID == "" || string(d.UID) != target.UID || d.DeletionTimestamp != nil || d.Spec.Paused || d.Spec.Replicas == nil || *d.Spec.Replicas != 1 || d.Labels[runtimePoolRoleLabel] != "upgrade-target" || d.Labels["clawmanager.io/runtime-protocol"] != "container-slots-v1" {
+		return false, fmt.Errorf("cold standby controller identity changed")
+	}
+	pods, err := s.orphanOwnedPods(ctx, d)
+	if err != nil {
+		return false, err
+	}
+	if len(pods) != 1 {
+		return false, nil
+	}
+	p := pods[0]
+	if podUID == "" || string(p.UID) != podUID || p.DeletionTimestamp != nil || p.Status.Phase != corev1.PodRunning || len(p.Spec.Containers) != 9 || len(p.Status.ContainerStatuses) != 9 {
+		return false, nil
+	}
+	statuses := map[string]corev1.ContainerStatus{}
+	for _, st := range p.Status.ContainerStatuses {
+		if _, exists := statuses[st.Name]; exists {
+			return false, fmt.Errorf("cold standby native worker identity is ambiguous")
+		}
+		statuses[st.Name] = st
+	}
+	for i, c := range p.Spec.Containers {
+		name := "runtime"
+		if i > 0 {
+			name = fmt.Sprintf("slot-%d", i-1)
+		}
+		st, ok := statuses[name]
+		if c.Name != name || c.Image != target.Image || !ok || st.State.Running == nil || (i > 0 && !st.Ready) {
+			return false, nil
+		}
+	}
+	return true, nil
 }

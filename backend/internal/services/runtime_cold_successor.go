@@ -322,7 +322,22 @@ func (s *RuntimeScheduler) advanceColdSuccessor(ctx context.Context, r models.Ru
 				continue
 			}
 			uid := stringValue(pod.PodUID)
-			if uid == "" || pod.ID <= 0 || stringValue(pod.RegisteredPodUID) != uid || stringValue(pod.KubernetesPodUID) != uid || !pod.KubernetesReady || pod.Capacity != 8 || pod.LastSeenAt == nil || pod.LastSeenAt.Before(s.schedulingHeartbeatCutoff()) || pod.Draining || !runtimePodMatchesImage(pod, r.TargetImageRef) || (pod.AgentState != "standby" && pod.AgentState != "ready") || stringValue(pod.AgentEndpoint) == "" {
+			if uid == "" || pod.ID <= 0 || stringValue(pod.RegisteredPodUID) != uid || stringValue(pod.KubernetesPodUID) != uid || pod.Capacity != 8 || pod.LastSeenAt == nil || pod.LastSeenAt.Before(s.schedulingHeartbeatCutoff()) || pod.Draining || !runtimePodMatchesImage(pod, r.TargetImageRef) || (pod.AgentState != "standby" && pod.AgentState != "ready") || stringValue(pod.AgentEndpoint) == "" {
+				continue
+			}
+			if !pod.KubernetesReady {
+				if pod.AgentState != "standby" {
+					continue
+				}
+				ready, inspectErr := backend.ColdRuntimeStandbyReady(ctx, *p.Successor, uid)
+				if inspectErr != nil {
+					return inspectErr
+				}
+				if !ready {
+					continue
+				}
+			}
+			if healthErr := s.agentClient.Health(ctx, *pod.AgentEndpoint); healthErr != nil {
 				continue
 			}
 			if !containsString(pod.Capabilities(), "openclaw.runtime-standby-v1") {
@@ -343,7 +358,7 @@ func (s *RuntimeScheduler) advanceColdSuccessor(ctx context.Context, r models.Ru
 			if err != nil {
 				return err
 			}
-			if pod.AgentState != "ready" {
+			if pod.AgentState != "ready" || !pod.KubernetesReady {
 				return nil
 			}
 			err = s.withColdSuccessorAdmission(ctx, r, func() error {

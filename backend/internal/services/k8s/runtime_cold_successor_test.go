@@ -171,3 +171,31 @@ func TestColdSourceRequiresOriginalRetirementTemplateAndStorage(t *testing.T) {
 		t.Fatal("changed PV backing accepted as retired storage")
 	}
 }
+
+func TestColdStandbyRequiresEveryWorkerButNotPublicReadiness(t *testing.T) {
+	ctx := context.Background()
+	image := "repo@sha256:" + strings.Repeat("a", 64)
+	yes := true
+	d := BuildRuntimeDeployment(RuntimeDeploymentSpec{Name: "target", Namespace: "tenant", RuntimeType: "openclaw", Image: image, Replicas: 1, SlotCount: 8, AgentTokenSecretName: "agent", WorkspaceMountPath: "/workspaces", PodUserNamespaces: true, NetworkIsolation: true})
+	d.UID = "target-uid"
+	d.Labels[runtimePoolRoleLabel] = "upgrade-target"
+	rs := &appsv1.ReplicaSet{ObjectMeta: metav1.ObjectMeta{Name: "target-rs", Namespace: "tenant", UID: "rs-uid", OwnerReferences: []metav1.OwnerReference{{Kind: "Deployment", Name: d.Name, UID: d.UID, Controller: &yes}}}}
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "target-pod", Namespace: "tenant", UID: "pod-uid", OwnerReferences: []metav1.OwnerReference{{Kind: "ReplicaSet", Name: rs.Name, UID: rs.UID, Controller: &yes}}}, Spec: *d.Spec.Template.Spec.DeepCopy(), Status: corev1.PodStatus{Phase: corev1.PodRunning}}
+	for i, c := range pod.Spec.Containers {
+		pod.Status.ContainerStatuses = append(pod.Status.ContainerStatuses, corev1.ContainerStatus{Name: c.Name, Ready: i > 0, State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}}})
+	}
+	client := fake.NewSimpleClientset(d, rs, pod)
+	s := &runtimeDeploymentService{client: client}
+	target := RuntimeRolloutTarget{Namespace: d.Namespace, Name: d.Name, UID: string(d.UID), Image: image}
+	if ready, err := s.ColdRuntimeStandbyReady(ctx, target, "pod-uid"); err != nil || !ready {
+		t.Fatal("public coordinator readiness blocked native activation", ready, err)
+	}
+	pod.Status.ContainerStatuses[1].Ready = false
+	client.CoreV1().Pods("tenant").Update(ctx, pod, metav1.UpdateOptions{})
+	if ready, err := s.ColdRuntimeStandbyReady(ctx, target, "pod-uid"); err != nil || ready {
+		t.Fatal("unhealthy native worker admitted activation", ready, err)
+	}
+	if ready, err := s.ColdRuntimeStandbyReady(ctx, target, "wrong-pod-uid"); err != nil || ready {
+		t.Fatal("unconfirmed Pod identity admitted activation", ready, err)
+	}
+}
