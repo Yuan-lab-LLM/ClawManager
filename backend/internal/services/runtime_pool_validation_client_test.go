@@ -144,7 +144,16 @@ func TestNativeValidationUsesProtectedSupervisorWithoutBusinessPublication(t *te
 	if _, e = k8s.VerifyPoolValidationScope(ctx, kube, scope); e != nil {
 		t.Fatal("normal API-assigned fields were rejected", e)
 	}
-	for _, kind := range []string{"business-volume", "host-users", "shared-processes", "command", "args", "init", "env-from", "volume-device", "pod-security", "security-annotation", "wrong-pod-uid", "wrong-source-uid", "serving-pool"} {
+	// Kubernetes converts the trusted legacy beta annotations into typed
+	// profiles on real Pods, without changing the original Deployment template.
+	for i := 1; i < len(pod.Spec.Containers); i++ {
+		pod.Spec.Containers[i].SecurityContext.AppArmorProfile = &corev1.AppArmorProfile{Type: corev1.AppArmorProfileTypeUnconfined}
+	}
+	kube.CoreV1().Pods("runtime").Update(ctx, pod, metav1.UpdateOptions{})
+	if _, e = k8s.VerifyPoolValidationScope(ctx, kube, scope); e != nil {
+		t.Fatal("Kubernetes materialized AppArmor directive was rejected", e)
+	}
+	for _, kind := range []string{"business-volume", "host-users", "shared-processes", "command", "args", "init", "env-from", "volume-device", "pod-security", "security-annotation", "wrong-pod-uid", "wrong-source-uid", "serving-pool", "apparmor-profile-conflict", "apparmor-annotation-conflict"} {
 		t.Run(kind, func(t *testing.T) {
 			candidate := pristine.DeepCopy()
 			candidateScope := scope
@@ -174,6 +183,10 @@ func TestNativeValidationUsesProtectedSupervisorWithoutBusinessPublication(t *te
 				candidateScope.PodUID = "wrong"
 			case "wrong-source-uid":
 				candidateScope.SourceUID = "wrong"
+			case "apparmor-profile-conflict":
+				candidate.Spec.Containers[1].SecurityContext.AppArmorProfile = &corev1.AppArmorProfile{Type: corev1.AppArmorProfileTypeRuntimeDefault}
+			case "apparmor-annotation-conflict":
+				candidate.Annotations["container.apparmor.security.beta.kubernetes.io/slot-0"] = "runtime/default"
 			case "serving-pool":
 				changed := d.DeepCopy()
 				changed.Labels["clawmanager.io/scheduling-enabled"] = "true"

@@ -97,6 +97,12 @@ func VerifyPoolValidationScope(ctx context.Context, client kubernetes.Interface,
 			}
 		}
 		expectedSpec, actualSpec := d.Spec.Template.Spec.DeepCopy(), p.Spec.DeepCopy()
+		if err := canonicalizeValidationAppArmor(expectedSpec, d.Spec.Template.Annotations); err != nil {
+			return nil, err
+		}
+		if err := canonicalizeValidationAppArmor(actualSpec, d.Spec.Template.Annotations); err != nil {
+			return nil, err
+		}
 		if err := normalizeValidationPodSpec(expectedSpec); err != nil {
 			return nil, err
 		}
@@ -114,8 +120,8 @@ func VerifyPoolValidationScope(ctx context.Context, client kubernetes.Interface,
 		if len(d.Spec.Template.Spec.Containers) != len(p.Spec.Containers) {
 			return nil, fmt.Errorf("validation worker membership changed")
 		}
-		for index, c := range d.Spec.Template.Spec.Containers {
-			actual := p.Spec.Containers[index]
+		for index, c := range expectedSpec.Containers {
+			actual := actualSpec.Containers[index]
 			if c.Name != actual.Name || !reflect.DeepEqual(c.Env, actual.Env) || !reflect.DeepEqual(c.Resources, actual.Resources) || !reflect.DeepEqual(c.SecurityContext, actual.SecurityContext) || !reflect.DeepEqual(c.VolumeMounts, actual.VolumeMounts) {
 				return nil, fmt.Errorf("validation worker differs from its frozen native template")
 			}
@@ -205,5 +211,28 @@ func normalizeValidationPodSpec(spec *corev1.PodSpec) error {
 		tolerations = append(tolerations, t)
 	}
 	spec.Tolerations = tolerations
+	return nil
+}
+
+// Kubernetes materializes this existing native sandbox annotation on Pods.
+// Preserve its exact meaning; an explicit conflicting typed profile is drift.
+func canonicalizeValidationAppArmor(spec *corev1.PodSpec, annotations map[string]string) error {
+	for _, containers := range [][]corev1.Container{spec.Containers, spec.InitContainers} {
+		for i := range containers {
+			c := &containers[i]
+			if annotations["container.apparmor.security.beta.kubernetes.io/"+c.Name] != "unconfined" {
+				continue
+			}
+			want := &corev1.AppArmorProfile{Type: corev1.AppArmorProfileTypeUnconfined}
+			if c.SecurityContext == nil {
+				c.SecurityContext = &corev1.SecurityContext{}
+			}
+			if c.SecurityContext.AppArmorProfile == nil {
+				c.SecurityContext.AppArmorProfile = want
+			} else if !reflect.DeepEqual(c.SecurityContext.AppArmorProfile, want) {
+				return fmt.Errorf("validation typed AppArmor profile conflicts with approved annotation")
+			}
+		}
+	}
 	return nil
 }
