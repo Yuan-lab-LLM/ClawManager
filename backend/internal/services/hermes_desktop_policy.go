@@ -163,12 +163,12 @@ var hermesDesktopRPCFields = map[string]string{
 	"ping":                 "",
 	"setup.status":         "",
 	"setup.runtime_check":  "provider",
-	"session.create":       "source cols profile cwd model provider reasoning_effort fast",
-	"session.resume":       "session_id source cols profile defer_history omit_messages lazy",
-	"session.activate":     "session_id cols omit_messages",
+	"session.create":       "source cols profile cwd cwd_explicit model provider reasoning_effort fast service_tier idempotency_key",
+	"session.resume":       "session_id source cols profile defer_history omit_messages lazy eager_build inline_images",
+	"session.activate":     "session_id cols omit_messages profile",
 	"session.usage":        "session_id",
 	"session.close":        "session_id",
-	"model.options":        "session_id explicit_only refresh",
+	"model.options":        "session_id explicit_only refresh profile",
 	"config.set":           "session_id key value confirm_expensive_model",
 	"config.get":           "key profile",
 	"plugins.manage":       "action key enable profile identifier force",
@@ -176,8 +176,8 @@ var hermesDesktopRPCFields = map[string]string{
 	"session.status":       "session_id",
 	"session.history":      "session_id",
 	"session.interrupt":    "session_id",
-	"session.events.since": "session_id last_seen",
-	"prompt.submit":        "session_id text interrupted queued",
+	"session.events.since": "session_id last_seen replay_epoch profile",
+	"prompt.submit":        "session_id text interrupted queued submission_id title_preview profile",
 	"approval.respond":     "session_id request_id choice",
 	"approval.pending":     "session_id",
 	"approval.received":    "session_id request_id",
@@ -185,6 +185,12 @@ var hermesDesktopRPCFields = map[string]string{
 }
 
 func hermesDesktopFilterRPC(frame []byte) ([]byte, error) {
+	// A v0.22.5 client also answers server-initiated requests. Syntax alone is
+	// insufficient: rpcScope.admit binds each response to this socket's request.
+	var envelope map[string]json.RawMessage
+	if json.Unmarshal(frame, &envelope) == nil && envelope != nil && envelope["method"] == nil {
+		return hermesDesktopFilterResponse(envelope)
+	}
 	var packet struct {
 		JSONRPC string                     `json:"jsonrpc"`
 		ID      json.RawMessage            `json:"id"`
@@ -214,12 +220,21 @@ func hermesDesktopFilterRPC(frame []byte) ([]byte, error) {
 			return nil, ErrHermesDesktopForbidden
 		}
 		switch key {
-		case "session_id", "request_id", "question_id", "source", "model", "provider", "text", "choice", "answer", "key", "value", "profile", "cwd", "reasoning_effort", "action", "identifier":
+		case "session_id", "request_id", "question_id", "source", "model", "provider", "text", "choice", "answer", "key", "value", "profile", "cwd", "reasoning_effort", "action", "identifier", "submission_id", "idempotency_key", "replay_epoch", "service_tier", "title_preview":
 			var v string
 			if json.Unmarshal(value, &v) != nil {
 				return nil, ErrHermesDesktopForbidden
 			}
 			if key == "session_id" && !hermesDesktopSessionID.MatchString(v) {
+				return nil, ErrHermesDesktopForbidden
+			}
+			if (key == "submission_id" || key == "idempotency_key" || key == "replay_epoch") && !hermesDesktopSessionID.MatchString(v) {
+				return nil, ErrHermesDesktopForbidden
+			}
+			if key == "service_tier" && !slices.Contains([]string{"auto", "normal", "priority", "ultrafast"}, v) {
+				return nil, ErrHermesDesktopForbidden
+			}
+			if key == "title_preview" && len(v) > 4096 {
 				return nil, ErrHermesDesktopForbidden
 			}
 			if key == "source" && v != "web" && v != "desktop" {
@@ -240,7 +255,7 @@ func hermesDesktopFilterRPC(frame []byte) ([]byte, error) {
 			if key == "choice" && v != "once" && v != "deny" {
 				return nil, ErrHermesDesktopForbidden
 			}
-			if key != "text" && key != "answer" && len(v) > 512 {
+			if key != "text" && key != "answer" && key != "title_preview" && len(v) > 512 {
 				return nil, ErrHermesDesktopForbidden
 			}
 		case "last_seen", "limit", "cols":
@@ -251,7 +266,7 @@ func hermesDesktopFilterRPC(frame []byte) ([]byte, error) {
 			if key == "cols" && (v < 20 || v > 500) {
 				return nil, ErrHermesDesktopForbidden
 			}
-		case "defer_history", "omit_messages", "lazy", "fast", "explicit_only", "refresh", "confirm_expensive_model", "interrupted", "queued", "enable", "force":
+		case "defer_history", "omit_messages", "lazy", "fast", "explicit_only", "refresh", "confirm_expensive_model", "interrupted", "queued", "enable", "force", "cwd_explicit", "eager_build", "inline_images":
 			var v bool
 			if json.Unmarshal(value, &v) != nil {
 				return nil, ErrHermesDesktopForbidden
@@ -321,6 +336,10 @@ func hermesDesktopFilterRPC(frame []byte) ([]byte, error) {
 			packet.Params = map[string]json.RawMessage{}
 		}
 		packet.Params["explicit_only"] = json.RawMessage("true")
+		// The v0.22.5 picker sends a default/current profile even before a
+		// session exists. Validation above permits only those local labels;
+		// the authenticated CM target, not this label, selects the runtime home.
+		delete(packet.Params, "profile")
 	}
 	if packet.Method == "session.create" || packet.Method == "session.resume" {
 		if packet.Params == nil {
@@ -333,7 +352,17 @@ func hermesDesktopFilterRPC(frame []byte) ([]byte, error) {
 		// A renderer profile label must never select another filesystem tree.
 		delete(packet.Params, "profile")
 		delete(packet.Params, "cwd")
+		delete(packet.Params, "cwd_explicit")
 	}
+	// These default/current labels route one CM-owned instance. They must not
+	// select a different Hermes home on any session-scoped request.
+	if packet.Method == "session.activate" || packet.Method == "session.events.since" || packet.Method == "prompt.submit" {
+		delete(packet.Params, "profile")
+	}
+	// Preserve submission_id on the first send. The pinned serve protocol may
+	// reject it with 4000 before executing the handler; the upstream renderer
+	// then performs its explicit, single legacy retry. Silently dropping the
+	// identity here would falsely imply durable deduplication on an ambiguous send.
 	return json.Marshal(packet)
 }
 

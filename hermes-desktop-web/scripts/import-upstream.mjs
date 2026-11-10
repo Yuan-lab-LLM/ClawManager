@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { createHash } from 'node:crypto'
+import { gitBlob, materializeSourceCache } from './source-cache.mjs'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -37,8 +37,8 @@ export async function importUpstream(source) {
       }
       if (!cacheComplete) break
     }
-    if (cacheComplete) return imported
-    if (lock.repository !== 'https://github.com/NousResearch/hermes-agent.git' || !/^v[0-9]{4}\.[0-9]+\.[0-9]+$/.test(lock.ref)) {
+    if (cacheComplete) return materializeSourceCache(imported, entries, async () => { throw new Error("Verified cache changed during import") })
+    if (lock.repository !== 'https://github.com/NousResearch/hermes-agent.git' || !/^v(0|[1-9][0-9]{0,2})\.[0-9]+\.[0-9]+$/.test(lock.ref)) {
       throw new Error('Unreviewed Hermes source repository or ref')
     }
     temporaryRoot = await mkdtemp(path.join(tmpdir(), 'clawmanager-hermes-source-'))
@@ -95,32 +95,16 @@ export async function importUpstream(source) {
       offset += size + 1
     }
     if (offset !== batch.length) throw new Error('Unexpected trailing Git object data')
-    let next = 0
-    async function worker() {
-      while (next < entries.length) {
-        const [filename, expected] = entries[next++]
-        const target = path.join(imported, filename)
-        let cached
-        try { cached = await readFile(target) } catch { /* Missing cache is imported below. */ }
-        if (cached && gitBlob(cached) === expected) continue
-        const bytes = sourceBytes.get(filename)
-        if (!bytes) throw new Error(`Missing Hermes source: ${filename}`)
-        const actualBlob = gitBlob(bytes)
-        if (actualBlob !== expected) throw new Error(`Hermes source integrity mismatch: ${filename}`)
-        await mkdir(path.dirname(target), { recursive: true })
-        await writeFile(target, bytes)
-      }
-    }
-    await Promise.all(Array.from({ length: 8 }, () => worker()))
-    return imported
+    return await materializeSourceCache(imported, entries, async (filename) => {
+      const bytes = sourceBytes.get(filename)
+      if (!bytes) throw new Error(`Missing Hermes source: ${filename}`)
+      return bytes
+    })
   } finally {
     if (temporaryRoot) await rm(temporaryRoot, { recursive: true, force: true })
   }
 }
 
-function gitBlob(bytes) {
-  return createHash('sha1').update(`blob ${bytes.length}\0`).update(bytes).digest('hex')
-}
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const sourceIndex = process.argv.indexOf('--source')

@@ -92,6 +92,7 @@ Thumbs.db
 
 .codex-logs/
 .codex-temp/
+.codex-tmp/
 .cache/
 .VSCodeCounter/
 .superpowers/

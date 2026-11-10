@@ -1,0 +1,58 @@
+# Stable key|tagged-image-reference
+#
+# This is the only image map edited for an offline release. Non-empty values
+# enter the image tar and are rendered into the staged YAML/bootstrap SQL.
+# An empty runtime.* value is retained as a supported catalog slot but is not
+# packed or rendered. It does not change that row's is_enabled state.
+# Infrastructure/platform values cannot be empty.
+kubernetes.kube-apiserver|registry.k8s.io/kube-apiserver:v1.36.4
+kubernetes.kube-controller-manager|registry.k8s.io/kube-controller-manager:v1.36.4
+kubernetes.kube-scheduler|registry.k8s.io/kube-scheduler:v1.36.4
+kubernetes.kube-proxy|registry.k8s.io/kube-proxy:v1.36.4
+kubernetes.coredns|registry.k8s.io/coredns/coredns:v1.14.2
+kubernetes.pause|registry.k8s.io/pause:3.10.2
+kubernetes.etcd|registry.k8s.io/etcd:3.6.8-0
+
+calico.operator|quay.io/tigera/operator:v1.42.3
+calico.apiserver|docker.io/calico/apiserver:v3.32.1
+calico.cni|docker.io/calico/cni:v3.32.1
+calico.csi|docker.io/calico/csi:v3.32.1
+calico.key-cert-provisioner|docker.io/calico/key-cert-provisioner:v3.32.1
+calico.kube-controllers|docker.io/calico/kube-controllers:v3.32.1
+calico.node|docker.io/calico/node:v3.32.1
+calico.node-driver-registrar|docker.io/calico/node-driver-registrar:v3.32.1
+calico.pod2daemon-flexvol|docker.io/calico/pod2daemon-flexvol:v3.32.1
+calico.typha|docker.io/calico/typha:v3.32.1
+
+longhorn.backing-image-manager|docker.io/longhornio/backing-image-manager:v1.12.0
+longhorn.csi-attacher|docker.io/longhornio/csi-attacher:v4.12.0
+longhorn.csi-node-driver-registrar|docker.io/longhornio/csi-node-driver-registrar:v2.17.0
+longhorn.csi-provisioner|docker.io/longhornio/csi-provisioner:v5.3.0-20260514
+longhorn.csi-resizer|docker.io/longhornio/csi-resizer:v2.1.0-20260514
+longhorn.csi-snapshotter|docker.io/longhornio/csi-snapshotter:v8.5.0-20260514
+longhorn.livenessprobe|docker.io/longhornio/livenessprobe:v2.19.0
+longhorn.engine|docker.io/longhornio/longhorn-engine:v1.12.0
+longhorn.instance-manager|docker.io/longhornio/longhorn-instance-manager:v1.12.0
+longhorn.manager|docker.io/longhornio/longhorn-manager:v1.12.0
+longhorn.share-manager|docker.io/longhornio/longhorn-share-manager:v1.12.0
+longhorn.ui|docker.io/longhornio/longhorn-ui:v1.12.0
+longhorn.support-bundle-kit|docker.io/longhornio/support-bundle-kit:v0.0.86
+
+platform.mysql|mysql:8.4.8
+platform.minio|minio/minio:RELEASE.2025-09-07T16-13-09Z
+platform.redis|redis:7-alpine
+platform.skill-scanner|ghcr.io/yuan-lab-llm/skill-scanner:latest
+platform.clawmanager|ghcr.io/yuan-lab-llm/clawmanager:v2026.9.11
+
+# Runtime catalog. OpenClaw, Hermes, DSH, and OpenCode keys remain present by
+# default. Pro uses the desktop backend and Lite uses the gateway backend.
+# Leave a value empty until that exact image is selected for this release.
+runtime.openclaw.pro|
+runtime.openclaw.lite|openclaw-lite:2026.8.24
+runtime.hermes.pro|
+runtime.hermes.lite|hermes-lite:2026.8.24
+runtime.dsh.pro|
+runtime.dsh.lite|
+runtime.opencode.pro|
+runtime.opencode.lite|
+runtime.workbuddy.internal|workbuddy-linux:2026.8.27

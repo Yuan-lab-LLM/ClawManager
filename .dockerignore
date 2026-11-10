@@ -24,6 +24,7 @@ scripts
 !hermes-desktop-web/scripts
 !hermes-desktop-web/scripts/**
 hermes-desktop-web/node_modules
+hermes-desktop-web/.npm-review-cache
 hermes-desktop-web/.cache
 hermes-desktop-web/.upstream
 hermes-desktop-web/dist
