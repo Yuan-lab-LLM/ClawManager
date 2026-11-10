@@ -115,16 +115,15 @@ func orphanFlowFixture(t *testing.T) (*RuntimeManagementService, *fake.Clientset
 		cm.Data["request"] = strings.ReplaceAll(cm.Data["request"], "/workspaces", root)
 		kube.CoreV1().ConfigMaps("runtime").Update(ctx, cm, metav1.UpdateOptions{})
 	}
-	kube.PrependReactor("delete", "pods", func(action ktesting.Action) (bool, runtime.Object, error) {
-		name := action.(ktesting.DeleteAction).GetName()
-		obj, e := kube.Tracker().Get(corev1.SchemeGroupVersion.WithResource("pods"), "runtime", name)
-		var pod *corev1.Pod
-		if obj != nil {
-			pod = obj.(*corev1.Pod)
+	// Simulate the independent Deployment/RS controllers acknowledging scale
+	// before Pod deletion. The K8s regression separately exercises delayed ack.
+	kube.PrependReactor("update", "deployments", func(action ktesting.Action) (bool, runtime.Object, error) {
+		updated := action.(ktesting.UpdateAction).GetObject().(*appsv1.Deployment).DeepCopy()
+		if updated.Name != "pool" || updated.Spec.Replicas == nil || *updated.Spec.Replicas != 0 {
+			return false, nil, nil
 		}
-		if e != nil {
-			return true, nil, e
-		}
+		updated.Generation++
+		updated.Status.ObservedGeneration = updated.Generation
 		objSet, err := kube.Tracker().Get(appsv1.SchemeGroupVersion.WithResource("replicasets"), "runtime", "pool-rs")
 		if err != nil {
 			return true, nil, err
@@ -135,6 +134,21 @@ func orphanFlowFixture(t *testing.T) (*RuntimeManagementService, *fake.Clientset
 		set.Status.Replicas = 0
 		set.Status.ObservedGeneration = set.Generation
 		kube.Tracker().Update(appsv1.SchemeGroupVersion.WithResource("replicasets"), set, "runtime")
+		updated.Status.Replicas = 0
+		e := kube.Tracker().Update(appsv1.SchemeGroupVersion.WithResource("deployments"), updated, "runtime")
+		return true, updated, e
+	})
+	kube.PrependReactor("delete", "pods", func(action ktesting.Action) (bool, runtime.Object, error) {
+		name := action.(ktesting.DeleteAction).GetName()
+		obj, e := kube.Tracker().Get(corev1.SchemeGroupVersion.WithResource("pods"), "runtime", name)
+		var pod *corev1.Pod
+		if obj != nil {
+			pod = obj.(*corev1.Pod)
+		}
+		if e != nil {
+			return true, nil, e
+		}
+
 		pod.DeletionTimestamp = &metav1.Time{Time: time.Now()}
 		pod.Status.Phase = corev1.PodFailed
 		pod.ResourceVersion = "terminal-rv"

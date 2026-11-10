@@ -233,11 +233,14 @@ func (s *runtimeDeploymentService) RetireRuntimeOrphanController(ctx context.Con
 			d.Labels = map[string]string{}
 		}
 		d.Labels[runtimeSchedulingLabel] = "false"
-		if _, e = s.client.AppsV1().Deployments(source.Namespace).Update(ctx, d, metav1.UpdateOptions{}); e != nil {
+		if d, e = s.client.AppsV1().Deployments(source.Namespace).Update(ctx, d, metav1.UpdateOptions{}); e != nil {
 			return false, e
 		}
 	}
 	if p.DeletionTimestamp == nil {
+		if e = s.orphanControllerScaleObserved(ctx, d); e != nil {
+			return false, e
+		}
 		podUID := types.UID(source.PodUID)
 		if e = s.client.CoreV1().Pods(source.Namespace).Delete(ctx, source.PodName, metav1.DeleteOptions{Preconditions: &metav1.Preconditions{UID: &podUID}}); e != nil {
 			return false, e
@@ -596,6 +599,28 @@ func (s *runtimeDeploymentService) orphanControllerConverged(ctx context.Context
 		if owner != nil && owner.Kind == "Deployment" && owner.UID == d.UID {
 			if rs.Spec.Replicas == nil || *rs.Spec.Replicas != 0 || rs.Status.Replicas != 0 || rs.Status.ObservedGeneration < rs.Generation {
 				return fmt.Errorf("%w: waiting for retired ReplicaSet zero-replica acknowledgement", ErrRuntimeFaultEvictionPending)
+			}
+		}
+	}
+	return nil
+}
+
+// Wait for the controller's requested generation and every owned ReplicaSet to
+// acknowledge desired zero before explicitly deleting the selected Pod. Actual
+// zero counts and Pod terminal status remain separate, later stop barriers.
+func (s *runtimeDeploymentService) orphanControllerScaleObserved(ctx context.Context, d *appsv1.Deployment) error {
+	if d.Spec.Replicas == nil || *d.Spec.Replicas != 0 || d.Status.ObservedGeneration < d.Generation {
+		return fmt.Errorf("%w: waiting for requested zero-replica Deployment generation", ErrRuntimeFaultEvictionPending)
+	}
+	sets, e := s.client.AppsV1().ReplicaSets(d.Namespace).List(ctx, metav1.ListOptions{})
+	if e != nil {
+		return e
+	}
+	for _, rs := range sets.Items {
+		owner := metav1.GetControllerOf(&rs)
+		if owner != nil && owner.Kind == "Deployment" && owner.UID == d.UID {
+			if rs.Spec.Replicas == nil || *rs.Spec.Replicas != 0 || rs.Status.ObservedGeneration < rs.Generation {
+				return fmt.Errorf("%w: waiting for owned ReplicaSet desired-zero acknowledgement", ErrRuntimeFaultEvictionPending)
 			}
 		}
 	}
