@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 type openCodeBootstrapRuntime struct {
@@ -22,6 +23,8 @@ type openCodeBootstrapRuntime struct {
 	infoStatus         int
 	infoHTML           bool
 	version            string
+	password           string
+	ingressToken       string
 	pages              map[string][]openCodeInitialSession
 }
 
@@ -29,7 +32,11 @@ func (runtime *openCodeBootstrapRuntime) serve(w http.ResponseWriter, r *http.Re
 	runtime.mu.Lock()
 	defer runtime.mu.Unlock()
 	username, password, ok := r.BasicAuth()
-	if !ok || username != "opencode" || password != "test-bootstrap-password" {
+	expectedPassword := runtime.password
+	if expectedPassword == "" {
+		expectedPassword = "test-bootstrap-password"
+	}
+	if !ok || username != "opencode" || password != expectedPassword || r.Header.Get(NativeIngressTokenHeader) != runtime.ingressToken {
 		http.Error(w, "authentication required", http.StatusUnauthorized)
 		return
 	}
@@ -172,11 +179,11 @@ func TestOpenCodeBootstrapSeparatesInstancesInSharedRuntime(t *testing.T) {
 	runtime := &openCodeBootstrapRuntime{}
 	first, _, firstUpstream := newOpenCodeBootstrapFixture(t, runtime, 707)
 	second, _, secondUpstream := newOpenCodeBootstrapFixture(t, runtime, 708)
-	firstID, err := first.ensureOpenCodeInitialSession(context.Background(), 707, firstUpstream, "test-bootstrap-password")
+	firstID, err := first.ensureOpenCodeInitialSession(context.Background(), 707, firstUpstream, "test-bootstrap-password", false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	secondID, err := second.ensureOpenCodeInitialSession(context.Background(), 708, secondUpstream, "test-bootstrap-password")
+	secondID, err := second.ensureOpenCodeInitialSession(context.Background(), 708, secondUpstream, "test-bootstrap-password", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -191,7 +198,7 @@ func TestOpenCodeBootstrapSeparatesInstancesInSharedRuntime(t *testing.T) {
 func TestOpenCodeBootstrapDoesNotReopenArchivedStarter(t *testing.T) {
 	runtime := &openCodeBootstrapRuntime{}
 	service, _, upstream := newOpenCodeBootstrapFixture(t, runtime, 709)
-	firstID, err := service.ensureOpenCodeInitialSession(context.Background(), 709, upstream, "test-bootstrap-password")
+	firstID, err := service.ensureOpenCodeInitialSession(context.Background(), 709, upstream, "test-bootstrap-password", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,7 +207,7 @@ func TestOpenCodeBootstrapDoesNotReopenArchivedStarter(t *testing.T) {
 	archived.Time.Archived = 1
 	runtime.sessions[firstID] = archived
 	runtime.mu.Unlock()
-	id, err := service.ensureOpenCodeInitialSession(context.Background(), 709, upstream, "test-bootstrap-password")
+	id, err := service.ensureOpenCodeInitialSession(context.Background(), 709, upstream, "test-bootstrap-password", false)
 	if err != nil || id != "" || runtime.creates != 1 {
 		t.Fatalf("archiving the starter was undone: %s %v", id, err)
 	}
@@ -223,7 +230,7 @@ func TestOpenCodeBootstrapConcurrentReplicasShareOneSession(t *testing.T) {
 			if index%2 == 1 {
 				service, upstream = two, upstreamTwo
 			}
-			id, err := service.ensureOpenCodeInitialSession(context.Background(), 702, upstream, "test-bootstrap-password")
+			id, err := service.ensureOpenCodeInitialSession(context.Background(), 702, upstream, "test-bootstrap-password", false)
 			if err != nil {
 				errors <- err
 				return
@@ -253,7 +260,7 @@ func TestOpenCodeBootstrapConcurrentReplicasShareOneSession(t *testing.T) {
 func TestOpenCodeBootstrapRecoversLostCreateResponse(t *testing.T) {
 	runtime := &openCodeBootstrapRuntime{lostCreateResponse: true}
 	service, _, upstream := newOpenCodeBootstrapFixture(t, runtime, 703)
-	id, err := service.ensureOpenCodeInitialSession(context.Background(), 703, upstream, "test-bootstrap-password")
+	id, err := service.ensureOpenCodeInitialSession(context.Background(), 703, upstream, "test-bootstrap-password", false)
 	if err != nil || id == "" || runtime.creates != 1 {
 		t.Fatalf("could not recover committed session: %s %v", id, err)
 	}
@@ -266,7 +273,7 @@ func TestOpenCodeBootstrapAdoptsExistingSessionAcrossPages(t *testing.T) {
 	foreign.Location.Directory = "/workspaces/opencode/user-45/instance-705/project"
 	runtime := &openCodeBootstrapRuntime{pages: map[string][]openCodeInitialSession{"": {foreign}, "second-page": {existing}}}
 	service, _, upstream := newOpenCodeBootstrapFixture(t, runtime, 704)
-	id, err := service.ensureOpenCodeInitialSession(context.Background(), 704, upstream, "test-bootstrap-password")
+	id, err := service.ensureOpenCodeInitialSession(context.Background(), 704, upstream, "test-bootstrap-password", false)
 	if err != nil || id != existing.ID || runtime.creates != 0 {
 		t.Fatalf("existing session was not adopted: %s %v", id, err)
 	}
@@ -275,7 +282,7 @@ func TestOpenCodeBootstrapAdoptsExistingSessionAcrossPages(t *testing.T) {
 func TestOpenCodeBootstrapRejectsCreationFailure(t *testing.T) {
 	runtime := &openCodeBootstrapRuntime{createStatus: http.StatusBadRequest}
 	service, _, upstream := newOpenCodeBootstrapFixture(t, runtime, 705)
-	if _, err := service.ensureOpenCodeInitialSession(context.Background(), 705, upstream, "test-bootstrap-password"); err == nil {
+	if _, err := service.ensureOpenCodeInitialSession(context.Background(), 705, upstream, "test-bootstrap-password", false); err == nil {
 		t.Fatal("creation failure was hidden")
 	}
 }
@@ -307,6 +314,52 @@ func TestOpenCodeBootstrapLeavesV1AndDirectSessionNavigationAlone(t *testing.T) 
 			}
 			if runtime.creates != 0 {
 				t.Fatal("v1 or direct navigation triggered a starter")
+			}
+		})
+	}
+}
+
+func TestOpenCodeBootstrapAuthenticatesProtectedIngress(t *testing.T) {
+	for _, v1 := range []bool{true, false} {
+		t.Run(fmt.Sprintf("v1=%v", v1), func(t *testing.T) {
+			runtime := &openCodeBootstrapRuntime{infoHTML: v1}
+			upstream := httptest.NewServer(http.HandlerFunc(runtime.serve))
+			defer upstream.Close()
+			service, _, credential := protectedNativeProxyFixture(t, upstream.URL, upstream.URL, true, RuntimeTypeOpenCode)
+			runtime.password, runtime.ingressToken = credential, credential
+			service.httpClient = upstream.Client()
+			WithOpenCodeLiteSessionBootstrap()(service)
+			instance, err := service.instanceRepo.GetByID(7)
+			if err != nil {
+				t.Fatal(err)
+			}
+			workspace := "/workspaces/opencode/user-3/instance-7"
+			instance.WorkspacePath = &workspace
+			for _, binding := range []string{"", "sl_test_share"} {
+				token, err := service.accessService.GenerateBoundToken(3, 7, RuntimeTypeOpenCode, "/api/v1/instances/7/proxy/", "", 3000, time.Hour, binding)
+				if err != nil {
+					t.Fatal(err)
+				}
+				request := httptest.NewRequest(http.MethodGet, "https://opencode-7.local/api/v1/instances/7/proxy/", nil)
+				request.Header.Set(DedicatedRuntimeOriginHeader, RuntimeTypeOpenCode)
+				request.Header.Set(NativeIngressTokenHeader, "browser-supplied-invalid-token")
+				recorder := httptest.NewRecorder()
+				if err := service.ProxyRequest(request.Context(), 7, token.Token, recorder, request); err != nil {
+					t.Fatalf("binding=%q: %v", binding, err)
+				}
+				want := http.StatusTemporaryRedirect
+				if v1 {
+					want = http.StatusOK
+				}
+				if recorder.Code != want {
+					t.Fatalf("binding=%q: status=%d want=%d", binding, recorder.Code, want)
+				}
+				if recorder.Header().Get(NativeIngressTokenHeader) != "" || strings.Contains(recorder.Body.String(), credential) || strings.Contains(recorder.Header().Get("Location"), credential) {
+					t.Fatal("native ingress credential exposed to browser")
+				}
+			}
+			if !v1 && runtime.creates != 1 {
+				t.Fatalf("creates=%d want=1", runtime.creates)
 			}
 		})
 	}

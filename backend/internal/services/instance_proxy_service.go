@@ -219,7 +219,7 @@ func (s *InstanceProxyService) ProxyRequest(ctx context.Context, instanceID int,
 		}
 	}
 	if s.openCodeBootstrapEnabled && opencodeLite && openCodeStorageScope != "" && bootstrapPath == "/" && len(queryParams) == 0 {
-		sessionID, bootstrapErr := s.ensureOpenCodeInitialSession(ctx, instanceID, targetURL, managedGatewayToken)
+		sessionID, bootstrapErr := s.ensureOpenCodeInitialSession(ctx, instanceID, targetURL, managedGatewayToken, protectedGateway)
 		if bootstrapErr != nil {
 			return fmt.Errorf("failed to initialize OpenCode session: %w", bootstrapErr)
 		}

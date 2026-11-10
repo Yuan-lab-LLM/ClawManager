@@ -47,7 +47,7 @@ func WithOpenCodeLiteSessionBootstrap() InstanceProxyServiceOption {
 // OpenCode owns the durable session record. Using a creation-scoped ID makes
 // a lost HTTP response, a control-plane restart, or concurrent replicas reuse
 // the same record instead of creating another empty conversation.
-func (s *InstanceProxyService) ensureOpenCodeInitialSession(ctx context.Context, instanceID int, upstream *url.URL, password string) (string, error) {
+func (s *InstanceProxyService) ensureOpenCodeInitialSession(ctx context.Context, instanceID int, upstream *url.URL, password string, protected bool) (string, error) {
 	instance, err := s.instanceRepo.GetByID(instanceID)
 	if err != nil || instance == nil || instance.WorkspacePath == nil || !path.IsAbs(*instance.WorkspacePath) {
 		return "", fmt.Errorf("instance workspace is unavailable")
@@ -74,7 +74,7 @@ func (s *InstanceProxyService) ensureOpenCodeInitialSession(ctx context.Context,
 	s.openCodeBootstrapMu.Unlock()
 	requestCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	call.sessionID, call.err = s.resolveOpenCodeInitialSession(requestCtx, instance, upstream, password, scope)
+	call.sessionID, call.err = s.resolveOpenCodeInitialSession(requestCtx, instance, upstream, password, scope, protected)
 	s.openCodeBootstrapMu.Lock()
 	delete(s.openCodeBootstraps, scope)
 	close(call.done)
@@ -82,11 +82,11 @@ func (s *InstanceProxyService) ensureOpenCodeInitialSession(ctx context.Context,
 	return call.sessionID, call.err
 }
 
-func (s *InstanceProxyService) resolveOpenCodeInitialSession(ctx context.Context, instance *models.Instance, upstream *url.URL, password, scope string) (string, error) {
+func (s *InstanceProxyService) resolveOpenCodeInitialSession(ctx context.Context, instance *models.Instance, upstream *url.URL, password, scope string, protected bool) (string, error) {
 	var info struct {
 		Version string `json:"version"`
 	}
-	status, err := s.openCodeBootstrapAPI(ctx, upstream, password, http.MethodGet, "/api/info", nil, &info)
+	status, err := s.openCodeBootstrapAPI(ctx, upstream, password, protected, http.MethodGet, "/api/info", nil, &info)
 	if status == http.StatusNotFound || (status == http.StatusOK && errors.Is(err, errOpenCodeBootstrapNotJSON)) {
 		return "", nil
 	} // v1 still uses its native landing page.
@@ -105,7 +105,7 @@ func (s *InstanceProxyService) resolveOpenCodeInitialSession(ctx context.Context
 	var saved struct {
 		Data openCodeInitialSession `json:"data"`
 	}
-	status, err = s.openCodeBootstrapAPI(ctx, upstream, password, http.MethodGet, "/api/session/"+initialID, nil, &saved)
+	status, err = s.openCodeBootstrapAPI(ctx, upstream, password, protected, http.MethodGet, "/api/session/"+initialID, nil, &saved)
 	if status != http.StatusNotFound {
 		if err != nil {
 			return "", err
@@ -134,7 +134,7 @@ func (s *InstanceProxyService) resolveOpenCodeInitialSession(ctx context.Context
 		if cursor != "" {
 			query.Set("cursor", cursor)
 		}
-		_, err = s.openCodeBootstrapAPI(ctx, upstream, password, http.MethodGet, "/api/session?"+query.Encode(), nil, &list)
+		_, err = s.openCodeBootstrapAPI(ctx, upstream, password, protected, http.MethodGet, "/api/session?"+query.Encode(), nil, &list)
 		if err != nil {
 			return "", err
 		}
@@ -165,11 +165,11 @@ func (s *InstanceProxyService) resolveOpenCodeInitialSession(ctx context.Context
 		"location": map[string]string{"directory": path.Join(root, "project")},
 		"metadata": map[string]string{"clawmanager.bootstrap": scope},
 	}
-	_, createErr := s.openCodeBootstrapAPI(ctx, upstream, password, http.MethodPost, "/api/session", payload, &saved)
+	_, createErr := s.openCodeBootstrapAPI(ctx, upstream, password, protected, http.MethodPost, "/api/session", payload, &saved)
 	if createErr != nil {
 		// Another replica, or a previous request whose response was lost, may
 		// already have committed the deterministic ID. Never retry with a new ID.
-		_, lookupErr := s.openCodeBootstrapAPI(ctx, upstream, password, http.MethodGet, "/api/session/"+initialID, nil, &saved)
+		_, lookupErr := s.openCodeBootstrapAPI(ctx, upstream, password, protected, http.MethodGet, "/api/session/"+initialID, nil, &saved)
 		if lookupErr != nil {
 			return "", createErr
 		}
@@ -191,7 +191,7 @@ func openCodeSessionWithinWorkspace(session openCodeInitialSession, root string)
 	return directory == root || strings.HasPrefix(directory, root+"/")
 }
 
-func (s *InstanceProxyService) openCodeBootstrapAPI(ctx context.Context, upstream *url.URL, password, method, target string, payload, out any) (int, error) {
+func (s *InstanceProxyService) openCodeBootstrapAPI(ctx context.Context, upstream *url.URL, password string, protected bool, method, target string, payload, out any) (int, error) {
 	relative, err := url.Parse(target)
 	if err != nil {
 		return 0, err
@@ -210,7 +210,9 @@ func (s *InstanceProxyService) openCodeBootstrapAPI(ctx context.Context, upstrea
 	if err != nil {
 		return 0, err
 	}
+	// Bootstrap bypasses the normal proxy forwarding path, including its ingress authentication.
 	setOpenCodeServerBasicAuthHeaders(req.Header, password)
+	setNativeIngressToken(req.Header, password, protected)
 	req.Header.Set("Accept", "application/json")
 	if payload != nil {
 		req.Header.Set("Content-Type", "application/json")

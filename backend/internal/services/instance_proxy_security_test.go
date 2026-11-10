@@ -22,10 +22,13 @@ type securityProxyInstances struct {
 	instance *models.Instance
 }
 
-func protectedNativeProxyFixture(t *testing.T, target, assigned string, protected bool) (*InstanceProxyService, *AccessToken, string) {
+func protectedNativeProxyFixture(t *testing.T, target, assigned string, protected bool, runtimeTypes ...string) (*InstanceProxyService, *AccessToken, string) {
 	t.Helper()
 	a, instances, kube, cm, pod := securityFixture(t)
 	instances.instance.Type = RuntimeTypeDeepSeekHarness
+	if len(runtimeTypes) > 0 {
+		instances.instance.Type = runtimeTypes[0]
+	}
 	host, port := splitURLHostPortForProxyTest(t, target)
 	assignedHost, assignedPort := splitURLHostPortForProxyTest(t, assigned)
 	cm.Data["runtime_type"] = instances.instance.Type
