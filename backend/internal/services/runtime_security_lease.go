@@ -28,6 +28,9 @@ func (l RuntimeSecurityLease) Identity() runtimeauth.Identity {
 // IssueLease additionally binds the control-authenticated caller's actual TCP
 // source to the assigned Pod. Forwarded headers must never supply peer.
 func (a *RuntimeSecurityAuthority) IssueLease(ctx context.Context, expected runtimeauth.Identity, peer netip.Addr) (RuntimeSecurityLease, error) {
+	if expected.InstanceID == poolProbeInstanceID {
+		return a.issuePoolValidationLease(ctx, expected, peer)
+	}
 	var empty RuntimeSecurityLease
 	snapshot, err := a.validatedSnapshot(ctx, expected.InstanceID)
 	identity := snapshot.identity

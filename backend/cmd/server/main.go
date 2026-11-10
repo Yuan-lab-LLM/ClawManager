@@ -740,6 +740,11 @@ func main() {
 	} else {
 		log.Printf("runtime scheduler disabled by configuration")
 	}
+	if runtimeSecurity != nil && runtimeScheduler != nil {
+		if err := runtimeSecurity.ConfigurePoolValidationLeases(runtimeScheduler); err != nil {
+			log.Fatal("Failed to configure isolated Runtime validation leases")
+		}
+	}
 	var autoStopKube kubernetes.Interface
 	if client := k8s.GetClient(); client != nil {
 		autoStopKube = client.Clientset

@@ -43,23 +43,24 @@ func LoadRuntimePoolOperation(ctx context.Context, repo any, id int64) (*Runtime
 }
 
 type poolReplacementProgress struct {
-	SuccessorName  string                    `json:"successor_name,omitempty"`
-	Successor      *k8s.RuntimeRolloutTarget `json:"successor,omitempty"`
-	Mode           string                    `json:"mode,omitempty"`
-	raw            string
-	Kind           string                     `json:"kind"`
-	Version        int                        `json:"version"`
-	Targets        []k8s.RuntimeRolloutTarget `json:"targets"`
-	ProbeIndex     int                        `json:"probe_index"`
-	PoolIndex      int                        `json:"pool_index"`
-	Stage          string                     `json:"stage"`
-	StageStarted   time.Time                  `json:"stage_started"`
-	Submitted      bool                       `json:"submitted"`
-	ProbePodUID    string                     `json:"probe_pod_uid"`
-	Failure        string                     `json:"failure,omitempty"`
-	Restored       bool                       `json:"restored,omitempty"`
-	Changed        bool                       `json:"changed,omitempty"`
-	RollbackImages map[string]string          `json:"rollback_images"`
+	ProbeDeploymentUID string                    `json:"probe_deployment_uid,omitempty"`
+	SuccessorName      string                    `json:"successor_name,omitempty"`
+	Successor          *k8s.RuntimeRolloutTarget `json:"successor,omitempty"`
+	Mode               string                    `json:"mode,omitempty"`
+	raw                string
+	Kind               string                     `json:"kind"`
+	Version            int                        `json:"version"`
+	Targets            []k8s.RuntimeRolloutTarget `json:"targets"`
+	ProbeIndex         int                        `json:"probe_index"`
+	PoolIndex          int                        `json:"pool_index"`
+	Stage              string                     `json:"stage"`
+	StageStarted       time.Time                  `json:"stage_started"`
+	Submitted          bool                       `json:"submitted"`
+	ProbePodUID        string                     `json:"probe_pod_uid"`
+	Failure            string                     `json:"failure,omitempty"`
+	Restored           bool                       `json:"restored,omitempty"`
+	Changed            bool                       `json:"changed,omitempty"`
+	RollbackImages     map[string]string          `json:"rollback_images"`
 }
 
 func (s *RuntimeScheduler) loadPoolReplacement(ctx context.Context, id int64) (*poolReplacementProgress, error) {
@@ -300,6 +301,16 @@ func (s *RuntimeScheduler) advanceOpenClawPoolReplacement(ctx context.Context, r
 		if !observed.Ready {
 			return report(observed.Reason)
 		}
+		if observed.Protocol == "container-slots-v1" {
+			if p.ProbePodUID == "" && p.ProbeDeploymentUID == "" {
+				p.ProbePodUID = observed.PodUID
+				p.ProbeDeploymentUID = observed.UID
+				return s.savePoolReplacement(ctx, r.ID, p)
+			}
+			if p.ProbePodUID != observed.PodUID || p.ProbeDeploymentUID != observed.UID {
+				return fail("验证 Runtime 身份发生变化，未启动新的进程")
+			}
+		}
 		if s.agentClient == nil {
 			return fail("Runtime 验证客户端不可用")
 		}
@@ -350,6 +361,8 @@ func (s *RuntimeScheduler) advanceOpenClawPoolReplacement(ctx context.Context, r
 			return err
 		}
 		p.ProbeIndex++
+		p.ProbePodUID = ""
+		p.ProbeDeploymentUID = ""
 		p.StageStarted = time.Now().UTC()
 		return s.savePoolReplacement(ctx, r.ID, p)
 	}

@@ -123,6 +123,9 @@ func TestNativeValidationUsesProtectedSupervisorWithoutBusinessPublication(t *te
 	repo := &checkpointRepo{fakeRuntimeRolloutRepo: fakeRuntimeRolloutRepo{rollouts: map[int64]*models.RuntimeRollout{21: &r}}}
 	scheduler := &RuntimeScheduler{rolloutRepo: repo, agentClient: client, deployments: dep, workspaceRoot: "/workspaces"}
 	p := &poolReplacementProgress{Kind: "openclaw-pool-replacement", Version: 2, Stage: "validate", StageStarted: time.Now(), Targets: []k8s.RuntimeRolloutTarget{{Namespace: "runtime", Name: "source", UID: "source-uid", Image: image}}}
+	if e = scheduler.advanceOpenClawPoolReplacement(ctx, r, p); e != nil || p.ProbePodUID != scope.PodUID || p.ProbeDeploymentUID != scope.DeploymentUID || calls != beforeController {
+		t.Fatal("probe identity was not frozen before native startup", e)
+	}
 	if e = scheduler.advanceOpenClawPoolReplacement(ctx, r, p); e != nil || p.ProbeIndex != 1 || calls != beforeController+3 || !dep.stopped {
 		t.Fatal("native rollout validation dispatch failed", p, e)
 	}
