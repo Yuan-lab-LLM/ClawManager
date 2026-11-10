@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { summarizePod, filterPods, slotState, availableTargets, canManageSlot, canEvictPod } from '../src/lib/runtimeManagement.ts';
+import { summarizePod, filterPods, slotState, availableTargets, canManageSlot, canEvictPod, recoveryInstanceIds } from '../src/lib/runtimeManagement.ts';
 
 const pod = { id: 1, runtime_type: 'opencode', namespace: 'runtime', deployment_name: 'code', pod_name: 'code-a', node_name: 'node-a', state: 'ready', agent_reported: true, capacity: 4, used_slots: 2, draining: false, slots: [
   { index: 1, ready: true, instance_id: 10, instance_name: 'builder', owner: 'alice', instance_state: 'running' },
@@ -148,4 +148,15 @@ test('a confirmed empty slot remains available beside unknown or residual observ
   assert.equal(summary.idle, 1);
   assert.equal(summary.unknown, 1);
   assert.equal(summary.error, 1);
+});
+
+
+test('recovery scope uses database expected owners and rejects unconfirmed physical occupants', () => {
+  assert.deepEqual(recoveryInstanceIds({ slots: [
+    { instance_id: 10, instance_state: 'running', binding_confirmed: true },
+    { instance_id: 99, expected_instance_id: 11, reconciliation_state: 'conflict' },
+    { instance_id: 12, reconciliation_state: 'residual', binding_confirmed: false },
+    { expected_instance_id: 13, ready: false },
+  ] }), [10, 11, 13]);
+  assert.deepEqual(recoveryInstanceIds({}), []);
 });

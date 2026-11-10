@@ -12,6 +12,7 @@ import {
   slotState,
   canManageSlot,
   canEvictPod,
+  recoveryInstanceIds,
 } from "../../lib/runtimeManagement";
 import { runtimePoolService } from "../../services/runtimePoolService";
 import { formatInstanceType } from "../../types/instance";
@@ -35,6 +36,8 @@ export default function RuntimeActions({
   kind,
   pod,
   initialIds,
+  verifiedRecoveryIds = [],
+  initialEvictionMode = "graceful",
   pods,
   onClose,
   onSubmitted,
@@ -43,6 +46,8 @@ export default function RuntimeActions({
   kind: "schedule" | "evict" | "events" | "history";
   pod?: RuntimePod;
   initialIds?: number[];
+  verifiedRecoveryIds?: number[];
+  initialEvictionMode?: "graceful" | "force" | "recovery";
   pods: RuntimePod[];
   onClose: () => void;
   onSubmitted: () => void;
@@ -74,7 +79,7 @@ export default function RuntimeActions({
   const [inferInitialType, setInferInitialType] = useState(!!initialIds?.length && !initialResolved);
   const [typeVersion, setTypeVersion] = useState(0);
   const typeVersionRef = useRef(0);
-  const [ids, setIds] = useState(invalidInitial ? [] : initialIds ?? []);
+  const [ids, setIds] = useState(initialEvictionMode === "recovery" ? initialIds ?? [] : invalidInitial ? [] : initialIds ?? []);
   const [targetId, setTargetId] = useState("");
   const [slot, setSlot] = useState("");
   const [preflight, setPreflight] = useState<{
@@ -86,8 +91,8 @@ export default function RuntimeActions({
   const [grace, setGrace] = useState(30);
   const [concurrency, setConcurrency] = useState(2);
   const [acknowledged, setAcknowledged] = useState(false);
-  const [evictionMode, setEvictionMode] = useState<"graceful" | "force">(
-    "graceful",
+  const [evictionMode, setEvictionMode] = useState<"graceful" | "force" | "recovery">(
+    initialEvictionMode,
   );
   if (inferInitialType && initialResolved) {
     setInferInitialType(false);
@@ -165,7 +170,12 @@ export default function RuntimeActions({
   );
   const insufficientEvictionCapacity =
     evictionMode === "graceful" && incoming < occupied;
-  const evictionAllowed = !!pod && canEvictPod(pod);
+  const recoverySupported = history.data?.supported_modes.includes("recovery") === true;
+  const recoveryIds = new Set([...(pod ? recoveryInstanceIds(pod) : []), ...verifiedRecoveryIds.filter((id) => Number.isSafeInteger(id) && id > 0)]);
+  const recoverySelectionValid = ids.every((id) => recoveryIds.has(id));
+  const evictionAllowed = !!pod && (evictionMode === "recovery"
+    ? pod.id > 0 && recoverySupported && recoverySelectionValid
+    : canEvictPod(pod));
   const submit = async (check = false) => {
     if (kind === "evict" && (!evictionAllowed || !acknowledged || busy || insufficientEvictionCapacity || (evictionMode === "force" && !forceSupported))) return;
     if (kind === "schedule" && (
@@ -182,8 +192,7 @@ export default function RuntimeActions({
       if (kind === "evict" && pod)
         await runtimePoolService.evict(pod.id, {
           mode: evictionMode,
-          grace_period_seconds: grace,
-          concurrency,
+          ...(evictionMode === "recovery" ? { instance_ids: ids } : { grace_period_seconds: grace, concurrency }),
         });
       else await runtimePoolService.schedule(request);
       if (kind !== "schedule" || typeVersion === typeVersionRef.current) onSubmitted();
@@ -526,7 +535,20 @@ export default function RuntimeActions({
               )}
             </p>
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className={`rounded border p-4 ${evictionMode === "recovery" ? "border-amber-300 bg-amber-50" : "border-slate-200"}`}>
+            <label className="flex items-center gap-2 text-sm font-medium">
+              <input type="radio" name="eviction-mode" value="recovery" checked={evictionMode === "recovery"} disabled={busy || !recoverySupported}
+                onChange={() => { setEvictionMode("recovery"); setAcknowledged(false); setError(undefined); }} />
+              {t("runtimePods.faultRecovery")}
+            </label>
+            <p className="ml-5 mt-2 text-xs leading-5">{t("runtimePods.faultRecoveryHelp")}</p>
+            {!recoverySupported && <p role="status" className="mt-2 text-xs">{t("runtimePods.faultRecoveryUnavailable")}</p>}
+            {evictionMode === "recovery" && <>
+              <p className="mt-3 text-xs leading-5">{ids.length ? t("runtimePods.faultRecoverySelected", { ids: ids.join(", #") }) : t("runtimePods.faultRecoveryDefault")}</p>
+              {!recoverySelectionValid && <ErrorMessage>{t("runtimePods.invalidInitialSelection")}</ErrorMessage>}
+            </>}
+          </div>
+          {evictionMode !== "recovery" && <div className="grid grid-cols-2 gap-3">
             <label className="space-y-2 text-xs">
               <span className="block">{t("runtimePods.grace")}</span>
               <select
@@ -558,7 +580,7 @@ export default function RuntimeActions({
                 ))}
               </select>
             </label>
-          </div>
+          </div>}
           <p className="text-xs text-slate-500">
             {t("runtimePods.incoming")}: {incoming}
           </p>
@@ -590,7 +612,7 @@ export default function RuntimeActions({
                 setError(undefined);
               }}
             />
-            {t("runtimePods.acknowledge")}
+            {t(evictionMode === "recovery" ? "runtimePods.faultRecoveryAcknowledge" : "runtimePods.acknowledge")}
           </label>
           <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
             <button type="button" className={buttonClass} onClick={onClose}>
@@ -599,11 +621,11 @@ export default function RuntimeActions({
             <button
               type="button"
               className={`${primaryClass} !border-red-600 !bg-red-600`}
-              disabled={!evictionAllowed || !acknowledged || busy || !occupied || insufficientEvictionCapacity || (evictionMode === "force" && !forceSupported)}
+              disabled={!evictionAllowed || !acknowledged || busy || (evictionMode !== "recovery" && !occupied) || insufficientEvictionCapacity || (evictionMode === "force" && !forceSupported)}
               onClick={() => void submit()}
             >
               {t(busy ? "runtimePods.startingOp" : "runtimePods.startEviction")}{" "}
-              ({summarizePod(pod).occupied})
+              {evictionMode === "recovery" ? ids.length ? `(${ids.length})` : "" : `(${summarizePod(pod).occupied})`}
             </button>
           </div>
         </form>
@@ -698,12 +720,13 @@ export default function RuntimeActions({
                       <span className="text-slate-500">
                         {t(`runtimePods.${item.state}`)}
                       </span>
+                      {item.recovery?.phase && <p className="w-full break-words text-slate-600">{t("runtimePods.recoveryPhase")}: {item.recovery.phase}</p>}
                       {item.error_message && (
                         <p className="w-full break-words leading-5 text-red-600">
                           {item.error_message}
                         </p>
                       )}
-                      {item.state === "failed" &&
+                      {item.state === "failed" && !item.recovery &&
                         instances.some(
                           (current) =>
                             current.slot.instance_id === item.instance_id,
@@ -719,8 +742,10 @@ export default function RuntimeActions({
                     </div>
                   ))}
                 </div>
-                {(["pending", "processing"].includes(operation.status) ||
-                  (operation.kind === "scale_in" && ["starting", "needs_attention"].includes(operation.status))) && (
+                {(operation.items?.some((item) => item.recovery)
+                  ? ["pending", "processing", "needs_attention"].includes(operation.status) && operation.items.every((item) => item.recovery?.phase === "planned")
+                  : ["pending", "processing"].includes(operation.status) ||
+                    (operation.kind === "scale_in" && ["starting", "needs_attention"].includes(operation.status))) && (
                   <button
                     type="button"
                     className={`${buttonClass} mt-3`}

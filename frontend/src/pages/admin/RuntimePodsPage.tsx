@@ -39,6 +39,8 @@ type Dialog = {
   kind: "schedule" | "evict" | "events" | "history" | "maintenance" | "balance" | "auto-stop" | "recovery";
   pod?: RuntimePod;
   ids?: number[];
+  evictionMode?: "recovery";
+  verifiedRecoveryIds?: number[];
 };
 const types = ["all", "openclaw", "hermes", "opencode", "deepseek-harness"];
 const emptySummary: RuntimePodSummary = {
@@ -131,7 +133,7 @@ export default function RuntimePodsPage() {
   if (selectedPod && inventoryConfirmed && !activePod) setSelectedPod(null);
   const dialogPod = dialog?.pod && (
     actionPods.find((pod) => pod.id === dialog.pod!.id) ??
-    (inventoryConfirmed ? undefined : dialog.pod)
+    (dialog.evictionMode === "recovery" && dialog.verifiedRecoveryIds?.length ? dialog.pod : inventoryConfirmed ? undefined : dialog.pod)
   );
   if (dialog?.pod && inventoryConfirmed && !dialogPod) setDialog(null);
   const selectRuntimePod = (pod: RuntimePod) => setSelectedPod(pod);
@@ -204,6 +206,7 @@ export default function RuntimePodsPage() {
             pod={activePod}
             onBack={() => setSelectedPod(null)}
             onSchedule={(ids) => openSchedule(activePod, ids)}
+            onRecovery={(ids) => setDialog({ kind: "evict", pod: activePod, ids, evictionMode: "recovery" })}
             onPause={() => void toggleScheduling(activePod)}
             onEvents={() => setDialog({ kind: "events", pod: activePod })}
             busy={busyPod === activePod.id}
@@ -444,7 +447,7 @@ export default function RuntimePodsPage() {
           </>
         )}
         {dialog?.kind === "recovery" ? (
- <RuntimeRecoveryDialog pods={actionPods} onClose={() => setDialog(null)} onChanged={refresh} />
+ <RuntimeRecoveryDialog pods={actionPods} onEvict={(pod, ids, verifiedRecoveryIds) => setDialog({ kind: "evict", pod, ids, verifiedRecoveryIds, evictionMode: "recovery" })} onClose={() => setDialog(null)} onChanged={refresh} />
  ) : dialog?.kind === "auto-stop" ? (
           <RuntimeAutoStopDialog onClose={() => setDialog(null)} />
         ) : dialog?.kind === "maintenance" ? (
@@ -461,6 +464,8 @@ export default function RuntimePodsPage() {
             kind={dialog.kind}
             pod={dialogPod}
             initialIds={dialog.ids}
+            verifiedRecoveryIds={dialog.verifiedRecoveryIds}
+            initialEvictionMode={dialog.evictionMode}
             pods={actionPods}
             onClose={() => setDialog(null)}
             onRetry={(ids) => setDialog({ kind: "schedule", ids })}

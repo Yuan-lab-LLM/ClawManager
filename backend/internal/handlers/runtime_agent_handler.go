@@ -396,7 +396,7 @@ func (h *RuntimeAgentHandler) ReportGateways(c *gin.Context) {
 				return
 			}
 		}
-		if err := h.syncInstanceRuntimeState(c.Request.Context(), gateway, lifecycle); err != nil {
+		if err := h.syncInstanceRuntimeState(c.Request.Context(), podID, gateway, lifecycle); err != nil {
 			if errors.Is(err, models.ErrRuntimeUpgradeInProgress) || errors.Is(err, repository.ErrStaleRuntimeGeneration) {
 				continue
 			}
@@ -489,11 +489,20 @@ func (h *RuntimeAgentHandler) reconcileReportedOpenClawGateway(ctx context.Conte
 		now := time.Now().UTC()
 		healthAt = &now
 	}
-	return reconciler.ReconcileReportedGateway(ctx, &models.InstanceRuntimeBinding{
+	reported := &models.InstanceRuntimeBinding{
 		InstanceID: gateway.InstanceID, RuntimePodID: podID, RuntimeType: services.RuntimeTypeOpenClaw,
 		GatewayID: gateway.GatewayID, GatewayPort: gateway.GatewayPort, GatewayPID: gateway.GatewayPID,
 		WorkspacePath: expectedWorkspace, State: services.RuntimeGatewayBindingRunning, Generation: gateway.Generation, LastHealthAt: healthAt,
-	}, instance.RuntimeGeneration, services.RuntimeGatewayPortBlockSize(services.RuntimeTypeOpenClaw))
+	}
+	if recovery, ok := h.bindingRepo.(interface {
+		ReportedGatewayRecoveryBlocked(context.Context, *models.InstanceRuntimeBinding) (bool, error)
+	}); ok {
+		blocked, err := recovery.ReportedGatewayRecoveryBlocked(ctx, reported)
+		if err != nil || blocked {
+			return false, err
+		}
+	}
+	return reconciler.ReconcileReportedGateway(ctx, reported, instance.RuntimeGeneration, services.RuntimeGatewayPortBlockSize(services.RuntimeTypeOpenClaw))
 }
 
 func runtimePodHasCapability(pod models.RuntimePod, required string) bool {
@@ -537,9 +546,14 @@ func pendingGatewayReconcileGrace(heartbeatTimeout time.Duration) time.Duration 
 	return grace
 }
 
-func (h *RuntimeAgentHandler) syncInstanceRuntimeState(ctx context.Context, gateway runtimeAgentGatewayReport, lifecycle services.RuntimeGatewayLifecycleState) error {
+func (h *RuntimeAgentHandler) syncInstanceRuntimeState(ctx context.Context, podID int64, gateway runtimeAgentGatewayReport, lifecycle services.RuntimeGatewayLifecycleState) error {
 	if h.instanceRepo == nil {
 		return nil
+	}
+	if reports, ok := h.instanceRepo.(interface {
+		UpdateReportedRuntimeStateForBinding(context.Context, int, string, int, *string, int64, string, int, string) error
+	}); ok {
+		return reports.UpdateReportedRuntimeStateForBinding(ctx, gateway.InstanceID, lifecycle.InstanceState, gateway.Generation, lifecycle.Message, podID, strings.TrimSpace(gateway.GatewayID), gateway.GatewayPort, strings.TrimSpace(gateway.WorkspacePath))
 	}
 	return h.instanceRepo.UpdateRuntimeState(ctx, gateway.InstanceID, lifecycle.InstanceState, gateway.Generation, lifecycle.Message)
 }

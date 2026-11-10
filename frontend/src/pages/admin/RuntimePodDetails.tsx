@@ -27,6 +27,7 @@ export default function RuntimePodDetails({
   onSchedule,
   onPause,
   onEvents,
+  onRecovery,
   busy,
 }: {
   pod: RuntimePod;
@@ -34,6 +35,7 @@ export default function RuntimePodDetails({
   onSchedule: (ids: number[]) => void;
   onPause: () => void;
   onEvents: () => void;
+  onRecovery?: (ids?: number[]) => void;
   busy: boolean;
 }) {
   const { t } = useI18n();
@@ -108,6 +110,7 @@ export default function RuntimePodDetails({
               `runtimePods.${pod.scheduling_enabled === false || pod.scheduling_paused ? "resume" : "pause"}`,
             )}
           </button>
+          <button type="button" className={buttonClass} disabled={busy || !onRecovery} onClick={() => onRecovery?.()}>{t("runtimePods.faultRecovery")}</button>
           <button
             type="button"
             className={primaryClass}
@@ -186,6 +189,7 @@ export default function RuntimePodDetails({
               <button type="button" className={buttonClass} onClick={onEvents}>
                 {t("runtimePods.events")}
               </button>
+              {!!chosen.expected_instance_id && !canManageSlot(chosen) && <button type="button" className={buttonClass} disabled={busy || !onRecovery} onClick={() => onRecovery?.([chosen.expected_instance_id!])}>{t("runtimePods.faultRecovery")}</button>}
               {canManageSlot(chosen) && (
                 <button
                   type="button"

@@ -31,18 +31,19 @@ type RuntimeSchedulingRequest struct {
 }
 
 type RuntimeSchedulingItem struct {
-	SourcePlacement  *RuntimeEvictionPlacement `json:"source_placement,omitempty"`
-	StopGraceSeconds int                       `json:"-"`
-	InstanceID       int                       `json:"instance_id"`
-	SourcePodID      int64                     `json:"source_pod_id"`
-	TargetPodID      int64                     `json:"target_pod_id"`
-	TargetSlot       int                       `json:"target_slot"`
-	State            string                    `json:"state"`
-	ErrorMessage     string                    `json:"error_message,omitempty"`
-	SourceGeneration int                       `json:"source_generation"`
-	SourceGatewayID  string                    `json:"source_gateway_id"`
-	SourcePodUID     string                    `json:"source_pod_uid"`
-	TargetPodUID     string                    `json:"target_pod_uid"`
+	Recovery         *RuntimeFaultEvictionJournal `json:"recovery,omitempty"`
+	SourcePlacement  *RuntimeEvictionPlacement    `json:"source_placement,omitempty"`
+	StopGraceSeconds int                          `json:"-"`
+	InstanceID       int                          `json:"instance_id"`
+	SourcePodID      int64                        `json:"source_pod_id"`
+	TargetPodID      int64                        `json:"target_pod_id"`
+	TargetSlot       int                          `json:"target_slot"`
+	State            string                       `json:"state"`
+	ErrorMessage     string                       `json:"error_message,omitempty"`
+	SourceGeneration int                          `json:"source_generation"`
+	SourceGatewayID  string                       `json:"source_gateway_id"`
+	SourcePodUID     string                       `json:"source_pod_uid"`
+	TargetPodUID     string                       `json:"target_pod_uid"`
 }
 
 type RuntimeSchedulingPreflight struct {
@@ -210,6 +211,9 @@ func (s *RuntimeManagementService) Scheduling(ctx context.Context, podID int64, 
 }
 
 func (s *RuntimeManagementService) Preflight(ctx context.Context, req RuntimeSchedulingRequest) (*RuntimeSchedulingPreflight, error) {
+	if req.Mode == "recovery" {
+		return s.recoveryEvictionPreflight(ctx, req)
+	}
 	return s.preflight(ctx, req, false)
 }
 
@@ -464,6 +468,9 @@ func (s *RuntimeManagementService) preflightWithInventory(ctx context.Context, r
 }
 
 func (s *RuntimeManagementService) Submit(ctx context.Context, req RuntimeSchedulingRequest, actor *int) (*RuntimeManagementOperation, error) {
+	if req.Mode == "recovery" {
+		return nil, errors.New("fault recovery must use the Pod eviction endpoint")
+	}
 	plan, err := s.Preflight(ctx, req)
 	if err != nil {
 		return nil, err
@@ -475,8 +482,8 @@ func (s *RuntimeManagementService) Submit(ctx context.Context, req RuntimeSchedu
 }
 
 func (s *RuntimeManagementService) Evict(ctx context.Context, podID int64, req RuntimeSchedulingRequest, actor *int) (*RuntimeManagementOperation, error) {
-	if req.Mode != "" && req.Mode != "graceful" && req.Mode != "force" {
-		return nil, errors.New("eviction mode must be graceful or force")
+	if req.Mode != "" && req.Mode != "graceful" && req.Mode != "force" && req.Mode != "recovery" {
+		return nil, errors.New("eviction mode must be graceful, force or recovery")
 	}
 	if req.GracePeriodSeconds < 0 || req.GracePeriodSeconds > 300 || req.Concurrency < 0 || req.Concurrency > 5 {
 		return nil, errors.New("grace period must be 1..300 seconds and concurrency 1..5")
@@ -505,6 +512,21 @@ func (s *RuntimeManagementService) Evict(ctx context.Context, podID int64, req R
 	sourceUnlock()
 	if err != nil {
 		return nil, err
+	}
+	if req.Mode == "recovery" {
+		req.SourcePodID, req.TargetPodID, req.TargetSlot = podID, 0, 0
+		plan, e := s.recoveryEvictionPreflight(ctx, req)
+		if e != nil {
+			return nil, e
+		}
+		if !plan.Allowed {
+			return nil, errors.New(strings.Join(plan.Blockers, "; "))
+		}
+		req.InstanceIDs = nil
+		for _, item := range plan.Items {
+			req.InstanceIDs = append(req.InstanceIDs, item.InstanceID)
+		}
+		return s.enqueue(ctx, "eviction", req, plan.Items, actor)
 	}
 	if req.Mode == "force" {
 		req.SourcePodID, req.TargetPodID, req.TargetSlot = podID, 0, 0
@@ -615,6 +637,9 @@ func (s *RuntimeManagementService) enqueue(ctx context.Context, kind string, req
 	now := time.Now().UTC()
 	op := &RuntimeManagementOperation{ID: "runtime_mgmt_" + uuid.NewString(), Kind: kind, Status: "pending", Items: items, CreatedAt: now, UpdatedAt: now}
 	for i := range op.Items {
+		if op.Items[i].Recovery != nil {
+			op.Items[i].Recovery.Scope.OperationID = op.ID
+		}
 		op.Items[i].State = "pending"
 	}
 	if len(items) == 0 && kind != "eviction" {
@@ -733,7 +758,7 @@ func (s *RuntimeManagementService) Process(ctx context.Context) error {
 	}
 	// Process returns only after every worker exits. A processing row left by
 	// this owner is interrupted too (for example SQL failed after a replica CAS).
-	_, err := s.sess.SQL().ExecContext(ctx, `UPDATE runtime_management_operations SET status='needs_attention',owner_token='',updated_at=? WHERE status='processing'`, time.Now().UTC())
+	_, err := s.sess.SQL().ExecContext(ctx, `UPDATE runtime_management_operations SET status=CASE WHEN kind='eviction' AND JSON_UNQUOTE(JSON_EXTRACT(request_json,'$.mode'))='recovery' THEN 'pending' ELSE 'needs_attention' END,owner_token='',updated_at=? WHERE status='processing'`, time.Now().UTC())
 	if err != nil {
 		return err
 	}
@@ -803,6 +828,9 @@ func (s *RuntimeManagementService) Process(ctx context.Context) error {
 	}
 	if kind == "scale_in" {
 		return s.processScaleIn(operationCtx, op, raw)
+	}
+	if kind == "eviction" && req.Mode == "recovery" {
+		return s.processRecoveryEviction(operationCtx, op)
 	}
 	// ponytail: bounded per-operation workers; one scheduler operation runs at a time.
 	concurrency := req.Concurrency
@@ -1274,6 +1302,15 @@ func (s *RuntimeManagementService) cancelRequested(ctx context.Context, id strin
 	return cancelled, err
 }
 func (s *RuntimeManagementService) Cancel(ctx context.Context, id string) error {
+	op, raw, _, readErr := s.runtimeManagementOperation(ctx, id)
+	if readErr != nil {
+		return readErr
+	}
+	var req RuntimeSchedulingRequest
+	if op.Kind == "eviction" && json.Unmarshal([]byte(raw), &req) == nil && req.Mode == "recovery" {
+		return s.cancelRecoveryEviction(ctx, id)
+	}
+
 	result, err := s.sess.SQL().ExecContext(ctx, "UPDATE runtime_management_operations SET cancel_requested=1,updated_at=? WHERE id=? AND (status IN ('pending','processing') OR (kind='scale_in' AND status IN ('starting','needs_attention')))", time.Now().UTC(), id)
 	if err != nil {
 		return err
@@ -1415,6 +1452,11 @@ func (s *RuntimeManagementService) retryOperation(ctx context.Context, id string
 		}
 		op.Phase, op.ErrorMessage = journal.Phase, journal.ErrorMessage
 		return op, err
+	}
+	var recoveryReq RuntimeSchedulingRequest
+	if op.Kind == "eviction" && json.Unmarshal([]byte(raw), &recoveryReq) == nil && recoveryReq.Mode == "recovery" {
+		op.Status = "pending"
+		return op, s.save(ctx, op)
 	}
 	// A successor already published by the interrupted move can be observed.
 	// All other uncertain source states remain held for explicit inspection.

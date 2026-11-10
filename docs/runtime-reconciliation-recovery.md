@@ -2,6 +2,8 @@
 
 Runtime desired state and observed state are separate facts. An omitted heartbeat/report is not proof that a process exited. Unknown, residual and conflicting slots remain unavailable until a fresh observation and matching authority resolve them. Workspace/PVC content is not deleted by reconciliation or recovery.
 
+**Fault eviction:** Inspect/Recheck/Retry retain their conservative checks. The Pod eviction flow now also offers mode `recovery`: an independent node/container stop path for an exact database-bound source. It does not rebuild an entire pool. See the [accepted fault eviction design](superpowers/specs/2026-11-10-runtime-terminal-recovery-design.md).
+
 ## Administrator controls
 
 Open **Runtime → Recovery / 异常恢复**. Enter an instance ID and choose **Inspect instance / 检查实例** to read the current generation, binding, recovery phase, attempts and blocker. Inspection is read-only. Editing the ID invalidates the previous inspection.
@@ -12,12 +14,25 @@ Use **Retry instance recovery / 重试实例恢复** after addressing the displa
 
 Open **Scheduling records / 调度记录** and choose **Recheck and continue / 重新核验并继续** for interrupted management operations. The request is persisted, so any API replica can accept it; the elected scheduler consumes it. An active worker is not taken over by the API. A replica write with an uncertain outcome is observed, not replayed. Terminal operations require a new preflight. Generic moves without an exact published successor remain blocked rather than replaying an uncertain source stop.
 
-If a source is unreachable, repair the source/network/control plane and recheck. If an older Runtime cannot supply complete Pod UID/worker epoch/exit proof, repair or upgrade that Runtime through the existing maintenance procedure before retrying. The separately restricted `recover-stopped-source` API remains for an exact unpublished successor with independent stopped-source/storage/external-writer proofs; it is not a general force-release API. Do not clear bindings, counters, assignment ConfigMaps or writer fences by SQL to make the screen appear idle.
+If a source is unreachable, repair the source/network/control plane and recheck. If an older Runtime cannot supply complete Pod UID/worker epoch/exit proof, use scoped fault eviction below when its independent node/storage identity can be verified, or repair/upgrade that Runtime through existing maintenance before retrying. The separately restricted `recover-stopped-source` API remains for an exact unpublished successor with independent stopped-source/storage/external-writer proofs; it is not a general force-release API. Do not clear bindings, counters, assignment ConfigMaps or writer fences by SQL to make the screen appear idle.
+
+## Fault eviction
+
+Choose **Fault recovery / 故障恢复** in the existing Pod eviction dialog. With no explicit IDs the server selects only existing abnormal bindings (`creating`, `error`, `stopped`, `deleting`); healthy running neighbors are excluded. Explicit IDs must belong to that source and require acknowledging restart impact. No SQL binding means no automatic orphan owner adoption/deletion.
+
+The source is paused for new placement. Normal Agent stop is attempted first; a node-pinned helper Job supplies the fallback. Only the exact source container is terminated; its matching management writer ledger is reconciled without deleting projects/Git/PVC. Assignment retirement and binding release require matching evidence. Future placement retains original storage/image/resource constraints. Stopped/deleting instances keep their intent; capacity shortage does not block source cleanup.
+
+Follow **Scheduling records → Recheck and continue** for the same durable operation. Pending helper Jobs continue automatically; structural conflicts retain their fence and reason. Failures before fencing can be cancelled and inspected again. Once fencing begins cancellation is refused. Application restarts retain progress and the pinned helper image. The old Pod stays paused until separately rechecked/maintained: releasing a binding does not claim all its slots are reusable.
+
+When the original Pod/controller history is already gone, only stopped/deleting instances may use an exact protected management ledger plus the verified management PVC to identify and retire the old execution. Independent node/CRI stop verification is still mandatory. This fallback never supplies restart-placement provenance.
+
+Requirements: a reachable source node, containerd socket `/run/containerd/containerd.sock`, verified workspace PVC/PV, and RBAC/admission permitting the restricted platform helper Job with socket/boot mounts. The image must contain `/usr/local/bin/runtime-eviction-helper`; its digest is pinned before submission from `clawmanager-app` or `CLAWMANAGER_RUNTIME_RECOVERY_IMAGE`. Missing history, changed node identity, protected Team/upgrade writers and unverified file helpers are explicit blockers, not force-release authorization. Do not bypass these with SQL or lock-file deletion.
 
 ## Admin APIs
 
 All routes require the normal authenticated administrator middleware. Mutations also require an actor identity. Unknown fields/trailing JSON are rejected for identity-bearing recovery requests.
 
+- `POST /api/v1/admin/runtime-pods/:id/evict`, body `{"mode":"recovery","instance_ids":[]}`: fault eviction of abnormal bound instances or explicitly selected IDs.
 - `GET /api/v1/admin/instances/:id/runtime-recovery`: read inspection.
 - `POST /api/v1/admin/instances/:id/runtime-recovery`, body `{"generation":3}`: retry the exact inspected generation.
 - `POST /api/v1/admin/runtime-pods/:id/recheck`, body `{"pod_uid":"current-uid"}`: immediate physical audit of that exact registered Pod.
@@ -52,3 +67,14 @@ Independent review found and verified fixes for the additional awake-pool/full-p
 - Frontend: 13 service tests and 16 management tests passed; TypeScript/Vite build passed. Chrome component regression passed English/Chinese at widths 1280 and 390, including failed-stop retention, exact generation/UID requests, invalidated inspection after ID edits, operation continuation and fitting layout. Mechanical UI detector found no issues.
 
 SQL fixtures were isolated databases, not application business databases. No Kubernetes test Pods were created. Deployment receipt and cleanup verification are recorded separately after rollout.
+
+## Fault eviction verification (2026-11-10)
+
+- Final broad backend regression: 4,876 tests/subtests passed, 392 skipped, 26 packages passed, zero failures. The temporary Darwin overlay excludes the pre-existing Linux-only NFS test compile issue.
+
+- Independent final review identified and verified fixes for three crash/concurrency edges: completion and lifecycle-guard removal are one transaction; pre-fence cancellation from `needs_attention` re-enters the processing queue; delayed legacy OpenClaw reports cannot recreate a retired source generation.
+- Real isolated SQL covered helper continuation, exact binding release, stopped/deleting intent, generation replay, completion rollback on guard-delete failure, cancellation, old-report adoption and existing maintenance admission fences. No test wrote application business tables.
+- Node helper and Kubernetes adapter tests cover exact container identity, receipts, ledger ownership, stale Jobs, retry and immutable helper-image/storage provenance. Linux amd64 and arm64 helper builds were verified.
+- Frontend service/selection/component tests: 72 passed; TypeScript/Vite build passed.
+
+Staging rollout and observed recovery results are recorded separately. Orphan execution without a database binding remains outside this fault-eviction path; the implementation does not claim every legacy Unknown slot is reusable.

@@ -224,6 +224,7 @@ export interface RuntimeSchedulingRequest {
 }
 
 export interface RuntimeSchedulingItem {
+  recovery?: { phase: string; scope: Record<string, unknown>; receipt?: Record<string, unknown> };
   instance_id: number;
   source_pod_id?: number;
   target_pod_id?: number;

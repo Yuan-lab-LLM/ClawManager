@@ -5,10 +5,11 @@ import { runtimeError } from "../../lib/runtimeManagement";
 import type { RuntimePod, RuntimeRecoveryInspection } from "../../types/runtimePool";
 import { buttonClass, primaryClass, inputClass, ErrorMessage, RuntimeDialog } from "./RuntimeManagementUI";
 
-export default function RuntimeRecoveryDialog({ pods, onClose, onChanged }: {
+export default function RuntimeRecoveryDialog({ pods, onClose, onChanged, onEvict }: {
   pods: RuntimePod[];
   onClose: () => void;
   onChanged: () => void;
+  onEvict?: (pod: RuntimePod, ids?: number[], verifiedRecoveryIds?: number[]) => void;
 }) {
   const { t } = useI18n();
   const [id, setId] = useState("");
@@ -74,6 +75,7 @@ export default function RuntimeRecoveryDialog({ pods, onClose, onChanged }: {
             {options.map(item => <option key={item.id} value={item.id}>{item.pod_name} · #{item.id}</option>)}
           </select>
         </label>
+        <button type="button" className={buttonClass} disabled={busy || !pod || !onEvict} onClick={() => { if (pod) { const verified = info && info.binding?.runtime_pod_id === pod.id && Number.isSafeInteger(info.instance_id) && info.instance_id > 0 ? [info.instance_id] : undefined; onEvict?.(pod, verified, verified); } }}>{t("runtimePods.faultRecovery")}</button>
         <button type="button" className={buttonClass} disabled={busy || !pod?.pod_uid} onClick={() => void act("recheck")}>{t("runtimePods.recoveryRecheck")}</button>
       </section>
       {busy && <p className="mt-3 text-sm text-slate-600" role="status">{t("runtimePods.recoveryChecking")}</p>}

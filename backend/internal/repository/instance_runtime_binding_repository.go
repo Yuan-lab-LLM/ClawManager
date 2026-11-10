@@ -123,10 +123,6 @@ func (r *instanceRuntimeBindingRepository) reconcileReportedGateway(ctx context.
 		if err := LockRuntimeManagementAdmission(ctx, tx); err != nil {
 			return err
 		}
-		if err := CheckRuntimePodBindingAdmission(ctx, tx, binding.RuntimePodID); err != nil {
-			return err
-		}
-
 		var status string
 		var generation int
 		row, err := tx.SQL().QueryRowContext(ctx, `SELECT status, runtime_generation FROM instances WHERE id = ? FOR UPDATE`, binding.InstanceID)
@@ -136,8 +132,23 @@ func (r *instanceRuntimeBindingRepository) reconcileReportedGateway(ctx context.
 		if err := row.Scan(&status, &generation); err != nil {
 			return err
 		}
+		if err := CheckRuntimePodBindingAdmission(ctx, tx, binding.RuntimePodID); err != nil {
+			return err
+		}
 		if (status != "error" && status != "creating") || generation != expectedInstanceGeneration {
 			return nil
+		}
+		if requiredPendingUserID == 0 {
+			// The instance lock precedes all consistent reads. Recovery commits
+			// lock operation -> instance; never lock its operation rows
+			// here in reverse order. Admission also excludes a new recovery enqueue.
+			blocked, err := reportedGatewayRecoveryBlocked(ctx, tx, binding)
+			if err != nil {
+				return err
+			}
+			if blocked {
+				return nil
+			}
 		}
 		if requiredPendingUserID > 0 {
 			var owner int

@@ -129,6 +129,7 @@ func (s *RuntimeAssignmentService) EnsureDesired(ctx context.Context, a RuntimeA
 		}
 		cm.Labels["clawmanager.io/purpose"] = "lite-instance"
 		cm.Labels["clawmanager.io/needs-reconcile"] = "true"
+		delete(cm.Annotations, faultEvictionAnnotation)
 		cm.Data = map[string]string{
 			"instance_id": strconv.Itoa(a.InstanceID), "user_id": strconv.Itoa(a.UserID),
 			"generation": strconv.Itoa(a.Generation), "runtime_type": a.RuntimeType,

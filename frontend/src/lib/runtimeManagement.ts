@@ -29,6 +29,10 @@ export function canManageSlot(slot: RuntimeSlot) {
     : slot.reconciliation_state === "consistent" && slot.binding_confirmed === true);
 }
 
+export function recoveryInstanceIds(pod: RuntimePod): number[] {
+  return [...new Set((pod.slots ?? []).flatMap((slot) => slot.expected_instance_id ? [slot.expected_instance_id] : canManageSlot(slot) ? [slot.instance_id!] : []))];
+}
+
 export function canEvictPod(pod: RuntimePod) {
   const slots = pod.slots ?? [];
   return pod.id > 0 && pod.agent_reported !== false && pod.bindings_reported !== false &&

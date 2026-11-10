@@ -287,3 +287,14 @@ test('manual recovery preserves exact generation and Pod UID without retrying mu
     assert.equal(failed.length, 1);
   }
 });
+
+
+test('fault recovery keeps the existing eviction endpoint and exact instance scope', async () => {
+  const calls = [];
+  const service = loadService({ post: async (...args) => { calls.push(args); return { data: { data: result } }; } });
+  for (const body of [{ mode: 'recovery', instance_ids: [17] }, { mode: 'recovery', instance_ids: [] }, { mode: 'recovery' }]) {
+    assert.equal(await service.evict(41, body), result);
+    assert.equal(calls.at(-1)[0], '/admin/runtime-pods/41/evict');
+    assert.equal(calls.at(-1)[1], body);
+  }
+});
