@@ -483,35 +483,36 @@ export function InstanceWorkbench({
                   <Terminal size={16} />
                   <span>{t("workbench.terminal")}</span>
                 </button>
+                <button
+                  disabled={!ready || busy}
+                  onClick={() => {
+                    setShowSessions(!showSessions);
+                    setNewMenu(false);
+                  }}
+                  aria-expanded={showSessions}
+                >
+                  <Activity size={16} />
+                  <span>{t("workbench.sessions")}</span>
+                </button>
+                {selected?.kind === "terminal" &&
+                  selected.session &&
+                  !selected.session.exited &&
+                  !selected.stale && (
+                    <button
+                      className="wb-button danger"
+                      disabled={busy}
+                      onClick={() => {
+                        setNewMenu(false);
+                        void endSession(selected.session!);
+                      }}
+                    >
+                      <Square size={12} />
+                      {t("workbench.end")}
+                    </button>
+                  )}
               </div>
             )}
           </div>
-        </div>
-        <div className="wb-runtime-toolbar">
-          <button
-            className="wb-subtle"
-            disabled={!ready || busy}
-            onClick={() => setShowSessions(!showSessions)}
-            aria-expanded={showSessions}
-          >
-            <Activity size={13} />
-            {t("workbench.sessions")}
-            {hidden.length > 0 && <span>{hidden.length}</span>}
-          </button>
-          <span className="wb-spacer" />
-          {selected?.kind === "terminal" &&
-            selected.session &&
-            !selected.session.exited &&
-            !selected.stale && (
-              <button
-                className="wb-button danger"
-                disabled={busy}
-                onClick={() => void endSession(selected.session!)}
-              >
-                <Square size={12} />
-                {t("workbench.end")}
-              </button>
-            )}
         </div>
         {(message || error) && (
           <div

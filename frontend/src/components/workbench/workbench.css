@@ -349,19 +349,6 @@
 .wb-popover button:hover:enabled {
   background: var(--surface-muted);
 }
-.wb-runtime-toolbar {
-  min-height: 39px;
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  padding: 4px 10px;
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-}
-.wb-runtime-toolbar .wb-button {
-  min-height: 27px;
-  font-size: 11px;
-}
 .wb-live-views {
   flex: 1;
   min-height: 0;
