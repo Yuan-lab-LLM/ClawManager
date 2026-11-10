@@ -15,7 +15,13 @@
     var value = node.getAttribute("href");
     if (!value || value.length > 8192 || /[\x00-\x20\x7f]/.test(value)) return;
     var url;
-    try { url = new URL(value); } catch (_) { return; }
+    try { url = new URL(value); } catch (_) {
+      // Markdown autolinks can swallow adjacent Chinese prose after the port.
+      // Recover only an exact loopback authority; valid paths stay untouched.
+      var authority = value.match(/^(https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\]|0\.0\.0\.0)(?::[0-9]+)?)[\uff08\uff09\uff0c\u3002\uff1b\uff01\uff1f\u3001\u3010\u3011\u300a\u300b\u300c\u300d\u300e\u300f]/i);
+      if (!authority) return;
+      try { url = new URL(authority[1]); } catch (_) { return; }
+    }
     if (["http:", "https:"].indexOf(url.protocol) < 0 || url.username || url.password || ["localhost", "127.0.0.1", "[::1]", "0.0.0.0"].indexOf(url.hostname) < 0) return;
     if (url.port && Number(url.port) < 1) return;
     if (url.hostname === "0.0.0.0") url.hostname = "localhost";

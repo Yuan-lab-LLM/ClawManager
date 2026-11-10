@@ -34,16 +34,34 @@ let browser, releaseDetail;
 try{
  await server.listen();const origin='http://127.0.0.1:'+server.httpServer.address().port;browser=await chromium.launch({channel:'chrome',headless:true});
  const context=await browser.newContext();let allocationCount=0,hold=false,release;
- await context.route('https://native-fixture.invalid/**',route=>route.fulfill({contentType:'text/html',body:'<html><head><script>'+bridge+'</script></head><body><a target="_blank" href="http://localhost:3000/hello?from=chat">Local app</a><a target="_blank" href="https://external-fixture.invalid/">External site</a><script>if(location.search.includes("generation=0"))setTimeout(()=>parent.postMessage({type:"clawmanager:preview-bridge:open",url:"http://localhost:3000/automatic"},"*"),100)</script></body></html>'}));
+ await context.addInitScript(()=>{window.addEventListener('message',event=>{if(event.source===parent&&String(event.data?.type).startsWith('clawmanager:preview-bridge:activate:'))window.previewActivated=true;});});
+ await context.route('https://native-fixture.invalid/**',route=>route.fulfill({contentType:'text/html; charset=utf-8',body:'<html><head><script>'+bridge+'</script></head><body><a target="_blank" href="http://localhost:3000/hello?from=chat">Local app</a><a target="_blank" href="http://127.0.0.1:3000（PID">Chat autolink</a><a target="_blank" href="https://external-fixture.invalid/">External site</a><script>if(location.search.includes("generation=0"))setTimeout(()=>parent.postMessage({type:"clawmanager:preview-bridge:open",url:"http://localhost:3000/automatic"},"*"),100)</script></body></html>'}));
  await context.route('https://external-fixture.invalid/**',route=>route.fulfill({body:'External site'}));
  await context.route('**/allocate',async route=>{allocationCount++;if(hold)await new Promise(resolve=>release=resolve);await route.fulfill({json:{url:origin+'/preview-content'}});});
  await context.route('**/preview-content',route=>route.fulfill({contentType:'text/html',body:'<h1>Instance preview</h1>'}));
  const page=await context.newPage();page.setDefaultTimeout(15000);await page.goto(origin+'/native-preview-fixture');await page.frameLocator('iframe[title="Native app"]').getByRole('link',{name:'Local app'}).waitFor();
+ await page.frames().find(frame=>new URL(frame.url()).hostname==='native-fixture.invalid').waitForFunction(()=>window.previewActivated);
+ console.log('PASS native bridge activation');
  await page.waitForTimeout(250);assert.equal(allocationCount,0,'Startup messages must not create previews');
  await page.frameLocator('iframe[title="Native app"]').getByRole('link',{name:'Local app'}).click();await page.frameLocator('iframe[title="Right preview"]').getByRole('heading',{name:'Instance preview'}).waitFor();
  assert.equal(allocationCount,1);assert.equal(context.pages().length,1,'A loopback anchor must not open a laptop tab');assert.deepEqual(await page.evaluate(()=>window.received),['http://localhost:3000/hello?from=chat']);
+ await page.frameLocator('iframe[title="Native app"]').getByRole('link',{name:'Chat autolink',exact:true}).click();
+ await page.waitForTimeout(250);
+ assert.equal(context.pages().length,1,'A chat autolink containing Chinese punctuation must not open a laptop tab');
+ assert.equal(allocationCount,2);assert.equal((await page.evaluate(()=>window.received)).at(-1),'http://127.0.0.1:3000/');
+ for (const [href,expected] of [
+  ['http://[::1]:3000（进程','http://[::1]:3000/'],
+  ['http://0.0.0.0:3000，服务','http://localhost:3000/'],
+  ['http://localhost:3000/文章（草稿）?标签=（中文）#节',new URL('http://localhost:3000/文章（草稿）?标签=（中文）#节').href],
+ ]) {
+  const link=page.frameLocator('iframe[title="Native app"]').getByRole('link',{name:'Chat autolink',exact:true});
+  await link.evaluate((node,value)=>node.setAttribute('href',value),href);await link.click();
+  await page.waitForFunction(expected=>window.received.at(-1)===expected,expected);
+  assert.equal(context.pages().length,1,'Loopback variants must open in the right preview and preserve valid Chinese paths');
+ }
+ assert.equal(allocationCount,5);
  const externalPromise=context.waitForEvent('page');await page.frameLocator('iframe[title="Native app"]').getByRole('link',{name:'External site'}).click();const external=await externalPromise;await external.waitForLoadState();assert.equal(new URL(external.url()).hostname,'external-fixture.invalid');await external.close();
- hold=true;await page.frameLocator('iframe[title="Native app"]').getByRole('link',{name:'Local app'}).click();await page.waitForFunction(()=>window.received.length===2);await page.evaluate(()=>window.replaceNative());release();await page.waitForFunction(()=>window.ignored===1);assert.equal(await page.locator('iframe[title="Right preview"]').count(),1,'Stale instance/generation response must not open another tab');
+ hold=true;await page.frameLocator('iframe[title="Native app"]').getByRole('link',{name:'Local app'}).click();await page.waitForFunction(()=>window.received.length===6);await page.evaluate(()=>window.replaceNative());release();await page.waitForFunction(()=>window.ignored===1);assert.equal(await page.locator('iframe[title="Right preview"]').count(),5,'Stale instance/generation response must not open another tab');
  console.log('PASS native anchor: one right preview, no laptop popup, external link unchanged, stale response ignored');await context.close();
  const cert=await browser.newContext();let trusted=false;await cert.addInitScript(()=>{window.openCalls=[];window.open=(...args)=>{window.openCalls.push(args);return null;};});
  await cert.route('https://p-fixture.invalid/**',route=>new URL(route.request().url()).pathname==='/__clawmanager_cert_check'?(trusted?route.fulfill({status:404,headers:{'Access-Control-Allow-Origin':'*'}}):route.abort('failed')):route.fulfill({status:502,contentType:'text/html',body:'Service unavailable'}));
