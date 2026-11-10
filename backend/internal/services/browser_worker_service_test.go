@@ -319,7 +319,7 @@ func TestBrowserWorkerUnifiedDeleteCleansResourcesAndRetriesFailure(t *testing.T
 	}
 	instance.RuntimeType = RuntimeBackendGateway
 	instances := s.instances.(*v2LifecycleInstanceRepo)
-	lifecycle := &instanceService{instanceRepo: instances, resourceCleanup: func(context.Context, int) error { return errors.New("temporary component cleanup failure") }}
+	lifecycle := &instanceService{instanceRepo: instances, bindingRepo: newFakeRuntimeBindingRepo(), agentClient: &fakeRuntimeAgentClient{}, resourceCleanup: func(context.Context, int) error { return errors.New("temporary component cleanup failure") }}
 	if err := lifecycle.Delete(instance.ID); err == nil {
 		t.Fatal("cleanup failure must keep instance retryable")
 	}

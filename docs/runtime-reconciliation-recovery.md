@@ -18,7 +18,7 @@ If a source is unreachable, repair the source/network/control plane and recheck.
 
 ## Fault eviction
 
-Choose **Fault recovery / 故障恢复** in the existing Pod eviction dialog. With no explicit IDs the server selects only existing abnormal bindings (`creating`, `error`, `stopped`, `deleting`); healthy running neighbors are excluded. Explicit IDs must belong to that source and require acknowledging restart impact. No SQL binding means no automatic orphan owner adoption/deletion.
+Choose **Fault recovery / 故障恢复** in the existing Pod eviction dialog. With no explicit IDs the server selects only existing abnormal bindings (`creating`, `error`, `stopped`, `deleting`); healthy running neighbors are excluded. Explicit IDs must belong to that source and require acknowledging restart impact. Sources without SQL bindings use the separately preflighted orphan recovery mode below; missing database rows alone never prove that execution stopped.
 
 The source is paused for new placement. Normal Agent stop is attempted first; a node-pinned helper Job supplies the fallback. Only the exact source container is terminated; its matching management writer ledger is reconciled without deleting projects/Git/PVC. Assignment retirement and binding release require matching evidence. Future placement retains original storage/image/resource constraints. Stopped/deleting instances keep their intent; capacity shortage does not block source cleanup. The native stop controller can consume the matching released recovery receipt to complete its old manual/idle stop journal, so a missing binding no longer strands deletion or a later manual start. It preserves the original stop reason and never manufactures an Agent teardown acknowledgement.
 
@@ -28,11 +28,25 @@ When the original Pod/controller history is already gone, only stopped/deleting 
 
 Requirements: a reachable source node, containerd socket `/run/containerd/containerd.sock`, verified workspace PVC/PV, and RBAC/admission permitting the restricted platform helper Job with socket/boot mounts. The image must contain `/usr/local/bin/runtime-eviction-helper`; its digest is pinned before submission from `clawmanager-app` or `CLAWMANAGER_RUNTIME_RECOVERY_IMAGE`. Missing history, changed node identity, protected Team/upgrade writers and unverified file helpers are explicit blockers, not force-release authorization. Do not bypass these with SQL or lock-file deletion.
 
+## Orphan Pod recovery
+
+Use **Fault recovery → Orphan Pod recovery** when an old Pod has residual or Unknown slots but no current SQL binding. Check the source first and acknowledge the exact Pod UID. Ordinary instance eviction retains its existing eligibility checks. The card shows **Bound** from SQL separately from residual runtime reports and Unknown physical observations.
+
+Preflight verifies the exact source Pod/controller, a single-replica controller without an HPA, Node UID/boot, pinned helper image and original workspace PVC/PV. Current running/creating publishers, valid bindings, protected Team/upgrade owners, unknown external writers and changed identities block recovery. A stopped/deleting unbound instance may obtain a new stop receipt without requiring that same receipt before recovery starts.
+
+Submission atomically registers the operation, source fence and instance guards. It takes the same lifecycle and workspace locks as normal Start/file mutations so already admitted work cannot race source retirement. The controller is scaled to zero and disabled for scheduling while retaining its template. The source Pod is deleted with exact-UID checks; positive terminal evidence and an independent node helper must confirm all old source containers stopped before publication retirement. API absence alone is insufficient. Only source-attributed publication/credential records are annotated; unattributed historical generations remain unchanged.
+
+Follow the same scheduling record through `planned`, `fencing`, `terminating`, `helper_pending`, `source_stopped`, `sources_retired` and completion. Retry continues the persisted scope; cancellation is available only before fencing. Partial failures retain their blocker and guard. A same-Node reboot may refresh boot provenance after revalidation; replacing the Node UID requires investigation. Completed retirement marks the old Runtime row deleted for audit, excludes it from inventory and prevents late heartbeats from reviving it. It does not resume stopped instances or delete project/PVC data.
+
+Instance deletion also verifies all retained source history even if the current binding is absent. Missing historical proof keeps the instance in deleting with an explicit blocker instead of silently losing the remaining cleanup record.
+
 ## Admin APIs
 
 All routes require the normal authenticated administrator middleware. Mutations also require an actor identity. Unknown fields/trailing JSON are rejected for identity-bearing recovery requests.
 
 - `POST /api/v1/admin/runtime-pods/:id/evict`, body `{"mode":"recovery","instance_ids":[]}`: fault eviction of abnormal bound instances or explicitly selected IDs.
+- `POST /api/v1/admin/runtime-scheduling/preflight`, body `{"mode":"orphan-recovery","source_pod_id":132,"source_pod_uid":"exact-uid","instance_ids":[]}`: inspect eligibility for one source Pod.
+- `POST /api/v1/admin/runtime-pods/:id/evict`, body `{"mode":"orphan-recovery","source_pod_uid":"exact-uid","instance_ids":[]}`: create its durable orphan recovery operation.
 - `GET /api/v1/admin/instances/:id/runtime-recovery`: read inspection.
 - `POST /api/v1/admin/instances/:id/runtime-recovery`, body `{"generation":3}`: retry the exact inspected generation.
 - `POST /api/v1/admin/runtime-pods/:id/recheck`, body `{"pod_uid":"current-uid"}`: immediate physical audit of that exact registered Pod.
@@ -78,4 +92,14 @@ SQL fixtures were isolated databases, not application business databases. No Kub
 - Node helper and Kubernetes adapter tests cover exact container identity, receipts, ledger ownership, stale Jobs, retry and immutable helper-image/storage provenance. Linux amd64 and arm64 helper builds were verified.
 - Frontend service/selection/component tests: 72 passed; TypeScript/Vite build passed. Actual Chrome desktop component acceptance passed for the inspected offline-source flow, explicit/unverified scope boundaries, impact acknowledgement and same-operation history controls. Additional locale/mobile browser runs were blocked by harness teardown, not counted as passing.
 
-[Staging acceptance](superpowers/handoffs/2026-11-10-runtime-fault-eviction.md) records the deployed image, exact recoveries, preserved neighbors/data/certificate and cleanup. Orphan execution without a database binding remains outside this fault-eviction path; the implementation does not claim every legacy Unknown slot is reusable.
+[Staging acceptance](superpowers/handoffs/2026-11-10-runtime-fault-eviction.md) records the deployed image, exact recoveries, preserved neighbors/data/certificate and cleanup. Unbound sources now use the separate orphan recovery path described above. Unknown slots are not declared reusable merely because their database owner is absent.
+
+## Orphan recovery verification (2026-11-10)
+
+- Broad backend regression: 4,912 tests/subtests passed, 422 skipped, 27 packages passed. Darwin uses the existing Linux-only NFS compile overlay. `TestWorkspaceTextConcurrentSave` is explicitly excluded after its `openat .clawmanager-editor-lock: no such file or directory` flake was reproduced with the unchanged HEAD workspace mutation implementation (200-run baseline); it is not counted as passing.
+- Final isolated SQL orphan flow passed in 136.588s; final queued lifecycle/reset admission plus real Start/workspace/atomic rollback group passed in 78.402s. Queued original-source, replacement-waiting, batch and retry cases failed without the new admission predicate, then passed with it.
+- Replacement reset execution and existing reset regressions passed in 17.728s. Start, workspace writes, replacement creation/cutover/cleanup share the orphan guard; admission serializes with lifecycle operation/batch producers and atomically persists guard, source fence and operation.
+- Kubernetes adapter, CRI helper and helper command suites passed; Linux amd64 and arm64 helper builds were checked. Source/controller/Node substitution, same-Node reboot, external writer exclusion (all four Runtime types), failed proof continuation and late heartbeat retirement have dedicated coverage.
+- Frontend: 61 tests and TypeScript/Vite build passed. Actual Chrome component checks at widths 1280 and 390 verified SQL Bound versus residual counts, Unknown recovery availability, exact UID/preflight/acknowledgement, changed-UID invalidation, blockers, phases and pre-fence cancellation, with no page errors or horizontal overflow.
+
+Cluster rollout and exact source retirement are recorded in a separate staging receipt; these local checks do not imply that the old Pods have already been recovered.

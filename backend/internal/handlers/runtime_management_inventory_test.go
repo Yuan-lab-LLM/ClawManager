@@ -118,3 +118,43 @@ func TestRuntimeInventoryDoesNotAttachBindingToDifferentConfiguredPort(t *testin
 		t.Fatalf("binding for stale port attached to configured slot: %+v", items[0].Slots[0])
 	}
 }
+
+func TestRuntimeInventorySeparatesDatabaseBindingsFromResidualCounts(t *testing.T) {
+	h := NewRuntimePoolHandler(nil, &runtimePoolHandlerBindingRepo{}, nil, nil, nil)
+	items := []runtimePoolPodListItem{{RuntimePod: models.RuntimePod{ID: 132, Capacity: 8, UsedSlots: 2, Slots: []models.RuntimeSlot{{Index: 1, InstanceID: inventoryTestInt(25)}}}, AgentReported: true}}
+	h.enrichRuntimeInventory(context.Background(), items)
+	data, err := json.Marshal(items[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]interface{}
+	if err = json.Unmarshal(data, &fields); err != nil {
+		t.Fatal(err)
+	}
+	if fields["bound_instances"] != float64(0) {
+		t.Fatalf("missing verified SQL binding count: %v", fields["bound_instances"])
+	}
+	if items[0].UsedSlots != 2 {
+		t.Fatal("display count changed conservative occupancy authority")
+	}
+}
+func inventoryTestInt(n int) *int { return &n }
+
+func TestRuntimeInventoryHidesProvenRetiredPodWithoutWaitingForHeartbeatExpiry(t *testing.T) {
+	now := time.Now().UTC()
+	for _, window := range []time.Duration{0, time.Minute} {
+		pods := []models.RuntimePod{{ID: 1, State: "deleted", LastSeenAt: &now}, {ID: 2, State: "ready", LastSeenAt: &now}}
+		got := filterCurrentRuntimePods(pods, now, window)
+		if len(got) != 1 || got[0].ID != 2 {
+			t.Fatalf("retired source reappeared with %s heartbeat window: %+v", window, got)
+		}
+	}
+}
+
+func TestRuntimeBindingSummaryDoesNotInventZeroForUnknownDatabaseInventory(t *testing.T) {
+	page := runtimePodPage([]runtimePoolPodListItem{{RuntimePod: models.RuntimePod{ID: 1, Capacity: 8}, BoundInstances: nil}}, runtimePodPageQuery{page: 1, size: 16}, "", time.Now())
+	summary := page["summary"].(map[string]int)
+	if _, known := summary["bound_instances"]; known {
+		t.Fatal("unknown database inventory was presented as zero bindings")
+	}
+}

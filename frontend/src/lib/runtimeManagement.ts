@@ -81,6 +81,8 @@ export function summarizePod(pod: RuntimePod) {
     capacity: pod.capacity,
     ready,
     occupied,
+    bound: pod.bound_instances,
+    residual: slots.filter(slot => !!slot.instance_id && !slot.binding_confirmed && slot.instance_id !== slot.expected_instance_id && slot.reconciliation_state !== undefined).length,
     available: isSchedulable(pod) && pod.bindings_reported !== false && bound >= pod.used_slots ? idle : 0,
     running: count("running"),
     starting: count("starting"),

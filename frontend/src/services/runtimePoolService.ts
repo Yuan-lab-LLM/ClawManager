@@ -139,7 +139,7 @@ export const runtimePoolService = {
     return response.data.data;
   },
 
-  async evict(podId: number, data: { mode: "graceful" | "force" | "recovery"; instance_ids?: number[]; grace_period_seconds?: number; concurrency?: number }): Promise<RuntimeSchedulingOperation> {
+  async evict(podId: number, data: { mode: "graceful" | "force" | "recovery" | "orphan-recovery"; source_pod_uid?: string; instance_ids?: number[]; grace_period_seconds?: number; concurrency?: number }): Promise<RuntimeSchedulingOperation> {
     const response = await api.post(`/admin/runtime-pods/${podId}/evict`, data);
     return response.data.data;
   },

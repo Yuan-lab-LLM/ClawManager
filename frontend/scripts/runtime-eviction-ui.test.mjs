@@ -102,7 +102,7 @@ function setup({ pod = source, pods = [pod], failure, forceSupported = true, com
           queries.push(options);
           return { refetch: async () => { refetches.push(options.queryKey); if (options.queryKey[0] === 'runtime-pod-scale-options' && scaleRefetch) return scaleRefetch(); }, ...(options.queryKey[1] === 'all' ? fullState : options.queryKey[0] === 'runtime-pod-scale-options' ? scaleState : {}), data: options.enabled === false ? undefined : options.queryKey[0] === 'runtime-pod-pools' ? { items: templates.managed_pools ?? [] } : options.queryKey[0] === 'runtime-pod-scale-options' ? scaleOptions : options.queryKey[0] === 'runtime-pods'
             ? options.queryKey[1] === 'page' ? inventory : fullPods
-            : options.queryKey[0] === 'runtime-pod-events' ? [] : { supported_modes: forceSupported ? ['force', 'recovery'] : [], items: historyItems } };
+            : options.queryKey[0] === 'runtime-pod-events' ? [] : { supported_modes: forceSupported ? ['force', 'recovery', 'orphan-recovery'] : [], items: historyItems } };
         },
         keepPreviousData: data => data,
         useQueryClient: () => client,
@@ -809,4 +809,35 @@ test('inspected offline source stays in recovery dialog after fresh inventory om
   assert.ok(action, 'offline source recovery must remain open');
   assert.equal(action.props.pod.id, source.id);
   assert.deepEqual(action.props.verifiedRecoveryIds, [156]);
+});
+
+test('unknown orphan Pod retains a separate recovery entry while ordinary eviction stays blocked', () => {
+  const pod = { ...source, pod_uid: 'old-pod', used_slots: 1, bound_instances: 0, unknown_slots: 2, reconciliation_state: 'unknown', slots: [{ index: 1, ready: true, instance_id: 25, binding_confirmed: false, reconciliation_state: 'residual' }] };
+  const view = setup({ component: 'RuntimePodsPage', pods: [pod] });
+  assert.equal(button(view.render(), 'Evict instances').props.disabled, true);
+  const recovery = button(view.render(), 'Fault recovery');
+  assert.ok(recovery, 'recovery entry must remain discoverable');
+  assert.equal(Boolean(recovery.props.disabled), false);
+  recovery.props.onClick({ currentTarget: { closest: () => ({ hidePopover() {} }) } });
+  const dialog = find(view.render(), n => n.props?.kind === 'evict')[0];
+  assert.equal(dialog.props.initialEvictionMode, 'orphan-recovery');
+});
+
+test('orphan recovery requires explicit UID preflight and acknowledgement before submission', async () => {
+  const pod = { ...source, pod_uid: 'old-pod', bound_instances: 0, unknown_slots: 2, slots: [] };
+  const view = setup({ pod, pods: [pod] });
+  const radio = input(view.render(), 'radio', 'orphan-recovery');
+  assert.ok(radio, 'orphan recovery choice must be visible');
+  radio.props.onChange();
+  acknowledge(view);
+  assert.equal(button(view.render(), 'Start eviction').props.disabled, true);
+  button(view.render(), 'Check source').props.onClick();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(JSON.parse(JSON.stringify(view.preflightRequests.at(-1))), { instance_ids: [], target_pod_id: 0, mode: 'orphan-recovery', source_pod_id: source.id, source_pod_uid: 'old-pod' });
+  acknowledge(view);
+  assert.equal(button(view.render(), 'Start eviction').props.disabled, false);
+  button(view.render(), 'Start eviction').props.onClick();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(view.calls(), 1);
+  assert.match(renderToStaticMarkup(view.render()), /retire the selected old Pod/i);
 });

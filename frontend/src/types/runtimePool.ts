@@ -48,6 +48,7 @@ export interface RuntimePod {
   capabilities: string[];
   state: "pending" | "ready" | "draining" | "unhealthy" | "deleted" | string;
   used_slots: number;
+  bound_instances?: number;
   capacity: number;
   draining: boolean;
   cpu_millis_used?: number;
@@ -110,6 +111,7 @@ export interface RuntimePodPageRequest {
 }
 
 export interface RuntimePodSummary {
+  bound_instances?: number;
   pods: number;
   online: number;
   schedulable: number;
@@ -218,12 +220,16 @@ export interface RuntimePodEvent {
 }
 
 export interface RuntimeSchedulingRequest {
+  mode?: "orphan-recovery";
+  source_pod_id?: number;
+  source_pod_uid?: string;
   instance_ids: number[];
   target_pod_id: number;
   target_slot?: number;
 }
 
 export interface RuntimeSchedulingItem {
+  orphan_recovery?: { phase: string; receipt?: Record<string, unknown> };
   recovery?: { phase: string; scope: Record<string, unknown>; receipt?: Record<string, unknown> };
   instance_id: number;
   source_pod_id?: number;

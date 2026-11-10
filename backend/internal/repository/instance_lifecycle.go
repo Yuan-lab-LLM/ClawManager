@@ -24,6 +24,11 @@ func (r *instanceRepository) AcquireLifecycleLock(ctx context.Context, id int) (
 		release()
 		return nil, err
 	}
+	if err := CheckRuntimeOrphanLifecycleGuard(ctx, r.sess, id); err != nil {
+		release()
+		return nil, err
+	}
+
 	return release, nil
 }
 

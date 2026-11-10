@@ -17,7 +17,8 @@ func manualStartIntentRepository(t *testing.T, runtimeType string) (*instanceRep
 		`CREATE TABLE instance_runtime_bindings (instance_id INT PRIMARY KEY,runtime_pod_id BIGINT,gateway_id VARCHAR(128),generation INT,state VARCHAR(32))`,
 		`CREATE TABLE runtime_management_admission_lock (id INT PRIMARY KEY,revision INT)`,
 		`INSERT INTO runtime_management_admission_lock VALUES (1,0)`,
-		`CREATE TABLE runtime_management_operations (kind VARCHAR(32),status VARCHAR(32),request_json JSON)`,
+		`CREATE TABLE runtime_management_operations (id VARCHAR(64) PRIMARY KEY,kind VARCHAR(32),status VARCHAR(32),request_json JSON)`,
+		`CREATE TABLE instance_lifecycle_manual_guards(instance_id INT PRIMARY KEY,token VARCHAR(64))`,
 		`CREATE TABLE runtime_pod_deletion_intents (namespace VARCHAR(64),deployment_name VARCHAR(64),deployment_uid VARCHAR(64))`,
 	} {
 		if _, err := r.sess.SQL().Exec(query); err != nil {

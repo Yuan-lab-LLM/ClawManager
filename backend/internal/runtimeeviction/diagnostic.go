@@ -34,7 +34,7 @@ func FailureJSON(err error) []byte {
 	case err != nil:
 		text := err.Error()
 		switch {
-		case text == "ledger owner or generation changed":
+		case text == "ledger owner or generation changed" || text == "invalid protected writer ledger identity" || text == "invalid protected ledger filename":
 			message = failureMessages[1]
 		case strings.HasPrefix(text, "untrusted "):
 			message = failureMessages[3]
@@ -42,7 +42,7 @@ func FailureJSON(err error) []byte {
 			message = failureMessages[5]
 		case text == "missing ledger requires positively identified pinned container" || text == "invalid durable stop intent" || text == "container identity mismatch" || text == "sandbox identity mismatch" || text == "container state unknown" || text == "old source still executing" || strings.HasPrefix(text, "CRI "):
 			message = failureMessages[4]
-		case text == "incomplete recovery scope" || text == "noncanonical slot or gateway identity" || text == "unsupported container identity" || text == "invalid recovery identity" || text == "workspace differs from scope":
+		case text == "invalid orphan recovery scope" || text == "incomplete orphan recovery identity or terminal barrier" || text == "incomplete recovery scope" || text == "noncanonical slot or gateway identity" || text == "unsupported container identity" || text == "invalid recovery identity" || text == "workspace differs from scope":
 			message = failureMessages[7]
 		}
 	}

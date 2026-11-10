@@ -21,7 +21,7 @@ func TestCleanupV2GatewayBindingPreservesStrictUnconfirmedStop(t *testing.T) {
 			bindings.bindings[209] = &models.InstanceRuntimeBinding{InstanceID: 209, RuntimePodID: 9, GatewayID: "gw-209-2", Generation: 2, State: RuntimeGatewayBindingRunning}
 			endpoint := "https://runtime"
 			agent := &strictStopRuntimeAgent{fakeRuntimeAgentClient: &fakeRuntimeAgentClient{deleteErr: ErrRuntimeAgentNotFound}, strict: strict}
-			service := &instanceService{bindingRepo: bindings, runtimePodRepo: &fakeRuntimePodRepo{pods: map[int64]*models.RuntimePod{9: {ID: 9, AgentEndpoint: &endpoint}}}, agentClient: agent}
+			service := &instanceService{instanceRepo: newV2LifecycleInstanceRepo(), bindingRepo: bindings, runtimePodRepo: &fakeRuntimePodRepo{pods: map[int64]*models.RuntimePod{9: {ID: 9, AgentEndpoint: &endpoint}}}, agentClient: agent}
 			err := service.cleanupV2GatewayBinding(context.Background(), &models.Instance{ID: 209})
 			if strict {
 				if err == nil || bindings.bindings[209] == nil || bindings.deleteAndReleaseCalls[209] != 0 {
@@ -40,7 +40,7 @@ func TestCleanupV2GatewayBindingStrictMissingIdentityPreservesBinding(t *testing
 			bindings := newFakeRuntimeBindingRepo()
 			bindings.bindings[209] = &models.InstanceRuntimeBinding{InstanceID: 209, RuntimePodID: 9, GatewayID: "gw-209-2"}
 			endpoint := "https://runtime"
-			service := &instanceService{bindingRepo: bindings, runtimePodRepo: &fakeRuntimePodRepo{pods: map[int64]*models.RuntimePod{9: {ID: 9, AgentEndpoint: &endpoint}}}, agentClient: &strictStopRuntimeAgent{fakeRuntimeAgentClient: &fakeRuntimeAgentClient{}, strict: true}}
+			service := &instanceService{instanceRepo: newV2LifecycleInstanceRepo(), bindingRepo: bindings, runtimePodRepo: &fakeRuntimePodRepo{pods: map[int64]*models.RuntimePod{9: {ID: 9, AgentEndpoint: &endpoint}}}, agentClient: &strictStopRuntimeAgent{fakeRuntimeAgentClient: &fakeRuntimeAgentClient{}, strict: true}}
 			switch missing {
 			case "pod-repository":
 				service.runtimePodRepo = nil
@@ -837,7 +837,7 @@ func TestInstanceServiceRestartWithEnvironmentMergesDesiredState(t *testing.T) {
 		RuntimeGeneration:        3,
 		EnvironmentOverridesJSON: existing,
 	}
-	service := &instanceService{instanceRepo: instanceRepo}
+	service := &instanceService{instanceRepo: instanceRepo, bindingRepo: newFakeRuntimeBindingRepo(), agentClient: &fakeRuntimeAgentClient{}}
 
 	configureLifecycleModels(t, service)
 	err = service.RestartWithEnvironment(191, map[string]string{
@@ -970,7 +970,7 @@ func TestInstanceServiceRestartWithEnvironmentRemovesDesiredState(t *testing.T) 
 		RuntimeGeneration:        5,
 		EnvironmentOverridesJSON: existing,
 	}
-	service := &instanceService{instanceRepo: instanceRepo}
+	service := &instanceService{instanceRepo: instanceRepo, bindingRepo: newFakeRuntimeBindingRepo(), agentClient: &fakeRuntimeAgentClient{}}
 
 	configureLifecycleModels(t, service)
 	err = service.RestartWithEnvironment(
@@ -1238,6 +1238,8 @@ func TestInstanceServiceResumePendingDeletionsOnlyRetriesExplicitDeletingRows(t 
 	}
 	service := &instanceService{
 		instanceRepo:      instanceRepo,
+		bindingRepo:       newFakeRuntimeBindingRepo(),
+		agentClient:       &fakeRuntimeAgentClient{},
 		deletionsInFlight: map[int]struct{}{},
 	}
 

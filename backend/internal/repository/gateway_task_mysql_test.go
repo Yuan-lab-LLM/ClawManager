@@ -50,10 +50,12 @@ func TestRuntimeTaskMySQLRevocationLifecycle(t *testing.T) {
 	}
 	// All tables below were created by this test after the empty-schema check.
 	t.Cleanup(func() {
-		for _, table := range []string{"browser_writer_registry", "team_workspace_write_intents", "team_members", "teams", "instance_workspace_write_fences", "instance_workspace_write_intents", "gateway_runtime_upgrade_stops", "instance_commands", "instance_desired_state", "instance_runtime_bindings", "runtime_pods", "gateway_runtime_upgrades", "gateway_runtime_maintenance", "gateway_runtime_protocols", "gateway_runtime_task_models", "gateway_runtime_tasks", "llm_model_user_grants", "llm_models", "instances", "users"} {
+		for _, table := range []string{"instance_lifecycle_manual_guards", "runtime_management_operations", "browser_writer_registry", "team_workspace_write_intents", "team_members", "teams", "instance_workspace_write_fences", "instance_workspace_write_intents", "gateway_runtime_upgrade_stops", "instance_commands", "instance_desired_state", "instance_runtime_bindings", "runtime_pods", "gateway_runtime_upgrades", "gateway_runtime_maintenance", "gateway_runtime_protocols", "gateway_runtime_task_models", "gateway_runtime_tasks", "llm_model_user_grants", "llm_models", "instances", "users"} {
 			_, _ = sess.SQL().Exec("DROP TABLE IF EXISTS " + table)
 		}
 	})
+	exec("CREATE TABLE runtime_management_operations(id VARCHAR(64) PRIMARY KEY,kind VARCHAR(32),status VARCHAR(32))")
+	exec("CREATE TABLE instance_lifecycle_manual_guards(instance_id INT PRIMARY KEY,token VARCHAR(64))")
 	exec("CREATE TABLE users (id INT PRIMARY KEY,is_active BOOLEAN NOT NULL) ENGINE=InnoDB")
 	exec("CREATE TABLE instances (id INT PRIMARY KEY,user_id INT NOT NULL,runtime_generation INT NOT NULL,instance_mode VARCHAR(16) NOT NULL DEFAULT 'pro',status VARCHAR(32) NOT NULL DEFAULT 'running') ENGINE=InnoDB")
 	teamGateFixtureTables(t, sess)

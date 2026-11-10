@@ -116,6 +116,9 @@ func (s *RuntimeAssignmentService) EnsureDesired(ctx context.Context, a RuntimeA
 			if cm.Data["container_termination_proof"] != "" && cm.Data["container_stop_released"] != "true" {
 				return fmt.Errorf("new runtime assignment generation requires finalized source slot release")
 			}
+			if err := retainStoppedSourceAudit(cm, current); err != nil {
+				return err
+			}
 		}
 		// Validate current identity and migration authority before creating a Secret.
 		if err := s.ensureRuntimeAssignmentSecret(ctx, a); err != nil {
@@ -130,6 +133,7 @@ func (s *RuntimeAssignmentService) EnsureDesired(ctx context.Context, a RuntimeA
 		cm.Labels["clawmanager.io/purpose"] = "lite-instance"
 		cm.Labels["clawmanager.io/needs-reconcile"] = "true"
 		delete(cm.Annotations, faultEvictionAnnotation)
+		delete(cm.Annotations, orphanOperation)
 		cm.Data = map[string]string{
 			"instance_id": strconv.Itoa(a.InstanceID), "user_id": strconv.Itoa(a.UserID),
 			"generation": strconv.Itoa(a.Generation), "runtime_type": a.RuntimeType,

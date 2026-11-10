@@ -47,7 +47,7 @@ export default function RuntimeActions({
   pod?: RuntimePod;
   initialIds?: number[];
   verifiedRecoveryIds?: number[];
-  initialEvictionMode?: "graceful" | "force" | "recovery";
+  initialEvictionMode?: "graceful" | "force" | "recovery" | "orphan-recovery";
   pods: RuntimePod[];
   onClose: () => void;
   onSubmitted: () => void;
@@ -91,7 +91,7 @@ export default function RuntimeActions({
   const [grace, setGrace] = useState(30);
   const [concurrency, setConcurrency] = useState(2);
   const [acknowledged, setAcknowledged] = useState(false);
-  const [evictionMode, setEvictionMode] = useState<"graceful" | "force" | "recovery">(
+  const [evictionMode, setEvictionMode] = useState<"graceful" | "force" | "recovery" | "orphan-recovery">(
     initialEvictionMode,
   );
   if (inferInitialType && initialResolved) {
@@ -136,7 +136,11 @@ export default function RuntimeActions({
     target_pod_id: Number(targetId),
     ...(slot && ids.length === 1 ? { target_slot: Number(slot) } : {}),
   };
+  const orphanMode = evictionMode === "orphan-recovery";
+  const orphanRequest: RuntimeSchedulingRequest = { instance_ids: [], target_pod_id: 0, mode: "orphan-recovery", source_pod_id: pod?.id, source_pod_uid: pod?.pod_uid };
   const fingerprint = JSON.stringify({
+    evictionMode,
+    orphanSource: orphanMode ? orphanRequest : undefined,
     selectedType,
     typeVersion,
     request,
@@ -173,11 +177,12 @@ export default function RuntimeActions({
   const recoverySupported = history.data?.supported_modes.includes("recovery") === true;
   const recoveryIds = new Set([...(pod ? recoveryInstanceIds(pod) : []), ...verifiedRecoveryIds.filter((id) => Number.isSafeInteger(id) && id > 0)]);
   const recoverySelectionValid = ids.every((id) => recoveryIds.has(id));
-  const evictionAllowed = !!pod && (evictionMode === "recovery"
+  const orphanSupported = history.data?.supported_modes.includes("orphan-recovery") === true;
+  const evictionAllowed = !!pod && (orphanMode ? pod.id > 0 && !!pod.pod_uid && orphanSupported : evictionMode === "recovery"
     ? pod.id > 0 && recoverySupported && recoverySelectionValid
     : canEvictPod(pod));
   const submit = async (check = false) => {
-    if (kind === "evict" && (!evictionAllowed || !acknowledged || busy || insufficientEvictionCapacity || (evictionMode === "force" && !forceSupported))) return;
+    if (kind === "evict" && (!evictionAllowed || (!check && (!acknowledged || (orphanMode && !validated))) || busy || insufficientEvictionCapacity || (evictionMode === "force" && !forceSupported))) return;
     if (kind === "schedule" && (
       typeVersion !== typeVersionRef.current || !canCheck || busy || (!check && !validated)
     )) return;
@@ -185,14 +190,15 @@ export default function RuntimeActions({
     setError(undefined);
     try {
       if (check) {
-        const result = await runtimePoolService.preflightScheduling(request);
+        setAcknowledged(false);
+        const result = await runtimePoolService.preflightScheduling(orphanMode ? orphanRequest : request);
         if (typeVersion === typeVersionRef.current) setPreflight({ key: fingerprint, result });
         return;
       }
       if (kind === "evict" && pod)
         await runtimePoolService.evict(pod.id, {
           mode: evictionMode,
-          ...(evictionMode === "recovery" ? { instance_ids: ids } : { grace_period_seconds: grace, concurrency }),
+          ...(orphanMode ? { source_pod_uid: pod.pod_uid, instance_ids: [] } : evictionMode === "recovery" ? { instance_ids: ids } : { grace_period_seconds: grace, concurrency }),
         });
       else await runtimePoolService.schedule(request);
       if (kind !== "schedule" || typeVersion === typeVersionRef.current) onSubmitted();
@@ -548,7 +554,20 @@ export default function RuntimeActions({
               {!recoverySelectionValid && <ErrorMessage>{t("runtimePods.invalidInitialSelection")}</ErrorMessage>}
             </>}
           </div>
-          {evictionMode !== "recovery" && <div className="grid grid-cols-2 gap-3">
+          <div className={`rounded border p-4 ${orphanMode ? "border-amber-300 bg-amber-50" : "border-slate-200"}`}>
+            <label className="flex items-center gap-2 text-sm font-medium">
+              <input type="radio" name="eviction-mode" value="orphan-recovery" checked={orphanMode} disabled={busy || !orphanSupported} onChange={() => { setEvictionMode("orphan-recovery"); setAcknowledged(false); setError(undefined); setPreflight(undefined); }} />
+              {t("runtimePods.orphanRecovery")}
+            </label>
+            <p className="ml-5 mt-2 text-xs leading-5">{t("runtimePods.orphanRecoveryHelp")}</p>
+            {!orphanSupported && <p role="status" className="mt-2 text-xs">{t("runtimePods.faultRecoveryUnavailable")}</p>}
+            {orphanMode && <>
+              <p className="mt-2 break-all text-xs text-slate-600">Pod UID: {pod.pod_uid || "—"}</p>
+              <button type="button" className={`${buttonClass} mt-3`} disabled={busy || !evictionAllowed} onClick={() => void submit(true)}>{t("runtimePods.checkOrphanSource")}</button>
+              {preflight?.key === fingerprint && (preflight.result.allowed ? <p role="status" className="mt-2 text-xs text-emerald-700">{t("runtimePods.orphanSourceVerified")}</p> : <div className="mt-2" role="status">{preflight.result.blockers.map((reason, i) => <ErrorMessage key={i}>{reason}</ErrorMessage>)}</div>)}
+            </>}
+          </div>
+          {evictionMode !== "recovery" && !orphanMode && <div className="grid grid-cols-2 gap-3">
             <label className="space-y-2 text-xs">
               <span className="block">{t("runtimePods.grace")}</span>
               <select
@@ -612,7 +631,7 @@ export default function RuntimeActions({
                 setError(undefined);
               }}
             />
-            {t(evictionMode === "recovery" ? "runtimePods.faultRecoveryAcknowledge" : "runtimePods.acknowledge")}
+            {t(orphanMode ? "runtimePods.orphanRecoveryAcknowledge" : evictionMode === "recovery" ? "runtimePods.faultRecoveryAcknowledge" : "runtimePods.acknowledge")}
           </label>
           <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
             <button type="button" className={buttonClass} onClick={onClose}>
@@ -621,11 +640,11 @@ export default function RuntimeActions({
             <button
               type="button"
               className={`${primaryClass} !border-red-600 !bg-red-600`}
-              disabled={!evictionAllowed || !acknowledged || busy || (evictionMode !== "recovery" && !occupied) || insufficientEvictionCapacity || (evictionMode === "force" && !forceSupported)}
+              disabled={!evictionAllowed || !acknowledged || busy || (orphanMode && !validated) || (evictionMode !== "recovery" && !orphanMode && !occupied) || insufficientEvictionCapacity || (evictionMode === "force" && !forceSupported)}
               onClick={() => void submit()}
             >
               {t(busy ? "runtimePods.startingOp" : "runtimePods.startEviction")}{" "}
-              {evictionMode === "recovery" ? ids.length ? `(${ids.length})` : "" : `(${summarizePod(pod).occupied})`}
+              {orphanMode ? "" : evictionMode === "recovery" ? ids.length ? `(${ids.length})` : "" : `(${summarizePod(pod).occupied})`}
             </button>
           </div>
         </form>
@@ -716,10 +735,11 @@ export default function RuntimeActions({
                       key={item.instance_id}
                       className="flex flex-wrap justify-between gap-2 py-2 text-xs"
                     >
-                      <span>#{item.instance_id}</span>
+                      <span>{item.orphan_recovery ? `Pod #${item.source_pod_id}` : `#${item.instance_id}`}</span>
                       <span className="text-slate-500">
                         {t(`runtimePods.${item.state}`)}
                       </span>
+                      {item.orphan_recovery?.phase && <p className="w-full break-words text-slate-600">{t("runtimePods.recoveryPhase")}: {item.orphan_recovery.phase}</p>}
                       {item.recovery?.phase && <p className="w-full break-words text-slate-600">{t("runtimePods.recoveryPhase")}: {item.recovery.phase}</p>}
                       {item.error_message && (
                         <p className="w-full break-words leading-5 text-red-600">
@@ -742,8 +762,8 @@ export default function RuntimeActions({
                     </div>
                   ))}
                 </div>
-                {(operation.items?.some((item) => item.recovery)
-                  ? ["pending", "processing", "needs_attention"].includes(operation.status) && operation.items.every((item) => item.recovery?.phase === "planned")
+                {(operation.items?.some((item) => item.recovery || item.orphan_recovery)
+                  ? ["pending", "processing", "needs_attention"].includes(operation.status) && operation.items.every((item) => (item.recovery?.phase ?? item.orphan_recovery?.phase) === "planned")
                   : ["pending", "processing"].includes(operation.status) ||
                     (operation.kind === "scale_in" && ["starting", "needs_attention"].includes(operation.status))) && (
                   <button

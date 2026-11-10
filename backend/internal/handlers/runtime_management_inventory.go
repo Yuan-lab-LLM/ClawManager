@@ -116,6 +116,8 @@ func (h *RuntimePoolHandler) enrichRuntimeInventory(ctx context.Context, items [
 			continue
 		}
 		pod.BindingsReported = true
+		boundCount := len(byPod[pod.ID])
+		pod.BoundInstances = &boundCount
 		configuredPorts := false
 		for _, slot := range pod.Slots {
 			if slot.GatewayPort != nil {

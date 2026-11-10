@@ -10,7 +10,7 @@ const pod = { id: 1, runtime_type: 'opencode', namespace: 'runtime', deployment_
 ] };
 
 test('agent health remains independent from bound instance state', () => {
-  assert.deepEqual(summarizePod(pod), { capacity: 4, ready: 3, occupied: 2, available: 1, running: 1, starting: 0, migrating: 0, error: 1, idle: 1, unknown: 0, unavailable: 1 });
+  assert.deepEqual(summarizePod(pod), { capacity: 4, ready: 3, occupied: 2, bound: undefined, residual: 0, available: 1, running: 1, starting: 0, migrating: 0, error: 1, idle: 1, unknown: 0, unavailable: 1 });
   assert.equal(slotState(pod.slots[1]), 'error');
   assert.equal(slotState({ ready: false, instance_id: 10, instance_state: 'running' }), 'unavailable');
 });
@@ -159,4 +159,12 @@ test('recovery scope uses database expected owners and rejects unconfirmed physi
     { expected_instance_id: 13, ready: false },
   ] }), [10, 11, 13]);
   assert.deepEqual(recoveryInstanceIds({}), []);
+});
+
+test('SQL binding count is separate from unconfirmed residual owners', () => {
+ const summary=summarizePod({...pod,bound_instances:0,used_slots:2,slots:[{ready:true,index:1,instance_id:25,reconciliation_state:'residual',binding_confirmed:false},{ready:true,index:2,instance_id:161,reconciliation_state:'unknown',binding_confirmed:false}]});
+ assert.equal(summary.bound,0);
+ assert.equal(summary.residual,2);
+ assert.equal(summary.occupied,2);
+ assert.equal(summary.available,0);
 });

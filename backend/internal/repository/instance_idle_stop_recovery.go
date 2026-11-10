@@ -92,6 +92,12 @@ func (r *InstanceAutoStopRepository) CompleteStopFromRecovery(ctx context.Contex
 			return err
 		}
 		if !proven {
+			proven, err = orphanRecoveryStopProof(ctx, tx, op)
+			if err != nil {
+				return err
+			}
+		}
+		if !proven {
 			return nil
 		}
 		now := time.Now().UTC()
@@ -142,13 +148,21 @@ type recoveredStopJournalItem struct {
 }
 
 func validateRecoveredStopJournal(operation string, item recoveredStopJournalItem, op models.InstanceIdleStopOperation) error {
+	if item.Recovery.ResultState != "stopped" && item.Recovery.ResultState != "deleting" {
+		return fmt.Errorf("released recovery continuation is not a stopped source")
+	}
+	return validateRecoveredSourceJournal(operation, item, op)
+}
+
+func validateRecoveredSourceJournal(operation string, item recoveredStopJournalItem, op models.InstanceIdleStopOperation) error {
+
 	j := item.Recovery
 	b := j.SourceBinding
 	s := j.Scope
 	alias := func(gateway string) bool {
 		return gateway == fmt.Sprintf("gw-%d-%d", op.InstanceID, op.Generation) || gateway == fmt.Sprintf("pending-%d-%d", op.InstanceID, op.Generation)
 	}
-	if item.SourcePodID != op.RuntimePodID || item.SourcePodUID != op.PodUID || !alias(item.SourceGatewayID) || j.SourceUserID != op.UserID || j.SourceEndpoint != op.Endpoint || b.InstanceID != op.InstanceID || b.RuntimePodID != op.RuntimePodID || b.Generation != op.Generation || !alias(op.GatewayID) || !alias(b.GatewayID) || b.WorkspacePath != op.WorkspacePath || b.GatewayPort <= 0 || (j.ResultState != "stopped" && j.ResultState != "deleting") {
+	if item.SourcePodID != op.RuntimePodID || item.SourcePodUID != op.PodUID || !alias(item.SourceGatewayID) || j.SourceUserID != op.UserID || j.SourceEndpoint != op.Endpoint || b.InstanceID != op.InstanceID || b.RuntimePodID != op.RuntimePodID || b.Generation != op.Generation || !alias(op.GatewayID) || !alias(b.GatewayID) || b.WorkspacePath != op.WorkspacePath || b.GatewayPort <= 0 {
 		return fmt.Errorf("released recovery source differs from native stop")
 	}
 	if err := s.Validate(); err != nil {

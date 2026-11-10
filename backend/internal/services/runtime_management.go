@@ -21,6 +21,7 @@ import (
 const RuntimeForceEvictionUnavailable = "Runtime management requires the confirmed slot teardown lifecycle"
 
 type RuntimeSchedulingRequest struct {
+	SourcePodUID       string `json:"source_pod_uid,omitempty"`
 	SourcePodID        int64  `json:"source_pod_id,omitempty"`
 	InstanceIDs        []int  `json:"instance_ids"`
 	TargetPodID        int64  `json:"target_pod_id"`
@@ -31,19 +32,20 @@ type RuntimeSchedulingRequest struct {
 }
 
 type RuntimeSchedulingItem struct {
-	Recovery         *RuntimeFaultEvictionJournal `json:"recovery,omitempty"`
-	SourcePlacement  *RuntimeEvictionPlacement    `json:"source_placement,omitempty"`
-	StopGraceSeconds int                          `json:"-"`
-	InstanceID       int                          `json:"instance_id"`
-	SourcePodID      int64                        `json:"source_pod_id"`
-	TargetPodID      int64                        `json:"target_pod_id"`
-	TargetSlot       int                          `json:"target_slot"`
-	State            string                       `json:"state"`
-	ErrorMessage     string                       `json:"error_message,omitempty"`
-	SourceGeneration int                          `json:"source_generation"`
-	SourceGatewayID  string                       `json:"source_gateway_id"`
-	SourcePodUID     string                       `json:"source_pod_uid"`
-	TargetPodUID     string                       `json:"target_pod_uid"`
+	OrphanRecovery   *RuntimeOrphanRecoveryJournal `json:"orphan_recovery,omitempty"`
+	Recovery         *RuntimeFaultEvictionJournal  `json:"recovery,omitempty"`
+	SourcePlacement  *RuntimeEvictionPlacement     `json:"source_placement,omitempty"`
+	StopGraceSeconds int                           `json:"-"`
+	InstanceID       int                           `json:"instance_id"`
+	SourcePodID      int64                         `json:"source_pod_id"`
+	TargetPodID      int64                         `json:"target_pod_id"`
+	TargetSlot       int                           `json:"target_slot"`
+	State            string                        `json:"state"`
+	ErrorMessage     string                        `json:"error_message,omitempty"`
+	SourceGeneration int                           `json:"source_generation"`
+	SourceGatewayID  string                        `json:"source_gateway_id"`
+	SourcePodUID     string                        `json:"source_pod_uid"`
+	TargetPodUID     string                        `json:"target_pod_uid"`
 }
 
 type RuntimeSchedulingPreflight struct {
@@ -211,6 +213,9 @@ func (s *RuntimeManagementService) Scheduling(ctx context.Context, podID int64, 
 }
 
 func (s *RuntimeManagementService) Preflight(ctx context.Context, req RuntimeSchedulingRequest) (*RuntimeSchedulingPreflight, error) {
+	if req.Mode == "orphan-recovery" {
+		return s.orphanRecoveryPreflight(ctx, req)
+	}
 	if req.Mode == "recovery" {
 		return s.recoveryEvictionPreflight(ctx, req)
 	}
@@ -468,6 +473,9 @@ func (s *RuntimeManagementService) preflightWithInventory(ctx context.Context, r
 }
 
 func (s *RuntimeManagementService) Submit(ctx context.Context, req RuntimeSchedulingRequest, actor *int) (*RuntimeManagementOperation, error) {
+	if req.Mode == "orphan-recovery" {
+		return nil, errors.New("orphan recovery must use the Pod eviction endpoint")
+	}
 	if req.Mode == "recovery" {
 		return nil, errors.New("fault recovery must use the Pod eviction endpoint")
 	}
@@ -482,6 +490,9 @@ func (s *RuntimeManagementService) Submit(ctx context.Context, req RuntimeSchedu
 }
 
 func (s *RuntimeManagementService) Evict(ctx context.Context, podID int64, req RuntimeSchedulingRequest, actor *int) (*RuntimeManagementOperation, error) {
+	if req.Mode == "orphan-recovery" {
+		return s.submitOrphanRecovery(ctx, podID, req, actor)
+	}
 	if req.Mode != "" && req.Mode != "graceful" && req.Mode != "force" && req.Mode != "recovery" {
 		return nil, errors.New("eviction mode must be graceful, force or recovery")
 	}
@@ -743,6 +754,9 @@ func (s *RuntimeManagementService) operations(ctx context.Context, activeOnly bo
 				op.ErrorMessage = "interrupted operation requires administrator recheck"
 			}
 		}
+		if op.Kind == "orphan_recovery" && len(op.Items) == 1 && op.Items[0].OrphanRecovery != nil {
+			op.Phase = op.Items[0].OrphanRecovery.Phase
+		}
 		items = append(items, op)
 	}
 	return items, rows.Err()
@@ -758,7 +772,7 @@ func (s *RuntimeManagementService) Process(ctx context.Context) error {
 	}
 	// Process returns only after every worker exits. A processing row left by
 	// this owner is interrupted too (for example SQL failed after a replica CAS).
-	_, err := s.sess.SQL().ExecContext(ctx, `UPDATE runtime_management_operations SET status=CASE WHEN kind='eviction' AND JSON_UNQUOTE(JSON_EXTRACT(request_json,'$.mode'))='recovery' THEN 'pending' ELSE 'needs_attention' END,owner_token='',updated_at=? WHERE status='processing'`, time.Now().UTC())
+	_, err := s.sess.SQL().ExecContext(ctx, `UPDATE runtime_management_operations SET status=CASE WHEN kind='orphan_recovery' OR (kind='eviction' AND JSON_UNQUOTE(JSON_EXTRACT(request_json,'$.mode'))='recovery') THEN 'pending' ELSE 'needs_attention' END,owner_token='',updated_at=? WHERE status='processing'`, time.Now().UTC())
 	if err != nil {
 		return err
 	}
@@ -825,6 +839,9 @@ func (s *RuntimeManagementService) Process(ctx context.Context) error {
 				}
 			}
 		}()
+	}
+	if kind == "orphan_recovery" {
+		return s.processOrphanRecovery(operationCtx, op)
 	}
 	if kind == "scale_in" {
 		return s.processScaleIn(operationCtx, op, raw)
@@ -1306,6 +1323,9 @@ func (s *RuntimeManagementService) Cancel(ctx context.Context, id string) error 
 	if readErr != nil {
 		return readErr
 	}
+	if op.Kind == "orphan_recovery" {
+		return s.cancelOrphanRecovery(ctx, id)
+	}
 	var req RuntimeSchedulingRequest
 	if op.Kind == "eviction" && json.Unmarshal([]byte(raw), &req) == nil && req.Mode == "recovery" {
 		return s.cancelRecoveryEviction(ctx, id)
@@ -1373,6 +1393,9 @@ func (s *RuntimeManagementService) runtimeManagementOperation(ctx context.Contex
 				break
 			}
 		}
+	}
+	if op.Kind == "orphan_recovery" && len(op.Items) == 1 && op.Items[0].OrphanRecovery != nil {
+		op.Phase = op.Items[0].OrphanRecovery.Phase
 	}
 	return op, raw, owner, nil
 }
@@ -1452,6 +1475,10 @@ func (s *RuntimeManagementService) retryOperation(ctx context.Context, id string
 		}
 		op.Phase, op.ErrorMessage = journal.Phase, journal.ErrorMessage
 		return op, err
+	}
+	if op.Kind == "orphan_recovery" {
+		op.Status = "pending"
+		return op, s.save(ctx, op)
 	}
 	var recoveryReq RuntimeSchedulingRequest
 	if op.Kind == "eviction" && json.Unmarshal([]byte(raw), &recoveryReq) == nil && recoveryReq.Mode == "recovery" {

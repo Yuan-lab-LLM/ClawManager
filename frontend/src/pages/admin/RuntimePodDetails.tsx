@@ -130,8 +130,8 @@ export default function RuntimePodDetails({
           warning={counts.unavailable > 0 || counts.unknown > 0}
         />
         <Metric
-          label={t("runtimePods.occupied")}
-          value={`${counts.occupied} / ${counts.capacity}`}
+          label={t(counts.bound === undefined ? "runtimePods.occupied" : "runtimePods.cardBound")}
+          value={`${counts.bound ?? counts.occupied} / ${counts.capacity}`}
           detail={`${t("runtimePods.running")} ${counts.running} · ${t("runtimePods.error")} ${counts.error}`}
         />
         <Metric

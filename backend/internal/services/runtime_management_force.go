@@ -13,6 +13,9 @@ import (
 func (s *RuntimeManagementService) SupportedEvictionModes() []string {
 	if s != nil && s.scheduler != nil && s.scheduler.deployments != nil && requiresConfirmedGatewayStop(s.scheduler.agentClient) {
 		if _, ok := s.scheduler.deployments.(faultEvictionStopper); ok {
+			if s.supportsOrphanRecovery() {
+				return []string{"graceful", "force", "recovery", "orphan-recovery"}
+			}
 			return []string{"graceful", "force", "recovery"}
 		}
 		return []string{"graceful", "force"}

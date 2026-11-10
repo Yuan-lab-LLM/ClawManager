@@ -2,6 +2,8 @@
 
 用户已确认复用现有驱逐功能恢复实例与 Pod 的关系。原先“停止整个运行池”的草案不采用。
 
+本设计描述有绑定的实例故障驱逐。无绑定旧 Pod 的精确恢复通过独立的 `orphan-recovery` 模式补充，见[无绑定残留清理设计](2026-11-10-runtime-orphan-cleanup-design.md)；不会扩大本模式的实例选择范围。
+
 ## 范围
 
 - 以数据库业务意图为准，按实例／槽位处理；默认只选择 creating、error、stopped、deleting 的现有绑定。

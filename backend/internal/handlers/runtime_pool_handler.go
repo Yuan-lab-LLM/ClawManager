@@ -52,6 +52,7 @@ type runtimeUpgradePreflightRequest struct {
 }
 
 type runtimePoolPodListItem struct {
+	BoundInstances *int `json:"bound_instances,omitempty"`
 	models.RuntimePod
 	AgentReported    bool     `json:"agent_reported"`
 	BindingsReported bool     `json:"bindings_reported"`
@@ -416,13 +417,13 @@ func (h *RuntimePoolHandler) runtimePodListHeartbeatTimeout() time.Duration {
 }
 
 func filterCurrentRuntimePods(pods []models.RuntimePod, now time.Time, heartbeatTimeout time.Duration) []models.RuntimePod {
-	if heartbeatTimeout <= 0 {
-		return pods
-	}
 	cutoff := now.UTC().Add(-runtimePodListStaleWindowMultiplier * heartbeatTimeout)
 	current := pods[:0]
 	for _, pod := range pods {
-		if pod.LastSeenAt != nil && pod.LastSeenAt.UTC().Before(cutoff) {
+		if pod.State == "deleted" {
+			continue
+		}
+		if heartbeatTimeout > 0 && pod.LastSeenAt != nil && pod.LastSeenAt.UTC().Before(cutoff) {
 			continue
 		}
 		current = append(current, pod)
