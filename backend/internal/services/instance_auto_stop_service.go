@@ -299,6 +299,15 @@ func (s *InstanceAutoStopService) resumeGuarded(ctx context.Context, op models.I
 	}
 	// The pending snapshot may predate another controller's successful receipt.
 	op.Phase = a.StopPhase
+	if op.Phase != "teardown_confirmed" {
+		if completed, recoveryErr := s.store.CompleteStopFromRecovery(ctx, op); recoveryErr != nil {
+			op.ErrorMessage = recoveryErr.Error()
+			_ = s.store.FailStop(ctx, op)
+			return
+		} else if completed {
+			return
+		}
+	}
 	if op.Kind == "manual" {
 		if err = s.lifecycle.resumeManualStop(ctx, op); err != nil {
 			op.ErrorMessage = err.Error()
