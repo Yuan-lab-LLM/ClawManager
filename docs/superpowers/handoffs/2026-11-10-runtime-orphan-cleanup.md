@@ -43,13 +43,15 @@
 - `clawmanager-ltt-system/clawmanager-app-756d7cdbdf-6z4t8` 的Pod UID、所有ContainerID及restartCount保持不变。
 - 主实例记录仍为118和166，没有为了清理幽灵资源而删除它们。
 
-## 当前容量阻塞与状态，不能宣称实例已恢复运行
+## 验收时容量阻塞与随后观测
 
-118当前为stopped/G10。验收初期是G9；07:20:46 UTC进入一次启动等待，07:22:22被启动watchdog超时退回stopped，错误为 `Start timed out waiting for capacity or readiness; retry Start manually`。没有G10 native stop，旧idle停止信息仍在；现存审计及已回收的旧应用日志不足以确认发起者/HTTP route。本轮未调用它的Start/Stop，且最后源135的恢复未再增加代次。
+07:52 UTC验收时118为stopped/G10。验收初期是G9；07:20:46 UTC进入一次启动等待，07:22:22被启动watchdog超时退回stopped，错误为 `Start timed out waiting for capacity or readiness; retry Start manually`。没有G10 native stop，旧idle停止信息仍在；现存审计及已回收的旧应用日志不足以确认发起者/HTTP route。本轮未调用它的Start/Stop，且最后源135的恢复未再增加代次。
 
-166保留为 `research-team-1-leader`、G1，原先creating，当前error / `RUNTIME_POOL_UNAVAILABLE: no schedulable openclaw runtime pod`。不是仍有旧Pod占用，而是当前没有可用OpenClaw受管池。`scale-options` 也明确拒绝复用已被隔离的旧OpenClaw默认controller；其他类型没有新鲜健康serving Pod证明默认模板。受管池清单只剩一个replicas0的Hermes池。
+166保留为 `research-team-1-leader`、G1，原先creating，验收时error / `RUNTIME_POOL_UNAVAILABLE: no schedulable openclaw runtime pod`。不是仍有旧Pod占用，而是当前没有可用OpenClaw受管池。`scale-options` 也明确拒绝复用已被隔离的旧OpenClaw默认controller；其他类型没有新鲜健康serving Pod证明默认模板。受管池清单只剩一个replicas0的Hermes池。
 
 因此本轮完成的是无绑定残留退役、数据库与现场核对及可重试手动恢复机制；未擅自选择新Runtime镜像、解除旧源fence、创建业务容量或单独启动/删除受保护Team实例。后续恢复业务运行需要通过正常池维护流程建立已验证的可调度容量。不能把“旧残留已清理”表述成“两个实例都已恢复运行”。
+
+08:01:46 UTC最新只读回查：118已为running/G11，实际绑定新Runtime171（`opencode-runtime-eight-20261109-67859dbb59-vr68t`，UID `3658b5b9-9d1a-4f4f-a098-e115e8fc7e89`），capacity=8、used_slots=1、bound_instances=1、unknown_slots=0，状态ready。它是有实际业务绑定的新运行池，已保留，不能当成旧测试残留再清理。本轮没有发起这次Start或创建该新池，不推断外部调用者。166仍为error/G1、RUNTIME_POOL_UNAVAILABLE，未擅自启动/删除；因此不能声称两个实例全部恢复。最新证据为节点 `final-observation.json`，旧7:52验收快照保留原时点事实。
 
 缺少历史来源的generation Secret不会被凭空补成已停止；未来实例删除若缺全历史凭据，会保留deleting并明确阻塞，不能删SQL来掩盖。
 
@@ -61,4 +63,4 @@
 - 前端61项测试、TypeScript/Vite构建通过；真实Chrome1280/390组件验收通过。Linux amd64/arm64 helper构建已验证。
 - 13319本机隔离MariaDB已关闭，进程/监听/datadir/socket/pid清理，日志保留。
 
-节点私有证据目录：`/root/cm-orphan-20261110/`。主要文件为 `before.json`、`deployment-image.json`、`acceptance.json`、`verification-recovered.json`、`operations-latest.json`、`helper-cleanup.json`、`cleanup-verified.json`、`nfs-lab-before.json`、`nfs-lab-retirement.json`、`nfs-lab-exit.json`、`source155-controller-events.json`、`scale-options-after.json`。完整源快照保存在受限目录，不提交含环境内容的manifest。
+节点私有证据目录：`/root/cm-orphan-20261110/`。主要文件为 `before.json`、`deployment-image.json`、`acceptance.json`、`verification-recovered.json`、`operations-latest.json`、`helper-cleanup.json`、`cleanup-verified.json`、`nfs-lab-before.json`、`nfs-lab-retirement.json`、`nfs-lab-exit.json`、`source155-controller-events.json`、`scale-options-after.json`、`final-observation.json`。完整源快照保存在受限目录，不提交含环境内容的manifest。
