@@ -94,6 +94,7 @@ export default function RuntimePodsPage() {
     enabled: !selectedPod,
     placeholderData: keepPreviousData,
     refetchInterval: 3000,
+    refetchIntervalInBackground: true,
     refetchOnWindowFocus: "always",
     refetchOnReconnect: "always",
   });
@@ -103,6 +104,7 @@ export default function RuntimePodsPage() {
     queryFn: ({ signal }) => runtimePoolService.listPods(undefined, signal),
     enabled: needsFullInventory,
     refetchInterval: 3000,
+    refetchIntervalInBackground: true,
     refetchOnWindowFocus: "always",
     refetchOnReconnect: "always",
   });
@@ -118,6 +120,9 @@ export default function RuntimePodsPage() {
     if (refreshTimer.current !== null) clearTimeout(refreshTimer.current);
   }, []);
   const { isConnected } = useRuntimeAdminWebSocket(refresh);
+  useEffect(() => {
+    if (isConnected) refresh();
+  }, [isConnected, refresh]);
   const pods = query.data?.pods ?? [];
   const summary = query.data?.summary ?? emptySummary;
   const pages = Math.max(1, query.data?.pagination.total_pages ?? 1);
