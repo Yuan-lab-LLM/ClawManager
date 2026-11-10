@@ -3044,6 +3044,7 @@ export const translations: Record<Locale, TranslationTree> = {
       failedToDelete: "Failed to delete instance",
       failedToStart: "Failed to start instance",
       failedToStop: "Failed to stop instance",
+      failedToRestart: "Failed to restart instance",
       confirmDelete:
         "Are you sure you want to delete this instance? This action cannot be undone.",
       details: "Details",
@@ -5190,6 +5191,7 @@ export const translations: Record<Locale, TranslationTree> = {
       failedToDelete: "删除实例失败",
       failedToStart: "启动实例失败",
       failedToStop: "停止实例失败",
+      failedToRestart: "重启实例失败",
       confirmDelete: "确定要删除这个实例吗？此操作不可撤销。",
       details: "详情",
       instanceImage: "实例镜像",
@@ -6837,6 +6839,7 @@ export const translations: Record<Locale, TranslationTree> = {
       failedToDelete: "インスタンスの削除に失敗しました",
       failedToStart: "インスタンスの開始に失敗しました",
       failedToStop: "インスタンスの停止に失敗しました",
+      failedToRestart: "インスタンスの再起動に失敗しました",
       confirmDelete:
         "このインスタンスを削除してもよろしいですか？この操作は元に戻せません。",
       details: "詳細",
@@ -8480,6 +8483,7 @@ export const translations: Record<Locale, TranslationTree> = {
       failedToDelete: "인스턴스 삭제에 실패했습니다",
       failedToStart: "인스턴스 시작에 실패했습니다",
       failedToStop: "인스턴스 중지에 실패했습니다",
+      failedToRestart: "인스턴스 재시작에 실패했습니다",
       confirmDelete:
         "이 인스턴스를 정말 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.",
       details: "세부정보",
@@ -10126,6 +10130,7 @@ export const translations: Record<Locale, TranslationTree> = {
       failedToDelete: "Instanz konnte nicht gelöscht werden",
       failedToStart: "Instanz konnte nicht gestartet werden",
       failedToStop: "Instanz konnte nicht gestoppt werden",
+      failedToRestart: "Instanz konnte nicht neu gestartet werden",
       confirmDelete:
         "Möchten Sie diese Instanz wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden.",
       details: "Details",

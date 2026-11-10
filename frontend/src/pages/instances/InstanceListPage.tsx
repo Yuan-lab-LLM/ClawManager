@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
-import { Monitor, MonitorPlay, Play, Plus, Search, Square, Trash2 } from "lucide-react";
+import { Monitor, MonitorPlay, Play, Plus, RotateCw, Search, Square, Trash2 } from "lucide-react";
 import ConfirmDialog from "../../components/ConfirmDialog";
 import InstanceLifecycleStatus from "../../components/InstanceLifecycleStatus";
 import InstanceAutoStopInfo from "../../components/InstanceAutoStopInfo";
@@ -463,6 +463,21 @@ const InstanceListPage: React.FC = () => {
         await loadInstances({ silent: true, refreshTeams: false });
       } catch (err: unknown) {
         alert(getErrorMessage(err, t("instances.failedToStart")));
+      } finally {
+        setActionLoading(null);
+      }
+    },
+    [loadInstances, t],
+  );
+
+  const handleRestart = useCallback(
+    async (id: number) => {
+      try {
+        setActionLoading(id);
+        await instanceService.restartInstance(id);
+        await loadInstances({ silent: true, refreshTeams: false });
+      } catch (err: unknown) {
+        alert(getErrorMessage(err, t("instances.failedToRestart")));
       } finally {
         setActionLoading(null);
       }
@@ -943,11 +958,23 @@ const InstanceListPage: React.FC = () => {
                           >
                             <Play className="h-4 w-4" />
                           </button>
+                        ) : instance.status === "error" ? (
+                          <button
+                            type="button"
+                            onClick={() => void handleRestart(instance.id)}
+                            disabled={actionLoading === instance.id || deletingIds.includes(instance.id)}
+                            className="cm-icon-button"
+                            title={t("common.restart")}
+                            aria-label={`${t("common.restart")} ${instance.name}`}
+                            aria-busy={actionLoading === instance.id}
+                          >
+                            <RotateCw className={`h-4 w-4${actionLoading === instance.id ? " animate-spin" : ""}`} />
+                          </button>
                         ) : null}
                         <button
                           type="button"
                           onClick={() => setPendingDeleteId(instance.id)}
-                          disabled={deletingIds.includes(instance.id) || instance.status === "deleting"}
+                          disabled={deletingIds.includes(instance.id) || instance.status === "deleting" || actionLoading === instance.id}
                           className="cm-icon-button border-red-200 text-red-600 hover:border-red-300 hover:bg-red-50 hover:text-red-700"
                           title={t("common.delete")}
                         >
