@@ -95,6 +95,76 @@ func TestPodLedgerlessLegacySourcePreservesWorkspace(t *testing.T) {
 		}
 	}
 }
+
+func TestPodMaintenanceLedgerIsRecognizedWithoutTouchingNeighbor(t *testing.T) {
+	s, f, root, boot := podFixture(t)
+	dir := filepath.Join(root, ".clawmanager-slot-locks")
+	neighbor := []byte(`{"instance_id":2,"user_id":2,"generation":7,"runtime_type":"opencode","pod_uid":"another-uid","slot":"maintenance","state":"upgrading"}`)
+	if err := os.WriteFile(filepath.Join(dir, "opencode-2-2.json"), neighbor, 0600); err != nil {
+		t.Fatal(err)
+	}
+	owners, err := InspectPodLedgerOwners(root, s.RuntimeType, s.PodUID)
+	if err != nil || len(owners) != 1 {
+		t.Fatalf("valid maintenance scope blocked unrelated source: %+v %v", owners, err)
+	}
+	if _, err = RunPod(t.Context(), s, f, root, boot); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(filepath.Join(dir, "opencode-2-2.json"))
+	if err != nil || string(got) != string(neighbor) {
+		t.Fatalf("neighbor maintenance changed: %s %v", got, err)
+	}
+}
+
+func TestPodMaintenanceRecoveryRetainsStoppedTombstone(t *testing.T) {
+	s, f, root, boot := podFixture(t)
+	p := filepath.Join(root, ".clawmanager-slot-locks", "opencode-2-1.json")
+	raw, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var l ledger
+	if err = json.Unmarshal(raw, &l); err != nil {
+		t.Fatal(err)
+	}
+	l.Slot, l.State = "maintenance", "upgrading"
+	raw, _ = json.Marshal(l)
+	if err = os.WriteFile(p, raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = RunPod(t.Context(), s, f, root, boot); err != nil {
+		t.Fatal(err)
+	}
+	owners, err := InspectPodLedgerOwners(root, s.RuntimeType, s.PodUID)
+	if err != nil || len(owners) != 1 || owners[0].Slot != "maintenance" || owners[0].State != "stopped" {
+		t.Fatalf("stopped maintenance tombstone unreadable: %+v %v", owners, err)
+	}
+}
+
+func TestPodMaintenanceDoesNotAuthorizeRunningOrUnknownSlot(t *testing.T) {
+	for _, slot := range []string{"maintenance", "arbitrary"} {
+		t.Run(slot, func(t *testing.T) {
+			s, _, root, _ := podFixture(t)
+			p := filepath.Join(root, ".clawmanager-slot-locks", "opencode-2-1.json")
+			raw, err := os.ReadFile(p)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var l ledger
+			if err = json.Unmarshal(raw, &l); err != nil {
+				t.Fatal(err)
+			}
+			l.Slot, l.State = slot, "running"
+			raw, _ = json.Marshal(l)
+			if err = os.WriteFile(p, raw, 0600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err = InspectPodLedgerOwners(root, s.RuntimeType, s.PodUID); err == nil {
+				t.Fatal("invalid maintenance/slot state accepted")
+			}
+		})
+	}
+}
 func TestPodRejectsSymlinkLedger(t *testing.T) {
 	s, f, root, boot := podFixture(t)
 	p := filepath.Join(root, ".clawmanager-slot-locks", "opencode-2-1.json")

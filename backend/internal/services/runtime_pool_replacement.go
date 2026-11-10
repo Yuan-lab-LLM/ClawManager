@@ -43,7 +43,9 @@ func LoadRuntimePoolOperation(ctx context.Context, repo any, id int64) (*Runtime
 }
 
 type poolReplacementProgress struct {
-	Mode           string `json:"mode,omitempty"`
+	SuccessorName  string                    `json:"successor_name,omitempty"`
+	Successor      *k8s.RuntimeRolloutTarget `json:"successor,omitempty"`
+	Mode           string                    `json:"mode,omitempty"`
 	raw            string
 	Kind           string                     `json:"kind"`
 	Version        int                        `json:"version"`
@@ -159,6 +161,21 @@ func (s *RuntimeScheduler) startOpenClawPoolReplacement(ctx context.Context, r *
 		return err
 	}
 	if p == nil {
+		proof, proofErr := coldSuccessorProof(r)
+		if proofErr != nil {
+			return proofErr
+		}
+		if proof != nil {
+			if err := s.withColdSuccessorAdmission(ctx, *r, func() error { return nil }); err != nil {
+				return err
+			}
+			p = &poolReplacementProgress{Kind: "openclaw-pool-replacement", Mode: "cold-successor", Version: 2, Targets: []k8s.RuntimeRolloutTarget{proof.Source}, SuccessorName: runtimeUpgradeTargetDeploymentName(proof.Source.Name, r.ID), Stage: "validate", StageStarted: time.Now().UTC()}
+			if err := s.savePoolReplacement(ctx, r.ID, p); err != nil {
+				return err
+			}
+			now := time.Now().UTC()
+			return s.setPoolReplacementStatus(ctx, *r, p, "running", &now, nil, stringPtrOrNil("正在验证已退役默认运行池的新容量"))
+		}
 		inventory, ok := s.deployments.(k8s.RuntimeRolloutInventory)
 		if !ok {
 			return fmt.Errorf("运行池部署清单不可用")
@@ -201,6 +218,13 @@ func (s *RuntimeScheduler) startOpenClawPoolReplacement(ctx context.Context, r *
 func (s *RuntimeScheduler) advanceOpenClawPoolReplacement(ctx context.Context, r models.RuntimeRollout, p *poolReplacementProgress) (resultErr error) {
 	defer func() {
 		if resultErr != nil && ctx.Err() == nil && time.Since(p.StageStarted) > 10*time.Minute {
+			if p.Mode == "cold-successor" && p.Stage != "cleanup_failed" {
+				p.Failure = resultErr.Error()
+				p.Stage = "cleanup_failed"
+				p.StageStarted = time.Now().UTC()
+				resultErr = s.savePoolReplacement(ctx, r.ID, p)
+				return
+			}
 			now := time.Now().UTC()
 			message := "运行池操作持续无法确认执行结果；实例数据保留，恢复未确认，请检查控制面后重试"
 			if err := s.setPoolReplacementStatus(ctx, r, p, "error", r.StartedAt, &now, &message); err != nil {
@@ -238,16 +262,29 @@ func (s *RuntimeScheduler) advanceOpenClawPoolReplacement(ctx context.Context, r
 	if s.leader != nil && !s.leader.IsLeader(ctx) {
 		return fmt.Errorf("运行池控制权已转移")
 	}
+	if p.Mode == "cold-successor" && p.Stage != "validate" {
+		return s.advanceColdSuccessor(ctx, r, p)
+	}
 	if p.Stage == "validate" {
 		if p.ProbeIndex == len(p.Targets) {
 			if p.Mode == "legacy" {
 				return transition("legacy_apply")
 			}
+			if p.Mode == "cold-successor" {
+				return transition("cold_create")
+			}
 			return transition("switch")
 		}
 		source := p.Targets[p.ProbeIndex]
 		name := replacementProbeName(r.ID, p.ProbeIndex)
-		if err := service.EnsurePoolValidation(ctx, source, name, r.TargetImageRef, operation); err != nil {
+		ensure := func() error { return service.EnsurePoolValidation(ctx, source, name, r.TargetImageRef, operation) }
+		var ensureErr error
+		if p.Mode == "cold-successor" {
+			ensureErr = s.withColdSuccessorAdmission(ctx, r, ensure)
+		} else {
+			ensureErr = ensure()
+		}
+		if err := ensureErr; err != nil {
 			return err
 		}
 		observed, err := service.ObservePoolValidation(ctx, source.Namespace, name, operation)

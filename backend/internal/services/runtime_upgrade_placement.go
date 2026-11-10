@@ -66,7 +66,11 @@ func (s *RuntimeUpgradeService) filterUpgradePlacementWithInventory(ctx context.
 		}
 		rolloutID, sourceJSON, target = current.ID, stringValue(current.SourceImagesJSON), current.TargetImageRef
 		targetDigest = stringValue(current.TargetImageDigest)
-		inPlace = current.PreflightID == nil
+		proof, proofErr := coldSuccessorProof(current)
+		if proofErr != nil {
+			return nil, proofErr
+		}
+		inPlace = current.PreflightID == nil && proof == nil
 		var created time.Time
 		row, err = s.sess.SQL().QueryRowContext(ctx, `SELECT created_at FROM instances WHERE id=?`, id)
 		if err != nil {
@@ -100,7 +104,7 @@ func (s *RuntimeUpgradeService) filterUpgradePlacementWithInventory(ctx context.
 				return nil, fmt.Errorf("%w: existing instance data has no compatible placement after pool switch", errRuntimeControlPlanePending)
 			}
 		}
-		if !inPlace && created.Before(*current.StartedAt) {
+		if !inPlace && created.Before(*current.StartedAt) && !(proof != nil && s.poolSwitchWaitingInstance(ctx, current, id)) {
 			// No item is not proof of no old data: an unselected existing instance
 			// stays on a frozen compatible source, never the migrated target.
 			var sources map[string]string
@@ -296,7 +300,7 @@ func (s *RuntimeUpgradeService) filterUpgradePlacementWithInventory(ctx context.
 // Recovery/lab runs are not a new global default. Read existing records rather
 // than rewriting upgrade history, so already-finished switches are repaired too.
 func (s *RuntimeUpgradeService) defaultPlacementRollout(ctx context.Context) (*models.RuntimeRollout, error) {
-	row, err := s.sess.SQL().QueryRowContext(ctx, `SELECT id,COALESCE(source_images_json,'{}'),target_image_ref,COALESCE(target_image_digest,''),phase,started_at,preflight_id,preflight_json
+	row, err := s.sess.SQL().QueryRowContext(ctx, `SELECT id,COALESCE(source_images_json,'{}'),target_image_ref,COALESCE(target_image_digest,''),phase,started_at,preflight_id,preflight_json,plan_fingerprint
 	 FROM runtime_rollouts WHERE runtime_type='openclaw' AND status='finished'
 	 AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(preflight_json,'$.recovery_mode')),'')=''
 	 AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(preflight_json,'$.upgrade_lab_run_id')),'null')='null'
@@ -304,9 +308,9 @@ func (s *RuntimeUpgradeService) defaultPlacementRollout(ctx context.Context) (*m
 	if err != nil {
 		return nil, err
 	}
-	r := &models.RuntimeRollout{RuntimeType: RuntimeTypeOpenClaw}
+	r := &models.RuntimeRollout{RuntimeType: RuntimeTypeOpenClaw, Status: "finished"}
 	var source string
-	if err = row.Scan(&r.ID, &source, &r.TargetImageRef, &r.TargetImageDigest, &r.Phase, &r.StartedAt, &r.PreflightID, &r.PreflightJSON); err == sql.ErrNoRows {
+	if err = row.Scan(&r.ID, &source, &r.TargetImageRef, &r.TargetImageDigest, &r.Phase, &r.StartedAt, &r.PreflightID, &r.PreflightJSON, &r.PlanFingerprint); err == sql.ErrNoRows {
 		return nil, nil
 	} else if err != nil {
 		return nil, err

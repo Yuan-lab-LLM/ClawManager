@@ -85,7 +85,10 @@ func readPodLedger(p, name, runtimeType string) (ledger, error) {
 	if e = json.Unmarshal(b, &l); e != nil {
 		return l, e
 	}
-	if l.InstanceID < 1 || l.UserID < 1 || l.Generation < 1 || l.RuntimeType != runtimeType || l.PodUID == "" || len(l.PodUID) > 256 || strings.TrimSpace(l.PodUID) != l.PodUID || strings.ContainsAny(l.PodUID, "\x00\r\n") || !canonicalSlot(l.Slot) || (l.State != "running" && l.State != "stopped" && l.State != "upgrading") || name != fmt.Sprintf("%s-%d-%d.json", runtimeType, l.UserID, l.InstanceID) {
+	// Trusted maintenance uses the same protected ledger while no ordinary slot
+	// owns the writer. Pod-wide recovery can also leave its stopped tombstone.
+	validSlot := canonicalSlot(l.Slot) || (l.Slot == "maintenance" && (l.State == "upgrading" || l.State == "stopped"))
+	if l.InstanceID < 1 || l.UserID < 1 || l.Generation < 1 || l.RuntimeType != runtimeType || l.PodUID == "" || len(l.PodUID) > 256 || strings.TrimSpace(l.PodUID) != l.PodUID || strings.ContainsAny(l.PodUID, "\x00\r\n") || !validSlot || (l.State != "running" && l.State != "stopped" && l.State != "upgrading") || name != fmt.Sprintf("%s-%d-%d.json", runtimeType, l.UserID, l.InstanceID) {
 		return l, fmt.Errorf("invalid protected writer ledger identity")
 	}
 	return l, nil

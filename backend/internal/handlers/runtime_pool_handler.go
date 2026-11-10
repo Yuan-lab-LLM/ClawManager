@@ -264,6 +264,7 @@ func (h *RuntimePoolHandler) StartRollout(c *gin.Context) {
 	var sourceImagesJSON *string
 	var targetImageDigest *string
 	var poolSwitchJSON *string
+	var planFingerprint *string
 	if runtimeType == services.RuntimeTypeHermes {
 		resolved, digest, err := services.ResolveHermesRolloutImage(c.Request.Context(), targetImage)
 		if err != nil {
@@ -329,7 +330,11 @@ func (h *RuntimePoolHandler) StartRollout(c *gin.Context) {
 			sourceImagesJSON = &value
 			if classification.EmptyPoolReset {
 				rolloutPhase = services.RuntimeUpgradePhaseEmptyPoolReset
-				raw, _ := json.Marshal(map[string]any{"pool_switch_waiting_instance_ids": classification.WaitingInstanceIDs})
+				raw, _ := json.Marshal(map[string]any{"pool_switch_waiting_instance_ids": classification.WaitingInstanceIDs, "cold_successor": classification.ColdSuccessor})
+				if classification.ColdSuccessor != nil {
+					fingerprint := classification.ColdSuccessor.Fingerprint()
+					planFingerprint = &fingerprint
+				}
 				value := string(raw)
 				poolSwitchJSON = &value
 			}
@@ -345,6 +350,7 @@ func (h *RuntimePoolHandler) StartRollout(c *gin.Context) {
 		SourceImagesJSON:  sourceImagesJSON,
 		TargetImageDigest: targetImageDigest,
 		PreflightJSON:     poolSwitchJSON,
+		PlanFingerprint:   planFingerprint,
 		Status:            "pending",
 		Phase:             rolloutPhase,
 		BatchSize:         batchSize,

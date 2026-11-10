@@ -1377,6 +1377,11 @@ func canAutoRollbackOpenClaw(phase string) bool {
 }
 
 func (s *RuntimeScheduler) rollbackOpenClawRollout(ctx context.Context, rollout *models.RuntimeRollout, cause error) error {
+	if proof, err := coldSuccessorProof(rollout); err != nil {
+		return err
+	} else if proof != nil {
+		return fmt.Errorf("cold successor recovery never restores retired sources; use owned successor cleanup")
+	}
 	if rollout == nil || s.deployments == nil || s.upgrade == nil {
 		return fmt.Errorf("OpenClaw rollback dependencies are not configured")
 	}

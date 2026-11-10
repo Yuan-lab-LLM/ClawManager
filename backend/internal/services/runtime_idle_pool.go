@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 	"clawreef/internal/repository"
 	"clawreef/internal/services/k8s"
 	"github.com/upper/db/v4"
+	apiequality "k8s.io/apimachinery/pkg/api/equality"
 )
 
 const runtimeIdlePodGrace = time.Minute
@@ -228,6 +230,45 @@ func (s *RuntimeScheduler) restoreIdleRuntimeCapacity(ctx context.Context, insta
 	if len(ids) == 0 {
 		return false, nil
 	}
+	// A restart keeps its last concrete source. New requests instead grow an
+	// already proven serving pool, even when all of its slots are occupied.
+	// Otherwise every burst can wake a different historical binary before the
+	// ordinary scale-out path gets a chance to expand the current pool.
+	source, sourceImage := "", ""
+	if runtimeType != RuntimeTypeOpenClaw {
+		source, sourceImage, err = s.idleRuntimeSource(ctx, instance.ID, runtimeType)
+		if err != nil {
+			return false, err
+		}
+	}
+	var approvedImage string
+	if source == "" && runtimeType != RuntimeTypeOpenClaw {
+		row, readErr := s.management.sess.SQL().QueryRowContext(ctx, `SELECT target_image_ref FROM runtime_rollouts WHERE runtime_type=? AND status='finished' ORDER BY id DESC LIMIT 1`, runtimeType)
+		if readErr != nil {
+			return false, readErr
+		}
+		if readErr = row.Scan(&approvedImage); readErr != nil && readErr != sql.ErrNoRows {
+			return false, readErr
+		}
+		reported, readErr := s.podRepo.List(ctx, runtimeType)
+		if readErr != nil {
+			return false, readErr
+		}
+		serving, readErr := s.verifiedOrdinaryRuntimePods(ctx, runtimeType, reported)
+		if readErr != nil {
+			return false, readErr
+		}
+		for _, pod := range serving {
+			if pod.SchedulingPaused || pod.Draining || (approvedImage != "" && !runtimePodMatchesImage(pod, approvedImage)) {
+				continue
+			}
+			// Quarantined-only slots do not prove a serving pool. Keep the
+			// existing compatible cold-capacity recovery for those hosts.
+			if free, capacityErr := s.allocatableGatewaySlots(ctx, pod); capacityErr == nil && (free > 0 || pod.UsedSlots >= pod.Capacity) {
+				return false, nil
+			}
+		}
+	}
 	args := make([]any, 0, len(ids)+1)
 	args = append(args, runtimeType)
 	for _, id := range ids {
@@ -248,6 +289,9 @@ func (s *RuntimeScheduler) restoreIdleRuntimeCapacity(ctx context.Context, insta
 			break
 		}
 		key := j.Target.Namespace + "/" + j.Target.DeploymentName
+		if source != "" && key != source {
+			continue
+		}
 		if _, seen := journals[key]; !seen {
 			journals[key] = j
 		}
@@ -276,13 +320,33 @@ func (s *RuntimeScheduler) restoreIdleRuntimeCapacity(ctx context.Context, insta
 		}
 		image := j.Snapshot.Option.ImageRef
 		digest := imageDigestFromReference(image)
-		candidates = append(candidates, models.RuntimePod{RuntimeType: runtimeType, Namespace: j.Target.Namespace, DeploymentName: j.Target.DeploymentName, ImageRef: image, ImageDigest: &digest})
+		candidate := models.RuntimePod{RuntimeType: runtimeType, Namespace: j.Target.Namespace, DeploymentName: j.Target.DeploymentName, ImageRef: image, ImageDigest: &digest}
+		if sourceImage != "" && !runtimePodMatchesImage(candidate, sourceImage) {
+			continue
+		}
+		candidates = append(candidates, candidate)
 	}
 	if runtimeType == RuntimeTypeOpenClaw && s.upgrade != nil {
 		candidates, err = s.upgrade.filterUpgradePlacementWithInventory(ctx, instance.ID, candidates, []models.RuntimePod{})
 		if err != nil {
 			return false, err
 		}
+	}
+	if source == "" && runtimeType != RuntimeTypeOpenClaw {
+		compatible := candidates[:0]
+		var contract *k8s.RuntimePodScaleSnapshot
+		for _, candidate := range candidates {
+			if approvedImage != "" && !runtimePodMatchesImage(candidate, approvedImage) {
+				continue
+			}
+			snapshot := journals[candidate.Namespace+"/"+candidate.DeploymentName].Snapshot
+			if contract != nil && !idleRuntimeContractMatches(contract, snapshot) {
+				return false, fmt.Errorf("sleeping %s pools have conflicting native contracts; current default proof required", runtimeType)
+			}
+			contract = snapshot
+			compatible = append(compatible, candidate)
+		}
+		candidates = compatible
 	}
 	sort.Slice(candidates, func(i, j int) bool { return candidates[i].DeploymentName < candidates[j].DeploymentName })
 	for _, candidate := range candidates {
@@ -357,4 +421,45 @@ func (s *RuntimeScheduler) restoreIdleRuntimeCapacity(ctx context.Context, insta
 		return false, err
 	}
 	return false, nil
+}
+
+// Concrete source ownership outranks a later default image for an existing home.
+func (s *RuntimeScheduler) idleRuntimeSource(ctx context.Context, instanceID int, runtimeType string) (string, string, error) {
+	if s.bindingRepo != nil {
+		binding, err := s.bindingRepo.GetByInstanceID(ctx, instanceID)
+		if err != nil {
+			return "", "", err
+		}
+		if binding != nil {
+			pod, err := s.podRepo.GetByID(ctx, binding.RuntimePodID)
+			if err != nil {
+				return "", "", err
+			}
+			if pod != nil && pod.Namespace == s.runtimeNamespace && pod.RuntimeType == runtimeType {
+				return pod.Namespace + "/" + pod.DeploymentName, pod.ImageRef, nil
+			}
+		}
+	}
+	row, err := s.management.sess.SQL().QueryRowContext(ctx, `SELECT p.namespace,p.deployment_name,p.image_ref FROM instance_idle_stop_operations s JOIN runtime_pods p ON p.id=s.runtime_pod_id WHERE s.instance_id=? AND s.phase='completed' AND p.namespace=? AND p.runtime_type=? ORDER BY s.created_at DESC LIMIT 1`, instanceID, s.runtimeNamespace, runtimeType)
+	if err != nil {
+		return "", "", err
+	}
+	var namespace, deployment, image string
+	if err = row.Scan(&namespace, &deployment, &image); err == sql.ErrNoRows {
+		return "", "", nil
+	}
+	if err != nil {
+		return "", "", err
+	}
+	return namespace + "/" + deployment, image, nil
+}
+
+func idleRuntimeContractMatches(a, b *k8s.RuntimePodScaleSnapshot) bool {
+	return a.Option.ImageRef == b.Option.ImageRef && a.Option.SlotCount == b.Option.SlotCount &&
+		a.WorkspaceStorageIdentity == b.WorkspaceStorageIdentity &&
+		a.Option.PodResources == b.Option.PodResources && a.Option.CoordinatorResources == b.Option.CoordinatorResources && a.Option.SlotResources == b.Option.SlotResources &&
+		apiequality.Semantic.DeepEqual(a.Template.Spec, b.Template.Spec) &&
+		a.Template.Labels["clawmanager.io/runtime-protocol"] == b.Template.Labels["clawmanager.io/runtime-protocol"] &&
+		a.Template.Labels["clawmanager.io/runtime-security"] == b.Template.Labels["clawmanager.io/runtime-security"] &&
+		a.Template.Labels["clawmanager.io/sandbox-profile"] == b.Template.Labels["clawmanager.io/sandbox-profile"]
 }

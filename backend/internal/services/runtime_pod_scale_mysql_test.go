@@ -233,3 +233,16 @@ func TestDefaultRuntimeScaleMySQLUsesAdmissionTransactionConnection(t *testing.T
 		t.Fatalf("admission read escaped its transaction: %+v %v", result, err)
 	}
 }
+
+func TestDefaultRuntimeScaleMySQLPinsCommittedColdDeploymentUID(t *testing.T) {
+	_, service, _ := runtimeScaleMySQLFixture(t, "hermes", "hermes-runtime")
+	inspector := service.scheduler.deployments.(k8s.RuntimePodScaleDeploymentService)
+	target := k8s.RuntimePodScaleTarget{RuntimeType: "hermes", Namespace: "runtime", DeploymentName: "hermes-runtime", DeploymentUID: "hermes-runtime-uid", PodName: "hermes-runtime-pod", PodUID: "hermes-runtime-pod-uid"}
+	if _, err := inspector.InspectRuntimeScale(context.Background(), target); err != nil {
+		t.Fatal(err)
+	}
+	target.DeploymentUID = "replaced-controller"
+	if _, err := inspector.InspectRuntimeScale(context.Background(), target); err == nil {
+		t.Fatal("replaced cold default controller was expanded")
+	}
+}
