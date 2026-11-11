@@ -3,6 +3,7 @@ package services
 import (
 	"clawreef/internal/models"
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"github.com/upper/db/v4"
@@ -151,7 +152,7 @@ func (s *RuntimeManagementService) queueEvictedSource(ctx context.Context, item 
 }
 
 func (s *RuntimeManagementService) finishStoppedSource(ctx context.Context, item RuntimeSchedulingItem, binding *models.InstanceRuntimeBinding, ownerID string, queue bool) error {
-	return s.sess.TxContext(ctx, func(tx db.Session) error {
+	err := s.sess.TxContext(ctx, func(tx db.Session) error {
 		var owner, status string
 		row, err := tx.SQL().QueryRowContext(ctx, "SELECT owner_token,status FROM runtime_management_operations WHERE id=? FOR UPDATE", ownerID)
 		if err != nil {
@@ -163,27 +164,34 @@ func (s *RuntimeManagementService) finishStoppedSource(ctx context.Context, item
 		if owner != s.token || status != "processing" {
 			return errors.New("operation execution ownership lost; eviction held")
 		}
+		// Match and lock the intent and its guard before writing. A stopped ->
+		// stopped update can report zero changed rows with TIMESTAMP(0).
+		var instanceID int
+		row, err = tx.SQL().QueryRowContext(ctx, `SELECT i.id FROM instances i
+ JOIN instance_lifecycle_manual_guards g ON g.instance_id=i.id
+ WHERE i.id=? AND i.runtime_generation=? AND i.status='stopped' AND g.token=? FOR UPDATE`, item.InstanceID, item.SourceGeneration+1, ownerID)
+		if err != nil {
+			return err
+		}
+		if err = row.Scan(&instanceID); errors.Is(err, sql.ErrNoRows) {
+			return errors.New("instance intent changed after confirmed stop")
+		} else if err != nil {
+			return err
+		}
 		now := time.Now().UTC()
 		nextStatus := "stopped"
 		if queue {
 			nextStatus = "creating"
 		}
-		result, err := tx.SQL().ExecContext(ctx, `UPDATE instances SET status=?,runtime_error_message=NULL,runtime_error_code=NULL,updated_at=? WHERE id=? AND runtime_generation=? AND status='stopped' AND EXISTS (SELECT 1 FROM instance_lifecycle_manual_guards WHERE instance_id=? AND token=?)`, nextStatus, now, item.InstanceID, item.SourceGeneration+1, item.InstanceID, ownerID)
+		_, err = tx.SQL().ExecContext(ctx, `UPDATE instances SET status=?,runtime_error_message=NULL,runtime_error_code=NULL,updated_at=? WHERE id=? AND runtime_generation=? AND status='stopped' AND EXISTS (SELECT 1 FROM instance_lifecycle_manual_guards WHERE instance_id=? AND token=?)`, nextStatus, now, item.InstanceID, item.SourceGeneration+1, item.InstanceID, ownerID)
+		if err != nil {
+			return err
+		}
+		result, err := tx.SQL().ExecContext(ctx, `DELETE FROM instance_runtime_bindings WHERE instance_id=? AND runtime_pod_id=? AND generation=? AND gateway_id=? AND state IN ('running','error','failed','stopped','unhealthy')`, item.InstanceID, item.SourcePodID, item.SourceGeneration, binding.GatewayID)
 		if err != nil {
 			return err
 		}
 		n, err := result.RowsAffected()
-		if err != nil {
-			return err
-		}
-		if n != 1 {
-			return errors.New("instance intent changed after confirmed stop")
-		}
-		result, err = tx.SQL().ExecContext(ctx, `DELETE FROM instance_runtime_bindings WHERE instance_id=? AND runtime_pod_id=? AND generation=? AND gateway_id=? AND state IN ('running','error','failed','stopped','unhealthy')`, item.InstanceID, item.SourcePodID, item.SourceGeneration, binding.GatewayID)
-		if err != nil {
-			return err
-		}
-		n, err = result.RowsAffected()
 		if err != nil {
 			return err
 		}
@@ -217,4 +225,8 @@ func (s *RuntimeManagementService) finishStoppedSource(ctx context.Context, item
 		_, err = tx.SQL().ExecContext(ctx, `UPDATE runtime_pods SET used_slots=?,updated_at=? WHERE id=?`, remaining, now, item.SourcePodID)
 		return err
 	}, nil)
+	if err == nil {
+		s.scheduler.RequestSlotAudit(item.SourcePodID)
+	}
+	return err
 }

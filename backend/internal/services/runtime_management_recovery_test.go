@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -96,6 +97,54 @@ func recoveryFlowFixture(t *testing.T, status string) (*RuntimeManagementService
 	s.scheduler.deployments = stopper
 	s.scheduler.workspaceRoot = "/workspaces"
 	return s, kube, stopper
+}
+
+func TestRecoveryLegacySnapshotRehydratesExactSourceProfile(t *testing.T) {
+	uid, node := "old", "node"
+	source := models.RuntimePod{Namespace: "ns", PodName: "pool-old", PodUID: &uid, NodeName: &node}
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: "pool-old", UID: "old", Labels: map[string]string{"clawmanager.io/sandbox-profile": "nfs-rootless-v1"}}, Spec: corev1.PodSpec{NodeName: "node"}}
+	for _, changed := range []bool{false, true} {
+		t.Run(fmt.Sprint(changed), func(t *testing.T) {
+			current := pod.DeepCopy()
+			if changed {
+				current.UID = "replacement"
+			}
+			client := fake.NewSimpleClientset(current)
+			snapshot := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: "pool-old", UID: "old", Annotations: map[string]string{"clawmanager.io/fault-eviction-helper-image": "pinned"}}}
+			err := restoreFaultRecoveryProfile(context.Background(), client, source, snapshot)
+			if changed {
+				if err == nil {
+					t.Fatal("replacement Pod profile accepted without original ReplicaSet")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if snapshot.Annotations["clawmanager.io/fault-eviction-sandbox-profile"] != "nfs-rootless-v1" || snapshot.Annotations["clawmanager.io/fault-eviction-helper-image"] != "pinned" {
+				t.Fatal("verified profile or pinned image lost")
+			}
+			if pod.Annotations != nil {
+				t.Fatal("live source was mutated")
+			}
+		})
+	}
+}
+
+func TestRecoveryProfileRejectsForeignRetainedController(t *testing.T) {
+	uid, node := "old", "node"
+	source := models.RuntimePod{Namespace: "ns", PodName: "pool-rs-old", PodUID: &uid, NodeName: &node, DeploymentName: "pool", CreatedAt: time.Now()}
+	controller := true
+	rs := &appsv1.ReplicaSet{ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: "pool-rs", CreationTimestamp: metav1.NewTime(time.Now().Add(-time.Hour)), OwnerReferences: []metav1.OwnerReference{{Kind: "Deployment", Name: "pool", UID: "original-controller", Controller: &controller}}}}
+	dep := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: "pool", UID: "replacement-controller"}, Spec: appsv1.DeploymentSpec{Template: corev1.PodTemplateSpec{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"clawmanager.io/sandbox-profile": "nfs-rootless-v1"}}}}}
+	client := fake.NewSimpleClientset(rs, dep)
+	snapshot := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: source.PodName, UID: "old", Labels: map[string]string{"clawmanager.io/sandbox-profile": "nfs-rootless-v1"}}}
+	if err := restoreFaultRecoveryProfile(context.Background(), client, source, snapshot); err == nil || !strings.Contains(err.Error(), "controller UID changed") {
+		t.Fatalf("foreign source controller was accepted: %v", err)
+	}
+	if _, verified := snapshot.Annotations[k8s.RuntimeFaultSandboxProfileAnnotation]; verified {
+		t.Fatal("failed verification persisted a profile")
+	}
 }
 func TestRuntimeRecoveryProcessPendingHelperPreservesNeighbor(t *testing.T) {
 	for _, status := range []string{"stopped", "deleting"} {

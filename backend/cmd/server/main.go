@@ -733,6 +733,9 @@ func main() {
 				cfg.Runtime.SchedulerTick,
 				runtimeSchedulerOptions...,
 			)
+			if rechecker, ok := instanceService.(interface{ SetRuntimeSlotRechecker(func(int64)) }); ok {
+				rechecker.SetRuntimeSlotRechecker(runtimeScheduler.RequestSlotAudit)
+			}
 			runtimeUpgradeService.SetDeploymentInventoryProvider(runtimeScheduler)
 			runtimeUpgradeService.SetUpgradeGatewayRestarter(runtimeScheduler)
 			log.Printf("runtime scheduler initialized")

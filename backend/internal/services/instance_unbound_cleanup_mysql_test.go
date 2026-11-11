@@ -63,6 +63,86 @@ func TestUnboundCleanupRetainsSQLSourceHistoryMySQL(t *testing.T) {
 	if err = service.cleanupV2GatewayBinding(ctx, instance); err == nil {
 		t.Fatal("uncertain recovery intent was ignored")
 	}
+	exec("UPDATE runtime_pods SET agent_endpoint='http://old:19091' WHERE id=5")
+	for _, phase := range []string{"source_stopped", "placing"} {
+		generation := 1
+		if phase == "placing" {
+			generation = 2
+		}
+		exec("UPDATE instance_runtime_recovery SET phase=?,generation=? WHERE instance_id=101", phase, generation)
+		if err = service.cleanupV2GatewayBinding(ctx, instance); err != nil {
+			t.Fatalf("%s recovery ignored retained source stop proof: %v", phase, err)
+		}
+	}
+	// A failed stop can recover health without advancing generation at all.
+	exec("UPDATE instance_runtime_recovery SET phase='',healthy_since=NOW(),generation=1 WHERE instance_id=101")
+	if err = service.cleanupV2GatewayBinding(ctx, instance); err != nil {
+		t.Fatalf("same-generation healthy source lost its exact stop proof: %v", err)
+	}
+	// Healthy G2 proves that G2 executed. G1's same-Pod receipt cannot excuse
+	// missing G2 credentials/publication: G2 still needs independent stop proof.
+	exec("UPDATE instance_runtime_recovery SET phase='',healthy_since=NOW(),generation=2 WHERE instance_id=101")
+	if err = service.cleanupV2GatewayBinding(ctx, instance); err == nil {
+		t.Fatal("healthy current generation without retained stop proof accepted")
+	}
+	// The real replacement can be on another Pod. Preserve its immutable Secret
+	// audit after the current ConfigMap is gone, as on deployed installations.
+	replacement := assignment
+	replacement.Generation, replacement.GatewayID = 2, "gw-101-2"
+	replacement.PodUID, replacement.Endpoint = "replacement", "http://replacement:19091"
+	if err = assignments.EnsureDesired(ctx, replacement); err != nil {
+		t.Fatal(err)
+	}
+	secret, err := kube.CoreV1().Secrets("runtime").Get(ctx, "lite-instance-101-g2", metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	proof, err := json.Marshal(k8sservice.RuntimeStoppedSourceAudit{InstanceID: 101, UserID: 1, Generation: 2, RuntimeType: "openclaw", PodUID: replacement.PodUID, Endpoint: replacement.Endpoint, GatewayID: replacement.GatewayID, WorkspacePath: workspace, Stopped: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret.Annotations = map[string]string{k8sservice.RuntimeStoppedSourceAnnotationPrefix + "2": string(proof)}
+	if _, err = kube.CoreV1().Secrets("runtime").Update(ctx, secret, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if err = kube.CoreV1().ConfigMaps("runtime").Delete(ctx, "lite-instance-101", metav1.DeleteOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if err = service.cleanupV2GatewayBinding(ctx, instance); err != nil {
+		t.Fatalf("healthy replacement lost its retired source proof: %v", err)
+	}
+	exec("UPDATE runtime_pods SET pod_uid='replacement',agent_endpoint='http://replacement:19091' WHERE id=5")
+	if err = service.cleanupV2GatewayBinding(ctx, instance); err != nil {
+		t.Fatalf("same-generation G2 source lost its exact stop proof: %v", err)
+	}
+	exec("UPDATE runtime_pods SET pod_uid='old',agent_endpoint='http://old:19091' WHERE id=5")
+	if err = kube.CoreV1().Secrets("runtime").Delete(ctx, secret.Name, metav1.DeleteOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if err = service.cleanupV2GatewayBinding(ctx, instance); err == nil {
+		t.Fatal("lost current generation evidence accepted via predecessor receipt")
+	}
+	if _, err = kube.CoreV1().Secrets("runtime").Create(ctx, secret, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	exec("UPDATE instance_runtime_recovery SET healthy_since=NULL WHERE instance_id=101")
+	if err = service.cleanupV2GatewayBinding(ctx, instance); err == nil {
+		t.Fatal("unresolved recovery without healthy replacement accepted")
+	}
+	exec("UPDATE instance_runtime_recovery SET phase='placing' WHERE instance_id=101")
+	exec("UPDATE runtime_pods SET pod_uid='replacement-uid' WHERE id=5")
+	if err = service.cleanupV2GatewayBinding(ctx, instance); err == nil {
+		t.Fatal("replacement Pod identity vouched for recovery source")
+	}
+	exec("UPDATE runtime_pods SET pod_uid='old' WHERE id=5")
+	exec("UPDATE instance_runtime_recovery SET source_pod_id=999 WHERE instance_id=101")
+	if err = service.cleanupV2GatewayBinding(ctx, instance); err == nil {
+		t.Fatal("missing recovery source Pod accepted")
+	}
+	exec("UPDATE instance_runtime_recovery SET source_pod_id=5,generation=3 WHERE instance_id=101")
+	if err = service.cleanupV2GatewayBinding(ctx, instance); err == nil {
+		t.Fatal("a different generation's proof vouched for recovery source")
+	}
 	exec("DELETE FROM instance_runtime_recovery")
 	exec("INSERT INTO instance_runtime_bindings(instance_id,runtime_pod_id,runtime_type,gateway_id,gateway_port,workspace_path,state,generation) VALUES(101,5,'openclaw','gw-101-1',20000,?,'running',1)", workspace)
 	if _, err = history.RuntimeCleanupHistory(ctx, instance); err == nil {

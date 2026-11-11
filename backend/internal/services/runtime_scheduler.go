@@ -56,6 +56,7 @@ type RuntimeScheduler struct {
 	creatingScan         runtimeSchedulerScan
 	desiredScan          runtimeSchedulerScan
 	slotAudit            runtimeSlotAuditor
+	slotRecheck          runtimeSlotRechecker
 }
 
 var (
@@ -188,6 +189,7 @@ func (s *RuntimeScheduler) Start(ctx context.Context) {
 	if s == nil {
 		return
 	}
+	go s.runSlotAuditRequests(ctx)
 	// Independent of long migration/reconciliation work: an idle Team and
 	// Agent-supervised restart must not depend on a browser renewing trust.
 	if s.proxyPolicy != nil {
@@ -1757,15 +1759,26 @@ func (s *RuntimeScheduler) retryUnpublishedPendingSlot(ctx context.Context, clie
 	if err != nil {
 		return err
 	}
-	if pod == nil || pod.State != "ready" || pod.Draining || pod.RuntimeType != runtimeType ||
-		strings.TrimSpace(stringValue(pod.AgentEndpoint)) == "" || strings.TrimSpace(stringValue(pod.PodUID)) == "" {
-		return fmt.Errorf("pending runtime target is not ready with a known identity")
+	if pod == nil || pod.RuntimeType != runtimeType || strings.TrimSpace(stringValue(pod.AgentEndpoint)) == "" || strings.TrimSpace(stringValue(pod.PodUID)) == "" {
+		return fmt.Errorf("pending runtime target has no known identity")
 	}
 	workspace := RuntimeWorkspacePathWithRoot(s.workspaceRoot, runtimeType, instance.UserID, instance.ID)
 	block := RuntimeGatewayPortBlockSize(runtimeType)
 	if binding.WorkspacePath != workspace || block <= 0 || binding.GatewayPort < s.gatewayPortStart ||
 		binding.GatewayPort+block-1 > s.gatewayPortEnd || (binding.GatewayPort-s.gatewayPortStart)%block != 0 {
 		return fmt.Errorf("pending runtime reservation workspace or port is invalid")
+	}
+	// Roll back only an unpublished G1 reservation whose original Pod is gone.
+	// The next scheduler pass selects capacity without advancing its generation.
+	var rollbackErr error
+	if instance.RuntimeGeneration == 1 {
+		rollbackErr = s.releaseUnpublishedFirstReservation(ctx, client, instance, *binding, *pod)
+		if rollbackErr == nil {
+			return nil
+		}
+	}
+	if pod.State != "ready" || pod.Draining {
+		return errors.Join(fmt.Errorf("pending runtime target is not ready with a known identity"), rollbackErr)
 	}
 	endpoint := strings.TrimSpace(*pod.AgentEndpoint)
 	if err := client.canRetryPendingGateway(ctx, endpoint, RuntimeAgentCreateGatewayRequest{

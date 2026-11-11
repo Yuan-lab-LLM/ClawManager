@@ -705,6 +705,90 @@ func TestRuntimeManagementMySQLForceEvictionWaitsAndRecovers(t *testing.T) {
 	}
 }
 
+func TestRuntimeManagementMySQLStoppedSourceMatchesWithUnchangedTimestamp(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		queue   bool
+		changed string
+		wantErr bool
+	}{
+		{name: "migration"},
+		{name: "force-queue", queue: true},
+		{name: "new-generation", changed: "UPDATE instances SET runtime_generation=3 WHERE id=101", wantErr: true},
+		{name: "later-start", changed: "UPDATE instances SET status='creating' WHERE id=101", wantErr: true},
+		{name: "later-delete", changed: "UPDATE instances SET status='deleting' WHERE id=101", wantErr: true},
+		{name: "replaced-guard", changed: "UPDATE instance_lifecycle_manual_guards SET token='new-owner' WHERE instance_id=101", wantErr: true},
+		{name: "missing-guard", changed: "DELETE FROM instance_lifecycle_manual_guards WHERE instance_id=101", wantErr: true},
+		{name: "replaced-binding", changed: "UPDATE instance_runtime_bindings SET gateway_id='replacement' WHERE instance_id=101", wantErr: true},
+		{name: "replaced-pod", changed: "UPDATE runtime_pods SET pod_uid='replacement' WHERE id=1", wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sess, service, _ := runtimeManagementMySQLMoveFixture(t)
+			ctx := context.Background()
+			op, err := service.enqueue(ctx, "migration", RuntimeSchedulingRequest{InstanceIDs: []int{101}, TargetPodID: 2}, []RuntimeSchedulingItem{{InstanceID: 101, SourcePodID: 1, SourcePodUID: "source-uid", SourceGeneration: 1, SourceGatewayID: "gw-101-1", TargetPodID: 2}}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err = sess.SQL().Exec("UPDATE runtime_management_operations SET status='processing',owner_token=? WHERE id=?", service.token, op.ID); err != nil {
+				t.Fatal(err)
+			}
+			for _, query := range []string{
+				"ALTER TABLE instances MODIFY updated_at TIMESTAMP(0) NULL",
+				"UPDATE instances SET status='stopped',runtime_generation=2,runtime_error_message=NULL,runtime_error_code=NULL,updated_at='2026-11-11 01:00:00' WHERE id=101",
+				// Freeze this fixture's timestamp to deterministically model fencing
+				// and source completion within the same TIMESTAMP(0) second.
+				"CREATE TRIGGER fixed_instance_timestamp BEFORE UPDATE ON instances FOR EACH ROW SET NEW.updated_at=OLD.updated_at",
+			} {
+				if _, err = sess.SQL().Exec(query); err != nil {
+					t.Fatal(err)
+				}
+			}
+			binding, err := service.scheduler.bindingRepo.GetByInstanceID(ctx, 101)
+			if err != nil || binding == nil {
+				t.Fatalf("source binding=%+v err=%v", binding, err)
+			}
+			if tc.changed != "" {
+				if _, err = sess.SQL().Exec(tc.changed); err != nil {
+					t.Fatal(err)
+				}
+			}
+			err = service.finishStoppedSource(ctx, op.Items[0], binding, op.ID, tc.queue)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("finish stopped source err=%v, want error=%v", err, tc.wantErr)
+			}
+			service.scheduler.slotRecheck.mu.Lock()
+			requested := service.scheduler.slotRecheck.pending[1]
+			wrongTarget := service.scheduler.slotRecheck.pending[2]
+			service.scheduler.slotRecheck.mu.Unlock()
+			if requested == tc.wantErr || wrongTarget {
+				t.Fatalf("source audit request=%v target=%v after transaction error=%v", requested, wrongTarget, tc.wantErr)
+			}
+			remaining, err := service.scheduler.bindingRepo.GetByInstanceID(ctx, 101)
+			if err != nil || (remaining != nil) != tc.wantErr {
+				t.Fatalf("remaining binding=%+v err=%v, want retained=%v", remaining, err, tc.wantErr)
+			}
+			wantUsed := 0
+			if tc.wantErr {
+				wantUsed = 1
+			}
+			source, err := service.scheduler.podRepo.GetByID(ctx, 1)
+			if err != nil || source.UsedSlots != wantUsed {
+				t.Fatalf("source=%+v err=%v, want used slots=%d", source, err, wantUsed)
+			}
+			if !tc.wantErr {
+				wantStatus := "stopped"
+				if tc.queue {
+					wantStatus = "creating"
+				}
+				instance, err := service.scheduler.instanceRepo.GetByID(101)
+				if err != nil || instance.Status != wantStatus || instance.RuntimeGeneration != 2 {
+					t.Fatalf("completed instance=%+v err=%v, want status=%s generation=2", instance, err, wantStatus)
+				}
+			}
+		})
+	}
+}
+
 func TestRuntimeManagementMySQLForceEvictionRetainsUnconfirmedSource(t *testing.T) {
 	_, service, agent := runtimeManagementMySQLMoveFixture(t)
 	agent.deleteErr = errors.New("source teardown unconfirmed")

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"clawreef/internal/models"
 )
@@ -133,17 +134,36 @@ func (r *instanceRepository) RuntimeCleanupHistory(ctx context.Context, want *mo
 		if err != nil {
 			return err
 		}
-		rows, err = local.sess.SQL().QueryContext(ctx, "SELECT generation,source_pod_id FROM instance_runtime_recovery WHERE instance_id=? AND attempts>0", want.ID)
+		rows, err = local.sess.SQL().QueryContext(ctx, `SELECT r.generation,r.source_pod_id,r.phase,COALESCE(p.pod_uid,''),COALESCE(p.agent_endpoint,''),r.healthy_since
+FROM instance_runtime_recovery r LEFT JOIN runtime_pods p ON p.id=r.source_pod_id
+WHERE r.instance_id=? AND r.attempts>0`, want.ID)
 		if err != nil {
 			return err
 		}
 		for rows.Next() {
 			var source models.RuntimeCleanupSource
-			if err = rows.Scan(&source.Generation, &source.RuntimePodID); err != nil {
+			var phase string
+			var healthySince *time.Time
+			if err = rows.Scan(&source.Generation, &source.RuntimePodID, &phase, &source.PodUID, &source.Endpoint, &healthySince); err != nil {
 				rows.Close()
 				return err
 			}
-			source.Blocker = "unresolved runtime recovery lacks an immutable source stop receipt"
+			source.RecoveryGenerationUncertain = phase == "" && healthySince != nil
+			if phase == "placing" {
+				// Only this durable checkpoint proves placement advanced generation.
+				// Healthy legacy records also include same-generation self-recovery;
+				// retained publication stop proofs must disambiguate those below.
+				source.Generation--
+			}
+			if (phase != "source_stopped" && phase != "placing" && !source.RecoveryGenerationUncertain) || source.Generation < 1 || source.Generation > want.RuntimeGeneration || source.RuntimePodID < 1 || source.PodUID == "" || source.Endpoint == "" {
+				source.Blocker = "unresolved runtime recovery lacks an immutable source stop receipt"
+			}
+			source.GatewayID = fmt.Sprintf("gw-%d-%d", want.ID, source.Generation)
+			if want.WorkspacePath != nil {
+				source.WorkspacePath = *want.WorkspacePath
+			}
+			// The phase identifies the source; retained stop evidence must still
+			// match it. A recovery checkpoint alone is never a stop receipt.
 			sources = append(sources, source)
 		}
 		err = rows.Err()

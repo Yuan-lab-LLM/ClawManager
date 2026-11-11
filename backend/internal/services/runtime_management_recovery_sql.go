@@ -130,19 +130,31 @@ func (s *RuntimeManagementService) commitRecoveredEviction(ctx context.Context, 
 			}
 		}
 		var recovery models.InstanceRuntimeRecovery
-		row, err = tx.SQL().QueryRowContext(ctx, "SELECT generation,source_pod_id,source_gateway_port FROM instance_runtime_recovery WHERE instance_id=? FOR UPDATE", current.InstanceID)
+		row, err = tx.SQL().QueryRowContext(ctx, "SELECT generation,source_pod_id,source_gateway_port,phase FROM instance_runtime_recovery WHERE instance_id=? FOR UPDATE", current.InstanceID)
 		if err != nil {
 			return err
 		}
-		err = row.Scan(&recovery.Generation, &recovery.SourcePodID, &recovery.SourceGatewayPort)
+		err = row.Scan(&recovery.Generation, &recovery.SourcePodID, &recovery.SourceGatewayPort, &recovery.Phase)
 		if err != nil && err != sql.ErrNoRows {
 			return err
 		}
 		if err == nil {
-			if recovery.Generation != binding.Generation || recovery.SourcePodID != binding.RuntimePodID || recovery.SourceGatewayPort != binding.GatewayPort {
+			if recovery.Generation != binding.Generation || (recovery.Phase != "" && recovery.Phase != "source_stopped" && recovery.Phase != "placing") {
 				return errors.New("conflicting runtime recovery source; recovery held")
 			}
-			deleted, e := tx.SQL().ExecContext(ctx, `DELETE FROM instance_runtime_recovery WHERE instance_id=? AND generation=? AND source_pod_id=? AND source_gateway_port=?`, current.InstanceID, recovery.Generation, recovery.SourcePodID, recovery.SourceGatewayPort)
+			if recovery.Phase == "placing" {
+				// This row names the previous generation's source. Even reuse of
+				// the same Pod/port cannot substitute the current stop for its proof.
+				proofCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+				e := s.verifyPreviousRecoveryPlacement(proofCtx, tx, *current, recovery, generation)
+				cancel()
+				if e != nil {
+					return e
+				}
+			} else if recovery.SourcePodID != binding.RuntimePodID || recovery.SourceGatewayPort != binding.GatewayPort {
+				return errors.New("conflicting runtime recovery source; recovery held")
+			}
+			deleted, e := tx.SQL().ExecContext(ctx, `DELETE FROM instance_runtime_recovery WHERE instance_id=? AND generation=? AND source_pod_id=? AND source_gateway_port=? AND BINARY phase=BINARY ?`, current.InstanceID, recovery.Generation, recovery.SourcePodID, recovery.SourceGatewayPort, recovery.Phase)
 			if e != nil {
 				return e
 			}
@@ -252,6 +264,39 @@ func (s *RuntimeManagementService) commitRecoveredEviction(ctx context.Context, 
 		return err
 	}, nil)
 	return resultState, err
+}
+
+// The caller holds the checkpoint row lock through proof verification and its
+// exact conditional deletion. Failed/unavailable evidence rolls back the whole
+// source release; this read-only check never grants a new stopped-source receipt.
+func (s *RuntimeManagementService) verifyPreviousRecoveryPlacement(ctx context.Context, tx db.Session, item RuntimeSchedulingItem, checkpoint models.InstanceRuntimeRecovery, generation int) error {
+	if checkpoint.Phase != "placing" || checkpoint.Generation != item.SourceGeneration || checkpoint.Generation < 2 || checkpoint.SourcePodID < 1 || checkpoint.SourceGatewayPort < 1 || s.scheduler == nil {
+		return errors.New("prior recovery placement identity is incomplete")
+	}
+	client, ok := s.scheduler.agentClient.(*slotRuntimeAgentClient)
+	if !ok || client.assignments == nil {
+		return errors.New("prior recovery placement requires retained publication verification")
+	}
+	var uid, endpoint, kind string
+	row, err := tx.SQL().QueryRowContext(ctx, "SELECT COALESCE(pod_uid,''),COALESCE(agent_endpoint,''),runtime_type FROM runtime_pods WHERE id=?", checkpoint.SourcePodID)
+	if err != nil {
+		return err
+	}
+	if err = row.Scan(&uid, &endpoint, &kind); err != nil {
+		return err
+	}
+	j := item.Recovery
+	if uid == "" || endpoint == "" || kind != j.SourceBinding.RuntimeType {
+		return errors.New("prior recovery placement source identity is unavailable")
+	}
+	sources := []models.RuntimeCleanupSource{
+		{Generation: checkpoint.Generation - 1, RuntimePodID: checkpoint.SourcePodID, PodUID: uid, Endpoint: endpoint, GatewayID: fmt.Sprintf("gw-%d-%d", item.InstanceID, checkpoint.Generation-1), WorkspacePath: j.SourceBinding.WorkspacePath},
+		{Generation: item.SourceGeneration, RuntimePodID: item.SourcePodID, PodUID: item.SourcePodUID, Endpoint: j.SourceEndpoint, GatewayID: fmt.Sprintf("gw-%d-%d", item.InstanceID, item.SourceGeneration), WorkspacePath: j.SourceBinding.WorkspacePath},
+	}
+	if err = client.assignments.CheckUnboundInstanceStopped(ctx, item.InstanceID, j.SourceUserID, generation, kind, sources); err != nil {
+		return fmt.Errorf("prior recovery placement stop proof: %w", err)
+	}
+	return nil
 }
 
 func sameFaultGatewayAlias(id, generation int, a, b string) bool {

@@ -826,13 +826,16 @@ func (h *InstanceHandler) BatchDeleteLiteInstances(c *gin.Context) {
 		Requested: len(instances),
 		Results:   make([]BatchDeleteLiteInstanceResult, 0, len(instances)),
 	}
+	// One retry budget covers the whole batch; busy entries cannot multiply it.
+	deleteCtx, cancel := context.WithTimeout(c.Request.Context(), 3*time.Second)
+	defer cancel()
 	for _, instance := range instances {
 		result := BatchDeleteLiteInstanceResult{
 			InstanceID: instance.ID,
 			Name:       instance.Name,
 			Status:     "deleting",
 		}
-		if err := h.instanceService.Delete(instance.ID); err != nil {
+		if err := h.deleteLiteBatchInstance(deleteCtx, instance.ID); err != nil {
 			result.Status = "failed"
 			result.Error = err.Error()
 			response.Failed++
@@ -847,6 +850,28 @@ func (h *InstanceHandler) BatchDeleteLiteInstances(c *gin.Context) {
 		status = http.StatusMultiStatus
 	}
 	utils.Success(c, status, "Lite instances batch delete started", response)
+}
+
+func (h *InstanceHandler) deleteLiteBatchInstance(ctx context.Context, id int) error {
+	deleteInstance := h.instanceService.Delete
+	if queue, ok := h.instanceService.(interface{ QueueDelete(int) error }); ok {
+		deleteInstance = queue.QueueDelete
+	}
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		err := deleteInstance(id)
+		if !errors.Is(err, models.ErrInstanceLifecycleLockBusy) {
+			return err
+		}
+		// Scheduler reconciliation briefly holds the same lifecycle lock.
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
 }
 
 func isLiteInstance(instance *models.Instance) bool {

@@ -70,3 +70,17 @@ test('unknown observations have an amber labeled slot and legend entry; residual
   assert.ok(unknown);
   assert.match(unknown.props.children[0].props.className, /bg-amber-500/);
 });
+
+
+test('pending release has its own labeled slot, help text and legend entry', () => {
+  const tree = SlotGrid({ pod: { slots: [{ index: 1, ready: true, reconciliation_state: 'releasing',
+    observation_message: 'runtime slot quarantine release pending' }] }, onSelect() {} });
+  const button = tree.props.children[0];
+  assert.match(button.props['aria-label'], /runtimePods.releasing$/);
+  assert.match(button.props.title, /runtimePods.releasingHelp/);
+  assert.doesNotMatch(button.props.title, /quarantine/);
+  assert.match(button.props.className, /bg-cyan-50/);
+  const entry = Legend({}).props.children.find(item => item.props.children[1] === 'runtimePods.releasing');
+  assert.ok(entry);
+  assert.match(entry.props.children[0].props.className, /bg-cyan-500/);
+});

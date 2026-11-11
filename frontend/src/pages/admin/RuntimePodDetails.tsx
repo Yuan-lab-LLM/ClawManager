@@ -126,7 +126,7 @@ export default function RuntimePodDetails({
         <Metric
           label={t("runtimePods.agentReady")}
           value={`${counts.ready} / ${counts.capacity}`}
-          detail={`${t("runtimePods.unavailable")} ${counts.unavailable} · ${t("runtimePods.unknown")} ${counts.unknown}`}
+          detail={`${t("runtimePods.releasing")} ${counts.releasing} · ${t("runtimePods.unavailable")} ${counts.unavailable} · ${t("runtimePods.unknown")} ${counts.unknown}`}
           warning={counts.unavailable > 0 || counts.unknown > 0}
         />
         <Metric
@@ -146,8 +146,8 @@ export default function RuntimePodDetails({
         />
       </div>
       {pod.reconciliation_message && (
-        <p role="status" className="rounded bg-amber-50 p-3 text-xs text-amber-800">
-          {pod.reconciliation_message}
+        <p role="status" className={`rounded p-3 text-xs ${pod.reconciliation_state === "releasing" ? "bg-cyan-50 text-cyan-800" : "bg-amber-50 text-amber-800"}`}>
+          {pod.reconciliation_state === "releasing" ? t("runtimePods.releasingHelp") : pod.reconciliation_message}
         </p>
       )}
       <section className="cm-surface space-y-4 p-4">
@@ -181,7 +181,7 @@ export default function RuntimePodDetails({
               {chosen.reconciliation_state && chosen.reconciliation_state !== "consistent" &&
                 `${t(`runtimePods.${chosen.reconciliation_state}`)} · `}
               {chosen.expected_instance_id && `${t("runtimePods.expectedBinding")} #${chosen.expected_instance_id} · `}
-              {chosen.observation_message || chosen.error_message ||
+              {slotState(chosen) === "releasing" ? t("runtimePods.releasingHelp") : chosen.observation_message || chosen.error_message ||
                 chosen.reason ||
                 t(`runtimePods.${slotState(chosen)}`)}
             </span>
@@ -230,7 +230,7 @@ export default function RuntimePodDetails({
               value={instanceFilter}
               onChange={(event) => setInstanceFilter(event.target.value)}
             >
-              {["all", "running", "starting", "migrating", "error", "unknown"].map(
+              {["all", "running", "starting", "migrating", "error", "releasing", "unknown"].map(
                 (value) => (
                   <option key={value} value={value}>
                     {t(`runtimePods.${value}`)}
@@ -365,9 +365,9 @@ export default function RuntimePodDetails({
                   </td>
                   <td
                     className="max-w-56 truncate px-3 py-3 text-slate-500"
-                    title={slot.observation_message || slot.error_message || slot.reason}
+                    title={slotState(slot) === "releasing" ? t("runtimePods.releasingHelp") : slot.observation_message || slot.error_message || slot.reason}
                   >
-                    {slot.observation_message || slot.error_message ||
+                    {slotState(slot) === "releasing" ? t("runtimePods.releasingHelp") : slot.observation_message || slot.error_message ||
                       slot.reason ||
                       (slot.restart_count
                         ? t("runtimePods.restarts", {

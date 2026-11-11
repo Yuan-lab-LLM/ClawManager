@@ -28,7 +28,7 @@ func acquireInstanceLifecycleOperation(parent context.Context, instances reposit
 	instanceLifecycleOperations.Lock()
 	if instanceLifecycleOperations.active[id] {
 		instanceLifecycleOperations.Unlock()
-		return nil, models.ErrInstanceOperationInProgress
+		return nil, models.ErrInstanceLifecycleLockBusy
 	}
 	instanceLifecycleOperations.active[id] = true
 	instanceLifecycleOperations.Unlock()

@@ -9,7 +9,88 @@ import (
 
 	"clawreef/internal/models"
 	"clawreef/internal/runtimeeviction"
+	k8sservice "clawreef/internal/services/k8s"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
+
+func TestRuntimeRecoveryConsumesProvenPreviousPlacementMySQL(t *testing.T) {
+	for _, scenario := range []string{"retired placement", "same slot previous generation", "missing prior proof", "same slot missing prior proof", "current still running", "different prior UID", "unfinished prior stop", "newer checkpoint"} {
+		t.Run(scenario, func(t *testing.T) {
+			s, kube, _ := recoveryFlowFixture(t, "stopped")
+			ctx := context.Background()
+			exec := func(q string, args ...any) {
+				t.Helper()
+				if _, err := s.sess.SQL().Exec(q, args...); err != nil {
+					t.Fatal(err)
+				}
+			}
+			plan, err := s.recoveryEvictionPreflight(ctx, RuntimeSchedulingRequest{SourcePodID: 1, Mode: "recovery", InstanceIDs: []int{101}})
+			if err != nil || !plan.Allowed {
+				t.Fatalf("preflight: %+v %v", plan, err)
+			}
+			item := plan.Items[0]
+			item.Recovery.Phase, item.Recovery.SourceStopConfirmed = "source_stopped", true
+			raw, _ := json.Marshal([]RuntimeSchedulingItem{item})
+			exec("INSERT INTO runtime_management_operations(id,kind,status,request_json,items_json,owner_token,created_at,updated_at) VALUES('op','eviction','processing','{}',?,?,NOW(),NOW())", string(raw), s.token)
+			exec("INSERT INTO instance_lifecycle_manual_guards(instance_id,token,created_at) VALUES(101,'op',NOW())")
+			exec("INSERT INTO runtime_pods(id,runtime_type,namespace,pod_name,pod_uid,agent_endpoint,deployment_name,image_ref,state,capacity) VALUES(9,'opencode','runtime','previous','previous','https://10.1.0.9:19090','pool','image','error',8)")
+			priorPod, priorPort, priorUID, priorEndpoint := 9, 20021, "previous", "https://10.1.0.9:19090"
+			if strings.HasPrefix(scenario, "same slot") {
+				priorPod, priorPort, priorUID, priorEndpoint = 1, 20000, "old", item.Recovery.SourceEndpoint
+			}
+			exec("INSERT INTO instance_runtime_recovery(instance_id,attempts,reason,source_pod_id,source_gateway_port,generation,phase,updated_at) VALUES(101,1,'replaced',?,?,4,'placing',NOW())", priorPod, priorPort)
+			assignments := k8sservice.NewRuntimeAssignmentService(kube, "runtime")
+			if scenario != "current still running" {
+				if err = assignments.MarkDraining(ctx, item.Recovery.SourceEndpoint, item.SourceGatewayID); err != nil {
+					t.Fatal(err)
+				}
+				if err = assignments.ConfirmStopped(ctx, item.Recovery.SourceEndpoint, item.SourceGatewayID); err != nil {
+					t.Fatal(err)
+				}
+			}
+			secret, err := kube.CoreV1().Secrets("runtime").Get(ctx, "lite-instance-101-g4", metav1.GetOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			secret.Name, secret.UID, secret.ResourceVersion = "lite-instance-101-g3", "previous-secret", ""
+			secret.Labels["clawmanager.io/generation"] = "3"
+			proof, _ := json.Marshal(k8sservice.RuntimeStoppedSourceAudit{InstanceID: 101, UserID: 1, Generation: 3, RuntimeType: "opencode", PodUID: priorUID, Endpoint: priorEndpoint, GatewayID: "gw-101-3", WorkspacePath: item.Recovery.SourceBinding.WorkspacePath, Stopped: true})
+			secret.Annotations = map[string]string{k8sservice.RuntimeStoppedSourceAnnotationPrefix + "3": string(proof)}
+			if strings.Contains(scenario, "missing prior proof") {
+				secret.Annotations = nil
+			}
+			if _, err = kube.CoreV1().Secrets("runtime").Create(ctx, secret, metav1.CreateOptions{}); err != nil {
+				t.Fatal(err)
+			}
+			switch scenario {
+			case "different prior UID":
+				exec("UPDATE runtime_pods SET pod_uid='reused' WHERE id=9")
+			case "unfinished prior stop":
+				exec("UPDATE instance_runtime_recovery SET phase='source_stopped' WHERE instance_id=101")
+			case "newer checkpoint":
+				exec("UPDATE instance_runtime_recovery SET generation=5 WHERE instance_id=101")
+			}
+			state, err := s.commitRecoveredEviction(ctx, item, "op")
+			allowed := scenario == "retired placement" || scenario == "same slot previous generation"
+			if allowed && (err != nil || state != "stopped") {
+				t.Fatalf("proven prior placement blocked: %s %v", state, err)
+			}
+			if !allowed && err == nil {
+				t.Fatal("unproven/conflicting prior writer consumed")
+			}
+			for _, table := range []string{"instance_runtime_recovery", "instance_runtime_bindings"} {
+				var count int
+				row, _ := s.sess.SQL().QueryRow("SELECT COUNT(*) FROM " + table + " WHERE instance_id=101")
+				if err = row.Scan(&count); err != nil {
+					t.Fatal(err)
+				}
+				if (allowed && count != 0) || (!allowed && count != 1) {
+					t.Fatalf("%s unexpected count %d", table, count)
+				}
+			}
+		})
+	}
+}
 
 func TestRuntimeRecoverySQLReleaseLifecycle(t *testing.T) {
 	for _, tc := range []struct {

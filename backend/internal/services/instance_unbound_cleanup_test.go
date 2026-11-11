@@ -20,7 +20,7 @@ func (r *cleanupHistoryRepo) RuntimeCleanupHistory(context.Context, *models.Inst
 }
 
 func TestDeleteUnboundGatewayRequiresProofBeforeResourceCleanup(t *testing.T) {
-	for _, scenario := range []string{"never-published", "live-assignment", "stopped-assignment", "unproven-migration"} {
+	for _, scenario := range []string{"never-published", "live-assignment", "stopped-assignment", "recovered-successor", "unproven-migration"} {
 		t.Run(scenario, func(t *testing.T) {
 			ctx := context.Background()
 			kube := fake.NewSimpleClientset()
@@ -46,6 +46,10 @@ func TestDeleteUnboundGatewayRequiresProofBeforeResourceCleanup(t *testing.T) {
 			}
 			if scenario == "unproven-migration" {
 				repo.sources = []models.RuntimeCleanupSource{{Generation: 1, RuntimePodID: 99, PodUID: "different-old-pod", GatewayID: "gw-7-1", WorkspacePath: workspace}}
+			}
+			if scenario == "recovered-successor" {
+				instance.RuntimeGeneration = 2
+				repo.sources = []models.RuntimeCleanupSource{{Generation: 1, RuntimePodID: 99, PodUID: "old", Endpoint: "http://old:19091", GatewayID: "gw-7-1", WorkspacePath: workspace}}
 			}
 			cleaned := false
 			service := &instanceService{instanceRepo: repo, bindingRepo: newFakeRuntimeBindingRepo(), agentClient: &slotRuntimeAgentClient{assignments: assignments}, resourceCleanup: func(context.Context, int) error { cleaned = true; return nil }}

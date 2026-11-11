@@ -97,6 +97,9 @@ func (s *RuntimeAssignmentService) CheckUnboundInstanceStopped(ctx context.Conte
 		if source.Blocker != "" {
 			return fmt.Errorf("instance %d source generation %d Pod %s: %s", id, source.Generation, source.PodUID, source.Blocker)
 		}
+		if source.RecoveryGenerationUncertain && source.StoppedProof {
+			return fmt.Errorf("ambiguous recovery history cannot supply stop authority")
+		}
 		if source.StoppedProof {
 			gateway := source.GatewayID
 			if strings.HasPrefix(gateway, "pending-") {
@@ -202,8 +205,28 @@ func (s *RuntimeAssignmentService) CheckUnboundInstanceStopped(ctx context.Conte
 		if strings.HasPrefix(gateway, "pending-") {
 			gateway = "gw-" + strings.TrimPrefix(gateway, "pending-")
 		}
+		if source.RecoveryGenerationUncertain {
+			// Healthy G proves G executed even when its Secret/CM was lost. An
+			// older same-Pod receipt alone must never authorize its cleanup.
+			currentStopped := false
+			if source.Generation < 1 || source.Generation > generation || source.WorkspacePath == "" || gateway != fmt.Sprintf("gw-%d-%d", id, source.Generation) {
+				return fmt.Errorf("ambiguous recovery generation identity is invalid")
+			}
+			for _, proof := range proofs {
+				if proof.Generation == source.Generation && proof.GatewayID == gateway && proof.WorkspacePath == source.WorkspacePath {
+					currentStopped = true
+				}
+			}
+			if !currentStopped {
+				return fmt.Errorf("healthy recovery generation %d has no retained matching stop proof", source.Generation)
+			}
+		}
 		for _, proof := range proofs {
-			if proof.Generation == source.Generation && proof.PodUID == source.PodUID && proof.GatewayID == gateway && (source.WorkspacePath == "" || proof.WorkspacePath == source.WorkspacePath) && (source.Endpoint == "" || proof.Endpoint == "" || source.Endpoint == proof.Endpoint) {
+			generationMatches := proof.Generation == source.Generation && proof.GatewayID == gateway
+			if source.RecoveryGenerationUncertain && source.Generation > 1 {
+				generationMatches = generationMatches || (proof.Generation == source.Generation-1 && proof.GatewayID == fmt.Sprintf("gw-%d-%d", id, source.Generation-1))
+			}
+			if generationMatches && proof.PodUID == source.PodUID && (source.WorkspacePath == "" || proof.WorkspacePath == source.WorkspacePath) && (source.Endpoint == "" || proof.Endpoint == "" || source.Endpoint == proof.Endpoint) {
 				covered = true
 			}
 		}

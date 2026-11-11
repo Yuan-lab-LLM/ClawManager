@@ -6,10 +6,12 @@ export type SlotState =
   | "migrating"
   | "error"
   | "idle"
+  | "releasing"
   | "unknown"
   | "unavailable";
 
 export function slotState(slot: RuntimeSlot): SlotState {
+  if (slot.reconciliation_state === "releasing") return "releasing";
   if (slot.reconciliation_state === "unknown") return "unknown";
   if (slot.reconciliation_state === "residual" || slot.reconciliation_state === "conflict") return "error";
   if (!slot.ready) return "unavailable";
@@ -40,9 +42,14 @@ export function failedMoveRetrySelections(pods: RuntimePod[], operation?: Runtim
         !item.source_pod_uid || !item.source_generation ||
         item.source_gateway_id !== `gw-${item.instance_id}-${item.source_generation}`) return [];
     const source = pods.find(pod => pod.id === item.source_pod_id && pod.pod_uid === item.source_pod_uid);
-    if (!source || source.agent_reported !== true || source.bindings_reported !== true) return [];
-    const slot = source.slots?.find(slot => slot.ready && !slot.instance_id &&
-      slot.reconciliation_state === "conflict" && slot.expected_instance_id === item.instance_id);
+    if (!source || source.state !== "ready" || source.agent_reported !== true || source.bindings_reported !== true) return [];
+    const slot = source.slots?.find(slot => slot.ready && slot.expected_instance_id === item.instance_id && (
+      (!slot.instance_id && slot.reconciliation_state === "conflict") ||
+      (slot.reconciliation_state === "unknown" && slot.binding_confirmed === false &&
+        slot.observation_message === "SQL binding still reserves runtime slot" && slot.instance_state === "stopped" &&
+        slot.instance_id === item.instance_id && slot.generation === item.source_generation &&
+        slot.gateway_id === item.source_gateway_id)
+    ));
     return slot ? [{ source, slot: { ...slot, instance_id: item.instance_id,
       generation: item.source_generation, gateway_id: item.source_gateway_id } }] : [];
   });
@@ -108,6 +115,7 @@ export function summarizePod(pod: RuntimePod) {
     migrating: count("migrating"),
     error: count("error"),
     idle,
+    releasing: count("releasing"),
     unknown: Math.max(count("unknown"), pod.unknown_slots ?? 0),
     unavailable: Math.max(0, pod.capacity - ready),
   };

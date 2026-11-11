@@ -128,7 +128,7 @@ func normalizeLLMProviderModels(providerModels []LLMProviderModel) []LLMProvider
 		if id == "" {
 			continue
 		}
-		key := strings.ToLower(id)
+		key := id
 		if _, exists := seen[key]; exists {
 			continue
 		}
@@ -144,7 +144,7 @@ func normalizeLLMProviderModels(providerModels []LLMProviderModel) []LLMProvider
 
 func containsLLMProviderModel(providerModels []LLMProviderModel, id string) bool {
 	for _, providerModel := range providerModels {
-		if strings.EqualFold(providerModel.ID, id) {
+		if providerModel.ID == id {
 			return true
 		}
 	}

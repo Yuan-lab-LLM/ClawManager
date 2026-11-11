@@ -8,6 +8,8 @@ import (
 
 const RuntimeObservationFreshness = 2 * time.Minute
 
+const RuntimeSlotReleasePendingMessage = "runtime slot quarantine release pending"
+
 // ReconcileRuntimePodObservation interprets persisted facts without granting
 // binding, allocation, or cleanup authority. Callers retain their exact fences.
 func ReconcileRuntimePodObservation(p *RuntimePod, bindings []InstanceRuntimeBinding, bindingsKnown bool, now time.Time) {
@@ -84,6 +86,15 @@ func ReconcileRuntimePodObservation(p *RuntimePod, bindings []InstanceRuntimeBin
 			slot.ObservationMessage = problem
 		case !present:
 			slot.ObservationMessage = "Runtime slot was not observed"
+		case fact.State == "unknown" && fact.Error == RuntimeSlotReleasePendingMessage && bindingsKnown && !bound && p.UsedSlots <= len(bindings) &&
+			(fact.GatewayState == "" || fact.GatewayState == "stopped") &&
+			((fact.InstanceID == 0 && fact.UserID == 0 && fact.Generation == 0 && fact.GatewayID == "" && fact.InstanceState == "") ||
+				(fact.InstanceID > 0 && fact.UserID > 0 && fact.Generation > 0 && fact.GatewayID == fmt.Sprintf("gw-%d-%d", fact.InstanceID, fact.Generation) && fact.InstanceState == "stopped")):
+			// The audit verified exit and is clearing its prior exclusion. This
+			// is display-only progress, never empty-Pod or allocation authority.
+			slot.ReconciliationState, slot.ObservationMessage = "releasing", RuntimeSlotReleasePendingMessage
+			slot.InstanceID, slot.Generation, slot.ExpectedInstanceID = nil, nil, nil
+			slot.GatewayID, slot.InstanceState, slot.InstanceName, slot.Owner = "", "", "", nil
 		case fact.State == "free" && fact.Error == "" && (fact.GatewayState == "" || fact.GatewayState == "stopped"):
 			if bound {
 				slot.InstanceID, slot.Generation, slot.GatewayID, slot.InstanceState, slot.InstanceName, slot.Owner = nil, nil, "", "", "", nil
@@ -194,10 +205,12 @@ func ConfirmedEmptyRuntimeObservation(p RuntimePod, now time.Time) error {
 func inventoryPriority(state string) int {
 	switch state {
 	case "conflict":
-		return 3
+		return 4
 	case "residual":
-		return 2
+		return 3
 	case "unknown":
+		return 2
+	case "releasing":
 		return 1
 	default:
 		return 0

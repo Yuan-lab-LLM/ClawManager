@@ -89,6 +89,10 @@ func TestIdleLegacyAgentCannotRegisterAuthenticateOrRenewNativeLite(t *testing.T
 func TestIdleManualStopPersistsIntentBeforeCleanupAndRetriesSameSource(t *testing.T) {
 	s := idleLifecycleDB(t)
 	ctx := t.Context()
+	// The minimal upgrade fixture predates the control-plane revision column.
+	if _, err := s.SQL().Exec(`ALTER TABLE instance_desired_state ADD desired_config_revision_id INT NULL`); err != nil {
+		t.Fatal(err)
+	}
 	for _, q := range []string{`INSERT INTO instances(id,user_id,type,runtime_type,instance_mode,status,runtime_generation,updated_at) VALUES(1,7,'openclaw','gateway','lite','running',2,UTC_TIMESTAMP())`, `INSERT INTO runtime_pods(id,runtime_type,namespace,pod_name,pod_uid,deployment_name,image_ref,agent_endpoint,state,capacity,used_slots) VALUES(11,'openclaw','runtime','pool','source-uid','pool','test','https://10.0.0.2:19090','ready',1,1)`, `INSERT INTO instance_runtime_bindings(instance_id,runtime_pod_id,runtime_type,gateway_id,gateway_port,workspace_path,state,generation) VALUES(1,11,'openclaw','gw-1-2',20000,'/workspace','running',2)`} {
 		if _, err := s.SQL().Exec(q); err != nil {
 			t.Fatal(err)
@@ -105,8 +109,19 @@ func TestIdleManualStopPersistsIntentBeforeCleanupAndRetriesSameSource(t *testin
 	}
 	agent := &manualStopFailureAgent{fakeRuntimeAgentClient: &fakeRuntimeAgentClient{}, store: store, fail: true, t: t}
 	svc := &instanceService{instanceRepo: repository.NewInstanceRepository(s), bindingRepo: repository.NewInstanceRuntimeBindingRepository(s), runtimePodRepo: repository.NewRuntimePodRepository(s), agentClient: agent, autoStopRepo: store}
+	var rechecked []int64
+	svc.SetRuntimeSlotRechecker(func(podID int64) {
+		binding, err := svc.bindingRepo.GetByInstanceID(ctx, 1)
+		if err != nil || binding != nil {
+			t.Errorf("audit requested before source release: binding=%+v err=%v", binding, err)
+		}
+		rechecked = append(rechecked, podID)
+	})
 	if err := svc.Stop(1); err == nil {
 		t.Fatal("failed cleanup returned success")
+	}
+	if len(rechecked) != 0 {
+		t.Fatalf("unconfirmed manual stop requested slot audit: %v", rechecked)
 	}
 	a, err := store.GetActivity(ctx, 1)
 	if err != nil {
@@ -139,6 +154,9 @@ func TestIdleManualStopPersistsIntentBeforeCleanupAndRetriesSameSource(t *testin
 	agent.fail = false
 	if err = svc.Stop(1); err != nil {
 		t.Fatal(err)
+	}
+	if len(rechecked) != 1 || rechecked[0] != 11 {
+		t.Fatalf("manual source release did not request exact source audit: %v", rechecked)
 	}
 	a, _ = store.GetActivity(ctx, 1)
 	if a.StopOperationID != "" || a.StopPhase != "completed" || a.StoppedReason != "manual" {
