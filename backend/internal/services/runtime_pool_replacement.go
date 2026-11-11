@@ -43,21 +43,24 @@ func LoadRuntimePoolOperation(ctx context.Context, repo any, id int64) (*Runtime
 }
 
 type poolReplacementProgress struct {
-	Mode           string `json:"mode,omitempty"`
-	raw            string
-	Kind           string                     `json:"kind"`
-	Version        int                        `json:"version"`
-	Targets        []k8s.RuntimeRolloutTarget `json:"targets"`
-	ProbeIndex     int                        `json:"probe_index"`
-	PoolIndex      int                        `json:"pool_index"`
-	Stage          string                     `json:"stage"`
-	StageStarted   time.Time                  `json:"stage_started"`
-	Submitted      bool                       `json:"submitted"`
-	ProbePodUID    string                     `json:"probe_pod_uid"`
-	Failure        string                     `json:"failure,omitempty"`
-	Restored       bool                       `json:"restored,omitempty"`
-	Changed        bool                       `json:"changed,omitempty"`
-	RollbackImages map[string]string          `json:"rollback_images"`
+	ProbeDeploymentUID string                    `json:"probe_deployment_uid,omitempty"`
+	SuccessorName      string                    `json:"successor_name,omitempty"`
+	Successor          *k8s.RuntimeRolloutTarget `json:"successor,omitempty"`
+	Mode               string                    `json:"mode,omitempty"`
+	raw                string
+	Kind               string                     `json:"kind"`
+	Version            int                        `json:"version"`
+	Targets            []k8s.RuntimeRolloutTarget `json:"targets"`
+	ProbeIndex         int                        `json:"probe_index"`
+	PoolIndex          int                        `json:"pool_index"`
+	Stage              string                     `json:"stage"`
+	StageStarted       time.Time                  `json:"stage_started"`
+	Submitted          bool                       `json:"submitted"`
+	ProbePodUID        string                     `json:"probe_pod_uid"`
+	Failure            string                     `json:"failure,omitempty"`
+	Restored           bool                       `json:"restored,omitempty"`
+	Changed            bool                       `json:"changed,omitempty"`
+	RollbackImages     map[string]string          `json:"rollback_images"`
 }
 
 func (s *RuntimeScheduler) loadPoolReplacement(ctx context.Context, id int64) (*poolReplacementProgress, error) {
@@ -159,6 +162,21 @@ func (s *RuntimeScheduler) startOpenClawPoolReplacement(ctx context.Context, r *
 		return err
 	}
 	if p == nil {
+		proof, proofErr := coldSuccessorProof(r)
+		if proofErr != nil {
+			return proofErr
+		}
+		if proof != nil {
+			if err := s.withColdSuccessorAdmission(ctx, *r, func() error { return nil }); err != nil {
+				return err
+			}
+			p = &poolReplacementProgress{Kind: "openclaw-pool-replacement", Mode: "cold-successor", Version: 2, Targets: []k8s.RuntimeRolloutTarget{proof.Source}, SuccessorName: runtimeUpgradeTargetDeploymentName(proof.Source.Name, r.ID), Stage: "validate", StageStarted: time.Now().UTC()}
+			if err := s.savePoolReplacement(ctx, r.ID, p); err != nil {
+				return err
+			}
+			now := time.Now().UTC()
+			return s.setPoolReplacementStatus(ctx, *r, p, "running", &now, nil, stringPtrOrNil("正在验证已退役默认运行池的新容量"))
+		}
 		inventory, ok := s.deployments.(k8s.RuntimeRolloutInventory)
 		if !ok {
 			return fmt.Errorf("运行池部署清单不可用")
@@ -201,6 +219,13 @@ func (s *RuntimeScheduler) startOpenClawPoolReplacement(ctx context.Context, r *
 func (s *RuntimeScheduler) advanceOpenClawPoolReplacement(ctx context.Context, r models.RuntimeRollout, p *poolReplacementProgress) (resultErr error) {
 	defer func() {
 		if resultErr != nil && ctx.Err() == nil && time.Since(p.StageStarted) > 10*time.Minute {
+			if p.Mode == "cold-successor" && p.Stage != "cleanup_failed" {
+				p.Failure = resultErr.Error()
+				p.Stage = "cleanup_failed"
+				p.StageStarted = time.Now().UTC()
+				resultErr = s.savePoolReplacement(ctx, r.ID, p)
+				return
+			}
 			now := time.Now().UTC()
 			message := "运行池操作持续无法确认执行结果；实例数据保留，恢复未确认，请检查控制面后重试"
 			if err := s.setPoolReplacementStatus(ctx, r, p, "error", r.StartedAt, &now, &message); err != nil {
@@ -238,16 +263,29 @@ func (s *RuntimeScheduler) advanceOpenClawPoolReplacement(ctx context.Context, r
 	if s.leader != nil && !s.leader.IsLeader(ctx) {
 		return fmt.Errorf("运行池控制权已转移")
 	}
+	if p.Mode == "cold-successor" && p.Stage != "validate" {
+		return s.advanceColdSuccessor(ctx, r, p)
+	}
 	if p.Stage == "validate" {
 		if p.ProbeIndex == len(p.Targets) {
 			if p.Mode == "legacy" {
 				return transition("legacy_apply")
 			}
+			if p.Mode == "cold-successor" {
+				return transition("cold_create")
+			}
 			return transition("switch")
 		}
 		source := p.Targets[p.ProbeIndex]
 		name := replacementProbeName(r.ID, p.ProbeIndex)
-		if err := service.EnsurePoolValidation(ctx, source, name, r.TargetImageRef, operation); err != nil {
+		ensure := func() error { return service.EnsurePoolValidation(ctx, source, name, r.TargetImageRef, operation) }
+		var ensureErr error
+		if p.Mode == "cold-successor" {
+			ensureErr = s.withColdSuccessorAdmission(ctx, r, ensure)
+		} else {
+			ensureErr = ensure()
+		}
+		if err := ensureErr; err != nil {
 			return err
 		}
 		observed, err := service.ObservePoolValidation(ctx, source.Namespace, name, operation)
@@ -262,6 +300,16 @@ func (s *RuntimeScheduler) advanceOpenClawPoolReplacement(ctx context.Context, r
 		}
 		if !observed.Ready {
 			return report(observed.Reason)
+		}
+		if observed.Protocol == "container-slots-v1" {
+			if p.ProbePodUID == "" && p.ProbeDeploymentUID == "" {
+				p.ProbePodUID = observed.PodUID
+				p.ProbeDeploymentUID = observed.UID
+				return s.savePoolReplacement(ctx, r.ID, p)
+			}
+			if p.ProbePodUID != observed.PodUID || p.ProbeDeploymentUID != observed.UID {
+				return fail("验证 Runtime 身份发生变化，未启动新的进程")
+			}
 		}
 		if s.agentClient == nil {
 			return fail("Runtime 验证客户端不可用")
@@ -278,7 +326,17 @@ func (s *RuntimeScheduler) advanceOpenClawPoolReplacement(ctx context.Context, r
 		}
 		// The complete native startup writes config/session files only to emptyDir.
 		// Dummy LLM credentials never invoke a provider or charge an account.
-		response, err := s.agentClient.CreateGateway(probeCtx, observed.Endpoint, RuntimeAgentCreateGatewayRequest{InstanceID: poolProbeInstanceID, UserID: 1, AgentType: RuntimeTypeOpenClaw, WorkspacePath: RuntimeWorkspacePathWithRoot(s.workspaceRoot, RuntimeTypeOpenClaw, 1, poolProbeInstanceID), Generation: 1, GatewayPort: 20000, PortRange: RuntimeAgentPortRange{Start: 20000, End: 20002}, UID: 1000, GID: 1000, MemoryMB: 512, DiskQuotaMB: 64, Environment: map[string]string{"CLAWMANAGER_LLM_BASE_URL": "http://127.0.0.1:9/v1", "CLAWMANAGER_LLM_API_KEY": "isolated-validation-only", "CLAWMANAGER_LLM_MODEL": "[\"auto\"]", "CLAWMANAGER_OPENCLAW_SCHEDULED_TASKS_JSON": "[]"}})
+		scope := k8s.RuntimePoolValidationScope{Namespace: source.Namespace, DeploymentName: name, DeploymentUID: observed.UID, SourceName: source.Name, SourceUID: source.UID, Operation: operation, PodUID: observed.PodUID, Endpoint: observed.Endpoint, ImageRef: r.TargetImageRef, WorkspaceRoot: s.workspaceRoot}
+		var response *RuntimeAgentCreateGatewayResponse
+		if observed.Protocol == "container-slots-v1" {
+			native, ok := s.agentClient.(nativePoolValidationClient)
+			if !ok {
+				return fail("原生 Runtime 验证客户端不可用")
+			}
+			response, err = native.CreatePoolValidationGateway(probeCtx, scope)
+		} else {
+			response, err = s.agentClient.CreateGateway(probeCtx, observed.Endpoint, RuntimeAgentCreateGatewayRequest{InstanceID: poolProbeInstanceID, UserID: 1, AgentType: RuntimeTypeOpenClaw, WorkspacePath: RuntimeWorkspacePathWithRoot(s.workspaceRoot, RuntimeTypeOpenClaw, 1, poolProbeInstanceID), Generation: 1, GatewayPort: 20000, PortRange: RuntimeAgentPortRange{Start: 20000, End: 20002}, UID: 1000, GID: 1000, MemoryMB: 512, DiskQuotaMB: 64, Environment: map[string]string{"CLAWMANAGER_LLM_BASE_URL": "http://127.0.0.1:9/v1", "CLAWMANAGER_LLM_API_KEY": "isolated-validation-only", "CLAWMANAGER_LLM_MODEL": "[\"auto\"]", "CLAWMANAGER_OPENCLAW_SCHEDULED_TASKS_JSON": "[]"}})
+		}
 		if err != nil {
 			if ctx.Err() != nil {
 				return ctx.Err()
@@ -291,13 +349,20 @@ func (s *RuntimeScheduler) advanceOpenClawPoolReplacement(ctx context.Context, r
 		if !NormalizeRuntimeGatewayLifecycle(response.Status, nil).Running {
 			return report("正在等待验证 Gateway 启动；保持同一实例和代数，不重复创建")
 		}
-		if err = s.agentClient.DeleteGateway(probeCtx, observed.Endpoint, response.GatewayID); err != nil {
+		if observed.Protocol == "container-slots-v1" {
+			err = s.agentClient.(nativePoolValidationClient).DeletePoolValidationGateway(probeCtx, scope, response.GatewayID)
+		} else {
+			err = s.agentClient.DeleteGateway(probeCtx, observed.Endpoint, response.GatewayID)
+		}
+		if err != nil {
 			return fail("目标验证进程等待清理")
 		}
 		if err = service.StopPoolValidation(ctx, source.Namespace, name, operation); err != nil {
 			return err
 		}
 		p.ProbeIndex++
+		p.ProbePodUID = ""
+		p.ProbeDeploymentUID = ""
 		p.StageStarted = time.Now().UTC()
 		return s.savePoolReplacement(ctx, r.ID, p)
 	}

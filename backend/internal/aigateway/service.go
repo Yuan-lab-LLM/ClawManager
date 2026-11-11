@@ -555,7 +555,7 @@ func (s *service) listActiveModels() ([]models.LLMModel, error) {
 }
 
 func (s *service) ChatCompletions(ctx context.Context, userID int, req ChatCompletionRequest) (*ProxyResponse, string, error) {
-	finishActivity, activityErr := s.beginChatModelActivity(ctx, userID, &req)
+	ctx, finishActivity, activityErr := s.beginChatModelActivity(ctx, userID, &req)
 	if activityErr != nil {
 		return nil, "", activityErr
 	}
@@ -704,7 +704,7 @@ func (s *service) recordDeploymentFailover(prepared *preparedChatRequest, failed
 }
 
 func (s *service) StreamChatCompletions(ctx context.Context, userID int, req ChatCompletionRequest, w http.ResponseWriter) (string, error) {
-	finishActivity, activityErr := s.beginChatModelActivity(ctx, userID, &req)
+	ctx, finishActivity, activityErr := s.beginChatModelActivity(ctx, userID, &req)
 	if activityErr != nil {
 		return "", activityErr
 	}

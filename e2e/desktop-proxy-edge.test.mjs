@@ -106,14 +106,22 @@ test('nginx proxy logs contain paths, never raw requests, query, or credential h
     const match = nginx.match(new RegExp(`log_format\\s+${name}\\s+([\\s\\S]*?);`))
     assert(match, `Missing nginx log format ${name}`)
     const variables = [...match[1].matchAll(/\$[A-Za-z_][A-Za-z_0-9]*/g)].map(item => item[0])
-    assert(variables.includes('$uri'), `${name} must log only the path`)
-    for (const forbidden of ['$request', '$request_uri', '$args', '$query_string', '$desktop_clean_uri', '$http_cookie', '$http_authorization', '$http_sec_websocket_protocol']) {
+    assert(variables.includes('$browser_safe_uri'), `${name} must log only the redacted path`)
+    for (const forbidden of ['$uri', '$request', '$request_uri', '$args', '$query_string', '$desktop_clean_uri', '$http_cookie', '$http_authorization', '$http_sec_websocket_protocol']) {
       assert(!variables.includes(forbidden), `${name} logs sensitive variable ${forbidden}`)
     }
   }
   assert.match(nginx, /proxy_pass \$desktop_target\$desktop_clean_uri;/, 'Forwarding must still preserve the cleaned business query')
   assert.match(nginx, /access_log \/var\/log\/nginx\/access\.log desktop_proxy;/)
   assert.match(nginx, /client_max_body_size 1024k;/, 'The dedicated Desktop limit must not be rewritten by start.sh')
+})
+
+test('the safe log path excludes query data and redacts preview capability paths', () => {
+  const map = nginx.match(/map\s+\$uri\s+\$browser_safe_uri\s*\{([\s\S]*?)\}/)
+  assert(map, 'Safe logging must derive its path from the normalized URI without a query')
+  assert.deepEqual([...new Set([...map[1].matchAll(/\$[A-Za-z_][A-Za-z_0-9]*/g)].map(item => item[0]))], ['$uri'])
+  assert.match(map[1], /default\s+\$uri;/, 'Ordinary paths must remain useful for diagnostics')
+  assert.match(map[1], /~\^\/__clawmanager_preview\/\s+\/__clawmanager_preview\/\[redacted\];/, 'Bootstrap capability paths must be redacted')
 })
 
 test('SSO bootstrap preserves the external Host port and rejection/error logs stay private', () => {

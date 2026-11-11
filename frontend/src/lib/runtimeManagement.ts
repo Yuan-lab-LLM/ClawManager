@@ -1,4 +1,4 @@
-import type { RuntimePod, RuntimeSlot } from "../types/runtimePool";
+import type { RuntimePod, RuntimeSlot, RuntimeSchedulingOperation } from "../types/runtimePool";
 
 export type SlotState =
   | "running"
@@ -6,9 +6,12 @@ export type SlotState =
   | "migrating"
   | "error"
   | "idle"
+  | "unknown"
   | "unavailable";
 
 export function slotState(slot: RuntimeSlot): SlotState {
+  if (slot.reconciliation_state === "unknown") return "unknown";
+  if (slot.reconciliation_state === "residual" || slot.reconciliation_state === "conflict") return "error";
   if (!slot.ready) return "unavailable";
   if (!slot.instance_id) return "idle";
   const state = slot.instance_state ?? "";
@@ -18,6 +21,45 @@ export function slotState(slot: RuntimeSlot): SlotState {
   if (["migrating", "upgrading", "draining", "stopping"].includes(state))
     return "migrating";
   return "error";
+}
+
+export function canManageSlot(slot: RuntimeSlot) {
+  return !!slot.instance_id && (slot.reconciliation_state === undefined
+    ? slot.binding_confirmed !== false
+    : slot.reconciliation_state === "consistent" && slot.binding_confirmed === true);
+}
+
+// A delayed stop can leave a SQL reservation on a physically empty slot.
+// This projection is only for retrying its original failed move; server preflight
+// still revalidates the binding, generation and stop proof before any mutation.
+export function failedMoveRetrySelections(pods: RuntimePod[], operation?: RuntimeSchedulingOperation) {
+  if (!operation || !["failed", "partial_failure"].includes(operation.status) ||
+      !["migration", "balance", "eviction"].includes(operation.kind ?? "")) return [];
+  return operation.items.flatMap(item => {
+    if (item.state !== "failed" || item.recovery || item.orphan_recovery ||
+        !item.source_pod_uid || !item.source_generation ||
+        item.source_gateway_id !== `gw-${item.instance_id}-${item.source_generation}`) return [];
+    const source = pods.find(pod => pod.id === item.source_pod_id && pod.pod_uid === item.source_pod_uid);
+    if (!source || source.agent_reported !== true || source.bindings_reported !== true) return [];
+    const slot = source.slots?.find(slot => slot.ready && !slot.instance_id &&
+      slot.reconciliation_state === "conflict" && slot.expected_instance_id === item.instance_id);
+    return slot ? [{ source, slot: { ...slot, instance_id: item.instance_id,
+      generation: item.source_generation, gateway_id: item.source_gateway_id } }] : [];
+  });
+}
+
+export function recoveryInstanceIds(pod: RuntimePod): number[] {
+  return [...new Set((pod.slots ?? []).flatMap((slot) => slot.expected_instance_id ? [slot.expected_instance_id] : canManageSlot(slot) ? [slot.instance_id!] : []))];
+}
+
+export function canEvictPod(pod: RuntimePod) {
+  const slots = pod.slots ?? [];
+  return pod.id > 0 && pod.agent_reported !== false && pod.bindings_reported !== false &&
+    (pod.reconciliation_state === undefined || pod.reconciliation_state === "consistent") &&
+    !pod.unknown_slots && slots.some(canManageSlot) &&
+    slots.every((slot) => slot.reconciliation_state === undefined || slot.reconciliation_state === "consistent") &&
+    slots.filter((slot) => slot.instance_id).every(canManageSlot) &&
+    slots.filter(canManageSlot).length >= pod.used_slots;
 }
 
 export function isSchedulable(pod: RuntimePod) {
@@ -51,19 +93,22 @@ export function summarizePod(pod: RuntimePod) {
   const count = (state: SlotState) =>
     slots.filter((slot) => slotState(slot) === state).length;
   const ready = slots.filter((slot) => slot.ready).length;
-  const bound = slots.filter((slot) => slot.instance_id).length;
+  const bound = slots.filter((slot) => slot.instance_id || slot.expected_instance_id).length;
   const occupied = Math.max(bound, pod.used_slots);
   const idle = count("idle");
   return {
     capacity: pod.capacity,
     ready,
     occupied,
+    bound: pod.bound_instances,
+    residual: slots.filter(slot => !!slot.instance_id && !slot.binding_confirmed && slot.instance_id !== slot.expected_instance_id && slot.reconciliation_state !== undefined).length,
     available: isSchedulable(pod) && pod.bindings_reported !== false && bound >= pod.used_slots ? idle : 0,
     running: count("running"),
     starting: count("starting"),
     migrating: count("migrating"),
     error: count("error"),
     idle,
+    unknown: Math.max(count("unknown"), pod.unknown_slots ?? 0),
     unavailable: Math.max(0, pod.capacity - ready),
   };
 }
@@ -98,6 +143,7 @@ export function filterPods(
             slot.instance_name,
             slot.owner,
             slot.instance_id,
+            slot.expected_instance_id,
           ]),
         ].some((value) =>
           String(value ?? "")

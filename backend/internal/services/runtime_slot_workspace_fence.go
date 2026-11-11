@@ -80,3 +80,26 @@ func (c *slotRuntimeAgentClient) requireExternalWriterCleanup(ctx context.Contex
 	}
 	return cleanup(ctx, identity)
 }
+
+func ConfigureSlotExternalWriterAbsence(client RuntimeAgentClient, proof func(context.Context, runtimeauth.Identity) error) error {
+	c, ok := client.(*slotRuntimeAgentClient)
+	if !ok || proof == nil {
+		return fmt.Errorf("invalid external writer absence authority")
+	}
+	c.admissionMu.Lock()
+	defer c.admissionMu.Unlock()
+	if c.workspaceExternalAbsence != nil {
+		return fmt.Errorf("external writer absence authority already configured")
+	}
+	c.workspaceExternalAbsence = proof
+	return nil
+}
+func (c *slotRuntimeAgentClient) requireExternalWriterAbsence(ctx context.Context, identity runtimeauth.Identity) error {
+	c.admissionMu.RLock()
+	proof := c.workspaceExternalAbsence
+	c.admissionMu.RUnlock()
+	if proof == nil {
+		return fmt.Errorf("stopped-source recovery requires positive external writer absence authority")
+	}
+	return proof(ctx, identity)
+}

@@ -5,7 +5,7 @@ import test from 'node:test';
 import { runInNewContext } from 'node:vm';
 import ts from 'typescript';
 import { AxiosError } from 'axios';
-import { parseAutoStopDays, MAX_AUTO_STOP_DAYS } from '../src/lib/runtimeAutoStop.ts';
+import * as autoStop from '../src/lib/runtimeAutoStop.ts';
 
 const require = createRequire(import.meta.url);
 const initialSettings = { enabled: true, check_interval_days: 1, idle_timeout_days: 1, version: 3, next_check_at: '2026-11-03T20:00:00Z' };
@@ -28,7 +28,7 @@ function setup({ settings = initialSettings, activity, update, keepRunning, isEr
     if (name.endsWith('/I18nContext')) return { useI18n: () => ({ locale: 'en', t: key => key }) };
     if (name.endsWith('/runtimePoolService')) return { runtimePoolService: service };
     if (name.endsWith('/runtimeManagement')) return { runtimeError: error => error.message };
-    if (name.endsWith('/runtimeAutoStop')) return { parseAutoStopDays, MAX_AUTO_STOP_DAYS };
+    if (name.endsWith('/runtimeAutoStop')) return autoStop;
     if (name === './RuntimeManagementUI') return { RuntimeDialog: 'dialog', ErrorMessage: 'error' };
     return require(name);
   } });
@@ -54,7 +54,7 @@ test('settings preserve independent intervals and use each confirmed server vers
   ui.inputs()[1].props.onChange({ target: { value: '2' } }); ui.render();
   ui.inputs()[2].props.onChange({ target: { value: '7' } }); ui.render();
   ui.submit(); await ui.flush();
-  assert.deepEqual(JSON.parse(JSON.stringify(ui.updates)), [{ enabled: true, check_interval_days: 2, idle_timeout_days: 7, version: 3 }]);
+  assert.deepEqual(JSON.parse(JSON.stringify(ui.updates)), [{ enabled: true, check_interval_seconds: 172800, idle_timeout_seconds: 604800, version: 3 }]);
   assert.ok(ui.nodes().some(node => node.props?.children === 'autoStop.saved'));
   ui.submit(); await ui.flush();
   assert.equal(ui.updates[1].version, 4);
@@ -128,4 +128,37 @@ test('Lite presentation exposes reason, activity and blockers without offering a
   assert.match(text, /native execution cannot be observed/);
   assert.match(text, /autoStop.startHelp/);
   assert.equal(ui.nodes().filter(node => node.type === 'button').length, 0);
+});
+
+test('seconds API values load exact units and independent dropdown choices save exact durations', async () => {
+  const ui = setup({ settings: { ...initialSettings, check_interval_seconds: 1, idle_timeout_seconds: 61 } });
+  const selects = () => ui.nodes().filter(node => node.type === 'select');
+  assert.equal(ui.inputs()[1].props.value, '1');
+  assert.equal(ui.inputs()[2].props.value, '61');
+  assert.equal(selects()[0].props.value, 'second');
+  assert.equal(selects()[1].props.value, 'second');
+  assert.deepEqual(Array.from(selects()[0].props.children, node => node.props.value), ['second', 'minute', 'hour', 'day']);
+  assert.equal(selects()[0].props['aria-label'], 'autoStop.checkIntervalUnit');
+  for (const [unit, multiplier] of [['second', 1], ['minute', 60], ['hour', 3600], ['day', 86400]]) {
+    selects()[0].props.onChange({ target: { value: unit } }); ui.render();
+    selects()[1].props.onChange({ target: { value: 'minute' } }); ui.render();
+    ui.inputs()[1].props.onChange({ target: { value: '3' } }); ui.render();
+    ui.inputs()[2].props.onChange({ target: { value: '7' } }); ui.render();
+    ui.submit(); await ui.flush();
+    const request = ui.updates.at(-1);
+    assert.equal(request.check_interval_seconds, 3 * multiplier);
+    assert.equal(request.idle_timeout_seconds, 420);
+  }
+  ui.inputs()[1].props.onChange({ target: { value: '106752' } }); ui.render();
+  assert.equal(ui.button('autoStop.save').props.disabled, true);
+  assert.ok(ui.find(node => node.props?.role === 'alert'));
+});
+
+test('effective legacy test timings are shown as minutes instead of saved day labels', () => {
+  const ui = setup({ settings: { ...initialSettings, check_interval_seconds: 60, idle_timeout_seconds: 300 } });
+  const selects = ui.nodes().filter(node => node.type === 'select');
+  assert.equal(ui.inputs()[1].props.value, '1');
+  assert.equal(ui.inputs()[2].props.value, '5');
+  assert.equal(selects[0].props.value, 'minute');
+  assert.equal(selects[1].props.value, 'minute');
 });

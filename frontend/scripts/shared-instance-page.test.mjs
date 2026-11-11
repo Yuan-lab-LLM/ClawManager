@@ -26,14 +26,14 @@ assert(
 
 assert(
   pageSource.includes("<WorkspaceFileManager") &&
-    pageSource.includes("createSharedWorkspaceService") &&
-    pageSource.includes('workspaceKey={`share:${code}`}') &&
+    pageSource.includes("createSharedWorkspaceService") && pageSource.includes("<InstanceWorkbench") && pageSource.includes("WorkbenchServicesProvider") && pageSource.includes("attachNativePreviewBridge") &&
+    pageSource.includes('workspaceKey: `share:${shareScope ?? code}`') &&
     pageSource.includes('session.workspace_access === "write"'),
   "Shared page must render the reusable single-instance workspace with scoped capabilities.",
 );
 
 assert(
-  pageSource.includes("const [workspaceVisible, setWorkspaceVisible] = useState(true)") &&
+  pageSource.includes("currentView.visible") && pageSource.includes("readWorkbenchView") &&
     pageSource.includes("PanelRightClose") &&
     pageSource.includes("PanelRightOpen") &&
     pageSource.includes("canShowWorkspace && workspaceVisible") &&

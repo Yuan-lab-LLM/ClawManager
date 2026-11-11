@@ -20,7 +20,7 @@ function load(url) {
   modules.set(url.href, exports);
   return exports;
 }
-const { SlotGrid } = load(new URL('../src/pages/admin/RuntimeManagementUI.tsx', import.meta.url));
+const { SlotGrid, Legend } = load(new URL('../src/pages/admin/RuntimeManagementUI.tsx', import.meta.url));
 const states = ['running', 'starting', 'migrating', 'error', 'idle', 'unavailable'];
 const pod = count => ({ slots: Array.from({ length: count }, (_, i) => ({
   index: i + 1, container_name: `agent-${i + 1}`, ready: i % 6 !== 5,
@@ -53,4 +53,20 @@ test('large custom inventories retain all actionable slots in a bounded compact 
   assert.equal(tree.props.children.flat().filter(Boolean).length, 256);
   assert.match(tree.props.className, /max-h-10/);
   assert.match(tree.props.className, /overflow-y-auto/);
+});
+
+
+test('unknown observations have an amber labeled slot and legend entry; residual owners show errors', () => {
+  const tree = SlotGrid({ pod: { slots: [
+    { index: 1, ready: true, reconciliation_state: 'unknown' },
+    { index: 2, ready: true, instance_id: 25, expected_instance_id: 118, reconciliation_state: 'conflict', observation_message: 'owner mismatch' },
+  ] }, onSelect() {} });
+  const buttons = tree.props.children;
+  assert.match(buttons[0].props.className, /bg-amber-50/);
+  assert.match(buttons[0].props['aria-label'], /runtimePods.unknown$/);
+  assert.match(buttons[1].props.className, /bg-red-50/);
+  assert.match(buttons[1].props.title, /#25.*runtimePods.expectedBinding #118.*owner mismatch/);
+  const unknown = Legend({}).props.children.find(item => item.props.children[1] === 'runtimePods.unknown');
+  assert.ok(unknown);
+  assert.match(unknown.props.children[0].props.className, /bg-amber-500/);
 });

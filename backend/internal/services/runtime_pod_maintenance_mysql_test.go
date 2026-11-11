@@ -5,6 +5,7 @@ import (
 	"clawreef/internal/repository"
 	"clawreef/internal/services/k8s"
 	"context"
+	"encoding/json"
 	"github.com/upper/db/v4/adapter/mysql"
 	"io"
 	appsv1 "k8s.io/api/apps/v1"
@@ -14,6 +15,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
 	clienttesting "k8s.io/client-go/testing"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -30,11 +32,21 @@ func TestRuntimeMaintenanceMySQLEmptyDeletionAdmission(t *testing.T) {
 	deployment := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "managed", Namespace: "runtime", UID: types.UID("deployment-uid"), ResourceVersion: "2", Labels: map[string]string{"clawmanager.io/managed-pool": "true", "clawmanager.io/purpose": "runtime-managed-pool", "clawmanager.io/runtime-type": "opencode"}}, Spec: appsv1.DeploymentSpec{Replicas: &one}}
 	rs := &appsv1.ReplicaSet{ObjectMeta: metav1.ObjectMeta{Name: "managed-rs", Namespace: "runtime", UID: types.UID("rs-uid"), OwnerReferences: []metav1.OwnerReference{{Kind: "Deployment", Name: "managed", UID: deployment.UID, Controller: &yes}}}}
 	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "managed-pod", Namespace: "runtime", UID: types.UID("pod-uid"), Labels: map[string]string{"app": "managed"}, OwnerReferences: []metav1.OwnerReference{{Kind: "ReplicaSet", Name: rs.Name, UID: rs.UID, Controller: &yes}}}, Status: corev1.PodStatus{Phase: corev1.PodRunning}}
+	profile := k8s.BuildRuntimeDeployment(k8s.RuntimeDeploymentSpec{Name: "managed", Namespace: "runtime", RuntimeType: "opencode", Image: "image", Replicas: 1, SlotCount: 2, AgentTokenSecretName: "token", WorkspacePVCClaimName: "workspace"})
+	pod.Spec = *profile.Spec.Template.Spec.DeepCopy()
+	pod.Labels["clawmanager.io/runtime-protocol"] = "container-slots-v1"
+	pod.Status.PodIP = "10.0.0.9"
 	kube := fake.NewSimpleClientset(deployment, rs, pod)
 	scheduler.deployments = k8s.NewRuntimeDeploymentService(kube)
-	scheduler.agentClient = NewSlotRuntimeAgentClient("test", kube, "runtime")
+	scheduler.agentClient = NewSlotRuntimeAgentClientWithHTTPClient("test", kube, "runtime", &http.Client{Transport: slotRoundTripper(func(r *http.Request) (*http.Response, error) {
+		raw, _ := json.Marshal(auditFreeSnapshot())
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(string(raw)))}, nil
+	})})
 	service := NewRuntimePodMaintenanceService(sess, scheduler)
 	if _, err := sess.SQL().Exec("INSERT INTO runtime_pods (id,runtime_type,namespace,pod_name,pod_uid,deployment_name,image_ref,state,capacity,used_slots,last_seen_at) VALUES (9,'opencode','runtime','managed-pod','pod-uid','managed','image','ready',2,1,NOW())"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sess.SQL().Exec("UPDATE runtime_pods SET agent_endpoint='https://10.0.0.9',pod_ip='10.0.0.9' WHERE id=9"); err != nil {
 		t.Fatal(err)
 	}
 	if err := service.Delete(ctx, 9, "pod-uid"); err == nil {
@@ -90,6 +102,11 @@ func TestRuntimeMaintenanceMySQLEmptyDeletionAdmission(t *testing.T) {
 	if _, err := sess.SQL().Exec("DELETE FROM instance_runtime_bindings WHERE runtime_pod_id=9"); err != nil {
 		t.Fatal(err)
 	}
+	// First fresh scan clears the old binding quarantine; a following scan
+	// independently confirms that release before authorizing deletion.
+	if err := scheduler.refreshRuntimeDeletionObservation(ctx, 9, "pod-uid"); err != nil {
+		t.Fatal(err)
+	}
 	kube.PrependReactor("delete", "deployments", func(action clienttesting.Action) (bool, runtime.Object, error) {
 		if err := kube.Tracker().Delete(appsv1.SchemeGroupVersion.WithResource("deployments"), "runtime", "managed"); err != nil {
 			t.Fatal(err)
@@ -140,9 +157,16 @@ func TestRuntimeMaintenanceMySQLDeleteFenceRejectsLastMomentAdmission(t *testing
 				phase = corev1.PodPending
 			}
 			pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod", Namespace: "runtime", UID: types.UID("pod-uid"), Labels: map[string]string{"app": "managed"}, OwnerReferences: []metav1.OwnerReference{{Kind: "ReplicaSet", Name: rs.Name, UID: rs.UID, Controller: &yes}}}, Status: corev1.PodStatus{Phase: phase}}
+			profile := k8s.BuildRuntimeDeployment(k8s.RuntimeDeploymentSpec{Name: "managed", Namespace: "runtime", RuntimeType: "opencode", Image: "image", Replicas: 1, SlotCount: 2, AgentTokenSecretName: "token", WorkspacePVCClaimName: "workspace"})
+			pod.Spec = *profile.Spec.Template.Spec.DeepCopy()
+			pod.Labels["clawmanager.io/runtime-protocol"] = "container-slots-v1"
+			pod.Status.PodIP = "10.0.0.9"
 			kube := fake.NewSimpleClientset(deployment, rs, pod)
 			scheduler.deployments = k8s.NewRuntimeDeploymentService(kube)
-			scheduler.agentClient = NewSlotRuntimeAgentClient("test", kube, "runtime")
+			scheduler.agentClient = NewSlotRuntimeAgentClientWithHTTPClient("test", kube, "runtime", &http.Client{Transport: slotRoundTripper(func(r *http.Request) (*http.Response, error) {
+				raw, _ := json.Marshal(auditFreeSnapshot())
+				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(string(raw)))}, nil
+			})})
 			outsideKube := fake.NewSimpleClientset(deployment.DeepCopy(), rs.DeepCopy(), pod.DeepCopy())
 			outsideManagement := runtimeManagementMySQLService(second)
 			outsideManagement.scheduler.runtimeNamespace = "runtime"
@@ -151,9 +175,12 @@ func TestRuntimeMaintenanceMySQLDeleteFenceRejectsLastMomentAdmission(t *testing
 			outsideManagement.scheduler.agentClient = NewSlotRuntimeAgentClient("test", outsideKube, "runtime")
 			_ = NewRuntimePodMaintenanceService(second, outsideManagement.scheduler)
 			service := NewRuntimePodMaintenanceService(sess, scheduler)
+			if _, err := sess.SQL().Exec("INSERT INTO instances(id,user_id,type,runtime_type,instance_mode,status,runtime_generation,workspace_path,updated_at) VALUES(101,1,'opencode','gateway','lite','creating',1,'/workspace',NOW(6))"); err != nil {
+				t.Fatal(err)
+			}
 			insert := func() {
 				t.Helper()
-				if _, err := second.SQL().Exec("INSERT INTO runtime_pods (id,runtime_type,namespace,pod_name,pod_uid,deployment_name,image_ref,state,capacity,used_slots,last_seen_at) VALUES (9,'opencode','runtime','pod','pod-uid','managed','image','ready',2,0,?)", time.Now().UTC()); err != nil {
+				if _, err := second.SQL().Exec("INSERT INTO runtime_pods (id,runtime_type,namespace,pod_name,pod_uid,deployment_name,image_ref,state,capacity,used_slots,last_seen_at,agent_endpoint,pod_ip) VALUES (9,'opencode','runtime','pod','pod-uid','managed','image','ready',2,0,?,'https://10.0.0.9','10.0.0.9')", time.Now().UTC()); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -173,65 +200,69 @@ func TestRuntimeMaintenanceMySQLDeleteFenceRejectsLastMomentAdmission(t *testing
 			podUIDForFenceTest := "pod-uid"
 			resumes, claims, unsafeDeletes := 0, 0, 0
 			publications := 0
+			admissionDone := make(chan struct{})
 			kube.PrependReactor("delete", "deployments", func(action clienttesting.Action) (bool, runtime.Object, error) {
-				for _, bad := range []struct{ namespace, podName, owner string }{{"runtime", "pod", "other"}, {"other", "pod", "managed"}, {"runtime", "duplicate", "managed"}} {
+				go func() {
+					defer close(admissionDone)
+					for _, bad := range []struct{ namespace, podName, owner string }{{"runtime", "pod", "other"}, {"other", "pod", "managed"}, {"runtime", "duplicate", "managed"}} {
+						now := time.Now().UTC()
+						uid := "pod-uid"
+						report := &models.RuntimePod{Namespace: bad.namespace, PodName: bad.podName, PodUID: &uid, DeploymentName: bad.owner, RuntimeType: "opencode", ImageRef: "image", State: "ready", Capacity: 2, LastSeenAt: &now}
+						if err := outside.UpsertFromAgent(ctx, report); err == nil {
+							t.Fatalf("registration changed verified controller identity: %+v", bad)
+						}
+					}
+					if scenario == "pending-register-and-claim" {
+						insert()
+						live := pod.DeepCopy()
+						live.Status.Phase = corev1.PodRunning
+						if err := kube.Tracker().Update(corev1.SchemeGroupVersion.WithResource("pods"), live, "runtime"); err != nil {
+							t.Fatal(err)
+						}
+					}
 					now := time.Now().UTC()
 					uid := "pod-uid"
-					report := &models.RuntimePod{Namespace: bad.namespace, PodName: bad.podName, PodUID: &uid, DeploymentName: bad.owner, RuntimeType: "opencode", ImageRef: "image", State: "ready", Capacity: 2, LastSeenAt: &now}
-					if err := outside.UpsertFromAgent(ctx, report); err == nil {
-						t.Fatalf("registration changed verified controller identity: %+v", bad)
+					good := &models.RuntimePod{Namespace: "runtime", PodName: "pod", PodUID: &uid, DeploymentName: "managed", RuntimeType: "opencode", ImageRef: "image", State: "ready", Capacity: 2, LastSeenAt: &now}
+					if err := outside.UpsertFromAgent(ctx, good); err != nil || good.ID != 9 || !good.SchedulingPaused {
+						t.Fatalf("valid fenced registration did not preserve identity/pause: %+v %v", good, err)
 					}
-				}
-				if scenario == "pending-register-and-claim" {
-					insert()
-					live := pod.DeepCopy()
-					live.Status.Phase = corev1.PodRunning
-					if err := kube.Tracker().Update(corev1.SchemeGroupVersion.WithResource("pods"), live, "runtime"); err != nil {
+					legacy := repository.NewRuntimePodRepository(second)
+					changed := *good
+					changed.DeploymentName = "other"
+					if err := legacy.UpsertFromAgent(ctx, &changed); err == nil || !strings.Contains(err.Error(), "fenced") {
+						t.Fatalf("transactional owner freeze bypassed: %v", err)
+					}
+					if err := outside.(interface {
+						SetSchedulingPaused(context.Context, int64, bool) error
+					}).SetSchedulingPaused(ctx, 9, false); err == nil {
+						resumes++
+					}
+					if claimed, err := outside.TryClaimSlot(ctx, 9); err != nil {
 						t.Fatal(err)
+					} else if claimed {
+						claims++
+						unsafeDeletes++
 					}
-				}
-				now := time.Now().UTC()
-				uid := "pod-uid"
-				good := &models.RuntimePod{Namespace: "runtime", PodName: "pod", PodUID: &uid, DeploymentName: "managed", RuntimeType: "opencode", ImageRef: "image", State: "ready", Capacity: 2, LastSeenAt: &now}
-				if err := outside.UpsertFromAgent(ctx, good); err != nil || good.ID != 9 || !good.SchedulingPaused {
-					t.Fatalf("valid fenced registration did not preserve identity/pause: %+v %v", good, err)
-				}
-				legacy := repository.NewRuntimePodRepository(second)
-				changed := *good
-				changed.DeploymentName = "other"
-				if err := legacy.UpsertFromAgent(ctx, &changed); err == nil || !strings.Contains(err.Error(), "fenced") {
-					t.Fatalf("transactional owner freeze bypassed: %v", err)
-				}
-				if err := outside.(interface {
-					SetSchedulingPaused(context.Context, int64, bool) error
-				}).SetSchedulingPaused(ctx, 9, false); err == nil {
-					resumes++
-				}
-				if claimed, err := outside.TryClaimSlot(ctx, 9); err != nil {
-					t.Fatal(err)
-				} else if claimed {
-					claims++
-					unsafeDeletes++
-				}
-				if err := repository.WithRuntimePodAssignmentAdmission(ctx, second, models.RuntimePod{Namespace: "runtime", PodName: "pod", PodUID: &podUIDForFenceTest, DeploymentName: "managed", RuntimeType: "opencode"}, 101, 1, func() error { publications++; return nil }); err == nil {
-					t.Fatal("fenced assignment publication was admitted")
-				}
+					if err := repository.WithRuntimePodAssignmentAdmission(ctx, second, models.RuntimePod{Namespace: "runtime", PodName: "pod", PodUID: &podUIDForFenceTest, DeploymentName: "managed", RuntimeType: "opencode"}, 101, 1, func() error { publications++; return nil }); err == nil {
+						t.Fatal("fenced assignment publication was admitted")
+					}
 
-				late := &models.InstanceRuntimeBinding{RuntimePodID: 9, InstanceID: 101, RuntimeType: "opencode", Generation: 1, GatewayID: "pending-101-1", GatewayPort: 20000, WorkspacePath: "/workspace", State: "creating"}
-				bindings := repository.NewInstanceRuntimeBindingRepository(second)
-				if err := bindings.Create(ctx, late); err == nil || !strings.Contains(err.Error(), "fenced") {
-					t.Fatalf("late binding publication not fenced: %v", err)
-				}
-				reported := *late
-				reported.GatewayID = "gw-101-1"
-				reported.State = "running"
-				if _, err := bindings.(repository.ReportedGatewayBindingReconciler).ReconcileReportedGateway(ctx, &reported, 1, 1); err == nil || !strings.Contains(err.Error(), "fenced") {
-					t.Fatalf("late report replay not fenced: %v", err)
-				}
-				target := models.RuntimePod{ID: 9, PodUID: &podUIDForFenceTest}
-				if _, err := bindings.(repository.UpgradeGatewayReserver).ReserveUpgradeGateway(ctx, repository.UpgradeGatewayReservation{RolloutID: 1, InstanceID: 101, Generation: 1, Pod: target, WorkspacePath: "/workspace", PortStart: 20000, PortEnd: 20010, PortBlockSize: 1}); err == nil || !strings.Contains(err.Error(), "fenced") {
-					t.Fatalf("late upgrade reservation not fenced: %v", err)
-				}
+					late := &models.InstanceRuntimeBinding{RuntimePodID: 9, InstanceID: 101, RuntimeType: "opencode", Generation: 1, GatewayID: "pending-101-1", GatewayPort: 20000, WorkspacePath: "/workspace", State: "creating"}
+					bindings := repository.NewInstanceRuntimeBindingRepository(second)
+					if err := bindings.Create(ctx, late); err == nil || !strings.Contains(err.Error(), "fenced") {
+						t.Fatalf("late binding publication not fenced: %v", err)
+					}
+					reported := *late
+					reported.GatewayID = "gw-101-1"
+					reported.State = "running"
+					if _, err := bindings.(repository.ReportedGatewayBindingReconciler).ReconcileReportedGateway(ctx, &reported, 1, 1); err == nil || !strings.Contains(err.Error(), "fenced") {
+						t.Fatalf("late report replay not fenced: %v", err)
+					}
+					target := models.RuntimePod{ID: 9, PodUID: &podUIDForFenceTest}
+					if _, err := bindings.(repository.UpgradeGatewayReserver).ReserveUpgradeGateway(ctx, repository.UpgradeGatewayReservation{RolloutID: 1, InstanceID: 101, Generation: 1, Pod: target, WorkspacePath: "/workspace", PortStart: 20000, PortEnd: 20010, PortBlockSize: 1}); err == nil || !strings.Contains(err.Error(), "fenced") {
+						t.Fatalf("late upgrade reservation not fenced: %v", err)
+					}
+				}()
 				return false, nil, nil
 			})
 
@@ -243,6 +274,11 @@ func TestRuntimeMaintenanceMySQLDeleteFenceRejectsLastMomentAdmission(t *testing
 			}
 			if err != nil {
 				t.Fatal(err)
+			}
+			select {
+			case <-admissionDone:
+			case <-time.After(10 * time.Second):
+				t.Fatal("concurrent admission did not finish after deletion released its proof lock")
 			}
 			if resumes != 0 || claims != 0 || unsafeDeletes != 0 || publications != 0 {
 				t.Fatalf("durable fence failed: resumes=%d claims=%d unsafeDeletes=%d", resumes, claims, unsafeDeletes)

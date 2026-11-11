@@ -7,122 +7,19 @@ import (
 	"errors"
 	"github.com/gin-gonic/gin"
 	"net/http"
-	"strconv"
 	"time"
 )
 
+// RuntimeMaintenanceHandler accepts authenticated runtime evidence for upgrade
+// isolation. Manual instance drain controls are intentionally not exposed.
 type RuntimeMaintenanceHandler struct {
-	store     repository.RuntimeMaintenanceRepository
-	instances repository.InstanceRepository
+	store repository.RuntimeMaintenanceRepository
 }
 
-func NewRuntimeMaintenanceHandler(store repository.RuntimeMaintenanceRepository, instances repository.InstanceRepository) *RuntimeMaintenanceHandler {
-	return &RuntimeMaintenanceHandler{store, instances}
+func NewRuntimeMaintenanceHandler(store repository.RuntimeMaintenanceRepository) *RuntimeMaintenanceHandler {
+	return &RuntimeMaintenanceHandler{store: store}
 }
-func (h *RuntimeMaintenanceHandler) instance(c *gin.Context, admin bool) *models.Instance {
-	if admin && c.GetString("userRole") != "admin" {
-		utils.Error(c, 403, "Administrator required")
-		return nil
-	}
-	id, err := strconv.Atoi(c.Param("id"))
-	if err != nil || id <= 0 {
-		utils.Error(c, 400, "Invalid instance ID")
-		return nil
-	}
-	instance, err := h.instances.GetByID(id)
-	if err != nil {
-		utils.HandleError(c, err)
-		return nil
-	}
-	if instance == nil {
-		utils.Error(c, 404, "Instance not found")
-		return nil
-	}
-	if c.GetString("userRole") != "admin" && instance.UserID != c.GetInt("userID") {
-		utils.Error(c, 403, "Access denied")
-		return nil
-	}
-	if instance.Type != "opencode" {
-		utils.Error(c, 409, "Maintenance drain currently supports OpenCode only")
-		return nil
-	}
-	return instance
-}
-func maintenanceResult(state *models.RuntimeMaintenance, instance *models.Instance) gin.H {
-	now := time.Now().UTC()
-	draining, drained := false, false
-	if state != nil && state.OwnerID == instance.UserID && state.Generation == instance.RuntimeGeneration && instance.Status == "running" {
-		draining = state.Draining(now)
-		drained = state.Drained(now)
-	}
-	return gin.H{"operation": state, "draining": draining, "drained": drained, "automatic_upgrade_available": false}
-}
-func (h *RuntimeMaintenanceHandler) Status(c *gin.Context) {
-	instance := h.instance(c, false)
-	if instance == nil {
-		return
-	}
-	state, err := h.store.Get(c.Request.Context(), instance.ID)
-	if err != nil {
-		utils.Error(c, 503, "Maintenance status unavailable")
-		return
-	}
-	c.Header("Cache-Control", "no-store")
-	utils.Success(c, 200, "Maintenance status", maintenanceResult(state, instance))
-}
-func (h *RuntimeMaintenanceHandler) Begin(c *gin.Context) {
-	instance := h.instance(c, true)
-	if instance == nil {
-		return
-	}
-	if instance.Status != "running" {
-		utils.Error(c, 409, "Instance must be running to confirm drain")
-		return
-	}
-	var input struct {
-		Timeout int `json:"timeout_seconds"`
-	}
-	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 1024)
-	if err := c.ShouldBindJSON(&input); err != nil || input.Timeout < 10 || input.Timeout > 600 {
-		utils.Error(c, 400, "timeout_seconds must be between 10 and 600")
-		return
-	}
-	state, err := h.store.Begin(c.Request.Context(), instance.ID, instance.UserID, instance.RuntimeGeneration, c.GetInt("userID"), time.Duration(input.Timeout)*time.Second)
-	if errors.Is(err, models.ErrRuntimeMaintenanceConflict) || errors.Is(err, models.ErrRuntimeUpgradeInProgress) {
-		utils.Error(c, 409, err.Error())
-		return
-	}
-	if err != nil {
-		utils.Error(c, 503, "Cannot begin maintenance")
-		return
-	}
-	c.Header("Cache-Control", "no-store")
-	utils.Success(c, 202, "Drain requested; no process stopped or image changed", maintenanceResult(state, instance))
-}
-func (h *RuntimeMaintenanceHandler) Cancel(c *gin.Context) {
-	instance := h.instance(c, true)
-	if instance == nil {
-		return
-	}
-	var input struct {
-		Operation string `json:"operation_id"`
-	}
-	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 1024)
-	if err := c.ShouldBindJSON(&input); err != nil || len(input.Operation) != 32 {
-		utils.Error(c, 400, "Matching operation_id required")
-		return
-	}
-	err := h.store.Cancel(c.Request.Context(), instance.ID, input.Operation)
-	if errors.Is(err, models.ErrRuntimeMaintenanceConflict) || errors.Is(err, models.ErrRuntimeUpgradeInProgress) {
-		utils.Error(c, 409, err.Error())
-		return
-	}
-	if err != nil {
-		utils.Error(c, 503, "Cannot cancel maintenance")
-		return
-	}
-	utils.Success(c, 200, "Drain cancelled; runtime reopens admission on its next successful poll", nil)
-}
+
 func (h *RuntimeMaintenanceHandler) Poll(c *gin.Context) {
 	// Missing counters must not silently decode to zero and certify an idle
 	// runtime. Zero is valid only when explicitly reported.

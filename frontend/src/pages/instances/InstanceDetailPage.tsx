@@ -1,3 +1,4 @@
+import { allowBrowserInstance } from "../../lib/browserOrigin";
 import React, {
   useCallback,
   useEffect,
@@ -29,7 +30,6 @@ import {
 } from "lucide-react";
 import ConfirmDialog from "../../components/ConfirmDialog";
 import InstanceLifecycleStatus from "../../components/InstanceLifecycleStatus";
-import InstanceAutoStopInfo from "../../components/InstanceAutoStopInfo";
 import {
   instancePanelStorageKey,
   readStoredCollapsed,
@@ -37,15 +37,18 @@ import {
 import InstanceSkillHubPanel from "../../components/InstanceSkillHubPanel";
 import InstanceSessionUsagePanel from "../../components/InstanceSessionUsagePanel";
 import RuntimeGovernanceBadge from "../../components/RuntimeGovernanceBadge";
-import RuntimeMaintenancePanel from "../../components/RuntimeMaintenancePanel";
 import { InstanceServiceFrame } from "../../components/InstanceServiceFrame";
 import RestartWithEnvironmentDialog from "../../components/RestartWithEnvironmentDialog";
 import UserLayout from "../../components/UserLayout";
 import UpgradeRecoveryActions from "../../components/UpgradeRecoveryActions";
-import { WorkspaceFileManager } from "../../components/WorkspaceFileManager";
+import { InstanceWorkbench } from "../../components/workbench/InstanceWorkbench";
+import {workbenchReducer,MAX_WORKBENCH_TABS,type WorkbenchState,type WorkbenchEvent} from "../../components/workbench/state";
+import { readWorkbenchView, writeWorkbenchView, workbenchViewKey } from "../../components/workbench/persistence";
+import { useAuthStore } from "../../stores/authStore";
 import { useI18n } from "../../contexts/I18nContext";
 import { useInstanceStatusWebSocket } from "../../hooks/useWebSocket";
 import type { InstanceStatusUpdate } from "../../hooks/useWebSocket";
+import { instanceWorkbenchService, workbenchPreviewError } from "../../services/instanceWorkbenchService";
 import { instanceService } from "../../services/instanceService";
 import {
   formatInstanceType,
@@ -405,7 +408,75 @@ const InstanceDetailPage: React.FC = () => {
   const [workspaceHeightPx, setWorkspaceHeightPx] = useState<number | null>(
     null,
   );
-  const [workspaceVisible, setWorkspaceVisible] = useState(true);
+  const workbenchUserId = useAuthStore((auth) => auth.isAuthenticated ? auth.user?.id : undefined);
+  const workbenchScope = workbenchViewKey(workbenchUserId, instanceId);
+  const activeWorkbenchScope = useRef(workbenchScope);
+  activeWorkbenchScope.current = workbenchScope;
+  const restoredWorkbench = useMemo(() => readWorkbenchView(workbenchScope), [workbenchScope]);
+  // Only browser definitions are durable; capabilities and drafts remain in memory.
+  const [workbenchViews,setWorkbenchViews]=useState<Record<string,WorkbenchState>>({});
+  const [workspaceVisibility, setWorkspaceVisibility] = useState<Record<string, boolean>>({});
+  const workbenchViewsRef = useRef(workbenchViews);
+  const workspaceVisibilityRef = useRef(workspaceVisibility);
+  const workspaceVisible = (workbenchScope ? workspaceVisibility[workbenchScope] : undefined) ?? restoredWorkbench.visible;
+  const setWorkspaceVisible = useCallback((visible: boolean) => {
+    if (!workbenchScope || activeWorkbenchScope.current !== workbenchScope) return;
+    workspaceVisibilityRef.current = { ...workspaceVisibilityRef.current, [workbenchScope]: visible };
+    setWorkspaceVisibility(workspaceVisibilityRef.current);
+    writeWorkbenchView(workbenchScope, { state: workbenchViewsRef.current[workbenchScope] ?? restoredWorkbench.state, visible });
+  }, [workbenchScope, restoredWorkbench]);
+  const onWorkbenchEvent = useCallback((event: WorkbenchEvent) => {
+    if (!instanceId || !workbenchScope || activeWorkbenchScope.current !== workbenchScope) return;
+    const previous = workbenchViewsRef.current;
+    const current = previous[workbenchScope] ?? restoredWorkbench.state;
+    const next = workbenchReducer(current, event);
+    if (next !== current) {
+      workbenchViewsRef.current = { ...previous, [workbenchScope]: next };
+      setWorkbenchViews(workbenchViewsRef.current);
+      writeWorkbenchView(workbenchScope, { state: next, visible: workspaceVisibilityRef.current[workbenchScope] ?? restoredWorkbench.visible });
+    }
+  }, [instanceId, workbenchScope, restoredWorkbench]);
+
+  const nativePreviewInstanceId = instance?.id;
+  const nativePreviewGeneration = instance?.runtime_generation ?? 0;
+  const handleNativePreview = useCallback(async (address: string, isCurrent: () => boolean) => {
+    if (!nativePreviewInstanceId || nativePreviewInstanceId !== instanceId || !isCurrent()) return;
+    const id = nativePreviewInstanceId;
+    const generation = nativePreviewGeneration;
+    if (!workbenchScope || activeWorkbenchScope.current !== workbenchScope) return;
+    const view = workbenchViewsRef.current[workbenchScope] ?? restoredWorkbench.state;
+    if (view.generation !== generation) return;
+    const existing = view.tabs.find((tab) => tab.kind === "browser" && tab.address === address && !tab.stale);
+    if (existing) {
+      setWorkspaceVisible(true);
+      onWorkbenchEvent({ type: "tab.select", id: existing.id });
+      return;
+    }
+    if (view.tabs.length >= MAX_WORKBENCH_TABS) {
+      setActionMessage(t("workbench.sessionLimit"));
+      return;
+    }
+    const tab = crypto.randomUUID();
+    // Reserve before awaiting allocation so concurrent clicks obey the tab limit.
+    onWorkbenchEvent({ type: "browser.new", id: tab });
+    onWorkbenchEvent({ type: "browser.navigate", id: tab, address, url: "", previewPending: true, generation });
+    setWorkspaceVisible(true);
+    try {
+      const result = await instanceWorkbenchService.preview(id, generation, address);
+      if (!isCurrent() || activeWorkbenchScope.current !== workbenchScope || result.generation !== generation || workbenchViewsRef.current[workbenchScope]?.generation !== generation) {
+        onWorkbenchEvent({ type: "tab.remove", id: tab });
+        return;
+      }
+      onWorkbenchEvent({ type: "browser.navigate", id: tab, address, url: result.url, viewer_url: result.viewer_url, credentialless: result.credentialless, generation });
+    } catch (error) {
+      if (!isCurrent() || activeWorkbenchScope.current !== workbenchScope || workbenchViewsRef.current[workbenchScope]?.generation !== generation) {
+        onWorkbenchEvent({ type: "tab.remove", id: tab });
+        return;
+      }
+      onWorkbenchEvent({ type: "browser.navigate", id: tab, address, url: "", previewError: workbenchPreviewError(error, t), generation });
+    }
+  }, [instanceId, nativePreviewInstanceId, nativePreviewGeneration, workbenchScope, restoredWorkbench, setWorkspaceVisible, onWorkbenchEvent, t]);
+
   const [collapsedBottomHeightPx, setCollapsedBottomHeightPx] = useState<
     number | null
   >(null);
@@ -1116,7 +1187,9 @@ const InstanceDetailPage: React.FC = () => {
     }
   };
 
-  if (loading) {
+  if (!allowBrowserInstance(instanceId)) return null;
+
+  if (loading || (instance !== null && instance.id !== instanceId)) {
     return (
       <UserLayout title={t("instances.details")}>
         <div className="flex h-64 items-center justify-center text-sm text-slate-500">
@@ -1163,9 +1236,7 @@ const InstanceDetailPage: React.FC = () => {
             )}
           </span>
           <span>{formatDateTime(instance.updated_at, locale)}</span>
-          {instance.type === "opencode" && <RuntimeMaintenancePanel key={instance.id} instanceId={instance.id} />}
         </div>
-        <InstanceAutoStopInfo instance={instance} />
       </div>
 
       <div className="flex flex-col items-start gap-2 lg:items-end">
@@ -1564,13 +1635,15 @@ const InstanceDetailPage: React.FC = () => {
     </div>
   );
 
+  const sharedWorkbenchState=(workbenchScope ? workbenchViews[workbenchScope] : undefined)??restoredWorkbench.state;
+
   const renderLiteWorkspace = () => {
     const pinnedWorkspaceHeight = workspaceHeightPx;
 
     return (
       <div
         ref={liteRootRef}
-        className={`flex min-h-0 flex-1 flex-col gap-2 ${
+        className={`${workspaceVisible&&supportsWorkspace(instance)?"wb-instance-stack":""} flex min-h-0 flex-1 flex-col gap-2 ${
           bottomPanelExpanded ? "" : "overflow-hidden"
         }`}
       >
@@ -1589,11 +1662,13 @@ const InstanceDetailPage: React.FC = () => {
                 }
               : { minHeight: 420, flex: 1 }
           }
-          className={`grid shrink-0 grid-cols-1 grid-rows-[minmax(0,1fr)] gap-4 overflow-hidden min-h-[420px] ${workspaceVisible ? "xl:grid-cols-[minmax(0,1fr)_minmax(360px,28rem)]" : "xl:grid-cols-1"}`}
+          className={`wb-instance-section grid shrink-0 grid-cols-1 grid-rows-[minmax(0,1fr)] gap-4 overflow-hidden min-h-[420px] ${workspaceVisible ? "xl:grid-cols-[minmax(360px,1fr)_minmax(420px,1.05fr)]" : "xl:grid-cols-1"}`}
         >
-          <div className="h-full min-h-0 min-w-0">
+          <div className="wb-instance-agent h-full min-h-0 min-w-0">
             <InstanceServiceFrame
               instanceId={instance.id}
+              runtimeGeneration={instance.runtime_generation ?? 0}
+              onOpenWorkbenchPreview={handleNativePreview}
               instanceName={instance.name}
               instanceType={instance.type}
               instanceMode={instance.instance_mode}
@@ -1604,24 +1679,20 @@ const InstanceDetailPage: React.FC = () => {
               onWorkspaceVisibilityChange={supportsWorkspace(instance) ? setWorkspaceVisible : undefined}
             />
           </div>
-          {workspaceVisible &&
-            (supportsWorkspace(instance) ? (
-              <div className="h-full min-h-0 min-w-0">
-                <WorkspaceFileManager
-                  instanceId={instance.id}
-                  initialPath={
-                    instance.type === "opencode" &&
-                    instance.instance_mode === "lite"
-                      ? "starter"
-                      : undefined
-                  }
-                />
-              </div>
-            ) : (
-              <div className="cm-surface flex h-full min-h-[420px] items-center justify-center text-sm text-slate-500">
-                No workspace
-              </div>
-            ))}
+          {supportsWorkspace(instance) && (
+            <div className={`wb-instance-tools h-full min-h-0 min-w-0 ${workspaceVisible ? "" : "hidden"}`}>
+              <InstanceWorkbench
+                key={workbenchScope}
+                sharedState={sharedWorkbenchState}
+                onWorkbenchEvent={onWorkbenchEvent}
+                instanceId={instance.id}
+                runtimeGeneration={instance.runtime_generation ?? 0}
+                isRunning={instance.status === "running"}
+                visible={workspaceVisible}
+                initialPath={instance.type === "opencode" && instance.instance_mode === "lite" ? "starter" : undefined}
+              />
+            </div>
+          )}
         </section>
         <div ref={liteBottomRef} className="flex shrink-0 flex-col gap-2">
           <InstanceSkillHubPanel
@@ -1704,11 +1775,13 @@ const InstanceDetailPage: React.FC = () => {
       {renderActionMessage()}
       <section
         data-layout="pro-desktop-workspace"
-        className={`grid items-start gap-4 ${workspaceVisible ? "xl:grid-cols-[minmax(0,7fr)_minmax(380px,3fr)]" : "xl:grid-cols-1"}`}
+        className={`grid items-start gap-4 ${workspaceVisible ? "xl:grid-cols-[minmax(360px,1fr)_minmax(420px,1.05fr)]" : "xl:grid-cols-1"}`}
       >
         <div className="h-[clamp(520px,calc(100vh-10rem),760px)] min-w-0 overflow-hidden">
           <InstanceServiceFrame
             instanceId={instance.id}
+            runtimeGeneration={instance.runtime_generation ?? 0}
+            onOpenWorkbenchPreview={handleNativePreview}
             instanceName={instance.name}
             instanceType={instance.type}
             instanceMode={instance.instance_mode}
@@ -1719,26 +1792,22 @@ const InstanceDetailPage: React.FC = () => {
           />
         </div>
 
-        {workspaceVisible &&
-          (supportsWorkspace(instance) ? (
-            <div className="h-[clamp(520px,calc(100vh-10rem),760px)] min-w-0 overflow-hidden">
-              <WorkspaceFileManager
-                instanceId={instance.id}
-                initialPath="/config"
-                onSelectDirectory={
-                  instance.type === "opencode" &&
-                  instance.instance_mode === "pro"
-                    ? handleSelectOpenCodeProject
-                    : undefined
-                }
-                selectingDirectory={actionLoading !== null}
-              />
-            </div>
-          ) : (
-            <div className="cm-surface flex h-[clamp(520px,calc(100vh-10rem),760px)] min-w-0 items-center justify-center text-sm text-slate-500">
-              No workspace
-            </div>
-          ))}
+        {supportsWorkspace(instance) && (
+          <div className={`h-[clamp(520px,calc(100vh-10rem),760px)] min-w-0 overflow-hidden ${workspaceVisible ? "" : "hidden"}`}>
+            <InstanceWorkbench
+              key={workbenchScope}
+              sharedState={sharedWorkbenchState}
+              onWorkbenchEvent={onWorkbenchEvent}
+              instanceId={instance.id}
+              runtimeGeneration={instance.runtime_generation ?? 0}
+              isRunning={instance.status === "running"}
+              visible={workspaceVisible}
+              initialPath="/config"
+              onSelectDirectory={instance.type === "opencode" && instance.instance_mode === "pro" ? handleSelectOpenCodeProject : undefined}
+              selectingDirectory={actionLoading !== null}
+            />
+          </div>
+        )}
       </section>
 
       {(instance.runtime_type || "desktop") === "desktop" && (

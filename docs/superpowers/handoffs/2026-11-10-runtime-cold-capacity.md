@@ -1,0 +1,53 @@
+# Runtime cold capacity and historical pool wake prevention
+
+User resource policy: retain each Runtime Pod request of 4 CPU and current memory/slot settings. The operator supplies additional cluster CPU. Never lower requests to hide Kubernetes Pending capacity constraints.
+
+## Trigger and behavior
+
+Batch creation previously woke a historical sleeping Hermes/DeepSeek Harness pool before scaling a full proven serving pool. The historical pool could report all slots Unknown because its image/native contract differs. New unpinned requests now expand the proven serving pool. Existing instances retain their recorded source deployment and image. A genuinely cold wake requires the approved image and compatible frozen native/security/resource/storage contract. Unknown slot proofs remain unavailable.
+
+OpenClaw had no approved live default after a completed orphan retirement. Existing default lineage pointed at the retired controller and correctly refused to revive it. The existing rollout API can now establish a fresh successor using the exact approved immutable image and completed retirement receipt. It verifies the original ReplicaSet template, PVC/PV storage identity, source UID and retirement fence, absence of writers, native validation/activation, and target UID. Only this new successor becomes the default. Retired source fences are retained. Failed operations clean up only their owned probe and successor.
+
+Protected writer inspection now recognizes the native maintenance/upgrading ledger and its stopped tombstone. It continues to reject arbitrary slots, maintenance/running, malformed ownership, and symlinks; records belonging to a different Pod are retained unchanged. This removes an erroneous recovery blocker from legitimate old maintenance records.
+
+## Operator recovery
+
+Use the existing Pod orphan-recovery preflight and eviction workflow for the two accidentally woken unbound historical pools. Never edit protected ledgers or repair business rows directly. Never evict a newly occupied Pod based on an earlier observation; recheck source Pod UID and bindings before submitting.
+
+For a fully retired canonical OpenClaw default, POST `/api/v1/admin/runtime-rollouts` with `runtime_type: openclaw`, its exact approved `target_image_ref`, and `auto_rollback: true`. The server derives cold mode and evidence; callers cannot supply template or authorization proof. Retry never-started failed instances only after rollout verification completes. A Pending Pod whose scheduling event says Insufficient cpu needs cluster resources; additional Pending replicas do not create capacity.
+
+## Verification
+
+Real local MariaDB regression runs cover cold admission/commit/failure isolation, committed controller UID scaling, pinned source/image, full-pool burst behavior, approved cold fallback, conflicting contracts, and existing idle pool behavior. Full K8s tests and protected-ledger race tests pass. Local Darwin service tests use the pre-existing compile overlay for an unrelated Linux-only NFS test.
+
+Deployment and live verification receipts will be appended after staging acceptance.
+
+## Native validation compatibility found during staging
+
+The historical image-validation path assumed a legacy HTTP supervisor and business Gateway admission. Native container slots require TLS1.3 with the authenticated control header. Validation now retains native/security labels, init setup, and all slot images/identity, and uses a dedicated owned-probe adapter. It checks the source transformation, exact Deployment/ReplicaSet/Pod identity and execution contract, user namespace or approved rootless isolation, and emptyDir-only business storage. It reuses environment sanitization with a sentinel credential that has no SQL instance/provider authority. It never publishes a business assignment or generation. Matching native teardown flags are required before completing validation.
+
+The probe keeps its sentinel instance ID but uses mapped Linux UID/GID200001. A real API server dry-run identified only enableServiceLinks, priority, preemptionPolicy, and standard toleration injection as Pod-spec differences; comparison normalizes those documented defaults. TLS readiness explicitly sets successThreshold1 to match persisted API defaults. Real TLS1.3, namespace CA, authenticated control header, thirteen negative contract mutations, existing protected-slot behavior, and race checks pass.
+
+Staging rollout20 exposed the legacy HTTP incompatibility, failed validation, and automatically removed all of its temporary Pods. Retired source identity and fences remained intact; no business Gateway was created by this failed probe. A new rollout is required after deploying the native validation compatibility fix.
+
+Staging rollout21 exposed another API transformation: legacy per-slot AppArmor `unconfined` annotations are materialized into typed container AppArmorProfile fields on actual Pods. The captured live source/probe/ReplicaSet plus API dry-run Pod reproduced only these eight field differences. Validation now canonicalizes this exact approved equivalent representation and rejects conflicts; it does not ignore security contexts. The failed probe was automatically removed before a successor was admitted.
+
+Native rollout22 then reached network preparation and was correctly denied by the ordinary runtime lease endpoint: a sentinel has no business SQL/desired assignment. A validation-only lease branch now checks the active SQL rollout/checkpoint, frozen probe controller and Pod UID, source/image, exact scratch contract and actual TCP peer. It returns four-segment deny-all credentials that all unchanged model/egress/services capability verifiers reject. No global capability lookup, audience, business identity or assignment is added. The controller checkpoints the native probe identities before POST and clears them after confirmed teardown. Tests include real SQL lifecycle/identity denial, all token/audience combinations, actual native netbroker Acquire/NewCredentials, and the real CM lease-handler wire contract without a permanent cross-repository dependency.
+
+After the real native probe passed, rollout23 exposed standby readiness ordering: coordinator /readyz intentionally stays503 until authenticated activation, so requiring KubernetesReady before activation forms a cycle. The cold-only path now proves the pinned controller/ReplicaSet/Pod and eight Running+Ready workers, checks authenticated management health, then activates. Full KubernetesReady remains mandatory before enabling ordinary scheduling and committing the default.
+
+Error instances now expose the existing Restart API from the instance-list row. Waiting/spinner/delete protection is per instance, so concurrent row actions do not clear each other. TypeScript/production build and Chrome single-row/multi-row interaction checks passed; served staging frontend is hash-checked against the built assets. Existing failed-instance lifecycle fences and recovery budget handling are reused.
+
+## Slot proof compatibility and staging acceptance
+
+Rollout23 finished and rebuilt the retired default as a new controller, but its previously approved OpenClaw image4066d1c4 contained an old Agent: `/v1/slots/slot-0/state` returned only `gateways`, `quarantined`, and `skills`. It omitted the current Pod UID, Worker epoch and explicit idle proof. Unknown was therefore correct; successful health and process launch were insufficient image acceptance criteria.
+
+Normal empty-pool rollout24 upgraded the unbound, never-started pool to immutable image `clawmanager.local/openclaw-lite@sha256:d0a5a85aa98f70eb20e0527023381e8edb3ba60dedd2a625d53630a8abcdeab9`. Its existing OCI artifact was revalidated against all554 current AgentsRuntime d383bab source files. A fresh build reproduced the exact agent binary SHA2568a65da88b59441b8caa675d1a5f5120c237f1a15aebc7be82aecdeff648af827; all34 base layers and runtime config were retained, with only the launcher binary appended. The existing internal TLS registry already served that immutable artifact; no registry trust changes were needed.
+
+Rollout24 completed isolated native startup/confirmed stop, switched the approved empty pool, and finished. Actual TLS slot inspection then returned matching Pod UID, valid32-character Worker epoch, idle_confirmed=true, quarantined=false, and an empty Gateway list. Ordinary scheduling automatically expanded to four8-slot Pods; all four reported unknown_slots=0 and waiting instances resumed. Subsequent idle_timeout stops honor the existing operator1800-second policy; stopped instances were not forcibly restarted for test occupancy. Retired Hermes174/DSH176 remain deleted and fenced, and no binding points to a deleted pool.
+
+The native image probe now checks every physical worker with the same strict slot-proof predicate used by ordinary scheduling before Gateway POST. It rejects missing proof, wrong Pod/epoch, unexpected owners/Gateways, quarantine and maintenance. An exact existing sentinel starting/running on port20000 remains admissible for idempotent startup polling. Scope is revalidated before POST; there are no business SQL assignments or weakened scheduling proofs. Its empty scheduled-task payload uses the current schema envelope.
+
+Regression evidence: exact historical payload fails before Gateway creation, including an incompatible eighth worker after seven compatible ones; positive idle and exact sentinel retries pass. Independent focused race1.783s, affected race1.742s, and SQL-enabled affected race64.510s passed. New Agent slot-proof tests passed with race detection3.100s. The protocol guard is commit394291d on preview. Runtime resource requests remain4CPU per Pod and8slots.
+
+Staging deployment receipt: CM394291d (`clawmanager.local/clawmanager@sha256:60dfa2d77b7cd9a16e06fc6d19cae8bd63edb554ae8bf7ec7efcf52d89d0d188`) completed rollout. Version and all five binary hashes match the build; seven protected project files, workspace PVC UID, TLS certificate and share URL are unchanged. After all30 OpenClaw instances reached idle_timeout sleep, automatic scale-in reduced four Pods to two during observation. Live authenticated inspection of all16 remaining slots proved each idle with matching identity, valid epoch, no quarantine and no active Gateway; API used/bound/unknown were all zero. No instance remained Creating/Error, no binding referenced a deleted pool, and the operator resource/idle settings were unchanged. Receipts remain under `/root/cm-cold-capacity-20261110/` (verified.json, all-slot-proof.json, native-upgrade-latest.json); private payloads are not committed.

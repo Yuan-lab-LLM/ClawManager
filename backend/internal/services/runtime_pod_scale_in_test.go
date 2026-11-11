@@ -89,3 +89,12 @@ func TestScaleInRejectsStaleSourceAndUnsettledClaims(t *testing.T) {
 		t.Fatal("stale source accepted")
 	}
 }
+
+func TestScaleInEmptySourcePlanRejectsUnprovedPhysicalOccupancy(t *testing.T) {
+	source, target := elasticManagementPod(1), elasticManagementPod(2)
+	source.UsedSlots = 0
+	service := &RuntimeManagementService{scheduler: &RuntimeScheduler{bindingRepo: newFakeRuntimeBindingRepo()}}
+	if _, err := service.runtimeScaleInPlanItems(context.Background(), []models.RuntimePod{source, target}, []models.RuntimePod{source}); err == nil {
+		t.Fatal("empty source plan accepted without physical emptiness proof")
+	}
+}

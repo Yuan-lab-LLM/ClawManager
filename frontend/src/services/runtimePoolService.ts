@@ -1,6 +1,7 @@
 import axios from "axios";
 import api from "./api";
 import type {
+  RuntimeRecoveryInspection,
   RuntimeAutoStopSettings,
   UpdateRuntimeAutoStopSettings,
   RuntimeAutoStopActivity,
@@ -26,6 +27,22 @@ import type {
 } from "../types/runtimePool";
 
 export const runtimePoolService = {
+  async inspectInstanceRecovery(id: number): Promise<RuntimeRecoveryInspection> {
+    const response = await api.get(`/admin/instances/${id}/runtime-recovery`);
+    return response.data.data;
+  },
+  async retryInstanceRecovery(id: number, generation: number): Promise<RuntimeRecoveryInspection> {
+    const response = await api.post(`/admin/instances/${id}/runtime-recovery`, { generation });
+    return response.data.data;
+  },
+  async recheckPod(id: number, podUid: string): Promise<RuntimePod> {
+    const response = await api.post(`/admin/runtime-pods/${id}/recheck`, { pod_uid: podUid });
+    return response.data.data;
+  },
+  async retryOperation(id: string): Promise<RuntimeSchedulingOperation> {
+    const response = await api.post(`/admin/runtime-scheduling/${encodeURIComponent(id)}/retry`);
+    return response.data.data;
+  },
   async getAutoStopSettings(signal?: AbortSignal): Promise<RuntimeAutoStopSettings> {
     const response = await api.get('/admin/runtime-auto-stop', { signal });
     return response.data.data;
@@ -122,12 +139,12 @@ export const runtimePoolService = {
     return response.data.data;
   },
 
-  async evict(podId: number, data: { mode: string; grace_period_seconds: number; concurrency: number }): Promise<RuntimeSchedulingOperation> {
+  async evict(podId: number, data: { mode: "graceful" | "force" | "recovery" | "orphan-recovery"; source_pod_uid?: string; instance_ids?: number[]; grace_period_seconds?: number; concurrency?: number }): Promise<RuntimeSchedulingOperation> {
     const response = await api.post(`/admin/runtime-pods/${podId}/evict`, data);
     return response.data.data;
   },
   async listPodsPage(params: RuntimePodPageRequest, signal?: AbortSignal): Promise<RuntimePodPage> {
-    const response = await api.get("/admin/runtime-pods", { params, signal });
+    const response = await api.get("/admin/runtime-pods", { params, signal, timeout: 15000 });
     return response.data.data;
   },
 
@@ -135,6 +152,7 @@ export const runtimePoolService = {
     const response = await api.get("/admin/runtime-pods", {
       params: runtimeType ? { runtime_type: runtimeType } : undefined,
       signal,
+      timeout: 15000,
     });
     const pods = response.data.data?.pods;
     return Array.isArray(pods) ? pods : [];

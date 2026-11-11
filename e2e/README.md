@@ -45,3 +45,9 @@ The address may include a protocol. When omitted, `https://` is used.
 - JUnit: `reports/junit.xml`
 - HTML: `playwright-report/`
 - Raw artifacts: `test-results/`
+
+## Instance workbench V4
+
+`npm run test:workbench` runs the actual React workspace and full instance page against a disposable local integration harness. It uses real temporary Git repositories and a Python PTY, checks manual-only previews/tabs, terminal replay and retention, clone/stage/commit/push/import, generation fencing, keyboard navigation, desktop/mobile layout and shared responsive tab state. Requires Go, Git, Python 3 and locally installed Chrome. `AgentsRuntime` should be adjacent to `ClawManager`; override `WORKBENCH_RUNTIME_ROOT` otherwise. Use `WORKBENCH_SCREENSHOTS` to choose the screenshot directory. No production endpoint or account is used; all subprocesses and temporary workspaces are cleaned up. This harness does not substitute for runtime sandbox or Kubernetes migration tests.
+
+Frontend state checks: `cd frontend && npm run test:workbench`.

@@ -42,7 +42,7 @@ func (r *paginationBindings) ListByRuntimePodIDs(_ context.Context, ids []int64)
 
 func runtimePagingFixture() (*gin.Engine, *paginationBindings) {
 	gin.SetMode(gin.TestMode)
-	now := time.Now().UTC()
+	now := time.Now().UTC().Truncate(time.Microsecond)
 	var pods []models.RuntimePod
 	for id := 6; id >= 1; id-- {
 		node, ip := fmt.Sprintf("node-%d", id%2), fmt.Sprintf("10.0.0.%d", id)
@@ -50,11 +50,20 @@ func runtimePagingFixture() (*gin.Engine, *paginationBindings) {
 		if id > 4 {
 			kind = "hermes"
 		}
-		pods = append(pods, models.RuntimePod{ID: int64(id), RuntimeType: kind, Namespace: "runtime", PodName: fmt.Sprintf("pod-%02d", id), NodeName: &node, PodIP: &ip, State: "ready", Capacity: 2, LastSeenAt: &now, SchedulingPaused: id == 2, Slots: []models.RuntimeSlot{{Index: 1, Ready: true}, {Index: 2, Ready: true}}})
+		uid := fmt.Sprintf("uid-%d", id)
+		block := services.RuntimeGatewayPortBlockSize(kind)
+		first, second := 20000, 20000+block
+		observation := models.RuntimePodObservation{PodUID: uid, ObservedAt: now, Slots: []models.RuntimeSlotObservation{{ContainerName: "slot-0", GatewayPort: first, State: "free"}, {ContainerName: "slot-1", GatewayPort: second, State: "free"}}}
+		if id == 5 {
+			observation.Slots[0] = models.RuntimeSlotObservation{ContainerName: "slot-0", GatewayPort: first, State: "occupied", InstanceID: 505, UserID: 1, GatewayID: "gw-505-1", Generation: 1, InstanceState: "running", GatewayState: "running", IdentityVerified: true}
+		}
+		raw, _ := json.Marshal(observation)
+		encoded := string(raw)
+		pods = append(pods, models.RuntimePod{ID: int64(id), RuntimeType: kind, Namespace: "runtime", PodName: fmt.Sprintf("pod-%02d", id), PodUID: &uid, ObservationJSON: &encoded, ObservationAt: &now, NodeName: &node, PodIP: &ip, State: "ready", Capacity: 2, LastSeenAt: &now, SchedulingPaused: id == 2, Slots: []models.RuntimeSlot{{Index: 1, ContainerName: "slot-0", GatewayPort: &first, Ready: true}, {Index: 2, ContainerName: "slot-1", GatewayPort: &second, Ready: true}}})
 	}
 	pods[0].UsedSlots = 1 // Reported occupancy without a binding is not available.
 	owner := "OffPageOwner"
-	bindings := &paginationBindings{runtimePoolHandlerBindingRepo: &runtimePoolHandlerBindingRepo{bindings: []models.InstanceRuntimeBinding{{RuntimePodID: 5, InstanceID: 505, GatewayPort: 20000, State: "running", Generation: 1}}}}
+	bindings := &paginationBindings{runtimePoolHandlerBindingRepo: &runtimePoolHandlerBindingRepo{bindings: []models.InstanceRuntimeBinding{{RuntimePodID: 5, InstanceID: 505, GatewayID: "gw-505-1", GatewayPort: 20000, State: "running", Generation: 1}}}}
 	repo := &runtimePoolHandlerPodRepo{pods: pods}
 	instances := &runtimeAgentHandlerInstanceRepo{instancesByID: map[int]*models.Instance{505: {ID: 505, Name: "OffPageAgent", Owner: &owner, Status: "running"}}}
 	scheduler := services.NewRuntimeScheduler(instances, repo, bindings, nil, nil, nil, nil, nil, time.Second)

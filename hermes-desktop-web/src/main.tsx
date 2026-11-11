@@ -1,6 +1,7 @@
 // Install the browser boundary BEFORE evaluating upstream's module-level stores.
 // App, router, layout, sidebar, composer and transcript come from the real
 // renderer, not a second application made from selected chat components.
+import '../../backend/internal/services/native_preview_bridge.js'
 import { createBridge } from './bridge'
 import { createBrowserDesktopBridge } from './browser-desktop-bridge'
 import { installRendererStorage } from './renderer-storage'

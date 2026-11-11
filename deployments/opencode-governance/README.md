@@ -180,12 +180,11 @@ external processes are not claimed to be safely interruptible. Real Lite/Pro
 runtime, background-job/subagent cancellation and data-preserving migration must
 pass integration acceptance before this is considered a production upgrade.
 
-## Instance drain check (not an upgrade command)
+## Internal runtime drain reporting
 
-Admin APIs: `POST /api/v1/instances/:id/runtime-maintenance` with
-`{"timeout_seconds":300}`, owner/admin `GET` at the same URL, and admin
-`POST .../runtime-maintenance/cancel` with the exact returned `operation_id`.
-The management instance page exposes these under its drain-check disclosure.
+The manual instance drain-check panel and its instance management APIs have been
+removed. The authenticated runtime reporting endpoint remains for shared upgrade
+isolation and existing drain records; it is not a user-facing upgrade control.
 
 The adapter polls `/runtime/maintenance` once per second through its authenticated
 Gateway endpoint. A request closes new public Session admissions, while previously
@@ -197,8 +196,7 @@ dropped or force-run to obtain zero. Timeout (10–600 seconds) or explicit canc
 reopens on the next successful poll. A failed poll cannot reopen a closed gate;
 stale control blocks new admissions until connectivity recovers.
 
-Legacy runtimes without fresh `maintenance_drain` capability return 409 when an
-admin requests draining; normal legacy use is unaffected. The old OpenCode
+Normal legacy runtime use is unaffected. The old OpenCode
 shared-pool rolling replacement API is blocked rather than reused for safe
 migration. This does not add process-stop confirmation, placement fencing,
 consistent backup, data restore, controlled protocol rollback or per-instance

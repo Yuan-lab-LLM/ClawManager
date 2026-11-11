@@ -23,21 +23,21 @@ func NewInstanceAutoStopRepository(sess db.Session) *InstanceAutoStopRepository 
 
 func (r *InstanceAutoStopRepository) Settings(ctx context.Context) (*models.InstanceAutoStopSettings, error) {
 	now := time.Now().UTC()
-	if _, err := r.sess.SQL().ExecContext(ctx, `UPDATE instance_auto_stop_settings SET next_check_at=? WHERE id=1 AND next_check_at IS NULL`, models.NextInstanceAutoStopCheck(now)); err != nil {
+	if _, err := r.sess.SQL().ExecContext(ctx, `UPDATE instance_auto_stop_settings SET next_check_at=IF(check_interval_seconds IS NULL,?,DATE_ADD(?, INTERVAL check_interval_seconds SECOND)) WHERE id=1 AND next_check_at IS NULL`, models.NextInstanceAutoStopCheck(now), now); err != nil {
 		return nil, err
 	}
 	if models.AutoStopTestTiming {
 		// A persisted production 04:00 deadline must not postpone the first test
 		// scan. Never replace an active scan or extend an already sooner deadline.
 		next := models.NextInstanceAutoStopCheck(now)
-		if _, err := r.sess.SQL().ExecContext(ctx, `UPDATE instance_auto_stop_settings SET next_check_at=?,updated_at=? WHERE id=1 AND scan_token='' AND next_check_at>?`, next, now, next); err != nil {
+		if _, err := r.sess.SQL().ExecContext(ctx, `UPDATE instance_auto_stop_settings SET next_check_at=?,updated_at=? WHERE id=1 AND check_interval_seconds IS NULL AND scan_token='' AND next_check_at>?`, next, now, next); err != nil {
 			return nil, err
 		}
 	}
 	return readAutoStopSettings(ctx, r.sess, false)
 }
 func readAutoStopSettings(ctx context.Context, s db.Session, lock bool) (*models.InstanceAutoStopSettings, error) {
-	query := `SELECT enabled,check_interval_days,idle_timeout_days,version,next_check_at,scan_token,scan_cursor,scan_lease_until FROM instance_auto_stop_settings WHERE id=1`
+	query := `SELECT enabled,check_interval_days,idle_timeout_days,check_interval_seconds,idle_timeout_seconds,version,next_check_at,scan_token,scan_cursor,scan_lease_until FROM instance_auto_stop_settings WHERE id=1`
 	if lock {
 		query += " FOR UPDATE"
 	}
@@ -46,7 +46,7 @@ func readAutoStopSettings(ctx context.Context, s db.Session, lock bool) (*models
 		return nil, err
 	}
 	var out models.InstanceAutoStopSettings
-	if err = row.Scan(&out.Enabled, &out.CheckIntervalDays, &out.IdleTimeoutDays, &out.Version, &out.NextCheckAt, &out.ScanID, &out.ScanCursor, &out.ScanLeaseUntil); err != nil {
+	if err = row.Scan(&out.Enabled, &out.CheckIntervalDays, &out.IdleTimeoutDays, &out.CheckIntervalSeconds, &out.IdleTimeoutSeconds, &out.Version, &out.NextCheckAt, &out.ScanID, &out.ScanCursor, &out.ScanLeaseUntil); err != nil {
 		return nil, err
 	}
 	return &out, out.Validate()
@@ -71,10 +71,18 @@ func (r *InstanceAutoStopRepository) SaveSettings(ctx context.Context, want mode
 			return models.ErrAutoStopConflict
 		}
 		next := current.NextCheckAt
-		if current.CheckIntervalDays != want.CheckIntervalDays || (!current.Enabled && want.Enabled) {
-			next = models.NextInstanceAutoStopCheck(time.Now().UTC())
+		if current.CheckInterval() != want.CheckInterval() || (!current.Enabled && want.Enabled) {
+			next = want.NextCheck(time.Now().UTC())
 		}
-		_, err = s.SQL().ExecContext(ctx, `UPDATE instance_auto_stop_settings SET enabled=?,check_interval_days=?,idle_timeout_days=?,version=version+1,next_check_at=?,scan_token='',scan_cursor=0,scan_lease_until=NULL,updated_at=? WHERE id=1`, want.Enabled, want.CheckIntervalDays, want.IdleTimeoutDays, next, time.Now().UTC())
+		next = next.Truncate(time.Microsecond)
+		// Retain the legacy values when a new client supplies exact seconds only.
+		if want.CheckIntervalSeconds != nil {
+			want.CheckIntervalDays = current.CheckIntervalDays
+		}
+		if want.IdleTimeoutSeconds != nil {
+			want.IdleTimeoutDays = current.IdleTimeoutDays
+		}
+		_, err = s.SQL().ExecContext(ctx, `UPDATE instance_auto_stop_settings SET enabled=?,check_interval_days=?,idle_timeout_days=?,check_interval_seconds=?,idle_timeout_seconds=?,version=version+1,next_check_at=?,scan_token='',scan_cursor=0,scan_lease_until=NULL,updated_at=? WHERE id=1`, want.Enabled, want.CheckIntervalDays, want.IdleTimeoutDays, want.CheckIntervalSeconds, want.IdleTimeoutSeconds, next, time.Now().UTC())
 		if err != nil {
 			return err
 		}
@@ -129,7 +137,7 @@ func (r *InstanceAutoStopRepository) CheckpointScan(ctx context.Context, cfg mod
 }
 func (r *InstanceAutoStopRepository) CompleteScan(ctx context.Context, cfg models.InstanceAutoStopSettings) error {
 	now := time.Now().UTC()
-	next := models.AdvanceInstanceAutoStopCheck(cfg.NextCheckAt, now, cfg.CheckIntervalDays)
+	next := cfg.AdvanceCheck(cfg.NextCheckAt, now)
 	result, err := r.sess.SQL().ExecContext(ctx, `UPDATE instance_auto_stop_settings SET next_check_at=?,scan_token='',scan_cursor=0,scan_lease_until=NULL,updated_at=? WHERE id=1 AND enabled=TRUE AND version=? AND scan_token=? AND scan_lease_until>?`, next, now, cfg.Version, cfg.ScanID, now)
 	if err != nil {
 		return err
@@ -181,7 +189,7 @@ func ensureActivity(ctx context.Context, s db.Session, id, generation int, now t
 	return err
 }
 func readActivity(ctx context.Context, s db.Session, id int, lock bool) (*models.InstanceModelActivity, error) {
-	query := `SELECT a.instance_id,a.generation,a.monitoring_since,a.last_gateway_activity_at,a.activity_version,a.auto_stop_disabled,a.stop_operation_id,a.stop_phase,a.stopped_reason,a.stopped_at,a.blocker,a.start_deadline_at,(SELECT COUNT(*) FROM instance_model_activity_requests q WHERE q.instance_id=a.instance_id AND q.generation=a.generation AND q.finished_at IS NULL) FROM instance_model_activity a WHERE a.instance_id=?`
+	query := `SELECT a.instance_id,a.generation,a.monitoring_since,a.last_gateway_activity_at,a.activity_version,a.auto_stop_disabled,a.stop_operation_id,a.stop_phase,a.stopped_reason,a.stopped_at,a.blocker,a.start_deadline_at,(SELECT COUNT(*) FROM instance_model_activity_requests q WHERE q.instance_id=a.instance_id AND q.generation=a.generation AND q.finished_at IS NULL AND (q.lease_expires_at IS NULL OR q.lease_expires_at>UTC_TIMESTAMP(6))) FROM instance_model_activity a WHERE a.instance_id=?`
 	if lock {
 		query += " FOR UPDATE"
 	}
@@ -243,7 +251,7 @@ func (r *InstanceAutoStopRepository) BeginModelActivity(ctx context.Context, use
 			return models.ErrInstanceStopping
 		}
 		key = uuid.NewString()
-		if _, err = s.SQL().ExecContext(ctx, `INSERT INTO instance_model_activity_requests(request_id,instance_id,generation,started_at) VALUES(?,?,?,?)`, key, id, i.generation, now); err != nil {
+		if _, err = s.SQL().ExecContext(ctx, `INSERT INTO instance_model_activity_requests(request_id,instance_id,generation,started_at,last_heartbeat_at,lease_expires_at) VALUES(?,?,?,?,?,?)`, key, id, i.generation, now, now, now.Add(models.ModelActivityLeaseDuration)); err != nil {
 			return err
 		}
 		_, err = s.SQL().ExecContext(ctx, `UPDATE instance_model_activity SET last_gateway_activity_at=GREATEST(COALESCE(last_gateway_activity_at,?),?),activity_version=activity_version+1,updated_at=? WHERE instance_id=?`, now, now, now, id)
@@ -253,40 +261,6 @@ func (r *InstanceAutoStopRepository) BeginModelActivity(ctx context.Context, use
 		return "", err
 	}
 	return key, nil
-}
-func (r *InstanceAutoStopRepository) FinishModelActivity(ctx context.Context, key string) error {
-	if key == "" {
-		return nil
-	}
-	// Resolve immutable scope ownership first; all mutations then take the same
-	// instance -> activity order as Begin and stop claims.
-	row, err := r.sess.SQL().QueryRowContext(ctx, `SELECT instance_id,generation FROM instance_model_activity_requests WHERE request_id=?`, key)
-	if err != nil {
-		return err
-	}
-	var id, generation int
-	if err = row.Scan(&id, &generation); err != nil {
-		return err
-	}
-	return r.sess.Tx(func(s db.Session) error {
-		if _, err := lockActivityInstance(ctx, s, id); err != nil {
-			return err
-		}
-		now := time.Now().UTC()
-		res, err := s.SQL().ExecContext(ctx, `UPDATE instance_model_activity_requests SET finished_at=? WHERE request_id=? AND finished_at IS NULL`, now, key)
-		if err != nil {
-			return err
-		}
-		n, err := res.RowsAffected()
-		if err != nil {
-			return err
-		}
-		if n == 0 {
-			return nil
-		}
-		_, err = s.SQL().ExecContext(ctx, `UPDATE instance_model_activity SET last_gateway_activity_at=GREATEST(COALESCE(last_gateway_activity_at,?),?),activity_version=activity_version+1,updated_at=? WHERE instance_id=? AND generation=?`, now, now, now, id, generation)
-		return err
-	})
 }
 func (r *InstanceAutoStopRepository) SetDisabled(ctx context.Context, id int, disabled bool) error {
 	return r.sess.Tx(func(s db.Session) error {
@@ -316,10 +290,16 @@ func (r *InstanceAutoStopRepository) Candidates(ctx context.Context, now time.Ti
 	if err := (models.InstanceAutoStopSettings{CheckIntervalDays: 1, IdleTimeoutDays: days}).Validate(); err != nil {
 		return nil, err
 	}
+	return r.CandidatesForTimeout(ctx, now, models.InstanceAutoStopIdleTimeout(days), after, limit)
+}
+func (r *InstanceAutoStopRepository) CandidatesForTimeout(ctx context.Context, now time.Time, timeout time.Duration, after, limit int) ([]models.InstanceModelActivity, error) {
+	if timeout < time.Second {
+		return nil, fmt.Errorf("idle timeout must be at least one second")
+	}
 	if limit < 1 || limit > 1000 {
 		limit = 100
 	}
-	cutoff := now.Add(-models.InstanceAutoStopIdleTimeout(days))
+	cutoff := now.Add(-timeout)
 	rows, err := r.sess.SQL().QueryContext(ctx, `SELECT a.instance_id FROM instance_model_activity a JOIN instances i ON i.id=a.instance_id WHERE a.instance_id>? AND i.instance_mode='lite' AND i.status='running' AND i.runtime_generation=a.generation AND a.auto_stop_disabled=FALSE AND a.stop_operation_id='' AND a.monitoring_since<=? AND (a.last_gateway_activity_at IS NULL OR a.last_gateway_activity_at<=?) AND (i.started_at IS NULL OR i.started_at<=?) ORDER BY a.instance_id LIMIT ?`, after, cutoff, cutoff, cutoff, limit)
 	if err != nil {
 		return nil, err

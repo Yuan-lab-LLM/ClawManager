@@ -395,7 +395,7 @@ func TestNginxDedicatedRuntimeOriginsExposeCertificateConfirmation(t *testing.T)
 	for _, want := range []string{
 		"location = /__clawmanager_cert_check",
 		"location = /__clawmanager_cert_trust",
-		"window.setTimeout(function(){window.history.back();},150);",
+		"Close this tab and return to ClawManager.",
 	} {
 		if count := strings.Count(text, want); count != 2 {
 			t.Fatalf("nginx dedicated runtime origins must contain %q twice, got %d", want, count)

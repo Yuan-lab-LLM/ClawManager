@@ -116,6 +116,9 @@ func (s *RuntimeAssignmentService) EnsureDesired(ctx context.Context, a RuntimeA
 			if cm.Data["container_termination_proof"] != "" && cm.Data["container_stop_released"] != "true" {
 				return fmt.Errorf("new runtime assignment generation requires finalized source slot release")
 			}
+			if err := retainStoppedSourceAudit(cm, current); err != nil {
+				return err
+			}
 		}
 		// Validate current identity and migration authority before creating a Secret.
 		if err := s.ensureRuntimeAssignmentSecret(ctx, a); err != nil {
@@ -129,6 +132,8 @@ func (s *RuntimeAssignmentService) EnsureDesired(ctx context.Context, a RuntimeA
 		}
 		cm.Labels["clawmanager.io/purpose"] = "lite-instance"
 		cm.Labels["clawmanager.io/needs-reconcile"] = "true"
+		delete(cm.Annotations, faultEvictionAnnotation)
+		delete(cm.Annotations, orphanOperation)
 		cm.Data = map[string]string{
 			"instance_id": strconv.Itoa(a.InstanceID), "user_id": strconv.Itoa(a.UserID),
 			"generation": strconv.Itoa(a.Generation), "runtime_type": a.RuntimeType,
@@ -164,18 +169,32 @@ func (s *RuntimeAssignmentService) CanRetryUnpublished(ctx context.Context, a Ru
 		return err
 	}
 	cm, err := s.client.CoreV1().ConfigMaps(s.namespace).Get(ctx, runtimeAssignmentName(a.InstanceID), metav1.GetOptions{})
-	if err != nil {
+	if apierrors.IsNotFound(err) {
+		// A missing assignment is first-publication proof only for generation 1.
+		// For later generations a lost predecessor is an unknown live writer.
+		if a.Generation != 1 {
+			return fmt.Errorf("missing predecessor assignment for pending generation")
+		}
+		secrets, listErr := s.client.CoreV1().Secrets(s.namespace).List(ctx, metav1.ListOptions{LabelSelector: "clawmanager.io/instance-id=" + strconv.Itoa(a.InstanceID)})
+		if listErr != nil {
+			return fmt.Errorf("read prior runtime credentials: %w", listErr)
+		}
+		if len(secrets.Items) != 0 {
+			return fmt.Errorf("runtime credential history exists without assignment; await authoritative reconciliation")
+		}
+	} else if err != nil {
 		return fmt.Errorf("read prior runtime assignment: %w", err)
-	}
-	current, state, err := storedRuntimeAssignment(cm)
-	if err != nil {
-		return err
-	}
-	if cm.Labels["clawmanager.io/purpose"] != "lite-instance" || current.InstanceID != a.InstanceID || current.UserID != a.UserID || current.RuntimeType != a.RuntimeType {
-		return fmt.Errorf("pending runtime assignment owner or runtime changed")
-	}
-	if current.Generation >= a.Generation || state != "stopped" {
-		return fmt.Errorf("pending retry requires an older confirmed stopped assignment")
+	} else {
+		current, state, parseErr := storedRuntimeAssignment(cm)
+		if parseErr != nil {
+			return parseErr
+		}
+		if cm.DeletionTimestamp != nil || cm.Labels["clawmanager.io/purpose"] != "lite-instance" || current.InstanceID != a.InstanceID || current.UserID != a.UserID || current.RuntimeType != a.RuntimeType {
+			return fmt.Errorf("pending runtime assignment owner or runtime changed")
+		}
+		if current.Generation >= a.Generation || state != "stopped" {
+			return fmt.Errorf("pending retry requires an older confirmed stopped assignment")
+		}
 	}
 	_, err = s.client.CoreV1().Secrets(s.namespace).Get(ctx, runtimeAssignmentSecretName(a.InstanceID, a.Generation), metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {

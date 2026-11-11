@@ -57,7 +57,7 @@ func newPendingSlotReplayFixture(t *testing.T) *pendingSlotReplayFixture {
 		if f.createErr != nil {
 			return nil, f.createErr
 		}
-		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(fmt.Sprintf(`{"gateway_id":"gw-7-2","status":"running","port":%d}`, req.GatewayPort)))}, nil
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(fmt.Sprintf(`{"gateway_id":"gw-7-%d","status":"running","port":%d}`, req.Generation, req.GatewayPort)))}, nil
 	})}
 	f.client = NewSlotRuntimeAgentClientWithHTTPClient("token", f.kube, "runtime", httpClient).(*slotRuntimeAgentClient)
 	deployments := &fakeRuntimeDeploymentService{pods: []k8sservice.RuntimeDeploymentPod{{RuntimeType: f.pod.RuntimeType, Namespace: f.pod.Namespace, PodName: f.pod.PodName, DeploymentName: f.pod.DeploymentName, PodUID: uid, PodIP: &ip, ImageRef: f.pod.ImageRef, State: "ready"}}}

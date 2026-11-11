@@ -52,6 +52,7 @@ type runtimeUpgradePreflightRequest struct {
 }
 
 type runtimePoolPodListItem struct {
+	BoundInstances *int `json:"bound_instances,omitempty"`
 	models.RuntimePod
 	AgentReported    bool     `json:"agent_reported"`
 	BindingsReported bool     `json:"bindings_reported"`
@@ -263,6 +264,7 @@ func (h *RuntimePoolHandler) StartRollout(c *gin.Context) {
 	var sourceImagesJSON *string
 	var targetImageDigest *string
 	var poolSwitchJSON *string
+	var planFingerprint *string
 	if runtimeType == services.RuntimeTypeHermes {
 		resolved, digest, err := services.ResolveHermesRolloutImage(c.Request.Context(), targetImage)
 		if err != nil {
@@ -328,7 +330,11 @@ func (h *RuntimePoolHandler) StartRollout(c *gin.Context) {
 			sourceImagesJSON = &value
 			if classification.EmptyPoolReset {
 				rolloutPhase = services.RuntimeUpgradePhaseEmptyPoolReset
-				raw, _ := json.Marshal(map[string]any{"pool_switch_waiting_instance_ids": classification.WaitingInstanceIDs})
+				raw, _ := json.Marshal(map[string]any{"pool_switch_waiting_instance_ids": classification.WaitingInstanceIDs, "cold_successor": classification.ColdSuccessor})
+				if classification.ColdSuccessor != nil {
+					fingerprint := classification.ColdSuccessor.Fingerprint()
+					planFingerprint = &fingerprint
+				}
 				value := string(raw)
 				poolSwitchJSON = &value
 			}
@@ -344,6 +350,7 @@ func (h *RuntimePoolHandler) StartRollout(c *gin.Context) {
 		SourceImagesJSON:  sourceImagesJSON,
 		TargetImageDigest: targetImageDigest,
 		PreflightJSON:     poolSwitchJSON,
+		PlanFingerprint:   planFingerprint,
 		Status:            "pending",
 		Phase:             rolloutPhase,
 		BatchSize:         batchSize,
@@ -416,13 +423,13 @@ func (h *RuntimePoolHandler) runtimePodListHeartbeatTimeout() time.Duration {
 }
 
 func filterCurrentRuntimePods(pods []models.RuntimePod, now time.Time, heartbeatTimeout time.Duration) []models.RuntimePod {
-	if heartbeatTimeout <= 0 {
-		return pods
-	}
 	cutoff := now.UTC().Add(-runtimePodListStaleWindowMultiplier * heartbeatTimeout)
 	current := pods[:0]
 	for _, pod := range pods {
-		if pod.LastSeenAt != nil && pod.LastSeenAt.UTC().Before(cutoff) {
+		if pod.State == "deleted" {
+			continue
+		}
+		if heartbeatTimeout > 0 && pod.LastSeenAt != nil && pod.LastSeenAt.UTC().Before(cutoff) {
 			continue
 		}
 		current = append(current, pod)
@@ -487,6 +494,7 @@ func mergeRuntimePoolDeploymentPods(items []runtimePoolPodListItem, deploymentPo
 			pod.AgentState, pod.Draining = "", false
 			pod.OpenClawVersion, pod.AgentProtocolVersion, pod.TeamPluginVersion = nil, nil, nil
 			pod.SessionStore, pod.CapabilitiesJSON, pod.MetricsJSON = nil, nil, nil
+			pod.ObservationJSON, pod.ObservationAt = nil, nil
 			pod.CPUMillisUsed, pod.MemoryBytesUsed, pod.DiskBytesUsed = 0, 0, 0
 			pod.NetworkRXBytes, pod.NetworkTXBytes = 0, 0
 			pod.Slots = append([]models.RuntimeSlot(nil), pod.Slots...)

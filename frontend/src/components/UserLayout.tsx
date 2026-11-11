@@ -131,22 +131,11 @@ const UserLayout: React.FC<UserLayoutProps> = ({
             <div className="grid gap-1">{navItems.map((item) => renderNavItem(item))}</div>
           </nav>
         </header>
-
-        {title && (
-          <div className="app-subheader">
-            <div className={`${shellContainerClass} flex flex-col gap-3 py-4`}>
-              <h1 className="text-xl font-semibold text-slate-950">{title}</h1>
-              {titleAccessory}
-            </div>
-          </div>
-        )}
-
-        <main className={`${shellContainerClass} py-6`}>{children}</main>
       </div>
 
-      <div className={`hidden md:flex ${fillHeight ? "h-screen overflow-hidden" : "min-h-screen"}`}>
+      <div className={`md:flex ${fillHeight ? "md:h-screen md:overflow-hidden" : "md:min-h-screen"}`}>
         <aside
-          className={`shrink-0 border-r border-slate-200 bg-white transition-[width] duration-200 ${
+          className={`hidden shrink-0 border-r border-slate-200 bg-white transition-[width] duration-200 md:block ${
             sidebarCollapsed ? 'w-16' : 'w-64'
           }`}
         >
@@ -249,18 +238,18 @@ const UserLayout: React.FC<UserLayoutProps> = ({
           </div>
         </aside>
 
-        <div className={`flex min-w-0 flex-1 flex-col ${fillHeight ? "min-h-0 overflow-hidden" : ""}`}>
+        <div className={`min-w-0 md:flex md:flex-1 md:flex-col ${fillHeight ? "md:min-h-0 md:overflow-hidden" : ""}`}>
           {title && (
             <div className="app-subheader">
-              <div className={`${shellContainerClass} flex min-h-20 items-center justify-between gap-6 py-4`}>
+              <div className={`${shellContainerClass} flex flex-col gap-3 py-4 md:min-h-20 md:flex-row md:items-center md:justify-between md:gap-6`}>
                 <div className="min-w-0">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#b46c50]">
+                  <div className="hidden text-[11px] font-semibold uppercase tracking-[0.22em] text-[#b46c50] md:block">
                     Workspace
                   </div>
-                  <h1 className="mt-1 truncate text-2xl font-semibold text-slate-950">{title}</h1>
+                  <h1 className="text-xl font-semibold text-slate-950 md:mt-1 md:truncate md:text-2xl">{title}</h1>
                 </div>
                 {titleAccessory && (
-                  <div className="flex shrink-0 justify-end">
+                  <div className="md:flex md:shrink-0 md:justify-end">
                     {titleAccessory}
                   </div>
                 )}
@@ -269,9 +258,9 @@ const UserLayout: React.FC<UserLayoutProps> = ({
           )}
 
           <main
-            className={`${shellContainerClass} flex-1 py-6 ${
+            className={`${shellContainerClass} py-6 md:flex-1 ${
               fillHeight
-                ? `flex min-h-0 flex-col ${scrollableMain ? "overflow-y-auto" : "overflow-hidden"}`
+                ? `md:flex md:min-h-0 md:flex-col ${scrollableMain ? "md:overflow-y-auto" : "md:overflow-hidden"}`
                 : ""
             }`}
           >

@@ -82,7 +82,11 @@ func (s *RuntimeScheduler) emptyPoolPlacementCompletionReason(ctx context.Contex
 	if r.SourceImagesJSON == nil && !isEmptyOpenClawPoolReset(&r) && s.upgrade != nil {
 		current, err = s.upgrade.legacyDefaultPlacement(ctx, &r, current)
 	} else {
-		current, err = filterPlacementTarget(current, r.ID, stringValue(r.SourceImagesJSON), r.TargetImageRef, false, true)
+		proof, proofErr := coldSuccessorProof(&r)
+		if proofErr != nil {
+			return "", proofErr
+		}
+		current, err = filterPlacementTarget(current, r.ID, stringValue(r.SourceImagesJSON), r.TargetImageRef, false, proof == nil)
 	}
 	if err != nil {
 		return "", err

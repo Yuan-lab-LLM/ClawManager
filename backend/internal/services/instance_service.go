@@ -1322,6 +1322,12 @@ func (s *instanceService) startInstance(instanceID int) error {
 				return err
 			}
 		}
+		if resumed, err := s.resumeUnpublishedV2Start(ctx, instance, runtimeType); resumed || err != nil {
+			if err != nil && s.autoStopRepo != nil {
+				_ = s.autoStopRepo.ClearStartDeadline(ctx, instance.ID)
+			}
+			return err
+		}
 		if err := s.prepareV2InstanceStart(ctx, instance); err != nil {
 			if s.autoStopRepo != nil {
 				_ = s.autoStopRepo.ClearStartDeadline(ctx, instance.ID)
@@ -2374,6 +2380,10 @@ func (s *instanceService) deleteV2Instance(ctx context.Context, instance *models
 		GetHub().BroadcastInstanceStatus(instance.UserID, instance)
 	}
 
+	if err := s.preflightUnboundGatewayCleanup(ctx, instance); err != nil {
+		return err
+	}
+
 	if s.resourceCleanup != nil {
 		if err := s.resourceCleanup(ctx, instance.ID); err != nil {
 			return fmt.Errorf("failed to clean instance components: %w", err)
@@ -2400,14 +2410,17 @@ func (s *instanceService) cleanupV2GatewayBinding(ctx context.Context, instance 
 		}
 	}
 	if s.bindingRepo == nil {
-		return nil
+		return fmt.Errorf("Runtime binding inventory is unavailable for cleanup")
+	}
+	if err := s.requireGatewayCleanupProofCapabilities(); err != nil {
+		return err
 	}
 	binding, err := s.bindingRepo.GetByInstanceID(ctx, instance.ID)
 	if err != nil {
 		return fmt.Errorf("failed to get v2 runtime binding: %w", err)
 	}
 	if binding == nil {
-		return nil
+		return s.verifyUnboundGatewayCleanup(ctx, instance)
 	}
 
 	strictStop := requiresConfirmedGatewayStop(s.agentClient)
@@ -2432,7 +2445,7 @@ func (s *instanceService) cleanupV2GatewayBinding(ctx context.Context, instance 
 	if err := s.bindingRepo.DeleteByInstanceIDAndReleaseSlot(ctx, instance.ID, binding.RuntimePodID); err != nil {
 		return fmt.Errorf("failed to delete v2 runtime binding and release slot: %w", err)
 	}
-	return nil
+	return s.verifyUnboundGatewayCleanup(ctx, instance)
 }
 
 func (s *instanceService) ensureV2Workspace(ctx context.Context, instance *models.Instance, runtimeType string) error {
@@ -2604,6 +2617,13 @@ func (s *instanceService) restartInstance(instanceID int) error {
 			return fmt.Errorf("failed to fence previous runtime generation: %w", err)
 		}
 	}
+	if isV2 {
+		if recovery, ok := s.instanceRepo.(repository.InstanceRuntimeRecoveryRepository); ok {
+			if err := recovery.ResetRuntimeRecovery(ctx, instanceID); err != nil {
+				return fmt.Errorf("reset explicit restart recovery budget: %w", err)
+			}
+		}
+	}
 	if err := s.stopInstance(instanceID); err != nil {
 		return fmt.Errorf("failed to stop instance: %w", err)
 	}
@@ -2672,6 +2692,28 @@ func factoryResetString(value string) *string { return &value }
 // workspace contents, runtime-local configuration, tokens and snapshots are
 // never copied from the source.
 func (s *instanceService) CreateResetReplacement(sourceInstanceID int, operationID string) (*models.Instance, error) {
+	var replacement *models.Instance
+	err := s.withReplacementResetMutation(sourceInstanceID, func() error {
+		var err error
+		replacement, err = s.createResetReplacement(sourceInstanceID, operationID)
+		return err
+	})
+	return replacement, err
+}
+
+// Replacement reset workers use these methods directly rather than Reset.
+// Share its lifecycle/workspace boundary so an already queued worker cannot
+// provision, promote, or erase a source reserved by orphan recovery.
+func (s *instanceService) withReplacementResetMutation(instanceID int, run func() error) error {
+	release, err := s.acquireLifecycleOperation(instanceID)
+	if err != nil {
+		return err
+	}
+	defer release()
+	return s.withRuntimeUpgradeMutation(instanceID, run)
+}
+
+func (s *instanceService) createResetReplacement(sourceInstanceID int, operationID string) (*models.Instance, error) {
 	if s.ownerTeamMutationGuard != nil {
 		if err := s.ownerTeamMutationGuard(sourceInstanceID, "reset", 0); err != nil {
 			return nil, err
@@ -2766,6 +2808,17 @@ func (s *instanceService) DeletePermanently(instanceID int) error {
 // replacement before attempting destructive cleanup. Cleanup failure therefore
 // cannot take the newly delivered instance away from the user.
 func (s *instanceService) FinalizeResetReplacement(sourceInstanceID, replacementInstanceID int) (bool, string, error) {
+	var pending bool
+	var warning string
+	err := s.withReplacementResetMutation(sourceInstanceID, func() error {
+		var err error
+		pending, warning, err = s.finalizeResetReplacement(sourceInstanceID, replacementInstanceID)
+		return err
+	})
+	return pending, warning, err
+}
+
+func (s *instanceService) finalizeResetReplacement(sourceInstanceID, replacementInstanceID int) (bool, string, error) {
 	ctx := context.Background()
 	if err := s.ValidateDelete(sourceInstanceID); err != nil {
 		return false, "", err
@@ -2854,6 +2907,10 @@ func (s *instanceService) FinalizeResetReplacement(sourceInstanceID, replacement
 // DiscardResetReplacement is used only before owner cutover. The source is not
 // touched even when cleanup of a failed staging instance needs admin follow-up.
 func (s *instanceService) DiscardResetReplacement(replacementInstanceID int) error {
+	return s.withReplacementResetMutation(replacementInstanceID, func() error { return s.discardResetReplacement(replacementInstanceID) })
+}
+
+func (s *instanceService) discardResetReplacement(replacementInstanceID int) error {
 	ctx := context.Background()
 	if err := s.ValidateDelete(replacementInstanceID); err != nil {
 		return err
@@ -2883,6 +2940,10 @@ func (s *instanceService) cleanupResetSource(ctx context.Context, instance *mode
 	if err := s.ValidateDelete(instance.ID); err != nil {
 		return err
 	}
+	if err := s.preflightUnboundGatewayCleanup(ctx, instance); err != nil {
+		return err
+	}
+
 	if s.runtimeSandboxProfile == k8s.RuntimeNFSRootlessProfile && s.resourceCleanup != nil {
 		if err := s.resourceCleanup(ctx, instance.ID); err != nil {
 			return err
@@ -2979,6 +3040,10 @@ func (s *instanceService) Reset(instanceID int) error {
 
 	if runtimeType, ok := v2RuntimeTypeForInstance(instance); ok {
 		if err := s.claimReset(instanceID); err != nil {
+			return err
+		}
+		if err := s.preflightUnboundGatewayCleanup(ctx, instance); err != nil {
+			s.markResetError(instanceID)
 			return err
 		}
 		if s.runtimeSandboxProfile == k8s.RuntimeNFSRootlessProfile && s.resourceCleanup != nil {

@@ -26,6 +26,7 @@ func (s *activityHTTPRecorder) BeginModelActivity(context.Context, int, int, int
 	s.begins++
 	return "scope", s.beginErr
 }
+func (s *activityHTTPRecorder) RenewModelActivity(context.Context, string) error { return nil }
 func (s *activityHTTPRecorder) FinishModelActivity(context.Context, string) error {
 	s.finishes++
 	return nil

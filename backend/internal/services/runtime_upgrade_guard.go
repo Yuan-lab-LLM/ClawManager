@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"clawreef/internal/models"
 	"clawreef/internal/repository"
@@ -44,6 +45,9 @@ func (s *RuntimeScheduler) reconcileDesiredInstance(ctx context.Context, snapsho
 	instance := *current
 	if instance.Status != "creating" && instance.Status != "running" && instance.Status != "error" {
 		return nil
+	}
+	if handled, errs := s.reconcileInstanceRecoveryLocked(ctx, instance, time.Now().UTC()); handled {
+		return errs
 	}
 	if isRuntimeErrorInstance(instance) && !isRecoverableRuntimeSchedulingError(instance) {
 		return nil
@@ -94,6 +98,23 @@ func (s *RuntimeScheduler) failoverBinding(ctx context.Context, podID int64, sna
 	}
 	if current.Generation != instance.RuntimeGeneration {
 		return nil
+	}
+	if requiresConfirmedGatewayStop(s.agentClient) {
+		pod, err := s.podRepo.GetByID(ctx, podID)
+		if err != nil {
+			return err
+		}
+		if pod == nil || stringValue(pod.PodUID) == "" || stringValue(pod.AgentEndpoint) == "" || current.GatewayID == "" {
+			return fmt.Errorf("failover requires the exact source runtime identity")
+		}
+		if store, ok := s.instanceRepo.(repository.RuntimeFailoverRepository); ok {
+			return s.beginOwnedRuntimeFailover(ctx, store, *instance, *current, *pod, reason)
+		}
+		// Heartbeat loss and Pod disappearance do not retire the durable writer
+		// assignment. Keep SQL ownership until the normal stop path proves it.
+		if err := s.agentClient.DeleteGateway(ctx, *pod.AgentEndpoint, current.GatewayID); err != nil {
+			return fmt.Errorf("failover source stop is unconfirmed: %w", err)
+		}
 	}
 	if err := s.instanceRepo.UpdateRuntimeState(ctx, instance.ID, "creating", instance.RuntimeGeneration+1, &reason); err != nil {
 		return err

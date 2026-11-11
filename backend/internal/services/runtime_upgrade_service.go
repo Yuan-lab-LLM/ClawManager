@@ -110,6 +110,7 @@ type RuntimeUpgradeUnavailable struct {
 }
 
 type OpenClawTargetClassification struct {
+	ColdSuccessor      *RuntimeColdSuccessorProof
 	WaitingInstanceIDs []int
 	Strategy           string
 	ImageRef           string
@@ -2191,7 +2192,7 @@ func (s *RuntimeUpgradeService) ValidateInstanceDeletion(ctx context.Context, in
 	if count > 0 {
 		return fmt.Errorf("instance %d is held by an active data-safe runtime rollout", instanceID)
 	}
-	return nil
+	return repository.CheckRuntimeOrphanLifecycleGuard(ctx, s.sess, instanceID)
 }
 
 // ValidateEmptyOpenClawPoolReset proves that the ordinary OpenClaw Lite pool
@@ -3322,7 +3323,7 @@ func (s *RuntimeUpgradeService) ClassifyOpenClawTarget(ctx context.Context, targ
 		}
 	}
 	if len(sourceImages) == 0 {
-		return nil, fmt.Errorf("no current OpenClaw deployment image is available to authorize the target registry")
+		return s.classifyColdSuccessor(ctx, target)
 	}
 	// With no ordinary Lite instances, Team references, Gateway occupancy,
 	// bindings or active rollout, this is an image-only operation. Version and

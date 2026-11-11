@@ -222,3 +222,77 @@ func TestRuntimeIdlePoolReadyBeforeRegistrationDoesNotWakeSecondPool(t *testing.
 		t.Fatalf("woke a second pool while the first is registering: %v", client.calls)
 	}
 }
+
+func TestRuntimeIdlePoolRegisteredPausedPoolDoesNotBlockAnotherWake(t *testing.T) {
+	ctx := context.Background()
+	sess, service, kube := scaleInMySQLFixture(t)
+	for i, name := range []string{"hermes-runtime-pod", "hermes-runtime-pod-2"} {
+		p, err := kube.CoreV1().Pods("runtime").Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		p.Status.PodIP = []string{"10.0.0.1", "10.0.0.2"}[i]
+		if _, err = kube.CoreV1().Pods("runtime").Update(ctx, p, metav1.UpdateOptions{}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err = sess.SQL().Exec("UPDATE runtime_pods SET scheduling_paused=1,pod_ip=?,agent_endpoint=? WHERE id=?", p.Status.PodIP, "https://"+p.Status.PodIP, i+1); err != nil {
+			t.Fatal(err)
+		}
+	}
+	client := &idleWakeRegistrationClient{RuntimeDeploymentService: service.scheduler.deployments}
+	service.scheduler.deployments = client
+	for i, name := range []string{"hermes-runtime", "zzz-hermes"} {
+		j := runtimePodScaleInJournal{AutomaticIdle: true, Phase: "finished", RuntimePodScaleInRequest: RuntimePodScaleInRequest{RuntimeType: "hermes"}, Target: k8s.RuntimePodScaleTarget{Namespace: "runtime", DeploymentName: name}, Snapshot: &k8s.RuntimePodScaleSnapshot{}}
+		raw, _ := json.Marshal(j)
+		if _, err := sess.SQL().Exec("INSERT INTO runtime_management_operations(id,kind,status,request_json,items_json,created_at,updated_at) VALUES(?,'scale_in','completed',?,'[]',NOW(6),NOW(6))", []string{"wake-first", "wake-second"}[i], string(raw)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pending, err := service.scheduler.restoreIdleRuntimeCapacity(ctx, models.Instance{ID: 25}, "hermes")
+	if err != nil || !pending {
+		t.Fatalf("second pool did not wake: %v %v", pending, err)
+	}
+	if len(client.calls) != 2 {
+		t.Fatalf("registered paused pool blocked eligible sleeping pool: %v", client.calls)
+	}
+}
+
+func TestRuntimeIdlePoolPhysicalExhaustionDoesNotBlockAnotherWake(t *testing.T) {
+	for _, state := range []string{"quarantined", "unknown-protocol"} {
+		t.Run(state, func(t *testing.T) {
+			ctx := context.Background()
+			sess, service, kube := scaleInMySQLFixture(t)
+			for i, name := range []string{"hermes-runtime-pod", "hermes-runtime-pod-2"} {
+				p, err := kube.CoreV1().Pods("runtime").Get(ctx, name, metav1.GetOptions{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				p.Status.PodIP = []string{"10.0.0.1", "10.0.0.2"}[i]
+				if _, err = kube.CoreV1().Pods("runtime").Update(ctx, p, metav1.UpdateOptions{}); err != nil {
+					t.Fatal(err)
+				}
+				if _, err = sess.SQL().Exec("UPDATE runtime_pods SET scheduling_paused=0,pod_ip=?,agent_endpoint=? WHERE id=?", p.Status.PodIP, "https://"+p.Status.PodIP, i+1); err != nil {
+					t.Fatal(err)
+				}
+			}
+			service.scheduler.agentClient = scaleInPhysicalAgent(t, kube, state)
+			client := &idleWakeRegistrationClient{RuntimeDeploymentService: service.scheduler.deployments}
+			service.scheduler.deployments = client
+			for i, name := range []string{"hermes-runtime", "zzz-hermes"} {
+				j := runtimePodScaleInJournal{AutomaticIdle: true, Phase: "finished", RuntimePodScaleInRequest: RuntimePodScaleInRequest{RuntimeType: "hermes"}, Target: k8s.RuntimePodScaleTarget{Namespace: "runtime", DeploymentName: name}, Snapshot: &k8s.RuntimePodScaleSnapshot{}}
+				raw, _ := json.Marshal(j)
+				if _, err := sess.SQL().Exec("INSERT INTO runtime_management_operations(id,kind,status,request_json,items_json,created_at,updated_at) VALUES(?,'scale_in','completed',?,'[]',NOW(6),NOW(6))", []string{"wake-first", "wake-second"}[i], string(raw)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			pending, err := service.scheduler.restoreIdleRuntimeCapacity(ctx, models.Instance{ID: 25}, "hermes")
+			if state == "unknown-protocol" {
+				if err == nil || pending || len(client.calls) != 1 {
+					t.Fatalf("unknown physical protocol allowed another pool wake: calls=%v pending=%v err=%v", client.calls, pending, err)
+				}
+			} else if err != nil || !pending || len(client.calls) != 2 {
+				t.Fatalf("physically exhausted registered pool blocked compatible sleeping pool: calls=%v pending=%v err=%v", client.calls, pending, err)
+			}
+		})
+	}
+}

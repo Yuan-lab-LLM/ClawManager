@@ -37,7 +37,24 @@ func (r *InstanceAutoStopRepository) ClaimStop(ctx context.Context, settingsVers
 			return err
 		}
 		now := time.Now().UTC()
-		if a == nil || a.Generation != i.generation || a.ActivityVersion != activityVersion || !a.IdleAt(now, cfg.IdleTimeoutDays) {
+		if a == nil || a.Generation != i.generation || a.ActivityVersion != activityVersion {
+			return models.ErrAutoStopConflict
+		}
+		if a.ActiveRequests != 0 {
+			row, err := s.SQL().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM instance_model_activity_requests WHERE instance_id=? AND generation=? AND finished_at IS NULL AND lease_expires_at IS NULL)`, input.InstanceID, input.Generation)
+			if err != nil {
+				return err
+			}
+			var legacy bool
+			if err = row.Scan(&legacy); err != nil {
+				return err
+			}
+			if legacy {
+				return models.ErrLegacyModelActivityUnverified
+			}
+			return models.ErrModelActivityInProgress
+		}
+		if !a.IdleAtDuration(now, cfg.IdleTimeout()) {
 			return models.ErrAutoStopConflict
 		}
 		workRow, err := s.SQL().QueryRowContext(ctx, `SELECT
@@ -66,7 +83,7 @@ func (r *InstanceAutoStopRepository) ClaimStop(ctx context.Context, settingsVers
 			return models.ErrAutoStopConflict
 		}
 		// A restart after observation cannot shorten the mandatory idle window.
-		row, err = s.SQL().QueryRowContext(ctx, `SELECT COUNT(*) FROM instances WHERE id=? AND (started_at IS NULL OR started_at<=?)`, input.InstanceID, now.Add(-models.InstanceAutoStopIdleTimeout(cfg.IdleTimeoutDays)))
+		row, err = s.SQL().QueryRowContext(ctx, `SELECT COUNT(*) FROM instances WHERE id=? AND (started_at IS NULL OR started_at<=?)`, input.InstanceID, now.Add(-cfg.IdleTimeout()))
 		if err != nil {
 			return err
 		}
@@ -228,6 +245,12 @@ func (r *InstanceAutoStopRepository) BeginManualStart(ctx context.Context, id in
 			return models.ErrInstanceStopping
 		}
 		_, err = s.SQL().ExecContext(ctx, `UPDATE instance_model_activity SET monitoring_since=?,start_deadline_at=?,blocker='',updated_at=? WHERE instance_id=?`, now, deadline.UTC(), now, id)
+		if err != nil {
+			return err
+		}
+		// Publish the explicit Start intent under the same instance row lock as
+		// Stop. A later committed Stop must still revoke publication authority.
+		_, err = s.SQL().ExecContext(ctx, `INSERT INTO instance_desired_state(instance_id,desired_power_state,created_at,updated_at) VALUES(?,'running',?,?) ON DUPLICATE KEY UPDATE desired_power_state='running',updated_at=VALUES(updated_at)`, id, now, now)
 		return err
 	})
 }

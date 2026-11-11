@@ -1,0 +1,25 @@
+# Chrome browser-only certificate confirmation
+
+Approved requirements: nip.io and private10.130.81.54, Chrome only, no certificate installation or trust-store change. Confirm the self-signed certificate once per retained browser exception, then manager/native/preview frames reuse that decision. Chromium may expire or clear the exception; permanent trust is not promised.
+
+## Browser origins
+
+Enable an explicit optional deployment mode with `CLAWMANAGER_BROWSER_ORIGIN=https://10.130.81.54:30443` and `CLAWMANAGER_BROWSER_PORT_RANGE=31400-31527`. The existing certificate covers this address through its IP SAN; an operator may instead choose a hostname covered by the same wildcard SAN. Main portal keeps30443. One new Kubernetes Service has128 NodePorts, each forwarding to one additional nginx TLS listener8444. Native/preview pages use the same hostname and certificate, distinct public ports. Existing subdomain mode remains unchanged when these variables are absent. Wrong host, unallocated port, invalid config and unsupported Chrome capabilities fail closed.
+
+Ports persist in MySQL and are never reassigned across instance identities, including after deletion. Native binding key includes instanceID and vetted runtime type. Preview binding includes instanceID and canonical target scheme/loopbackhost/port, excluding paths. Bound distinct preview targets to32 per instance and the configured global port pool; exhausted pools return a clear error. Cookies and localStorage cannot be made port-scoped by configuration alone.
+
+## Credentials and preview isolation
+
+Only existing dedicated cookie-free OpenCode and DeepSeek Harness native UIs use persistent native ports. Strip all incoming cookies after CM access authentication before native HTTP/WS forwarding, and all upstream Set-Cookie, including WS101. CM alone sets its HttpOnly instance-specific access cookies. Validate exact Origin and Fetch Metadata at the public boundary before any DSH Origin rewrite; narrowly permit signed-token iframe bootstrap and parent access renewal. Deny mismatched/missing browser context on credential-authenticated requests. Guard manager cookie-auth endpoints from cross-port CSRF too. Existing unrelated API token clients remain usable.
+
+Every preview retains an unpredictable existing persisted bearer capability, owner and generation checks. The port is a route, not authority. A reserved bootstrap path carries the capability, exchanges it for a port-specific HttpOnly cookie and redirects to the requested application path; ordinary assets and WS require that cookie and the assigned port/target identity. Filter platform cookies in the preview forwarding path regardless of browser context. App Set-Cookie cannot replace platform cookie names.
+
+Preview frames must be credentialless in Chrome and remain on a port different from the manager/native origins. Previews within one instance intentionally behave like localhost apps and may share ordinary app cookies; the runtime itself already gives these services the same instance UID. Each manager document is pinned to one instance: hard-navigate between instance identities before rendering a new instance. This creates a fresh credentialless nonce and discards prior instance app cookies. Different manager browser tabs get independent nonces. Preserve the original single live native frame across responsive layout changes.
+
+Preview external links route through a trusted manager-origin viewer that creates a credentialless different-port child. Direct top-level preview requests redirect to that viewer, never render user HTML in the ordinary browser cookie context. Block preview popups/top navigation initially; do not rely on iframe credentialless to isolate ordinary popup contexts. Unknown browsers show a useful unsupported-mode message. Native UI app cookies are unsupported only in this explicit mode; vetted OpenCode/DSH must pass ordinary session/model-selector/storage interactions.
+
+## Operations and validation
+
+No internal CA, no installed certificate, no global ignore-certificate-errors. Retain current leaf/key and use the shared gateway TLS mount. Do not restart, stop or migrate any user runtime; especially instance118 remains running generation9 with its node3000 service. Snapshot fresh runtime Pod UIDs before the manager deployment and verify afterwards. Install only the owned test gateway Service and manager image/env, with rollback. Keep all foreign namespaces and production secrets untouched.
+
+Tests must demonstrate one real Chrome interstitial approval permits manager/native/multiple preview origins, web page200, module/root assets/redirects/WS, unchanged native prompt and per-instance storage, no manager/native cookies forwarded to app HTTP/WS, no cross-port native/manager CSRF, no raw popup escape, capability/owner/generation rejection, cross-instance nonce reset, responsive iframe stability and explicit capacity errors. Measure real JWT cookie header sizes for expected simultaneous native frames and adjust bounded nginx buffers only if required.

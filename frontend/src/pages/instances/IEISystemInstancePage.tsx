@@ -1,3 +1,4 @@
+import { allowBrowserInstance } from "../../lib/browserOrigin";
 import axios from "axios";
 import { ArrowLeft, Maximize2, Minimize2, RefreshCw, RotateCw, ShieldAlert } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -167,12 +168,12 @@ export default function IEISystemInstancePage() {
   }, []);
 
   const accessFrameUrl = useMemo(() => {
-    if (!instance || !access?.access_url) return "";
+    if (!instance || !access?.access_url || !allowBrowserInstance(instanceID, access)) return "";
     const url = resolveEmbedUrl(access.access_url);
     return instance.type.toLowerCase() === "openclaw"
       ? prepareOpenClawControlUIStorage(instance.id, url)
       : url;
-  }, [access, instance]);
+  }, [access, instance, instanceID]);
   const normalizedType = instance?.type.trim().toLowerCase() ?? "";
   const requiresRuntimeCertificateTrust =
     normalizedType === "opencode" || normalizedType === "deepseek-harness";
@@ -180,6 +181,7 @@ export default function IEISystemInstancePage() {
     frameUrl: frameSrc,
     checkingCertificate,
     certificateConfirmationRequired,
+    certificateOrigin,
     confirmCertificate,
   } = useRuntimeCertificateTrust(
     accessFrameUrl || null,
@@ -357,7 +359,7 @@ export default function IEISystemInstancePage() {
               <p className="max-w-md text-sm leading-6 text-slate-600">工作区独立于运行界面加载。可在右侧检查并修改文件；保存后如需生效，请确认配置并手动重启。</p>
               <button className="app-button-secondary" disabled={loading} onClick={() => void openInstance()}>重新连接</button>
             </div>
-          ) : frameSrc ? (
+          ) : frameSrc && allowBrowserInstance(instanceID, access ?? undefined) ? (
             <iframe
               key={`${frameSrc}:${frameVersion}`}
               onLoad={event=>onFrameLoad(event.currentTarget)}
@@ -373,8 +375,9 @@ export default function IEISystemInstancePage() {
               <ShieldAlert className="h-8 w-8 text-amber-500" />
               <div>
                 <p className="text-sm font-semibold text-slate-900">需要确认运行时 HTTPS 证书</p>
-                <p className="mt-1 max-w-lg text-sm leading-6 text-slate-600">
-                  请继续完成一次浏览器证书确认，确认后会自动返回当前实例页面。
+                <p className="mt-1 max-w-lg break-words text-sm leading-6 text-slate-600">
+                  浏览器尚未信任 {certificateOrigin} 的证书。请在新标签页核对并确认浏览器的证书提示，
+                  然后关闭该标签页返回此处。若未打开新标签页，请允许 ClawManager 弹出窗口后重试。
                 </p>
               </div>
               <button
@@ -382,7 +385,7 @@ export default function IEISystemInstancePage() {
                 className="app-button-primary"
                 onClick={confirmCertificate}
               >
-                继续确认
+                在新标签页确认实例证书
               </button>
             </div>
           ) : (

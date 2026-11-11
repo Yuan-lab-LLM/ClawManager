@@ -53,6 +53,9 @@ type RuntimeScheduler struct {
 	lastPoolCleanupAt    time.Time
 	configurationRetryMu sync.Mutex
 	configurationRetryAt map[string]time.Time
+	creatingScan         runtimeSchedulerScan
+	desiredScan          runtimeSchedulerScan
+	slotAudit            runtimeSlotAuditor
 }
 
 var (
@@ -236,11 +239,12 @@ func (s *RuntimeScheduler) FailoverPod(ctx context.Context, podID int64, reason 
 	if s == nil || s.podRepo == nil || s.bindingRepo == nil || s.instanceRepo == nil {
 		return fmt.Errorf("runtime scheduler dependencies are not configured")
 	}
-	var errs []error
-	if err := s.podRepo.MarkState(ctx, podID, "unhealthy", false); err != nil {
-		errs = append(errs, err)
+	// Draining remains eligible for the stale-pod confirmation loop if listing
+	// bindings or persisting an intent fails before every writer is captured.
+	if err := s.podRepo.MarkState(ctx, podID, "draining", true); err != nil {
+		return err
 	}
-
+	var errs []error
 	bindings, err := s.bindingRepo.ListByRuntimePodID(ctx, podID)
 	if err != nil {
 		errs = append(errs, err)
@@ -249,6 +253,16 @@ func (s *RuntimeScheduler) FailoverPod(ctx context.Context, podID int64, reason 
 	for _, binding := range bindings {
 		if err := s.failoverBinding(ctx, podID, binding, reason); err != nil {
 			errs = append(errs, err)
+		}
+	}
+	if len(errs) == 0 {
+		remaining, err := s.bindingRepo.ListByRuntimePodID(ctx, podID)
+		if err != nil {
+			errs = append(errs, err)
+		} else if len(remaining) == 0 {
+			if err := s.podRepo.MarkState(ctx, podID, "unhealthy", false); err != nil {
+				errs = append(errs, err)
+			}
 		}
 	}
 	return errors.Join(errs...)
@@ -771,6 +785,7 @@ func (s *RuntimeScheduler) RuntimeDeploymentPods(ctx context.Context, runtimeTyp
 			}
 			result[index].UsedSlots = pod.UsedSlots
 			result[index].LastSeenAt = pod.LastSeenAt
+			result[index].ObservationJSON, result[index].ObservationAt = pod.ObservationJSON, pod.ObservationAt
 		}
 	}
 	return result, nil
@@ -1362,6 +1377,11 @@ func canAutoRollbackOpenClaw(phase string) bool {
 }
 
 func (s *RuntimeScheduler) rollbackOpenClawRollout(ctx context.Context, rollout *models.RuntimeRollout, cause error) error {
+	if proof, err := coldSuccessorProof(rollout); err != nil {
+		return err
+	} else if proof != nil {
+		return fmt.Errorf("cold successor recovery never restores retired sources; use owned successor cleanup")
+	}
 	if rollout == nil || s.deployments == nil || s.upgrade == nil {
 		return fmt.Errorf("OpenClaw rollback dependencies are not configured")
 	}
@@ -1532,6 +1552,9 @@ func (s *RuntimeScheduler) reconcile(ctx context.Context) error {
 		return fmt.Errorf("runtime scheduler dependencies are not configured")
 	}
 	var errs []error
+	if err := s.slotAudit.Reconcile(ctx, s); err != nil {
+		errs = append(errs, err)
+	}
 	if s.management != nil {
 		if err := s.management.Process(ctx); err != nil {
 			errs = append(errs, err)
@@ -1543,14 +1566,14 @@ func (s *RuntimeScheduler) reconcile(ctx context.Context) error {
 	if err := s.reconcileRollouts(ctx); err != nil {
 		errs = append(errs, err)
 	}
-	creating, err := s.instanceRepo.GetV2Creating(ctx, runtimeSchedulerBatchLimit)
+	creating, err := s.schedulerInstanceBatch(ctx, true)
 	if err != nil {
 		errs = append(errs, err)
 	} else {
 		errs = append(errs, s.reconcileCreatingInstances(ctx, creating)...)
 	}
 
-	desired, err := s.instanceRepo.GetV2DesiredRunning(ctx, runtimeSchedulerBatchLimit)
+	desired, err := s.schedulerInstanceBatch(ctx, false)
 	if err != nil {
 		errs = append(errs, err)
 	} else {
@@ -1664,6 +1687,9 @@ func (s *RuntimeScheduler) reconcileCreatingInstance(ctx context.Context, instan
 }
 
 func (s *RuntimeScheduler) reconcileCreatingInstanceLocked(ctx context.Context, instance models.Instance) []error {
+	if handled, errs := s.reconcileInstanceRecoveryLocked(ctx, instance, time.Now().UTC()); handled {
+		return errs
+	}
 	binding, err := s.bindingRepo.GetByInstanceID(ctx, instance.ID)
 	if err != nil {
 		return []error{fmt.Errorf("get binding for creating instance %d: %w", instance.ID, err)}
@@ -1820,8 +1846,9 @@ func (s *RuntimeScheduler) syncInstanceStateFromBinding(ctx context.Context, ins
 }
 
 func (s *RuntimeScheduler) failoverStalePods(ctx context.Context) error {
+	resumeErr := s.resumeOwnedRuntimeFailovers(ctx)
 	if s.heartbeatTimeout <= 0 {
-		return nil
+		return resumeErr
 	}
 	pods, err := s.podRepo.List(ctx, "")
 	if err != nil {
@@ -1834,6 +1861,9 @@ func (s *RuntimeScheduler) failoverStalePods(ctx context.Context) error {
 	cutoff := time.Now().UTC().Add(-time.Duration(runtimeHeartbeatFailoverMultiplier) * s.heartbeatTimeout)
 	kubernetesPodsByType := map[string][]k8s.RuntimeDeploymentPod{}
 	var errs []error
+	if resumeErr != nil {
+		errs = append(errs, resumeErr)
+	}
 	for _, pod := range pods {
 		if pod.State == "unhealthy" || pod.State == "pending" {
 			continue
@@ -2010,12 +2040,17 @@ func (s *RuntimeScheduler) scaleOutIfBacklogExceedsCapacity(ctx context.Context,
 			continue
 		}
 		group.active++
+		free, capacityErr := s.allocatableGatewaySlots(ctx, pod)
+		if capacityErr != nil {
+			group.capacityUnknown = true
+			continue
+		}
 		group.capacityTotal += pod.Capacity
-		group.usedSlots += minInt(pod.UsedSlots, pod.Capacity)
+		group.usedSlots += pod.Capacity - free
 	}
 	var target *runtimeDeploymentCapacity
 	for _, group := range groups {
-		if (group.active == 0 && group.draining == 0) || group.capacityPerPod <= 0 {
+		if group.capacityUnknown || (group.active == 0 && group.draining == 0) || group.capacityPerPod <= 0 {
 			continue
 		}
 		if target == nil || group.active > target.active {
@@ -2209,7 +2244,25 @@ func (s *RuntimeScheduler) assignInstance(ctx context.Context, instance models.I
 		}
 		return nil
 	}
+	// Heartbeat capacity may include quarantined or reserved physical slots.
+	// No gateway publication is pending here: uncertain creates returned above.
+	// Try proven sleeping capacity before waiting on the unusable live pool.
+	if len(pods) > 0 && (lastErr == nil || isRuntimeAssignmentPending(lastErr)) {
+		if pending, wakeErr := s.restoreIdleRuntimeCapacity(ctx, instance, runtimeType); pending || wakeErr != nil {
+			return runtimeIdleWakeResult(wakeErr)
+		}
+	}
 	if lastErr != nil {
+		if errors.Is(lastErr, errRuntimeScaleOutPending) {
+			scaled, scaleErr := s.scaleOutIfBacklogExceedsCapacity(ctx, runtimeType, 1)
+			if scaleErr != nil {
+				return errors.Join(errRuntimeControlPlanePending, scaleErr)
+			}
+			if scaled {
+				return errRuntimeScaleOutPending
+			}
+			return fmt.Errorf("%w: physical capacity is unavailable and no compatible expansion is confirmed: %v", errRuntimeControlPlanePending, lastErr)
+		}
 		if isRuntimeAssignmentPending(lastErr) {
 			return lastErr
 		}
@@ -2239,6 +2292,7 @@ type runtimeDeploymentCapacity struct {
 	capacityPerPod  int
 	usedSlots       int
 	desiredReplicas int
+	capacityUnknown bool
 }
 
 // Automatic scale requests are floors; stale inventory must not undo newer capacity.
@@ -2287,13 +2341,18 @@ func (s *RuntimeScheduler) scaleOutIfAtCapacity(ctx context.Context, runtimeType
 			continue
 		}
 		group.active++
-		if pod.UsedSlots >= pod.Capacity {
+		free, capacityErr := s.allocatableGatewaySlots(ctx, pod)
+		if capacityErr != nil {
+			group.capacityUnknown = true
+			continue
+		}
+		if free == 0 {
 			group.full++
 		}
 	}
 	var target *runtimeDeploymentCapacity
 	for _, group := range groups {
-		if group.active == 0 && group.draining == 0 {
+		if group.capacityUnknown || (group.active == 0 && group.draining == 0) {
 			continue
 		}
 		if group.active > 0 && group.active != group.full {
@@ -2797,6 +2856,51 @@ func (s *RuntimeScheduler) reserveGatewayPortExcludingPorts(
 	if blockSize <= 0 {
 		blockSize = 1
 	}
+	if layout, ok := s.agentClient.(interface {
+		physicalGatewayPorts(context.Context, models.RuntimePod) (map[int]struct{}, error)
+	}); ok {
+		ports, err := layout.physicalGatewayPorts(ctx, pod)
+		if err != nil {
+			return nil, fmt.Errorf("%w: physical slot layout unavailable: %w", errRuntimeControlPlanePending, err)
+		}
+		count := 0
+		for port := s.gatewayPortStart; port+blockSize-1 <= s.gatewayPortEndForPod(pod, runtimeType); port += blockSize {
+			if _, present := ports[port]; !present {
+				return nil, fmt.Errorf("%w: allocator port range does not match physical slots", errRuntimeControlPlanePending)
+			}
+			count++
+		}
+		if count == 0 || count != len(ports) {
+			return nil, fmt.Errorf("%w: allocator capacity does not match physical slots", errRuntimeControlPlanePending)
+		}
+	}
+	if inventory, ok := s.agentClient.(interface {
+		reservedGatewayPorts(context.Context, models.RuntimePod) (map[int]struct{}, error)
+	}); ok {
+		reserved, err := inventory.reservedGatewayPorts(ctx, pod)
+		if err != nil {
+			return nil, fmt.Errorf("%w: read persisted slot reservations: %w", errRuntimeControlPlanePending, err)
+		}
+		merged := make(map[int]struct{}, len(reserved)+len(excludedPorts))
+		for port := range reserved {
+			if port < s.gatewayPortStart || port+blockSize-1 > s.gatewayPortEndForPod(pod, runtimeType) || (port-s.gatewayPortStart)%blockSize != 0 {
+				return nil, fmt.Errorf("persisted reservation does not identify a current slot block")
+			}
+			merged[port] = struct{}{}
+		}
+		for port := range excludedPorts {
+			merged[port] = struct{}{}
+		}
+		excludedPorts = merged
+	}
+	if sourcePod, sourcePort := runtimeRecoverySource(ctx); sourcePod == pod.ID && sourcePort > 0 {
+		merged := make(map[int]struct{}, len(excludedPorts)+1)
+		for port := range excludedPorts {
+			merged[port] = struct{}{}
+		}
+		merged[sourcePort] = struct{}{}
+		excludedPorts = merged
+	}
 	existingBindings, err := s.bindingRepo.ListByRuntimePodID(ctx, pod.ID)
 	if err != nil {
 		return nil, fmt.Errorf("list runtime pod %d bindings for gateway port allocation: %w", pod.ID, err)
@@ -2807,6 +2911,9 @@ func (s *RuntimeScheduler) reserveGatewayPortExcludingPorts(
 			continue
 		}
 		if runtimeGatewayPortBlockOccupied(existingBindings, port, blockSize) {
+			if requiresConfirmedGatewayStop(s.agentClient) {
+				continue // An error is not a confirmed writer-stop receipt.
+			}
 			deleted, err := s.bindingRepo.DeleteErrorByRuntimePodIDAndGatewayPort(ctx, pod.ID, port)
 			if err != nil {
 				return nil, fmt.Errorf("clear stale gateway port %d on runtime pod %d: %w", port, pod.ID, err)
@@ -2849,6 +2956,9 @@ func runtimeGatewayPortBlockOccupied(bindings []models.InstanceRuntimeBinding, r
 
 func (s *RuntimeScheduler) createRuntimeBindingWithStalePortRecovery(ctx context.Context, binding *models.InstanceRuntimeBinding) error {
 	if err := s.bindingRepo.Create(ctx, binding); err != nil {
+		if requiresConfirmedGatewayStop(s.agentClient) {
+			return err
+		}
 		deleted, deleteErr := s.bindingRepo.DeleteErrorByRuntimePodIDAndGatewayPort(ctx, binding.RuntimePodID, binding.GatewayPort)
 		if deleteErr != nil {
 			return errors.Join(err, deleteErr)
@@ -2940,6 +3050,15 @@ func (s *RuntimeScheduler) preservePendingGatewayStart(ctx context.Context, inst
 	}
 	message := cause.Error()
 	if s != nil && s.bindingRepo != nil && generation > 0 {
+		binding, readErr := s.bindingRepo.GetByInstanceID(ctx, instanceID)
+		if readErr != nil {
+			return errors.Join(errRuntimeGatewayStartPending, cause, readErr)
+		}
+		// Keep the reservation's timeout origin stable. Repeated observation of
+		// an uncertain create must not renew the grace period indefinitely.
+		if binding != nil && binding.Generation == generation && binding.State == RuntimeGatewayBindingCreating {
+			return fmt.Errorf("instance %d Gateway start awaits Agent reconciliation: %w", instanceID, errors.Join(errRuntimeGatewayStartPending, cause))
+		}
 		if err := s.bindingRepo.UpdateState(ctx, instanceID, generation, RuntimeGatewayBindingCreating, &message); err != nil && !errors.Is(err, repository.ErrStaleRuntimeGeneration) {
 			cause = errors.Join(cause, fmt.Errorf("preserve pending binding for instance %d: %w", instanceID, err))
 		}

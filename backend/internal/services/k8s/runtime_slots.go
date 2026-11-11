@@ -391,7 +391,7 @@ func parseRuntimeResourceBudget(budgets config.RuntimeSlotResources, label strin
 func setRuntimeSlotTLSReadiness(container *corev1.Container) {
 	for _, env := range container.Env {
 		if env.Name == "RUNTIME_AGENT_ROLE" && env.Value == "pool" {
-			container.ReadinessProbe = &corev1.Probe{ProbeHandler: corev1.ProbeHandler{HTTPGet: &corev1.HTTPGetAction{Path: "/readyz", Port: intstr.FromString("agent"), Scheme: corev1.URISchemeHTTPS}}, PeriodSeconds: 2, TimeoutSeconds: 3, FailureThreshold: 3}
+			container.ReadinessProbe = &corev1.Probe{ProbeHandler: corev1.ProbeHandler{HTTPGet: &corev1.HTTPGetAction{Path: "/readyz", Port: intstr.FromString("agent"), Scheme: corev1.URISchemeHTTPS}}, PeriodSeconds: 2, TimeoutSeconds: 3, FailureThreshold: 3, SuccessThreshold: 1}
 			return
 		}
 	}

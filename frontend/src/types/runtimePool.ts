@@ -4,11 +4,16 @@ export interface RuntimeAutoStopSettings {
   enabled: boolean;
   check_interval_days: number;
   idle_timeout_days: number;
+  check_interval_seconds?: number;
+  idle_timeout_seconds?: number;
   version: number;
   next_check_at: string;
 }
 
-export type UpdateRuntimeAutoStopSettings = Omit<RuntimeAutoStopSettings, "next_check_at">;
+export type UpdateRuntimeAutoStopSettings = Pick<RuntimeAutoStopSettings, "enabled" | "version"> & (
+  | { check_interval_seconds: number; idle_timeout_seconds: number }
+  | { check_interval_days: number; idle_timeout_days: number }
+);
 
 export interface RuntimeAutoStopActivity extends InstanceAutoStopActivity {
   instance_id: number;
@@ -22,6 +27,8 @@ export type RuntimeType =
   | "hermes"
   | "opencode"
   | "deepseek-harness";
+
+export type RuntimeReconciliationState = "consistent" | "residual" | "conflict" | "unknown";
 
 export interface RuntimePod {
   id: number;
@@ -41,6 +48,7 @@ export interface RuntimePod {
   capabilities: string[];
   state: "pending" | "ready" | "draining" | "unhealthy" | "deleted" | string;
   used_slots: number;
+  bound_instances?: number;
   capacity: number;
   draining: boolean;
   cpu_millis_used?: number;
@@ -52,6 +60,10 @@ export interface RuntimePod {
   updated_at?: string;
   agent_reported?: boolean;
   bindings_reported?: boolean;
+  reconciliation_state?: RuntimeReconciliationState;
+  reconciliation_message?: string;
+  unknown_slots?: number;
+  observation_at?: string;
   pool_role?: "upgrade-target" | "upgrade-lab" | string;
   pool_purpose?: string;
   upgrade_id?: string;
@@ -83,6 +95,10 @@ export interface RuntimeSlot {
   gateway_port?: number;
   generation?: number;
   error_message?: string;
+  reconciliation_state?: RuntimeReconciliationState;
+  expected_instance_id?: number;
+  binding_confirmed?: boolean;
+  observation_message?: string;
 }
 
 export interface RuntimePodPageRequest {
@@ -95,6 +111,7 @@ export interface RuntimePodPageRequest {
 }
 
 export interface RuntimePodSummary {
+  bound_instances?: number;
   pods: number;
   online: number;
   schedulable: number;
@@ -107,6 +124,7 @@ export interface RuntimePodSummary {
   migrating: number;
   error: number;
   idle: number;
+  unknown?: number;
   unavailable: number;
 }
 
@@ -202,6 +220,9 @@ export interface RuntimePodEvent {
 }
 
 export interface RuntimeSchedulingRequest {
+  mode?: "orphan-recovery";
+  source_pod_id?: number;
+  source_pod_uid?: string;
   retry_operation_id?: string;
   instance_ids: number[];
   target_pod_id: number;
@@ -209,6 +230,11 @@ export interface RuntimeSchedulingRequest {
 }
 
 export interface RuntimeSchedulingItem {
+  source_pod_uid?: string;
+  source_generation?: number;
+  source_gateway_id?: string;
+  orphan_recovery?: { phase: string; receipt?: Record<string, unknown> };
+  recovery?: { phase: string; scope: Record<string, unknown>; receipt?: Record<string, unknown> };
   instance_id: number;
   source_pod_id?: number;
   target_pod_id?: number;
@@ -218,6 +244,7 @@ export interface RuntimeSchedulingItem {
 }
 
 export interface RuntimeSchedulingOperation {
+  retry_requested?: boolean;
   id: string;
   kind?: string;
   status: string;
@@ -332,4 +359,16 @@ export interface RuntimeUpgradeDetails {
   rollout: RuntimeRollout;
   items: RuntimeUpgradeItem[];
   audits: Array<{ id: number; action: string; phase: string; outcome: string; created_at: string }>;
+}
+
+export interface RuntimeRecoveryInspection {
+  failover?: { attempts: number; source_stopped: boolean; reason: string };
+  instance_id: number;
+  generation: number;
+  status: string;
+  blocker?: string;
+  blocker_code?: string;
+  recovery?: { attempts: number; phase?: string; reason?: string; next_retry_at?: string };
+  binding?: { runtime_pod_id: number; generation: number; state: string; gateway_id: string };
+  pod?: RuntimePod;
 }

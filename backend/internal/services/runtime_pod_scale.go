@@ -59,6 +59,19 @@ func runtimeDefaultScaleTargets(namespace, runtimeType string, rollouts []models
 		if rollout.RuntimeType != "openclaw" || rollout.Status != "finished" {
 			continue
 		}
+		proof, proofErr := coldSuccessorProof(&rollout)
+		if proofErr != nil {
+			return nil, proofErr
+		}
+		if proof != nil {
+			if proof.Source.Namespace != namespace || !canonical[proof.Source.Name] {
+				return nil, fmt.Errorf("cold successor has no approved default lineage")
+			}
+			target := k8s.RuntimePodScaleTarget{DeploymentUID: proof.SuccessorUID, RuntimeType: runtimeType, Namespace: namespace, DeploymentName: runtimeUpgradeTargetDeploymentName(proof.Source.Name, rollout.ID), UpgradeID: strconv.FormatInt(rollout.ID, 10), SourceDeployment: proof.Source.Name, ImageRef: rollout.TargetImageRef}
+			canonical[target.DeploymentName] = true
+			targets = []k8s.RuntimePodScaleTarget{target}
+			continue
+		}
 		if rollout.PreflightID == nil || strings.TrimSpace(*rollout.PreflightID) == "" || rollout.PlanFingerprint == nil || strings.TrimSpace(*rollout.PlanFingerprint) == "" || rollout.SourceImagesJSON == nil || strings.TrimSpace(rollout.TargetImageRef) == "" {
 			return nil, fmt.Errorf("finished OpenClaw rollout %d lacks approved default source proof", rollout.ID)
 		}

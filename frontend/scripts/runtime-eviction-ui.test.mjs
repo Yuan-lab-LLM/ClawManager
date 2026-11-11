@@ -19,7 +19,7 @@ const source = {
 const target = { ...source, id: 42, used_slots: 0, slots: [{ index: 1, ready: true }] };
 
 // Execute production render/event logic with in-memory hook state and service boundaries.
-function setup({ pod = source, pods = [pod], failure, forceSupported = true, component = 'RuntimeActions', realLayout = false, kind = 'evict', initialIds, preflight, templates, scaleOptions, scaleState, scaleRefetch, create, balancePlan, historyItems = [] } = {}) {
+function setup({ pod = source, pods = [pod], failure, forceSupported = true, component = 'RuntimeActions', realLayout = false, kind = 'evict', initialIds, verifiedRecoveryIds, inspection, onEvict, preflight, templates, scaleOptions, scaleState, scaleRefetch, create, balancePlan, historyItems = [] } = {}) {
   const states = [];
   const effects = [];
   const timers = new Map();
@@ -60,7 +60,8 @@ function setup({ pod = source, pods = [pod], failure, forceSupported = true, com
   const summary = { pods: 30, online: 29, schedulable: 28, capacity: 100, ready: 99, occupied: 20, available: 79, running: 20, starting: 0, migrating: 0, error: 0, idle: 79, unavailable: 1 };
   const inventory = { pods, summary, nodes: ['off-page-node'], pagination: { page: 1, page_size: 4, total: 30, total_pages: 8 }, updated_at: '2026-10-27T00:00:00Z' };
   const service = {
-    evict: async () => { calls++; if (failure) throw failure; },
+    inspectInstanceRecovery: async () => inspection,
+    evict: async (...args) => { operationCalls.push(["evict", ...args]); calls++; if (failure) throw failure; },
     preflightScheduling: async request => { preflightRequests.push(request); return preflight ? preflight(request) : { allowed: true, blockers: [] }; },
     schedule: async request => { scheduleRequests.push(request); },
     listPodsPage: async (...args) => { inventoryCalls.push(args); return inventory; },
@@ -101,7 +102,7 @@ function setup({ pod = source, pods = [pod], failure, forceSupported = true, com
           queries.push(options);
           return { refetch: async () => { refetches.push(options.queryKey); if (options.queryKey[0] === 'runtime-pod-scale-options' && scaleRefetch) return scaleRefetch(); }, ...(options.queryKey[1] === 'all' ? fullState : options.queryKey[0] === 'runtime-pod-scale-options' ? scaleState : {}), data: options.enabled === false ? undefined : options.queryKey[0] === 'runtime-pod-pools' ? { items: templates.managed_pools ?? [] } : options.queryKey[0] === 'runtime-pod-scale-options' ? scaleOptions : options.queryKey[0] === 'runtime-pods'
             ? options.queryKey[1] === 'page' ? inventory : fullPods
-            : options.queryKey[0] === 'runtime-pod-events' ? [] : { supported_modes: forceSupported ? ['force'] : [], items: historyItems } };
+            : options.queryKey[0] === 'runtime-pod-events' ? [] : { supported_modes: forceSupported ? ['force', 'recovery', 'orphan-recovery'] : [], items: historyItems } };
         },
         keepPreviousData: data => data,
         useQueryClient: () => client,
@@ -115,7 +116,7 @@ function setup({ pod = source, pods = [pod], failure, forceSupported = true, com
   }
   translations = load(new URL('../src/lib/i18n.ts', import.meta.url));
   const Component = load(new URL(`../src/pages/admin/${component}.tsx`, import.meta.url)).default;
-  const props = { kind, pod: pod ?? undefined, pods, initialIds, onClose() {}, onChanged() { changes++; }, onSubmitted() { submitted++; }, onRetry() {}, onBack() {}, onSchedule() {}, onPause() {}, onEvents() {}, busy: false };
+  const props = { kind, pod: pod ?? undefined, pods, initialIds, verifiedRecoveryIds, onEvict, onClose() {}, onChanged() { changes++; }, onSubmitted() { submitted++; }, onRetry() {}, onBack() {}, onSchedule() {}, onPause() {}, onEvents() {}, busy: false };
   const render = () => { cursor = 0; const tree = Component(props); effects.splice(0).forEach(effect => effect()); return tree; };
   return { render, calls: () => calls, queries, inventoryCalls, invalidations, timers, preflightRequests, scheduleRequests, operationCalls, refetches, changed: () => changes, submitted: () => submitted,
     updateProps: values => Object.assign(props, values),
@@ -682,4 +683,161 @@ test('scale-in history exposes cancellation while starting or needing attention 
   }
   const tree = setup({ kind: 'history', historyItems: [{ id: 'migration', kind: 'migration', status: 'starting', items: [] }] }).render();
   assert.equal(button(tree, 'Stop further moves'), undefined);
+});
+
+
+test('unresolved observations cannot be selected for migration or evicted, including force', async () => {
+  for (const reconciliation_state of ['residual', 'conflict', 'unknown', 'consistent']) {
+    const unsafe = { ...source, reconciliation_state, slots: [{ index: 1, ready: true, instance_id: 25, expected_instance_id: 118, reconciliation_state, binding_confirmed: false }] };
+    const schedule = setup({ kind: 'schedule', pod: unsafe, pods: [unsafe, target], initialIds: [25] });
+    assert.equal(find(schedule.render(), node => node.type === 'input' && node.props.type === 'checkbox').length, 0);
+    assert.equal(button(schedule.render(), 'Validate target').props.disabled, true);
+    const evict = setup({ pod: unsafe, pods: [unsafe, target] });
+    input(evict.render(), 'radio', 'force').props.onChange(); acknowledge(evict);
+    assert.equal(button(evict.render(), 'Start eviction').props.disabled, true);
+    button(evict.render(), 'Start eviction').props.onClick(); await tick();
+    assert.equal(evict.calls(), 0);
+  }
+});
+
+test('slot details show observed and expected owners and explicit unknown without offering migration', () => {
+  const view = setup({ component: 'RuntimePodDetails', pod: { ...source, slots: [
+    { index: 1, ready: true, instance_id: 25, expected_instance_id: 118, reconciliation_state: 'conflict', binding_confirmed: false, observation_message: 'owner mismatch' },
+    { index: 2, ready: true, reconciliation_state: 'unknown', observation_message: 'observation expired' },
+  ] } });
+  const markup = renderToStaticMarkup(view.render());
+  assert.match(markup, /Reported instance.*#25/);
+  assert.match(markup, /Expected binding.*#118/);
+  assert.match(markup, /owner mismatch/);
+  assert.match(markup, /observation expired/);
+  assert.match(markup, /Unknown/);
+  assert.equal(button(view.render(), 'Manual scheduling'), undefined);
+  assert.equal(find(view.render(), node => node.type === 'input' && node.props.type === 'checkbox' && !node.props.disabled).length, 0);
+});
+
+
+test('recovery uses abnormal-only backend defaults without target capacity and preserves scope', async () => {
+  const pod = { ...source, agent_reported: false, reconciliation_state: 'conflict', used_slots: 1,
+    slots: [{ index: 1, ready: false, expected_instance_id: 17, reconciliation_state: 'conflict' }] };
+  const view = setup({ pod });
+  input(view.render(), 'radio', 'recovery').props.onChange();
+  acknowledge(view);
+  const tree = view.render();
+  assert.equal(button(tree, 'Start eviction').props.disabled, false);
+  assert.match(renderToStaticMarkup(tree), /Healthy neighboring slots and Pods/);
+  button(tree, 'Start eviction').props.onClick();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(JSON.parse(JSON.stringify(view.operationCalls)), [['evict', 41, { mode: 'recovery', instance_ids: [] }]]);
+});
+
+test('explicit recovery selection requires acknowledgement and sends exact known IDs', async () => {
+  const view = setup({ initialIds: [1] });
+  input(view.render(), 'radio', 'recovery').props.onChange();
+  assert.equal(button(view.render(), 'Start eviction').props.disabled, true);
+  acknowledge(view);
+  button(view.render(), 'Start eviction').props.onClick();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(JSON.parse(JSON.stringify(view.operationCalls[0][2])), { mode: 'recovery', instance_ids: [1] });
+});
+
+test('recovery refuses an unconfirmed physical occupant selected without a database binding', () => {
+  const pod = { ...source, slots: [{ index: 1, instance_id: 99, reconciliation_state: 'residual', binding_confirmed: false }] };
+  const view = setup({ pod, initialIds: [99] });
+  input(view.render(), 'radio', 'recovery').props.onChange();
+  acknowledge(view);
+  assert.equal(button(view.render(), 'Start eviction').props.disabled, true);
+});
+
+test('recovery history exposes persisted phase and underlying errors without claiming success', () => {
+  const view = setup({ kind: 'history', historyItems: [{ id: 'runtime_mgmt_recovery', kind: 'evict', status: 'needs_attention', items: [{ instance_id: 17, state: 'failed', recovery: { phase: 'isolating_source', scope: {} }, error_message: 'Node boot identity changed' }] }] });
+  const markup = renderToStaticMarkup(view.render());
+  assert.match(markup, /Recovery phase.*isolating_source/);
+  assert.match(markup, /Node boot identity changed/);
+  assert.ok(button(view.render(), 'Recheck and continue'));
+});
+
+test('recovery history offers cancel only before fencing and no terminal retry', () => {
+  for (const status of ['pending', 'processing', 'needs_attention', 'failed', 'partial_failure']) {
+    for (const phase of ['planned', 'fencing', 'stopping', 'source_stopped', 'released']) {
+      const view = setup({ kind: 'history', historyItems: [{ id: 'recovery', kind: 'eviction', status, items: [{ instance_id: 17, state: 'processing', recovery: { phase, scope: {} } }] }] });
+      const tree = view.render();
+      assert.equal(Boolean(button(tree, 'Stop further moves')), phase === 'planned' && ['pending', 'processing', 'needs_attention'].includes(status), `${status}/${phase} cancel`);
+      assert.equal(Boolean(button(tree, 'Recheck and continue')), ['processing', 'needs_attention'].includes(status), `${status}/${phase} retry`);
+    }
+  }
+});
+
+
+test('offline recovery accepts matching inspected binding IDs while rejecting unverified IDs', async () => {
+  const pod = { ...source, slots: [], agent_reported: false };
+  for (const verifiedRecoveryIds of [undefined, [156]]) {
+    const view = setup({ pod, initialIds: [156], verifiedRecoveryIds });
+    input(view.render(), 'radio', 'recovery').props.onChange();
+    acknowledge(view);
+    assert.equal(button(view.render(), 'Start eviction').props.disabled, !verifiedRecoveryIds);
+    if (verifiedRecoveryIds) {
+      button(view.render(), 'Start eviction').props.onClick();
+      await new Promise(resolve => setImmediate(resolve));
+      assert.deepEqual(JSON.parse(JSON.stringify(view.operationCalls[0][2])), { mode: 'recovery', instance_ids: [156] });
+    }
+  }
+});
+
+test('inspection grants recovery IDs only for the selected matching database binding', async () => {
+  for (const boundPod of [41, 42, undefined]) {
+    const calls = [];
+    const pod = { ...source, slots: [] };
+    const inspection = { instance_id: 156, generation: 4, status: 'error', pod, ...(boundPod ? { binding: { runtime_pod_id: boundPod, generation: 4, state: 'error', gateway_id: 'gw-156-4' } } : {}) };
+    const view = setup({ component: 'RuntimeRecoveryDialog', pod, inspection, onEvict: (...args) => calls.push(args) });
+    find(view.render(), node => node.type === 'input' && node.props.type === 'number')[0].props.onChange({ target: { value: '156' } });
+    find(view.render(), node => node.type === 'form')[0].props.onSubmit({ preventDefault() {} });
+    await new Promise(resolve => setImmediate(resolve));
+    button(view.render(), 'Fault recovery').props.onClick();
+    assert.equal(calls.length, 1);
+    assert.deepEqual(JSON.parse(JSON.stringify(calls[0].slice(1))), boundPod === 41 ? [[156], [156]] : [null, null]);
+  }
+});
+
+test('inspected offline source stays in recovery dialog after fresh inventory omits it', () => {
+  const view = setup({ component: 'RuntimePodsPage' });
+  button(view.render(), 'Recovery').props.onClick();
+  const recovery = find(view.render(), node => typeof node.props?.onEvict === 'function')[0];
+  assert.ok(recovery);
+  recovery.props.onEvict({ ...source, slots: [], agent_reported: false }, [156], [156]);
+  view.fullInventory([]);
+  const action = find(view.render(), node => node.props?.kind === 'evict')[0];
+  assert.ok(action, 'offline source recovery must remain open');
+  assert.equal(action.props.pod.id, source.id);
+  assert.deepEqual(action.props.verifiedRecoveryIds, [156]);
+});
+
+test('unknown orphan Pod retains a separate recovery entry while ordinary eviction stays blocked', () => {
+  const pod = { ...source, pod_uid: 'old-pod', used_slots: 1, bound_instances: 0, unknown_slots: 2, reconciliation_state: 'unknown', slots: [{ index: 1, ready: true, instance_id: 25, binding_confirmed: false, reconciliation_state: 'residual' }] };
+  const view = setup({ component: 'RuntimePodsPage', pods: [pod] });
+  assert.equal(button(view.render(), 'Evict instances').props.disabled, true);
+  const recovery = button(view.render(), 'Fault recovery');
+  assert.ok(recovery, 'recovery entry must remain discoverable');
+  assert.equal(Boolean(recovery.props.disabled), false);
+  recovery.props.onClick({ currentTarget: { closest: () => ({ hidePopover() {} }) } });
+  const dialog = find(view.render(), n => n.props?.kind === 'evict')[0];
+  assert.equal(dialog.props.initialEvictionMode, 'orphan-recovery');
+});
+
+test('orphan recovery requires explicit UID preflight and acknowledgement before submission', async () => {
+  const pod = { ...source, pod_uid: 'old-pod', bound_instances: 0, unknown_slots: 2, slots: [] };
+  const view = setup({ pod, pods: [pod] });
+  const radio = input(view.render(), 'radio', 'orphan-recovery');
+  assert.ok(radio, 'orphan recovery choice must be visible');
+  radio.props.onChange();
+  acknowledge(view);
+  assert.equal(button(view.render(), 'Start eviction').props.disabled, true);
+  button(view.render(), 'Check source').props.onClick();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(JSON.parse(JSON.stringify(view.preflightRequests.at(-1))), { instance_ids: [], target_pod_id: 0, mode: 'orphan-recovery', source_pod_id: source.id, source_pod_uid: 'old-pod' });
+  acknowledge(view);
+  assert.equal(button(view.render(), 'Start eviction').props.disabled, false);
+  button(view.render(), 'Start eviction').props.onClick();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(view.calls(), 1);
+  assert.match(renderToStaticMarkup(view.render()), /retire the selected old Pod/i);
 });

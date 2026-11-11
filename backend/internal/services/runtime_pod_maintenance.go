@@ -155,8 +155,29 @@ func runtimeMaintenanceEmptyReport(pod *models.RuntimePod, uid string, now time.
 	if pod.State != "ready" || pod.LastSeenAt == nil || now.Sub(*pod.LastSeenAt) > 2*time.Minute || pod.LastSeenAt.After(now.Add(time.Minute)) {
 		return fmt.Errorf("fresh healthy Runtime occupancy report required")
 	}
-	return nil
+	return models.ConfirmedEmptyRuntimeObservation(*pod, now)
 }
+
+// Maintenance sources are paused, so the ordinary candidate auditor skips them.
+// Run its exact-UID inspection explicitly after the admission fence, including
+// its assignment/quarantine checks; cached heartbeat counters are insufficient.
+func (s *RuntimeScheduler) refreshRuntimeDeletionObservation(ctx context.Context, id int64, uid string) error {
+	pod, err := s.podRepo.GetByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	if pod == nil || stringValue(pod.PodUID) != uid {
+		return fmt.Errorf("Runtime deletion source identity changed")
+	}
+	client, ok := s.agentClient.(*slotRuntimeAgentClient)
+	if !ok {
+		return fmt.Errorf("fresh physical Runtime inspection is unavailable; source remains protected")
+	}
+	scanCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	defer cancel()
+	return s.auditRuntimePodSlots(scanCtx, client, *pod)
+}
+
 func (s *RuntimePodMaintenanceService) Delete(ctx context.Context, id int64, uid string) error {
 	kube, err := s.maintenanceKube()
 	if err != nil {
@@ -225,6 +246,11 @@ func (s *RuntimePodMaintenanceService) deletePool(ctx context.Context, kube k8s.
 		unlock := s.scheduler.lockGatewayCreateForPod(id)
 		defer unlock()
 	}
+	if id > 0 {
+		if err := s.scheduler.refreshRuntimeDeletionObservation(ctx, id, podUID); err != nil {
+			return err
+		}
+	}
 	// Commit the controller fence with empty SQL admission and the pause. No
 	// Kubernetes RPC runs while this transaction owns the global admission row.
 	err = s.admissionTx(ctx, func(tx db.Session) error {
@@ -257,9 +283,33 @@ func (s *RuntimePodMaintenanceService) deletePool(ctx context.Context, kube k8s.
 			return fail(fmt.Errorf("selected Pod UID changed"))
 		}
 	}
+	if id > 0 {
+		if err = s.scheduler.refreshRuntimeDeletionObservation(ctx, id, podUID); err != nil {
+			return fail(err)
+		}
+	}
 	// A Pending Pod can register after the fence commits. Its new SQL row is
 	// excluded by controller name, so neither Resume nor a new claim can admit it.
-	if err = kube.DeleteManagedRuntimePool(ctx, namespace, name, deploymentUID); err != nil {
+	// Serialize the last physical observation and assignment check with every
+	// observation writer and admission attempt through the destructive RPC.
+	err = s.sess.TxContext(ctx, func(tx db.Session) error {
+		if id > 0 {
+			if err := repository.CheckRuntimePodEmptyObservation(ctx, tx, id, podUID); err != nil {
+				return err
+			}
+			assignments, ok := s.scheduler.deployments.(interface {
+				ConfirmRuntimeScaleInAssignmentsEmpty(context.Context, string, []k8s.RuntimePodScaleInIdentity) error
+			})
+			if !ok {
+				return fmt.Errorf("Runtime assignment inspection unavailable")
+			}
+			if err := assignments.ConfirmRuntimeScaleInAssignmentsEmpty(ctx, namespace, []k8s.RuntimePodScaleInIdentity{{PodName: pool.Pods[0].Name, PodUID: podUID}}); err != nil {
+				return err
+			}
+		}
+		return kube.DeleteManagedRuntimePool(ctx, namespace, name, deploymentUID)
+	}, nil)
+	if err != nil {
 		return fail(err)
 	}
 	return nil

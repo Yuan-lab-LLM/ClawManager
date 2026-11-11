@@ -44,6 +44,12 @@ func runtimePodSchedulable(pod runtimePoolPodListItem) bool {
 }
 
 func runtimeInventorySlotState(slot models.RuntimeSlot) string {
+	switch slot.ReconciliationState {
+	case "unknown":
+		return "unknown"
+	case "residual", "conflict":
+		return "error"
+	}
 	if !slot.Ready {
 		return "unavailable"
 	}
@@ -80,6 +86,9 @@ func runtimePodMatchesSearch(pod runtimePoolPodListItem, search string) bool {
 		if slot.InstanceID != nil {
 			fields = append(fields, strconv.Itoa(*slot.InstanceID))
 		}
+		if slot.ExpectedInstanceID != nil {
+			fields = append(fields, strconv.Itoa(*slot.ExpectedInstanceID))
+		}
 	}
 	for _, field := range fields {
 		if strings.Contains(strings.ToLower(field), search) {
@@ -91,7 +100,8 @@ func runtimePodMatchesSearch(pod runtimePoolPodListItem, search string) bool {
 
 func runtimePodPage(items []runtimePoolPodListItem, query runtimePodPageQuery, runtimeType string, now time.Time) gin.H {
 	summary := map[string]int{}
-	for _, key := range []string{"pods", "online", "schedulable", "capacity", "ready", "occupied", "available", "running", "starting", "migrating", "error", "idle", "unavailable"} {
+	bindingsKnown := true
+	for _, key := range []string{"pods", "online", "schedulable", "capacity", "ready", "occupied", "bound_instances", "available", "running", "starting", "migrating", "error", "idle", "unavailable", "unknown"} {
 		summary[key] = 0
 	}
 	nodeSet := map[string]bool{}
@@ -106,12 +116,17 @@ func runtimePodPage(items []runtimePoolPodListItem, query runtimePodPageQuery, r
 			summary["schedulable"]++
 		}
 		summary["capacity"] += pod.Capacity
+		if pod.BoundInstances != nil {
+			summary["bound_instances"] += *pod.BoundInstances
+		} else {
+			bindingsKnown = false
+		}
 		ready, bound, idle := 0, 0, 0
 		for _, slot := range pod.Slots {
 			if slot.Ready {
 				ready++
 			}
-			if slot.InstanceID != nil && *slot.InstanceID != 0 {
+			if slot.InstanceID != nil && *slot.InstanceID != 0 || slot.ExpectedInstanceID != nil && *slot.ExpectedInstanceID != 0 {
 				bound++
 			}
 			state := runtimeInventorySlotState(slot)
@@ -135,6 +150,9 @@ func runtimePodPage(items []runtimePoolPodListItem, query runtimePodPageQuery, r
 			continue
 		}
 		filtered = append(filtered, pod)
+	}
+	if !bindingsKnown {
+		delete(summary, "bound_instances")
 	}
 	sort.Slice(filtered, func(i, j int) bool {
 		a, b := filtered[i], filtered[j]

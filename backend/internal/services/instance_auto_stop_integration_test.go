@@ -167,3 +167,52 @@ func testAutoStopControllerFailureResume(t *testing.T, runtimeType string) {
 		t.Fatalf("slot not returned: %+v %v", p, err)
 	}
 }
+
+func TestAutoStopMySQLPollingInitializesAtStartupAndOnlyRescansWhenDue(t *testing.T) {
+	s := idleLifecycleDB(t)
+	store := repository.NewInstanceAutoStopRepository(s)
+	ctx := t.Context()
+	cfg, err := store.Settings(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Enabled = false
+	cfg, err = store.SaveSettings(ctx, *cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	insert := func(id int) {
+		t.Helper()
+		if _, err := s.SQL().Exec("INSERT INTO instances(id,user_id,type,runtime_type,instance_mode,status,runtime_generation) VALUES(?,7,'openclaw','gateway','lite','stopped',1)", id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	controller := &InstanceAutoStopService{store: store, lifecycle: &instanceService{}}
+	insert(99)
+	if err := controller.Tick(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if activity, err := store.GetActivity(ctx, 99); err != nil || activity == nil {
+		t.Fatalf("startup did not establish observation window: %+v %v", activity, err)
+	}
+	insert(100)
+	if err := controller.Tick(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if activity, err := store.GetActivity(ctx, 100); err != nil || activity != nil {
+		t.Fatalf("poll without due scan traversed all instances: %+v %v", activity, err)
+	}
+	cfg.Enabled = true
+	if _, err := store.SaveSettings(ctx, *cfg); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SQL().Exec("UPDATE instance_auto_stop_settings SET next_check_at=UTC_TIMESTAMP()-INTERVAL 1 SECOND"); err != nil {
+		t.Fatal(err)
+	}
+	if err := controller.Tick(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if activity, err := store.GetActivity(ctx, 100); err != nil || activity == nil {
+		t.Fatalf("due scan did not initialize newly observed instance: %+v %v", activity, err)
+	}
+}

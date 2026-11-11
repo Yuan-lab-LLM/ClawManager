@@ -2,12 +2,14 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"clawreef/internal/backupgate"
@@ -18,9 +20,16 @@ import (
 )
 
 type InstanceAutoStopService struct {
-	store     *repository.InstanceAutoStopRepository
-	lifecycle *instanceService
-	kube      kubernetes.Interface
+	initialized  atomic.Bool
+	store        *repository.InstanceAutoStopRepository
+	lifecycle    *instanceService
+	kube         kubernetes.Interface
+	appNamespace string
+	appPodName   string
+}
+
+func (s *InstanceAutoStopService) SetApplicationPodIdentity(namespace, podName string) {
+	s.appNamespace, s.appPodName = strings.TrimSpace(namespace), strings.TrimSpace(podName)
 }
 
 func NewInstanceAutoStopService(store *repository.InstanceAutoStopRepository, instances InstanceService, kube kubernetes.Interface) *InstanceAutoStopService {
@@ -32,10 +41,10 @@ func NewInstanceAutoStopService(store *repository.InstanceAutoStopRepository, in
 }
 func (s *InstanceAutoStopService) Run(ctx context.Context) {
 	if models.AutoStopTestTiming {
-		log.Print("automatic Lite stop: TEST BUILD; scan interval=1m, idle timeout=5m; rebuild without cm_idle_stop_test_timing for production")
+		log.Print("automatic Lite stop: TEST BUILD; legacy defaults: scan interval=1m, idle timeout=5m; explicitly configured seconds take precedence")
 	}
 	// Capacity deadlines are control-plane recovery, independent of the
-	// administrator's day-scale idle scan and potentially slow native stops.
+	// administrator's idle scan and potentially slow native stops.
 	deadlineCtx, deadlineCancel := context.WithCancel(ctx)
 	defer deadlineCancel()
 	go func() {
@@ -55,7 +64,7 @@ func (s *InstanceAutoStopService) Run(ctx context.Context) {
 			}
 		}
 	}()
-	tick := time.NewTicker(30 * time.Second)
+	tick := time.NewTicker(time.Second)
 	defer tick.Stop()
 	for {
 		if err := s.Tick(ctx); err != nil && ctx.Err() == nil {
@@ -77,8 +86,13 @@ func (s *InstanceAutoStopService) Tick(ctx context.Context) error {
 	if s.lifecycle == nil {
 		return fmt.Errorf("instance lifecycle unavailable")
 	}
-	if err = s.store.Initialize(ctx); err != nil {
-		return err
+	initializedNow := false
+	if !s.initialized.Load() {
+		if err = s.store.Initialize(ctx); err != nil {
+			return err
+		}
+		s.initialized.Store(true)
+		initializedNow = true
 	}
 	pending, err := s.store.PendingStops(ctx)
 	if err != nil {
@@ -113,9 +127,30 @@ func (s *InstanceAutoStopService) Tick(ctx context.Context) error {
 	if err != nil || cfg == nil {
 		return err
 	}
+	// Establish missing observation windows at startup and on due scans, rather
+	// than traversing every Lite instance during each one-second deadline poll.
+	if !initializedNow {
+		if err = s.store.Initialize(ctx); err != nil {
+			return err
+		}
+	}
+	var legacyCutoff *time.Time
+	var legacyProofErr error
+	legacy, err := s.store.HasLegacyModelActivities(ctx)
+	if err != nil {
+		return err
+	}
+	if legacy {
+		proofCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		legacyCutoff, legacyProofErr = modelActivityLegacyCutoff(proofCtx, s.kube, s.appNamespace, s.appPodName)
+		cancel()
+	}
+	if err = s.store.ReconcileModelActivities(ctx, legacyCutoff); err != nil {
+		return err
+	}
 	after := cfg.ScanCursor
 	for {
-		candidates, err := s.store.Candidates(ctx, time.Now().UTC(), cfg.IdleTimeoutDays, after, 100)
+		candidates, err := s.store.CandidatesForTimeout(ctx, time.Now().UTC(), cfg.IdleTimeout(), after, 100)
 		if err != nil {
 			return err
 		}
@@ -131,6 +166,9 @@ func (s *InstanceAutoStopService) Tick(ctx context.Context) error {
 				return ctx.Err()
 			}
 			if err = s.tryStop(ctx, *cfg, a); err != nil {
+				if errors.Is(err, models.ErrLegacyModelActivityUnverified) && legacyProofErr != nil {
+					err = fmt.Errorf("%w: %v", err, legacyProofErr)
+				}
 				_ = s.store.RecordBlocker(ctx, a.InstanceID, err.Error())
 			}
 			if err = s.store.CheckpointScan(ctx, *cfg, after); err != nil {
@@ -285,6 +323,15 @@ func (s *InstanceAutoStopService) resumeGuarded(ctx context.Context, op models.I
 	}
 	// The pending snapshot may predate another controller's successful receipt.
 	op.Phase = a.StopPhase
+	if op.Phase != "teardown_confirmed" {
+		if completed, recoveryErr := s.store.CompleteStopFromRecovery(ctx, op); recoveryErr != nil {
+			op.ErrorMessage = recoveryErr.Error()
+			_ = s.store.FailStop(ctx, op)
+			return
+		} else if completed {
+			return
+		}
+	}
 	if op.Kind == "manual" {
 		if err = s.lifecycle.resumeManualStop(ctx, op); err != nil {
 			op.ErrorMessage = err.Error()

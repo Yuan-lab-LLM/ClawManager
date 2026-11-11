@@ -7,6 +7,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -41,22 +43,45 @@ func scaleInMySQLFixture(t *testing.T) (db.Session, *RuntimeManagementService, *
 		t.Fatal(err)
 	}
 	p.ResourceVersion = "1"
+	p.Status.PodIP = "10.0.0.1"
 	_, _ = kube.CoreV1().Pods("runtime").Update(ctx, p, metav1.UpdateOptions{})
 	q := p.DeepCopy()
 	q.Name = "hermes-runtime-pod-2"
 	q.UID = "hermes-runtime-pod-2-uid"
+	q.Status.PodIP = "10.0.0.2"
 	_, err = kube.CoreV1().Pods("runtime").Create(ctx, q, metav1.CreateOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = sess.SQL().Exec("INSERT INTO runtime_pods(id,runtime_type,namespace,pod_name,pod_uid,deployment_name,image_ref,state,capacity,used_slots,last_seen_at,agent_endpoint) VALUES(2,'hermes','runtime',?,?,'hermes-runtime',?,'ready',8,0,?,'https://agent-2')", q.Name, string(q.UID), d.Spec.Template.Spec.Containers[0].Image, time.Now().UTC()); err != nil {
+	if _, err = sess.SQL().Exec("INSERT INTO runtime_pods(id,runtime_type,namespace,pod_name,pod_uid,deployment_name,image_ref,state,capacity,used_slots,last_seen_at,agent_endpoint) VALUES(2,'hermes','runtime',?,?,'hermes-runtime',?,'ready',8,0,?,'https://10.0.0.2')", q.Name, string(q.UID), d.Spec.Template.Spec.Containers[0].Image, time.Now().UTC()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = sess.SQL().Exec("UPDATE runtime_pods SET agent_endpoint='https://agent-1' WHERE id=1"); err != nil {
+	if _, err = sess.SQL().Exec("UPDATE runtime_pods SET agent_endpoint='https://10.0.0.1' WHERE id=1"); err != nil {
 		t.Fatal(err)
+	}
+	// Automatic reclamation consumes the same fresh facts as inventory. This
+	// fixture starts with two physically empty native Pods before each test adds
+	// any claims, stopped owners, or conflicting database state.
+	for index, physical := range []*corev1.Pod{p, q} {
+		observedAt := time.Now().UTC().Truncate(time.Microsecond)
+		observation := models.RuntimePodObservation{PodUID: string(physical.UID), ObservedAt: observedAt}
+		slots, err := runtimeAuditPhysicalSlots(physical, 8)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, slot := range slots {
+			observation.Slots = append(observation.Slots, models.RuntimeSlotObservation{ContainerName: slot.Name, GatewayPort: slot.Port, State: "free"})
+		}
+		data, err := json.Marshal(observation)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err = sess.SQL().Exec("UPDATE runtime_pods SET observation_json=?,observation_at=? WHERE id=?", string(data), observedAt, index+1); err != nil {
+			t.Fatal(err)
+		}
 	}
 	scheduler := maintenance.scheduler
-	scheduler.agentClient = &strictStopRuntimeAgent{fakeRuntimeAgentClient: &fakeRuntimeAgentClient{}, strict: true}
+	scheduler.agentClient = scaleInPhysicalAgent(t, kube, "free")
 	scheduler.heartbeatTimeout = time.Minute
 	service := NewRuntimeManagementService(sess, scheduler, repository.NewNorthboundRepository(sess))
 	kube.PrependReactor("delete", "pods", func(a ktesting.Action) (bool, runtime.Object, error) {
@@ -68,6 +93,41 @@ func scaleInMySQLFixture(t *testing.T) (db.Session, *RuntimeManagementService, *
 	})
 	return sess, service, kube
 }
+
+// The real native client verifies exact Kubernetes UIDs and fresh worker epochs;
+// only the HTTP worker boundary is simulated.
+func scaleInPhysicalAgent(t *testing.T, kube *fake.Clientset, state string) RuntimeAgentClient {
+	t.Helper()
+	return NewSlotRuntimeAgentClientWithHTTPClient("test", kube, "runtime", &http.Client{Transport: slotRoundTripper(func(r *http.Request) (*http.Response, error) {
+		uid := "hermes-runtime-pod-uid"
+		if r.URL.Hostname() == "10.0.0.2" {
+			uid = "hermes-runtime-pod-2-uid"
+		}
+		snapshot := auditFreeSnapshot()
+		snapshot["pod_uid"] = uid
+		if state == "unknown" {
+			return nil, errors.New("worker state unavailable")
+		}
+		if state == "quarantined" {
+			snapshot["quarantined"] = true
+		}
+		if state == "unknown-protocol" {
+			delete(snapshot, "worker_epoch")
+			delete(snapshot, "idle_confirmed")
+		}
+		if state == "missing" {
+			delete(snapshot, "idle_confirmed")
+		}
+		if state == "occupied" {
+			snapshot = auditOccupiedSnapshot("running")
+			snapshot["pod_uid"] = uid
+			snapshot["assignment"].(map[string]any)["pod_uid"] = uid
+		}
+		raw, _ := json.Marshal(snapshot)
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(string(raw)))}, nil
+	})})
+}
+
 func scaleInQueue(t *testing.T, service *RuntimeManagementService) *RuntimeManagementOperation {
 	t.Helper()
 	req := RuntimePodScaleInRequest{RuntimeType: "hermes", PodCount: 1}
@@ -355,5 +415,231 @@ func TestScaleInMySQLMoveFailurePreservesReplicas(t *testing.T) {
 	d, _ := kube.AppsV1().Deployments("runtime").Get(ctx, "hermes-runtime", metav1.GetOptions{})
 	if *d.Spec.Replicas != 2 || d.Labels["clawmanager.io/scale-in-operation"] != "" {
 		t.Fatal("failed move changed replicas or leaked guard")
+	}
+}
+
+func TestScaleInMySQLManualRejectsUnprovedPhysicalOccupancy(t *testing.T) {
+	for _, state := range []string{"missing", "unknown", "occupied"} {
+		t.Run(state, func(t *testing.T) {
+			sess, s, kube := scaleInMySQLFixture(t)
+			op := scaleInQueue(t, s)
+			s.scheduler.agentClient = scaleInPhysicalAgent(t, kube, state)
+			var observation models.RuntimePodObservation
+			pod, err := s.scheduler.podRepo.GetByID(context.Background(), 1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = json.Unmarshal([]byte(*pod.ObservationJSON), &observation); err != nil {
+				t.Fatal(err)
+			}
+			observation.Slots[0].State = state
+			raw, _ := json.Marshal(observation)
+			if state == "missing" {
+				raw = []byte("null")
+			}
+			if _, err = sess.SQL().Exec("UPDATE runtime_pods SET observation_json=? WHERE id=1", string(raw)); err != nil {
+				t.Fatal(err)
+			}
+			if err = s.Process(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			d, _ := kube.AppsV1().Deployments("runtime").Get(context.Background(), "hermes-runtime", metav1.GetOptions{})
+			if *d.Spec.Replicas != 2 {
+				t.Fatalf("manual scale-in %s deleted unproved occupied source", op.ID)
+			}
+		})
+	}
+}
+
+func TestScaleInMySQLSameOwnerResizingContinuesObservation(t *testing.T) {
+	sess, s, kube := scaleInMySQLFixture(t)
+	ctx := context.Background()
+	op := scaleInQueue(t, s)
+	if err := s.Process(ctx); err != nil {
+		t.Fatal(err)
+	}
+	_, journal := scaleInRead(t, s, op.ID)
+	journal.Phase = "resizing"
+	raw, _ := json.Marshal(journal)
+	if _, err := sess.SQL().Exec("UPDATE runtime_management_operations SET status='processing',owner_token=?,request_json=? WHERE id=?", s.token, string(raw), op.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := kube.Tracker().Delete(corev1.SchemeGroupVersion.WithResource("pods"), "runtime", "hermes-runtime-pod"); err != nil {
+		t.Fatal(err)
+	}
+	d, _ := kube.AppsV1().Deployments("runtime").Get(ctx, "hermes-runtime", metav1.GetOptions{})
+	d.Status.Replicas, d.Status.UpdatedReplicas, d.Status.ReadyReplicas = 1, 1, 1
+	if _, err := kube.AppsV1().Deployments("runtime").Update(ctx, d, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Process(ctx); err != nil {
+		t.Fatal(err)
+	}
+	current, _ := scaleInRead(t, s, op.ID)
+	if current.Status != "completed" {
+		t.Fatalf("same-owner post-PATCH journal never resumed: %+v", current)
+	}
+}
+
+func TestRuntimeManagementManualRetryMethod(t *testing.T) {
+	s := &RuntimeManagementService{}
+	if _, ok := any(s).(interface {
+		RetryOperation(context.Context, string) (*RuntimeManagementOperation, error)
+	}); !ok {
+		t.Fatal("administrator cannot request a safe phase-aware retry")
+	}
+}
+
+func TestScaleInMySQLLostPostPatchSaveResumesWithoutReplicaReplay(t *testing.T) {
+	sess, s, kube := scaleInMySQLFixture(t)
+	ctx := context.Background()
+	op := scaleInQueue(t, s)
+	if _, err := sess.SQL().Exec(`CREATE TRIGGER reject_observing BEFORE UPDATE ON runtime_management_operations FOR EACH ROW BEGIN IF JSON_UNQUOTE(JSON_EXTRACT(NEW.request_json,'$.phase'))='observing' THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='injected journal failure'; END IF; END`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Process(ctx); err == nil {
+		t.Fatal("failure injection did not reject the post-PATCH journal")
+	}
+	current, journal := scaleInRead(t, s, op.ID)
+	if current.Status != "processing" || journal.Phase != "resizing" {
+		t.Fatalf("unexpected durable crash window: %+v %s", current, journal.Phase)
+	}
+	if _, err := sess.SQL().Exec("DROP TRIGGER reject_observing"); err != nil {
+		t.Fatal(err)
+	}
+	patches := 0
+	for _, action := range kube.Actions() {
+		if action.GetVerb() == "patch" && action.GetResource().Resource == "deployments" && strings.Contains(string(action.(ktesting.PatchAction).GetPatch()), `"path":"/spec/replicas","value":1`) {
+			patches++
+		}
+	}
+	if err := kube.Tracker().Delete(corev1.SchemeGroupVersion.WithResource("pods"), "runtime", "hermes-runtime-pod"); err != nil {
+		t.Fatal(err)
+	}
+	d, _ := kube.AppsV1().Deployments("runtime").Get(ctx, "hermes-runtime", metav1.GetOptions{})
+	d.Status.Replicas, d.Status.UpdatedReplicas, d.Status.ReadyReplicas = 1, 1, 1
+	if _, err := kube.AppsV1().Deployments("runtime").Update(ctx, d, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	queued, err := s.RetryOperation(ctx, op.ID)
+	if err != nil || !queued.RetryRequested {
+		t.Fatalf("manual retry not queued: %+v %v", queued, err)
+	}
+	if err = s.Process(ctx); err != nil {
+		t.Fatal(err)
+	}
+	recovered, _ := scaleInRead(t, s, op.ID)
+	if recovered.Status != "completed" {
+		t.Fatalf("manual observation did not finish: %+v %v", recovered, err)
+	}
+	after := 0
+	for _, action := range kube.Actions() {
+		if action.GetVerb() == "patch" && action.GetResource().Resource == "deployments" && strings.Contains(string(action.(ktesting.PatchAction).GetPatch()), `"path":"/spec/replicas","value":1`) {
+			after++
+		}
+	}
+	// Cleanup can update controller labels, but it must never write replicas again.
+	if after != patches {
+		t.Fatalf("manual recovery replayed Deployment replica PATCH: before=%d after=%d", patches, after)
+	}
+}
+
+func TestRuntimeManagementManualRetryPreservesUncertainMove(t *testing.T) {
+	sess, s, agent := runtimeManagementMySQLMoveFixture(t)
+	ctx := context.Background()
+	plan, err := s.Preflight(ctx, RuntimeSchedulingRequest{InstanceIDs: []int{101}, TargetPodID: 2})
+	if err != nil || !plan.Allowed {
+		t.Fatalf("%+v %v", plan, err)
+	}
+	op, err := s.Submit(ctx, RuntimeSchedulingRequest{InstanceIDs: []int{101}, TargetPodID: 2}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	op.Items = plan.Items
+	for i := range op.Items {
+		op.Items[i].State = "processing"
+	}
+	raw, _ := json.Marshal(op.Items)
+	if _, err = sess.SQL().Exec("UPDATE runtime_management_operations SET status='needs_attention',items_json=? WHERE id=?", string(raw), op.ID); err != nil {
+		t.Fatal(err)
+	}
+	recovered, err := s.RetryOperation(ctx, op.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = s.Process(ctx); err != nil {
+		t.Fatal(err)
+	}
+	recovered, _, _, err = s.runtimeManagementOperation(ctx, op.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if recovered.Status != "needs_attention" || recovered.ErrorMessage == "" {
+		t.Fatalf("uncertain move falsely resolved: %+v", recovered)
+	}
+	if len(agent.deleteRequests) != 0 || len(agent.createRequests) != 0 {
+		t.Fatal("manual recheck replayed uncertain move")
+	}
+}
+
+func TestScaleInMySQLFinalProofVetoesObservationChangedAfterScan(t *testing.T) {
+	sess, s, kube := scaleInMySQLFixture(t)
+	op := scaleInQueue(t, s)
+	// The operation row transitions after the physical scan but before the RPC.
+	// Simulate a later unavailable observation at exactly that boundary.
+	if _, err := sess.SQL().Exec(`CREATE TRIGGER invalidate_scale_proof BEFORE UPDATE ON runtime_management_operations FOR EACH ROW BEGIN IF JSON_UNQUOTE(JSON_EXTRACT(NEW.request_json,'$.phase'))='resizing' THEN UPDATE runtime_pods SET observation_json=NULL,observation_at=NULL WHERE id=1; END IF; END`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Process(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	d, _ := kube.AppsV1().Deployments("runtime").Get(context.Background(), "hermes-runtime", metav1.GetOptions{})
+	if *d.Spec.Replicas != 2 {
+		t.Fatal("replica write ignored a physical proof invalidated after scan")
+	}
+	current, _ := scaleInRead(t, s, op.ID)
+	if current.Status != "failed" {
+		t.Fatalf("did not safely release an unexecuted resize: %+v", current)
+	}
+}
+
+type runtimeRetryTestLeader bool
+
+func (l *runtimeRetryTestLeader) IsLeader(context.Context) bool { return bool(*l) }
+func TestRuntimeManagementFollowerQueuesRetryWithoutWorkerTakeover(t *testing.T) {
+	sess, s, kube := scaleInMySQLFixture(t)
+	op := scaleInQueue(t, s)
+	if _, err := sess.SQL().Exec("UPDATE runtime_management_operations SET status='processing',owner_token='active-worker' WHERE id=?", op.ID); err != nil {
+		t.Fatal(err)
+	}
+	leader := runtimeRetryTestLeader(false)
+	s.scheduler.leader = &leader
+	actions := len(kube.Actions())
+	queued, err := s.RetryOperation(context.Background(), op.ID)
+	if err != nil {
+		t.Fatalf("follower cannot queue administrator fallback: %v", err)
+	}
+	if queued.Status != "processing" {
+		t.Fatalf("HTTP retry changed active worker phase: %+v", queued)
+	}
+	var owner, status string
+	var requested bool
+	row, _ := sess.SQL().QueryRow("SELECT owner_token,status,retry_requested FROM runtime_management_operations WHERE id=?", op.ID)
+	if err = row.Scan(&owner, &status, &requested); err != nil {
+		t.Fatal(err)
+	}
+	if owner != "active-worker" || status != "processing" || !requested || len(kube.Actions()) != actions {
+		t.Fatal("follower retry took over active work or failed to persist request")
+	}
+	leader = runtimeRetryTestLeader(true)
+	if err = s.Process(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	row, _ = sess.SQL().QueryRow("SELECT retry_requested FROM runtime_management_operations WHERE id=?", op.ID)
+	if err = row.Scan(&requested); err != nil {
+		t.Fatal(err)
+	}
+	if requested {
+		t.Fatal("elected scheduler did not consume queued administrator retry")
 	}
 }

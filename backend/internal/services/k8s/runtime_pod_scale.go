@@ -56,6 +56,7 @@ type RuntimePodScaleResult struct {
 
 // Server-side proof, resolved from the registered live Pod and committed rollout.
 type RuntimePodScaleTarget struct {
+	DeploymentUID                                           string // Optional immutable controller proof for a committed cold successor.
 	RuntimeType, Namespace, DeploymentName, PodName, PodUID string
 	IdlePool                                                bool // Internal only: permit ordinary custom pools for idle scale-in.
 	UpgradeID, SourceDeployment, ImageRef                   string
@@ -79,7 +80,7 @@ func (s *runtimeDeploymentService) InspectRuntimeScale(ctx context.Context, targ
 	if err != nil {
 		return nil, err
 	}
-	if d.Name != target.DeploymentName || d.Labels["clawmanager.io/runtime-type"] != target.RuntimeType || d.UID == "" || d.ResourceVersion == "" || d.Spec.Replicas == nil || *d.Spec.Replicas <= 0 || d.Spec.Paused {
+	if (target.DeploymentUID != "" && string(d.UID) != target.DeploymentUID) || d.Name != target.DeploymentName || d.Labels["clawmanager.io/runtime-type"] != target.RuntimeType || d.UID == "" || d.ResourceVersion == "" || d.Spec.Replicas == nil || *d.Spec.Replicas <= 0 || d.Spec.Paused {
 		return nil, fmt.Errorf("current default Deployment identity and positive serving replicas required")
 	}
 	for _, labels := range []map[string]string{d.Labels, d.Spec.Template.Labels, p.Labels} {

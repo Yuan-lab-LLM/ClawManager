@@ -252,6 +252,10 @@ func (s *runtimeDeploymentService) waitForUpgradeLabPoolGone(ctx context.Context
 }
 
 func (s *runtimeDeploymentService) EnsureUpgradePool(ctx context.Context, namespace, sourceName, targetName, image, upgradeID string) error {
+	return s.ensureUpgradePool(ctx, namespace, sourceName, targetName, image, upgradeID, nil)
+}
+
+func (s *runtimeDeploymentService) ensureUpgradePool(ctx context.Context, namespace, sourceName, targetName, image, upgradeID string, cold *runtimeColdClone) error {
 	if s == nil || s.client == nil {
 		return fmt.Errorf("k8s client not initialized")
 	}
@@ -263,6 +267,9 @@ func (s *runtimeDeploymentService) EnsureUpgradePool(ctx context.Context, namesp
 	}
 	deployments := s.client.AppsV1().Deployments(namespace)
 	if existing, err := deployments.Get(ctx, targetName, metav1.GetOptions{}); err == nil {
+		if cold != nil {
+			return s.verifyColdSuccessorTemplate(ctx, existing, cold.Source, cold.Hash, cold.Operation, upgradeID)
+		}
 		if runtimeContainerImage(existing.Spec.Template.Spec.Containers) != strings.TrimSpace(image) || existing.Labels["clawmanager.io/upgrade-id"] != upgradeID || existing.Labels["clawmanager.io/source-deployment"] != sourceName {
 			return fmt.Errorf("existing upgrade pool %s/%s does not match rollout", namespace, targetName)
 		}
@@ -274,9 +281,34 @@ func (s *runtimeDeploymentService) EnsureUpgradePool(ctx context.Context, namesp
 	if err != nil {
 		return fmt.Errorf("get source runtime deployment %s/%s: %w", namespace, sourceName, err)
 	}
+	if cold != nil {
+		actual, verifyErr := s.inspectRetiredRuntimePoolSnapshot(ctx, cold.Source, cold.Operation, source)
+		if verifyErr != nil {
+			return verifyErr
+		}
+		if actual != cold.Hash {
+			return fmt.Errorf("cold source changed before cloning")
+		}
+	}
+	target, err := buildUpgradeRuntimePool(source, namespace, sourceName, targetName, image, upgradeID, cold)
+	if err != nil {
+		return err
+	}
+	if _, err := deployments.Create(ctx, target, metav1.CreateOptions{}); err != nil {
+		return fmt.Errorf("create upgrade runtime pool %s/%s: %w", namespace, targetName, err)
+	}
+	return nil
+}
+
+func buildUpgradeRuntimePool(source *appsv1.Deployment, namespace, sourceName, targetName, image, upgradeID string, cold *runtimeColdClone) (*appsv1.Deployment, error) {
 	target := source.DeepCopy()
 	target.TypeMeta = metav1.TypeMeta{}
 	target.ObjectMeta = metav1.ObjectMeta{Name: targetName, Namespace: namespace, Labels: map[string]string{}}
+	if cold != nil {
+		one := int32(1)
+		target.Spec.Replicas = &one
+		target.Annotations = map[string]string{coldSourceUIDAnnotation: cold.Source.UID, coldSourceHashAnnotation: cold.Hash}
+	}
 	for key, value := range source.Labels {
 		target.Labels[key] = value
 	}
@@ -306,7 +338,7 @@ func (s *runtimeDeploymentService) EnsureUpgradePool(ctx context.Context, namesp
 		}
 	}
 	if containerIndex < 0 {
-		return fmt.Errorf("source runtime deployment %s/%s has no runtime container", namespace, sourceName)
+		return nil, fmt.Errorf("source runtime deployment %s/%s has no runtime container", namespace, sourceName)
 	}
 	container := &target.Spec.Template.Spec.Containers[containerIndex]
 	container.Image = strings.TrimSpace(image)
@@ -318,10 +350,7 @@ func (s *runtimeDeploymentService) EnsureUpgradePool(ctx context.Context, namesp
 	container.ReadinessProbe = &corev1.Probe{ProbeHandler: corev1.ProbeHandler{HTTPGet: &corev1.HTTPGetAction{Path: "/readyz", Port: intstr.FromString("agent"), Scheme: corev1.URISchemeHTTP}}, InitialDelaySeconds: 1, PeriodSeconds: 2, TimeoutSeconds: 1, FailureThreshold: 3, SuccessThreshold: 1}
 	setRuntimeSlotTLSReadiness(container)
 	syncRuntimeSlotImageAndIdentity(target, container)
-	if _, err := deployments.Create(ctx, target, metav1.CreateOptions{}); err != nil {
-		return fmt.Errorf("create upgrade runtime pool %s/%s: %w", namespace, targetName, err)
-	}
-	return nil
+	return target, nil
 }
 
 func (s *runtimeDeploymentService) SetUpgradePoolActive(ctx context.Context, namespace, sourceName, targetName, upgradeID string, active bool) error {

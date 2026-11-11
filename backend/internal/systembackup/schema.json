@@ -296,6 +296,44 @@
     ]
   },
   {
+    "name": "browser_origin_ports",
+    "columns": [
+      {
+        "name": "port",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "instance_id",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "identity_hash",
+        "type": "char(64)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "kind",
+        "type": "varchar(16)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "target",
+        "type": "varchar(512)",
+        "nullable": "YES",
+        "extra": ""
+      }
+    ],
+    "primary_key": [
+      "port"
+    ]
+  },
+  {
     "name": "chat_messages",
     "columns": [
       {
@@ -1537,6 +1575,18 @@
         "extra": ""
       },
       {
+        "name": "check_interval_seconds",
+        "type": "bigint unsigned",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "idle_timeout_seconds",
+        "type": "bigint unsigned",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
         "name": "version",
         "type": "bigint unsigned",
         "nullable": "NO",
@@ -2442,6 +2492,74 @@
     ],
     "primary_key": [
       "id"
+    ]
+  },
+  {
+    "name": "instance_runtime_recovery",
+    "columns": [
+      {
+        "name": "instance_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "attempts",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "next_retry_at",
+        "type": "datetime(6)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "reason",
+        "type": "text",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "healthy_since",
+        "type": "datetime(6)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "source_pod_id",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "source_gateway_port",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "generation",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "updated_at",
+        "type": "datetime(6)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "phase",
+        "type": "varchar(32)",
+        "nullable": "NO",
+        "extra": ""
+      }
+    ],
+    "primary_key": [
+      "instance_id"
     ]
   },
   {
@@ -5258,6 +5376,18 @@
         "name": "scheduling_paused",
         "type": "tinyint(1)",
         "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "observation_json",
+        "type": "json",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "observation_at",
+        "type": "datetime(6)",
+        "nullable": "YES",
         "extra": ""
       }
     ],

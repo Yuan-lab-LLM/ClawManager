@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { summarizePod, filterPods, slotState, availableTargets } from '../src/lib/runtimeManagement.ts';
+import { summarizePod, filterPods, slotState, availableTargets, canManageSlot, canEvictPod, recoveryInstanceIds, failedMoveRetrySelections } from '../src/lib/runtimeManagement.ts';
 
 const pod = { id: 1, runtime_type: 'opencode', namespace: 'runtime', deployment_name: 'code', pod_name: 'code-a', node_name: 'node-a', state: 'ready', agent_reported: true, capacity: 4, used_slots: 2, draining: false, slots: [
   { index: 1, ready: true, instance_id: 10, instance_name: 'builder', owner: 'alice', instance_state: 'running' },
@@ -10,7 +10,7 @@ const pod = { id: 1, runtime_type: 'opencode', namespace: 'runtime', deployment_
 ] };
 
 test('agent health remains independent from bound instance state', () => {
-  assert.deepEqual(summarizePod(pod), { capacity: 4, ready: 3, occupied: 2, available: 1, running: 1, starting: 0, migrating: 0, error: 1, idle: 1, unavailable: 1 });
+  assert.deepEqual(summarizePod(pod), { capacity: 4, ready: 3, occupied: 2, bound: undefined, residual: 0, available: 1, running: 1, starting: 0, migrating: 0, error: 1, idle: 1, unknown: 0, unavailable: 1 });
   assert.equal(slotState(pod.slots[1]), 'error');
   assert.equal(slotState({ ready: false, instance_id: 10, instance_state: 'running' }), 'unavailable');
 });
@@ -95,4 +95,96 @@ test('default and managed deployments are mutual candidates for every runtime, w
     assert.deepEqual(availableTargets([{ ...managed, scheduling_paused: true }], source), []);
     assert.deepEqual(availableTargets([{ ...managed, pool_role: 'upgrade-lab' }], source), []);
   }
+});
+
+
+test('explicit unknown observations never become idle or available, even with healthy containers', () => {
+  const slot = { index: 1, ready: true, reconciliation_state: 'unknown', binding_confirmed: false };
+  assert.equal(slotState(slot), 'unknown');
+  assert.equal(slotState({ ...slot, ready: false }), 'unknown');
+  const summary = summarizePod({ ...pod, capacity: 1, used_slots: 0, unknown_slots: 1, slots: [slot] });
+  assert.equal(summary.idle, 0);
+  assert.equal(summary.unknown, 1);
+  assert.equal(summary.available, 0);
+});
+
+test('observed Hermes25 without a SQL binding remains occupied and erroneous', () => {
+  const slot = { index: 1, ready: true, instance_id: 25, instance_state: 'running', reconciliation_state: 'residual', binding_confirmed: false };
+  assert.equal(slotState(slot), 'error');
+  const summary = summarizePod({ ...pod, capacity: 1, used_slots: 0, slots: [slot] });
+  assert.equal(summary.occupied, 1);
+  assert.equal(summary.error, 1);
+  assert.equal(summary.available, 0);
+  assert.equal(slotState({ ...slot, expected_instance_id: 118, reconciliation_state: 'conflict' }), 'error');
+});
+
+test('confirmed empty and bound observations retain their actual states', () => {
+  assert.equal(slotState({ ready: true, reconciliation_state: 'consistent' }), 'idle');
+  assert.equal(slotState({ ready: true, instance_id: 118, instance_state: 'running', reconciliation_state: 'consistent', binding_confirmed: true }), 'running');
+});
+
+
+test('only confirmed bindings authorize owner actions while legacy payloads remain compatible', () => {
+  const confirmed = { index: 1, ready: true, instance_id: 118, instance_state: 'running', reconciliation_state: 'consistent', binding_confirmed: true };
+  assert.equal(canManageSlot(confirmed), true);
+  assert.equal(canEvictPod({ ...pod, used_slots: 1, reconciliation_state: 'consistent', slots: [confirmed] }), true);
+  assert.equal(canManageSlot({ ...confirmed, reconciliation_state: undefined, binding_confirmed: undefined }), true);
+  for (const reconciliation_state of ['residual', 'conflict', 'unknown']) {
+    assert.equal(canManageSlot({ ...confirmed, reconciliation_state }), false);
+    assert.equal(canEvictPod({ ...pod, used_slots: 1, slots: [confirmed, { index: 2, ready: true, reconciliation_state }] }), false);
+  }
+  assert.equal(canManageSlot({ ...confirmed, binding_confirmed: false }), false);
+  assert.equal(canEvictPod({ ...pod, used_slots: 1, unknown_slots: 1, slots: [confirmed] }), false);
+});
+
+test('a confirmed empty slot remains available beside unknown or residual observations', () => {
+  const slots = [
+    { index: 1, ready: true, reconciliation_state: 'consistent' },
+    { index: 2, ready: true, reconciliation_state: 'unknown' },
+    { index: 3, ready: true, instance_id: 25, reconciliation_state: 'residual' },
+  ];
+  const summary = summarizePod({ ...pod, used_slots: 0, reconciliation_state: 'unknown', capacity: 3, slots });
+  assert.equal(summary.available, 1);
+  assert.equal(summary.idle, 1);
+  assert.equal(summary.unknown, 1);
+  assert.equal(summary.error, 1);
+});
+
+
+test('recovery scope uses database expected owners and rejects unconfirmed physical occupants', () => {
+  assert.deepEqual(recoveryInstanceIds({ slots: [
+    { instance_id: 10, instance_state: 'running', binding_confirmed: true },
+    { instance_id: 99, expected_instance_id: 11, reconciliation_state: 'conflict' },
+    { instance_id: 12, reconciliation_state: 'residual', binding_confirmed: false },
+    { expected_instance_id: 13, ready: false },
+  ] }), [10, 11, 13]);
+  assert.deepEqual(recoveryInstanceIds({}), []);
+});
+
+test('SQL binding count is separate from unconfirmed residual owners', () => {
+ const summary=summarizePod({...pod,bound_instances:0,used_slots:2,slots:[{ready:true,index:1,instance_id:25,reconciliation_state:'residual',binding_confirmed:false},{ready:true,index:2,instance_id:161,reconciliation_state:'unknown',binding_confirmed:false}]});
+ assert.equal(summary.bound,0);
+ assert.equal(summary.residual,2);
+ assert.equal(summary.occupied,2);
+ assert.equal(summary.available,0);
+});
+
+
+test('failed move retry resolves only the original reserved empty slot without granting ordinary management', () => {
+  const slot = { index: 1, ready: true, reconciliation_state: 'conflict', binding_confirmed: false, expected_instance_id: 101 };
+  const source = { ...pod, pod_uid: 'source-uid', agent_reported: true, bindings_reported: true, slots: [slot] };
+  const operation = { id: 'failed-move', kind: 'migration', status: 'failed', items: [{ instance_id: 101, source_pod_id: 1, source_pod_uid: 'source-uid', source_generation: 2, source_gateway_id: 'gw-101-2', state: 'failed' }] };
+  const [selection] = failedMoveRetrySelections([source], operation);
+  assert.equal(selection.slot.instance_id, 101);
+  assert.equal(selection.slot.generation, 2);
+  assert.equal(selection.slot.gateway_id, 'gw-101-2');
+  assert.equal(canManageSlot(slot), false);
+  assert.equal(canManageSlot(selection.slot), false);
+  assert.equal(source.slots[0].instance_id, undefined, 'retry must not alter inventory');
+  assert.deepEqual(failedMoveRetrySelections([source], undefined), []);
+  for (const extra of [{ status: 'completed' }, { kind: 'scale_in' }]) assert.deepEqual(failedMoveRetrySelections([source], { ...operation, ...extra }), []);
+  for (const extra of [{ pod_uid: 'replacement' }, { bindings_reported: false }, { slots: [{ ...slot, expected_instance_id: 102 }] }, { slots: [{ ...slot, instance_id: 102 }] }, { slots: [{ ...slot, reconciliation_state: 'unknown' }] }]) {
+    assert.deepEqual(failedMoveRetrySelections([{ ...source, ...extra }], operation), []);
+  }
+  for (const extra of [{ source_gateway_id: 'gw-101-9' }, { state: 'completed' }, { recovery: {} }, { orphan_recovery: {} }]) assert.deepEqual(failedMoveRetrySelections([source], { ...operation, items: [{ ...operation.items[0], ...extra }] }), []);
 });

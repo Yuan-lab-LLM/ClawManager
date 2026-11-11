@@ -10,6 +10,9 @@ import type { RuntimePod, RuntimePodSummary } from "../../types/runtimePool";
 import {
   isSchedulable,
   canManageScheduling,
+  canManageSlot,
+  canEvictPod,
+  recoveryInstanceIds,
   runtimeError,
   summarizePod,
   formatCPU,
@@ -17,6 +20,7 @@ import {
 } from "../../lib/runtimeManagement";
 import RuntimePodDetails from "./RuntimePodDetails";
 import RuntimeActions from "./RuntimeActions";
+import RuntimeRecoveryDialog from "./RuntimeRecoveryDialog";
 import RuntimeMaintenanceDialog from "./RuntimeMaintenanceDialog";
 import RuntimeBalanceDialog from "./RuntimeBalanceDialog";
 import RuntimeAutoStopDialog from "./RuntimeAutoStopDialog";
@@ -33,15 +37,17 @@ import {
 import "../../styles/runtime-pods.css";
 
 type Dialog = {
-  kind: "schedule" | "evict" | "events" | "history" | "maintenance" | "balance" | "auto-stop";
+  kind: "schedule" | "evict" | "events" | "history" | "maintenance" | "balance" | "auto-stop" | "recovery";
   pod?: RuntimePod;
   ids?: number[];
+  evictionMode?: "recovery" | "orphan-recovery";
+  verifiedRecoveryIds?: number[];
   retryOperationId?: string;
 };
 const types = ["all", "openclaw", "hermes", "opencode", "deepseek-harness"];
 const emptySummary: RuntimePodSummary = {
   pods: 0, online: 0, schedulable: 0, capacity: 0, ready: 0, occupied: 0,
-  available: 0, running: 0, starting: 0, migrating: 0, error: 0, idle: 0, unavailable: 0,
+  available: 0, running: 0, starting: 0, migrating: 0, error: 0, idle: 0, unknown: 0, unavailable: 0,
 };
 
 export default function RuntimePodsPage() {
@@ -89,6 +95,7 @@ export default function RuntimePodsPage() {
     enabled: !selectedPod,
     placeholderData: keepPreviousData,
     refetchInterval: 3000,
+    refetchIntervalInBackground: true,
     refetchOnWindowFocus: "always",
     refetchOnReconnect: "always",
   });
@@ -98,6 +105,7 @@ export default function RuntimePodsPage() {
     queryFn: ({ signal }) => runtimePoolService.listPods(undefined, signal),
     enabled: needsFullInventory,
     refetchInterval: 3000,
+    refetchIntervalInBackground: true,
     refetchOnWindowFocus: "always",
     refetchOnReconnect: "always",
   });
@@ -113,6 +121,9 @@ export default function RuntimePodsPage() {
     if (refreshTimer.current !== null) clearTimeout(refreshTimer.current);
   }, []);
   const { isConnected } = useRuntimeAdminWebSocket(refresh);
+  useEffect(() => {
+    if (isConnected) refresh();
+  }, [isConnected, refresh]);
   const pods = query.data?.pods ?? [];
   const summary = query.data?.summary ?? emptySummary;
   const pages = Math.max(1, query.data?.pagination.total_pages ?? 1);
@@ -129,7 +140,7 @@ export default function RuntimePodsPage() {
   if (selectedPod && inventoryConfirmed && !activePod) setSelectedPod(null);
   const dialogPod = dialog?.pod && (
     actionPods.find((pod) => pod.id === dialog.pod!.id) ??
-    (inventoryConfirmed ? undefined : dialog.pod)
+    (dialog.evictionMode === "recovery" && dialog.verifiedRecoveryIds?.length ? dialog.pod : inventoryConfirmed ? undefined : dialog.pod)
   );
   if (dialog?.pod && inventoryConfirmed && !dialogPod) setDialog(null);
   const selectRuntimePod = (pod: RuntimePod) => setSelectedPod(pod);
@@ -171,6 +182,7 @@ export default function RuntimePodsPage() {
         "migrating",
         "error",
         "idle",
+        "unknown",
         "unavailable",
       ] as const
     )
@@ -201,6 +213,7 @@ export default function RuntimePodsPage() {
             pod={activePod}
             onBack={() => setSelectedPod(null)}
             onSchedule={(ids) => openSchedule(activePod, ids)}
+            onRecovery={(ids) => setDialog({ kind: "evict", pod: activePod, ids, evictionMode: ids?.length || recoveryInstanceIds(activePod).length ? "recovery" : "orphan-recovery" })}
             onPause={() => void toggleScheduling(activePod)}
             onEvents={() => setDialog({ kind: "events", pod: activePod })}
             busy={busyPod === activePod.id}
@@ -218,6 +231,7 @@ export default function RuntimePodsPage() {
                 ))}
               </div>
               <div className="runtime-toolbar-actions flex-wrap">
+ <button type="button" className={`${buttonClass} !px-2 !py-1.5`} onClick={() => setDialog({ kind: "recovery" })}>{t("runtimePods.recoveryTitle")}</button>
                 <button type="button" className={`${buttonClass} !px-2 !py-1.5`} onClick={() => setDialog({ kind: "auto-stop" })}>{t("autoStop.title")}</button>
                 <button type="button" className={`${buttonClass} !px-2 !py-1.5`} onClick={() => setDialog({ kind: "maintenance" })}>{t("runtimePods.maintenance")}</button>
                 <button type="button" className={`${buttonClass} !px-2 !py-1.5`} onClick={() => setDialog({ kind: "balance" })}>{t("runtimePods.balance")}</button>
@@ -231,7 +245,7 @@ export default function RuntimePodsPage() {
                 <button
                   type="button"
                   className={`${primaryClass} !px-2 !py-1.5`}
-                  disabled={!summary.occupied}
+                  disabled={!(summary.bound_instances ?? summary.occupied)}
                   onClick={() => openSchedule()}
                 >
                   {t("runtimePods.batch")}
@@ -249,20 +263,20 @@ export default function RuntimePodsPage() {
                 compact
                 label={t("runtimePods.agentReady")}
                 value={`${summary.ready} / ${summary.capacity}`}
-                detail={`${t("runtimePods.ready")} ${summary.ready} · ${t("runtimePods.unavailable")} ${summary.unavailable}`}
-                warning={summary.unavailable > 0}
+                detail={`${t("runtimePods.ready")} ${summary.ready} · ${t("runtimePods.unavailable")} ${summary.unavailable} · ${t("runtimePods.unknown")} ${summary.unknown ?? 0}`}
+                warning={summary.unavailable > 0 || (summary.unknown ?? 0) > 0}
               />
               <Metric
                 compact
-                label={t("runtimePods.occupied")}
-                value={`${summary.occupied} / ${summary.capacity}`}
+                label={t(summary.bound_instances === undefined ? "runtimePods.cardReported" : "runtimePods.occupied")}
+                value={`${summary.bound_instances ?? summary.occupied} / ${summary.capacity}`}
                 detail={`${summary.running} ${t("runtimePods.running")} · ${summary.starting} ${t("runtimePods.starting")} · ${summary.migrating} ${t("runtimePods.migrating")} · ${summary.error} ${t("runtimePods.error")}`}
               />
               <Metric
                 compact
                 label={t("runtimePods.incoming")}
                 value={summary.available}
-                detail={`${t("runtimePods.idle")} ${summary.idle} · ${t("runtimePods.unavailable")} ${summary.unavailable}`}
+                detail={`${t("runtimePods.idle")} ${summary.idle} · ${t("runtimePods.unknown")} ${summary.unknown ?? 0}`}
               />
             </div>
             <div className="runtime-filters">
@@ -358,6 +372,7 @@ export default function RuntimePodsPage() {
                   const warning =
                     summary.unavailable > 0 ||
                     summary.error > 0 ||
+                    summary.unknown > 0 ||
                     !isSchedulable(pod);
                   const canOperate = pod.id > 0 && pod.agent_reported !== false;
                   return (
@@ -387,8 +402,10 @@ export default function RuntimePodsPage() {
                       </p>
                       <SlotGrid compact pod={pod} onSelect={() => selectRuntimePod(pod)} />
                       <div className="runtime-card-actions" onClick={event => event.stopPropagation()}>
-                        <span className="mr-auto min-w-0 truncate tabular-nums text-slate-600" title={`Agent ${summary.ready}/${pod.capacity} · ${stateCounts(pod)}`}>
-                          {t("runtimePods.cardUsed")} {summary.occupied}/{pod.capacity} · {t("runtimePods.cardFree")} {summary.available}
+                        <span className="mr-auto min-w-0 text-xs leading-5 tabular-nums text-slate-600" title={`Agent ${summary.ready}/${pod.capacity} · ${stateCounts(pod)}`}>
+                          {t(summary.bound === undefined ? "runtimePods.cardReported" : "runtimePods.cardBound")} {summary.bound ?? summary.occupied}/{pod.capacity} · {t("runtimePods.cardFree")} {summary.available}
+                          {summary.residual > 0 && ` · ${t("runtimePods.cardResidual")} ${summary.residual}`}
+                          {summary.unknown > 0 && ` · ${t("runtimePods.unknown")} ${summary.unknown}`}
                         </span>
                         <button type="button" className="shrink-0 text-slate-600 hover:text-slate-950" aria-label={t("runtimePods.viewAgents", { count: pod.capacity })} title={t("runtimePods.viewAgents", { count: pod.capacity })} onClick={() => selectRuntimePod(pod)}>{t("runtimePods.cardView")}</button>
                         <button type="button" className="runtime-card-menu-trigger" popoverTarget={`runtime-actions-${pod.namespace}-${pod.pod_name}`} aria-label={t("runtimePods.cardActions")} onClick={event => {
@@ -397,9 +414,10 @@ export default function RuntimePodsPage() {
                         }}>{t("runtimePods.cardActions")} ▾</button>
                         <div id={`runtime-actions-${pod.namespace}-${pod.pod_name}`} popover="auto" className="runtime-card-popover" style={menuPosition}>
                           <button type="button" disabled={!canOperate} onClick={event => { event.currentTarget.closest<HTMLElement>("[popover]")?.hidePopover(); setDialog({ kind: "events", pod }); }}>{t("runtimePods.events")}</button>
-                          <button type="button" className="text-red-600" disabled={!canOperate || !summary.occupied} onClick={event => { event.currentTarget.closest<HTMLElement>("[popover]")?.hidePopover(); setDialog({ kind: "evict", pod }); }}>{t("runtimePods.evict")}</button>
+                          <button type="button" disabled={pod.id <= 0 || !pod.pod_uid} onClick={event => { event.currentTarget.closest<HTMLElement>("[popover]")?.hidePopover(); setDialog({ kind: "evict", pod, evictionMode: recoveryInstanceIds(pod).length ? "recovery" : "orphan-recovery" }); }}>{t("runtimePods.faultRecovery")}</button>
+                          <button type="button" className="text-red-600" disabled={!canEvictPod(pod)} onClick={event => { event.currentTarget.closest<HTMLElement>("[popover]")?.hidePopover(); setDialog({ kind: "evict", pod }); }}>{t("runtimePods.evict")}</button>
                           <button type="button" disabled={!canManageScheduling(pod) || busyPod === pod.id} onClick={event => { event.currentTarget.closest<HTMLElement>("[popover]")?.hidePopover(); void toggleScheduling(pod); }}>{t(`runtimePods.${paused ? "resume" : "pause"}`)}</button>
-                          <button type="button" disabled={!canOperate || !summary.occupied} onClick={event => { event.currentTarget.closest<HTMLElement>("[popover]")?.hidePopover(); openSchedule(pod); }}>{t("runtimePods.manual")}</button>
+                          <button type="button" disabled={!canOperate || !pod.slots?.some(canManageSlot)} onClick={event => { event.currentTarget.closest<HTMLElement>("[popover]")?.hidePopover(); openSchedule(pod); }}>{t("runtimePods.manual")}</button>
                         </div>
                       </div>
                     </article>
@@ -437,7 +455,9 @@ export default function RuntimePodsPage() {
             </div>
           </>
         )}
-        {dialog?.kind === "auto-stop" ? (
+        {dialog?.kind === "recovery" ? (
+ <RuntimeRecoveryDialog pods={actionPods} onEvict={(pod, ids, verifiedRecoveryIds) => setDialog({ kind: "evict", pod, ids, verifiedRecoveryIds, evictionMode: "recovery" })} onClose={() => setDialog(null)} onChanged={refresh} />
+ ) : dialog?.kind === "auto-stop" ? (
           <RuntimeAutoStopDialog onClose={() => setDialog(null)} />
         ) : dialog?.kind === "maintenance" ? (
           <RuntimeMaintenanceDialog onClose={() => setDialog(null)} onChanged={refresh} onViewScheduling={() => setDialog({ kind: "history" })} />
@@ -453,6 +473,8 @@ export default function RuntimePodsPage() {
             kind={dialog.kind}
             pod={dialogPod}
             initialIds={dialog.ids}
+            verifiedRecoveryIds={dialog.verifiedRecoveryIds}
+            initialEvictionMode={dialog.evictionMode}
             retryOperationId={dialog.retryOperationId}
             pods={actionPods}
             onClose={() => setDialog(null)}

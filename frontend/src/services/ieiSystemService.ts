@@ -1,3 +1,4 @@
+import type { BrowserOriginMetadata } from "../lib/browserOrigin";
 import axios from "axios";
 import type { WorkspaceFileOperations } from "../components/WorkspaceFileManager";
 import type { WorkspaceEntry, WorkspacePreview, WorkspaceSearchResponse } from "../types/workspace";
@@ -53,7 +54,7 @@ export interface IEISystemInstanceList {
   limit: number;
 }
 
-export interface IEISystemInstanceAccess {
+export interface IEISystemInstanceAccess extends BrowserOriginMetadata {
   access_url: string;
   expires_at: string;
   desktop_proxy_mode?: "control-plane" | "fallback" | "direct";

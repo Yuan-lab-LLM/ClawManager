@@ -264,3 +264,37 @@ test("automatic stop conflicts and mutation network failures propagate without r
     }
   }
 });
+
+test('manual recovery preserves exact generation and Pod UID without retrying mutations', async () => {
+  const calls = [];
+  const api = Object.fromEntries(['get', 'post'].map(method => [method, async (...args) => { calls.push([method, ...args]); return { data: { data: result } }; }]));
+  const service = loadService(api);
+  await service.inspectInstanceRecovery(7);
+  await service.retryInstanceRecovery(7, 3);
+  await service.recheckPod(9, 'exact-uid');
+  await service.retryOperation('operation/1');
+  assert.deepEqual(JSON.parse(JSON.stringify(calls)), [
+    ['get', '/admin/instances/7/runtime-recovery'],
+    ['post', '/admin/instances/7/runtime-recovery', { generation: 3 }],
+    ['post', '/admin/runtime-pods/9/recheck', { pod_uid: 'exact-uid' }],
+    ['post', '/admin/runtime-scheduling/operation%2F1/retry'],
+  ]);
+  for (const invoke of [
+    s => s.retryInstanceRecovery(7, 3), s => s.recheckPod(9, 'exact-uid'), s => s.retryOperation('op'),
+  ]) {
+    const { service: failing, calls: failed } = setup([new Error('network response lost')]);
+    await assert.rejects(() => invoke(failing), /network response lost/);
+    assert.equal(failed.length, 1);
+  }
+});
+
+
+test('fault recovery keeps the existing eviction endpoint and exact instance scope', async () => {
+  const calls = [];
+  const service = loadService({ post: async (...args) => { calls.push(args); return { data: { data: result } }; } });
+  for (const body of [{ mode: 'recovery', instance_ids: [17] }, { mode: 'recovery', instance_ids: [] }, { mode: 'recovery' }]) {
+    assert.equal(await service.evict(41, body), result);
+    assert.equal(calls.at(-1)[0], '/admin/runtime-pods/41/evict');
+    assert.equal(calls.at(-1)[1], body);
+  }
+});

@@ -32,13 +32,14 @@ type runtimeSecurityInstanceSource interface {
 // ConfigMap desired owner and the live protected Pod to agree. Losing one source
 // never permits falling back to a long-lived instance token.
 type RuntimeSecurityAuthority struct {
-	kube         kubernetes.Interface
-	namespace    string
-	instances    runtimeSecurityInstanceSource
-	capabilities *runtimeauth.Service
-	key          []byte
-	assignments  RuntimeSecurityAssignmentSource
-	teamNetwork  func(context.Context, *models.Instance) error
+	validationScheduler *RuntimeScheduler
+	kube                kubernetes.Interface
+	namespace           string
+	instances           runtimeSecurityInstanceSource
+	capabilities        *runtimeauth.Service
+	key                 []byte
+	assignments         RuntimeSecurityAssignmentSource
+	teamNetwork         func(context.Context, *models.Instance) error
 }
 
 type RuntimeSecurityAssignmentSource interface {

@@ -28,6 +28,7 @@ import { useI18n } from "../contexts/I18nContext";
 import { interpolate, translate, type Locale } from "../lib/i18n";
 import { workspaceService } from "../services/workspaceService";
 import type { WorkspaceEntry, WorkspacePreview, WorkspaceSearchResponse } from "../types/workspace";
+import type { WorkspaceFileView } from "./workbench/state";
 
 interface WorkspaceFileManagerProps {
   instanceId: number;
@@ -40,6 +41,8 @@ interface WorkspaceFileManagerProps {
   localeOverride?: Locale;
   onSelectDirectory?: (path: string) => void | Promise<void>;
   selectingDirectory?: boolean;
+  view?: WorkspaceFileView;
+  onViewChange?: (view: WorkspaceFileView) => void;
 }
 
 export interface WorkspaceFileOperations {
@@ -326,6 +329,8 @@ export function WorkspaceFileManager({
   localeOverride,
   onSelectDirectory,
   selectingDirectory = false,
+  view,
+  onViewChange,
 }: WorkspaceFileManagerProps) {
   const { locale, t } = useI18n();
   const effectiveLocale = localeOverride ?? locale;
@@ -341,9 +346,9 @@ export function WorkspaceFileManager({
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
   const folderUploadInputRef = useRef<HTMLInputElement | null>(null);
   const uploadMenuRef = useRef<HTMLDivElement | null>(null);
-  const [currentPath, setCurrentPath] = useState(() => normalizeWorkspacePath(initialPath));
-  const [previewPath, setPreviewPath] = useState<string | null>(null);
-  const [editPath, setEditPath] = useState<string | null>(null);
+  const [currentPath, setCurrentPath] = useState(() => normalizeWorkspacePath(view?.currentPath ?? initialPath));
+  const [previewPath, setPreviewPath] = useState<string | null>(view?.previewPath ?? null);
+  const [editPath, setEditPath] = useState<string | null>(view?.editPath ?? null);
   const canEditEntry = (entry: WorkspaceEntry) => Boolean(service.readText && service.saveText && !entry.is_dir && entry.size <= 1024*1024 && editableWorkspaceName(entry.name));
   const previewObjectUrlRef = useRef<string | null>(null);
   const [previewObjectUrl, setPreviewObjectUrl] = useState<string | null>(null);
@@ -351,15 +356,18 @@ export function WorkspaceFileManager({
   const [error, setError] = useState<string | null>(null);
   const [uploadStatus, setUploadStatus] = useState<string | null>(null);
   const [uploadMenuOpen, setUploadMenuOpen] = useState(false);
-  const [pageIndex, setPageIndex] = useState(0);
-  const [sortColumn, setSortColumn] = useState<WorkspaceSortColumn>("name");
-  const [sortDirection, setSortDirection] = useState<WorkspaceSortDirection>("asc");
-  const [expanded, setExpanded] = useState(false);
-  const [searchOpen, setSearchOpen] = useState(false);
-  const [searchInput, setSearchInput] = useState("");
-  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
+  const [pageIndex, setPageIndex] = useState(view?.pageIndex ?? 0);
+  const [sortColumn, setSortColumn] = useState<WorkspaceSortColumn>(view?.sortColumn ?? "name");
+  const [sortDirection, setSortDirection] = useState<WorkspaceSortDirection>(view?.sortDirection ?? "asc");
+  const [expanded, setExpanded] = useState(view?.expanded ?? false);
+  const [searchOpen, setSearchOpen] = useState(view?.searchOpen ?? false);
+  const [searchInput, setSearchInput] = useState(view?.searchInput ?? "");
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState(view?.searchOpen ? view.searchInput.trim() : "");
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const workspaceLabel = translateLabel("workspaceFileManager.workspace");
+  useEffect(() => {
+    onViewChange?.({ currentPath, previewPath, editPath, pageIndex, sortColumn, sortDirection, expanded, searchOpen, searchInput });
+  }, [onViewChange, currentPath, previewPath, editPath, pageIndex, sortColumn, sortDirection, expanded, searchOpen, searchInput]);
 
   const exitSearch = useCallback(() => {
     setSearchOpen(false);
@@ -368,7 +376,10 @@ export function WorkspaceFileManager({
     setPageIndex(0);
   }, []);
 
+  const currentRoot = useRef({ cacheKey, initialPath });
   useEffect(() => {
+    if (currentRoot.current.cacheKey === cacheKey && currentRoot.current.initialPath === initialPath) return;
+    currentRoot.current = { cacheKey, initialPath };
     setCurrentPath(normalizeWorkspacePath(initialPath));
     setPreviewPath(null);
     setEditPath(null);
@@ -452,7 +463,10 @@ export function WorkspaceFileManager({
   });
 
   // Search term changes and search toggles restart pagination from page 1.
+  const currentSearch = useRef({ debouncedSearchQuery, isSearchActive });
   useEffect(() => {
+    if (currentSearch.current.debouncedSearchQuery === debouncedSearchQuery && currentSearch.current.isSearchActive === isSearchActive) return;
+    currentSearch.current = { debouncedSearchQuery, isSearchActive };
     setPageIndex(0);
   }, [debouncedSearchQuery, isSearchActive]);
 

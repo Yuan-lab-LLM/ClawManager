@@ -1,3 +1,4 @@
+import type { BrowserOriginMetadata } from "../lib/browserOrigin";
 import api from "./api";
 import type {
   Instance,
@@ -21,7 +22,6 @@ import type {
   BatchDeleteLiteInstancesResponse,
   InstanceSessionUsageDetail,
   InstanceSessionUsageResult,
-  RuntimeMaintenanceStatus,
 } from "../types/instance";
 import type { InstanceSkill } from "../types/skill";
 
@@ -39,17 +39,6 @@ export interface BrowserWorkerStatus {
 }
 
 export const instanceService = {
-  getRuntimeMaintenance: async (id: number): Promise<RuntimeMaintenanceStatus> => {
-    const response = await api.get(`/instances/${id}/runtime-maintenance`);
-    return response.data.data;
-  },
-  beginRuntimeMaintenance: async (id: number): Promise<RuntimeMaintenanceStatus> => {
-    const response = await api.post(`/instances/${id}/runtime-maintenance`, { timeout_seconds: 300 });
-    return response.data.data;
-  },
-  cancelRuntimeMaintenance: async (id: number, operationId: string): Promise<void> => {
-    await api.post(`/instances/${id}/runtime-maintenance/cancel`, { operation_id: operationId });
-  },
   getRuntimeGovernance: async (id: number): Promise<import("../types/instance").RuntimeGovernanceStatus> => {
     const response = await api.get(`/instances/${id}/runtime-governance`);
     return response.data.data;
@@ -59,9 +48,12 @@ export const instanceService = {
     page: number = 1,
     limit: number = 20,
     filters?: InstanceListFilters,
+    signal?: AbortSignal,
   ): Promise<InstanceListResponse> => {
     const response = await api.get("/instances", {
       params: { page, limit, ...filters },
+      signal,
+      timeout: 15000,
     });
     return response.data.data;
   },
@@ -197,7 +189,7 @@ export const instanceService = {
   // Generate access token
   generateAccessToken: async (
     id: number,
-  ): Promise<{
+  ): Promise<BrowserOriginMetadata & {
     token: string;
     access_url: string;
     proxy_url: string;

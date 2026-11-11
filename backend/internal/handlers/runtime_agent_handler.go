@@ -128,6 +128,7 @@ func (h *RuntimeAgentHandler) Register(c *gin.Context) {
 		utils.ValidationError(c, err)
 		return
 	}
+	req.Capabilities = normalizeRuntimeCapabilities(req.Capabilities)
 	runtimeType, ok := services.NormalizeV2RuntimeType(req.RuntimeType)
 	if !ok {
 		utils.Error(c, http.StatusBadRequest, "unsupported runtime type")
@@ -143,7 +144,11 @@ func (h *RuntimeAgentHandler) Register(c *gin.Context) {
 			utils.Error(c, http.StatusBadRequest, "physical Runtime slot capacity is required")
 			return
 		}
-		capacity = boundedRuntimeSlotCapacity(req.Capacity, h.cfg.MaxGatewaysPerPod)
+		if runtimeSlotCapacityExceedsAdmissionLimit(req.Capacity, h.cfg.MaxGatewaysPerPod) {
+			utils.Error(c, http.StatusConflict, "physical Runtime slot capacity exceeds configured admission limit; align Runtime slot count and max gateways per pod")
+			return
+		}
+		capacity = req.Capacity
 	}
 	// Liveness is measured at the control plane. Agent clocks may drift and a
 	// request can sit behind a slow database or network path before it arrives.
@@ -231,27 +236,29 @@ func (h *RuntimeAgentHandler) Heartbeat(c *gin.Context) {
 	}
 	lastSeen := time.Now().UTC()
 	capacity := runtimePodCapacityFromReport(0, h.cfg.MaxGatewaysPerPod)
-	if h.cfg.ContainerSlots > 0 {
-		pod, err := h.podRepo.GetByID(c.Request.Context(), podID)
-		if err != nil {
-			utils.HandleError(c, err)
+	pod, err := h.podRepo.GetByID(c.Request.Context(), podID)
+	if err != nil {
+		utils.HandleError(c, err)
+		return
+	}
+	if pod == nil && h.cfg.ContainerSlots > 0 {
+		utils.Error(c, http.StatusNotFound, "runtime pod must register before heartbeats")
+		return
+	}
+	if pod != nil && slices.Contains(pod.Capabilities(), "container-slots-v1") {
+		physical := req.MaxGateways
+		if physical <= 0 {
+			physical = pod.Capacity
+		}
+		if physical <= 0 {
+			utils.Error(c, http.StatusConflict, "physical Runtime slot capacity is unavailable; register again")
 			return
 		}
-		if pod == nil {
-			utils.Error(c, http.StatusNotFound, "runtime pod must register before heartbeats")
+		if runtimeSlotCapacityExceedsAdmissionLimit(physical, h.cfg.MaxGatewaysPerPod) {
+			utils.Error(c, http.StatusConflict, "physical Runtime slot capacity exceeds configured admission limit; align Runtime slot count and max gateways per pod")
 			return
 		}
-		if slices.Contains(pod.Capabilities(), "container-slots-v1") {
-			physical := req.MaxGateways
-			if physical <= 0 {
-				physical = pod.Capacity
-			}
-			if physical <= 0 {
-				utils.Error(c, http.StatusConflict, "physical Runtime slot capacity is unavailable; register again")
-				return
-			}
-			capacity = boundedRuntimeSlotCapacity(physical, h.cfg.MaxGatewaysPerPod)
-		}
+		capacity = physical
 	}
 	if err := h.podRepo.UpdateHeartbeat(c.Request.Context(), podID, strings.TrimSpace(req.State), req.UsedSlots, capacity, req.Draining, lastSeen); err != nil {
 		utils.HandleError(c, err)
@@ -389,7 +396,7 @@ func (h *RuntimeAgentHandler) ReportGateways(c *gin.Context) {
 				return
 			}
 		}
-		if err := h.syncInstanceRuntimeState(c.Request.Context(), gateway, lifecycle); err != nil {
+		if err := h.syncInstanceRuntimeState(c.Request.Context(), podID, gateway, lifecycle); err != nil {
 			if errors.Is(err, models.ErrRuntimeUpgradeInProgress) || errors.Is(err, repository.ErrStaleRuntimeGeneration) {
 				continue
 			}
@@ -407,27 +414,24 @@ func (h *RuntimeAgentHandler) ReportGateways(c *gin.Context) {
 		if _, reportedByInstance := reported[binding.InstanceID]; reportedByInstance {
 			continue
 		}
-		if !h.missingGatewayCleanupEligible(binding, now) {
-			if !h.missingPendingGatewayCleanupEligible(binding, now) {
-				continue
+		// A missing report never proves that either a running writer or a
+		// pending start is stopped, including legacy or unknown security profiles.
+		// Keep ownership and capacity until the normal fenced stop/audit path.
+		if !h.missingGatewayCleanupEligible(binding, now) && !h.missingPendingGatewayCleanupEligible(binding, now) {
+			continue
+		}
+		if marker, ok := h.bindingRepo.(repository.ProtectedGatewayMissingReportMarker); ok {
+			before := now.Add(-h.cfg.HeartbeatTimeout)
+			if strings.EqualFold(strings.TrimSpace(binding.State), services.RuntimeGatewayBindingCreating) {
+				before = now.Add(-pendingGatewayReconcileGrace(h.cfg.HeartbeatTimeout))
 			}
-			releaser, ok := h.bindingRepo.(repository.PendingGatewayBindingReleaser)
-			if !ok {
-				continue
-			}
-			if _, err := releaser.DeletePendingByInstanceIDGenerationAndReleaseSlot(c.Request.Context(), binding.InstanceID, podID, binding.Generation, now.Add(-pendingGatewayReconcileGrace(h.cfg.HeartbeatTimeout))); err != nil {
+			_, err := marker.MarkProtectedGatewayReportMissing(c.Request.Context(), binding, before, "Runtime gateway omitted from report; ownership retained until current authority or exact source-stop proof is available")
+			if err != nil && !errors.Is(err, models.ErrRuntimeUpgradeInProgress) {
 				utils.HandleError(c, err)
 				return
 			}
-			continue
 		}
-		if _, err := h.bindingRepo.DeleteRunningByInstanceIDGenerationAndReleaseSlot(c.Request.Context(), binding.InstanceID, podID, binding.Generation); err != nil {
-			if errors.Is(err, models.ErrRuntimeUpgradeInProgress) {
-				continue
-			}
-			utils.HandleError(c, err)
-			return
-		}
+
 	}
 	h.publish(c.Request.Context(), "runtime_pod_gateways_reported", map[string]any{
 		"pod_id":        podID,
@@ -485,11 +489,20 @@ func (h *RuntimeAgentHandler) reconcileReportedOpenClawGateway(ctx context.Conte
 		now := time.Now().UTC()
 		healthAt = &now
 	}
-	return reconciler.ReconcileReportedGateway(ctx, &models.InstanceRuntimeBinding{
+	reported := &models.InstanceRuntimeBinding{
 		InstanceID: gateway.InstanceID, RuntimePodID: podID, RuntimeType: services.RuntimeTypeOpenClaw,
 		GatewayID: gateway.GatewayID, GatewayPort: gateway.GatewayPort, GatewayPID: gateway.GatewayPID,
 		WorkspacePath: expectedWorkspace, State: services.RuntimeGatewayBindingRunning, Generation: gateway.Generation, LastHealthAt: healthAt,
-	}, instance.RuntimeGeneration, services.RuntimeGatewayPortBlockSize(services.RuntimeTypeOpenClaw))
+	}
+	if recovery, ok := h.bindingRepo.(interface {
+		ReportedGatewayRecoveryBlocked(context.Context, *models.InstanceRuntimeBinding) (bool, error)
+	}); ok {
+		blocked, err := recovery.ReportedGatewayRecoveryBlocked(ctx, reported)
+		if err != nil || blocked {
+			return false, err
+		}
+	}
+	return reconciler.ReconcileReportedGateway(ctx, reported, instance.RuntimeGeneration, services.RuntimeGatewayPortBlockSize(services.RuntimeTypeOpenClaw))
 }
 
 func runtimePodHasCapability(pod models.RuntimePod, required string) bool {
@@ -533,9 +546,14 @@ func pendingGatewayReconcileGrace(heartbeatTimeout time.Duration) time.Duration 
 	return grace
 }
 
-func (h *RuntimeAgentHandler) syncInstanceRuntimeState(ctx context.Context, gateway runtimeAgentGatewayReport, lifecycle services.RuntimeGatewayLifecycleState) error {
+func (h *RuntimeAgentHandler) syncInstanceRuntimeState(ctx context.Context, podID int64, gateway runtimeAgentGatewayReport, lifecycle services.RuntimeGatewayLifecycleState) error {
 	if h.instanceRepo == nil {
 		return nil
+	}
+	if reports, ok := h.instanceRepo.(interface {
+		UpdateReportedRuntimeStateForBinding(context.Context, int, string, int, *string, int64, string, int, string) error
+	}); ok {
+		return reports.UpdateReportedRuntimeStateForBinding(ctx, gateway.InstanceID, lifecycle.InstanceState, gateway.Generation, lifecycle.Message, podID, strings.TrimSpace(gateway.GatewayID), gateway.GatewayPort, strings.TrimSpace(gateway.WorkspacePath))
 	}
 	return h.instanceRepo.UpdateRuntimeState(ctx, gateway.InstanceID, lifecycle.InstanceState, gateway.Generation, lifecycle.Message)
 }
@@ -611,11 +629,8 @@ func runtimePodCapacityFromReport(reported, configured int) int {
 	return capacity
 }
 
-func boundedRuntimeSlotCapacity(physical, configured int) int {
-	if configured > 0 {
-		return min(physical, configured)
-	}
-	return physical
+func runtimeSlotCapacityExceedsAdmissionLimit(physical, configured int) bool {
+	return configured > 0 && physical > configured
 }
 
 func trimStringPtr(value *string) *string {

@@ -549,25 +549,6 @@ export interface InstanceLLMGovernanceStatus {
   is_compliant: boolean;
 }
 
-export interface RuntimeMaintenanceStatus {
-  draining: boolean;
-  drained: boolean;
-  automatic_upgrade_available: false;
-  operation: null | {
-    upgrade_fenced?: boolean;
-    operation_id: string;
-    generation: number;
-    deadline: string;
-    cancelled: boolean;
-    gate_closed: boolean;
-    active_executions: number;
-    active_admissions: number;
-    active_jobs: number;
-    queued_inputs: number;
-    reported_at: string | null;
-  };
-}
-
 export const PRESET_CONFIGS = {
   small: {
     name: "Small",

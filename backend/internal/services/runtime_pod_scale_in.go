@@ -120,6 +120,11 @@ func (s *RuntimeManagementService) runtimeScaleInPlanItems(ctx context.Context, 
 		if err != nil {
 			return nil, err
 		}
+		if len(bindings) == 0 {
+			if err := models.ConfirmedEmptyRuntimeObservation(source, time.Now().UTC()); err != nil {
+				return nil, fmt.Errorf("source Pod %s has no verified physical emptiness: %w", source.PodName, err)
+			}
+		}
 		if source.UsedSlots != len(bindings) {
 			return nil, fmt.Errorf("source Pod %s has unsettled slot claims; retry after starts settle", source.PodName)
 		}
@@ -381,7 +386,7 @@ func (s *RuntimeManagementService) submitScaleInJournal(ctx context.Context, jou
 			if !enabled {
 				return errors.New("automatic idle scale-in disabled")
 			}
-			if err := s.idlePoolDemandAdmission(ctx, tx); err != nil {
+			if err := s.idlePoolDemandAdmission(ctx, tx, journal.Plan.SourcePods); err != nil {
 				return err
 			}
 			if err := repository.CheckRuntimePodDeletionIntent(ctx, tx, journal.Target.Namespace, journal.Target.DeploymentName); err != nil {
@@ -404,6 +409,11 @@ func (s *RuntimeManagementService) submitScaleInJournal(ctx context.Context, jou
 			}
 			if uid != source.PodUID || paused || used != source.InstanceCount {
 				return errors.New("source occupancy or identity changed; refresh preflight")
+			}
+			if source.InstanceCount == 0 {
+				if err := repository.CheckRuntimePodEmptyObservation(ctx, tx, source.ID, source.PodUID); err != nil {
+					return err
+				}
 			}
 			bindings, err := repository.NewInstanceRuntimeBindingRepository(tx).ListByRuntimePodID(ctx, source.ID)
 			if err != nil {

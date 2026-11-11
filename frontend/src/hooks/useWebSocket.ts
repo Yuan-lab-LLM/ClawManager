@@ -25,7 +25,7 @@ interface UseWebSocketOptions {
 }
 
 export interface RuntimeAdminMessage {
-  type: "runtime_pod_metrics" | "runtime_pod_state" | "runtime_rollout";
+  type: "runtime_pod_metrics" | "runtime_pod_state" | "runtime_rollout" | "instance_status";
   data: unknown;
   timestamp: string;
 }
@@ -218,7 +218,8 @@ export function useRuntimeAdminWebSocket(
       if (
         message.type === "runtime_pod_metrics" ||
         message.type === "runtime_pod_state" ||
-        message.type === "runtime_rollout"
+        message.type === "runtime_rollout" ||
+        message.type === "instance_status"
       ) {
         onRuntimeEvent(message as RuntimeAdminMessage);
       }

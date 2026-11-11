@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"log"
+	"net"
 	"net/http"
 	"net/netip"
 	"net/url"
@@ -16,6 +17,7 @@ import (
 
 	"clawreef/internal/aigateway"
 	"clawreef/internal/backupgate"
+	"clawreef/internal/browserorigin"
 	"clawreef/internal/buildinfo"
 	"clawreef/internal/config"
 	"clawreef/internal/db"
@@ -32,6 +34,7 @@ import (
 	"clawreef/internal/services/leader"
 	"clawreef/internal/systembackup"
 	"clawreef/internal/teamtemplate"
+	"clawreef/internal/workbench"
 
 	"github.com/gin-gonic/gin"
 	"k8s.io/client-go/dynamic"
@@ -283,6 +286,9 @@ func main() {
 	services.ConfigureRuntimeUpgradeNFSIO(runtimeUpgradeService, cfg.Runtime.SandboxProfile)
 	browserWorkerService := services.NewBrowserWorkerService(browserWorkerRepo, instanceRepo, k8s.GetClient())
 	if cfg.Runtime.ContainerSlots > 0 {
+		if err := services.ConfigureSlotExternalWriterAbsence(runtimeAgentClient, browserWorkerService.VerifyNoBrowserWriterHistory); err != nil {
+			log.Fatal("Failed to configure external Runtime writer absence authority")
+		}
 		if err := services.ConfigureSlotExternalWriterCleanup(runtimeAgentClient, func(ctx context.Context, id runtimeauth.Identity) error {
 			return browserWorkerService.DeleteForInstance(ctx, id.InstanceID)
 		}); err != nil {
@@ -329,7 +335,7 @@ func main() {
 		coreHandler := northbound.NewCoreHandler(northboundCoreService, cfg.Northbound.InternalJWTSecret)
 		coreRouter := gin.New()
 		_ = coreRouter.SetTrustedProxies(nil)
-		coreRouter.Use(gin.Logger(), gin.Recovery(), northbound.RequestContext(), northbound.BodyLimit(64<<10))
+		coreRouter.Use(handlers.SafeAccessLogger(), gin.Recovery(), northbound.RequestContext(), northbound.BodyLimit(64<<10))
 		northbound.RegisterCoreRoutes(coreRouter, coreHandler)
 		northboundCoreServer = &http.Server{
 			Addr:              cfg.Northbound.CoreInternalAddress,
@@ -422,7 +428,7 @@ func main() {
 	gatewayRuntimeHandler := handlers.NewGatewayRuntimeHandler(runtimeTasks, aiGatewayService, auditEventService)
 	runtimeProtocols := repository.NewRuntimeProtocolRepository(database)
 	runtimeProtocolHandler := handlers.NewRuntimeProtocolHandler(runtimeProtocols, instanceRepo)
-	runtimeMaintenanceHandler := handlers.NewRuntimeMaintenanceHandler(repository.NewRuntimeMaintenanceRepository(database), instanceRepo)
+	runtimeMaintenanceHandler := handlers.NewRuntimeMaintenanceHandler(repository.NewRuntimeMaintenanceRepository(database))
 	runtimeProtocolPolicy := middleware.RuntimeProtocolPolicy(runtimeProtocols)
 	customTeamTemplateService := teamtemplate.NewService(customTeamTemplateRepo, aiGatewayService)
 	ownerTeamAPI := northbound.NewOwnerTeamAPI(database, teamService, instanceService, userRepo, aiGatewayService, false, 0)
@@ -630,6 +636,37 @@ func main() {
 		log.Printf("skill inventory report persistence is disabled; reports will be acknowledged without database synchronization")
 	}
 	teamHandler := handlers.NewTeamHandler(teamService)
+	previewOrigin := strings.TrimSpace(os.Getenv("CLAWMANAGER_WORKBENCH_PREVIEW_ORIGIN"))
+	if previewOrigin == "" {
+		_, port, splitErr := net.SplitHostPort(cfg.Server.Address)
+		if splitErr != nil || port == "" {
+			port = "9001"
+		}
+		previewOrigin = "http://p-{token}.localhost:" + port
+	}
+	workbenchPreviews, err := workbench.NewPreviews(previewOrigin, repository.NewWorkbenchPreviewStore(database), 8*time.Hour)
+	if err != nil {
+		log.Fatalf("invalid workbench preview origin: %v", err)
+	}
+	workbenchAgent, _ := runtimeAgentClient.(services.WorkbenchAgent)
+	instanceWorkbenchService := services.NewInstanceWorkbenchService(instanceRepo, bindingRepo, runtimePodRepo, workbenchAgent, workbenchPreviews)
+	instanceWorkbenchService.SetGitFiles(workspaceFileService)
+	instanceWorkbenchService.SetSharedPreviewAccess(externalAccessService)
+	browserOrigin := strings.TrimSpace(os.Getenv("CLAWMANAGER_BROWSER_ORIGIN"))
+	browserPorts := strings.TrimSpace(os.Getenv("CLAWMANAGER_BROWSER_PORT_RANGE"))
+	var browserOrigins *browserorigin.Registry
+	if (browserOrigin == "") != (browserPorts == "") {
+		log.Fatal("CLAWMANAGER_BROWSER_ORIGIN and CLAWMANAGER_BROWSER_PORT_RANGE must both be configured")
+	}
+	if browserOrigin != "" {
+		browserOrigins, err = browserorigin.New(browserOrigin, browserPorts, repository.NewBrowserOriginStore(database))
+		if err != nil {
+			log.Fatalf("invalid browser origin configuration: %v", err)
+		}
+		instanceHandler.SetBrowserOrigins(browserOrigins)
+		instanceWorkbenchService.SetBrowserOrigins(browserOrigins)
+	}
+	instanceWorkbenchHandler := handlers.NewInstanceWorkbenchHandler(instanceWorkbenchService)
 	workspaceFileHandler := handlers.NewWorkspaceFileHandler(instanceService, workspaceFileService, runtimeWorkspaceFileService)
 	workspaceFileHandler.SetSkillRepository(skillRepo)
 	workspaceFileHandler.SetExternalAccessServices(externalAccessService, instanceHandler.InstanceAccessService())
@@ -703,11 +740,30 @@ func main() {
 	} else {
 		log.Printf("runtime scheduler disabled by configuration")
 	}
+	if runtimeSecurity != nil && runtimeScheduler != nil {
+		if err := runtimeSecurity.ConfigurePoolValidationLeases(runtimeScheduler); err != nil {
+			log.Fatal("Failed to configure isolated Runtime validation leases")
+		}
+	}
 	var autoStopKube kubernetes.Interface
 	if client := k8s.GetClient(); client != nil {
 		autoStopKube = client.Clientset
 	}
 	autoStopService := services.NewInstanceAutoStopService(autoStopRepo, instanceService, autoStopKube)
+	appNamespace := strings.TrimSpace(os.Getenv("POD_NAMESPACE"))
+	if appNamespace == "" {
+		if raw, err := os.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/namespace"); err == nil {
+			appNamespace = strings.TrimSpace(string(raw))
+		}
+	}
+	if appNamespace == "" {
+		appNamespace = cfg.Runtime.Namespace
+	}
+	appPodName := os.Getenv("POD_NAME")
+	if appPodName == "" {
+		appPodName = os.Getenv("HOSTNAME")
+	}
+	autoStopService.SetApplicationPodIdentity(appNamespace, appPodName)
 	autoStopHandler := handlers.NewInstanceAutoStopHandler(autoStopRepo)
 	runtimePoolHandler := handlers.NewRuntimePoolHandler(runtimePodRepo, bindingRepo, rolloutRepo, runtimeScheduler, runtimeEvents)
 	runtimePoolHandler.SetUpgradeService(runtimeUpgradeService)
@@ -809,13 +865,25 @@ func main() {
 
 	// Setup router
 	r := gin.New()
-	r.Use(handlers.HermesDesktopRedactTickets(), egressProxyHandler.AccessLogger(gin.DefaultWriter), gin.CustomRecovery(func(c *gin.Context, _ any) {
+	r.Use(handlers.HermesDesktopRedactTickets(), gin.CustomRecovery(func(c *gin.Context, _ any) {
 		log.Print("HTTP request failed")
 		c.AbortWithStatus(http.StatusInternalServerError)
 	}))
 	r.Use(middleware.BackupRequestBoundary(backupHTTPPool, db.SQLGateScope()))
 
 	// Middleware
+	// Browser-origin routes can carry a bearer capability in their path. Handle
+	// them before the general logger; nginx8444 records statuses without URLs.
+	r.Use(handlers.BrowserOriginRoutes(browserOrigins, instanceHandler, instanceWorkbenchService))
+	r.Use(egressProxyHandler.AccessLogger(gin.DefaultWriter))
+	r.Use(func(c *gin.Context) {
+		if instanceWorkbenchService.IsPreviewHost(c.Request.Host) {
+			instanceWorkbenchService.ServePreview(c.Writer, c.Request)
+			c.Abort()
+			return
+		}
+		c.Next()
+	})
 	r.Use(middleware.CORS())
 	r.Use(middleware.ErrorHandler())
 	r.NoRoute(egressProxyHandler.Handle)
@@ -868,6 +936,7 @@ func main() {
 		sharedInstances := api.Group("/shared-instances")
 		{
 			sharedInstances.GET("/:code/session", instanceHandler.GetSharedInstanceSession)
+			handlers.NewSharedInstanceWorkbenchHandler(instanceWorkbenchService, instanceService, externalAccessService, instanceHandler.InstanceAccessService()).Register(sharedInstances.Group("/:code/workbench"))
 			sharedInstances.GET("/:code/workspace/files", workspaceFileHandler.SharedList)
 			sharedInstances.GET("/:code/workspace/search", workspaceFileHandler.SharedSearch)
 			sharedInstances.GET("/:code/workspace/preview", workspaceFileHandler.SharedPreview)
@@ -969,9 +1038,6 @@ func main() {
 			instances.GET("/:id/status", instanceHandler.GetInstanceStatus)
 			instances.GET("/:id/runtime", instanceHandler.GetRuntimeDetails)
 			instances.GET("/:id/runtime-governance", runtimeProtocolHandler.Status)
-			instances.GET("/:id/runtime-maintenance", runtimeMaintenanceHandler.Status)
-			instances.POST("/:id/runtime-maintenance", runtimeMaintenanceHandler.Begin)
-			instances.POST("/:id/runtime-maintenance/cancel", runtimeMaintenanceHandler.Cancel)
 			instances.GET("/:id/session-usage", instanceHandler.GetInstanceSessionUsage)
 			instances.GET("/:id/session-usage/detail", instanceHandler.GetInstanceSessionUsageDetail)
 			instances.POST("/:id/runtime/:command", instanceHandler.CreateRuntimeCommand)
@@ -982,6 +1048,7 @@ func main() {
 			instances.GET("/:id/browser-worker", instanceHandler.GetBrowserWorker)
 			instances.POST("/:id/browser-worker/access", instanceHandler.GenerateBrowserWorkerAccess)
 			instances.GET("/:id/shell", instanceHandler.StreamShell)
+			instanceWorkbenchHandler.Register(instances.Group("/:id/workbench"))
 			instances.POST("/:id/sync", instanceHandler.ForceSync)
 			instances.GET("/:id/openclaw/export", instanceHandler.ExportOpenClaw)
 			instances.POST("/:id/openclaw/import", instanceHandler.ImportOpenClaw)
@@ -1039,6 +1106,10 @@ func main() {
 			adminRuntime.GET("/runtime-auto-stop", autoStopHandler.Get)
 			adminRuntime.PUT("/runtime-auto-stop", autoStopHandler.Update)
 			adminRuntime.PUT("/instances/:id/auto-stop", autoStopHandler.SetDisabled)
+			adminRuntime.POST("/instances/:id/recover-stopped-source", runtimePoolHandler.RecoverStoppedSource)
+			adminRuntime.GET("/instances/:id/runtime-recovery", runtimePoolHandler.InspectInstanceRecovery)
+			adminRuntime.POST("/instances/:id/runtime-recovery", runtimePoolHandler.RetryInstanceRecovery)
+			adminRuntime.POST("/runtime-pods/:id/recheck", runtimePoolHandler.RecheckPod)
 			adminRuntime.GET("/runtime-pods", runtimePoolHandler.ListPods)
 			adminRuntime.GET("/runtime-pod-pools", runtimePodMaintenanceHandler.ManagedPools)
 			adminRuntime.GET("/runtime-pods/scale-options", runtimePodMaintenanceHandler.ScaleOptions)
@@ -1057,6 +1128,7 @@ func main() {
 			adminRuntime.POST("/runtime-balance/plan", runtimeManagementHandler.BalancePlan)
 			adminRuntime.POST("/runtime-balance", runtimeManagementHandler.Balance)
 			adminRuntime.POST("/runtime-scheduling/:id/cancel", runtimeManagementHandler.Cancel)
+			adminRuntime.POST("/runtime-scheduling/:id/retry", runtimeManagementHandler.Retry)
 			adminRuntime.POST("/runtime-pods/:id/drain", runtimePoolHandler.DrainPod)
 			adminRuntime.POST("/runtime-rollouts", runtimePoolHandler.StartRollout)
 			adminRuntime.POST("/runtime-rollouts/preflight", runtimePoolHandler.PreflightOpenClawRollout)

@@ -29,7 +29,7 @@ type WorkspaceText struct {
 func workspaceTextName(name string) bool {
 	name = path.Base(name)
 	lower := strings.ToLower(name)
-	if lower == ".env" || strings.HasPrefix(lower, ".env.") || lower == "dockerfile" || lower == "makefile" {
+	if lower == "config" || lower == ".env" || strings.HasPrefix(lower, ".env.") || lower == "dockerfile" || lower == "makefile" {
 		return true
 	}
 	switch strings.ToLower(path.Ext(name)) {
@@ -166,6 +166,30 @@ func (s *workspaceFileService) saveText(ctx context.Context, scope WorkspaceFile
 		return nil, err
 	}
 	defer root.Close()
+	// Git writers coordinate on config.lock. Reserve it in the same credential-
+	// scoped transaction as our version checks, audit and atomic replacement.
+	cleaned, err := cleanWorkspaceRelativePath(relative)
+	if err != nil {
+		return nil, err
+	}
+	if name == "config" && path.Base(path.Dir(cleaned)) == ".git" {
+		gitLock, lockErr := root.OpenFile("config.lock", os.O_CREATE|os.O_EXCL|os.O_WRONLY|workspaceTextOpenFlags, 0600)
+		if lockErr != nil {
+			if os.IsExist(lockErr) {
+				return nil, ErrWorkspaceTextConflict
+			}
+			return nil, lockErr
+		}
+		defer gitLock.Close()
+		// Do not remove a lock replaced by an uncooperative external writer.
+		defer func() {
+			owned, ownErr := gitLock.Stat()
+			current, currentErr := root.Lstat("config.lock")
+			if ownErr == nil && currentErr == nil && os.SameFile(owned, current) {
+				_ = root.Remove("config.lock")
+			}
+		}()
+	}
 	lockMode := os.FileMode(0600)
 	if scope.credentialScoped && scope.TeamID > 0 {
 		lockMode = 0660

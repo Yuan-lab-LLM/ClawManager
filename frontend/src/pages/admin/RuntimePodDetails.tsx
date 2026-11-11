@@ -8,6 +8,7 @@ import {
   formatMemory,
   isSchedulable,
   canManageScheduling,
+  canManageSlot,
 } from "../../lib/runtimeManagement";
 import type { RuntimePod } from "../../types/runtimePool";
 import {
@@ -26,6 +27,7 @@ export default function RuntimePodDetails({
   onSchedule,
   onPause,
   onEvents,
+  onRecovery,
   busy,
 }: {
   pod: RuntimePod;
@@ -33,6 +35,7 @@ export default function RuntimePodDetails({
   onSchedule: (ids: number[]) => void;
   onPause: () => void;
   onEvents: () => void;
+  onRecovery?: (ids?: number[]) => void;
   busy: boolean;
 }) {
   const { t } = useI18n();
@@ -48,7 +51,7 @@ export default function RuntimePodDetails({
     (slot) =>
       (filter === "all" ||
         (filter === "bound"
-          ? !!slot.instance_id
+          ? !!(slot.instance_id || slot.expected_instance_id)
           : filter === "idle"
             ? slotState(slot) === "idle"
             : !slot.ready)) &&
@@ -57,6 +60,7 @@ export default function RuntimePodDetails({
         slot.container_name,
         slot.instance_name,
         slot.instance_id,
+        slot.expected_instance_id,
         slot.owner,
       ].some((value) =>
         String(value ?? "")
@@ -65,10 +69,10 @@ export default function RuntimePodDetails({
       ),
   );
   const boundRows = rows.flatMap((slot) =>
-    slot.instance_id ? [slot.instance_id] : [],
+    canManageSlot(slot) ? [slot.instance_id!] : [],
   );
   const selectedIds = selection.filter((id) =>
-    slots.some((slot) => slot.instance_id === id),
+    slots.some((slot) => slot.instance_id === id && canManageSlot(slot)),
   );
   return (
     <div className="space-y-5">
@@ -106,6 +110,7 @@ export default function RuntimePodDetails({
               `runtimePods.${pod.scheduling_enabled === false || pod.scheduling_paused ? "resume" : "pause"}`,
             )}
           </button>
+          <button type="button" className={buttonClass} disabled={busy || !onRecovery} onClick={() => onRecovery?.()}>{t("runtimePods.faultRecovery")}</button>
           <button
             type="button"
             className={primaryClass}
@@ -121,12 +126,12 @@ export default function RuntimePodDetails({
         <Metric
           label={t("runtimePods.agentReady")}
           value={`${counts.ready} / ${counts.capacity}`}
-          detail={`${t("runtimePods.unavailable")} ${counts.unavailable}`}
-          warning={counts.unavailable > 0}
+          detail={`${t("runtimePods.unavailable")} ${counts.unavailable} · ${t("runtimePods.unknown")} ${counts.unknown}`}
+          warning={counts.unavailable > 0 || counts.unknown > 0}
         />
         <Metric
-          label={t("runtimePods.occupied")}
-          value={`${counts.occupied} / ${counts.capacity}`}
+          label={t(counts.bound === undefined ? "runtimePods.occupied" : "runtimePods.cardBound")}
+          value={`${counts.bound ?? counts.occupied} / ${counts.capacity}`}
           detail={`${t("runtimePods.running")} ${counts.running} · ${t("runtimePods.error")} ${counts.error}`}
         />
         <Metric
@@ -140,6 +145,11 @@ export default function RuntimePodDetails({
           detail={t("runtimePods.capacityHelp")}
         />
       </div>
+      {pod.reconciliation_message && (
+        <p role="status" className="rounded bg-amber-50 p-3 text-xs text-amber-800">
+          {pod.reconciliation_message}
+        </p>
+      )}
       <section className="cm-surface space-y-4 p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-sm font-semibold">
@@ -162,12 +172,16 @@ export default function RuntimePodDetails({
               {t("runtimePods.slot")} {chosen.index} · {chosen.container_name} ·
               Agent {t(`runtimePods.${chosen.ready ? "ready" : "unavailable"}`)}{" "}
               ·{" "}
+              {chosen.reconciliation_state && chosen.reconciliation_state !== "unknown" && chosen.instance_id && `${t("runtimePods.reportedInstance")} `}
               {chosen.instance_name ||
                 (chosen.instance_id
                   ? `#${chosen.instance_id}`
-                  : t("runtimePods.unbound"))}{" "}
+                  : t(`runtimePods.${slotState(chosen) === "unknown" ? "unknown" : "unbound"}`))}{" "}
               ·{" "}
-              {chosen.error_message ||
+              {chosen.reconciliation_state && chosen.reconciliation_state !== "consistent" &&
+                `${t(`runtimePods.${chosen.reconciliation_state}`)} · `}
+              {chosen.expected_instance_id && `${t("runtimePods.expectedBinding")} #${chosen.expected_instance_id} · `}
+              {chosen.observation_message || chosen.error_message ||
                 chosen.reason ||
                 t(`runtimePods.${slotState(chosen)}`)}
             </span>
@@ -175,7 +189,8 @@ export default function RuntimePodDetails({
               <button type="button" className={buttonClass} onClick={onEvents}>
                 {t("runtimePods.events")}
               </button>
-              {chosen.instance_id && (
+              {!!chosen.expected_instance_id && !canManageSlot(chosen) && <button type="button" className={buttonClass} disabled={busy || !onRecovery} onClick={() => onRecovery?.([chosen.expected_instance_id!])}>{t("runtimePods.faultRecovery")}</button>}
+              {canManageSlot(chosen) && (
                 <button
                   type="button"
                   className={buttonClass}
@@ -215,7 +230,7 @@ export default function RuntimePodDetails({
               value={instanceFilter}
               onChange={(event) => setInstanceFilter(event.target.value)}
             >
-              {["all", "running", "starting", "migrating", "error"].map(
+              {["all", "running", "starting", "migrating", "error", "unknown"].map(
                 (value) => (
                   <option key={value} value={value}>
                     {t(`runtimePods.${value}`)}
@@ -285,7 +300,7 @@ export default function RuntimePodDetails({
                     <input
                       type="checkbox"
                       aria-label={`${t("runtimePods.slot")} ${slot.index}`}
-                      disabled={!slot.instance_id}
+                      disabled={!canManageSlot(slot)}
                       checked={
                         !!slot.instance_id &&
                         selectedIds.includes(slot.instance_id)
@@ -320,6 +335,7 @@ export default function RuntimePodDetails({
                   <td className="px-3 py-3">
                     {slot.instance_id ? (
                       <>
+                        {slot.reconciliation_state && slot.reconciliation_state !== "unknown" && `${t("runtimePods.reportedInstance")} `}
                         {slot.instance_name || `#${slot.instance_id}`}{" "}
                         <span className="text-slate-400">
                           #{slot.instance_id} / {slot.owner || "—"}
@@ -327,16 +343,19 @@ export default function RuntimePodDetails({
                       </>
                     ) : (
                       <span className="text-slate-400">
-                        {t("runtimePods.unbound")}
+                        {t(`runtimePods.${slotState(slot) === "unknown" ? "unknown" : "unbound"}`)}
+                      </span>
+                    )}
+                    {slot.expected_instance_id && (
+                      <span className="mt-1 block text-amber-800">
+                        {t("runtimePods.expectedBinding")} #{slot.expected_instance_id}
                       </span>
                     )}
                   </td>
                   <td
-                    className={`px-3 py-3 ${slotState(slot) === "error" ? "text-red-600" : "text-slate-600"}`}
+                    className={`px-3 py-3 ${slotState(slot) === "error" ? "text-red-600" : slotState(slot) === "unknown" ? "text-amber-800" : "text-slate-600"}`}
                   >
-                    {slot.instance_id
-                      ? t(`runtimePods.${slotState({ ...slot, ready: true })}`)
-                      : "—"}
+                    {t(`runtimePods.${slot.reconciliation_state && slot.reconciliation_state !== "consistent" ? slot.reconciliation_state : slotState(slot)}`)}
                   </td>
                   <td className="px-3 py-3 tabular-nums">
                     {formatCPU(slot.cpu_millis_used)}
@@ -346,9 +365,9 @@ export default function RuntimePodDetails({
                   </td>
                   <td
                     className="max-w-56 truncate px-3 py-3 text-slate-500"
-                    title={slot.error_message || slot.reason}
+                    title={slot.observation_message || slot.error_message || slot.reason}
                   >
-                    {slot.error_message ||
+                    {slot.observation_message || slot.error_message ||
                       slot.reason ||
                       (slot.restart_count
                         ? t("runtimePods.restarts", {
@@ -358,7 +377,7 @@ export default function RuntimePodDetails({
                   </td>
                   <td className="px-3 py-3">
                     <div className="flex gap-3">
-                      {slot.instance_id && (
+                      {canManageSlot(slot) && (
                         <button
                           type="button"
                           className="text-slate-700 hover:underline"

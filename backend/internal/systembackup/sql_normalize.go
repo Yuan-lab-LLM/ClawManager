@@ -114,13 +114,20 @@ func NormalizeDataRow(table SQLTable, row team.Row, now time.Time) (team.Change,
 		set("infra_status", "stopped")
 		set("agent_status", "offline")
 		set("openclaw_status", "stopped")
+	case "instance_runtime_recovery":
+		set("phase", "")
+		// Retain the failure budget/history while removing runnable timers and
+		// source-slot identities belonging to the original installation.
+		erase("next_retry_at", "healthy_since")
+		set("source_pod_id", "0")
+		set("source_gateway_port", "0")
 	case "instance_runtime_bindings":
 		set("state", "failed")
 		erase("gateway_pid")
 	case "runtime_pods":
 		set("state", "offline")
 		set("draining", "1")
-		erase("pod_uid", "pod_ip", "agent_endpoint")
+		erase("pod_uid", "pod_ip", "agent_endpoint", "observation_json", "observation_at")
 	case "instance_commands":
 		err = stopState("status", "failed", []string{"pending", "dispatched", "running", "accepted", "batch_pending"}, []string{"succeeded", "failed", "cancelled", "canceled", "timeout", "timed_out", "expired"})
 	case "runtime_rollouts":

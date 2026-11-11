@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"clawreef/internal/browserorigin"
 	"clawreef/internal/models"
 	"clawreef/internal/repository"
 	"clawreef/internal/services"
@@ -1577,10 +1578,10 @@ func (h *InstanceHandler) GenerateAccessToken(c *gin.Context) {
 	}
 
 	// Generate proxy entry URL. The actual Service remains internal-only.
-	accessURL := h.proxyService.GetProxyURLForInstance(instance, "")
+	accessURL, err := h.proxyService.GetProxyURLForInstanceWithError(instance, "")
 
-	if accessURL == "" {
-		utils.Error(c, http.StatusServiceUnavailable, "Unable to generate access URL")
+	if err != nil || accessURL == "" {
+		instanceAccessURLFailure(c, err)
 		return
 	}
 
@@ -1620,14 +1621,18 @@ func (h *InstanceHandler) GenerateAccessToken(c *gin.Context) {
 		true,
 	)
 
-	proxyURL := h.proxyService.GetProxyURLForInstance(instance, token.Token)
+	proxyURL, err := h.proxyService.GetProxyURLForInstanceWithError(instance, token.Token)
+	if err != nil {
+		instanceAccessURLFailure(c, err)
+		return
+	}
 
 	// Dedicated runtime origins cannot reuse the HttpOnly cookie set on the
 	// ClawManager origin. Their first navigation must carry the short-lived
 	// token so the dedicated origin can validate it and promote it to its own
 	// origin-scoped cookie. Same-origin proxy URLs continue to use the clean,
 	// token-free entry URL.
-	response := map[string]interface{}{
+	response := gin.H{
 		"token":                    token.Token,
 		"access_url":               browserAccessEntryURL(accessURL, proxyURL),
 		"proxy_url":                proxyURL,
@@ -1636,7 +1641,23 @@ func (h *InstanceHandler) GenerateAccessToken(c *gin.Context) {
 		"desktop_upstream_present": upstream != "",
 	}
 
-	utils.Success(c, http.StatusOK, "Access token generated successfully", response)
+	utils.Success(c, http.StatusOK, "Access token generated successfully", h.browserOriginMetadata(instance, response))
+}
+
+func (h *InstanceHandler) SetBrowserOrigins(reg *browserorigin.Registry) {
+	h.proxyService.SetBrowserOrigins(reg)
+}
+
+func (h *InstanceHandler) browserOriginMetadata(instance *models.Instance, response gin.H) gin.H {
+	reg := h.proxyService.BrowserOrigins()
+	runtimeType, managed := services.NormalizeV2RuntimeType(instance.Type)
+	mode, _ := services.NormalizeInstanceMode(instance.InstanceMode)
+	if reg != nil && managed && (strings.EqualFold(strings.TrimSpace(instance.RuntimeType), "gateway") || mode == services.InstanceModeLite) &&
+		(runtimeType == services.RuntimeTypeOpenCode || runtimeType == services.RuntimeTypeDeepSeekHarness) {
+		response["browser_origin_mode"] = "chrome-single-host"
+		response["manager_origin"] = reg.ManagerOrigin()
+	}
+	return response
 }
 
 func browserAccessEntryURL(accessURL, proxyURL string) string {
@@ -1775,7 +1796,7 @@ func (h *InstanceHandler) proxyAccessToken(c *gin.Context, id int) (string, bool
 	original := originalInstanceProxyRequest(c)
 	queryToken := strings.TrimSpace(original.URL.Query().Get("token"))
 	if queryToken == "" && isDedicatedAccessRefreshPath(c, id) {
-		queryToken = strings.TrimSpace(c.GetHeader(dedicatedAccessRefreshHeader))
+		queryToken = strings.TrimSpace(original.Header.Get(dedicatedAccessRefreshHeader))
 	}
 	// A freshly issued ClawManager token must be allowed to replace an expired
 	// dedicated-origin cookie. Runtime applications can also own a `token`
@@ -1849,7 +1870,11 @@ func (h *InstanceHandler) promoteProxyAccessToken(c *gin.Context, id int, queryT
 			true,
 		)
 	}
-	if dedicatedOrigin && originRuntimeType == services.RuntimeTypeOpenCode &&
+	if dedicatedOrigin && browserorigin.IsNativeContext(c.Request.Context()) && !isDedicatedAccessRefreshPath(c, id) &&
+		browserorigin.ServeBootstrapDocument(c.Writer, c.Request, dedicatedRuntimeCleanLocation(originalInstanceProxyRequest(c).URL, id, queryToken)) {
+		return "", false
+	}
+	if dedicatedOrigin && !isDedicatedAccessRefreshPath(c, id) && originRuntimeType == services.RuntimeTypeOpenCode &&
 		(c.Request.Method == http.MethodGet || c.Request.Method == http.MethodHead) {
 		c.Redirect(http.StatusTemporaryRedirect, dedicatedRuntimeCleanLocation(originalInstanceProxyRequest(c).URL, id, queryToken))
 		return "", false
@@ -1895,6 +1920,12 @@ func dedicatedRuntimeCleanLocation(requestURL *url.URL, instanceID int, accessTo
 func (h *InstanceHandler) validCurrentExternalSession(c *gin.Context, accessToken *services.AccessToken) bool {
 	if accessToken == nil {
 		return false
+	}
+	if browserorigin.IsNativeContext(c.Request.Context()) {
+		runtimeType, managed := services.NormalizeV2RuntimeType(accessToken.InstanceType)
+		if !managed || runtimeType != c.GetHeader(services.DedicatedRuntimeOriginHeader) {
+			return false
+		}
 	}
 	if strings.TrimSpace(accessToken.SessionBinding) == "" {
 		return true
@@ -1943,6 +1974,10 @@ func isDedicatedIEIRuntimeOrigin(c *gin.Context, accessToken *services.AccessTok
 	if !originManaged || !instanceManaged || originRuntimeType != instanceRuntimeType ||
 		(originRuntimeType != services.RuntimeTypeOpenCode && originRuntimeType != services.RuntimeTypeDeepSeekHarness) {
 		return false
+	}
+
+	if browserorigin.IsNativeContext(c.Request.Context()) {
+		return true
 	}
 
 	host := strings.TrimSpace(c.Request.Host)
@@ -2624,7 +2659,11 @@ func (h *InstanceHandler) OpenShortExternalAccess(c *gin.Context) {
 		canonicalAccessURL = instanceToken.AccessURL
 	} else {
 		setShortExternalAccessCookies(c, instance.ID, code, token, int(time.Hour.Seconds()))
-		canonicalAccessURL = h.externalAccessEntryURL(instance)
+		canonicalAccessURL, err = h.externalAccessEntryURL(instance)
+		if err != nil {
+			instanceAccessURLFailure(c, err)
+			return
+		}
 	}
 
 	originalPath := c.Request.URL.Path
@@ -2693,7 +2732,11 @@ func (h *InstanceHandler) GetSharedInstanceSession(c *gin.Context) {
 	if !ok {
 		return
 	}
-	proxyURL := h.proxyService.GetProxyURLForInstance(instance, instanceToken.Token)
+	proxyURL, err := h.proxyService.GetProxyURLForInstanceWithError(instance, instanceToken.Token)
+	if err != nil {
+		instanceAccessURLFailure(c, err)
+		return
+	}
 	accessURL := browserAccessEntryURL(instanceToken.AccessURL, proxyURL)
 	sessionExpiresAt := instanceToken.ExpiresAt
 	if isSharedHermesDesktopInstance(instance) {
@@ -2740,23 +2783,25 @@ func (h *InstanceHandler) GetSharedInstanceSession(c *gin.Context) {
 		workspaceRoot = "/config"
 	}
 
-	utils.Success(c, http.StatusOK, "Shared instance session created", gin.H{
+	utils.Success(c, http.StatusOK, "Shared instance session created", h.browserOriginMetadata(instance, gin.H{
 		"instance": gin.H{
-			"id":            instance.ID,
-			"name":          instance.Name,
-			"type":          instance.Type,
-			"status":        instance.Status,
-			"instance_mode": instance.InstanceMode,
-			"runtime_type":  instance.RuntimeType,
+			"id":                 instance.ID,
+			"name":               instance.Name,
+			"type":               instance.Type,
+			"status":             instance.Status,
+			"instance_mode":      instance.InstanceMode,
+			"runtime_type":       instance.RuntimeType,
+			"runtime_generation": instance.RuntimeGeneration,
 		},
 		"access_url":          accessURL,
 		"session_expires_at":  sessionExpiresAt,
 		"share_expires_at":    access.ExpiresAt,
 		"workspace_access":    workspaceAccess,
+		"workbench_scope":     services.SharedWorkbenchScope(code, access),
 		"workspace_available": workspaceAvailable,
 		"workspace_root":      workspaceRoot,
 		"csrf_token":          sharedExternalAccessCSRFToken(code, instanceToken.Token),
-	})
+	}))
 }
 
 func bearerToken(header string) string {
@@ -2812,13 +2857,25 @@ func (h *InstanceHandler) requireExternalAccessInstance(c *gin.Context, access *
 }
 
 func (h *InstanceHandler) issueShortExternalAccessToken(c *gin.Context, instance *models.Instance, code string, access *models.InstanceExternalAccess) (*services.AccessToken, bool) {
-	accessURL := h.externalAccessEntryURL(instance)
-	if accessURL == "" {
-		utils.Error(c, http.StatusServiceUnavailable, "Unable to generate access URL")
+	accessURL, err := h.externalAccessEntryURL(instance)
+	if err != nil || accessURL == "" {
+		instanceAccessURLFailure(c, err)
 		return nil, false
 	}
 	targetPort := h.proxyService.GetTargetPortForInstance(instance)
 	upstream, _ := h.desktopAccessUpstream(c, instance, targetPort)
+	// Opening another tab must retain the existing CSRF proof until renewal is due.
+	// Recheck all routing/owner fields before reusing a signed share session.
+	if cookie, cookieErr := c.Cookie(shortExternalAccessCookieName(code)); cookieErr == nil {
+		existing, tokenErr := h.accessService.ValidateToken(cookie)
+		if tokenErr == nil && existing.InstanceID == instance.ID && existing.UserID == instance.UserID &&
+			existing.InstanceType == instance.Type && existing.AccessURL == accessURL && existing.Upstream == upstream &&
+			existing.TargetPort == targetPort && existing.SessionBinding == sharedExternalAccessSessionBinding(code, access) &&
+			time.Until(existing.ExpiresAt) > 5*time.Minute {
+			setShortExternalAccessCookies(c, instance.ID, code, existing.Token, int(time.Until(existing.ExpiresAt).Seconds()))
+			return existing, true
+		}
+	}
 	instanceToken, err := h.accessService.GenerateBoundToken(
 		instance.UserID,
 		instance.ID,
@@ -2837,15 +2894,18 @@ func (h *InstanceHandler) issueShortExternalAccessToken(c *gin.Context, instance
 	return instanceToken, true
 }
 
-func (h *InstanceHandler) externalAccessEntryURL(instance *models.Instance) string {
+func (h *InstanceHandler) externalAccessEntryURL(instance *models.Instance) (string, error) {
 	if h == nil || h.proxyService == nil || instance == nil {
-		return ""
+		return "", nil
 	}
-	accessURL := h.proxyService.GetProxyURLForInstance(instance, "")
+	accessURL, err := h.proxyService.GetProxyURLForInstanceWithError(instance, "")
+	if err != nil {
+		return "", err
+	}
 	if accessURL == "" && isSharedHermesDesktopInstance(instance) {
-		return sharedHermesDesktopEntryURL(instance.ID)
+		return sharedHermesDesktopEntryURL(instance.ID), nil
 	}
-	return accessURL
+	return accessURL, nil
 }
 
 func (h *InstanceHandler) validShortLinkAccessToken(c *gin.Context, code string, access *models.InstanceExternalAccess) string {

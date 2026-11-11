@@ -16,7 +16,7 @@ import (
 
 func applyIdleStopFixtureSchema(t *testing.T, session db.Session) {
 	t.Helper()
-	for _, name := range []string{"096_add_instance_auto_stop.sql", "097_add_instance_auto_stop_scan.sql", "098_add_instance_auto_stop_policy_status.sql"} {
+	for _, name := range []string{"096_add_instance_auto_stop.sql", "097_add_instance_auto_stop_scan.sql", "098_add_instance_auto_stop_policy_status.sql", "104_add_instance_auto_stop_seconds.sql", "109_add_model_activity_leases.sql"} {
 		raw, err := os.ReadFile("../db/migrations/" + name)
 		if err != nil {
 			t.Fatal(err)
@@ -83,6 +83,17 @@ func idleStopMySQL(t *testing.T) db.Session {
 		t.Fatal(policyStatusErr)
 	}
 	raw = append(raw, policyStatus...)
+	seconds, secondsErr := os.ReadFile("../db/migrations/104_add_instance_auto_stop_seconds.sql")
+	if secondsErr != nil {
+		t.Fatal(secondsErr)
+	}
+	raw = append(raw, seconds...)
+	leases, leaseErr := os.ReadFile("../db/migrations/109_add_model_activity_leases.sql")
+	if leaseErr != nil {
+		t.Fatal(leaseErr)
+	}
+	raw = append(raw, leases...)
+
 	if err != nil {
 		t.Fatal(err)
 	}

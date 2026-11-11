@@ -1,6 +1,7 @@
 package services
 
 import (
+	"clawreef/internal/repository"
 	"context"
 	"errors"
 	"fmt"
@@ -155,5 +156,5 @@ func (s *RuntimeUpgradeService) validateInstanceMutation(ctx context.Context, se
 	if count > 0 {
 		return fmt.Errorf("%w: #%d", ErrWorkspaceUpgradeBusy, id)
 	}
-	return nil
+	return repository.CheckRuntimeOrphanLifecycleGuard(ctx, sess, id)
 }

@@ -17,7 +17,8 @@
     "pw:p2": "playwright test --grep @p2",
     "pw:all": "playwright test",
     "test:report": "playwright show-report playwright-report",
-    "db:reset": "tsx scripts/reset-db.ts"
+    "db:reset": "tsx scripts/reset-db.ts",
+    "test:workbench": "node workbench.browser.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.49.1",

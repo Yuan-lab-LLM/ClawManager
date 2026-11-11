@@ -98,6 +98,7 @@ func (r *runtimePodRepository) UpsertFromAgent(ctx context.Context, pod *models.
 			}
 		}
 		ensureTimestamps(&pod.CreatedAt, &pod.UpdatedAt)
+		// MySQL evaluates updates left to right: reset observations before replacing pod_uid.
 		res, err := tx.SQL().ExecContext(ctx, `
 		INSERT INTO runtime_pods (
 			runtime_type, namespace, pod_name, pod_uid, pod_ip, node_name, deployment_name,
@@ -109,6 +110,8 @@ func (r *runtimePodRepository) UpsertFromAgent(ctx context.Context, pod *models.
 		ON DUPLICATE KEY UPDATE
 			id = LAST_INSERT_ID(id),
 			runtime_type = VALUES(runtime_type),
+			observation_json = IF(BINARY pod_uid <=> BINARY VALUES(pod_uid), observation_json, NULL),
+			observation_at = IF(BINARY pod_uid <=> BINARY VALUES(pod_uid), observation_at, NULL),
 			pod_uid = VALUES(pod_uid),
 			pod_ip = VALUES(pod_ip),
 			node_name = VALUES(node_name),
@@ -274,7 +277,7 @@ func (r *runtimePodRepository) MarkState(ctx context.Context, podID int64, state
 	_, err := r.sess.SQL().ExecContext(ctx, `
 		UPDATE runtime_pods
 		SET state = ?, draining = ?, updated_at = ?
-		WHERE id = ?
+		WHERE id = ? AND state <> 'deleted' AND NOT EXISTS (SELECT 1 FROM runtime_pod_deletion_intents di WHERE di.namespace=runtime_pods.namespace AND di.deployment_name=runtime_pods.deployment_name)
 	`, state, draining, time.Now().UTC(), podID)
 	if err != nil {
 		return fmt.Errorf("failed to mark runtime pod state: %w", err)
@@ -286,7 +289,7 @@ func (r *runtimePodRepository) UpdateHeartbeat(ctx context.Context, podID int64,
 	_, err := r.sess.SQL().ExecContext(ctx, `
 		UPDATE runtime_pods
 		SET state = ?, used_slots = ?, capacity = ?, draining = ?, last_seen_at = ?, updated_at = ?
-		WHERE id = ?
+		WHERE id = ? AND state <> 'deleted' AND NOT EXISTS (SELECT 1 FROM runtime_pod_deletion_intents di WHERE di.namespace=runtime_pods.namespace AND di.deployment_name=runtime_pods.deployment_name)
 	`, state, usedSlots, capacity, draining, lastSeenAt, time.Now().UTC(), podID)
 	if err != nil {
 		return fmt.Errorf("failed to update runtime pod heartbeat: %w", err)
@@ -298,7 +301,7 @@ func (r *runtimePodRepository) MarkUnseenUnhealthy(ctx context.Context, cutoff t
 	_, err := r.sess.SQL().ExecContext(ctx, `
 		UPDATE runtime_pods
 		SET state = 'unhealthy', updated_at = ?
-		WHERE (last_seen_at IS NULL OR last_seen_at < ?) AND state <> 'unhealthy'
+		WHERE (last_seen_at IS NULL OR last_seen_at < ?) AND state NOT IN ('unhealthy','deleted') AND NOT EXISTS (SELECT 1 FROM runtime_pod_deletion_intents di WHERE di.namespace=runtime_pods.namespace AND di.deployment_name=runtime_pods.deployment_name)
 	`, time.Now().UTC(), cutoff)
 	if err != nil {
 		return fmt.Errorf("failed to mark unseen runtime pods unhealthy: %w", err)
