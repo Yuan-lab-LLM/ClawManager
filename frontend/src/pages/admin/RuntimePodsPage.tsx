@@ -47,7 +47,7 @@ type Dialog = {
 const types = ["all", "openclaw", "hermes", "opencode", "deepseek-harness"];
 const emptySummary: RuntimePodSummary = {
   pods: 0, online: 0, schedulable: 0, capacity: 0, ready: 0, occupied: 0,
-  available: 0, running: 0, starting: 0, migrating: 0, error: 0, idle: 0, unknown: 0, unavailable: 0,
+  available: 0, running: 0, starting: 0, migrating: 0, error: 0, idle: 0, releasing: 0, unknown: 0, unavailable: 0,
 };
 
 export default function RuntimePodsPage() {
@@ -182,6 +182,7 @@ export default function RuntimePodsPage() {
         "migrating",
         "error",
         "idle",
+        "releasing",
         "unknown",
         "unavailable",
       ] as const
@@ -276,7 +277,7 @@ export default function RuntimePodsPage() {
                 compact
                 label={t("runtimePods.incoming")}
                 value={summary.available}
-                detail={`${t("runtimePods.idle")} ${summary.idle} · ${t("runtimePods.unknown")} ${summary.unknown ?? 0}`}
+                detail={`${t("runtimePods.idle")} ${summary.idle} · ${t("runtimePods.releasing")} ${summary.releasing ?? 0} · ${t("runtimePods.unknown")} ${summary.unknown ?? 0}`}
               />
             </div>
             <div className="runtime-filters">
@@ -405,6 +406,7 @@ export default function RuntimePodsPage() {
                         <span className="mr-auto min-w-0 text-xs leading-5 tabular-nums text-slate-600" title={`Agent ${summary.ready}/${pod.capacity} · ${stateCounts(pod)}`}>
                           {t(summary.bound === undefined ? "runtimePods.cardReported" : "runtimePods.cardBound")} {summary.bound ?? summary.occupied}/{pod.capacity} · {t("runtimePods.cardFree")} {summary.available}
                           {summary.residual > 0 && ` · ${t("runtimePods.cardResidual")} ${summary.residual}`}
+                          {summary.releasing > 0 && ` · ${t("runtimePods.releasing")} ${summary.releasing}`}
                           {summary.unknown > 0 && ` · ${t("runtimePods.unknown")} ${summary.unknown}`}
                         </span>
                         <button type="button" className="shrink-0 text-slate-600 hover:text-slate-950" aria-label={t("runtimePods.viewAgents", { count: pod.capacity })} title={t("runtimePods.viewAgents", { count: pod.capacity })} onClick={() => selectRuntimePod(pod)}>{t("runtimePods.cardView")}</button>

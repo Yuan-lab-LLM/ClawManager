@@ -125,6 +125,51 @@ func TestRuntimeInventoryConfirmedEmptyIsConsistent(t *testing.T) {
 	}
 }
 
+func TestRuntimeInventoryPendingReleaseIsVisibleWithoutGrantingCapacity(t *testing.T) {
+	for _, scenario := range []string{"stopped owner", "no owner", "SQL unavailable", "binding appeared", "allocation claimed", "stale", "wrong Pod", "gateway running", "occupied", "invalid owner", "other error"} {
+		t.Run(scenario, func(t *testing.T) {
+			p, o, now := observationViewFixture(t)
+			o.Slots[0] = RuntimeSlotObservation{ContainerName: "slot-0", GatewayPort: 20000, State: "unknown", InstanceID: 52, UserID: 1, Generation: 1, GatewayID: "gw-52-1", InstanceState: "stopped", GatewayState: "stopped", Error: "runtime slot quarantine release pending"}
+			var bindings []InstanceRuntimeBinding
+			switch scenario {
+			case "no owner":
+				o.Slots[0] = RuntimeSlotObservation{ContainerName: "slot-0", GatewayPort: 20000, State: "unknown", Error: "runtime slot quarantine release pending"}
+			case "binding appeared":
+				bindings = []InstanceRuntimeBinding{{InstanceID: 99, Generation: 1, GatewayID: "gw-99-1", GatewayPort: 20000, State: "creating"}}
+				p.UsedSlots = 1
+			case "allocation claimed":
+				p.UsedSlots = 1
+			case "stale":
+				old := now.Add(-3 * time.Minute)
+				o.ObservedAt, p.ObservationAt = old, &old
+			case "wrong Pod":
+				o.PodUID = "replacement"
+			case "gateway running":
+				o.Slots[0].GatewayState = "running"
+			case "occupied":
+				o.Slots[0].State = "occupied"
+			case "invalid owner":
+				o.Slots[0].GatewayID = "gw-52-2"
+			case "other error":
+				o.Slots[0].Error = "cleanup is unconfirmed"
+			}
+			setViewObservation(t, &p, o)
+			ReconcileRuntimePodObservation(&p, bindings, scenario != "SQL unavailable", now)
+			slot := p.Slots[0]
+			wantPending := scenario == "stopped owner" || scenario == "no owner"
+			if (slot.ReconciliationState == "releasing") != wantPending || slot.BindingConfirmed {
+				t.Fatalf("pending release projection is unsafe or missing: %+v", slot)
+			}
+			if wantPending && (p.ReconciliationState != "releasing" || p.UnknownSlots != 0 || p.UsedSlots != 0 || slot.InstanceID != nil || slot.ExpectedInstanceID != nil || slot.Generation != nil || slot.GatewayID != "") {
+				t.Fatalf("retired owner was counted or promoted: %+v / %+v", p, slot)
+			}
+			if err := ConfirmedEmptyRuntimeObservation(p, now); err == nil {
+				t.Fatal("pending or uncertain release authorized an empty Pod mutation")
+			}
+		})
+	}
+}
+
 func TestRuntimeInventoryKeepsUnverifiedReportedIDForDiagnosis(t *testing.T) {
 	p, o, now := observationViewFixture(t)
 	o.Slots[0] = RuntimeSlotObservation{ContainerName: "slot-0", GatewayPort: 20000, State: "occupied", InstanceID: 25, GatewayState: "error"}

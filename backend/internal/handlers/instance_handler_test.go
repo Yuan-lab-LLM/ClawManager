@@ -1,7 +1,9 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -17,6 +19,107 @@ import (
 
 	"github.com/gin-gonic/gin"
 )
+
+type busyBatchDeleteService struct {
+	fakeWorkspaceHandlerInstanceService
+	calls   int
+	busy    bool
+	failure error
+}
+
+type queuedBatchDeleteService struct {
+	fakeWorkspaceHandlerInstanceService
+	queued      int
+	synchronous int
+}
+
+func (s *queuedBatchDeleteService) QueueDelete(int) error { s.queued++; return nil }
+func (s *queuedBatchDeleteService) Delete(int) error {
+	s.synchronous++
+	return errors.New("slow native cleanup must run in background")
+}
+
+func TestBatchDeleteLiteInstancesQueuesSlowNativeCleanup(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	service := &queuedBatchDeleteService{fakeWorkspaceHandlerInstanceService: fakeWorkspaceHandlerInstanceService{instances: map[int]*models.Instance{7: {ID: 7, UserID: 1, InstanceMode: "lite", RuntimeType: "gateway"}}}}
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/instances/batch/delete", strings.NewReader(`{"instance_ids":[7]}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set("userID", 1)
+	c.Set("userRole", "user")
+	(&InstanceHandler{instanceService: service}).BatchDeleteLiteInstances(c)
+	if recorder.Code != http.StatusAccepted || service.queued != 1 || service.synchronous != 0 {
+		t.Fatalf("batch request waited for native teardown: queued=%d synchronous=%d response=%s", service.queued, service.synchronous, recorder.Body.String())
+	}
+}
+
+func (s *busyBatchDeleteService) Delete(int) error {
+	s.calls++
+	if s.busy || s.calls == 1 {
+		return fmt.Errorf("scheduler owns lifecycle: %w", models.ErrInstanceLifecycleLockBusy)
+	}
+	return s.failure
+}
+
+func TestBatchDeleteLiteInstancesRetriesTransientLifecycleConflict(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	service := &busyBatchDeleteService{fakeWorkspaceHandlerInstanceService: fakeWorkspaceHandlerInstanceService{instances: map[int]*models.Instance{7: {ID: 7, UserID: 1, Type: "openclaw", InstanceMode: "lite", RuntimeType: "gateway"}}}}
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/instances/batch/delete", strings.NewReader(`{"instance_ids":[7]}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set("userID", 1)
+	c.Set("userRole", "user")
+	(&InstanceHandler{instanceService: service}).BatchDeleteLiteInstances(c)
+	if recorder.Code != http.StatusAccepted || service.calls != 2 {
+		t.Fatalf("transient conflict was not retried: calls=%d response=%s", service.calls, recorder.Body.String())
+	}
+}
+
+func TestBatchDeleteLiteInstancesStopsRetryOnCancellation(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	service := &busyBatchDeleteService{busy: true, fakeWorkspaceHandlerInstanceService: fakeWorkspaceHandlerInstanceService{instances: map[int]*models.Instance{7: {ID: 7, UserID: 1, Type: "openclaw", InstanceMode: "lite", RuntimeType: "gateway"}}}}
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/instances/batch/delete", strings.NewReader(`{"instance_ids":[7]}`)).WithContext(ctx)
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set("userID", 1)
+	c.Set("userRole", "user")
+	(&InstanceHandler{instanceService: service}).BatchDeleteLiteInstances(c)
+	if recorder.Code != http.StatusMultiStatus || service.calls != 1 || !strings.Contains(recorder.Body.String(), context.DeadlineExceeded.Error()) {
+		t.Fatalf("retry did not respect cancellation: calls=%d response=%s", service.calls, recorder.Body.String())
+	}
+	service.calls, service.busy, service.failure = 1, false, errors.New("stop proof unavailable")
+	recorder = httptest.NewRecorder()
+	c, _ = gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/instances/batch/delete", strings.NewReader(`{"instance_ids":[7]}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set("userID", 1)
+	c.Set("userRole", "user")
+	(&InstanceHandler{instanceService: service}).BatchDeleteLiteInstances(c)
+	if service.calls != 2 || !strings.Contains(recorder.Body.String(), "stop proof unavailable") {
+		t.Fatalf("nontransient deletion failure retried or lost: calls=%d response=%s", service.calls, recorder.Body.String())
+	}
+}
+
+func TestBatchDeleteLiteInstancesPreservesDurableLifecycleGuard(t *testing.T) {
+	service := &busyBatchDeleteService{calls: 1, failure: models.ErrInstanceOperationInProgress, fakeWorkspaceHandlerInstanceService: fakeWorkspaceHandlerInstanceService{instances: map[int]*models.Instance{7: {ID: 7, UserID: 1, InstanceMode: "lite", RuntimeType: "gateway"}}}}
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/instances/batch/delete", strings.NewReader(`{"instance_ids":[7]}`)).WithContext(ctx)
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set("userID", 1)
+	c.Set("userRole", "user")
+	(&InstanceHandler{instanceService: service}).BatchDeleteLiteInstances(c)
+	if service.calls != 2 || !strings.Contains(recorder.Body.String(), models.ErrInstanceOperationInProgress.Error()) {
+		t.Fatalf("durable lifecycle guard was retried or hidden: %s", recorder.Body.String())
+	}
+}
 
 type blockingBatchInstanceService struct {
 	fakeWorkspaceHandlerInstanceService
@@ -1354,5 +1457,24 @@ func TestSharedInstanceSessionReusesCurrentCookieUntilRenewalWindow(t *testing.T
 				}
 			}
 		})
+	}
+}
+
+func TestBatchDeleteLiteInstancesSharesRetryBudget(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	service := &busyBatchDeleteService{busy: true, fakeWorkspaceHandlerInstanceService: fakeWorkspaceHandlerInstanceService{instances: map[int]*models.Instance{7: {ID: 7, UserID: 1, InstanceMode: "lite", RuntimeType: "gateway"}, 8: {ID: 8, UserID: 1, InstanceMode: "lite", RuntimeType: "gateway"}}}}
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/instances/batch/delete", strings.NewReader(`{"instance_ids":[7,8]}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set("userID", 1)
+	c.Set("userRole", "user")
+	started := time.Now()
+	(&InstanceHandler{instanceService: service}).BatchDeleteLiteInstances(c)
+	if elapsed := time.Since(started); elapsed > 4500*time.Millisecond {
+		t.Fatalf("each busy item renewed the batch budget: %v", elapsed)
+	}
+	if recorder.Code != http.StatusMultiStatus {
+		t.Fatalf("busy batch result: %s", recorder.Body.String())
 	}
 }

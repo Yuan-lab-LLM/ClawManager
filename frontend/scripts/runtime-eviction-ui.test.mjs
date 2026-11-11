@@ -687,7 +687,7 @@ test('scale-in history exposes cancellation while starting or needing attention 
 
 
 test('unresolved observations cannot be selected for migration or evicted, including force', async () => {
-  for (const reconciliation_state of ['residual', 'conflict', 'unknown', 'consistent']) {
+  for (const reconciliation_state of ['residual', 'conflict', 'releasing', 'unknown', 'consistent']) {
     const unsafe = { ...source, reconciliation_state, slots: [{ index: 1, ready: true, instance_id: 25, expected_instance_id: 118, reconciliation_state, binding_confirmed: false }] };
     const schedule = setup({ kind: 'schedule', pod: unsafe, pods: [unsafe, target], initialIds: [25] });
     assert.equal(find(schedule.render(), node => node.type === 'input' && node.props.type === 'checkbox').length, 0);
@@ -840,4 +840,34 @@ test('orphan recovery requires explicit UID preflight and acknowledgement before
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(view.calls(), 1);
   assert.match(renderToStaticMarkup(view.render()), /retire the selected old Pod/i);
+});
+
+
+test('pending release details keep product copy and disable instance selection', () => {
+  const view = setup({ component: 'RuntimePodDetails', pod: { ...source, used_slots: 0, bound_instances: 0,
+    reconciliation_state: 'releasing', reconciliation_message: 'runtime slot quarantine release pending',
+    slots: [{ index: 1, ready: true, container_name: 'agent-1', reconciliation_state: 'releasing', binding_confirmed: false,
+      observation_message: 'runtime slot quarantine release pending' }] } });
+  button(view.render(), '01').props.onClick();
+  const tree = view.render();
+  const markup = renderToStaticMarkup(tree);
+  assert.match(markup, /Pending release/);
+  assert.match(markup, /This slot will be available once its release is confirmed/);
+  assert.doesNotMatch(markup, /quarantine/);
+  assert.equal(button(tree, 'Manual scheduling'), undefined);
+  assert.equal(find(tree, node => node.type === 'input' && node.props.type === 'checkbox' && !node.props.disabled).length, 0);
+});
+
+test('failed stopped SQL reservation has a history Retry without ordinary migration actions', () => {
+  const slot = { index: 1, ready: true, instance_id: 101, expected_instance_id: 101,
+    generation: 2, gateway_id: 'gw-101-2', instance_state: 'stopped', reconciliation_state: 'unknown',
+    binding_confirmed: false, observation_message: 'SQL binding still reserves runtime slot' };
+  const pod = { ...source, pod_uid: 'source-uid', bindings_reported: true, slots: [slot] };
+  const operation = { id: 'failed-balance', kind: 'balance', status: 'failed', items: [{ instance_id: 101,
+    source_pod_id: pod.id, source_pod_uid: 'source-uid', source_generation: 2, source_gateway_id: 'gw-101-2', state: 'failed' }] };
+  assert.ok(button(setup({ kind: 'history', pod, pods: [pod], historyItems: [operation] }).render(), 'Retry'));
+  for (const extra of [{ generation: 3 }, { instance_state: 'running' }, { gateway_id: 'gw-101-3' }]) {
+    const changed = { ...pod, slots: [{ ...slot, ...extra }] };
+    assert.equal(button(setup({ kind: 'history', pod: changed, pods: [changed], historyItems: [operation] }).render(), 'Retry'), undefined);
+  }
 });

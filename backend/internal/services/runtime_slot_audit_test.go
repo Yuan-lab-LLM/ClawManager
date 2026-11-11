@@ -46,7 +46,7 @@ func auditOccupiedSnapshot(state string) map[string]any {
 	return s
 }
 func TestSlotAllocationRequiresFreshRuntimeExitProof(t *testing.T) {
-	for _, scenario := range []string{"sql-and-cm-lost", "stopped-cleanup-pending", "unreachable", "missing-idle-proof", "wrong-pod-response", "pod-replaced-during-read", "free"} {
+	for _, scenario := range []string{"sql-and-cm-lost", "stopped-cleanup-pending", "unreachable", "missing-idle-proof", "wrong-pod-response", "pod-replaced-during-read", "free", "stopped-old-worker"} {
 		t.Run(scenario, func(t *testing.T) {
 			p := auditTestPod()
 			kube := fake.NewSimpleClientset(p)
@@ -63,6 +63,10 @@ func TestSlotAllocationRequiresFreshRuntimeExitProof(t *testing.T) {
 				case "stopped-cleanup-pending":
 					s = auditOccupiedSnapshot("stopped")
 					s["quarantined"] = true
+				case "stopped-old-worker":
+					s = auditOccupiedSnapshot("stopped")
+					s["idle_confirmed"] = true
+					s["assignment"].(map[string]any)["worker_epoch"] = strings.Repeat("b", 32)
 				case "unreachable":
 					return nil, errors.New("worker unreachable")
 				case "missing-idle-proof":
@@ -79,7 +83,7 @@ func TestSlotAllocationRequiresFreshRuntimeExitProof(t *testing.T) {
 			endpoint, uid := "https://10.0.0.2:19090", "pod-uid"
 			ports, err := client.reservedGatewayPorts(context.Background(), models.RuntimePod{ID: 1, RuntimeType: "openclaw", Capacity: 1, AgentEndpoint: &endpoint, PodUID: &uid})
 			_, blocked := ports[20000]
-			if scenario == "free" {
+			if scenario == "free" || scenario == "stopped-old-worker" {
 				if err != nil || blocked || calls != 1 {
 					t.Fatalf("confirmed free slot unavailable: ports=%v err=%v calls=%d", ports, err, calls)
 				}
@@ -715,7 +719,7 @@ func (r *auditObservationRepository) SaveRuntimeObservation(_ context.Context, i
 }
 
 func TestRuntimeSlotAuditPersistsSanitizedFactsWithoutUpgradingLegacyProof(t *testing.T) {
-	for _, scenario := range []string{"free", "legacy-owner", "old-worker-owner", "malformed-owner", "missing-idle-proof", "read-failure", "wrong-response-uid", "stopped-tombstone", "legacy-stopped-tombstone", "conflicting-gateways", "matching-gateway", "binding-read-failure"} {
+	for _, scenario := range []string{"free", "legacy-owner", "old-worker-owner", "malformed-owner", "missing-idle-proof", "read-failure", "wrong-response-uid", "stopped-tombstone", "stopped-old-worker", "legacy-stopped-tombstone", "conflicting-gateways", "matching-gateway", "binding-read-failure"} {
 		t.Run(scenario, func(t *testing.T) {
 			kube := fake.NewSimpleClientset(auditTestPod())
 			snapshot := auditOccupiedSnapshot("starting")
@@ -746,6 +750,11 @@ func TestRuntimeSlotAuditPersistsSanitizedFactsWithoutUpgradingLegacyProof(t *te
 			case "stopped-tombstone":
 				snapshot = auditOccupiedSnapshot("stopped")
 				snapshot["idle_confirmed"] = true
+				wantState, wantVerified = "free", false
+			case "stopped-old-worker":
+				snapshot = auditOccupiedSnapshot("stopped")
+				snapshot["idle_confirmed"] = true
+				snapshot["assignment"].(map[string]any)["worker_epoch"] = strings.Repeat("b", 32)
 				wantState, wantVerified = "free", false
 			case "legacy-stopped-tombstone":
 				snapshot = auditOccupiedSnapshot("stopped")

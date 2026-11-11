@@ -54,3 +54,23 @@ func TestExpandLLMModelCatalogQualifiesDuplicateProviderModelIDs(t *testing.T) {
 		t.Fatalf("duplicate provider model aliases were not qualified: %#v", expanded)
 	}
 }
+
+func TestSavedProviderCatalogPreservesCaseSensitiveRealIDs(t *testing.T) {
+	for _, saved := range [][]LLMProviderModel{
+		{{ID: "org/Model", DisplayName: "Upper"}, {ID: "org/model", DisplayName: "Lower"}, {ID: "org/Model"}},
+		{{ID: "org/model", DisplayName: "Lower"}},
+	} {
+		configured := LLMModel{DisplayName: "provider", ProviderModelName: "org/Model"}
+		if err := SetLLMProviderModels(&configured, saved); err != nil {
+			t.Fatal(err)
+		}
+		PopulateLLMProviderModels(&configured)
+		if len(configured.ProviderModels) != 2 || configured.ProviderModels[0].ID != "org/Model" || configured.ProviderModels[1].ID != "org/model" {
+			t.Fatalf("case-sensitive IDs or configured default were dropped: %+v", configured.ProviderModels)
+		}
+		expanded := ExpandLLMModelCatalog([]LLMModel{configured})
+		if len(expanded) != 2 || expanded[0].ProviderModelName != "org/Model" || expanded[1].ProviderModelName != "org/model" {
+			t.Fatalf("saved case-sensitive IDs were not expanded: %+v", expanded)
+		}
+	}
+}

@@ -10,7 +10,7 @@ const pod = { id: 1, runtime_type: 'opencode', namespace: 'runtime', deployment_
 ] };
 
 test('agent health remains independent from bound instance state', () => {
-  assert.deepEqual(summarizePod(pod), { capacity: 4, ready: 3, occupied: 2, bound: undefined, residual: 0, available: 1, running: 1, starting: 0, migrating: 0, error: 1, idle: 1, unknown: 0, unavailable: 1 });
+  assert.deepEqual(summarizePod(pod), { capacity: 4, ready: 3, occupied: 2, bound: undefined, residual: 0, available: 1, running: 1, starting: 0, migrating: 0, error: 1, idle: 1, releasing: 0, unknown: 0, unavailable: 1 });
   assert.equal(slotState(pod.slots[1]), 'error');
   assert.equal(slotState({ ready: false, instance_id: 10, instance_state: 'running' }), 'unavailable');
 });
@@ -187,4 +187,42 @@ test('failed move retry resolves only the original reserved empty slot without g
     assert.deepEqual(failedMoveRetrySelections([{ ...source, ...extra }], operation), []);
   }
   for (const extra of [{ source_gateway_id: 'gw-101-9' }, { state: 'completed' }, { recovery: {} }, { orphan_recovery: {} }]) assert.deepEqual(failedMoveRetrySelections([source], { ...operation, items: [{ ...operation.items[0], ...extra }] }), []);
+});
+
+
+test('pending release remains distinct from idle, unknown and incoming capacity', () => {
+  const slot = { index: 1, ready: true, reconciliation_state: 'releasing', binding_confirmed: false };
+  const source = { ...pod, capacity: 2, used_slots: 0, slots: [slot, { index: 2, ready: true, reconciliation_state: 'unknown' }] };
+  assert.equal(slotState(slot), 'releasing');
+  const summary = summarizePod(source);
+  assert.equal(summary.releasing, 1);
+  assert.equal(summary.idle, 0);
+  assert.equal(summary.unknown, 1);
+  assert.equal(summary.available, 0);
+  assert.equal(canManageSlot(slot), false);
+  assert.equal(canManageSlot({ ...slot, instance_id: 101 }), false);
+  assert.equal(canEvictPod(source), false);
+  assert.deepEqual(availableTargets([{ ...source, id: 2 }], source), []);
+});
+
+test('failed move retry includes only the exact stopped SQL reservation behind unknown inventory', () => {
+  const slot = { index: 1, ready: true, instance_id: 101, expected_instance_id: 101,
+    generation: 2, gateway_id: 'gw-101-2', instance_state: 'stopped', reconciliation_state: 'unknown',
+    binding_confirmed: false, observation_message: 'SQL binding still reserves runtime slot' };
+  const source = { ...pod, pod_uid: 'source-uid', agent_reported: true, bindings_reported: true, slots: [slot] };
+  const operation = { id: 'failed-balance', kind: 'balance', status: 'partial_failure', items: [{ instance_id: 101,
+    source_pod_id: 1, source_pod_uid: 'source-uid', source_generation: 2, source_gateway_id: 'gw-101-2', state: 'failed' }] };
+  const [selection] = failedMoveRetrySelections([source], operation);
+  assert.ok(selection, 'exact stopped reservation must retain the history retry entry');
+  assert.equal(selection.slot.instance_id, 101);
+  assert.equal(canManageSlot(slot), false, 'unknown inventory must not grant ordinary lifecycle actions');
+  assert.deepEqual(source.slots[0], slot, 'retry must not change the inventory');
+  for (const extra of [{ instance_id: 102 }, { expected_instance_id: 102 }, { generation: 3 },
+    { gateway_id: 'gw-101-3' }, { instance_state: 'running' }, { ready: false },
+    { binding_confirmed: true }, { observation_message: 'ownership not observed' }, { reconciliation_state: 'releasing' }]) {
+    assert.deepEqual(failedMoveRetrySelections([{ ...source, slots: [{ ...slot, ...extra }] }], operation), [], JSON.stringify(extra));
+  }
+  for (const extra of [{ pod_uid: 'replacement' }, { agent_reported: false }, { bindings_reported: false }, { state: 'unhealthy' }, { state: 'deleted' }]) {
+    assert.deepEqual(failedMoveRetrySelections([{ ...source, ...extra }], operation), [], JSON.stringify(extra));
+  }
 });

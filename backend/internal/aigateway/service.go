@@ -1133,7 +1133,7 @@ func (s *service) prepareChatRequest(ctx context.Context, userID int, req ChatCo
 	}
 	// A removed saved catalog member must not reach the dispatcher's legacy
 	// empty-list fallback, which would resurrect its stale selected snapshot.
-	if resolvedModel.CatalogProviderName != "" && len(prepared.deploymentCandidates) == 0 {
+	if len(prepared.deploymentCandidates) == 0 {
 		return nil, models.ErrModelUnavailable
 	}
 	if isAutoModelRequest(requestedModel) {
@@ -3146,8 +3146,31 @@ func (s *service) resolveRequestedModel(requestedModel string) (*models.LLMModel
 		return s.selectAutoModel()
 	}
 	requestedModel = strings.TrimSpace(requestedModel)
+	items, err := s.listActiveModels()
+	if err != nil {
+		return nil, fmt.Errorf("failed to list active models: %w", err)
+	}
+	items = models.ExpandLLMModelCatalog(items)
+	// Runtime configurations carry the real upstream ID, including namespace
+	// slashes. An owner-visible canonical ID takes priority over a colliding
+	// display alias; UI labels must never redirect it to another real model.
+	for _, item := range orderModelDeployments(items) {
+		if strings.TrimSpace(item.ProviderModelName) == requestedModel {
+			selected := item
+			if !models.LLMChatAvailable(&selected) {
+				return nil, models.ErrChatNotSupported
+			}
+			if selected.CatalogProviderName == "" {
+				selected.CatalogProviderName = strings.TrimSpace(selected.DisplayName)
+				if selected.CatalogProviderName == "" {
+					selected.CatalogProviderName = "clawmanager"
+				}
+			}
+			return &selected, nil
+		}
+	}
 	// Preserve the scoped repository's explicit denial (including its stable
-	// error code) before attempting logical-group aliases.
+	// error code) before attempting legacy display or logical-group aliases.
 	configured, lookupErr := s.modelRepo.GetByDisplayName(requestedModel)
 	if lookupErr != nil {
 		return nil, lookupErr
@@ -3156,13 +3179,11 @@ func (s *service) resolveRequestedModel(requestedModel string) (*models.LLMModel
 		if !models.LLMChatAvailable(configured) {
 			return nil, models.ErrChatNotSupported
 		}
+		if strings.TrimSpace(configured.ProviderModelName) != "" && configured.CatalogProviderName == "" {
+			configured.CatalogProviderName = strings.TrimSpace(configured.DisplayName)
+		}
 		return configured, nil
 	}
-	items, err := s.listActiveModels()
-	if err != nil {
-		return nil, fmt.Errorf("failed to list active models: %w", err)
-	}
-	items = models.ExpandLLMModelCatalog(items)
 	for _, item := range items {
 		if strings.TrimSpace(item.DisplayName) == requestedModel {
 			selected := item
@@ -3277,15 +3298,15 @@ func (s *service) deploymentCandidates(selected *models.LLMModel) []*models.LLMM
 	catalogSelection := strings.TrimSpace(selected.CatalogProviderName) != ""
 	items, err := s.modelRepo.ListActive()
 	if err != nil {
-		if catalogSelection {
-			return nil
-		}
-		return []*models.LLMModel{selected}
+		return nil
 	}
 	if catalogSelection {
 		items = models.ExpandLLMModelCatalog(items)
 	}
 	group := strings.TrimSpace(selected.ModelGroup)
+	if group == "" {
+		group = strings.TrimSpace(selected.CatalogProviderName)
+	}
 	if group == "" {
 		group = selected.DisplayName
 	}
@@ -3298,6 +3319,9 @@ func (s *service) deploymentCandidates(selected *models.LLMModel) []*models.LLMM
 		}
 		itemGroup := strings.TrimSpace(item.ModelGroup)
 		if itemGroup == "" {
+			itemGroup = strings.TrimSpace(item.CatalogProviderName)
+		}
+		if itemGroup == "" {
 			itemGroup = item.DisplayName
 		}
 		// A secure reroute may only fail over to other secure deployments.
@@ -3305,9 +3329,6 @@ func (s *service) deploymentCandidates(selected *models.LLMModel) []*models.LLMM
 			candidate := item
 			candidates = append(candidates, &candidate)
 		}
-	}
-	if len(candidates) == 0 && !catalogSelection {
-		return []*models.LLMModel{selected}
 	}
 	return candidates
 }

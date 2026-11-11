@@ -18,6 +18,7 @@ import (
 )
 
 const RuntimeFaultHelperImageAnnotation = "clawmanager.io/fault-eviction-helper-image"
+const RuntimeFaultSandboxProfileAnnotation = "clawmanager.io/fault-eviction-sandbox-profile"
 
 var ErrRuntimeFaultEvictionPending = errors.New("runtime fault eviction helper pending")
 
@@ -94,12 +95,29 @@ func buildRuntimeEvictionJob(s runtimeeviction.Scope, p *corev1.Pod, image strin
 	no := false
 	yes := false
 	uid := int64(0)
+	var group *int64
+	profile, verified := p.Annotations[RuntimeFaultSandboxProfileAnnotation]
+	if !verified {
+		// Orphan recovery retains the verified complete original Pod snapshot.
+		profile = p.Labels["clawmanager.io/sandbox-profile"]
+	}
+	switch profile {
+	case "":
+	case RuntimeNFSRootlessProfile:
+		uid = 10001
+		// The node CRI socket is root-group writable. This grants no Linux
+		// capabilities and preserves the management-owned NFS ledger identity.
+		gid := int64(0)
+		group = &gid
+	default:
+		return nil, fmt.Errorf("unsupported recovery sandbox profile %q", profile)
+	}
 	procMount := corev1.DefaultProcMount
 	zero := int32(3)
 	deadline := int64(600)
 	ttl := int32(86400)
 	digest := runtimeeviction.ScopeDigest(s)
-	return &batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: "runtime-evict-" + digest[:40], Namespace: s.Namespace, Labels: map[string]string{"clawmanager.io/component": "runtime-recovery"}, Annotations: map[string]string{"clawmanager.io/recovery-scope": digest}}, Spec: batchv1.JobSpec{BackoffLimit: &zero, ActiveDeadlineSeconds: &deadline, TTLSecondsAfterFinished: &ttl, Template: corev1.PodTemplateSpec{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"clawmanager.io/recovery-scope": digest[:40], "clawmanager.io/component": "runtime-recovery"}}, Spec: corev1.PodSpec{NodeName: s.NodeName, AutomountServiceAccountToken: &no, RestartPolicy: corev1.RestartPolicyNever, Tolerations: p.Spec.Tolerations, Volumes: volumes, Containers: []corev1.Container{{Name: "recovery", Image: image, ImagePullPolicy: corev1.PullIfNotPresent, Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("10m"), corev1.ResourceMemory: resource.MustParse("32Mi")}, Limits: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("250m"), corev1.ResourceMemory: resource.MustParse("128Mi")}}, Command: []string{"/usr/local/bin/runtime-eviction-helper"}, Env: []corev1.EnvVar{{Name: "RECOVERY_SCOPE", Value: string(b)}}, VolumeMounts: mounts, SecurityContext: &corev1.SecurityContext{RunAsUser: &uid, ProcMount: &procMount, Privileged: &yes, AllowPrivilegeEscalation: &no, Capabilities: &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}}}, TerminationMessagePath: "/dev/termination-log", TerminationMessagePolicy: corev1.TerminationMessageReadFile}}}}}}, nil
+	return &batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: "runtime-evict-" + digest[:40], Namespace: s.Namespace, Labels: map[string]string{"clawmanager.io/component": "runtime-recovery"}, Annotations: map[string]string{"clawmanager.io/recovery-scope": digest}}, Spec: batchv1.JobSpec{BackoffLimit: &zero, ActiveDeadlineSeconds: &deadline, TTLSecondsAfterFinished: &ttl, Template: corev1.PodTemplateSpec{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"clawmanager.io/recovery-scope": digest[:40], "clawmanager.io/component": "runtime-recovery"}}, Spec: corev1.PodSpec{NodeName: s.NodeName, AutomountServiceAccountToken: &no, RestartPolicy: corev1.RestartPolicyNever, Tolerations: p.Spec.Tolerations, Volumes: volumes, Containers: []corev1.Container{{Name: "recovery", Image: image, ImagePullPolicy: corev1.PullIfNotPresent, Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("10m"), corev1.ResourceMemory: resource.MustParse("32Mi")}, Limits: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("250m"), corev1.ResourceMemory: resource.MustParse("128Mi")}}, Command: []string{"/usr/local/bin/runtime-eviction-helper"}, Env: []corev1.EnvVar{{Name: "RECOVERY_SCOPE", Value: string(b)}}, VolumeMounts: mounts, SecurityContext: &corev1.SecurityContext{RunAsUser: &uid, RunAsGroup: group, ProcMount: &procMount, Privileged: &yes, AllowPrivilegeEscalation: &no, Capabilities: &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}}}, TerminationMessagePath: "/dev/termination-log", TerminationMessagePolicy: corev1.TerminationMessageReadFile}}}}}}, nil
 }
 func trustedRecoveryTemplate(actual, expected corev1.PodSpec) bool {
 	if actual.NodeName != expected.NodeName || actual.RestartPolicy != expected.RestartPolicy || actual.AutomountServiceAccountToken == nil || *actual.AutomountServiceAccountToken || actual.HostPID || actual.HostIPC || actual.HostNetwork || len(actual.InitContainers) != 0 || len(actual.EphemeralContainers) != 0 || len(actual.Containers) != 1 {

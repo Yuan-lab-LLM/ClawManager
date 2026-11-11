@@ -28,7 +28,7 @@ export type RuntimeType =
   | "opencode"
   | "deepseek-harness";
 
-export type RuntimeReconciliationState = "consistent" | "residual" | "conflict" | "unknown";
+export type RuntimeReconciliationState = "consistent" | "residual" | "conflict" | "releasing" | "unknown";
 
 export interface RuntimePod {
   id: number;
@@ -124,6 +124,7 @@ export interface RuntimePodSummary {
   migrating: number;
   error: number;
   idle: number;
+  releasing?: number;
   unknown?: number;
   unavailable: number;
 }

@@ -93,10 +93,31 @@ func faultEvictionPod(ctx context.Context, client kubernetes.Interface, source m
 		return nil, err
 	}
 
-	pod = &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: source.PodName, Namespace: source.Namespace, UID: types.UID(*source.PodUID)}, Spec: *rs.Spec.Template.Spec.DeepCopy()}
+	pod = &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: source.PodName, Namespace: source.Namespace, UID: types.UID(*source.PodUID), Labels: rs.Spec.Template.DeepCopy().Labels}, Spec: *rs.Spec.Template.Spec.DeepCopy()}
 	pod.Spec.NodeName = node.Name
 	pod.Annotations = map[string]string{"clawmanager.io/reconstructed-source": "true"}
 	return pod, nil
+}
+
+// Older journals omitted the original sandbox profile. Recover it only from
+// the exact source Pod or its verified retained ReplicaSet, never the current
+// Deployment template or a replacement Pod's labels.
+func restoreFaultRecoveryProfile(ctx context.Context, client kubernetes.Interface, source models.RuntimePod, snapshot *corev1.Pod) error {
+	if snapshot == nil || source.PodUID == nil || string(snapshot.UID) != *source.PodUID || snapshot.Name != source.PodName || snapshot.Namespace != source.Namespace {
+		return fmt.Errorf("recovery source profile identity changed")
+	}
+	if _, verified := snapshot.Annotations[k8s.RuntimeFaultSandboxProfileAnnotation]; verified {
+		return nil
+	}
+	original, err := faultEvictionPod(ctx, client, source)
+	if err != nil {
+		return fmt.Errorf("verify original recovery sandbox profile: %w", err)
+	}
+	if snapshot.Annotations == nil {
+		snapshot.Annotations = map[string]string{}
+	}
+	snapshot.Annotations[k8s.RuntimeFaultSandboxProfileAnnotation] = original.Labels["clawmanager.io/sandbox-profile"]
+	return nil
 }
 
 func (s *RuntimeManagementService) recoveryEvictionPreflight(ctx context.Context, req RuntimeSchedulingRequest) (*RuntimeSchedulingPreflight, error) {
@@ -292,7 +313,7 @@ func (s *RuntimeManagementService) prepareRecoveryEviction(ctx context.Context, 
 	if !strings.Contains(helperImage, "@sha256:") {
 		return fail(fmt.Errorf("recovery helper image must be pinned by digest"))
 	}
-	clean.Annotations = map[string]string{k8s.RuntimeFaultStorageAnnotation: storage, k8s.RuntimeFaultHelperImageAnnotation: helperImage}
+	clean.Annotations = map[string]string{k8s.RuntimeFaultStorageAnnotation: storage, k8s.RuntimeFaultHelperImageAnnotation: helperImage, k8s.RuntimeFaultSandboxProfileAnnotation: pod.Labels["clawmanager.io/sandbox-profile"]}
 	if pod.Annotations["clawmanager.io/retirement-ledger-source"] == "true" {
 		clean.Annotations["clawmanager.io/retirement-ledger-source"] = "true"
 	}
@@ -473,6 +494,24 @@ func (s *RuntimeManagementService) recoverEvictedSource(ctx context.Context, ope
 			}
 		}
 		if j.Phase == "stopping" {
+			if j.SourcePod == nil {
+				return fmt.Errorf("recovery source Pod snapshot missing")
+			}
+			if _, verified := j.SourcePod.Annotations[k8s.RuntimeFaultSandboxProfileAnnotation]; !verified && j.SourcePod.Annotations["clawmanager.io/retirement-ledger-source"] != "true" {
+				source, e := s.scheduler.podRepo.GetByID(ctx, item.SourcePodID)
+				if e != nil {
+					return e
+				}
+				if source == nil {
+					return fmt.Errorf("recovery source registration missing")
+				}
+				if e = restoreFaultRecoveryProfile(ctx, c.kube, *source, j.SourcePod); e != nil {
+					return e
+				}
+				if e = s.saveRecoveryItem(ctx, operation, item); e != nil {
+					return e
+				}
+			}
 			node, e := c.kube.CoreV1().Nodes().Get(ctx, j.Scope.NodeName, metav1.GetOptions{})
 			if e != nil {
 				return e

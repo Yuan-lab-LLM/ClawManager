@@ -187,6 +187,17 @@ func TestRuntimePodsSummaryKeepsUnknownAndOccupiedSlotsConservative(t *testing.T
 	}
 }
 
+func TestRuntimePodsSummarySeparatesPendingReleaseFromUnknownAndCapacity(t *testing.T) {
+	zero := 0
+	items := []runtimePoolPodListItem{{RuntimePod: models.RuntimePod{ID: 1, State: "ready", Capacity: 2, Slots: []models.RuntimeSlot{{Index: 1, Ready: true, ReconciliationState: "releasing"}, {Index: 2, Ready: true, ReconciliationState: "consistent"}}}, AgentReported: true, BindingsReported: true, BoundInstances: &zero}}
+	summary := runtimePodPage(items, runtimePodPageQuery{page: 1, size: 4}, "", time.Now())["summary"].(map[string]int)
+	for key, want := range map[string]int{"releasing": 1, "unknown": 0, "idle": 1, "available": 1, "occupied": 0, "ready": 2} {
+		if summary[key] != want {
+			t.Errorf("summary[%s]=%d, want %d", key, summary[key], want)
+		}
+	}
+}
+
 func TestRuntimePodsReplacementUIDDoesNotInheritOldAgentOrBindings(t *testing.T) {
 	for _, tc := range []struct {
 		query string

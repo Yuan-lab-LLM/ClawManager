@@ -300,6 +300,7 @@ type instanceService struct {
 	bindingRepo            repository.InstanceRuntimeBindingRepository
 	agentClient            RuntimeAgentClient
 	runtimeUpgradeGuard    RuntimeUpgradeDeletionGuard
+	runtimeSlotRechecker   func(int64)
 	resourceCleanup        func(context.Context, int) error
 	workspaceRoot          string
 	runtimeSandboxProfile  string
@@ -312,6 +313,11 @@ type instanceService struct {
 	secretService          *k8s.SecretService
 	deletionMu             sync.Mutex
 	deletionsInFlight      map[int]struct{}
+}
+
+// SetRuntimeSlotRechecker installs the scheduler's non-blocking source audit request.
+func (s *instanceService) SetRuntimeSlotRechecker(recheck func(int64)) {
+	s.runtimeSlotRechecker = recheck
 }
 
 const (
@@ -1275,12 +1281,7 @@ func (s *instanceService) Start(instanceID int) error {
 }
 
 func (s *instanceService) startWithUpgradeGuard(instanceID int) error {
-	if guard, ok := s.runtimeUpgradeGuard.(interface {
-		WithInstanceMutation(context.Context, int, func() error) error
-	}); ok {
-		return guard.WithInstanceMutation(context.Background(), instanceID, func() error { return s.startInstance(instanceID) })
-	}
-	return s.startInstance(instanceID)
+	return s.withRuntimeUpgradeMutation(instanceID, func() error { return s.startInstance(instanceID) })
 }
 func (s *instanceService) startInstance(instanceID int) error {
 	ctx := context.Background()
@@ -2093,9 +2094,12 @@ func (s *instanceService) resolveGatewayModelInjection(ownerID int) (*gatewayMod
 	reasoningControlForInjection := map[string]string{"auto": models.ReasoningControlNone}
 	contextWindowsForInjection := make(map[string]int, len(items)+1)
 	contextWindowsForInjection["auto"] = safeContextWindow(items)
+	modelsByRealName := make(map[string][]models.LLMModel)
 	modelsByGroup := make(map[string][]models.LLMModel)
 	groupNames := make(map[string]string)
 	for _, item := range items {
+		name := strings.TrimSpace(item.ProviderModelName)
+		modelsByRealName[name] = append(modelsByRealName[name], item)
 		group := strings.TrimSpace(item.ModelGroup)
 		if group == "" {
 			continue
@@ -2114,33 +2118,41 @@ func (s *instanceService) resolveGatewayModelInjection(ownerID int) (*gatewayMod
 	}
 
 	for _, item := range items {
-		displayName := strings.TrimSpace(item.DisplayName)
-		if displayName == "" {
-			displayName = strings.TrimSpace(item.ProviderModelName)
-		}
-		if displayName == "" {
+		modelName := strings.TrimSpace(item.ProviderModelName)
+		if modelName == "" || strings.EqualFold(modelName, "auto") {
 			continue
 		}
 
-		normalizedName := strings.ToLower(displayName)
+		normalizedName := modelName
 		if _, exists := seen[normalizedName]; exists {
 			continue
 		}
 		seen[normalizedName] = struct{}{}
-		modelsForInjection = append(modelsForInjection, displayName)
-		providerRefs = append(providerRefs, modelCatalogProviderName(item)+"/"+displayName)
-		models.PopulateLLMReasoningCapability(&item)
-		reasoningForInjection[displayName] = item.SupportsReasoning && item.ReasoningEnabled
-		qualifiedName := modelCatalogProviderName(item) + "/" + displayName
-		reasoningForInjection[qualifiedName] = reasoningForInjection[displayName]
-		visionForInjection[displayName] = models.LLMVisionInputAvailable(&item)
-		reasoningControlForInjection[displayName] = item.ReasoningControl
-		reasoningControlForInjection[qualifiedName] = item.ReasoningControl
-		contextWindow := item.ContextWindowTokens
-		if normalizedGroup := strings.ToLower(strings.TrimSpace(item.ModelGroup)); normalizedGroup != "" {
-			contextWindow = safeContextWindow(modelsByGroup[normalizedGroup])
+		modelsForInjection = append(modelsForInjection, modelName)
+		qualifiedName := "clawmanager/" + modelName
+		providerRefs = append(providerRefs, qualifiedName)
+		// One runtime ID may route through several deployments. Advertise only
+		// capabilities and context supported by every deployment of that ID.
+		reasoning, vision := true, true
+		control := ""
+		deployments := modelsByRealName[normalizedName]
+		for i, deployment := range deployments {
+			models.PopulateLLMReasoningCapability(&deployment)
+			reasoning = reasoning && deployment.SupportsReasoning && deployment.ReasoningEnabled
+			vision = vision && models.LLMVisionInputAvailable(&deployment)
+			if i == 0 {
+				control = deployment.ReasoningControl
+			} else if control != deployment.ReasoningControl {
+				control = models.ReasoningControlNone
+				reasoning = false
+			}
 		}
-		contextWindowsForInjection[displayName] = contextWindow
+		for _, name := range []string{modelName, qualifiedName} {
+			reasoningForInjection[name] = reasoning
+			visionForInjection[name] = vision
+			reasoningControlForInjection[name] = control
+			contextWindowsForInjection[name] = safeContextWindow(deployments)
+		}
 	}
 
 	rawModels, err := json.Marshal(modelsForInjection)
@@ -2352,6 +2364,9 @@ func (s *instanceService) resumeManualStop(ctx context.Context, op models.Instan
 		if err = s.bindingRepo.DeleteByInstanceIDAndReleaseSlot(ctx, op.InstanceID, op.RuntimePodID); err != nil {
 			return err
 		}
+		if s.runtimeSlotRechecker != nil {
+			s.runtimeSlotRechecker(op.RuntimePodID)
+		}
 	} else if op.Phase != "teardown_confirmed" {
 		if op.RuntimePodID != 0 {
 			return fmt.Errorf("manual stop binding disappeared without durable teardown proof")
@@ -2445,6 +2460,9 @@ func (s *instanceService) cleanupV2GatewayBinding(ctx context.Context, instance 
 	if err := s.bindingRepo.DeleteByInstanceIDAndReleaseSlot(ctx, instance.ID, binding.RuntimePodID); err != nil {
 		return fmt.Errorf("failed to delete v2 runtime binding and release slot: %w", err)
 	}
+	if s.runtimeSlotRechecker != nil {
+		s.runtimeSlotRechecker(binding.RuntimePodID)
+	}
 	return s.verifyUnboundGatewayCleanup(ctx, instance)
 }
 
@@ -2495,12 +2513,7 @@ func (s *instanceService) Stop(instanceID int) error {
 }
 
 func (s *instanceService) stopWithUpgradeGuard(instanceID int) error {
-	if guard, ok := s.runtimeUpgradeGuard.(interface {
-		WithInstanceMutation(context.Context, int, func() error) error
-	}); ok {
-		return guard.WithInstanceMutation(context.Background(), instanceID, func() error { return s.stopInstance(instanceID) })
-	}
-	return s.stopInstance(instanceID)
+	return s.withRuntimeUpgradeMutation(instanceID, func() error { return s.stopInstance(instanceID) })
 }
 func (s *instanceService) stopInstance(instanceID int) error {
 	ctx := context.Background()
@@ -2571,6 +2584,18 @@ func (s *instanceService) Restart(instanceID int) error {
 // Combine the upstream OpenClaw recovery fence with the instance lifecycle
 // lock held by callers, without reacquiring either lock inside Stop/Start.
 func (s *instanceService) withRuntimeUpgradeMutation(instanceID int, run func() error) error {
+	mutation := run
+	run = func() error {
+		instance, err := s.instanceRepo.GetByID(instanceID)
+		if err != nil {
+			return err
+		}
+		// Accepted deletion remains terminal while its background worker waits.
+		if instance != nil && instance.Status == "deleting" {
+			return models.ErrInstanceStopping
+		}
+		return mutation()
+	}
 	if guard, ok := s.runtimeUpgradeGuard.(interface {
 		WithInstanceMutation(context.Context, int, func() error) error
 	}); ok {
@@ -3026,6 +3051,11 @@ func (s *instanceService) Reset(instanceID int) error {
 			return err
 		}
 	}
+	release, err := s.acquireLifecycleOperation(instanceID)
+	if err != nil {
+		return err
+	}
+	defer release()
 	ctx := context.Background()
 	instance, err := s.instanceRepo.GetByID(instanceID)
 	if err != nil {
@@ -3033,6 +3063,9 @@ func (s *instanceService) Reset(instanceID int) error {
 	}
 	if instance == nil {
 		return fmt.Errorf("instance not found")
+	}
+	if instance.Status == "deleting" {
+		return models.ErrInstanceStopping
 	}
 	if err := s.ValidateDelete(instanceID); err != nil {
 		return err
@@ -3068,7 +3101,7 @@ func (s *instanceService) Reset(instanceID int) error {
 			s.markResetError(instanceID)
 			return err
 		}
-		if err := s.Start(instanceID); err != nil {
+		if err := s.startWithUpgradeGuard(instanceID); err != nil {
 			s.markResetError(instanceID)
 			return fmt.Errorf("failed to create fresh Lite runtime: %w", err)
 		}
@@ -3154,7 +3187,7 @@ func (s *instanceService) Reset(instanceID int) error {
 		s.markResetError(instanceID)
 		return err
 	}
-	if err := s.Start(instanceID); err != nil {
+	if err := s.startWithUpgradeGuard(instanceID); err != nil {
 		s.markResetError(instanceID)
 		return fmt.Errorf("failed to create fresh Pro runtime: %w", err)
 	}
@@ -3473,6 +3506,8 @@ func (s *instanceService) scheduleLegacyDeletion(userID, instanceID int) {
 		return
 	}
 	go func() {
+		instanceDeletionWorkers <- struct{}{}
+		defer func() { <-instanceDeletionWorkers }()
 		defer s.finishDeletion(instanceID)
 		s.completeDeletion(userID, instanceID)
 	}()
@@ -3573,6 +3608,22 @@ func (s *instanceService) completeDeletion(userID, instanceID int) {
 	defer lifecycleRelease()
 	instance, err := s.instanceRepo.GetByID(instanceID)
 	if err != nil || instance == nil || instance.UserID != userID || instance.Status != "deleting" {
+		return
+	}
+	if err := s.ValidateDelete(instanceID); err != nil {
+		fmt.Printf("Deletion of instance %d deferred: %v\n", instanceID, err)
+		return
+	}
+	if s.ownerTeamMutationGuard != nil {
+		if err := s.ownerTeamMutationGuard(instanceID, "delete", 0); err != nil {
+			fmt.Printf("Deletion of instance %d deferred: %v\n", instanceID, err)
+			return
+		}
+	}
+	if _, native := v2RuntimeTypeForInstance(instance); native {
+		if err := s.deleteV2Instance(ctx, instance); err != nil {
+			fmt.Printf("Native deletion of instance %d deferred: %v\n", instanceID, err)
+		}
 		return
 	}
 

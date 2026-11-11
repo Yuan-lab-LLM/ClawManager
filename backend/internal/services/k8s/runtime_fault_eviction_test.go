@@ -77,3 +77,44 @@ func TestRecoveryJobPinnedScope(t *testing.T) {
 		}
 	}
 }
+
+func TestRecoveryJobUsesVerifiedStorageIdentity(t *testing.T) {
+	s := runtimeeviction.Scope{Version: 1, OperationID: "op", Namespace: "ns", PodName: "pod", PodUID: "uid", NodeName: "node", NodeUID: "nodeuid", NodeBootID: "boot", ContainerName: "slot-0", RuntimeType: "openclaw", GatewayID: "gw-1-1", WorkspaceRoot: "/workspaces", InstanceID: 1, UserID: 1, Generation: 1}
+	for _, profile := range []string{"", "nfs-rootless-v1", "unknown"} {
+		t.Run(profile, func(t *testing.T) {
+			p := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod", Namespace: "ns", UID: "uid", Annotations: map[string]string{"clawmanager.io/fault-eviction-sandbox-profile": profile}}, Spec: corev1.PodSpec{NodeName: "node", Containers: []corev1.Container{{Name: "slot-0", VolumeMounts: []corev1.VolumeMount{{Name: "ws", MountPath: "/workspaces"}}}}, Volumes: []corev1.Volume{{Name: "ws", VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: "data"}}}}}}
+			job, err := buildRuntimeEvictionJob(s, p, "helper@sha256:abc")
+			if profile == "unknown" {
+				if err == nil {
+					t.Fatal("unknown storage identity accepted")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			security := job.Spec.Template.Spec.Containers[0].SecurityContext
+			want := int64(0)
+			if profile == "nfs-rootless-v1" {
+				want = 10001
+			}
+			if security.RunAsUser == nil || *security.RunAsUser != want {
+				t.Fatalf("helper UID=%v, want %d", security.RunAsUser, want)
+			}
+			if profile != "" && (security.RunAsGroup == nil || *security.RunAsGroup != 0) {
+				t.Fatal("helper lost CRI socket group")
+			}
+			if len(security.Capabilities.Add) != 0 || len(security.Capabilities.Drop) != 1 || security.Capabilities.Drop[0] != "ALL" {
+				t.Fatal("helper gained capabilities")
+			}
+			if profile == RuntimeNFSRootlessProfile {
+				old := job.Spec.Template.Spec.DeepCopy()
+				root := int64(0)
+				old.Containers[0].SecurityContext.RunAsUser = &root
+				if trustedRecoveryTemplate(*old, job.Spec.Template.Spec) {
+					t.Fatal("old root helper template accepted for rootless storage")
+				}
+			}
+		})
+	}
+}

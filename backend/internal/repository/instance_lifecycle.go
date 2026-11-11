@@ -55,7 +55,7 @@ func (r *instanceRepository) acquireLifecycleLock(ctx context.Context, id int) (
 	if !acquired.Valid || acquired.Int64 != 1 {
 		_ = conn.Close()
 		if acquired.Valid && acquired.Int64 == 0 {
-			return nil, models.ErrInstanceOperationInProgress
+			return nil, models.ErrInstanceLifecycleLockBusy
 		}
 		return nil, fmt.Errorf("instance lifecycle lock returned no result")
 	}

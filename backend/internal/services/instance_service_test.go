@@ -77,8 +77,8 @@ func TestBuildGatewayEnvInjectsGatewayModelCatalog(t *testing.T) {
 			service := &instanceService{
 				llmModelRepo: &stubLLMModelRepository{
 					active: []models.LLMModel{
-						{DisplayName: "GPT-4.1", ModelGroup: "general", ContextWindowTokens: 128000},
-						{DisplayName: "Claude 3.7 Sonnet", ModelGroup: "general", ContextWindowTokens: 200000},
+						{DisplayName: "GPT-4.1", ProviderModelName: "gpt-4.1", ModelGroup: "general", ContextWindowTokens: 128000},
+						{DisplayName: "Claude 3.7 Sonnet", ProviderModelName: "claude-3.7-sonnet", ModelGroup: "general", ContextWindowTokens: 200000},
 						{DisplayName: "auto", ContextWindowTokens: 64000},
 						{ProviderModelName: "deepseek-r1", ContextWindowTokens: 32000, ProviderType: models.ProviderTypeOpenAICompatible, ProtocolType: models.ProtocolTypeOpenAICompatible, BaseURL: "https://api.deepseek.com"},
 					},
@@ -97,16 +97,16 @@ func TestBuildGatewayEnvInjectsGatewayModelCatalog(t *testing.T) {
 			if env["CLAWMANAGER_LLM_BASE_URL"] != "http://gateway.example/api/v1/gateway/llm" {
 				t.Fatalf("expected CLAWMANAGER_LLM_BASE_URL to use gateway base URL, got %q", env["CLAWMANAGER_LLM_BASE_URL"])
 			}
-			if env["CLAWMANAGER_LLM_MODEL"] != `["auto","GPT-4.1","Claude 3.7 Sonnet","deepseek-r1"]` {
+			if env["CLAWMANAGER_LLM_MODEL"] != `["auto","gpt-4.1","claude-3.7-sonnet","deepseek-r1"]` {
 				t.Fatalf("expected CLAWMANAGER_LLM_MODEL to contain injected model catalog JSON, got %q", env["CLAWMANAGER_LLM_MODEL"])
 			}
-			if env["CLAWMANAGER_LLM_REASONING"] != `{"Claude 3.7 Sonnet":false,"Claude 3.7 Sonnet/Claude 3.7 Sonnet":false,"GPT-4.1":false,"GPT-4.1/GPT-4.1":false,"auto":false,"deepseek-r1":false,"openai-compatible/deepseek-r1":false}` {
+			if env["CLAWMANAGER_LLM_REASONING"] != `{"auto":false,"claude-3.7-sonnet":false,"clawmanager/claude-3.7-sonnet":false,"clawmanager/deepseek-r1":false,"clawmanager/gpt-4.1":false,"deepseek-r1":false,"gpt-4.1":false}` {
 				t.Fatalf("expected authoritative reasoning settings, got %q", env["CLAWMANAGER_LLM_REASONING"])
 			}
-			if env["CLAWMANAGER_LLM_REASONING_CONTROL"] != `{"Claude 3.7 Sonnet":"","Claude 3.7 Sonnet/Claude 3.7 Sonnet":"","GPT-4.1":"","GPT-4.1/GPT-4.1":"","auto":"","deepseek-r1":"deepseek-thinking","openai-compatible/deepseek-r1":"deepseek-thinking"}` {
+			if env["CLAWMANAGER_LLM_REASONING_CONTROL"] != `{"auto":"","claude-3.7-sonnet":"","clawmanager/claude-3.7-sonnet":"","clawmanager/deepseek-r1":"deepseek-thinking","clawmanager/gpt-4.1":"","deepseek-r1":"deepseek-thinking","gpt-4.1":""}` {
 				t.Fatalf("expected authoritative reasoning controls, got %q", env["CLAWMANAGER_LLM_REASONING_CONTROL"])
 			}
-			if env["CLAWMANAGER_LLM_PROVIDER_MODELS"] != `["auto/auto","GPT-4.1/GPT-4.1","Claude 3.7 Sonnet/Claude 3.7 Sonnet","openai-compatible/deepseek-r1"]` {
+			if env["CLAWMANAGER_LLM_PROVIDER_MODELS"] != `["auto/auto","clawmanager/gpt-4.1","clawmanager/claude-3.7-sonnet","clawmanager/deepseek-r1"]` {
 				t.Fatalf("expected CLAWMANAGER_LLM_PROVIDER_MODELS to preserve configured provider names, got %q", env["CLAWMANAGER_LLM_PROVIDER_MODELS"])
 			}
 			if env["OPENAI_MODEL"] != "auto" {
@@ -119,7 +119,7 @@ func TestBuildGatewayEnvInjectsGatewayModelCatalog(t *testing.T) {
 			if err := json.Unmarshal([]byte(env["CLAWMANAGER_LLM_CONTEXT_WINDOWS"]), &contextWindows); err != nil {
 				t.Fatalf("context window catalogue is not valid JSON: %v", err)
 			}
-			if contextWindows["GPT-4.1"] != 128000 || contextWindows["Claude 3.7 Sonnet"] != 128000 || contextWindows["general"] != 128000 {
+			if contextWindows["gpt-4.1"] != 128000 || contextWindows["claude-3.7-sonnet"] != 200000 || contextWindows["general"] != 128000 {
 				t.Fatalf("unexpected context window catalogue: %#v", contextWindows)
 			}
 			if env["CLAWMANAGER_LLM_API_KEY"] != token || env["OPENAI_API_KEY"] != token {
@@ -165,7 +165,7 @@ func TestResolveGatewayModelInjectionUsesSavedProviderCatalog(t *testing.T) {
 	if injection.modelsJSON != `["auto","qwen3.8","glm-5.2","minimax-m3"]` {
 		t.Fatalf("saved provider catalog was not expanded or unsaved discovery leaked: %s", injection.modelsJSON)
 	}
-	if injection.providerModelsJSON != `["auto/auto","icompify/qwen3.8","icompify/glm-5.2","icompify/minimax-m3"]` {
+	if injection.providerModelsJSON != `["auto/auto","clawmanager/qwen3.8","clawmanager/glm-5.2","clawmanager/minimax-m3"]` {
 		t.Fatalf("provider-qualified catalog was not injected: %s", injection.providerModelsJSON)
 	}
 	if injection.codingAgentDefaultModel != "qwen3.8" {
@@ -192,13 +192,13 @@ func TestResolveGatewayModelInjectionIgnoresUnapprovedExpandedCatalog(t *testing
 	if err != nil {
 		t.Fatalf("resolveGatewayModelInjection returned error: %v", err)
 	}
-	if injection.modelsJSON != `["auto","model-1"]` {
+	if injection.modelsJSON != `["auto","provider-model-1"]` {
 		t.Fatalf("expanded provider models were not injected: %s", injection.modelsJSON)
 	}
-	if injection.providerModelsJSON != `["auto/auto","configured-provider/model-1"]` {
+	if injection.providerModelsJSON != `["auto/auto","clawmanager/provider-model-1"]` {
 		t.Fatalf("expanded provider model references were not injected: %s", injection.providerModelsJSON)
 	}
-	if injection.codingAgentDefaultModel != "model-1" {
+	if injection.codingAgentDefaultModel != "provider-model-1" {
 		t.Fatalf("coding agent default = %q, want model-1", injection.codingAgentDefaultModel)
 	}
 }
@@ -228,20 +228,20 @@ func assertOpenCodeGatewayConfig(t *testing.T, raw string) {
 	if !ok || provider.NPM != "@ai-sdk/openai-compatible" || provider.Options["baseURL"] != "{env:CLAWMANAGER_LLM_BASE_URL}" || provider.Options["apiKey"] != "{env:CLAWMANAGER_LLM_API_KEY}" {
 		t.Fatalf("missing governed provider: %s", raw)
 	}
-	for _, name := range []string{"auto", "GPT-4.1", "Claude 3.7 Sonnet", "deepseek-r1"} {
+	for _, name := range []string{"auto", "gpt-4.1", "claude-3.7-sonnet", "deepseek-r1"} {
 		if _, ok := provider.Models[name]; !ok {
 			t.Fatalf("missing model %q", name)
 		}
 	}
-	if provider.Models["auto"].Limit.Context != 32000 || provider.Models["GPT-4.1"].Limit.Context != 128000 || provider.Models["Claude 3.7 Sonnet"].Limit.Context != 128000 {
+	if provider.Models["auto"].Limit.Context != 32000 || provider.Models["gpt-4.1"].Limit.Context != 128000 || provider.Models["claude-3.7-sonnet"].Limit.Context != 200000 {
 		t.Fatalf("OpenCode config is missing model context limits: %s", raw)
 	}
 }
 
 func TestResolveGatewayModelInjectionKeepsUnknownAggregateContextWindow(t *testing.T) {
 	service := &instanceService{llmModelRepo: &stubLLMModelRepository{active: []models.LLMModel{
-		{DisplayName: "known", ModelGroup: "shared", ContextWindowTokens: 128000},
-		{DisplayName: "unknown", ModelGroup: "shared", ContextWindowTokens: 0},
+		{DisplayName: "known", ProviderModelName: "known", ModelGroup: "shared", ContextWindowTokens: 128000},
+		{DisplayName: "unknown", ProviderModelName: "unknown", ModelGroup: "shared", ContextWindowTokens: 0},
 	}}}
 
 	injection, err := service.resolveGatewayModelInjection(1)
@@ -255,7 +255,7 @@ func TestResolveGatewayModelInjectionKeepsUnknownAggregateContextWindow(t *testi
 	if err := json.Unmarshal([]byte(injection.contextWindowsJSON), &contextWindows); err != nil {
 		t.Fatalf("context window catalogue is not valid JSON: %v", err)
 	}
-	if contextWindows["shared"] != 0 || contextWindows["known"] != 0 || contextWindows["unknown"] != 0 {
+	if contextWindows["shared"] != 0 || contextWindows["known"] != 128000 || contextWindows["unknown"] != 0 {
 		t.Fatalf("unexpected context window aggregation: %#v", contextWindows)
 	}
 }

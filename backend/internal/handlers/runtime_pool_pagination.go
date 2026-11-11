@@ -45,6 +45,8 @@ func runtimePodSchedulable(pod runtimePoolPodListItem) bool {
 
 func runtimeInventorySlotState(slot models.RuntimeSlot) string {
 	switch slot.ReconciliationState {
+	case "releasing":
+		return "releasing"
 	case "unknown":
 		return "unknown"
 	case "residual", "conflict":
@@ -101,7 +103,7 @@ func runtimePodMatchesSearch(pod runtimePoolPodListItem, search string) bool {
 func runtimePodPage(items []runtimePoolPodListItem, query runtimePodPageQuery, runtimeType string, now time.Time) gin.H {
 	summary := map[string]int{}
 	bindingsKnown := true
-	for _, key := range []string{"pods", "online", "schedulable", "capacity", "ready", "occupied", "bound_instances", "available", "running", "starting", "migrating", "error", "idle", "unavailable", "unknown"} {
+	for _, key := range []string{"pods", "online", "schedulable", "capacity", "ready", "occupied", "bound_instances", "available", "running", "starting", "migrating", "error", "idle", "unavailable", "unknown", "releasing"} {
 		summary[key] = 0
 	}
 	nodeSet := map[string]bool{}

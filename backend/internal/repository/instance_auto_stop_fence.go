@@ -71,6 +71,9 @@ func checkAutoStopRuntimeState(ctx context.Context, s db.Session, id int, target
 	if generation < gen {
 		return ErrStaleRuntimeGeneration
 	}
+	if current == "deleting" && target != "deleting" {
+		return models.ErrInstanceStopping
+	}
 	if target == "stopped" || target == "deleting" {
 		return nil
 	}
