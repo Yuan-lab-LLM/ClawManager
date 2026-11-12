@@ -1,6 +1,6 @@
 import { allowBrowserInstance } from "../../lib/browserOrigin";
 import axios from "axios";
-import { ArrowLeft, Maximize2, Minimize2, RefreshCw, RotateCw, ShieldAlert } from "lucide-react";
+import { ArrowLeft, Maximize2, Minimize2, PanelRightClose, PanelRightOpen, RefreshCw, RotateCw, ShieldAlert } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useParams } from "react-router-dom";
 import { ownerOverviewURL, ownerTeamOverviewURL } from "../../lib/ownerPortalNavigation";
@@ -9,6 +9,7 @@ import { useExpiringResourceRenewal } from "../../hooks/useExpiringResourceRenew
 import { useOwnerActivity } from "../../hooks/useOwnerActivity";
 import { useRuntimeCertificateTrust } from "../../hooks/useRuntimeCertificateTrust";
 import { refreshDedicatedRuntimeCookie } from "../../lib/instanceAccess";
+import { OWNER_SESSION_INVALID, OWNER_SESSION_MESSAGE, isOwnerSessionFailure } from "../../lib/ownerReadNotice";
 import { prepareOpenClawControlUIStorage } from "../../lib/openclawControlStorage";
 import {
   ieiSystemService,
@@ -67,6 +68,11 @@ export default function IEISystemInstancePage() {
   const requestRef = useRef(0);
   const [frameVersion, setFrameVersion] = useState(0);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [workspaceVisible, setWorkspaceVisible] = useState(true);
+  const recoveryAttempts = useRef(0);
+  const recoveryInFlight = useRef(false);
+  const recoveryTimer = useRef<number | null>(null);
+  const wakeRecovery = useRef<(() => void) | null>(null);
   const [restartDialogOpen, setRestartDialogOpen] = useState(false);
   const [restartInProgress, setRestartInProgress] = useState(false);
   const [restartNotice, setRestartNotice] = useState<string | null>(null);
@@ -76,13 +82,19 @@ export default function IEISystemInstancePage() {
 
   useEffect(() => {
     mountedRef.current = true;
+    const invalidate = () => { requestRef.current++; setInstance(null); setAccess(null); setError(OWNER_SESSION_MESSAGE); };
+    window.addEventListener(OWNER_SESSION_INVALID, invalidate);
     return () => {
       mountedRef.current = false;
+      wakeRecovery.current?.();
+      window.removeEventListener(OWNER_SESSION_INVALID, invalidate);
     };
   }, []);
 
   const openInstance = useCallback(async () => {
     const request = ++requestRef.current;
+    recoveryAttempts.current = 0;
+    wakeRecovery.current?.();
     if (!Number.isInteger(instanceID) || instanceID <= 0) {
       setError("实例编号无效。");
       setLoading(false);
@@ -108,7 +120,10 @@ export default function IEISystemInstancePage() {
           setInstance(null);
           setError("访问验证失效，请返回列表重新登录或确认实例权限。");
         } else {
-          setRuntimeError(nextInstance.status === "stopped" ? "实例已停止，运行界面暂不可用。" : nextInstance.status === "error" ? "实例运行异常，暂时无法连接运行界面。" : "暂时无法连接运行界面，请稍后重新连接。");
+          const accessCode = axios.isAxiosError(accessError) ? accessError.response?.data?.error_code : undefined;
+          setRuntimeError(accessCode === "runtime_access_not_configured"
+            ? "OpenCode 访问入口尚未正确配置，请联系管理员。无需重启实例。"
+            : nextInstance.status === "stopped" ? "实例已停止，运行界面暂不可用。" : nextInstance.status === "error" ? "实例运行异常，暂时无法连接运行界面。" : "暂时无法连接运行界面，请稍后重新连接。");
         }
       }
     } catch (openError) {
@@ -120,6 +135,45 @@ export default function IEISystemInstancePage() {
       if (request === requestRef.current && mountedRef.current) setLoading(false);
     }
   }, [instanceID]);
+
+  // Only renew access credentials: never restart the Runtime or its model turn.
+  const recoverRuntimeConnection = useCallback(async () => {
+    if (!mountedRef.current || recoveryInFlight.current || recoveryAttempts.current >= 5) return;
+    const request = requestRef.current;
+    recoveryInFlight.current = true;
+    for (; recoveryAttempts.current < 5 && mountedRef.current && request === requestRef.current;) {
+      recoveryAttempts.current++;
+      try {
+        await ieiSystemService.refreshSession();
+        const next = await ieiSystemService.generateAccess(instanceID);
+        await refreshDedicatedRuntimeCookie(resolveEmbedUrl(next.access_url));
+        if (!mountedRef.current || request !== requestRef.current) break;
+        setAccess(next); setRuntimeError(null); setFrameVersion(value => value + 1);
+        break;
+      } catch (error) {
+        if (!mountedRef.current || request !== requestRef.current) break;
+        if (isOwnerSessionFailure(error) || (axios.isAxiosError(error) && [403,404].includes(error.response?.status ?? 0))) break;
+        if (recoveryAttempts.current >= 5) { setRuntimeError('运行界面连接暂未恢复，请点击重新连接。'); break; }
+        await new Promise<void>(resolve => {
+          const wake = () => { if (recoveryTimer.current !== null) window.clearTimeout(recoveryTimer.current); recoveryTimer.current = null; wakeRecovery.current = null; resolve(); };
+          wakeRecovery.current = wake;
+          recoveryTimer.current = window.setTimeout(wake, 5_000);
+        });
+      }
+    }
+    recoveryInFlight.current = false;
+  }, [instanceID]);
+
+  useEffect(() => {
+    const authMessage = (event: MessageEvent) => {
+      const frame = frameContainerRef.current?.querySelector('iframe');
+      if (!frame || event.source !== frame.contentWindow || event.origin !== new URL(frame.src, window.location.href).origin) return;
+      const type = typeof event.data?.type === 'string' ? event.data.type : '';
+      if ((event.data?.status ?? event.data?.httpStatus) === 401 || /(?:auth|session).*(?:error|expired|unauthorized)|401/i.test(type)) void recoverRuntimeConnection();
+    };
+    window.addEventListener('message', authMessage);
+    return () => window.removeEventListener('message', authMessage);
+  }, [recoverRuntimeConnection]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -326,7 +380,7 @@ export default function IEISystemInstancePage() {
         </div>
       )}
 
-      <section className="grid min-h-0 flex-1 gap-4 p-4 max-xl:grid-rows-[minmax(420px,1fr)_minmax(360px,0.8fr)] xl:grid-cols-[minmax(0,1fr)_minmax(360px,28rem)]">
+      <section className={`grid min-h-0 flex-1 gap-4 p-4 ${workspaceVisible ? 'max-xl:grid-rows-[minmax(420px,1fr)_minmax(360px,0.8fr)] xl:grid-cols-[minmax(0,1fr)_minmax(360px,28rem)]' : 'grid-cols-1'}`}>
         <section
           ref={frameContainerRef}
           className="cm-surface relative flex min-h-0 min-w-0 flex-col overflow-hidden bg-white"
@@ -335,6 +389,9 @@ export default function IEISystemInstancePage() {
           <div className="flex h-12 shrink-0 items-center justify-between border-b border-slate-200 px-3">
             <span className="min-w-0 truncate text-sm font-medium text-slate-950">{instanceDisplayName(instance)}</span>
             <div className="flex shrink-0 items-center gap-2">
+              <button type="button" className="cm-icon-button" title={workspaceVisible ? '收起文件区' : '展开文件区'} aria-expanded={workspaceVisible} aria-controls="iei-instance-workspace" onClick={() => setWorkspaceVisible(value => !value)}>
+                {workspaceVisible ? <PanelRightClose className="h-4 w-4"/> : <PanelRightOpen className="h-4 w-4"/>}
+              </button>
               <button type="button" className="cm-icon-button" title="刷新访问" onClick={() => void openInstance()}>
                 <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
               </button>
@@ -369,6 +426,7 @@ export default function IEISystemInstancePage() {
               scrolling="no"
               allow="clipboard-read; clipboard-write; fullscreen; autoplay"
               referrerPolicy="no-referrer"
+              onError={() => void recoverRuntimeConnection()}
             />
           ) : certificateConfirmationRequired ? (
             <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
@@ -396,6 +454,7 @@ export default function IEISystemInstancePage() {
           )}
         </section>
 
+        <div id="iei-instance-workspace" className={workspaceVisible ? 'min-h-0 min-w-0' : 'hidden'}>
         {canShowWorkspace ? (
           <div className="min-h-0 min-w-0">
             <WorkspaceFileManager
@@ -413,6 +472,7 @@ export default function IEISystemInstancePage() {
             该实例没有可用的工作区。
           </section>
         )}
+        </div>
       </section>
 
       {restartDialogOpen && (

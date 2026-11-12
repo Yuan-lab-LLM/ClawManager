@@ -1,3 +1,4 @@
+import TeamPowerControl, { teamPowerLabel } from '../../components/teams/TeamPowerControl';
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import UserLayout from "../../components/UserLayout";
@@ -55,7 +56,7 @@ const TeamListPage: React.FC = () => {
   }, [loadTeams]);
 
   useEffect(() => {
-    if (!teams.some((team) => team.status === "creating")) {
+    if (!teams.length) {
       return;
     }
     const timer = window.setInterval(() => {
@@ -171,9 +172,9 @@ const TeamListPage: React.FC = () => {
                         {team.name}
                       </Link>
                       <span
-                        className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium ${statusStyle(team.status)}`}
+                        className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium ${statusStyle(team.runtime_state?.state || team.status)}`}
                       >
-                        {team.status}
+                        {teamPowerLabel(team.runtime_state) || team.status}
                       </span>
                     </div>
                     <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-sm text-gray-500">
@@ -183,6 +184,7 @@ const TeamListPage: React.FC = () => {
                       <span>{formatDateTime(team.created_at)}</span>
                     </div>
                   </div>
+                  <TeamPowerControl state={team.runtime_state} start={() => teamService.startTeam(team.id)} onChange={() => loadTeams()}/>
                   <Link
                     to={`/teams/${team.id}`}
                     className="inline-flex items-center justify-center rounded-xl border border-[#eadfd8] bg-white px-4 py-2 text-sm font-medium text-[#5f5957] hover:bg-[#fff8f5]"

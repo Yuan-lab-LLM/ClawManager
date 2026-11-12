@@ -18,18 +18,21 @@ type growthRead struct {
 	data *Growth
 }
 type lowCostState struct {
-	ownerKeys  map[string]map[string]bool
-	slots      chan struct{}
-	reports    map[string]reportRead
-	mu         sync.Mutex
-	bindings   map[uint64]bool
-	events     []queuedObservation
-	growth     map[string]growthRead
-	growthBusy map[string]chan struct{}
-	visits     map[string]time.Time
-	activityMu sync.Mutex
-	streams    map[string]activityStream
-	windows    map[string]activityWindow
+	bindingsInFlight int
+	eventsInFlight   int
+	windowsInFlight  int
+	ownerKeys        map[string]map[string]bool
+	slots            chan struct{}
+	reports          map[string]reportRead
+	mu               sync.Mutex
+	bindings         map[uint64]bool
+	events           []queuedObservation
+	growth           map[string]growthRead
+	growthBusy       map[string]chan struct{}
+	visits           map[string]time.Time
+	activityMu       sync.Mutex
+	streams          map[string]activityStream
+	windows          map[string]activityWindow
 }
 
 // Best-effort bounded side channel: proxy/inference never waits for statistics SQL.
@@ -42,7 +45,7 @@ func (s *Store) QueueBinding(instance uint64) {
 	if s.perf.low.bindings == nil {
 		s.perf.low.bindings = map[uint64]bool{}
 	}
-	if len(s.perf.low.bindings) < 2048 {
+	if len(s.perf.low.bindings)+s.perf.low.bindingsInFlight < 2048 {
 		s.perf.low.bindings[instance] = true
 	}
 }
@@ -52,29 +55,52 @@ func (s *Store) QueueOpenClaw(instance uint64, event OpenClawEvent, at time.Time
 	}
 	s.perf.low.mu.Lock()
 	defer s.perf.low.mu.Unlock()
-	if len(s.perf.low.events) < 2048 {
+	if len(s.perf.low.events)+s.perf.low.eventsInFlight < 2048 {
 		s.perf.low.events = append(s.perf.low.events, queuedObservation{instance, event, at})
 	}
 }
 func (s *Store) drainObservations(ctx context.Context) {
 	s.perf.low.mu.Lock()
 	bindings, events := s.perf.low.bindings, s.perf.low.events
+	s.perf.low.bindingsInFlight += len(bindings)
+	s.perf.low.eventsInFlight += len(events)
 	s.perf.low.bindings = nil
 	s.perf.low.events = nil
 	s.perf.low.mu.Unlock()
+	reservedBindings, reservedEvents := len(bindings), len(events)
+	remainingEvents := events
+	defer func() {
+		s.perf.low.mu.Lock()
+		defer s.perf.low.mu.Unlock()
+		s.perf.low.bindingsInFlight -= reservedBindings
+		s.perf.low.eventsInFlight -= reservedEvents
+		if s.perf.low.bindings == nil {
+			s.perf.low.bindings = map[uint64]bool{}
+		}
+		for id := range bindings {
+			s.perf.low.bindings[id] = true
+		}
+		s.perf.low.events = append(remainingEvents, s.perf.low.events...)
+	}()
 	n := 0
 	for id := range bindings {
 		if ctx.Err() != nil || n >= 100 {
 			break
 		}
-		_, _ = s.Bind(ctx, id)
+		if _, err := s.Bind(ctx, id); err == nil {
+			delete(bindings, id)
+		}
 		n++
 	}
-	for _, e := range events {
+	remainingEvents = nil
+	for index, e := range events {
 		if ctx.Err() != nil {
+			remainingEvents = append(remainingEvents, events[index:]...)
 			return
 		}
-		_ = s.ObserveOpenClaw(ctx, e.instance, e.event, e.at)
+		if err := s.ObserveOpenClaw(ctx, e.instance, e.event, e.at); err != nil {
+			remainingEvents = append(remainingEvents, e)
+		}
 	}
 }
 func (s *Store) CachedGrowth(ctx context.Context, owner string, now time.Time) (*Growth, error) {
@@ -165,18 +191,23 @@ func (s *Store) CachedReport(ctx context.Context, owner, kind, date string, now 
 	if epoch, e := s.analyticsEpoch(ctx); e != nil {
 		return nil, e
 	} else if epoch != nil {
+		if report, e := s.reportPreview(ctx, owner, kind, date, now); e == nil {
+			return report, nil
+		}
 		snapshot, e := s.publishedOwner(ctx, owner, now)
 		if e != nil {
 			return nil, e
 		}
-		start, _, e := reportWindow(kind, date, now)
+		start, end, e := reportWindow(kind, date, now)
 		if e != nil {
 			return nil, e
 		}
-		if r := snapshot.Reports[kind]; r != nil && r.Start.Equal(start) {
+		if r := snapshot.Reports[kind]; r != nil && r.Start.Equal(start) && now.Before(end) {
 			return r, nil
 		}
-		return s.Report(ctx, owner, kind, date, now.Truncate(summaryInterval), false)
+		bounded, cancel := context.WithTimeout(ctx, time.Second)
+		defer cancel()
+		return s.ReadReport(bounded, owner, kind, date, now.Truncate(summaryInterval))
 	}
 	key := Key("report-read", owner, kind, date)
 	s.registerRead(owner, key)

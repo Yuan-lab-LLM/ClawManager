@@ -1,5 +1,5 @@
 import {useEffect,useRef,useState} from 'react';
-import type {UsageDay} from '../services/ieiSystemService';
+import type {UsageDay,OwnerDashboardData} from '../services/ieiSystemService';
 export const ownerNumber=(n:number)=>new Intl.NumberFormat('zh-CN',{notation:n>=10000?'compact':'standard',maximumFractionDigits:2}).format(n);
 export const ownerCard='rounded-2xl border border-slate-200 bg-white p-4';
 export function UsageChart({days,onDay,label='Token',height:fixedHeight=176,fit=false,maxTicks=6}:{days:UsageDay[];onDay?:(day:UsageDay)=>void;label?:string;height?:number;fit?:boolean;maxTicks?:number}){
@@ -27,18 +27,23 @@ export function UsageChart({days,onDay,label='Token',height:fixedHeight=176,fit=
   {!fit&&<p className="min-h-4 text-[12px] text-slate-500">悬停查看具体值{onDay?' · 点击数据点查看当日明细':''} · 缺失数据不连线</p>}
  </div>
 }
-export function ActivityHeatmap({days,onDay}:{days:UsageDay[];onDay:(day:UsageDay)=>void}){
+export function ActivityHeatmap({days,onDay,visits}:{days:UsageDay[];onDay:(day:UsageDay)=>void;visits?:OwnerDashboardData['visits']}){
  const [hover,setHover]=useState<UsageDay|null>(null);const offset=days.length?(new Date(days[0].date+'T00:00:00+08:00').getUTCDay()+6)%7:0;
  // UTC weekday at midnight Shanghai is the previous date; use date-only UTC.
  const pad=days.length?(new Date(days[0].date+'T00:00:00Z').getUTCDay()+6)%7:offset;
  const cells:(UsageDay|null)[]=[...Array(pad).fill(null),...days];while(cells.length%7)cells.push(null);
+ const columns=Math.max(1,cells.length/7);
+ const months=[...new Set(days.map(d=>d.date.slice(0,7)))].map(month=>({month,column:Math.floor(cells.findIndex(d=>d?.date.startsWith(month))/7)+1}));
  const colors=['bg-slate-100','bg-teal-100','bg-teal-300','bg-teal-500'];const active=days.filter(d=>d.questions>0).length;
  const first=days.find(d=>d.observed)?.date;
- const inRange=(d:UsageDay)=>d.in_statistical_range??(!!first&&d.date>=first);
- const description=(d:UsageDay)=>d.observed?`${d.questions} 次提问 · ${ownerNumber(d.tokens)} Token`:inRange(d)?'暂无提问记录（仅表示平台已采集数据）':'统计开始前';
+ const visitByDate=new Map(visits?.days.map(d=>[d.date,d]));
+ // Portal visits are independent facts, including visits before first model usage.
+ const inRange=(d:UsageDay)=>!!visitByDate.get(d.date)?.visited||(d.in_statistical_range??(!!first&&d.date>=first));
+ const pastRest=(d:UsageDay)=>{const v=visitByDate.get(d.date);return !!v?.rest&&!!visits&&(d.date<visits.today||v.visited)&&inRange(d)};
+ const description=(d:UsageDay)=>{const v=visitByDate.get(d.date);if(!inRange(d))return '统计开始前';return `${v?.name??'日历未加载'}${v&&!v.known?'（暂定）':''} · ${v?.visited?'已访问':visits?'未访问':'访问状态未知'} · ${d.questions} 次有效提问${v?.rest&&!v.visited?' · 不断签':''}`};
+ const cellStyle=(d:UsageDay)=>!inRange(d)?'border border-dashed border-slate-200 bg-white':d.questions>0?colors[d.questions<3?1:d.questions<10?2:3]:visitByDate.get(d.date)?.visited?'border border-[#d8eee6] bg-[#f0faf6]':pastRest(d)?'border border-slate-100 bg-white':'border border-slate-100 bg-slate-50';
  return <section className={`owner-chart-card owner-heatmap relative`}><h3 className="text-base font-semibold">近 90 天活跃度</h3><div className="mt-2 flex items-baseline justify-between"><p className="text-xl font-medium">{active} <span className="text-sm">天活跃</span></p><span className="text-[13px] text-slate-500">有记录 {days.filter(d=>d.observed).length}/90 天</span></div>
- <div className="owner-heatmap-grid"><div className="grid h-[122px] grid-rows-7 text-[12px] text-slate-500">{['一','','三','','五','','日'].map((d,i)=><span key={i}>{d}</span>)}</div><div><div className="grid grid-flow-col grid-rows-7 gap-[3px]">{cells.map((d,i)=>d?<button key={d.date} aria-label={`${d.date} ${description(d)}`} onMouseEnter={()=>setHover(d)} onMouseLeave={()=>setHover(null)} onFocus={()=>setHover(d)} onBlur={()=>setHover(null)} onClick={()=>onDay(d)} className={`h-[14px] w-[14px] rounded-[3px] outline-offset-2 hover:ring-2 hover:ring-blue-400 ${!inRange(d)?'border border-dashed border-slate-200 bg-white':colors[d.questions===0?0:d.questions<3?1:d.questions<10?2:3]}`}/>:<span key={`pad-${i}`} className="h-[14px] w-[14px]"/>)}</div><div className="mt-2 flex justify-between text-[13px] text-slate-500">{[...new Set(days.map(d=>d.date.slice(0,7)))].map(m=><span key={m}>{Number(m.slice(5))}月</span>)}</div></div></div>
- <div className="mt-auto flex items-center justify-end gap-1 text-[13px] text-slate-500"><span>少</span>{colors.map(c=><i key={c} className={`h-2.5 w-2.5 rounded-sm ${c}`}/>)}<span>多 · 空白：统计前</span></div>
+ <div className="owner-heatmap-grid"><div className="owner-heatmap-weekdays text-[12px] text-slate-500">{['一','','三','','五','','日'].map((d,i)=><span key={i}>{d}</span>)}</div><div className="owner-heatmap-calendar"><div className="owner-heatmap-cells" style={{gridTemplateColumns:`repeat(${columns},minmax(0,1fr))`}}>{cells.map((d,i)=>d?<button key={d.date} aria-label={`${d.date} ${description(d)}`} onMouseEnter={()=>setHover(d)} onMouseLeave={()=>setHover(null)} onFocus={()=>setHover(d)} onBlur={()=>setHover(null)} onClick={()=>onDay(d)} className={`owner-heatmap-cell flex items-center justify-center rounded-[4px] outline-offset-2 hover:ring-2 hover:ring-blue-300 ${cellStyle(d)}`}>{pastRest(d)&&<svg aria-hidden="true" viewBox="0 0 24 24" className={`h-[60%] w-[60%] ${visitByDate.get(d.date)?.visited?'text-teal-700/60':'text-slate-400/70'}`} fill={visitByDate.get(d.date)?.visited?'currentColor':'none'} stroke="currentColor" strokeWidth="1.5"><path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-3-5.6 3 1.1-6.2L3 9.6l6.2-.9Z"/></svg>}</button>:<span key={`pad-${i}`} className="owner-heatmap-cell"/>)}</div><div className="owner-heatmap-months text-[12px] text-slate-500" style={{gridTemplateColumns:`repeat(${columns},minmax(0,1fr))`}}>{months.map(({month,column})=><span key={month} style={{gridColumn:column}}>{Number(month.slice(5))}月</span>)}</div></div></div>
  {hover&&<div role="tooltip" className="pointer-events-none absolute left-4 top-10 z-10 rounded-lg border bg-white/95 p-2 text-sm shadow-lg">{hover.date}<p>{description(hover)}</p></div>}
  </section>
 }

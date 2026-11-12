@@ -1,0 +1,9 @@
+# Replace only artifacts changed by the final upstream lifecycle merge.
+# Immutable base retains the accepted native bundles and all unchanged helpers.
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+ARG VCS_REF
+COPY --chmod=755 --from=release-binaries /merged-server /usr/local/bin/clawreef-server
+RUN rm -rf /usr/share/nginx/html/assets && rm -f /usr/share/nginx/html/index.html
+COPY --from=release-assets / /usr/share/nginx/html/
+LABEL org.opencontainers.image.revision=$VCS_REF

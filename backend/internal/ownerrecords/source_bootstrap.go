@@ -78,22 +78,79 @@ func (s *Store) bootstrapSource(ctx context.Context, now time.Time) (bool, error
 }
 
 func (s *Store) refreshSource(ctx context.Context, now time.Time) error {
-	loc, _ := time.LoadLocation("Asia/Shanghai")
-	local := now.In(loc)
-	today := time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, loc)
+	today := sourceLocalDay(now)
 	end := now.Truncate(summaryInterval)
-	if end.After(today) {
-		if _, e := s.aggregateSourceDay(ctx, today, end); e != nil {
-			return e
+	first := today.AddDate(0, 0, -1)
+	epoch, err := s.analyticsEpoch(ctx)
+	if err != nil {
+		return err
+	}
+	if epoch != nil {
+		first = sourceLocalDay(epoch.Start)
+	}
+	cursors, err := s.sourceDayCursors(ctx, first)
+	if err != nil {
+		return err
+	}
+	return runSourceLanes(ctx, []sourceLane{
+		{budget: 15 * time.Second, run: func(work context.Context) error {
+			// Publish the newest closed numeric bucket before doing any backfill.
+			// aggregateSourceWindow cannot advance a cursor across a preceding gap.
+			if end.After(today) {
+				if _, e := s.aggregateSourceWindow(work, end.Add(-summaryInterval), end); e != nil {
+					return e
+				}
+			}
+			return s.refreshSourceDays(work, today, today.AddDate(0, 0, 1), end, cursors)
+		}},
+		{budget: 30 * time.Second, run: func(work context.Context) error {
+			return s.refreshSourceDays(work, first, today, end, cursors)
+		}},
+	})
+}
+
+// Read the small cursor metadata set once, not the invocation table once per
+// missed day. A missing day is still a gap, not implicit evidence of no usage.
+func (s *Store) sourceDayCursors(ctx context.Context, first time.Time) (map[string]time.Time, error) {
+	rows, err := s.Session.SQL().QueryContext(ctx, `SELECT record_key,interval_end FROM northbound_owner_records WHERE record_type='source_day_cursor' AND status='ready' AND interval_end>=?`, first.UTC())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	cursors := map[string]time.Time{}
+	for rows.Next() {
+		var key string
+		var end time.Time
+		if err = rows.Scan(&key, &end); err != nil {
+			return nil, err
+		}
+		cursors[key] = end
+	}
+	return cursors, rows.Err()
+}
+
+func (s *Store) refreshSourceDays(ctx context.Context, first, until, end time.Time, cursors map[string]time.Time) error {
+	units := 0
+	for day := first; day.Before(until) && day.Before(end); day = day.AddDate(0, 0, 1) {
+		target := day.AddDate(0, 0, 1)
+		if target.After(end) {
+			target = end
+		}
+		cursor := cursors[Key("source-day-cursor", day.Format("2006-01-02"))]
+		if cursor.Before(day) {
+			cursor = day
+		}
+		cursor = cursor.Truncate(summaryInterval)
+		for cursor.Before(target) {
+			if units >= 144 || !scanHasBudget(ctx) {
+				return errSyncYield
+			}
+			if _, e := s.aggregateSourceWindow(ctx, cursor, cursor.Add(summaryInterval)); e != nil {
+				return e
+			}
+			cursor = cursor.Add(summaryInterval)
+			units++
 		}
 	}
-	if _, e := s.aggregateSourceDay(ctx, today.AddDate(0, 0, -1), today); e != nil {
-		return e
-	}
-	// A small rotating repair window handles late changes without rescanning all
-	// owners/history in every pass. Historical dates outside it remain explicit
-	// backfill work, never a request-triggered full scan.
-	day := today.AddDate(0, 0, -2-int(now.Unix()/int64(summaryInterval/time.Second))%29)
-	_, e := s.aggregateSourceDay(ctx, day, day.AddDate(0, 0, 1))
-	return e
+	return nil
 }

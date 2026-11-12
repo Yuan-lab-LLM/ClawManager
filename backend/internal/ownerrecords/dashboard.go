@@ -27,16 +27,18 @@ type Coverage struct {
 	UnavailableHistories uint64 `json:"unavailable_histories"`
 }
 type Dashboard struct {
-	Growth          *Growth                   `json:"growth,omitempty"`
-	Snapshot        *SnapshotState            `json:"snapshot,omitempty"`
-	RecentQuestions map[uint64]RecentQuestion `json:"recent_questions,omitempty"`
-	Insights        *Insights                 `json:"insights,omitempty"`
-	Summary         Metrics                   `json:"summary"`
-	Trend           []Day                     `json:"trend"`
-	LastActivity    map[uint64]string         `json:"last_activity"`
-	Coverage        Coverage                  `json:"coverage"`
-	Timezone        string                    `json:"timezone"`
-	Range           string                    `json:"range"`
+	Visits            *VisitCalendar            `json:"visits,omitempty"`
+	VisitsUnavailable bool                      `json:"visits_unavailable,omitempty"`
+	Growth            *Growth                   `json:"growth,omitempty"`
+	Snapshot          *SnapshotState            `json:"snapshot,omitempty"`
+	RecentQuestions   map[uint64]RecentQuestion `json:"recent_questions,omitempty"`
+	Insights          *Insights                 `json:"insights,omitempty"`
+	Summary           Metrics                   `json:"summary"`
+	Trend             []Day                     `json:"trend"`
+	LastActivity      map[uint64]string         `json:"last_activity"`
+	Coverage          Coverage                  `json:"coverage"`
+	Timezone          string                    `json:"timezone"`
+	Range             string                    `json:"range"`
 }
 
 // Dashboard is read-only. A nil scope is reserved for a server-verified IEI

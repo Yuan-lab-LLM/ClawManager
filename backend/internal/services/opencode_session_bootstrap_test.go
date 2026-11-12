@@ -170,7 +170,7 @@ func TestOpenCodeBootstrapSurvivesRefreshAndControlPlaneRestart(t *testing.T) {
 	if runtime.creates != 1 || len(runtime.sessions) != 1 {
 		t.Fatalf("starter duplicated: %d creates, %d sessions", runtime.creates, len(runtime.sessions))
 	}
-	if runtime.sessions[selected].Location.Directory != "/workspaces/opencode/user-45/instance-701/project" {
+	if runtime.sessions[selected].Location.Directory != "/workspaces/opencode/user-45/instance-701/starter" {
 		t.Fatal("starter is outside the default project")
 	}
 }

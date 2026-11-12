@@ -1,5 +1,6 @@
 import type { BrowserOriginMetadata } from "../lib/browserOrigin";
 import axios from "axios";
+import {isOwnerSessionEndpoint,isOwnerSessionFailure,OWNER_SESSION_INVALID} from "../lib/ownerReadNotice";
 import type { WorkspaceFileOperations } from "../components/WorkspaceFileManager";
 import type { WorkspaceEntry, WorkspacePreview, WorkspaceSearchResponse } from "../types/workspace";
 
@@ -9,9 +10,11 @@ export interface IEISystemSession {
 }
 
 export interface OwnerDashboardData {
+ visits?:{today:string;streak:number;longest:number;total:number;provisional:boolean;versions:Record<string,number>;days:{date:string;visited:boolean;rest:boolean;name:string;known:boolean}[]};
+ visits_unavailable?:boolean;
   growth?:OwnerGrowth;
-  snapshot?:{version:number;as_of:string|null;next_refresh_at:string;state:string};
-	 recent_questions?: Record<string,{text:string;at:string;checked_at:string}>;
+  snapshot?:{version:number;as_of:string|null;next_refresh_at:string;state:string;last_batch_at?:string};
+	 recent_questions?: Record<string,{text:string;at:string;checked_at:string;warning?:string}>;
 	insights?: OwnerInsights;
   summary: { prompt_tokens:number; completion_tokens:number; total_tokens:number; sessions:number; questions:number|null; workday_streak:number|null };
   trend: {date:string;tokens:number}[];
@@ -82,6 +85,11 @@ const ieiAPI = axios.create({
   baseURL: `${API_BASE_URL.replace(/\/+$/, "")}/ieisystem`,
   headers: { "Content-Type": "application/json" },
   withCredentials: true,
+});
+
+ieiAPI.interceptors.response.use(response=>response,error=>{
+  if (isOwnerSessionFailure(error) && isOwnerSessionEndpoint(error.config?.url ?? '')) window.dispatchEvent(new Event(OWNER_SESSION_INVALID));
+  return Promise.reject(error);
 });
 
 function lifecycleIdempotencyKey() {

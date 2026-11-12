@@ -72,6 +72,10 @@ func testAutoStopControllerFailureResume(t *testing.T, runtimeType string) {
 		}
 	}
 	exec(`ALTER TABLE instances ADD access_token VARCHAR(255) NULL,ADD agent_bootstrap_token VARCHAR(255) NULL`)
+	exec(`ALTER TABLE instances ADD provisioning_operation_id VARCHAR(64) NULL`)
+	exec(`ALTER TABLE teams ADD status VARCHAR(32), ADD resource_scope VARCHAR(32)`)
+	exec(`ALTER TABLE team_members ADD team_id INT,ADD instance_id INT,ADD status VARCHAR(32),ADD member_key VARCHAR(64)`)
+
 	for _, name := range []string{"007_add_instance_agent_control_plane.sql", "096_add_instance_auto_stop.sql", "097_add_instance_auto_stop_scan.sql", "098_add_instance_auto_stop_policy_status.sql"} {
 		raw, err := os.ReadFile("../db/migrations/" + name)
 		if err != nil {

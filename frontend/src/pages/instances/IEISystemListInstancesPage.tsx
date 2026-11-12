@@ -1,4 +1,5 @@
 import axios from "axios";
+import {OWNER_SESSION_INVALID,OWNER_SESSION_MESSAGE,isOwnerSessionFailure,isPersistentReadFailure,nextReadFailure,type ReadFailure} from "../../lib/ownerReadNotice";
 import {useOwnerPortalVisit} from '../../hooks/useOwnerPortalVisit';
 import { OwnerInstanceCard } from "../../components/OwnerInstanceCard";
 import { getInstanceDisplayStatus } from "../../lib/instanceStatus";
@@ -108,6 +109,7 @@ function InstanceTypeIcon({
 }
 
 function errorMessage(error: unknown) {
+  if (isOwnerSessionFailure(error)) return OWNER_SESSION_MESSAGE;
   if (axios.isAxiosError(error) && typeof error.response?.data?.error === "string") {
     return error.response.data.error;
   }
@@ -174,6 +176,7 @@ function selectedInstanceIDFromURL() {
 
 export default function IEISystemListInstancesPage() {
   const initialized = useRef(false);
+  const sessionInvalid = useRef(false);
   const [session, setSession] = useState<IEISystemSession | null>(null);
   const ownerTeams = useOwnerTeams(session?.owner);
   useOwnerPortalVisit(session?.owner);
@@ -207,6 +210,16 @@ export default function IEISystemListInstancesPage() {
   const [lifecycleErrors, setLifecycleErrors] = useState<Record<number, string>>({});
   const [lifecycleWarnings, setLifecycleWarnings] = useState<Record<number, string>>({});
   const [error, setError] = useState<string | null>(null);
+  const refreshFailure = useRef<ReadFailure|null>(null);
+  useEffect(()=>{
+    const invalidate=()=>{
+      sessionInvalid.current=true;
+      setSession(null);setRefreshError('');setError(OWNER_SESSION_MESSAGE);
+      setInstances([]);setSelectedID(null);setLifecycleOperations({});
+    };
+    window.addEventListener(OWNER_SESSION_INVALID,invalidate);
+    return()=>window.removeEventListener(OWNER_SESSION_INVALID,invalidate);
+  },[]);
 
   const loadInstances = useCallback(async (preferredID?: number | null) => {
     const first = await ieiSystemService.listInstances(1, PAGE_SIZE);
@@ -216,6 +229,7 @@ export default function IEISystemListInstancesPage() {
       const next = await ieiSystemService.listInstances(page, PAGE_SIZE);
       items.push(...(next.instances ?? []));
     }
+    if(sessionInvalid.current)return;
     setInstances(items);
     setSelectedID((current) => {
       const candidate = preferredID ?? current;
@@ -226,15 +240,19 @@ export default function IEISystemListInstancesPage() {
   }, []);
 
   const refreshPortal=async()=>{
-    if(refreshInFlight.current)return;
+    if(refreshInFlight.current||sessionInvalid.current)return;
     refreshInFlight.current=true;setRefreshing(true);setRefreshError('');
     try{
       const results=await Promise.allSettled([
-        ieiSystemService.getSession().then(setSession),
+        ieiSystemService.getSession().then(value=>{if(!sessionInvalid.current)setSession(value)}),
         loadInstances(),
         dashboardRefresh.current?.()
       ]);
-      if(results.some(r=>r.status==='rejected'))setRefreshError('部分数据刷新失败，已保留原内容，请重试。');
+      if(sessionInvalid.current)return;
+      if(results.some(r=>r.status==='rejected')){
+        refreshFailure.current=nextReadFailure(refreshFailure.current,Date.now());
+        if(isPersistentReadFailure(refreshFailure.current))setRefreshError('实例列表暂时无法更新，已保留原内容，请稍后刷新。');
+      }else refreshFailure.current=null;
     }finally{refreshInFlight.current=false;setRefreshing(false)}
   };
 
@@ -257,13 +275,14 @@ export default function IEISystemListInstancesPage() {
       const nextSession = token
         ? await ieiSystemService.exchangeSession(token)
         : await ieiSystemService.getSession();
+      if(sessionInvalid.current)return;
       setSession(nextSession);
       await loadInstances(preferredID);
     } catch (loadError) {
       setSession(null);
       setInstances([]);
       setSelectedID(null);
-      setError(errorMessage(loadError));
+      setError(sessionInvalid.current?OWNER_SESSION_MESSAGE:errorMessage(loadError));
     } finally {
       setLoading(false);
     }
@@ -276,7 +295,8 @@ export default function IEISystemListInstancesPage() {
   }, [initialize]);
 
   const renewSession = useCallback(async () => {
-    setSession(await ieiSystemService.refreshSession());
+    const next=await ieiSystemService.refreshSession();
+    if(!sessionInvalid.current)setSession(next);
   }, []);
   useExpiringResourceRenewal({
     expiresAt: session?.expires_at,

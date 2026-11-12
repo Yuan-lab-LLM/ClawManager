@@ -76,6 +76,9 @@ func (s *instanceService) ValidateCreateRequests(userID int, requests []CreateIn
 	if len(requests) == 0 {
 		return nil
 	}
+	if err := s.ValidateTeamRuntimeRequests(requests); err != nil {
+		return err
+	}
 	for idx := range requests {
 		requests[idx].Name = strings.TrimSpace(requests[idx].Name)
 		if requests[idx].Name == "" {
@@ -1272,6 +1275,11 @@ func hydrateInstanceDesktopStreamProfile(instance *models.Instance) {
 
 // Start starts an instance
 func (s *instanceService) Start(instanceID int) error {
+	if s.ownerTeamMutationGuard != nil {
+		if err := s.ownerTeamMutationGuard(instanceID, "start", 0); err != nil {
+			return err
+		}
+	}
 	release, err := s.acquireLifecycleOperation(instanceID)
 	if err != nil {
 		return err
@@ -2278,8 +2286,12 @@ func (s *instanceService) prepareV2InstanceStart(ctx context.Context, instance *
 }
 
 func (s *instanceService) stopV2Instance(ctx context.Context, instance *models.Instance) error {
+	return s.stopV2InstanceForKind(ctx, instance, "manual")
+}
+
+func (s *instanceService) stopV2InstanceForKind(ctx context.Context, instance *models.Instance, kind string) error {
 	if s.autoStopRepo != nil && instance.InstanceMode == "lite" {
-		input := models.InstanceIdleStopOperation{InstanceID: instance.ID, UserID: instance.UserID, Generation: instance.RuntimeGeneration}
+		input := models.InstanceIdleStopOperation{Kind: kind, InstanceID: instance.ID, UserID: instance.UserID, Generation: instance.RuntimeGeneration}
 		if instance.WorkspacePath != nil {
 			input.WorkspacePath = *instance.WorkspacePath
 		}
@@ -2305,6 +2317,14 @@ func (s *instanceService) stopV2Instance(ctx context.Context, instance *models.I
 			input.GatewayID = b.GatewayID
 			input.PodUID = *pod.PodUID
 			input.Endpoint = *pod.AgentEndpoint
+			if client, ok := s.agentClient.(*slotRuntimeAgentClient); ok && client.kube != nil {
+				input.StorageIdentity, err = k8s.ResolveRuntimePersistentStorage(ctx, client.kube, pod.Namespace, pod.PodName, *pod.PodUID, b.WorkspacePath)
+				if err != nil {
+					return fmt.Errorf("verify manual stop persistent workspace: %w", err)
+				}
+			} else if instance.RuntimeSecurityProfile == RuntimeSecurityProfile {
+				return fmt.Errorf("protected manual stop persistent storage verifier unavailable")
+			}
 		}
 		op, err := s.autoStopRepo.BeginManualStop(ctx, input)
 		if err != nil {
@@ -2316,6 +2336,9 @@ func (s *instanceService) stopV2Instance(ctx context.Context, instance *models.I
 		if err = s.resumeManualStop(ctx, *op); err != nil {
 			op.ErrorMessage = err.Error()
 			_ = s.autoStopRepo.FailStop(ctx, *op)
+			if kind == "restart" {
+				return ErrInstanceRestartPending
+			}
 			return err
 		}
 		return nil
@@ -2504,6 +2527,11 @@ func ensureRuntimeWorkspaceDirectories(root, runtimeType string, userID, instanc
 
 // Stop stops an instance
 func (s *instanceService) Stop(instanceID int) error {
+	if s.ownerTeamMutationGuard != nil {
+		if err := s.ownerTeamMutationGuard(instanceID, "stop", 0); err != nil {
+			return err
+		}
+	}
 	release, err := s.acquireLifecycleOperation(instanceID)
 	if err != nil {
 		return err
@@ -2573,6 +2601,11 @@ func (s *instanceService) stopInstance(instanceID int) error {
 
 // Restart restarts an instance
 func (s *instanceService) Restart(instanceID int) error {
+	if s.ownerTeamMutationGuard != nil {
+		if err := s.ownerTeamMutationGuard(instanceID, "restart", 0); err != nil {
+			return err
+		}
+	}
 	release, err := s.acquireLifecycleOperation(instanceID)
 	if err != nil {
 		return err
@@ -2619,6 +2652,19 @@ func (s *instanceService) restartInstance(instanceID int) error {
 
 	_, isV2 := v2RuntimeTypeForInstance(instance)
 	waitForDesktopPods := !isV2 && instanceUsesDesktopRuntime(instance)
+	if isV2 && s.autoStopRepo != nil && instance.InstanceMode == "lite" {
+		if op, err := s.autoStopRepo.RestartFollowup(ctx, instanceID); err != nil {
+			return err
+		} else if op != nil {
+			return s.resumeRestartFollowup(ctx, instanceID)
+		}
+		// The durable stop fence rejects stale reporters without changing the
+		// source generation. Start allocates a new generation only after proof.
+		if err := s.stopV2InstanceForKind(ctx, instance, "restart"); err != nil {
+			return err
+		}
+		return s.resumeRestartFollowup(ctx, instanceID)
+	}
 
 	if isV2 {
 		// Fence heartbeats/scheduler snapshots from the old gateway before Stop.
@@ -3350,6 +3396,11 @@ func (s *instanceService) GetEnvironmentOverrideNames(instanceID int) ([]string,
 // the source of truth and allows a failed restart to be retried with the same
 // desired configuration.
 func (s *instanceService) RestartWithEnvironment(instanceID int, environmentOverrides map[string]string, environmentOverrideRemovals []string) error {
+	if s.ownerTeamMutationGuard != nil {
+		if err := s.ownerTeamMutationGuard(instanceID, "restart", 0); err != nil {
+			return err
+		}
+	}
 	release, err := s.acquireLifecycleOperation(instanceID)
 	if err != nil {
 		return err

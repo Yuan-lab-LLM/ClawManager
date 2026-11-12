@@ -55,6 +55,7 @@ type RuntimeDeploymentSpec struct {
 	HermesDesktopWeb      bool
 	// Zero preserves the existing process-pool deployment contract.
 	SlotCount            int
+	SlotAppArmorProfile  string
 	SlotResources        corev1.ResourceRequirements
 	PodResources         *corev1.ResourceRequirements
 	PodUserNamespaces    bool

@@ -6,9 +6,9 @@ import TeamBadge from './TeamBadge';
 import { memberIcon } from '../../lib/teamIcons';
 import './team-task-composer.css';
 
-export default function TeamTaskComposer({ members, leaderKey, targetKey, onTargetChange, value, onChange, sending, error, reference, onClearReference, onSubmit }: {
+export default function TeamTaskComposer({ members, leaderKey, targetKey, onTargetChange, value, onChange, sending, disabled, error, reference, onClearReference, onSubmit }: {
   members: TeamMember[]; leaderKey?: string; targetKey: string; onTargetChange: (key: string) => void;
-  value: string; onChange: (value: string) => void; sending: boolean; error: string | null;
+  value: string; onChange: (value: string) => void; sending: boolean; disabled?: boolean; error: string | null;
   reference?: { id?: number; title: string }; onClearReference: () => void; onSubmit: (event: React.FormEvent) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -80,9 +80,9 @@ export default function TeamTaskComposer({ members, leaderKey, targetKey, onTarg
             if (event.key === '@' && !event.nativeEvent.isComposing && (cursor === 0 || /\s/.test(value[cursor - 1] || ''))) {
               event.preventDefault(); setOpen(true); setSearch(''); setIndex(0); return;
             }
-            if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && event.keyCode !== 229) { event.preventDefault(); if (!sending) event.currentTarget.form?.requestSubmit(); }
+            if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && event.keyCode !== 229) { event.preventDefault(); if (!sending && !disabled) event.currentTarget.form?.requestSubmit(); }
           }} />
-        <button type="submit" className="team-composer-send" disabled={sending || !value.trim() || !selected} aria-label="发送任务" title="发送任务">{sending ? <span className="team-composer-spinner" /> : <Send size={18}/>}</button>
+        <button type="submit" className="team-composer-send" disabled={sending || disabled || !value.trim() || !selected} aria-label="发送任务" title="发送任务">{sending ? <span className="team-composer-spinner" /> : <Send size={18}/>}</button>
       </div>
     </form>
   </div>;

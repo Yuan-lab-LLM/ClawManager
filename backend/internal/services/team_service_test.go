@@ -2742,6 +2742,52 @@ func TestEvaluateProtocolV3ExplicitPhaseRequiresDispositionBeforeWorkflowSeal(t 
 	}
 }
 
+func TestLeaderDispositionAcceptsKnownDiagnosticSuffixWithoutDisposingOtherWork(t *testing.T) {
+	policy := teamPhaseCompletionPolicyExplicitV1
+	task := &models.TeamTask{ID: 401, TeamID: 182, TargetMemberID: 574, Status: models.TeamTaskStatusRunning, PlanVersion: 1}
+	repo := &teamRepositoryStub{workflowPhases: []models.TeamWorkflowPhase{
+		{TeamID: 182, RootTaskID: 401, PhaseID: "P2", PlanVersion: 1, Status: teamPhaseStatusPlanned, RequiredForRoot: true, CompletionPolicy: &policy},
+	}}
+	s := &teamService{repo: repo}
+	payload := map[string]interface{}{"protocolVersion": 4, "workflowFinal": true, "finalAnswerReady": true, "resultMarkdown": "All accepted results reviewed.", "phaseDispositions": []interface{}{map[string]interface{}{"phaseId": "P2:leader_review", "decision": "superseded", "reason": "Leader explicitly integrated this unassigned review into final synthesis"}}}
+	team := &models.Team{ID: 182, CommunicationMode: teamCommunicationModeLeaderMediated}
+	leader := &models.TeamMember{ID: 574, TeamID: 182, Role: "leader", MemberKey: "leader"}
+	result, err := s.evaluateLeaderRootCompletion(team, task, leader, payload)
+	if err != nil || result.Decision != teamCompletionDecisionAccepted {
+		t.Fatalf("diagnostic ID stranded explicit Leader decision: %+v %v", result, err)
+	}
+	if structuredTeamPhaseDispositions(payload)["P2"].Decision != "superseded" || payload["reportedPhaseDispositions"] == nil {
+		t.Fatal("canonical decision or original audit missing")
+	}
+	worker := 575
+	phase := "P2"
+	repo.workItems = []models.TeamWorkItem{{TeamID: 182, RootTaskID: 401, WorkID: "live", PhaseID: &phase, Revision: 1, RequiredForRoot: true, OwnerMemberID: &worker, Status: models.TeamTaskStatusRunning}}
+	result, err = s.evaluateLeaderRootCompletion(team, task, leader, payload)
+	if err != nil || result.Decision != teamCompletionDecisionDeferred || result.Reason != "pending_assignments" {
+		t.Fatalf("disposition bypassed running work: %+v %v", result, err)
+	}
+}
+
+func TestPhaseDispositionDiagnosticAliasNeverOverridesExactOrOtherPlan(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		phases       []models.TeamWorkflowPhase
+		dispositions map[string]teamPhaseDisposition
+	}{
+		{"unknown", []models.TeamWorkflowPhase{{PhaseID: "other", PlanVersion: 1}}, map[string]teamPhaseDisposition{"P2:leader_review": {PhaseID: "P2:leader_review", Decision: "skipped", Reason: "explicit"}}},
+		{"old_plan", []models.TeamWorkflowPhase{{PhaseID: "P2", PlanVersion: 2}}, map[string]teamPhaseDisposition{"P2:leader_review": {PhaseID: "P2:leader_review", Decision: "skipped", Reason: "explicit"}}},
+		{"real_suffix_id", []models.TeamWorkflowPhase{{PhaseID: "P2", PlanVersion: 1}, {PhaseID: "P2:leader_review", PlanVersion: 1}}, map[string]teamPhaseDisposition{"P2:leader_review": {PhaseID: "P2:leader_review", Decision: "skipped", Reason: "explicit"}}},
+		{"conflicting_explicit", []models.TeamWorkflowPhase{{PhaseID: "P2", PlanVersion: 1}}, map[string]teamPhaseDisposition{"P2": {PhaseID: "P2", Decision: "cancelled", Reason: "exact"}, "P2:leader_review": {PhaseID: "P2:leader_review", Decision: "skipped", Reason: "alias"}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			out, changed := canonicalTeamPhaseDispositionIDs(tc.dispositions, tc.phases, 1)
+			if changed || len(out) != len(tc.dispositions) {
+				t.Fatal("unknown, conflicting or exact identity was changed")
+			}
+		})
+	}
+}
+
 func TestReconcileExplicitPlannedPhaseRequiresAndAppliesDisposition(t *testing.T) {
 	now := time.Now().UTC()
 	policy := teamPhaseCompletionPolicyExplicitV1

@@ -20,6 +20,7 @@ import (
 )
 
 type InstanceAutoStopService struct {
+	teamPower    *teamLifecycleCoordinator
 	initialized  atomic.Bool
 	store        *repository.InstanceAutoStopRepository
 	lifecycle    *instanceService
@@ -43,7 +44,7 @@ func (s *InstanceAutoStopService) Run(ctx context.Context) {
 	if models.AutoStopTestTiming {
 		log.Print("automatic Lite stop: TEST BUILD; legacy defaults: scan interval=1m, idle timeout=5m; explicitly configured seconds take precedence")
 	}
-	// Capacity deadlines are control-plane recovery, independent of the
+	// Capacity deadlines and expired model leases are control-plane recovery, independent of the
 	// administrator's idle scan and potentially slow native stops.
 	deadlineCtx, deadlineCancel := context.WithCancel(ctx)
 	defer deadlineCancel()
@@ -58,6 +59,9 @@ func (s *InstanceAutoStopService) Run(ctx context.Context) {
 				release, err := backupgate.HoldWorkUnit(deadlineCtx, "instance.start-deadline")
 				if err != nil {
 					continue
+				}
+				if err := s.store.ReconcileModelActivities(deadlineCtx, nil); err != nil {
+					log.Printf("model activity lease recovery: %v", err)
 				}
 				_ = s.expireStarts(deadlineCtx)
 				release()
@@ -74,8 +78,15 @@ func (s *InstanceAutoStopService) Run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-tick.C:
+		case <-s.teamKick():
 		}
 	}
+}
+func (s *InstanceAutoStopService) teamKick() <-chan struct{} {
+	if s.teamPower != nil {
+		return s.teamPower.kick
+	}
+	return nil
 }
 func (s *InstanceAutoStopService) Tick(ctx context.Context) error {
 	release, err := backupgate.HoldWorkUnit(ctx, "instance.auto-stop")
@@ -93,6 +104,17 @@ func (s *InstanceAutoStopService) Tick(ctx context.Context) error {
 		}
 		s.initialized.Store(true)
 		initializedNow = true
+	}
+	// Expired leases must not wait for the administrator's daily idle scan,
+	// or for a potentially slow Team/native stop below. Legacy scopes still
+	// require the independent application-exit proof collected by the idle scan.
+	if err = s.store.ReconcileModelActivities(ctx, nil); err != nil {
+		return err
+	}
+	if s.teamPower != nil {
+		if err := s.teamPower.reconcile(ctx); err != nil {
+			return err
+		}
 	}
 	pending, err := s.store.PendingStops(ctx)
 	if err != nil {
@@ -148,6 +170,11 @@ func (s *InstanceAutoStopService) Tick(ctx context.Context) error {
 	if err = s.store.ReconcileModelActivities(ctx, legacyCutoff); err != nil {
 		return err
 	}
+	if s.teamPower != nil {
+		if err := s.teamPower.scan(ctx, *cfg); err != nil {
+			return err
+		}
+	}
 	after := cfg.ScanCursor
 	for {
 		candidates, err := s.store.CandidatesForTimeout(ctx, time.Now().UTC(), cfg.IdleTimeout(), after, 100)
@@ -189,6 +216,21 @@ func (s *InstanceAutoStopService) tryStop(ctx context.Context, cfg models.Instan
 // The lifecycle lock and workspace/upgrade mutation fence both span live
 // preflight, the durable stop claim, Runtime cleanup, and binding release.
 func (s *InstanceAutoStopService) tryStopGuarded(ctx context.Context, cfg models.InstanceAutoStopSettings, a models.InstanceModelActivity) error {
+	if s.teamPower != nil {
+		team, err := s.teamPower.store.InstanceTeam(ctx, a.InstanceID)
+		if err != nil {
+			return err
+		}
+		if team != 0 {
+			allowed, _ := ctx.Value(teamIdleStopContextKey{}).(int)
+			if allowed != team {
+				return fmt.Errorf("Team members only stop through a Team operation")
+			}
+			if err = s.teamPower.store.ValidateStopMember(ctx, team, a.InstanceID, a.Generation); err != nil {
+				return err
+			}
+		}
+	}
 	i, err := s.lifecycle.instanceRepo.GetByID(a.InstanceID)
 	if err != nil {
 		return err
@@ -317,6 +359,15 @@ func (s *InstanceAutoStopService) withInstanceMutation(ctx context.Context, id i
 }
 
 func (s *InstanceAutoStopService) resumeGuarded(ctx context.Context, op models.InstanceIdleStopOperation) {
+	current, readErr := s.store.GetStopOperation(ctx, op.ID)
+	if readErr != nil || current == nil || current.Phase == "completed" {
+		return
+	}
+	op = *current
+	if op.Kind == "restart" && op.Phase == "restart_ready" {
+		_ = s.lifecycle.resumeRestartFollowup(ctx, op.InstanceID)
+		return
+	}
 	a, err := s.store.GetActivity(ctx, op.InstanceID)
 	if err != nil || a == nil || a.StopOperationID != op.ID {
 		return
@@ -332,10 +383,12 @@ func (s *InstanceAutoStopService) resumeGuarded(ctx context.Context, op models.I
 			return
 		}
 	}
-	if op.Kind == "manual" {
+	if op.Kind == "manual" || op.Kind == "restart" {
 		if err = s.lifecycle.resumeManualStop(ctx, op); err != nil {
 			op.ErrorMessage = err.Error()
 			_ = s.store.FailStop(ctx, op)
+		} else if op.Kind == "restart" {
+			_ = s.lifecycle.resumeRestartFollowup(ctx, op.InstanceID)
 		}
 		return
 	}
@@ -421,6 +474,10 @@ func (s *InstanceAutoStopService) expireStarts(ctx context.Context) error {
 		}
 		func() {
 			defer release()
+			activity, e := s.store.GetActivity(ctx, id)
+			if e != nil || activity == nil || activity.StartDeadlineAt == nil {
+				return
+			}
 			changed, e := s.store.FenceExpiredStart(ctx, id)
 			if e != nil || !changed {
 				return
@@ -431,11 +488,32 @@ func (s *InstanceAutoStopService) expireStarts(ctx context.Context) error {
 			}
 			// An explicit Start already authorizes cancellation of its unpublished
 			// reservation. Keep the deadline/fence if teardown cannot be confirmed.
-			if e = s.lifecycle.cleanupV2GatewayBinding(ctx, i); e != nil {
+			if s.lifecycle.bindingRepo == nil {
+				return
+			}
+			b, e := s.lifecycle.bindingRepo.GetByInstanceID(ctx, id)
+			if e != nil {
+				return
+			}
+			if verifier, ok := s.lifecycle.agentClient.(interface {
+				VerifyFailedStartCleanup(context.Context, *models.Instance) error
+			}); b == nil && ok {
+				// Current-generation stop proof is sufficient to withdraw Start;
+				// unrelated historical delete protection must remain untouched.
+				e = verifier.VerifyFailedStartCleanup(ctx, i)
+				if errors.Is(e, k8sservice.ErrCurrentStartPublicationUnavailable) {
+					e = s.lifecycle.cleanupV2GatewayBinding(ctx, i)
+				}
+			} else {
+				e = s.lifecycle.cleanupV2GatewayBinding(ctx, i)
+			}
+			if e != nil {
 				_ = s.store.RecordBlocker(ctx, id, e.Error())
 				return
 			}
-			_ = s.store.ClearStartDeadline(ctx, id)
+			if e = s.store.ClearExpiredStartDeadline(ctx, id, i.RuntimeGeneration, *activity.StartDeadlineAt); e != nil {
+				return
+			}
 			GetHub().BroadcastInstanceStatus(i.UserID, i)
 		}()
 	}

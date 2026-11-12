@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -20,6 +21,26 @@ func ConfigureOwnerHistoryNFSIO(store *ownerrecords.Store, profile string) {
 		return
 	}
 	store.HistoryRoot = filepath.Clean(store.HistoryRoot)
+	store.IsolatedReader = func(ctx context.Context, raw []byte) ([]byte, bool, error) {
+		var read struct {
+			Root, Workspace string
+			Identity        ownerrecords.Identity
+		}
+		if json.Unmarshal(raw, &read) != nil || read.Root != store.HistoryRoot {
+			return nil, true, ErrWorkspacePathInvalid
+		}
+		request, err := ownerHistoryRequest(read.Root, read.Workspace, read.Identity)
+		if err != nil {
+			return nil, true, err
+		}
+		request.Action, request.HistorySnapshot = "snapshot", raw
+		response, _, ended, err := runWorkspaceNFSHelperCommand(ctx, ownerHistoryHelperCommand, request, nil, nil)
+		if ended {
+			_ = os.Remove(request.HistoryTempPath)
+		}
+		return response.HistorySnapshot, ended, err
+	}
+
 	store.HistoryReader = func(ctx context.Context, root, workspace string, identity ownerrecords.Identity, recent bool, cutoff ...time.Time) ([]ownerrecords.NativeQuestion, error) {
 		request, err := ownerHistoryRequest(root, workspace, identity)
 		if err != nil {

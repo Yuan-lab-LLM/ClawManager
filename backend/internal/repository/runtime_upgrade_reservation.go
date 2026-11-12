@@ -122,9 +122,10 @@ func (r *instanceRuntimeBindingRepository) ReserveUpgradeGateway(ctx context.Con
 		if !owned {
 			return ErrUpgradeReservationDenied
 		}
-		// Another active upgrade of the same type is never implicitly authorized.
+		// Only the oldest admitted OpenClaw operation may start a writer. Later
+		// queued/recovery records must not deadlock it; waiting is retryable.
 		var other int
-		row, err := tx.SQL().QueryRowContext(ctx, "SELECT COUNT(*) FROM runtime_rollouts WHERE runtime_type = 'openclaw' AND status IN ('pending','running') AND id <> ?", rollout.ID)
+		row, err := tx.SQL().QueryRowContext(ctx, "SELECT COUNT(*) FROM runtime_rollouts WHERE runtime_type = 'openclaw' AND status IN ('pending','running') AND id < ?", rollout.ID)
 		if err != nil {
 			return err
 		}
@@ -132,7 +133,7 @@ func (r *instanceRuntimeBindingRepository) ReserveUpgradeGateway(ctx context.Con
 			return err
 		}
 		if other != 0 {
-			return ErrUpgradeReservationDenied
+			return ErrUpgradeCapacityPending
 		}
 		var existing models.InstanceRuntimeBinding
 		err = tx.Collection("instance_runtime_bindings").Find("instance_id", req.InstanceID).One(&existing)

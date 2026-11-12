@@ -312,7 +312,7 @@ func (r *OwnerTeamRepository) MemberGroups(teams []models.Team) (map[int][]model
 }
 
 func (r *OwnerTeamRepository) InstanceTeam(instanceID int) (*models.Team, error) {
-	rows, err := r.sess.SQL().Query(`SELECT DISTINCT t.id FROM team_members m JOIN teams t ON t.id=m.team_id JOIN instances i ON i.id=? WHERE t.resource_scope='northbound' AND m.status<>'deleted' AND t.status<>'deleted' AND (m.instance_id=i.id OR i.provisioning_operation_id=SHA2(CONCAT('owner-team-',t.id,'-member-',m.member_key),256)) LIMIT 2`, instanceID)
+	rows, err := r.sess.SQL().Query(`SELECT DISTINCT t.id FROM team_members m JOIN teams t ON t.id=m.team_id JOIN instances i ON i.id=? WHERE m.status<>'deleted' AND t.status<>'deleted' AND (m.instance_id=i.id OR (t.resource_scope='northbound' AND i.provisioning_operation_id=SHA2(CONCAT('owner-team-',t.id,'-member-',m.member_key),256))) LIMIT 2`, instanceID)
 	if err != nil {
 		return nil, err
 	}
@@ -337,7 +337,7 @@ func (r *OwnerTeamRepository) InstanceTeam(instanceID int) (*models.Team, error)
 		return nil, fmt.Errorf("ambiguous instance Team identity")
 	}
 	team, err := NewTeamRepository(r.sess).GetTeamByID(teamID)
-	if err != nil || team == nil || team.IsCM() {
+	if err != nil || team == nil {
 		return nil, err
 	}
 	return team, team.ValidateScope()
@@ -354,6 +354,8 @@ func (r *NorthboundRepository) FinishOwnerTeamOperation(ctx context.Context, op 
 		status, code, message = "failed", "OWNER_TEAM_OPERATION_FAILED", "操作未完成；已保留现有资源，请查看操作记录"
 		text := strings.ToLower(cause.Error())
 		switch {
+		case strings.Contains(text, "team_creation_policy:"):
+			code, message = "TEAM_CREATION_POLICY", "原创建配置不符合当前 Team 规则；Leader 必须为 OpenClaw Lite，Worker 仅支持 Lite。已有资源已保留，不能继续新增成员"
 		case strings.Contains(text, "runtime readiness timed out"):
 			code, message = "OWNER_TEAM_RUNTIME_TIMEOUT", "成员启动验证超时；现有实例和数据已保留，解决运行异常后可重试原操作"
 		case strings.Contains(text, "owner_team_step_uncertain"):

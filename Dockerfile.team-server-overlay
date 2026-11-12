@@ -1,0 +1,6 @@
+# Backend-only follow-up: retain the serving frontend, native assets and settings.
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+ARG VCS_REF
+COPY --chmod=755 --from=backend-binaries /clawreef-server /usr/local/bin/clawreef-server
+LABEL org.opencontainers.image.revision=$VCS_REF
