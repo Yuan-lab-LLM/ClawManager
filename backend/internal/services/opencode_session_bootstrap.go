@@ -162,7 +162,7 @@ func (s *InstanceProxyService) resolveOpenCodeInitialSession(ctx context.Context
 	}
 	payload := map[string]any{
 		"id": initialID, "title": "开始使用",
-		"location": map[string]string{"directory": path.Join(root, "project")},
+		"location": map[string]string{"directory": path.Join(root, OpenCodeDefaultProjectRelativePath)},
 		"metadata": map[string]string{"clawmanager.bootstrap": scope},
 	}
 	_, createErr := s.openCodeBootstrapAPI(ctx, upstream, password, protected, http.MethodPost, "/api/session", payload, &saved)

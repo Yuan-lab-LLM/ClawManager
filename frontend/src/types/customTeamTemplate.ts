@@ -26,6 +26,7 @@ export interface CustomTeamTemplateSpec {
 }
 
 export interface CustomTeamTemplate {
+  creation_error?: string;
   id: number;
   name: string;
   intent: string;

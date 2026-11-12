@@ -19,6 +19,8 @@ assert.equal(memberRailState({ status: 'idle', availability: 'unknown' }).label,
 assert.equal(memberRailState({ status: 'failed', availability: 'idle' }).label, '失败');
 assert.equal(memberRailState({ status: 'idle', availability: 'busy' }).label, '运行忙碌');
 assert.equal(memberRailState({ status: 'idle', availability: 'idle', blocked_reason: 'fault' }).label, '运行异常');
+assert.equal(memberRailState({status:'idle',availability:'idle',runtime_observation:{state:'online',reason:'runtime_inventory_delayed'}}).label,'空闲 · 状态更新中');
+assert.equal(memberRailState({status:'busy',availability:'busy',runtime_observation:{state:'offline'}}).tone,'error');
 for(const runtime_status of ['creating','starting','pending']){
   const warming={status:'creating',availability:'unknown',runtime_status};
   assert.equal(memberRailState(warming).label,'启动中');assert.equal(memberRailState(warming).tone,'neutral');

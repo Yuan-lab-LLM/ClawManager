@@ -1117,6 +1117,10 @@ func (h *InstanceHandler) RestartInstance(c *gin.Context) {
 	}
 
 	if err := h.instanceService.RestartWithEnvironment(id, req.EnvironmentOverrides, req.EnvironmentOverrideRemovals); err != nil {
+		if errors.Is(err, services.ErrInstanceRestartPending) {
+			utils.Success(c, http.StatusAccepted, "Instance restart is awaiting confirmed shutdown", nil)
+			return
+		}
 		if errors.Is(err, services.ErrInvalidEnvironmentOverrides) {
 			utils.Error(c, http.StatusBadRequest, err.Error())
 			return
@@ -1125,7 +1129,7 @@ func (h *InstanceHandler) RestartInstance(c *gin.Context) {
 		return
 	}
 
-	utils.Success(c, http.StatusOK, "Instance restarted successfully", nil)
+	utils.Success(c, http.StatusOK, "Instance restart submitted", nil)
 }
 
 // GetInstanceEnvironmentOverrides returns only configured variable names.

@@ -219,3 +219,66 @@ func TestProtectedRedisOpenUsesPinnedTargetAndNeverAuthenticationFallback(t *tes
 		})
 	}
 }
+
+type managedStartingTeamFixture struct {
+	*managedTeamFixture
+	allowed bool
+	fail    error
+}
+
+func (f *managedStartingTeamFixture) AuthorizeTeamMemberStartup(context.Context, int, int, int) (bool, error) {
+	return f.allowed, f.fail
+}
+func TestProtectedTeamOfflineMemberCanOnlyBootstrapWithinOwnedStart(t *testing.T) {
+	id := 7
+	env := `{"CLAWMANAGER_TEAM_ID":"12"}`
+	instance := &models.Instance{ID: 7, UserID: 3, Status: "creating", EnvironmentOverridesJSON: &env}
+	f := &managedStartingTeamFixture{managedTeamFixture: &managedTeamFixture{team: &models.Team{ID: 12, UserID: 3, Status: models.TeamStatusRunning}, member: &models.TeamMember{ID: 91, TeamID: 12, UserID: 3, InstanceID: &id, Status: models.TeamMemberStatusOffline}}}
+	m := &ManagedTeamRedis{teams: f}
+	if _, err := m.authorizeTeam(context.Background(), instance, 12); err == nil {
+		t.Fatal("offline member bypassed startup gate")
+	}
+	f.allowed = true
+	if _, err := m.authorizeTeam(context.Background(), instance, 12); err != nil {
+		t.Fatal(err)
+	}
+	instance.Status = "running"
+	if _, err := m.authorizeTeam(context.Background(), instance, 12); err != nil {
+		t.Fatal("online handoff within original start rejected", err)
+	}
+	f.allowed = false
+	if _, err := m.authorizeTeam(context.Background(), instance, 12); err == nil {
+		t.Fatal("general offline access admitted")
+	}
+	f.allowed = true
+	instance.Status = "creating"
+	f.fail = errors.New("lookup failed")
+	if _, err := m.authorizeTeam(context.Background(), instance, 12); err == nil {
+		t.Fatal("uncertain startup admitted")
+	}
+}
+
+func TestNewProtectedTeamBootstrapDoesNotAuthorizeLegacyCreatingTeam(t *testing.T) {
+	id := 7
+	env := `{"CLAWMANAGER_TEAM_ID":"12"}`
+	instance := &models.Instance{ID: 7, UserID: 3, Status: "creating", EnvironmentOverridesJSON: &env}
+	f := &managedTeamFixture{team: &models.Team{ID: 12, UserID: 3, Status: models.TeamStatusCreating}, member: &models.TeamMember{ID: 91, TeamID: 12, UserID: 3, InstanceID: &id, Status: models.TeamMemberStatusCreating}}
+	m := &ManagedTeamRedis{teams: f}
+	if _, err := m.authorizeTeam(context.Background(), instance, 12); err == nil {
+		t.Fatal("legacy creating Team admitted")
+	}
+	f.team.PreviewSecurityProfile = models.TeamPreviewSecurityProfile
+	if _, err := m.authorizeTeam(context.Background(), instance, 12); err != nil {
+		t.Fatal(err)
+	}
+	f.member.Status = models.TeamMemberStatusIdle
+	instance.Status = "running"
+	if _, err := m.authorizeTeam(context.Background(), instance, 12); err != nil {
+		t.Fatal("new Team online handoff rejected", err)
+	}
+	f.member.Status = models.TeamMemberStatusBusy
+	if _, err := m.authorizeTeam(context.Background(), instance, 12); err == nil {
+		t.Fatal("execution during creation admitted")
+	}
+
+}

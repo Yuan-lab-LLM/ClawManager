@@ -64,5 +64,68 @@
 .ot-member-detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;min-width:0}.ot-member-detail-grid>div{min-width:0}.ot-member-detail-grid h5{font-size:12px;font-weight:500;color:var(--ot-ink);margin:0 0 7px}.ot-member-detail-grid p{margin:0 0 13px}.ot-member-field{margin-bottom:14px}.ot-member-field ul{list-style:disc;padding-left:17px;margin:0}.ot-member-field li{margin:0 0 5px}
 .ot-member-detail-actions{display:flex;gap:7px;align-items:center;flex-wrap:wrap;flex-shrink:0;border-top:1px solid var(--ot-border);padding-top:10px}.ot-member-detail-actions>.ot-secondary{font-size:11px;padding:5px 8px;min-height:31px}
 .ot-mobile-member-select,.ot-compact-tabs{display:none}
+
 @media(max-width:1280px){.ot-editor-columns{display:flex}.ot-compact-tabs{display:flex;gap:5px;padding:4px;background:var(--ot-soft);border-radius:8px;margin-bottom:12px;flex-shrink:0}.ot-compact-tabs button{flex:1;padding:7px;background:transparent;border-radius:5px;color:var(--ot-muted);font-size:12px}.ot-compact-tabs button[aria-selected=true]{background:var(--ot-surface);color:var(--ot-blue)}.ot-template-information{display:none;flex:1}.ot-template-members{border-left:0;padding-left:0;flex:1}.ot-compact-editor[data-pane=info] .ot-template-information{display:block}.ot-compact-editor[data-pane=info] .ot-template-members{display:none}}
 @media(max-width:700px){.ot-member-selector{display:none}.ot-mobile-member-select{display:flex;align-items:center;gap:8px;color:var(--ot-muted);font-size:12px;margin-bottom:12px;flex-shrink:0}.ot-mobile-member-select select{flex:1;min-width:0;border:1px solid var(--ot-border);border-radius:8px;background:var(--ot-surface);color:var(--ot-ink);padding:8px;font-size:12px}.ot-mobile-member-select small{font-size:11px;white-space:nowrap}.ot-template-members>.ot-section-title{display:none}.ot-member-detail-grid{gap:12px}.ot-member-detail-actions{gap:5px}.ot-member-detail-actions>.ot-secondary{padding:5px 6px;font-size:11px}.ot-template-information textarea{min-height:110px}}
+
+/* Directory template editor: each pane owns one bounded scroll area. Keep
+   four pixels around focusable controls rather than clipping their outlines. */
+.ot-directory-template-area{--ot-template-list-width:160px;--ot-template-column-gap:20px;grid-template-rows:auto minmax(0,1fr)}
+.ot-directory-template-area .ot-template-toolbar{display:grid;grid-template-columns:minmax(130px,var(--ot-template-list-width)) minmax(0,1fr);column-gap:var(--ot-template-column-gap);padding:16px 4px 18px}
+.ot-directory-template-area .ot-template-manager{grid-template-columns:minmax(130px,var(--ot-template-list-width)) minmax(0,1fr);column-gap:var(--ot-template-column-gap)}
+.ot-template-selection-toolbar{display:flex;align-items:center;justify-content:space-between;gap:14px;min-width:0}
+.ot-template-selection-toolbar>.ot-actions{flex-shrink:0;flex-wrap:nowrap;gap:6px}
+.ot-template-selection-toolbar .ot-icon{border-color:transparent;background:transparent;flex-shrink:0}
+.ot-template-selection-toolbar .ot-icon:hover{background:var(--ot-soft);border-color:transparent}
+.ot-directory-template-area .ot-template-list{padding:6px 6px 12px}
+.ot-directory-template-area .ot-template-list .ot-master-item{border:0;border-left:2px solid transparent;border-radius:0 8px 8px 0;background:var(--ot-surface);box-shadow:none}
+.ot-directory-template-area .ot-template-list .ot-master-item:hover{background:var(--ot-soft)}
+.ot-directory-template-area .ot-template-list .ot-master-item[aria-pressed=true]{border-left-color:var(--ot-blue);background:var(--ot-soft);color:var(--ot-blue)}
+.ot-workspace .ot-master{padding:6px 6px 12px}
+.ot-directory-editor button:focus-visible{outline-offset:2px}
+.ot-directory-editor{padding:4px;gap:0}
+.ot-directory-template-area .ot-template-name{display:flex;align-items:center;gap:6px;min-width:0;flex:1}
+.ot-directory-template-area .ot-template-name h3{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:15px;font-weight:600;line-height:1.5}
+.ot-directory-editor .ot-editor-columns{grid-template-columns:minmax(225px,.72fr) minmax(0,1.28fr);gap:22px;overflow:hidden}
+.ot-directory-editor .ot-template-information{display:flex;flex-direction:column;padding:0;overflow:hidden}
+.ot-editor-section-heading{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:38px;flex-shrink:0;margin:0 0 10px;padding:3px 4px}
+.ot-editor-section-heading h4{display:flex;align-items:center;gap:7px;font-size:13px;font-weight:600;margin:0!important}
+.ot-editor-section-heading .ot-muted{margin:0;white-space:nowrap;font-size:11px}
+.ot-information-scroll{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;scrollbar-width:thin;padding:4px 5px 12px 4px}
+.ot-information-scroll form label{display:flex;flex-direction:column;gap:7px;margin-bottom:15px;font-size:12px;color:var(--ot-muted)}
+.ot-directory-editor .ot-count-field{display:flex;align-items:center;gap:7px;white-space:nowrap;font-size:11px;color:var(--ot-muted)}
+.ot-count-field select{font-size:13px;border:1px solid var(--ot-border);border-radius:8px;padding:5px 8px;background:var(--ot-surface);color:var(--ot-ink);min-width:70px}
+.ot-count-field select:focus-visible{outline:2px solid #1467d3;outline-offset:2px}
+.ot-directory-editor .ot-template-information textarea{min-height:180px;max-height:280px;line-height:1.85}
+.ot-template-local-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:18px 0 10px}
+.ot-template-local-actions button{font-size:12px;padding:8px 10px}
+.ot-template-scope-note{display:flex;align-items:flex-start;gap:6px;color:var(--ot-muted);font-size:11px;line-height:1.7;margin:0 0 10px}
+.ot-template-scope-note>svg{flex-shrink:0;margin-top:2px}
+.ot-directory-editor .ot-template-members{position:relative;container-type:inline-size;padding-left:20px;border-left:0;overflow:hidden}
+.ot-directory-editor .ot-template-members::before{content:'';position:absolute;left:0;top:6px;width:1px;height:calc(100% - 50px);max-height:350px;background:color-mix(in srgb,var(--ot-border) 75%,var(--ot-surface));pointer-events:none}
+.ot-template-directory-layout{display:grid;grid-template-columns:126px minmax(0,1fr);gap:15px;flex:1;min-height:0;min-width:0;overflow:hidden;padding:4px}
+.ot-directory-editor .ot-member-selector{display:flex;flex-direction:column;gap:5px;min-height:0;max-height:none;overflow:auto;scrollbar-width:thin;padding:4px 8px 8px 4px;margin:-4px 0 -4px -4px;border-right:0}
+.ot-directory-editor .ot-member-tab{flex-shrink:0;min-height:53px;border-color:transparent;padding:9px 6px;gap:7px}
+.ot-directory-editor .ot-member-tab[aria-selected=true]{border-color:transparent;color:var(--ot-blue)}
+.ot-directory-editor .ot-member-tab strong{-webkit-line-clamp:3;font-size:12px}
+.ot-directory-editor .ot-member-tab>.team-functional-badge{width:23px;height:28px;flex-basis:23px;background:transparent;border-color:transparent}
+.ot-directory-editor .ot-member-tab>.team-functional-badge svg{width:16px;height:16px}
+.ot-directory-editor .ot-member-detail{overflow:hidden;padding:4px;margin:-4px}
+.ot-member-detail-heading{display:flex;align-items:center;gap:9px;min-height:42px;margin-bottom:12px;flex-shrink:0}
+.ot-member-detail-heading>div:last-child{min-width:0;overflow-wrap:anywhere}
+.ot-member-detail-heading strong{display:block;font-size:13px;font-weight:600}
+.ot-member-detail-heading small{display:block;color:var(--ot-muted);font-size:11px;margin-top:3px}
+.ot-directory-editor .ot-member-detail-grid{grid-template-columns:minmax(0,1fr);gap:0}
+.ot-directory-editor .ot-member-detail-scroll{padding:4px 7px 14px 4px;font-size:13px;line-height:1.85}
+.ot-directory-editor .ot-member-detail-grid h5{font-size:12px}
+.ot-directory-editor .ot-member-detail-actions{border-top:0;padding:14px 4px 4px;gap:7px}
+.ot-directory-editor .ot-member-detail-actions>.ot-secondary{font-size:12px;padding:7px 8px}
+.ot-directory-editor .ot-member-detail-tabs{border-bottom:0;padding:3px 4px 0;gap:15px}
+.ot-directory-editor .ot-member-detail-tabs button{position:relative;border-bottom:0}
+.ot-directory-editor .ot-member-detail-tabs button[aria-selected=true]::after{content:'';position:absolute;left:0;bottom:0;width:18px;height:2px;border-radius:2px;background:var(--ot-blue)}
+.ot-directory-editor .ot-mobile-member-select{display:none}
+@container(max-width:430px){.ot-template-directory-layout{display:flex;flex-direction:column;gap:10px}.ot-directory-editor .ot-member-selector{display:none}.ot-directory-editor .ot-mobile-member-select{display:flex;align-items:center;gap:9px;flex-shrink:0;font-size:12px;color:var(--ot-muted);padding:3px;margin:0}.ot-directory-editor .ot-mobile-member-select select{flex:1;min-width:0;border:1px solid var(--ot-border);border-radius:8px;background:var(--ot-surface);color:var(--ot-ink);padding:8px}.ot-directory-editor .ot-member-detail-heading{margin-bottom:8px}}
+@media(max-width:1280px){.ot-directory-editor .ot-template-information{display:none}.ot-directory-editor[data-pane=info] .ot-template-information{display:flex}.ot-directory-editor .ot-editor-columns{gap:0}.ot-directory-editor .ot-template-members{padding-left:0}.ot-directory-editor .ot-template-members::before{display:none}.ot-directory-editor .ot-compact-tabs{margin-top:2px}}
+@media(max-width:700px){.ot-directory-template-area .ot-template-toolbar{grid-template-columns:minmax(0,1fr);padding:12px 4px}.ot-directory-template-area .ot-template-toolbar>.ot-template-library-heading{display:none}.ot-template-selection-toolbar{flex-wrap:wrap;gap:8px}.ot-directory-template-area .ot-template-name{flex-basis:100%}.ot-directory-template-area .ot-template-list{padding:4px 5px 8px 4px;max-height:120px}.ot-directory-editor .ot-template-information textarea{min-height:140px}.ot-directory-editor .ot-editor-section-heading{display:flex}.ot-directory-editor .ot-member-detail-grid{gap:0}.ot-directory-editor .ot-template-local-actions{margin-top:12px}.ot-directory-editor .ot-member-detail-actions>.ot-secondary{font-size:11px;padding:7px}}
+
+.ot-card-status [data-state="stopped"] { color: #64748b; }

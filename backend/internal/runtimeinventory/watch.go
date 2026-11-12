@@ -2,6 +2,8 @@ package runtimeinventory
 
 import (
 	"context"
+	"fmt"
+	"net/netip"
 	"sync"
 	"time"
 
@@ -26,13 +28,21 @@ type objectSource struct {
 // requests expire every two seconds; even a silent broken transport loses its
 // authority after three seconds. Normal renewal resumes the last version rather
 // than repeatedly listing the full instance set.
-func Start(ctx context.Context, kube kubernetes.Interface, dynamicClient dynamic.Interface, metadataClient metadata.Interface, namespace string, podCIDRs, controls []string) (*Inventory, error) {
+func Start(ctx context.Context, kube kubernetes.Interface, dynamicClient dynamic.Interface, metadataClient metadata.Interface, namespace string, podCIDRs, controls []string, legacyServiceCIDRs ...[]string) (*Inventory, error) {
 	i, err := newInventory(podCIDRs, controls)
 	if err != nil {
 		return nil, err
 	}
 	if kube == nil || dynamicClient == nil || metadataClient == nil || namespace == "" {
 		return nil, errUnavailable
+	}
+	if len(legacyServiceCIDRs) > 1 {
+		return nil, fmt.Errorf("ambiguous legacy service ranges")
+	}
+	if len(legacyServiceCIDRs) == 1 && len(legacyServiceCIDRs[0]) > 0 {
+		if err := i.configureLegacyServiceRanges(kube, legacyServiceCIDRs[0]); err != nil {
+			return nil, err
+		}
 	}
 	cms := kube.CoreV1().ConfigMaps(namespace)
 	pods := kube.CoreV1().Pods(namespace)
@@ -115,6 +125,10 @@ func Start(ctx context.Context, kube kubernetes.Interface, dynamicClient dynamic
 		{schema.GroupVersionResource{Version: "v1", Resource: "nodes"}, "", ""},
 		{schema.GroupVersionResource{Group: "networking.k8s.io", Version: "v1", Resource: "servicecidrs"}, "", ""},
 	}
+	if len(i.legacyServiceRanges) > 0 {
+		streams = streams[:3]
+		proofs = proofs[:3]
+	}
 	for n, proof := range proofs {
 		streams[n].source.proof = metadataProof(metadataClient.Resource(proof.resource).Namespace(proof.namespace), proof.selector)
 	}
@@ -141,7 +155,7 @@ func (i *Inventory) WaitReady(ctx context.Context) error {
 	defer ticker.Stop()
 	for {
 		ready := true
-		for _, store := range []*objectStore{&i.assignments, &i.pods, &i.nodes, &i.services} {
+		for _, store := range i.observedStores() {
 			if !store.isHealthy() {
 				ready = false
 				break
@@ -278,4 +292,34 @@ func retry(ctx context.Context) bool {
 	case <-timer.C:
 		return true
 	}
+}
+
+// Older API servers have no ServiceCIDR resource. Explicit site ranges must
+// come from that server's service-cluster-ip-range configuration, just as Pod
+// CIDRs come from the CNI. This does not relax any Pod/Node/assignment proof.
+func (i *Inventory) configureLegacyServiceRanges(kube kubernetes.Interface, values []string) error {
+	resources, err := kube.Discovery().ServerResourcesForGroupVersion("networking.k8s.io/v1")
+	if err != nil && !apierrors.IsNotFound(err) {
+		return err
+	}
+	if resources != nil {
+		for _, r := range resources.APIResources {
+			if r.Name == "servicecidrs" {
+				return fmt.Errorf("legacy service ranges cannot replace available ServiceCIDR authority")
+			}
+		}
+	}
+	ranges := make([]netip.Prefix, 0, len(values))
+	for _, v := range values {
+		p, e := netip.ParsePrefix(v)
+		if e != nil || p.Bits() == 0 || p != p.Masked() || p.Addr().Is4In6() {
+			return fmt.Errorf("invalid explicit legacy service CIDR")
+		}
+		ranges = append(ranges, p)
+	}
+	if len(ranges) == 0 {
+		return fmt.Errorf("legacy service CIDRs required")
+	}
+	i.legacyServiceRanges = ranges
+	return nil
 }

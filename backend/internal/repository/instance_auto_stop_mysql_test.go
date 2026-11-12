@@ -72,6 +72,31 @@ func idleStopMySQL(t *testing.T) db.Session {
 			t.Fatal(err)
 		}
 	}
+
+	for _, q := range []string{
+		`ALTER TABLE instances ADD provisioning_operation_id VARCHAR(64) NULL, ADD workspace_path VARCHAR(1024) NULL`,
+		`CREATE TABLE teams (id INT PRIMARY KEY,status VARCHAR(32),resource_scope VARCHAR(32))`,
+		`CREATE TABLE team_members (id INT PRIMARY KEY,team_id INT,instance_id INT NULL,member_key VARCHAR(64),role VARCHAR(32),status VARCHAR(32))`,
+		`CREATE TABLE team_tasks (id INT PRIMARY KEY,team_id INT,created_by INT NULL,status VARCHAR(32),finished_at DATETIME(6) NULL,payload_json LONGTEXT NULL)`,
+		`CREATE TABLE team_work_items (team_id INT,status VARCHAR(32),superseded_by VARCHAR(255) NULL,root_task_id INT NULL)`,
+		`CREATE TABLE team_event_outbox (team_id INT,status VARCHAR(32))`,
+		`CREATE TABLE team_workspace_write_intents (team_id INT)`,
+	} {
+		if _, e := s.SQL().Exec(q); e != nil {
+			t.Fatal(e)
+		}
+	}
+	rawTeam, e := os.ReadFile("../db/migrations/101_add_team_runtime_lifecycle.sql")
+	if e != nil {
+		t.Fatal(e)
+	}
+	for _, q := range strings.Split(string(rawTeam), ";") {
+		if strings.TrimSpace(q) != "" {
+			if _, e = s.SQL().Exec(q); e != nil {
+				t.Fatal(e)
+			}
+		}
+	}
 	raw, err := os.ReadFile("../db/migrations/096_add_instance_auto_stop.sql")
 	extra, extraErr := os.ReadFile("../db/migrations/097_add_instance_auto_stop_scan.sql")
 	if extraErr != nil {

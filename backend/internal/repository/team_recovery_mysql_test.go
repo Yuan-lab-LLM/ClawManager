@@ -77,4 +77,92 @@ func TestRecoveryObservationAndOutboxAreAtomicMySQL(t *testing.T) {
 			t.Fatalf("replay count %s: %d/%v", table, n, e)
 		}
 	}
+	t.Run("delivery transaction and strict event IDs", func(t *testing.T) {
+		member := &models.TeamMember{TeamID: team.ID, UserID: 1, MemberKey: "worker", DisplayName: "Worker", Role: "worker", RuntimeType: "opencode", InstanceMode: "lite", Status: "idle", Availability: "idle"}
+		if e := repo.CreateMember(member); e != nil {
+			t.Fatal(e)
+		}
+		task := &models.TeamTask{TeamID: team.ID, TargetMemberID: member.ID, MessageID: "atomic-delivery", Status: "running", WorkflowState: "executing", LedgerVersion: 1, PayloadJSON: `{}`}
+		if e := repo.CreateTask(task); e != nil {
+			t.Fatal(e)
+		}
+		now := time.Now().UTC()
+		old := `{"completionId":"receipt","summary":"old"}`
+		item := &models.TeamWorkItem{TeamID: team.ID, RootTaskID: task.ID, OwnerMemberID: &member.ID, WorkID: "work", Status: "succeeded", RequiredForRoot: true, ReviewRequired: true, ValidatedRevision: func() *int { v := 1; return &v }(), Revision: 1, ResultJSON: &old, FinishedAt: &now}
+		if e := repo.UpsertWorkItem(item); e != nil {
+			t.Fatal(e)
+		}
+		committer := repo.(interface {
+			CommitTeamDelivery(*models.TeamWorkItem, *models.TeamEvent, *models.TeamEventOutbox, *models.TeamTask, int64, []*models.TeamEvent, ...*models.TeamEventOutbox) error
+		})
+		corrected := *item
+		body := `{"completionId":"receipt","summary":"actual correction"}`
+		corrected.ResultJSON = &body
+		changed := *task
+		changed.LedgerVersion = 2
+		long := strings.Repeat("e", 139)
+		event := &models.TeamEvent{TeamID: team.ID, TaskID: &task.ID, EventID: &long, EventType: "member_result_updated", PayloadJSON: &body}
+		ack := &models.TeamEventOutbox{TeamID: team.ID, MessageID: "delivery-ack", SourceEventID: "delivery-update", Destination: strings.Repeat("d", 4096), PayloadJSON: `{}`}
+		if committer.CommitTeamDelivery(&corrected, event, ack, &changed, 1, nil) == nil {
+			t.Fatal("oversized event identity accepted")
+		}
+		short := "member-result-updated:" + strings.Repeat("f", 64)
+		event.EventID = &short
+		event.ID = 0
+		if committer.CommitTeamDelivery(&corrected, event, ack, &changed, 1, nil) == nil {
+			t.Fatal("outbox failure not reproduced")
+		}
+		current, e := repo.GetTaskByID(task.ID)
+		if e != nil || current.LedgerVersion != 1 {
+			t.Fatal("partial ledger committed", e)
+		}
+		items, e := repo.ListWorkItemsByRootTaskID(task.ID)
+		if e != nil || items[0].ResultJSON == nil || *items[0].ResultJSON != old {
+			t.Fatal("partial correction committed", e)
+		}
+		event.ID = 0
+		ack.ID = 0
+		ack.Destination = "claw:team:test:completion-ack"
+		if e = committer.CommitTeamDelivery(&corrected, event, ack, &changed, 1, nil); e != nil {
+			t.Fatal(e)
+		}
+		current, e = repo.GetTaskByID(task.ID)
+		if e != nil || current.LedgerVersion != 2 {
+			t.Fatal("correction did not commit", e)
+		}
+		items, e = repo.ListWorkItemsByRootTaskID(task.ID)
+		if e != nil || items[0].ResultJSON == nil || *items[0].ResultJSON != body || items[0].ValidatedRevision != nil {
+			t.Fatal("correction/result review boundary not committed", e)
+		}
+		if committer.CommitTeamDelivery(&corrected, event, ack, &changed, 1, nil) == nil {
+			t.Fatal("stale ledger overwrote result")
+		}
+		for i := 0; i < 3; i++ {
+			x := *task
+			x.ID = 0
+			x.MessageID = fmt.Sprintf("page-%d", i)
+			if e = repo.CreateTask(&x); e != nil {
+				t.Fatal(e)
+			}
+		}
+		pager := repo.(interface {
+			ListActiveTeamTasksAfterID(int, int) ([]models.TeamTask, error)
+		})
+		after, count := 0, 0
+		for {
+			page, e := pager.ListActiveTeamTasksAfterID(after, 1)
+			if e != nil {
+				t.Fatal(e)
+			}
+			if len(page) == 0 {
+				break
+			}
+			count++
+			after = page[0].ID
+		}
+		if count != 4 {
+			t.Fatalf("active task pages lost: %d", count)
+		}
+	})
+
 }

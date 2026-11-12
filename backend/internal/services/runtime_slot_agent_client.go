@@ -25,6 +25,8 @@ import (
 // slotRuntimeAgentClient preserves all existing HTTP upgrade/policy operations
 // while requiring persisted ownership and teardown evidence for slot lifecycle.
 type slotRuntimeAgentClient struct {
+	legacy            RuntimeAgentClient
+	protectedInstance func(context.Context, int) (bool, error)
 	*runtimeAgentHTTPClient
 	kube                     kubernetes.Interface
 	namespace                string
@@ -135,24 +137,41 @@ func NewSlotRuntimeAgentClientWithHTTPClient(controlToken string, kube kubernete
 	if base == nil {
 		base = http.DefaultTransport
 	}
-	copyClient.Transport = slotTLSTransport{base: base}
+	transport := &slotTLSTransport{base: base}
+	copyClient.Transport = transport
 	copyClient.CheckRedirect = func(*http.Request, []*http.Request) error { return fmt.Errorf("runtime slot redirects are forbidden") }
 	embedded := NewRuntimeAgentClientWithHTTPClient(controlToken, &copyClient).(*runtimeAgentHTTPClient)
 	if copyClient.Timeout == runtimeAgentControlTimeout {
 		embedded.upgradeHTTPClient.Timeout = runtimeAgentUpgradeTimeout
 	}
-	return &slotRuntimeAgentClient{
+	client := &slotRuntimeAgentClient{
 		runtimeAgentHTTPClient: embedded,
 		recoveryStorageProof:   k8sservice.ResolveStoppedSourceStorage,
 		kube:                   kube, namespace: namespace, assignments: k8sservice.NewRuntimeAssignmentService(kube, namespace),
 	}
+	transport.legacyHTTP = client.allowLegacyHTTPEndpoint
+	transport.legacyToken = func() string {
+		if old, ok := client.legacy.(*runtimeAgentHTTPClient); ok {
+			return old.controlToken
+		}
+		return ""
+	}
+	return client
 }
 
-type slotTLSTransport struct{ base http.RoundTripper }
+type slotTLSTransport struct {
+	base        http.RoundTripper
+	legacyHTTP  func(context.Context, *url.URL) bool
+	legacyToken func() string
+}
 
 func (t slotTLSTransport) RoundTrip(r *http.Request) (*http.Response, error) {
-	if r.URL.Scheme != "https" {
+	if r.URL.Scheme != "https" && (r.URL.Scheme != "http" || t.legacyHTTP == nil || !t.legacyHTTP(r.Context(), r.URL)) {
 		return nil, fmt.Errorf("runtime slots require authenticated HTTPS")
+	}
+	if r.URL.Scheme == "http" && t.legacyToken != nil {
+		r = r.Clone(r.Context())
+		r.Header.Set("X-ClawManager-Control-Token", t.legacyToken())
 	}
 	return t.base.RoundTrip(r)
 }
@@ -174,6 +193,16 @@ func (c *slotRuntimeAgentClient) canRetryPendingGateway(ctx context.Context, end
 }
 
 func (c *slotRuntimeAgentClient) CreateGateway(ctx context.Context, endpoint string, req RuntimeAgentCreateGatewayRequest) (*RuntimeAgentCreateGatewayResponse, error) {
+	if c.legacy != nil {
+		protected, err := c.protectedInstance(ctx, req.InstanceID)
+		if err != nil {
+			return nil, err
+		}
+		if !protected && req.SecurityProfile == "" && strings.HasPrefix(endpoint, "http://") {
+			return c.legacy.CreateGateway(ctx, endpoint, req)
+		}
+	}
+
 	podUID, err := c.targetPodUID(ctx, endpoint)
 	if err != nil {
 		return nil, err
@@ -238,6 +267,19 @@ func (c *slotRuntimeAgentClient) CreateGateway(ctx context.Context, endpoint str
 }
 
 func (c *slotRuntimeAgentClient) DeleteGateway(ctx context.Context, endpoint, gatewayID string) error {
+	if c.legacy != nil {
+		id, parseErr := legacyGatewayInstanceID(gatewayID)
+		if parseErr == nil {
+			protected, err := c.protectedInstance(ctx, id)
+			if err != nil {
+				return err
+			}
+			if !protected {
+				return c.legacy.DeleteGateway(ctx, endpoint, gatewayID)
+			}
+		}
+	}
+
 	var err error
 	gatewayID, err = c.assignments.ResolvePendingGatewayID(ctx, endpoint, gatewayID)
 	if err != nil {
@@ -341,4 +383,50 @@ func (c *slotRuntimeAgentClient) targetPodUID(ctx context.Context, endpoint stri
 		return "", fmt.Errorf("runtime target has no current ready container-slots Pod")
 	}
 	return uid, nil
+}
+
+// ConfigureSlotLegacyCoexistence retains existing process bindings during an explicit
+// migration. A failed identity lookup never downgrades a protected assignment.
+func ConfigureSlotLegacyCoexistence(client RuntimeAgentClient, legacy RuntimeAgentClient, protected func(context.Context, int) (bool, error)) error {
+	c, ok := client.(*slotRuntimeAgentClient)
+	if !ok || legacy == nil || protected == nil {
+		return fmt.Errorf("invalid mixed runtime configuration")
+	}
+	c.legacy, c.protectedInstance = legacy, protected
+	return nil
+}
+func legacyGatewayInstanceID(gatewayID string) (int, error) {
+	parts := strings.Split(gatewayID, "-")
+	if len(parts) != 3 || parts[0] != "gw" {
+		return 0, fmt.Errorf("invalid gateway identity")
+	}
+	id, e := strconv.Atoi(parts[1])
+	generation, g := strconv.Atoi(parts[2])
+	if e != nil || g != nil || id <= 0 || generation <= 0 {
+		return 0, fmt.Errorf("invalid gateway identity")
+	}
+	return id, nil
+}
+
+// Legacy HTTP is restricted to an actual, non-slot Pod in this tenant. Neither
+// a lookup failure nor an HTTPS failure may trigger an insecure retry.
+func (c *slotRuntimeAgentClient) allowLegacyHTTPEndpoint(ctx context.Context, u *url.URL) bool {
+	if c.legacy == nil || c.kube == nil || u.User != nil || net.ParseIP(u.Hostname()) == nil {
+		return false
+	}
+	pods, err := c.kube.CoreV1().Pods(c.namespace).List(ctx, metav1.ListOptions{FieldSelector: "status.podIP=" + u.Hostname()})
+	if err != nil {
+		return false
+	}
+	matches := 0
+	for _, p := range pods.Items {
+		if p.Namespace != c.namespace || p.Status.PodIP != u.Hostname() || p.DeletionTimestamp != nil {
+			continue
+		}
+		if p.Labels["clawmanager.io/runtime-protocol"] != "" || p.Labels["clawmanager.io/runtime-type"] == "" {
+			return false
+		}
+		matches++
+	}
+	return matches == 1
 }

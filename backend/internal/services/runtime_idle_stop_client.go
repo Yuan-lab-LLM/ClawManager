@@ -31,6 +31,16 @@ type RuntimeIdleStopClient interface {
 }
 
 func (c *slotRuntimeAgentClient) verifyIdleTarget(ctx context.Context, endpoint, gatewayID string, req RuntimeIdleStopRequest) error {
+	if c.legacy != nil {
+		protected, err := c.protectedInstance(ctx, req.InstanceID)
+		if err != nil {
+			return err
+		}
+		if !protected {
+			return ErrRuntimeAgentUnsupported
+		}
+	}
+
 	if req.InstanceID <= 0 || req.Generation <= 0 || req.PodUID == "" || gatewayID != fmt.Sprintf("gw-%d-%d", req.InstanceID, req.Generation) {
 		return fmt.Errorf("invalid idle-stop identity")
 	}

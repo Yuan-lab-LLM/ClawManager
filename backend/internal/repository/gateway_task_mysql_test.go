@@ -2,8 +2,10 @@ package repository
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -137,6 +139,33 @@ func TestRuntimeTaskMySQLRevocationLifecycle(t *testing.T) {
 	identity := models.GatewayTaskIdentity{InstanceID: 10, UserID: 1, Generation: 5, SessionID: "ses_test", TaskID: "msg_one"}
 	if err = tasks.Bind(t.Context(), identity, model.ID); err != nil {
 		t.Fatal(err)
+	}
+	// Native guard and per-request headers check the SAME live identity in
+	// parallel. Preserve revocation checks without deadlocking instance/task locks.
+	sess.SetMaxOpenConns(8)
+	var parallel sync.WaitGroup
+	failures := make(chan error, 4)
+	for worker := 0; worker < 4; worker++ {
+		parallel.Add(1)
+		go func() {
+			defer parallel.Done()
+			for n := 0; n < 30; n++ {
+				state, e := tasks.Check(t.Context(), identity)
+				if e != nil {
+					failures <- e
+					return
+				}
+				if state.Revoked || state.Finished {
+					failures <- fmt.Errorf("live authorization changed: %+v", state)
+					return
+				}
+			}
+		}()
+	}
+	parallel.Wait()
+	close(failures)
+	for e := range failures {
+		t.Fatal(e)
 	}
 	model.VisibilityScope = "selected_users"
 	model.AllowedUserIDs = []int{2}

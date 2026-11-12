@@ -32,6 +32,9 @@ func (r *InstanceAutoStopRepository) ClaimStop(ctx context.Context, settingsVers
 		if i.mode != "lite" || i.status != "running" || i.generation != input.Generation || i.userID != input.UserID {
 			return models.ErrAutoStopConflict
 		}
+		if err := requireTeamStopAuthority(ctx, s, input.InstanceID, input.Generation); err != nil {
+			return err
+		}
 		a, err := readActivity(ctx, s, input.InstanceID, true)
 		if err != nil {
 			return err
@@ -179,7 +182,7 @@ func (r *InstanceAutoStopRepository) FailStop(ctx context.Context, op models.Ins
 	})
 }
 func (r *InstanceAutoStopRepository) PendingStops(ctx context.Context) ([]models.InstanceIdleStopOperation, error) {
-	rows, err := r.sess.SQL().QueryContext(ctx, `SELECT id,instance_id,user_id,generation,runtime_pod_id,gateway_id,pod_uid,endpoint,workspace_path,storage_identity,phase,error_message,created_at,stop_kind FROM instance_idle_stop_operations WHERE phase IN ('stopping','error','teardown_confirmed') ORDER BY updated_at,created_at LIMIT 10`)
+	rows, err := r.sess.SQL().QueryContext(ctx, `SELECT id,instance_id,user_id,generation,runtime_pod_id,gateway_id,pod_uid,endpoint,workspace_path,storage_identity,phase,error_message,created_at,stop_kind FROM instance_idle_stop_operations WHERE phase IN ('stopping','error','teardown_confirmed','restart_ready') ORDER BY updated_at,created_at LIMIT 10`)
 	if err != nil {
 		return nil, err
 	}
@@ -306,6 +309,45 @@ func (r *InstanceAutoStopRepository) ClearStartDeadline(ctx context.Context, id 
 	}, nil)
 }
 
+// The caller has confirmed the original failed Start's native teardown under
+// the lifecycle operation lock. Recheck its identity and admission atomically;
+// late proof must never clear a subsequent Start or an in-progress Stop.
+func (r *InstanceAutoStopRepository) ClearExpiredStartDeadline(ctx context.Context, id, generation int, deadline time.Time) error {
+	return r.sess.TxContext(ctx, func(s db.Session) error {
+		i, err := lockActivityInstance(ctx, s, id)
+		if err != nil {
+			return err
+		}
+		a, err := readActivity(ctx, s, id, true)
+		if err != nil {
+			return err
+		}
+		if a == nil || a.StartDeadlineAt == nil {
+			return nil
+		}
+		now := time.Now().UTC()
+		if i.mode != "lite" || i.status != "stopped" || i.generation != generation || a.StopOperationID != "" || !a.StartDeadlineAt.Equal(deadline) || deadline.After(now) {
+			return models.ErrAutoStopConflict
+		}
+		row, err := s.SQL().QueryRowContext(ctx, `SELECT
+		 (SELECT COUNT(*) FROM instance_runtime_bindings WHERE instance_id=?)+
+		 (SELECT COUNT(*) FROM instance_model_activity_requests WHERE instance_id=? AND finished_at IS NULL AND (lease_expires_at IS NULL OR lease_expires_at>UTC_TIMESTAMP(6)))+
+		 (SELECT COUNT(*) FROM gateway_runtime_tasks WHERE instance_id=? AND generation=? AND finished=FALSE)`, id, id, id, generation)
+		if err != nil {
+			return err
+		}
+		var active int
+		if err = row.Scan(&active); err != nil {
+			return err
+		}
+		if active != 0 {
+			return models.ErrModelActivityInProgress
+		}
+		_, err = s.SQL().ExecContext(ctx, `UPDATE instance_model_activity SET generation=?,start_deadline_at=NULL,blocker='',activity_version=activity_version+1,updated_at=? WHERE instance_id=?`, generation, now, id)
+		return err
+	}, nil)
+}
+
 // Preserve proof before releasing a binding: recovery must not contact a slot
 // that may already have been assigned to a different instance.
 func (r *InstanceAutoStopRepository) ConfirmTeardown(ctx context.Context, op models.InstanceIdleStopOperation) error {
@@ -391,6 +433,9 @@ func (r *InstanceAutoStopRepository) PreviousIdleStorage(ctx context.Context, id
 // Manual cleanup has the same durable identity and fence as idle cleanup, but
 // only this explicitly requested mode may invoke the existing delete protocol.
 func (r *InstanceAutoStopRepository) BeginManualStop(ctx context.Context, input models.InstanceIdleStopOperation) (*models.InstanceIdleStopOperation, error) {
+	if input.Kind != "restart" {
+		input.Kind = "manual"
+	}
 	var result *models.InstanceIdleStopOperation
 	err := r.sess.TxContext(ctx, func(s db.Session) error {
 		i, err := lockActivityInstance(ctx, s, input.InstanceID)
@@ -404,6 +449,13 @@ func (r *InstanceAutoStopRepository) BeginManualStop(ctx context.Context, input 
 			return models.ErrAutoStopConflict
 		}
 		now := time.Now().UTC()
+		// An explicit Stop cancels only an unstarted restart follow-up. The old
+		// source still goes through its original confirmed teardown operation.
+		if input.Kind == "manual" {
+			if _, err = s.SQL().ExecContext(ctx, `UPDATE instance_idle_stop_operations SET stop_kind='manual',phase=IF(phase IN ('restart_ready','restart_blocked'),'completed',phase),updated_at=? WHERE instance_id=? AND stop_kind='restart' AND phase<>'completed'`, now, input.InstanceID); err != nil {
+				return err
+			}
+		}
 		if err = ensureActivity(ctx, s, input.InstanceID, i.generation, now); err != nil {
 			return err
 		}
@@ -420,17 +472,19 @@ func (r *InstanceAutoStopRepository) BeginManualStop(ctx context.Context, input 
 			if e = row.Scan(&old.ID, &old.InstanceID, &old.UserID, &old.Generation, &old.RuntimePodID, &old.GatewayID, &old.PodUID, &old.Endpoint, &old.WorkspacePath, &old.StorageIdentity, &old.Phase, &old.ErrorMessage, &old.CreatedAt, &old.Kind); e != nil {
 				return e
 			}
-			if old.Kind != "manual" {
+			if old.Kind != "manual" && old.Kind != "restart" {
+				return models.ErrInstanceStopping
+			}
+			if input.Kind == "restart" && old.Kind != "restart" {
 				return models.ErrInstanceStopping
 			}
 			result = &old
 			return nil
 		}
 		input.ID = uuid.NewString()
-		input.Kind = "manual"
 		input.Phase = "stopping"
 		input.CreatedAt = now
-		_, err = s.SQL().ExecContext(ctx, `INSERT INTO instance_idle_stop_operations(id,instance_id,user_id,generation,runtime_pod_id,gateway_id,pod_uid,endpoint,workspace_path,storage_identity,phase,stop_kind,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,'manual',?,?)`, input.ID, input.InstanceID, input.UserID, input.Generation, input.RuntimePodID, input.GatewayID, input.PodUID, input.Endpoint, input.WorkspacePath, input.StorageIdentity, input.Phase, now, now)
+		_, err = s.SQL().ExecContext(ctx, `INSERT INTO instance_idle_stop_operations(id,instance_id,user_id,generation,runtime_pod_id,gateway_id,pod_uid,endpoint,workspace_path,storage_identity,phase,stop_kind,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, input.ID, input.InstanceID, input.UserID, input.Generation, input.RuntimePodID, input.GatewayID, input.PodUID, input.Endpoint, input.WorkspacePath, input.StorageIdentity, input.Phase, input.Kind, now, now)
 		if err != nil {
 			return err
 		}
@@ -459,7 +513,7 @@ func (r *InstanceAutoStopRepository) CompleteManualStop(ctx context.Context, op 
 		if err != nil {
 			return err
 		}
-		if op.Kind != "manual" || a == nil || a.StopOperationID != op.ID || a.StopPhase != "teardown_confirmed" || i.generation != op.Generation || i.status != "stopped" {
+		if (op.Kind != "manual" && op.Kind != "restart") || a == nil || a.StopOperationID != op.ID || a.StopPhase != "teardown_confirmed" || i.generation != op.Generation || i.status != "stopped" {
 			return models.ErrAutoStopConflict
 		}
 		row, err := s.SQL().QueryRowContext(ctx, `SELECT COUNT(*) FROM instance_runtime_bindings WHERE instance_id=?`, op.InstanceID)
@@ -474,7 +528,11 @@ func (r *InstanceAutoStopRepository) CompleteManualStop(ctx context.Context, op 
 			return models.ErrInstanceStopping
 		}
 		now := time.Now().UTC()
-		if _, err = s.SQL().ExecContext(ctx, `UPDATE instance_idle_stop_operations SET phase='completed',error_message='',updated_at=? WHERE id=? AND stop_kind='manual'`, now, op.ID); err != nil {
+		phase := "completed"
+		if op.Kind == "restart" {
+			phase = "restart_ready"
+		}
+		if _, err = s.SQL().ExecContext(ctx, `UPDATE instance_idle_stop_operations SET phase=?,error_message='',updated_at=? WHERE id=? AND stop_kind=?`, phase, now, op.ID, op.Kind); err != nil {
 			return err
 		}
 		if _, err = s.SQL().ExecContext(ctx, `UPDATE instance_model_activity SET stopped_reason='manual',stopped_at=?,stop_operation_id='',stop_phase='completed',blocker='',updated_at=? WHERE instance_id=?`, now, now, op.InstanceID); err != nil {

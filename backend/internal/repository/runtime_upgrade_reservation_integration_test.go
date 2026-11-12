@@ -127,11 +127,14 @@ func TestUpgradeReservationMySQLContract(t *testing.T) {
 		}
 		exec(tc.restore)
 	}
-	exec(`INSERT INTO runtime_rollouts (id,runtime_type,target_image_ref,status) VALUES (124,'openclaw','other','running')`)
-	if _, err := bindings.ReserveUpgradeGateway(ctx, req); !errors.Is(err, ErrUpgradeReservationDenied) {
-		t.Fatalf("competing rollout accepted: %v", err)
+	exec(`INSERT INTO runtime_rollouts (id,runtime_type,target_image_ref,status) VALUES (122,'openclaw','earlier','pending')`)
+	if _, err := bindings.ReserveUpgradeGateway(ctx, req); !errors.Is(err, ErrUpgradeCapacityPending) {
+		t.Fatalf("earlier queued rollout must cause a bounded wait, not isolation: %v", err)
 	}
-	exec("UPDATE runtime_rollouts SET status='completed' WHERE id=124")
+	exec("UPDATE runtime_rollouts SET status='completed' WHERE id=122")
+	// A later accepted recovery must not deadlock the head of the queue,
+	// including running rows admitted by older controllers.
+	exec(`INSERT INTO runtime_rollouts (id,runtime_type,target_image_ref,status) VALUES (124,'openclaw','later','running')`)
 	// Real deployed old Agent omits UID. Only exact Kubernetes-observed
 	// identity may fill this gap; never treat NULL as a wildcard.
 	exec("UPDATE runtime_pods SET pod_uid=NULL WHERE id=307")

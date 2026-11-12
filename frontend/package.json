@@ -16,6 +16,7 @@
     "test:hermes-session-navigation": "node --experimental-strip-types --test src/lib/hermesDesktopFrame.test.mjs src/lib/hermesSessionNavigation.test.mjs && node scripts/hermes-session-navigation.browser.mjs",
     "test:opencode-default-entry": "node scripts/opencode-default-entry.test.mjs",
     "preview": "vite preview",
+    "test:team-creation": "node --experimental-strip-types scripts/team-creation-policy.test.mjs",
     "test:workbench": "node --disable-warning=ExperimentalWarning --experimental-strip-types --test scripts/workbench-state.test.mjs"
   },
   "dependencies": {

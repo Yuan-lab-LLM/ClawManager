@@ -28,4 +28,5 @@ type SnapshotState struct {
 	AsOf          *time.Time `json:"as_of"`
 	NextRefreshAt time.Time  `json:"next_refresh_at"`
 	State         string     `json:"state"`
+	LastBatchAt   *time.Time `json:"last_batch_at,omitempty"`
 }

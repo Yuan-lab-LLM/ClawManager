@@ -68,7 +68,7 @@ func historyFingerprint(ctx context.Context, root, workspace string, i Identity)
 			}
 			count++
 			if count > 2000 {
-				return fmt.Errorf("history directory limit exceeded")
+				return errHistoryRestricted
 			}
 			return add(path)
 		})

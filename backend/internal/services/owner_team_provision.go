@@ -53,6 +53,9 @@ type OwnerTeamProvisioner interface {
 }
 
 func (s *teamService) ValidateOwnerTeamCreate(userID int, owner string, req CreateTeamRequest) error {
+	if err := ValidateNewTeamRequest(req); err != nil {
+		return err
+	}
 	plans, err := planTeamMembers(req.Name, req.Members)
 	if err != nil {
 		return err
@@ -62,12 +65,13 @@ func (s *teamService) ValidateOwnerTeamCreate(userID int, owner string, req Crea
 }
 
 func (s *teamService) deleteTeamMemberInstance(team *models.Team, instanceID int) error {
-	if team.ResourceScope == models.TeamScopeNorthbound {
-		deleter, ok := s.instanceService.(interface{ DeleteForOwnerTeam(int, int) error })
-		if !ok {
-			return fmt.Errorf("Owner Team deletion guard unavailable")
-		}
+	// Carry the Team identity for either resource scope. Direct instance routes
+	// have no such identity and must not bypass whole-Team management.
+	if deleter, ok := s.instanceService.(interface{ DeleteForOwnerTeam(int, int) error }); ok {
 		return deleter.DeleteForOwnerTeam(team.ID, instanceID)
+	}
+	if team.ResourceScope == models.TeamScopeNorthbound {
+		return fmt.Errorf("Owner Team deletion guard unavailable")
 	}
 	return s.instanceService.Delete(instanceID)
 }
@@ -102,6 +106,11 @@ func (s *teamService) ProvisionOwnerTeam(ctx context.Context, team *models.Team,
 		return err
 	} else if done {
 		return s.finishOwnerTeamProvision(ctx, team)
+	}
+	// Already committed historical members may finish readiness above. Never
+	// allocate missing resources from an obsolete, now-disallowed frozen plan.
+	if err := ValidateNewTeamRequest(req); err != nil {
+		return fmt.Errorf("TEAM_CREATION_POLICY: %w", err)
 	}
 	var pending []CreateInstanceRequest
 	for _, plan := range plans {

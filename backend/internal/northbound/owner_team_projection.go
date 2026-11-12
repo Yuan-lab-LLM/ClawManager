@@ -10,7 +10,7 @@ import (
 )
 
 func ownerTeamView(team models.Team) map[string]interface{} {
-	return map[string]interface{}{"id": team.ID, "name": team.VisibleName(), "description": team.Description, "status": team.Status, "communication_mode": team.CommunicationMode, "resource_scope": models.TeamScopeNorthbound, "shared_mount_path": "/team", "created_at": team.CreatedAt, "updated_at": team.UpdatedAt}
+	return map[string]interface{}{"runtime_state": team.RuntimeState, "id": team.ID, "name": team.VisibleName(), "description": team.Description, "status": team.Status, "communication_mode": team.CommunicationMode, "resource_scope": models.TeamScopeNorthbound, "shared_mount_path": "/team", "created_at": team.CreatedAt, "updated_at": team.UpdatedAt}
 }
 
 func ownerTeamMemberViews(members []models.TeamMember) []map[string]interface{} {
@@ -61,6 +61,11 @@ func ownerTeamSummary(team models.Team, members []models.TeamMember) map[string]
 	}
 	view["member_count"], view["available_count"] = total, available
 	view["confirming_count"], view["fault_count"] = confirming, faults
+	if team.RuntimeState != nil && team.RuntimeState.State == "stopped" {
+		view["fault_count"] = 0
+		view["confirming_count"] = 0
+		view["available_count"] = 0
+	}
 	return view
 }
 

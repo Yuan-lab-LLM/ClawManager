@@ -95,6 +95,10 @@ func (a *OwnerTeamAPI) submitCreate(c *gin.Context, identity OwnerTeamIdentity) 
 			writeError(c, apiError(409, "TEMPLATE_INVALID", "模板内容不可用", nil))
 			return
 		}
+		if err := teamtemplate.ValidateForCreation(spec, item.RequestedMemberCount); err != nil {
+			writeError(c, apiError(422, "TEMPLATE_INVALID", err.Error(), nil))
+			return
+		}
 		for _, m := range spec.Members {
 			profile := &services.TeamMemberRoleProfileRequest{SchemaVersion: spec.SchemaVersion, ProfileKey: m.MemberID, DisplayName: m.DisplayName, RoleHint: m.Role, Summary: m.Summary, Mission: m.Mission, Responsibilities: m.Responsibilities, Boundaries: m.Boundaries, ExpectedInputs: m.ExpectedInputs, Deliverables: m.Deliverables, AcceptanceCriteria: m.AcceptanceCriteria, CollaborationNotes: m.CollaborationNotes, CapabilityTags: m.CapabilityTags}
 			description := m.Summary
@@ -108,7 +112,7 @@ func (a *OwnerTeamAPI) submitCreate(c *gin.Context, identity OwnerTeamIdentity) 
 	if frozen.CommunicationMode == "" {
 		frozen.CommunicationMode = "leader_mediated"
 	}
-	if frozen.CommunicationMode != "leader_mediated" && frozen.CommunicationMode != "peer_assisted" && frozen.CommunicationMode != "full_mesh" {
+	if frozen.CommunicationMode != "leader_mediated" {
 		writeError(c, apiError(422, "VALIDATION_ERROR", "不支持的协作模式", nil))
 		return
 	}
@@ -137,28 +141,27 @@ func (a *OwnerTeamAPI) submitCreate(c *gin.Context, identity OwnerTeamIdentity) 
 		if m.InstanceMode == "" {
 			m.InstanceMode = "lite"
 		}
-		if (m.RuntimeType != "openclaw" && m.RuntimeType != "hermes") || (m.InstanceMode != "lite" && m.InstanceMode != "pro") || m.IsLeader && m.RuntimeType != "openclaw" {
-			writeError(c, apiError(422, "RUNTIME_DISABLED", "不支持的成员 Runtime 或模式", nil))
-			return
-		}
+	}
+	if len(overrides) > 0 {
+		writeError(c, apiError(422, "VALIDATION_ERROR", "模板不包含指定成员", nil))
+		return
+	}
+	if err := services.ValidateNewTeamRequest(frozen); err != nil {
+		writeError(c, apiError(422, "TEAM_CREATION_POLICY", err.Error(), nil))
+		return
+	}
+	for i := range frozen.Members {
+		m := &frozen.Members[i]
 		if a.Settings != nil {
 			policy := a.Settings.Current()
 			allowed := policy.AllowedLiteTypes
 			m.CPUCores, m.MemoryGB, m.DiskGB = policy.LiteCPUCores, policy.LiteMemoryGB, policy.LiteDiskGB
-			if m.InstanceMode == "pro" {
-				allowed = policy.AllowedProTypes
-				m.CPUCores, m.MemoryGB, m.DiskGB = policy.ProCPUCores, policy.ProMemoryGB, policy.ProDiskGB
-			}
 			if !allowedType(allowed, m.RuntimeType) {
 				writeError(c, apiError(403, "RUNTIME_DISABLED", "该成员类型尚未获准创建", nil))
 				return
 			}
 		}
-		backend := services.RuntimeBackendGateway
-		if m.InstanceMode == "pro" {
-			backend = services.RuntimeBackendDesktop
-		}
-		image, ok := services.RuntimeImageForBackend(m.RuntimeType, backend)
+		image, ok := services.RuntimeImageForBackend(m.RuntimeType, services.RuntimeBackendGateway)
 		if !ok || strings.TrimSpace(image.Image) == "" {
 			writeError(c, apiError(422, "RUNTIME_DISABLED", "成员镜像尚未配置", nil))
 			return
@@ -180,6 +183,9 @@ func (a *OwnerTeamAPI) submitCreate(c *gin.Context, identity OwnerTeamIdentity) 
 	now := time.Now().UTC()
 	name := req.Name
 	team := &models.Team{ResourceScope: models.TeamScopeNorthbound, Owner: &identity.Owner, DisplayName: &name, Description: req.Description, Status: models.TeamStatusCreating, CommunicationMode: frozen.CommunicationMode, RedisEventsLastID: "0-0", SharedMountPath: "/team", CreatedAt: now, UpdatedAt: now}
+	if provider, ok := a.teams.(interface{ TeamPreviewProfileForCreation() string }); ok {
+		team.PreviewSecurityProfile = provider.TeamPreviewProfileForCreation()
+	}
 	stored.TeamRequest = &frozen
 	a.submit(c, identity, OwnerTeamRoute{Scope: ScopeTeamsCreate}, nil, team, stored)
 }

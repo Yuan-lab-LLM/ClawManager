@@ -95,7 +95,20 @@ func (s *RuntimeUpgradeService) RecoveryInfo(ctx context.Context, id int) (*Runt
 		info.Reason = "该实例已在原版本恢复运行，可参与正常升级，无需重复恢复。"
 		return info, nil
 	}
-	if status != "error" && status != "running" && status != "stopped" {
+	recoveredCreating := false
+	if status == "creating" && info.Isolated {
+		binding, err := s.bindings.GetByInstanceID(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		if binding == nil {
+			prior, proofErr := s.recoveryStoppedSource(ctx, parent, id, info.Generation)
+			if proofErr == nil && s.verifyRecoverySourceStopped(ctx, prior) == nil {
+				recoveredCreating = true
+			}
+		}
+	}
+	if status != "error" && status != "running" && status != "stopped" && !recoveredCreating {
 		info.Reason = "实例状态正在变化，请等待检查完成后重试"
 		return info, nil
 	}
@@ -308,7 +321,7 @@ func upgradeRecoveryCapability(mode string) string {
 
 func (s *RuntimeUpgradeService) attachRecoveryMigrationReceipt(ctx context.Context, r *models.RuntimeRollout, item models.RuntimeUpgradeItem, candidate runtimeUpgradeCandidate, req *RuntimeAgentWorkspaceRequest) {
 	scope := runtimeUpgradeScopeFromRollout(r)
-	if scope.RecoveryMode != "retry" || scope.RecoveryParentID <= 0 || candidate.SourceImageDigest == "" || candidate.SourceImageDigest != stringValue(r.TargetImageDigest) {
+	if scope.RecoveryMode != "retry" || scope.RecoveryParentID <= 0 || candidate.SourceImageDigest == "" {
 		return
 	}
 	parent, err := s.rollouts.GetByID(ctx, scope.RecoveryParentID)
@@ -323,6 +336,14 @@ func (s *RuntimeUpgradeService) attachRecoveryMigrationReceipt(ctx context.Conte
 	case "migrated", "restart_ready", "gateway_verified", "verified":
 	default:
 		return
+	}
+	if candidate.SourceImageDigest != stringValue(r.TargetImageDigest) {
+		// The data already reached this target image, even though its original
+		// source image differs. Reuse only a proven never-started generation;
+		// Runtime still validates current config/catalog before reusing a receipt.
+		if candidate.Generation != *prior.SourceGeneration+1 || s.verifyUnstartedUpgradeGeneration(ctx, parent, prior, candidate.Generation) != nil {
+			return
+		}
 	}
 	req.ResumeRolloutID = fmt.Sprint(parent.ID)
 	req.ResumeGeneration = *prior.SourceGeneration

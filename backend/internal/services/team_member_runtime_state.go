@@ -6,6 +6,32 @@ import (
 	"clawreef/internal/models"
 )
 
+// Historical active-looking cards are retained as evidence when a root fails.
+// A confirmed terminal root cannot make its member busy again. Unknown/missing
+// roots remain conservative; this changes only the operational projection.
+func (s *teamService) memberOperationalItems(teamID int, items []models.TeamWorkItem) ([]models.TeamWorkItem, error) {
+	terminal := map[int]bool{}
+	result := make([]models.TeamWorkItem, 0, len(items))
+	for _, item := range items {
+		if isActiveTeamWorkItemStatus(item.Status) && item.RootTaskID > 0 {
+			closed, known := terminal[item.RootTaskID]
+			if !known {
+				task, err := s.repo.GetTaskByID(item.RootTaskID)
+				if err != nil {
+					return nil, err
+				}
+				closed = task != nil && task.TeamID == teamID && isTerminalTeamTaskStatus(task.Status)
+				terminal[item.RootTaskID] = closed
+			}
+			if closed {
+				continue
+			}
+		}
+		result = append(result, item)
+	}
+	return result, nil
+}
+
 func teamMemberInstanceStarting(status string) bool {
 	switch strings.ToLower(strings.TrimSpace(status)) {
 	case "creating", "starting", "pending":
@@ -25,6 +51,15 @@ func projectTeamMemberInstanceAvailability(member *models.TeamMember, instance *
 		if derefTeamString(member.RuntimeStatus) != value {
 			member.RuntimeStatus = &value
 		}
+	}
+	if status == "stopped" && instance.StoppedReason != "" {
+		member.Status = models.TeamMemberStatusOffline
+		member.Availability = models.TeamMemberAvailabilityOffline
+		setRuntimeStatus("stopped")
+		if runtimeBlock {
+			member.BlockedReason = nil
+		}
+		return false, *member != before
 	}
 	if teamMemberInstanceStarting(status) {
 		// Keep a busy member's assignment binding and progress during recovery.

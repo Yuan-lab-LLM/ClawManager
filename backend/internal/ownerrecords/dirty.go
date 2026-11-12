@@ -3,6 +3,7 @@ package ownerrecords
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"github.com/upper/db/v4"
 	"time"
 )
@@ -12,7 +13,7 @@ import (
 func markUsageDay(ctx context.Context, tx db.Session, owner string, at time.Time) error {
 	loc, _ := time.LoadLocation("Asia/Shanghai")
 	date := at.In(loc).Format("2006-01-02")
-	_, err := tx.SQL().ExecContext(ctx, `INSERT INTO northbound_owner_records(record_type,record_key,scope_id,owner_normalized,business_date,status,version,occurred_at) VALUES ('usage_dirty',?,0,?,?,'pending',1,?) ON DUPLICATE KEY UPDATE version=version+1,status='pending'`, Key("usage-dirty", owner, date), owner, date, at.UTC())
+	_, err := tx.SQL().ExecContext(ctx, `INSERT INTO northbound_owner_records(record_type,record_key,scope_id,owner_normalized,business_date,status,version,occurred_at,interval_start) VALUES ('usage_dirty',?,0,?,?,'pending',1,?,UTC_TIMESTAMP(6)) ON DUPLICATE KEY UPDATE interval_start=IF(status='pending',COALESCE(interval_start,UTC_TIMESTAMP(6)),UTC_TIMESTAMP(6)),version=version+1,status='pending'`, Key("usage-dirty", owner, date), owner, date, at.UTC())
 	return err
 }
 
@@ -64,14 +65,14 @@ type dirtyDay struct {
 
 func (s *Store) pendingDays(ctx context.Context, owner string, limit int, now time.Time) ([]dirtyDay, error) {
 	loc, _ := time.LoadLocation("Asia/Shanghai")
-	query := `SELECT record_key,owner_normalized,business_date,version FROM northbound_owner_records WHERE record_type='usage_dirty' AND status='pending' AND business_date<=?`
+	query := `SELECT record_key,owner_normalized,business_date,version FROM northbound_owner_records WHERE record_type='usage_dirty' AND status='pending' AND business_date<=? AND (JSON_EXTRACT(payload,'$.retry_at') IS NULL OR JSON_EXTRACT(payload,'$.retry_at')<=UNIX_TIMESTAMP() OR COALESCE(JSON_EXTRACT(payload,'$.failed_version'),0)<>version)`
 	args := []any{now.In(loc).Format("2006-01-02")}
 	if owner != "" {
 		query += ` AND owner_normalized=?`
 		args = append(args, owner)
 	}
 	// Oldest pending change first: constantly active owners cannot starve others.
-	query += ` ORDER BY updated_at,id LIMIT ?`
+	query += ` ORDER BY COALESCE(interval_start,created_at),id LIMIT ?`
 	args = append(args, limit)
 	rows, err := s.factRows(ctx, query, args...)
 	if err != nil {
@@ -118,6 +119,29 @@ func (s *Store) scheduleReports(ctx context.Context, d dirtyDay) error {
 }
 
 func (s *Store) processDirty(ctx context.Context, now time.Time) error {
+	var failures []error
+	for pass := 0; pass < 32; pass++ {
+		if !scanHasBudget(ctx) {
+			return errors.Join(append(failures, errSyncYield)...)
+		}
+		days, err := s.pendingDays(ctx, "", 1, now)
+		if err != nil {
+			return errors.Join(append(failures, err)...)
+		}
+		if len(days) == 0 {
+			return errors.Join(failures...)
+		}
+		if err = s.processDirtyPass(ctx, now); err != nil {
+			failures = append(failures, err)
+		}
+		if ctx.Err() != nil {
+			return errors.Join(append(failures, ctx.Err())...)
+		}
+	}
+	return errors.Join(append(failures, errSyncYield)...)
+}
+
+func (s *Store) processDirtyPass(ctx context.Context, now time.Time) error {
 	epoch, e := s.analyticsEpoch(ctx)
 	if e != nil {
 		return e
@@ -145,94 +169,86 @@ func (s *Store) processDirty(ctx context.Context, now time.Time) error {
 			groups[d.owner] = append(groups[d.owner], d)
 		}
 	}
+	var failures []error
+	recordSyncSelected(ctx, "projection", len(owners))
 	for _, owner := range owners {
-		for _, d := range groups[owner] {
-			day, err := time.ParseInLocation("2006-01-02", d.date.Format("2006-01-02"), loc)
-			if err != nil {
+		if ctx.Err() != nil {
+			return errors.Join(append(failures, ctx.Err())...)
+		}
+		started := time.Now()
+		ownerCtx, ownerCancel := context.WithTimeout(ctx, syncOwnerBudget)
+		err = func(ctx context.Context) error {
+			var err error
+			for _, d := range groups[owner] {
+				day, err := time.ParseInLocation("2006-01-02", d.date.Format("2006-01-02"), loc)
+				if err != nil {
+					return err
+				}
+				if day.After(now) {
+					continue
+				}
+				at := day.AddDate(0, 0, 1).Add(-time.Microsecond)
+				if now.Before(at) {
+					at = now
+				}
+				if (epoch == nil || !at.Before(epoch.Start)) && !at.Equal(now) {
+					err = s.reconcileGrowthAt(ctx, d.owner, at, now, true, effective, v3)
+				}
+				if err != nil {
+					return err
+				}
+				if err = s.refreshDailyDate(ctx, d.owner, day, now); err != nil {
+					return err
+				}
+				if err = s.scheduleReports(ctx, d); err != nil {
+					return err
+				}
+			}
+			// Commit progress per owner, not per batch. A later timeout must not replay
+			// unrelated owners. The next pass resumes persisted pending dates.
+			if err = s.reconcileGrowthAt(ctx, owner, now, now, false, effective, v3); err != nil {
 				return err
 			}
-			if day.After(now) {
-				continue
+			if epoch != nil {
+				if _, err = s.buildOwnerSnapshot(ctx, owner, now, true); err != nil {
+					return err
+				}
 			}
-			at := day.AddDate(0, 0, 1).Add(-time.Microsecond)
-			if now.Before(at) {
-				at = now
+			for _, d := range groups[owner] {
+				_, err = s.Session.SQL().ExecContext(ctx, `UPDATE northbound_owner_records SET status='done' WHERE record_type='usage_dirty' AND record_key=? AND version=? AND status='pending'`, d.key, d.version)
+				if err != nil {
+					return err
+				}
 			}
-			if epoch == nil || !at.Before(epoch.Start) {
-				err = s.reconcileGrowthAt(ctx, d.owner, at, now, true, effective, v3)
-			}
-			if err != nil {
-				return err
-			}
-			if err = s.refreshDailyDate(ctx, d.owner, day, now); err != nil {
-				return err
-			}
-			if err = s.scheduleReports(ctx, d); err != nil {
-				return err
+			s.InvalidateOwner(owner)
+			return nil
+		}(ownerCtx)
+		ownerCancel()
+		state := "ready"
+		if err != nil {
+			state = "retry"
+			failures = append(failures, err)
+			{
+				// A phase deadline must not leave its slowest owner at the head
+				// forever. This bounded metadata-only write is outside accounting.
+				retryCtx, retryCancel := context.WithTimeout(context.WithoutCancel(ctx), syncMetadataBudget)
+				for _, d := range groups[owner] {
+					_, e := s.Session.SQL().ExecContext(retryCtx, `UPDATE northbound_owner_records SET payload=JSON_OBJECT('failures',LEAST(COALESCE(JSON_EXTRACT(payload,'$.failures'),0)+1,5),'failed_version',version,'retry_at',UNIX_TIMESTAMP()+600*POW(2,LEAST(COALESCE(JSON_EXTRACT(payload,'$.failures'),0),4)),'reason',?) WHERE record_type='usage_dirty' AND record_key=? AND version=? AND status='pending'`, syncReason(err), d.key, d.version)
+					if e != nil {
+						retryCancel()
+						return errors.Join(err, e)
+					}
+				}
+				retryCancel()
 			}
 		}
-		// Commit progress per owner, not per batch. A later timeout must not replay
-		// unrelated owners. The next pass resumes persisted pending dates.
-		if err = s.reconcileGrowthAt(ctx, owner, now, now, false, effective, v3); err != nil {
-			return err
-		}
-		if epoch != nil {
-			if _, err = s.buildOwnerSnapshot(ctx, owner, now, true); err != nil {
-				return err
-			}
-		}
-		for _, d := range groups[owner] {
-			_, err = s.Session.SQL().ExecContext(ctx, `UPDATE northbound_owner_records SET status='done' WHERE record_type='usage_dirty' AND record_key=? AND version=? AND status='pending'`, d.key, d.version)
-			if err != nil {
-				return err
-			}
-		}
-		s.InvalidateOwner(owner)
+		recordSyncItem(ctx, "projection", Identity{Owner: owner}, state, syncReason(err), started, false)
 	}
-	return s.processDueReports(ctx, now)
+	return errors.Join(failures...)
 }
 
 func (s *Store) processDueReports(ctx context.Context, now time.Time) error {
-	rows, err := s.factRows(ctx, `SELECT record_key,owner_normalized,period_type,period_start,version FROM northbound_owner_records WHERE record_type='report_dirty' AND status='pending' AND expires_at<=? ORDER BY expires_at LIMIT 5`, now.UTC())
-	if err != nil {
-		return err
-	}
-	type job struct {
-		key, owner, kind string
-		date             time.Time
-		version          uint64
-	}
-	jobs := []job{}
-	for rows.Next() {
-		var j job
-		if err = rows.Scan(&j.key, &j.owner, &j.kind, &j.date, &j.version); err != nil {
-			rows.Close()
-			return err
-		}
-		jobs = append(jobs, j)
-	}
-	err = rows.Err()
-	rows.Close()
-	if err != nil {
-		return err
-	}
-	for _, j := range jobs {
-		loc, _ := time.LoadLocation("Asia/Shanghai")
-		if j.date.Format("2006-01-02") < now.In(loc).AddDate(-2, 0, 0).Format("2006-01-02") {
-			_, err = s.Session.SQL().ExecContext(ctx, `UPDATE northbound_owner_records SET status='outside_report_range' WHERE record_type='report_dirty' AND record_key=? AND version=?`, j.key, j.version)
-			if err != nil {
-				return err
-			}
-			continue
-		}
-		if _, err = s.Report(ctx, j.owner, j.kind, j.date.Format("2006-01-02"), now, true); err != nil {
-			return err
-		}
-		if _, err = s.Session.SQL().ExecContext(ctx, `UPDATE northbound_owner_records SET status='done' WHERE record_type='report_dirty' AND record_key=? AND version=?`, j.key, j.version); err != nil {
-			return err
-		}
-	}
-	return nil
+	return s.runReportJobs(ctx, now, false)
 }
 
 // One-time resumable upgrade scan; ongoing events create their own dirty entries.

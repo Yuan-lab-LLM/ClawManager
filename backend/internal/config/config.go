@@ -252,12 +252,15 @@ type RuntimeSlotResources struct {
 }
 
 type RuntimePoolConfig struct {
+	SlotPoolPrefix            string               `yaml:"slotPoolPrefix"`
+	SlotAppArmorProfile       string               `yaml:"slotAppArmorProfile"`
 	SandboxProfile            string               `yaml:"sandboxProfile"`
 	ContainerSlots            int                  `yaml:"containerSlots"`
 	SlotResources             RuntimeSlotResources `yaml:"slotResources"`
 	PodResources              RuntimeSlotResources `yaml:"podResources"`
 	PodUserNamespaces         bool                 `yaml:"podUserNamespaces"`
 	NetworkIsolation          bool                 `yaml:"networkIsolation"`
+	LegacyServiceCIDRs        []string             `yaml:"legacyServiceCIDRs"`
 	NetworkPodCIDRs           []string             `yaml:"networkPodCIDRs"`
 	DeepSeekHarnessImage      string               `yaml:"deepSeekHarnessImage"`
 	Namespace                 string               `yaml:"namespace"`
@@ -265,6 +268,7 @@ type RuntimePoolConfig struct {
 	WorkspacePVCClaimName     string               `yaml:"workspacePvcClaimName"`
 	WorkspaceNFSServer        string               `yaml:"workspaceNfsServer"`
 	WorkspaceNFSPath          string               `yaml:"workspaceNfsPath"`
+	LegacyAgentControlToken   string               `yaml:"legacyAgentControlToken"`
 	AgentControlToken         string               `yaml:"agentControlToken"`
 	AgentReportToken          string               `yaml:"agentReportToken"`
 	BackendReplicaID          string               `yaml:"backendReplicaId"`
@@ -438,6 +442,8 @@ func Load() (*Config, error) {
 			WorkspaceAccessMode:      getEnv("K8S_WORKSPACE_ACCESS_MODE", "ReadWriteMany"),
 		},
 		Runtime: RuntimePoolConfig{
+			SlotPoolPrefix:            getEnv("RUNTIME_SLOT_POOL_PREFIX", ""),
+			SlotAppArmorProfile:       getEnv("RUNTIME_SLOT_APPARMOR_PROFILE", ""),
 			SandboxProfile:            getEnv("RUNTIME_SANDBOX_PROFILE", ""),
 			ContainerSlots:            getEnvInt("RUNTIME_CONTAINER_SLOTS", 0),
 			DeepSeekHarnessImage:      getEnv("DEEPSEEK_HARNESS_RUNTIME_IMAGE", "ghcr.io/yuan-lab-llm/agentsruntime/deepseek-harness-lite:latest"),
@@ -450,6 +456,7 @@ func Load() (*Config, error) {
 			WorkspacePVCClaimName:     getEnv("RUNTIME_WORKSPACE_PVC_CLAIM", ""),
 			WorkspaceNFSServer:        getEnv("RUNTIME_WORKSPACE_NFS_SERVER", ""),
 			WorkspaceNFSPath:          getEnv("RUNTIME_WORKSPACE_NFS_PATH", "/"),
+			LegacyAgentControlToken:   getEnv("RUNTIME_LEGACY_AGENT_CONTROL_TOKEN", ""),
 			AgentControlToken:         getEnv("RUNTIME_AGENT_CONTROL_TOKEN", ""),
 			AgentReportToken:          getEnv("RUNTIME_AGENT_REPORT_TOKEN", ""),
 			BackendReplicaID:          getEnv("HOSTNAME", "clawmanager-backend-local"),
@@ -763,6 +770,9 @@ func applyEnvOverrides(config *Config) {
 	}
 
 	config.Runtime.ContainerSlots = getEnvInt("RUNTIME_CONTAINER_SLOTS", config.Runtime.ContainerSlots)
+	config.Runtime.LegacyAgentControlToken = getEnv("RUNTIME_LEGACY_AGENT_CONTROL_TOKEN", config.Runtime.LegacyAgentControlToken)
+	config.Runtime.SlotPoolPrefix = getEnv("RUNTIME_SLOT_POOL_PREFIX", config.Runtime.SlotPoolPrefix)
+	config.Runtime.SlotAppArmorProfile = getEnv("RUNTIME_SLOT_APPARMOR_PROFILE", config.Runtime.SlotAppArmorProfile)
 	config.Runtime.SandboxProfile = getEnv("RUNTIME_SANDBOX_PROFILE", config.Runtime.SandboxProfile)
 	config.Runtime.DeepSeekHarnessImage = getEnv("DEEPSEEK_HARNESS_RUNTIME_IMAGE", config.Runtime.DeepSeekHarnessImage)
 	config.Runtime.SlotResources.CPURequest = getEnv("RUNTIME_SLOT_CPU_REQUEST", config.Runtime.SlotResources.CPURequest)
@@ -780,6 +790,14 @@ func applyEnvOverrides(config *Config) {
 		if strings.TrimSpace(value) != "" {
 			for _, cidr := range strings.Split(value, ",") {
 				config.Runtime.NetworkPodCIDRs = append(config.Runtime.NetworkPodCIDRs, strings.TrimSpace(cidr))
+			}
+		}
+	}
+	if value, present := os.LookupEnv("RUNTIME_LEGACY_SERVICE_CIDRS"); present {
+		config.Runtime.LegacyServiceCIDRs = nil
+		if strings.TrimSpace(value) != "" {
+			for _, v := range strings.Split(value, ",") {
+				config.Runtime.LegacyServiceCIDRs = append(config.Runtime.LegacyServiceCIDRs, strings.TrimSpace(v))
 			}
 		}
 	}

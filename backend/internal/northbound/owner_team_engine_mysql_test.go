@@ -63,6 +63,12 @@ func (s *ownerTeamEngineInstances) CreatePrevalidated(uid int, req services.Crea
 }
 
 func TestOwnerTeamMySQLRealEngineResumesLostCreateWithoutNewInstance(t *testing.T) {
+	for _, runtimeType := range []string{"openclaw", "opencode"} {
+		t.Run(runtimeType, func(t *testing.T) { testOwnerTeamMySQLRealEngineResumesLostCreate(t, runtimeType) })
+	}
+}
+
+func testOwnerTeamMySQLRealEngineResumesLostCreate(t *testing.T, runtimeType string) {
 	if os.Getenv("TEST_OWNER_TEAM_REDIS_PORT") == "" {
 		t.Skip("isolated Redis required")
 	}
@@ -80,7 +86,7 @@ func TestOwnerTeamMySQLRealEngineResumesLostCreateWithoutNewInstance(t *testing.
 	if err := repo.CreateTeam(team); err != nil {
 		t.Fatal(err)
 	}
-	req := services.CreateTeamRequest{Name: name, CommunicationMode: "leader_mediated", Members: []services.CreateTeamMemberRequest{{MemberID: "leader", Name: "主编", Role: "leader", IsLeader: true, RuntimeType: "openclaw", InstanceMode: "lite"}, {MemberID: "worker", Name: "筛选员", Role: "worker", RuntimeType: "openclaw", InstanceMode: "lite"}}}
+	req := services.CreateTeamRequest{Name: name, CommunicationMode: "leader_mediated", Members: []services.CreateTeamMemberRequest{{MemberID: "leader", Name: "主编", Role: "leader", IsLeader: true, RuntimeType: runtimeType, InstanceMode: "lite"}, {MemberID: "worker", Name: "筛选员", Role: "worker", RuntimeType: runtimeType, InstanceMode: "lite"}}}
 	provision := engine.(services.OwnerTeamProvisioner)
 	if err := provision.ProvisionOwnerTeam(context.Background(), team, req, "fixture-op", steps); err == nil {
 		t.Fatal("lost response fixture did not fail")
@@ -121,8 +127,13 @@ func TestOwnerTeamMySQLRealEngineResumesLostCreateWithoutNewInstance(t *testing.
 			t.Fatal("missing binding")
 		}
 		instance, _ := instances.GetByID(*m.InstanceID)
-		data, err := os.ReadFile(filepath.Join(*instance.WorkspacePath, "home", ".openclaw", "workspace", "AGENTS.md"))
-		if err != nil || !strings.Contains(string(data), "CLAWMANAGER TEAM OVERLAY") {
+		identityPath := filepath.Join(*instance.WorkspacePath, "home", ".openclaw", "workspace", "AGENTS.md")
+		marker := "CLAWMANAGER TEAM OVERLAY"
+		if runtimeType == "opencode" {
+			identityPath, marker = filepath.Join(*instance.WorkspacePath, "AGENTS.md"), "# ClawManager Team Runtime"
+		}
+		data, err := os.ReadFile(identityPath)
+		if err != nil || !strings.Contains(string(data), marker) || !strings.Contains(string(data), m.MemberKey) {
 			t.Fatal("identity files incomplete")
 		}
 		if instance.Owner == nil || *instance.Owner != owner {

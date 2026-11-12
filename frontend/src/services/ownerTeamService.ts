@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { isConfirmedOwnerSessionFailure, OWNER_SESSION_INVALID } from '../lib/ownerReadNotice';
 import type { teamService } from './teamService';
 import type { Team, TeamMember, TeamDetails, DispatchTeamTaskRequest, TeamTask, TeamTasksHistoryResponse, TeamEventsHistoryResponse, TeamWorkspaceListResponse, TeamWorkspacePreviewResponse } from '../types/team';
 import type { WorkspaceText } from '../components/WorkspaceTextEditor';
@@ -7,13 +8,14 @@ import type { CustomTeamTemplate } from '../types/customTeamTemplate';
 // Intentionally independent of the CM JWT client/interceptors.
 export const ownerTeamHTTP = axios.create({ baseURL: '/api/v1/ieisystem', withCredentials: true });
 ownerTeamHTTP.interceptors.response.use(r => r, error => {
+  if (isConfirmedOwnerSessionFailure(error)) window.dispatchEvent(new Event(OWNER_SESSION_INVALID));
   if (axios.isAxiosError(error)) error.message = error.response?.data?.message || error.response?.data?.error || error.message;
   return Promise.reject(error);
 });
 export type TeamWorkspaceAPI = Omit<typeof teamService, 'createTeam' | 'listTeams'>;
 export interface OwnerTeamSummary extends Team { members: TeamMember[]; member_count: number; available_count: number; confirming_count?: number; fault_count?: number }
 export interface TeamOperation { operation_id: string; status: string; attempt_count?: number; team_id?: number; template_id?: number; error_code?: string; error_message?: string }
-export interface OwnerTeamCapabilities { enabled: boolean; can_create: boolean; create_disabled_reason?: string; runtime_types?: string[]; instance_modes?: string[] }
+export interface OwnerTeamCapabilities { enabled: boolean; can_create: boolean; create_disabled_reason?: string; runtime_types?: string[]; instance_modes?: string[]; leader_runtime_types?: string[]; worker_runtime_types?: string[]; communication_modes?: string[] }
 export interface OwnerTeamCatalogEntry { key: string; revision: number; name: string; description: string; communication_mode: string; members: { member_id: string; name: string; role: string; is_leader: boolean; runtime_type: string; instance_mode: string }[] }
 
 export function ownerTeamRequestKey(): string { return `owner-team-${crypto.randomUUID()}`; }
@@ -62,6 +64,9 @@ async function get<T>(url: string, params?: object, signal?: AbortSignal): Promi
 async function post<T>(url: string, data: unknown, key?: string): Promise<T> { return (await ownerTeamHTTP.post(url, data, key ? { headers: { 'Idempotency-Key': key } } : undefined)).data.data; }
 
 export const ownerTeamService = {
+  startTeam: (id: number) => post<import('../types/team').TeamRuntimeState>(`/teams/${id}/start`, {}),
+  stopTeam: (id: number) => post<import('../types/team').TeamRuntimeState>(`/teams/${id}/stop`, {}),
+
   capabilities: (signal?: AbortSignal) => get<OwnerTeamCapabilities>('/team-capabilities', undefined, signal),
   list: (page = 1, limit = 100, q = '', signal?: AbortSignal) => get<{ teams: OwnerTeamSummary[]; total: number; page: number; limit: number }>('/teams', { page, limit, q }, signal),
   catalog: (signal?: AbortSignal) => get<{ templates: OwnerTeamCatalogEntry[] }>('/team-templates', undefined, signal),
@@ -69,7 +74,6 @@ export const ownerTeamService = {
   operation: (id: string, signal?: AbortSignal) => get<TeamOperation>(`/team-operations/${encodeURIComponent(id)}`, undefined, signal),
   retryOperation: (id: string, expected_attempt_count: number) => post<TeamOperation>(`/team-operations/${encodeURIComponent(id)}/retry`, { expected_attempt_count }),
   removeTeam: async (id: number) => (await ownerTeamHTTP.delete(`/teams/${id}`, { data: { confirm_data_loss: true }, headers: { 'Idempotency-Key': ownerTeamRequestKey() } })).data.data as TeamOperation,
-  removeMember: async (id: number, member: string) => (await ownerTeamHTTP.delete(`/teams/${id}/members/${encodeURIComponent(member)}`, { data: { confirm_data_loss: true }, headers: { 'Idempotency-Key': ownerTeamRequestKey() } })).data.data as TeamOperation,
   update: async (id: number, data: { name: string; description?: string }) => { await ownerTeamHTTP.patch(`/teams/${id}`, data); },
   templates: (signal?: AbortSignal) => get<{ templates: CustomTeamTemplate[] }>('/custom-team-templates', undefined, signal),
   template: (id: number, signal?: AbortSignal) => get<CustomTeamTemplate>(`/custom-team-templates/${id}`, undefined, signal),
@@ -82,6 +86,9 @@ export const ownerTeamService = {
 
 // Shared CM workspace receives this adapter; no iframe or CM login is involved.
 export const ownerTeamWorkspaceAPI: TeamWorkspaceAPI = {
+  startTeam: ownerTeamService.startTeam,
+  stopTeam: ownerTeamService.stopTeam,
+
   getTeam: (id: number) => get<TeamDetails>(`/teams/${id}`),
   getTeamTasks: (id: number, before_id?: number, limit = 20) => get<TeamTasksHistoryResponse>(`/teams/${id}/tasks`, { before_id, limit }),
   getTeamEvents: (id: number, before_id?: number, limit = 50) => get<TeamEventsHistoryResponse>(`/teams/${id}/events`, { before_id, limit }),
@@ -90,10 +97,7 @@ export const ownerTeamWorkspaceAPI: TeamWorkspaceAPI = {
     const op = (await ownerTeamHTTP.delete(`/teams/${id}`, { data: { confirm_data_loss: true }, headers: { 'Idempotency-Key': ownerTeamRequestKey() } })).data.data as TeamOperation;
     await waitForOwnerTeamOperation(op.operation_id);
   },
-  deleteMember: async (id: number, member: number | string) => {
-    const op = (await ownerTeamHTTP.delete(`/teams/${id}/members/${encodeURIComponent(member)}`, { data: { confirm_data_loss: true }, headers: { 'Idempotency-Key': ownerTeamRequestKey() } })).data.data as TeamOperation;
-    await waitForOwnerTeamOperation(op.operation_id);
-  },
+  deleteMember: async () => { throw new Error('不支持单独删除团队成员；请删除整个 Team'); },
   listWorkspaceFiles: (id: number, path = '', signal?: AbortSignal) => get<TeamWorkspaceListResponse>(`/teams/${id}/workspace/files`, { path }, signal),
   previewWorkspaceFile: (id: number, path: string, signal?: AbortSignal) => get<TeamWorkspacePreviewResponse>(`/teams/${id}/workspace/preview`, { path }, signal),
   downloadWorkspaceFile: async (id: number, path: string) => (await ownerTeamHTTP.get<Blob>(`/teams/${id}/workspace/download`, { params: { path }, responseType: 'blob' })).data,

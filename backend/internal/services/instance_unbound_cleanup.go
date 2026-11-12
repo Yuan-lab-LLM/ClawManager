@@ -7,6 +7,13 @@ import (
 	"clawreef/internal/models"
 )
 
+func (c *slotRuntimeAgentClient) VerifyFailedStartCleanup(ctx context.Context, instance *models.Instance) error {
+	if c.assignments == nil || instance == nil || instance.WorkspacePath == nil {
+		return fmt.Errorf("failed Start identity is unavailable")
+	}
+	return c.assignments.CheckFailedStartStopped(ctx, instance.ID, instance.UserID, instance.RuntimeGeneration, instance.Type, *instance.WorkspacePath)
+}
+
 func (s *instanceService) verifyUnboundGatewayCleanup(ctx context.Context, instance *models.Instance) error {
 	verifier, ok := s.agentClient.(interface {
 		VerifyUnboundGatewayCleanup(context.Context, *models.Instance, []models.RuntimeCleanupSource) error

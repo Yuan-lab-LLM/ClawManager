@@ -1,0 +1,12 @@
+# syntax=docker/dockerfile:1.7
+# Admission/UI follow-up on the immutable serving release. Rebuild the two App
+# binaries and frontend; retain Runtime, nginx/origin and backup tools unchanged.
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+ARG VCS_REF
+COPY --from=app-binaries /clawreef-server /usr/local/bin/clawreef-server
+COPY --from=app-binaries /clawreef-northbound-gateway /usr/local/bin/clawreef-northbound-gateway
+# Retain previous hashed chunks for already-open tabs while replacing index.html.
+COPY --from=frontend-assets / /usr/share/nginx/html/
+RUN chmod 0755 /usr/local/bin/clawreef-server /usr/local/bin/clawreef-northbound-gateway
+LABEL org.opencontainers.image.revision="${VCS_REF}"

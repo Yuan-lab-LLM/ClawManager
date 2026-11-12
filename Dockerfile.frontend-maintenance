@@ -1,0 +1,8 @@
+# syntax=docker/dockerfile:1.7
+# UI-only release on an immutable serving App. Retain both backend binaries,
+# runtime configuration and old hashed assets for already-open browser tabs.
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+ARG VCS_REF
+COPY --from=frontend-assets / /usr/share/nginx/html/
+LABEL io.clawmanager.frontend-source-revision="${VCS_REF}"

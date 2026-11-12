@@ -239,9 +239,9 @@ func (c *slotRuntimeAgentClient) observeRuntimeSlot(ctx context.Context, pod mod
 		o.Err = fmt.Errorf("runtime slot exit proof is unavailable or belongs to another Pod")
 		o.Diagnostic = "runtime slot exit proof unavailable or Pod identity differs"
 	}
-	// A stopped assignment describes the previous execution. Only an active
-	// owner must belong to the current worker; free() still requires full cleanup.
-	if a := s.Assignment; a != nil && (a.PodUID != *pod.PodUID || a.InstanceID < 1 || a.UserID < 1 || a.Generation < 1 || a.GatewayID != fmt.Sprintf("gw-%d-%d", a.InstanceID, a.Generation) || !stopTokenValid(a.WorkerEpoch) || a.State != "stopped" && a.WorkerEpoch != s.WorkerEpoch) {
+	// Preserve upstream's stopped-owner handling, with the full current-worker
+	// empty proof required before accepting a changed historical owner epoch.
+	if a := s.Assignment; a != nil && (a.PodUID != *pod.PodUID || a.InstanceID < 1 || a.UserID < 1 || a.Generation < 1 || a.GatewayID != fmt.Sprintf("gw-%d-%d", a.InstanceID, a.Generation) || !stopTokenValid(a.WorkerEpoch) || !runtimeSlotOwnerEpochConfirmed(s)) {
 		o.Err = fmt.Errorf("runtime slot owner identity is invalid")
 		o.Diagnostic = "runtime slot owner identity invalid"
 	}
@@ -249,6 +249,17 @@ func (c *slotRuntimeAgentClient) observeRuntimeSlot(ctx context.Context, pod mod
 		o.Err = fmt.Errorf("runtime slot gateway ownership is ambiguous")
 		o.Diagnostic = "runtime slot gateway ownership ambiguous"
 	}
+}
+
+func runtimeSlotOwnerEpochConfirmed(s runtimeSlotAuditSnapshot) bool {
+	if s.Assignment == nil || s.Assignment.WorkerEpoch == s.WorkerEpoch {
+		return true
+	}
+	// A confirmed container stop replaces the worker epoch but keeps its stopped
+	// assignment as history. Only the fresh worker's complete empty proof can
+	// retire that historical owner; a running or uncertain owner still blocks.
+	return s.Assignment.State == "stopped" && s.IdleConfirmed != nil && *s.IdleConfirmed &&
+		s.Quarantined != nil && !*s.Quarantined && s.MaintenanceOperationID == "" && s.Gateways != nil && len(s.Gateways) == 0
 }
 
 func runtimeSlotGatewayOwnershipAmbiguous(s runtimeSlotAuditSnapshot) bool {

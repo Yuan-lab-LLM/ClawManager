@@ -23,6 +23,8 @@ type readFlight struct {
 	err  error
 }
 type performanceState struct {
+	scanCostMu    sync.Mutex
+	scanCosts     map[string]time.Duration
 	epochMu       sync.Mutex
 	epoch         *analyticsEpoch
 	epochChecked  time.Time

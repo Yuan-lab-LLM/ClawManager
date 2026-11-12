@@ -1,0 +1,14 @@
+# Preserve the verified native desktop assets and old hashed frontend chunks.
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+ARG VCS_REF
+COPY --from=backend-binaries /clawreef-server /usr/local/bin/clawreef-server
+COPY --from=backend-binaries /clawreef-northbound-gateway /usr/local/bin/clawreef-northbound-gateway
+COPY --from=backend-binaries /system-backup-controller /usr/local/bin/system-backup-controller
+COPY --from=backend-binaries /system-backup-artifact /usr/local/bin/system-backup-artifact
+COPY --from=frontend-assets / /usr/share/nginx/html/
+COPY deployments/nginx/nginx.conf /etc/nginx/nginx.conf
+COPY deployments/nginx/njs/desktop_auth.js /etc/nginx/njs/desktop_auth.js
+COPY deployments/container/start.sh /app/start.sh
+RUN chmod 755 /app/start.sh /usr/local/bin/clawreef-server /usr/local/bin/clawreef-northbound-gateway /usr/local/bin/system-backup-controller /usr/local/bin/system-backup-artifact
+LABEL org.opencontainers.image.revision=$VCS_REF

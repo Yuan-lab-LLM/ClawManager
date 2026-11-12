@@ -1,0 +1,11 @@
+# syntax=docker/dockerfile:1.7
+# Backend-only maintenance release. Use the immutable serving image from the
+# release record; frontend assets/nginx and backup binaries stay byte-identical.
+# Build both Go binaries from this checkout; provide --build-context app-binaries.
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+ARG VCS_REF
+COPY --from=app-binaries /clawreef-server /usr/local/bin/clawreef-server
+COPY --from=app-binaries /clawreef-northbound-gateway /usr/local/bin/clawreef-northbound-gateway
+RUN chmod 0755 /usr/local/bin/clawreef-server /usr/local/bin/clawreef-northbound-gateway
+LABEL org.opencontainers.image.revision="${VCS_REF}"

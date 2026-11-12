@@ -25,6 +25,7 @@ export function memberRuntime(availability?: string, runtimeStatus?: string) {
 
 // The rail must not let an idle scheduling projection hide a runtime failure.
 export function memberRailState(member: TeamMember) {
+ if (member.runtime_status === "stopped" || member.runtime_observation?.reason === "intentionally_stopped") return {label:"已停止",tone:"neutral"};
   if (memberHasRuntimeFault(member)) return { label: "运行异常", tone: "error" };
   if (member.status === "failed" || member.status === "deleting" || member.status === "deleted") return memberSchedule(member.status);
   if (member.runtime_observation) {
@@ -36,7 +37,8 @@ export function memberRailState(member: TeamMember) {
       if (member.runtime_observation.reason === 'presence_unavailable') return { label: '在线状态暂不可查', tone: 'unknown' };
       return { label: member.runtime_observation.reason === 'collaboration_unconfirmed' ? '协作待确认' : '待确认', tone: 'unknown' };
     }
-    return member.availability === 'busy' ? { label: '执行中', tone: 'active' } : { label: '空闲', tone: 'good' };
+    const delayed = member.runtime_observation.reason === 'runtime_inventory_delayed' ? ' · 状态更新中' : '';
+    return member.availability === 'busy' ? { label: `执行中${delayed}`, tone: 'active' } : { label: `空闲${delayed}`, tone: 'good' };
   }
   if (memberIsStarting(member)) return { label: '启动中', tone: 'neutral' };
   if (member.status === 'creating') return memberSchedule(member.status);

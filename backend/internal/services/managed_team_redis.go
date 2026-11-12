@@ -92,17 +92,34 @@ func (m *ManagedTeamRedis) authorizeTeam(ctx context.Context, instance *models.I
 		return nil, errManagedRedis
 	}
 	team, err := m.teams.GetTeamByIDContext(ctx, id)
-	if err != nil || team == nil || team.ID != id || team.UserID != instance.UserID || team.Status != models.TeamStatusRunning {
+	if err != nil || team == nil || team.ID != id || team.UserID != instance.UserID || (team.Status != models.TeamStatusRunning && team.Status != models.TeamStatusCreating) {
 		return nil, errManagedRedis
 	}
 	member, err := m.teams.GetMemberByTeamInstanceContext(ctx, id, instance.ID)
 	if err != nil || member == nil || member.TeamID != id || member.UserID != instance.UserID || member.InstanceID == nil || *member.InstanceID != instance.ID {
 		return nil, errManagedRedis
 	}
+	if team.Status == models.TeamStatusCreating {
+		if team.PreviewSecurityProfile != models.TeamPreviewSecurityProfile || (member.Status != models.TeamMemberStatusCreating && member.Status != models.TeamMemberStatusIdle) || (instance.Status != "creating" && instance.Status != "running") {
+			return nil, errManagedRedis
+		}
+		return team, nil
+	}
 	switch member.Status {
 	case models.TeamMemberStatusIdle, models.TeamMemberStatusBusy, models.TeamMemberStatusCreating:
 	default:
-		return nil, errManagedRedis
+		// A stopped member is offline. Its explicitly persisted Team start must
+		// bootstrap collaboration before it can report online; this grants no task.
+		admission, ok := m.teams.(interface {
+			AuthorizeTeamMemberStartup(context.Context, int, int, int) (bool, error)
+		})
+		if !ok || member.Status != models.TeamMemberStatusOffline || (instance.Status != "creating" && instance.Status != "running") {
+			return nil, errManagedRedis
+		}
+		allowed, startErr := admission.AuthorizeTeamMemberStartup(ctx, id, member.ID, instance.ID)
+		if startErr != nil || !allowed {
+			return nil, errManagedRedis
+		}
 	}
 	return team, nil
 }

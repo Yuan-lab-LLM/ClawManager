@@ -44,6 +44,10 @@ import (
 )
 
 func main() {
+	// Read-only analytics helpers must exit before starting any services.
+	if len(os.Args) == 2 && os.Args[1] == ownerrecords.HistoryReaderArgument {
+		os.Exit(ownerrecords.RunHistoryReaderCLI(os.Stdin, os.Stdout))
+	}
 	if handled, err := services.RunTeamWorkspaceHelper(os.Args[1:], os.Stdin, os.Stdout); handled {
 		if err != nil {
 			os.Exit(1)
@@ -167,6 +171,10 @@ func main() {
 	services.SetRuntimeImageSettingsProvider(systemImageSettingService)
 	services.SetOpenClawTransferRuntimeRepositories(instanceRepo, bindingRepo, runtimePodRepo)
 	runtimeAgentClient := services.NewRuntimeAgentClient(cfg.Runtime.AgentControlToken)
+	legacyRuntimeAgentClient := runtimeAgentClient
+	if cfg.Runtime.LegacyAgentControlToken != "" {
+		legacyRuntimeAgentClient = services.NewRuntimeAgentClient(cfg.Runtime.LegacyAgentControlToken)
+	}
 	var runtimeSecurity *services.RuntimeSecurityAuthority
 	// The zero inventory fails closed for protected assignments when their
 	// cluster ranges have not been configured, while legacy runtimes still work.
@@ -212,6 +220,9 @@ func main() {
 			log.Fatalf("Failed to trust Lite container slot management TLS: %v", trustErr)
 		}
 		runtimeAgentClient = services.NewSlotRuntimeAgentClientWithHTTPClient(cfg.Runtime.AgentControlToken, slotKubeClient.Clientset, slotNamespace, &http.Client{Transport: &http.Transport{TLSClientConfig: slotTrust}, Timeout: 30 * time.Second})
+		if err := services.ConfigureSlotLegacyCoexistence(runtimeAgentClient, legacyRuntimeAgentClient, protectedRuntimeInstance); err != nil {
+			log.Fatal("Failed to configure existing runtime compatibility")
+		}
 		workspaceFences := repository.NewWorkspaceWriteFenceRepository(database)
 		if err := services.ConfigureSlotWorkspaceWriteFence(runtimeAgentClient, func(ctx context.Context, id runtimeauth.Identity) error {
 			return workspaceFences.Fence(ctx, id.InstanceID, id.UserID, id.Generation, id.PodUID)
@@ -262,7 +273,7 @@ func main() {
 				}
 				controlAddresses = append(controlAddresses, storageAddresses...)
 			}
-			runtimeInventory, watchErr = runtimeinventory.Start(context.Background(), watchKube, watchDynamic, watchMetadata, slotNamespace, cfg.Runtime.NetworkPodCIDRs, controlAddresses)
+			runtimeInventory, watchErr = runtimeinventory.Start(context.Background(), watchKube, watchDynamic, watchMetadata, slotNamespace, cfg.Runtime.NetworkPodCIDRs, controlAddresses, cfg.Runtime.LegacyServiceCIDRs)
 			if watchErr != nil {
 				log.Fatal("Failed to initialize protected runtime inventory")
 			}
@@ -753,6 +764,7 @@ func main() {
 		autoStopKube = client.Clientset
 	}
 	autoStopService := services.NewInstanceAutoStopService(autoStopRepo, instanceService, autoStopKube)
+	services.ConfigureTeamLifecycle(database, teamService, autoStopService)
 	appNamespace := strings.TrimSpace(os.Getenv("POD_NAMESPACE"))
 	if appNamespace == "" {
 		if raw, err := os.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/namespace"); err == nil {
@@ -1147,6 +1159,8 @@ func main() {
 			teams.GET("", teamHandler.ListTeams)
 			teams.POST("", teamHandler.CreateTeam)
 			teams.GET("/:id", teamHandler.GetTeam)
+			teams.POST("/:id/start", teamHandler.Power)
+			teams.POST("/:id/stop", teamHandler.Power)
 			teams.DELETE("/:id", teamHandler.DeleteTeam)
 			teams.GET("/:id/tasks", teamHandler.ListTasks)
 			teams.POST("/:id/tasks", teamHandler.DispatchTask)
@@ -1332,6 +1346,13 @@ func main() {
 		northboundSettings.Use(middleware.NewAdminAuth(userRepo))
 		{
 			northboundSettings.GET("", northboundAdminHandler.Overview)
+			portalAdmin := handlers.NewOwnerPortalAdminHandler(ownerStore)
+			northboundSettings.GET("/portal/users", portalAdmin.Users)
+			northboundSettings.GET("/portal/sync", portalAdmin.SyncRecords)
+			northboundSettings.GET("/portal/sync/overview", portalAdmin.SyncOverview)
+			northboundSettings.POST("/portal/sync/retry", portalAdmin.RetrySync)
+			northboundSettings.GET("/portal/calendar", portalAdmin.Calendar)
+			northboundSettings.POST("/portal/calendar", portalAdmin.MutateCalendar)
 			northboundSettings.PUT("/settings", northboundAdminHandler.SaveSettings)
 			northboundSettings.PATCH("/settings/:section", northboundAdminHandler.SaveSettingsSection)
 			northboundSettings.PUT("/callers", northboundAdminHandler.SaveCaller)
@@ -1571,6 +1592,11 @@ func main() {
 	// call is idempotent and covers the leader-election-disabled path.
 	leaderCancel()
 	stopBackground()
+	readerDrain, stopReaderDrain := context.WithTimeout(context.Background(), 3*time.Second)
+	if !ownerrecords.DrainHistoryReaders(readerDrain) {
+		log.Printf("History reader exit could not be confirmed; its safety guard remains held")
+	}
+	stopReaderDrain()
 	if runtimeAdminEventBridgeCancel != nil {
 		runtimeAdminEventBridgeCancel()
 	}

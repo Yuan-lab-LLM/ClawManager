@@ -60,7 +60,7 @@ func (s *Store) BufferActivity(owner string, instance uint64, p ActivityPulse, n
 	start := minute.Truncate(5 * time.Minute)
 	windowKey := Key("activity-window", owner, fmt.Sprint(start.Unix()))
 	w, ok := s.perf.low.windows[windowKey]
-	if !ok && len(s.perf.low.windows) >= 2048 {
+	if !ok && len(s.perf.low.windows)+s.perf.low.windowsInFlight >= 2048 {
 		return nil
 	}
 	w.owner = owner
@@ -72,8 +72,24 @@ func (s *Store) BufferActivity(owner string, instance uint64, p ActivityPulse, n
 func (s *Store) flushActivity(ctx context.Context) error {
 	s.perf.low.activityMu.Lock()
 	windows := s.perf.low.windows
+	reserved := len(windows)
+	s.perf.low.windowsInFlight += reserved
 	s.perf.low.windows = nil
 	s.perf.low.activityMu.Unlock()
+	defer func() {
+		s.perf.low.activityMu.Lock()
+		defer s.perf.low.activityMu.Unlock()
+		s.perf.low.windowsInFlight -= reserved
+		if s.perf.low.windows == nil {
+			s.perf.low.windows = map[string]activityWindow{}
+		}
+		for key, window := range windows {
+			if fresh, ok := s.perf.low.windows[key]; ok {
+				window.mask |= fresh.mask
+			}
+			s.perf.low.windows[key] = window
+		}
+	}()
 	loc, _ := time.LoadLocation("Asia/Shanghai")
 	n := 0
 	for key, w := range windows {
@@ -134,6 +150,7 @@ func (s *Store) flushActivity(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+		delete(windows, key)
 	}
 	return nil
 }
@@ -150,7 +167,7 @@ func (s *Store) RunBuffered(ctx context.Context) {
 			return
 		case <-observations.C:
 			if s.Available() {
-				pass, cancel := context.WithTimeout(ctx, 3*time.Second)
+				pass, cancel := context.WithTimeout(ctx, syncPhaseBudget)
 				s.drainObservations(pass)
 				cancel()
 			}
@@ -159,7 +176,7 @@ func (s *Store) RunBuffered(ctx context.Context) {
 			if !s.Available() {
 				continue
 			}
-			pass, cancel := context.WithTimeout(ctx, 3*time.Second)
+			pass, cancel := context.WithTimeout(ctx, syncPhaseBudget)
 			_ = s.flushActivity(pass)
 			cancel()
 		}

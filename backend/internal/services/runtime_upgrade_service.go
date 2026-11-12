@@ -2352,10 +2352,10 @@ func (s *RuntimeUpgradeService) inspectCandidates(ctx context.Context, scope run
 				}
 			}
 		}
-		if !podID.Valid && candidate.InstanceStatus != "stopped" && !(candidate.InstanceStatus == "error" && scope.allowsRecovery(instanceID)) {
+		if !podID.Valid && candidate.InstanceStatus != "stopped" && !((candidate.InstanceStatus == "error" || candidate.InstanceStatus == "creating") && scope.allowsRecovery(instanceID) && scope.RecoveryParentID > 0) {
 			blockers = append(blockers, fmt.Sprintf("instance %d is %s without a Runtime binding; wait for runtime reconciliation before upgrading", instanceID, candidate.InstanceStatus))
 		}
-		if !podID.Valid && candidate.InstanceStatus == "error" && scope.allowsRecovery(instanceID) && scope.RecoveryParentID > 0 {
+		if !podID.Valid && (candidate.InstanceStatus == "error" || candidate.InstanceStatus == "creating") && scope.allowsRecovery(instanceID) && scope.RecoveryParentID > 0 {
 			prior, err := s.recoveryStoppedSource(ctx, scope.RecoveryParentID, instanceID, runtimeGeneration)
 			if err != nil {
 				blockers = append(blockers, err.Error())
@@ -2577,7 +2577,7 @@ func (s *RuntimeUpgradeService) inspectTeamConsistency(ctx context.Context, team
 			return 0, nil, err
 		}
 		leaderCount := 0
-		openClawLeaderCount := 0
+		compatibleLeaderCount := 0
 		for rows.Next() {
 			var id int
 			var runtimeType, role, availability, status string
@@ -2587,22 +2587,22 @@ func (s *RuntimeUpgradeService) inspectTeamConsistency(ctx context.Context, team
 			}
 			if isTeamLeaderRole(role) {
 				leaderCount++
-				if strings.EqualFold(runtimeType, RuntimeTypeOpenClaw) {
-					openClawLeaderCount++
+				if strings.EqualFold(runtimeType, RuntimeTypeOpenClaw) || strings.EqualFold(runtimeType, RuntimeTypeOpenCode) {
+					compatibleLeaderCount++
 				}
 			}
 			if strings.EqualFold(runtimeType, RuntimeTypeHermes) {
 				hermesCount++
-				if strings.EqualFold(availability, models.TeamMemberAvailabilityBusy) || strings.EqualFold(status, models.TeamMemberStatusBusy) {
-					blockers = append(blockers, fmt.Sprintf("Team %d Hermes member %d is busy", teamID, id))
-				}
+			}
+			if strings.EqualFold(availability, models.TeamMemberAvailabilityBusy) || strings.EqualFold(status, models.TeamMemberStatusBusy) {
+				blockers = append(blockers, fmt.Sprintf("Team %d %s member %d is busy", teamID, runtimeType, id))
 			}
 		}
 		rows.Close()
 		if leaderCount != 1 {
 			blockers = append(blockers, fmt.Sprintf("Team %d must have exactly one Leader", teamID))
-		} else if openClawLeaderCount != 1 {
-			blockers = append(blockers, fmt.Sprintf("Team %d Leader must remain an OpenClaw intermediary", teamID))
+		} else if compatibleLeaderCount != 1 {
+			blockers = append(blockers, fmt.Sprintf("Team %d Leader must be an OpenClaw or supported OpenCode intermediary", teamID))
 		}
 	}
 	return hermesCount, blockers, nil
