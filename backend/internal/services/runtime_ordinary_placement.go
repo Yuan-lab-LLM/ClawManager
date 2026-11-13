@@ -9,6 +9,7 @@ import (
 
 	"clawreef/internal/heartbeat"
 	"clawreef/internal/models"
+	k8sservice "clawreef/internal/services/k8s"
 )
 
 func (s *RuntimeScheduler) schedulingHeartbeatCutoff() time.Time {
@@ -34,12 +35,13 @@ func (s *RuntimeScheduler) currentOrdinaryRuntimePods(pods, inventory []models.R
 			continue
 		}
 		for _, live := range inventory {
-			if !live.KubernetesReady || stringValue(live.PodUID) == "" || !ordinaryRuntimeIdentityMatches(reported, live) {
+			if !runtimeOrdinaryPodReady(live) || stringValue(live.PodUID) == "" || !ordinaryRuntimeIdentityMatches(reported, live) {
 				continue
 			}
 			reported.PoolRole, reported.PoolPurpose, reported.UpgradeID = live.PoolRole, live.PoolPurpose, live.UpgradeID
 			reported.SourceDeployment, reported.SchedulingEnabled, reported.DesiredReplicas = live.SourceDeployment, live.SchedulingEnabled, live.DesiredReplicas
-			reported.KubernetesPodUID, reported.KubernetesReady = live.PodUID, true
+			reported.KubernetesPodUID, reported.KubernetesReady = live.PodUID, live.KubernetesReady
+			reported.ReadyGatewayPorts = live.ReadyGatewayPorts
 			reported.WorkspaceStorageIdentity = live.WorkspaceStorageIdentity
 			if runtimePodEligibleForOrdinaryScheduling(reported) {
 				result = append(result, reported)
@@ -114,4 +116,25 @@ func (s *RuntimeScheduler) claimRuntimeSlot(ctx context.Context, id int64) (bool
 		return repo.TryClaimSlotSince(ctx, id, s.schedulingHeartbeatCutoff())
 	}
 	return s.podRepo.TryClaimSlot(ctx, id)
+}
+
+// This evidence is transient and comes only from authenticated Kubernetes
+// inventory. Whole-Pod readiness remains unchanged for upgrades and operations.
+func runtimeOrdinaryReadyGatewayPorts(pod k8sservice.RuntimeDeploymentPod) map[int]bool {
+	if pod.SandboxProfile == k8sservice.RuntimeNFSRootlessProfile {
+		return pod.ReadyGatewayPorts
+	}
+	return nil
+}
+
+func runtimeOrdinaryPodReady(pod models.RuntimePod) bool {
+	if pod.KubernetesReady {
+		return true
+	}
+	for _, ready := range pod.ReadyGatewayPorts {
+		if ready {
+			return true
+		}
+	}
+	return false
 }

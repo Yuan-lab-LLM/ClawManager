@@ -42,7 +42,7 @@ func idleStopMySQL(t *testing.T) db.Session {
 			t.Fatal("localhost port required")
 		}
 	}
-	u := mysql.ConnectionURL{Host: "127.0.0.1:" + port, User: "root", Database: "mysql", Options: map[string]string{"parseTime": "true"}}
+	u := mysql.ConnectionURL{Host: "127.0.0.1:" + port, User: "root", Password: os.Getenv("TEST_IDLE_MYSQL_PASSWORD"), Database: "mysql", Options: map[string]string{"parseTime": "true"}}
 	root, err := mysql.Open(u)
 	if err != nil {
 		t.Fatal(err)

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"reflect"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -77,7 +76,7 @@ func (s *runtimeDeploymentService) WakeIdleRuntimePool(ctx context.Context, targ
 	one := int32(1)
 	active.Spec.Replicas = &one
 	role := d.Labels[runtimePoolRoleLabel]
-	if string(d.UID) != expected.Option.DeploymentUID || d.ResourceVersion == "" || d.Spec.Replicas == nil || d.Spec.Paused || !ordinaryRuntimeDeployment(*active) || (role != "" && role != "upgrade-target") || d.Labels[RuntimeScaleInOperationLabel] != "" || d.Labels["clawmanager.io/runtime-type"] != target.RuntimeType || !reflect.DeepEqual(d.Spec.Template, expected.Template) {
+	if string(d.UID) != expected.Option.DeploymentUID || d.ResourceVersion == "" || d.Spec.Replicas == nil || d.Spec.Paused || !ordinaryRuntimeDeployment(*active) || (role != "" && role != "upgrade-target") || d.Labels[RuntimeScaleInOperationLabel] != "" || d.Labels["clawmanager.io/runtime-type"] != target.RuntimeType || !runtimeSleepTemplateMatches(d.Spec.Template, expected) {
 		return fmt.Errorf("sleeping Runtime pool identity, serving role or template changed")
 	}
 	storage, err := s.idleRuntimeStorageIdentity(ctx, d.Namespace, d.Spec.Template.Spec)
@@ -99,7 +98,7 @@ func (s *runtimeDeploymentService) WakeIdleRuntimePool(ctx context.Context, targ
 		}
 		return nil // Lost response or another Start is waiting for native capacity.
 	}
-	if expected.IdleSleepOperation == "" || d.Annotations[runtimeIdleSleepAnnotation] != expected.IdleSleepOperation || d.Generation != expected.DeploymentGeneration+1 {
+	if expected.IdleSleepOperation == "" || d.Annotations[runtimeIdleSleepAnnotation] != expected.IdleSleepOperation || !runtimeSleepGenerationMatches(d.Generation, expected, 1) {
 		return fmt.Errorf("current zero replicas do not belong to this automatic sleep operation")
 	}
 	pods, err := s.runtimeScaleInPods(ctx, d)

@@ -56,12 +56,12 @@ const LoginPage: React.FC = () => {
 
   return (
     <div className="app-shell flex min-h-screen items-center justify-center px-4">
-      <div className="app-panel-warm relative w-full max-w-md space-y-8 p-8">
+      <div className="app-panel relative w-full max-w-md space-y-8 p-8">
         <div className="flex justify-end">
           <LanguageSwitcher />
         </div>
         <div>
-          <h2 className="text-center text-3xl font-bold text-gray-900">
+          <h2 className="text-center text-2xl font-semibold text-gray-900">
             {t('auth.signInTitle')}
           </h2>
           <p className="mt-2 text-center text-sm text-gray-600">
@@ -70,7 +70,7 @@ const LoginPage: React.FC = () => {
         </div>
         
         {displayError && (
-          <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-red-700">
+          <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-red-700">
             {displayError}
           </div>
         )}
@@ -122,7 +122,7 @@ const LoginPage: React.FC = () => {
             <button
               type="submit"
               disabled={isLoading}
-              className="app-button-primary flex w-full disabled:cursor-not-allowed disabled:opacity-50"
+              className="app-button-primary flex w-full disabled:cursor-not-allowed"
             >
               {isLoading ? t('auth.signingIn') : t('auth.signIn')}
             </button>

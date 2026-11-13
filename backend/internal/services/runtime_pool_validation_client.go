@@ -71,8 +71,14 @@ func (c *slotRuntimeAgentClient) DeletePoolValidationGateway(ctx context.Context
 	if scope.Namespace != c.namespace || gatewayID != fmt.Sprintf("gw-%d-1", poolProbeInstanceID) {
 		return fmt.Errorf("validation stop identity changed")
 	}
-	if _, err := k8s.VerifyPoolValidationScope(ctx, c.kube, scope); err != nil {
+	pod, err := k8s.VerifyPoolValidationScope(ctx, c.kube, scope)
+	if err != nil {
 		return err
+	}
+	if pod.Labels["clawmanager.io/sandbox-profile"] == k8s.RuntimeNFSRootlessProfile {
+		// This synthetic probe has no business assignment or C1 stop intent.
+		// Its exact isolated pool must physically exit before teardown succeeds.
+		return k8s.StopIsolatedPoolValidation(ctx, c.kube, scope)
 	}
 	var receipt struct {
 		GatewayID string `json:"gateway_id"`

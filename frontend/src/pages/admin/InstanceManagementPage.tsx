@@ -1,6 +1,7 @@
-﻿import React, { useCallback, useEffect, useMemo, useState } from 'react';
+﻿import React, { useCallback, useEffect, useMemo, useState, useId, useRef } from 'react';
 import AdminLayout from '../../components/AdminLayout';
 import ConfirmDialog from '../../components/ConfirmDialog';
+import ExpandableSearch from '../../components/ExpandableSearch';
 import InstanceAutoStopInfo, { InstanceAutoStopControl } from '../../components/InstanceAutoStopInfo';
 import { useI18n } from '../../contexts/I18nContext';
 import { instanceService } from '../../services/instanceService';
@@ -10,6 +11,52 @@ import { formatInstanceType, type Instance } from '../../types/instance';
 import { INSTANCE_STATUS_FILTERS, type InstanceStatusFilter } from '../../lib/instanceListFilters';
 import type { User } from '../../types/user';
 import { getInstanceDisplayStatus } from '../../lib/instanceStatus';
+
+function InstanceDetailsPopover(props: React.ComponentProps<typeof InstanceAutoStopControl> & { ownerName?: string }) {
+  const { t } = useI18n();
+  const id = useId();
+  const panel = useRef<HTMLDivElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const anchor = useRef<DOMRect | null>(null);
+  useEffect(() => {
+    const dismiss = () => {
+      if (!panel.current?.matches(':popover-open')) return;
+      panel.current.hidePopover();
+      trigger.current?.focus({ preventScroll: true });
+    };
+    const scroll = (event: Event) => {
+      if (!panel.current?.matches(':popover-open')) return;
+      if (event.target instanceof Node && panel.current?.contains(event.target)) return;
+      const rect = trigger.current?.getBoundingClientRect();
+      if (rect && anchor.current && (rect.top !== anchor.current.top || rect.left !== anchor.current.left)) dismiss();
+    };
+    window.addEventListener('resize', dismiss);
+    document.addEventListener('scroll', scroll, true);
+    return () => { window.removeEventListener('resize', dismiss); document.removeEventListener('scroll', scroll, true); };
+  }, []);
+  const { instance } = props;
+  return <>
+    <button ref={trigger} type="button" popoverTarget={id} className="ml-2 rounded px-2 py-1 text-xs text-[var(--cm-primary)]" onClick={event => {
+      event.stopPropagation();
+      const rect = event.currentTarget.getBoundingClientRect();
+      anchor.current = rect;
+      if (panel.current) {
+        panel.current.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - 336))}px`;
+        panel.current.style.top = `${Math.max(8, Math.min(rect.bottom + 4, window.innerHeight - 320))}px`;
+      }
+    }}>{t('instances.details')}</button>
+    <div ref={panel} id={id} popover="auto" className="fixed inset-auto m-0 max-h-[min(300px,80dvh)] w-80 max-w-[calc(100vw-16px)] overflow-auto whitespace-normal rounded-lg border border-[var(--cm-border)] bg-[var(--cm-surface)] p-3 text-[var(--cm-text)] shadow-lg" onClick={event => event.stopPropagation()}>
+      <dl className="space-y-2 text-xs">
+        <div><dt className="text-[var(--cm-muted)]">{t('admin.instanceColumn')}</dt><dd className="break-all">{instance.name} · #{instance.id}</dd></div>
+        <div><dt className="text-[var(--cm-muted)]">{t('admin.userColumn')}</dt><dd className="break-all">{props.ownerName || '—'} · #{instance.user_id}</dd></div>
+        <div><dt className="text-[var(--cm-muted)]">{t('admin.k8sColumn')}</dt><dd className="break-all">{[instance.pod_name, instance.pod_namespace, instance.pod_ip].filter(Boolean).join(' / ') || '—'}</dd></div>
+        <div><dt className="text-[var(--cm-muted)]">{t('admin.updatedAtLabel')}</dt><dd>{new Date(instance.updated_at).toLocaleString()}</dd></div>
+      </dl>
+      <InstanceAutoStopInfo instance={props.instance} />
+      <InstanceAutoStopControl {...props} />
+    </div>
+  </>;
+}
 
 const InstanceManagementPage: React.FC = () => {
   const { t } = useI18n();
@@ -24,22 +71,33 @@ const InstanceManagementPage: React.FC = () => {
   const [runtimeFilter, setRuntimeFilter] = useState<'all' | Instance['runtime_type']>('all');
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [pendingDeleteInstance, setPendingDeleteInstance] = useState<Instance | null>(null);
+  const pendingLoad = useRef(false);
+  const refreshAfterLoad = useRef(false);
 
-  const loadData = useCallback(async (options?: { silent?: boolean }) => {
+  const loadData = useCallback(async (options?: { silent?: boolean }): Promise<void> => {
+    if (pendingLoad.current) {
+      if (!options?.silent) refreshAfterLoad.current = true;
+      return;
+    }
+    pendingLoad.current = true;
+    if (!options?.silent) setLoading(true);
     try {
-      if (!options?.silent) {
-        setLoading(true);
-      }
-      setError(null);
-      const [instancesData, usersData] = await Promise.all([
-        adminInstanceService.getInstances(1, 1000),
-        userService.getUsers(1, 1000),
-      ]);
-      setInstances(instancesData.instances || []);
-      setUsers(usersData.users || []);
-    } catch (err: unknown) {
-      setError(getAdminErrorMessage(err, t('admin.failedToLoadInstances')));
+      do {
+        refreshAfterLoad.current = false;
+        setError(null);
+        try {
+          const [instancesData, usersData] = await Promise.all([
+            adminInstanceService.getInstances(1, 1000),
+            userService.getUsers(1, 1000),
+          ]);
+          setInstances(instancesData.instances || []);
+          setUsers(usersData.users || []);
+        } catch (err: unknown) {
+          setError(getAdminErrorMessage(err, t('admin.failedToLoadInstances')));
+        }
+      } while (refreshAfterLoad.current);
     } finally {
+      pendingLoad.current = false;
       if (!options?.silent) {
         setLoading(false);
       }
@@ -51,16 +109,16 @@ const InstanceManagementPage: React.FC = () => {
   }, [loadData]);
 
   useEffect(() => {
-    if (!instances.some((instance) => instance.status === 'creating' || instance.status === 'deleting')) {
-      return;
-    }
-
-    const intervalId = window.setInterval(() => {
-      void loadData({ silent: true });
-    }, 5000);
+    const refresh = () => { if (document.visibilityState !== 'hidden') void loadData({ silent: true }); };
+    const transient = instances.some((instance) => instance.status === 'creating' || instance.status === 'deleting');
+    const intervalId = window.setInterval(refresh, transient ? 5000 : 30000);
+    window.addEventListener('focus', refresh);
+    window.addEventListener('online', refresh);
 
     return () => {
       window.clearInterval(intervalId);
+      window.removeEventListener('focus', refresh);
+      window.removeEventListener('online', refresh);
     };
   }, [instances, loadData]);
 
@@ -227,21 +285,9 @@ const InstanceManagementPage: React.FC = () => {
       />
 
       <div className="space-y-6">
-        <div className="app-panel p-5 lg:flex lg:items-center lg:justify-between">
-          <div>
-            <h2 className="text-lg font-semibold text-[#171212]">{t('admin.globalInstances')}</h2>
-            <p className="mt-1 text-sm text-[#8f8681]">
-              {t('admin.globalInstancesDesc')}
-            </p>
-          </div>
-          <div className="flex flex-col gap-3 sm:flex-row">
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder={t('admin.instanceSearchPlaceholder')}
-              className="app-input min-w-[280px]"
-            />
+        <div className="app-panel p-4">
+          <div className="flex flex-wrap items-center gap-2">
+            <ExpandableSearch value={searchQuery} onChange={setSearchQuery} label={t('common.search')} placeholder={t('admin.instanceSearchPlaceholder')} />
             <select
               aria-label={t("instances.statusFilter")}
               value={statusFilter}
@@ -285,12 +331,7 @@ const InstanceManagementPage: React.FC = () => {
               <option value="desktop">Desktop</option>
               <option value="shell">Shell</option>
             </select>
-            <button
-              onClick={() => void loadData()}
-              className="app-button-secondary"
-            >
-              {t('common.refresh')}
-            </button>
+
           </div>
         </div>
 
@@ -301,8 +342,8 @@ const InstanceManagementPage: React.FC = () => {
               <section key={mode} className="app-panel p-4">
                 <div className="flex items-center justify-between gap-3">
                   <div>
-                    <div className="text-sm font-semibold text-[#171212]">{formatMode(mode)}</div>
-                    <div className="mt-1 text-xs text-[#8f8681]">
+                    <div className="text-sm font-semibold text-[var(--cm-ink)]">{formatMode(mode)}</div>
+                    <div className="mt-1 text-xs text-[var(--cm-muted)]">
                       {mode === 'lite' ? 'Gateway runtime' : 'Desktop deployment'}
                     </div>
                   </div>
@@ -312,16 +353,16 @@ const InstanceManagementPage: React.FC = () => {
                 </div>
                 <div className="mt-3 grid grid-cols-3 gap-3 text-sm">
                   <div>
-                    <div className="text-xs text-[#8f8681]">Total</div>
-                    <div className="mt-1 font-semibold text-[#171212]">{stats.total}</div>
+                    <div className="text-xs text-[var(--cm-muted)]">Total</div>
+                    <div className="mt-1 font-semibold text-[var(--cm-ink)]">{stats.total}</div>
                   </div>
                   <div>
-                    <div className="text-xs text-[#8f8681]">Running</div>
-                    <div className="mt-1 font-semibold text-[#171212]">{stats.running}</div>
+                    <div className="text-xs text-[var(--cm-muted)]">Running</div>
+                    <div className="mt-1 font-semibold text-[var(--cm-ink)]">{stats.running}</div>
                   </div>
                   <div>
-                    <div className="text-xs text-[#8f8681]">Creating</div>
-                    <div className="mt-1 font-semibold text-[#171212]">{stats.creating}</div>
+                    <div className="text-xs text-[var(--cm-muted)]">Creating</div>
+                    <div className="mt-1 font-semibold text-[var(--cm-ink)]">{stats.creating}</div>
                   </div>
                 </div>
               </section>
@@ -330,81 +371,76 @@ const InstanceManagementPage: React.FC = () => {
         </div>
 
         {error && (
-          <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-red-700">
+          <div role="alert" className="flex items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-red-700">
             {error}
+            <button type="button" className="app-button-secondary" onClick={() => void loadData()}>{t('common.retry')}</button>
           </div>
         )}
 
         <div className="app-panel">
-          <div className="flex items-center justify-between border-b border-[#f1e7e1] px-5 py-4">
-            <div className="text-sm text-[#8f8681]">
+          <div className="flex items-center justify-between border-b border-[var(--cm-border)] px-5 py-4">
+            <div className="text-sm text-[var(--cm-muted)]">
               {t('admin.showingInstances', { filtered: filteredInstances.length, total: instances.length })}
             </div>
           </div>
 
           {loading ? (
-            <div className="px-5 py-12 text-center text-[#8f8681]">{t('admin.loadingInstances')}</div>
+            <div className="px-5 py-12 text-center text-[var(--cm-muted)]">{t('admin.loadingInstances')}</div>
           ) : filteredInstances.length === 0 ? (
-            <div className="px-5 py-12 text-center text-[#8f8681]">{t('admin.noFilteredInstances')}</div>
+            <div className="px-5 py-12 text-center text-[var(--cm-muted)]">{t('admin.noFilteredInstances')}</div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-[#f1e7e1]">
-                <thead className="bg-[#fcfaf8]">
+              <table className="w-full min-w-[1200px] divide-y divide-[var(--cm-border)] whitespace-nowrap text-sm">
+                <thead className="bg-[var(--cm-subtle)]">
                   <tr>
-                    <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-[0.12em] text-[#8f8681]">{t('admin.instanceColumn')}</th>
-                    <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-[0.12em] text-[#8f8681]">{t('admin.userColumn')}</th>
-                    <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-[0.12em] text-[#8f8681]">{t('admin.typeOsColumn')}</th>
-                    <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-[0.12em] text-[#8f8681]">{t('admin.resourcesColumn')}</th>
-                    <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-[0.12em] text-[#8f8681]">{t('admin.k8sColumn')}</th>
-                    <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-[0.12em] text-[#8f8681]">{t('common.status')}</th>
-                    <th className="px-5 py-3 text-right text-xs font-semibold uppercase tracking-[0.12em] text-[#8f8681]">{t('admin.actionsColumn')}</th>
+                    <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-[0.12em] text-[var(--cm-muted)]">{t('admin.instanceColumn')}</th>
+                    <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-[0.12em] text-[var(--cm-muted)]">{t('admin.userColumn')}</th>
+                    <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-[0.12em] text-[var(--cm-muted)]">{t('admin.typeOsColumn')}</th>
+                    <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-[0.12em] text-[var(--cm-muted)]">{t('admin.resourcesColumn')}</th>
+                    <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-[0.12em] text-[var(--cm-muted)]">{t('admin.k8sColumn')}</th>
+                    <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-[0.12em] text-[var(--cm-muted)]">{t('common.status')}</th>
+                    <th className="px-5 py-3 text-right text-xs font-semibold uppercase tracking-[0.12em] text-[var(--cm-muted)]">{t('admin.actionsColumn')}</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-[#f7efe9]">
+                <tbody className="divide-y divide-[var(--cm-border)]">
                   {filteredInstances.map((instance) => (
-                    <tr key={instance.id} className="hover:bg-[#fffaf7]">
-                      <td className="px-5 py-4 align-top">
-                        <div className="font-medium text-[#171212]">{instance.name}</div>
-                        <div className="mt-1 text-xs text-[#8f8681]">
-                          {t('instances.instanceIdLabel')}: {instance.id} / {t('admin.updatedAtLabel')} {new Date(instance.updated_at).toLocaleString()}
+                    <tr key={instance.id} className="hover:bg-[var(--cm-subtle)]">
+                      <td className="h-11 px-4 py-1 align-middle">
+                        <div className="flex items-center gap-2">
+                          <span className="max-w-48 truncate font-medium text-[var(--cm-ink)]" tabIndex={0} title={instance.name}>{instance.name}</span>
+                          <span className="text-xs text-[var(--cm-muted)]" title={`${t('admin.updatedAtLabel')} ${new Date(instance.updated_at).toLocaleString()}`}>#{instance.id}</span>
                         </div>
                       </td>
-                      <td className="px-5 py-4 align-top">
-                        <div className="font-medium text-[#171212]">{userMap.get(instance.user_id) || `${t('admin.userColumn')} #${instance.user_id}`}</div>
-                        <div className="mt-1 text-xs text-[#8f8681]">{t('admin.userIdLabel')}: {instance.user_id}</div>
+                      <td className="h-11 px-4 py-1 align-middle">
+                        <div className="flex items-center gap-2">
+                          <span className="max-w-36 truncate font-medium text-[var(--cm-ink)]" tabIndex={0} title={userMap.get(instance.user_id)}>{userMap.get(instance.user_id) || `${t('admin.userColumn')} #${instance.user_id}`}</span>
+                          <span className="text-xs text-[var(--cm-muted)]">#{instance.user_id}</span>
+                        </div>
                       </td>
-                      <td className="px-5 py-4 align-top">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="font-medium capitalize text-[#171212]">{instance.type}</span>
+                      <td className="h-11 px-4 py-1 align-middle">
+                        <div className="inline-flex items-center gap-2">
+                          <span className="font-medium capitalize text-[var(--cm-ink)]">{instance.type}</span>
                           <span className={`inline-flex rounded-md border px-2 py-0.5 text-xs font-medium ${getModeBadge(instance.instance_mode)}`}>
                             {formatMode(instance.instance_mode)}
                           </span>
                         </div>
-                        <div className="mt-1 text-xs text-[#8f8681]">{instance.os_type} {instance.os_version}</div>
-                        <div className="mt-1 text-xs text-[#8f8681]">{formatRuntime(instance.runtime_type)}</div>
+                        <span className="ml-2 text-xs text-[var(--cm-muted)]">{instance.os_type} {instance.os_version}</span>
+                        <span className="ml-2 text-xs text-[var(--cm-muted)]">{formatRuntime(instance.runtime_type)}</span>
                       </td>
-                      <td className="px-5 py-4 align-top">
-                        <div className="font-medium text-[#171212]">{formatResources(instance)}</div>
-                        <div className="mt-1 text-xs text-[#8f8681]">
-                          {t('admin.gpuLabel')}: {instance.gpu_enabled ? instance.gpu_count : 0}
-                        </div>
+                      <td className="h-11 px-4 py-1 align-middle">
+                        <span className="font-medium text-[var(--cm-ink)]">{formatResources(instance)}</span>
+                        <span className="ml-2 text-xs text-[var(--cm-muted)]">{t('admin.gpuLabel')}: {instance.gpu_enabled ? instance.gpu_count : 0}</span>
                       </td>
-                      <td className="px-5 py-4 align-top">
-                        <div className="text-sm text-[#171212]">
-                          {instance.instance_mode === 'lite' ? 'Gateway binding' : 'Deployment'}
-                        </div>
-                        <div className="mt-1 text-xs text-[#8f8681]">{instance.pod_name || '-'}</div>
-                        <div className="mt-1 text-xs text-[#8f8681]">{instance.pod_namespace || '-'}</div>
-                        <div className="mt-1 text-xs text-[#8f8681]">{instance.pod_ip || '-'}</div>
+                      <td className="h-11 px-4 py-1 align-middle">
+                        <span className="inline-block max-w-48 truncate align-middle text-xs text-[var(--cm-text)]" tabIndex={0} title={[instance.instance_mode === 'lite' ? 'Gateway binding' : 'Deployment', instance.pod_name || '-', instance.pod_namespace || '-', instance.pod_ip || '-'].join(' / ')}>{instance.pod_name || (instance.instance_mode === 'lite' ? 'Gateway binding' : 'Deployment')}</span>
                       </td>
-                      <td className="px-5 py-4 align-top">
+                      <td className="h-11 px-4 py-1 align-middle">
                         <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${getStatusBadge(instance.status)}`}>
                           {t(`status.${getInstanceDisplayStatus(instance.status, instance.stopped_reason)}`)}
                         </span>
-                        <InstanceAutoStopInfo instance={instance} />
-                        <InstanceAutoStopControl instance={instance} onChanged={activity => setInstances(current => current.map(item => item.id === instance.id ? { ...item, last_gateway_activity_at: activity.last_gateway_activity_at, monitoring_since: activity.monitoring_since, auto_stop_disabled: activity.auto_stop_disabled, stopped_reason: activity.stopped_reason, auto_stop_blocker: activity.auto_stop_blocker, auto_stop_phase: activity.stop_phase } : item))} />
+                        <InstanceDetailsPopover instance={instance} ownerName={userMap.get(instance.user_id)} onChanged={activity => setInstances(current => current.map(item => item.id === instance.id ? { ...item, last_gateway_activity_at: activity.last_gateway_activity_at, monitoring_since: activity.monitoring_since, auto_stop_disabled: activity.auto_stop_disabled, stopped_reason: activity.stopped_reason, auto_stop_blocker: activity.auto_stop_blocker, auto_stop_phase: activity.stop_phase } : item))} />
                       </td>
-                      <td className="px-5 py-4 align-top">
+                      <td className="h-11 px-4 py-1 align-middle">
                         <div className="flex justify-end gap-2">
                           {instance.status === 'stopped' && (
                             <button
@@ -428,7 +464,7 @@ const InstanceManagementPage: React.FC = () => {
                             <button
                               onClick={() => handleAction(instance, 'restart')}
                               disabled={actionLoading === `restart-${instance.id}`}
-                              className="rounded-md bg-[#fff2ea] px-3 py-1.5 text-xs font-medium text-[#ef6b4a] hover:bg-[#fde5db] disabled:opacity-50"
+                              className="rounded-md bg-[var(--cm-subtle)] px-3 py-1.5 text-xs font-medium text-[var(--cm-primary)] hover:bg-[var(--cm-hover)] disabled:opacity-50"
                             >
                               {t('common.restart')}
                             </button>
@@ -436,7 +472,7 @@ const InstanceManagementPage: React.FC = () => {
                           <button
                             onClick={() => handleAction(instance, 'sync')}
                             disabled={actionLoading === `sync-${instance.id}` || instance.status === 'deleting'}
-                            className="rounded-md bg-[#f3f0ed] px-3 py-1.5 text-xs font-medium text-[#5f5957] hover:bg-[#ebe3dd] disabled:opacity-50"
+                            className="rounded-md bg-[var(--cm-subtle)] px-3 py-1.5 text-xs font-medium text-[var(--cm-text)] hover:bg-[var(--cm-subtle)] disabled:opacity-50"
                           >
                             {t('common.refresh')}
                           </button>

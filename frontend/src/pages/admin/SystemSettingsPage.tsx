@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, KeyRound, Pencil, Plus, Rocket, Save, ShieldCheck, Trash2 } from 'lucide-react';
 import AdminLayout from '../../components/AdminLayout';
 import UpgradeRecoveryActions from '../../components/UpgradeRecoveryActions';
@@ -16,8 +16,10 @@ import {
   type EnterpriseAuthStatus,
   type LDAPConfigPublic,
 } from '../../services/enterpriseAuthService';
-import { runtimePoolService } from '../../services/runtimePoolService';
-import type { RuntimeUpgradeDetails, RuntimeUpgradePreflightResult } from '../../types/runtimePool';
+import { runtimePoolService, type RuntimePreparationOperation } from '../../services/runtimePoolService';
+import { readRuntimeUpgradeIntent, saveRuntimeUpgradeIntent, cancelRuntimeUpgradePreparation, waitForRuntimeUpgradeCancellation, isDefiniteRuntimeUpgradeRejection, type RuntimeUpgradeIntent } from '../../lib/runtimeUpgradeSubmission';
+import { useAuthStore } from '../../stores/authStore';
+import type { RuntimeUpgradeDetails, RuntimeUpgradePreflightResult, RuntimeRollout } from '../../types/runtimePool';
 import type { RuntimePod, RuntimeType } from '../../types/runtimePool';
 import { localizeEnterpriseAuthIssue, localizeEnterpriseAuthIssues } from '../../utils/enterpriseAuthErrors';
 
@@ -367,10 +369,47 @@ const SystemSettingsPage: React.FC = () => {
 	const [rolloutBatchSize, setRolloutBatchSize] = useState(2);
   const [rolloutMaxUnavailable, setRolloutMaxUnavailable] = useState(1);
   const [rolloutSaving, setRolloutSaving] = useState(false);
+  const [rolloutPreparing, setRolloutPreparing] = useState(false);
+  const rolloutRequest = useRef<AbortController | null>(null);
+  const rolloutPreparation = useRef<string | null>(null);
+  const safelyCancellablePreparations = useRef(new Set<string>());
+  const accountId = useAuthStore((state) => state.user?.id);
+  const [uncertainUpgrade, setUncertainUpgrade] = useState(() => readRuntimeUpgradeIntent(accountId));
+  const [reconciliationItems, setReconciliationItems] = useState<Array<{ id: string; label: string; preparation?: { id: string; status: string; phase?: string }; rollout?: RuntimeRollout }>>([]);
+  const [reconciliationBusy, setReconciliationBusy] = useState(false);
+  const reconciliationGeneration = useRef(0);
+  const [adoptedPreflight, setAdoptedPreflight] = useState<RuntimeRollout | null>(null);
   const [rolloutError, setRolloutError] = useState<string | null>(null);
   const [rolloutPreflight, setRolloutPreflight] = useState<RuntimeUpgradePreflightResult | null>(null);
 	const [rolloutDetails, setRolloutDetails] = useState<RuntimeUpgradeDetails | null>(null);
 	const [activeRolloutId, setActiveRolloutId] = useState<number | null>(null);
+  const releaseRolloutPreparation = useCallback(() => {
+    const id = rolloutPreparation.current;
+    rolloutPreparation.current = null;
+    if (id && safelyCancellablePreparations.current.has(id) && !readRuntimeUpgradeIntent(accountId)) void cancelRuntimeUpgradePreparation(accountId, id, runtimePoolService.cancelScheduling);
+  }, [accountId]);
+  const invalidateRolloutRequest = useCallback(() => {
+    reconciliationGeneration.current += 1;
+    setReconciliationBusy(false);
+    setReconciliationItems([]);
+    rolloutRequest.current?.abort();
+    rolloutRequest.current = null;
+    releaseRolloutPreparation();
+    setRolloutPreparing(false);
+    setRolloutSaving(false);
+    setRolloutPreflight(null);
+    setAdoptedPreflight(null);
+  }, [releaseRolloutPreparation]);
+  useEffect(() => {
+    invalidateRolloutRequest();
+    setUncertainUpgrade(readRuntimeUpgradeIntent(accountId));
+    setReconciliationItems([]);
+    setReconciliationBusy(false);
+    setRolloutError(null);
+    setRolloutDetails(null);
+    setActiveRolloutId(null);
+    return () => { reconciliationGeneration.current += 1; rolloutRequest.current?.abort(); rolloutRequest.current = null; releaseRolloutPreparation(); };
+  }, [accountId, invalidateRolloutRequest, releaseRolloutPreparation]);
 	const [enterpriseConfig, setEnterpriseConfig] = useState<EnterpriseAuthConfig | null>(null);
 	const [enterpriseLoading, setEnterpriseLoading] = useState(true);
 	const [enterpriseSaving, setEnterpriseSaving] = useState(false);
@@ -421,11 +460,7 @@ const SystemSettingsPage: React.FC = () => {
         const nextRolloutCard = nextCards.find(
           (card) => card.instance_type === rolloutRuntimeType && card.runtime_type === 'gateway',
         );
-        setRolloutImage(
-          rolloutRuntimeType === 'openclaw'
-            ? ''
-            : nextRolloutCard?.image.trim() || '',
-        );
+        setRolloutImage(current => current.trim() || (rolloutRuntimeType === 'openclaw' ? '' : nextRolloutCard?.image.trim() || ''));
       } catch (error: unknown) {
         setPageError(getErrorMessage(error, t('systemSettingsPage.loadFailed')));
       } finally {
@@ -720,6 +755,7 @@ const SystemSettingsPage: React.FC = () => {
       } : item));
 
       if (nextCard.runtime_type === 'gateway' && nextCard.instance_type === rolloutRuntimeType) {
+        invalidateRolloutRequest();
         setRolloutImage(nextCard.image.trim());
       }
     } catch (error: unknown) {
@@ -762,6 +798,7 @@ const SystemSettingsPage: React.FC = () => {
   };
 
   const handleRolloutRuntimeTypeChange = (runtimeType: RuntimeType) => {
+    invalidateRolloutRequest();
     const nextCard = liteCards.find((card) => card.instance_type === runtimeType);
     setRolloutRuntimeType(runtimeType);
     setRolloutImage(runtimeType === 'openclaw'
@@ -773,64 +810,280 @@ const SystemSettingsPage: React.FC = () => {
     setRolloutMaxUnavailable(1);
   };
 
+  const beginRolloutRequest = () => {
+    if (accountId === undefined || readRuntimeUpgradeIntent(accountId) || rolloutRequest.current || rolloutSaving || activeRolloutId !== null) return null;
+    const controller = new AbortController();
+    rolloutRequest.current = controller;
+    setRolloutSaving(true);
+    setRolloutError(null);
+    return {
+      controller,
+      current: () => rolloutRequest.current === controller && !controller.signal.aborted && useAuthStore.getState().user?.id === accountId,
+      finish: () => {
+        if (rolloutRequest.current !== controller) return;
+        rolloutRequest.current = null;
+        setRolloutPreparing(false);
+        setRolloutSaving(false);
+      },
+    };
+  };
+
+  const submitRuntimeUpgrade = async <T,>(stage: RuntimeUpgradeIntent['stage'], submit: (acknowledge: () => void) => Promise<T>, preparationId?: string, reviewed?: RuntimeRollout) => {
+    const intent: RuntimeUpgradeIntent = {
+      stage, runtimeType: rolloutRuntimeType, targetImage: rolloutImage.trim(),
+      batchSize: rolloutBatchSize, maxUnavailable: rolloutMaxUnavailable,
+      preparationId, preflightId: reviewed?.preflight_id, rolloutId: reviewed?.id,
+      submittedAt: new Date().toISOString(),
+    };
+    const submittingController = rolloutRequest.current;
+    const staleSubmission = () => submittingController !== rolloutRequest.current || submittingController?.signal.aborted || useAuthStore.getState().user?.id !== accountId;
+    saveRuntimeUpgradeIntent(accountId, intent);
+    setUncertainUpgrade(intent);
+    const acknowledge = () => {
+      const saved = readRuntimeUpgradeIntent(accountId);
+      if (saved?.submittedAt === intent.submittedAt && saved.stage === intent.stage) saveRuntimeUpgradeIntent(accountId, null);
+      if (useAuthStore.getState().user?.id === accountId) setUncertainUpgrade(readRuntimeUpgradeIntent(accountId));
+    };
+    try {
+      const result = await submit(acknowledge);
+      acknowledge();
+      if (stage === 'preflight' && preparationId && staleSubmission()) await cancelRuntimeUpgradePreparation(accountId, preparationId, runtimePoolService.cancelScheduling);
+      return result;
+    } catch (error) {
+      if (isDefiniteRuntimeUpgradeRejection(error)) {
+        acknowledge();
+        if (preparationId && staleSubmission()) await cancelRuntimeUpgradePreparation(accountId, preparationId, runtimePoolService.cancelScheduling);
+      }
+      throw error;
+    }
+  };
+
+  const prepareRuntimeUpgrade = async (controller: AbortController) => {
+    if (rolloutPreparation.current) return rolloutPreparation.current;
+    setRolloutPreparing(true);
+    await waitForRuntimeUpgradeCancellation(accountId);
+    controller.signal.throwIfAborted();
+    if (useAuthStore.getState().user?.id !== accountId) return;
+    const cancelOperation = (id: string) => {
+      const held = readRuntimeUpgradeIntent(accountId);
+      if (!safelyCancellablePreparations.current.has(id) || (held?.protectedPreparation && held.preparationId === id)) return Promise.resolve();
+      if (rolloutPreparation.current === id) rolloutPreparation.current = null;
+      return cancelRuntimeUpgradePreparation(accountId, id, runtimePoolService.cancelScheduling);
+    };
+    const markProtectedPreparation = (operation: RuntimePreparationOperation) => {
+      if (['pending', 'starting', 'processing'].includes(operation.status) || (operation.status === 'completed' && operation.phase === 'ready')) safelyCancellablePreparations.current.add(operation.id);
+      else safelyCancellablePreparations.current.delete(operation.id);
+      if (operation.status !== 'needs_attention') return;
+      const held: RuntimeUpgradeIntent = {
+        stage: 'prepare', runtimeType: rolloutRuntimeType, targetImage: rolloutImage.trim(),
+        batchSize: rolloutBatchSize, maxUnavailable: rolloutMaxUnavailable,
+        preparationId: operation.id, protectedPreparation: true, submittedAt: new Date().toISOString(),
+      };
+      saveRuntimeUpgradeIntent(accountId, held);
+      if (useAuthStore.getState().user?.id === accountId) setUncertainUpgrade(held);
+    };
+    const id = await submitRuntimeUpgrade('prepare', acknowledge => runtimePoolService.prepareRollout(rolloutRuntimeType, controller.signal, {
+      onOperation: (knownId, operation) => {
+        acknowledge();
+        markProtectedPreparation(operation);
+        if (!controller.signal.aborted && rolloutRequest.current === controller && useAuthStore.getState().user?.id === accountId) rolloutPreparation.current = knownId;
+        else void cancelOperation(knownId);
+      },
+      onStatus: markProtectedPreparation,
+      cancelOperation,
+    }));
+    if (controller.signal.aborted || rolloutRequest.current !== controller || useAuthStore.getState().user?.id !== accountId) {
+      await cancelOperation(id);
+      return;
+    }
+    rolloutPreparation.current = id;
+    safelyCancellablePreparations.current.add(id);
+    setRolloutPreparing(false);
+    return id;
+  };
+
   const startRollout = async (forceCheck = false) => {
     if (!rolloutImage.trim()) {
       setRolloutError(t('systemSettingsPage.rolloutTargetRequired'));
       return;
     }
+    const request = beginRolloutRequest();
+    if (!request) return;
     try {
-      setRolloutSaving(true);
-      setRolloutError(null);
-		let targetImage = rolloutImage.trim();
-		let preflight = forceCheck ? null : rolloutPreflight;
-      if (rolloutRuntimeType === 'openclaw' && (!preflight || !preflight.passed)) {
-			preflight = await runtimePoolService.preflightOpenClawRollout({
-			  target_image_ref: targetImage,
-			  batch_size: Math.max(1, rolloutBatchSize),
-			  max_unavailable: 0,
-			  auto_rollback: true,
-			});
-			targetImage = preflight.target_image_ref || targetImage;
-			setRolloutImage(targetImage);
-			if (!preflight.passed) {
-			  setRolloutPreflight(preflight);
-			  setRolloutError(preflight.blockers.join('；'));
-			  return;
-			}
-			if (preflight.strategy === 'openclaw_8plus_data_safe') {
-			  setRolloutPreflight(preflight);
-			  setRolloutMaxUnavailable(0);
-			  return;
-			}
-		}
-		const rollout = await runtimePoolService.startRollout({
+      let targetImage = rolloutImage.trim();
+      let preflight = forceCheck ? null : rolloutPreflight;
+      let recoveredPreflight = forceCheck ? null : adoptedPreflight;
+      // Confirmation reuses the reviewed preflight; the server rechecks its native fingerprint.
+      let preparationId: string | undefined;
+      if (rolloutRuntimeType !== 'opencode') {
+        if (!rolloutPreparation.current) { preflight = null; recoveredPreflight = null; }
+        preparationId = await prepareRuntimeUpgrade(request.controller);
+        if (!request.current()) return;
+      }
+      if (rolloutRuntimeType === 'openclaw' && !recoveredPreflight && (!preflight || !preflight.passed)) {
+        preflight = await submitRuntimeUpgrade('preflight', () => runtimePoolService.preflightOpenClawRollout({
+          preparation_id: preparationId,
+          target_image_ref: targetImage,
+          batch_size: Math.max(1, rolloutBatchSize),
+          max_unavailable: 0,
+          auto_rollback: true,
+        }), preparationId);
+        if (!request.current()) return;
+        targetImage = preflight.target_image_ref || targetImage;
+        setRolloutImage(targetImage);
+        if (!preflight.passed) {
+          setRolloutPreflight(preflight);
+          setRolloutError(preflight.blockers.join('；'));
+          return;
+        }
+        if (preflight.strategy === 'openclaw_8plus_data_safe') {
+          setRolloutPreflight(preflight);
+          setRolloutMaxUnavailable(0);
+          return;
+        }
+      }
+      if (!request.current()) return;
+      const rollout = await submitRuntimeUpgrade('rollout', () => runtimePoolService.startRollout({
+        preparation_id: preparationId,
         runtime_type: rolloutRuntimeType,
-		target_image_ref: targetImage,
+        target_image_ref: targetImage,
         batch_size: Math.max(1, rolloutBatchSize),
-		max_unavailable: preflight?.strategy === 'openclaw_8plus_data_safe' ? 0 : Math.max(1, rolloutMaxUnavailable),
-		preflight_id: preflight?.strategy === 'openclaw_8plus_data_safe' ? preflight.rollout?.preflight_id : undefined,
+        max_unavailable: recoveredPreflight || preflight?.strategy === 'openclaw_8plus_data_safe' ? 0 : Math.max(1, rolloutMaxUnavailable),
+        preflight_id: recoveredPreflight?.preflight_id ?? (preflight?.strategy === 'openclaw_8plus_data_safe' ? preflight.rollout?.preflight_id : undefined),
         auto_rollback: true,
-      });
-		setRolloutDetails({ rollout, items: [], audits: [] });
-		setActiveRolloutId(rollout.id);
+      }), preparationId, recoveredPreflight ?? preflight?.rollout);
+      if (rolloutPreparation.current === preparationId) rolloutPreparation.current = null;
+      if (!request.current()) return;
+      setRolloutDetails({ rollout, items: [], audits: [] });
+      setActiveRolloutId(rollout.id);
       setRolloutPreflight(null);
       setRolloutImage(rolloutCard?.image.trim() || rolloutImage.trim());
       void refreshRolloutCurrentImage(rolloutRuntimeType);
     } catch (error: unknown) {
-      setRolloutError(getErrorMessage(error, t('systemSettingsPage.rolloutFailed')));
+      if (request.current()) {
+        releaseRolloutPreparation();
+        setRolloutPreflight(null);
+        setRolloutError(getErrorMessage(error, t('systemSettingsPage.rolloutFailed')));
+      }
     } finally {
-		if (!activeRolloutId) setRolloutSaving(false);
+      request.finish();
     }
   };
 
-  const preflightHealthyInstances = async () => {
+  const preflightHealthyInstances = async (excludeInstanceIds?: number[]) => {
     if (!rolloutImage.trim()) {setRolloutError('请先填写目标镜像'); return;}
-    setRolloutSaving(true);
+    const request = beginRolloutRequest();
+    if (!request) return;
+    setRolloutPreflight(null);
     try {
-      const result = await runtimePoolService.preflightOpenClawRollout({target_image_ref:rolloutImage.trim(),batch_size:rolloutBatchSize,max_unavailable:0,auto_rollback:true});
-      setRolloutPreflight(result);setRolloutError(result.passed?null:result.blockers.join('；'));
-    } catch(error) {setRolloutError(getErrorMessage(error,'正常实例预检失败'));}
-    finally {setRolloutSaving(false);}
+      const preparationId = await prepareRuntimeUpgrade(request.controller);
+      if (!request.current()) return;
+      const result = await submitRuntimeUpgrade('preflight', () => runtimePoolService.preflightOpenClawRollout({
+        preparation_id: preparationId,
+        target_image_ref: rolloutImage.trim(), batch_size: rolloutBatchSize,
+        max_unavailable: 0, auto_rollback: true, exclude_instance_ids: excludeInstanceIds,
+      }), preparationId);
+      if (!request.current()) return;
+      setRolloutImage(result.target_image_ref || rolloutImage.trim());
+      setRolloutPreflight(result);
+      if (result.passed && result.strategy === 'openclaw_8plus_data_safe') setRolloutMaxUnavailable(0);
+      setRolloutError(result.passed ? null : result.blockers.join('；'));
+    } catch(error) {
+      if (request.current()) {
+        releaseRolloutPreparation();
+        setRolloutError(getErrorMessage(error,'正常实例预检失败'));
+      }
+    } finally {
+      request.finish();
+    }
+  };
+
+  const matchesUncertainUpgrade = (intent: RuntimeUpgradeIntent, item: RuntimeRollout & { created_at?: string }) =>
+    item.runtime_type === intent.runtimeType &&
+    (!intent.targetImage.includes('@sha256:') || item.target_image_ref === intent.targetImage) &&
+    (!intent.rolloutId || (item.id === intent.rolloutId && item.preflight_id === intent.preflightId));
+
+  const reconcileUpgradeHistory = async () => {
+    const intent = readRuntimeUpgradeIntent(accountId);
+    if (!intent || reconciliationBusy) return;
+    const generation = reconciliationGeneration.current;
+    setReconciliationBusy(true);
+    setReconciliationItems([]);
+    try {
+      if (intent.stage === 'prepare') {
+        const history = await runtimePoolService.schedulingHistory();
+        if (generation !== reconciliationGeneration.current || useAuthStore.getState().user?.id !== accountId) return;
+        const items = history.items as Array<{ id: string; kind?: string; runtime_type?: RuntimeType; status: string; phase?: string; created_at?: string }>;
+        setReconciliationItems(items.filter(item => item.kind === 'rollout_wake' && item.runtime_type === intent.runtimeType && (!intent.preparationId || item.id === intent.preparationId))
+          .map(item => ({ id: item.id, label: `${item.id} · ${item.runtime_type} · ${item.status} / ${item.phase || ''} · ${item.created_at}`, preparation: item })));
+      } else {
+        const items = await runtimePoolService.listRollouts(intent.runtimeType);
+        if (generation !== reconciliationGeneration.current || useAuthStore.getState().user?.id !== accountId) return;
+        setReconciliationItems(items.filter(item => matchesUncertainUpgrade(intent, item) &&
+          (intent.stage !== 'rollout' || ['pending', 'running', 'finished', 'error', 'cancelled'].includes(item.status)))
+          .map(item => ({ id: String(item.id), label: `#${item.id} · ${item.target_image_ref} · ${item.status} / ${item.phase} · ${(item as RuntimeRollout & { created_at?: string }).created_at || ''}`, rollout: item })));
+      }
+    } catch (error) {
+      if (generation === reconciliationGeneration.current && useAuthStore.getState().user?.id === accountId) setRolloutError(getErrorMessage(error, t('systemSettingsPage.rolloutFailed')));
+    } finally {
+      if (generation === reconciliationGeneration.current && useAuthStore.getState().user?.id === accountId) setReconciliationBusy(false);
+    }
+  };
+
+  const adoptUpgradeHistory = async (item: typeof reconciliationItems[number]) => {
+    const intent = readRuntimeUpgradeIntent(accountId);
+    if (!intent || reconciliationBusy) return;
+    const generation = reconciliationGeneration.current;
+    setReconciliationBusy(true);
+    let restoredImage = intent.targetImage;
+    let restoredError: string | null = null;
+    try {
+      if (item.preparation) {
+        const history = await runtimePoolService.schedulingHistory();
+        const operation = history.items.find(operation => operation.id === item.id) as (typeof history.items[number] & { runtime_type?: RuntimeType }) | undefined;
+        if (!operation || operation.kind !== 'rollout_wake' || operation.runtime_type !== intent.runtimeType || (intent.preparationId && operation.id !== intent.preparationId) || generation !== reconciliationGeneration.current || useAuthStore.getState().user?.id !== accountId) return;
+        if (operation.status === 'needs_attention') {
+          setRolloutError(`${operation.id}: needs_attention / ${operation.phase || ''}${operation.error_message ? ': ' + operation.error_message : ''}`);
+          return;
+        }
+        if (operation.status === 'completed' && operation.phase === 'ready') {
+          rolloutPreparation.current = operation.id;
+          safelyCancellablePreparations.current.add(operation.id);
+        }
+        else if (!['failed', 'cancelled', 'needs_attention'].includes(operation.status)) {
+          setRolloutError(`${operation.id}: ${operation.status} / ${operation.phase || ''}`);
+          return;
+        } else restoredError = `${operation.id}: ${operation.status} / ${operation.phase || ''}${operation.error_message ? ': ' + operation.error_message : ''}`;
+      } else if (item.rollout) {
+        const details = await runtimePoolService.getRollout(item.rollout.id);
+        if (generation !== reconciliationGeneration.current || useAuthStore.getState().user?.id !== accountId || !matchesUncertainUpgrade(intent, details.rollout)) return;
+        restoredImage = details.rollout.target_image_ref;
+        if (details.rollout.status === 'preflight_passed' && intent.stage === 'preflight' && intent.preparationId && details.rollout.preflight_id && details.rollout.plan_fingerprint) {
+          rolloutPreparation.current = intent.preparationId;
+          safelyCancellablePreparations.current.add(intent.preparationId);
+          setAdoptedPreflight(details.rollout);
+          setRolloutMaxUnavailable(0);
+        } else if (details.rollout.status.startsWith('preflight') && intent.stage === 'rollout') return;
+        else {
+          rolloutPreparation.current = details.rollout.status.startsWith('preflight') ? intent.preparationId ?? null : null;
+          if (rolloutPreparation.current) safelyCancellablePreparations.current.add(rolloutPreparation.current);
+          if (['pending', 'running'].includes(details.rollout.status)) setActiveRolloutId(details.rollout.id);
+        }
+        setRolloutDetails(details);
+      }
+      saveRuntimeUpgradeIntent(accountId, null);
+      setUncertainUpgrade(null);
+      setReconciliationItems([]);
+      setRolloutRuntimeType(intent.runtimeType);
+      setRolloutImage(restoredImage);
+      setRolloutBatchSize(intent.batchSize);
+      if (intent.stage === 'prepare') setRolloutMaxUnavailable(intent.maxUnavailable);
+      setRolloutError(restoredError);
+    } catch (error) {
+      if (generation === reconciliationGeneration.current && useAuthStore.getState().user?.id === accountId) setRolloutError(getErrorMessage(error, t('systemSettingsPage.rolloutFailed')));
+    } finally {
+      if (generation === reconciliationGeneration.current && useAuthStore.getState().user?.id === accountId) setReconciliationBusy(false);
+    }
   };
 
   const renderRuntimeCard = (card: EditableImageCard) => (
@@ -1160,7 +1413,7 @@ const SystemSettingsPage: React.FC = () => {
                 type="text"
                 value={rolloutImage}
                 data-upgrade-target-image
-                onChange={(event) => { setRolloutImage(event.target.value); setRolloutPreflight(null); setRolloutError(null); }}
+                onChange={(event) => { invalidateRolloutRequest(); setRolloutImage(event.target.value); setRolloutPreflight(null); setRolloutError(null); }}
                 className="app-input mt-1 block w-full"
                 placeholder={rolloutRuntimeType === 'openclaw'
 				  ? 'registry/repository:tag 或 registry/repository@sha256:...'
@@ -1178,7 +1431,7 @@ const SystemSettingsPage: React.FC = () => {
                 type="number"
                 min={1}
                 value={rolloutBatchSize}
-                onChange={(event) => { setRolloutBatchSize(Number(event.target.value) || 1); setRolloutPreflight(null); }}
+                onChange={(event) => { invalidateRolloutRequest(); setRolloutBatchSize(Number(event.target.value) || 1); setRolloutPreflight(null); }}
                 className="app-input mt-1 block w-full"
               />
             </div>
@@ -1188,34 +1441,47 @@ const SystemSettingsPage: React.FC = () => {
                 type="number"
 				min={rolloutPreflight?.strategy === 'openclaw_8plus_data_safe' ? 0 : 1}
                 value={rolloutMaxUnavailable}
-                onChange={(event) => { setRolloutMaxUnavailable(Number(event.target.value) || 0); setRolloutPreflight(null); }}
-				disabled={rolloutPreflight?.strategy === 'openclaw_8plus_data_safe'}
+                onChange={(event) => { invalidateRolloutRequest(); setRolloutMaxUnavailable(Number(event.target.value) || 0); setRolloutPreflight(null); }}
+				disabled={Boolean(adoptedPreflight) || rolloutPreflight?.strategy === 'openclaw_8plus_data_safe'}
                 className="app-input mt-1 block w-full"
               />
             </div>
             <button
               type="button"
               onClick={() => void startRollout()}
-				disabled={rolloutSaving || activeRolloutId !== null}
+              aria-busy={rolloutSaving}
+				disabled={accountId === undefined || Boolean(uncertainUpgrade) || rolloutSaving || activeRolloutId !== null}
               className="app-button-primary inline-flex items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <Rocket className="h-4 w-4" />
 			  {activeRolloutId !== null
 				? `升级执行中（#${activeRolloutId}）`
-				: rolloutSaving
+				: rolloutPreparing
+                ? t('systemSettingsPage.rolloutPreparing')
+                : rolloutSaving
                 ? t('systemSettingsPage.rolloutStarting')
-				: rolloutRuntimeType === 'openclaw' && rolloutPreflight?.strategy === 'openclaw_8plus_data_safe' && rolloutPreflight.passed
+				: rolloutRuntimeType === 'openclaw' && (adoptedPreflight || (rolloutPreflight?.strategy === 'openclaw_8plus_data_safe' && rolloutPreflight.passed))
                   ? '确认执行（自动回退）'
                   : rolloutRuntimeType === 'openclaw'
                     ? '执行升级预检'
                     : t('systemSettingsPage.startRollout')}
             </button>
           </div>
-          {rolloutError && (
+          {(rolloutError || (uncertainUpgrade && !rolloutSaving)) && (
             <div className="mt-4 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-              {rolloutError}
+              {rolloutError && <div>{rolloutError}</div>}
+              {uncertainUpgrade && !rolloutSaving && <>
+                <p>{uncertainUpgrade.protectedPreparation
+                  ? t('systemSettingsPage.rolloutProtectedPreparation', { id: uncertainUpgrade.preparationId || '' })
+                  : t('systemSettingsPage.rolloutUncertain', { runtime: uncertainUpgrade.runtimeType })}</p>
+                <p className="mt-1 break-all">{uncertainUpgrade.targetImage} · {uncertainUpgrade.submittedAt}</p>
+                <button type="button" className="app-button-secondary mt-2" disabled={reconciliationBusy} onClick={() => void reconcileUpgradeHistory()}>{t('systemSettingsPage.rolloutReconcile')}</button>
+                {reconciliationItems.length === 0 && <p className="mt-2">{t('systemSettingsPage.rolloutNoMatch')}</p>}
+                {reconciliationItems.map(item => <div key={item.id} className="mt-2 flex flex-wrap items-center gap-2"><span className="break-all">{item.label}</span><button type="button" className="app-button-secondary" disabled={reconciliationBusy} onClick={() => void adoptUpgradeHistory(item)}>{t('systemSettingsPage.rolloutAdopt')}</button></div>)}
+              </>}
             </div>
           )}
+          {adoptedPreflight && <p className="mt-3 text-sm">{t('systemSettingsPage.rolloutRecoveredPreflight', { id: adoptedPreflight.id })}</p>}
 		  {rolloutDetails && (
 			<div className="mt-4 rounded-md border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
 			  <div className="font-medium">
@@ -1283,8 +1549,7 @@ const SystemSettingsPage: React.FC = () => {
                 {rolloutPreflight.unavailable.map(item=><div key={item.instance_id}><div className="mb-1">实例 #{item.instance_id}{item.team_id?` · Team #${item.team_id}`:''}：{item.reason}</div><UpgradeRecoveryActions instanceId={item.instance_id} targetImage={rolloutImage}/></div>)}
                 <button type="button" className="app-button-secondary" disabled={rolloutSaving||activeRolloutId!==null} onClick={()=>{
                   if(!window.confirm('暂缓这些实例及其所属 Team，保留它们的数据和必要旧运行环境，只重新预检其他实例。确认继续？'))return;
-                  setRolloutSaving(true);
-                  void runtimePoolService.preflightOpenClawRollout({target_image_ref:rolloutImage.trim(),batch_size:rolloutBatchSize,max_unavailable:0,auto_rollback:true,exclude_instance_ids:[...new Set([...(rolloutPreflight.excluded_instance_ids??[]),...(rolloutPreflight.unavailable??[]).map(item=>item.instance_id)])]}).then(result=>{setRolloutPreflight(result);setRolloutError(result.passed?null:result.blockers.join('；'))}).catch(error=>setRolloutError(getErrorMessage(error,'重新预检失败'))).finally(()=>setRolloutSaving(false));
+                  void preflightHealthyInstances([...new Set([...(rolloutPreflight.excluded_instance_ids??[]),...(rolloutPreflight.unavailable??[]).map(item=>item.instance_id)])]);
                 }}>暂缓故障范围，预检其他实例</button>
               </div>}
 			  {!!rolloutPreflight.excluded_instance_ids?.length&&<div className="mt-2">本次暂缓：{rolloutPreflight.excluded_instance_ids.map(id=>`#${id}`).join('、')}，数据及必要旧运行环境保留。</div>}

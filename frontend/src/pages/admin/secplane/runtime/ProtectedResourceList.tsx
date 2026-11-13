@@ -138,9 +138,9 @@ const ProtectedResourceList: React.FC<Props> = ({ kind, title, placeholder, help
         {visible.map((r) => (
           <li
             key={r.rule_id}
-            className="flex items-center gap-2 rounded-lg border border-[#eadfd8] bg-white px-3 py-2"
+            className="flex items-center gap-2 rounded-lg border border-[var(--cm-border)] bg-white px-3 py-2"
           >
-            <code className="flex-1 truncate font-mono text-xs text-[#171212]" title={r.pattern}>
+            <code className="flex-1 truncate font-mono text-xs text-[var(--cm-ink)]" title={r.pattern}>
               {r.pattern}
             </code>
             <button

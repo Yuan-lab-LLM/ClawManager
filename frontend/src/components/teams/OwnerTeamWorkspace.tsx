@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, ArrowRight, Check, ChevronUp, History, Plus, RefreshCw, Search, Settings2, Trash2, UserMinus, Users } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Check, ChevronUp, History, Plus, Search, Settings2, Trash2, UserMinus, Users } from 'lucide-react';
 import { OwnerTeamOperationError, withOwnerTeamIntent, pendingOwnerTeamIntent, recoverOwnerTeamIntent, ownerTeamService, ownerTeamWorkspaceAPI, waitForOwnerTeamOperation, type OwnerTeamSummary, type OwnerTeamCatalogEntry, type TeamOperation } from '../../services/ownerTeamService';
 import type { OwnerTeamsState } from '../../hooks/useOwnerTeams';
 import type { TeamDetails, TeamMember } from '../../types/team';
@@ -77,6 +77,14 @@ function OwnerTeamDashboardContent({ state }: { state: OwnerTeamsState }) {
   const [narrowDetail, setNarrowDetail] = useState(false);
   const operation = useTeamOperation(state.owner, state.refresh);
   const pendingIntent = pendingOwnerTeamIntent(state.owner);
+  const activeOperationID = operation.operation?.operation_id;
+  const activeOperationStatus = operation.operation?.status;
+  const refreshTeams = state.refresh;
+  useEffect(() => {
+    if (!activeOperationID || !activeOperationStatus || ['succeeded', 'failed'].includes(activeOperationStatus)) return;
+    const timer = window.setInterval(() => { if (!document.hidden) void refreshTeams(); }, 3000);
+    return () => window.clearInterval(timer);
+  }, [activeOperationID, activeOperationStatus, refreshTeams]);
   const reportOperation = (op: TeamOperation, error = '') => {
     const failed = op.status === 'failed' || !!error;
     feedback.notify({ id: op.operation_id, operationID: op.operation_id, attemptCount: op.attempt_count, terminal: ['succeeded', 'failed'].includes(op.status), kind: failed ? 'error' : op.status === 'succeeded' ? 'success' : 'pending', title: failed ? '操作尚未完成' : op.status === 'succeeded' ? '操作已完成' : '操作进行中', message: error || op.error_message || (op.status === 'succeeded' ? '后台已确认完成，可继续查看和管理。' : '可以继续浏览，关闭通知不会取消后台操作。'), actions: failed ? [{ label: '重新检查进度', onClick: operation.retryRead }, ...(op.status === 'failed' && op.team_id ? [{ label: '重试原操作', onClick: () => void operation.retryFailed() }] : [])] : undefined });
@@ -112,7 +120,7 @@ function OwnerTeamDashboardContent({ state }: { state: OwnerTeamsState }) {
       <div className="ot-master"><label className="ot-search"><Search size={14}/><input aria-label="筛选团队" placeholder="搜索团队…" value={state.query} onChange={e => state.setQuery(e.target.value)}/></label>{state.error && <p role="alert" className="ot-error">{state.error}</p>}{state.teams.map(t => <button key={t.id} aria-pressed={state.selectedID === t.id} className="ot-master-item" onClick={() => { state.select(t.id); setNarrowDetail(true); }}><strong>{t.name}</strong><span>#{t.id} · {t.available_count}/{t.member_count} 可用</span><small>{teamLabel(t)}</small></button>)}{state.hasMore && <button onClick={state.loadMore}>加载更多</button>}</div>
       <div className="ot-detail"><button className="ot-mobile-back ot-secondary" onClick={() => setNarrowDetail(false)}><ArrowLeft size={14}/>团队列表</button>{detailError ? <p role="alert" className="ot-error">{detailError}</p> : selected ? <>
         <div className="ot-detail-title"><div className="ot-team-icon"><Users size={22}/></div><div><h3>{selected.name}</h3><p>Team #{selected.id}</p></div></div><p className="ot-description">{selected.description || '协作完成团队任务，沉淀共享产物。'}</p><p className="ot-muted">{selected.member_count} 名成员 · {selected.available_count}/{selected.member_count} 可用 · Leader 统筹</p>
-        <div className="ot-actions"><Link className="ot-primary" to={teamURL(selected.id)} state={{ portalReturnSearch: window.location.search }}>进入团队对话 <ArrowRight size={15}/></Link><button className="ot-secondary" onClick={() => setManage(true)}><Settings2 size={15}/>管理</button><button className="ot-secondary" aria-label="刷新团队" onClick={() => void state.refresh()}><RefreshCw size={15}/>刷新</button></div>
+        <div className="ot-actions"><Link className="ot-primary" to={teamURL(selected.id)} state={{ portalReturnSearch: window.location.search }}>进入团队对话 <ArrowRight size={15}/></Link><button className="ot-secondary" onClick={() => setManage(true)}><Settings2 size={15}/>管理</button></div>
         <div className="ot-task-summary"><small>当前任务</small><p>{details?.tasks?.find(t => ['pending', 'dispatched', 'running', 'waiting'].includes(t.status))?.payload?.prompt as string || '暂无执行中的任务'}</p></div>
         <h4>团队成员</h4>{(details?.members || selected.members).map(m => <MemberRow key={m.id} member={m} ownerTeamID={selected.id}/>)}
         {manage && details && <OwnerTeamManage key={selected.id} details={details} onClose={() => setManage(false)} onChange={state.refresh} onOperation={operation.begin}/>}

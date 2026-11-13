@@ -18,13 +18,13 @@ func fixtureDatabase(t *testing.T) *sql.DB {
 	if port == "" {
 		t.Skip("requires disposable localhost MySQL")
 	}
-	c := mysql.Config{User: "root", Net: "tcp", Addr: "127.0.0.1:" + port, DBName: "mysql", ParseTime: true, AllowNativePasswords: true}
+	c := mysql.Config{User: "root", Passwd: os.Getenv("TEST_SYSTEM_BACKUP_MYSQL_PASSWORD"), Net: "tcp", Addr: "127.0.0.1:" + port, DBName: "mysql", ParseTime: true, AllowNativePasswords: true}
 	root, err := sql.Open("mysql", c.FormatDSN())
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { root.Close() })
-	name, err := RandomID("cm_control_")
+	name, err := RandomID("clawmanager_test_backup_")
 	if err != nil {
 		t.Fatal(err)
 	}

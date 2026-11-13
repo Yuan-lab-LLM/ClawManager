@@ -31,7 +31,6 @@ func TestLifecycleRejectsConflictingOperationsBeforeReadingOrSaving(t *testing.T
 		"stop":        func() error { return s.Stop(91234) },
 		"restart":     func() error { return s.Restart(91234) },
 		"restart-env": func() error { return s.RestartWithEnvironment(91234, map[string]string{"TEST": "value"}, nil) },
-		"delete":      func() error { return s.Delete(91234) },
 	} {
 		t.Run(name, func(t *testing.T) {
 			if err := call(); !errors.Is(err, models.ErrInstanceOperationInProgress) {

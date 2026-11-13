@@ -2,13 +2,68 @@ package services
 
 import (
 	"context"
+	"fmt"
+	"strconv"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	coordinationv1 "k8s.io/api/coordination/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/kubernetes/fake"
+	ktesting "k8s.io/client-go/testing"
 )
+
+func TestRuntimeLeaderConcurrentLoopsDoNotLoseTheirOwnLease(t *testing.T) {
+	ctx := context.Background()
+	client := fake.NewSimpleClientset()
+	s := NewRuntimeLeaderService(client, "runtime-system", "backend-a")
+	if !s.IsLeader(ctx) {
+		t.Fatal("initial lease acquisition failed")
+	}
+	resource := schema.GroupVersionResource{Group: "coordination.k8s.io", Version: "v1", Resource: "leases"}
+	// Fake Kubernetes does not normally enforce resourceVersion; reproduce the
+	// API's optimistic concurrency contract instead of silently accepting races.
+	client.PrependReactor("update", "leases", func(action ktesting.Action) (bool, runtime.Object, error) {
+		next := action.(ktesting.UpdateAction).GetObject().(*coordinationv1.Lease)
+		obj, err := client.Tracker().Get(resource, next.Namespace, next.Name)
+		if err != nil {
+			return true, nil, err
+		}
+		current := obj.(*coordinationv1.Lease)
+		if next.ResourceVersion != current.ResourceVersion {
+			return true, nil, apierrors.NewConflict(resource.GroupResource(), next.Name, fmt.Errorf("stale lease version"))
+		}
+		n, _ := strconv.Atoi(current.ResourceVersion)
+		next.ResourceVersion = strconv.Itoa(n + 1)
+		err = client.Tracker().Update(resource, next, next.Namespace)
+		return true, next.DeepCopy(), err
+	})
+	var failed atomic.Int32
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	for i := 0; i < 16; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			for n := 0; n < 20; n++ {
+				if !s.IsLeader(ctx) {
+					failed.Add(1)
+				}
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+	if failed.Load() != 0 {
+		t.Fatalf("%d renewals misidentified this process's own lease as lost", failed.Load())
+	}
+}
 
 func TestRuntimeLeaderServiceFirstCallerBecomesLeader(t *testing.T) {
 	service := NewRuntimeLeaderService(fake.NewSimpleClientset(), "runtime-system", "backend-a")

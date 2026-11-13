@@ -174,7 +174,7 @@ const SecureClawPage: React.FC = () => {
         <div className="min-w-0 flex-1">
           <div className="font-medium text-gray-900">{label}</div>
           {help && <div className="mt-0.5 text-xs text-gray-500">{help}</div>}
-          <div className="mt-0.5 font-mono text-[10px] text-gray-400">{rule.rule_id}</div>
+          <div className="mt-0.5 font-mono text-xs text-gray-400">{rule.rule_id}</div>
         </div>
         <button disabled={isSaving} onClick={() => persistRule({ ...rule, is_enabled: !rule.is_enabled })}
           className={`shrink-0 rounded-full border px-3 py-1 text-xs ${rule.is_enabled ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-gray-100 text-gray-500 border-gray-200'} disabled:opacity-60`}>
@@ -194,7 +194,7 @@ const SecureClawPage: React.FC = () => {
         <div className="mb-2 flex items-center justify-between">
           <div>
             <div className="font-medium text-gray-900">{label}</div>
-            <div className="font-mono text-[10px] text-gray-400">{rule.rule_id}</div>
+            <div className="font-mono text-xs text-gray-400">{rule.rule_id}</div>
           </div>
           <div className="text-xs text-gray-500">{t('secplane.secureClaw.audit.current')} <code className="font-semibold text-indigo-700">{current}</code></div>
         </div>
@@ -263,7 +263,7 @@ const SecureClawPage: React.FC = () => {
         <td className="px-3 py-2 align-top">
           <div className="flex items-center gap-2">
             <code className="font-mono text-xs text-gray-700">{r.display_name}</code>
-            <span className={`rounded-full border px-1.5 py-0.5 text-[10px] ${severityChip(r.severity)}`}>{r.severity}</span>
+            <span className={`rounded-full border px-1.5 py-0.5 text-xs ${severityChip(r.severity)}`}>{r.severity}</span>
           </div>
           <div className="mt-0.5 max-w-xl truncate text-xs text-gray-500" title={r.description ?? ''}>{r.description ?? '-'}</div>
         </td>
@@ -271,7 +271,7 @@ const SecureClawPage: React.FC = () => {
           <div className="inline-flex divide-x divide-gray-300 overflow-hidden rounded-md border border-gray-300">
             {(['off', 'observe', 'enforce'] as AuditTriState[]).map((s) => (
               <button key={s} disabled={isSaving} onClick={() => persistAuditTri(r, s)}
-                className={`px-2.5 py-1 text-[10px] transition first:rounded-l-md last:rounded-r-md ${state === s ? SEG_TONE[s] : 'bg-white text-gray-600 hover:bg-gray-50'} disabled:opacity-60 disabled:cursor-not-allowed`}>
+                className={`px-2.5 py-1 text-xs transition first:rounded-l-md last:rounded-r-md ${state === s ? SEG_TONE[s] : 'bg-white text-gray-600 hover:bg-gray-50'} disabled:opacity-60 disabled:cursor-not-allowed`}>
                 {s === 'off' ? 'Off' : s === 'observe' ? 'Observe' : 'Enforce'}
               </button>
             ))}
@@ -435,7 +435,7 @@ const SecureClawPage: React.FC = () => {
               <details key={cat} open className="group">
                 <summary className="flex cursor-pointer items-center justify-between bg-gray-50 px-4 py-2 text-sm hover:bg-gray-100">
                   <span className="font-medium text-gray-800">{CATEGORY_LABEL[cat] ?? cat}<span className="ml-2 text-xs text-gray-500">({items.length})</span></span>
-                  <span className="flex items-center gap-1 text-[10px]" onClick={(e) => e.stopPropagation()}>
+                  <span className="flex items-center gap-1 text-xs" onClick={(e) => e.stopPropagation()}>
                     <button onClick={() => bulkSetCategory(cat, 'enforce')} className="rounded border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-emerald-700 hover:bg-emerald-100">{t('secplane.secureClaw.audit.bulkEnforce')}</button>
                     <button onClick={() => bulkSetCategory(cat, 'observe')} className="rounded border border-amber-200 bg-amber-50 px-2 py-0.5 text-amber-700 hover:bg-amber-100">{t('secplane.secureClaw.audit.bulkObserve')}</button>
                     <button onClick={() => bulkSetCategory(cat, 'off')} className="rounded border border-gray-300 bg-gray-100 px-2 py-0.5 text-gray-700 hover:bg-gray-200">{t('secplane.secureClaw.audit.bulkOff')}</button>
@@ -460,10 +460,10 @@ const SecureClawPage: React.FC = () => {
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
                   <code className="font-mono text-xs text-gray-900">{r.display_name}</code>
-                  {!r.is_enabled && <span className="rounded-full border border-gray-200 bg-gray-100 px-2 py-0.5 text-[10px] text-gray-600">disabled</span>}
+                  {!r.is_enabled && <span className="rounded-full border border-gray-200 bg-gray-100 px-2 py-0.5 text-xs text-gray-600">disabled</span>}
                 </div>
                 {r.description && <div className="mt-0.5 text-xs text-gray-500">{r.description}</div>}
-                <div className="mt-0.5 font-mono text-[10px] text-gray-400">{r.rule_id}</div>
+                <div className="mt-0.5 font-mono text-xs text-gray-400">{r.rule_id}</div>
               </div>
               <button disabled={savingRuleID === r.rule_id} onClick={() => persistRule({ ...r, is_enabled: !r.is_enabled })}
                 className={`shrink-0 rounded-full border px-3 py-1 text-xs ${r.is_enabled ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-gray-100 text-gray-500 border-gray-200'} disabled:opacity-60`}>
@@ -498,7 +498,7 @@ const SecureClawPage: React.FC = () => {
                   <div className="flex min-w-0 flex-1 items-center gap-2">
                     <span className="font-medium text-gray-900">{catKey}</span>
                     <span className="text-xs text-gray-500">{patterns.length} {t('secplane.secureClaw.dangerousCommands.patterns')}</span>
-                    {!cat.is_enabled && <span className="rounded-full border border-gray-200 bg-gray-100 px-2 py-0.5 text-[10px] text-gray-600">{t('secplane.secureClaw.dangerousCommands.disabled')}</span>}
+                    {!cat.is_enabled && <span className="rounded-full border border-gray-200 bg-gray-100 px-2 py-0.5 text-xs text-gray-600">{t('secplane.secureClaw.dangerousCommands.disabled')}</span>}
                   </div>
                   <div className="flex items-center gap-2 text-xs" onClick={(e) => e.stopPropagation()}>
                     <select value={cat.severity} disabled={isSaving} onChange={(e) => persistRule({ ...cat, severity: e.target.value as any })} className="rounded border border-gray-300 px-2 py-0.5">

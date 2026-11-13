@@ -7,8 +7,39 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 )
+
+// ListSDKModelsForUser exposes the same canonical IDs injected into managed
+// runtimes. Expand only persisted models after owner filtering; discovery is
+// never an authorization source. Keep the legacy UI's Auto-only list separate.
+func (s *service) ListSDKModelsForUser(userID int, groups []string) ([]AvailableModel, error) {
+	items, err := repository.ForModelUser(s.modelRepo, userID).ListActive()
+	if errors.Is(err, models.ErrModelUnavailable) {
+		return []AvailableModel{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	available := []AvailableModel{}
+	seen := map[string]bool{"auto": true}
+	for _, item := range models.ExpandLLMModelCatalog(items) {
+		if !models.LLMChatAvailable(&item) || !modelAllowedForGatewayKey(&item, groups) {
+			continue
+		}
+		if len(available) == 0 {
+			available = append(available, AvailableModel{ID: 0, DisplayName: "Auto", Provider: "gateway"})
+		}
+		name := strings.TrimSpace(item.ProviderModelName)
+		if name == "" || strings.EqualFold(name, "auto") || seen[name] {
+			continue
+		}
+		seen[name] = true
+		available = append(available, AvailableModel{ID: item.ID, DisplayName: name, Provider: item.ProviderType})
+	}
+	return available, nil
+}
 
 func (s *service) ListAvailableModelsForUser(userID int, groups []string) ([]AvailableModel, error) {
 	items, err := repository.ForModelUser(s.modelRepo, userID).ListActive()

@@ -11,8 +11,8 @@ const PasswordSettingsSection: React.FC = () => {
       <div className="app-panel p-6">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h2 className="text-lg font-semibold text-[#171212]">{t('auth.changePassword')}</h2>
-            <p className="mt-1 text-sm text-[#8f8681]">{t('auth.changePasswordDesc')}</p>
+            <h2 className="text-lg font-semibold text-[var(--cm-ink)]">{t('auth.changePassword')}</h2>
+            <p className="mt-1 text-sm text-[var(--cm-muted)]">{t('auth.changePasswordDesc')}</p>
           </div>
           <button
             onClick={() => setOpen(true)}

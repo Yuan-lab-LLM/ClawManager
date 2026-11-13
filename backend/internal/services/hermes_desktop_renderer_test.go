@@ -115,6 +115,44 @@ func TestHermesDesktopRendererSessionOptionPolicy(t *testing.T) {
 	}
 }
 
+func TestHermesDesktopRendererMainModelPickerIsSessionScoped(t *testing.T) {
+	for _, value := range []string{"m2 --provider custom:managed", "m2 --provider custom:managed --session"} {
+		frame, err := hermesDesktopFilterRPC(desktopRPCFrame(1, "config.set", map[string]any{
+			"session_id": "live", "key": "model", "value": value, "confirm_expensive_model": true,
+		}))
+		if err != nil {
+			t.Errorf("Desktop model picker rejected %q: %v", value, err)
+			continue
+		}
+		var request struct {
+			Params struct {
+				SessionID string `json:"session_id"`
+				Value     string `json:"value"`
+				Confirm   bool   `json:"confirm_expensive_model"`
+			} `json:"params"`
+		}
+		if json.Unmarshal(frame, &request) != nil || request.Params.Value != "m2 --provider custom:managed --session" || request.Params.SessionID != "live" || !request.Params.Confirm {
+			t.Errorf("model picker was not normalized to the live session: %s", frame)
+		}
+		if !errors.Is(newHermesDesktopRPCScope().admit(frame), errHermesDesktopUnboundSession) {
+			t.Error("main model picker bypassed live-session ownership")
+		}
+	}
+	for _, value := range []string{
+		"m2 --provider managed --global", "m2 --provider managed --session --global",
+		"m2 --provider managed --once", "m2 --provider managed --profile other",
+		"m2 --provider managed\n", "m2 --provider managed --session\n", "m2 --provider managed;whoami",
+		"m2 --provider managed --session --session", "m2  --provider managed", "m2 --provider managed ",
+	} {
+		if _, err := hermesDesktopFilterRPC(desktopRPCFrame(1, "config.set", map[string]any{"session_id": "live", "key": "model", "value": value})); !errors.Is(err, ErrHermesDesktopForbidden) {
+			t.Errorf("unsafe model picker accepted %q: %v", value, err)
+		}
+	}
+	if _, err := hermesDesktopFilterRPC(desktopRPCFrame(1, "config.set", map[string]any{"key": "model", "value": "m2 --provider managed"})); !errors.Is(err, ErrHermesDesktopForbidden) {
+		t.Error("sessionless main model picker accepted")
+	}
+}
+
 func TestHermesDesktopRendererReasoningExactPolicy(t *testing.T) {
 	efforts := []string{"none", "minimal", "low", "medium", "high", "xhigh", "max"}
 	invalid := []string{"", " low", "low ", "LOW", "show", strings.Join(efforts, " ")}
@@ -423,8 +461,9 @@ func TestHermesDesktopRendererRealWebSocketBridge(t *testing.T) {
 	}
 	roundtrip(1, "config.set", map[string]any{"session_id": "unowned", "key": "model", "value": "m2 --provider managed --session"}, true)
 	roundtrip(2, "session.create", map[string]any{"source": "desktop", "cols": 96, "profile": "default", "model": "m", "provider": "managed", "fast": false}, false)
-	roundtrip(3, "config.set", map[string]any{"session_id": "live-1", "key": "model", "value": "m2 --provider managed --session"}, false)
-	roundtrip(4, "config.set", map[string]any{"session_id": "live-1", "key": "model", "value": "evil --provider external --session"}, true)
+	roundtrip(3, "config.set", map[string]any{"session_id": "live-1", "key": "model", "value": "m2 --provider managed"}, false)
+	roundtrip(4, "config.set", map[string]any{"session_id": "live-1", "key": "model", "value": "evil --provider external"}, true)
+	roundtrip(10, "config.set", map[string]any{"session_id": "live-1", "key": "model", "value": "unlisted --provider managed"}, true)
 	roundtrip(5, "session.activate", map[string]any{"session_id": "live-1", "cols": 96, "omit_messages": true}, false)
 	if forwarded.Load() != 3 {
 		t.Fatalf("blocked operations reached upstream: %d", forwarded.Load())

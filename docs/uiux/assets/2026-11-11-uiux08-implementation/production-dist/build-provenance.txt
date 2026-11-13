@@ -1,0 +1,5 @@
+source_commit=e737ca5040e637f271ea5f394ca35aeac985ab98
+source_branch=uiux
+source_archive_sha256=1d8324a566fa745be6d762822bdfc23d5a4d10a92e8d027d41a401e52d61d16f
+node=v24.21.0
+Google Chrome 157.0.8103.50

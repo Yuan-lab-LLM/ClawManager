@@ -220,9 +220,22 @@ func (c *slotRuntimeAgentClient) saveNativeMaintenanceResult(ctx context.Context
 	return name, err
 }
 
-func (c *slotRuntimeAgentClient) runNativeMaintenance(ctx context.Context, endpoint, action string, req RuntimeAgentWorkspaceRequest, pod *corev1.Pod, out any) error {
-	ctx, cancel := context.WithTimeout(ctx, runtimeAgentUpgradeTimeout)
+func (c *slotRuntimeAgentClient) runNativeMaintenance(ctx context.Context, endpoint, action string, req RuntimeAgentWorkspaceRequest, pod *corev1.Pod, out any) (err error) {
+	parent := ctx
+	timeout := runtimeAgentUpgradeTimeout
+	_, controller := ctx.Value(upgradeClaimKey{}).(string)
+	slice := controller && action == "compatibility"
+	if slice {
+		// Other actions may hold a writer lease that cannot be reacquired on retry.
+		timeout = 2 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
+	defer func() {
+		if slice && err != nil && parent.Err() == nil && errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			err = errors.Join(ErrRuntimeUpgradeBusy, ctx.Err(), err)
+		}
+	}()
 	cm, operation, err := c.ensureNativeMaintenance(ctx, endpoint, pod, action, req)
 	if err != nil {
 		return err

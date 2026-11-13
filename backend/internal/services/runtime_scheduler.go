@@ -195,6 +195,7 @@ func (s *RuntimeScheduler) Start(ctx context.Context) {
 	if s.proxyPolicy != nil {
 		go s.runProxyPolicyRenewal(ctx)
 	}
+	go s.runRuntimeOperations(ctx)
 	go func() {
 		ticker := time.NewTicker(s.tick)
 		defer ticker.Stop()
@@ -745,6 +746,7 @@ func (s *RuntimeScheduler) RuntimeDeploymentPods(ctx context.Context, runtimeTyp
 			SchedulingEnabled: pod.SchedulingEnabled,
 			DesiredReplicas:   pod.DesiredReplicas,
 			KubernetesReady:   pod.State == "ready",
+			ReadyGatewayPorts: runtimeOrdinaryReadyGatewayPorts(pod),
 			KubernetesPodUID:  stringPtrOrNil(pod.PodUID),
 		})
 	}
@@ -1557,17 +1559,6 @@ func (s *RuntimeScheduler) reconcile(ctx context.Context) error {
 	if err := s.slotAudit.Reconcile(ctx, s); err != nil {
 		errs = append(errs, err)
 	}
-	if s.management != nil {
-		if err := s.management.Process(ctx); err != nil {
-			errs = append(errs, err)
-		}
-	}
-	if err := s.failoverStalePods(ctx); err != nil {
-		errs = append(errs, err)
-	}
-	if err := s.reconcileRollouts(ctx); err != nil {
-		errs = append(errs, err)
-	}
 	creating, err := s.schedulerInstanceBatch(ctx, true)
 	if err != nil {
 		errs = append(errs, err)
@@ -1592,45 +1583,6 @@ func (s *RuntimeScheduler) reconcile(ctx context.Context) error {
 		}
 	}
 	return errors.Join(errs...)
-}
-
-func (s *RuntimeScheduler) recoverLegacyFailedGatewayBinding(ctx context.Context, instance models.Instance, binding *models.InstanceRuntimeBinding) (bool, error) {
-	if s == nil || binding == nil || s.agentClient == nil || s.podRepo == nil || s.instanceRepo == nil {
-		return false, nil
-	}
-	state := strings.ToLower(strings.TrimSpace(binding.State))
-	if state != RuntimeGatewayBindingError && state != "failed" && state != RuntimeGatewayBindingStopped {
-		return false, nil
-	}
-	if !isRuntimeErrorInstance(instance) || !isLegacyUnexpectedGatewayExitMessage(strings.TrimSpace(stringValue(instance.RuntimeErrorMessage))) {
-		return false, nil
-	}
-	releaser, ok := s.bindingRepo.(repository.FailedGatewayBindingReleaser)
-	if !ok {
-		return false, nil
-	}
-	pod, err := s.podRepo.GetByID(ctx, binding.RuntimePodID)
-	if err != nil {
-		return false, err
-	}
-	if pod == nil || pod.State != "ready" || pod.Draining || pod.AgentEndpoint == nil || strings.TrimSpace(*pod.AgentEndpoint) == "" {
-		return false, nil
-	}
-	// DeleteGateway is the writer-fencing acknowledgement. Never release the
-	// binding or schedule another process when the Agent cannot confirm that the
-	// old PID is gone.
-	if err := s.agentClient.DeleteGateway(ctx, strings.TrimSpace(*pod.AgentEndpoint), binding.GatewayID); err != nil && (requiresConfirmedGatewayStop(s.agentClient) || !errors.Is(err, ErrRuntimeAgentNotFound)) {
-		return false, fmt.Errorf("confirm failed Gateway %s stopped: %w", binding.GatewayID, err)
-	}
-	deleted, err := releaser.DeleteFailedByInstanceIDGenerationAndReleaseSlot(ctx, instance.ID, binding.RuntimePodID, binding.Generation)
-	if err != nil || !deleted {
-		return false, err
-	}
-	message := "recovering a confirmed legacy Gateway process exit"
-	if err := s.instanceRepo.UpdateRuntimeState(ctx, instance.ID, "creating", binding.Generation, &message); err != nil {
-		return false, err
-	}
-	return true, nil
 }
 
 func (s *RuntimeScheduler) reconcileCreatingInstances(ctx context.Context, instances []models.Instance) []error {
@@ -1689,8 +1641,8 @@ func (s *RuntimeScheduler) reconcileCreatingInstance(ctx context.Context, instan
 }
 
 func (s *RuntimeScheduler) reconcileCreatingInstanceLocked(ctx context.Context, instance models.Instance) []error {
-	if handled, errs := s.reconcileInstanceRecoveryLocked(ctx, instance, time.Now().UTC()); handled {
-		return errs
+	if instance.Status != "creating" {
+		return nil
 	}
 	binding, err := s.bindingRepo.GetByInstanceID(ctx, instance.ID)
 	if err != nil {
@@ -1711,30 +1663,26 @@ func (s *RuntimeScheduler) reconcileCreatingInstanceLocked(ctx context.Context, 
 			return []error{fmt.Errorf("clean stale binding for creating instance %d: %w", instance.ID, staleErr)}
 		}
 		if !stale {
-			recovered, recoverErr := s.recoverLegacyFailedGatewayBinding(ctx, instance, binding)
-			if recoverErr != nil {
-				return []error{fmt.Errorf("recover failed Gateway binding for instance %d: %w", instance.ID, recoverErr)}
-			}
-			if recovered {
-				stale = true
-				instance.Status = "creating"
-				instance.RuntimeErrorMessage = nil
-			}
-		}
-		if !stale {
 			if err := s.syncInstanceStateFromBinding(ctx, instance, binding); err != nil {
 				return []error{fmt.Errorf("sync creating instance %d from binding: %w", instance.ID, err)}
 			}
 			return nil
 		}
 	}
-	var retry bool
-	instance, retry, err = s.retryProtectedSchedulingError(ctx, instance)
-	if err != nil {
-		return []error{fmt.Errorf("prepare protected scheduling retry for instance %d: %w", instance.ID, err)}
-	}
-	if !retry {
-		return nil
+	// A previous recovery may have fenced its source and deleted the binding,
+	// but not advanced the generation yet. Absence of a binding is not authority
+	// to restart that stopped generation; only explicit Recovery can resume it.
+	if store, ok := s.instanceRepo.(repository.InstanceRuntimeRecoveryRepository); ok {
+		state, err := store.GetRuntimeRecovery(ctx, instance.ID)
+		if err != nil {
+			return []error{err}
+		}
+		if state != nil && state.Generation == instance.RuntimeGeneration && state.Phase == "source_stopped" {
+			cause := &runtimeFailure{code: "RUNTIME_RECOVERY_REQUIRED", cause: fmt.Errorf("instance %d has an interrupted Runtime recovery; explicit recovery is required before placement", instance.ID)}
+			errs := []error{cause}
+			s.markInstanceError(ctx, instance, cause, &errs)
+			return errs
+		}
 	}
 	if err := s.assignInstance(ctx, instance); err != nil {
 		if isRuntimeAssignmentPending(err) {
@@ -1782,7 +1730,7 @@ func (s *RuntimeScheduler) retryUnpublishedPendingSlot(ctx context.Context, clie
 	}
 	endpoint := strings.TrimSpace(*pod.AgentEndpoint)
 	if err := client.canRetryPendingGateway(ctx, endpoint, RuntimeAgentCreateGatewayRequest{
-		InstanceID: instance.ID, UserID: instance.UserID, Generation: instance.RuntimeGeneration, AgentType: runtimeType, PodUID: *pod.PodUID,
+		InstanceID: instance.ID, UserID: instance.UserID, Generation: instance.RuntimeGeneration, AgentType: runtimeType, PodUID: *pod.PodUID, GatewayPort: binding.GatewayPort,
 	}); err != nil {
 		return err
 	}
@@ -1974,11 +1922,12 @@ func (s *RuntimeScheduler) scaleOutForPendingBacklog(ctx context.Context, instan
 		return nil
 	}
 	backlogByType := map[string]int{}
+	var errs []error
 	for _, instance := range instances {
 		if !isSchedulerManagedV2Instance(instance) {
 			continue
 		}
-		if isRuntimeErrorInstance(instance) && !isRecoverableRuntimeSchedulingError(instance) {
+		if instance.Status != "creating" {
 			continue
 		}
 		runtimeType, ok := schedulerRuntimeType(instance)
@@ -1993,7 +1942,8 @@ func (s *RuntimeScheduler) scaleOutForPendingBacklog(ctx context.Context, instan
 		}
 		binding, err := s.bindingRepo.GetByInstanceID(ctx, instance.ID)
 		if err != nil {
-			return fmt.Errorf("get binding for backlog instance %d: %w", instance.ID, err)
+			errs = append(errs, fmt.Errorf("get binding for backlog instance %d: %w", instance.ID, err))
+			continue
 		}
 		if binding == nil {
 			if _, configErr := s.gatewayEnvironment(&instance); configErr != nil {
@@ -2009,10 +1959,10 @@ func (s *RuntimeScheduler) scaleOutForPendingBacklog(ctx context.Context, instan
 			continue
 		}
 		if _, err := s.scaleOutIfBacklogExceedsCapacity(ctx, runtimeType, backlog); err != nil {
-			return err
+			errs = append(errs, err)
 		}
 	}
-	return nil
+	return errors.Join(errs...)
 }
 
 func (s *RuntimeScheduler) scaleOutIfBacklogExceedsCapacity(ctx context.Context, runtimeType string, backlog int) (bool, error) {
@@ -2185,16 +2135,10 @@ func (s *RuntimeScheduler) assignInstance(ctx context.Context, instance models.I
 			return err
 		}
 		if verifiedCount > 0 && len(pods) == 0 {
-			if pending, wakeErr := s.restoreIdleRuntimeCapacity(ctx, instance, runtimeType); pending || wakeErr != nil {
-				return runtimeIdleWakeResult(wakeErr)
-			}
 			return fmt.Errorf("%w: no verified Runtime matches this instance's committed upgrade placement (healthy candidates=%d)", errRuntimeControlPlanePending, verifiedCount)
 		}
 	}
 	if len(pods) == 0 {
-		if pending, wakeErr := s.restoreIdleRuntimeCapacity(ctx, instance, runtimeType); pending || wakeErr != nil {
-			return runtimeIdleWakeResult(wakeErr)
-		}
 		scaled, err := s.scaleOutIfAtCapacity(ctx, runtimeType)
 		if err != nil {
 			if runtimeUpgradeInfrastructureRetryable(err) {
@@ -2204,6 +2148,20 @@ func (s *RuntimeScheduler) assignInstance(ctx context.Context, instance models.I
 		}
 		if scaled {
 			return errRuntimeScaleOutPending
+		}
+		// A retained Pod can be starting or awaiting its first registration.
+		// Waiting for that existing capacity is not an automatic error retry.
+		if s.deployments != nil {
+			inventory, err := s.RuntimeDeploymentPods(ctx, runtimeType)
+			if err != nil {
+				return fmt.Errorf("%w: inspect starting %s Runtime: %v", errRuntimeControlPlanePending, runtimeType, err)
+			}
+			for _, pod := range inventory {
+				if pod.RuntimeType == runtimeType && pod.DesiredReplicas > 0 && runtimePodEligibleForOrdinaryScheduling(pod) && !pod.Draining &&
+					(pod.State == "pending" || pod.KubernetesReady && pod.RegisteredPodUID == nil) {
+					return errRuntimeScaleOutPending
+				}
+			}
 		}
 	}
 	var lastErr error
@@ -2256,14 +2214,6 @@ func (s *RuntimeScheduler) assignInstance(ctx context.Context, instance models.I
 			continue
 		}
 		return nil
-	}
-	// Heartbeat capacity may include quarantined or reserved physical slots.
-	// No gateway publication is pending here: uncertain creates returned above.
-	// Try proven sleeping capacity before waiting on the unusable live pool.
-	if len(pods) > 0 && (lastErr == nil || isRuntimeAssignmentPending(lastErr)) {
-		if pending, wakeErr := s.restoreIdleRuntimeCapacity(ctx, instance, runtimeType); pending || wakeErr != nil {
-			return runtimeIdleWakeResult(wakeErr)
-		}
 	}
 	if lastErr != nil {
 		if errors.Is(lastErr, errRuntimeScaleOutPending) {
@@ -3132,52 +3082,6 @@ func isSchedulerManagedV2Instance(instance models.Instance) bool {
 
 func isRuntimeErrorInstance(instance models.Instance) bool {
 	return strings.EqualFold(strings.TrimSpace(instance.Status), "error")
-}
-
-func isRecoverableRuntimeSchedulingError(instance models.Instance) bool {
-	if !isRetryableRuntimeSchedulingError(instance) {
-		return false
-	}
-	if instance.RuntimeErrorCode != nil {
-		switch *instance.RuntimeErrorCode {
-		case "MODEL_CONFIGURATION_REQUIRED", "GATEWAY_START_FAILED", "PROXY_POLICY_NOT_READY":
-			// Bound retries across replicas/restarts, independently of whether
-			// the durable error can eventually recover.
-			return time.Since(instance.UpdatedAt) >= 30*time.Second
-		}
-	}
-	return true
-}
-
-// Retry eligibility includes the backoff period; journals must not interpret
-// "not due for retry yet" as a terminal failure.
-func isRetryableRuntimeSchedulingError(instance models.Instance) bool {
-	if !isRuntimeErrorInstance(instance) || instance.RuntimeErrorMessage == nil {
-		return false
-	}
-	runtimeType, ok := schedulerRuntimeType(instance)
-	if !ok {
-		return false
-	}
-	message := strings.TrimSpace(*instance.RuntimeErrorMessage)
-	if instance.RuntimeErrorCode != nil {
-		switch *instance.RuntimeErrorCode {
-		case "MODEL_CONFIGURATION_REQUIRED", "GATEWAY_START_FAILED", "PROXY_POLICY_NOT_READY", "RUNTIME_POOL_UNAVAILABLE", "RUNTIME_CAPACITY_EXHAUSTED", "CONTROL_PLANE_UNAVAILABLE":
-			return true
-		}
-	}
-	return message == fmt.Sprintf("no schedulable %s runtime pod", runtimeType) ||
-		strings.Contains(message, fmt.Sprintf("no schedulable %s runtime pod:", runtimeType)) ||
-		message == fmt.Sprintf("instance %d is held by an active data-safe runtime rollout", instance.ID) ||
-		message == "gateway start failed: exit status 1" ||
-		isLegacyUnexpectedGatewayExitMessage(message)
-}
-
-func isLegacyUnexpectedGatewayExitMessage(message string) bool {
-	normalized := strings.ToLower(strings.TrimSpace(message))
-	return normalized == "exit status 1" ||
-		strings.HasPrefix(normalized, "gateway process exited unexpectedly") ||
-		strings.HasPrefix(normalized, "gateway exited unexpectedly")
 }
 
 func isRuntimeAssignmentPending(err error) bool {

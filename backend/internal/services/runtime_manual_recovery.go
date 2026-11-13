@@ -71,6 +71,7 @@ func (s *RuntimeScheduler) InspectInstanceRecovery(ctx context.Context, id int) 
 			return nil, err
 		}
 	}
+	_, classifiedFailure := runtimeRecoveryFailureReason(*instance, binding)
 	switch {
 	case instance.Status != "error" && instance.Status != "creating" && instance.Status != "running":
 		info.BlockerCode = "stopped"
@@ -96,6 +97,12 @@ func (s *RuntimeScheduler) InspectInstanceRecovery(ctx context.Context, id int) 
 	case info.Recovery != nil && info.Recovery.Attempts >= len(runtimeRecoveryBackoff) && info.Recovery.Phase == "":
 		info.BlockerCode = "budget"
 		info.Blocker = "Automatic recovery budget exhausted. An administrator can retry after checking the source."
+		if info.Recovery.Reason == runtimeRecoveryNativeResetReason && !classifiedFailure {
+			info.Blocker = "Automatic recovery budget exhausted. Native source stop remains unconfirmed; inspect its Runtime before further recovery."
+		}
+	case binding != nil && binding.State != RuntimeGatewayBindingRunning && !classifiedFailure:
+		info.BlockerCode = "source_stop_unconfirmed"
+		info.Blocker = "Source stop is unconfirmed. Automatic recovery requires fresh native failure verification and matching container teardown proof."
 	}
 	return info, nil
 }

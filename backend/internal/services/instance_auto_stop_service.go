@@ -26,6 +26,11 @@ type InstanceAutoStopService struct {
 	kube         kubernetes.Interface
 	appNamespace string
 	appPodName   string
+	workMu       sync.Mutex
+	working      map[int]bool
+	byType       map[string]int
+	queued       map[string][]autoStopWork
+	workers      sync.WaitGroup
 }
 
 func (s *InstanceAutoStopService) SetApplicationPodIdentity(namespace, podName string) {
@@ -40,6 +45,7 @@ func NewInstanceAutoStopService(store *repository.InstanceAutoStopRepository, in
 	return &InstanceAutoStopService{store: store, lifecycle: lifecycle, kube: kube}
 }
 func (s *InstanceAutoStopService) Run(ctx context.Context) {
+	defer s.workers.Wait()
 	if models.AutoStopTestTiming {
 		log.Print("automatic Lite stop: TEST BUILD; legacy defaults: scan interval=1m, idle timeout=5m; explicitly configured seconds take precedence")
 	}
@@ -98,28 +104,11 @@ func (s *InstanceAutoStopService) Tick(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if err = s.expireStarts(ctx); err != nil {
-		return err
-	}
-	jobs := make(chan models.InstanceIdleStopOperation)
-	var workers sync.WaitGroup
-	for n := 0; n < min(3, len(pending)); n++ {
-		workers.Add(1)
-		go func() {
-			defer workers.Done()
-			for op := range jobs {
-				s.resume(ctx, op)
-			}
-		}()
-	}
 	for _, op := range pending {
-		if ctx.Err() != nil {
-			break
+		if err = s.dispatchStop(ctx, op.InstanceID, func() { s.resume(ctx, op) }); err != nil {
+			return err
 		}
-		jobs <- op
 	}
-	close(jobs)
-	workers.Wait()
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
@@ -165,11 +154,15 @@ func (s *InstanceAutoStopService) Tick(ctx context.Context) error {
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
-			if err = s.tryStop(ctx, *cfg, a); err != nil {
-				if errors.Is(err, models.ErrLegacyModelActivityUnverified) && legacyProofErr != nil {
-					err = fmt.Errorf("%w: %v", err, legacyProofErr)
+			if err = s.dispatchStop(ctx, a.InstanceID, func() {
+				if stopErr := s.tryStop(ctx, *cfg, a); stopErr != nil {
+					if errors.Is(stopErr, models.ErrLegacyModelActivityUnverified) && legacyProofErr != nil {
+						stopErr = fmt.Errorf("%w: %v", stopErr, legacyProofErr)
+					}
+					_ = s.store.RecordBlocker(ctx, a.InstanceID, stopErr.Error())
 				}
-				_ = s.store.RecordBlocker(ctx, a.InstanceID, err.Error())
+			}); err != nil {
+				return err
 			}
 			if err = s.store.CheckpointScan(ctx, *cfg, after); err != nil {
 				return err
@@ -178,9 +171,21 @@ func (s *InstanceAutoStopService) Tick(ctx context.Context) error {
 	}
 }
 func (s *InstanceAutoStopService) tryStop(ctx context.Context, cfg models.InstanceAutoStopSettings, a models.InstanceModelActivity) error {
-	release, err := acquireInstanceLifecycleOperation(ctx, s.lifecycle.instanceRepo, a.InstanceID)
-	if err != nil {
-		return err
+	var release func()
+	var err error
+	for attempt := 0; ; attempt++ {
+		release, err = acquireInstanceLifecycleOperation(ctx, s.lifecycle.instanceRepo, a.InstanceID)
+		if err == nil {
+			break
+		}
+		if !errors.Is(err, models.ErrInstanceLifecycleLockBusy) || attempt == 24 {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(200 * time.Millisecond):
+		}
 	}
 	defer release()
 	return s.withInstanceMutation(ctx, a.InstanceID, func() error { return s.tryStopGuarded(ctx, cfg, a) })
@@ -232,8 +237,9 @@ func (s *InstanceAutoStopService) tryStopGuarded(ctx context.Context, cfg models
 		return fmt.Errorf("runtime does not support graceful idle stop")
 	}
 	// Check protocol availability and the exact source before committing a stop.
-	// Native execution state is deliberately not an eligibility condition: all
-	// Lite types share the durable Gateway model-activity window.
+	// Model inactivity determines eligibility. Native admission is a separate
+	// safety check: do not revoke execution authority for a stop already known
+	// to be busy, unsupported, or unprovable.
 	req := RuntimeIdleStopRequest{InstanceID: i.ID, Generation: i.RuntimeGeneration, PodUID: *pod.PodUID}
 	probeCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	proof, err := client.IdlePreflight(probeCtx, *pod.AgentEndpoint, b.GatewayID, req)
@@ -249,6 +255,9 @@ func (s *InstanceAutoStopService) tryStopGuarded(ctx context.Context, cfg models
 	}
 	if err = s.store.RecordDefaultsPolicy(ctx, repository.InstanceAutoStopPolicyStatus{InstanceID: i.ID, Generation: i.RuntimeGeneration, PodUID: *pod.PodUID, DefaultsPolicyVersion: proof.DefaultsPolicyVersion, DefaultsPolicyStatus: proof.DefaultsPolicyStatus}); err != nil {
 		return err
+	}
+	if !proof.ExecutionProofSupported || proof.ExecutionState != "idle" {
+		return fmt.Errorf("runtime idle stop admission is not ready: %s", proof.ExecutionState)
 	}
 	op, err := s.store.ClaimStop(ctx, cfg.Version, a.ActivityVersion, models.InstanceIdleStopOperation{InstanceID: i.ID, UserID: i.UserID, Generation: i.RuntimeGeneration, RuntimePodID: b.RuntimePodID, GatewayID: b.GatewayID, PodUID: *pod.PodUID, Endpoint: *pod.AgentEndpoint, WorkspacePath: b.WorkspacePath, StorageIdentity: storage})
 	if err != nil {
@@ -293,6 +302,12 @@ func (s *InstanceAutoStopService) resume(ctx context.Context, op models.Instance
 		if touchErr != nil {
 			return
 		}
+		if held, err := s.store.FaultRecoveryActive(ctx, op.InstanceID); err != nil || held {
+			if err != nil {
+				log.Printf("automatic Lite stop: instance %d recovery ownership check: %v", op.InstanceID, err)
+			}
+			return
+		}
 	}
 	release, err := acquireInstanceLifecycleOperation(ctx, s.lifecycle.instanceRepo, op.InstanceID)
 	if err != nil {
@@ -317,6 +332,15 @@ func (s *InstanceAutoStopService) withInstanceMutation(ctx context.Context, id i
 }
 
 func (s *InstanceAutoStopService) resumeGuarded(ctx context.Context, op models.InstanceIdleStopOperation) {
+	// Recheck after acquiring the lifecycle lock: a recovery may have queued
+	// between the first check and lock acquisition.
+	if held, err := s.store.FaultRecoveryActive(ctx, op.InstanceID); err != nil || held {
+		return
+	}
+	instance, err := s.lifecycle.instanceRepo.GetByID(op.InstanceID)
+	if err != nil || instance == nil || instance.Status == "deleting" {
+		return
+	}
 	a, err := s.store.GetActivity(ctx, op.InstanceID)
 	if err != nil || a == nil || a.StopOperationID != op.ID {
 		return
@@ -342,6 +366,8 @@ func (s *InstanceAutoStopService) resumeGuarded(ctx context.Context, op models.I
 	_ = s.complete(ctx, op)
 }
 func (s *InstanceAutoStopService) complete(ctx context.Context, op models.InstanceIdleStopOperation) (err error) {
+	ctx, cancel := s.lifecycle.cancelStopWhenDeleting(ctx, op.InstanceID)
+	defer cancel()
 	defer func() {
 		if err != nil {
 			op.ErrorMessage = err.Error()

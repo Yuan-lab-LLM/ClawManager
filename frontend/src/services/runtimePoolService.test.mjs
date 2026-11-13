@@ -298,3 +298,114 @@ test('fault recovery keeps the existing eviction endpoint and exact instance sco
     assert.equal(calls.at(-1)[1], body);
   }
 });
+
+function preparationService(responses, options = {}) {
+  const calls = [];
+  let now = 0;
+  const operation = { id: 'wake-exact', kind: 'rollout_wake', runtime_type: 'hermes', status: 'pending', phase: 'wake' };
+  const api = {
+    post: async (url, body, config) => { calls.push(['post', url, body, config]); if (options.postError) throw options.postError; return { data: { data: { operation: options.operation || operation } } }; },
+    get: async (url, config) => { calls.push(['get', url, config]); if (options.getError) throw options.getError; return { data: { data: { items: responses.shift() || [] } } }; },
+  };
+  const exports = {};
+  runInNewContext(compiled, {
+    exports, Date: { now: () => now },
+    setTimeout: fn => { now += options.step || 2000; queueMicrotask(() => { options.onWait?.(); fn(); }); return 1; }, clearTimeout() {},
+    require: name => name === './api' ? { default: api } : { default: axios },
+  });
+  return { service: exports.runtimePoolService, calls, operation };
+}
+
+test('rollout preparation submits once and waits for the exact matching wake to complete', async () => {
+  const completed = { id: 'wake-exact', kind: 'rollout_wake', runtime_type: 'hermes', status: 'completed' };
+  const { service, calls } = preparationService([
+    [{ ...completed, id: 'foreign' }],
+    [{ ...completed, status: 'starting' }],
+    [completed],
+  ]);
+  assert.equal(await service.prepareRollout('hermes'), 'wake-exact');
+  assert.equal(calls.filter(c => c[0] === 'post').length, 1);
+  assert.equal(calls[0][1], '/admin/runtime-rollouts/prepare');
+  assert.deepEqual(JSON.parse(JSON.stringify(calls[0][2])), { runtime_type: 'hermes' });
+  assert.equal(calls.filter(c => c[0] === 'get').length, 3);
+  assert.ok(calls.filter(c => c[0] === 'get').every(c => c[1] === '/admin/runtime-scheduling'));
+});
+
+test('rollout preparation fails closed with operation ID for blocked, drifted and missing operations', async () => {
+  for (const status of ['failed', 'cancelled', 'needs_attention']) {
+    const { service } = preparationService([[{ id: 'wake-exact', kind: 'rollout_wake', runtime_type: 'hermes', status, error_message: 'proof changed' }]]);
+    await assert.rejects(service.prepareRollout('hermes'), /wake-exact.*proof changed/);
+  }
+  const { service } = preparationService([[{ id: 'wake-exact', kind: 'rollout_wake', runtime_type: 'openclaw', status: 'completed' }]]);
+  await assert.rejects(service.prepareRollout('hermes'), /wake-exact/);
+  const missing = preparationService([], { step: 16 * 60 * 1000 });
+  await assert.rejects(missing.service.prepareRollout('hermes'), /wake-exact/);
+  assert.equal(missing.calls.filter(c => c[0] === 'post').length, 1);
+});
+
+test('rollout preparation never resubmits a lost POST and preserves known IDs after polling errors', async () => {
+  const failed = preparationService([], { postError: new Error('response lost') });
+  await assert.rejects(failed.service.prepareRollout('hermes'), /response lost/);
+  assert.equal(failed.calls.length, 1);
+  const poll = preparationService([], { getError: new Error('offline') });
+  await assert.rejects(poll.service.prepareRollout('hermes'), /wake-exact.*offline/);
+  assert.equal(poll.calls.filter(c => c[0] === 'post').length, 1);
+  const aborted = preparationService([]);
+  const controller = new AbortController(); controller.abort();
+  await assert.rejects(aborted.service.prepareRollout('hermes', controller.signal));
+  assert.equal(aborted.calls.length, 0);
+});
+
+
+test('rollout preparation cancellation interrupts waiting before another history request', async () => {
+  const controller = new AbortController();
+  const { service, calls } = preparationService([], { onWait: () => controller.abort() });
+  await assert.rejects(service.prepareRollout('hermes', controller.signal));
+  assert.equal(calls.length, 2);
+  assert.equal(calls[1][0], 'post');
+  assert.equal(calls[1][1], '/admin/runtime-scheduling/wake-exact/cancel');
+  assert.equal(calls[1][3], undefined, 'cleanup must not reuse the aborted signal');
+});
+
+
+test('prepare receipt exposes the known ID before a poll error and awaits exact cancellation on abort', async () => {
+  const offline = preparationService([], { getError: new Error('offline') });
+  let known;
+  await assert.rejects(offline.service.prepareRollout('hermes', undefined, { onOperation: id => { known = id; } }), /offline/);
+  assert.equal(known, 'wake-exact');
+  const controller = new AbortController();
+  const aborted = preparationService([], { onWait: () => controller.abort() });
+  let release;
+  let cancelled;
+  let settled = false;
+  const waiting = aborted.service.prepareRollout('hermes', controller.signal, {
+    onOperation: id => { known = id; },
+    cancelOperation: id => { cancelled = id; return new Promise(resolve => { release = resolve; }); },
+  }).catch(() => { settled = true; });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(cancelled, 'wake-exact');
+  assert.equal(settled, false, 'abort waits for the shared cancellation barrier');
+  release(); await waiting;
+  assert.equal(settled, true);
+});
+
+test('a mismatched initial prepare receipt is never adopted or cancelled as this request', async () => {
+  const { service, calls } = preparationService([], { operation: { id: 'unrelated', kind: 'migration', runtime_type: 'hermes', status: 'completed' } });
+  let adopted = false;
+  await assert.rejects(service.prepareRollout('hermes', undefined, { onOperation: () => { adopted = true; } }), /identity/);
+  assert.equal(adopted, false);
+  assert.equal(calls.length, 1);
+});
+
+test('prepare observers receive needs_attention before failure and abort never cancels a held operation', async () => {
+  const held = { id: 'wake-exact', kind: 'rollout_wake', runtime_type: 'hermes', status: 'needs_attention', phase: 'verify_sleep_proof', error_message: 'proof drift' };
+  const controller = new AbortController();
+  const { service, calls } = preparationService([[held]]);
+  const states = [];
+  await assert.rejects(service.prepareRollout('hermes', controller.signal, {
+    onOperation() {},
+    onStatus: operation => { states.push(operation.status); if (operation.status === 'needs_attention') controller.abort(); },
+  }));
+  assert.ok(states.includes('needs_attention'));
+  assert.equal(calls.filter(call => call[0] === 'post').length, 1, 'held native proof is never cleared by abort cleanup');
+});

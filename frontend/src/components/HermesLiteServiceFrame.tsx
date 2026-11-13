@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { RefreshCw } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useI18n } from "../contexts/I18nContext";
 import { hermesDesktopRenewalDelay, hermesSessionRoute, isHermesDesktopFrameMessage, readHermesSessionRoute, rememberHermesSession, resolveHermesDesktopRendererUrl, resolveHermesDesktopView } from "../lib/hermesDesktopFrame";
 import { useAuthStore } from "../stores/authStore";
@@ -27,40 +27,25 @@ export function HermesLiteServiceFrame(props: HermesLiteServiceFrameProps) {
     failed: capability.isError,
     capability: capability.data,
   });
+  let unavailableContent: ReactNode = null;
   if (view.mode === "pending") {
-    return (
-      <InstanceServiceFrameShell
-        instanceName={props.instanceName}
-        refreshing
-        workspaceVisible={props.workspaceVisible}
-        onWorkspaceVisibilityChange={props.onWorkspaceVisibilityChange}
-      >
-        <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 p-6 text-center text-sm text-slate-600" role="status">
-          <RefreshCw className="h-5 w-5 animate-spin" />
-          <p>{t("hermesDesktop.checking")}</p>
-        </div>
-      </InstanceServiceFrameShell>
+    unavailableContent = (
+      <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 p-6 text-center text-sm text-slate-600" role="status">
+        <RefreshCw className="h-5 w-5 animate-spin" />
+        <p>{t("hermesDesktop.checking")}</p>
+      </div>
     );
-  }
-  if (view.mode === "unavailable") {
-    return (
-      <InstanceServiceFrameShell
-        instanceName={props.instanceName}
-        refreshing={capability.isFetching}
-        workspaceVisible={props.workspaceVisible}
-        onWorkspaceVisibilityChange={props.onWorkspaceVisibilityChange}
-      >
-        <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 p-6 text-center text-sm text-slate-600" role="alert">
-          <p>{t(`hermesDesktop.${view.reason ?? "capabilityUnknown"}`)}</p>
-          <button type="button" disabled={capability.isFetching} onClick={() => void capability.refetch()} className="rounded-md border border-slate-200 px-3 py-1.5 disabled:opacity-50">{t("hermesDesktop.retryCapability")}</button>
-        </div>
-      </InstanceServiceFrameShell>
+  } else if (view.mode === "unavailable") {
+    unavailableContent = (
+      <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 p-6 text-center text-sm text-slate-600" role="alert">
+        <p>{t(`hermesDesktop.${view.reason ?? "capabilityUnknown"}`)}</p>
+        <button type="button" disabled={capability.isFetching} onClick={() => void capability.refetch()} className="rounded-md border border-slate-200 px-3 py-1.5 disabled:opacity-50">{t("hermesDesktop.retryCapability")}</button>
+      </div>
     );
   }
   return (
-    <div className="flex h-full min-h-0 flex-col gap-2">
-      <div className="min-h-0 flex-1"><HermesDesktopFrame {...props} /></div>
-    </div>
+    <HermesDesktopFrame {...props} unavailableContent={unavailableContent}
+      capabilityRefreshing={view.mode === "pending" || capability.isFetching} />
   );
 }
 
@@ -74,16 +59,27 @@ type FrameState = {
 function HermesDesktopFrame({
   instanceId,
   instanceName,
+  headerTitle,
+  headerActions,
+  headerEndActions,
   reloadToken = 0,
   workspaceVisible,
   onWorkspaceVisibilityChange,
   onOpenWorkbenchPreview,
-}: InstanceServiceFrameProps) {
+  unavailableContent,
+  capabilityRefreshing,
+}: InstanceServiceFrameProps & { unavailableContent?: ReactNode; capabilityRefreshing: boolean }) {
   const { t } = useI18n();
   const frameRef = useRef<HTMLIFrameElement | null>(null);
   const userId = useAuthStore((auth) => auth.isAuthenticated ? auth.user?.id : undefined);
   const [revision, setRevision] = useState(0);
   const [state, setState] = useState<FrameState | null>(null);
+  const enabled = !unavailableContent;
+  const [wasEnabled, setWasEnabled] = useState(enabled);
+  if (wasEnabled !== enabled) {
+    setWasEnabled(enabled);
+    if (!enabled) setState(null);
+  }
   const launchKey = `${userId ?? "shared"}-${instanceId}-${reloadToken}-${revision}`;
   const current = state?.key === launchKey ? state : null;
   const src = current?.src ?? null;
@@ -101,6 +97,7 @@ function HermesDesktopFrame({
   }, [src, launchKey, onOpenWorkbenchPreview]);
 
   useEffect(() => {
+    if (!enabled) return;
     const controller = new AbortController();
     let disposed = false;
     let renewalTimer: number | undefined;
@@ -157,7 +154,7 @@ function HermesDesktopFrame({
       window.removeEventListener("focus", renewOnFocus);
       document.removeEventListener("visibilitychange", renewOnFocus);
     };
-  }, [instanceId, launchKey, userId]);
+  }, [enabled, instanceId, launchKey, userId]);
 
   useEffect(() => {
     if (!src) return;
@@ -190,19 +187,23 @@ function HermesDesktopFrame({
   return (
     <InstanceServiceFrameShell
       instanceName={instanceName}
-      onRefresh={refresh}
-      refreshing={opening}
+      headerTitle={headerTitle}
+      headerActions={headerActions}
+      headerEndActions={headerEndActions}
+      onRefresh={enabled ? refresh : undefined}
+      refreshing={enabled ? opening : capabilityRefreshing}
       workspaceVisible={workspaceVisible}
       onWorkspaceVisibilityChange={onWorkspaceVisibilityChange}
     >
-      <div className="relative flex min-h-0 flex-1 flex-col">
+      {unavailableContent ?? <div className="relative flex min-h-0 flex-1 flex-col">
         {src && (
           <iframe
             ref={frameRef}
             key={launchKey}
             title={`${instanceName} Hermes Desktop Web`}
             src={src}
-            className="min-h-0 w-full flex-1 border-0 bg-white"
+            className="cm-instance-native-content min-h-0 w-full flex-1 border-0 bg-white"
+            data-ready={current?.status === "ready"}
             allow="clipboard-write; fullscreen"
             onError={() => setState({ key: launchKey, src: null, status: "error", error: "connectionFailed" })}
           />
@@ -214,7 +215,7 @@ function HermesDesktopFrame({
             {failed && <button type="button" onClick={refresh} className="rounded-md border border-slate-200 px-3 py-1.5">{t("common.refresh")}</button>}
           </div>
         )}
-      </div>
+      </div>}
     </InstanceServiceFrameShell>
   );
 }

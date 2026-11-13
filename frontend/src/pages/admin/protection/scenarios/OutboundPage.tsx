@@ -144,7 +144,7 @@ const OutboundPage: React.FC = () => {
         <div className="panel">
           <div className="hero-block">
             <div className="h-eyebrow">{t(`${o}.eyebrow`)}</div>
-            <h2 className="h-title">{t(`${o}.title`)}</h2>
+            <h2 className="section-title">{t(`${o}.title`)}</h2>
             <p className="h-subtitle">
               {t(`${o}.subtitle`)}
             </p>
@@ -201,8 +201,8 @@ const OutboundPage: React.FC = () => {
             <div className="text-xs muted leading-6">
               {t(`${o}.tls.desc`)}
             </div>
-            <div className="p-4 rounded-2xl border border-[#eadfd8] bg-[#fffaf7] text-right">
-              <div className="text-[10px] muted-strong tracking-wider">{t(`${o}.tls.recentHits`)}</div>
+            <div className="p-4 rounded-lg border border-[var(--cm-border)] bg-[var(--cm-subtle)] text-right">
+              <div className="text-xs muted-strong tracking-wider">{t(`${o}.tls.recentHits`)}</div>
               <div className={`text-2xl font-bold mt-1 tone-${httpsHits > 0 ? 'red' : 'green'}`}>{httpsHits}</div>
               <div className="text-xs muted mt-0.5">{t(`${o}.tls.recentHitsSub`)}</div>
             </div>
@@ -311,11 +311,11 @@ const OutboundPage: React.FC = () => {
                     <span className={`badge badge-${ep.status === 'active' ? 'green' : 'slate'}`}>{ep.status}</span>
                   </td>
                   <td>
-                    <code className="text-sm font-mono text-[#171212]">{ep.domain_pattern}</code>
+                    <code className="text-sm font-mono text-[var(--cm-ink)]">{ep.domain_pattern}</code>
                   </td>
                   <td>
                     {ep.fingerprint_sha256 ? (
-                      <code className="text-[10px] muted-strong">{ep.fingerprint_sha256.slice(0, 32)}…</code>
+                      <code className="text-xs muted-strong">{ep.fingerprint_sha256.slice(0, 32)}…</code>
                     ) : (
                       <span className="text-xs muted italic">{t(`${o}.trust.onlyDomain`)}</span>
                     )}
@@ -348,9 +348,9 @@ const OutboundPage: React.FC = () => {
             </tbody>
           </table>
           <div className="text-xs muted mt-3 leading-5">
-            <strong className="text-[#171212]">{t(`${o}.trust.behavior`)}</strong>：{t(`${o}.trust.behaviorDesc`)}
+            <strong className="text-[var(--cm-ink)]">{t(`${o}.trust.behavior`)}</strong>：{t(`${o}.trust.behaviorDesc`)}
             <br />
-            <strong className="text-[#171212]">{t(`${o}.trust.certPhase2a`)}</strong>：{t(`${o}.trust.certPhase2aDesc`)}
+            <strong className="text-[var(--cm-ink)]">{t(`${o}.trust.certPhase2a`)}</strong>：{t(`${o}.trust.certPhase2aDesc`)}
           </div>
         </div>
       </div>

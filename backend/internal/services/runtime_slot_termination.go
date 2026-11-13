@@ -42,7 +42,7 @@ type runtimeSlotContainerProof struct {
 func validContainerIntent(i runtimeSlotStopIntent) bool {
 	digest, err := hex.DecodeString(i.AssignmentDigest)
 	index, indexErr := strconv.Atoi(strings.TrimPrefix(i.Slot, "slot-"))
-	return i.Version == 1 && (i.Kind == "" || i.Kind == "maintenance") && stopTokenValid(i.OperationID) && stopTokenValid(i.WorkerEpoch) && i.PodUID != "" &&
+	return i.Version == 1 && (i.Kind == "" || i.Kind == "maintenance" || i.Kind == "force-delete" && !i.Graceful) && stopTokenValid(i.OperationID) && stopTokenValid(i.WorkerEpoch) && i.PodUID != "" &&
 		indexErr == nil && index >= 0 && index < 256 && i.Slot == fmt.Sprintf("slot-%d", index) && i.InstanceID > 0 && i.UserID > 0 && i.Generation > 0 &&
 		i.GatewayID == fmt.Sprintf("gw-%d-%d", i.InstanceID, i.Generation) && err == nil && len(digest) == 32
 }
@@ -176,6 +176,10 @@ func containerSlotName(pod *corev1.Pod, request []byte) (string, error) {
 }
 
 func (c *slotRuntimeAgentClient) stopContainerGateway(ctx context.Context, endpoint, gatewayID string, graceful bool) error {
+	return c.stopContainerGatewayPolicy(ctx, endpoint, gatewayID, graceful, false)
+}
+
+func (c *slotRuntimeAgentClient) stopContainerGatewayPolicy(ctx context.Context, endpoint, gatewayID string, graceful, forceDelete bool) error {
 	if _, bounded := ctx.Deadline(); !bounded {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, runtimeAgentControlTimeout)
@@ -185,7 +189,7 @@ func (c *slotRuntimeAgentClient) stopContainerGateway(ctx context.Context, endpo
 	if err != nil {
 		return err
 	}
-	if intent != nil && (!validContainerIntent(*intent) || intent.Kind != "") {
+	if intent != nil && (!validContainerIntent(*intent) || intent.Kind != "" && intent.Kind != "force-delete") {
 		return fmt.Errorf("stored container stop identity is invalid")
 	}
 	pod, err := c.containerStopPod(ctx, endpoint, a.PodUID)
@@ -234,9 +238,22 @@ func (c *slotRuntimeAgentClient) stopContainerGateway(ctx context.Context, endpo
 			return err
 		}
 		candidate := runtimeSlotStopIntent{Version: 1, OperationID: hex.EncodeToString(token[:]), PodUID: a.PodUID, Slot: slot, GatewayID: gatewayID, InstanceID: a.InstanceID, UserID: a.UserID, Generation: a.Generation, WorkerEpoch: assignment.WorkerEpoch, AssignmentDigest: raw.Digest, Graceful: graceful}
+		if forceDelete {
+			candidate.Kind = "force-delete"
+			candidate.Graceful = false
+		}
 		if !validContainerIntent(candidate) {
 			return fmt.Errorf("slot execution identity is incomplete")
 		}
+		intent, err = c.assignments.BeginContainerStop(ctx, endpoint, candidate)
+		if err != nil {
+			return err
+		}
+	}
+	if forceDelete && intent.Kind != "force-delete" && len(saved) == 0 {
+		candidate := *intent
+		candidate.Kind = "force-delete"
+		candidate.Graceful = false
 		intent, err = c.assignments.BeginContainerStop(ctx, endpoint, candidate)
 		if err != nil {
 			return err
@@ -264,7 +281,13 @@ func (c *slotRuntimeAgentClient) stopContainerGateway(ctx context.Context, endpo
 		if err != nil {
 			return err
 		}
-		if err = c.assignments.StoreContainerTermination(ctx, endpoint, *intent, data); err != nil {
+		if proof.runtimeSlotStopIntent != *intent {
+			if err = c.assignments.ResolveCompletedContainerDelete(ctx, endpoint, *intent, proof.runtimeSlotStopIntent, data); err != nil {
+				return err
+			}
+			actual := proof.runtimeSlotStopIntent
+			intent = &actual
+		} else if err = c.assignments.StoreContainerTermination(ctx, endpoint, *intent, data); err != nil {
 			return err
 		}
 	}
@@ -332,6 +355,23 @@ func (c *slotRuntimeAgentClient) waitContainerTermination(ctx context.Context, n
 			return nil, err
 		}
 		proof, err := runtimeSlotTerminationProof(pod, intent)
+		if errors.Is(err, errContainerTerminationPending) && intent.Kind == "force-delete" {
+			// The original stop may have committed its receipt immediately before
+			// explicit deletion superseded it. Only real kubelet evidence resolves
+			// this race; never invent a receipt for the new operation kind.
+			for _, graceful := range []bool{true, false} {
+				previous := intent
+				previous.Kind = ""
+				previous.Graceful = graceful
+				oldProof, oldErr := runtimeSlotTerminationProof(pod, previous)
+				if oldErr == nil {
+					return oldProof, nil
+				}
+				if !errors.Is(oldErr, errContainerTerminationPending) {
+					return nil, oldErr
+				}
+			}
+		}
 		if !errors.Is(err, errContainerTerminationPending) {
 			return proof, err
 		}
@@ -344,7 +384,7 @@ func (c *slotRuntimeAgentClient) waitContainerTermination(ctx context.Context, n
 // The termination record can arrive before the replacement worker is listening.
 // Retry transport/unavailability errors with the SAME proof, never conflicts or
 // invalid receipts, and never infer success from a new worker's readiness.
-func (c *slotRuntimeAgentClient) containerStopRequest(ctx context.Context, endpoint, path string, proof runtimeSlotContainerProof, receipt any) error {
+func (c *slotRuntimeAgentClient) containerStopRequest(ctx context.Context, endpoint, path string, proof any, receipt any) error {
 	for {
 		err := c.do(ctx, http.MethodPost, endpoint, path, proof, receipt)
 		var transport *url.Error

@@ -71,7 +71,7 @@ const OutputSurfacePage: React.FC = () => {
         <div className="panel">
           <div className="hero-block">
             <div className="h-eyebrow">{t('secplane.runtime.outputSurface.heroEyebrow')}</div>
-            <h2 className="h-title">{t('secplane.runtime.outputSurface.heroTitle')}</h2>
+            <h2 className="section-title">{t('secplane.runtime.outputSurface.heroTitle')}</h2>
             <p className="h-subtitle">{t('secplane.runtime.outputSurface.heroSubtitle')}</p>
           </div>
           <div className="grid grid-cols-4 gap-3 mt-5">
@@ -120,15 +120,15 @@ const OutputSurfacePage: React.FC = () => {
           </div>
           <div className="space-y-2.5">
             {PRIVACY_RULES.map(([key, ruleKey, category, _desc, tone, sevKey, mask]) => (
-              <div key={key} className="flex items-center gap-4 p-4 rounded-2xl border border-[#eadfd8] bg-white">
+              <div key={key} className="flex items-center gap-4 p-4 rounded-lg border border-[var(--cm-border)] bg-white">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-1 flex-wrap">
-                    <span className="font-semibold text-[#171212]">{t(`secplane.runtime.outputSurface.privacyRules.${ruleKey}.name`)}</span>
+                    <span className="font-semibold text-[var(--cm-ink)]">{t(`secplane.runtime.outputSurface.privacyRules.${ruleKey}.name`)}</span>
                     <span className={`badge ${catBadge(category)} text-[9px]`}>{t(`secplane.runtime.shared.${category}`)}</span>
                     <span className={`badge badge-${tone} text-[9px]`}>{t(`secplane.runtime.shared.${sevKey}`)}</span>
                   </div>
                   <div className="text-xs muted mb-1">{t(`secplane.runtime.outputSurface.privacyRules.${ruleKey}.desc`)}</div>
-                  <code className="block text-[10px] muted-strong bg-[#fdf6f1] px-2 py-1 rounded font-mono truncate" style={{ maxWidth: 420 }}>
+                  <code className="block text-xs muted-strong bg-[var(--cm-subtle)] px-2 py-1 rounded font-mono truncate" style={{ maxWidth: 420 }}>
                     {t('secplane.runtime.outputSurface.maskExample')}{mask}
                   </code>
                 </div>
@@ -156,7 +156,7 @@ const OutputSurfacePage: React.FC = () => {
                 >
                   <div className="flex items-center gap-2 mb-1">
                     <span className="text-[9px] muted-strong tracking-wider">{t('secplane.runtime.outputSurface.instance')}</span>
-                    <code className="text-[11px] font-mono text-[#7a4a30]">{inst}</code>
+                    <code className="text-[11px] font-mono text-[var(--cm-text)]">{inst}</code>
                   </div>
                   <code className="text-xs text-[#b42318] font-mono break-all block">{loc}</code>
                   <div className="flex items-center justify-between mt-2">
@@ -222,7 +222,7 @@ const OutputSurfacePage: React.FC = () => {
                   <td><span className="muted-strong text-xs">{a.ts?.replace('T', ' ').slice(11, 19)}</span></td>
                   <td><span className="font-mono text-xs">{a.agent_id ?? '—'}</span></td>
                   <td><span className="badge badge-red">{a.rule_name ?? a.rule_id ?? '—'}</span></td>
-                  <td><code className="text-xs text-[#171212] truncate inline-block" style={{ maxWidth: 340 }}>{a.evidence ?? '—'}</code></td>
+                  <td><code className="text-xs text-[var(--cm-ink)] truncate inline-block" style={{ maxWidth: 340 }}>{a.evidence ?? '—'}</code></td>
                   <td><span className={`badge badge-${a.action === 'block' ? 'red' : a.action === 'redact' ? 'orange' : 'slate'}`}>{a.action}</span></td>
                 </tr>
               ))}

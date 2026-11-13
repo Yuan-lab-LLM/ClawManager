@@ -271,19 +271,10 @@ func (s *RuntimeManagementService) submitOrphanRecovery(ctx context.Context, pod
 		if err := repository.LockRuntimeManagementAdmission(ctx, tx); err != nil {
 			return err
 		}
-		var active int
-		for _, q := range []string{"SELECT COUNT(*) FROM runtime_rollouts WHERE status IN ('pending','running')", "SELECT COUNT(*) FROM runtime_management_operations WHERE status IN ('pending','processing','starting','needs_attention')"} {
-			row, err := tx.SQL().QueryRowContext(ctx, q)
-			if err != nil {
-				return err
-			}
-			if err = row.Scan(&active); err != nil {
-				return err
-			}
-			if active > 0 {
-				return fmt.Errorf("another Runtime operation is active")
-			}
+		if err := repository.CheckRuntimeControlAdmission(ctx, tx, j.Source.RuntimeType, ""); err != nil {
+			return err
 		}
+
 		attributed := []int{}
 		for _, publication := range j.Publications {
 			attributed = append(attributed, publication.Audit.InstanceID)

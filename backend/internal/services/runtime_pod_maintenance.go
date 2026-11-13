@@ -93,31 +93,24 @@ func (s *RuntimePodMaintenanceService) createAdmission(ctx context.Context, runt
 		if err := repository.LockRuntimeManagementAdmission(ctx, tx); err != nil {
 			return err
 		}
-		var active int
-		row, err := tx.SQL().QueryRowContext(ctx, "SELECT COUNT(*) FROM runtime_rollouts WHERE runtime_type=? AND status IN ('pending','running')", runtimeType)
-		if err != nil {
+		if err := repository.CheckRuntimePreparationReservationsForType(ctx, tx, "", runtimeType); err != nil {
 			return err
 		}
-		if err = row.Scan(&active); err != nil {
+		if err := repository.CheckRuntimeRolloutActivityForType(ctx, tx, runtimeType); err != nil {
 			return err
 		}
-		if active > 0 {
-			return fmt.Errorf("Runtime %s upgrade is pending or running; wait before adding capacity", runtimeType)
-		}
-		row, err = tx.SQL().QueryRowContext(ctx, "SELECT COUNT(*) FROM runtime_management_operations WHERE kind='scale_in' AND status IN ('pending','processing','starting','needs_attention') AND JSON_UNQUOTE(JSON_EXTRACT(request_json,'$.runtime_type'))=?", runtimeType)
-		if err != nil {
+		if err := repository.CheckRuntimeManagementOperationsForType(ctx, tx, runtimeType, "", "scale_in"); err != nil {
 			return err
 		}
-		if err = row.Scan(&active); err != nil {
-			return err
-		}
-		if active > 0 {
-			return fmt.Errorf("Runtime %s scale-in is active; wait before adding capacity", runtimeType)
-		}
+
 		return fn(tx)
 	}, nil)
 }
-func (s *RuntimePodMaintenanceService) admissionTx(ctx context.Context, fn func(db.Session) error) error {
+func (s *RuntimePodMaintenanceService) admissionTx(ctx context.Context, fn func(db.Session) error, runtimeTypes ...string) error {
+	runtimeType := ""
+	if len(runtimeTypes) > 0 {
+		runtimeType = runtimeTypes[0]
+	}
 	if s.sess == nil {
 		return fmt.Errorf("persistent Runtime maintenance admission is unavailable")
 	}
@@ -125,23 +118,10 @@ func (s *RuntimePodMaintenanceService) admissionTx(ctx context.Context, fn func(
 		if err := repository.LockRuntimeManagementAdmission(ctx, tx); err != nil {
 			return err
 		}
-		for _, query := range []string{
-			"SELECT COUNT(*) FROM runtime_rollouts WHERE status IN ('pending','running')",
-			"SELECT COUNT(*) FROM runtime_management_operations WHERE status IN ('pending','processing','starting','needs_attention')",
-			"SELECT COUNT(*) FROM runtime_upgrade_items ui JOIN runtime_rollouts r ON r.id=ui.rollout_id WHERE ui.recovery_status IN ('pending','starting','retrying','needs_attention') AND ui.state NOT IN ('verified','gateway_verified') AND NOT EXISTS (SELECT 1 FROM runtime_upgrade_items newer JOIN runtime_rollouts nr ON nr.id=newer.rollout_id WHERE newer.instance_id=ui.instance_id AND nr.id>r.id AND nr.status IN ('pending','running','finished','error'))",
-		} {
-			var count int
-			row, err := tx.SQL().QueryRowContext(ctx, query)
-			if err != nil {
-				return err
-			}
-			if err = row.Scan(&count); err != nil {
-				return err
-			}
-			if count > 0 {
-				return fmt.Errorf("Runtime upgrade, recovery or scheduling operation is active")
-			}
+		if err := repository.CheckRuntimeControlAdmission(ctx, tx, runtimeType, ""); err != nil {
+			return err
 		}
+
 		return fn(tx)
 	}, nil)
 }
@@ -267,7 +247,7 @@ func (s *RuntimePodMaintenanceService) deletePool(ctx context.Context, kube k8s.
 			}
 		}
 		return repository.FenceRuntimePodDeletion(ctx, tx, namespace, name, deploymentUID)
-	})
+	}, pool.Deployment.Labels["clawmanager.io/runtime-type"])
 	if err != nil {
 		return err
 	}

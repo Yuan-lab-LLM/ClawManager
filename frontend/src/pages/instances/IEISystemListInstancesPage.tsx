@@ -526,7 +526,7 @@ export default function IEISystemListInstancesPage() {
 
   return (
     <main className={`flex min-h-screen flex-col bg-[#f4f7fb] text-slate-900 ${view==='overview'?'portal-overview':''}`}>
-      <header className="shrink-0 border-b border-slate-200 bg-white/95 shadow-[0_1px_16px_rgba(15,23,42,0.025)] backdrop-blur">
+      <header className="shrink-0 border-b border-slate-200 bg-white/95 shadow-sm backdrop-blur">
         <div className="flex min-h-[64px] flex-wrap items-center justify-between gap-3 px-4 py-2 sm:flex-nowrap sm:gap-6 sm:px-7 lg:px-9">
           <div className="flex min-w-0 shrink-0 items-center gap-4">
             <img
@@ -587,11 +587,11 @@ export default function IEISystemListInstancesPage() {
             正在验证身份并加载实例…
           </div>
         ) : instances.length === 0 && !ownerTeams.enabled ? (
-          <div className="relative mx-auto flex min-h-[calc(100vh-132px)] max-w-6xl items-center justify-center overflow-hidden rounded-2xl border border-blue-100 bg-[#f3f7ff] px-5 py-10 text-center shadow-[0_12px_35px_rgba(15,23,42,0.035)] sm:px-8">
+          <div className="relative mx-auto flex min-h-[calc(100vh-132px)] max-w-6xl items-center justify-center overflow-hidden rounded-2xl border border-blue-100 bg-[#f3f7ff] px-5 py-10 text-center shadow-sm sm:px-8">
             <div className="pointer-events-none absolute -left-24 -top-24 h-64 w-64 rounded-full bg-blue-100/60" />
             <div className="pointer-events-none absolute -bottom-36 -right-28 h-72 w-72 rounded-full bg-blue-100/60" />
             <div className="relative flex w-full max-w-4xl flex-col items-center">
-              <div className="flex h-[70px] w-[70px] items-center justify-center rounded-2xl bg-white text-blue-600 shadow-[0_12px_28px_rgba(37,99,235,0.10)]">
+              <div className="flex h-[70px] w-[70px] items-center justify-center rounded-2xl bg-white text-blue-600 shadow-sm">
                 <Briefcase className="h-7 w-7" />
               </div>
               <h2 className="mt-5 text-2xl font-semibold tracking-tight text-[#10203b]">
@@ -602,7 +602,7 @@ export default function IEISystemListInstancesPage() {
               </p>
               <button
                 type="button"
-                className="mt-6 inline-flex h-8 items-center gap-2 rounded-lg bg-gradient-to-r from-blue-700 to-blue-600 px-5 text-sm font-semibold text-white shadow-[0_9px_20px_rgba(37,99,235,0.18)] transition hover:from-blue-800 hover:to-blue-700 disabled:opacity-60"
+                className="mt-6 inline-flex h-8 items-center gap-2 rounded-lg bg-[var(--cm-primary)] px-5 text-sm font-semibold text-white shadow-sm transition disabled:opacity-60"
                 onClick={() => void refreshPortal()}
                 disabled={loading||refreshing}
               >
@@ -620,7 +620,7 @@ export default function IEISystemListInstancesPage() {
                 </span>
               </div>
 
-              <div className="mt-9 w-full rounded-2xl border border-blue-100 bg-white/80 px-4 pb-3 pt-4 shadow-[0_9px_24px_rgba(60,96,149,0.05)] sm:px-5">
+              <div className="mt-9 w-full rounded-2xl border border-blue-100 bg-white/80 px-4 pb-3 pt-4 shadow-sm sm:px-5">
                 <div className="flex flex-col items-start justify-between gap-1 px-1 pb-3 text-left sm:flex-row sm:items-center">
                   <h3 className="text-sm font-semibold text-slate-800">支持的工作空间</h3>
                   <p className="text-xs text-slate-400">分配后将在门户中自动显示</p>
@@ -646,7 +646,7 @@ export default function IEISystemListInstancesPage() {
                           >
                             {presentation.name}
                           </p>
-                          <p className="mt-1 text-[11px] leading-4 text-slate-400">
+                          <p className="mt-1 text-xs leading-4 text-slate-400">
                             {runtime.description}
                           </p>
                         </div>
@@ -659,7 +659,7 @@ export default function IEISystemListInstancesPage() {
           </div>
         ) : (view === 'overview' || selectedInstance && selectedRuntime) ? (
           <div className={view==='overview'?'portal-overview-grid grid items-start gap-3 lg:grid-cols-[320px_minmax(0,1fr)] xl:grid-cols-[350px_minmax(0,1fr)]':'grid gap-4 lg:h-[calc(100vh-132px)] lg:min-h-[640px] lg:grid-cols-[minmax(280px,330px)_minmax(460px,1fr)_minmax(280px,320px)] 2xl:grid-cols-[minmax(320px,380px)_minmax(560px,1fr)_minmax(320px,360px)]'}>
-            <aside className={`portal-instance-sidebar flex flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-[0_12px_35px_rgba(15,23,42,0.045)] lg:min-h-0 ${view==='overview'?'max-h-[360px] lg:max-h-[calc(100vh-132px)]':'min-h-[680px]'}`}>
+            <aside className={`portal-instance-sidebar flex flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm lg:min-h-0 ${view==='overview'?'max-h-[360px] lg:max-h-[calc(100vh-132px)]':'min-h-[680px]'}`}>
               <div className="flex items-center justify-between border-b border-slate-100 px-5 py-5">
                 <h2 className="text-base font-bold text-[#14213a]">{ownerTeams.enabled ? '我的工作空间' : `我的实例 · ${instances.length}`}</h2>
                 <button
@@ -726,7 +726,7 @@ export default function IEISystemListInstancesPage() {
             </aside>
 
             {view==='overview' ? <div className="portal-dashboard-host min-w-0"><OwnerDashboard teamContent={ownerTeams.enabled ? <OwnerTeamDashboard key={ownerTeams.owner} state={ownerTeams}/> : undefined} refreshAction={dashboardRefresh} owner={session?.owner??''} instances={instances} onSelect={id=>{if(instances.some(i=>i.id===id)){setSelectedID(id);setView('instance');}}}/></div> : selectedInstance && selectedRuntime ? <>
-            <section className="flex min-h-[680px] flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-[0_12px_35px_rgba(15,23,42,0.045)] lg:min-h-0">
+            <section className="flex min-h-[680px] flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm lg:min-h-0">
               <div className="border-b border-slate-100 px-6 py-5">
                 <h2 className="text-base font-bold text-[#14213a]">运行时说明</h2>
               </div>
@@ -808,7 +808,7 @@ export default function IEISystemListInstancesPage() {
                     <Link
                       to={`/ieisystem/instances/${selectedInstance.id}`}
                       state={{portalReturnSearch:window.location.search}}
-                      className="inline-flex h-12 shrink-0 items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-blue-700 to-blue-600 px-6 text-sm font-semibold text-white shadow-[0_10px_24px_rgba(37,99,235,0.22)] transition hover:-translate-y-0.5 hover:from-blue-800 hover:to-blue-700"
+                      className="inline-flex h-12 shrink-0 items-center justify-center gap-2 rounded-lg bg-[var(--cm-primary)] px-6 text-sm font-semibold text-white shadow-sm transition "
                     >
                       进入实例
                       <ArrowRight className="h-4 w-4" />
@@ -824,7 +824,7 @@ export default function IEISystemListInstancesPage() {
                         {selectedRuntime.name}
                       </span>
                       {selectedRuntime.badge ? (
-                        <span className="rounded-full bg-gradient-to-r from-teal-500 to-cyan-500 px-2.5 py-1 text-[10px] font-bold tracking-wider text-white">
+                        <span className="rounded-full bg-[var(--cm-primary)] px-2.5 py-1 text-xs font-bold tracking-wider text-white">
                           {selectedRuntime.badge}
                         </span>
                       ) : null}
@@ -862,7 +862,7 @@ export default function IEISystemListInstancesPage() {
                         className="flex min-h-14 items-center gap-3 rounded-xl border border-slate-100 bg-slate-50/70 px-4 py-3 text-sm font-medium text-slate-700"
                       >
                         <span
-                          className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full ${selectedRuntime.theme.accentSoft} text-[11px] font-bold ${selectedRuntime.theme.accent}`}
+                          className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full ${selectedRuntime.theme.accentSoft} text-xs font-bold ${selectedRuntime.theme.accent}`}
                         >
                           {index + 1}
                         </span>
@@ -901,7 +901,7 @@ export default function IEISystemListInstancesPage() {
               </div>
             </section>
 
-            <aside className="flex min-h-[680px] flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-[0_12px_35px_rgba(15,23,42,0.045)] lg:min-h-0">
+            <aside className="flex min-h-[680px] flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm lg:min-h-0">
               <div className="border-b border-slate-100 px-5 py-5">
                 <h2 className="text-base font-bold text-[#14213a]">实例信息</h2>
               </div>

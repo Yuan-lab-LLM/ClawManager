@@ -68,16 +68,6 @@ const RuntimeSecurityCategoryPage: React.FC = () => {
 
         {/* Hero */}
         <div className="panel">
-          <div className="hero-block mb-5">
-            <div className="h-eyebrow">{t('secplane.runtime.runtimeSecurityCategory.heroEyebrow')}</div>
-            <h2 className="h-title">{t('secplane.runtime.runtimeSecurityCategory.heroTitle')}</h2>
-            <p className="h-subtitle">
-              {t('secplane.runtime.runtimeSecurityCategory.heroSubtitle1')}
-              {t('secplane.runtime.runtimeSecurityCategory.heroSubtitle2')}
-              <code className="mx-1 px-1 py-0.5 rounded bg-[#fdf6f1] text-[#7a4a30] text-xs">install_skill</code>
-              {t('secplane.runtime.runtimeSecurityCategory.heroSubtitle3')}
-            </p>
-          </div>
           <div className="grid grid-cols-4 gap-3">
             <div className="stat-card">
               <div className="stat-card-label">{t('secplane.runtime.runtimeSecurityCategory.statScenarios')}</div>
@@ -112,22 +102,22 @@ const RuntimeSecurityCategoryPage: React.FC = () => {
                     width: 36,
                     height: 36,
                     borderRadius: 12,
-                    background: 'linear-gradient(135deg, #fdf6f1, #f5e9df)',
-                    border: '1px solid #eadfd8',
+                    background: 'var(--cm-surface)',
+                    border: '1px solid var(--cm-border)',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
                     fontSize: '1rem',
                     fontWeight: 700,
-                    color: '#7d5744',
+                    color: 'var(--cm-muted)',
                     flexShrink: 0,
                   }}
                 >
                   {s.letter}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <div className="eyebrow" style={{ color: '#ef6b4a' }}>{s.sub}</div>
-                  <div className="text-lg font-bold text-[#171212]">{t(s.labelKey)}</div>
+                  <div className="eyebrow" style={{ color: 'var(--cm-primary)' }}>{s.sub}</div>
+                  <div className="text-lg font-bold text-[var(--cm-ink)]">{t(s.labelKey)}</div>
                   <div className="text-xs muted mt-1">{t(s.descKey)}</div>
                 </div>
               </div>
@@ -136,7 +126,7 @@ const RuntimeSecurityCategoryPage: React.FC = () => {
                 <span className="muted-strong" style={{ fontFamily: 'ui-monospace, monospace', fontSize: '0.6875rem' }}>
                   {s.defenses}
                 </span>
-                <span style={{ color: '#ef6b4a', fontWeight: 600 }}>{t('secplane.runtime.runtimeSecurityCategory.viewDetail')}</span>
+                <span style={{ color: 'var(--cm-primary)', fontWeight: 600 }}>{t('secplane.runtime.runtimeSecurityCategory.viewDetail')}</span>
               </div>
             </Link>
           ))}

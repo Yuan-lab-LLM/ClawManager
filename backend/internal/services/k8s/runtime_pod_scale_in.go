@@ -19,6 +19,7 @@ const RuntimeScaleInProtectedLabel = "clawmanager.io/scale-in-protected"
 const RuntimeScaleInOperationLabel = "clawmanager.io/scale-in-operation"
 const RuntimeScaleInPolicyDenial = "CM_SCALE_IN_PROTECTED"
 const runtimeScaleInCleanupBarrierAnnotation = "clawmanager.io/scale-in-cleanup-barrier"
+const runtimeScaleInResizeOperationAnnotation = "clawmanager.io/scale-in-resize-operation"
 const runtimeDeletionCostAnnotation = "controller.kubernetes.io/pod-deletion-cost"
 
 type RuntimePodScaleInIdentity struct {
@@ -27,6 +28,8 @@ type RuntimePodScaleInIdentity struct {
 	DeletionCost *string `json:"deletion_cost,omitempty"`
 }
 type RuntimePodScaleInProtection struct {
+	// Attached by the worker from its immutable journal; never duplicate it in JSON.
+	ExpectedSnapshot *RuntimePodScaleSnapshot    `json:"-"`
 	AutomaticIdle    bool                        `json:"automatic_idle,omitempty"`
 	OperationID      string                      `json:"operation_id"`
 	Namespace        string                      `json:"namespace"`
@@ -120,9 +123,23 @@ func runtimeScaleInPodReady(p corev1.Pod) bool {
 	}
 	return false
 }
-func (s *runtimeDeploymentService) validateRuntimeScaleInSet(ctx context.Context, p RuntimePodScaleInProtection, readiness ...bool) (*appsv1.Deployment, []corev1.Pod, error) {
+func validateRuntimeScaleInProof(p RuntimePodScaleInProtection) error {
 	if p.OperationID == "" || p.DeploymentUID == "" || p.Replicas < 0 || p.PreviousReplicas <= p.Replicas || len(p.SourcePods) != int(p.PreviousReplicas-p.Replicas) || len(p.RetainedPods) != int(p.Replicas) {
-		return nil, nil, fmt.Errorf("complete immutable scale-in proof required")
+		return fmt.Errorf("complete immutable scale-in proof required")
+	}
+	names, uids := map[string]bool{}, map[string]bool{}
+	for _, id := range append(append([]RuntimePodScaleInIdentity{}, p.SourcePods...), p.RetainedPods...) {
+		if id.PodName == "" || id.PodUID == "" || names[id.PodName] || uids[id.PodUID] {
+			return fmt.Errorf("invalid Runtime Pod identities")
+		}
+		names[id.PodName], uids[id.PodUID] = true, true
+	}
+	return nil
+}
+
+func (s *runtimeDeploymentService) validateRuntimeScaleInSet(ctx context.Context, p RuntimePodScaleInProtection, readiness ...bool) (*appsv1.Deployment, []corev1.Pod, error) {
+	if err := validateRuntimeScaleInProof(p); err != nil {
+		return nil, nil, err
 	}
 	d, err := s.client.AppsV1().Deployments(p.Namespace).Get(ctx, p.DeploymentName, metav1.GetOptions{})
 	if err != nil {
@@ -140,9 +157,6 @@ func (s *runtimeDeploymentService) validateRuntimeScaleInSet(ctx context.Context
 	}
 	expected := map[string]string{}
 	for _, id := range append(append([]RuntimePodScaleInIdentity{}, p.SourcePods...), p.RetainedPods...) {
-		if id.PodName == "" || id.PodUID == "" || expected[id.PodName] != "" {
-			return nil, nil, fmt.Errorf("invalid Runtime Pod identities")
-		}
 		expected[id.PodName] = id.PodUID
 	}
 	for _, pod := range pods {
@@ -232,52 +246,126 @@ func (s *runtimeDeploymentService) ResizeRuntimeScaleIn(ctx context.Context, tar
 	if err = s.ConfirmRuntimeScaleInAssignmentsEmpty(ctx, p.Namespace, p.SourcePods); err != nil {
 		return err
 	}
+	annotations := d.Annotations
+	if annotations == nil {
+		annotations = map[string]string{}
+	}
+	annotations[runtimeScaleInResizeOperationAnnotation] = p.OperationID
 	patches := []map[string]any{{"op": "test", "path": "/metadata/uid", "value": p.DeploymentUID}, {"op": "test", "path": "/metadata/resourceVersion", "value": d.ResourceVersion}, {"op": "replace", "path": "/spec/replicas", "value": p.Replicas}}
 	if p.AutomaticIdle && p.Replicas == 0 {
-		annotations := d.Annotations
-		if annotations == nil {
-			annotations = map[string]string{}
-		}
 		annotations[runtimeIdleSleepAnnotation] = p.OperationID
 		delete(annotations, runtimeIdleWakeAnnotation)
-		patches = append(patches, map[string]any{"op": "add", "path": "/metadata/annotations", "value": annotations})
 	}
+	patches = append(patches, map[string]any{"op": "add", "path": "/metadata/annotations", "value": annotations})
 	patch, _ := json.Marshal(patches)
 	_, err = s.client.AppsV1().Deployments(p.Namespace).Patch(ctx, p.DeploymentName, types.JSONPatchType, patch, metav1.PatchOptions{})
 	return err
 }
-func (s *runtimeDeploymentService) ObserveRuntimeScaleIn(ctx context.Context, p RuntimePodScaleInProtection) (bool, error) {
-	return s.observeRuntimeScaleIn(ctx, p, true)
+
+func runtimeScaleInResizeOwned(d *appsv1.Deployment, p RuntimePodScaleInProtection) bool {
+	marker := d.Annotations[runtimeScaleInResizeOperationAnnotation]
+	return marker == p.OperationID || (marker == "" && p.AutomaticIdle && p.Replicas == 0 && d.Annotations[runtimeIdleSleepAnnotation] == p.OperationID)
 }
-func (s *runtimeDeploymentService) observeRuntimeScaleIn(ctx context.Context, p RuntimePodScaleInProtection, requireProtection bool) (bool, error) {
+
+// ObserveInterruptedRuntimeScaleIn admits only a replica write committed by this
+// exact operation. A protection label alone also exists before resize, so it
+// cannot distinguish an external/manual scale from our accepted CAS.
+func (s *runtimeDeploymentService) ObserveInterruptedRuntimeScaleIn(ctx context.Context, p RuntimePodScaleInProtection, expected *RuntimePodScaleSnapshot) (bool, error) {
+	if expected == nil || expected.WorkspaceStorageIdentity == "" || expected.Option.DeploymentUID != p.DeploymentUID || expected.Option.Namespace != p.Namespace || expected.Option.DeploymentName != p.DeploymentName || expected.Option.Replicas != p.PreviousReplicas {
+		return false, fmt.Errorf("complete original scale-in snapshot required for interrupted recovery")
+	}
 	d, err := s.client.AppsV1().Deployments(p.Namespace).Get(ctx, p.DeploymentName, metav1.GetOptions{})
 	if err != nil {
 		return false, err
 	}
-	if string(d.UID) != p.DeploymentUID || (d.Labels[RuntimeScaleInOperationLabel] != p.OperationID && (requireProtection || d.Labels[RuntimeScaleInOperationLabel] != "")) || d.Spec.Replicas == nil || *d.Spec.Replicas != p.Replicas {
+	if !runtimeScaleInResizeOwned(d, p) || d.Generation != expected.DeploymentGeneration+1 {
+		return false, fmt.Errorf("interrupted scale-in has no matching operation resize proof")
+	}
+	p.ExpectedSnapshot = expected
+	return s.ObserveRuntimeScaleIn(ctx, p)
+}
+
+func (s *runtimeDeploymentService) validateRuntimeScaleInSnapshot(ctx context.Context, d *appsv1.Deployment, expected *RuntimePodScaleSnapshot) error {
+	if expected == nil {
+		return nil
+	} // Existing native callers retain their contract.
+	if expected.Option.DeploymentUID != string(d.UID) || expected.Option.Namespace != d.Namespace || expected.Option.DeploymentName != d.Name || expected.Option.RuntimeType != d.Labels["clawmanager.io/runtime-type"] || expected.WorkspaceStorageIdentity == "" || !reflect.DeepEqual(d.Spec.Template, expected.Template) {
+		return fmt.Errorf("scale-in original template or storage proof changed")
+	}
+	storage, err := s.idleRuntimeStorageIdentity(ctx, d.Namespace, d.Spec.Template.Spec)
+	if err != nil {
+		return err
+	}
+	if storage != expected.WorkspaceStorageIdentity {
+		return fmt.Errorf("scale-in original workspace PVC identity changed")
+	}
+	return nil
+}
+
+func (s *runtimeDeploymentService) ObserveRuntimeScaleIn(ctx context.Context, p RuntimePodScaleInProtection) (bool, error) {
+	return s.observeRuntimeScaleIn(ctx, p, true)
+}
+func (s *runtimeDeploymentService) observeRuntimeScaleIn(ctx context.Context, p RuntimePodScaleInProtection, requireProtection bool) (bool, error) {
+	if err := validateRuntimeScaleInProof(p); err != nil {
+		return false, err
+	}
+	d, err := s.client.AppsV1().Deployments(p.Namespace).Get(ctx, p.DeploymentName, metav1.GetOptions{})
+	if err != nil {
+		return false, err
+	}
+	if string(d.UID) != p.DeploymentUID || (d.Labels[RuntimeScaleInOperationLabel] != p.OperationID && (requireProtection || d.Labels[RuntimeScaleInOperationLabel] != "")) || d.Spec.Replicas == nil || *d.Spec.Replicas != p.Replicas || d.Spec.Paused {
 		return false, fmt.Errorf("scale-in desired Deployment identity or replica count changed")
+	}
+	if requireProtection && p.ExpectedSnapshot != nil && !runtimeScaleInResizeOwned(d, p) {
+		return false, fmt.Errorf("scale-in resize operation proof changed")
+	}
+	if err = s.validateRuntimeScaleInSnapshot(ctx, d, p.ExpectedSnapshot); err != nil {
+		return false, err
+	}
+	if err = s.ConfirmRuntimeScaleInAssignmentsEmpty(ctx, p.Namespace, p.SourcePods); err != nil {
+		return false, err
 	}
 	pods, err := s.runtimeScaleInPods(ctx, d)
 	if err != nil {
 		return false, err
 	}
-	sources := map[string]bool{}
-	for _, id := range p.SourcePods {
-		sources[id.PodUID] = true
-	}
-	retained := map[string]bool{}
-	for _, id := range p.RetainedPods {
-		retained[id.PodUID] = true
-	}
+	// Selected identities must really be absent, rather than still existing
+	// under an unexpected owner or as a replacement hidden from the native set.
+	owned := map[string]bool{}
 	for _, pod := range pods {
-		if sources[string(pod.UID)] {
-			return false, nil
+		owned[string(pod.UID)] = true
+	}
+	for _, id := range p.SourcePods {
+		pod, e := s.client.CoreV1().Pods(p.Namespace).Get(ctx, id.PodName, metav1.GetOptions{})
+		if apierrors.IsNotFound(e) {
+			continue
 		}
-		if !retained[string(pod.UID)] || (requireProtection && pod.Labels[RuntimeScaleInProtectedLabel] != p.OperationID) || pod.DeletionTimestamp != nil {
+		if e != nil {
+			return false, e
+		}
+		if string(pod.UID) != id.PodUID || !owned[id.PodUID] {
+			return false, fmt.Errorf("source Runtime Pod identity or owner changed")
+		}
+	}
+	sources := map[string]string{}
+	for _, id := range p.SourcePods {
+		sources[id.PodUID] = id.PodName
+	}
+	retained := map[string]string{}
+	for _, id := range p.RetainedPods {
+		retained[id.PodUID] = id.PodName
+	}
+	waiting := false
+	for _, pod := range pods {
+		if sources[string(pod.UID)] == pod.Name {
+			waiting = true
+			continue
+		}
+		if retained[string(pod.UID)] != pod.Name || (requireProtection && pod.Labels[RuntimeScaleInProtectedLabel] != p.OperationID) || pod.DeletionTimestamp != nil {
 			return false, fmt.Errorf("retained Runtime set changed during scale-in")
 		}
 	}
-	return len(pods) == int(p.Replicas) && d.Status.ObservedGeneration >= d.Generation && d.Status.Replicas == p.Replicas && d.Status.UpdatedReplicas == p.Replicas && d.Status.ReadyReplicas == p.Replicas, nil
+	return !waiting && len(pods) == int(p.Replicas) && d.Status.ObservedGeneration >= d.Generation && d.Status.Replicas == p.Replicas && d.Status.UpdatedReplicas == p.Replicas && d.Status.ReadyReplicas == p.Replicas, nil
 }
 
 // beforeResize permits rollback only while replicas and the complete sibling
@@ -287,8 +375,14 @@ func (s *runtimeDeploymentService) ReleaseRuntimeScaleIn(ctx context.Context, p 
 	if err != nil {
 		return err
 	}
+	if marker := d.Annotations[runtimeScaleInResizeOperationAnnotation]; marker != "" && marker != p.OperationID {
+		return fmt.Errorf("scale-in resize operation owner changed during cleanup")
+	}
 	if string(d.UID) != p.DeploymentUID || d.Spec.Replicas == nil {
 		return fmt.Errorf("scale-in controller identity changed")
+	}
+	if err = s.validateRuntimeScaleInSnapshot(ctx, d, p.ExpectedSnapshot); err != nil {
+		return err
 	}
 	if beforeResize {
 		if _, _, err := s.validateRuntimeScaleInSet(ctx, p, false); err != nil {
@@ -320,16 +414,23 @@ func (s *runtimeDeploymentService) ReleaseRuntimeScaleIn(ctx context.Context, p 
 	if owner := d.Labels[RuntimeScaleInOperationLabel]; owner != "" && owner != p.OperationID {
 		return fmt.Errorf("scale-in owner changed")
 	}
+	retained := map[string]bool{}
+	for _, id := range p.RetainedPods {
+		retained[id.PodUID] = true
+	}
 	for _, id := range append(append([]RuntimePodScaleInIdentity{}, p.SourcePods...), p.RetainedPods...) {
 		pod, e := s.client.CoreV1().Pods(p.Namespace).Get(ctx, id.PodName, metav1.GetOptions{})
 		if apierrors.IsNotFound(e) {
+			if beforeResize || retained[id.PodUID] {
+				return fmt.Errorf("Runtime Pod disappeared during scale-in cleanup")
+			}
 			continue
 		}
 		if e != nil {
 			return e
 		}
 		if string(pod.UID) != id.PodUID {
-			continue
+			return fmt.Errorf("Runtime Pod identity changed during scale-in cleanup")
 		}
 		if owner := pod.Labels[RuntimeScaleInProtectedLabel]; owner != "" && owner != p.OperationID {
 			return fmt.Errorf("Runtime Pod protection owner changed")
@@ -355,13 +456,25 @@ func (s *runtimeDeploymentService) ReleaseRuntimeScaleIn(ctx context.Context, p 
 	if err != nil {
 		return err
 	}
+	if marker := d.Annotations[runtimeScaleInResizeOperationAnnotation]; marker != "" && marker != p.OperationID {
+		return fmt.Errorf("scale-in resize operation owner changed during cleanup")
+	}
 	if string(d.UID) != p.DeploymentUID || (d.Labels[RuntimeScaleInOperationLabel] != "" && d.Labels[RuntimeScaleInOperationLabel] != p.OperationID) {
 		return fmt.Errorf("scale-in controller owner changed")
+	}
+	if !beforeResize {
+		if err = s.validateRuntimeScaleInSnapshot(ctx, d, p.ExpectedSnapshot); err != nil {
+			return err
+		}
+		if d.Spec.Replicas == nil || *d.Spec.Replicas != p.Replicas || d.Spec.Paused {
+			return fmt.Errorf("scale-in desired replicas changed during cleanup")
+		}
 	}
 	labels := d.Labels
 	delete(labels, RuntimeScaleInOperationLabel)
 	annotations := d.Annotations
 	delete(annotations, runtimeScaleInCleanupBarrierAnnotation)
+	delete(annotations, runtimeScaleInResizeOperationAnnotation)
 	patch, _ := json.Marshal([]map[string]any{{"op": "test", "path": "/metadata/uid", "value": p.DeploymentUID}, {"op": "test", "path": "/metadata/resourceVersion", "value": d.ResourceVersion}, {"op": "add", "path": "/metadata/labels", "value": labels}, {"op": "add", "path": "/metadata/annotations", "value": annotations}})
 	_, err = s.client.AppsV1().Deployments(p.Namespace).Patch(ctx, p.DeploymentName, types.JSONPatchType, patch, metav1.PatchOptions{})
 	return err

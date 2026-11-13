@@ -19,7 +19,7 @@ import (
 
 var hermesDesktopSources = regexp.MustCompile(`^[A-Za-z0-9_-]+(,[A-Za-z0-9_-]+)*$`)
 var hermesDesktopModelName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_./:@+-]{0,255}$`)
-var hermesDesktopModelSwitch = regexp.MustCompile(`^([A-Za-z0-9][A-Za-z0-9_./:@+-]{0,255}) --provider ([A-Za-z0-9][A-Za-z0-9_./:@+-]{0,255}) --session$`)
+var hermesDesktopModelSwitch = regexp.MustCompile(`^([A-Za-z0-9][A-Za-z0-9_./:@+-]{0,255}) --provider ([A-Za-z0-9][A-Za-z0-9_./:@+-]{0,255})(?: --session)?$`)
 var errHermesDesktopUnboundSession = errors.New("session not found; resume required")
 
 func hermesDesktopPick(object map[string]json.RawMessage, keys string) map[string]json.RawMessage {

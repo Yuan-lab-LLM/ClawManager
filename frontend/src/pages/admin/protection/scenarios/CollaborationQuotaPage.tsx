@@ -343,7 +343,7 @@ const CollaborationQuotaPage: React.FC = () => {
         <div className="panel">
           <div className="hero-block">
             <div className="h-eyebrow">AI Gateway Tokens 治理</div>
-            <h2 className="h-title">配额限制</h2>
+            <h2 className="section-title">配额限制</h2>
             <p className="h-subtitle">
               在 AI Gateway 上对<strong>单个实例</strong>和<strong>Team 级别</strong>增加 tokens 限额，支持
               <strong>日 / 周 / 月</strong>额度配置，并在使用达到 <strong>80%</strong> 时自动产生告警。
@@ -404,7 +404,7 @@ const CollaborationQuotaPage: React.FC = () => {
               )}
 
               <div className="grid grid-cols-3 gap-4">
-                <div className="p-4 rounded-2xl border border-[#eadfd8] bg-white">
+                <div className="p-4 rounded-lg border border-[var(--cm-border)] bg-white">
                   <div className="eyebrow mb-2">AI Gateway 模式</div>
                   <div className="mode-selector">
                     <button className={policy.gatewayMode === 'enforce' ? 'active-enforce' : ''} onClick={() => markDirty('gatewayMode', 'enforce')}>
@@ -418,7 +418,7 @@ const CollaborationQuotaPage: React.FC = () => {
                     </button>
                   </div>
                 </div>
-                <div className="p-4 rounded-2xl border border-[#eadfd8] bg-white">
+                <div className="p-4 rounded-lg border border-[var(--cm-border)] bg-white">
                   <div className="eyebrow mb-2">默认观察周期</div>
                   <div className="mode-selector">
                     <button className={policy.preferredPeriod === 'daily' ? 'active-observe' : ''} onClick={() => markDirty('preferredPeriod', 'daily')}>
@@ -432,7 +432,7 @@ const CollaborationQuotaPage: React.FC = () => {
                     </button>
                   </div>
                 </div>
-                <div className="p-4 rounded-2xl border border-[#eadfd8] bg-white">
+                <div className="p-4 rounded-lg border border-[var(--cm-border)] bg-white">
                   <div className="eyebrow mb-2">告警阈值</div>
                   <input className="input" type="number" min={50} max={95} value={policy.warnAtPercent} onChange={(e) => markDirty('warnAtPercent', Number(e.target.value))} />
                   <div className="text-xs muted mt-2">达到阈值立即产生告警；100% 以上按 mode 决定是否拒绝。</div>
@@ -486,13 +486,13 @@ const CollaborationQuotaPage: React.FC = () => {
               </div>
 
               <div className="grid gap-4" style={{ gridTemplateColumns: '0.9fr 1.1fr' }}>
-                <div className="p-4 rounded-2xl border border-[#eadfd8] bg-white">
+                <div className="p-4 rounded-lg border border-[var(--cm-border)] bg-white">
                   <div className="eyebrow mb-3">使用情况预估</div>
                   <div className="space-y-3 text-sm">
                     {quotaSummary.tracked.map((row) => (
-                      <div key={row.id} className="p-3 rounded-xl bg-[#fdf6f1] border border-[#eadfd8]">
+                      <div key={row.id} className="p-3 rounded-xl bg-[var(--cm-subtle)] border border-[var(--cm-border)]">
                         <div className="flex items-center justify-between gap-2">
-                          <div className="font-semibold text-[#171212]">{row.target}</div>
+                          <div className="font-semibold text-[var(--cm-ink)]">{row.target}</div>
                           <span className={badgeClass(row.scope === 'team' ? 'purple' : 'blue')}>{row.scope}</span>
                         </div>
                         <div className="grid grid-cols-3 gap-2 mt-3 text-xs muted">
@@ -504,7 +504,7 @@ const CollaborationQuotaPage: React.FC = () => {
                     ))}
                   </div>
                 </div>
-                <div className="p-4 rounded-2xl border border-[#eadfd8] bg-white">
+                <div className="p-4 rounded-lg border border-[var(--cm-border)] bg-white">
                   <div className="eyebrow mb-2">策略预览</div>
                   <pre className="code-block text-[11px] max-h-[360px] overflow-auto">{policyPreview}</pre>
                 </div>

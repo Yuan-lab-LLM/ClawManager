@@ -1,0 +1,5 @@
+instance-refresh 0
+runtime-refresh 0
+runtime-grid 0
+team-workspace 0
+visual 0

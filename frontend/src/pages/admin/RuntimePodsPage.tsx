@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronLeft, ChevronRight, RefreshCw, Search } from "lucide-react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
+import ExpandableSearch from "../../components/ExpandableSearch";
+import FilterSelect from "../../components/FilterSelect";
+import ActionMenu from "../../components/ActionMenu";
 import AdminLayout from "../../components/AdminLayout";
 import { useI18n } from "../../contexts/I18nContext";
 import { useRuntimeAdminWebSocket } from "../../hooks/useWebSocket";
@@ -15,8 +18,6 @@ import {
   recoveryInstanceIds,
   runtimeError,
   summarizePod,
-  formatCPU,
-  formatMemory,
 } from "../../lib/runtimeManagement";
 import RuntimePodDetails from "./RuntimePodDetails";
 import RuntimeActions from "./RuntimeActions";
@@ -27,11 +28,10 @@ import RuntimeAutoStopDialog from "./RuntimeAutoStopDialog";
 import {
   buttonClass,
   primaryClass,
-  inputClass,
   ErrorMessage,
   Legend,
   Metric,
-  SlotGrid,
+  SlotOverview,
   RuntimeDialog,
 } from "./RuntimeManagementUI";
 import "../../styles/runtime-pods.css";
@@ -45,10 +45,7 @@ type Dialog = {
   retryOperationId?: string;
 };
 const types = ["all", "openclaw", "hermes", "opencode", "deepseek-harness"];
-const emptySummary: RuntimePodSummary = {
-  pods: 0, online: 0, schedulable: 0, capacity: 0, ready: 0, occupied: 0,
-  available: 0, running: 0, starting: 0, migrating: 0, error: 0, idle: 0, releasing: 0, unknown: 0, unavailable: 0,
-};
+const emptySummary: Partial<RuntimePodSummary> = {};
 
 export default function RuntimePodsPage() {
   const { t } = useI18n();
@@ -63,21 +60,15 @@ export default function RuntimePodsPage() {
   const [dialog, setDialog] = useState<Dialog | null>(null);
   const [actionError, setActionError] = useState<string>();
   const [busyPod, setBusyPod] = useState<number>();
-  const [menuPosition, setMenuPosition] = useState({ left: 0, top: 0 });
-  const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const filterDetails = useRef<HTMLDetailsElement>(null);
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    const closeMenus = (event: Event) => {
-      if (event.target instanceof Element && event.target.closest(".runtime-card-popover")) return;
-      document.querySelectorAll<HTMLElement>(".runtime-card-popover:popover-open").forEach(menu => menu.hidePopover());
-    };
-    window.addEventListener("resize", closeMenus);
-    window.addEventListener("scroll", closeMenus, true);
-    return () => {
-      window.removeEventListener("resize", closeMenus);
-      window.removeEventListener("scroll", closeMenus, true);
-    };
-  }, []);
+    const media = matchMedia("(max-width: 1100px)");
+    const sync = () => {if (filterDetails.current) filterDetails.current.open = !media.matches;};
+    const outside = (event: PointerEvent) => {if (media.matches && filterDetails.current && !filterDetails.current.contains(event.target as Node)) filterDetails.current.open = false;};
+    sync();media.addEventListener("change",sync);document.addEventListener("pointerdown",outside);
+    return () => {media.removeEventListener("change",sync);document.removeEventListener("pointerdown",outside);};
+  }, [selectedPod]);
+  const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (search.trim() === debouncedSearch) return;
     const timer = setTimeout(() => {
@@ -126,6 +117,7 @@ export default function RuntimePodsPage() {
   }, [isConnected, refresh]);
   const pods = query.data?.pods ?? [];
   const summary = query.data?.summary ?? emptySummary;
+  const metricValue = (value?: number) => value ?? t("runtimePods.unknown");
   const pages = Math.max(1, query.data?.pagination.total_pages ?? 1);
   if (query.data && !query.isPlaceholderData && page > pages) setPage(pages);
   const actionPods = fullQuery.data ?? pods;
@@ -144,18 +136,6 @@ export default function RuntimePodsPage() {
   );
   if (dialog?.pod && inventoryConfirmed && !dialogPod) setDialog(null);
   const selectRuntimePod = (pod: RuntimePod) => setSelectedPod(pod);
-  const handleRuntimePodCardKeyDown = (
-    event: React.KeyboardEvent<HTMLElement>,
-    pod: RuntimePod,
-  ) => {
-    if (
-      event.target !== event.currentTarget ||
-      !["Enter", " "].includes(event.key)
-    )
-      return;
-    event.preventDefault();
-    selectRuntimePod(pod);
-  };
   const toggleScheduling = async (pod: RuntimePod) => {
     try {
       setActionError(undefined);
@@ -173,24 +153,6 @@ export default function RuntimePodsPage() {
   };
   const openSchedule = (pod?: RuntimePod, ids?: number[]) =>
     setDialog({ kind: "schedule", pod, ids });
-  const stateCounts = (pod: RuntimePod) => {
-    const summary = summarizePod(pod);
-    return (
-      [
-        "running",
-        "starting",
-        "migrating",
-        "error",
-        "idle",
-        "releasing",
-        "unknown",
-        "unavailable",
-      ] as const
-    )
-      .filter((key) => summary[key] > 0)
-      .map((key) => `${summary[key]} ${t(`runtimePods.${key}`)}`)
-      .join(" · ");
-  };
   return (
     <AdminLayout title={t("runtimePods.title")} fullHeight={!activePod}>
       <div className={activePod ? "space-y-4" : "runtime-overview"}>
@@ -221,28 +183,54 @@ export default function RuntimePodsPage() {
           />
         ) : (
           <>
+            <div className="runtime-metrics">
+              <Metric
+                compact
+                label={t("runtimePods.online")}
+                value={`${metricValue(summary.online)} / ${metricValue(summary.pods)}`}
+                detail={`${metricValue(summary.schedulable)} ${t("runtimePods.enabled")}`}
+              />
+              <Metric
+                compact
+                label={t("runtimePods.agentReady")}
+                value={`${metricValue(summary.ready)} / ${metricValue(summary.capacity)}`}
+                detail={`${t("runtimePods.ready")} ${metricValue(summary.ready)} · ${t("runtimePods.unavailable")} ${metricValue(summary.unavailable)} · ${t("runtimePods.unknown")} ${metricValue(summary.unknown)}`}
+                warning={(summary.unavailable ?? 0) > 0 || (summary.unknown ?? 0) > 0}
+              />
+              <Metric
+                compact
+                label={t("runtimePods.cardBound")}
+                value={`${metricValue(summary.bound_instances)} / ${metricValue(summary.capacity)}`}
+                detail={`${t("runtimePods.occupied")} ${metricValue(summary.occupied)} · ${metricValue(summary.running)} ${t("runtimePods.running")} · ${metricValue(summary.starting)} ${t("runtimePods.starting")} · ${metricValue(summary.migrating)} ${t("runtimePods.migrating")} · ${metricValue(summary.error)} ${t("runtimePods.error")}`}
+              />
+              <Metric
+                compact
+                label={t("runtimePods.incoming")}
+                value={metricValue(summary.available)}
+                detail={`${t("runtimePods.idle")} ${metricValue(summary.idle)} · ${t("runtimePods.releasing")} ${metricValue(summary.releasing)} · ${t("runtimePods.unknown")} ${metricValue(summary.unknown)}`}
+              />
+            </div>
             <div className="runtime-toolbar">
-              <div className="runtime-types">
-                {types.map((type) => (
-                  <button key={type} type="button" aria-pressed={filter === type}
-                    onClick={() => { setFilter(type); setPage(1); }}
-                    className={`rounded px-2 py-1.5 text-xs font-medium ${filter === type ? "bg-slate-900 text-white" : "text-slate-500 hover:bg-slate-100"}`}>
-                    {type === "all" ? t("common.all") : formatInstanceType(type)}
-                  </button>
-                ))}
+              <div className="runtime-filter-controls">
+                <ExpandableSearch label={t("runtimePods.search")} placeholder={t("runtimePods.search")} value={search} onChange={setSearch} />
+                <details ref={filterDetails} className="runtime-filters" open onKeyDown={event => {
+                  if (event.key === "Escape" && matchMedia("(max-width: 1100px)").matches) {
+                    event.preventDefault();event.stopPropagation();event.currentTarget.open = false;event.currentTarget.querySelector("summary")?.focus();
+                  }
+                }}><summary className="app-button-secondary">{t("instances.filters")}</summary><div className="runtime-filter-fields">
+                <FilterSelect label={t("runtimePods.runtimeType")} value={filter} options={types.map(value => ({value, label: value === "all" ? t("common.all") : formatInstanceType(value)}))} onChange={value => {setFilter(value); setPage(1);}} />
+                <FilterSelect label={t("runtimePods.allNodes")} value={node} options={[{value:"all",label:t("runtimePods.allNodes")}, ...(query.data?.nodes ?? []).map(value => ({value,label:value}))]} onChange={value => {setNode(value);setPage(1);}} />
+                <FilterSelect label={t("runtimePods.allScheduling")} value={scheduling} options={[{value:"all",label:t("runtimePods.allScheduling")},{value:"enabled",label:t("runtimePods.enabled")},{value:"disabled",label:t("runtimePods.disabled")}]} onChange={value => {setScheduling(value);setPage(1);}} />
+                </div></details>
               </div>
               <div className="runtime-toolbar-actions flex-wrap">
- <button type="button" className={`${buttonClass} !px-2 !py-1.5`} onClick={() => setDialog({ kind: "recovery" })}>{t("runtimePods.recoveryTitle")}</button>
-                <button type="button" className={`${buttonClass} !px-2 !py-1.5`} onClick={() => setDialog({ kind: "auto-stop" })}>{t("autoStop.title")}</button>
                 <button type="button" className={`${buttonClass} !px-2 !py-1.5`} onClick={() => setDialog({ kind: "maintenance" })}>{t("runtimePods.maintenance")}</button>
-                <button type="button" className={`${buttonClass} !px-2 !py-1.5`} onClick={() => setDialog({ kind: "balance" })}>{t("runtimePods.balance")}</button>
-                <button
-                  type="button"
-                  className={`${buttonClass} !px-2 !py-1.5`}
-                  onClick={() => setDialog({ kind: "history" })}
-                >
-                  {t("runtimePods.history")}
-                </button>
+                <ActionMenu label={t("runtimePods.cardActions")} items={[
+                  {id:"recovery",label:t("runtimePods.recoveryTitle"),onSelect:() => setDialog({kind:"recovery"})},
+                  {id:"auto-stop",label:t("autoStop.title"),onSelect:() => setDialog({kind:"auto-stop"})},
+                  {id:"balance",label:t("runtimePods.balance"),onSelect:() => setDialog({kind:"balance"})},
+                  {id:"history",label:t("runtimePods.history"),onSelect:() => setDialog({kind:"history"})},
+                ]} />
                 <button
                   type="button"
                   className={`${primaryClass} !px-2 !py-1.5`}
@@ -253,184 +241,59 @@ export default function RuntimePodsPage() {
                 </button>
               </div>
             </div>
-            <div className="runtime-metrics">
-              <Metric
-                compact
-                label={t("runtimePods.online")}
-                value={`${summary.online} / ${summary.pods}`}
-                detail={`${summary.schedulable} ${t("runtimePods.enabled")} · ${summary.pods - summary.schedulable} ${t("runtimePods.disabled")}`}
-              />
-              <Metric
-                compact
-                label={t("runtimePods.agentReady")}
-                value={`${summary.ready} / ${summary.capacity}`}
-                detail={`${t("runtimePods.ready")} ${summary.ready} · ${t("runtimePods.unavailable")} ${summary.unavailable} · ${t("runtimePods.unknown")} ${summary.unknown ?? 0}`}
-                warning={summary.unavailable > 0 || (summary.unknown ?? 0) > 0}
-              />
-              <Metric
-                compact
-                label={t(summary.bound_instances === undefined ? "runtimePods.cardReported" : "runtimePods.occupied")}
-                value={`${summary.bound_instances ?? summary.occupied} / ${summary.capacity}`}
-                detail={`${summary.running} ${t("runtimePods.running")} · ${summary.starting} ${t("runtimePods.starting")} · ${summary.migrating} ${t("runtimePods.migrating")} · ${summary.error} ${t("runtimePods.error")}`}
-              />
-              <Metric
-                compact
-                label={t("runtimePods.incoming")}
-                value={summary.available}
-                detail={`${t("runtimePods.idle")} ${summary.idle} · ${t("runtimePods.releasing")} ${summary.releasing ?? 0} · ${t("runtimePods.unknown")} ${summary.unknown ?? 0}`}
-              />
-            </div>
-            <div className="runtime-filters">
-              <div className="relative min-w-0 flex-1">
-                <Search className="pointer-events-none absolute left-2.5 top-2 h-3.5 w-3.5 text-slate-400" />
-                <input
-                  className={`${inputClass} w-full !py-1.5 !pl-8 !text-xs`}
-                  aria-label={t("runtimePods.search")}
-                  placeholder={t("runtimePods.search")}
-                  value={search}
-                  onChange={(event) => {
-                    setSearch(event.target.value);
-                  }}
-                />
-              </div>
-              <select
-                className={`${inputClass} !py-1.5 !text-xs`}
-                aria-label={t("runtimePods.allNodes")}
-                value={node}
-                onChange={(event) => {
-                  setNode(event.target.value);
-                  setPage(1);
-                }}
-              >
-                <option value="all">{t("runtimePods.allNodes")}</option>
-                {(query.data?.nodes ?? []).map((name) => (
-                    <option key={name} value={name}>
-                      {name}
-                    </option>
-                  ))}
-              </select>
-              <select
-                className={`${inputClass} !py-1.5 !text-xs`}
-                aria-label={t("runtimePods.allScheduling")}
-                value={scheduling}
-                onChange={(event) => {
-                  setScheduling(event.target.value);
-                  setPage(1);
-                }}
-              >
-                <option value="all">{t("runtimePods.allScheduling")}</option>
-                <option value="enabled">{t("runtimePods.enabled")}</option>
-                <option value="disabled">{t("runtimePods.disabled")}</option>
-              </select>
-            </div>
             <div className="runtime-inventory-status">
-              <span>
-                {t("runtimePods.podCount", {
-                  count: query.data?.pagination.total ?? 0,
-                  shown: pods.length,
-                })}
-              </span>
-              <div className="flex flex-wrap items-center gap-3">
-                <Legend compact />
-                <button
-                  type="button"
-                  className="inline-flex items-center gap-1.5"
-                  onClick={() => void query.refetch({ cancelRefetch: false })}
-                  title={t("runtimePods.refresh")}
-                >
-                  <span
-                    className={`h-1.5 w-1.5 rounded-full ${isConnected ? "bg-emerald-500" : "bg-slate-300"}`}
-                  />
-                  <RefreshCw
-                    className={`h-3 w-3 ${query.isFetching ? "animate-spin" : ""}`}
-                  />
-                  {query.data?.updated_at
-                    ? t("runtimePods.updated", {
-                        time: new Date(
-                          query.data.updated_at,
-                        ).toLocaleTimeString(),
-                      })
-                    : t("runtimePods.refresh")}
-                </button>
-              </div>
+              <Legend compact />
             </div>
+            <section className="runtime-inventory-panel cm-surface">
             {query.isLoading ? (
-              <div className="cm-surface p-10 text-center text-sm text-slate-500">
+              <div className="p-10 text-center text-sm text-slate-500">
                 {t("runtimePods.loading")}
               </div>
             ) : pods.length === 0 ? (
-              <div className="cm-surface p-10 text-center text-sm text-slate-500">
+              <div className="p-10 text-center text-sm text-slate-500">
                 {t(
                   summary.pods ? "runtimePods.noMatching" : "runtimePods.empty",
                 )}
               </div>
             ) : (
-            <section className="runtime-card-grid" aria-busy={query.isFetching}>
-                {pods.map((pod) => {
-                  const summary = summarizePod(pod);
-                  const paused =
-                    pod.scheduling_enabled === false || !!pod.scheduling_paused;
-                  const warning =
-                    summary.unavailable > 0 ||
-                    summary.error > 0 ||
-                    summary.unknown > 0 ||
-                    !isSchedulable(pod);
+            <div className="runtime-table-scroll">
+              <table className="runtime-table" aria-label={t("runtimePods.title")} aria-busy={query.isFetching}>
+                <thead><tr>{["runtimeName", "node", "typeLabel", "status", "capacity", "cardActions"].map(key => <th key={key} scope="col">{t(`runtimePods.${key}`)}</th>)}</tr></thead>
+                <tbody>{pods.map(pod => {
+                  const counts = summarizePod(pod);
+                  const reported = pod.agent_reported !== false && !!pod.slots?.length;
+                  const complete = reported && pod.slots!.length >= pod.capacity && pod.slots!.every(slot => slot.state !== "unknown");
+                  const onlineState = pod.agent_reported === false ? "unknown" : ["ready", "draining"].includes(pod.state) ? "onlineState" : ["unhealthy", "deleted", "offline"].includes(pod.state) ? "offline" : "unknown";
+                  const paused = pod.scheduling_enabled === false || !!pod.scheduling_paused;
                   const canOperate = pod.id > 0 && pod.agent_reported !== false;
-                  return (
-                    <article
-                      key={`${pod.namespace}/${pod.pod_name}`}
-                      role="button"
-                      tabIndex={0}
-                      aria-label={pod.pod_name}
-                      aria-pressed={selectedPod?.id === pod.id}
-                      onClick={() => selectRuntimePod(pod)}
-                      onKeyDown={(event) =>
-                        handleRuntimePodCardKeyDown(event, pod)
-                      }
-                      className={`cm-surface runtime-card cursor-pointer transition hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 ${warning ? "!border-amber-200" : ""}`}
-                    >
-                      <div className="runtime-card-heading">
-                        <span className="min-w-0 truncate font-semibold text-slate-900">{formatInstanceType(pod.runtime_type)}</span>
-                        <span className={`ml-auto shrink-0 ${isSchedulable(pod) ? "text-emerald-600" : "text-amber-600"}`}>{t(`runtimePods.${isSchedulable(pod) ? "enabled" : "disabled"}`)}</span>
-                      </div>
-                      <div className="runtime-card-identity">
-                        <h2 className="min-w-0 truncate font-normal" aria-label={pod.pod_name} title={pod.pod_name}>{pod.pod_name.split("-").slice(-2).join("-")}</h2>
-                        <span className="min-w-0 truncate text-slate-500" title={`${t("runtimePods.node")}: ${pod.node_name || "—"} / ${pod.pod_ip || "—"}`}>{pod.node_name || t("runtimePods.unknown")}</span>
-                      </div>
-                      <p className="runtime-card-resources tabular-nums text-slate-600" title={t("runtimePods.capacityHelp")}>
-                        <span>CPU {formatCPU(pod.cpu_millis_used)}/{formatCPU(pod.cpu_millis_limit)}</span>
-                        <span>{t("runtimePods.memory")} {formatMemory(pod.memory_bytes_used)}/{formatMemory(pod.memory_bytes_limit)}</span>
-                      </p>
-                      <SlotGrid compact pod={pod} onSelect={() => selectRuntimePod(pod)} />
-                      <div className="runtime-card-actions" onClick={event => event.stopPropagation()}>
-                        <span className="mr-auto min-w-0 text-xs leading-5 tabular-nums text-slate-600" title={`Agent ${summary.ready}/${pod.capacity} · ${stateCounts(pod)}`}>
-                          {t(summary.bound === undefined ? "runtimePods.cardReported" : "runtimePods.cardBound")} {summary.bound ?? summary.occupied}/{pod.capacity} · {t("runtimePods.cardFree")} {summary.available}
-                          {summary.residual > 0 && ` · ${t("runtimePods.cardResidual")} ${summary.residual}`}
-                          {summary.releasing > 0 && ` · ${t("runtimePods.releasing")} ${summary.releasing}`}
-                          {summary.unknown > 0 && ` · ${t("runtimePods.unknown")} ${summary.unknown}`}
-                        </span>
-                        <button type="button" className="shrink-0 text-slate-600 hover:text-slate-950" aria-label={t("runtimePods.viewAgents", { count: pod.capacity })} title={t("runtimePods.viewAgents", { count: pod.capacity })} onClick={() => selectRuntimePod(pod)}>{t("runtimePods.cardView")}</button>
-                        <button type="button" className="runtime-card-menu-trigger" popoverTarget={`runtime-actions-${pod.namespace}-${pod.pod_name}`} aria-label={t("runtimePods.cardActions")} onClick={event => {
-                          const rect = event.currentTarget.getBoundingClientRect();
-                          setMenuPosition({ left: Math.max(8, Math.min(rect.right - 184, window.innerWidth - 192)), top: Math.max(8, Math.min(rect.top > 152 ? rect.top - 144 : rect.bottom + 4, window.innerHeight - 146)) });
-                        }}>{t("runtimePods.cardActions")} ▾</button>
-                        <div id={`runtime-actions-${pod.namespace}-${pod.pod_name}`} popover="auto" className="runtime-card-popover" style={menuPosition}>
-                          <button type="button" disabled={!canOperate} onClick={event => { event.currentTarget.closest<HTMLElement>("[popover]")?.hidePopover(); setDialog({ kind: "events", pod }); }}>{t("runtimePods.events")}</button>
-                          <button type="button" disabled={pod.id <= 0 || !pod.pod_uid} onClick={event => { event.currentTarget.closest<HTMLElement>("[popover]")?.hidePopover(); setDialog({ kind: "evict", pod, evictionMode: recoveryInstanceIds(pod).length ? "recovery" : "orphan-recovery" }); }}>{t("runtimePods.faultRecovery")}</button>
-                          <button type="button" className="text-red-600" disabled={!canEvictPod(pod)} onClick={event => { event.currentTarget.closest<HTMLElement>("[popover]")?.hidePopover(); setDialog({ kind: "evict", pod }); }}>{t("runtimePods.evict")}</button>
-                          <button type="button" disabled={!canManageScheduling(pod) || busyPod === pod.id} onClick={event => { event.currentTarget.closest<HTMLElement>("[popover]")?.hidePopover(); void toggleScheduling(pod); }}>{t(`runtimePods.${paused ? "resume" : "pause"}`)}</button>
-                          <button type="button" disabled={!canOperate || !pod.slots?.some(canManageSlot)} onClick={event => { event.currentTarget.closest<HTMLElement>("[popover]")?.hidePopover(); openSchedule(pod); }}>{t("runtimePods.manual")}</button>
-                        </div>
-                      </div>
-                    </article>
-                  );
-                })}
-              </section>
+                  return <tr key={`${pod.namespace}/${pod.pod_name}`}>
+                    <td><button type="button" className="runtime-name" title={`${pod.namespace}/${pod.pod_name}`} onClick={() => selectRuntimePod(pod)}>{pod.pod_name}</button></td>
+                    <td title={`${pod.node_name || t("runtimePods.unknown")} / ${pod.pod_ip || "—"}`}>{pod.node_name || t("runtimePods.unknown")}</td>
+                    <td>{formatInstanceType(pod.runtime_type)}</td>
+                    <td><span className={`runtime-status runtime-status-${onlineState === "onlineState" ? "ready" : onlineState}`}>{t(`runtimePods.${onlineState}`)}</span><span className="runtime-scheduling"> · {t(`runtimePods.${isSchedulable(pod) ? "enabled" : "disabled"}`)}</span></td>
+                    <td><div className="runtime-capacity-cell">
+                      <SlotOverview pod={pod} />
+                      <span className="runtime-slot-count" title={`${t("runtimePods.agentReady")}: ${complete ? counts.ready : t("runtimePods.unknown")} · ${t("runtimePods.incoming")}: ${complete && pod.bindings_reported !== false ? counts.available : t("runtimePods.unknown")}`}>
+                        {t("runtimePods.cardBound")} {metricValue(counts.bound)} / {pod.capacity}
+                      </span>
+                    </div></td>
+                    <td><div className="runtime-row-actions">
+                      <button type="button" className="runtime-view" aria-label={t("runtimePods.viewAgents", {count:pod.capacity})} onClick={() => selectRuntimePod(pod)}>{t("runtimePods.cardView")}</button>
+                      <ActionMenu label={`${t("runtimePods.cardActions")}: ${pod.pod_name}`} items={[
+                        {id:"events",label:t("runtimePods.events"),disabled:!canOperate,onSelect:() => setDialog({kind:"events",pod})},
+                        {id:"recovery",label:t("runtimePods.faultRecovery"),disabled:pod.id <= 0 || !pod.pod_uid,onSelect:() => setDialog({kind:"evict",pod,evictionMode:recoveryInstanceIds(pod).length ? "recovery" : "orphan-recovery"})},
+                        {id:"evict",label:t("runtimePods.evict"),disabled:!canEvictPod(pod),destructive:true,onSelect:() => setDialog({kind:"evict",pod})},
+                        {id:"pause",label:t(`runtimePods.${paused ? "resume" : "pause"}`),disabled:!canManageScheduling(pod) || busyPod === pod.id,onSelect:() => void toggleScheduling(pod)},
+                        {id:"manual",label:t("runtimePods.manual"),disabled:!canOperate || !pod.slots?.some(canManageSlot),onSelect:() => openSchedule(pod)},
+                      ]} />
+                    </div></td>
+                  </tr>;
+                })}</tbody>
+              </table>
+            </div>
             )}
             <div className="runtime-pagination">
-              <p className="max-w-3xl text-[10px] leading-4 text-slate-500">
-                {t("runtimePods.pauseHelp")}
-              </p>
+              <span>{t("runtimePods.podCount", {count:query.data?.pagination.total ?? t("runtimePods.unknown"), shown:query.data ? pods.length : t("runtimePods.unknown")})}</span>
               <div className="flex items-center gap-2">
                 <button
                   type="button"
@@ -455,6 +318,7 @@ export default function RuntimePodsPage() {
                 </button>
               </div>
             </div>
+            </section>
           </>
         )}
         {dialog?.kind === "recovery" ? (

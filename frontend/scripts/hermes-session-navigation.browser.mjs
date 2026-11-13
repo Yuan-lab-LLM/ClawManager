@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import http from 'node:http';
 import path from 'node:path';
-const requireE2E = createRequire(new URL('../../e2e/package.json', import.meta.url));
+const requireE2E = createRequire(process.env.WORKSPACE_E2E_PACKAGE || new URL('../../e2e/package.json', import.meta.url));
 const { build } = requireE2E('esbuild');
 const { chromium } = requireE2E('playwright');
 const bundle = await build({ stdin: { resolveDir: path.resolve(import.meta.dirname, '..'), loader: 'tsx', contents: `
@@ -20,11 +20,13 @@ const descriptor=id=>({available:true,instance_id:id,renderer_url:'/hermes-deskt
 hermesDesktopService.probe=async id=>descriptor(id);
 hermesDesktopService.bootstrap=async id=>descriptor(id);
 hermesDesktopService.recentSession=async id=>'recent-'+useAuthStore.getState().user.id+'-'+id;
-function App(){const[open,setOpen]=useState(true);const[id,setID]=useState(229);return <>
+function HeaderState(){const[value,setValue]=useState('');return <input aria-label='Header working state' value={value} onChange={event=>setValue(event.target.value)}/>;}
+function App(){const[open,setOpen]=useState(true);const[id,setID]=useState(229);const[available,setAvailable]=useState(true);return <>
 <button onClick={()=>setOpen(!open)}>{open?'Leave instance':'Enter instance'}</button>
 <button onClick={()=>useAuthStore.setState({user:{id:2,username:'two',role:'admin'}})}>User two</button>
 <button onClick={()=>setID(228)}>Other instance</button>
-{open&&<HermesLiteServiceFrame instanceId={id} instanceName={'Hermes-'+id} instanceMode='lite' availability='available'/>}</>}
+<button onClick={()=>setAvailable(!available)}>{available?'Suspend runtime':'Resume runtime'}</button>
+{open&&<HermesLiteServiceFrame instanceId={id} instanceName={'Hermes-'+id} instanceMode='lite' availability={available?'available':'unavailable'} headerActions={<HeaderState/>}/>}</>}
 createRoot(document.getElementById('root')).render(<QueryClientProvider client={new QueryClient()}><I18nProvider><App/></I18nProvider></QueryClientProvider>);
 ` }, bundle: true, write: false, format: 'esm', jsx: 'automatic', define: { 'process.env.NODE_ENV': '"test"', 'import.meta.env': '{}'  } });
 const server = http.createServer((request, response) => {
@@ -40,12 +42,17 @@ setTimeout(()=>parent.postMessage({type:'clawmanager:hermes-desktop:ready',insta
   response.setHeader('Content-Type','text/html');response.end('<div id="root"></div><script type="module" src="/fixture.js"></script>');
 });
 await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
-const browser=await chromium.launch({channel:'chrome',headless:true});
+const browser=await chromium.launch({channel:'chrome',headless:true,args:['--no-sandbox']});
 try{
  const page=await browser.newPage();const errors=[];page.on('pageerror',e=>{errors.push(e.message);console.error('page error:', e.message)});
  await page.goto('http://127.0.0.1:'+server.address().port);
  const selected=()=>page.frameLocator('iframe').locator('#selected');
  await selected().getByText('#/recent-1-229',{exact:true}).waitFor();
+ const headerState=page.getByRole('textbox',{name:'Header working state'});await headerState.fill('Keep active skill operation');const headerNode=await headerState.elementHandle();
+ await page.getByRole('button',{name:'Suspend runtime'}).click();await page.getByRole('alert').waitFor();
+ assert.equal(await headerState.inputValue(),'Keep active skill operation');assert.equal(await headerState.evaluate((node,old)=>node===old,headerNode),true,'unavailable runtime retains header controller');
+ await page.getByRole('button',{name:'Resume runtime'}).click();await selected().getByText('#/recent-1-229',{exact:true}).waitFor();
+ assert.equal(await headerState.inputValue(),'Keep active skill operation','resuming retains header state');
  await page.frameLocator('iframe').getByText('Older session',{exact:true}).click();
  await page.getByText('Leave instance',{exact:true}).click();await page.getByText('Enter instance',{exact:true}).click();
  await selected().getByText('#/older-chat',{exact:true}).waitFor();

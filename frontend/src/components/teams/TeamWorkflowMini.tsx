@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ArrowDown, ArrowUpRight, Check, Circle, GitBranch, LoaderCircle, Pause, TriangleAlert } from "lucide-react";
+import { useI18n } from "../../contexts/I18nContext";
 import type { TeamMember, TeamWorkItem } from "../../types/team";
 import TeamBadge from './TeamBadge';
 import { memberIcon } from '../../lib/teamIcons';
@@ -45,6 +46,7 @@ export default function TeamWorkflowMini({ nodes, taskId, status, title, termina
   handoff?: { id: number; from: string; to: string; verb: string };
   freshHandoff: boolean;
 }) {
+  const { t } = useI18n();
   const tooltipId = useId();
   const [hovered, setHovered] = useState<{ id: string; x: number; y: number; width: number } | null>(null);
   const current = nodes.find(node => node.id === hovered?.id);
@@ -58,40 +60,40 @@ export default function TeamWorkflowMini({ nodes, taskId, status, title, termina
     setHovered({ id: node.id, width, x: Math.max(12, Math.min(rect.left - width - 12, window.innerWidth - width - 12)), y: Math.max(12, Math.min(rect.top - 12, window.innerHeight - 290)) });
   };
   const activeCount = nodes.filter(node => node.active).length;
-  return <section className="team-workflow-mini" aria-label="任务工作流缩略" onKeyDown={event => { if (event.key === "Escape") { event.stopPropagation(); clearHover(); } }}>
-    <button className="team-workflow-heading" type="button" onClick={onOpen} aria-label="展开任务看板">
-      <span><GitBranch size={14} />执行流程 <small>{taskId ? `#${taskId}` : ""}</small></span><ArrowUpRight size={14} />
+  return <section className="team-workflow-mini" aria-label={t("teams.workflow")} onKeyDown={event => { if (event.key === "Escape") { event.stopPropagation(); clearHover(); } }}>
+    <button className="team-workflow-heading" type="button" onClick={onOpen} aria-label={t("teams.openBoard")}>
+      <span><GitBranch size={14} />{t("teams.execution")} <small>{taskId ? `#${taskId}` : ""}</small></span><ArrowUpRight size={14} />
     </button>
-    <div className="team-workflow-status"><span>{status}</span>{activeCount > 1 && <b>{activeCount} 人并行</b>}</div>
-    <div className="team-workflow-order">{executionLabel || (nodes.some(node => node.dependsOn.length) ? "按任务依赖" : "按派发记录")}</div>
+    <div className="team-workflow-status"><span>{status}</span>{activeCount > 1 && <b>{t("teams.parallel", { count: activeCount })}</b>}</div>
+    <div className="team-workflow-order">{executionLabel || (nodes.some(node => node.dependsOn.length) ? t("teams.dependencyOrder") : t("teams.dispatchOrder"))}</div>
     <ol className="team-workflow-nodes">
       {nodes.map((node, index) => <li key={node.id} data-tone={node.tone} data-active={node.active}>
         {index > 0 && <span className="team-workflow-connector" data-linked={node.dependsOn.includes(nodes[index - 1].id)} aria-hidden="true">{node.dependsOn.includes(nodes[index - 1].id) && <ArrowDown size={12} />}</span>}
-        <button type="button" className="team-workflow-node" aria-label={`${node.owner}：${node.statusLabel}，打开看板`} aria-describedby={hovered?.id === node.id ? tooltipId : undefined}
+        <button type="button" className="team-workflow-node" aria-label={t("teams.openNode", { name: node.owner, status: node.statusLabel })} aria-describedby={hovered?.id === node.id ? tooltipId : undefined}
           onMouseEnter={event => show(node, event.currentTarget)} onMouseLeave={() => { hoverTimer.current = setTimeout(clearHover, 120); }}
           onFocus={event => show(node, event.currentTarget)} onBlur={clearHover}
           onClick={() => { clearHover(); onSelect(node.id); }}>
           <span className="team-workflow-marker" aria-hidden="true">{node.tone === "active" ? <LoaderCircle size={13} /> : node.tone === "done" ? <Check size={12} /> : node.tone === "error" ? <TriangleAlert size={12} /> : terminal ? <Pause size={11} /> : <Circle size={10} />}</span>
-          <span className="team-workflow-person"><span className="team-workflow-identity"><TeamBadge iconKey={node.iconKey || 'unknown'} size="workflow" /><strong>{node.owner}</strong></span><small>{node.role || "成员"}</small></span>
-          <span className="team-workflow-state">{node.active ? "执行中" : node.statusLabel}</span>
+          <span className="team-workflow-person"><span className="team-workflow-identity"><TeamBadge iconKey={node.iconKey || 'unknown'} size="workflow" /><strong>{node.owner}</strong></span><small>{node.role || t("teams.member")}</small></span>
+          <span className="team-workflow-state">{node.active ? t("teams.running") : node.statusLabel}</span>
         </button>
       </li>)}
     </ol>
-    {nodes.length === 0 && <button type="button" className="team-workflow-empty" onClick={onOpen}>{taskId ? "等待任务拆解" : "暂无任务"}</button>}
-    {handoff && <div key={handoff.id} className="team-workflow-handoff" data-fresh={freshHandoff} role="group" tabIndex={0} aria-label={`最近传递：${handoff.from} → ${handoff.to} · ${handoff.verb}`} title={`${handoff.from} → ${handoff.to} · ${handoff.verb}`}>
-      <span className="team-workflow-handoff-caption">最近传递</span>
+    {nodes.length === 0 && <button type="button" className="team-workflow-empty" onClick={onOpen}>{t(taskId ? "teams.waitingBreakdown" : "teams.noTasks")}</button>}
+    {handoff && <div key={handoff.id} className="team-workflow-handoff" data-fresh={freshHandoff} role="group" tabIndex={0} aria-label={`${t("teams.recentTransfer")}：${handoff.from} → ${handoff.to} · ${handoff.verb}`} title={`${handoff.from} → ${handoff.to} · ${handoff.verb}`}>
+      <span className="team-workflow-handoff-caption">{t("teams.recentTransfer")}</span>
       <div className="team-workflow-handoff-route">
-        <div className="team-workflow-handoff-row"><span>发出</span><strong>{handoff.from}</strong></div>
+        <div className="team-workflow-handoff-row"><span>{t("teams.from")}</span><strong>{handoff.from}</strong></div>
         <ArrowDown className="team-workflow-handoff-arrow" size={14} aria-hidden="true" />
-        <div className="team-workflow-handoff-row"><span>接收</span><strong>{handoff.to}</strong></div>
+        <div className="team-workflow-handoff-row"><span>{t("teams.to")}</span><strong>{handoff.to}</strong></div>
       </div>
     </div>}
     {hovered && current && createPortal(<div id={tooltipId} role="tooltip" className="team-workflow-tooltip" style={{ left: hovered.x, top: hovered.y, width: hovered.width }}
       onMouseEnter={() => clearTimeout(hoverTimer.current)} onMouseLeave={clearHover}>
-      <div className="team-workflow-tooltip-caption">{current.owner} · {current.role || "成员"}</div>
+      <div className="team-workflow-tooltip-caption">{current.owner} · {current.role || t("teams.member")}</div>
       <strong>{current.title}</strong>
       <div className="team-workflow-tooltip-status">{current.statusLabel}{terminal && current.column !== "done" ? " · 根任务已结束，保留原执行记录" : ""}</div>
-      <p>{current.summary || current.detail || "尚无进展摘要"}</p>
+      <p>{current.summary || current.detail || t("teams.noProgress")}</p>
       {current.dependencyNames.length > 0 && <p>依赖：{current.dependencyNames.join("、")}</p>}
       <div className="team-workflow-tooltip-footer">{title}<br />点击节点打开完整 Kanban</div>
     </div>, document.body)}

@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, type ReactNode } from "react";
+import { useI18n } from "../../contexts/I18nContext";
 import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
 import { ArrowUpRight, ChevronLeft, ChevronRight, MonitorUp, Users, X } from "lucide-react";
@@ -14,11 +15,12 @@ function Avatar({ member, index, leaderKey }: { member: TeamMember; index: numbe
 }
 
 export function MemberEntry({ member, compact = false }: { member: TeamMember; compact?: boolean }) {
+  const { t } = useI18n();
   const environment = useTeamPageEnvironment();
   const entry = member.instance_id ? environment.memberEntry?.(member.instance_id) : undefined;
   return member.instance_id ? <Link to={entry?.to || `/instances/${member.instance_id}`} state={entry?.state} target={entry ? entry.target : "_blank"} rel="noreferrer" className={compact ? "team-roster-quick-entry" : "team-roster-entry"} aria-label={`进入${member.display_name}实例 #${member.instance_id}`}>
-    {compact && <MonitorUp size={13} />}<span>{compact ? "进入" : "进入实例"}</span>{!compact && <ArrowUpRight size={13} />}
-  </Link> : <span className="team-roster-no-instance">{compact ? "待创建" : "实例待创建"}</span>;
+    {compact && <MonitorUp size={13} />}<span>{t(compact ? "teams.entry" : "teams.enterInstance")}</span>{!compact && <ArrowUpRight size={13} />}
+  </Link> : <span className="team-roster-no-instance">{t("teams.pendingInstance")}</span>;
 }
 
 export function MemberPager({ page, pages, onPage }: { page: number; pages: number; onPage: (page: number) => void }) {
@@ -29,8 +31,9 @@ export function MemberPager({ page, pages, onPage }: { page: number; pages: numb
 type RosterProps = { members: TeamMember[]; start: number; leaderKey?: string; onDetails: (id: number) => void };
 
 export function MemberRail({ members, start, leaderKey, onOpen, onDetails, total, expanded, panelId, pager }: RosterProps & { onOpen: () => void; total: number; expanded: boolean; panelId: string; pager: ReactNode }) {
+  const { t } = useI18n();
   return <>
-    <button type="button" className="team-roster-rail-heading" aria-label="展开成员与团队配置" aria-expanded={expanded} aria-controls={panelId} onClick={onOpen}><Users size={18} /><span>成员 <small>{total}</small></span></button>
+    <button type="button" className="team-roster-rail-heading" aria-label={t("teams.membersLabel")} aria-expanded={expanded} aria-controls={panelId} onClick={onOpen}><Users size={18} /><span>{t("teams.members")} <small>{total}</small></span></button>
     {members.map((member, index) => {
       const state = memberRailState(member);
       return <div key={member.id} className="team-roster-mini" data-member-id={member.id} data-tone={state.tone}>

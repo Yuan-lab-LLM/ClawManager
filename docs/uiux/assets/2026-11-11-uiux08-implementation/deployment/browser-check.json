@@ -1,0 +1,17 @@
+{
+  "url": "https://10.130.81.54:30443",
+  "read_only": true,
+  "checks": [
+    "existing account login",
+    "instances live route, new header and table",
+    "instances filter keyboard/focus",
+    "instances 390px viewport",
+    "runtimes live route, new header and table",
+    "runtimes filter keyboard/focus",
+    "runtimes 390px viewport",
+    "teams live route, new header and table",
+    "teams 390px viewport"
+  ],
+  "page_errors": [],
+  "http_5xx": []
+}

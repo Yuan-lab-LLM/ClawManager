@@ -44,8 +44,8 @@ try {
     document.dispatchEvent(new Event('visibilitychange'));
   }, hidden);
   await page.goto(`http://127.0.0.1:${server.address().port}/admin/runtime-pods`);
-  const red = page.getByRole('button', { name: 'Slot 1 · Instance error', exact: true });
-  const green = page.getByRole('button', { name: 'Slot 1 · Running', exact: true });
+  const red = page.getByRole('img', {name: /Slot distribution.*Instance error 1/});
+  const green = page.getByRole('img', {name: /Slot distribution.*Running 1/});
   await red.waitFor(); state = 'running'; await green.waitFor({ timeout: 7000 });
   state = 'error'; await red.waitFor({ timeout: 7000 });
   await visibility(true); const before = reads; state = 'running'; await page.waitForTimeout(6500);
@@ -59,7 +59,7 @@ try {
   await page.waitForFunction(() => window.sockets.length === 2);
   state = 'running'; await page.evaluate(() => window.sockets.at(-1).onopen());
   await green.waitFor({ timeout: 1400 });
-  await green.click(); const detailsBefore = reads; await visibility(true); await page.waitForTimeout(6500);
+  await page.getByRole('button', {name:'openclaw-test',exact:true}).click(); await page.getByRole('button', {name:'Slot 1 · Running',exact:true}).waitFor(); const detailsBefore = reads; await visibility(true); await page.waitForTimeout(6500);
   assert.ok(reads >= detailsBefore + 2, 'background Runtime detail inventory stopped polling');
   console.log('PASS Runtime overview/detail background refresh, lifecycle events and WebSocket reconnect without reload');
 } finally { await browser.close(); await new Promise(resolve => { server.close(resolve); server.closeAllConnections(); }); }

@@ -34,6 +34,7 @@ type runtimeSlotAuditOwner struct {
 	State       string `json:"state"`
 }
 type runtimeSlotAuditSnapshot struct {
+	Digest                 string                 `json:"digest"`
 	PodUID                 string                 `json:"pod_uid"`
 	WorkerEpoch            string                 `json:"worker_epoch"`
 	IdleConfirmed          *bool                  `json:"idle_confirmed"`

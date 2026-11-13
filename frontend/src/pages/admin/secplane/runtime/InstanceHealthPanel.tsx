@@ -73,11 +73,11 @@ const InstanceHealthPanel: React.FC<Props> = ({ instances, loading, error, onRel
           {instances.map((inst) => (
             <div
               key={inst.id}
-              className="flex items-center gap-2 rounded-lg border border-[#eadfd8] bg-white px-3 py-2"
+              className="flex items-center gap-2 rounded-lg border border-[var(--cm-border)] bg-white px-3 py-2"
             >
               <span className={`badge ${statusBadge(inst.status)}`}>{inst.status}</span>
               <div className="flex-1 min-w-0">
-                <div className="text-sm font-semibold text-[#171212] truncate" title={inst.name}>
+                <div className="text-sm font-semibold text-[var(--cm-ink)] truncate" title={inst.name}>
                   {inst.name}
                 </div>
                 <div className="muted-strong text-xs font-mono">#{inst.id}</div>

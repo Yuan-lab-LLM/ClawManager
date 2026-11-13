@@ -3,6 +3,7 @@ package handlers
 import (
 	"clawreef/internal/services"
 	"clawreef/internal/utils"
+	"errors"
 	"github.com/gin-gonic/gin"
 	"net/http"
 )
@@ -122,4 +123,26 @@ func (h *RuntimeManagementHandler) Balance(c *gin.Context) {
 		return
 	}
 	utils.Success(c, http.StatusAccepted, "Runtime balance queued", result)
+}
+
+// PrepareRollout restores verified old native capacity before compatibility
+// preflight. It never changes a Runtime image or starts a user instance.
+func (h *RuntimeManagementHandler) PrepareRollout(c *gin.Context) {
+	var req struct {
+		RuntimeType string `json:"runtime_type" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		utils.ValidationError(c, err)
+		return
+	}
+	operation, err := h.service.PrepareRollout(c.Request.Context(), req.RuntimeType, currentUserIDPtr(c))
+	if err != nil {
+		status := http.StatusConflict
+		if errors.Is(err, services.ErrRuntimeUpgradeCommitUncertain) {
+			status = http.StatusInternalServerError
+		}
+		utils.Error(c, status, err.Error())
+		return
+	}
+	utils.Success(c, http.StatusAccepted, "Runtime upgrade preparation queued", gin.H{"operation": operation})
 }

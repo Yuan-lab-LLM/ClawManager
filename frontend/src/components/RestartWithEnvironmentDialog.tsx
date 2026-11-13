@@ -162,7 +162,7 @@ const RestartWithEnvironmentDialog: React.FC<
         role="dialog"
         aria-modal="true"
         aria-labelledby="restart-with-environment-title"
-        className="flex max-h-[min(760px,calc(100vh-3rem))] w-full max-w-2xl flex-col overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-[0_36px_100px_-48px_rgba(15,23,42,0.62)]"
+        className="flex max-h-[min(760px,calc(100vh-3rem))] w-full max-w-2xl flex-col overflow-hidden rounded-[var(--cm-radius-dialog)] border border-slate-200 bg-white shadow-2xl"
       >
         <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
           <div className="min-w-0">

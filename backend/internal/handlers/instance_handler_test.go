@@ -16,6 +16,7 @@ import (
 	"clawreef/internal/models"
 	"clawreef/internal/repository"
 	"clawreef/internal/services"
+	"clawreef/internal/utils"
 
 	"github.com/gin-gonic/gin"
 )
@@ -51,6 +52,21 @@ func TestBatchDeleteLiteInstancesQueuesSlowNativeCleanup(t *testing.T) {
 	(&InstanceHandler{instanceService: service}).BatchDeleteLiteInstances(c)
 	if recorder.Code != http.StatusAccepted || service.queued != 1 || service.synchronous != 0 {
 		t.Fatalf("batch request waited for native teardown: queued=%d synchronous=%d response=%s", service.queued, service.synchronous, recorder.Body.String())
+	}
+}
+
+func TestDeleteInstanceQueuesSlowNativeCleanup(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	service := &queuedBatchDeleteService{fakeWorkspaceHandlerInstanceService: fakeWorkspaceHandlerInstanceService{instances: map[int]*models.Instance{7: {ID: 7, UserID: 1, InstanceMode: "lite", RuntimeType: "gateway"}}}}
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Params = gin.Params{{Key: "id", Value: "7"}}
+	c.Request = httptest.NewRequest(http.MethodDelete, "/api/v1/instances/7", nil)
+	c.Set("userID", 1)
+	c.Set("userRole", "user")
+	(&InstanceHandler{instanceService: service}).DeleteInstance(c)
+	if recorder.Code != http.StatusAccepted || service.queued != 1 || service.synchronous != 0 {
+		t.Fatalf("HTTP delete waited for native proof: queued=%d synchronous=%d response=%s", service.queued, service.synchronous, recorder.Body.String())
 	}
 }
 
@@ -145,6 +161,71 @@ func TestInstanceCreateRequestToServiceIncludesOwner(t *testing.T) {
 	got := instanceCreateRequestToService(req)
 	if got.Owner == nil || *got.Owner != owner {
 		t.Fatalf("owner = %v, want %q", got.Owner, owner)
+	}
+}
+
+type postCreateInstanceService struct {
+	fakeWorkspaceHandlerInstanceService
+	err error
+}
+
+func (s *postCreateInstanceService) Create(userID int, req services.CreateInstanceRequest) (*models.Instance, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	return &models.Instance{ID: 71, UserID: userID, Name: req.Name}, nil
+}
+
+type postCreateSkillService struct {
+	services.SkillService
+	err error
+}
+
+func (s *postCreateSkillService) AttachSkillToInstance(int, string, int, int) (*services.InstanceSkillPayload, error) {
+	return nil, s.err
+}
+
+func TestCreateInstanceReportsCreatedIdentityAfterSkillFailure(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, tc := range []struct {
+		name       string
+		createErr  error
+		skillErr   error
+		wantStatus int
+		wantHeader string
+		wantError  string
+	}{
+		{name: "attach forbidden", skillErr: errors.New("skill_attach_forbidden"), wantStatus: http.StatusForbidden, wantHeader: "71", wantError: "skill_attach_forbidden"},
+		{name: "package pending", skillErr: errors.New("skill_package_pending"), wantStatus: http.StatusConflict, wantHeader: "71", wantError: "skill_package_pending"},
+		{name: "package checksum", skillErr: utils.NewHubError("skill_package_md5_mismatch", "checksum failed", nil), wantStatus: http.StatusBadRequest, wantHeader: "71", wantError: "skill_package_md5_mismatch"},
+		{name: "create failed", createErr: errors.New("instance name already exists"), wantStatus: http.StatusConflict, wantError: "instance name already exists"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/instances", strings.NewReader(`{"name":"created-lite","type":"openclaw","cpu_cores":2,"memory_gb":4,"disk_gb":10,"os_type":"openclaw","os_version":"latest","skill_ids":[17]}`))
+			c.Request.Header.Set("Content-Type", "application/json")
+			c.Set("userID", 7)
+			c.Set("userRole", "user")
+			handler := &InstanceHandler{instanceService: &postCreateInstanceService{err: tc.createErr}, skillService: &postCreateSkillService{err: tc.skillErr}}
+			handler.CreateInstance(c)
+			if recorder.Code != tc.wantStatus {
+				t.Fatalf("status = %d, want %d: %s", recorder.Code, tc.wantStatus, recorder.Body.String())
+			}
+			var response struct {
+				Success bool   `json:"success"`
+				Error   string `json:"error"`
+			}
+			if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+				t.Fatal(err)
+			}
+			if response.Success || response.Error != tc.wantError {
+				t.Fatalf("error response = %#v, want error %q", response, tc.wantError)
+			}
+			if got := recorder.Header().Get("X-ClawManager-Created-Instance"); got != tc.wantHeader {
+				t.Fatalf("created instance header = %q, want %q", got, tc.wantHeader)
+			}
+		})
 	}
 }
 
@@ -1151,6 +1232,9 @@ func TestBuildLiteBatchCreateRequestsDefaultsToGatewayLite(t *testing.T) {
 		t.Fatalf("request count = %d/%d, want 2/2", len(requests), len(handlerRequests))
 	}
 	for idx, req := range requests {
+		if req.Owner != nil || handlerRequests[idx].Owner != nil {
+			t.Fatalf("request %d omitted owner = %v/%v, want nil/nil", idx, req.Owner, handlerRequests[idx].Owner)
+		}
 		if req.Name == "" || req.Mode != services.InstanceModeLite || req.InstanceMode != services.InstanceModeLite || req.RuntimeType != services.RuntimeBackendGateway {
 			t.Fatalf("request %d was not normalized to lite gateway: %#v", idx, req)
 		}
@@ -1160,6 +1244,44 @@ func TestBuildLiteBatchCreateRequestsDefaultsToGatewayLite(t *testing.T) {
 		if req.DiskGB != services.DefaultLiteDiskGB {
 			t.Fatalf("request %d disk = %dGiB, want %dGiB", idx, req.DiskGB, services.DefaultLiteDiskGB)
 		}
+	}
+}
+
+func TestBuildLiteBatchCreateRequestsPreservesSharedMetadata(t *testing.T) {
+	for _, instanceType := range []string{"openclaw", "hermes", "opencode", "deepseek-harness"} {
+		t.Run(instanceType, func(t *testing.T) {
+			var input BatchCreateLiteInstancesRequest
+			body := fmt.Sprintf(`{"name_prefix":"shared","count":2,"start_index":9,"template":{"type":%q,"owner":"team@example.com","description":"Shared setup","environment_overrides":{"API_TOKEN":"value=with=equals","LOG_LEVEL":"info"},"skill_ids":[17,23],"openclaw_config_plan":{"mode":"manual","resource_ids":[31]}}}`, instanceType)
+			if err := json.Unmarshal([]byte(body), &input); err != nil {
+				t.Fatal(err)
+			}
+			requests, handlerRequests, err := buildLiteBatchCreateRequests(input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(requests) != 2 || len(handlerRequests) != 2 {
+				t.Fatalf("request count = %d/%d, want 2/2", len(requests), len(handlerRequests))
+			}
+			for idx, req := range requests {
+				handlerReq := handlerRequests[idx]
+				wantName := fmt.Sprintf("shared-%03d", idx+9)
+				if req.Name != wantName || handlerReq.Name != wantName || req.Type != instanceType || handlerReq.Type != instanceType {
+					t.Fatalf("request %d identity = %q/%q %q/%q", idx, req.Name, handlerReq.Name, req.Type, handlerReq.Type)
+				}
+				if req.Owner == nil || *req.Owner != "team@example.com" || handlerReq.Owner == nil || *handlerReq.Owner != "team@example.com" {
+					t.Fatalf("request %d owner = %v/%v, want shared owner", idx, req.Owner, handlerReq.Owner)
+				}
+				if req.Description == nil || *req.Description != "Shared setup" || handlerReq.Description == nil || *handlerReq.Description != "Shared setup" {
+					t.Fatalf("request %d description = %v/%v, want shared description", idx, req.Description, handlerReq.Description)
+				}
+				if !reflect.DeepEqual(req.EnvironmentOverrides, input.Template.EnvironmentOverrides) || !reflect.DeepEqual(handlerReq.EnvironmentOverrides, input.Template.EnvironmentOverrides) {
+					t.Fatalf("request %d lost shared environment: %#v / %#v", idx, req.EnvironmentOverrides, handlerReq.EnvironmentOverrides)
+				}
+				if !reflect.DeepEqual(handlerReq.SkillIDs, []int{17, 23}) || !reflect.DeepEqual(req.OpenClawConfigPlan, input.Template.OpenClawConfigPlan) || !reflect.DeepEqual(handlerReq.OpenClawConfigPlan, input.Template.OpenClawConfigPlan) {
+					t.Fatalf("request %d lost skills or configuration plan: %#v / %#v", idx, req, handlerReq)
+				}
+			}
+		})
 	}
 }
 
@@ -1476,5 +1598,53 @@ func TestBatchDeleteLiteInstancesSharesRetryBudget(t *testing.T) {
 	}
 	if recorder.Code != http.StatusMultiStatus {
 		t.Fatalf("busy batch result: %s", recorder.Body.String())
+	}
+}
+
+type selectivelyBusyBatchDeleteService struct {
+	fakeWorkspaceHandlerInstanceService
+	queued map[int]bool
+}
+
+func (s *selectivelyBusyBatchDeleteService) QueueDelete(id int) error {
+	if id == 7 {
+		return models.ErrInstanceLifecycleLockBusy
+	}
+	s.queued[id] = true
+	return nil
+}
+
+func TestBatchDeleteLiteInstancesBusyEntryDoesNotStarveOtherEntries(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	service := &selectivelyBusyBatchDeleteService{
+		fakeWorkspaceHandlerInstanceService: fakeWorkspaceHandlerInstanceService{instances: map[int]*models.Instance{
+			7: {ID: 7, UserID: 1, InstanceMode: "lite", RuntimeType: "gateway"},
+			8: {ID: 8, UserID: 1, InstanceMode: "lite", RuntimeType: "gateway"},
+			9: {ID: 9, UserID: 1, InstanceMode: "lite", RuntimeType: "gateway"},
+		}},
+		queued: make(map[int]bool),
+	}
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	ctx, cancel := context.WithTimeout(context.Background(), 80*time.Millisecond)
+	defer cancel()
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/instances/batch/delete", strings.NewReader(`{"instance_ids":[7,8,9]}`)).WithContext(ctx)
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set("userID", 1)
+	c.Set("userRole", "user")
+	(&InstanceHandler{instanceService: service}).BatchDeleteLiteInstances(c)
+	var response struct {
+		Data BatchDeleteLiteInstancesResponse `json:"data"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if recorder.Code != http.StatusMultiStatus || !service.queued[8] || !service.queued[9] || response.Data.Deleted != 2 || response.Data.Failed != 1 {
+		t.Fatalf("busy first entry starved available entries: queued=%v response=%s", service.queued, recorder.Body.String())
+	}
+	for idx, id := range []int{7, 8, 9} {
+		if response.Data.Results[idx].InstanceID != id {
+			t.Fatalf("batch result order changed: %s", recorder.Body.String())
+		}
 	}
 }

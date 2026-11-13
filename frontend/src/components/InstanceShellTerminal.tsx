@@ -345,7 +345,7 @@ export function InstanceShellTerminal({
     : t("instances.enterFullscreen");
   const containerFrameClass = isFullscreen
     ? "h-screen min-h-0 max-h-none rounded-none border-0 shadow-none"
-    : `rounded-lg border border-[#1f2937] shadow-[0_30px_90px_-56px_rgba(17,24,39,0.9)] ${heightClassName}`;
+    : `rounded-lg border border-[#1f2937] shadow-sm ${heightClassName}`;
 
   if (!isRunning && !isConnected) {
     return (

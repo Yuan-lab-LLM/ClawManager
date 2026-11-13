@@ -45,8 +45,11 @@ export function useOwnerTeams(owner?: string) {
   useEffect(() => { setPage(1); }, [query]);
   useEffect(() => {
     const controller = new AbortController(); void refresh(controller.signal);
+    const update = () => { if (!document.hidden) void refresh(controller.signal); };
+    window.addEventListener('focus', update);
+    window.addEventListener('online', update);
     const timer = window.setInterval(() => { if (!document.hidden) void refresh(controller.signal); }, 10_000);
-    return () => { controller.abort(); sequence.current++; clearInterval(timer); };
+    return () => { controller.abort(); sequence.current++; clearInterval(timer); window.removeEventListener('focus', update); window.removeEventListener('online', update); };
   }, [refresh]);
   const currentOwner = loadedOwner === owner;
   return { owner: owner || '', capabilities: currentOwner ? capabilities : null, enabled: currentOwner && capabilities?.enabled === true, teams: currentOwner ? teams : [], total: currentOwner ? total : 0, loading, error: currentOwner ? error : '', query, selectedID: selectedID || (currentOwner ? teams[0]?.id : null) || null, expandedID, leftTab,
@@ -54,7 +57,7 @@ export function useOwnerTeams(owner?: string) {
     setLeftTab: (tab: 'instances' | 'teams') => setPresentation({ workspace_tab: tab }),
     select: (id: number) => setPresentation({ selected_team_id: String(id), dashboard_tab: 'team', view: 'overview' }),
     expand: (id: number) => setPresentation({ expanded_team_id: expandedID === id ? null : String(id), selected_team_id: String(id), dashboard_tab: 'team', view: 'overview' }),
-    refresh: () => refresh(), loadMore: () => setPage(p => p + 1), hasMore: teams.length < total,
+    refresh, loadMore: () => setPage(p => p + 1), hasMore: teams.length < total,
   };
 }
 export type OwnerTeamsState = ReturnType<typeof useOwnerTeams>;

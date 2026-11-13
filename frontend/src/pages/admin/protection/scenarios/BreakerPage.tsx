@@ -108,7 +108,7 @@ const BreakerPage: React.FC = () => {
         <div className="panel">
           <div className="hero-block">
             <div className="h-eyebrow">{t(`${k}.hero.eyebrow`)}</div>
-            <h2 className="h-title">{t(`${k}.hero.title`)}</h2>
+            <h2 className="section-title">{t(`${k}.hero.title`)}</h2>
             <p className="h-subtitle">{t(`${k}.hero.subtitle`)}</p>
           </div>
           <div className="grid grid-cols-4 gap-3 mt-5">
@@ -140,19 +140,19 @@ const BreakerPage: React.FC = () => {
         </div>
 
         {active && (
-          <div className="panel" style={{ border: '2px solid #f4b6b3', background: 'linear-gradient(180deg, #fdeded 0%, #ffffff 60%)' }}>
+          <div className="panel" style={{ border: '2px solid #f4b6b3', background: 'var(--cm-error-background)' }}>
             <div className="flex items-start justify-between gap-4">
               <div className="flex items-start gap-3">
-                <div className="w-12 h-12 rounded-2xl bg-red-600 flex items-center justify-center" style={{ flexShrink: 0 }}>
+                <div className="w-12 h-12 rounded-lg bg-red-600 flex items-center justify-center" style={{ flexShrink: 0 }}>
                   <svg width="22" height="22" fill="none" viewBox="0 0 24 24" stroke="white">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
                   </svg>
                 </div>
                 <div>
                   <div className="eyebrow" style={{ color: '#b42318' }}>{t(`${k}.activePanel.breakerActive`)}</div>
-                  <h3 className="text-2xl font-bold text-[#171212] mt-1">{t(`${k}.activePanel.systemLevelBreaker`)}</h3>
+                  <h3 className="text-2xl font-bold text-[var(--cm-ink)] mt-1">{t(`${k}.activePanel.systemLevelBreaker`)}</h3>
                   <div className="text-xs muted mt-1">
-                    {t(`${k}.activePanel.reason`)}<strong className="text-[#171212]">{ks?.reason || t(`${k}.activePanel.none`)}</strong>
+                    {t(`${k}.activePanel.reason`)}<strong className="text-[var(--cm-ink)]">{ks?.reason || t(`${k}.activePanel.none`)}</strong>
                     <span className="ml-3">{t(`${k}.activePanel.enabledBy`)}{ks?.set_by || t(`${k}.activePanel.none`)}</span>
                     <span className="ml-3">{t(`${k}.activePanel.enabledAt`)}{ks?.set_at?.replace('T', ' ').slice(0, 19) ?? '-'}</span>
                   </div>
@@ -178,8 +178,8 @@ const BreakerPage: React.FC = () => {
 
             <div className="space-y-3 mb-4 text-sm">
               <div>
-                <div className="eyebrow text-[10px] mb-1">{t(`${k}.manualTrigger.impactPreview`)}</div>
-                <div className="p-3 rounded-xl bg-[#fdf6f1] border border-[#eadfd8] text-xs">
+                <div className="eyebrow text-xs mb-1">{t(`${k}.manualTrigger.impactPreview`)}</div>
+                <div className="p-3 rounded-xl bg-[var(--cm-subtle)] border border-[var(--cm-border)] text-xs">
                   {t(`${k}.manualTrigger.willAffect`)} <strong>{runningInstances.length}</strong> {t(`${k}.manualTrigger.runningInstancesUnit`)}
                   {runningInstances.length === 0 ? (
                     <span className="muted ml-1">{t(`${k}.manualTrigger.noRunningInstances`)}</span>
@@ -195,7 +195,7 @@ const BreakerPage: React.FC = () => {
                 </div>
               </div>
               <div>
-                <div className="eyebrow text-[10px] mb-1">{t(`${k}.manualTrigger.reasonRequired`)}</div>
+                <div className="eyebrow text-xs mb-1">{t(`${k}.manualTrigger.reasonRequired`)}</div>
                 <textarea
                   className="input"
                   rows={3}
@@ -206,8 +206,8 @@ const BreakerPage: React.FC = () => {
                 />
               </div>
               <div>
-                <div className="eyebrow text-[10px] mb-1">
-                  {t(`${k}.manualTrigger.confirmInstruction`)}<code className="text-[11px] text-[#b42318] bg-[#fdf6f1] px-1 rounded">{t(`${k}.manualTrigger.confirmCode`)}</code>{t(`${k}.manualTrigger.confirmCodeHint`)}
+                <div className="eyebrow text-xs mb-1">
+                  {t(`${k}.manualTrigger.confirmInstruction`)}<code className="text-[11px] text-[#b42318] bg-[var(--cm-subtle)] px-1 rounded">{t(`${k}.manualTrigger.confirmCode`)}</code>{t(`${k}.manualTrigger.confirmCodeHint`)}
                 </div>
                 <input
                   className="input"
@@ -219,9 +219,9 @@ const BreakerPage: React.FC = () => {
               </div>
             </div>
             <button
-              className="inline-flex items-center justify-center gap-2 rounded-2xl px-5 py-3 text-sm font-semibold text-white w-full"
+              className="inline-flex items-center justify-center gap-2 rounded-lg px-5 py-3 text-sm font-semibold text-white w-full"
               style={{
-                background: canExecute ? 'linear-gradient(135deg,#dc2626,#991b1b)' : '#d8c4b9',
+                background: canExecute ? 'var(--cm-error)' : '#d8c4b9',
                 cursor: canExecute ? 'pointer' : 'not-allowed',
               }}
               disabled={!canExecute}
@@ -242,7 +242,7 @@ const BreakerPage: React.FC = () => {
               {active ? t(`${k}.deactivation.afterDeactivation`) : t(`${k}.deactivation.currentlyInactive`)}
             </div>
             <div className="space-y-3 text-sm mb-4">
-              <div className="p-3 rounded-xl border bg-[#fdf6f1]" style={{ borderColor: '#eadfd8' }}>
+              <div className="p-3 rounded-xl border bg-[var(--cm-subtle)]" style={{ borderColor: 'var(--cm-border)' }}>
                 <div className="flex items-center justify-between">
                   <span className="text-xs muted-strong">{t(`${k}.deactivation.status`)}</span>
                   <span className={`badge ${active ? 'badge-red' : 'badge-green'}`}>
@@ -252,7 +252,7 @@ const BreakerPage: React.FC = () => {
                 {active && (
                   <>
                     <div className="text-xs muted mt-2">
-                      {t(`${k}.deactivation.reason`)}<span className="text-[#171212]">{ks?.reason || t(`${k}.activePanel.none`)}</span>
+                      {t(`${k}.deactivation.reason`)}<span className="text-[var(--cm-ink)]">{ks?.reason || t(`${k}.activePanel.none`)}</span>
                     </div>
                     <div className="text-xs muted">
                       {t(`${k}.deactivation.enabledAt`)}{ks?.set_at?.replace('T', ' ').slice(0, 19) ?? '-'}

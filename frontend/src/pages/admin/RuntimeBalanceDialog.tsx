@@ -1,3 +1,4 @@
+import FilterSelect from "../../components/FilterSelect";
 import { useRef, useState } from "react";
 import axios from "axios";
 import { useI18n } from "../../contexts/I18nContext";
@@ -5,7 +6,7 @@ import { runtimeError } from "../../lib/runtimeManagement";
 import { runtimePoolService } from "../../services/runtimePoolService";
 import { formatInstanceType } from "../../types/instance";
 import type { RuntimeBalancePlan, RuntimeType } from "../../types/runtimePool";
-import { buttonClass, primaryClass, inputClass, ErrorMessage, RuntimeDialog } from "./RuntimeManagementUI";
+import { buttonClass, primaryClass, ErrorMessage, RuntimeDialog } from "./RuntimeManagementUI";
 
 const runtimeTypes: Array<RuntimeType | "all"> = ["all", "openclaw", "hermes", "opencode", "deepseek-harness"];
 
@@ -50,15 +51,13 @@ export default function RuntimeBalanceDialog({ onClose, onSubmitted }: { onClose
       {error && <ErrorMessage>{error}</ErrorMessage>}
       <p className="text-xs leading-5 text-slate-500">{t("runtimePods.balanceHelp")}</p>
       <div className="flex items-end gap-3">
-        <label className="flex-1 space-y-1 text-xs"><span>{t("runtimePods.runtimeType")}</span>
-          <select aria-label={t("runtimePods.runtimeType")} className={`${inputClass} w-full`} value={type} disabled={busy} onChange={event => {
-            const next = event.target.value as RuntimeType | "all";
+        <div className="flex-1 space-y-1 text-xs"><span>{t("runtimePods.runtimeType")}</span>
+          <FilterSelect label={t("runtimePods.runtimeType")} value={type} disabled={busy} onChange={value => {
+            const next = value as RuntimeType | "all";
             if (!runtimeTypes.includes(next)) return;
             version.current++; setType(next); setPlan(undefined); planRef.current = undefined; setAcknowledged(false); setError(undefined); setBusy(false);
-          }}>
-            {runtimeTypes.map(value => <option key={value} value={value}>{value === "all" ? t("common.all") : formatInstanceType(value)}</option>)}
-          </select>
-        </label>
+          }} options={runtimeTypes.map(value => ({value,label:value === "all" ? t("common.all") : formatInstanceType(value)}))} />
+        </div>
         <button type="button" className={buttonClass} disabled={busy} onClick={() => void preview()}>{t("runtimePods.previewBalance")}</button>
       </div>
       {plan && <>

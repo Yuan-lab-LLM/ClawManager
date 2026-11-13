@@ -1,3 +1,4 @@
+import FilterSelect from "../../components/FilterSelect";
 import { useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import axios from "axios";
@@ -67,9 +68,7 @@ function SettingsForm({ settings, onClose, onRefresh, refreshing }: { settings: 
           <legend>{t(field.label)}</legend>
           <div className="flex gap-2">
             <input className={`${inputClass} min-w-0 flex-1`} aria-label={t(field.label)} type="number" min={1} max={Math.floor(MAX_AUTO_STOP_SECONDS / AUTO_STOP_UNITS[field.unit])} step={1} required value={field.value} disabled={busy || refreshing} aria-invalid={field.seconds === undefined} aria-describedby={field.seconds === undefined ? "auto-stop-duration-error" : undefined} onChange={event => { field.setValue(event.target.value); changed(); }} />
-            <select className={inputClass} aria-label={t(field.unitLabel)} value={field.unit} disabled={busy || refreshing} onChange={event => { field.setUnit(event.target.value as AutoStopUnit); changed(); }}>
-              {(Object.keys(AUTO_STOP_UNITS) as AutoStopUnit[]).map(unit => <option key={unit} value={unit}>{t(`autoStop.unit_${unit}`)}</option>)}
-            </select>
+            <FilterSelect label={t(field.unitLabel)} value={field.unit} disabled={busy || refreshing} onChange={value => { field.setUnit(value as AutoStopUnit); changed(); }} options={(Object.keys(AUTO_STOP_UNITS) as AutoStopUnit[]).map(value => ({value,label:t(`autoStop.unit_${value}`)}))} />
           </div>
         </fieldset>)}
       </div>

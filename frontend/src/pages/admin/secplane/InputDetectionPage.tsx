@@ -330,7 +330,7 @@ const InputDetectionPage: React.FC = () => {
           <td className="px-4 py-3 align-top">
             <div className={`font-medium ${state === 'off' ? 'text-gray-500' : 'text-gray-900'}`}>{defenseDisplay(d.name)}</div>
             <div className="mt-0.5 text-xs text-gray-500">{defenseHelp(d.name)}</div>
-            <div className="mt-0.5 font-mono text-[10px] text-gray-400">{d.ruleID}</div>
+            <div className="mt-0.5 font-mono text-xs text-gray-400">{d.ruleID}</div>
           </td>
           <td className="px-4 py-3 text-right">
             <div className="inline-flex divide-x divide-gray-300 overflow-hidden rounded-md border border-gray-300">
@@ -356,7 +356,7 @@ const InputDetectionPage: React.FC = () => {
           <td className="px-4 py-3 align-top">
             <div className={`font-medium ${state === 'off' ? 'text-gray-500' : 'text-gray-900'}`}>{defenseDisplay(d.name)}</div>
             <div className="mt-0.5 text-xs text-gray-500">{defenseHelp(d.name)}</div>
-            <div className="mt-0.5 font-mono text-[10px] text-gray-400">{d.ruleID}</div>
+            <div className="mt-0.5 font-mono text-xs text-gray-400">{d.ruleID}</div>
           </td>
           <td className="px-4 py-3 text-right">
             <div className="inline-flex divide-x divide-gray-300 overflow-hidden rounded-md border border-gray-300">

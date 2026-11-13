@@ -63,8 +63,8 @@ const RuleDetailModal: React.FC<Props> = ({ data, onClose }) => {
                 <div key={c.flag} style={{ marginBottom: idx === data.categories.length - 1 ? 0 : 20 }}>
                   <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center gap-2">
-                      <code className="text-xs font-bold text-[#171212]">{c.flag}</code>
-                      <span className="text-sm text-[#171212]">{c.name}</span>
+                      <code className="text-xs font-bold text-[var(--cm-ink)]">{c.flag}</code>
+                      <span className="text-sm text-[var(--cm-ink)]">{c.name}</span>
                     </div>
                     {c.hits !== undefined && (
                       <span className={`badge ${TONE_TO_BADGE[c.tone]}`}>{c.hits} hits / 24h</span>
@@ -76,7 +76,7 @@ const RuleDetailModal: React.FC<Props> = ({ data, onClose }) => {
                       <code
                         key={i}
                         className="block text-xs rounded-md px-3 py-1.5"
-                        style={{ background: '#fdf6f1', color: '#7a4a30', wordBreak: 'break-all' }}
+                        style={{ background: 'var(--cm-subtle)', color: 'var(--cm-text)', wordBreak: 'break-all' }}
                       >
                         {r}
                       </code>
@@ -87,7 +87,7 @@ const RuleDetailModal: React.FC<Props> = ({ data, onClose }) => {
                       <div className="muted-strong text-xs mb-1">{t('secplane.runtime.ruleDetailModal.maskExample')}</div>
                       <code
                         className="block text-xs rounded-md px-3 py-1.5 mb-3"
-                        style={{ background: '#fdf6f1', color: '#171212' }}
+                        style={{ background: 'var(--cm-subtle)', color: 'var(--cm-ink)' }}
                       >
                         {c.maskExample}
                       </code>
@@ -101,7 +101,7 @@ const RuleDetailModal: React.FC<Props> = ({ data, onClose }) => {
                           <div
                             key={i}
                             className="muted text-xs italic px-3 py-1"
-                            style={{ borderLeft: '2px solid #eadfd8' }}
+                            style={{ borderLeft: '2px solid var(--cm-border)' }}
                           >
                             "{e}"
                           </div>
@@ -114,13 +114,13 @@ const RuleDetailModal: React.FC<Props> = ({ data, onClose }) => {
               ))
             : data.sections.map((s, idx) => (
                 <div key={s.name} style={{ marginBottom: idx === data.sections.length - 1 ? 0 : 16 }}>
-                  <div className="text-sm font-semibold text-[#171212] mb-2">{s.name}</div>
+                  <div className="text-sm font-semibold text-[var(--cm-ink)] mb-2">{s.name}</div>
                   <div className="flex flex-col gap-1.5">
                     {s.items.map((it, i) => (
                       <div
                         key={i}
-                        className="text-xs text-[#171212] rounded-md px-3 py-2"
-                        style={{ background: '#fdf6f1', lineHeight: 1.6 }}
+                        className="text-xs text-[var(--cm-ink)] rounded-md px-3 py-2"
+                        style={{ background: 'var(--cm-subtle)', lineHeight: 1.6 }}
                       >
                         <span className="muted-strong mr-2">{i + 1}.</span>
                         {it}

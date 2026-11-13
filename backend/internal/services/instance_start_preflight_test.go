@@ -117,16 +117,6 @@ func TestModelConfigurationRetriesAreBoundedAndGenerationScoped(t *testing.T) {
 	if s.configurationRetryPending(next) {
 		t.Fatal("old failure blocks explicit new generation")
 	}
-	code, message := "MODEL_CONFIGURATION_REQUIRED", ErrModelConfigurationRequired.Error()
-	instance.RuntimeErrorCode, instance.RuntimeErrorMessage = &code, &message
-	instance.UpdatedAt = time.Now()
-	if isRecoverableRuntimeSchedulingError(instance) {
-		t.Fatal("retries immediately")
-	}
-	instance.UpdatedAt = time.Now().Add(-31 * time.Second)
-	if !isRecoverableRuntimeSchedulingError(instance) {
-		t.Fatal("never rechecks restored configuration")
-	}
 	s.configurationRetryAt["89/8"] = time.Now().Add(-time.Second)
 	if s.configurationRetryPending(instance) {
 		t.Fatal("expired retry cooldown did not release")

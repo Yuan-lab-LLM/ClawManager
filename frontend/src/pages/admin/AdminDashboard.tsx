@@ -37,24 +37,24 @@ interface NodeSummaryRowProps {
 
 const toneStyles: Record<ClusterMetricCardProps['tone'], { shell: string; line: string; glow: string }> = {
   coral: {
-    shell: 'from-[rgba(255,255,255,0.96)] via-[rgba(255,251,247,0.96)] to-[rgba(255,255,255,0.92)] border-[#ead8cf]',
+    shell: 'border-[var(--cm-border)]',
     line: 'bg-[#ef6b4a]',
-    glow: 'shadow-[0_24px_70px_-52px_rgba(72,44,24,0.5)]',
+    glow: 'shadow-sm',
   },
   amber: {
-    shell: 'from-[rgba(255,255,255,0.96)] via-[rgba(255,251,247,0.96)] to-[rgba(255,255,255,0.92)] border-[#ead8cf]',
+    shell: 'border-[var(--cm-border)]',
     line: 'bg-[#d59a22]',
-    glow: 'shadow-[0_24px_70px_-52px_rgba(72,44,24,0.5)]',
+    glow: 'shadow-sm',
   },
   blue: {
-    shell: 'from-[rgba(255,255,255,0.96)] via-[rgba(255,251,247,0.96)] to-[rgba(255,255,255,0.92)] border-[#ead8cf]',
+    shell: 'border-[var(--cm-border)]',
     line: 'bg-[#3b82f6]',
-    glow: 'shadow-[0_24px_70px_-52px_rgba(72,44,24,0.5)]',
+    glow: 'shadow-sm',
   },
   slate: {
-    shell: 'from-[rgba(255,255,255,0.96)] via-[rgba(255,251,247,0.96)] to-[rgba(255,255,255,0.92)] border-[#ead8cf]',
+    shell: 'border-[var(--cm-border)]',
     line: 'bg-[#5b6478]',
-    glow: 'shadow-[0_24px_70px_-52px_rgba(72,44,24,0.5)]',
+    glow: 'shadow-sm',
   },
 };
 
@@ -135,103 +135,27 @@ const AdminDashboard: React.FC = () => {
   return (
     <AdminLayout title={t('admin.dashboardTitle')}>
       {error && (
-        <div className="mb-6 rounded-3xl border border-red-200 bg-[linear-gradient(135deg,#fff0ec_0%,#fffaf8_100%)] px-5 py-4 text-red-700 shadow-[0_24px_60px_-40px_rgba(220,38,38,0.45)]">
+        <div className="mb-6 rounded-3xl border border-red-200 bg-[var(--cm-subtle)] px-5 py-4 text-red-700 shadow-sm">
           {error}
         </div>
       )}
 
-      <section className="relative overflow-hidden rounded-[32px] border border-[#ead8cf] bg-[radial-gradient(circle_at_top_left,#fff8f0_0%,#fff6f0_22%,#fbf4ef_45%,#f5efe9_100%)] px-6 py-6 shadow-[0_30px_90px_-48px_rgba(132,85,52,0.45)] sm:px-8">
-        <div className="pointer-events-none absolute inset-y-0 right-0 w-[40%] bg-[radial-gradient(circle_at_center,rgba(239,107,74,0.16),transparent_58%)]" />
-        <div className="pointer-events-none absolute left-0 top-0 h-36 w-36 rounded-full bg-[radial-gradient(circle,rgba(213,154,34,0.18),transparent_70%)] blur-2xl" />
-
-        <div className="relative grid gap-6 xl:grid-cols-[1.3fr_0.9fr]">
-          <div>
-            <div className="inline-flex items-center rounded-full border border-[#f0d4c6] bg-white/75 px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em] text-[#b46c50] backdrop-blur">
-              {t('admin.clusterCommand')}
-            </div>
-            <div className="mt-4 max-w-3xl">
-              <h2 className="text-[1.85rem] font-semibold leading-[1.02] tracking-[-0.045em] text-[#1d1713] sm:text-[2.65rem] lg:text-[3rem]">
-                {t('admin.clusterHeroTitle')}
-              </h2>
-              <p className="mt-4 max-w-2xl text-[15px] leading-7 text-[#7a6d66]">
-                {t('admin.clusterHeroDesc')}
-              </p>
-            </div>
-
-            <div className="mt-7 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              <HeroStat
-                label={t('admin.totalUsers')}
-                value={loading ? '--' : `${stats.totalUsers}`}
-                hint={t('admin.accountsWithAccess')}
-              />
-              <HeroStat
-                label={t('admin.totalInstances')}
-                value={loading ? '--' : `${stats.totalInstances}`}
-                hint={t('admin.provisionedDesktops')}
-              />
-              <HeroStat
-                label={t('admin.runningInstances')}
-                value={loading ? '--' : `${stats.runningInstances}`}
-                hint={t('admin.currentlyOnline')}
-                highlight
-              />
-              <HeroStat
-                label={t('admin.totalStorage')}
-                value={loading ? '--' : `${stats.totalStorageGB} GB`}
-                hint={t('admin.allocatedToInstances')}
-              />
-            </div>
-          </div>
-
-          <div className="relative">
-            <div className="rounded-[28px] border border-[#ead8cf] bg-white/80 p-5 shadow-[0_24px_70px_-48px_rgba(72,44,24,0.6)] backdrop-blur">
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#b46c50]">{t('admin.readiness')}</p>
-                  <h3 className="mt-2 text-[2.35rem] font-semibold leading-none tracking-[-0.05em] text-[#1d1713] tabular-nums">
-                    {loading || !clusterResources ? '--' : `${clusterResources.ready_nodes}/${clusterResources.node_count}`}
-                  </h3>
-                  <p className="mt-2 min-h-[40px] text-[13px] leading-5 text-[#7a6d66]">
-                    {loading || !clusterResources ? t('admin.clusterStatusPending') : t('admin.nodesHealthySchedulable', { percent: readyRatio })}
-                  </p>
-                </div>
-                <div className="rounded-2xl bg-[#fff4ee] px-3 py-2 text-right">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#c27252]">{t('admin.hotNode')}</p>
-                  <p className="mt-1 text-sm font-semibold text-[#1d1713]">{highestPressureNode?.name || '--'}</p>
-                </div>
-              </div>
-
-              <div className="mt-5 h-3 overflow-hidden rounded-full bg-[#efe7e1]">
-                <div
-                  className="h-full rounded-full bg-[linear-gradient(90deg,#ef6b4a_0%,#d59a22_100%)] transition-all"
-                  style={{ width: `${readyRatio}%` }}
-                />
-              </div>
-
-              <div className="mt-5 grid grid-cols-2 gap-3">
-                <MiniSignal
-                  label={t('admin.cpuRequested')}
-                  value={loading || !clusterResources ? '--' : `${formatValue(clusterResources.cpu.requested)} cores`}
-                />
-                <MiniSignal
-                  label={t('admin.memoryRequested')}
-                  value={loading || !clusterResources ? '--' : `${formatValue(clusterResources.memory.requested)} GiB`}
-                />
-                <MiniSignal
-                  label={t('admin.diskAllocated')}
-                  value={loading || !clusterResources ? '--' : `${formatValue(clusterResources.disk.requested)} GiB`}
-                />
-                <MiniSignal
-                  label={t('admin.pressureFocus')}
-                  value={highestPressureNode ? t('admin.pressureFocusMem', { percent: formatValue(usagePercent(highestPressureNode.memory), 0) }) : '--'}
-                />
-              </div>
-            </div>
-          </div>
+      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <HeroStat label={t('admin.totalUsers')} value={loading ? '--' : `${stats.totalUsers}`} hint={t('admin.accountsWithAccess')} />
+        <HeroStat label={t('admin.totalInstances')} value={loading ? '--' : `${stats.totalInstances}`} hint={t('admin.provisionedDesktops')} />
+        <HeroStat label={t('admin.runningInstances')} value={loading ? '--' : `${stats.runningInstances}`} hint={t('admin.currentlyOnline')} highlight />
+        <HeroStat label={t('admin.totalStorage')} value={loading ? '--' : `${stats.totalStorageGB} GB`} hint={t('admin.allocatedToInstances')} />
+      </section>
+      <section className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[var(--cm-border)] bg-[var(--cm-surface)] px-4 py-3 text-sm">
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="font-semibold text-[var(--cm-ink)]">{t('admin.readiness')}</span>
+          <span className="tabular-nums text-[var(--cm-text)]">{loading || !clusterResources ? '--' : `${clusterResources.ready_nodes}/${clusterResources.node_count}`}</span>
+          <span className="text-[var(--cm-muted)]">{loading || !clusterResources ? t('admin.clusterStatusPending') : t('admin.nodesHealthySchedulable', { percent: readyRatio })}</span>
         </div>
+        <span className="text-[var(--cm-muted)]">{t('admin.hotNode')}: <span className="font-medium text-[var(--cm-text)]">{highestPressureNode?.name || '--'}</span></span>
       </section>
 
-      <section className="mt-8 grid gap-4 lg:grid-cols-3">
+      <section className="mt-4 grid gap-4 lg:grid-cols-3">
         <CommandTile
           to="/admin/users"
           title={t('admin.userManagement')}
@@ -258,18 +182,17 @@ const AdminDashboard: React.FC = () => {
         />
       </section>
 
-      <section className="mt-10">
-        <div className="mb-5 flex flex-wrap items-end justify-between gap-4">
+      <section className="mt-4">
+        <div className="mb-3 flex flex-wrap items-end justify-between gap-4">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[#b46c50]">{t('admin.clusterResources')}</p>
-            <h2 className="mt-2 text-2xl font-semibold text-[#1d1713]">{t('admin.capacityBoard')}</h2>
+            <h2 className="text-base font-semibold leading-[22px] text-[var(--cm-ink)]">{t('admin.capacityBoard')}</h2>
           </div>
-          <div className="rounded-full border border-[#ead8cf] bg-white/80 px-4 py-2 text-sm text-[#7a6d66] shadow-sm">
+          <div className="rounded-full border border-[var(--cm-border)] bg-white/80 px-4 py-2 text-sm text-[var(--cm-text)] shadow-sm">
             {loading || !clusterResources ? t('admin.waitingForClusterData') : t('admin.nodesReadySummary', { ready: clusterResources.ready_nodes, total: clusterResources.node_count })}
           </div>
         </div>
 
-        <div className="grid gap-5 xl:grid-cols-4">
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <ClusterMetricCard
             tone="blue"
             eyebrow={t('admin.nodeFleet')}
@@ -305,31 +228,27 @@ const AdminDashboard: React.FC = () => {
         </div>
       </section>
 
-      <section className="mt-10 overflow-hidden rounded-[30px] border border-[#ead8cf] bg-[linear-gradient(180deg,rgba(255,255,255,0.88)_0%,rgba(255,250,246,0.96)_100%)] shadow-[0_30px_80px_-52px_rgba(60,42,28,0.6)]">
-        <div className="border-b border-[#efe2da] px-6 py-5">
+      <section className="mt-4 overflow-hidden rounded-lg border border-[var(--cm-border)] bg-[var(--cm-subtle)] shadow-sm">
+        <div className="border-b border-[var(--cm-border)] px-4 py-3">
           <div className="flex flex-wrap items-end justify-between gap-4">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[#b46c50]">{t('admin.nodeMatrix')}</p>
-              <h2 className="mt-2 text-2xl font-semibold text-[#1d1713]">{t('admin.infrastructureTable')}</h2>
+              <h2 className="text-base font-semibold leading-[22px] text-[var(--cm-ink)]">{t('admin.infrastructureTable')}</h2>
             </div>
-            <p className="max-w-xl text-[13px] leading-5 text-[#7a6d66]">
-              {t('admin.infrastructureTableDesc')}
-            </p>
           </div>
         </div>
 
         <div className="overflow-x-auto">
           <table className="min-w-full">
             <thead>
-              <tr className="border-b border-[#f0e3db] bg-[linear-gradient(180deg,#fffaf6_0%,#fff6f1_100%)] text-left text-[11px] font-semibold uppercase tracking-[0.18em] text-[#9d7d6e]">
-                <th className="px-6 py-4">{t('admin.node')}</th>
-                <th className="px-6 py-4">{t('admin.health')}</th>
-                <th className="px-6 py-4">{t('admin.role')}</th>
-                <th className="px-6 py-4">{t('admin.internalIp')}</th>
-                <th className="px-6 py-4">{t('admin.pods')}</th>
-                <th className="px-6 py-4">{t('admin.cpuLoad')}</th>
-                <th className="px-6 py-4">{t('admin.memoryLoad')}</th>
-                <th className="px-6 py-4 text-right">{t('admin.inspect')}</th>
+              <tr className="border-b border-[var(--cm-border)] bg-[var(--cm-subtle)] text-left text-xs font-semibold text-[var(--cm-muted)]">
+                <th className="px-4 py-3">{t('admin.node')}</th>
+                <th className="px-4 py-3">{t('admin.health')}</th>
+                <th className="px-4 py-3">{t('admin.role')}</th>
+                <th className="px-4 py-3">{t('admin.internalIp')}</th>
+                <th className="px-4 py-3">{t('admin.pods')}</th>
+                <th className="px-4 py-3">{t('admin.cpuLoad')}</th>
+                <th className="px-4 py-3">{t('admin.memoryLoad')}</th>
+                <th className="px-4 py-3 text-right">{t('admin.inspect')}</th>
               </tr>
             </thead>
             <tbody>
@@ -342,11 +261,11 @@ const AdminDashboard: React.FC = () => {
                     format={formatValue}
                   />
                   {expandedNode === node.name && (
-                    <tr className="border-b border-[#f2e8e2] bg-[linear-gradient(180deg,#fffdfb_0%,#fff7f2_100%)]">
+                    <tr className="border-b border-[var(--cm-border)] bg-[var(--cm-subtle)]">
                       <td colSpan={8} className="px-6 py-6">
                         <div className="grid items-start gap-4 xl:grid-cols-[0.95fr_1.8fr]">
-                          <div className="rounded-[24px] border border-[#ebdad0] bg-white/85 p-5 shadow-[0_18px_50px_-42px_rgba(72,44,24,0.7)]">
-                            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#b46c50]">{t('admin.nodeDossier')}</p>
+                          <div className="rounded-lg border border-[var(--cm-border)] bg-white/85 p-5 shadow-sm">
+                            <p className="text-xs font-semibold text-[var(--cm-muted)]">{t('admin.nodeDossier')}</p>
                             <dl className="mt-4 space-y-4">
                               <DetailRow label={t('admin.kubeletVersion')} value={node.kubelet_version || '--'} />
                               <DetailRow label={t('admin.roles')} value={node.roles.join(', ')} />
@@ -355,8 +274,8 @@ const AdminDashboard: React.FC = () => {
                             </dl>
                           </div>
 
-                          <div className="self-start rounded-[24px] border border-[#ebdad0] bg-white/75 p-5 shadow-[0_18px_50px_-42px_rgba(72,44,24,0.58)]">
-                            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#b46c50]">{t('admin.resourceProfile')}</p>
+                          <div className="self-start rounded-lg border border-[var(--cm-border)] bg-white/75 p-5 shadow-sm">
+                            <p className="text-xs font-semibold text-[var(--cm-muted)]">{t('admin.resourceProfile')}</p>
                             <div className="mt-5 grid items-start gap-5 lg:grid-cols-3">
                               <NodeResourceBar label="CPU" summary={node.cpu} format={formatValue} />
                               <NodeResourceBar label="Memory" summary={node.memory} format={formatValue} />
@@ -374,14 +293,14 @@ const AdminDashboard: React.FC = () => {
         </div>
 
         {!loading && clusterResources?.nodes?.length === 0 && (
-          <div className="px-6 py-16 text-center text-sm text-[#8f8681]">
+          <div className="px-6 py-16 text-center text-sm text-[var(--cm-muted)]">
             {t('admin.noNodeData')}
           </div>
         )}
 
         {!loading && allNodes.length > 0 && (
-          <div className="flex flex-col gap-4 border-t border-[#f0e3db] px-6 py-5 sm:flex-row sm:items-center sm:justify-between">
-            <p className="text-sm text-[#7a6d66]">
+          <div className="flex flex-col gap-4 border-t border-[var(--cm-border)] px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm text-[var(--cm-text)]">
               {t('admin.showingNodes', { from: (currentPage - 1) * pageSize + 1, to: Math.min(currentPage * pageSize, allNodes.length), total: allNodes.length })}
             </p>
             <div className="flex items-center gap-2">
@@ -389,18 +308,18 @@ const AdminDashboard: React.FC = () => {
                 type="button"
                 onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
                 disabled={currentPage === 1}
-                className="rounded-full border border-[#ead7cd] bg-white px-4 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-[#a05f46] transition-all hover:border-[#ef6b4a] hover:text-[#ef6b4a] disabled:cursor-not-allowed disabled:opacity-40"
+                className="rounded-full border border-[var(--cm-border)] bg-white px-4 py-2 text-xs font-semibold text-[var(--cm-muted)] transition-all hover:border-[#ef6b4a] hover:text-[#ef6b4a] disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {t('admin.prev')}
               </button>
-              <div className="rounded-full border border-[#ead7cd] bg-[#fff8f3] px-4 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-[#a05f46]">
+              <div className="rounded-full border border-[var(--cm-border)] bg-[var(--cm-subtle)] px-4 py-2 text-xs font-semibold text-[var(--cm-muted)]">
                 {t('admin.pageSummary', { page: currentPage, total: totalPages })}
               </div>
               <button
                 type="button"
                 onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
                 disabled={currentPage === totalPages}
-                className="rounded-full border border-[#ead7cd] bg-white px-4 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-[#a05f46] transition-all hover:border-[#ef6b4a] hover:text-[#ef6b4a] disabled:cursor-not-allowed disabled:opacity-40"
+                className="rounded-full border border-[var(--cm-border)] bg-white px-4 py-2 text-xs font-semibold text-[var(--cm-muted)] transition-all hover:border-[#ef6b4a] hover:text-[#ef6b4a] disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {t('admin.nextPage')}
               </button>
@@ -424,35 +343,10 @@ function HeroStat({
   highlight?: boolean;
 }) {
   return (
-    <div
-      className={`rounded-[24px] border p-4 shadow-[0_24px_60px_-44px_rgba(72,44,24,0.55)] backdrop-blur ${
-        highlight
-          ? 'border-[#f3c7b7] bg-[linear-gradient(135deg,rgba(255,241,235,0.98)_0%,rgba(255,255,255,0.95)_100%)]'
-          : 'border-[#ead8cf] bg-white/78'
-      }`}
-    >
-      <div className="grid min-h-[122px] grid-rows-[40px_minmax(0,1fr)_32px]">
-        <p className="text-[13px] leading-5 text-[#8c7b72]">{label}</p>
-        <p
-          className={`self-center whitespace-nowrap text-[2rem] font-semibold leading-none tracking-[-0.05em] tabular-nums ${
-            highlight ? 'text-[#dc2626]' : 'text-[#1d1713]'
-          }`}
-        >
-          {value}
-        </p>
-        <p className="text-[10px] font-semibold uppercase leading-4 tracking-[0.16em] text-[#b09d93]">{hint}</p>
-      </div>
-    </div>
-  );
-}
-
-function MiniSignal({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-2xl border border-[#eee1d8] bg-[#fffaf7] px-4 py-3">
-      <div className="grid min-h-[92px] grid-rows-[28px_minmax(0,1fr)]">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#b09d93]">{label}</p>
-        <p className="self-end whitespace-nowrap text-[1.75rem] font-semibold leading-none tracking-[-0.04em] text-[#1d1713] tabular-nums">{value}</p>
-      </div>
+    <div className="min-w-0 rounded-lg border border-[var(--cm-border)] bg-[var(--cm-surface)] p-4">
+      <p className="text-sm leading-5 text-[var(--cm-muted)]">{label}</p>
+      <p className={`mt-2 break-words text-[32px] font-semibold leading-10 tabular-nums ${highlight ? 'text-[var(--cm-primary)]' : 'text-[var(--cm-ink)]'}`}>{value}</p>
+      <p className="mt-1 text-xs leading-4 text-[var(--cm-muted)]">{hint}</p>
     </div>
   );
 }
@@ -473,59 +367,45 @@ function CommandTile({
   openLabel: string;
 }) {
   const accents = {
-    coral: 'border-[#ead8cf] text-[#ef6b4a] after:bg-[radial-gradient(circle,rgba(239,107,74,0.14),transparent_66%)]',
-    amber: 'border-[#ead8cf] text-[#d59a22] after:bg-[radial-gradient(circle,rgba(213,154,34,0.14),transparent_66%)]',
-    blue: 'border-[#ead8cf] text-[#3b82f6] after:bg-[radial-gradient(circle,rgba(59,130,246,0.14),transparent_66%)]',
+    coral: 'border-[var(--cm-border)] text-[#ef6b4a] after:bg-[var(--cm-subtle)]',
+    amber: 'border-[var(--cm-border)] text-[#d59a22] after:bg-[var(--cm-subtle)]',
+    blue: 'border-[var(--cm-border)] text-[#3b82f6] after:bg-[var(--cm-subtle)]',
   }[tone];
 
   return (
     <Link
       to={to}
-      className={`group relative overflow-hidden rounded-[28px] border bg-[linear-gradient(180deg,rgba(255,255,255,0.98)_0%,rgba(255,249,245,0.94)_100%)] p-6 shadow-[0_24px_70px_-52px_rgba(72,44,24,0.5)] transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_30px_80px_-52px_rgba(72,44,24,0.64)] after:absolute after:-right-8 after:top-[-24px] after:h-24 after:w-24 after:rounded-full ${accents}`}
+      className={`min-w-0 rounded-lg border bg-[var(--cm-surface)] p-4 transition-shadow hover:shadow-sm ${accents}`}
     >
-      <div className="relative flex items-start gap-4">
-        <div className="rounded-2xl border border-[#f1e2d9] bg-white/90 p-3 shadow-[0_12px_30px_-24px_rgba(72,44,24,0.5)]">
+      <div className="flex items-start gap-3">
+        <div className="shrink-0 rounded-lg bg-[var(--cm-subtle)] p-2">
           <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={iconPath} />
           </svg>
         </div>
-        <div>
-          <h3 className="text-[1.15rem] font-semibold leading-6 text-[#1d1713]">{title}</h3>
-          <p className="mt-1 text-[13px] leading-5 text-[#7a6d66]">{description}</p>
-          <p className="mt-4 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#b46c50]">{openLabel}</p>
+        <div className="min-w-0">
+          <h3 className="break-words text-base font-semibold leading-[22px] text-[var(--cm-ink)]">{title}</h3>
+          <p className="mt-1 text-[13px] leading-5 text-[var(--cm-text)]">{description}</p>
+          <p className="mt-2 text-xs text-[var(--cm-muted)]">{openLabel}</p>
         </div>
       </div>
     </Link>
   );
 }
 
-function ClusterMetricCard({ title, eyebrow, value, subtitle, progress, tone }: ClusterMetricCardProps) {
-  const { t } = useI18n();
+function ClusterMetricCard({ title, value, subtitle, progress, tone }: ClusterMetricCardProps) {
   const style = toneStyles[tone];
-
   return (
-    <div className={`overflow-hidden rounded-[28px] border bg-[linear-gradient(135deg,var(--tw-gradient-from),var(--tw-gradient-via),var(--tw-gradient-to))] p-5 ${style.shell} ${style.glow}`}>
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-h-[54px]">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[#ad8f80]">{eyebrow}</p>
-          <h3 className="mt-2 text-[1.35rem] font-semibold leading-6 text-[#1d1713]">{title}</h3>
-        </div>
-        <div className="rounded-full border border-[#efe2d9] bg-white/85 px-3 py-1 text-xs font-semibold text-[#7a6d66] shadow-[0_10px_24px_-20px_rgba(72,44,24,0.55)]">
-          {Math.round(progress)}%
-        </div>
+    <div className="min-w-0 rounded-lg border border-[var(--cm-border)] bg-[var(--cm-surface)] p-4">
+      <div className="flex items-center justify-between gap-3">
+        <h3 className="text-base font-semibold leading-[22px] text-[var(--cm-ink)]">{title}</h3>
+        <span className="text-xs tabular-nums text-[var(--cm-muted)]">{Math.round(progress)}%</span>
       </div>
-      <div className="mt-4 rounded-[22px] border border-[#f1e2d8] bg-[linear-gradient(180deg,rgba(255,255,255,0.92)_0%,rgba(255,249,245,0.88)_100%)] px-4 py-4">
-        <p className="whitespace-nowrap text-[1.5rem] font-semibold leading-none tracking-[-0.04em] text-[#111827] tabular-nums sm:text-[1.65rem]">
-          {value}
-        </p>
-        <div className="mt-4 h-2.5 overflow-hidden rounded-full bg-white/90">
-          <div className={`h-full rounded-full transition-all ${style.line}`} style={{ width: `${progress}%` }} />
-        </div>
-        <div className="mt-4 flex items-end justify-between gap-3">
-          <p className="text-[13px] leading-5 text-[#7a6d66]">{subtitle}</p>
-          <p className="shrink-0 text-[11px] font-semibold uppercase tracking-[0.16em] text-[#b09d93]">{t('admin.usage')}</p>
-        </div>
+      <p className="mt-3 break-words text-xl font-semibold leading-7 text-[var(--cm-ink)] tabular-nums">{value}</p>
+      <div className="mt-3 h-2 overflow-hidden rounded-full bg-[var(--cm-canvas)]">
+        <div className={`h-full rounded-full transition-all ${style.line}`} style={{ width: `${progress}%` }} />
       </div>
+      <p className="mt-2 text-xs leading-4 text-[var(--cm-muted)]">{subtitle}</p>
     </div>
   );
 }
@@ -535,20 +415,20 @@ function NodeResourceBar({ label, summary, format }: NodeResourceBarProps) {
   const percent = summary.allocatable > 0 ? Math.min((summary.requested / summary.allocatable) * 100, 100) : 0;
 
   return (
-    <div className="rounded-[22px] border border-[#efe1d8] bg-[#fffaf7] p-4">
+    <div className="rounded-lg border border-[var(--cm-border)] bg-[var(--cm-subtle)] p-4">
       <div className="flex items-center justify-between gap-3">
-        <span className="text-sm font-semibold text-[#1d1713]">{label}</span>
-        <span className="rounded-full bg-white px-2.5 py-1 text-[11px] font-semibold text-[#8a766a]">
+        <span className="text-sm font-semibold text-[var(--cm-ink)]">{label}</span>
+        <span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-[var(--cm-muted)]">
           {Math.round(percent)}%
         </span>
       </div>
-      <p className="mt-3 whitespace-nowrap text-[1.05rem] font-semibold leading-none text-[#111827] tabular-nums">
+      <p className="mt-3 break-words text-base font-semibold leading-none text-[#111827] tabular-nums">
         {format(summary.requested)} / {format(summary.allocatable)} {summary.unit}
       </p>
-      <p className="mt-2 text-[13px] leading-5 text-[#8c7b72]">{t('admin.capacityGiB', { value: format(summary.capacity) }).replace('GiB', summary.unit)}</p>
-      <div className="mt-4 h-2.5 overflow-hidden rounded-full bg-[#eadfd8]">
+      <p className="mt-2 text-[13px] leading-5 text-[var(--cm-muted)]">{t('admin.capacityGiB', { value: format(summary.capacity) }).replace('GiB', summary.unit)}</p>
+      <div className="mt-4 h-2.5 overflow-hidden rounded-full bg-[var(--cm-subtle)]">
         <div
-          className="h-full rounded-full bg-[linear-gradient(90deg,#ef6b4a_0%,#d59a22_100%)]"
+          className="h-full rounded-full bg-[var(--cm-primary)]"
           style={{ width: `${percent}%` }}
         />
       </div>
@@ -558,9 +438,9 @@ function NodeResourceBar({ label, summary, format }: NodeResourceBarProps) {
 
 function DetailRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="border-b border-[#f3e7df] pb-3 last:border-b-0 last:pb-0">
-      <dt className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#b09d93]">{label}</dt>
-      <dd className="mt-1 text-sm font-medium text-[#1d1713]">{value}</dd>
+    <div className="border-b border-[var(--cm-border)] pb-3 last:border-b-0 last:pb-0">
+      <dt className="text-xs font-semibold text-[var(--cm-muted)]">{label}</dt>
+      <dd className="mt-1 text-sm font-medium text-[var(--cm-ink)]">{value}</dd>
     </div>
   );
 }
@@ -568,39 +448,39 @@ function DetailRow({ label, value }: { label: string; value: string }) {
 function NodeSummaryRow({ node, expanded, onToggle, format }: NodeSummaryRowProps) {
   const { t } = useI18n();
   return (
-    <tr className="border-b border-[#f2e8e2] text-sm transition-colors hover:bg-[#fffaf6]">
-      <td className="px-6 py-5">
+    <tr className="border-b border-[var(--cm-border)] text-sm transition-colors hover:bg-[var(--cm-subtle)]">
+      <td className="px-4 py-3">
         <div>
-          <p className="font-semibold text-[#1d1713]">{node.name}</p>
-          <p className="mt-1 text-xs uppercase tracking-[0.14em] text-[#b09d93]">{t('admin.node')}</p>
+          <p className="font-semibold text-[var(--cm-ink)]">{node.name}</p>
+          <p className="mt-1 text-xs text-[var(--cm-muted)]">{t('admin.node')}</p>
         </div>
       </td>
-      <td className="px-6 py-5">
+      <td className="px-4 py-3">
         <span
           className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${
-            node.ready ? 'bg-[#dcfce7] text-[#15803d]' : 'bg-[#fee2e2] text-[#b91c1c]'
+            node.ready ? 'bg-[#dcfce7] text-[#15803d]' : 'bg-[var(--cm-subtle)] text-[#b91c1c]'
           }`}
         >
           {node.ready ? t('admin.ready') : t('admin.notReady')}
         </span>
       </td>
-      <td className="px-6 py-5 text-[#7a6d66]">{node.roles.join(', ')}</td>
-      <td className="px-6 py-5 text-[#7a6d66]">{node.internal_ip || '--'}</td>
-      <td className="px-6 py-5 font-medium tabular-nums text-[#1d1713]">{node.pod_count}</td>
-      <td className="px-6 py-5 whitespace-nowrap tabular-nums text-[#7a6d66]">
+      <td className="px-4 py-3 text-[var(--cm-text)]">{node.roles.join(', ')}</td>
+      <td className="px-4 py-3 text-[var(--cm-text)]">{node.internal_ip || '--'}</td>
+      <td className="px-4 py-3 font-medium tabular-nums text-[var(--cm-ink)]">{node.pod_count}</td>
+      <td className="px-4 py-3 whitespace-nowrap tabular-nums text-[var(--cm-text)]">
         {format(node.cpu.requested)} / {format(node.cpu.allocatable)} {node.cpu.unit}
       </td>
-      <td className="px-6 py-5 whitespace-nowrap tabular-nums text-[#7a6d66]">
+      <td className="px-4 py-3 whitespace-nowrap tabular-nums text-[var(--cm-text)]">
         {format(node.memory.requested)} / {format(node.memory.allocatable)} {node.memory.unit}
       </td>
-      <td className="px-6 py-5 text-right">
+      <td className="px-4 py-3 text-right">
         <button
           type="button"
           onClick={onToggle}
-          className={`rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-[0.14em] transition-all ${
+          className={`rounded-full border px-4 py-2 text-xs font-semibold transition-all ${
             expanded
               ? 'border-[#ef6b4a] bg-[#ef6b4a] text-white'
-              : 'border-[#ead7cd] bg-white text-[#a05f46] hover:border-[#ef6b4a] hover:text-[#ef6b4a]'
+              : 'border-[var(--cm-border)] bg-white text-[var(--cm-muted)] hover:border-[#ef6b4a] hover:text-[#ef6b4a]'
           }`}
         >
           {expanded ? t('admin.collapse') : t('admin.viewDetails')}

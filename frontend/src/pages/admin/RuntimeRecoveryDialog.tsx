@@ -1,3 +1,4 @@
+import FilterSelect from "../../components/FilterSelect";
 import { useState } from "react";
 import { useI18n } from "../../contexts/I18nContext";
 import { runtimePoolService } from "../../services/runtimePoolService";
@@ -69,12 +70,9 @@ export default function RuntimeRecoveryDialog({ pods, onClose, onChanged, onEvic
         <button type="button" className={primaryClass} disabled={busy || !canRetry} onClick={() => void act("retry")}>{t("runtimePods.recoveryRetry")}</button>
       </section>}
       <section className="mt-6 space-y-3 border-t border-slate-200 pt-4">
-        <label className="flex flex-col gap-2 text-sm">{t("runtimePods.recoveryPod")}
-          <select className={`${inputClass} w-full`} value={podId} disabled={busy} onChange={event => setPodId(event.target.value)}>
-            <option value="">{t("runtimePods.recoveryChoosePod")}</option>
-            {options.map(item => <option key={item.id} value={item.id}>{item.pod_name} · #{item.id}</option>)}
-          </select>
-        </label>
+        <div className="flex flex-col gap-2 text-sm"><span>{t("runtimePods.recoveryPod")}</span>
+          <FilterSelect label={t("runtimePods.recoveryPod")} value={podId} disabled={busy} onChange={setPodId} options={[{value:"",label:t("runtimePods.recoveryChoosePod")}, ...options.map(item => ({value:String(item.id),label:`${item.pod_name} · #${item.id}`}))]} />
+        </div>
         <button type="button" className={buttonClass} disabled={busy || !pod || !onEvict} onClick={() => { if (pod) { const verified = info && info.binding?.runtime_pod_id === pod.id && Number.isSafeInteger(info.instance_id) && info.instance_id > 0 ? [info.instance_id] : undefined; onEvict?.(pod, verified, verified); } }}>{t("runtimePods.faultRecovery")}</button>
         <button type="button" className={buttonClass} disabled={busy || !pod?.pod_uid} onClick={() => void act("recheck")}>{t("runtimePods.recoveryRecheck")}</button>
       </section>

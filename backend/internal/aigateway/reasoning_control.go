@@ -3,9 +3,45 @@ package aigateway
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
+	"strings"
 
 	"clawreef/internal/models"
 )
+
+// This proxy's V4.1 route rejects medium and treats reasoning_content and
+// reasoning as aliases of one field. Hermes sends both on local gateway routes.
+// Keep this observed compatibility contract separate from reasoning capability
+// detection: it must not enable thinking or change other deployments' dialects.
+func applyIcompifyDeepSeekCompatibility(payload map[string]json.RawMessage, model *models.LLMModel) {
+	endpoint, err := url.Parse(model.BaseURL)
+	if err != nil || !strings.EqualFold(endpoint.Hostname(), "api.icompify.com") || model.ProviderModelName != "deepseek-v4.1-flash" {
+		return
+	}
+	var effort string
+	if json.Unmarshal(payload["reasoning_effort"], &effort) == nil && effort == "medium" {
+		payload["reasoning_effort"] = json.RawMessage(`"high"`)
+	}
+	var messages []map[string]json.RawMessage
+	if json.Unmarshal(payload["messages"], &messages) != nil {
+		return
+	}
+	changed := false
+	for _, message := range messages {
+		var role string
+		var reasoning, content *string
+		if json.Unmarshal(message["role"], &role) == nil && role == "assistant" &&
+			json.Unmarshal(message["reasoning"], &reasoning) == nil &&
+			json.Unmarshal(message["reasoning_content"], &content) == nil &&
+			reasoning != nil && content != nil && *reasoning == *content {
+			delete(message, "reasoning")
+			changed = true
+		}
+	}
+	if changed {
+		payload["messages"], _ = json.Marshal(messages)
+	}
+}
 
 func clearAlternativeThinkingSwitches(payload map[string]json.RawMessage) error {
 	delete(payload, "enable_thinking")

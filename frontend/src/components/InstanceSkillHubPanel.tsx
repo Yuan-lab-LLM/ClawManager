@@ -310,16 +310,24 @@ function InstanceSkillCard({
   );
 }
 
+function SkillDialogContent({ headerActions, children }: React.ComponentProps<typeof InstanceCollapsiblePanel>) {
+  return <section className="cm-instance-skills-content"><div className="cm-instance-skills-actions">{headerActions}</div>{children}</section>;
+}
+
 interface InstanceSkillHubPanelProps {
   instance: Instance;
   onRuntimeDetailsChange: (details: InstanceRuntimeDetails) => void;
   onPanelExpandedChange?: (expanded: boolean) => void;
+  embedded?: boolean;
+  active?: boolean;
 }
 
 const InstanceSkillHubPanel: React.FC<InstanceSkillHubPanelProps> = ({
   instance,
   onRuntimeDetailsChange,
   onPanelExpandedChange,
+  embedded = false,
+  active = true,
 }) => {
   const { t, locale } = useI18n();
   const { user } = useAuth();
@@ -328,6 +336,7 @@ const InstanceSkillHubPanel: React.FC<InstanceSkillHubPanelProps> = ({
 
   const [skillLoading, setSkillLoading] = useState(false);
   const [skillError, setSkillError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [skillsBurstUntil, setSkillsBurstUntil] = useState(0);
   const [skillSyncPhase, setSkillSyncPhase] = useState<"idle" | "syncing" | "success" | "failed">("idle");
@@ -344,7 +353,7 @@ const InstanceSkillHubPanel: React.FC<InstanceSkillHubPanelProps> = ({
   const [hubCatalogSearch, setHubCatalogSearch] = useState("");
   const [selectedHubSkillIds, setSelectedHubSkillIds] = useState<number[]>([]);
   const [hubBatchInstallProgress, setHubBatchInstallProgress] = useState<HubBatchInstallProgress | null>(null);
-  const [panelExpanded, setPanelExpanded] = useState(false);
+  const [panelExpanded, setPanelExpanded] = useState(embedded);
 
   const handlePanelExpandedChange = useCallback(
     (expanded: boolean) => {
@@ -382,7 +391,7 @@ const InstanceSkillHubPanel: React.FC<InstanceSkillHubPanelProps> = ({
   }, [instanceId]);
 
   useEffect(() => {
-    if (skillHubUnsupported) {
+    if (skillHubUnsupported || !active) {
       return;
     }
     let disposed = false;
@@ -391,14 +400,14 @@ const InstanceSkillHubPanel: React.FC<InstanceSkillHubPanelProps> = ({
         setSkillLoading(true);
         await reloadSkillSection();
         if (!disposed) {
-          setSkillError(null);
+          setLoadError(null);
         }
       } catch (err: unknown) {
         if (!disposed) {
           const message =
             (err as { response?: { data?: { error?: string } } })?.response?.data?.error ||
             "Failed to load skills";
-          setSkillError(message);
+          setLoadError(message);
         }
       } finally {
         if (!disposed) {
@@ -410,7 +419,7 @@ const InstanceSkillHubPanel: React.FC<InstanceSkillHubPanelProps> = ({
     return () => {
       disposed = true;
     };
-  }, [reloadSkillSection, skillHubUnsupported]);
+  }, [reloadSkillSection, skillHubUnsupported, active]);
 
   useEffect(() => {
     skillSyncActiveRef.current = false;
@@ -421,7 +430,7 @@ const InstanceSkillHubPanel: React.FC<InstanceSkillHubPanelProps> = ({
   }, [instanceId]);
 
   useEffect(() => {
-    if (skillHubUnsupported || !panelExpanded) {
+    if (skillHubUnsupported || !panelExpanded || !active) {
       return;
     }
     const skillsTimer = window.setInterval(() => {
@@ -430,7 +439,7 @@ const InstanceSkillHubPanel: React.FC<InstanceSkillHubPanelProps> = ({
       }
     }, skillsPollInterval);
     return () => window.clearInterval(skillsTimer);
-  }, [panelExpanded, refreshSkills, skillsPollInterval, skillHubUnsupported]);
+  }, [panelExpanded, refreshSkills, skillsPollInterval, skillHubUnsupported, active]);
 
   useEffect(() => {
     setInstanceSkillPage(1);
@@ -854,9 +863,10 @@ const InstanceSkillHubPanel: React.FC<InstanceSkillHubPanelProps> = ({
     return null;
   }
 
+  const Panel = embedded ? SkillDialogContent : InstanceCollapsiblePanel;
   return (
     <>
-      <InstanceCollapsiblePanel
+      <Panel
         storageKey={instancePanelStorageKey("skills", instanceId)}
         title={t("instances.skillManagement")}
         icon={<KeyRound className="h-4 w-4 text-indigo-600" />}
@@ -878,6 +888,7 @@ const InstanceSkillHubPanel: React.FC<InstanceSkillHubPanelProps> = ({
         </Link>
 
         {skillError ? <div className="mt-3 text-xs text-red-600">{skillError}</div> : null}
+        {loadError ? <div className="mt-3 text-xs text-red-600">{loadError}</div> : null}
         {(skillSyncPhase !== "idle" || lastSkillSyncAt) && (
           <div
             className={`mt-3 rounded-md border px-3 py-2 text-xs ${
@@ -1107,7 +1118,7 @@ const InstanceSkillHubPanel: React.FC<InstanceSkillHubPanelProps> = ({
             </div>
           </div>
         </div>
-      </InstanceCollapsiblePanel>
+      </Panel>
 
       {publishSkillId !== null ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
