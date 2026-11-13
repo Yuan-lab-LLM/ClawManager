@@ -370,6 +370,8 @@ func RunWorkspaceIOHelper(args []string, input io.Reader, output io.Writer) (boo
 	var download io.ReadCloser
 	ctx := context.Background()
 	switch request.Action {
+	case "measure_usage":
+		response.Size, err = measureWorkspaceUsageTree(ctx, scope.WorkspacePath, request.Limit)
 	case "list":
 		response.Entries, err = s.List(ctx, scope, request.Path)
 	case "search":

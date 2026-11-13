@@ -68,13 +68,13 @@ interface ModuleVisual {
   badgeClass: string;
 }
 const MODULE_VISUAL: Record<string, ModuleVisual> = {
-  'cat-1': { num: '①', layer: 'runtime', cardBorder: '#f4b6b3', cardBg: 'linear-gradient(135deg,#fff,#fdeded)', iconGradient: 'linear-gradient(135deg,#ef4444,#991b1b)', iconShadow: '0 8px 20px -8px rgba(239,68,68,0.5)', iconPath: 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z', arrowColor: '#ef4444', footerNoteKey: 'secplane.protection.moduleVisual.cat1.footerNote', layerLabelKey: 'secplane.protection.moduleVisual.cat1.layerLabel', layerTagClass: 'layer-tag-runtime', badgeClass: 'badge-red' },
-  'cat-6': { num: '⑥', layer: 'host', cardBorder: '#a8d9d2', cardBg: 'linear-gradient(135deg,#fff,#e8f8f5)', iconGradient: 'linear-gradient(135deg,#0f766e,#115e59)', iconShadow: '0 8px 20px -8px rgba(15,118,110,0.4)', iconPath: 'M3 11v11h18V11M7 11V7a5 5 0 0110 0v4', arrowColor: '#0f766e', footerNoteKey: 'secplane.protection.moduleVisual.cat6.footerNote', layerLabelKey: 'secplane.protection.moduleVisual.cat6.layerLabel', layerTagClass: 'layer-tag-host', badgeClass: 'badge-blue' },
-  'cat-4': { num: '②', layer: 'audit', cardBorder: '#d9c7f5', cardBg: 'linear-gradient(135deg,#fff,#f3edff)', iconGradient: 'linear-gradient(135deg,#7c3aed,#6b21a8)', iconShadow: '0 8px 20px -8px rgba(107,33,168,0.4)', iconPath: 'M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z', arrowColor: '#6b21a8', footerNoteKey: 'secplane.protection.moduleVisual.cat4.footerNote', layerLabelKey: 'secplane.protection.moduleVisual.cat4.layerLabel', layerTagClass: 'layer-tag-audit', badgeClass: 'badge-purple' },
-  'cat-3': { num: '④', layer: 'control', cardBorder: '#c8d4e2', cardBg: 'linear-gradient(135deg,#fff,#f3f6fa)', iconGradient: 'linear-gradient(135deg,#64748b,#475569)', iconShadow: '0 8px 20px -8px rgba(71,85,105,0.35)', iconPath: 'M17 8h2a2 2 0 012 2v8a2 2 0 01-2 2h-2m-10 0H5a2 2 0 01-2-2v-8a2 2 0 012-2h2m3 4h4m-8 4h8M9 4h6a1 1 0 011 1v3H8V5a1 1 0 011-1z', arrowColor: '#64748b', footerNoteKey: 'secplane.protection.moduleVisual.cat3.footerNote', layerLabelKey: 'secplane.protection.moduleVisual.cat3.layerLabel', layerTagClass: 'layer-tag-control', badgeClass: 'badge-blue' },
-  'cat-2': { num: '③', layer: 'control', cardBorder: '#b8d8f4', cardBg: 'linear-gradient(135deg,#fff,#e8f3fd)', iconGradient: 'linear-gradient(135deg,#2563eb,#1d4ed8)', iconShadow: '0 8px 20px -8px rgba(37,99,235,0.4)', iconPath: 'M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z', arrowColor: '#1d4ed8', footerNoteKey: 'secplane.protection.moduleVisual.cat2.footerNote', layerLabelKey: 'secplane.protection.moduleVisual.cat2.layerLabel', layerTagClass: 'layer-tag-control', badgeClass: 'badge-blue' },
-  'cat-7': { num: '⑦', layer: 'control', cardBorder: '#eadfd8', cardBg: 'linear-gradient(135deg,#fff,#fdf6f1)', iconGradient: 'linear-gradient(135deg,#92400e,#78350f)', iconShadow: '0 8px 20px -8px rgba(146,64,14,0.4)', iconPath: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4', arrowColor: '#78350f', footerNoteKey: 'secplane.protection.moduleVisual.cat7.footerNote', layerLabelKey: 'secplane.protection.moduleVisual.cat7.layerLabel', layerTagClass: 'layer-tag-control', badgeClass: 'badge-orange' },
-  'cat-5': { num: '⑧', layer: 'control', cardBorder: '#f4cba0', cardBg: 'linear-gradient(135deg,#fff,#fff3e1)', iconGradient: 'linear-gradient(135deg,#d97706,#b45309)', iconShadow: '0 8px 20px -8px rgba(217,119,6,0.4)', iconPath: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01', arrowColor: '#b45309', footerNoteKey: 'secplane.protection.moduleVisual.cat5.footerNote', layerLabelKey: 'secplane.protection.moduleVisual.cat5.layerLabel', layerTagClass: 'layer-tag-control', badgeClass: 'badge-orange' },
+  'cat-1': { num: '①', layer: 'runtime', cardBorder: '#f4b6b3', cardBg: 'var(--cm-surface)', iconGradient: '#ef4444', iconShadow: 'var(--cm-shadow-2)', iconPath: 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z', arrowColor: '#ef4444', footerNoteKey: 'secplane.protection.moduleVisual.cat1.footerNote', layerLabelKey: 'secplane.protection.moduleVisual.cat1.layerLabel', layerTagClass: 'layer-tag-runtime', badgeClass: 'badge-red' },
+  'cat-6': { num: '⑥', layer: 'host', cardBorder: '#a8d9d2', cardBg: 'var(--cm-surface)', iconGradient: '#0f766e', iconShadow: 'var(--cm-shadow-2)', iconPath: 'M3 11v11h18V11M7 11V7a5 5 0 0110 0v4', arrowColor: '#0f766e', footerNoteKey: 'secplane.protection.moduleVisual.cat6.footerNote', layerLabelKey: 'secplane.protection.moduleVisual.cat6.layerLabel', layerTagClass: 'layer-tag-host', badgeClass: 'badge-blue' },
+  'cat-4': { num: '②', layer: 'audit', cardBorder: '#d9c7f5', cardBg: 'var(--cm-surface)', iconGradient: '#7c3aed', iconShadow: 'var(--cm-shadow-2)', iconPath: 'M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z', arrowColor: '#6b21a8', footerNoteKey: 'secplane.protection.moduleVisual.cat4.footerNote', layerLabelKey: 'secplane.protection.moduleVisual.cat4.layerLabel', layerTagClass: 'layer-tag-audit', badgeClass: 'badge-purple' },
+  'cat-3': { num: '④', layer: 'control', cardBorder: '#c8d4e2', cardBg: 'var(--cm-surface)', iconGradient: '#64748b', iconShadow: 'var(--cm-shadow-2)', iconPath: 'M17 8h2a2 2 0 012 2v8a2 2 0 01-2 2h-2m-10 0H5a2 2 0 01-2-2v-8a2 2 0 012-2h2m3 4h4m-8 4h8M9 4h6a1 1 0 011 1v3H8V5a1 1 0 011-1z', arrowColor: '#64748b', footerNoteKey: 'secplane.protection.moduleVisual.cat3.footerNote', layerLabelKey: 'secplane.protection.moduleVisual.cat3.layerLabel', layerTagClass: 'layer-tag-control', badgeClass: 'badge-blue' },
+  'cat-2': { num: '③', layer: 'control', cardBorder: '#b8d8f4', cardBg: 'var(--cm-surface)', iconGradient: '#2563eb', iconShadow: 'var(--cm-shadow-2)', iconPath: 'M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z', arrowColor: '#1d4ed8', footerNoteKey: 'secplane.protection.moduleVisual.cat2.footerNote', layerLabelKey: 'secplane.protection.moduleVisual.cat2.layerLabel', layerTagClass: 'layer-tag-control', badgeClass: 'badge-blue' },
+  'cat-7': { num: '⑦', layer: 'control', cardBorder: 'var(--cm-border)', cardBg: 'var(--cm-surface)', iconGradient: '#92400e', iconShadow: 'var(--cm-shadow-2)', iconPath: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4', arrowColor: '#78350f', footerNoteKey: 'secplane.protection.moduleVisual.cat7.footerNote', layerLabelKey: 'secplane.protection.moduleVisual.cat7.layerLabel', layerTagClass: 'layer-tag-control', badgeClass: 'badge-orange' },
+  'cat-5': { num: '⑧', layer: 'control', cardBorder: '#f4cba0', cardBg: 'var(--cm-surface)', iconGradient: '#d97706', iconShadow: 'var(--cm-shadow-2)', iconPath: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01', arrowColor: '#b45309', footerNoteKey: 'secplane.protection.moduleVisual.cat5.footerNote', layerLabelKey: 'secplane.protection.moduleVisual.cat5.layerLabel', layerTagClass: 'layer-tag-control', badgeClass: 'badge-orange' },
 };
 
 // Bubble label keys per cat
@@ -138,7 +138,7 @@ const RingCard: React.FC<RingCardProps> = ({ catId, style, bubbleKeys, bubbleOpa
   const planned = vis.layer === 'planned';
   const label = RING_SHORT_LABEL_KEYS[catId] ? t(RING_SHORT_LABEL_KEYS[catId]) : (cat.labelKey ? t(cat.labelKey) : cat.label);
   return (
-    <div style={{ position: 'absolute', background: '#fff', borderRadius: 16, border: `1px solid ${vis.cardBorder}`, padding: '10px 12px', boxShadow: '0 8px 24px -12px rgba(0,0,0,0.2)', ...style }}>
+    <div style={{ position: 'absolute', background: '#fff', borderRadius: 8, border: `1px solid ${vis.cardBorder}`, padding: '10px 12px', boxShadow: 'var(--cm-shadow-8)', ...style }}>
       <div className="flex items-center gap-2 mb-1">
         <div style={{ width: 28, height: 28, borderRadius: 8, background: vis.iconGradient, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5">
@@ -146,13 +146,13 @@ const RingCard: React.FC<RingCardProps> = ({ catId, style, bubbleKeys, bubbleOpa
           </svg>
         </div>
         <div>
-          <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#171212' }}>{label}</div>
-          <div style={{ fontSize: '0.6rem', color: planned ? '#94a3b8' : vis.arrowColor, fontWeight: 600 }}>{t(vis.layerLabelKey)}</div>
+          <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--cm-ink)' }}>{label}</div>
+          <div style={{ fontSize: '0.75rem', color: planned ? '#94a3b8' : vis.arrowColor, fontWeight: 600 }}>{t(vis.layerLabelKey)}</div>
         </div>
       </div>
       <div className="flex flex-wrap gap-1">
         {bubbleKeys.map((bk, i) => (
-          <span key={i} className="scenario-bubble" style={{ fontSize: '0.6rem', padding: '2px 6px', ...(bubbleOpacity ? { opacity: bubbleOpacity } : {}) }}>{t(`secplane.protection.ringBubble.${bk}`)}</span>
+          <span key={i} className="scenario-bubble" style={{ fontSize: '0.75rem', padding: '2px 6px', ...(bubbleOpacity ? { opacity: bubbleOpacity } : {}) }}>{t(`secplane.protection.ringBubble.${bk}`)}</span>
         ))}
       </div>
     </div>
@@ -168,21 +168,21 @@ const LayerCard: React.FC<{ catId: string; sceneSubtitle?: string; t: (key: stri
   const sceneCount = BUBBLE_LABEL_KEYS[catId]?.length ?? 0;
   const bubbles = BUBBLE_LABEL_KEYS[catId]?.map((bk) => t(`secplane.protection.bubbleLabels.${bk}`)) ?? [];
   const inner = (
-    <div className="panel-tight flex items-start gap-3" style={{ borderLeft: `4px solid ${vis.arrowColor}`, cursor: planned ? 'not-allowed' : 'pointer', opacity: planned ? 0.75 : 1 }}>
-      <div style={{ width: 40, height: 40, borderRadius: 10, background: vis.iconGradient, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+    <div className="secp-layer-card panel-tight flex items-start gap-3" style={{ borderLeft: `4px solid ${vis.arrowColor}`, cursor: planned ? 'not-allowed' : 'pointer', opacity: planned ? 0.75 : 1 }}>
+      <div style={{ width: 40, height: 40, borderRadius: 8, background: vis.iconGradient, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
           <path strokeLinecap="round" strokeLinejoin="round" d={vis.iconPath} />
         </svg>
       </div>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 mb-1 flex-wrap">
-          <div style={{ fontSize: '0.875rem', fontWeight: 700, color: '#171212' }}>{cat.labelKey ? t(cat.labelKey) : cat.label}</div>
+          <div style={{ fontSize: '0.875rem', fontWeight: 700, color: 'var(--cm-ink)' }}>{cat.labelKey ? t(cat.labelKey) : cat.label}</div>
           {planned ? (
-            <span className="badge badge-slate" style={{ fontSize: '0.5625rem', padding: '2px 6px' }}>{t('secplane.protection.layerCard.planned')}</span>
+            <span className="badge badge-slate" style={{ fontSize: '0.75rem', padding: '2px 6px' }}>{t('secplane.protection.layerCard.planned')}</span>
           ) : (
             <>
               <span className={`layer-tag ${vis.layerTagClass}`}>{t(vis.layerLabelKey)}</span>
-              <span className={`badge ${vis.badgeClass}`} style={{ fontSize: '0.5625rem', padding: '2px 6px' }}>{t('secplane.protection.layerCard.sceneCount', { count: sceneCount })}</span>
+              <span className={`badge ${vis.badgeClass}`} style={{ fontSize: '0.75rem', padding: '2px 6px' }}>{t('secplane.protection.layerCard.sceneCount', { count: sceneCount })}</span>
             </>
           )}
         </div>
@@ -193,13 +193,13 @@ const LayerCard: React.FC<{ catId: string; sceneSubtitle?: string; t: (key: stri
           ))}
         </div>
       </div>
-      <div style={{ color: planned ? '#94a3b8' : vis.arrowColor, fontWeight: 600, fontSize: '0.8125rem' }}>{planned ? t('secplane.protection.layerCard.plannedLink') : t('secplane.protection.layerCard.viewLink')}</div>
+      <div style={{ color: planned ? '#94a3b8' : vis.arrowColor, fontWeight: 600, fontSize: '0.875rem' }}>{planned ? t('secplane.protection.layerCard.plannedLink') : t('secplane.protection.layerCard.viewLink')}</div>
     </div>
   );
   if (planned) {
     return inner;
   }
-  return <Link to={cat.path} style={{ textDecoration: 'none', color: 'inherit', display: 'block' }}>{inner}</Link>;
+  return <Link to={cat.path} style={{ textDecoration: 'none', color: 'inherit', display: 'block', minWidth: 0 }}>{inner}</Link>;
 };
 
 // Layer section
@@ -214,7 +214,7 @@ const LayerSection: React.FC<{ title: string; dotColor: string; rows: Array<stri
       <div className="zone-divider-line" />
     </div>
     {rows.map((row, i) => {
-      const colsClass = row.length === 1 ? 'grid-cols-1' : row.length === 2 ? 'grid-cols-2' : 'grid-cols-3';
+      const colsClass = row.length === 1 ? 'grid-cols-1' : 'grid-cols-1 md:grid-cols-2';
       return (
         <div key={i} className={`grid ${colsClass} gap-3`}>
           {row.map((catId) => (
@@ -353,13 +353,13 @@ const SecurityProtectionPage: React.FC = () => {
 
   return (
     <AdminLayout>
-      <div className="cm-content space-y-6">
+      <div className="cm-content secp-overview space-y-6">
         {killActive && (
           <div
             className="panel"
             style={{
               borderColor: '#dc2626',
-              background: 'linear-gradient(90deg,#fef2f2,#fee2e2)',
+              background: 'var(--cm-error-background)',
               borderWidth: 2,
             }}
           >
@@ -385,15 +385,8 @@ const SecurityProtectionPage: React.FC = () => {
         )}
         {/* Hero */}
         <div className="panel">
-          <div className="flex items-start justify-between gap-6 mb-5">
-            <div className="hero-block flex-1">
-              <div className="h-eyebrow">{t('secplane.protection.hero.eyebrow')}</div>
-              <h2 className="h-title">{t('secplane.protection.hero.title')}</h2>
-              <p className="h-subtitle">
-                {t('secplane.protection.hero.subtitle')}
-              </p>
-            </div>
-            <div className="flex flex-col gap-2 shrink-0">
+          <div className="flex flex-wrap items-center justify-end gap-3 mb-4">
+            <div className="flex flex-wrap items-center gap-2">
               <LiveAegisConfigButton />
               <button
                 className="btn-secondary"
@@ -423,7 +416,7 @@ const SecurityProtectionPage: React.FC = () => {
               )}
             </div>
           </div>
-          <div className="grid grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
             <div className="stat-card">
               <div className="stat-card-label">{t('secplane.protection.stats.todayHits')}</div>
               <div className="stat-card-value">{todayHits}</div>
@@ -478,8 +471,7 @@ const SecurityProtectionPage: React.FC = () => {
         <div className="panel" style={{ padding: 24 }}>
           <div className="flex items-center justify-between mb-5">
             <div>
-              <div className="eyebrow">{t('secplane.protection.section.eyebrow')}</div>
-              <h3 className="section-title-lg mt-1">{t('secplane.protection.section.title')}</h3>
+              <h3 className="section-title">{t('secplane.protection.section.title')}</h3>
             </div>
             <div className="layer-legend">
               <div className="layer-dot"><div className="layer-dot-inner" style={{ background: '#ef4444' }} /><span>{t('secplane.protection.legend.runtime')}</span></div>
@@ -495,22 +487,22 @@ const SecurityProtectionPage: React.FC = () => {
           </div>
 
           {viewMode === 'ring' && (
-            <div className="flex flex-col items-center">
+            <div className="flex min-w-0 max-w-full flex-col items-center overflow-x-auto">
               <div className="flex gap-5 mb-6 flex-wrap justify-center">
                 <div className="flex items-center gap-2 text-xs"><div style={{ width: 10, height: 10, borderRadius: '50%', background: '#ef4444' }} />{t('secplane.protection.legend.runtime')}</div>
                 <div className="flex items-center gap-2 text-xs"><div style={{ width: 10, height: 10, borderRadius: '50%', background: '#1d4ed8' }} />{t('secplane.protection.legend.host')}</div>
                 <div className="flex items-center gap-2 text-xs"><div style={{ width: 10, height: 10, borderRadius: '50%', background: '#6b21a8' }} />{t('secplane.protection.legend.audit')}</div>
                 <div className="flex items-center gap-2 text-xs"><div style={{ width: 10, height: 10, borderRadius: '50%', background: '#b45309' }} />{t('secplane.protection.legend.control')}</div>
               </div>
-              <div className="relative flex items-center justify-center" style={{ width: 560, height: 560 }}>
+              <div className="relative flex shrink-0 self-start items-center justify-center md:self-center" style={{ width: 560, height: 560 }}>
                 <div style={{ position: 'absolute', width: 540, height: 540, top: '50%', left: '50%', transform: 'translate(-50%,-50%)', borderRadius: '50%', border: '2px solid #ef4444', opacity: 0.25 }} />
                 <div style={{ position: 'absolute', width: 390, height: 390, top: '50%', left: '50%', transform: 'translate(-50%,-50%)', borderRadius: '50%', border: '2px solid #1d4ed8', opacity: 0.25 }} />
                 <div style={{ position: 'absolute', width: 260, height: 260, top: '50%', left: '50%', transform: 'translate(-50%,-50%)', borderRadius: '50%', border: '2px solid #6b21a8', opacity: 0.25 }} />
                 <div style={{ position: 'absolute', width: 140, height: 140, top: '50%', left: '50%', transform: 'translate(-50%,-50%)', borderRadius: '50%', border: '2px solid #b45309', opacity: 0.25 }} />
 
-                <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', width: 100, height: 100, borderRadius: '50%', background: 'linear-gradient(135deg,#ef6b4a,#dc2626)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#fff', boxShadow: '0 12px 32px -12px rgba(220,38,38,0.5)', zIndex: 2 }}>
+                <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', width: 100, height: 100, borderRadius: '50%', background: 'var(--cm-primary)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#fff', boxShadow: 'var(--cm-shadow-4)', zIndex: 2 }}>
                   <div style={{ fontSize: '2.25rem', fontWeight: 800, lineHeight: 1 }}>7</div>
-                  <div style={{ fontSize: '0.5625rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', opacity: 0.9, whiteSpace: 'pre-line' }}>{t('secplane.protection.ringCenter.riskSurfaces')}</div>
+                  <div style={{ fontSize: '0.75rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', opacity: 0.9, whiteSpace: 'pre-line' }}>{t('secplane.protection.ringCenter.riskSurfaces')}</div>
                 </div>
 
                 <RingCard catId="cat-1" t={t} style={{ top: 8, left: '50%', transform: 'translateX(-50%)', width: 180 }} bubbleKeys={RING_BUBBLE_KEYS['cat-1']} />
@@ -525,23 +517,23 @@ const SecurityProtectionPage: React.FC = () => {
               <div className="flex flex-col gap-2 mt-4" style={{ width: 560 }}>
                 <div className="flex items-center gap-3 p-3 rounded-xl" style={{ border: '1px solid #f4b6b3', background: '#fdeded' }}>
                   <div style={{ width: 12, height: 12, borderRadius: '50%', background: '#ef4444', flexShrink: 0 }} />
-                  <div style={{ fontSize: '0.8125rem', fontWeight: 700, color: '#b42318' }}>{t('secplane.protection.ringLegend.runtimeTitle')}</div>
-                  <div style={{ fontSize: '0.75rem', color: '#6f6661' }}>{t('secplane.protection.ringLegend.runtimeDesc')}</div>
+                  <div style={{ fontSize: '0.875rem', fontWeight: 700, color: '#b42318' }}>{t('secplane.protection.ringLegend.runtimeTitle')}</div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--cm-muted)' }}>{t('secplane.protection.ringLegend.runtimeDesc')}</div>
                 </div>
                 <div className="flex items-center gap-3 p-3 rounded-xl" style={{ border: '1px solid #b8d4f4', background: '#e8f3fd' }}>
                   <div style={{ width: 12, height: 12, borderRadius: '50%', background: '#1d4ed8', flexShrink: 0 }} />
-                  <div style={{ fontSize: '0.8125rem', fontWeight: 700, color: '#1d4ed8' }}>{t('secplane.protection.ringLegend.hostTitle')}</div>
-                  <div style={{ fontSize: '0.75rem', color: '#6f6661' }}>{t('secplane.protection.ringLegend.hostDesc')}</div>
+                  <div style={{ fontSize: '0.875rem', fontWeight: 700, color: '#1d4ed8' }}>{t('secplane.protection.ringLegend.hostTitle')}</div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--cm-muted)' }}>{t('secplane.protection.ringLegend.hostDesc')}</div>
                 </div>
                 <div className="flex items-center gap-3 p-3 rounded-xl" style={{ border: '1px solid #d9c7f5', background: '#f3edff' }}>
                   <div style={{ width: 12, height: 12, borderRadius: '50%', background: '#6b21a8', flexShrink: 0 }} />
-                  <div style={{ fontSize: '0.8125rem', fontWeight: 700, color: '#6b21a8' }}>{t('secplane.protection.ringLegend.auditTitle')}</div>
-                  <div style={{ fontSize: '0.75rem', color: '#6f6661' }}>{t('secplane.protection.ringLegend.auditDesc')}</div>
+                  <div style={{ fontSize: '0.875rem', fontWeight: 700, color: '#6b21a8' }}>{t('secplane.protection.ringLegend.auditTitle')}</div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--cm-muted)' }}>{t('secplane.protection.ringLegend.auditDesc')}</div>
                 </div>
                 <div className="flex items-center gap-3 p-3 rounded-xl" style={{ border: '1px solid #f4cba0', background: '#fff3e1' }}>
                   <div style={{ width: 12, height: 12, borderRadius: '50%', background: '#b45309', flexShrink: 0 }} />
-                  <div style={{ fontSize: '0.8125rem', fontWeight: 700, color: '#b45309' }}>{t('secplane.protection.ringLegend.controlTitle')}</div>
-                  <div style={{ fontSize: '0.75rem', color: '#6f6661' }}>{t('secplane.protection.ringLegend.controlDesc')}</div>
+                  <div style={{ fontSize: '0.875rem', fontWeight: 700, color: '#b45309' }}>{t('secplane.protection.ringLegend.controlTitle')}</div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--cm-muted)' }}>{t('secplane.protection.ringLegend.controlDesc')}</div>
                 </div>
               </div>
             </div>
@@ -561,13 +553,13 @@ const SecurityProtectionPage: React.FC = () => {
         <div className="panel">
           <div className="flex items-center justify-between mb-4">
             <div>
-              <div className="eyebrow">{t('secplane.protection.eventTable.eyebrow')}</div>
-              <h3 className="section-title-lg mt-1">{t('secplane.protection.eventTable.title')}</h3>
+              <h3 className="section-title">{t('secplane.protection.eventTable.title')}</h3>
             </div>
             <Link to="/admin/secplane/events" className="btn-secondary btn-sm" style={{ textDecoration: 'none' }}>
               {t('secplane.protection.eventTable.fullLink')}
             </Link>
           </div>
+          <div className="min-w-0 max-w-full overflow-x-auto">
           <table className="tbl">
             <thead>
               <tr>
@@ -611,10 +603,10 @@ const SecurityProtectionPage: React.FC = () => {
                       <span className={`badge ${sourceBadgeTone(a.source, t)}`}>{getSourceLabel(a.source)}</span>
                     </td>
                     <td>
-                      <span className="text-xs font-medium text-[#171212]">{sceneOf(a.rule_id)}</span>
+                      <span className="text-xs font-medium text-[var(--cm-ink)]">{sceneOf(a.rule_id)}</span>
                     </td>
                     <td>
-                      <span className="text-sm text-[#171212]" title={a.evidence ?? ''}>{event}</span>
+                      <span className="text-sm text-[var(--cm-ink)]" title={a.evidence ?? ''}>{event}</span>
                     </td>
                     <td>
                       <span className="font-mono text-xs">{target}</span>
@@ -627,6 +619,7 @@ const SecurityProtectionPage: React.FC = () => {
               })}
             </tbody>
           </table>
+          </div>
         </div>
       </div>
     </AdminLayout>

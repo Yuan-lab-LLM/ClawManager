@@ -81,7 +81,7 @@ const StateSurfacePage: React.FC = () => {
         <div className="panel">
           <div className="hero-block">
             <div className="h-eyebrow">{t('secplane.runtime.stateSurface.heroEyebrow')}</div>
-            <h2 className="h-title">{t('secplane.runtime.stateSurface.heroTitle')}</h2>
+            <h2 className="section-title">{t('secplane.runtime.stateSurface.heroTitle')}</h2>
             <p className="h-subtitle">{t('secplane.runtime.stateSurface.heroSubtitle')}</p>
           </div>
           <div className="grid grid-cols-4 gap-3 mt-5">
@@ -133,9 +133,9 @@ const StateSurfacePage: React.FC = () => {
           </div>
           <div className="grid grid-cols-2 gap-3">
             {PROTECTED_PATHS.map(([path, descKey, pattern, , hits]) => (
-              <div key={path} className="p-4 rounded-2xl border border-[#eadfd8] bg-[#fffaf7]">
+              <div key={path} className="p-4 rounded-lg border border-[var(--cm-border)] bg-[var(--cm-subtle)]">
                 <div className="flex items-start justify-between mb-2">
-                  <code className="text-sm font-bold text-[#171212]">{path}</code>
+                  <code className="text-sm font-bold text-[var(--cm-ink)]">{path}</code>
                   <span className="badge badge-slate">{t('secplane.runtime.stateSurface.sharedMode')}</span>
                 </div>
                 <div className="text-xs muted mb-2">{t('secplane.runtime.stateSurface.protectedPaths.' + descKey + '.desc')}</div>
@@ -253,7 +253,7 @@ const StateSurfacePage: React.FC = () => {
                   <td><span className="muted-strong text-xs">{a.ts?.replace('T', ' ').slice(0, 19) ?? '—'}</span></td>
                   <td><span className="font-mono text-xs">{a.agent_id ?? '—'}</span></td>
                   <td><code className="text-xs">{a.subject ?? '—'}</code></td>
-                  <td><code className="text-xs text-[#7a4a30]">{a.rule_id ?? '—'}</code></td>
+                  <td><code className="text-xs text-[var(--cm-text)]">{a.rule_id ?? '—'}</code></td>
                   <td><span className="text-xs muted">{a.evidence ?? a.rule_name ?? '—'}</span></td>
                   <td>
                     <span className={`badge badge-${a.action === 'block' ? 'red' : a.action === 'redact' ? 'orange' : 'slate'}`}>

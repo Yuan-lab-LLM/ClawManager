@@ -133,7 +133,7 @@ assert.match(
 );
 assert.match(
   source,
-  /title=\{queryText \|\| undefined\}[\s\S]*\{queryText \|\| "用户提交 query 后，这里会展示拆解、执行和汇总。"\}/,
+  /title=\{queryText \|\| undefined\}[\s\S]*\{queryText \|\| t\("teams.boardEmpty"\)\}/,
   "the Kanban header must present the current query as its primary text",
 );
 assert.doesNotMatch(source, /teamWorkspaceHeight/, "chat height must not depend on card detail length");

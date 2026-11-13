@@ -255,7 +255,7 @@ const InputSurfacePage: React.FC = () => {
           <div className="flex items-start justify-between gap-6 mb-5">
             <div className="hero-block flex-1">
               <div className="h-eyebrow">{t('secplane.runtime.inputSurface.heroEyebrow')}</div>
-              <h2 className="h-title">{t('secplane.runtime.inputSurface.heroTitle')}</h2>
+              <h2 className="section-title">{t('secplane.runtime.inputSurface.heroTitle')}</h2>
               <p className="h-subtitle">
                 {t('secplane.runtime.inputSurface.heroSubtitle')}
               </p>
@@ -334,7 +334,7 @@ const InputSurfacePage: React.FC = () => {
                 >
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-1">
-                      <span className="text-base font-semibold text-[#171212]">{t(def.nameKey)}</span>
+                      <span className="text-base font-semibold text-[var(--cm-ink)]">{t(def.nameKey)}</span>
                       <span className="tag">{def.hook}</span>
                       {!rule && (
                         <span className="badge badge-slate">{t('secplane.runtime.shared.notConfigured')}</span>
@@ -435,8 +435,8 @@ const InputSurfacePage: React.FC = () => {
                   <div key={c.flag} style={{ marginBottom: idx === modal.categories.length - 1 ? 0 : 20 }}>
                     <div className="flex items-center justify-between mb-2">
                       <div className="flex items-center gap-2">
-                        <code className="text-xs font-bold text-[#171212]">{c.flag}</code>
-                        <span className="text-sm text-[#171212]">{t(c.nameKey)}</span>
+                        <code className="text-xs font-bold text-[var(--cm-ink)]">{c.flag}</code>
+                        <span className="text-sm text-[var(--cm-ink)]">{t(c.nameKey)}</span>
                       </div>
                       <span className={`badge ${TONE_TO_BADGE[c.tone] || 'badge-slate'}`}>{c.hits} hits / 24h</span>
                     </div>
@@ -446,7 +446,7 @@ const InputSurfacePage: React.FC = () => {
                         <code
                           key={i}
                           className="block text-xs rounded-md px-3 py-1.5"
-                          style={{ background: '#fdf6f1', color: '#7a4a30', wordBreak: 'break-all' }}
+                          style={{ background: 'var(--cm-subtle)', color: 'var(--cm-text)', wordBreak: 'break-all' }}
                         >
                           {r}
                         </code>
@@ -455,7 +455,7 @@ const InputSurfacePage: React.FC = () => {
                     <div className="muted-strong text-xs mb-1">{t('secplane.runtime.inputSurface.ruleModal.hitExample')}</div>
                     <div className="flex flex-col gap-1">
                       {c.examples.map((e, i) => (
-                        <div key={i} className="muted text-xs italic px-3 py-1" style={{ borderLeft: '2px solid #eadfd8' }}>
+                        <div key={i} className="muted text-xs italic px-3 py-1" style={{ borderLeft: '2px solid var(--cm-border)' }}>
                           "{e}"
                         </div>
                       ))}
@@ -466,15 +466,15 @@ const InputSurfacePage: React.FC = () => {
               ) : (
                 modal.sections.map((s, idx) => (
                   <div key={s.name} style={{ marginBottom: idx === modal.sections.length - 1 ? 0 : 16 }}>
-                    <div className="text-sm font-semibold text-[#171212] mb-2">
+                    <div className="text-sm font-semibold text-[var(--cm-ink)] mb-2">
                       {t(`secplane.runtime.inputSurface.ruleModal.${modalKey}.${s.name}.name`)}
                     </div>
                     <div className="flex flex-col gap-1.5">
                       {s.items.map((it, i) => (
                         <div
                           key={i}
-                          className="text-xs text-[#171212] rounded-md px-3 py-2"
-                          style={{ background: '#fdf6f1', lineHeight: 1.6 }}
+                          className="text-xs text-[var(--cm-ink)] rounded-md px-3 py-2"
+                          style={{ background: 'var(--cm-subtle)', lineHeight: 1.6 }}
                         >
                           <span className="muted-strong mr-2">{i + 1}.</span>
                           {getInjectedItem(s.name, it)}

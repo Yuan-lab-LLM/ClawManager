@@ -292,6 +292,11 @@ func hermesDesktopFilterRPC(frame []byte) ([]byte, error) {
 		if !valid {
 			return nil, ErrHermesDesktopForbidden
 		}
+		// The main Desktop picker omits --session. Never let Runtime defaults
+		// turn that browser pick into a persistent profile configuration write.
+		if key == "model" && !strings.HasSuffix(value, " --session") {
+			packet.Params["value"], _ = json.Marshal(value + " --session")
+		}
 		if _, exists := packet.Params["confirm_expensive_model"]; exists && key != "model" {
 			return nil, ErrHermesDesktopForbidden
 		}

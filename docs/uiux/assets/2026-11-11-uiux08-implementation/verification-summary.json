@@ -1,0 +1,37 @@
+{
+  "source_base": "aae8107",
+  "frontend": "http://127.0.0.1:9002",
+  "browser": "Chromium 151 cached headless shell",
+  "isolated_backend": "cm-uiux08-e2e via localhost9001; MySQL13307",
+  "typecheck": {
+    "app_noEmit_incremental_false": "PASS",
+    "node_noEmit_incremental_false": "PASS"
+  },
+  "node_tests": {
+    "runtime-management": 21,
+    "instance-access": 20,
+    "workbench": 7
+  },
+  "real_auth_db_playwright": {
+    "passed": 32,
+    "failed": 0,
+    "includes_setup": 2
+  },
+  "targeted_lint": {
+    "exit_code": 1,
+    "legacy_errors": 30,
+    "legacy_warnings": 9,
+    "new_diagnostics_by_file_rule_severity_multiplicity": 0
+  },
+  "rendered_contrast_samples": 70,
+  "contrast_minimum": 4.694084288264296,
+  "impeccable": {
+    "files": 22,
+    "regex_findings": 0,
+    "legacy_advisories": 1,
+    "parsed_element_checks": "NOT RUN"
+  },
+  "local_production_build": "NOT RUN",
+  "cluster_exact_commit_build_and_dist": "TASK 8 PENDING",
+  "real_mobile_keyboard_live_model_production_owner_auth": "NOT RUN"
+}

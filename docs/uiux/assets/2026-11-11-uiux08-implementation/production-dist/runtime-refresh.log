@@ -1,0 +1,5 @@
+
+> frontend@0.0.0 test:runtime-refresh
+> node scripts/runtime-refresh.browser.mjs
+
+PASS Runtime overview/detail background refresh, lifecycle events and WebSocket reconnect without reload

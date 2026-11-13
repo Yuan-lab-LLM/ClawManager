@@ -80,7 +80,7 @@ const PolicyPage: React.FC = () => {
         <div className="panel">
           <div className="hero-block">
             <div className="h-eyebrow">{t(`${p}.hero.eyebrow`)}</div>
-            <h2 className="h-title">{t(`${p}.hero.title`)}</h2>
+            <h2 className="section-title">{t(`${p}.hero.title`)}</h2>
             <p className="h-subtitle">
               {t(`${p}.hero.subtitle`)}
             </p>
@@ -114,7 +114,7 @@ const PolicyPage: React.FC = () => {
           <h3 className="section-title-lg mb-4">{t(`${p}.scopes.title`)}</h3>
           <div className="grid grid-cols-2 gap-4">
             {SCOPES.map(([n, key, , descKey, count, color, tipKey]) => (
-              <div key={n} className="p-5 rounded-2xl border-2 bg-white" style={{ borderColor: color }}>
+              <div key={n} className="p-5 rounded-lg border-2 bg-white" style={{ borderColor: color }}>
                 <div className="flex items-center gap-2 mb-3">
                   <div
                     className="w-9 h-9 rounded-xl flex items-center justify-center font-bold text-white text-sm"
@@ -122,7 +122,7 @@ const PolicyPage: React.FC = () => {
                   >
                     {n}
                   </div>
-                  <span className="font-bold text-[#171212]">{t(`${p}.scopes.${key}`)}</span>
+                  <span className="font-bold text-[var(--cm-ink)]">{t(`${p}.scopes.${key}`)}</span>
                 </div>
                 <div className="text-xs muted leading-5 mb-3">{t(`${p}.scopes.${descKey}`)}</div>
                 <div className="flex items-baseline justify-between">
@@ -131,7 +131,7 @@ const PolicyPage: React.FC = () => {
                     {count}
                   </span>
                 </div>
-                <div className="text-[10px] muted-strong mt-2 italic">{t(`${p}.scopes.${tipKey}`)}</div>
+                <div className="text-xs muted-strong mt-2 italic">{t(`${p}.scopes.${tipKey}`)}</div>
               </div>
             ))}
           </div>
@@ -148,7 +148,7 @@ const PolicyPage: React.FC = () => {
           <h3 className="section-title-lg mb-4">{t(`${p}.compiler.title`)}</h3>
           <div className="grid gap-6 items-center" style={{ gridTemplateColumns: '1fr auto 1fr' }}>
             <div className="panel-warm">
-              <div className="eyebrow text-[10px] mb-2">{t(`${p}.compiler.inputLabel`)}</div>
+              <div className="eyebrow text-xs mb-2">{t(`${p}.compiler.inputLabel`)}</div>
               <pre className="code-block text-[11px]">{RULE_JSON}</pre>
             </div>
             <svg width="40" height="40" fill="none" viewBox="0 0 24 24" stroke="currentColor" className="muted">
@@ -156,7 +156,7 @@ const PolicyPage: React.FC = () => {
             </svg>
             <div className="space-y-2">
               {TARGETS.map(([key, path]) => (
-                <div key={key} className="p-3 rounded-xl bg-white border border-[#eadfd8] flex items-center gap-2">
+                <div key={key} className="p-3 rounded-xl bg-white border border-[var(--cm-border)] flex items-center gap-2">
                   <span className={`badge ${targetBadge(key)}`}>{t(`${p}.compiler.${key}`)}</span>
                   <code className="text-xs flex-1">{path}</code>
                   <span className="text-xs tone-green font-bold">{t(`${p}.compiler.synced`)}</span>
@@ -216,10 +216,10 @@ const PolicyPage: React.FC = () => {
               {POLICIES.map(([name, scKey, scope, target, mode, syncKey, upd]) => (
                 <tr key={name}>
                   <td>
-                    <span className="font-semibold text-[#171212]">{name}</span>
+                    <span className="font-semibold text-[var(--cm-ink)]">{name}</span>
                   </td>
                   <td>
-                    <span className="text-xs font-medium text-[#171212]">{t(`${p}.policies.${scKey}`)}</span>
+                    <span className="text-xs font-medium text-[var(--cm-ink)]">{t(`${p}.policies.${scKey}`)}</span>
                   </td>
                   <td>
                     <span className={`badge ${scope === 'host' ? 'badge-blue' : 'badge-orange'}`}>
@@ -264,10 +264,10 @@ const PolicyPage: React.FC = () => {
             {TEMPLATES.map(([key, descKey, tone, refs]) => (
               <div
                 key={key}
-                className="p-4 rounded-2xl border border-[#eadfd8] bg-white hover:border-[#ef6b4a] hover:shadow-md transition cursor-pointer"
+                className="p-4 rounded-lg border border-[var(--cm-border)] bg-white hover:border-[var(--cm-primary)] hover:shadow-md transition cursor-pointer"
               >
                 <div className="flex items-center justify-between mb-2">
-                  <span className="font-bold text-[#171212] text-sm">{t(`${p}.templates.${key}`)}</span>
+                  <span className="font-bold text-[var(--cm-ink)] text-sm">{t(`${p}.templates.${key}`)}</span>
                   <span className={`badge badge-${tone === 'teal' ? 'green' : tone}`}>{t(`${p}.templateSection.rules`, { count: refs })}</span>
                 </div>
                 <div className="text-xs muted leading-5">{t(`${p}.templates.${descKey}`)}</div>

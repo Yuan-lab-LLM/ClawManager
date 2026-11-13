@@ -52,7 +52,7 @@ import CollaborationGovernancePage from '../pages/admin/protection/scenarios/Col
 import CollaborationQuotaPage from '../pages/admin/protection/scenarios/CollaborationQuotaPage';
 
 // Instance Pages
-import InstanceListPage from '../pages/instances/InstanceListPage';
+import InstanceWorkspaceEntry from '../pages/instances/InstanceWorkspaceEntry';
 import CreateInstancePage from '../pages/instances/CreateInstancePage';
 import InstanceDetailPage from '../pages/instances/InstanceDetailPage';
 import InstancePortalPage from '../pages/instances/InstancePortalPage';
@@ -193,7 +193,7 @@ function AppRoutes() {
         path="/instances"
         element={
           <ProtectedRoute>
-            <InstanceListPage />
+            <InstanceWorkspaceEntry />
           </ProtectedRoute>
         }
       />

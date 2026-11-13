@@ -178,7 +178,7 @@ const AssetProtectionPage: React.FC = () => {
         <div className="panel">
           <div className="hero-block">
             <div className="h-eyebrow">{t('secplane.runtime.assetProtection.heroEyebrow')}</div>
-            <h2 className="h-title">{t('secplane.runtime.assetProtection.heroTitle')}</h2>
+            <h2 className="section-title">{t('secplane.runtime.assetProtection.heroTitle')}</h2>
             <p className="h-subtitle">{t('secplane.runtime.assetProtection.heroSubtitle')}</p>
           </div>
           <div className="grid grid-cols-4 gap-3 mt-5">
@@ -219,15 +219,15 @@ const AssetProtectionPage: React.FC = () => {
               const curMode = modeOf(ruleId, 'enforce');
               const realHits = alerts.filter((a) => a.rule_id?.startsWith(ruleId)).length;
               return (
-                <div key={ruleId} className="flex items-center gap-4 p-4 rounded-2xl border border-[#eadfd8] bg-white">
+                <div key={ruleId} className="flex items-center gap-4 p-4 rounded-lg border border-[var(--cm-border)] bg-white">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-1 flex-wrap">
-                      <span className="font-semibold text-[#171212]">{t(`secplane.runtime.assetProtection.rules.${nameKey}.name`)}</span>
-                      <code className="text-[10px] muted-strong tracking-wider">{flag}</code>
-                      <code className="text-[10px] text-[#7a4a30] bg-[#fdf6f1] px-1.5 py-0.5 rounded">{hook}</code>
+                      <span className="font-semibold text-[var(--cm-ink)]">{t(`secplane.runtime.assetProtection.rules.${nameKey}.name`)}</span>
+                      <code className="text-xs muted-strong tracking-wider">{flag}</code>
+                      <code className="text-xs text-[var(--cm-text)] bg-[var(--cm-subtle)] px-1.5 py-0.5 rounded">{hook}</code>
                     </div>
                     <div className="text-xs muted mb-1">{t(`secplane.runtime.assetProtection.rules.${descKey}.desc`)}</div>
-                    <code className="block text-[10px] muted-strong bg-[#fdf6f1] px-2 py-1 rounded font-mono truncate" style={{ maxWidth: 480 }}>{pat}</code>
+                    <code className="block text-xs muted-strong bg-[var(--cm-subtle)] px-2 py-1 rounded font-mono truncate" style={{ maxWidth: 480 }}>{pat}</code>
                   </div>
                   <div className="shrink-0">
                     <div className="mode-selector">
@@ -275,12 +275,12 @@ const AssetProtectionPage: React.FC = () => {
             {CUSTOM_KINDS.map((cfg) => {
               const items = customRules[cfg.kind];
               return (
-                <div key={cfg.kind} className="p-4 rounded-2xl border border-[#eadfd8] bg-white">
+                <div key={cfg.kind} className="p-4 rounded-lg border border-[var(--cm-border)] bg-white">
                   <div className="flex items-center justify-between mb-2.5 gap-3 flex-wrap">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-semibold text-[#171212]">{t(`secplane.runtime.assetProtection.customKinds.${cfg.key}.name`)}</span>
-                      <code className="text-[10px] muted-strong tracking-wider">{t(`secplane.runtime.assetProtection.customKinds.${cfg.key}.field`)}</code>
-                      <span className={`badge badge-${cfg.badge} text-[10px]`}>{t('secplane.runtime.shared.items', { count: items.length })}</span>
+                      <span className="font-semibold text-[var(--cm-ink)]">{t(`secplane.runtime.assetProtection.customKinds.${cfg.key}.name`)}</span>
+                      <code className="text-xs muted-strong tracking-wider">{t(`secplane.runtime.assetProtection.customKinds.${cfg.key}.field`)}</code>
+                      <span className={`badge badge-${cfg.badge} text-xs`}>{t('secplane.runtime.shared.items', { count: items.length })}</span>
                     </div>
                     <div className="flex gap-2 items-center">
                       <input
@@ -308,7 +308,7 @@ const AssetProtectionPage: React.FC = () => {
                       <span
                         key={r.rule_id}
                         className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-mono"
-                        style={{ background: '#fdf6f1', border: '1px solid #eadfd8', color: '#7a4a30' }}
+                        style={{ background: 'var(--cm-subtle)', border: '1px solid var(--cm-border)', color: 'var(--cm-text)' }}
                         title={`mode=${r.mode}`}
                       >
                         {r.pattern}
@@ -327,8 +327,8 @@ const AssetProtectionPage: React.FC = () => {
               );
             })}
           </div>
-          <div className="text-xs muted mt-4 pt-3 border-t border-[#eadfd8]">
-            {t('secplane.runtime.assetProtection.customNotePrefix')}<strong className="text-[#171212]">{t('secplane.runtime.assetProtection.customNoteHighlight')}</strong>{t('secplane.runtime.assetProtection.customNoteSuffix')}
+          <div className="text-xs muted mt-4 pt-3 border-t border-[var(--cm-border)]">
+            {t('secplane.runtime.assetProtection.customNotePrefix')}<strong className="text-[var(--cm-ink)]">{t('secplane.runtime.assetProtection.customNoteHighlight')}</strong>{t('secplane.runtime.assetProtection.customNoteSuffix')}
           </div>
         </div>
 
@@ -350,11 +350,11 @@ const AssetProtectionPage: React.FC = () => {
                 const a = autoBadge(auto as 'realtime' | 'install' | 'manual');
                 return (
                   <tr key={path}>
-                    <td><code className="text-sm font-mono text-[#171212]">{path}</code></td>
+                    <td><code className="text-sm font-mono text-[var(--cm-ink)]">{path}</code></td>
                     <td><span className={`badge ${assetBadge(kind)}`}>{t(`secplane.runtime.assetProtection.coreAssets.${assetKey}.type`)}</span></td>
                     <td>
-                      <span className="text-xs" style={{ color: '#7a4a30', fontWeight: 500 }}>✓ {t(`secplane.runtime.assetProtection.coreAssets.${assetKey}.sec`)}</span>{' '}
-                      <span className={`badge ${a.class} text-[10px] ml-2 whitespace-nowrap`}>{t(a.labelKey)}</span>
+                      <span className="text-xs" style={{ color: 'var(--cm-text)', fontWeight: 500 }}>✓ {t(`secplane.runtime.assetProtection.coreAssets.${assetKey}.sec`)}</span>{' '}
+                      <span className={`badge ${a.class} text-xs ml-2 whitespace-nowrap`}>{t(a.labelKey)}</span>
                     </td>
                   </tr>
                 );
@@ -374,11 +374,11 @@ const AssetProtectionPage: React.FC = () => {
             </div>
             <div className="space-y-2">
               {DRIFT_CHECKS.map(([path, node, time, status, tone, descKey]) => (
-                <div key={path} className="flex items-center gap-3 p-3 rounded-xl border border-[#eadfd8] bg-white">
+                <div key={path} className="flex items-center gap-3 p-3 rounded-xl border border-[var(--cm-border)] bg-white">
                   <span className={`dot bg-${tone}-500`} />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
-                      <code className="text-xs font-mono text-[#171212]">{path}</code>
+                      <code className="text-xs font-mono text-[var(--cm-ink)]">{path}</code>
                       <span className="text-xs muted-strong">on {node}</span>
                     </div>
                     <div className="text-xs muted mt-0.5">{t(`secplane.runtime.assetProtection.driftChecks.${descKey}.desc`)}</div>
@@ -397,10 +397,10 @@ const AssetProtectionPage: React.FC = () => {
             </div>
             <div className="space-y-2">
               {MEMORY_ALERTS.map(([alertKey, inst, file, _reason, _sev, tone], i) => (
-                <div key={i} className="flex items-center gap-3 p-2.5 rounded-xl border border-[#eadfd8] bg-white">
+                <div key={i} className="flex items-center gap-3 p-2.5 rounded-xl border border-[var(--cm-border)] bg-white">
                   <span className="muted-strong text-xs shrink-0 w-12">{t(`secplane.runtime.assetProtection.memoryAlerts.${alertKey}.time`)}</span>
-                  <code className="text-xs font-mono text-[#171212] shrink-0">{inst}</code>
-                  <code className="text-xs text-[#171212] shrink-0">{file}</code>
+                  <code className="text-xs font-mono text-[var(--cm-ink)] shrink-0">{inst}</code>
+                  <code className="text-xs text-[var(--cm-ink)] shrink-0">{file}</code>
                   <span className="text-xs muted flex-1 truncate">{t(`secplane.runtime.assetProtection.memoryAlerts.${alertKey}.reason`)}</span>
                   <span className={`badge badge-${tone} shrink-0`}>{t(`secplane.runtime.assetProtection.memoryAlerts.${alertKey}.severity`)}</span>
                 </div>

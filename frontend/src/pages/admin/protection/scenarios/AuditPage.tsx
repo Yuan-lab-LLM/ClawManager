@@ -61,10 +61,10 @@ const AuditPage: React.FC = () => {
 
   const barGradient = (tone: Tone) =>
     tone === 'red'
-      ? 'linear-gradient(90deg, #ef6b4a, #dc2626)'
+      ? 'var(--cm-primary)'
       : tone === 'blue'
-      ? 'linear-gradient(90deg, #3b82f6, #1d4ed8)'
-      : 'linear-gradient(90deg, #a855f7, #6b21a8)';
+      ? 'var(--cm-data-blue)'
+      : '#6b21a8';
 
   return (
     <AdminLayout>
@@ -80,7 +80,7 @@ const AuditPage: React.FC = () => {
         <div className="panel">
           <div className="hero-block">
             <div className="h-eyebrow">{t(`${k}.hero.eyebrow`)}</div>
-            <h2 className="h-title">{t(`${k}.hero.title`)}</h2>
+            <h2 className="section-title">{t(`${k}.hero.title`)}</h2>
             <p className="h-subtitle">{t(`${k}.hero.subtitle`)}</p>
           </div>
           <div className="grid grid-cols-4 gap-3 mt-5">
@@ -161,7 +161,7 @@ const AuditPage: React.FC = () => {
                 <tr key={i}>
                   <td><span className="muted-strong text-xs">{evTime}</span></td>
                   <td><span className={`badge ${sourceBadgeTone(src)}`}>{src}</span></td>
-                  <td><span className="text-xs font-medium text-[#171212]">{sc}</span></td>
+                  <td><span className="text-xs font-medium text-[var(--cm-ink)]">{sc}</span></td>
                   <td><code className="text-xs">{rule}</code></td>
                   <td><span className="font-mono text-xs">{inst}</span></td>
                   <td><code className="text-xs muted">{trace}</code></td>
@@ -187,7 +187,7 @@ const AuditPage: React.FC = () => {
               {SOURCES.map(([name, tone, count, pct]) => (
                 <div key={name}>
                   <div className="flex justify-between mb-1">
-                    <span className="text-sm font-semibold text-[#171212]">{name}</span>
+                    <span className="text-sm font-semibold text-[var(--cm-ink)]">{name}</span>
                     <span className={`text-sm font-bold tone-${tone}`}>
                       {count.toLocaleString()} ({pct})
                     </span>
@@ -205,8 +205,8 @@ const AuditPage: React.FC = () => {
             <h3 className="section-title-lg mb-4">{t(`${k}.sceneHits.title`)}</h3>
             <div className="space-y-2 text-sm">
               {SCENE_HITS.map(([name, n, tone]) => (
-                <div key={name} className="flex items-center justify-between p-2 rounded-lg hover:bg-[#fdf6f1]">
-                  <span className="text-[#171212]">{name}</span>
+                <div key={name} className="flex items-center justify-between p-2 rounded-lg hover:bg-[var(--cm-subtle)]">
+                  <span className="text-[var(--cm-ink)]">{name}</span>
                   <span className={`font-bold tone-${tone}`}>{n}</span>
                 </div>
               ))}

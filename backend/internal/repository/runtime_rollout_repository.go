@@ -57,10 +57,13 @@ func (r *runtimeRolloutRepository) Create(ctx context.Context, rollout *models.R
 		return insert(r.sess)
 	}
 	return r.sess.TxContext(ctx, func(tx db.Session) error {
-		if err := CheckRuntimeManagementRolloutAdmission(ctx, tx); err != nil {
+		if err := CheckRuntimeManagementRolloutAdmission(ctx, tx, rollout.RuntimeType); err != nil {
 			return err
 		}
-		return insert(tx)
+		if err := insert(tx); err != nil {
+			return err
+		}
+		return ConsumeRuntimeRolloutPreparation(ctx, tx, rollout.ID)
 	}, nil)
 }
 

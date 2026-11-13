@@ -66,7 +66,7 @@ const DecisionSurfacePage: React.FC = () => {
         <div className="panel">
           <div className="hero-block">
             <div className="h-eyebrow">{t('secplane.runtime.decisionSurface.heroEyebrow')}</div>
-            <h2 className="h-title">{t('secplane.runtime.decisionSurface.heroTitle')}</h2>
+            <h2 className="section-title">{t('secplane.runtime.decisionSurface.heroTitle')}</h2>
             <p className="h-subtitle">{t('secplane.runtime.decisionSurface.heroSubtitle')}</p>
           </div>
           <div className="grid grid-cols-4 gap-3 mt-5">
@@ -107,12 +107,12 @@ const DecisionSurfacePage: React.FC = () => {
               const curMode = modeOf(ruleId, 'enforce');
               const hitCount = alerts.filter((a) => a.rule_id?.startsWith(ruleId)).length;
               return (
-                <div key={ruleId} className="flex items-center gap-4 p-4 rounded-2xl border border-[#eadfd8] bg-white">
+                <div key={ruleId} className="flex items-center gap-4 p-4 rounded-lg border border-[var(--cm-border)] bg-white">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-1 flex-wrap">
-                      <span className="font-semibold text-[#171212]">{t(`secplane.runtime.decisionSurface.categories.${catKey}.name`)}</span>
-                      <code className="text-[10px] muted-strong tracking-wider">{flag}</code>
-                      <code className="text-[10px] text-[#7a4a30] bg-[#fdf6f1] px-1.5 py-0.5 rounded">before_tool_call</code>
+                      <span className="font-semibold text-[var(--cm-ink)]">{t(`secplane.runtime.decisionSurface.categories.${catKey}.name`)}</span>
+                      <code className="text-xs muted-strong tracking-wider">{flag}</code>
+                      <code className="text-xs text-[var(--cm-text)] bg-[var(--cm-subtle)] px-1.5 py-0.5 rounded">before_tool_call</code>
                     </div>
                     <div className="text-xs muted">{t(`secplane.runtime.decisionSurface.categories.${catKey}.desc`)}</div>
                   </div>
@@ -185,7 +185,7 @@ const DecisionSurfacePage: React.FC = () => {
                   <td><span className="muted-strong text-xs">{a.ts?.replace('T', ' ').slice(11, 19)}</span></td>
                   <td><span className="font-mono text-xs">{a.agent_id ?? '—'}</span></td>
                   <td><code className="text-xs">{a.rule_id?.split('.')[1] ?? a.rule_id ?? '—'}</code></td>
-                  <td><code className="text-xs text-[#171212] truncate inline-block" style={{ maxWidth: 320 }}>{a.subject ?? a.evidence?.slice(0, 80) ?? '—'}</code></td>
+                  <td><code className="text-xs text-[var(--cm-ink)] truncate inline-block" style={{ maxWidth: 320 }}>{a.subject ?? a.evidence?.slice(0, 80) ?? '—'}</code></td>
                   <td><span className="text-xs">{a.rule_name ?? '—'}</span></td>
                   <td><span className={`badge ${a.severity === 'high' ? 'badge-red' : a.severity === 'medium' ? 'badge-orange' : 'badge-slate'}`}>{a.severity}</span></td>
                   <td><span className={`badge badge-${a.action === 'block' ? 'red' : a.action === 'observe' ? 'orange' : 'slate'}`}>{a.action}</span></td>

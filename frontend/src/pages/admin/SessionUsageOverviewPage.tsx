@@ -153,25 +153,25 @@ const SessionUsageOverviewPage: React.FC = () => {
     <AdminLayout title={t("nav.sessionUsage")}>
       <div className="space-y-5">
         <section className="app-panel px-5 py-4">
-          <p className="text-sm text-[#6f625b]">{t("sessionUsagePage.subtitle")}</p>
+          <p className="text-sm text-[var(--cm-text)]">{t("sessionUsagePage.subtitle")}</p>
           <div className="mt-4 flex flex-wrap items-center gap-3">
             <input
               value={search}
               onChange={(event) => setSearch(event.target.value)}
               placeholder={t("sessionUsagePage.searchPlaceholder")}
-              className="min-w-[220px] flex-1 rounded-md border border-[#ead8cf] px-3 py-2 text-sm"
+              className="min-w-[220px] flex-1 rounded-md border border-[var(--cm-border)] px-3 py-2 text-sm"
             />
             <select
               value={timeRange}
               onChange={(event) => setTimeRange(event.target.value as SessionUsageTimeRange)}
-              className="rounded-md border border-[#ead8cf] px-3 py-2 text-sm"
+              className="rounded-md border border-[var(--cm-border)] px-3 py-2 text-sm"
             >
               <option value="all">{t("instances.sessionUsage.timeRangeAll")}</option>
               <option value="24h">{t("instances.sessionUsage.timeRange24h")}</option>
               <option value="7d">{t("instances.sessionUsage.timeRange7d")}</option>
               <option value="30d">{t("instances.sessionUsage.timeRange30d")}</option>
             </select>
-            <label className="inline-flex items-center gap-2 text-sm text-[#6f625b]">
+            <label className="inline-flex items-center gap-2 text-sm text-[var(--cm-text)]">
               <input
                 type="checkbox"
                 checked={autoRefresh}
@@ -181,7 +181,7 @@ const SessionUsageOverviewPage: React.FC = () => {
             </label>
             <button
               type="button"
-              className="rounded-md border border-[#ead8cf] px-3 py-2 text-sm"
+              className="rounded-md border border-[var(--cm-border)] px-3 py-2 text-sm"
               onClick={() => void loadOverview()}
             >
               {t("instances.sessionUsage.refresh")}
@@ -189,7 +189,7 @@ const SessionUsageOverviewPage: React.FC = () => {
             <button
               type="button"
               disabled={exporting}
-              className="rounded-md border border-[#ead8cf] px-3 py-2 text-sm disabled:opacity-50"
+              className="rounded-md border border-[var(--cm-border)] px-3 py-2 text-sm disabled:opacity-50"
               onClick={() => void exportCsv()}
             >
               {exporting ? t("instances.sessionUsage.exportCsvLoading") : t("instances.sessionUsage.exportCsv")}
@@ -204,7 +204,7 @@ const SessionUsageOverviewPage: React.FC = () => {
         )}
 
         {loading || !overview ? (
-          <section className="app-panel px-6 py-12 text-sm text-[#8f8681]">
+          <section className="app-panel px-6 py-12 text-sm text-[var(--cm-muted)]">
             {t("sessionUsagePage.loading")}
           </section>
         ) : (
@@ -221,11 +221,11 @@ const SessionUsageOverviewPage: React.FC = () => {
 
             <section className="app-panel overflow-x-auto px-4 py-4">
               {overview.items.length === 0 ? (
-                <div className="py-10 text-center text-sm text-[#8f8681]">{t("sessionUsagePage.empty")}</div>
+                <div className="py-10 text-center text-sm text-[var(--cm-muted)]">{t("sessionUsagePage.empty")}</div>
               ) : (
                 <table className="min-w-full text-left text-sm">
                   <thead>
-                    <tr className="border-b border-[#ead8cf] text-xs uppercase tracking-wide text-[#8f8681]">
+                    <tr className="border-b border-[var(--cm-border)] text-xs uppercase tracking-wide text-[var(--cm-muted)]">
                       <th className="px-2 py-2">{t("sessionUsagePage.instance")}</th>
                       <th className="px-2 py-2">{t("sessionUsagePage.user")}</th>
                       <th className="px-2 py-2">{t("sessionUsagePage.sessions")}</th>
@@ -237,10 +237,10 @@ const SessionUsageOverviewPage: React.FC = () => {
                   </thead>
                   <tbody>
                     {overview.items.map((item) => (
-                      <tr key={item.instance_id} className="border-b border-[#f3ebe4]">
+                      <tr key={item.instance_id} className="border-b border-[var(--cm-border)]">
                         <td className="px-2 py-2">
-                          <div className="font-medium text-[#171212]">{item.instance_name}</div>
-                          <div className="text-xs text-[#8f8681]">
+                          <div className="font-medium text-[var(--cm-ink)]">{item.instance_name}</div>
+                          <div className="text-xs text-[var(--cm-muted)]">
                             #{item.instance_id} · {item.instance_type}
                           </div>
                         </td>
@@ -273,13 +273,13 @@ const SessionUsageOverviewPage: React.FC = () => {
             </section>
 
             {overview.total > PAGE_SIZE && (
-              <div className="flex items-center justify-between text-xs text-[#8f8681]">
+              <div className="flex items-center justify-between text-xs text-[var(--cm-muted)]">
                 <span>{t("instances.sessionUsage.pageSummary", { page, totalPages })}</span>
                 <div className="flex gap-2">
                   <button
                     type="button"
                     disabled={page <= 1}
-                    className="rounded border border-[#ead8cf] px-2 py-1 disabled:opacity-40"
+                    className="rounded border border-[var(--cm-border)] px-2 py-1 disabled:opacity-40"
                     onClick={() => setPage((current) => Math.max(1, current - 1))}
                   >
                     {t("instances.sessionUsage.prev")}
@@ -287,7 +287,7 @@ const SessionUsageOverviewPage: React.FC = () => {
                   <button
                     type="button"
                     disabled={page >= totalPages}
-                    className="rounded border border-[#ead8cf] px-2 py-1 disabled:opacity-40"
+                    className="rounded border border-[var(--cm-border)] px-2 py-1 disabled:opacity-40"
                     onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
                   >
                     {t("instances.sessionUsage.next")}
@@ -305,8 +305,8 @@ const SessionUsageOverviewPage: React.FC = () => {
 function MetricCard({ label, value }: { label: string; value: string }) {
   return (
     <div className="app-panel px-4 py-4">
-      <div className="text-xs uppercase tracking-wide text-[#8f8681]">{label}</div>
-      <div className="mt-2 text-2xl font-semibold text-[#171212]">{value}</div>
+      <div className="text-xs uppercase tracking-wide text-[var(--cm-muted)]">{label}</div>
+      <div className="mt-2 text-2xl font-semibold text-[var(--cm-ink)]">{value}</div>
     </div>
   );
 }

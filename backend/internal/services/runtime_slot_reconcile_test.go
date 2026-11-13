@@ -187,3 +187,53 @@ func TestSlotReconcileResumesAfterUnreachableSources(t *testing.T) {
 		t.Fatal("later healthy assignment starved behind unreachable sources")
 	}
 }
+
+func TestSlotReconcileStopAllowsPrimaryShutdownGracePeriod(t *testing.T) {
+	for _, state := range []string{"starting", "draining", "stopped"} {
+		for _, parentTimeout := range []time.Duration{time.Minute, 5 * time.Second} {
+			t.Run(fmt.Sprintf("%s/%s", state, parentTimeout), func(t *testing.T) {
+				kube := fake.NewSimpleClientset(slotTestPod())
+				var remaining time.Duration
+				client := NewSlotRuntimeAgentClientWithHTTPClient("token", kube, "runtime", &http.Client{Transport: slotRoundTripper(func(r *http.Request) (*http.Response, error) {
+					deadline, ok := r.Context().Deadline()
+					if !ok {
+						t.Fatal("assignment request has no deadline")
+					}
+					remaining = time.Until(deadline)
+					body := `{"gateway_id":"gw-7-1","state":"starting","gateway_port":20000}`
+					if r.Method == http.MethodDelete {
+						body = `{"gateway_id":"gw-7-1","stopped":true,"confirmed":true,"unmounted":true}`
+					}
+					return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body))}, nil
+				})}).(*slotRuntimeAgentClient)
+				seedPendingAssignment(t, client, 7)
+				if state != "starting" {
+					if err := client.assignments.MarkDraining(context.Background(), "https://10.0.0.2:19090", "gw-7-1"); err != nil {
+						t.Fatal(err)
+					}
+				}
+				pending, err := client.assignments.ListPending(context.Background())
+				if err != nil || len(pending) != 1 {
+					t.Fatalf("pending assignment: %v %v", pending, err)
+				}
+				desired := pending[0]
+				desired.State = state
+				ctx, cancel := context.WithTimeout(context.Background(), parentTimeout)
+				defer cancel()
+				if err := client.reconcileAssignment(ctx, desired); err != nil {
+					t.Fatal(err)
+				}
+				want := 10 * time.Second
+				if state != "starting" {
+					want = runtimeAgentControlTimeout
+				}
+				if parentTimeout < want {
+					want = parentTimeout
+				}
+				if remaining > want || remaining < want-time.Second {
+					t.Fatalf("%s request budget=%v, want about %v; stop must allow the 20s primary shutdown grace period", state, remaining, want)
+				}
+			})
+		}
+	}
+}

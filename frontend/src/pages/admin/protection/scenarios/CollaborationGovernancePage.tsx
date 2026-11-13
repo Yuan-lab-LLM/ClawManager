@@ -349,7 +349,7 @@ const CollaborationGovernancePage: React.FC = () => {
         <div className="panel">
           <div className="hero-block">
             <div className="h-eyebrow">多智能体 Team 总线治理</div>
-            <h2 className="h-title">协同治理策略中心</h2>
+            <h2 className="section-title">协同治理策略中心</h2>
             <p className="h-subtitle">
               面向 Team 的 Redis Stream 协同链路，统一管理 Relay 接入、Redis ACL、消息配额、越权审批和日志告警。
               当前原型页支持<strong>策略配置、策略下发、日志告警</strong>三类操作闭环。
@@ -423,7 +423,7 @@ const CollaborationGovernancePage: React.FC = () => {
                 </div>
               )}
 
-              <div className="p-4 rounded-2xl border border-[#eadfd8] bg-white">
+              <div className="p-4 rounded-lg border border-[var(--cm-border)] bg-white">
                 <div className="eyebrow mb-2">Team ID 绑定</div>
                 <div className="flex items-center gap-3 mt-2">
                   <input
@@ -442,7 +442,7 @@ const CollaborationGovernancePage: React.FC = () => {
               </div>
 
               <div className="grid grid-cols-3 gap-4">
-                <div className="p-4 rounded-2xl border border-[#eadfd8] bg-white">
+                <div className="p-4 rounded-lg border border-[var(--cm-border)] bg-white">
                   <div className="eyebrow mb-2">通信模式</div>
                   <div className="mode-selector">
                     <button className={policy.communicationMode === 'leader_mediated' ? 'active-enforce' : ''} onClick={() => markDirty('communicationMode', 'leader_mediated')}>
@@ -459,7 +459,7 @@ const CollaborationGovernancePage: React.FC = () => {
                     控制成员是否必须经 Leader / Relay 转派，还是允许有限的 peer-to-peer 协作。
                   </div>
                 </div>
-                <div className="p-4 rounded-2xl border border-[#eadfd8] bg-white">
+                <div className="p-4 rounded-lg border border-[var(--cm-border)] bg-white">
                   <div className="eyebrow mb-2">Redis ACL 模式</div>
                   <div className="mode-selector">
                     <button className={policy.redisAclMode === 'password_only' ? 'active-off' : ''} onClick={() => markDirty('redisAclMode', 'password_only')}>
@@ -476,17 +476,17 @@ const CollaborationGovernancePage: React.FC = () => {
                     从统一 password 演进到按 Team / Member 的 key-pattern 与命令级最小权限。
                   </div>
                 </div>
-                <div className="p-4 rounded-2xl border border-[#eadfd8] bg-white">
+                <div className="p-4 rounded-lg border border-[var(--cm-border)] bg-white">
                   <div className="eyebrow mb-2">控制面开关</div>
-                  <label className="flex items-center justify-between py-2 text-sm text-[#171212]">
+                  <label className="flex items-center justify-between py-2 text-sm text-[var(--cm-ink)]">
                     <span>强制经 Relay 接入</span>
                     <input type="checkbox" checked={policy.relayRequired} onChange={(e) => markDirty('relayRequired', e.target.checked)} />
                   </label>
-                  <label className="flex items-center justify-between py-2 text-sm text-[#171212]">
+                  <label className="flex items-center justify-between py-2 text-sm text-[var(--cm-ink)]">
                     <span>异常成员自动禁言</span>
                     <input type="checkbox" checked={policy.muteOnAnomaly} onChange={(e) => markDirty('muteOnAnomaly', e.target.checked)} />
                   </label>
-                  <label className="flex items-center justify-between py-2 text-sm text-[#171212]">
+                  <label className="flex items-center justify-between py-2 text-sm text-[var(--cm-ink)]">
                     <span>审计回放保留</span>
                     <input type="checkbox" checked={policy.auditReplay} onChange={(e) => markDirty('auditReplay', e.target.checked)} />
                   </label>
@@ -497,10 +497,10 @@ const CollaborationGovernancePage: React.FC = () => {
                 {RULE_CARDS.map((card) => {
                   const mode = policy[card.key];
                   return (
-                    <div key={card.key} className="p-5 rounded-2xl border border-[#eadfd8] bg-white">
+                    <div key={card.key} className="p-5 rounded-lg border border-[var(--cm-border)] bg-white">
                       <div className="flex items-center justify-between gap-3">
                         <div>
-                          <div className="font-bold text-[#171212]">{card.title}</div>
+                          <div className="font-bold text-[var(--cm-ink)]">{card.title}</div>
                           <div className="text-xs muted mt-1">{card.subtitle}</div>
                         </div>
                         <span className={badgeClass(mode === 'enforce' ? 'red' : mode === 'observe' ? 'orange' : 'slate')}>
@@ -547,25 +547,25 @@ const CollaborationGovernancePage: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="p-4 rounded-2xl border border-[#eadfd8] bg-white">
+                <div className="p-4 rounded-lg border border-[var(--cm-border)] bg-white">
                   <div className="eyebrow mb-3">ACL 预期效果</div>
                   <div className="space-y-3 text-sm">
                     <div>
                       <div className="text-xs muted-strong mb-1">读权限</div>
-                      <code className="text-[11px] text-[#171212]">{aclPreview.read}</code>
+                      <code className="text-[11px] text-[var(--cm-ink)]">{aclPreview.read}</code>
                     </div>
                     <div>
                       <div className="text-xs muted-strong mb-1">写权限</div>
-                      <code className="text-[11px] text-[#171212]">{aclPreview.write}</code>
+                      <code className="text-[11px] text-[var(--cm-ink)]">{aclPreview.write}</code>
                     </div>
                     <div>
                       <div className="text-xs muted-strong mb-1">命令集</div>
-                      <code className="text-[11px] text-[#171212]">{aclPreview.commands}</code>
+                      <code className="text-[11px] text-[var(--cm-ink)]">{aclPreview.commands}</code>
                     </div>
                   </div>
                 </div>
 
-                <div className="p-4 rounded-2xl border border-[#eadfd8] bg-white">
+                <div className="p-4 rounded-lg border border-[var(--cm-border)] bg-white">
                   <div className="eyebrow mb-2">策略预览</div>
                   <pre className="code-block text-[11px] max-h-[320px] overflow-auto">{policyPreview}</pre>
                 </div>
@@ -662,7 +662,7 @@ const CollaborationGovernancePage: React.FC = () => {
                   </table>
                 </div>
 
-                <div className="p-4 rounded-2xl border border-[#eadfd8] bg-white">
+                <div className="p-4 rounded-lg border border-[var(--cm-border)] bg-white">
                   <div className="eyebrow mb-3">发布建议</div>
                   <div className="space-y-3 text-sm muted leading-6">
                     <div>1. 先对 running 实例灰度下发，验证 Relay 路由和 ACL 命中日志。</div>
@@ -786,7 +786,7 @@ const CollaborationGovernancePage: React.FC = () => {
                           {item.severity}
                         </span>
                       </td>
-                      <td><span className="text-sm font-semibold text-[#171212]">{item.category}</span></td>
+                      <td><span className="text-sm font-semibold text-[var(--cm-ink)]">{item.category}</span></td>
                       <td className="text-xs">{item.member}</td>
                       <td>
                         <span className={badgeClass(item.action === 'BLOCK' || item.action === 'DENY' ? 'red' : item.action === 'THROTTLE' || item.action === 'APPROVAL' ? 'orange' : 'slate')}>

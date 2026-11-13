@@ -152,7 +152,7 @@ const SecurityEventsPage: React.FC = () => {
           <div className="flex items-start justify-between gap-6 mb-5">
             <div className="hero-block flex-1">
               <div className="h-eyebrow">{t('secplane.events.hero.eyebrow')}</div>
-              <h2 className="h-title">{t('secplane.events.hero.title')}</h2>
+              <h2 className="section-title">{t('secplane.events.hero.title')}</h2>
               <p className="h-subtitle">{t('secplane.events.hero.subtitle')}</p>
             </div>
             <button type="button" className="btn-secondary btn-sm" onClick={load} disabled={loading}>

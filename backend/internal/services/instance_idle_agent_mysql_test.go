@@ -196,6 +196,10 @@ func (a *manualStopFailureAgent) DeleteGateway(ctx context.Context, endpoint, id
 
 func TestIdleLegacyAgentProControlPlaneUnchanged(t *testing.T) {
 	s := idleLifecycleDB(t)
+	// The Lite-only upgrade fixture predates the full legacy agent schema.
+	if _, err := s.SQL().Exec(`ALTER TABLE instance_desired_state ADD id INT NOT NULL AUTO_INCREMENT UNIQUE,ADD desired_config_revision_id INT NULL,ADD desired_runtime_action VARCHAR(50) NULL,ADD updated_by INT NULL`); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := s.SQL().Exec(`INSERT INTO instances(id,user_id,type,runtime_type,instance_mode,status,runtime_generation,agent_bootstrap_token,updated_at) VALUES(8,7,'openclaw','desktop','pro','running',0,'pro-bootstrap',UTC_TIMESTAMP())`); err != nil {
 		t.Fatal(err)
 	}

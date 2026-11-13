@@ -179,7 +179,7 @@ func (r *InstanceAutoStopRepository) FailStop(ctx context.Context, op models.Ins
 	})
 }
 func (r *InstanceAutoStopRepository) PendingStops(ctx context.Context) ([]models.InstanceIdleStopOperation, error) {
-	rows, err := r.sess.SQL().QueryContext(ctx, `SELECT id,instance_id,user_id,generation,runtime_pod_id,gateway_id,pod_uid,endpoint,workspace_path,storage_identity,phase,error_message,created_at,stop_kind FROM instance_idle_stop_operations WHERE phase IN ('stopping','error','teardown_confirmed') ORDER BY updated_at,created_at LIMIT 10`)
+	rows, err := r.sess.SQL().QueryContext(ctx, `SELECT o.id,o.instance_id,o.user_id,o.generation,o.runtime_pod_id,o.gateway_id,o.pod_uid,o.endpoint,o.workspace_path,o.storage_identity,o.phase,o.error_message,o.created_at,o.stop_kind FROM (SELECT s.*,ROW_NUMBER() OVER (PARTITION BY i.type ORDER BY s.updated_at,s.created_at,s.id) AS type_rank FROM instance_idle_stop_operations s JOIN instances i ON i.id=s.instance_id WHERE s.phase IN ('stopping','error','teardown_confirmed') AND i.status<>'deleting') o WHERE o.type_rank<=10 ORDER BY o.updated_at,o.created_at,o.id`)
 	if err != nil {
 		return nil, err
 	}

@@ -457,7 +457,7 @@ const SkillHubPage: React.FC = () => {
     const summary = displaySkillDescription(skill.description);
     return (
       <div className="mt-2 flex flex-wrap items-start gap-2">
-        <p className="line-clamp-2 min-w-0 flex-1 text-sm text-[#6f6158]">
+        <p className="line-clamp-2 min-w-0 flex-1 text-sm text-[var(--cm-text)]">
           {summary || t('skillHubPage.summaryNone')}
         </p>
         <button
@@ -476,46 +476,46 @@ const SkillHubPage: React.FC = () => {
     const canPublishManage = isOwner;
     const canDelete = isOwner || (options?.adminView === true && user?.role === 'admin');
     return (
-      <div key={skill.id} className="rounded-[22px] border border-[#efe2d8] bg-[#fffaf7] px-5 py-4">
+      <div key={skill.id} className="rounded-lg border border-[var(--cm-border)] bg-[var(--cm-subtle)] px-5 py-4">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
           <div>
             <div className="flex flex-wrap items-center gap-2">
-              <h3 className="text-base font-semibold text-[#1d1713]">{skill.name}</h3>
+              <h3 className="text-base font-semibold text-[var(--cm-ink)]">{skill.name}</h3>
               {skill.current_version_no ? (
-                <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-emerald-800">
+                <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-semibold uppercase tracking-[0.12em] text-emerald-800">
                   {t('skillHubPage.versionLabel', { version: skill.current_version_no })}
                 </span>
               ) : null}
-              <span className="rounded-full border border-[#ead8cf] bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-[#8f776b]">
+              <span className="rounded-full border border-[var(--cm-border)] bg-white px-2.5 py-1 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--cm-muted)]">
                 {skill.visibility === 'public' ? t('skillHubPage.visibility.public') : t('skillHubPage.visibility.private')}
               </span>
-              <span className="rounded-full border border-[#ead8cf] bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-[#8f776b]">
+              <span className="rounded-full border border-[var(--cm-border)] bg-white px-2.5 py-1 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--cm-muted)]">
                 {skill.risk_level}
               </span>
               {skill.scan_status ? (
-                <span className="rounded-full border border-[#ead8cf] bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-[#8f776b]">
+                <span className="rounded-full border border-[var(--cm-border)] bg-white px-2.5 py-1 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--cm-muted)]">
                   {skill.scan_status}
                 </span>
               ) : null}
             </div>
             {renderSkillSummaryLine(skill)}
-            <p className="mt-2 text-sm text-[#6f6158]">{skill.skill_key}</p>
+            <p className="mt-2 text-sm text-[var(--cm-text)]">{skill.skill_key}</p>
             {options?.showOwner && skill.owner_username ? (
-              <p className="mt-1 text-sm text-[#6f6158]">{t('skillHubPage.owner')}: {skill.owner_username}</p>
+              <p className="mt-1 text-sm text-[var(--cm-text)]">{t('skillHubPage.owner')}: {skill.owner_username}</p>
             ) : null}
             {skill.published_at ? (
-              <p className="mt-1 text-sm text-[#6f6158]">
+              <p className="mt-1 text-sm text-[var(--cm-text)]">
                 {t('skillHubPage.publishedAt')}: {new Date(skill.published_at).toLocaleString()}
               </p>
             ) : null}
             <div className="mt-3 flex flex-wrap gap-2">
               {(skill.tags || []).map((tag) => (
-                <span key={tag.id} className="rounded-full bg-[#f6ece4] px-2.5 py-1 text-xs text-[#7a6d66]">
+                <span key={tag.id} className="rounded-full bg-[var(--cm-subtle)] px-2.5 py-1 text-xs text-[var(--cm-text)]">
                   {tagLabel(tag)}
                 </span>
               ))}
             </div>
-            <p className="mt-2 text-xs text-[#9a877c]">
+            <p className="mt-2 text-xs text-[var(--cm-muted)]">
               {skill.publishable ? t('skillHubPage.publishable') : t('skillHubPage.notPublishable')}
               {!skill.publishable && skill.publish_blocked_reason ? (
                 <> · {blockReasonLabel(skill.publish_blocked_reason)}</>
@@ -527,7 +527,7 @@ const SkillHubPage: React.FC = () => {
               <p className="mt-1 text-xs leading-5 text-amber-800">{skill.package_collect_error}</p>
             ) : null}
             {!skill.publishable && skill.source_type === 'discovered' ? (
-              <p className="mt-1 text-xs text-[#9a877c]">{t('skillHubPage.discoveredPublishHint')}</p>
+              <p className="mt-1 text-xs text-[var(--cm-muted)]">{t('skillHubPage.discoveredPublishHint')}</p>
             ) : null}
           </div>
           <div className="flex flex-wrap gap-2">
@@ -629,13 +629,13 @@ const SkillHubPage: React.FC = () => {
     <UserLayout title={t('skillHubPage.title')}>
       <div className="space-y-6">
         <section className="app-panel px-6 py-6">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#b09d93]">Skill Hub</p>
-          <h1 className="mt-2 text-[2rem] font-semibold tracking-[-0.03em] text-[#1d1713]">{t('skillHubPage.title')}</h1>
-          <p className="mt-2 max-w-3xl text-sm text-[#6f6158]">{t('skillHubPage.subtitle')}</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--cm-muted)]">Skill Hub</p>
+          <h1 className="mt-2 text-[2rem] font-semibold tracking-[-0.03em] text-[var(--cm-ink)]">{t('skillHubPage.title')}</h1>
+          <p className="mt-2 max-w-3xl text-sm text-[var(--cm-text)]">{t('skillHubPage.subtitle')}</p>
         </section>
 
-        {error ? <div className="rounded-[18px] border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div> : null}
-        {notice ? <div className="rounded-[18px] border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{notice}</div> : null}
+        {error ? <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div> : null}
+        {notice ? <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{notice}</div> : null}
 
         <section className="app-panel px-6 py-6">
           <div className="flex flex-wrap gap-2">
@@ -673,12 +673,12 @@ const SkillHubPage: React.FC = () => {
             <div className="mt-5 flex flex-col gap-3 lg:flex-row lg:items-center">
               <label
                 htmlFor="skill-hub-upload"
-                className="flex w-full cursor-pointer items-center gap-3 rounded-2xl border border-[#dfd6cf] bg-white px-4 py-3 text-sm text-[#3f3a36] transition hover:border-[#cfc3ba] hover:bg-[#fcfaf8]"
+                className="flex w-full cursor-pointer items-center gap-3 rounded-2xl border border-[var(--cm-border)] bg-white px-4 py-3 text-sm text-[var(--cm-ink)] transition hover:border-[var(--cm-border)] hover:bg-[var(--cm-subtle)]"
               >
-                <span className="rounded-xl border border-[#d8d0ca] bg-[#f6f3f0] px-3 py-2 text-sm font-medium text-[#2f2a27]">
+                <span className="rounded-xl border border-[var(--cm-border)] bg-[var(--cm-subtle)] px-3 py-2 text-sm font-medium text-[var(--cm-ink)]">
                   {t('openClawResourcesPage.skillActions.chooseFile')}
                 </span>
-                <span className="min-w-0 truncate text-[#6d655f]">
+                <span className="min-w-0 truncate text-[var(--cm-text)]">
                   {uploadFiles.length > 0
                     ? uploadFiles.map((file) => file.name).join(', ')
                     : t('openClawResourcesPage.noFileSelected')}
@@ -704,9 +704,9 @@ const SkillHubPage: React.FC = () => {
           ) : null}
 
           <div className="mt-5 space-y-3">
-            {loading ? <div className="text-sm text-[#7a6d66]">{t('common.loading')}</div> : null}
+            {loading ? <div className="text-sm text-[var(--cm-text)]">{t('common.loading')}</div> : null}
             {!loading && currentSkills.length === 0 ? (
-              <div className="rounded-[22px] border border-dashed border-[#e7d9d1] bg-[#fffaf7] px-5 py-6 text-sm text-[#7a6d66]">
+              <div className="rounded-lg border border-dashed border-[var(--cm-border)] bg-[var(--cm-subtle)] px-5 py-6 text-sm text-[var(--cm-text)]">
                 {t('skillHubPage.noSkills')}
               </div>
             ) : null}
@@ -717,14 +717,14 @@ const SkillHubPage: React.FC = () => {
 
       {publishSkillId !== null ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
-          <div className="w-full max-w-lg rounded-[24px] bg-white p-6 shadow-xl">
-            <h2 className="text-lg font-semibold text-[#1d1713]">
+          <div className="w-full max-w-lg rounded-[var(--cm-radius-dialog)] bg-white p-6 shadow-xl">
+            <h2 className="text-lg font-semibold text-[var(--cm-ink)]">
               {publishMode === 'publish-as-new' ? t('skillHubPage.publishAsNew') : t('skillHubPage.publish')}
             </h2>
-            <p className="mt-2 text-sm text-[#6f6158]">{t('skillHubPage.selectTags')}</p>
+            <p className="mt-2 text-sm text-[var(--cm-text)]">{t('skillHubPage.selectTags')}</p>
             <div className="mt-4 flex flex-wrap gap-2">
               {visibleTags.map((tag) => (
-                <label key={tag.id} className="flex items-center gap-2 rounded-full border border-[#ead8cf] px-3 py-1 text-sm">
+                <label key={tag.id} className="flex items-center gap-2 rounded-full border border-[var(--cm-border)] px-3 py-1 text-sm">
                   <input type="checkbox" checked={selectedTagIds.includes(tag.id)} onChange={() => toggleTag(tag.id)} />
                   {tagLabel(tag)}
                 </label>
@@ -751,12 +751,12 @@ const SkillHubPage: React.FC = () => {
 
       {editTagsSkillId !== null ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
-          <div className="w-full max-w-lg rounded-[24px] bg-white p-6 shadow-xl">
-            <h2 className="text-lg font-semibold text-[#1d1713]">{t('skillHubPage.editTags')}</h2>
-            <p className="mt-2 text-sm text-[#6f6158]">{t('skillHubPage.selectTags')}</p>
+          <div className="w-full max-w-lg rounded-[var(--cm-radius-dialog)] bg-white p-6 shadow-xl">
+            <h2 className="text-lg font-semibold text-[var(--cm-ink)]">{t('skillHubPage.editTags')}</h2>
+            <p className="mt-2 text-sm text-[var(--cm-text)]">{t('skillHubPage.selectTags')}</p>
             <div className="mt-4 flex flex-wrap gap-2">
               {visibleTags.map((tag) => (
-                <label key={tag.id} className="flex items-center gap-2 rounded-full border border-[#ead8cf] px-3 py-1 text-sm">
+                <label key={tag.id} className="flex items-center gap-2 rounded-full border border-[var(--cm-border)] px-3 py-1 text-sm">
                   <input type="checkbox" checked={selectedTagIds.includes(tag.id)} onChange={() => toggleTag(tag.id)} />
                   {tagLabel(tag)}
                 </label>
@@ -772,35 +772,35 @@ const SkillHubPage: React.FC = () => {
 
       {installSkillId !== null ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
-          <div className="w-full max-w-lg rounded-[24px] bg-white p-6 shadow-xl">
-            <h2 className="text-lg font-semibold text-[#1d1713]">{t('skillHubPage.installBatch')}</h2>
-            <p className="mt-2 text-sm text-[#6f6158]">{t('skillHubPage.selectInstances')}</p>
+          <div className="w-full max-w-lg rounded-[var(--cm-radius-dialog)] bg-white p-6 shadow-xl">
+            <h2 className="text-lg font-semibold text-[var(--cm-ink)]">{t('skillHubPage.installBatch')}</h2>
+            <p className="mt-2 text-sm text-[var(--cm-text)]">{t('skillHubPage.selectInstances')}</p>
             <div className="mt-4 flex items-center justify-between gap-3 text-sm">
-              <span className="text-[#6f6158]">{selectedInstanceIds.length}/{instances.length}</span>
+              <span className="text-[var(--cm-text)]">{selectedInstanceIds.length}/{instances.length}</span>
               <div className="flex gap-2">
                 <button type="button" className="text-[#c45a43] hover:text-[#a94734] disabled:cursor-not-allowed disabled:opacity-50" disabled={actionLoading === `install-${installSkillId}`} onClick={() => setSelectedInstanceIds(instances.map((instance) => instance.id))}>{t('skillHubPage.selectAll')}</button>
-                <button type="button" className="text-[#6f6158] hover:text-[#1d1713] disabled:cursor-not-allowed disabled:opacity-50" disabled={actionLoading === `install-${installSkillId}`} onClick={() => setSelectedInstanceIds([])}>{t('skillHubPage.clearSelection')}</button>
+                <button type="button" className="text-[var(--cm-text)] hover:text-[var(--cm-ink)] disabled:cursor-not-allowed disabled:opacity-50" disabled={actionLoading === `install-${installSkillId}`} onClick={() => setSelectedInstanceIds([])}>{t('skillHubPage.clearSelection')}</button>
               </div>
             </div>
-            <div className="mt-4 max-h-72 space-y-2 overflow-y-auto rounded-xl border border-[#ead8cf] p-3">
+            <div className="mt-4 max-h-72 space-y-2 overflow-y-auto rounded-xl border border-[var(--cm-border)] p-3">
               {instances.map((instance) => (
-                <label key={instance.id} className="flex cursor-pointer items-center gap-3 rounded-lg px-2 py-2 hover:bg-[#fffaf7]">
+                <label key={instance.id} className="flex cursor-pointer items-center gap-3 rounded-lg px-2 py-2 hover:bg-[var(--cm-subtle)]">
                   <input
                     type="checkbox"
                     checked={selectedInstanceIds.includes(instance.id)}
                     disabled={actionLoading === `install-${installSkillId}`}
                     onChange={() => setSelectedInstanceIds((current) => current.includes(instance.id) ? current.filter((id) => id !== instance.id) : [...current, instance.id])}
                   />
-                  <span className="text-sm text-[#1d1713]">{instance.name}</span>
+                  <span className="text-sm text-[var(--cm-ink)]">{instance.name}</span>
                 </label>
               ))}
             </div>
             {installProgress.length > 0 ? (
-              <div className="mt-4 rounded-xl border border-[#ead8cf] bg-[#fffaf7] p-3 text-sm">
-                <p className="font-medium text-[#1d1713]">{t('skillHubPage.installProgress.summary', { completed: installProgress.filter((item) => item.status !== 'pending').length, total: installProgress.length })}</p>
+              <div className="mt-4 rounded-xl border border-[var(--cm-border)] bg-[var(--cm-subtle)] p-3 text-sm">
+                <p className="font-medium text-[var(--cm-ink)]">{t('skillHubPage.installProgress.summary', { completed: installProgress.filter((item) => item.status !== 'pending').length, total: installProgress.length })}</p>
                 <div className="mt-2 space-y-1.5">
                   {installProgress.map((item) => (
-                    <p key={item.instanceId} className={item.status === 'failed' ? 'text-red-700' : item.status === 'success' ? 'text-emerald-700' : 'text-[#6f6158]'}>
+                    <p key={item.instanceId} className={item.status === 'failed' ? 'text-red-700' : item.status === 'success' ? 'text-emerald-700' : 'text-[var(--cm-text)]'}>
                       {instances.find((instance) => instance.id === item.instanceId)?.name || `#${item.instanceId}`}: {t(`skillHubPage.installProgress.${item.status}`)}{item.error ? ` — ${item.error}` : ''}
                     </p>
                   ))}
@@ -817,11 +817,11 @@ const SkillHubPage: React.FC = () => {
 
       {detailSkill ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
-          <div className="flex max-h-[85vh] w-full max-w-3xl flex-col rounded-[24px] bg-white p-6 shadow-xl">
+          <div className="flex max-h-[85vh] w-full max-w-3xl flex-col rounded-[var(--cm-radius-dialog)] bg-white p-6 shadow-xl">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <h2 className="text-lg font-semibold text-[#1d1713]">{detailSkill.name}</h2>
-                <p className="mt-1 text-sm text-[#6f6158]">{t('skillHubPage.skillMdTitle')}</p>
+                <h2 className="text-lg font-semibold text-[var(--cm-ink)]">{detailSkill.name}</h2>
+                <p className="mt-1 text-sm text-[var(--cm-text)]">{t('skillHubPage.skillMdTitle')}</p>
               </div>
               <button
                 type="button"
@@ -835,15 +835,15 @@ const SkillHubPage: React.FC = () => {
                 {t('common.close')}
               </button>
             </div>
-            <div className="mt-5 min-h-0 flex-1 overflow-y-auto rounded-xl border border-[#ead8cf] bg-[#fffaf7] p-4">
+            <div className="mt-5 min-h-0 flex-1 overflow-y-auto rounded-xl border border-[var(--cm-border)] bg-[var(--cm-subtle)] p-4">
               {detailLoading ? (
-                <p className="text-sm text-[#6f6158]">{t('common.loading')}</p>
+                <p className="text-sm text-[var(--cm-text)]">{t('common.loading')}</p>
               ) : null}
               {!detailLoading && detailError ? (
                 <p className="text-sm text-red-700">{detailError}</p>
               ) : null}
               {!detailLoading && !detailError ? (
-                <pre className="whitespace-pre-wrap break-words font-mono text-sm leading-6 text-[#3f3a36]">
+                <pre className="whitespace-pre-wrap break-words font-mono text-sm leading-6 text-[var(--cm-ink)]">
                   {detailMarkdown || t('skillHubPage.summaryEmptySection')}
                 </pre>
               ) : null}

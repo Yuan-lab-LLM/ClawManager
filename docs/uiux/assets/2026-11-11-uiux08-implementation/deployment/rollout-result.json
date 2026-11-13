@@ -1,0 +1,12 @@
+{
+  "namespace": "clawmanager-system",
+  "deployment": "clawmanager-app",
+  "url": "https://10.130.81.54:30443",
+  "previous_image": "clawmanager.local/clawmanager@sha256:30f98851d7b3f061718ad0ee5a5e94a5d4af580adfbd954c236373733185085e",
+  "image": "clawmanager.local/clawmanager@sha256:e8252ca5c28f37bd30a4adfffe59b01babb6d72da3a39050f1e90487b9c03592",
+  "source_commit": "e737ca5040e637f271ea5f394ca35aeac985ab98",
+  "generation": 10,
+  "ready_replicas": 1,
+  "backend_start_nginx_unchanged": true,
+  "other_deployment_images_unchanged": true
+}

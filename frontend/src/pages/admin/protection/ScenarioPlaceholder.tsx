@@ -34,7 +34,7 @@ const ScenarioPlaceholder: React.FC<ScenarioPlaceholderProps> = ({ scenarioId })
         <div className="panel">
           <div className="hero-block">
             <div className="h-eyebrow">{t('secplane.protection.category.scenarioCode', { code: sc.code })}</div>
-            <h2 className="h-title">{sc.label}</h2>
+            <h2 className="section-title">{sc.label}</h2>
             <p className="h-subtitle">{sc.subtitle}</p>
           </div>
           <div className="divider my-5" />

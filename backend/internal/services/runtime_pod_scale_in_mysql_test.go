@@ -468,6 +468,8 @@ func TestScaleInMySQLSameOwnerResizingContinuesObservation(t *testing.T) {
 		t.Fatal(err)
 	}
 	d, _ := kube.AppsV1().Deployments("runtime").Get(ctx, "hermes-runtime", metav1.GetOptions{})
+	d.Generation++ // The real API server increments generation on the accepted replica CAS.
+	d.Status.ObservedGeneration = d.Generation
 	d.Status.Replicas, d.Status.UpdatedReplicas, d.Status.ReadyReplicas = 1, 1, 1
 	if _, err := kube.AppsV1().Deployments("runtime").Update(ctx, d, metav1.UpdateOptions{}); err != nil {
 		t.Fatal(err)
@@ -517,6 +519,8 @@ func TestScaleInMySQLLostPostPatchSaveResumesWithoutReplicaReplay(t *testing.T) 
 		t.Fatal(err)
 	}
 	d, _ := kube.AppsV1().Deployments("runtime").Get(ctx, "hermes-runtime", metav1.GetOptions{})
+	d.Generation++ // The real API server increments generation on the accepted replica CAS.
+	d.Status.ObservedGeneration = d.Generation
 	d.Status.Replicas, d.Status.UpdatedReplicas, d.Status.ReadyReplicas = 1, 1, 1
 	if _, err := kube.AppsV1().Deployments("runtime").Update(ctx, d, metav1.UpdateOptions{}); err != nil {
 		t.Fatal(err)

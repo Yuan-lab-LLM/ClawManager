@@ -1,3 +1,4 @@
+import "./instance-workspace.css";
 import { Maximize2, MessageSquare, Minimize2, Monitor, PanelRightClose, PanelRightOpen, RefreshCw, ShieldAlert } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useI18n } from "../contexts/I18nContext";
@@ -14,6 +15,10 @@ import { HermesLiteServiceFrame } from "./HermesLiteServiceFrame";
 export interface InstanceServiceFrameProps {
   instanceId: number;
   instanceName: string;
+  headerTitle?: ReactNode;
+  headerActions?: ReactNode;
+  headerEndActions?: ReactNode;
+  showModelHint?: boolean;
   instanceType?: string;
   instanceMode: string;
   availability: InstanceAvailability;
@@ -98,6 +103,10 @@ export function InstanceServiceFrame({
 function EmbeddedInstanceServiceFrame({
   instanceId,
   instanceName,
+  headerTitle,
+  headerActions,
+  headerEndActions,
+  showModelHint = true,
   instanceType,
   instanceMode,
   availability,
@@ -300,10 +309,10 @@ function EmbeddedInstanceServiceFrame({
       className="cm-surface relative isolate flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-white max-xl:min-h-[360px]"
       style={isFullscreen ? { height: "100vh", width: "100vw", borderRadius: 0 } : undefined}
     >
-      <div className="relative z-20 flex h-12 shrink-0 items-center justify-between border-b border-slate-200 bg-white px-3">
-        <div className="flex min-w-0 items-center gap-3">
-          <div className="min-w-0 truncate text-sm font-medium text-slate-950">
-            {instanceName}
+      <div className="cm-instance-frame-header relative z-20 flex h-12 shrink-0 items-center justify-between border-b border-slate-200 bg-white px-3">
+        <div className="flex min-w-0 flex-1 items-center gap-3">
+          <div className="min-w-0 flex-1 text-sm font-medium text-slate-950">
+            {headerTitle ?? <span className="block truncate">{instanceName}</span>}
           </div>
           {browserWorker?.enabled && (
             <div className="flex shrink-0 rounded-md bg-slate-100 p-0.5" role="tablist">
@@ -333,6 +342,7 @@ function EmbeddedInstanceServiceFrame({
           )}
         </div>
         <div className="relative z-20 flex shrink-0 items-center gap-2">
+          {headerActions}
           {typeof workspaceVisible === "boolean" && onWorkspaceVisibilityChange && (
             <button
               type="button"
@@ -344,7 +354,7 @@ function EmbeddedInstanceServiceFrame({
               {workspaceVisible ? <PanelRightClose className="h-4 w-4" /> : <PanelRightOpen className="h-4 w-4" />}
             </button>
           )}
-          {["opencode", "openclaw", "hermes", "deepseek-harness"].includes(normalizedType) && (
+          {showModelHint && ["opencode", "openclaw", "hermes", "deepseek-harness"].includes(normalizedType) && (
             <InstanceModelHint instanceId={instanceId} active={isAvailable} />
           )}
           {isAvailable && (
@@ -358,6 +368,7 @@ function EmbeddedInstanceServiceFrame({
               <RefreshCw className={`h-4 w-4 ${reconnecting ? "animate-spin" : ""}`} />
             </button>
           )}
+          {headerEndActions}
           <button
             type="button"
             onClick={handleFullscreen}
@@ -470,16 +481,19 @@ function EmbeddedInstanceServiceFrame({
         key={`frame-${instanceId}-${runtimeGeneration}-${reloadToken}-${frameRevision}`}
         title={`${instanceName} service`}
         src={frameSrc}
-        className="min-h-0 w-full flex-1 border-0 bg-white"
+        className="cm-instance-native-content min-h-0 w-full flex-1 border-0 bg-white"
+        data-ready={frameStatus === "ready"}
         scrolling="no"
         allow="clipboard-read; clipboard-write; fullscreen; autoplay"
         onLoad={(event) => handleFrameLoad(event.currentTarget)}
         onError={handleFrameError}
       />
-      {frameStatus !== "ready" && (
-        <div
-          className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-white p-6 text-center text-sm text-slate-600"
-          role={frameStatus === "error" ? "alert" : "status"}
+      <div
+          className="cm-instance-frame-loading absolute inset-0 flex flex-col items-center justify-center gap-3 bg-white p-6 text-center text-sm text-slate-600"
+          data-ready={frameStatus === "ready"}
+          aria-hidden={frameStatus === "ready"}
+          inert={frameStatus === "ready"}
+          role={frameStatus === "ready" ? undefined : frameStatus === "error" ? "alert" : "status"}
           aria-live="polite"
         >
           {frameStatus === "recovering" && <RefreshCw className="h-5 w-5 animate-spin" aria-hidden="true" />}
@@ -490,7 +504,6 @@ function EmbeddedInstanceServiceFrame({
             </button>
           )}
         </div>
-      )}
     </div>,
   );
 }

@@ -95,6 +95,15 @@ func (s *RuntimeScheduler) reconcileInstanceRecoveryLocked(ctx context.Context, 
 	}
 	reason, failed := runtimeRecoveryFailureReason(instance, binding)
 	if !failed {
+		verified, verifyErr := s.nativeRecoveryCandidate(ctx, instance, binding, state)
+		if verifyErr != nil {
+			return true, []error{verifyErr}
+		}
+		if verified {
+			reason, failed = runtimeRecoveryNativeResetReason, true
+		}
+	}
+	if !failed {
 		// Generic startup failure can conceal credentials or configuration.
 		// Require an actionable reported crash before entering automatic retry.
 		if state == nil && instance.RuntimeErrorCode != nil && *instance.RuntimeErrorCode == "GATEWAY_START_FAILED" {
@@ -206,9 +215,15 @@ func (s *RuntimeScheduler) confirmRecoverySourceStopped(ctx context.Context, ins
 	if pod == nil || strings.TrimSpace(stringValue(pod.PodUID)) == "" || strings.TrimSpace(stringValue(pod.AgentEndpoint)) == "" {
 		return fmt.Errorf("recovery source Pod identity is unavailable")
 	}
+	legacyNativeReset := stringValue(binding.ErrorMessage) == "gateway_stop_failed"
+	if legacyNativeReset {
+		if err := s.confirmNativeRecoveryCandidate(ctx, instance, binding); err != nil {
+			return err
+		}
+	}
 	if reader, ok := s.agentClient.(interface {
 		GatewayState(context.Context, string, string) (*RuntimeAgentGatewayState, error)
-	}); ok {
+	}); ok && !legacyNativeReset {
 		fresh, readErr := reader.GatewayState(ctx, strings.TrimSpace(*pod.AgentEndpoint), binding.GatewayID)
 		if readErr != nil && !errors.Is(readErr, ErrRuntimeAgentNotFound) && !errors.Is(readErr, ErrRuntimeAgentUnsupported) {
 			return fmt.Errorf("recovery source state is unreadable: %w", readErr)

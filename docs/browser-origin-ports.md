@@ -16,7 +16,30 @@ CLAWMANAGER_BROWSER_ORIGIN=https://10.130.81.54:30443
 CLAWMANAGER_BROWSER_PORT_RANGE=31600-31727
 ```
 
-Expose nginx8444 through one Service. This example only prints a manifest;
+When these variables are enabled, exposing nginx8444 through a matching Service
+is required. The manager frontend Service on30443 does not expose the application
+port pool. Missing NodePorts cause connection failures that the browser's
+certificate probe can display as a certificate-confirmation prompt; confirming a
+certificate cannot repair an unreachable port.
+
+For server54, apply the checked-in [browser-origin Service](../deployments/k8s/sites/server54/browser-origins.yaml)
+alongside the application deployment, including after cluster reinstallation:
+
+```sh
+kubectl apply --dry-run=server -f deployments/k8s/sites/server54/browser-origins.yaml
+kubectl apply -f deployments/k8s/sites/server54/browser-origins.yaml
+kubectl -n clawmanager-system get service clawmanager-browser-origins
+kubectl -n clawmanager-system get endpointslice -l kubernetes.io/service-name=clawmanager-browser-origins
+```
+
+Check that every configured public port maps to8444, ready endpoints exist,
+and an assigned native origin's `/__clawmanager_cert_check` returns204. Compare
+its TLS certificate with30443 and validate OpenCode/DSH in a browser that has
+confirmed only the manager hostname. Do not use `ignoreHTTPSErrors` as evidence
+that this confirmation flow works. Unassigned origins and unauthenticated native
+requests must continue to fail closed.
+
+The following example only prints a manifest;
 adapt namespace, selector and ports before applying it elsewhere.
 
 ```python

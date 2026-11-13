@@ -35,6 +35,7 @@ import (
 	"clawreef/internal/systembackup"
 	"clawreef/internal/teamtemplate"
 	"clawreef/internal/workbench"
+	"clawreef/internal/workspacedashboard"
 
 	"github.com/gin-gonic/gin"
 	"k8s.io/client-go/dynamic"
@@ -143,7 +144,7 @@ func main() {
 	authService := services.NewAuthService(userRepo, cfg.JWT, enterpriseAuthManager, services.WithEnterpriseAuthPolicy(cfg.Auth.Enterprise), services.WithQuotaRepository(quotaRepo))
 	quotaService := services.NewQuotaService(quotaRepo)
 	userService := services.NewUserService(userRepo, quotaRepo)
-	systemImageSettingService := services.NewSystemImageSettingService(systemImageSettingRepo)
+	systemImageSettingService := services.NewSystemImageSettingService(systemImageSettingRepo, services.WithCommittedRuntimeImages(database))
 	llmModelService := services.NewLLMModelService(llmModelRepo)
 	modelInvocationService := services.NewModelInvocationService(modelInvocationRepo)
 	auditEventService := services.NewAuditEventService(auditEventRepo)
@@ -196,7 +197,11 @@ func main() {
 			log.Fatal("Lite container slots require Kubernetes connectivity")
 		}
 		bootstrapCtx, bootstrapCancel := context.WithTimeout(context.Background(), 2*time.Minute)
-		bootstrapErr := k8s.EnsureRuntimeSlotPools(bootstrapCtx, slotKubeClient.Clientset, cfg.Runtime)
+		committedImages, bootstrapErr := services.LoadCommittedRuntimeImages(bootstrapCtx, database)
+		if bootstrapErr == nil {
+			cfg.Runtime = committedImages.Apply(cfg.Runtime)
+			bootstrapErr = k8s.EnsureRuntimeSlotPools(bootstrapCtx, slotKubeClient.Clientset, cfg.Runtime, committedImages.BootstrapSources...)
+		}
 		bootstrapCancel()
 		if bootstrapErr != nil {
 			log.Fatalf("Failed to initialize Lite container slots: %v", bootstrapErr)
@@ -802,10 +807,17 @@ func main() {
 		}
 	}
 	defer leaderCancel()
+	workspaceStore := workspacedashboard.NewStore(database)
+	if runtimeScheduler != nil {
+		workspaceStore.SetCapacityReader(runtimeScheduler.WorkspaceCapacity)
+	}
+	workspaceHandler := handlers.NewWorkspaceDashboardHandler(workspaceStore)
+	go workspaceStore.Run(leaderCtx)
 	go ownerStore.RunBuffered(leaderCtx)
 	go db.RetryOwnerAnalytics(leaderCtx, database)
 
 	startBackground := func(ctx context.Context) {
+		go services.NewWorkspaceUsageCollector(repository.NewWorkspaceUsageRepository(database), baseWorkspaceFileService).Run(ctx)
 		go autoStopService.Run(ctx)
 		go ownerStore.Run(ctx)
 		go browserWorkerService.Run(ctx, 30*time.Second)
@@ -1014,6 +1026,8 @@ func main() {
 		hermesDesktop.DELETE("/api/*path", hermesDesktopHandler.API)
 		hermesDesktop.POST("/ws-ticket", hermesDesktopHandler.Ticket)
 		hermesDesktop.GET("/ws", hermesDesktopHandler.WebSocket)
+		api.GET("/dashboard/workspace", middleware.Auth(), middleware.SetUserInfo(userRepo), workspaceHandler.Get)
+		api.GET("/dashboard/workspace/usage", middleware.Auth(), middleware.SetUserInfo(userRepo), workspaceHandler.GetUsage)
 		instances := api.Group("/instances")
 		instances.Use(middleware.Auth())
 		instances.Use(middleware.SetUserInfo(userRepo))
@@ -1133,6 +1147,7 @@ func main() {
 			adminRuntime.POST("/runtime-scheduling/:id/cancel", runtimeManagementHandler.Cancel)
 			adminRuntime.POST("/runtime-scheduling/:id/retry", runtimeManagementHandler.Retry)
 			adminRuntime.POST("/runtime-pods/:id/drain", runtimePoolHandler.DrainPod)
+			adminRuntime.POST("/runtime-rollouts/prepare", runtimeManagementHandler.PrepareRollout)
 			adminRuntime.POST("/runtime-rollouts", runtimePoolHandler.StartRollout)
 			adminRuntime.POST("/runtime-rollouts/preflight", runtimePoolHandler.PreflightOpenClawRollout)
 			adminRuntime.GET("/runtime-rollouts/:id", runtimePoolHandler.GetRollout)

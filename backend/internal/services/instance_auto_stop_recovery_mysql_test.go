@@ -23,13 +23,12 @@ func TestAutoStopResumesFromReleasedFaultRecoveryMySQL(t *testing.T) {
 		}
 	}
 	store := repository.NewInstanceAutoStopRepository(sess)
-	service := &InstanceAutoStopService{store: store, lifecycle: &instanceService{}}
+	service := &InstanceAutoStopService{store: store, lifecycle: &instanceService{instanceRepo: repository.NewInstanceRepository(sess)}}
 	for n, kind := range []string{"idle", "manual"} {
 		id := 101 + n
 		state := "stopped"
 		reason := "idle_timeout"
 		if kind == "manual" {
-			state = "deleting"
 			reason = "manual"
 		}
 		scope := runtimeeviction.Scope{Version: 1, OperationID: kind, Namespace: "runtime", PodName: "old", PodUID: "old-uid", NodeName: "node", NodeUID: "node-uid", NodeBootID: "boot", ContainerName: "slot-0", RuntimeType: "openclaw", GatewayID: "gw-101-2", WorkspaceRoot: "/workspaces", InstanceID: id, UserID: 1, Generation: 2}
@@ -38,7 +37,7 @@ func TestAutoStopResumesFromReleasedFaultRecoveryMySQL(t *testing.T) {
 		}
 		workspace := RuntimeWorkspacePathWithRoot("/workspaces", "openclaw", 1, id)
 		op := models.InstanceIdleStopOperation{ID: kind, Kind: kind, InstanceID: id, UserID: 1, Generation: 2, RuntimePodID: 5, GatewayID: scope.GatewayID, PodUID: scope.PodUID, Endpoint: "https://10.0.0.1:19090", WorkspacePath: workspace, StorageIdentity: "native-encoding", Phase: "error"}
-		exec("INSERT INTO instances(id,user_id,type,runtime_type,instance_mode,status,runtime_generation) VALUES(?,1,'openclaw','gateway','lite',?,2)", id, state)
+		exec("INSERT INTO instances(id,user_id,type,runtime_type,instance_mode,status,runtime_generation,updated_at) VALUES(?,1,'openclaw','gateway','lite',?,2,NOW())", id, state)
 		initialReason := reason
 		if kind == "idle" {
 			initialReason = ""
@@ -50,6 +49,12 @@ func TestAutoStopResumesFromReleasedFaultRecoveryMySQL(t *testing.T) {
 		item := RuntimeSchedulingItem{InstanceID: id, SourceGeneration: 2, SourcePodID: 5, SourcePodUID: scope.PodUID, SourceGatewayID: scope.GatewayID, Recovery: &RuntimeFaultEvictionJournal{Phase: "released", ResultState: state, Scope: scope, Receipt: receipt, SourceUserID: 1, SourceEndpoint: op.Endpoint, SourcePod: pod, SourceBinding: models.InstanceRuntimeBinding{ID: 1, InstanceID: id, RuntimePodID: 5, RuntimeType: "openclaw", GatewayID: scope.GatewayID, GatewayPort: 20000, WorkspacePath: workspace, Generation: 2}}}
 		raw, _ := json.Marshal([]RuntimeSchedulingItem{item})
 		exec("INSERT INTO runtime_management_operations(id,kind,status,request_json,items_json,created_at,updated_at) VALUES(?,'eviction','completed','{\"mode\":\"recovery\"}',?,NOW(),NOW())", kind, string(raw))
+		if instance, err := service.lifecycle.instanceRepo.GetByID(id); err != nil || instance == nil {
+			t.Fatalf("fixture instance unavailable: %+v %v", instance, err)
+		}
+		if held, err := store.FaultRecoveryActive(t.Context(), id); err != nil || held {
+			t.Fatalf("fixture recovery reservation: %v %v", held, err)
+		}
 		service.resumeGuarded(t.Context(), op)
 		activity, err := store.GetActivity(t.Context(), id)
 		if err != nil {
@@ -84,7 +89,7 @@ func TestAutoStopNativeConfirmedProofIgnoresMalformedRecoveryMySQL(t *testing.T)
 	exec("INSERT INTO runtime_management_operations(id,kind,status,request_json,items_json,created_at,updated_at) VALUES('malformed','eviction','completed','{\"mode\":\"recovery\"}','broken',NOW(),NOW())")
 	for n, kind := range []string{"idle", "manual"} {
 		id := 201 + n
-		exec("INSERT INTO instances(id,user_id,type,runtime_type,instance_mode,status,runtime_generation) VALUES(?,1,'openclaw','gateway','lite','stopped',2)", id)
+		exec("INSERT INTO instances(id,user_id,type,runtime_type,instance_mode,status,runtime_generation,updated_at) VALUES(?,1,'openclaw','gateway','lite','stopped',2,NOW())", id)
 		exec("INSERT INTO instance_model_activity(instance_id,generation,monitoring_since,stop_operation_id,stop_phase) VALUES(?,2,NOW(),?,'teardown_confirmed')", id, kind)
 		exec("INSERT INTO instance_idle_stop_operations(id,instance_id,user_id,generation,runtime_pod_id,gateway_id,pod_uid,endpoint,workspace_path,storage_identity,phase,stop_kind,created_at,updated_at) VALUES(?,?,1,2,5,'gateway','old','endpoint','/workspace','storage','teardown_confirmed',?,NOW(),NOW())", kind, id, kind)
 		service.resumeGuarded(t.Context(), models.InstanceIdleStopOperation{ID: kind, Kind: kind, InstanceID: id, UserID: 1, Generation: 2, RuntimePodID: 5, Phase: "error"})

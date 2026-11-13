@@ -21,6 +21,7 @@ type idleFlowAgent struct {
 	store                       *repository.InstanceAutoStopRepository
 	fail, preflightFail         bool
 	stops, confirms, preflights int
+	executionState              string
 }
 
 func (a *idleFlowAgent) IdlePreflight(_ context.Context, _ string, id string, req RuntimeIdleStopRequest) (*RuntimeIdlePreflight, error) {
@@ -28,7 +29,11 @@ func (a *idleFlowAgent) IdlePreflight(_ context.Context, _ string, id string, re
 	if a.preflightFail {
 		return nil, fmt.Errorf("graceful stop endpoint is unavailable")
 	}
-	return &RuntimeIdlePreflight{GatewayID: id, InstanceID: req.InstanceID, Generation: req.Generation, PodUID: req.PodUID, ExecutionState: "unsupported", ExecutionProofSupported: false}, nil
+	state := a.executionState
+	if state == "" {
+		state = "idle"
+	}
+	return &RuntimeIdlePreflight{GatewayID: id, InstanceID: req.InstanceID, Generation: req.Generation, PodUID: req.PodUID, ExecutionState: state, ExecutionProofSupported: state != "unsupported"}, nil
 }
 func (a *idleFlowAgent) IdleStop(ctx context.Context, _ string, gatewayID string, req RuntimeIdleStopRequest) error {
 	a.stops++
@@ -130,6 +135,18 @@ func testAutoStopControllerFailureResume(t *testing.T, runtimeType string) {
 		t.Fatalf("protocol failure changed desired state: %+v %v", stillRunning, readErr)
 	}
 	agent.preflightFail = false
+	for _, state := range []string{"busy", "unknown", "unsupported"} {
+		agent.executionState = state
+		if err = controller.tryStop(ctx, *cfg, *activity); err == nil {
+			t.Fatalf("%s native admission claimed a stop", state)
+		}
+		current, readErr := instances.GetByID(1)
+		after, activityErr := store.GetActivity(ctx, 1)
+		if readErr != nil || activityErr != nil || current.Status != "running" || after.StopOperationID != "" || agent.stops != 0 {
+			t.Fatalf("%s preflight changed execution authority: %+v %+v %v %v", state, current, after, readErr, activityErr)
+		}
+	}
+	agent.executionState = "idle"
 	agent.fail = true
 	if err = controller.tryStop(ctx, *cfg, *activity); err == nil {
 		t.Fatal("lost teardown was reported complete")
@@ -146,6 +163,27 @@ func testAutoStopControllerFailureResume(t *testing.T, runtimeType string) {
 		t.Fatal("unresolved stop allowed Start")
 	}
 	agent.fail = false
+	// A durable fault-recovery owner must get the lifecycle lock instead of
+	// competing with another long graceful retry of the same old execution.
+	exec(`INSERT INTO runtime_management_operations(id,kind,status,request_json,items_json,created_at,updated_at) VALUES('fault','eviction','pending','{"mode":"recovery"}','[]',NOW(),NOW())`)
+	exec(`INSERT INTO instance_lifecycle_manual_guards(instance_id,token,created_at) VALUES(1,'fault',NOW())`)
+	exec(`UPDATE instance_idle_stop_operations SET updated_at=UTC_TIMESTAMP()-INTERVAL 1 DAY WHERE instance_id=1`)
+	beforeYield := time.Now().UTC().Add(-time.Second)
+	controller.resume(ctx, pending[0])
+	binding, err = bindings.GetByInstanceID(ctx, 1)
+	if err != nil || binding == nil || agent.stops != 1 {
+		t.Fatalf("auto-stop competed with reserved fault recovery: binding=%+v stops=%d err=%v", binding, agent.stops, err)
+	}
+	var attemptedAt time.Time
+	row, err := s.SQL().QueryRow(`SELECT updated_at FROM instance_idle_stop_operations WHERE instance_id=1`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = row.Scan(&attemptedAt); err != nil || attemptedAt.Before(beforeYield) {
+		t.Fatalf("held recovery monopolized the bounded pending-stop queue: %v %v", attemptedAt, err)
+	}
+	exec(`DELETE FROM instance_lifecycle_manual_guards WHERE instance_id=1`)
+	exec(`UPDATE runtime_management_operations SET status='completed' WHERE id='fault'`)
 	controller.resume(ctx, pending[0])
 	binding, err = bindings.GetByInstanceID(ctx, 1)
 	if err != nil || binding != nil {
@@ -155,7 +193,7 @@ func testAutoStopControllerFailureResume(t *testing.T, runtimeType string) {
 	if err != nil || activity.StoppedReason != "idle_timeout" || activity.StopOperationID != "" {
 		t.Fatalf("stop did not complete: %+v %v", activity, err)
 	}
-	if agent.stops != 2 || agent.confirms != 1 || agent.preflights != 2 {
+	if agent.stops != 2 || agent.confirms != 1 || agent.preflights != 5 {
 		t.Fatalf("wrong retry flow: stops=%d confirms=%d native_preflights=%d", agent.stops, agent.confirms, agent.preflights)
 	}
 	bytes, err := os.ReadFile(data)

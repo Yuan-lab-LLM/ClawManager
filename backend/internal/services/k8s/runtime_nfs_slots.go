@@ -78,4 +78,43 @@ func configureNFSRootlessSlots(d *appsv1.Deployment) {
 	}
 	init.Command = []string{"/bin/sh", "-ec", strings.Join(commands, "\n")}
 	pod.InitContainers = append(pod.InitContainers, init)
+	setRuntimeCoordinatorSlotStateMounts(d)
+}
+
+// The coordinator finalizes a terminated worker while holding its existing
+// socket guard. Only management receives peer state; workers keep private mounts.
+// Apply this same transformation to operation-created targets so upgrading an
+// old pool does not depend on its source already having the new mounts.
+func setRuntimeCoordinatorSlotStateMounts(d *appsv1.Deployment) {
+	if d.Spec.Template.Labels["clawmanager.io/sandbox-profile"] != RuntimeNFSRootlessProfile || d.Spec.Template.Labels["clawmanager.io/runtime-protocol"] != "container-slots-v1" {
+		return
+	}
+	const root = "/var/lib/clawmanager-slots"
+	var coordinator *corev1.Container
+	for i := range d.Spec.Template.Spec.Containers {
+		if d.Spec.Template.Spec.Containers[i].Name == "runtime" {
+			coordinator = &d.Spec.Template.Spec.Containers[i]
+			break
+		}
+	}
+	if coordinator == nil {
+		return
+	}
+	upsertEnvVar(coordinator, "RUNTIME_COORDINATOR_SLOT_STATE_ROOT", root)
+	for _, slot := range d.Spec.Template.Spec.Containers {
+		if !strings.HasPrefix(slot.Name, "slot-") {
+			continue
+		}
+		state := corev1.VolumeMount{Name: slot.Name + "-state", MountPath: root + "/" + slot.Name}
+		found := false
+		for _, mount := range coordinator.VolumeMounts {
+			if mount.Name == state.Name && mount.MountPath == state.MountPath {
+				found = true
+				break
+			}
+		}
+		if !found {
+			coordinator.VolumeMounts = append(coordinator.VolumeMounts, state)
+		}
+	}
 }

@@ -217,7 +217,7 @@ export function OpenClawDesktopOverlay({
         onPointerUp={handlePointerUp}
         onPointerCancel={() => setIsDragging(false)}
         style={{ transform: `translate(${position.x}px, ${position.y}px)` }}
-        className={`pointer-events-auto absolute flex h-[62px] w-[62px] items-center justify-center rounded-full border-4 border-white/90 text-white shadow-[0_20px_40px_-18px_rgba(15,23,42,0.82)] ${
+        className={`pointer-events-auto absolute flex h-[62px] w-[62px] items-center justify-center rounded-full border-4 border-white/90 text-white shadow-sm ${
           isDragging
             ? "scale-100 cursor-grabbing"
             : "cursor-grab transition-[transform,box-shadow] duration-300 ease-out hover:scale-[1.03] active:scale-100"
@@ -227,9 +227,9 @@ export function OpenClawDesktopOverlay({
           className="absolute inset-0 rounded-full"
           style={{ background: ballTone.gradient }}
         />
-        <span className="absolute inset-[7px] rounded-full border border-white/35 bg-[radial-gradient(circle_at_30%_26%,rgba(255,255,255,0.42),rgba(255,255,255,0.08)_42%,rgba(0,0,0,0.08)_100%)] shadow-[inset_0_1px_0_rgba(255,255,255,0.35),inset_0_-8px_14px_rgba(0,0,0,0.12)] backdrop-blur-md" />
+        <span className="absolute inset-[7px] rounded-full border border-white/35 bg-[var(--cm-subtle)] shadow-sm backdrop-blur-md" />
         <span className="absolute inset-x-[15px] top-[10px] h-[12px] rounded-full bg-white/28 blur-[2px]" />
-        <span className="relative flex h-10 w-10 items-center justify-center rounded-full border border-white/28 bg-[linear-gradient(180deg,rgba(255,255,255,0.28)_0%,rgba(255,255,255,0.08)_100%)] shadow-[0_8px_18px_-10px_rgba(15,23,42,0.8)] backdrop-blur-md">
+        <span className="relative flex h-10 w-10 items-center justify-center rounded-full border border-[var(--cm-border)] bg-[var(--cm-subtle)] text-[var(--cm-ink)] shadow-sm">
           <svg
             className="h-7 w-7"
             viewBox="0 0 24 24"
@@ -312,7 +312,7 @@ function OrbActionButton({
           : "translate(0px, 0px) scale(0.72)",
         transitionDelay: menuOpen ? `${delayMs}ms` : "0ms",
       }}
-      className="pointer-events-auto absolute left-0 top-0 flex h-[54px] w-[54px] items-center justify-center rounded-full border border-white/18 bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.42),rgba(255,255,255,0.08)_38%),linear-gradient(180deg,#ffffff_0%,#eef2f7_100%)] text-[#182131] opacity-100 shadow-[0_18px_36px_-18px_rgba(15,23,42,0.9)] transition-[transform,opacity] duration-300 [transition-timing-function:cubic-bezier(0.22,1.22,0.36,1)] hover:scale-105 disabled:cursor-not-allowed disabled:opacity-45"
+      className="pointer-events-auto absolute left-0 top-0 flex h-[54px] w-[54px] items-center justify-center rounded-full border border-white/18 bg-[var(--cm-subtle)] text-[#182131] opacity-100 shadow-sm transition-[transform,opacity] duration-300 [transition-timing-function:cubic-bezier(0.22,1.22,0.36,1)] hover:scale-105 disabled:cursor-not-allowed disabled:opacity-45"
     >
       <span className="flex h-9 w-9 items-center justify-center rounded-full bg-[#f3f5f8] shadow-inner">
         {loading ? (

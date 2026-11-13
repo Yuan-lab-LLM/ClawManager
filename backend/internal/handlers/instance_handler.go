@@ -262,6 +262,8 @@ type CreateInstanceRequest struct {
 }
 
 type BatchCreateLiteInstanceTemplate struct {
+	Owner                *string                      `json:"owner,omitempty" binding:"omitempty,max=128"`
+	Description          *string                      `json:"description,omitempty"`
 	Type                 string                       `json:"type,omitempty"`
 	CPUCores             float64                      `json:"cpu_cores,omitempty"`
 	MemoryGB             int                          `json:"memory_gb,omitempty"`
@@ -486,6 +488,7 @@ func (h *InstanceHandler) CreateInstance(c *gin.Context) {
 		utils.HandleError(c, err)
 		return
 	}
+	c.Header("X-ClawManager-Created-Instance", strconv.Itoa(instance.ID))
 
 	skillIDs, err := h.resolveCreateInstanceSkillIDs(userID.(int), req)
 	if err != nil {
@@ -681,6 +684,8 @@ func buildLiteBatchCreateRequests(req BatchCreateLiteInstancesRequest) ([]servic
 
 	template := CreateInstanceRequest{}
 	if req.Template != nil {
+		template.Owner = req.Template.Owner
+		template.Description = req.Template.Description
 		template.Type = req.Template.Type
 		template.CPUCores = req.Template.CPUCores
 		template.MemoryGB = req.Template.MemoryGB
@@ -829,20 +834,41 @@ func (h *InstanceHandler) BatchDeleteLiteInstances(c *gin.Context) {
 	// One retry budget covers the whole batch; busy entries cannot multiply it.
 	deleteCtx, cancel := context.WithTimeout(c.Request.Context(), 3*time.Second)
 	defer cancel()
-	for _, instance := range instances {
-		result := BatchDeleteLiteInstanceResult{
+	pending := make([]int, 0, len(instances))
+	for idx, instance := range instances {
+		response.Results = append(response.Results, BatchDeleteLiteInstanceResult{
 			InstanceID: instance.ID,
 			Name:       instance.Name,
 			Status:     "deleting",
+		})
+		pending = append(pending, idx)
+	}
+	for len(pending) > 0 {
+		retry := make([]int, 0, len(pending))
+		for _, idx := range pending {
+			result := &response.Results[idx]
+			err := h.deleteLiteBatchInstance(deleteCtx, result.InstanceID)
+			if errors.Is(err, models.ErrInstanceLifecycleLockBusy) {
+				retry = append(retry, idx)
+				continue
+			}
+			if err != nil {
+				result.Status = "failed"
+				result.Error = err.Error()
+				response.Failed++
+			} else {
+				response.Deleted++
+			}
 		}
-		if err := h.deleteLiteBatchInstance(deleteCtx, instance.ID); err != nil {
-			result.Status = "failed"
-			result.Error = err.Error()
-			response.Failed++
-		} else {
-			response.Deleted++
+		pending = retry
+		if len(pending) == 0 {
+			break
 		}
-		response.Results = append(response.Results, result)
+		// Try every entry before waiting on scheduler lifecycle locks.
+		select {
+		case <-deleteCtx.Done():
+		case <-time.After(50 * time.Millisecond):
+		}
 	}
 
 	status := http.StatusAccepted
@@ -853,25 +879,13 @@ func (h *InstanceHandler) BatchDeleteLiteInstances(c *gin.Context) {
 }
 
 func (h *InstanceHandler) deleteLiteBatchInstance(ctx context.Context, id int) error {
-	deleteInstance := h.instanceService.Delete
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if queue, ok := h.instanceService.(interface{ QueueDelete(int) error }); ok {
-		deleteInstance = queue.QueueDelete
+		return queue.QueueDelete(id)
 	}
-	for {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		err := deleteInstance(id)
-		if !errors.Is(err, models.ErrInstanceLifecycleLockBusy) {
-			return err
-		}
-		// Scheduler reconciliation briefly holds the same lifecycle lock.
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(50 * time.Millisecond):
-		}
-	}
+	return h.instanceService.Delete(id)
 }
 
 func isLiteInstance(instance *models.Instance) bool {
@@ -999,7 +1013,11 @@ func (h *InstanceHandler) DeleteInstance(c *gin.Context) {
 		utils.Error(c, http.StatusForbidden, "Access denied")
 		return
 	}
-	if err := h.instanceService.Delete(id); err != nil {
+	deleteInstance := h.instanceService.Delete
+	if queue, ok := h.instanceService.(interface{ QueueDelete(int) error }); ok {
+		deleteInstance = queue.QueueDelete
+	}
+	if err := deleteInstance(id); err != nil {
 		utils.HandleError(c, err)
 		return
 	}
@@ -1239,6 +1257,7 @@ func buildUserSafeInstanceStatus(instance *models.Instance, status *services.Ins
 	if agentType, ok := services.NormalizeV2RuntimeType(instance.Type); ok && (strings.EqualFold(strings.TrimSpace(instance.RuntimeType), "gateway") || strings.EqualFold(strings.TrimSpace(instance.InstanceMode), "lite")) {
 		payload["agent_type"] = agentType
 		payload["workspace_usage_bytes"] = instance.WorkspaceUsageBytes
+		payload["workspace_usage_observed_at"] = instance.WorkspaceUsageObservedAt
 	}
 	return payload
 }
