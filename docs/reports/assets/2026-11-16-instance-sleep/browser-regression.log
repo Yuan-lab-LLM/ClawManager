@@ -1,0 +1,20 @@
+Browserslist: browsers data (caniuse-lite) is 6 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+PASS openclaw lite: sleep icon, keyboard wake, pending guard and lifecycle transition
+PASS openclaw pro: sleep icon, keyboard wake, pending guard and lifecycle transition
+PASS hermes lite: sleep icon, keyboard wake, pending guard and lifecycle transition
+PASS hermes pro: sleep icon, keyboard wake, pending guard and lifecycle transition
+PASS opencode lite: sleep icon, keyboard wake, pending guard and lifecycle transition
+PASS opencode pro: sleep icon, keyboard wake, pending guard and lifecycle transition
+PASS deepseek-harness lite: sleep icon, keyboard wake, pending guard and lifecycle transition
+PASS deepseek-harness pro: sleep icon, keyboard wake, pending guard and lifecycle transition
+PASS failed wake stays inline and permits retry
+PASS a newer generation does not display an older wake failure
+PASS en: sleeping state at 1440 / 1280 / 768 / 390
+PASS zh: sleeping state at 1440 / 1280 / 768 / 390
+PASS ja: sleeping state at 1440 / 1280 / 768 / 390
+PASS ko: sleeping state at 1440 / 1280 / 768 / 390
+PASS de: sleeping state at 1440 / 1280 / 768 / 390
+Browser errors: []
+PASS sleeping states in 5 languages / 4 widths; screenshots: /tmp/cm-instance-sleep-browser

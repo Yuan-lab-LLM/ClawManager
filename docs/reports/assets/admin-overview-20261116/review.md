@@ -1,0 +1,31 @@
+# Conversation source correction review — 2026-11-16
+
+Final verdict after semantic correction: **approved to proceed with validation and release**; no unresolved Critical or Important findings. The original finding below is retained as review history and resolved by the final disposition.
+
+## Important — The exposed conversation meaning exceeds the durable evidence
+
+`conversations.go:16–22` accepts any attributed assistant row linked to a completed LLM invocation. That includes intermediate tool-selection responses: `aigateway/service.go:4032` (`extractAssistantContent`) serializes tool calls as assistant content when ordinary text is absent; the Anthropic streaming path at lines1814–1821 similarly substitutes rendered tool calls/raw stream. `recordSuccess` persists these as assistant messages linked to status=completed model invocations. A root user message followed only by successful tool selection, then failed or abandoned continuation, passes the query. Successful model completion is not evidence of terminal conversation completion; role=user and positive user attribution also do not independently prove a real human rather than an automated prompt.
+
+The new SQLite fixture's `tool` rejection uses role=tool. That is different from the actual tool-only response writer (role=assistant), so the fixture does not catch the above case.
+
+The new tooltip/comment also claims retries count once without qualification. `resolveTraceID` returns a caller-supplied trace or reuses a tool-round trace, but plain requests with neither an explicit trace nor current-turn tool references receive a random new trace. Ordinary client retries in that case are distinct roots and the query counts both.
+
+Minimal resolution: expose the actual metric as **recorded gateway user turns with a successful model response**, clearly state that intermediate/tool responses qualify and only identical scoped trace identities deduplicate, and avoid claiming confirmed human/terminal completion. Rename the current `confirmedConversations` label if it retains that stronger implication. If the product must keep the original confirmed completed-human meaning, require durable human/terminal evidence instead; do not infer it from completed model attempts. Add a fixture for the actual assistant/tool-only shape and document its deliberately chosen result, plus a distinct-trace retry case. This can remain a narrow read/display fix; no collector or schema change is required for the honestly limited metric.
+
+## Minor — Daily filter lacks a matching time index
+
+The reviewed chat_messages migration has indexes on trace/session/request/user/sequence, but none on created_at. The outer daily root scan can therefore visit historical roots (sequence_no=1) on every30-second poll. The trace index helps the EXISTS lookup and the current small source is not a release blocker. Retain an actual MySQL EXPLAIN/latency observation for this query before describing its cost as bounded by today's rows; introduce a suitable index only if measured scale requires it.
+
+## Confirmed and evidence limits
+
+- Source independence is improved: owner assignment, XP epoch and question_v4 collectors are no longer prerequisites. The new query uses durable gateway records, not transcript payload parsing; `currentTurnMessages` selects the last user-led suffix and persistence performs prefix deduplication and trace sequencing.
+- Admin authorization remains on the existing route; an admin-wide aggregate intentionally spans users. Both assistant and invocation joins require matching trace/session/user and null-safe instance attribution, so another scope cannot confirm a root. Invocation identity is joined by primary id. Parameters are bound; no new injection path.
+- Root time is in the shared exclusive Shanghai-day interval and confirmations must exist before the response window end. Root-time attribution is explicitly a change from the prior completion-time metric. Grouped rows supply both hourly counts and daily total, eliminating separate-query inconsistency. Source/scan failure leaves unavailable/null rather than publishing a partial prefix.
+- Scoped trace grouping prevents multiple tool/model rounds from multiplying a root, and null instance attribution permits CM conversations. Explicit caller trace reuse across multiple human turns remains a source limitation because persistence sequences by trace; this metric is trace-based, not a universal human-turn counter.
+- Reviewed production SQL, new SQLite predicate fixture and ownerless/unavailable source tests, gateway request/success writers, current-turn/trace resolution, chat-message service sequencing and schema indexes, and changed English/Chinese tooltip text. Remote GREEN was still running when review was requested; no fresh test completion is claimed here. No tests/builds/source edits/cluster mutations were performed, only this report write.
+
+## Final semantic disposition
+
+The Important finding is resolved by narrowing the exposed contract rather than claiming stronger evidence. Verified all five visible labels now mean Recorded conversations; English/Chinese tooltips explicitly include intermediate tool responses, deduplicate same-trace retries only, exclude outside-gateway traffic and disclaim final task completion. API coverage remains partial and carries the same limitations plus root-message-time attribution. Browser readout assertion now expects 已记录对话. The unchanged scoped root grouping is consistent with this disclosed metric, rather than counting model invocations.
+
+No additional blocking auth, interval, deduplication or performance issue identified in this wording delta. The query still requires root and attributed successful response within the exclusive end boundary; it intentionally attributes to first root-message time rather than completion time. The earlier lack-of-time-index observation remains a nonblocking scaling caveat, not a request to change schema for this small source. The actual MySQL daily/hourly conversation-count assertion and final test results remain release-owner validation; this reviewer did not rerun tests or assert their pending outcome. No lifecycle/schema/collector/growth changes are introduced.

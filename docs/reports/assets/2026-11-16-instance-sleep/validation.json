@@ -1,0 +1,65 @@
+{
+  "branch": "UIUX2",
+  "base_commit": "05b0162ca0d25913aac2be4ea023cae1cd370c6b",
+  "backend_version": {
+    "version": "v2026.11.13-coordinator-finalization",
+    "commit": "ab6b1e7dc4806dc9b0049abca11f5800d504f4b6",
+    "build_time": "2026-11-13T09:12:22Z"
+  },
+  "review": "Independent review found one stale-error issue; generation-scoped error fixed and regression passed. Follow-up review passed.",
+  "scope": "Current frontend source in Vite, live API requests forwarded to test cluster; no production frontend deployment or Runtime image changes.",
+  "static_checks": {
+    "typescript_app": "PASS (tsc --noEmit -p tsconfig.app.json)",
+    "typescript_node": "PASS (tsc --noEmit -p tsconfig.node.json)",
+    "diff_whitespace": "PASS",
+    "changed_frame_components_eslint": "PASS",
+    "instance_detail_eslint": "5 pre-existing errors; git HEAD baseline has same five rule/source locations",
+    "design_detector": "PASS: []"
+  },
+  "ui_regression": {
+    "modes": [
+      "lite",
+      "pro"
+    ],
+    "types": [
+      "openclaw",
+      "hermes",
+      "opencode",
+      "deepseek-harness"
+    ],
+    "keyboard": true,
+    "pending_disabled": true,
+    "inline_error_retry": true,
+    "error_generation_isolation": true,
+    "manual_stop_error_starting_not_sleep": true,
+    "languages": [
+      "en",
+      "zh",
+      "ja",
+      "ko",
+      "de"
+    ],
+    "widths": [
+      1440,
+      1280,
+      768,
+      390
+    ],
+    "reduced_motion": true
+  },
+  "unit_tests": {
+    "passed": 17,
+    "failed": 0
+  },
+  "generated_at": "2026-11-16T01:11:28.055422+00:00",
+  "source_sha256": {
+    "frontend/src/components/InstanceSleepingState.tsx": "35b4731615a2df456d81722c6bba890871d397a686b45a76865914b4322b925b",
+    "frontend/src/components/InstanceServiceFrame.tsx": "c26fc3d57bb79d53056df031813bb65eaf2f51844ae6ea6ac7c58243157e06e0",
+    "frontend/src/components/HermesLiteServiceFrame.tsx": "c1e21a389b17b381514c7398fb33d225b3e330d98676c2758cdc63b9166e298c",
+    "frontend/src/pages/instances/InstanceDetailPage.tsx": "b465e0dbbbf47c8b32ac3c6d420d6f2af44942fa4acb1c42383bf2142f1d1fc8",
+    "frontend/src/lib/i18n.ts": "ed5b2a61caafbd186350964d23db610315cfe825113b212b77028dfa6dbfd162",
+    "frontend/tests/instance-sleep.browser.mjs": "9282c5e06e00bc4beea5d00c82bb2c18657909e17f9cc563d82358baf5fd433c",
+    "frontend/tests/instance-sleep-live.browser.mjs": "151fd8ec6a2b3193e2142e110635055d4873b5045625ccd678dc82d240276ec3",
+    "e2e/runtime-sleep-acceptance.py": "197984e8cbb17be571797a69a8e7fa84947afd21123a6c7532dc981a9a5be4a7"
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "release": "uiux2-sleep-20261116-39640fa8d593",
+  "base_commit": "05b0162ca0d25913aac2be4ea023cae1cd370c6b",
+  "source_identity": "39640fa8d5939348f4b0dbb051ca304a85e2e5977cac460ed79e796d8a098a53",
+  "source_archive_sha256": "35e984cb3a9c5b3f5c1838b466bafe52466a7e716855f6e780891a4d8c30477a",
+  "built_on": "10.130.81.54",
+  "built_at": "2026-11-16T01:28:33.919822+00:00",
+  "image": "clawmanager.local/clawmanager@sha256:be38cc2c2958d9a5bb403f111929ecf879f1954d989bf6778db02cf8e2bb371b",
+  "base_image": "clawmanager.local/clawmanager@sha256:bc8988e59d867ed628ecdd3157ae8f34298204ee2f4fb9c33e029f257d4eb4b3",
+  "accepted_digests": [
+    "sha256:be38cc2c2958d9a5bb403f111929ecf879f1954d989bf6778db02cf8e2bb371b"
+  ],
+  "frontend_only": true,
+  "backend_and_native_config_preserved": true,
+  "source_files_verified": 478,
+  "stable_paths": [
+    "/usr/local/bin/clawreef-server",
+    "/usr/local/bin/clawreef-northbound-gateway",
+    "/usr/local/bin/system-backup-controller",
+    "/usr/local/bin/system-backup-artifact",
+    "/app/start.sh",
+    "/etc/nginx/nginx.conf",
+    "/usr/local/bin/runtime-eviction-helper",
+    "/usr/local/bin/cm-runtime-template-hash-v1.35"
+  ],
+  "index_sha256": "afe88994aa6de78e4071f9df4b2502c688c40b6c5f3fc956a875b857f052b114"
+}

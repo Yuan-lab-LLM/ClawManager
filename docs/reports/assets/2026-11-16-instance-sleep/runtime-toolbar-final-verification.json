@@ -1,0 +1,27 @@
+{
+  "release": "uiux2-runtime-toolbar-20261116-d1d78c7d80c8",
+  "url": "https://10.130.81.54:30443",
+  "image": "clawmanager.local/clawmanager@sha256:27e39b6db3e3e9d9153009dfee307d7fc57aa58365e2fa81ce5caa60c2852e12",
+  "frontend_revision_verified": true,
+  "backend_version": {
+    "version": "v2026.11.13-coordinator-finalization",
+    "commit": "ab6b1e7dc4806dc9b0049abca11f5800d504f4b6",
+    "build_time": "2026-11-13T09:12:22Z"
+  },
+  "ready_replicas": 1,
+  "sleep_ui_cases": 4,
+  "shell_ui_cases": 2,
+  "native_browser_cases": 2,
+  "browser_failures": 0,
+  "native_fixture_cleanup": {
+    "deleted": [
+      283,
+      284
+    ],
+    "remaining": []
+  },
+  "remaining_original_instances": 36,
+  "original_instance_ids_preserved": true,
+  "runtime_toolbar_cases": 2,
+  "auto_stop_policy_version": 6
+}

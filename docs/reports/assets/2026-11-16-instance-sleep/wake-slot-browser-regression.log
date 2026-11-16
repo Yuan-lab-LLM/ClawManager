@@ -1,0 +1,24 @@
+Browserslist: browsers data (caniuse-lite) is 6 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+PASS en 1440
+PASS en 1280
+PASS en 768
+PASS en 390
+PASS zh 1440
+PASS zh 1280
+PASS zh 768
+PASS zh 390
+PASS ja 1440
+PASS ja 1280
+PASS ja 768
+PASS ja 390
+PASS ko 1440
+PASS ko 1280
+PASS ko 768
+PASS ko 390
+PASS de 1440
+PASS de 1280
+PASS de 768
+PASS de 390
+PASS all states, tabs/search and 20 locale/viewport combinations; no writes

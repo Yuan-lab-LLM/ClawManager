@@ -1,0 +1,33 @@
+{
+  "release": "uiux2-admin-conversation-20261116-975f7fef4e95",
+  "image": "clawmanager.local/clawmanager@sha256:18c6467429512ea242518209e48ac44ef36d5985e5aa75c2c0a6a05358baca44",
+  "healthz": "ok",
+  "backend_version": {
+    "version": "v2026.11.16-admin-dialogue",
+    "commit": "05b0162ca0d25913aac2be4ea023cae1cd370c6b-dirty",
+    "build_time": "2026-11-16T13:55:19Z"
+  },
+  "source_hashes_verified": true,
+  "frontend_revision_verified": true,
+  "ready_replicas": 1,
+  "pods": [
+    {
+      "name": "clawmanager-app-74474f67d7-gl7gf",
+      "uid": "784d0874-82e8-468a-b8a7-3d1aeb450438",
+      "imageID": "clawmanager.local/clawmanager@sha256:18c6467429512ea242518209e48ac44ef36d5985e5aa75c2c0a6a05358baca44",
+      "digest": "sha256:18c6467429512ea242518209e48ac44ef36d5985e5aa75c2c0a6a05358baca44",
+      "status_image": "clawmanager.local/clawmanager:uiux2-admin-conversation-20261116-975f7fef4e95"
+    }
+  ],
+  "other_deployment_specs_uids_generations_unchanged": true,
+  "browser_node_ports": {
+    "count": 128,
+    "first": 31600,
+    "last": 31727,
+    "target_port": 8444,
+    "ready_endpoints": [
+      "clawmanager-app-74474f67d7-gl7gf"
+    ]
+  },
+  "browser_visual_native_checks": "Separate browser evidence required; this script does not prove visual or native application rendering."
+}

@@ -1,0 +1,116 @@
+TAP version 13
+# (node:73551) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: Desktop is the default only after capability confirmation; initial pending mounts neither frame
+ok 1 - Desktop is the default only after capability confirmation; initial pending mounts neither frame
+  ---
+  duration_ms: 10.036635
+  type: 'test'
+  ...
+# Subtest: capability results are scoped to the selected instance
+ok 2 - capability results are scoped to the selected instance
+  ---
+  duration_ms: 0.833261
+  type: 'test'
+  ...
+# Subtest: gate and capability failures identify Desktop as unavailable with a fixed safe reason, never raw server text
+ok 3 - gate and capability failures identify Desktop as unavailable with a fixed safe reason, never raw server text
+  ---
+  duration_ms: 1.777206
+  type: 'test'
+  ...
+# Subtest: unavailable Desktop is not a permanent user choice; a later confirmed capability opens Desktop
+ok 4 - unavailable Desktop is not a permanent user choice; a later confirmed capability opens Desktop
+  ---
+  duration_ms: 0.541858
+  type: 'test'
+  ...
+# Subtest: activation rejection after a successful probe keeps the safe authentication reason
+ok 5 - activation rejection after a successful probe keeps the safe authentication reason
+  ---
+  duration_ms: 0.654332
+  type: 'test'
+  ...
+# Subtest: renderer is same-origin, instance-scoped and contains no bearer material
+ok 6 - renderer is same-origin, instance-scoped and contains no bearer material
+  ---
+  duration_ms: 2.458381
+  type: 'test'
+  ...
+# Subtest: iframe readiness only accepts messages from the current instance frame and origin
+ok 7 - iframe readiness only accepts messages from the current instance frame and origin
+  ---
+  duration_ms: 1.344258
+  type: 'test'
+  ...
+# Subtest: cookie renewal is scheduled before expiry and invalid expiries fail closed
+ok 8 - cookie renewal is scheduled before expiry and invalid expiries fail closed
+  ---
+  duration_ms: 2.423154
+  type: 'test'
+  ...
+# (node:73552) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: short lived handoff survives duplicate reads, isolates users and keeps only latest target
+ok 9 - short lived handoff survives duplicate reads, isolates users and keeps only latest target
+  ---
+  duration_ms: 14.948884
+  type: 'test'
+  ...
+# Subtest: null and empty stopped reasons from live responses do not reject handoff or list snapshots
+ok 10 - null and empty stopped reasons from live responses do not reject handoff or list snapshots
+  ---
+  duration_ms: 4.195292
+  type: 'test'
+  ...
+# Subtest: workspace paths preserve native project selection without accepting URLs or token syntax
+ok 11 - workspace paths preserve native project selection without accepting URLs or token syntax
+  ---
+  duration_ms: 2.034545
+  type: 'test'
+  ...
+# Subtest: storage is revalidated rather than trusting modified metadata or instance data
+ok 12 - storage is revalidated rather than trusting modified metadata or instance data
+  ---
+  duration_ms: 3.406504
+  type: 'test'
+  ...
+# Subtest: list position and last selected ID survive reloads and remain scoped to user
+ok 13 - list position and last selected ID survive reloads and remain scoped to user
+  ---
+  duration_ms: 4.722431
+  type: 'test'
+  ...
+# Subtest: list snapshot restores only its account, search and server page with sanitized rows
+ok 14 - list snapshot restores only its account, search and server page with sanitized rows
+  ---
+  duration_ms: 1.953934
+  type: 'test'
+  ...
+# Subtest: list snapshot rejects expired, malformed and oversized pages without losing pagination
+ok 15 - list snapshot rejects expired, malformed and oversized pages without losing pagination
+  ---
+  duration_ms: 2.430639
+  type: 'test'
+  ...
+# Subtest: deleted instance cannot resume from last target or snapshot; other account and view remain
+ok 16 - deleted instance cannot resume from last target or snapshot; other account and view remain
+  ---
+  duration_ms: 1.503186
+  type: 'test'
+  ...
+# Subtest: invalid identities, malformed views and unavailable storage cannot interrupt navigation
+ok 17 - invalid identities, malformed views and unavailable storage cannot interrupt navigation
+  ---
+  duration_ms: 3.64506
+  type: 'test'
+  ...
+1..17
+# tests 17
+# suites 0
+# pass 17
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 637.087885

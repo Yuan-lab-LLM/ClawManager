@@ -1,0 +1,25 @@
+{
+  "release": "uiux2-sleep-20261116-39640fa8d593",
+  "url": "https://10.130.81.54:30443",
+  "image": "clawmanager.local/clawmanager@sha256:be38cc2c2958d9a5bb403f111929ecf879f1954d989bf6778db02cf8e2bb371b",
+  "frontend_revision_verified": true,
+  "backend_version": {
+    "version": "v2026.11.13-coordinator-finalization",
+    "commit": "ab6b1e7dc4806dc9b0049abca11f5800d504f4b6",
+    "build_time": "2026-11-13T09:12:22Z"
+  },
+  "ready_replicas": 1,
+  "sleep_ui_cases": 4,
+  "native_browser_cases": 2,
+  "browser_failures": 0,
+  "native_fixture_cleanup": {
+    "deleted": [
+      279,
+      280
+    ],
+    "remaining": []
+  },
+  "remaining_original_instances": 36,
+  "original_instance_states": "stopped",
+  "auto_stop_policy_version": 6
+}

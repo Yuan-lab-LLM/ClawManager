@@ -1,0 +1,65 @@
+{
+  "source": "UIUX2 working tree",
+  "backend": "https://10.130.81.54:30443",
+  "tlsNote": "Browser test trusts the private cluster certificate; API runner verifies cluster TLS",
+  "results": [
+    {
+      "type": "openclaw",
+      "id": 267,
+      "result": "PASS",
+      "seconds": 42.031,
+      "generation": 2,
+      "keyboard": true,
+      "pendingDisabled": true,
+      "startRequests": 1
+    },
+    {
+      "type": "hermes",
+      "id": 270,
+      "result": "PASS",
+      "seconds": 18.466,
+      "generation": 2,
+      "keyboard": true,
+      "pendingDisabled": true,
+      "startRequests": 1
+    },
+    {
+      "type": "opencode",
+      "id": 273,
+      "result": "PASS",
+      "seconds": 11.676,
+      "generation": 2,
+      "keyboard": true,
+      "pendingDisabled": true,
+      "startRequests": 1
+    },
+    {
+      "type": "deepseek-harness",
+      "id": 276,
+      "result": "PASS",
+      "seconds": 11.631,
+      "generation": 2,
+      "keyboard": true,
+      "pendingDisabled": true,
+      "startRequests": 1
+    }
+  ],
+  "starts": [
+    {
+      "id": 267,
+      "at": "2026-11-16T01:07:39.094Z"
+    },
+    {
+      "id": 270,
+      "at": "2026-11-16T01:08:13.939Z"
+    },
+    {
+      "id": 273,
+      "at": "2026-11-16T01:08:33.445Z"
+    },
+    {
+      "id": 276,
+      "at": "2026-11-16T01:08:45.428Z"
+    }
+  ]
+}

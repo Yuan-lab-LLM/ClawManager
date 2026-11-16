@@ -1,0 +1,45 @@
+{
+  "status": "PASS",
+  "widths": [
+    [
+      2560,
+      1271
+    ],
+    [
+      1920,
+      720
+    ],
+    [
+      1440,
+      900
+    ],
+    [
+      1280,
+      720
+    ],
+    [
+      768,
+      900
+    ],
+    [
+      390,
+      900
+    ]
+  ],
+  "locales": [
+    "zh",
+    "en",
+    "ja",
+    "ko",
+    "de"
+  ],
+  "visuals_inspected": [
+    2560,
+    1920,
+    1280
+  ],
+  "change": "Remove fixed tiny chart caps; size charts by card width and desktop container height; preserve mobile stacking and grouped alignment.",
+  "typecheck": "tsc --noEmit PASS",
+  "model_tests": "5/5 PASS using node --experimental-strip-types --test",
+  "source_browser": "30 locale/viewport combinations plus interaction/state suite PASS; errors=[]"
+}

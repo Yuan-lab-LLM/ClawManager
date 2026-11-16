@@ -1,0 +1,57 @@
+{
+  "release": "uiux2-runtime-toolbar-20261116-d1d78c7d80c8",
+  "checks": [
+    {
+      "check": "TypeScript app noEmit",
+      "result": "PASS"
+    },
+    {
+      "check": "ESLint RuntimePodsPage.tsx and i18n.ts",
+      "result": "PASS"
+    },
+    {
+      "check": "Runtime page contract",
+      "result": "PASS"
+    },
+    {
+      "check": "Runtime toolbar dialog unit regression",
+      "result": "PASS",
+      "cases": 1
+    },
+    {
+      "check": "Mock browser regression, 5 locales, desktop and narrow viewports",
+      "result": "PASS"
+    },
+    {
+      "check": "Independent read-only review",
+      "result": "PASS",
+      "findings": []
+    },
+    {
+      "check": "Deployed browser verification",
+      "result": "PASS",
+      "cases": 10
+    },
+    {
+      "check": "Browser NodePort 31600–31727, target 8444, ready new Pod endpoints",
+      "result": "PASS"
+    },
+    {
+      "check": "Native fixture cleanup",
+      "result": "PASS",
+      "deleted": [
+        283,
+        284
+      ]
+    },
+    {
+      "check": "git diff --check",
+      "result": "PASS"
+    }
+  ],
+  "boundaries": [
+    "This release only changes frontend labels and toolbar organization. No real scheduling or maintenance operation submitted.",
+    "Initial test credential expired; renewed the existing signed test identity privately, then reran all deployed browser checks.",
+    "Production frontend and image built on 10.130.81.54; backend/helper hashes and AgentRuntime images preserved."
+  ]
+}

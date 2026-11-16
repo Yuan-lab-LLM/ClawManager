@@ -1,0 +1,48 @@
+Browserslist: browsers data (caniuse-lite) is 6 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+PASS sixteen table rows, readable geometry and slot distributions en { width: 1440, height: 900 }
+PASS sixteen table rows, readable geometry and slot distributions en { width: 1920, height: 1080 }
+PASS sixteen table rows, readable geometry and slot distributions en { width: 1280, height: 900 }
+PASS Actions keyboard, viewport containment, dismiss, actual Events/Pause actions and row action isolation en
+PASS responsive table with local horizontal scrolling and reachable actions en { width: 1440, height: 800 }
+PASS responsive table with local horizontal scrolling and reachable actions en { width: 900, height: 900 }
+PASS responsive table with local horizontal scrolling and reachable actions en { width: 768, height: 900 }
+PASS responsive table with local horizontal scrolling and reachable actions en { width: 390, height: 844 }
+PASS server pagination, off-page search and keyboard Pod detail entry en
+PASS sixteen table rows, readable geometry and slot distributions zh { width: 1440, height: 900 }
+PASS sixteen table rows, readable geometry and slot distributions zh { width: 1920, height: 1080 }
+PASS sixteen table rows, readable geometry and slot distributions zh { width: 1280, height: 900 }
+PASS Actions keyboard, viewport containment, dismiss, actual Events/Pause actions and row action isolation zh
+PASS responsive table with local horizontal scrolling and reachable actions zh { width: 1440, height: 800 }
+PASS responsive table with local horizontal scrolling and reachable actions zh { width: 900, height: 900 }
+PASS responsive table with local horizontal scrolling and reachable actions zh { width: 768, height: 900 }
+PASS responsive table with local horizontal scrolling and reachable actions zh { width: 390, height: 844 }
+PASS server pagination, off-page search and keyboard Pod detail entry zh
+PASS sixteen table rows, readable geometry and slot distributions ja { width: 1440, height: 900 }
+PASS sixteen table rows, readable geometry and slot distributions ja { width: 1920, height: 1080 }
+PASS sixteen table rows, readable geometry and slot distributions ja { width: 1280, height: 900 }
+PASS Actions keyboard, viewport containment, dismiss, actual Events/Pause actions and row action isolation ja
+PASS responsive table with local horizontal scrolling and reachable actions ja { width: 1440, height: 800 }
+PASS responsive table with local horizontal scrolling and reachable actions ja { width: 900, height: 900 }
+PASS responsive table with local horizontal scrolling and reachable actions ja { width: 768, height: 900 }
+PASS responsive table with local horizontal scrolling and reachable actions ja { width: 390, height: 844 }
+PASS server pagination, off-page search and keyboard Pod detail entry ja
+PASS sixteen table rows, readable geometry and slot distributions ko { width: 1440, height: 900 }
+PASS sixteen table rows, readable geometry and slot distributions ko { width: 1920, height: 1080 }
+PASS sixteen table rows, readable geometry and slot distributions ko { width: 1280, height: 900 }
+PASS Actions keyboard, viewport containment, dismiss, actual Events/Pause actions and row action isolation ko
+PASS responsive table with local horizontal scrolling and reachable actions ko { width: 1440, height: 800 }
+PASS responsive table with local horizontal scrolling and reachable actions ko { width: 900, height: 900 }
+PASS responsive table with local horizontal scrolling and reachable actions ko { width: 768, height: 900 }
+PASS responsive table with local horizontal scrolling and reachable actions ko { width: 390, height: 844 }
+PASS server pagination, off-page search and keyboard Pod detail entry ko
+PASS sixteen table rows, readable geometry and slot distributions de { width: 1440, height: 900 }
+PASS sixteen table rows, readable geometry and slot distributions de { width: 1920, height: 1080 }
+PASS sixteen table rows, readable geometry and slot distributions de { width: 1280, height: 900 }
+PASS Actions keyboard, viewport containment, dismiss, actual Events/Pause actions and row action isolation de
+PASS responsive table with local horizontal scrolling and reachable actions de { width: 1440, height: 800 }
+PASS responsive table with local horizontal scrolling and reachable actions de { width: 900, height: 900 }
+PASS responsive table with local horizontal scrolling and reachable actions de { width: 768, height: 900 }
+PASS responsive table with local horizontal scrolling and reachable actions de { width: 390, height: 844 }
+PASS server pagination, off-page search and keyboard Pod detail entry de
