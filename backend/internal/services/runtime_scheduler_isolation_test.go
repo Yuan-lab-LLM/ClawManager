@@ -11,15 +11,16 @@ import (
 
 type stalledRolloutInventory struct {
 	*fakeRuntimeRolloutRepo
-	entered chan struct{}
-	exited  chan struct{}
-	once    sync.Once
+	entered  chan struct{}
+	exited   chan struct{}
+	once     sync.Once
+	exitOnce sync.Once
 }
 
 func (r *stalledRolloutInventory) ListActive(ctx context.Context, _ string) ([]models.RuntimeRollout, error) {
 	r.once.Do(func() { close(r.entered) })
 	<-ctx.Done()
-	close(r.exited)
+	r.exitOnce.Do(func() { close(r.exited) })
 	return nil, ctx.Err()
 }
 
@@ -57,5 +58,18 @@ func TestRuntimeSchedulerLongRolloutDoesNotBlockOrdinaryReconciliation(t *testin
 	case <-rollouts.exited:
 	case <-time.After(time.Second):
 		t.Fatal("rollout did not observe cancellation")
+	}
+}
+
+func TestRuntimeOperationsCanceledContextDoesNotStartReconciliation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	rollouts := &stalledRolloutInventory{fakeRuntimeRolloutRepo: &fakeRuntimeRolloutRepo{}, entered: make(chan struct{}), exited: make(chan struct{})}
+	scheduler := NewRuntimeScheduler(newFakeRuntimeInstanceRepo(), &fakeRuntimePodRepo{}, &fakeRuntimeBindingRepo{}, rollouts, nil, nil, nil, nil, time.Nanosecond)
+	scheduler.runRuntimeOperations(ctx)
+	select {
+	case <-rollouts.entered:
+		t.Fatal("canceled operations loop started a new rollout scan")
+	default:
 	}
 }
