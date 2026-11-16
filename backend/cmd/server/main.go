@@ -1116,6 +1116,7 @@ func main() {
 		adminRuntime.Use(middleware.SetUserInfo(userRepo))
 		adminRuntime.Use(middleware.NewAdminAuth(userRepo))
 		{
+			adminRuntime.GET("/dashboard", handlers.NewAdminDashboardHandler(database, runtimePoolHandler).Get)
 			adminRuntime.GET("/auth/enterprise/config", enterpriseAuthHandler.Config)
 			adminRuntime.POST("/auth/enterprise/config/test", enterpriseAuthHandler.TestConfig)
 			adminRuntime.PUT("/auth/enterprise/config", enterpriseAuthHandler.UpdateConfig)
