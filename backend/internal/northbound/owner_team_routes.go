@@ -25,6 +25,8 @@ var OwnerTeamRoutes = []OwnerTeamRoute{
 	{"GET", "/teams", ScopeTeamsRead, "teams.list"},
 	{"POST", "/teams", ScopeTeamsCreate, "teams.create"},
 	{"GET", "/teams/:id", ScopeTeamsRead, "teams.get"},
+	{"POST", "/teams/:id/start", ScopeTeamsManage, "teams.start"},
+	{"POST", "/teams/:id/stop", ScopeTeamsManage, "teams.stop"},
 	{"PATCH", "/teams/:id", ScopeTeamsManage, "teams.update"},
 	{"DELETE", "/teams/:id", ScopeTeamsDelete, "teams.delete"},
 	{"GET", "/teams/:id/members", ScopeTeamsRead, "members.list"},

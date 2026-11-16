@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -28,6 +29,7 @@ const workspaceNFSHeaderLimit = 8 << 20
 const workspaceNFSResponseLimit = 8 << 20
 
 type workspaceNFSRequest struct {
+	HistorySnapshot                                json.RawMessage
 	HistoryTempPath                                string
 	HistoryIdentity                                ownerrecords.Identity
 	HistoryRecent                                  bool
@@ -41,17 +43,18 @@ type workspaceNFSRequest struct {
 	Size, UploadMax                                int64
 }
 type workspaceNFSResponse struct {
-	GitData        []byte
-	Questions      []ownerrecords.NativeQuestion
-	Fingerprint    string
-	UploadIdentity string
-	Entries        []WorkspaceEntry
-	Entry          *WorkspaceEntry
-	Preview        *WorkspacePreview
-	Text           *WorkspaceText
-	Name, Error    string
-	Size           int64
-	Owner          int
+	HistorySnapshot json.RawMessage
+	GitData         []byte
+	Questions       []ownerrecords.NativeQuestion
+	Fingerprint     string
+	UploadIdentity  string
+	Entries         []WorkspaceEntry
+	Entry           *WorkspaceEntry
+	Preview         *WorkspacePreview
+	Text            *WorkspaceText
+	Name, Error     string
+	Size            int64
+	Owner           int
 }
 type workspaceNFSEvent struct {
 	Kind, Action, Path string

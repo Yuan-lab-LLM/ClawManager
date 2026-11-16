@@ -79,7 +79,7 @@ func TestNFSHealthyTeamMemberSurvivesPeerResetAndSQLPending(t *testing.T) {
 				t.Fatalf("OwnerTeam ready=%t expected=%t err=%v", ready, healthy, err)
 			}
 			team := NewTeamService(nil, nil, WithTeamKubernetesClient(client)).(*teamService)
-			observed := team.observeMemberGateway(t.Context(), models.TeamMemberRuntimeFacts{Instance: instance, Binding: binding, Runtime: &report}, now)
+			observed := team.observeMemberGateway(t.Context(), models.TeamMemberRuntimeFacts{Instance: instance, Binding: binding, Runtime: &report}, now, nil)
 			if (observed.State == "online") != healthy {
 				t.Fatalf("Team member observation lost healthy sibling: %+v", observed)
 			}

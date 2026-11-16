@@ -122,8 +122,12 @@ func TestNativeRestartStopsOriginalGenerationBeforeFencing(t *testing.T) {
 					}
 					return service.Restart(1)
 				}
-				if err := restart(); err == nil || !strings.Contains(err.Error(), "native teardown receipt unavailable") {
-					t.Fatalf("restart must reach original generation teardown: %v", err)
+				if err := restart(); !errors.Is(err, ErrInstanceRestartPending) {
+					t.Fatalf("unconfirmed restart must retain its durable continuation: %v", err)
+				}
+				pending, err := store.GetStopOperation(ctx, operationID)
+				if err != nil || pending == nil || pending.Kind != "restart" || !strings.Contains(pending.ErrorMessage, "native teardown receipt unavailable") || deleteCalls != 1 {
+					t.Fatalf("original teardown failure or restart identity lost: %+v %v deletes=%d", pending, err, deleteCalls)
 				}
 				binding, err := bindings.GetByInstanceID(ctx, 1)
 				if err != nil || binding == nil || binding.Generation != 2 || rechecked != 0 {
@@ -132,8 +136,9 @@ func TestNativeRestartStopsOriginalGenerationBeforeFencing(t *testing.T) {
 				if err := restart(); err != nil {
 					t.Fatalf("restart retry failed: %v", err)
 				}
+				// The durable continuation fences once during Start; retry must not add another generation.
 				instance, err := instances.GetByID(1)
-				if err != nil || instance == nil || instance.Status != "creating" || instance.RuntimeGeneration != 4 || stringValue(instance.WorkspacePath) != workspace {
+				if err != nil || instance == nil || instance.Status != "creating" || instance.RuntimeGeneration != 3 || stringValue(instance.WorkspacePath) != workspace {
 					t.Fatalf("restart did not preserve home and fence old generation: %+v %v", instance, err)
 				}
 				if err := instances.UpdateRuntimeState(ctx, 1, "running", 2, nil); !errors.Is(err, repository.ErrStaleRuntimeGeneration) {

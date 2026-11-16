@@ -1,0 +1,16 @@
+import assert from 'node:assert/strict';
+import {isOwnerSessionEndpoint,isConfirmedOwnerSessionFailure,nextReadFailure,isPersistentReadFailure} from '../src/lib/ownerReadNotice.ts';
+assert.equal(isOwnerSessionEndpoint('/dashboard?range=7d'),true);
+assert.equal(isOwnerSessionEndpoint('/instances/1/access'),false);
+assert.equal(isOwnerSessionEndpoint('/teams/1/workspace/preview'),false);
+const error=(status,message)=>({response:{status,data:{error:message}}});
+assert.equal(isConfirmedOwnerSessionFailure(error(401,'IEI system session is required')),true);
+assert.equal(isConfirmedOwnerSessionFailure(error(401,'IEI system session is invalid or expired')),true);
+for (const status of [403,503]) assert.equal(isConfirmedOwnerSessionFailure(error(status,'IEI system session is required')),false);
+assert.equal(isConfirmedOwnerSessionFailure(error(401,'Provider authentication failed')),false);
+let failure=nextReadFailure(null,0);
+assert.equal(isPersistentReadFailure(failure),false);
+failure=nextReadFailure(failure,1000);
+assert.equal(isPersistentReadFailure(failure),false);
+assert.equal(isPersistentReadFailure(nextReadFailure(failure,61_000)),true);
+console.log('PASS owner failures: transient retention, owner expiry, Runtime 401 and permission isolation');

@@ -5,8 +5,9 @@ import {compactDisplayTime} from '../lib/compactDisplayTime';
 import type {IEISystemInstance} from '../services/ieiSystemService';
 import '../styles/owner-instance-card.css';
 
-const logos:Record<string,string>={openclaw:'/openclaw.png',hermes:'/hermes-card.png',opencode:'/opencode-card.svg','deepseek-harness':'/deepseek-harness.svg'};
+const logos:Record<string,string>={openclaw:'/openclaw.png',hermes:'/hermes-card.png',opencode:'/opencode-card.svg','deepseek-harness':'/deepseek-harness.svg',workbuddy:'/workbuddy.png'};
 const summaries:Record<string,{text:string;tags:string[]}>= {
+ workbuddy:{text:'围绕文档、资料与待办持续协作，协助内容生成、信息归纳和日常事务推进。',tags:['文档生成','信息整理','事务跟进']},
  openclaw:{text:'从日常问答到多步骤执行，借助工具推进工作，适合灵活、多样的协作任务。',tags:['日常协作','工具调用','任务执行']},
  hermes:{text:'围绕复杂目标持续推理与研究，整理资料并保留阶段成果，适合需要深入推进的任务。',tags:['深度推理','资料研究','长程任务']},
  opencode:{text:'理解项目结构，完成代码修改、终端执行与测试验证，适合开发、调试和仓库维护。',tags:['仓库理解','代码修改','测试验证']},

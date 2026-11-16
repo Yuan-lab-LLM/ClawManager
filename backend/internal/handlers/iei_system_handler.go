@@ -509,7 +509,7 @@ func (h *IEISystemHandler) GenerateInstanceAccess(c *gin.Context) {
 
 	accessURL, err := h.instanceHandler.proxyService.GetProxyURLForInstanceWithError(instance, "")
 	if err != nil || strings.TrimSpace(accessURL) == "" {
-		instanceAccessURLFailure(c, err)
+		instanceAccessURLFailure(c, err, instance)
 		return
 	}
 	targetPort := h.instanceHandler.proxyService.GetTargetPortForInstance(instance)
@@ -545,7 +545,7 @@ func (h *IEISystemHandler) GenerateInstanceAccess(c *gin.Context) {
 	}
 	proxyURL, err := h.instanceHandler.proxyService.GetProxyURLForInstanceWithError(instance, accessToken.Token)
 	if err != nil {
-		instanceAccessURLFailure(c, err)
+		instanceAccessURLFailure(c, err, instance)
 		return
 	}
 	browserURL := browserAccessEntryURL(accessURL, proxyURL)

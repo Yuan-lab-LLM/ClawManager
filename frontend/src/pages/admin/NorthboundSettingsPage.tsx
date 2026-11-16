@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Download, Network, RefreshCw, Save, ShieldCheck, TriangleAlert } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import NorthboundAPIKeysPanel from './NorthboundAPIKeysPanel';
+import OwnerPortalAdminPanel from './OwnerPortalAdminPanel';
 import AdminLayout from '../../components/AdminLayout';
 import { northboundSettingsService, type NorthboundCallerPolicy, type NorthboundOverview, type NorthboundSettings } from '../../services/northboundSettingsService';
 import { userService } from '../../services/userService';
@@ -15,6 +16,7 @@ const categories = [
  {id:'traffic',label:'Token 与流控',note:'认证周期与请求保护'},
  {id:'runtime',label:'实例创建策略',note:'运行时与资源默认值'},
  {id:'audit',label:'操作审计',note:'追踪配置变更'},
+ {id:'portal',label:'门户统计',note:'用户统计、同步记录与工作日期'},
 ];
 const sectionFields: Record<string, (keyof NorthboundSettings)[]> = {
  access:['api_enabled','owner_teams_enabled','owner_team_creation_user_id'], callers:['require_explicit_callers'],
@@ -59,6 +61,7 @@ const NorthboundSettingsPage: React.FC = () => {
   const [params, setParams] = useSearchParams();
   const section = categories.some(c=>c.id===params.get('section')) ? params.get('section')! : 'access';
   const [keyDirty,setKeyDirty] = useState(false);
+  const [portalDirty,setPortalDirty] = useState(false);
   const onKeyDirty = useCallback((value:boolean)=>setKeyDirty(value),[]);
   const [callerDirty,setCallerDirty] = useState(false);
   const [keyCount,setKeyCount] = useState<number|null>(null);
@@ -76,7 +79,7 @@ const NorthboundSettingsPage: React.FC = () => {
   const [error, setError] = useState('');
 
   const settingsDirty = !!settings && !!overview && Object.values(sectionFields).flat().some(k=>JSON.stringify(settings[k])!==JSON.stringify(overview.settings[k]));
-  const dirty = settingsDirty || keyDirty || callerDirty || (!!overview && nodePort !== (overview.cluster.external_node_port || overview.settings.external_node_port || 32343));
+  const dirty = settingsDirty || keyDirty || portalDirty || callerDirty || (!!overview && nodePort !== (overview.cluster.external_node_port || overview.settings.external_node_port || 32343));
   useEffect(()=>{const handler=(e:BeforeUnloadEvent)=>{if(dirty){e.preventDefault();e.returnValue=''}};window.addEventListener('beforeunload',handler);return()=>window.removeEventListener('beforeunload',handler)},[dirty]);
   useEffect(()=>{const handler=(e:MouseEvent)=>{const link=(e.target as HTMLElement).closest('a');if(dirty && link && link.getAttribute('href') && !window.confirm('存在未保存修改，确认离开？')){e.preventDefault();e.stopPropagation()}};document.addEventListener('click',handler,true);return()=>document.removeEventListener('click',handler,true)},[dirty]);
   const load = async () => {
@@ -168,10 +171,11 @@ const NorthboundSettingsPage: React.FC = () => {
 
         <div className="grid items-start gap-5 lg:grid-cols-[220px_minmax(0,1fr)]">
           <nav aria-label="北向设置分类" className="flex gap-2 overflow-x-auto rounded-2xl border border-slate-200 bg-white p-3 shadow-sm lg:sticky lg:top-5 lg:flex-col">
-            {categories.map(c=><button key={c.id} aria-current={section===c.id?'page':undefined} onClick={()=>{setParams({section:c.id});setMessage('');setError('')}} className={`shrink-0 rounded-xl border px-4 py-3 text-left transition ${section===c.id?'border-red-100 bg-red-50 text-red-700':'border-transparent text-slate-600 hover:bg-slate-50'}`}><span className="block text-sm font-semibold">{c.label}</span><span className="mt-1 hidden text-xs opacity-70 lg:block">{c.note}</span></button>)}
+            {categories.map(c=><button key={c.id} aria-current={section===c.id?'page':undefined} onClick={()=>{if(portalDirty&&!window.confirm('离开将丢弃当前日历预览，是否继续？'))return;setPortalDirty(false);setParams({section:c.id});setMessage('');setError('')}} className={`shrink-0 rounded-xl border px-4 py-3 text-left transition ${section===c.id?'border-red-100 bg-red-50 text-red-700':'border-transparent text-slate-600 hover:bg-slate-50'}`}><span className="block text-sm font-semibold">{c.label}</span><span className="mt-1 hidden text-xs opacity-70 lg:block">{c.note}</span></button>)}
           </nav>
           <div className="min-w-0 space-y-5 rounded-2xl border border-slate-200 bg-white/60 p-4 md:p-6">
             <div className="border-b border-slate-200 pb-4"><h2 className="text-xl font-semibold text-slate-900">{categories.find(c=>c.id===section)?.label}</h2><p className="mt-1 text-sm text-slate-500">{categories.find(c=>c.id===section)?.note} · 各区域独立保存，不覆盖其他设置</p></div>
+            {section==='portal'&&<OwnerPortalAdminPanel onDirty={setPortalDirty}/>}
             <div className={section==='keys'?'':'hidden'}><NorthboundAPIKeysPanel users={users} callers={overview.callers} scopes={scopes} onDirty={onKeyDirty}/></div>
 
         {section==='access' && <section className="grid gap-4 lg:grid-cols-3">

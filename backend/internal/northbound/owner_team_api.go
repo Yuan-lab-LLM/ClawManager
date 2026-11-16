@@ -205,7 +205,8 @@ func (a *OwnerTeamAPI) Handle(c *gin.Context, identity OwnerTeamIdentity, route 
 				reason = failure.Message
 			}
 		}
-		ownerTeamSuccess(c, map[string]interface{}{"enabled": true, "can_create": createErr == nil, "create_disabled_reason": reason, "runtime_types": []string{"openclaw", "hermes"}, "instance_modes": []string{"lite", "pro"}, "custom_member_min": 2, "custom_member_max": 6})
+		rules := services.CurrentTeamCreationRules()
+		ownerTeamSuccess(c, map[string]interface{}{"enabled": true, "can_create": createErr == nil, "create_disabled_reason": reason, "runtime_types": rules.RuntimeTypes, "leader_runtime_types": rules.LeaderRuntimeTypes, "worker_runtime_types": rules.WorkerRuntimeTypes, "instance_modes": rules.InstanceModes, "communication_modes": rules.CommunicationModes, "custom_member_min": 2, "custom_member_max": 6})
 		return
 	}
 	if strings.HasPrefix(route.Action, "catalog.") {
@@ -250,6 +251,13 @@ func (a *OwnerTeamAPI) Handle(c *gin.Context, identity OwnerTeamIdentity, route 
 			}
 		}
 		for _, team := range items {
+			if power, ok := a.teams.(services.TeamLifecycleControl); ok {
+				team.RuntimeState, err = power.TeamPower(c.Request.Context(), team.ID)
+				if err != nil {
+					writeError(c, err)
+					return
+				}
+			}
 			views = append(views, ownerTeamSummary(team, groups[team.ID]))
 		}
 		ownerTeamSuccess(c, gin.H{"teams": views, "total": total, "page": page, "limit": limit})
@@ -267,6 +275,20 @@ func (a *OwnerTeamAPI) Handle(c *gin.Context, identity OwnerTeamIdentity, route 
 	c.Set("ownerTeamProviderUserID", team.UserID)
 	var result interface{}
 	switch route.Action {
+	case "teams.start", "teams.stop":
+		control, ok := a.teams.(services.TeamLifecycleControl)
+		if !ok {
+			err = apiError(503, "TEAM_POWER_UNAVAILABLE", "团队启停服务未就绪", nil)
+			break
+		}
+		target := "running"
+		if route.Action == "teams.stop" {
+			target = "stopped"
+		}
+		result, err = control.RequestTeamPower(c.Request.Context(), team.UserID, id, target)
+		if err != nil {
+			err = apiError(409, "TEAM_POWER_CONFLICT", err.Error(), nil)
+		}
 	case "teams.get":
 		var details *services.TeamDetailsPayload
 		details, err = a.teams.GetTeam(team.UserID, team.ID)
@@ -346,7 +368,9 @@ func (a *OwnerTeamAPI) Handle(c *gin.Context, identity OwnerTeamIdentity, route 
 		if err == nil {
 			result = safeOwnerTeamValue(result)
 		}
-	case "teams.delete", "members.delete":
+	case "members.delete":
+		err = apiError(409, services.TeamMemberRemovalUnsupportedCode, services.TeamMemberRemovalUnsupportedMessage, nil)
+	case "teams.delete":
 		var req struct {
 			ConfirmDataLoss bool `json:"confirm_data_loss"`
 		}
@@ -396,6 +420,10 @@ func (a *OwnerTeamAPI) retryOperation(c *gin.Context, identity OwnerTeamIdentity
 		writeError(c, apiError(403, "SCOPE_DENIED", "Insufficient permission", nil))
 		return
 	}
+	if op.OperationType == "owner_team_members_delete" && op.Status != "queued" && op.Status != "processing" {
+		writeError(c, apiError(409, services.TeamMemberRemovalUnsupportedCode, services.TeamMemberRemovalUnsupportedMessage, nil))
+		return
+	}
 	if op.OperationType != "owner_team_teams_create" && op.OperationType != "owner_team_teams_delete" && op.OperationType != "owner_team_members_delete" {
 		writeError(c, apiError(409, "EXPLICIT_MODEL_RETRY_REQUIRED", "不会自动重做模型生成；请核对模板后明确重新生成", nil))
 		return
@@ -413,6 +441,17 @@ func (a *OwnerTeamAPI) retryOperation(c *gin.Context, identity OwnerTeamIdentity
 	if op.Status != "failed" || req.ExpectedAttempt != op.AttemptCount {
 		writeError(c, apiError(409, "OPERATION_CHANGED", "操作状态已变化，请重新检查", nil))
 		return
+	}
+	if op.OperationType == "owner_team_teams_create" {
+		var frozen ownerTeamStoredRequest
+		if json.Unmarshal([]byte(op.RequestPayload), &frozen) != nil || frozen.TeamRequest == nil {
+			writeError(c, apiError(409, "TEAM_CREATION_POLICY", "原创建配置不可用，已有资源已保留", nil))
+			return
+		}
+		if err := services.ValidateNewTeamRequest(*frozen.TeamRequest); err != nil {
+			writeError(c, apiError(409, "TEAM_CREATION_POLICY", err.Error()+"；已有资源已保留，不能继续新增成员", nil))
+			return
+		}
 	}
 	changed, err := a.store.RetryOperation(op, req.ExpectedAttempt)
 	if err != nil {
@@ -703,6 +742,23 @@ func (a *OwnerTeamAPI) execute(ctx context.Context, op *models.NorthboundOperati
 		return nil, a.teams.DeleteTeam(team.UserID, team.ID)
 	}
 	if req.Action == "members.delete" {
+		// Only finish a removal that had already changed the member to deleting
+		// before this policy was installed. An old queued request is not consent
+		// to start a newly forbidden destructive action after deployment.
+		members, err := a.store.Members(team.ID)
+		if err != nil {
+			return nil, err
+		}
+		started := false
+		for _, member := range members {
+			if (member.MemberKey == req.MemberID || strconv.Itoa(member.ID) == req.MemberID) && member.Status == models.TeamMemberStatusDeleting {
+				started = true
+				break
+			}
+		}
+		if !started {
+			return nil, apiError(409, services.TeamMemberRemovalUnsupportedCode, services.TeamMemberRemovalUnsupportedMessage, nil)
+		}
 		return nil, a.teams.DeleteMember(team.UserID, team.ID, req.MemberID)
 	}
 	return nil, fmt.Errorf("unsupported Team operation")

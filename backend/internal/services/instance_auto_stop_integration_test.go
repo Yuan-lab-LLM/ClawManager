@@ -77,6 +77,10 @@ func testAutoStopControllerFailureResume(t *testing.T, runtimeType string) {
 		}
 	}
 	exec(`ALTER TABLE instances ADD access_token VARCHAR(255) NULL,ADD agent_bootstrap_token VARCHAR(255) NULL`)
+	exec(`ALTER TABLE instances ADD provisioning_operation_id VARCHAR(64) NULL`)
+	exec(`ALTER TABLE teams ADD status VARCHAR(32), ADD resource_scope VARCHAR(32)`)
+	exec(`ALTER TABLE team_members ADD team_id INT,ADD instance_id INT,ADD status VARCHAR(32),ADD member_key VARCHAR(64)`)
+
 	for _, name := range []string{"007_add_instance_agent_control_plane.sql", "096_add_instance_auto_stop.sql", "097_add_instance_auto_stop_scan.sql", "098_add_instance_auto_stop_policy_status.sql"} {
 		raw, err := os.ReadFile("../db/migrations/" + name)
 		if err != nil {
@@ -208,6 +212,16 @@ func testAutoStopControllerFailureResume(t *testing.T, runtimeType string) {
 
 func TestAutoStopMySQLPollingInitializesAtStartupAndOnlyRescansWhenDue(t *testing.T) {
 	s := idleLifecycleDB(t)
+	// The scan excludes Team members; the isolated upgrade fixture has only IDs.
+	for _, query := range []string{
+		`ALTER TABLE instances ADD provisioning_operation_id VARCHAR(64) NULL`,
+		`ALTER TABLE teams ADD status VARCHAR(32), ADD resource_scope VARCHAR(32)`,
+		`ALTER TABLE team_members ADD team_id INT, ADD instance_id INT, ADD member_key VARCHAR(64), ADD status VARCHAR(32)`,
+	} {
+		if _, err := s.SQL().Exec(query); err != nil {
+			t.Fatal(err)
+		}
+	}
 	store := repository.NewInstanceAutoStopRepository(s)
 	ctx := t.Context()
 	cfg, err := store.Settings(ctx)

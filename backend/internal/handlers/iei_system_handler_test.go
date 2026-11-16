@@ -474,6 +474,41 @@ func TestIEISystemDedicatedRuntimeAccessReturnsTokenBootstrapURL(t *testing.T) {
 	}
 }
 
+func TestIEISystemOpenCodeOriginErrorPreservesOwnerBoundary(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	t.Setenv("CLAWMANAGER_OPENCODE_PUBLIC_URL_TEMPLATE", "")
+	cfg := testIEIHandlerConfig()
+	sso, err := services.NewIEISSOService(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner := "owner@example.com"
+	instances := &fakeIEIInstanceService{fakeWorkspaceHandlerInstanceService: &fakeWorkspaceHandlerInstanceService{instances: map[int]*models.Instance{
+		28: {ID: 28, UserID: 10, Owner: &owner, Type: services.RuntimeTypeOpenCode, RuntimeType: "gateway", InstanceMode: "lite", Status: "running"},
+	}}}
+	access := services.NewInstanceAccessService()
+	defer access.Stop()
+	h := NewIEISystemHandler(cfg, sso, instances, &InstanceHandler{accessService: access, proxyService: services.NewInstanceProxyService(access)})
+	router := gin.New()
+	router.POST("/api/v1/ieisystem/session", h.ExchangeSession)
+	router.POST("/api/v1/ieisystem/instances/:id/access", h.GenerateInstanceAccess)
+	for _, tc := range []struct {
+		owner  string
+		status int
+	}{{owner, 503}, {"other@example.com", 404}} {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/ieisystem/instances/28/access", nil)
+		req.AddCookie(exchangeIEITestSession(t, router, cfg, tc.owner))
+		res := httptest.NewRecorder()
+		router.ServeHTTP(res, req)
+		if res.Code != tc.status {
+			t.Fatalf("status=%d want=%d", res.Code, tc.status)
+		}
+		if strings.Contains(res.Body.String(), "runtime_access_not_configured") != (tc.status == 503) {
+			t.Fatal("configuration error missing or leaked across owner boundary")
+		}
+	}
+}
+
 func TestIEISystemOpenClawLiteAccessReturnsTokenBootstrapURL(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	cfg := testIEIHandlerConfig()

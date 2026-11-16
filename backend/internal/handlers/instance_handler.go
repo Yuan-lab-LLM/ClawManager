@@ -1135,6 +1135,10 @@ func (h *InstanceHandler) RestartInstance(c *gin.Context) {
 	}
 
 	if err := h.instanceService.RestartWithEnvironment(id, req.EnvironmentOverrides, req.EnvironmentOverrideRemovals); err != nil {
+		if errors.Is(err, services.ErrInstanceRestartPending) {
+			utils.Success(c, http.StatusAccepted, "Instance restart is awaiting confirmed shutdown", nil)
+			return
+		}
 		if errors.Is(err, services.ErrInvalidEnvironmentOverrides) {
 			utils.Error(c, http.StatusBadRequest, err.Error())
 			return
@@ -1143,7 +1147,7 @@ func (h *InstanceHandler) RestartInstance(c *gin.Context) {
 		return
 	}
 
-	utils.Success(c, http.StatusOK, "Instance restarted successfully", nil)
+	utils.Success(c, http.StatusOK, "Instance restart submitted", nil)
 }
 
 // GetInstanceEnvironmentOverrides returns only configured variable names.
@@ -1625,7 +1629,7 @@ func (h *InstanceHandler) GenerateAccessToken(c *gin.Context) {
 	accessURL, err := h.proxyService.GetProxyURLForInstanceWithError(instance, "")
 
 	if err != nil || accessURL == "" {
-		instanceAccessURLFailure(c, err)
+		instanceAccessURLFailure(c, err, instance)
 		return
 	}
 
@@ -1667,7 +1671,7 @@ func (h *InstanceHandler) GenerateAccessToken(c *gin.Context) {
 
 	proxyURL, err := h.proxyService.GetProxyURLForInstanceWithError(instance, token.Token)
 	if err != nil {
-		instanceAccessURLFailure(c, err)
+		instanceAccessURLFailure(c, err, instance)
 		return
 	}
 
@@ -2705,7 +2709,7 @@ func (h *InstanceHandler) OpenShortExternalAccess(c *gin.Context) {
 		setShortExternalAccessCookies(c, instance.ID, code, token, int(time.Hour.Seconds()))
 		canonicalAccessURL, err = h.externalAccessEntryURL(instance)
 		if err != nil {
-			instanceAccessURLFailure(c, err)
+			instanceAccessURLFailure(c, err, instance)
 			return
 		}
 	}
@@ -2778,7 +2782,7 @@ func (h *InstanceHandler) GetSharedInstanceSession(c *gin.Context) {
 	}
 	proxyURL, err := h.proxyService.GetProxyURLForInstanceWithError(instance, instanceToken.Token)
 	if err != nil {
-		instanceAccessURLFailure(c, err)
+		instanceAccessURLFailure(c, err, instance)
 		return
 	}
 	accessURL := browserAccessEntryURL(instanceToken.AccessURL, proxyURL)
@@ -2903,7 +2907,7 @@ func (h *InstanceHandler) requireExternalAccessInstance(c *gin.Context, access *
 func (h *InstanceHandler) issueShortExternalAccessToken(c *gin.Context, instance *models.Instance, code string, access *models.InstanceExternalAccess) (*services.AccessToken, bool) {
 	accessURL, err := h.externalAccessEntryURL(instance)
 	if err != nil || accessURL == "" {
-		instanceAccessURLFailure(c, err)
+		instanceAccessURLFailure(c, err, instance)
 		return nil, false
 	}
 	targetPort := h.proxyService.GetTargetPortForInstance(instance)

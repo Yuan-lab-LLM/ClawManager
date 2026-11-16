@@ -1,3 +1,4 @@
+import { customTemplateCreationError, TEAM_CREATION_NOTICE } from '../../lib/teamCreationPolicy';
 import React, { useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
@@ -137,20 +138,12 @@ const CustomTeamTemplatesPage: React.FC = () => {
   const rename = async () => {
     if (!selected || !nameDraft.trim()) return;
     try {
-      setBusy("rename");
-      setError(null);
-      applyUpdated(
-        await customTeamTemplateService.rename(
-          selected.id,
-          nameDraft.trim(),
-          selected.revision,
-        ),
-      );
-    } catch (err) {
-      setError(errorMessage(err));
-    } finally {
-      setBusy(null);
-    }
+      setBusy("rename"); setError(null);
+      const updated = await customTeamTemplateService.rename(selected.id, nameDraft.trim(), selected.revision);
+      applyUpdated(updated, { syncEditor: false });
+      setNameDraft(updated.name);
+    } catch (err) { setError(errorMessage(err)); }
+    finally { setBusy(null); }
   };
 
   const reviseTeam = async () => {
@@ -393,12 +386,12 @@ const CustomTeamTemplatesPage: React.FC = () => {
                       {editorChanged ? " · 有未应用的整体修改" : ""}
                     </div>
                   </div>
-                  <Link
+                  {customTemplateCreationError(selected) ? <span role="alert" className="text-sm text-red-600">{customTemplateCreationError(selected)}</span> : <Link
                     to={`/teams/new?template=custom-${selected.id}`}
                     className="app-button-primary inline-flex items-center gap-2"
                   >
                     使用此模板创建 Team <ArrowRight size={16} />
-                  </Link>
+                  </Link>}
                 </section>
 
                 <section className="app-panel overflow-hidden">
@@ -438,7 +431,7 @@ const CustomTeamTemplatesPage: React.FC = () => {
                           onClick={() => void rename()}
                           className="app-button-secondary inline-flex items-center gap-2 disabled:opacity-50"
                         >
-                          <Save size={15} /> 仅保存名称
+                          <Save size={15} /> 保存名称
                         </button>
                       </div>
                     </label>
@@ -473,7 +466,7 @@ const CustomTeamTemplatesPage: React.FC = () => {
                         className="app-button-primary inline-flex items-center gap-2 disabled:opacity-50"
                       >
                         <Sparkles size={16} />
-                        {busy === "revise-team" ? "整体调整中..." : "按新目标更新 Team"}
+                        {busy === "revise-team" ? "整体调整中..." : "按目标更新模板"}
                       </button>
                       <button
                         type="button"
@@ -483,7 +476,7 @@ const CustomTeamTemplatesPage: React.FC = () => {
                         title={editorChanged ? "请先应用整体修改" : undefined}
                       >
                         <RefreshCw size={15} />
-                        {busy === "regenerate-all" ? "重新生成中..." : "重新生成整个 Team"}
+                        {busy === "regenerate-all" ? "重新生成中..." : "重新生成整套模板"}
                       </button>
                       <p className="text-xs text-gray-500">
                         使用已保存的意图和人数重建全部成员；单个成员的职责调整请在下方进行。
@@ -497,7 +490,7 @@ const CustomTeamTemplatesPage: React.FC = () => {
                     <div>
                       <h2 className="text-lg font-semibold text-gray-900">成员职责</h2>
                       <p className="mt-1 text-sm text-gray-500">
-                        默认收起便于浏览；展开成员后可用自然语言单独细化延展职责。
+                        {TEAM_CREATION_NOTICE} Runtime 在使用模板创建时选择。
                       </p>
                     </div>
                     <span className="text-sm text-gray-500">共 {selected.spec.members.length} 人</span>

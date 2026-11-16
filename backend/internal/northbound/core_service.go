@@ -1046,6 +1046,11 @@ func (w *OperationWorker) processLifecycle(ctx context.Context, item *models.Nor
 		action = func() error { return resetInstance(w.service.instances, request.InstanceID) }
 	}
 	actionErr := w.runLifecycleActionWithLease(ctx, item, action)
+	if errors.Is(actionErr, services.ErrInstanceRestartPending) {
+		now := time.Now().UTC()
+		_ = w.service.repo.RequeueOperation(ctx, item.OperationID, lifecycleWaitingCode, "Waiting for confirmed shutdown before restart", now.Add(lifecycleReadyPollInterval), now)
+		return
+	}
 	if actionErr != nil {
 		log.Printf("northbound lifecycle operation %s instance %d action failed: %v", item.OperationID, request.InstanceID, actionErr)
 		// Lifecycle operations are not retried automatically. A failed factory

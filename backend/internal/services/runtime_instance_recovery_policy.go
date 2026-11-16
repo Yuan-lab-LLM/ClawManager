@@ -114,7 +114,7 @@ func runtimeRecoveryFailureReason(instance models.Instance, binding *models.Inst
 	// These are the isolated Gateway safeGatewayError codes. Keep the list
 	// explicit: generic gateway_start_failed may conceal a bad configuration.
 	switch normalized {
-	case "gateway_process_exited", "port_conflict", "http_health_failed", "dashboard_not_ready", "dashboard_http_unavailable", "gateway_health_unavailable", "websocket_unavailable":
+	case "gateway_process_exited", "container_reset_required", "port_conflict", "http_health_failed", "dashboard_not_ready", "dashboard_http_unavailable", "gateway_health_unavailable", "websocket_unavailable":
 		return message, true
 	}
 	// A failed state alone may represent a permanent startup error. Only concrete

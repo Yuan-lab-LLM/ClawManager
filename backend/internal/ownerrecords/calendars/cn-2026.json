@@ -1,0 +1,251 @@
+{
+  "schema_version": 1,
+  "region": "CN",
+  "timezone": "Asia/Shanghai",
+  "year": 2026,
+  "coverage": "official_full_year",
+  "sources": [
+    {
+      "id": "gov-2026",
+      "title": "国务院办公厅关于2026年部分节假日安排的通知",
+      "url": "https://www.gov.cn/zhengce/zhengceku/202511/content_7047091.htm",
+      "published_at": "2025-11-04"
+    }
+  ],
+  "days": [
+    {
+      "date": "2026-01-01",
+      "kind": "holiday",
+      "name": "元旦",
+      "source_id": "gov-2026"
+    },
+    {
+      "date": "2026-01-02",
+      "kind": "holiday",
+      "name": "元旦",
+      "source_id": "gov-2026"
+    },
+    {
+      "date": "2026-01-03",
+      "kind": "holiday",
+      "name": "元旦",
+      "source_id": "gov-2026"
+    },
+    {
+      "date": "2026-01-04",
+      "kind": "workday",
+      "name": "元旦调休",
+      "source_id": "gov-2026"
+    },
+    {
+      "date": "2026-02-14",
+      "kind": "workday",
+      "name": "春节调休",
+      "source_id": "gov-2026"
+    },
+    {
+      "date": "2026-02-15",
+      "kind": "holiday",
+      "name": "春节",
+      "source_id": "gov-2026"
+    },
+    {
+      "date": "2026-02-16",
+      "kind": "holiday",
+      "name": "春节",
+      "source_id": "gov-2026"
+    },
+    {
+      "date": "2026-02-17",
+      "kind": "holiday",
+      "name": "春节",
+      "source_id": "gov-2026"
+    },
+    {
+      "date": "2026-02-18",
+      "kind": "holiday",
+      "name": "春节",
+      "source_id": "gov-2026"
+    },
+    {
+      "date": "2026-02-19",
+      "kind": "holiday",
+      "name": "春节",
+      "source_id": "gov-2026"
+    },
+    {
+      "date": "2026-02-20",
+      "kind": "holiday",
+      "name": "春节",
+      "source_id": "gov-2026"
+    },
+    {
+      "date": "2026-02-21",
+      "kind": "holiday",
+      "name": "春节",
+      "source_id": "gov-2026"
+    },
+    {
+      "date": "2026-02-22",
+      "kind": "holiday",
+      "name": "春节",
+      "source_id": "gov-2026"
+    },
+    {
+      "date": "2026-02-23",
+      "kind": "holiday",
+      "name": "春节",
+      "source_id": "gov-2026"
+    },
+    {
+      "date": "2026-02-28",
+      "kind": "workday",
+      "name": "春节调休",
+      "source_id": "gov-2026"
+    },
+    {
+      "date": "2026-04-04",
+      "kind": "holiday",
+      "name": "清明节",
+      "source_id": "gov-2026"
+    },
+    {
+      "date": "2026-04-05",
+      "kind": "holiday",
+      "name": "清明节",
+      "source_id": "gov-2026"
+    },
+    {
+      "date": "2026-04-06",
+      "kind": "holiday",
+      "name": "清明节",
+      "source_id": "gov-2026"
+    },
+    {
+      "date": "2026-05-01",
+      "kind": "holiday",
+      "name": "劳动节",
+      "source_id": "gov-2026"
+    },
+    {
+      "date": "2026-05-02",
+      "kind": "holiday",
+      "name": "劳动节",
+      "source_id": "gov-2026"
+    },
+    {
+      "date": "2026-05-03",
+      "kind": "holiday",
+      "name": "劳动节",
+      "source_id": "gov-2026"
+    },
+    {
+      "date": "2026-05-04",
+      "kind": "holiday",
+      "name": "劳动节",
+      "source_id": "gov-2026"
+    },
+    {
+      "date": "2026-05-05",
+      "kind": "holiday",
+      "name": "劳动节",
+      "source_id": "gov-2026"
+    },
+    {
+      "date": "2026-05-09",
+      "kind": "workday",
+      "name": "劳动节调休",
+      "source_id": "gov-2026"
+    },
+    {
+      "date": "2026-06-19",
+      "kind": "holiday",
+      "name": "端午节",
+      "source_id": "gov-2026"
+    },
+    {
+      "date": "2026-06-20",
+      "kind": "holiday",
+      "name": "端午节",
+      "source_id": "gov-2026"
+    },
+    {
+      "date": "2026-06-21",
+      "kind": "holiday",
+      "name": "端午节",
+      "source_id": "gov-2026"
+    },
+    {
+      "date": "2026-09-20",
+      "kind": "workday",
+      "name": "国庆节调休",
+      "source_id": "gov-2026"
+    },
+    {
+      "date": "2026-09-25",
+      "kind": "holiday",
+      "name": "中秋节",
+      "source_id": "gov-2026"
+    },
+    {
+      "date": "2026-09-26",
+      "kind": "holiday",
+      "name": "中秋节",
+      "source_id": "gov-2026"
+    },
+    {
+      "date": "2026-09-27",
+      "kind": "holiday",
+      "name": "中秋节",
+      "source_id": "gov-2026"
+    },
+    {
+      "date": "2026-10-01",
+      "kind": "holiday",
+      "name": "国庆节",
+      "source_id": "gov-2026"
+    },
+    {
+      "date": "2026-10-02",
+      "kind": "holiday",
+      "name": "国庆节",
+      "source_id": "gov-2026"
+    },
+    {
+      "date": "2026-10-03",
+      "kind": "holiday",
+      "name": "国庆节",
+      "source_id": "gov-2026"
+    },
+    {
+      "date": "2026-10-04",
+      "kind": "holiday",
+      "name": "国庆节",
+      "source_id": "gov-2026"
+    },
+    {
+      "date": "2026-10-05",
+      "kind": "holiday",
+      "name": "国庆节",
+      "source_id": "gov-2026"
+    },
+    {
+      "date": "2026-10-06",
+      "kind": "holiday",
+      "name": "国庆节",
+      "source_id": "gov-2026"
+    },
+    {
+      "date": "2026-10-07",
+      "kind": "holiday",
+      "name": "国庆节",
+      "source_id": "gov-2026"
+    },
+    {
+      "date": "2026-10-10",
+      "kind": "workday",
+      "name": "国庆节调休",
+      "source_id": "gov-2026"
+    }
+  ]
+}

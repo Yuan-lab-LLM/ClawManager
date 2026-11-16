@@ -6,9 +6,12 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	drivermysql "github.com/go-sql-driver/mysql"
 	"github.com/upper/db/v4"
 	"strings"
+	"time"
 	"unicode/utf8"
 )
 
@@ -54,6 +57,26 @@ func revokeUnauthorizedTasks(sess db.Session, modelID int) error {
 }
 
 func (r *gatewayTaskRepository) Check(ctx context.Context, t models.GatewayTaskIdentity) (*models.GatewayTaskState, error) {
+	for attempt := 0; ; attempt++ {
+		state, err := r.checkOnce(ctx, t)
+		var deadlock *drivermysql.MySQLError
+		if err == nil || attempt >= 2 || !errors.As(err, &deadlock) || deadlock.Number != 1213 {
+			return state, err
+		}
+		timer := time.NewTimer(time.Duration(attempt+1) * 10 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
+	}
+}
+
+// Lock the instance before the task throughout admission AND revocation checks.
+// Splitting these phases let one checker hold the task while another held the
+// instance, aborting otherwise authorized native executions with HTTP 500.
+func (r *gatewayTaskRepository) checkOnce(ctx context.Context, t models.GatewayTaskIdentity) (*models.GatewayTaskState, error) {
 	key, err := GatewayTaskKey(t)
 	if err != nil {
 		return nil, err
@@ -63,6 +86,7 @@ func (r *gatewayTaskRepository) Check(ctx context.Context, t models.GatewayTaskI
 	}
 	// Instance generation and owner are checked again in SQL, covering restarts
 	// and ownership changes racing with middleware authentication.
+	var state models.GatewayTaskState
 	err = r.sess.TxContext(ctx, func(sess db.Session) error {
 		i, err := lockActivityInstance(ctx, sess, t.InstanceID)
 		if err != nil {
@@ -85,19 +109,16 @@ func (r *gatewayTaskRepository) Check(ctx context.Context, t models.GatewayTaskI
 			if n == 0 {
 				return models.ErrModelUnavailable
 			}
-			return nil
-		}
-		_, err = sess.SQL().ExecContext(ctx, `INSERT IGNORE INTO gateway_runtime_tasks
+		} else {
+			_, err = sess.SQL().ExecContext(ctx, `INSERT IGNORE INTO gateway_runtime_tasks
  (task_key,instance_id,owner_user_id,generation,session_id,task_id)
  SELECT ?,i.id,i.user_id,?,?,? FROM instances i JOIN users u ON u.id=i.user_id
  WHERE i.id=? AND i.user_id=? AND i.runtime_generation=? AND u.is_active=TRUE`, key, t.Generation, t.SessionID, t.TaskID, t.InstanceID, t.UserID, t.Generation)
-		return err
-	}, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	_, err = r.sess.SQL().ExecContext(ctx, `UPDATE gateway_runtime_tasks t
+			if err != nil {
+				return err
+			}
+		}
+		_, err = sess.SQL().ExecContext(ctx, `UPDATE gateway_runtime_tasks t
  LEFT JOIN gateway_runtime_tasks previous ON previous.instance_id=t.instance_id AND previous.owner_user_id=t.owner_user_id
  AND previous.session_id=t.session_id AND previous.task_id=t.task_id AND previous.generation<t.generation AND previous.revoked=TRUE
  SET t.revoked=TRUE WHERE t.task_key=? AND t.finished=FALSE AND t.revoked=FALSE AND
@@ -108,14 +129,18 @@ func (r *gatewayTaskRepository) Check(ctx context.Context, t models.GatewayTaskI
  WHERE b.task_key=t.task_key AND (m.id IS NULL OR m.is_active=FALSE OR NOT
  (m.visibility_scope='all' OR (m.visibility_scope='selected_users' AND EXISTS
  (SELECT 1 FROM llm_model_user_grants g WHERE g.model_id=m.id AND g.user_id=t.owner_user_id))))))`, key)
-	if err != nil {
-		return nil, err
-	}
-	var state models.GatewayTaskState
-	if err := r.sess.Collection("gateway_runtime_tasks").Find(db.Cond{"task_key": key}).Select("revoked", "finished", "runtime_acknowledged").One(&state); err != nil {
-		if err == db.ErrNoMoreRows {
-			return nil, models.ErrModelUnavailable
+		if err != nil {
+			return err
 		}
+		if err = sess.Collection("gateway_runtime_tasks").Find(db.Cond{"task_key": key}).Select("revoked", "finished", "runtime_acknowledged").One(&state); err != nil {
+			if err == db.ErrNoMoreRows {
+				return models.ErrModelUnavailable
+			}
+			return err
+		}
+		return nil
+	}, nil)
+	if err != nil {
 		return nil, err
 	}
 	return &state, nil

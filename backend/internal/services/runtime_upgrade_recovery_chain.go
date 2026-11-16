@@ -3,8 +3,10 @@ package services
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"clawreef/internal/models"
@@ -37,6 +39,16 @@ func (s *RuntimeUpgradeService) recoveryStoppedSource(ctx context.Context, paren
 		if err != nil && err != db.ErrNoMoreRows {
 			return prior, err
 		}
+		if err == nil && upgradeItemOwnsConfirmedStoppedGateway(prior) && intValue(prior.SourceGeneration, -2)+1 == generation {
+			if err := s.verifyUnstartedUpgradeGeneration(ctx, r, prior, generation); err != nil {
+				return prior, err
+			}
+			// No target writer was reserved. The child freezes the current data
+			// version while preserving the original Gateway stop identity.
+			prior.SourceGeneration = &generation
+			prior.SourceRuntimeVersion = prior.TargetRuntimeVersion
+			return prior, nil
+		}
 		if err == nil && upgradeItemOwnsConfirmedStoppedGateway(prior) && intValue(prior.SourceGeneration, -1) == generation {
 			if r.Status == "finished" && prior.IsolatedAt == nil {
 				return prior, ErrUpgradeSourceState
@@ -50,6 +62,70 @@ func (s *RuntimeUpgradeService) recoveryStoppedSource(ctx context.Context, paren
 		parent = next
 	}
 	return models.RuntimeUpgradeItem{}, fmt.Errorf("%w: instance %d has no matching confirmed-stop evidence; data remains isolated", ErrUpgradeSourceState, id)
+}
+
+// A missing binding alone is never evidence of an absent writer. This handles
+// only a terminal migration whose atomic target reservation never happened.
+func (s *RuntimeUpgradeService) verifyUnstartedUpgradeGeneration(ctx context.Context, r *models.RuntimeRollout, item models.RuntimeUpgradeItem, generation int) error {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	denied := fmt.Errorf("%w: unstarted target generation cannot be proven", ErrUpgradeSourceState)
+	var evidence struct {
+		Migration *RuntimeAgentSessionSQLiteMigration `json:"migration"`
+	}
+	if r.RollbackStatus != nil && strings.TrimSpace(*r.RollbackStatus) != "" {
+		return denied
+	}
+	if item.State != "restart_ready" || item.RestartAttempts != 0 || item.RestartTargetPodUID != nil || item.RecoveryStartedAt == nil || item.SnapshotRef == nil || item.PostflightJSON == nil || item.TargetRuntimeVersion == nil || (item.IsolatedAt == nil && stringValue(item.RecoveryStatus) != "needs_attention") {
+		return denied
+	}
+	if json.Unmarshal([]byte(*item.PostflightJSON), &evidence) != nil || !validSessionSQLiteMigration(evidence.Migration) || evidence.Migration.InstanceID != item.InstanceID {
+		return denied
+	}
+	binding, err := s.bindings.GetByInstanceID(ctx, item.InstanceID)
+	if err != nil {
+		return err
+	}
+	if binding != nil {
+		return denied
+	}
+	if err := s.verifyRecoverySourceStopped(ctx, item); err != nil {
+		return err
+	}
+	reader, ok := s.agent.(gatewayStateReader)
+	if !ok || s.deployments == nil {
+		return denied
+	}
+	expected, err := rolloutExpectedTargetDeployments(r)
+	if err != nil || len(expected) == 0 {
+		return denied
+	}
+	live, err := runtimeDeploymentPodsFor(ctx, s.deployments, RuntimeTypeOpenClaw, runtimeRolloutDeploymentRefs(r, true))
+	if err != nil {
+		return err
+	}
+	observed := map[string]bool{}
+	for _, pod := range live {
+		key := strings.TrimSpace(pod.Namespace) + "/" + strings.TrimSpace(pod.DeploymentName)
+		if _, ok := expected[key]; !ok || stringValue(pod.KubernetesPodUID) == "" || stringValue(pod.AgentEndpoint) == "" || !runtimePodMatchesImage(pod, r.TargetImageRef) {
+			continue
+		}
+		state, err := reader.GatewayState(ctx, stringValue(pod.AgentEndpoint), fmt.Sprintf("gw-%d-%d", item.InstanceID, generation))
+		if err != nil && !errors.Is(err, ErrRuntimeAgentNotFound) {
+			return err
+		}
+		if state != nil && (state.InstanceID != item.InstanceID || state.Generation != generation || state.State != "stopped") {
+			return denied
+		}
+		if state == nil && !errors.Is(err, ErrRuntimeAgentNotFound) {
+			return denied
+		}
+		observed[key] = true
+	}
+	if len(observed) != len(expected) {
+		return denied
+	}
+	return nil
 }
 
 func (s *RuntimeUpgradeService) verifyRecoverySourceStopped(ctx context.Context, item models.RuntimeUpgradeItem) error {

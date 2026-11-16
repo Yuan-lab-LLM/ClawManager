@@ -9,7 +9,7 @@ import (
 )
 
 func TestTeamMemberStartupIsTransitionNotFailure(t *testing.T) {
-	for _, runtime := range []string{"openclaw", "hermes"} {
+	for _, runtime := range []string{"openclaw", "hermes", "opencode", "deepseek-harness"} {
 		for _, mode := range []string{"lite", "pro"} {
 			for _, phase := range []string{"creating", "starting", "pending"} {
 				t.Run(runtime+"/"+mode+"/"+phase, func(t *testing.T) {

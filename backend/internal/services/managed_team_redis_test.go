@@ -151,6 +151,8 @@ func TestManagedRedisNativeScriptsMatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Normalize checkout line endings before applying semantic Lua mutations.
+	source = []byte(strings.ReplaceAll(string(source), "\r\n", "\n"))
 	if !managedNativeScriptsMatch(t, string(source)) {
 		t.Fatal("native emitted scripts changed")
 	}
@@ -173,7 +175,7 @@ func managedNativeScriptsMatch(t *testing.T, source string) bool {
 	// unused old arrays, inserted statements and altered join separators cannot pass.
 	const harness = `
 const fs = require("node:fs"), vm = require("node:vm");
-const source = fs.readFileSync(0, "utf8");
+const source = fs.readFileSync(0, "utf8").replaceAll("\r\n", "\n");
 function extract(name) {
  const marker = "async function " + name + "(";
  const start = source.indexOf(marker);

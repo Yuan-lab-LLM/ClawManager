@@ -239,6 +239,12 @@ func (r *InstanceAutoStopRepository) BeginModelActivity(ctx context.Context, use
 				return models.ErrInstanceStopping
 			}
 		}
+		if err = RequireInstanceTeamRunning(ctx, s, id); err != nil {
+			if errors.Is(err, ErrTeamNotRunning) {
+				return models.ErrInstanceStopping
+			}
+			return err
+		}
 		now := time.Now().UTC()
 		if err = ensureActivity(ctx, s, id, i.generation, now); err != nil {
 			return err
@@ -300,7 +306,7 @@ func (r *InstanceAutoStopRepository) CandidatesForTimeout(ctx context.Context, n
 		limit = 100
 	}
 	cutoff := now.Add(-timeout)
-	rows, err := r.sess.SQL().QueryContext(ctx, `SELECT a.instance_id FROM instance_model_activity a JOIN instances i ON i.id=a.instance_id WHERE a.instance_id>? AND i.instance_mode='lite' AND i.status='running' AND i.runtime_generation=a.generation AND a.auto_stop_disabled=FALSE AND a.stop_operation_id='' AND a.monitoring_since<=? AND (a.last_gateway_activity_at IS NULL OR a.last_gateway_activity_at<=?) AND (i.started_at IS NULL OR i.started_at<=?) ORDER BY a.instance_id LIMIT ?`, after, cutoff, cutoff, cutoff, limit)
+	rows, err := r.sess.SQL().QueryContext(ctx, `SELECT a.instance_id FROM instance_model_activity a JOIN instances i ON i.id=a.instance_id WHERE a.instance_id>? AND NOT EXISTS (SELECT 1 FROM team_members m JOIN teams t ON t.id=m.team_id WHERE t.status<>'deleted' AND m.status<>'deleted' AND (m.instance_id=i.id OR (t.resource_scope='northbound' AND i.provisioning_operation_id=SHA2(CONCAT('owner-team-',t.id,'-member-',m.member_key),256)))) AND i.instance_mode='lite' AND i.status='running' AND i.runtime_generation=a.generation AND a.auto_stop_disabled=FALSE AND a.stop_operation_id='' AND a.monitoring_since<=? AND (a.last_gateway_activity_at IS NULL OR a.last_gateway_activity_at<=?) AND (i.started_at IS NULL OR i.started_at<=?) ORDER BY a.instance_id LIMIT ?`, after, cutoff, cutoff, cutoff, limit)
 	if err != nil {
 		return nil, err
 	}

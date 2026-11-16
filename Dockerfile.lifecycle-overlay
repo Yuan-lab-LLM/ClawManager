@@ -1,0 +1,7 @@
+# All other artifacts are reused from the immutable merged release. Only the
+# failed-Start lifecycle repair changes; frontend and Runtime bundles are intact.
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+ARG VCS_REF
+COPY --chmod=755 --from=release-binaries /merged-server /usr/local/bin/clawreef-server
+LABEL org.opencontainers.image.revision=$VCS_REF

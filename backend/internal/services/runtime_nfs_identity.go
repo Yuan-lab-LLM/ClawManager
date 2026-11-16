@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"fmt"
+	"net/url"
 
 	"clawreef/internal/models"
 	"clawreef/internal/services/k8s"
@@ -15,6 +16,19 @@ func (s *RuntimeScheduler) gatewayLinuxIDs(ctx context.Context, instanceID int, 
 	client, ok := s.agentClient.(*slotRuntimeAgentClient)
 	if !ok {
 		return uid, gid, "", nil
+	}
+	if client.legacy != nil && target.AgentEndpoint != nil {
+		u, e := url.Parse(*target.AgentEndpoint)
+		if e == nil && u.Scheme == "http" {
+			protected, err := client.protectedInstance(ctx, instanceID)
+			if err != nil {
+				return 0, 0, "", err
+			}
+			if !protected && client.allowLegacyHTTPEndpoint(ctx, u) {
+				return uid, gid, "", nil
+			}
+			return 0, 0, "", fmt.Errorf("legacy runtime identity unavailable")
+		}
 	}
 	if target.PodUID == nil || target.AgentEndpoint == nil {
 		return 0, 0, "", fmt.Errorf("runtime target lacks a pinned Pod identity")

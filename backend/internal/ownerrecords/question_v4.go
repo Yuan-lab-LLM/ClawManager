@@ -30,6 +30,9 @@ func (s *Store) applyNewQuestion(ctx context.Context, i Identity, f Fact, start 
 	}
 	applied := false
 	e = s.Session.TxContext(ctx, func(tx db.Session) error {
+		if err := validateScanGeneration(ctx, tx, i); err != nil {
+			return err
+		}
 		result, e := tx.SQL().ExecContext(ctx, `INSERT INTO northbound_owner_records(record_type,record_key,scope_id,owner_normalized,instance_id,runtime_type,source_kind,session_key,question_key,status,occurred_at,interval_start) VALUES('question_v4',?,?,?,?,?,?,?,?,'confirmed',?,?) ON DUPLICATE KEY UPDATE record_key=record_key`, key, i.Scope, owner, i.Instance, i.Runtime, f.Source, f.SessionID, f.QuestionID, f.At.UTC(), f.SubmittedAt.UTC())
 		if e != nil {
 			return e

@@ -6,16 +6,122 @@ import (
 	"clawreef/internal/services/k8s"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
+	"k8s.io/client-go/rest"
+	ktesting "k8s.io/client-go/testing"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
+
+func TestTeamObservationInventoriesDoNotStarveLaterMembers(t *testing.T) {
+	var calls atomic.Int32
+	allStarted := make(chan struct{})
+	var once sync.Once
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.Contains(r.URL.Path, "/deployments/") {
+			if calls.Add(1) == 4 {
+				once.Do(func() { close(allStarted) })
+			}
+			select {
+			case <-allStarted:
+			case <-r.Context().Done():
+				return
+			}
+			fmt.Fprint(w, `{"apiVersion":"apps/v1","kind":"Deployment","metadata":{"name":"pool","namespace":"tenant"},"spec":{"selector":{"matchLabels":{"app":"pool"}}}}`)
+		} else {
+			fmt.Fprint(w, `{"apiVersion":"v1","kind":"PodList","items":[]}`)
+		}
+	}))
+	defer server.Close()
+	client, err := kubernetes.NewForConfig(&rest.Config{Host: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := NewTeamService(observedFactsRepo{}, nil, WithTeamKubernetesClient(&k8s.Client{Namespace: "tenant", Clientset: client})).(*teamService)
+	facts := map[int]models.TeamMemberRuntimeFacts{}
+	for i := 0; i < 6; i++ {
+		facts[i] = models.TeamMemberRuntimeFacts{Runtime: &models.RuntimePod{Namespace: "tenant", DeploymentName: fmt.Sprintf("pool-%d", i%4)}}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	result := s.observeInventories(ctx, facts)
+	if len(result) != 4 || calls.Load() != 4 {
+		t.Fatalf("inventory not deduplicated: %d %d", len(result), calls.Load())
+	}
+	for key, read := range result {
+		if read.err != nil {
+			t.Fatalf("later member starved at %s: %v", key, read.err)
+		}
+	}
+}
+
+func TestTeamObservationRecentInventoryFailureDoesNotInventAnOutage(t *testing.T) {
+	client := &k8s.Client{Namespace: "tenant", Clientset: fake.NewSimpleClientset()}
+	client.Clientset.(*fake.Clientset).PrependReactor("get", "deployments", func(ktesting.Action) (bool, runtime.Object, error) {
+		return true, nil, errors.New("temporary API failure")
+	})
+	s := NewTeamService(observedFactsRepo{}, nil, WithTeamKubernetesClient(client)).(*teamService)
+	report, live := ordinaryPlacementFixture()
+	key := report.Namespace + "/" + report.DeploymentName
+	s.observationPods = map[string]teamObservationPods{key: {at: time.Now().Add(-11 * time.Second), pods: []k8s.RuntimeDeploymentPod{live}}}
+	snapshot, err := s.observationLivePods(context.Background(), &report)
+	if err != nil || !snapshot.delayed || len(snapshot.pods) != 1 {
+		t.Fatalf("recent confirmed inventory lost: %+v %v", snapshot, err)
+	}
+	s.observationPods[key] = teamObservationPods{at: time.Now().Add(-61 * time.Second), pods: []k8s.RuntimeDeploymentPod{live}}
+	if _, err = s.observationLivePods(context.Background(), &report); err == nil {
+		t.Fatal("expired inventory hid an observation failure")
+	}
+}
+
+func TestTeamObservationDelayedInventoryStillRequiresIdentityAndCollaboration(t *testing.T) {
+	now := time.Now().UTC()
+	report, live := ordinaryPlacementFixture()
+	instance := models.Instance{ID: 9, UserID: 1, Status: "running", Type: "openclaw", InstanceMode: "lite", RuntimeType: "gateway", RuntimeGeneration: 1, CreatedAt: now.Add(-time.Hour)}
+	binding := &models.InstanceRuntimeBinding{InstanceID: 9, RuntimePodID: report.ID, RuntimeType: "openclaw", GatewayID: "gw-9-1", GatewayPort: 20000, State: "running", Generation: 1, LastHealthAt: &now}
+	f := models.TeamMemberRuntimeFacts{Instance: instance, Binding: binding, Runtime: &report}
+	s := NewTeamService(observedFactsRepo{}, nil).(*teamService)
+	key := report.Namespace + "/" + report.DeploymentName
+	at := now.Add(-15 * time.Second)
+	inventory := map[string]teamInventoryRead{key: {snapshot: teamObservationPods{at: at, pods: []k8s.RuntimeDeploymentPod{live}, delayed: true}}}
+	obs := s.observeMemberGateway(context.Background(), f, now, inventory)
+	if obs.State != "online" || obs.Reason != "runtime_inventory_delayed" {
+		t.Fatalf("%+v", obs)
+	}
+	member := models.TeamMember{ID: 2, TeamID: 7, UserID: 1, MemberKey: "worker", Status: "idle"}
+	raw := fmt.Sprintf(`{"teamId":"7","memberId":"worker","liveness":"online","lastSeenAt":%q}`, now.Format(time.RFC3339Nano))
+	got := projectTeamMemberObservation(member, instance, obs, raw, now)
+	if got.Availability != "idle" || got.RuntimeObservation.Reason != "runtime_inventory_delayed" {
+		t.Fatalf("%+v", got)
+	}
+	if got = projectTeamMemberObservation(member, instance, obs, "", now); got.Availability != "unknown" {
+		t.Fatal("cached Pod invented collaboration liveness")
+	}
+	binding.Generation++
+	if got := s.observeMemberGateway(context.Background(), f, now, inventory); got.State == "online" {
+		t.Fatal("cached inventory crossed generation")
+	}
+	binding.Generation--
+	report.PodUID = optionalString("replacement-uid")
+	if got := s.observeMemberGateway(context.Background(), f, now, inventory); got.State == "online" {
+		t.Fatal("cached inventory crossed Pod identity")
+	}
+}
 
 func TestTeamObservationDoesNotNeedFirstTask(t *testing.T) {
 	now := time.Now().UTC()
@@ -151,5 +257,13 @@ func TestTeamObservationRedisBeforeAnyTaskAndIsolation(t *testing.T) {
 	got = s.ObserveTeamMembers(ctx, []models.Team{team}, []models.TeamMember{member})[0]
 	if got.RuntimeObservation.State != "unknown" {
 		t.Fatal("cross-owner instance accepted")
+	}
+}
+
+func TestStoppedTeamMemberWithoutLegacyReasonCannotReuseOldSuccessPresence(t *testing.T) {
+	member := models.TeamMember{RuntimeStatus: optionalString("succeeded"), Availability: "idle", BlockedReason: optionalString("runtime_unavailable")}
+	result := projectTeamMemberObservation(member, models.Instance{Status: "stopped"}, models.TeamMemberRuntimeObservation{State: "offline", Reason: "runtime_unavailable"}, `{"liveness":"online"}`, time.Now())
+	if result.RuntimeStatus == nil || *result.RuntimeStatus != "stopped" || result.Availability != "offline" || result.BlockedReason != nil || result.RuntimeObservation.Reason != "runtime_stopped" {
+		t.Fatalf("stopped state not preserved: %+v", result)
 	}
 }

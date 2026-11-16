@@ -72,6 +72,31 @@ func idleStopMySQL(t *testing.T) db.Session {
 			t.Fatal(err)
 		}
 	}
+
+	for _, q := range []string{
+		`ALTER TABLE instances ADD provisioning_operation_id VARCHAR(64) NULL, ADD workspace_path VARCHAR(1024) NULL`,
+		`CREATE TABLE teams (id INT PRIMARY KEY,status VARCHAR(32),resource_scope VARCHAR(32))`,
+		`CREATE TABLE team_members (id INT PRIMARY KEY,team_id INT,instance_id INT NULL,member_key VARCHAR(64),role VARCHAR(32),status VARCHAR(32))`,
+		`CREATE TABLE team_tasks (id INT PRIMARY KEY,team_id INT,created_by INT NULL,status VARCHAR(32),finished_at DATETIME(6) NULL,payload_json LONGTEXT NULL)`,
+		`CREATE TABLE team_work_items (team_id INT,status VARCHAR(32),superseded_by VARCHAR(255) NULL,root_task_id INT NULL)`,
+		`CREATE TABLE team_event_outbox (team_id INT,status VARCHAR(32))`,
+		`CREATE TABLE team_workspace_write_intents (team_id INT)`,
+	} {
+		if _, e := s.SQL().Exec(q); e != nil {
+			t.Fatal(e)
+		}
+	}
+	rawTeam, e := os.ReadFile("../db/migrations/101_add_team_runtime_lifecycle.sql")
+	if e != nil {
+		t.Fatal(e)
+	}
+	for _, q := range strings.Split(string(rawTeam), ";") {
+		if strings.TrimSpace(q) != "" {
+			if _, e = s.SQL().Exec(q); e != nil {
+				t.Fatal(e)
+			}
+		}
+	}
 	raw, err := os.ReadFile("../db/migrations/096_add_instance_auto_stop.sql")
 	extra, extraErr := os.ReadFile("../db/migrations/097_add_instance_auto_stop_scan.sql")
 	if extraErr != nil {
@@ -380,5 +405,49 @@ func TestAutoStopRetryTouchRotatesPendingOrderWithoutDroppingProof(t *testing.T)
 	pending, err := r.PendingStops(ctx)
 	if err != nil || len(pending) != 2 || pending[0].ID != "later" || pending[1].Phase != "teardown_confirmed" {
 		t.Fatalf("blocked source starves later work or loses proof: %+v %v", pending, err)
+	}
+}
+
+// Both histories must survive the merge: upstream's per-type fairness and the
+// durable restart continuation retained by Team lifecycle recovery.
+func TestAutoStopMySQLPendingRetainsRestartAndTypeFairness(t *testing.T) {
+	s := idleStopMySQL(t)
+	r := NewInstanceAutoStopRepository(s)
+	ctx := t.Context()
+	for n := 0; n < 12; n++ {
+		if _, err := s.SQL().Exec(`INSERT INTO instance_idle_stop_operations(id,instance_id,user_id,generation,runtime_pod_id,gateway_id,pod_uid,endpoint,workspace_path,storage_identity,phase,created_at,updated_at) VALUES(?,1,7,2,11,'gw-1-2','pod','','','','error',UTC_TIMESTAMP()-INTERVAL 2 DAY,UTC_TIMESTAMP()-INTERVAL 1 DAY)`, fmt.Sprintf("blocked-%02d", n)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.SQL().Exec(`INSERT INTO instance_idle_stop_operations(id,instance_id,user_id,generation,runtime_pod_id,gateway_id,pod_uid,endpoint,workspace_path,storage_identity,phase,stop_kind,created_at,updated_at) VALUES('resume-other-type',2,7,1,12,'gw-2-1','pod','','','','restart_ready','restart',UTC_TIMESTAMP(),UTC_TIMESTAMP())`); err != nil {
+		t.Fatal(err)
+	}
+	pending, err := r.PendingStops(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pending) != 11 {
+		t.Fatalf("expected ten blocked OpenClaw operations plus one OpenCode restart, got %+v", pending)
+	}
+	found := false
+	for _, op := range pending {
+		if op.ID == "resume-other-type" {
+			found = op.Phase == "restart_ready" && op.Kind == "restart"
+		}
+	}
+	if !found {
+		t.Fatal("blocked runtime type starved the restart continuation")
+	}
+	if _, err := s.SQL().Exec(`UPDATE instances SET status='deleting' WHERE id=2`); err != nil {
+		t.Fatal(err)
+	}
+	pending, err = r.PendingStops(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, op := range pending {
+		if op.InstanceID == 2 {
+			t.Fatal("deleting instance remained in restart queue")
+		}
 	}
 }

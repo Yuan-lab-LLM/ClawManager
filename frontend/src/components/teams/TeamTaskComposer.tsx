@@ -7,9 +7,9 @@ import TeamBadge from './TeamBadge';
 import { memberIcon } from '../../lib/teamIcons';
 import './team-task-composer.css';
 
-export default function TeamTaskComposer({ members, leaderKey, targetKey, onTargetChange, value, onChange, sending, error, reference, onClearReference, onSubmit }: {
+export default function TeamTaskComposer({ members, leaderKey, targetKey, onTargetChange, value, onChange, sending, disabled, error, reference, onClearReference, onSubmit }: {
   members: TeamMember[]; leaderKey?: string; targetKey: string; onTargetChange: (key: string) => void;
-  value: string; onChange: (value: string) => void; sending: boolean; error: string | null;
+  value: string; onChange: (value: string) => void; sending: boolean; disabled?: boolean; error: string | null;
   reference?: { id?: number; title: string }; onClearReference: () => void; onSubmit: (event: React.FormEvent) => void;
 }) {
   const { t } = useI18n();
@@ -57,11 +57,11 @@ export default function TeamTaskComposer({ members, leaderKey, targetKey, onTarg
     {error && <div className="team-composer-error" role="alert">{error}</div>}
     <form ref={root} onSubmit={onSubmit} aria-label={t("teams.send")}>
       <div className="team-composer-context">
-        <button type="button" className="team-recipient-trigger" disabled={sending} aria-label={t("teams.chooseMember")} aria-expanded={open} aria-controls={listId} onClick={() => { setOpen(current => !current); setSearch(''); setIndex(0); }}>
+        <button type="button" className="team-recipient-trigger" disabled={sending || disabled} aria-label={t("teams.chooseMember")} aria-expanded={open} aria-controls={listId} onClick={() => { setOpen(current => !current); setSearch(''); setIndex(0); }}>
           {selected ? <TeamBadge iconKey={memberIcon(selected)} size="workflow" /> : <AtSign size={17} />}
           <strong>@{selected?.display_name || (targetKey ? t('teams.unavailable') : 'Leader')}</strong><span>{t(single ? 'teams.single' : 'teams.collaboration')}</span><ChevronDown size={14} />
         </button>
-        {single && reference && <span className="team-reference-chip" title={reference.title}><span>{t("teams.reference", { title: reference.title })}</span><button type="button" aria-label={t("teams.clearReference")} disabled={sending} onClick={onClearReference}><X size={14}/></button></span>}
+        {single && reference && <span className="team-reference-chip" title={reference.title}><span>{t("teams.reference", { title: reference.title })}</span><button type="button" aria-label={t("teams.clearReference")} disabled={sending || disabled} onClick={onClearReference}><X size={14}/></button></span>}
         {open && <div className="team-recipient-popover" onKeyDown={keyboard}>
           <input ref={query} value={search} onChange={event => { setSearch(event.target.value); setIndex(0); }} placeholder={t("teams.searchMembers")} aria-label={t("teams.searchTaskMembers")} role="combobox" aria-expanded="true" aria-controls={listId} aria-activedescendant={options.length ? `${listId}-${options[activeIndex].id}` : undefined} />
           <div id={listId} role="listbox" aria-label={t("teams.taskMembers")}>{options.map((member, optionIndex) => <button type="button" role="option" id={`${listId}-${member.id}`} key={member.id} aria-selected={selected?.id === member.id} data-highlighted={activeIndex === optionIndex} onMouseEnter={() => setIndex(optionIndex)} onClick={() => select(member)}>
@@ -70,7 +70,7 @@ export default function TeamTaskComposer({ members, leaderKey, targetKey, onTarg
         </div>}
       </div>
       <div className="team-composer-input-row">
-        <textarea ref={input} value={value} disabled={sending} aria-label={t("teams.taskContent")} rows={1} placeholder={t(single ? 'teams.singlePlaceholder' : 'teams.teamPlaceholder')}
+        <textarea ref={input} value={value} disabled={sending || disabled} aria-label={t("teams.taskContent")} rows={1} placeholder={t(single ? 'teams.singlePlaceholder' : 'teams.teamPlaceholder')}
           onChange={event => {
             const next = event.target.value;
             if (next === '@' && !value) { setOpen(true); setSearch(''); setIndex(0); return; }
@@ -82,9 +82,9 @@ export default function TeamTaskComposer({ members, leaderKey, targetKey, onTarg
             if (event.key === '@' && !event.nativeEvent.isComposing && (cursor === 0 || /\s/.test(value[cursor - 1] || ''))) {
               event.preventDefault(); setOpen(true); setSearch(''); setIndex(0); return;
             }
-            if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && event.keyCode !== 229) { event.preventDefault(); if (!sending) event.currentTarget.form?.requestSubmit(); }
+            if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && event.keyCode !== 229) { event.preventDefault(); if (!sending && !disabled) event.currentTarget.form?.requestSubmit(); }
           }} />
-        <button type="submit" className="team-composer-send" disabled={sending || !value.trim() || !selected} aria-label={t("teams.send")} title={t("teams.send")}>{sending ? <span className="team-composer-spinner" /> : <Send size={18}/>}</button>
+        <button type="submit" className="team-composer-send" disabled={sending || disabled || !value.trim() || !selected} aria-label={t("teams.send")} title={t("teams.send")}>{sending ? <span className="team-composer-spinner" /> : <Send size={18}/>}</button>
       </div>
     </form>
   </div>;

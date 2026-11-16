@@ -84,5 +84,21 @@ try {
   await page.getByRole('dialog', { name: 'Delete', exact: true }).getByRole('button', { name: 'Cancel' }).click();
   assert.equal(await composer.inputValue(), 'Unsent team draft');
   await page.keyboard.press('Escape');
-  console.log('PASS real TeamDetailPage 390: compact header, accessible info/actions, visible composer and retained draft');
+  for (const link of await page.getByRole('link', { name: 'Enter', exact: true }).all()) {
+    assert.equal(await link.getAttribute('target'), '_blank', 'Member entry preserves the Team page');
+    assert.match(await link.getAttribute('rel'), /noopener/);
+  }
+  data.team.runtime_state = { state: 'stopped', desired_state: 'stopped', progress: 3, total: 3, reason: 'idle_timeout' };
+  await Promise.all([page.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/teams/144'), page.evaluate(() => window.dispatchEvent(new Event('online')))]);
+  await page.waitForFunction(() => document.querySelector('.team-composer-send')?.disabled === true);
+  assert(await composer.isDisabled(), 'Stopped teams cannot submit new tasks');
+  assert.equal(await composer.inputValue(), 'Unsent team draft', 'Stopping retains unsent work');
+  await actions.click();
+  assert(await panel.getByRole('button', { name: '启动团队', exact: true }).isVisible());
+  await page.keyboard.press('Escape');
+  data.team.runtime_state.state = 'running';
+  await Promise.all([page.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/teams/144'), page.evaluate(() => window.dispatchEvent(new Event('online')))]);
+  await page.waitForFunction(() => document.querySelector('.team-composer-send')?.disabled === false);
+  assert.equal(await composer.inputValue(), 'Unsent team draft');
+  console.log('PASS Team detail: responsive shell, preserved drafts, member new tabs, stopped/start controls and resumed input');
 } catch (error) { console.error(error); throw error; } finally { await browser.close(); }

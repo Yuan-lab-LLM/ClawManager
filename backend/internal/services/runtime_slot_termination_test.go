@@ -100,6 +100,10 @@ func TestNFSProfileGracefulStopUsesTerminatedContainerProof(t *testing.T) {
 	testNFSContainerStop(t, true)
 }
 
+func TestNFSProfileManualOperatorFenceUsesExistingWriterReconciliation(t *testing.T) {
+	testNFSContainerStop(t, false, "external")
+}
+
 func TestNFSContainerStopWaitsForKubeletAndReplacementWorker(t *testing.T) {
 	testNFSContainerStop(t, false, "delayed")
 }
@@ -131,12 +135,23 @@ func readyNativeTerminationPod() *corev1.Pod {
 
 func testNFSContainerStop(t *testing.T, graceful bool, mode ...string) {
 	t.Helper()
+	external := len(mode) > 0 && mode[0] == "external"
 	force := len(mode) > 0 && strings.HasPrefix(mode[0], "force-")
 	completedOriginal := force && mode[0] == "force-completed"
 	pod := readyNativeTerminationPod()
+	if external {
+		yes, no := true, false
+		pod.Spec.HostUsers = &yes
+		pod.Spec.ShareProcessNamespace = &no
+		pod.Spec.NodeName = "node"
+		pod.Spec.Containers[1].Image = "registry/runtime@sha256:" + strings.Repeat("a", 64)
+		for i := range pod.Spec.Containers {
+			pod.Spec.Containers[i].SecurityContext = &corev1.SecurityContext{Privileged: &no, AllowPrivilegeEscalation: &no, Capabilities: &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}, Add: []corev1.Capability{"SETUID", "SETGID"}}}
+		}
+	}
 	kube := fake.NewSimpleClientset(pod)
 	reads := 0
-	if len(mode) > 0 {
+	if len(mode) > 0 && !external {
 		kube.PrependReactor("get", "pods", func(action ktesting.Action) (bool, runtime.Object, error) {
 			obj, err := kube.Tracker().Get(corev1.SchemeGroupVersion.WithResource("pods"), "runtime", pod.Name)
 			if err != nil {
@@ -177,11 +192,24 @@ func testNFSContainerStop(t *testing.T, graceful bool, mode ...string) {
 				completedIntent.Graceful = true
 			}
 			message, _ := containerTerminationCommitment(runtimeSlotTerminationMessage{runtimeSlotStopIntent: completedIntent, CleanupConfirmed: true})
+			if external {
+				yes := true
+				raw, _ := json.Marshal(runtimeSlotFenceRequest{Version: 1, Intent: intent, ContainerID: "containerd://old", ReplacementImage: pod.Spec.Containers[1].Image})
+				_, e := kube.CoreV1().ConfigMaps("runtime").Create(r.Context(), &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "runtime-slot-fence-" + intent.OperationID, Namespace: "runtime", UID: "operator-request", CreationTimestamp: metav1.NewTime(time.Now().Add(-time.Minute)), Labels: map[string]string{"clawmanager.io/operator-recovery": slotKernelFenceSource}}, Immutable: &yes, Data: map[string]string{"request": string(raw)}}, metav1.CreateOptions{})
+				if e != nil {
+					t.Fatal(e)
+				}
+				message = "no native cleanup receipt"
+			}
 			current, err := kube.CoreV1().Pods("runtime").Get(r.Context(), pod.Name, metav1.GetOptions{})
 			if err != nil {
 				t.Fatal(err)
 			}
 			current.Status.ContainerStatuses[0].ContainerID = "containerd://new"
+			if external {
+				current.Status.ContainerStatuses[0].RestartCount = 1
+				current.Status.ContainerStatuses[0].State.Running = &corev1.ContainerStateRunning{StartedAt: metav1.NewTime(time.Now().Add(time.Second))}
+			}
 			// The last slot is quarantined after restart, so PodReady is false.
 			// Stop recovery must still reach the coordinator by its pinned Pod IP.
 			current.Status.Conditions[0].Status = corev1.ConditionFalse
@@ -195,7 +223,7 @@ func testNFSContainerStop(t *testing.T, graceful bool, mode ...string) {
 			body = `{"pending":true,"confirmed":false,"stopped":false}`
 		case strings.HasSuffix(r.URL.Path, "/reconcile-stop"):
 			reconcileCalls++
-			if len(mode) > 0 && reconcileCalls == 1 {
+			if len(mode) > 0 && !external && reconcileCalls == 1 {
 				return &http.Response{StatusCode: 503, Body: io.NopCloser(strings.NewReader("slot unavailable"))}, nil
 			}
 			var proof runtimeSlotContainerProof
@@ -204,6 +232,9 @@ func testNFSContainerStop(t *testing.T, graceful bool, mode ...string) {
 			}
 			if proof.ContainerID != "containerd://old" || !proof.CleanupConfirmed {
 				t.Fatal("writer reconciliation lacked exact terminated container")
+			}
+			if external && (proof.ProofSource != slotKernelFenceSource || proof.FenceRequestUID != "operator-request" || proof.Graceful) {
+				t.Fatal("external fencing origin was lost")
 			}
 			reconciled = true
 			b, _ := json.Marshal(map[string]any{"gateway_id": proof.GatewayID, "operation_id": proof.OperationID, "worker_epoch": proof.WorkerEpoch, "container_id": proof.ContainerID, "stopped": true, "confirmed": true, "unmounted": true, "graceful": proof.Graceful})

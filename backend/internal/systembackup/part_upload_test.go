@@ -8,7 +8,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"io"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -81,16 +80,7 @@ func TestUploadSealedPhasesHasNoSigningOrFinalWriteCapability(t *testing.T) {
 	}
 	store.invalid = false
 	store.objects = map[string][]byte{}
-	file := filepath.Join(dirs.Secrets, "secret_bundle.enc")
-	f, err := os.OpenFile(file, os.O_WRONLY, 0600)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = f.WriteAt([]byte{42}, 64)
-	f.Close()
-	if err != nil {
-		t.Fatal(err)
-	}
+	corruptTestFileByte(t, filepath.Join(dirs.Secrets, "secret_bundle.enc"), 64)
 	if _, err = UploadCapturedParts(ctx, store, dirs, signed, pub, "v1", 64<<20); PublicError(err) != "checksum_mismatch" || len(store.objects) != 0 {
 		t.Fatal("corrupt sealed part dispatched writes", err, len(store.objects))
 	}
