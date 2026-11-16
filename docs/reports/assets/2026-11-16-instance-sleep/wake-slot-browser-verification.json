@@ -1,0 +1,105 @@
+{
+  "release": "uiux2-wake-slot-20261116-e76862cac469",
+  "results": [
+    {
+      "case": "deployed sleeping UI",
+      "type": "openclaw",
+      "id": 239,
+      "status": "PASS",
+      "wakeButton": true,
+      "sleepIcon": true
+    },
+    {
+      "case": "deployed sleeping UI",
+      "type": "hermes",
+      "id": 248,
+      "status": "PASS",
+      "wakeButton": true,
+      "sleepIcon": true
+    },
+    {
+      "case": "deployed sleeping UI",
+      "type": "opencode",
+      "id": 257,
+      "status": "PASS",
+      "wakeButton": true,
+      "sleepIcon": true
+    },
+    {
+      "case": "deployed sleeping UI",
+      "type": "deepseek-harness",
+      "id": 266,
+      "status": "PASS",
+      "wakeButton": true,
+      "sleepIcon": true
+    },
+    {
+      "case": "account settings and brand version",
+      "width": 1440,
+      "status": "PASS"
+    },
+    {
+      "case": "account settings and brand version",
+      "width": 390,
+      "status": "PASS"
+    },
+    {
+      "case": "runtime toolbar",
+      "width": 1440,
+      "status": "PASS",
+      "label": "实例调度",
+      "order": [
+        "scheduling",
+        "more"
+      ],
+      "maintenance": "more menu"
+    },
+    {
+      "case": "runtime toolbar",
+      "width": 390,
+      "status": "PASS",
+      "label": "实例调度",
+      "order": [
+        "scheduling",
+        "more"
+      ],
+      "maintenance": "more menu"
+    },
+    {
+      "case": "Skill Hub introduction removal",
+      "width": 1440,
+      "status": "PASS"
+    },
+    {
+      "case": "Skill Hub introduction removal",
+      "width": 390,
+      "status": "PASS"
+    },
+    {
+      "case": "native application",
+      "type": "opencode",
+      "id": 288,
+      "status": "PASS",
+      "frame": {
+        "origin": "https://10.130.81.54:31615",
+        "path": "/new-session",
+        "textLength": 70,
+        "controls": 8
+      },
+      "javascriptErrors": []
+    },
+    {
+      "case": "native application",
+      "type": "deepseek-harness",
+      "id": 289,
+      "status": "PASS",
+      "frame": {
+        "origin": "https://10.130.81.54:31616",
+        "path": "/",
+        "textLength": 69,
+        "controls": 8
+      },
+      "javascriptErrors": []
+    }
+  ]
+}

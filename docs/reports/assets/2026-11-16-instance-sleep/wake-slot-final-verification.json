@@ -1,0 +1,31 @@
+{
+  "release": "uiux2-wake-slot-20261116-e76862cac469",
+  "url": "https://10.130.81.54:30443",
+  "image": "clawmanager.local/clawmanager@sha256:09e37e1a9fe6dbf499cadd54fc9afdcba9b05b1e2c6d5500872e03e399147137",
+  "frontend_revision_verified": true,
+  "backend_version": {
+    "version": "v2026.11.16-uiux2-wake-slot",
+    "commit": "05b0162ca0d25913aac2be4ea023cae1cd370c6b-dirty",
+    "build_time": "2026-11-16T05:56:03Z"
+  },
+  "ready_replicas": 1,
+  "live_wake_cases": 4,
+  "sleep_ui_cases": 4,
+  "shell_ui_cases": 2,
+  "native_browser_cases": 2,
+  "browser_failures": 0,
+  "native_fixture_cleanup": {
+    "deleted": [
+      286,
+      287,
+      288,
+      289
+    ],
+    "remaining": []
+  },
+  "remaining_original_instances": 36,
+  "original_instance_ids_preserved": true,
+  "runtime_toolbar_cases": 2,
+  "skill_hub_cases": 2,
+  "auto_stop_policy_version": 7
+}

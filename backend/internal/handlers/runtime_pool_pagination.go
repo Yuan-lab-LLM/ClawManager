@@ -50,6 +50,9 @@ func runtimeInventorySlotState(slot models.RuntimeSlot) string {
 	case "unknown":
 		return "unknown"
 	case "residual", "conflict":
+		if slot.StartPending && slot.Ready {
+			return "starting"
+		}
 		return "error"
 	}
 	if !slot.Ready {

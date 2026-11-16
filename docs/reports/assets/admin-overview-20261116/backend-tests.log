@@ -1,0 +1,4 @@
+ok  	clawreef/internal/admindashboard	0.037s
+ok  	clawreef/internal/handlers	0.039s
+ok  	clawreef/internal/services	0.085s
+?   	clawreef/cmd/server	[no test files]

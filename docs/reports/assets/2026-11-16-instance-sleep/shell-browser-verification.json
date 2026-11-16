@@ -1,0 +1,73 @@
+{
+  "release": "uiux2-shell-20261116-40f42490633e",
+  "results": [
+    {
+      "case": "deployed sleeping UI",
+      "type": "openclaw",
+      "id": 239,
+      "status": "PASS",
+      "wakeButton": true,
+      "sleepIcon": true
+    },
+    {
+      "case": "deployed sleeping UI",
+      "type": "hermes",
+      "id": 248,
+      "status": "PASS",
+      "wakeButton": true,
+      "sleepIcon": true
+    },
+    {
+      "case": "deployed sleeping UI",
+      "type": "opencode",
+      "id": 257,
+      "status": "PASS",
+      "wakeButton": true,
+      "sleepIcon": true
+    },
+    {
+      "case": "deployed sleeping UI",
+      "type": "deepseek-harness",
+      "id": 266,
+      "status": "PASS",
+      "wakeButton": true,
+      "sleepIcon": true
+    },
+    {
+      "case": "account settings and brand version",
+      "width": 1440,
+      "status": "PASS"
+    },
+    {
+      "case": "account settings and brand version",
+      "width": 390,
+      "status": "PASS"
+    },
+    {
+      "case": "native application",
+      "type": "opencode",
+      "id": 281,
+      "status": "PASS",
+      "frame": {
+        "origin": "https://10.130.81.54:31607",
+        "path": "/new-session",
+        "textLength": 75,
+        "controls": 9
+      },
+      "javascriptErrors": []
+    },
+    {
+      "case": "native application",
+      "type": "deepseek-harness",
+      "id": 282,
+      "status": "PASS",
+      "frame": {
+        "origin": "https://10.130.81.54:31608",
+        "path": "/",
+        "textLength": 69,
+        "controls": 8
+      },
+      "javascriptErrors": []
+    }
+  ]
+}

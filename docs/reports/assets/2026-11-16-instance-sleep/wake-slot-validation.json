@@ -1,0 +1,27 @@
+{
+  "release": "uiux2-wake-slot-20261116-e76862cac469",
+  "source_identity": "e76862cac4696ad066601545832acae956203984fa4659c0e038d698ea17c240",
+  "checks": {
+    "frontend_runtime_management_tests": 22,
+    "slot_grid_tests": 4,
+    "backend_projection_and_inventory_tests": "PASS on server54",
+    "typescript_no_emit": "PASS",
+    "changed_runtime_files_eslint": "PASS",
+    "mock_browser_locale_viewport_cases": 20,
+    "real_owned_restart_cases": 4,
+    "deployed_browser_cases": 12,
+    "independent_review": "PASS after assignment failure negative test",
+    "git_diff_check": "PASS"
+  },
+  "known_baseline": {
+    "file": "SkillHubPage.tsx",
+    "eslint_errors": 3,
+    "eslint_warnings": 1,
+    "rules": [
+      "react-hooks/set-state-in-effect",
+      "react-hooks/exhaustive-deps"
+    ],
+    "verified_against": "git HEAD original file"
+  },
+  "scope": "Manual stop then existing start endpoint; no change to global automatic sleep policy or original instances. All builds ran on 10.130.81.54."
+}

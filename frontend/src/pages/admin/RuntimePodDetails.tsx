@@ -344,7 +344,7 @@ export default function RuntimePodDetails({
                   <td
                     className={`px-3 py-3 ${slotState(slot) === "error" ? "text-red-600" : slotState(slot) === "unknown" ? "text-amber-800" : "text-slate-600"}`}
                   >
-                    {t(`runtimePods.${slot.reconciliation_state && slot.reconciliation_state !== "consistent" ? slot.reconciliation_state : slotState(slot)}`)}
+                    {t(`runtimePods.${slotState(slot) === "starting" ? "starting" : slot.reconciliation_state && slot.reconciliation_state !== "consistent" ? slot.reconciliation_state : slotState(slot)}`)}
                   </td>
                   <td className="px-3 py-3 tabular-nums">
                     {formatCPU(slot.cpu_millis_used)}

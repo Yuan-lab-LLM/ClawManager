@@ -628,12 +628,6 @@ const SkillHubPage: React.FC = () => {
   return (
     <UserLayout title={t('skillHubPage.title')}>
       <div className="space-y-6">
-        <section className="app-panel px-6 py-6">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--cm-muted)]">Skill Hub</p>
-          <h1 className="mt-2 text-[2rem] font-semibold tracking-[-0.03em] text-[var(--cm-ink)]">{t('skillHubPage.title')}</h1>
-          <p className="mt-2 max-w-3xl text-sm text-[var(--cm-text)]">{t('skillHubPage.subtitle')}</p>
-        </section>
-
         {error ? <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div> : null}
         {notice ? <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{notice}</div> : null}
 

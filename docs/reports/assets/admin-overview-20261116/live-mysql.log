@@ -1,0 +1,6 @@
+=== RUN   TestLiveMySQLReadOnlyAggregation
+    dashboard_mysql_test.go:71: recorded gateway conversation turns=8; hourly sum=8
+    dashboard_mysql_test.go:73: read-only live SQL valid: users=1 instances=36 tokens=507352 models=1 currencies=1 conversations=partial runtime=partial
+--- PASS: TestLiveMySQLReadOnlyAggregation (0.02s)
+PASS
+ok  	clawreef/internal/admindashboard	0.022s

@@ -186,8 +186,9 @@ test('@p1 runtime maintenance popup stays above native dialog and returns focus'
   await page.addInitScript(() => localStorage.setItem('clawmanager_locale','en'));
   await page.route('**/api/v1/admin/runtime-pods/scale-options', route => route.fulfill({json:{data:{items:[{runtime_type:'hermes',replicas:2,capacity:16}],unavailable:[],limits:{min_pods:1,max_pods:10}}}}));
   await page.goto('/admin/runtime-pods');
-  const maintenance = page.getByRole('button',{name:'Pod maintenance',exact:true});
+  const maintenance = page.locator('.runtime-toolbar-actions').getByRole('button',{name:'Actions',exact:true});
   await maintenance.click();
+  await page.getByRole('menuitem',{name:'Pod maintenance',exact:true}).click();
   const dialog = page.getByRole('dialog',{name:'Pod maintenance',exact:true});
   const runtimeType = dialog.getByRole('button',{name:/^Runtime type:/});
   await runtimeType.click();
@@ -292,7 +293,7 @@ test('@p1 account omits Portal while keeping Console, language, focus and versio
   });
   await page.addInitScript(() => localStorage.setItem('clawmanager_locale', 'en'));
   await page.goto('/instances');
-  await expect(page.getByTestId('clawmanager-version')).toBeVisible();
+  await expect(page.locator('[data-testid="clawmanager-version"]:visible')).toBeVisible();
   await expect(page.getByRole('navigation', { name: 'Main navigation', exact: true }).getByRole('link', { name: 'Portal', exact: true })).toHaveCount(0);
   await page.getByLabel('Account', { exact: true }).click();
   await expect(page.getByRole('link', { name: 'Portal', exact: true })).toHaveCount(0);
@@ -304,7 +305,7 @@ test('@p1 account omits Portal while keeping Console, language, focus and versio
   await page.keyboard.press('Escape');
   await expect(page.getByLabel('Account', { exact: true })).toBeFocused();
   await page.goto('/admin/runtime-pods');
-  await expect(page.getByTestId('clawmanager-version')).toBeVisible();
+  await expect(page.locator('[data-testid="clawmanager-version"]:visible')).toBeVisible();
   await page.getByLabel('Account', { exact: true }).click();
   await expect(page.getByRole('link', { name: 'Portal', exact: true })).toHaveCount(0);
   await expect(page.getByRole('link', { name: 'Workspace', exact: true }).last()).toBeVisible();

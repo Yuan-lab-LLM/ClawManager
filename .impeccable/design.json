@@ -339,6 +339,49 @@
       ],
       "environmentPreview": "key-value-columns-masked-secrets",
       "partialCreation": "retain-existing-instance-and-retry-only-failed-operation"
+    },
+    "instanceSleepingState": {
+      "sourceOfTruth": "DESIGN.md",
+      "types": [
+        "openclaw",
+        "hermes",
+        "opencode",
+        "deepseek-harness"
+      ],
+      "condition": "status=stopped and stopped_reason=idle_timeout",
+      "content": "原生类型休眠图标、自动休眠状态与唤醒按钮；Lite/Pro 共用",
+      "action": "现有 CM 启动接口；处理中禁用，错误就地展示并按 runtime_generation 隔离",
+      "motion": "复用 AgentStateIcon，遵循减少动态效果及不可见时暂停规则"
+    },
+    "personalSettingsNavigation": {
+      "entry": "account-dropdown",
+      "route": "/settings",
+      "userSidebar": false,
+      "mobileNavigation": false,
+      "sharedBy": "user-and-admin-shells",
+      "consoleSystemSettings": "/admin/settings"
+    },
+    "versionPlacement": {
+      "position": "below-brand-name",
+      "headerHeight": "48px",
+      "sidebarFooter": false,
+      "collapsedSidebar": "logo-only",
+      "mobileDrawer": "below-brand-name",
+      "details": "existing full version, commit and build-time tooltip"
+    },
+    "runtimeToolbar": {
+      "primaryAction": "instance-scheduling",
+      "order": [
+        "instance-scheduling",
+        "more"
+      ],
+      "podMaintenance": "more-menu",
+      "schedulingSemantics": "existing permissions, disabled conditions and preflight preserved"
+    },
+    "runtimeStartProgress": {
+      "source": "verified display-only start_pending",
+      "safety": "original reconciliation and binding fences preserved",
+      "skillHub": "no repeated body introduction card"
     }
   },
   "components": [

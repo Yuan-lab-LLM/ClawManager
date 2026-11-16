@@ -56,7 +56,18 @@ function setup({ pod = source, pods = [pod], failure, forceSupported = true, com
   } };
   const wrapper = ({ children, footer }) => React.createElement('div', null, children, footer);
   const empty = () => null;
-  const ui = { RuntimeDialog: wrapper, ErrorMessage: wrapper, Metric: empty, ResourceBar: empty, SlotGrid: empty, Legend: empty };
+  // State-machine tests use stateless control adapters. Browser regressions
+  // exercise the actual menu, listbox and expandable-search interactions.
+  function FilterSelect({ label, value, options = [], onChange, disabled }) {
+    return React.createElement('select', { 'aria-label': label, value, disabled, onChange: event => onChange(event.target.value) }, options.map(option => React.createElement('option', { key: option.value, value: option.value }, option.label)));
+  }
+  function ExpandableSearch({ label, value, onChange }) {
+    return React.createElement('input', { 'aria-label': label, value, onChange: event => onChange(event.target.value) });
+  }
+  function ActionMenu({ items }) {
+    return React.createElement('div', null, items.map(item => React.createElement('button', { key: item.id, disabled: item.disabled, onClick: item.onSelect }, item.label)));
+  }
+  const ui = { RuntimeDialog: wrapper, ErrorMessage: wrapper, Metric: empty, ResourceBar: empty, SlotGrid: empty, SlotOverview: empty, Legend: empty };
   const summary = { pods: 30, online: 29, schedulable: 28, capacity: 100, ready: 99, occupied: 20, available: 79, running: 20, starting: 0, migrating: 0, error: 0, idle: 79, unavailable: 1 };
   const inventory = { pods, summary, nodes: ['off-page-node'], pagination: { page: 1, page_size: 4, total: 30, total_pages: 8 }, updated_at: '2026-10-27T00:00:00Z' };
   const service = {
@@ -82,6 +93,8 @@ function setup({ pod = source, pods = [pod], failure, forceSupported = true, com
     }).outputText);
     const exports = {};
     runInNewContext(compiled.get(url.href), { exports,
+      matchMedia: () => ({ matches: true, addEventListener() {}, removeEventListener() {} }),
+      document: { addEventListener() {}, removeEventListener() {} },
       setTimeout: (callback, delay) => { const id = ++timerId; timers.set(id, { callback, delay }); return id; },
       clearTimeout: id => timers.delete(id),
       require: name => {
@@ -90,6 +103,9 @@ function setup({ pod = source, pods = [pod], failure, forceSupported = true, com
       if (name.endsWith('/I18nContext')) return { useI18n: () => ({ t }) };
       if (name.endsWith('/runtimePoolService')) return { runtimePoolService: service };
       if (name.endsWith('/RuntimeManagementUI')) return ui;
+      if (name.endsWith('/FilterSelect')) return { default: FilterSelect };
+      if (name.endsWith('/ExpandableSearch')) return { default: ExpandableSearch };
+      if (name.endsWith('/ActionMenu')) return { default: ActionMenu };
       if (name.endsWith('/AdminLayout') && !realLayout) return { default: wrapper };
       if (name.endsWith('/AuthContext')) return { useAuth: () => ({ user: { username: 'fixture-admin', role: 'admin' }, logout() {} }) };
       if (name.endsWith('/uiStore')) return { useUiStore: () => ({ sidebarCollapsed: false, toggleSidebarCollapsed() {} }) };
@@ -131,7 +147,8 @@ function setup({ pod = source, pods = [pod], failure, forceSupported = true, com
 function find(node, match) {
   if (Array.isArray(node)) return node.flatMap(item => find(item, match));
   if (!node || typeof node !== 'object') return [];
-  return [...(match(node) ? [node] : []), ...find(node.props?.children, match), ...find(node.props?.footer, match)];
+  const controls = ['FilterSelect', 'ExpandableSearch', 'ActionMenu'].includes(node.type?.name) ? node.type(node.props) : undefined;
+  return [...(match(node) ? [node] : []), ...find(controls, match), ...find(node.props?.children, match), ...find(node.props?.footer, match)];
 }
 const button = (tree, label) => find(tree, node => node.type === 'button' && renderToStaticMarkup(node).includes(label))[0];
 const input = (tree, type, value) => find(tree, node => node.type === 'input' && node.props.type === type && (!value || node.props.value === value))[0];
@@ -223,7 +240,7 @@ test('overview requests only a server page, retains previous data and searches t
   const view = setup({ component: 'RuntimePodsPage', pods });
   let tree = view.render();
   assert.doesNotMatch(renderToStaticMarkup(tree), /Runtime resources &amp; scheduling/);
-  assert.equal(find(tree, node => node.type === 'article').length, 16);
+  assert.equal(find(tree, node => node.type === 'tr' && node.key !== null).length, 16);
   const pageQuery = () => view.queries.findLast(query => query.queryKey[1] === 'page');
   assert.equal(pageQuery().queryKey[2].page_size, 16);
   assert.equal(pageQuery().refetchInterval, 3000);
@@ -246,7 +263,7 @@ test('overview requests only a server page, retains previous data and searches t
   assert.equal(pageQuery().queryKey[2].search, 'off-page owner');
   assert.equal(pageQuery().queryKey[2].page, 1);
   assert.match(renderToStaticMarkup(tree), /off-page-node/);
-  button(tree, 'Batch scheduling').props.onClick();
+  button(tree, 'Instance scheduling').props.onClick();
   view.render();
   assert.equal(view.queries.findLast(query => query.queryKey[1] === 'all').enabled, true);
 });
@@ -266,17 +283,17 @@ test('WebSocket bursts coalesce without cancelling inventory fetches and timers 
   assert.equal(view.timers.size, 0);
 });
 
-test('production AdminLayout mounts one shared main and sixteen Runtime cards', () => {
+test('production AdminLayout mounts one shared main and sixteen Runtime table rows', () => {
   const pods = Array.from({ length: 16 }, (_, i) => ({ ...source, id: i + 1, pod_name: `pod-${i}` }));
   const view = setup({ component: 'RuntimePodsPage', pods, realLayout: true });
   const markup = renderToStaticMarkup(view.render());
   assert.equal((markup.match(/<main(?:\s|>)/g) || []).length, 1);
-  assert.equal((markup.match(/<article(?:\s|>)/g) || []).length, 16);
+  assert.equal((markup.match(/<tr(?:\s|>)/g) || []).length, 17);
 });
 
 test('detail uses its snapshot while loading or failed, but a successful deletion returns to the overview', () => {
   const view = setup({ component: 'RuntimePodsPage' });
-  find(view.render(), node => node.type === 'article')[0].props.onClick();
+  button(view.render(), source.pod_name).props.onClick();
   view.fullInventory(undefined, { isSuccess: false, isFetching: true });
   assert.match(renderToStaticMarkup(view.render()), /Back to overview/);
   view.fullInventory([], { isSuccess: false, isFetching: false, isError: true, error: new Error('fixture unavailable') });
@@ -285,7 +302,7 @@ test('detail uses its snapshot while loading or failed, but a successful deletio
   view.render();
   const tree = view.render();
   assert.doesNotMatch(renderToStaticMarkup(tree), /Back to overview/);
-  assert.equal(find(tree, node => node.type === 'article').length, 1);
+  assert.equal(find(tree, node => node.type === 'tr' && node.key !== null).length, 1);
   assert.equal(view.queries.findLast(query => query.queryKey[1] === 'page').enabled, true);
 });
 
@@ -659,14 +676,21 @@ test('balance execution consumes its plan once and reports an uncertain network 
 
 test('Runtime toolbar opens the independent dialogs and routes accepted balance to scheduling records', () => {
   const maintenance = setup({ component: 'RuntimePodsPage', templates: templateData });
-  button(maintenance.render(), 'Pod maintenance').props.onClick();
+  const initial = maintenance.render();
+  const toolbar = find(initial, node => node.props?.className?.includes('runtime-toolbar-actions'))[0];
+  const directButtons = React.Children.toArray(toolbar.props.children).filter(node => node.type === 'button');
+  assert.equal(directButtons.length, 1);
+  assert.match(renderToStaticMarkup(directButtons[0]), /Instance scheduling/);
+  const maintenanceMenu = find(initial, node => node.type?.name === 'ActionMenu')[0];
+  maintenanceMenu.props.items.find(item => item.id === 'maintenance').onSelect();
   let tree = maintenance.render();
   const maintenanceDialog = find(tree, node => node.type?.name === 'RuntimeMaintenanceDialog')[0];
   assert.ok(maintenanceDialog);
   maintenanceDialog.props.onChanged(); maintenance.runTimers();
   assert.equal(maintenance.invalidations.length, 2);
   const view = setup({ component: 'RuntimePodsPage', balancePlan: balance });
-  button(view.render(), 'Balance').props.onClick();
+  const menu = find(view.render(), node => node.type?.name === 'ActionMenu')[0];
+  menu.props.items.find(item => item.id === 'balance').onSelect();
   tree = view.render();
   const balanceDialog = find(tree, node => node.type?.name === 'RuntimeBalanceDialog')[0];
   assert.ok(balanceDialog);

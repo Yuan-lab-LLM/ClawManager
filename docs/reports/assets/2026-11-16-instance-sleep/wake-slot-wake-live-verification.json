@@ -1,0 +1,145 @@
+{
+  "results": [
+    {
+      "type": "openclaw",
+      "id": 286,
+      "status": "PASS",
+      "generationBefore": 1,
+      "generationAfter": 2,
+      "pendingScreenshot": true,
+      "observations": [
+        {
+          "status": "creating",
+          "generation": 2,
+          "slot": 2,
+          "start_pending": true,
+          "reconciliation_state": "conflict",
+          "binding_confirmed": false
+        },
+        {
+          "status": "running",
+          "generation": 2,
+          "slot": 2,
+          "start_pending": true,
+          "reconciliation_state": "conflict",
+          "binding_confirmed": false
+        },
+        {
+          "status": "running",
+          "generation": 2,
+          "slot": 2,
+          "instance_state": "running",
+          "start_pending": false,
+          "reconciliation_state": "consistent",
+          "binding_confirmed": true
+        }
+      ]
+    },
+    {
+      "type": "hermes",
+      "id": 287,
+      "status": "PASS",
+      "generationBefore": 1,
+      "generationAfter": 2,
+      "pendingScreenshot": true,
+      "observations": [
+        {
+          "status": "creating",
+          "generation": 2,
+          "slot": 3,
+          "start_pending": true,
+          "reconciliation_state": "conflict",
+          "binding_confirmed": false
+        },
+        {
+          "status": "running",
+          "generation": 2,
+          "slot": 3,
+          "start_pending": true,
+          "reconciliation_state": "conflict",
+          "binding_confirmed": false
+        },
+        {
+          "status": "running",
+          "generation": 2,
+          "slot": 3,
+          "instance_state": "running",
+          "start_pending": false,
+          "reconciliation_state": "consistent",
+          "binding_confirmed": true
+        }
+      ]
+    },
+    {
+      "type": "opencode",
+      "id": 288,
+      "status": "PASS",
+      "generationBefore": 1,
+      "generationAfter": 2,
+      "pendingScreenshot": true,
+      "observations": [
+        {
+          "status": "creating",
+          "generation": 2,
+          "slot": 2,
+          "start_pending": true,
+          "reconciliation_state": "conflict",
+          "binding_confirmed": false
+        },
+        {
+          "status": "running",
+          "generation": 2,
+          "slot": 2,
+          "start_pending": true,
+          "reconciliation_state": "conflict",
+          "binding_confirmed": false
+        },
+        {
+          "status": "running",
+          "generation": 2,
+          "slot": 2,
+          "instance_state": "running",
+          "start_pending": false,
+          "reconciliation_state": "consistent",
+          "binding_confirmed": true
+        }
+      ]
+    },
+    {
+      "type": "deepseek-harness",
+      "id": 289,
+      "status": "PASS",
+      "generationBefore": 1,
+      "generationAfter": 2,
+      "pendingScreenshot": true,
+      "observations": [
+        {
+          "status": "creating",
+          "generation": 2,
+          "slot": 3,
+          "start_pending": true,
+          "reconciliation_state": "conflict",
+          "binding_confirmed": false
+        },
+        {
+          "status": "running",
+          "generation": 2,
+          "slot": 3,
+          "start_pending": true,
+          "reconciliation_state": "conflict",
+          "binding_confirmed": false
+        },
+        {
+          "status": "running",
+          "generation": 2,
+          "slot": 3,
+          "instance_state": "running",
+          "start_pending": false,
+          "reconciliation_state": "consistent",
+          "binding_confirmed": true
+        }
+      ]
+    }
+  ],
+  "scope": "Owned fixtures: manual stop then existing start endpoint; global auto-sleep policy unchanged"
+}

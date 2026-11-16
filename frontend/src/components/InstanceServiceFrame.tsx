@@ -22,6 +22,7 @@ export interface InstanceServiceFrameProps {
   instanceType?: string;
   instanceMode: string;
   availability: InstanceAvailability;
+  unavailableContent?: ReactNode;
   reloadToken?: number;
   runtimeGeneration?: number;
   onOpenWorkbenchPreview?: (address: string, isCurrent: () => boolean) => void;
@@ -110,6 +111,7 @@ function EmbeddedInstanceServiceFrame({
   instanceType,
   instanceMode,
   availability,
+  unavailableContent,
   reloadToken = 0,
   runtimeGeneration = 0,
   onOpenWorkbenchPreview,
@@ -394,7 +396,7 @@ function EmbeddedInstanceServiceFrame({
 
   if (!isAvailable) {
     return renderFrameShell(
-      <div className="flex min-h-0 flex-1 items-center justify-center text-sm text-slate-600">
+      unavailableContent ?? <div className="flex min-h-0 flex-1 items-center justify-center text-sm text-slate-600">
         Unavailable
       </div>,
     );

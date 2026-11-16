@@ -2624,7 +2624,7 @@ export const translations: Record<Locale, TranslationTree> = {
       heading: "Runtime resources & scheduling",
       description: "Actual Pod capacity, Agent health and instance state.",
       history: "Scheduling records",
-      batch: "Batch scheduling",
+      batch: "Instance scheduling",
       online: "Online Pods",
       agentReady: "Agents ready",
       occupied: "Instance occupancy",
@@ -2996,6 +2996,9 @@ export const translations: Record<Locale, TranslationTree> = {
     },
     instances: {
       listTitle: "My Instances",
+      wakeUp: "Wake up",
+      wakingUp: "Waking up…",
+      wakeFailed: "Failed to wake instance",
       realTimeUpdates: "Real-time updates",
       connected: "Connected",
       disconnected: "Disconnected",
@@ -4783,7 +4786,7 @@ export const translations: Record<Locale, TranslationTree> = {
       heading: "Runtime 资源与调度",
       description: "按各 Pod 实际配置展示槽位，分别观察 Agent 健康与实例运行状态。",
       history: "调度记录",
-      batch: "批量调度",
+      batch: "实例调度",
       online: "在线 Pod",
       agentReady: "Agent 就绪",
       occupied: "实例占用",
@@ -5150,6 +5153,9 @@ export const translations: Record<Locale, TranslationTree> = {
     },
     instances: {
       listTitle: "我的实例",
+      wakeUp: "唤醒",
+      wakingUp: "正在唤醒…",
+      wakeFailed: "唤醒实例失败",
       realTimeUpdates: "实时更新",
       connected: "已连接",
       disconnected: "未连接",
@@ -6822,6 +6828,9 @@ export const translations: Record<Locale, TranslationTree> = {
     },
     instances: {
       listTitle: "マイインスタンス",
+      wakeUp: "起動",
+      wakingUp: "起動中…",
+      wakeFailed: "インスタンスを起動できませんでした",
       realTimeUpdates: "リアルタイム更新",
       connected: "接続済み",
       disconnected: "未接続",
@@ -8470,6 +8479,9 @@ export const translations: Record<Locale, TranslationTree> = {
     },
     instances: {
       listTitle: "내 인스턴스",
+      wakeUp: "깨우기",
+      wakingUp: "깨우는 중…",
+      wakeFailed: "인스턴스를 깨우지 못했습니다",
       realTimeUpdates: "실시간 업데이트",
       connected: "연결됨",
       disconnected: "연결 끊김",
@@ -10119,6 +10131,9 @@ export const translations: Record<Locale, TranslationTree> = {
     },
     instances: {
       listTitle: "Meine Instanzen",
+      wakeUp: "Aufwecken",
+      wakingUp: "Wird aufgeweckt…",
+      wakeFailed: "Instanz konnte nicht aufgeweckt werden",
       realTimeUpdates: "Echtzeit-Updates",
       connected: "Verbunden",
       disconnected: "Getrennt",
@@ -11256,9 +11271,9 @@ for (const locale of Object.keys(rolloutPreparingTranslations) as Locale[]) (tra
 const runtimeTableTranslations: Record<Locale, TranslationTree> = {
   en: {runtimeName:"Name",offline:"Offline",onlineState:"Online"},
   zh: {runtimeName:"名称",offline:"离线",onlineState:"在线"},
-  ja: {runtimeName:"名前",offline:"オフライン",onlineState:"オンライン"},
-  ko: {runtimeName:"이름",offline:"오프라인",onlineState:"온라인"},
-  de: {runtimeName:"Name",offline:"Offline",onlineState:"Online"},
+  ja: {runtimeName:"名前",offline:"オフライン",onlineState:"オンライン",batch:"インスタンスのスケジューリング"},
+  ko: {runtimeName:"이름",offline:"오프라인",onlineState:"온라인",batch:"인스턴스 스케줄링"},
+  de: {runtimeName:"Name",offline:"Offline",onlineState:"Online",batch:"Instanzplanung"},
 };
 for (const locale of Object.keys(runtimeTableTranslations) as Locale[]) Object.assign(translations[locale].runtimePods ??= {}, runtimeTableTranslations[locale]);
 

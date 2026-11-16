@@ -40,8 +40,10 @@ try {
     const html = renderToStaticMarkup(React.createElement(MemoryRouter, null,
       React.createElement(AuthProvider, null, React.createElement(I18nProvider, null,
         React.createElement(Layout, { title: 'Workspace' }, React.createElement('p', null, 'Content'))))));
-    assert((html.match(/data-testid="clawmanager-version"/g) || []).length === 1, `${file} exposes exactly one shared version badge`);
-    assert(html.indexOf('ClawManager logo') < html.indexOf('data-testid="clawmanager-version"'), 'version follows the brand');
+    const brands = html.match(/<a[^>]*class="cm-shell-brand"[^>]*>[\s\S]*?<\/a>/g) || [];
+    assert(brands.length === 2, `${file} renders desktop and mobile brands`);
+    assert(brands.every(brand => brand.includes('data-testid="clawmanager-version"')), `${file} keeps version inside both brand links`);
+    assert((html.match(/data-testid="clawmanager-version"/g) || []).length === 2, `${file} has no extra footer version`);
   }
 } finally { await server.close(); }
 console.log('ClawManager version service/component and both shared layout trees are valid.');

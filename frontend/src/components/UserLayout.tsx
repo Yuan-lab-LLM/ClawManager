@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Home, Monitor, Package, Settings, SlidersHorizontal, Users } from 'lucide-react';
+import { Home, Monitor, Package, SlidersHorizontal, Users } from 'lucide-react';
 import { useI18n } from '../contexts/I18nContext';
 import { useUiStore } from '../stores/uiStore';
 import { ManagementShell } from './ManagementHeader';
@@ -37,7 +37,6 @@ const UserLayout: React.FC<UserLayoutProps> = ({
     { path: '/teams', label: t('nav.teams'), icon: Users },
     { path: '/openclaw-configs', label: t('nav.openClawConfigs'), icon: SlidersHorizontal },
     { path: '/skill-hub', label: t('nav.skillHub'), icon: Package },
-    { path: '/settings', label: t('nav.settings'), icon: Settings },
   ];
 
   const isActive = (item: UserNavItem) => {

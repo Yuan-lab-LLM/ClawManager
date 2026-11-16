@@ -91,6 +91,7 @@ export interface RuntimeSlot {
   instance_name?: string;
   owner?: string;
   instance_state?: string;
+  start_pending?: boolean;
   gateway_id?: string;
   gateway_port?: number;
   generation?: number;

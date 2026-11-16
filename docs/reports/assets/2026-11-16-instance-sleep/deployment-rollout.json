@@ -1,0 +1,34 @@
+{
+  "release": "uiux2-sleep-20261116-39640fa8d593",
+  "built_on": "10.130.81.54",
+  "image": "clawmanager.local/clawmanager@sha256:be38cc2c2958d9a5bb403f111929ecf879f1954d989bf6778db02cf8e2bb371b",
+  "previous_image": "clawmanager.local/clawmanager@sha256:bc8988e59d867ed628ecdd3157ae8f34298204ee2f4fb9c33e029f257d4eb4b3",
+  "namespace": "clawmanager-system",
+  "deployment": "clawmanager-app",
+  "ready_replicas": 1,
+  "pods": [
+    {
+      "name": "clawmanager-app-6f5b649c88-jqbpc",
+      "uid": "b6576307-9d08-4a7a-80bd-ba67719a9210",
+      "imageID": "clawmanager.local/clawmanager@sha256:be38cc2c2958d9a5bb403f111929ecf879f1954d989bf6778db02cf8e2bb371b",
+      "digest": "sha256:be38cc2c2958d9a5bb403f111929ecf879f1954d989bf6778db02cf8e2bb371b",
+      "status_image": "clawmanager.local/clawmanager:uiux2-sleep-20261116-39640fa8d593"
+    }
+  ],
+  "backend_and_helpers_unchanged": true,
+  "other_images_unchanged": true,
+  "browser_node_ports": {
+    "first": 31600,
+    "last": 31727,
+    "count": 128,
+    "target_port": 8444,
+    "ready_endpoints": [
+      {
+        "addresses": [
+          "10.244.235.203"
+        ],
+        "pod": "clawmanager-app-6f5b649c88-jqbpc"
+      }
+    ]
+  }
+}
