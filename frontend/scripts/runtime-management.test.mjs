@@ -123,6 +123,21 @@ test('confirmed empty and bound observations retain their actual states', () => 
   assert.equal(slotState({ ready: true, instance_id: 118, instance_state: 'running', reconciliation_state: 'consistent', binding_confirmed: true }), 'running');
 });
 
+test('verified pending starts display progress without authorizing reserved slots', () => {
+  const slot = { index: 1, ready: true, expected_instance_id: 118, reconciliation_state: 'conflict', binding_confirmed: false, start_pending: true };
+  assert.equal(slotState(slot), 'starting');
+  assert.equal(canManageSlot(slot), false);
+  assert.equal(canEvictPod({ ...pod, used_slots: 1, slots: [slot] }), false);
+  const summary = summarizePod({ ...pod, capacity: 1, used_slots: 1, slots: [slot] });
+  assert.equal(summary.starting, 1);
+  assert.equal(summary.error, 0);
+  assert.equal(summary.available, 0);
+  assert.equal(slotState({ ...slot, start_pending: false }), 'error');
+  assert.equal(slotState({ ...slot, reconciliation_state: 'unknown' }), 'unknown');
+  assert.equal(slotState({ ...slot, reconciliation_state: 'releasing' }), 'releasing');
+  assert.equal(slotState({ ...slot, ready: false }), 'unavailable');
+});
+
 
 test('only confirmed bindings authorize owner actions while legacy payloads remain compatible', () => {
   const confirmed = { index: 1, ready: true, instance_id: 118, instance_state: 'running', reconciliation_state: 'consistent', binding_confirmed: true };

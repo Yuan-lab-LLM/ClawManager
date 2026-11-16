@@ -89,6 +89,7 @@ type RuntimeSlot struct {
 	InstanceName        string  `json:"instance_name,omitempty"`
 	Owner               *string `json:"owner,omitempty"`
 	InstanceState       string  `json:"instance_state,omitempty"`
+	StartPending        bool    `json:"start_pending,omitempty"` // Display-only; binding and reconciliation fences still apply.
 	GatewayID           string  `json:"gateway_id,omitempty"`
 	GatewayPort         *int    `json:"gateway_port,omitempty"`
 	Generation          *int    `json:"generation,omitempty"`

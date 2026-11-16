@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { ChevronDown, ChevronLeft, ChevronRight, Home, LogOut, Menu, Shield, User, X } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, Home, LogOut, Menu, Settings, Shield, User, X } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useI18n } from '../contexts/I18nContext';
 import { useUiStore } from '../stores/uiStore';
@@ -57,6 +57,7 @@ function ShellHeader({ title, titleAccessory, admin, onOpenNavigation, navigatio
             <FilterSelect label={t('common.language')} value={locale} options={localeOptions} onChange={value => setLocale(value as typeof locale)} />
           </div>
           {(admin || user?.role === 'admin') && <Link to={admin ? '/dashboard' : '/admin'} onClick={() => { if (account.current) account.current.open = false; }}>{t(admin ? 'nav.backToUserDashboard' : 'nav.adminDashboard')}</Link>}
+          <Link to="/settings" onClick={() => { if (account.current) account.current.open = false; accountTrigger.current?.focus(); }}><Settings size={14} aria-hidden="true" />{t('nav.settings')}</Link>
           <button type="button" onClick={handleLogout}><LogOut size={14} />{t('common.logout')}</button>
         </div>
       </details>
@@ -95,10 +96,10 @@ export function ManagementShell({ children, title, titleAccessory, admin, fillHe
     breakpoint.addEventListener('change', close);
     return () => breakpoint.removeEventListener('change', close);
   }, []);
-  const brand = <Link to={admin ? '/admin' : '/dashboard'} className="cm-shell-brand"><img src="/lobster_logo.png" alt="ClawManager logo" /><span>{t('app.name')}</span></Link>;
+  const brand = <Link to={admin ? '/admin' : '/dashboard'} className="cm-shell-brand"><img src="/lobster_logo.png" alt="ClawManager logo" /><span className="cm-shell-brand-copy"><span className="cm-shell-brand-name">{t('app.name')}</span><AppVersion /></span></Link>;
   return <div className={`app-shell cm-management-shell ${sidebarCollapsed ? 'cm-sidebar-collapsed' : ''} ${fillHeight ? 'cm-shell-fill' : ''}`}>
     <aside className="cm-management-sidebar">
-      <div className="cm-sidebar-inner">{brand}<nav aria-label={t('shell.mainNavigation')} className="cm-shell-navigation">{navigation}</nav><div className="cm-shell-version"><AppVersion /></div></div>
+      <div className="cm-sidebar-inner">{brand}<nav aria-label={t('shell.mainNavigation')} className="cm-shell-navigation">{navigation}</nav></div>
       <button type="button" onClick={toggleSidebarCollapsed} aria-label={t(sidebarCollapsed ? 'common.expandSidebar' : 'common.collapseSidebar')} className="cm-sidebar-edge">{sidebarCollapsed ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}</button>
     </aside>
     <div className="cm-shell-content">

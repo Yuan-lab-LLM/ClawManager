@@ -300,3 +300,88 @@ func TestRuntimeInventoryGlobalFailureRetainsOnlyCurrentMappedReportedOwner(t *t
 		})
 	}
 }
+
+func TestRuntimeInventoryPendingStartIsDisplayOnly(t *testing.T) {
+	for _, scenario := range []string{"reserved free", "creating free", "running before reservation", "running after reservation", "running zero reservation time", "free with owner", "free with partial identity", "failed free", "stale free", "SQL unavailable", "unknown", "starting report", "running report", "different owner", "different generation", "weak proof", "gateway error", "assignment error", "stopped binding"} {
+		t.Run(scenario, func(t *testing.T) {
+			p, o, now := observationViewFixture(t)
+			binding := InstanceRuntimeBinding{InstanceID: 7, GatewayID: "gw-7-1", GatewayPort: 20000, Generation: 1, State: "creating", CreatedAt: now.Add(-time.Second)}
+			known, wantPending := true, false
+			switch scenario {
+			case "reserved free":
+				binding.State, wantPending = "reserved", true
+			case "creating free":
+				wantPending = true
+			case "running before reservation":
+				binding.State, binding.CreatedAt, wantPending = "running", now.Add(time.Second), true
+			case "running after reservation":
+				binding.State = "running"
+			case "running zero reservation time":
+				binding.State, binding.CreatedAt = "running", time.Time{}
+			case "free with owner":
+				o.Slots[0].InstanceID = 9
+			case "free with partial identity":
+				o.Slots[0].Generation = 1
+			case "failed free":
+				binding.State = "error"
+			case "stale free":
+				old := now.Add(-3 * time.Minute)
+				p.ObservationAt, o.ObservedAt = &old, old
+			case "SQL unavailable":
+				known = false
+			case "unknown":
+				o.Slots[0].State = "unknown"
+			default:
+				o.Slots[0] = RuntimeSlotObservation{ContainerName: "slot-0", GatewayPort: 20000, State: "occupied", InstanceID: 7, UserID: 2, Generation: 1, GatewayID: "gw-7-1", InstanceState: "starting", GatewayState: "starting", IdentityVerified: true}
+				binding.State = "running"
+				switch scenario {
+				case "starting report":
+					wantPending = true
+				case "running report":
+					binding.State, o.Slots[0].GatewayState, wantPending = "creating", "running", true
+				case "different owner":
+					o.Slots[0].InstanceID, o.Slots[0].GatewayID = 9, "gw-9-1"
+				case "different generation":
+					o.Slots[0].Generation, o.Slots[0].GatewayID = 2, "gw-7-2"
+				case "weak proof":
+					o.Slots[0].IdentityVerified = false
+				case "assignment error":
+					o.Slots[0].InstanceState = "error"
+				case "gateway error":
+					o.Slots[0].GatewayState = "error"
+				case "stopped binding":
+					binding.State = "stopped"
+				}
+			}
+			setViewObservation(t, &p, o)
+			ReconcileRuntimePodObservation(&p, []InstanceRuntimeBinding{binding}, known, now)
+			slot := p.Slots[0]
+			raw, err := json.Marshal(slot)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var payload map[string]any
+			if err := json.Unmarshal(raw, &payload); err != nil {
+				t.Fatal(err)
+			}
+			if pending := payload["start_pending"] == true; pending != wantPending {
+				t.Fatalf("start_pending=%v want %v: %s", pending, wantPending, raw)
+			}
+			if slot.BindingConfirmed || slot.ReconciliationState == "consistent" || p.UsedSlots < 1 {
+				t.Fatalf("display progress weakened binding fences: %+v", slot)
+			}
+			if err := ConfirmedEmptyRuntimeObservation(p, now); err == nil {
+				t.Fatal("display progress enabled empty admission")
+			}
+			// Reusing the projection cannot retain an earlier pending hint.
+			binding.State = "error"
+			ReconcileRuntimePodObservation(&p, []InstanceRuntimeBinding{binding}, known, now)
+			raw, _ = json.Marshal(p.Slots[0])
+			payload = nil
+			_ = json.Unmarshal(raw, &payload)
+			if payload["start_pending"] == true {
+				t.Fatal("pending hint survived failure")
+			}
+		})
+	}
+}

@@ -35,6 +35,8 @@ import InstanceSkillsDialog from "../../components/InstanceSkillsDialog";
 import InstanceWorkspaceSplit from "../../components/InstanceWorkspaceSplit";
 import InstanceNameEditor from "../../components/InstanceNameEditor";
 import { InstanceServiceFrame } from "../../components/InstanceServiceFrame";
+import InstanceSleepingState from "../../components/InstanceSleepingState";
+import { getInstanceDisplayStatus } from "../../lib/instanceStatus";
 import RestartWithEnvironmentDialog from "../../components/RestartWithEnvironmentDialog";
 import UserLayout from "../../components/UserLayout";
 import UpgradeRecoveryActions from "../../components/UpgradeRecoveryActions";
@@ -336,6 +338,7 @@ const InstanceDetailPage: React.FC = () => {
   const [loading, setLoading] = useState(!preparedInstance);
   const [error, setError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [wakeError, setWakeError] = useState<{ generation: number | undefined; message: string } | null>(null);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [showRestartEnvironmentDialog, setShowRestartEnvironmentDialog] =
     useState(false);
@@ -764,6 +767,7 @@ const InstanceDetailPage: React.FC = () => {
 
     try {
       setActionLoading(action);
+      if (action === "start") setWakeError(null);
       if (action === "restart") {
         showRestartNotice(t("instances.restartInProgress"));
       } else {
@@ -790,7 +794,11 @@ const InstanceDetailPage: React.FC = () => {
       await fetchMeta(instance.id, { background: true });
     } catch (err: unknown) {
       dismissRestartNotice();
-      if (activePage.current) alert(getErrorMessage(err, t("instances.failedToLoad")));
+      if (activePage.current) {
+        if (action === "start" && getInstanceDisplayStatus(instance.status, instance.stopped_reason) === "auto_sleep") {
+          setWakeError({ generation: instance.runtime_generation, message: getErrorMessage(err, t("instances.wakeFailed")) });
+        } else alert(getErrorMessage(err, t("instances.failedToLoad")));
+      }
     } finally {
       setActionLoading(null);
     }
@@ -1414,6 +1422,11 @@ const InstanceDetailPage: React.FC = () => {
   );
 
   const sharedWorkbenchState=(workbenchScope ? workbenchViews[workbenchScope] : undefined)??restoredWorkbench.state;
+  const sleepingContent = getInstanceDisplayStatus(status?.status ?? instance.status, instance.stopped_reason) === "auto_sleep"
+    ? <InstanceSleepingState type={instance.type} waking={actionLoading === "start"} disabled={actionLoading !== null}
+        error={wakeError?.generation === instance.runtime_generation ? wakeError?.message ?? null : null}
+        onWake={() => void handleAction("start")} />
+    : undefined;
 
   const renderLiteWorkspace = () => {
     const pinnedWorkspaceHeight = workspaceHeightPx;
@@ -1451,6 +1464,7 @@ const InstanceDetailPage: React.FC = () => {
               instanceType={instance.type}
               instanceMode={instance.instance_mode}
               availability={availability}
+              unavailableContent={sleepingContent}
               reloadToken={serviceFrameReloadToken}
               openCodeInitialDirectory={openCodeInitialDirectory}
               workspaceVisible={supportsWorkspace(instance) ? workspaceVisible : undefined}
@@ -1556,6 +1570,7 @@ const InstanceDetailPage: React.FC = () => {
             instanceType={instance.type}
             instanceMode={instance.instance_mode}
             availability={availability}
+            unavailableContent={sleepingContent}
             reloadToken={serviceFrameReloadToken}
             workspaceVisible={supportsWorkspace(instance) ? workspaceVisible : undefined}
             onWorkspaceVisibilityChange={supportsWorkspace(instance) ? setWorkspaceVisible : undefined}

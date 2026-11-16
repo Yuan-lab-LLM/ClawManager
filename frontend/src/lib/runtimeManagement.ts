@@ -13,6 +13,7 @@ export type SlotState =
 export function slotState(slot: RuntimeSlot): SlotState {
   if (slot.reconciliation_state === "releasing") return "releasing";
   if (slot.reconciliation_state === "unknown") return "unknown";
+  if (slot.start_pending) return slot.ready ? "starting" : "unavailable";
   if (slot.reconciliation_state === "residual" || slot.reconciliation_state === "conflict") return "error";
   if (!slot.ready) return "unavailable";
   if (!slot.instance_id) return "idle";

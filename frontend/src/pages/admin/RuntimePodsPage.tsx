@@ -224,13 +224,6 @@ export default function RuntimePodsPage() {
                 </div></details>
               </div>
               <div className="runtime-toolbar-actions flex-wrap">
-                <button type="button" className={`${buttonClass} !px-2 !py-1.5`} onClick={() => setDialog({ kind: "maintenance" })}>{t("runtimePods.maintenance")}</button>
-                <ActionMenu label={t("runtimePods.cardActions")} items={[
-                  {id:"recovery",label:t("runtimePods.recoveryTitle"),onSelect:() => setDialog({kind:"recovery"})},
-                  {id:"auto-stop",label:t("autoStop.title"),onSelect:() => setDialog({kind:"auto-stop"})},
-                  {id:"balance",label:t("runtimePods.balance"),onSelect:() => setDialog({kind:"balance"})},
-                  {id:"history",label:t("runtimePods.history"),onSelect:() => setDialog({kind:"history"})},
-                ]} />
                 <button
                   type="button"
                   className={`${primaryClass} !px-2 !py-1.5`}
@@ -239,6 +232,13 @@ export default function RuntimePodsPage() {
                 >
                   {t("runtimePods.batch")}
                 </button>
+                <ActionMenu label={t("runtimePods.cardActions")} items={[
+                  {id:"recovery",label:t("runtimePods.recoveryTitle"),onSelect:() => setDialog({kind:"recovery"})},
+                  {id:"auto-stop",label:t("autoStop.title"),onSelect:() => setDialog({kind:"auto-stop"})},
+                  {id:"balance",label:t("runtimePods.balance"),onSelect:() => setDialog({kind:"balance"})},
+                  {id:"history",label:t("runtimePods.history"),onSelect:() => setDialog({kind:"history"})},
+                  {id:"maintenance",label:t("runtimePods.maintenance"),onSelect:() => setDialog({kind:"maintenance"})},
+                ]} />
               </div>
             </div>
             <div className="runtime-inventory-status">

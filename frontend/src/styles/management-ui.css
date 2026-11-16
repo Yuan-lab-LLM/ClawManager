@@ -134,10 +134,13 @@ color: var(--cm-text);
 .cm-management-sidebar { position:relative; z-index:35; flex:0 0 var(--cm-sidebar-width); width:var(--cm-sidebar-width); background:var(--cm-surface); border-right:1px solid var(--cm-border); }
 .cm-sidebar-collapsed .cm-management-sidebar { flex-basis:64px; width:64px; }
 .cm-sidebar-inner { position:sticky; top:0; display:flex; flex-direction:column; height:100dvh; }
-.cm-shell-brand { height:var(--cm-header-height); display:flex; align-items:center; gap:8px; flex-shrink:0; padding:0 16px; color:var(--cm-ink); font-size:var(--cm-font-brand); font-weight:600; white-space:nowrap; border-bottom:1px solid var(--cm-border); }
-.cm-shell-brand img { width:30px; height:var(--cm-control-height); object-fit:contain; }
+.cm-shell-brand { height:var(--cm-header-height); min-width:0; display:flex; align-items:center; gap:8px; flex-shrink:0; padding:0 16px; color:var(--cm-ink); font-size:var(--cm-font-brand); font-weight:600; white-space:nowrap; border-bottom:1px solid var(--cm-border); }
+.cm-shell-brand img { width:30px; height:var(--cm-control-height); flex-shrink:0; object-fit:contain; }
+.cm-shell-brand-copy { display:flex; flex:1; flex-direction:column; min-width:0; line-height:20px; }
+.cm-shell-brand-name { overflow:hidden; text-overflow:ellipsis; }
+.cm-shell-brand [data-testid="clawmanager-version"] { border:0; border-radius:0; background:transparent; padding:0; font-size:10px; font-weight:400; line-height:12px; color:var(--cm-muted); }
 .cm-sidebar-collapsed .cm-management-sidebar .cm-shell-brand { padding:0; justify-content:center; }
-.cm-sidebar-collapsed .cm-management-sidebar .cm-shell-brand span, .cm-sidebar-collapsed .cm-shell-version { display:none; }
+.cm-sidebar-collapsed .cm-management-sidebar .cm-shell-brand-copy { display:none; }
 .cm-shell-navigation { flex:1; padding:12px 10px; }
 .cm-shell-navigation .app-nav-link { min-height:var(--cm-navigation-height); margin-bottom:4px; padding:0 10px; border-radius:4px; color:var(--cm-muted); font-size:var(--cm-font-body); gap:10px; }
 .cm-shell-navigation .app-nav-link svg { color:var(--cm-nav-icon); }
@@ -145,7 +148,6 @@ color: var(--cm-text);
 .cm-shell-navigation .app-nav-link-active { background:var(--cm-selected); color:var(--cm-primary); font-weight:600; }
 .cm-shell-navigation .app-nav-link-active svg { color:var(--cm-primary); }
 .cm-shell-navigation .app-nav-link > svg { width:20px; height:20px; }
-.cm-shell-version { padding:12px 20px; border-top:1px solid var(--cm-border); }
 .cm-sidebar-edge { position:fixed; top:50dvh; left:212px; z-index:30; display:flex; align-items:center; justify-content:center; width:24px; height:24px; border:1px solid var(--cm-border); border-radius:50%; background:var(--cm-surface); color:var(--cm-muted); }
 .cm-sidebar-collapsed .cm-sidebar-edge { left:52px; }
 .cm-shell-content { display:flex; flex:1; flex-direction:column; min-width:0; }
@@ -188,7 +190,6 @@ color: var(--cm-text);
 /* Bound the desktop navigation independently of the page. Fixed submenus escape
    this scrollport without clipping the category links at short viewport heights. */
 .cm-management-sidebar .cm-shell-navigation { min-height:0; overflow-y:auto; overscroll-behavior:contain; }
-.cm-shell-version { flex-shrink:0; }
 .cm-sidebar-protection-popup { position:fixed; z-index:40; width:256px; overflow:auto; padding:8px; }
 .cm-team-header-actions { position:relative; flex-shrink:0; }
 .cm-team-header-actions summary { display:flex; align-items:center; gap:8px; height:var(--cm-control-height); padding:0 10px; list-style:none; cursor:pointer; border:1px solid var(--cm-border); border-radius:var(--cm-radius-control); background:var(--cm-surface); color:var(--cm-ink); font-size:12px; }

@@ -67,6 +67,7 @@ func ReconcileRuntimePodObservation(p *RuntimePod, bindings []InstanceRuntimeBin
 		priorID := slot.InstanceID
 		slot.InstanceID, slot.Generation, slot.ExpectedInstanceID = nil, nil, nil
 		slot.BindingConfirmed, slot.ReconciliationState, slot.ObservationMessage = false, "unknown", ""
+		slot.StartPending = false
 		slot.InstanceState, slot.GatewayID = "", ""
 		if bound {
 			slot.InstanceID, slot.Generation, slot.ExpectedInstanceID = inventoryInt(binding.InstanceID), inventoryInt(binding.Generation), inventoryInt(binding.InstanceID)
@@ -97,6 +98,10 @@ func ReconcileRuntimePodObservation(p *RuntimePod, bindings []InstanceRuntimeBin
 			slot.GatewayID, slot.InstanceState, slot.InstanceName, slot.Owner = "", "", "", nil
 		case fact.State == "free" && fact.Error == "" && (fact.GatewayState == "" || fact.GatewayState == "stopped"):
 			if bound {
+				// A start reserves SQL capacity before its first Runtime observation.
+				// Keep the conflict fence; only its presentation is in progress.
+				slot.StartPending = bindingsKnown && slot.Ready && fact.InstanceID == 0 && fact.UserID == 0 && fact.Generation == 0 && fact.GatewayID == "" && fact.InstanceState == "" &&
+					(inventoryState(binding.State) == "starting" || (inventoryState(binding.State) == "running" && !binding.CreatedAt.IsZero() && observation.ObservedAt.Before(binding.CreatedAt)))
 				slot.InstanceID, slot.Generation, slot.GatewayID, slot.InstanceState, slot.InstanceName, slot.Owner = nil, nil, "", "", "", nil
 				slot.ReconciliationState = "conflict"
 				slot.ObservationMessage = "Runtime reports an empty slot but the database still reserves it"
@@ -121,6 +126,10 @@ func ReconcileRuntimePodObservation(p *RuntimePod, bindings []InstanceRuntimeBin
 			case !fact.IdentityVerified || fact.Error != "":
 				slot.ObservationMessage = "Runtime owner proof is incomplete"
 			case inventoryState(binding.State) != inventoryState(slot.InstanceState):
+				expected, reported := inventoryState(binding.State), inventoryState(slot.InstanceState)
+				assignment := inventoryState(fact.InstanceState)
+				slot.StartPending = slot.Ready && (assignment == "" || assignment == "starting" || assignment == "running") &&
+					((expected == "starting" && reported == "running") || (expected == "running" && reported == "starting"))
 				slot.ReconciliationState = "conflict"
 				slot.ObservationMessage = "Database and Runtime disagree about the gateway state"
 			default:

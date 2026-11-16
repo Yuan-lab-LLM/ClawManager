@@ -256,3 +256,22 @@ func TestRuntimePodsLegacyUnknownUIDDoesNotBecomeConfirmed(t *testing.T) {
 		t.Fatalf("legacy display changed or unknown UID became confirmed: %+v", merged)
 	}
 }
+
+func TestRuntimePendingStartSummaryRetainsCapacityAndBindingFences(t *testing.T) {
+	id := 7
+	slot := models.RuntimeSlot{Ready: true, ExpectedInstanceID: &id, ReconciliationState: "conflict", StartPending: true}
+	if state := runtimeInventorySlotState(slot); state != "starting" {
+		t.Fatalf("pending start displayed as %q", state)
+	}
+	slot.StartPending = false
+	if state := runtimeInventorySlotState(slot); state != "error" {
+		t.Fatalf("real conflict displayed as %q", state)
+	}
+	slot.StartPending = true
+	for _, state := range []string{"unknown", "releasing"} {
+		slot.ReconciliationState = state
+		if got := runtimeInventorySlotState(slot); got != state {
+			t.Fatalf("%s overridden by progress: %s", state, got)
+		}
+	}
+}
