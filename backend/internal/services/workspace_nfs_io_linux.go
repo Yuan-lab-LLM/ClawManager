@@ -4,6 +4,7 @@ package services
 
 import (
 	"bytes"
+	"clawreef/internal/ownerrecords"
 	"context"
 	"encoding/binary"
 	"encoding/json"
@@ -72,6 +73,9 @@ func runWorkspaceNFSHelperCommand(ctx context.Context, command string, request w
 	cmd.Stdin = io.MultiReader(readers...)
 	cmd.ExtraFiles = []*os.File{right, exe}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: uint32(request.UID), Gid: uint32(request.GID), Groups: []uint32{}}, Pdeathsig: syscall.SIGKILL}
+	if command == ownerHistoryHelperCommand {
+		cmd.SysProcAttr.Setpgid = true
+	}
 	cmd.WaitDelay = 5 * time.Second
 	var output workspaceNFSOutput
 	cmd.Stdout = &output
@@ -174,6 +178,10 @@ func runWorkspaceNFSHelperCommand(ctx context.Context, command string, request w
 		if status, ok := cmd.ProcessState.Sys().(syscall.WaitStatus); ok && status.Signaled() {
 			ended = true
 		}
+	}
+	if command == ownerHistoryHelperCommand && !ownerrecords.HistoryReaderGroupDrained(cmd) {
+		ended = false
+		waitErr = errors.Join(waitErr, fmt.Errorf("native history reader descendants have not exited"))
 	}
 	if waitErr != nil || controlErr != nil || auditFailure != nil || ctx.Err() != nil {
 		if file != nil {

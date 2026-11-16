@@ -113,7 +113,7 @@ func (p *ManagedTeamPreview) migrationReady(ctx context.Context, team *models.Te
 		if member.TeamID != team.ID || member.UserID != team.UserID || member.InstanceMode != InstanceModeLite || member.InstanceID == nil || *member.InstanceID < 1 || seen[*member.InstanceID] {
 			return errManagedPreview
 		}
-		if member.RuntimeType != RuntimeTypeOpenClaw && member.RuntimeType != RuntimeTypeHermes {
+		if member.RuntimeType != RuntimeTypeOpenClaw && member.RuntimeType != RuntimeTypeHermes && member.RuntimeType != RuntimeTypeOpenCode && member.RuntimeType != RuntimeTypeDeepSeekHarness {
 			return errManagedPreview
 		}
 		switch member.Status {

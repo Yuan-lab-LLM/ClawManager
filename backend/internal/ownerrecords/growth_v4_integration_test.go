@@ -137,9 +137,11 @@ func verifyGrowthV4(t *testing.T, s *Store) {
 		t.Fatal(e)
 	}
 	d, e = replica.CachedDashboard(ctx, owner, nil, "7d", now.Add(13*time.Minute))
-	if e != nil || d.Snapshot.State != "updating" {
-		t.Fatal("partial batch falsely ready", e)
+	if e != nil || d.Snapshot.State != "deferred" {
+		t.Fatal("expired partial batch must wait for next pass, not remain running", e)
 	}
+	d,e=replica.CachedDashboard(ctx,owner,nil,"7d",now.Add(10*time.Second))
+	if e!=nil || d.Snapshot.State!="updating" { t.Fatal("live batch not running",e) }
 	verifyV4SourceCapacity(t, s, day.AddDate(0, 0, 1))
 }
 

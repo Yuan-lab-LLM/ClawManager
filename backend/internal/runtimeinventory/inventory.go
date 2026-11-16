@@ -89,6 +89,7 @@ func (s *objectStore) selectObjects(selectObject func(string, runtime.Object) bo
 // spec.podCIDRs can describe different ranges and are not a substitute.
 type Inventory struct {
 	assignments, pods, nodes, services objectStore
+	legacyServiceRanges                []netip.Prefix
 	podRanges                          []netip.Prefix
 	controlAddresses                   []netip.Addr
 	cancel                             context.CancelFunc
@@ -184,11 +185,15 @@ func (i *Inventory) DeniedPrefixes(ctx context.Context) ([]netip.Prefix, error) 
 	if err != nil || len(nodes) == 0 {
 		return nil, errUnavailable
 	}
-	services, err := i.services.snapshot()
-	if err != nil || len(services) == 0 {
-		return nil, errUnavailable
+	services := map[string]runtime.Object{}
+	if len(i.legacyServiceRanges) == 0 {
+		services, err = i.services.snapshot()
+		if err != nil || len(services) == 0 {
+			return nil, errUnavailable
+		}
 	}
 	prefixes := append([]netip.Prefix(nil), i.podRanges...)
+	prefixes = append(prefixes, i.legacyServiceRanges...)
 	addAddress := func(address netip.Addr) {
 		address = address.Unmap()
 		prefixes = append(prefixes, netip.PrefixFrom(address, address.BitLen()))
@@ -243,10 +248,18 @@ func (i *Inventory) checkHealthy(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	for _, store := range []*objectStore{&i.assignments, &i.pods, &i.nodes, &i.services} {
+	for _, store := range i.observedStores() {
 		if !store.isHealthy() {
 			return errUnavailable
 		}
 	}
 	return nil
+}
+
+func (i *Inventory) observedStores() []*objectStore {
+	stores := []*objectStore{&i.assignments, &i.pods, &i.nodes}
+	if len(i.legacyServiceRanges) == 0 {
+		stores = append(stores, &i.services)
+	}
+	return stores
 }

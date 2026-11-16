@@ -1,3 +1,4 @@
+import TeamPowerControl, { teamPowerLabel } from '../../components/teams/TeamPowerControl';
 import { teamStatusLabel } from "../../lib/teamI18n";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, Download, FilePenLine, FileText, MessagesSquare } from "lucide-react";
@@ -992,6 +993,7 @@ const TeamDetailPage: React.FC = () => {
   const user = environment.owner ? { username: environment.owner, email: environment.owner, id: 0 } : cmUser;
   const teamId = id ? Number(id) : null;
   const [details, setDetails] = useState<TeamDetails | null>(null);
+  const teamRead = useRef({ sequence: 0, inFlight: false });
   const [loadedTasks, setLoadedTasks] = useState<TeamTask[]>([]);
   const [loadedEvents, setLoadedEvents] = useState<TeamEvent[]>([]);
   const [hasMoreTasks, setHasMoreTasks] = useState(false);
@@ -1021,6 +1023,8 @@ const TeamDetailPage: React.FC = () => {
   const ownerViewKey = environment.owner && teamId ? `owner-team-view:${environment.owner}:${teamId}` : '';
 
   useEffect(() => {
+    teamRead.current.sequence++;
+    teamRead.current.inFlight = false;
     setLoadedTasks([]);
     setLoadedEvents([]);
     setHasMoreTasks(false);
@@ -1050,7 +1054,7 @@ const TeamDetailPage: React.FC = () => {
         }
       } catch { /* A malformed presentation cache cannot grant access. */ }
     }
-    return () => workspaceFileRequest.current?.abort();
+    return () => { teamRead.current.sequence++; teamRead.current.inFlight = false; workspaceFileRequest.current?.abort(); };
   }, [teamId, ownerViewKey]);
 
   useEffect(() => {
@@ -1064,11 +1068,17 @@ const TeamDetailPage: React.FC = () => {
         setLoading(false);
         return;
       }
+      // A slow poll must not overlap the next poll indefinitely or overwrite
+      // a newer manual refresh. This gate affects reads only, never dispatch.
+      if (options?.background && teamRead.current.inFlight) return;
+      const sequence = ++teamRead.current.sequence;
+      teamRead.current.inFlight = true;
       try {
         if (!options?.background) {
           setLoading(true);
         }
         const data = await teamService.getTeam(teamId);
+        if (sequence !== teamRead.current.sequence) return;
         if (eventHistoryCursor.current === undefined && data.events_next_before_id) eventHistoryCursor.current = data.events_next_before_id;
         setDetails(data);
         setLoadedTasks((current) => mergeTasksByLatestState(current, data.tasks || []));
@@ -1085,9 +1095,10 @@ const TeamDetailPage: React.FC = () => {
         );
         setError(null);
       } catch (err: any) {
+        if (sequence !== teamRead.current.sequence) return;
         setError(err.response?.data?.error || "加载 Team 失败");
       } finally {
-        setLoading(false);
+        if (sequence === teamRead.current.sequence) { teamRead.current.inFlight = false; setLoading(false); }
       }
     },
     [teamId],
@@ -1209,6 +1220,7 @@ const TeamDetailPage: React.FC = () => {
   }, [details?.team.id, workspacePreview]);
 
   const handleDispatch = async (event: React.FormEvent) => {
+    if (details?.team.runtime_state && details.team.runtime_state.state !== "running") { event.preventDefault(); setError("团队尚未启动完成，请先启动团队。草稿已保留。"); return; }
     event.preventDefault();
     if (dispatchLock.current) return;
     if (!teamId || !taskPrompt.trim()) {
@@ -1309,10 +1321,11 @@ const TeamDetailPage: React.FC = () => {
       title={t("nav.teams")}
       titleAccessory={
         <TeamHeaderActions>
-          <span className="cm-team-status" data-status={details.team.status}>{teamStatusLabel(locale, details.team.status)}</span>
+          <span className="cm-team-status" data-status={details.team.runtime_state?.state || details.team.status}>{teamPowerLabel(details.team.runtime_state) || teamStatusLabel(locale, details.team.status)}</span>
           <span>Team #{details.team.id}</span>
           <span className="cm-team-shared-path">{t("teams.sharedPath", { path: details.team.shared_mount_path })}</span>
           <div className="cm-team-header-buttons">
+ <TeamPowerControl state={details.team.runtime_state} start={() => teamService.startTeam(details.team.id)} stop={() => teamService.stopTeam(details.team.id)} onChange={() => loadTeam({background:true})}/>
             <button
               type="button"
               onClick={() => { setDeleteError(""); setDeleteOpen(true); }}
@@ -1333,6 +1346,7 @@ const TeamDetailPage: React.FC = () => {
     >
       {error && <div role="alert" className="shrink-0 px-3 py-2 text-sm text-red-700">{t("teams.updateFailed", { error })}</div>}
       {workspaceError && <div role="alert" className="shrink-0 px-3 py-2 text-sm text-[var(--cm-error)]">{workspaceError}</div>}
+      {details.team.runtime_state && details.team.runtime_state.state !== "running" && <div role="status" className="px-4 py-2 text-sm text-slate-600">{teamPowerLabel(details.team.runtime_state)}。历史对话和文件仍可查看，启动完成后可发送任务。{details.team.runtime_state.error && <span role="alert"> {details.team.runtime_state.error}</span>}</div>}
       <TeamChatWorkspace
         key={details.team.id}
         members={details.members}
@@ -2371,7 +2385,7 @@ function CollaborationPanel({
           <div className="min-w-0 flex-1">
             <h2 className="team-chat-heading" title={team.name}><span><MessagesSquare size={18} /></span>{team.name}</h2>
             <div className="team-chat-subtitle">
-              <span>Team #{team.id}</span><span className="team-chat-online"><i />{t("teams.online", { count: onlineCount })}</span>{startingCount > 0 && <span>{t("teams.starting", { count: startingCount })}</span>}<span className="cm-team-status" data-status={team.status}>{teamStatusLabel(locale, team.status)}</span>
+              <span>Team #{team.id}</span><span className="team-chat-online"><i />{t("teams.online", { count: onlineCount })}</span>{startingCount > 0 && <span>{t("teams.starting", { count: startingCount })}</span>}<span className="cm-team-status" data-status={team.runtime_state?.state || team.status}>{teamPowerLabel(team.runtime_state) || teamStatusLabel(locale, team.status)}</span>
             </div>
           </div>
           {queryAnchors.length >= 2 && <TeamHistoryMenu
@@ -2468,7 +2482,7 @@ function CollaborationPanel({
 
       {unread && <button type="button" className="mx-auto my-1 rounded-full border border-sky-200 px-3 py-1 text-xs text-sky-700" onClick={jumpToLatest}>有新消息 · 回到底部 ↓</button>}
 
-      <TeamTaskComposer members={members} leaderKey={leaderMemberId} targetKey={targetMember} onTargetChange={onTargetChange} value={taskPrompt} onChange={onTaskPromptChange} sending={dispatching} error={dispatchError} reference={reference} onClearReference={onClearReference} onSubmit={onDispatch} />
+      <TeamTaskComposer members={members} leaderKey={leaderMemberId} targetKey={targetMember} onTargetChange={onTargetChange} value={taskPrompt} onChange={onTaskPromptChange} sending={dispatching} disabled={!!team.runtime_state && team.runtime_state.state !== "running"} error={dispatchError} reference={reference} onClearReference={onClearReference} onSubmit={onDispatch} />
     </section>
   );
 }

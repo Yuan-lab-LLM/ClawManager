@@ -3,6 +3,7 @@
 package services
 
 import (
+	"bytes"
 	"clawreef/internal/ownerrecords"
 	"context"
 	"encoding/hex"
@@ -69,6 +70,19 @@ func RunOwnerHistoryHelper(args []string, input io.Reader, output io.Writer) (bo
 	}
 	response := workspaceNFSResponse{}
 	switch request.Action {
+	case "snapshot":
+		var identity struct {
+			Root, Workspace string
+			Identity        ownerrecords.Identity
+		}
+		if json.Unmarshal(request.HistorySnapshot, &identity) != nil || identity.Root != request.Root || identity.Workspace != request.Scope.WorkspacePath || identity.Identity != request.HistoryIdentity {
+			return true, ErrWorkspacePathInvalid
+		}
+		var result bytes.Buffer
+		if ownerrecords.RunHistoryReaderContext(context.Background(), bytes.NewReader(request.HistorySnapshot), &result) != 0 {
+			return true, ErrWorkspacePathInvalid
+		}
+		response.HistorySnapshot = result.Bytes()
 	case "history":
 		response.Questions, err = ownerrecords.ReadNativeHistorySnapshot(context.Background(), request.Root, request.Scope.WorkspacePath, request.HistoryIdentity, request.HistoryRecent, request.HistoryCutoff...)
 	case "fingerprint":

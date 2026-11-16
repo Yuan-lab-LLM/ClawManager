@@ -3,6 +3,7 @@ package k8s
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -15,6 +16,80 @@ import (
 )
 
 const RuntimeStoppedSourceAnnotationPrefix = "clawmanager.io/stopped-source-"
+
+var ErrCurrentStartPublicationUnavailable = errors.New("current Start publication is unavailable")
+
+// RetainedStoppedAssignment reads the existing controller-confirmed source;
+// it authorizes only nondestructive resume, never workspace deletion or history
+// retirement. Old credentials alone cannot resurrect an old writer generation.
+func (s *RuntimeAssignmentService) RetainedStoppedAssignment(ctx context.Context, id, user, generation int, kind, workspace string) (RuntimeAssignment, error) {
+	if err := s.validService(); err != nil {
+		return RuntimeAssignment{}, err
+	}
+	cm, err := s.client.CoreV1().ConfigMaps(s.namespace).Get(ctx, runtimeAssignmentName(id), metav1.GetOptions{})
+	if err != nil {
+		return RuntimeAssignment{}, err
+	}
+	a, state, err := storedRuntimeAssignment(cm)
+	if err != nil {
+		return RuntimeAssignment{}, err
+	}
+	if cm.DeletionTimestamp != nil || state != "stopped" || a.InstanceID != id || a.UserID != user || a.RuntimeType != kind || a.Generation >= generation || workspace == "" || assignmentWorkspace(a) != workspace || cm.Data["container_stop_released"] != "true" || cm.Data["container_termination_proof"] == "" {
+		return RuntimeAssignment{}, fmt.Errorf("retained source is not a finalized predecessor")
+	}
+	if err = s.CheckFailedStartStopped(ctx, id, user, a.Generation, kind, workspace); err != nil {
+		return RuntimeAssignment{}, err
+	}
+	secrets, err := s.client.CoreV1().Secrets(s.namespace).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return RuntimeAssignment{}, err
+	}
+	prefix := fmt.Sprintf("lite-instance-%d-g", id)
+	for _, secret := range secrets.Items {
+		if secret.Labels["clawmanager.io/instance-id"] != strconv.Itoa(id) && !strings.HasPrefix(secret.Name, prefix) {
+			continue
+		}
+		gen, parseErr := strconv.Atoi(secret.Labels["clawmanager.io/generation"])
+		if parseErr != nil || gen < 1 || gen > a.Generation {
+			return RuntimeAssignment{}, fmt.Errorf("a newer or unknown publication must reconcile before resume")
+		}
+	}
+	return a, nil
+}
+
+// CheckFailedStartStopped only retires the current Start deadline. It grants no
+// authority to delete a workspace or retire older publication credentials; those
+// operations still require CheckUnboundInstanceStopped's complete history.
+func (s *RuntimeAssignmentService) CheckFailedStartStopped(ctx context.Context, id, user, generation int, kind, workspace string) error {
+	if err := s.validService(); err != nil {
+		return err
+	}
+	cm, err := s.client.CoreV1().ConfigMaps(s.namespace).Get(ctx, runtimeAssignmentName(id), metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return ErrCurrentStartPublicationUnavailable
+	}
+	if err != nil {
+		return err
+	}
+	a, state, err := storedRuntimeAssignment(cm)
+	if err != nil {
+		return err
+	}
+	if a.InstanceID == id && a.UserID == user && a.RuntimeType == kind && a.Generation < generation && state == "stopped" {
+		return ErrCurrentStartPublicationUnavailable
+	}
+	proof := RuntimeStoppedSourceAudit{InstanceID: a.InstanceID, UserID: a.UserID, Generation: a.Generation, RuntimeType: a.RuntimeType, PodUID: a.PodUID, Endpoint: a.Endpoint, GatewayID: a.GatewayID, WorkspacePath: assignmentWorkspace(a), Stopped: state == "stopped"}
+	if err := ValidateRuntimeStoppedSourceAudit(proof, id, user, generation, kind); err != nil {
+		return err
+	}
+	if a.Generation != generation || workspace == "" || proof.WorkspacePath != workspace || cm.DeletionTimestamp != nil {
+		return fmt.Errorf("failed Start source identity changed")
+	}
+	if (cm.Data["container_stop_intent"] != "" || cm.Data["container_termination_proof"] != "") && (cm.Data["container_termination_proof"] == "" || cm.Data["container_stop_released"] != "true") {
+		return fmt.Errorf("failed Start container teardown is unconfirmed")
+	}
+	return nil
+}
 
 // RuntimeStoppedSourceAudit preserves existing controller-confirmed stop
 // authority before EnsureDesired replaces a generation's current assignment.

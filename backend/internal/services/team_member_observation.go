@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -19,8 +20,9 @@ type TeamMemberObserver interface {
 }
 
 type teamObservationPods struct {
-	at   time.Time
-	pods []k8s.RuntimeDeploymentPod
+	at      time.Time
+	pods    []k8s.RuntimeDeploymentPod
+	delayed bool
 }
 type teamRuntimeFactsReader interface {
 	TeamMemberRuntimeFacts(context.Context, []int) (map[int]models.TeamMemberRuntimeFacts, error)
@@ -33,6 +35,17 @@ func observationFresh(t *time.Time, now time.Time, max time.Duration) bool {
 // Presence describes liveness only. Assignment IDs, availability and outcome
 // fields from old status records must never overwrite the current work ledger.
 func projectTeamMemberObservation(member models.TeamMember, instance models.Instance, gateway models.TeamMemberRuntimeObservation, raw string, now time.Time) models.TeamMember {
+	if instance.Status == "stopped" {
+		member.RuntimeStatus = optionalString("stopped")
+		member.Availability = "offline"
+		member.BlockedReason = nil
+		reason := "runtime_stopped"
+		if instance.StoppedReason != "" {
+			reason = "intentionally_stopped"
+		}
+		member.RuntimeObservation = &models.TeamMemberRuntimeObservation{State: "offline", Reason: reason}
+		return member
+	}
 	obs := gateway
 	if gateway.State == "online" {
 		obs.State, obs.Reason, obs.ObservedAt = "unknown", "collaboration_unconfirmed", nil
@@ -56,7 +69,10 @@ func projectTeamMemberObservation(member models.TeamMember, instance models.Inst
 			}
 			if teamID == strconv.Itoa(member.TeamID) && presence.MemberID == member.MemberKey && observationFresh(&presence.LastSeenAt, now, 2*time.Minute) && !presence.LastSeenAt.Before(start) && (gen == nil || *gen == instance.RuntimeGeneration) {
 				if presence.Liveness == "online" {
-					obs.State, obs.Reason, obs.ObservedAt = "online", "", &presence.LastSeenAt
+					obs.State, obs.Reason, obs.ObservedAt = "online", gateway.Reason, &presence.LastSeenAt
+					if gateway.Reason == "runtime_inventory_delayed" && gateway.ObservedAt != nil && gateway.ObservedAt.Before(presence.LastSeenAt) {
+						obs.ObservedAt = gateway.ObservedAt
+					}
 				} else if presence.Liveness == "offline" {
 					obs.State, obs.Reason, obs.ObservedAt = "offline", "collaboration_offline", &presence.LastSeenAt
 				}
@@ -97,22 +113,29 @@ func projectTeamMemberObservation(member models.TeamMember, instance models.Inst
 	return member
 }
 
-func (s *teamService) observationLivePods(ctx context.Context, pod *models.RuntimePod) ([]k8s.RuntimeDeploymentPod, error) {
+func (s *teamService) observationLivePods(ctx context.Context, pod *models.RuntimePod) (teamObservationPods, error) {
 	key := pod.Namespace + "/" + pod.DeploymentName
 	s.observationMu.Lock()
 	cached, ok := s.observationPods[key]
 	s.observationMu.Unlock()
 	if ok && time.Since(cached.at) < 10*time.Second {
-		return cached.pods, nil
+		return cached, nil
 	}
 	if s.pvcService == nil || s.pvcService.GetClient() == nil {
-		return nil, fmt.Errorf("runtime inventory unavailable")
+		return teamObservationPods{}, fmt.Errorf("runtime inventory unavailable")
 	}
 	service := k8s.NewRuntimeDeploymentService(s.pvcService.GetClient().Clientset)
 	pods, err := service.ListDeploymentPods(ctx, []k8s.RuntimeDeploymentRef{{Namespace: pod.Namespace, Name: pod.DeploymentName}})
 	if err != nil {
-		return nil, err
+		// Reuse only a recent successful inventory. Binding, generation, image,
+		// Pod identity and fresh collaboration proof are still checked below.
+		if ok && time.Since(cached.at) < time.Minute {
+			cached.delayed = true
+			return cached, nil
+		}
+		return teamObservationPods{}, err
 	}
+	snapshot := teamObservationPods{at: time.Now(), pods: pods}
 	s.observationMu.Lock()
 	if s.observationPods == nil {
 		s.observationPods = map[string]teamObservationPods{}
@@ -122,12 +145,53 @@ func (s *teamService) observationLivePods(ctx context.Context, pod *models.Runti
 			delete(s.observationPods, k)
 		}
 	}
-	s.observationPods[key] = teamObservationPods{time.Now(), pods}
+	s.observationPods[key] = snapshot
 	s.observationMu.Unlock()
-	return pods, nil
+	return snapshot, nil
 }
 
-func (s *teamService) observeMemberGateway(ctx context.Context, f models.TeamMemberRuntimeFacts, now time.Time) models.TeamMemberRuntimeObservation {
+type teamInventoryRead struct {
+	snapshot teamObservationPods
+	err      error
+}
+
+// Query each authorized deployment once per request with bounded concurrency;
+// one slow Runtime must not consume the whole deadline before later members.
+func (s *teamService) observeInventories(ctx context.Context, facts map[int]models.TeamMemberRuntimeFacts) map[string]teamInventoryRead {
+	refs := map[string]*models.RuntimePod{}
+	for _, f := range facts {
+		if f.Runtime != nil {
+			refs[f.Runtime.Namespace+"/"+f.Runtime.DeploymentName] = f.Runtime
+		}
+	}
+	result := map[string]teamInventoryRead{}
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	slots := make(chan struct{}, 4)
+	for key, pod := range refs {
+		wg.Add(1)
+		go func(key string, pod *models.RuntimePod) {
+			defer wg.Done()
+			select {
+			case slots <- struct{}{}:
+				defer func() { <-slots }()
+			case <-ctx.Done():
+				mu.Lock()
+				result[key] = teamInventoryRead{err: ctx.Err()}
+				mu.Unlock()
+				return
+			}
+			snapshot, err := s.observationLivePods(ctx, pod)
+			mu.Lock()
+			result[key] = teamInventoryRead{snapshot, err}
+			mu.Unlock()
+		}(key, pod)
+	}
+	wg.Wait()
+	return result
+}
+
+func (s *teamService) observeMemberGateway(ctx context.Context, f models.TeamMemberRuntimeFacts, now time.Time, inventory map[string]teamInventoryRead) models.TeamMemberRuntimeObservation {
 	i := f.Instance
 	result := models.TeamMemberRuntimeObservation{State: "unknown", Reason: "runtime_unconfirmed"}
 	if teamMemberInstanceStarting(i.Status) {
@@ -155,13 +219,22 @@ func (s *teamService) observeMemberGateway(ctx context.Context, f models.TeamMem
 	if b == nil || b.RuntimeType != runtimeType || b.Generation != i.RuntimeGeneration || b.State != "running" || b.GatewayID == "" || b.GatewayPort <= 0 || p == nil || p.RuntimeType != runtimeType || (p.State != "ready" && i.RuntimeSecurityProfile != RuntimeSecurityProfile) || !observationFresh(p.LastSeenAt, now, heartbeat.Timeout) || !observationFresh(b.LastHealthAt, now, heartbeat.Timeout) {
 		return result
 	}
-	live, err := s.observationLivePods(ctx, p)
-	if err != nil {
+	read, ok := inventory[p.Namespace+"/"+p.DeploymentName]
+	if !ok {
+		read.snapshot, read.err = s.observationLivePods(ctx, p)
+	}
+	if read.err != nil {
+		result.Reason = "runtime_inventory_unavailable"
 		return result
 	}
-	for _, actual := range live {
+	result.Reason = "runtime_identity_unconfirmed"
+	for _, actual := range read.snapshot.pods {
 		if actual.ReadyForGateway(b.GatewayPort) && runtimeRolloutAgentMatchesPod(*p, actual) && runtimePodMatchesImage(*p, actual.ImageRef) {
 			result.State, result.Reason, result.ObservedAt = "online", "", b.LastHealthAt
+			if read.snapshot.delayed {
+				result.Reason = "runtime_inventory_delayed"
+				result.ObservedAt = &read.snapshot.at
+			}
 			return result
 		}
 		if actual.PodName == p.PodName && actual.State == "failed" && (p.PodUID == nil || *p.PodUID == actual.PodUID) {
@@ -231,6 +304,16 @@ func (s *teamService) ObserveTeamMembers(ctx context.Context, teams []models.Tea
 			}
 		}
 	}
+	// Never query inventory for a cross-owner or unrelated instance.
+	ownedFacts := map[int]models.TeamMemberRuntimeFacts{}
+	for _, m := range members {
+		if team, ok := byTeam[m.TeamID]; ok && team.UserID == m.UserID && m.InstanceID != nil {
+			if f, ok := facts[*m.InstanceID]; ok && f.Instance.UserID == team.UserID && (team.IsCM() || stringValue(f.Instance.Owner) == stringValue(team.Owner)) {
+				ownedFacts[*m.InstanceID] = f
+			}
+		}
+	}
+	inventory := s.observeInventories(ctx, ownedFacts)
 	now := time.Now().UTC()
 	for idx, m := range result {
 		gateway := models.TeamMemberRuntimeObservation{State: "unknown", Reason: "runtime_unconfirmed"}
@@ -238,7 +321,7 @@ func (s *teamService) ObserveTeamMembers(ctx context.Context, teams []models.Tea
 		if team, ok := byTeam[m.TeamID]; ok && team.UserID == m.UserID && m.InstanceID != nil {
 			if f, ok := facts[*m.InstanceID]; ok && f.Instance.UserID == team.UserID && (team.IsCM() || stringValue(f.Instance.Owner) == stringValue(team.Owner)) {
 				instance = f.Instance
-				gateway = s.observeMemberGateway(ctx, f, now)
+				gateway = s.observeMemberGateway(ctx, f, now, inventory)
 				// Older plugins omit a generation. Their heartbeat must still be
 				// newer than the current binding and Runtime registration.
 				start := instance.CreatedAt

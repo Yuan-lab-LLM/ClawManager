@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { ownerTeamService, type OwnerTeamCapabilities, type OwnerTeamSummary } from '../services/ownerTeamService';
+import { OWNER_SESSION_INVALID, OWNER_SESSION_MESSAGE } from '../lib/ownerReadNotice';
 
 export function useOwnerTeams(owner?: string) {
   const [params, setParams] = useSearchParams();
@@ -12,6 +13,11 @@ export function useOwnerTeams(owner?: string) {
   const [page, setPage] = useState(1);
   const [loadedOwner, setLoadedOwner] = useState(owner);
   const sequence = useRef(0);
+  useEffect(() => {
+    const invalidate = () => { sequence.current++; setCapabilities(null); setTeams([]); setTotal(0); setError(OWNER_SESSION_MESSAGE); };
+    window.addEventListener(OWNER_SESSION_INVALID, invalidate);
+    return () => window.removeEventListener(OWNER_SESSION_INVALID, invalidate);
+  }, []);
   const query = params.get('team_q') || '';
   const positiveID = (key: string) => { const n = Number(params.get(key)); return Number.isSafeInteger(n) && n > 0 ? n : null; };
   const selectedID = positiveID('selected_team_id');

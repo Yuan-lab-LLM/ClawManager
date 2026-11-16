@@ -35,8 +35,10 @@ type runtimeSlotTerminationMessage struct {
 
 type runtimeSlotContainerProof struct {
 	runtimeSlotTerminationMessage
-	ContainerID string    `json:"container_id"`
-	FinishedAt  time.Time `json:"finished_at"`
+	ContainerID     string    `json:"container_id"`
+	FinishedAt      time.Time `json:"finished_at"`
+	ProofSource     string    `json:"proof_source,omitempty"`
+	FenceRequestUID string    `json:"fence_request_uid,omitempty"`
 }
 
 func validContainerIntent(i runtimeSlotStopIntent) bool {
@@ -264,7 +266,7 @@ func (c *slotRuntimeAgentClient) stopContainerGatewayPolicy(ctx context.Context,
 	}
 	var proof runtimeSlotContainerProof
 	if len(saved) != 0 {
-		if decodeContainerProof(saved, &proof) != nil || proof.runtimeSlotStopIntent != *intent || !proof.CleanupConfirmed || proof.ContainerID == "" || proof.FinishedAt.IsZero() {
+		if decodeContainerProof(saved, &proof) != nil || proof.runtimeSlotStopIntent != *intent || !validSlotProofSource(proof) || !proof.CleanupConfirmed || proof.ContainerID == "" || proof.FinishedAt.IsZero() {
 			return fmt.Errorf("stored container termination proof is invalid")
 		}
 	} else {
@@ -355,6 +357,14 @@ func (c *slotRuntimeAgentClient) waitContainerTermination(ctx context.Context, n
 			return nil, err
 		}
 		proof, err := runtimeSlotTerminationProof(pod, intent)
+		// Explicit operator fencing is independent evidence. Automatic/graceful
+		// stops still require the native receipt; waiting must not drop either
+		// the upstream delayed proof path or the existing operator recovery.
+		if err != nil && !intent.Graceful {
+			if fenced, fenceErr := c.operatorContainerFenceProof(ctx, pod, intent); fenceErr == nil {
+				return fenced, nil
+			}
+		}
 		if errors.Is(err, errContainerTerminationPending) && intent.Kind == "force-delete" {
 			// The original stop may have committed its receipt immediately before
 			// explicit deletion superseded it. Only real kubelet evidence resolves

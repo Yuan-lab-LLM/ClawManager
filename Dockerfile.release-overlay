@@ -1,0 +1,32 @@
+# Reuse the immutable, previously accepted nginx/runtime dependencies while
+# replacing every application artifact from the same source revision.
+# Named contexts: release-binaries (cross-built Linux binaries), release-assets
+# (built frontend), hermes-assets (the source-locked desktop web build).
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE} AS accepted-dependencies
+# Flatten previous release layers; all files still come from the accepted,
+# immutable base. This prevents accumulated overlays hitting Docker's limit.
+FROM scratch
+COPY --from=accepted-dependencies / /
+ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    NGINX_VERSION=1.27.5 PKG_RELEASE=1 DYNPKG_RELEASE=1 NJS_VERSION=0.8.10 NJS_RELEASE=1
+WORKDIR /app
+EXPOSE 80 8443 9443
+STOPSIGNAL SIGQUIT
+ENTRYPOINT ["dumb-init", "--"]
+CMD ["/app/start.sh"]
+ARG VCS_REF
+COPY --chmod=755 --from=release-binaries /merged-server /usr/local/bin/clawreef-server
+COPY --chmod=755 --from=release-binaries /merged-northbound-gateway /usr/local/bin/clawreef-northbound-gateway
+COPY --chmod=755 --from=release-binaries /merged-system-backup-controller /usr/local/bin/system-backup-controller
+COPY --chmod=755 --from=release-binaries /merged-system-backup-artifact /usr/local/bin/system-backup-artifact
+COPY --chmod=755 --from=release-binaries /merged-runtime-eviction-helper /usr/local/bin/runtime-eviction-helper
+COPY --chmod=755 --from=release-binaries /cm-runtime-template-hash-v1.35 /usr/local/bin/cm-runtime-template-hash-v1.35
+# Clear the previous bundle so missing chunks fail rather than loading stale JS.
+RUN rm -rf /usr/share/nginx/html/*
+COPY --from=release-assets / /usr/share/nginx/html/
+COPY --from=hermes-assets / /usr/share/nginx/html/hermes-desktop-web/
+COPY deployments/nginx/nginx.conf /etc/nginx/nginx.conf
+COPY deployments/nginx/njs/desktop_auth.js /etc/nginx/njs/desktop_auth.js
+COPY --chmod=755 deployments/container/start.sh /app/start.sh
+LABEL org.opencontainers.image.revision=$VCS_REF

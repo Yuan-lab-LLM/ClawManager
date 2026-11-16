@@ -3,6 +3,8 @@
 package services
 
 import (
+	"bytes"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,6 +18,7 @@ func TestNFSOwnerHistoryLandlockBlocksForeignReadsAndWrites(t *testing.T) {
 		runtime.LockOSThread()
 		workspace := filepath.Join(root, "instance")
 		if err := restrictOwnerHistoryReads(root, workspace, filepath.Join(workspace, "own")); err != nil {
+			fmt.Fprintln(os.Stderr, err)
 			os.Exit(10)
 		}
 		if data, err := os.ReadFile(filepath.Join(workspace, "own")); err != nil || string(data) != "own" {
@@ -77,6 +80,8 @@ func TestNFSOwnerHistoryLandlockBlocksForeignReadsAndWrites(t *testing.T) {
 	defer proceedWrite.Close()
 	cmd := exec.Command("/proc/self/fd/3", "-test.run=^TestNFSOwnerHistoryLandlockBlocksForeignReadsAndWrites$")
 	cmd.ExtraFiles = []*os.File{executable, readyWrite, proceedRead}
+	var childError bytes.Buffer
+	cmd.Stderr = &childError
 	cmd.Env = append(os.Environ(), "CM_OWNER_LANDLOCK_CHILD="+base)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: 200012, Gid: 200012, Groups: []uint32{}}}
 	if err := cmd.Start(); err != nil {
@@ -87,7 +92,7 @@ func TestNFSOwnerHistoryLandlockBlocksForeignReadsAndWrites(t *testing.T) {
 	var signal [1]byte
 	if _, err := readyRead.Read(signal[:]); err != nil {
 		cmd.Wait()
-		t.Fatalf("helper failed before inode replacement: %v", err)
+		t.Fatalf("helper failed before inode replacement: %v; child: %s", err, childError.String())
 	}
 	// Replace the checked pathname after Landlock has captured the original
 	// inode. The parser's later open must never inherit its authority by name.

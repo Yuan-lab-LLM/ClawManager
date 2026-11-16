@@ -115,6 +115,21 @@ func TestTeamPreviewSecurityPersistence(t *testing.T) {
 	if err = repo.ProtectTeamPreview(ctx, 12, 3); err != nil {
 		t.Fatal("idempotent protection failed", err)
 	}
+	if _, err = repo.sess.SQL().Exec("UPDATE teams SET status='creating',preview_security_profile=? WHERE id=12", models.TeamPreviewSecurityProfile); err != nil {
+		t.Fatal(err)
+	}
+	if err = repo.ProtectTeamPreview(ctx, 12, 3); err != nil {
+		t.Fatal("explicitly protected new Team cannot bootstrap", err)
+	}
+	if _, err = repo.sess.SQL().Exec("UPDATE teams SET preview_security_profile='' WHERE id=12"); err != nil {
+		t.Fatal(err)
+	}
+	if err = repo.ProtectTeamPreview(ctx, 12, 3); err == nil {
+		t.Fatal("legacy creating Team migrated without protection proof")
+	}
+	if _, err = repo.sess.SQL().Exec("UPDATE teams SET status='running',preview_security_profile=? WHERE id=12", models.TeamPreviewSecurityProfile); err != nil {
+		t.Fatal(err)
+	}
 	for _, unknown := range []string{"MANAGED-PREVIEW-V3", "managed-preview-v3 ", "future"} {
 		if _, err = repo.sess.SQL().Exec("UPDATE teams SET preview_security_profile = ? WHERE id = 12", unknown); err != nil {
 			t.Fatal(err)

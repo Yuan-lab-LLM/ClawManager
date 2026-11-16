@@ -82,12 +82,7 @@ func TestEncryptedSixPartArtifactIsIndependentlyRecoverable(t *testing.T) {
 	if e = VerifyManifest(decoded, pub, "sign-v3"); e == nil {
 		t.Fatal("missing required part")
 	}
-	f, e := os.OpenFile(filepath.Join(dir, "workspace.enc"), os.O_WRONLY, 0600)
-	if e != nil {
-		t.Fatal(e)
-	}
-	f.WriteAt([]byte{42}, 100)
-	f.Close()
+	corruptTestFileByte(t, filepath.Join(dir, "workspace.enc"), 100)
 	if e = VerifyArtifactDirectory(ctx, dir, signed, pub, "sign-v3", wrapper, 32<<20); e == nil {
 		t.Fatal("ciphertext corruption undetected")
 	}

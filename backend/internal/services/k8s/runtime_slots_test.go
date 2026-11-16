@@ -208,3 +208,26 @@ func TestContainerSlotsPermitUserNamespaceMountsWithoutChangingCoordinatorAppArm
 		})
 	}
 }
+
+func TestSlotPoolPrefixPreservesDefaultAndSupportsExplicitMigration(t *testing.T) {
+	cfg := config.RuntimePoolConfig{Namespace: "tenant", ContainerSlots: 2, WorkspacePVCClaimName: "workspace", OpenClawImage: "oc", HermesImage: "h", OpenCodeImage: "code", DeepSeekHarnessImage: "dsh"}
+	specs, err := RuntimeSlotDeploymentSpecs(cfg, "agent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if specs[0].Name != "openclaw-runtime" {
+		t.Fatal("changed upstream default")
+	}
+	cfg.SlotPoolPrefix = "team-"
+	specs, err = RuntimeSlotDeploymentSpecs(cfg, "agent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if specs[0].Name != "team-openclaw-runtime" {
+		t.Fatal(specs[0].Name)
+	}
+	cfg.SlotPoolPrefix = "../"
+	if _, err = RuntimeSlotDeploymentSpecs(cfg, "agent"); err == nil {
+		t.Fatal("unsafe pool name accepted")
+	}
+}

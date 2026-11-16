@@ -244,6 +244,7 @@ func (member *MemberSpec) UnmarshalJSON(data []byte) error {
 }
 
 type Payload struct {
+	CreationError        string       `json:"creation_error,omitempty"`
 	ID                   int          `json:"id"`
 	Name                 string       `json:"name"`
 	Intent               string       `json:"intent"`
@@ -520,6 +521,9 @@ func (s *service) replaceMember(ctx context.Context, userID, id int, memberID st
 		member.IsLeader = true
 	} else {
 		member.IsLeader = false
+		if reservedLeaderRole(member.Role) {
+			member.Role = current.Role
+		}
 	}
 	member = normalizeMember(member, targetIndex)
 	spec.Members[targetIndex] = member
@@ -767,6 +771,9 @@ func validateAndNormalizeSpec(spec *TemplateSpec, requestedCount *int) error {
 		if spec.Members[idx].IsLeader {
 			return errors.New("generated custom team template must include exactly one leader")
 		}
+		if reservedLeaderRole(spec.Members[idx].Role) {
+			return fmt.Errorf("custom team Worker %s cannot use a Leader role", spec.Members[idx].MemberID)
+		}
 	}
 	spec.SchemaVersion = 1
 	spec.Name = strings.TrimSpace(spec.Name)
@@ -887,7 +894,11 @@ func payloadFromModel(item *models.CustomTeamTemplate) (*Payload, error) {
 	for i := range spec.Members {
 		resolveMemberIcon(&spec.Members[i], false)
 	}
-	return &Payload{
+	creationError := ""
+	if err := ValidateForCreation(spec, item.RequestedMemberCount); err != nil {
+		creationError = err.Error()
+	}
+	return &Payload{CreationError: creationError,
 		ID: item.ID, Name: item.Name, Intent: item.Intent,
 		RequestedMemberCount: item.RequestedMemberCount,
 		ResolvedMemberCount:  item.ResolvedMemberCount,

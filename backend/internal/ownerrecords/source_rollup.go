@@ -44,25 +44,49 @@ func (s *Store) aggregateSourceDay(ctx context.Context, start, end time.Time) (i
 	if !start.Equal(day) || !end.After(start) || end.After(day.AddDate(0, 0, 1)) {
 		return 0, fmt.Errorf("one bounded Beijing source day required")
 	}
+	return s.aggregateSourceRange(ctx, start, end, false)
+}
+
+func (s *Store) aggregateSourceWindow(ctx context.Context, start, end time.Time) (int, error) {
+	day := sourceLocalDay(start)
+	if !start.Equal(start.Truncate(summaryInterval)) || !end.Equal(start.Add(summaryInterval)) || end.After(day.AddDate(0, 0, 1)) {
+		return 0, fmt.Errorf("one complete source bucket required")
+	}
+	return s.aggregateSourceRange(ctx, start, end, true)
+}
+
+func sourceLocalDay(at time.Time) time.Time {
+	loc, _ := time.LoadLocation("Asia/Shanghai")
+	d := at.In(loc)
+	return time.Date(d.Year(), d.Month(), d.Day(), 0, 0, 0, 0, loc)
+}
+
+func (s *Store) aggregateSourceRange(ctx context.Context, start, end time.Time, window bool) (int, error) {
+	loc, _ := time.LoadLocation("Asia/Shanghai")
+	day := sourceLocalDay(start)
 	changed := 0
+	var cached *sourceDayRead
+	var committedItems []sourceUsage
+	var committedRevision uint64
 	epoch, epochErr := s.analyticsEpoch(ctx)
 	if epochErr != nil {
 		return 0, epochErr
 	}
 	err := s.Session.TxContext(ctx, func(tx db.Session) error {
 		cursorKey := Key("source-day-cursor", day.Format("2006-01-02"))
-		if _, err := tx.SQL().ExecContext(ctx, `INSERT INTO northbound_owner_records(record_type,record_key,scope_id,status,interval_end) VALUES('source_day_cursor',?,0,'initializing',?) ON DUPLICATE KEY UPDATE record_key=record_key`, cursorKey, start.UTC()); err != nil {
+		if _, err := tx.SQL().ExecContext(ctx, `INSERT INTO northbound_owner_records(record_type,record_key,scope_id,status,interval_end) VALUES('source_day_cursor',?,0,'initializing',?) ON DUPLICATE KEY UPDATE record_key=record_key`, cursorKey, day.UTC()); err != nil {
 			return err
 		}
-		cursor, err := tx.SQL().QueryRowContext(ctx, `SELECT interval_end FROM northbound_owner_records WHERE record_type='source_day_cursor' AND record_key=? FOR UPDATE`, cursorKey)
+		cursor, err := tx.SQL().QueryRowContext(ctx, `SELECT interval_end,version FROM northbound_owner_records WHERE record_type='source_day_cursor' AND record_key=? FOR UPDATE`, cursorKey)
 		if err != nil {
 			return err
 		}
 		var publishedUntil time.Time
-		if err = cursor.Scan(&publishedUntil); err != nil {
+		var revision uint64
+		if err = cursor.Scan(&publishedUntil, &revision); err != nil {
 			return err
 		}
-		if publishedUntil.After(end) {
+		if !window && publishedUntil.After(end) {
 			return nil
 		}
 		rows, err := tx.SQL().QueryContext(ctx, `SELECT COALESCE(b.scope_id,i.user_id),COALESCE(b.owner_normalized,LOWER(TRIM(i.owner))),COALESCE(b.runtime_type,i.type,''),m.instance_id,TIMESTAMPADD(SECOND,FLOOR(TIMESTAMPDIFF(SECOND,'1970-01-01',m.created_at)/600)*600,'1970-01-01'),SUM(m.prompt_tokens),SUM(m.completion_tokens),SUM(m.total_tokens),COUNT(*)`+sourceIdentityJoin+` GROUP BY 1,2,3,4,5`, start.UTC(), end.UTC())
@@ -96,16 +120,12 @@ func (s *Store) aggregateSourceDay(ctx context.Context, start, end time.Time) (i
 			present[groupKey(u)] = true
 		}
 		old := map[string]sourceUsage{}
-		previousRows, e := tx.SQL().QueryContext(ctx, `SELECT scope_id,owner_normalized,COALESCE(runtime_type,''),instance_id,occurred_at,prompt_tokens,completion_tokens,total_tokens,invocation_count FROM northbound_owner_records WHERE record_type='source_usage' AND business_date=?`, day.Format("2006-01-02"))
+		previousRows, cache, e := previousSourceRows(ctx, tx, day, start, end, window, revision)
 		if e != nil {
 			return e
 		}
-		for previousRows.Next() {
-			var u sourceUsage
-			if e = previousRows.Scan(&u.scope, &u.owner, &u.runtime, &u.instance, &u.at, &u.prompt, &u.completion, &u.tokens, &u.calls); e != nil {
-				previousRows.Close()
-				return e
-			}
+		cached = cache
+		for _, u := range previousRows {
 			old[groupKey(u)] = u
 			if !present[groupKey(u)] {
 				u.prompt = 0
@@ -114,11 +134,6 @@ func (s *Store) aggregateSourceDay(ctx context.Context, start, end time.Time) (i
 				u.calls = 0
 				items = append(items, u)
 			}
-		}
-		e = previousRows.Err()
-		previousRows.Close()
-		if e != nil {
-			return e
 		}
 		owners := map[string]bool{}
 		values := []string{}
@@ -278,14 +293,14 @@ func (s *Store) aggregateSourceDay(ctx context.Context, start, end time.Time) (i
 			if len(pendingValues) == 0 {
 				return nil
 			}
-			_, e := tx.SQL().ExecContext(ctx, `INSERT INTO northbound_owner_records(record_type,record_key,scope_id,owner_normalized,business_date,status,version,occurred_at) VALUES `+strings.Join(pendingValues, ",")+` ON DUPLICATE KEY UPDATE version=version+1,status='pending'`, pendingArgs...)
+			_, e := tx.SQL().ExecContext(ctx, `INSERT INTO northbound_owner_records(record_type,record_key,scope_id,owner_normalized,business_date,status,version,occurred_at,interval_start) VALUES `+strings.Join(pendingValues, ",")+` ON DUPLICATE KEY UPDATE version=version+1,interval_start=IF(status='pending',COALESCE(interval_start,UTC_TIMESTAMP()),UTC_TIMESTAMP()),status='pending'`, pendingArgs...)
 			pendingValues = nil
 			pendingArgs = nil
 			return e
 		}
 		for owner := range owners {
 			date := markAt.In(loc).Format("2006-01-02")
-			pendingValues = append(pendingValues, `('usage_dirty',?,0,?,?,'pending',1,?)`)
+			pendingValues = append(pendingValues, `('usage_dirty',?,0,?,?,'pending',1,?,UTC_TIMESTAMP())`)
 			pendingArgs = append(pendingArgs, Key("usage-dirty", owner, date), owner, date, markAt.UTC())
 			if len(pendingValues) >= 100 {
 				if err = flushPending(); err != nil {
@@ -296,13 +311,22 @@ func (s *Store) aggregateSourceDay(ctx context.Context, start, end time.Time) (i
 		if err = flushPending(); err != nil {
 			return err
 		}
-		if publishedUntil.Before(end) {
-			_, err = tx.SQL().ExecContext(ctx, `UPDATE northbound_owner_records SET interval_end=?,status='ready' WHERE record_type='source_day_cursor' AND record_key=?`, end.UTC(), cursorKey)
+		if publishedUntil.Before(end) && (!window || !start.After(publishedUntil)) {
+			_, err = tx.SQL().ExecContext(ctx, `UPDATE northbound_owner_records SET interval_end=?,status='ready',version=version+1 WHERE record_type='source_day_cursor' AND record_key=?`, end.UTC(), cursorKey)
 			if err != nil {
 				return err
 			}
+		} else {
+			if _, err = tx.SQL().ExecContext(ctx, `UPDATE northbound_owner_records SET version=version+1 WHERE record_type='source_day_cursor' AND record_key=?`, cursorKey); err != nil {
+				return err
+			}
 		}
+		committedRevision = revision + 1
+		committedItems = items
 		return nil
 	}, &sql.TxOptions{Isolation: sql.LevelRepeatableRead})
+	if err == nil {
+		commitSourceRead(ctx, cached, start, committedRevision, committedItems)
+	}
 	return changed, err
 }

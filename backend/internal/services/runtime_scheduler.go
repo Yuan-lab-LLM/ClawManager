@@ -294,16 +294,8 @@ func (s *RuntimeScheduler) StartRollout(ctx context.Context, rolloutID int64) er
 	if rollout.Status != "pending" {
 		return nil
 	}
-	if rollout.RuntimeType == RuntimeTypeOpenClaw && rollout.PreflightID == nil {
-		active, err := s.rolloutRepo.ListActive(ctx, rollout.RuntimeType)
-		if err != nil {
-			return err
-		}
-		for _, other := range active {
-			if other.ID != rollout.ID && (other.Status == "running" || other.ID < rollout.ID) {
-				return nil
-			}
-		}
+	if wait, err := s.waitForEarlierOpenClawRollout(ctx, *rollout); err != nil || wait {
+		return err
 	}
 	if isEmptyOpenClawPoolReset(rollout) {
 		if err := s.startOpenClawPoolReplacement(ctx, rollout); err != nil {
@@ -513,6 +505,26 @@ func (s *RuntimeScheduler) startRuntimeRolloutWork(ctx context.Context, rollout 
 		return s.rolloutRepo.UpdateStatus(ctx, rollout.ID, "finished", &startedAt, &finishedAt, nil)
 	}
 	return nil
+}
+
+// Recovery requests share the normal upgrade queue. Serializing operations
+// preserves maintenance and writer ownership, while each operation retains its
+// bounded parallel instance checks/migrations. Also fence running rows admitted
+// by older controllers, without rewriting their receipts or stopping processes.
+func (s *RuntimeScheduler) waitForEarlierOpenClawRollout(ctx context.Context, r models.RuntimeRollout) (bool, error) {
+	if r.RuntimeType != RuntimeTypeOpenClaw {
+		return false, nil
+	}
+	active, err := s.rolloutRepo.ListActive(ctx, r.RuntimeType)
+	if err != nil {
+		return false, err
+	}
+	for _, other := range active {
+		if other.ID < r.ID {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (s *RuntimeScheduler) reconcileRollouts(ctx context.Context) error {
@@ -1030,6 +1042,9 @@ func runtimeDeploymentFallbackState(k8sState string) string {
 func (s *RuntimeScheduler) finishRolloutIfReady(ctx context.Context, rollout models.RuntimeRollout) error {
 	if s == nil || s.podRepo == nil || s.rolloutRepo == nil {
 		return nil
+	}
+	if wait, err := s.waitForEarlierOpenClawRollout(ctx, rollout); err != nil || wait {
+		return err
 	}
 	if rollout.RuntimeType == RuntimeTypeOpenClaw && rollout.PreflightID == nil {
 		if _, ok := s.rolloutRepo.(rolloutCheckpointStore); ok {
@@ -2113,24 +2128,25 @@ func (s *RuntimeScheduler) assignInstance(ctx context.Context, instance models.I
 		}
 		return fmt.Errorf("classify schedulable %s runtime pods: %w", runtimeType, err)
 	}
+	pods = filterOpenCodeTeamPods(&instance, pods)
+
+	storage := ""
 	if s.autoStopRepo != nil {
-		storage, storageErr := s.autoStopRepo.PreviousIdleStorage(ctx, instance.ID)
-		if storageErr != nil {
-			return storageErr
-		}
-		if storage != "" {
-			matching := make([]models.RuntimePod, 0, len(pods))
-			for _, p := range pods {
-				if runtimeWorkspaceStorageCompatible(storage, p.WorkspaceStorageIdentity) {
-					matching = append(matching, p)
-				}
-			}
-			pods = matching
+		storage, err = s.autoStopRepo.PreviousIdleStorage(ctx, instance.ID)
+		if err != nil {
+			return err
 		}
 	}
+	verifiedCount := len(pods)
+	var coldNative bool
+	pods, coldNative, err = s.filterResumeWorkspace(ctx, instance, pods, storage, inspectOpenClawRegistryImage)
+	if err != nil {
+		return err
+	}
 	if runtimeType == RuntimeTypeOpenClaw && s.upgrade != nil {
-		verifiedCount := len(pods)
-		pods, err = s.upgrade.filterUpgradePlacement(ctx, instance.ID, pods)
+		if !coldNative {
+			pods, err = s.upgrade.filterUpgradePlacement(ctx, instance.ID, pods)
+		}
 		if err != nil {
 			return err
 		}
@@ -2529,6 +2545,9 @@ func (s *RuntimeScheduler) prepareGatewayStartForUpgrade(ctx context.Context, in
 }
 
 func (s *RuntimeScheduler) prepareGatewayStartParameters(ctx context.Context, instance models.Instance, runtimeType string, pod models.RuntimePod) (*runtimeGatewayStart, error) {
+	if len(filterOpenCodeTeamPods(&instance, []models.RuntimePod{pod})) == 0 {
+		return nil, fmt.Errorf("%w: Native Team adapter is unavailable on the serving Runtime", errRuntimeControlPlanePending)
+	}
 	if s.agentClient == nil || s.bindingRepo == nil || s.instanceRepo == nil {
 		return nil, fmt.Errorf("runtime scheduler gateway dependencies are not configured")
 	}

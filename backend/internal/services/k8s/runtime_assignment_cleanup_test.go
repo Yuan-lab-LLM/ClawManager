@@ -19,6 +19,83 @@ type unboundCleanupVerifier interface {
 	CheckUnboundInstanceStopped(context.Context, int, int, int, string, []models.RuntimeCleanupSource) error
 }
 
+func TestRetainedStoppedAssignmentRequiresFinalizedOwnerAndWorkspace(t *testing.T) {
+	ctx := t.Context()
+	client := fake.NewSimpleClientset()
+	s := NewRuntimeAssignmentService(client, "tenant")
+	a := assignmentFixture()
+	a.PodUID = "old"
+	workspace := "/workspaces/openclaw/user-4/instance-7"
+	a.Request = json.RawMessage(`{"workspace_path":"` + workspace + `","gateway_port":20000}`)
+	if err := s.EnsureDesired(ctx, a); err != nil {
+		t.Fatal(err)
+	}
+	check := func(user int, path string) error {
+		_, err := s.RetainedStoppedAssignment(ctx, 7, user, 4, "openclaw", path)
+		return err
+	}
+	if check(4, workspace) == nil {
+		t.Fatal("live assignment accepted as stopped")
+	}
+	if err := s.MarkDraining(ctx, a.Endpoint, a.GatewayID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ConfirmStopped(ctx, a.Endpoint, a.GatewayID); err != nil {
+		t.Fatal(err)
+	}
+	if check(4, workspace) == nil {
+		t.Fatal("container finalization was not required")
+	}
+	cm := assignmentCM(t, client)
+	cm.Data["container_termination_proof"] = `{}`
+	cm.Data["container_stop_released"] = "true"
+	if _, err := client.CoreV1().ConfigMaps("tenant").Update(ctx, cm, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	// This layer checks publication provenance; the caller independently decodes
+	// and validates the opaque native termination proof before placement.
+	if err := check(4, workspace); err != nil {
+		t.Fatal(err)
+	}
+	old, err := client.CoreV1().Secrets("tenant").Get(ctx, "lite-instance-7-g3", metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	old.Name = "lite-instance-7-g1"
+	old.ResourceVersion = ""
+	old.Annotations = nil
+	old.Labels["clawmanager.io/generation"] = "1"
+	if _, err = client.CoreV1().Secrets("tenant").Create(ctx, old, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if err = check(4, workspace); err != nil {
+		t.Fatalf("old credential blocked nondestructive resume: %v", err)
+	}
+	if err = s.CheckUnboundInstanceStopped(ctx, 7, 4, 4, "openclaw", nil); err == nil {
+		t.Fatal("resume relaxed destructive history protection")
+	}
+	newer := old.DeepCopy()
+	newer.Name = "lite-instance-7-g4"
+	newer.Labels["clawmanager.io/generation"] = "4"
+	if _, err = client.CoreV1().Secrets("tenant").Create(ctx, newer, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if check(4, workspace) == nil {
+		t.Fatal("newer uncertain publication allowed resume")
+	}
+	if err = client.CoreV1().Secrets("tenant").Delete(ctx, newer.Name, metav1.DeleteOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if check(5, workspace) == nil || check(4, "/other") == nil {
+		t.Fatal("owner/workspace change accepted")
+	}
+	cm.Data["container_stop_released"] = "false"
+	client.CoreV1().ConfigMaps("tenant").Update(ctx, cm, metav1.UpdateOptions{})
+	if check(4, workspace) == nil {
+		t.Fatal("unfinished release accepted")
+	}
+}
+
 func TestUnboundCleanupRequiresPublicationStopProof(t *testing.T) {
 	ctx := context.Background()
 	client := fake.NewSimpleClientset()

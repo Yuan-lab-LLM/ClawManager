@@ -45,7 +45,7 @@ func Registry() []ObjectPolicy {
 	// Restoring them must never enroll a copied instance or replay remote work.
 	// Runtime management journals and deletion fences also contain live native
 	// controller identities; copied work must not run or fence another cluster.
-	for _, name := range []string{"instance_auto_stop_policy_status", "instance_model_activity_requests", "instance_idle_stop_operations", "gateway_runtime_tasks", "gateway_runtime_task_models", "gateway_runtime_protocols", "gateway_runtime_maintenance", "gateway_runtime_upgrades", "gateway_runtime_upgrade_stops", "instance_workspace_write_intents", "instance_workspace_write_fences", "team_workspace_write_intents", "browser_writer_registry", "runtime_management_operations", "runtime_pod_deletion_intents", "runtime_failover_intents"} {
+	for _, name := range []string{"team_runtime_lifecycle", "instance_auto_stop_policy_status", "instance_model_activity_requests", "instance_idle_stop_operations", "gateway_runtime_tasks", "gateway_runtime_task_models", "gateway_runtime_protocols", "gateway_runtime_maintenance", "gateway_runtime_upgrades", "gateway_runtime_upgrade_stops", "instance_workspace_write_intents", "instance_workspace_write_fences", "team_workspace_write_intents", "browser_writer_registry", "runtime_management_operations", "runtime_pod_deletion_intents", "runtime_failover_intents"} {
 		out = append(out, ObjectPolicy{name, "system_backup", "secret", "metadata_only", "reference_only"})
 	}
 	for category, names := range businessTables {

@@ -19,6 +19,15 @@ func TestAutoStopMySQLReadinessStartsFullWindowOnce(t *testing.T) {
 
 func testAutoStopReadinessWindow(t *testing.T, full, missing bool) {
 	r := idleRuntimeRepository(t)
+	// Candidate admission also consults real Team ownership after integration.
+	for _, query := range []string{
+		`CREATE TABLE teams(id INT PRIMARY KEY,status VARCHAR(32),resource_scope VARCHAR(32))`,
+		`CREATE TABLE team_members(id INT PRIMARY KEY,team_id INT,instance_id INT,member_key VARCHAR(64),status VARCHAR(32))`,
+	} {
+		if _, err := r.sess.SQL().Exec(query); err != nil {
+			t.Fatal(err)
+		}
+	}
 	ctx := t.Context()
 	store := NewInstanceAutoStopRepository(r.sess)
 	if _, err := r.sess.SQL().Exec("UPDATE instances SET status='creating',started_at=UTC_TIMESTAMP()-INTERVAL 2 DAY WHERE id=7"); err != nil {

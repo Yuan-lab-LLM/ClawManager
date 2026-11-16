@@ -1,3 +1,4 @@
+import TeamPowerControl, { teamPowerLabel } from '../../components/teams/TeamPowerControl';
 import { teamStatusLabel } from "../../lib/teamI18n";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
@@ -50,8 +51,12 @@ const TeamListPage: React.FC = () => {
   }, [loadTeams]);
 
   useEffect(() => {
-    if (!teams.some(team => ["creating", "deleting"].includes(team.status))) return;
-    const timer = window.setInterval(() => { void loadTeams({ silent: true }); }, 5000);
+    if (!teams.length) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      void loadTeams({ silent: true });
+    }, 5000);
     return () => window.clearInterval(timer);
   }, [loadTeams, teams]);
 
@@ -74,11 +79,11 @@ const TeamListPage: React.FC = () => {
             <thead><tr>{['name', 'status', 'communication', 'storage', 'created', 'actions'].map(key => <th key={key} scope="col">{t(`teams.${key}`)}</th>)}</tr></thead>
             <tbody>{loading ? <tr><td colSpan={6} className="cm-team-empty" role="status">{t("teams.loading")}</td></tr> : !filteredTeams.length ? <tr><td colSpan={6} className="cm-team-empty">{t(searchQuery ? "teams.noMatches" : "teams.empty")}</td></tr> : filteredTeams.map(team => <tr key={team.id}>
               <td><div className="cm-team-identity"><Link className="cm-management-identity cm-management-truncate" title={team.name} to={`/teams/${team.id}`}>{team.name}</Link><span>#{team.id}</span></div></td>
-              <td><span className="cm-team-status" data-status={team.status}>{teamStatusLabel(locale, team.status)}</span></td>
+              <td><span className="cm-team-status" data-status={team.runtime_state?.state || team.status}>{teamPowerLabel(team.runtime_state) || teamStatusLabel(locale, team.status)}</span></td>
               <td title={team.communication_mode}><span className="cm-management-truncate cm-team-cell">{team.communication_mode}</span></td>
               <td title={team.shared_pvc_name || t("teams.storagePending")}><span className="cm-management-truncate cm-team-cell">{team.shared_pvc_name || t("teams.storagePending")}</span></td>
               <td>{formatDateTime(team.created_at)}</td>
-              <td><Link className="cm-team-entry" aria-label={`${t("teams.open")} ${team.name}`} to={`/teams/${team.id}`}>{t("teams.open")}</Link></td>
+              <td><TeamPowerControl state={team.runtime_state} start={() => teamService.startTeam(team.id)} onChange={() => loadTeams({silent:true})}/><Link className="cm-team-entry" aria-label={`${t("teams.open")} ${team.name}`} to={`/teams/${team.id}`}>{t("teams.open")}</Link></td>
             </tr>)}</tbody>
           </table>
         </div>

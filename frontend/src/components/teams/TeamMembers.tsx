@@ -18,7 +18,7 @@ export function MemberEntry({ member, compact = false }: { member: TeamMember; c
   const { t } = useI18n();
   const environment = useTeamPageEnvironment();
   const entry = member.instance_id ? environment.memberEntry?.(member.instance_id) : undefined;
-  return member.instance_id ? <Link to={entry?.to || `/instances/${member.instance_id}`} state={entry?.state} target={entry ? entry.target : "_blank"} rel="noreferrer" className={compact ? "team-roster-quick-entry" : "team-roster-entry"} aria-label={`进入${member.display_name}实例 #${member.instance_id}`}>
+  return member.instance_id ? <Link to={entry?.to || `/instances/${member.instance_id}`} state={entry?.state} target="_blank" rel="noopener noreferrer" className={compact ? "team-roster-quick-entry" : "team-roster-entry"} aria-label={`进入${member.display_name}实例 #${member.instance_id}`}>
     {compact && <MonitorUp size={13} />}<span>{t(compact ? "teams.entry" : "teams.enterInstance")}</span>{!compact && <ArrowUpRight size={13} />}
   </Link> : <span className="team-roster-no-instance">{t("teams.pendingInstance")}</span>;
 }

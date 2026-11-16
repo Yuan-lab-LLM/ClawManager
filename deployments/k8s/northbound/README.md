@@ -35,6 +35,18 @@ default and causes application rate limits to use the direct peer address.
 
 ## Required Secrets
 
+For an existing-tenant apply script that patches Core separately from the
+rendered manifest, preserve the dedicated OpenCode origin in that patch **before**
+its dry-run and apply. Rendering only the base manifest does not update Core:
+
+```sh
+python3 merge-runtime-origin.py "$RENDERED_MANIFEST" "$CORE_PATCH_MANIFEST" "$SYSTEM_NAMESPACE"
+```
+
+The helper requires PyYAML and copies only the validated origin setting into the
+tenant Core patch; it does not apply resources or modify Runtime pools. Keep the
+existing TLS preparation and certificate confirmation flow.
+
 Create these Secrets without committing key material:
 
 ```text

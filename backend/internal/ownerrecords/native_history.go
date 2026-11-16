@@ -56,7 +56,7 @@ type cappedOutput struct {
 
 func (b *cappedOutput) Write(p []byte) (int, error) {
 	if b.Len()+len(p) > b.max {
-		return 0, fmt.Errorf("history output limit exceeded")
+		return 0, errHistoryRestricted
 	}
 	return b.Buffer.Write(p)
 }
@@ -78,6 +78,9 @@ func readNativeHistory(ctx context.Context, root, workspace string, identity Ide
 		return nil, fmt.Errorf("workspace identity mismatch")
 	}
 	var result []NativeQuestion
+	if identity.Runtime == "deepseek-harness" {
+		return readDSHHistory(ctx, root, workspace, identity, recent, cutoff...)
+	}
 	if identity.Runtime == "hermes" || identity.Runtime == "opencode" {
 		relative := "home/.hermes/state.db"
 		query := hermesQuestionSQL
@@ -91,13 +94,6 @@ func readNativeHistory(ctx context.Context, root, workspace string, identity Ide
 				query = openCodeRecentSQL
 			}
 		}
-		if len(cutoff) > 0 && !recent {
-			condition := fmt.Sprintf("u.timestamp>=%.6f AND ", float64(cutoff[0].UnixMilli())/1000)
-			if identity.Runtime == "opencode" {
-				condition = fmt.Sprintf("u.time_created>=%d AND ", cutoff[0].UnixMilli())
-			}
-			query = strings.Replace(query, "WHERE ", "WHERE "+condition, 1)
-		}
 		path := filepath.Join(expected, filepath.FromSlash(relative))
 		if err := checkHistoryPath(root, path); err != nil {
 			return nil, err
@@ -109,13 +105,36 @@ func readNativeHistory(ctx context.Context, root, workspace string, identity Ide
 				}
 			}
 		}
+		if identity.Runtime == "opencode" {
+			// Detect the authoritative format without opening or migrating it.
+			var err error
+			query, err = openCodeHistoryQuery(ctx, filepath.Join(expected, filepath.FromSlash(relative)), recent)
+			if err != nil {
+				return nil, err
+			}
+		}
+		if len(cutoff) > 0 && !recent {
+			condition := fmt.Sprintf("u.timestamp>=%.6f AND ", float64(cutoff[0].UnixMilli())/1000)
+			if identity.Runtime == "opencode" {
+				condition = fmt.Sprintf("u.time_created>=%d AND ", cutoff[0].UnixMilli())
+			}
+			query = strings.Replace(query, "WHERE ", "WHERE "+condition, 1)
+		}
 		cmd := exec.CommandContext(ctx, "sqlite3", "-readonly", "-json", path, query)
 		if scoped, _ := ctx.Value(nativeHistoryHelperContextKey{}).(bool); scoped {
 			configureNativeHistoryCommand(cmd)
 		}
 		output := &cappedOutput{max: 4 << 20}
 		cmd.Stdout = output
+		diagnostic := &cappedOutput{max: 4096}
+		cmd.Stderr = diagnostic
 		if err := cmd.Run(); err != nil {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			if strings.Contains(diagnostic.String(), "no such table") || strings.Contains(diagnostic.String(), "no such column") {
+				return nil, errHistoryRestricted
+			}
 			return nil, fmt.Errorf("native history read failed: %w", err)
 		}
 		if output.Len() == 0 {
@@ -125,7 +144,7 @@ func readNativeHistory(ctx context.Context, root, workspace string, identity Ide
 			return nil, err
 		}
 		if len(result) > 10000 {
-			return nil, fmt.Errorf("native history page limit exceeded")
+			return nil, errHistoryRestricted
 		}
 		return result, nil
 	}
@@ -136,6 +155,14 @@ func readNativeHistory(ctx context.Context, root, workspace string, identity Ide
 	base := filepath.Join(expected, filepath.FromSlash(relative))
 	if err := checkHistoryPath(root, base); err != nil {
 		return nil, err
+	}
+	var sqliteAgents map[string]bool
+	if identity.Runtime == "openclaw" {
+		var err error
+		result, sqliteAgents, err = readOpenClawSQLiteAgents(ctx, root, base, recent, cutoff...)
+		if err != nil {
+			return nil, err
+		}
 	}
 	count := 0
 	files := 0
@@ -149,12 +176,15 @@ func readNativeHistory(ctx context.Context, root, workspace string, identity Ide
 		}
 		count++
 		if count > 2000 {
-			return fmt.Errorf("history directory limit exceeded")
+			return errHistoryRestricted
 		}
 		if d.Type()&os.ModeSymlink != 0 {
 			return fmt.Errorf("history symlink rejected")
 		}
 		if d.IsDir() {
+			if sqliteAgents[path] {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		eligible := identity.Runtime == "openclaw" && filepath.Base(filepath.Dir(path)) == "sessions" && strings.HasSuffix(path, ".jsonl") && !strings.Contains(d.Name(), ".trajectory.")
@@ -175,7 +205,7 @@ func readNativeHistory(ctx context.Context, root, workspace string, identity Ide
 		}
 		files++
 		if files > 200 {
-			return fmt.Errorf("history file limit exceeded")
+			return errHistoryRestricted
 		}
 		f, err := os.Open(path)
 		if err != nil {
@@ -219,12 +249,12 @@ func readNativeHistory(ctx context.Context, root, workspace string, identity Ide
 		if len(cutoff) > 0 || recent {
 			limit = 1 << 20
 		}
-		data, err := io.ReadAll(io.LimitReader(reader, limit+1))
+		data, err := io.ReadAll(io.LimitReader(historyContextReader{ctx, reader}, limit+1))
 		if err != nil {
 			return err
 		}
 		if int64(len(data)) > limit {
-			return fmt.Errorf("history file limit exceeded")
+			return errHistoryRestricted
 		}
 		parse := ParseNativeLog
 		if recent {
@@ -232,6 +262,9 @@ func readNativeHistory(ctx context.Context, root, workspace string, identity Ide
 		}
 		questions, err := parse(identity.Runtime, data)
 		if err != nil {
+			return err
+		}
+		if err = ctx.Err(); err != nil {
 			return err
 		}
 		if recent && truncated && len(questions) == 0 {
@@ -244,14 +277,31 @@ func readNativeHistory(ctx context.Context, root, workspace string, identity Ide
 			result = append(result, q)
 		}
 		if len(result) > 10000 {
-			return fmt.Errorf("history evidence limit exceeded")
+			return errHistoryRestricted
 		}
 		return nil
 	})
 	if err == nil && truncatedWithoutQuestion {
-		return nil, fmt.Errorf("recent question outside bounded history window")
+		return nil, errHistoryRestricted
 	}
 	return result, err
+}
+
+// Cancellation is checked between reads; it cannot interrupt an in-flight NFS
+// syscall. Callers stay synchronous, so cancelled reads cannot accumulate workers.
+type historyContextReader struct {
+	ctx    context.Context
+	reader io.Reader
+}
+
+func (r historyContextReader) Read(p []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	if len(p) > 32<<10 {
+		p = p[:32<<10]
+	}
+	return r.reader.Read(p)
 }
 
 func checkHistoryPath(root, path string) error {
@@ -273,7 +323,22 @@ func checkHistoryPath(root, path string) error {
 	return nil
 }
 
+// Retry an incomplete append without acknowledging its fingerprint or replacing
+// the previous excerpt. Corruption in a terminated/middle line remains an error.
+func checkHistoryTail(data []byte) error {
+	if len(data) > 0 && data[len(data)-1] != '\n' {
+		tail := bytes.TrimSpace(data[bytes.LastIndexByte(data, '\n')+1:])
+		if len(tail) > 0 && !json.Valid(tail) {
+			return errIncompleteTail
+		}
+	}
+	return nil
+}
+
 func ParseNativeLog(runtime string, data []byte) ([]NativeQuestion, error) {
+	if err := checkHistoryTail(data); err != nil {
+		return nil, err
+	}
 	scanner := bufio.NewScanner(bytes.NewReader(data))
 	scanner.Buffer(make([]byte, 4096), 1<<20)
 	session := ""

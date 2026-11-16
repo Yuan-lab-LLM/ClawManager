@@ -14,7 +14,7 @@ func (r *teamRepository) ProtectTeamPreview(ctx context.Context, id, user int) e
 	if id < 1 || user < 1 {
 		return errors.New("invalid Team preview transition")
 	}
-	result, err := r.sess.SQL().ExecContext(ctx, `UPDATE teams SET preview_security_profile = ?, updated_at = ? WHERE id = ? AND user_id = ? AND status = 'running' AND CAST(preview_security_profile AS BINARY) IN ('', ?)`, models.TeamPreviewSecurityProfile, time.Now().UTC(), id, user, models.TeamPreviewSecurityProfile)
+	result, err := r.sess.SQL().ExecContext(ctx, `UPDATE teams SET preview_security_profile = ?, updated_at = ? WHERE id = ? AND user_id = ? AND ((status = 'running' AND CAST(preview_security_profile AS BINARY) IN ('', ?)) OR (status = 'creating' AND CAST(preview_security_profile AS BINARY) = ?))`, models.TeamPreviewSecurityProfile, time.Now().UTC(), id, user, models.TeamPreviewSecurityProfile, models.TeamPreviewSecurityProfile)
 	if err != nil {
 		return err
 	}
@@ -24,7 +24,7 @@ func (r *teamRepository) ProtectTeamPreview(ctx context.Context, id, user int) e
 	}
 	if count == 0 {
 		team, err := r.GetTeamByIDContext(ctx, id)
-		if err != nil || team.UserID != user || team.Status != models.TeamStatusRunning || team.PreviewSecurityProfile != models.TeamPreviewSecurityProfile {
+		if err != nil || team.UserID != user || (team.Status != models.TeamStatusRunning && team.Status != models.TeamStatusCreating) || team.PreviewSecurityProfile != models.TeamPreviewSecurityProfile {
 			return errors.New("Team preview transition lost authority")
 		}
 	}

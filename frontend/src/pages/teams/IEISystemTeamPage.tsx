@@ -6,6 +6,7 @@ import { TeamPageEnvironmentProvider } from '../../components/teams/TeamPageEnvi
 import { ownerTeamWorkspaceAPI } from '../../services/ownerTeamService';
 import { ieiSystemService } from '../../services/ieiSystemService';
 import { ownerTeamOverviewURL } from '../../lib/ownerPortalNavigation';
+import { OWNER_SESSION_INVALID, OWNER_SESSION_MESSAGE } from '../../lib/ownerReadNotice';
 import TeamDetailPage from './TeamDetailPage';
 import '../../components/teams/owner-team-workspace.css';
 
@@ -21,8 +22,10 @@ export default function IEISystemTeamPage() {
   const initialSearch = useRef(priorSearch); initialSearch.current = priorSearch;
   useEffect(() => {
     let active = true; setOwner(''); setError('');
+    const invalidate = () => { active = false; setOwner(''); setError(OWNER_SESSION_MESSAGE); };
+    window.addEventListener(OWNER_SESSION_INVALID, invalidate);
     void ieiSystemService.getSession().then(session => { if (active) setOwner(session.owner); }).catch(error => { if (active) setError(error instanceof Error ? error.message : '访问会话无效'); });
-    return () => { active = false; };
+    return () => { active = false; window.removeEventListener(OWNER_SESSION_INVALID, invalidate); };
   }, [id]);
   const environment = useMemo(() => ({ api: ownerTeamWorkspaceAPI, owner, Layout: NorthboundTeamLayout, returnURL: ownerTeamOverviewURL(Number(id), initialSearch.current), memberEntry: (instanceID: number) => ({ to: `/ieisystem/instances/${instanceID}`, state: { portalReturnSearch: initialSearch.current, portalReturnTeamID: Number(id) } }) }), [owner, id]);
   if (error) return <main className="ot-workspace"><h1>访问验证失败</h1><p role="alert">{error}</p><Link to="/ieisystem/list-instances">返回门户</Link></main>;
