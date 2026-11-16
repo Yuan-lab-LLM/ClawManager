@@ -121,12 +121,17 @@ type SystemImageSettingService interface {
 }
 
 type systemImageSettingService struct {
-	repo repository.SystemImageSettingRepository
+	repo            repository.SystemImageSettingRepository
+	committedImages func() (*RuntimeCommittedImages, error)
 }
 
 // NewSystemImageSettingService creates a new system image setting service.
-func NewSystemImageSettingService(repo repository.SystemImageSettingRepository) SystemImageSettingService {
-	return &systemImageSettingService{repo: repo}
+func NewSystemImageSettingService(repo repository.SystemImageSettingRepository, options ...func(*systemImageSettingService)) SystemImageSettingService {
+	service := &systemImageSettingService{repo: repo}
+	for _, option := range options {
+		option(service)
+	}
+	return service
 }
 
 func (s *systemImageSettingService) List() ([]models.SystemImageSetting, error) {
@@ -163,7 +168,7 @@ func (s *systemImageSettingService) List() ([]models.SystemImageSetting, error) 
 		settings = append(settings, enabledSystemImageSettingsForType(instanceType, items)...)
 	}
 
-	return settings, nil
+	return s.effectiveImages(settings)
 }
 
 func (s *systemImageSettingService) Save(setting *models.SystemImageSetting) (*models.SystemImageSetting, error) {
@@ -253,22 +258,12 @@ func (s *systemImageSettingService) disableTypeWithFallback(instanceType string)
 
 func (s *systemImageSettingService) GetRuntimeImage(instanceType string) (RuntimeImageConfig, bool) {
 	normalizedType := strings.TrimSpace(strings.ToLower(instanceType))
-	items, err := s.repo.ListByInstanceType(normalizedType)
+	items, err := s.effectiveImagesForType(normalizedType)
 	if err != nil {
 		return RuntimeImageConfig{}, false
 	}
 
-	if len(items) == 0 {
-		for _, item := range defaultSystemImagePresetsForType(normalizedType) {
-			image := strings.TrimSpace(item.Image)
-			if item.IsEnabled && image != "" {
-				return runtimeImageConfigForSetting(normalizedType, item), true
-			}
-		}
-		return RuntimeImageConfig{}, false
-	}
-
-	for _, item := range enabledSystemImageSettingsForType(normalizedType, items) {
+	for _, item := range items {
 		image := strings.TrimSpace(item.Image)
 		if image != "" {
 			return RuntimeImageConfig{
@@ -288,12 +283,12 @@ func (s *systemImageSettingService) GetRuntimeImage(instanceType string) (Runtim
 func (s *systemImageSettingService) GetRuntimeImageForRuntimeType(instanceType, runtimeType string) (RuntimeImageConfig, bool) {
 	normalizedType := strings.TrimSpace(strings.ToLower(instanceType))
 	normalizedRuntimeType := normalizeSystemImageRuntimeType(runtimeType)
-	items, err := s.repo.ListByInstanceType(normalizedType)
+	items, err := s.effectiveImagesForType(normalizedType)
 	if err != nil {
 		return RuntimeImageConfig{}, false
 	}
 
-	for _, item := range enabledSystemImageSettingsForType(normalizedType, items) {
+	for _, item := range items {
 		if normalizeSystemImageRuntimeType(item.RuntimeType) != normalizedRuntimeType || strings.TrimSpace(item.Image) == "" {
 			continue
 		}
@@ -309,22 +304,12 @@ func (s *systemImageSettingService) GetRuntimeImageForImage(instanceType, image 
 		return RuntimeImageConfig{}, false
 	}
 
-	items, err := s.repo.ListByInstanceType(normalizedType)
+	items, err := s.effectiveImagesForType(normalizedType)
 	if err != nil {
 		return RuntimeImageConfig{}, false
 	}
 
-	if len(items) == 0 {
-		for _, item := range defaultSystemImagePresetsForType(normalizedType) {
-			defaultImage := strings.TrimSpace(item.Image)
-			if item.IsEnabled && defaultImage == normalizedImage {
-				return runtimeImageConfigForSetting(normalizedType, item), true
-			}
-		}
-		return RuntimeImageConfig{}, false
-	}
-
-	for _, item := range enabledSystemImageSettingsForType(normalizedType, items) {
+	for _, item := range items {
 		if strings.TrimSpace(item.Image) == normalizedImage {
 			return RuntimeImageConfig{
 				Image:          normalizedImage,

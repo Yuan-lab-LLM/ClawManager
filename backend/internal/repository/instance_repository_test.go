@@ -38,8 +38,8 @@ func TestBuildV2SchedulerInstanceQueryRequiresWorkspaceTypeAndStatuses(t *testin
 	}
 }
 
-func TestV2DesiredRunningStatusesIncludeRecoverableErrorCandidates(t *testing.T) {
-	want := []string{"creating", "running", "error"}
+func TestV2DesiredRunningStatusesExcludeErrorsWithoutStartIntent(t *testing.T) {
+	want := []string{"creating", "running"}
 	if got := v2DesiredRunningStatuses(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("desired running statuses = %#v, want %#v", got, want)
 	}

@@ -42,7 +42,7 @@ func idleStopMySQL(t *testing.T) db.Session {
 			t.Fatal("localhost port required")
 		}
 	}
-	u := mysql.ConnectionURL{Host: "127.0.0.1:" + port, User: "root", Database: "mysql", Options: map[string]string{"parseTime": "true"}}
+	u := mysql.ConnectionURL{Host: "127.0.0.1:" + port, User: "root", Password: os.Getenv("TEST_IDLE_MYSQL_PASSWORD"), Database: "mysql", Options: map[string]string{"parseTime": "true"}}
 	root, err := mysql.Open(u)
 	if err != nil {
 		t.Fatal(err)
@@ -405,5 +405,49 @@ func TestAutoStopRetryTouchRotatesPendingOrderWithoutDroppingProof(t *testing.T)
 	pending, err := r.PendingStops(ctx)
 	if err != nil || len(pending) != 2 || pending[0].ID != "later" || pending[1].Phase != "teardown_confirmed" {
 		t.Fatalf("blocked source starves later work or loses proof: %+v %v", pending, err)
+	}
+}
+
+// Both histories must survive the merge: upstream's per-type fairness and the
+// durable restart continuation retained by Team lifecycle recovery.
+func TestAutoStopMySQLPendingRetainsRestartAndTypeFairness(t *testing.T) {
+	s := idleStopMySQL(t)
+	r := NewInstanceAutoStopRepository(s)
+	ctx := t.Context()
+	for n := 0; n < 12; n++ {
+		if _, err := s.SQL().Exec(`INSERT INTO instance_idle_stop_operations(id,instance_id,user_id,generation,runtime_pod_id,gateway_id,pod_uid,endpoint,workspace_path,storage_identity,phase,created_at,updated_at) VALUES(?,1,7,2,11,'gw-1-2','pod','','','','error',UTC_TIMESTAMP()-INTERVAL 2 DAY,UTC_TIMESTAMP()-INTERVAL 1 DAY)`, fmt.Sprintf("blocked-%02d", n)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.SQL().Exec(`INSERT INTO instance_idle_stop_operations(id,instance_id,user_id,generation,runtime_pod_id,gateway_id,pod_uid,endpoint,workspace_path,storage_identity,phase,stop_kind,created_at,updated_at) VALUES('resume-other-type',2,7,1,12,'gw-2-1','pod','','','','restart_ready','restart',UTC_TIMESTAMP(),UTC_TIMESTAMP())`); err != nil {
+		t.Fatal(err)
+	}
+	pending, err := r.PendingStops(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pending) != 11 {
+		t.Fatalf("expected ten blocked OpenClaw operations plus one OpenCode restart, got %+v", pending)
+	}
+	found := false
+	for _, op := range pending {
+		if op.ID == "resume-other-type" {
+			found = op.Phase == "restart_ready" && op.Kind == "restart"
+		}
+	}
+	if !found {
+		t.Fatal("blocked runtime type starved the restart continuation")
+	}
+	if _, err := s.SQL().Exec(`UPDATE instances SET status='deleting' WHERE id=2`); err != nil {
+		t.Fatal(err)
+	}
+	pending, err = r.PendingStops(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, op := range pending {
+		if op.InstanceID == 2 {
+			t.Fatal("deleting instance remained in restart queue")
+		}
 	}
 }

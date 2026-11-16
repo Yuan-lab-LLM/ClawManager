@@ -79,6 +79,14 @@ function OwnerTeamDashboardContent({ state }: { state: OwnerTeamsState }) {
   const [narrowDetail, setNarrowDetail] = useState(false);
   const operation = useTeamOperation(state.owner, state.refresh);
   const pendingIntent = pendingOwnerTeamIntent(state.owner);
+  const activeOperationID = operation.operation?.operation_id;
+  const activeOperationStatus = operation.operation?.status;
+  const refreshTeams = state.refresh;
+  useEffect(() => {
+    if (!activeOperationID || !activeOperationStatus || ['succeeded', 'failed'].includes(activeOperationStatus)) return;
+    const timer = window.setInterval(() => { if (!document.hidden) void refreshTeams(); }, 3000);
+    return () => window.clearInterval(timer);
+  }, [activeOperationID, activeOperationStatus, refreshTeams]);
   const reportOperation = (op: TeamOperation, error = '') => {
     const failed = op.status === 'failed' || !!error;
     feedback.notify({ id: op.operation_id, operationID: op.operation_id, attemptCount: op.attempt_count, terminal: ['succeeded', 'failed'].includes(op.status), kind: failed ? 'error' : op.status === 'succeeded' ? 'success' : 'pending', title: failed ? '操作尚未完成' : op.status === 'succeeded' ? '操作已完成' : '操作进行中', message: error || op.error_message || (op.status === 'succeeded' ? '后台已确认完成，可继续查看和管理。' : '可以继续浏览，关闭通知不会取消后台操作。'), actions: failed ? [{ label: '重新检查进度', onClick: operation.retryRead }, ...(op.status === 'failed' && op.team_id && op.error_code !== 'TEAM_CREATION_POLICY' ? [{ label: '重试原操作', onClick: () => void operation.retryFailed() }] : [])] : undefined });

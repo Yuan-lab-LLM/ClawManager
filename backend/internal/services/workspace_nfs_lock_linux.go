@@ -93,7 +93,12 @@ func openNFSOperationLock(rootPath string, instanceID int) (*os.File, error) {
 			return nil, err
 		}
 		stat, ok := info.Sys().(*syscall.Stat_t)
-		if !ok || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || stat.Uid != 10001 || info.Mode().Perm() != 0700 {
+		// Runtime capsules require search permission on the shared parent. The
+		// lock directory itself remains private; neither layout allows writes
+		// by the business identity or enumeration of the parent by others.
+		mode := info.Mode().Perm()
+		privateMode := mode == 0700 || part == ".clawmanager-upgrades" && mode == 0711
+		if !ok || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || stat.Uid != 10001 || !privateMode {
 			return nil, os.ErrPermission
 		}
 		next, err := root.OpenRoot(part)

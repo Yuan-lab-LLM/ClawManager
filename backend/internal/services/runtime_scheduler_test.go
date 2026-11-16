@@ -185,7 +185,7 @@ func TestRuntimeSchedulerTreatsOpenClawUpgradeGuardAsTransient(t *testing.T) {
 	}
 }
 
-func TestRuntimeSchedulerRecoversHistoricalHermesUpgradeGuardError(t *testing.T) {
+func TestRuntimeSchedulerRetainsHistoricalHermesErrorUntilExplicitStart(t *testing.T) {
 	ctx := context.Background()
 	endpoint := "http://hermes-agent.runtime"
 	workspace := "/workspaces/hermes/user-1/instance-145"
@@ -221,12 +221,8 @@ func TestRuntimeSchedulerRecoversHistoricalHermesUpgradeGuardError(t *testing.T)
 	if err := scheduler.reconcile(ctx); err != nil {
 		t.Fatalf("reconcile historical Hermes error: %v", err)
 	}
-	state := instanceRepo.runtimeStates[instance.ID]
-	if state.status != "running" || state.message != nil {
-		t.Fatalf("recovered Hermes state = %+v, want running without error", state)
-	}
-	if len(agent.createRequests) != 1 {
-		t.Fatalf("Hermes gateway creates = %d, want 1", len(agent.createRequests))
+	if len(instanceRepo.runtimeStates) != 0 || len(agent.createRequests) != 0 {
+		t.Fatal("historical error triggered automatic recovery")
 	}
 }
 
@@ -1640,7 +1636,7 @@ func TestRuntimeSchedulerDoesNotScaleOutWhenGatewayCreateFailsWithFreeSlot(t *te
 	}
 }
 
-func TestRuntimeSchedulerReconcileAssignsDesiredRunningInstanceWithMissingBinding(t *testing.T) {
+func TestRuntimeSchedulerReportsDesiredRunningInstanceWithMissingBinding(t *testing.T) {
 	ctx := context.Background()
 	endpoint := "http://agent.runtime"
 	workspacePath := "/workspaces/openclaw/user-46/instance-18"
@@ -1683,12 +1679,16 @@ func TestRuntimeSchedulerReconcileAssignsDesiredRunningInstanceWithMissingBindin
 	if err := scheduler.reconcile(ctx); err != nil {
 		t.Fatalf("reconcile returned error: %v", err)
 	}
-	if got := len(agent.createRequests); got != 1 {
-		t.Fatalf("CreateGateway calls = %d, want 1", got)
+	if len(agent.createRequests) != 0 {
+		t.Fatal("running observation created an unowned replacement")
+	}
+	state := instanceRepo.runtimeStates[18]
+	if state.status != "error" || state.generation != 4 || state.message == nil {
+		t.Fatalf("missing binding should be a visible error at the same generation: %+v", state)
 	}
 }
 
-func TestRuntimeSchedulerReconcileRetriesRecoverableNoSchedulableError(t *testing.T) {
+func TestRuntimeSchedulerRetainsCapacityErrorUntilExplicitStart(t *testing.T) {
 	ctx := context.Background()
 	endpoint := "http://agent.runtime"
 	workspacePath := "/workspaces/openclaw/user-46/instance-68"
@@ -1733,16 +1733,12 @@ func TestRuntimeSchedulerReconcileRetriesRecoverableNoSchedulableError(t *testin
 	if err := scheduler.reconcile(ctx); err != nil {
 		t.Fatalf("reconcile returned error: %v", err)
 	}
-	if got := len(agent.createRequests); got != 1 {
-		t.Fatalf("CreateGateway calls = %d, want 1", got)
-	}
-	state := instanceRepo.runtimeStates[68]
-	if state.status != "running" || state.generation != 29 || state.message != nil {
-		t.Fatalf("runtime state = %+v, want running generation 29 without error message", state)
+	if len(agent.createRequests) != 0 || len(instanceRepo.runtimeStates) != 0 {
+		t.Fatal("capacity error retried without an explicit start")
 	}
 }
 
-func TestRuntimeSchedulerReconcileRetriesUnboundGatewayStartFailureAfterRuntimeUpgrade(t *testing.T) {
+func TestRuntimeSchedulerRetainsGatewayErrorAfterUpgradeUntilExplicitStart(t *testing.T) {
 	ctx := context.Background()
 	endpoint := "http://agent.runtime"
 	workspacePath := "/workspaces/openclaw/user-46/instance-970"
@@ -1787,16 +1783,12 @@ func TestRuntimeSchedulerReconcileRetriesUnboundGatewayStartFailureAfterRuntimeU
 	if err := scheduler.reconcile(ctx); err != nil {
 		t.Fatalf("reconcile returned error: %v", err)
 	}
-	if got := len(agent.createRequests); got != 1 {
-		t.Fatalf("CreateGateway calls = %d, want one retry after the runtime upgrade", got)
-	}
-	state := instanceRepo.runtimeStates[970]
-	if state.status != "running" || state.generation != 26 || state.message != nil {
-		t.Fatalf("runtime state = %+v, want recovered generation 26 without an error", state)
+	if len(agent.createRequests) != 0 || len(instanceRepo.runtimeStates) != 0 {
+		t.Fatal("upgrade caused a failed instance to retry automatically")
 	}
 }
 
-func TestRuntimeSchedulerRecoversConfirmedLegacyGatewayExitWithBinding(t *testing.T) {
+func TestRuntimeSchedulerRetainsFailedWriterForExplicitRecovery(t *testing.T) {
 	ctx := context.Background()
 	endpoint := "http://agent.runtime"
 	workspacePath := "/workspaces/openclaw/user-46/instance-971"
@@ -1823,19 +1815,15 @@ func TestRuntimeSchedulerRecoversConfirmedLegacyGatewayExitWithBinding(t *testin
 	if err := scheduler.reconcile(ctx); err != nil {
 		t.Fatalf("reconcile returned error: %v", err)
 	}
-	if len(agent.deleteRequests) != 1 || agent.deleteRequests[0].gatewayID != "gw-971-27" {
-		t.Fatalf("writer fencing delete requests = %#v", agent.deleteRequests)
+	if len(agent.deleteRequests) != 0 || bindingRepo.failedReleaseCalls[971] != 0 || len(agent.createRequests) != 0 || len(instanceRepo.runtimeStates) != 0 {
+		t.Fatal("failed writer was automatically stopped, released or restarted")
 	}
-	if bindingRepo.failedReleaseCalls[971] != 1 || len(agent.createRequests) != 1 {
-		t.Fatalf("failed binding release=%d create requests=%d", bindingRepo.failedReleaseCalls[971], len(agent.createRequests))
-	}
-	state := instanceRepo.runtimeStates[971]
-	if state.status != "running" || state.generation != 27 || state.message != nil {
-		t.Fatalf("runtime state = %+v, want recovered running generation 27", state)
+	if bindingRepo.bindings[971] == nil {
+		t.Fatal("failed writer ownership was lost")
 	}
 }
 
-func TestRuntimeSchedulerDoesNotRecoverFailedBindingWithoutAgentFence(t *testing.T) {
+func TestRuntimeSchedulerDoesNotProbeFailedWriterWithoutExplicitRecovery(t *testing.T) {
 	ctx := context.Background()
 	endpoint := "http://agent.runtime"
 	workspacePath := "/workspaces/openclaw/user-46/instance-972"
@@ -1855,8 +1843,11 @@ func TestRuntimeSchedulerDoesNotRecoverFailedBindingWithoutAgentFence(t *testing
 	agent := &fakeRuntimeAgentClient{deleteErr: context.DeadlineExceeded}
 	scheduler := NewRuntimeScheduler(instanceRepo, podRepo, bindingRepo, &fakeRuntimeRolloutRepo{}, agent, NewRuntimeEventService(nil), nil, &fakeRuntimeDeploymentService{}, time.Second)
 
-	if err := scheduler.reconcile(ctx); err == nil {
-		t.Fatal("reconcile error = nil, want writer-fencing failure")
+	if err := scheduler.reconcile(ctx); err != nil {
+		t.Fatalf("ordinary scheduler probed a failed writer: %v", err)
+	}
+	if len(agent.deleteRequests) != 0 {
+		t.Fatal("ordinary scheduler attempted a recovery stop")
 	}
 	if bindingRepo.failedReleaseCalls[972] != 0 || len(agent.createRequests) != 0 || bindingRepo.bindings[972] == nil {
 		t.Fatalf("unsafe recovery mutated state: releases=%d creates=%d binding=%#v", bindingRepo.failedReleaseCalls[972], len(agent.createRequests), bindingRepo.bindings[972])
@@ -1943,7 +1934,7 @@ func TestRuntimeSchedulerReconcileSkipsAssignmentWhenBindingLookupErrors(t *test
 		},
 	}
 	bindingRepo := newFakeRuntimeBindingRepo()
-	bindingRepo.runningErr = lookupErr
+	bindingRepo.getErr = lookupErr
 	agent := &fakeRuntimeAgentClient{
 		createResponse: &RuntimeAgentCreateGatewayResponse{GatewayID: "gw-19", Port: 20019, Status: "running"},
 	}
@@ -2389,6 +2380,7 @@ func TestRuntimeSchedulerDesiredRunningSkipsNonRunningExistingBinding(t *testing
 	bindingRepo := newFakeRuntimeBindingRepo()
 	bindingRepo.bindings[24] = &models.InstanceRuntimeBinding{
 		InstanceID:   24,
+		RuntimeType:  RuntimeTypeOpenClaw,
 		RuntimePodID: 9,
 		State:        "creating",
 		Generation:   1,
@@ -2525,7 +2517,7 @@ func TestRuntimeSchedulerFailoverLeavesBindingAndSlotWhenInstanceUpdateFails(t *
 	}
 }
 
-func TestRuntimeSchedulerReconcileFailoversStalePod(t *testing.T) {
+func TestRuntimeSchedulerDoesNotFailoverStalePodAutomatically(t *testing.T) {
 	ctx := context.Background()
 	staleSeen := time.Now().UTC().Add(-31 * time.Second)
 	podUID := "pod-uid-9"
@@ -2566,24 +2558,8 @@ func TestRuntimeSchedulerReconcileFailoversStalePod(t *testing.T) {
 		t.Fatalf("reconcile returned error: %v", err)
 	}
 
-	if got := podRepo.marked[9]; got.state != "unhealthy" || got.draining {
-		t.Fatalf("marked pod state = %+v", got)
-	}
-	if bindingRepo.bindings[17] != nil {
-		t.Fatal("binding was not deleted")
-	}
-	if podRepo.releases[9] != 1 {
-		t.Fatalf("pod releases = %d, want 1", podRepo.releases[9])
-	}
-	state := instanceRepo.runtimeStates[17]
-	if state.status != "creating" || state.generation != 4 {
-		t.Fatalf("runtime state = %+v, want creating generation 4", state)
-	}
-	if state.message == nil || !strings.Contains(*state.message, "runtime pod heartbeat lost") {
-		t.Fatalf("runtime state message = %v, want heartbeat lost reason", state.message)
-	}
-	if len(agent.healthCalls) != 1 || agent.healthCalls[0] != endpoint {
-		t.Fatalf("agent health calls = %#v, want one independent probe", agent.healthCalls)
+	if len(podRepo.marked) != 0 || bindingRepo.bindings[17] == nil || podRepo.releases[9] != 0 || len(instanceRepo.runtimeStates) != 0 || len(agent.healthCalls) != 0 {
+		t.Fatal("stale heartbeat triggered automatic writer migration")
 	}
 }
 
@@ -3120,7 +3096,7 @@ func TestRuntimeSchedulerRolloutSameImageFinishesWithoutDrain(t *testing.T) {
 	}
 }
 
-func TestRuntimeSchedulerReconcileStartsPendingRollouts(t *testing.T) {
+func TestRuntimeOperationsReconcileStartsPendingRollouts(t *testing.T) {
 	ctx := context.Background()
 	recentSeen := time.Now().UTC()
 	endpoint := "http://pod-1.runtime"
@@ -3162,7 +3138,7 @@ func TestRuntimeSchedulerReconcileStartsPendingRollouts(t *testing.T) {
 		time.Second,
 	)
 
-	if err := scheduler.reconcile(ctx); err != nil {
+	if err := scheduler.reconcileRuntimeOperations(ctx); err != nil {
 		t.Fatalf("reconcile returned error: %v", err)
 	}
 	if got := len(deployments.rolloutImageCalls); got != 1 {

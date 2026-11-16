@@ -68,7 +68,7 @@ const Toast: React.FC<{ toast: ToastState; onClose: () => void }> = ({ toast, on
         padding: '10px 16px',
         background: bg,
         color: fg,
-        borderRadius: 10,
+        borderRadius: 8,
         fontSize: 13,
         boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
       }}
@@ -97,7 +97,7 @@ const Modal: React.FC<{
         style={{ maxWidth: 560, width: '100%', maxHeight: '90vh', overflow: 'auto' }}
         onClick={(e) => e.stopPropagation()}
       >
-        {eyebrow && <div className="eyebrow text-[10px] mb-1">{eyebrow}</div>}
+        {eyebrow && <div className="eyebrow text-xs mb-1">{eyebrow}</div>}
         <h3 className="section-title-lg mb-4">{title}</h3>
         <div className="mb-5">{children}</div>
         <div className="flex justify-end gap-2">{footer}</div>
@@ -967,7 +967,7 @@ const HostHardeningPage: React.FC = () => {
           <div className="flex items-start justify-between gap-6 mb-5">
             <div className="hero-block flex-1">
               <div className="h-eyebrow">{t(`${h}.hero.eyebrow`)}</div>
-              <h2 className="h-title">{t(`${h}.hero.title`)}</h2>
+              <h2 className="section-title">{t(`${h}.hero.title`)}</h2>
               <p className="h-subtitle">{t(`${h}.hero.subtitle`)}</p>
             </div>
           </div>
@@ -1044,9 +1044,9 @@ const HostHardeningPage: React.FC = () => {
                 alignItems: 'center',
                 gap: 14,
                 padding: '12px 16px',
-                background: '#fdf6f1',
-                border: '1px solid #eadfd8',
-                borderRadius: 10,
+                background: 'var(--cm-subtle)',
+                border: '1px solid var(--cm-border)',
+                borderRadius: 8,
                 marginBottom: 18,
               }}
             >
@@ -1082,7 +1082,7 @@ const HostHardeningPage: React.FC = () => {
                     />
                   </label>
                 </div>
-                <div style={{ maxHeight: 520, overflowY: 'auto', border: '1px solid #eadfd8', borderRadius: 10 }}>
+                <div style={{ maxHeight: 520, overflowY: 'auto', border: '1px solid var(--cm-border)', borderRadius: 8 }}>
                   <table className="tbl" style={{ margin: 0 }}>
                     <thead style={{ position: 'sticky', top: 0, background: '#fdfaf7', zIndex: 1 }}>
                       <tr>
@@ -1095,9 +1095,9 @@ const HostHardeningPage: React.FC = () => {
                     <tbody>
                       {builtinTemplate.map((rule) => (
                         <tr key={rule.path}>
-                          <td><code className="text-sm font-mono text-[#171212]">{rule.path}</code></td>
+                          <td><code className="text-sm font-mono text-[var(--cm-ink)]">{rule.path}</code></td>
                           <td><span className="text-xs muted">{rule.desc ?? '-'}</span></td>
-                          <td><span className="badge badge-slate text-[10px]">{modeI18n(rule.mode, t)}</span></td>
+                          <td><span className="badge badge-slate text-xs">{modeI18n(rule.mode, t)}</span></td>
                           <td>
                             <Toggle
                               on={builtinEnabledPaths.has(rule.path)}
@@ -1148,11 +1148,11 @@ const HostHardeningPage: React.FC = () => {
                   <tbody>
                     {customFileRules.map((rule, i) => (
                       <tr key={i}>
-                        <td><code className="text-sm font-mono text-[#171212]">{rule.path}</code></td>
+                        <td><code className="text-sm font-mono text-[var(--cm-ink)]">{rule.path}</code></td>
                         <td><code className="text-xs font-mono muted-strong">{rule.trust}</code></td>
                         {(['r', 'w', 'x', 'd'] as const).map((k) => (
                           <td key={k} style={{ textAlign: 'center' }}>
-                            <span className={`badge badge-${rule[k] ? 'green' : 'slate'} text-[10px]`}>
+                            <span className={`badge badge-${rule[k] ? 'green' : 'slate'} text-xs`}>
                               {rule[k] ? '✓' : '—'}
                             </span>
                           </td>
@@ -1179,7 +1179,7 @@ const HostHardeningPage: React.FC = () => {
               <>
                 <div className="text-xs muted mb-3">{t(`${h}.file.procDesc`)}</div>
                 <div className="flex items-center justify-between mb-3">
-                  <span className="font-semibold text-[#171212] text-sm">{t(`${h}.file.procProtectBlacklist`)}</span>
+                  <span className="font-semibold text-[var(--cm-ink)] text-sm">{t(`${h}.file.procProtectBlacklist`)}</span>
                   <button
                     className="btn-primary btn-sm"
                     disabled={procRules.length >= 40}
@@ -1208,7 +1208,7 @@ const HostHardeningPage: React.FC = () => {
                   <tbody>
                     {procRules.map((rule, i) => (
                       <tr key={i}>
-                        <td><code className="text-sm font-mono text-[#171212]">{rule.path}</code></td>
+                        <td><code className="text-sm font-mono text-[var(--cm-ink)]">{rule.path}</code></td>
                         <td>
                           <span className={`badge badge-${rule.type === '进程保护' ? 'red' : 'orange'}`}>
                             {rule.type === '进程保护' ? t(`${h}.file.processProtectLabel`) : t(`${h}.file.processBlacklist`)}
@@ -1235,7 +1235,7 @@ const HostHardeningPage: React.FC = () => {
             {/* 主机防护日志 */}
             <div style={{ marginTop: 24 }}>
               <div className="flex items-center justify-between mb-3">
-                <h4 className="font-semibold text-[#171212] text-sm">{t(`${h}.file.logTitle`)}</h4>
+                <h4 className="font-semibold text-[var(--cm-ink)] text-sm">{t(`${h}.file.logTitle`)}</h4>
                 <button className="btn-secondary btn-sm" onClick={() => fireToast(t(`${h}.file.logRefreshed`), 'info')}>{t(`${h}.common.refresh`)}</button>
               </div>
               <table className="tbl">
@@ -1260,9 +1260,9 @@ const HostHardeningPage: React.FC = () => {
                       <tr key={i}>
                         <td><span className="text-xs muted-strong font-mono">{row.time ?? '-'}</span></td>
                         <td><span className="text-xs">{row.user ?? '-'}</span></td>
-                        <td><code className="text-xs font-mono text-[#171212]">{row.process ?? '-'}</code></td>
+                        <td><code className="text-xs font-mono text-[var(--cm-ink)]">{row.process ?? '-'}</code></td>
                         <td><code className="text-xs font-mono">{row.path ?? '-'}</code></td>
-                        <td><span className="badge badge-slate text-[10px]">{operationI18n(row.operation, t)}</span></td>
+                        <td><span className="badge badge-slate text-xs">{operationI18n(row.operation, t)}</span></td>
                         <td><span className={`badge badge-${tone}`}>{actionI18n(row.action, t)}</span></td>
                       </tr>
                     );
@@ -1306,9 +1306,9 @@ const HostHardeningPage: React.FC = () => {
                 alignItems: 'center',
                 gap: 14,
                 padding: '12px 16px',
-                background: '#fdf6f1',
-                border: '1px solid #eadfd8',
-                borderRadius: 10,
+                background: 'var(--cm-subtle)',
+                border: '1px solid var(--cm-border)',
+                borderRadius: 8,
                 marginBottom: 18,
               }}
             >
@@ -1363,7 +1363,7 @@ const HostHardeningPage: React.FC = () => {
                   <tbody>
                     {baits.map((p, i) => (
                       <tr key={i}>
-                        <td><code className="text-sm font-mono text-[#171212]">{p}</code></td>
+                        <td><code className="text-sm font-mono text-[var(--cm-ink)]">{p}</code></td>
                         <td><span className="badge badge-green">{t(`${h}.ransom.deployed`)}</span></td>
                         <td>
                           <button
@@ -1415,7 +1415,7 @@ const HostHardeningPage: React.FC = () => {
                   <tbody>
                     {ransomWhite.map((p, i) => (
                       <tr key={i}>
-                        <td><code className="text-sm font-mono text-[#171212]">{p}</code></td>
+                        <td><code className="text-sm font-mono text-[var(--cm-ink)]">{p}</code></td>
                         <td>
                           <button
                             className="text-xs text-[#dc2626] font-semibold hover:underline"
@@ -1437,7 +1437,7 @@ const HostHardeningPage: React.FC = () => {
             {/* 勒索防护日志 */}
             <div style={{ marginTop: 24 }}>
               <div className="flex items-center justify-between mb-3">
-                <h4 className="font-semibold text-[#171212] text-sm">{t(`${h}.ransom.logTitle`)}</h4>
+                <h4 className="font-semibold text-[var(--cm-ink)] text-sm">{t(`${h}.ransom.logTitle`)}</h4>
                 <button className="btn-secondary btn-sm" onClick={() => fireToast(t(`${h}.file.logRefreshed`), 'info')}>{t(`${h}.common.refresh`)}</button>
               </div>
               <table className="tbl">
@@ -1467,7 +1467,7 @@ const HostHardeningPage: React.FC = () => {
                     return (
                       <tr key={i}>
                         <td><span className="text-xs muted-strong font-mono">{entry.time ?? '-'}</span></td>
-                        <td><code className="text-xs font-mono text-[#171212]">{entry.process ?? entry.path ?? entry.raw}</code></td>
+                        <td><code className="text-xs font-mono text-[var(--cm-ink)]">{entry.process ?? entry.path ?? entry.raw}</code></td>
                         <td><span className="text-xs">{entry.user ?? '-'}</span></td>
                         <td><span className={`badge badge-${killed ? 'red' : 'orange'}`}>{label}</span></td>
                       </tr>
@@ -1530,15 +1530,15 @@ const HostHardeningPage: React.FC = () => {
                         alignItems: 'center',
                         gap: 14,
                         padding: '12px 16px',
-                        border: '1px solid #eadfd8',
-                        borderRadius: 10,
+                        border: '1px solid var(--cm-border)',
+                        borderRadius: 8,
                         background: 'white',
                       }}
                     >
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div className="flex items-center gap-2">
-                          <span className="badge badge-slate text-[10px]">{r.type}</span>
-                          <span className="text-sm font-semibold text-[#171212]">{r.name}</span>
+                          <span className="badge badge-slate text-xs">{r.type}</span>
+                          <span className="text-sm font-semibold text-[var(--cm-ink)]">{r.name}</span>
                         </div>
                         <div className="text-xs muted mt-1">{r.desc}</div>
                       </div>
@@ -1649,7 +1649,7 @@ const HostHardeningPage: React.FC = () => {
                 展示方式参考 KSecGUI/components/InvasionLog.vue */}
             <div style={{ marginTop: 24 }}>
               <div className="flex items-center justify-between mb-3">
-                <h4 className="font-semibold text-[#171212] text-sm">{t(`${h}.invasion.logTitle`)}</h4>
+                <h4 className="font-semibold text-[var(--cm-ink)] text-sm">{t(`${h}.invasion.logTitle`)}</h4>
                 <button className="btn-secondary btn-sm" onClick={() => fireToast(t(`${h}.file.logRefreshed`), 'info')}>{t(`${h}.common.refresh`)}</button>
               </div>
               <table className="tbl">
@@ -1681,7 +1681,7 @@ const HostHardeningPage: React.FC = () => {
                       return [
                         <tr key={row.key}>
                           <td><span className="text-xs muted-strong font-mono">{row.time}</span></td>
-                          <td><span className="badge badge-red text-[10px]">{row.ruleType}</span></td>
+                          <td><span className="badge badge-red text-xs">{row.ruleType}</span></td>
                           <td>
                             <button
                               type="button"
@@ -1740,7 +1740,7 @@ const HostHardeningPage: React.FC = () => {
               {/* Hero: 头部状态卡 */}
               <div
                 className="flex items-start justify-between mb-4"
-                style={{ padding: 16, background: '#fdf6f1', border: '1px solid #eadfd8', borderRadius: 10 }}
+                style={{ padding: 16, background: 'var(--cm-subtle)', border: '1px solid var(--cm-border)', borderRadius: 8 }}
               >
                 <div className="flex-1">
                   <div className="eyebrow">{t(`${h}.baseline.eyebrow`)}</div>
@@ -1846,7 +1846,7 @@ const HostHardeningPage: React.FC = () => {
                   }
                   const isOpen = baselineExpanded.has(cat.type);
                   return (
-                    <div key={cat.type} style={{ border: '1px solid #eadfd8', borderRadius: 10, background: 'white' }}>
+                    <div key={cat.type} style={{ border: '1px solid var(--cm-border)', borderRadius: 8, background: 'white' }}>
                       <div
                         style={{
                           display: 'flex',
@@ -1864,7 +1864,7 @@ const HostHardeningPage: React.FC = () => {
                           />
                         )}
                         <div style={{ flex: 1, minWidth: 0 }}>
-                          <div className="text-sm font-semibold text-[#171212]">{cat.type}</div>
+                          <div className="text-sm font-semibold text-[var(--cm-ink)]">{cat.type}</div>
                           <div className="text-xs muted mt-0.5">{cat.description}</div>
                         </div>
                         <button
@@ -1892,7 +1892,7 @@ const HostHardeningPage: React.FC = () => {
                         </button>
                       </div>
                       {isOpen && (
-                        <div style={{ borderTop: '1px solid #eadfd8' }}>
+                        <div style={{ borderTop: '1px solid var(--cm-border)' }}>
                           <table className="tbl" style={{ margin: 0 }}>
                             <thead style={{ background: '#fdfaf7' }}>
                               <tr>
@@ -1914,7 +1914,7 @@ const HostHardeningPage: React.FC = () => {
                                 return (
                                   <tr key={it.id}>
                                     <td>
-                                      <div className="text-sm text-[#171212]">{it.name}</div>
+                                      <div className="text-sm text-[var(--cm-ink)]">{it.name}</div>
                                       {it.desp && <div className="text-xs muted" style={{ marginTop: 2 }}>{it.desp}</div>}
                                     </td>
                                     {!phase && (
@@ -1984,7 +1984,7 @@ const WhitelistTable: React.FC<{
       <tbody>
         {items.map((item, i) => (
           <tr key={i}>
-            <td><code className="text-sm font-mono text-[#171212]">{item.value}</code></td>
+            <td><code className="text-sm font-mono text-[var(--cm-ink)]">{item.value}</code></td>
             <td><span className="text-xs muted">{item.desc || '-'}</span></td>
             <td>
               <button className="text-xs text-[#dc2626] font-semibold hover:underline" onClick={() => onDelete(i)}>删除</button>
@@ -2066,11 +2066,11 @@ const FileRuleModal: React.FC<{
     >
       <div className="space-y-4">
         <div>
-          <div className="eyebrow text-[10px] mb-1"><span style={{ color: '#dc2626' }}>*</span> 保护文件/目录</div>
+          <div className="eyebrow text-xs mb-1"><span style={{ color: '#dc2626' }}>*</span> 保护文件/目录</div>
           <input className="input" placeholder="请输入绝对路径" value={path} onChange={(e) => setPath(e.target.value)} />
         </div>
         <div>
-          <div className="eyebrow text-[10px] mb-1">信任进程 <span
+          <div className="eyebrow text-xs mb-1">信任进程 <span
             className="muted"
             title={'信任进程为空时表示信任所有进程\n支持目录形式'}
           >ⓘ</span></div>
@@ -2084,7 +2084,7 @@ const FileRuleModal: React.FC<{
           />
         </div>
         <div>
-          <div className="eyebrow text-[10px] mb-2">权限 <span
+          <div className="eyebrow text-xs mb-2">权限 <span
             className="muted"
             title={'1、权限：配置信任进程对保护文件/目录的权限，非信任进程对保护文件/目录无权限\n2、写：包含创建、写、移动或重命名权限'}
           >ⓘ</span></div>
@@ -2136,14 +2136,14 @@ const ProcRuleModal: React.FC<{
     >
       <div className="space-y-4">
         <div>
-          <div className="eyebrow text-[10px] mb-1"><span style={{ color: '#dc2626' }}>*</span> 规则类型</div>
+          <div className="eyebrow text-xs mb-1"><span style={{ color: '#dc2626' }}>*</span> 规则类型</div>
           <select className="input" value={type} onChange={(e) => setType(e.target.value as ProcRule['type'])}>
             <option value="进程保护">进程保护</option>
             <option value="进程黑名单">进程黑名单</option>
           </select>
         </div>
         <div>
-          <div className="eyebrow text-[10px] mb-1"><span style={{ color: '#dc2626' }}>*</span> 进程路径</div>
+          <div className="eyebrow text-xs mb-1"><span style={{ color: '#dc2626' }}>*</span> 进程路径</div>
           <textarea
             className="input"
             rows={6}

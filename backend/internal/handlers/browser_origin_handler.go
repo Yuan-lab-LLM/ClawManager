@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"clawreef/internal/browserorigin"
+	"clawreef/internal/models"
 	"clawreef/internal/services"
 	"github.com/gin-gonic/gin"
 )
@@ -175,7 +176,13 @@ func browserOriginCapacityFailure(c *gin.Context, err error) bool {
 	return true
 }
 
-func instanceAccessURLFailure(c *gin.Context, err error) {
+func instanceAccessURLFailure(c *gin.Context, err error, instance ...*models.Instance) {
+	// An empty legacy URL means missing origin configuration. Preserve typed
+	// registry/capacity failures instead of labeling all failures as configuration.
+	if err == nil && len(instance) > 0 {
+		unavailableInstanceAccess(c, instance[0])
+		return
+	}
 	if !browserOriginCapacityFailure(c, err) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"success": false, "error": "Unable to generate access URL"})
 	}

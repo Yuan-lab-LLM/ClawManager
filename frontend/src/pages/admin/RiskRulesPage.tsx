@@ -32,23 +32,23 @@ const RULE_VISUALS: Record<string, RuleVisualMeta> = {
   private_key_marker: {
     category: 'security',
     icon: 'M15 7a3 3 0 10-5.196 2.018L3 16v5h5l6.982-6.804A3 3 0 0015 7z',
-    panelClass: 'border-[#f5dfcb] bg-[rgba(255,249,244,0.94)]',
-    badgeClass: 'border-[#f5d5c2] bg-[#fff5ef] text-[#b46c50]',
-    iconShellClass: 'border-[#f5d5c2] bg-[#fff5ef] text-[#b46c50]',
+    panelClass: 'border-[var(--cm-border)] bg-[var(--cm-subtle)]',
+    badgeClass: 'border-[#f5d5c2] bg-[var(--cm-selected)] text-[var(--cm-muted)]',
+    iconShellClass: 'border-[#f5d5c2] bg-[var(--cm-selected)] text-[var(--cm-muted)]',
   },
   api_key_like: {
     category: 'security',
     icon: 'M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2h-1V9a5 5 0 00-10 0v2H6a2 2 0 00-2 2v6a2 2 0 002 2z',
-    panelClass: 'border-[#f5dfcb] bg-[rgba(255,249,244,0.94)]',
-    badgeClass: 'border-[#f5d5c2] bg-[#fff5ef] text-[#b46c50]',
-    iconShellClass: 'border-[#f5d5c2] bg-[#fff5ef] text-[#b46c50]',
+    panelClass: 'border-[var(--cm-border)] bg-[var(--cm-subtle)]',
+    badgeClass: 'border-[#f5d5c2] bg-[var(--cm-selected)] text-[var(--cm-muted)]',
+    iconShellClass: 'border-[#f5d5c2] bg-[var(--cm-selected)] text-[var(--cm-muted)]',
   },
   credential_assignment: {
     category: 'security',
     icon: 'M4 7h16M4 12h8m-8 5h16',
-    panelClass: 'border-[#f5dfcb] bg-[rgba(255,249,244,0.94)]',
-    badgeClass: 'border-[#f5d5c2] bg-[#fff5ef] text-[#b46c50]',
-    iconShellClass: 'border-[#f5d5c2] bg-[#fff5ef] text-[#b46c50]',
+    panelClass: 'border-[var(--cm-border)] bg-[var(--cm-subtle)]',
+    badgeClass: 'border-[#f5d5c2] bg-[var(--cm-selected)] text-[var(--cm-muted)]',
+    iconShellClass: 'border-[#f5d5c2] bg-[var(--cm-selected)] text-[var(--cm-muted)]',
   },
   private_ip: {
     category: 'company',
@@ -60,51 +60,51 @@ const RULE_VISUALS: Record<string, RuleVisualMeta> = {
   email_address: {
     category: 'personal',
     icon: 'M4 6h16v12H4V6zm0 0l8 6 8-6',
-    panelClass: 'border-[#f2d7d7] bg-[rgba(255,248,248,0.94)]',
-    badgeClass: 'border-[#f0d2d2] bg-[#fff3f3] text-[#a65252]',
-    iconShellClass: 'border-[#f0d2d2] bg-[#fff3f3] text-[#a65252]',
+    panelClass: 'border-[var(--cm-border)] bg-[var(--cm-subtle)]',
+    badgeClass: 'border-[var(--cm-border)] bg-[var(--cm-subtle)] text-[#a65252]',
+    iconShellClass: 'border-[var(--cm-border)] bg-[var(--cm-subtle)] text-[#a65252]',
   },
   cn_mobile_number: {
     category: 'personal',
     icon: 'M7 4h10a1 1 0 011 1v14a1 1 0 01-1 1H7a1 1 0 01-1-1V5a1 1 0 011-1zm5 13h.01',
-    panelClass: 'border-[#f2d7d7] bg-[rgba(255,248,248,0.94)]',
-    badgeClass: 'border-[#f0d2d2] bg-[#fff3f3] text-[#a65252]',
-    iconShellClass: 'border-[#f0d2d2] bg-[#fff3f3] text-[#a65252]',
+    panelClass: 'border-[var(--cm-border)] bg-[var(--cm-subtle)]',
+    badgeClass: 'border-[var(--cm-border)] bg-[var(--cm-subtle)] text-[#a65252]',
+    iconShellClass: 'border-[var(--cm-border)] bg-[var(--cm-subtle)] text-[#a65252]',
   },
   cn_id_card: {
     category: 'personal',
     icon: 'M4 7h16v10H4V7zm4 2h5m-5 3h8m3-3h.01',
-    panelClass: 'border-[#f2d7d7] bg-[rgba(255,248,248,0.94)]',
-    badgeClass: 'border-[#f0d2d2] bg-[#fff3f3] text-[#a65252]',
-    iconShellClass: 'border-[#f0d2d2] bg-[#fff3f3] text-[#a65252]',
+    panelClass: 'border-[var(--cm-border)] bg-[var(--cm-subtle)]',
+    badgeClass: 'border-[var(--cm-border)] bg-[var(--cm-subtle)] text-[#a65252]',
+    iconShellClass: 'border-[var(--cm-border)] bg-[var(--cm-subtle)] text-[#a65252]',
   },
   passport_number: {
     category: 'personal',
     icon: 'M12 2a7 7 0 017 7v11H5V9a7 7 0 017-7zm0 0v18m-4-9h8',
-    panelClass: 'border-[#f2d7d7] bg-[rgba(255,248,248,0.94)]',
-    badgeClass: 'border-[#f0d2d2] bg-[#fff3f3] text-[#a65252]',
-    iconShellClass: 'border-[#f0d2d2] bg-[#fff3f3] text-[#a65252]',
+    panelClass: 'border-[var(--cm-border)] bg-[var(--cm-subtle)]',
+    badgeClass: 'border-[var(--cm-border)] bg-[var(--cm-subtle)] text-[#a65252]',
+    iconShellClass: 'border-[var(--cm-border)] bg-[var(--cm-subtle)] text-[#a65252]',
   },
   bank_card_context: {
     category: 'personal',
     icon: 'M3 7h18v10H3V7zm0 3h18M7 14h2',
-    panelClass: 'border-[#f2d7d7] bg-[rgba(255,248,248,0.94)]',
-    badgeClass: 'border-[#f0d2d2] bg-[#fff3f3] text-[#a65252]',
-    iconShellClass: 'border-[#f0d2d2] bg-[#fff3f3] text-[#a65252]',
+    panelClass: 'border-[var(--cm-border)] bg-[var(--cm-subtle)]',
+    badgeClass: 'border-[var(--cm-border)] bg-[var(--cm-subtle)] text-[#a65252]',
+    iconShellClass: 'border-[var(--cm-border)] bg-[var(--cm-subtle)] text-[#a65252]',
   },
   personal_address_keywords: {
     category: 'personal',
     icon: 'M12 21s-6-4.35-6-10a6 6 0 1112 0c0 5.65-6 10-6 10zm0-8a2 2 0 100-4 2 2 0 000 4z',
-    panelClass: 'border-[#f2d7d7] bg-[rgba(255,248,248,0.94)]',
-    badgeClass: 'border-[#f0d2d2] bg-[#fff3f3] text-[#a65252]',
-    iconShellClass: 'border-[#f0d2d2] bg-[#fff3f3] text-[#a65252]',
+    panelClass: 'border-[var(--cm-border)] bg-[var(--cm-subtle)]',
+    badgeClass: 'border-[var(--cm-border)] bg-[var(--cm-subtle)] text-[#a65252]',
+    iconShellClass: 'border-[var(--cm-border)] bg-[var(--cm-subtle)] text-[#a65252]',
   },
   resume_cv_keywords: {
     category: 'personal',
     icon: 'M7 3h7l5 5v13H7V3zm7 0v5h5',
-    panelClass: 'border-[#f2d7d7] bg-[rgba(255,248,248,0.94)]',
-    badgeClass: 'border-[#f0d2d2] bg-[#fff3f3] text-[#a65252]',
-    iconShellClass: 'border-[#f0d2d2] bg-[#fff3f3] text-[#a65252]',
+    panelClass: 'border-[var(--cm-border)] bg-[var(--cm-subtle)]',
+    badgeClass: 'border-[var(--cm-border)] bg-[var(--cm-subtle)] text-[#a65252]',
+    iconShellClass: 'border-[var(--cm-border)] bg-[var(--cm-subtle)] text-[#a65252]',
   },
   internal_domain_name: {
     category: 'company',
@@ -179,70 +179,70 @@ const RULE_VISUALS: Record<string, RuleVisualMeta> = {
   jwt_token_like: {
     category: 'security',
     icon: 'M12 2l7 4v5c0 5-3.5 9.5-7 11-3.5-1.5-7-6-7-11V6l7-4zm0 7v3m0 4h.01',
-    panelClass: 'border-[#f5dfcb] bg-[rgba(255,249,244,0.94)]',
-    badgeClass: 'border-[#f5d5c2] bg-[#fff5ef] text-[#b46c50]',
-    iconShellClass: 'border-[#f5d5c2] bg-[#fff5ef] text-[#b46c50]',
+    panelClass: 'border-[var(--cm-border)] bg-[var(--cm-subtle)]',
+    badgeClass: 'border-[#f5d5c2] bg-[var(--cm-selected)] text-[var(--cm-muted)]',
+    iconShellClass: 'border-[#f5d5c2] bg-[var(--cm-selected)] text-[var(--cm-muted)]',
   },
   cookie_session_like: {
     category: 'security',
     icon: 'M7 3a2 2 0 104 0 2 2 0 104 0 2 2 0 104 0v4a7 7 0 11-12 7V3z',
-    panelClass: 'border-[#f5dfcb] bg-[rgba(255,249,244,0.94)]',
-    badgeClass: 'border-[#f5d5c2] bg-[#fff5ef] text-[#b46c50]',
-    iconShellClass: 'border-[#f5d5c2] bg-[#fff5ef] text-[#b46c50]',
+    panelClass: 'border-[var(--cm-border)] bg-[var(--cm-subtle)]',
+    badgeClass: 'border-[#f5d5c2] bg-[var(--cm-selected)] text-[var(--cm-muted)]',
+    iconShellClass: 'border-[#f5d5c2] bg-[var(--cm-selected)] text-[var(--cm-muted)]',
   },
   db_connection_string: {
     category: 'security',
     icon: 'M12 4c4.418 0 8 1.12 8 2.5S16.418 9 12 9 4 7.88 4 6.5 7.582 4 12 4zm8 6v3.5C20 14.88 16.418 16 12 16s-8-1.12-8-2.5V10',
-    panelClass: 'border-[#f5dfcb] bg-[rgba(255,249,244,0.94)]',
-    badgeClass: 'border-[#f5d5c2] bg-[#fff5ef] text-[#b46c50]',
-    iconShellClass: 'border-[#f5d5c2] bg-[#fff5ef] text-[#b46c50]',
+    panelClass: 'border-[var(--cm-border)] bg-[var(--cm-subtle)]',
+    badgeClass: 'border-[#f5d5c2] bg-[var(--cm-selected)] text-[var(--cm-muted)]',
+    iconShellClass: 'border-[#f5d5c2] bg-[var(--cm-selected)] text-[var(--cm-muted)]',
   },
   kubeconfig_content: {
     category: 'security',
     icon: 'M12 3l7 4v10l-7 4-7-4V7l7-4zm0 5l3 1.5v3L12 14l-3-1.5v-3L12 8z',
-    panelClass: 'border-[#f5dfcb] bg-[rgba(255,249,244,0.94)]',
-    badgeClass: 'border-[#f5d5c2] bg-[#fff5ef] text-[#b46c50]',
-    iconShellClass: 'border-[#f5d5c2] bg-[#fff5ef] text-[#b46c50]',
+    panelClass: 'border-[var(--cm-border)] bg-[var(--cm-subtle)]',
+    badgeClass: 'border-[#f5d5c2] bg-[var(--cm-selected)] text-[var(--cm-muted)]',
+    iconShellClass: 'border-[#f5d5c2] bg-[var(--cm-selected)] text-[var(--cm-muted)]',
   },
   env_file_secret: {
     category: 'security',
     icon: 'M8 4h8l4 4v12H4V4h4zm1 5h6m-6 4h6m-6 4h4',
-    panelClass: 'border-[#f5dfcb] bg-[rgba(255,249,244,0.94)]',
-    badgeClass: 'border-[#f5d5c2] bg-[#fff5ef] text-[#b46c50]',
-    iconShellClass: 'border-[#f5d5c2] bg-[#fff5ef] text-[#b46c50]',
+    panelClass: 'border-[var(--cm-border)] bg-[var(--cm-subtle)]',
+    badgeClass: 'border-[#f5d5c2] bg-[var(--cm-selected)] text-[var(--cm-muted)]',
+    iconShellClass: 'border-[#f5d5c2] bg-[var(--cm-selected)] text-[var(--cm-muted)]',
   },
   financial_metrics_keywords: {
     category: 'financeLegal',
     icon: 'M4 17l4-4 3 3 5-6 4 4',
-    panelClass: 'border-[#efe3bf] bg-[rgba(255,252,244,0.94)]',
-    badgeClass: 'border-[#e8dab0] bg-[#fff8e7] text-[#9a7b20]',
-    iconShellClass: 'border-[#e8dab0] bg-[#fff8e7] text-[#9a7b20]',
+    panelClass: 'border-[#efe3bf] bg-[var(--cm-subtle)]',
+    badgeClass: 'border-[#e8dab0] bg-[var(--cm-subtle)] text-[#9a7b20]',
+    iconShellClass: 'border-[#e8dab0] bg-[var(--cm-subtle)] text-[#9a7b20]',
   },
   legal_document_keywords: {
     category: 'financeLegal',
     icon: 'M9 4h6m-3 0v12m-5 0h10',
-    panelClass: 'border-[#efe3bf] bg-[rgba(255,252,244,0.94)]',
-    badgeClass: 'border-[#e8dab0] bg-[#fff8e7] text-[#9a7b20]',
-    iconShellClass: 'border-[#e8dab0] bg-[#fff8e7] text-[#9a7b20]',
+    panelClass: 'border-[#efe3bf] bg-[var(--cm-subtle)]',
+    badgeClass: 'border-[#e8dab0] bg-[var(--cm-subtle)] text-[#9a7b20]',
+    iconShellClass: 'border-[#e8dab0] bg-[var(--cm-subtle)] text-[#9a7b20]',
   },
   political_person_org_keywords: {
     category: 'political',
     icon: 'M4 20h16M6 20V9h12v11M9 9V6l3-2 3 2v3',
-    panelClass: 'border-[#efd7de] bg-[rgba(255,248,250,0.94)]',
+    panelClass: 'border-[#efd7de] bg-[var(--cm-subtle)]',
     badgeClass: 'border-[#ebcbd4] bg-[#fff2f6] text-[#a24f68]',
     iconShellClass: 'border-[#ebcbd4] bg-[#fff2f6] text-[#a24f68]',
   },
   military_security_keywords: {
     category: 'political',
     icon: 'M12 2l7 4v6c0 4.5-3 8.5-7 10-4-1.5-7-5.5-7-10V6l7-4z',
-    panelClass: 'border-[#efd7de] bg-[rgba(255,248,250,0.94)]',
+    panelClass: 'border-[#efd7de] bg-[var(--cm-subtle)]',
     badgeClass: 'border-[#ebcbd4] bg-[#fff2f6] text-[#a24f68]',
     iconShellClass: 'border-[#ebcbd4] bg-[#fff2f6] text-[#a24f68]',
   },
   extremism_keywords: {
     category: 'political',
     icon: 'M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z',
-    panelClass: 'border-[#efd7de] bg-[rgba(255,248,250,0.94)]',
+    panelClass: 'border-[#efd7de] bg-[var(--cm-subtle)]',
     badgeClass: 'border-[#ebcbd4] bg-[#fff2f6] text-[#a24f68]',
     iconShellClass: 'border-[#ebcbd4] bg-[#fff2f6] text-[#a24f68]',
   },
@@ -263,9 +263,9 @@ const CATEGORY_OPTIONS: RuleCategory[] = ['personal', 'company', 'customer', 'se
 const DEFAULT_RULE_VISUAL: RuleVisualMeta = {
   category: 'custom',
   icon: 'M12 4v16m8-8H4',
-  panelClass: 'border-[#ead8cf] bg-[rgba(255,248,245,0.84)]',
-  badgeClass: 'border-[#ead8cf] bg-white text-[#7c5a4d]',
-  iconShellClass: 'border-[#ead8cf] bg-white text-[#7c5a4d]',
+  panelClass: 'border-[var(--cm-border)] bg-[var(--cm-subtle)]',
+  badgeClass: 'border-[var(--cm-border)] bg-white text-[var(--cm-text)]',
+  iconShellClass: 'border-[var(--cm-border)] bg-white text-[var(--cm-text)]',
 };
 
 function getRuleVisual(ruleId: string): RuleVisualMeta {
@@ -658,14 +658,9 @@ const RiskRulesPage: React.FC = () => {
   return (
     <AdminLayout title={t('nav.riskRules')}>
       <div className="space-y-6">
-        <section className="app-panel p-6">
+        <section className="app-panel p-4">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <h2 className="text-xl font-semibold text-gray-900">{t('riskRulesPage.title')}</h2>
-              <p className="mt-1 text-sm text-gray-500">
-                {t('riskRulesPage.subtitle')}
-              </p>
-            </div>
+
             <button
               type="button"
               onClick={addRule}
@@ -739,7 +734,7 @@ const RiskRulesPage: React.FC = () => {
               </select>
             </div>
             <div className="flex flex-wrap items-center gap-3">
-              <label className="inline-flex items-center gap-2 text-sm text-[#5f5957]">
+              <label className="inline-flex items-center gap-2 text-sm text-[var(--cm-text)]">
                 <input
                   type="checkbox"
                   checked={allVisibleSelected}
@@ -786,10 +781,10 @@ const RiskRulesPage: React.FC = () => {
               {groupedRules.map((group) => (
                 <section key={group.category} className="space-y-3">
                   <div className="flex items-center gap-3 px-1">
-                    <div className={`inline-flex items-center rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] ${DEFAULT_RULE_VISUAL.badgeClass}`}>
+                    <div className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] ${DEFAULT_RULE_VISUAL.badgeClass}`}>
                       {t(CATEGORY_LABEL_KEYS[group.category])}
                     </div>
-                    <div className="text-xs font-medium text-[#8f8681]">{group.rules.length}</div>
+                    <div className="text-xs font-medium text-[var(--cm-muted)]">{group.rules.length}</div>
                   </div>
                   <div className="grid grid-cols-1 items-start gap-4 md:grid-cols-2 xl:grid-cols-4">
                     {group.rules.map((rule) => {
@@ -798,7 +793,7 @@ const RiskRulesPage: React.FC = () => {
                         return (
                           <div
                             key={rule.local_id}
-                            className={`flex h-[340px] flex-col self-start rounded-[22px] p-4 shadow-[0_18px_42px_-34px_rgba(72,44,24,0.42)] ${visual.panelClass}`}
+                            className={`flex h-[340px] flex-col self-start rounded-lg p-4 shadow-sm ${visual.panelClass}`}
                           >
                             <div className="flex items-start justify-between gap-3">
                               <div className="flex min-w-0 flex-1 gap-3">
@@ -808,10 +803,10 @@ const RiskRulesPage: React.FC = () => {
                                   </svg>
                                 </div>
                                 <div className="min-w-0 flex-1">
-                            <div className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] ${visual.badgeClass}`}>
+                            <div className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold uppercase tracking-[0.16em] ${visual.badgeClass}`}>
                               {t(CATEGORY_LABEL_KEYS[visual.category])}
                             </div>
-                            <label className="mt-2 inline-flex items-center gap-2 text-xs text-[#8f8681]">
+                            <label className="mt-2 inline-flex items-center gap-2 text-xs text-[var(--cm-muted)]">
                               <input
                                 type="checkbox"
                                 checked={selectedRuleIds.includes(rule.rule_id)}
@@ -834,7 +829,7 @@ const RiskRulesPage: React.FC = () => {
                                 }`}>
                                   {rule.severity}
                                 </span>
-                                <span className={`rounded-full px-2.5 py-1 ${rule.is_enabled ? 'border border-[#d9ead3] bg-[#f3fff0] text-[#2f6b2f]' : 'border border-[#eadfd8] bg-white text-[#7b6f6a]'}`}>
+                                <span className={`rounded-full px-2.5 py-1 ${rule.is_enabled ? 'border border-[#d9ead3] bg-[#f3fff0] text-[#2f6b2f]' : 'border border-[var(--cm-border)] bg-white text-[var(--cm-text)]'}`}>
                                   {rule.is_enabled ? t('riskRulesPage.enabled') : t('riskRulesPage.disabled')}
                                 </span>
                               </div>
@@ -847,7 +842,7 @@ const RiskRulesPage: React.FC = () => {
                               </div>
                               <div>
                                 <dt className="font-medium text-gray-700">{t('riskRulesPage.pattern')}</dt>
-                                <dd className="mt-1 line-clamp-3 overflow-hidden rounded-lg bg-[#fffaf7] px-3 py-2 font-mono text-[11px] leading-5 text-gray-600 break-all">
+                                <dd className="mt-1 line-clamp-3 overflow-hidden rounded-lg bg-[var(--cm-subtle)] px-3 py-2 font-mono text-xs leading-5 text-gray-600 break-all">
                                   {rule.pattern}
                                 </dd>
                               </div>
@@ -882,7 +877,7 @@ const RiskRulesPage: React.FC = () => {
                       return (
                         <div
                           key={rule.local_id}
-                          className="self-start rounded-[24px] border border-[#ead8cf] bg-[rgba(255,248,245,0.84)] p-5 shadow-[0_18px_42px_-34px_rgba(72,44,24,0.42)] md:col-span-2 xl:col-span-2"
+                          className="self-start rounded-lg border border-[var(--cm-border)] bg-[var(--cm-subtle)] p-5 shadow-sm md:col-span-2 xl:col-span-2"
                         >
                     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                       <div>
@@ -896,7 +891,7 @@ const RiskRulesPage: React.FC = () => {
                           disabled={!rule.isNew}
                         />
                         {!rule.isNew && (
-                          <p className="mt-2 text-xs text-[#8f8681]">
+                          <p className="mt-2 text-xs text-[var(--cm-muted)]">
                             {t('riskRulesPage.ruleIdLocked')}
                           </p>
                         )}
@@ -1029,7 +1024,7 @@ const RiskRulesPage: React.FC = () => {
           )}
 
           {!loading && filteredRules.length === 0 && (
-            <div className="mt-6 rounded-xl border border-dashed border-[#eadfd8] bg-[#fffaf7] px-4 py-8 text-center text-sm text-[#8f8681]">
+            <div className="mt-6 rounded-xl border border-dashed border-[var(--cm-border)] bg-[var(--cm-subtle)] px-4 py-8 text-center text-sm text-[var(--cm-muted)]">
               {t('riskRulesPage.noRules')}
             </div>
           )}
@@ -1090,35 +1085,35 @@ const RiskRulesPage: React.FC = () => {
                 }`}>
                   {testResult.is_sensitive ? t('riskRulesPage.sensitive') : t('riskRulesPage.noMatch')}
                 </span>
-                <span className="rounded-full border border-[#eadfd8] bg-white px-3 py-1 text-sm text-[#5f5957]">
+                <span className="rounded-full border border-[var(--cm-border)] bg-white px-3 py-1 text-sm text-[var(--cm-text)]">
                   {t('riskRulesPage.highestSeverity', { value: testResult.highest_severity })}
                 </span>
-                <span className="rounded-full border border-[#eadfd8] bg-white px-3 py-1 text-sm text-[#5f5957]">
+                <span className="rounded-full border border-[var(--cm-border)] bg-white px-3 py-1 text-sm text-[var(--cm-text)]">
                   {t('riskRulesPage.highestAction', { value: testResult.highest_action })}
                 </span>
               </div>
 
               <div className="grid gap-4 xl:grid-cols-2">
                 {testResult.hits.length === 0 ? (
-                  <div className="rounded-xl border border-[#eadfd8] bg-[#fffaf7] px-4 py-3 text-sm text-[#8f8681]">
+                  <div className="rounded-xl border border-[var(--cm-border)] bg-[var(--cm-subtle)] px-4 py-3 text-sm text-[var(--cm-muted)]">
                     {t('riskRulesPage.noMatchesForSample')}
                   </div>
                 ) : (
                   testResult.hits.map((hit, index) => (
-                    <div key={`${hit.rule_id}-${index}`} className="rounded-xl border border-[#eadfd8] bg-[#fffaf7] p-4">
+                    <div key={`${hit.rule_id}-${index}`} className="rounded-xl border border-[var(--cm-border)] bg-[var(--cm-subtle)] p-4">
                       <div className="flex items-center justify-between gap-3">
-                        <div className="font-medium text-[#171212]">{hit.rule_name}</div>
+                        <div className="font-medium text-[var(--cm-ink)]">{hit.rule_name}</div>
                         <div className="flex items-center gap-2">
-                          <span className="rounded-full border border-[#eadfd8] bg-white px-2.5 py-1 text-xs text-[#5f5957]">
+                          <span className="rounded-full border border-[var(--cm-border)] bg-white px-2.5 py-1 text-xs text-[var(--cm-text)]">
                             {hit.severity}
                           </span>
-                          <span className="rounded-full border border-[#eadfd8] bg-white px-2.5 py-1 text-xs text-[#5f5957]">
+                          <span className="rounded-full border border-[var(--cm-border)] bg-white px-2.5 py-1 text-xs text-[var(--cm-text)]">
                             {hit.action}
                           </span>
                         </div>
                       </div>
-                      <div className="mt-2 text-xs text-[#8f8681]">{hit.rule_id}</div>
-                      <div className="mt-3 text-sm text-[#5f5957]">{hit.match_summary}</div>
+                      <div className="mt-2 text-xs text-[var(--cm-muted)]">{hit.rule_id}</div>
+                      <div className="mt-3 text-sm text-[var(--cm-text)]">{hit.match_summary}</div>
                     </div>
                   ))
                 )}
@@ -1142,12 +1137,12 @@ const SummaryCard: React.FC<{
       ? 'border-red-200 bg-red-50'
       : highlight === 'amber'
         ? 'border-amber-200 bg-amber-50'
-        : 'border-[#eadfd8] bg-white';
+        : 'border-[var(--cm-border)] bg-white';
 
   return (
     <div className={`rounded-2xl border px-4 py-4 ${toneClass}`}>
-      <div className="text-xs font-semibold uppercase tracking-[0.14em] text-[#8f8681]">{label}</div>
-      <div className="mt-3 text-2xl font-semibold tracking-[-0.04em] text-[#171212]">{value}</div>
+      <div className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--cm-muted)]">{label}</div>
+      <div className="mt-3 text-2xl font-semibold tracking-[-0.04em] text-[var(--cm-ink)]">{value}</div>
     </div>
   );
 };

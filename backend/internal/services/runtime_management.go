@@ -57,6 +57,7 @@ type RuntimeSchedulingPreflight struct {
 }
 
 type RuntimeManagementOperation struct {
+	RuntimeType     string                  `json:"runtime_type,omitempty"`
 	RetryRequested  bool                    `json:"retry_requested"`
 	CancelRequested bool                    `json:"cancel_requested"`
 	ErrorMessage    string                  `json:"error_message,omitempty"`
@@ -254,20 +255,7 @@ func (s *RuntimeManagementService) preflightWithInventory(ctx context.Context, r
 		block("an exact target slot requires one instance")
 		return result, nil
 	}
-	if s.sess != nil {
-		var active int
-		row, err := s.sess.SQL().QueryRowContext(ctx, "SELECT COUNT(*) FROM runtime_rollouts WHERE status IN ('pending','running')")
-		if err != nil {
-			return nil, err
-		}
-		if err = row.Scan(&active); err != nil {
-			return nil, err
-		}
-		if active > 0 {
-			block("Runtime rollout is active; scheduling is locked")
-			return result, nil
-		}
-	}
+
 	seen := map[int]bool{}
 	allocated := map[int64]map[int]bool{}
 	for _, id := range req.InstanceIDs {
@@ -292,6 +280,22 @@ func (s *RuntimeManagementService) preflightWithInventory(ctx context.Context, r
 			result.Items = append(result.Items, item)
 			continue
 		}
+		if s.sess != nil {
+			var active int
+			row, e := s.sess.SQL().QueryRowContext(ctx, "SELECT COUNT(*) FROM runtime_rollouts WHERE (LOWER(TRIM(runtime_type))=? OR LOWER(TRIM(runtime_type)) NOT IN ('openclaw','opencode','hermes','deepseek-harness') OR runtime_type IS NULL) AND status IN ('pending','running')", strings.ToLower(strings.TrimSpace(instance.Type)))
+			if e == nil {
+				e = row.Scan(&active)
+			}
+			if e != nil {
+				return nil, e
+			}
+			if active > 0 {
+				fail(errors.New("Runtime rollout is active; scheduling is locked"))
+				result.Items = append(result.Items, item)
+				continue
+			}
+		}
+
 		if s.sess != nil {
 			var count int
 			row, e := s.sess.SQL().QueryRowContext(ctx, "SELECT COUNT(*) FROM team_members WHERE instance_id=? AND status NOT IN ('deleted','deleting')", id)
@@ -673,18 +677,24 @@ func (s *RuntimeManagementService) enqueue(ctx context.Context, kind string, req
 		if err := repository.LockRuntimeManagementAdmission(ctx, tx); err != nil {
 			return err
 		}
-		var active int
-		row, err := tx.SQL().QueryRowContext(ctx, "SELECT COUNT(*) FROM runtime_rollouts WHERE status IN ('pending','running')")
-		if err != nil {
-			return err
+		runtimeTypes, scopeErr := repository.RuntimeOperationTypes(ctx, tx, string(requestJSON), string(itemsJSON))
+		if scopeErr != nil {
+			if !errors.Is(scopeErr, repository.ErrRuntimeOperationScopeUnknown) {
+				return scopeErr
+			}
+			// Legacy callers without type evidence still require globally clear rollout/preparation gates.
+			runtimeTypes = []string{""}
 		}
-		if err = row.Scan(&active); err != nil {
-			return err
+		for _, runtimeType := range runtimeTypes {
+			if err := repository.CheckRuntimePreparationReservationsForType(ctx, tx, "", runtimeType); err != nil {
+				return err
+			}
+			if err := repository.CheckRuntimeRolloutActivityForType(ctx, tx, runtimeType); err != nil {
+				return err
+			}
 		}
-		if active > 0 {
-			return errors.New("Runtime rollout is active; scheduling is locked")
-		}
-		if _, err = tx.SQL().ExecContext(ctx, `INSERT INTO runtime_management_operations (id,kind,status,actor_user_id,request_json,items_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)`, op.ID, kind, op.Status, actor, string(requestJSON), string(itemsJSON), now, now); err != nil {
+
+		if _, err := tx.SQL().ExecContext(ctx, `INSERT INTO runtime_management_operations (id,kind,status,actor_user_id,request_json,items_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)`, op.ID, kind, op.Status, actor, string(requestJSON), string(itemsJSON), now, now); err != nil {
 			return err
 		}
 		for _, id := range req.InstanceIDs {
@@ -754,7 +764,14 @@ func (s *RuntimeManagementService) operations(ctx context.Context, activeOnly bo
 			op.ErrorMessage = journal.ErrorMessage
 			op.Phase = journal.Phase
 		}
-		if op.Kind != "scale_in" && op.Status == "needs_attention" {
+		if op.Kind == rolloutWakeKind {
+			var journal rolloutWakeJournal
+			if err = json.Unmarshal([]byte(requestRaw), &journal); err != nil {
+				return nil, err
+			}
+			op.RuntimeType, op.Phase, op.ErrorMessage = journal.RuntimeType, journal.Phase, journal.ErrorMessage
+		}
+		if op.Kind != "scale_in" && op.Kind != rolloutWakeKind && op.Status == "needs_attention" {
 			for _, item := range op.Items {
 				if item.ErrorMessage != "" {
 					op.ErrorMessage = item.ErrorMessage
@@ -783,7 +800,7 @@ func (s *RuntimeManagementService) Process(ctx context.Context) error {
 	}
 	// Process returns only after every worker exits. A processing row left by
 	// this owner is interrupted too (for example SQL failed after a replica CAS).
-	_, err := s.sess.SQL().ExecContext(ctx, `UPDATE runtime_management_operations SET status=CASE WHEN kind='orphan_recovery' OR (kind='eviction' AND JSON_UNQUOTE(JSON_EXTRACT(request_json,'$.mode'))='recovery') THEN 'pending' ELSE 'needs_attention' END,owner_token='',updated_at=? WHERE status='processing'`, time.Now().UTC())
+	_, err := s.sess.SQL().ExecContext(ctx, `UPDATE runtime_management_operations SET status=CASE WHEN kind IN ('orphan_recovery','rollout_wake') OR (kind='eviction' AND JSON_UNQUOTE(JSON_EXTRACT(request_json,'$.mode'))='recovery') THEN 'pending' ELSE 'needs_attention' END,owner_token='',updated_at=? WHERE status='processing'`, time.Now().UTC())
 	if err != nil {
 		return err
 	}
@@ -853,6 +870,9 @@ func (s *RuntimeManagementService) Process(ctx context.Context) error {
 	}
 	if kind == "orphan_recovery" {
 		return s.processOrphanRecovery(operationCtx, op)
+	}
+	if kind == rolloutWakeKind {
+		return s.advanceRolloutWake(operationCtx, op, raw)
 	}
 	if kind == "scale_in" {
 		return s.processScaleIn(operationCtx, op, raw)
@@ -1158,6 +1178,9 @@ func runtimeManagementStatus(items []RuntimeSchedulingItem) string {
 }
 
 func (s *RuntimeManagementService) refresh(ctx context.Context) error {
+	if err := s.refreshRolloutWakes(ctx); err != nil {
+		return err
+	}
 	if err := s.refreshScaleIn(ctx); err != nil {
 		return err
 	}
@@ -1170,7 +1193,7 @@ func (s *RuntimeManagementService) refresh(ctx context.Context) error {
 		return err
 	}
 	for _, op := range ops {
-		if op.Kind == "scale_in" {
+		if op.Kind == "scale_in" || op.Kind == rolloutWakeKind {
 			continue
 		}
 		if op.Status != "starting" && op.Status != "partial_failure" {
@@ -1193,7 +1216,7 @@ func (s *RuntimeManagementService) refresh(ctx context.Context) error {
 				}
 				// An explicit stop/delete or later generation ends either pending
 				// start path. Preserve uncertain live starts; never replay them here.
-				if instance == nil || instance.RuntimeGeneration != item.SourceGeneration+1 || instance.Status == "stopped" || instance.Status == "deleted" || instance.Status == "deleting" || (isRuntimeErrorInstance(*instance) && !isRetryableRuntimeSchedulingError(*instance)) {
+				if instance == nil || instance.RuntimeGeneration != item.SourceGeneration+1 || instance.Status == "stopped" || instance.Status == "deleted" || instance.Status == "deleting" || isRuntimeErrorInstance(*instance) {
 					item.State = "failed"
 					item.ErrorMessage = "instance intent changed or scheduling failed after confirmed source stop"
 					changed = true
@@ -1334,6 +1357,9 @@ func (s *RuntimeManagementService) Cancel(ctx context.Context, id string) error 
 	if readErr != nil {
 		return readErr
 	}
+	if op.Kind == rolloutWakeKind {
+		return s.cancelRolloutWake(ctx, id)
+	}
 	if op.Kind == "orphan_recovery" {
 		return s.cancelOrphanRecovery(ctx, id)
 	}
@@ -1396,6 +1422,12 @@ func (s *RuntimeManagementService) runtimeManagementOperation(ctx context.Contex
 			return nil, "", "", err
 		}
 		op.Phase, op.ErrorMessage = journal.Phase, journal.ErrorMessage
+	} else if op.Kind == rolloutWakeKind {
+		var journal rolloutWakeJournal
+		if err := json.Unmarshal([]byte(raw), &journal); err != nil {
+			return nil, "", "", err
+		}
+		op.RuntimeType, op.Phase, op.ErrorMessage = journal.RuntimeType, journal.Phase, journal.ErrorMessage
 	} else if op.Status == "needs_attention" {
 		op.ErrorMessage = "interrupted operation requires administrator recheck"
 		for _, item := range op.Items {
@@ -1473,13 +1505,27 @@ func (s *RuntimeManagementService) retryOperation(ctx context.Context, id string
 	}
 	previousStatus := op.Status
 	op.Status = "needs_attention"
+	if op.Kind == rolloutWakeKind {
+		op.Status = "starting"
+		var journal rolloutWakeJournal
+		if err = json.Unmarshal([]byte(raw), &journal); err != nil {
+			return nil, err
+		}
+		if err = s.saveRolloutWake(ctx, op, &journal); err != nil {
+			return nil, err
+		}
+		if err = s.advanceRolloutWake(ctx, op, raw); err != nil {
+			return nil, err
+		}
+		result, _, _, err := s.runtimeManagementOperation(ctx, id)
+		return result, err
+	}
 	if op.Kind == "scale_in" {
 		var journal runtimePodScaleInJournal
 		if err = json.Unmarshal([]byte(raw), &journal); err != nil {
 			return nil, err
 		}
 		if journal.Phase == "resizing" || journal.Phase == "observing" || journal.Phase == "cleanup" || previousStatus == "starting" {
-			op.Status = "starting"
 			err = s.advanceScaleIn(ctx, op, &journal)
 		} else {
 			err = s.failScaleInBeforeResize(ctx, op, &journal, errors.New("interrupted source migration cannot be replayed; inspect instance recovery before submitting a new plan"))

@@ -275,17 +275,18 @@ type UpdateInstanceRequest struct {
 
 // InstanceStatus holds the status of an instance
 type InstanceStatus struct {
-	InstanceID          int        `json:"instance_id"`
-	Status              string     `json:"status"`
-	Availability        string     `json:"availability,omitempty"`
-	AgentType           string     `json:"agent_type,omitempty"`
-	WorkspaceUsageBytes int64      `json:"workspace_usage_bytes,omitempty"`
-	PodName             *string    `json:"pod_name,omitempty"`
-	PodNamespace        *string    `json:"pod_namespace,omitempty"`
-	PodIP               *string    `json:"pod_ip,omitempty"`
-	PodStatus           string     `json:"pod_status,omitempty"`
-	CreatedAt           time.Time  `json:"created_at"`
-	StartedAt           *time.Time `json:"started_at,omitempty"`
+	InstanceID               int        `json:"instance_id"`
+	Status                   string     `json:"status"`
+	Availability             string     `json:"availability,omitempty"`
+	AgentType                string     `json:"agent_type,omitempty"`
+	WorkspaceUsageBytes      int64      `json:"workspace_usage_bytes"`
+	WorkspaceUsageObservedAt *time.Time `json:"workspace_usage_observed_at"`
+	PodName                  *string    `json:"pod_name,omitempty"`
+	PodNamespace             *string    `json:"pod_namespace,omitempty"`
+	PodIP                    *string    `json:"pod_ip,omitempty"`
+	PodStatus                string     `json:"pod_status,omitempty"`
+	CreatedAt                time.Time  `json:"created_at"`
+	StartedAt                *time.Time `json:"started_at,omitempty"`
 }
 
 // instanceService implements InstanceService
@@ -2358,6 +2359,8 @@ func (s *instanceService) stopV2InstanceForKind(ctx context.Context, instance *m
 }
 
 func (s *instanceService) resumeManualStop(ctx context.Context, op models.InstanceIdleStopOperation) error {
+	ctx, cancel := s.cancelStopWhenDeleting(ctx, op.InstanceID)
+	defer cancel()
 	b, err := s.bindingRepo.GetByInstanceID(ctx, op.InstanceID)
 	if err != nil {
 		return err
@@ -2438,7 +2441,7 @@ func (s *instanceService) deleteV2Instance(ctx context.Context, instance *models
 }
 
 func (s *instanceService) cleanupV2GatewayBinding(ctx context.Context, instance *models.Instance) error {
-	if s.autoStopRepo != nil && instance.InstanceMode == "lite" {
+	if s.autoStopRepo != nil && instance.InstanceMode == "lite" && instance.Status != "deleting" {
 		a, err := s.autoStopRepo.GetActivity(ctx, instance.ID)
 		if err != nil {
 			return err
@@ -2474,7 +2477,17 @@ func (s *instanceService) cleanupV2GatewayBinding(ctx context.Context, instance 
 		} else if strictStop && (pod.AgentEndpoint == nil || strings.TrimSpace(*pod.AgentEndpoint) == "") {
 			return fmt.Errorf("runtime source endpoint is required to confirm v2 gateway cleanup")
 		} else if pod != nil && pod.AgentEndpoint != nil && strings.TrimSpace(*pod.AgentEndpoint) != "" && s.agentClient != nil && binding.GatewayID != "" {
-			if err := s.agentClient.DeleteGateway(ctx, strings.TrimSpace(*pod.AgentEndpoint), binding.GatewayID); err != nil && (requiresConfirmedGatewayStop(s.agentClient) || !errors.Is(err, ErrRuntimeAgentNotFound)) {
+			deleteGateway := s.agentClient.DeleteGateway
+			if instance.Status == "deleting" {
+				if force, ok := s.agentClient.(interface {
+					ForceDeleteGateway(context.Context, string, string) error
+				}); ok {
+					deleteGateway = force.ForceDeleteGateway
+				} else if strictStop {
+					return fmt.Errorf("runtime force-delete capability is unavailable")
+				}
+			}
+			if err := deleteGateway(ctx, strings.TrimSpace(*pod.AgentEndpoint), binding.GatewayID); err != nil && (requiresConfirmedGatewayStop(s.agentClient) || !errors.Is(err, ErrRuntimeAgentNotFound)) {
 				return fmt.Errorf("failed to delete v2 gateway: %w", err)
 			}
 		}
@@ -2652,7 +2665,11 @@ func (s *instanceService) restartInstance(instanceID int) error {
 
 	_, isV2 := v2RuntimeTypeForInstance(instance)
 	waitForDesktopPods := !isV2 && instanceUsesDesktopRuntime(instance)
-	if isV2 && s.autoStopRepo != nil && instance.InstanceMode == "lite" {
+	nativeStop := isV2 && s.autoStopRepo != nil && instance.InstanceMode == "lite"
+	if nativeStop {
+		if instance.Status != "running" && instance.Status != "stopped" && instance.Status != "error" {
+			return fmt.Errorf("instance changed during restart preparation; retry after the current operation")
+		}
 		if op, err := s.autoStopRepo.RestartFollowup(ctx, instanceID); err != nil {
 			return err
 		} else if op != nil {
@@ -2667,7 +2684,7 @@ func (s *instanceService) restartInstance(instanceID int) error {
 	}
 
 	if isV2 {
-		// Fence heartbeats/scheduler snapshots from the old gateway before Stop.
+		// Fence heartbeats/scheduler snapshots from the old gateway before Start.
 		// Otherwise a late "running" update can resurrect the stopped generation
 		// and make Start reject the restart as "already running". No workspace
 		// contents are changed; Start allocates the next running generation.
@@ -2695,8 +2712,10 @@ func (s *instanceService) restartInstance(instanceID int) error {
 			}
 		}
 	}
-	if err := s.stopInstance(instanceID); err != nil {
-		return fmt.Errorf("failed to stop instance: %w", err)
+	if !nativeStop {
+		if err := s.stopInstance(instanceID); err != nil {
+			return fmt.Errorf("failed to stop instance: %w", err)
+		}
 	}
 
 	if waitForDesktopPods {
@@ -3482,17 +3501,26 @@ func (s *instanceService) DeleteForOwnerTeam(teamID, instanceID int) error {
 	return s.deleteForTeam(instanceID, teamID)
 }
 func (s *instanceService) deleteForTeam(instanceID, teamID int) error {
-	if s.ownerTeamMutationGuard != nil {
-		if err := s.ownerTeamMutationGuard(instanceID, "delete", teamID); err != nil {
-			return err
-		}
-	}
-	release, err := s.acquireLifecycleOperation(instanceID)
-	if err != nil {
+	if _, err := s.prepareDeletion(instanceID, teamID); err != nil {
 		return err
 	}
-	defer release()
-	return s.deleteInstance(instanceID)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	for {
+		release, err := acquireInstanceLifecycleOperation(ctx, s.instanceRepo, instanceID)
+		if err == nil {
+			defer release()
+			return s.deleteInstance(instanceID)
+		}
+		if !errors.Is(err, models.ErrInstanceLifecycleLockBusy) {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
 }
 
 func (s *instanceService) deleteInstance(instanceID int) error {
@@ -3955,13 +3983,14 @@ func (s *instanceService) GetInstanceStatus(instanceID int) (*InstanceStatus, er
 
 	if runtimeType, ok := v2RuntimeTypeForInstance(instance); ok {
 		return &InstanceStatus{
-			InstanceID:          instance.ID,
-			Status:              instance.Status,
-			Availability:        s.v2InstanceAvailability(ctx, instance),
-			AgentType:           runtimeType,
-			WorkspaceUsageBytes: instance.WorkspaceUsageBytes,
-			CreatedAt:           instance.CreatedAt,
-			StartedAt:           instance.StartedAt,
+			InstanceID:               instance.ID,
+			Status:                   instance.Status,
+			Availability:             s.v2InstanceAvailability(ctx, instance),
+			AgentType:                runtimeType,
+			WorkspaceUsageBytes:      instance.WorkspaceUsageBytes,
+			WorkspaceUsageObservedAt: instance.WorkspaceUsageObservedAt,
+			CreatedAt:                instance.CreatedAt,
+			StartedAt:                instance.StartedAt,
 		}, nil
 	}
 

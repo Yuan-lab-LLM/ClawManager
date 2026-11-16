@@ -2415,7 +2415,11 @@ func applyOpenAICompatibleProviderContract(payload map[string]json.RawMessage, m
 		}
 		delete(payload, "max_completion_tokens")
 	}
-	return applyReasoningControl(payload, model, managedAgentType)
+	if err := applyReasoningControl(payload, model, managedAgentType); err != nil {
+		return err
+	}
+	applyIcompifyDeepSeekCompatibility(payload, model)
+	return nil
 }
 
 type reasoningRequestIntent struct {

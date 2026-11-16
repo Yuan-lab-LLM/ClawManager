@@ -277,6 +277,11 @@ func (c *runtimeAgentHTTPClient) DeleteGateway(ctx context.Context, endpoint, ga
 	return c.do(ctx, http.MethodDelete, endpoint, "/v1/gateways/"+url.PathEscape(gatewayID), nil, nil)
 }
 
+// ForceDeleteGateway never shares the graceful stop retry path.
+func (c *runtimeAgentHTTPClient) ForceDeleteGateway(ctx context.Context, endpoint, gatewayID string) error {
+	return c.do(ctx, http.MethodDelete, endpoint, "/v1/gateways/"+url.PathEscape(gatewayID)+"?force_delete=true", nil, nil)
+}
+
 func (c *runtimeAgentHTTPClient) Drain(ctx context.Context, endpoint string) error {
 	return c.do(ctx, http.MethodPost, endpoint, "/v1/drain", map[string]bool{"draining": true}, nil)
 }

@@ -48,7 +48,7 @@ func (h *AIGatewayHandler) ListModels(c *gin.Context) {
 		return
 	}
 	lister, ok := h.service.(interface {
-		ListAvailableModelsForUser(int, []string) ([]aigateway.AvailableModel, error)
+		ListSDKModelsForUser(int, []string) ([]aigateway.AvailableModel, error)
 	})
 	if !ok {
 		utils.Error(c, http.StatusServiceUnavailable, "Model authorization unavailable")
@@ -58,15 +58,21 @@ func (h *AIGatewayHandler) ListModels(c *gin.Context) {
 	if value, exists := c.Get("gatewayAllowedModelGroups"); exists {
 		groups, _ = value.([]string)
 	}
-	items, err := lister.ListAvailableModelsForUser(userID, groups)
+	items, err := lister.ListSDKModelsForUser(userID, groups)
 	if err != nil {
 		utils.HandleError(c, err)
 		return
 	}
 
-	utils.Success(c, http.StatusOK, "Available gateway models retrieved successfully", gin.H{
-		"items": items,
-	})
+	entries := make([]gin.H, 0, len(items))
+	for _, item := range items {
+		id := item.DisplayName
+		if item.ID == 0 {
+			id = "auto"
+		}
+		entries = append(entries, gin.H{"id": id, "object": "model", "created": 0, "owned_by": item.Provider})
+	}
+	c.JSON(http.StatusOK, gin.H{"object": "list", "data": entries})
 }
 
 // ChatCompletions proxies a governed chat completion request.

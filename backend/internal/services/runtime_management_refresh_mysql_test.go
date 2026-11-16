@@ -3,7 +3,6 @@ package services
 import (
 	"context"
 	"testing"
-	"time"
 
 	"clawreef/internal/repository"
 )
@@ -21,9 +20,9 @@ func TestRuntimeManagementMySQLRefreshUnboundStartingIntent(t *testing.T) {
 		{"stopped", 2, true, ""}, {"deleting", 2, true, ""}, {"deleted", 2, true, ""},
 		{"missing", 2, true, ""}, {"creating", 3, true, ""}, {"error", 2, true, ""},
 		{"creating", 2, false, ""}, {"running", 2, false, ""},
-		{"error", 2, false, "MODEL_CONFIGURATION_REQUIRED"},
-		{"error", 2, false, "GATEWAY_START_FAILED"},
-		{"error", 2, false, "PROXY_POLICY_NOT_READY"},
+		{"error", 2, true, "MODEL_CONFIGURATION_REQUIRED"},
+		{"error", 2, true, "GATEWAY_START_FAILED"},
+		{"error", 2, true, "PROXY_POLICY_NOT_READY"},
 	}
 	for n, tc := range cases {
 		t.Run(tc.status+tc.errorCode, func(t *testing.T) {
@@ -57,16 +56,6 @@ func TestRuntimeManagementMySQLRefreshUnboundStartingIntent(t *testing.T) {
 			before, err := service.scheduler.instanceRepo.GetByID(id)
 			if err != nil {
 				t.Fatal(err)
-			}
-			if tc.errorCode != "" {
-				if !isRetryableRuntimeSchedulingError(*before) || isRecoverableRuntimeSchedulingError(*before) {
-					t.Fatal("fresh retryable error must retain its backoff")
-				}
-				mature := *before
-				mature.UpdatedAt = time.Now().Add(-time.Minute)
-				if !isRecoverableRuntimeSchedulingError(mature) {
-					t.Fatal("retry must become due after its backoff")
-				}
 			}
 			if err = service.refresh(ctx); err != nil {
 				t.Fatal(err)

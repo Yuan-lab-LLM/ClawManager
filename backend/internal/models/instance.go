@@ -45,7 +45,10 @@ type Instance struct {
 	PVCName                  *string    `db:"pvc_name" json:"-"`
 	MountPath                string     `db:"mount_path" json:"mount_path"`
 	WorkspacePath            *string    `db:"workspace_path" json:"workspace_path,omitempty"`
-	WorkspaceUsageBytes      int64      `db:"workspace_usage_bytes" json:"workspace_usage_bytes"`
+	WorkspaceUsageBytes      int64      `db:"workspace_usage_bytes,omitempty" json:"workspace_usage_bytes"`
+	WorkspaceUsageObservedAt *time.Time `db:"workspace_usage_observed_at,omitempty" json:"workspace_usage_observed_at"`
+	WorkspaceUsageEpoch      int64      `db:"workspace_usage_epoch,omitempty" json:"-"`
+	WorkspaceUsageBlocked    bool       `db:"workspace_usage_blocked,omitempty" json:"-"`
 	RuntimeGeneration        int        `db:"runtime_generation" json:"runtime_generation"`
 	RuntimeSecurityProfile   string     `db:"runtime_security_profile,omitempty" json:"runtime_security_profile,omitempty"`
 	RuntimeErrorMessage      *string    `db:"runtime_error_message" json:"runtime_error_message,omitempty"`

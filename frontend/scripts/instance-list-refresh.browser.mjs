@@ -32,6 +32,7 @@ try {
       data={instances,total:instances.length,page:1,page_size:100};
     } else if(u.pathname.endsWith('/teams')){teamCalls++;data={teams:[],total:0};}
     else if(u.pathname.endsWith('/system-settings/images'))data={images:[]};
+    else if(u.pathname.endsWith('/instances/batch/lifecycle'))data=[];
     else data={items:[],batches:[]};
     await route.fulfill({json:{success:true,data}}).catch(()=>{});
   });
@@ -53,7 +54,7 @@ try {
   await row().waitFor({state:'detached',timeout:1800});
   console.log('PASS sleep/start synchronization, background and empty filtered lists, focus, selection retention, no team polling');
   state='running';await page.goto(`http://127.0.0.1:${server.address().port}/instances`);
-  await row().waitFor();const input=page.getByPlaceholder(/ID \/ Search/);
+  await row().waitFor();await page.getByRole('button',{name:'Search instances',exact:true}).click();const input=page.getByRole('textbox',{name:'Search instances',exact:true});
   await input.fill('older');await page.waitForRequest(r=>new URL(r.url()).pathname.endsWith('/instances')&&(new URL(r.url()).searchParams.get('q')||new URL(r.url()).searchParams.get('query'))==='older');
   await input.fill('newer');await page.locator('tbody tr').filter({hasText:'newer'}).waitFor();releaseOld();await page.waitForTimeout(500);
   assert.equal(await page.locator('tbody tr').filter({hasText:'older'}).count(),0,'old response replaced newer filter');

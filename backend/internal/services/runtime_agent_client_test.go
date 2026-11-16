@@ -376,3 +376,25 @@ func TestRuntimeUpgradeAgentClientWriterLeaseContract(t *testing.T) {
 func runtimeAgentIntPtr(v int) *int {
 	return &v
 }
+
+func TestRuntimeAgentForceDeleteUsesExplicitSelector(t *testing.T) {
+	var selected bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		selected = r.Method == http.MethodDelete && r.URL.Path == "/v1/gateways/gw-7-3" && r.URL.Query().Get("force_delete") == "true"
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	client := NewRuntimeAgentClientWithHTTPClient("control", server.Client())
+	forcer, ok := client.(interface {
+		ForceDeleteGateway(context.Context, string, string) error
+	})
+	if !ok {
+		t.Fatal("explicit force deletion unavailable")
+	}
+	if err := forcer.ForceDeleteGateway(context.Background(), server.URL, "gw-7-3"); err != nil {
+		t.Fatal(err)
+	}
+	if !selected {
+		t.Fatal("force deletion silently fell back to ordinary stop")
+	}
+}

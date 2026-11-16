@@ -1,4 +1,6 @@
-﻿import { workbenchTranslations } from "./workbenchI18n";
+import { instanceCreateTranslations } from "./instanceCreateI18n";
+import { teamTranslations } from "./teamI18n";
+import { workbenchTranslations } from "./workbenchI18n";
 export type Locale = "en" | "zh" | "ja" | "ko" | "de";
 
 import { hermesDesktopTranslations } from "./hermesDesktopI18n";
@@ -1845,6 +1847,7 @@ export const translations: Record<Locale, TranslationTree> = {
     nav: {
       dashboard: "Dashboard",
       adminDashboard: "Console",
+      northbound: "Northbound API",
       backups: 'Backups',
       userDashboard: "Workspace",
       users: "Users",
@@ -3004,7 +3007,7 @@ export const translations: Record<Locale, TranslationTree> = {
       batchDeleteConfirm: "Delete {count} selected instance(s)? This action cannot be undone.",
       batchCreateFailed: "Failed to batch create instances",
       batchDeleteFailed: "Failed to batch delete instances",
-      batchDeletePartial: "Deleted {deleted}, failed {failed}.",
+      batchDeletePartial: "Queued for deletion: {deleted}. Failed: {failed}.",
       batchCreating: "Creating...",
       batchCreateSummary: "Created {created}, failed {failed}.",
       batchMode: "Mode",
@@ -3331,6 +3334,8 @@ export const translations: Record<Locale, TranslationTree> = {
         "Restarting the instance. The desktop may disconnect briefly while the new stream settings apply.",
       restartSubmitted:
         "Restart requested. The desktop will reconnect when the instance is available again.",
+      runtimeManagement: "Runtime management",
+      resizeWorkspace: "Resize Agent and workspace",
       restartMenuLabel: "Restart options",
       restartWithEnvironment: "Configure environment variables and restart...",
       restartWithEnvironmentHint: "Add optional variables required by a skill.",
@@ -4024,6 +4029,7 @@ export const translations: Record<Locale, TranslationTree> = {
     nav: {
       dashboard: "仪表盘",
       adminDashboard: "控制台",
+      northbound: "北向接口",
       backups: '备份',
       userDashboard: "工作台",
       users: "用户",
@@ -5155,7 +5161,7 @@ export const translations: Record<Locale, TranslationTree> = {
       batchDeleteConfirm: "确认删除选中的 {count} 个实例吗？此操作不可撤销。",
       batchCreateFailed: "批量创建实例失败",
       batchDeleteFailed: "批量删除实例失败",
-      batchDeletePartial: "已删除 {deleted} 个，失败 {failed} 个。",
+      batchDeletePartial: "已提交删除 {deleted} 个，失败 {failed} 个。",
       batchCreating: "创建中...",
       batchCreateSummary: "已创建 {created} 个，失败 {failed} 个。",
       batchMode: "模式",
@@ -5457,6 +5463,8 @@ export const translations: Record<Locale, TranslationTree> = {
       restartInProgress:
         "正在重启实例，桌面会短暂断开，新桌面流设置会在重连后生效。",
       restartSubmitted: "已发起重启，实例可用后桌面会自动重新连接。",
+      runtimeManagement: "运行管理",
+      resizeWorkspace: "调整 Agent 与工作区宽度",
       restartMenuLabel: "重启选项",
       restartWithEnvironment: "配置环境变量并重启…",
       restartWithEnvironmentHint: "添加 Skill 运行所需的可选变量。",
@@ -6114,6 +6122,7 @@ export const translations: Record<Locale, TranslationTree> = {
     nav: {
       dashboard: "ダッシュボード",
       adminDashboard: "コンソール",
+      northbound: "北向き API",
       backups: 'バックアップ',
       userDashboard: "ワークスペース",
       users: "ユーザー",
@@ -7134,6 +7143,8 @@ export const translations: Record<Locale, TranslationTree> = {
         "Restarting the instance. The desktop may disconnect briefly while the new stream settings apply.",
       restartSubmitted:
         "Restart requested. The desktop will reconnect when the instance is available again.",
+      runtimeManagement: "実行管理",
+      resizeWorkspace: "Agent とワークスペースの幅を調整",
       restartMenuLabel: "再起動オプション",
       restartWithEnvironment: "環境変数を設定して再起動…",
       restartWithEnvironmentHint: "Skill に必要な任意の変数を追加します。",
@@ -7765,6 +7776,7 @@ export const translations: Record<Locale, TranslationTree> = {
     nav: {
       dashboard: "대시보드",
       adminDashboard: "콘솔",
+      northbound: "노스바운드 API",
       backups: '백업',
       userDashboard: "워크스페이스",
       users: "사용자",
@@ -8764,6 +8776,8 @@ export const translations: Record<Locale, TranslationTree> = {
         "Restarting the instance. The desktop may disconnect briefly while the new stream settings apply.",
       restartSubmitted:
         "Restart requested. The desktop will reconnect when the instance is available again.",
+      runtimeManagement: "실행 관리",
+      resizeWorkspace: "Agent 및 작업 공간 너비 조정",
       restartMenuLabel: "재시작 옵션",
       restartWithEnvironment: "환경 변수를 설정하고 재시작…",
       restartWithEnvironmentHint: "Skill에 필요한 선택적 변수를 추가합니다.",
@@ -9395,6 +9409,7 @@ export const translations: Record<Locale, TranslationTree> = {
     nav: {
       dashboard: "Dashboard",
       adminDashboard: "Konsole",
+      northbound: "Northbound-API",
       backups: 'Backups',
       userDashboard: "Arbeitsbereich",
       users: "Benutzer",
@@ -10423,6 +10438,8 @@ export const translations: Record<Locale, TranslationTree> = {
         "Restarting the instance. The desktop may disconnect briefly while the new stream settings apply.",
       restartSubmitted:
         "Restart requested. The desktop will reconnect when the instance is available again.",
+      runtimeManagement: "Laufzeitverwaltung",
+      resizeWorkspace: "Breite von Agent und Arbeitsbereich anpassen",
       restartMenuLabel: "Neustartoptionen",
       restartWithEnvironment: "Umgebungsvariablen konfigurieren und neu starten…",
       restartWithEnvironmentHint:
@@ -11007,6 +11024,250 @@ export const translations: Record<Locale, TranslationTree> = {
     },
   },
 };
+
+const shellTranslations: Record<Locale, TranslationTree> = {
+  en: { currentPage: 'Current page', mainNavigation: 'Main navigation', openNavigation: 'Open navigation', closeNavigation: 'Close navigation', account: 'Account', teamActions: 'Team actions' },
+  zh: { currentPage: '当前位置', mainNavigation: '主导航', openNavigation: '打开导航', closeNavigation: '关闭导航', account: '账户', teamActions: 'Team 操作' },
+  ja: { currentPage: '現在のページ', mainNavigation: 'メインナビゲーション', openNavigation: 'ナビゲーションを開く', closeNavigation: 'ナビゲーションを閉じる', account: 'アカウント', teamActions: 'チーム操作' },
+  ko: { currentPage: '현재 페이지', mainNavigation: '기본 탐색', openNavigation: '탐색 열기', closeNavigation: '탐색 닫기', account: '계정', teamActions: '팀 작업' },
+  de: { currentPage: 'Aktuelle Seite', mainNavigation: 'Hauptnavigation', openNavigation: 'Navigation öffnen', closeNavigation: 'Navigation schließen', account: 'Konto', teamActions: 'Teamaktionen' },
+};
+for (const locale of Object.keys(shellTranslations) as Locale[]) translations[locale].shell = shellTranslations[locale];
+
+const controlTranslations: Record<Locale, TranslationTree> = {
+  en: { clearSearch: 'Clear search', noOptions: 'No options', noActions: 'No actions', destructiveAction: '(destructive action)' },
+  zh: { clearSearch: '清除搜索', noOptions: '暂无选项', noActions: '暂无操作', destructiveAction: '（危险操作）' },
+  ja: { clearSearch: '検索をクリア', noOptions: '選択肢がありません', noActions: '操作がありません', destructiveAction: '（破壊的な操作）' },
+  ko: { clearSearch: '검색 지우기', noOptions: '옵션 없음', noActions: '작업 없음', destructiveAction: '(삭제 작업)' },
+  de: { clearSearch: 'Suche löschen', noOptions: 'Keine Optionen', noActions: 'Keine Aktionen', destructiveAction: '(destruktive Aktion)' },
+};
+for (const locale of Object.keys(controlTranslations) as Locale[]) translations[locale].controls = controlTranslations[locale];
+
+const instanceTableTranslations: Record<Locale, TranslationTree> = {
+  "en": {
+    "searchLabel": "Search instances",
+    "filters": "Filters",
+    "nameAndId": "Name / ID",
+    "modeLabel": "Mode",
+    "workspaceLabel": "Workspace",
+    "lastOnline": "Last online",
+    "actionsLabel": "Actions",
+    "noOnlineRecord": "No record",
+    "errorDetails": "Error details",
+    "noErrorReason": "No recorded reason"
+  },
+  "zh": {
+    "searchLabel": "搜索实例",
+    "filters": "筛选",
+    "nameAndId": "名称 / ID",
+    "modeLabel": "模式",
+    "workspaceLabel": "工作区",
+    "lastOnline": "最近在线",
+    "actionsLabel": "操作",
+    "noOnlineRecord": "暂无记录",
+    "errorDetails": "错误详情",
+    "noErrorReason": "原因未记录"
+  },
+  "ja": {
+    "searchLabel": "インスタンスを検索",
+    "filters": "絞り込み",
+    "nameAndId": "名前 / ID",
+    "modeLabel": "モード",
+    "workspaceLabel": "ワークスペース",
+    "lastOnline": "最終オンライン",
+    "actionsLabel": "操作",
+    "noOnlineRecord": "記録なし",
+    "errorDetails": "エラー詳細",
+    "noErrorReason": "原因の記録なし"
+  },
+  "ko": {
+    "searchLabel": "인스턴스 검색",
+    "filters": "필터",
+    "nameAndId": "이름 / ID",
+    "modeLabel": "모드",
+    "workspaceLabel": "작업 공간",
+    "lastOnline": "최근 온라인",
+    "actionsLabel": "작업",
+    "noOnlineRecord": "기록 없음",
+    "errorDetails": "오류 상세",
+    "noErrorReason": "기록된 원인 없음"
+  },
+  "de": {
+    "searchLabel": "Instanzen suchen",
+    "filters": "Filter",
+    "nameAndId": "Name / ID",
+    "modeLabel": "Modus",
+    "workspaceLabel": "Arbeitsbereich",
+    "lastOnline": "Zuletzt online",
+    "actionsLabel": "Aktionen",
+    "noOnlineRecord": "Kein Eintrag",
+    "errorDetails": "Fehlerdetails",
+    "noErrorReason": "Keine Ursache erfasst"
+  }
+};
+for (const locale of Object.keys(instanceTableTranslations) as Locale[]) Object.assign(translations[locale].instances, instanceTableTranslations[locale]);
+
+const instanceSelectionTranslations: Record<Locale, TranslationTree> = {
+  "en": {
+    "selectUnavailable": "Select all unavailable instances",
+    "selectingUnavailable": "Selecting across pages… (uncheck to cancel)",
+    "unavailableSelectionHint": "Select unavailable standalone Lite instances across all pages; excludes deleting, cleanup remnants and team instances. Current filters do not apply.",
+    "unavailableSelected": "Selected {count} unavailable Lite instances across pages. Current filters do not apply.",
+    "selectionLimit": " Select at most 500 instances per restart/reset batch.",
+    "noUnavailable": "No unavailable Lite instances to select.",
+    "selectionFailed": "Selection failed. Your previous selection is retained; retry.",
+    "batchRestart": "Batch Restart",
+    "batchReset": "Batch Reset",
+    "selectedCount": "{count} selected (including other pages)",
+    "showHistory": "Show task history",
+    "hideHistory": "Hide task history",
+    "unfinishedTasks": " (unfinished tasks)",
+    "batchTask": "Batch task",
+    "progressFailed": "Progress is temporarily unavailable. Background tasks continue; avoid resubmitting."
+  },
+  "zh": {
+    "selectUnavailable": "选中所有不可用实例",
+    "selectingUnavailable": "正在跨页获取…（取消勾选可中止）",
+    "unavailableSelectionHint": "跨所有页面选择当前账号的不可用独立 Lite 实例；排除删除中、清理残留及团队实例，不受当前筛选限制。",
+    "unavailableSelected": "已跨页选中 {count} 个不可用 Lite 实例；不受当前搜索、类型筛选限制。",
+    "selectionLimit": "单次批量重启/重置最多选择 500 个，请减少选择。",
+    "noUnavailable": "没有可选的不可用 Lite 实例。",
+    "selectionFailed": "全选失败，原选择已保留，请重试。",
+    "batchRestart": "批量重启",
+    "batchReset": "批量重置",
+    "selectedCount": "已选中 {count} 个实例（含跨页选择）",
+    "showHistory": "展开任务记录",
+    "hideHistory": "收起任务记录",
+    "unfinishedTasks": "（有未完成任务）",
+    "batchTask": "批任务",
+    "progressFailed": "暂时无法查询进度，后台任务不会因此停止；请勿重复提交。"
+  },
+  "ja": {
+    "selectUnavailable": "利用不可のインスタンスをすべて選択",
+    "selectingUnavailable": "全ページから選択中…（解除で中止）",
+    "unavailableSelectionHint": "全ページの利用不可な独立 Lite を選択。削除中、残存データ、チームのインスタンスを除外。現在の絞り込みは適用されません。",
+    "unavailableSelected": "全ページから利用不可な Lite を {count} 件選択。現在の絞り込みは適用されません。",
+    "selectionLimit": "再起動・リセットは最大500件です。",
+    "noUnavailable": "選択できる利用不可の Lite はありません。",
+    "selectionFailed": "選択に失敗しました。以前の選択は保持されます。再試行してください。",
+    "batchRestart": "一括再起動",
+    "batchReset": "一括リセット",
+    "selectedCount": "{count} 件選択（他ページを含む）",
+    "showHistory": "タスク履歴を表示",
+    "hideHistory": "タスク履歴を隠す",
+    "unfinishedTasks": "（未完了のタスク）",
+    "batchTask": "一括タスク",
+    "progressFailed": "進行状況を取得できません。バックグラウンドのタスクは継続します。再送信しないでください。"
+  },
+  "ko": {
+    "selectUnavailable": "사용 불가 인스턴스 모두 선택",
+    "selectingUnavailable": "모든 페이지에서 선택 중… (해제하여 취소)",
+    "unavailableSelectionHint": "모든 페이지의 사용 불가 독립 Lite를 선택합니다. 삭제 중, 정리 잔여 및 팀 인스턴스는 제외됩니다. 현재 필터는 적용되지 않습니다.",
+    "unavailableSelected": "모든 페이지에서 사용 불가 Lite {count}개 선택. 현재 필터는 적용되지 않습니다.",
+    "selectionLimit": "재시작/초기화는 최대 500개까지 선택하세요.",
+    "noUnavailable": "선택할 사용 불가 Lite가 없습니다.",
+    "selectionFailed": "선택 실패. 이전 선택은 유지됩니다. 다시 시도하세요.",
+    "batchRestart": "일괄 재시작",
+    "batchReset": "일괄 초기화",
+    "selectedCount": "{count}개 선택 (다른 페이지 포함)",
+    "showHistory": "작업 기록 표시",
+    "hideHistory": "작업 기록 숨기기",
+    "unfinishedTasks": " (미완료 작업)",
+    "batchTask": "일괄 작업",
+    "progressFailed": "진행 상황을 조회할 수 없습니다. 백그라운드 작업은 계속됩니다. 다시 제출하지 마세요."
+  },
+  "de": {
+    "selectUnavailable": "Alle nicht verfügbaren Instanzen auswählen",
+    "selectingUnavailable": "Seitenübergreifende Auswahl… (abwählen zum Abbrechen)",
+    "unavailableSelectionHint": "Nicht verfügbare eigenständige Lite-Instanzen aller Seiten auswählen; ohne Löschvorgänge, Bereinigungsreste und Teaminstanzen. Aktuelle Filter gelten nicht.",
+    "unavailableSelected": "{count} nicht verfügbare Lite-Instanzen seitenübergreifend ausgewählt. Aktuelle Filter gelten nicht.",
+    "selectionLimit": " Für Neustart/Zurücksetzen höchstens 500 Instanzen auswählen.",
+    "noUnavailable": "Keine nicht verfügbaren Lite-Instanzen zur Auswahl.",
+    "selectionFailed": "Auswahl fehlgeschlagen. Die vorherige Auswahl bleibt erhalten; erneut versuchen.",
+    "batchRestart": "Stapelneustart",
+    "batchReset": "Stapel zurücksetzen",
+    "selectedCount": "{count} ausgewählt (einschließlich anderer Seiten)",
+    "showHistory": "Aufgabenverlauf anzeigen",
+    "hideHistory": "Aufgabenverlauf ausblenden",
+    "unfinishedTasks": " (offene Aufgaben)",
+    "batchTask": "Stapelaufgabe",
+    "progressFailed": "Fortschritt vorübergehend nicht verfügbar. Hintergrundaufgaben laufen weiter; nicht erneut senden."
+  }
+};
+for (const locale of Object.keys(instanceSelectionTranslations) as Locale[]) Object.assign(translations[locale].instances, instanceSelectionTranslations[locale]);
+
+const instanceActivityTranslations: Record<Locale, string> = {
+  en: "Activity and policy",
+  zh: "活动与策略",
+  ja: "アクティビティとポリシー",
+  ko: "활동 및 정책",
+  de: "Aktivität und Richtlinie",
+};
+for (const locale of Object.keys(instanceActivityTranslations) as Locale[]) (translations[locale].instances as TranslationTree).activityPolicy = instanceActivityTranslations[locale];
+
+const rolloutReconciliationTranslations: Record<Locale, TranslationTree> = {
+  en: {
+    rolloutUncertain: "The {runtime} request outcome is unknown. New submissions are blocked. Check history and select the corresponding operation.",
+    rolloutProtectedPreparation: "Operation #{id} needs attention. Protection is retained. Inspect and repair it in Runtime management, then check history again.",
+    rolloutReconcile: "Check operation history", rolloutAdopt: "Use this operation",
+    rolloutNoMatch: "No matching operation selected. Empty history does not confirm that the request failed.",
+    rolloutRecoveredPreflight: "Preflight #{id} recovered. Review the operation details before confirming.",
+  },
+  zh: {
+    rolloutUncertain: "{runtime} 请求结果不明确，已阻止再次提交。请核对记录并选择对应操作。",
+    rolloutProtectedPreparation: "操作 #{id} 需要处理，保护仍保留。请在 Runtime 管理中检查并修复后，再核对记录。",
+    rolloutReconcile: "核对操作记录", rolloutAdopt: "使用此操作",
+    rolloutNoMatch: "尚未选择对应操作。记录为空不代表请求未执行。",
+    rolloutRecoveredPreflight: "已恢复预检 #{id}，请核对操作详情后确认。",
+  },
+  ja: {
+    rolloutUncertain: "{runtime} の応答を確認できません。再送信は停止中です。履歴から該当する操作を選択してください。",
+    rolloutProtectedPreparation: "操作 #{id} は対応が必要です。保護を保持しています。Runtime 管理で確認・修復後、履歴を再確認してください。",
+    rolloutReconcile: "操作履歴を確認", rolloutAdopt: "この操作を使用",
+    rolloutNoMatch: "該当する操作が未選択です。履歴が空でも未実行とは判断できません。",
+    rolloutRecoveredPreflight: "事前確認 #{id} を復元しました。詳細を確認してから実行してください。",
+  },
+  ko: {
+    rolloutUncertain: "{runtime}의 응답을 확인할 수 없어 재전송을 차단했습니다. 기록에서 해당 작업을 선택하세요.",
+    rolloutProtectedPreparation: "작업 #{id}에 조치가 필요하며 보호가 유지됩니다. Runtime 관리에서 검사하고 복구한 후 기록을 다시 확인하세요.",
+    rolloutReconcile: "작업 기록 확인", rolloutAdopt: "이 작업 사용",
+    rolloutNoMatch: "해당 작업을 선택하지 않았습니다. 기록이 비어 있어도 요청 실패를 의미하지 않습니다.",
+    rolloutRecoveredPreflight: "사전 검사 #{id}을 복구했습니다. 작업 세부 정보를 검토한 후 확인하세요.",
+  },
+  de: {
+    rolloutUncertain: "Das Ergebnis der Anfrage für {runtime} ist unklar. Erneutes Senden ist gesperrt. Wählen Sie den zugehörigen Vorgang im Verlauf.",
+    rolloutProtectedPreparation: "Vorgang #{id} erfordert Aufmerksamkeit. Der Schutz bleibt bestehen. Prüfen und reparieren Sie ihn in der Runtime-Verwaltung und prüfen Sie dann den Verlauf erneut.",
+    rolloutReconcile: "Vorgangsverlauf prüfen", rolloutAdopt: "Diesen Vorgang verwenden",
+    rolloutNoMatch: "Kein zugehöriger Vorgang ausgewählt. Ein leerer Verlauf bestätigt keinen Fehlschlag.",
+    rolloutRecoveredPreflight: "Vorprüfung #{id} wiederhergestellt. Prüfen Sie die Details vor der Bestätigung.",
+  },
+};
+for (const locale of Object.keys(rolloutReconciliationTranslations) as Locale[]) Object.assign(translations[locale].systemSettingsPage, rolloutReconciliationTranslations[locale]);
+
+const rolloutPreparingTranslations: Record<Locale, string> = {
+  en: "Preparing pools…",
+  zh: "准备运行池中…",
+  ja: "プールを準備中…",
+  ko: "풀 준비 중…",
+  de: "Pools vorbereiten…",
+};
+for (const locale of Object.keys(rolloutPreparingTranslations) as Locale[]) (translations[locale].systemSettingsPage as TranslationTree).rolloutPreparing = rolloutPreparingTranslations[locale];
+
+const runtimeTableTranslations: Record<Locale, TranslationTree> = {
+  en: {runtimeName:"Name",offline:"Offline",onlineState:"Online"},
+  zh: {runtimeName:"名称",offline:"离线",onlineState:"在线"},
+  ja: {runtimeName:"名前",offline:"オフライン",onlineState:"オンライン"},
+  ko: {runtimeName:"이름",offline:"오프라인",onlineState:"온라인"},
+  de: {runtimeName:"Name",offline:"Offline",onlineState:"Online"},
+};
+for (const locale of Object.keys(runtimeTableTranslations) as Locale[]) Object.assign(translations[locale].runtimePods ??= {}, runtimeTableTranslations[locale]);
+
+for (const locale of Object.keys(teamTranslations) as Locale[]) {
+  translations[locale].teams = teamTranslations[locale];
+  (translations[locale].nav as TranslationTree).teams = teamTranslations[locale].title;
+}
+
+for (const locale of Object.keys(instanceCreateTranslations) as Locale[]) translations[locale].instanceCreate = instanceCreateTranslations[locale];
 
 export function translate(locale: Locale, key: string): string | undefined {
   const segments = key.split(".");

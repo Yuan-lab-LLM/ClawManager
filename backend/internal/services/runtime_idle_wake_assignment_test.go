@@ -25,7 +25,7 @@ func (p *exhaustedPoolWakeProbe) WakeIdleRuntimePool(context.Context, k8s.Runtim
 	return errors.New("unexpected wake without a journal")
 }
 
-func TestRuntimeSchedulerChecksSleepingCapacityAfterLiveSlotsAreUnusable(t *testing.T) {
+func TestRuntimeSchedulerExpandsLivePoolWithoutSearchingSleepingHistory(t *testing.T) {
 	for _, kind := range []string{RuntimeTypeOpenClaw, RuntimeTypeHermes, RuntimeTypeOpenCode, RuntimeTypeDeepSeekHarness} {
 		for _, reason := range []string{"reserved slots", "unreadable slots", "uncertain create"} {
 			t.Run(kind+"/"+reason, func(t *testing.T) {
@@ -59,8 +59,8 @@ func TestRuntimeSchedulerChecksSleepingCapacityAfterLiveSlotsAreUnusable(t *test
 					}
 					return
 				}
-				if deployment.calls != 1 || err == nil || !isRuntimeAssignmentPending(err) {
-					t.Fatalf("unusable live pool prevented cold start: wake checks=%d err=%v", deployment.calls, err)
+				if deployment.calls != 0 || err == nil || !isRuntimeAssignmentPending(err) {
+					t.Fatalf("ordinary assignment searched cold history: wake checks=%d err=%v", deployment.calls, err)
 				}
 				if len(fake.createRequests) != 0 || bindings.bindings[161] != nil || pods.releases[132] != 1 {
 					t.Fatalf("old writer/reservation changed: creates=%d binding=%+v releases=%v", len(fake.createRequests), bindings.bindings[161], pods.releases)

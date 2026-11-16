@@ -9,16 +9,13 @@ import {
 } from "../../lib/runtimeManagement";
 import type { RuntimePod, RuntimeSlot } from "../../types/runtimePool";
 
-export const buttonClass =
-  "inline-flex items-center justify-center gap-2 rounded border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40";
-export const primaryClass =
-  "inline-flex items-center justify-center gap-2 rounded border border-slate-900 bg-slate-900 px-3 py-2 text-xs font-medium text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40";
-export const inputClass =
-  "min-w-0 rounded border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-400";
+export const buttonClass = "app-button-secondary disabled:cursor-not-allowed";
+export const primaryClass = "app-button-primary disabled:cursor-not-allowed";
+export const inputClass = "app-input min-w-0";
 const slotStyles: Record<SlotState, string> = {
   running: "border-emerald-100 bg-emerald-50 text-emerald-600",
   starting: "border-blue-100 bg-blue-50 text-blue-600",
-  migrating: "border-violet-100 bg-violet-50 text-violet-600",
+  migrating: "border-amber-200 bg-amber-50 text-amber-800",
   error: "border-red-100 bg-red-50 text-red-500",
   releasing: "border-cyan-200 bg-cyan-50 text-cyan-800",
   idle: "border-slate-200 bg-slate-50 text-slate-400",
@@ -81,15 +78,28 @@ export function SlotGrid({
   );
 }
 
+export function SlotOverview({ pod }: { pod: RuntimePod }) {
+  const { t } = useI18n();
+  const slots = pod.agent_reported === false ? [] : pod.slots ?? [];
+  if (!slots.length) return <span className="runtime-slot-overview runtime-no-inventory">{t("runtimePods.noInventory")}</span>;
+  const counts = Object.keys(slotStyles).map(state => ({state:state as SlotState, count:slots.filter(slot => slotState(slot) === state).length}));
+  const missing = Math.max(0, pod.capacity - slots.length);
+  const description = [...counts.filter(item => item.count).map(item => `${t(`runtimePods.${item.state}`)} ${item.count}`), ...(missing ? [`${t("runtimePods.unknown")} ${missing}`] : [])].join(" · ");
+  return <div className={`runtime-slot-overview ${pod.capacity <= 16 ? "runtime-slot-individual" : "runtime-slot-segmented"}`} role="img" aria-label={`${t("runtimePods.distribution")}: ${description}`} title={description}>
+    {pod.capacity <= 16 ? slots.map(slot => <span key={slot.index} className={`runtime-slot-mark runtime-slot-${slotState(slot)}`} />) : counts.filter(item => item.count).map(item => <span key={item.state} className={`runtime-slot-mark runtime-slot-${item.state}`} style={{flex:item.count}} />)}
+    {missing > 0 && <span className="runtime-slot-mark runtime-slot-unknown" style={{flex:missing}} />}
+  </div>;
+}
+
 export function Legend({ compact = false }: { compact?: boolean }) {
   const { t } = useI18n();
   return (
-    <div className={`flex flex-wrap gap-y-1 text-slate-500 ${compact ? "gap-x-2 text-[10px]" : "gap-x-4 text-xs"}`}>
+    <div className={`flex flex-wrap gap-y-1 text-slate-500 ${compact ? "gap-x-2 text-xs" : "gap-x-4 text-xs"}`}>
       {Object.keys(slotStyles).map((state) => (
         <span key={state} className="inline-flex items-center gap-1.5">
           <span
             aria-hidden="true"
-            className={`h-2 w-2 rounded-full ${state === "running" ? "bg-emerald-500" : state === "starting" ? "bg-blue-500" : state === "migrating" ? "bg-violet-500" : state === "error" ? "bg-red-500" : state === "releasing" ? "bg-cyan-500" : state === "unknown" ? "bg-amber-500" : state === "idle" ? "bg-slate-300" : "bg-slate-500"}`}
+            className={`h-2 w-2 rounded-full ${state === "running" ? "bg-emerald-500" : state === "starting" ? "bg-blue-500" : state === "migrating" ? "bg-amber-600" : state === "error" ? "bg-red-500" : state === "releasing" ? "bg-cyan-500" : state === "unknown" ? "bg-amber-500" : state === "idle" ? "bg-slate-300" : "bg-slate-500"}`}
           />
           {t(`runtimePods.${state}`)}
         </span>
@@ -112,16 +122,16 @@ export function Metric({
   compact?: boolean;
 }) {
   return (
-    <div className={`cm-surface min-w-0 ${compact ? "p-2" : "p-4"}`}>
+    <div className={`cm-surface min-w-0 ${compact ? "runtime-metric p-2" : "p-4"}`} title={typeof detail === "string" ? detail : undefined}>
       <div className={compact ? "flex items-center justify-between gap-1" : ""}>
-      <div className={`${compact ? "text-[11px]" : "text-xs"} text-slate-500`}>{label}</div>
-      <div className={`${compact ? "text-lg leading-5" : "mt-1.5 text-2xl"} font-semibold tabular-nums tracking-tight text-slate-900`}>
+      <div className="text-xs text-slate-500">{label}</div>
+      <div className={`${compact ? "text-lg leading-5" : "mt-1.5 text-2xl"} whitespace-nowrap font-semibold tabular-nums tracking-tight text-slate-900`}>
         {value}
       </div>
       </div>
       {detail && (
         <div
-          className={`mt-1 ${compact ? "text-[10px] leading-3" : "text-xs"} ${warning ? "text-amber-600" : "text-slate-500"}`}
+          className={`${compact ? "sr-only" : "mt-1 text-xs"} ${warning ? "text-amber-800" : "text-slate-500"}`}
         >
           {detail}
         </div>
@@ -149,12 +159,12 @@ export function ResourceBar({
   const format = memory ? formatMemory : formatCPU;
   return (
     <div className="min-w-0 flex-1" title={t("runtimePods.capacityHelp")}>
-      <div className={`flex justify-between gap-2 ${compact ? "mb-0.5 text-[10px] leading-3" : "mb-2 text-xs"}`}>
+      <div className={`flex justify-between gap-2 ${compact ? "mb-0.5 text-xs leading-3" : "mb-2 text-xs"}`}>
         <span className="text-slate-500">
           {t(`runtimePods.${memory ? "memory" : "cpu"}`)}
         </span>
         <span
-          className={`font-medium tabular-nums ${percentage && percentage >= 85 ? "text-amber-600" : "text-slate-800"}`}
+          className={`font-medium tabular-nums ${percentage && percentage >= 85 ? "text-amber-800" : "text-slate-800"}`}
         >
           {format(used)} / {format(limit)}
           {percentage !== undefined && memory && !compact
@@ -194,8 +204,12 @@ export function RuntimeDialog({
   const { t } = useI18n();
   useEffect(() => {
     const dialog = ref.current;
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     dialog?.showModal();
-    return () => dialog?.close();
+    return () => {
+      dialog?.close();
+      if (previous?.isConnected) previous.focus();
+    };
   }, []);
   return (
     <dialog
@@ -213,10 +227,10 @@ export function RuntimeDialog({
         if (closeOnBackdrop && backdropPointer.current && event.target === event.currentTarget && outside) onClose();
         backdropPointer.current = false;
       }}
-      className={`m-auto max-h-[90dvh] ${wide ? "w-[min(95vw,880px)]" : "w-[min(95vw,640px)]"} overflow-hidden rounded-lg border border-slate-200 bg-white p-0 text-slate-800 shadow-2xl backdrop:bg-slate-950/40 open:flex open:flex-col`}
+      className={`m-auto max-h-[90dvh] ${wide ? "w-[min(95vw,880px)]" : "w-[min(95vw,640px)]"} overflow-hidden rounded-md border border-slate-200 bg-white p-0 text-slate-800 shadow-lg backdrop:bg-slate-950/40 open:flex open:flex-col`}
     >
       <div className="flex shrink-0 items-center justify-between border-b border-slate-100 px-4 py-3 sm:px-6">
-        <h2 id="runtime-dialog-title" className="text-lg font-semibold">
+        <h2 id="runtime-dialog-title" className="text-sm font-semibold">
           {title}
         </h2>
         <button

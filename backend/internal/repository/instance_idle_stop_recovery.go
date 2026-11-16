@@ -16,6 +16,21 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
+// A durable independent recovery owns teardown until its coordinator releases
+// the reservation. Ordinary graceful retries must not starve that owner.
+func (r *InstanceAutoStopRepository) FaultRecoveryActive(ctx context.Context, id int) (bool, error) {
+	row, err := r.sess.SQL().QueryRowContext(ctx, `SELECT COUNT(*) FROM instance_lifecycle_manual_guards g
+ JOIN runtime_management_operations o ON BINARY o.id=BINARY g.token
+ WHERE g.instance_id=? AND o.kind='eviction' AND o.status IN ('pending','processing','needs_attention')
+ AND JSON_UNQUOTE(JSON_EXTRACT(o.request_json,'$.mode'))='recovery'`, id)
+	if err != nil {
+		return false, err
+	}
+	var count int
+	err = row.Scan(&count)
+	return count > 0, err
+}
+
 // CompleteStopFromRecovery consumes independent, verified writer-stop authority.
 // It does not manufacture an idle/Agent acknowledgement. The released journal
 // remains the audit proof after the old native stop fence has been retired.

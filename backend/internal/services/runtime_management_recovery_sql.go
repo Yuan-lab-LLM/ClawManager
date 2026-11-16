@@ -61,6 +61,9 @@ func (s *RuntimeManagementService) commitRecoveredEviction(ctx context.Context, 
 		if journal.Phase != "source_stopped" {
 			return errors.New("source stop is not confirmed")
 		}
+		if faultSlotReleaseRequired(journal) && !faultSlotReleaseComplete(journal) {
+			return errors.New("source Runtime slot release is not finalized")
+		}
 		if journal.Receipt != nil {
 			if err = runtimeeviction.ValidateReceipt(journal.Scope, journal.Receipt); err != nil {
 				return err

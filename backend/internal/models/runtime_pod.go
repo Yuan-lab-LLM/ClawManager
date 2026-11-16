@@ -53,6 +53,7 @@ type RuntimePod struct {
 	KubernetesPodUID              *string       `db:"-" json:"-"`
 	RegisteredPodUID              *string       `db:"-" json:"-"`
 	AgentState                    string        `db:"-" json:"-"`
+	ReadyGatewayPorts             map[int]bool  `db:"-" json:"-"`
 	KubernetesReady               bool          `db:"-" json:"-"`
 	CPUMillisLimit                *int64        `db:"-" json:"cpu_millis_limit,omitempty"`
 	MemoryBytesLimit              *int64        `db:"-" json:"memory_bytes_limit,omitempty"`

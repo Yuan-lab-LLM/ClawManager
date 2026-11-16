@@ -1,3 +1,4 @@
+import FilterSelect from "../../components/FilterSelect";
 import { useState } from "react";
 import { ArrowLeft } from "lucide-react";
 import { useI18n } from "../../contexts/I18nContext";
@@ -46,6 +47,7 @@ export default function RuntimePodDetails({
   const [instanceFilter, setInstanceFilter] = useState("all");
   const counts = summarizePod(pod);
   const slots = pod.slots ?? [];
+  const completeInventory = pod.agent_reported !== false && slots.length > 0 && slots.length >= pod.capacity && slots.every(slot => slot.state !== "unknown");
   const chosen = slots.find((slot) => slot.index === selectedSlot);
   const rows = slots.filter(
     (slot) =>
@@ -79,17 +81,17 @@ export default function RuntimePodDetails({
       <button
         type="button"
         onClick={onBack}
-        className="inline-flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-900"
+        className="inline-flex items-center gap-1.5 text-xs text-[var(--cm-text)] hover:text-slate-900"
       >
         <ArrowLeft className="h-4 w-4" />
         {t("runtimePods.back")}
       </button>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold text-slate-900">
+          <h1 className="text-sm font-semibold text-slate-900">
             {pod.pod_name}
           </h1>
-          <p className="mt-1 text-xs text-slate-500">
+          <p className="mt-1 text-xs text-[var(--cm-text)]">
             {t("runtimePods.node")}: {pod.node_name || t("runtimePods.unknown")} / {pod.pod_ip || "—"} · {pod.capacity} Agent
             · {pod.storage_class || "—"}
           </p>
@@ -125,14 +127,14 @@ export default function RuntimePodDetails({
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <Metric
           label={t("runtimePods.agentReady")}
-          value={`${counts.ready} / ${counts.capacity}`}
-          detail={`${t("runtimePods.releasing")} ${counts.releasing} · ${t("runtimePods.unavailable")} ${counts.unavailable} · ${t("runtimePods.unknown")} ${counts.unknown}`}
+          value={`${completeInventory ? counts.ready : t("runtimePods.unknown")} / ${counts.capacity}`}
+          detail={completeInventory ? `${t("runtimePods.releasing")} ${counts.releasing} · ${t("runtimePods.unavailable")} ${counts.unavailable} · ${t("runtimePods.unknown")} ${counts.unknown}` : t("runtimePods.noInventory")}
           warning={counts.unavailable > 0 || counts.unknown > 0}
         />
         <Metric
-          label={t(counts.bound === undefined ? "runtimePods.occupied" : "runtimePods.cardBound")}
-          value={`${counts.bound ?? counts.occupied} / ${counts.capacity}`}
-          detail={`${t("runtimePods.running")} ${counts.running} · ${t("runtimePods.error")} ${counts.error}`}
+          label={t("runtimePods.cardBound")}
+          value={`${counts.bound ?? t("runtimePods.unknown")} / ${counts.capacity}`}
+          detail={`${t("runtimePods.cardReported")} ${pod.used_slots} · ${t("runtimePods.running")} ${counts.running} · ${t("runtimePods.error")} ${counts.error}`}
         />
         <Metric
           label={t("runtimePods.cpu")}
@@ -170,7 +172,7 @@ export default function RuntimePodDetails({
           <div className="flex flex-wrap items-center justify-between gap-2 rounded bg-slate-50 p-3 text-xs">
             <span>
               {t("runtimePods.slot")} {chosen.index} · {chosen.container_name} ·
-              Agent {t(`runtimePods.${chosen.ready ? "ready" : "unavailable"}`)}{" "}
+              Agent {t(`runtimePods.${chosen.state === "unknown" ? "unknown" : chosen.ready ? "ready" : "unavailable"}`)}{" "}
               ·{" "}
               {chosen.reconciliation_state && chosen.reconciliation_state !== "unknown" && chosen.instance_id && `${t("runtimePods.reportedInstance")} `}
               {chosen.instance_name ||
@@ -212,32 +214,19 @@ export default function RuntimePodDetails({
                 type="button"
                 onClick={() => setFilter(value)}
                 aria-pressed={filter === value}
-                className={`rounded px-3 py-1.5 text-xs ${filter === value ? "bg-slate-900 text-white" : "text-slate-500 hover:bg-slate-100"}`}
+                className={`rounded px-3 py-1.5 text-xs ${filter === value ? "bg-slate-900 text-white" : "text-[var(--cm-text)] hover:bg-slate-100"}`}
               >
                 {t(`runtimePods.${value}`)}{" "}
                 {value === "all"
                   ? counts.capacity
                   : value === "bound"
                     ? counts.occupied
-                    : counts[value]}
+                    : !completeInventory ? t("runtimePods.unknown") : counts[value]}
               </button>
             ))}
           </div>
           <div className="flex flex-wrap gap-2">
-            <select
-              aria-label={t("runtimePods.instanceState")}
-              className={inputClass}
-              value={instanceFilter}
-              onChange={(event) => setInstanceFilter(event.target.value)}
-            >
-              {["all", "running", "starting", "migrating", "error", "releasing", "unknown"].map(
-                (value) => (
-                  <option key={value} value={value}>
-                    {t(`runtimePods.${value}`)}
-                  </option>
-                ),
-              )}
-            </select>
+            <FilterSelect label={t("runtimePods.instanceState")} value={instanceFilter} onChange={setInstanceFilter} options={["all", "running", "starting", "migrating", "error", "releasing", "unknown"].map(value => ({value,label:t(`runtimePods.${value}`)}))} />
             <input
               aria-label={t("runtimePods.search")}
               placeholder={t("runtimePods.search")}
@@ -249,7 +238,7 @@ export default function RuntimePodDetails({
         </div>
         <div className="overflow-x-auto">
           <table className="w-full whitespace-nowrap text-left text-xs">
-            <thead className="bg-slate-50 text-slate-500">
+            <thead className="bg-slate-50 text-[var(--cm-text)]">
               <tr>
                 <th className="p-3">
                   <input
@@ -324,13 +313,13 @@ export default function RuntimePodDetails({
                       {String(slot.index).padStart(2, "0")}
                     </button>
                   </td>
-                  <td className="px-3 py-3 font-mono text-slate-500">
+                  <td className="px-3 py-3 font-mono text-[var(--cm-text)]">
                     {slot.container_name}
                   </td>
                   <td
                     className={`px-3 py-3 ${slot.ready ? "text-emerald-600" : "text-amber-600"}`}
                   >
-                    {t(`runtimePods.${slot.ready ? "ready" : "unavailable"}`)}
+                    {t(`runtimePods.${slot.state === "unknown" ? "unknown" : slot.ready ? "ready" : "unavailable"}`)}
                   </td>
                   <td className="px-3 py-3">
                     {slot.instance_id ? (
@@ -364,7 +353,7 @@ export default function RuntimePodDetails({
                     {formatMemory(slot.memory_bytes_used)}
                   </td>
                   <td
-                    className="max-w-56 truncate px-3 py-3 text-slate-500"
+                    className="max-w-56 truncate px-3 py-3 text-[var(--cm-text)]"
                     title={slotState(slot) === "releasing" ? t("runtimePods.releasingHelp") : slot.observation_message || slot.error_message || slot.reason}
                   >
                     {slotState(slot) === "releasing" ? t("runtimePods.releasingHelp") : slot.observation_message || slot.error_message ||
@@ -388,7 +377,7 @@ export default function RuntimePodDetails({
                       )}
                       <button
                         type="button"
-                        className="text-slate-500 hover:underline"
+                        className="text-[var(--cm-text)] hover:underline"
                         onClick={onEvents}
                       >
                         {t("runtimePods.events")}
@@ -400,7 +389,7 @@ export default function RuntimePodDetails({
             </tbody>
           </table>
         </div>
-        <div className="flex justify-between border-t border-slate-100 p-3 text-xs text-slate-500">
+        <div className="flex justify-between border-t border-slate-100 p-3 text-xs text-[var(--cm-text)]">
           <span>
             {t("runtimePods.podCount", { count: 1, shown: rows.length })} Agent
             · {t("runtimePods.selected", { count: selectedIds.length })}

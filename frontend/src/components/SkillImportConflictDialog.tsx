@@ -64,18 +64,18 @@ const SkillImportConflictDialog: React.FC<SkillImportConflictDialogProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
-      <div className="w-full max-w-xl rounded-[24px] border border-[#efe2d8] bg-[#fffaf7] p-6 shadow-[0_30px_80px_-40px_rgba(72,44,24,0.55)]">
-        <h3 className="text-lg font-semibold text-[#1d1713]">{t('skillHubPage.importConflict.title')}</h3>
+      <div className="w-full max-w-xl rounded-[var(--cm-radius-dialog)] border border-[var(--cm-border)] bg-[var(--cm-subtle)] p-6 shadow-2xl">
+        <h3 className="text-lg font-semibold text-[var(--cm-ink)]">{t('skillHubPage.importConflict.title')}</h3>
 
         {single ? (
-          <p className="mt-3 text-sm leading-6 text-[#6f6158]">
+          <p className="mt-3 text-sm leading-6 text-[var(--cm-text)]">
             {t('skillHubPage.importConflict.message', {
               name: single.existing_name || single.skill_key,
               version: single.current_version_no ?? 1,
             })}
           </p>
         ) : (
-          <p className="mt-3 text-sm leading-6 text-[#6f6158]">{t('skillHubPage.importConflict.batchMessage')}</p>
+          <p className="mt-3 text-sm leading-6 text-[var(--cm-text)]">{t('skillHubPage.importConflict.batchMessage')}</p>
         )}
 
         {single ? (
@@ -124,16 +124,16 @@ const SkillImportConflictDialog: React.FC<SkillImportConflictDialogProps> = ({
               {conflicts.map((item) => (
                 <div
                   key={item.directory_name}
-                  className="rounded-[18px] border border-[#efe2d8] bg-white px-4 py-3"
+                  className="rounded-lg border border-[var(--cm-border)] bg-white px-4 py-3"
                 >
-                  <div className="text-sm font-medium text-[#1d1713]">{item.existing_name || item.skill_key}</div>
-                  <div className="mt-1 text-xs text-[#7a6d66]">
+                  <div className="text-sm font-medium text-[var(--cm-ink)]">{item.existing_name || item.skill_key}</div>
+                  <div className="mt-1 text-xs text-[var(--cm-text)]">
                     {t('skillHubPage.importConflict.currentVersion', {
                       version: item.current_version_no ?? 1,
                     })}
                   </div>
                   <select
-                    className="mt-3 w-full rounded-xl border border-[#ead8cf] bg-[#fffaf7] px-3 py-2 text-sm text-[#1d1713]"
+                    className="mt-3 w-full rounded-xl border border-[var(--cm-border)] bg-[var(--cm-subtle)] px-3 py-2 text-sm text-[var(--cm-ink)]"
                     value={choices[item.directory_name] || 'new_version'}
                     onChange={(event) =>
                       setChoices((current) => ({

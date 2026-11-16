@@ -125,6 +125,11 @@ func buildPoolValidationDeployment(original *appsv1.Deployment, source RuntimeRo
 			v.VolumeSource = corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}
 		}
 	}
+	if identity["clawmanager.io/sandbox-profile"] == RuntimeNFSRootlessProfile {
+		if err := initializeValidationWorkspace(d); err != nil {
+			return nil, err
+		}
+	}
 	var container *corev1.Container
 	for i := range d.Spec.Template.Spec.Containers {
 		if d.Spec.Template.Spec.Containers[i].Name == "runtime" {
@@ -166,6 +171,38 @@ func buildPoolValidationDeployment(original *appsv1.Deployment, source RuntimeRo
 		setRuntimeSlotTLSReadiness(container)
 	}
 	return d, nil
+}
+
+// The source NFS root is provisioned externally. Validation replaces it with a
+// private emptyDir, whose root needs the same management ownership before any
+// worker starts. Never apply these commands to the source or recurse into data.
+func initializeValidationWorkspace(d *appsv1.Deployment) error {
+	workspace := false
+	for _, volume := range d.Spec.Template.Spec.Volumes {
+		if volume.Name == runtimeWorkspaceVolume {
+			if volume.EmptyDir == nil {
+				return fmt.Errorf("validation workspace initialization requires private emptyDir")
+			}
+			workspace = true
+		}
+	}
+	if !workspace {
+		return fmt.Errorf("validation workspace volume is missing")
+	}
+	for i := range d.Spec.Template.Spec.InitContainers {
+		init := &d.Spec.Template.Spec.InitContainers[i]
+		if init.Name != "runtime-local-state" {
+			continue
+		}
+		if len(init.Command) != 3 || init.Command[0] != "/bin/sh" || init.Command[1] != "-ec" {
+			return fmt.Errorf("validation local-state initializer command changed")
+		}
+		const path = "/initialize/validation-workspace"
+		init.VolumeMounts = append(init.VolumeMounts, corev1.VolumeMount{Name: runtimeWorkspaceVolume, MountPath: path})
+		init.Command[2] += "\nchown 10001:10001 " + path + "\nchmod 0711 " + path
+		return nil
+	}
+	return fmt.Errorf("validation local-state initializer is missing")
 }
 
 func (s *runtimeDeploymentService) ObservePoolValidation(ctx context.Context, namespace, name, operation string) (*RuntimeValidationStatus, error) {

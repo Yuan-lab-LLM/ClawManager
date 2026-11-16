@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 	"strconv"
@@ -35,6 +36,7 @@ const (
 )
 
 type startRuntimeRolloutRequest struct {
+	PreparationID  string `json:"preparation_id,omitempty"`
 	RuntimeType    string `json:"runtime_type" binding:"required"`
 	TargetImageRef string `json:"target_image_ref" binding:"required"`
 	BatchSize      int    `json:"batch_size"`
@@ -44,6 +46,7 @@ type startRuntimeRolloutRequest struct {
 }
 
 type runtimeUpgradePreflightRequest struct {
+	PreparationID      string `json:"preparation_id,omitempty"`
 	TargetImageRef     string `json:"target_image_ref" binding:"required"`
 	BatchSize          int    `json:"batch_size"`
 	MaxUnavailable     int    `json:"max_unavailable"`
@@ -78,6 +81,16 @@ func (h *RuntimePoolHandler) PreflightOpenClawRollout(c *gin.Context) {
 		utils.ValidationError(c, err)
 		return
 	}
+	if h.scheduler != nil {
+		if err := h.scheduler.ValidateRolloutPreparation(c.Request.Context(), req.PreparationID, services.RuntimeTypeOpenClaw); err != nil {
+			utils.Error(c, http.StatusConflict, err.Error())
+			return
+		}
+	} else if req.PreparationID != "" {
+		utils.Error(c, http.StatusServiceUnavailable, "Runtime preparation validation unavailable")
+		return
+	}
+	c.Request = c.Request.WithContext(h.rolloutPreparationContext(c.Request.Context(), req.PreparationID, services.RuntimeTypeOpenClaw))
 	autoRollback := true
 	if req.AutoRollback != nil {
 		autoRollback = *req.AutoRollback
@@ -247,6 +260,16 @@ func (h *RuntimePoolHandler) StartRollout(c *gin.Context) {
 		utils.Error(c, http.StatusConflict, models.ErrOpenCodeSafeUpgradeRequired.Error())
 		return
 	}
+	if h.scheduler != nil {
+		if err := h.scheduler.ValidateRolloutPreparation(c.Request.Context(), req.PreparationID, runtimeType); err != nil {
+			utils.Error(c, http.StatusConflict, err.Error())
+			return
+		}
+	} else if req.PreparationID != "" {
+		utils.Error(c, http.StatusServiceUnavailable, "Runtime preparation validation unavailable")
+		return
+	}
+	c.Request = c.Request.WithContext(h.rolloutPreparationContext(c.Request.Context(), req.PreparationID, runtimeType))
 	if targetImage == "" {
 		utils.Error(c, http.StatusBadRequest, "target image ref is required")
 		return
@@ -285,6 +308,14 @@ func (h *RuntimePoolHandler) StartRollout(c *gin.Context) {
 			rolloutPhase = k8s.HermesWebRolloutPhase
 		}
 	}
+	if runtimeType == services.RuntimeTypeDeepSeekHarness {
+		if !services.IsImmutableRuntimeImage(targetImage) {
+			utils.Error(c, http.StatusConflict, "Runtime target must use an immutable repository@sha256 digest")
+			return
+		}
+		digest := targetImage[strings.LastIndex(targetImage, "@")+1:]
+		targetImageDigest = &digest
+	}
 	if runtimeType == services.RuntimeTypeOpenClaw {
 		if h.upgrade == nil {
 			utils.Error(c, http.StatusServiceUnavailable, "runtime upgrade service is unavailable")
@@ -293,7 +324,11 @@ func (h *RuntimePoolHandler) StartRollout(c *gin.Context) {
 		if strings.TrimSpace(req.PreflightID) != "" {
 			rollout, err := h.upgrade.ConfirmPreflight(c.Request.Context(), req.PreflightID, targetImage, startedBy)
 			if err != nil {
-				utils.Error(c, http.StatusConflict, err.Error())
+				status := http.StatusConflict
+				if errors.Is(err, services.ErrRuntimeUpgradeCommitUncertain) {
+					status = http.StatusInternalServerError
+				}
+				utils.Error(c, status, err.Error())
 				return
 			}
 			if h.scheduler != nil {
@@ -563,4 +598,12 @@ func currentUserIDPtr(c *gin.Context) *int {
 		return nil
 	}
 	return &userID
+}
+
+func (h *RuntimePoolHandler) rolloutPreparationContext(ctx context.Context, id, runtimeType string) context.Context {
+	ctx = repository.WithRuntimeRolloutPreparation(ctx, id, runtimeType)
+	if h.scheduler != nil {
+		ctx = repository.WithRuntimeRolloutAdmissionValidation(ctx, func() error { return h.scheduler.ValidateRolloutPreparation(ctx, id, runtimeType) })
+	}
+	return ctx
 }

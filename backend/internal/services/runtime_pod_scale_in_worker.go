@@ -3,6 +3,7 @@ package services
 import (
 	"clawreef/internal/models"
 	"clawreef/internal/repository"
+	"clawreef/internal/services/k8s"
 	"context"
 	"encoding/json"
 	"errors"
@@ -85,6 +86,7 @@ func (s *RuntimeManagementService) finishScaleIn(ctx context.Context, op *Runtim
 
 func (s *RuntimeManagementService) failScaleInBeforeResize(ctx context.Context, op *RuntimeManagementOperation, journal *runtimePodScaleInJournal, cause error) error {
 	journal.ErrorMessage = cause.Error()
+	journal.Protection.ExpectedSnapshot = journal.Snapshot
 	if journal.Phase != "pending" {
 		kube, err := s.scaleInKube()
 		if err == nil {
@@ -111,6 +113,9 @@ func (s *RuntimeManagementService) processScaleIn(ctx context.Context, op *Runti
 	var journal runtimePodScaleInJournal
 	if err := json.Unmarshal([]byte(raw), &journal); err != nil {
 		return err
+	}
+	if journal.AutomaticIdle && (journal.Plan.Replicas < 1 || journal.Protection.Replicas < 1) {
+		return s.failScaleInBeforeResize(ctx, op, &journal, errRuntimeIdleMinimumCapacity)
 	}
 	kube, err := s.scaleInKube()
 	if err != nil {
@@ -245,6 +250,13 @@ func (s *RuntimeManagementService) refreshScaleIn(ctx context.Context) error {
 			continue
 		}
 		if e.op.Status == "needs_attention" && e.journal.Phase != "resizing" && e.journal.Phase != "observing" && e.journal.Phase != "cleanup" {
+			reconciled, recoverErr := s.reconcileInterruptedScaleIn(ctx, &e.op, &e.journal)
+			if recoverErr != nil {
+				return recoverErr
+			}
+			if reconciled {
+				continue
+			}
 			// No interrupted move is replayed. Restore capacity admission only after
 			// proving the replica write never happened and safely releasing protection.
 			if err = s.failScaleInBeforeResize(ctx, &e.op, &e.journal, errors.New("scale-in worker interrupted; instance moves require inspection")); err != nil {
@@ -258,12 +270,107 @@ func (s *RuntimeManagementService) refreshScaleIn(ctx context.Context) error {
 	}
 	return nil
 }
+
+// Recover journal lag only from a same-operation native replica CAS. Failed
+// proof falls back to the existing original-set rollback barrier, never a retry.
+func (s *RuntimeManagementService) reconcileInterruptedScaleIn(ctx context.Context, op *RuntimeManagementOperation, journal *runtimePodScaleInJournal) (bool, error) {
+	kube, err := s.scaleInKube()
+	if err != nil {
+		return false, nil
+	}
+	observer, ok := kube.(interface {
+		ObserveInterruptedRuntimeScaleIn(context.Context, k8s.RuntimePodScaleInProtection, *k8s.RuntimePodScaleSnapshot) (bool, error)
+	})
+	if !ok || journal.Snapshot == nil || journal.Protection.OperationID != op.ID {
+		return false, nil
+	}
+	if _, err = observer.ObserveInterruptedRuntimeScaleIn(ctx, journal.Protection, journal.Snapshot); err != nil {
+		return false, nil
+	}
+	journal.Protection.ExpectedSnapshot = journal.Snapshot
+	// Serialize the SQL fences with the same operation owner used for cleanup.
+	err = s.withScaleInKubeMutation(ctx, op, journal, func(tx db.Session) error { return s.checkScaleInFences(ctx, tx, op, journal) })
+	if err != nil {
+		op.Status = "needs_attention"
+		journal.ErrorMessage = "interrupted scale-in source proof changed: " + err.Error()
+		return true, s.saveScaleIn(ctx, op, journal)
+	}
+	for i := range op.Items {
+		op.Items[i].State = "completed"
+		op.Items[i].ErrorMessage = ""
+	}
+	journal.Phase = "observing"
+	op.Status = "starting"
+	if err = s.saveScaleIn(ctx, op, journal); err != nil {
+		return true, err
+	}
+	return true, s.advanceScaleIn(ctx, op, journal)
+}
+
+func (s *RuntimeManagementService) checkScaleInFences(ctx context.Context, tx db.Session, op *RuntimeManagementOperation, journal *runtimePodScaleInJournal) error {
+	for _, source := range journal.Plan.SourcePods {
+		var uid string
+		var paused bool
+		var claims int
+		row, err := tx.SQL().QueryRowContext(ctx, "SELECT pod_uid,scheduling_paused,used_slots FROM runtime_pods WHERE id=? FOR UPDATE", source.ID)
+		if err == nil {
+			err = row.Scan(&uid, &paused, &claims)
+		}
+		if err != nil {
+			return err
+		}
+		if uid != source.PodUID || !paused || claims != 0 {
+			return errors.New("source identity, pause or slot claims changed")
+		}
+		bindings, err := repository.NewInstanceRuntimeBindingRepository(tx).ListByRuntimePodID(ctx, source.ID)
+		if err != nil {
+			return err
+		}
+		if len(bindings) != 0 {
+			return errors.New("source has an unexpected binding")
+		}
+	}
+	// A completed native resize does not prove a migration destination is
+	// still valid. Never replay a move or override a later stop/delete intent.
+	for _, item := range op.Items {
+		var targetID int64
+		var generation, instanceGeneration int
+		var state, uid, status string
+		row, err := tx.SQL().QueryRowContext(ctx, `SELECT b.runtime_pod_id,b.generation,b.state,p.pod_uid,i.runtime_generation,i.status
+   FROM instances i JOIN instance_runtime_bindings b ON b.instance_id=i.id JOIN runtime_pods p ON p.id=b.runtime_pod_id
+   WHERE i.id=? FOR UPDATE`, item.InstanceID)
+		if err == nil {
+			err = row.Scan(&targetID, &generation, &state, &uid, &instanceGeneration, &status)
+		}
+		if err != nil {
+			return fmt.Errorf("migration destination proof unavailable: %w", err)
+		}
+		if targetID != item.TargetPodID || uid != item.TargetPodUID || generation != item.SourceGeneration+1 || instanceGeneration != generation || state != "running" || status != "running" {
+			return errors.New("migration destination identity, generation or running intent changed")
+		}
+	}
+	return nil
+}
+
 func (s *RuntimeManagementService) advanceScaleIn(ctx context.Context, op *RuntimeManagementOperation, journal *runtimePodScaleInJournal) error {
 	kube, err := s.scaleInKube()
 	if err != nil {
 		return err
 	}
 	if journal.Phase == "resizing" || journal.Phase == "observing" || journal.Phase == "cleanup" {
+		if op.Status == "needs_attention" && journal.Phase != "cleanup" {
+			reconciled, e := s.reconcileInterruptedScaleIn(ctx, op, journal)
+			if e != nil || reconciled {
+				return e
+			}
+			cause := errors.New("interrupted scale-in lacks verified same-operation resize proof")
+			if journal.Phase == "resizing" {
+				return s.failScaleInBeforeResize(ctx, op, journal, cause)
+			}
+			journal.ErrorMessage = cause.Error()
+			return s.saveScaleIn(ctx, op, journal)
+		}
+		journal.Protection.ExpectedSnapshot = journal.Snapshot
 		if journal.Phase != "cleanup" {
 			ready, e := kube.ObserveRuntimeScaleIn(ctx, journal.Protection)
 			if e != nil {
@@ -287,7 +394,12 @@ func (s *RuntimeManagementService) advanceScaleIn(ctx context.Context, op *Runti
 				return err
 			}
 		}
-		if err = s.withScaleInKubeMutation(ctx, op, journal, func(_ db.Session) error { return kube.ReleaseRuntimeScaleIn(ctx, journal.Protection, false) }); err != nil {
+		if err = s.withScaleInKubeMutation(ctx, op, journal, func(tx db.Session) error {
+			if err := s.checkScaleInFences(ctx, tx, op, journal); err != nil {
+				return err
+			}
+			return kube.ReleaseRuntimeScaleIn(ctx, journal.Protection, false)
+		}); err != nil {
 			op.Status = "needs_attention"
 			journal.ErrorMessage = err.Error()
 			return s.saveScaleIn(ctx, op, journal)
@@ -295,6 +407,11 @@ func (s *RuntimeManagementService) advanceScaleIn(ctx context.Context, op *Runti
 		journal.Phase = "finished"
 		journal.ErrorMessage = ""
 		return s.finishScaleIn(ctx, op, journal, "completed", false)
+	}
+	// Already accepted replica writes above must finish observing their exact
+	// result. A queued old zero plan below has no authority to resize anymore.
+	if journal.AutomaticIdle && (journal.Plan.Replicas < 1 || journal.Protection.Replicas < 1) {
+		return s.failScaleInBeforeResize(ctx, op, journal, errRuntimeIdleMinimumCapacity)
 	}
 	cancelled, err := s.cancelRequested(ctx, op.ID)
 	if err != nil {

@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	coordinationv1 "k8s.io/api/coordination/v1"
@@ -20,6 +21,7 @@ type RuntimeLeaderService interface {
 }
 
 type runtimeLeaderService struct {
+	renewMu   sync.Mutex
 	client    kubernetes.Interface
 	namespace string
 	holder    string
@@ -37,6 +39,10 @@ func (s *runtimeLeaderService) IsLeader(ctx context.Context) bool {
 	if s == nil || s.client == nil || s.namespace == "" || s.holder == "" {
 		return false
 	}
+	// Scheduling, operations and trust renewal share one process identity. A
+	// local concurrent renewal must not cancel a native operation as lease loss.
+	s.renewMu.Lock()
+	defer s.renewMu.Unlock()
 
 	leases := s.client.CoordinationV1().Leases(s.namespace)
 	now := metav1.NewMicroTime(time.Now())

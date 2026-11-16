@@ -105,7 +105,12 @@ dispatch:
 }
 
 func (c *slotRuntimeAgentClient) reconcileAssignment(ctx context.Context, desired k8sservice.RuntimeDesiredAssignment) error {
-	requestCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	timeout := 10 * time.Second
+	if desired.State == "draining" || desired.State == "stopped" {
+		// Native stop must outlast the agent's 20s primary shutdown grace period.
+		timeout = runtimeAgentControlTimeout
+	}
+	requestCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	var err error
 	if desired.State == "draining" || desired.State == "stopped" {
@@ -179,7 +184,7 @@ func (t slotTLSTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 // canRetryPendingGateway is deliberately narrower than CreateGateway: only a
 // never-published generation following a confirmed source stop can rebuild env.
 func (c *slotRuntimeAgentClient) canRetryPendingGateway(ctx context.Context, endpoint string, req RuntimeAgentCreateGatewayRequest) error {
-	podUID, err := c.targetPodUID(ctx, endpoint)
+	podUID, err := c.targetPodUIDForSlot(ctx, endpoint, req.GatewayPort, RuntimeGatewayPortBlockSize(req.AgentType))
 	if err != nil {
 		return err
 	}
@@ -203,7 +208,7 @@ func (c *slotRuntimeAgentClient) CreateGateway(ctx context.Context, endpoint str
 		}
 	}
 
-	podUID, err := c.targetPodUID(ctx, endpoint)
+	podUID, err := c.targetPodUIDForSlot(ctx, endpoint, req.GatewayPort, RuntimeGatewayPortBlockSize(req.AgentType))
 	if err != nil {
 		return nil, err
 	}
@@ -267,6 +272,15 @@ func (c *slotRuntimeAgentClient) CreateGateway(ctx context.Context, endpoint str
 }
 
 func (c *slotRuntimeAgentClient) DeleteGateway(ctx context.Context, endpoint, gatewayID string) error {
+	return c.deleteGateway(ctx, endpoint, gatewayID, false)
+}
+
+// ForceDeleteGateway is reserved for an explicitly authorized instance deletion.
+func (c *slotRuntimeAgentClient) ForceDeleteGateway(ctx context.Context, endpoint, gatewayID string) error {
+	return c.deleteGateway(ctx, endpoint, gatewayID, true)
+}
+
+func (c *slotRuntimeAgentClient) deleteGateway(ctx context.Context, endpoint, gatewayID string, forceDelete bool) error {
 	if c.legacy != nil {
 		id, parseErr := legacyGatewayInstanceID(gatewayID)
 		if parseErr == nil {
@@ -297,7 +311,7 @@ func (c *slotRuntimeAgentClient) DeleteGateway(ctx context.Context, endpoint, ga
 		return lookupErr
 	}
 	if pod.Labels["clawmanager.io/sandbox-profile"] == "nfs-rootless-v1" {
-		return c.stopContainerGateway(ctx, endpoint, gatewayID, false)
+		return c.stopContainerGatewayPolicy(ctx, endpoint, gatewayID, false, forceDelete)
 	}
 	var receipt struct {
 		GatewayID string `json:"gateway_id"`
@@ -305,7 +319,11 @@ func (c *slotRuntimeAgentClient) DeleteGateway(ctx context.Context, endpoint, ga
 		Confirmed bool   `json:"confirmed"`
 		Unmounted bool   `json:"unmounted"`
 	}
-	if err := c.do(ctx, http.MethodDelete, endpoint, "/v1/gateways/"+url.PathEscape(gatewayID), nil, &receipt); err != nil {
+	path := "/v1/gateways/" + url.PathEscape(gatewayID)
+	if forceDelete {
+		path += "?force_delete=true"
+	}
+	if err := c.do(ctx, http.MethodDelete, endpoint, path, nil, &receipt); err != nil {
 		// An immutable request can be published before the native POST reaches
 		// its slot. Unknown DELETE remains unconfirmed; a separate operation
 		// must persist a writer-generation fence before it can acknowledge stop.
@@ -332,6 +350,12 @@ func (c *slotRuntimeAgentClient) DeleteGateway(ctx context.Context, endpoint, ga
 }
 
 func (c *slotRuntimeAgentClient) targetPodUID(ctx context.Context, endpoint string) (string, error) {
+	return c.targetPodUIDForSlot(ctx, endpoint, -1, 0)
+}
+
+// gatewayPort=-1 retains whole-Pod readiness; port=block=0 inspects only the
+// coordinator before selection. A selected slot always supplies its port block.
+func (c *slotRuntimeAgentClient) targetPodUIDForSlot(ctx context.Context, endpoint string, gatewayPort, block int) (string, error) {
 	if c.kube == nil || strings.TrimSpace(c.namespace) == "" {
 		return "", fmt.Errorf("runtime target Kubernetes client and namespace are required")
 	}
@@ -369,6 +393,12 @@ func (c *slotRuntimeAgentClient) targetPodUID(ctx context.Context, endpoint stri
 		for _, condition := range pod.Status.Conditions {
 			if condition.Type == corev1.PodReady && condition.Status == corev1.ConditionTrue {
 				ready = true
+			}
+		}
+		if (gatewayPort != -1 || block != 0) && pod.Labels["clawmanager.io/sandbox-profile"] == k8sservice.RuntimeNFSRootlessProfile {
+			ready = k8sservice.RuntimeSlotCoordinatorReady(&pod)
+			if gatewayPort != 0 || block != 0 {
+				ready = k8sservice.RuntimeAssignmentReady(&pod, gatewayPort, block)
 			}
 		}
 		if !ready {

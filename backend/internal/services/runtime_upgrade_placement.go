@@ -19,6 +19,12 @@ func (s *RuntimeUpgradeService) filterUpgradePlacement(ctx context.Context, id i
 // liveInventory may be supplied only by the current planning call. It is never
 // cached across mutations or requests.
 func (s *RuntimeUpgradeService) filterUpgradePlacementWithInventory(ctx context.Context, id int, pods, liveInventory []models.RuntimePod) ([]models.RuntimePod, error) {
+	return s.filterUpgradePlacementAtBirth(ctx, id, pods, liveInventory, nil)
+}
+
+// A prospective birth is read-only evidence for a new placement. Existing
+// instance callers always pass nil and retain the persisted birth/data fence.
+func (s *RuntimeUpgradeService) filterUpgradePlacementAtBirth(ctx context.Context, id int, pods, liveInventory []models.RuntimePod, prospectiveBirth *time.Time) ([]models.RuntimePod, error) {
 	var item models.RuntimeUpgradeItem
 	var latestStatus string
 	row, err := s.sess.SQL().QueryRowContext(ctx, `SELECT ui.id,r.status FROM runtime_upgrade_items ui JOIN runtime_rollouts r ON r.id=ui.rollout_id WHERE ui.instance_id=? AND r.preflight_id IS NOT NULL AND r.status IN('pending','running','finished','error') ORDER BY r.id DESC LIMIT 1`, id)
@@ -72,12 +78,19 @@ func (s *RuntimeUpgradeService) filterUpgradePlacementWithInventory(ctx context.
 		}
 		inPlace = current.PreflightID == nil && proof == nil
 		var created time.Time
-		row, err = s.sess.SQL().QueryRowContext(ctx, `SELECT created_at FROM instances WHERE id=?`, id)
-		if err != nil {
-			return nil, err
-		}
-		if err = row.Scan(&created); err != nil {
-			return nil, fmt.Errorf("verify instance birth before default placement: %w", err)
+		if prospectiveBirth != nil {
+			if id != 0 {
+				return nil, fmt.Errorf("prospective placement must not override an existing instance")
+			}
+			created = prospectiveBirth.UTC()
+		} else {
+			row, err = s.sess.SQL().QueryRowContext(ctx, `SELECT created_at FROM instances WHERE id=?`, id)
+			if err != nil {
+				return nil, err
+			}
+			if err = row.Scan(&created); err != nil {
+				return nil, fmt.Errorf("verify instance birth before default placement: %w", err)
+			}
 		}
 		if created.IsZero() || current.StartedAt == nil {
 			return nil, fmt.Errorf("%w: default placement has no verified instance/rollout birth boundary", errRuntimeControlPlanePending)
@@ -362,7 +375,7 @@ func (s *RuntimeUpgradeService) legacyDefaultPlacement(ctx context.Context, r *m
 	}
 	result := []models.RuntimePod{}
 	for _, pod := range pods {
-		if !pod.KubernetesReady || stringValue(pod.KubernetesPodUID) == "" || !runtimePodEligibleForOrdinaryScheduling(pod) {
+		if !runtimeOrdinaryPodReady(pod) || stringValue(pod.KubernetesPodUID) == "" || !runtimePodEligibleForOrdinaryScheduling(pod) {
 			continue
 		}
 		if scope != nil && scope[pod.Namespace+"/"+pod.DeploymentName] == "" {

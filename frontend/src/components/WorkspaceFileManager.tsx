@@ -773,7 +773,7 @@ export function WorkspaceFileManager({
   const content = (
     <>
       <div className="border-b border-slate-200 px-3 py-2">
-        <div className="flex items-center justify-between gap-3">
+        <div className="cm-workspace-file-toolbar flex items-center justify-between gap-3">
           <span className="shrink-0 truncate px-1.5 py-1 text-sm font-bold text-slate-700">
             {translateLabel("workspaceFileManager.fileManager")}
           </span>

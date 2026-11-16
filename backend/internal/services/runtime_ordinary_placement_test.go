@@ -304,7 +304,7 @@ func TestOrdinaryPlacementMySQLAfterEmptyPoolSwitch(t *testing.T) {
 	rollouts := repository.NewRuntimeRolloutRepository(sess)
 	u := NewRuntimeUpgradeService(sess, rollouts, pods, bindings, nil, root, "")
 	oldImage := "registry/openclaw@sha256:" + strings.Repeat("a", 64)
-	for _, target := range []string{"7", "8", "b"} {
+	for _, target := range []string{"7", "8", "b", "c"} {
 		t.Run("target-"+target, func(t *testing.T) {
 			exec(`DELETE FROM instance_runtime_bindings`)
 			exec(`DELETE FROM runtime_pods`)
@@ -337,6 +337,13 @@ func TestOrdinaryPlacementMySQLAfterEmptyPoolSwitch(t *testing.T) {
 			pod.DeploymentName, live.DeploymentName = pool, pool
 			pod.ImageRef, live.ImageRef, live.ImageDigest = image, image, "sha256:"+strings.Repeat(target, 64)
 			pod.ImageDigest = &live.ImageDigest
+			if target == "c" {
+				// Ordinary placement after a committed pool switch must retain
+				// its birth/image/scope fences while accepting a healthy sibling.
+				live.State = "unhealthy"
+				live.SandboxProfile = k8s.RuntimeNFSRootlessProfile
+				live.ReadyGatewayPorts = map[int]bool{20000: true}
+			}
 			if err := pods.UpsertFromAgent(ctx, &pod); err != nil {
 				t.Fatal(err)
 			}

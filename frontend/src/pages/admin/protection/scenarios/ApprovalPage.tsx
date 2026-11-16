@@ -73,7 +73,7 @@ const ApprovalPage: React.FC = () => {
         <div className="panel">
           <div className="hero-block">
             <div className="h-eyebrow">高风险操作审批回路</div>
-            <h2 className="h-title">人因审批中心</h2>
+            <h2 className="section-title">人因审批中心</h2>
             <p className="h-subtitle">
               决策对齐引擎 触发的高风险操作审批工作流。反误导设计：默认拒绝、强制摘要、复选确认、24h 行为统计可视化。
             </p>
@@ -83,7 +83,7 @@ const ApprovalPage: React.FC = () => {
         {!FEATURES.approvalCenter && (
           <div className="panel">
             <div className="text-center py-12">
-              <div className="text-base font-semibold text-[#171212] mb-2">功能开发中</div>
+              <div className="text-base font-semibold text-[var(--cm-ink)] mb-2">功能开发中</div>
               <div className="text-sm muted">
                 审批队列 / 工作流后端尚未就绪。开通后此处将展示待审批高风险操作、SLA 倒计时、智能体身份与风险评分。
               </div>
@@ -105,8 +105,8 @@ const ApprovalPage: React.FC = () => {
                 key={idx}
                 className={
                   idx === 0
-                    ? 'rounded-2xl border-2 border-red-200 bg-gradient-to-br from-red-50 to-white p-5'
-                    : 'rounded-2xl border border-[#eadfd8] bg-white p-5'
+                    ? 'rounded-lg border-2 border-red-200 bg-[var(--cm-error-background)] p-5'
+                    : 'rounded-lg border border-[var(--cm-border)] bg-white p-5'
                 }
               >
                 <div className="flex items-start justify-between gap-4 mb-3">
@@ -123,31 +123,31 @@ const ApprovalPage: React.FC = () => {
                         <span className={`badge ${badgeClass(a.riskTone)}`}>{a.riskLabel}风险</span>
                         <span className="text-xs muted-strong">触发 {a.time}</span>
                       </div>
-                      <div className="font-bold text-lg text-[#171212] mt-1">
+                      <div className="font-bold text-lg text-[var(--cm-ink)] mt-1">
                         {a.tool} → <code className="text-base font-mono">{a.cmd}</code>
                       </div>
                       <div className="text-xs muted mt-1">{a.scope}</div>
                     </div>
                   </div>
                   <div className="text-right shrink-0">
-                    <div className="eyebrow text-[10px]">SLA 倒计时</div>
+                    <div className="eyebrow text-xs">SLA 倒计时</div>
                     <div className={`text-2xl font-bold ${a.pulse ? 'tone-red' : 'tone-orange'} font-mono`}>{a.sla}</div>
                   </div>
                 </div>
                 <div className="grid gap-3 mt-3" style={{ gridTemplateColumns: '1fr 140px 220px' }}>
-                  <div className="p-3 rounded-xl bg-[#fdf6f1] border border-[#eadfd8]">
-                    <div className="eyebrow text-[10px]">智能体身份</div>
-                    <div className="text-sm font-semibold text-[#171212] mt-1">{a.inst}</div>
+                  <div className="p-3 rounded-xl bg-[var(--cm-subtle)] border border-[var(--cm-border)]">
+                    <div className="eyebrow text-xs">智能体身份</div>
+                    <div className="text-sm font-semibold text-[var(--cm-ink)] mt-1">{a.inst}</div>
                     <div className="text-xs muted">用户 {a.user}</div>
                   </div>
-                  <div className="p-3 rounded-xl bg-white border border-[#eadfd8]">
-                    <div className="eyebrow text-[10px]">风险评分</div>
+                  <div className="p-3 rounded-xl bg-white border border-[var(--cm-border)]">
+                    <div className="eyebrow text-xs">风险评分</div>
                     <div className={`text-2xl font-bold ${toneClass(a.riskTone)} mt-1`}>{a.risk}</div>
                     <div className="text-xs muted">/100</div>
                   </div>
-                  <div className="p-3 rounded-xl bg-white border border-[#eadfd8]">
-                    <div className="eyebrow text-[10px]">24h 行为</div>
-                    <div className="text-sm font-bold text-[#171212] mt-1">
+                  <div className="p-3 rounded-xl bg-white border border-[var(--cm-border)]">
+                    <div className="eyebrow text-xs">24h 行为</div>
+                    <div className="text-sm font-bold text-[var(--cm-ink)] mt-1">
                       {a.events} 事件 · 命中 {a.rules.length} 规则
                     </div>
                     <div className="text-xs muted">{a.rules.join(', ')}</div>
@@ -156,10 +156,10 @@ const ApprovalPage: React.FC = () => {
                 <div className="flex items-center justify-end gap-2 mt-4">
                   <button className="btn-secondary btn-sm">查看详情</button>
                   <button className="btn-secondary btn-sm">转交上级</button>
-                  <button className="inline-flex items-center justify-center gap-2 rounded-2xl border border-[#16a34a] text-[#15803d] bg-gradient-to-br from-green-50 to-white px-4 py-2 text-sm font-bold hover:shadow-lg">
+                  <button className="inline-flex items-center justify-center gap-2 rounded-lg border border-[#16a34a] text-[#15803d] bg-[var(--cm-success-background)] px-4 py-2 text-sm font-bold hover:shadow-lg">
                     🛡 拒绝（推荐）
                   </button>
-                  <button className="inline-flex items-center justify-center gap-2 rounded-2xl border border-red-300 text-red-700 bg-red-50 px-4 py-2 text-sm font-bold opacity-50 cursor-not-allowed">
+                  <button className="inline-flex items-center justify-center gap-2 rounded-lg border border-red-300 text-red-700 bg-red-50 px-4 py-2 text-sm font-bold opacity-50 cursor-not-allowed">
                     ✋ 允许
                   </button>
                 </div>
@@ -173,12 +173,12 @@ const ApprovalPage: React.FC = () => {
           <h3 className="section-title-lg mb-4">5 项强制约束</h3>
           <div className="grid grid-cols-5 gap-3 text-sm">
             {PRINCIPLES.map(([n, t, d]) => (
-              <div key={n} className="p-3 rounded-xl bg-white border border-[#eadfd8]">
+              <div key={n} className="p-3 rounded-xl bg-white border border-[var(--cm-border)]">
                 <div className="flex items-center gap-2 mb-2">
                   <div className="w-6 h-6 rounded-full bg-[#dc2626] text-white text-xs font-bold flex items-center justify-center">
                     {n}
                   </div>
-                  <span className="text-sm font-semibold text-[#171212]">{t}</span>
+                  <span className="text-sm font-semibold text-[var(--cm-ink)]">{t}</span>
                 </div>
                 <div className="text-xs muted leading-5">{d}</div>
               </div>

@@ -1,0 +1,450 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-12T05:05:25.397887+00:00",
+  "title": "Design System: ClawManager · Fluent 2 Web",
+  "extensions": {
+    "baseline": {
+      "name": "Fluent 2 Web",
+      "approvedAt": "2026-11-12",
+      "status": "approved-target",
+      "sourceOfTruth": "DESIGN.md",
+      "implementationStatus": "规范已更新；不代表页面已迁移或部署",
+      "sources": [
+        "https://fluent2.microsoft.design/",
+        "https://raw.githubusercontent.com/microsoft/fluentui/master/packages/tokens/src/global/brandColors.ts",
+        "https://raw.githubusercontent.com/microsoft/fluentui/master/packages/tokens/src/alias/lightColor.ts"
+      ]
+    },
+    "colorMeta": {
+      "primary": {
+        "role": "primary",
+        "displayName": "primary",
+        "fluentAlias": "colorBrandBackground"
+      },
+      "primary-hover": {
+        "role": "primary",
+        "displayName": "primary-hover",
+        "fluentAlias": "colorBrandBackgroundHover"
+      },
+      "primary-pressed": {
+        "role": "primary",
+        "displayName": "primary-pressed",
+        "fluentAlias": "colorBrandBackgroundPressed"
+      },
+      "primary-selected": {
+        "role": "primary",
+        "displayName": "primary-selected",
+        "fluentAlias": "colorBrandBackgroundSelected"
+      },
+      "on-primary": {
+        "role": "neutral",
+        "displayName": "on-primary",
+        "fluentAlias": "colorNeutralForegroundOnBrand"
+      },
+      "selected": {
+        "role": "primary",
+        "displayName": "selected",
+        "fluentAlias": "colorBrandBackground2"
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "ink",
+        "fluentAlias": "colorNeutralForeground1"
+      },
+      "text": {
+        "role": "neutral",
+        "displayName": "text",
+        "fluentAlias": "colorNeutralForeground2"
+      },
+      "muted": {
+        "role": "neutral",
+        "displayName": "muted",
+        "fluentAlias": "colorNeutralForeground3"
+      },
+      "disabled": {
+        "role": "neutral",
+        "displayName": "disabled",
+        "fluentAlias": "colorNeutralForegroundDisabled"
+      },
+      "canvas": {
+        "role": "neutral",
+        "displayName": "canvas",
+        "fluentAlias": "colorNeutralBackground3"
+      },
+      "surface": {
+        "role": "neutral",
+        "displayName": "surface",
+        "fluentAlias": "colorNeutralBackground1"
+      },
+      "subtle": {
+        "role": "neutral",
+        "displayName": "subtle",
+        "fluentAlias": "colorNeutralBackground2"
+      },
+      "hover": {
+        "role": "neutral",
+        "displayName": "hover",
+        "fluentAlias": "colorNeutralBackground1Hover"
+      },
+      "pressed": {
+        "role": "neutral",
+        "displayName": "pressed",
+        "fluentAlias": "colorNeutralBackground1Pressed"
+      },
+      "border": {
+        "role": "neutral",
+        "displayName": "border",
+        "fluentAlias": "colorNeutralStroke1"
+      },
+      "border-subtle": {
+        "role": "neutral",
+        "displayName": "border-subtle",
+        "fluentAlias": "colorNeutralStroke2"
+      },
+      "border-accessible": {
+        "role": "neutral",
+        "displayName": "border-accessible",
+        "fluentAlias": "colorNeutralStrokeAccessible"
+      },
+      "success": {
+        "role": "status",
+        "displayName": "success",
+        "fluentAlias": "colorStatusSuccessForeground1"
+      },
+      "success-background": {
+        "role": "status",
+        "displayName": "success-background",
+        "fluentAlias": "colorStatusSuccessBackground1"
+      },
+      "warning": {
+        "role": "status",
+        "displayName": "warning",
+        "fluentAlias": "colorStatusWarningForeground1"
+      },
+      "warning-background": {
+        "role": "status",
+        "displayName": "warning-background",
+        "fluentAlias": "colorStatusWarningBackground1"
+      },
+      "error": {
+        "role": "status",
+        "displayName": "error",
+        "fluentAlias": "colorStatusDangerForeground1"
+      },
+      "error-background": {
+        "role": "status",
+        "displayName": "error-background",
+        "fluentAlias": "colorStatusDangerBackground1"
+      },
+      "data-blue": {
+        "role": "data",
+        "displayName": "data-blue",
+        "source": "CM 数据可视化扩展"
+      },
+      "data-blue-text": {
+        "role": "data",
+        "displayName": "data-blue-text",
+        "source": "CM 数据可视化扩展"
+      },
+      "data-blue-fill": {
+        "role": "data",
+        "displayName": "data-blue-fill",
+        "source": "CM 数据可视化扩展"
+      },
+      "data-cost": {
+        "role": "data",
+        "displayName": "data-cost",
+        "source": "CM 数据可视化扩展"
+      },
+      "data-busy": {
+        "role": "data",
+        "displayName": "data-busy",
+        "source": "CM 数据可视化扩展"
+      },
+      "data-idle": {
+        "role": "data",
+        "displayName": "data-idle",
+        "source": "CM 数据可视化扩展"
+      },
+      "data-sleeping": {
+        "role": "data",
+        "displayName": "data-sleeping",
+        "source": "CM 数据可视化扩展"
+      },
+      "data-starting": {
+        "role": "data",
+        "displayName": "data-starting",
+        "source": "CM 数据可视化扩展"
+      },
+      "data-failed": {
+        "role": "data",
+        "displayName": "data-failed",
+        "source": "CM 数据可视化扩展"
+      },
+      "data-offline": {
+        "role": "data",
+        "displayName": "data-offline",
+        "source": "CM 数据可视化扩展"
+      },
+      "data-unknown": {
+        "role": "data",
+        "displayName": "data-unknown",
+        "source": "CM 数据可视化扩展"
+      },
+      "heat-0": {
+        "role": "data",
+        "displayName": "heat-0",
+        "source": "CM 数据可视化扩展"
+      },
+      "heat-1": {
+        "role": "data",
+        "displayName": "heat-1",
+        "source": "CM 数据可视化扩展"
+      },
+      "heat-2": {
+        "role": "data",
+        "displayName": "heat-2",
+        "source": "CM 数据可视化扩展"
+      },
+      "heat-3": {
+        "role": "data",
+        "displayName": "heat-3",
+        "source": "CM 数据可视化扩展"
+      }
+    },
+    "typographyMeta": {
+      "brand": {
+        "displayName": "brand",
+        "purpose": "品牌名"
+      },
+      "title": {
+        "displayName": "title",
+        "purpose": "区域标题"
+      },
+      "subtitle": {
+        "displayName": "subtitle",
+        "purpose": "欢迎语及复杂弹窗标题"
+      },
+      "page-title": {
+        "displayName": "page-title",
+        "purpose": "必要的详情标题"
+      },
+      "body": {
+        "displayName": "body",
+        "purpose": "正文、表格、按钮和字段"
+      },
+      "body-strong": {
+        "displayName": "body-strong",
+        "purpose": "重要正文"
+      },
+      "label": {
+        "displayName": "label",
+        "purpose": "辅助标签和图例"
+      },
+      "metric": {
+        "displayName": "metric",
+        "purpose": "重要总量与当前值"
+      }
+    },
+    "shadows": [
+      {
+        "name": "shadow2",
+        "value": "0 0 2px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.14)",
+        "purpose": "交互卡片基础层"
+      },
+      {
+        "name": "shadow4",
+        "value": "0 0 2px rgba(0,0,0,0.12), 0 2px 4px rgba(0,0,0,0.14)",
+        "purpose": "卡片悬停"
+      },
+      {
+        "name": "shadow8",
+        "value": "0 0 2px rgba(0,0,0,0.12), 0 4px 8px rgba(0,0,0,0.14)",
+        "purpose": "局部 Popover"
+      },
+      {
+        "name": "shadow16",
+        "value": "0 0 2px rgba(0,0,0,0.12), 0 8px 16px rgba(0,0,0,0.14)",
+        "purpose": "菜单与选择列表"
+      },
+      {
+        "name": "shadow28",
+        "value": "0 0 8px rgba(0,0,0,0.12), 0 14px 28px rgba(0,0,0,0.14)",
+        "purpose": "覆盖式抽屉"
+      },
+      {
+        "name": "shadow64",
+        "value": "0 0 8px rgba(0,0,0,0.12), 0 32px 64px rgba(0,0,0,0.14)",
+        "purpose": "模态 Dialog"
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "shell-desktop-existing-behavior",
+        "value": "768px"
+      },
+      {
+        "name": "team-workspace-single-container",
+        "value": "1248px"
+      },
+      {
+        "name": "team-workspace-dual-container",
+        "value": "1540px"
+      }
+    ],
+    "radiusAliases": {
+      "control": "borderRadiusMedium",
+      "panel": "borderRadiusXLarge",
+      "dialog": "borderRadius2XLarge",
+      "small": "borderRadiusSmall",
+      "circular": "borderRadiusCircular"
+    },
+    "motion": {
+      "durationFaster": "100ms",
+      "durationFast": "150ms",
+      "durationNormal": "200ms",
+      "durationSlow": "300ms",
+      "curveEasyEase": "cubic-bezier(0.33,0,0.67,1)",
+      "curveDecelerateMid": "cubic-bezier(0,0,0,1)",
+      "reducedMotion": "关闭非必要动画，直接呈现最终状态；后台暂停持续动画"
+    },
+    "focus": {
+      "token": "--cm-focus",
+      "compositeSearch": "外层统一蓝色焦点提示，内部输入不叠加轮廓",
+      "outline": "2px solid #0f6cbd",
+      "outlineOffset": "2px",
+      "isolation": "0 0 0 2px #ffffff",
+      "forcedColors": "使用系统色，边框与焦点始终可见"
+    },
+    "previewScope": "以下仅为文档控件样例，不是已部署页面或真实业务数据",
+    "unifiedInstanceCreation": {
+      "approvedAt": "2026-11-12",
+      "sourceOfTruth": "DESIGN.md",
+      "layout": "single-page-form-and-live-preview",
+      "batchToggle": "below-mode-left",
+      "batchMode": "lite-only",
+      "defaultTypes": [
+        "openclaw",
+        "hermes",
+        "opencode",
+        "deepseek-harness"
+      ],
+      "owner": "optional",
+      "imageSelection": "automatic-enabled-setting",
+      "liteResources": "hidden",
+      "advancedOrder": [
+        "import",
+        "environment",
+        "skills"
+      ],
+      "environmentPreview": "key-value-columns-masked-secrets",
+      "partialCreation": "retain-existing-instance-and-retry-only-failed-operation"
+    }
+  },
+  "components": [
+    {
+      "name": "主要动作",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Fluent Web 蓝色；含悬停、按下、焦点和禁用状态。",
+      "html": "<button type=\"button\" class=\"ds-primary\">创建实例</button>",
+      "css": ".ds-primary{font:14px/20px \"Segoe UI\", -apple-system, BlinkMacSystemFont, \"PingFang SC\", \"Microsoft YaHei\", sans-serif;box-sizing:border-box;height:32px;padding:0 12px;border:1px solid transparent;border-radius:4px;background:#0f6cbd;color:#fff;cursor:pointer}.ds-primary:hover{background:#115ea3}.ds-primary:active{background:#0c3b5e}.ds-primary:focus-visible{outline:2px solid #0f6cbd;outline-offset:2px;box-shadow:0 0 0 2px #fff;}.ds-primary:disabled{background:#f0f0f0;color:#bdbdbd;cursor:default}"
+    },
+    {
+      "name": "次要动作",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "独立的批量创建入口，与筛选分开。",
+      "html": "<button type=\"button\" class=\"ds-secondary\">批量创建</button>",
+      "css": ".ds-secondary{font:14px/20px \"Segoe UI\", -apple-system, BlinkMacSystemFont, \"PingFang SC\", \"Microsoft YaHei\", sans-serif;box-sizing:border-box;height:32px;padding:0 12px;border:1px solid #d1d1d1;border-radius:4px;background:#fff;color:#242424;cursor:pointer}.ds-secondary:hover{background:#f5f5f5}.ds-secondary:active{background:#e0e0e0}.ds-secondary:focus-visible{outline:2px solid #0f6cbd;outline-offset:2px;box-shadow:0 0 0 2px #fff;}"
+    },
+    {
+      "name": "展开后的搜索",
+      "kind": "input",
+      "refersTo": "field",
+      "description": "只预览展开后的输入；产品默认仍是图标入口。",
+      "html": "<label class=\"ds-search\"><span>搜索实例</span><input type=\"search\" placeholder=\"名称或 ID\" /></label>",
+      "css": ".ds-search{font:14px/20px \"Segoe UI\", -apple-system, BlinkMacSystemFont, \"PingFang SC\", \"Microsoft YaHei\", sans-serif;box-sizing:border-box;display:inline-flex;align-items:center;gap:8px;color:#424242}.ds-search input{font:14px/20px \"Segoe UI\", -apple-system, BlinkMacSystemFont, \"PingFang SC\", \"Microsoft YaHei\", sans-serif;box-sizing:border-box;height:32px;padding:0 12px;border:1px solid #616161;border-radius:4px;background:#fff;color:#242424}.ds-search input::placeholder{color:#616161}.ds-search input:focus-visible{outline:2px solid #0f6cbd;outline-offset:2px;box-shadow:0 0 0 2px #fff;}"
+    },
+    {
+      "name": "导航选中态",
+      "kind": "navigation",
+      "refersTo": "navigation-item-selected",
+      "description": "浅蓝表面、强调文字与选中指示。",
+      "html": "<a class=\"ds-nav\" href=\"#workspace\" aria-current=\"page\">Workspace</a>",
+      "css": ".ds-nav{font:14px/20px \"Segoe UI\", -apple-system, BlinkMacSystemFont, \"PingFang SC\", \"Microsoft YaHei\", sans-serif;box-sizing:border-box;position:relative;display:flex;align-items:center;height:40px;width:200px;padding:0 12px;border-radius:4px;background:#ebf3fc;color:#0f6cbd;font-weight:600;text-decoration:none}.ds-nav:before{content:\"\";position:absolute;left:0;top:10px;height:20px;width:3px;border-radius:2px;background:#0f6cbd}.ds-nav:focus-visible{outline:2px solid #0f6cbd;outline-offset:2px;box-shadow:0 0 0 2px #fff;}"
+    },
+    {
+      "name": "运行状态",
+      "kind": "badge",
+      "refersTo": "table-row",
+      "description": "点与文字共同表达状态，不只依赖颜色。",
+      "html": "<span class=\"ds-status\"><span aria-hidden=\"true\">●</span>运行中</span>",
+      "css": ".ds-status{font:14px/20px \"Segoe UI\", -apple-system, BlinkMacSystemFont, \"PingFang SC\", \"Microsoft YaHei\", sans-serif;box-sizing:border-box;display:inline-flex;gap:8px;align-items:center;color:#0e700e;background:#f1faf1;padding:2px 8px;border-radius:2px}.ds-status>span{font-size:10px}"
+    },
+    {
+      "name": "轻层级面板",
+      "kind": "panel",
+      "refersTo": "panel",
+      "description": "白色表面、8px 圆角；交互卡片按需要使用 shadow2。",
+      "html": "<section class=\"ds-panel\" aria-labelledby=\"ds-panel-title\"><h2 id=\"ds-panel-title\">继续工作</h2><p>暂无最近使用记录</p></section>",
+      "css": ".ds-panel{font:14px/20px \"Segoe UI\", -apple-system, BlinkMacSystemFont, \"PingFang SC\", \"Microsoft YaHei\", sans-serif;box-sizing:border-box;background:#fff;color:#424242;border:1px solid #d1d1d1;border-radius:8px;padding:16px;min-width:280px}.ds-panel h2{font-size:16px;line-height:22px;font-weight:600;margin:0 0 16px;color:#242424}.ds-panel p{margin:0;color:#616161}"
+    },
+    {
+      "name": "单行身份表格",
+      "kind": "table",
+      "refersTo": "table-row",
+      "description": "默认 44px 行高；名称、ID 同行，保留原生表格语义。",
+      "html": "<div class=\"ds-table-wrap\"><table class=\"ds-table\"><caption>实例列表（文档示例）</caption><thead><tr><th scope=\"col\">实例</th><th scope=\"col\">状态</th></tr></thead><tbody><tr><td><a href=\"#example-agent\">研发助手</a> <span>inst-example</span></td><td>运行中</td></tr></tbody></table></div>",
+      "css": ".ds-table-wrap{overflow-x:auto}.ds-table{font:14px/20px \"Segoe UI\", -apple-system, BlinkMacSystemFont, \"PingFang SC\", \"Microsoft YaHei\", sans-serif;box-sizing:border-box;width:100%;border-collapse:collapse;color:#424242;background:#fff}.ds-table caption{text-align:left;padding:8px 12px;color:#616161}.ds-table th,.ds-table td{height:44px;padding:0 12px;text-align:left;white-space:nowrap;border-bottom:1px solid #e0e0e0}.ds-table th{background:#fafafa;font-weight:600;color:#242424}.ds-table td span{color:#616161;font-size:12px}.ds-table a{color:#115ea3}.ds-table a:focus-visible{outline:2px solid #0f6cbd;outline-offset:2px;box-shadow:0 0 0 2px #fff;}"
+    }
+  ],
+  "narrative": {
+    "northStar": "Fluent 2 Web · 清晰、轻盈、有层次的 Agent 工作台",
+    "overview": "2026-11-12 用户指定的 CM 整体目标设计语言。中性表面、Web 蓝交互、清晰字体层级、4px 间距、轻层级与功能动效共同组织工作。旧 08 方案归档；本文及 DESIGN.md 不构成已迁移或已部署声明。",
+    "keyCharacteristics": [
+      "全平台共享语义 Token、组件状态与浮层层级。",
+      "保留真实品牌图标、32px Agent 图标和鲜明可读的数据图表。",
+      "保留单行表格、紧凑工具栏、侧栏边缘折叠和现有业务语义。",
+      "Dashboard 优先继续工作及运行概览；Token 与费用用蓝橙双轴平滑曲线同时显示，用量卡片独立切换时间并局部加载；移除主卡片解释段落，保留币种、单位与小计标识。三个资源表盘、Agent 环图分别表达，环图中心展示运行数量 / 总数量。",
+      "实例工作台采用实例列表、Agent、工作区三栏，默认比例 1.2:6.8:2；两条分隔线可拖动与键盘调宽。名称支持内联重命名，移除返回与元信息行；实例列表支持真实图标、原生类型状态图标（运行轻呼吸、停止灰化熄灭、故障仅红色感叹号缩放且无晃动红圈、休眠睡姿与 Zz）、中性行背景、柔和蓝色高亮与 1px 渐变选中轮廓、搜索、分页与安全切换；实例列表标题栏仅保留隐藏入口，移除重复的全屏或展开管理按钮，隐藏后在 Agent 标题栏的实例状态后提供恢复列表按钮，与名称、状态同行，不单独占用一行，不依赖原生页面加载或实例运行状态，全屏时仍可达并在恢复时退出全屏及返回列表焦点；实例列表顶部依次提供“创建实例”和“实例管理”，空列表主窗口也提供创建提示及按钮，切换保留无凭据列表快照并为内容提供短暂过渡；普通实例切换不因运行状态或访问元数据重载整页，仅实际隔离预览绑定文档分区，预览后的跨实例隔离继续保留。窄屏用弹窗选择实例。顶部技能管理弹窗与运行管理菜单保留。"
+    ],
+    "rules": [
+      {
+        "name": "Semantic Tokens",
+        "body": "使用 Fluent 2 Web 语义映射；CM 图表扩展独立命名，不冒充微软默认 Token。",
+        "section": "colors"
+      },
+      {
+        "name": "Readable Density",
+        "body": "正文 14/20、辅助 12/16；通过布局和内容优先级控制密度，不缩字或裁切页面。",
+        "section": "typography"
+      },
+      {
+        "name": "Stable Workflows",
+        "body": "不改变 API、权限、路由、生命周期和真实刷新机制；表格局部滚动。",
+        "section": "layout"
+      },
+      {
+        "name": "Meaningful Elevation",
+        "body": "浅层交互卡片与高层浮层分级，不给所有面板叠加浓重阴影。",
+        "section": "elevation"
+      },
+      {
+        "name": "Accessible Data",
+        "body": "单位、时间范围、图例与文字替代齐全；缺测不是零，运行中不是执行中。",
+        "section": "components"
+      }
+    ],
+    "dos": [
+      "统一主题与公共组件后再逐页迁移。",
+      "保留真实 Logo 与 Agent 图标、完整键盘路径及可见焦点。",
+      "核对数据口径、无障碍对比度、缩放及减少动态效果。"
+    ],
+    "donts": [
+      "不把文档更新当作全站上线。",
+      "不混用旧 08 视觉规则、紫色主题或装饰性全屏玻璃。",
+      "不以预览常量、缺测补零或循环动画伪造运行情况。"
+    ]
+  }
+}

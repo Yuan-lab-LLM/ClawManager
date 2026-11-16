@@ -114,3 +114,15 @@ func TestRepositoriesDoNotCreateSchema(t *testing.T) {
 		}
 	}
 }
+
+func TestWorkspaceObservationHistoryBackupPolicy(t *testing.T) {
+	policy, ok := Policy("workspace_dashboard_observations")
+	if !ok || policy.Category != "instances" || policy.Classification != "secret" || policy.BackupStrategy != "mysql_dump" || policy.RestoreStrategy != "normalize" {
+		t.Fatalf("real observation history must survive encrypted data-only backup: %+v", policy)
+	}
+	row := team.Row{"user_id": team.Value("7"), "bucket_start": team.Value("2026-11-12 00:00:00"), "observed_at": team.Value("2026-11-12 00:00:01.123456"), "snapshot_json": team.Value(`{"total":2,"running":1,"sleeping":1,"eligible_slots":null}`)}
+	change, err := NormalizeDataRow(SQLTable{Name: policy.Name}, row, time.Now().UTC())
+	if err != nil || change.Reason != "preserved" || change.Quarantined || !reflect.DeepEqual(change.Before, row) || !reflect.DeepEqual(change.After, row) {
+		t.Fatalf("history must be preserved without replaying execution state: %+v %v", change, err)
+	}
+}

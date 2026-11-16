@@ -222,3 +222,58 @@ func TestNFSWorkspaceOperationLockRealRootSquashRuntime(t *testing.T) {
 	run("0")
 	t.Log("root-squash NFS: actual Runtime lock denied while CM held transferred FD, admitted after CM closed it")
 }
+
+func TestNFSWorkspaceOperationLockAcceptsRuntimeTraversableParent(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("requires credential switching")
+	}
+	for _, tc := range []struct {
+		name               string
+		parent, operations os.FileMode
+		allowed            bool
+	}{
+		{"private legacy", 0700, 0700, true}, {"Runtime capsules parent", 0711, 0700, true},
+		{"group writable parent", 0770, 0700, false}, {"world writable parent", 0777, 0700, false},
+		{"enumerable parent", 0755, 0700, false}, {"traversable private locks", 0711, 0711, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			base, err := os.MkdirTemp("/tmp", "cm-operation-parent-")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer os.RemoveAll(base)
+			if err = os.Chown(base, 10001, 10001); err != nil {
+				t.Fatal(err)
+			}
+			os.Chmod(base, 0700)
+			parent := filepath.Join(base, ".clawmanager-upgrades")
+			operations := filepath.Join(parent, "operations")
+			for _, entry := range []struct {
+				path string
+				mode os.FileMode
+			}{{parent, tc.parent}, {operations, tc.operations}} {
+				if err = os.Mkdir(entry.path, entry.mode); err != nil {
+					t.Fatal(err)
+				}
+				os.Chown(entry.path, 10001, 10001)
+				os.Chmod(entry.path, entry.mode)
+			}
+			service := &RuntimeUpgradeService{workspaceRoot: base}
+			ConfigureRuntimeUpgradeNFSIO(service, "nfs-rootless-v1")
+			release, err := service.lockWorkspaceOperations([]int{141})
+			if tc.allowed {
+				if err != nil {
+					t.Fatalf("valid shared Runtime layout rejected: %v", err)
+				}
+				defer release()
+				info, err := os.Stat(filepath.Join(operations, "instance-141.lock"))
+				if err != nil || info.Mode().Perm() != 0600 {
+					t.Fatal("lock privacy changed")
+				}
+			} else if err == nil {
+				release()
+				t.Fatal("unsafe management layout accepted")
+			}
+		})
+	}
+}

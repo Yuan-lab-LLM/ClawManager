@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"clawreef/internal/models"
+	k8sservice "clawreef/internal/services/k8s"
 )
 
 func (c *slotRuntimeAgentClient) reservedGatewayPorts(ctx context.Context, pod models.RuntimePod) (map[int]struct{}, error) {
@@ -14,10 +15,15 @@ func (c *slotRuntimeAgentClient) reservedGatewayPorts(ctx context.Context, pod m
 }
 
 func (c *slotRuntimeAgentClient) reservedGatewayPortsInspected(ctx context.Context, pod models.RuntimePod, requireCapacityProof bool) (map[int]struct{}, error) {
+	return c.inspectReservedGatewayPorts(ctx, pod, requireCapacityProof, false)
+}
+
+// Workspace observations must not clear or persist scheduler audit quarantine.
+func (c *slotRuntimeAgentClient) inspectReservedGatewayPorts(ctx context.Context, pod models.RuntimePod, requireCapacityProof, readOnly bool) (map[int]struct{}, error) {
 	if pod.AgentEndpoint == nil || pod.PodUID == nil || pod.Capacity < 1 {
 		return nil, fmt.Errorf("registered slot target identity is required")
 	}
-	uid, err := c.targetPodUID(ctx, *pod.AgentEndpoint)
+	uid, err := c.targetPodUIDForSlot(ctx, *pod.AgentEndpoint, 0, 0)
 	if err != nil || uid != *pod.PodUID {
 		return nil, fmt.Errorf("slot reservation target Pod identity changed")
 	}
@@ -68,7 +74,7 @@ func (c *slotRuntimeAgentClient) reservedGatewayPortsInspected(ctx context.Conte
 		quarantine.PodError = ""
 		changed = true
 	}
-	if prior != nil && changed {
+	if prior != nil && changed && !readOnly {
 		quarantine.InspectedAt = time.Now().UTC()
 		// Do not retry stale evidence after a CAS conflict: newer quarantine wins.
 		if err := c.writeSlotAudit(inspectionCtx, pod, prior, quarantine); err != nil {
@@ -84,6 +90,21 @@ func (c *slotRuntimeAgentClient) reservedGatewayPortsInspected(ctx context.Conte
 	for _, observation := range observations {
 		if !observation.free() {
 			ports[observation.Port] = struct{}{}
+		}
+	}
+	// A stale runtime idle response cannot make a restarting container allocatable.
+	current, err := c.containerStopPod(ctx, *pod.AgentEndpoint, uid)
+	if err != nil {
+		return nil, err
+	}
+	if current.Labels["clawmanager.io/sandbox-profile"] == k8sservice.RuntimeNFSRootlessProfile {
+		if !k8sservice.RuntimeSlotCoordinatorReady(current) {
+			return nil, fmt.Errorf("runtime slot coordinator is not ready")
+		}
+		for _, observation := range observations {
+			if !k8sservice.RuntimeAssignmentReady(current, observation.Port, observation.Block) {
+				ports[observation.Port] = struct{}{}
+			}
 		}
 	}
 	return ports, nil

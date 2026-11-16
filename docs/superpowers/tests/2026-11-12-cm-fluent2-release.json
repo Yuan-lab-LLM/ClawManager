@@ -1,0 +1,42 @@
+{
+  "source_commit": "685030618de1c9b71c51b0fb375ae3a2d4241beb",
+  "design_migration_commit": "ee7349f0249cbfd2adc52faeb3187653eff39a3c",
+  "built_on": "10.130.81.54",
+  "image": "clawmanager.local/clawmanager@sha256:eb8102549c2a9a75d8aab7f7771ac1d94d24a07b521bc40fa4588904e17272e6",
+  "generation": 19,
+  "ready_replicas": 1,
+  "url": "https://10.130.81.54:30443/dashboard",
+  "verified_frontend_assets": 161,
+  "source_manifest_sha256": "b2f42c3e98dec0cebb4dc6e698ebf1ac9649ae7477141398314a951a68e4cb65",
+  "runtime_config_preserved": true,
+  "other_deployment_images_unchanged": true,
+  "deployed_browser_viewports": [
+    {
+      "width": 1440,
+      "height": 900
+    },
+    {
+      "width": 1280,
+      "height": 800
+    },
+    {
+      "width": 390,
+      "height": 844
+    }
+  ],
+  "page_errors": [],
+  "instances": 56,
+  "state_counts": {
+    "busy": 0,
+    "failed": 0,
+    "idle": 0,
+    "offline": 0,
+    "running": 56,
+    "sleeping": 0,
+    "starting": 0,
+    "unknown": 0
+  },
+  "health_http": 200,
+  "owned_test_vite_stopped": true,
+  "evidence_root": "/root/cm-fluent2-20261112/release-685030618de1"
+}

@@ -1,3 +1,4 @@
+import FilterSelect from "../../components/FilterSelect";
 import { useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import axios from "axios";
@@ -127,14 +128,11 @@ export default function RuntimeMaintenanceDialog({ onClose, onChanged, onViewSch
       {section !== "manage" && !operation && <form id="runtime-create-pod" aria-label={t(section === "scale-in" ? "runtimePods.scaleIn" : "runtimePods.addPods")} className="space-y-4" onSubmit={event => { event.preventDefault(); if (section === "create") void create(); else void previewScaleIn(); }}>
         <p className="text-xs leading-5 text-slate-500">{t(section === "scale-in" ? "runtimePods.scaleInHelp" : "runtimePods.scaleHelp")}</p>
         <div className="grid gap-3 sm:grid-cols-2">
-          <label className="space-y-1 text-xs"><span>{t("runtimePods.typeLabel")}</span>
-            <select aria-label={t("runtimePods.runtimeType")} className={`${inputClass} w-full`} value={type} disabled={busy} onChange={event => {
-              currentType.current = event.target.value as RuntimeType | ""; setType(currentType.current); resetPlan(); setError(undefined); setNotice(undefined);
-            }}>
-              <option value="">{t("runtimePods.chooseRuntimeType")}</option>
-              {runtimeTypes.map(value => <option key={value} value={value} disabled={!!scaleOptions.data && !scaleOptions.data.items.some(item => item.runtime_type === value)}>{formatInstanceType(value)}</option>)}
-            </select>
-          </label>
+          <div className="space-y-1 text-xs"><span>{t("runtimePods.typeLabel")}</span>
+            <FilterSelect label={t("runtimePods.runtimeType")} value={type} disabled={busy} onChange={value => {
+              currentType.current = value as RuntimeType | ""; setType(currentType.current); resetPlan(); setError(undefined); setNotice(undefined);
+            }} options={[{value:"",label:t("runtimePods.chooseRuntimeType")}, ...runtimeTypes.map(value => ({value,label:formatInstanceType(value),disabled:!!scaleOptions.data && !scaleOptions.data.items.some(item => item.runtime_type === value)}))]} />
+          </div>
           <label className="space-y-1 text-xs"><span>{t(section === "scale-in" ? "runtimePods.removedPods" : "runtimePods.additionalPods")}</span><input aria-label={t(section === "scale-in" ? "runtimePods.removedPods" : "runtimePods.additionalPods")} className={`${inputClass} w-full`} type="number" min={minPods} max={maxPods} step={1} required value={podCount} disabled={busy} onChange={event => { setPodCount(event.target.value); resetPlan(); setError(undefined); }} /></label>
         </div>
         {selected && section === "create" && <p className="rounded bg-slate-50 p-3 text-xs leading-5 text-slate-600">{t("runtimePods.scaleSummary", { slots: selected.slot_count, count: validCount ? count : "—", added: validCount ? count * selected.slot_count : "—", total: validCount ? selected.replicas + count : "—" })}</p>}

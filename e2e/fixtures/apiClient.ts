@@ -409,8 +409,14 @@ export async function listGatewayModels(
   const response = await request.get(`${env.backendUrl}/gateway/llm/models`, {
     headers: bearer(accessToken),
   });
-  const body = await expectOkEnvelope<{ items: GatewayModelSummary[] }>(response);
-  return body.items ?? [];
+  if (!response.ok()) {
+    throw new Error(`Gateway model list failed: HTTP ${response.status()}`);
+  }
+  const body = await response.json() as { object: string; data: GatewayModelSummary[] };
+  if (body.object !== "list" || !Array.isArray(body.data)) {
+    throw new Error("Gateway model list is not an OpenAI model list");
+  }
+  return body.data;
 }
 
 export async function gatewayChatCompletion(

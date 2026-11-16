@@ -235,7 +235,7 @@ func (s *RuntimeManagementService) scaleInPlan(ctx context.Context, req RuntimeP
 	if journal.Plan.Replicas < 1 {
 		return block(errors.New("scale-in must retain at least one default Runtime Pod"))
 	}
-	if err = s.scaleInAdmission(ctx, s.sess); err != nil {
+	if err = s.scaleInAdmission(ctx, s.sess, req.RuntimeType); err != nil {
 		return block(err)
 	}
 	native, err := kube.InspectRuntimeScaleInPods(ctx, target, snapshot)
@@ -312,21 +312,15 @@ func (s *RuntimeManagementService) ScaleInPreflight(ctx context.Context, req Run
 	}
 	return &journal.Plan, nil
 }
-func (s *RuntimeManagementService) scaleInAdmission(ctx context.Context, tx db.Session) error {
-	for _, query := range []string{"SELECT COUNT(*) FROM runtime_rollouts WHERE status IN ('pending','running')", "SELECT COUNT(*) FROM runtime_management_operations WHERE status IN ('pending','processing','starting','needs_attention')", "SELECT COUNT(*) FROM runtime_upgrade_items ui JOIN runtime_rollouts r ON r.id=ui.rollout_id WHERE ui.recovery_status IN ('pending','starting','retrying','needs_attention') AND ui.state NOT IN ('verified','gateway_verified') AND NOT EXISTS (SELECT 1 FROM runtime_upgrade_items newer JOIN runtime_rollouts nr ON nr.id=newer.rollout_id WHERE newer.instance_id=ui.instance_id AND nr.id>r.id AND nr.status IN ('pending','running','finished','error'))"} {
-		var n int
-		row, err := tx.SQL().QueryRowContext(ctx, query)
-		if err == nil {
-			err = row.Scan(&n)
-		}
-		if err != nil {
-			return err
-		}
-		if n > 0 {
-			return errors.New("Runtime upgrade, recovery or scheduling operation is active")
-		}
+func (s *RuntimeManagementService) scaleInAdmission(ctx context.Context, tx db.Session, runtimeTypes ...string) error {
+	return s.scaleInAdmissionExcept(ctx, tx, "", runtimeTypes...)
+}
+func (s *RuntimeManagementService) scaleInAdmissionExcept(ctx context.Context, tx db.Session, operationID string, runtimeTypes ...string) error {
+	runtimeType := ""
+	if len(runtimeTypes) > 0 {
+		runtimeType = runtimeTypes[0]
 	}
-	return nil
+	return repository.CheckRuntimeControlAdmission(ctx, tx, runtimeType, operationID)
 }
 func (s *RuntimeManagementService) ScaleInSubmit(ctx context.Context, req RuntimePodScaleInRequest, actor *int) (*RuntimeManagementOperation, error) {
 	journal, err := s.scaleInPlan(ctx, req)
@@ -343,6 +337,9 @@ func (s *RuntimeManagementService) ScaleInSubmit(ctx context.Context, req Runtim
 }
 
 func (s *RuntimeManagementService) submitScaleInJournal(ctx context.Context, journal *runtimePodScaleInJournal, actor *int) (*RuntimeManagementOperation, error) {
+	if journal.AutomaticIdle && (journal.Plan.Replicas < 1 || journal.Protection.Replicas < 1) {
+		return nil, errRuntimeIdleMinimumCapacity
+	}
 	if s.guards == nil {
 		return nil, errors.New("instance mutation reservation unavailable")
 	}
@@ -371,7 +368,7 @@ func (s *RuntimeManagementService) submitScaleInJournal(ctx context.Context, jou
 		if err := repository.LockRuntimeManagementAdmission(ctx, tx); err != nil {
 			return err
 		}
-		if err := s.scaleInAdmission(ctx, tx); err != nil {
+		if err := s.scaleInAdmission(ctx, tx, journal.RuntimeType); err != nil {
 			return err
 		}
 		if journal.AutomaticIdle {

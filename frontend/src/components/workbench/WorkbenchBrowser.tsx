@@ -1,5 +1,5 @@
 import { useWorkbenchServices } from "./WorkbenchServices";
-import { allowBrowserInstance, supportsCredentiallessPreview, trustedPreviewViewer, type BrowserOriginMetadata } from "../../lib/browserOrigin";
+import { allowBrowserInstance, allowBrowserPreview, supportsCredentiallessPreview, trustedPreviewViewer, type BrowserOriginMetadata } from "../../lib/browserOrigin";
 import type { WorkbenchPreview } from "../../types/workbench";
 import { useRef, useState } from "react";
 import { ExternalLink, Globe, RefreshCw, ArrowRight, ShieldAlert } from "lucide-react";
@@ -47,7 +47,9 @@ export function WorkbenchBrowser({
   if (rendered && !activated) setActivated(true);
   const isolated = browserOrigin?.browser_origin_mode === "chrome-single-host" || tab.credentialless === true;
   const supported = !isolated || supportsCredentiallessPreview();
-  const scopeAllowed = allowBrowserInstance(instanceId, browserOrigin);
+  const scopeAllowed = isolated && supported && tab.credentialless === true && tab.url && activated && !metadataPending
+    ? allowBrowserPreview(instanceId, browserOrigin)
+    : allowBrowserInstance(instanceId, browserOrigin);
   const viewerUrl = isolated ? trustedPreviewViewer(tab.viewer_url, browserOrigin) : tab.url;
   const previewAllowed = !metadataPending && scopeAllowed && supported && (!isolated || tab.credentialless === true);
   const { frameUrl, checkingCertificate, certificateConfirmationRequired, certificateOrigin, confirmCertificate } =

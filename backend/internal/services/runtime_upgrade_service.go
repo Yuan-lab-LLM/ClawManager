@@ -303,6 +303,15 @@ func (s *RuntimeUpgradeService) Preflight(ctx context.Context, req RuntimeUpgrad
 	if err != nil {
 		return nil, err
 	}
+	var sourceDeploymentProofs []k8s.RuntimeRolloutTarget
+	if source, ok := s.deployments.(interface {
+		RuntimeUpgradeSourceProofs(context.Context, string, map[string]string) ([]k8s.RuntimeRolloutTarget, error)
+	}); ok && req.RecoveryMode == "" && req.UpgradeLabRunID == nil {
+		sourceDeploymentProofs, err = source.RuntimeUpgradeSourceProofs(ctx, RuntimeTypeOpenClaw, sourceImages)
+		if err != nil {
+			return nil, err
+		}
+	}
 	result.Warnings = append(result.Warnings, warnings...)
 	result.Blockers = append(result.Blockers, blockers...)
 	digest := imageDigestFromReference(target)
@@ -363,6 +372,7 @@ func (s *RuntimeUpgradeService) Preflight(ctx context.Context, req RuntimeUpgrad
 		}
 	}
 	preflightSummary, _ := json.Marshal(map[string]any{
+		"source_deployment_proofs":        sourceDeploymentProofs,
 		"stopped_source_version_evidence": stoppedSourceEvidence,
 		"strategy":                        result.Strategy,
 		"target_runtime_version":          result.TargetRuntimeVersion,
@@ -490,13 +500,15 @@ func (s *RuntimeUpgradeService) ConfirmPreflight(ctx context.Context, preflightI
 		return nil, err
 	}
 	defer release()
+	confirmationAttempted := false
 	err = s.sess.TxContext(ctx, func(tx db.Session) error {
-		if err := repository.CheckRuntimeManagementRolloutAdmission(ctx, tx); err != nil {
+		if err := repository.CheckRuntimeManagementRolloutAdmission(ctx, tx, rollout.RuntimeType); err != nil {
 			return err
 		}
 		if err := s.lockUpgradeScope(ctx, tx, rollout.ID); err != nil {
 			return err
 		}
+		confirmationAttempted = true
 		result, err := tx.SQL().ExecContext(ctx, `UPDATE runtime_rollouts SET status = 'pending', started_by = ?, updated_at = ? WHERE id = ? AND status = 'preflight_passed'`, actor, time.Now().UTC(), rollout.ID)
 		if err != nil {
 			return err
@@ -505,9 +517,15 @@ func (s *RuntimeUpgradeService) ConfirmPreflight(ctx context.Context, preflightI
 		if err != nil || affected != 1 {
 			return fmt.Errorf("runtime upgrade preflight was already consumed")
 		}
+		if err := repository.ConsumeRuntimeRolloutPreparation(ctx, tx, rollout.ID); err != nil {
+			return err
+		}
 		return insertRuntimeUpgradeAudit(ctx, tx, &rollout.ID, actor, "confirm", "preflight", "accepted", map[string]any{"preflight_id": preflightID, "plan_fingerprint": *rollout.PlanFingerprint})
 	}, nil)
 	if err != nil {
+		if confirmationAttempted {
+			return nil, fmt.Errorf("%w: rollout %d: %v", ErrRuntimeUpgradeCommitUncertain, rollout.ID, err)
+		}
 		return nil, err
 	}
 	rollout.Status = "pending"

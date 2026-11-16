@@ -1,0 +1,492 @@
+[
+  {
+    "label": "selected row and shell",
+    "text": "My Instances",
+    "fg": "rgb(48, 58, 69)",
+    "bg": "rgb(240, 243, 245)",
+    "ratio": 10.371790625964731
+  },
+  {
+    "label": "selected row and shell",
+    "text": "My Instances",
+    "fg": "rgb(48, 58, 69)",
+    "bg": "rgb(255, 255, 255)",
+    "ratio": 11.55857914730225
+  },
+  {
+    "label": "selected row and shell",
+    "text": "Research workspace",
+    "fg": "rgb(48, 58, 69)",
+    "bg": "rgb(240, 243, 245)",
+    "ratio": 10.371790625964731
+  },
+  {
+    "label": "selected row and shell",
+    "text": "#229",
+    "fg": "rgb(70, 83, 96)",
+    "bg": "rgb(240, 243, 245)",
+    "ratio": 7.066533106773512
+  },
+  {
+    "label": "row menu",
+    "text": "Activity and policy",
+    "fg": "rgb(70, 83, 96)",
+    "bg": "rgb(240, 243, 245)",
+    "ratio": 7.066533106773512
+  },
+  {
+    "label": "row menu",
+    "text": "Delete (destructive action)",
+    "fg": "rgb(179, 71, 77)",
+    "bg": "rgb(255, 255, 255)",
+    "ratio": 5.350044720958131
+  },
+  {
+    "label": "hovered runtime node and counts",
+    "text": "runtime-198",
+    "fg": "rgb(70, 83, 96)",
+    "bg": "rgb(248, 250, 251)",
+    "ratio": 7.522066433458968
+  },
+  {
+    "label": "hovered runtime node and counts",
+    "text": "test-node-54",
+    "fg": "rgb(70, 83, 96)",
+    "bg": "rgb(248, 250, 251)",
+    "ratio": 7.522066433458968
+  },
+  {
+    "label": "hovered runtime node and counts",
+    "text": "OpenClaw",
+    "fg": "rgb(70, 83, 96)",
+    "bg": "rgb(248, 250, 251)",
+    "ratio": 7.522066433458968
+  },
+  {
+    "label": "hovered runtime node and counts",
+    "text": "Online · Schedulable",
+    "fg": "rgb(70, 83, 96)",
+    "bg": "rgb(248, 250, 251)",
+    "ratio": 7.522066433458968
+  },
+  {
+    "label": "hovered runtime node and counts",
+    "text": "· Schedulable",
+    "fg": "rgb(102, 114, 126)",
+    "bg": "rgb(248, 250, 251)",
+    "ratio": 4.694084288264296
+  },
+  {
+    "label": "hovered runtime node and counts",
+    "text": "Bound 2 / 8",
+    "fg": "rgb(70, 83, 96)",
+    "bg": "rgb(248, 250, 251)",
+    "ratio": 7.522066433458968
+  },
+  {
+    "label": "hovered runtime node and counts",
+    "text": "ViewEvent logFault recoveryEvict instances (destructive action)Pause schedulingManual scheduling",
+    "fg": "rgb(70, 83, 96)",
+    "bg": "rgb(248, 250, 251)",
+    "ratio": 7.522066433458968
+  },
+  {
+    "label": "runtime detail secondary text",
+    "text": "runtime-198",
+    "fg": "rgb(15, 23, 42)",
+    "bg": "rgb(245, 246, 248)",
+    "ratio": 16.509569120923487
+  },
+  {
+    "label": "runtime detail secondary text",
+    "text": "Node: test-node-54 / 10.42.1.24 · 8 Agent · —",
+    "fg": "rgb(70, 83, 96)",
+    "bg": "rgb(245, 246, 248)",
+    "ratio": 7.282708961191331
+  },
+  {
+    "label": "runtime detail secondary text",
+    "text": "Slot",
+    "fg": "rgb(70, 83, 96)",
+    "bg": "rgb(248, 250, 252)",
+    "ratio": 7.526809526460727
+  },
+  {
+    "label": "runtime detail secondary text",
+    "text": "Agent container",
+    "fg": "rgb(70, 83, 96)",
+    "bg": "rgb(248, 250, 252)",
+    "ratio": 7.526809526460727
+  },
+  {
+    "label": "runtime detail secondary text",
+    "text": "Container state",
+    "fg": "rgb(70, 83, 96)",
+    "bg": "rgb(248, 250, 252)",
+    "ratio": 7.526809526460727
+  },
+  {
+    "label": "runtime detail secondary text",
+    "text": "Instance / owner",
+    "fg": "rgb(70, 83, 96)",
+    "bg": "rgb(248, 250, 252)",
+    "ratio": 7.526809526460727
+  },
+  {
+    "label": "runtime detail secondary text",
+    "text": "Instance state",
+    "fg": "rgb(70, 83, 96)",
+    "bg": "rgb(248, 250, 252)",
+    "ratio": 7.526809526460727
+  },
+  {
+    "label": "runtime detail secondary text",
+    "text": "CPU",
+    "fg": "rgb(70, 83, 96)",
+    "bg": "rgb(248, 250, 252)",
+    "ratio": 7.526809526460727
+  },
+  {
+    "label": "runtime detail secondary text",
+    "text": "Memory",
+    "fg": "rgb(70, 83, 96)",
+    "bg": "rgb(248, 250, 252)",
+    "ratio": 7.526809526460727
+  },
+  {
+    "label": "runtime detail secondary text",
+    "text": "Event / reason",
+    "fg": "rgb(70, 83, 96)",
+    "bg": "rgb(248, 250, 252)",
+    "ratio": 7.526809526460727
+  },
+  {
+    "label": "runtime detail secondary text",
+    "text": "Actions",
+    "fg": "rgb(70, 83, 96)",
+    "bg": "rgb(248, 250, 252)",
+    "ratio": 7.526809526460727
+  },
+  {
+    "label": "team object and auxiliary labels",
+    "text": "delivery-team",
+    "fg": "rgb(48, 58, 69)",
+    "bg": "rgb(255, 255, 255)",
+    "ratio": 11.55857914730225
+  },
+  {
+    "label": "team object and auxiliary labels",
+    "text": "Team #144",
+    "fg": "rgb(102, 114, 126)",
+    "bg": "rgb(255, 255, 255)",
+    "ratio": 4.914403673502957
+  },
+  {
+    "label": "team object and auxiliary labels",
+    "text": "3 online",
+    "fg": "rgb(59, 124, 88)",
+    "bg": "rgb(255, 255, 255)",
+    "ratio": 4.988196824221027
+  },
+  {
+    "label": "team object and auxiliary labels",
+    "text": "Running",
+    "fg": "rgb(70, 83, 96)",
+    "bg": "rgb(255, 255, 255)",
+    "ratio": 7.875118690421495
+  },
+  {
+    "label": "hovered team ID and date",
+    "text": "delivery-team#144",
+    "fg": "rgb(70, 83, 96)",
+    "bg": "rgb(240, 243, 245)",
+    "ratio": 7.066533106773512
+  },
+  {
+    "label": "hovered team ID and date",
+    "text": "#144",
+    "fg": "rgb(70, 83, 96)",
+    "bg": "rgb(240, 243, 245)",
+    "ratio": 7.066533106773512
+  },
+  {
+    "label": "hovered team ID and date",
+    "text": "Running",
+    "fg": "rgb(70, 83, 96)",
+    "bg": "rgb(240, 243, 245)",
+    "ratio": 7.066533106773512
+  },
+  {
+    "label": "hovered team ID and date",
+    "text": "leader_mediated",
+    "fg": "rgb(70, 83, 96)",
+    "bg": "rgb(240, 243, 245)",
+    "ratio": 7.066533106773512
+  },
+  {
+    "label": "hovered team ID and date",
+    "text": "Storage pending",
+    "fg": "rgb(70, 83, 96)",
+    "bg": "rgb(240, 243, 245)",
+    "ratio": 7.066533106773512
+  },
+  {
+    "label": "hovered team ID and date",
+    "text": "11/11/2026, 4:00:00 PM",
+    "fg": "rgb(70, 83, 96)",
+    "bg": "rgb(240, 243, 245)",
+    "ratio": 7.066533106773512
+  },
+  {
+    "label": "hovered team ID and date",
+    "text": "Open team",
+    "fg": "rgb(70, 83, 96)",
+    "bg": "rgb(240, 243, 245)",
+    "ratio": 7.066533106773512
+  },
+  {
+    "label": "selected row and shell",
+    "text": "我的实例",
+    "fg": "rgb(48, 58, 69)",
+    "bg": "rgb(240, 243, 245)",
+    "ratio": 10.371790625964731
+  },
+  {
+    "label": "selected row and shell",
+    "text": "我的实例",
+    "fg": "rgb(48, 58, 69)",
+    "bg": "rgb(255, 255, 255)",
+    "ratio": 11.55857914730225
+  },
+  {
+    "label": "selected row and shell",
+    "text": "Research workspace",
+    "fg": "rgb(48, 58, 69)",
+    "bg": "rgb(240, 243, 245)",
+    "ratio": 10.371790625964731
+  },
+  {
+    "label": "selected row and shell",
+    "text": "#229",
+    "fg": "rgb(70, 83, 96)",
+    "bg": "rgb(240, 243, 245)",
+    "ratio": 7.066533106773512
+  },
+  {
+    "label": "row menu",
+    "text": "活动与策略",
+    "fg": "rgb(70, 83, 96)",
+    "bg": "rgb(240, 243, 245)",
+    "ratio": 7.066533106773512
+  },
+  {
+    "label": "row menu",
+    "text": "删除 （危险操作）",
+    "fg": "rgb(179, 71, 77)",
+    "bg": "rgb(255, 255, 255)",
+    "ratio": 5.350044720958131
+  },
+  {
+    "label": "hovered runtime node and counts",
+    "text": "runtime-198",
+    "fg": "rgb(70, 83, 96)",
+    "bg": "rgb(248, 250, 251)",
+    "ratio": 7.522066433458968
+  },
+  {
+    "label": "hovered runtime node and counts",
+    "text": "test-node-54",
+    "fg": "rgb(70, 83, 96)",
+    "bg": "rgb(248, 250, 251)",
+    "ratio": 7.522066433458968
+  },
+  {
+    "label": "hovered runtime node and counts",
+    "text": "OpenClaw",
+    "fg": "rgb(70, 83, 96)",
+    "bg": "rgb(248, 250, 251)",
+    "ratio": 7.522066433458968
+  },
+  {
+    "label": "hovered runtime node and counts",
+    "text": "在线 · 可调度",
+    "fg": "rgb(70, 83, 96)",
+    "bg": "rgb(248, 250, 251)",
+    "ratio": 7.522066433458968
+  },
+  {
+    "label": "hovered runtime node and counts",
+    "text": "· 可调度",
+    "fg": "rgb(102, 114, 126)",
+    "bg": "rgb(248, 250, 251)",
+    "ratio": 4.694084288264296
+  },
+  {
+    "label": "hovered runtime node and counts",
+    "text": "绑定 2 / 8",
+    "fg": "rgb(70, 83, 96)",
+    "bg": "rgb(248, 250, 251)",
+    "ratio": 7.522066433458968
+  },
+  {
+    "label": "hovered runtime node and counts",
+    "text": "详情事件日志故障恢复驱逐实例 （危险操作）暂停调度手动调度",
+    "fg": "rgb(70, 83, 96)",
+    "bg": "rgb(248, 250, 251)",
+    "ratio": 7.522066433458968
+  },
+  {
+    "label": "runtime detail secondary text",
+    "text": "runtime-198",
+    "fg": "rgb(15, 23, 42)",
+    "bg": "rgb(245, 246, 248)",
+    "ratio": 16.509569120923487
+  },
+  {
+    "label": "runtime detail secondary text",
+    "text": "节点: test-node-54 / 10.42.1.24 · 8 Agent · —",
+    "fg": "rgb(70, 83, 96)",
+    "bg": "rgb(245, 246, 248)",
+    "ratio": 7.282708961191331
+  },
+  {
+    "label": "runtime detail secondary text",
+    "text": "槽位",
+    "fg": "rgb(70, 83, 96)",
+    "bg": "rgb(248, 250, 252)",
+    "ratio": 7.526809526460727
+  },
+  {
+    "label": "runtime detail secondary text",
+    "text": "Agent 容器",
+    "fg": "rgb(70, 83, 96)",
+    "bg": "rgb(248, 250, 252)",
+    "ratio": 7.526809526460727
+  },
+  {
+    "label": "runtime detail secondary text",
+    "text": "容器状态",
+    "fg": "rgb(70, 83, 96)",
+    "bg": "rgb(248, 250, 252)",
+    "ratio": 7.526809526460727
+  },
+  {
+    "label": "runtime detail secondary text",
+    "text": "绑定实例 / 使用者",
+    "fg": "rgb(70, 83, 96)",
+    "bg": "rgb(248, 250, 252)",
+    "ratio": 7.526809526460727
+  },
+  {
+    "label": "runtime detail secondary text",
+    "text": "实例状态",
+    "fg": "rgb(70, 83, 96)",
+    "bg": "rgb(248, 250, 252)",
+    "ratio": 7.526809526460727
+  },
+  {
+    "label": "runtime detail secondary text",
+    "text": "CPU",
+    "fg": "rgb(70, 83, 96)",
+    "bg": "rgb(248, 250, 252)",
+    "ratio": 7.526809526460727
+  },
+  {
+    "label": "runtime detail secondary text",
+    "text": "内存",
+    "fg": "rgb(70, 83, 96)",
+    "bg": "rgb(248, 250, 252)",
+    "ratio": 7.526809526460727
+  },
+  {
+    "label": "runtime detail secondary text",
+    "text": "事件 / 原因",
+    "fg": "rgb(70, 83, 96)",
+    "bg": "rgb(248, 250, 252)",
+    "ratio": 7.526809526460727
+  },
+  {
+    "label": "runtime detail secondary text",
+    "text": "操作",
+    "fg": "rgb(70, 83, 96)",
+    "bg": "rgb(248, 250, 252)",
+    "ratio": 7.526809526460727
+  },
+  {
+    "label": "team object and auxiliary labels",
+    "text": "delivery-team",
+    "fg": "rgb(48, 58, 69)",
+    "bg": "rgb(255, 255, 255)",
+    "ratio": 11.55857914730225
+  },
+  {
+    "label": "team object and auxiliary labels",
+    "text": "Team #144",
+    "fg": "rgb(102, 114, 126)",
+    "bg": "rgb(255, 255, 255)",
+    "ratio": 4.914403673502957
+  },
+  {
+    "label": "team object and auxiliary labels",
+    "text": "3 人在线",
+    "fg": "rgb(59, 124, 88)",
+    "bg": "rgb(255, 255, 255)",
+    "ratio": 4.988196824221027
+  },
+  {
+    "label": "team object and auxiliary labels",
+    "text": "运行中",
+    "fg": "rgb(70, 83, 96)",
+    "bg": "rgb(255, 255, 255)",
+    "ratio": 7.875118690421495
+  },
+  {
+    "label": "hovered team ID and date",
+    "text": "delivery-team#144",
+    "fg": "rgb(70, 83, 96)",
+    "bg": "rgb(240, 243, 245)",
+    "ratio": 7.066533106773512
+  },
+  {
+    "label": "hovered team ID and date",
+    "text": "#144",
+    "fg": "rgb(70, 83, 96)",
+    "bg": "rgb(240, 243, 245)",
+    "ratio": 7.066533106773512
+  },
+  {
+    "label": "hovered team ID and date",
+    "text": "运行中",
+    "fg": "rgb(70, 83, 96)",
+    "bg": "rgb(240, 243, 245)",
+    "ratio": 7.066533106773512
+  },
+  {
+    "label": "hovered team ID and date",
+    "text": "leader_mediated",
+    "fg": "rgb(70, 83, 96)",
+    "bg": "rgb(240, 243, 245)",
+    "ratio": 7.066533106773512
+  },
+  {
+    "label": "hovered team ID and date",
+    "text": "存储待创建",
+    "fg": "rgb(70, 83, 96)",
+    "bg": "rgb(240, 243, 245)",
+    "ratio": 7.066533106773512
+  },
+  {
+    "label": "hovered team ID and date",
+    "text": "11/11/2026, 4:00:00 PM",
+    "fg": "rgb(70, 83, 96)",
+    "bg": "rgb(240, 243, 245)",
+    "ratio": 7.066533106773512
+  },
+  {
+    "label": "hovered team ID and date",
+    "text": "进入团队",
+    "fg": "rgb(70, 83, 96)",
+    "bg": "rgb(240, 243, 245)",
+    "ratio": 7.066533106773512
+  }
+]

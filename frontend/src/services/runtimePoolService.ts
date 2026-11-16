@@ -26,7 +26,66 @@ import type {
   RuntimeBalancePlan,
 } from "../types/runtimePool";
 
+export interface RuntimePreparationOperation {
+  id: string;
+  kind: string;
+  runtime_type: RuntimeType;
+  status: string;
+  phase?: string;
+  error_message?: string;
+}
+
 export const runtimePoolService = {
+  async prepareRollout(runtimeType: RuntimeType, signal?: AbortSignal, observer?: {
+    onOperation: (id: string, operation: RuntimePreparationOperation) => void;
+    onStatus?: (operation: RuntimePreparationOperation) => void;
+    cancelOperation?: (id: string) => Promise<void>;
+  }): Promise<string> {
+    signal?.throwIfAborted();
+    // This mutation must never be replayed after an unknown response.
+    const response = await api.post('/admin/runtime-rollouts/prepare', { runtime_type: runtimeType }, { signal });
+    type WakeOperation = RuntimePreparationOperation;
+    let operation = response.data.data?.operation as WakeOperation | undefined;
+    const id = operation?.id;
+    if (!id || typeof id !== 'string') throw new Error('Runtime preparation response is incomplete; check scheduling history before retrying');
+    if (operation?.kind !== 'rollout_wake' || operation.runtime_type !== runtimeType) throw new Error(`Runtime preparation #${id}: receipt identity does not match`);
+    observer?.onOperation(id, operation);
+    const deadline = Date.now() + 15 * 60 * 1000;
+    try {
+      while (true) {
+        signal?.throwIfAborted();
+        if (operation) {
+          if (operation.id !== id || operation.kind !== 'rollout_wake' || operation.runtime_type !== runtimeType) {
+            throw new Error('Runtime preparation identity does not match');
+          }
+          observer?.onStatus?.(operation);
+          if (operation.status === 'completed') return id;
+          if (!['pending', 'starting', 'processing'].includes(operation.status)) {
+            throw new Error(operation.error_message || `${operation.status} / ${operation.phase || 'preparation'}`);
+          }
+        }
+        if (Date.now() >= deadline) throw new Error('Timed out; check scheduling history before retrying');
+        await new Promise<void>((resolve, reject) => {
+          const cancel = () => { clearTimeout(timer); reject(signal?.reason); };
+          const timer = setTimeout(() => { signal?.removeEventListener('abort', cancel); resolve(); }, 2000);
+          signal?.addEventListener('abort', cancel, { once: true });
+        });
+        signal?.throwIfAborted();
+        const remaining = deadline - Date.now();
+        if (remaining <= 0) throw new Error('Timed out; check scheduling history before retrying');
+        const history = await api.get('/admin/runtime-scheduling', { signal, timeout: Math.min(15000, remaining) });
+        const items: WakeOperation[] = Array.isArray(history.data.data?.items) ? history.data.data.items : [];
+        operation = items.find(item => item.id === id);
+      }
+    } catch (error) {
+      if (signal?.aborted) {
+        const cancellable = operation && (['pending', 'starting', 'processing'].includes(operation.status) || (operation.status === 'completed' && operation.phase === 'ready'));
+        if (cancellable) await (observer?.cancelOperation?.(id) ?? api.post(`/admin/runtime-scheduling/${encodeURIComponent(id)}/cancel`)).catch(() => {});
+        throw error;
+      }
+      throw new Error(`Runtime preparation #${id}: ${axios.isAxiosError(error) ? error.response?.data?.error || error.message : error instanceof Error ? error.message : String(error)}`);
+    }
+  },
   async inspectInstanceRecovery(id: number): Promise<RuntimeRecoveryInspection> {
     const response = await api.get(`/admin/instances/${id}/runtime-recovery`);
     return response.data.data;
@@ -168,7 +227,7 @@ export const runtimePoolService = {
     await api.post(`/admin/runtime-pods/${podId}/drain`);
   },
 
-  async startRollout(data: StartRuntimeRolloutRequest): Promise<RuntimeRollout> {
+  async startRollout(data: StartRuntimeRolloutRequest & { preparation_id?: string }): Promise<RuntimeRollout> {
     const response = await api.post("/admin/runtime-rollouts", data);
     const rollout = response.data.data?.rollout as RuntimeRollout | undefined;
     if (!rollout || typeof rollout.id !== "number") {
@@ -198,7 +257,7 @@ export const runtimePoolService = {
     return Array.isArray(items) ? items : [];
   },
 
-  async preflightOpenClawRollout(data: Omit<StartRuntimeRolloutRequest, "runtime_type" | "preflight_id">): Promise<RuntimeUpgradePreflightResult> {
+  async preflightOpenClawRollout(data: Omit<StartRuntimeRolloutRequest, "runtime_type" | "preflight_id"> & { preparation_id?: string }): Promise<RuntimeUpgradePreflightResult> {
     const response = await api.post("/admin/runtime-rollouts/preflight", data);
     const result = response.data.data as RuntimeUpgradePreflightResult | null | undefined;
     if (!result || typeof result.passed !== "boolean") {

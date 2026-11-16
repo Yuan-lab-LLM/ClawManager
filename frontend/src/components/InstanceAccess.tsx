@@ -209,7 +209,7 @@ function DesktopInstanceAccess({
     return (
       <div
         ref={containerRef}
-        className={`relative overflow-hidden rounded-[28px] border border-[#1f2937] bg-[radial-gradient(circle_at_top,rgba(59,130,246,0.2),transparent_28%),linear-gradient(180deg,#111827_0%,#0f172a_100%)] shadow-[0_30px_90px_-56px_rgba(17,24,39,0.9)] ${containerClassName || ""}`}
+        className={`relative overflow-hidden rounded-lg border border-[#1f2937] bg-[#111827] shadow-sm ${containerClassName || ""}`}
       >
         {overlay ? (
           <OpenClawDesktopOverlay
@@ -254,7 +254,7 @@ function DesktopInstanceAccess({
           {error && shouldConnect && (
             <p className="mt-4 max-w-md text-sm text-red-300">{error}</p>
           )}
-          <p className="mt-4 text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">
+          <p className="mt-4 text-xs font-semibold text-[#b7c1cf]">
             {loading
               ? t("instances.generatingToken")
               : t("instances.generateAccess")}
@@ -267,7 +267,7 @@ function DesktopInstanceAccess({
   return (
     <div
       ref={containerRef}
-      className={`relative overflow-hidden bg-[#111827] ${isFullscreen ? "flex h-screen flex-col rounded-none" : "rounded-[28px] border border-[#1f2937] shadow-[0_30px_90px_-56px_rgba(17,24,39,0.9)]"} ${containerClassName || ""}`}
+      className={`relative overflow-hidden bg-[#111827] ${isFullscreen ? "flex h-screen flex-col rounded-none" : "rounded-lg border border-[#1f2937] shadow-sm"} ${containerClassName || ""}`}
     >
       {overlay ? (
         <OpenClawDesktopOverlay

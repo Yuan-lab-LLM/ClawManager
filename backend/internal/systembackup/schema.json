@@ -3069,6 +3069,24 @@
         "type": "varchar(64)",
         "nullable": "NO",
         "extra": ""
+      },
+      {
+        "name": "workspace_usage_observed_at",
+        "type": "datetime(6)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "workspace_usage_epoch",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "workspace_usage_blocked",
+        "type": "tinyint(1)",
+        "nullable": "NO",
+        "extra": ""
       }
     ],
     "primary_key": [
@@ -7792,6 +7810,39 @@
     ],
     "primary_key": [
       "id"
+    ]
+  },
+  {
+    "name": "workspace_dashboard_observations",
+    "columns": [
+      {
+        "name": "user_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "bucket_start",
+        "type": "datetime",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "observed_at",
+        "type": "datetime(6)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "snapshot_json",
+        "type": "json",
+        "nullable": "NO",
+        "extra": ""
+      }
+    ],
+    "primary_key": [
+      "user_id",
+      "bucket_start"
     ]
   },
   {

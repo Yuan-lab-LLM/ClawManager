@@ -49,8 +49,8 @@ func (r *protectedRetryInstances) RetryRuntimeSchedulingError(ctx context.Contex
 	p.RuntimeErrorMessage = nil
 	return true, nil
 }
-func TestProtectedSchedulerRestoresDurableCreatingBeforeRealSlotRetry(t *testing.T) {
-	for _, scenario := range []string{"recover", "cas-lost", "pending-binding", "permanent-error"} {
+func TestProtectedSchedulerRequiresExplicitCreatingBeforeRealSlotStart(t *testing.T) {
+	for _, scenario := range []string{"explicit-start", "error", "pending-binding", "permanent-error"} {
 		t.Run(scenario, func(t *testing.T) {
 			ctx := context.Background()
 			a, _, kube, cm, pod := securityFixture(t)
@@ -66,7 +66,11 @@ func TestProtectedSchedulerRestoresDurableCreatingBeforeRealSlotRetry(t *testing
 			path := "/workspaces/opencode/user-3/instance-7"
 			code, msg := "RUNTIME_POOL_UNAVAILABLE", "no schedulable opencode runtime pod"
 			instance := models.Instance{ID: 7, UserID: 3, Type: "opencode", RuntimeType: "gateway", InstanceMode: "lite", Status: "error", RuntimeGeneration: 2, WorkspacePath: &path, RuntimeErrorCode: &code, RuntimeErrorMessage: &msg, UpdatedAt: time.Now().Add(-time.Minute)}
-			repo := &protectedRetryInstances{fakeRuntimeInstanceRepo: newFakeRuntimeInstanceRepo(), reject: scenario == "cas-lost"}
+			repo := &protectedRetryInstances{fakeRuntimeInstanceRepo: newFakeRuntimeInstanceRepo()}
+			if scenario == "explicit-start" {
+				instance.Status = "creating"
+				instance.RuntimeErrorCode, instance.RuntimeErrorMessage = nil, nil
+			}
 			if scenario == "permanent-error" {
 				code = "USER_CONFIGURATION_INVALID"
 				msg = "invalid user config"
@@ -112,9 +116,9 @@ func TestProtectedSchedulerRestoresDurableCreatingBeforeRealSlotRetry(t *testing
 			if err := s.reconcile(ctx); err != nil {
 				t.Fatal(err)
 			}
-			if scenario == "recover" {
-				if calls != 1 || repo.resets != 1 {
-					t.Fatalf("protected retry never reached actual slot client: resets=%d native_calls=%d", repo.resets, calls)
+			if scenario == "explicit-start" {
+				if calls != 1 || repo.resets != 0 {
+					t.Fatalf("explicit start never reached actual slot client: resets=%d native_calls=%d", repo.resets, calls)
 				}
 				binding := bindings.bindings[7]
 				if binding == nil || binding.State != RuntimeGatewayBindingRunning || binding.GatewayID != "gw-7-2" || repo.runtimeStates[7].status != "running" {

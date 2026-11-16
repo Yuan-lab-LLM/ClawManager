@@ -51,28 +51,31 @@ func checkInstanceAutoStopMutation(ctx context.Context, s db.Session, id int) er
 }
 
 func checkAutoStopRuntimeState(ctx context.Context, s db.Session, id int, target string, generation int) error {
-	row, err := s.SQL().QueryRowContext(ctx, `SELECT i.status,i.runtime_generation,COALESCE(a.stop_operation_id,''),COALESCE(a.stopped_reason,''),a.start_deadline_at FROM instances i LEFT JOIN instance_model_activity a ON a.instance_id=i.id WHERE i.id=? AND i.instance_mode='lite'`, id)
+	row, err := s.SQL().QueryRowContext(ctx, `SELECT i.status,i.runtime_generation,COALESCE(a.stop_operation_id,''),COALESCE(a.stopped_reason,''),a.start_deadline_at,i.instance_mode FROM instances i LEFT JOIN instance_model_activity a ON a.instance_id=i.id WHERE i.id=?`, id)
 	if missingAutoStopTable(err) {
 		return nil
 	}
 	if err != nil {
 		return err
 	}
-	var current, operation, reason string
+	var current, operation, reason, mode string
 	var gen int
 	var deadline sql.NullTime
-	err = row.Scan(&current, &gen, &operation, &reason, &deadline)
+	err = row.Scan(&current, &gen, &operation, &reason, &deadline, &mode)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}
 	if err != nil {
 		return err
 	}
-	if generation < gen {
+	if mode == "lite" && generation < gen {
 		return ErrStaleRuntimeGeneration
 	}
 	if current == "deleting" && target != "deleting" {
 		return models.ErrInstanceStopping
+	}
+	if mode != "lite" {
+		return nil
 	}
 	if target == "stopped" || target == "deleting" {
 		return nil
@@ -89,15 +92,41 @@ func checkAutoStopRuntimeState(ctx context.Context, s db.Session, id int, target
 	return nil
 }
 
-// The caller holds the instance row lock. Readiness and the complete idle
-// window are committed atomically, and only the current generation can finish Start.
-func confirmAutoStopRunning(ctx context.Context, s db.Session, id, generation int) error {
+// Read the previous state under the caller's instance row lock, before either
+// runtime reports or a full lifecycle update publishes readiness.
+func autoStopRunningTransition(ctx context.Context, s db.Session, id int, target string, generation int) (bool, error) {
+	if target != "running" {
+		return false, nil
+	}
+	row, err := s.SQL().QueryRowContext(ctx, "SELECT status,runtime_generation FROM instances WHERE id=?", id)
+	if err != nil {
+		return false, err
+	}
+	var previous string
+	var previousGeneration int
+	if err = row.Scan(&previous, &previousGeneration); errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return previous != "running" || previousGeneration != generation, err
+}
+
+// Readiness starts a complete idle window, including delayed initial creation.
+// Repeated healthy reports must not move that window forward.
+func confirmAutoStopRunning(ctx context.Context, s db.Session, id, generation int, entering bool) error {
 	now := time.Now().UTC()
-	_, err := s.SQL().ExecContext(ctx, `UPDATE instance_model_activity a JOIN instances i ON i.id=a.instance_id
+	_, err := s.SQL().ExecContext(ctx, `INSERT IGNORE INTO instance_model_activity(instance_id,generation,monitoring_since)
+ SELECT id,runtime_generation,? FROM instances WHERE id=? AND instance_mode='lite' AND status='running' AND runtime_generation=?`, now, id, generation)
+	if missingAutoStopTable(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	_, err = s.SQL().ExecContext(ctx, `UPDATE instance_model_activity a JOIN instances i ON i.id=a.instance_id
  SET a.generation=?,a.monitoring_since=?,a.activity_version=a.activity_version+1,
  a.start_deadline_at=NULL,a.stopped_reason='',a.stop_phase='',a.blocker='',a.updated_at=?,i.started_at=?
  WHERE i.id=? AND i.instance_mode='lite' AND i.status='running' AND i.runtime_generation=?
- AND a.stop_operation_id='' AND a.start_deadline_at IS NOT NULL`, generation, now, now, now, id, generation)
+ AND a.stop_operation_id='' AND (? OR a.start_deadline_at IS NOT NULL OR i.started_at IS NULL)`, generation, now, now, now, id, generation, entering)
 	if missingAutoStopTable(err) {
 		return nil
 	}

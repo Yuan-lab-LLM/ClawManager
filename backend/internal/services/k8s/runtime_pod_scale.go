@@ -62,6 +62,9 @@ type RuntimePodScaleTarget struct {
 	UpgradeID, SourceDeployment, ImageRef                   string
 }
 type RuntimePodScaleSnapshot struct {
+	// A newly prepared upgrade freezes the current configuration, while a
+	// historical automatic-sleep snapshot permits ordinary image updates.
+	WakeConfigurationFrozen  bool
 	Option                   RuntimePodScaleOption
 	Template                 corev1.PodTemplateSpec
 	ResourceVersion          string

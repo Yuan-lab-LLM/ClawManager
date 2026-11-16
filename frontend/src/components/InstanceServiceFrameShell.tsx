@@ -4,7 +4,10 @@ import { useI18n } from "../contexts/I18nContext";
 
 interface InstanceServiceFrameShellProps {
   instanceName: string;
+  headerTitle?: ReactNode;
+  headerActions?: ReactNode;
   children: ReactNode;
+  headerEndActions?: ReactNode;
   onRefresh?: () => void;
   refreshing?: boolean;
   workspaceVisible?: boolean;
@@ -13,7 +16,10 @@ interface InstanceServiceFrameShellProps {
 
 export function InstanceServiceFrameShell({
   instanceName,
+  headerTitle,
+  headerActions,
   children,
+  headerEndActions,
   onRefresh,
   refreshing = false,
   workspaceVisible,
@@ -45,9 +51,10 @@ export function InstanceServiceFrameShell({
       className="cm-surface relative isolate flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-white max-xl:min-h-[360px]"
       style={isFullscreen ? { height: "100vh", width: "100vw", borderRadius: 0 } : undefined}
     >
-      <div className="relative z-20 flex h-12 shrink-0 items-center justify-between gap-2 border-b border-slate-200 bg-white px-3">
-        <div className="min-w-0 truncate text-sm font-medium text-slate-950">{instanceName}</div>
+      <div className="cm-instance-frame-header relative z-20 flex h-12 shrink-0 items-center justify-between gap-2 border-b border-slate-200 bg-white px-3">
+        <div className="min-w-0 flex-1 text-sm font-medium text-slate-950">{headerTitle ?? <span className="block truncate">{instanceName}</span>}</div>
         <div className="relative z-20 flex shrink-0 items-center gap-2">
+          {headerActions}
           {typeof workspaceVisible === "boolean" && onWorkspaceVisibilityChange && (
             <button
               type="button"
@@ -64,6 +71,7 @@ export function InstanceServiceFrameShell({
               <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
             </button>
           )}
+          {headerEndActions}
           <button
             type="button"
             onClick={toggleFullscreen}

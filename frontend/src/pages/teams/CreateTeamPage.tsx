@@ -711,7 +711,7 @@ const CreateTeamPage: React.FC = () => {
                 </span>
               </div>
 
-              <div className="mt-5 border-t border-[#f1e5df] pt-5">
+              <div className="mt-5 border-t border-[var(--cm-border)] pt-5">
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <h3 className="text-sm font-semibold text-gray-900">
@@ -724,7 +724,7 @@ const CreateTeamPage: React.FC = () => {
                   <button
                     type="button"
                     onClick={addEnvironmentRow}
-                    className="inline-flex items-center justify-center rounded-xl border border-[#eadfd8] bg-white px-3 py-2 text-sm font-medium text-[#5f5957] hover:bg-[#fff8f5]"
+                    className="inline-flex items-center justify-center rounded-xl border border-[var(--cm-border)] bg-white px-3 py-2 text-sm font-medium text-[var(--cm-text)] hover:bg-[var(--cm-subtle)]"
                   >
                     添加变量
                   </button>
@@ -732,7 +732,7 @@ const CreateTeamPage: React.FC = () => {
 
                 <div className="mt-4 space-y-3">
                   {environmentRows.length === 0 ? (
-                    <div className="rounded-xl border border-dashed border-[#eadfd8] bg-white px-4 py-3 text-sm text-gray-500">
+                    <div className="rounded-xl border border-dashed border-[var(--cm-border)] bg-white px-4 py-3 text-sm text-gray-500">
                       暂无额外环境变量。
                     </div>
                   ) : (
@@ -749,7 +749,7 @@ const CreateTeamPage: React.FC = () => {
                             })
                           }
                           placeholder="ENV_NAME"
-                          className="rounded-xl border border-[#eadfd8] px-3 py-2 text-sm focus:border-[#ef4444] focus:outline-none focus:ring-1 focus:ring-[#f3d2c2]"
+                          className="rounded-xl border border-[var(--cm-border)] px-3 py-2 text-sm focus:border-[var(--cm-primary)] focus:outline-none focus:ring-1 focus:ring-[#f3d2c2]"
                         />
                         <input
                           value={row.value}
@@ -759,7 +759,7 @@ const CreateTeamPage: React.FC = () => {
                             })
                           }
                           placeholder="value"
-                          className="rounded-xl border border-[#eadfd8] px-3 py-2 text-sm focus:border-[#ef4444] focus:outline-none focus:ring-1 focus:ring-[#f3d2c2]"
+                          className="rounded-xl border border-[var(--cm-border)] px-3 py-2 text-sm focus:border-[var(--cm-primary)] focus:outline-none focus:ring-1 focus:ring-[#f3d2c2]"
                         />
                         <button
                           type="button"
@@ -779,7 +779,7 @@ const CreateTeamPage: React.FC = () => {
                 </div>
               </div>
 
-              <div className="mt-6 border-t border-[#f1e5df] pt-5">
+              <div className="mt-6 border-t border-[var(--cm-border)] pt-5">
                 <h3 className="text-sm font-semibold text-gray-900">
                   OpenClaw 配置
                 </h3>
@@ -852,14 +852,14 @@ const CreateTeamPage: React.FC = () => {
                     value={name}
                     onChange={(event) => setName(event.target.value)}
                     placeholder="research-team"
-                    className="mt-1 block w-full rounded-xl border border-[#eadfd8] px-3 py-2 text-sm focus:border-[#ef4444] focus:outline-none focus:ring-1 focus:ring-[#f3d2c2]"
+                    className="mt-1 block w-full rounded-xl border border-[var(--cm-border)] px-3 py-2 text-sm focus:border-[var(--cm-primary)] focus:outline-none focus:ring-1 focus:ring-[#f3d2c2]"
                   />
                 </label>
                 <label className="block">
                   <span className="text-sm font-medium text-gray-700">
                     共享存储
                   </span>
-                  <div className="mt-1 flex rounded-xl border border-[#eadfd8] bg-white">
+                  <div className="mt-1 flex rounded-xl border border-[var(--cm-border)] bg-white">
                     <input
                       type="number"
                       min={1}
@@ -869,7 +869,7 @@ const CreateTeamPage: React.FC = () => {
                       }
                       className="min-w-0 flex-1 rounded-l-xl border-0 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-[#f3d2c2]"
                     />
-                    <span className="flex items-center rounded-r-xl border-l border-[#eadfd8] bg-gray-50 px-3 text-sm text-gray-500">
+                    <span className="flex items-center rounded-r-xl border-l border-[var(--cm-border)] bg-gray-50 px-3 text-sm text-gray-500">
                       GiB
                     </span>
                   </div>
@@ -878,7 +878,7 @@ const CreateTeamPage: React.FC = () => {
                   <span className="text-sm font-medium text-gray-700">
                     协作模式
                   </span>
-                  <div className="mt-1 rounded-xl border border-[#eadfd8] bg-gray-50 px-3 py-2 text-sm text-gray-700">
+                  <div className="mt-1 rounded-xl border border-[var(--cm-border)] bg-gray-50 px-3 py-2 text-sm text-gray-700">
                     {communicationModeOption.label}
                   </div>
                   <p className="mt-1 text-xs text-gray-500">
@@ -890,7 +890,7 @@ const CreateTeamPage: React.FC = () => {
                   <select
                     value={selectedTemplate?.id || ""}
                     onChange={(event) => applyTemplate(event.target.value)}
-                    className="mt-1 block w-full rounded-xl border border-[#eadfd8] bg-white px-3 py-2 text-sm focus:border-[#ef4444] focus:outline-none focus:ring-1 focus:ring-[#f3d2c2]"
+                    className="mt-1 block w-full rounded-xl border border-[var(--cm-border)] bg-white px-3 py-2 text-sm focus:border-[var(--cm-primary)] focus:outline-none focus:ring-1 focus:ring-[#f3d2c2]"
                   >
                     {memberTemplates.map((template) => (
                       <option key={template.id} value={template.id}>
@@ -903,7 +903,7 @@ const CreateTeamPage: React.FC = () => {
               </div>
 
               {selectedTemplate && (
-                <div className="mt-4 rounded-xl border border-[#eadfd8] bg-[#fffaf6] px-4 py-3 text-sm">
+                <div className="mt-4 rounded-xl border border-[var(--cm-border)] bg-[var(--cm-subtle)] px-4 py-3 text-sm">
                   <div className="font-medium text-gray-900">
                     {getTemplateDisplayName(selectedTemplate)}
                   </div>
@@ -914,15 +914,15 @@ const CreateTeamPage: React.FC = () => {
               )}
 
               <p className="mt-3 text-xs text-gray-500">{TEAM_CREATION_NOTICE}</p>
-              <div className="mt-5 overflow-hidden rounded-xl border border-[#eadfd8]">
-                <div className="hidden grid-cols-[minmax(110px,0.8fr)_minmax(130px,0.9fr)_minmax(190px,1.15fr)_minmax(140px,0.9fr)_minmax(260px,1.7fr)] gap-3 border-b border-[#eadfd8] bg-gray-50 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 lg:grid">
+              <div className="mt-5 overflow-hidden rounded-xl border border-[var(--cm-border)]">
+                <div className="hidden grid-cols-[minmax(110px,0.8fr)_minmax(130px,0.9fr)_minmax(190px,1.15fr)_minmax(140px,0.9fr)_minmax(260px,1.7fr)] gap-3 border-b border-[var(--cm-border)] bg-gray-50 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 lg:grid">
                   <div>成员 ID</div>
                   <div>显示名称</div>
                   <div>运行时</div>
                   <div>角色模板</div>
                   <div>角色解释</div>
                 </div>
-                <div className="divide-y divide-[#eadfd8] bg-white">
+                <div className="divide-y divide-[var(--cm-border)] bg-white">
                   {members.map((member) => (
                     <div
                       key={member.id}
@@ -953,7 +953,7 @@ const CreateTeamPage: React.FC = () => {
                           运行时
                         </div>
                         <div className="flex flex-wrap gap-2">
-                          {member.isLeader ? <span className="rounded-lg border border-[#eadfd8] bg-gray-50 px-3 py-1.5 text-xs">OpenClaw Lite · 固定 Leader</span> : <select aria-label={`${member.memberId} 运行时`} value={member.runtimeType} onChange={event => updateWorkerRuntime(member.id, event.target.value as RuntimeType)} disabled={submitting} className="rounded-lg border border-[#eadfd8] bg-white px-3 py-1.5 text-xs">
+                          {member.isLeader ? <span className="rounded-lg border border-[var(--cm-border)] bg-gray-50 px-3 py-1.5 text-xs">OpenClaw Lite · 固定 Leader</span> : <select aria-label={`${member.memberId} 运行时`} value={member.runtimeType} onChange={event => updateWorkerRuntime(member.id, event.target.value as RuntimeType)} disabled={submitting} className="rounded-lg border border-[var(--cm-border)] bg-white px-3 py-1.5 text-xs">
                             {teamRuntimeOptions(false).map(type => <option key={type} value={type} disabled={!imageForRuntime(type)}>{`${teamRuntimeLabel(type)} Lite`}{!imageForRuntime(type) ? "（镜像未配置）" : ""}</option>)}
                           </select>}
 

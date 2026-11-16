@@ -289,6 +289,7 @@ func syncRuntimeSlotImageAndIdentity(deployment *appsv1.Deployment, coordinator 
 			}
 		}
 	}
+	setRuntimeCoordinatorSlotStateMounts(deployment)
 }
 
 // RuntimeSlotDeploymentSpecs builds only explicitly opted-in container pools.

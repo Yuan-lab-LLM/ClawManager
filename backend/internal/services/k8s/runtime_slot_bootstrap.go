@@ -4,18 +4,28 @@ import (
 	"bytes"
 	"clawreef/internal/config"
 	"context"
+	"encoding/hex"
 	"fmt"
 	corev1 "k8s.io/api/core/v1"
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
+	"strings"
 )
 
 // EnsureRuntimeSlotPools bootstraps explicitly enabled slot pools without
 // restarting or scaling down serving pools on a backend restart. Changes to
 // active images, slot counts or credentials require the drain/rollout workflow.
-func EnsureRuntimeSlotPools(ctx context.Context, client kubernetes.Interface, cfg config.RuntimePoolConfig) error {
+type RuntimeSlotBootstrapSourceProof struct {
+	Source    RuntimeRolloutTarget
+	RolloutID int64
+	// Set only by the committed-rollout reader after every retained binding
+	// passes its isolated source identity and generation fence.
+	AllowServingSource bool
+}
+
+func EnsureRuntimeSlotPools(ctx context.Context, client kubernetes.Interface, cfg config.RuntimePoolConfig, committedSources ...RuntimeSlotBootstrapSourceProof) error {
 	if cfg.ContainerSlots == 0 {
 		return nil
 	}
@@ -36,16 +46,41 @@ func EnsureRuntimeSlotPools(ctx context.Context, client kubernetes.Interface, cf
 	}
 	missing := map[string]bool{}
 	for _, spec := range specs {
+		var preserved *RuntimeSlotBootstrapSourceProof
+		for i := range committedSources {
+			proof := &committedSources[i]
+			if proof.Source.Namespace == spec.Namespace && proof.Source.Name == spec.Name {
+				preserved = proof
+				break
+			}
+		}
 		if err = service.validateRuntimeSlotStorage(ctx, spec); err != nil {
 			return err
 		}
 		existing, e := client.AppsV1().Deployments(spec.Namespace).Get(ctx, spec.Name, metav1.GetOptions{})
 		if apierrors.IsNotFound(e) {
+			if preserved != nil {
+				return fmt.Errorf("committed Runtime source %s/%s was deleted; inspect CM rollout %d instead of recreating it", spec.Namespace, spec.Name, preserved.RolloutID)
+			}
 			missing[spec.Name] = true
 			continue
 		}
 		if e != nil {
 			return e
+		}
+		expectedImage := spec.Image
+		if preserved != nil {
+			digest := runtimeImageDigest(preserved.Source.Image)
+			_, digestErr := hex.DecodeString(strings.TrimPrefix(digest, "sha256:"))
+			if preserved.RolloutID <= 0 || preserved.Source.UID == "" || string(existing.UID) != preserved.Source.UID || len(digest) != 71 || digestErr != nil || strings.ToLower(digest) != digest || existing.DeletionTimestamp != nil || (existing.Labels[runtimeSchedulingLabel] != "false" && !preserved.AllowServingSource) {
+				return fmt.Errorf("retained Runtime source %s/%s lacks exact committed UID/image and disabled or isolated-binding proof; inspect CM rollout %d", spec.Namespace, spec.Name, preserved.RolloutID)
+			}
+			expectedImage = preserved.Source.Image
+			for _, container := range existing.Spec.Template.Spec.Containers {
+				if container.Image != expectedImage {
+					return fmt.Errorf("retained Runtime source %s/%s image drifted from CM rollout %d", spec.Namespace, spec.Name, preserved.RolloutID)
+				}
+			}
 		}
 		if existing.Spec.Template.Labels["clawmanager.io/runtime-protocol"] != "container-slots-v1" {
 			return fmt.Errorf("existing %s requires explicit process-pool migration before enabling container slots", spec.Name)
@@ -63,8 +98,8 @@ func EnsureRuntimeSlotPools(ctx context.Context, client kubernetes.Interface, cf
 		if err := validateRuntimeSlotTLSDeployment(existing); err != nil {
 			return err
 		}
-		if len(existing.Spec.Template.Spec.Containers) != spec.SlotCount+1 || runtimeContainerImage(existing.Spec.Template.Spec.Containers) != spec.Image {
-			return fmt.Errorf("serving %s slot/image change requires a coordinated rollout", spec.Name)
+		if len(existing.Spec.Template.Spec.Containers) != spec.SlotCount+1 || runtimeContainerImage(existing.Spec.Template.Spec.Containers) != expectedImage {
+			return fmt.Errorf("serving %s slot/image change requires a coordinated rollout; inspect committed CM history and retained-source proof", spec.Name)
 		}
 		pod := existing.Spec.Template.Spec
 		usesUserNamespaces := pod.HostUsers != nil && !*pod.HostUsers

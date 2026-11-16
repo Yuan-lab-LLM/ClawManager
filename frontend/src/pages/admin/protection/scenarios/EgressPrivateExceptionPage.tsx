@@ -194,7 +194,7 @@ const EgressPrivateExceptionPage: React.FC = () => {
         <div className="panel">
           <div className="hero-block">
             <div className="h-eyebrow">{t(`${k}.eyebrow`)}</div>
-            <h2 className="h-title">{t(`${k}.title`)}</h2>
+            <h2 className="section-title">{t(`${k}.title`)}</h2>
             <p className="h-subtitle">{t(`${k}.subtitle`)}</p>
           </div>
           <div className="grid grid-cols-2 gap-3 mt-5 max-w-xl">
@@ -322,7 +322,7 @@ const EgressPrivateExceptionPage: React.FC = () => {
               </thead>
               <tbody>
                 {items.map((item) => (
-                  <tr key={item.id} className="border-t border-[#eadfd8]">
+                  <tr key={item.id} className="border-t border-[var(--cm-border)]">
                     <td className="py-2 pr-3">
                       {item.scope_type}:{item.scope_id}
                     </td>

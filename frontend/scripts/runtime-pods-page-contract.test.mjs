@@ -29,16 +29,8 @@ assert(
   pageSource.includes("t('runtimePods.title')") || pageSource.includes('t("runtimePods.title")'),
   "Runtime pods page title must use runtimePods.title.",
 );
-assert(
-  pageSource.includes("selectRuntimePod(pod)") &&
-    pageSource.includes('role="button"') &&
-    /onKeyDown=\{\(event\) =>\s*handleRuntimePodCardKeyDown\(event, pod\)\s*\}/.test(pageSource),
-  "Runtime pod cards must be selectable by clicking or using the keyboard.",
-);
-assert(
-  pageSource.includes("event.stopPropagation()"),
-  "Runtime pod card action buttons must not trigger card selection accidentally.",
-);
+// Entry keyboard behavior, action isolation and bounded capacity layout run in
+// e2e/tests/uiux/management-ui.spec.ts against the rendered native table.
 assert(
   i18nSource.includes('runtime: "Runtime"') &&
     i18nSource.includes('runtime: "运行时"') &&
@@ -46,8 +38,6 @@ assert(
   "Runtime page translations must include English and Chinese runtime labels.",
 );
 
-console.log("Runtime pods page source contract is valid.");
+assert(pageSource.includes("page_size: 16"), "Runtime inventory must request sixteen Runtime rows per page.");
 
-assert(pageSource.includes("page_size: 16"), "Runtime inventory must request sixteen cards per page.");
-const css = readFileSync(path.resolve(scriptDir, "../src/styles/runtime-pods.css"), "utf8");
-assert(/grid-template-columns: repeat\(4, minmax\(0, 1fr\)\)/.test(css) && /grid-template-rows: repeat\(4, minmax\(0, 1fr\)\)/.test(css), "Desktop inventory must use four rows and four columns.");
+console.log("Runtime pods page source contract is valid.");

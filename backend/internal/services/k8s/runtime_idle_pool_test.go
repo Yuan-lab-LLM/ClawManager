@@ -30,8 +30,8 @@ func TestRuntimeIdlePoolCanRemoveFinalEmptyPod(t *testing.T) {
 	}
 }
 
-func TestRuntimeIdlePoolWakeRequiresUnchangedAutomaticSleepProof(t *testing.T) {
-	for _, change := range []string{"none", "uid", "template", "disabled", "scale-in", "no-proof", "manual-rescale", "pvc-replaced", "consumed"} {
+func TestRuntimeIdlePoolWakePreservesIdentityAndAllowsImageUpdates(t *testing.T) {
+	for _, change := range []string{"none", "image", "image-env", "revision", "uid", "template", "disabled", "scale-in", "no-proof", "old-generation", "pvc-replaced", "security", "mount", "remaining-pod", "consumed"} {
 		t.Run(change, func(t *testing.T) {
 			ctx := context.Background()
 			svc, kube, d, p := maintenanceSourceFixture()
@@ -50,8 +50,10 @@ func TestRuntimeIdlePoolWakeRequiresUnchangedAutomaticSleepProof(t *testing.T) {
 			zero := int32(0)
 			d.Spec.Replicas = &zero
 			switch change {
-			case "manual-rescale":
+			case "revision":
 				d.Generation += 2
+			case "old-generation":
+				d.Generation = snapshot.DeploymentGeneration
 			case "consumed":
 				delete(d.Annotations, runtimeIdleSleepAnnotation)
 			case "pvc-replaced":
@@ -60,8 +62,22 @@ func TestRuntimeIdlePoolWakeRequiresUnchangedAutomaticSleepProof(t *testing.T) {
 				_, _ = kube.CoreV1().PersistentVolumeClaims("ns").Update(ctx, claim, metav1.UpdateOptions{})
 			case "uid":
 				d.UID = "replacement"
-			case "template":
+			case "image":
 				d.Spec.Template.Spec.Containers[0].Image = "repo/other:latest"
+				d.Generation += 2
+			case "image-env":
+				for i := range d.Spec.Template.Spec.Containers {
+					d.Spec.Template.Spec.Containers[i].Image = "repo/other:latest"
+					upsertEnvVar(&d.Spec.Template.Spec.Containers[i], "CLAWMANAGER_RUNTIME_IMAGE_REF", "repo/other:latest")
+					upsertEnvVar(&d.Spec.Template.Spec.Containers[i], "CLAWMANAGER_RUNTIME_IMAGE_DIGEST", "")
+				}
+				d.Generation += 2
+			case "template":
+				d.Spec.Template.Spec.Containers[0].Command = []string{"/foreign-command"}
+			case "security":
+				d.Spec.Template.Spec.Containers[0].SecurityContext.Privileged = maintenanceBool(true)
+			case "mount":
+				d.Spec.Template.Spec.Containers[0].VolumeMounts[0].MountPath = "/foreign"
 			case "disabled":
 				d.Labels[runtimeSchedulingLabel] = "false"
 			case "scale-in":
@@ -70,7 +86,9 @@ func TestRuntimeIdlePoolWakeRequiresUnchangedAutomaticSleepProof(t *testing.T) {
 				snapshot = nil
 			}
 			_, _ = kube.AppsV1().Deployments("ns").Update(ctx, d, metav1.UpdateOptions{})
-			_ = kube.CoreV1().Pods("ns").Delete(ctx, p.Name, metav1.DeleteOptions{})
+			if change != "remaining-pod" {
+				_ = kube.CoreV1().Pods("ns").Delete(ctx, p.Name, metav1.DeleteOptions{})
+			}
 			wake, ok := any(svc).(interface {
 				WakeIdleRuntimePool(context.Context, RuntimePodScaleTarget, *RuntimePodScaleSnapshot) error
 			})
@@ -78,15 +96,16 @@ func TestRuntimeIdlePoolWakeRequiresUnchangedAutomaticSleepProof(t *testing.T) {
 				t.Fatal("automatic sleep capacity restoration is not implemented")
 			}
 			err = wake.WakeIdleRuntimePool(ctx, target, snapshot)
-			if change == "none" && err != nil {
+			allowed := change == "none" || change == "image" || change == "image-env" || change == "revision"
+			if allowed && err != nil {
 				t.Fatal(err)
 			}
-			if change != "none" && err == nil {
+			if !allowed && err == nil {
 				t.Fatal("accepted changed or absent sleep proof")
 			}
 			current, _ := kube.AppsV1().Deployments("ns").Get(ctx, d.Name, metav1.GetOptions{})
 			want := int32(0)
-			if change == "none" {
+			if allowed {
 				want = 1
 			}
 			if *current.Spec.Replicas != want {

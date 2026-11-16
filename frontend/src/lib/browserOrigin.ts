@@ -3,8 +3,9 @@ export interface BrowserOriginMetadata {
   manager_origin?: string;
 }
 
-// A credentialless partition lives for this document. Never reuse it for a
-// different instance, including after visiting an intermediate list or portal.
+// Only an actual credentialless preview uses this document's partition.
+// Native access/capability metadata alone must not force lifecycle-dependent
+// manager reloads. Once used, never share the partition with another instance.
 let documentInstance: number | undefined;
 let navigating = false;
 
@@ -27,13 +28,21 @@ export function allowBrowserInstance(
       window.location.replace(manager.origin + current.pathname + current.search + current.hash);
       return false;
     }
-    if (documentInstance === undefined && instanceId) documentInstance = instanceId;
   }
   if (documentInstance !== undefined && instanceId && instanceId !== documentInstance) {
     navigating = true;
     window.location.replace(window.location.href);
     return false;
   }
+  return true;
+}
+
+export function allowBrowserPreview(
+  instanceId: number | null | undefined,
+  metadata?: BrowserOriginMetadata,
+): boolean {
+  if (!instanceId || !allowBrowserInstance(instanceId, metadata)) return false;
+  documentInstance ??= instanceId;
   return true;
 }
 

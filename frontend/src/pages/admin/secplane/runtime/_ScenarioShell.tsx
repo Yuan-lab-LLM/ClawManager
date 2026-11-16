@@ -173,7 +173,7 @@ export const ScenarioShell: React.FC<{ meta: ScenarioMeta }> = ({ meta }) => {
         <div className="flex items-start justify-between gap-6 mb-5">
           <div className="hero-block flex-1">
             <div className="h-eyebrow">{meta.eyebrow}</div>
-            <h2 className="h-title">{meta.title}</h2>
+            <h2 className="section-title">{meta.title}</h2>
             <p className="h-subtitle">{meta.subtitle}</p>
           </div>
           <div className="flex flex-col items-end gap-2">
@@ -238,7 +238,7 @@ export const ScenarioShell: React.FC<{ meta: ScenarioMeta }> = ({ meta }) => {
               <div key={def.ruleId} className="panel-warm flex items-start justify-between gap-4" style={{ padding: '18px 22px' }}>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-1">
-                    <span className="text-base font-semibold text-[#171212]">{def.name}</span>
+                    <span className="text-base font-semibold text-[var(--cm-ink)]">{def.name}</span>
                     {def.hook && <span className="tag">{def.hook}</span>}
                     {!rule && <span className="badge badge-slate">{t('secplane.runtime.shared.notConfigured')}</span>}
                   </div>

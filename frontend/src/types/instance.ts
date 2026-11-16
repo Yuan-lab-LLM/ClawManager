@@ -64,6 +64,7 @@ export interface Instance extends InstanceAutoStopActivity {
   mount_path: string;
   workspace_path?: string;
   workspace_usage_bytes?: number;
+  workspace_usage_observed_at?: string | null;
   runtime_generation?: number;
   runtime_error_message?: string;
   runtime_error_code?: string;
@@ -117,6 +118,7 @@ export interface InstanceStatus {
   availability?: InstanceAvailability;
   agent_type?: V2InstanceType;
   workspace_usage_bytes?: number;
+  workspace_usage_observed_at?: string | null;
   pod_name?: string;
   pod_namespace?: string;
   pod_ip?: string;

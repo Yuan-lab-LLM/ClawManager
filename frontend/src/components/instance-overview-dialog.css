@@ -1,0 +1,49 @@
+.cm-instance-overview-dialog {
+  width: calc(100vw - 48px);
+  max-width: 1600px;
+  height: calc(100dvh - 48px);
+  max-height: calc(100dvh - 48px);
+  padding: 0;
+  overflow: hidden;
+}
+
+.cm-instance-overview-dialog[open] {
+  display: flex;
+  flex-direction: column;
+}
+
+.cm-instance-overview-header {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--cm-space-control-gap);
+  padding: var(--cm-space-group) var(--cm-space-content);
+  border-bottom: 1px solid var(--cm-border);
+}
+
+.cm-instance-overview-header h2 {
+  font-size: var(--cm-font-title);
+}
+
+.cm-instance-overview-body {
+  min-height: 0;
+  min-width: 0;
+  padding: var(--cm-space-group);
+  overflow: auto;
+  scrollbar-color: var(--cm-muted) var(--cm-subtle);
+  scrollbar-width: thin;
+}
+
+@media (max-width: 767px) {
+  .cm-instance-overview-dialog {
+    width: calc(100vw - 16px);
+    height: calc(100dvh - 16px);
+    max-height: calc(100dvh - 16px);
+  }
+
+  .cm-instance-overview-header,
+  .cm-instance-overview-body {
+    padding: var(--cm-space-cell);
+  }
+}

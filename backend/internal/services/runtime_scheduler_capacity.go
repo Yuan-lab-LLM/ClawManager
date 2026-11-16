@@ -9,6 +9,10 @@ import (
 // allocatableGatewaySlots uses the same physical reservations and SQL ownership
 // as admission. Unknown inventory cannot justify expanding an incompatible pool.
 func (s *RuntimeScheduler) allocatableGatewaySlots(ctx context.Context, pod models.RuntimePod) (int, error) {
+	return s.inspectAllocatableGatewaySlots(ctx, pod, false)
+}
+
+func (s *RuntimeScheduler) inspectAllocatableGatewaySlots(ctx context.Context, pod models.RuntimePod, readOnly bool) (int, error) {
 	free := maxInt(0, pod.Capacity-pod.UsedSlots)
 	inventory, ok := s.agentClient.(interface {
 		reservedGatewayPorts(context.Context, models.RuntimePod) (map[int]struct{}, error)
@@ -19,7 +23,7 @@ func (s *RuntimeScheduler) allocatableGatewaySlots(ctx context.Context, pod mode
 	var reserved map[int]struct{}
 	var err error
 	if client, ok := s.agentClient.(*slotRuntimeAgentClient); ok {
-		reserved, err = client.reservedGatewayPortsInspected(ctx, pod, true)
+		reserved, err = client.inspectReservedGatewayPorts(ctx, pod, true, readOnly)
 	} else {
 		reserved, err = inventory.reservedGatewayPorts(ctx, pod)
 	}

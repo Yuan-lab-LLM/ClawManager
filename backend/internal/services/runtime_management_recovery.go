@@ -22,6 +22,7 @@ import (
 )
 
 type RuntimeFaultEvictionJournal struct {
+	SlotRelease         *RuntimeFaultSlotRelease      `json:"slot_release,omitempty"`
 	Phase               string                        `json:"phase"`
 	Scope               runtimeeviction.Scope         `json:"scope"`
 	Receipt             *runtimeeviction.Receipt      `json:"receipt,omitempty"`
@@ -557,6 +558,15 @@ func (s *RuntimeManagementService) recoverEvictedSource(ctx context.Context, ope
 			if err = s.saveRecoveryItem(ctx, operation, item); err != nil {
 				return err
 			}
+		}
+	}
+	if j.Receipt != nil {
+		c, ok := s.scheduler.agentClient.(*slotRuntimeAgentClient)
+		if !ok {
+			return fmt.Errorf("fault slot lifecycle unavailable")
+		}
+		if err := c.finalizeFaultSlot(ctx, j, func() error { return s.saveRecoveryItem(ctx, operation, item) }); err != nil {
+			return resumableFaultSlotError(err)
 		}
 	}
 	_, err := s.commitRecoveredEviction(ctx, item, operation)

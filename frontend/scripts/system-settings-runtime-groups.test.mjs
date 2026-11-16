@@ -86,7 +86,7 @@ assert(
   "System settings page must not expose the legacy Shell/Desktop selector.",
 );
 assert(
-  pageSource.includes("rolloutRuntimeType === 'openclaw'\n            ? ''") &&
+  /rolloutRuntimeType === 'openclaw'\s*\?\s*''/.test(pageSource) &&
     pageSource.includes("runtimePoolService.preflightOpenClawRollout") &&
     pageSource.includes("rolloutImmutableTargetHelp") &&
     pageSource.includes("preflight.strategy === 'openclaw_8plus_data_safe'"),
