@@ -1,6 +1,6 @@
 # ClawManager Agent 工作规则
 
-本文件适用于本仓库。继续遵循上级目录的 `AGENTS.md`；用户当前明确指令优先于本文件。
+本文件适用于本仓库。用户当前明确指令优先于本文件。
 
 ## 开始工作前
 
@@ -42,18 +42,14 @@
 - 汇报修改范围、实际运行的检查和剩余限制。没有运行的检查不得称为通过；不擅自合并、发布或改动无关文件。
 - 稳定的系统级设计变化同步更新 `DESIGN.md` 和 `.impeccable/design.json`；两者不一致时以 `DESIGN.md` 为准。不要为单个页面的一次性实现复制另一套设计 token。
 
-## 构建与部署约定
+## 构建与部署
 
-- 不要在用户本地机器构建容器镜像，本地资源不足。
-- 镜像及镜像所需二进制的构建必须在测试集群执行；当前测试集群为 `10.130.81.54`。
-- 本地仅准备、校验和传输构建源码及部署脚本。
-- 本轮本地允许做源码阅读、文档编辑、无产物类型检查及浏览器校验；生产前端打包、镜像构建和相关二进制构建安排在测试集群执行。
-- 启用 `CLAWMANAGER_BROWSER_ORIGIN` / `CLAWMANAGER_BROWSER_PORT_RANGE` 时，发布或重建后必须核对对应 NodePort Service、8444 目标端口及就绪 EndpointSlice，并验证 OpenCode/DSH 实际页面；不能仅验证 30443 管理首页。54 环境的持久配置见 `deployments/k8s/sites/server54/browser-origins.yaml`。
+- 根据开发、CI 和部署环境的实际配置选择构建与发布方式。个人机器资源限制、测试集群地址和临时操作约定应保存在仓库外的本地说明中，不作为项目通用要求。
 
 ## AgentRuntime 镜像升级
 
 - 后续 AgentRuntime 镜像更新必须使用 CM 自带 Runtime 升级流程；优先使用仓库 `deployments/runtime-upgrade/upgrade-runtime.py`，由 CM 执行准备、预检、升级、验证及状态记录。
-- 镜像仍在10.130.81.54构建，提交不可变 digest；不得以 `kubectl set image`、直接修改 Runtime Deployment 镜像/副本/身份环境变量、提前改默认镜像或写数据库替代升级流程。
+- 目标镜像使用不可变 digest；不得以 `kubectl set image`、直接修改 Runtime Deployment 镜像/副本/身份环境变量、提前改默认镜像或写数据库替代升级流程。
 - 升级被未完成操作、休眠证明不符或原生兼容性检查阻止时，停止并报告具体操作；不得清除保护或回退到外部脚本强推。
 - CM 应用自身发布不等同于 AgentRuntime 升级。缺少原生数据安全升级能力的类型仍保持拒绝，不能为了发布新镜像移除安全边界。
 
