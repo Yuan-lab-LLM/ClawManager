@@ -16,6 +16,11 @@ func (s *RuntimeScheduler) runRuntimeOperations(ctx context.Context) {
 	ticker := time.NewTicker(s.tick)
 	defer ticker.Stop()
 	for {
+		// A tick and cancellation can become ready together. Do not start a
+		// fresh reconciliation after selecting the tick from a canceled loop.
+		if ctx.Err() != nil {
+			return
+		}
 		s.reconcileRuntimeOperationsIfLeader(ctx)
 		select {
 		case <-ctx.Done():
