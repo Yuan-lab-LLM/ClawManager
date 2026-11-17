@@ -584,21 +584,76 @@ func TestSyncResilienceMySQLProductionScaleSource(t *testing.T) {
 		t.Fatal("no healthy owner advanced in the full production-scale phase")
 	}
 	t.Logf("projection_scale owners=1000 processed=%d remaining_dates=%d elapsed=%s", processed, remaining, time.Since(started))
-	// Even after discarding every process-local cache, a fresh worker must pick
-	// up the durable remainder rather than restart all owners or re-add totals.
-	restarted := &Store{Session: s.Session}
-	work, cancel = context.WithTimeout(ctx, 3*time.Second)
-	e = restarted.processDirty(work, now)
+	// A fast full pass may already have drained the queue. Cold workers must
+	// reduce an actual remainder and leave an empty queue entirely untouched.
+	resume := func(label string, pending int64) int64 {
+		t.Helper()
+		rowsBefore := resilienceInt(t, s, `SELECT COUNT(*) FROM northbound_owner_records`)
+		versionsBefore := resilienceInt(t, s, `SELECT COALESCE(SUM(version),0) FROM northbound_owner_records`)
+		restarted := &Store{Session: s.Session}
+		work, cancel := context.WithTimeout(ctx, 3*time.Second)
+		work, diagnostic := newSyncRun(work, now)
+		err := restarted.processDirty(work, now)
+		cancel()
+		if err != nil && !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, errSyncYield) {
+			t.Fatal("restart failed to resume scale backlog", err)
+		}
+		after := resilienceInt(t, s, `SELECT COUNT(*) FROM northbound_owner_records WHERE record_type='usage_dirty' AND status='pending'`)
+		processed := 0
+		if count := diagnostic.counts["projection"]; count != nil {
+			processed = count.Processed
+		}
+		path := "partial"
+		if pending == 0 {
+			path = "empty"
+			if err != nil || after != 0 || processed != 0 || resilienceInt(t, s, `SELECT COUNT(*) FROM northbound_owner_records`) != rowsBefore || resilienceInt(t, s, `SELECT COALESCE(SUM(version),0) FROM northbound_owner_records`) != versionsBefore {
+				t.Fatal("empty cold restart requeued or reprocessed completed owners", after, processed, err)
+			}
+		} else if after >= pending || processed == 0 {
+			t.Fatal("restart did not reduce persisted pending work", after, pending)
+		}
+		if n := resilienceInt(t, s, `SELECT SUM(total_tokens) FROM northbound_owner_records WHERE record_type='source_usage'`); n != 100050 {
+			t.Fatal("projection restart changed source accounting", n)
+		}
+		t.Logf("projection_restart phase=%s path=%s remaining_before=%d remaining_after=%d processed=%d", label, path, pending, after, processed)
+		return after
+	}
+	drain := func(label string, pending int64) {
+		t.Helper()
+		for attempt, limit := int64(0), pending+1; pending > 0 && attempt < limit; attempt++ {
+			pending = resume(label, pending)
+		}
+		if pending != 0 {
+			t.Fatal("cold workers did not finish the durable remainder", label, pending)
+		}
+		resume("idle-"+label, 0)
+	}
+	drain("full-pass", remaining)
+	// Mark real existing owner/date work, without changing the source volume or
+	// tokens. One bounded production pass selects at most 40 dates, so 41 markers
+	// guarantee persisted work for a cold worker regardless of machine speed.
+	for n := 0; n < 41; n++ {
+		if e = markUsageDay(ctx, s.Session, fmt.Sprintf("scale-%d@example.test", n), day); e != nil {
+			t.Fatal(e)
+		}
+	}
+	pendingBeforePass := resilienceInt(t, s, `SELECT COUNT(*) FROM northbound_owner_records WHERE record_type='usage_dirty' AND status='pending'`)
+	if pendingBeforePass != 41 {
+		t.Fatal("durable restart fixture did not retain all marked dates", pendingBeforePass)
+	}
+	work, cancel = context.WithTimeout(ctx, syncProjectionBudget)
+	e = s.processDirtyPass(work, now)
 	cancel()
-	if e != nil && !errors.Is(e, context.DeadlineExceeded) && !errors.Is(e, errSyncYield) {
-		t.Fatal("restart failed to resume scale backlog", e)
+	if e != nil {
+		t.Fatal("bounded projection pass failed", e)
 	}
-	remainingAfterRestart := resilienceInt(t, s, `SELECT COUNT(*) FROM northbound_owner_records WHERE record_type='usage_dirty' AND status='pending'`)
-	if remainingAfterRestart >= remaining {
-		t.Fatal("restart did not reduce persisted pending work", remainingAfterRestart, remaining)
+	pendingAfterPass := resilienceInt(t, s, `SELECT COUNT(*) FROM northbound_owner_records WHERE record_type='usage_dirty' AND status='pending'`)
+	if pendingAfterPass != 1 {
+		t.Fatal("bounded projection pass did not leave exactly one durable date", pendingBeforePass, pendingAfterPass)
 	}
+	t.Logf("projection_bounded_restart pending_before=%d pending_after=%d", pendingBeforePass, pendingAfterPass)
+	drain("bounded-pass", pendingAfterPass)
 	if n := resilienceInt(t, s, `SELECT SUM(total_tokens) FROM northbound_owner_records WHERE record_type='source_usage'`); n != 100050 {
 		t.Fatal("projection restart changed source accounting", n)
 	}
-	t.Logf("projection_restart remaining_before=%d remaining_after=%d", remaining, remainingAfterRestart)
 }
