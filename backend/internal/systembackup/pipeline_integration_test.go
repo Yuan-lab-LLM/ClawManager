@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 
 	"encoding/json"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -117,7 +118,7 @@ func TestSixRealSourcesPublishAndDataOnlyRestore(t *testing.T) {
 	pub, signer, _ := ed25519.GenerateKey(rand.Reader)
 	var published PublishedArtifact
 	var e error
-	if exe := os.Getenv("TEST_SYSTEM_BACKUP_VERIFY_EXE"); exe != "" {
+	if exe := os.Getenv("TEST_SYSTEM_BACKUP_VERIFY_EXE"); exe != "" && !source.TeamDataOnly {
 		runCaptureCLI(t, ctx, exe, external, source, stage, "fixture-installation", id, wrapper, pub, signer)
 		published, e = OpenPublishedArtifact(ctx, external, "fixture-installation", id, pub, "v1")
 		if e != nil {
@@ -205,9 +206,21 @@ func TestSixRealSourcesPublishAndDataOnlyRestore(t *testing.T) {
 	} else {
 		report, e = RestorePublishedData(ctx, external, recovered, wrapper, run, restoreTarget, budget)
 	}
-	if e != nil || report.Status != "succeeded" || report.Phase != "complete" || report.AcceptanceEligible || len(report.SQL.Tables) != 75 || len(report.HistoryParts) != 2 {
-		t.Fatal("data restore runner", report.Phase, e)
+	if e != nil || report.Status != "succeeded" || report.Phase != "complete" || report.AcceptanceEligible || len(report.HistoryParts) != 2 {
+		t.Fatal("data restore runner", report.Phase, "SQL tables", len(report.SQL.Tables), e)
 	}
+	if e := requireBusinessSQLInventory(report.SQL); e != nil {
+		t.Fatal("restored SQL registry inventory", e)
+	}
+	for name := range report.SQL.Tables {
+		incomplete := report.SQL
+		incomplete.Tables = maps.Clone(report.SQL.Tables)
+		delete(incomplete.Tables, name)
+		if e := requireBusinessSQLInventory(incomplete); e == nil {
+			t.Fatalf("missing registered table %q accepted", name)
+		}
+	}
+	t.Logf("exact production SQL registry: %d tables; every single-table omission rejected", len(report.SQL.Tables))
 	t.Logf("restored and read back: files=%d objects=%d redis=%d", report.VerifiedFileCount, report.VerifiedObjectCount, report.VerifiedRedisCount)
 	if os.Getenv("TEST_SYSTEM_BACKUP_LARGE_SMOKE") == "1" {
 		if report.SQL.Tables["team_events"] != 100000 || report.VerifiedObjectCount != 10001 || report.VerifiedRedisCount != 100001 || report.VerifiedFileCount < 2050 {

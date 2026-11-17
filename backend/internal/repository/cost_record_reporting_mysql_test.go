@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"strconv"
-	"strings"
 	"testing"
 	"time"
 
@@ -80,17 +79,15 @@ func TestCostReportingCountsEachEligibleRecordOnce(t *testing.T) {
 }
 
 func TestSessionReportingInvocationProjectionOmitsBodies(t *testing.T) {
-	s := databaseReportingMySQL(t)
-	_, err := s.SQL().Exec(`CREATE TABLE model_invocations(id INT PRIMARY KEY,trace_id VARCHAR(100),session_id VARCHAR(100),request_id VARCHAR(100),user_id INT,instance_id INT,instance_mode VARCHAR(16),runtime_type VARCHAR(32),gateway_id VARCHAR(128),runtime_pod_id BIGINT,gateway_key_id INT,model_id INT,provider_type VARCHAR(100),requested_model VARCHAR(255),actual_provider_model VARCHAR(255),traffic_class VARCHAR(50),request_payload LONGTEXT,response_payload LONGTEXT,prompt_tokens INT,completion_tokens INT,total_tokens INT,cached_tokens INT,reasoning_tokens INT,latency_ms INT,ttft_ms INT,generation_ms INT,tokens_per_second DOUBLE,attempt_no INT,is_streaming BOOLEAN,status VARCHAR(50),error_message TEXT,created_at DATETIME(6),completed_at DATETIME(6))`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = s.SQL().Exec(`INSERT INTO model_invocations(id,trace_id,session_id,request_id,instance_id,provider_type,requested_model,actual_provider_model,traffic_class,request_payload,response_payload,prompt_tokens,completion_tokens,total_tokens,attempt_no,is_streaming,status,created_at) VALUES (1,'trace','main','request',9,'openai','a','b','chat','request body','response body',1,2,3,1,false,'completed','2026-11-17 12:00:00')`)
+	s := auditFullFixture(t)
+	_, err := s.SQL().Exec(`INSERT INTO model_invocations(id,trace_id,session_id,request_id,instance_id,provider_type,requested_model,actual_provider_model,traffic_class,request_payload,response_payload,prompt_tokens,completion_tokens,total_tokens,attempt_no,is_streaming,status,created_at) VALUES (1,'trace','main','request',9,'openai','a','b','chat','request body','response body',1,2,3,1,false,'completed','2026-11-17 12:00:00')`)
 	if err != nil {
 		t.Fatal(err)
 	}
 	repo := NewModelInvocationRepository(s)
-	seedReportingSummaries(t, s)
+	if n, err := ReconcileObservationSummaries(context.Background(), s, 500); err != nil || n != 1 {
+		t.Fatalf("initial projection: rows=%d error=%v", n, err)
+	}
 	items, err := repo.ListRecentByInstanceSession(9, "main", 20, SessionUsageFilter{})
 	if err != nil {
 		t.Fatal(err)
@@ -109,7 +106,9 @@ func TestSessionReportingInvocationProjectionOmitsBodies(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	seedReportingSummaries(t, s)
+	if n, err := ReconcileObservationSummaries(context.Background(), s, 500); err != nil || n != 24 {
+		t.Fatalf("remaining projection: rows=%d error=%v", n, err)
+	}
 	aggregates, err := aggregateRepo.AggregateModelsByInstanceSession(9, "main", SessionUsageFilter{})
 	if err != nil || len(aggregates) != 1 || aggregates[0].ActualProviderModel != "b" || aggregates[0].TotalTokens != 75 {
 		t.Fatalf("full model aggregation: %+v %v", aggregates, err)
@@ -226,36 +225,5 @@ func TestCostReportingRejectsMixedCurrencies(t *testing.T) {
 				t.Errorf("empty model window: %+v %v", emptyModels, err)
 			}
 		})
-	}
-}
-
-func seedReportingSummaries(t *testing.T, s db.Session) {
-	t.Helper()
-	raw, e := os.ReadFile("../db/migrations/116_add_query_summaries.sql")
-	if e != nil {
-		t.Fatal(e)
-	}
-	guards, e := os.ReadFile("../db/migrations/121_guard_observation_reconciliation.sql")
-	if e != nil {
-		t.Fatal(e)
-	}
-	raw = append(raw, []byte(strings.Split(string(guards), "-- A trigger")[0])...)
-	for _, q := range strings.Split(string(raw), ";") {
-		if strings.TrimSpace(q) != "" {
-			if _, e = s.SQL().Exec(q); e != nil {
-				t.Fatal(e)
-			}
-		}
-	}
-	var rows []models.ModelInvocation
-	if e = s.Collection("model_invocations").Find().All(&rows); e != nil {
-		t.Fatal(e)
-	}
-	for i := range rows {
-		if e = s.Tx(func(tx db.Session) error {
-			return maintainInvocationSummary(context.Background(), tx, "model_invocations", &rows[i])
-		}); e != nil {
-			t.Fatal(e)
-		}
 	}
 }

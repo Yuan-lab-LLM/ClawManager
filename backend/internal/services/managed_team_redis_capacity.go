@@ -2,10 +2,17 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 )
+
+var errManagedRedisKeyDenied = errors.New("managed Team Redis key access denied")
+
+// Only CM emits this command after the client-script allowlist has been checked.
+// Redis serializes the fixed error with all earlier/later pipeline replies.
+const managedRedisKeyDeniedScript = "return redis.error_reply('NOPERM managed Team key access denied')"
 
 // Runtime supplies only the two exact allowlisted scripts. A read-only first
 // pass checks every write before the original atomic script can change state.
@@ -81,7 +88,7 @@ func (s *ManagedTeamRedisSession) capacityCommand(ctx context.Context, args []st
 	for _, key := range keys {
 		proofRead := strings.EqualFold(args[0], "GET") && key == teamCapacityPrefix(s.teamID)+"replay-source-closed"
 		if !strings.HasPrefix(key, prefix) || len(key) > 512 || (strings.Contains(key, teamRedisInternalNamespace) && !proofRead) {
-			return nil, errManagedRedis
+			return nil, errManagedRedisKeyDenied
 		}
 	}
 	cmd := strings.ToUpper(args[0])

@@ -289,7 +289,9 @@ func (s *ManagedTeamRedisSession) Relay(ctx context.Context, downstream net.Conn
 				return
 			}
 			args, err = s.capacityCommand(ctx, args)
-			if err != nil {
+			if errors.Is(err, errManagedRedisKeyDenied) {
+				args = []string{"EVAL", managedRedisKeyDeniedScript, "0"}
+			} else if err != nil {
 				results <- err
 				return
 			}
