@@ -10,6 +10,30 @@ from generate_database_report import coverage_rows, generate, read_cases, verifi
 
 
 class ReportIntegrity(unittest.TestCase):
+    def test_query_metrics_use_the_actual_go_capacity_labels(self):
+        # Independent literals mirror query_capacity_mysql_test.go's emitted
+        # messages; do not derive fixtures from PERFORMANCE_EVIDENCE itself.
+        labels = {
+            'admin_fractional': 'admin-fractional-window',
+            'session_instance': 'instance-session',
+            'trace_page': 'trace-page',
+            'cost_fractional': 'cost-fractional-window',
+        }
+        with tempfile.TemporaryDirectory() as folder:
+            evidence = Path(folder) / 'actual-labels.jsonl'
+            for identity, label in labels.items():
+                with self.subTest(metric=identity):
+                    line = f'MEASURED {label} samples=20 P50=7.90754ms P95=8.92925ms max=11.103863ms'
+                    evidence.write_text(json.dumps(dict(Action='output',
+                        Test='TestQueryCapacityTenThousandInstancesNinetyDays', Output=line + '\n')))
+                    suite = dict(suite_id='query-capacity', kind='go-json', evidence=str(evidence))
+                    metric = dict(id=identity, evidence_suite_id='query-capacity',
+                        evidence_test='TestQueryCapacityTenThousandInstancesNinetyDays', evidence_output=line,
+                        samples=20, p50_ms=7.90754, p95_ms=8.92925)
+                    self.assertTrue(verified_metric(metric, [suite]))
+                    metric['p95_ms'] = 1
+                    self.assertFalse(verified_metric(metric, [suite]))
+
     def test_complete_fixture_passes_but_relaxed_target_cannot_hide_slow_metric(self):
         with tempfile.TemporaryDirectory() as folder:
             evidence = Path(folder) / "complete.jsonl"

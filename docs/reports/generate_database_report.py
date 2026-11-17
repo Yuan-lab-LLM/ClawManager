@@ -34,11 +34,11 @@ PERFORMANCE_EVIDENCE = {
     "audit90": ("audit-capacity", "scenario=all90"), "audit_search90": ("audit-capacity", "scenario=search90"),
     "audit_search30": ("audit-capacity", "scenario=search30"),
     "admin_all": ("query-capacity", "instances=10000 active=100%"),
-    "admin_fractional": ("query-capacity", "scenario=admin-fractional-window"),
-    "session_instance": ("query-capacity", "scenario=instance-session"),
-    "trace_page": ("query-capacity", "scenario=trace-page"),
+    "admin_fractional": ("query-capacity", "admin-fractional-window"),
+    "session_instance": ("query-capacity", "instance-session"),
+    "trace_page": ("query-capacity", "trace-page"),
     "cost_overview": ("query-capacity", "cost overview"),
-    "cost_fractional": ("query-capacity", "scenario=cost-fractional-window"),
+    "cost_fractional": ("query-capacity", "cost-fractional-window"),
 }
 
 
