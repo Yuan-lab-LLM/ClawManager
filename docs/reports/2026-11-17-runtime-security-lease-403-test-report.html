@@ -1,0 +1,674 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Runtime security lease 403 修复验收</title><style>body{font:15px/1.65 system-ui,sans-serif;max-width:1300px;margin:auto;padding:28px;color:#242424;background:#fafafa}h1{font-size:27px}h2{font-size:21px;margin-top:28px}table{border-collapse:collapse;width:100%;background:white}th,td{border:1px solid #ddd;text-align:left;padding:10px;vertical-align:top}th{background:#eee}.PASS{color:#107c10}.FAIL{color:#b10e1c}.outcome{font-weight:650}pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px}summary{cursor:pointer;color:#0078d4}details{max-width:800px}@media(max-width:768px){body{padding:12px}table{font-size:12px}td,th{padding:6px}}</style></head><body><h1>Runtime security lease 403 修复验收</h1><p>2026-11-17 · 10.130.81.54 · clawmanager-system / 30443</p><p class="outcome">最终结果：通过</p><p>历史文档记录于 chatgroup；本次按用户明确要求，仅发布和验收 system。历史 403 的具体拒绝分支无法唯一还原，本轮修复并验证已复现的缓存可见性窗口和签发阶段暂态失效。</p><h2>修复行为</h2><ul><li>发布 assignment 后确认同一名称、UID、同类型 resourceVersion、身份和请求；库存未追上时保留 creating、SQL 认领及绑定，由已有持久 reconciliation 重观察；直接新建 G1 超过原始 CreatedAt 五分钟后显示 RUNTIME_PUBLICATION_TIMEOUT，保留身份与占用并阻止迟到启动。</li><li>租约仅对明确的库存暂态错误做有界整组重试，每次重新验证完整身份与实际 TCP 来源，不返回部分凭证。</li><li>UID、generation、请求、停止/删除意图及来源冲突继续拒绝；无 Kubernetes 直接读取回退，不放宽缓存健康证明。</li><li>增加安全拒绝原因、阶段、关联 ID 和 assignment 版本日志；不记录 token、环境或请求正文。</li><li>保持现有 Agent 协议和 Runtime 镜像；此次只更新 CM 镜像。</li></ul><h2>并发验收</h2><p>OpenClaw 在现有 8 槽物理池先并发创建两个新实例（包含 slot-1），再通过 CM 正常创建填充实例，剩一个空槽时并发创建三个，验证自动扩容。Hermes、OpenCode、DSH 各两个新实例并发创建。全部要求首次 generation 1 达到 running、绑定和物理槽位身份唯一。</p><table id="acceptance"><thead><tr><th>检查</th><th>结果</th><th>证据</th></tr></thead><tbody><tr><td>OpenClaw 双槽首次并发创建</td><td class="PASS">PASS</td><td><details><summary>展开证据</summary><pre>[
+  {
+    &quot;instance_id&quot;: 354,
+    &quot;pod_id&quot;: 67,
+    &quot;pod_uid&quot;: &quot;b8d8f30c-c942-4f2c-9e48-d7c8f559afa2&quot;,
+    &quot;container&quot;: &quot;slot-2&quot;,
+    &quot;port&quot;: 20006,
+    &quot;generation&quot;: 1,
+    &quot;binding_confirmed&quot;: true
+  },
+  {
+    &quot;instance_id&quot;: 355,
+    &quot;pod_id&quot;: 67,
+    &quot;pod_uid&quot;: &quot;b8d8f30c-c942-4f2c-9e48-d7c8f559afa2&quot;,
+    &quot;container&quot;: &quot;slot-1&quot;,
+    &quot;port&quot;: 20003,
+    &quot;generation&quot;: 1,
+    &quot;binding_confirmed&quot;: true
+  }
+]</pre></details></td></tr><tr><td>OpenClaw 池内确认仅剩一个空槽</td><td class="PASS">PASS</td><td><details><summary>展开证据</summary><pre>{
+  &quot;pod_id&quot;: 67,
+  &quot;capacity&quot;: 8,
+  &quot;used_slots&quot;: 7,
+  &quot;free_containers&quot;: [
+    &quot;slot-7&quot;
+  ]
+}</pre></details></td></tr><tr><td>OpenClaw 单空槽三实例并发及自动扩容</td><td class="PASS">PASS</td><td><details><summary>展开证据</summary><pre>[
+  {
+    &quot;instance_id&quot;: 360,
+    &quot;pod_id&quot;: 67,
+    &quot;pod_uid&quot;: &quot;b8d8f30c-c942-4f2c-9e48-d7c8f559afa2&quot;,
+    &quot;container&quot;: &quot;slot-7&quot;,
+    &quot;port&quot;: 20021,
+    &quot;generation&quot;: 1,
+    &quot;binding_confirmed&quot;: true
+  },
+  {
+    &quot;instance_id&quot;: 361,
+    &quot;pod_id&quot;: 80,
+    &quot;pod_uid&quot;: &quot;ea7c4637-3185-43c6-820d-eef8f1a30964&quot;,
+    &quot;container&quot;: &quot;slot-1&quot;,
+    &quot;port&quot;: 20003,
+    &quot;generation&quot;: 1,
+    &quot;binding_confirmed&quot;: true
+  },
+  {
+    &quot;instance_id&quot;: 362,
+    &quot;pod_id&quot;: 80,
+    &quot;pod_uid&quot;: &quot;ea7c4637-3185-43c6-820d-eef8f1a30964&quot;,
+    &quot;container&quot;: &quot;slot-0&quot;,
+    &quot;port&quot;: 20000,
+    &quot;generation&quot;: 1,
+    &quot;binding_confirmed&quot;: true
+  }
+]</pre></details></td></tr><tr><td>Hermes 首次并发创建</td><td class="PASS">PASS</td><td><details><summary>展开证据</summary><pre>[
+  {
+    &quot;instance_id&quot;: 363,
+    &quot;pod_id&quot;: 69,
+    &quot;pod_uid&quot;: &quot;1546df64-9a08-47ce-a2b1-bf626b40b5bc&quot;,
+    &quot;container&quot;: &quot;slot-2&quot;,
+    &quot;port&quot;: 20002,
+    &quot;generation&quot;: 1,
+    &quot;binding_confirmed&quot;: true
+  },
+  {
+    &quot;instance_id&quot;: 364,
+    &quot;pod_id&quot;: 69,
+    &quot;pod_uid&quot;: &quot;1546df64-9a08-47ce-a2b1-bf626b40b5bc&quot;,
+    &quot;container&quot;: &quot;slot-1&quot;,
+    &quot;port&quot;: 20001,
+    &quot;generation&quot;: 1,
+    &quot;binding_confirmed&quot;: true
+  }
+]</pre></details></td></tr><tr><td>OpenCode 首次并发创建</td><td class="PASS">PASS</td><td><details><summary>展开证据</summary><pre>[
+  {
+    &quot;instance_id&quot;: 365,
+    &quot;pod_id&quot;: 70,
+    &quot;pod_uid&quot;: &quot;503b4a31-7f16-438f-8a55-9fa15a67a630&quot;,
+    &quot;container&quot;: &quot;slot-2&quot;,
+    &quot;port&quot;: 20006,
+    &quot;generation&quot;: 1,
+    &quot;binding_confirmed&quot;: true
+  },
+  {
+    &quot;instance_id&quot;: 366,
+    &quot;pod_id&quot;: 70,
+    &quot;pod_uid&quot;: &quot;503b4a31-7f16-438f-8a55-9fa15a67a630&quot;,
+    &quot;container&quot;: &quot;slot-3&quot;,
+    &quot;port&quot;: 20009,
+    &quot;generation&quot;: 1,
+    &quot;binding_confirmed&quot;: true
+  }
+]</pre></details></td></tr><tr><td>DSH 首次并发创建</td><td class="PASS">PASS</td><td><details><summary>展开证据</summary><pre>[
+  {
+    &quot;instance_id&quot;: 367,
+    &quot;pod_id&quot;: 71,
+    &quot;pod_uid&quot;: &quot;f28099e5-c63a-46da-b502-018e9ffbdaf2&quot;,
+    &quot;container&quot;: &quot;slot-3&quot;,
+    &quot;port&quot;: 20003,
+    &quot;generation&quot;: 1,
+    &quot;binding_confirmed&quot;: true
+  },
+  {
+    &quot;instance_id&quot;: 368,
+    &quot;pod_id&quot;: 71,
+    &quot;pod_uid&quot;: &quot;f28099e5-c63a-46da-b502-018e9ffbdaf2&quot;,
+    &quot;container&quot;: &quot;slot-4&quot;,
+    &quot;port&quot;: 20004,
+    &quot;generation&quot;: 1,
+    &quot;binding_confirmed&quot;: true
+  }
+]</pre></details></td></tr><tr><td>全部测试绑定的物理槽位唯一</td><td class="PASS">PASS</td><td><details><summary>展开证据</summary><pre>[
+  {
+    &quot;instance_id&quot;: &quot;354&quot;,
+    &quot;pod_id&quot;: &quot;67&quot;,
+    &quot;port&quot;: &quot;20006&quot;,
+    &quot;generation&quot;: &quot;1&quot;,
+    &quot;state&quot;: &quot;running&quot;,
+    &quot;gateway_id&quot;: &quot;gw-354-1&quot;,
+    &quot;pod_uid&quot;: &quot;b8d8f30c-c942-4f2c-9e48-d7c8f559afa2&quot;,
+    &quot;pod_name&quot;: &quot;openclaw-runtime-5688b4c79c-xjwc7&quot;
+  },
+  {
+    &quot;instance_id&quot;: &quot;355&quot;,
+    &quot;pod_id&quot;: &quot;67&quot;,
+    &quot;port&quot;: &quot;20003&quot;,
+    &quot;generation&quot;: &quot;1&quot;,
+    &quot;state&quot;: &quot;running&quot;,
+    &quot;gateway_id&quot;: &quot;gw-355-1&quot;,
+    &quot;pod_uid&quot;: &quot;b8d8f30c-c942-4f2c-9e48-d7c8f559afa2&quot;,
+    &quot;pod_name&quot;: &quot;openclaw-runtime-5688b4c79c-xjwc7&quot;
+  },
+  {
+    &quot;instance_id&quot;: &quot;356&quot;,
+    &quot;pod_id&quot;: &quot;67&quot;,
+    &quot;port&quot;: &quot;20015&quot;,
+    &quot;generation&quot;: &quot;1&quot;,
+    &quot;state&quot;: &quot;running&quot;,
+    &quot;gateway_id&quot;: &quot;gw-356-1&quot;,
+    &quot;pod_uid&quot;: &quot;b8d8f30c-c942-4f2c-9e48-d7c8f559afa2&quot;,
+    &quot;pod_name&quot;: &quot;openclaw-runtime-5688b4c79c-xjwc7&quot;
+  },
+  {
+    &quot;instance_id&quot;: &quot;357&quot;,
+    &quot;pod_id&quot;: &quot;67&quot;,
+    &quot;port&quot;: &quot;20018&quot;,
+    &quot;generation&quot;: &quot;1&quot;,
+    &quot;state&quot;: &quot;running&quot;,
+    &quot;gateway_id&quot;: &quot;gw-357-1&quot;,
+    &quot;pod_uid&quot;: &quot;b8d8f30c-c942-4f2c-9e48-d7c8f559afa2&quot;,
+    &quot;pod_name&quot;: &quot;openclaw-runtime-5688b4c79c-xjwc7&quot;
+  },
+  {
+    &quot;instance_id&quot;: &quot;358&quot;,
+    &quot;pod_id&quot;: &quot;67&quot;,
+    &quot;port&quot;: &quot;20012&quot;,
+    &quot;generation&quot;: &quot;1&quot;,
+    &quot;state&quot;: &quot;running&quot;,
+    &quot;gateway_id&quot;: &quot;gw-358-1&quot;,
+    &quot;pod_uid&quot;: &quot;b8d8f30c-c942-4f2c-9e48-d7c8f559afa2&quot;,
+    &quot;pod_name&quot;: &quot;openclaw-runtime-5688b4c79c-xjwc7&quot;
+  },
+  {
+    &quot;instance_id&quot;: &quot;359&quot;,
+    &quot;pod_id&quot;: &quot;67&quot;,
+    &quot;port&quot;: &quot;20009&quot;,
+    &quot;generation&quot;: &quot;1&quot;,
+    &quot;state&quot;: &quot;running&quot;,
+    &quot;gateway_id&quot;: &quot;gw-359-1&quot;,
+    &quot;pod_uid&quot;: &quot;b8d8f30c-c942-4f2c-9e48-d7c8f559afa2&quot;,
+    &quot;pod_name&quot;: &quot;openclaw-runtime-5688b4c79c-xjwc7&quot;
+  },
+  {
+    &quot;instance_id&quot;: &quot;360&quot;,
+    &quot;pod_id&quot;: &quot;67&quot;,
+    &quot;port&quot;: &quot;20021&quot;,
+    &quot;generation&quot;: &quot;1&quot;,
+    &quot;state&quot;: &quot;running&quot;,
+    &quot;gateway_id&quot;: &quot;gw-360-1&quot;,
+    &quot;pod_uid&quot;: &quot;b8d8f30c-c942-4f2c-9e48-d7c8f559afa2&quot;,
+    &quot;pod_name&quot;: &quot;openclaw-runtime-5688b4c79c-xjwc7&quot;
+  },
+  {
+    &quot;instance_id&quot;: &quot;361&quot;,
+    &quot;pod_id&quot;: &quot;80&quot;,
+    &quot;port&quot;: &quot;20003&quot;,
+    &quot;generation&quot;: &quot;1&quot;,
+    &quot;state&quot;: &quot;running&quot;,
+    &quot;gateway_id&quot;: &quot;gw-361-1&quot;,
+    &quot;pod_uid&quot;: &quot;ea7c4637-3185-43c6-820d-eef8f1a30964&quot;,
+    &quot;pod_name&quot;: &quot;openclaw-runtime-5688b4c79c-pmxp7&quot;
+  },
+  {
+    &quot;instance_id&quot;: &quot;362&quot;,
+    &quot;pod_id&quot;: &quot;80&quot;,
+    &quot;port&quot;: &quot;20000&quot;,
+    &quot;generation&quot;: &quot;1&quot;,
+    &quot;state&quot;: &quot;running&quot;,
+    &quot;gateway_id&quot;: &quot;gw-362-1&quot;,
+    &quot;pod_uid&quot;: &quot;ea7c4637-3185-43c6-820d-eef8f1a30964&quot;,
+    &quot;pod_name&quot;: &quot;openclaw-runtime-5688b4c79c-pmxp7&quot;
+  },
+  {
+    &quot;instance_id&quot;: &quot;363&quot;,
+    &quot;pod_id&quot;: &quot;69&quot;,
+    &quot;port&quot;: &quot;20002&quot;,
+    &quot;generation&quot;: &quot;1&quot;,
+    &quot;state&quot;: &quot;running&quot;,
+    &quot;gateway_id&quot;: &quot;gw-363-1&quot;,
+    &quot;pod_uid&quot;: &quot;1546df64-9a08-47ce-a2b1-bf626b40b5bc&quot;,
+    &quot;pod_name&quot;: &quot;hermes-runtime-d64fdbddd-xzm2h&quot;
+  },
+  {
+    &quot;instance_id&quot;: &quot;364&quot;,
+    &quot;pod_id&quot;: &quot;69&quot;,
+    &quot;port&quot;: &quot;20001&quot;,
+    &quot;generation&quot;: &quot;1&quot;,
+    &quot;state&quot;: &quot;running&quot;,
+    &quot;gateway_id&quot;: &quot;gw-364-1&quot;,
+    &quot;pod_uid&quot;: &quot;1546df64-9a08-47ce-a2b1-bf626b40b5bc&quot;,
+    &quot;pod_name&quot;: &quot;hermes-runtime-d64fdbddd-xzm2h&quot;
+  },
+  {
+    &quot;instance_id&quot;: &quot;365&quot;,
+    &quot;pod_id&quot;: &quot;70&quot;,
+    &quot;port&quot;: &quot;20006&quot;,
+    &quot;generation&quot;: &quot;1&quot;,
+    &quot;state&quot;: &quot;running&quot;,
+    &quot;gateway_id&quot;: &quot;gw-365-1&quot;,
+    &quot;pod_uid&quot;: &quot;503b4a31-7f16-438f-8a55-9fa15a67a630&quot;,
+    &quot;pod_name&quot;: &quot;opencode-runtime-55b5685cbb-v8ppp&quot;
+  },
+  {
+    &quot;instance_id&quot;: &quot;366&quot;,
+    &quot;pod_id&quot;: &quot;70&quot;,
+    &quot;port&quot;: &quot;20009&quot;,
+    &quot;generation&quot;: &quot;1&quot;,
+    &quot;state&quot;: &quot;running&quot;,
+    &quot;gateway_id&quot;: &quot;gw-366-1&quot;,
+    &quot;pod_uid&quot;: &quot;503b4a31-7f16-438f-8a55-9fa15a67a630&quot;,
+    &quot;pod_name&quot;: &quot;opencode-runtime-55b5685cbb-v8ppp&quot;
+  },
+  {
+    &quot;instance_id&quot;: &quot;367&quot;,
+    &quot;pod_id&quot;: &quot;71&quot;,
+    &quot;port&quot;: &quot;20003&quot;,
+    &quot;generation&quot;: &quot;1&quot;,
+    &quot;state&quot;: &quot;running&quot;,
+    &quot;gateway_id&quot;: &quot;gw-367-1&quot;,
+    &quot;pod_uid&quot;: &quot;f28099e5-c63a-46da-b502-018e9ffbdaf2&quot;,
+    &quot;pod_name&quot;: &quot;deepseek-harness-runtime-fbc6bf894-g5xgq&quot;
+  },
+  {
+    &quot;instance_id&quot;: &quot;368&quot;,
+    &quot;pod_id&quot;: &quot;71&quot;,
+    &quot;port&quot;: &quot;20004&quot;,
+    &quot;generation&quot;: &quot;1&quot;,
+    &quot;state&quot;: &quot;running&quot;,
+    &quot;gateway_id&quot;: &quot;gw-368-1&quot;,
+    &quot;pod_uid&quot;: &quot;f28099e5-c63a-46da-b502-018e9ffbdaf2&quot;,
+    &quot;pod_name&quot;: &quot;deepseek-harness-runtime-fbc6bf894-g5xgq&quot;
+  }
+]</pre></details></td></tr><tr><td>测试实例及绑定清理、全局策略保持</td><td class="PASS">PASS</td><td><details><summary>展开证据</summary><pre>{
+  &quot;all_intents_resolved&quot;: true,
+  &quot;remaining_instance_rows&quot;: &quot;&quot;,
+  &quot;remaining_bindings&quot;: &quot;&quot;,
+  &quot;policy_unchanged&quot;: true,
+  &quot;delete_request_errors&quot;: []
+}</pre></details></td></tr></tbody></table><h2>回归、发布及清理证据</h2><details><summary>报告判定条件</summary><pre>{
+  &quot;complete_concurrency_acceptance&quot;: true,
+  &quot;all_phases_pass&quot;: true,
+  &quot;regression_pass&quot;: true,
+  &quot;review_pass&quot;: true,
+  &quot;existing_instances_unchanged&quot;: true,
+  &quot;test_resources_removed&quot;: true,
+  &quot;runtime_specs_preserved&quot;: true,
+  &quot;browser_ports_pass&quot;: true,
+  &quot;native_browser_pages_pass&quot;: true,
+  &quot;isolated_mysql_removed&quot;: true,
+  &quot;live_lease_requests_pass&quot;: true,
+  &quot;slots_unique_within_capacity&quot;: true,
+  &quot;historical_cleanup_pass&quot;: true,
+  &quot;deployed_source_matches&quot;: true
+}</pre></details><details><summary>镜像与源码清单</summary><pre>{
+  &quot;manager&quot;: &quot;clawmanager.local/clawmanager@sha256:72a85b999d155febc151224f295a03a86777786767b1fc8e09959546a56a5d0e&quot;,
+  &quot;base&quot;: &quot;clawmanager.local/clawmanager@sha256:e92cf50aae1cc6533ee73f0b531d8a94fe295dadf554279cf3b31305fae52d17&quot;,
+  &quot;source_sha256&quot;: &quot;a6a6aafac6f6b76a244225e1636154429408ebc07cf2cf4f131b56ed6c8b034a&quot;,
+  &quot;built_on&quot;: &quot;10.130.81.54&quot;
+}</pre></details><details><summary>部署版本（commit 字段为源码清单摘要前缀）</summary><pre>{
+  &quot;version&quot;: &quot;lease403-20261117&quot;,
+  &quot;commit&quot;: &quot;a6a6aafac6f6&quot;,
+  &quot;build_time&quot;: &quot;unknown&quot;
+}</pre></details><details><summary>隔离回归</summary><pre>{
+  &quot;exit_code&quot;: 0,
+  &quot;at&quot;: &quot;2026-11-17T09:28:43.160750+00:00&quot;,
+  &quot;command&quot;: [
+    &quot;/root/cm-nfs-multislot-20261105/tools/usr/local/go/bin/go&quot;,
+    &quot;test&quot;,
+    &quot;./internal/runtimeinventory&quot;,
+    &quot;./internal/runtimeauth&quot;,
+    &quot;./internal/services/k8s&quot;,
+    &quot;./internal/repository&quot;,
+    &quot;./internal/services&quot;,
+    &quot;./internal/handlers&quot;,
+    &quot;-count=1&quot;,
+    &quot;-timeout=15m&quot;
+  ],
+  &quot;packages&quot;: [
+    &quot;./internal/runtimeinventory&quot;,
+    &quot;./internal/runtimeauth&quot;,
+    &quot;./internal/services/k8s&quot;,
+    &quot;./internal/repository&quot;,
+    &quot;./internal/services&quot;,
+    &quot;./internal/handlers&quot;
+  ],
+  &quot;isolated_mysql&quot;: true,
+  &quot;mysql_fixture_families&quot;: [
+    &quot;TEST_RUNTIME_MYSQL&quot;,
+    &quot;TEST_RUNTIME_SECURITY_MYSQL&quot;
+  ],
+  &quot;node_available&quot;: true,
+  &quot;source_sha256&quot;: &quot;a6a6aafac6f6b76a244225e1636154429408ebc07cf2cf4f131b56ed6c8b034a&quot;
+}</pre></details><details><summary>独立审查</summary><pre>{
+  &quot;status&quot;: &quot;APPROVED&quot;,
+  &quot;critical&quot;: 0,
+  &quot;important&quot;: 0,
+  &quot;at&quot;: &quot;2026-11-17T09:26:07.258575+00:00&quot;,
+  &quot;source_sha256&quot;: &quot;a6a6aafac6f6b76a244225e1636154429408ebc07cf2cf4f131b56ed6c8b034a&quot;,
+  &quot;initial_findings_resolved&quot;: [
+    &quot;SQL user/generation checked before inventory in the same snapshot&quot;,
+    &quot;Durable five-minute direct-G1 deadline; late replay fenced; timeout CAS cannot overwrite running&quot;,
+    &quot;Exact batch intents persisted before POST; lost response/interrupted journal recovered; unresolved cleanup fails&quot;,
+    &quot;Snapshot denials logged with sanitized classification&quot;
+  ],
+  &quot;conditional_timeout_sql_tests&quot;: &quot;isolated MySQL expired/running-race/new generation/new origin/timely/deleting; binding retained&quot;,
+  &quot;runner_fake_api_tests&quot;: {
+    &quot;count&quot;: 6,
+    &quot;result&quot;: &quot;PASS&quot;
+  },
+  &quot;remaining_verification_gate&quot;: &quot;Final six packages and both isolated MySQL families passed on reviewed source&quot;,
+  &quot;harness_sql_fix_review&quot;: &quot;APPROVED: binary exact-name comparison avoids MySQL1270; all four fake API checks and actual read-only discovery passed&quot;,
+  &quot;physical_observation_review&quot;: &quot;APPROVED: bounded90s actual identity confirmation; no fake success or duplicate-owner tolerance; capacity-used-3 fill formula&quot;
+}</pre></details><details><summary>Kubernetes 核对</summary><pre>{
+  &quot;at&quot;: &quot;2026-11-17T09:45:36.178893+00:00&quot;,
+  &quot;namespace&quot;: &quot;clawmanager-system&quot;,
+  &quot;browser_service&quot;: {
+    &quot;node_ports&quot;: 128,
+    &quot;range&quot;: [
+      31600,
+      31727
+    ],
+    &quot;target_port&quot;: 8444,
+    &quot;ready_endpoints&quot;: 1,
+    &quot;all_ports_verified&quot;: true
+  },
+  &quot;cm_spec_change&quot;: &quot;CM image digest only&quot;,
+  &quot;runtime_images_and_layout_unchanged&quot;: true,
+  &quot;automatic_replica_changes&quot;: [
+    {
+      &quot;deployment&quot;: &quot;openclaw-runtime&quot;,
+      &quot;before_replicas&quot;: 1,
+      &quot;after_replicas&quot;: 2
+    }
+  ],
+  &quot;existing_service_specs_unchanged&quot;: true
+}</pre></details><details><summary>既有实例与测试数据核对</summary><pre>{
+  &quot;at&quot;: &quot;2026-11-17T09:45:36.413930+00:00&quot;,
+  &quot;original_count&quot;: 36,
+  &quot;unchanged&quot;: true,
+  &quot;binding_identities_unchanged&quot;: true,
+  &quot;differences&quot;: [],
+  &quot;owned_count&quot;: 19,
+  &quot;owned_remaining_rows&quot;: &quot;&quot;,
+  &quot;owned_remaining_bindings&quot;: &quot;&quot;
+}</pre></details><details><summary>隔离 MySQL 清理</summary><pre>{
+  &quot;namespace&quot;: &quot;cm-lease403-test-20261117&quot;,
+  &quot;deletion_submitted&quot;: true,
+  &quot;at&quot;: &quot;2026-11-17T09:29:44.897650+00:00&quot;,
+  &quot;deleted&quot;: true,
+  &quot;verified_at&quot;: &quot;2026-11-17T09:31:16.753702+00:00&quot;
+}</pre></details><details><summary>真实租约请求观察</summary><pre>{
+  &quot;at&quot;: &quot;2026-11-17T09:45:36.000826+00:00&quot;,
+  &quot;since&quot;: &quot;2026-11-17T09:39:21.044096+00:00&quot;,
+  &quot;lease_http_status_counts&quot;: {
+    &quot;200&quot;: 26
+  },
+  &quot;owned_security_observations&quot;: [],
+  &quot;all_observed_lease_requests_200&quot;: true
+}</pre></details><details><summary>峰值全池槽位与容量核对</summary><pre>{
+  &quot;at&quot;: &quot;2026-11-17T09:45:06.037055+00:00&quot;,
+  &quot;unique_slots&quot;: true,
+  &quot;within_capacity&quot;: true,
+  &quot;duplicate_rows&quot;: &quot;&quot;,
+  &quot;over_capacity_rows&quot;: &quot;&quot;
+}</pre></details><details><summary>发布前资源余量</summary><pre>{
+  &quot;at&quot;: &quot;2026-11-17T08:59:20.071869+00:00&quot;,
+  &quot;pod_level_requests_used&quot;: true,
+  &quot;nodes&quot;: [
+    {
+      &quot;node&quot;: &quot;k8s-master&quot;,
+      &quot;cpu_allocatable&quot;: &quot;96&quot;,
+      &quot;cpu_requested&quot;: &quot;73.68&quot;,
+      &quot;cpu_remaining&quot;: &quot;22.32&quot;,
+      &quot;memory_allocatable_gib&quot;: &quot;503.37&quot;,
+      &quot;memory_requested_gib&quot;: &quot;220.72&quot;,
+      &quot;memory_remaining_gib&quot;: &quot;282.65&quot;
+    }
+  ]
+}</pre></details><details><summary>验收阶段退出码</summary><pre>{
+  &quot;acceptance-prepare&quot;: 0,
+  &quot;runtime-claims&quot;: 0,
+  &quot;native-browser&quot;: 0,
+  &quot;native-browser-owned&quot;: 0,
+  &quot;acceptance-cleanup&quot;: 0
+}</pre></details><details><summary>browser-verification.json</summary><pre>{
+  &quot;at&quot;: &quot;2026-11-17T09:45:09.337Z&quot;,
+  &quot;results&quot;: [
+    {
+      &quot;case&quot;: &quot;native browser page&quot;,
+      &quot;type&quot;: &quot;opencode&quot;,
+      &quot;id&quot;: 255,
+      &quot;status&quot;: &quot;PASS&quot;,
+      &quot;frame&quot;: {
+        &quot;origin&quot;: &quot;https://10.130.81.54:31614&quot;,
+        &quot;path&quot;: &quot;/new-session&quot;,
+        &quot;textLength&quot;: 75,
+        &quot;controls&quot;: 9
+      }
+    },
+    {
+      &quot;case&quot;: &quot;native browser page&quot;,
+      &quot;type&quot;: &quot;deepseek-harness&quot;,
+      &quot;id&quot;: 258,
+      &quot;status&quot;: &quot;PASS&quot;,
+      &quot;frame&quot;: {
+        &quot;origin&quot;: &quot;https://10.130.81.54:31604&quot;,
+        &quot;path&quot;: &quot;/&quot;,
+        &quot;textLength&quot;: 69,
+        &quot;controls&quot;: 8
+      }
+    }
+  ]
+}</pre></details><details><summary>browser-owned-verification.json</summary><pre>{
+  &quot;at&quot;: &quot;2026-11-17T09:45:12.700Z&quot;,
+  &quot;results&quot;: [
+    {
+      &quot;case&quot;: &quot;native browser page&quot;,
+      &quot;type&quot;: &quot;opencode&quot;,
+      &quot;id&quot;: 365,
+      &quot;status&quot;: &quot;PASS&quot;,
+      &quot;frame&quot;: {
+        &quot;origin&quot;: &quot;https://10.130.81.54:31622&quot;,
+        &quot;path&quot;: &quot;/new-session&quot;,
+        &quot;textLength&quot;: 70,
+        &quot;controls&quot;: 8
+      }
+    },
+    {
+      &quot;case&quot;: &quot;native browser page&quot;,
+      &quot;type&quot;: &quot;deepseek-harness&quot;,
+      &quot;id&quot;: 367,
+      &quot;status&quot;: &quot;PASS&quot;,
+      &quot;frame&quot;: {
+        &quot;origin&quot;: &quot;https://10.130.81.54:31623&quot;,
+        &quot;path&quot;: &quot;/&quot;,
+        &quot;textLength&quot;: 69,
+        &quot;controls&quot;: 8
+      }
+    }
+  ]
+}</pre></details><details><summary>验收脚本字符集问题及修复</summary><pre>{
+  &quot;old_query_error&quot;: &quot;MySQL1270 mixed unicode_ci/0900_ai_ci in CONVERT(... USING utf8mb4) IN comparison&quot;,
+  &quot;fix&quot;: &quot;CAST(name AS BINARY) IN binary hex literals&quot;,
+  &quot;read_only_green_rows&quot;: &quot;350\t1\tlease-6f1acb9a84-two-slots-001\topenclaw\trunning\t1\n351\t1\tlease-6f1acb9a84-two-slots-002\topenclaw\trunning\t1\n&quot;,
+  &quot;fake_api_tests&quot;: 4,
+  &quot;fake_api_result&quot;: &quot;PASS&quot;
+}</pre></details><h2>历史验收中止及清理</h2><p>首轮两个新实例达到 running/G1 后，资源发现 SQL 出现字符集比较错误；第二轮两个新实例达到 running/G1 后，单次物理槽位观测未确认。两轮均已通过 CM 清理。脚本改用二进制精确名称查询与有界物理观测确认；未重发不确定的创建，未更换应用镜像。最终结果只采用最后完整复测。</p><details><summary>acceptance-harness-failure.json</summary><pre>{
+  &quot;run&quot;: &quot;lease-6f1acb9a84&quot;,
+  &quot;owned&quot;: [
+    {
+      &quot;id&quot;: 350,
+      &quot;name&quot;: &quot;lease-6f1acb9a84-two-slots-001&quot;,
+      &quot;type&quot;: &quot;openclaw&quot;,
+      &quot;deleted&quot;: true
+    },
+    {
+      &quot;id&quot;: 351,
+      &quot;name&quot;: &quot;lease-6f1acb9a84-two-slots-002&quot;,
+      &quot;type&quot;: &quot;openclaw&quot;,
+      &quot;deleted&quot;: true
+    }
+  ],
+  &quot;results&quot;: [
+    {
+      &quot;case&quot;: &quot;prepare aborted&quot;,
+      &quot;result&quot;: &quot;FAIL&quot;,
+      &quot;at&quot;: &quot;2026-11-17T09:32:32.183015+00:00&quot;,
+      &quot;evidence&quot;: &quot;Command &#x27;[&#x27;kubectl&#x27;, &#x27;-n&#x27;, &#x27;clawmanager-system&#x27;, &#x27;exec&#x27;, &#x27;-i&#x27;, &#x27;deploy/mysql&#x27;, &#x27;--&#x27;, &#x27;sh&#x27;, &#x27;-c&#x27;, &#x27;MYSQL_PWD=\&quot;$MYSQL_ROOT_PASSWORD\&quot; mysql -uroot -N -B clawmanager&#x27;]&#x27; returned non-zero exit status 1.&quot;
+    },
+    {
+      &quot;case&quot;: &quot;Owned instance and binding cleanup; global policy unchanged&quot;,
+      &quot;result&quot;: &quot;PASS&quot;,
+      &quot;at&quot;: &quot;2026-11-17T09:33:42.214357+00:00&quot;,
+      &quot;evidence&quot;: {
+        &quot;all_intents_resolved&quot;: true,
+        &quot;remaining_instance_rows&quot;: &quot;&quot;,
+        &quot;remaining_bindings&quot;: &quot;&quot;,
+        &quot;policy_unchanged&quot;: true,
+        &quot;delete_request_errors&quot;: []
+      }
+    }
+  ]
+}</pre></details><details><summary>acceptance-observation-failure.json</summary><pre>{
+  &quot;run&quot;: &quot;lease-6597d4e60f&quot;,
+  &quot;owned&quot;: [
+    {
+      &quot;id&quot;: 352,
+      &quot;name&quot;: &quot;lease-6597d4e60f-two-slots-001&quot;,
+      &quot;type&quot;: &quot;openclaw&quot;,
+      &quot;deleted&quot;: true
+    },
+    {
+      &quot;id&quot;: 353,
+      &quot;name&quot;: &quot;lease-6597d4e60f-two-slots-002&quot;,
+      &quot;type&quot;: &quot;openclaw&quot;,
+      &quot;deleted&quot;: true
+    }
+  ],
+  &quot;results&quot;: [
+    {
+      &quot;case&quot;: &quot;prepare aborted&quot;,
+      &quot;result&quot;: &quot;FAIL&quot;,
+      &quot;at&quot;: &quot;2026-11-17T09:35:36.883934+00:00&quot;,
+      &quot;evidence&quot;: &quot;Expected one physical owner for 352&quot;
+    },
+    {
+      &quot;case&quot;: &quot;Owned instance and binding cleanup; global policy unchanged&quot;,
+      &quot;result&quot;: &quot;PASS&quot;,
+      &quot;at&quot;: &quot;2026-11-17T09:35:41.813917+00:00&quot;,
+      &quot;evidence&quot;: {
+        &quot;all_intents_resolved&quot;: true,
+        &quot;remaining_instance_rows&quot;: &quot;&quot;,
+        &quot;remaining_bindings&quot;: &quot;&quot;,
+        &quot;policy_unchanged&quot;: true,
+        &quot;delete_request_errors&quot;: []
+      }
+    }
+  ]
+}</pre></details><h2>现场边界</h2><p>原有 system 异常实例 233、242、264 的状态及错误仍保留，本次未清除停止证明保护或强制恢复。全局休眠策略未修改，测试只设置新实例的自动休眠排除并随实例删除。真实环境验证正常并发流程；缓存断连、旧观测、UID 替换、持续失效、取消、错误来源与签发中断等场景由隔离回归验证。未更换 Runtime 镜像，未修改业务 SQL 或直接调整 Runtime 副本。</p><details><summary>专属测试资源</summary><pre>[
+  {
+    &quot;id&quot;: 354,
+    &quot;name&quot;: &quot;lease-cb7fe55d20-two-slots-002&quot;,
+    &quot;type&quot;: &quot;openclaw&quot;,
+    &quot;purpose&quot;: &quot;two-slots&quot;,
+    &quot;deleted&quot;: true
+  },
+  {
+    &quot;id&quot;: 355,
+    &quot;name&quot;: &quot;lease-cb7fe55d20-two-slots-001&quot;,
+    &quot;type&quot;: &quot;openclaw&quot;,
+    &quot;purpose&quot;: &quot;two-slots&quot;,
+    &quot;deleted&quot;: true
+  },
+  {
+    &quot;id&quot;: 356,
+    &quot;name&quot;: &quot;lease-cb7fe55d20-fill-002&quot;,
+    &quot;type&quot;: &quot;openclaw&quot;,
+    &quot;purpose&quot;: &quot;fill&quot;,
+    &quot;deleted&quot;: true
+  },
+  {
+    &quot;id&quot;: 357,
+    &quot;name&quot;: &quot;lease-cb7fe55d20-fill-003&quot;,
+    &quot;type&quot;: &quot;openclaw&quot;,
+    &quot;purpose&quot;: &quot;fill&quot;,
+    &quot;deleted&quot;: true
+  },
+  {
+    &quot;id&quot;: 358,
+    &quot;name&quot;: &quot;lease-cb7fe55d20-fill-001&quot;,
+    &quot;type&quot;: &quot;openclaw&quot;,
+    &quot;purpose&quot;: &quot;fill&quot;,
+    &quot;deleted&quot;: true
+  },
+  {
+    &quot;id&quot;: 359,
+    &quot;name&quot;: &quot;lease-cb7fe55d20-fill-004&quot;,
+    &quot;type&quot;: &quot;openclaw&quot;,
+    &quot;purpose&quot;: &quot;fill&quot;,
+    &quot;deleted&quot;: true
+  },
+  {
+    &quot;id&quot;: 360,
+    &quot;name&quot;: &quot;lease-cb7fe55d20-burst-001&quot;,
+    &quot;type&quot;: &quot;openclaw&quot;,
+    &quot;purpose&quot;: &quot;burst&quot;,
+    &quot;deleted&quot;: true
+  },
+  {
+    &quot;id&quot;: 361,
+    &quot;name&quot;: &quot;lease-cb7fe55d20-burst-003&quot;,
+    &quot;type&quot;: &quot;openclaw&quot;,
+    &quot;purpose&quot;: &quot;burst&quot;,
+    &quot;deleted&quot;: true
+  },
+  {
+    &quot;id&quot;: 362,
+    &quot;name&quot;: &quot;lease-cb7fe55d20-burst-002&quot;,
+    &quot;type&quot;: &quot;openclaw&quot;,
+    &quot;purpose&quot;: &quot;burst&quot;,
+    &quot;deleted&quot;: true
+  },
+  {
+    &quot;id&quot;: 363,
+    &quot;name&quot;: &quot;lease-cb7fe55d20-hermes-002&quot;,
+    &quot;type&quot;: &quot;hermes&quot;,
+    &quot;purpose&quot;: &quot;hermes&quot;,
+    &quot;deleted&quot;: true
+  },
+  {
+    &quot;id&quot;: 364,
+    &quot;name&quot;: &quot;lease-cb7fe55d20-hermes-001&quot;,
+    &quot;type&quot;: &quot;hermes&quot;,
+    &quot;purpose&quot;: &quot;hermes&quot;,
+    &quot;deleted&quot;: true
+  },
+  {
+    &quot;id&quot;: 365,
+    &quot;name&quot;: &quot;lease-cb7fe55d20-opencode-001&quot;,
+    &quot;type&quot;: &quot;opencode&quot;,
+    &quot;purpose&quot;: &quot;opencode&quot;,
+    &quot;deleted&quot;: true
+  },
+  {
+    &quot;id&quot;: 366,
+    &quot;name&quot;: &quot;lease-cb7fe55d20-opencode-002&quot;,
+    &quot;type&quot;: &quot;opencode&quot;,
+    &quot;purpose&quot;: &quot;opencode&quot;,
+    &quot;deleted&quot;: true
+  },
+  {
+    &quot;id&quot;: 367,
+    &quot;name&quot;: &quot;lease-cb7fe55d20-deepseek-harness-001&quot;,
+    &quot;type&quot;: &quot;deepseek-harness&quot;,
+    &quot;purpose&quot;: &quot;deepseek-harness&quot;,
+    &quot;deleted&quot;: true
+  },
+  {
+    &quot;id&quot;: 368,
+    &quot;name&quot;: &quot;lease-cb7fe55d20-deepseek-harness-002&quot;,
+    &quot;type&quot;: &quot;deepseek-harness&quot;,
+    &quot;purpose&quot;: &quot;deepseek-harness&quot;,
+    &quot;deleted&quot;: true
+  }
+]</pre></details><details><summary>策略前后</summary><pre>{
+  &quot;before&quot;: {
+    &quot;enabled&quot;: true,
+    &quot;check_interval_days&quot;: 1,
+    &quot;check_interval_seconds&quot;: 60,
+    &quot;idle_timeout_days&quot;: 1,
+    &quot;idle_timeout_seconds&quot;: 172800,
+    &quot;version&quot;: 13,
+    &quot;next_check_at&quot;: &quot;2026-11-17T09:40:20.281024Z&quot;
+  },
+  &quot;after&quot;: {
+    &quot;enabled&quot;: true,
+    &quot;check_interval_days&quot;: 1,
+    &quot;check_interval_seconds&quot;: 60,
+    &quot;idle_timeout_days&quot;: 1,
+    &quot;idle_timeout_seconds&quot;: 172800,
+    &quot;version&quot;: 13,
+    &quot;next_check_at&quot;: &quot;2026-11-17T09:46:20.281024Z&quot;
+  }
+}</pre></details></body></html>

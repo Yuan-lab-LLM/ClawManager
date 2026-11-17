@@ -9,6 +9,8 @@ import (
 	"strings"
 
 	"clawreef/internal/runtimeauth"
+	"clawreef/internal/runtimeinventory"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -208,4 +210,82 @@ func (c *slotRuntimeAgentClient) protectPublishedGeneration(ctx context.Context,
 		return c.protectTeamPreview(ctx, runtimeauth.Identity{InstanceID: req.InstanceID, UserID: req.UserID, Generation: req.Generation, PodUID: req.PodUID})
 	}
 	return nil
+}
+
+// confirmPublishedSecurity fences the Agent POST on the shared source having
+// observed this exact publication. Pending uses the persisted assignment and SQL
+// reservation; it never chooses another Pod or creates replacement credentials.
+func (c *slotRuntimeAgentClient) confirmPublishedSecurity(ctx context.Context, published *corev1.ConfigMap, req RuntimeAgentCreateGatewayRequest) error {
+	if req.SecurityProfile == "" || c.security == nil || c.security.assignments == nil {
+		return ctx.Err()
+	}
+	identity := runtimeauth.Identity{InstanceID: req.InstanceID, UserID: req.UserID, Generation: req.Generation, PodUID: req.PodUID}
+	reject := func(reason string, cause error) error {
+		err := runtimeSecurityError(reason, "publication", published, cause)
+		logRuntimeSecurityFailure(ctx, identity, 0, err)
+		return err
+	}
+	pending := func() error { return reject("publication_pending", errRuntimeGatewayStartPending) }
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if published == nil || published.Name != "lite-instance-"+strconv.Itoa(req.InstanceID) || published.Namespace != c.namespace || published.UID == "" || !runtimeinventory.ResourceVersionAtLeast(published.ResourceVersion, published.ResourceVersion) {
+		return reject("publication_invalid", nil)
+	}
+	instance, err := c.security.instances.GetByIDContext(ctx, req.InstanceID)
+	if err == nil && instance != nil {
+		if timeout := recordRuntimePublicationTimeout(ctx, c.security.instances, instance); timeout != nil {
+			logRuntimeSecurityFailure(ctx, identity, 0, timeout)
+			return timeout
+		}
+	}
+	if err != nil || !validRuntimeSecurityInstance(req.InstanceID, instance) || instance.UserID != req.UserID || instance.RuntimeGeneration != req.Generation || instance.Type != req.AgentType {
+		return reject("instance_conflict", nil)
+	}
+	instanceCopy := *instance
+	if published.DeletionTimestamp != nil || published.Data["desired_state"] != "running" {
+		return reject("assignment_stopped", nil)
+	}
+	observed, pods, err := c.security.assignments.Assignment(ctx, req.InstanceID)
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if errors.Is(err, runtimeinventory.ErrUnavailable) || errors.Is(err, runtimeinventory.ErrAssignmentNotFound) {
+		return pending()
+	}
+	if err != nil || observed == nil {
+		return reject("inventory_denied", nil)
+	}
+	if observed.Name != published.Name || observed.Namespace != published.Namespace || observed.UID != published.UID {
+		return reject("assignment_identity_conflict", nil)
+	}
+	// Stop/delete intent is always a hard fence, even in an older observation.
+	if observed.DeletionTimestamp != nil || observed.Data["desired_state"] != "running" {
+		return reject("assignment_stopped", nil)
+	}
+	if !runtimeinventory.ResourceVersionAtLeast(observed.ResourceVersion, observed.ResourceVersion) {
+		return reject("assignment_version_invalid", nil)
+	}
+	// The shared Pod observation must agree with the published target even if
+	// its assignment watch has not caught up yet.
+	if _, err := validateRuntimeSecuritySnapshot(ctx, req.InstanceID, &instanceCopy, published, pods); err != nil {
+		logRuntimeSecurityFailure(ctx, identity, 0, err)
+		return err
+	}
+	if !runtimeinventory.ResourceVersionAtLeast(observed.ResourceVersion, published.ResourceVersion) {
+		return pending()
+	}
+	if observed.Labels["clawmanager.io/purpose"] != "lite-instance" {
+		return reject("assignment_identity_conflict", nil)
+	}
+	for _, key := range []string{"instance_id", "user_id", "generation", "runtime_type", "endpoint", "gateway_id", "pod_uid", "request", "secret_ref"} {
+		if observed.Data[key] != published.Data[key] {
+			return reject("publication_conflict", nil)
+		}
+	}
+	_, err = validateRuntimeSecuritySnapshot(ctx, req.InstanceID, &instanceCopy, observed, pods)
+	if err != nil {
+		logRuntimeSecurityFailure(ctx, identity, 0, err)
+	}
+	return err
 }

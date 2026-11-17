@@ -2340,6 +2340,9 @@ func (s *instanceService) stopV2InstanceForKind(ctx context.Context, instance *m
 			if kind == "restart" {
 				return ErrInstanceRestartPending
 			}
+			if errors.Is(err, ErrRuntimeAgentUnavailable) {
+				return fmt.Errorf("%w: %v", ErrInstanceStopPending, err)
+			}
 			return err
 		}
 		return nil

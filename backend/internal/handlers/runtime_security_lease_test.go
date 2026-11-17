@@ -2,13 +2,16 @@ package handlers
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"log"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -159,5 +162,30 @@ func TestRuntimeLeaseUsesActualPeerAndControlCredential(t *testing.T) {
 				t.Fatal("lease response cacheable")
 			}
 		})
+	}
+}
+
+func TestRuntimeLeaseDiagnosticMasksArbitraryIssuerError(t *testing.T) {
+	var output bytes.Buffer
+	previous := log.Writer()
+	log.SetOutput(&output)
+	defer log.SetOutput(previous)
+	h, err := NewRuntimeSecurityLeaseHandler(strings.Repeat("c", 32), leaseIssuerFunc(func(context.Context, runtimeauth.Identity, netip.Addr) (services.RuntimeSecurityLease, error) {
+		return services.RuntimeSecurityLease{ModelToken: "partial-secret"}, errors.New("sentinel-secret arbitrary\nerror")
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"instance_id":7,"user_id":3,"generation":2,"pod_uid":"pod-7"}`))
+	r.RemoteAddr = "10.2.0.3:4567"
+	r.Header.Set("X-ClawManager-Control-Token", strings.Repeat("c", 32))
+	r.Header.Set("X-Request-ID", "untrusted-correlation-sentinel")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusForbidden || strings.Contains(w.Body.String(), "secret") || strings.Contains(output.String(), "secret") || strings.Contains(output.String(), "arbitrary") || strings.Contains(output.String(), "untrusted-correlation") {
+		t.Fatalf("unsafe denial: response=%s log=%s", w.Body.String(), output.String())
+	}
+	if !regexp.MustCompile(`correlation_id="[a-f0-9]{32}"`).MatchString(output.String()) || !strings.Contains(output.String(), "reason=authorization_denied stage=lease") {
+		t.Fatalf("missing sanitized correlation and classification: %s", output.String())
 	}
 }

@@ -1092,6 +1092,10 @@ func (h *InstanceHandler) StopInstance(c *gin.Context) {
 	}
 
 	if err := h.instanceService.Stop(id); err != nil {
+		if errors.Is(err, services.ErrInstanceStopPending) {
+			utils.Success(c, http.StatusAccepted, "Instance stop is awaiting confirmed shutdown", nil)
+			return
+		}
 		utils.HandleError(c, err)
 		return
 	}

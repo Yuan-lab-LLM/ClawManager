@@ -112,6 +112,12 @@ func decimalVersion(value string) bool {
 }
 
 func versionAtLeast(a, b string) bool {
+	return ResourceVersionAtLeast(a, b)
+}
+
+// ResourceVersionAtLeast compares versions of the same Kubernetes resource type.
+// It must never compare (for example) a Pod version with a ConfigMap version.
+func ResourceVersionAtLeast(a, b string) bool {
 	if !decimalVersion(a) || !decimalVersion(b) {
 		return false
 	}

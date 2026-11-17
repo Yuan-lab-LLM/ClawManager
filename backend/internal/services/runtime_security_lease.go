@@ -2,10 +2,12 @@ package services
 
 import (
 	"context"
+	"errors"
 	"net/netip"
 	"time"
 
 	"clawreef/internal/runtimeauth"
+	"clawreef/internal/runtimeinventory"
 )
 
 // RuntimeSecurityLease is returned only to the trusted slot supervisor. Native
@@ -31,11 +33,49 @@ func (a *RuntimeSecurityAuthority) IssueLease(ctx context.Context, expected runt
 	if expected.InstanceID == poolProbeInstanceID {
 		return a.issuePoolValidationLease(ctx, expected, peer)
 	}
+	ctx, cancel := context.WithTimeout(ctx, 1500*time.Millisecond)
+	defer cancel()
+	delays := [...]time.Duration{25, 50, 100, 200, 250, 250, 250}
+	for attempt := 0; ; attempt++ {
+		if ctx.Err() != nil {
+			return RuntimeSecurityLease{}, ctx.Err()
+		}
+		lease, err := a.issueLeaseAttempt(ctx, expected, peer)
+		if err == nil {
+			return lease, nil
+		}
+		logRuntimeSecurityFailure(ctx, expected, attempt+1, err)
+		if ctx.Err() != nil {
+			return RuntimeSecurityLease{}, ctx.Err()
+		}
+		if !errors.Is(err, runtimeinventory.ErrUnavailable) || attempt == len(delays) {
+			return RuntimeSecurityLease{}, err
+		}
+		timer := time.NewTimer(delays[attempt] * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return RuntimeSecurityLease{}, ctx.Err()
+		case <-timer.C:
+		}
+	}
+}
+
+func (a *RuntimeSecurityAuthority) issueLeaseAttempt(ctx context.Context, expected runtimeauth.Identity, peer netip.Addr) (RuntimeSecurityLease, error) {
 	var empty RuntimeSecurityLease
-	snapshot, err := a.validatedSnapshot(ctx, expected.InstanceID)
+	snapshot, err := a.validatedSnapshotForIdentity(ctx, expected.InstanceID, &expected)
 	identity := snapshot.identity
-	if err != nil || identity != expected || !peer.IsValid() || peer.Zone() != "" || snapshot.address.Unmap() != peer.Unmap() {
-		return empty, errRuntimeSecurity
+	if err != nil {
+		return empty, err
+	}
+	fail := func(reason, stage string, cause error) error {
+		return &runtimeSecurityDenial{diagnostic: RuntimeSecurityDiagnostic{Reason: reason, Stage: stage, AssignmentUID: snapshot.assignmentUID, AssignmentResourceVersion: snapshot.assignmentVersion}, cause: cause}
+	}
+	if identity != expected {
+		return empty, fail("identity_conflict", "lease", nil)
+	}
+	if !peer.IsValid() || peer.Zone() != "" || snapshot.address.Unmap() != peer.Unmap() {
+		return empty, fail("peer_conflict", "lease", nil)
 	}
 	lease := RuntimeSecurityLease{InstanceID: identity.InstanceID, UserID: identity.UserID, Generation: identity.Generation, PodUID: identity.PodUID, ExpiresAt: time.Now().UTC().Truncate(time.Second).Add(15 * time.Minute)}
 	for _, entry := range []struct {
@@ -44,8 +84,21 @@ func (a *RuntimeSecurityAuthority) IssueLease(ctx context.Context, expected runt
 	}{{runtimeauth.AudienceModel, &lease.ModelToken}, {runtimeauth.AudienceEgress, &lease.EgressToken}, {runtimeauth.AudienceServices, &lease.ServicesToken}} {
 		*entry.token, err = a.capabilities.Issue(ctx, identity, entry.audience)
 		if err != nil {
-			return empty, errRuntimeSecurity
+			if ctx.Err() != nil {
+				return empty, ctx.Err()
+			}
+			if errors.Is(err, runtimeinventory.ErrUnavailable) {
+				return empty, fail("inventory_unavailable", "issue_"+entry.audience, runtimeinventory.ErrUnavailable)
+			}
+			return empty, fail("authorization_denied", "issue_"+entry.audience, nil)
 		}
+	}
+	final, err := a.validatedSnapshotForIdentity(ctx, expected.InstanceID, &expected)
+	if err != nil {
+		return empty, err
+	}
+	if final.identity != expected || final.address.Unmap() != peer.Unmap() {
+		return empty, fail("identity_conflict", "lease_complete", nil)
 	}
 	if ctx.Err() != nil {
 		return empty, ctx.Err()
