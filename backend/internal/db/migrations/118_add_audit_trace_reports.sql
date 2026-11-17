@@ -16,7 +16,8 @@ CREATE TABLE IF NOT EXISTS observation_audit_trace_reports (
  event_type VARCHAR(100) NOT NULL DEFAULT '',message TEXT NOT NULL,
  PRIMARY KEY(trace_id),UNIQUE KEY uk_audit_report_sequence(sequence_id),
  KEY idx_audit_report_time(sort_at,trace_id),KEY idx_audit_report_status_time(status,sort_at,trace_id),
- KEY idx_audit_report_count(sort_at,sequence_id,id)
+ KEY idx_audit_report_count(sort_at,sequence_id,id),
+ KEY idx_audit_report_model_search(sort_at,requested_model,actual_provider_model,sequence_id,id,status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE TABLE IF NOT EXISTS observation_audit_backfill (
  source VARCHAR(40) PRIMARY KEY,after_id BIGINT NOT NULL DEFAULT 0,target_id BIGINT NOT NULL DEFAULT 0,complete BOOLEAN NOT NULL DEFAULT FALSE,

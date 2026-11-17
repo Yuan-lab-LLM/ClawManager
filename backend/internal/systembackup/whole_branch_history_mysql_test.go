@@ -200,6 +200,11 @@ func TestWholeBranchFullSchemaArchiveMonthlyNativeRestore(t *testing.T) {
 	must(err)
 	_, err = VerifyMySQL(ctx, target, bytes.NewReader(normalized.Bytes()), 10000)
 	must(err)
+	var searchIndex string
+	must(target.QueryRow(`SELECT COALESCE(GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX),'') FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='observation_audit_trace_reports' AND INDEX_NAME='idx_audit_report_model_search'`).Scan(&searchIndex))
+	if searchIndex != "sort_at,requested_model,actual_provider_model,sequence_id,id,status" {
+		t.Fatalf("isolated restore omitted audit search index: %q", searchIndex)
+	}
 	targetBucket, err := RandomID("cm-restore-")
 	must(err)
 	must(store.Client.MakeBucket(ctx, targetBucket, minio.MakeBucketOptions{}))

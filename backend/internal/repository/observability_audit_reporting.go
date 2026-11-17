@@ -121,11 +121,8 @@ func (r *modelInvocationRepository) ListAuditReportPage(ctx context.Context, q A
 				return e
 			}
 		}
-		where := ` FROM observation_audit_trace_reports r`
-		if q.Search != "" {
-			where += ` LEFT JOIN users u ON u.id=r.user_id`
-		}
-		where += ` WHERE r.id>0 AND r.sort_at>=? AND r.sort_at<? AND r.sequence_id<=?`
+		from := ` FROM observation_audit_trace_reports r`
+		where := ` WHERE r.id>0 AND r.sort_at>=? AND r.sort_at<? AND r.sequence_id<=?`
 		args := []interface{}{c.Since, c.Until, c.Fence}
 		if q.Status != "" {
 			where += ` AND r.status=?`
@@ -135,15 +132,31 @@ func (r *modelInvocationRepository) ListAuditReportPage(ctx context.Context, q A
 			where += ` AND (LOCATE(?,LOWER(r.requested_model))>0 OR LOCATE(?,LOWER(r.actual_provider_model))>0)`
 			args = append(args, q.Model, q.Model)
 		}
+		countQuery := `SELECT COUNT(*)` + from + where
+		countArgs := args
 		if q.Search != "" {
 			clauses := []string{}
 			for _, field := range []string{"r.requested_model", "r.actual_provider_model", "u.username", "r.trace_id", "r.request_id", "r.provider_type", "r.event_type", "r.message"} {
 				clauses = append(clauses, `LOCATE(?,LOWER(COALESCE(`+field+`,'')))>0`)
+			}
+			// Model matches use a covering range scan. The disjoint remainder
+			// rejects those same rows by index condition before fetching message
+			// or joining the current username. Both counts retain this RR fence.
+			modelMatch := `(` + strings.Join(clauses[:2], ` OR `) + `)`
+			countFrom := from + ` FORCE INDEX(idx_audit_report_model_search)`
+			countQuery = `SELECT SUM(n) FROM (SELECT COUNT(*) n` + countFrom + where + ` AND ` + modelMatch +
+				` UNION ALL SELECT COUNT(*) n` + countFrom + ` LEFT JOIN users u ON u.id=r.user_id` + where +
+				` AND NOT ` + modelMatch + ` AND (` + strings.Join(clauses[2:], ` OR `) + `)) audit_counts`
+			countArgs = append(append([]interface{}{}, args...), q.Search, q.Search)
+			countArgs = append(countArgs, args...)
+			for range clauses {
+				countArgs = append(countArgs, q.Search)
 				args = append(args, q.Search)
 			}
+			from += ` LEFT JOIN users u ON u.id=r.user_id`
 			where += ` AND (` + strings.Join(clauses, ` OR `) + `)`
 		}
-		row, e = tx.SQL().QueryRowContext(ctx, `SELECT COUNT(*)`+where, args...)
+		row, e = tx.SQL().QueryRowContext(ctx, countQuery, countArgs...)
 		if e != nil {
 			return e
 		}
@@ -155,7 +168,7 @@ func (r *modelInvocationRepository) ListAuditReportPage(ctx context.Context, q A
 			args = append(args, c.At, c.At, c.Trace)
 		}
 		args = append(args, q.Limit+1)
-		rows, e := tx.SQL().QueryContext(ctx, `SELECT r.id,r.trace_id,r.request_id,r.session_id,r.user_id,r.instance_id,r.requested_model,r.actual_provider_model,r.provider_type,r.status,r.prompt_tokens,r.completion_tokens,r.total_tokens,r.latency_ms,r.ttft_ms,r.generation_ms,r.tokens_per_second,r.attempt_no,LEFT(r.error_message,1000),r.created_at,r.completed_at,r.sort_at,COALESCE(CHAR_LENGTH(r.error_message)>1000,FALSE)`+where+` ORDER BY r.sort_at DESC,r.trace_id DESC LIMIT ?`, args...)
+		rows, e := tx.SQL().QueryContext(ctx, `SELECT r.id,r.trace_id,r.request_id,r.session_id,r.user_id,r.instance_id,r.requested_model,r.actual_provider_model,r.provider_type,r.status,r.prompt_tokens,r.completion_tokens,r.total_tokens,r.latency_ms,r.ttft_ms,r.generation_ms,r.tokens_per_second,r.attempt_no,LEFT(r.error_message,1000),r.created_at,r.completed_at,r.sort_at,COALESCE(CHAR_LENGTH(r.error_message)>1000,FALSE)`+from+where+` ORDER BY r.sort_at DESC,r.trace_id DESC LIMIT ?`, args...)
 		if e != nil {
 			return e
 		}

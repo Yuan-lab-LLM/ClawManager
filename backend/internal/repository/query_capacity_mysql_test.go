@@ -111,8 +111,9 @@ func TestQueryCapacityTenThousandInstancesNinetyDays(t *testing.T) {
 		// Synthetic rows above already materialized both fact and day tables.
 		// Acknowledge only source IDs with matching durable facts, in bounded
 		// batches, as the ordinary projection transaction would do.
+		// Start with pending IDs; resolved facts alone are not selective.
 		for {
-			res, err := s.SQL().Exec(`DELETE FROM observation_cost_pending WHERE id IN (SELECT id FROM (SELECT p.id FROM observation_cost_pending p JOIN cost_records c ON c.id=p.id JOIN observation_cost_facts f ON f.id=c.id AND f.trace_id=c.trace_id AND f.invocation_id=c.invocation_id AND f.estimated_cost=c.estimated_cost AND f.resolved=TRUE ORDER BY p.id LIMIT 500) verified)`)
+			res, err := s.SQL().Exec(`DELETE FROM observation_cost_pending WHERE id IN (SELECT id FROM (SELECT p.id FROM observation_cost_pending p STRAIGHT_JOIN cost_records c ON c.id=p.id STRAIGHT_JOIN observation_cost_facts f ON f.id=c.id AND f.trace_id=c.trace_id AND f.invocation_id=c.invocation_id AND f.estimated_cost=c.estimated_cost AND f.resolved=TRUE ORDER BY p.id LIMIT 500) verified)`)
 			if err != nil {
 				t.Fatal(err)
 			}

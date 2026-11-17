@@ -160,6 +160,13 @@ func TestAuditCapacityActualSourceBackfillAndQueries(t *testing.T) {
 		}
 		sort.Slice(samples, func(i, j int) bool { return samples[i] < samples[j] })
 		t.Logf("MEASURED scenario=%s instances=10000 source_rows=900000 trace_rows=900000 samples=20 P50=%s P95=%s MAX=%s", scenario.name, samples[9], samples[18], samples[19])
+		budget := 2 * time.Second
+		if scenario.days == 30 {
+			budget = 500 * time.Millisecond
+		}
+		if samples[18] > budget {
+			t.Errorf("%s P95 %s exceeds fixed %s target", scenario.name, samples[18], budget)
+		}
 	}
 	for _, query := range []string{`SELECT COUNT(*) FROM observation_audit_trace_reports r WHERE r.id>0 AND r.sort_at>=? AND r.sort_at<? AND r.sequence_id<=(SELECT MAX(sequence_id) FROM observation_audit_trace_reports)`, `SELECT r.id,r.trace_id,r.request_id,r.status,r.total_tokens FROM observation_audit_trace_reports r WHERE r.id>0 AND r.sort_at>=? AND r.sort_at<? AND r.sequence_id<=(SELECT MAX(sequence_id) FROM observation_audit_trace_reports) ORDER BY r.sort_at DESC,r.trace_id DESC LIMIT 21`} {
 		row, e := s.SQL().QueryRow("EXPLAIN FORMAT=JSON "+query, since, until)
