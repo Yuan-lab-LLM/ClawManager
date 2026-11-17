@@ -20,6 +20,9 @@ func TestModelActivityControllerReconcilesOnlyVerifiedScopes(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
+			exec(`ALTER TABLE instances ADD provisioning_operation_id VARCHAR(64) NULL`)
+			exec(`ALTER TABLE teams ADD status VARCHAR(32), ADD resource_scope VARCHAR(32)`)
+			exec(`ALTER TABLE team_members ADD team_id INT, ADD instance_id INT, ADD member_key VARCHAR(64), ADD status VARCHAR(32)`)
 			exec(`INSERT INTO instances(id,user_id,type,runtime_type,instance_mode,status,runtime_generation) VALUES(1,7,'opencode','gateway','lite','stopped',2)`)
 			store := repository.NewInstanceAutoStopRepository(s)
 			if err := store.Initialize(t.Context()); err != nil {

@@ -1667,6 +1667,11 @@ func (s *RuntimeScheduler) reconcileCreatingInstanceLocked(ctx context.Context, 
 		if client, ok := s.agentClient.(*slotRuntimeAgentClient); ok && instance.Status == "creating" &&
 			binding.Generation == instance.RuntimeGeneration && binding.State == RuntimeGatewayBindingCreating &&
 			binding.GatewayID == fmt.Sprintf("pending-%d-%d", instance.ID, instance.RuntimeGeneration) {
+			if client.security != nil && client.security.assignments != nil {
+				if timeout := recordRuntimePublicationTimeout(ctx, s.instanceRepo, &instance); timeout != nil {
+					return []error{timeout}
+				}
+			}
 			if err := s.retryUnpublishedPendingSlot(ctx, client, instance, binding); err != nil {
 				// A missing proof or uncertain create keeps the exact reservation pending.
 				_ = s.preservePendingGatewayStart(ctx, instance.ID, instance.RuntimeGeneration, err)
@@ -2157,7 +2162,7 @@ func (s *RuntimeScheduler) assignInstance(ctx context.Context, instance models.I
 	if len(pods) == 0 {
 		scaled, err := s.scaleOutIfAtCapacity(ctx, runtimeType)
 		if err != nil {
-			if runtimeUpgradeInfrastructureRetryable(err) {
+			if !errors.Is(err, k8s.ErrRuntimeScaleOutRejected) && runtimeUpgradeInfrastructureRetryable(err) {
 				return fmt.Errorf("%w: scale out runtime deployment: %v", errRuntimeControlPlanePending, err)
 			}
 			return fmt.Errorf("scale out %s runtime deployment: %w", runtimeType, err)
@@ -2181,6 +2186,12 @@ func (s *RuntimeScheduler) assignInstance(ctx context.Context, instance models.I
 		}
 	}
 	var lastErr error
+	lostClaim := false
+	rememberError := func(err error) {
+		if lastErr == nil || (!isRuntimeAssignmentPending(err) && !runtimeUpgradeInfrastructureRetryable(err)) || isRuntimeAssignmentPending(lastErr) || runtimeUpgradeInfrastructureRetryable(lastErr) {
+			lastErr = err
+		}
+	}
 	for _, pod := range pods {
 		if pod.AgentEndpoint == nil || strings.TrimSpace(*pod.AgentEndpoint) == "" {
 			continue
@@ -2189,21 +2200,22 @@ func (s *RuntimeScheduler) assignInstance(ctx context.Context, instance models.I
 		canStart, err := s.podCanStartGateway(ctx, pod.ID)
 		if err != nil {
 			unlock()
-			lastErr = err
+			rememberError(err)
 			continue
 		}
 		if !canStart {
 			unlock()
-			lastErr = fmt.Errorf("runtime pod %d has gateway start in flight: %w", pod.ID, errRuntimeGatewayStartPending)
+			rememberError(fmt.Errorf("runtime pod %d has gateway start in flight: %w", pod.ID, errRuntimeGatewayStartPending))
 			continue
 		}
 		claimed, err := s.claimRuntimeSlot(ctx, pod.ID)
 		if err != nil {
 			unlock()
-			lastErr = err
+			rememberError(err)
 			continue
 		}
 		if !claimed {
+			lostClaim = true
 			unlock()
 			continue
 		}
@@ -2216,7 +2228,7 @@ func (s *RuntimeScheduler) assignInstance(ctx context.Context, instance models.I
 			if errors.Is(err, ErrModelConfigurationRequired) {
 				return err
 			}
-			lastErr = err
+			rememberError(err)
 			continue
 		}
 		if err := s.createGatewayOnPodWithPortFallback(ctx, instance, runtimeType, pod, start); err != nil {
@@ -2226,7 +2238,7 @@ func (s *RuntimeScheduler) assignInstance(ctx context.Context, instance models.I
 			if releaseErr := s.podRepo.ReleaseSlot(ctx, pod.ID); releaseErr != nil {
 				return errors.Join(err, releaseErr)
 			}
-			lastErr = err
+			rememberError(err)
 			continue
 		}
 		return nil
@@ -2235,7 +2247,10 @@ func (s *RuntimeScheduler) assignInstance(ctx context.Context, instance models.I
 		if errors.Is(lastErr, errRuntimeScaleOutPending) {
 			scaled, scaleErr := s.scaleOutIfBacklogExceedsCapacity(ctx, runtimeType, 1)
 			if scaleErr != nil {
-				return errors.Join(errRuntimeControlPlanePending, scaleErr)
+				if !errors.Is(scaleErr, k8s.ErrRuntimeScaleOutRejected) && runtimeUpgradeInfrastructureRetryable(scaleErr) {
+					return fmt.Errorf("%w: scale out runtime deployment: %v", errRuntimeControlPlanePending, scaleErr)
+				}
+				return scaleErr
 			}
 			if scaled {
 				return errRuntimeScaleOutPending
@@ -2252,6 +2267,9 @@ func (s *RuntimeScheduler) assignInstance(ctx context.Context, instance models.I
 			return fmt.Errorf("%w: runtime assignment probe: %v", errRuntimeControlPlanePending, lastErr)
 		}
 		return &runtimeFailure{code: "GATEWAY_START_FAILED", cause: fmt.Errorf("prepare or start %s gateway: %w", runtimeType, lastErr)}
+	}
+	if lostClaim {
+		return fmt.Errorf("%w: candidate Runtime capacity changed during slot claim", errRuntimeControlPlanePending)
 	}
 	code := "RUNTIME_POOL_UNAVAILABLE"
 	if len(pods) > 0 {
@@ -2277,9 +2295,17 @@ type runtimeDeploymentCapacity struct {
 // Automatic scale requests are floors; stale inventory must not undo newer capacity.
 func (s *RuntimeScheduler) scaleOutRuntimeDeployment(ctx context.Context, namespace, name string, replicas int32) error {
 	if scaleOut, ok := s.deployments.(k8s.RuntimeDeploymentScaleOut); ok {
-		return scaleOut.ScaleOut(ctx, namespace, name, replicas)
+		err := scaleOut.ScaleOut(ctx, namespace, name, replicas)
+		if errors.Is(err, k8s.ErrRuntimeScaleOutPending) {
+			return fmt.Errorf("%w: %v", errRuntimeControlPlanePending, err)
+		}
+		return err
 	}
-	return s.deployments.Scale(ctx, namespace, name, replicas)
+	err := s.deployments.Scale(ctx, namespace, name, replicas)
+	if runtimeUpgradeInfrastructureRetryable(err) {
+		return fmt.Errorf("%w: scale out runtime deployment: %v", errRuntimeControlPlanePending, err)
+	}
+	return err
 }
 
 func (s *RuntimeScheduler) scaleOutIfAtCapacity(ctx context.Context, runtimeType string) (bool, error) {
@@ -2696,6 +2722,9 @@ func (s *RuntimeScheduler) createGatewayOnPod(ctx context.Context, instance mode
 		Environment:     start.environment,
 	})
 	if err != nil {
+		if errors.Is(err, errRuntimePublicationTimeout) {
+			return errors.Join(err, errRuntimeGatewayStartPending)
+		}
 		if runtimeGatewayCreateOutcomeUncertain(err) {
 			return s.preservePendingGatewayStart(ctx, instance.ID, instance.RuntimeGeneration, err)
 		}
@@ -3019,7 +3048,7 @@ func runtimeGatewayCreateOutcomeUncertain(err error) bool {
 	if err == nil {
 		return false
 	}
-	if runtimeUpgradeInfrastructureRetryable(err) || errors.Is(err, context.Canceled) {
+	if errors.Is(err, errRuntimeGatewayStartPending) || errors.Is(err, errRuntimePublicationTimeout) || runtimeUpgradeInfrastructureRetryable(err) || errors.Is(err, context.Canceled) {
 		return true
 	}
 	message := strings.ToLower(err.Error())

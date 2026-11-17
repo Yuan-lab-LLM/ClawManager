@@ -1,0 +1,19 @@
+# Strategic merge patch for the CM application on server54.
+# Existing Runtime Pods already have eight physical slots; this aligns CM's
+# inventory fallback without changing Runtime images, identities or layout.
+# Startup concurrency is an independent setting and is intentionally omitted.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: clawmanager-app
+  namespace: clawmanager-system
+spec:
+  template:
+    spec:
+      containers:
+        - name: clawmanager-app
+          env:
+            - name: RUNTIME_CONTAINER_SLOTS
+              value: "8"
+            - name: RUNTIME_MAX_GATEWAYS_PER_POD
+              value: "8"

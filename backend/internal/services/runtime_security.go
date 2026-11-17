@@ -8,12 +8,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/netip"
 	"net/url"
 	"strconv"
 
 	"clawreef/internal/models"
 	"clawreef/internal/runtimeauth"
+	"clawreef/internal/runtimeinventory"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/validation"
@@ -100,11 +102,13 @@ func (a *RuntimeSecurityAuthority) ProtectedInstance(ctx context.Context, id int
 }
 
 type runtimeSecuritySnapshot struct {
-	gatewayID string
-	identity  runtimeauth.Identity
-	address   netip.Addr
-	request   RuntimeAgentCreateGatewayRequest
-	pod       *corev1.Pod
+	assignmentUID     string
+	assignmentVersion string
+	gatewayID         string
+	identity          runtimeauth.Identity
+	address           netip.Addr
+	request           RuntimeAgentCreateGatewayRequest
+	pod               *corev1.Pod
 }
 
 func (a *RuntimeSecurityAuthority) CurrentIdentity(ctx context.Context, id int) (runtimeauth.Identity, error) {
@@ -115,21 +119,46 @@ func (a *RuntimeSecurityAuthority) CurrentIdentity(ctx context.Context, id int) 
 // Acquire one assignment observation, then validate it without further I/O.
 // Lease peers and native targets must use values from this same snapshot.
 func (a *RuntimeSecurityAuthority) validatedSnapshot(ctx context.Context, id int) (runtimeSecuritySnapshot, error) {
+	return a.validatedSnapshotForIdentity(ctx, id, nil)
+}
+
+// A lease's expected SQL identity is checked against the same SQL snapshot
+// used for inventory validation, before a temporary source error can hide it.
+func (a *RuntimeSecurityAuthority) validatedSnapshotForIdentity(ctx context.Context, id int, expected *runtimeauth.Identity) (runtimeSecuritySnapshot, error) {
 	if err := ctx.Err(); err != nil {
 		return runtimeSecuritySnapshot{}, err
 	}
 	instance, err := a.instances.GetByIDContext(ctx, id)
 	if err != nil || instance == nil {
-		return runtimeSecuritySnapshot{}, errRuntimeSecurity
+		return runtimeSecuritySnapshot{}, runtimeSecurityError("instance_unavailable", "instance", nil, nil)
 	}
 	instanceCopy := *instance
+	if timeout := runtimePublicationCreateTimeout(&instanceCopy); timeout != nil {
+		return runtimeSecuritySnapshot{}, timeout
+	}
+	if !validRuntimeSecurityInstance(id, &instanceCopy) {
+		return runtimeSecuritySnapshot{}, runtimeSecurityError("instance_conflict", "instance", nil, nil)
+	}
+	if expected != nil && (instanceCopy.ID != expected.InstanceID || instanceCopy.UserID != expected.UserID || instanceCopy.RuntimeGeneration != expected.Generation) {
+		return runtimeSecuritySnapshot{}, runtimeSecurityError("identity_conflict", "instance", nil, nil)
+	}
 	if a.checkTeamNetwork(ctx, &instanceCopy) != nil {
-		return runtimeSecuritySnapshot{}, errRuntimeSecurity
+		return runtimeSecuritySnapshot{}, runtimeSecurityError("team_network_denied", "instance", nil, nil)
 	}
 	if a.assignments != nil {
 		cm, pods, err := a.assignments.Assignment(ctx, id)
+		if ctx.Err() != nil {
+			return runtimeSecuritySnapshot{}, ctx.Err()
+		}
 		if err != nil {
-			return runtimeSecuritySnapshot{}, errRuntimeSecurity
+			if errors.Is(err, runtimeinventory.ErrUnavailable) {
+				return runtimeSecuritySnapshot{}, runtimeSecurityError("inventory_unavailable", "inventory", nil, runtimeinventory.ErrUnavailable)
+			}
+			reason := "inventory_denied"
+			if errors.Is(err, runtimeinventory.ErrAssignmentNotFound) {
+				reason = "assignment_missing"
+			}
+			return runtimeSecuritySnapshot{}, runtimeSecurityError(reason, "inventory", nil, nil)
 		}
 		return validateRuntimeSecuritySnapshot(ctx, id, &instanceCopy, cm, pods)
 	}
@@ -145,24 +174,26 @@ func (a *RuntimeSecurityAuthority) validatedSnapshot(ctx context.Context, id int
 }
 
 func validateRuntimeSecuritySnapshot(ctx context.Context, id int, instance *models.Instance, cm *corev1.ConfigMap, pods []corev1.Pod) (runtimeSecuritySnapshot, error) {
-	fail := func() (runtimeSecuritySnapshot, error) { return runtimeSecuritySnapshot{}, errRuntimeSecurity }
-	if instance == nil || instance.ID != id || instance.RuntimeSecurityProfile != RuntimeSecurityProfile || instance.InstanceMode != "lite" || instance.RuntimeType != "gateway" || (instance.Status != "running" && instance.Status != "creating") {
-		return fail()
+	fail := func(reason, stage string) (runtimeSecuritySnapshot, error) {
+		return runtimeSecuritySnapshot{}, runtimeSecurityError(reason, stage, cm, nil)
+	}
+	if !validRuntimeSecurityInstance(id, instance) {
+		return fail("instance_conflict", "instance")
 	}
 	if cm == nil || cm.DeletionTimestamp != nil || cm.Data["desired_state"] != "running" || cm.Data["instance_id"] != strconv.Itoa(id) || cm.Data["user_id"] != strconv.Itoa(instance.UserID) || cm.Data["generation"] != strconv.Itoa(instance.RuntimeGeneration) || cm.Data["runtime_type"] != instance.Type {
-		return fail()
+		return fail("assignment_conflict", "assignment")
 	}
 	var request RuntimeAgentCreateGatewayRequest
 	if len(cm.Data["request"]) > 1<<20 || json.Unmarshal([]byte(cm.Data["request"]), &request) != nil || request.InstanceID != id || request.UserID != instance.UserID || request.Generation != instance.RuntimeGeneration || request.PodUID == "" || request.PodUID != cm.Data["pod_uid"] || request.AgentType != instance.Type || request.SecurityProfile != RuntimeSecurityProfile {
-		return fail()
+		return fail("request_conflict", "request")
 	}
 	endpoint, err := url.Parse(cm.Data["endpoint"])
 	if err != nil || endpoint.Scheme != "https" || endpoint.User != nil || endpoint.Port() != "19090" || endpoint.RawQuery != "" || endpoint.Fragment != "" || (endpoint.Path != "" && endpoint.Path != "/") {
-		return fail()
+		return fail("endpoint_conflict", "assignment")
 	}
 	address, err := netip.ParseAddr(endpoint.Hostname())
 	if err != nil || address.Zone() != "" {
-		return fail()
+		return fail("endpoint_conflict", "assignment")
 	}
 	matches := 0
 	var matchedPod *corev1.Pod
@@ -172,20 +203,20 @@ func validateRuntimeSecuritySnapshot(ctx context.Context, id int, instance *mode
 		}
 		matches++
 		if string(pod.UID) != request.PodUID || pod.DeletionTimestamp != nil || pod.Status.Phase != corev1.PodRunning || pod.Labels["clawmanager.io/runtime-security"] != RuntimeSecurityProfile {
-			return fail()
+			return fail("pod_identity_conflict", "pod")
 		}
 		if !runtimeAssignmentReady(&pod, request) {
-			return fail()
+			return fail("pod_not_ready", "pod")
 		}
 		matchedPod = pod.DeepCopy()
 	}
 	if matches != 1 {
-		return fail()
+		return fail("pod_identity_conflict", "pod")
 	}
 	if err := ctx.Err(); err != nil {
 		return runtimeSecuritySnapshot{}, err
 	}
-	return runtimeSecuritySnapshot{gatewayID: cm.Data["gateway_id"], identity: runtimeauth.Identity{InstanceID: id, UserID: instance.UserID, Generation: instance.RuntimeGeneration, PodUID: request.PodUID}, address: address, request: request, pod: matchedPod}, nil
+	return runtimeSecuritySnapshot{assignmentUID: string(cm.UID), assignmentVersion: cm.ResourceVersion, gatewayID: cm.Data["gateway_id"], identity: runtimeauth.Identity{InstanceID: id, UserID: instance.UserID, Generation: instance.RuntimeGeneration, PodUID: request.PodUID}, address: address, request: request, pod: matchedPod}, nil
 }
 
 // NativeGatewayCredential is a per-generation UI password. It is deliberately
@@ -229,4 +260,63 @@ func (a *RuntimeSecurityAuthority) nativeCredential(identity runtimeauth.Identit
 	mac := hmac.New(sha256.New, a.key)
 	fmt.Fprintf(mac, "clawmanager/native-ui/v1\x00%d\x00%d\x00%d\x00%s", identity.UserID, identity.InstanceID, identity.Generation, identity.PodUID)
 	return "ui1_" + base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+}
+
+// RuntimeSecurityDiagnostic contains only stable classifications and Kubernetes
+// metadata. Raw source errors, request bodies and credentials are never retained.
+type RuntimeSecurityDiagnostic struct {
+	Reason                    string
+	Stage                     string
+	AssignmentUID             string
+	AssignmentResourceVersion string
+}
+
+type runtimeSecurityDenial struct {
+	diagnostic RuntimeSecurityDiagnostic
+	cause      error
+}
+
+func (e *runtimeSecurityDenial) Error() string { return errRuntimeSecurity.Error() }
+func (e *runtimeSecurityDenial) Unwrap() error { return e.cause }
+func runtimeSecurityError(reason, stage string, cm *corev1.ConfigMap, cause error) error {
+	d := RuntimeSecurityDiagnostic{Reason: reason, Stage: stage}
+	if cm != nil {
+		d.AssignmentUID, d.AssignmentResourceVersion = string(cm.UID), cm.ResourceVersion
+	}
+	return &runtimeSecurityDenial{diagnostic: d, cause: cause}
+}
+
+// RuntimeSecurityFailureDiagnostic never formats an untrusted error.
+func RuntimeSecurityFailureDiagnostic(err error) RuntimeSecurityDiagnostic {
+	var denial *runtimeSecurityDenial
+	if errors.As(err, &denial) {
+		return denial.diagnostic
+	}
+	reason := "authorization_denied"
+	if errors.Is(err, errRuntimePublicationTimeout) {
+		return RuntimeSecurityDiagnostic{Reason: "publication_timeout", Stage: "publication"}
+	}
+	if errors.Is(err, context.Canceled) {
+		reason = "canceled"
+	} else if errors.Is(err, context.DeadlineExceeded) {
+		reason = "deadline"
+	} else if errors.Is(err, runtimeinventory.ErrUnavailable) {
+		reason = "inventory_unavailable"
+	}
+	return RuntimeSecurityDiagnostic{Reason: reason, Stage: "lease"}
+}
+
+type runtimeSecurityCorrelationKey struct{}
+
+func WithRuntimeSecurityCorrelation(ctx context.Context, id string) context.Context {
+	return context.WithValue(ctx, runtimeSecurityCorrelationKey{}, id)
+}
+func logRuntimeSecurityFailure(ctx context.Context, identity runtimeauth.Identity, attempt int, err error) {
+	d := RuntimeSecurityFailureDiagnostic(err)
+	correlation, _ := ctx.Value(runtimeSecurityCorrelationKey{}).(string)
+	log.Printf("runtime_security correlation_id=%q reason=%s stage=%s instance=%d generation=%d pod_uid=%q assignment_uid=%q assignment_rv=%q attempt=%d", correlation, d.Reason, d.Stage, identity.InstanceID, identity.Generation, identity.PodUID, d.AssignmentUID, d.AssignmentResourceVersion, attempt)
+}
+
+func validRuntimeSecurityInstance(id int, instance *models.Instance) bool {
+	return instance != nil && instance.ID == id && instance.RuntimeSecurityProfile == RuntimeSecurityProfile && instance.InstanceMode == "lite" && instance.RuntimeType == "gateway" && (instance.Status == "running" || instance.Status == "creating")
 }

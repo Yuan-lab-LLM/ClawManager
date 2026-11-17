@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"clawreef/internal/models"
+	drivermysql "github.com/go-sql-driver/mysql"
 	"github.com/google/uuid"
 	"github.com/upper/db/v4"
 )
@@ -433,6 +434,31 @@ func (r *InstanceAutoStopRepository) PreviousIdleStorage(ctx context.Context, id
 // Manual cleanup has the same durable identity and fence as idle cleanup, but
 // only this explicitly requested mode may invoke the existing delete protocol.
 func (r *InstanceAutoStopRepository) BeginManualStop(ctx context.Context, input models.InstanceIdleStopOperation) (*models.InstanceIdleStopOperation, error) {
+	// Only a deadlock proves that this database transaction was rolled back.
+	// Agent teardown happens after acceptance and must never be replayed here.
+	for attempt := 0; ; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		result, err := r.beginManualStopOnce(ctx, input)
+		if err == nil {
+			return result, nil
+		}
+		var deadlock *drivermysql.MySQLError
+		if attempt >= 2 || !errors.As(err, &deadlock) || deadlock.Number != 1213 {
+			return nil, err
+		}
+		timer := time.NewTimer(time.Duration(attempt+1) * 10 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
+	}
+}
+
+func (r *InstanceAutoStopRepository) beginManualStopOnce(ctx context.Context, input models.InstanceIdleStopOperation) (*models.InstanceIdleStopOperation, error) {
 	if input.Kind != "restart" {
 		input.Kind = "manual"
 	}

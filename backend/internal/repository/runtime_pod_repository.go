@@ -286,9 +286,15 @@ func (r *runtimePodRepository) MarkState(ctx context.Context, podID int64, state
 }
 
 func (r *runtimePodRepository) UpdateHeartbeat(ctx context.Context, podID int64, state string, usedSlots int, capacity int, draining bool, lastSeenAt time.Time) error {
+	// Scale-in source claims remain owned by the SQL lifecycle until the
+	// operation ends. Keep liveness fresh without recreating released claims.
 	_, err := r.sess.SQL().ExecContext(ctx, `
 		UPDATE runtime_pods
-		SET state = ?, used_slots = ?, capacity = ?, draining = ?, last_seen_at = ?, updated_at = ?
+		SET state = ?, used_slots = CASE WHEN EXISTS (
+			SELECT 1 FROM runtime_management_operations op
+			WHERE op.kind='scale_in' AND op.status NOT IN ('completed','failed','cancelled')
+			AND JSON_CONTAINS(JSON_EXTRACT(op.request_json,'$.plan.source_pods'),JSON_OBJECT('id',runtime_pods.id,'pod_uid',runtime_pods.pod_uid))
+		) THEN used_slots ELSE ? END, capacity = ?, draining = ?, last_seen_at = ?, updated_at = ?
 		WHERE id = ? AND state <> 'deleted' AND NOT EXISTS (SELECT 1 FROM runtime_pod_deletion_intents di WHERE di.namespace=runtime_pods.namespace AND di.deployment_name=runtime_pods.deployment_name)
 	`, state, usedSlots, capacity, draining, lastSeenAt, time.Now().UTC(), podID)
 	if err != nil {

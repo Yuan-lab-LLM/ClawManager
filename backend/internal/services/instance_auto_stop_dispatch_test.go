@@ -60,6 +60,10 @@ func testAutoStopDispatch(t *testing.T, holdLock bool) {
 		}
 	}
 	exec(`ALTER TABLE instance_desired_state ADD desired_config_revision_id INT NULL`)
+	// Candidate selection also excludes active native team members.
+	exec(`ALTER TABLE instances ADD provisioning_operation_id VARCHAR(64) NULL`)
+	exec(`ALTER TABLE teams ADD status VARCHAR(32), ADD resource_scope VARCHAR(32)`)
+	exec(`ALTER TABLE team_members ADD team_id INT, ADD instance_id INT, ADD member_key VARCHAR(64), ADD status VARCHAR(32)`)
 	policy, err := os.ReadFile("../db/migrations/098_add_instance_auto_stop_policy_status.sql")
 	if err != nil {
 		t.Fatal(err)

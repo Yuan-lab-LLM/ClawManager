@@ -71,18 +71,27 @@ func (s *RuntimeAssignmentService) ResolvePendingGatewayID(ctx context.Context, 
 // A conflicting update is reread and revalidated; a lease or elapsed time never
 // authorizes handover. A failed CAS can leave an unreferenced immutable Secret.
 func (s *RuntimeAssignmentService) EnsureDesired(ctx context.Context, a RuntimeAssignment) error {
+	_, err := s.EnsureDesiredPublication(ctx, a)
+	return err
+}
+
+// EnsureDesiredPublication returns the exact successful API create/update, or
+// the existing same-generation object. Callers use its UID/version as a shared
+// inventory barrier; a later direct GET is not a publication receipt.
+func (s *RuntimeAssignmentService) EnsureDesiredPublication(ctx context.Context, a RuntimeAssignment) (*corev1.ConfigMap, error) {
 	if err := s.validService(); err != nil {
-		return err
+		return nil, err
 	}
 	if err := validateRuntimeAssignment(a); err != nil {
-		return err
+		return nil, err
 	}
 	request, err := runtimeAssignmentRequest(a.Request, true)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	name := runtimeAssignmentName(a.InstanceID)
-	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+	var published *corev1.ConfigMap
+	err = retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		cm, err := s.client.CoreV1().ConfigMaps(s.namespace).Get(ctx, name, metav1.GetOptions{})
 		creating := apierrors.IsNotFound(err)
 		if err != nil && !creating {
@@ -108,7 +117,11 @@ func (s *RuntimeAssignmentService) EnsureDesired(ctx context.Context, a RuntimeA
 					return fmt.Errorf("same-generation runtime assignment changed")
 				}
 				// Do not resurrect draining/stopped assignments on a delayed create retry.
-				return s.ensureRuntimeAssignmentSecret(ctx, a)
+				if err := s.ensureRuntimeAssignmentSecret(ctx, a); err != nil {
+					return err
+				}
+				published = cm.DeepCopy()
+				return nil
 			}
 			if state != "stopped" {
 				return fmt.Errorf("new runtime assignment generation requires confirmed source stop")
@@ -142,15 +155,19 @@ func (s *RuntimeAssignmentService) EnsureDesired(ctx context.Context, a RuntimeA
 			"request": request, "secret_ref": runtimeAssignmentSecretName(a.InstanceID, a.Generation),
 		}
 		if creating {
-			_, err = s.client.CoreV1().ConfigMaps(s.namespace).Create(ctx, cm, metav1.CreateOptions{})
+			published, err = s.client.CoreV1().ConfigMaps(s.namespace).Create(ctx, cm, metav1.CreateOptions{})
 			if apierrors.IsAlreadyExists(err) {
 				return apierrors.NewConflict(schema.GroupResource{Resource: "configmaps"}, name, err)
 			}
 			return err
 		}
-		_, err = s.client.CoreV1().ConfigMaps(s.namespace).Update(ctx, cm, metav1.UpdateOptions{})
+		published, err = s.client.CoreV1().ConfigMaps(s.namespace).Update(ctx, cm, metav1.UpdateOptions{})
 		return err
 	})
+	if err != nil {
+		return nil, err
+	}
+	return published, nil
 }
 
 type RuntimeDesiredAssignment struct {

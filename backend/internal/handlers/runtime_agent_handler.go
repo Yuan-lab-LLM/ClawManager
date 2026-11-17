@@ -397,7 +397,7 @@ func (h *RuntimeAgentHandler) ReportGateways(c *gin.Context) {
 			}
 		}
 		if err := h.syncInstanceRuntimeState(c.Request.Context(), podID, gateway, lifecycle); err != nil {
-			if errors.Is(err, models.ErrRuntimeUpgradeInProgress) || errors.Is(err, repository.ErrStaleRuntimeGeneration) {
+			if errors.Is(err, models.ErrRuntimeUpgradeInProgress) || errors.Is(err, repository.ErrStaleRuntimeGeneration) || errors.Is(err, models.ErrInstanceStopping) {
 				continue
 			}
 			utils.HandleError(c, err)

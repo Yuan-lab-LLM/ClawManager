@@ -225,10 +225,12 @@ func (c *slotRuntimeAgentClient) CreateGateway(ctx context.Context, endpoint str
 		return nil, err
 	}
 	gatewayID := fmt.Sprintf("gw-%d-%d", req.InstanceID, req.Generation)
+	var published *corev1.ConfigMap
 	publish := func() error {
-		return c.assignments.EnsureDesired(ctx, k8sservice.RuntimeAssignment{
+		published, err = c.assignments.EnsureDesiredPublication(ctx, k8sservice.RuntimeAssignment{
 			InstanceID: req.InstanceID, UserID: req.UserID, Generation: req.Generation, RuntimeType: req.AgentType, Endpoint: endpoint, GatewayID: gatewayID, PodUID: podUID, Request: request, Environment: req.Environment,
 		})
+		return err
 	}
 	c.admissionMu.RLock()
 	admit := c.assignmentAdmission
@@ -247,6 +249,9 @@ func (c *slotRuntimeAgentClient) CreateGateway(ctx context.Context, endpoint str
 		return nil, err
 	}
 	if err := c.assignments.CanStart(ctx, endpoint, gatewayID); err != nil {
+		return nil, err
+	}
+	if err := c.confirmPublishedSecurity(ctx, published, req); err != nil {
 		return nil, err
 	}
 	currentPod, err := c.containerStopPod(ctx, endpoint, podUID)

@@ -194,6 +194,8 @@ func TestManualStartIntentMySQLIdleStopAllowsPublication(t *testing.T) {
 	ctx := t.Context()
 	store := NewInstanceAutoStopRepository(r.sess)
 	for _, query := range []string{
+		`CREATE TABLE teams(id INT PRIMARY KEY,status VARCHAR(32),resource_scope VARCHAR(32))`,
+		`CREATE TABLE team_members(id INT PRIMARY KEY,team_id INT,instance_id INT,status VARCHAR(32),member_key VARCHAR(64))`,
 		`CREATE TABLE instance_workspace_write_intents(instance_id INT)`,
 		`CREATE TABLE instance_commands(instance_id INT,status VARCHAR(32))`,
 		`CREATE TABLE gateway_runtime_tasks(instance_id INT,generation INT,finished BOOLEAN)`,

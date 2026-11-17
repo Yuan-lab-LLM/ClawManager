@@ -11,6 +11,8 @@ import (
 	"math"
 	"strings"
 	"time"
+
+	"clawreef/internal/runtimeinventory"
 )
 
 const AudienceModel = "model"
@@ -153,6 +155,11 @@ func (s *Service) authorize(ctx context.Context, identity Identity) error {
 	current, err := s.lookup(ctx, identity.InstanceID)
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return ctxErr
+	}
+	// Preserve only the classified, sanitized shared-inventory sentinel. Never
+	// expose arbitrary lookup text through capability errors.
+	if errors.Is(err, runtimeinventory.ErrUnavailable) {
+		return runtimeinventory.ErrUnavailable
 	}
 	if err != nil || current != identity {
 		return errCapability
