@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -161,7 +162,7 @@ func (r *modelInvocationRepository) ListRecentByInstanceSession(instanceID int, 
 		limit = 20
 	}
 	query := `
-SELECT id, trace_id, session_id, request_id, user_id, instance_id, instance_mode, runtime_type, gateway_id, runtime_pod_id, gateway_key_id, model_id, provider_type, requested_model, actual_provider_model, traffic_class, request_payload, response_payload, prompt_tokens, completion_tokens, total_tokens, cached_tokens, reasoning_tokens, latency_ms, ttft_ms, generation_ms, tokens_per_second, attempt_no, is_streaming, status, error_message, created_at, completed_at
+SELECT id, trace_id, session_id, request_id, user_id, instance_id, instance_mode, runtime_type, gateway_id, runtime_pod_id, gateway_key_id, model_id, provider_type, requested_model, actual_provider_model, traffic_class, prompt_tokens, completion_tokens, total_tokens, cached_tokens, reasoning_tokens, latency_ms, ttft_ms, generation_ms, tokens_per_second, attempt_no, is_streaming, status, error_message, created_at, completed_at
 FROM model_invocations
 WHERE instance_id = ?
   AND session_id = ?
@@ -169,7 +170,7 @@ WHERE instance_id = ?
 	args := []interface{}{instanceID, sessionID, models.ModelInvocationStatusBlocked}
 	query, args = appendTimeFilter(query, args, filter, "created_at")
 	query += `
-ORDER BY created_at DESC
+ORDER BY created_at DESC, id DESC
 LIMIT ?`
 	args = append(args, limit)
 
@@ -199,8 +200,6 @@ LIMIT ?`
 			&item.RequestedModel,
 			&item.ActualProviderModel,
 			&item.TrafficClass,
-			&item.RequestPayload,
-			&item.ResponsePayload,
 			&item.PromptTokens,
 			&item.CompletionTokens,
 			&item.TotalTokens,
@@ -254,4 +253,32 @@ func isDuplicateIndexError(err error) bool {
 	}
 	message := strings.ToLower(err.Error())
 	return strings.Contains(message, "duplicate key name") || strings.Contains(message, "already exists")
+}
+
+// AggregateModelsByInstanceSession keeps model token totals independent of the recent trace page.
+func (r *modelInvocationRepository) AggregateModelsByInstanceSession(instanceID int, sessionID string, filter SessionUsageFilter) ([]models.ModelInvocation, error) {
+	query := `SELECT COALESCE(NULLIF(TRIM(actual_provider_model), ''), requested_model),
+COALESCE(SUM(prompt_tokens), 0), COALESCE(SUM(completion_tokens), 0), COALESCE(SUM(total_tokens), 0)
+FROM model_invocations WHERE instance_id = ? AND session_id = ? AND status != ?`
+	query, args := appendTimeFilter(query, []interface{}{instanceID, sessionID, models.ModelInvocationStatusBlocked}, filter, "created_at")
+	query += " GROUP BY COALESCE(NULLIF(TRIM(actual_provider_model), ''), requested_model)"
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	rows, err := r.sess.SQL().QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to aggregate session models: %w", err)
+	}
+	defer rows.Close()
+	items := make([]models.ModelInvocation, 0)
+	for rows.Next() {
+		var item models.ModelInvocation
+		if err := rows.Scan(&item.ActualProviderModel, &item.PromptTokens, &item.CompletionTokens, &item.TotalTokens); err != nil {
+			return nil, fmt.Errorf("failed to scan session model: %w", err)
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to iterate session models: %w", err)
+	}
+	return items, nil
 }

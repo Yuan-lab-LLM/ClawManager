@@ -363,6 +363,26 @@ func NewAIObservabilityService(
 
 func (s *aiObservabilityService) ListAuditItems(query AuditQuery) (*AuditListResult, error) {
 	page, limit := normalizePageLimit(query.Page, query.Limit, 20, 100)
+	if reporter, ok := s.invocationRepo.(interface {
+		ListAuditReport(int, int, string, string, string) ([]models.ModelInvocation, int, error)
+	}); ok {
+		items, total, err := reporter.ListAuditReport(page, limit, query.Search, query.Status, query.Model)
+		if err != nil {
+			return nil, err
+		}
+		usernames, err := s.loadUsernamesForAudit(items, nil, nil)
+		if err != nil {
+			return nil, err
+		}
+		rows := aggregateInvocationsByTrace(items, usernames)
+		sort.Slice(rows, func(i, j int) bool {
+			if rows[i].CreatedAt.Equal(rows[j].CreatedAt) {
+				return rows[i].TraceID > rows[j].TraceID
+			}
+			return rows[i].CreatedAt.After(rows[j].CreatedAt)
+		})
+		return &AuditListResult{Items: rows, Total: total, Page: page, Limit: limit}, nil
+	}
 
 	items, err := s.invocationRepo.ListRecent(expandFetchWindow(page, limit))
 	if err != nil {
@@ -1018,6 +1038,18 @@ func (s *aiObservabilityService) loadUsernamesForAudit(items []models.ModelInvoc
 	}
 
 	usernames := make(map[int]string, len(userIDs))
+	if len(userIDs) == 0 {
+		return usernames, nil
+	}
+	if reader, ok := s.userRepo.(interface {
+		UsernamesByIDs([]int) (map[int]string, error)
+	}); ok {
+		ids := make([]int, 0, len(userIDs))
+		for id := range userIDs {
+			ids = append(ids, id)
+		}
+		return reader.UsernamesByIDs(ids)
+	}
 	for userID := range userIDs {
 		user, err := s.userRepo.GetByID(userID)
 		if err != nil {
@@ -1999,6 +2031,9 @@ func pointerToInt(value int) *int {
 }
 
 func (s *aiObservabilityService) GetInstanceSessionUsage(instanceID int, query InstanceSessionUsageQuery) (*InstanceSessionUsageResult, error) {
+	if reporter, ok := s.invocationRepo.(sessionUsageReporter); ok {
+		return getSQLSessionUsage(reporter, instanceID, query)
+	}
 	page, limit := normalizePageLimit(query.Page, query.Limit, 20, 100)
 	filter := repository.SessionUsageFilter{Since: query.Since, Until: query.Until}
 	allItems, err := s.mergeInstanceSessionUsageItems(instanceID, filter)
@@ -2039,9 +2074,23 @@ func (s *aiObservabilityService) GetInstanceSessionUsageDetail(instanceID int, s
 		return nil, fmt.Errorf("session id is required")
 	}
 
-	items, err := s.mergeInstanceSessionUsageItems(instanceID, filter)
-	if err != nil {
-		return nil, err
+	var items []InstanceSessionUsageItem
+	if reporter, ok := s.invocationRepo.(interface {
+		GetSessionUsageReportItem(int, string, repository.SessionUsageFilter) (*repository.SessionUsageReportItem, error)
+	}); ok {
+		item, err := reporter.GetSessionUsageReportItem(instanceID, sessionID, filter)
+		if err != nil {
+			return nil, fmt.Errorf("failed to query session usage: %w", err)
+		}
+		if item != nil {
+			items = append(items, mapSessionReportItem(*item))
+		}
+	} else {
+		var err error
+		items, err = s.mergeInstanceSessionUsageItems(instanceID, filter)
+		if err != nil {
+			return nil, err
+		}
 	}
 	var matched *InstanceSessionUsageItem
 	for index := range items {
@@ -2059,29 +2108,12 @@ func (s *aiObservabilityService) GetInstanceSessionUsageDetail(instanceID int, s
 		return nil, fmt.Errorf("failed to list recent invocations for session: %w", err)
 	}
 
-	modelTotals := map[string]*CostBreakdownItem{}
+	modelTotals, err := s.sessionModelBreakdown(instanceID, sessionID, filter, invocations)
+	if err != nil {
+		return nil, err
+	}
 	recentTraces := make([]InstanceSessionTrace, 0, len(invocations))
 	for _, invocation := range invocations {
-		modelLabel := strings.TrimSpace(invocation.ActualProviderModel)
-		if modelLabel == "" {
-			modelLabel = invocation.RequestedModel
-		}
-		modelRow := modelTotals[modelLabel]
-		if modelRow == nil {
-			modelRow = &CostBreakdownItem{Label: modelLabel}
-			modelTotals[modelLabel] = modelRow
-		}
-		modelRow.PromptTokens += invocation.PromptTokens
-		modelRow.CompletionTokens += invocation.CompletionTokens
-		modelRow.TotalTokens += invocation.TotalTokens
-		if s.costRepo != nil {
-			if costs, costErr := s.costRepo.ListByTraceID(invocation.TraceID); costErr == nil {
-				for _, cost := range costs {
-					modelRow.EstimatedCost += cost.EstimatedCost
-				}
-			}
-		}
-
 		recentTraces = append(recentTraces, InstanceSessionTrace{
 			TraceID:             invocation.TraceID,
 			RequestedModel:      invocation.RequestedModel,
@@ -2106,7 +2138,7 @@ func (s *aiObservabilityService) GetInstanceSessionUsageDetail(instanceID int, s
 		InvocationCount:  matched.InvocationCount,
 		FirstSeenAt:      matched.FirstSeenAt,
 		LastSeenAt:       matched.LastSeenAt,
-		ModelBreakdown:   s.completeModelBreakdowns(modelTotals),
+		ModelBreakdown:   sortBreakdowns(modelTotals),
 		RecentTraces:     recentTraces,
 	}, nil
 }
@@ -2205,6 +2237,11 @@ func (s *aiObservabilityService) GetLLMGovernanceOverview() (*LLMGovernanceOverv
 }
 
 func (s *aiObservabilityService) GetAdminSessionUsageOverview(query InstanceSessionUsageOverviewQuery) (*InstanceSessionUsageOverview, error) {
+	if s.instanceRepo != nil {
+		if reporter, ok := s.invocationRepo.(sessionUsageReporter); ok {
+			return getSQLAdminSessionUsage(reporter, query)
+		}
+	}
 	if s.instanceRepo == nil {
 		return &InstanceSessionUsageOverview{Items: []InstanceSessionUsageOverviewItem{}}, nil
 	}

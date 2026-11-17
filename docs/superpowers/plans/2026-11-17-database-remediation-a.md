@@ -24,9 +24,9 @@
 
 **Interfaces:** Preserve `readRedisReply(*bufio.Reader) (interface{}, error)` and `redisBus.XRead`. Add private parsing helpers only if needed.
 
-- [ ] Add failing tests using local-in-test-process TCP listeners and in-memory RESP payloads: XREAD includes COUNT; reject oversized bulk, aggregate response, excess elements/depth, malformed negative lengths, incorrect CRLF; close rejected pooled connections and succeed on a fresh connection.
-- [ ] Run the new tests on server54 before implementation; retain RED output.
-- [ ] Implement COUNT 100, a shared whole-response byte budget (8 MiB), element and recursion limits, and bounded line reads. Validate lengths before allocation and account for nested headers and payloads. Preserve nil handling. Parsing failures must leave pooled connection non-reusable.
+- [x] Add failing tests using local-in-test-process TCP listeners and in-memory RESP payloads: XREAD includes COUNT; reject oversized bulk, aggregate response, excess elements/depth, malformed negative lengths, incorrect CRLF; close rejected pooled connections and succeed on a fresh connection.
+- [x] Run the new tests on server54 before implementation; retain RED output.
+- [x] Implement COUNT 100, a shared whole-response byte budget (8 MiB), element and recursion limits, and bounded line reads. Validate lengths before allocation and account for nested headers and payloads. Preserve nil handling. Parsing failures must leave pooled connection non-reusable.
 
 ```go
 // Apply the budget once per top-level response, not once per nested value.
@@ -34,8 +34,8 @@
 args := []string{"XREAD", "COUNT", "100", "BLOCK", strconv.Itoa(blockMillis), "STREAMS", key, lastID}
 ```
 
-- [ ] Run focused Redis and existing managed-Redis tests on server54; report commands and RED/GREEN evidence.
-- [ ] Review existing Runtime notification retention and reliable Team streams remain unchanged.
+- [x] Run focused Redis and existing managed-Redis tests on server54; report commands and RED/GREEN evidence.
+- [x] Review existing Runtime notification retention and reliable Team streams remain unchanged.
 
 ## Task 2: Durable Team event handoff and cursor errors (E3)
 
@@ -43,9 +43,9 @@ args := []string{"XREAD", "COUNT", "100", "BLOCK", strconv.Itoa(blockMillis), "S
 
 **Interfaces:** Preserve `projectConsumedTeamEvent(... ) bool`. Return false if the cursor cannot be durably committed; do not mutate the caller's team cursor before success. Keep existing outbox recovery lane and original stream identity.
 
-- [ ] Write a regression in which projection/replay intent succeeds but `UpdateTeam` fails; assert false and original in-memory cursor. Add duplicate/restart and outbox-failure cases.
-- [ ] Run RED on server54.
-- [ ] Commit a copy of the team and only update the in-memory cursor after repository success:
+- [x] Write a regression in which projection/replay intent succeeds but `UpdateTeam` fails; assert false and original in-memory cursor. Add duplicate/restart and outbox-failure cases.
+- [x] Run RED on server54.
+- [x] Commit a copy of the team and only update the in-memory cursor after repository success:
 
 ```go
 next := *team
@@ -59,16 +59,22 @@ team.UpdatedAt = next.UpdatedAt
 return true
 ```
 
-- [ ] Trace projection deduplication and partial writes. Before performing business projection, persist a stable replay intent if existing non-atomic paths cannot guarantee recovery. On failure retain this intent; resolve it only after successful idempotent projection. No Redis trimming is enabled in this task. Clearly document any remaining transactional projection limitation.
-- [ ] Run focused Team recovery and backup-gate tests, then self-review failure and restart behavior.
+- [ ] Complete a transactional or explicitly owned projection/replay protocol that covers partial business writes and crash recovery without duplicate side effects. This requirement remains unfinished in the first delivery. Retain the existing failure-only journal and do not reintroduce all-event pre-journaling without proving atomic completion and worker ownership. No Redis trimming may be enabled on the strength of the cursor-only fix.
+- [x] Run focused Team recovery and backup-gate tests, then self-review failure and restart behavior.
+
+### Task 2 review result: safe cursor subset only
+
+Independent review rejected the all-event pre-journal implementation: completion-marker failure could replay successful ledger effects, and an eligible outbox row could race the inline worker. That implementation, its new repository helper and MySQL test were removed. The final patch keeps the original failure-only journal/dedup semantics and fixes the checked copy-on-commit cursor update. Four regression cases and existing backup/native/recovery tests passed on server54 (14 top-level, zero skips with isolated Redis).
+
+Full transaction/replay ownership and generic partial-write idempotency remain open. Task 2 is not marked fully complete, and reliable Redis trimming remains disabled. This is an explicit remaining requirement, not a relaxation of the approved design.
 
 ## Task 3: Correct fee aggregation and narrow reporting reads (E1)
 
 **Files:** `backend/internal/repository/cost_record_repository.go`, `model_invocation_repository.go`; `backend/internal/services/ai_observability_service.go`; new MySQL and service regression tests.
 
-- [ ] Add a disposable-MySQL fixture with two invocations sharing a trace, failed/successful attempts and multiple fee records; assert aggregate equals the sum of eligible fee records once. Add service regression for model cost breakdown with repeated traces and different models.
-- [ ] Run RED remotely.
-- [ ] Replace multiplicative JOIN with an EXISTS predicate or unique invocation association. Preserve time and instance/session filtering. Exact invocation IDs take precedence; legacy rows without IDs require bounded, explicit compatibility semantics.
+- [x] Add a disposable-MySQL fixture with two invocations sharing a trace, failed/successful attempts and multiple fee records; assert aggregate equals the sum of eligible fee records once. Add service regression for model cost breakdown with repeated traces and different models.
+- [x] Run RED remotely.
+- [x] Replace multiplicative JOIN with an EXISTS predicate or unique invocation association. Preserve time and instance/session filtering. Exact invocation IDs take precedence; legacy rows without IDs require bounded, explicit compatibility semantics.
 
 ```sql
 SELECT cr.session_id, SUM(cr.estimated_cost)
@@ -81,18 +87,18 @@ WHERE cr.instance_id = ? AND EXISTS (
 GROUP BY cr.session_id
 ```
 
-- [ ] In detail views count each fee once, attribute it using its own model identity, and retain token/call semantics. Do not add the entire trace fee for each invocation.
-- [ ] Remove request/response payloads from reporting-specific invocation projections; preserve detail methods that require bodies.
-- [ ] Verify RED/GREEN and relevant existing session/cost tests on server54.
+- [x] In detail views count each fee once, attribute it using its own model identity, and retain token/call semantics. Do not add the entire trace fee for each invocation.
+- [x] Remove request/response payloads from reporting-specific invocation projections; preserve detail methods that require bodies.
+- [x] Verify RED/GREEN and relevant existing session/cost tests on server54.
 
 ## Task 4: SQL-backed audit/session/admin paging (E2 and query performance)
 
 **Files:** New focused reporting repository/service files; wire through existing concrete repository capabilities; existing reporting tests and new disposable-MySQL integration tests. Migrations only for evidenced useful indexes.
 
-- [ ] Add test data where a matching audit row lies beyond 1,000 newest rows. Check accurate total and page, trace grouping, event-only fallback, stable ordering and status/model/search combinations.
-- [ ] Add session list tests where only the page is materialized and admin overview is batched rather than one aggregate per instance. Preserve global summary versus filtered page semantics and managed-runtime scope.
-- [ ] Run RED remotely.
-- [ ] Query SQL for total and current page with stable timestamp/ID ordering, filter before LIMIT, and load only page metadata. Keep existing API response shape. Avoid SQL string interpolation of user values.
+- [x] Add test data where a matching audit row lies beyond 1,000 newest rows. Check accurate total and page, trace grouping, event-only fallback, stable ordering and status/model/search combinations.
+- [x] Add session list tests where only the page is materialized and admin overview is batched rather than one aggregate per instance. Preserve global summary versus filtered page semantics and managed-runtime scope.
+- [x] Run RED remotely.
+- [x] Query SQL for total and current page with stable timestamp/ID ordering, filter before LIMIT, and load only page metadata. Keep existing API response shape. Avoid SQL string interpolation of user values.
 
 ```sql
 -- Values are parameters; deterministic ordering is required.
@@ -100,23 +106,23 @@ ORDER BY last_activity_at DESC, session_id DESC
 LIMIT ? OFFSET ?
 ```
 
-- [ ] Add bounded context/query timeouts. For existing numbered-page APIs retain accurate offset behavior in this compatible batch; stable cursor interfaces and incrementally maintained summaries must be tracked as follow-on implementation, not claimed complete merely because Go memory is bounded.
-- [ ] Check actual MySQL execution plans and ordinary/empty/search/deep-page behavior with isolated data. No fabricated P95 or 10,000-instance capacity claims.
-- [ ] Run reporting suites and relevant server handler tests on server54.
+- [x] Add bounded context/query timeouts. For existing numbered-page APIs retain accurate offset behavior in this compatible batch; stable cursor interfaces and incrementally maintained summaries must be tracked as follow-on implementation, not claimed complete merely because Go memory is bounded.
+- [x] Check actual MySQL execution plans and ordinary/empty/search/deep-page behavior with isolated data. No fabricated P95 or 10,000-instance capacity claims.
+- [x] Run reporting suites and relevant server handler tests on server54.
 
 ## Task 5: Review, evidence and next batches
 
-- [ ] Run `git diff --check` locally. Run Go package tests and focused race checks on server54; record exact commands, counts, failures and skips.
-- [ ] Independently review E1/E2/E3/E5 and integration behavior, fix important findings and rerun only affected checks.
-- [ ] Update the design status and add a report under `docs/superpowers/tests/` containing implemented behavior, remaining scope, cluster evidence and rollout requirements.
+- [x] Run `git diff --check` locally. Run Go package tests and focused race checks on server54; record exact commands, counts, failures and skips.
+- [x] Independently review E1/E2/E3/E5 and integration behavior, fix important findings and rerun only affected checks.
+- [x] Update the design status and add a report under `docs/superpowers/tests/` containing implemented behavior, remaining scope, cluster evidence and rollout requirements.
 - [ ] Continue with separate plans for B (E4/E6, body storage and safe maintenance), C (archival/monthly layout and recovery), and D (reliable Redis retention and capacity). Do not mark the full design complete after batch A.
 
 ## Progress
 
 - [x] User approved implementation of the design, including discovered correctness issues.
 - [x] Local branch and server54 access inspected; existing Go toolchain/cache located.
-- [ ] Task 1.
-- [ ] Task 2.
-- [ ] Task 3.
-- [ ] Task 4.
-- [ ] Task 5.
+- [x] Task 1: bounded Redis reads and adaptive budget recovery.
+- [ ] Task 2: cursor error handling delivered; full atomic projection/replay protocol remains open.
+- [x] Task 3: fees, full model rows, single-currency guards and narrow reads.
+- [x] Task 4: SQL list/admin/exact-detail paging and bounded metadata; persisted summaries/keyset remain follow-on.
+- [x] Task 5 delivery checks: combined package tests, focused race, server54 server build and whole-branch review passed. Further batches and full E3 remain open.
