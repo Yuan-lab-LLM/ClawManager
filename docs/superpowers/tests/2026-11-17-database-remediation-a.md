@@ -55,7 +55,7 @@
 | 服务端 SHA-256 | `3aee1efc4b9271ef5855432d0df1a58fffde7d2d084bdbdf727800e9d7646e7b` |
 | 源码一致性 | 节点 `evidence/source-manifest.json` 校对本地改动源码与参与测试的 integration 目录；本地 `git diff --check` 通过 |
 
-测试公共环境为 `GOTOOLCHAIN=local`、`GOPROXY=off`、`GOSUMDB=off`、`GOMAXPROCS=2`，复用节点 Go 工具链和模块/构建缓存。普通测试 `CGO_ENABLED=0`，race 测试 `CGO_ENABLED=1`。
+测试公共环境为 `GOTOOLCHAIN=local`、`GOPROXY=off`、`GOSUMDB=off`、`GOMAXPROCS=2`，复用节点 Go 1.26.8 工具链和模块/构建缓存。普通测试 `CGO_ENABLED=0`，race 测试 `CGO_ENABLED=1`。
 
 ```sh
 # 在节点 integration/backend 目录，使用已校验的隔离 loopback fixture。
@@ -68,6 +68,8 @@ go test -json -p 2 ./internal/repository ./internal/services ./internal/handlers
 
 已有测试的显式跳过及其具体原因保留在 JSON 日志中，不能把跳过计为通过。真实 Redis fixture 修正后只重跑受影响的整个 services 包，repository/handlers 源码未发生后续变更。
 
+
+临时命名空间及 MySQL/Redis Pod 已删除，两个 port-forward 进程已停止；节点源码、日志和构建产物保留用于审查，没有发布到运行中的应用。
 
 ## 审查纠正
 
