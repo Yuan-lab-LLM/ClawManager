@@ -1,0 +1,36 @@
+{
+  "validated_at": "2026-11-17T21:44:22.956606+00:00",
+  "passed": true,
+  "browser": {
+    "offlineReport": true,
+    "records": 7152,
+    "allPagesReachable": true,
+    "verdictAndCountsExact": true,
+    "combinedFilters": true,
+    "searchEmptyState": true,
+    "logDetails": true,
+    "jsonDownloadExact": true,
+    "evidenceZIPVerified": true,
+    "mobileWidth": 390,
+    "externalRequests": [],
+    "pageErrors": []
+  },
+  "source_files_reverified": 4302,
+  "zip_entries_verified": 758,
+  "private_fixture_credentials_absent": true,
+  "artifacts": {
+    "2026-11-18-database-functional-test-report.html": {
+      "bytes": 18370106,
+      "sha256": "ae289452303bfbd8f4d6b5f707beb8d055afaa528f64c593427a5b4b06a77f19"
+    },
+    "2026-11-18-database-functional-test-report.json": {
+      "bytes": 18386661,
+      "sha256": "903a8f7dafec20261c0d62d63cb0adb3411d01f8f960d6a07a825f4fdd3b32a7"
+    },
+    "2026-11-18-database-functional-test-evidence.zip": {
+      "bytes": 11382581,
+      "sha256": "e1e121537bdae7113675e4929201e236cd2b14a97dde0f8e3dfd2adbd674b721"
+    }
+  },
+  "note": "报告交付校验发生在功能证据 ZIP 生成后，单独保留，不改写功能用例结果。"
+}
