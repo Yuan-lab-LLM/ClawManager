@@ -323,6 +323,30 @@ func TestManagedRedisReal7(t *testing.T) {
 			t.Fatal("active older generation killed", v, e)
 		}
 		active.conn.Close()
+		// Closing a loopback port-forward returns before Redis necessarily sees
+		// the FIN. The reaper must retain users that still have a server-side
+		// connection, so observe disconnection before asserting orphan cleanup.
+		disconnectedBy := time.Now().Add(2 * time.Second)
+		for {
+			clients, ok := do(admin, "CLIENT", "LIST").(string)
+			if !ok {
+				t.Fatal("unexpected CLIENT LIST response")
+			}
+			connected := false
+			for _, field := range strings.Fields(clients) {
+				if field == "user="+old {
+					connected = true
+					break
+				}
+			}
+			if !connected {
+				break
+			}
+			if time.Now().After(disconnectedBy) {
+				t.Fatal("closed fixture connection is still visible to Redis")
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
 		if e = reapManagedRedisUsers(ctx, admin); e != nil {
 			t.Fatal(e)
 		}

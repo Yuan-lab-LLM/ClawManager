@@ -3835,6 +3835,7 @@ func (s *teamService) consumeTeamEvents(ctx context.Context, teamID int) {
 		s.mu.Unlock()
 	}()
 
+	blockedReason := ""
 	for {
 		select {
 		case <-ctx.Done():
@@ -3858,8 +3859,20 @@ func (s *teamService) consumeTeamEvents(ctx context.Context, teamID int) {
 		}
 		messages, err := bus.XRead(ctx, teamEventsKey(teamID), lastID, 5*time.Second)
 		if err != nil {
+			if ctx.Err() != nil {
+				return
+			}
+			reason := redisReadFailureReason(err)
+			if reason != blockedReason {
+				fmt.Printf("Warning: Team %d event reads blocked: stream=%s cursor=%s reason=%s\n", teamID, teamEventsKey(teamID), lastID, reason)
+				blockedReason = reason
+			}
 			time.Sleep(2 * time.Second)
 			continue
+		}
+		if blockedReason != "" {
+			fmt.Printf("Team %d event reads recovered: stream=%s cursor=%s\n", teamID, teamEventsKey(teamID), lastID)
+			blockedReason = ""
 		}
 		for _, message := range messages {
 			if !s.projectConsumedTeamEvent(ctx, team, bus, message) {
@@ -3884,9 +3897,14 @@ func (s *teamService) projectConsumedTeamEvent(ctx context.Context, team *models
 			return false
 		}
 	}
-	team.RedisEventsLastID = message.ID
-	team.UpdatedAt = time.Now().UTC()
-	_ = s.repo.UpdateTeam(team)
+	next := *team
+	next.RedisEventsLastID = message.ID
+	next.UpdatedAt = time.Now().UTC()
+	if err := s.repo.UpdateTeam(&next); err != nil {
+		return false
+	}
+	team.RedisEventsLastID = next.RedisEventsLastID
+	team.UpdatedAt = next.UpdatedAt
 	return true
 }
 
