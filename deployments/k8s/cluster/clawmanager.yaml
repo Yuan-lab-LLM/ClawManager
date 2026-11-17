@@ -5796,8 +5796,22 @@ spec:
           imagePullPolicy: IfNotPresent
           args:
             - "--innodb-use-native-aio=0"
+            - "--innodb-buffer-pool-size=4294967296"
+            - "--max-connections=800"
+            - "--sort-buffer-size=262144"
+            - "--join-buffer-size=262144"
+            - "--read-buffer-size=131072"
+            - "--read-rnd-buffer-size=262144"
+            - "--temptable-max-ram=268435456"
             - "--binlog-expire-logs-seconds=259200"
             - "--max-binlog-size=134217728"
+          resources:
+            requests:
+              cpu: "1"
+              memory: 4Gi
+            limits:
+              cpu: "4"
+              memory: 8Gi
           ports:
             - containerPort: 3306
           env:
@@ -5938,6 +5952,19 @@ spec:
             - redis-server
             - --appendonly
             - "yes"
+            - --maxmemory
+            - "1gb"
+            - --maxmemory-policy
+            - noeviction
+            - --auto-aof-rewrite-percentage
+            - "100"
+          resources:
+            requests:
+              cpu: "500m"
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 3Gi
           ports:
             - name: redis
               containerPort: 6379

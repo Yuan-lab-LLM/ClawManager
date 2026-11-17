@@ -188,7 +188,7 @@ func main() {
 	dataRequest := flag.String("data-request", "", "frozen isolated data execution identity (base64url)")
 	cursor := flag.String("cursor", "", "bounded Team data discovery cursor")
 	pageSize := flag.Int("page-size", 20, "Team data discovery page size (1..100)")
-	operation := flag.String("operation", "verify", "verify, capture, restore or verify-restored (data-only)")
+	operation := flag.String("operation", "verify", "verify, capture, restore, verify-restored or record-observation-restore-proof")
 	operationConfig := flag.String("operation-config", "", "source or isolated target configuration file")
 	maxItems := flag.Int("max-items", 1000000, "maximum records/files per data source")
 	config := flag.String("bootstrap", "", "disaster-side bootstrap JSON file")
@@ -262,7 +262,7 @@ func main() {
 		} else {
 			e = runCapturePhase(ctx, *config, *operationConfig, *origin, *id, *readyFile, request, systembackup.CaptureBudget{MaxBytes: *max, MaxItems: *maxItems}, output)
 		}
-	case "capture", "restore", "verify-restored":
+	case "capture", "restore", "verify-restored", "record-observation-restore-proof":
 		if *operationConfig == "" || *maxItems < 1 || *maxItems > 100000000 {
 			e = errors.New("validation_failed")
 		} else {

@@ -2,7 +2,12 @@ package repository
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -11,96 +16,198 @@ import (
 	"github.com/upper/db/v4"
 )
 
-// ListAuditReport filters the complete trace set before paging. Bodies are never
-// selected for a list; event-only traces remain visible if invocation logging failed.
-func (r *modelInvocationRepository) ListAuditReport(page, limit int, search, status, model string) ([]models.ModelInvocation, int, error) {
-	if page < 1 || limit < 1 || limit > 100 || page > int(^uint(0)>>1)/limit {
-		return nil, 0, fmt.Errorf("invalid audit page")
+var ErrInvalidAuditQuery = errors.New("invalid audit query")
+
+type AuditReportQuery struct {
+	Limit                         int
+	Search, Status, Model, Cursor string
+	Since, Until                  *time.Time
+}
+type AuditReportPage struct {
+	Items           []models.ModelInvocation
+	TruncatedErrors map[int]bool
+	Total           int
+	NextCursor      string
+	Since, Until    time.Time
+}
+type auditReportCursor struct {
+	Version      int
+	Filter       string
+	At           time.Time
+	Trace        string
+	Fence        int64
+	Since, Until time.Time
+}
+
+func auditFilterKey(q AuditReportQuery) string {
+	b, _ := json.Marshal([]interface{}{q.Search, q.Status, q.Model, q.Limit})
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
+}
+func normalizeAuditReportQuery(q AuditReportQuery) (AuditReportQuery, auditReportCursor, error) {
+	q.Search = strings.ToLower(strings.TrimSpace(q.Search))
+	q.Status = strings.ToLower(strings.TrimSpace(q.Status))
+	q.Model = strings.ToLower(strings.TrimSpace(q.Model))
+	c := auditReportCursor{Version: 1, Filter: auditFilterKey(q)}
+	bad := func() (AuditReportQuery, auditReportCursor, error) { return q, c, ErrInvalidAuditQuery }
+	if q.Limit < 1 || q.Limit > 100 || len(q.Search) > 1000 || len(q.Model) > 255 || strings.ContainsRune(q.Search, 0) {
+		return bad()
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	switch q.Status {
+	case "", "completed", "blocked", "failed", "pending":
+	default:
+		return bad()
+	}
+	if q.Cursor != "" {
+		if len(q.Cursor) > 4096 {
+			return bad()
+		}
+		b, e := base64.RawURLEncoding.DecodeString(q.Cursor)
+		if e != nil {
+			return bad()
+		}
+		if e = json.Unmarshal(b, &c); e != nil || c.Version != 1 || c.Filter != auditFilterKey(q) || c.Trace == "" || c.At.IsZero() || c.Fence < 1 {
+			return bad()
+		}
+		if q.Since != nil && !q.Since.Equal(c.Since) || q.Until != nil && !q.Until.Equal(c.Until) {
+			return bad()
+		}
+	} else {
+		c.Until = time.Now().UTC()
+		if q.Until != nil {
+			c.Until = q.Until.UTC()
+		}
+		c.Since = c.Until.Add(-30 * 24 * time.Hour)
+		if q.Since != nil {
+			c.Since = q.Since.UTC()
+		}
+	}
+	if c.Since.IsZero() || c.Until.IsZero() || !c.Until.After(c.Since) || c.Until.Sub(c.Since) > 90*24*time.Hour {
+		return bad()
+	}
+	return q, c, nil
+}
+
+// ListAuditReportPage reads one persisted row per trace, including cold and
+// event-only traces. sort_at is immutable after first materialization so late
+// events cannot move a trace across a cursor. sequence_id fences new traces.
+func (r *modelInvocationRepository) ListAuditReportPage(ctx context.Context, q AuditReportQuery) (*AuditReportPage, error) {
+	q, c, err := normalizeAuditReportQuery(q)
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	cte := auditReportCTE
-	where := " FROM report_rows r LEFT JOIN users u ON u.id=r.user_id WHERE 1=1"
-	args := []interface{}{}
-	if status = strings.ToLower(strings.TrimSpace(status)); status != "" {
-		where += " AND r.status=?"
-		args = append(args, status)
-	}
-	if model = strings.ToLower(strings.TrimSpace(model)); model != "" {
-		where += " AND (LOCATE(?,LOWER(r.requested_model))>0 OR LOCATE(?,LOWER(r.actual_provider_model))>0)"
-		args = append(args, model, model)
-	}
-	if search = strings.ToLower(strings.TrimSpace(search)); search != "" {
-		where += " AND (LOCATE(?,LOWER(CONCAT_WS(CHAR(0),r.trace_id,r.request_id,r.requested_model,r.actual_provider_model,r.provider_type,u.username,r.event_type,r.message)))>0)"
-		args = append(args, search)
-	}
-	items := make([]models.ModelInvocation, 0, limit)
-	total := 0
-	err := r.sess.TxContext(ctx, func(tx db.Session) error {
-		row, err := tx.SQL().QueryRowContext(ctx, cte+" SELECT COUNT(*)"+where, args...)
-		if err != nil {
-			return err
+	result := &AuditReportPage{Items: []models.ModelInvocation{}, TruncatedErrors: map[int]bool{}, Since: c.Since, Until: c.Until}
+	err = r.sess.TxContext(ctx, func(tx db.Session) error {
+		row, e := tx.SQL().QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(SUM(NOT complete),0)+(SELECT EXISTS(SELECT 1 FROM observation_audit_pending))+(SELECT EXISTS(SELECT 1 FROM observation_invocation_pending))+(SELECT EXISTS(SELECT 1 FROM observation_cost_pending)),COALESCE(SUM(LEAST(after_id,target_id)),0),COALESCE(SUM(target_id),0) FROM observation_audit_backfill`)
+		if e != nil {
+			return e
 		}
-		if err := row.Scan(&total); err != nil {
-			return err
+		var sources, pending int
+		var processed, target int64
+		if e = row.Scan(&sources, &pending, &processed, &target); e != nil {
+			return e
 		}
-		pageArgs := append(append([]interface{}{}, args...), limit, (page-1)*limit)
-		rows, err := tx.SQL().QueryContext(ctx, cte+` SELECT r.id,r.trace_id,r.request_id,r.session_id,r.user_id,r.instance_id,
-r.requested_model,r.actual_provider_model,r.provider_type,r.status,
-r.prompt_tokens,r.completion_tokens,r.total_tokens,r.latency_ms,r.ttft_ms,r.generation_ms,
-r.tokens_per_second,r.attempt_no,r.error_message,r.created_at,r.completed_at`+where+" ORDER BY r.created_at DESC,r.trace_id DESC LIMIT ? OFFSET ?", pageArgs...)
-		if err != nil {
-			return err
+		if pending > 0 || sources != 5 {
+			return &SummaryRebuildingError{Processed: processed, Target: target}
+		}
+		if q.Cursor == "" {
+			row, e = tx.SQL().QueryRowContext(ctx, `SELECT COALESCE(MAX(sequence_id),0) FROM observation_audit_trace_reports`)
+			if e != nil {
+				return e
+			}
+			if e = row.Scan(&c.Fence); e != nil {
+				return e
+			}
+		}
+		where := ` FROM observation_audit_trace_reports r`
+		if q.Search != "" {
+			where += ` LEFT JOIN users u ON u.id=r.user_id`
+		}
+		where += ` WHERE r.id>0 AND r.sort_at>=? AND r.sort_at<? AND r.sequence_id<=?`
+		args := []interface{}{c.Since, c.Until, c.Fence}
+		if q.Status != "" {
+			where += ` AND r.status=?`
+			args = append(args, q.Status)
+		}
+		if q.Model != "" {
+			where += ` AND (LOCATE(?,LOWER(r.requested_model))>0 OR LOCATE(?,LOWER(r.actual_provider_model))>0)`
+			args = append(args, q.Model, q.Model)
+		}
+		if q.Search != "" {
+			clauses := []string{}
+			for _, field := range []string{"r.requested_model", "r.actual_provider_model", "u.username", "r.trace_id", "r.request_id", "r.provider_type", "r.event_type", "r.message"} {
+				clauses = append(clauses, `LOCATE(?,LOWER(COALESCE(`+field+`,'')))>0`)
+				args = append(args, q.Search)
+			}
+			where += ` AND (` + strings.Join(clauses, ` OR `) + `)`
+		}
+		row, e = tx.SQL().QueryRowContext(ctx, `SELECT COUNT(*)`+where, args...)
+		if e != nil {
+			return e
+		}
+		if e = row.Scan(&result.Total); e != nil {
+			return e
+		}
+		if q.Cursor != "" {
+			where += ` AND (r.sort_at<? OR (r.sort_at=? AND r.trace_id<?))`
+			args = append(args, c.At, c.At, c.Trace)
+		}
+		args = append(args, q.Limit+1)
+		rows, e := tx.SQL().QueryContext(ctx, `SELECT r.id,r.trace_id,r.request_id,r.session_id,r.user_id,r.instance_id,r.requested_model,r.actual_provider_model,r.provider_type,r.status,r.prompt_tokens,r.completion_tokens,r.total_tokens,r.latency_ms,r.ttft_ms,r.generation_ms,r.tokens_per_second,r.attempt_no,LEFT(r.error_message,1000),r.created_at,r.completed_at,r.sort_at,COALESCE(CHAR_LENGTH(r.error_message)>1000,FALSE)`+where+` ORDER BY r.sort_at DESC,r.trace_id DESC LIMIT ?`, args...)
+		if e != nil {
+			return e
 		}
 		defer rows.Close()
+		var lastAt time.Time
 		for rows.Next() {
 			var v models.ModelInvocation
-			if err := rows.Scan(&v.ID, &v.TraceID, &v.RequestID, &v.SessionID, &v.UserID, &v.InstanceID,
-				&v.RequestedModel, &v.ActualProviderModel, &v.ProviderType, &v.Status,
-				&v.PromptTokens, &v.CompletionTokens, &v.TotalTokens, &v.LatencyMs, &v.TTFTMs, &v.GenerationMs,
-				&v.TokensPerSecond, &v.AttemptNo, &v.ErrorMessage, &v.CreatedAt, &v.CompletedAt); err != nil {
-				return err
+			var at time.Time
+			var truncated bool
+			if e = rows.Scan(&v.ID, &v.TraceID, &v.RequestID, &v.SessionID, &v.UserID, &v.InstanceID, &v.RequestedModel, &v.ActualProviderModel, &v.ProviderType, &v.Status, &v.PromptTokens, &v.CompletionTokens, &v.TotalTokens, &v.LatencyMs, &v.TTFTMs, &v.GenerationMs, &v.TokensPerSecond, &v.AttemptNo, &v.ErrorMessage, &v.CreatedAt, &v.CompletedAt, &at, &truncated); e != nil {
+				return e
 			}
-			items = append(items, v)
+			if len(result.Items) == q.Limit {
+				c.At = lastAt
+				c.Trace = result.Items[len(result.Items)-1].TraceID
+				b, _ := json.Marshal(c)
+				result.NextCursor = base64.RawURLEncoding.EncodeToString(b)
+				break
+			}
+			result.Items = append(result.Items, v)
+			if truncated {
+				result.TruncatedErrors[v.ID] = true
+			}
+			lastAt = at
 		}
 		return rows.Err()
 	}, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
 	if err != nil {
-		return nil, 0, fmt.Errorf("query audit report: %w", err)
+		return nil, err
 	}
-	return items, total, nil
+	return result, nil
 }
 
-// Aggregate each source independently before joining. This prevents calls and
-// costs under a reused trace from multiplying one another.
-const auditReportCTE = `WITH invocation_groups AS (
- SELECT trace_id,MIN(id) first_id,MAX(id) last_id,MIN(created_at) created_at,
- MAX(completed_at) completed_at,SUM(prompt_tokens) prompt_tokens,
- SUM(completion_tokens) completion_tokens,SUM(total_tokens) total_tokens,SUM(latency_ms) latency_ms
- FROM model_invocations WHERE trace_id<>'' GROUP BY trace_id
-), event_groups AS (
- SELECT e.trace_id,MAX(e.id) last_id FROM audit_events e
- WHERE e.trace_id<>'' AND NOT EXISTS(SELECT 1 FROM model_invocations m WHERE m.trace_id=e.trace_id)
- GROUP BY e.trace_id
-), fallback_costs AS (
- SELECT c.trace_id,MAX(c.id) last_id,SUM(c.prompt_tokens) prompt_tokens,
- SUM(c.completion_tokens) completion_tokens,SUM(c.total_tokens) total_tokens
- FROM cost_records c JOIN event_groups g ON g.trace_id=c.trace_id GROUP BY c.trace_id
-), report_rows AS (
- SELECT m.id,m.trace_id,f.request_id,m.session_id,m.user_id,m.instance_id,
- m.requested_model,m.actual_provider_model,m.provider_type,
- CASE WHEN m.status IN ('completed','blocked','failed') THEN m.status ELSE 'pending' END status,
- g.prompt_tokens,g.completion_tokens,g.total_tokens,g.latency_ms,m.ttft_ms,m.generation_ms,
- m.tokens_per_second,m.attempt_no,m.error_message,g.created_at,g.completed_at,
- '' event_type,'' message
- FROM invocation_groups g JOIN model_invocations m ON m.id=g.last_id JOIN model_invocations f ON f.id=g.first_id
- UNION ALL
- SELECT e.id,e.trace_id,COALESCE(e.request_id,''),e.session_id,COALESCE(e.user_id,c.user_id),COALESCE(e.instance_id,c.instance_id),
- 'Auto',COALESCE(NULLIF(c.model_name,''),e.event_type),'gateway',
- CASE WHEN LOCATE('completed',e.event_type)>0 THEN 'completed'
- WHEN LOCATE('blocked',e.event_type)>0 THEN 'blocked' WHEN LOCATE('failed',e.event_type)>0 THEN 'failed' ELSE 'pending' END,
- COALESCE(fc.prompt_tokens,0),COALESCE(fc.completion_tokens,0),COALESCE(fc.total_tokens,0),
- NULL,NULL,NULL,NULL,0,NULL,e.created_at,NULL,e.event_type,e.message
- FROM event_groups g JOIN audit_events e ON e.id=g.last_id
- LEFT JOIN fallback_costs fc ON fc.trace_id=e.trace_id LEFT JOIN cost_records c ON c.id=fc.last_id
-)`
+// Compatibility for in-process callers; HTTP serving uses the explicit cursor
+// method above. Walking older pages remains keyset-based, without OFFSET.
+func (r *modelInvocationRepository) ListAuditReport(page, limit int, search, status, model string) ([]models.ModelInvocation, int, error) {
+	if page < 1 || page > 10000 {
+		return nil, 0, fmt.Errorf("invalid audit page")
+	}
+	q := AuditReportQuery{Limit: limit, Search: search, Status: status, Model: model}
+	for i := 1; i <= page; i++ {
+		p, e := r.ListAuditReportPage(context.Background(), q)
+		if e != nil {
+			return nil, 0, e
+		}
+		if i == page || p.NextCursor == "" {
+			if i < page {
+				return []models.ModelInvocation{}, p.Total, nil
+			}
+			return p.Items, p.Total, nil
+		}
+		q.Cursor = p.NextCursor
+	}
+	return nil, 0, nil
+}

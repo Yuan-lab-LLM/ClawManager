@@ -37,12 +37,13 @@ func (g SQLCaptureGuard) Snapshot(ctx context.Context) (CaptureGuardSnapshot, er
 }
 
 type CapturePhaseRequest struct {
-	Origin    string        `json:"origin_installation_id"`
-	BackupID  string        `json:"backup_id"`
-	AttemptID string        `json:"attempt_id"`
-	Phase     string        `json:"phase"`
-	Gate      GateOwnership `json:"gate"`
-	StageUID  string        `json:"staging_uid"`
+	RequiredSecrets []KubernetesSelection `json:"required_secrets,omitempty"`
+	Origin          string                `json:"origin_installation_id"`
+	BackupID        string                `json:"backup_id"`
+	AttemptID       string                `json:"attempt_id"`
+	Phase           string                `json:"phase"`
+	Gate            GateOwnership         `json:"gate"`
+	StageUID        string                `json:"staging_uid"`
 }
 type CaptureCandidate struct {
 	Schema string `json:"schema"`
@@ -91,6 +92,13 @@ func CapturePhase(parent context.Context, stage string, r CapturePhaseRequest, s
 	if err := source.ValidateForPhase(r.Phase); err != nil {
 		return zero, err
 	}
+	if r.Phase == "secret_capture" {
+		if err := validateRequiredCaptureSecrets(r.RequiredSecrets, source.Secrets); err != nil {
+			return zero, err
+		}
+	} else if len(r.RequiredSecrets) != 0 {
+		return zero, errors.New("ordinary collector cannot carry secret requirements")
+	}
 	entries, err := os.ReadDir(stage)
 	if err != nil || len(entries) != 0 {
 		return zero, errors.New("fresh encrypted staging required")
@@ -129,6 +137,9 @@ func CapturePhase(parent context.Context, stage string, r CapturePhaseRequest, s
 	var tables []string
 	if r.Phase == "capture" {
 		if err = ValidateSchema(ctx, source.MySQL); err != nil {
+			return zero, err
+		}
+		if err = validateObservationCaptureSources(ctx, source, false); err != nil {
 			return zero, err
 		}
 		tables, err = SnapshotBusinessTables(ctx, source.MySQL)

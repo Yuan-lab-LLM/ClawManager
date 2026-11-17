@@ -82,6 +82,12 @@ type restoredVerificationConfig struct {
 	Directory       string                                 `json:"directory"`
 }
 
+type observationProofConfig struct {
+	VerificationConfigFile string `json:"verification_config_file"`
+	SourceDSNFile          string `json:"source_dsn_file"`
+	ControlDSNFile         string `json:"control_dsn_file"`
+}
+
 func connectDB(ctx context.Context, path string) (*sql.DB, string, error) {
 	raw, e := readBounded(path, 16384)
 	if e != nil {
@@ -196,7 +202,14 @@ func runBoundDataOperation(ctx context.Context, operation, bootstrapPath, operat
 	}
 	return withBootstrap(ctx, bootstrapPath, func(cfg bootstrap, store systembackup.ImmutableObjectStore, pub ed25519.PublicKey, wrapper systembackup.AESKeyWrapper) error {
 		switch operation {
-		case "verify-restored":
+		case "verify-restored", "record-observation-restore-proof":
+			var proof observationProofConfig
+			if operation == "record-observation-restore-proof" {
+				if e := decodeFile(operationPath, &proof); e != nil {
+					return e
+				}
+				operationPath = proof.VerificationConfigFile
+			}
 			var c restoredVerificationConfig
 			if e := decodeFile(operationPath, &c); e != nil {
 				return e
@@ -229,6 +242,26 @@ func runBoundDataOperation(ctx context.Context, operation, bootstrapPath, operat
 			}
 			defer closeObjects()
 			report, e := systembackup.VerifyRestoredData(ctx, store, artifact, wrapper, c.Intent, target, budget)
+			if operation == "record-observation-restore-proof" {
+				if e != nil {
+					return e
+				}
+				source, _, err := connectDB(ctx, proof.SourceDSNFile)
+				if err != nil {
+					return err
+				}
+				defer source.Close()
+				control, _, err := connectDB(ctx, proof.ControlDSNFile)
+				if err != nil {
+					return err
+				}
+				defer control.Close()
+				n, err := report.RecordObservationRestoreProof(ctx, source, control, strings.TrimSpace(os.Getenv("SYSTEM_BACKUP_SQL_GATE_SCOPE")))
+				if err != nil {
+					return err
+				}
+				return json.NewEncoder(out).Encode(map[string]any{"run_id": report.RunID, "backup_id": report.BackupID, "objects_proven": n})
+			}
 			if binding != nil {
 				if e != nil {
 					return e

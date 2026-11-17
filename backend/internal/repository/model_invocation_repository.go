@@ -50,65 +50,74 @@ func (r *modelInvocationRepository) Create(invocation *models.ModelInvocation) e
 	if invocation.CreatedAt.IsZero() {
 		invocation.CreatedAt = now
 	}
-	res, err := r.sess.Collection("model_invocations").Insert(invocation)
-	if err != nil {
-		return fmt.Errorf("failed to create model invocation: %w", err)
+	if handled, err := persistObservation(context.Background(), r.sess, "model_invocations", invocation); handled {
+		return err
 	}
-	invocation.ID = int(res.ID().(int64))
-	return nil
+	return r.sess.Tx(func(tx db.Session) error {
+		if invocation.TraceID != "" {
+			if err := lockAuditTraces(context.Background(), tx, []string{invocation.TraceID}); err != nil {
+				return err
+			}
+		}
+		if err := lockObservationSourceDays(context.Background(), tx, invocation); err != nil {
+			return err
+		}
+		res, err := tx.Collection("model_invocations").Insert(invocation)
+		if err != nil {
+			return fmt.Errorf("failed to create model invocation: %w", err)
+		}
+		invocation.ID = int(res.ID().(int64))
+		return maintainObservationSummary(context.Background(), tx, "model_invocations", invocation)
+	})
 }
 
 func (r *modelInvocationRepository) GetByID(id int) (*models.ModelInvocation, error) {
+	if item, handled, err := monthlyByID[models.ModelInvocation](context.Background(), r.sess, "model_invocations", id); handled || err != nil {
+		return item, err
+	}
 	var invocation models.ModelInvocation
 	err := r.sess.Collection("model_invocations").Find(db.Cond{"id": id}).One(&invocation)
 	if err != nil {
 		if err == db.ErrNoMoreRows {
-			return nil, nil
+			archived, archiveErr := archivedByID[models.ModelInvocation](r.sess, "model_invocations", id)
+			if archiveErr != nil {
+				return nil, archiveErr
+			}
+			if archived != nil {
+				if err := hydrateObservation(context.Background(), archived); err != nil {
+					return nil, err
+				}
+			}
+			return archived, nil
 		}
 		return nil, fmt.Errorf("failed to get model invocation by id: %w", err)
+	}
+	if err := hydrateObservation(context.Background(), &invocation); err != nil {
+		return nil, err
 	}
 	return &invocation, nil
 }
 
 func (r *modelInvocationRepository) ListByTraceID(traceID string) ([]models.ModelInvocation, error) {
-	var items []models.ModelInvocation
-	if err := r.sess.Collection("model_invocations").Find(db.Cond{"trace_id": traceID}).OrderBy("id").All(&items); err != nil {
-		return nil, fmt.Errorf("failed to list model invocations by trace: %w", err)
-	}
-	return items, nil
+	return routedLogDetails[models.ModelInvocation](r.sess, "model_invocations", traceID, "", 0, 200, false)
 }
 
 func (r *modelInvocationRepository) ListBySessionID(sessionID string, limit int) ([]models.ModelInvocation, error) {
-	var items []models.ModelInvocation
 	if limit <= 0 {
 		limit = 50
 	}
-	if err := r.sess.Collection("model_invocations").Find(db.Cond{"session_id": sessionID}).OrderBy("-created_at").Limit(limit).All(&items); err != nil {
-		return nil, fmt.Errorf("failed to list model invocations by session: %w", err)
-	}
-	return items, nil
+	return routedLogDetails[models.ModelInvocation](r.sess, "model_invocations", "", sessionID, 0, limit, true)
 }
 
 func (r *modelInvocationRepository) ListByUserID(userID, limit int) ([]models.ModelInvocation, error) {
-	var items []models.ModelInvocation
 	if limit <= 0 {
 		limit = 50
 	}
-	if err := r.sess.Collection("model_invocations").Find(db.Cond{"user_id": userID}).OrderBy("-created_at").Limit(limit).All(&items); err != nil {
-		return nil, fmt.Errorf("failed to list model invocations by user: %w", err)
-	}
-	return items, nil
+	return routedRecentLogs[models.ModelInvocation](r.sess, "model_invocations", userID, limit)
 }
 
 func (r *modelInvocationRepository) ListRecent(limit int) ([]models.ModelInvocation, error) {
-	var items []models.ModelInvocation
-	if limit <= 0 {
-		limit = 100
-	}
-	if err := r.sess.Collection("model_invocations").Find().OrderBy("-created_at").Limit(limit).All(&items); err != nil {
-		return nil, fmt.Errorf("failed to list recent model invocations: %w", err)
-	}
-	return items, nil
+	return routedRecentLogs[models.ModelInvocation](r.sess, "model_invocations", 0, limit)
 }
 
 func (r *modelInvocationRepository) AggregateByInstanceSession(instanceID int, filter SessionUsageFilter) ([]InstanceSessionTokenAggregate, error) {
@@ -120,7 +129,7 @@ SELECT session_id,
        COUNT(*),
        MIN(created_at),
        MAX(created_at)
-FROM model_invocations
+FROM observation_invocation_summaries
 WHERE instance_id = ?
   AND session_id IS NOT NULL
   AND session_id != ''
@@ -154,6 +163,9 @@ GROUP BY session_id`
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("failed to iterate session token aggregates: %w", err)
 	}
+	if err := hydrateObservations(context.Background(), items); err != nil {
+		return nil, err
+	}
 	return items, nil
 }
 
@@ -161,75 +173,29 @@ func (r *modelInvocationRepository) ListRecentByInstanceSession(instanceID int, 
 	if limit <= 0 {
 		limit = 20
 	}
-	query := `
-SELECT id, trace_id, session_id, request_id, user_id, instance_id, instance_mode, runtime_type, gateway_id, runtime_pod_id, gateway_key_id, model_id, provider_type, requested_model, actual_provider_model, traffic_class, prompt_tokens, completion_tokens, total_tokens, cached_tokens, reasoning_tokens, latency_ms, ttft_ms, generation_ms, tokens_per_second, attempt_no, is_streaming, status, error_message, created_at, completed_at
-FROM model_invocations
-WHERE instance_id = ?
-  AND session_id = ?
-  AND status != ?`
-	args := []interface{}{instanceID, sessionID, models.ModelInvocationStatusBlocked}
-	query, args = appendTimeFilter(query, args, filter, "created_at")
-	query += `
-ORDER BY created_at DESC, id DESC
-LIMIT ?`
-	args = append(args, limit)
-
-	rows, err := r.sess.SQL().Query(query, args...)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list model invocations by instance session: %w", err)
+	if limit > 200 {
+		limit = 200
 	}
-	defer rows.Close()
-
-	items := make([]models.ModelInvocation, 0, limit)
-	for rows.Next() {
-		var item models.ModelInvocation
-		if err := rows.Scan(
-			&item.ID,
-			&item.TraceID,
-			&item.SessionID,
-			&item.RequestID,
-			&item.UserID,
-			&item.InstanceID,
-			&item.InstanceMode,
-			&item.RuntimeType,
-			&item.GatewayID,
-			&item.RuntimePodID,
-			&item.GatewayKeyID,
-			&item.ModelID,
-			&item.ProviderType,
-			&item.RequestedModel,
-			&item.ActualProviderModel,
-			&item.TrafficClass,
-			&item.PromptTokens,
-			&item.CompletionTokens,
-			&item.TotalTokens,
-			&item.CachedTokens,
-			&item.ReasoningTokens,
-			&item.LatencyMs,
-			&item.TTFTMs,
-			&item.GenerationMs,
-			&item.TokensPerSecond,
-			&item.AttemptNo,
-			&item.IsStreaming,
-			&item.Status,
-			&item.ErrorMessage,
-			&item.CreatedAt,
-			&item.CompletedAt,
-		); err != nil {
-			return nil, fmt.Errorf("failed to scan model invocation by instance session: %w", err)
-		}
-		items = append(items, item)
+	cond := db.Cond{"instance_id": instanceID, "session_id": sessionID, "status !=": models.ModelInvocationStatusBlocked}
+	if filter.Since != nil {
+		cond["created_at >="] = *filter.Since
 	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("failed to iterate model invocations by instance session: %w", err)
+	if filter.Until != nil {
+		cond["created_at <"] = *filter.Until
 	}
-	return items, nil
+	var items []models.ModelInvocation
+	columns := []interface{}{}
+	for _, column := range traceColumns("model_invocations") {
+		columns = append(columns, column)
+	}
+	err := r.sess.Collection("observation_invocation_summaries").Find(cond).Select(columns...).OrderBy("-created_at", "-id").Limit(limit).All(&items)
+	return items, err
 }
 
 func (r *modelInvocationRepository) CountDistinctSessionsByInstance(instanceID int, filter SessionUsageFilter) (int, error) {
 	query := `
 SELECT COUNT(DISTINCT session_id)
-FROM model_invocations
+FROM observation_invocation_summaries
 WHERE instance_id = ?
   AND session_id IS NOT NULL
   AND session_id != ''
@@ -259,7 +225,7 @@ func isDuplicateIndexError(err error) bool {
 func (r *modelInvocationRepository) AggregateModelsByInstanceSession(instanceID int, sessionID string, filter SessionUsageFilter) ([]models.ModelInvocation, error) {
 	query := `SELECT COALESCE(NULLIF(TRIM(actual_provider_model), ''), requested_model),
 COALESCE(SUM(prompt_tokens), 0), COALESCE(SUM(completion_tokens), 0), COALESCE(SUM(total_tokens), 0)
-FROM model_invocations WHERE instance_id = ? AND session_id = ? AND status != ?`
+FROM observation_invocation_summaries WHERE instance_id = ? AND session_id = ? AND status != ?`
 	query, args := appendTimeFilter(query, []interface{}{instanceID, sessionID, models.ModelInvocationStatusBlocked}, filter, "created_at")
 	query += " GROUP BY COALESCE(NULLIF(TRIM(actual_provider_model), ''), requested_model)"
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -279,6 +245,9 @@ FROM model_invocations WHERE instance_id = ? AND session_id = ? AND status != ?`
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("failed to iterate session models: %w", err)
+	}
+	if err := hydrateObservations(context.Background(), items); err != nil {
+		return nil, err
 	}
 	return items, nil
 }

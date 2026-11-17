@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"clawreef/internal/models"
+	"clawreef/internal/repository"
 	"clawreef/internal/services"
 )
 
@@ -390,7 +391,9 @@ func (s *service) recordFailedAttemptCost(prepared *preparedChatRequest, candida
 		internalCost = estimatedCost
 	}
 	if err := s.costRecordService.RecordCost(&models.CostRecord{
-		TraceID: prepared.traceID, SessionID: prepared.sessionIDPtr, RequestID: prepared.requestIDPtr,
+		EventUID:           stringPtr(repository.ObservationAttemptUID("cost_records", prepared.userID, prepared.requestID, prepared.attemptNumber, candidate.ProviderType, candidate.ProviderModelName)),
+		InvocationEventUID: stringPtr(repository.ObservationAttemptUID("model_invocations", prepared.userID, prepared.requestID, prepared.attemptNumber, candidate.ProviderType, candidate.ProviderModelName)),
+		TraceID:            prepared.traceID, SessionID: prepared.sessionIDPtr, RequestID: prepared.requestIDPtr,
 		UserID: prepared.userIDPtr, InstanceID: prepared.req.InstanceID, GatewayKeyID: prepared.req.GatewayKeyID,
 		InstanceMode: runtimeAttributionString(prepared.req.InstanceMode), RuntimeType: runtimeAttributionString(prepared.req.RuntimeType),
 		GatewayID: runtimeAttributionString(prepared.req.GatewayID), RuntimePodID: runtimeAttributionInt64(prepared.req.RuntimePodID),

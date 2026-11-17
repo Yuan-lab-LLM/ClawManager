@@ -37,6 +37,7 @@ type DataOperationReceipt struct {
 	DataOperationBinding
 	Status             string         `json:"status"`
 	NormalizedAt       time.Time      `json:"normalized_at"`
+	MonthlyTables      int            `json:"monthly_tables,omitempty"`
 	SQLTables          int            `json:"sql_tables"`
 	SQLRows            int64          `json:"sql_rows"`
 	SQLSHA256          string         `json:"sql_sha256"`
@@ -49,7 +50,7 @@ type DataOperationReceipt struct {
 }
 
 func dataReceipt(b DataOperationBinding, sql SQLResult, at time.Time, files, objects, redis int, history []ArtifactPart) (DataOperationReceipt, error) {
-	r := DataOperationReceipt{Schema: "system-backup-data-operation.v1", DataOperationBinding: b, Status: "succeeded", NormalizedAt: at, SQLTables: len(sql.Tables), FileCount: files, ObjectCount: objects, RedisCount: redis, HistoryParts: history, IntegrityVerified: true}
+	r := DataOperationReceipt{Schema: "system-backup-data-operation.v1", DataOperationBinding: b, Status: "succeeded", NormalizedAt: at, SQLTables: len(sql.Tables), MonthlyTables: len(sql.MonthlyCatalog), FileCount: files, ObjectCount: objects, RedisCount: redis, HistoryParts: history, IntegrityVerified: true}
 	if b.Validate() != nil || at.IsZero() || files < 0 || objects < 0 || redis < 0 || requireBusinessSQLInventory(sql) != nil || len(history) != 2 {
 		return r, errors.New("evidence_incomplete")
 	}
@@ -105,7 +106,7 @@ func RestoredVerificationReceipt(b DataOperationBinding, intent RestoreVerificat
 }
 
 func (r DataOperationReceipt) validateBinding(b DataOperationBinding) error {
-	if b.Validate() != nil || r.Schema != "system-backup-data-operation.v1" || r.DataOperationBinding != b || r.Status != "succeeded" || !r.IntegrityVerified || r.AcceptanceEligible || r.NormalizedAt.IsZero() || r.SQLTables != businessTableCount() || r.SQLRows < 0 || !validHash(r.SQLSHA256) || r.FileCount < 0 || r.ObjectCount < 0 || r.RedisCount < 0 || len(r.HistoryParts) != 2 {
+	if b.Validate() != nil || r.Schema != "system-backup-data-operation.v1" || r.DataOperationBinding != b || r.Status != "succeeded" || !r.IntegrityVerified || r.AcceptanceEligible || r.NormalizedAt.IsZero() || (r.MonthlyTables < 0 || r.MonthlyTables > 14400 || r.SQLTables != businessTableCount()+r.MonthlyTables) || r.SQLRows < 0 || !validHash(r.SQLSHA256) || r.FileCount < 0 || r.ObjectCount < 0 || r.RedisCount < 0 || len(r.HistoryParts) != 2 {
 		return errors.New("evidence_incomplete")
 	}
 	seen := map[string]bool{}

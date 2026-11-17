@@ -1,4 +1,6 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import ArchiveHistoryExport from "./ArchiveHistoryExport";
+import { isAxiosError } from "axios";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BarChart3, ChevronDown, ChevronUp, Download, RefreshCw, Search } from "lucide-react";
 import { useI18n } from "../contexts/I18nContext";
 import InstanceCollapsiblePanel, { instancePanelStorageKey } from "./InstanceCollapsiblePanel";
@@ -58,7 +60,7 @@ export default function InstanceSessionUsagePanel({
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [page, setPage] = useState(1);
-  const [timeRange, setTimeRange] = useState<SessionUsageTimeRange>("all");
+  const [timeRange, setTimeRange] = useState<SessionUsageTimeRange>("30d");
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [result, setResult] = useState<InstanceSessionUsageResult | null>(null);
@@ -67,6 +69,9 @@ export default function InstanceSessionUsagePanel({
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState("");
   const [panelExpanded, setPanelExpanded] = useState(false);
+  const [refreshVersion, setRefreshVersion] = useState(0);
+  const requestVersion = useRef(0);
+  const detailVersion = useRef(0);
 
   const handlePanelExpandedChange = useCallback(
     (expanded: boolean) => {
@@ -81,7 +86,17 @@ export default function InstanceSessionUsagePanel({
     instanceType === "hermes" ||
     instanceType === "opencode" ||
     instanceType === "deepseek-harness";
-  const since = useMemo(() => resolveSessionUsageSince(timeRange), [timeRange]);
+  const until = useMemo(() => new Date(Math.floor(Date.now() / 1000) * 1000).toISOString(), [timeRange, debouncedSearch, instanceId, refreshVersion]);
+  const since = useMemo(() => resolveSessionUsageSince(timeRange, Date.parse(until)), [timeRange, until]);
+  const pageCursors = useRef<Record<number, string>>({ 1: "" });
+  const cursorScope = useRef("");
+  const refreshLatest = useCallback(() => {
+    requestVersion.current++;
+    detailVersion.current++;
+    pageCursors.current = { 1: "" };
+    setPage(1);
+    setRefreshVersion(value => value + 1);
+  }, []);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setDebouncedSearch(search.trim()), 300);
@@ -90,6 +105,7 @@ export default function InstanceSessionUsagePanel({
 
   const loadDetail = useCallback(
     async (sessionId: string, options?: { silent?: boolean }) => {
+      const request = ++detailVersion.current;
       if (!options?.silent) {
         setDetailLoading(true);
       }
@@ -97,18 +113,21 @@ export default function InstanceSessionUsagePanel({
       try {
         const data = await instanceService.getInstanceSessionUsageDetail(instanceId, sessionId, {
           since,
+        until,
         });
+        if (request !== detailVersion.current) return;
         setDetail(data);
       } catch (err) {
+        if (request !== detailVersion.current) return;
         setDetail(null);
         setDetailError(err instanceof Error ? err.message : t("instances.sessionUsage.detailLoadFailed"));
       } finally {
-        if (!options?.silent) {
+        if (request === detailVersion.current && !options?.silent) {
           setDetailLoading(false);
         }
       }
     },
-    [instanceId, since, t],
+    [instanceId, since, until, refreshVersion, t],
   );
 
   const loadUsage = useCallback(async (options?: { silent?: boolean }) => {
@@ -118,26 +137,41 @@ export default function InstanceSessionUsagePanel({
     if (!options?.silent) {
       setLoading(true);
     }
+    const scope = JSON.stringify([instanceId, debouncedSearch, since, until]);
+    const requestPage = cursorScope.current === scope ? page : 1;
+    if (cursorScope.current !== scope) { cursorScope.current = scope; pageCursors.current = { 1: "" }; setPage(1); }
+    const request = ++requestVersion.current;
     setError("");
     try {
+      if (requestPage > 1 && !pageCursors.current[requestPage]) {
+        setError(t("instances.sessionUsage.cursorStale"));
+        return;
+      }
       const data = await instanceService.getInstanceSessionUsage(instanceId, {
-        page,
+        page: requestPage,
         limit: PAGE_SIZE,
+        cursor: pageCursors.current[requestPage],
         search: debouncedSearch || undefined,
         since,
+        until,
       });
+      if (request !== requestVersion.current) return;
+      delete pageCursors.current[requestPage + 1];
+      if (data.next_cursor) pageCursors.current[requestPage + 1] = data.next_cursor;
       setResult(data);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t("instances.sessionUsage.loadFailed"));
+      if (request !== requestVersion.current) return;
+      setError(isAxiosError(err) && err.response?.status === 409 ? t("instances.sessionUsage.cursorStale") : isAxiosError(err) && err.response?.data?.error || (err instanceof Error ? err.message : t("instances.sessionUsage.loadFailed")));
     } finally {
-      if (!options?.silent) {
+      if (request === requestVersion.current && !options?.silent) {
         setLoading(false);
       }
     }
-  }, [debouncedSearch, instanceId, page, since, supported, t]);
+  }, [debouncedSearch, instanceId, page, since, until, refreshVersion, supported, t]);
 
   useEffect(() => {
     void loadUsage();
+    return () => { requestVersion.current++; };
   }, [loadUsage]);
 
   useEffect(() => {
@@ -151,19 +185,19 @@ export default function InstanceSessionUsagePanel({
   }, [debouncedSearch, timeRange]);
 
   useEffect(() => {
-    if (!autoRefresh || !supported || !panelExpanded) {
+    if (!autoRefresh || !supported || !panelExpanded || page !== 1) {
       return;
     }
     const timer = window.setInterval(() => {
-      void (async () => {
-        await loadUsage({ silent: true });
-        if (expandedSessionId) {
-          await loadDetail(expandedSessionId, { silent: true });
-        }
-      })();
+      refreshLatest();
     }, AUTO_REFRESH_MS);
     return () => window.clearInterval(timer);
-  }, [autoRefresh, expandedSessionId, loadDetail, loadUsage, panelExpanded, supported]);
+  }, [autoRefresh, page, refreshLatest, panelExpanded, supported]);
+
+  useEffect(() => {
+    if (expandedSessionId) void loadDetail(expandedSessionId);
+    return () => { detailVersion.current++; };
+  }, [expandedSessionId, loadDetail]);
 
   const totalPages = useMemo(() => {
     if (!result) {
@@ -177,25 +211,27 @@ export default function InstanceSessionUsagePanel({
     try {
       const items: InstanceSessionUsageItem[] = [];
       let pageCursor = 1;
-      let total = 0;
+      let cursor: string | undefined;
       let currency = "USD";
       do {
         const batch = await instanceService.getInstanceSessionUsage(instanceId, {
           page: pageCursor,
+          cursor,
           limit: 100,
           search: debouncedSearch || undefined,
           since,
+        until,
         });
         items.push(...batch.items);
-        total = batch.total;
+        cursor = batch.next_cursor;
         currency = batch.summary.currency || currency;
         pageCursor += 1;
-      } while (items.length < total);
+      } while (cursor);
 
       const csv = buildSessionUsageCsv(items, currency);
       downloadSessionUsageCsv(csv, `instance-${instanceId}-session-usage.csv`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t("instances.sessionUsage.exportFailed"));
+      setError(isAxiosError(err) && err.response?.status === 409 ? t("instances.sessionUsage.cursorStale") : isAxiosError(err) && err.response?.data?.error || (err instanceof Error ? err.message : t("instances.sessionUsage.exportFailed")));
     } finally {
       setExporting(false);
     }
@@ -210,7 +246,6 @@ export default function InstanceSessionUsagePanel({
     }
     setExpandedSessionId(item.session_id);
     setDetail(null);
-    await loadDetail(item.session_id);
   };
 
   const sessionPanelSummary = result
@@ -235,7 +270,7 @@ export default function InstanceSessionUsagePanel({
       summary={sessionPanelSummary}
       onExpandedChange={handlePanelExpandedChange}
       headerActions={
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
           <div className="relative min-w-[180px] flex-1 sm:max-w-xs">
             <Search className="pointer-events-none absolute left-2 top-2.5 h-4 w-4 text-slate-400" />
             <input
@@ -250,7 +285,7 @@ export default function InstanceSessionUsagePanel({
             onChange={(event) => setTimeRange(event.target.value as SessionUsageTimeRange)}
             className="rounded-md border border-slate-200 px-2 py-2 text-sm"
           >
-            <option value="all">{t("instances.sessionUsage.timeRangeAll")}</option>
+            <option value="90d">90 days</option>
             <option value="24h">{t("instances.sessionUsage.timeRange24h")}</option>
             <option value="7d">{t("instances.sessionUsage.timeRange7d")}</option>
             <option value="30d">{t("instances.sessionUsage.timeRange30d")}</option>
@@ -266,7 +301,7 @@ export default function InstanceSessionUsagePanel({
           <button
             type="button"
             className="inline-flex items-center gap-1 rounded-md border border-slate-200 px-2 py-2 text-xs text-slate-700"
-            onClick={() => void loadUsage()}
+            onClick={refreshLatest}
           >
             <RefreshCw className="h-3.5 w-3.5" />
             {t("instances.sessionUsage.refresh")}
@@ -283,6 +318,8 @@ export default function InstanceSessionUsagePanel({
         </div>
       }
     >
+      <ArchiveHistoryExport instanceId={instanceId} />
+      {autoRefresh && page > 1 && <p className="mb-2 text-sm text-slate-500">{t("instances.sessionUsage.refreshPaused")}</p>}
       <p className="text-xs text-slate-500">{t("instances.sessionUsage.gatewayOnlyNotice")}</p>
 
       {result?.compliance.has_fallback_sessions && (
@@ -450,17 +487,17 @@ export default function InstanceSessionUsagePanel({
           <div className="flex gap-2">
             <button
               type="button"
-              disabled={page <= 1}
+              disabled={loading || page <= 1 || (page > 2 && !pageCursors.current[page - 1])}
               className="rounded border border-slate-200 px-2 py-1 disabled:opacity-40"
-              onClick={() => setPage((current) => Math.max(1, current - 1))}
+              onClick={() => { if (!loading) setPage((current) => current <= 2 || pageCursors.current[current - 1] ? Math.max(1, current - 1) : current); }}
             >
               {t("instances.sessionUsage.prev")}
             </button>
             <button
               type="button"
-              disabled={page >= totalPages}
+              disabled={loading || page >= totalPages || !pageCursors.current[page + 1]}
               className="rounded border border-slate-200 px-2 py-1 disabled:opacity-40"
-              onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
+              onClick={() => { if (!loading) setPage((current) => pageCursors.current[current + 1] ? Math.min(totalPages, current + 1) : current); }}
             >
               {t("instances.sessionUsage.next")}
             </button>

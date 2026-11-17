@@ -294,6 +294,8 @@ type teamService struct {
 	workspaceText         *workspaceFileService
 	observationMu         sync.Mutex
 	observationPods       map[string]teamObservationPods
+	redisMaintenanceAfter int
+	redisMaintenanceLast  time.Time
 }
 
 type teamOpenClawConfigPlanner interface {
@@ -451,6 +453,7 @@ func (s *teamService) consumerScanLoop(ctx context.Context) {
 		case <-ticker.C:
 			s.resumePendingTeamDeletions()
 			s.ensureConsumersForActiveTeams(ctx)
+			s.maintainTeamRedis(ctx)
 		}
 	}
 }
@@ -1148,6 +1151,11 @@ func (s *teamService) createRootCoordinationRecovery(
 		return nil
 	}
 	s.publishTeamRootWorkflowState(bus, task)
+	if bus.commandHook != nil {
+		// The enclosing projection transaction owns this pending outbox. Its
+		// normal sender may publish only after the SQL commit succeeds.
+		return nil
+	}
 	if err := s.deliverTeamEventOutbox(team, bus, outbox); err != nil {
 		_ = s.repo.MarkEventOutboxFailed(outbox.ID, now.Add(teamOutboxRetryDelay(outbox.Attempts)), err.Error())
 		return nil
@@ -2203,8 +2211,10 @@ func (s *teamService) DispatchTask(userID, teamID int, req DispatchTeamTaskReque
 	if enrichedPayloadJSON != task.PayloadJSON {
 		task.PayloadJSON = enrichedPayloadJSON
 		task.UpdatedAt = time.Now().UTC()
-		if err := s.repo.UpdateTask(task); err != nil {
-			return nil, err
+		if _, durable := s.repo.(repository.TeamDispatchOutboxRepository); !durable {
+			if err := s.repo.UpdateTask(task); err != nil {
+				return nil, err
+			}
 		}
 	}
 	if strings.TrimSpace(eventString(taskPayload, "intent")) == initialLeaderTaskIntent && backendGeneratedBootstrapEnabled() {
@@ -2229,6 +2239,34 @@ func (s *teamService) DispatchTask(userID, teamID int, req DispatchTeamTaskReque
 	// Close the dispatch-to-XADD race with runtime-upgrade maintenance.
 	if err := s.requireTeamRedisDeliveryAvailable(context.Background(), team, bus); err != nil {
 		return nil, err
+	}
+	if durable, ok := s.repo.(repository.TeamDispatchOutboxRepository); ok {
+		outbox := &models.TeamEventOutbox{TeamID: team.ID, SourceEventID: "dispatch:" + messageID, Destination: teamInboxKey(team.ID, member.MemberKey), MessageID: messageID, PayloadJSON: envelopeJSON}
+		if err := durable.EnqueueTeamDispatch(task, outbox); err != nil {
+			return nil, err
+		}
+		if task.Status != models.TeamTaskStatusPending || task.RedisStreamID != nil {
+			return teamTaskPayload(*task)
+		}
+		if err := s.deliverTeamEventOutbox(team, bus, outbox); err != nil {
+			if outbox.ID > 0 {
+				_ = s.repo.MarkEventOutboxFailed(outbox.ID, now.Add(teamOutboxRetryDelay(0)), err.Error())
+			}
+			return teamTaskPayload(*task)
+		}
+		if outbox.ID > 0 {
+			if err := s.repo.MarkEventOutboxDelivered(outbox.ID, time.Now().UTC()); err != nil {
+				return teamTaskPayload(*task)
+			}
+		}
+		fresh, err := s.repo.GetTaskByID(task.ID)
+		if err != nil {
+			return nil, err
+		}
+		if fresh != nil {
+			task = fresh
+		}
+		return teamTaskPayload(*task)
 	}
 	streamID, err := bus.XAdd(context.Background(), teamInboxKey(team.ID, member.MemberKey), map[string]string{
 		"payload":    envelopeJSON,
@@ -2262,6 +2300,15 @@ func (s *teamService) requireTeamDispatchAvailable(ctx context.Context, team *mo
 }
 
 func (s *teamService) requireTeamRedisDeliveryAvailable(ctx context.Context, team *models.Team, bus *redisBus) error {
+	if team != nil && s.repo != nil {
+		current, err := s.repo.GetTeamByID(team.ID)
+		if err != nil {
+			return err
+		}
+		if current == nil || current.Status == models.TeamStatusDeleting || current.Status == models.TeamStatusDeleted {
+			return fmt.Errorf("Team is deleting or deleted")
+		}
+	}
 	if team != nil {
 		if err := s.requireTeamPowerRunning(ctx, team.ID); err != nil {
 			return err
@@ -3628,6 +3675,17 @@ func (s *teamService) DeleteTeam(userID, teamID int) error {
 		}
 	}
 
+	if maintenance, ok := s.repo.(repository.TeamRedisMaintenanceRepository); ok {
+		producers := []int{}
+		for _, member := range members {
+			if member.InstanceID != nil && *member.InstanceID > 0 {
+				producers = append(producers, *member.InstanceID)
+			}
+		}
+		if err := maintenance.PrepareTeamRedisCleanup(team, producers); err != nil {
+			return err
+		}
+	}
 	now := time.Now().UTC()
 	team.Status = models.TeamStatusDeleting
 	team.UpdatedAt = now
@@ -3891,6 +3949,9 @@ func (s *teamService) projectConsumedTeamEvent(ctx context.Context, team *models
 		return false
 	}
 	defer release()
+	if _, ok := s.repo.(repository.TeamProjectionRepository); ok {
+		return s.projectConsumedTeamEventAtomic(ctx, team, bus, message)
+	}
 	if err := s.projectTeamEvent(team, bus, message); err != nil {
 		fmt.Printf("Warning: failed to project Team %d event %s\n", team.ID, message.ID)
 		if saveErr := s.preserveProjectionFailure(team, message); saveErr != nil {
@@ -4012,6 +4073,15 @@ func (s *teamService) deliverTeamEventOutbox(team *models.Team, bus *redisBus, o
 	if team == nil || bus == nil || outbox == nil || strings.TrimSpace(outbox.Destination) == "" {
 		return fmt.Errorf("team, redis bus and outbox destination are required")
 	}
+	if outbox.Status == "delivered" {
+		return nil
+	}
+	if outbox.Status == "cancelled" {
+		return fmt.Errorf("outbox cancelled by Team deletion")
+	}
+	if bus.commandHook != nil {
+		return fmt.Errorf("Team outbox delivery must wait for projection commit")
+	}
 	if err := s.requireTeamRedisDeliveryAvailable(context.Background(), team, bus); err != nil {
 		return err
 	}
@@ -4020,7 +4090,13 @@ func (s *teamService) deliverTeamEventOutbox(team *models.Team, bus *redisBus, o
 		if err := json.Unmarshal([]byte(outbox.PayloadJSON), &message); err != nil {
 			return err
 		}
+		if _, ok := s.repo.(repository.TeamProjectionRepository); ok {
+			return s.projectTeamEventAtomic(context.Background(), team, bus, message, false, outbox)
+		}
 		return s.projectTeamEventAttempt(team, bus, message, true)
+	}
+	if outbox.Destination == teamProjectionCommandDestination {
+		return s.deliverProjectionCommand(context.Background(), team, bus, outbox)
 	}
 	payload := map[string]interface{}{}
 	if err := json.Unmarshal([]byte(outbox.PayloadJSON), &payload); err != nil {
@@ -4050,7 +4126,17 @@ func (s *teamService) deliverTeamEventOutbox(team *models.Team, bus *redisBus, o
 	if taskID := eventString(payload, "taskId", "task_id", "rootTaskId", "root_task_id"); taskID != "" {
 		fields["task_id"] = taskID
 	}
-	_, err := bus.XAdd(context.Background(), outbox.Destination, fields)
+	receipt := teamCapacityPrefix(team.ID) + "receipt:" + repository.TeamOutboxReceiptIdentity(team.ID, outbox.Destination, outbox.MessageID)
+	streamID, err := bus.xAddReliableOnce(context.Background(), outbox.Destination, fields, receipt)
+	if err == nil && strings.HasPrefix(outbox.SourceEventID, "dispatch:") {
+		if durable, ok := s.repo.(repository.TeamDispatchOutboxRepository); ok {
+			if taskID, parseErr := strconv.Atoi(fields["task_id"]); parseErr == nil {
+				err = durable.MarkTeamDispatchSent(taskID, streamID, time.Now().UTC())
+			} else {
+				return fmt.Errorf("dispatch outbox lacks task identity")
+			}
+		}
+	}
 	return err
 }
 
@@ -6144,7 +6230,32 @@ func (s *teamService) redisBusForTeam(ctx context.Context, team *models.Team) (*
 	if redisURL == "" {
 		return nil, fmt.Errorf("team redis url is required")
 	}
-	return newRedisBus(redisURL)
+	bus, err := newRedisBus(redisURL)
+	if err != nil {
+		return nil, err
+	}
+	bus.teamLiveGuard = func(ctx context.Context, id int) error {
+		if s.repo == nil {
+			return fmt.Errorf("Team Redis producer verifier unavailable")
+		}
+		var current *models.Team
+		var err error
+		if repo, ok := s.repo.(interface {
+			GetTeamByIDContext(context.Context, int) (*models.Team, error)
+		}); ok {
+			current, err = repo.GetTeamByIDContext(ctx, id)
+		} else {
+			current, err = s.repo.GetTeamByID(id)
+		}
+		if err != nil {
+			return err
+		}
+		if current == nil || current.Status == models.TeamStatusDeleting || current.Status == models.TeamStatusDeleted {
+			return fmt.Errorf("Team Redis producer authority revoked")
+		}
+		return nil
+	}
+	return bus, nil
 }
 
 type teamTaskProjectionResult struct {
@@ -7677,7 +7788,7 @@ func (s *teamService) dispatchDependencyReadyReminder(team *models.Team, bus *re
 		}
 		return err
 	}
-	if bus == nil || outbox.ID <= 0 {
+	if bus == nil || outbox.ID <= 0 || bus.commandHook != nil {
 		return nil
 	}
 	if err := s.deliverTeamEventOutbox(team, bus, outbox); err != nil {
@@ -8577,6 +8688,9 @@ func buildCompletionAcknowledgement(team *models.Team, task *models.TeamTask, me
 		"teamId":             strconv.Itoa(team.ID),
 		"memberId":           memberKey,
 		"rootTaskId":         rootTaskID,
+		"assignmentId":       eventString(payload, "assignmentId", "assignment_id", "workId", "work_id"),
+		"workId":             eventString(payload, "workId", "work_id", "assignmentId", "assignment_id"),
+		"revision":           eventInt(payload, "revision"),
 		"rootMessageId":      eventString(payload, "rootMessageId", "root_message_id"),
 		"completionId":       completionID,
 		"attemptId":          attemptID,
@@ -9495,6 +9609,9 @@ func inferLeaderDispatchTarget(payload map[string]interface{}) string {
 }
 
 func (s *teamService) projectTeamEvent(team *models.Team, bus *redisBus, message redisStreamMessage) error {
+	if _, ok := s.repo.(repository.TeamProjectionRepository); ok {
+		return s.projectTeamEventAtomic(context.Background(), team, bus, message, false, nil)
+	}
 	return s.projectTeamEventAttempt(team, bus, message, false)
 }
 func (s *teamService) projectTeamEventAttempt(team *models.Team, bus *redisBus, message redisStreamMessage, replay bool) error {
@@ -11019,7 +11136,7 @@ func (s *teamService) createLeaderMediatedResultNotification(team *models.Team, 
 	if err := s.repo.ConfirmWorkItemResult(workItem, event, outbox); err != nil {
 		return err
 	}
-	if outbox.ID > 0 {
+	if outbox.ID > 0 && (bus == nil || bus.commandHook == nil) {
 		if err := s.deliverTeamEventOutbox(team, bus, outbox); err != nil {
 			_ = s.repo.MarkEventOutboxFailed(outbox.ID, now.Add(teamOutboxRetryDelay(outbox.Attempts)), err.Error())
 			return nil

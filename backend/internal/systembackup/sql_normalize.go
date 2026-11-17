@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"clawreef/internal/historymaintenance"
 	"clawreef/internal/systembackup/team"
 )
 
@@ -19,6 +20,9 @@ import (
 // field remains in the immutable encrypted source archive and Change.Before.
 // It does not emit Team completion events or schedule any business operation.
 func NormalizeDataRow(table SQLTable, row team.Row, now time.Time) (team.Change, error) {
+	if _, _, monthly := historymaintenance.ParseMonthly(table.Name); monthly {
+		return preservedMonthly(table, row)
+	}
 	policy, ok := Policy(table.Name)
 	if !ok || policy.Category == "system_backup" {
 		return team.Change{}, errors.New("normalization policy missing")
@@ -86,6 +90,32 @@ func NormalizeDataRow(table SQLTable, row team.Row, now time.Time) (team.Change,
 	}
 	var err error
 	switch table.Name {
+	case "team_redis_cleanup_jobs":
+		set("scan_completed", "0")
+		set("state", "restored_requires_review")
+		set("lease_owner", "")
+		erase("lease_until")
+		set("last_error", "Restore requires producer and archive reconciliation")
+	case "team_projection_watermarks":
+		set("baseline_verified", "0")
+	case "history_replay_closures":
+		set("replay_closed", "0")
+		set("recovery_closed", "0")
+		set("idempotency_durable", "0")
+	case "history_month_catalog":
+		set("state", "prepared")
+		set("read_route", "legacy")
+		set("route_after_id", "0")
+		set("route_verified", "0")
+		set("verify_after_id", "0")
+		erase("verified_at")
+	case "history_archive_records":
+		erase("restore_verified_at", "summary_verified_at")
+		set("summary_sha256", "")
+		set("restore_sha256", "")
+		set("restore_receipt", "")
+	case "observability_objects":
+		erase("backup_verified_at", "restore_verified_at", "recovery_closed_at")
 	case "users":
 		set("is_active", "0")
 		set("password_hash", "!disabled-after-isolated-restore!")
@@ -228,11 +258,16 @@ func NormalizeSQLSnapshot(ctx context.Context, r io.Reader, w io.Writer, at time
 	if at.IsZero() || evidence == nil {
 		return SQLResult{}, errors.New("normalization evidence required")
 	}
-	encoder := json.NewEncoder(w)
-	if e := encoder.Encode(SQLRecord{Kind: "mysql_rows_v1"}); e != nil {
+	header, replay, e := sqlHeader(r)
+	if e != nil {
 		return SQLResult{}, e
 	}
-	out := SQLResult{Tables: map[string]int64{}, Hashes: map[string]string{}}
+	r = replay
+	encoder := json.NewEncoder(w)
+	if e := encoder.Encode(header); e != nil {
+		return SQLResult{}, e
+	}
+	out := SQLResult{Tables: map[string]int64{}, Hashes: map[string]string{}, MonthlyCatalog: header.MonthlyCatalog}
 	var current *SQLTable
 	var count int64
 	hash := sha256.New()
@@ -313,6 +348,9 @@ func snapshotBusinessTables(ctx context.Context, q SQLQueryer, teamData bool) ([
 	}
 	business := []string{}
 	for _, name := range names {
+		if kind, _, monthly := historymaintenance.ParseMonthly(name); teamData && monthly && kind != "team_events" && kind != "team_tasks" {
+			continue
+		}
 		p, _ := Policy(name)
 		if p.Category != "system_backup" {
 			business = append(business, name)

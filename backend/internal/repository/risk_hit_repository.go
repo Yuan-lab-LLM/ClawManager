@@ -1,9 +1,11 @@
 package repository
 
 import (
+	"context"
 	"fmt"
 	"time"
 
+	"clawreef/internal/historymaintenance"
 	"clawreef/internal/models"
 
 	"github.com/upper/db/v4"
@@ -29,18 +31,19 @@ func (r *riskHitRepository) Create(hit *models.RiskHit) error {
 	if hit.CreatedAt.IsZero() {
 		hit.CreatedAt = time.Now()
 	}
-	res, err := r.sess.Collection("risk_hits").Insert(hit)
-	if err != nil {
-		return fmt.Errorf("failed to create risk hit: %w", err)
-	}
-	hit.ID = int(res.ID().(int64))
-	return nil
+	return r.sess.Tx(func(tx db.Session) error {
+		res, err := tx.Collection("risk_hits").Insert(hit)
+		if err != nil {
+			return fmt.Errorf("failed to create risk hit: %w", err)
+		}
+		hit.ID = int(res.ID().(int64))
+		if err = historymaintenance.WriteLogBatch(context.Background(), monthlySQL{tx.SQL()}, "risk_hits", []any{hit.ID}); err != nil {
+			return err
+		}
+		return historymaintenance.ClearLogPending(context.Background(), monthlySQL{tx.SQL()}, "risk_hits", hit.ID)
+	})
 }
 
 func (r *riskHitRepository) ListByTraceID(traceID string) ([]models.RiskHit, error) {
-	var items []models.RiskHit
-	if err := r.sess.Collection("risk_hits").Find(db.Cond{"trace_id": traceID}).OrderBy("id").All(&items); err != nil {
-		return nil, fmt.Errorf("failed to list risk hits by trace: %w", err)
-	}
-	return items, nil
+	return routedLogDetails[models.RiskHit](r.sess, "risk_hits", traceID, "", 0, 200, false)
 }

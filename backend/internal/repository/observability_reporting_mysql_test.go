@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"os"
 	"strings"
 	"testing"
@@ -36,6 +37,58 @@ func reportingFixture(t *testing.T) db.Session {
 			t.Fatal(err)
 		}
 	}
+	raw, err := os.ReadFile("../db/migrations/116_add_query_summaries.sql")
+	historySchema, historyErr := os.ReadFile("../db/migrations/114_add_history_maintenance.sql")
+	if historyErr != nil {
+		t.Fatal(historyErr)
+	}
+	raw = append(append(historySchema, byte(10)), raw...)
+	auditSchema, readErr := os.ReadFile("../db/migrations/118_add_audit_trace_reports.sql")
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+
+	costSchema, costErr := os.ReadFile("../db/migrations/119_add_session_cost_summaries.sql")
+	if costErr != nil {
+		t.Fatal(costErr)
+	}
+	raw = append(append(raw, byte(10)), auditSchema...)
+	raw = append(append(raw, byte(10)), costSchema...)
+	guardSchema, guardErr := os.ReadFile("../db/migrations/121_guard_observation_reconciliation.sql")
+	if guardErr != nil {
+		t.Fatal(guardErr)
+	}
+	raw = append(append(raw, byte(10)), guardSchema...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var lines []string
+	for _, line := range strings.Split(string(raw), "\n") {
+		if !strings.HasPrefix(strings.TrimSpace(line), "--") {
+			lines = append(lines, line)
+		}
+	}
+	for _, q := range strings.Split(strings.Join(lines, "\n"), ";") {
+		if strings.TrimSpace(q) != "" {
+			if _, err = s.SQL().Exec(q); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if _, err = s.SQL().Exec(`CREATE TABLE chat_messages(id INT PRIMARY KEY,trace_id VARCHAR(100),session_id VARCHAR(100),request_id VARCHAR(100),user_id INT,instance_id INT,invocation_id INT,role VARCHAR(50),content LONGTEXT,sequence_no INT,created_at DATETIME)`); err != nil {
+		t.Fatal(err)
+	}
+	monthly, err := os.ReadFile("../db/migrations/123_add_monthly_log_catchup.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range strings.Split(string(monthly), ";") {
+		if strings.TrimSpace(q) != "" {
+			if _, err = s.SQL().Exec(q); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
 	return s
 }
 
@@ -43,6 +96,13 @@ func addReportingInvocation(t *testing.T, s db.Session, id, instance int, trace,
 	t.Helper()
 	_, err := s.SQL().Exec(`INSERT INTO model_invocations(id,trace_id,session_id,request_id,user_id,instance_id,provider_type,requested_model,actual_provider_model,traffic_class,status,prompt_tokens,completion_tokens,total_tokens,created_at,request_payload,response_payload) VALUES(?,?,?, ?,1,?,'openai','auto',?,'llm',?,10,5,15,?,'large request body','large response body')`, id, trace, session, trace+"-request", instance, model, status, created)
 	if err != nil {
+		t.Fatal(err)
+	}
+	owner := 1
+	v := models.ModelInvocation{ID: id, UserID: &owner, InstanceID: &instance, SessionID: &session, TraceID: trace, RequestID: trace + "-request", RequestedModel: "auto", ActualProviderModel: model, ProviderType: "openai", Status: status, PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15, CreatedAt: created, AttemptNo: 1}
+	if err = s.Tx(func(tx db.Session) error {
+		return maintainObservationSummary(context.Background(), tx, "model_invocations", &v)
+	}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -61,6 +121,7 @@ func TestAuditSQLPagingIncludesHistoricalMatchesAndTraceTotals(t *testing.T) {
 	}
 	addReportingInvocation(t, s, 2000, 9, "historical-match", "main", "older-model", "failed", now.Add(-time.Hour))
 	addReportingInvocation(t, s, 2001, 9, "historical-match", "main", "older-model", "completed", now.Add(-30*time.Minute))
+	completeAuditBackfill(t, s)
 	items, total, err := reporter.ListAuditReport(1, 20, "historical-match", "completed", "older-model")
 	if err != nil || total != 1 || len(items) != 1 {
 		t.Fatalf("historical match lost: items=%+v total=%d err=%v", items, total, err)
@@ -97,6 +158,7 @@ func TestAuditSQLPagingIncludesEventOnlyTracesAndStableOrder(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	completeAuditBackfill(t, s)
 	items, total, err := reporter.ListAuditReport(1, 1, "", "", "")
 	if err != nil || total != 3 || len(items) != 1 || items[0].TraceID != "trace-b" {
 		t.Fatalf("stable first page: %+v %d %v", items, total, err)
@@ -123,4 +185,38 @@ func TestReportingUsernameBatchReturnsOnlyRequestedUsers(t *testing.T) {
 	if err != nil || len(names) != 0 {
 		t.Fatalf("empty batch should be empty: %+v %v", names, err)
 	}
+}
+
+func TestAuditReportPersistsAfterHotHistoryRemoval(t *testing.T) {
+	s := reportingFixture(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	addReportingInvocation(t, s, 1, 9, "survives-archive", "main", "m", "completed", now)
+	completeAuditBackfill(t, s)
+	if _, err := s.SQL().Exec(`DELETE FROM model_invocations`); err != nil {
+		t.Fatal(err)
+	}
+	items, total, err := NewModelInvocationRepository(s).(*modelInvocationRepository).ListAuditReport(1, 20, "survives-archive", "", "")
+	if err != nil || total != 1 || len(items) != 1 || items[0].TotalTokens != 15 {
+		t.Fatalf("durable audit trace lost after verified archive: items=%+v total=%d err=%v", items, total, err)
+	}
+}
+
+func completeAuditBackfill(t *testing.T, s db.Session) {
+	t.Helper()
+	for i := 0; i < 10000; i++ {
+		if _, err := ReconcileObservationSummaries(context.Background(), s, 500); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := ReconcileCostSummaries(context.Background(), s, 500); err != nil {
+			t.Fatal(err)
+		}
+		_, ready, err := ReconcileAuditReports(context.Background(), s, 500)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ready {
+			return
+		}
+	}
+	t.Fatal("audit backfill did not complete")
 }

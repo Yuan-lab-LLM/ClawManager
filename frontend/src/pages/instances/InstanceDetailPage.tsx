@@ -32,6 +32,7 @@ import ConfirmDialog from "../../components/ConfirmDialog";
 import InstanceLifecycleStatus from "../../components/InstanceLifecycleStatus";
 import ActionMenu from "../../components/ActionMenu";
 import InstanceSkillsDialog from "../../components/InstanceSkillsDialog";
+import InstanceSessionUsagePanel from "../../components/InstanceSessionUsagePanel";
 import InstanceWorkspaceSplit from "../../components/InstanceWorkspaceSplit";
 import InstanceNameEditor from "../../components/InstanceNameEditor";
 import { InstanceServiceFrame } from "../../components/InstanceServiceFrame";
@@ -1439,6 +1440,9 @@ const InstanceDetailPage: React.FC = () => {
         <div ref={liteHeaderRef} className="flex shrink-0 flex-col gap-2">
           {renderActionMessage()}
         </div>
+        <div className="max-h-[55vh] shrink-0 overflow-y-auto">
+          <InstanceSessionUsagePanel key={instance.id} instanceId={instance.id} instanceType={instance.type} />
+        </div>
         <section
           style={
             pinnedWorkspaceHeight
@@ -1553,6 +1557,7 @@ const InstanceDetailPage: React.FC = () => {
   const renderProWorkspace = () => (
     <div className="flex flex-col gap-4">
       {renderActionMessage()}
+      <InstanceSessionUsagePanel key={instance.id} instanceId={instance.id} instanceType={instance.type} />
       <section
         data-layout="pro-desktop-workspace"
         className="min-w-0 h-[clamp(520px,calc(100vh-10rem),760px)]"

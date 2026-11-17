@@ -23,6 +23,7 @@ func TestSessionSQLPagingFiltersBeforeLimitAndKeepsGlobalSummary(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	seedCostSummaryFixture(t, s)
 	result, err := reporter.ListSessionUsageReport(9, 1, 1, "research", SessionUsageFilter{})
 	if err != nil {
 		t.Fatal(err)
@@ -79,6 +80,7 @@ func TestAdminSessionSQLPagingBatchesManagedScopeAndSearchSummary(t *testing.T) 
 	if _, err := s.SQL().Exec(`INSERT INTO instances VALUES(12,1,'deleted','openclaw','deleted'),(13,1,'idle','workbuddy','error')`); err != nil {
 		t.Fatal(err)
 	}
+	seedCostSummaryFixture(t, s)
 	result, err := reporter.ListAdminSessionUsageReport(1, 1, "", SessionUsageFilter{})
 	if err != nil || result.Total != 3 || len(result.Items) != 1 || result.Summary.TotalTokens != 30 || result.Items[0].InstanceID != 10 {
 		t.Fatalf("managed scope/global summary/stable token ordering: %+v %v", result, err)
@@ -106,16 +108,19 @@ func TestSessionSQLReportingRejectsMixedCurrencies(t *testing.T) {
 	if _, err := s.SQL().Exec(`INSERT INTO cost_records(trace_id,session_id,instance_id,invocation_id,provider_type,model_name,estimated_cost,currency) VALUES('usd','usd',9,1,'openai','a',2,'USD'),('eur','eur',10,2,'openai','b',3,'EUR')`); err != nil {
 		t.Fatal(err)
 	}
+	seedCostSummaryFixture(t, s)
 	if _, err := reporter.ListAdminSessionUsageReport(1, 1, "", SessionUsageFilter{}); !errors.Is(err, ErrMixedCostCurrencies) {
 		t.Fatalf("admin mixed currency error: %v", err)
 	}
+	seedCostSummaryFixture(t, s)
 	result, err := reporter.ListAdminSessionUsageReport(1, 1, "primary", SessionUsageFilter{})
 	if err != nil || result.Summary.Currency != "USD" || result.Summary.EstimatedCost != 2 {
 		t.Fatalf("search scoped currency: %+v %v", result, err)
 	}
-	if _, err := s.SQL().Exec(`UPDATE cost_records SET instance_id=9,session_id='usd',invocation_id=1 WHERE currency='EUR'`); err != nil {
+	if _, err := s.SQL().Exec(`INSERT INTO cost_records(trace_id,session_id,instance_id,invocation_id,provider_type,model_name,estimated_cost,currency) VALUES('usd','usd',9,1,'openai','a',3,'EUR')`); err != nil {
 		t.Fatal(err)
 	}
+	seedCostSummaryFixture(t, s)
 	if _, err := reporter.ListSessionUsageReport(9, 1, 1, "", SessionUsageFilter{}); !errors.Is(err, ErrMixedCostCurrencies) {
 		t.Fatalf("session mixed currency error: %v", err)
 	}
@@ -126,12 +131,13 @@ func TestSessionSQLReportingRetainsBoundedStreamRetryMetadata(t *testing.T) {
 	reporter := NewModelInvocationRepository(s).(*modelInvocationRepository)
 	now := time.Now().UTC().Truncate(time.Second)
 	addReportingInvocation(t, s, 1, 9, "retry", "main", "first", "failed", now.Add(-time.Second))
-	if _, err := s.SQL().Exec(`UPDATE model_invocations SET is_streaming=TRUE,latency_ms=100,ttft_ms=10 WHERE id=1`); err != nil {
+	if _, err := s.SQL().Exec(`UPDATE observation_invocation_summaries SET is_streaming=TRUE,latency_ms=100,ttft_ms=10 WHERE id=1`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.SQL().Exec(`INSERT INTO audit_events(trace_id,request_id,instance_id,event_type,traffic_class,severity,message,details,created_at) VALUES('retry','retry-request',9,'gateway.deployment.failover','llm','info','retry','{"failed_attempt":1,"next_model":"replacement"}',?)`, now); err != nil {
 		t.Fatal(err)
 	}
+	seedCostSummaryFixture(t, s)
 	result, err := reporter.ListSessionUsageReport(9, 1, 1, "", SessionUsageFilter{})
 	if err != nil {
 		t.Fatal(err)
@@ -151,9 +157,11 @@ func TestSessionSQLReportingRejectsInvalidPages(t *testing.T) {
 	s := reportingFixture(t)
 	reporter := NewModelInvocationRepository(s).(*modelInvocationRepository)
 	for _, p := range [][2]int{{0, 1}, {1, 0}, {1, 101}, {int(^uint(0) >> 1), 100}} {
+		seedCostSummaryFixture(t, s)
 		if _, err := reporter.ListSessionUsageReport(9, p[0], p[1], "", SessionUsageFilter{}); err == nil {
 			t.Fatalf("invalid session page accepted: %v", p)
 		}
+		seedCostSummaryFixture(t, s)
 		if _, err := reporter.ListAdminSessionUsageReport(p[0], p[1], "", SessionUsageFilter{}); err == nil {
 			t.Fatalf("invalid admin page accepted: %v", p)
 		}
@@ -175,6 +183,7 @@ func TestSessionSQLReportingReadsOnlyExactSession(t *testing.T) {
 	if _, err := s.SQL().Exec(`INSERT INTO cost_records(trace_id,session_id,instance_id,invocation_id,provider_type,model_name,estimated_cost) VALUES('exact','exact',9,1,'openai','a',2),('neighbor','neighbor',9,2,'openai','b',100),('exact-old','exact',9,3,'openai','c',20)`); err != nil {
 		t.Fatal(err)
 	}
+	seedCostSummaryFixture(t, s)
 	item, err := reporter.GetSessionUsageReportItem(9, "exact", SessionUsageFilter{Since: &now})
 	if err != nil || item == nil || item.SessionID != "exact" || item.TotalTokens != 15 || item.InvocationCount != 1 || item.EstimatedCost != 2 {
 		t.Fatalf("exact session/time window must exclude neighbor/old rows: %+v %v", item, err)

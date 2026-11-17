@@ -148,6 +148,9 @@ func RestorePublishedData(ctx context.Context, store ImmutableObjectStore, artif
 	if e = consume("mysql", ValidateBusinessSQLSnapshot); e != nil {
 		return report, e
 	}
+	if e = consume("mysql", func(r io.Reader) error { return prepareMonthlyRestoreSchema(ctx, target.MySQL, r) }); e != nil {
+		return report, e
+	}
 	var teamReport teamReportCollector
 	report.Phase = "mysql"
 	if e = consume("mysql", func(r io.Reader) error {

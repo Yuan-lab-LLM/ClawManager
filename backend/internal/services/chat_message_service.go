@@ -45,14 +45,31 @@ func (s *chatMessageService) RecordMessages(traceID, sessionID string, requestID
 			continue
 		}
 		normalizedMessages = append(normalizedMessages, PersistedChatMessage{
-			Role:    role,
-			Content: content,
+			Role:       role,
+			Content:    content,
+			SequenceNo: message.SequenceNo,
 		})
 	}
 	if len(normalizedMessages) == 0 {
 		return nil
 	}
 
+	// Durable mode must not depend on a preliminary SQL read: the transcript is
+	// accepted into the journal even while SQL is unavailable. Source positions
+	// give full-transcript retries and assistant-only completion a stable identity.
+	if repository.ObservabilityEnabled() {
+		for index, message := range normalizedMessages {
+			sequence := message.SequenceNo
+			if sequence <= 0 {
+				sequence = index + 1
+			}
+			record := &models.ChatMessageRecord{TraceID: traceID, SessionID: sessionID, RequestID: requestID, UserID: userID, InstanceID: instanceID, InvocationID: invocationID, Role: message.Role, Content: message.Content, SequenceNo: sequence}
+			if err := s.repo.Create(record); err != nil {
+				return fmt.Errorf("durable chat message: %w", err)
+			}
+		}
+		return nil
+	}
 	existing, err := s.repo.ListByTraceID(traceID)
 	if err != nil {
 		return fmt.Errorf("failed to load existing chat messages: %w", err)

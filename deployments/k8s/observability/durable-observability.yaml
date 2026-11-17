@@ -1,0 +1,44 @@
+# Apply the PVC and merge the Deployment document as a strategic merge patch.
+# Generate the immutable key Secret with prepare-observability-secret.py first.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: clawmanager-observability
+  namespace: clawmanager-system
+spec:
+  accessModes: [ReadWriteMany]
+  resources:
+    requests:
+      storage: 128Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: clawmanager-app
+  namespace: clawmanager-system
+spec:
+  template:
+    spec:
+      containers:
+        - name: clawmanager-app
+          env:
+            - name: CLAWMANAGER_OBSERVABILITY_DIR
+              value: /var/lib/clawmanager-observability
+            - name: CLAWMANAGER_OBSERVABILITY_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: clawmanager-observability-key-v1
+                  key: master-key
+            - name: CLAWMANAGER_OBSERVABILITY_GLOBAL_BYTES
+              value: "68719476736"
+            - name: CLAWMANAGER_OBSERVABILITY_OWNER_BYTES
+              value: "4294967296"
+            - name: CLAWMANAGER_OBSERVABILITY_REQUEST_BYTES
+              value: "67108864"
+          volumeMounts:
+            - name: observability
+              mountPath: /var/lib/clawmanager-observability
+      volumes:
+        - name: observability
+          persistentVolumeClaim:
+            claimName: clawmanager-observability

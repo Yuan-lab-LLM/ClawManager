@@ -68,42 +68,40 @@ func (r *costRecordRepository) Create(record *models.CostRecord) error {
 	if record.RecordedAt.IsZero() {
 		record.RecordedAt = time.Now()
 	}
-	res, err := r.sess.Collection("cost_records").Insert(record)
-	if err != nil {
-		return fmt.Errorf("failed to create cost record: %w", err)
+	if handled, err := persistObservation(context.Background(), r.sess, "cost_records", record); handled {
+		return err
 	}
-	record.ID = int(res.ID().(int64))
-	return nil
+	return r.sess.Tx(func(tx db.Session) error {
+		if record.TraceID != "" {
+			if err := lockAuditTraces(context.Background(), tx, []string{record.TraceID}); err != nil {
+				return err
+			}
+		}
+		if err := lockObservationSourceDays(context.Background(), tx, record); err != nil {
+			return err
+		}
+		res, err := tx.Collection("cost_records").Insert(record)
+		if err != nil {
+			return fmt.Errorf("failed to create cost record: %w", err)
+		}
+		record.ID = int(res.ID().(int64))
+		return maintainObservationSummary(context.Background(), tx, "cost_records", record)
+	})
 }
 
 func (r *costRecordRepository) ListByTraceID(traceID string) ([]models.CostRecord, error) {
-	var items []models.CostRecord
-	if err := r.sess.Collection("cost_records").Find(db.Cond{"trace_id": traceID}).OrderBy("id").All(&items); err != nil {
-		return nil, fmt.Errorf("failed to list cost records by trace: %w", err)
-	}
-	return items, nil
+	return routedLogDetails[models.CostRecord](r.sess, "cost_records", traceID, "", 0, 200, false)
 }
 
 func (r *costRecordRepository) ListByUserID(userID, limit int) ([]models.CostRecord, error) {
-	var items []models.CostRecord
 	if limit <= 0 {
 		limit = 50
 	}
-	if err := r.sess.Collection("cost_records").Find(db.Cond{"user_id": userID}).OrderBy("-recorded_at").Limit(limit).All(&items); err != nil {
-		return nil, fmt.Errorf("failed to list cost records by user: %w", err)
-	}
-	return items, nil
+	return routedRecentLogs[models.CostRecord](r.sess, "cost_records", userID, limit)
 }
 
 func (r *costRecordRepository) ListRecent(limit int) ([]models.CostRecord, error) {
-	var items []models.CostRecord
-	if limit <= 0 {
-		limit = 100
-	}
-	if err := r.sess.Collection("cost_records").Find().OrderBy("-recorded_at").Limit(limit).All(&items); err != nil {
-		return nil, fmt.Errorf("failed to list recent cost records: %w", err)
-	}
-	return items, nil
+	return routedRecentLogs[models.CostRecord](r.sess, "cost_records", 0, limit)
 }
 
 func (r *costRecordRepository) AggregateCostByInstanceSession(instanceID int, filter SessionUsageFilter) ([]InstanceSessionCostAggregate, error) {
@@ -165,16 +163,13 @@ GROUP BY cr.session_id`
 // appendEligibleCostInvocationFilter counts each fee once. Exact associations never
 // fall back to a different attempt; legacy fees require a matching scoped trace.
 func appendEligibleCostInvocationFilter(query string, args []interface{}, filter SessionUsageFilter) (string, []interface{}) {
-	query += ` AND EXISTS (
-SELECT 1 FROM model_invocations mi
-WHERE mi.instance_id = cr.instance_id
-  AND mi.session_id = cr.session_id
-  AND mi.status != ?
-  AND ((cr.invocation_id IS NOT NULL AND mi.id = cr.invocation_id)
-    OR (cr.invocation_id IS NULL AND mi.trace_id = cr.trace_id))`
+	query += ` AND ((cr.invocation_id IS NOT NULL AND EXISTS (SELECT 1 FROM observation_invocation_summaries mi WHERE mi.id=cr.invocation_id AND mi.instance_id=cr.instance_id AND mi.session_id=cr.session_id AND mi.status!=?`
 	args = append(args, models.ModelInvocationStatusBlocked)
 	query, args = appendTimeFilter(query, args, filter, "mi.created_at")
-	return query + ")", args
+	query += `)) OR (cr.invocation_id IS NULL AND EXISTS (SELECT 1 FROM observation_invocation_summaries mi WHERE mi.instance_id=cr.instance_id AND mi.session_id=cr.session_id AND mi.trace_id=cr.trace_id AND mi.status!=?`
+	args = append(args, models.ModelInvocationStatusBlocked)
+	query, args = appendTimeFilter(query, args, filter, "mi.created_at")
+	return query + ")))", args
 }
 
 // AggregateModelCostByInstanceSession reports full-window fees by their recorded model identity.

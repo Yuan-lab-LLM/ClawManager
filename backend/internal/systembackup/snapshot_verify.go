@@ -51,7 +51,8 @@ func validatePublishedSnapshot(ctx context.Context, store ImmutableObjectStore, 
 			return err
 		}
 	}
-	return nil
+	_, err := verifyPublishedHistoryDependencies(ctx, store, artifact, wrapper, b, nil, nil)
+	return err
 }
 
 func ValidateSnapshotPart(ctx context.Context, name string, r io.Reader, b CaptureBudget) error {

@@ -29,6 +29,7 @@ type CaptureSourceVolume struct {
 	ID string `json:"id"`
 }
 type CaptureJobRequest struct {
+	RequiredSecrets []KubernetesSelection `json:"required_secrets,omitempty"`
 	VerifyJobRequest
 	Phase              string                `json:"phase"`
 	Gate               GateOwnership         `json:"gate"`
@@ -105,7 +106,7 @@ func captureJob(a Attempt) (*batchv1.Job, CaptureJobRequest, error) {
 	pod.TerminationGracePeriodSeconds = &grace
 	container := &pod.Containers[0]
 	container.Name = "collector"
-	request := CapturePhaseRequest{Origin: r.Origin, BackupID: r.BackupID, AttemptID: a.ID, Phase: r.Phase, Gate: r.Gate, StageUID: r.Stage.UID}
+	request := CapturePhaseRequest{Origin: r.Origin, BackupID: r.BackupID, AttemptID: a.ID, Phase: r.Phase, Gate: r.Gate, StageUID: r.Stage.UID, RequiredSecrets: r.RequiredSecrets}
 	if err = request.Validate(); err != nil {
 		return nil, r, err
 	}
@@ -254,7 +255,7 @@ func (j CaptureJobs) Observe(ctx context.Context, a Attempt, boundUID string) (C
 				return out, errors.New("evidence_incomplete")
 			}
 			var candidate CaptureCandidate
-			if strictDecode([]byte(term.Message), &candidate) != nil || candidate.CapturePhaseRequest.Validate() != nil || candidate.AttemptID != a.ID || candidate.BackupID != r.BackupID || candidate.Origin != r.Origin || candidate.Phase != r.Phase || candidate.StageUID != r.Stage.UID || candidate.Gate != r.Gate || candidate.RegistryHash != RegistryHash() {
+			if strictDecode([]byte(term.Message), &candidate) != nil || candidate.CapturePhaseRequest.Validate() != nil || candidate.AttemptID != a.ID || candidate.BackupID != r.BackupID || candidate.Origin != r.Origin || candidate.Phase != r.Phase || candidate.StageUID != r.Stage.UID || candidate.Gate != r.Gate || !reflect.DeepEqual(candidate.RequiredSecrets, r.RequiredSecrets) || candidate.RegistryHash != RegistryHash() {
 				return out, errors.New("evidence_incomplete")
 			}
 			out.State = "sealed"

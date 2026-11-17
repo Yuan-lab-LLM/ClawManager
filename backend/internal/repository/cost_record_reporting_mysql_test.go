@@ -1,10 +1,12 @@
 package repository
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -57,9 +59,9 @@ func databaseReportingMySQL(t *testing.T) db.Session {
 func TestCostReportingCountsEachEligibleRecordOnce(t *testing.T) {
 	s := databaseReportingMySQL(t)
 	for _, q := range []string{
-		`CREATE TABLE model_invocations(id INT PRIMARY KEY,trace_id VARCHAR(100),instance_id INT,session_id VARCHAR(100),status VARCHAR(50),created_at DATETIME(6))`,
+		`CREATE TABLE observation_invocation_summaries(id INT PRIMARY KEY,trace_id VARCHAR(100),instance_id INT,session_id VARCHAR(100),status VARCHAR(50),created_at DATETIME(6))`,
 		`CREATE TABLE cost_records(id INT PRIMARY KEY,trace_id VARCHAR(100),instance_id INT,session_id VARCHAR(100),invocation_id INT NULL,prompt_tokens INT,completion_tokens INT,total_tokens INT,estimated_cost DECIMAL(18,8),currency VARCHAR(16))`,
-		`INSERT INTO model_invocations VALUES (1,'retry',9,'main','failed','2026-11-17 12:00:00'),(2,'retry',9,'main','completed','2026-11-17 12:01:00'),(3,'retry',9,'main','blocked','2026-11-17 12:02:00'),(4,'retry',9,'other','completed','2026-11-17 12:00:00'),(5,'retry',10,'main','completed','2026-11-17 12:00:00'),(6,'retry',9,'main','completed','2026-11-16 12:00:00'),(7,'only-other-session',9,'other','completed','2026-11-17 12:00:00'),(8,'until-boundary',9,'main','completed','2026-11-18 00:00:00')`,
+		`INSERT INTO observation_invocation_summaries VALUES (1,'retry',9,'main','failed','2026-11-17 12:00:00'),(2,'retry',9,'main','completed','2026-11-17 12:01:00'),(3,'retry',9,'main','blocked','2026-11-17 12:02:00'),(4,'retry',9,'other','completed','2026-11-17 12:00:00'),(5,'retry',10,'main','completed','2026-11-17 12:00:00'),(6,'retry',9,'main','completed','2026-11-16 12:00:00'),(7,'only-other-session',9,'other','completed','2026-11-17 12:00:00'),(8,'until-boundary',9,'main','completed','2026-11-18 00:00:00')`,
 		`INSERT INTO cost_records VALUES (1,'retry',9,'main',1,10,1,11,1,'USD'),(2,'retry',9,'main',2,20,2,22,2,'USD'),(3,'retry',9,'main',NULL,30,3,33,3,'USD'),(4,'retry',9,'main',3,400,40,440,40,'USD'),(5,'retry',9,'main',999,500,50,550,50,'USD'),(6,'retry',9,'main',4,600,60,660,60,'USD'),(7,'retry',9,'main',5,700,70,770,70,'USD'),(8,'retry',9,'main',6,800,80,880,80,'USD'),(9,'only-other-session',9,'main',NULL,900,90,990,90,'USD'),(10,'until-boundary',9,'main',8,1000,100,1100,100,'USD')`,
 	} {
 		if _, err := s.SQL().Exec(q); err != nil {
@@ -88,6 +90,7 @@ func TestSessionReportingInvocationProjectionOmitsBodies(t *testing.T) {
 		t.Fatal(err)
 	}
 	repo := NewModelInvocationRepository(s)
+	seedReportingSummaries(t, s)
 	items, err := repo.ListRecentByInstanceSession(9, "main", 20, SessionUsageFilter{})
 	if err != nil {
 		t.Fatal(err)
@@ -106,6 +109,7 @@ func TestSessionReportingInvocationProjectionOmitsBodies(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	seedReportingSummaries(t, s)
 	aggregates, err := aggregateRepo.AggregateModelsByInstanceSession(9, "main", SessionUsageFilter{})
 	if err != nil || len(aggregates) != 1 || aggregates[0].ActualProviderModel != "b" || aggregates[0].TotalTokens != 75 {
 		t.Fatalf("full model aggregation: %+v %v", aggregates, err)
@@ -129,9 +133,9 @@ func TestCostReportingModelAggregationUsesEligibleCostIdentity(t *testing.T) {
 		t.Fatal("SQL cost model aggregation capability missing")
 	}
 	for _, q := range []string{
-		`CREATE TABLE model_invocations(id INT PRIMARY KEY,trace_id VARCHAR(100),instance_id INT,session_id VARCHAR(100),status VARCHAR(50),created_at DATETIME(6))`,
+		`CREATE TABLE observation_invocation_summaries(id INT PRIMARY KEY,trace_id VARCHAR(100),instance_id INT,session_id VARCHAR(100),status VARCHAR(50),created_at DATETIME(6))`,
 		`CREATE TABLE cost_records(id INT PRIMARY KEY,trace_id VARCHAR(100),instance_id INT,session_id VARCHAR(100),invocation_id INT NULL,model_name VARCHAR(255),estimated_cost DECIMAL(18,8),currency VARCHAR(16))`,
-		`INSERT INTO model_invocations VALUES(1,'retry',9,'main','failed','2026-11-17 12:00:00'),(2,'retry',9,'main','completed','2026-11-17 12:00:00'),(3,'retry',9,'main','blocked','2026-11-17 12:00:00')`,
+		`INSERT INTO observation_invocation_summaries VALUES(1,'retry',9,'main','failed','2026-11-17 12:00:00'),(2,'retry',9,'main','completed','2026-11-17 12:00:00'),(3,'retry',9,'main','blocked','2026-11-17 12:00:00')`,
 		`INSERT INTO cost_records VALUES(1,'retry',9,'main',1,'billed-a',1,'USD'),(2,'retry',9,'main',2,'billed-b',2,'USD'),(3,'retry',9,'main',NULL,'billed-b',3,'USD'),(4,'retry',9,'main',3,'blocked',100,'EUR')`,
 	} {
 		if _, err := s.SQL().Exec(q); err != nil {
@@ -165,15 +169,15 @@ func TestCostReportingRejectsMixedCurrencies(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			s := databaseReportingMySQL(t)
 			for _, q := range []string{
-				`CREATE TABLE model_invocations(id INT PRIMARY KEY,trace_id VARCHAR(100),instance_id INT,session_id VARCHAR(100),status VARCHAR(50),created_at DATETIME(6))`,
+				`CREATE TABLE observation_invocation_summaries(id INT PRIMARY KEY,trace_id VARCHAR(100),instance_id INT,session_id VARCHAR(100),status VARCHAR(50),created_at DATETIME(6))`,
 				`CREATE TABLE cost_records(id INT PRIMARY KEY,trace_id VARCHAR(100),instance_id INT,session_id VARCHAR(100),invocation_id INT NULL,model_name VARCHAR(255),prompt_tokens INT,completion_tokens INT,total_tokens INT,estimated_cost DECIMAL(18,8),currency VARCHAR(16))`,
-				`INSERT INTO model_invocations VALUES(1,'first',9,'main','completed','2026-11-17 12:00:00')`,
+				`INSERT INTO observation_invocation_summaries VALUES(1,'first',9,'main','completed','2026-11-17 12:00:00')`,
 			} {
 				if _, err := s.SQL().Exec(q); err != nil {
 					t.Fatal(err)
 				}
 			}
-			if _, err := s.SQL().Exec(`INSERT INTO model_invocations VALUES(2,'second',9,?,'completed','2026-11-17 12:00:00')`, tc.secondSession); err != nil {
+			if _, err := s.SQL().Exec(`INSERT INTO observation_invocation_summaries VALUES(2,'second',9,?,'completed','2026-11-17 12:00:00')`, tc.secondSession); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := s.SQL().Exec(`INSERT INTO cost_records VALUES(1,'first',9,'main',1,'billed-a',1,2,3,1,?),(2,'second',9,?,2,?,4,5,9,10,?)`, tc.firstCurrency, tc.secondSession, tc.secondModel, tc.secondCurrency); err != nil {
@@ -222,5 +226,36 @@ func TestCostReportingRejectsMixedCurrencies(t *testing.T) {
 				t.Errorf("empty model window: %+v %v", emptyModels, err)
 			}
 		})
+	}
+}
+
+func seedReportingSummaries(t *testing.T, s db.Session) {
+	t.Helper()
+	raw, e := os.ReadFile("../db/migrations/116_add_query_summaries.sql")
+	if e != nil {
+		t.Fatal(e)
+	}
+	guards, e := os.ReadFile("../db/migrations/121_guard_observation_reconciliation.sql")
+	if e != nil {
+		t.Fatal(e)
+	}
+	raw = append(raw, []byte(strings.Split(string(guards), "-- A trigger")[0])...)
+	for _, q := range strings.Split(string(raw), ";") {
+		if strings.TrimSpace(q) != "" {
+			if _, e = s.SQL().Exec(q); e != nil {
+				t.Fatal(e)
+			}
+		}
+	}
+	var rows []models.ModelInvocation
+	if e = s.Collection("model_invocations").Find().All(&rows); e != nil {
+		t.Fatal(e)
+	}
+	for i := range rows {
+		if e = s.Tx(func(tx db.Session) error {
+			return maintainInvocationSummary(context.Background(), tx, "model_invocations", &rows[i])
+		}); e != nil {
+			t.Fatal(e)
+		}
 	}
 }

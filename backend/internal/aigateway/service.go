@@ -142,6 +142,7 @@ const maxDeferredStreamPreludeBytes = 256 * 1024
 var providerVersionSegmentPattern = regexp.MustCompile(`(?i)^v\d+(?:[a-z0-9._-]*)?$`)
 
 type preparedChatRequest struct {
+	observabilityAdmitted   bool
 	traceID                 string
 	sessionID               string
 	sessionIDPtr            *string
@@ -569,6 +570,16 @@ func (s *service) ChatCompletions(ctx context.Context, userID int, req ChatCompl
 	scoped.modelRepo = repository.ForModelUser(s.modelRepo, userID)
 	s = &scoped
 	prepared, err := s.prepareChatRequest(ctx, userID, req)
+	if prepared != nil && prepared.observabilityAdmitted {
+		defer func() {
+			finishCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if finishErr := repository.FinishObservedRequest(finishCtx, userID, prepared.requestID); finishErr != nil {
+				logPersistenceError("durable request remains recovery-required", prepared.traceID, finishErr)
+			}
+		}()
+	}
+
 	if err != nil {
 		traceID := ""
 		if prepared != nil {
@@ -609,7 +620,22 @@ func (s *service) ChatCompletions(ctx context.Context, userID int, req ChatCompl
 			return nil, prepared.traceID, err
 		}
 		attemptStartedAt := time.Now()
+		if err := repository.PreflightObservedRequest(callCtx, userID, prepared.requestID); err != nil {
+			stopGuard()
+			return nil, prepared.traceID, err
+		}
 		response, traceID, callErr := s.callNonStreamingDeployment(callCtx, prepared)
+		if response != nil && prepared.observabilityAdmitted {
+			if response.Headers == nil {
+				response.Headers = make(http.Header)
+			}
+			response.Headers.Set("X-ClawManager-Request-ID", prepared.requestID)
+			if e := repository.CheckObservedRequest(context.Background(), userID, prepared.requestID); e != nil {
+				response.Headers.Set("X-ClawManager-Persistence", "recovery-required; upstream-executed; do-not-retry")
+			} else {
+				response.Headers.Set("X-ClawManager-Persistence", "durably-recorded")
+			}
+		}
 		accessCause := context.Cause(callCtx)
 		stopGuard()
 		statusCode := 0
@@ -718,12 +744,33 @@ func (s *service) StreamChatCompletions(ctx context.Context, userID int, req Cha
 	scoped.modelRepo = repository.ForModelUser(s.modelRepo, userID)
 	s = &scoped
 	prepared, err := s.prepareChatRequest(ctx, userID, req)
+	if prepared != nil && prepared.observabilityAdmitted {
+		defer func() {
+			finishCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if finishErr := repository.FinishObservedRequest(finishCtx, userID, prepared.requestID); finishErr != nil {
+				logPersistenceError("durable request remains recovery-required", prepared.traceID, finishErr)
+			}
+		}()
+	}
+
 	if err != nil {
 		traceID := ""
 		if prepared != nil {
 			traceID = prepared.traceID
 		}
 		return traceID, err
+	}
+	if prepared.observabilityAdmitted {
+		w.Header().Add("Trailer", "X-ClawManager-Persistence")
+		w.Header().Set("X-ClawManager-Request-ID", prepared.requestID)
+		defer func() {
+			if e := repository.CheckObservedRequest(context.Background(), userID, prepared.requestID); e != nil {
+				w.Header().Set("X-ClawManager-Persistence", "recovery-required; execution-may-have-occurred; do-not-retry")
+			} else {
+				w.Header().Set("X-ClawManager-Persistence", "durably-recorded")
+			}
+		}()
 	}
 	return prepared.traceID, s.streamPreparedChatCompletions(ctx, prepared, w)
 }
@@ -775,6 +822,10 @@ func (s *service) streamPreparedChatCompletions(ctx context.Context, prepared *p
 		}
 		attemptStartedAt := time.Now()
 		hasFallback := index+1 < len(candidates)
+		if err := repository.PreflightObservedRequest(callCtx, prepared.userID, prepared.requestID); err != nil {
+			stopGuard()
+			return err
+		}
 		callErr := s.streamDeployment(callCtx, prepared, trackedWriter, hasFallback)
 		accessCause := context.Cause(callCtx)
 		stopGuard()
@@ -937,6 +988,16 @@ func (s *service) prepareChatRequest(ctx context.Context, userID int, req ChatCo
 	prepared.req.SessionID = prepared.sessionIDPtr
 	prepared.requestID = normalizeOrCreateID(req.RequestID, "req")
 	prepared.requestIDPtr = stringPtr(prepared.requestID)
+	if repository.ObservabilityEnabled() {
+		// Reserve bounded recovery space before any provider can execute.
+		if len(rawOrJSONRequestPayload(req)) > 256<<10 || len(req.Messages) > 64 {
+			return prepared, errors.New("request exceeds durable observability admission limit (256 KiB or 64 messages)")
+		}
+		if err := repository.BeginObservedRequest(ctx, userID, prepared.requestID); err != nil {
+			return prepared, err
+		}
+		prepared.observabilityAdmitted = true
+	}
 
 	if sessionSource == "trace_fallback" && req.InstanceID != nil {
 		if err := s.auditEventService.RecordEvent(&models.AuditEvent{
@@ -1161,6 +1222,9 @@ func (s *service) prepareChatRequest(ctx context.Context, userID int, req ChatCo
 			}
 		}
 	}
+	if repository.ObservabilityEnabled() && len(prepared.deploymentCandidates) > 3 {
+		return prepared, errors.New("durable request supports at most three deployment attempts")
+	}
 	if routing != nil {
 		s.recordRoutingDecision(prepared, routing)
 	}
@@ -1209,7 +1273,7 @@ func (s *service) callOpenAICompatible(ctx context.Context, prepared *preparedCh
 	}
 	defer response.Body.Close()
 
-	responseBody, readErr := io.ReadAll(response.Body)
+	responseBody, readErr := readDurableProviderBody(response.Body)
 	if readErr != nil {
 		s.recordFailure(prepared.traceID, prepared.requestID, prepared.req, userIDOrZero(prepared.userIDPtr), prepared.resolvedModel, startedAt, fmt.Sprintf("failed to read provider response: %v", readErr), providerRequestBody, prepared.attemptNumber, prepared.attemptPromptTokens, prepared.attemptCompletionTokens)
 		return nil, prepared.traceID, fmt.Errorf("failed to read provider response: %w", readErr)
@@ -1266,7 +1330,7 @@ func (s *service) callAnthropic(ctx context.Context, prepared *preparedChatReque
 	}
 	defer response.Body.Close()
 
-	responseBody, readErr := io.ReadAll(response.Body)
+	responseBody, readErr := readDurableProviderBody(response.Body)
 	if readErr != nil {
 		s.recordFailure(prepared.traceID, prepared.requestID, prepared.req, userIDOrZero(prepared.userIDPtr), prepared.resolvedModel, startedAt, fmt.Sprintf("failed to read provider response: %v", readErr), providerRequestBody, prepared.attemptNumber, prepared.attemptPromptTokens, prepared.attemptCompletionTokens)
 		return nil, prepared.traceID, fmt.Errorf("failed to read provider response: %w", readErr)
@@ -1485,28 +1549,30 @@ func (s *service) recordSuccess(prepared *preparedChatRequest, providerRequestBo
 		internalCost = estimatedCost
 	}
 	if err := s.costRecordService.RecordCost(&models.CostRecord{
-		TraceID:          prepared.traceID,
-		SessionID:        prepared.req.SessionID,
-		RequestID:        prepared.requestIDPtr,
-		UserID:           prepared.userIDPtr,
-		InstanceID:       prepared.req.InstanceID,
-		InstanceMode:     runtimeAttributionString(prepared.req.InstanceMode),
-		RuntimeType:      runtimeAttributionString(prepared.req.RuntimeType),
-		GatewayID:        runtimeAttributionString(prepared.req.GatewayID),
-		RuntimePodID:     runtimeAttributionInt64(prepared.req.RuntimePodID),
-		GatewayKeyID:     prepared.req.GatewayKeyID,
-		InvocationID:     intPtr(invocation.ID),
-		ModelID:          intPtr(prepared.resolvedModel.ID),
-		ProviderType:     prepared.resolvedModel.ProviderType,
-		ModelName:        prepared.resolvedModel.DisplayName,
-		Currency:         fallbackCurrency(prepared.resolvedModel.Currency),
-		PromptTokens:     promptTokens,
-		CompletionTokens: completionTokens,
-		TotalTokens:      totalTokens,
-		InputUnitPrice:   prepared.resolvedModel.InputPrice,
-		OutputUnitPrice:  prepared.resolvedModel.OutputPrice,
-		EstimatedCost:    estimatedCost,
-		InternalCost:     internalCost,
+		EventUID:           stringPtr(repository.ObservationAttemptUID("cost_records", prepared.userID, prepared.requestID, prepared.attemptNumber, prepared.resolvedModel.ProviderType, prepared.resolvedModel.ProviderModelName)),
+		InvocationEventUID: invocation.EventUID,
+		TraceID:            prepared.traceID,
+		SessionID:          prepared.req.SessionID,
+		RequestID:          prepared.requestIDPtr,
+		UserID:             prepared.userIDPtr,
+		InstanceID:         prepared.req.InstanceID,
+		InstanceMode:       runtimeAttributionString(prepared.req.InstanceMode),
+		RuntimeType:        runtimeAttributionString(prepared.req.RuntimeType),
+		GatewayID:          runtimeAttributionString(prepared.req.GatewayID),
+		RuntimePodID:       runtimeAttributionInt64(prepared.req.RuntimePodID),
+		GatewayKeyID:       prepared.req.GatewayKeyID,
+		InvocationID:       intPtr(invocation.ID),
+		ModelID:            intPtr(prepared.resolvedModel.ID),
+		ProviderType:       prepared.resolvedModel.ProviderType,
+		ModelName:          prepared.resolvedModel.DisplayName,
+		Currency:           fallbackCurrency(prepared.resolvedModel.Currency),
+		PromptTokens:       promptTokens,
+		CompletionTokens:   completionTokens,
+		TotalTokens:        totalTokens,
+		InputUnitPrice:     prepared.resolvedModel.InputPrice,
+		OutputUnitPrice:    prepared.resolvedModel.OutputPrice,
+		EstimatedCost:      estimatedCost,
+		InternalCost:       internalCost,
 	}); err != nil {
 		logPersistenceError("record cost", prepared.traceID, err)
 	}
@@ -1599,7 +1665,7 @@ func (s *service) streamOpenAICompatible(ctx context.Context, prepared *prepared
 	}
 
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		responseBody, _ := io.ReadAll(response.Body)
+		responseBody, _ := readDurableProviderBody(response.Body)
 		prepared.attemptFailureResponse = &ProxyResponse{StatusCode: response.StatusCode, Body: responseBody}
 		message := strings.TrimSpace(string(responseBody))
 		if message == "" {
@@ -1709,7 +1775,7 @@ func (s *service) streamAnthropic(ctx context.Context, prepared *preparedChatReq
 	}
 
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		responseBody, _ := io.ReadAll(response.Body)
+		responseBody, _ := readDurableProviderBody(response.Body)
 		prepared.attemptFailureResponse = &ProxyResponse{StatusCode: response.StatusCode, Body: responseBody}
 		message := strings.TrimSpace(string(responseBody))
 		if message == "" {
@@ -1823,7 +1889,7 @@ func (s *service) streamAnthropic(ctx context.Context, prepared *preparedChatReq
 }
 
 func proxyAnthropicStream(reader io.Reader, writer io.Writer, flusher http.Flusher, state *anthropicStreamState, deferUntilSemantic ...bool) (string, error) {
-	buffered := bufio.NewReader(reader)
+	buffered := bufio.NewReader(io.LimitReader(reader, 1<<20+1))
 	var deferred *deferredStreamWriter
 	if len(deferUntilSemantic) > 0 && deferUntilSemantic[0] {
 		deferred = &deferredStreamWriter{writer: writer, flusher: flusher}
@@ -1859,6 +1925,10 @@ func proxyAnthropicStream(reader io.Reader, writer io.Writer, flusher http.Flush
 
 	for !done {
 		line, readErr := buffered.ReadString('\n')
+		if rawStream.Len()+len(line) > 1<<20 {
+			readErr = errors.New("provider stream exceeded durable response limit (1 MiB)")
+			line = ""
+		}
 		if line != "" {
 			rawStream.WriteString(line)
 			trimmedLine := strings.TrimRight(line, "\r\n")
@@ -1891,7 +1961,7 @@ func proxyAnthropicStream(reader io.Reader, writer io.Writer, flusher http.Flush
 }
 
 func proxyOpenAIStream(reader io.Reader, writer io.Writer, flusher http.Flusher, deferUntilSemantic ...bool) (openAIStreamProxyResult, error) {
-	buffered := bufio.NewReader(reader)
+	buffered := bufio.NewReader(io.LimitReader(reader, 1<<20+1))
 	var deferred *deferredStreamWriter
 	if len(deferUntilSemantic) > 0 && deferUntilSemantic[0] {
 		deferred = &deferredStreamWriter{writer: writer, flusher: flusher}
@@ -1923,6 +1993,10 @@ func proxyOpenAIStream(reader io.Reader, writer io.Writer, flusher http.Flusher,
 
 	for {
 		line, readErr := buffered.ReadString('\n')
+		if rawStream.Len()+len(line) > 1<<20 {
+			readErr = errors.New("provider stream exceeded durable response limit (1 MiB)")
+			line = ""
+		}
 		if line != "" {
 			inspection := inspectStreamLine(
 				line,
@@ -1961,7 +2035,10 @@ func proxyOpenAIStream(reader io.Reader, writer io.Writer, flusher http.Flusher,
 			if pendingProviderError != nil && strings.TrimSpace(line) == "" {
 				return result(), pendingProviderError
 			}
-			if inspection.Done {
+			// DONE is an SSE data line; its following blank line terminates the
+			// frame. Forward that delimiter before returning, without waiting for
+			// the provider to close an otherwise complete stream.
+			if sawDone && strings.TrimSpace(line) == "" {
 				return result(), nil
 			}
 		}
@@ -1971,7 +2048,7 @@ func proxyOpenAIStream(reader io.Reader, writer io.Writer, flusher http.Flusher,
 				return result(), pendingProviderError
 			}
 			if errors.Is(readErr, io.EOF) {
-				if sawFinishReason {
+				if sawDone || sawFinishReason {
 					return result(), nil
 				}
 				return result(), &upstreamStreamReadError{err: io.ErrUnexpectedEOF}
@@ -4044,4 +4121,13 @@ func extractAssistantContent(response ChatCompletionResponse) string {
 		}
 	}
 	return strings.Join(parts, "\n")
+}
+
+// The bounded reader preserves an explicit interrupted/failed execution state.
+func readDurableProviderBody(reader io.Reader) ([]byte, error) {
+	body, err := io.ReadAll(io.LimitReader(reader, 1<<20+1))
+	if len(body) > 1<<20 {
+		return nil, errors.New("provider response exceeded durable response limit (1 MiB); execution may have occurred")
+	}
+	return body, err
 }

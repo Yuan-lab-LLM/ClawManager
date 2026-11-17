@@ -55,12 +55,14 @@ type redisStreamMessage struct {
 }
 
 type redisBus struct {
-	address  string
-	username string
-	password string
-	db       int
-	useTLS   bool
-	pool     *redisConnPool
+	commandHook   func(context.Context, []string) (any, bool, error)
+	teamLiveGuard func(context.Context, int) error
+	address       string
+	username      string
+	password      string
+	db            int
+	useTLS        bool
+	pool          *redisConnPool
 }
 
 const (
@@ -150,6 +152,11 @@ func (b *redisBus) XAdd(ctx context.Context, key string, fields map[string]strin
 		return "", err
 	}
 	id, ok := reply.(string)
+	if ok && id == "" && b.commandHook != nil {
+		// A projection transaction queued this command in its durable outbox.
+		// No Redis stream ID exists until the post-commit sender executes it.
+		return "", nil
+	}
 	if !ok || strings.TrimSpace(id) == "" {
 		return "", fmt.Errorf("unexpected redis XADD response")
 	}
@@ -309,6 +316,66 @@ func parseRedisStreamEntries(entries []interface{}) []redisStreamMessage {
 }
 
 func (b *redisBus) do(ctx context.Context, args ...string) (interface{}, error) {
+	if b != nil && b.commandHook != nil {
+		if reply, handled, err := b.commandHook(ctx, args); handled {
+			return reply, err
+		}
+	}
+	if len(args) == 5 && strings.EqualFold(args[0], "EVAL") && args[1] == publishTeamWorkflowContextScript {
+		if id, ok := teamRedisID(args[3]); ok {
+			if err := b.initializeTeamCapacity(ctx, id, false); err != nil {
+				return nil, err
+			}
+			p := teamCapacityPrefix(id)
+			return b.doRaw(ctx, "EVAL", capacityGuardedScript(args[1], 1, true), "3", args[3], p+"usage", p+"lock", args[4])
+		}
+	}
+	if len(args) > 6 && strings.EqualFold(args[0], "XADD") && args[1] == runtimeEventStreamKey {
+		fieldStart := 3
+		if args[2] == "MAXLEN" {
+			fieldStart = 6
+		}
+		if len(args) < fieldStart+2 {
+			return nil, fmt.Errorf("invalid runtime UI event")
+		}
+		bytes := 0
+		for _, v := range args[fieldStart:] {
+			bytes += len(v)
+		}
+		if bytes > 16<<10 {
+			return nil, fmt.Errorf("runtime UI event exceeds 16 KiB")
+		}
+		out := []string{"EVAL", `local now=redis.call('TIME'); local minimum=tostring(tonumber(now[1])*1000-86400000)..'-0'; redis.call('XTRIM',KEYS[1],'MINID','=',minimum); return redis.call('XADD',KEYS[1],'MAXLEN','=',10000,'*',unpack(ARGV))`, "1", runtimeEventStreamKey}
+		return b.doRaw(ctx, append(out, args[fieldStart:]...)...)
+	}
+	if len(args) >= 5 && strings.EqualFold(args[0], "XADD") && reliableTeamStream(args[1]) {
+		if args[2] != "*" || (len(args)-3)%2 != 0 {
+			return nil, fmt.Errorf("invalid reliable Team append")
+		}
+		fields := make(map[string]string, (len(args)-3)/2)
+		for i := 3; i < len(args); i += 2 {
+			fields[args[i]] = args[i+1]
+		}
+		return b.xAddReliableOnce(ctx, args[1], fields, "")
+	}
+	if teamStateCommand(args) {
+		id, _ := teamRedisID(args[1])
+		if err := b.initializeTeamCapacity(ctx, id, false); err != nil {
+			return nil, err
+		}
+		return b.doRaw(ctx, teamStateArgs(args)...)
+	}
+	if transformed, ok := teamGroupArgs(args); ok {
+		id, _ := teamRedisID(args[2])
+		if err := b.initializeTeamCapacity(ctx, id, false); err != nil {
+			return nil, err
+		}
+		return b.doRaw(ctx, transformed...)
+	}
+	return b.doRaw(ctx, args...)
+}
+
+func (b *redisBus) doRaw(ctx context.Context, args ...string) (interface{}, error) {
 	if b == nil || b.pool == nil {
 		return nil, fmt.Errorf("redis bus is not initialized")
 	}

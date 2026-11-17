@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import AdminLayout from '../../components/AdminLayout';
+import ArchiveHistoryExport from '../../components/ArchiveHistoryExport';
 import {
   adminService,
   type AIAuditListResponse,
@@ -353,6 +354,10 @@ const AIAuditPage: React.FC = () => {
     limit: 20,
   });
   const [selectedTrace, setSelectedTrace] = useState<AuditTraceDetail | null>(null);
+  const [traceCursors, setTraceCursors] = useState<string[]>(['']);
+  const [tracePageIndex, setTracePageIndex] = useState(0);
+  const [bodyLoading, setBodyLoading] = useState<string | null>(null);
+  const [bodyStatuses, setBodyStatuses] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -361,6 +366,15 @@ const AIAuditPage: React.FC = () => {
   const [modelFilter, setModelFilter] = useState('');
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(20);
+  const [windowBounds] = useState(() => {
+    const until = new Date();
+    return { since: new Date(until.getTime() - 30 * 86400000).toISOString().slice(0, 16), until: until.toISOString().slice(0, 16) };
+  });
+  const [since, setSince] = useState(windowBounds.since);
+  const [until, setUntil] = useState(windowBounds.until);
+  const [listCursors, setListCursors] = useState<string[]>(['']);
+  const [appliedFilters, setAppliedFilters] = useState({ search: '', status: '', model: '', limit: 20, since: `${windowBounds.since}:00Z`, until: `${windowBounds.until}:00Z` });
+  const listRequestRef = useRef(0);
   const [copyState, setCopyState] = useState<string | null>(null);
   const [loadingTraceId, setLoadingTraceId] = useState<string | null>(null);
   const [detailPanelMounted, setDetailPanelMounted] = useState(false);
@@ -386,7 +400,7 @@ const AIAuditPage: React.FC = () => {
 
   useEffect(() => {
     void loadAudit();
-  }, [page, limit]);
+  }, [page, appliedFilters]);
 
   useEffect(() => {
     if (loading) {
@@ -414,42 +428,35 @@ const AIAuditPage: React.FC = () => {
   }, [traceQuery]);
 
   const loadAudit = async () => {
+    const requestId = ++listRequestRef.current;
     try {
       setLoading(true);
       setError(null);
       const data = await adminService.getAIAudit({
         page,
-        limit,
-        search: search.trim() || undefined,
-        status: status || undefined,
-        model: modelFilter.trim() || undefined,
+        ...appliedFilters,
+        cursor: listCursors[page - 1] || undefined,
       });
+      if (requestId !== listRequestRef.current) return;
       setListState(data);
     } catch (err: any) {
+      if (requestId !== listRequestRef.current) return;
+      setListState({ items: [], total: 0, page, limit: appliedFilters.limit });
       setError(err.response?.data?.error || t('aiAuditPage.loadFailed'));
     } finally {
-      setLoading(false);
+      if (requestId === listRequestRef.current) setLoading(false);
     }
   };
 
-  const applyFilters = async () => {
-    setPage(1);
-    try {
-      setLoading(true);
-      setError(null);
-      const data = await adminService.getAIAudit({
-        page: 1,
-        limit,
-        search: search.trim() || undefined,
-        status: status || undefined,
-        model: modelFilter.trim() || undefined,
-      });
-      setListState(data);
-    } catch (err: any) {
-      setError(err.response?.data?.error || t('aiAuditPage.loadFailed'));
-    } finally {
-      setLoading(false);
+  const applyFilters = () => {
+    const from = Date.parse(`${since}:00Z`), to = Date.parse(`${until}:00Z`);
+    if (!Number.isFinite(from) || !Number.isFinite(to) || to <= from || to - from > 90 * 86400000) {
+      setError(t('aiAuditPage.archiveWindow'));
+      return;
     }
+    setListCursors(['']);
+    setPage(1);
+    setAppliedFilters({ search: search.trim(), status, model: modelFilter.trim(), limit, since: new Date(from).toISOString(), until: new Date(to).toISOString() });
   };
 
   const loadTraceDetail = async (traceId: string, replaceHistory: boolean = false) => {
@@ -471,6 +478,8 @@ const AIAuditPage: React.FC = () => {
         return;
       }
       setSelectedTrace(detail);
+      setTraceCursors(['']);
+      setTracePageIndex(0);
       if (searchParams.get('trace') !== traceId) {
         setSearchParams((current) => {
           const next = new URLSearchParams(current);
@@ -492,6 +501,49 @@ const AIAuditPage: React.FC = () => {
         setLoadingTraceId(null);
       }
     }
+  };
+
+  const loadTracePage = async (index: number, cursor: string) => {
+    if (!selectedTrace || detailLoading) return;
+    const trace = selectedTrace.trace_id;
+    const request = ++detailRequestRef.current;
+    setDetailLoading(true);
+    setError(null);
+    try {
+      const detail = await adminService.getAITraceDetail(trace, cursor);
+      if (request !== detailRequestRef.current || closingTraceRef.current) return;
+      setSelectedTrace(detail);
+      setTraceCursors(current => [...current.slice(0, index), cursor]);
+      setTracePageIndex(index);
+    } catch (err) {
+      if (request === detailRequestRef.current) setError(err instanceof Error ? err.message : t('aiAuditPage.detailLoadFailed'));
+    } finally {
+      if (request === detailRequestRef.current) setDetailLoading(false);
+    }
+  };
+
+  const loadTraceBody = async (kind: string, id: number) => {
+    if (!selectedTrace || bodyLoading) return;
+    const trace = selectedTrace.trace_id;
+    const request = detailRequestRef.current;
+    setBodyLoading(`${kind}:${id}`);
+    setError(null);
+    try {
+      const body = await adminService.getAITraceBody(trace, kind, id);
+      if (request !== detailRequestRef.current || closingTraceRef.current) return;
+      const statuses = body.body_status && typeof body.body_status === 'object' ? Object.values(body.body_status).map(String).join(', ') : 'available';
+      setBodyStatuses(current => ({ ...current, [`${trace}:${kind}:${id}`]: statuses }));
+      const fields: Record<string, 'invocations' | 'audit_events' | 'cost_records' | 'risk_hits' | 'messages'> = { model_invocations: 'invocations', audit_events: 'audit_events', cost_records: 'cost_records', risk_hits: 'risk_hits', chat_messages: 'messages' };
+      const field = fields[kind];
+      if (!field) return;
+      setSelectedTrace(current => current?.trace_id === trace ? {
+        ...current,
+        [field]: current[field].map(item => item.id === id ? { ...item, ...body } : item),
+        flow_nodes: current.flow_nodes.map(node => kind === 'model_invocations' && node.invocation_id === id ? { ...node, input_payload: typeof body.request_payload === 'string' ? body.request_payload : node.input_payload, output_payload: typeof body.response_payload === 'string' ? body.response_payload : node.output_payload } : node),
+      } : current);
+    } catch (err) {
+      if (request === detailRequestRef.current) setError(err instanceof Error ? err.message : t('aiAuditPage.detailLoadFailed'));
+    } finally { setBodyLoading(null); }
   };
 
   const totalPages = useMemo(() => {
@@ -740,8 +792,12 @@ const AIAuditPage: React.FC = () => {
           </button>
           <button
             type="button"
-            onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
-            disabled={page >= totalPages}
+            onClick={() => {
+              if (!listState.next_cursor) return;
+              setListCursors((current) => [...current.slice(0, page), listState.next_cursor!]);
+              setPage((current) => current + 1);
+            }}
+            disabled={!listState.next_cursor}
             className="app-button-secondary disabled:cursor-not-allowed disabled:opacity-50"
           >
             {t('admin.nextPage')}
@@ -758,6 +814,27 @@ const AIAuditPage: React.FC = () => {
 
     return (
       <div className="mt-6 space-y-6 transition-all duration-300 ease-out">
+        <div className="flex flex-wrap items-center justify-between gap-3" aria-live="polite">
+          <p className="text-sm text-[var(--cm-muted)]">{t('aiAuditPage.metadataPage')} {tracePageIndex + 1}</p>
+          <div className="flex gap-2">
+            <button type="button" className="app-button-secondary" disabled={detailLoading || bodyLoading !== null || tracePageIndex === 0} onClick={() => void loadTracePage(tracePageIndex - 1, traceCursors[tracePageIndex - 1])}>{t('admin.prev')}</button>
+            <button type="button" className="app-button-secondary" disabled={detailLoading || bodyLoading !== null || !selectedTrace.next_cursor} onClick={() => void loadTracePage(tracePageIndex + 1, selectedTrace.next_cursor!)}>{detailLoading ? t('common.loading') : t('admin.nextPage')}</button>
+          </div>
+        </div>
+        {!!selectedTrace.body_records?.length && <details className="rounded-lg border border-[var(--cm-border)] p-4">
+          <summary className="cursor-pointer text-sm font-medium">{t('aiAuditPage.loadBodies')}</summary>
+          <p className="my-3 text-sm text-[var(--cm-muted)]">{t('aiAuditPage.bodyOnDemand')}</p>
+          <ul className="max-h-64 space-y-2 overflow-auto">
+            {selectedTrace.body_records.map(record => <li key={`${record.kind}:${record.id}`} className="flex flex-wrap items-center justify-between gap-2 text-sm">
+              <span>{record.kind} #{record.id} {bodyStatuses[`${selectedTrace.trace_id}:${record.kind}:${record.id}`] && <span role="status">· {bodyStatuses[`${selectedTrace.trace_id}:${record.kind}:${record.id}`]}</span>}</span>
+              <button type="button" className="app-button-secondary" disabled={bodyLoading !== null || detailLoading} onClick={() => void loadTraceBody(record.kind, record.id)}>{bodyLoading === `${record.kind}:${record.id}` ? t('common.loading') : t('aiAuditPage.loadBody')}</button>
+            </li>)}
+          </ul>
+          {selectedTrace.invocations.filter(record => record.error_message).map(record => <div key={`error-${record.id}`} className="mt-3 text-sm">
+            <p className="font-medium">{t('aiAuditPage.failureReason')} #{record.id}</p>
+            <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded border border-[var(--cm-border)] p-3">{record.error_message}</pre>
+          </div>)}
+        </details>}
         <div className="overflow-hidden rounded-lg border border-[var(--cm-border)] bg-[var(--cm-subtle)] shadow-sm">
           <div className="border-b border-[var(--cm-border)] px-5 py-5 sm:px-6">
             <div className="flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
@@ -1100,11 +1177,12 @@ const AIAuditPage: React.FC = () => {
   return (
     <AdminLayout title={t('nav.aiAudit')}>
       <div className="space-y-6">
+        <ArchiveHistoryExport admin />
         <section className={`app-panel p-6 ${isSplitView ? 'overflow-visible' : ''}`}>
 
 
           {error && (
-            <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-red-700">
+            <div role="alert" className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-red-700">
               {error}
             </div>
           )}
@@ -1127,9 +1205,16 @@ const AIAuditPage: React.FC = () => {
                     {t('aiAuditPage.traceTableSubtitle')}
                   </p>
                 </div>
-                <div className="flex flex-col gap-3 lg:flex-row">
+                <div className="flex flex-wrap items-end gap-3">
+                  <label className="grid gap-1 text-sm">{t('aiAuditPage.archiveFrom')}
+                    <input type="datetime-local" className="app-input" value={since} onChange={(event) => setSince(event.target.value)} />
+                  </label>
+                  <label className="grid gap-1 text-sm">{t('aiAuditPage.archiveUntil')}
+                    <input type="datetime-local" className="app-input" value={until} onChange={(event) => setUntil(event.target.value)} />
+                  </label>
                   <input
                     type="text"
+                    aria-label={t('aiAuditPage.searchPlaceholder')}
                     value={search}
                     onChange={(event) => setSearch(event.target.value)}
                     placeholder={t('aiAuditPage.searchPlaceholder')}
@@ -1137,6 +1222,7 @@ const AIAuditPage: React.FC = () => {
                   />
                   <select
                     value={status}
+                    aria-label={t('aiAuditPage.allStatuses')}
                     onChange={(event) => setStatus(event.target.value)}
                     className="app-input"
                   >
@@ -1149,12 +1235,14 @@ const AIAuditPage: React.FC = () => {
                   <input
                     type="text"
                     value={modelFilter}
+                    aria-label={t('aiAuditPage.modelPlaceholder')}
                     onChange={(event) => setModelFilter(event.target.value)}
                     placeholder={t('aiAuditPage.modelPlaceholder')}
                     className="app-input min-w-[220px]"
                   />
                   <select
                     value={limit}
+                    aria-label={t('aiAuditPage.pageSize')}
                     onChange={(event) => setLimit(Number(event.target.value))}
                     className="app-input"
                   >
@@ -1162,16 +1250,19 @@ const AIAuditPage: React.FC = () => {
                     <option value={20}>{t('costsPage.pageSize20')}</option>
                     <option value={50}>{t('costsPage.pageSize50')}</option>
                   </select>
-                  <button onClick={applyFilters} className="app-button-secondary">
-                    {t('common.refresh')}
+                  <button onClick={applyFilters} className="app-button-secondary" disabled={loading}>
+                    {t('aiAuditPage.applyFilters')}
                   </button>
                 </div>
               </div>
+              <p className="mt-3 text-sm text-[var(--cm-muted)]" aria-live="polite">
+                {t('aiAuditPage.queryWindow', { since: formatAbsoluteTimestamp(listState.since || appliedFilters.since, locale), until: formatAbsoluteTimestamp(listState.until || appliedFilters.until, locale), count: listState.total })}
+              </p>
             </div>
 
             {loading ? (
               <div className="px-5 py-6 text-sm text-[var(--cm-muted)]">{t('aiAuditPage.loading')}</div>
-            ) : listState.items.length === 0 ? (
+            ) : listState.items.length === 0 && !isSplitView ? (
               <div className="px-5 py-6 text-sm text-[var(--cm-muted)]">{t('aiAuditPage.empty')}</div>
             ) : isSplitView ? (
               <div className="grid gap-0 xl:grid-cols-[320px_minmax(0,1fr)]">
@@ -1300,6 +1391,7 @@ const AIAuditPage: React.FC = () => {
                                     title={item.error_message}
                                   >
                                     {t('aiAuditPage.failureReason')}: {errorSummary}
+                                    {item.error_message_truncated && <span> · {t('aiAuditPage.errorPreview')}</span>}
                                   </div>
                                 )}
                               </td>

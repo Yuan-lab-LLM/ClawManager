@@ -25,12 +25,12 @@ func mapSessionReportSummary(in repository.SessionUsageReportSummary) (InstanceS
 
 func getSQLSessionUsage(reporter sessionUsageReporter, instanceID int, query InstanceSessionUsageQuery) (*InstanceSessionUsageResult, error) {
 	page, limit := normalizePageLimit(query.Page, query.Limit, 20, 100)
-	report, err := reporter.ListSessionUsageReport(instanceID, page, limit, query.Search, repository.SessionUsageFilter{Since: query.Since, Until: query.Until})
+	report, err := reporter.ListSessionUsageReport(instanceID, page, limit, query.Search, repository.SessionUsageFilter{Since: query.Since, Until: query.Until, Cursor: query.Cursor})
 	if err != nil {
 		return nil, err
 	}
 	summary, compliance := mapSessionReportSummary(report.Summary)
-	result := &InstanceSessionUsageResult{Summary: summary, Compliance: compliance, Total: report.Total, Page: page, Limit: limit, Items: make([]InstanceSessionUsageItem, 0, len(report.Items))}
+	result := &InstanceSessionUsageResult{Summary: summary, NextCursor: report.NextCursor, Compliance: compliance, Total: report.Total, Page: page, Limit: limit, Items: make([]InstanceSessionUsageItem, 0, len(report.Items))}
 	for _, item := range report.Items {
 		result.Items = append(result.Items, mapSessionReportItem(item))
 	}
@@ -43,12 +43,12 @@ func mapSessionReportItem(item repository.SessionUsageReportItem) InstanceSessio
 
 func getSQLAdminSessionUsage(reporter sessionUsageReporter, query InstanceSessionUsageOverviewQuery) (*InstanceSessionUsageOverview, error) {
 	page, limit := normalizePageLimit(query.Page, query.Limit, 20, 100)
-	report, err := reporter.ListAdminSessionUsageReport(page, limit, query.Search, repository.SessionUsageFilter{Since: query.Since, Until: query.Until})
+	report, err := reporter.ListAdminSessionUsageReport(page, limit, query.Search, repository.SessionUsageFilter{Since: query.Since, Until: query.Until, Cursor: query.Cursor})
 	if err != nil {
 		return nil, err
 	}
 	summary, _ := mapSessionReportSummary(report.Summary)
-	result := &InstanceSessionUsageOverview{Summary: summary, Total: report.Total, Page: page, Limit: limit, Items: make([]InstanceSessionUsageOverviewItem, 0, len(report.Items))}
+	result := &InstanceSessionUsageOverview{Summary: summary, NextCursor: report.NextCursor, Total: report.Total, Page: page, Limit: limit, Items: make([]InstanceSessionUsageOverviewItem, 0, len(report.Items))}
 	for _, item := range report.Items {
 		summary, compliance := mapSessionReportSummary(item.Summary)
 		result.Items = append(result.Items, InstanceSessionUsageOverviewItem{InstanceID: item.InstanceID, InstanceName: item.InstanceName, InstanceType: item.InstanceType, UserID: item.UserID, Summary: summary, Compliance: compliance})

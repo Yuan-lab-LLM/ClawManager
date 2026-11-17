@@ -26,7 +26,16 @@ func requireBusinessSQLInventory(result SQLResult) error {
 			return errors.New("incomplete business SQL inventory")
 		}
 	}
-	if len(result.Tables) != expected {
+	monthly, err := monthlyManifest(result.MonthlyCatalog)
+	if err != nil {
+		return err
+	}
+	for name := range monthly {
+		if _, ok := result.Tables[name]; !ok {
+			return errors.New("monthly inventory missing")
+		}
+	}
+	if len(result.Tables) != expected+len(monthly) {
 		return errors.New("unexpected business SQL inventory")
 	}
 	return nil

@@ -1,6 +1,7 @@
 package systembackup
 
 import (
+	"clawreef/internal/historymaintenance"
 	"context"
 	_ "embed"
 	"encoding/json"
@@ -31,6 +32,9 @@ func DiscoverSchema(ctx context.Context, q SQLQueryer) ([]SQLTable, error) {
 	out := []SQLTable{}
 	for _, name := range names {
 		p, _ := Policy(name)
+		if _, _, monthly := historymaintenance.ParseMonthly(name); monthly {
+			continue
+		}
 		if p.Category == "system_backup" {
 			continue
 		}
@@ -55,12 +59,5 @@ func ValidateSchema(ctx context.Context, q SQLQueryer) error {
 	if !reflect.DeepEqual(expected, actual) {
 		return errors.New("unsupported_schema")
 	}
-	var executable int
-	if e = q.QueryRowContext(ctx, "SELECT (SELECT COUNT(*) FROM information_schema.TRIGGERS WHERE TRIGGER_SCHEMA=DATABASE()) + (SELECT COUNT(*) FROM information_schema.ROUTINES WHERE ROUTINE_SCHEMA=DATABASE()) + (SELECT COUNT(*) FROM information_schema.EVENTS WHERE EVENT_SCHEMA=DATABASE())").Scan(&executable); e != nil {
-		return e
-	}
-	if executable != 0 {
-		return errors.New("unsupported_schema")
-	}
-	return nil
+	return validateCaptureExecutables(ctx, q)
 }

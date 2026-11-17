@@ -166,6 +166,10 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to initialize object storage: %v", err)
 	}
+	observationObjects, err := configureDatabaseMaintenance(database, objectStorageService)
+	if err != nil {
+		log.Fatalf("Failed to configure durable database maintenance: %v", err)
+	}
 	skillScannerClient := services.NewSkillScannerClient(cfg.SkillScanner)
 	aiObservabilityService := services.NewAIObservabilityService(modelInvocationRepo, auditEventRepo, costRecordRepo, riskHitRepo, chatMessageRepo, chatSessionRepo, llmModelRepo, instanceRepo, userRepo, instanceRuntimeStatusRepo)
 	clusterResourceService := services.NewClusterResourceService(instanceRepo)
@@ -819,6 +823,9 @@ func main() {
 		}
 	}
 	defer leaderCancel()
+	if err := startDatabaseMaintenance(leaderCtx, database, observationObjects, cfg.Database); err != nil {
+		log.Fatalf("Failed to start database maintenance: %v", err)
+	}
 	workspaceStore := workspacedashboard.NewStore(database)
 	if runtimeScheduler != nil {
 		workspaceStore.SetCapacityReader(runtimeScheduler.WorkspaceCapacity)
@@ -1414,6 +1421,25 @@ func main() {
 		{
 			adminAIAudit.GET("", aiObservabilityHandler.ListAuditItems)
 			adminAIAudit.GET("/:traceId", aiObservabilityHandler.GetTraceDetail)
+		}
+
+		historyArchive := handlers.NewHistoryArchiveHandler(databaseHistory, false)
+		historyRoutes := api.Group("/history")
+		historyRoutes.Use(middleware.Auth(), middleware.SetUserInfo(userRepo))
+		{
+			historyRoutes.GET("/:kind", historyArchive.List)
+			historyRoutes.GET("/:kind/export", historyArchive.Export)
+			historyRoutes.GET("/:kind/:id", historyArchive.Get)
+			historyRoutes.GET("/:kind/:id/body", historyArchive.Body)
+		}
+		adminHistoryArchive := handlers.NewHistoryArchiveHandler(databaseHistory, true)
+		adminHistoryRoutes := api.Group("/admin/history")
+		adminHistoryRoutes.Use(middleware.Auth(), middleware.SetUserInfo(userRepo), middleware.NewAdminAuth(userRepo))
+		{
+			adminHistoryRoutes.GET("/:kind", adminHistoryArchive.List)
+			adminHistoryRoutes.GET("/:kind/export", adminHistoryArchive.Export)
+			adminHistoryRoutes.GET("/:kind/:id", adminHistoryArchive.Get)
+			adminHistoryRoutes.GET("/:kind/:id/body", adminHistoryArchive.Body)
 		}
 
 		adminCosts := api.Group("/admin/costs")

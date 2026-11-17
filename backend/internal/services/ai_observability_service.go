@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -15,48 +16,56 @@ import (
 
 // AuditQuery contains query options for AI audit list views.
 type AuditQuery struct {
-	Page   int
-	Limit  int
-	Search string
-	Status string
-	Model  string
+	Cursor       string
+	Since, Until *time.Time
+	Page         int
+	Limit        int
+	Search       string
+	Status       string
+	Model        string
 }
 
 // AuditListResult is the paginated audit list response.
 type AuditListResult struct {
-	Items []AuditListItem `json:"items"`
-	Total int             `json:"total"`
-	Page  int             `json:"page"`
-	Limit int             `json:"limit"`
+	NextCursor string          `json:"next_cursor,omitempty"`
+	Since      *time.Time      `json:"since,omitempty"`
+	Until      *time.Time      `json:"until,omitempty"`
+	Items      []AuditListItem `json:"items"`
+	Total      int             `json:"total"`
+	Page       int             `json:"page"`
+	Limit      int             `json:"limit"`
 }
 
 // AuditListItem is a flattened list row for AI audit views.
 type AuditListItem struct {
-	TraceID             string     `json:"trace_id"`
-	RequestID           string     `json:"request_id"`
-	SessionID           *string    `json:"session_id,omitempty"`
-	UserID              *int       `json:"user_id,omitempty"`
-	Username            string     `json:"username,omitempty"`
-	InstanceID          *int       `json:"instance_id,omitempty"`
-	RequestedModel      string     `json:"requested_model"`
-	ActualProviderModel string     `json:"actual_provider_model"`
-	ProviderType        string     `json:"provider_type"`
-	Status              string     `json:"status"`
-	PromptTokens        int        `json:"prompt_tokens"`
-	CompletionTokens    int        `json:"completion_tokens"`
-	TotalTokens         int        `json:"total_tokens"`
-	LatencyMs           *int       `json:"latency_ms,omitempty"`
-	TTFTMs              *int       `json:"ttft_ms,omitempty"`
-	GenerationMs        *int       `json:"generation_ms,omitempty"`
-	TokensPerSecond     *float64   `json:"tokens_per_second,omitempty"`
-	AttemptNo           int        `json:"attempt_no,omitempty"`
-	ErrorMessage        *string    `json:"error_message,omitempty"`
-	CreatedAt           time.Time  `json:"created_at"`
-	CompletedAt         *time.Time `json:"completed_at,omitempty"`
+	ErrorMessageTruncated bool       `json:"error_message_truncated,omitempty"`
+	TraceID               string     `json:"trace_id"`
+	RequestID             string     `json:"request_id"`
+	SessionID             *string    `json:"session_id,omitempty"`
+	UserID                *int       `json:"user_id,omitempty"`
+	Username              string     `json:"username,omitempty"`
+	InstanceID            *int       `json:"instance_id,omitempty"`
+	RequestedModel        string     `json:"requested_model"`
+	ActualProviderModel   string     `json:"actual_provider_model"`
+	ProviderType          string     `json:"provider_type"`
+	Status                string     `json:"status"`
+	PromptTokens          int        `json:"prompt_tokens"`
+	CompletionTokens      int        `json:"completion_tokens"`
+	TotalTokens           int        `json:"total_tokens"`
+	LatencyMs             *int       `json:"latency_ms,omitempty"`
+	TTFTMs                *int       `json:"ttft_ms,omitempty"`
+	GenerationMs          *int       `json:"generation_ms,omitempty"`
+	TokensPerSecond       *float64   `json:"tokens_per_second,omitempty"`
+	AttemptNo             int        `json:"attempt_no,omitempty"`
+	ErrorMessage          *string    `json:"error_message,omitempty"`
+	CreatedAt             time.Time  `json:"created_at"`
+	CompletedAt           *time.Time `json:"completed_at,omitempty"`
 }
 
 // AuditTraceDetail bundles invocation, audit event, and cost records for a trace.
 type AuditTraceDetail struct {
+	NextCursor  string                     `json:"next_cursor,omitempty"`
+	BodyRecords []TraceBodyLocator         `json:"body_records"`
 	TraceID     string                     `json:"trace_id"`
 	Username    string                     `json:"username,omitempty"`
 	Invocations []models.ModelInvocation   `json:"invocations"`
@@ -84,6 +93,7 @@ type AuditFlowNode struct {
 
 // CostOverview contains a compact cost summary for admin reporting.
 type CostOverview struct {
+	NextCursor            string              `json:"next_cursor,omitempty"`
 	TotalPromptTokens     int                 `json:"total_prompt_tokens"`
 	TotalCompletionTokens int                 `json:"total_completion_tokens"`
 	TotalTokens           int                 `json:"total_tokens"`
@@ -105,9 +115,11 @@ type CostOverview struct {
 
 // CostQuery contains query options for cost list views.
 type CostQuery struct {
-	Page   int
-	Limit  int
-	Search string
+	Cursor       string
+	Since, Until *time.Time
+	Page         int
+	Limit        int
+	Search       string
 }
 
 // CostBreakdownItem is a grouped summary row.
@@ -168,6 +180,7 @@ type CostRecordView struct {
 
 // InstanceSessionUsageQuery contains query options for instance session usage views.
 type InstanceSessionUsageQuery struct {
+	Cursor string
 	Page   int
 	Limit  int
 	Search string
@@ -215,6 +228,7 @@ type InstanceSessionUsageItem struct {
 
 // InstanceSessionUsageResult is the paginated instance session usage response.
 type InstanceSessionUsageResult struct {
+	NextCursor string                         `json:"next_cursor,omitempty"`
 	Summary    InstanceSessionUsageSummary    `json:"summary"`
 	Compliance InstanceSessionUsageCompliance `json:"compliance"`
 	Items      []InstanceSessionUsageItem     `json:"items"`
@@ -283,6 +297,7 @@ type LLMGovernanceOverview struct {
 
 // InstanceSessionUsageOverviewQuery contains query options for admin session usage overview.
 type InstanceSessionUsageOverviewQuery struct {
+	Cursor string
 	Page   int
 	Limit  int
 	Search string
@@ -302,11 +317,12 @@ type InstanceSessionUsageOverviewItem struct {
 
 // InstanceSessionUsageOverview aggregates session usage across managed runtime instances.
 type InstanceSessionUsageOverview struct {
-	Summary InstanceSessionUsageSummary        `json:"summary"`
-	Items   []InstanceSessionUsageOverviewItem `json:"items"`
-	Total   int                                `json:"total"`
-	Page    int                                `json:"page"`
-	Limit   int                                `json:"limit"`
+	NextCursor string                             `json:"next_cursor,omitempty"`
+	Summary    InstanceSessionUsageSummary        `json:"summary"`
+	Items      []InstanceSessionUsageOverviewItem `json:"items"`
+	Total      int                                `json:"total"`
+	Page       int                                `json:"page"`
+	Limit      int                                `json:"limit"`
 }
 
 // AIObservabilityService provides read APIs for audit and cost reporting.
@@ -363,6 +379,27 @@ func NewAIObservabilityService(
 
 func (s *aiObservabilityService) ListAuditItems(query AuditQuery) (*AuditListResult, error) {
 	page, limit := normalizePageLimit(query.Page, query.Limit, 20, 100)
+	if reporter, ok := s.invocationRepo.(interface {
+		ListAuditReportPage(context.Context, repository.AuditReportQuery) (*repository.AuditReportPage, error)
+	}); ok {
+		if page > 1 && query.Cursor == "" {
+			return nil, repository.ErrInvalidAuditQuery
+		}
+		result, err := reporter.ListAuditReportPage(context.Background(), repository.AuditReportQuery{Limit: limit, Search: query.Search, Status: query.Status, Model: query.Model, Cursor: query.Cursor, Since: query.Since, Until: query.Until})
+		if err != nil {
+			return nil, err
+		}
+		names, err := s.loadUsernamesForAudit(result.Items, nil, nil)
+		if err != nil {
+			return nil, err
+		}
+		rows := make([]AuditListItem, 0, len(result.Items))
+		for _, item := range result.Items {
+			rows = append(rows, aggregateInvocationsByTrace([]models.ModelInvocation{item}, names)...)
+			rows[len(rows)-1].ErrorMessageTruncated = result.TruncatedErrors[item.ID]
+		}
+		return &AuditListResult{Items: rows, Total: result.Total, Page: page, Limit: limit, NextCursor: result.NextCursor, Since: &result.Since, Until: &result.Until}, nil
+	}
 	if reporter, ok := s.invocationRepo.(interface {
 		ListAuditReport(int, int, string, string, string) ([]models.ModelInvocation, int, error)
 	}); ok {
@@ -528,6 +565,9 @@ func (s *aiObservabilityService) ListAuditItems(query AuditQuery) (*AuditListRes
 }
 
 func (s *aiObservabilityService) GetTraceDetail(traceID string) (*AuditTraceDetail, error) {
+	if _, ok := s.invocationRepo.(tracePageRepository); ok {
+		return s.GetTracePage(traceID, "", 200)
+	}
 	traceID = strings.TrimSpace(traceID)
 	if traceID == "" {
 		return nil, fmt.Errorf("trace id is required")
@@ -573,6 +613,9 @@ func (s *aiObservabilityService) GetTraceDetail(traceID string) (*AuditTraceDeta
 }
 
 func (s *aiObservabilityService) GetCostOverview(query CostQuery) (*CostOverview, error) {
+	if reporter, ok := s.costRepo.(costOverviewReporter); ok {
+		return getSQLCostOverview(reporter, query)
+	}
 	page, limit := normalizePageLimit(query.Page, query.Limit, 20, 100)
 	search := strings.ToLower(strings.TrimSpace(query.Search))
 

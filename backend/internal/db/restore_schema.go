@@ -52,6 +52,14 @@ func PrepareIsolatedRestoreSchema(ctx context.Context, database *sql.DB) error {
 		}
 		for i, statement := range splitSQLStatements(string(raw)) {
 			upper := strings.ToUpper(strings.TrimSpace(statement))
+			// The capture-only legacy audit hook must never execute while imported
+			// history is restored. No trigger is installed in an inert drill schema.
+			if entry.Name() == "121_guard_observation_reconciliation.sql" && (strings.HasPrefix(upper, "CREATE TRIGGER OBSERVATION_AUDIT_ENQUEUE ") || strings.HasPrefix(upper, "CREATE TRIGGER OBSERVATION_INVOCATION_ENQUEUE ") || strings.HasPrefix(upper, "CREATE TRIGGER OBSERVATION_COST_ENQUEUE ")) {
+				continue
+			}
+			if entry.Name() == "123_add_monthly_log_catchup.sql" && (strings.HasPrefix(upper, "CREATE TRIGGER OBSERVATION_CHAT_ENQUEUE ") || strings.HasPrefix(upper, "CREATE TRIGGER OBSERVATION_RISK_ENQUEUE ")) {
+				continue
+			}
 			// The migration parser already removes comments. Seed DML is intentionally
 			// excluded; updates/backfills on this empty schema cannot create records.
 			if strings.HasPrefix(upper, "INSERT ") || strings.HasPrefix(upper, "REPLACE ") {

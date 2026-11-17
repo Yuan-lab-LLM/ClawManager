@@ -132,6 +132,9 @@ func RestoreMySQL(ctx context.Context, db *sql.DB, sourceDatabase, targetDatabas
 	if err != nil {
 		return result, err
 	}
+	if err = verifyHistoryAllocators(ctx, tx, result.AutoIncrement); err != nil {
+		return result, err
+	}
 	if err = tx.Commit(); err != nil {
 		return result, err
 	}

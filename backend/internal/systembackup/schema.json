@@ -109,6 +109,18 @@
         "type": "bigint",
         "nullable": "YES",
         "extra": ""
+      },
+      {
+        "name": "event_uid",
+        "type": "char(64)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "details_body_ref",
+        "type": "json",
+        "nullable": "YES",
+        "extra": ""
       }
     ],
     "primary_key": [
@@ -401,6 +413,18 @@
         "type": "timestamp",
         "nullable": "YES",
         "extra": "DEFAULT_GENERATED"
+      },
+      {
+        "name": "event_uid",
+        "type": "char(64)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "content_body_ref",
+        "type": "json",
+        "nullable": "YES",
+        "extra": ""
       }
     ],
     "primary_key": [
@@ -613,6 +637,18 @@
       {
         "name": "gateway_key_id",
         "type": "bigint",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "invocation_event_uid",
+        "type": "char(64)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "event_uid",
+        "type": "char(64)",
         "nullable": "YES",
         "extra": ""
       }
@@ -1415,6 +1451,567 @@
     ],
     "primary_key": [
       "id"
+    ]
+  },
+  {
+    "name": "history_archive_records",
+    "columns": [
+      {
+        "name": "kind",
+        "type": "varchar(32)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "original_id",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "owner_id",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "instance_id",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "team_id",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "trace_id",
+        "type": "varchar(100)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "session_id",
+        "type": "varchar(100)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "datetime(6)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "month_table",
+        "type": "varchar(64)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "object_ref",
+        "type": "json",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "payload_sha256",
+        "type": "char(64)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "payload_bytes",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "metadata_json",
+        "type": "json",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "summary_verified_at",
+        "type": "datetime(6)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "summary_sha256",
+        "type": "char(64)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "archived_at",
+        "type": "datetime(6)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "readback_verified_at",
+        "type": "datetime(6)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "restore_verified_at",
+        "type": "datetime(6)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "restore_sha256",
+        "type": "char(64)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "restore_receipt",
+        "type": "varchar(255)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "source_deleted_at",
+        "type": "datetime(6)",
+        "nullable": "YES",
+        "extra": ""
+      }
+    ],
+    "primary_key": [
+      "kind",
+      "original_id"
+    ]
+  },
+  {
+    "name": "history_identity_receipts",
+    "columns": [
+      {
+        "name": "kind",
+        "type": "varchar(32)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "team_id",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "key_type",
+        "type": "varchar(32)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "key_hash",
+        "type": "binary(32)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "original_id",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "payload_sha256",
+        "type": "char(64)",
+        "nullable": "NO",
+        "extra": ""
+      }
+    ],
+    "primary_key": [
+      "kind",
+      "team_id",
+      "key_type",
+      "key_hash"
+    ]
+  },
+  {
+    "name": "history_log_locations",
+    "columns": [
+      {
+        "name": "kind",
+        "type": "varchar(32)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "original_id",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "month_table",
+        "type": "varchar(64)",
+        "nullable": "NO",
+        "extra": ""
+      }
+    ],
+    "primary_key": [
+      "kind",
+      "original_id"
+    ]
+  },
+  {
+    "name": "history_maintenance_cursors",
+    "columns": [
+      {
+        "name": "kind",
+        "type": "varchar(32)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "after_id",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "updated_at",
+        "type": "datetime(6)",
+        "nullable": "NO",
+        "extra": ""
+      }
+    ],
+    "primary_key": [
+      "kind"
+    ]
+  },
+  {
+    "name": "history_month_catalog",
+    "columns": [
+      {
+        "name": "table_name",
+        "type": "varchar(64)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "kind",
+        "type": "varchar(32)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "month_utc",
+        "type": "char(6)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "schema_version",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "schema_sha256",
+        "type": "char(64)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "state",
+        "type": "varchar(20)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "datetime(6)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "verified_at",
+        "type": "datetime(6)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "verify_after_id",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "revision",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "read_route",
+        "type": "varchar(16)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "route_after_id",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "route_verified",
+        "type": "tinyint(1)",
+        "nullable": "NO",
+        "extra": ""
+      }
+    ],
+    "primary_key": [
+      "table_name"
+    ]
+  },
+  {
+    "name": "history_month_template",
+    "columns": [
+      {
+        "name": "original_id",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "owner_id",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "datetime(6)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "trace_id",
+        "type": "varchar(100)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "instance_id",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "object_ref",
+        "type": "json",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "payload_sha256",
+        "type": "char(64)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "payload_bytes",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "session_id",
+        "type": "varchar(100)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "team_id",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "metadata_json",
+        "type": "json",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "payload_json",
+        "type": "longtext",
+        "nullable": "YES",
+        "extra": ""
+      }
+    ],
+    "primary_key": [
+      "original_id"
+    ]
+  },
+  {
+    "name": "history_outbox_cancellations",
+    "columns": [
+      {
+        "name": "team_id",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "destination",
+        "type": "varchar(255)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "message_id",
+        "type": "varchar(255)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "source_event_id",
+        "type": "varchar(255)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "payload_sha256",
+        "type": "char(64)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "cancelled_at",
+        "type": "datetime(6)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "reason",
+        "type": "varchar(255)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "closure_sha256",
+        "type": "char(64)",
+        "nullable": "NO",
+        "extra": ""
+      }
+    ],
+    "primary_key": [
+      "team_id",
+      "destination",
+      "message_id"
+    ]
+  },
+  {
+    "name": "history_outbox_receipts",
+    "columns": [
+      {
+        "name": "team_id",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "destination",
+        "type": "varchar(255)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "message_id",
+        "type": "varchar(255)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "source_event_id",
+        "type": "varchar(255)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "payload_sha256",
+        "type": "char(64)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "delivered_at",
+        "type": "datetime(6)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "closure_sha256",
+        "type": "char(64)",
+        "nullable": "NO",
+        "extra": ""
+      }
+    ],
+    "primary_key": [
+      "team_id",
+      "destination",
+      "message_id"
+    ]
+  },
+  {
+    "name": "history_replay_closures",
+    "columns": [
+      {
+        "name": "team_id",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "closed_before",
+        "type": "datetime(6)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "replay_closed",
+        "type": "tinyint(1)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "recovery_closed",
+        "type": "tinyint(1)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "idempotency_durable",
+        "type": "tinyint(1)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "proof_sha256",
+        "type": "char(64)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "verified_at",
+        "type": "datetime(6)",
+        "nullable": "NO",
+        "extra": ""
+      }
+    ],
+    "primary_key": [
+      "team_id"
     ]
   },
   {
@@ -3538,6 +4135,24 @@
         "type": "bigint",
         "nullable": "YES",
         "extra": ""
+      },
+      {
+        "name": "event_uid",
+        "type": "char(64)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "request_body_ref",
+        "type": "json",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "response_body_ref",
+        "type": "json",
+        "nullable": "YES",
+        "extra": ""
       }
     ],
     "primary_key": [
@@ -4540,6 +5155,985 @@
     ],
     "primary_key": [
       "id"
+    ]
+  },
+  {
+    "name": "observability_admissions",
+    "columns": [
+      {
+        "name": "owner",
+        "type": "varchar(128)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "request_id",
+        "type": "varchar(128)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "state",
+        "type": "varchar(32)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "admitted_at",
+        "type": "datetime(6)",
+        "nullable": "NO",
+        "extra": "DEFAULT_GENERATED"
+      },
+      {
+        "name": "completed_at",
+        "type": "datetime(6)",
+        "nullable": "YES",
+        "extra": ""
+      }
+    ],
+    "primary_key": [
+      "owner",
+      "request_id"
+    ]
+  },
+  {
+    "name": "observability_archive_dependencies",
+    "columns": [
+      {
+        "name": "parent_key",
+        "type": "varchar(255)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "child_key",
+        "type": "varchar(255)",
+        "nullable": "NO",
+        "extra": ""
+      }
+    ],
+    "primary_key": [
+      "parent_key",
+      "child_key"
+    ]
+  },
+  {
+    "name": "observability_body_refs",
+    "columns": [
+      {
+        "name": "source_table",
+        "type": "varchar(64)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "event_uid",
+        "type": "char(64)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "field_name",
+        "type": "varchar(64)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "object_key",
+        "type": "varchar(255)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "body_ref",
+        "type": "json",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "datetime(6)",
+        "nullable": "NO",
+        "extra": "DEFAULT_GENERATED"
+      },
+      {
+        "name": "released_at",
+        "type": "datetime(6)",
+        "nullable": "YES",
+        "extra": ""
+      }
+    ],
+    "primary_key": [
+      "source_table",
+      "event_uid",
+      "field_name"
+    ]
+  },
+  {
+    "name": "observability_event_receipts",
+    "columns": [
+      {
+        "name": "event_uid",
+        "type": "char(64)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "source_table",
+        "type": "varchar(64)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "original_id",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "payload_sha256",
+        "type": "char(64)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "committed_at",
+        "type": "datetime(6)",
+        "nullable": "NO",
+        "extra": "DEFAULT_GENERATED"
+      }
+    ],
+    "primary_key": [
+      "event_uid"
+    ]
+  },
+  {
+    "name": "observability_objects",
+    "columns": [
+      {
+        "name": "object_key",
+        "type": "varchar(255)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "owner",
+        "type": "varchar(128)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "sha256",
+        "type": "char(64)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "byte_length",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "encryption_version",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "datetime(6)",
+        "nullable": "NO",
+        "extra": "DEFAULT_GENERATED"
+      },
+      {
+        "name": "retain_until",
+        "type": "datetime(6)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "backup_verified_at",
+        "type": "datetime(6)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "restore_verified_at",
+        "type": "datetime(6)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "recovery_closed_at",
+        "type": "datetime(6)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "deleted_at",
+        "type": "datetime(6)",
+        "nullable": "YES",
+        "extra": ""
+      }
+    ],
+    "primary_key": [
+      "object_key"
+    ]
+  },
+  {
+    "name": "observation_archive_receipts",
+    "columns": [
+      {
+        "name": "kind",
+        "type": "varchar(32)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "original_id",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "payload_sha256",
+        "type": "char(64)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "metadata_json",
+        "type": "json",
+        "nullable": "NO",
+        "extra": ""
+      }
+    ],
+    "primary_key": [
+      "kind",
+      "original_id"
+    ]
+  },
+  {
+    "name": "observation_audit_event_summaries",
+    "columns": [
+      {
+        "name": "id",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "trace_id",
+        "type": "varchar(100)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "request_id",
+        "type": "varchar(100)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "session_id",
+        "type": "varchar(100)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "user_id",
+        "type": "bigint",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "instance_id",
+        "type": "bigint",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "event_type",
+        "type": "varchar(100)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "message",
+        "type": "text",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "datetime(6)",
+        "nullable": "NO",
+        "extra": ""
+      }
+    ],
+    "primary_key": [
+      "id"
+    ]
+  },
+  {
+    "name": "observation_audit_pending",
+    "columns": [
+      {
+        "name": "id",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      }
+    ],
+    "primary_key": [
+      "id"
+    ]
+  },
+  {
+    "name": "observation_audit_trace_reports",
+    "columns": [
+      {
+        "name": "sequence_id",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": "auto_increment"
+      },
+      {
+        "name": "trace_id",
+        "type": "varchar(100)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "id",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "request_id",
+        "type": "varchar(100)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "session_id",
+        "type": "varchar(100)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "user_id",
+        "type": "bigint",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "instance_id",
+        "type": "bigint",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "requested_model",
+        "type": "varchar(255)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "actual_provider_model",
+        "type": "varchar(255)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "provider_type",
+        "type": "varchar(100)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "status",
+        "type": "varchar(32)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "prompt_tokens",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "completion_tokens",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "total_tokens",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "latency_ms",
+        "type": "bigint",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "ttft_ms",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "generation_ms",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "tokens_per_second",
+        "type": "double",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "attempt_no",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "error_message",
+        "type": "text",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "datetime(6)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "completed_at",
+        "type": "datetime(6)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "sort_at",
+        "type": "datetime(6)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "event_type",
+        "type": "varchar(100)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "message",
+        "type": "text",
+        "nullable": "NO",
+        "extra": ""
+      }
+    ],
+    "primary_key": [
+      "trace_id"
+    ]
+  },
+  {
+    "name": "observation_chat_pending",
+    "columns": [
+      {
+        "name": "id",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      }
+    ],
+    "primary_key": [
+      "id"
+    ]
+  },
+  {
+    "name": "observation_cost_facts",
+    "columns": [
+      {
+        "name": "id",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "invocation_id",
+        "type": "bigint",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "instance_id",
+        "type": "bigint",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "session_id",
+        "type": "varchar(100)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "trace_id",
+        "type": "varchar(100)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "currency",
+        "type": "varchar(16)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "estimated_cost",
+        "type": "decimal(24,8)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "eligible_at",
+        "type": "datetime(6)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "resolved",
+        "type": "tinyint(1)",
+        "nullable": "NO",
+        "extra": ""
+      }
+    ],
+    "primary_key": [
+      "id"
+    ]
+  },
+  {
+    "name": "observation_cost_overview_daily",
+    "columns": [
+      {
+        "name": "scope",
+        "type": "varchar(16)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "dimension_id",
+        "type": "varchar(255)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "day_utc",
+        "type": "date",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "currency",
+        "type": "varchar(16)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "record_count",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "prompt_tokens",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "completion_tokens",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "total_tokens",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "estimated_cost",
+        "type": "decimal(24,8)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "internal_cost",
+        "type": "decimal(24,8)",
+        "nullable": "NO",
+        "extra": ""
+      }
+    ],
+    "primary_key": [
+      "scope",
+      "dimension_id",
+      "day_utc",
+      "currency"
+    ]
+  },
+  {
+    "name": "observation_cost_pending",
+    "columns": [
+      {
+        "name": "id",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      }
+    ],
+    "primary_key": [
+      "id"
+    ]
+  },
+  {
+    "name": "observation_daily_summaries",
+    "columns": [
+      {
+        "name": "scope",
+        "type": "varchar(16)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "instance_id",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "dimension_id",
+        "type": "varchar(100)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "day_utc",
+        "type": "date",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "prompt_tokens",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "completion_tokens",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "total_tokens",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "invocation_count",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "first_seen_at",
+        "type": "datetime(6)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "last_seen_at",
+        "type": "datetime(6)",
+        "nullable": "NO",
+        "extra": ""
+      }
+    ],
+    "primary_key": [
+      "scope",
+      "instance_id",
+      "dimension_id",
+      "day_utc"
+    ]
+  },
+  {
+    "name": "observation_invocation_pending",
+    "columns": [
+      {
+        "name": "id",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      }
+    ],
+    "primary_key": [
+      "id"
+    ]
+  },
+  {
+    "name": "observation_invocation_summaries",
+    "columns": [
+      {
+        "name": "id",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "event_uid",
+        "type": "varchar(64)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "instance_id",
+        "type": "bigint",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "user_id",
+        "type": "bigint",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "session_id",
+        "type": "varchar(100)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "trace_id",
+        "type": "varchar(100)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "request_id",
+        "type": "varchar(100)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "requested_model",
+        "type": "varchar(255)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "actual_provider_model",
+        "type": "varchar(255)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "provider_type",
+        "type": "varchar(100)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "status",
+        "type": "varchar(32)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "prompt_tokens",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "completion_tokens",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "total_tokens",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "latency_ms",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "ttft_ms",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "generation_ms",
+        "type": "int",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "tokens_per_second",
+        "type": "double",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "is_streaming",
+        "type": "tinyint(1)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "attempt_no",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "datetime(6)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "completed_at",
+        "type": "datetime(6)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "error_message",
+        "type": "text",
+        "nullable": "YES",
+        "extra": ""
+      }
+    ],
+    "primary_key": [
+      "id"
+    ]
+  },
+  {
+    "name": "observation_legacy_trace_costs",
+    "columns": [
+      {
+        "name": "instance_id",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "session_id",
+        "type": "varchar(100)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "trace_id",
+        "type": "varchar(100)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "currency",
+        "type": "varchar(16)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "estimated_cost",
+        "type": "decimal(24,8)",
+        "nullable": "NO",
+        "extra": ""
+      }
+    ],
+    "primary_key": [
+      "instance_id",
+      "session_id",
+      "trace_id",
+      "currency"
+    ]
+  },
+  {
+    "name": "observation_risk_pending",
+    "columns": [
+      {
+        "name": "id",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      }
+    ],
+    "primary_key": [
+      "id"
+    ]
+  },
+  {
+    "name": "observation_session_cost_daily",
+    "columns": [
+      {
+        "name": "instance_id",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "session_id",
+        "type": "varchar(100)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "day_utc",
+        "type": "date",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "currency",
+        "type": "varchar(16)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "estimated_cost",
+        "type": "decimal(24,8)",
+        "nullable": "NO",
+        "extra": ""
+      }
+    ],
+    "primary_key": [
+      "instance_id",
+      "session_id",
+      "day_utc",
+      "currency"
     ]
   },
   {
@@ -6784,6 +8378,51 @@
     ]
   },
   {
+    "name": "team_completion_receipt_closures",
+    "columns": [
+      {
+        "name": "team_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "event_id",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "task_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "source_window_sha256",
+        "type": "char(64)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "closed_at",
+        "type": "datetime(6)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "redis_reclaimed_at",
+        "type": "datetime(6)",
+        "nullable": "YES",
+        "extra": ""
+      }
+    ],
+    "primary_key": [
+      "team_id",
+      "event_id"
+    ]
+  },
+  {
     "name": "team_event_outbox",
     "columns": [
       {
@@ -7099,6 +8738,438 @@
     ],
     "primary_key": [
       "id"
+    ]
+  },
+  {
+    "name": "team_outbox_receipt_closures",
+    "columns": [
+      {
+        "name": "outbox_id",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "team_id",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "task_id",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "source_window_sha256",
+        "type": "char(64)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "closed_before",
+        "type": "datetime(6)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "closed_at",
+        "type": "datetime(6)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "redis_reclaimed_at",
+        "type": "datetime(6)",
+        "nullable": "YES",
+        "extra": ""
+      }
+    ],
+    "primary_key": [
+      "outbox_id"
+    ]
+  },
+  {
+    "name": "team_projection_audits",
+    "columns": [
+      {
+        "name": "audit_sha256",
+        "type": "char(64)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "team_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "state_sha256",
+        "type": "char(64)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "reviewer",
+        "type": "varchar(255)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "manifest_json",
+        "type": "longtext",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "datetime(6)",
+        "nullable": "NO",
+        "extra": "DEFAULT_GENERATED"
+      }
+    ],
+    "primary_key": [
+      "audit_sha256"
+    ]
+  },
+  {
+    "name": "team_projection_command_sources",
+    "columns": [
+      {
+        "name": "team_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "message_id",
+        "type": "varchar(255)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "source_stream_id",
+        "type": "varchar(128)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "task_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      }
+    ],
+    "primary_key": [
+      "team_id",
+      "message_id"
+    ]
+  },
+  {
+    "name": "team_projection_receipts",
+    "columns": [
+      {
+        "name": "team_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "identity_hash",
+        "type": "binary(32)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "stream_id",
+        "type": "varchar(128)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "datetime(6)",
+        "nullable": "NO",
+        "extra": "DEFAULT_GENERATED"
+      }
+    ],
+    "primary_key": [
+      "team_id",
+      "identity_hash"
+    ]
+  },
+  {
+    "name": "team_projection_watermarks",
+    "columns": [
+      {
+        "name": "team_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "committed_cursor",
+        "type": "varchar(128)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "baseline_verified",
+        "type": "tinyint(1)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "updated_at",
+        "type": "datetime(6)",
+        "nullable": "NO",
+        "extra": "DEFAULT_GENERATED"
+      }
+    ],
+    "primary_key": [
+      "team_id"
+    ]
+  },
+  {
+    "name": "team_redis_archive_receipts",
+    "columns": [
+      {
+        "name": "team_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "key_sha256",
+        "type": "binary(32)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "key_name",
+        "type": "varchar(512)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "chunk_no",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "value_sha256",
+        "type": "binary(32)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "object_ref",
+        "type": "json",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "archived_at",
+        "type": "datetime(6)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "deleted_at",
+        "type": "datetime(6)",
+        "nullable": "YES",
+        "extra": ""
+      }
+    ],
+    "primary_key": [
+      "team_id",
+      "key_sha256",
+      "chunk_no"
+    ]
+  },
+  {
+    "name": "team_redis_cleanup_jobs",
+    "columns": [
+      {
+        "name": "team_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "owner_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "state",
+        "type": "varchar(32)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "scan_cursor",
+        "type": "varchar(32)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "producer_ids",
+        "type": "json",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "archived_keys",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "deleted_keys",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "lease_owner",
+        "type": "varchar(64)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "lease_until",
+        "type": "datetime(6)",
+        "nullable": "YES",
+        "extra": ""
+      },
+      {
+        "name": "last_error",
+        "type": "varchar(1000)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "datetime(6)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "updated_at",
+        "type": "datetime(6)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "scan_completed",
+        "type": "tinyint(1)",
+        "nullable": "NO",
+        "extra": ""
+      }
+    ],
+    "primary_key": [
+      "team_id"
+    ]
+  },
+  {
+    "name": "team_redis_cleanup_keys",
+    "columns": [
+      {
+        "name": "team_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "key_sha256",
+        "type": "binary(32)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "key_name",
+        "type": "varchar(512)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "kind",
+        "type": "varchar(16)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "next_cursor",
+        "type": "varchar(64)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "chunk_no",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "archive_complete",
+        "type": "tinyint(1)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "deleted_at",
+        "type": "datetime(6)",
+        "nullable": "YES",
+        "extra": ""
+      }
+    ],
+    "primary_key": [
+      "team_id",
+      "key_sha256"
+    ]
+  },
+  {
+    "name": "team_redis_dlq_receipts",
+    "columns": [
+      {
+        "name": "team_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "stream_id",
+        "type": "varchar(128)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "value_sha256",
+        "type": "binary(32)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "object_ref",
+        "type": "json",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "archived_at",
+        "type": "datetime(6)",
+        "nullable": "NO",
+        "extra": ""
+      }
+    ],
+    "primary_key": [
+      "team_id",
+      "stream_id"
     ]
   },
   {

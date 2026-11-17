@@ -2,7 +2,9 @@ package services
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"time"
 )
 
@@ -46,6 +48,27 @@ func (s *redisRuntimeEventService) Publish(ctx context.Context, eventType string
 	eventJSON, err := json.Marshal(event)
 	if err != nil {
 		return err
+	}
+	if len(payloadJSON)+len(eventJSON)+len(eventType)+128 > 16<<10 {
+		// UI events are refresh notifications; the authoritative status remains
+		// queryable in SQL. Never retain arbitrary provider bodies in this stream.
+		var original map[string]json.RawMessage
+		_ = json.Unmarshal(payloadJSON, &original)
+		compact := map[string]any{"refresh_required": true, "payload_sha256": fmt.Sprintf("%x", sha256.Sum256(payloadJSON))}
+		for _, name := range []string{"instance_id", "user_id", "generation", "pod_uid", "team_id"} {
+			if value := original[name]; len(value) > 0 && len(value) <= 256 {
+				compact[name] = value
+			}
+		}
+		payloadJSON, err = json.Marshal(compact)
+		if err != nil {
+			return err
+		}
+		event.Payload = payloadJSON
+		eventJSON, err = json.Marshal(event)
+		if err != nil {
+			return err
+		}
 	}
 	_, err = s.redis.XAdd(ctx, runtimeEventStreamKey, map[string]string{
 		"type":       event.Type,

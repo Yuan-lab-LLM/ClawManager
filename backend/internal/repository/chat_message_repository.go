@@ -1,7 +1,9 @@
 package repository
 
 import (
+	"context"
 	"fmt"
+	"sort"
 	"time"
 
 	"clawreef/internal/models"
@@ -29,18 +31,26 @@ func (r *chatMessageRepository) Create(message *models.ChatMessageRecord) error 
 	if message.CreatedAt.IsZero() {
 		message.CreatedAt = time.Now()
 	}
-	res, err := r.sess.Collection("chat_messages").Insert(message)
-	if err != nil {
-		return fmt.Errorf("failed to create chat message: %w", err)
+	if handled, err := persistObservation(context.Background(), r.sess, "chat_messages", message); handled {
+		return err
 	}
-	message.ID = int(res.ID().(int64))
-	return nil
+	return r.sess.Tx(func(tx db.Session) error {
+		res, err := tx.Collection("chat_messages").Insert(message)
+		if err != nil {
+			return fmt.Errorf("failed to create chat message: %w", err)
+		}
+		message.ID = int(res.ID().(int64))
+		return maintainObservationSummary(context.Background(), tx, "chat_messages", message)
+	})
 }
 
 func (r *chatMessageRepository) ListByTraceID(traceID string) ([]models.ChatMessageRecord, error) {
-	var items []models.ChatMessageRecord
-	if err := r.sess.Collection("chat_messages").Find(db.Cond{"trace_id": traceID}).OrderBy("sequence_no", "id").All(&items); err != nil {
-		return nil, fmt.Errorf("failed to list chat messages by trace: %w", err)
-	}
-	return items, nil
+	items, err := routedLogDetails[models.ChatMessageRecord](r.sess, "chat_messages", traceID, "", 0, 200, false)
+	sort.SliceStable(items, func(i, j int) bool {
+		if items[i].SequenceNo != items[j].SequenceNo {
+			return items[i].SequenceNo < items[j].SequenceNo
+		}
+		return items[i].ID < items[j].ID
+	})
+	return items, err
 }

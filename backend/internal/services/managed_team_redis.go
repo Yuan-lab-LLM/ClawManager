@@ -208,7 +208,7 @@ func (m *ManagedTeamRedis) Open(ctx context.Context, identity runtimeauth.Identi
 		user = fmt.Sprintf("%s%d_%x_%s", managedRedisUserPrefix, time.Now().Unix(), binding[:12], hex.EncodeToString(nonce[:8]))
 		password := hex.EncodeToString(nonce[8:])
 		args := []string{"ACL", "SETUSER", user, "reset", "on", ">" + password, fmt.Sprintf("~claw:team:%d:*", team.ID), "-@all"}
-		for _, command := range []string{"ping", "get", "set", "del", "expire", "incr", "hset", "hget", "hgetall", "hdel", "hlen", "sadd", "smembers", "srem", "xadd", "xgroup|create", "xreadgroup", "xread", "xack", "eval", "select", "client|setname"} {
+		for _, command := range []string{"ping", "get", "set", "del", "expire", "incr", "hset", "hget", "hgetall", "hdel", "hlen", "hexists", "hincrby", "scard", "sismember", "exists", "memory|usage", "sadd", "smembers", "srem", "xadd", "xlen", "xgroup|create", "xreadgroup", "xread", "xack", "eval", "select", "client|setname"} {
 			args = append(args, "+"+command)
 		}
 		if _, err = managedRedisDo(ctx, admin, args...); err != nil {
@@ -285,6 +285,11 @@ func (s *ManagedTeamRedisSession) Relay(ctx context.Context, downstream net.Conn
 				return
 			}
 			if err = guardManagedRedis(args, s.bus.db); err != nil {
+				results <- err
+				return
+			}
+			args, err = s.capacityCommand(ctx, args)
+			if err != nil {
 				results <- err
 				return
 			}

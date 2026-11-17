@@ -109,6 +109,15 @@ func (s Store) PrepareCapturePlan(ctx context.Context, l Leadership, t Task, r C
 	if r.Ordinary.Phase != "capture" || r.Secrets.Phase != "secret_capture" || r.Ordinary.Gate != r.Secrets.Gate || r.Ordinary.Origin != s.InstallationID || r.Secrets.Origin != s.InstallationID || r.Ordinary.BackupID != t.ID || r.Secrets.BackupID != t.ID || r.Ordinary.Stage.UID == r.Secrets.Stage.UID || !validHash(r.WriterRegistryHash) || !r.Ordinary.DeadlineAt.Equal(t.DeadlineAt) || !r.Secrets.DeadlineAt.Equal(t.DeadlineAt) {
 		return zero, errors.New("validation_failed")
 	}
+	migrated, coverageErr := hasObservabilitySchema(ctx, s.DB)
+	if coverageErr != nil {
+		return zero, coverageErr
+	}
+	if migrated {
+		if err := validateHistoryPlanCoverage(r.Ordinary, r.Secrets); err != nil {
+			return zero, err
+		}
+	}
 	for _, job := range []CaptureJobRequest{r.Ordinary, r.Secrets} {
 		raw, _ := json.Marshal(job)
 		if _, _, err := captureJob(Attempt{ID: "sat_00000000000000000000000000000000", TaskID: t.ID, Phase: job.Phase, Request: raw}); err != nil {

@@ -1,16 +1,16 @@
 import type { InstanceSessionUsageItem } from "../types/instance";
 
-export type SessionUsageTimeRange = "all" | "24h" | "7d" | "30d";
+export type SessionUsageTimeRange = "all" | "24h" | "7d" | "30d" | "90d";
 
-export function resolveSessionUsageSince(range: SessionUsageTimeRange): string | undefined {
+export function resolveSessionUsageSince(range: SessionUsageTimeRange, now = Date.now()): string | undefined {
   if (range === "all") {
     return undefined;
   }
-  const now = Date.now();
   const offsets: Record<Exclude<SessionUsageTimeRange, "all">, number> = {
     "24h": 24 * 60 * 60 * 1000,
     "7d": 7 * 24 * 60 * 60 * 1000,
     "30d": 30 * 24 * 60 * 60 * 1000,
+    "90d": 90 * 24 * 60 * 60 * 1000,
   };
   return new Date(now - offsets[range]).toISOString();
 }

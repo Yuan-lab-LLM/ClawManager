@@ -503,6 +503,7 @@ export interface InstanceSessionUsageItem {
 }
 
 export interface InstanceSessionUsageResult {
+  next_cursor?: string;
   summary: InstanceSessionUsageSummary;
   compliance: InstanceSessionUsageCompliance;
   items: InstanceSessionUsageItem[];

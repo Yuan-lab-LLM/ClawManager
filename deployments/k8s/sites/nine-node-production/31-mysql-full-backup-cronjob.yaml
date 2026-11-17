@@ -42,6 +42,54 @@ data:
     FLUSH PRIVILEGES;
     SQL
 
+  attempt-ownership.sh: |
+    #!/usr/bin/env bash
+    # All cooperative writers hold the stable root lock; attempt locks survive
+    # pod exits without relying on PIDs or heartbeat clocks for liveness.
+    acquire_backup_lock() {
+      command -v flock >/dev/null || { echo "ERROR: flock is required" >&2; return 1; }
+      [ -d "${FULL_ROOT}" ] && [ ! -L "${FULL_ROOT}" ] || return 1
+      [ "$(realpath -e "${FULL_ROOT}")" = "${FULL_ROOT}" ] || return 1
+      [ ! -L "${FULL_ROOT}/cleanup.log" ] || return 1
+      [ ! -L "${FULL_ROOT}/.maintenance.lock" ] || return 1
+      if [ "${_backup_lock_held:-0}" != 1 ]; then
+        exec 9>"${FULL_ROOT}/.maintenance.lock"
+        flock -n -x 9 || { echo "ERROR: another backup or cleanup holds the root lock" >&2; return 1; }
+        _backup_lock_held=1
+      fi
+    }
+    reclaim_partial_attempts() {
+      acquire_backup_lock || return 1
+      local candidate token marker stamp now lock reclaimed=0
+      now="$(date -u +%s)"
+      while IFS= read -r -d '' candidate; do
+        [ "${reclaimed}" -lt 32 ] || break
+        [ ! -L "${candidate}" ] && [ -d "${candidate}" ] || continue
+        token="${candidate##*/}"; token="${token%.partial}"
+        [[ "${token}" =~ ^[A-Za-z0-9_-]{1,100}$ ]] || continue
+        [ -f "${candidate}/owner" ] && [ ! -L "${candidate}/owner" ] || continue
+        [ -f "${candidate}/heartbeat" ] && [ ! -L "${candidate}/heartbeat" ] || continue
+        marker="$(cat "${candidate}/owner")"
+        [ "${marker}" = "$(printf 'cm-mysql-full-v1\n%s' "${token}")" ] || continue
+        stamp="$(stat -c %Y "${candidate}/heartbeat")"
+        [ "$((now - stamp))" -ge 86400 ] || continue
+        lock="${FULL_ROOT}/.attempt-${token}.lock"
+        [ ! -L "${lock}" ] || continue
+        (
+          exec 8>"${lock}"
+          flock -n -x 8 || exit 0
+          # Recheck control files after owning both locks. Never follow links.
+          [ -d "${candidate}" ] && [ ! -L "${candidate}" ] || exit 0
+          [ ! -L "${candidate}/owner" ] && [ ! -L "${candidate}/heartbeat" ] || exit 0
+          [ "$(cat "${candidate}/owner")" = "${marker}" ] || exit 0
+          [ "$(( $(date -u +%s) - $(stat -c %Y "${candidate}/heartbeat") ))" -ge 86400 ] || exit 0
+          find -P "${candidate}" -xdev -depth -delete
+          printf '%s reclaimed %s\n' "$(date -u +%FT%TZ)" "${token}" >>"${FULL_ROOT}/cleanup.log"
+        )
+        reclaimed="$((reclaimed + 1))"
+      done < <(find -P "${FULL_ROOT}" -mindepth 1 -maxdepth 1 -type d -name '*.partial' -print0)
+    }
+
   full-backup.sh: |
     #!/usr/bin/env bash
     set -Eeuo pipefail
@@ -53,6 +101,9 @@ data:
 
     umask 077
     mkdir -p "${FULL_ROOT}"
+    source /scripts/attempt-ownership.sh
+    acquire_backup_lock
+    reclaim_partial_attempts
 
     used_kib="$(du -sk "${BACKUP_ROOT}" | awk '{print $1}')"
     used_percent="$((used_kib * 100 / SOFT_BUDGET_KIB))"
@@ -76,9 +127,27 @@ data:
     fi
 
     timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
-    run_dir="${FULL_ROOT}/${timestamp}.partial"
+    attempt="${timestamp}-$(cat /proc/sys/kernel/random/uuid)"
+    run_dir="${FULL_ROOT}/${attempt}.partial"
     final_dir="${FULL_ROOT}/${timestamp}"
+    exec 8>"${FULL_ROOT}/.attempt-${attempt}.lock"
+    flock -n -x 8
     mkdir "${run_dir}"
+    printf 'cm-mysql-full-v1\n%s\n' "${attempt}" >"${run_dir}/owner"
+    touch "${run_dir}/heartbeat"
+    heartbeat_loop() {
+      local sleeper=''
+      trap '[ -z "${sleeper}" ] || { kill "${sleeper}" 2>/dev/null || true; wait "${sleeper}" 2>/dev/null || true; }; exit 0' TERM INT
+      while :; do
+        touch "${run_dir}/heartbeat" || return
+        sleep 30 & sleeper=$!
+        wait "${sleeper}" || return
+      done
+    }
+    heartbeat_loop &
+    heartbeat_pid=$!
+    trap 'kill "${heartbeat_pid}" 2>/dev/null || true; wait "${heartbeat_pid}" 2>/dev/null || true' EXIT
+
 
     export MYSQL_PWD="${MYSQL_BACKUP_PASSWORD}"
     gtid_executed="$(mysql --host=mysql --user=clawmanager_backup --ssl-mode=REQUIRED \
@@ -116,14 +185,23 @@ data:
     MYSQLDUMP_VERSION=$(mysqldump --version | tr ' ' '_')
     EOF
     touch "${run_dir}/complete"
-    mv "${run_dir}" "${final_dir}"
+    kill "${heartbeat_pid}" 2>/dev/null || true
+    wait "${heartbeat_pid}" 2>/dev/null || true
+    mv -T "${run_dir}" "${final_dir}"
 
     mapfile -t successful_backups < <(
-      find "${FULL_ROOT}" -mindepth 1 -maxdepth 1 -type d ! -name '*.partial' -printf '%f\n' | sort -r
+      while IFS= read -r old_name; do
+        [[ "${old_name}" =~ ^[0-9]{8}T[0-9]{6}Z$ ]] || continue
+        old_path="${FULL_ROOT}/${old_name}"
+        [ ! -L "${old_path}" ] && [ -f "${old_path}/complete" ] && [ ! -L "${old_path}/complete" ] && [ -f "${old_path}/manifest.env" ] && [ ! -L "${old_path}/manifest.env" ] || continue
+        printf '%s\n' "${old_name}"
+      done < <(find -P "${FULL_ROOT}" -mindepth 1 -maxdepth 1 -type d ! -name '*.partial' -printf '%f\n' | sort -r)
     )
     if [ "${#successful_backups[@]}" -gt "${RETAIN_SUCCESSFUL}" ]; then
       for old_name in "${successful_backups[@]:${RETAIN_SUCCESSFUL}}"; do
         old_path="${FULL_ROOT}/${old_name}"
+        [[ "${old_name}" =~ ^[0-9]{8}T[0-9]{6}Z$ ]] || continue
+        [ ! -L "${old_path}" ] && [ -f "${old_path}/complete" ] && [ -f "${old_path}/manifest.env" ] || continue
         case "${old_path}" in
           "${FULL_ROOT}"/*) find "${old_path}" -depth -delete ;;
           *) echo "ERROR: refusing unsafe backup cleanup target ${old_path}" >&2; exit 1 ;;
@@ -195,12 +273,38 @@ spec:
             app: mysql-production-full-backup
         spec:
           restartPolicy: Never
+          initContainers:
+            - name: backup-lock-helper
+              image: 10.130.15.40:5000/mysql:8.4.8
+              imagePullPolicy: IfNotPresent
+              command:
+                - bash
+                - -euc
+                - |
+                  gzip -dc /lock-helper/flock.gz > /opt/cm-backup-tools/flock
+                  sha256sum -c /lock-helper/SHA256SUMS
+                  chmod 0555 /opt/cm-backup-tools/flock
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 16Mi
+                limits:
+                  cpu: 100m
+                  memory: 32Mi
+              volumeMounts:
+                - name: backup-lock-helper
+                  mountPath: /lock-helper
+                  readOnly: true
+                - name: backup-tools
+                  mountPath: /opt/cm-backup-tools
           containers:
             - name: backup
               image: 10.130.15.40:5000/mysql:8.4.8
               imagePullPolicy: IfNotPresent
               command: ["bash", "/scripts/full-backup.sh"]
               env:
+                - name: PATH
+                  value: /opt/cm-backup-tools:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
                 - name: MYSQL_BACKUP_PASSWORD
                   valueFrom:
                     secretKeyRef:
@@ -214,12 +318,22 @@ spec:
                   cpu: "4"
                   memory: 8Gi
               volumeMounts:
+                - name: backup-tools
+                  mountPath: /opt/cm-backup-tools
+                  readOnly: true
                 - name: scripts
                   mountPath: /scripts
                   readOnly: true
                 - name: backup
                   mountPath: /backup
           volumes:
+            - name: backup-lock-helper
+              configMap:
+                name: mysql-backup-lock-helper-v1
+                defaultMode: 0440
+            - name: backup-tools
+              emptyDir:
+                sizeLimit: 8Mi
             - name: scripts
               configMap:
                 name: mysql-production-backup-scripts

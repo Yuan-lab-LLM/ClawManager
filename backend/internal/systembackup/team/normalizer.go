@@ -54,7 +54,7 @@ func Normalize(table string, row Row, now time.Time) (Change, error) {
 	switch table {
 	case "team_tasks":
 		active = []string{"pending", "dispatched", "running", "waiting", "stale"}
-		terminal = []string{"succeeded", "failed"}
+		terminal = []string{"succeeded", "failed", "cancelled"}
 		if field, ok := row["workflow_state"]; ok && (field.IsNull || !slices.Contains([]string{"open", "planning", "executing", "awaiting_phase_results", "awaiting_leader_decision", "synthesizing", "completion_pending", "completed", "failed"}, string(field.Data))) {
 			return r, errors.New("unregistered task workflow state")
 		}
@@ -67,7 +67,7 @@ func Normalize(table string, row Row, now time.Time) (Change, error) {
 		next = "cancelled"
 	case "team_event_outbox":
 		active = []string{"pending"}
-		terminal = []string{"delivered", "failed"}
+		terminal = []string{"delivered", "failed", "cancelled"}
 		r.Quarantined = true
 	case "northbound_operations":
 		active = []string{"queued", "processing", "batch_pending"}

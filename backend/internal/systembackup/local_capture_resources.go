@@ -54,6 +54,15 @@ func (r LocalCaptureResources) Prepare(ctx context.Context, s Store, l Leadershi
 		return zero, errors.New("deadline_exceeded")
 	}
 	ordinary, secrets := r.Config.Capture, r.Config.Secrets
+	migrated, err := hasObservabilitySchema(ctx, s.DB)
+	if err != nil {
+		return zero, err
+	}
+	if migrated {
+		if err = freezeHistorySecretPair(ctx, r.Volumes.Client, ordinary, &secrets); err != nil {
+			return zero, err
+		}
+	}
 	if c.MaxArtifactBytes < 2<<20 {
 		return zero, errors.New("capacity_exceeded")
 	}

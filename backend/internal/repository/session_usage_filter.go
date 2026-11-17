@@ -7,8 +7,9 @@ import (
 
 // SessionUsageFilter optionally bounds session usage aggregates by timestamp.
 type SessionUsageFilter struct {
-	Since *time.Time
-	Until *time.Time
+	Cursor string
+	Since  *time.Time
+	Until  *time.Time
 }
 
 func appendTimeFilter(query string, args []interface{}, filter SessionUsageFilter, column string) (string, []interface{}) {

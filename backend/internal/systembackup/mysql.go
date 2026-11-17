@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strings"
 
+	"clawreef/internal/historymaintenance"
 	"clawreef/internal/systembackup/team"
 )
 
@@ -31,15 +32,19 @@ type SQLTable struct {
 	PrimaryKey []string    `json:"primary_key"`
 }
 type SQLRecord struct {
-	Kind   string      `json:"kind"`
-	Table  *SQLTable   `json:"table,omitempty"`
-	Cells  []team.Cell `json:"cells,omitempty"`
-	Count  int64       `json:"count,omitempty"`
-	SHA256 string      `json:"sha256,omitempty"`
+	Kind           string                `json:"kind"`
+	Table          *SQLTable             `json:"table,omitempty"`
+	Cells          []team.Cell           `json:"cells,omitempty"`
+	Count          int64                 `json:"count,omitempty"`
+	SHA256         string                `json:"sha256,omitempty"`
+	MonthlyCatalog []MonthlyRegistration `json:"monthly_catalog,omitempty"`
+	AutoIncrement  map[string]uint64     `json:"auto_increment,omitempty"`
 }
 type SQLResult struct {
-	Tables map[string]int64  `json:"tables"`
-	Hashes map[string]string `json:"hashes"`
+	Tables         map[string]int64      `json:"tables"`
+	Hashes         map[string]string     `json:"hashes"`
+	MonthlyCatalog []MonthlyRegistration `json:"monthly_catalog,omitempty"`
+	AutoIncrement  map[string]uint64     `json:"auto_increment,omitempty"`
 }
 
 type SQLQueryer interface {
@@ -66,6 +71,10 @@ func discoverTables(ctx context.Context, q SQLQueryer, teamData bool) ([]string,
 			return nil, fmt.Errorf("unsupported schema object: %s", name)
 		}
 		if _, ok := Policy(name); !ok {
+			if _, _, monthly := historymaintenance.ParseMonthly(name); monthly {
+				out = append(out, name)
+				continue
+			}
 			if teamData && teamDataHistoricalOperationTable(name) {
 				continue
 			}
@@ -73,7 +82,19 @@ func discoverTables(ctx context.Context, q SQLQueryer, teamData bool) ([]string,
 		}
 		out = append(out, name)
 	}
-	return out, rows.Err()
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	for _, name := range out {
+		if _, _, monthly := historymaintenance.ParseMonthly(name); monthly {
+			if err = historymaintenance.ValidateMonthly(ctx, q, name); err != nil {
+				return nil, err
+			}
+		}
+	}
+	return out, nil
 }
 
 func ReadTableSchema(ctx context.Context, q SQLQueryer, name string) (SQLTable, error) {
@@ -137,15 +158,25 @@ func ExportTeamDataMySQL(ctx context.Context, db *sql.DB, w io.Writer, tables []
 }
 
 func teamDataOmitsRows(table string) bool {
+	if strings.HasPrefix(table, "observation_") || strings.HasPrefix(table, "observability_") {
+		return true
+	}
 	switch table {
-	case "model_invocations", "audit_events", "cost_records", "risk_hits", "chat_sessions", "chat_messages":
+	case "model_invocations", "audit_events", "cost_records", "risk_hits", "chat_sessions", "chat_messages", "history_log_locations":
 		return true
 	}
 	return false
 }
 
 func teamDataExcludedTables() []string {
-	return []string{"audit_events", "chat_messages", "chat_sessions", "cost_records", "model_invocations", "risk_hits"}
+	out := []string{"audit_events", "chat_messages", "chat_sessions", "cost_records", "model_invocations", "risk_hits", "history_log_locations"}
+	for _, p := range Registry() {
+		if (strings.HasPrefix(p.Name, "observation_") || strings.HasPrefix(p.Name, "observability_")) && p.BackupStrategy == "mysql_dump" {
+			out = append(out, p.Name)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 func exportMySQL(ctx context.Context, db *sql.DB, w io.Writer, tables []string, teamData bool) (SQLResult, error) {
@@ -155,13 +186,32 @@ func exportMySQL(ctx context.Context, db *sql.DB, w io.Writer, tables []string, 
 		return result, err
 	}
 	defer tx.Rollback()
+	if teamData {
+		filtered := make([]string, 0, len(tables))
+		for _, name := range tables {
+			if kind, _, monthly := historymaintenance.ParseMonthly(name); monthly && kind != "team_events" && kind != "team_tasks" {
+				continue
+			}
+			filtered = append(filtered, name)
+		}
+		tables = filtered
+	}
+	catalog, err := freezeMonthly(ctx, tx, tables)
+	if err != nil {
+		return result, err
+	}
+	result.MonthlyCatalog = catalog
+	allocators, err := captureHistoryAllocators(ctx, tx, tables, teamData)
+	if err != nil {
+		return result, err
+	}
 	encoder := json.NewEncoder(w)
-	if err = encoder.Encode(SQLRecord{Kind: "mysql_rows_v1"}); err != nil {
+	if err = encoder.Encode(SQLRecord{Kind: "mysql_rows_v1", MonthlyCatalog: catalog, AutoIncrement: allocators}); err != nil {
 		return result, err
 	}
 	seen := map[string]bool{}
 	for _, name := range tables {
-		p, ok := Policy(name)
+		p, ok := capturePolicy(ctx, tx, name)
 		if !ok || p.BackupStrategy != "mysql_dump" || seen[name] {
 			return result, fmt.Errorf("table excluded or duplicated: %s", name)
 		}
@@ -185,6 +235,9 @@ func exportMySQL(ctx context.Context, db *sql.DB, w io.Writer, tables []string, 
 		where := ""
 		if teamData && teamDataOmitsRows(name) {
 			where = " WHERE 1=0"
+		}
+		if teamData && (name == "history_archive_records" || name == "history_month_catalog" || name == "history_identity_receipts" || name == "history_maintenance_cursors") {
+			where = " WHERE kind IN ('team_events','team_tasks')"
 		}
 		rows, e := tx.QueryContext(ctx, "SELECT * FROM "+quoted+where+" ORDER BY "+strings.Join(order, ","))
 		if e != nil {
@@ -256,6 +309,10 @@ func ReadSQLSnapshot(r io.Reader, onTable func(SQLTable) error, onRow func(SQLTa
 	hash := sha256.New()
 	var count int64
 	started, ended := false, false
+	monthly := map[string]MonthlyRegistration{}
+	floors := map[string]uint64{}
+	allocatorTables := map[string]bool{}
+	declared := map[string]uint64{}
 	for scanner.Scan() {
 		if ended {
 			return result, errors.New("records after SQL end")
@@ -269,6 +326,19 @@ func ReadSQLSnapshot(r io.Reader, onTable func(SQLTable) error, onRow func(SQLTa
 			if record.Kind != "mysql_rows_v1" {
 				return result, errors.New("unsupported SQL snapshot")
 			}
+			var err error
+			monthly, err = monthlyManifest(record.MonthlyCatalog)
+			if err != nil {
+				return result, err
+			}
+			result.MonthlyCatalog = record.MonthlyCatalog
+			for kind, next := range record.AutoIncrement {
+				if !historyAllocatorKind(kind) || next == 0 || next > uint64(1<<63-1) {
+					return result, errors.New("invalid history allocator floor")
+				}
+				floors[kind] = next
+				declared[kind] = next
+			}
 			started = true
 			continue
 		}
@@ -278,6 +348,13 @@ func ReadSQLSnapshot(r io.Reader, onTable func(SQLTable) error, onRow func(SQLTa
 				return result, errors.New("nested or missing table")
 			}
 			p, ok := Policy(record.Table.Name)
+			if _, registered := monthly[record.Table.Name]; registered {
+				if err := validateMonthlySQLTable(*record.Table); err != nil {
+					return result, err
+				}
+				p = monthlyPolicy(record.Table.Name)
+				ok = true
+			}
 			if !ok || p.BackupStrategy != "mysql_dump" {
 				return result, errors.New("excluded table in SQL payload")
 			}
@@ -295,6 +372,11 @@ func ReadSQLSnapshot(r io.Reader, onTable func(SQLTable) error, onRow func(SQLTa
 				seen[c.Name] = true
 			}
 			table = record.Table
+			for _, c := range table.Columns {
+				if historyAllocatorKind(table.Name) && c.Name == "id" && strings.Contains(c.Extra, "auto_increment") {
+					allocatorTables[table.Name] = true
+				}
+			}
 			count = 0
 			hash.Reset()
 			if onTable != nil {
@@ -312,6 +394,9 @@ func ReadSQLSnapshot(r io.Reader, onTable func(SQLTable) error, onRow func(SQLTa
 					return result, errors.New("ambiguous SQL null")
 				}
 				row[table.Columns[i].Name] = c
+			}
+			if err := historyAllocatorRow(floors, table.Name, row); err != nil {
+				return result, err
 			}
 			canonical, _ := json.Marshal(record)
 			hash.Write(append(canonical, '\n'))
@@ -342,6 +427,22 @@ func ReadSQLSnapshot(r io.Reader, onTable func(SQLTable) error, onRow func(SQLTa
 	}
 	if !ended {
 		return result, errors.New("incomplete SQL snapshot")
+	}
+	for name := range monthly {
+		if _, ok := result.Tables[name]; !ok {
+			return result, errors.New("monthly manifest table missing")
+		}
+	}
+	for kind := range declared {
+		if !allocatorTables[kind] {
+			return result, errors.New("allocator metadata has no native AUTO_INCREMENT source")
+		}
+	}
+	result.AutoIncrement = map[string]uint64{}
+	for kind, next := range floors {
+		if allocatorTables[kind] {
+			result.AutoIncrement[kind] = next
+		}
 	}
 	return result, nil
 }

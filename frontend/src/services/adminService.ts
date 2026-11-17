@@ -202,6 +202,7 @@ export interface ClusterResourceOverview {
 }
 
 export interface AIAuditItem {
+  error_message_truncated?: boolean;
   trace_id: string;
   request_id: string;
   session_id?: string;
@@ -226,6 +227,9 @@ export interface AIAuditItem {
 }
 
 export interface AIAuditListResponse {
+  next_cursor?: string;
+  since?: string;
+  until?: string;
   items: AIAuditItem[];
   total: number;
   page: number;
@@ -297,6 +301,8 @@ export interface RiskHitRecord {
 }
 
 export interface AuditTraceDetail {
+  next_cursor?: string;
+  body_records?: Array<{ kind: string; id: number }>;
   trace_id: string;
   username?: string;
   invocations: ModelInvocationRecord[];
@@ -337,6 +343,7 @@ export interface CostBreakdownItem {
 }
 
 export interface CostOverview {
+  next_cursor?: string;
   total_prompt_tokens: number;
   total_completion_tokens: number;
   total_tokens: number;
@@ -424,6 +431,7 @@ export interface SessionUsageOverviewItem {
 }
 
 export interface SessionUsageOverview {
+  next_cursor?: string;
   summary: SessionUsageOverviewSummary;
   items: SessionUsageOverviewItem[];
   total: number;
@@ -468,6 +476,9 @@ export const adminService = {
   },
 
   getAIAudit: async (params?: {
+    cursor?: string;
+    since?: string;
+    until?: string;
     page?: number;
     limit?: number;
     search?: string;
@@ -478,12 +489,27 @@ export const adminService = {
     return response.data.data ?? { items: [], total: 0, page: 1, limit: params?.limit ?? 20 };
   },
 
-  getAITraceDetail: async (traceId: string): Promise<AuditTraceDetail> => {
-    const response = await api.get(`/admin/ai-audit/${traceId}`);
+  getAITraceBody: async (traceId: string, kind: string, id: number): Promise<Record<string, unknown>> => {
+    let offset = 0;
+    const chunks: string[] = [];
+    do {
+      const response = await api.get(`/admin/ai-audit/${encodeURIComponent(traceId)}`, { params: { body_kind: kind, body_id: id, offset } });
+      const chunk = response.data.data;
+      if (!chunk || typeof chunk.data !== 'string' || (chunk.next_offset !== 0 && chunk.next_offset <= offset)) throw new Error('Invalid body continuation');
+      chunks.push(chunk.data);
+      offset = chunk.next_offset;
+    } while (offset);
+    return JSON.parse(chunks.join('')) as Record<string, unknown>;
+  },
+
+  getAITraceDetail: async (traceId: string, cursor?: string): Promise<AuditTraceDetail> => {
+    const response = await api.get(`/admin/ai-audit/${encodeURIComponent(traceId)}`, { params: { cursor, limit: 200 } });
     const data = response.data.data ?? {};
     return {
       trace_id: data.trace_id ?? traceId,
       username: data.username,
+      next_cursor: data.next_cursor,
+      body_records: data.body_records ?? [],
       invocations: data.invocations ?? [],
       audit_events: data.audit_events ?? [],
       cost_records: data.cost_records ?? [],
@@ -494,6 +520,7 @@ export const adminService = {
   },
 
   getCostOverview: async (params?: {
+    since?: string; until?: string; cursor?: string;
     page?: number;
     limit?: number;
     search?: string;
@@ -516,12 +543,14 @@ export const adminService = {
       user_trends: data.user_trends ?? [],
       recent_records: data.recent_records ?? [],
       total_recent_records: data.total_recent_records ?? 0,
+      next_cursor: data.next_cursor,
       page: data.page ?? params?.page ?? 1,
       limit: data.limit ?? params?.limit ?? 20,
     };
   },
 
   getSessionUsageOverview: async (params?: {
+    cursor?: string;
     page?: number;
     limit?: number;
     search?: string;
@@ -541,6 +570,7 @@ export const adminService = {
       },
       items: data.items ?? [],
       total: data.total ?? 0,
+      next_cursor: data.next_cursor,
       page: data.page ?? params?.page ?? 1,
       limit: data.limit ?? params?.limit ?? 20,
     };

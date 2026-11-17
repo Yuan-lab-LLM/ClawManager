@@ -115,6 +115,9 @@ func CaptureTeamDataObjects(ctx context.Context, c *minio.Client, w io.Writer, b
 	return captureObjects(ctx, c, w, buckets, b, true)
 }
 func captureObjects(ctx context.Context, c *minio.Client, w io.Writer, buckets []string, b ObjectBudget, teamData bool) error {
+	return captureObjectsSelected(ctx, c, w, buckets, b, teamData, nil)
+}
+func captureObjectsSelected(ctx context.Context, c *minio.Client, w io.Writer, buckets []string, b ObjectBudget, teamData bool, include func(string, string) bool) error {
 	if c == nil || b.MaxBytes <= 0 || b.MaxItems <= 0 || len(buckets) == 0 {
 		return errors.New("invalid object capture configuration")
 	}
@@ -158,6 +161,9 @@ func captureObjects(ctx context.Context, c *minio.Client, w io.Writer, buckets [
 			}
 			if e := ctx.Err(); e != nil {
 				return e
+			}
+			if include != nil && !include(bucket, item.Key) {
+				continue
 			}
 			count++
 			if count > int64(b.MaxItems) || item.Key == "" || (previous != "" && item.Key <= previous) {

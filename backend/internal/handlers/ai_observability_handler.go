@@ -1,8 +1,10 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 
+	"clawreef/internal/repository"
 	"clawreef/internal/services"
 	"clawreef/internal/utils"
 
@@ -16,6 +18,9 @@ type AIObservabilityHandler struct {
 
 // AuditQueryRequest binds supported audit list filters.
 type AuditQueryRequest struct {
+	Cursor string `form:"cursor"`
+	Since  string `form:"since"`
+	Until  string `form:"until"`
 	Page   int    `form:"page,default=1"`
 	Limit  int    `form:"limit,default=100"`
 	Search string `form:"search"`
@@ -25,6 +30,9 @@ type AuditQueryRequest struct {
 
 // CostQueryRequest binds supported cost query filters.
 type CostQueryRequest struct {
+	Cursor string `form:"cursor"`
+	Since  string `form:"since"`
+	Until  string `form:"until"`
 	Page   int    `form:"page,default=1"`
 	Limit  int    `form:"limit,default=100"`
 	Search string `form:"search"`
@@ -32,6 +40,7 @@ type CostQueryRequest struct {
 
 // SessionUsageOverviewQueryRequest binds admin session usage overview filters.
 type SessionUsageOverviewQueryRequest struct {
+	Cursor string `form:"cursor"`
 	Page   int    `form:"page,default=1"`
 	Limit  int    `form:"limit,default=20"`
 	Search string `form:"search"`
@@ -52,7 +61,26 @@ func (h *AIObservabilityHandler) ListAuditItems(c *gin.Context) {
 		return
 	}
 
+	since, err := parseOptionalRFC3339(req.Since)
+	if err != nil {
+		utils.Error(c, http.StatusBadRequest, "Invalid since timestamp")
+		return
+	}
+	until, err := parseOptionalRFC3339(req.Until)
+	if err != nil {
+		utils.Error(c, http.StatusBadRequest, "Invalid until timestamp")
+		return
+	}
+	// Cursor requests retain the original frozen window; do not default to now again.
+	if req.Cursor == "" {
+		since, until, err = normalizeSessionUsageTimeRange(since, until)
+		if err != nil {
+			utils.Error(c, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
 	items, err := h.service.ListAuditItems(services.AuditQuery{
+		Cursor: req.Cursor, Since: since, Until: until,
 		Page:   req.Page,
 		Limit:  req.Limit,
 		Search: req.Search,
@@ -60,7 +88,11 @@ func (h *AIObservabilityHandler) ListAuditItems(c *gin.Context) {
 		Model:  req.Model,
 	})
 	if err != nil {
-		utils.HandleError(c, err)
+		if errors.Is(err, repository.ErrInvalidAuditQuery) {
+			utils.Error(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		handleObservationQueryError(c, err)
 		return
 	}
 
@@ -69,6 +101,9 @@ func (h *AIObservabilityHandler) ListAuditItems(c *gin.Context) {
 
 // GetTraceDetail returns full trace detail for a model invocation trace.
 func (h *AIObservabilityHandler) GetTraceDetail(c *gin.Context) {
+	if h.tracePagedRequest(c) {
+		return
+	}
 	traceID := c.Param("traceId")
 	detail, err := h.service.GetTraceDetail(traceID)
 	if err != nil {
@@ -87,13 +122,29 @@ func (h *AIObservabilityHandler) GetCostOverview(c *gin.Context) {
 		return
 	}
 
+	since, err := parseOptionalRFC3339(req.Since)
+	if err != nil {
+		utils.Error(c, http.StatusBadRequest, "Invalid since timestamp")
+		return
+	}
+	until, err := parseOptionalRFC3339(req.Until)
+	if err != nil {
+		utils.Error(c, http.StatusBadRequest, "Invalid until timestamp")
+		return
+	}
+	since, until, err = normalizeSessionUsageTimeRange(since, until)
+	if err != nil {
+		utils.Error(c, http.StatusBadRequest, err.Error())
+		return
+	}
 	overview, err := h.service.GetCostOverview(services.CostQuery{
+		Cursor: req.Cursor, Since: since, Until: until,
 		Page:   req.Page,
 		Limit:  req.Limit,
 		Search: req.Search,
 	})
 	if err != nil {
-		utils.HandleError(c, err)
+		handleObservationQueryError(c, err)
 		return
 	}
 
@@ -128,12 +179,14 @@ func (h *AIObservabilityHandler) GetSessionUsageOverview(c *gin.Context) {
 		utils.Error(c, http.StatusBadRequest, "Invalid until timestamp")
 		return
 	}
-	if err := validateSessionUsageTimeRange(since, until); err != nil {
+	since, until, err = normalizeSessionUsageTimeRange(since, until)
+	if err != nil {
 		utils.Error(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	overview, err := h.service.GetAdminSessionUsageOverview(services.InstanceSessionUsageOverviewQuery{
+		Cursor: req.Cursor,
 		Page:   req.Page,
 		Limit:  req.Limit,
 		Search: req.Search,
@@ -141,7 +194,7 @@ func (h *AIObservabilityHandler) GetSessionUsageOverview(c *gin.Context) {
 		Until:  until,
 	})
 	if err != nil {
-		utils.HandleError(c, err)
+		handleObservationQueryError(c, err)
 		return
 	}
 
