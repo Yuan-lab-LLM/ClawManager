@@ -8,7 +8,7 @@ import html
 import json
 import math
 from pathlib import Path
-import shutil
+import re
 from urllib.parse import quote
 import zipfile
 
@@ -42,10 +42,22 @@ STATUSES = ("PASS", "FAIL", "SKIP", "NOT RUN")
 TERMINAL = {"pass": "PASS", "fail": "FAIL", "skip": "SKIP", "build-fail": "FAIL"}
 SCOPE_REQUIRED = {5: {"cluster", "browser-live"}, 12: {"browser-live"}}
 PREVIEW_CHARS = 16000
+PRIVATE_VALUES = (
+    (re.compile(r"(?i)\b((?:https?|mysql|postgres(?:ql)?|redis)://)[^:/@\\\s\x22\x27]+:[^/@\\\s\x22\x27]+@"), r"\g<1>[redacted]@"),
+    (re.compile(r"\b[\w.-]+:[^@\\\s\x22\x27]+@tcp\("), "[redacted]@tcp("),
+    (re.compile(r"\beyJ[A-Za-z0-9_-]{12,}\.eyJ[A-Za-z0-9_-]{12,}\.[A-Za-z0-9_-]{15,}"), "[redacted-jwt]"),
+    (re.compile(r"(?i)\b(Bearer )[A-Za-z0-9_.~+/=-]{12,}"), r"\g<1>[redacted]"),
+)
 
 
 def load_json(path):
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def redact(text):
+    for pattern, replacement in PRIVATE_VALUES:
+        text = pattern.sub(replacement, text)
+    return text
 
 
 def timestamp(value):
@@ -389,6 +401,8 @@ def render_suite(suite):
         ("耗时（秒）", suite.get("elapsed_seconds", "—")), ("命令退出码", suite["exit_code"]),
         ("日志 SHA-256", suite.get("evidence_sha256", "—")), ("Go JSON 无效行", suite.get("malformed_lines", "—")),
     )
+    if suite.get("published_log_sha256"):
+        fields += (("交付副本 SHA-256（凭据已脱敏）", suite["published_log_sha256"]),)
     metadata = "".join(f"<dt>{key}</dt><dd>{esc(value)}</dd>" for key, value in fields)
     link_text = link(suite["log"], "查看原始日志") + " · " + link(suite["record"], "查看采集记录")
     return (f'<details id="suite-{esc(suite["suite_id"])}"><summary>{badge(suite["status"])} '
@@ -403,7 +417,8 @@ def render_suite(suite):
 def render_supporting(run):
     fields = (("原始版本", "source_revision"), ("源码 SHA-256", "source_manifest_sha256"), ("工作目录", "cwd"),
               ("开始", "started_at"), ("结束", "finished_at"), ("耗时（秒）", "elapsed_seconds"),
-              ("退出码", "exit_code"), ("日志 SHA-256", "evidence_sha256"), ("环境与范围", "detail"))
+              ("退出码", "exit_code"), ("日志 SHA-256", "evidence_sha256"),
+              ("交付副本 SHA-256（凭据已脱敏）", "published_log_sha256"), ("环境与范围", "detail"))
     metadata = "".join(f"<dt>{label}</dt><dd>{esc(run[key])}</dd>" for label, key in fields if run.get(key) is not None)
     return (f'<details id="suite-{esc(run["suite_id"])}"><summary>{badge(run["status"])} '
             f'{esc(run.get("name", run["suite_id"]))} · {esc(SCOPES_ZH[run["scope"]])}</summary><dl>{metadata}</dl>'
@@ -538,16 +553,34 @@ def generate(manifest, output, basename, bundle):
     fingerprints = {"source-manifest.json": data["source"]["manifest_sha256"]}
     fingerprints.update((run["log"], run.get("evidence_sha256")) for run in data["suites"] + data["supporting_runs"])
     fingerprints.update((artifact["link"], artifact["sha256"]) for artifact in data["artifacts"].values())
+    runs = {run["log"]: run for run in data["suites"] + data["supporting_runs"]}
     for name, source in files.items():
         target = output / name
         target.parent.mkdir(parents=True, exist_ok=True)
-        if source.resolve() != target.resolve():
-            shutil.copyfile(source, target)
+        observed = source.read_bytes()
+        first_party_text = name in runs or name.startswith("records/") or name == "input-manifest.json"
+        published = observed
+        if first_party_text:
+            original_text = observed.decode("utf-8", errors="replace")
+            safe_text = redact(original_text)
+            if safe_text != original_text:
+                published = safe_text.encode("utf-8")
         expected = fingerprints.get(name)
-        if expected and digest(target.read_bytes()) != expected:
+        if expected and digest(observed) != expected:
             raise ValueError(f"artifact changed during report generation: {name}")
+        if published != observed:
+            if name in runs:
+                runs[name]["published_log_sha256"] = digest(published)
+            if source.resolve() == target.resolve():
+                raise ValueError(f"report output would overwrite original evidence: {name}")
+        if source.resolve() != target.resolve():
+            target.write_bytes(published)
+    if any(run.get("published_log_sha256") for run in runs.values()):
+        data["limitations"].append("交付日志和报告预览已去除凭据片段；保留原始采集 SHA-256 与脱敏副本 SHA-256，原始日志留在 54。")
+    safe_json = redact(json.dumps(data, ensure_ascii=False, indent=2, allow_nan=False))
+    data = json.loads(safe_json)
     for name, contents in (
-        (basename + ".json", json.dumps(data, ensure_ascii=False, indent=2, allow_nan=False) + "\n"),
+        (basename + ".json", safe_json + "\n"),
         (basename + ".html", render_html(data, {name: output / name for name in files}, basename, bundle)),
     ):
         (output / name).write_text(contents, encoding="utf-8")

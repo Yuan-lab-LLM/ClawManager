@@ -178,6 +178,22 @@ class EvidenceReportTest(unittest.TestCase):
         (self.root / "tampered.log").write_text("altered", encoding="utf-8")
         self.assertIn("evidence differs from recording", self.report(expected=2))
 
+    def test_export_removes_fixture_credentials_without_changing_the_recorded_digest(self):
+        credential = b"stale-fixture-password"
+        token = b"eyJfixture01234567.eyJfixture01234567.signature0123456789"
+        original = self.record("credentials", f"print('https://test:{credential.decode()}@fixture.invalid {token.decode()}')")
+        data, output = self.report()
+        for path in output.rglob("*"):
+            if path.is_file() and path.suffix != ".zip":
+                self.assertNotIn(credential, path.read_bytes(), str(path))
+                self.assertNotIn(token, path.read_bytes(), str(path))
+        log = (output / "raw/credentials.log").read_bytes()
+        row = data["suites"][0]
+        self.assertEqual(original["evidence_sha256"], row["evidence_sha256"])
+        self.assertEqual(hashlib.sha256(log).hexdigest(), row["published_log_sha256"])
+        self.assertNotEqual(row["evidence_sha256"], row["published_log_sha256"])
+        self.assertEqual("PASS", row["status"])
+
 
 if __name__ == "__main__":
     unittest.main()

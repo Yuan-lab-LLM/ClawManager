@@ -7,6 +7,7 @@
 - 配置 `RUNTIME_CONTAINER_SLOTS>0`、`RUNTIME_NETWORK_ISOLATION=true`、`RUNTIME_POD_USER_NAMESPACES=false` 和真实 `RUNTIME_NETWORK_POD_CIDRS`。control token 至少32字节，保留现有 report token 和管理 HTTPS CA/证书校验。可参考 [配置补丁](backend-nfs-patch.example.yaml)，替换全部占位值后合并，不能直接 apply 成完整部署。
 - PVC/PV 必须真实绑定且可写，访问模式为 RWX、卷模式为 Filesystem。支持静态直接 NFS、`nfs.csi.k8s.io` 和 `driver.longhorn.io` 的 NFS RWX；CSI 的 StorageClass provisioner 必须匹配。直接 NFS/NFS CSI 的 server 必须是固定的 IPv4/IPv6 字面地址，避免 DNS 变化使内核客户端和出口拒绝规则指向不同服务器。卷、claim UID、StorageClass 或 provider 不一致会拒绝启动。
 - 节点提供非特权 user/mount/net namespace、支持映射 FD 的 bubblewrap、iproute2、nftables 和强制 seccomp。节点 AppArmor 策略须允许受信任的 bubblewrap 路径。实际策略不支持时保持启动失败。CM 读取私有原生会话还要求 Landlock ABI≥3 和镜像内固定 `/usr/bin/sqlite3`。
+- 通过 `RUNTIME_SLOT_APPARMOR_PROFILE` 使用指定策略时，在每个候选节点预先加载同名 `Localhost` profile，并检查实际 Pod 的 slot 容器有此策略。CM 会把槽位 AppArmor、seccomp、资源请求、挂载和安全启动参数纳入扩容批准，按现场控制器配置核验。配置变化需要重新产生可信批准。
 - 后端与 Runtime 可信程序需要 SETUID/SETGID，以执行固定的实例身份辅助程序。Runtime 使用普通 Pod（`hostUsers:true`），不共享容器 PID namespace，保留默认 masked proc。固定 OCI root 引导只持 SETUID/SETGID，立即切换为10001后执行 tini/agent。槽位不使用外层 SYS_ADMIN/NET_ADMIN/KILL/SYS_PTRACE；业务及 relay 有效 capabilities 为空。仅本地 emptyDir/TLS 初始化有 CHOWN 等本地能力，完全不挂载 NFS。
 - RBAC 除现有 Pod/Deployment/ConfigMap/Secret/存储读取权限，还需要运行命名空间的 StatefulSet 和 ReplicaSet get/list/watch/create/update/patch/delete。标准 k3s 部署清单已补充 apps 资源；自建角色也需检查。
 - 管理 TLS 源 Secret 只交给本地 init，复制到管理专用内存 emptyDir 并设为10001只读。业务槽位没有后端 report/upstream/管理证书凭据，不挂载 ServiceAccount token。
@@ -33,11 +34,19 @@ Team GID 是显式附加组，不替换实例 primary GID。若 NFS 服务端启
 
 单槽位重置期间，协调器自己的就绪检查不等待该槽位锁。已有相邻实例使用精确分配槽位、Pod UID、镜像及授权的实时校验继续服务；不把整个 Pod 的临时 Pending 状态当作相邻实例失去授权。普通新实例放置仍受池容量和就绪检查约束。
 
+管理员可在 **Runtime Pods → 单槽位详情 → 强制重置 slot** 提交经预检的精确旧容器。Runtime 需声明 `manual-slot-reset-v1`。节点 helper 按固定 Node UID/boot ID、Pod UID、slot 名和旧 ContainerID 校验 containerd 的容器元数据与退出，再提交回执。物理 helper 不挂载工作区。它停止旧容器内的进程，其他 slot 继续经各自的绑定与 writer 证明提供服务。工作区和 Git 数据保留，任意手动启动的网站进程需按原用途重启。
+
+已发布旧源需要单独核实 writer 退休时，CM 以原 PVC UID 和 resourceVersion 设置本操作的 finalizer，再检查 PVC/PV 与 NFS 来源。该保护覆盖异步 Job 可能提交至 Job 已确认终结、相应 Pod 不再活动、并且清理落盘的时间窗。后继已经迁移或开始调度时仍保护其绑定和 writer。Job 消失、NFS I/O 不确定、身份变化或收据不完整时，保留故障状态与对应 PVC pin。处理底层原因后从原调度记录重新核验，保留其他操作的 finalizer 和未知 writer 证据。
+
+普通停止、休眠和删除继续使用各自原生意图。辅助清理返回未确认时，支持该协议的 slot 可通过对应精确容器的 C2 退出承诺进入后续核验。休眠仍需原生的 graceful 证明。用户的停止、休眠和删除不会生成手动重置的自动恢复意图。
+
 后端私有文件操作、Team 文件写入、原生升级和浏览器都有持久写入记录。没有收到可信完成回执的记录在后端重启后继续阻塞删除、替换或维护；NFS EIO/ESTALE/取消等不确定结果不会因为辅助进程已退出就被视为完成。Team 共享写入不会要求停止无关的正常 Team 同伴，但不确定的共享写入必须先解决才能改成员身份或接纳替代执行。
 
 后端的私有文件和原生历史读取由固定 Go 辅助程序执行，环境不包含后端管理凭据。历史读取额外以 Landlock 逐个授予已验证的实例所有、单链接常规 inode；不能通过把 B 的可读文件硬链接到 A 或在检查后替换路径读取 B。
 
 ## 浏览器与旧部署迁移
+
+启用 `CLAWMANAGER_BROWSER_ORIGIN` 或 `CLAWMANAGER_BROWSER_PORT_RANGE` 后，每次发布或重建均核对浏览器入口。54 的配置由 [browser-origins.yaml](../sites/server54/browser-origins.yaml) 定义，`clawmanager-browser-origins` NodePort Service 的 31600–31727 映射到应用 TLS 端口 8444。核对 Service 配置与就绪 EndpointSlice，再从相应独立域访问实际 OpenCode 和 DeepSeek Harness 测试页面。30443 管理入口的检查单独记录。
 
 NFS 浏览器每个执行 epoch 使用独立名称、OnDelete 的单副本 StatefulSet，Pod 创建时就带保护 finalizer。停止后保留已证实全部容器终止、带删除时间的旧 Pod 及零副本旧控制器，占住旧名称，阻止超时后才落地的旧创建请求启动 writer。新 epoch 使用新控制器和新名称；每次操作都核对旧对象 UID、finalizer 及容器终止摘要。浏览器资料保存在 `browsers/user-<userID>/instance-<instanceID>/{profile,downloads}`；业务自己的私有 home 权限不变。镜像初始化使用本地 `/config`，只把两个准确资料目录绑定到 Chromium/Downloads。
 
@@ -54,5 +63,11 @@ NFS 浏览器每个执行 epoch 使用独立名称、OnDelete 的单副本 State
 3. 在实际目标 NFS/节点策略下验证权限、文件锁、rename/fsync、四类 Runtime 启停、双实例并行及故障封锁；双节点部署还要完成真实双节点 A→B→A。单节点测试不能替代此项。
 4. 停止旧实例并取得旧执行全部退出的证明，再通过受控流程排空旧池并建立新配置池。不要只修改现有 Deployment 的 profile、hostUsers 或镜像。启动检查会拒绝不兼容的原地覆盖。
 5. 按原有实例生命周期启动并逐项验证。回退同样先排空并确认停止；保留持久数据和证明，使用兼容旧配置的镜像与数据恢复方案。不要在新 writer 活动期间直接启动旧池。
+
+CM 应用升级前核对迁移身份。如果旧数据库尚未应用带观测触发器的 121、123，且开启 MySQL binlog，应用身份可能因创建触发器权限不足遇到 1419。使用同一发布提交的 `backend/internal/db.Initialize` 和批准的数据库迁移身份完成迁移。保留应用运行权限、数据库日志配置和原生 Runtime 独立的保护状态。应用继续通过其正常发布流程就绪。
+
+从此前应用版本升级时，同时核对 [持久观测部署前提](../observability/README.md)。应用启动依赖独立的不可变观测密钥和支持共享 `flock`、持久 `fsync` 的日志 PVC。历史恢复凭据使用独立受限 schema 和只读挂载的专用 Secret。保留观测密钥与日志卷的恢复关系。
+
+已经运行的 AgentRuntime 通过 [CM 原生升级脚本](../../runtime-upgrade/upgrade-runtime.py) 使用不可变目标 digest。应用发布与 Runtime 升级各有独立记录。原生流程若发现未完成操作、休眠或数据安全证明不足、类型不支持，停在相应保护状态并记录实际原因。OpenCode 现有原生 CLI 明确拒绝数据安全升级。
 
 本次测试环境只有一个节点。跨节点迁移、实际生产 NFS 故障重连、arm64、容量及真实模型/Team 消息链路仍需各自环境的发布验收。测试控制服务只提供注册/租约等最小协议，模型上游返回403；它不证明真实模型调用成功。
