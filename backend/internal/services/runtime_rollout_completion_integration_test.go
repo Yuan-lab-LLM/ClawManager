@@ -38,7 +38,7 @@ func TestPoolCompletionMySQLSchedulerLifecycle(t *testing.T) {
 	exec(`INSERT INTO runtime_pods (id,runtime_type,namespace,pod_name,pod_uid,pod_ip,deployment_name,image_ref,agent_endpoint,state,draining,last_seen_at) VALUES (306,'hermes','tenant','old','old-uid','10.1.2.2','hermes-runtime','repo:old','http://10.1.2.2:19090','draining',1,NOW())`)
 	// Existing stopped/error instances and bindings are unrelated to rollout
 	// completion. They must survive intact; do not manufacture instance recovery.
-	exec(`INSERT INTO instances VALUES (483,1,'hermes','gateway','lite','stopped',3,'/workspace/483',NULL,NULL,NOW()),(494,1,'hermes','gateway','lite','error',1,'/workspace/494','unsupported_hermes_protocol',NULL,NOW())`)
+	exec(`INSERT INTO instances(id,user_id,type,runtime_type,instance_mode,status,runtime_generation,workspace_path,runtime_error_message,runtime_error_code,updated_at) VALUES (483,1,'hermes','gateway','lite','stopped',3,'/workspace/483',NULL,NULL,NOW()),(494,1,'hermes','gateway','lite','error',1,'/workspace/494','unsupported_hermes_protocol',NULL,NOW())`)
 	bindings := repository.NewInstanceRuntimeBindingRepository(sess)
 	if err := bindings.Create(ctx, &models.InstanceRuntimeBinding{InstanceID: 483, RuntimePodID: 306, RuntimeType: "hermes", GatewayID: "gw-483-3", GatewayPort: 20000, State: "stopped", Generation: 3, WorkspacePath: "/workspace/483"}); err != nil {
 		t.Fatal(err)

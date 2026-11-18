@@ -1,0 +1,280 @@
+TAP version 13
+# Subtest: graceful eviction requires enough compatible empty slots for every bound instance
+ok 1 - graceful eviction requires enough compatible empty slots for every bound instance
+  ---
+  duration_ms: 828.408699
+  type: 'test'
+  ...
+# Subtest: force eviction remains an explicit supported choice and resets acknowledgement
+ok 2 - force eviction remains an explicit supported choice and resets acknowledgement
+  ---
+  duration_ms: 52.621068
+  type: 'test'
+  ...
+# Subtest: eviction transport failure stays uncertain, never retries, and clears on acknowledgement or mode change
+ok 3 - eviction transport failure stays uncertain, never retries, and clears on acknowledgement or mode change
+  ---
+  duration_ms: 136.547191
+  type: 'test'
+  ...
+# Subtest: a real eviction 409 preserves its domain error
+ok 4 - a real eviction 409 preserves its domain error
+  ---
+  duration_ms: 35.43005
+  type: 'test'
+  ...
+# Subtest: both card and detail allow enabled or paused upgrade targets without activating reserved pools
+ok 5 - both card and detail allow enabled or paused upgrade targets without activating reserved pools
+  ---
+  duration_ms: 759.332518
+  type: 'test'
+  ...
+# Subtest: overview requests only a server page, retains previous data and searches the whole inventory after debounce
+ok 6 - overview requests only a server page, retains previous data and searches the whole inventory after debounce
+  ---
+  duration_ms: 92.49268
+  type: 'test'
+  ...
+# Subtest: WebSocket bursts coalesce without cancelling inventory fetches and timers clean up
+ok 7 - WebSocket bursts coalesce without cancelling inventory fetches and timers clean up
+  ---
+  duration_ms: 33.104346
+  type: 'test'
+  ...
+# Subtest: production AdminLayout mounts one shared main and sixteen Runtime table rows
+ok 8 - production AdminLayout mounts one shared main and sixteen Runtime table rows
+  ---
+  duration_ms: 96.835788
+  type: 'test'
+  ...
+# Subtest: detail uses its snapshot while loading or failed, but a successful deletion returns to the overview
+ok 9 - detail uses its snapshot while loading or failed, but a successful deletion returns to the overview
+  ---
+  duration_ms: 46.635563
+  type: 'test'
+  ...
+# Subtest: Pod dialogs await fresh inventory and close only on a confirmed source deletion
+ok 10 - Pod dialogs await fresh inventory and close only on a confirmed source deletion
+  ---
+  duration_ms: 78.392867
+  type: 'test'
+  ...
+# Subtest: cross-deployment manual candidates require successful server preflight before confirmation
+ok 11 - cross-deployment manual candidates require successful server preflight before confirmation
+  ---
+  duration_ms: 83.935948
+  type: 'test'
+  ...
+# Subtest: global manual scheduling requires type first and shows only that type with same-type multi-select
+ok 12 - global manual scheduling requires type first and shows only that type with same-type multi-select
+  ---
+  duration_ms: 42.87317
+  type: 'test'
+  ...
+# Subtest: changing runtime type clears selection, target, slot, validation, and stale submit callbacks
+ok 13 - changing runtime type clears selection, target, slot, validation, and stale submit callbacks
+  ---
+  duration_ms: 41.098851
+  type: 'test'
+  ...
+# Subtest: a preflight response arriving after a type change cannot restore validation or errors
+ok 14 - a preflight response arriving after a type change cannot restore validation or errors
+  ---
+  duration_ms: 35.288689
+  type: 'test'
+  ...
+# Subtest: per-Pod scheduling prefills and locks type, preserves valid IDs and enforces its source context
+ok 15 - per-Pod scheduling prefills and locks type, preserves valid IDs and enforces its source context
+  ---
+  duration_ms: 29.118532
+  type: 'test'
+  ...
+# Subtest: mixed initial IDs fail closed and never send preflight or scheduling requests
+ok 16 - mixed initial IDs fail closed and never send preflight or scheduling requests
+  ---
+  duration_ms: 58.308004
+  type: 'test'
+  ...
+# Subtest: late initial inventory infers type once and never overwrites a subsequent explicit choice
+ok 17 - late initial inventory infers type once and never overwrites a subsequent explicit choice
+  ---
+  duration_ms: 63.73486
+  type: 'test'
+  ...
+# Subtest: changing type clears a previous validation error and discards a late error from the old type
+ok 18 - changing type clears a previous validation error and discards a late error from the old type
+  ---
+  duration_ms: 60.26593
+  type: 'test'
+  ...
+# Subtest: maintenance adds Pods to a default deployment with exactly type and additional count editable
+ok 19 - maintenance adds Pods to a default deployment with exactly type and additional count editable
+  ---
+  duration_ms: 35.434736
+  type: 'test'
+  ...
+# Subtest: maintenance rejects unavailable defaults and does not reuse a previous type while options are pending
+ok 20 - maintenance rejects unavailable defaults and does not reuse a previous type while options are pending
+  ---
+  duration_ms: 27.297445
+  type: 'test'
+  ...
+# Subtest: maintenance guards synchronous double submission until the first add request settles
+ok 21 - maintenance guards synchronous double submission until the first add request settles
+  ---
+  duration_ms: 24.008167
+  type: 'test'
+  ...
+# Subtest: maintenance deletion requires empty inventory and exact pool name plus UID, using the right registered or pending API
+ok 22 - maintenance deletion requires empty inventory and exact pool name plus UID, using the right registered or pending API
+  ---
+  duration_ms: 75.574772
+  type: 'test'
+  ...
+# Subtest: maintenance preserves deletion conflicts and never retries an uncertain create
+ok 23 - maintenance preserves deletion conflicts and never retries an uncertain create
+  ---
+  duration_ms: 53.829381
+  type: 'test'
+  ...
+# Subtest: uncertain expansion failures refresh metadata once and keep submission locked until that read settles
+ok 24 - uncertain expansion failures refresh metadata once and keep submission locked until that read settles
+  ---
+  duration_ms: 55.522348
+  type: 'test'
+  ...
+# Subtest: balance previews distributions, moves and blockers before an acknowledged fingerprint execution
+ok 25 - balance previews distributions, moves and blockers before an acknowledged fingerprint execution
+  ---
+  duration_ms: 25.077364
+  type: 'test'
+  ...
+# Subtest: balance type changes invalidate the plan and stale handlers, while zero moves remains informational
+ok 26 - balance type changes invalidate the plan and stale handlers, while zero moves remains informational
+  ---
+  duration_ms: 70.733157
+  type: 'test'
+  ...
+# Subtest: balance 409 clears the stale plan and requires another preview without retrying execution
+ok 27 - balance 409 clears the stale plan and requires another preview without retrying execution
+  ---
+  duration_ms: 26.274779
+  type: 'test'
+  ...
+# Subtest: balance ignores late previews for another type and rejects missing fingerprints or disallowed plans
+ok 28 - balance ignores late previews for another type and rejects missing fingerprints or disallowed plans
+  ---
+  duration_ms: 75.077216
+  type: 'test'
+  ...
+# Subtest: balance execution consumes its plan once and reports an uncertain network outcome without retry
+ok 29 - balance execution consumes its plan once and reports an uncertain network outcome without retry
+  ---
+  duration_ms: 29.69721
+  type: 'test'
+  ...
+# Subtest: Runtime toolbar opens the independent dialogs and routes accepted balance to scheduling records
+ok 30 - Runtime toolbar opens the independent dialogs and routes accepted balance to scheduling records
+  ---
+  duration_ms: 63.999183
+  type: 'test'
+  ...
+# Subtest: scale-in history exposes cancellation while starting or needing attention and shows operation errors without items
+ok 31 - scale-in history exposes cancellation while starting or needing attention and shows operation errors without items
+  ---
+  duration_ms: 75.853326
+  type: 'test'
+  ...
+# Subtest: unresolved observations cannot be selected for migration or evicted, including force
+ok 32 - unresolved observations cannot be selected for migration or evicted, including force
+  ---
+  duration_ms: 296.1477
+  type: 'test'
+  ...
+# Subtest: slot details show observed and expected owners and explicit unknown without offering migration
+ok 33 - slot details show observed and expected owners and explicit unknown without offering migration
+  ---
+  duration_ms: 29.668819
+  type: 'test'
+  ...
+# Subtest: recovery uses abnormal-only backend defaults without target capacity and preserves scope
+ok 34 - recovery uses abnormal-only backend defaults without target capacity and preserves scope
+  ---
+  duration_ms: 29.037851
+  type: 'test'
+  ...
+# Subtest: explicit recovery selection requires acknowledgement and sends exact known IDs
+ok 35 - explicit recovery selection requires acknowledgement and sends exact known IDs
+  ---
+  duration_ms: 30.883155
+  type: 'test'
+  ...
+# Subtest: recovery refuses an unconfirmed physical occupant selected without a database binding
+ok 36 - recovery refuses an unconfirmed physical occupant selected without a database binding
+  ---
+  duration_ms: 25.752664
+  type: 'test'
+  ...
+# Subtest: recovery history exposes persisted phase and underlying errors without claiming success
+ok 37 - recovery history exposes persisted phase and underlying errors without claiming success
+  ---
+  duration_ms: 31.170374
+  type: 'test'
+  ...
+# Subtest: recovery history offers cancel only before fencing and no terminal retry
+ok 38 - recovery history offers cancel only before fencing and no terminal retry
+  ---
+  duration_ms: 624.266475
+  type: 'test'
+  ...
+# Subtest: offline recovery accepts matching inspected binding IDs while rejecting unverified IDs
+ok 39 - offline recovery accepts matching inspected binding IDs while rejecting unverified IDs
+  ---
+  duration_ms: 59.091916
+  type: 'test'
+  ...
+# Subtest: inspection grants recovery IDs only for the selected matching database binding
+ok 40 - inspection grants recovery IDs only for the selected matching database binding
+  ---
+  duration_ms: 73.911067
+  type: 'test'
+  ...
+# Subtest: inspected offline source stays in recovery dialog after fresh inventory omits it
+ok 41 - inspected offline source stays in recovery dialog after fresh inventory omits it
+  ---
+  duration_ms: 34.995389
+  type: 'test'
+  ...
+# Subtest: unknown orphan Pod retains a separate recovery entry while ordinary eviction stays blocked
+ok 42 - unknown orphan Pod retains a separate recovery entry while ordinary eviction stays blocked
+  ---
+  duration_ms: 30.433182
+  type: 'test'
+  ...
+# Subtest: orphan recovery requires explicit UID preflight and acknowledgement before submission
+ok 43 - orphan recovery requires explicit UID preflight and acknowledgement before submission
+  ---
+  duration_ms: 37.09733
+  type: 'test'
+  ...
+# Subtest: pending release details keep product copy and disable instance selection
+ok 44 - pending release details keep product copy and disable instance selection
+  ---
+  duration_ms: 27.703214
+  type: 'test'
+  ...
+# Subtest: failed stopped SQL reservation has a history Retry without ordinary migration actions
+ok 45 - failed stopped SQL reservation has a history Retry without ordinary migration actions
+  ---
+  duration_ms: 95.563489
+  type: 'test'
+  ...
+1..45
+# tests 45
+# suites 0
+# pass 45
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 4652.153543

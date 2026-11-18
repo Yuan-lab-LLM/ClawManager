@@ -4,7 +4,7 @@
 
 ## 源码与构建
 
-固定基线：Hermes `v2026.8.31` / commit `29112bef099274229cadff79cdff7bf7b99c4b77`；Agent `0.21.0`，Desktop package `0.17.0`。
+固定基线：Hermes `v0.22.5` / commit `bf0203a794a07aac3ff764972ab9087baa4e4f4e`；Agent release `0.22.5`，上游 Desktop package 元数据版本为 `0.0.0`，发布身份以锁定的 tag 和 commit 为准。
 
 `upstream.lock.json` 锁定完整 `apps/desktop/src`、public 静态资源、shared 源码与相关包/构建元数据的 Git blob。源文件以原始字节导入；不能修改缓存、改用 main/latest，或在依赖失败时替换为另一套 App。构建拒绝未锁定模块、内容漂移、Electron/Node 宿主依赖和遗漏真实主入口。
 

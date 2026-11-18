@@ -32,7 +32,7 @@ const Toast: React.FC<{ toast: ToastState; onClose: () => void }> = ({ toast, on
         padding: '10px 16px',
         background: bg,
         color: fg,
-        borderRadius: 10,
+        borderRadius: 8,
         fontSize: 13,
         boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
       }}
@@ -62,7 +62,7 @@ const Modal: React.FC<{
         style={{ maxWidth, width: '100%', maxHeight: '90vh', overflow: 'auto' }}
         onClick={(e) => e.stopPropagation()}
       >
-        {eyebrow && <div className="eyebrow text-[10px] mb-1">{eyebrow}</div>}
+        {eyebrow && <div className="eyebrow text-xs mb-1">{eyebrow}</div>}
         <h3 className="section-title-lg mb-4">{title}</h3>
         <div className="mb-5">{children}</div>
         <div className="flex justify-end gap-2">{footer}</div>
@@ -199,7 +199,7 @@ const ContainerPage: React.FC = () => {
           <div className="flex items-start justify-between gap-6 mb-5">
             <div className="hero-block flex-1">
               <div className="h-eyebrow">容器层加固 · 防逃逸 + 文件/进程防护</div>
-              <h2 className="h-title">容器隔离</h2>
+              <h2 className="section-title">容器隔离</h2>
               <p className="h-subtitle">为运行中的容器配置文件 / 进程防护规则，并通过 mount 白名单与特权容器创建限制阻断逃逸攻击。</p>
             </div>
             <div className="flex flex-col items-end gap-3 shrink-0">
@@ -273,13 +273,13 @@ const ContainerPage: React.FC = () => {
                 const counts = containerRuleCount(c.name);
                 return (
                   <tr key={c.id}>
-                    <td><code className="font-mono text-xs font-bold text-[#171212]">{c.name}</code></td>
+                    <td><code className="font-mono text-xs font-bold text-[var(--cm-ink)]">{c.name}</code></td>
                     <td><code className="font-mono text-xs muted-strong">{c.id}</code></td>
                     <td><code className="font-mono text-xs muted">{c.image}</code></td>
                     <td><span className="text-xs muted-strong">{c.created}</span></td>
                     <td style={{ textAlign: 'center' }}>
                       <span
-                        className={`badge badge-${counts.files > 0 ? 'green' : 'slate'} text-[10px]`}
+                        className={`badge badge-${counts.files > 0 ? 'green' : 'slate'} text-xs`}
                         style={{ marginRight: 6 }}
                       >
                         {counts.files} 条
@@ -294,7 +294,7 @@ const ContainerPage: React.FC = () => {
                     </td>
                     <td style={{ textAlign: 'center' }}>
                       <span
-                        className={`badge badge-${counts.processes > 0 ? 'green' : 'slate'} text-[10px]`}
+                        className={`badge badge-${counts.processes > 0 ? 'green' : 'slate'} text-xs`}
                         style={{ marginRight: 6 }}
                       >
                         {counts.processes} 条
@@ -324,7 +324,7 @@ const ContainerPage: React.FC = () => {
           {/* mount 白名单 */}
           <div className="mb-5">
             <div className="flex items-center justify-between mb-3">
-              <span className="font-semibold text-[#171212] text-sm">📁 mount 挂载白名单</span>
+              <span className="font-semibold text-[var(--cm-ink)] text-sm">📁 mount 挂载白名单</span>
               <button className="btn-primary btn-sm" onClick={() => setModal({ kind: 'mount-add' })}>
                 + 添加
               </button>
@@ -339,7 +339,7 @@ const ContainerPage: React.FC = () => {
               <tbody>
                 {mountWhitelist.map((p, i) => (
                   <tr key={i}>
-                    <td><code className="text-sm font-mono text-[#171212]">{p}</code></td>
+                    <td><code className="text-sm font-mono text-[var(--cm-ink)]">{p}</code></td>
                     <td>
                       <button
                         className="text-xs text-[#dc2626] font-semibold hover:underline"
@@ -364,7 +364,7 @@ const ContainerPage: React.FC = () => {
           <div className="flex items-center justify-between mt-4">
             <div className="flex items-center gap-2">
               <span style={{ fontSize: 18 }}>🔒</span>
-              <span className="font-semibold text-[#171212] text-sm">禁止在容器内创建特权容器</span>
+              <span className="font-semibold text-[var(--cm-ink)] text-sm">禁止在容器内创建特权容器</span>
               <span className="text-xs muted">阻止容器使用 --privileged 创建嵌套特权容器，规避逃逸常用手法</span>
             </div>
             <Toggle
@@ -404,11 +404,11 @@ const ContainerPage: React.FC = () => {
                 return (
                   <tr key={i}>
                     <td><span className="text-xs muted-strong font-mono">{t}</span></td>
-                    <td><code className="font-mono text-xs font-bold text-[#171212]">{c}</code></td>
+                    <td><code className="font-mono text-xs font-bold text-[var(--cm-ink)]">{c}</code></td>
                     <td><span className="text-xs">{user}</span></td>
-                    <td><code className="text-xs font-mono text-[#171212]">{proc}</code></td>
+                    <td><code className="text-xs font-mono text-[var(--cm-ink)]">{proc}</code></td>
                     <td><code className="text-xs font-mono">{obj}</code></td>
-                    <td><span className="badge badge-slate text-[10px]">{act}</span></td>
+                    <td><span className="badge badge-slate text-xs">{act}</span></td>
                     <td><span className={`badge badge-${tone}`}>{result}</span></td>
                   </tr>
                 );
@@ -563,15 +563,15 @@ const FileRulesManagerModal: React.FC<{
   >
     <div className="flex items-center justify-between mb-3">
       <div>
-        <div className="eyebrow text-[10px]">容器</div>
-        <code className="font-mono text-sm font-bold text-[#171212]">{container}</code>
+        <div className="eyebrow text-xs">容器</div>
+        <code className="font-mono text-sm font-bold text-[var(--cm-ink)]">{container}</code>
       </div>
       <button className="btn-primary btn-sm" onClick={onAddClick}>+ 添加规则</button>
     </div>
     {rules.length === 0 ? (
       <div
         className="text-center py-10"
-        style={{ background: '#fdfaf7', border: '1px dashed #eadfd8', borderRadius: 10 }}
+        style={{ background: '#fdfaf7', border: '1px dashed var(--cm-border)', borderRadius: 8 }}
       >
         <div className="text-sm muted">暂无文件防护规则</div>
         <div className="text-xs muted mt-1">点击右上角 "+ 添加规则" 为该容器创建第一条规则</div>
@@ -592,11 +592,11 @@ const FileRulesManagerModal: React.FC<{
         <tbody>
           {rules.map((rule, i) => (
             <tr key={i}>
-              <td><code className="text-xs font-mono text-[#171212]">{rule.path}</code></td>
+              <td><code className="text-xs font-mono text-[var(--cm-ink)]">{rule.path}</code></td>
               <td><code className="text-xs font-mono muted-strong">{rule.trust}</code></td>
               {(['r', 'w', 'x', 'd'] as const).map((k) => (
                 <td key={k} style={{ textAlign: 'center' }}>
-                  <span className={`badge badge-${rule[k] ? 'green' : 'slate'} text-[10px]`}>
+                  <span className={`badge badge-${rule[k] ? 'green' : 'slate'} text-xs`}>
                     {rule[k] ? '✓' : '—'}
                   </span>
                 </td>
@@ -634,15 +634,15 @@ const ProcRulesManagerModal: React.FC<{
   >
     <div className="flex items-center justify-between mb-3">
       <div>
-        <div className="eyebrow text-[10px]">容器</div>
-        <code className="font-mono text-sm font-bold text-[#171212]">{container}</code>
+        <div className="eyebrow text-xs">容器</div>
+        <code className="font-mono text-sm font-bold text-[var(--cm-ink)]">{container}</code>
       </div>
       <button className="btn-primary btn-sm" onClick={onAddClick}>+ 添加规则</button>
     </div>
     {rules.length === 0 ? (
       <div
         className="text-center py-10"
-        style={{ background: '#fdfaf7', border: '1px dashed #eadfd8', borderRadius: 10 }}
+        style={{ background: '#fdfaf7', border: '1px dashed var(--cm-border)', borderRadius: 8 }}
       >
         <div className="text-sm muted">暂无进程防护规则</div>
         <div className="text-xs muted mt-1">点击右上角 "+ 添加规则" 为该容器创建第一条规则</div>
@@ -659,7 +659,7 @@ const ProcRulesManagerModal: React.FC<{
         <tbody>
           {rules.map((rule, i) => (
             <tr key={i}>
-              <td><code className="text-xs font-mono text-[#171212]">{rule.path}</code></td>
+              <td><code className="text-xs font-mono text-[var(--cm-ink)]">{rule.path}</code></td>
               <td>
                 <span className={`badge badge-${rule.type === '进程保护' ? 'red' : 'orange'}`}>{rule.type}</span>
               </td>
@@ -712,20 +712,20 @@ const FileRuleAddModal: React.FC<{
     >
       <div className="space-y-4">
         <div>
-          <div className="eyebrow text-[10px] mb-1">容器</div>
+          <div className="eyebrow text-xs mb-1">容器</div>
           <input
             className="input"
             value={container}
             readOnly
-            style={{ background: '#fdf6f1', color: '#7a4a30', fontFamily: 'ui-monospace,SFMono-Regular,Menlo,monospace' }}
+            style={{ background: 'var(--cm-subtle)', color: 'var(--cm-text)', fontFamily: 'ui-monospace,SFMono-Regular,Menlo,monospace' }}
           />
         </div>
         <div>
-          <div className="eyebrow text-[10px] mb-1"><span style={{ color: '#dc2626' }}>*</span> 保护文件/目录</div>
+          <div className="eyebrow text-xs mb-1"><span style={{ color: '#dc2626' }}>*</span> 保护文件/目录</div>
           <input className="input" placeholder="请输入绝对路径（容器内路径）" value={path} onChange={(e) => setPath(e.target.value)} />
         </div>
         <div>
-          <div className="eyebrow text-[10px] mb-1">信任进程</div>
+          <div className="eyebrow text-xs mb-1">信任进程</div>
           <textarea
             className="input"
             rows={4}
@@ -736,7 +736,7 @@ const FileRuleAddModal: React.FC<{
           />
         </div>
         <div>
-          <div className="eyebrow text-[10px] mb-2">权限</div>
+          <div className="eyebrow text-xs mb-2">权限</div>
           <div className="flex items-center gap-5">
             <label className="flex items-center gap-1.5 cursor-pointer text-sm">
               <input type="checkbox" style={{ accentColor: '#dc2626' }} checked={r} onChange={(e) => setR(e.target.checked)} /> 读
@@ -786,23 +786,23 @@ const ProcRuleAddModal: React.FC<{
     >
       <div className="space-y-4">
         <div>
-          <div className="eyebrow text-[10px] mb-1">容器</div>
+          <div className="eyebrow text-xs mb-1">容器</div>
           <input
             className="input"
             value={container}
             readOnly
-            style={{ background: '#fdf6f1', color: '#7a4a30', fontFamily: 'ui-monospace,SFMono-Regular,Menlo,monospace' }}
+            style={{ background: 'var(--cm-subtle)', color: 'var(--cm-text)', fontFamily: 'ui-monospace,SFMono-Regular,Menlo,monospace' }}
           />
         </div>
         <div>
-          <div className="eyebrow text-[10px] mb-1"><span style={{ color: '#dc2626' }}>*</span> 规则类型</div>
+          <div className="eyebrow text-xs mb-1"><span style={{ color: '#dc2626' }}>*</span> 规则类型</div>
           <select className="input" value={type} onChange={(e) => setType(e.target.value as ProcRule['type'])}>
             <option value="进程保护">进程保护</option>
             <option value="进程黑名单">进程黑名单</option>
           </select>
         </div>
         <div>
-          <div className="eyebrow text-[10px] mb-1"><span style={{ color: '#dc2626' }}>*</span> 进程路径</div>
+          <div className="eyebrow text-xs mb-1"><span style={{ color: '#dc2626' }}>*</span> 进程路径</div>
           <textarea
             className="input"
             rows={5}

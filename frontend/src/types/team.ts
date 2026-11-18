@@ -1,3 +1,4 @@
+export interface TeamRuntimeState { state: string; operation_id?: string; desired_state: string; reason?: string; progress: number; total: number; error?: string; started_at?: string; stopped_at?: string; can_start: boolean; can_stop: boolean }
 import type { OpenClawConfigPlan } from "./openclawConfig";
 
 export type TeamCommunicationMode =
@@ -6,6 +7,7 @@ export type TeamCommunicationMode =
   | "full_mesh";
 
 export interface Team {
+ runtime_state?: TeamRuntimeState;
   id: number;
   user_id: number;
   name: string;
@@ -30,7 +32,7 @@ export interface TeamMember {
   member_key: string;
   display_name: string;
   role: string;
-  runtime_type?: "openclaw" | "hermes";
+  runtime_type?: "openclaw" | "hermes" | "opencode" | "deepseek-harness";
   instance_mode?: "lite" | "pro";
   description?: string;
   status:
@@ -44,6 +46,7 @@ export interface TeamMember {
   current_task_id?: number;
   progress: number;
   last_seen_at?: string;
+  runtime_observation?: { state: 'online' | 'starting' | 'offline' | 'unknown'; reason?: string; observed_at?: string };
   availability?: "unknown" | "idle" | "busy" | "blocked" | "offline";
   runtime_status?: string;
   runtime_task_id?: string;
@@ -140,7 +143,7 @@ export interface CreateTeamMemberRequest {
   role: string;
   mode?: "lite" | "pro";
   instance_mode?: "lite" | "pro";
-  runtime_type?: "openclaw" | "hermes";
+  runtime_type?: "openclaw" | "hermes" | "opencode" | "deepseek-harness";
   description?: string;
   cpu_cores?: number;
   memory_gb?: number;
@@ -181,6 +184,9 @@ export interface CreateTeamRequest {
 }
 
 export interface TeamDetails {
+	// Northbound filtering advances the raw cursor even through hidden events.
+	events_has_more?: boolean;
+	events_next_before_id?: number;
   team: Team;
   leader_member_id?: string;
   leader?: TeamMember;

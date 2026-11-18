@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	coordinationv1 "k8s.io/api/coordination/v1"
@@ -20,6 +21,7 @@ type RuntimeLeaderService interface {
 }
 
 type runtimeLeaderService struct {
+	renewMu   sync.Mutex
 	client    kubernetes.Interface
 	namespace string
 	holder    string
@@ -37,6 +39,10 @@ func (s *runtimeLeaderService) IsLeader(ctx context.Context) bool {
 	if s == nil || s.client == nil || s.namespace == "" || s.holder == "" {
 		return false
 	}
+	// Scheduling, operations and trust renewal share one process identity. A
+	// local concurrent renewal must not cancel a native operation as lease loss.
+	s.renewMu.Lock()
+	defer s.renewMu.Unlock()
 
 	leases := s.client.CoordinationV1().Leases(s.namespace)
 	now := metav1.NewMicroTime(time.Now())
@@ -67,6 +73,18 @@ func (s *runtimeLeaderService) IsLeader(ctx context.Context) bool {
 		return false
 	}
 	return true
+}
+
+// HoldsLease observes ownership without attempting another renewal. Concurrent
+// renewals by this process can conflict without transferring leadership.
+func (s *runtimeLeaderService) HoldsLease(ctx context.Context) bool {
+	if s == nil || s.client == nil || s.namespace == "" || s.holder == "" {
+		return false
+	}
+	lease, err := s.client.CoordinationV1().Leases(s.namespace).Get(ctx, runtimeLeaderLeaseName, metav1.GetOptions{})
+	return err == nil && lease.Spec.HolderIdentity != nil && *lease.Spec.HolderIdentity == s.holder &&
+		lease.Spec.RenewTime != nil && lease.Spec.LeaseDurationSeconds != nil && *lease.Spec.LeaseDurationSeconds > 0 &&
+		time.Now().Before(lease.Spec.RenewTime.Add(time.Duration(*lease.Spec.LeaseDurationSeconds)*time.Second))
 }
 
 func (s *runtimeLeaderService) newLease(now metav1.MicroTime) *coordinationv1.Lease {

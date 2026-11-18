@@ -6,6 +6,17 @@ import (
 
 // Instance represents a virtual desktop instance
 type Instance struct {
+	RuntimeRecovery       *InstanceRuntimeRecovery `db:"-" json:"runtime_recovery,omitempty"`
+	DefaultsPolicyVersion string                   `db:"-" json:"defaults_policy_version,omitempty"`
+	DefaultsPolicyStatus  string                   `db:"-" json:"defaults_policy_status,omitempty"`
+
+	LastGatewayActivityAt *time.Time `db:"-" json:"last_gateway_activity_at,omitempty"`
+	MonitoringSince       *time.Time `db:"-" json:"monitoring_since,omitempty"`
+	AutoStopDisabled      bool       `db:"-" json:"auto_stop_disabled"`
+	StoppedReason         string     `db:"-" json:"stopped_reason,omitempty"`
+	AutoStopBlocker       string     `db:"-" json:"auto_stop_blocker,omitempty"`
+	AutoStopPhase         string     `db:"-" json:"auto_stop_phase,omitempty"`
+
 	ID                       int        `db:"id,primarykey,autoincrement" json:"id"`
 	LastOnlineAt             *time.Time `db:"-" json:"last_online_at,omitempty"`
 	UserID                   int        `db:"user_id" json:"user_id"`
@@ -34,8 +45,12 @@ type Instance struct {
 	PVCName                  *string    `db:"pvc_name" json:"-"`
 	MountPath                string     `db:"mount_path" json:"mount_path"`
 	WorkspacePath            *string    `db:"workspace_path" json:"workspace_path,omitempty"`
-	WorkspaceUsageBytes      int64      `db:"workspace_usage_bytes" json:"workspace_usage_bytes"`
+	WorkspaceUsageBytes      int64      `db:"workspace_usage_bytes,omitempty" json:"workspace_usage_bytes"`
+	WorkspaceUsageObservedAt *time.Time `db:"workspace_usage_observed_at,omitempty" json:"workspace_usage_observed_at"`
+	WorkspaceUsageEpoch      int64      `db:"workspace_usage_epoch,omitempty" json:"-"`
+	WorkspaceUsageBlocked    bool       `db:"workspace_usage_blocked,omitempty" json:"-"`
 	RuntimeGeneration        int        `db:"runtime_generation" json:"runtime_generation"`
+	RuntimeSecurityProfile   string     `db:"runtime_security_profile,omitempty" json:"runtime_security_profile,omitempty"`
 	RuntimeErrorMessage      *string    `db:"runtime_error_message" json:"runtime_error_message,omitempty"`
 	RuntimeErrorCode         *string    `db:"runtime_error_code" json:"runtime_error_code,omitempty"`
 	ProvisioningOperationID  *string    `db:"provisioning_operation_id" json:"-"`
@@ -60,6 +75,7 @@ type InstanceListFilter struct {
 	InstanceMode string
 	Availability string
 	Status       string
+	AutoSleep    *bool
 }
 
 // InstanceSummary is the aggregate instance data used by the user dashboard.

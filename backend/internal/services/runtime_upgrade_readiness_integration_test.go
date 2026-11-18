@@ -19,7 +19,7 @@ func TestUpgradeTargetReadinessMySQLRecovery(t *testing.T) {
 	}
 	exec(`INSERT INTO runtime_rollouts (id,runtime_type,target_image_ref,status,phase,error_message,created_at,updated_at) VALUES (1,'openclaw','repo','running','gateway_restart','UPGRADE_TARGET_UNAVAILABLE: target not ready',NOW(),NOW())`)
 	for _, id := range []int{1, 2, 3} {
-		exec(`INSERT INTO instances VALUES (?,1,'openclaw','gateway','lite','stopped',1,'/isolated',NULL,NULL,NOW())`, id)
+		exec(`INSERT INTO instances(id,user_id,type,runtime_type,instance_mode,status,runtime_generation,workspace_path,runtime_error_message,runtime_error_code,updated_at) VALUES (?,1,'openclaw','gateway','lite','stopped',1,'/isolated',NULL,NULL,NOW())`, id)
 		exec(`INSERT INTO runtime_upgrade_items (rollout_id,instance_id,state,source_generation,recovery_status,recovery_error_code,error_message,restart_next_retry_at,recovery_started_at,created_at,updated_at) VALUES (1,?,'migrated',1,'retrying','UPGRADE_TARGET_UNAVAILABLE','target not ready',NOW()+INTERVAL 15 SECOND,NOW(),NOW(),NOW())`, id)
 	}
 	exec(`UPDATE runtime_upgrade_items SET state='restart_ready',restart_attempts=1,restart_deadline_at=NOW()+INTERVAL 5 MINUTE WHERE instance_id=2`)

@@ -1,0 +1,2132 @@
+{
+  "run": "u2-4790906",
+  "started_at": "2026-11-16T01:01:46.930008+00:00",
+  "version": {
+    "version": "v2026.11.13-coordinator-finalization",
+    "commit": "ab6b1e7dc4806dc9b0049abca11f5800d504f4b6",
+    "build_time": "2026-11-13T09:12:22Z"
+  },
+  "policy": {
+    "enabled": true,
+    "check_interval_days": 1,
+    "check_interval_seconds": 60,
+    "idle_timeout_days": 1,
+    "idle_timeout_seconds": 120,
+    "version": 6,
+    "next_check_at": "2026-11-16T01:02:03.673323Z"
+  },
+  "owned": [
+    {
+      "id": 267,
+      "name": "u2-4790906-openclaw-single",
+      "type": "openclaw",
+      "purpose": "single",
+      "initial_generation": 1,
+      "samples": [
+        {
+          "at": "2026-11-16T01:01:47.078709+00:00",
+          "instance": {
+            "id": 267,
+            "name": "u2-4790906-openclaw-single",
+            "type": "openclaw",
+            "status": "creating",
+            "runtime_generation": 1,
+            "stopped_reason": null,
+            "auto_stop_phase": null,
+            "auto_stop_blocker": null,
+            "runtime_error_message": null
+          }
+        },
+        {
+          "at": "2026-11-16T01:01:56.177965+00:00",
+          "instance": {
+            "id": 267,
+            "name": "u2-4790906-openclaw-single",
+            "type": "openclaw",
+            "status": "creating",
+            "runtime_generation": 1,
+            "stopped_reason": null,
+            "auto_stop_phase": null,
+            "auto_stop_blocker": null,
+            "runtime_error_message": "runtime gateway starting"
+          }
+        },
+        {
+          "at": "2026-11-16T01:02:17.402021+00:00",
+          "instance": {
+            "id": 267,
+            "name": "u2-4790906-openclaw-single",
+            "type": "openclaw",
+            "status": "running",
+            "runtime_generation": 1,
+            "stopped_reason": null,
+            "auto_stop_phase": null,
+            "auto_stop_blocker": null,
+            "runtime_error_message": null
+          }
+        },
+        {
+          "at": "2026-11-16T01:05:06.635578+00:00",
+          "instance": {
+            "id": 267,
+            "name": "u2-4790906-openclaw-single",
+            "type": "openclaw",
+            "status": "stopped",
+            "runtime_generation": 1,
+            "stopped_reason": null,
+            "auto_stop_phase": "stopping",
+            "auto_stop_blocker": null,
+            "runtime_error_message": null
+          }
+        },
+        {
+          "at": "2026-11-16T01:05:26.681643+00:00",
+          "instance": {
+            "id": 267,
+            "name": "u2-4790906-openclaw-single",
+            "type": "openclaw",
+            "status": "stopped",
+            "runtime_generation": 1,
+            "stopped_reason": "idle_timeout",
+            "auto_stop_phase": "completed",
+            "auto_stop_blocker": null,
+            "runtime_error_message": null
+          }
+        },
+        {
+          "at": "2026-11-16T01:09:23.447480+00:00",
+          "instance": {
+            "id": 267,
+            "name": "u2-4790906-openclaw-single",
+            "type": "openclaw",
+            "status": "running",
+            "runtime_generation": 2,
+            "stopped_reason": null,
+            "auto_stop_phase": null,
+            "auto_stop_blocker": null,
+            "runtime_error_message": null
+          }
+        }
+      ],
+      "running": {
+        "id": 267,
+        "name": "u2-4790906-openclaw-single",
+        "type": "openclaw",
+        "status": "running",
+        "runtime_generation": 2,
+        "stopped_reason": null,
+        "auto_stop_phase": null,
+        "auto_stop_blocker": null,
+        "runtime_error_message": null
+      },
+      "before_generation": 1,
+      "marker": {
+        "path": "uiux2-sleep-canary.txt",
+        "sha256": "2edba01ec93e427aaf573a3df4e1d497f4aaa88d58417bc9bb913b45bfbbe7ea"
+      },
+      "stopped": {
+        "id": 267,
+        "name": "u2-4790906-openclaw-single",
+        "type": "openclaw",
+        "status": "stopped",
+        "runtime_generation": 1,
+        "stopped_reason": "idle_timeout",
+        "auto_stop_phase": "completed",
+        "auto_stop_blocker": null,
+        "runtime_error_message": null
+      },
+      "sleep_proof": "completed\t1\tidle",
+      "integrity_preserved": true,
+      "cleanup_submitted": true,
+      "deleted": true
+    },
+    {
+      "id": 268,
+      "name": "u2-4790906-openclaw-batch-001",
+      "type": "openclaw",
+      "purpose": "batch",
+      "initial_generation": 1,
+      "samples": [
+        {
+          "at": "2026-11-16T01:02:17.720228+00:00",
+          "instance": {
+            "id": 268,
+            "name": "u2-4790906-openclaw-batch-001",
+            "type": "openclaw",
+            "status": "creating",
+            "runtime_generation": 1,
+            "stopped_reason": null,
+            "auto_stop_phase": null,
+            "auto_stop_blocker": null,
+            "runtime_error_message": null
+          }
+        },
+        {
+          "at": "2026-11-16T01:02:36.094488+00:00",
+          "instance": {
+            "id": 268,
+            "name": "u2-4790906-openclaw-batch-001",
+            "type": "openclaw",
+            "status": "creating",
+            "runtime_generation": 1,
+            "stopped_reason": null,
+            "auto_stop_phase": null,
+            "auto_stop_blocker": null,
+            "runtime_error_message": "runtime gateway starting"
+          }
+        },
+        {
+          "at": "2026-11-16T01:02:57.634426+00:00",
+          "instance": {
+            "id": 268,
+            "name": "u2-4790906-openclaw-batch-001",
+            "type": "openclaw",
+            "status": "running",
+            "runtime_generation": 1,
+            "stopped_reason": null,
+            "auto_stop_phase": null,
+            "auto_stop_blocker": null,
+            "runtime_error_message": null
+          }
+        },
+        {
+          "at": "2026-11-16T01:05:06.662246+00:00",
+          "instance": {
+            "id": 268,
+            "name": "u2-4790906-openclaw-batch-001",
+            "type": "openclaw",
+            "status": "stopped",
+            "runtime_generation": 1,
+            "stopped_reason": null,
+            "auto_stop_phase": "stopping",
+            "auto_stop_blocker": null,
+            "runtime_error_message": null
+          }
+        },
+        {
+          "at": "2026-11-16T01:05:26.964527+00:00",
+          "instance": {
+            "id": 268,
+            "name": "u2-4790906-openclaw-batch-001",
+            "type": "openclaw",
+            "status": "stopped",
+            "runtime_generation": 1,
+            "stopped_reason": "idle_timeout",
+            "auto_stop_phase": "completed",
+            "auto_stop_blocker": null,
+            "runtime_error_message": null
+          }
+        },
+        {
+          "at": "2026-11-16T01:09:23.889834+00:00",
+          "instance": {
+            "id": 268,
+            "name": "u2-4790906-openclaw-batch-001",
+            "type": "openclaw",
+            "status": "creating",
+            "runtime_generation": 2,
+            "stopped_reason": "idle_timeout",
+            "auto_stop_phase": "completed",
+            "auto_stop_blocker": null,
+            "runtime_error_message": null
+          }
+        },
+        {
+          "at": "2026-11-16T01:09:33.080837+00:00",
+          "instance": {
+            "id": 268,
+            "name": "u2-4790906-openclaw-batch-001",
+            "type": "openclaw",
+            "status": "creating",
+            "runtime_generation": 2,
+            "stopped_reason": "idle_timeout",
+            "auto_stop_phase": "completed",
+            "auto_stop_blocker": null,
+            "runtime_error_message": "runtime gateway starting"
+          }
+        },
+        {
+          "at": "2026-11-16T01:09:57.572669+00:00",
+          "instance": {
+            "id": 268,
+            "name": "u2-4790906-openclaw-batch-001",
+            "type": "openclaw",
+            "status": "running",
+            "runtime_generation": 2,
+            "stopped_reason": null,
+            "auto_stop_phase": null,
+            "auto_stop_blocker": null,
+            "runtime_error_message": null
+          }
+        }
+      ],
+      "running": {
+        "id": 268,
+        "name": "u2-4790906-openclaw-batch-001",
+        "type": "openclaw",
+        "status": "running",
+        "runtime_generation": 2,
+        "stopped_reason": null,
+        "auto_stop_phase": null,
+        "auto_stop_blocker": null,
+        "runtime_error_message": null
+      },
+      "before_generation": 1,
+      "marker": {
+        "path": "uiux2-sleep-canary.txt",
+        "sha256": "29e68fb55db7dc730dd8135670c8bafe841e08226188397e25de2cbd75e75bef"
+      },
+      "stopped": {
+        "id": 268,
+        "name": "u2-4790906-openclaw-batch-001",
+        "type": "openclaw",
+        "status": "stopped",
+        "runtime_generation": 1,
+        "stopped_reason": "idle_timeout",
+        "auto_stop_phase": "completed",
+        "auto_stop_blocker": null,
+        "runtime_error_message": null
+      },
+      "sleep_proof": "completed\t1\tidle",
+      "integrity_preserved": true,
+      "cleanup_submitted": true,
+      "deleted": true
+    },
+    {
+      "id": 269,
+      "name": "u2-4790906-openclaw-batch-002",
+      "type": "openclaw",
+      "purpose": "batch",
+      "initial_generation": 1,
+      "samples": [
+        {
+          "at": "2026-11-16T01:02:17.749002+00:00",
+          "instance": {
+            "id": 269,
+            "name": "u2-4790906-openclaw-batch-002",
+            "type": "openclaw",
+            "status": "creating",
+            "runtime_generation": 1,
+            "stopped_reason": null,
+            "auto_stop_phase": null,
+            "auto_stop_blocker": null,
+            "runtime_error_message": null
+          }
+        },
+        {
+          "at": "2026-11-16T01:02:26.938900+00:00",
+          "instance": {
+            "id": 269,
+            "name": "u2-4790906-openclaw-batch-002",
+            "type": "openclaw",
+            "status": "creating",
+            "runtime_generation": 1,
+            "stopped_reason": null,
+            "auto_stop_phase": null,
+            "auto_stop_blocker": null,
+            "runtime_error_message": "runtime gateway starting"
+          }
+        },
+        {
+          "at": "2026-11-16T01:02:51.440609+00:00",
+          "instance": {
+            "id": 269,
+            "name": "u2-4790906-openclaw-batch-002",
+            "type": "openclaw",
+            "status": "running",
+            "runtime_generation": 1,
+            "stopped_reason": null,
+            "auto_stop_phase": null,
+            "auto_stop_blocker": null,
+            "runtime_error_message": null
+          }
+        },
+        {
+          "at": "2026-11-16T01:05:06.688934+00:00",
+          "instance": {
+            "id": 269,
+            "name": "u2-4790906-openclaw-batch-002",
+            "type": "openclaw",
+            "status": "stopped",
+            "runtime_generation": 1,
+            "stopped_reason": null,
+            "auto_stop_phase": "stopping",
+            "auto_stop_blocker": null,
+            "runtime_error_message": null
+          }
+        },
+        {
+          "at": "2026-11-16T01:05:27.262124+00:00",
+          "instance": {
+            "id": 269,
+            "name": "u2-4790906-openclaw-batch-002",
+            "type": "openclaw",
+            "status": "stopped",
+            "runtime_generation": 1,
+            "stopped_reason": "idle_timeout",
+            "auto_stop_phase": "completed",
+            "auto_stop_blocker": null,
+            "runtime_error_message": null
+          }
+        },
+        {
+          "at": "2026-11-16T01:09:23.917534+00:00",
+          "instance": {
+            "id": 269,
+            "name": "u2-4790906-openclaw-batch-002",
+            "type": "openclaw",
+            "status": "creating",
+            "runtime_generation": 2,
+            "stopped_reason": "idle_timeout",
+            "auto_stop_phase": "completed",
+            "auto_stop_blocker": null,
+            "runtime_error_message": null
+          }
+        },
+        {
+          "at": "2026-11-16T01:09:42.292584+00:00",
+          "instance": {
+            "id": 269,
+            "name": "u2-4790906-openclaw-batch-002",
+            "type": "openclaw",
+            "status": "creating",
+            "runtime_generation": 2,
+            "stopped_reason": "idle_timeout",
+            "auto_stop_phase": "completed",
+            "auto_stop_blocker": null,
+            "runtime_error_message": "runtime gateway starting"
+          }
+        },
+        {
+          "at": "2026-11-16T01:10:03.800172+00:00",
+          "instance": {
+            "id": 269,
+            "name": "u2-4790906-openclaw-batch-002",
+            "type": "openclaw",
+            "status": "running",
+            "runtime_generation": 2,
+            "stopped_reason": null,
+            "auto_stop_phase": null,
+            "auto_stop_blocker": null,
+            "runtime_error_message": null
+          }
+        }
+      ],
+      "running": {
+        "id": 269,
+        "name": "u2-4790906-openclaw-batch-002",
+        "type": "openclaw",
+        "status": "running",
+        "runtime_generation": 2,
+        "stopped_reason": null,
+        "auto_stop_phase": null,
+        "auto_stop_blocker": null,
+        "runtime_error_message": null
+      },
+      "before_generation": 1,
+      "marker": {
+        "path": "uiux2-sleep-canary.txt",
+        "sha256": "7459fca7f8b9a676ddea3ad021eb6e29edac0b3cc4412cde092370517b3b2551"
+      },
+      "stopped": {
+        "id": 269,
+        "name": "u2-4790906-openclaw-batch-002",
+        "type": "openclaw",
+        "status": "stopped",
+        "runtime_generation": 1,
+        "stopped_reason": "idle_timeout",
+        "auto_stop_phase": "completed",
+        "auto_stop_blocker": null,
+        "runtime_error_message": null
+      },
+      "sleep_proof": "completed\t1\tidle",
+      "integrity_preserved": true,
+      "cleanup_submitted": true,
+      "deleted": true
+    },
+    {
+      "id": 270,
+      "name": "u2-4790906-hermes-single",
+      "type": "hermes",
+      "purpose": "single",
+      "initial_generation": 1,
+      "samples": [
+        {
+          "at": "2026-11-16T01:02:58.041723+00:00",
+          "instance": {
+            "id": 270,
+            "name": "u2-4790906-hermes-single",
+            "type": "hermes",
+            "status": "creating",
+            "runtime_generation": 1,
+            "stopped_reason": null,
+            "auto_stop_phase": null,
+            "auto_stop_blocker": null,
+            "runtime_error_message": null
+          }
+        },
+        {
+          "at": "2026-11-16T01:03:07.138251+00:00",
+          "instance": {
+            "id": 270,
+            "name": "u2-4790906-hermes-single",
+            "type": "hermes",
+            "status": "creating",
+            "runtime_generation": 1,
+            "stopped_reason": null,
+            "auto_stop_phase": null,
+            "auto_stop_blocker": null,
+            "runtime_error_message": "runtime gateway starting"
+          }
+        },
+        {
+          "at": "2026-11-16T01:03:16.234977+00:00",
+          "instance": {
+            "id": 270,
+            "name": "u2-4790906-hermes-single",
+            "type": "hermes",
+            "status": "running",
+            "runtime_generation": 1,
+            "stopped_reason": null,
+            "auto_stop_phase": null,
+            "auto_stop_blocker": null,
+            "runtime_error_message": null
+          }
+        },
+        {
+          "at": "2026-11-16T01:06:06.736008+00:00",
+          "instance": {
+            "id": 270,
+            "name": "u2-4790906-hermes-single",
+            "type": "hermes",
+            "status": "stopped",
+            "runtime_generation": 1,
+            "stopped_reason": "idle_timeout",
+            "auto_stop_phase": "completed",
+            "auto_stop_blocker": null,
+            "runtime_error_message": null
+          }
+        },
+        {
+          "at": "2026-11-16T01:10:04.189217+00:00",
+          "instance": {
+            "id": 270,
+            "name": "u2-4790906-hermes-single",
+            "type": "hermes",
+            "status": "running",
+            "runtime_generation": 2,
+            "stopped_reason": null,
+            "auto_stop_phase": null,
+            "auto_stop_blocker": null,
+            "runtime_error_message": null
+          }
+        }
+      ],
+      "running": {
+        "id": 270,
+        "name": "u2-4790906-hermes-single",
+        "type": "hermes",
+        "status": "running",
+        "runtime_generation": 2,
+        "stopped_reason": null,
+        "auto_stop_phase": null,
+        "auto_stop_blocker": null,
+        "runtime_error_message": null
+      },
+      "before_generation": 1,
+      "marker": {
+        "path": "uiux2-sleep-canary.txt",
+        "sha256": "6ecb5c1c29060f5105f0696da8e9765bac7ab114cb4d54b1ddd0236d0ab6a1df"
+      },
+      "stopped": {
+        "id": 270,
+        "name": "u2-4790906-hermes-single",
+        "type": "hermes",
+        "status": "stopped",
+        "runtime_generation": 1,
+        "stopped_reason": "idle_timeout",
+        "auto_stop_phase": "completed",
+        "auto_stop_blocker": null,
+        "runtime_error_message": null
+      },
+      "sleep_proof": "completed\t1\tidle",
+      "integrity_preserved": true,
+      "cleanup_submitted": true,
+      "deleted": true
+    },
+    {
+      "id": 272,
+      "name": "u2-4790906-hermes-batch-001",
+      "type": "hermes",
+      "purpose": "batch",
+      "initial_generation": 1,
+      "samples": [
+        {
+          "at": "2026-11-16T01:03:16.564939+00:00",
+          "instance": {
+            "id": 272,
+            "name": "u2-4790906-hermes-batch-001",
+            "type": "hermes",
+            "status": "creating",
+            "runtime_generation": 1,
+            "stopped_reason": null,
+            "auto_stop_phase": null,
+            "auto_stop_blocker": null,
+            "runtime_error_message": null
+          }
+        },
+        {
+          "at": "2026-11-16T01:03:25.742005+00:00",
+          "instance": {
+            "id": 272,
+            "name": "u2-4790906-hermes-batch-001",
+            "type": "hermes",
+            "status": "creating",
+            "runtime_generation": 1,
+            "stopped_reason": null,
+            "auto_stop_phase": null,
+            "auto_stop_blocker": null,
+            "runtime_error_message": "runtime gateway starting"
+          }
+        },
+        {
+          "at": "2026-11-16T01:03:31.859648+00:00",
+          "instance": {
+            "id": 272,
+            "name": "u2-4790906-hermes-batch-001",
+            "type": "hermes",
+            "status": "running",
+            "runtime_generation": 1,
+            "stopped_reason": null,
+            "auto_stop_phase": null,
+            "auto_stop_blocker": null,
+            "runtime_error_message": null
+          }
+        },
+        {
+          "at": "2026-11-16T01:06:07.033829+00:00",
+          "instance": {
+            "id": 272,
+            "name": "u2-4790906-hermes-batch-001",
+            "type": "hermes",
+            "status": "stopped",
+            "runtime_generation": 1,
+            "stopped_reason": "idle_timeout",
+            "auto_stop_phase": "completed",
+            "auto_stop_blocker": null,
+            "runtime_error_message": null
+          }
+        },
+        {
+          "at": "2026-11-16T01:10:04.651408+00:00",
+          "instance": {
+            "id": 272,
+            "name": "u2-4790906-hermes-batch-001",
+            "type": "hermes",
+            "status": "creating",
+            "runtime_generation": 2,
+            "stopped_reason": "idle_timeout",
+            "auto_stop_phase": "completed",
+            "auto_stop_blocker": null,
+            "runtime_error_message": null
+          }
+        },
+        {
+          "at": "2026-11-16T01:10:13.835535+00:00",
+          "instance": {
+            "id": 272,
+            "name": "u2-4790906-hermes-batch-001",
+            "type": "hermes",
+            "status": "creating",
+            "runtime_generation": 2,
+            "stopped_reason": "idle_timeout",
+            "auto_stop_phase": "completed",
+            "auto_stop_blocker": null,
+            "runtime_error_message": "runtime gateway starting"
+          }
+        },
+        {
+          "at": "2026-11-16T01:10:19.958267+00:00",
+          "instance": {
+            "id": 272,
+            "name": "u2-4790906-hermes-batch-001",
+            "type": "hermes",
+            "status": "running",
+            "runtime_generation": 2,
+            "stopped_reason": null,
+            "auto_stop_phase": null,
+            "auto_stop_blocker": null,
+            "runtime_error_message": null
+          }
+        }
+      ],
+      "running": {
+        "id": 272,
+        "name": "u2-4790906-hermes-batch-001",
+        "type": "hermes",
+        "status": "running",
+        "runtime_generation": 2,
+        "stopped_reason": null,
+        "auto_stop_phase": null,
+        "auto_stop_blocker": null,
+        "runtime_error_message": null
+      },
+      "before_generation": 1,
+      "marker": {
+        "path": "uiux2-sleep-canary.txt",
+        "sha256": "c4b774ba4f769f5c7d25db313c8865113f0f73f6d1bcbf4b179879479c35b21e"
+      },
+      "stopped": {
+        "id": 272,
+        "name": "u2-4790906-hermes-batch-001",
+        "type": "hermes",
+        "status": "stopped",
+        "runtime_generation": 1,
+        "stopped_reason": "idle_timeout",
+        "auto_stop_phase": "completed",
+        "auto_stop_blocker": null,
+        "runtime_error_message": null
+      },
+      "sleep_proof": "completed\t1\tidle",
+      "integrity_preserved": true,
+      "cleanup_submitted": true,
+      "deleted": true
+    },
+    {
+      "id": 271,
+      "name": "u2-4790906-hermes-batch-002",
+      "type": "hermes",
+      "purpose": "batch",
+      "initial_generation": 1,
+      "samples": [
+        {
+          "at": "2026-11-16T01:03:16.592744+00:00",
+          "instance": {
+            "id": 271,
+            "name": "u2-4790906-hermes-batch-002",
+            "type": "hermes",
+            "status": "creating",
+            "runtime_generation": 1,
+            "stopped_reason": null,
+            "auto_stop_phase": null,
+            "auto_stop_blocker": null,
+            "runtime_error_message": null
+          }
+        },
+        {
+          "at": "2026-11-16T01:03:32.017243+00:00",
+          "instance": {
+            "id": 271,
+            "name": "u2-4790906-hermes-batch-002",
+            "type": "hermes",
+            "status": "creating",
+            "runtime_generation": 1,
+            "stopped_reason": null,
+            "auto_stop_phase": null,
+            "auto_stop_blocker": null,
+            "runtime_error_message": "runtime gateway starting"
+          }
+        },
+        {
+          "at": "2026-11-16T01:03:41.114443+00:00",
+          "instance": {
+            "id": 271,
+            "name": "u2-4790906-hermes-batch-002",
+            "type": "hermes",
+            "status": "running",
+            "runtime_generation": 1,
+            "stopped_reason": null,
+            "auto_stop_phase": null,
+            "auto_stop_blocker": null,
+            "runtime_error_message": null
+          }
+        },
+        {
+          "at": "2026-11-16T01:06:07.323068+00:00",
+          "instance": {
+            "id": 271,
+            "name": "u2-4790906-hermes-batch-002",
+            "type": "hermes",
+            "status": "stopped",
+            "runtime_generation": 1,
+            "stopped_reason": "idle_timeout",
+            "auto_stop_phase": "completed",
+            "auto_stop_blocker": null,
+            "runtime_error_message": null
+          }
+        },
+        {
+          "at": "2026-11-16T01:10:04.680305+00:00",
+          "instance": {
+            "id": 271,
+            "name": "u2-4790906-hermes-batch-002",
+            "type": "hermes",
+            "status": "creating",
+            "runtime_generation": 2,
+            "stopped_reason": "idle_timeout",
+            "auto_stop_phase": "completed",
+            "auto_stop_blocker": null,
+            "runtime_error_message": null
+          }
+        },
+        {
+          "at": "2026-11-16T01:10:16.925255+00:00",
+          "instance": {
+            "id": 271,
+            "name": "u2-4790906-hermes-batch-002",
+            "type": "hermes",
+            "status": "creating",
+            "runtime_generation": 2,
+            "stopped_reason": "idle_timeout",
+            "auto_stop_phase": "completed",
+            "auto_stop_blocker": null,
+            "runtime_error_message": "runtime gateway starting"
+          }
+        },
+        {
+          "at": "2026-11-16T01:10:26.188761+00:00",
+          "instance": {
+            "id": 271,
+            "name": "u2-4790906-hermes-batch-002",
+            "type": "hermes",
+            "status": "running",
+            "runtime_generation": 2,
+            "stopped_reason": null,
+            "auto_stop_phase": null,
+            "auto_stop_blocker": null,
+            "runtime_error_message": null
+          }
+        }
+      ],
+      "running": {
+        "id": 271,
+        "name": "u2-4790906-hermes-batch-002",
+        "type": "hermes",
+        "status": "running",
+        "runtime_generation": 2,
+        "stopped_reason": null,
+        "auto_stop_phase": null,
+        "auto_stop_blocker": null,
+        "runtime_error_message": null
+      },
+      "before_generation": 1,
+      "marker": {
+        "path": "uiux2-sleep-canary.txt",
+        "sha256": "51f6639cbb2a6b57de9ff91642206be8274d77d2844c47547050357348daea76"
+      },
+      "stopped": {
+        "id": 271,
+        "name": "u2-4790906-hermes-batch-002",
+        "type": "hermes",
+        "status": "stopped",
+        "runtime_generation": 1,
+        "stopped_reason": "idle_timeout",
+        "auto_stop_phase": "completed",
+        "auto_stop_blocker": null,
+        "runtime_error_message": null
+      },
+      "sleep_proof": "completed\t1\tidle",
+      "integrity_preserved": true,
+      "cleanup_submitted": true,
+      "deleted": true
+    },
+    {
+      "id": 273,
+      "name": "u2-4790906-opencode-single",
+      "type": "opencode",
+      "purpose": "single",
+      "initial_generation": 1,
+      "samples": [
+        {
+          "at": "2026-11-16T01:03:41.519801+00:00",
+          "instance": {
+            "id": 273,
+            "name": "u2-4790906-opencode-single",
+            "type": "opencode",
+            "status": "creating",
+            "runtime_generation": 1,
+            "stopped_reason": null,
+            "auto_stop_phase": null,
+            "auto_stop_blocker": null,
+            "runtime_error_message": null
+          }
+        },
+        {
+          "at": "2026-11-16T01:03:44.553605+00:00",
+          "instance": {
+            "id": 273,
+            "name": "u2-4790906-opencode-single",
+            "type": "opencode",
+            "status": "creating",
+            "runtime_generation": 1,
+            "stopped_reason": null,
+            "auto_stop_phase": null,
+            "auto_stop_blocker": null,
+            "runtime_error_message": "runtime gateway starting"
+          }
+        },
+        {
+          "at": "2026-11-16T01:03:53.644191+00:00",
+          "instance": {
+            "id": 273,
+            "name": "u2-4790906-opencode-single",
+            "type": "opencode",
+            "status": "running",
+            "runtime_generation": 1,
+            "stopped_reason": null,
+            "auto_stop_phase": null,
+            "auto_stop_blocker": null,
+            "runtime_error_message": null
+          }
+        },
+        {
+          "at": "2026-11-16T01:06:07.618404+00:00",
+          "instance": {
+            "id": 273,
+            "name": "u2-4790906-opencode-single",
+            "type": "opencode",
+            "status": "stopped",
+            "runtime_generation": 1,
+            "stopped_reason": "idle_timeout",
+            "auto_stop_phase": "completed",
+            "auto_stop_blocker": null,
+            "runtime_error_message": null
+          }
+        },
+        {
+          "at": "2026-11-16T01:10:26.567024+00:00",
+          "instance": {
+            "id": 273,
+            "name": "u2-4790906-opencode-single",
+            "type": "opencode",
+            "status": "running",
+            "runtime_generation": 2,
+            "stopped_reason": null,
+            "auto_stop_phase": null,
+            "auto_stop_blocker": null,
+            "runtime_error_message": null
+          }
+        }
+      ],
+      "running": {
+        "id": 273,
+        "name": "u2-4790906-opencode-single",
+        "type": "opencode",
+        "status": "running",
+        "runtime_generation": 2,
+        "stopped_reason": null,
+        "auto_stop_phase": null,
+        "auto_stop_blocker": null,
+        "runtime_error_message": null
+      },
+      "before_generation": 1,
+      "marker": {
+        "path": "uiux2-sleep-canary.txt",
+        "sha256": "71ba427cb736a04cb0d67015d9889954b1645ab1ede8d9e81c375cf79c81804f"
+      },
+      "stopped": {
+        "id": 273,
+        "name": "u2-4790906-opencode-single",
+        "type": "opencode",
+        "status": "stopped",
+        "runtime_generation": 1,
+        "stopped_reason": "idle_timeout",
+        "auto_stop_phase": "completed",
+        "auto_stop_blocker": null,
+        "runtime_error_message": null
+      },
+      "sleep_proof": "completed\t1\tidle",
+      "integrity_preserved": true,
+      "cleanup_submitted": true,
+      "deleted": true
+    },
+    {
+      "id": 274,
+      "name": "u2-4790906-opencode-batch-001",
+      "type": "opencode",
+      "purpose": "batch",
+      "initial_generation": 1,
+      "samples": [
+        {
+          "at": "2026-11-16T01:03:53.947323+00:00",
+          "instance": {
+            "id": 274,
+            "name": "u2-4790906-opencode-batch-001",
+            "type": "opencode",
+            "status": "creating",
+            "runtime_generation": 1,
+            "stopped_reason": null,
+            "auto_stop_phase": null,
+            "auto_stop_blocker": null,
+            "runtime_error_message": null
+          }
+        },
+        {
+          "at": "2026-11-16T01:03:57.007144+00:00",
+          "instance": {
+            "id": 274,
+            "name": "u2-4790906-opencode-batch-001",
+            "type": "opencode",
+            "status": "creating",
+            "runtime_generation": 1,
+            "stopped_reason": null,
+            "auto_stop_phase": null,
+            "auto_stop_blocker": null,
+            "runtime_error_message": "runtime gateway starting"
+          }
+        },
+        {
+          "at": "2026-11-16T01:04:03.128916+00:00",
+          "instance": {
+            "id": 274,
+            "name": "u2-4790906-opencode-batch-001",
+            "type": "opencode",
+            "status": "running",
+            "runtime_generation": 1,
+            "stopped_reason": null,
+            "auto_stop_phase": null,
+            "auto_stop_blocker": null,
+            "runtime_error_message": null
+          }
+        },
+        {
+          "at": "2026-11-16T01:06:07.919129+00:00",
+          "instance": {
+            "id": 274,
+            "name": "u2-4790906-opencode-batch-001",
+            "type": "opencode",
+            "status": "stopped",
+            "runtime_generation": 1,
+            "stopped_reason": "idle_timeout",
+            "auto_stop_phase": "completed",
+            "auto_stop_blocker": null,
+            "runtime_error_message": null
+          }
+        },
+        {
+          "at": "2026-11-16T01:10:26.987647+00:00",
+          "instance": {
+            "id": 274,
+            "name": "u2-4790906-opencode-batch-001",
+            "type": "opencode",
+            "status": "creating",
+            "runtime_generation": 2,
+            "stopped_reason": "idle_timeout",
+            "auto_stop_phase": "completed",
+            "auto_stop_blocker": null,
+            "runtime_error_message": null
+          }
+        },
+        {
+          "at": "2026-11-16T01:10:30.050676+00:00",
+          "instance": {
+            "id": 274,
+            "name": "u2-4790906-opencode-batch-001",
+            "type": "opencode",
+            "status": "creating",
+            "runtime_generation": 2,
+            "stopped_reason": "idle_timeout",
+            "auto_stop_phase": "completed",
+            "auto_stop_blocker": null,
+            "runtime_error_message": "runtime gateway starting"
+          }
+        },
+        {
+          "at": "2026-11-16T01:10:39.240813+00:00",
+          "instance": {
+            "id": 274,
+            "name": "u2-4790906-opencode-batch-001",
+            "type": "opencode",
+            "status": "running",
+            "runtime_generation": 2,
+            "stopped_reason": null,
+            "auto_stop_phase": null,
+            "auto_stop_blocker": null,
+            "runtime_error_message": null
+          }
+        }
+      ],
+      "running": {
+        "id": 274,
+        "name": "u2-4790906-opencode-batch-001",
+        "type": "opencode",
+        "status": "running",
+        "runtime_generation": 2,
+        "stopped_reason": null,
+        "auto_stop_phase": null,
+        "auto_stop_blocker": null,
+        "runtime_error_message": null
+      },
+      "before_generation": 1,
+      "marker": {
+        "path": "uiux2-sleep-canary.txt",
+        "sha256": "159fe8f77c0df0ed21e08e5915322b07c3cb315980270ec4b4673f758102e736"
+      },
+      "stopped": {
+        "id": 274,
+        "name": "u2-4790906-opencode-batch-001",
+        "type": "opencode",
+        "status": "stopped",
+        "runtime_generation": 1,
+        "stopped_reason": "idle_timeout",
+        "auto_stop_phase": "completed",
+        "auto_stop_blocker": null,
+        "runtime_error_message": null
+      },
+      "sleep_proof": "completed\t1\tidle",
+      "integrity_preserved": true,
+      "cleanup_submitted": true,
+      "deleted": true
+    },
+    {
+      "id": 275,
+      "name": "u2-4790906-opencode-batch-002",
+      "type": "opencode",
+      "purpose": "batch",
+      "initial_generation": 1,
+      "samples": [
+        {
+          "at": "2026-11-16T01:03:53.976469+00:00",
+          "instance": {
+            "id": 275,
+            "name": "u2-4790906-opencode-batch-002",
+            "type": "opencode",
+            "status": "creating",
+            "runtime_generation": 1,
+            "stopped_reason": null,
+            "auto_stop_phase": null,
+            "auto_stop_blocker": null,
+            "runtime_error_message": null
+          }
+        },
+        {
+          "at": "2026-11-16T01:03:57.034748+00:00",
+          "instance": {
+            "id": 275,
+            "name": "u2-4790906-opencode-batch-002",
+            "type": "opencode",
+            "status": "creating",
+            "runtime_generation": 1,
+            "stopped_reason": null,
+            "auto_stop_phase": null,
+            "auto_stop_blocker": null,
+            "runtime_error_message": "runtime gateway starting"
+          }
+        },
+        {
+          "at": "2026-11-16T01:04:03.295370+00:00",
+          "instance": {
+            "id": 275,
+            "name": "u2-4790906-opencode-batch-002",
+            "type": "opencode",
+            "status": "running",
+            "runtime_generation": 1,
+            "stopped_reason": null,
+            "auto_stop_phase": null,
+            "auto_stop_blocker": null,
+            "runtime_error_message": null
+          }
+        },
+        {
+          "at": "2026-11-16T01:06:08.191112+00:00",
+          "instance": {
+            "id": 275,
+            "name": "u2-4790906-opencode-batch-002",
+            "type": "opencode",
+            "status": "stopped",
+            "runtime_generation": 1,
+            "stopped_reason": "idle_timeout",
+            "auto_stop_phase": "completed",
+            "auto_stop_blocker": null,
+            "runtime_error_message": null
+          }
+        },
+        {
+          "at": "2026-11-16T01:10:27.017165+00:00",
+          "instance": {
+            "id": 275,
+            "name": "u2-4790906-opencode-batch-002",
+            "type": "opencode",
+            "status": "creating",
+            "runtime_generation": 2,
+            "stopped_reason": "idle_timeout",
+            "auto_stop_phase": "completed",
+            "auto_stop_blocker": null,
+            "runtime_error_message": null
+          }
+        },
+        {
+          "at": "2026-11-16T01:10:30.080067+00:00",
+          "instance": {
+            "id": 275,
+            "name": "u2-4790906-opencode-batch-002",
+            "type": "opencode",
+            "status": "creating",
+            "runtime_generation": 2,
+            "stopped_reason": "idle_timeout",
+            "auto_stop_phase": "completed",
+            "auto_stop_blocker": null,
+            "runtime_error_message": "runtime gateway starting"
+          }
+        },
+        {
+          "at": "2026-11-16T01:10:39.404129+00:00",
+          "instance": {
+            "id": 275,
+            "name": "u2-4790906-opencode-batch-002",
+            "type": "opencode",
+            "status": "running",
+            "runtime_generation": 2,
+            "stopped_reason": null,
+            "auto_stop_phase": null,
+            "auto_stop_blocker": null,
+            "runtime_error_message": null
+          }
+        }
+      ],
+      "running": {
+        "id": 275,
+        "name": "u2-4790906-opencode-batch-002",
+        "type": "opencode",
+        "status": "running",
+        "runtime_generation": 2,
+        "stopped_reason": null,
+        "auto_stop_phase": null,
+        "auto_stop_blocker": null,
+        "runtime_error_message": null
+      },
+      "before_generation": 1,
+      "marker": {
+        "path": "uiux2-sleep-canary.txt",
+        "sha256": "c10e74c2cc36a820a2a3b7154b48432718be420fa903aa9a434b5041a3ff23db"
+      },
+      "stopped": {
+        "id": 275,
+        "name": "u2-4790906-opencode-batch-002",
+        "type": "opencode",
+        "status": "stopped",
+        "runtime_generation": 1,
+        "stopped_reason": "idle_timeout",
+        "auto_stop_phase": "completed",
+        "auto_stop_blocker": null,
+        "runtime_error_message": null
+      },
+      "sleep_proof": "completed\t1\tidle",
+      "integrity_preserved": true,
+      "cleanup_submitted": true,
+      "deleted": true
+    },
+    {
+      "id": 276,
+      "name": "u2-4790906-dsh-single",
+      "type": "deepseek-harness",
+      "purpose": "single",
+      "initial_generation": 1,
+      "samples": [
+        {
+          "at": "2026-11-16T01:04:03.697340+00:00",
+          "instance": {
+            "id": 276,
+            "name": "u2-4790906-dsh-single",
+            "type": "deepseek-harness",
+            "status": "creating",
+            "runtime_generation": 1,
+            "stopped_reason": null,
+            "auto_stop_phase": null,
+            "auto_stop_blocker": null,
+            "runtime_error_message": null
+          }
+        },
+        {
+          "at": "2026-11-16T01:04:06.731413+00:00",
+          "instance": {
+            "id": 276,
+            "name": "u2-4790906-dsh-single",
+            "type": "deepseek-harness",
+            "status": "creating",
+            "runtime_generation": 1,
+            "stopped_reason": null,
+            "auto_stop_phase": null,
+            "auto_stop_blocker": null,
+            "runtime_error_message": "runtime gateway starting"
+          }
+        },
+        {
+          "at": "2026-11-16T01:04:09.761845+00:00",
+          "instance": {
+            "id": 276,
+            "name": "u2-4790906-dsh-single",
+            "type": "deepseek-harness",
+            "status": "running",
+            "runtime_generation": 1,
+            "stopped_reason": null,
+            "auto_stop_phase": null,
+            "auto_stop_blocker": null,
+            "runtime_error_message": null
+          }
+        },
+        {
+          "at": "2026-11-16T01:07:07.226858+00:00",
+          "instance": {
+            "id": 276,
+            "name": "u2-4790906-dsh-single",
+            "type": "deepseek-harness",
+            "status": "stopped",
+            "runtime_generation": 1,
+            "stopped_reason": "idle_timeout",
+            "auto_stop_phase": "completed",
+            "auto_stop_blocker": null,
+            "runtime_error_message": null
+          }
+        },
+        {
+          "at": "2026-11-16T01:10:39.778601+00:00",
+          "instance": {
+            "id": 276,
+            "name": "u2-4790906-dsh-single",
+            "type": "deepseek-harness",
+            "status": "running",
+            "runtime_generation": 2,
+            "stopped_reason": null,
+            "auto_stop_phase": null,
+            "auto_stop_blocker": null,
+            "runtime_error_message": null
+          }
+        }
+      ],
+      "running": {
+        "id": 276,
+        "name": "u2-4790906-dsh-single",
+        "type": "deepseek-harness",
+        "status": "running",
+        "runtime_generation": 2,
+        "stopped_reason": null,
+        "auto_stop_phase": null,
+        "auto_stop_blocker": null,
+        "runtime_error_message": null
+      },
+      "before_generation": 1,
+      "marker": {
+        "path": "uiux2-sleep-canary.txt",
+        "sha256": "eef4253d44fa62bb97f9dfa97a0045c7709c7451a36b6a0a7a8479be16d3dabb"
+      },
+      "stopped": {
+        "id": 276,
+        "name": "u2-4790906-dsh-single",
+        "type": "deepseek-harness",
+        "status": "stopped",
+        "runtime_generation": 1,
+        "stopped_reason": "idle_timeout",
+        "auto_stop_phase": "completed",
+        "auto_stop_blocker": null,
+        "runtime_error_message": null
+      },
+      "sleep_proof": "completed\t1\tidle",
+      "integrity_preserved": true,
+      "cleanup_submitted": true,
+      "deleted": true
+    },
+    {
+      "id": 278,
+      "name": "u2-4790906-dsh-batch-001",
+      "type": "deepseek-harness",
+      "purpose": "batch",
+      "initial_generation": 1,
+      "samples": [
+        {
+          "at": "2026-11-16T01:04:10.093053+00:00",
+          "instance": {
+            "id": 278,
+            "name": "u2-4790906-dsh-batch-001",
+            "type": "deepseek-harness",
+            "status": "creating",
+            "runtime_generation": 1,
+            "stopped_reason": null,
+            "auto_stop_phase": null,
+            "auto_stop_blocker": null,
+            "runtime_error_message": null
+          }
+        },
+        {
+          "at": "2026-11-16T01:04:13.154627+00:00",
+          "instance": {
+            "id": 278,
+            "name": "u2-4790906-dsh-batch-001",
+            "type": "deepseek-harness",
+            "status": "creating",
+            "runtime_generation": 1,
+            "stopped_reason": null,
+            "auto_stop_phase": null,
+            "auto_stop_blocker": null,
+            "runtime_error_message": "runtime gateway starting"
+          }
+        },
+        {
+          "at": "2026-11-16T01:04:19.280388+00:00",
+          "instance": {
+            "id": 278,
+            "name": "u2-4790906-dsh-batch-001",
+            "type": "deepseek-harness",
+            "status": "running",
+            "runtime_generation": 1,
+            "stopped_reason": null,
+            "auto_stop_phase": null,
+            "auto_stop_blocker": null,
+            "runtime_error_message": null
+          }
+        },
+        {
+          "at": "2026-11-16T01:07:07.489797+00:00",
+          "instance": {
+            "id": 278,
+            "name": "u2-4790906-dsh-batch-001",
+            "type": "deepseek-harness",
+            "status": "stopped",
+            "runtime_generation": 1,
+            "stopped_reason": "idle_timeout",
+            "auto_stop_phase": "completed",
+            "auto_stop_blocker": null,
+            "runtime_error_message": null
+          }
+        },
+        {
+          "at": "2026-11-16T01:10:40.208677+00:00",
+          "instance": {
+            "id": 278,
+            "name": "u2-4790906-dsh-batch-001",
+            "type": "deepseek-harness",
+            "status": "creating",
+            "runtime_generation": 2,
+            "stopped_reason": "idle_timeout",
+            "auto_stop_phase": "completed",
+            "auto_stop_blocker": null,
+            "runtime_error_message": null
+          }
+        },
+        {
+          "at": "2026-11-16T01:10:43.274602+00:00",
+          "instance": {
+            "id": 278,
+            "name": "u2-4790906-dsh-batch-001",
+            "type": "deepseek-harness",
+            "status": "creating",
+            "runtime_generation": 2,
+            "stopped_reason": "idle_timeout",
+            "auto_stop_phase": "completed",
+            "auto_stop_blocker": null,
+            "runtime_error_message": "runtime gateway starting"
+          }
+        },
+        {
+          "at": "2026-11-16T01:10:49.401964+00:00",
+          "instance": {
+            "id": 278,
+            "name": "u2-4790906-dsh-batch-001",
+            "type": "deepseek-harness",
+            "status": "running",
+            "runtime_generation": 2,
+            "stopped_reason": null,
+            "auto_stop_phase": null,
+            "auto_stop_blocker": null,
+            "runtime_error_message": null
+          }
+        }
+      ],
+      "running": {
+        "id": 278,
+        "name": "u2-4790906-dsh-batch-001",
+        "type": "deepseek-harness",
+        "status": "running",
+        "runtime_generation": 2,
+        "stopped_reason": null,
+        "auto_stop_phase": null,
+        "auto_stop_blocker": null,
+        "runtime_error_message": null
+      },
+      "before_generation": 1,
+      "marker": {
+        "path": "uiux2-sleep-canary.txt",
+        "sha256": "51f06e4840bc24652af43a8e7d1d092cba449e980df5d87781474fc933c4dcc3"
+      },
+      "stopped": {
+        "id": 278,
+        "name": "u2-4790906-dsh-batch-001",
+        "type": "deepseek-harness",
+        "status": "stopped",
+        "runtime_generation": 1,
+        "stopped_reason": "idle_timeout",
+        "auto_stop_phase": "completed",
+        "auto_stop_blocker": null,
+        "runtime_error_message": null
+      },
+      "sleep_proof": "completed\t1\tidle",
+      "integrity_preserved": true,
+      "cleanup_submitted": true,
+      "deleted": true
+    },
+    {
+      "id": 277,
+      "name": "u2-4790906-dsh-batch-002",
+      "type": "deepseek-harness",
+      "purpose": "batch",
+      "initial_generation": 1,
+      "samples": [
+        {
+          "at": "2026-11-16T01:04:10.120493+00:00",
+          "instance": {
+            "id": 277,
+            "name": "u2-4790906-dsh-batch-002",
+            "type": "deepseek-harness",
+            "status": "creating",
+            "runtime_generation": 1,
+            "stopped_reason": null,
+            "auto_stop_phase": null,
+            "auto_stop_blocker": null,
+            "runtime_error_message": null
+          }
+        },
+        {
+          "at": "2026-11-16T01:04:13.183644+00:00",
+          "instance": {
+            "id": 277,
+            "name": "u2-4790906-dsh-batch-002",
+            "type": "deepseek-harness",
+            "status": "creating",
+            "runtime_generation": 1,
+            "stopped_reason": null,
+            "auto_stop_phase": null,
+            "auto_stop_blocker": null,
+            "runtime_error_message": "runtime gateway starting"
+          }
+        },
+        {
+          "at": "2026-11-16T01:04:19.431936+00:00",
+          "instance": {
+            "id": 277,
+            "name": "u2-4790906-dsh-batch-002",
+            "type": "deepseek-harness",
+            "status": "running",
+            "runtime_generation": 1,
+            "stopped_reason": null,
+            "auto_stop_phase": null,
+            "auto_stop_blocker": null,
+            "runtime_error_message": null
+          }
+        },
+        {
+          "at": "2026-11-16T01:07:07.762050+00:00",
+          "instance": {
+            "id": 277,
+            "name": "u2-4790906-dsh-batch-002",
+            "type": "deepseek-harness",
+            "status": "stopped",
+            "runtime_generation": 1,
+            "stopped_reason": "idle_timeout",
+            "auto_stop_phase": "completed",
+            "auto_stop_blocker": null,
+            "runtime_error_message": null
+          }
+        },
+        {
+          "at": "2026-11-16T01:10:40.237789+00:00",
+          "instance": {
+            "id": 277,
+            "name": "u2-4790906-dsh-batch-002",
+            "type": "deepseek-harness",
+            "status": "creating",
+            "runtime_generation": 2,
+            "stopped_reason": "idle_timeout",
+            "auto_stop_phase": "completed",
+            "auto_stop_blocker": null,
+            "runtime_error_message": null
+          }
+        },
+        {
+          "at": "2026-11-16T01:10:43.302161+00:00",
+          "instance": {
+            "id": 277,
+            "name": "u2-4790906-dsh-batch-002",
+            "type": "deepseek-harness",
+            "status": "creating",
+            "runtime_generation": 2,
+            "stopped_reason": "idle_timeout",
+            "auto_stop_phase": "completed",
+            "auto_stop_blocker": null,
+            "runtime_error_message": "runtime gateway starting"
+          }
+        },
+        {
+          "at": "2026-11-16T01:10:49.572835+00:00",
+          "instance": {
+            "id": 277,
+            "name": "u2-4790906-dsh-batch-002",
+            "type": "deepseek-harness",
+            "status": "running",
+            "runtime_generation": 2,
+            "stopped_reason": null,
+            "auto_stop_phase": null,
+            "auto_stop_blocker": null,
+            "runtime_error_message": null
+          }
+        }
+      ],
+      "running": {
+        "id": 277,
+        "name": "u2-4790906-dsh-batch-002",
+        "type": "deepseek-harness",
+        "status": "running",
+        "runtime_generation": 2,
+        "stopped_reason": null,
+        "auto_stop_phase": null,
+        "auto_stop_blocker": null,
+        "runtime_error_message": null
+      },
+      "before_generation": 1,
+      "marker": {
+        "path": "uiux2-sleep-canary.txt",
+        "sha256": "70c4e1639f5cec318f8af589806415502647043eab50b46eb7e89f1172d87b72"
+      },
+      "stopped": {
+        "id": 277,
+        "name": "u2-4790906-dsh-batch-002",
+        "type": "deepseek-harness",
+        "status": "stopped",
+        "runtime_generation": 1,
+        "stopped_reason": "idle_timeout",
+        "auto_stop_phase": "completed",
+        "auto_stop_blocker": null,
+        "runtime_error_message": null
+      },
+      "sleep_proof": "completed\t1\tidle",
+      "integrity_preserved": true,
+      "cleanup_submitted": true,
+      "deleted": true
+    }
+  ],
+  "results": [
+    {
+      "type": "openclaw",
+      "case": "single:create",
+      "result": "PASS",
+      "at": "2026-11-16T01:02:17.636645+00:00",
+      "evidence": {
+        "ids": [
+          267
+        ],
+        "seconds": 30.65
+      }
+    },
+    {
+      "type": "openclaw",
+      "case": "batch:create",
+      "result": "PASS",
+      "at": "2026-11-16T01:02:57.948713+00:00",
+      "evidence": {
+        "ids": [
+          268,
+          269
+        ],
+        "seconds": 40.31
+      }
+    },
+    {
+      "type": "hermes",
+      "case": "single:create",
+      "result": "PASS",
+      "at": "2026-11-16T01:03:16.471617+00:00",
+      "evidence": {
+        "ids": [
+          270
+        ],
+        "seconds": 18.52
+      }
+    },
+    {
+      "type": "hermes",
+      "case": "batch:create",
+      "result": "PASS",
+      "at": "2026-11-16T01:03:41.437419+00:00",
+      "evidence": {
+        "ids": [
+          272,
+          271
+        ],
+        "seconds": 24.96
+      }
+    },
+    {
+      "type": "opencode",
+      "case": "single:create",
+      "result": "PASS",
+      "at": "2026-11-16T01:03:53.867652+00:00",
+      "evidence": {
+        "ids": [
+          273
+        ],
+        "seconds": 12.43
+      }
+    },
+    {
+      "type": "opencode",
+      "case": "batch:create",
+      "result": "PASS",
+      "at": "2026-11-16T01:04:03.612747+00:00",
+      "evidence": {
+        "ids": [
+          274,
+          275
+        ],
+        "seconds": 9.74
+      }
+    },
+    {
+      "type": "deepseek-harness",
+      "case": "single:create",
+      "result": "PASS",
+      "at": "2026-11-16T01:04:09.995112+00:00",
+      "evidence": {
+        "ids": [
+          276
+        ],
+        "seconds": 6.38
+      }
+    },
+    {
+      "type": "deepseek-harness",
+      "case": "batch:create",
+      "result": "PASS",
+      "at": "2026-11-16T01:04:19.763422+00:00",
+      "evidence": {
+        "ids": [
+          278,
+          277
+        ],
+        "seconds": 9.77
+      }
+    },
+    {
+      "type": "openclaw",
+      "case": "single:sleep",
+      "result": "PASS",
+      "at": "2026-11-16T01:07:08.015643+00:00",
+      "evidence": {
+        "instances": [
+          {
+            "id": 267,
+            "stopped": {
+              "id": 267,
+              "name": "u2-4790906-openclaw-single",
+              "type": "openclaw",
+              "status": "stopped",
+              "runtime_generation": 1,
+              "stopped_reason": "idle_timeout",
+              "auto_stop_phase": "completed",
+              "auto_stop_blocker": null,
+              "runtime_error_message": null
+            },
+            "sleep_proof": "completed\t1\tidle",
+            "failure": null
+          }
+        ]
+      }
+    },
+    {
+      "type": "openclaw",
+      "case": "batch:sleep",
+      "result": "PASS",
+      "at": "2026-11-16T01:07:08.016836+00:00",
+      "evidence": {
+        "instances": [
+          {
+            "id": 268,
+            "stopped": {
+              "id": 268,
+              "name": "u2-4790906-openclaw-batch-001",
+              "type": "openclaw",
+              "status": "stopped",
+              "runtime_generation": 1,
+              "stopped_reason": "idle_timeout",
+              "auto_stop_phase": "completed",
+              "auto_stop_blocker": null,
+              "runtime_error_message": null
+            },
+            "sleep_proof": "completed\t1\tidle",
+            "failure": null
+          },
+          {
+            "id": 269,
+            "stopped": {
+              "id": 269,
+              "name": "u2-4790906-openclaw-batch-002",
+              "type": "openclaw",
+              "status": "stopped",
+              "runtime_generation": 1,
+              "stopped_reason": "idle_timeout",
+              "auto_stop_phase": "completed",
+              "auto_stop_blocker": null,
+              "runtime_error_message": null
+            },
+            "sleep_proof": "completed\t1\tidle",
+            "failure": null
+          }
+        ]
+      }
+    },
+    {
+      "type": "hermes",
+      "case": "single:sleep",
+      "result": "PASS",
+      "at": "2026-11-16T01:07:08.017781+00:00",
+      "evidence": {
+        "instances": [
+          {
+            "id": 270,
+            "stopped": {
+              "id": 270,
+              "name": "u2-4790906-hermes-single",
+              "type": "hermes",
+              "status": "stopped",
+              "runtime_generation": 1,
+              "stopped_reason": "idle_timeout",
+              "auto_stop_phase": "completed",
+              "auto_stop_blocker": null,
+              "runtime_error_message": null
+            },
+            "sleep_proof": "completed\t1\tidle",
+            "failure": null
+          }
+        ]
+      }
+    },
+    {
+      "type": "hermes",
+      "case": "batch:sleep",
+      "result": "PASS",
+      "at": "2026-11-16T01:07:08.018731+00:00",
+      "evidence": {
+        "instances": [
+          {
+            "id": 272,
+            "stopped": {
+              "id": 272,
+              "name": "u2-4790906-hermes-batch-001",
+              "type": "hermes",
+              "status": "stopped",
+              "runtime_generation": 1,
+              "stopped_reason": "idle_timeout",
+              "auto_stop_phase": "completed",
+              "auto_stop_blocker": null,
+              "runtime_error_message": null
+            },
+            "sleep_proof": "completed\t1\tidle",
+            "failure": null
+          },
+          {
+            "id": 271,
+            "stopped": {
+              "id": 271,
+              "name": "u2-4790906-hermes-batch-002",
+              "type": "hermes",
+              "status": "stopped",
+              "runtime_generation": 1,
+              "stopped_reason": "idle_timeout",
+              "auto_stop_phase": "completed",
+              "auto_stop_blocker": null,
+              "runtime_error_message": null
+            },
+            "sleep_proof": "completed\t1\tidle",
+            "failure": null
+          }
+        ]
+      }
+    },
+    {
+      "type": "opencode",
+      "case": "single:sleep",
+      "result": "PASS",
+      "at": "2026-11-16T01:07:08.019685+00:00",
+      "evidence": {
+        "instances": [
+          {
+            "id": 273,
+            "stopped": {
+              "id": 273,
+              "name": "u2-4790906-opencode-single",
+              "type": "opencode",
+              "status": "stopped",
+              "runtime_generation": 1,
+              "stopped_reason": "idle_timeout",
+              "auto_stop_phase": "completed",
+              "auto_stop_blocker": null,
+              "runtime_error_message": null
+            },
+            "sleep_proof": "completed\t1\tidle",
+            "failure": null
+          }
+        ]
+      }
+    },
+    {
+      "type": "opencode",
+      "case": "batch:sleep",
+      "result": "PASS",
+      "at": "2026-11-16T01:07:08.020641+00:00",
+      "evidence": {
+        "instances": [
+          {
+            "id": 274,
+            "stopped": {
+              "id": 274,
+              "name": "u2-4790906-opencode-batch-001",
+              "type": "opencode",
+              "status": "stopped",
+              "runtime_generation": 1,
+              "stopped_reason": "idle_timeout",
+              "auto_stop_phase": "completed",
+              "auto_stop_blocker": null,
+              "runtime_error_message": null
+            },
+            "sleep_proof": "completed\t1\tidle",
+            "failure": null
+          },
+          {
+            "id": 275,
+            "stopped": {
+              "id": 275,
+              "name": "u2-4790906-opencode-batch-002",
+              "type": "opencode",
+              "status": "stopped",
+              "runtime_generation": 1,
+              "stopped_reason": "idle_timeout",
+              "auto_stop_phase": "completed",
+              "auto_stop_blocker": null,
+              "runtime_error_message": null
+            },
+            "sleep_proof": "completed\t1\tidle",
+            "failure": null
+          }
+        ]
+      }
+    },
+    {
+      "type": "deepseek-harness",
+      "case": "single:sleep",
+      "result": "PASS",
+      "at": "2026-11-16T01:07:08.021643+00:00",
+      "evidence": {
+        "instances": [
+          {
+            "id": 276,
+            "stopped": {
+              "id": 276,
+              "name": "u2-4790906-dsh-single",
+              "type": "deepseek-harness",
+              "status": "stopped",
+              "runtime_generation": 1,
+              "stopped_reason": "idle_timeout",
+              "auto_stop_phase": "completed",
+              "auto_stop_blocker": null,
+              "runtime_error_message": null
+            },
+            "sleep_proof": "completed\t1\tidle",
+            "failure": null
+          }
+        ]
+      }
+    },
+    {
+      "type": "deepseek-harness",
+      "case": "batch:sleep",
+      "result": "PASS",
+      "at": "2026-11-16T01:07:08.022621+00:00",
+      "evidence": {
+        "instances": [
+          {
+            "id": 278,
+            "stopped": {
+              "id": 278,
+              "name": "u2-4790906-dsh-batch-001",
+              "type": "deepseek-harness",
+              "status": "stopped",
+              "runtime_generation": 1,
+              "stopped_reason": "idle_timeout",
+              "auto_stop_phase": "completed",
+              "auto_stop_blocker": null,
+              "runtime_error_message": null
+            },
+            "sleep_proof": "completed\t1\tidle",
+            "failure": null
+          },
+          {
+            "id": 277,
+            "stopped": {
+              "id": 277,
+              "name": "u2-4790906-dsh-batch-002",
+              "type": "deepseek-harness",
+              "status": "stopped",
+              "runtime_generation": 1,
+              "stopped_reason": "idle_timeout",
+              "auto_stop_phase": "completed",
+              "auto_stop_blocker": null,
+              "runtime_error_message": null
+            },
+            "sleep_proof": "completed\t1\tidle",
+            "failure": null
+          }
+        ]
+      }
+    },
+    {
+      "type": "openclaw",
+      "case": "single:wake",
+      "result": "PASS",
+      "at": "2026-11-16T01:09:23.673240+00:00",
+      "evidence": {
+        "ids": [
+          267
+        ],
+        "seconds": 0.29,
+        "new_generation": true,
+        "sha256_preserved": true
+      }
+    },
+    {
+      "type": "openclaw",
+      "case": "batch:wake",
+      "result": "PASS",
+      "at": "2026-11-16T01:10:04.125255+00:00",
+      "evidence": {
+        "ids": [
+          268,
+          269
+        ],
+        "seconds": 40.45,
+        "new_generation": true,
+        "sha256_preserved": true
+      }
+    },
+    {
+      "type": "hermes",
+      "case": "single:wake",
+      "result": "PASS",
+      "at": "2026-11-16T01:10:04.412900+00:00",
+      "evidence": {
+        "ids": [
+          270
+        ],
+        "seconds": 0.29,
+        "new_generation": true,
+        "sha256_preserved": true
+      }
+    },
+    {
+      "type": "hermes",
+      "case": "batch:wake",
+      "result": "PASS",
+      "at": "2026-11-16T01:10:26.505396+00:00",
+      "evidence": {
+        "ids": [
+          272,
+          271
+        ],
+        "seconds": 22.09,
+        "new_generation": true,
+        "sha256_preserved": true
+      }
+    },
+    {
+      "type": "opencode",
+      "case": "single:wake",
+      "result": "PASS",
+      "at": "2026-11-16T01:10:26.788262+00:00",
+      "evidence": {
+        "ids": [
+          273
+        ],
+        "seconds": 0.28,
+        "new_generation": true,
+        "sha256_preserved": true
+      }
+    },
+    {
+      "type": "opencode",
+      "case": "batch:wake",
+      "result": "PASS",
+      "at": "2026-11-16T01:10:39.712876+00:00",
+      "evidence": {
+        "ids": [
+          274,
+          275
+        ],
+        "seconds": 12.92,
+        "new_generation": true,
+        "sha256_preserved": true
+      }
+    },
+    {
+      "type": "deepseek-harness",
+      "case": "single:wake",
+      "result": "PASS",
+      "at": "2026-11-16T01:10:39.997441+00:00",
+      "evidence": {
+        "ids": [
+          276
+        ],
+        "seconds": 0.28,
+        "new_generation": true,
+        "sha256_preserved": true
+      }
+    },
+    {
+      "type": "deepseek-harness",
+      "case": "batch:wake",
+      "result": "PASS",
+      "at": "2026-11-16T01:10:49.887474+00:00",
+      "evidence": {
+        "ids": [
+          278,
+          277
+        ],
+        "seconds": 9.89,
+        "new_generation": true,
+        "sha256_preserved": true
+      }
+    },
+    {
+      "type": "platform",
+      "case": "cleanup",
+      "result": "PASS",
+      "at": "2026-11-16T01:11:03.741757+00:00",
+      "evidence": {
+        "deleted": [
+          267,
+          268,
+          269,
+          270,
+          272,
+          271,
+          273,
+          274,
+          275,
+          276,
+          278,
+          277
+        ],
+        "remaining": []
+      }
+    }
+  ],
+  "sql_read_only": true,
+  "global_policy_changed": false,
+  "runtime_images_changed": false,
+  "finished_at": "2026-11-16T01:11:03.743783+00:00",
+  "final_state": {
+    "remaining_instances": 36,
+    "remaining_states": {
+      "stopped": 36
+    },
+    "test_bindings": 0,
+    "policy_unchanged": true,
+    "all_test_instances_deleted": true
+  }
+}

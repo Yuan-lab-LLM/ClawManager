@@ -19,5 +19,5 @@ test("@p0 @local-only admin runtime pods page renders seeded pod status and capa
   await runtimePodsPage.goto();
   await runtimePodsPage.selectRuntimeFilter("OpenClaw");
   await runtimePodsPage.expectPodStatusAndCapacity(defaultRuntimePod);
-  await runtimePodsPage.expectPodMetricsVisible(defaultRuntimePod.pod_name);
+  await runtimePodsPage.expectPodMetricsVisible(defaultRuntimePod);
 });

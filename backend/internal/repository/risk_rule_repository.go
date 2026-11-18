@@ -21,38 +21,13 @@ type riskRuleRepository struct {
 	sess db.Session
 }
 
-// NewRiskRuleRepository creates a new risk rule repository and ensures its table and defaults exist.
+// NewRiskRuleRepository creates a new risk rule repository and initializes its default rules.
 func NewRiskRuleRepository(sess db.Session) RiskRuleRepository {
 	repo := &riskRuleRepository{sess: sess}
-	repo.ensureTable()
 	repo.normalizeDeprecatedActions()
 	repo.normalizeDefaultRuleActions()
 	repo.seedDefaults()
 	return repo
-}
-
-func (r *riskRuleRepository) ensureTable() {
-	const query = `
-CREATE TABLE IF NOT EXISTS risk_rules (
-  id INT AUTO_INCREMENT PRIMARY KEY,
-  rule_id VARCHAR(100) NOT NULL UNIQUE,
-  display_name VARCHAR(255) NOT NULL,
-  description TEXT NULL,
-  pattern TEXT NOT NULL,
-  severity VARCHAR(20) NOT NULL,
-  action VARCHAR(50) NOT NULL,
-  is_enabled BOOLEAN NOT NULL DEFAULT TRUE,
-  sort_order INT NOT NULL DEFAULT 0,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  INDEX idx_risk_rules_enabled (is_enabled),
-  INDEX idx_risk_rules_sort (sort_order)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-`
-
-	if _, err := r.sess.SQL().Exec(query); err != nil {
-		panic(fmt.Errorf("failed to ensure risk_rules table: %w", err))
-	}
 }
 
 func (r *riskRuleRepository) seedDefaults() {

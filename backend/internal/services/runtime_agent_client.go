@@ -17,6 +17,7 @@ var (
 	ErrRuntimeAgentConflict    = errors.New("runtime agent conflict")
 	ErrRuntimeAgentNotFound    = errors.New("runtime agent resource not found")
 	ErrRuntimeAgentUnsupported = errors.New("runtime agent operation unsupported")
+	ErrRuntimeAgentUnavailable = errors.New("runtime agent temporarily unavailable")
 	ErrRuntimeUpgradeBusy      = errors.New("runtime upgrade operation is still in flight")
 )
 
@@ -154,10 +155,31 @@ type RuntimeAgentSessionSQLiteRestore struct {
 }
 
 type RuntimeAgentGatewayState struct {
-	GatewayID  string `json:"gateway_id"`
-	InstanceID int    `json:"instance_id"`
-	Generation int    `json:"generation"`
-	State      string `json:"state"`
+	ModelCatalogSync *RuntimeModelCatalogSyncReport `json:"model_catalog_sync,omitempty"`
+	GatewayID        string                         `json:"gateway_id"`
+	InstanceID       int                            `json:"instance_id"`
+	Generation       int                            `json:"generation"`
+	State            string                         `json:"state"`
+
+	// Runtime errors may include credentials. Decode only the classification;
+	// neither raw details nor the private verdict can enter inspection JSON.
+	recoveryFailureBlocked bool
+}
+
+func (state *RuntimeAgentGatewayState) UnmarshalJSON(data []byte) error {
+	type identity RuntimeAgentGatewayState
+	var wire struct {
+		identity
+		ErrorCode    string `json:"error_code"`
+		ErrorMessage string `json:"error_message"`
+	}
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	*state = RuntimeAgentGatewayState(wire.identity)
+	state.ModelCatalogSync = sanitizeModelCatalogSyncReport(state.ModelCatalogSync)
+	state.recoveryFailureBlocked = runtimeRecoveryFreshFailureBlocked(wire.ErrorCode, wire.ErrorMessage)
+	return nil
 }
 
 type RuntimeAgentPortRange struct {
@@ -184,6 +206,8 @@ type RuntimeAgentCreateGatewayRequest struct {
 	MemoryMB            int                   `json:"memory_mb"`
 	DiskQuotaMB         int                   `json:"disk_quota_mb"`
 	Generation          int                   `json:"generation"`
+	PodUID              string                `json:"pod_uid,omitempty"`
+	SecurityProfile     string                `json:"security_profile,omitempty"`
 	UpgradeID           string                `json:"upgrade_id,omitempty"`
 	Environment         map[string]string     `json:"environment,omitempty"`
 }
@@ -237,6 +261,13 @@ func (c *runtimeAgentHTTPClient) Health(ctx context.Context, endpoint string) er
 }
 
 func (c *runtimeAgentHTTPClient) CreateGateway(ctx context.Context, endpoint string, req RuntimeAgentCreateGatewayRequest) (*RuntimeAgentCreateGatewayResponse, error) {
+	if req.SecurityProfile != "" {
+		return nil, fmt.Errorf("protected runtime generations require authenticated container slots")
+	}
+	return c.createGateway(ctx, endpoint, req)
+}
+
+func (c *runtimeAgentHTTPClient) createGateway(ctx context.Context, endpoint string, req RuntimeAgentCreateGatewayRequest) (*RuntimeAgentCreateGatewayResponse, error) {
 	var resp RuntimeAgentCreateGatewayResponse
 	if err := c.do(ctx, http.MethodPost, endpoint, "/v1/gateways", req, &resp); err != nil {
 		return nil, err
@@ -246,6 +277,11 @@ func (c *runtimeAgentHTTPClient) CreateGateway(ctx context.Context, endpoint str
 
 func (c *runtimeAgentHTTPClient) DeleteGateway(ctx context.Context, endpoint, gatewayID string) error {
 	return c.do(ctx, http.MethodDelete, endpoint, "/v1/gateways/"+url.PathEscape(gatewayID), nil, nil)
+}
+
+// ForceDeleteGateway never shares the graceful stop retry path.
+func (c *runtimeAgentHTTPClient) ForceDeleteGateway(ctx context.Context, endpoint, gatewayID string) error {
+	return c.do(ctx, http.MethodDelete, endpoint, "/v1/gateways/"+url.PathEscape(gatewayID)+"?force_delete=true", nil, nil)
 }
 
 func (c *runtimeAgentHTTPClient) Drain(ctx context.Context, endpoint string) error {
@@ -403,6 +439,9 @@ func (c *runtimeAgentHTTPClient) doWithClient(ctx context.Context, httpClient *h
 		}
 		if resp.StatusCode == http.StatusNotFound {
 			return fmt.Errorf("%w: %s", ErrRuntimeAgentNotFound, string(msg))
+		}
+		if resp.StatusCode == http.StatusBadGateway || resp.StatusCode == http.StatusServiceUnavailable || resp.StatusCode == http.StatusGatewayTimeout {
+			return fmt.Errorf("%w: runtime agent status %d: %s", ErrRuntimeAgentUnavailable, resp.StatusCode, string(msg))
 		}
 		return fmt.Errorf("runtime agent status %d: %s", resp.StatusCode, string(msg))
 	}

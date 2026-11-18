@@ -12,6 +12,9 @@ import (
 // Same permanent NFS lock inode as Runtime migration/rebuild commands. Never
 // unlink it: another Pod may already hold an FD for this inode.
 func (s *RuntimeUpgradeService) lockWorkspaceOperations(ids []int) (func(), error) {
+	if s.nfsIOProfile == "nfs-rootless-v1" {
+		return s.lockNFSWorkspaceOperations(ids)
+	}
 	dir := filepath.Join(s.workspaceRoot, ".clawmanager-upgrades", "operations")
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return nil, err

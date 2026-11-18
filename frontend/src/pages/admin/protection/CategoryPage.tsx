@@ -80,14 +80,6 @@ const CAT_STATS: Record<string, { label: string; value: string; tone?: string; s
   ],
 };
 
-const CAT_DESC: Record<string, string> = {
-  'cat-1': '面向单智能体从初始化、输入、推理、决策到执行的完整运行时链路，覆盖输入面、状态面、决策面、输出面、资产保护、人因审批 6 个场景，构建运行时层纵深防御主链路。',
-  'cat-4': '面向智能体所依赖的技能、插件、镜像等供应链：六分析器并行扫描代码安全 + 凭据外泄 + IOC 命中 + LLM 语义复核，识别高危技能、阻断不可信组件落地。',
-  'cat-2': '智能体身份签发、调用授权、最小权限策略；agent token 生命周期管理，强制最小权限访问。',
-  'cat-5': '面向运营与合规的审计回溯与应急处置：全链路事件聚合、风险评分、熔断处置、运营驾驶舱。',
-  'cat-7': '统一策略中心：策略模板、版本管理、灰度发布与回滚；批量应用到实例与命名空间。',
-  'cat-3': '面向 Team 多智能体协作链路与 AI Gateway 通信平面：围绕 Redis Stream 与网关 tokens 使用补齐接入认证、ACL、Relay 中转、配额限制、禁言熔断与审计回放，避免“内部成员默认互信 + tokens 无限消耗”的治理空洞。',
-};
 
 export type CategoryPageProps = { catId: string };
 
@@ -137,8 +129,6 @@ const CategoryPage: React.FC<CategoryPageProps> = ({ catId }) => {
     ],
   };
   const stats = catId in i18nStatsIds ? i18nStatsIds[catId] : (CAT_STATS[catId] ?? []);
-  const i18nDescIds = ['cat-6', 'cat-4', 'cat-2', 'cat-7', 'cat-5'];
-  const desc = i18nDescIds.includes(catId) ? t(`${k}.${catId.replace('-', '')}Desc`) : (CAT_DESC[catId] ?? '');
 
   return (
     <AdminLayout>
@@ -150,13 +140,6 @@ const CategoryPage: React.FC<CategoryPageProps> = ({ catId }) => {
         </div>
 
         <div className="panel">
-          <div className="flex items-start justify-between gap-6 mb-5">
-            <div className="hero-block flex-1">
-              <div className="h-eyebrow">{cat.sub}</div>
-              <h2 className="h-title">{cat.labelKey ? t(cat.labelKey) : cat.label}</h2>
-              <p className="h-subtitle">{desc}</p>
-            </div>
-          </div>
           {catId === 'cat-4' ? (
             <CatTrustLiveStats />
           ) : (
@@ -183,7 +166,7 @@ const CategoryPage: React.FC<CategoryPageProps> = ({ catId }) => {
               <Link key={s.id} to={s.path} className="cat-overview-card">
                 <div className="flex items-start gap-3 mb-3">
                   <div className="flex-1 min-w-0">
-                    <div className="text-lg font-bold text-[#171212]">{s.labelKey ? t(s.labelKey) : s.label}</div>
+                    <div className="text-lg font-bold text-[var(--cm-ink)]">{s.labelKey ? t(s.labelKey) : s.label}</div>
                     <div className="text-xs muted mt-1">{s.subtitleKey ? t(s.subtitleKey) : s.subtitle}</div>
                   </div>
                 </div>

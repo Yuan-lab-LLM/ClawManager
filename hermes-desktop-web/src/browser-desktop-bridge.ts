@@ -145,7 +145,7 @@ export function createBrowserDesktopBridge(
     version: 2, primary: connectionId, lastUsed: connectionId, launchMode: 'primary' as const,
     secureTokenStorage: false,
     connections: [{
-      id: connectionId, kind: 'remote' as const, label: `ClawManager · ${instanceId}`,
+      id: connectionId, kind: 'remote' as const, label: `ClawManager 路 ${instanceId}`,
       url: baseUrl, authMode: 'oauth' as const, tokenSet: false, tokenPreview: null,
     }],
   })
@@ -188,7 +188,6 @@ export function createBrowserDesktopBridge(
       await transport.session()
       return { ok: true, rebuilt: false }
     },
-    touchBackend: unsupported('touchBackend'),
     api<T>(request: Parameters<DesktopBridge['api']>[0]): Promise<T> {
       assertScope(request.profile, request.connectionId)
       if (request.upload !== undefined) return Promise.reject(new BrowserDesktopUnsupportedError('api.upload'))
@@ -209,7 +208,7 @@ export function createBrowserDesktopBridge(
     onBootstrapEvent: noNativeEvents,
     async getBootstrapState() {
       // There is no LOCAL installer in a managed browser. This is not a backend-ready signal.
-      return { active: false, manifest: null, stages: {}, error: null, log: [], startedAt: null, completedAt: null, setupChoice: null, unsupportedPlatform: null }
+      return { active: false, bundled: false, manifest: null, stages: {}, error: null, log: [], startedAt: null, completedAt: null, setupChoice: null, unsupportedPlatform: null }
     },
     onWindowStateChanged(callback: (state: HermesWindowState) => void) {
       const publish = () => callback(windowState())
@@ -235,6 +234,8 @@ export function createBrowserDesktopBridge(
       return readClipboardText()
     },
     profile: {
+      getDefault: async () => ({ connectionId, profile: 'default' }),
+      setDefault: unsupported('profile.setDefault'), onDefaultChanged: noNativeEvents,
       get: async () => ({ profile: 'default' }),
       remember: async (name: string | null) => { assertScope(name); return { profile: 'default' } },
       set: async (name: string | null) => { assertScope(name); return { profile: 'default' } },
@@ -273,6 +274,7 @@ export function createBrowserDesktopBridge(
     openSessionWindow: unsupported('openSessionWindow'), openSessionInTerminal: unsupported('openSessionInTerminal'),
     openWindow: unsupported('openWindow'), openBrowserWindow: unsupported('openBrowserWindow'),
     onBrowserPopoutClosed: noNativeEvents, claimAmbientCue: unsupported('claimAmbientCue'),
+    windowControls: { custom: false, minimize: unsupportedSync('windowControls.minimize'), toggleMaximize: unsupportedSync('windowControls.toggleMaximize'), close: unsupportedSync('windowControls.close') },
     petOverlay: {
       open: unsupported('petOverlay.open'), close: unsupported('petOverlay.close'),
       setBounds: unsupportedSync('petOverlay.setBounds'), setIgnoreMouse: unsupportedSync('petOverlay.setIgnoreMouse'),
@@ -283,6 +285,7 @@ export function createBrowserDesktopBridge(
       getSettings: unsupported('quickEntry.getSettings'), setSettings: unsupported('quickEntry.setSettings'),
       submit: unsupportedSync('quickEntry.submit'), dismiss: unsupportedSync('quickEntry.dismiss'),
       pushState: unsupportedSync('quickEntry.pushState'), onState: noNativeEvents, onSubmit: noNativeEvents, onShown: noNativeEvents,
+      ackSubmit: unsupportedSync('quickEntry.ackSubmit'), onLateResult: noNativeEvents,
     },
     async notify(payload: Parameters<DesktopBridge['notify']>[0]) {
       const NotificationApi = (browserWindow as (Window & { Notification?: typeof globalThis.Notification }) | null)?.Notification
@@ -309,6 +312,7 @@ export function createBrowserDesktopBridge(
     readDir: unsupported('readDir'), selectPaths: pickFiles, selectSavePath: unsupported('selectSavePath'),
     saveImageFromUrl: unsupported('saveImageFromUrl'), saveImageBuffer: unsupported('saveImageBuffer'),
     saveClipboardImage: unsupported('saveClipboardImage'), getPathForFile: (file: File) => rememberFile(file),
+    savePastedText: unsupported('savePastedText'),
     normalizePreviewTarget: unsupported('normalizePreviewTarget'), watchPreviewFile: unsupported('watchPreviewFile'),
     stopPreviewFileWatch: unsupported('stopPreviewFileWatch'),
     async openExternal(rawUrl: string) {
@@ -333,21 +337,24 @@ export function createBrowserDesktopBridge(
     },
     revealLogs: unsupported('revealLogs'), getRecentLogs: unsupported('getRecentLogs'),
     terminal: {
+      attach: unsupported('terminal.attach'),
       cwd: unsupported('terminal.cwd'), dispose: unsupported('terminal.dispose'),
       resize: unsupported('terminal.resize'), start: unsupported('terminal.start'), write: unsupported('terminal.write'),
       onData: noNativeEvents, onExit: noNativeEvents,
     },
     continueBootstrapLocal: unsupported('continueBootstrapLocal'), resetBootstrap: unsupported('resetBootstrap'),
     repairBootstrap: unsupported('repairBootstrap'), cancelBootstrap: unsupported('cancelBootstrap'),
+    updateHold: { recheck: unsupported('updateHold.recheck'), quit: unsupported('updateHold.quit'), startAnyway: unsupported('updateHold.startAnyway') },
+    getSyncStatus: async () => null,
     async getVersion() {
       const session = await transport.session()
       return { appVersion: session.versions.bridge_version, electronVersion: '', nodeVersion: '', platform: 'web', hermesRoot: 'managed-runtime' }
     },
     updates: {
       check: unsupported('updates.check'), apply: unsupported('updates.apply'),
-      getBranch: unsupported('updates.getBranch'), setBranch: unsupported('updates.setBranch'), onProgress: noNativeEvents,
+      onProgress: noNativeEvents,
     },
-    uninstall: { summary: unsupported('uninstall.summary'), run: unsupported('uninstall.run') },
+    uninstall: { summary: unsupported('uninstall.summary'), run: unsupported('uninstall.run'), openAppsSettings: unsupported('uninstall.openAppsSettings') },
     themes: { fetchMarketplace: unsupported('themes.fetchMarketplace'), searchMarketplace: unsupported('themes.searchMarketplace') },
     findInPage: unsupported('findInPage'), stopFindInPage: unsupported('stopFindInPage'),
     onFoundInPage: noNativeEvents, onOpenFindBarRequested: noNativeEvents,

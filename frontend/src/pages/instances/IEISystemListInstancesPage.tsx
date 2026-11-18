@@ -1,8 +1,12 @@
 import axios from "axios";
+import {OWNER_SESSION_INVALID,OWNER_SESSION_MESSAGE,isOwnerSessionFailure,isPersistentReadFailure,nextReadFailure,type ReadFailure} from "../../lib/ownerReadNotice";
 import {useOwnerPortalVisit} from '../../hooks/useOwnerPortalVisit';
 import { OwnerInstanceCard } from "../../components/OwnerInstanceCard";
+import { getInstanceDisplayStatus } from "../../lib/instanceStatus";
 import { expandedInstanceFromSearch } from "../../lib/ownerPortalNavigation";
 import { OwnerDashboard } from "../../components/OwnerDashboard";
+import { useOwnerTeams } from '../../hooks/useOwnerTeams';
+import { OwnerTeamSidebar, OwnerTeamDashboard } from '../../components/teams/OwnerTeamWorkspace';
 import {
   ArrowRight,
   Briefcase,
@@ -51,8 +55,8 @@ function statusClass(status: string) {
   }
 }
 
-function statusLabel(status: string) {
-  switch (status.toLowerCase()) {
+function statusLabel(status: string, stoppedReason?: string) {
+  switch (getInstanceDisplayStatus(status, stoppedReason)) {
     case "running":
       return "运行中";
     case "creating":
@@ -63,6 +67,8 @@ function statusLabel(status: string) {
       return "重启中";
     case "stopped":
       return "已停止";
+    case "auto_sleep":
+      return "自动休眠";
     case "error":
       return "异常";
     default:
@@ -103,6 +109,7 @@ function InstanceTypeIcon({
 }
 
 function errorMessage(error: unknown) {
+  if (isOwnerSessionFailure(error)) return OWNER_SESSION_MESSAGE;
   if (axios.isAxiosError(error) && typeof error.response?.data?.error === "string") {
     return error.response.data.error;
   }
@@ -169,7 +176,9 @@ function selectedInstanceIDFromURL() {
 
 export default function IEISystemListInstancesPage() {
   const initialized = useRef(false);
+  const sessionInvalid = useRef(false);
   const [session, setSession] = useState<IEISystemSession | null>(null);
+  const ownerTeams = useOwnerTeams(session?.owner);
   useOwnerPortalVisit(session?.owner);
   const [expandedInstanceID, setExpandedInstanceID] = useState<number|null>(()=>expandedInstanceFromSearch(window.location.search));
   const [instances, setInstances] = useState<IEISystemInstance[]>([]);
@@ -201,6 +210,16 @@ export default function IEISystemListInstancesPage() {
   const [lifecycleErrors, setLifecycleErrors] = useState<Record<number, string>>({});
   const [lifecycleWarnings, setLifecycleWarnings] = useState<Record<number, string>>({});
   const [error, setError] = useState<string | null>(null);
+  const refreshFailure = useRef<ReadFailure|null>(null);
+  useEffect(()=>{
+    const invalidate=()=>{
+      sessionInvalid.current=true;
+      setSession(null);setRefreshError('');setError(OWNER_SESSION_MESSAGE);
+      setInstances([]);setSelectedID(null);setLifecycleOperations({});
+    };
+    window.addEventListener(OWNER_SESSION_INVALID,invalidate);
+    return()=>window.removeEventListener(OWNER_SESSION_INVALID,invalidate);
+  },[]);
 
   const loadInstances = useCallback(async (preferredID?: number | null) => {
     const first = await ieiSystemService.listInstances(1, PAGE_SIZE);
@@ -210,6 +229,7 @@ export default function IEISystemListInstancesPage() {
       const next = await ieiSystemService.listInstances(page, PAGE_SIZE);
       items.push(...(next.instances ?? []));
     }
+    if(sessionInvalid.current)return;
     setInstances(items);
     setSelectedID((current) => {
       const candidate = preferredID ?? current;
@@ -220,15 +240,19 @@ export default function IEISystemListInstancesPage() {
   }, []);
 
   const refreshPortal=async()=>{
-    if(refreshInFlight.current)return;
+    if(refreshInFlight.current||sessionInvalid.current)return;
     refreshInFlight.current=true;setRefreshing(true);setRefreshError('');
     try{
       const results=await Promise.allSettled([
-        ieiSystemService.getSession().then(setSession),
+        ieiSystemService.getSession().then(value=>{if(!sessionInvalid.current)setSession(value)}),
         loadInstances(),
         dashboardRefresh.current?.()
       ]);
-      if(results.some(r=>r.status==='rejected'))setRefreshError('部分数据刷新失败，已保留原内容，请重试。');
+      if(sessionInvalid.current)return;
+      if(results.some(r=>r.status==='rejected')){
+        refreshFailure.current=nextReadFailure(refreshFailure.current,Date.now());
+        if(isPersistentReadFailure(refreshFailure.current))setRefreshError('实例列表暂时无法更新，已保留原内容，请稍后刷新。');
+      }else refreshFailure.current=null;
     }finally{refreshInFlight.current=false;setRefreshing(false)}
   };
 
@@ -251,13 +275,14 @@ export default function IEISystemListInstancesPage() {
       const nextSession = token
         ? await ieiSystemService.exchangeSession(token)
         : await ieiSystemService.getSession();
+      if(sessionInvalid.current)return;
       setSession(nextSession);
       await loadInstances(preferredID);
     } catch (loadError) {
       setSession(null);
       setInstances([]);
       setSelectedID(null);
-      setError(errorMessage(loadError));
+      setError(sessionInvalid.current?OWNER_SESSION_MESSAGE:errorMessage(loadError));
     } finally {
       setLoading(false);
     }
@@ -270,7 +295,8 @@ export default function IEISystemListInstancesPage() {
   }, [initialize]);
 
   const renewSession = useCallback(async () => {
-    setSession(await ieiSystemService.refreshSession());
+    const next=await ieiSystemService.refreshSession();
+    if(!sessionInvalid.current)setSession(next);
   }, []);
   useExpiringResourceRenewal({
     expiresAt: session?.expires_at,
@@ -520,7 +546,7 @@ export default function IEISystemListInstancesPage() {
 
   return (
     <main className={`flex min-h-screen flex-col bg-[#f4f7fb] text-slate-900 ${view==='overview'?'portal-overview':''}`}>
-      <header className="shrink-0 border-b border-slate-200 bg-white/95 shadow-[0_1px_16px_rgba(15,23,42,0.025)] backdrop-blur">
+      <header className="shrink-0 border-b border-slate-200 bg-white/95 shadow-sm backdrop-blur">
         <div className="flex min-h-[64px] flex-wrap items-center justify-between gap-3 px-4 py-2 sm:flex-nowrap sm:gap-6 sm:px-7 lg:px-9">
           <div className="flex min-w-0 shrink-0 items-center gap-4">
             <img
@@ -580,12 +606,12 @@ export default function IEISystemListInstancesPage() {
             <RefreshCw className="mr-2 h-5 w-5 animate-spin" />
             正在验证身份并加载实例…
           </div>
-        ) : instances.length === 0 ? (
-          <div className="relative mx-auto flex min-h-[calc(100vh-132px)] max-w-6xl items-center justify-center overflow-hidden rounded-2xl border border-blue-100 bg-[#f3f7ff] px-5 py-10 text-center shadow-[0_12px_35px_rgba(15,23,42,0.035)] sm:px-8">
+        ) : instances.length === 0 && !ownerTeams.enabled ? (
+          <div className="relative mx-auto flex min-h-[calc(100vh-132px)] max-w-6xl items-center justify-center overflow-hidden rounded-2xl border border-blue-100 bg-[#f3f7ff] px-5 py-10 text-center shadow-sm sm:px-8">
             <div className="pointer-events-none absolute -left-24 -top-24 h-64 w-64 rounded-full bg-blue-100/60" />
             <div className="pointer-events-none absolute -bottom-36 -right-28 h-72 w-72 rounded-full bg-blue-100/60" />
             <div className="relative flex w-full max-w-4xl flex-col items-center">
-              <div className="flex h-[70px] w-[70px] items-center justify-center rounded-2xl bg-white text-blue-600 shadow-[0_12px_28px_rgba(37,99,235,0.10)]">
+              <div className="flex h-[70px] w-[70px] items-center justify-center rounded-2xl bg-white text-blue-600 shadow-sm">
                 <Briefcase className="h-7 w-7" />
               </div>
               <h2 className="mt-5 text-2xl font-semibold tracking-tight text-[#10203b]">
@@ -596,7 +622,7 @@ export default function IEISystemListInstancesPage() {
               </p>
               <button
                 type="button"
-                className="mt-6 inline-flex h-8 items-center gap-2 rounded-lg bg-gradient-to-r from-blue-700 to-blue-600 px-5 text-sm font-semibold text-white shadow-[0_9px_20px_rgba(37,99,235,0.18)] transition hover:from-blue-800 hover:to-blue-700 disabled:opacity-60"
+                className="mt-6 inline-flex h-8 items-center gap-2 rounded-lg bg-[var(--cm-primary)] px-5 text-sm font-semibold text-white shadow-sm transition disabled:opacity-60"
                 onClick={() => void refreshPortal()}
                 disabled={loading||refreshing}
               >
@@ -614,7 +640,7 @@ export default function IEISystemListInstancesPage() {
                 </span>
               </div>
 
-              <div className="mt-9 w-full rounded-2xl border border-blue-100 bg-white/80 px-4 pb-3 pt-4 shadow-[0_9px_24px_rgba(60,96,149,0.05)] sm:px-5">
+              <div className="mt-9 w-full rounded-2xl border border-blue-100 bg-white/80 px-4 pb-3 pt-4 shadow-sm sm:px-5">
                 <div className="flex flex-col items-start justify-between gap-1 px-1 pb-3 text-left sm:flex-row sm:items-center">
                   <h3 className="text-sm font-semibold text-slate-800">支持的工作空间</h3>
                   <p className="text-xs text-slate-400">分配后将在门户中自动显示</p>
@@ -640,7 +666,7 @@ export default function IEISystemListInstancesPage() {
                           >
                             {presentation.name}
                           </p>
-                          <p className="mt-1 text-[11px] leading-4 text-slate-400">
+                          <p className="mt-1 text-xs leading-4 text-slate-400">
                             {runtime.description}
                           </p>
                         </div>
@@ -651,11 +677,11 @@ export default function IEISystemListInstancesPage() {
               </div>
             </div>
           </div>
-        ) : selectedInstance && selectedRuntime ? (
+        ) : (view === 'overview' || selectedInstance && selectedRuntime) ? (
           <div className={view==='overview'?'portal-overview-grid grid items-start gap-3 lg:grid-cols-[320px_minmax(0,1fr)] xl:grid-cols-[350px_minmax(0,1fr)]':'grid gap-4 lg:h-[calc(100vh-132px)] lg:min-h-[640px] lg:grid-cols-[minmax(280px,330px)_minmax(460px,1fr)_minmax(280px,320px)] 2xl:grid-cols-[minmax(320px,380px)_minmax(560px,1fr)_minmax(320px,360px)]'}>
-            <aside className={`portal-instance-sidebar flex flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-[0_12px_35px_rgba(15,23,42,0.045)] lg:min-h-0 ${view==='overview'?'max-h-[360px] lg:max-h-[calc(100vh-132px)]':'min-h-[680px]'}`}>
+            <aside className={`portal-instance-sidebar flex flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm lg:min-h-0 ${view==='overview'?'max-h-[360px] lg:max-h-[calc(100vh-132px)]':'min-h-[680px]'}`}>
               <div className="flex items-center justify-between border-b border-slate-100 px-5 py-5">
-                <h2 className="text-base font-bold text-[#14213a]">我的实例 · {instances.length}</h2>
+                <h2 className="text-base font-bold text-[#14213a]">{ownerTeams.enabled ? '我的工作空间' : `我的实例 · ${instances.length}`}</h2>
                 <button
                   type="button"
                   className={`cm-icon-button h-9 w-9 ${showFilters ? "border-blue-200 bg-blue-50 text-blue-600" : ""}`}
@@ -665,7 +691,8 @@ export default function IEISystemListInstancesPage() {
                   <SlidersHorizontal className="h-4 w-4" />
                 </button>
               </div>
-              <div className="space-y-3 px-4 py-4">
+              {ownerTeams.enabled && <div className="ot-instance-tabs" role="tablist" aria-label="我的工作空间"><button role="tab" aria-selected={ownerTeams.leftTab==='instances'} onClick={()=>ownerTeams.setLeftTab('instances')}>实例 · {instances.length}</button><button role="tab" aria-selected={ownerTeams.leftTab==='teams'} onClick={()=>ownerTeams.setLeftTab('teams')}>Team · {ownerTeams.total}</button></div>}
+              {ownerTeams.enabled && ownerTeams.leftTab==='teams' ? <OwnerTeamSidebar key={ownerTeams.owner} state={ownerTeams} onSelect={()=>setView('overview')}/> : <><div className="space-y-3 px-4 py-4">
                 <label className="relative block">
                   <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                   <input
@@ -691,7 +718,7 @@ export default function IEISystemListInstancesPage() {
                   </select>
                 ) : null}
               </div>
-              <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 pb-4">
+              <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
                 {visibleInstances.length === 0 ? (
                   <div className="rounded-xl border border-dashed border-slate-200 px-4 py-10 text-center text-sm text-slate-500">
                     没有符合条件的实例
@@ -705,7 +732,7 @@ export default function IEISystemListInstancesPage() {
                     );
                     return (
                       <div key={instance.id}>
-                        <OwnerInstanceCard instance={instance} expanded={expandedInstanceID===instance.id} selected={selected} status={statusLabel(displayStatus)} pending={operationIsPending(lifecycleOperations[instance.id],instance.status)} menuOpen={menuInstanceID===instance.id}
+                        <OwnerInstanceCard instance={instance} expanded={expandedInstanceID===instance.id} selected={selected} status={statusLabel(displayStatus, instance.stopped_reason)} pending={operationIsPending(lifecycleOperations[instance.id],instance.status)} menuOpen={menuInstanceID===instance.id}
                           onToggle={()=>{setExpandedInstanceID(current=>current===instance.id?null:instance.id);setMenuInstanceID(null)}}
                           onMenu={()=>setMenuInstanceID(current=>current===instance.id?null:instance.id)} onCloseMenu={()=>setMenuInstanceID(null)}
                           onDetails={()=>{setSelectedID(instance.id);setView('instance')}}
@@ -715,11 +742,11 @@ export default function IEISystemListInstancesPage() {
                     );
                   })
                 )}
-              </div>
+              </div></>}
             </aside>
 
-            {view==='overview' ? <div className="portal-dashboard-host min-w-0"><OwnerDashboard refreshAction={dashboardRefresh} owner={session?.owner??''} instances={instances} onSelect={id=>{if(instances.some(i=>i.id===id)){setSelectedID(id);setView('instance');}}}/></div> : <>
-            <section className="flex min-h-[680px] flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-[0_12px_35px_rgba(15,23,42,0.045)] lg:min-h-0">
+            {view==='overview' ? <div className="portal-dashboard-host min-w-0"><OwnerDashboard teamContent={ownerTeams.enabled ? <OwnerTeamDashboard key={ownerTeams.owner} state={ownerTeams}/> : undefined} refreshAction={dashboardRefresh} owner={session?.owner??''} instances={instances} onSelect={id=>{if(instances.some(i=>i.id===id)){setSelectedID(id);setView('instance');}}}/></div> : selectedInstance && selectedRuntime ? <>
+            <section className="flex min-h-[680px] flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm lg:min-h-0">
               <div className="border-b border-slate-100 px-6 py-5">
                 <h2 className="text-base font-bold text-[#14213a]">运行时说明</h2>
               </div>
@@ -753,7 +780,7 @@ export default function IEISystemListInstancesPage() {
                       <span
                         className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${statusClass(selectedDisplayStatus)}`}
                       >
-                        {statusLabel(selectedDisplayStatus)}
+                        {statusLabel(selectedDisplayStatus, selectedInstance.stopped_reason)}
                       </span>
                     </div>
                     <p className="mt-2 text-base text-slate-500">
@@ -801,7 +828,7 @@ export default function IEISystemListInstancesPage() {
                     <Link
                       to={`/ieisystem/instances/${selectedInstance.id}`}
                       state={{portalReturnSearch:window.location.search}}
-                      className="inline-flex h-12 shrink-0 items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-blue-700 to-blue-600 px-6 text-sm font-semibold text-white shadow-[0_10px_24px_rgba(37,99,235,0.22)] transition hover:-translate-y-0.5 hover:from-blue-800 hover:to-blue-700"
+                      className="inline-flex h-12 shrink-0 items-center justify-center gap-2 rounded-lg bg-[var(--cm-primary)] px-6 text-sm font-semibold text-white shadow-sm transition "
                     >
                       进入实例
                       <ArrowRight className="h-4 w-4" />
@@ -817,7 +844,7 @@ export default function IEISystemListInstancesPage() {
                         {selectedRuntime.name}
                       </span>
                       {selectedRuntime.badge ? (
-                        <span className="rounded-full bg-gradient-to-r from-teal-500 to-cyan-500 px-2.5 py-1 text-[10px] font-bold tracking-wider text-white">
+                        <span className="rounded-full bg-[var(--cm-primary)] px-2.5 py-1 text-xs font-bold tracking-wider text-white">
                           {selectedRuntime.badge}
                         </span>
                       ) : null}
@@ -855,7 +882,7 @@ export default function IEISystemListInstancesPage() {
                         className="flex min-h-14 items-center gap-3 rounded-xl border border-slate-100 bg-slate-50/70 px-4 py-3 text-sm font-medium text-slate-700"
                       >
                         <span
-                          className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full ${selectedRuntime.theme.accentSoft} text-[11px] font-bold ${selectedRuntime.theme.accent}`}
+                          className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full ${selectedRuntime.theme.accentSoft} text-xs font-bold ${selectedRuntime.theme.accent}`}
                         >
                           {index + 1}
                         </span>
@@ -894,7 +921,7 @@ export default function IEISystemListInstancesPage() {
               </div>
             </section>
 
-            <aside className="flex min-h-[680px] flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-[0_12px_35px_rgba(15,23,42,0.045)] lg:min-h-0">
+            <aside className="flex min-h-[680px] flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm lg:min-h-0">
               <div className="border-b border-slate-100 px-5 py-5">
                 <h2 className="text-base font-bold text-[#14213a]">实例信息</h2>
               </div>
@@ -913,7 +940,7 @@ export default function IEISystemListInstancesPage() {
                   <span
                     className={`mt-3 inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${statusClass(selectedInstance.status)}`}
                   >
-                    {statusLabel(selectedInstance.status)}
+                    {statusLabel(selectedInstance.status, selectedInstance.stopped_reason)}
                   </span>
                 </div>
 
@@ -925,7 +952,7 @@ export default function IEISystemListInstancesPage() {
                       ["实例 ID", `#${selectedInstance.id}`],
                       ["运行时", selectedRuntime.name],
                       ["运行时类型", selectedRuntime.category],
-                      ["状态", statusLabel(selectedInstance.status)],
+                      ["状态", statusLabel(selectedInstance.status, selectedInstance.stopped_reason)],
                       ["更新时间", formatTime(selectedInstance.updated_at)],
                     ].map(([label, value]) => (
                       <div key={label} className="py-3 text-sm">
@@ -944,7 +971,7 @@ export default function IEISystemListInstancesPage() {
                 </div>
               </div>
             </aside>
-            </>}
+            </> : null}
           </div>
         ) : null}
       </section>

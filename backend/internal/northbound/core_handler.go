@@ -1,6 +1,7 @@
 package northbound
 
 import (
+	"clawreef/internal/models"
 	"net/http"
 	"strconv"
 	"strings"
@@ -99,6 +100,23 @@ func (h *CoreHandler) GetOperation(c *gin.Context) {
 	item, err := h.service.GetOperation(principal.UserID, c.Param("id"))
 	if err != nil {
 		writeError(c, err)
+		return
+	}
+	if strings.HasPrefix(item.OperationType, ownerTeamOperationPrefix) {
+		if item.Owner == nil {
+			writeError(c, apiError(404, "OPERATION_NOT_FOUND", "Operation not found", nil))
+			return
+		}
+		if h.service.OwnerTeams == nil {
+			writeError(c, apiError(503, "TEAM_UNAVAILABLE", "Team service unavailable", nil))
+			return
+		}
+		owner, err := models.NormalizeTeamOwner(c.Query("owner"))
+		if err != nil {
+			writeError(c, apiError(404, "OPERATION_NOT_FOUND", "Operation not found", nil))
+			return
+		}
+		h.service.OwnerTeams.getOperation(c, OwnerTeamIdentity{UserID: principal.UserID, Owner: owner, SessionID: principal.SessionID, Source: "northbound", Principal: principal}, item.OperationID)
 		return
 	}
 	scope := operationScope(item.OperationType)
@@ -325,6 +343,14 @@ func (h *CoreHandler) ResetShareLinkPassword(c *gin.Context) {
 func RegisterCoreRoutes(router *gin.Engine, handler *CoreHandler) {
 	group := router.Group("/internal/northbound/v1")
 	group.Use(handler.Middleware())
+	RegisterOwnerTeamRoutes(group, func() *OwnerTeamAPI { return handler.service.OwnerTeams }, func(c *gin.Context) (*OwnerTeamIdentity, bool) {
+		principal := currentPrincipal(c)
+		if principal == nil {
+			writeError(c, apiError(401, "AUTH_INVALID", "Invalid identity", nil))
+			return nil, false
+		}
+		return &OwnerTeamIdentity{UserID: principal.UserID, Owner: c.Query("owner"), SessionID: principal.SessionID, Source: "northbound", Principal: principal, RequestID: requestIDFromContext(c)}, true
+	})
 	group.GET("/owners/usage", handler.GetOwnerUsage)
 	group.POST("/lite-instances", handler.SubmitCreate)
 	group.GET("/lite-instances", handler.ListInstances)

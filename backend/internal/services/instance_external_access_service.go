@@ -276,6 +276,18 @@ func ExternalAccessSessionBinding(code string, accesses ...*models.InstanceExter
 	return hex.EncodeToString(sum[:])
 }
 
+// SharedWorkbenchScope isolates browser persistence without exposing share credentials.
+func SharedWorkbenchScope(code string, access *models.InstanceExternalAccess) string {
+	permission := ExternalWorkspaceAccessNone
+	mode := ""
+	if access != nil {
+		permission, _ = NormalizeExternalWorkspaceAccess(access.WorkspaceAccess)
+		mode = access.AuthMode
+	}
+	sum := sha256.Sum256([]byte("shared-workbench\x00" + ExternalAccessSessionBinding(code, access) + "\x00" + mode + "\x00" + permission))
+	return hex.EncodeToString(sum[:])
+}
+
 func (s *instanceExternalAccessService) Disable(ctx context.Context, instanceID int) error {
 	if s == nil || s.repo == nil {
 		return fmt.Errorf("instance external access repository is not configured")

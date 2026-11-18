@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: ClawManager Northbound API
-  version: 1.3.0
+  version: 1.5.0
   description: Public API for authenticated OpenClaw, Hermes, OpenCode, and DeepSeek Harness provisioning and password-protected ShareLink management.
 servers:
   - url: https://northbound.example.com:38443
@@ -519,6 +519,743 @@ paths:
                 $ref: "#/components/schemas/Operation"
         "404":
           $ref: "#/components/responses/NotFound"
+  /api/northbound/v1/team-capabilities:
+    get:
+      summary: Owner Team capabilities
+      description: Requires teams:read. Provider identity comes from authentication; owner and every child resource are checked. See northbound-owner-teams.md.
+      operationId: ownerTeamCapabilities
+      security:
+        - bearerAuth: []
+      parameters:
+        - { in: query, name: owner, required: true, schema: { type: string, maxLength: 128 } }
+      responses:
+        "200":
+          description: Authorized business projection
+        "401": { description: 'Invalid or expired identity' }
+        "403": { description: 'Missing explicit scope' }
+        "404": { description: 'Resource is absent or belongs to another owner/provider' }
+        "409": { description: 'Revision, admission, ownership or idempotency conflict' }
+        "422": { description: 'Invalid request' }
+        "503": { description: 'Dependency or feature unavailable' }
+  /api/northbound/v1/teams:
+    get:
+      summary: Owner Team teams.list
+      description: Requires teams:read. Provider identity comes from authentication; owner and every child resource are checked. See northbound-owner-teams.md.
+      operationId: ownerTeamTeamsList
+      security:
+        - bearerAuth: []
+      parameters:
+        - { in: query, name: owner, required: true, schema: { type: string, maxLength: 128 } }
+      responses:
+        "200":
+          description: Authorized business projection
+        "401": { description: 'Invalid or expired identity' }
+        "403": { description: 'Missing explicit scope' }
+        "404": { description: 'Resource is absent or belongs to another owner/provider' }
+        "409": { description: 'Revision, admission, ownership or idempotency conflict' }
+        "422": { description: 'Invalid request' }
+        "503": { description: 'Dependency or feature unavailable' }
+    post:
+      summary: Owner Team teams.create
+      description: Requires teams:create. Provider identity comes from authentication; owner and every child resource are checked. See northbound-owner-teams.md.
+      operationId: ownerTeamTeamsCreate
+      security:
+        - bearerAuth: []
+      parameters:
+        - { in: query, name: owner, required: true, schema: { type: string, maxLength: 128 } }
+        - { in: header, name: Idempotency-Key, required: true, schema: { type: string, minLength: 8, maxLength: 128 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, description: 'Action-specific body documented in northbound-owner-teams.md; unknown fields are rejected.' }
+      responses:
+        "202":
+          description: Accepted once; data contains operation_id, status and team_id or template_id
+        "401": { description: 'Invalid or expired identity' }
+        "403": { description: 'Missing explicit scope' }
+        "404": { description: 'Resource is absent or belongs to another owner/provider' }
+        "409": { description: 'Revision, admission, ownership or idempotency conflict' }
+        "422": { description: 'Invalid request' }
+        "503": { description: 'Dependency or feature unavailable' }
+  /api/northbound/v1/teams/{id}:
+    get:
+      summary: Owner Team teams.get
+      description: Requires teams:read. Provider identity comes from authentication; owner and every child resource are checked. See northbound-owner-teams.md.
+      operationId: ownerTeamTeamsGet
+      security:
+        - bearerAuth: []
+      parameters:
+        - { in: query, name: owner, required: true, schema: { type: string, maxLength: 128 } }
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Authorized business projection
+        "401": { description: 'Invalid or expired identity' }
+        "403": { description: 'Missing explicit scope' }
+        "404": { description: 'Resource is absent or belongs to another owner/provider' }
+        "409": { description: 'Revision, admission, ownership or idempotency conflict' }
+        "422": { description: 'Invalid request' }
+        "503": { description: 'Dependency or feature unavailable' }
+    patch:
+      summary: Owner Team teams.update
+      description: Requires teams:manage. Provider identity comes from authentication; owner and every child resource are checked. See northbound-owner-teams.md.
+      operationId: ownerTeamTeamsUpdate
+      security:
+        - bearerAuth: []
+      parameters:
+        - { in: query, name: owner, required: true, schema: { type: string, maxLength: 128 } }
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, description: 'Action-specific body documented in northbound-owner-teams.md; unknown fields are rejected.' }
+      responses:
+        "200":
+          description: Authorized business projection
+        "401": { description: 'Invalid or expired identity' }
+        "403": { description: 'Missing explicit scope' }
+        "404": { description: 'Resource is absent or belongs to another owner/provider' }
+        "409": { description: 'Revision, admission, ownership or idempotency conflict' }
+        "422": { description: 'Invalid request' }
+        "503": { description: 'Dependency or feature unavailable' }
+    delete:
+      summary: Owner Team teams.delete
+      description: Requires teams:delete. Provider identity comes from authentication; owner and every child resource are checked. See northbound-owner-teams.md.
+      operationId: ownerTeamTeamsDelete
+      security:
+        - bearerAuth: []
+      parameters:
+        - { in: query, name: owner, required: true, schema: { type: string, maxLength: 128 } }
+        - { in: path, name: id, required: true, schema: { type: integer } }
+        - { in: header, name: Idempotency-Key, required: true, schema: { type: string, minLength: 8, maxLength: 128 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, description: 'Action-specific body documented in northbound-owner-teams.md; unknown fields are rejected.' }
+      responses:
+        "202":
+          description: Accepted once; data contains operation_id, status and team_id or template_id
+        "401": { description: 'Invalid or expired identity' }
+        "403": { description: 'Missing explicit scope' }
+        "404": { description: 'Resource is absent or belongs to another owner/provider' }
+        "409": { description: 'Revision, admission, ownership or idempotency conflict' }
+        "422": { description: 'Invalid request' }
+        "503": { description: 'Dependency or feature unavailable' }
+  /api/northbound/v1/teams/{id}/members:
+    get:
+      summary: Owner Team members.list
+      description: Requires teams:read. Provider identity comes from authentication; owner and every child resource are checked. See northbound-owner-teams.md.
+      operationId: ownerTeamMembersList
+      security:
+        - bearerAuth: []
+      parameters:
+        - { in: query, name: owner, required: true, schema: { type: string, maxLength: 128 } }
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Authorized business projection
+        "401": { description: 'Invalid or expired identity' }
+        "403": { description: 'Missing explicit scope' }
+        "404": { description: 'Resource is absent or belongs to another owner/provider' }
+        "409": { description: 'Revision, admission, ownership or idempotency conflict' }
+        "422": { description: 'Invalid request' }
+        "503": { description: 'Dependency or feature unavailable' }
+  /api/northbound/v1/teams/{id}/members/{memberID}:
+    delete:
+      summary: Owner Team members.delete
+      description: Requires teams:manage. Provider identity comes from authentication; owner and every child resource are checked. See northbound-owner-teams.md.
+      operationId: ownerTeamMembersDelete
+      security:
+        - bearerAuth: []
+      parameters:
+        - { in: query, name: owner, required: true, schema: { type: string, maxLength: 128 } }
+        - { in: path, name: id, required: true, schema: { type: integer } }
+        - { in: path, name: memberID, required: true, schema: { type: string } }
+        - { in: header, name: Idempotency-Key, required: true, schema: { type: string, minLength: 8, maxLength: 128 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, description: 'Action-specific body documented in northbound-owner-teams.md; unknown fields are rejected.' }
+      responses:
+        "202":
+          description: Accepted once; data contains operation_id, status and team_id or template_id
+        "401": { description: 'Invalid or expired identity' }
+        "403": { description: 'Missing explicit scope' }
+        "404": { description: 'Resource is absent or belongs to another owner/provider' }
+        "409": { description: 'Revision, admission, ownership or idempotency conflict' }
+        "422": { description: 'Invalid request' }
+        "503": { description: 'Dependency or feature unavailable' }
+  /api/northbound/v1/teams/{id}/tasks:
+    get:
+      summary: Owner Team tasks.list
+      description: Requires teams:tasks:read. Provider identity comes from authentication; owner and every child resource are checked. See northbound-owner-teams.md.
+      operationId: ownerTeamTasksList
+      security:
+        - bearerAuth: []
+      parameters:
+        - { in: query, name: owner, required: true, schema: { type: string, maxLength: 128 } }
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Authorized business projection
+        "401": { description: 'Invalid or expired identity' }
+        "403": { description: 'Missing explicit scope' }
+        "404": { description: 'Resource is absent or belongs to another owner/provider' }
+        "409": { description: 'Revision, admission, ownership or idempotency conflict' }
+        "422": { description: 'Invalid request' }
+        "503": { description: 'Dependency or feature unavailable' }
+    post:
+      summary: Owner Team tasks.dispatch
+      description: Requires teams:tasks:write. Provider identity comes from authentication; owner and every child resource are checked. See northbound-owner-teams.md.
+      operationId: ownerTeamTasksDispatch
+      security:
+        - bearerAuth: []
+      parameters:
+        - { in: query, name: owner, required: true, schema: { type: string, maxLength: 128 } }
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, description: 'Action-specific body documented in northbound-owner-teams.md; unknown fields are rejected.' }
+      responses:
+        "200":
+          description: Authorized business projection
+        "401": { description: 'Invalid or expired identity' }
+        "403": { description: 'Missing explicit scope' }
+        "404": { description: 'Resource is absent or belongs to another owner/provider' }
+        "409": { description: 'Revision, admission, ownership or idempotency conflict' }
+        "422": { description: 'Invalid request' }
+        "503": { description: 'Dependency or feature unavailable' }
+  /api/northbound/v1/teams/{id}/events:
+    get:
+      summary: Owner Team events.list
+      description: Requires teams:tasks:read. Provider identity comes from authentication; owner and every child resource are checked. See northbound-owner-teams.md.
+      operationId: ownerTeamEventsList
+      security:
+        - bearerAuth: []
+      parameters:
+        - { in: query, name: owner, required: true, schema: { type: string, maxLength: 128 } }
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Authorized business projection
+        "401": { description: 'Invalid or expired identity' }
+        "403": { description: 'Missing explicit scope' }
+        "404": { description: 'Resource is absent or belongs to another owner/provider' }
+        "409": { description: 'Revision, admission, ownership or idempotency conflict' }
+        "422": { description: 'Invalid request' }
+        "503": { description: 'Dependency or feature unavailable' }
+  /api/northbound/v1/teams/{id}/workspace/files:
+    get:
+      summary: Owner Team files.list
+      description: Requires teams:files:read. Provider identity comes from authentication; owner and every child resource are checked. See northbound-owner-teams.md.
+      operationId: ownerTeamFilesList
+      security:
+        - bearerAuth: []
+      parameters:
+        - { in: query, name: owner, required: true, schema: { type: string, maxLength: 128 } }
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Authorized business projection
+        "401": { description: 'Invalid or expired identity' }
+        "403": { description: 'Missing explicit scope' }
+        "404": { description: 'Resource is absent or belongs to another owner/provider' }
+        "409": { description: 'Revision, admission, ownership or idempotency conflict' }
+        "422": { description: 'Invalid request' }
+        "503": { description: 'Dependency or feature unavailable' }
+  /api/northbound/v1/teams/{id}/workspace/preview:
+    get:
+      summary: Owner Team files.preview
+      description: Requires teams:files:read. Provider identity comes from authentication; owner and every child resource are checked. See northbound-owner-teams.md.
+      operationId: ownerTeamFilesPreview
+      security:
+        - bearerAuth: []
+      parameters:
+        - { in: query, name: owner, required: true, schema: { type: string, maxLength: 128 } }
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Authorized business projection
+        "401": { description: 'Invalid or expired identity' }
+        "403": { description: 'Missing explicit scope' }
+        "404": { description: 'Resource is absent or belongs to another owner/provider' }
+        "409": { description: 'Revision, admission, ownership or idempotency conflict' }
+        "422": { description: 'Invalid request' }
+        "503": { description: 'Dependency or feature unavailable' }
+  /api/northbound/v1/teams/{id}/workspace/download:
+    get:
+      summary: Owner Team files.download
+      description: Requires teams:files:read. Provider identity comes from authentication; owner and every child resource are checked. See northbound-owner-teams.md.
+      operationId: ownerTeamFilesDownload
+      security:
+        - bearerAuth: []
+      parameters:
+        - { in: query, name: owner, required: true, schema: { type: string, maxLength: 128 } }
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Authorized business projection
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        "401": { description: 'Invalid or expired identity' }
+        "403": { description: 'Missing explicit scope' }
+        "404": { description: 'Resource is absent or belongs to another owner/provider' }
+        "409": { description: 'Revision, admission, ownership or idempotency conflict' }
+        "422": { description: 'Invalid request' }
+        "503": { description: 'Dependency or feature unavailable' }
+  /api/northbound/v1/teams/{id}/workspace/text:
+    get:
+      summary: Owner Team files.read
+      description: Requires teams:files:read. Provider identity comes from authentication; owner and every child resource are checked. See northbound-owner-teams.md.
+      operationId: ownerTeamFilesRead
+      security:
+        - bearerAuth: []
+      parameters:
+        - { in: query, name: owner, required: true, schema: { type: string, maxLength: 128 } }
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Authorized business projection
+        "401": { description: 'Invalid or expired identity' }
+        "403": { description: 'Missing explicit scope' }
+        "404": { description: 'Resource is absent or belongs to another owner/provider' }
+        "409": { description: 'Revision, admission, ownership or idempotency conflict' }
+        "422": { description: 'Invalid request' }
+        "503": { description: 'Dependency or feature unavailable' }
+    put:
+      summary: Owner Team files.save
+      description: Requires teams:files:write. Provider identity comes from authentication; owner and every child resource are checked. See northbound-owner-teams.md.
+      operationId: ownerTeamFilesSave
+      security:
+        - bearerAuth: []
+      parameters:
+        - { in: query, name: owner, required: true, schema: { type: string, maxLength: 128 } }
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, description: 'Action-specific body documented in northbound-owner-teams.md; unknown fields are rejected.' }
+      responses:
+        "200":
+          description: Authorized business projection
+        "401": { description: 'Invalid or expired identity' }
+        "403": { description: 'Missing explicit scope' }
+        "404": { description: 'Resource is absent or belongs to another owner/provider' }
+        "409": { description: 'Revision, admission, ownership or idempotency conflict' }
+        "422": { description: 'Invalid request' }
+        "503": { description: 'Dependency or feature unavailable' }
+  /api/northbound/v1/teams/{id}/workspace/upload:
+    post:
+      summary: Owner Team files.upload
+      description: Requires teams:files:write. Provider identity comes from authentication; owner and every child resource are checked. See northbound-owner-teams.md.
+      operationId: ownerTeamFilesUpload
+      security:
+        - bearerAuth: []
+      parameters:
+        - { in: query, name: owner, required: true, schema: { type: string, maxLength: 128 } }
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [files]
+              properties:
+                path: { type: string }
+                relative_paths: { type: array, items: { type: string } }
+                files: { type: array, minItems: 1, maxItems: 100, items: { type: string, format: binary } }
+      responses:
+        "200":
+          description: Authorized business projection
+        "401": { description: 'Invalid or expired identity' }
+        "403": { description: 'Missing explicit scope' }
+        "404": { description: 'Resource is absent or belongs to another owner/provider' }
+        "409": { description: 'Revision, admission, ownership or idempotency conflict' }
+        "422": { description: 'Invalid request' }
+        "503": { description: 'Dependency or feature unavailable' }
+  /api/northbound/v1/teams/{id}/workspace/folders:
+    post:
+      summary: Owner Team files.mkdir
+      description: Requires teams:files:write. Provider identity comes from authentication; owner and every child resource are checked. See northbound-owner-teams.md.
+      operationId: ownerTeamFilesMkdir
+      security:
+        - bearerAuth: []
+      parameters:
+        - { in: query, name: owner, required: true, schema: { type: string, maxLength: 128 } }
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, description: 'Action-specific body documented in northbound-owner-teams.md; unknown fields are rejected.' }
+      responses:
+        "200":
+          description: Authorized business projection
+        "401": { description: 'Invalid or expired identity' }
+        "403": { description: 'Missing explicit scope' }
+        "404": { description: 'Resource is absent or belongs to another owner/provider' }
+        "409": { description: 'Revision, admission, ownership or idempotency conflict' }
+        "422": { description: 'Invalid request' }
+        "503": { description: 'Dependency or feature unavailable' }
+  /api/northbound/v1/teams/{id}/workspace/entries:
+    patch:
+      summary: Owner Team files.rename
+      description: Requires teams:files:write. Provider identity comes from authentication; owner and every child resource are checked. See northbound-owner-teams.md.
+      operationId: ownerTeamFilesRename
+      security:
+        - bearerAuth: []
+      parameters:
+        - { in: query, name: owner, required: true, schema: { type: string, maxLength: 128 } }
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, description: 'Action-specific body documented in northbound-owner-teams.md; unknown fields are rejected.' }
+      responses:
+        "200":
+          description: Authorized business projection
+        "401": { description: 'Invalid or expired identity' }
+        "403": { description: 'Missing explicit scope' }
+        "404": { description: 'Resource is absent or belongs to another owner/provider' }
+        "409": { description: 'Revision, admission, ownership or idempotency conflict' }
+        "422": { description: 'Invalid request' }
+        "503": { description: 'Dependency or feature unavailable' }
+    delete:
+      summary: Owner Team files.delete
+      description: Requires teams:files:write. Provider identity comes from authentication; owner and every child resource are checked. See northbound-owner-teams.md.
+      operationId: ownerTeamFilesDelete
+      security:
+        - bearerAuth: []
+      parameters:
+        - { in: query, name: owner, required: true, schema: { type: string, maxLength: 128 } }
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Authorized business projection
+        "401": { description: 'Invalid or expired identity' }
+        "403": { description: 'Missing explicit scope' }
+        "404": { description: 'Resource is absent or belongs to another owner/provider' }
+        "409": { description: 'Revision, admission, ownership or idempotency conflict' }
+        "422": { description: 'Invalid request' }
+        "503": { description: 'Dependency or feature unavailable' }
+  /api/northbound/v1/team-templates:
+    get:
+      summary: Owner Team catalog.list
+      description: Requires team-templates:read. Provider identity comes from authentication; owner and every child resource are checked. See northbound-owner-teams.md.
+      operationId: ownerTeamCatalogList
+      security:
+        - bearerAuth: []
+      parameters:
+        - { in: query, name: owner, required: true, schema: { type: string, maxLength: 128 } }
+      responses:
+        "200":
+          description: Authorized business projection
+        "401": { description: 'Invalid or expired identity' }
+        "403": { description: 'Missing explicit scope' }
+        "404": { description: 'Resource is absent or belongs to another owner/provider' }
+        "409": { description: 'Revision, admission, ownership or idempotency conflict' }
+        "422": { description: 'Invalid request' }
+        "503": { description: 'Dependency or feature unavailable' }
+  /api/northbound/v1/team-templates/{key}:
+    get:
+      summary: Owner Team catalog.get
+      description: Requires team-templates:read. Provider identity comes from authentication; owner and every child resource are checked. See northbound-owner-teams.md.
+      operationId: ownerTeamCatalogGet
+      security:
+        - bearerAuth: []
+      parameters:
+        - { in: query, name: owner, required: true, schema: { type: string, maxLength: 128 } }
+        - { in: path, name: key, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Authorized business projection
+        "401": { description: 'Invalid or expired identity' }
+        "403": { description: 'Missing explicit scope' }
+        "404": { description: 'Resource is absent or belongs to another owner/provider' }
+        "409": { description: 'Revision, admission, ownership or idempotency conflict' }
+        "422": { description: 'Invalid request' }
+        "503": { description: 'Dependency or feature unavailable' }
+  /api/northbound/v1/custom-team-templates:
+    get:
+      summary: Owner Team templates.list
+      description: Requires team-templates:read. Provider identity comes from authentication; owner and every child resource are checked. See northbound-owner-teams.md.
+      operationId: ownerTeamTemplatesList
+      security:
+        - bearerAuth: []
+      parameters:
+        - { in: query, name: owner, required: true, schema: { type: string, maxLength: 128 } }
+      responses:
+        "200":
+          description: Authorized business projection
+        "401": { description: 'Invalid or expired identity' }
+        "403": { description: 'Missing explicit scope' }
+        "404": { description: 'Resource is absent or belongs to another owner/provider' }
+        "409": { description: 'Revision, admission, ownership or idempotency conflict' }
+        "422": { description: 'Invalid request' }
+        "503": { description: 'Dependency or feature unavailable' }
+    post:
+      summary: Owner Team templates.generate
+      description: Requires team-templates:generate. Provider identity comes from authentication; owner and every child resource are checked. See northbound-owner-teams.md.
+      operationId: ownerTeamTemplatesGenerate
+      security:
+        - bearerAuth: []
+      parameters:
+        - { in: query, name: owner, required: true, schema: { type: string, maxLength: 128 } }
+        - { in: header, name: Idempotency-Key, required: true, schema: { type: string, minLength: 8, maxLength: 128 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, description: 'Action-specific body documented in northbound-owner-teams.md; unknown fields are rejected.' }
+      responses:
+        "202":
+          description: Accepted once; data contains operation_id, status and team_id or template_id
+        "401": { description: 'Invalid or expired identity' }
+        "403": { description: 'Missing explicit scope' }
+        "404": { description: 'Resource is absent or belongs to another owner/provider' }
+        "409": { description: 'Revision, admission, ownership or idempotency conflict' }
+        "422": { description: 'Invalid request' }
+        "503": { description: 'Dependency or feature unavailable' }
+  /api/northbound/v1/custom-team-templates/{id}:
+    get:
+      summary: Owner Team templates.get
+      description: Requires team-templates:read. Provider identity comes from authentication; owner and every child resource are checked. See northbound-owner-teams.md.
+      operationId: ownerTeamTemplatesGet
+      security:
+        - bearerAuth: []
+      parameters:
+        - { in: query, name: owner, required: true, schema: { type: string, maxLength: 128 } }
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Authorized business projection
+        "401": { description: 'Invalid or expired identity' }
+        "403": { description: 'Missing explicit scope' }
+        "404": { description: 'Resource is absent or belongs to another owner/provider' }
+        "409": { description: 'Revision, admission, ownership or idempotency conflict' }
+        "422": { description: 'Invalid request' }
+        "503": { description: 'Dependency or feature unavailable' }
+    patch:
+      summary: Owner Team templates.update
+      description: Requires team-templates:write. Provider identity comes from authentication; owner and every child resource are checked. See northbound-owner-teams.md.
+      operationId: ownerTeamTemplatesUpdate
+      security:
+        - bearerAuth: []
+      parameters:
+        - { in: query, name: owner, required: true, schema: { type: string, maxLength: 128 } }
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, description: 'Action-specific body documented in northbound-owner-teams.md; unknown fields are rejected.' }
+      responses:
+        "200":
+          description: Authorized business projection
+        "401": { description: 'Invalid or expired identity' }
+        "403": { description: 'Missing explicit scope' }
+        "404": { description: 'Resource is absent or belongs to another owner/provider' }
+        "409": { description: 'Revision, admission, ownership or idempotency conflict' }
+        "422": { description: 'Invalid request' }
+        "503": { description: 'Dependency or feature unavailable' }
+    delete:
+      summary: Owner Team templates.delete
+      description: Requires team-templates:write. Provider identity comes from authentication; owner and every child resource are checked. See northbound-owner-teams.md.
+      operationId: ownerTeamTemplatesDelete
+      security:
+        - bearerAuth: []
+      parameters:
+        - { in: query, name: owner, required: true, schema: { type: string, maxLength: 128 } }
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Authorized business projection
+        "401": { description: 'Invalid or expired identity' }
+        "403": { description: 'Missing explicit scope' }
+        "404": { description: 'Resource is absent or belongs to another owner/provider' }
+        "409": { description: 'Revision, admission, ownership or idempotency conflict' }
+        "422": { description: 'Invalid request' }
+        "503": { description: 'Dependency or feature unavailable' }
+  /api/northbound/v1/custom-team-templates/{id}/revise:
+    post:
+      summary: Owner Team templates.revise
+      description: Requires team-templates:generate. Provider identity comes from authentication; owner and every child resource are checked. See northbound-owner-teams.md.
+      operationId: ownerTeamTemplatesRevise
+      security:
+        - bearerAuth: []
+      parameters:
+        - { in: query, name: owner, required: true, schema: { type: string, maxLength: 128 } }
+        - { in: path, name: id, required: true, schema: { type: integer } }
+        - { in: header, name: Idempotency-Key, required: true, schema: { type: string, minLength: 8, maxLength: 128 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, description: 'Action-specific body documented in northbound-owner-teams.md; unknown fields are rejected.' }
+      responses:
+        "202":
+          description: Accepted once; data contains operation_id, status and team_id or template_id
+        "401": { description: 'Invalid or expired identity' }
+        "403": { description: 'Missing explicit scope' }
+        "404": { description: 'Resource is absent or belongs to another owner/provider' }
+        "409": { description: 'Revision, admission, ownership or idempotency conflict' }
+        "422": { description: 'Invalid request' }
+        "503": { description: 'Dependency or feature unavailable' }
+  /api/northbound/v1/custom-team-templates/{id}/regenerate:
+    post:
+      summary: Owner Team templates.regenerate
+      description: Requires team-templates:generate. Provider identity comes from authentication; owner and every child resource are checked. See northbound-owner-teams.md.
+      operationId: ownerTeamTemplatesRegenerate
+      security:
+        - bearerAuth: []
+      parameters:
+        - { in: query, name: owner, required: true, schema: { type: string, maxLength: 128 } }
+        - { in: path, name: id, required: true, schema: { type: integer } }
+        - { in: header, name: Idempotency-Key, required: true, schema: { type: string, minLength: 8, maxLength: 128 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, description: 'Action-specific body documented in northbound-owner-teams.md; unknown fields are rejected.' }
+      responses:
+        "202":
+          description: Accepted once; data contains operation_id, status and team_id or template_id
+        "401": { description: 'Invalid or expired identity' }
+        "403": { description: 'Missing explicit scope' }
+        "404": { description: 'Resource is absent or belongs to another owner/provider' }
+        "409": { description: 'Revision, admission, ownership or idempotency conflict' }
+        "422": { description: 'Invalid request' }
+        "503": { description: 'Dependency or feature unavailable' }
+  /api/northbound/v1/custom-team-templates/{id}/members/{memberID}/adjust:
+    post:
+      summary: Owner Team templates.adjust
+      description: Requires team-templates:generate. Provider identity comes from authentication; owner and every child resource are checked. See northbound-owner-teams.md.
+      operationId: ownerTeamTemplatesAdjust
+      security:
+        - bearerAuth: []
+      parameters:
+        - { in: query, name: owner, required: true, schema: { type: string, maxLength: 128 } }
+        - { in: path, name: id, required: true, schema: { type: integer } }
+        - { in: path, name: memberID, required: true, schema: { type: string } }
+        - { in: header, name: Idempotency-Key, required: true, schema: { type: string, minLength: 8, maxLength: 128 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, description: 'Action-specific body documented in northbound-owner-teams.md; unknown fields are rejected.' }
+      responses:
+        "202":
+          description: Accepted once; data contains operation_id, status and team_id or template_id
+        "401": { description: 'Invalid or expired identity' }
+        "403": { description: 'Missing explicit scope' }
+        "404": { description: 'Resource is absent or belongs to another owner/provider' }
+        "409": { description: 'Revision, admission, ownership or idempotency conflict' }
+        "422": { description: 'Invalid request' }
+        "503": { description: 'Dependency or feature unavailable' }
+  /api/northbound/v1/custom-team-templates/{id}/members/{memberID}/regenerate:
+    post:
+      summary: Owner Team templates.regenerate-member
+      description: Requires team-templates:generate. Provider identity comes from authentication; owner and every child resource are checked. See northbound-owner-teams.md.
+      operationId: ownerTeamTemplatesRegeneratemember
+      security:
+        - bearerAuth: []
+      parameters:
+        - { in: query, name: owner, required: true, schema: { type: string, maxLength: 128 } }
+        - { in: path, name: id, required: true, schema: { type: integer } }
+        - { in: path, name: memberID, required: true, schema: { type: string } }
+        - { in: header, name: Idempotency-Key, required: true, schema: { type: string, minLength: 8, maxLength: 128 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, description: 'Action-specific body documented in northbound-owner-teams.md; unknown fields are rejected.' }
+      responses:
+        "202":
+          description: Accepted once; data contains operation_id, status and team_id or template_id
+        "401": { description: 'Invalid or expired identity' }
+        "403": { description: 'Missing explicit scope' }
+        "404": { description: 'Resource is absent or belongs to another owner/provider' }
+        "409": { description: 'Revision, admission, ownership or idempotency conflict' }
+        "422": { description: 'Invalid request' }
+        "503": { description: 'Dependency or feature unavailable' }
+  /api/northbound/v1/custom-team-templates/{id}/members/{memberID}/icon:
+    put:
+      summary: Owner Team templates.icon
+      description: Requires team-templates:write. Provider identity comes from authentication; owner and every child resource are checked. See northbound-owner-teams.md.
+      operationId: ownerTeamTemplatesIcon
+      security:
+        - bearerAuth: []
+      parameters:
+        - { in: query, name: owner, required: true, schema: { type: string, maxLength: 128 } }
+        - { in: path, name: id, required: true, schema: { type: integer } }
+        - { in: path, name: memberID, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, description: 'Action-specific body documented in northbound-owner-teams.md; unknown fields are rejected.' }
+      responses:
+        "200":
+          description: Authorized business projection
+        "401": { description: 'Invalid or expired identity' }
+        "403": { description: 'Missing explicit scope' }
+        "404": { description: 'Resource is absent or belongs to another owner/provider' }
+        "409": { description: 'Revision, admission, ownership or idempotency conflict' }
+        "422": { description: 'Invalid request' }
+        "503": { description: 'Dependency or feature unavailable' }
+  /api/northbound/v1/team-operations/{operationID}:
+    get:
+      summary: Owner Team operations.get
+      description: Requires original operation scope. Provider identity comes from authentication; owner and every child resource are checked. See northbound-owner-teams.md.
+      operationId: ownerTeamOperationsGet
+      security:
+        - bearerAuth: []
+      parameters:
+        - { in: query, name: owner, required: true, schema: { type: string, maxLength: 128 } }
+        - { in: path, name: operationID, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Authorized business projection
+        "401": { description: 'Invalid or expired identity' }
+        "403": { description: 'Missing explicit scope' }
+        "404": { description: 'Resource is absent or belongs to another owner/provider' }
+        "409": { description: 'Revision, admission, ownership or idempotency conflict' }
+        "422": { description: 'Invalid request' }
+        "503": { description: 'Dependency or feature unavailable' }
+  /api/northbound/v1/team-operations/{operationID}/retry:
+    post:
+      summary: Owner Team operations.retry
+      description: Requires original operation scope. Provider identity comes from authentication; owner and every child resource are checked. See northbound-owner-teams.md.
+      operationId: ownerTeamOperationsRetry
+      security:
+        - bearerAuth: []
+      parameters:
+        - { in: query, name: owner, required: true, schema: { type: string, maxLength: 128 } }
+        - { in: path, name: operationID, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, description: 'Action-specific body documented in northbound-owner-teams.md; unknown fields are rejected.' }
+      responses:
+        "200":
+          description: Authorized business projection
+        "401": { description: 'Invalid or expired identity' }
+        "403": { description: 'Missing explicit scope' }
+        "404": { description: 'Resource is absent or belongs to another owner/provider' }
+        "409": { description: 'Revision, admission, ownership or idempotency conflict' }
+        "422": { description: 'Invalid request' }
+        "503": { description: 'Dependency or feature unavailable' }
 components:
   securitySchemes:
     apiKeyAuth:

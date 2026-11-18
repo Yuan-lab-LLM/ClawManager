@@ -1,6 +1,8 @@
 import api from './api';
 
 export interface NorthboundSettings {
+	owner_teams_enabled: boolean;
+	owner_team_creation_user_id: number;
   id: number;
   api_enabled: boolean;
   external_node_port: number;

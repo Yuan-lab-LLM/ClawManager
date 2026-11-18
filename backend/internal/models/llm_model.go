@@ -5,6 +5,7 @@ import "time"
 // LLMModel stores an admin-managed AI model configuration.
 type LLMModel struct {
 	ID                  int     `db:"id,primarykey,autoincrement" json:"id"`
+	RuntimeModelID      string  `db:"runtime_model_id" json:"runtime_model_id,omitempty"`
 	VisibilityScope     string  `db:"visibility_scope" json:"visibility_scope"`
 	AccessPolicyVersion int     `db:"access_policy_version" json:"access_policy_version"`
 	AllowedUserIDs      []int   `db:"-" json:"allowed_user_ids"`

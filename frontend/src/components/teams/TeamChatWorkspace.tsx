@@ -1,5 +1,6 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { FolderOpen, PanelLeftClose, Settings2, X } from "lucide-react";
+import { useI18n } from "../../contexts/I18nContext";
 import type { Team, TeamMember } from "../../types/team";
 import { MemberCards, MemberInfoDialog, MemberPager, MemberRail } from "./TeamMembers";
 import { memberPageSize } from "./teamMemberPresentation";
@@ -22,6 +23,7 @@ export default function TeamChatWorkspace({ members, team, leaderKey, renderMemb
   renderKanban: (mini: boolean, open: () => void) => ReactNode;
   files: ReactNode | ((active: boolean) => ReactNode);
 }) {
+  const { t } = useI18n();
   const root = useRef<HTMLDivElement>(null);
   const leftPanel = useRef<HTMLElement>(null);
   const rightPanel = useRef<HTMLElement>(null);
@@ -65,7 +67,7 @@ export default function TeamChatWorkspace({ members, team, leaderKey, renderMemb
   };
   const restoreFocus = () => requestAnimationFrame(() => {
     if (lastTrigger.current?.isConnected && lastTrigger.current.getClientRects().length) lastTrigger.current.focus();
-    else root.current?.querySelector<HTMLButtonElement>('[aria-label="展开任务看板"]')?.focus();
+    else root.current?.querySelector<HTMLButtonElement>('.team-workflow-heading')?.focus();
   });
   const openRight = (panel: "kanban" | "files") => {
     rememberTrigger();
@@ -81,7 +83,7 @@ export default function TeamChatWorkspace({ members, team, leaderKey, renderMemb
     panel?.querySelector<HTMLButtonElement>("button")?.focus();
     const onKey = (event: KeyboardEvent) => {
       // File previews have their own modal layer and keyboard lifecycle.
-      if (document.querySelector('[data-workspace-preview], [data-workspace-editor], [data-team-member-dialog]')) return;
+      if (document.querySelector('[data-workspace-preview], [data-workspace-editor], [data-team-member-dialog], [data-team-file-dialog][open]')) return;
       if (event.key === "Escape") { event.preventDefault(); close(); }
       if (event.key !== "Tab" || !panel) return;
       const controls = [...panel.querySelectorAll<HTMLElement>('button:not([disabled]), a[href], input, textarea, select, summary')]
@@ -100,23 +102,23 @@ export default function TeamChatWorkspace({ members, team, leaderKey, renderMemb
         rememberTrigger(); setLastSide("left"); setLeft(value => !value); if (mode !== "dual") setRight("closed");
       }} pager={<MemberPager page={page} pages={pages} onPage={setMemberPage} />} />
     </div>
-    <aside id={membersPanelId} ref={leftPanel} hidden={!left} className="team-members-panel" role={mode === "drawer" ? "dialog" : undefined} aria-modal={mode === "drawer" ? true : undefined} aria-label="成员与团队配置">
-      <header><strong>成员 <span className="team-roster-count">{members.length}</span></strong><div className="team-roster-header-actions"><button type="button" aria-label="团队配置" title="团队配置" onClick={() => setMemberInfo("team")}><Settings2 size={17} /></button><button type="button" aria-label="收起成员" onClick={() => { setLeft(false); restoreFocus(); }}><PanelLeftClose size={18} /></button></div></header>
+    <aside id={membersPanelId} ref={leftPanel} hidden={!left} className="team-members-panel" role={mode === "drawer" ? "dialog" : undefined} aria-modal={mode === "drawer" ? true : undefined} aria-label={t("teams.membersLabel")}>
+      <header><strong>{t("teams.members")} <span className="team-roster-count">{members.length}</span></strong><div className="team-roster-header-actions"><button type="button" aria-label={t("teams.settings")} title={t("teams.settings")} onClick={() => setMemberInfo("team")}><Settings2 size={17} /></button><button type="button" aria-label={t("teams.collapseMembers")} onClick={() => { setLeft(false); restoreFocus(); }}><PanelLeftClose size={18} /></button></div></header>
       <div className="team-members-body"><MemberCards members={pageMembers} start={start} leaderKey={leaderKey} onDetails={setMemberInfo} /></div>
       <MemberPager page={page} pages={pages} onPage={setMemberPage} />
     </aside>
     <main className="team-chat-main" inert={drawerOpen}>{chat}</main>
-    <aside ref={rightPanel} className="team-tools-panel" role={drawerOpen && right !== "closed" ? "dialog" : undefined} aria-modal={drawerOpen && right !== "closed" ? true : undefined} aria-label="任务看板与文件" inert={drawerOpen && left}>
+    <aside ref={rightPanel} className="team-tools-panel" role={drawerOpen && right !== "closed" ? "dialog" : undefined} aria-modal={drawerOpen && right !== "closed" ? true : undefined} aria-label={t("teams.toolsLabel")} inert={drawerOpen && left}>
       <header className="team-tools-toolbar">
-        {right !== "closed" && <strong>{right === "kanban" ? "任务看板" : "共享文件"}</strong>}
-        {right !== "closed" && <button type="button" onClick={() => openRight("kanban")} aria-pressed={right === "kanban"}>看板</button>}
-        <button type="button" onClick={() => openRight("files")} aria-expanded={right === "files"}><FolderOpen size={17} /><span>文件</span></button>
-        {right !== "closed" && <button type="button" aria-label="收起右侧面板" onClick={() => { setRight("closed"); restoreFocus(); }}><X size={18} /></button>}
+        {right !== "closed" && <strong>{t(right === "kanban" ? "teams.board" : "teams.sharedFiles")}</strong>}
+        {right !== "closed" && <button type="button" onClick={() => openRight("kanban")} aria-pressed={right === "kanban"}>{t("teams.boardTab")}</button>}
+        <button type="button" onClick={() => openRight("files")} aria-expanded={right === "files"}><FolderOpen size={17} /><span>{t("teams.files")}</span></button>
+        {right !== "closed" && <button type="button" aria-label={t("teams.collapseTools")} onClick={() => { setRight("closed"); restoreFocus(); }}><X size={18} /></button>}
       </header>
       <div className="team-kanban-host" hidden={right === "files"}>{renderKanban(right === "closed", () => openRight("kanban"))}</div>
       <div className="team-files-host" hidden={right !== "files"}>{filesVisited && (typeof files === "function" ? files(right === "files" && width > 0) : files)}</div>
     </aside>
-    {drawerOpen && <button type="button" className="team-drawer-backdrop" aria-label="关闭工具抽屉" onClick={close} />}
+    {drawerOpen && <button type="button" className="team-drawer-backdrop" aria-label={t("teams.closeDrawer")} onClick={close} />}
     {(memberInfo === "team" || inspectedMember) && <MemberInfoDialog member={inspectedMember} team={team} renderDetails={renderMemberDetails} onClose={() => setMemberInfo(null)} />}
   </div>;
 }

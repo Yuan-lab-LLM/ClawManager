@@ -23,7 +23,7 @@ func (r *recoveryFailureRepository) CreateEventWithOutbox(e *models.TeamEvent, o
 }
 
 func TestSingleMemberTurnEndUsesSharedAtomicRecovery(t *testing.T) {
-	for _, runtimeType := range []string{"openclaw", "hermes"} {
+	for _, runtimeType := range []string{"openclaw", "hermes", "opencode", "deepseek-harness"} {
 		for _, mode := range []string{"lite", "pro"} {
 			t.Run(runtimeType+"/"+mode, func(t *testing.T) {
 				task := &models.TeamTask{ID: 45, TeamID: 7, TargetMemberID: 2, MessageID: "input", Status: "running", PayloadJSON: `{"executionType":"single_member","followupContext":{"text":"Keep earlier citations"}}`}

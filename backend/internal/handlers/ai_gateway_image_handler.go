@@ -74,6 +74,11 @@ func (h *AIGatewayHandler) imageOperation(c *gin.Context, operation aigateway.Im
 	if !h.applyGatewayRequestContext(c, &attribution) {
 		return
 	}
+	finishActivity, ok := h.admitGatewayModelActivity(c, &attribution, false)
+	if !ok {
+		return
+	}
+	defer finishActivity()
 	lease, ok := h.acquireGatewayLeaseWithEstimate(c, aigateway.EstimateImageRequestTokens(req))
 	if !ok {
 		return

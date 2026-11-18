@@ -1,0 +1,15 @@
+{
+  "temporary_credential_files_deleted": [
+    "fixture-credentials.json",
+    "job-fixture-auth.json",
+    "job-read-auth.json",
+    "job-test-auth.json",
+    "kube-capture-auth.json",
+    "providers-test.sh",
+    "restored-read-auth.json"
+  ],
+  "directory_retained": true,
+  "directory": "C:/Users/hanxingchen/AppData/Local/Temp/cm-team-backup-20261023",
+  "recursive_cleanup_rejected_by_policy": true,
+  "original_connection_document_preserved": true
+}

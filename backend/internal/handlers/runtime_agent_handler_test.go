@@ -523,7 +523,7 @@ func TestRuntimeAgentHandlerDoesNotReconcileMismatchedGatewayIdentity(t *testing
 	}
 }
 
-func TestRuntimeAgentHandlerGatewayReportDeletesMissingCurrentPodBinding(t *testing.T) {
+func TestRuntimeAgentHandlerGatewayReportRetainsMissingCurrentPodBinding(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	lastHealthAt := time.Now().UTC().Add(-time.Minute)
 	bindingRepo := &runtimeAgentHandlerBindingRepo{
@@ -547,11 +547,8 @@ func TestRuntimeAgentHandlerGatewayReportDeletesMissingCurrentPodBinding(t *test
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s, want 200", rec.Code, rec.Body.String())
 	}
-	if got, want := bindingRepo.deletedInstanceIDs, []int{10}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("deleted instance IDs = %v, want %v", got, want)
-	}
-	if got, want := bindingRepo.deletedRuntimePodIDs, []int64{9}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("released runtime pod IDs = %v, want %v", got, want)
+	if len(bindingRepo.deletedInstanceIDs) != 0 || len(bindingRepo.deletedRuntimePodIDs) != 0 || len(bindingRepo.bindings) != 3 {
+		t.Fatalf("omission released unproven ownership: instances=%v pods=%v bindings=%v", bindingRepo.deletedInstanceIDs, bindingRepo.deletedRuntimePodIDs, bindingRepo.bindings)
 	}
 }
 
@@ -584,7 +581,7 @@ func TestRuntimeAgentHandlerGatewayReportDoesNotDeleteFreshBindingFromFirstEmpty
 	}
 }
 
-func TestRuntimeAgentHandlerGatewayReportReleasesOnlyExpiredPendingBinding(t *testing.T) {
+func TestRuntimeAgentHandlerGatewayReportRetainsExpiredPendingBindings(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	old := time.Now().UTC().Add(-time.Minute)
 	fresh := time.Now().UTC()
@@ -604,8 +601,8 @@ func TestRuntimeAgentHandlerGatewayReportReleasesOnlyExpiredPendingBinding(t *te
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s, want 200", rec.Code, rec.Body.String())
 	}
-	if got, want := bindingRepo.deletedInstanceIDs, []int{10}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("released pending instances = %v, want %v", got, want)
+	if len(bindingRepo.deletedInstanceIDs) != 0 || bindingRepo.bindings[10] == nil {
+		t.Fatalf("expired pending ownership released from omission alone: %v", bindingRepo.deletedInstanceIDs)
 	}
 	if bindingRepo.bindings[11] == nil {
 		t.Fatal("fresh pending binding was released by the first empty snapshot")

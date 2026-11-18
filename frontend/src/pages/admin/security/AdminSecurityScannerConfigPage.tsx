@@ -81,14 +81,14 @@ const AdminSecurityScannerConfigPage: React.FC = () => {
     <SecurityCenterShell summary={summary}>
       <div className="space-y-6">
         {error ? (
-          <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
+          <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
         ) : null}
 
-        <section className="rounded-[28px] border border-[#eadfd8] bg-white p-6 shadow-[0_24px_60px_-42px_rgba(72,44,24,0.35)]">
+        <section className="rounded-lg border border-[var(--cm-border)] bg-white p-6 shadow-none">
             <div className="flex items-center justify-between gap-4">
               <div>
-                <h2 className="text-lg font-semibold text-[#171212]">{t('securityCenter.scanner.title')}</h2>
-                <p className="mt-1 text-sm text-[#8f8681]">{t('securityCenter.scanner.subtitle')}</p>
+                <h2 className="text-base leading-[22px] font-semibold text-[var(--cm-ink)]">{t('securityCenter.scanner.title')}</h2>
+                <p className="mt-1 text-sm text-[var(--cm-muted)]">{t('securityCenter.scanner.subtitle')}</p>
               </div>
               <button
                 type="button"
@@ -102,11 +102,11 @@ const AdminSecurityScannerConfigPage: React.FC = () => {
 
             {draftConfig ? (
               <div className="mt-6 space-y-5">
-                <div className="rounded-2xl border border-[#efe1d8] bg-[#fffaf7] p-4">
+                <div className="rounded-lg border border-[var(--cm-border-subtle)] bg-[var(--cm-subtle)] p-4">
                   <div className="flex items-center justify-between gap-3">
                     <div>
-                      <div className="text-sm font-semibold text-[#171212]">{t('securityCenter.scanner.serviceStatus')}</div>
-                      <div className="mt-1 text-xs text-[#8f8681]">
+                      <div className="text-sm font-semibold text-[var(--cm-ink)]">{t('securityCenter.scanner.serviceStatus')}</div>
+                      <div className="mt-1 text-xs text-[var(--cm-muted)]">
                         {t('securityCenter.scanner.namespaceDeployment', {
                           namespace: draftConfig.skill_scanner_config.namespace,
                           deployment: draftConfig.skill_scanner_config.deployment_name,
@@ -117,12 +117,12 @@ const AdminSecurityScannerConfigPage: React.FC = () => {
                       {draftConfig.scanner_status.connected ? t('securityCenter.dashboard.connected') : t('securityCenter.dashboard.disconnected')}
                     </Badge>
                   </div>
-                  <div className="mt-3 text-sm text-[#6f6661]">{draftConfig.scanner_status.status_label}</div>
+                  <div className="mt-3 text-sm text-[var(--cm-muted)]">{draftConfig.scanner_status.status_label}</div>
                   <div className="mt-3 flex flex-wrap gap-2">
                     {draftConfig.scanner_status.available_capabilities.map((item) => (
                       <span
                         key={item}
-                        className="inline-flex rounded-full border border-[#d9e0e7] bg-[#f6f8fb] px-3 py-1 text-xs font-semibold text-[#556070]"
+                        className="inline-flex rounded-full border border-[var(--cm-border)] bg-[var(--cm-subtle)] px-3 py-1 text-xs font-semibold text-[var(--cm-muted)]"
                       >
                         {item}
                       </span>
@@ -130,9 +130,9 @@ const AdminSecurityScannerConfigPage: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="rounded-2xl border border-[#efe1d8] bg-[#fffaf7] p-4">
-                  <div className="text-sm font-semibold text-[#171212]">{t('securityCenter.scanner.llmConfig')}</div>
-                  <p className="mt-1 text-xs leading-5 text-[#8f8681]">
+                <div className="rounded-lg border border-[var(--cm-border-subtle)] bg-[var(--cm-subtle)] p-4">
+                  <div className="text-sm font-semibold text-[var(--cm-ink)]">{t('securityCenter.scanner.llmConfig')}</div>
+                  <p className="mt-1 text-xs leading-5 text-[var(--cm-muted)]">
                     {t('securityCenter.scanner.llmConfigDesc')}
                   </p>
                   <div className="mt-4 grid grid-cols-1 gap-4">
@@ -267,9 +267,9 @@ const AdminSecurityScannerConfigPage: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="rounded-2xl border border-[#efe1d8] bg-[#fffaf7] p-4">
-                  <div className="text-sm font-semibold text-[#171212]">{t('securityCenter.scanner.currentMode')}</div>
-                  <p className="mt-1 text-xs leading-5 text-[#8f8681]">
+                <div className="rounded-lg border border-[var(--cm-border-subtle)] bg-[var(--cm-subtle)] p-4">
+                  <div className="text-sm font-semibold text-[var(--cm-ink)]">{t('securityCenter.scanner.currentMode')}</div>
+                  <p className="mt-1 text-xs leading-5 text-[var(--cm-muted)]">
                     {t('securityCenter.scanner.currentModeDesc')}
                   </p>
                   <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -281,8 +281,8 @@ const AdminSecurityScannerConfigPage: React.FC = () => {
                       return (
                         <label
                           key={option.value}
-                          className={`flex cursor-pointer items-start gap-3 rounded-2xl border px-4 py-4 transition ${
-                            checked ? 'border-[#9fc7ee] bg-[#eef7ff]' : 'border-[#eadfd8] bg-white'
+                          className={`flex cursor-pointer items-start gap-3 rounded-lg border px-4 py-4 transition ${
+                            checked ? 'border-[var(--cm-primary-selected)] bg-[var(--cm-selected)]' : 'border-[var(--cm-border)] bg-white'
                           }`}
                         >
                           <input
@@ -295,11 +295,11 @@ const AdminSecurityScannerConfigPage: React.FC = () => {
                                 current ? { ...current, active_mode: option.value, default_mode: option.value } : current,
                               );
                             }}
-                            className="mt-1 h-4 w-4 border-[#d7c9bf] text-[#dc2626] focus:ring-[#ef6b4a]"
+                            className="mt-1 h-4 w-4 border-[#d7c9bf] text-[#dc2626] focus:ring-[var(--cm-primary)]"
                           />
                           <div>
-                            <div className="text-sm font-semibold text-[#171212]">{option.label}</div>
-                            <div className="mt-1 text-xs leading-5 text-[#8f8681]">{option.description}</div>
+                            <div className="text-sm font-semibold text-[var(--cm-ink)]">{option.label}</div>
+                            <div className="mt-1 text-xs leading-5 text-[var(--cm-muted)]">{option.description}</div>
                           </div>
                         </label>
                       );
@@ -351,12 +351,12 @@ const AdminSecurityScannerConfigPage: React.FC = () => {
                     }}
                   />
                 </div>
-                <div className="rounded-2xl border border-[#efe1d8] bg-[#fffaf7] px-4 py-4 text-sm leading-6 text-[#6f6661]">
+                <div className="rounded-lg border border-[var(--cm-border-subtle)] bg-[var(--cm-subtle)] px-4 py-4 text-sm leading-5 text-[var(--cm-muted)]">
                   {t('securityCenter.scanner.applySummary')}
                 </div>
               </div>
             ) : (
-              <div className="mt-6 text-sm text-[#8f8681]">{t('securityCenter.scanner.loadingConfig')}</div>
+              <div className="mt-6 text-sm text-[var(--cm-muted)]">{t('securityCenter.scanner.loadingConfig')}</div>
             )}
         </section>
       </div>
@@ -382,8 +382,8 @@ function ScanMethodCard({
   const { t } = useI18n();
   const quickLabel = t('securityCenter.scanModes.quick');
   return (
-    <div className="rounded-2xl border border-[#efe1d8] bg-[#fffaf7] p-4">
-      <div className="text-sm font-semibold text-[#171212]">{title}</div>
+    <div className="rounded-lg border border-[var(--cm-border-subtle)] bg-[var(--cm-subtle)] p-4">
+      <div className="text-sm font-semibold text-[var(--cm-ink)]">{title}</div>
       <div className="mt-4">
         <label className="block text-sm font-medium text-gray-700">{t('securityCenter.scanner.timeoutSeconds')}</label>
         <input
@@ -402,17 +402,17 @@ function ScanMethodCard({
             return (
               <label
                 key={`${title}-${option.value}`}
-                className="flex cursor-pointer items-start gap-3 rounded-2xl border border-[#eadfd8] bg-white px-4 py-3"
+                className="flex cursor-pointer items-start gap-3 rounded-lg border border-[var(--cm-border)] bg-white px-4 py-3"
               >
                 <input
                   type="checkbox"
                   checked={checked}
                   onChange={() => onToggleAnalyzer(option.value)}
-                  className="mt-1 h-4 w-4 rounded border-[#d7c9bf] text-[#dc2626] focus:ring-[#ef6b4a]"
+                  className="mt-1 h-4 w-4 rounded border-[#d7c9bf] text-[#dc2626] focus:ring-[var(--cm-primary)]"
                 />
                 <div>
-                  <div className="text-sm font-semibold text-[#171212]">{option.label}</div>
-                  <div className="mt-1 text-xs leading-5 text-[#8f8681]">{option.description}</div>
+                  <div className="text-sm font-semibold text-[var(--cm-ink)]">{option.label}</div>
+                  <div className="mt-1 text-xs leading-5 text-[var(--cm-muted)]">{option.description}</div>
                 </div>
               </label>
             );
@@ -446,7 +446,7 @@ function ConfigField({
   return (
     <div>
       <label className="block text-sm font-medium text-gray-700">{label}</label>
-      <p className="mt-1 text-xs text-[#8f8681]">{helper}</p>
+      <p className="mt-1 text-xs text-[var(--cm-muted)]">{helper}</p>
       <div className="mt-2 flex items-center gap-3">
         <input
           type={type}
@@ -458,7 +458,7 @@ function ConfigField({
           <button
             type="button"
             onClick={onToggleReveal}
-            className="inline-flex min-w-[68px] justify-center rounded-xl border border-[#eadfd8] bg-white px-3 py-2 text-sm font-medium text-[#6f6661] transition hover:border-[#d6c7be] hover:bg-[#fffaf7]"
+            className="inline-flex min-w-[68px] justify-center rounded-xl border border-[var(--cm-border)] bg-white px-3 py-2 text-sm font-medium text-[var(--cm-muted)] transition hover:border-[var(--cm-border)] hover:bg-[var(--cm-subtle)]"
           >
             {revealed ? t('securityCenter.scanner.hide') : t('securityCenter.scanner.reveal')}
           </button>
@@ -483,7 +483,7 @@ function ModelImportField({
   return (
     <div>
       <label className="block text-sm font-medium text-gray-700">{label}</label>
-      <p className="mt-1 text-xs text-[#8f8681]">{helper}</p>
+      <p className="mt-1 text-xs text-[var(--cm-muted)]">{helper}</p>
       <select
         defaultValue=""
         onChange={(event) => {

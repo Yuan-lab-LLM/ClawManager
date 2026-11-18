@@ -1,0 +1,20 @@
+{
+  "url": "https://10.130.81.54:30443",
+  "index_matches_validated_dist": true,
+  "assets": [
+    {
+      "path": "/assets/index-De54G2k9.js",
+      "sha256": "9eb9e1d3d5ab74922ceb98a95203e8f83ba1e6a24fcc4e5b9ad16491340d35b9"
+    },
+    {
+      "path": "/assets/dist-BjP5Xqm5.js",
+      "sha256": "939c4f32c4d627e09a1b01e9e7ceda8f8d589e1da70dbc3dca60f9e60bc44e6e"
+    },
+    {
+      "path": "/assets/index-CjVS0VS9.css",
+      "sha256": "1b28d964b13ec694ace8c1ca7a2c8aed0d863209b90385b0992c6d2c9283aba7"
+    }
+  ],
+  "health_http": 200,
+  "version_http": 200
+}

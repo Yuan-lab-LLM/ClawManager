@@ -25,10 +25,8 @@ assert(
 );
 
 assert(
-  listSource.includes("window.setInterval") &&
-    listSource.includes('instance.status === "creating"') &&
-    listSource.includes('instance.status === "deleting"'),
-  "Instance list must keep transition-state polling after removing WebSocket updates.",
+  listSource.includes("refetchInterval: 5000") && listSource.includes("refetchOnReconnect:"),
+  "Instance list must keep periodic snapshot synchronization and reconnect recovery without a WebSocket.",
 );
 
 assert(

@@ -2,19 +2,23 @@ package repository
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"clawreef/internal/models"
 	drivermysql "github.com/go-sql-driver/mysql"
+	"github.com/upper/db/v4"
 	"github.com/upper/db/v4/adapter/mysql"
 )
 
 // Opt-in integration test. Requires an EMPTY, DISPOSABLE database whose name
 // begins with clawmanager_test_. Never runs against the application database.
-func TestRuntimeTaskMySQLRevocationLifecycle(t *testing.T) {
+func runtimeTaskMySQLFixture(t *testing.T) (db.Session, *models.LLMModel) {
+	t.Helper()
 	dsn := os.Getenv("CLAWMANAGER_TEST_MYSQL_DSN")
 	if dsn == "" {
 		t.Skip("CLAWMANAGER_TEST_MYSQL_DSN not configured; requires disposable MySQL")
@@ -50,14 +54,19 @@ func TestRuntimeTaskMySQLRevocationLifecycle(t *testing.T) {
 	}
 	// All tables below were created by this test after the empty-schema check.
 	t.Cleanup(func() {
-		for _, table := range []string{"instance_workspace_write_intents", "gateway_runtime_upgrade_stops", "instance_commands", "instance_desired_state", "instance_runtime_bindings", "runtime_pods", "gateway_runtime_upgrades", "gateway_runtime_maintenance", "gateway_runtime_protocols", "gateway_runtime_task_models", "gateway_runtime_tasks", "llm_model_user_grants", "llm_models", "instances", "users"} {
+		_, _ = sess.SQL().Exec("DROP TABLE IF EXISTS llm_runtime_model_aliases")
+		_, _ = sess.SQL().Exec("DROP TABLE IF EXISTS llm_runtime_provider_refs")
+		for _, table := range []string{"instance_lifecycle_manual_guards", "runtime_management_operations", "browser_writer_registry", "team_workspace_write_intents", "team_members", "teams", "instance_workspace_write_fences", "instance_workspace_write_intents", "gateway_runtime_upgrade_stops", "instance_commands", "instance_desired_state", "instance_runtime_bindings", "runtime_pods", "gateway_runtime_upgrades", "gateway_runtime_maintenance", "gateway_runtime_protocols", "gateway_runtime_task_models", "gateway_runtime_tasks", "llm_model_user_grants", "llm_models", "instances", "users"} {
 			_, _ = sess.SQL().Exec("DROP TABLE IF EXISTS " + table)
 		}
 	})
+	exec("CREATE TABLE runtime_management_operations(id VARCHAR(64) PRIMARY KEY,kind VARCHAR(32),status VARCHAR(32))")
+	exec("CREATE TABLE instance_lifecycle_manual_guards(instance_id INT PRIMARY KEY,token VARCHAR(64))")
 	exec("CREATE TABLE users (id INT PRIMARY KEY,is_active BOOLEAN NOT NULL) ENGINE=InnoDB")
-	exec("CREATE TABLE instances (id INT PRIMARY KEY,user_id INT NOT NULL,runtime_generation INT NOT NULL) ENGINE=InnoDB")
+	exec("CREATE TABLE instances (id INT PRIMARY KEY,user_id INT NOT NULL,runtime_generation INT NOT NULL,instance_mode VARCHAR(16) NOT NULL DEFAULT 'pro',status VARCHAR(32) NOT NULL DEFAULT 'running') ENGINE=InnoDB")
+	teamGateFixtureTables(t, sess)
 	exec("INSERT INTO users VALUES (1,TRUE),(2,TRUE)")
-	exec("INSERT INTO instances VALUES (10,1,5)")
+	exec("INSERT INTO instances(id,user_id,runtime_generation) VALUES (10,1,5)")
 	writeSchema, schemaErr := os.ReadFile("../db/migrations/068_add_workspace_write_intents.sql")
 	if schemaErr != nil {
 		t.Fatal(schemaErr)
@@ -67,7 +76,25 @@ func TestRuntimeTaskMySQLRevocationLifecycle(t *testing.T) {
 			exec(statement)
 		}
 	}
+	teamSchema, teamErr := os.ReadFile("../db/migrations/100_add_nfs_external_writer_tracking.sql")
+	if teamErr != nil {
+		t.Fatal(teamErr)
+	}
+	for _, statement := range strings.Split(string(teamSchema), ";") {
+		if strings.TrimSpace(statement) != "" {
+			exec(statement)
+		}
+	}
 	commandSchema, schemaErr := os.ReadFile("../db/migrations/007_add_instance_agent_control_plane.sql")
+	fenceSchema, fenceErr := os.ReadFile("../db/migrations/099_add_workspace_write_fences.sql")
+	if fenceErr != nil {
+		t.Fatal(fenceErr)
+	}
+	for _, statement := range strings.Split(string(fenceSchema), ";") {
+		if strings.TrimSpace(statement) != "" {
+			exec(statement)
+		}
+	}
 	if schemaErr != nil {
 		t.Fatal(schemaErr)
 	}
@@ -77,6 +104,18 @@ func TestRuntimeTaskMySQLRevocationLifecycle(t *testing.T) {
 		}
 	}
 	modelRepo := NewLLMModelRepository(sess)
+	// Model repositories no longer create schemas on construction. Seed the
+	// migration-owned base table before applying this fixture's extra columns.
+	baseModelSchema, err := os.ReadFile("../db/migrations/045_add_llm_model_reasoning_control.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	exec(strings.Split(string(baseModelSchema), ";")[0])
+	exec(`ALTER TABLE llm_models ADD COLUMN reasoning_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+ ADD COLUMN model_group VARCHAR(100) NOT NULL DEFAULT '', ADD COLUMN deployment_priority INT NOT NULL DEFAULT 100,
+ ADD COLUMN max_concurrent_requests INT NOT NULL DEFAULT 0, ADD COLUMN context_window_tokens INT NOT NULL DEFAULT 0,
+ ADD COLUMN quality_tier INT NOT NULL DEFAULT 0, ADD COLUMN image_price_per_image DECIMAL(18,8) NULL,
+ ADD COLUMN provider_models_json LONGTEXT NULL`)
 	exec(`ALTER TABLE llm_models ADD COLUMN visibility_scope VARCHAR(24) NOT NULL DEFAULT 'all',
  ADD COLUMN access_policy_version INT NOT NULL DEFAULT 1, ADD COLUMN supports_tools BOOLEAN NOT NULL DEFAULT FALSE,
  ADD COLUMN supports_vision BOOLEAN NOT NULL DEFAULT FALSE, ADD COLUMN tools_support_override BOOLEAN NULL,
@@ -96,14 +135,93 @@ func TestRuntimeTaskMySQLRevocationLifecycle(t *testing.T) {
 			exec(statement)
 		}
 	}
+	identitySchema, err := os.ReadFile("../db/migrations/077_add_runtime_model_identity.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, statement := range strings.Split(string(identitySchema), ";") {
+		if strings.TrimSpace(statement) != "" {
+			exec(statement)
+		}
+	}
 	model := &models.LLMModel{DisplayName: "deployment-one", ProviderType: "local", ProtocolType: "openai-compatible", ModelGroup: "general", BaseURL: "https://test.invalid/v1", ProviderModelName: "same", VisibilityScope: "all", IsActive: true, Currency: "USD"}
+	refsSchema, err := os.ReadFile("../db/migrations/078_add_runtime_provider_refs.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, statement := range strings.Split(string(refsSchema), ";") {
+		if strings.TrimSpace(statement) != "" {
+			exec(statement)
+		}
+	}
 	if err = modelRepo.Save(model); err != nil {
 		t.Fatal(err)
 	}
+	stableID := model.RuntimeModelID
+	model.DisplayName = "deployment-renamed"
+	if err = modelRepo.Save(model); err != nil {
+		t.Fatal(err)
+	}
+	if stableID == "" || stableID != model.RuntimeModelID {
+		t.Fatal("rename changed stable ID")
+	}
+	for _, ref := range []string{"deployment-one", models.RuntimeModelAlias("deployment-one"), stableID} {
+		m, err := modelRepo.(RuntimeModelResolver).ResolveRuntimeModel(ref)
+		if err != nil || m == nil || m.ID != model.ID {
+			t.Fatalf("historical alias lost: %s %v", ref, err)
+		}
+	}
+	return sess, model
+}
+
+func TestRuntimeTaskMySQLConcurrentAuthorization(t *testing.T) {
+	sess, model := runtimeTaskMySQLFixture(t)
+	sess.SetMaxOpenConns(12)
+	testGatewayTaskConcurrentWrites(t, sess, *model)
+}
+
+func TestRuntimeTaskMySQLRevocationLifecycle(t *testing.T) {
+	sess, model := runtimeTaskMySQLFixture(t)
+	modelRepo := NewLLMModelRepository(sess)
+	exec := func(query string, args ...any) {
+		t.Helper()
+		if _, err := sess.SQL().Exec(query, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var err error
+	var raw []byte
 	tasks := NewGatewayTaskRepository(sess)
 	identity := models.GatewayTaskIdentity{InstanceID: 10, UserID: 1, Generation: 5, SessionID: "ses_test", TaskID: "msg_one"}
 	if err = tasks.Bind(t.Context(), identity, model.ID); err != nil {
 		t.Fatal(err)
+	}
+	// Native guard and per-request headers check the SAME live identity in
+	// parallel. Preserve revocation checks without deadlocking instance/task locks.
+	sess.SetMaxOpenConns(8)
+	var parallel sync.WaitGroup
+	failures := make(chan error, 4)
+	for worker := 0; worker < 4; worker++ {
+		parallel.Add(1)
+		go func() {
+			defer parallel.Done()
+			for n := 0; n < 30; n++ {
+				state, e := tasks.Check(t.Context(), identity)
+				if e != nil {
+					failures <- e
+					return
+				}
+				if state.Revoked || state.Finished {
+					failures <- fmt.Errorf("live authorization changed: %+v", state)
+					return
+				}
+			}
+		}()
+	}
+	parallel.Wait()
+	close(failures)
+	for e := range failures {
+		t.Fatal(e)
 	}
 	model.VisibilityScope = "selected_users"
 	model.AllowedUserIDs = []int{2}
@@ -217,21 +335,19 @@ func TestRuntimeTaskMySQLRevocationLifecycle(t *testing.T) {
 		}
 	}
 	maintenance := NewRuntimeMaintenanceRepository(sess)
-	if _, err = maintenance.Begin(t.Context(), 10, 1, 7, 1, time.Minute); !errors.Is(err, models.ErrRuntimeMaintenanceConflict) {
-		t.Fatalf("stale/non-drain runtime accepted: %v", err)
-	}
 	report.Protocol = 1
 	report.Capabilities = append(report.Capabilities, "maintenance_drain")
 	if err = protocols.Negotiate(t.Context(), 10, 1, report); err != nil {
 		t.Fatal(err)
 	}
-	drain, err := maintenance.Begin(t.Context(), 10, 1, 7, 1, time.Minute)
-	if err != nil || drain.Drained(time.Now()) {
-		t.Fatalf("drain before receipt: %+v %v", drain, err)
+	// Seed internal drain evidence directly: manual Begin/Cancel controls were removed.
+	seedDrain := func(id, owner, generation int, operation string) *models.RuntimeMaintenance {
+		t.Helper()
+		deadline := time.Now().UTC().Add(time.Minute)
+		exec("REPLACE INTO gateway_runtime_maintenance(instance_id,owner_user_id,generation,operation_id,requested_by,deadline) VALUES(?,?,?,?,?,?)", id, owner, generation, operation, owner, deadline)
+		return &models.RuntimeMaintenance{InstanceID: id, OwnerID: owner, Generation: generation, Operation: operation, Deadline: deadline}
 	}
-	if _, err = maintenance.Begin(t.Context(), 10, 1, 7, 1, time.Minute); !errors.Is(err, models.ErrRuntimeMaintenanceConflict) {
-		t.Fatal("overlapping drain accepted", err)
-	}
+	drain := seedDrain(10, 1, 7, strings.Repeat("1", 32))
 	status := models.RuntimeMaintenanceReport{Generation: 7, Operation: drain.Operation, GateClosed: true, Jobs: 1}
 	drain, err = maintenance.Poll(t.Context(), 10, 1, status)
 	if err != nil || drain.Drained(time.Now()) {
@@ -242,20 +358,12 @@ func TestRuntimeTaskMySQLRevocationLifecycle(t *testing.T) {
 	if err != nil || !drain.Drained(time.Now()) {
 		t.Fatalf("idle receipt rejected: %+v %v", drain, err)
 	}
-	if err = maintenance.Cancel(t.Context(), 10, strings.Repeat("0", 32)); !errors.Is(err, models.ErrRuntimeMaintenanceConflict) {
-		t.Fatal("wrong cancel accepted", err)
-	}
-	if err = maintenance.Cancel(t.Context(), 10, drain.Operation); err != nil {
-		t.Fatal(err)
-	}
+	exec("UPDATE gateway_runtime_maintenance SET cancelled=TRUE WHERE instance_id=10")
 	drain, err = maintenance.Poll(t.Context(), 10, 1, status)
 	if err != nil || drain.Draining(time.Now()) {
 		t.Fatal("late receipt revived cancellation", err)
 	}
-	drain, err = maintenance.Begin(t.Context(), 10, 1, 7, 1, time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
+	drain = seedDrain(10, 1, 7, strings.Repeat("2", 32))
 	if drain.Operation == status.Operation {
 		t.Fatal("operation identity reused")
 	}
@@ -273,13 +381,10 @@ func TestRuntimeTaskMySQLRevocationLifecycle(t *testing.T) {
 	if _, err = maintenance.Poll(t.Context(), 10, 1, status); !errors.Is(err, models.ErrModelUnavailable) {
 		t.Fatal("stale generation report accepted", err)
 	}
-	exec("ALTER TABLE instances ADD COLUMN type VARCHAR(32) NOT NULL DEFAULT 'opencode', ADD COLUMN status VARCHAR(32) NOT NULL DEFAULT 'running'")
+	exec("ALTER TABLE instances ADD COLUMN type VARCHAR(32) NOT NULL DEFAULT 'opencode'")
 	upgrade := NewRuntimeUpgradeRepository(sess)
 	status.Generation = 7
-	drain, err = maintenance.Begin(t.Context(), 10, 1, 7, 1, time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
+	drain = seedDrain(10, 1, 7, strings.Repeat("3", 32))
 	status.Operation = drain.Operation
 	status.Jobs = 1
 	if _, err = maintenance.Poll(t.Context(), 10, 1, status); err != nil {
@@ -411,9 +516,6 @@ func TestRuntimeTaskMySQLRevocationLifecycle(t *testing.T) {
 			t.Fatalf("%s bypassed fence: %v", name, err)
 		}
 	}
-	if err = maintenance.Cancel(t.Context(), 10, status.Operation); !errors.Is(err, models.ErrRuntimeUpgradeInProgress) {
-		t.Fatal("drain cancel bypassed reservation", err)
-	}
 	if err = upgrade.CancelReservation(t.Context(), 10, 1, 7, status.Operation); err != nil {
 		t.Fatal(err)
 	}
@@ -425,10 +527,7 @@ func TestRuntimeTaskMySQLRevocationLifecycle(t *testing.T) {
 		t.Fatal("cancel did not release fence", err)
 	}
 	release()
-	drain, err = maintenance.Begin(t.Context(), 10, 1, 7, 1, time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
+	drain = seedDrain(10, 1, 7, strings.Repeat("4", 32))
 	status.Operation = drain.Operation
 	if _, err = maintenance.Poll(t.Context(), 10, 1, status); err != nil {
 		t.Fatal(err)
@@ -452,9 +551,6 @@ func TestRuntimeTaskMySQLRevocationLifecycle(t *testing.T) {
 	}
 	if err = upgrade.MarkRecoveryRequired(t.Context(), 10, 1, 7, status.Operation); err != nil {
 		t.Fatal(err)
-	}
-	if _, err = maintenance.Begin(t.Context(), 10, 1, 7, 1, time.Minute); !errors.Is(err, models.ErrRuntimeUpgradeInProgress) {
-		t.Fatal("new drain bypassed recovery fence", err)
 	}
 	if err = upgrade.MarkRecoveryRequired(t.Context(), 10, 2, 7, status.Operation); !errors.Is(err, models.ErrRuntimeUpgradeConflict) {
 		t.Fatal("wrong owner accepted", err)
@@ -493,10 +589,7 @@ func TestRuntimeTaskMySQLRevocationLifecycle(t *testing.T) {
 	if err = protocols.Negotiate(t.Context(), 12, 1, report); err != nil {
 		t.Fatal(err)
 	}
-	drain, err = maintenance.Begin(t.Context(), 12, 1, 1, 1, time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
+	drain = seedDrain(12, 1, 1, strings.Repeat("5", 32))
 	status = models.RuntimeMaintenanceReport{Generation: 1, Operation: drain.Operation, GateClosed: true}
 	if _, err = maintenance.Poll(t.Context(), 12, 1, status); err != nil {
 		t.Fatal(err)

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -27,12 +28,14 @@ type runtimeEventPublisher interface {
 }
 
 type RuntimeAgentHandler struct {
-	cfg          config.RuntimePoolConfig
-	podRepo      repository.RuntimePodRepository
-	bindingRepo  repository.InstanceRuntimeBindingRepository
-	instanceRepo repository.InstanceRepository
-	events       runtimeEventPublisher
-	skillService services.SkillService
+	reportVerifier RuntimeGatewayReportVerifier
+	shutdownAudits repository.RuntimeShutdownAuditRepository
+	cfg            config.RuntimePoolConfig
+	podRepo        repository.RuntimePodRepository
+	bindingRepo    repository.InstanceRuntimeBindingRepository
+	instanceRepo   repository.InstanceRepository
+	events         runtimeEventPublisher
+	skillService   services.SkillService
 }
 
 type runtimeAgentPodIdentity struct {
@@ -67,10 +70,11 @@ type runtimeAgentRegisterRequest struct {
 
 type runtimeAgentHeartbeatRequest struct {
 	runtimeAgentPodIdentity
-	State      string     `json:"state" binding:"required"`
-	UsedSlots  int        `json:"used_slots"`
-	Draining   bool       `json:"draining"`
-	ReportedAt *time.Time `json:"reported_at,omitempty"`
+	MaxGateways int        `json:"max_gateways,omitempty"`
+	State       string     `json:"state" binding:"required"`
+	UsedSlots   int        `json:"used_slots"`
+	Draining    bool       `json:"draining"`
+	ReportedAt  *time.Time `json:"reported_at,omitempty"`
 }
 
 type runtimeAgentMetricsRequest struct {
@@ -90,19 +94,20 @@ type runtimeAgentGatewaysRequest struct {
 }
 
 type runtimeAgentGatewayReport struct {
-	InstanceID     int        `json:"instance_id" binding:"required"`
-	GatewayID      string     `json:"gateway_id"`
-	GatewayPort    int        `json:"gateway_port"`
-	GatewayPID     *int       `json:"gateway_pid,omitempty"`
-	WorkspacePath  string     `json:"workspace_path,omitempty"`
-	State          string     `json:"state" binding:"required"`
-	Generation     int        `json:"generation" binding:"required"`
-	ErrorMessage   *string    `json:"error_message,omitempty"`
-	FailureClass   string     `json:"failure_class,omitempty"`
-	ExitCode       *int       `json:"exit_code,omitempty"`
-	Retryable      *bool      `json:"retryable,omitempty"`
-	RestartAttempt int        `json:"restart_attempt,omitempty"`
-	HealthAt       *time.Time `json:"health_at,omitempty"`
+	ShutdownObservation *models.RuntimeShutdownObservation `json:"shutdown_observation,omitempty"`
+	InstanceID          int                                `json:"instance_id" binding:"required"`
+	GatewayID           string                             `json:"gateway_id"`
+	GatewayPort         int                                `json:"gateway_port"`
+	GatewayPID          *int                               `json:"gateway_pid,omitempty"`
+	WorkspacePath       string                             `json:"workspace_path,omitempty"`
+	State               string                             `json:"state" binding:"required"`
+	Generation          int                                `json:"generation" binding:"required"`
+	ErrorMessage        *string                            `json:"error_message,omitempty"`
+	FailureClass        string                             `json:"failure_class,omitempty"`
+	ExitCode            *int                               `json:"exit_code,omitempty"`
+	Retryable           *bool                              `json:"retryable,omitempty"`
+	RestartAttempt      int                                `json:"restart_attempt,omitempty"`
+	HealthAt            *time.Time                         `json:"health_at,omitempty"`
 }
 
 func NewRuntimeAgentHandler(cfg config.RuntimePoolConfig, podRepo repository.RuntimePodRepository, bindingRepo repository.InstanceRuntimeBindingRepository, instanceRepo repository.InstanceRepository, events runtimeEventPublisher, skillService services.SkillService) *RuntimeAgentHandler {
@@ -125,6 +130,7 @@ func (h *RuntimeAgentHandler) Register(c *gin.Context) {
 		utils.ValidationError(c, err)
 		return
 	}
+	req.Capabilities = normalizeRuntimeCapabilities(req.Capabilities)
 	runtimeType, ok := services.NormalizeV2RuntimeType(req.RuntimeType)
 	if !ok {
 		utils.Error(c, http.StatusBadRequest, "unsupported runtime type")
@@ -135,6 +141,17 @@ func (h *RuntimeAgentHandler) Register(c *gin.Context) {
 		state = "ready"
 	}
 	capacity := runtimePodCapacityFromReport(req.Capacity, h.cfg.MaxGatewaysPerPod)
+	if slices.Contains(req.Capabilities, "container-slots-v1") {
+		if req.Capacity <= 0 {
+			utils.Error(c, http.StatusBadRequest, "physical Runtime slot capacity is required")
+			return
+		}
+		if runtimeSlotCapacityExceedsAdmissionLimit(req.Capacity, h.cfg.MaxGatewaysPerPod) {
+			utils.Error(c, http.StatusConflict, "physical Runtime slot capacity exceeds configured admission limit; align Runtime slot count and max gateways per pod")
+			return
+		}
+		capacity = req.Capacity
+	}
 	// Liveness is measured at the control plane. Agent clocks may drift and a
 	// request can sit behind a slow database or network path before it arrives.
 	// Using reported_at here can make a newly received report look stale and
@@ -221,6 +238,30 @@ func (h *RuntimeAgentHandler) Heartbeat(c *gin.Context) {
 	}
 	lastSeen := time.Now().UTC()
 	capacity := runtimePodCapacityFromReport(0, h.cfg.MaxGatewaysPerPod)
+	pod, err := h.podRepo.GetByID(c.Request.Context(), podID)
+	if err != nil {
+		utils.HandleError(c, err)
+		return
+	}
+	if pod == nil && h.cfg.ContainerSlots > 0 {
+		utils.Error(c, http.StatusNotFound, "runtime pod must register before heartbeats")
+		return
+	}
+	if pod != nil && slices.Contains(pod.Capabilities(), "container-slots-v1") {
+		physical := req.MaxGateways
+		if physical <= 0 {
+			physical = pod.Capacity
+		}
+		if physical <= 0 {
+			utils.Error(c, http.StatusConflict, "physical Runtime slot capacity is unavailable; register again")
+			return
+		}
+		if runtimeSlotCapacityExceedsAdmissionLimit(physical, h.cfg.MaxGatewaysPerPod) {
+			utils.Error(c, http.StatusConflict, "physical Runtime slot capacity exceeds configured admission limit; align Runtime slot count and max gateways per pod")
+			return
+		}
+		capacity = physical
+	}
 	if err := h.podRepo.UpdateHeartbeat(c.Request.Context(), podID, strings.TrimSpace(req.State), req.UsedSlots, capacity, req.Draining, lastSeen); err != nil {
 		utils.HandleError(c, err)
 		return
@@ -311,6 +352,16 @@ func (h *RuntimeAgentHandler) ReportGateways(c *gin.Context) {
 			utils.HandleError(c, err)
 			return
 		}
+		handled, _, recoveryErr := h.reconcileProtectedPendingReport(c.Request.Context(), binding, podID, gateway)
+		if recoveryErr != nil {
+			utils.HandleError(c, recoveryErr)
+			return
+		}
+		if handled {
+			// The protected transaction already updates both rows. A second
+			// write here could resurrect a same-generation concurrent stop.
+			continue
+		}
 		if binding == nil || pendingBindingCanYieldToReportedGateway(binding, podID, gateway) {
 			reconciled, reconcileErr := h.reconcileReportedOpenClawGateway(c.Request.Context(), podID, gateway)
 			if reconcileErr != nil {
@@ -328,6 +379,28 @@ func (h *RuntimeAgentHandler) ReportGateways(c *gin.Context) {
 		}
 		if binding == nil || binding.RuntimePodID != podID || binding.Generation != gateway.Generation {
 			continue
+		}
+		if gateway.ShutdownObservation != nil {
+			if gateway.ShutdownObservation.Validate() != nil || gateway.ShutdownObservation.Generation != gateway.Generation {
+				utils.Error(c, 400, "Invalid runtime shutdown observation")
+				return
+			}
+			if h.shutdownAudits == nil || h.instanceRepo == nil {
+				utils.Error(c, 503, "Runtime shutdown audit storage unavailable")
+				return
+			}
+			instance, err := h.instanceRepo.GetByID(gateway.InstanceID)
+			if err != nil {
+				utils.Error(c, 503, "Runtime shutdown audit storage unavailable")
+				return
+			}
+			if instance == nil || instance.RuntimeGeneration != gateway.Generation {
+				continue
+			}
+			if err := h.shutdownAudits.Record(c.Request.Context(), instance.ID, instance.UserID, "lite_agent", *gateway.ShutdownObservation); err != nil {
+				utils.Error(c, 503, "Runtime shutdown audit not accepted")
+				return
+			}
 		}
 		lifecycle := services.NormalizeRuntimeGatewayLifecycle(gateway.State, gateway.ErrorMessage)
 		if lifecycle.Running {
@@ -347,7 +420,7 @@ func (h *RuntimeAgentHandler) ReportGateways(c *gin.Context) {
 				return
 			}
 		}
-		if err := h.syncInstanceRuntimeState(c.Request.Context(), gateway, lifecycle); err != nil {
+		if err := h.syncInstanceRuntimeState(c.Request.Context(), podID, gateway, lifecycle); err != nil {
 			if errors.Is(err, models.ErrRuntimeUpgradeInProgress) || errors.Is(err, repository.ErrStaleRuntimeGeneration) {
 				continue
 			}
@@ -365,33 +438,35 @@ func (h *RuntimeAgentHandler) ReportGateways(c *gin.Context) {
 		if _, reportedByInstance := reported[binding.InstanceID]; reportedByInstance {
 			continue
 		}
-		if !h.missingGatewayCleanupEligible(binding, now) {
-			if !h.missingPendingGatewayCleanupEligible(binding, now) {
-				continue
+		// A missing report never proves that either a running writer or a
+		// pending start is stopped, including legacy or unknown security profiles.
+		// Keep ownership and capacity until the normal fenced stop/audit path.
+		if !h.missingGatewayCleanupEligible(binding, now) && !h.missingPendingGatewayCleanupEligible(binding, now) {
+			continue
+		}
+		if marker, ok := h.bindingRepo.(repository.ProtectedGatewayMissingReportMarker); ok {
+			before := now.Add(-h.cfg.HeartbeatTimeout)
+			if strings.EqualFold(strings.TrimSpace(binding.State), services.RuntimeGatewayBindingCreating) {
+				before = now.Add(-pendingGatewayReconcileGrace(h.cfg.HeartbeatTimeout))
 			}
-			releaser, ok := h.bindingRepo.(repository.PendingGatewayBindingReleaser)
-			if !ok {
-				continue
-			}
-			if _, err := releaser.DeletePendingByInstanceIDGenerationAndReleaseSlot(c.Request.Context(), binding.InstanceID, podID, binding.Generation, now.Add(-pendingGatewayReconcileGrace(h.cfg.HeartbeatTimeout))); err != nil {
+			_, err := marker.MarkProtectedGatewayReportMissing(c.Request.Context(), binding, before, "Runtime gateway omitted from report; ownership retained until current authority or exact source-stop proof is available")
+			if err != nil && !errors.Is(err, models.ErrRuntimeUpgradeInProgress) {
 				utils.HandleError(c, err)
 				return
 			}
-			continue
 		}
-		if _, err := h.bindingRepo.DeleteRunningByInstanceIDGenerationAndReleaseSlot(c.Request.Context(), binding.InstanceID, podID, binding.Generation); err != nil {
-			if errors.Is(err, models.ErrRuntimeUpgradeInProgress) {
-				continue
-			}
-			utils.HandleError(c, err)
-			return
-		}
+
 	}
 	h.publish(c.Request.Context(), "runtime_pod_gateways_reported", map[string]any{
 		"pod_id":        podID,
 		"gateway_count": len(req.Gateways),
 	})
 	utils.Success(c, http.StatusOK, "Runtime gateway report accepted", nil)
+}
+
+func (h *RuntimeAgentHandler) WithShutdownAudits(repo repository.RuntimeShutdownAuditRepository) *RuntimeAgentHandler {
+	h.shutdownAudits = repo
+	return h
 }
 
 func pendingBindingCanYieldToReportedGateway(binding *models.InstanceRuntimeBinding, podID int64, gateway runtimeAgentGatewayReport) bool {
@@ -443,11 +518,20 @@ func (h *RuntimeAgentHandler) reconcileReportedOpenClawGateway(ctx context.Conte
 		now := time.Now().UTC()
 		healthAt = &now
 	}
-	return reconciler.ReconcileReportedGateway(ctx, &models.InstanceRuntimeBinding{
+	reported := &models.InstanceRuntimeBinding{
 		InstanceID: gateway.InstanceID, RuntimePodID: podID, RuntimeType: services.RuntimeTypeOpenClaw,
 		GatewayID: gateway.GatewayID, GatewayPort: gateway.GatewayPort, GatewayPID: gateway.GatewayPID,
 		WorkspacePath: expectedWorkspace, State: services.RuntimeGatewayBindingRunning, Generation: gateway.Generation, LastHealthAt: healthAt,
-	}, instance.RuntimeGeneration, services.RuntimeGatewayPortBlockSize(services.RuntimeTypeOpenClaw))
+	}
+	if recovery, ok := h.bindingRepo.(interface {
+		ReportedGatewayRecoveryBlocked(context.Context, *models.InstanceRuntimeBinding) (bool, error)
+	}); ok {
+		blocked, err := recovery.ReportedGatewayRecoveryBlocked(ctx, reported)
+		if err != nil || blocked {
+			return false, err
+		}
+	}
+	return reconciler.ReconcileReportedGateway(ctx, reported, instance.RuntimeGeneration, services.RuntimeGatewayPortBlockSize(services.RuntimeTypeOpenClaw))
 }
 
 func runtimePodHasCapability(pod models.RuntimePod, required string) bool {
@@ -491,9 +575,14 @@ func pendingGatewayReconcileGrace(heartbeatTimeout time.Duration) time.Duration 
 	return grace
 }
 
-func (h *RuntimeAgentHandler) syncInstanceRuntimeState(ctx context.Context, gateway runtimeAgentGatewayReport, lifecycle services.RuntimeGatewayLifecycleState) error {
+func (h *RuntimeAgentHandler) syncInstanceRuntimeState(ctx context.Context, podID int64, gateway runtimeAgentGatewayReport, lifecycle services.RuntimeGatewayLifecycleState) error {
 	if h.instanceRepo == nil {
 		return nil
+	}
+	if reports, ok := h.instanceRepo.(interface {
+		UpdateReportedRuntimeStateForBinding(context.Context, int, string, int, *string, int64, string, int, string) error
+	}); ok {
+		return reports.UpdateReportedRuntimeStateForBinding(ctx, gateway.InstanceID, lifecycle.InstanceState, gateway.Generation, lifecycle.Message, podID, strings.TrimSpace(gateway.GatewayID), gateway.GatewayPort, strings.TrimSpace(gateway.WorkspacePath))
 	}
 	return h.instanceRepo.UpdateRuntimeState(ctx, gateway.InstanceID, lifecycle.InstanceState, gateway.Generation, lifecycle.Message)
 }
@@ -567,6 +656,10 @@ func runtimePodCapacityFromReport(reported, configured int) int {
 		capacity = services.RuntimePodCapacity
 	}
 	return capacity
+}
+
+func runtimeSlotCapacityExceedsAdmissionLimit(physical, configured int) bool {
+	return configured > 0 && physical > configured
 }
 
 func trimStringPtr(value *string) *string {

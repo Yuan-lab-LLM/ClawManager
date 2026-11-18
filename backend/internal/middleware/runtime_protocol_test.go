@@ -39,6 +39,9 @@ func TestRuntimeProtocolPolicyCompatibilityBoundary(t *testing.T) {
 	}{
 		{"legacy-instance", 8, nil, nil, http.StatusNoContent, 0, 1},
 		{"enrolled-instance", 8, &models.RuntimeProtocolState{Protocol: 1}, nil, http.StatusNoContent, 1, 1},
+		{"invalid-zero-enrollment", 8, &models.RuntimeProtocolState{Protocol: 0}, nil, http.StatusServiceUnavailable, 0, 1},
+		{"invalid-negative-enrollment", 8, &models.RuntimeProtocolState{Protocol: -1}, nil, http.StatusServiceUnavailable, 0, 1},
+		{"future-enrollment", 8, &models.RuntimeProtocolState{Protocol: 2}, nil, http.StatusServiceUnavailable, 0, 1},
 		// The current runtime's generation/report freshness never implicitly
 		// clears enrollment: even this old generation must enforce protocol 1.
 		{"old-enrollment-remains-enforced", 8, &models.RuntimeProtocolState{Protocol: 1, Generation: 1}, nil, http.StatusNoContent, 1, 1},

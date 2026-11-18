@@ -3,6 +3,9 @@ package models
 import "time"
 
 type CustomTeamTemplate struct {
+	LastOperationID      *string   `db:"last_operation_id" json:"-"`
+	ResourceScope        string    `db:"resource_scope" json:"-"`
+	Owner                *string   `db:"owner" json:"-"`
 	ID                   int       `db:"id,primarykey,autoincrement" json:"id"`
 	UserID               int       `db:"user_id" json:"user_id"`
 	Name                 string    `db:"name" json:"name"`

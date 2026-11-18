@@ -118,20 +118,20 @@ export function SecurityCenterShell({
         </div>
         <section className="grid grid-cols-1 gap-6 xl:grid-cols-[176px_minmax(0,1fr)]">
           <div className="xl:sticky xl:top-6 xl:self-start">
-            <div className="rounded-[24px] border border-[#eadfd8] bg-[linear-gradient(180deg,#fffaf7_0%,#ffffff_100%)] p-3 shadow-[0_18px_44px_-36px_rgba(72,44,24,0.35)]">
+            <div className="rounded-lg border border-[var(--cm-border)] bg-[var(--cm-surface)] p-3 shadow-none">
               <div className="flex flex-col gap-2">
                 {navItems.map((item) => (
                 <Link
                   key={item.path}
                   to={item.path}
-                  className={`group rounded-[18px] border px-3 py-3 text-left transition ${
+                  className={`group rounded border px-3 py-2 min-h-10 text-left transition ${
                     isActive(item.path)
-                      ? 'border-[#9fc7ee] bg-[#eef7ff] shadow-[inset_0_0_0_1px_rgba(116,173,223,0.35)]'
-                      : 'border-[#eadfd8] bg-[#fffaf7] hover:border-[#d6c7be] hover:bg-white'
+                      ? 'border-[var(--cm-primary-selected)] bg-[var(--cm-selected)] shadow-none'
+                      : 'border-[var(--cm-border)] bg-[var(--cm-subtle)] hover:border-[var(--cm-border)] hover:bg-white'
                   }`}
                 >
                   <div className="min-w-0">
-                    <div className="whitespace-nowrap text-sm font-semibold text-[#171212]">{item.label}</div>
+                    <div className="whitespace-nowrap text-sm font-semibold text-[var(--cm-ink)]">{item.label}</div>
                   </div>
                 </Link>
               ))}
@@ -150,16 +150,16 @@ export function AnalyzerGroup({ title, items, emptyLabel }: { title: string; ite
   const { t } = useI18n();
   const safeItems = Array.isArray(items) ? items : [];
   return (
-    <div className="rounded-2xl border border-[#f1e2d9] bg-white p-4">
-      <div className="text-xs font-semibold uppercase tracking-[0.16em] text-[#b46c50]">{title}</div>
+    <div className="rounded-lg border border-[var(--cm-border-subtle)] bg-white p-4">
+      <div className="text-xs font-semibold tracking-normal text-[var(--cm-muted)]">{title}</div>
       {safeItems.length === 0 ? (
-        <div className="mt-3 text-sm text-[#8f8681]">{emptyLabel || t('securityCenter.common.noneYet')}</div>
+        <div className="mt-3 text-sm text-[var(--cm-muted)]">{emptyLabel || t('securityCenter.common.noneYet')}</div>
       ) : (
         <div className="mt-3 flex flex-wrap gap-2">
           {safeItems.map((item) => (
             <span
               key={`${title}-${item}`}
-              className="inline-flex rounded-full border border-[#d9e0e7] bg-[#f6f8fb] px-3 py-1 text-xs font-semibold uppercase tracking-[0.12em] text-[#556070]"
+              className="inline-flex rounded-sm border border-[var(--cm-border)] bg-[var(--cm-subtle)] px-3 py-1 text-xs font-semibold tracking-normal text-[var(--cm-muted)]"
             >
               {item}
             </span>
@@ -172,9 +172,9 @@ export function AnalyzerGroup({ title, items, emptyLabel }: { title: string; ite
 
 export function StatCard({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-2xl border border-[#f1e2d9] bg-white px-4 py-3">
-      <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#b46c50]">{label}</div>
-      <div className="mt-2 text-2xl font-semibold text-[#171212]">{value}</div>
+    <div className="rounded-lg border border-[var(--cm-border-subtle)] bg-white px-4 py-3">
+      <div className="text-xs font-semibold tracking-normal text-[var(--cm-muted)]">{label}</div>
+      <div className="mt-2 text-2xl font-semibold text-[var(--cm-ink)]">{value}</div>
     </div>
   );
 }
@@ -188,19 +188,19 @@ export function Badge({
 }) {
   const toneClass =
     tone === 'green'
-      ? 'border-[#bde8ca] bg-[#edfdf2] text-[#177245]'
+      ? 'border-[#bde8ca] bg-[var(--cm-success-background)] text-[var(--cm-success)]'
       : tone === 'yellow'
-        ? 'border-[#f5df9f] bg-[#fff8dd] text-[#9a6a00]'
+        ? 'border-[#f5df9f] bg-[var(--cm-warning-background)] text-[var(--cm-warning)]'
         : tone === 'orange'
-          ? 'border-[#f7c8a4] bg-[#fff1e6] text-[#b45309]'
+          ? 'border-[#f7c8a4] bg-[var(--cm-warning-background)] text-[var(--cm-warning)]'
           : tone === 'red'
-            ? 'border-[#f2c2c2] bg-[#fff0f0] text-[#b42318]'
+            ? 'border-[#f2c2c2] bg-[var(--cm-error-background)] text-[var(--cm-error)]'
             : tone === 'amber'
-              ? 'border-[#f1d9c7] bg-[#fff6f0] text-[#b46c50]'
-              : 'border-[#d9e0e7] bg-[#f6f8fb] text-[#556070]';
+              ? 'border-[#f1d9c7] bg-[var(--cm-warning-background)] text-[var(--cm-muted)]'
+              : 'border-[var(--cm-border)] bg-[var(--cm-subtle)] text-[var(--cm-muted)]';
 
   return (
-    <span className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.12em] ${toneClass}`}>
+    <span className={`inline-flex rounded-sm border px-3 py-1 text-xs font-semibold tracking-normal ${toneClass}`}>
       {children}
     </span>
   );

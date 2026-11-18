@@ -259,13 +259,21 @@ func (h *InstanceHandler) ProxyBrowserWorker(c *gin.Context) {
 	c.Request.Header.Del("Authorization")
 	c.Request.Header.Set("X-Forwarded-Prefix", base)
 
+	target := browserWorkerTarget(id, h.browserWorkerService.Namespace())
+	if instance.RuntimeSecurityProfile != "" {
+		target, err = h.browserWorkerService.ProtectedGUITarget(c.Request.Context(), instance)
+		if err != nil {
+			c.AbortWithStatus(http.StatusServiceUnavailable)
+			return
+		}
+	}
 	token, err := h.browserWorkerService.AuthToken(c.Request.Context(), id)
 	if err != nil {
 		c.AbortWithStatus(http.StatusServiceUnavailable)
 		return
 	}
-	target := browserWorkerTarget(id, h.browserWorkerService.Namespace())
 	proxy := httputil.NewSingleHostReverseProxy(target)
+	proxy.Transport = &http.Transport{Proxy: nil, DialContext: (&net.Dialer{Timeout: 5 * time.Second}).DialContext, ResponseHeaderTimeout: 5 * time.Second, MaxResponseHeaderBytes: 32 << 10, DisableKeepAlives: true}
 	originalDirector := proxy.Director
 	proxy.Director = func(request *http.Request) {
 		originalDirector(request)

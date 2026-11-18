@@ -1,5 +1,67 @@
 const RENDERER_PATHS = new Set(["/hermes-desktop-web/", "/hermes-desktop-web/index.html"]);
 
+const HERMES_PAGES = new Set(["settings", "command-center", "skills", "messaging", "webhooks", "artifacts", "cron", "profiles", "agents", "starmap"]);
+
+export function hermesSessionRoute(value: unknown): string | null {
+  if (value === "#/" || value === "#" || value === "") return "#/";
+  if (typeof value !== "string" || !value.startsWith("#/")) return null;
+  try {
+    const id = decodeURIComponent(value.slice(2));
+    return /^[A-Za-z0-9_:-]{1,160}$/.test(id) && !HERMES_PAGES.has(id) ? `#/${encodeURIComponent(id)}` : null;
+  } catch { return null; }
+}
+
+function hermesSessionKey(userId: number | undefined, instanceId: number): string | null {
+  return Number.isSafeInteger(userId) && userId! > 0 && Number.isSafeInteger(instanceId) && instanceId > 0
+    ? `clawmanager:hermes-session:v1:${userId}:${instanceId}` : null;
+}
+
+export function readHermesSessionRoute(storage: Storage, userId: number | undefined, instanceId: number): string | null {
+  const key = hermesSessionKey(userId, instanceId);
+  if (!key) return null;
+  try { const value = storage.getItem(key); return value === null ? null : hermesSessionRoute(value); } catch { return null; }
+}
+
+export function writeHermesSessionRoute(storage: Storage, userId: number | undefined, instanceId: number, value: unknown): void {
+  const key = hermesSessionKey(userId, instanceId), route = hermesSessionRoute(value);
+  if (!key || route === null) return;
+  try { storage.setItem(key, route); } catch { /* Navigation still works when storage is blocked/full. */ }
+}
+
+// Keep the renderer's drafts/transcript storage isolated. Only its non-secret
+// session route is remembered by the authenticated Manager, across frame loads.
+export function rememberHermesSession(frame: HTMLIFrameElement, storage: Storage, userId: number | undefined, instanceId: number): () => void {
+  let detach = () => {};
+  const attach = () => {
+    detach();
+    const child = frame.contentWindow;
+    if (!child) return;
+    try {
+      const url = new URL(child.location.href);
+      url.hash = "";
+      if (!resolveHermesDesktopRendererUrl(url.href, instanceId, window.location.origin)) return;
+      const save = () => writeHermesSessionRoute(storage, userId, instanceId, child.location.hash);
+      const history = child.history, push = history.pushState, replace = history.replaceState;
+      const pushState: History["pushState"] = function (this: History, ...args) { push.apply(this, args); save(); };
+      const replaceState: History["replaceState"] = function (this: History, ...args) { replace.apply(this, args); save(); };
+      history.pushState = pushState;
+      history.replaceState = replaceState;
+      child.addEventListener("hashchange", save);
+      child.addEventListener("popstate", save);
+      save();
+      detach = () => {
+        child.removeEventListener("hashchange", save);
+        child.removeEventListener("popstate", save);
+        if (history.pushState === pushState) history.pushState = push;
+        if (history.replaceState === replaceState) history.replaceState = replace;
+      };
+    } catch { /* An unavailable or cross-origin frame has no restorable route. */ }
+  };
+  frame.addEventListener("load", attach);
+  attach();
+  return () => { frame.removeEventListener("load", attach); detach(); };
+}
+
 const UNAVAILABLE_REASONS: Readonly<Record<string, string>> = {
   feature_disabled: "featureDisabled",
   runtime_capability_unsupported: "runtimeUnsupported",

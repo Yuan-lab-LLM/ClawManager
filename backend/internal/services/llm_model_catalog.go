@@ -91,10 +91,7 @@ func providerModelNameSet(items []models.LLMModel) map[string]struct{} {
 }
 
 func modelCatalogProviderName(item models.LLMModel) string {
-	name := firstNonEmptyCatalogValue(item.CatalogProviderName, item.DisplayName, item.ProviderType, "provider")
-	// A slash separates the runtime provider name from its model id.
-	name = strings.ReplaceAll(name, "/", "-")
-	return strings.ReplaceAll(name, `\`, "-")
+	return models.RuntimeCatalogProviderName(item)
 }
 
 func uniqueDiscoveredModelAlias(item models.LLMModel, providerModelName string, used map[string]struct{}) string {

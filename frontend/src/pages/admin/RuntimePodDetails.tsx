@@ -1,0 +1,404 @@
+import FilterSelect from "../../components/FilterSelect";
+import { useState } from "react";
+import { ArrowLeft } from "lucide-react";
+import { useI18n } from "../../contexts/I18nContext";
+import {
+  summarizePod,
+  slotState,
+  formatCPU,
+  formatMemory,
+  isSchedulable,
+  canManageScheduling,
+  canManageSlot,
+} from "../../lib/runtimeManagement";
+import type { RuntimePod } from "../../types/runtimePool";
+import {
+  buttonClass,
+  primaryClass,
+  inputClass,
+  Metric,
+  ResourceBar,
+  SlotGrid,
+  Legend,
+} from "./RuntimeManagementUI";
+
+export default function RuntimePodDetails({
+  pod,
+  onBack,
+  onSchedule,
+  onPause,
+  onEvents,
+  onRecovery,
+  busy,
+}: {
+  pod: RuntimePod;
+  onBack: () => void;
+  onSchedule: (ids: number[]) => void;
+  onPause: () => void;
+  onEvents: () => void;
+  onRecovery?: (ids?: number[]) => void;
+  busy: boolean;
+}) {
+  const { t } = useI18n();
+  const [selectedSlot, setSelectedSlot] = useState<number>();
+  const [selection, setSelection] = useState<number[]>([]);
+  const [filter, setFilter] = useState("all");
+  const [search, setSearch] = useState("");
+  const [instanceFilter, setInstanceFilter] = useState("all");
+  const counts = summarizePod(pod);
+  const slots = pod.slots ?? [];
+  const completeInventory = pod.agent_reported !== false && slots.length > 0 && slots.length >= pod.capacity && slots.every(slot => slot.state !== "unknown");
+  const chosen = slots.find((slot) => slot.index === selectedSlot);
+  const rows = slots.filter(
+    (slot) =>
+      (filter === "all" ||
+        (filter === "bound"
+          ? !!(slot.instance_id || slot.expected_instance_id)
+          : filter === "idle"
+            ? slotState(slot) === "idle"
+            : !slot.ready)) &&
+      (instanceFilter === "all" || slotState(slot) === instanceFilter) &&
+      [
+        slot.container_name,
+        slot.instance_name,
+        slot.instance_id,
+        slot.expected_instance_id,
+        slot.owner,
+      ].some((value) =>
+        String(value ?? "")
+          .toLowerCase()
+          .includes(search.toLowerCase()),
+      ),
+  );
+  const boundRows = rows.flatMap((slot) =>
+    canManageSlot(slot) ? [slot.instance_id!] : [],
+  );
+  const selectedIds = selection.filter((id) =>
+    slots.some((slot) => slot.instance_id === id && canManageSlot(slot)),
+  );
+  return (
+    <div className="space-y-5">
+      <button
+        type="button"
+        onClick={onBack}
+        className="inline-flex items-center gap-1.5 text-xs text-[var(--cm-text)] hover:text-slate-900"
+      >
+        <ArrowLeft className="h-4 w-4" />
+        {t("runtimePods.back")}
+      </button>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-sm font-semibold text-slate-900">
+            {pod.pod_name}
+          </h1>
+          <p className="mt-1 text-xs text-[var(--cm-text)]">
+            {t("runtimePods.node")}: {pod.node_name || t("runtimePods.unknown")} / {pod.pod_ip || "—"} · {pod.capacity} Agent
+            · {pod.storage_class || "—"}
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <span
+            className={`self-center rounded px-2 py-1 text-xs ${isSchedulable(pod) ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}
+          >
+            {t(`runtimePods.${isSchedulable(pod) ? "enabled" : "disabled"}`)}
+          </span>
+          <button
+            type="button"
+            className={buttonClass}
+            disabled={!canManageScheduling(pod) || busy}
+            onClick={onPause}
+          >
+            {t(
+              `runtimePods.${pod.scheduling_enabled === false || pod.scheduling_paused ? "resume" : "pause"}`,
+            )}
+          </button>
+          <button type="button" className={buttonClass} disabled={busy || !onRecovery} onClick={() => onRecovery?.()}>{t("runtimePods.faultRecovery")}</button>
+          <button
+            type="button"
+            className={primaryClass}
+            disabled={!selectedIds.length}
+            onClick={() => onSchedule(selectedIds)}
+          >
+            {t("runtimePods.batch")}
+            {selectedIds.length ? ` (${selectedIds.length})` : ""}
+          </button>
+        </div>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <Metric
+          label={t("runtimePods.agentReady")}
+          value={`${completeInventory ? counts.ready : t("runtimePods.unknown")} / ${counts.capacity}`}
+          detail={completeInventory ? `${t("runtimePods.releasing")} ${counts.releasing} · ${t("runtimePods.unavailable")} ${counts.unavailable} · ${t("runtimePods.unknown")} ${counts.unknown}` : t("runtimePods.noInventory")}
+          warning={counts.unavailable > 0 || counts.unknown > 0}
+        />
+        <Metric
+          label={t("runtimePods.cardBound")}
+          value={`${counts.bound ?? t("runtimePods.unknown")} / ${counts.capacity}`}
+          detail={`${t("runtimePods.cardReported")} ${pod.used_slots} · ${t("runtimePods.running")} ${counts.running} · ${t("runtimePods.error")} ${counts.error}`}
+        />
+        <Metric
+          label={t("runtimePods.cpu")}
+          value={`${formatCPU(pod.cpu_millis_used)} / ${formatCPU(pod.cpu_millis_limit)}`}
+          detail={t("runtimePods.capacityHelp")}
+        />
+        <Metric
+          label={t("runtimePods.memory")}
+          value={`${formatMemory(pod.memory_bytes_used)} / ${formatMemory(pod.memory_bytes_limit)}`}
+          detail={t("runtimePods.capacityHelp")}
+        />
+      </div>
+      {pod.reconciliation_message && (
+        <p role="status" className={`rounded p-3 text-xs ${pod.reconciliation_state === "releasing" ? "bg-cyan-50 text-cyan-800" : "bg-amber-50 text-amber-800"}`}>
+          {pod.reconciliation_state === "releasing" ? t("runtimePods.releasingHelp") : pod.reconciliation_message}
+        </p>
+      )}
+      <section className="cm-surface space-y-4 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-sm font-semibold">
+            {t("runtimePods.distribution")}
+          </h2>
+          <Legend />
+        </div>
+        <div className="flex gap-8">
+          <ResourceBar pod={pod} />
+          <ResourceBar pod={pod} memory />
+        </div>
+        <SlotGrid
+          pod={pod}
+          selected={selectedSlot}
+          onSelect={(slot) => setSelectedSlot(slot.index)}
+        />
+        {chosen && (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded bg-slate-50 p-3 text-xs">
+            <span>
+              {t("runtimePods.slot")} {chosen.index} · {chosen.container_name} ·
+              Agent {t(`runtimePods.${chosen.state === "unknown" ? "unknown" : chosen.ready ? "ready" : "unavailable"}`)}{" "}
+              ·{" "}
+              {chosen.reconciliation_state && chosen.reconciliation_state !== "unknown" && chosen.instance_id && `${t("runtimePods.reportedInstance")} `}
+              {chosen.instance_name ||
+                (chosen.instance_id
+                  ? `#${chosen.instance_id}`
+                  : t(`runtimePods.${slotState(chosen) === "unknown" ? "unknown" : "unbound"}`))}{" "}
+              ·{" "}
+              {chosen.reconciliation_state && chosen.reconciliation_state !== "consistent" &&
+                `${t(`runtimePods.${chosen.reconciliation_state}`)} · `}
+              {chosen.expected_instance_id && `${t("runtimePods.expectedBinding")} #${chosen.expected_instance_id} · `}
+              {slotState(chosen) === "releasing" ? t("runtimePods.releasingHelp") : chosen.observation_message || chosen.error_message ||
+                chosen.reason ||
+                t(`runtimePods.${slotState(chosen)}`)}
+            </span>
+            <div className="flex gap-2">
+              <button type="button" className={buttonClass} onClick={onEvents}>
+                {t("runtimePods.events")}
+              </button>
+              {!!chosen.expected_instance_id && !canManageSlot(chosen) && <button type="button" className={buttonClass} disabled={busy || !onRecovery} onClick={() => onRecovery?.([chosen.expected_instance_id!])}>{t("runtimePods.faultRecovery")}</button>}
+              {canManageSlot(chosen) && (
+                <button
+                  type="button"
+                  className={buttonClass}
+                  onClick={() => onSchedule([chosen.instance_id!])}
+                >
+                  {t("runtimePods.manual")}
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+      </section>
+      <section className="cm-surface overflow-hidden">
+        <div className="flex flex-wrap justify-between gap-3 border-b border-slate-100 p-4">
+          <div className="flex gap-1">
+            {(["all", "bound", "idle", "unavailable"] as const).map((value) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => setFilter(value)}
+                aria-pressed={filter === value}
+                className={`rounded px-3 py-1.5 text-xs ${filter === value ? "bg-slate-900 text-white" : "text-[var(--cm-text)] hover:bg-slate-100"}`}
+              >
+                {t(`runtimePods.${value}`)}{" "}
+                {value === "all"
+                  ? counts.capacity
+                  : value === "bound"
+                    ? counts.occupied
+                    : !completeInventory ? t("runtimePods.unknown") : counts[value]}
+              </button>
+            ))}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <FilterSelect label={t("runtimePods.instanceState")} value={instanceFilter} onChange={setInstanceFilter} options={["all", "running", "starting", "migrating", "error", "releasing", "unknown"].map(value => ({value,label:t(`runtimePods.${value}`)}))} />
+            <input
+              aria-label={t("runtimePods.search")}
+              placeholder={t("runtimePods.search")}
+              className={inputClass}
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+            />
+          </div>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full whitespace-nowrap text-left text-xs">
+            <thead className="bg-slate-50 text-[var(--cm-text)]">
+              <tr>
+                <th className="p-3">
+                  <input
+                    type="checkbox"
+                    aria-label={t("runtimePods.selectInstances")}
+                    disabled={!boundRows.length}
+                    checked={
+                      boundRows.length > 0 &&
+                      boundRows.every((id) => selectedIds.includes(id))
+                    }
+                    onChange={(event) =>
+                      setSelection(
+                        event.target.checked
+                          ? [...new Set([...selectedIds, ...boundRows])]
+                          : selectedIds.filter((id) => !boundRows.includes(id)),
+                      )
+                    }
+                  />
+                </th>
+                {[
+                  "slot",
+                  "container",
+                  "containerState",
+                  "instanceOwner",
+                  "instanceState",
+                  "cpu",
+                  "memory",
+                  "reason",
+                  "actions",
+                ].map((key) => (
+                  <th key={key} className="px-3 py-3 font-medium">
+                    {t(`runtimePods.${key}`)}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {rows.map((slot) => (
+                <tr
+                  key={slot.index}
+                  className={
+                    selectedSlot === slot.index
+                      ? "bg-blue-50/50"
+                      : "hover:bg-slate-50"
+                  }
+                >
+                  <td className="p-3">
+                    <input
+                      type="checkbox"
+                      aria-label={`${t("runtimePods.slot")} ${slot.index}`}
+                      disabled={!canManageSlot(slot)}
+                      checked={
+                        !!slot.instance_id &&
+                        selectedIds.includes(slot.instance_id)
+                      }
+                      onChange={(event) => {
+                        const id = slot.instance_id!;
+                        setSelection(
+                          event.target.checked
+                            ? [...selection, id]
+                            : selection.filter((value) => value !== id),
+                        );
+                      }}
+                    />
+                  </td>
+                  <td className="px-3 py-3">
+                    <button
+                      type="button"
+                      className="font-medium hover:underline"
+                      onClick={() => setSelectedSlot(slot.index)}
+                    >
+                      {String(slot.index).padStart(2, "0")}
+                    </button>
+                  </td>
+                  <td className="px-3 py-3 font-mono text-[var(--cm-text)]">
+                    {slot.container_name}
+                  </td>
+                  <td
+                    className={`px-3 py-3 ${slot.ready ? "text-emerald-600" : "text-amber-600"}`}
+                  >
+                    {t(`runtimePods.${slot.state === "unknown" ? "unknown" : slot.ready ? "ready" : "unavailable"}`)}
+                  </td>
+                  <td className="px-3 py-3">
+                    {slot.instance_id ? (
+                      <>
+                        {slot.reconciliation_state && slot.reconciliation_state !== "unknown" && `${t("runtimePods.reportedInstance")} `}
+                        {slot.instance_name || `#${slot.instance_id}`}{" "}
+                        <span className="text-slate-400">
+                          #{slot.instance_id} / {slot.owner || "—"}
+                        </span>
+                      </>
+                    ) : (
+                      <span className="text-slate-400">
+                        {t(`runtimePods.${slotState(slot) === "unknown" ? "unknown" : "unbound"}`)}
+                      </span>
+                    )}
+                    {slot.expected_instance_id && (
+                      <span className="mt-1 block text-amber-800">
+                        {t("runtimePods.expectedBinding")} #{slot.expected_instance_id}
+                      </span>
+                    )}
+                  </td>
+                  <td
+                    className={`px-3 py-3 ${slotState(slot) === "error" ? "text-red-600" : slotState(slot) === "unknown" ? "text-amber-800" : "text-slate-600"}`}
+                  >
+                    {t(`runtimePods.${slotState(slot) === "starting" ? "starting" : slot.reconciliation_state && slot.reconciliation_state !== "consistent" ? slot.reconciliation_state : slotState(slot)}`)}
+                  </td>
+                  <td className="px-3 py-3 tabular-nums">
+                    {formatCPU(slot.cpu_millis_used)}
+                  </td>
+                  <td className="px-3 py-3 tabular-nums">
+                    {formatMemory(slot.memory_bytes_used)}
+                  </td>
+                  <td
+                    className="max-w-56 truncate px-3 py-3 text-[var(--cm-text)]"
+                    title={slotState(slot) === "releasing" ? t("runtimePods.releasingHelp") : slot.observation_message || slot.error_message || slot.reason}
+                  >
+                    {slotState(slot) === "releasing" ? t("runtimePods.releasingHelp") : slot.observation_message || slot.error_message ||
+                      slot.reason ||
+                      (slot.restart_count
+                        ? t("runtimePods.restarts", {
+                            count: slot.restart_count,
+                          })
+                        : "—")}
+                  </td>
+                  <td className="px-3 py-3">
+                    <div className="flex gap-3">
+                      {canManageSlot(slot) && (
+                        <button
+                          type="button"
+                          className="text-slate-700 hover:underline"
+                          onClick={() => onSchedule([slot.instance_id!])}
+                        >
+                          {t("runtimePods.manual")}
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        className="text-[var(--cm-text)] hover:underline"
+                        onClick={onEvents}
+                      >
+                        {t("runtimePods.events")}
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="flex justify-between border-t border-slate-100 p-3 text-xs text-[var(--cm-text)]">
+          <span>
+            {t("runtimePods.podCount", { count: 1, shown: rows.length })} Agent
+            · {t("runtimePods.selected", { count: selectedIds.length })}
+          </span>
+          <span>
+            {rows.length} / {counts.capacity}
+          </span>
+        </div>
+      </section>
+    </div>
+  );
+}

@@ -18,6 +18,14 @@ func (r upgradeBlockedRepo) AcquireLifecycleLock(context.Context, int) (func(), 
 	return nil, r.failure
 }
 
+func (r upgradeBlockedRepo) GetByID(id int) (*models.Instance, error) {
+	return &models.Instance{ID: id, Status: "running"}, nil
+}
+
+func (r upgradeBlockedRepo) MarkDeleting(context.Context, int, int, int) error {
+	return r.failure
+}
+
 func TestDurableUpgradeBlocksAllLifecycleEntrypoints(t *testing.T) {
 	s := &instanceService{instanceRepo: upgradeBlockedRepo{failure: models.ErrRuntimeUpgradeInProgress}}
 	for name, call := range map[string]func() error{

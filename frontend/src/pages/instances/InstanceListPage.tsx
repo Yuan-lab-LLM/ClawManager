@@ -1,44 +1,43 @@
+import { formatWorkspaceUsage, workspaceUsageText } from "../../lib/workspaceUsage";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useLocation } from "react-router-dom";
-import { Monitor, MonitorPlay, Play, Plus, Search, Square, Trash2 } from "lucide-react";
+import { Monitor, Play, Plus, RotateCw, Square, Trash2 } from "lucide-react";
+import { useAuthStore } from "../../stores/authStore";
 import ConfirmDialog from "../../components/ConfirmDialog";
+import InstanceLifecycleStatus from "../../components/InstanceLifecycleStatus";
+import InstanceAutoStopInfo from "../../components/InstanceAutoStopInfo";
+import ActionMenu from "../../components/ActionMenu";
+import ExpandableSearch from "../../components/ExpandableSearch";
+import FilterSelect from "../../components/FilterSelect";
 import { runtimeFailureSummary } from "../../lib/runtimeFailure";
 import InstanceLifecycleBatches from "../../components/InstanceLifecycleBatches";
 import { collectUnavailableLiteIds, pruneVisibleSelection } from "../../lib/unavailableInstanceSelection";
 import UserLayout from "../../components/UserLayout";
 import { useI18n } from "../../contexts/I18nContext";
 import { instanceService } from "../../services/instanceService";
-import {
-  systemSettingsService,
-  type SystemImageSetting,
-} from "../../services/systemSettingsService";
-import { teamService } from "../../services/teamService";
-import {
-  formatInstanceType,
-  INSTANCE_TYPES,
-  type Instance,
-  type InstanceAvailability,
-} from "../../types/instance";
-import type { Team, TeamMember } from "../../types/team";
 
-type AvailabilityFilter = "all" | InstanceAvailability;
+import { teamService } from "../../services/teamService";
+import { formatInstanceType, type Instance, type BatchDeleteLiteInstancesResponse } from "../../types/instance";
+import type { Team, TeamMember } from "../../types/team";
+import {
+  INSTANCE_STATUS_FILTERS,
+  INSTANCE_TYPE_FILTERS,
+  instanceStatusFilterQuery,
+  type InstanceStatusFilter,
+} from "../../lib/instanceListFilters";
+
 type ModeFilter = "all" | Instance["instance_mode"];
 type TeamMembership = {
   team: Team;
   member: TeamMember;
 };
 type LoadInstancesOptions = {
-  silent?: boolean;
   refreshTeams?: boolean;
 };
 
 const INSTANCE_LIST_PAGE_SIZE = 100;
 const TEAM_LIST_PAGE_SIZE = 100;
-
-const runtimeImageKey = (item: SystemImageSetting) =>
-  item.id
-    ? "runtime-image-id:" + item.id
-    : ["runtime-image", item.instance_type, item.runtime_type ?? "gateway", item.image].join(":");
 
 const instanceTimeValue = (instance: Instance) => {
   const value = Date.parse(instance.created_at || "");
@@ -93,46 +92,8 @@ const loadTeamMemberships = async (strict = false) => {
   return memberships;
 };
 
-function availabilityForStatus(status: string): InstanceAvailability {
-  if (status === "running") {
-    return "available";
-  }
-  if (status === "creating") {
-    return "starting";
-  }
-  return "unavailable";
-}
-
-function availabilityLabel(availability: InstanceAvailability) {
-  switch (availability) {
-    case "available":
-      return "Available";
-    case "starting":
-      return "Starting";
-    default:
-      return "Unavailable";
-  }
-}
-
-function availabilityClass(availability: InstanceAvailability) {
-  switch (availability) {
-    case "available":
-      return "border-emerald-200 bg-emerald-50 text-emerald-700";
-    case "starting":
-      return "border-amber-200 bg-amber-50 text-amber-700";
-    default:
-      return "border-slate-200 bg-slate-50 text-slate-600";
-  }
-}
-
 function modeLabel(mode: Instance["instance_mode"]) {
   return mode === "pro" ? "Pro" : "Lite";
-}
-
-function modeClass(mode: Instance["instance_mode"]) {
-  return mode === "pro"
-    ? "border-indigo-200 bg-indigo-50 text-indigo-700"
-    : "border-sky-200 bg-sky-50 text-sky-700";
 }
 
 function isLiteInstance(instance: Instance) {
@@ -142,19 +103,6 @@ function isLiteInstance(instance: Instance) {
   return instance.runtime_type === "gateway";
 }
 
-function formatBytes(value?: number) {
-  if (!value || value <= 0) {
-    return "0 B";
-  }
-  const units = ["B", "KB", "MB", "GB", "TB"];
-  let size = value;
-  let unitIndex = 0;
-  while (size >= 1024 && unitIndex < units.length - 1) {
-    size /= 1024;
-    unitIndex += 1;
-  }
-  return `${size.toFixed(size >= 10 || unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
-}
 
 function getErrorMessage(err: unknown, fallback: string) {
   const responseError = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
@@ -164,46 +112,65 @@ function getErrorMessage(err: unknown, fallback: string) {
   return err instanceof Error ? err.message : fallback;
 }
 
-const InstanceListPage: React.FC = () => {
+interface InstanceListPageProps {
+  embedded?: boolean;
+  initialSearch?: string;
+  onSelectInstance?: (instance: Instance) => void;
+}
+
+const InstanceListPage: React.FC<InstanceListPageProps> = ({ embedded = false, initialSearch, onSelectInstance }) => {
   const { t, locale } = useI18n();
   const navigate = useNavigate();
   const location = useLocation();
-  const initialQuery = new URLSearchParams(location.search);
+  const initialQuery = new URLSearchParams(initialSearch ?? (embedded ? "" : location.search));
   const detailState = { returnTo: location.pathname + location.search };
-  const [instances, setInstances] = useState<Instance[]>([]);
+  const selectInstance = (instance: Instance) => {
+    if (onSelectInstance) onSelectInstance(instance);
+    else navigate(`/instances/${instance.id}`, { state: detailState });
+  };
+  const userId = useAuthStore((auth) => auth.isAuthenticated ? auth.user?.id : undefined);
   const [teamMemberships, setTeamMemberships] = useState<Map<number, TeamMembership[]>>(
     new Map(),
   );
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [deletingIds, setDeletingIds] = useState<number[]>([]);
-  const [actionLoading, setActionLoading] = useState<number | null>(null);
+  const [actionLoadingIds, setActionLoadingIds] = useState<number[]>([]);
   const [pendingDeleteId, setPendingDeleteId] = useState<number | null>(null);
-  const [availabilityFilter, setAvailabilityFilter] = useState<AvailabilityFilter>(() => (["available", "starting", "unavailable"].includes(initialQuery.get("availability") || "") ? initialQuery.get("availability") : "all") as AvailabilityFilter);
-  const [typeFilter, setTypeFilter] = useState(initialQuery.get("type") || "all");
-  const [modeFilter, setModeFilter] = useState<ModeFilter>(() => (["lite", "pro"].includes(initialQuery.get("mode") || "") ? initialQuery.get("mode") : "all") as ModeFilter);
+  const [statusFilter, setStatusFilter] = useState<InstanceStatusFilter>(() => {
+    const status = INSTANCE_STATUS_FILTERS.find((value) => value === initialQuery.get("status"));
+    if (status) return status;
+    const availability = initialQuery.get("availability");
+    return availability === "available" ? "running" : availability === "starting" ? "creating" : "all";
+  });
+  const [typeFilter, setTypeFilter] = useState<string>(
+    () => INSTANCE_TYPE_FILTERS.find((value) => value === initialQuery.get("type")) ?? "all",
+  );
+  const [modeFilter, setModeFilter] = useState<ModeFilter>(() => {
+    const mode = initialQuery.get("mode");
+    return mode === "lite" || mode === "pro" ? mode : "all";
+  });
+  const filterDetails = useRef<HTMLDetailsElement>(null);
+  useEffect(() => {
+    const media = window.matchMedia("(max-width: 1100px)");
+    const sync = () => { if (filterDetails.current) filterDetails.current.open = !media.matches; };
+    sync();
+    const outside = (event: PointerEvent) => {
+      if (media.matches && filterDetails.current && !filterDetails.current.contains(event.target as Node)) filterDetails.current.open = false;
+    };
+    media.addEventListener("change", sync);
+    document.addEventListener("pointerdown", outside);
+    return () => {media.removeEventListener("change", sync); document.removeEventListener("pointerdown", outside);};
+  }, []);
   const [searchQuery, setSearchQuery] = useState(initialQuery.get("q") || "");
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState(initialQuery.get("q") || "");
   const [page, setPage] = useState(() => Math.max(1, Number(initialQuery.get("page")) || 1));
-  const [total, setTotal] = useState(0);
   const [selectedLiteIds, setSelectedLiteIds] = useState<number[]>([]);
   const [allUnavailableSelected, setAllUnavailableSelected] = useState(false);
   const [selectingUnavailable, setSelectingUnavailable] = useState(false);
   const [unavailableSelectionNotice, setUnavailableSelectionNotice] = useState("");
   const selectionRequest = useRef(0);
   useEffect(() => () => { selectionRequest.current++; }, []);
-  const [batchCreateOpen, setBatchCreateOpen] = useState(false);
-  const [batchCreatePrefix, setBatchCreatePrefix] = useState("lite-openclaw");
-  const [batchCreateCount, setBatchCreateCount] = useState(3);
-  const [batchCreateStartIndex, setBatchCreateStartIndex] = useState(1);
-  const [batchCreateType, setBatchCreateType] = useState<
-    "openclaw" | "hermes" | "opencode" | "deepseek-harness"
-  >("openclaw");
-  const [batchCreateImageKey, setBatchCreateImageKey] = useState("");
-  const [runtimeImageSettings, setRuntimeImageSettings] = useState<SystemImageSetting[]>([]);
-  const [batchCreateLoading, setBatchCreateLoading] = useState(false);
-  const [batchCreateSummary, setBatchCreateSummary] = useState<string | null>(null);
   const [batchDeleteLoading, setBatchDeleteLoading] = useState(false);
+  const [batchDeleteResult, setBatchDeleteResult] = useState<BatchDeleteLiteInstancesResponse | null>(null);
   const [pendingBatchDelete, setPendingBatchDelete] = useState(false);
 
   const refreshTeamMemberships = useCallback(async () => {
@@ -215,41 +182,39 @@ const InstanceListPage: React.FC = () => {
     }
   }, []);
 
-  const loadInstances = useCallback(
-    async (options?: LoadInstancesOptions) => {
-      try {
-        if (!options?.silent) {
-          setLoading(true);
-        }
-        setError(null);
-        const data = await instanceService.getInstances(page, INSTANCE_LIST_PAGE_SIZE, {
-          query: debouncedSearchQuery.trim() || undefined,
-          type: typeFilter === "all" ? undefined : typeFilter,
-          instance_mode: modeFilter === "all" ? undefined : modeFilter,
-          availability: availabilityFilter === "all" ? undefined : availabilityFilter,
-        });
-        setInstances(sortInstances(data.instances || []));
-        setTotal(data.total || 0);
-        if ((data.instances || []).length === 0 && data.total > 0 && page > 1) {
-          setPage(Math.max(1, Math.ceil(data.total / INSTANCE_LIST_PAGE_SIZE)));
-        }
-        if (options?.refreshTeams !== false) {
-          void refreshTeamMemberships();
-        }
-      } catch (err: unknown) {
-        setError(getErrorMessage(err, t("instances.failedToLoad")));
-      } finally {
-        if (!options?.silent) {
-          setLoading(false);
-        }
-      }
-    },
-    [availabilityFilter, debouncedSearchQuery, modeFilter, page, refreshTeamMemberships, t, typeFilter],
-  );
-
+  const filters = {
+    query: debouncedSearchQuery.trim() || undefined,
+    type: typeFilter === "all" ? undefined : typeFilter,
+    instance_mode: modeFilter === "all" ? undefined : modeFilter,
+    ...instanceStatusFilterQuery(statusFilter),
+  };
+  const query = useQuery({
+    queryKey: ["instances", "list", userId, page, filters],
+    queryFn: ({ signal }) => instanceService.getInstances(page, INSTANCE_LIST_PAGE_SIZE, filters, signal),
+    enabled: !!userId,
+    // Keep rows during a filter change, but never inherit another user's cache.
+    placeholderData: (previous, previousQuery) => previousQuery?.queryKey[2] === userId ? previous : undefined,
+    refetchInterval: 5000,
+    refetchIntervalInBackground: true,
+    refetchOnWindowFocus: "always",
+    refetchOnReconnect: "always",
+    retry: 1,
+  });
+  const instances = useMemo(() => sortInstances(query.data?.instances ?? []), [query.data]);
+  const total = query.data?.total ?? 0;
+  const loading = query.isPending;
+  const error = query.isError && !query.data ? getErrorMessage(query.error, t("instances.failedToLoad")) : null;
+  const { refetch } = query;
+  const loadInstances = useCallback(async (options?: LoadInstancesOptions) => {
+    await refetch();
+    if (options?.refreshTeams !== false) void refreshTeamMemberships();
+  }, [refetch, refreshTeamMemberships]);
+  useEffect(() => { if (userId) void refreshTeamMemberships(); }, [userId, refreshTeamMemberships]);
   useEffect(() => {
-    void loadInstances();
-  }, [loadInstances]);
+    if (!query.data || query.isPlaceholderData) return;
+    const lastPage = Math.max(1, Math.ceil(total / INSTANCE_LIST_PAGE_SIZE));
+    if (page > lastPage) setPage(lastPage);
+  }, [query.data, query.isPlaceholderData, total, page]);
   useEffect(() => {
     if (searchQuery === debouncedSearchQuery) return;
     const timeoutId = window.setTimeout(() => {
@@ -259,55 +224,21 @@ const InstanceListPage: React.FC = () => {
     return () => window.clearTimeout(timeoutId);
   }, [searchQuery, debouncedSearchQuery]);
   useEffect(() => {
+    if (embedded) return;
     const params = new URLSearchParams();
     if (searchQuery) params.set("q", searchQuery);
     if (typeFilter !== "all") params.set("type", typeFilter);
     if (modeFilter !== "all") params.set("mode", modeFilter);
-    if (availabilityFilter !== "all") params.set("availability", availabilityFilter);
+    if (statusFilter !== "all") params.set("status", statusFilter);
     if (page > 1) params.set("page", String(page));
     const search = params.toString();
     if (location.search.replace(/^\?/, "") !== search) {
       navigate({ pathname: location.pathname, search }, { replace: true });
     }
-  }, [searchQuery, typeFilter, modeFilter, availabilityFilter, page, navigate, location.pathname, location.search]);
-  useEffect(() => {
-    let cancelled = false;
-    systemSettingsService
-      .getImageSettings()
-      .then((items) => {
-        if (!cancelled) {
-          setRuntimeImageSettings(items.filter((item) => item.is_enabled !== false));
-        }
-      })
-      .catch((imageError) => {
-        console.error("Failed to load runtime images", imageError);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  }, [embedded, searchQuery, typeFilter, modeFilter, statusFilter, page, navigate, location.pathname, location.search]);
 
-  useEffect(() => {
-    if (!instances.some((instance) => instance.status === "creating" || instance.status === "deleting")) {
-      return;
-    }
-
-    const intervalId = window.setInterval(() => {
-      void loadInstances({ silent: true, refreshTeams: false });
-    }, 5000);
-
-    return () => window.clearInterval(intervalId);
-  }, [instances, loadInstances]);
 
   const filteredInstances = instances;
-  const typeOptions = useMemo(() => {
-    const values = new Set(INSTANCE_TYPES.map((item) => item.id));
-    runtimeImageSettings.forEach((item) => values.add(item.instance_type));
-    instances.forEach((instance) => values.add(instance.type));
-    return Array.from(values).sort((left, right) =>
-      formatInstanceType(left).localeCompare(formatInstanceType(right), locale),
-    );
-  }, [instances, locale, runtimeImageSettings]);
   const totalPages = Math.max(1, Math.ceil(total / INSTANCE_LIST_PAGE_SIZE));
   const resultFrom = total === 0 ? 0 : (page - 1) * INSTANCE_LIST_PAGE_SIZE + 1;
   const resultTo = total === 0 ? 0 : Math.min(page * INSTANCE_LIST_PAGE_SIZE, total);
@@ -315,28 +246,17 @@ const InstanceListPage: React.FC = () => {
     searchQuery.trim() !== "" ||
     typeFilter !== "all" ||
     modeFilter !== "all" ||
-    availabilityFilter !== "all";
+    statusFilter !== "all";
 
   const clearFilters = useCallback(() => {
     setSearchQuery("");
     setDebouncedSearchQuery("");
     setTypeFilter("all");
     setModeFilter("all");
-    setAvailabilityFilter("all");
+    setStatusFilter("all");
     setPage(1);
   }, []);
 
-  const batchRuntimeImageOptions = useMemo(
-    () =>
-      runtimeImageSettings.filter(
-        (item) =>
-          item.instance_type === batchCreateType &&
-          (item.runtime_type ?? "gateway") === "gateway",
-      ),
-    [batchCreateType, runtimeImageSettings],
-  );
-  const selectedBatchRuntimeImage =
-    batchRuntimeImageOptions.find((item) => runtimeImageKey(item) === batchCreateImageKey) ?? null;
   const selectableLiteIds = useMemo(
     () =>
       filteredInstances
@@ -345,14 +265,6 @@ const InstanceListPage: React.FC = () => {
     [filteredInstances],
   );
 
-  useEffect(() => {
-    if (
-      batchCreateImageKey &&
-      !batchRuntimeImageOptions.some((item) => runtimeImageKey(item) === batchCreateImageKey)
-    ) {
-      setBatchCreateImageKey("");
-    }
-  }, [batchCreateImageKey, batchRuntimeImageOptions]);
   const selectedLiteSet = useMemo(() => new Set(selectedLiteIds), [selectedLiteIds]);
   const selectedLiteCount = selectedLiteIds.length;
   const allVisibleLiteSelected =
@@ -374,9 +286,9 @@ const InstanceListPage: React.FC = () => {
       if (request !== selectionRequest.current) return;
       setSelectedLiteIds(ids);
       setAllUnavailableSelected(ids.length > 0);
-      setUnavailableSelectionNotice(ids.length ? `已跨页选中 ${ids.length} 个不可用 Lite 实例；不受当前搜索、类型筛选限制。${ids.length > 500 ? "单次批量重启/重置最多选择 500 个，请减少选择。" : ""}` : "没有可选的不可用 Lite 实例。");
+      setUnavailableSelectionNotice(ids.length ? `${t("instances.unavailableSelected", {count: ids.length})}${ids.length > 500 ? t("instances.selectionLimit") : ""}` : t("instances.noUnavailable"));
     } catch (err) {
-      if (request === selectionRequest.current) setUnavailableSelectionNotice(getErrorMessage(err, "全选失败，原选择已保留，请重试。"));
+      if (request === selectionRequest.current) setUnavailableSelectionNotice(getErrorMessage(err, t("instances.selectionFailed")));
     } finally {
       if (request === selectionRequest.current) setSelectingUnavailable(false);
     }
@@ -406,61 +318,15 @@ const InstanceListPage: React.FC = () => {
     });
   }, [selectableLiteIds]);
 
-  const handleBatchCreateLite = useCallback(async () => {
-    try {
-      setBatchCreateLoading(true);
-      setBatchCreateSummary(null);
-      const result = await instanceService.batchCreateLiteInstances({
-        name_prefix: batchCreatePrefix.trim(),
-        count: batchCreateCount,
-        start_index: batchCreateStartIndex,
-        template: {
-          type: batchCreateType,
-          mode: "lite",
-          instance_mode: "lite",
-          runtime_type: "gateway",
-          os_type: batchCreateType,
-          os_version: "latest",
-          image_registry: selectedBatchRuntimeImage?.image,
-          gpu_enabled: false,
-          gpu_count: 0,
-        },
-      });
-      setBatchCreateSummary(
-        t("instances.batchCreateSummary", {
-          created: result.created,
-          failed: result.failed,
-        }),
-      );
-      await loadInstances({ silent: true });
-      if (result.failed === 0) {
-        setBatchCreateOpen(false);
-      }
-    } catch (err: unknown) {
-      setBatchCreateSummary(getErrorMessage(err, t("instances.batchCreateFailed")));
-    } finally {
-      setBatchCreateLoading(false);
-    }
-  }, [
-    batchCreateCount,
-    batchCreatePrefix,
-    batchCreateStartIndex,
-    batchCreateType,
-    selectedBatchRuntimeImage,
-    loadInstances,
-    t,
-  ]);
-
   const handleBatchDeleteLite = useCallback(async () => {
     try {
       setBatchDeleteLoading(true);
+      setBatchDeleteResult(null);
       const result = await instanceService.batchDeleteLiteInstances(selectedLiteIds);
-      if (result.failed > 0) {
-        alert(t("instances.batchDeletePartial", { deleted: result.deleted, failed: result.failed }));
-      }
-      setSelectedLiteIds([]);
+      setBatchDeleteResult(result);
+      setSelectedLiteIds(result.results.filter(item => item.status === "failed").map(item => item.instance_id));
       setPendingBatchDelete(false);
-      await loadInstances({ silent: true });
+      await loadInstances();
     } catch (err: unknown) {
       alert(getErrorMessage(err, t("instances.batchDeleteFailed")));
     } finally {
@@ -473,7 +339,7 @@ const InstanceListPage: React.FC = () => {
         setDeletingIds((prevIds) => [...prevIds, id]);
         await instanceService.deleteInstance(id);
         setPendingDeleteId(null);
-        await loadInstances({ silent: true });
+        await loadInstances();
       } catch (err: unknown) {
         alert(getErrorMessage(err, t("instances.failedToDelete")));
       } finally {
@@ -486,13 +352,28 @@ const InstanceListPage: React.FC = () => {
   const handleStart = useCallback(
     async (id: number) => {
       try {
-        setActionLoading(id);
+        setActionLoadingIds((ids) => ids.includes(id) ? ids : [...ids, id]);
         await instanceService.startInstance(id);
-        await loadInstances({ silent: true, refreshTeams: false });
+        await loadInstances({ refreshTeams: false });
       } catch (err: unknown) {
         alert(getErrorMessage(err, t("instances.failedToStart")));
       } finally {
-        setActionLoading(null);
+        setActionLoadingIds((ids) => ids.filter((pendingId) => pendingId !== id));
+      }
+    },
+    [loadInstances, t],
+  );
+
+  const handleRestart = useCallback(
+    async (id: number) => {
+      try {
+        setActionLoadingIds((ids) => ids.includes(id) ? ids : [...ids, id]);
+        await instanceService.restartInstance(id);
+        await loadInstances({ refreshTeams: false });
+      } catch (err: unknown) {
+        alert(getErrorMessage(err, t("instances.failedToRestart")));
+      } finally {
+        setActionLoadingIds((ids) => ids.filter((pendingId) => pendingId !== id));
       }
     },
     [loadInstances, t],
@@ -501,20 +382,20 @@ const InstanceListPage: React.FC = () => {
   const handleStop = useCallback(
     async (id: number) => {
       try {
-        setActionLoading(id);
+        setActionLoadingIds((ids) => ids.includes(id) ? ids : [...ids, id]);
         await instanceService.stopInstance(id);
-        await loadInstances({ silent: true, refreshTeams: false });
+        await loadInstances({ refreshTeams: false });
       } catch (err: unknown) {
         alert(getErrorMessage(err, t("instances.failedToStop")));
       } finally {
-        setActionLoading(null);
+        setActionLoadingIds((ids) => ids.filter((pendingId) => pendingId !== id));
       }
     },
     [loadInstances, t],
   );
 
-  return (
-    <UserLayout title={t("instances.listTitle")}>
+  const content = (
+    <>
       <ConfirmDialog
         open={pendingDeleteId !== null}
         title={t("common.delete")}
@@ -543,287 +424,60 @@ const InstanceListPage: React.FC = () => {
         onConfirm={() => void handleBatchDeleteLite()}
       />
 
-      {batchCreateOpen ? (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(15,23,42,0.45)] px-4"
-          onClick={(event) => {
-            if (event.target === event.currentTarget && !batchCreateLoading) {
-              setBatchCreateOpen(false);
-            }
-          }}
-        >
-          <div className="w-full max-w-lg rounded-lg border border-slate-200 bg-white p-6 shadow-xl">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <h3 className="text-lg font-semibold text-slate-950">
-                  {t("instances.batchCreateLite")}
-                </h3>
-                <p className="mt-1 text-sm text-slate-500">
-                  {t("instances.batchCreateLiteSubtitle")}
-                </p>
-              </div>
-            </div>
-
-            <div className="mt-5 space-y-4">
-              <div>
-                <div className="mb-2 text-sm font-medium text-slate-700">
-                  {t("instances.batchMode")}
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    className="rounded-md border border-sky-300 bg-sky-50 px-3 py-2 text-left text-sm font-medium text-sky-700"
-                  >
-                    {t("instances.batchModeLite")}
-                  </button>
-                  <button
-                    type="button"
-                    disabled
-                    className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-left text-sm font-medium text-slate-400 disabled:cursor-not-allowed"
-                    title={t("instances.batchModeProDisabled")}
-                  >
-                    {t("instances.batchModePro")}
-                  </button>
-                </div>
-              </div>
-
-              <label className="block text-sm font-medium text-slate-700">
-                {t("instances.batchNamePrefix")}
-                <input
-                  type="text"
-                  value={batchCreatePrefix}
-                  onChange={(event) => setBatchCreatePrefix(event.target.value)}
-                  className="app-input mt-1 w-full"
-                  placeholder="lite-openclaw"
-                />
-              </label>
-
-              <div className="grid gap-4 sm:grid-cols-2">
-                <label className="block text-sm font-medium text-slate-700">
-                  {t("instances.batchCount")}
-                  <input
-                    type="number"
-                    min={1}
-                    max={100}
-                    value={batchCreateCount}
-                    onChange={(event) => setBatchCreateCount(Number(event.target.value))}
-                    className="app-input mt-1 w-full"
-                  />
-                </label>
-                <label className="block text-sm font-medium text-slate-700">
-                  {t("instances.batchStartIndex")}
-                  <input
-                    type="number"
-                    min={1}
-                    max={9999}
-                    value={batchCreateStartIndex}
-                    onChange={(event) => setBatchCreateStartIndex(Number(event.target.value))}
-                    className="app-input mt-1 w-full"
-                  />
-                </label>
-              </div>
-
-              <div className="grid gap-4 sm:grid-cols-2">
-                <label className="block text-sm font-medium text-slate-700">
-                  {t("instances.type")}
-                  <select
-                    value={batchCreateType}
-                    onChange={(event) =>
-                      setBatchCreateType(
-                        event.target.value as
-                          | "openclaw"
-                          | "hermes"
-                          | "opencode"
-                          | "deepseek-harness",
-                      )
-                    }
-                    className="app-input mt-1 w-full"
-                  >
-                    <option value="openclaw">OpenClaw</option>
-                    <option value="hermes">Hermes</option>
-                    <option value="opencode">OpenCode</option>
-                    <option value="deepseek-harness">DeepSeek Harness</option>
-                  </select>
-                </label>
-                <label className="block text-sm font-medium text-slate-700">
-                  {t("instances.batchImage")}
-                  <select
-                    value={batchCreateImageKey}
-                    onChange={(event) => setBatchCreateImageKey(event.target.value)}
-                    className="app-input mt-1 w-full"
-                  >
-                    <option value="">{t("instances.batchDefaultImage")}</option>
-                    {batchRuntimeImageOptions.map((item) => (
-                      <option key={runtimeImageKey(item)} value={runtimeImageKey(item)}>
-                        {item.display_name || item.image}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              </div>
-            </div>
-            <div className="mt-4 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
-              {t("instances.batchCreatePreview", {
-                first: `${batchCreatePrefix || "lite"}-${String(batchCreateStartIndex || 1).padStart(3, "0")}`,
-                last: `${batchCreatePrefix || "lite"}-${String((batchCreateStartIndex || 1) + Math.max(batchCreateCount - 1, 0)).padStart(3, "0")}`,
-              })}
-            </div>
-
-            {batchCreateSummary ? (
-              <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
-                {batchCreateSummary}
-              </div>
-            ) : null}
-
-            <div className="mt-6 flex justify-end gap-3">
-              <button
-                type="button"
-                onClick={() => setBatchCreateOpen(false)}
-                disabled={batchCreateLoading}
-                className="app-button-secondary"
-              >
-                {t("common.cancel")}
-              </button>
-              <button
-                type="button"
-                onClick={() => void handleBatchCreateLite()}
-                disabled={batchCreateLoading}
-                className="app-button-primary"
-              >
-                <Plus className="h-4 w-4" />
-                {batchCreateLoading ? t("instances.batchCreating") : t("instances.batchCreateLite")}
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
-      <InstanceLifecycleBatches selectedIds={selectedLiteIds} selectionBusy={selectingUnavailable} onChanged={() => void loadInstances({ silent: true })} selectionControl={<>
-        <label className="flex items-center gap-2 text-sm text-slate-600" title="跨所有页面选择当前账号的不可用独立 Lite 实例；排除删除中、清理残留及团队实例，不受当前筛选限制。">
+      <InstanceLifecycleBatches selectedIds={selectedLiteIds} selectionBusy={selectingUnavailable} onChanged={() => void loadInstances()} selectionControl={<>
+        <label className="flex items-center gap-2 text-sm text-slate-600" title={t("instances.unavailableSelectionHint")}>
           <input type="checkbox" checked={allUnavailableSelected || selectingUnavailable} onChange={e => void selectAllUnavailable(e.target.checked)} />
-          {selectingUnavailable ? "正在跨页获取…（取消勾选可中止）" : "选中所有不可用实例"}
+          {t(selectingUnavailable ? "instances.selectingUnavailable" : "instances.selectUnavailable")}
         </label>
         {unavailableSelectionNotice && <span role="status" className="text-xs text-slate-500">{unavailableSelectionNotice}</span>}
       </>} />
-      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex flex-wrap gap-2">
-          <Link to="/instances/new" className="app-button-primary self-start">
-            <Monitor className="h-4 w-4" />
-            {t("instances.createInstance")}
-          </Link>
-          <button
-            type="button"
-            onClick={() => {
-              setBatchCreateSummary(null);
-              setBatchCreateOpen(true);
-            }}
-            className="app-button-secondary self-start"
-          >
-            <Plus className="h-4 w-4" />
-            {t("instances.batchCreateLite")}
-          </button>
-          <button
-            type="button"
-            onClick={() => setPendingBatchDelete(true)}
-            disabled={selectedLiteCount === 0 || batchDeleteLoading || selectingUnavailable}
-            className="app-button-secondary self-start border-red-200 text-red-600 hover:border-red-300 hover:bg-red-50 hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <Trash2 className="h-4 w-4" />
-            {selectedLiteCount > 0
-              ? t("instances.batchDeleteLiteWithCount", { count: selectedLiteCount })
-              : t("instances.batchDeleteLite")}
-          </button>
-          <Link to="/portal" className="app-button-secondary self-start">
-            <MonitorPlay className="h-4 w-4" />
-            {t("instances.portalView")}
-          </Link>
+      <div className="cm-surface cm-instance-panel">
+      <div className="cm-management-toolbar cm-instance-toolbar">
+        <div className="cm-management-toolbar-filters">
+          <ExpandableSearch value={searchQuery} onChange={setSearchQuery} label={t("instances.searchLabel")} placeholder={`ID / ${t("instances.searchPlaceholder")}`} />
+          <details ref={filterDetails} className="cm-instance-filters" open onKeyDown={event => {
+            if (event.key === "Escape" && window.matchMedia("(max-width: 1100px)").matches) {
+              event.preventDefault(); event.stopPropagation(); event.currentTarget.open = false; event.currentTarget.querySelector("summary")?.focus();
+            }
+          }}>
+            <summary className="app-button-secondary">{t("instances.filters")}</summary>
+            <div className="cm-instance-filter-fields">
+              <FilterSelect label={t("instances.instanceTypeFilter")} value={typeFilter} options={[{value: "all", label: t("instances.allTypes")}, ...INSTANCE_TYPE_FILTERS.map(type => ({value: type, label: formatInstanceType(type)}))]} onChange={value => {setTypeFilter(value); setPage(1);}} />
+              <FilterSelect label={t("instances.instanceModeFilter")} value={modeFilter} options={[{value: "all", label: t("instances.allModes")}, {value: "lite", label: "Lite"}, {value: "pro", label: "Pro"}]} onChange={value => {setModeFilter(value as ModeFilter); setPage(1);}} />
+              <FilterSelect label={t("instances.statusFilter")} value={statusFilter} options={[{value: "all", label: t("instances.allStatuses")}, ...INSTANCE_STATUS_FILTERS.map(status => ({value: status, label: t(`status.${status}`)}))]} onChange={value => {setStatusFilter(value as InstanceStatusFilter); setPage(1);}} />
+              {filtersActive && <button type="button" onClick={clearFilters} className="app-button-secondary">{t("instances.clearFilters")}</button>}
+            </div>
+          </details>
         </div>
-
-        <div className="flex flex-col gap-2 xl:flex-row xl:flex-wrap xl:justify-end">
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-            <input
-              type="text"
-              placeholder={`ID / ${t("instances.searchPlaceholder")}`}
-              value={searchQuery}
-              onChange={(event) => setSearchQuery(event.target.value)}
-              className="app-input w-full pl-9 sm:w-64"
-            />
-          </div>
-          <select
-            value={typeFilter}
-            onChange={(event) => {
-              setTypeFilter(event.target.value);
-              setPage(1);
-            }}
-            className="app-input"
-            aria-label={t("instances.instanceTypeFilter")}
-          >
-            <option value="all">{t("instances.allTypes")}</option>
-            {typeOptions.map((type) => (
-              <option key={type} value={type}>
-                {formatInstanceType(type)}
-              </option>
-            ))}
-          </select>
-          <select
-            value={modeFilter}
-            onChange={(event) => {
-              setModeFilter(event.target.value as ModeFilter);
-              setPage(1);
-            }}
-            className="app-input"
-            aria-label={t("instances.instanceModeFilter")}
-          >
-            <option value="all">{t("instances.allModes")}</option>
-            <option value="lite">Lite</option>
-            <option value="pro">Pro</option>
-          </select>
-          <select
-            value={availabilityFilter}
-            onChange={(event) => {
-              setAvailabilityFilter(event.target.value as AvailabilityFilter);
-              setPage(1);
-            }}
-            className="app-input"
-            aria-label={t("instances.availabilityFilter")}
-          >
-            <option value="all">{t("instances.allAvailability")}</option>
-            <option value="available">Available</option>
-            <option value="starting">Starting</option>
-            <option value="unavailable">Unavailable</option>
-          </select>
-          {filtersActive ? (
-            <button type="button" onClick={clearFilters} className="app-button-secondary">
-              {t("instances.clearFilters")}
-            </button>
-          ) : null}
+        <div className="cm-management-toolbar-actions">
+          <Link to="/instances/new?batch=1" className="app-button-secondary"><Plus size={14} />{t("instances.batchCreateLite")}</Link>
+          <Link to="/instances/new" className="app-button-primary"><Monitor size={14} />{t("instances.createInstance")}</Link>
         </div>
       </div>
-
-      {!loading && !error && total > 0 ? (
-        <div className="flex items-center justify-between text-xs text-slate-500">
-          <span>
-            {t("instances.showingResults", {
-              filtered: `${resultFrom}-${resultTo}`,
-              total,
-            })}
-          </span>
-          <span>
-            {t("instances.pageOf", { page, totalPages })}
-          </span>
+      {selectedLiteCount > 0 && <div className="cm-instance-selection"><button type="button" onClick={() => setPendingBatchDelete(true)} disabled={batchDeleteLoading || selectingUnavailable} className="app-button-secondary cm-instance-danger"><Trash2 size={14} />{t("instances.batchDeleteLiteWithCount", {count: selectedLiteCount})}</button></div>}
+      {batchDeleteResult && batchDeleteResult.failed > 0 && <details open role="alert" className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+        <summary>{t("instances.batchDeletePartial", { deleted: batchDeleteResult.deleted, failed: batchDeleteResult.failed })}</summary>
+        <ul className="mt-2 max-h-48 overflow-y-auto break-words">
+          {batchDeleteResult.results.filter(item => item.status === "failed").map(item => <li key={item.instance_id}>{item.name || `#${item.instance_id}`}: {item.error || t("instances.batchDeleteFailed")}</li>)}
+        </ul>
+      </details>}
+      {query.isRefetchError && query.data && (
+        <div role="status" className="rounded-md border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800">
+          {t("instances.failedToLoad")}
         </div>
-      ) : null}
+      )}
+
 
       {loading ? (
         <div className="flex h-64 items-center justify-center text-sm text-slate-500">
           {t("common.loading")}
         </div>
       ) : error ? (
-        <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          {error}
+        <div role="alert" className="px-4 py-3 text-sm text-red-700">
+          {error} <button type="button" className="app-button-secondary" onClick={() => void refetch()}>{t("common.retry")}</button>
         </div>
       ) : instances.length === 0 && !filtersActive ? (
-        <div className="cm-surface p-10 text-center">
+        <div className="p-10 text-center">
           <h3 className="text-sm font-medium text-slate-950">{t("instances.noInstances")}</h3>
           <div className="mt-5">
             <Link to="/instances/new" className="app-button-primary">
@@ -832,13 +486,13 @@ const InstanceListPage: React.FC = () => {
           </div>
         </div>
       ) : filteredInstances.length === 0 ? (
-        <div className="cm-surface p-10 text-center text-sm text-slate-500">
+        <div className="p-10 text-center text-sm text-slate-500">
           {t("instances.noMatchingInstances")}
         </div>
       ) : (
-        <div className="cm-surface overflow-x-auto">
-          <table className="w-full min-w-[820px] table-fixed divide-y divide-slate-200 text-sm">
-            <thead className="bg-slate-50 text-left text-xs font-medium uppercase tracking-normal text-slate-500">
+        <div className="cm-management-table-wrap" tabIndex={0} aria-label={t("instances.listTitle")}>
+          <table className="cm-management-table cm-instance-table">
+            <thead className="text-left">
               <tr>
                 <th className="w-[5%] px-4 py-3">
                   <input
@@ -846,21 +500,21 @@ const InstanceListPage: React.FC = () => {
                     checked={allVisibleLiteSelected}
                     disabled={selectableLiteIds.length === 0}
                     onChange={toggleAllVisibleLite}
-                    className="h-4 w-4 rounded border-slate-300 text-red-600 focus:ring-red-500 disabled:opacity-40"
+                    className="h-4 w-4 rounded border-slate-300  disabled:opacity-40"
                     aria-label={t("instances.selectVisibleLite")}
                   />
                 </th>
-                <th className="w-[28%] px-4 py-3">Instance</th>
-                <th className="w-[13%] px-4 py-3">Type</th>
-                <th className="w-[20%] px-4 py-3">Information</th>
-                <th className="w-[16%] px-4 py-3">Availability</th>
-                <th className="w-[10%] px-4 py-3">Workspace</th>
-                <th className="w-[10%] px-4 py-3 text-right">Actions</th>
+                <th style={{width: "23%"}}>{t("instances.nameAndId")}</th>
+                <th style={{width: "16%"}}>{t("instances.type")}</th>
+                <th style={{width: "6%"}}>{t("instances.modeLabel")}</th>
+                <th style={{width: "19%"}}>{t("common.status")}</th>
+                <th style={{width: "9%"}}>{t("instances.workspaceLabel")}</th>
+                <th style={{width: "13%"}}>{t("instances.lastOnline")}</th>
+                <th style={{width: "9%"}}>{t("instances.actionsLabel")}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 bg-white">
               {filteredInstances.map((instance) => {
-                const availability = availabilityForStatus(instance.status);
                 const memberships = teamMemberships.get(instance.id) || [];
                 const primaryMembership = memberships[0];
                 const canSelectLite = isLiteInstance(instance) && instance.status !== "deleting";
@@ -868,17 +522,17 @@ const InstanceListPage: React.FC = () => {
                 return (
                   <tr
                     key={instance.id}
-                    role="link"
                     tabIndex={0}
-                    onClick={() => navigate(`/instances/${instance.id}`, { state: detailState })}
+                    aria-selected={selected}
+                    onClick={() => selectInstance(instance)}
                     onKeyDown={(event) => {
-                      if (event.key === "Enter" || event.key === " ") {
+                      if (event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) {
                         event.preventDefault();
-                        navigate(`/instances/${instance.id}`, { state: detailState });
+                        selectInstance(instance);
                       }
                     }}
-                    className={`cursor-pointer focus:outline-none focus-visible:bg-slate-50 ${
-                      primaryMembership ? "bg-sky-50/30 hover:bg-sky-50/60" : "hover:bg-slate-50"
+                    className={`cursor-pointer cm-instance-row ${
+                      primaryMembership ? "hover:bg-slate-50" : "hover:bg-slate-50"
                     }`}
                   >
                     <td
@@ -891,66 +545,31 @@ const InstanceListPage: React.FC = () => {
                         checked={selected}
                         disabled={!canSelectLite}
                         onChange={() => toggleLiteSelection(instance.id)}
-                        className="h-4 w-4 rounded border-slate-300 text-red-600 focus:ring-red-500 disabled:opacity-30"
+                        className="h-4 w-4 rounded border-slate-300  disabled:opacity-30"
                         aria-label={t("instances.selectLiteInstance", { name: instance.name })}
                       />
                     </td>
-                    <td className="max-w-[280px] px-4 py-3">
-                      <Link
-                        to={`/instances/${instance.id}`}
-                        state={detailState}
-                        onClick={(event) => event.stopPropagation()}
-                        className="block truncate font-medium text-slate-950 hover:text-red-700"
-                      >
-                        {instance.name}
-                      </Link>
-                      <div className="mt-1 truncate text-xs text-slate-500">
-                        {t("instances.createdAt", {
-                          time: instance.created_at
-                            ? new Date(instance.created_at).toLocaleString(locale)
-                            : "-",
-                        })}
-                      </div>
-                      {primaryMembership && <Link
-                        to={`/teams/${primaryMembership.team.id}`}
-                        title={`${primaryMembership.team.name} / ${primaryMembership.member.display_name || primaryMembership.member.member_key} / ${primaryMembership.member.role}`}
-                        onClick={(event) => event.stopPropagation()}
-                        className="mt-1 block truncate text-xs text-violet-700 hover:underline"
-                      >Team: {primaryMembership.team.name}{memberships.length > 1 ? ` (+${memberships.length - 1})` : ""}</Link>}
-                    </td>
-                    <td className="px-4 py-3 text-slate-600">
-                      <div className="flex min-w-0 flex-wrap items-center gap-2">
-                        <span className="truncate">{formatInstanceType(instance.type)}</span>
-                        <span
-                          className={`inline-flex shrink-0 rounded-md border px-2 py-0.5 text-xs font-medium ${modeClass(
-                            instance.instance_mode,
-                          )}`}
-                        >
-                          {modeLabel(instance.instance_mode)}
-                        </span>
+                    <td>
+                      <div className="cm-instance-identity">
+                        <Link to={`/instances/${instance.id}`} state={detailState} onClick={event => { event.stopPropagation(); if (onSelectInstance) { event.preventDefault(); onSelectInstance(instance); } }} className="cm-management-identity cm-management-truncate" title={instance.name}>{instance.name}</Link>
+                        <span className="cm-instance-id">#{instance.id}</span>
+                        {primaryMembership && <Link to={`/teams/${primaryMembership.team.id}`} onClick={event => event.stopPropagation()} className="cm-management-truncate cm-instance-team" title={`${primaryMembership.team.name} / ${primaryMembership.member.display_name || primaryMembership.member.member_key} / ${primaryMembership.member.role}`}>{primaryMembership.team.name}{memberships.length > 1 ? ` (+${memberships.length - 1})` : ""}</Link>}
                       </div>
                     </td>
-                    <td className="px-4 py-3 text-slate-600">
-                      <div className="text-xs">ID: {instance.id}</div>
-                      <div className="mt-1 text-xs text-slate-500">最后在线：{instance.last_online_at ? new Date(instance.last_online_at).toLocaleString(locale) : "暂无记录"}</div>
-                      {instance.status === "error" && <div tabIndex={0}
-                        className="group relative mt-1 text-xs text-red-600"
-                      ><div className="truncate">错误：{runtimeFailureSummary(instance)}</div>
-                        <div role="tooltip" className="absolute left-0 top-full z-50 hidden max-h-64 w-80 max-w-[75vw] overflow-auto whitespace-pre-wrap break-words rounded border border-red-100 bg-white p-3 text-slate-700 shadow-lg group-hover:block group-focus-within:block">{instance.runtime_error_message || "原因未记录"}</div>
-                      </div>}
+                    <td>{formatInstanceType(instance.type)}</td>
+                    <td>{modeLabel(instance.instance_mode)}</td>
+                    <td><div className="cm-instance-state">
+                      <InstanceLifecycleStatus layout="inline" status={instance.status} availability={instance.availability} stoppedReason={instance.stopped_reason} />
+                      {instance.status === "error" && <>
+                        <button type="button" className="cm-instance-error cm-management-truncate" popoverTarget={`instance-error-${instance.id}`} aria-label={`${t("instances.errorDetails")}: ${instance.name}`} onClick={event => event.stopPropagation()}>{runtimeFailureSummary(instance)}</button>
+                        <div id={`instance-error-${instance.id}`} popover="auto" role="dialog" aria-label={`${t("instances.errorDetails")}: ${instance.name}`} className="cm-management-popup cm-instance-error-popup" tabIndex={0} onToggle={event => {if (event.currentTarget.matches(":popover-open")) event.currentTarget.focus();}} onClick={event => event.stopPropagation()}>{instance.runtime_error_message || t("instances.noErrorReason")}</div>
+                      </>}
+
+                    </div></td>
+                    <td className="cm-management-number" title={workspaceUsageText(locale, instance).description} aria-label={workspaceUsageText(locale, instance).description}>
+                      {formatWorkspaceUsage(instance, workspaceUsageText(locale, instance).unavailable)}
                     </td>
-                    <td className="px-4 py-3">
-                      <span
-                        className={`inline-flex rounded-md border px-2 py-1 text-xs font-medium ${availabilityClass(
-                          availability,
-                        )}`}
-                      >
-                        {availabilityLabel(availability)}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-slate-600">
-                      {formatBytes(instance.workspace_usage_bytes)}
-                    </td>
+                    <td><span className="cm-management-truncate block" title={instance.last_online_at ? new Date(instance.last_online_at).toLocaleString(locale) : undefined}>{instance.last_online_at ? new Date(instance.last_online_at).toLocaleString(locale) : t("instances.noOnlineRecord")}</span></td>
                     <td
                       className="px-4 py-3"
                       onClick={(event) => event.stopPropagation()}
@@ -961,7 +580,7 @@ const InstanceListPage: React.FC = () => {
                           <button
                             type="button"
                             onClick={() => void handleStop(instance.id)}
-                            disabled={actionLoading === instance.id}
+                            disabled={actionLoadingIds.includes(instance.id)}
                             className="cm-icon-button"
                             title={t("common.stop")}
                           >
@@ -971,23 +590,31 @@ const InstanceListPage: React.FC = () => {
                           <button
                             type="button"
                             onClick={() => void handleStart(instance.id)}
-                            disabled={actionLoading === instance.id}
+                            disabled={actionLoadingIds.includes(instance.id)}
                             className="cm-icon-button"
                             title={t("common.start")}
                           >
                             <Play className="h-4 w-4" />
                           </button>
+                        ) : instance.status === "error" ? (
+                          <button
+                            type="button"
+                            onClick={() => void handleRestart(instance.id)}
+                            disabled={actionLoadingIds.includes(instance.id) || deletingIds.includes(instance.id)}
+                            className="cm-icon-button"
+                            title={t("common.restart")}
+                            aria-label={`${t("common.restart")} ${instance.name}`}
+                            aria-busy={actionLoadingIds.includes(instance.id)}
+                          >
+                            <RotateCw className={`h-4 w-4${actionLoadingIds.includes(instance.id) ? " animate-spin" : ""}`} />
+                          </button>
                         ) : null}
-                        <button
-                          type="button"
-                          onClick={() => setPendingDeleteId(instance.id)}
-                          disabled={deletingIds.includes(instance.id) || instance.status === "deleting"}
-                          className="cm-icon-button border-red-200 text-red-600 hover:border-red-300 hover:bg-red-50 hover:text-red-700"
-                          title={t("common.delete")}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
+                        <ActionMenu label={`${t("instances.actionsLabel")}: ${instance.name}`} items={[...(isLiteInstance(instance) ? [{id: "activity", label: t("instances.activityPolicy"), onSelect: () => {const dialog = document.getElementById(`instance-activity-${instance.id}`); if (dialog instanceof HTMLDialogElement) dialog.showModal();}}] : []), {id: "delete", label: t("common.delete"), destructive: true, disabled: deletingIds.includes(instance.id) || instance.status === "deleting" || actionLoadingIds.includes(instance.id), onSelect: () => setPendingDeleteId(instance.id)}]} />
                       </div>
+                      {isLiteInstance(instance) && <dialog id={`instance-activity-${instance.id}`} aria-label={`${t("instances.activityPolicy")}: ${instance.name}`} className="cm-confirm-dialog cm-instance-activity-dialog">
+                        <div className="flex items-center justify-between gap-3"><h2>{t("instances.activityPolicy")}</h2><button type="button" className="app-button-secondary" autoFocus onClick={event => event.currentTarget.closest("dialog")?.close()}>{t("common.close")}</button></div>
+                        <InstanceAutoStopInfo instance={instance} />
+                      </dialog>}
                     </td>
                   </tr>
                 );
@@ -1016,8 +643,23 @@ const InstanceListPage: React.FC = () => {
           ) : null}
         </div>
       )}
-    </UserLayout>
+      {!loading && !error && total > 0 ? (
+        <div className="cm-management-pagination">
+          <span>
+            {t("instances.showingResults", {
+              filtered: `${resultFrom}-${resultTo}`,
+              total,
+            })}
+          </span>
+          <span>
+            {t("instances.pageOf", { page, totalPages })}
+          </span>
+        </div>
+      ) : null}
+      </div>
+    </>
   );
+  return embedded ? content : <UserLayout title={t("instances.listTitle")}>{content}</UserLayout>;
 };
 
 export default InstanceListPage;

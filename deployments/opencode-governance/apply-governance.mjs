@@ -15,6 +15,8 @@ const helper = fs.readFileSync(path.join(here, "governance.ts"), "utf8").replace
 const tests = fs.readFileSync(path.join(here, "governance.test.ts"), "utf8").replaceAll("\r\n", "\n")
 const imageTools = fs.readFileSync(path.join(here, "image-tools.ts"), "utf8").replaceAll("\r\n", "\n")
 const imageTests = fs.readFileSync(path.join(here, "image-tools.test.ts"), "utf8").replaceAll("\r\n", "\n")
+const teamTools = fs.readFileSync(path.join(here, "team-tools.ts"), "utf8").replaceAll("\r\n", "\n")
+const teamTests = fs.readFileSync(path.join(here, "team-tools.test.ts"), "utf8").replaceAll("\r\n", "\n")
 const core = path.join(root, "packages/core/src")
 const manifestPath = path.join(root, ".clawmanager-governance-manifest.json")
 const verifiedFiles = new Set()
@@ -24,7 +26,7 @@ if (JSON.parse(fs.readFileSync(path.join(root, "packages/core/package.json"))).v
 }
 if (fs.existsSync(manifestPath)) {
   const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"))
-  if ((manifest.imageTools !== hash(imageTools) || manifest.imageTests !== hash(imageTests)) && !refreshPatches)
+  if ((manifest.teamTools !== hash(teamTools) || manifest.teamTests !== hash(teamTests) || manifest.imageTools !== hash(imageTools) || manifest.imageTests !== hash(imageTests)) && !refreshPatches)
     throw new Error("Image tool adapter changed; use --refresh-patches on verified source or a fresh pinned checkout")
   if (manifest.revision !== revision || (manifest.helper !== hash(helper) && !process.argv.includes("--refresh-helper") && !refreshPatches)) throw new Error("Adapter changed; use a fresh pinned source checkout or explicitly refresh verified helper files")
   for (const [relative, expected] of Object.entries(manifest.files)) {
@@ -64,8 +66,8 @@ function patch(relative, edits) {
 // Validate every file before any mutation. No changes to SQLite schema or UI.
 const files = [
   patch("plugin/internal.ts", [
-    ['import { WebSearchTool }', 'import { ClawManagerImageTools } from "../clawmanager-image-tools.js"\nimport { WebSearchTool }'],
-    ['  WebSearchTool.Plugin,', '  WebSearchTool.Plugin,\n  ClawManagerImageTools.Plugin,'],
+    ['import { WebSearchTool }', 'import { ClawManagerImageTools } from "../clawmanager-image-tools.js"\nimport { ClawManagerTeamTools } from "../clawmanager-team-tools.js"\nimport { WebSearchTool }'],
+    ['  WebSearchTool.Plugin,', '  WebSearchTool.Plugin,\n  ClawManagerImageTools.Plugin,\n  ClawManagerTeamTools.Plugin,'],
   ]),
   patch("session/runner/llm.ts", [
     ['import { Message }', 'import { Governance } from "../../clawmanager-governance.js"\nimport { Message }'],
@@ -172,17 +174,19 @@ const files = [
     ['        return ["gpt-luna",', '        if (Governance.enabled && providerID === "clawmanager") return models.find((item) => item.id === "auto")\n        return ["gpt-luna",'],
     ['      small: Effect.fn("Model.small")(function* (providerID) {\n        const value = yield* read()', '      small: Effect.fn("Model.small")(function* (providerID) {'],
   ]),
+  [path.join(core, "clawmanager-team-tools.ts"), teamTools],
+  [path.join(root, "packages/core/test/clawmanager-team-tools.test.ts"), teamTests],
   [path.join(core, "clawmanager-governance.ts"), helper],
   [path.join(root, "packages/core/test/clawmanager-governance.test.ts"), tests],
   [path.join(core, "clawmanager-image-tools.ts"), imageTools],
   [path.join(root, "packages/core/test/clawmanager-image-tools.test.ts"), imageTests],
 ]
-for (const [file] of files.slice(-4)) {
+for (const [file] of files.slice(-6)) {
   const relative = path.relative(root, file).replaceAll("\\", "/")
   if (fs.existsSync(file) && !verifiedFiles.has(relative)) throw new Error(`Refusing to overwrite untracked helper: ${relative}`)
 }
 if (checkOnly) { console.log(`Validated ${files.length} files against official ${version}; no files changed`); process.exit(0) }
-const manifest = { revision, helper: hash(helper), imageTools: hash(imageTools), imageTests: hash(imageTests), files: {} }
+const manifest = { revision, teamTools: hash(teamTools), teamTests: hash(teamTests), helper: hash(helper), imageTools: hash(imageTools), imageTests: hash(imageTests), files: {} }
 for (const [file, contents] of files) {
   fs.writeFileSync(file, contents)
   manifest.files[path.relative(root, file).replaceAll("\\", "/")] = hash(contents)

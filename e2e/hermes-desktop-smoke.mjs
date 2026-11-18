@@ -77,7 +77,11 @@ assert(mainAssets.some(path => path.endsWith('.js')), 'Missing main frontend Jav
 assert(mainAssets.some(path => path.endsWith('.css')), 'Missing main frontend CSS')
 for (const asset of mainAssets) {
   const res = await request(asset)
-  assert(res.body.length > 1000, 'Unexpectedly small main frontend asset')
+  if (asset === '/tab-branding.js') {
+    assert(res.body.length > 100 && res.body.includes('clawmanagerApplyTabBranding'), 'Missing tab branding bootstrap')
+  } else {
+    assert(res.body.length > 1000, 'Unexpectedly small main frontend asset')
+  }
   assert((asset.endsWith('.js') ? /javascript/ : /text\/css/).test(res.headers['content-type']), 'Wrong main frontend asset MIME type')
 }
 const renderer = await request('/hermes-desktop-web/')
@@ -97,13 +101,13 @@ assert(info.acceptance === 'not-asserted-by-build', 'Build metadata must not cla
 assert(/^[a-f0-9]{64}$/.test(info.build_input_sha256), 'Missing renderer build input digest')
 if (expectedBuildInput) assert(info.build_input_sha256 === expectedBuildInput, 'Renderer build inputs differ from the tested release')
 assert(info.dependency_audit?.policy === 'exact-upstream-runtime-version-and-integrity', 'Runtime dependencies are not locked to the original renderer')
-assert(info.dependency_audit?.roots === 66 && info.dependency_audit?.resolved_nodes === 511, 'Unexpected locked renderer dependency closure size')
-assert(info.dependency_audit?.closure_sha256 === '223942ec5775c9f3afdfdc7fb1b289511053ba0cc9911080a2e774fcb8c58f63', 'Unexpected locked renderer dependency closure digest')
+assert(info.dependency_audit?.roots === 70 && info.dependency_audit?.resolved_nodes === 541, 'Unexpected locked renderer dependency closure size')
+assert(info.dependency_audit?.closure_sha256 === 'e03f6eeb629656beb7ac2ac4d5599a729ef7ad0040a26f2f57e3231411ca08de', 'Unexpected locked renderer dependency closure digest')
 for (const source of ['apps/desktop/src/app/index.tsx', 'apps/desktop/src/app/contrib/controller.tsx', 'apps/desktop/src/app/routes.ts']) {
   assert(/^[a-f0-9]{40}$/.test(info.source_files?.[source]), `Missing locked original renderer source: ${source}`)
 }
 assert(info.bridge_version === '1', 'Unexpected browser bridge version')
-assert(info.hermes_commit === '29112bef099274229cadff79cdff7bf7b99c4b77', 'Unexpected original renderer commit')
+assert(info.hermes_commit === 'bf0203a794a07aac3ff764972ab9087baa4e4f4e', 'Unexpected original renderer commit')
 const assets = [...renderer.body.matchAll(/(?:src|href)="([^"]+\.(?:js|css))"/g)].map(match => match[1])
 assert(assets.some(path => path.endsWith('.js')), 'Missing renderer JavaScript')
 const dynamicRendererAssets = new Set()

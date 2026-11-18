@@ -79,6 +79,9 @@ func humanText(raw json.RawMessage) string {
 // A latest human prompt is independent of whether its answer completed. Never
 // substitute a session title, assistant reply or model-request history.
 func parseRecentNativeLog(runtime string, data []byte) ([]NativeQuestion, error) {
+	if err := checkHistoryTail(data); err != nil {
+		return nil, err
+	}
 	scanner := bufio.NewScanner(bytes.NewReader(data))
 	scanner.Buffer(make([]byte, 4096), 1<<20)
 	session := ""
@@ -145,21 +148,37 @@ type RecentQuestion struct {
 	Text      string `json:"text"`
 	At        string `json:"at"`
 	CheckedAt string `json:"checked_at"`
+	Warning   string `json:"warning,omitempty"`
 }
 
 // Cache replaces a complete read-only snapshot, not a stream of partial facts.
 // Snapshot ordering rejects late scans; replacement also handles message deletion.
 func (s *Store) cacheRecentQuestion(ctx context.Context, i Identity, workspace string) error {
 	checked := time.Now().UTC()
-	readCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-	qs, readErr := readNativeHistory(readCtx, s.HistoryRoot, workspace, i, true)
+	if i.Runtime == "openclaw" {
+		generation, _ := ctx.Value(dshGenerationKey{}).(string)
+		if generation != "" {
+			var err error
+			runtimeGeneration, _ := ctx.Value(scanRuntimeKey{}).(uint64)
+			ctx, _, err = s.openClawColdProgress(ctx, scanItem{identity: i, workspace: workspace, generation: generation, runtimeGeneration: runtimeGeneration})
+			if err != nil {
+				return err
+			}
+		}
+	}
+	readCtx, cancel := context.WithTimeout(ctx, nativeReaderWaitBudget)
+	qs, readErr := s.isolatedNativeRead(readCtx, workspace, i, true, time.Time{})
 	cancel()
+	return s.saveRecentQuestions(ctx, i, workspace, checked, qs, readErr)
+}
+
+func (s *Store) saveRecentQuestions(ctx context.Context, i Identity, workspace string, checked time.Time, qs []NativeQuestion, readErr error) error {
 	// A failed read is not evidence that the last question was deleted.
-	if readErr != nil {
+	if readErr != nil && !usablePartial(readErr) {
 		return readErr
 	}
 	var latest NativeQuestion
-	if readErr == nil {
+	if readErr == nil || usablePartial(readErr) {
 		for _, q := range qs {
 			if q.At > 0 && q.At <= float64(checked.Add(5*time.Minute).Unix()) && (q.At > latest.At || q.At == latest.At && q.ID > latest.ID) {
 				latest = q
@@ -176,6 +195,9 @@ func (s *Store) cacheRecentQuestion(ctx context.Context, i Identity, workspace s
 		b, _ := json.Marshal(RecentQuestion{Text: questionExcerpt(latest.Text), At: time.UnixMilli(int64(latest.At * 1000)).UTC().Format(time.RFC3339), CheckedAt: checked.Format(time.RFC3339)})
 		payload = string(b)
 	}
+	if readErr != nil && latest.ID == "" {
+		return readErr
+	}
 	key := Key("recent_question", strconv.FormatUint(i.Instance, 10))
 	row, lookupErr := s.Session.SQL().QueryRowContext(ctx, `SELECT r.payload,r.status FROM northbound_owner_records r JOIN instances i ON i.id=r.instance_id AND r.source_key=SHA2(CONCAT(COALESCE(i.workspace_path,''),'|',COALESCE(i.access_token,'')),256) WHERE r.record_type='recent_question' AND r.record_key=? AND r.scope_id=? AND r.owner_normalized=?`, key, i.Scope, strings.ToLower(strings.TrimSpace(i.Owner)))
 	if lookupErr != nil {
@@ -185,6 +207,11 @@ func (s *Store) cacheRecentQuestion(ctx context.Context, i Identity, workspace s
 	var previousStatus string
 	if e := row.Scan(&previous, &previousStatus); e == nil {
 		var old, next RecentQuestion
+		if readErr != nil && json.Unmarshal(previous, &old) == nil {
+			if oldAt, e := time.Parse(time.RFC3339, old.At); e == nil && float64(oldAt.UnixMilli())/1000 >= latest.At {
+				return readErr
+			}
+		}
 		if json.Unmarshal(previous, &old) == nil && json.Unmarshal([]byte(payload), &next) == nil && previousStatus == status && old.Text == next.Text && old.At == next.At {
 			return nil
 		}
@@ -196,14 +223,18 @@ func (s *Store) cacheRecentQuestion(ctx context.Context, i Identity, workspace s
 	if !ok {
 		return fmt.Errorf("recent question SQL driver unavailable")
 	}
+	generation, _ := ctx.Value(dshGenerationKey{}).(string)
 	_, err := driver.ExecContext(ctx, `INSERT INTO northbound_owner_records
  (record_type,record_key,scope_id,owner,owner_normalized,instance_id,runtime_type,status,occurred_at,expires_at,payload,source_key)
  SELECT 'recent_question',?,i.user_id,i.owner,LOWER(TRIM(i.owner)),i.id,i.type,?,?,?,CAST(? AS JSON),SHA2(CONCAT(COALESCE(i.workspace_path,''),'|',COALESCE(i.access_token,'')),256) FROM instances i
- WHERE i.id=? AND i.user_id=? AND LOWER(TRIM(i.owner))=? AND i.workspace_path=?
+ WHERE i.id=? AND i.user_id=? AND LOWER(TRIM(i.owner))=? AND i.workspace_path=? AND (?='' OR SHA2(CONCAT(COALESCE(i.workspace_path,''),'|',COALESCE(i.access_token,'')),256)=?)`+scanRuntimeClause(ctx, "i")+`
  ON DUPLICATE KEY UPDATE source_key=IF(VALUES(occurred_at)>=northbound_owner_records.occurred_at,VALUES(source_key),northbound_owner_records.source_key),payload=IF(VALUES(occurred_at)>=northbound_owner_records.occurred_at,VALUES(payload),northbound_owner_records.payload),status=IF(VALUES(occurred_at)>=northbound_owner_records.occurred_at,VALUES(status),northbound_owner_records.status),
  scope_id=IF(VALUES(occurred_at)>=northbound_owner_records.occurred_at,VALUES(scope_id),northbound_owner_records.scope_id),owner_normalized=IF(VALUES(occurred_at)>=northbound_owner_records.occurred_at,VALUES(owner_normalized),northbound_owner_records.owner_normalized),
- owner=IF(VALUES(occurred_at)>=northbound_owner_records.occurred_at,VALUES(owner),northbound_owner_records.owner),expires_at=GREATEST(northbound_owner_records.expires_at,VALUES(expires_at)),occurred_at=GREATEST(northbound_owner_records.occurred_at,VALUES(occurred_at))`, key, status, checked, checked.Add(30*time.Minute), payload, i.Instance, i.Scope, strings.ToLower(strings.TrimSpace(i.Owner)), workspace)
-	return err
+ owner=IF(VALUES(occurred_at)>=northbound_owner_records.occurred_at,VALUES(owner),northbound_owner_records.owner),expires_at=GREATEST(northbound_owner_records.expires_at,VALUES(expires_at)),occurred_at=GREATEST(northbound_owner_records.occurred_at,VALUES(occurred_at))`, key, status, checked, checked.Add(30*time.Minute), payload, i.Instance, i.Scope, strings.ToLower(strings.TrimSpace(i.Owner)), workspace, generation, generation)
+	if err != nil {
+		return err
+	}
+	return readErr
 }
 
 func (s *Store) recentQuestions(ctx context.Context, owner string, scope *uint64, now time.Time) (map[uint64]RecentQuestion, error) {
@@ -218,17 +249,47 @@ func (s *Store) recentQuestions(ctx context.Context, owner string, scope *uint64
 	if err != nil {
 		return result, err
 	}
-	defer rows.Close()
 	for rows.Next() {
 		var id uint64
 		var b []byte
 		if err = rows.Scan(&id, &b); err != nil {
+			rows.Close()
 			return result, err
 		}
 		var q RecentQuestion
 		if json.Unmarshal(b, &q) == nil && q.Text != "" {
 			result[id] = q
 		}
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return result, err
+	}
+	// Only persistent, current-generation excerpt failures affect this card.
+	query = `SELECT r.instance_id,r.status FROM northbound_owner_records r JOIN instances i ON i.id=r.instance_id AND i.user_id=r.scope_id AND LOWER(TRIM(i.owner))=r.owner_normalized AND i.status='running' AND r.source_key=SHA2(CONCAT(COALESCE(i.workspace_path,''),'|',COALESCE(i.access_token,'')),256) WHERE r.record_type='recent_schedule' AND r.owner_normalized=? AND ((r.status='retry' AND r.version>=3) OR r.status IN ('pending','restricted')) AND r.interval_start<=?`
+	args = []any{owner, now.Add(-30 * time.Minute).UTC()}
+	if scope != nil {
+		query += " AND r.scope_id=?"
+		args = append(args, *scope)
+	}
+	rows, err = s.Session.SQL().QueryContext(ctx, query, args...)
+	if err != nil {
+		return result, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id uint64
+		var state string
+		if err = rows.Scan(&id, &state); err != nil {
+			return result, err
+		}
+		q := result[id]
+		q.Warning = "最近提问更新延迟"
+		if state == "restricted" {
+			q.Warning = "历史格式或大小超出采集范围"
+		}
+		result[id] = q
 	}
 	return result, rows.Err()
 }

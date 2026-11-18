@@ -1,0 +1,9 @@
+# role|hostname|ssh_target|node_ip|storage
+#
+# ssh_target is only the address used by the control-plane to open SSH.
+# node_ip=auto asks the installer to select the source IP used to reach the control-plane.
+# Set an explicit node_ip only when a multi-NIC host cannot be detected unambiguously.
+control-plane|k8s-master|local|auto|false
+worker|k8s-worker1|192.168.1.101|auto|true
+worker|k8s-worker2|192.168.1.102|auto|true
+worker|k8s-worker3|192.168.1.103|auto|true

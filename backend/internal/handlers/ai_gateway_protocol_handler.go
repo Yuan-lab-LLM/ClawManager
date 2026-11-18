@@ -63,6 +63,11 @@ func (h *AIGatewayHandler) Responses(c *gin.Context) {
 		req.Messages = append([]aigateway.ChatMessage{{Role: "system", Content: payload.Instructions}}, req.Messages...)
 	}
 	req.RawBody = canonicalChatBody(req)
+	finishActivity, ok := h.admitGatewayModelActivity(c, &req, true)
+	if !ok {
+		return
+	}
+	defer finishActivity()
 	lease, ok := h.acquireGatewayKeyLease(c, &req)
 	if !ok {
 		return
@@ -255,6 +260,11 @@ func (h *AIGatewayHandler) AnthropicMessages(c *gin.Context) {
 		utils.Error(c, http.StatusUnauthorized, "Unauthorized")
 		return
 	}
+	finishActivity, ok := h.admitGatewayModelActivity(c, &req, true)
+	if !ok {
+		return
+	}
+	defer finishActivity()
 	lease, ok := h.acquireGatewayKeyLease(c, &req)
 	if !ok {
 		return

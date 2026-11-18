@@ -43,6 +43,7 @@ func TestMergedMigrationsMySQL(t *testing.T) {
 			}
 			defer session.Close()
 			var modelID int64
+			baselineHasModelPolicy := false
 			if scenario == "upgrade" {
 				driver := session.Driver().(*sql.DB)
 				conn, err := driver.Conn(context.Background())
@@ -73,7 +74,16 @@ func TestMergedMigrationsMySQL(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
-				result, err := conn.ExecContext(context.Background(), "INSERT INTO llm_models(display_name,provider_type,base_url,provider_model_name,model_group,visibility_scope,access_policy_version) VALUES ('merge-test','local','https://example.invalid','test-model','test-group','selected_users',3)")
+				var policyColumns int
+				if err := conn.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='llm_models' AND COLUMN_NAME='visibility_scope'").Scan(&policyColumns); err != nil {
+					t.Fatal(err)
+				}
+				baselineHasModelPolicy = policyColumns == 1
+				seedModel := "INSERT INTO llm_models(display_name,provider_type,base_url,provider_model_name) VALUES ('merge-test','local','https://example.invalid','test-model')"
+				if baselineHasModelPolicy {
+					seedModel = "INSERT INTO llm_models(display_name,provider_type,base_url,provider_model_name,model_group,visibility_scope,access_policy_version) VALUES ('merge-test','local','https://example.invalid','test-model','test-group','selected_users',3)"
+				}
+				result, err := conn.ExecContext(context.Background(), seedModel)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -81,8 +91,10 @@ func TestMergedMigrationsMySQL(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if _, err := conn.ExecContext(context.Background(), "INSERT INTO llm_model_user_grants(model_id,user_id) SELECT ?,id FROM users ORDER BY id LIMIT 1", modelID); err != nil {
-					t.Fatal(err)
+				if baselineHasModelPolicy {
+					if _, err := conn.ExecContext(context.Background(), "INSERT INTO llm_model_user_grants(model_id,user_id) SELECT ?,id FROM users ORDER BY id LIMIT 1", modelID); err != nil {
+						t.Fatal(err)
+					}
 				}
 				conn.Close()
 			}
@@ -101,7 +113,11 @@ func TestMergedMigrationsMySQL(t *testing.T) {
 				if err := row.Scan(&scope, &version, &grants); err != nil {
 					t.Fatal(err)
 				}
-				if scope != "selected_users" || version != 3 || grants != 1 {
+				wantScope, wantVersion, wantGrants := "all", 1, 0
+				if baselineHasModelPolicy {
+					wantScope, wantVersion, wantGrants = "selected_users", 3, 1
+				}
+				if scope != wantScope || version != wantVersion || grants != wantGrants {
 					t.Fatalf("authorization changed: scope=%s version=%d grants=%d", scope, version, grants)
 				}
 			}

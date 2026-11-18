@@ -29,21 +29,15 @@ assert(
   pageSource.includes("t('runtimePods.title')") || pageSource.includes('t("runtimePods.title")'),
   "Runtime pods page title must use runtimePods.title.",
 );
-assert(
-  pageSource.includes("selectRuntimePod(pod)") &&
-    pageSource.includes('role="button"') &&
-    pageSource.includes("onKeyDown={(event) => handleRuntimePodCardKeyDown(event, pod)}"),
-  "Runtime pod cards must be selectable by clicking or using the keyboard.",
-);
-assert(
-  pageSource.includes("event.stopPropagation()"),
-  "Runtime pod card action buttons must not trigger card selection accidentally.",
-);
+// Entry keyboard behavior, action isolation and bounded capacity layout run in
+// e2e/tests/uiux/management-ui.spec.ts against the rendered native table.
 assert(
   i18nSource.includes('runtime: "Runtime"') &&
     i18nSource.includes('runtime: "运行时"') &&
     i18nSource.includes('title: "运行时"'),
   "Runtime page translations must include English and Chinese runtime labels.",
 );
+
+assert(pageSource.includes("page_size: 16"), "Runtime inventory must request sixteen Runtime rows per page.");
 
 console.log("Runtime pods page source contract is valid.");

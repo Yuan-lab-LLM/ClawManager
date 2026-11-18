@@ -1,0 +1,63 @@
+{
+  "release": "uiux2-sleep-20261116-39640fa8d593",
+  "results": [
+    {
+      "case": "deployed sleeping UI",
+      "type": "openclaw",
+      "id": 239,
+      "status": "PASS",
+      "wakeButton": true,
+      "sleepIcon": true
+    },
+    {
+      "case": "deployed sleeping UI",
+      "type": "hermes",
+      "id": 248,
+      "status": "PASS",
+      "wakeButton": true,
+      "sleepIcon": true
+    },
+    {
+      "case": "deployed sleeping UI",
+      "type": "opencode",
+      "id": 257,
+      "status": "PASS",
+      "wakeButton": true,
+      "sleepIcon": true
+    },
+    {
+      "case": "deployed sleeping UI",
+      "type": "deepseek-harness",
+      "id": 266,
+      "status": "PASS",
+      "wakeButton": true,
+      "sleepIcon": true
+    },
+    {
+      "case": "native application",
+      "type": "opencode",
+      "id": 279,
+      "status": "PASS",
+      "frame": {
+        "origin": "https://10.130.81.54:31605",
+        "path": "/new-session",
+        "textLength": 70,
+        "controls": 8
+      },
+      "javascriptErrors": []
+    },
+    {
+      "case": "native application",
+      "type": "deepseek-harness",
+      "id": 280,
+      "status": "PASS",
+      "frame": {
+        "origin": "https://10.130.81.54:31606",
+        "path": "/",
+        "textLength": 69,
+        "controls": 8
+      },
+      "javascriptErrors": []
+    }
+  ]
+}

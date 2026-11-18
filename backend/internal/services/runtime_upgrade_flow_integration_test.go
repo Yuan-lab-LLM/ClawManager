@@ -28,7 +28,7 @@ func upgradeFlowDB(t *testing.T) db.Session {
 			t.Fatal("invalid port")
 		}
 	}
-	u := mysql.ConnectionURL{Host: "127.0.0.1:" + port, User: "root", Database: "mysql", Options: map[string]string{"parseTime": "true"}}
+	u := mysql.ConnectionURL{Host: "127.0.0.1:" + port, User: "root", Password: os.Getenv("TEST_RUNTIME_MYSQL_PASSWORD"), Database: "mysql", Options: map[string]string{"parseTime": "true"}}
 	root, e := mysql.Open(u)
 	if e != nil {
 		t.Fatal(e)
@@ -42,6 +42,9 @@ func upgradeFlowDB(t *testing.T) db.Session {
 	if e != nil {
 		t.Fatal(e)
 	}
+	// Recovery inspection reads related rows while its inventory cursor is open,
+	// just as the application's pooled connection permits in production.
+	s.SetMaxOpenConns(10)
 	t.Cleanup(func() { s.Close(); root.SQL().Exec("DROP DATABASE " + name); root.Close() })
 	exec := func(q string) {
 		t.Helper()
@@ -49,11 +52,12 @@ func upgradeFlowDB(t *testing.T) db.Session {
 			t.Fatalf("%v: %s", e, q)
 		}
 	}
-	exec(`CREATE TABLE instances (id INT PRIMARY KEY,user_id INT,type VARCHAR(32),runtime_type VARCHAR(32),instance_mode VARCHAR(32),status VARCHAR(32),runtime_generation INT,workspace_path VARCHAR(1024),runtime_error_message TEXT NULL,runtime_error_code VARCHAR(64) NULL,updated_at DATETIME(6))`)
+	exec(`CREATE TABLE instances (id INT PRIMARY KEY,user_id INT,type VARCHAR(32),runtime_type VARCHAR(32),instance_mode VARCHAR(32),status VARCHAR(32),runtime_generation INT,workspace_path VARCHAR(1024),runtime_error_message TEXT NULL,runtime_error_code VARCHAR(64) NULL,created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),started_at DATETIME(6) NULL,stopped_at DATETIME(6) NULL,updated_at DATETIME(6))`)
+	exec(`CREATE TABLE instance_desired_state (instance_id INT PRIMARY KEY,desired_power_state VARCHAR(32),created_at DATETIME(6),updated_at DATETIME(6))`)
 	for _, n := range []string{"users", "teams", "team_members"} {
 		exec("CREATE TABLE " + n + " (id INT PRIMARY KEY)")
 	}
-	for _, file := range []string{"023_add_runtime_pool_v2.sql", "058_add_openclaw_runtime_upgrade_safety.sql", "061_persist_runtime_upgrade_source_identity.sql", "070_add_upgrade_restart_attempts.sql", "073_add_upgrade_operation_claims.sql", "074_add_upgrade_recovery_key.sql", "075_add_upgrade_retry_diagnostics.sql", "076_add_upgrade_item_isolation.sql"} {
+	for _, file := range []string{"023_add_runtime_pool_v2.sql", "066_add_runtime_upgrade_fence.sql", "058_add_openclaw_runtime_upgrade_safety.sql", "061_persist_runtime_upgrade_source_identity.sql", "070_add_upgrade_restart_attempts.sql", "073_add_upgrade_operation_claims.sql", "074_add_upgrade_recovery_key.sql", "075_add_upgrade_retry_diagnostics.sql", "076_add_upgrade_item_isolation.sql", "064_add_instance_lifecycle_batches.sql", "079_add_runtime_management.sql", "080_add_runtime_pod_deletion_intents.sql", "096_add_instance_auto_stop.sql", "104_add_instance_auto_stop_seconds.sql", "098_add_instance_auto_stop_policy_status.sql", "103_add_instance_runtime_recovery.sql", "105_add_runtime_observations.sql", "106_add_runtime_recovery_phase.sql", "107_add_runtime_failover_intents.sql", "109_add_model_activity_leases.sql", "111_add_workspace_usage_observation.sql"} {
 		b, e := os.ReadFile("../db/migrations/" + file)
 		if e != nil {
 			t.Fatal(e)
@@ -105,7 +109,7 @@ func TestUpgradeRecoveryMySQLFlow(t *testing.T) {
 		t.Run(scenario, func(t *testing.T) {
 			s := upgradeFlowDB(t)
 			ctx := context.Background()
-			root := t.TempDir()
+			root := canonicalCompatibilityTestDir(t)
 			exec := func(q string, args ...any) {
 				t.Helper()
 				if _, e := s.SQL().Exec(q, args...); e != nil {
@@ -125,7 +129,7 @@ func TestUpgradeRecoveryMySQLFlow(t *testing.T) {
 				if id == 484 {
 					state, status, gen = "migrated", "stopped", 1
 				}
-				exec("INSERT INTO instances VALUES (?,1,'openclaw','gateway','lite',?,?,?,NULL,NULL,NOW())", id, status, gen, RuntimeWorkspacePathWithRoot(root, "openclaw", 1, id))
+				exec("INSERT INTO instances(id,user_id,type,runtime_type,instance_mode,status,runtime_generation,workspace_path,runtime_error_message,runtime_error_code,updated_at) VALUES (?,1,'openclaw','gateway','lite',?,?,?,NULL,NULL,NOW())", id, status, gen, RuntimeWorkspacePathWithRoot(root, "openclaw", 1, id))
 				exec(`INSERT INTO runtime_upgrade_items (rollout_id,instance_id,state,source_generation,snapshot_ref,postflight_json,created_at,updated_at) VALUES (123,?,?,1,'capsule','{}',NOW(),NOW()-INTERVAL 2 HOUR)`, id, state)
 			}
 			pods := repository.NewRuntimePodRepository(s)
@@ -182,7 +186,10 @@ func TestUpgradeRecoveryMySQLFlow(t *testing.T) {
 				}
 			}
 			if !done {
-				t.Fatal("rollout could not converge")
+				var diagnostics []models.RuntimeUpgradeItem
+				_ = s.Collection("runtime_upgrade_items").Find("rollout_id", 123).All(&diagnostics)
+				raw, _ := json.Marshal(diagnostics)
+				t.Fatalf("rollout could not converge: %s", raw)
 			}
 			if agent.creates != len(ids) {
 				t.Fatalf("duplicate/lost starts: creates=%d instances=%d", agent.creates, len(ids))

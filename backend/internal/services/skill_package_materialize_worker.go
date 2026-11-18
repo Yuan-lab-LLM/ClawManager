@@ -5,6 +5,8 @@ import (
 	"log"
 	"sync"
 	"time"
+
+	"clawreef/internal/backupgate"
 )
 
 type SkillPackageMaterializeWorker struct {
@@ -91,6 +93,11 @@ func (w *SkillPackageMaterializeWorker) loop(stop <-chan struct{}) {
 }
 
 func (w *SkillPackageMaterializeWorker) processBatch(ctx context.Context) {
+	release, gateErr := backupgate.HoldWorkUnit(ctx, "skill.materialize_batch")
+	if gateErr != nil {
+		return
+	}
+	defer release()
 	jobs, err := w.service.ClaimNextPending(ctx, w.batchSize)
 	if err != nil {
 		log.Printf("skill package materialize claim failed: %v", err)

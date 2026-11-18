@@ -1,0 +1,213 @@
+package services
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log"
+	"sort"
+	"strings"
+	"time"
+
+	"clawreef/internal/models"
+	"clawreef/internal/repository"
+	"clawreef/internal/services/k8s"
+	"github.com/upper/db/v4"
+)
+
+const runtimeIdlePodGrace = time.Minute
+
+var errRuntimeIdleMinimumCapacity = errors.New("automatic idle scale-in must retain at least one Runtime Pod")
+
+func idleRuntimePodEmpty(pod models.RuntimePod, now time.Time) error {
+	pod.State = pod.AgentState // Inventory keeps Kubernetes and Agent states separate.
+	if err := runtimeMaintenanceEmptyReport(&pod, stringValue(pod.PodUID), now); err != nil {
+		return err
+	}
+	return models.ConfirmedEmptyRuntimeObservation(pod, now)
+}
+
+// Protect concrete stop identities, not every pool of an unbound Creating row.
+// Claims and bindings are rechecked under the admission lock before publication;
+// a later start uses the retained pool or expands its capacity.
+func (s *RuntimeManagementService) idlePoolDemandAdmission(ctx context.Context, tx db.Session, sources []RuntimePodScaleInSource) error {
+	if len(sources) == 0 {
+		return fmt.Errorf("idle pool source identity required")
+	}
+	conditions := make([]string, 0, len(sources))
+	stopArgs := make([]any, 0, 2*len(sources))
+	for _, source := range sources {
+		if source.ID <= 0 || source.PodUID == "" {
+			return fmt.Errorf("idle pool source identity required")
+		}
+		conditions = append(conditions, "(pod_uid=? OR (runtime_pod_id=? AND pod_uid=''))")
+		stopArgs = append(stopArgs, source.PodUID, source.ID)
+	}
+	var count int
+	row, err := tx.SQL().QueryRowContext(ctx, `SELECT COUNT(*) FROM instance_idle_stop_operations WHERE phase NOT IN ('completed','failed') AND (`+strings.Join(conditions, " OR ")+`)`, stopArgs...)
+	if err != nil {
+		return err
+	}
+	if err = row.Scan(&count); err != nil {
+		return err
+	}
+	if count > 0 {
+		return fmt.Errorf("idle pool removal postponed: instance start or unconfirmed stop exists")
+	}
+	return nil
+}
+
+// Run only from the existing leader's serial reconcile loop. A restart or any
+// unavailable inventory resets the full grace period rather than assuming idle.
+func (s *RuntimeManagementService) reconcileIdleRuntimePools(ctx context.Context, now time.Time) error {
+	if s.scheduler.autoStopRepo == nil || now.Sub(s.lastIdlePoolScan) < 10*time.Second {
+		return nil
+	}
+	if !s.lastIdlePoolScan.IsZero() && now.Sub(s.lastIdlePoolScan) > 30*time.Second {
+		s.idlePodSince = nil
+	}
+	s.lastIdlePoolScan = now
+	settings, err := s.scheduler.autoStopRepo.Settings(ctx)
+	if err != nil {
+		s.idlePodSince = nil
+		return err
+	}
+	if !settings.Enabled {
+		s.idlePodSince = nil
+		return nil
+	}
+	// Keep observing other empty pools while one operation owns admission.
+	// A busy pool loses its own observation below; unrelated pools retain their
+	// continuously verified grace instead of starting over after each drain.
+	kube, err := s.scaleInKube()
+	if err != nil {
+		s.idlePodSince = nil
+		return err
+	}
+	inventory, err := s.scheduler.RuntimeDeploymentPods(ctx, "")
+	if err != nil {
+		s.idlePodSince = nil
+		return err
+	}
+	seen := map[string]time.Time{}
+	groups := map[string][]models.RuntimePod{}
+	for _, pod := range inventory {
+		if pod.Namespace != s.scheduler.runtimeNamespace || !runtimePodEligibleForOrdinaryScheduling(pod) {
+			continue
+		}
+		key := pod.Namespace + "/" + pod.DeploymentName
+		groups[key] = append(groups[key], pod)
+		uid := stringValue(pod.PodUID)
+		if runtimeScaleInFreshPod(pod, s.scheduler.heartbeatTimeout) != nil || idleRuntimePodEmpty(pod, now) != nil {
+			continue
+		}
+		bindings, err := s.scheduler.bindingRepo.ListByRuntimePodID(ctx, pod.ID)
+		if err != nil {
+			s.idlePodSince = nil
+			return err
+		}
+		if len(bindings) != 0 {
+			continue
+		}
+		since := s.idlePodSince[uid]
+		if since.IsZero() {
+			since = now
+		}
+		seen[uid] = since
+	}
+	s.idlePodSince = seen
+	keys := make([]string, 0, len(groups))
+	for key := range groups {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		pods := groups[key]
+		// Keep a live serving pool; instance sleep does not require Pod sleep.
+		if len(pods) <= 1 {
+			continue
+		}
+		if err := s.scaleInAdmission(ctx, s.sess, pods[0].RuntimeType); err != nil {
+			continue
+		}
+		selected := map[string]bool{}
+		sources := []RuntimePodScaleInSource{}
+		for _, pod := range pods {
+			uid := stringValue(pod.PodUID)
+			if since, ok := seen[uid]; ok && now.Sub(since) >= runtimeIdlePodGrace && len(selected) < min(10, len(pods)-1) {
+				selected[uid] = true
+				sources = append(sources, RuntimePodScaleInSource{ID: pod.ID, PodUID: uid})
+			}
+		}
+		if len(selected) == 0 {
+			continue
+		}
+		if err := s.idlePoolDemandAdmission(ctx, s.sess, sources); err != nil {
+			log.Printf("runtime idle pool %s removal postponed: %v", key, err)
+			continue
+		}
+		journal, err := s.idleRuntimeScaleInPlan(ctx, kube, pods, selected)
+		if err != nil {
+			log.Printf("runtime idle pool %s removal postponed: %v", key, err)
+			continue
+		} // Unsafe/unstable pools retain capacity; other pools can still qualify.
+		op, err := s.submitScaleInJournal(ctx, journal, nil)
+		if err != nil {
+			return err
+		}
+		log.Printf("runtime idle pool scale-in queued: pool=%s replicas=%d->%d operation=%s", key, journal.Plan.PreviousReplicas, journal.Plan.Replicas, op.ID)
+		return nil // Shared admission permits one durable management operation at a time.
+	}
+	return nil
+}
+
+func (s *RuntimeManagementService) idleRuntimeScaleInPlan(ctx context.Context, kube k8s.RuntimePodScaleInDeploymentService, pods []models.RuntimePod, selected map[string]bool) (*runtimePodScaleInJournal, error) {
+	if len(selected) == 0 || len(selected) >= len(pods) {
+		return nil, errRuntimeIdleMinimumCapacity
+	}
+	first := pods[0]
+	target := k8s.RuntimePodScaleTarget{RuntimeType: first.RuntimeType, Namespace: first.Namespace, DeploymentName: first.DeploymentName, PodName: first.PodName, PodUID: stringValue(first.PodUID), UpgradeID: first.UpgradeID, SourceDeployment: first.SourceDeployment, ImageRef: first.ImageRef, IdlePool: true}
+	if err := repository.CheckRuntimePodDeletionIntent(ctx, s.sess, target.Namespace, target.DeploymentName); err != nil {
+		return nil, err
+	}
+	snapshot, err := kube.InspectRuntimeScale(ctx, target)
+	if err != nil {
+		return nil, err
+	}
+	if snapshot.Option.Replicas-int32(len(selected)) < 1 {
+		return nil, errRuntimeIdleMinimumCapacity
+	}
+	native, err := kube.InspectRuntimeScaleInPods(ctx, target, snapshot)
+	if err != nil {
+		return nil, err
+	}
+	if len(native) != len(pods) {
+		return nil, fmt.Errorf("idle pool sibling registration is incomplete")
+	}
+	journal := &runtimePodScaleInJournal{AutomaticIdle: true, RuntimePodScaleInRequest: RuntimePodScaleInRequest{RuntimeType: first.RuntimeType, PodCount: len(selected)}, Target: target, Snapshot: snapshot, Phase: "pending"}
+	journal.Plan = RuntimePodScaleInPreflight{Allowed: true, RuntimeType: first.RuntimeType, Namespace: first.Namespace, DeploymentName: first.DeploymentName, DeploymentUID: snapshot.Option.DeploymentUID, PreviousReplicas: snapshot.Option.Replicas, Replicas: snapshot.Option.Replicas - int32(len(selected)), RemovedPods: len(selected), Items: []RuntimeSchedulingItem{}}
+	journal.Protection = k8s.RuntimePodScaleInProtection{Namespace: first.Namespace, DeploymentName: first.DeploymentName, DeploymentUID: snapshot.Option.DeploymentUID, PreviousReplicas: snapshot.Option.Replicas, Replicas: journal.Plan.Replicas}
+	byUID := map[string]models.RuntimePod{}
+	for _, pod := range pods {
+		byUID[stringValue(pod.PodUID)] = pod
+	}
+	for _, identity := range native {
+		pod, ok := byUID[identity.PodUID]
+		if !ok || pod.PodName != identity.PodName || runtimeScaleInFreshPod(pod, s.scheduler.heartbeatTimeout) != nil {
+			return nil, fmt.Errorf("idle pool sibling identity or readiness changed")
+		}
+		if selected[identity.PodUID] {
+			if err = idleRuntimePodEmpty(pod, time.Now().UTC()); err != nil {
+				return nil, err
+			}
+			journal.Plan.SourcePods = append(journal.Plan.SourcePods, RuntimePodScaleInSource{ID: pod.ID, PodName: pod.PodName, PodUID: identity.PodUID})
+			journal.Protection.SourcePods = append(journal.Protection.SourcePods, identity)
+		} else {
+			journal.Protection.RetainedPods = append(journal.Protection.RetainedPods, identity)
+		}
+	}
+	if len(journal.Plan.SourcePods) != len(selected) {
+		return nil, fmt.Errorf("idle source set changed")
+	}
+	return journal, nil
+}

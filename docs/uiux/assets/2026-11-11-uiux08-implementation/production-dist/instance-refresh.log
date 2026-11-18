@@ -1,0 +1,7 @@
+
+> frontend@0.0.0 test:instance-refresh
+> node scripts/instance-list-refresh.browser.mjs
+
+PASS sleep/start synchronization, background and empty filtered lists, focus, selection retention, no team polling
+PASS late response cannot overwrite current filters
+PASS request deduplication, retained rows during failure and reconnect recovery

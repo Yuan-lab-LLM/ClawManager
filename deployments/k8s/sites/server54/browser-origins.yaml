@@ -1,0 +1,143 @@
+# Required when CLAWMANAGER_BROWSER_PORT_RANGE=31600-31727 is enabled on server54.
+# Every permanent native/preview origin uses the existing app TLS listener.
+apiVersion: v1
+kind: Service
+metadata:
+  name: clawmanager-browser-origins
+  namespace: clawmanager-system
+  labels:
+    app: clawmanager-app
+    app.kubernetes.io/component: browser-origins
+spec:
+  type: NodePort
+  selector:
+    app: clawmanager-app
+  ports:
+    - {name: browser-31600, port: 31600, targetPort: 8444, nodePort: 31600, protocol: TCP}
+    - {name: browser-31601, port: 31601, targetPort: 8444, nodePort: 31601, protocol: TCP}
+    - {name: browser-31602, port: 31602, targetPort: 8444, nodePort: 31602, protocol: TCP}
+    - {name: browser-31603, port: 31603, targetPort: 8444, nodePort: 31603, protocol: TCP}
+    - {name: browser-31604, port: 31604, targetPort: 8444, nodePort: 31604, protocol: TCP}
+    - {name: browser-31605, port: 31605, targetPort: 8444, nodePort: 31605, protocol: TCP}
+    - {name: browser-31606, port: 31606, targetPort: 8444, nodePort: 31606, protocol: TCP}
+    - {name: browser-31607, port: 31607, targetPort: 8444, nodePort: 31607, protocol: TCP}
+    - {name: browser-31608, port: 31608, targetPort: 8444, nodePort: 31608, protocol: TCP}
+    - {name: browser-31609, port: 31609, targetPort: 8444, nodePort: 31609, protocol: TCP}
+    - {name: browser-31610, port: 31610, targetPort: 8444, nodePort: 31610, protocol: TCP}
+    - {name: browser-31611, port: 31611, targetPort: 8444, nodePort: 31611, protocol: TCP}
+    - {name: browser-31612, port: 31612, targetPort: 8444, nodePort: 31612, protocol: TCP}
+    - {name: browser-31613, port: 31613, targetPort: 8444, nodePort: 31613, protocol: TCP}
+    - {name: browser-31614, port: 31614, targetPort: 8444, nodePort: 31614, protocol: TCP}
+    - {name: browser-31615, port: 31615, targetPort: 8444, nodePort: 31615, protocol: TCP}
+    - {name: browser-31616, port: 31616, targetPort: 8444, nodePort: 31616, protocol: TCP}
+    - {name: browser-31617, port: 31617, targetPort: 8444, nodePort: 31617, protocol: TCP}
+    - {name: browser-31618, port: 31618, targetPort: 8444, nodePort: 31618, protocol: TCP}
+    - {name: browser-31619, port: 31619, targetPort: 8444, nodePort: 31619, protocol: TCP}
+    - {name: browser-31620, port: 31620, targetPort: 8444, nodePort: 31620, protocol: TCP}
+    - {name: browser-31621, port: 31621, targetPort: 8444, nodePort: 31621, protocol: TCP}
+    - {name: browser-31622, port: 31622, targetPort: 8444, nodePort: 31622, protocol: TCP}
+    - {name: browser-31623, port: 31623, targetPort: 8444, nodePort: 31623, protocol: TCP}
+    - {name: browser-31624, port: 31624, targetPort: 8444, nodePort: 31624, protocol: TCP}
+    - {name: browser-31625, port: 31625, targetPort: 8444, nodePort: 31625, protocol: TCP}
+    - {name: browser-31626, port: 31626, targetPort: 8444, nodePort: 31626, protocol: TCP}
+    - {name: browser-31627, port: 31627, targetPort: 8444, nodePort: 31627, protocol: TCP}
+    - {name: browser-31628, port: 31628, targetPort: 8444, nodePort: 31628, protocol: TCP}
+    - {name: browser-31629, port: 31629, targetPort: 8444, nodePort: 31629, protocol: TCP}
+    - {name: browser-31630, port: 31630, targetPort: 8444, nodePort: 31630, protocol: TCP}
+    - {name: browser-31631, port: 31631, targetPort: 8444, nodePort: 31631, protocol: TCP}
+    - {name: browser-31632, port: 31632, targetPort: 8444, nodePort: 31632, protocol: TCP}
+    - {name: browser-31633, port: 31633, targetPort: 8444, nodePort: 31633, protocol: TCP}
+    - {name: browser-31634, port: 31634, targetPort: 8444, nodePort: 31634, protocol: TCP}
+    - {name: browser-31635, port: 31635, targetPort: 8444, nodePort: 31635, protocol: TCP}
+    - {name: browser-31636, port: 31636, targetPort: 8444, nodePort: 31636, protocol: TCP}
+    - {name: browser-31637, port: 31637, targetPort: 8444, nodePort: 31637, protocol: TCP}
+    - {name: browser-31638, port: 31638, targetPort: 8444, nodePort: 31638, protocol: TCP}
+    - {name: browser-31639, port: 31639, targetPort: 8444, nodePort: 31639, protocol: TCP}
+    - {name: browser-31640, port: 31640, targetPort: 8444, nodePort: 31640, protocol: TCP}
+    - {name: browser-31641, port: 31641, targetPort: 8444, nodePort: 31641, protocol: TCP}
+    - {name: browser-31642, port: 31642, targetPort: 8444, nodePort: 31642, protocol: TCP}
+    - {name: browser-31643, port: 31643, targetPort: 8444, nodePort: 31643, protocol: TCP}
+    - {name: browser-31644, port: 31644, targetPort: 8444, nodePort: 31644, protocol: TCP}
+    - {name: browser-31645, port: 31645, targetPort: 8444, nodePort: 31645, protocol: TCP}
+    - {name: browser-31646, port: 31646, targetPort: 8444, nodePort: 31646, protocol: TCP}
+    - {name: browser-31647, port: 31647, targetPort: 8444, nodePort: 31647, protocol: TCP}
+    - {name: browser-31648, port: 31648, targetPort: 8444, nodePort: 31648, protocol: TCP}
+    - {name: browser-31649, port: 31649, targetPort: 8444, nodePort: 31649, protocol: TCP}
+    - {name: browser-31650, port: 31650, targetPort: 8444, nodePort: 31650, protocol: TCP}
+    - {name: browser-31651, port: 31651, targetPort: 8444, nodePort: 31651, protocol: TCP}
+    - {name: browser-31652, port: 31652, targetPort: 8444, nodePort: 31652, protocol: TCP}
+    - {name: browser-31653, port: 31653, targetPort: 8444, nodePort: 31653, protocol: TCP}
+    - {name: browser-31654, port: 31654, targetPort: 8444, nodePort: 31654, protocol: TCP}
+    - {name: browser-31655, port: 31655, targetPort: 8444, nodePort: 31655, protocol: TCP}
+    - {name: browser-31656, port: 31656, targetPort: 8444, nodePort: 31656, protocol: TCP}
+    - {name: browser-31657, port: 31657, targetPort: 8444, nodePort: 31657, protocol: TCP}
+    - {name: browser-31658, port: 31658, targetPort: 8444, nodePort: 31658, protocol: TCP}
+    - {name: browser-31659, port: 31659, targetPort: 8444, nodePort: 31659, protocol: TCP}
+    - {name: browser-31660, port: 31660, targetPort: 8444, nodePort: 31660, protocol: TCP}
+    - {name: browser-31661, port: 31661, targetPort: 8444, nodePort: 31661, protocol: TCP}
+    - {name: browser-31662, port: 31662, targetPort: 8444, nodePort: 31662, protocol: TCP}
+    - {name: browser-31663, port: 31663, targetPort: 8444, nodePort: 31663, protocol: TCP}
+    - {name: browser-31664, port: 31664, targetPort: 8444, nodePort: 31664, protocol: TCP}
+    - {name: browser-31665, port: 31665, targetPort: 8444, nodePort: 31665, protocol: TCP}
+    - {name: browser-31666, port: 31666, targetPort: 8444, nodePort: 31666, protocol: TCP}
+    - {name: browser-31667, port: 31667, targetPort: 8444, nodePort: 31667, protocol: TCP}
+    - {name: browser-31668, port: 31668, targetPort: 8444, nodePort: 31668, protocol: TCP}
+    - {name: browser-31669, port: 31669, targetPort: 8444, nodePort: 31669, protocol: TCP}
+    - {name: browser-31670, port: 31670, targetPort: 8444, nodePort: 31670, protocol: TCP}
+    - {name: browser-31671, port: 31671, targetPort: 8444, nodePort: 31671, protocol: TCP}
+    - {name: browser-31672, port: 31672, targetPort: 8444, nodePort: 31672, protocol: TCP}
+    - {name: browser-31673, port: 31673, targetPort: 8444, nodePort: 31673, protocol: TCP}
+    - {name: browser-31674, port: 31674, targetPort: 8444, nodePort: 31674, protocol: TCP}
+    - {name: browser-31675, port: 31675, targetPort: 8444, nodePort: 31675, protocol: TCP}
+    - {name: browser-31676, port: 31676, targetPort: 8444, nodePort: 31676, protocol: TCP}
+    - {name: browser-31677, port: 31677, targetPort: 8444, nodePort: 31677, protocol: TCP}
+    - {name: browser-31678, port: 31678, targetPort: 8444, nodePort: 31678, protocol: TCP}
+    - {name: browser-31679, port: 31679, targetPort: 8444, nodePort: 31679, protocol: TCP}
+    - {name: browser-31680, port: 31680, targetPort: 8444, nodePort: 31680, protocol: TCP}
+    - {name: browser-31681, port: 31681, targetPort: 8444, nodePort: 31681, protocol: TCP}
+    - {name: browser-31682, port: 31682, targetPort: 8444, nodePort: 31682, protocol: TCP}
+    - {name: browser-31683, port: 31683, targetPort: 8444, nodePort: 31683, protocol: TCP}
+    - {name: browser-31684, port: 31684, targetPort: 8444, nodePort: 31684, protocol: TCP}
+    - {name: browser-31685, port: 31685, targetPort: 8444, nodePort: 31685, protocol: TCP}
+    - {name: browser-31686, port: 31686, targetPort: 8444, nodePort: 31686, protocol: TCP}
+    - {name: browser-31687, port: 31687, targetPort: 8444, nodePort: 31687, protocol: TCP}
+    - {name: browser-31688, port: 31688, targetPort: 8444, nodePort: 31688, protocol: TCP}
+    - {name: browser-31689, port: 31689, targetPort: 8444, nodePort: 31689, protocol: TCP}
+    - {name: browser-31690, port: 31690, targetPort: 8444, nodePort: 31690, protocol: TCP}
+    - {name: browser-31691, port: 31691, targetPort: 8444, nodePort: 31691, protocol: TCP}
+    - {name: browser-31692, port: 31692, targetPort: 8444, nodePort: 31692, protocol: TCP}
+    - {name: browser-31693, port: 31693, targetPort: 8444, nodePort: 31693, protocol: TCP}
+    - {name: browser-31694, port: 31694, targetPort: 8444, nodePort: 31694, protocol: TCP}
+    - {name: browser-31695, port: 31695, targetPort: 8444, nodePort: 31695, protocol: TCP}
+    - {name: browser-31696, port: 31696, targetPort: 8444, nodePort: 31696, protocol: TCP}
+    - {name: browser-31697, port: 31697, targetPort: 8444, nodePort: 31697, protocol: TCP}
+    - {name: browser-31698, port: 31698, targetPort: 8444, nodePort: 31698, protocol: TCP}
+    - {name: browser-31699, port: 31699, targetPort: 8444, nodePort: 31699, protocol: TCP}
+    - {name: browser-31700, port: 31700, targetPort: 8444, nodePort: 31700, protocol: TCP}
+    - {name: browser-31701, port: 31701, targetPort: 8444, nodePort: 31701, protocol: TCP}
+    - {name: browser-31702, port: 31702, targetPort: 8444, nodePort: 31702, protocol: TCP}
+    - {name: browser-31703, port: 31703, targetPort: 8444, nodePort: 31703, protocol: TCP}
+    - {name: browser-31704, port: 31704, targetPort: 8444, nodePort: 31704, protocol: TCP}
+    - {name: browser-31705, port: 31705, targetPort: 8444, nodePort: 31705, protocol: TCP}
+    - {name: browser-31706, port: 31706, targetPort: 8444, nodePort: 31706, protocol: TCP}
+    - {name: browser-31707, port: 31707, targetPort: 8444, nodePort: 31707, protocol: TCP}
+    - {name: browser-31708, port: 31708, targetPort: 8444, nodePort: 31708, protocol: TCP}
+    - {name: browser-31709, port: 31709, targetPort: 8444, nodePort: 31709, protocol: TCP}
+    - {name: browser-31710, port: 31710, targetPort: 8444, nodePort: 31710, protocol: TCP}
+    - {name: browser-31711, port: 31711, targetPort: 8444, nodePort: 31711, protocol: TCP}
+    - {name: browser-31712, port: 31712, targetPort: 8444, nodePort: 31712, protocol: TCP}
+    - {name: browser-31713, port: 31713, targetPort: 8444, nodePort: 31713, protocol: TCP}
+    - {name: browser-31714, port: 31714, targetPort: 8444, nodePort: 31714, protocol: TCP}
+    - {name: browser-31715, port: 31715, targetPort: 8444, nodePort: 31715, protocol: TCP}
+    - {name: browser-31716, port: 31716, targetPort: 8444, nodePort: 31716, protocol: TCP}
+    - {name: browser-31717, port: 31717, targetPort: 8444, nodePort: 31717, protocol: TCP}
+    - {name: browser-31718, port: 31718, targetPort: 8444, nodePort: 31718, protocol: TCP}
+    - {name: browser-31719, port: 31719, targetPort: 8444, nodePort: 31719, protocol: TCP}
+    - {name: browser-31720, port: 31720, targetPort: 8444, nodePort: 31720, protocol: TCP}
+    - {name: browser-31721, port: 31721, targetPort: 8444, nodePort: 31721, protocol: TCP}
+    - {name: browser-31722, port: 31722, targetPort: 8444, nodePort: 31722, protocol: TCP}
+    - {name: browser-31723, port: 31723, targetPort: 8444, nodePort: 31723, protocol: TCP}
+    - {name: browser-31724, port: 31724, targetPort: 8444, nodePort: 31724, protocol: TCP}
+    - {name: browser-31725, port: 31725, targetPort: 8444, nodePort: 31725, protocol: TCP}
+    - {name: browser-31726, port: 31726, targetPort: 8444, nodePort: 31726, protocol: TCP}
+    - {name: browser-31727, port: 31727, targetPort: 8444, nodePort: 31727, protocol: TCP}

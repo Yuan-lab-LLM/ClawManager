@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path"
 	"reflect"
@@ -12,6 +13,95 @@ import (
 	"clawreef/internal/models"
 	"clawreef/internal/repository"
 )
+
+func TestCleanupV2GatewayBindingPreservesStrictUnconfirmedStop(t *testing.T) {
+	for _, strict := range []bool{false, true} {
+		t.Run(fmt.Sprintf("strict=%v", strict), func(t *testing.T) {
+			bindings := newFakeRuntimeBindingRepo()
+			bindings.bindings[209] = &models.InstanceRuntimeBinding{InstanceID: 209, RuntimePodID: 9, GatewayID: "gw-209-2", Generation: 2, State: RuntimeGatewayBindingRunning}
+			endpoint := "https://runtime"
+			agent := &strictStopRuntimeAgent{fakeRuntimeAgentClient: &fakeRuntimeAgentClient{deleteErr: ErrRuntimeAgentNotFound}, strict: strict}
+			service := &instanceService{instanceRepo: newV2LifecycleInstanceRepo(), bindingRepo: bindings, runtimePodRepo: &fakeRuntimePodRepo{pods: map[int64]*models.RuntimePod{9: {ID: 9, AgentEndpoint: &endpoint}}}, agentClient: agent}
+			err := service.cleanupV2GatewayBinding(context.Background(), &models.Instance{ID: 209})
+			if strict {
+				if err == nil || bindings.bindings[209] == nil || bindings.deleteAndReleaseCalls[209] != 0 {
+					t.Fatalf("strict unconfirmed stop released binding: %v", err)
+				}
+			} else if err != nil || bindings.bindings[209] != nil {
+				t.Fatalf("legacy absence semantics changed: %v", err)
+			}
+		})
+	}
+}
+
+type slotRecheckReleaseRepository struct {
+	*fakeRuntimeBindingRepo
+	releaseErr error
+}
+
+func (r *slotRecheckReleaseRepository) DeleteByInstanceIDAndReleaseSlot(ctx context.Context, instanceID int, podID int64) error {
+	if r.releaseErr != nil {
+		return r.releaseErr
+	}
+	return r.fakeRuntimeBindingRepo.DeleteByInstanceIDAndReleaseSlot(ctx, instanceID, podID)
+}
+
+func TestCleanupV2GatewayBindingRequestsOnlyReleasedSourceSlotAudit(t *testing.T) {
+	for _, scenario := range []string{"released", "stop-failed", "release-failed"} {
+		t.Run(scenario, func(t *testing.T) {
+			bindings := &slotRecheckReleaseRepository{fakeRuntimeBindingRepo: newFakeRuntimeBindingRepo()}
+			bindings.bindings[209] = &models.InstanceRuntimeBinding{InstanceID: 209, RuntimePodID: 9, GatewayID: "gw-209-2", Generation: 2}
+			endpoint := "https://runtime"
+			agent := &strictStopRuntimeAgent{fakeRuntimeAgentClient: &fakeRuntimeAgentClient{}, strict: true}
+			if scenario == "stop-failed" {
+				agent.deleteErr = errors.New("stop proof unavailable")
+			}
+			if scenario == "release-failed" {
+				bindings.releaseErr = errors.New("binding changed")
+			}
+			service := &instanceService{instanceRepo: newV2LifecycleInstanceRepo(), bindingRepo: bindings, runtimePodRepo: &fakeRuntimePodRepo{pods: map[int64]*models.RuntimePod{9: {ID: 9, AgentEndpoint: &endpoint}}}, agentClient: agent}
+			var requested []int64
+			service.SetRuntimeSlotRechecker(func(podID int64) {
+				if bindings.bindings[209] != nil {
+					t.Error("audit requested before binding release")
+				}
+				requested = append(requested, podID)
+				// A later binding belongs to another Pod and must stay intact.
+				bindings.bindings[209] = &models.InstanceRuntimeBinding{InstanceID: 209, RuntimePodID: 10, Generation: 3, GatewayID: "gw-209-3"}
+			})
+			err := service.cleanupV2GatewayBinding(context.Background(), &models.Instance{ID: 209})
+			if scenario == "released" {
+				if err != nil || len(requested) != 1 || requested[0] != 9 || bindings.bindings[209].RuntimePodID != 10 {
+					t.Fatalf("source audit changed operation/new binding: requests=%v err=%v", requested, err)
+				}
+			} else if err == nil || len(requested) != 0 {
+				t.Fatalf("failed cleanup requested audit: requests=%v err=%v", requested, err)
+			}
+		})
+	}
+}
+
+func TestCleanupV2GatewayBindingStrictMissingIdentityPreservesBinding(t *testing.T) {
+	for _, missing := range []string{"pod-repository", "endpoint", "gateway-id"} {
+		t.Run(missing, func(t *testing.T) {
+			bindings := newFakeRuntimeBindingRepo()
+			bindings.bindings[209] = &models.InstanceRuntimeBinding{InstanceID: 209, RuntimePodID: 9, GatewayID: "gw-209-2"}
+			endpoint := "https://runtime"
+			service := &instanceService{instanceRepo: newV2LifecycleInstanceRepo(), bindingRepo: bindings, runtimePodRepo: &fakeRuntimePodRepo{pods: map[int64]*models.RuntimePod{9: {ID: 9, AgentEndpoint: &endpoint}}}, agentClient: &strictStopRuntimeAgent{fakeRuntimeAgentClient: &fakeRuntimeAgentClient{}, strict: true}}
+			switch missing {
+			case "pod-repository":
+				service.runtimePodRepo = nil
+			case "endpoint":
+				endpoint = ""
+			case "gateway-id":
+				bindings.bindings[209].GatewayID = ""
+			}
+			if err := service.cleanupV2GatewayBinding(context.Background(), &models.Instance{ID: 209}); err == nil || bindings.bindings[209] == nil || bindings.deleteAndReleaseCalls[209] != 0 {
+				t.Fatalf("missing %s released strict binding: %v", missing, err)
+			}
+		})
+	}
+}
 
 func TestValidateCreateInstanceDiskGBUsesModeSpecificMinimum(t *testing.T) {
 	if err := validateCreateInstanceDiskGB(CreateInstanceRequest{DiskGB: DefaultLiteDiskGB}, InstanceModeLite); err != nil {
@@ -515,7 +605,7 @@ func TestInstanceServiceStartV2CleansFailedBindingBeforeNextGeneration(t *testin
 }
 
 func TestInstanceServiceStartV2QuarantinesReportedCorruptLegacyTaskDatabase(t *testing.T) {
-	workspacePath := t.TempDir()
+	workspacePath := canonicalCompatibilityTestDir(t)
 	legacyTasksRoot := path.Join(workspacePath, "home", ".openclaw", "tasks")
 	if err := os.MkdirAll(legacyTasksRoot, 0o750); err != nil {
 		t.Fatal(err)
@@ -794,7 +884,7 @@ func TestInstanceServiceRestartWithEnvironmentMergesDesiredState(t *testing.T) {
 		RuntimeGeneration:        3,
 		EnvironmentOverridesJSON: existing,
 	}
-	service := &instanceService{instanceRepo: instanceRepo}
+	service := &instanceService{instanceRepo: instanceRepo, bindingRepo: newFakeRuntimeBindingRepo(), agentClient: &fakeRuntimeAgentClient{}}
 
 	configureLifecycleModels(t, service)
 	err = service.RestartWithEnvironment(191, map[string]string{
@@ -927,7 +1017,7 @@ func TestInstanceServiceRestartWithEnvironmentRemovesDesiredState(t *testing.T) 
 		RuntimeGeneration:        5,
 		EnvironmentOverridesJSON: existing,
 	}
-	service := &instanceService{instanceRepo: instanceRepo}
+	service := &instanceService{instanceRepo: instanceRepo, bindingRepo: newFakeRuntimeBindingRepo(), agentClient: &fakeRuntimeAgentClient{}}
 
 	configureLifecycleModels(t, service)
 	err = service.RestartWithEnvironment(
@@ -1195,6 +1285,8 @@ func TestInstanceServiceResumePendingDeletionsOnlyRetriesExplicitDeletingRows(t 
 	}
 	service := &instanceService{
 		instanceRepo:      instanceRepo,
+		bindingRepo:       newFakeRuntimeBindingRepo(),
+		agentClient:       &fakeRuntimeAgentClient{},
 		deletionsInFlight: map[int]struct{}{},
 	}
 

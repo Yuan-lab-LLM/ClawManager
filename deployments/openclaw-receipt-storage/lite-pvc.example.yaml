@@ -1,0 +1,19 @@
+# Example only: change namespace, pool name, and StorageClass before use.
+# One dedicated CSI/RWOP filesystem PVC per single-Pod experimental Lite pool.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: openclaw-runtime-receipts
+  namespace: clawmanager-system
+  labels:
+    clawmanager.io/storage-purpose: task-receipts
+  annotations:
+    clawmanager.io/runtime-deployment: openclaw-runtime
+spec:
+  accessModes:
+    - ReadWriteOncePod
+  volumeMode: Filesystem
+  storageClassName: REPLACE_WITH_RWOP_CSI_STORAGE_CLASS
+  resources:
+    requests:
+      storage: 1Gi

@@ -1,0 +1,29 @@
+{
+  "release": "uiux2-admin-conversation-20261116-975f7fef4e95",
+  "base_commit": "05b0162ca0d25913aac2be4ea023cae1cd370c6b",
+  "source_identity": "975f7fef4e95197320235a9c12f4276712daa8ac723b668128f3ab35405da572",
+  "source_archive_sha256": "5a73907ca7412a8aec46ca8ed653dcce1f6b0052f446bb8cb102e022cb65ff2b",
+  "built_on": "10.130.81.54",
+  "built_at": "2026-11-16T13:55:41.473119+00:00",
+  "image": "clawmanager.local/clawmanager@sha256:18c6467429512ea242518209e48ac44ef36d5985e5aa75c2c0a6a05358baca44",
+  "base_image": "clawmanager.local/clawmanager@sha256:024ce2d96c7e36b3b0eaa933ada47047abb2407bc1e60c9726664b204fc44a24",
+  "accepted_digests": [
+    "sha256:18c6467429512ea242518209e48ac44ef36d5985e5aa75c2c0a6a05358baca44"
+  ],
+  "frontend_only": false,
+  "backend_version": "v2026.11.16-admin-dialogue",
+  "backend_commit": "05b0162ca0d25913aac2be4ea023cae1cd370c6b-dirty",
+  "backend_sha256": "78c0a201ab56b7564be86d06e2f8cda62747a4bba3f53932d81c7acc426bd1b8",
+  "native_config_preserved": true,
+  "source_files_verified": 2121,
+  "stable_paths": [
+    "/usr/local/bin/clawreef-northbound-gateway",
+    "/usr/local/bin/system-backup-controller",
+    "/usr/local/bin/system-backup-artifact",
+    "/app/start.sh",
+    "/etc/nginx/nginx.conf",
+    "/usr/local/bin/runtime-eviction-helper",
+    "/usr/local/bin/cm-runtime-template-hash-v1.35"
+  ],
+  "index_sha256": "b2db1a56e96df047e367353582d31b9c233b6ce74080da32b5410744fba0d53b"
+}

@@ -72,8 +72,8 @@ const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({ open, onClose
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(23,18,18,0.34)] px-4 backdrop-blur-sm">
       <div className="app-panel-warm w-full max-w-md p-6">
         <div className="flex items-center justify-between">
-          <h3 className="text-lg font-semibold text-[#171212]">{t('auth.changePassword')}</h3>
-          <button onClick={handleClose} className="text-[#8f8681] hover:text-[#171212]">
+          <h3 className="text-lg font-semibold text-[var(--cm-ink)]">{t('auth.changePassword')}</h3>
+          <button onClick={handleClose} className="text-[var(--cm-muted)] hover:text-[var(--cm-ink)]">
             ×
           </button>
         </div>

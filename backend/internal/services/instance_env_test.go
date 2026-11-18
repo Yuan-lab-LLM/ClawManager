@@ -16,6 +16,36 @@ func TestValidateManagedRuntimeEnvironmentOverridesRejectsProtectedKeys(t *testi
 	}
 }
 
+func TestModelReferenceProtocolCannotBeDisabledByUserOverride(t *testing.T) {
+	t.Setenv("CLAWMANAGER_LLM_GOVERNANCE_STRICT", "true")
+	if err := validateManagedRuntimeEnvironmentOverrides("hermes", map[string]string{"CLAWMANAGER_MODEL_REFERENCE_PROTOCOL": "0"}); err == nil {
+		t.Fatal("user override disabled the managed model reference protocol")
+	}
+}
+
+func TestOpenClawTaskProtocolCannotBeOverriddenByUser(t *testing.T) {
+	t.Setenv("CLAWMANAGER_LLM_GOVERNANCE_STRICT", "true")
+	for _, value := range []string{"0", "1"} {
+		if err := validateManagedRuntimeEnvironmentOverrides("openclaw", map[string]string{"CLAWMANAGER_OPENCLAW_TASK_PROTOCOL": value}); err == nil {
+			t.Fatal("user override changed the managed task protocol")
+		}
+	}
+}
+
+func TestTaskReceiptDirectoryCannotBeOverriddenByUser(t *testing.T) {
+	t.Setenv("CLAWMANAGER_LLM_GOVERNANCE_STRICT", "true")
+	if err := validateManagedRuntimeEnvironmentOverrides("openclaw", map[string]string{"CLAWMANAGER_TASK_RECEIPT_DIR": "/tmp/user"}); err == nil {
+		t.Fatal("user override changed the receipt directory")
+	}
+}
+
+func TestTaskReceiptRootCannotBeOverriddenByUser(t *testing.T) {
+	t.Setenv("CLAWMANAGER_LLM_GOVERNANCE_STRICT", "true")
+	if err := validateManagedRuntimeEnvironmentOverrides("openclaw", map[string]string{"CLAWMANAGER_TASK_RECEIPT_ROOT": "/tmp/user"}); err == nil {
+		t.Fatal("user override changed the pool receipt storage root")
+	}
+}
+
 func TestApplyProtectedManagedRuntimeEnvRestoresGatewayValues(t *testing.T) {
 	target := map[string]string{
 		"OPENAI_BASE_URL": "https://api.openai.com/v1",

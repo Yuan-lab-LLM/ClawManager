@@ -16,10 +16,13 @@ import (
 
 // Store is Core-only. The northbound Gateway must not receive this dependency.
 type Store struct {
-	Session      db.Session
-	HistoryRoot  string
-	Availability func() bool
-	perf         performanceState
+	IsolatedReader    func(context.Context, []byte) ([]byte, bool, error)
+	Session           db.Session
+	HistoryRoot       string
+	Availability      func() bool
+	HistoryReader     func(context.Context, string, string, Identity, bool, ...time.Time) ([]NativeQuestion, error)
+	FingerprintReader func(context.Context, string, string, Identity) (string, error)
+	perf              performanceState
 }
 
 func (s *Store) Available() bool { return s != nil && (s.Availability == nil || s.Availability()) }
@@ -150,6 +153,9 @@ func (s *Store) Apply(ctx context.Context, identity Identity, fact Fact) (bool, 
 	}
 	applied := false
 	err := s.Session.TxContext(ctx, func(tx db.Session) error {
+		if err := validateScanGeneration(ctx, tx, identity); err != nil {
+			return err
+		}
 		// A profile lock serializes owner aggregate updates across App replicas.
 		_, err := tx.SQL().ExecContext(ctx, `INSERT INTO northbound_owner_records
    (record_type,record_key,scope_id,owner,owner_normalized,status,prompt_tokens,completion_tokens,total_tokens,invocation_count,question_count,session_count)

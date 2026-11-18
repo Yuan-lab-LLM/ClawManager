@@ -6,6 +6,7 @@ import { LanguageDescription } from "@codemirror/language";
 import { keymap } from "@codemirror/view";
 import { load as loadYAML } from "js-yaml";
 import { Copy, Download, FilePenLine, Save, TextCursorInput, X } from "lucide-react";
+import { beforePageRefresh } from './PageVersionNotice';
 import type { WorkspaceFileOperations } from "./WorkspaceFileManager";
 
 export interface WorkspaceText { text: string; version: string }
@@ -39,6 +40,11 @@ export function WorkspaceTextEditor({ instanceId, initialPath, service, onClose,
   const wrapping=useRef(new Compartment());
   const readonly=useRef(new Compartment());
   const dirty=doc!==null&&text!==doc.text;
+  useEffect(()=>{
+    const guard=(event:Event)=>{if(dirty||busy)event.preventDefault()};
+    window.addEventListener(beforePageRefresh,guard);
+    return()=>window.removeEventListener(beforePageRefresh,guard);
+  },[dirty,busy]);
   const close=()=>{if(!operating.current&&(!dirty||window.confirm("文件尚未保存，确定放弃修改并关闭？")))onClose()};
   const closeRef=useRef(close);useLayoutEffect(()=>{closeRef.current=close});
 

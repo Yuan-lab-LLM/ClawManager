@@ -75,6 +75,7 @@ func TestInterruptedDispatchSettlesPriorAttempts(t *testing.T) {
 					items := routingModels()
 					for i := range items {
 						items[i].ModelGroup = "basic"
+						items[i].DeploymentPriority = i
 						items[i].BaseURL = upstream.URL
 						items[i].ProviderModelName = items[i].DisplayName
 					}
@@ -87,7 +88,7 @@ func TestInterruptedDispatchSettlesPriorAttempts(t *testing.T) {
 					gateway.costRecordService = costs
 					budget := &dispatchBudgetStore{}
 					req := routingRequest("hello")
-					req.Model, req.Stream = "cheap", stream
+					req.Model, req.Stream = "basic", stream
 					req.BudgetController = services.NewGatewayBudgetController(budget, 1)
 					finalizations, tokens := 0, 0
 					req.UsageFinalizer = func(n int) error { finalizations++; tokens = n; return nil }

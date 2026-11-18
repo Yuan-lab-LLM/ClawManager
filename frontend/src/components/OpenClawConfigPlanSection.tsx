@@ -216,7 +216,7 @@ const OpenClawConfigPlanSection: React.FC<OpenClawConfigPlanSectionProps> = ({
       {!loading && mode === "manual" && (
         <div className="mt-5 space-y-5">
           <div>
-            <div className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-[#b46c50]">
+            <div className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-[var(--cm-muted)]">
               {t("openClawInjectionSection.channel")}
             </div>
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
@@ -259,7 +259,7 @@ const OpenClawConfigPlanSection: React.FC<OpenClawConfigPlanSectionProps> = ({
           </div>
 
           <div>
-            <div className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-[#b46c50]">
+            <div className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-[var(--cm-muted)]">
               {t("openClawInjectionSection.scheduledTask")}
             </div>
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2">

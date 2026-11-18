@@ -1,7 +1,9 @@
+import "./instance-workspace.css";
 import { Maximize2, MessageSquare, Minimize2, Monitor, PanelRightClose, PanelRightOpen, RefreshCw, ShieldAlert } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useI18n } from "../contexts/I18nContext";
 import { useInstanceDesktopAccess } from "../hooks/useInstanceDesktopAccess";
+import { attachNativePreviewBridge } from "../lib/nativePreviewBridge";
 import { useRuntimeCertificateTrust } from "../hooks/useRuntimeCertificateTrust";
 import { prepareOpenClawControlUIStorage } from "../lib/openclawControlStorage";
 import { browserWorkerAccessIsFresh, browserWorkerRenewalDelay, refreshBrowserWorkerAccess } from "../lib/browserWorkerAccess";
@@ -13,11 +15,17 @@ import { HermesLiteServiceFrame } from "./HermesLiteServiceFrame";
 export interface InstanceServiceFrameProps {
   instanceId: number;
   instanceName: string;
+  headerTitle?: ReactNode;
+  headerActions?: ReactNode;
+  headerEndActions?: ReactNode;
+  showModelHint?: boolean;
   instanceType?: string;
   instanceMode: string;
   availability: InstanceAvailability;
+  unavailableContent?: ReactNode;
   reloadToken?: number;
-  openCodeInitialDirectory?: string;
+  runtimeGeneration?: number;
+  onOpenWorkbenchPreview?: (address: string, isCurrent: () => boolean) => void;
   workspaceVisible?: boolean;
   onWorkspaceVisibilityChange?: (visible: boolean) => void;
 }
@@ -45,42 +53,6 @@ interface PreparedFrame {
   src: string;
 }
 
-function encodeOpenCodeDirectory(directory: string) {
-  const bytes = new TextEncoder().encode(directory);
-  let binary = "";
-  for (const byte of bytes) {
-    binary += String.fromCharCode(byte);
-  }
-  return window
-    .btoa(binary)
-    .replaceAll("+", "-")
-    .replaceAll("/", "_")
-    .replace(/=+$/u, "");
-}
-
-function openCodeNewSessionUrl(
-  entryUrl: string,
-  directory: string | undefined,
-) {
-  const normalizedDirectory = directory?.trim().replaceAll("\\", "/");
-  if (!normalizedDirectory?.startsWith("/")) {
-    return entryUrl;
-  }
-
-  try {
-    const parsed = new URL(entryUrl, window.location.href);
-    const directorySlug = encodeOpenCodeDirectory(normalizedDirectory);
-    const proxyOrOriginBase = parsed.pathname.endsWith("/")
-      ? parsed.pathname
-      : `${parsed.pathname}/`;
-    parsed.pathname = `${proxyOrOriginBase}${directorySlug}/session`;
-    parsed.hash = "";
-    return parsed.toString();
-  } catch {
-    return entryUrl;
-  }
-}
-
 export function InstanceServiceFrame({
   instanceMode,
   ...props
@@ -95,11 +67,17 @@ export function InstanceServiceFrame({
 function EmbeddedInstanceServiceFrame({
   instanceId,
   instanceName,
+  headerTitle,
+  headerActions,
+  headerEndActions,
+  showModelHint = true,
   instanceType,
   instanceMode,
   availability,
+  unavailableContent,
   reloadToken = 0,
-  openCodeInitialDirectory,
+  runtimeGeneration = 0,
+  onOpenWorkbenchPreview,
   workspaceVisible,
   onWorkspaceVisibilityChange,
 }: InstanceServiceFrameProps) {
@@ -124,6 +102,9 @@ function EmbeddedInstanceServiceFrame({
     loading,
     error,
     reconnecting,
+    frameRef,
+    frameRevision,
+    frameStatus,
     refreshAccess,
     handleFrameLoad,
     handleFrameError,
@@ -131,6 +112,7 @@ function EmbeddedInstanceServiceFrame({
     instanceId,
     isRunning: isAvailable,
     reloadOnAccessRefresh: normalizedType === "deepseek-harness",
+    monitorFrame: normalizedType === "openclaw",
     resolveEmbedUrl,
     failedMessage: "Failed to open instance service",
   });
@@ -140,6 +122,7 @@ function EmbeddedInstanceServiceFrame({
     frameUrl: embedUrl,
     checkingCertificate,
     certificateConfirmationRequired,
+    certificateOrigin,
     confirmCertificate,
   } = useRuntimeCertificateTrust(
     accessEmbedUrl,
@@ -250,10 +233,6 @@ function EmbeddedInstanceServiceFrame({
     let src = embedUrl;
     if (normalizedType === "openclaw") {
       src = prepareOpenClawControlUIStorage(instanceId, embedUrl);
-    } else if (normalizedType === "opencode") {
-      // The root route is OpenCode's global landing page. Its directory-scoped
-      // /session route selects the managed project and opens a blank chat.
-      src = openCodeNewSessionUrl(embedUrl, openCodeInitialDirectory);
     }
     queueMicrotask(() => {
       if (!cancelled) {
@@ -263,7 +242,7 @@ function EmbeddedInstanceServiceFrame({
     return () => {
       cancelled = true;
     };
-  }, [embedUrl, instanceId, normalizedType, openCodeInitialDirectory]);
+  }, [embedUrl, instanceId, normalizedType]);
 
   useEffect(() => {
     const handleChange = () => {
@@ -278,16 +257,22 @@ function EmbeddedInstanceServiceFrame({
       ? preparedFrame.src
       : null;
 
+  useEffect(() => {
+    const frame = frameRef.current;
+    if (!frame || !frameSrc || !onOpenWorkbenchPreview) return;
+    return attachNativePreviewBridge(frame, frameSrc, onOpenWorkbenchPreview);
+  }, [frameRef, frameSrc, instanceId, runtimeGeneration, reloadToken, frameRevision, normalizedType, onOpenWorkbenchPreview]);
+
   const renderFrameShell = (content: ReactNode) => (
     <section
       ref={frameContainerRef}
       className="cm-surface relative isolate flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-white max-xl:min-h-[360px]"
       style={isFullscreen ? { height: "100vh", width: "100vw", borderRadius: 0 } : undefined}
     >
-      <div className="relative z-20 flex h-12 shrink-0 items-center justify-between border-b border-slate-200 bg-white px-3">
-        <div className="flex min-w-0 items-center gap-3">
-          <div className="min-w-0 truncate text-sm font-medium text-slate-950">
-            {instanceName}
+      <div className="cm-instance-frame-header relative z-20 flex h-12 shrink-0 items-center justify-between border-b border-slate-200 bg-white px-3">
+        <div className="flex min-w-0 flex-1 items-center gap-3">
+          <div className="min-w-0 flex-1 text-sm font-medium text-slate-950">
+            {headerTitle ?? <span className="block truncate">{instanceName}</span>}
           </div>
           {browserWorker?.enabled && (
             <div className="flex shrink-0 rounded-md bg-slate-100 p-0.5" role="tablist">
@@ -317,6 +302,7 @@ function EmbeddedInstanceServiceFrame({
           )}
         </div>
         <div className="relative z-20 flex shrink-0 items-center gap-2">
+          {headerActions}
           {typeof workspaceVisible === "boolean" && onWorkspaceVisibilityChange && (
             <button
               type="button"
@@ -328,7 +314,7 @@ function EmbeddedInstanceServiceFrame({
               {workspaceVisible ? <PanelRightClose className="h-4 w-4" /> : <PanelRightOpen className="h-4 w-4" />}
             </button>
           )}
-          {["opencode", "openclaw", "hermes", "deepseek-harness"].includes(normalizedType) && (
+          {showModelHint && ["opencode", "openclaw", "hermes", "deepseek-harness"].includes(normalizedType) && (
             <InstanceModelHint instanceId={instanceId} active={isAvailable} />
           )}
           {isAvailable && (
@@ -342,6 +328,7 @@ function EmbeddedInstanceServiceFrame({
               <RefreshCw className={`h-4 w-4 ${reconnecting ? "animate-spin" : ""}`} />
             </button>
           )}
+          {headerEndActions}
           <button
             type="button"
             onClick={handleFullscreen}
@@ -367,7 +354,7 @@ function EmbeddedInstanceServiceFrame({
 
   if (!isAvailable) {
     return renderFrameShell(
-      <div className="flex min-h-0 flex-1 items-center justify-center text-sm text-slate-600">
+      unavailableContent ?? <div className="flex min-h-0 flex-1 items-center justify-center text-sm text-slate-600">
         Unavailable
       </div>,
     );
@@ -422,8 +409,8 @@ function EmbeddedInstanceServiceFrame({
             <p className="text-sm font-semibold text-slate-900">
               {t("instances.certificateConfirmationRequired")}
             </p>
-            <p className="mt-1 max-w-lg text-sm leading-6 text-slate-600">
-              {t("instances.certificateConfirmationDescription")}
+            <p className="mt-1 max-w-lg break-words text-sm leading-6 text-slate-600">
+              {t("instances.certificateConfirmationDescription", { origin: certificateOrigin })}
             </p>
           </div>
           <button
@@ -448,15 +435,35 @@ function EmbeddedInstanceServiceFrame({
   }
 
   return renderFrameShell(
+    <div className="relative flex min-h-0 flex-1 flex-col">
       <iframe
-        key={`frame-${instanceId}-${reloadToken}`}
+        ref={frameRef}
+        key={`frame-${instanceId}-${runtimeGeneration}-${reloadToken}-${frameRevision}`}
         title={`${instanceName} service`}
         src={frameSrc}
-        className="min-h-0 w-full flex-1 border-0 bg-white"
+        className="cm-instance-native-content min-h-0 w-full flex-1 border-0 bg-white"
+        data-ready={frameStatus === "ready"}
         scrolling="no"
         allow="clipboard-read; clipboard-write; fullscreen; autoplay"
         onLoad={(event) => handleFrameLoad(event.currentTarget)}
         onError={handleFrameError}
-      />,
+      />
+      <div
+          className="cm-instance-frame-loading absolute inset-0 flex flex-col items-center justify-center gap-3 bg-white p-6 text-center text-sm text-slate-600"
+          data-ready={frameStatus === "ready"}
+          aria-hidden={frameStatus === "ready"}
+          inert={frameStatus === "ready"}
+          role={frameStatus === "ready" ? undefined : frameStatus === "error" ? "alert" : "status"}
+          aria-live="polite"
+        >
+          {frameStatus === "recovering" && <RefreshCw className="h-5 w-5 animate-spin" aria-hidden="true" />}
+          <p>{t(frameStatus === "error" ? "common.connectionFailed" : "common.reconnecting")}</p>
+          {frameStatus === "error" && (
+            <button type="button" disabled={loading || reconnecting} onClick={handleRefresh} className="app-button-secondary disabled:opacity-50">
+              {t("common.retry")}
+            </button>
+          )}
+        </div>
+    </div>,
   );
 }

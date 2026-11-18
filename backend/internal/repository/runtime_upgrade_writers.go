@@ -34,5 +34,5 @@ func requireNoPlatformWriters(ctx context.Context, sess db.Session, id int) erro
 	if count != 0 {
 		return models.ErrRuntimeUpgradeWritersActive
 	}
-	return nil
+	return requireNoInstanceTeamWorkspaceWrites(ctx, sess, id)
 }

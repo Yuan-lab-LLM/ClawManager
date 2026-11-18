@@ -2,8 +2,12 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"log"
+	"net"
 	"net/http"
+	"net/netip"
+	"net/url"
 	"os"
 	"os/signal"
 	"strings"
@@ -12,6 +16,8 @@ import (
 	"time"
 
 	"clawreef/internal/aigateway"
+	"clawreef/internal/backupgate"
+	"clawreef/internal/browserorigin"
 	"clawreef/internal/buildinfo"
 	"clawreef/internal/config"
 	"clawreef/internal/db"
@@ -21,15 +27,40 @@ import (
 	"clawreef/internal/northbound"
 	"clawreef/internal/ownerrecords"
 	"clawreef/internal/repository"
+	"clawreef/internal/runtimeauth"
+	"clawreef/internal/runtimeinventory"
 	"clawreef/internal/services"
 	"clawreef/internal/services/k8s"
 	"clawreef/internal/services/leader"
+	"clawreef/internal/systembackup"
 	"clawreef/internal/teamtemplate"
+	"clawreef/internal/workbench"
+	"clawreef/internal/workspacedashboard"
 
 	"github.com/gin-gonic/gin"
+	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/metadata"
+	"k8s.io/client-go/rest"
 )
 
 func main() {
+	// Read-only analytics helpers must exit before starting any services.
+	if len(os.Args) == 2 && os.Args[1] == ownerrecords.HistoryReaderArgument {
+		os.Exit(ownerrecords.RunHistoryReaderCLI(os.Stdin, os.Stdout))
+	}
+	if handled, err := services.RunTeamWorkspaceHelper(os.Args[1:], os.Stdin, os.Stdout); handled {
+		if err != nil {
+			os.Exit(1)
+		}
+		return
+	}
+	if handled, err := services.RunWorkspaceIOHelper(os.Args[1:], os.Stdin, os.Stdout); handled {
+		if err != nil {
+			os.Exit(1)
+		}
+		return
+	}
 	build := buildinfo.Current()
 	log.Printf("Starting ClawManager version=%s commit=%s build_time=%s", build.Version, build.Commit, build.BuildTime)
 
@@ -84,6 +115,7 @@ func main() {
 	rolloutRepo := repository.NewRuntimeRolloutRepository(database)
 	workspaceFileAuditRepo := repository.NewWorkspaceFileAuditRepository(database)
 	teamRepo := repository.NewTeamRepository(database)
+	repository.ConfigureTeamNFSWriteFences(teamRepo, cfg.Runtime.SandboxProfile)
 	customTeamTemplateRepo := repository.NewCustomTeamTemplateRepository(database)
 	skillRepo := repository.NewSkillRepository(database)
 	securityScanRepo := repository.NewSecurityScanRepository(database)
@@ -116,7 +148,7 @@ func main() {
 	authService := services.NewAuthService(userRepo, cfg.JWT, enterpriseAuthManager, services.WithEnterpriseAuthPolicy(cfg.Auth.Enterprise), services.WithQuotaRepository(quotaRepo))
 	quotaService := services.NewQuotaService(quotaRepo)
 	userService := services.NewUserService(userRepo, quotaRepo)
-	systemImageSettingService := services.NewSystemImageSettingService(systemImageSettingRepo)
+	systemImageSettingService := services.NewSystemImageSettingService(systemImageSettingRepo, services.WithCommittedRuntimeImages(database))
 	llmModelService := services.NewLLMModelService(llmModelRepo)
 	modelInvocationService := services.NewModelInvocationService(modelInvocationRepo)
 	auditEventService := services.NewAuditEventService(auditEventRepo)
@@ -140,8 +172,151 @@ func main() {
 	services.SetRuntimeImageSettingsProvider(systemImageSettingService)
 	services.SetOpenClawTransferRuntimeRepositories(instanceRepo, bindingRepo, runtimePodRepo)
 	runtimeAgentClient := services.NewRuntimeAgentClient(cfg.Runtime.AgentControlToken)
+	legacyRuntimeAgentClient := runtimeAgentClient
+	if cfg.Runtime.LegacyAgentControlToken != "" {
+		legacyRuntimeAgentClient = services.NewRuntimeAgentClient(cfg.Runtime.LegacyAgentControlToken)
+	}
+	var runtimeSecurity *services.RuntimeSecurityAuthority
+	// The zero inventory fails closed for protected assignments when their
+	// cluster ranges have not been configured, while legacy runtimes still work.
+	runtimeInventory := &runtimeinventory.Inventory{}
+	contextInstances, ok := instanceRepo.(interface {
+		GetByIDContext(context.Context, int) (*models.Instance, error)
+	})
+	if !ok {
+		log.Fatal("Runtime authentication requires contextual instance lookup")
+	}
+	protectedRuntimeInstance := func(ctx context.Context, id int) (bool, error) {
+		instance, err := contextInstances.GetByIDContext(ctx, id)
+		if err != nil {
+			return false, err
+		}
+		if ctx.Err() != nil {
+			return false, ctx.Err()
+		}
+		if instance == nil {
+			return false, services.ErrInstanceGatewayUnavailable
+		}
+		return instance.RuntimeSecurityProfile != "", nil
+	}
+	if cfg.Runtime.ContainerSlots > 0 {
+		slotKubeClient := k8s.GetClient()
+		if slotKubeClient == nil || slotKubeClient.Clientset == nil {
+			log.Fatal("Lite container slots require Kubernetes connectivity")
+		}
+		bootstrapCtx, bootstrapCancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		committedImages, bootstrapErr := services.LoadCommittedRuntimeImages(bootstrapCtx, database)
+		if bootstrapErr == nil {
+			cfg.Runtime = committedImages.Apply(cfg.Runtime)
+			bootstrapErr = k8s.EnsureRuntimeSlotPools(bootstrapCtx, slotKubeClient.Clientset, cfg.Runtime, committedImages.BootstrapSources...)
+		}
+		bootstrapCancel()
+		if bootstrapErr != nil {
+			log.Fatalf("Failed to initialize Lite container slots: %v", bootstrapErr)
+		}
+		slotNamespace := strings.TrimSpace(cfg.Runtime.Namespace)
+		if slotNamespace == "" {
+			slotNamespace = "clawmanager-system"
+		}
+		trustCtx, trustCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		slotTrust, trustErr := k8s.RuntimeSlotTLSConfig(trustCtx, slotKubeClient.Clientset, slotNamespace)
+		trustCancel()
+		if trustErr != nil {
+			log.Fatalf("Failed to trust Lite container slot management TLS: %v", trustErr)
+		}
+		runtimeAgentClient = services.NewSlotRuntimeAgentClientWithHTTPClient(cfg.Runtime.AgentControlToken, slotKubeClient.Clientset, slotNamespace, &http.Client{Transport: &http.Transport{TLSClientConfig: slotTrust}, Timeout: 30 * time.Second})
+		if err := services.ConfigureSlotLegacyCoexistence(runtimeAgentClient, legacyRuntimeAgentClient, protectedRuntimeInstance); err != nil {
+			log.Fatal("Failed to configure existing runtime compatibility")
+		}
+		workspaceFences := repository.NewWorkspaceWriteFenceRepository(database)
+		if err := services.ConfigureSlotWorkspaceWriteFence(runtimeAgentClient, func(ctx context.Context, id runtimeauth.Identity) error {
+			return workspaceFences.Fence(ctx, id.InstanceID, id.UserID, id.Generation, id.PodUID)
+		}); err != nil {
+			log.Fatal("Failed to configure Runtime management write fencing")
+		}
+		if err := services.ConfigureSlotWorkspaceWriteActivation(runtimeAgentClient, func(ctx context.Context, id runtimeauth.Identity) error {
+			return workspaceFences.Activate(ctx, id.InstanceID, id.UserID, id.Generation, id.PodUID)
+		}); err != nil {
+			log.Fatal("Failed to configure Runtime management write activation")
+		}
+		securityCtx, securityCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		signingKey, securityErr := k8s.RuntimeCapabilitySigningKey(securityCtx, slotKubeClient.Clientset, slotNamespace)
+		securityCancel()
+		if securityErr != nil {
+			log.Fatal("Failed to prepare runtime capability signing key")
+		}
+		if len(cfg.Runtime.NetworkPodCIDRs) > 0 {
+			watchConfig := rest.CopyConfig(slotKubeClient.Config)
+			watchConfig.QPS, watchConfig.Burst, watchConfig.Timeout = 20, 40, 0
+			apiURL, parseErr := url.Parse(watchConfig.Host)
+			if parseErr != nil {
+				log.Fatal("Invalid protected runtime API server address")
+			}
+			apiAddress, parseErr := netip.ParseAddr(apiURL.Hostname())
+			if parseErr != nil || apiAddress.Zone() != "" {
+				log.Fatal("Protected runtime inventory requires a literal API server address")
+			}
+			watchKube, watchErr := kubernetes.NewForConfig(watchConfig)
+			if watchErr != nil {
+				log.Fatal("Failed to initialize protected runtime watch client")
+			}
+			watchDynamic, watchErr := dynamic.NewForConfig(watchConfig)
+			if watchErr != nil {
+				log.Fatal("Failed to initialize protected runtime network inventory client")
+			}
+			watchMetadata, watchErr := metadata.NewForConfig(watchConfig)
+			if watchErr != nil {
+				log.Fatal("Failed to initialize protected runtime metadata proof client")
+			}
+			controlAddresses := []string{apiAddress.String()}
+			if cfg.Runtime.SandboxProfile == k8s.RuntimeNFSRootlessProfile {
+				storageCtx, storageCancel := context.WithTimeout(context.Background(), 10*time.Second)
+				storageAddresses, storageErr := k8s.RuntimeNFSStorageEndpoints(storageCtx, slotKubeClient.Clientset, slotNamespace, cfg.Runtime.WorkspacePVCClaimName)
+				storageCancel()
+				if storageErr != nil {
+					log.Fatalf("Failed to pin NFS storage egress boundary: %v", storageErr)
+				}
+				controlAddresses = append(controlAddresses, storageAddresses...)
+			}
+			runtimeInventory, watchErr = runtimeinventory.Start(context.Background(), watchKube, watchDynamic, watchMetadata, slotNamespace, cfg.Runtime.NetworkPodCIDRs, controlAddresses, cfg.Runtime.LegacyServiceCIDRs)
+			if watchErr != nil {
+				log.Fatal("Failed to initialize protected runtime inventory")
+			}
+			defer runtimeInventory.Close()
+			readyCtx, readyCancel := context.WithTimeout(context.Background(), 15*time.Second)
+			watchErr = runtimeInventory.WaitReady(readyCtx)
+			readyCancel()
+			if watchErr != nil {
+				log.Fatal("Protected runtime inventory did not synchronize")
+			}
+		}
+		runtimeSecurity, securityErr = services.NewRuntimeSecurityAuthority(slotKubeClient.Clientset, slotNamespace, contextInstances, signingKey, services.WithRuntimeSecurityAssignments(runtimeInventory))
+		if securityErr != nil {
+			log.Fatal("Failed to initialize runtime capability authority")
+		}
+		if err := services.ConfigureSlotRuntimeSecurity(runtimeAgentClient, runtimeSecurity); err != nil {
+			log.Fatal("Failed to configure protected runtime assignment lifecycle")
+		}
+	}
 	runtimeUpgradeService := services.NewRuntimeUpgradeService(database, rolloutRepo, runtimePodRepo, bindingRepo, runtimeAgentClient, cfg.Runtime.WorkspaceRoot, cfg.Runtime.RedisURL)
+	services.ConfigureRuntimeUpgradeNFSIO(runtimeUpgradeService, cfg.Runtime.SandboxProfile)
 	browserWorkerService := services.NewBrowserWorkerService(browserWorkerRepo, instanceRepo, k8s.GetClient())
+	if cfg.Runtime.ContainerSlots > 0 {
+		if err := services.ConfigureSlotExternalWriterAbsence(runtimeAgentClient, browserWorkerService.VerifyNoBrowserWriterHistory); err != nil {
+			log.Fatal("Failed to configure external Runtime writer absence authority")
+		}
+		if err := services.ConfigureSlotExternalWriterCleanup(runtimeAgentClient, func(ctx context.Context, id runtimeauth.Identity) error {
+			return browserWorkerService.DeleteForInstance(ctx, id.InstanceID)
+		}); err != nil {
+			log.Fatal("Failed to configure external Runtime writer cleanup")
+		}
+	}
+	services.ConfigureBrowserWorkspaceNFSIO(browserWorkerService, cfg.Runtime.SandboxProfile, cfg.Runtime.WorkspaceRoot, repository.NewWorkspaceWriteRepository(database), runtimeUpgradeService)
+	if runtimeSecurity != nil {
+		if err := services.ConfigureBrowserRuntimeSecurity(browserWorkerService, runtimeSecurity.CurrentIdentity); err != nil {
+			log.Fatal("Failed to configure protected Browser Worker authority")
+		}
+	}
 	instanceService := services.NewInstanceService(
 		instanceRepo,
 		quotaRepo,
@@ -150,6 +325,8 @@ func main() {
 		services.WithPrivilegedInstancePods(cfg.Kubernetes.Runtime.Pod.Privileged),
 		services.WithGatewayKeyRepository(gatewayKeyRepo),
 		services.WithV2RuntimeLifecycle(runtimePodRepo, bindingRepo, runtimeAgentClient, cfg.Runtime.WorkspaceRoot),
+		services.WithRuntimeSandboxProfile(cfg.Runtime.SandboxProfile),
+		services.WithWorkspaceWriteRepository(repository.NewWorkspaceWriteRepository(database)),
 		services.WithRuntimeUpgradeDeletionGuard(runtimeUpgradeService),
 		services.WithExpandedLLMModelCatalog(llmModelService),
 		services.WithInstanceResourceCleanup(browserWorkerService.DeleteForInstance),
@@ -174,7 +351,7 @@ func main() {
 		coreHandler := northbound.NewCoreHandler(northboundCoreService, cfg.Northbound.InternalJWTSecret)
 		coreRouter := gin.New()
 		_ = coreRouter.SetTrustedProxies(nil)
-		coreRouter.Use(gin.Logger(), gin.Recovery(), northbound.RequestContext(), northbound.BodyLimit(64<<10))
+		coreRouter.Use(handlers.SafeAccessLogger(), gin.Recovery(), northbound.RequestContext(), northbound.BodyLimit(64<<10))
 		northbound.RegisterCoreRoutes(coreRouter, coreHandler)
 		northboundCoreServer = &http.Server{
 			Addr:              cfg.Northbound.CoreInternalAddress,
@@ -188,7 +365,8 @@ func main() {
 		}
 	}
 	instanceAgentService := services.NewInstanceAgentService(instanceRepo, instanceAgentRepo, instanceDesiredStateRepo, instanceRuntimeStatusRepo, instanceCommandRepo)
-	instanceRuntimeStatusService := services.NewInstanceRuntimeStatusService(instanceRuntimeStatusRepo, instanceAgentRepo, instanceDesiredStateRepo)
+	shutdownAudits := repository.NewRuntimeShutdownAuditRepository(database)
+	instanceRuntimeStatusService := services.NewInstanceRuntimeStatusService(instanceRuntimeStatusRepo, instanceAgentRepo, instanceDesiredStateRepo, shutdownAudits)
 	instanceCommandService := services.NewInstanceCommandService(instanceCommandRepo, instanceRuntimeStatusRepo, instanceDesiredStateRepo, skillRepo)
 	instanceConfigRevisionService := services.NewInstanceConfigRevisionService(instanceConfigRevisionRepo)
 	teamService := services.NewTeamService(
@@ -198,6 +376,7 @@ func main() {
 		services.WithTeamOpenClawConfigService(openClawConfigService),
 		services.WithTeamWorkspaceAuditRepository(repository.NewTeamWorkspaceFileAuditRepository(database)),
 	)
+	services.ConfigureTeamWorkspaceNFSIO(teamService, cfg.Runtime.SandboxProfile, cfg.Runtime.WorkspaceRoot, repository.NewWorkspaceWriteRepository(database), runtimeUpgradeService)
 	var platformRedis services.PlatformRedisClient
 	if redisURL := strings.TrimSpace(cfg.Runtime.RedisURL); redisURL != "" {
 		var redisErr error
@@ -210,6 +389,7 @@ func main() {
 	}
 	runtimeEvents := services.NewRuntimeEventService(platformRedis)
 	baseWorkspaceFileService := services.NewWorkspaceFileService(workspaceFileAuditRepo)
+	services.ConfigureWorkspaceNFSIO(baseWorkspaceFileService, cfg.Runtime.SandboxProfile, cfg.Runtime.WorkspaceRoot, repository.NewWorkspaceWriteRepository(database))
 	services.ConfigureWorkspaceUpgradeGuard(baseWorkspaceFileService, runtimeUpgradeService)
 	workspaceFileService := services.WithWorkspaceUpgradeGuard(baseWorkspaceFileService, instanceRepo, false)
 	runtimeWorkspaceFileService := services.WithWorkspaceUpgradeGuard(services.NewRuntimeWorkspaceFileService(workspaceFileAuditRepo, repository.NewWorkspaceWriteRepository(database)), instanceRepo, true)
@@ -228,6 +408,7 @@ func main() {
 	services.ConfigureSkillRuntimeSync(skillService, bindingRepo, runtimePodRepo, runtimeAgentClient)
 	securityScanService := services.NewSecurityScanService(securityScanRepo, skillRepo, objectStorageService, skillScannerClient)
 	ownerStore := &ownerrecords.Store{Session: database, HistoryRoot: cfg.Runtime.WorkspaceRoot, Availability: db.OwnerAnalyticsAvailable}
+	services.ConfigureOwnerHistoryNFSIO(ownerStore, cfg.Runtime.SandboxProfile)
 	gatewayCoordinationRedisURL := strings.TrimSpace(os.Getenv("GATEWAY_RATE_LIMIT_REDIS_URL"))
 	if gatewayCoordinationRedisURL == "" {
 		gatewayCoordinationRedisURL = strings.TrimSpace(cfg.Runtime.RedisURL)
@@ -249,6 +430,7 @@ func main() {
 	if classifierErr != nil {
 		log.Fatal(classifierErr)
 	}
+	autoStopRepo := repository.NewInstanceAutoStopRepository(database)
 	runtimeTasks := repository.NewGatewayTaskRepository(database)
 	imageArtifacts, err := services.NewGatewayImageArtifactService(database, objectStorageService)
 	if err != nil {
@@ -259,13 +441,22 @@ func main() {
 	go imageArtifacts.RunCleanup(imageCleanupCtx)
 	imageJobs := services.NewGatewayImageJobService(database, gatewayBudgetService)
 	go imageJobs.RunRecovery(imageCleanupCtx)
-	aiGatewayService := aigateway.NewService(llmModelRepo, modelInvocationService, auditEventService, costRecordService, riskDetectionService, riskHitService, chatSessionService, chatMessageService, aigateway.WithOwnerUsage(ownerStore), aigateway.WithDeploymentStore(deploymentStore), classifierOption, aigateway.WithRuntimeTasks(runtimeTasks), aigateway.WithImageArtifacts(imageArtifacts), aigateway.WithImageJobs(imageJobs))
+	aiGatewayService := aigateway.NewService(llmModelRepo, modelInvocationService, auditEventService, costRecordService, riskDetectionService, riskHitService, chatSessionService, chatMessageService, aigateway.WithExpandedLLMModelCatalog(llmModelService), aigateway.WithOwnerUsage(ownerStore), aigateway.WithDeploymentStore(deploymentStore), classifierOption, aigateway.WithRuntimeTasks(runtimeTasks), aigateway.WithModelActivity(autoStopRepo), aigateway.WithImageArtifacts(imageArtifacts), aigateway.WithImageJobs(imageJobs))
 	gatewayRuntimeHandler := handlers.NewGatewayRuntimeHandler(runtimeTasks, aiGatewayService, auditEventService)
 	runtimeProtocols := repository.NewRuntimeProtocolRepository(database)
 	runtimeProtocolHandler := handlers.NewRuntimeProtocolHandler(runtimeProtocols, instanceRepo)
 	runtimeMaintenanceHandler := handlers.NewRuntimeMaintenanceHandler(repository.NewRuntimeMaintenanceRepository(database), instanceRepo)
 	runtimeProtocolPolicy := middleware.RuntimeProtocolPolicy(runtimeProtocols)
 	customTeamTemplateService := teamtemplate.NewService(customTeamTemplateRepo, aiGatewayService)
+	ownerTeamAPI := northbound.NewOwnerTeamAPI(database, teamService, instanceService, userRepo, aiGatewayService, false, 0)
+	ownerTeamAPI.Settings = northboundRuntimeSettings
+	ownerTeamAPI.Audit = auditEventRepo
+	if guarded, ok := instanceService.(interface {
+		SetOwnerTeamMutationGuard(func(int, string, int) error)
+	}); ok {
+		guarded.SetOwnerTeamMutationGuard(ownerTeamAPI.GuardInstanceMutation)
+	}
+	northboundCoreService.OwnerTeams = ownerTeamAPI
 
 	// Initialize handlers
 	versionHandler := handlers.NewVersionHandler()
@@ -284,7 +475,8 @@ func main() {
 		aiObservabilityService,
 		services.NewInstanceShellService(),
 		services.WithInstanceProxyRuntimeRepositories(instanceRepo, runtimePodRepo, bindingRepo),
-		services.WithOpenCodeLiteSessionBootstrap(),
+		services.WithInstanceProxyRuntimeSecurity(runtimeSecurity),
+		services.WithOpenCodeOnboardingWorkspace(workspaceFileService, externalAccessService),
 		services.WithInstanceProxyPolicyCoordinator(runtimeAgentClient, cfg.Runtime.Namespace),
 		services.WithInstanceProxyOwnerUsage(ownerStore),
 	)
@@ -294,6 +486,7 @@ func main() {
 		Enabled:         services.HermesWebEnabled(os.Getenv("CLAWMANAGER_HERMES_DESKTOP_WEB_ENABLED")),
 		Secret:          cfg.JWT.Secret, Instances: instanceRepo, Users: userRepo, Bindings: bindingRepo, Pods: runtimePodRepo,
 		Teams: repository.NewHermesDesktopTeamGuard(database), Agent: runtimeAgentClient, Redis: platformRedis, ExternalAccess: externalAccessService,
+		RuntimeSecurity: runtimeSecurity,
 	})
 	hermesDesktopHandler := handlers.NewHermesDesktopHandler(hermesDesktopService)
 	authHandler.SetDesktopLogoutHook(hermesDesktopService.RevokeUserSessions)
@@ -302,10 +495,12 @@ func main() {
 		log.Fatalf("Failed to initialize IEI system SSO: %v", err)
 	}
 	instanceHandler.SetIEISSOService(ieiSSOService)
+	ieiSSOService.SetSessionRevocationStore(repository.NewOwnerTeamRepository(database))
 	instanceHandler.SetHermesDesktopService(hermesDesktopService)
 	ieiSystemHandler := handlers.NewIEISystemHandler(cfg.IEISystem, ieiSSOService, instanceService, instanceHandler)
 	ieiSystemHandler.SetHermesDesktopService(hermesDesktopService)
 	ieiSystemHandler.SetOwnerDashboard(ownerStore)
+	ieiSystemHandler.SetOwnerTeamAPI(ownerTeamAPI)
 	if northboundCoreService != nil {
 		northboundCoreService.SetOwnerUsage(ownerStore)
 	}
@@ -339,8 +534,7 @@ func main() {
 	clusterResourceHandler := handlers.NewClusterResourceHandler(clusterResourceService)
 	teamPreviewSecretService := k8s.NewSecretService()
 	teamPreviewOrigin, _ := services.DefaultTeamPreviewOrigin()
-	egressProxyHandler := handlers.NewEgressProxyHandler(
-		auditEventService,
+	egressOptions := []handlers.EgressProxyOption{
 		handlers.WithTeamArtifactPreview(
 			teamRepo,
 			teamPreviewSecretService,
@@ -355,7 +549,94 @@ func main() {
 		),
 		handlers.WithTeamArtifactPreviewOrigin(teamPreviewOrigin),
 		handlers.WithEgressPrivateExceptions(egressPrivateExceptionService, repository.NewEgressInstanceRepository(database)),
-	)
+	}
+	var protectedEgressServer *http.Server
+	var browserEgressServer *http.Server
+	var runtimeServicesHandler *handlers.RuntimeServicesHandler
+	var runtimeLeaseHandler *handlers.RuntimeSecurityLeaseHandler
+	var runtimeCapabilityVerifier middleware.RuntimeCapabilityVerifier
+	if runtimeSecurity != nil {
+		contextBrowserConfigs, ok := browserWorkerRepo.(services.RuntimeBrowserConfigSource)
+		if !ok {
+			log.Fatal("Managed browser requires contextual configuration lookup")
+		}
+		browserAdapter, err := services.NewRuntimeBrowserAdapter(contextInstances, contextBrowserConfigs, browserWorkerService)
+		if err != nil {
+			log.Fatal("Failed to configure managed browser adapter")
+		}
+		managedRedis, err := services.NewManagedTeamRedis(teamService, contextInstances, runtimeSecurity.CurrentIdentity, func(ctx context.Context, address netip.Addr) error {
+			denied, err := runtimeInventory.Deny(ctx, address)
+			if err != nil || !denied {
+				return services.ErrInstanceGatewayUnavailable
+			}
+			return nil
+		})
+		if err != nil {
+			log.Fatal("Failed to configure managed Team Redis")
+		}
+		if err := services.ConfigureManagedTeamRedisNetwork(managedRedis, runtimeSecurity); err != nil {
+			log.Fatal("Failed to configure protected Team network admission")
+		}
+		managedPreview, err := services.NewManagedTeamPreview(managedRedis, runtimeSecurity, cfg.Runtime.WorkspaceRoot, teamPreviewOrigin, func(ctx context.Context, identity runtimeauth.Identity) error {
+			return runtimeSecurity.VerifyManagedPreviewImage(ctx, identity, map[string]string{
+				"openclaw": cfg.Runtime.OpenClawImage, "hermes": cfg.Runtime.HermesImage,
+				"opencode": cfg.Runtime.OpenCodeImage, "deepseek-harness": cfg.Runtime.DeepSeekHarnessImage,
+			})
+		})
+		if err != nil {
+			log.Fatal("Failed to configure managed Team preview")
+		}
+		if err := services.ConfigureSlotTeamPreviewSecurity(runtimeAgentClient, managedPreview); err != nil {
+			log.Fatal("Failed to configure Team preview assignment protection")
+		}
+		egressOptions = append(egressOptions, handlers.WithManagedTeamPreview(managedPreview))
+		workerVerifier, err := services.NewRuntimeBrowserEgressVerifier(runtimeSecurity.CurrentIdentity, browserAdapter)
+		if err != nil {
+			log.Fatal("Failed to configure Browser Worker egress authority")
+		}
+		workerOptions := append(append([]handlers.EgressProxyOption(nil), egressOptions...), handlers.WithEgressRuntimeCapabilities(workerVerifier), handlers.WithEgressHardDeny(runtimeInventory.Deny))
+		workerProxy := handlers.NewEgressProxyHandler(auditEventService, workerOptions...)
+		workerRouter := gin.New()
+		workerRouter.Use(gin.CustomRecovery(func(c *gin.Context, _ any) {
+			log.Print("Browser Worker egress request failed")
+			c.AbortWithStatus(http.StatusInternalServerError)
+		}))
+		workerRouter.NoRoute(workerProxy.Handle)
+		workerRouter.NoMethod(workerProxy.Handle)
+		browserEgressServer = &http.Server{Addr: ":9004", Handler: workerRouter, ReadHeaderTimeout: 5 * time.Second, MaxHeaderBytes: 32 << 10}
+		resolver, err := handlers.NewRuntimeManagedServicesResolver(managedRedis, browserAdapter, managedPreview)
+		if err != nil {
+			log.Fatal("Failed to configure managed runtime services")
+		}
+		runtimeServicesHandler, err = handlers.NewRuntimeServicesHandler(runtimeSecurity.Capabilities(), resolver)
+		if err != nil {
+			log.Fatal("Failed to configure managed service authorization")
+		}
+		runtimeCapabilityVerifier = runtimeSecurity.Capabilities()
+		protectedOptions := append(append([]handlers.EgressProxyOption(nil), egressOptions...), handlers.WithEgressRuntimeCapabilities(runtimeSecurity.Capabilities()), handlers.WithEgressHardDeny(runtimeInventory.Deny))
+		protectedProxy := handlers.NewEgressProxyHandler(auditEventService, protectedOptions...)
+		proxyRouter := gin.New()
+		proxyRouter.Use(gin.CustomRecovery(func(c *gin.Context, _ any) {
+			log.Print("Runtime egress request failed")
+			c.AbortWithStatus(http.StatusInternalServerError)
+		}))
+		proxyRouter.NoRoute(protectedProxy.Handle)
+		proxyRouter.NoMethod(protectedProxy.Handle)
+		protectedEgressServer = &http.Server{Addr: ":9002", Handler: proxyRouter, ReadHeaderTimeout: 5 * time.Second, MaxHeaderBytes: 32 << 10}
+		if len(cfg.Runtime.AgentControlToken) >= 32 {
+			var leaseErr error
+			runtimeLeaseHandler, leaseErr = handlers.NewRuntimeSecurityLeaseHandler(cfg.Runtime.AgentControlToken, runtimeSecurity)
+			if leaseErr != nil {
+				log.Fatal("Failed to initialize trusted runtime lease endpoint")
+			}
+		}
+	}
+	if runtimeSecurity != nil {
+		slotReconcileCtx, slotReconcileCancel := context.WithCancel(context.Background())
+		defer slotReconcileCancel()
+		services.StartRuntimeSlotReconciliation(slotReconcileCtx, runtimeAgentClient)
+	}
+	egressProxyHandler := handlers.NewEgressProxyHandler(auditEventService, egressOptions...)
 	openClawConfigHandler := handlers.NewOpenClawConfigHandler(openClawConfigService)
 	skillHandler := handlers.NewSkillHandler(skillService, instanceService)
 	skillHubHandler := handlers.NewSkillHubHandler(skillService, instanceService)
@@ -367,16 +648,51 @@ func main() {
 		instanceConfigRevisionService,
 		skillService,
 		handlers.WithAgentSkillReportPersistence(cfg.Runtime.SkillReportPersistence),
+		handlers.WithAgentShutdownAudits(shutdownAudits),
 	)
 	if !cfg.Runtime.SkillReportPersistence {
 		log.Printf("skill inventory report persistence is disabled; reports will be acknowledged without database synchronization")
 	}
 	teamHandler := handlers.NewTeamHandler(teamService)
+	previewOrigin := strings.TrimSpace(os.Getenv("CLAWMANAGER_WORKBENCH_PREVIEW_ORIGIN"))
+	if previewOrigin == "" {
+		_, port, splitErr := net.SplitHostPort(cfg.Server.Address)
+		if splitErr != nil || port == "" {
+			port = "9001"
+		}
+		previewOrigin = "http://p-{token}.localhost:" + port
+	}
+	workbenchPreviews, err := workbench.NewPreviews(previewOrigin, repository.NewWorkbenchPreviewStore(database), 8*time.Hour)
+	if err != nil {
+		log.Fatalf("invalid workbench preview origin: %v", err)
+	}
+	workbenchAgent, _ := runtimeAgentClient.(services.WorkbenchAgent)
+	instanceWorkbenchService := services.NewInstanceWorkbenchService(instanceRepo, bindingRepo, runtimePodRepo, workbenchAgent, workbenchPreviews)
+	instanceWorkbenchService.SetGitFiles(workspaceFileService)
+	instanceWorkbenchService.SetSharedPreviewAccess(externalAccessService)
+	browserOrigin := strings.TrimSpace(os.Getenv("CLAWMANAGER_BROWSER_ORIGIN"))
+	browserPorts := strings.TrimSpace(os.Getenv("CLAWMANAGER_BROWSER_PORT_RANGE"))
+	var browserOrigins *browserorigin.Registry
+	if (browserOrigin == "") != (browserPorts == "") {
+		log.Fatal("CLAWMANAGER_BROWSER_ORIGIN and CLAWMANAGER_BROWSER_PORT_RANGE must both be configured")
+	}
+	if browserOrigin != "" {
+		browserOrigins, err = browserorigin.New(browserOrigin, browserPorts, repository.NewBrowserOriginStore(database))
+		if err != nil {
+			log.Fatalf("invalid browser origin configuration: %v", err)
+		}
+		instanceHandler.SetBrowserOrigins(browserOrigins)
+		instanceWorkbenchService.SetBrowserOrigins(browserOrigins)
+	}
+	instanceWorkbenchHandler := handlers.NewInstanceWorkbenchHandler(instanceWorkbenchService)
 	workspaceFileHandler := handlers.NewWorkspaceFileHandler(instanceService, workspaceFileService, runtimeWorkspaceFileService)
 	workspaceFileHandler.SetSkillRepository(skillRepo)
 	workspaceFileHandler.SetExternalAccessServices(externalAccessService, instanceHandler.InstanceAccessService())
 	ieiSystemHandler.SetWorkspaceFileHandler(workspaceFileHandler)
-	runtimeAgentHandler := handlers.NewRuntimeAgentHandler(cfg.Runtime, runtimePodRepo, bindingRepo, instanceRepo, runtimeEvents, skillService)
+	runtimeAgentHandler := handlers.NewRuntimeAgentHandler(cfg.Runtime, runtimePodRepo, bindingRepo, instanceRepo, runtimeEvents, skillService).WithShutdownAudits(shutdownAudits)
+	if runtimeSecurity != nil {
+		runtimeAgentHandler.SetRuntimeGatewayReportVerifier(runtimeSecurity)
+	}
 
 	// Initialize WebSocket hub and handler
 	wsHub := services.GetHub()
@@ -409,6 +725,7 @@ func main() {
 			runtimeDeployments := k8s.NewRuntimeDeploymentService(k8sClient.Clientset)
 			runtimeSchedulerOptions := []services.RuntimeSchedulerOption{
 				services.WithRuntimeSchedulerWorkspaceRoot(cfg.Runtime.WorkspaceRoot),
+				services.WithRuntimeSchedulerAutoStopRepository(autoStopRepo),
 				services.WithRuntimeSchedulerNamespace(cfg.Runtime.Namespace),
 				services.WithRuntimeSchedulerGatewayPortRange(cfg.Runtime.GatewayPortStart, cfg.Runtime.GatewayPortEnd),
 				services.WithRuntimeSchedulerHeartbeatTimeout(cfg.Runtime.HeartbeatTimeout),
@@ -434,6 +751,9 @@ func main() {
 				cfg.Runtime.SchedulerTick,
 				runtimeSchedulerOptions...,
 			)
+			if rechecker, ok := instanceService.(interface{ SetRuntimeSlotRechecker(func(int64)) }); ok {
+				rechecker.SetRuntimeSlotRechecker(runtimeScheduler.RequestSlotAudit)
+			}
 			runtimeUpgradeService.SetDeploymentInventoryProvider(runtimeScheduler)
 			runtimeUpgradeService.SetUpgradeGatewayRestarter(runtimeScheduler)
 			log.Printf("runtime scheduler initialized")
@@ -441,16 +761,78 @@ func main() {
 	} else {
 		log.Printf("runtime scheduler disabled by configuration")
 	}
+	if runtimeSecurity != nil && runtimeScheduler != nil {
+		if err := runtimeSecurity.ConfigurePoolValidationLeases(runtimeScheduler); err != nil {
+			log.Fatal("Failed to configure isolated Runtime validation leases")
+		}
+	}
+	var autoStopKube kubernetes.Interface
+	if client := k8s.GetClient(); client != nil {
+		autoStopKube = client.Clientset
+	}
+	autoStopService := services.NewInstanceAutoStopService(autoStopRepo, instanceService, autoStopKube)
+	services.ConfigureTeamLifecycle(database, teamService, autoStopService)
+	appNamespace := strings.TrimSpace(os.Getenv("POD_NAMESPACE"))
+	if appNamespace == "" {
+		if raw, err := os.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/namespace"); err == nil {
+			appNamespace = strings.TrimSpace(string(raw))
+		}
+	}
+	if appNamespace == "" {
+		appNamespace = cfg.Runtime.Namespace
+	}
+	appPodName := os.Getenv("POD_NAME")
+	if appPodName == "" {
+		appPodName = os.Getenv("HOSTNAME")
+	}
+	autoStopService.SetApplicationPodIdentity(appNamespace, appPodName)
+	autoStopHandler := handlers.NewInstanceAutoStopHandler(autoStopRepo)
 	runtimePoolHandler := handlers.NewRuntimePoolHandler(runtimePodRepo, bindingRepo, rolloutRepo, runtimeScheduler, runtimeEvents)
 	runtimePoolHandler.SetUpgradeService(runtimeUpgradeService)
+	runtimeManagementService := services.NewRuntimeManagementService(database, runtimeScheduler, northboundRepo)
+	runtimeManagementHandler := handlers.NewRuntimeManagementHandler(runtimeManagementService)
+	runtimePodMaintenanceHandler := handlers.NewRuntimePodMaintenanceHandler(services.NewRuntimePodMaintenanceService(database, runtimeScheduler))
 	workbuddyPrewarmController := k8s.NewWorkbuddyPrewarmController()
 
 	leaderCtx, leaderCancel := context.WithCancel(context.Background())
+	var backupHTTPPool *sql.DB
+	if db.SQLGateScope() != "" {
+		openCtx, openCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		var openErr error
+		backupHTTPPool, openErr = systembackup.OpenControlDatabase(openCtx, os.Getenv("SYSTEM_BACKUP_CONTROL_DSN_FILE"))
+		if openErr == nil {
+			businessSQL, _ := database.Driver().(*sql.DB)
+			openErr = backupgate.RequireSameDatabase(openCtx, businessSQL, backupHTTPPool)
+		}
+		openCancel()
+		if openErr != nil {
+			log.Fatal("backup HTTP boundary requires an available independent control credential")
+		}
+		// Do not consume the business SQL pool while a handler is awaiting I/O.
+		backupHTTPPool.SetMaxOpenConns(64)
+		defer backupHTTPPool.Close()
+		restoreBoundary := backupgate.ConfigureWorkBoundary(func(ctx context.Context) (func(), error) {
+			return backupgate.HoldRequest(ctx, backupHTTPPool, db.SQLGateScope())
+		})
+		defer restoreBoundary()
+		go (systembackup.Gate{DB: backupHTTPPool}).RunExpiryWatchdog(leaderCtx, db.SQLGateScope())
+		if northboundCoreServer != nil {
+			northboundCoreServer.Handler = backupgate.HTTPBoundary(northboundCoreServer.Handler, "northbound.core_http")
+		}
+	}
 	defer leaderCancel()
+	workspaceStore := workspacedashboard.NewStore(database)
+	if runtimeScheduler != nil {
+		workspaceStore.SetCapacityReader(runtimeScheduler.WorkspaceCapacity)
+	}
+	workspaceHandler := handlers.NewWorkspaceDashboardHandler(workspaceStore)
+	go workspaceStore.Run(leaderCtx)
 	go ownerStore.RunBuffered(leaderCtx)
 	go db.RetryOwnerAnalytics(leaderCtx, database)
 
 	startBackground := func(ctx context.Context) {
+		go services.NewWorkspaceUsageCollector(repository.NewWorkspaceUsageRepository(database), baseWorkspaceFileService).Run(ctx)
+		go autoStopService.Run(ctx)
 		go ownerStore.Run(ctx)
 		go browserWorkerService.Run(ctx, 30*time.Second)
 		log.Printf("Starting leader-only background loops (identity=%s)", cfg.LeaderElection.Identity)
@@ -512,9 +894,25 @@ func main() {
 
 	// Setup router
 	r := gin.New()
-	r.Use(handlers.HermesDesktopRedactTickets(), gin.Logger(), gin.Recovery())
+	r.Use(handlers.HermesDesktopRedactTickets(), gin.CustomRecovery(func(c *gin.Context, _ any) {
+		log.Print("HTTP request failed")
+		c.AbortWithStatus(http.StatusInternalServerError)
+	}))
+	r.Use(middleware.BackupRequestBoundary(backupHTTPPool, db.SQLGateScope()))
 
 	// Middleware
+	// Browser-origin routes can carry a bearer capability in their path. Handle
+	// them before the general logger; nginx8444 records statuses without URLs.
+	r.Use(handlers.BrowserOriginRoutes(browserOrigins, instanceHandler, instanceWorkbenchService))
+	r.Use(egressProxyHandler.AccessLogger(gin.DefaultWriter))
+	r.Use(func(c *gin.Context) {
+		if instanceWorkbenchService.IsPreviewHost(c.Request.Host) {
+			instanceWorkbenchService.ServePreview(c.Writer, c.Request)
+			c.Abort()
+			return
+		}
+		c.Next()
+	})
 	r.Use(middleware.CORS())
 	r.Use(middleware.ErrorHandler())
 	r.NoRoute(egressProxyHandler.Handle)
@@ -531,6 +929,7 @@ func main() {
 		api.GET("/version", versionHandler.Get)
 
 		ieiSystem := api.Group("/ieisystem")
+		ieiSystemHandler.RegisterOwnerTeamRoutes(ieiSystem)
 		{
 			ieiSystem.POST("/session", ieiSystemHandler.ExchangeSession)
 			ieiSystem.GET("/session", ieiSystemHandler.GetSession)
@@ -566,6 +965,7 @@ func main() {
 		sharedInstances := api.Group("/shared-instances")
 		{
 			sharedInstances.GET("/:code/session", instanceHandler.GetSharedInstanceSession)
+			handlers.NewSharedInstanceWorkbenchHandler(instanceWorkbenchService, instanceService, externalAccessService, instanceHandler.InstanceAccessService()).Register(sharedInstances.Group("/:code/workbench"))
 			sharedInstances.GET("/:code/workspace/files", workspaceFileHandler.SharedList)
 			sharedInstances.GET("/:code/workspace/search", workspaceFileHandler.SharedSearch)
 			sharedInstances.GET("/:code/workspace/preview", workspaceFileHandler.SharedPreview)
@@ -577,12 +977,19 @@ func main() {
 		}
 
 		runtimeAgent := api.Group("/runtime-agent")
+		runtimeAgent.POST("/shutdown-deliveries", runtimeAgentHandler.ReportShutdownDeliveries)
 		{
 			runtimeAgent.POST("/register", runtimeAgentHandler.Register)
 			runtimeAgent.POST("/heartbeat", runtimeAgentHandler.Heartbeat)
 			runtimeAgent.POST("/metrics/report", runtimeAgentHandler.ReportMetrics)
 			runtimeAgent.POST("/gateways/report", runtimeAgentHandler.ReportGateways)
 			runtimeAgent.POST("/skills/report", runtimeAgentHandler.ReportSkills)
+		}
+		if runtimeLeaseHandler != nil {
+			api.POST("/runtime/security/lease", gin.WrapH(runtimeLeaseHandler))
+		}
+		if runtimeServicesHandler != nil {
+			api.Any("/runtime/services/*path", gin.WrapH(runtimeServicesHandler))
 		}
 
 		// Auth routes
@@ -634,6 +1041,8 @@ func main() {
 		hermesDesktop.DELETE("/api/*path", hermesDesktopHandler.API)
 		hermesDesktop.POST("/ws-ticket", hermesDesktopHandler.Ticket)
 		hermesDesktop.GET("/ws", hermesDesktopHandler.WebSocket)
+		api.GET("/dashboard/workspace", middleware.Auth(), middleware.SetUserInfo(userRepo), workspaceHandler.Get)
+		api.GET("/dashboard/workspace/usage", middleware.Auth(), middleware.SetUserInfo(userRepo), workspaceHandler.GetUsage)
 		instances := api.Group("/instances")
 		instances.Use(middleware.Auth())
 		instances.Use(middleware.SetUserInfo(userRepo))
@@ -660,7 +1069,9 @@ func main() {
 			instances.GET("/:id/environment-overrides", instanceHandler.GetInstanceEnvironmentOverrides)
 			instances.GET("/:id/status", instanceHandler.GetInstanceStatus)
 			instances.GET("/:id/runtime", instanceHandler.GetRuntimeDetails)
+			instances.GET("/:id/model-catalog-sync", instanceHandler.GetModelCatalogSync)
 			instances.GET("/:id/runtime-governance", runtimeProtocolHandler.Status)
+			instances.GET("/:id/runtime-shutdown-audits", handlers.NewRuntimeShutdownAuditHandler(instanceRepo, shutdownAudits).List)
 			instances.GET("/:id/runtime-maintenance", runtimeMaintenanceHandler.Status)
 			instances.POST("/:id/runtime-maintenance", runtimeMaintenanceHandler.Begin)
 			instances.POST("/:id/runtime-maintenance/cancel", runtimeMaintenanceHandler.Cancel)
@@ -674,6 +1085,7 @@ func main() {
 			instances.GET("/:id/browser-worker", instanceHandler.GetBrowserWorker)
 			instances.POST("/:id/browser-worker/access", instanceHandler.GenerateBrowserWorkerAccess)
 			instances.GET("/:id/shell", instanceHandler.StreamShell)
+			instanceWorkbenchHandler.Register(instances.Group("/:id/workbench"))
 			instances.POST("/:id/sync", instanceHandler.ForceSync)
 			instances.GET("/:id/openclaw/export", instanceHandler.ExportOpenClaw)
 			instances.POST("/:id/openclaw/import", instanceHandler.ImportOpenClaw)
@@ -724,13 +1136,39 @@ func main() {
 		adminRuntime.Use(middleware.SetUserInfo(userRepo))
 		adminRuntime.Use(middleware.NewAdminAuth(userRepo))
 		{
+			adminRuntime.GET("/dashboard", handlers.NewAdminDashboardHandler(database, runtimePoolHandler).Get)
 			adminRuntime.GET("/auth/enterprise/config", enterpriseAuthHandler.Config)
 			adminRuntime.POST("/auth/enterprise/config/test", enterpriseAuthHandler.TestConfig)
 			adminRuntime.PUT("/auth/enterprise/config", enterpriseAuthHandler.UpdateConfig)
 			adminRuntime.GET("/auth/enterprise/status", enterpriseAuthHandler.Status)
+			adminRuntime.GET("/runtime-auto-stop", autoStopHandler.Get)
+			adminRuntime.PUT("/runtime-auto-stop", autoStopHandler.Update)
+			adminRuntime.PUT("/instances/:id/auto-stop", autoStopHandler.SetDisabled)
+			adminRuntime.POST("/instances/:id/recover-stopped-source", runtimePoolHandler.RecoverStoppedSource)
+			adminRuntime.GET("/instances/:id/runtime-recovery", runtimePoolHandler.InspectInstanceRecovery)
+			adminRuntime.POST("/instances/:id/runtime-recovery", runtimePoolHandler.RetryInstanceRecovery)
+			adminRuntime.POST("/runtime-pods/:id/recheck", runtimePoolHandler.RecheckPod)
 			adminRuntime.GET("/runtime-pods", runtimePoolHandler.ListPods)
+			adminRuntime.GET("/runtime-pod-pools", runtimePodMaintenanceHandler.ManagedPools)
+			adminRuntime.GET("/runtime-pods/scale-options", runtimePodMaintenanceHandler.ScaleOptions)
+			adminRuntime.POST("/runtime-pods", runtimePodMaintenanceHandler.Scale)
+			adminRuntime.POST("/runtime-pods/scale-in/preflight", runtimeManagementHandler.ScaleInPreflight)
+			adminRuntime.POST("/runtime-pods/scale-in", runtimeManagementHandler.ScaleInSubmit)
+			adminRuntime.DELETE("/runtime-pods/:id", runtimePodMaintenanceHandler.Delete)
+			adminRuntime.DELETE("/runtime-pod-pools/:name", runtimePodMaintenanceHandler.DeletePool)
 			adminRuntime.GET("/runtime-pods/:id/gateways", runtimePoolHandler.GetPodGateways)
+			adminRuntime.GET("/runtime-pods/:id/events", runtimePoolHandler.GetPodEvents)
+			adminRuntime.POST("/runtime-pods/:id/scheduling", runtimeManagementHandler.Scheduling)
+			adminRuntime.POST("/runtime-pods/:id/evict", runtimeManagementHandler.Evict)
+			adminRuntime.POST("/runtime-scheduling/preflight", runtimeManagementHandler.Preflight)
+			adminRuntime.POST("/runtime-scheduling", runtimeManagementHandler.Submit)
+			adminRuntime.GET("/runtime-scheduling", runtimeManagementHandler.History)
+			adminRuntime.POST("/runtime-balance/plan", runtimeManagementHandler.BalancePlan)
+			adminRuntime.POST("/runtime-balance", runtimeManagementHandler.Balance)
+			adminRuntime.POST("/runtime-scheduling/:id/cancel", runtimeManagementHandler.Cancel)
+			adminRuntime.POST("/runtime-scheduling/:id/retry", runtimeManagementHandler.Retry)
 			adminRuntime.POST("/runtime-pods/:id/drain", runtimePoolHandler.DrainPod)
+			adminRuntime.POST("/runtime-rollouts/prepare", runtimeManagementHandler.PrepareRollout)
 			adminRuntime.POST("/runtime-rollouts", runtimePoolHandler.StartRollout)
 			adminRuntime.POST("/runtime-rollouts/preflight", runtimePoolHandler.PreflightOpenClawRollout)
 			adminRuntime.GET("/runtime-rollouts/:id", runtimePoolHandler.GetRollout)
@@ -740,10 +1178,13 @@ func main() {
 		teams := api.Group("/teams")
 		teams.Use(middleware.Auth())
 		teams.Use(middleware.SetUserInfo(userRepo))
+		teams.Use(teamHandler.ResourceScopeGuard)
 		{
 			teams.GET("", teamHandler.ListTeams)
 			teams.POST("", teamHandler.CreateTeam)
 			teams.GET("/:id", teamHandler.GetTeam)
+			teams.POST("/:id/start", teamHandler.Power)
+			teams.POST("/:id/stop", teamHandler.Power)
 			teams.DELETE("/:id", teamHandler.DeleteTeam)
 			teams.GET("/:id/tasks", teamHandler.ListTasks)
 			teams.POST("/:id/tasks", teamHandler.DispatchTask)
@@ -870,12 +1311,72 @@ func main() {
 			adminSystemSettings.POST("/routing-classifier/compare", routingClassifierHandler.Compare)
 		}
 
+		backupBindings, backupBindingErr := systembackup.ParseRoleBindings(os.Getenv("SYSTEM_BACKUP_ROLE_BINDINGS"))
+		if backupBindingErr != nil {
+			log.Println("System backup role bootstrap is invalid; access disabled")
+			backupBindings = nil
+		}
+		backupSQL, _ := database.Driver().(*sql.DB)
+		if controlFile := strings.TrimSpace(os.Getenv("SYSTEM_BACKUP_CONTROL_DSN_FILE")); controlFile != "" {
+			controlContext, controlCancel := context.WithTimeout(context.Background(), 10*time.Second)
+			controlSQL, controlErr := systembackup.OpenControlDatabase(controlContext, controlFile)
+			if controlErr == nil && db.SQLGateScope() != "" {
+				controlErr = backupgate.RequireSameDatabase(controlContext, backupSQL, controlSQL)
+			}
+			controlCancel()
+			if controlErr != nil {
+				if controlSQL != nil {
+					controlSQL.Close()
+				}
+				log.Println("System backup control database unavailable; access disabled")
+				backupSQL = nil
+			} else {
+				backupSQL = controlSQL
+				defer controlSQL.Close()
+			}
+		} else if db.SQLGateScope() != "" {
+			log.Println("System backup SQL gate requires a separate control credential; backup access disabled")
+			backupSQL = nil
+		}
+		backupStore := systembackup.Store{DB: backupSQL, InstallationID: strings.TrimSpace(os.Getenv("SYSTEM_BACKUP_INSTALLATION_ID"))}
+		backupHandler := handlers.NewSystemBackupHandler(backupStore, backupBindings)
+		backupMFA, backupMFAErr := systembackup.LoadStrongAuthVerifier(strings.TrimSpace(os.Getenv("SYSTEM_BACKUP_STRONG_AUTH_FILE")))
+		if backupMFAErr != nil || backupMFA != nil && backupMFA.Audience != backupStore.InstallationID {
+			log.Println("System backup MFA bootstrap is invalid; sensitive configuration changes disabled")
+		} else {
+			backupHandler.SetStrongAuthVerifier(backupMFA)
+		}
+		backupAdmin := api.Group("/admin/system-backup")
+		backupAdmin.Use(middleware.Auth(), middleware.SetUserInfo(userRepo), middleware.NewAdminAuth(userRepo))
+		backupHandler.Register(backupAdmin)
+		var teamDataBackup *systembackup.TeamDataService
+		if path := strings.TrimSpace(os.Getenv("SYSTEM_TEAM_DATA_BACKUP_CONFIG")); path != "" {
+			setupCtx, setupCancel := context.WithTimeout(leaderCtx, 20*time.Second)
+			sourceSQL, _ := database.Driver().(*sql.DB)
+			teamDataBackup, err = systembackup.NewTeamDataService(setupCtx, sourceSQL, path)
+			setupCancel()
+			if err != nil {
+				log.Printf("Team data backup unavailable: %s", systembackup.PublicError(err))
+			} else {
+				defer teamDataBackup.Close()
+				go teamDataBackup.Run(leaderCtx)
+			}
+		}
+		handlers.NewTeamDataBackupHandler(teamDataBackup).Register(backupAdmin)
+
 		northboundSettings := api.Group("/admin/northbound")
 		northboundSettings.Use(middleware.Auth())
 		northboundSettings.Use(middleware.SetUserInfo(userRepo))
 		northboundSettings.Use(middleware.NewAdminAuth(userRepo))
 		{
 			northboundSettings.GET("", northboundAdminHandler.Overview)
+			portalAdmin := handlers.NewOwnerPortalAdminHandler(ownerStore)
+			northboundSettings.GET("/portal/users", portalAdmin.Users)
+			northboundSettings.GET("/portal/sync", portalAdmin.SyncRecords)
+			northboundSettings.GET("/portal/sync/overview", portalAdmin.SyncOverview)
+			northboundSettings.POST("/portal/sync/retry", portalAdmin.RetrySync)
+			northboundSettings.GET("/portal/calendar", portalAdmin.Calendar)
+			northboundSettings.POST("/portal/calendar", portalAdmin.MutateCalendar)
 			northboundSettings.PUT("/settings", northboundAdminHandler.SaveSettings)
 			northboundSettings.PATCH("/settings/:section", northboundAdminHandler.SaveSettingsSection)
 			northboundSettings.PUT("/callers", northboundAdminHandler.SaveCaller)
@@ -992,7 +1493,7 @@ func main() {
 		}
 
 		gatewayLLM := api.Group("/gateway/llm")
-		gatewayLLM.Use(middleware.GatewayAuth(instanceRepo, gatewayKeyRepo, bindingRepo))
+		gatewayLLM.Use(middleware.GatewayAuthWithRuntimeCapabilitiesAndGatewayKeys(instanceRepo, gatewayKeyRepo, runtimeCapabilityVerifier, protectedRuntimeInstance, bindingRepo))
 		{
 			gatewayLLM.GET("/models", aiGatewayHandler.ListModels)
 			gatewayLLM.POST("/images/generations", runtimeProtocolPolicy, aiGatewayHandler.ImageGenerations)
@@ -1002,9 +1503,13 @@ func main() {
 			gatewayLLM.GET("/images/models", aiGatewayHandler.ImageModels)
 			gatewayLLM.GET("/runtime/catalog", gatewayRuntimeHandler.Catalog)
 			gatewayLLM.POST("/runtime/capabilities", runtimeProtocolHandler.Negotiate)
+			gatewayLLM.GET("/runtime/capabilities", runtimeProtocolHandler.Inspect)
+			gatewayLLM.POST("/runtime/capabilities/renew", runtimeProtocolHandler.Renew)
+			gatewayLLM.POST("/runtime/capabilities/enroll", runtimeProtocolHandler.Enroll)
 			gatewayLLM.POST("/runtime/maintenance", runtimeMaintenanceHandler.Poll)
 			gatewayLLM.POST("/runtime/tasks/check", gatewayRuntimeHandler.CheckTask)
 			gatewayLLM.POST("/runtime/tasks/finish", gatewayRuntimeHandler.FinishTask)
+			gatewayLLM.POST("/runtime/tasks/inspect", gatewayRuntimeHandler.InspectTasks)
 			gatewayLLM.POST("/chat/completions", runtimeProtocolPolicy, aiGatewayHandler.ChatCompletions)
 			gatewayLLM.POST("/responses", runtimeProtocolPolicy, aiGatewayHandler.Responses)
 			gatewayLLM.POST("/v1/responses", runtimeProtocolPolicy, aiGatewayHandler.Responses)
@@ -1019,6 +1524,8 @@ func main() {
 			agent.POST("/commands/:id/start", agentHandler.StartCommand)
 			agent.POST("/commands/:id/finish", agentHandler.FinishCommand)
 			agent.POST("/state/report", agentHandler.ReportState)
+			agent.POST("/shutdown-deliveries", agentHandler.ReportShutdownDeliveries)
+			agent.GET("/shutdown-deliveries/scope", agentHandler.ShutdownDeliveryScope)
 			agent.POST("/skills/inventory", agentHandler.ReportSkillInventory)
 			agent.POST("/skills/upload", agentHandler.UploadSkillPackage)
 			agent.GET("/skills/versions/:skillVersion/download", agentHandler.DownloadSkillVersion)
@@ -1043,6 +1550,20 @@ func main() {
 	}
 
 	// Start server with graceful shutdown
+	if protectedEgressServer != nil {
+		go func() {
+			if err := protectedEgressServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				log.Fatalf("Failed to start authenticated runtime egress listener: %v", err)
+			}
+		}()
+	}
+	if browserEgressServer != nil {
+		go func() {
+			if err := browserEgressServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				log.Fatalf("Failed to start Browser Worker egress listener: %v", err)
+			}
+		}()
+	}
 	if northboundCoreServer != nil {
 		go func() {
 			log.Printf("Northbound Core mTLS server starting on %s", cfg.Northbound.CoreInternalAddress)
@@ -1074,8 +1595,21 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
+	if runtimeServicesHandler != nil {
+		runtimeServicesHandler.Close()
+	}
 	if err := srv.Shutdown(ctx); err != nil {
 		log.Printf("HTTP server forced to shutdown: %v", err)
+	}
+	if protectedEgressServer != nil {
+		if err := protectedEgressServer.Shutdown(ctx); err != nil {
+			log.Printf("Authenticated runtime egress shutdown: %v", err)
+		}
+	}
+	if browserEgressServer != nil {
+		if err := browserEgressServer.Shutdown(ctx); err != nil {
+			log.Printf("Browser Worker egress shutdown: %v", err)
+		}
 	}
 	if northboundCoreServer != nil {
 		if err := northboundCoreServer.Shutdown(ctx); err != nil {
@@ -1088,6 +1622,11 @@ func main() {
 	// call is idempotent and covers the leader-election-disabled path.
 	leaderCancel()
 	stopBackground()
+	readerDrain, stopReaderDrain := context.WithTimeout(context.Background(), 3*time.Second)
+	if !ownerrecords.DrainHistoryReaders(readerDrain) {
+		log.Printf("History reader exit could not be confirmed; its safety guard remains held")
+	}
+	stopReaderDrain()
 	if runtimeAdminEventBridgeCancel != nil {
 		runtimeAdminEventBridgeCancel()
 	}

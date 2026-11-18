@@ -1,0 +1,15 @@
+dist/
+ubuntu*/dist/
+config/install.env
+config/nodes.conf
+images/*.tar
+images/*.tar.sha256
+images/local/*.tar
+images/local/*.tar.sha256
+ubuntu*/packages/*/*.deb
+ubuntu*/packages/*/Packages.gz
+scripts/__pycache__/
+tests/__pycache__/
+images/images.lock.backup-*
+images/local/*.source.json
+*.log

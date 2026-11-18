@@ -1,0 +1,16 @@
+PASS sixteen table rows, readable geometry and slot distributions en { width: 1440, height: 900 }
+PASS sixteen table rows, readable geometry and slot distributions en { width: 1920, height: 1080 }
+PASS sixteen table rows, readable geometry and slot distributions en { width: 1280, height: 900 }
+PASS Actions keyboard, viewport containment, dismiss, actual Events/Pause actions and row action isolation en
+PASS responsive table with local horizontal scrolling and reachable actions en { width: 1440, height: 800 }
+PASS responsive table with local horizontal scrolling and reachable actions en { width: 900, height: 900 }
+PASS responsive table with local horizontal scrolling and reachable actions en { width: 390, height: 844 }
+PASS server pagination, off-page search and keyboard Pod detail entry en
+PASS sixteen table rows, readable geometry and slot distributions zh { width: 1440, height: 900 }
+PASS sixteen table rows, readable geometry and slot distributions zh { width: 1920, height: 1080 }
+PASS sixteen table rows, readable geometry and slot distributions zh { width: 1280, height: 900 }
+PASS Actions keyboard, viewport containment, dismiss, actual Events/Pause actions and row action isolation zh
+PASS responsive table with local horizontal scrolling and reachable actions zh { width: 1440, height: 800 }
+PASS responsive table with local horizontal scrolling and reachable actions zh { width: 900, height: 900 }
+PASS responsive table with local horizontal scrolling and reachable actions zh { width: 390, height: 844 }
+PASS server pagination, off-page search and keyboard Pod detail entry zh

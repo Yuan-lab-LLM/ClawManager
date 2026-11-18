@@ -35,7 +35,7 @@ assert.doesNotMatch(
 );
 assert.match(
   customSource,
-  /重新生成整个 Team/,
+  /重新生成整套模板/,
   "whole-Team regeneration must remain available",
 );
 assert.match(

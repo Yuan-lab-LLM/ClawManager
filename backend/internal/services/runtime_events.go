@@ -6,7 +6,10 @@ import (
 	"time"
 )
 
-const runtimeEventStreamKey = "clawmanager:runtime-events"
+const (
+	runtimeEventStreamKey       = "clawmanager:runtime-events"
+	runtimeEventStreamMaxLength = 10_000
+)
 
 type RuntimeEvent struct {
 	Type      string          `json:"type"`

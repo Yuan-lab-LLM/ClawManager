@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"clawreef/internal/backupgate"
 	"clawreef/internal/models"
 	"clawreef/internal/repository"
 	"clawreef/internal/services/k8s"
@@ -93,6 +94,11 @@ func (s *SyncService) syncLoop(stop <-chan struct{}) {
 // syncAllInstances synchronizes the state of all instances
 func (s *SyncService) syncAllInstances() {
 	ctx := context.Background()
+	release, gateErr := backupgate.HoldWorkUnit(ctx, "instance.sync")
+	if gateErr != nil {
+		return
+	}
+	defer release()
 
 	fmt.Println("[SyncService] Fetching all instances from database...")
 	// Get all running instances from database

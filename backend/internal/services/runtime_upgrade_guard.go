@@ -42,31 +42,31 @@ func (s *RuntimeScheduler) reconcileDesiredInstance(ctx context.Context, snapsho
 		return nil
 	}
 	instance := *current
-	if instance.Status != "creating" && instance.Status != "running" && instance.Status != "error" {
+	if instance.Status == "creating" {
+		return s.reconcileCreatingInstanceLocked(ctx, instance)
+	}
+	if instance.Status != "running" {
 		return nil
 	}
-	if isRuntimeErrorInstance(instance) && !isRecoverableRuntimeSchedulingError(instance) {
-		return nil
-	}
-	binding, err := s.bindingRepo.GetRunningByInstanceID(ctx, instance.ID)
+	binding, err := s.bindingRepo.GetByInstanceID(ctx, instance.ID)
 	if err != nil {
 		return []error{err}
 	}
 	if binding != nil {
-		stale, err := s.cleanupStaleInstanceBinding(ctx, instance, binding)
-		if err != nil {
+		runtimeType, _ := schedulerRuntimeType(instance)
+		if binding.InstanceID != instance.ID || binding.RuntimeType != runtimeType || binding.Generation != instance.RuntimeGeneration {
+			return []error{fmt.Errorf("instance %d Runtime binding identity or generation differs; explicit inspection is required", instance.ID)}
+		}
+		if err := s.syncInstanceStateFromBinding(ctx, instance, binding); err != nil {
 			return []error{err}
 		}
-		if !stale {
-			if err := s.syncInstanceStateFromBinding(ctx, instance, binding); err != nil {
-				return []error{err}
-			}
-			return nil
-		}
+		return nil
 	}
-	// This checks any non-running binding before attempting assignment and
-	// retains the lifecycle lock across port reservation, HTTP create and cleanup.
-	return s.reconcileCreatingInstanceLocked(ctx, instance)
+	// A running row is an observation, not permission to create another writer.
+	// Start/Recovery must explicitly establish a new creating intent.
+	var errs []error
+	s.markInstanceError(ctx, instance, &runtimeFailure{code: "RUNTIME_BINDING_MISSING", cause: fmt.Errorf("instance %d has no Runtime binding; explicit start or recovery is required", instance.ID)}, &errs)
+	return errs
 }
 
 func (s *RuntimeScheduler) failoverBinding(ctx context.Context, podID int64, snapshot models.InstanceRuntimeBinding, reason string) error {
@@ -94,6 +94,23 @@ func (s *RuntimeScheduler) failoverBinding(ctx context.Context, podID int64, sna
 	}
 	if current.Generation != instance.RuntimeGeneration {
 		return nil
+	}
+	if requiresConfirmedGatewayStop(s.agentClient) {
+		pod, err := s.podRepo.GetByID(ctx, podID)
+		if err != nil {
+			return err
+		}
+		if pod == nil || stringValue(pod.PodUID) == "" || stringValue(pod.AgentEndpoint) == "" || current.GatewayID == "" {
+			return fmt.Errorf("failover requires the exact source runtime identity")
+		}
+		if store, ok := s.instanceRepo.(repository.RuntimeFailoverRepository); ok {
+			return s.beginOwnedRuntimeFailover(ctx, store, *instance, *current, *pod, reason)
+		}
+		// Heartbeat loss and Pod disappearance do not retire the durable writer
+		// assignment. Keep SQL ownership until the normal stop path proves it.
+		if err := s.agentClient.DeleteGateway(ctx, *pod.AgentEndpoint, current.GatewayID); err != nil {
+			return fmt.Errorf("failover source stop is unconfirmed: %w", err)
+		}
 	}
 	if err := s.instanceRepo.UpdateRuntimeState(ctx, instance.ID, "creating", instance.RuntimeGeneration+1, &reason); err != nil {
 		return err

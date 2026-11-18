@@ -31,6 +31,10 @@ func (s *Store) buildOwnerSnapshot(ctx context.Context, owner string, now time.T
 		return nil, e
 	}
 	result := &ownerSnapshot{}
+	covered, e := s.sourceAsOf(ctx, now)
+	if e != nil {
+		return nil, e
+	}
 	e = s.Session.TxContext(ctx, func(tx db.Session) error {
 		// Serialize publishing with immediate login awards, never with instance work.
 		if save {
@@ -57,15 +61,7 @@ func (s *Store) buildOwnerSnapshot(ctx context.Context, owner string, now time.T
 		if e != nil {
 			return e
 		}
-		result.Reports = map[string]*Report{}
-		loc, _ := time.LoadLocation("Asia/Shanghai")
-		for _, kind := range []string{"week", "month"} {
-			report, e := reader.Report(ctx, owner, kind, now.In(loc).Format("2006-01-02"), now.Truncate(summaryInterval), false)
-			if e != nil {
-				return e
-			}
-			result.Reports[kind] = report
-		}
+		// Reports must never extend the growth lock or prevent numeric publication.
 		result.State = SnapshotState{NextRefreshAt: nextSummaryBatch(now).Add(20 * time.Second), State: "ready"}
 		row, e := tx.SQL().QueryRowContext(ctx, `SELECT status FROM northbound_owner_records WHERE record_type='analytics_epoch' AND record_key=?`, Key("analytics-epoch", "v4"))
 		if e != nil {
@@ -78,7 +74,7 @@ func (s *Store) buildOwnerSnapshot(ctx context.Context, owner string, now time.T
 		if state != "ready" {
 			result.State.State = "initializing"
 		}
-		asof := now.Truncate(summaryInterval)
+		asof := covered
 		result.State.AsOf = &asof
 		if !save {
 			return nil
@@ -112,6 +108,9 @@ func (s *Store) buildOwnerSnapshot(ctx context.Context, owner string, now time.T
 			return nil
 		}
 		result.State.Version = revision + 1
+		if e = reader.queueReportPreviews(ctx, owner, now); e != nil {
+			return e
+		}
 		raw, e := json.Marshal(result)
 		if e != nil {
 			return e
@@ -149,8 +148,8 @@ func (s *Store) publishedOwner(ctx context.Context, owner string, now time.Time)
 	snapshot.State.NextRefreshAt = nextSummaryBatch(now).Add(20 * time.Second)
 	if liveState == "ready" {
 		snapshot.State.State = "ready"
-		if batchStatus != "ready" {
-			snapshot.State.State = "updating"
+		if e = s.applyBatchView(ctx, owner, now, batchStatus, &snapshot.State); e != nil {
+			return nil, e
 		}
 	}
 	if snapshot.State.State == "initializing" {
@@ -168,6 +167,48 @@ func (s *Store) publishedOwner(ctx context.Context, owner string, now time.Time)
 	snapshot.Dashboard.Snapshot = &snapshot.State
 	snapshot.Growth.Snapshot = &snapshot.State
 	return &snapshot, nil
+}
+
+// Operational metadata is read separately; it must not rewrite every user's
+// numeric snapshot just because a wall-clock batch completed.
+func (s *Store) applyBatchView(ctx context.Context, owner string, now time.Time, status string, state *SnapshotState) error {
+	row, err := s.Session.SQL().QueryRowContext(ctx, `SELECT
+(SELECT occurred_at FROM northbound_owner_records WHERE record_type='summary_batch' AND record_key=?),
+(SELECT interval_end FROM northbound_owner_records WHERE record_type='summary_batch' AND record_key=?),
+EXISTS(SELECT 1 FROM northbound_owner_records r JOIN instances i ON i.id=r.instance_id AND i.user_id=r.scope_id AND LOWER(TRIM(i.owner))=r.owner_normalized AND i.status='running' AND r.source_key=SHA2(CONCAT(COALESCE(i.workspace_path,''),'|',COALESCE(i.access_token,'')),256) WHERE r.owner_normalized=? AND r.record_type='history_schedule' AND ((r.status='retry' AND r.version>=3) OR r.status IN ('pending','restricted')) AND r.interval_start<=?),
+EXISTS(SELECT 1 FROM northbound_owner_records WHERE record_type='usage_dirty' AND owner_normalized=? AND status='pending' AND COALESCE(interval_start,updated_at)<=?)`, Key("summary-batch", "v4"), Key("summary-batch", "v4"), owner, now.Add(-30*time.Minute).UTC(), owner, now.Add(-30*time.Minute).UTC())
+	if err != nil {
+		return err
+	}
+	var started, completed sql.NullTime
+	var retry, pending bool
+	if err = row.Scan(&started, &completed, &retry, &pending); err != nil {
+		return err
+	}
+	state.LastBatchAt = nil
+	if completed.Valid {
+		state.LastBatchAt = &completed.Time
+	}
+	state.State = batchDisplayState(status, started.Time, now, retry || pending)
+	// A ready state left by a dead worker is not a fresh batch. Numeric snapshot
+	// timestamps may legitimately stay old for quiet users; use worker completion.
+	if completed.Valid && now.Sub(completed.Time) >= 3*summaryInterval {
+		state.State = "deferred"
+	}
+	return nil
+}
+
+func batchDisplayState(status string, started, now time.Time, pending bool) string {
+	if status == "updating" && !started.IsZero() && now.Sub(started) >= 0 {
+		if now.Sub(started) < syncBatchDisplayWindow {
+			return "updating"
+		}
+		return "deferred"
+	}
+	if pending || (!started.IsZero() && now.Sub(started) >= 3*summaryInterval) {
+		return "deferred"
+	}
+	return "ready"
 }
 
 func snapshotRange(d *Dashboard, period string, now time.Time) *Dashboard {

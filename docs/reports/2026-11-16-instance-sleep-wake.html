@@ -1,0 +1,541 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>CM UIUX2 · 实例休眠与唤醒测试报告</title><style>
+:root{color-scheme:light;--ink:#242424;--muted:#616161;--line:#d1d1d1;--blue:#0f6cbd}*{box-sizing:border-box}body{margin:0;background:#f5f5f5;color:var(--ink);font:14px/1.6 "Segoe UI",-apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif}main{max-width:1440px;margin:auto;padding:32px 24px}h1{font-size:28px;margin:0 0 12px}h2{font-size:20px;margin:0 0 14px}p{margin:8px 0 14px}section{padding:24px;margin:20px 0;border:1px solid var(--line);border-radius:8px;background:#fff}code{overflow-wrap:anywhere}a{color:var(--blue);text-underline-offset:3px}a:focus-visible,summary:focus-visible{outline:2px solid var(--blue);outline-offset:3px}.muted{color:var(--muted)}.badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:12px;font-weight:600}.pass{background:#f1faf1;color:#0e700e}.fail{background:#fdf3f4;color:#b10e1c}.blocked{background:#fff9f5;color:#bc4b09}.scroll{overflow:auto}table{border-collapse:collapse;min-width:760px;width:100%;text-align:left}td,th{padding:12px;border-bottom:1px solid #e0e0e0;white-space:nowrap}details{border-top:1px solid #e0e0e0;padding:12px 0}summary{cursor:pointer}pre{overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;background:#fafafa;padding:16px;border-radius:4px}.gallery{display:grid;grid-template-columns:1fr 1fr;gap:24px}figure{margin:0;min-width:0}figcaption{margin-bottom:8px}img{display:block;width:100%;height:auto;border:1px solid #e0e0e0}.samples{display:flex;gap:16px;flex-wrap:wrap}.samples a{display:block}@media(max-width:768px){main{padding:16px}section{padding:16px}.gallery{grid-template-columns:1fr}h1{font-size:24px}}@media print{body{background:white}section{break-inside:avoid}details pre{font-size:10px}}
+</style></head><body><main>
+<h1>实例休眠与唤醒 · 测试报告</h1><p class="muted">2026-11-16 · UIUX2 · 测试集群 10.130.81.54 · 供用户审查</p>
+<section id="wake-slot-deployment"><h2>最新发布 · 唤醒槽位状态与 Skill Hub 精简</h2><p><a href="https://10.130.81.54:30443">测试集群</a>已更新至 <code>uiux2-wake-slot-20261116-e76862cac469</code>，后端版本 <code>v2026.11.16-uiux2-wake-slot</code>。正常启动预留及同身份启动报告的时间差现在显示蓝色“启动”，不再直接显示红色“实例异常”；Skill Hub 顶部介绍卡片已删除，保留顶栏定位、页签、检索与业务区域。</p><p>根因已由真实 Hermes #285 复现：数据库先预留绑定，而 Runtime 快照尚为空闲；或数据库已进入 running，快照仍为 starting。库存投影新增只读 <code>start_pending</code>，前后端状态展示和汇总同步使用；原始对账状态、绑定确认、归属与代际、空闲准入和操作预检均保留。真实 owner/generation 冲突、失败、弱身份、未知和过期证据不覆盖为启动。独立审查发现 assignment 失败与 gateway 启动并存的边界，已先添加失败负例，再修复并复审通过。</p><p>四类临时实例 #286–#289 的真实再次启动验证全部通过：手动停止、调用既有 start 接口、捕获蓝色启动槽位、等待真实 running 与绑定收敛、确认 Runtime 代际推进。当前全局自动休眠超时为两天，本轮未修改该策略，故这四项为手动停止后再次启动；历史自然休眠测试仍按其原测试轮次记录。#285 以及 #286–#289 均已清理，原有 36 个实例 ID 保留，全局策略版本仍为 7。</p><p>前端分类回归 22/22、槽位组件 4/4、集群后端相关回归、TypeScript、运行时变更文件 ESLint 和五语四宽度（20 组）浏览器检查通过。发布后四类休眠、个人设置与品牌版本、运行时工具栏、Skill Hub 桌面/手机、OpenCode/DSH 原生应用，共 12 项通过。SkillHubPage 仍有原有 3 个 ESLint 错误与 1 个警告，对 HEAD 原文件运行得到同一规则与位置；未将该文件完整 lint 称为通过。</p><p>后端二进制、生产前端及镜像均在 10.130.81.54 构建；CM 应用 1/1 就绪，源码清单 2105 项校验通过，实际二进制与前端摘要匹配。其他二进制、Runtime 辅助程序及 AgentRuntime 镜像保持原值；128 个浏览器 NodePort（31600–31727）、8444 目标端口及新 Pod 就绪端点验证通过。</p><p><a href="assets/2026-11-16-instance-sleep/wake-slot-candidate.json">构建记录</a> · <a href="assets/2026-11-16-instance-sleep/wake-slot-rollout.json">发布与端点</a> · <a href="assets/2026-11-16-instance-sleep/wake-slot-wake-live-verification.json">四类真实启动证据</a> · <a href="assets/2026-11-16-instance-sleep/wake-slot-browser-verification.json">部署后 12 项验收</a> · <a href="assets/2026-11-16-instance-sleep/wake-slot-final-verification.json">最终检查</a> · <a href="assets/2026-11-16-instance-sleep/wake-slot-validation.json">检查范围与已知基线</a></p><div class="gallery"><figure><figcaption>真实集群 · OpenClaw 启动槽位为蓝色</figcaption><a href="assets/2026-11-16-instance-sleep/wake-slot-live-starting-openclaw.png"><img src="assets/2026-11-16-instance-sleep/wake-slot-live-starting-openclaw.png" alt="真实 OpenClaw 启动期间的蓝色槽位"></a></figure><figure><figcaption>真实集群 · Skill Hub 直接进入工作区</figcaption><a href="assets/2026-11-16-instance-sleep/wake-slot-deployed-skill-hub-1440.png"><img src="assets/2026-11-16-instance-sleep/wake-slot-deployed-skill-hub-1440.png" alt="删除介绍卡片后的 Skill Hub"></a></figure></div><p><a href="assets/2026-11-16-instance-sleep/wake-slot-live-starting-hermes.png">Hermes 启动截图</a> · <a href="assets/2026-11-16-instance-sleep/wake-slot-live-starting-opencode.png">OpenCode 启动截图</a> · <a href="assets/2026-11-16-instance-sleep/wake-slot-live-starting-deepseek-harness.png">DeepSeek Harness 启动截图</a> · <a href="assets/2026-11-16-instance-sleep/wake-slot-deployed-skill-hub-390.png">Skill Hub 手机截图</a> · <a href="assets/2026-11-16-instance-sleep/wake-slot-browser-regression.log">浏览器回归日志</a> · <a href="assets/2026-11-16-instance-sleep/wake-slot-backend-tests.log">集群后端回归日志</a></p></section>
+<section id="runtime-toolbar-deployment"><h2>前次发布 · 运行时工具栏与实例调度</h2><p><a href="https://10.130.81.54:30443/admin/runtime-pods">测试集群运行时页面</a>已更新至 <code>uiux2-runtime-toolbar-20261116-d1d78c7d80c8</code>。“批量调度”更名为“实例调度”，顶部顺序调整为“实例调度 → …”；独立“Pod 维护”按钮移入更多菜单。详情页同名入口及五种语言标签同步更新。</p><p>定向弹窗单元回归、运行时页面契约检查、TypeScript、相关文件 ESLint、独立审查及五语桌面/窄屏浏览器回归均通过。发布后真实页面共 10 项通过：四类休眠界面、桌面/手机个人设置和品牌版本、桌面/手机运行时工具栏、OpenCode 与 DeepSeek Harness 原生页面。仅打开并关闭调度和维护弹窗，未提交真实调度或维护操作。</p><p>镜像及生产前端在 10.130.81.54 构建；应用 1/1 就绪，128 个浏览器 NodePort 的目标端口仍为 8444，就绪端点指向新 Pod。后端与辅助程序哈希、AgentRuntime 镜像保持原值。临时实例 #283、#284 已清理，发布前的 36 个实例 ID 均保留，全局自动休眠策略版本仍为 6。验收登录凭据首次过期，私下续期原有测试身份后重跑全部验收通过。</p><p><a href="assets/2026-11-16-instance-sleep/runtime-toolbar-candidate.json">镜像构建记录</a> · <a href="assets/2026-11-16-instance-sleep/runtime-toolbar-rollout.json">发布与端点验证</a> · <a href="assets/2026-11-16-instance-sleep/runtime-toolbar-browser-verification.json">发布后 10 项验收</a> · <a href="assets/2026-11-16-instance-sleep/runtime-toolbar-final-verification.json">最终核对</a> · <a href="assets/2026-11-16-instance-sleep/runtime-toolbar-validation.json">检查范围</a> · <a href="assets/2026-11-16-instance-sleep/runtime-toolbar-browser-regression.log">五语浏览器回归日志</a> · <a href="assets/2026-11-16-instance-sleep/runtime-toolbar-unit-regression.log">弹窗回归日志</a></p><div class="gallery"><figure><figcaption>真实集群 · “实例调度”位于更多菜单左侧</figcaption><a href="assets/2026-11-16-instance-sleep/runtime-toolbar-deployed-runtime-toolbar-1440.png"><img src="assets/2026-11-16-instance-sleep/runtime-toolbar-deployed-runtime-toolbar-1440.png" alt="运行时页面右上角的实例调度按钮和更多菜单"></a></figure><figure><figcaption>真实集群 · 手机布局</figcaption><a href="assets/2026-11-16-instance-sleep/runtime-toolbar-deployed-runtime-toolbar-390.png"><img loading="lazy" style="max-width:300px" src="assets/2026-11-16-instance-sleep/runtime-toolbar-deployed-runtime-toolbar-390.png" alt="窄屏运行时页面中的实例调度和更多菜单"></a></figure></div></section>
+<section id="shell-deployment"><h2>前次发布 · 个人设置与版本号位置</h2><p><a href="https://10.130.81.54:30443">测试集群</a>已更新至 <code>uiux2-shell-20261116-40f42490633e</code>。Settings 从个人侧栏及窄屏导航移入右上角个人下拉菜单，位于控制台与退出登录之间；版本号移到左上角 ClawManager 名称下方，保留完整构建信息 tooltip。侧栏折叠只显示 Logo，手机抽屉和 Console 使用同样的品牌版本布局。</p><p>本地通过 TypeScript、相关组件 ESLint、版本组件布局检查、独立审查及五语四宽度浏览器回归；真实部署后通过四类休眠界面、1440/390 宽度 Settings 跳转和品牌版本、OpenCode/DSH 原生页面，共 8 项。验收脚本首次误用“修改密码”标题定位实际“更新密码”按钮，修正定位后重跑全部通过；产品代码未因此更改。</p><p>生产前端与镜像均在 10.130.81.54 构建，1/1 Pod 就绪，128 个浏览器 NodePort 仍指向 8444 及新 Pod 就绪端点。后端、Runtime 辅助程序和 AgentRuntime 镜像保持不变；临时实例 #281、#282 已清理，原有 36 个实例仍休眠，全局策略版本仍为 6。</p><p><a href="assets/2026-11-16-instance-sleep/shell-candidate.json">镜像构建记录</a> · <a href="assets/2026-11-16-instance-sleep/shell-rollout.json">发布与端点验证</a> · <a href="assets/2026-11-16-instance-sleep/shell-browser-verification.json">发布后 8 项验收</a> · <a href="assets/2026-11-16-instance-sleep/shell-final-verification.json">最终核对</a></p><div class="gallery"><figure><figcaption>发布后的桌面设置入口与品牌版本</figcaption><a href="assets/2026-11-16-instance-sleep/shell-deployed-account-1440.png"><img src="assets/2026-11-16-instance-sleep/shell-deployed-account-1440.png" alt="右上账户菜单中的设置及左上品牌名下版本号"></a></figure><figure><figcaption>手机导航中的品牌版本</figcaption><a href="assets/2026-11-16-instance-sleep/shell-deployed-mobile-brand.png"><img loading="lazy" src="assets/2026-11-16-instance-sleep/shell-deployed-mobile-brand.png" alt="手机导航抽屉的品牌名称和版本号" style="max-width:300px"></a></figure></div></section><section><h2>本轮要求的生命周期与休眠界面验证通过</h2><p>真实 API 场景：25 通过 / 0 失败 / 0 未执行；真实前端点击：4/4 通过。单元回归 17/17 通过。</p><p>四类 Lite 实例每类创建 1 个单实例和一组 2 个批量实例，共 12 个。所有休眠均为自然等待，未修改数据库时间戳，未绕过原生停止证明，未直接修改 Runtime 镜像、Deployment、全局休眠策略或原有 36 个实例。</p><p>测试时间（UTC）：2026-11-16T01:01:46.930008+00:00 → 2026-11-16T01:11:03.743783+00:00。测试实例：267, 268, 269, 270, 272, 271, 273, 274, 275, 276, 278, 277。</p></section>
+<section id="deployment"><h2>已发布到测试集群 · 2026-11-16</h2><p><a href="https://10.130.81.54:30443">打开测试集群</a> · 发布标识 <code>uiux2-sleep-20261116-39640fa8d593</code>。</p><p>源码、生产前端和镜像均在 10.130.81.54 构建或校验；本地仅准备并传输源码。镜像 <code>clawmanager.local/clawmanager@sha256:be38cc2c2958d9a5bb403f111929ecf879f1954d989bf6778db02cf8e2bb371b</code> 已滚动发布，1/1 Pod 就绪，实际加载镜像及 index.html 摘要与候选镜像一致。</p><p>本次发布仅更新 CM 前端。后台二进制、Nginx、Runtime 辅助程序与 AgentRuntime 镜像保持原值，因此后端版本仍为 v2026.11.13-coordinator-finalization。可通过 <a href="https://10.130.81.54:30443/ui-release.json">前端发布信息</a> 核对本次版本。</p><p>发布后 4 类真实休眠界面、OpenCode 和 DeepSeek Harness 原生页面共 6 项验证通过。128 个浏览器 NodePort（31600–31727）的目标端口均为 8444，就绪 EndpointSlice 已指向新 Pod；原生页面分别通过 31605、31606 访问。两个临时验收实例 #279、#280 已删除，原有 36 个实例仍保持休眠，全局自动休眠策略版本仍为 6。</p><p><a href="assets/2026-11-16-instance-sleep/deployment-candidate.json">构建镜像</a> · <a href="assets/2026-11-16-instance-sleep/deployment-rollout.json">滚动发布及端口验证</a> · <a href="assets/2026-11-16-instance-sleep/deployment-browser-verification.json">发布后浏览器验收</a> · <a href="assets/2026-11-16-instance-sleep/deployment-final-verification.json">最终检查</a></p><p><a href="assets/2026-11-16-instance-sleep/deployed-sleep-openclaw.png">OpenClaw 休眠</a> · <a href="assets/2026-11-16-instance-sleep/deployed-sleep-hermes.png">Hermes 休眠</a> · <a href="assets/2026-11-16-instance-sleep/deployed-sleep-opencode.png">OpenCode 休眠</a> · <a href="assets/2026-11-16-instance-sleep/deployed-sleep-deepseek-harness.png">DSH 休眠</a> · <a href="assets/2026-11-16-instance-sleep/deployed-native-opencode.png">OpenCode 原生页面</a> · <a href="assets/2026-11-16-instance-sleep/deployed-native-deepseek-harness.png">DSH 原生页面</a></p></section><section><h2>六项工作流矩阵</h2><div class="scroll"><table><thead><tr><th>类型</th><th>单例创建</th><th>单例休眠</th><th>单例唤醒</th><th>批量创建 ×2</th><th>批量休眠 ×2</th><th>并发唤醒 ×2</th></tr></thead><tbody><tr><th>openclaw</th><td><span class="badge pass">PASS</span></td><td><span class="badge pass">PASS</span></td><td><span class="badge pass">PASS</span></td><td><span class="badge pass">PASS</span></td><td><span class="badge pass">PASS</span></td><td><span class="badge pass">PASS</span></td></tr><tr><th>hermes</th><td><span class="badge pass">PASS</span></td><td><span class="badge pass">PASS</span></td><td><span class="badge pass">PASS</span></td><td><span class="badge pass">PASS</span></td><td><span class="badge pass">PASS</span></td><td><span class="badge pass">PASS</span></td></tr><tr><th>opencode</th><td><span class="badge pass">PASS</span></td><td><span class="badge pass">PASS</span></td><td><span class="badge pass">PASS</span></td><td><span class="badge pass">PASS</span></td><td><span class="badge pass">PASS</span></td><td><span class="badge pass">PASS</span></td></tr><tr><th>deepseek-harness</th><td><span class="badge pass">PASS</span></td><td><span class="badge pass">PASS</span></td><td><span class="badge pass">PASS</span></td><td><span class="badge pass">PASS</span></td><td><span class="badge pass">PASS</span></td><td><span class="badge pass">PASS</span></td></tr></tbody></table></div><p class="muted">当前没有批量休眠/唤醒专用接口或按钮：批量休眠观察同批实例按策略自然休眠；批量唤醒以两个并发的现有 start 请求验证，并未新增批量功能。</p></section>
+<section><h2>修改后的真实界面</h2><p>以下截图由 UIUX2 工作树的 Vite 前端连接集群真实 API 取得，逐类通过键盘触发“唤醒”。后台版本为 <code>ab6b1e7dc4806dc9b0049abca11f5800d504f4b6</code>；前端基线 <code>05b0162ca0d25913aac2be4ea023cae1cd370c6b</code> 加本轮未提交修改。以上首次流程验证使用工作树前端；后续已发布测试集群，见上方发布记录。</p><div class="gallery"><figure><figcaption>openclaw · #267 · <span class="badge pass">PASS</span></figcaption><a href="assets/2026-11-16-instance-sleep/live-openclaw-sleep.png"><img loading="lazy" src="assets/2026-11-16-instance-sleep/live-openclaw-sleep.png" alt="openclaw 真实休眠实例的图标和唤醒按钮"></a></figure><figure><figcaption>hermes · #270 · <span class="badge pass">PASS</span></figcaption><a href="assets/2026-11-16-instance-sleep/live-hermes-sleep.png"><img loading="lazy" src="assets/2026-11-16-instance-sleep/live-hermes-sleep.png" alt="hermes 真实休眠实例的图标和唤醒按钮"></a></figure><figure><figcaption>opencode · #273 · <span class="badge pass">PASS</span></figcaption><a href="assets/2026-11-16-instance-sleep/live-opencode-sleep.png"><img loading="lazy" src="assets/2026-11-16-instance-sleep/live-opencode-sleep.png" alt="opencode 真实休眠实例的图标和唤醒按钮"></a></figure><figure><figcaption>deepseek-harness · #276 · <span class="badge pass">PASS</span></figcaption><a href="assets/2026-11-16-instance-sleep/live-deepseek-harness-sleep.png"><img loading="lazy" src="assets/2026-11-16-instance-sleep/live-deepseek-harness-sleep.png" alt="deepseek-harness 真实休眠实例的图标和唤醒按钮"></a></figure></div><details><summary>展开真实界面点击结果</summary><pre>[
+  {
+    &quot;type&quot;: &quot;openclaw&quot;,
+    &quot;id&quot;: 267,
+    &quot;result&quot;: &quot;PASS&quot;,
+    &quot;seconds&quot;: 42.031,
+    &quot;generation&quot;: 2,
+    &quot;keyboard&quot;: true,
+    &quot;pendingDisabled&quot;: true,
+    &quot;startRequests&quot;: 1
+  },
+  {
+    &quot;type&quot;: &quot;hermes&quot;,
+    &quot;id&quot;: 270,
+    &quot;result&quot;: &quot;PASS&quot;,
+    &quot;seconds&quot;: 18.466,
+    &quot;generation&quot;: 2,
+    &quot;keyboard&quot;: true,
+    &quot;pendingDisabled&quot;: true,
+    &quot;startRequests&quot;: 1
+  },
+  {
+    &quot;type&quot;: &quot;opencode&quot;,
+    &quot;id&quot;: 273,
+    &quot;result&quot;: &quot;PASS&quot;,
+    &quot;seconds&quot;: 11.676,
+    &quot;generation&quot;: 2,
+    &quot;keyboard&quot;: true,
+    &quot;pendingDisabled&quot;: true,
+    &quot;startRequests&quot;: 1
+  },
+  {
+    &quot;type&quot;: &quot;deepseek-harness&quot;,
+    &quot;id&quot;: 276,
+    &quot;result&quot;: &quot;PASS&quot;,
+    &quot;seconds&quot;: 11.631,
+    &quot;generation&quot;: 2,
+    &quot;keyboard&quot;: true,
+    &quot;pendingDisabled&quot;: true,
+    &quot;startRequests&quot;: 1
+  }
+]</pre></details></section>
+<section><h2>检查标准与覆盖边界</h2><ul><li>创建：实际到达 running，并具有匹配的运行绑定；HTTP 受理不等于创建完成。</li><li>休眠：stopped_reason=idle_timeout，停止操作 phase=completed，运行绑定为 0。</li><li>唤醒：新 runtime_generation 实际运行；12 个实例的工作区标记文件 SHA256 与休眠前一致。</li><li>四类 Lite/Pro 共 8 条界面路径：休眠图标、键盘唤醒、处理中禁用、启动中切换；另测失败就地显示及重试、新代际不显示旧错误、手动停止/故障/启动中不冒充休眠。</li><li>中、英、日、韩、德在 1440 / 1280 / 768 / 390 宽度检查，无整页横向溢出；减少动态效果模式下仍可操作。Pro 为模拟接口界面回归，本轮集群生命周期实测为 Lite。</li><li>本轮创建使用真实 API，单实例唤醒同时检查修改后的真实界面按钮；原生 Agent 页面业务功能、模型回复及收费模型调用不在本轮断言范围。</li></ul><div class="samples"><a href="assets/2026-11-16-instance-sleep/sleep-zh-1440.png">中文桌面截图</a><a href="assets/2026-11-16-instance-sleep/sleep-en-1280.png">英文 1280 截图</a><a href="assets/2026-11-16-instance-sleep/sleep-ja-768.png">日文 768 截图</a><a href="assets/2026-11-16-instance-sleep/sleep-de-390.png">德文手机截图</a></div></section>
+<section><h2>静态检查与独立审查</h2><p>TypeScript app/node 无产物检查通过；变更组件 ESLint 通过；git diff --check 通过；设计检测未发现问题。独立审查发现旧唤醒错误可能跨休眠周期残留，现已按 Runtime 代际隔离，并通过新增浏览器回归及复审。</p><p>完整变更文件 ESLint <b>仍有 5 个已有错误</b>，均位于 InstanceDetailPage：react-hooks/refs 1 个、react-hooks/set-state-in-effect 4 个。对 git HEAD 原文件运行相同检查得到相同 5 个规则和代码位置；未将其称为通过，也未为本次修复改动无关逻辑。</p><p class="muted">浏览器测试夹具最初错误拦截了 Vite 开发 WebSocket，导致测试工具错误；修正为只拦截 API WebSocket 后重新运行，最终浏览器错误为 0。此问题未修改产品代码。</p></section>
+<section><h2>逐项证据与清理</h2><p><a href="assets/2026-11-16-instance-sleep/cluster-evidence.json">集群完整证据</a> · <a href="assets/2026-11-16-instance-sleep/live-browser.json">真实界面点击证据</a> · <a href="assets/2026-11-16-instance-sleep/validation.json">检查清单</a> · <a href="assets/2026-11-16-instance-sleep/browser-regression.log">界面回归日志</a> · <a href="assets/2026-11-16-instance-sleep/unit-regression.log">单元回归日志</a> · <a href="assets/2026-11-16-instance-sleep/eslint-baseline.json">ESLint 基线</a> · <a href="assets/2026-11-16-instance-sleep/eslint-components.json">组件 ESLint</a> · <a href="assets/2026-11-16-instance-sleep/design-check.json">设计检测</a></p><p><a href="../../e2e/runtime-sleep-acceptance.py">集群实测脚本</a> · <a href="../../frontend/tests/instance-sleep.browser.mjs">界面回归脚本</a> · <a href="../../frontend/tests/instance-sleep-live.browser.mjs">真实界面测试脚本</a></p><details><summary><span class="badge pass">PASS</span> openclaw · 单例创建</summary><pre>{
+  &quot;type&quot;: &quot;openclaw&quot;,
+  &quot;case&quot;: &quot;single:create&quot;,
+  &quot;result&quot;: &quot;PASS&quot;,
+  &quot;at&quot;: &quot;2026-11-16T01:02:17.636645+00:00&quot;,
+  &quot;evidence&quot;: {
+    &quot;ids&quot;: [
+      267
+    ],
+    &quot;seconds&quot;: 30.65
+  }
+}</pre></details><details><summary><span class="badge pass">PASS</span> openclaw · 批量创建 ×2</summary><pre>{
+  &quot;type&quot;: &quot;openclaw&quot;,
+  &quot;case&quot;: &quot;batch:create&quot;,
+  &quot;result&quot;: &quot;PASS&quot;,
+  &quot;at&quot;: &quot;2026-11-16T01:02:57.948713+00:00&quot;,
+  &quot;evidence&quot;: {
+    &quot;ids&quot;: [
+      268,
+      269
+    ],
+    &quot;seconds&quot;: 40.31
+  }
+}</pre></details><details><summary><span class="badge pass">PASS</span> hermes · 单例创建</summary><pre>{
+  &quot;type&quot;: &quot;hermes&quot;,
+  &quot;case&quot;: &quot;single:create&quot;,
+  &quot;result&quot;: &quot;PASS&quot;,
+  &quot;at&quot;: &quot;2026-11-16T01:03:16.471617+00:00&quot;,
+  &quot;evidence&quot;: {
+    &quot;ids&quot;: [
+      270
+    ],
+    &quot;seconds&quot;: 18.52
+  }
+}</pre></details><details><summary><span class="badge pass">PASS</span> hermes · 批量创建 ×2</summary><pre>{
+  &quot;type&quot;: &quot;hermes&quot;,
+  &quot;case&quot;: &quot;batch:create&quot;,
+  &quot;result&quot;: &quot;PASS&quot;,
+  &quot;at&quot;: &quot;2026-11-16T01:03:41.437419+00:00&quot;,
+  &quot;evidence&quot;: {
+    &quot;ids&quot;: [
+      272,
+      271
+    ],
+    &quot;seconds&quot;: 24.96
+  }
+}</pre></details><details><summary><span class="badge pass">PASS</span> opencode · 单例创建</summary><pre>{
+  &quot;type&quot;: &quot;opencode&quot;,
+  &quot;case&quot;: &quot;single:create&quot;,
+  &quot;result&quot;: &quot;PASS&quot;,
+  &quot;at&quot;: &quot;2026-11-16T01:03:53.867652+00:00&quot;,
+  &quot;evidence&quot;: {
+    &quot;ids&quot;: [
+      273
+    ],
+    &quot;seconds&quot;: 12.43
+  }
+}</pre></details><details><summary><span class="badge pass">PASS</span> opencode · 批量创建 ×2</summary><pre>{
+  &quot;type&quot;: &quot;opencode&quot;,
+  &quot;case&quot;: &quot;batch:create&quot;,
+  &quot;result&quot;: &quot;PASS&quot;,
+  &quot;at&quot;: &quot;2026-11-16T01:04:03.612747+00:00&quot;,
+  &quot;evidence&quot;: {
+    &quot;ids&quot;: [
+      274,
+      275
+    ],
+    &quot;seconds&quot;: 9.74
+  }
+}</pre></details><details><summary><span class="badge pass">PASS</span> deepseek-harness · 单例创建</summary><pre>{
+  &quot;type&quot;: &quot;deepseek-harness&quot;,
+  &quot;case&quot;: &quot;single:create&quot;,
+  &quot;result&quot;: &quot;PASS&quot;,
+  &quot;at&quot;: &quot;2026-11-16T01:04:09.995112+00:00&quot;,
+  &quot;evidence&quot;: {
+    &quot;ids&quot;: [
+      276
+    ],
+    &quot;seconds&quot;: 6.38
+  }
+}</pre></details><details><summary><span class="badge pass">PASS</span> deepseek-harness · 批量创建 ×2</summary><pre>{
+  &quot;type&quot;: &quot;deepseek-harness&quot;,
+  &quot;case&quot;: &quot;batch:create&quot;,
+  &quot;result&quot;: &quot;PASS&quot;,
+  &quot;at&quot;: &quot;2026-11-16T01:04:19.763422+00:00&quot;,
+  &quot;evidence&quot;: {
+    &quot;ids&quot;: [
+      278,
+      277
+    ],
+    &quot;seconds&quot;: 9.77
+  }
+}</pre></details><details><summary><span class="badge pass">PASS</span> openclaw · 单例休眠</summary><pre>{
+  &quot;type&quot;: &quot;openclaw&quot;,
+  &quot;case&quot;: &quot;single:sleep&quot;,
+  &quot;result&quot;: &quot;PASS&quot;,
+  &quot;at&quot;: &quot;2026-11-16T01:07:08.015643+00:00&quot;,
+  &quot;evidence&quot;: {
+    &quot;instances&quot;: [
+      {
+        &quot;id&quot;: 267,
+        &quot;stopped&quot;: {
+          &quot;id&quot;: 267,
+          &quot;name&quot;: &quot;u2-4790906-openclaw-single&quot;,
+          &quot;type&quot;: &quot;openclaw&quot;,
+          &quot;status&quot;: &quot;stopped&quot;,
+          &quot;runtime_generation&quot;: 1,
+          &quot;stopped_reason&quot;: &quot;idle_timeout&quot;,
+          &quot;auto_stop_phase&quot;: &quot;completed&quot;,
+          &quot;auto_stop_blocker&quot;: null,
+          &quot;runtime_error_message&quot;: null
+        },
+        &quot;sleep_proof&quot;: &quot;completed\t1\tidle&quot;,
+        &quot;failure&quot;: null
+      }
+    ]
+  }
+}</pre></details><details><summary><span class="badge pass">PASS</span> openclaw · 批量休眠 ×2</summary><pre>{
+  &quot;type&quot;: &quot;openclaw&quot;,
+  &quot;case&quot;: &quot;batch:sleep&quot;,
+  &quot;result&quot;: &quot;PASS&quot;,
+  &quot;at&quot;: &quot;2026-11-16T01:07:08.016836+00:00&quot;,
+  &quot;evidence&quot;: {
+    &quot;instances&quot;: [
+      {
+        &quot;id&quot;: 268,
+        &quot;stopped&quot;: {
+          &quot;id&quot;: 268,
+          &quot;name&quot;: &quot;u2-4790906-openclaw-batch-001&quot;,
+          &quot;type&quot;: &quot;openclaw&quot;,
+          &quot;status&quot;: &quot;stopped&quot;,
+          &quot;runtime_generation&quot;: 1,
+          &quot;stopped_reason&quot;: &quot;idle_timeout&quot;,
+          &quot;auto_stop_phase&quot;: &quot;completed&quot;,
+          &quot;auto_stop_blocker&quot;: null,
+          &quot;runtime_error_message&quot;: null
+        },
+        &quot;sleep_proof&quot;: &quot;completed\t1\tidle&quot;,
+        &quot;failure&quot;: null
+      },
+      {
+        &quot;id&quot;: 269,
+        &quot;stopped&quot;: {
+          &quot;id&quot;: 269,
+          &quot;name&quot;: &quot;u2-4790906-openclaw-batch-002&quot;,
+          &quot;type&quot;: &quot;openclaw&quot;,
+          &quot;status&quot;: &quot;stopped&quot;,
+          &quot;runtime_generation&quot;: 1,
+          &quot;stopped_reason&quot;: &quot;idle_timeout&quot;,
+          &quot;auto_stop_phase&quot;: &quot;completed&quot;,
+          &quot;auto_stop_blocker&quot;: null,
+          &quot;runtime_error_message&quot;: null
+        },
+        &quot;sleep_proof&quot;: &quot;completed\t1\tidle&quot;,
+        &quot;failure&quot;: null
+      }
+    ]
+  }
+}</pre></details><details><summary><span class="badge pass">PASS</span> hermes · 单例休眠</summary><pre>{
+  &quot;type&quot;: &quot;hermes&quot;,
+  &quot;case&quot;: &quot;single:sleep&quot;,
+  &quot;result&quot;: &quot;PASS&quot;,
+  &quot;at&quot;: &quot;2026-11-16T01:07:08.017781+00:00&quot;,
+  &quot;evidence&quot;: {
+    &quot;instances&quot;: [
+      {
+        &quot;id&quot;: 270,
+        &quot;stopped&quot;: {
+          &quot;id&quot;: 270,
+          &quot;name&quot;: &quot;u2-4790906-hermes-single&quot;,
+          &quot;type&quot;: &quot;hermes&quot;,
+          &quot;status&quot;: &quot;stopped&quot;,
+          &quot;runtime_generation&quot;: 1,
+          &quot;stopped_reason&quot;: &quot;idle_timeout&quot;,
+          &quot;auto_stop_phase&quot;: &quot;completed&quot;,
+          &quot;auto_stop_blocker&quot;: null,
+          &quot;runtime_error_message&quot;: null
+        },
+        &quot;sleep_proof&quot;: &quot;completed\t1\tidle&quot;,
+        &quot;failure&quot;: null
+      }
+    ]
+  }
+}</pre></details><details><summary><span class="badge pass">PASS</span> hermes · 批量休眠 ×2</summary><pre>{
+  &quot;type&quot;: &quot;hermes&quot;,
+  &quot;case&quot;: &quot;batch:sleep&quot;,
+  &quot;result&quot;: &quot;PASS&quot;,
+  &quot;at&quot;: &quot;2026-11-16T01:07:08.018731+00:00&quot;,
+  &quot;evidence&quot;: {
+    &quot;instances&quot;: [
+      {
+        &quot;id&quot;: 272,
+        &quot;stopped&quot;: {
+          &quot;id&quot;: 272,
+          &quot;name&quot;: &quot;u2-4790906-hermes-batch-001&quot;,
+          &quot;type&quot;: &quot;hermes&quot;,
+          &quot;status&quot;: &quot;stopped&quot;,
+          &quot;runtime_generation&quot;: 1,
+          &quot;stopped_reason&quot;: &quot;idle_timeout&quot;,
+          &quot;auto_stop_phase&quot;: &quot;completed&quot;,
+          &quot;auto_stop_blocker&quot;: null,
+          &quot;runtime_error_message&quot;: null
+        },
+        &quot;sleep_proof&quot;: &quot;completed\t1\tidle&quot;,
+        &quot;failure&quot;: null
+      },
+      {
+        &quot;id&quot;: 271,
+        &quot;stopped&quot;: {
+          &quot;id&quot;: 271,
+          &quot;name&quot;: &quot;u2-4790906-hermes-batch-002&quot;,
+          &quot;type&quot;: &quot;hermes&quot;,
+          &quot;status&quot;: &quot;stopped&quot;,
+          &quot;runtime_generation&quot;: 1,
+          &quot;stopped_reason&quot;: &quot;idle_timeout&quot;,
+          &quot;auto_stop_phase&quot;: &quot;completed&quot;,
+          &quot;auto_stop_blocker&quot;: null,
+          &quot;runtime_error_message&quot;: null
+        },
+        &quot;sleep_proof&quot;: &quot;completed\t1\tidle&quot;,
+        &quot;failure&quot;: null
+      }
+    ]
+  }
+}</pre></details><details><summary><span class="badge pass">PASS</span> opencode · 单例休眠</summary><pre>{
+  &quot;type&quot;: &quot;opencode&quot;,
+  &quot;case&quot;: &quot;single:sleep&quot;,
+  &quot;result&quot;: &quot;PASS&quot;,
+  &quot;at&quot;: &quot;2026-11-16T01:07:08.019685+00:00&quot;,
+  &quot;evidence&quot;: {
+    &quot;instances&quot;: [
+      {
+        &quot;id&quot;: 273,
+        &quot;stopped&quot;: {
+          &quot;id&quot;: 273,
+          &quot;name&quot;: &quot;u2-4790906-opencode-single&quot;,
+          &quot;type&quot;: &quot;opencode&quot;,
+          &quot;status&quot;: &quot;stopped&quot;,
+          &quot;runtime_generation&quot;: 1,
+          &quot;stopped_reason&quot;: &quot;idle_timeout&quot;,
+          &quot;auto_stop_phase&quot;: &quot;completed&quot;,
+          &quot;auto_stop_blocker&quot;: null,
+          &quot;runtime_error_message&quot;: null
+        },
+        &quot;sleep_proof&quot;: &quot;completed\t1\tidle&quot;,
+        &quot;failure&quot;: null
+      }
+    ]
+  }
+}</pre></details><details><summary><span class="badge pass">PASS</span> opencode · 批量休眠 ×2</summary><pre>{
+  &quot;type&quot;: &quot;opencode&quot;,
+  &quot;case&quot;: &quot;batch:sleep&quot;,
+  &quot;result&quot;: &quot;PASS&quot;,
+  &quot;at&quot;: &quot;2026-11-16T01:07:08.020641+00:00&quot;,
+  &quot;evidence&quot;: {
+    &quot;instances&quot;: [
+      {
+        &quot;id&quot;: 274,
+        &quot;stopped&quot;: {
+          &quot;id&quot;: 274,
+          &quot;name&quot;: &quot;u2-4790906-opencode-batch-001&quot;,
+          &quot;type&quot;: &quot;opencode&quot;,
+          &quot;status&quot;: &quot;stopped&quot;,
+          &quot;runtime_generation&quot;: 1,
+          &quot;stopped_reason&quot;: &quot;idle_timeout&quot;,
+          &quot;auto_stop_phase&quot;: &quot;completed&quot;,
+          &quot;auto_stop_blocker&quot;: null,
+          &quot;runtime_error_message&quot;: null
+        },
+        &quot;sleep_proof&quot;: &quot;completed\t1\tidle&quot;,
+        &quot;failure&quot;: null
+      },
+      {
+        &quot;id&quot;: 275,
+        &quot;stopped&quot;: {
+          &quot;id&quot;: 275,
+          &quot;name&quot;: &quot;u2-4790906-opencode-batch-002&quot;,
+          &quot;type&quot;: &quot;opencode&quot;,
+          &quot;status&quot;: &quot;stopped&quot;,
+          &quot;runtime_generation&quot;: 1,
+          &quot;stopped_reason&quot;: &quot;idle_timeout&quot;,
+          &quot;auto_stop_phase&quot;: &quot;completed&quot;,
+          &quot;auto_stop_blocker&quot;: null,
+          &quot;runtime_error_message&quot;: null
+        },
+        &quot;sleep_proof&quot;: &quot;completed\t1\tidle&quot;,
+        &quot;failure&quot;: null
+      }
+    ]
+  }
+}</pre></details><details><summary><span class="badge pass">PASS</span> deepseek-harness · 单例休眠</summary><pre>{
+  &quot;type&quot;: &quot;deepseek-harness&quot;,
+  &quot;case&quot;: &quot;single:sleep&quot;,
+  &quot;result&quot;: &quot;PASS&quot;,
+  &quot;at&quot;: &quot;2026-11-16T01:07:08.021643+00:00&quot;,
+  &quot;evidence&quot;: {
+    &quot;instances&quot;: [
+      {
+        &quot;id&quot;: 276,
+        &quot;stopped&quot;: {
+          &quot;id&quot;: 276,
+          &quot;name&quot;: &quot;u2-4790906-dsh-single&quot;,
+          &quot;type&quot;: &quot;deepseek-harness&quot;,
+          &quot;status&quot;: &quot;stopped&quot;,
+          &quot;runtime_generation&quot;: 1,
+          &quot;stopped_reason&quot;: &quot;idle_timeout&quot;,
+          &quot;auto_stop_phase&quot;: &quot;completed&quot;,
+          &quot;auto_stop_blocker&quot;: null,
+          &quot;runtime_error_message&quot;: null
+        },
+        &quot;sleep_proof&quot;: &quot;completed\t1\tidle&quot;,
+        &quot;failure&quot;: null
+      }
+    ]
+  }
+}</pre></details><details><summary><span class="badge pass">PASS</span> deepseek-harness · 批量休眠 ×2</summary><pre>{
+  &quot;type&quot;: &quot;deepseek-harness&quot;,
+  &quot;case&quot;: &quot;batch:sleep&quot;,
+  &quot;result&quot;: &quot;PASS&quot;,
+  &quot;at&quot;: &quot;2026-11-16T01:07:08.022621+00:00&quot;,
+  &quot;evidence&quot;: {
+    &quot;instances&quot;: [
+      {
+        &quot;id&quot;: 278,
+        &quot;stopped&quot;: {
+          &quot;id&quot;: 278,
+          &quot;name&quot;: &quot;u2-4790906-dsh-batch-001&quot;,
+          &quot;type&quot;: &quot;deepseek-harness&quot;,
+          &quot;status&quot;: &quot;stopped&quot;,
+          &quot;runtime_generation&quot;: 1,
+          &quot;stopped_reason&quot;: &quot;idle_timeout&quot;,
+          &quot;auto_stop_phase&quot;: &quot;completed&quot;,
+          &quot;auto_stop_blocker&quot;: null,
+          &quot;runtime_error_message&quot;: null
+        },
+        &quot;sleep_proof&quot;: &quot;completed\t1\tidle&quot;,
+        &quot;failure&quot;: null
+      },
+      {
+        &quot;id&quot;: 277,
+        &quot;stopped&quot;: {
+          &quot;id&quot;: 277,
+          &quot;name&quot;: &quot;u2-4790906-dsh-batch-002&quot;,
+          &quot;type&quot;: &quot;deepseek-harness&quot;,
+          &quot;status&quot;: &quot;stopped&quot;,
+          &quot;runtime_generation&quot;: 1,
+          &quot;stopped_reason&quot;: &quot;idle_timeout&quot;,
+          &quot;auto_stop_phase&quot;: &quot;completed&quot;,
+          &quot;auto_stop_blocker&quot;: null,
+          &quot;runtime_error_message&quot;: null
+        },
+        &quot;sleep_proof&quot;: &quot;completed\t1\tidle&quot;,
+        &quot;failure&quot;: null
+      }
+    ]
+  }
+}</pre></details><details><summary><span class="badge pass">PASS</span> openclaw · 单例唤醒</summary><pre>{
+  &quot;type&quot;: &quot;openclaw&quot;,
+  &quot;case&quot;: &quot;single:wake&quot;,
+  &quot;result&quot;: &quot;PASS&quot;,
+  &quot;at&quot;: &quot;2026-11-16T01:09:23.673240+00:00&quot;,
+  &quot;evidence&quot;: {
+    &quot;ids&quot;: [
+      267
+    ],
+    &quot;seconds&quot;: 0.29,
+    &quot;new_generation&quot;: true,
+    &quot;sha256_preserved&quot;: true
+  }
+}</pre></details><details><summary><span class="badge pass">PASS</span> openclaw · 并发唤醒 ×2</summary><pre>{
+  &quot;type&quot;: &quot;openclaw&quot;,
+  &quot;case&quot;: &quot;batch:wake&quot;,
+  &quot;result&quot;: &quot;PASS&quot;,
+  &quot;at&quot;: &quot;2026-11-16T01:10:04.125255+00:00&quot;,
+  &quot;evidence&quot;: {
+    &quot;ids&quot;: [
+      268,
+      269
+    ],
+    &quot;seconds&quot;: 40.45,
+    &quot;new_generation&quot;: true,
+    &quot;sha256_preserved&quot;: true
+  }
+}</pre></details><details><summary><span class="badge pass">PASS</span> hermes · 单例唤醒</summary><pre>{
+  &quot;type&quot;: &quot;hermes&quot;,
+  &quot;case&quot;: &quot;single:wake&quot;,
+  &quot;result&quot;: &quot;PASS&quot;,
+  &quot;at&quot;: &quot;2026-11-16T01:10:04.412900+00:00&quot;,
+  &quot;evidence&quot;: {
+    &quot;ids&quot;: [
+      270
+    ],
+    &quot;seconds&quot;: 0.29,
+    &quot;new_generation&quot;: true,
+    &quot;sha256_preserved&quot;: true
+  }
+}</pre></details><details><summary><span class="badge pass">PASS</span> hermes · 并发唤醒 ×2</summary><pre>{
+  &quot;type&quot;: &quot;hermes&quot;,
+  &quot;case&quot;: &quot;batch:wake&quot;,
+  &quot;result&quot;: &quot;PASS&quot;,
+  &quot;at&quot;: &quot;2026-11-16T01:10:26.505396+00:00&quot;,
+  &quot;evidence&quot;: {
+    &quot;ids&quot;: [
+      272,
+      271
+    ],
+    &quot;seconds&quot;: 22.09,
+    &quot;new_generation&quot;: true,
+    &quot;sha256_preserved&quot;: true
+  }
+}</pre></details><details><summary><span class="badge pass">PASS</span> opencode · 单例唤醒</summary><pre>{
+  &quot;type&quot;: &quot;opencode&quot;,
+  &quot;case&quot;: &quot;single:wake&quot;,
+  &quot;result&quot;: &quot;PASS&quot;,
+  &quot;at&quot;: &quot;2026-11-16T01:10:26.788262+00:00&quot;,
+  &quot;evidence&quot;: {
+    &quot;ids&quot;: [
+      273
+    ],
+    &quot;seconds&quot;: 0.28,
+    &quot;new_generation&quot;: true,
+    &quot;sha256_preserved&quot;: true
+  }
+}</pre></details><details><summary><span class="badge pass">PASS</span> opencode · 并发唤醒 ×2</summary><pre>{
+  &quot;type&quot;: &quot;opencode&quot;,
+  &quot;case&quot;: &quot;batch:wake&quot;,
+  &quot;result&quot;: &quot;PASS&quot;,
+  &quot;at&quot;: &quot;2026-11-16T01:10:39.712876+00:00&quot;,
+  &quot;evidence&quot;: {
+    &quot;ids&quot;: [
+      274,
+      275
+    ],
+    &quot;seconds&quot;: 12.92,
+    &quot;new_generation&quot;: true,
+    &quot;sha256_preserved&quot;: true
+  }
+}</pre></details><details><summary><span class="badge pass">PASS</span> deepseek-harness · 单例唤醒</summary><pre>{
+  &quot;type&quot;: &quot;deepseek-harness&quot;,
+  &quot;case&quot;: &quot;single:wake&quot;,
+  &quot;result&quot;: &quot;PASS&quot;,
+  &quot;at&quot;: &quot;2026-11-16T01:10:39.997441+00:00&quot;,
+  &quot;evidence&quot;: {
+    &quot;ids&quot;: [
+      276
+    ],
+    &quot;seconds&quot;: 0.28,
+    &quot;new_generation&quot;: true,
+    &quot;sha256_preserved&quot;: true
+  }
+}</pre></details><details><summary><span class="badge pass">PASS</span> deepseek-harness · 并发唤醒 ×2</summary><pre>{
+  &quot;type&quot;: &quot;deepseek-harness&quot;,
+  &quot;case&quot;: &quot;batch:wake&quot;,
+  &quot;result&quot;: &quot;PASS&quot;,
+  &quot;at&quot;: &quot;2026-11-16T01:10:49.887474+00:00&quot;,
+  &quot;evidence&quot;: {
+    &quot;ids&quot;: [
+      278,
+      277
+    ],
+    &quot;seconds&quot;: 9.89,
+    &quot;new_generation&quot;: true,
+    &quot;sha256_preserved&quot;: true
+  }
+}</pre></details><details><summary><span class="badge pass">PASS</span> platform · cleanup</summary><pre>{
+  &quot;type&quot;: &quot;platform&quot;,
+  &quot;case&quot;: &quot;cleanup&quot;,
+  &quot;result&quot;: &quot;PASS&quot;,
+  &quot;at&quot;: &quot;2026-11-16T01:11:03.741757+00:00&quot;,
+  &quot;evidence&quot;: {
+    &quot;deleted&quot;: [
+      267,
+      268,
+      269,
+      270,
+      272,
+      271,
+      273,
+      274,
+      275,
+      276,
+      278,
+      277
+    ],
+    &quot;remaining&quot;: []
+  }
+}</pre></details></section>
+<p class="muted">报告仅包含测试实例、状态及非敏感校验值；登录凭据和访问令牌未写入报告。保留本地已有未提交文件；本轮没有自动提交或合并；测试集群已按用户指令发布，见上方发布记录。</p>
+</main></body></html>

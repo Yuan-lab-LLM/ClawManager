@@ -11,6 +11,22 @@ async function load(path) {
 const { modelRoutingPlanRows, mergeDiscoveredPlan, plannedReasoningEnabled } = await load('../src/lib/modelRoutingPlan.ts');
 const { supportsManagedReasoningControl } = await load('../src/lib/modelProviderTemplates.ts');
 
+test('model editor omits the verbose routing guide but preserves configuration and refresh', () => {
+  const plan = read('../src/components/ModelDiscoveryPlan.tsx');
+  assert.doesNotMatch(plan, /<h3|<details|label\('planGuideTitle'\)|label\('planDisplayNameHelp'\)/);
+  assert.match(plan, /<table/);
+  assert.match(plan, /onClick=\{onRefresh\}/);
+  assert.match(plan, /title=\{discoveryHelp\}/);
+  assert.match(plan, /<ModelAccessEditor/);
+});
+
+test('context capacity input can remain empty while saved requests retain the zero default', () => {
+  const page = read('../src/pages/admin/ModelManagementPage.tsx');
+  assert.match(page, /value=\{card\.context_window_tokens \?\? ''\}/);
+  assert.match(page, /context_window_tokens: event\.target\.value === '' \? undefined : Number\.parseInt/);
+  assert.match(page, /context_window_tokens: Number\(card\.context_window_tokens\) \|\| 0/);
+});
+
 test('manual reasoning opt-out overrides discovery and a reasoning pool suggestion', () => {
   assert.equal(plannedReasoningEnabled({ reasoning_enabled: false, supports_reasoning: true, suggested_pool: 'reasoning' }), false);
   assert.equal(plannedReasoningEnabled({ reasoning_enabled: true, supports_reasoning: false }), true);
@@ -54,7 +70,9 @@ test('single plan keeps a stable row key and manual ID entry; batch does not sav
   assert.doesNotMatch(plan, /onApply|applySelected|displayNamePlaceholder/);
   assert.match(plan, /model\.id\.trim\(\) && <input/);
   assert.match(page, /models\.some\(\(card\) => !card\.isEditing\) && <ModelCatalog/);
-  assert.match(plan, /reasoningUnmanagedHelp/);
+  assert.doesNotMatch(plan, /reasoningUnmanagedHelp|supportsVisionHelp|poolHelp_/);
+  assert.match(plan, /flex h-8 items-center gap-2 whitespace-nowrap/);
+  assert.match(plan, /flex h-8 items-center gap-3/);
   assert.match(page, /patch\.reasoning_enabled !== undefined/);
   assert.match(plan, /'supportsTools', 'supportsVision', 'reasoning'/);
 });

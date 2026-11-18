@@ -1,0 +1,17 @@
+# Build context: verified native artifact directory produced from the pinned
+# source by build-local.sh. Never use an arbitrary downloaded stock executable.
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+ARG BINARY_SHA256
+ARG RUNTIME_REVISION
+COPY --chmod=755 opencode /usr/local/bin/opencode
+COPY governance-manifest.json /usr/local/share/clawmanager/opencode-governance-manifest.json
+RUN test -n "${BINARY_SHA256}" \
+ && echo "${BINARY_SHA256}  /usr/local/bin/opencode" | sha256sum -c - \
+ && opencode --version | grep -Fx 'opencode v2.0.27' \
+ && node -e 'const m=require("/usr/local/share/clawmanager/opencode-governance-manifest.json"); if(m.revision!=="1f4d07a4a519185955ae8ab2ea3607805509e386" || !m.teamTools || !m.teamTests) process.exit(1)'
+ENV CLAWMANAGER_MODEL_GOVERNANCE_PROTOCOL=1 CLAWMANAGER_REDIS_TEAM_PLUGIN_VERSION=opencode-team-v1
+LABEL io.clawmanager.opencode-revision="1f4d07a4a519185955ae8ab2ea3607805509e386" \
+      io.clawmanager.governance-adapter="cm-governance-2" \
+      io.clawmanager.team-protocol="opencode-team-v1" \
+      org.opencontainers.image.revision="${RUNTIME_REVISION}"

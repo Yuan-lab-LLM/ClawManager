@@ -1,7 +1,9 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -14,9 +16,126 @@ import (
 	"clawreef/internal/models"
 	"clawreef/internal/repository"
 	"clawreef/internal/services"
+	"clawreef/internal/utils"
 
 	"github.com/gin-gonic/gin"
 )
+
+type busyBatchDeleteService struct {
+	fakeWorkspaceHandlerInstanceService
+	calls   int
+	busy    bool
+	failure error
+}
+
+type queuedBatchDeleteService struct {
+	fakeWorkspaceHandlerInstanceService
+	queued      int
+	synchronous int
+}
+
+func (s *queuedBatchDeleteService) QueueDelete(int) error { s.queued++; return nil }
+func (s *queuedBatchDeleteService) Delete(int) error {
+	s.synchronous++
+	return errors.New("slow native cleanup must run in background")
+}
+
+func TestBatchDeleteLiteInstancesQueuesSlowNativeCleanup(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	service := &queuedBatchDeleteService{fakeWorkspaceHandlerInstanceService: fakeWorkspaceHandlerInstanceService{instances: map[int]*models.Instance{7: {ID: 7, UserID: 1, InstanceMode: "lite", RuntimeType: "gateway"}}}}
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/instances/batch/delete", strings.NewReader(`{"instance_ids":[7]}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set("userID", 1)
+	c.Set("userRole", "user")
+	(&InstanceHandler{instanceService: service}).BatchDeleteLiteInstances(c)
+	if recorder.Code != http.StatusAccepted || service.queued != 1 || service.synchronous != 0 {
+		t.Fatalf("batch request waited for native teardown: queued=%d synchronous=%d response=%s", service.queued, service.synchronous, recorder.Body.String())
+	}
+}
+
+func TestDeleteInstanceQueuesSlowNativeCleanup(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	service := &queuedBatchDeleteService{fakeWorkspaceHandlerInstanceService: fakeWorkspaceHandlerInstanceService{instances: map[int]*models.Instance{7: {ID: 7, UserID: 1, InstanceMode: "lite", RuntimeType: "gateway"}}}}
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Params = gin.Params{{Key: "id", Value: "7"}}
+	c.Request = httptest.NewRequest(http.MethodDelete, "/api/v1/instances/7", nil)
+	c.Set("userID", 1)
+	c.Set("userRole", "user")
+	(&InstanceHandler{instanceService: service}).DeleteInstance(c)
+	if recorder.Code != http.StatusAccepted || service.queued != 1 || service.synchronous != 0 {
+		t.Fatalf("HTTP delete waited for native proof: queued=%d synchronous=%d response=%s", service.queued, service.synchronous, recorder.Body.String())
+	}
+}
+
+func (s *busyBatchDeleteService) Delete(int) error {
+	s.calls++
+	if s.busy || s.calls == 1 {
+		return fmt.Errorf("scheduler owns lifecycle: %w", models.ErrInstanceLifecycleLockBusy)
+	}
+	return s.failure
+}
+
+func TestBatchDeleteLiteInstancesRetriesTransientLifecycleConflict(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	service := &busyBatchDeleteService{fakeWorkspaceHandlerInstanceService: fakeWorkspaceHandlerInstanceService{instances: map[int]*models.Instance{7: {ID: 7, UserID: 1, Type: "openclaw", InstanceMode: "lite", RuntimeType: "gateway"}}}}
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/instances/batch/delete", strings.NewReader(`{"instance_ids":[7]}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set("userID", 1)
+	c.Set("userRole", "user")
+	(&InstanceHandler{instanceService: service}).BatchDeleteLiteInstances(c)
+	if recorder.Code != http.StatusAccepted || service.calls != 2 {
+		t.Fatalf("transient conflict was not retried: calls=%d response=%s", service.calls, recorder.Body.String())
+	}
+}
+
+func TestBatchDeleteLiteInstancesStopsRetryOnCancellation(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	service := &busyBatchDeleteService{busy: true, fakeWorkspaceHandlerInstanceService: fakeWorkspaceHandlerInstanceService{instances: map[int]*models.Instance{7: {ID: 7, UserID: 1, Type: "openclaw", InstanceMode: "lite", RuntimeType: "gateway"}}}}
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/instances/batch/delete", strings.NewReader(`{"instance_ids":[7]}`)).WithContext(ctx)
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set("userID", 1)
+	c.Set("userRole", "user")
+	(&InstanceHandler{instanceService: service}).BatchDeleteLiteInstances(c)
+	if recorder.Code != http.StatusMultiStatus || service.calls != 1 || !strings.Contains(recorder.Body.String(), context.DeadlineExceeded.Error()) {
+		t.Fatalf("retry did not respect cancellation: calls=%d response=%s", service.calls, recorder.Body.String())
+	}
+	service.calls, service.busy, service.failure = 1, false, errors.New("stop proof unavailable")
+	recorder = httptest.NewRecorder()
+	c, _ = gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/instances/batch/delete", strings.NewReader(`{"instance_ids":[7]}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set("userID", 1)
+	c.Set("userRole", "user")
+	(&InstanceHandler{instanceService: service}).BatchDeleteLiteInstances(c)
+	if service.calls != 2 || !strings.Contains(recorder.Body.String(), "stop proof unavailable") {
+		t.Fatalf("nontransient deletion failure retried or lost: calls=%d response=%s", service.calls, recorder.Body.String())
+	}
+}
+
+func TestBatchDeleteLiteInstancesPreservesDurableLifecycleGuard(t *testing.T) {
+	service := &busyBatchDeleteService{calls: 1, failure: models.ErrInstanceOperationInProgress, fakeWorkspaceHandlerInstanceService: fakeWorkspaceHandlerInstanceService{instances: map[int]*models.Instance{7: {ID: 7, UserID: 1, InstanceMode: "lite", RuntimeType: "gateway"}}}}
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/instances/batch/delete", strings.NewReader(`{"instance_ids":[7]}`)).WithContext(ctx)
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set("userID", 1)
+	c.Set("userRole", "user")
+	(&InstanceHandler{instanceService: service}).BatchDeleteLiteInstances(c)
+	if service.calls != 2 || !strings.Contains(recorder.Body.String(), models.ErrInstanceOperationInProgress.Error()) {
+		t.Fatalf("durable lifecycle guard was retried or hidden: %s", recorder.Body.String())
+	}
+}
 
 type blockingBatchInstanceService struct {
 	fakeWorkspaceHandlerInstanceService
@@ -42,6 +161,71 @@ func TestInstanceCreateRequestToServiceIncludesOwner(t *testing.T) {
 	got := instanceCreateRequestToService(req)
 	if got.Owner == nil || *got.Owner != owner {
 		t.Fatalf("owner = %v, want %q", got.Owner, owner)
+	}
+}
+
+type postCreateInstanceService struct {
+	fakeWorkspaceHandlerInstanceService
+	err error
+}
+
+func (s *postCreateInstanceService) Create(userID int, req services.CreateInstanceRequest) (*models.Instance, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	return &models.Instance{ID: 71, UserID: userID, Name: req.Name}, nil
+}
+
+type postCreateSkillService struct {
+	services.SkillService
+	err error
+}
+
+func (s *postCreateSkillService) AttachSkillToInstance(int, string, int, int) (*services.InstanceSkillPayload, error) {
+	return nil, s.err
+}
+
+func TestCreateInstanceReportsCreatedIdentityAfterSkillFailure(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, tc := range []struct {
+		name       string
+		createErr  error
+		skillErr   error
+		wantStatus int
+		wantHeader string
+		wantError  string
+	}{
+		{name: "attach forbidden", skillErr: errors.New("skill_attach_forbidden"), wantStatus: http.StatusForbidden, wantHeader: "71", wantError: "skill_attach_forbidden"},
+		{name: "package pending", skillErr: errors.New("skill_package_pending"), wantStatus: http.StatusConflict, wantHeader: "71", wantError: "skill_package_pending"},
+		{name: "package checksum", skillErr: utils.NewHubError("skill_package_md5_mismatch", "checksum failed", nil), wantStatus: http.StatusBadRequest, wantHeader: "71", wantError: "skill_package_md5_mismatch"},
+		{name: "create failed", createErr: errors.New("instance name already exists"), wantStatus: http.StatusConflict, wantError: "instance name already exists"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/instances", strings.NewReader(`{"name":"created-lite","type":"openclaw","cpu_cores":2,"memory_gb":4,"disk_gb":10,"os_type":"openclaw","os_version":"latest","skill_ids":[17]}`))
+			c.Request.Header.Set("Content-Type", "application/json")
+			c.Set("userID", 7)
+			c.Set("userRole", "user")
+			handler := &InstanceHandler{instanceService: &postCreateInstanceService{err: tc.createErr}, skillService: &postCreateSkillService{err: tc.skillErr}}
+			handler.CreateInstance(c)
+			if recorder.Code != tc.wantStatus {
+				t.Fatalf("status = %d, want %d: %s", recorder.Code, tc.wantStatus, recorder.Body.String())
+			}
+			var response struct {
+				Success bool   `json:"success"`
+				Error   string `json:"error"`
+			}
+			if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+				t.Fatal(err)
+			}
+			if response.Success || response.Error != tc.wantError {
+				t.Fatalf("error response = %#v, want error %q", response, tc.wantError)
+			}
+			if got := recorder.Header().Get("X-ClawManager-Created-Instance"); got != tc.wantHeader {
+				t.Fatalf("created instance header = %q, want %q", got, tc.wantHeader)
+			}
+		})
 	}
 }
 
@@ -170,6 +354,11 @@ func TestRestartInstanceAcceptsOptionalEnvironmentOverrides(t *testing.T) {
 			userRole:   "user",
 			wantStatus: http.StatusOK,
 			wantCalls:  1,
+		},
+		{
+			name:   "durable shutdown pending is accepted",
+			userID: 7, userRole: "user", wantStatus: http.StatusAccepted,
+			wantCalls: 1, restartErr: services.ErrInstanceRestartPending,
 		},
 		{
 			name:       "other user cannot restart",
@@ -567,14 +756,15 @@ func TestSharedInstanceSessionIssuesScopedRuntimeAndWorkspaceSession(t *testing.
 	workspacePath := t.TempDir()
 	instanceService := &fakeWorkspaceHandlerInstanceService{instances: map[int]*models.Instance{
 		77: {
-			ID:            77,
-			UserID:        20,
-			Name:          "shared-openclaw",
-			Type:          "openclaw",
-			Status:        "running",
-			RuntimeType:   services.RuntimeBackendGateway,
-			InstanceMode:  services.InstanceModeLite,
-			WorkspacePath: &workspacePath,
+			ID:                77,
+			RuntimeGeneration: 3,
+			UserID:            20,
+			Name:              "shared-openclaw",
+			Type:              "openclaw",
+			Status:            "running",
+			RuntimeType:       services.RuntimeBackendGateway,
+			InstanceMode:      services.InstanceModeLite,
+			WorkspacePath:     &workspacePath,
 		},
 	}}
 	accessTokens := services.NewInstanceAccessService()
@@ -602,6 +792,8 @@ func TestSharedInstanceSessionIssuesScopedRuntimeAndWorkspaceSession(t *testing.
 	}
 	for _, value := range []string{
 		`"workspace_access":"write"`,
+		`"runtime_generation":3`,
+		`"workbench_scope":"` + services.SharedWorkbenchScope("sl_test", &models.InstanceExternalAccess{AuthMode: services.ExternalAccessModeShareLink, WorkspaceAccess: services.ExternalWorkspaceAccessWrite}) + `"`,
 		`"workspace_available":true`,
 		`"csrf_token":"`,
 		`"access_url":"`,
@@ -922,8 +1114,6 @@ func TestProxyAccessTokenRejectsRuntimeQueryTokenWithoutCookie(t *testing.T) {
 	}
 }
 
-
-
 func TestBrowserAccessEntryURLBootstrapsDedicatedOrigin(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
@@ -969,6 +1159,7 @@ func TestProxyAccessTokenBootstrapsDedicatedOpenCodeOriginCookie(t *testing.T) {
 	requestURL := "/api/v1/instances/171/proxy/?token=" + url.QueryEscape(token.Token) + "&token=runtime-session&view=compact"
 	c.Request = httptest.NewRequest(http.MethodGet, requestURL, nil)
 	c.Request.Header.Set(services.DedicatedRuntimeOriginHeader, services.RuntimeTypeOpenCode)
+	c.Request.Header.Set("Sec-Fetch-Dest", "iframe")
 
 	handler := &InstanceHandler{accessService: accessService}
 	if got, ok := handler.proxyAccessToken(c, 171); ok || got != "" {
@@ -1046,6 +1237,9 @@ func TestBuildLiteBatchCreateRequestsDefaultsToGatewayLite(t *testing.T) {
 		t.Fatalf("request count = %d/%d, want 2/2", len(requests), len(handlerRequests))
 	}
 	for idx, req := range requests {
+		if req.Owner != nil || handlerRequests[idx].Owner != nil {
+			t.Fatalf("request %d omitted owner = %v/%v, want nil/nil", idx, req.Owner, handlerRequests[idx].Owner)
+		}
 		if req.Name == "" || req.Mode != services.InstanceModeLite || req.InstanceMode != services.InstanceModeLite || req.RuntimeType != services.RuntimeBackendGateway {
 			t.Fatalf("request %d was not normalized to lite gateway: %#v", idx, req)
 		}
@@ -1055,6 +1249,44 @@ func TestBuildLiteBatchCreateRequestsDefaultsToGatewayLite(t *testing.T) {
 		if req.DiskGB != services.DefaultLiteDiskGB {
 			t.Fatalf("request %d disk = %dGiB, want %dGiB", idx, req.DiskGB, services.DefaultLiteDiskGB)
 		}
+	}
+}
+
+func TestBuildLiteBatchCreateRequestsPreservesSharedMetadata(t *testing.T) {
+	for _, instanceType := range []string{"openclaw", "hermes", "opencode", "deepseek-harness"} {
+		t.Run(instanceType, func(t *testing.T) {
+			var input BatchCreateLiteInstancesRequest
+			body := fmt.Sprintf(`{"name_prefix":"shared","count":2,"start_index":9,"template":{"type":%q,"owner":"team@example.com","description":"Shared setup","environment_overrides":{"API_TOKEN":"value=with=equals","LOG_LEVEL":"info"},"skill_ids":[17,23],"openclaw_config_plan":{"mode":"manual","resource_ids":[31]}}}`, instanceType)
+			if err := json.Unmarshal([]byte(body), &input); err != nil {
+				t.Fatal(err)
+			}
+			requests, handlerRequests, err := buildLiteBatchCreateRequests(input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(requests) != 2 || len(handlerRequests) != 2 {
+				t.Fatalf("request count = %d/%d, want 2/2", len(requests), len(handlerRequests))
+			}
+			for idx, req := range requests {
+				handlerReq := handlerRequests[idx]
+				wantName := fmt.Sprintf("shared-%03d", idx+9)
+				if req.Name != wantName || handlerReq.Name != wantName || req.Type != instanceType || handlerReq.Type != instanceType {
+					t.Fatalf("request %d identity = %q/%q %q/%q", idx, req.Name, handlerReq.Name, req.Type, handlerReq.Type)
+				}
+				if req.Owner == nil || *req.Owner != "team@example.com" || handlerReq.Owner == nil || *handlerReq.Owner != "team@example.com" {
+					t.Fatalf("request %d owner = %v/%v, want shared owner", idx, req.Owner, handlerReq.Owner)
+				}
+				if req.Description == nil || *req.Description != "Shared setup" || handlerReq.Description == nil || *handlerReq.Description != "Shared setup" {
+					t.Fatalf("request %d description = %v/%v, want shared description", idx, req.Description, handlerReq.Description)
+				}
+				if !reflect.DeepEqual(req.EnvironmentOverrides, input.Template.EnvironmentOverrides) || !reflect.DeepEqual(handlerReq.EnvironmentOverrides, input.Template.EnvironmentOverrides) {
+					t.Fatalf("request %d lost shared environment: %#v / %#v", idx, req.EnvironmentOverrides, handlerReq.EnvironmentOverrides)
+				}
+				if !reflect.DeepEqual(handlerReq.SkillIDs, []int{17, 23}) || !reflect.DeepEqual(req.OpenClawConfigPlan, input.Template.OpenClawConfigPlan) || !reflect.DeepEqual(handlerReq.OpenClawConfigPlan, input.Template.OpenClawConfigPlan) {
+					t.Fatalf("request %d lost skills or configuration plan: %#v / %#v", idx, req, handlerReq)
+				}
+			}
+		})
 	}
 }
 
@@ -1249,5 +1481,175 @@ func TestGetInstanceSessionUsageDetailNotFound(t *testing.T) {
 
 	if recorder.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want %d, body = %s", recorder.Code, http.StatusNotFound, recorder.Body.String())
+	}
+}
+
+func TestSharedInstanceSessionReusesCurrentCookieUntilRenewalWindow(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, tc := range []struct {
+		name       string
+		remaining  time.Duration
+		wrongOwner bool
+		reuse      bool
+	}{
+		{"second tab retains CSRF", 30 * time.Minute, false, true},
+		{"near expiry renews", time.Minute, false, false},
+		{"wrong owner never reused", 30 * time.Minute, true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := t.TempDir()
+			instances := &fakeWorkspaceHandlerInstanceService{instances: map[int]*models.Instance{77: {ID: 77, UserID: 20, Type: "openclaw", Status: "running", RuntimeType: services.RuntimeBackendGateway, InstanceMode: services.InstanceModeLite, WorkspacePath: &path}}}
+			access := &models.InstanceExternalAccess{InstanceID: 77, Enabled: true, AuthMode: services.ExternalAccessModeShareLink, WorkspaceAccess: services.ExternalWorkspaceAccessWrite}
+			tokens := services.NewInstanceAccessService()
+			defer tokens.Stop()
+			handler := &InstanceHandler{instanceService: instances, externalAccessService: &fakeSharedExternalAccessService{access: access}, accessService: tokens, proxyService: services.NewInstanceProxyService(tokens)}
+			router := gin.New()
+			router.GET("/shared/:code/session", handler.GetSharedInstanceSession)
+			executor := &sharedWorkbenchHandlerService{}
+			NewSharedInstanceWorkbenchHandler(executor, instances, handler.externalAccessService, tokens).Register(router.Group("/shared/:code/workbench"))
+			first := httptest.NewRecorder()
+			router.ServeHTTP(first, httptest.NewRequest("GET", "/shared/sl_test/session", nil))
+			if first.Code != 200 {
+				t.Fatalf("initial session: %d %s", first.Code, first.Body.String())
+			}
+			var issued string
+			for _, cookie := range first.Result().Cookies() {
+				if cookie.Name == shortExternalAccessCookieName("sl_test") {
+					issued = cookie.Value
+					break
+				}
+			}
+			original, err := tokens.ValidateToken(issued)
+			if err != nil {
+				t.Fatal(err)
+			}
+			user := 20
+			if tc.wrongOwner {
+				user = 21
+			}
+			old, err := tokens.GenerateBoundToken(user, 77, original.InstanceType, original.AccessURL, original.Upstream, original.TargetPort, tc.remaining, original.SessionBinding)
+			if err != nil {
+				t.Fatal(err)
+			}
+			request := httptest.NewRequest("GET", "/shared/sl_test/session", nil)
+			request.AddCookie(&http.Cookie{Name: shortExternalAccessCookieName("sl_test"), Value: old.Token})
+			second := httptest.NewRecorder()
+			router.ServeHTTP(second, request)
+			if second.Code != 200 {
+				t.Fatalf("second session: %d %s", second.Code, second.Body.String())
+			}
+			current := old.Token
+			for _, cookie := range second.Result().Cookies() {
+				if cookie.Name == shortExternalAccessCookieName("sl_test") {
+					current = cookie.Value
+					break
+				}
+			}
+			if (current == old.Token) != tc.reuse {
+				t.Fatalf("cookie reuse=%v want=%v", current == old.Token, tc.reuse)
+			}
+			var response struct {
+				Data struct {
+					CSRF string `json:"csrf_token"`
+				} `json:"data"`
+			}
+			if err := json.Unmarshal(second.Body.Bytes(), &response); err != nil {
+				t.Fatal(err)
+			}
+			if tc.reuse && response.Data.CSRF != sharedExternalAccessCSRFToken("sl_test", old.Token) {
+				t.Fatal("opening another tab invalidated existing tab CSRF")
+			}
+			// A renewed cookie rejects the previous proof before execution; the refreshed
+			// proof can then be retried without replaying a successful mutation.
+			post := func(csrf string) *httptest.ResponseRecorder {
+				request := httptest.NewRequest("POST", "/shared/sl_test/workbench/git?generation=3", strings.NewReader(`{"operation":"projects"}`))
+				request.AddCookie(&http.Cookie{Name: shortExternalAccessCookieName("sl_test"), Value: current})
+				request.Header.Set(sharedWorkspaceCSRFHeader, csrf)
+				result := httptest.NewRecorder()
+				router.ServeHTTP(result, request)
+				return result
+			}
+			previous := post(sharedExternalAccessCSRFToken("sl_test", old.Token))
+			if tc.reuse {
+				if previous.Code != 200 || executor.calls != 1 {
+					t.Fatalf("unchanged tab lost workbench access: %d %s", previous.Code, previous.Body.String())
+				}
+			} else {
+				if previous.Code != 403 || executor.calls != 0 || !strings.Contains(previous.Body.String(), `"error_code":"share_csrf_invalid"`) {
+					t.Fatalf("stale proof reached executor or cannot renew: %d %s", previous.Code, previous.Body.String())
+				}
+				refreshed := post(response.Data.CSRF)
+				if refreshed.Code != 200 || executor.calls != 1 {
+					t.Fatalf("renewed proof failed: %d %s", refreshed.Code, refreshed.Body.String())
+				}
+			}
+		})
+	}
+}
+
+func TestBatchDeleteLiteInstancesSharesRetryBudget(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	service := &busyBatchDeleteService{busy: true, fakeWorkspaceHandlerInstanceService: fakeWorkspaceHandlerInstanceService{instances: map[int]*models.Instance{7: {ID: 7, UserID: 1, InstanceMode: "lite", RuntimeType: "gateway"}, 8: {ID: 8, UserID: 1, InstanceMode: "lite", RuntimeType: "gateway"}}}}
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/instances/batch/delete", strings.NewReader(`{"instance_ids":[7,8]}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set("userID", 1)
+	c.Set("userRole", "user")
+	started := time.Now()
+	(&InstanceHandler{instanceService: service}).BatchDeleteLiteInstances(c)
+	if elapsed := time.Since(started); elapsed > 4500*time.Millisecond {
+		t.Fatalf("each busy item renewed the batch budget: %v", elapsed)
+	}
+	if recorder.Code != http.StatusMultiStatus {
+		t.Fatalf("busy batch result: %s", recorder.Body.String())
+	}
+}
+
+type selectivelyBusyBatchDeleteService struct {
+	fakeWorkspaceHandlerInstanceService
+	queued map[int]bool
+}
+
+func (s *selectivelyBusyBatchDeleteService) QueueDelete(id int) error {
+	if id == 7 {
+		return models.ErrInstanceLifecycleLockBusy
+	}
+	s.queued[id] = true
+	return nil
+}
+
+func TestBatchDeleteLiteInstancesBusyEntryDoesNotStarveOtherEntries(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	service := &selectivelyBusyBatchDeleteService{
+		fakeWorkspaceHandlerInstanceService: fakeWorkspaceHandlerInstanceService{instances: map[int]*models.Instance{
+			7: {ID: 7, UserID: 1, InstanceMode: "lite", RuntimeType: "gateway"},
+			8: {ID: 8, UserID: 1, InstanceMode: "lite", RuntimeType: "gateway"},
+			9: {ID: 9, UserID: 1, InstanceMode: "lite", RuntimeType: "gateway"},
+		}},
+		queued: make(map[int]bool),
+	}
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	ctx, cancel := context.WithTimeout(context.Background(), 80*time.Millisecond)
+	defer cancel()
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/instances/batch/delete", strings.NewReader(`{"instance_ids":[7,8,9]}`)).WithContext(ctx)
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set("userID", 1)
+	c.Set("userRole", "user")
+	(&InstanceHandler{instanceService: service}).BatchDeleteLiteInstances(c)
+	var response struct {
+		Data BatchDeleteLiteInstancesResponse `json:"data"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if recorder.Code != http.StatusMultiStatus || !service.queued[8] || !service.queued[9] || response.Data.Deleted != 2 || response.Data.Failed != 1 {
+		t.Fatalf("busy first entry starved available entries: queued=%v response=%s", service.queued, recorder.Body.String())
+	}
+	for idx, id := range []int{7, 8, 9} {
+		if response.Data.Results[idx].InstanceID != id {
+			t.Fatalf("batch result order changed: %s", recorder.Body.String())
+		}
 	}
 }

@@ -1108,6 +1108,24 @@ kind: ClusterRole
 metadata:
   name: clawmanager-runtime-manager
 rules:
+  - apiGroups: [""]
+    resources: ["nodes", "configmaps"]
+    verbs: ["watch"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["servicecidrs"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["nodes", "persistentvolumes", "persistentvolumeclaims"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["serviceaccounts"]
+    verbs: ["get", "create"]
+  - apiGroups: ["storage.k8s.io"]
+    resources: ["storageclasses"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["configmaps", "secrets"]
+    verbs: ["get", "list", "create", "update"]
   - apiGroups:
       - coordination.k8s.io
     resources:
@@ -1132,6 +1150,7 @@ rules:
       - ""
     resources:
       - pods
+      - endpoints
     verbs:
       - get
       - list
@@ -1488,7 +1507,7 @@ spec:
           readinessProbe:
             httpGet:
               scheme: HTTPS
-              path: /healthz
+              path: /api/v1/version
               port: https
             initialDelaySeconds: 10
             periodSeconds: 10
@@ -1835,6 +1854,12 @@ spec:
     - name: proxy
       port: 3128
       targetPort: 9001
+    - name: runtime-proxy
+      port: 3129
+      targetPort: 9002
+    - name: browser-proxy
+      port: 3131
+      targetPort: 9004
 ---
 apiVersion: apps/v1
 kind: Deployment

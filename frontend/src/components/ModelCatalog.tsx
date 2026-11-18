@@ -92,8 +92,8 @@ export default function ModelCatalog<T extends CatalogModel>({ models, busy, edi
       const limit = limits[groupId] ?? 10;
       const title = grouping === 'url' ? key || label('catalogNoURL') : label(`qualityTier${key}`);
       const pending = items.filter((model) => model.isNew).length;
-      return <section key={groupId} className="overflow-hidden rounded-xl border border-[#ead8cf] bg-white">
-        <button type="button" className="flex w-full items-center gap-3 bg-[#fff8f5] px-4 py-3 text-left" aria-expanded={!isCollapsed}
+      return <section key={groupId} className="overflow-hidden rounded-xl border border-[var(--cm-border)] bg-white">
+        <button type="button" className="flex w-full items-center gap-3 bg-[var(--cm-subtle)] px-4 py-3 text-left" aria-expanded={!isCollapsed}
           onClick={() => setCollapsed((current) => { const next = new Set(current); if (next.has(groupId)) next.delete(groupId); else next.add(groupId); return next; })}>
           <span aria-hidden="true">{isCollapsed ? '▸' : '▾'}</span>
           <span className="min-w-0 flex-1 break-all text-sm font-semibold text-gray-800">{title}</span>

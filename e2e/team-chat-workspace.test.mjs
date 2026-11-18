@@ -16,11 +16,11 @@ const server = http.createServer((req, res) => {
 });
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 const origin = `http://127.0.0.1:${server.address().port}`;
-const browser = await chromium.launch({ headless: true, channel: process.env.PLAYWRIGHT_CHANNEL || 'chrome' });
+const browser = await chromium.launch({ headless: true, channel: process.env.PLAYWRIGHT_CHANNEL || 'chrome', executablePath: process.env.PLAYWRIGHT_EXECUTABLE_PATH });
 const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
 const errors = [];
 page.on('pageerror', error => errors.push(String(error)));
-await page.addInitScript(() => { localStorage.setItem('access_token', 'local-fixture-only'); localStorage.setItem('language', 'zh-CN'); });
+await page.addInitScript(() => { localStorage.setItem('access_token', 'local-fixture-only'); localStorage.setItem('clawmanager_locale', 'zh'); });
 const now = new Date().toISOString();
 const members = ['leader', 'developer', 'reviewer'].map((key, i) => ({ id: i + 1, team_id: 144, user_id: 1, instance_id: 477 + i, member_key: key, display_name: key, role: key, runtime_type: i ? 'hermes' : 'openclaw', instance_mode: 'lite', status: i === 1 ? 'busy' : 'idle', availability: i === 1 ? 'busy' : 'idle', progress: 0, description: '成员职责与完整说明', last_seen_at: now, created_at: now, updated_at: now }));
 const tasks = Array.from({ length: 8 }, (_, i) => ({ id: 300 + i, team_id: 144, target_member_id: 1, created_by: 1, message_id: `team-144-task-${300 + i}`, status: i === 7 ? 'running' : 'succeeded', workflow_state: i === 7 ? 'executing' : 'completed', payload: { title: `测试问题 ${i + 1}`, prompt: `测试问题 ${i + 1}：请协作开发并验收。\n${'长消息用于验证滚动定位和自动换行。'.repeat(20)}` }, result: i === 7 ? {} : { result: `已完成第 ${i + 1} 次任务。 /team/report.md` }, created_at: new Date(Date.now() - (8 - i) * 60000).toISOString(), updated_at: now }));
@@ -51,6 +51,10 @@ await page.route('**/api/v1/**', async route => {
   if (url.pathname === '/api/v1/teams/144') return failRefresh ? route.fulfill({ status: 503, json: { error: 'fixture transient failure' } }) : send(data);
   return send({});
 });
+const updateTeam = async (event = 'focus') => {
+  await Promise.all([page.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/teams/144'), page.evaluate(type => window.dispatchEvent(new Event(type)), event)]);
+  await page.waitForTimeout(100);
+};
 const workspace = () => page.locator('.team-chat-workspace:visible');
 const shot = async name => { await page.screenshot({ path: path.resolve(import.meta.dirname, `reports/team-workspace-${name}.png`), fullPage: true }); };
 try {
@@ -104,7 +108,7 @@ try {
   members[0].display_name = '团队负责人';
   members[1].display_name = '论文检索专员';
   members[2].display_name = '论文精读专员';
-  await page.getByRole('button', { name: '刷新', exact: true }).click(); await page.waitForTimeout(200);
+  await updateTeam(); await page.waitForTimeout(200);
   await shot('member-rail-grouped');
   await workspace().locator('.team-member-rail').screenshot({ path: path.resolve(import.meta.dirname, 'reports/team-member-rail-white.png') });
   assert.ok(await workspace().locator('.team-roster-mini-name').evaluateAll(names => names.every(name => name.scrollHeight <= name.clientHeight + 1)), 'shared-prefix names fit without clipping the distinguishing suffix');
@@ -115,7 +119,7 @@ try {
   members[2].instance_mode = 'pro';
   const savedInstance = members[1].instance_id;
   delete members[1].instance_id;
-  await page.getByRole('button', { name: '刷新', exact: true }).click();
+  await updateTeam();
   await page.waitForTimeout(200);
   assert.match(await workspace().locator('.team-member-rail').innerText(), /论文检索专员/);
   assert.match(await workspace().locator('.team-member-rail').innerText(), /论文精读专员/);
@@ -159,7 +163,7 @@ try {
   await page.setViewportSize({ width: 1920, height: 1080 }); await page.waitForTimeout(200);
   const extraMembers = Array.from({ length: 5 }, (_, i) => ({ ...members[0], id: 20 + i, member_key: 'extra-' + i, display_name: 'Additional specialist ' + i }));
   members.push(...extraMembers);
-  await page.getByRole('button', { name: '刷新', exact: true }).click(); await page.waitForTimeout(200);
+  await updateTeam(); await page.waitForTimeout(200);
   if (await workspace().getAttribute('data-left') !== 'true') await workspace().getByRole('button', { name: '展开成员与团队配置' }).click();
   const found = new Set();
   for (let i = 0; i < 3; i++) {
@@ -172,7 +176,7 @@ try {
   members.splice(3);
   members.forEach((m, i) => { m.display_name = m.member_key; m.availability = i === 1 ? 'busy' : 'idle'; m.instance_mode = 'lite'; delete m.blocked_reason; });
   members[1].instance_id = savedInstance;
-  await page.getByRole('button', { name: '刷新', exact: true }).click(); await page.waitForTimeout(200);
+  await updateTeam(); await page.waitForTimeout(200);
   assert.equal(await memberPanel.locator('.team-roster-card').count(), 3, 'shrinking roster clamps page safely');
   await workspace().getByRole('button', { name: '收起成员', exact: true }).click();
   await shot('collapsed');
@@ -316,7 +320,7 @@ try {
   // New, successful transfer animates once; re-polling the same event does not
   // reset the effect. Terminal tasks must stop execution animation.
   data.events.push({ ...data.events[0], id: 2, sequence_no: 2, created_at: new Date().toISOString(), payload: { from: 'developer', to: 'reviewer', sent: true, messageDelivered: true } });
-  await page.getByRole('button', { name: '刷新', exact: true }).filter({ visible: true }).first().click();
+  await updateTeam();
   await workspace().locator('.team-workflow-handoff[data-fresh=true]').waitFor();
   assert.match(await workspace().locator('.team-workflow-handoff').innerText(), /developer[\s\S]*reviewer/);
   const handoff=workspace().locator('.team-workflow-handoff');
@@ -326,7 +330,7 @@ try {
   assert.match(await handoff.getAttribute('aria-label'),/developer → reviewer/);
   assert.ok(await handoff.evaluate(el=>el===document.activeElement));
   tasks[7].status = 'succeeded'; tasks[7].workflow_state = 'completed'; tasks[7].updated_at = new Date(Date.now() + 1000).toISOString();
-  await page.getByRole('button', { name: '刷新', exact: true }).filter({ visible: true }).first().click();
+  await updateTeam();
   await page.waitForFunction(() => [...document.querySelectorAll('.team-workflow-nodes li')].every(el => el.dataset.active !== 'true'));
   assert.match(await workspace().locator('.team-workflow-status').innerText(), /已完成/);
   // Actual product transcript: consecutive-worker grouping keeps every event
@@ -336,7 +340,7 @@ try {
   const narrative = (id, member, content) => ({ id, team_id:144,task_id:307,member_id:member.id,event_type:'progress',sequence_no:id,created_at:new Date(Date.now()+id*1000).toISOString(),payload:{from:member.member_key,memberId:member.member_key,eventKind:'agent_narrative',messageId:`narrative-${id}`,text:content,phaseId:'phase-news',revision:1}});
   data.events.push(narrative(10,members[1],'已完成资讯来源核对，正在整理主题与发布时间。'),narrative(11,members[1],'继续筛选重复报道，保留可追溯的一手来源。'),narrative(12,members[2],'已收到采集结果，正在独立核对日报内容。'),narrative(13,members[1],'采集结果已经整理，可供内容筛选员查看。'));
   data.events.at(-1).payload.artifactRefs=['/team/report.md','/team/index.html'];
-  await page.getByRole('button',{name:'刷新',exact:true}).filter({visible:true}).first().click();
+  await updateTeam();
   const eventNode=id=>workspace().locator(`[data-chat-message="event-${id}"]`);
   await eventNode(13).waitFor();
   assert.equal(await eventNode(10).getAttribute('data-chat-segment'),'start');
@@ -370,7 +374,7 @@ try {
     coordEvent(24,'进入阶段二。',{event:'task_progress',eventKind:'leader_plan',phaseId:'phase-two'}),
     coordEvent(25,'重试版本二。',{event:'task_progress',eventKind:'leader_plan',phaseId:'phase-two',revision:2}),
   );
-  await page.getByRole('button',{name:'刷新',exact:true}).filter({visible:true}).first().click();
+  await updateTeam();
   await eventNode(25).waitFor();
   for(const id of [21,22,23,24]) assert.equal(await eventNode(id).getAttribute('data-chat-segment'),'continuation',`coordination ${id}`);
   assert.equal(await eventNode(20).locator('.team-avatar').count(),1);
@@ -387,7 +391,7 @@ try {
   await handoff.screenshot({path:path.resolve(import.meta.dirname,'reports/team-workflow-handoff-readable.png')});
   const longName='内容筛选与资讯来源独立核验及每日简报编辑专员';
   members[1].display_name=longName;
-  await page.getByRole('button',{name:'刷新',exact:true}).filter({visible:true}).first().click();
+  await updateTeam();
   await page.waitForFunction(name=>document.querySelector('.team-workflow-handoff')?.textContent.includes(name),longName);
   assert.ok(await handoff.locator('.team-workflow-handoff-row strong').evaluateAll(nodes=>nodes.every(el=>el.scrollWidth<=el.clientWidth+1 && el.scrollHeight<=el.clientHeight+1)),'full names wrap without clipping');
   assert.match(await handoff.innerText(),new RegExp(longName));
@@ -408,11 +412,11 @@ try {
   await page.evaluate(()=>{document.body.style.zoom='';}); await page.waitForTimeout(250);
   members[1].display_name='资讯采集员';
   const ids=await workspace().locator('[data-chat-message]').evaluateAll(nodes=>nodes.map(n=>n.dataset.chatMessage));
-  await page.getByRole('button',{name:'刷新',exact:true}).filter({visible:true}).first().click();
+  await updateTeam();
   assert.deepEqual(await workspace().locator('[data-chat-message]').evaluateAll(nodes=>nodes.map(n=>n.dataset.chatMessage)),ids,'polling does not duplicate or drop presented messages');
   await workspace().getByRole('button', { name: '展开任务看板', exact: true }).click();
   failRefresh = true;
-  await page.getByRole('button', { name: '刷新', exact: true }).filter({ visible: true }).first().click();
+  await updateTeam('online');
   await page.getByRole('alert').filter({ visible: true }).waitFor();
   assert.equal(await workspace().locator('textarea').inputValue(), '保留未发送的草稿');
   assert.deepEqual(errors, []);

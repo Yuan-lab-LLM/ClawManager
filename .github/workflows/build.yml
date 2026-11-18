@@ -39,6 +39,43 @@ jobs:
       - name: Test Hermes iframe boundaries
         run: node --test src/lib/hermesDesktopFrame.test.mjs src/lib/browserWorkerAccess.test.mjs src/services/authService.test.mjs ../e2e/desktop-proxy-edge.test.mjs
 
+      - name: Test OpenCode default entry
+        run: npm run test:opencode-default-entry
+
+      - name: Test read-only runtime protocol preflight
+        run: node --test ../scripts/check-openclaw-governance.test.mjs
+
+  gateway-receipt-maintenance:
+    name: Gateway Receipt Maintenance (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.21.0'
+      # Independent of frontend installation/build. Linux-only process checks
+      # run here; cross-repository writer/native fixtures run in the local harness.
+      - name: Test inspection, recovery and stale-owner protection
+        run: node --test scripts/inspect-openclaw-receipts.test.mjs scripts/inspect-runtime-shutdown-outbox.test.mjs scripts/plan-runtime-shutdown-credential-rotation.test.mjs scripts/reconcile-runtime-shutdown-outbox.test.mjs scripts/reconcile-openclaw-executions.test.mjs scripts/reconcile-openclaw-writer.test.mjs
+
+  opencode-browser:
+    name: OpenCode browser onboarding
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: e2e
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: e2e/package-lock.json
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:opencode-browser
+
   hermes-desktop:
     name: Hermes Desktop Web Build
     runs-on: ubuntu-latest
@@ -65,16 +102,26 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: backend
+        working-directory: ClawManager/backend
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          path: ClawManager
+
+      - name: Checkout native runtime contract
+        uses: actions/checkout@v4
+        with:
+          repository: iamlovingit/AgentsRuntime
+          ref: ${{ vars.AGENTS_RUNTIME_REF || 'container' }}
+          token: ${{ secrets.AGENTS_RUNTIME_READ_TOKEN || github.token }}
+          path: AgentsRuntime
 
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: backend/go.mod
-          cache-dependency-path: backend/go.sum
+          go-version-file: ClawManager/backend/go.mod
+          cache-dependency-path: ClawManager/backend/go.sum
 
       - name: Download dependencies
         run: go mod download
@@ -85,31 +132,72 @@ jobs:
       - name: Run backend tests
         run: go test ./...
 
-  browser-worker:
-    name: Browser Worker Build and Tests
+  runtime-task-mysql:
+    name: Runtime Governance MySQL Fences
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      mysql:
+        image: mysql:8.4.8
+        env:
+          MYSQL_ROOT_PASSWORD: runtime-test-only
+          MYSQL_DATABASE: clawmanager_test_runtime_receipts
+          MYSQL_USER: runtime_test
+          MYSQL_PASSWORD: receipt-test-only
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 --silent"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Test isolated MySQL authorization concurrency, receipts and capability fences
+        working-directory: backend
+        env:
+          CLAWMANAGER_TEST_MYSQL_DSN: runtime_test:receipt-test-only@tcp(127.0.0.1:3306)/clawmanager_test_runtime_receipts?parseTime=true
+        run: go test -vet=all ./internal/repository -run '^(TestRuntimeTaskMySQLConcurrentAuthorization|TestGatewayTaskWrite.*|TestRuntimeTaskInspectionMySQL|TestRuntimeCapabilityRenewalMySQL|TestRuntimeCapabilityEnrollmentMySQL|TestRuntimeShutdownAuditMySQLIsolationAndDeduplication)$' -count=1 -timeout=5m
+
+  browser-worker:
+    name: Browser Worker Build and Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: ClawManager
+      - name: Checkout shared runtime broker
+        uses: actions/checkout@v4
+        with:
+          repository: iamlovingit/AgentsRuntime
+          ref: ${{ vars.AGENTS_RUNTIME_REF || 'container' }}
+          token: ${{ secrets.AGENTS_RUNTIME_READ_TOKEN || github.token }}
+          path: AgentsRuntime
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: ClawManager/backend/go.mod
+          cache: false
       - name: Test authenticated CDP and GUI relay
-        working-directory: deployments/browser-worker/cdp-proxy
-        run: go test -race main.go main_test.go
+        working-directory: ClawManager/deployments/browser-worker/cdp-proxy
+        run: go test -race .
       - uses: docker/setup-buildx-action@v3
       - name: Build visible browser
         uses: docker/build-push-action@v6
         with:
-          context: deployments/browser-worker
-          file: deployments/browser-worker/Dockerfile
+          context: ClawManager/deployments/browser-worker
+          file: ClawManager/deployments/browser-worker/Dockerfile
           platforms: linux/amd64
           push: false
           tags: browser-worker:ci
       - name: Build relay
         uses: docker/build-push-action@v6
         with:
-          context: deployments/browser-worker
-          file: deployments/browser-worker/Dockerfile.cdp-proxy
+          context: .
+          file: ClawManager/deployments/browser-worker/Dockerfile.cdp-proxy
           platforms: linux/amd64
           push: false
           tags: browser-worker-relay:ci
@@ -120,7 +208,6 @@ jobs:
     needs:
       - frontend
       - backend
-      - hermes-desktop
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -242,19 +329,6 @@ jobs:
       - name: Wait for ClawManager deployment
         run: kubectl -n clawmanager-system rollout status deployment/clawmanager-app --timeout=300s
 
-      - name: Show cluster status on failure
-        if: failure()
-        run: |
-          kubectl get pods -A || true
-          kubectl get pvc -A || true
-          kubectl get events -A --sort-by=.lastTimestamp || true
-          kubectl -n clawmanager-system describe deployment mysql || true
-          kubectl -n clawmanager-system describe deployment clawmanager-app || true
-          kubectl -n clawmanager-system describe pod -l app=mysql || true
-          kubectl -n clawmanager-system describe pod -l app=clawmanager-app || true
-          kubectl -n clawmanager-system logs deployment/mysql --tail=200 || true
-          kubectl -n clawmanager-system logs deployment/clawmanager-app --tail=200 || true
-
       - name: Start port-forward
         run: |
           kubectl -n clawmanager-system port-forward svc/clawmanager-frontend 8443:443 > /tmp/clawmanager-port-forward.log 2>&1 &
@@ -269,6 +343,21 @@ jobs:
 
       - name: Verify web page is reachable
         run: curl --fail --insecure https://127.0.0.1:8443/ | grep -i "<!doctype html>"
+
+      - name: Show cluster status on failure
+        if: failure()
+        run: |
+          kubectl get pods -A || true
+          kubectl get pvc -A || true
+          kubectl get events -A --sort-by=.lastTimestamp || true
+          kubectl -n clawmanager-system describe deployment mysql || true
+          kubectl -n clawmanager-system describe deployment clawmanager-app || true
+          kubectl -n clawmanager-system describe pod -l app=mysql || true
+          kubectl -n clawmanager-system describe pod -l app=clawmanager-app || true
+          kubectl -n clawmanager-system logs deployment/mysql --tail=200 || true
+          kubectl -n clawmanager-system logs deployment/clawmanager-app --tail=200 || true
+          kubectl -n clawmanager-system logs deployment/clawmanager-app --previous --tail=200 || true
+          cat /tmp/clawmanager-port-forward.log 2>/dev/null || true
 
       - name: Stop port-forward
         if: always()

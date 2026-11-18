@@ -8,8 +8,6 @@ const source = (relativePath) =>
 
 const versionComponent = source('../src/components/AppVersion.tsx');
 const versionService = source('../src/services/versionService.ts');
-const userLayout = source('../src/components/UserLayout.tsx');
-const adminLayout = source('../src/components/AdminLayout.tsx');
 
 function assert(condition, message) {
   if (!condition) {
@@ -26,15 +24,26 @@ assert(
     versionComponent.includes('buildInfo?.version'),
   'Version component must render the running ClawManager version.',
 );
-assert(
-  userLayout.includes('<AppVersion />') && adminLayout.includes('<AppVersion />'),
-  'User and admin layouts must expose the ClawManager version.',
-);
-assert(
-  userLayout.includes('className="mt-1 max-w-40"') &&
-    adminLayout.includes('className="mt-1 max-w-40"') &&
-    versionComponent.includes('block max-w-full truncate'),
-  'Version badges must sit below the product name without overflowing the sidebar.',
-);
-
-console.log('ClawManager version display contract is valid.');
+// The shared shell owns version rendering. Exercise both real layout trees.
+const { default: React } = await import('react');
+const { renderToStaticMarkup } = await import('react-dom/server');
+const { MemoryRouter } = await import('react-router-dom');
+const { createServer } = await import('vite');
+globalThis.localStorage = { getItem: () => null };
+globalThis.window = { localStorage: globalThis.localStorage };
+const server = await createServer({ server: { middlewareMode: true }, appType: 'custom' });
+try {
+  const { AuthProvider } = await server.ssrLoadModule('/src/contexts/AuthContext.tsx');
+  const { I18nProvider } = await server.ssrLoadModule('/src/contexts/I18nContext.tsx');
+  for (const file of ['UserLayout', 'AdminLayout']) {
+    const { default: Layout } = await server.ssrLoadModule(`/src/components/${file}.tsx`);
+    const html = renderToStaticMarkup(React.createElement(MemoryRouter, null,
+      React.createElement(AuthProvider, null, React.createElement(I18nProvider, null,
+        React.createElement(Layout, { title: 'Workspace' }, React.createElement('p', null, 'Content'))))));
+    const brands = html.match(/<a[^>]*class="cm-shell-brand"[^>]*>[\s\S]*?<\/a>/g) || [];
+    assert(brands.length === 2, `${file} renders desktop and mobile brands`);
+    assert(brands.every(brand => brand.includes('data-testid="clawmanager-version"')), `${file} keeps version inside both brand links`);
+    assert((html.match(/data-testid="clawmanager-version"/g) || []).length === 2, `${file} has no extra footer version`);
+  }
+} finally { await server.close(); }
+console.log('ClawManager version service/component and both shared layout trees are valid.');

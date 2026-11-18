@@ -2,10 +2,12 @@ package services
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
 	"clawreef/internal/models"
+	"github.com/go-sql-driver/mysql"
 )
 
 const (
@@ -62,6 +64,13 @@ func (s *openClawConfigService) EnsurePlatformLLMGatewayResource(userID int) (*m
 		UpdatedAt:    now,
 	}
 	if err := s.repo.CreateResource(item); err != nil {
+		var duplicate *mysql.MySQLError
+		if errors.As(err, &duplicate) && duplicate.Number == 1062 {
+			// Another API replica may have initialized the same built-in resource.
+			if existing, readErr := s.repo.GetResourceByUserTypeKey(userID, OpenClawConfigResourceTypeAgent, PlatformLLMGatewayResourceKey); readErr == nil && existing != nil {
+				return existing, nil
+			}
+		}
 		return nil, err
 	}
 	return item, nil

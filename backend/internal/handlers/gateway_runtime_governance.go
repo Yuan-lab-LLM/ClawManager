@@ -9,7 +9,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"github.com/gin-gonic/gin"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -46,16 +48,23 @@ func attachRuntimeTask(c *gin.Context, req *aigateway.ChatCompletionRequest) boo
 }
 
 func authenticateRuntimeTask(c *gin.Context, t *models.GatewayTaskIdentity) bool {
-	t.UserID, _ = gatewayUserID(c)
-	t.InstanceID = c.GetInt("instanceID")
-	actual, exists := c.Get("runtimeGeneration")
-	generation, ok := actual.(int)
-	if !exists || !ok || t.InstanceID <= 0 || t.Generation != generation {
-		utils.HandleError(c, models.ErrModelUnavailable)
+	if !authenticateRuntimeTaskScope(c, t) {
 		return false
 	}
 	if _, err := repository.GatewayTaskKey(*t); err != nil {
 		utils.Error(c, 400, "Invalid runtime task identity")
+		return false
+	}
+	return true
+}
+
+func authenticateRuntimeTaskScope(c *gin.Context, t *models.GatewayTaskIdentity) bool {
+	t.UserID, _ = gatewayUserID(c)
+	t.InstanceID = c.GetInt("instanceID")
+	actual, exists := c.Get("runtimeGeneration")
+	generation, ok := actual.(int)
+	if !exists || !ok || t.InstanceID <= 0 || t.UserID <= 0 || t.Generation < 0 || t.Generation != generation {
+		utils.HandleError(c, models.ErrModelUnavailable)
 		return false
 	}
 	return true
@@ -70,6 +79,16 @@ type GatewayRuntimeHandler struct {
 func NewGatewayRuntimeHandler(tasks repository.GatewayTaskRepository, gateway aigateway.Service, audit services.AuditEventService) *GatewayRuntimeHandler {
 	return &GatewayRuntimeHandler{tasks: tasks, gateway: gateway, audit: audit}
 }
+
+func handleRuntimeTaskStorageError(c *gin.Context, err error) {
+	if errors.Is(err, models.ErrModelUnavailable) {
+		utils.HandleError(c, models.ErrModelUnavailable)
+		return
+	}
+	// Database/driver errors can contain query text or connection details.
+	utils.Error(c, http.StatusServiceUnavailable, "Runtime task state unavailable")
+}
+
 func (h *GatewayRuntimeHandler) CheckTask(c *gin.Context) {
 	var task models.GatewayTaskIdentity
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 4096)
@@ -82,17 +101,22 @@ func (h *GatewayRuntimeHandler) CheckTask(c *gin.Context) {
 	}
 	state, err := h.tasks.Check(c.Request.Context(), task)
 	if err != nil {
-		utils.HandleError(c, err)
+		handleRuntimeTaskStorageError(c, err)
 		return
 	}
 	c.Header("Cache-Control", "no-store")
 	if state.Revoked || state.Finished {
+		if state.Revoked {
+			// Only authenticated, exact task state may authorize runtime fail-stop.
+			c.Header("X-ClawManager-Task-State", "revoked")
+		}
 		utils.HandleError(c, models.ErrModelUnavailable)
 		return
 	}
 	c.JSON(200, state)
 }
 func (h *GatewayRuntimeHandler) FinishTask(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
 	var body struct {
 		models.GatewayTaskIdentity
 		Cancelled bool `json:"cancelled"`
@@ -105,13 +129,23 @@ func (h *GatewayRuntimeHandler) FinishTask(c *gin.Context) {
 	if !authenticateRuntimeTask(c, &body.GatewayTaskIdentity) {
 		return
 	}
-	state, err := h.tasks.Check(c.Request.Context(), body.GatewayTaskIdentity)
-	if err != nil {
-		utils.HandleError(c, err)
+	inspector, ok := h.tasks.(repository.GatewayTaskInspector)
+	if !ok {
+		utils.Error(c, 503, "Runtime task inspection unavailable")
 		return
 	}
+	snapshots, err := inspector.Inspect(c.Request.Context(), body.GatewayTaskIdentity, []models.GatewayTaskIdentity{body.GatewayTaskIdentity})
+	if err != nil {
+		handleRuntimeTaskStorageError(c, err)
+		return
+	}
+	if len(snapshots) != 1 || snapshots[0].State == nil {
+		utils.HandleError(c, models.ErrModelUnavailable)
+		return
+	}
+	state := snapshots[0].State
 	if err := h.tasks.Finish(c.Request.Context(), body.GatewayTaskIdentity, body.Cancelled); err != nil {
-		utils.HandleError(c, err)
+		handleRuntimeTaskStorageError(c, err)
 		return
 	}
 	if body.Cancelled && state.Revoked && !state.RuntimeAcknowledged && h.audit != nil {
@@ -129,6 +163,46 @@ func (h *GatewayRuntimeHandler) FinishTask(c *gin.Context) {
 			Message: "Runtime acknowledged that the affected turn stopped; completed tool side effects were not rolled back."})
 	}
 	c.JSON(200, gin.H{"accepted": true})
+}
+
+// InspectTasks permits read-only lookup of old generations owned by the CURRENT
+// authenticated instance owner. It never replays receipts or creates task rows.
+func (h *GatewayRuntimeHandler) InspectTasks(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
+	var body struct {
+		Generation int                          `json:"generation"`
+		Tasks      []models.GatewayTaskIdentity `json:"tasks"`
+	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 32768)
+	decoder := json.NewDecoder(c.Request.Body)
+	if err := decoder.Decode(&body); err != nil {
+		utils.Error(c, 400, "Invalid runtime task inspection")
+		return
+	}
+	if err := decoder.Decode(new(any)); err != io.EOF {
+		utils.Error(c, 400, "Invalid trailing runtime task inspection data")
+		return
+	}
+	scope := models.GatewayTaskIdentity{Generation: body.Generation}
+	if !authenticateRuntimeTaskScope(c, &scope) {
+		return
+	}
+	tasks, err := repository.PrepareRuntimeTaskInspection(scope, body.Tasks)
+	if err != nil {
+		utils.Error(c, 400, "Invalid runtime task inspection batch")
+		return
+	}
+	inspector, ok := h.tasks.(repository.GatewayTaskInspector)
+	if !ok {
+		utils.Error(c, 503, "Runtime task inspection unavailable")
+		return
+	}
+	snapshots, err := inspector.Inspect(c.Request.Context(), scope, tasks)
+	if err != nil {
+		handleRuntimeTaskStorageError(c, err)
+		return
+	}
+	c.JSON(200, gin.H{"generation": scope.Generation, "read_only": true, "receipt_replay_allowed": false, "tasks": snapshots})
 }
 func (h *GatewayRuntimeHandler) Catalog(c *gin.Context) {
 	userID, ok := gatewayUserID(c)
@@ -161,5 +235,5 @@ func (h *GatewayRuntimeHandler) Catalog(c *gin.Context) {
 		c.Status(304)
 		return
 	}
-	c.JSON(200, gin.H{"revision": revision, "models": items, "generation": c.GetInt("runtimeGeneration")})
+	c.JSON(200, gin.H{"revision": revision, "models": items, "generation": c.GetInt("runtimeGeneration"), "owner_user_id": userID, "complete": true, "catalog_protocol": 2})
 }

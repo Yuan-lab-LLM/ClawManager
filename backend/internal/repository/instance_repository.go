@@ -138,6 +138,15 @@ func (r *instanceRepository) GetByID(id int) (*models.Instance, error) {
 		}
 		return nil, fmt.Errorf("failed to get instance: %w", err)
 	}
+	if err := r.hydrateAutoStop([]*models.Instance{&instance}); err != nil {
+		return nil, err
+	}
+	if instance.InstanceMode == "lite" {
+		instance.RuntimeRecovery, err = r.GetRuntimeRecovery(context.Background(), id)
+		if err != nil && !missingAutoStopTable(err) {
+			return nil, err
+		}
+	}
 	return &instance, nil
 }
 
@@ -152,9 +161,15 @@ func (r *instanceRepository) ClaimLifecycleStatus(ctx context.Context, id int, a
 		placeholders = append(placeholders, "?")
 		arguments = append(arguments, strings.ToLower(strings.TrimSpace(status)))
 	}
+	// The stopped lifecycle claim is used only by factory reset, before
+	// erasure. Ordinary stop/auto-sleep use UpdateRuntimeState and stay sampleable.
+	observationFence := ""
+	if strings.TrimSpace(targetStatus) == "stopped" {
+		observationFence = ", workspace_usage_epoch = workspace_usage_epoch + 1, workspace_usage_blocked = TRUE, workspace_usage_observed_at = NULL"
+	}
 	result, err := r.sess.SQL().ExecContext(ctx, `
 		UPDATE instances
-		SET status = ?, updated_at = ?
+		SET status = ?, updated_at = ?`+observationFence+`
 		WHERE id = ? AND LOWER(status) IN (`+strings.Join(placeholders, ",")+`)`, arguments...)
 	if err != nil {
 		return false, fmt.Errorf("failed to claim instance lifecycle status: %w", err)
@@ -301,6 +316,9 @@ func (r *instanceRepository) GetAll(offset, limit int) ([]models.Instance, error
 	if err != nil {
 		return nil, fmt.Errorf("failed to get all instances: %w", err)
 	}
+	if err := r.hydrateAutoStopSlice(instances); err != nil {
+		return nil, err
+	}
 	return instances, nil
 }
 
@@ -317,6 +335,9 @@ func (r *instanceRepository) GetByStatus(ctx context.Context, status string, lim
 	err := result.All(&instances)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get instances by status: %w", err)
+	}
+	if err := r.hydrateAutoStopSlice(instances); err != nil {
+		return nil, err
 	}
 	return instances, nil
 }
@@ -335,6 +356,9 @@ func (r *instanceRepository) GetByUserID(userID int, offset, limit int) ([]model
 	err := r.sess.Collection("instances").Find(db.Cond{"user_id": userID}).OrderBy("-created_at", "-id").Offset(offset).Limit(limit).All(&instances)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get instances: %w", err)
+	}
+	if err := r.hydrateAutoStopSlice(instances); err != nil {
+		return nil, err
 	}
 	return instances, nil
 }
@@ -367,6 +391,14 @@ func (r *instanceRepository) filteredByUserID(userID int, filter models.Instance
 		case "unavailable":
 			result = result.And(db.Cond{"status IN": []string{"stopped", "error", "deleting"}})
 		}
+	}
+	if filter.AutoSleep != nil {
+		result = result.And(db.Cond{"status": "stopped"})
+		predicate := "EXISTS (SELECT 1 FROM instance_model_activity a WHERE a.instance_id = instances.id AND a.stopped_reason = ?)"
+		if !*filter.AutoSleep {
+			predicate = "NOT " + predicate
+		}
+		result = result.And(predicate, "idle_timeout")
 	}
 	if value := strings.ToLower(strings.TrimSpace(filter.Query)); value != "" {
 		id, _ := strconv.Atoi(strings.TrimPrefix(value, "#"))
@@ -425,6 +457,9 @@ func (r *instanceRepository) GetFilteredByUserID(userID int, filter models.Insta
 			}
 		}
 	}
+	if err := r.hydrateAutoStopSlice(instances); err != nil {
+		return nil, err
+	}
 	return instances, nil
 }
 
@@ -481,6 +516,9 @@ func (r *instanceRepository) GetLiteByUserIDAndOwner(userID int, owner string, o
 	if err != nil {
 		return nil, fmt.Errorf("failed to get owner Lite instances: %w", err)
 	}
+	if err := r.hydrateAutoStopSlice(instances); err != nil {
+		return nil, err
+	}
 	return instances, nil
 }
 
@@ -510,6 +548,9 @@ func (r *instanceRepository) GetWorkbuddyProByUserIDAndOwner(userID int, owner s
 	if err != nil {
 		return nil, fmt.Errorf("failed to get owner WorkBuddy Pro instances: %w", err)
 	}
+	if err := r.hydrateAutoStopSlice(instances); err != nil {
+		return nil, err
+	}
 	return instances, nil
 }
 
@@ -529,6 +570,7 @@ func (r *instanceRepository) CountWorkbuddyProByUserIDAndOwner(userID int, owner
 
 func supportedNorthboundProOwnerInstances(userID int, owner string) db.LogicalExpr {
 	return db.And(
+		db.Raw("NOT EXISTS (SELECT 1 FROM team_members otm JOIN teams ott ON ott.id=otm.team_id WHERE (otm.instance_id=instances.id OR instances.provisioning_operation_id=SHA2(CONCAT('owner-team-',ott.id,'-member-',otm.member_key),256)) AND otm.status<>'deleted' AND ott.resource_scope='northbound' AND ott.status<>'deleted')"),
 		db.Cond{"user_id": userID, "owner": owner, "instance_mode": "pro"},
 		db.Or(
 			db.Cond{"type IN": []string{"openclaw", "hermes", "opencode", "deepseek-harness"}},
@@ -544,6 +586,9 @@ func (r *instanceRepository) GetProByUserIDAndOwner(userID int, owner string, of
 	if err != nil {
 		return nil, fmt.Errorf("failed to get owner Pro instances: %w", err)
 	}
+	if err := r.hydrateAutoStopSlice(instances); err != nil {
+		return nil, err
+	}
 	return instances, nil
 }
 
@@ -557,6 +602,7 @@ func (r *instanceRepository) CountProByUserIDAndOwner(userID int, owner string) 
 
 func supportedNorthboundOwnerInstances(userID int, owner string) db.LogicalExpr {
 	return db.And(
+		db.Raw("NOT EXISTS (SELECT 1 FROM team_members otm JOIN teams ott ON ott.id=otm.team_id WHERE (otm.instance_id=instances.id OR instances.provisioning_operation_id=SHA2(CONCAT('owner-team-',ott.id,'-member-',otm.member_key),256)) AND otm.status<>'deleted' AND ott.resource_scope='northbound' AND ott.status<>'deleted')"),
 		db.Cond{"user_id": userID, "owner": owner},
 		db.Or(
 			db.Cond{
@@ -583,6 +629,9 @@ func (r *instanceRepository) GetNorthboundByUserIDAndOwner(userID int, owner str
 	if err != nil {
 		return nil, fmt.Errorf("failed to get owner northbound instances: %w", err)
 	}
+	if err := r.hydrateAutoStopSlice(instances); err != nil {
+		return nil, err
+	}
 	return instances, nil
 }
 
@@ -596,6 +645,7 @@ func (r *instanceRepository) CountNorthboundByUserIDAndOwner(userID int, owner s
 
 func supportedIEIOwnerInstances(owner string) db.LogicalExpr {
 	return db.And(
+		db.Raw("NOT EXISTS (SELECT 1 FROM team_members otm JOIN teams ott ON ott.id=otm.team_id WHERE (otm.instance_id=instances.id OR instances.provisioning_operation_id=SHA2(CONCAT('owner-team-',ott.id,'-member-',otm.member_key),256)) AND otm.status<>'deleted' AND ott.resource_scope='northbound' AND ott.status<>'deleted')"),
 		db.Cond{"owner_normalized": strings.ToLower(strings.TrimSpace(owner))},
 		db.Or(
 			db.Cond{
@@ -621,6 +671,9 @@ func (r *instanceRepository) GetSupportedByOwnerEmail(owner string, offset, limi
 		OrderBy("-created_at", "-id").Offset(offset).Limit(limit).All(&instances)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get IEI owner instances: %w", err)
+	}
+	if err := r.hydrateAutoStopSlice(instances); err != nil {
+		return nil, err
 	}
 	return instances, nil
 }
@@ -685,6 +738,9 @@ func (r *instanceRepository) GetAllRunning() ([]models.Instance, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to get running instances: %w", err)
 	}
+	if err := r.hydrateAutoStopSlice(instances); err != nil {
+		return nil, err
+	}
 	return instances, nil
 }
 
@@ -702,11 +758,14 @@ func (r *instanceRepository) GetV2DesiredRunning(ctx context.Context, limit int)
 	if err := iter.All(&instances); err != nil {
 		return nil, fmt.Errorf("failed to get v2 desired running instances: %w", err)
 	}
+	if err := r.hydrateAutoStopSlice(instances); err != nil {
+		return nil, err
+	}
 	return instances, nil
 }
 
 func v2DesiredRunningStatuses() []string {
-	return []string{"creating", "running", "error"}
+	return []string{"creating", "running"}
 }
 
 func (r *instanceRepository) GetV2Creating(ctx context.Context, limit int) ([]models.Instance, error) {
@@ -722,6 +781,9 @@ func (r *instanceRepository) GetV2Creating(ctx context.Context, limit int) ([]mo
 	defer iter.Close()
 	if err := iter.All(&instances); err != nil {
 		return nil, fmt.Errorf("failed to get v2 creating instances: %w", err)
+	}
+	if err := r.hydrateAutoStopSlice(instances); err != nil {
+		return nil, err
 	}
 	return instances, nil
 }
@@ -744,6 +806,7 @@ func buildV2SchedulerInstanceQuery(statuses []string, limit int) (string, []any)
 		FROM instances
 		WHERE status IN (%s)
 			AND LOWER(TRIM(COALESCE(description, ''))) NOT LIKE 'openclaw-upgrade-lab:%%'
+            AND NOT EXISTS (SELECT 1 FROM instance_lifecycle_manual_guards mg WHERE mg.instance_id=instances.id AND mg.token LIKE 'runtime_mgmt_%%')
 			AND runtime_type = ?
 			AND instance_mode = ?
 			AND workspace_path IS NOT NULL
@@ -785,6 +848,13 @@ func (r *instanceRepository) updateRuntimeStateWithCode(ctx context.Context, id 
 }
 
 func (r *instanceRepository) updateRuntimeStateWithCodeLocked(ctx context.Context, id int, status string, generation int, message, code *string) error {
+	if err := checkAutoStopRuntimeState(ctx, r.sess, id, status, generation); err != nil {
+		return err
+	}
+	enteringRunning, err := autoStopRunningTransition(ctx, r.sess, id, status, generation)
+	if err != nil {
+		return err
+	}
 	res, err := r.sess.SQL().ExecContext(ctx, `
 		UPDATE instances
 		SET status = ?, runtime_generation = ?, runtime_error_message = ?, runtime_error_code = ?, updated_at = ?
@@ -809,6 +879,9 @@ func (r *instanceRepository) updateRuntimeStateWithCodeLocked(ctx context.Contex
 		if currentGeneration > generation {
 			return ErrStaleRuntimeGeneration
 		}
+	}
+	if status == "running" {
+		return confirmAutoStopRunning(ctx, r.sess, id, generation, enteringRunning)
 	}
 	return nil
 }
@@ -836,9 +909,9 @@ func (r *instanceRepository) SetWorkspacePath(ctx context.Context, id int, works
 	return r.withUnfencedInstance(ctx, id, func(local *instanceRepository) error {
 		_, err := local.sess.SQL().ExecContext(ctx, `
 		UPDATE instances
-		SET workspace_path = ?, updated_at = ?
-		WHERE id = ?
-	`, workspacePath, time.Now().UTC(), id)
+		SET workspace_path = ?, updated_at = ?, workspace_usage_observed_at = NULL, workspace_usage_epoch = workspace_usage_epoch + 1
+		WHERE id = ? AND NOT (BINARY workspace_path<=>BINARY ?)
+	`, workspacePath, time.Now().UTC(), id, workspacePath)
 		if err != nil {
 			return fmt.Errorf("failed to set instance workspace path: %w", err)
 		}
@@ -846,12 +919,14 @@ func (r *instanceRepository) SetWorkspacePath(ctx context.Context, id int, works
 	})
 }
 
+// UpdateWorkspaceUsage preserves the legacy unverified setter. Only conditional
+// WorkspaceUsageRepository.Publish may establish successful observation proof.
 func (r *instanceRepository) UpdateWorkspaceUsage(ctx context.Context, id int, usageBytes int64) error {
 	_, err := r.sess.SQL().ExecContext(ctx, `
 		UPDATE instances
-		SET workspace_usage_bytes = ?, updated_at = ?
+		SET workspace_usage_bytes = ?, workspace_usage_observed_at = NULL, updated_at = updated_at
 		WHERE id = ?
-	`, usageBytes, time.Now().UTC(), id)
+	`, usageBytes, id)
 	if err != nil {
 		return fmt.Errorf("failed to update instance workspace usage: %w", err)
 	}
@@ -884,6 +959,7 @@ func (r *instanceRepository) ResetInstanceRuntimeData(ctx context.Context, id in
 		if _, err := tx.SQL().ExecContext(ctx, `
 			UPDATE instances
 			SET workspace_usage_bytes = 0,
+                workspace_usage_observed_at = NULL, workspace_usage_epoch = workspace_usage_epoch + 1, workspace_usage_blocked = FALSE,
 			    runtime_error_message = NULL,
 			    pod_name = NULL,
 			    pod_namespace = NULL,
@@ -917,6 +993,7 @@ func (r *instanceRepository) PromoteResetReplacement(ctx context.Context, source
 		oldResult, err := tx.SQL().ExecContext(ctx, `
 			UPDATE instances
 			SET owner = ?, name = ?, status = 'stopped', runtime_error_message = ?,
+                workspace_usage_observed_at = NULL, workspace_usage_epoch = workspace_usage_epoch + 1, workspace_usage_blocked = TRUE,
 			    access_url = NULL, access_token = NULL, agent_bootstrap_token = NULL,
 			    pod_name = NULL, pod_namespace = NULL, pod_ip = NULL,
 			    stopped_at = ?, updated_at = ?
@@ -934,7 +1011,7 @@ func (r *instanceRepository) PromoteResetReplacement(ctx context.Context, source
 
 		newResult, err := tx.SQL().ExecContext(ctx, `
 			UPDATE instances
-			SET owner = ?, name = ?, updated_at = ?
+			SET owner = ?, name = ?, updated_at = ?, workspace_usage_observed_at = NULL, workspace_usage_epoch = workspace_usage_epoch + 1
 			WHERE id = ? AND status = 'running'
 		`, owner, name, now, replacementID)
 		if err != nil {
@@ -958,10 +1035,36 @@ func (r *instanceRepository) PromoteResetReplacement(ctx context.Context, source
 
 // Update updates an instance
 func (r *instanceRepository) Update(instance *models.Instance) error {
+
 	return r.withUnfencedInstance(context.Background(), instance.ID, func(local *instanceRepository) error {
-		err := local.sess.Collection("instances").Find(db.Cond{"id": instance.ID}).Update(instance)
+		if err := checkAutoStopRuntimeState(context.Background(), local.sess, instance.ID, instance.Status, instance.RuntimeGeneration); err != nil {
+			return err
+		}
+		enteringRunning, err := autoStopRunningTransition(context.Background(), local.sess, instance.ID, instance.Status, instance.RuntimeGeneration)
+		if err != nil {
+			return err
+		}
+		// Only ProtectRuntimeGeneration may write the sticky security marker.
+		// The omitempty tag excludes it even when updating a stale snapshot.
+		// Invalidate proof when this generic business write changes the tree
+		// identity. This runs under the existing instance row lock.
+		if _, err := local.sess.SQL().Exec(`UPDATE instances SET workspace_usage_observed_at=NULL,workspace_usage_epoch=workspace_usage_epoch+1,updated_at=updated_at WHERE id=? AND NOT (user_id=? AND BINARY owner<=>BINARY ? AND BINARY type=BINARY ? AND BINARY runtime_type=BINARY ? AND BINARY instance_mode=BINARY ? AND BINARY workspace_path<=>BINARY ? AND runtime_generation=?)`, instance.ID, instance.UserID, instance.Owner, instance.Type, instance.RuntimeType, instance.InstanceMode, instance.WorkspacePath, instance.RuntimeGeneration); err != nil {
+			return err
+		}
+		update := *instance
+		update.RuntimeSecurityProfile = ""
+		// Statistics are maintained independently; stale lifecycle snapshots
+		// must never overwrite a newer observation or clear a reset fence.
+		update.WorkspaceUsageBytes = 0
+		update.WorkspaceUsageObservedAt = nil
+		update.WorkspaceUsageEpoch = 0
+		update.WorkspaceUsageBlocked = false
+		err = local.sess.Collection("instances").Find(db.Cond{"id": instance.ID}).Update(&update)
 		if err != nil {
 			return fmt.Errorf("failed to update instance: %w", err)
+		}
+		if instance.Status == "running" {
+			return confirmAutoStopRunning(context.Background(), local.sess, instance.ID, instance.RuntimeGeneration, enteringRunning)
 		}
 		return nil
 	})

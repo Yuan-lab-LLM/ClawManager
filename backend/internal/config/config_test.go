@@ -306,3 +306,22 @@ func TestLoadEnterpriseLDAPEnvOverrides(t *testing.T) {
 		t.Fatalf("second admin group DN = %q, want %q", got, want)
 	}
 }
+
+func TestLoadContainerSlotConfiguration(t *testing.T) {
+	t.Setenv("RUNTIME_CONTAINER_SLOTS", "4")
+	t.Setenv("RUNTIME_SLOT_CPU_LIMIT", "2")
+	t.Setenv("DEEPSEEK_HARNESS_RUNTIME_IMAGE", "registry/dsh:test")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Runtime.ContainerSlots != 4 || cfg.Runtime.SlotResources.CPULimit != "2" || cfg.Runtime.DeepSeekHarnessImage != "registry/dsh:test" {
+		t.Fatalf("slot config missing: %#v", cfg.Runtime)
+	}
+	for _, value := range []string{"-1", "257", "broken"} {
+		t.Setenv("RUNTIME_CONTAINER_SLOTS", value)
+		if _, err := Load(); err == nil {
+			t.Fatalf("invalid slot count %q accepted", value)
+		}
+	}
+}

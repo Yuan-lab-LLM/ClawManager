@@ -1,0 +1,61 @@
+# Kubernetes <=1.24 with PodSecurityPolicy admission only.
+# Bind this policy solely to the dedicated trusted Lite runtime supervisors.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: clawmanager-lite-runtime
+  namespace: clawmanager-system
+automountServiceAccountToken: false
+---
+apiVersion: policy/v1beta1
+kind: PodSecurityPolicy
+metadata:
+  name: clawmanager-lite-slots
+  annotations:
+    seccomp.security.alpha.kubernetes.io/allowedProfileNames: runtime/default,unconfined
+    seccomp.security.alpha.kubernetes.io/defaultProfileName: runtime/default
+    apparmor.security.beta.kubernetes.io/allowedProfileNames: runtime/default,unconfined
+    apparmor.security.beta.kubernetes.io/defaultProfileName: runtime/default
+spec:
+  privileged: false
+  allowPrivilegeEscalation: false
+  requiredDropCapabilities: [ALL]
+  allowedCapabilities: [SETUID, SETGID, CHOWN, DAC_OVERRIDE, FOWNER, KILL, SYS_PTRACE]
+  allowedProcMountTypes: [Default, Unmasked]
+  hostNetwork: false
+  hostPID: false
+  hostIPC: false
+  volumes: [persistentVolumeClaim, emptyDir, configMap, secret, projected, downwardAPI]
+  runAsUser:
+    rule: RunAsAny
+  seLinux:
+    rule: RunAsAny
+  supplementalGroups:
+    rule: RunAsAny
+  fsGroup:
+    rule: RunAsAny
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: clawmanager-lite-slots-psp
+  namespace: clawmanager-system
+rules:
+  - apiGroups: [policy]
+    resources: [podsecuritypolicies]
+    resourceNames: [clawmanager-lite-slots]
+    verbs: [use]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: clawmanager-lite-slots-psp
+  namespace: clawmanager-system
+subjects:
+  - kind: ServiceAccount
+    name: clawmanager-lite-runtime
+    namespace: clawmanager-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: clawmanager-lite-slots-psp

@@ -144,50 +144,23 @@ the instance origin on 30443. Its screenshot and verification are retained as
 `browser-storage-fix-portal-30443.json`. The existing Lite runtime Pod remains
 on OpenCode 2.0.27.
 
-## Default Lite project and first conversation (2026-10-14)
+## Guided first use (2026-11-05)
 
-The existing Runtime Agent startup still creates the per-instance `project`
-directory. The ClawManager proxy now initializes the first conversation on
-the first browser visit to the Lite instance root and opens the native v2
-session route. The initial title is `开始使用`. It uses a session ID derived
-from the same instance creation identity as browser storage; OpenCode's own
-database persists the conversation. Refreshing credentials, clearing browser
-storage, or restarting the control plane does not generate another ID.
+OpenCode Lite now keeps the native root page and never creates a project
+directory or conversation during instance startup or the first browser visit.
+The dedicated OpenCode origin injects an instance-scoped help panel after the
+browser-storage isolation bootstrap. It explains how to create or select a
+folder, add and select the project, and then start a conversation.
 
-An instance that already contains an active top-level conversation reuses
-that conversation instead of creating a starter. Workspace checks reject
-sessions belonging to another instance. Concurrent visits within one service
-share the same initialization request; concurrent replicas use the same ID
-and recover an already committed session after a failed create response.
-Explicit session URLs keep their native behavior. Archived starters remain
-archived. OpenCode v1 continues to use its existing landing page.
+Users with workspace write permission can explicitly create a folder from the
+panel. The request uses a narrow authenticated ClawManager endpoint with path,
+owner, lifecycle, shared-link permission, and workspace audit checks. Read-only
+links only display the instructions. Closing the panel keeps a small help
+button, and the dismissal state remains isolated per instance.
 
-The server entrypoint enables this behavior with
-`WithOpenCodeLiteSessionBootstrap`. This is a control-plane change, so the
-OpenCode Runtime image and the old 8443 test deployment need no update. Build
-the main-service image using:
+Validate both storage isolation and onboarding with:
 
 ```powershell
-docker build -f deployments/opencode-lite-v2/Dockerfile.clawmanager --build-arg APP_BASE_IMAGE=clawmanager-local:opencode-browser-isolation-20261013 -t clawmanager-local:opencode-lite-bootstrap-20261014 .
+cd e2e
+npm run test:opencode-browser
 ```
-
-OpenCode service tests pass on Windows and in the Linux image build. Tests
-cover repeated visits, a fresh control-plane service, concurrent replicas,
-lost create responses, existing conversations across pagination, shared-pool
-workspace isolation, archived conversations, v1 compatibility, and explicit
-session navigation. Real Chrome verification on port 30443 covers the native
-conversation input, simultaneous visits, reloads, cleared browser storage,
-a fresh browser, and a main-service restart; the session count remains one.
-
-Verification artifacts are `outputs/opencode-lite-v2/lite-bootstrap-30443.png`
-and `lite-bootstrap-30443-verification.json`. A temporary model entry and Lite
-instance were used because the local model catalog was empty; no model
-inference was requested. The temporary conversation, instance, and model entry
-were removed after verification. Creating a normal Lite instance still
-requires a real enabled model in AI Gateway.
-
-To roll back only this initialization change, restore the `clawmanager-app`
-image to `clawmanager-local:opencode-browser-isolation-20261013`, keeping the
-public-origin template on port 30443. The local pre-deployment snapshot is
-`.tmp/opencode-bootstrap/app-before.json`; keep it private because it contains
-environment configuration. Existing conversations remain in OpenCode.

@@ -1120,6 +1120,8 @@ rules:
     resources:
       - deployments
       - deployments/scale
+      - statefulsets
+      - replicasets
     verbs:
       - get
       - list
@@ -1486,7 +1488,7 @@ spec:
           readinessProbe:
             httpGet:
               scheme: HTTPS
-              path: /healthz
+              path: /api/v1/version
               port: https
             initialDelaySeconds: 10
             periodSeconds: 10

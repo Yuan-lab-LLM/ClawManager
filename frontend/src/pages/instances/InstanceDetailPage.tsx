@@ -1,16 +1,19 @@
+import { isAxiosError } from "axios";
+import { useQueryClient } from "@tanstack/react-query";
+import { forgetInstance, readInstanceTarget, rememberLastInstance } from "../../lib/instanceNavigation";
+import { allowBrowserInstance } from "../../lib/browserOrigin";
 import React, {
   useCallback,
   useEffect,
   useMemo,
+  useLayoutEffect,
   useRef,
   useState,
 } from "react";
-import { Link, useNavigate, useParams, useLocation } from "react-router-dom";
+import { useNavigate, useParams, useLocation } from "react-router-dom";
 import {
-  ArrowLeft,
   Ban,
   BarChart3,
-  ChevronDown,
   Clock3,
   Copy,
   Cpu,
@@ -21,32 +24,34 @@ import {
   KeyRound,
   MemoryStick,
   Network,
-  Play,
   RotateCw,
-  Square,
-  Trash2,
+  Settings2,
   X,
 } from "lucide-react";
 import ConfirmDialog from "../../components/ConfirmDialog";
-import {
-  instancePanelStorageKey,
-  readStoredCollapsed,
-} from "../../components/InstanceCollapsiblePanel";
-import InstanceSkillHubPanel from "../../components/InstanceSkillHubPanel";
-import InstanceSessionUsagePanel from "../../components/InstanceSessionUsagePanel";
-import RuntimeGovernanceBadge from "../../components/RuntimeGovernanceBadge";
-import RuntimeMaintenancePanel from "../../components/RuntimeMaintenancePanel";
+import InstanceLifecycleStatus from "../../components/InstanceLifecycleStatus";
+import ActionMenu from "../../components/ActionMenu";
+import InstanceSkillsDialog from "../../components/InstanceSkillsDialog";
+import InstanceWorkspaceSplit from "../../components/InstanceWorkspaceSplit";
+import InstanceNameEditor from "../../components/InstanceNameEditor";
+import ModelCatalogSyncBadge from "../../components/ModelCatalogSyncBadge";
+import RuntimeShutdownAuditPanel from "../../components/RuntimeShutdownAuditPanel";
 import { InstanceServiceFrame } from "../../components/InstanceServiceFrame";
+import InstanceSleepingState from "../../components/InstanceSleepingState";
+import { getInstanceDisplayStatus } from "../../lib/instanceStatus";
 import RestartWithEnvironmentDialog from "../../components/RestartWithEnvironmentDialog";
 import UserLayout from "../../components/UserLayout";
 import UpgradeRecoveryActions from "../../components/UpgradeRecoveryActions";
-import { WorkspaceFileManager } from "../../components/WorkspaceFileManager";
+import { InstanceWorkbench } from "../../components/workbench/InstanceWorkbench";
+import {workbenchReducer,MAX_WORKBENCH_TABS,type WorkbenchState,type WorkbenchEvent} from "../../components/workbench/state";
+import { readWorkbenchView, writeWorkbenchView, workbenchViewKey } from "../../components/workbench/persistence";
+import { useAuthStore } from "../../stores/authStore";
 import { useI18n } from "../../contexts/I18nContext";
 import { useInstanceStatusWebSocket } from "../../hooks/useWebSocket";
 import type { InstanceStatusUpdate } from "../../hooks/useWebSocket";
+import { instanceWorkbenchService, workbenchPreviewError } from "../../services/instanceWorkbenchService";
 import { instanceService } from "../../services/instanceService";
 import {
-  formatInstanceType,
   type ExternalAccessExpirationMode,
   type ExternalAccessExpirationPreset,
   type ExternalAccessRequest,
@@ -62,9 +67,6 @@ import {
 const META_POLL_INTERVAL_MS = 5000;
 const RUNTIME_POLL_INTERVAL_MS = 5000;
 const RESTART_NOTICE_AUTO_DISMISS_MS = 6000;
-const LITE_COLLAPSED_BOTTOM_FALLBACK_PX = 120;
-const LITE_COLLAPSED_BOTTOM_MAX_PX = 220;
-const LITE_ROOT_GAP_TOTAL_PX = 16; // two gap-2 rows between header / workspace / bottom
 type ExternalAccessAction =
   | "share-link"
   | "password"
@@ -93,16 +95,6 @@ const DESKTOP_STREAM_PROFILES: Array<{
   },
 ];
 
-function readPanelExpanded(
-  panel: "skills" | "session-usage",
-  instanceId: number | null,
-): boolean {
-  if (!instanceId || Number.isNaN(instanceId)) {
-    return false;
-  }
-  return !readStoredCollapsed(instancePanelStorageKey(panel, instanceId), true);
-}
-
 function availabilityForStatus(status: string): InstanceAvailability {
   if (status === "running") {
     return "available";
@@ -111,28 +103,6 @@ function availabilityForStatus(status: string): InstanceAvailability {
     return "starting";
   }
   return "unavailable";
-}
-
-function availabilityLabel(availability: InstanceAvailability) {
-  switch (availability) {
-    case "available":
-      return "Available";
-    case "starting":
-      return "Starting";
-    default:
-      return "Unavailable";
-  }
-}
-
-function availabilityClass(availability: InstanceAvailability) {
-  switch (availability) {
-    case "available":
-      return "border-emerald-200 bg-emerald-50 text-emerald-700";
-    case "starting":
-      return "border-amber-200 bg-amber-50 text-amber-700";
-    default:
-      return "border-slate-200 bg-slate-50 text-slate-600";
-  }
 }
 
 function formatBytes(value?: number) {
@@ -354,17 +324,24 @@ const InstanceDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const location = useLocation();
+  const queryClient = useQueryClient();
   const requestedReturn = location.state?.returnTo;
   const listReturnTo = typeof requestedReturn === "string" && /^\/instances(?:\?[^#]*)?$/.test(requestedReturn) ? requestedReturn : "/instances";
   const instanceId = id ? Number(id) : null;
 
-  const [instance, setInstance] = useState<Instance | null>(null);
+  const userId = useAuthStore(auth => auth.isAuthenticated ? auth.user?.id : undefined);
+  const [preparedInstance] = useState(() => userId && instanceId ? readInstanceTarget(userId, instanceId) : null);
+  const [instance, setInstance] = useState<Instance | null>(preparedInstance);
+  const metaRequest = useRef(0);
+  const metaInFlight = useRef(false);
+  const activePage = useRef(true);
+  useEffect(()=>{activePage.current=true;return()=>{activePage.current=false;};},[]);
   const [status, setStatus] = useState<InstanceStatus | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!preparedInstance);
   const [error, setError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [wakeError, setWakeError] = useState<{ generation: number | undefined; message: string } | null>(null);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
-  const [restartMenuOpen, setRestartMenuOpen] = useState(false);
   const [showRestartEnvironmentDialog, setShowRestartEnvironmentDialog] =
     useState(false);
   const [restartEnvironmentError, setRestartEnvironmentError] = useState<
@@ -383,6 +360,28 @@ const InstanceDetailPage: React.FC = () => {
   const [externalPassword, setExternalPassword] = useState("");
   const [externalPasswordVisible, setExternalPasswordVisible] = useState(false);
   const [externalAccessPanelOpen, setExternalAccessPanelOpen] = useState(false);
+  const shareTriggerRef = useRef<HTMLButtonElement>(null);
+  const sharePanelRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const panel = sharePanelRef.current, trigger = shareTriggerRef.current;
+    if (!externalAccessPanelOpen || !panel || !trigger) return;
+    const position = () => {
+      const bounds = trigger.getBoundingClientRect();
+      panel.style.left = `${Math.max(12, Math.min(bounds.right - panel.offsetWidth, innerWidth - panel.offsetWidth - 12))}px`;
+      panel.style.top = `${Math.min(bounds.bottom + 8, innerHeight - 96)}px`;
+      panel.style.maxHeight = `${Math.max(64, innerHeight - Math.min(bounds.bottom + 8, innerHeight - 96) - 12)}px`;
+    };
+    panel.showPopover();
+    position();
+    window.addEventListener('resize', position);
+    window.addEventListener('scroll', position, true);
+    return () => {
+      window.removeEventListener('resize', position);
+      window.removeEventListener('scroll', position, true);
+      panel.hidePopover();
+    };
+  }, [externalAccessPanelOpen]);
+
   const [externalActionLoading, setExternalActionLoading] = useState<
     string | null
   >(null);
@@ -416,25 +415,80 @@ const InstanceDetailPage: React.FC = () => {
     openCodeProjectRestartSawTransition,
     setOpenCodeProjectRestartSawTransition,
   ] = useState(false);
-  const [skillPanelExpanded, setSkillPanelExpanded] = useState(() =>
-    readPanelExpanded("skills", instanceId),
-  );
-  const [sessionPanelExpanded, setSessionPanelExpanded] = useState(() =>
-    readPanelExpanded("session-usage", instanceId),
-  );
   const [workspaceHeightPx, setWorkspaceHeightPx] = useState<number | null>(
     null,
   );
-  const [workspaceVisible, setWorkspaceVisible] = useState(true);
-  const [collapsedBottomHeightPx, setCollapsedBottomHeightPx] = useState<
-    number | null
-  >(null);
-  const workspaceSectionRef = useRef<HTMLElement>(null);
+  const workbenchUserId = useAuthStore((auth) => auth.isAuthenticated ? auth.user?.id : undefined);
+  const workbenchScope = workbenchViewKey(workbenchUserId, instanceId);
+  const activeWorkbenchScope = useRef(workbenchScope);
+  activeWorkbenchScope.current = workbenchScope;
+  const restoredWorkbench = useMemo(() => readWorkbenchView(workbenchScope), [workbenchScope]);
+  // Only browser definitions are durable; capabilities and drafts remain in memory.
+  const [workbenchViews,setWorkbenchViews]=useState<Record<string,WorkbenchState>>({});
+  const [workspaceVisibility, setWorkspaceVisibility] = useState<Record<string, boolean>>({});
+  const workbenchViewsRef = useRef(workbenchViews);
+  const workspaceVisibilityRef = useRef(workspaceVisibility);
+  const workspaceVisible = (workbenchScope ? workspaceVisibility[workbenchScope] : undefined) ?? restoredWorkbench.visible;
+  const setWorkspaceVisible = useCallback((visible: boolean) => {
+    if (!workbenchScope || activeWorkbenchScope.current !== workbenchScope) return;
+    workspaceVisibilityRef.current = { ...workspaceVisibilityRef.current, [workbenchScope]: visible };
+    setWorkspaceVisibility(workspaceVisibilityRef.current);
+    writeWorkbenchView(workbenchScope, { state: workbenchViewsRef.current[workbenchScope] ?? restoredWorkbench.state, visible });
+  }, [workbenchScope, restoredWorkbench]);
+  const onWorkbenchEvent = useCallback((event: WorkbenchEvent) => {
+    if (!instanceId || !workbenchScope || activeWorkbenchScope.current !== workbenchScope) return;
+    const previous = workbenchViewsRef.current;
+    const current = previous[workbenchScope] ?? restoredWorkbench.state;
+    const next = workbenchReducer(current, event);
+    if (next !== current) {
+      workbenchViewsRef.current = { ...previous, [workbenchScope]: next };
+      setWorkbenchViews(workbenchViewsRef.current);
+      writeWorkbenchView(workbenchScope, { state: next, visible: workspaceVisibilityRef.current[workbenchScope] ?? restoredWorkbench.visible });
+    }
+  }, [instanceId, workbenchScope, restoredWorkbench]);
+
+  const nativePreviewInstanceId = instance?.id;
+  const nativePreviewGeneration = instance?.runtime_generation ?? 0;
+  const handleNativePreview = useCallback(async (address: string, isCurrent: () => boolean) => {
+    if (!nativePreviewInstanceId || nativePreviewInstanceId !== instanceId || !isCurrent()) return;
+    const id = nativePreviewInstanceId;
+    const generation = nativePreviewGeneration;
+    if (!workbenchScope || activeWorkbenchScope.current !== workbenchScope) return;
+    const view = workbenchViewsRef.current[workbenchScope] ?? restoredWorkbench.state;
+    if (view.generation !== generation) return;
+    const existing = view.tabs.find((tab) => tab.kind === "browser" && tab.address === address && !tab.stale);
+    if (existing) {
+      setWorkspaceVisible(true);
+      onWorkbenchEvent({ type: "tab.select", id: existing.id });
+      return;
+    }
+    if (view.tabs.length >= MAX_WORKBENCH_TABS) {
+      setActionMessage(t("workbench.sessionLimit"));
+      return;
+    }
+    const tab = crypto.randomUUID();
+    // Reserve before awaiting allocation so concurrent clicks obey the tab limit.
+    onWorkbenchEvent({ type: "browser.new", id: tab });
+    onWorkbenchEvent({ type: "browser.navigate", id: tab, address, url: "", previewPending: true, generation });
+    setWorkspaceVisible(true);
+    try {
+      const result = await instanceWorkbenchService.preview(id, generation, address);
+      if (!isCurrent() || activeWorkbenchScope.current !== workbenchScope || result.generation !== generation || workbenchViewsRef.current[workbenchScope]?.generation !== generation) {
+        onWorkbenchEvent({ type: "tab.remove", id: tab });
+        return;
+      }
+      onWorkbenchEvent({ type: "browser.navigate", id: tab, address, url: result.url, viewer_url: result.viewer_url, credentialless: result.credentialless, generation });
+    } catch (error) {
+      if (!isCurrent() || activeWorkbenchScope.current !== workbenchScope || workbenchViewsRef.current[workbenchScope]?.generation !== generation) {
+        onWorkbenchEvent({ type: "tab.remove", id: tab });
+        return;
+      }
+      onWorkbenchEvent({ type: "browser.navigate", id: tab, address, url: "", previewError: workbenchPreviewError(error, t), generation });
+    }
+  }, [instanceId, nativePreviewInstanceId, nativePreviewGeneration, workbenchScope, restoredWorkbench, setWorkspaceVisible, onWorkbenchEvent, t]);
+
   const liteRootRef = useRef<HTMLDivElement>(null);
   const liteHeaderRef = useRef<HTMLDivElement>(null);
-  const liteBottomRef = useRef<HTMLDivElement>(null);
-  const bottomPanelExpandedRef = useRef(false);
-  const restartMenuRef = useRef<HTMLDivElement>(null);
   const restartNoticeTimerRef = useRef<number | null>(null);
 
   const cancelRestartNoticeTimer = useCallback(() => {
@@ -473,44 +527,52 @@ const InstanceDetailPage: React.FC = () => {
     return () => cancelRestartNoticeTimer();
   }, [cancelRestartNoticeTimer]);
 
-  const openCodeInitialDirectory = (() => {
-    if (instance?.type !== "opencode" || instance.instance_mode !== "lite") {
-      return undefined;
+  const returnToInventory = useCallback((targetInstanceId: number) => {
+    if (userId) {
+      forgetInstance(userId, targetInstanceId);
+      queryClient.removeQueries({ queryKey: ["instance-switcher", userId] });
     }
-    const workspacePath = instance?.workspace_path?.trim().replaceAll("\\", "/");
-    if (!workspacePath?.startsWith("/")) {
-      return undefined;
-    }
-    return `${workspacePath.replace(/\/+$/gu, "")}/starter`;
-  })();
-
+    metaRequest.current += 1;
+    navigate(listReturnTo, { replace: true });
+  }, [userId, queryClient, navigate, listReturnTo]);
   const fetchMeta = useCallback(
     async (targetInstanceId: number, options?: { background?: boolean }) => {
+      if (!activePage.current || metaInFlight.current) return;
+      metaInFlight.current = true;
+      const request = ++metaRequest.current;
       try {
         if (!options?.background) {
           setLoading(true);
         }
         const [instanceData, statusData] = await Promise.all([
-          instanceService.getInstance(targetInstanceId),
+          instanceService.getInstance(targetInstanceId).catch((reason: unknown) => {
+            if (activePage.current && request === metaRequest.current && isAxiosError(reason) && reason.response?.status === 404) {
+              returnToInventory(targetInstanceId);
+            }
+            throw reason;
+          }),
           instanceService.getInstanceStatus(targetInstanceId),
         ]);
+        if (!activePage.current || request !== metaRequest.current) return;
         setInstance(instanceData);
+        if (userId) rememberLastInstance(userId, instanceData.id);
         setStatus(statusData);
         setError(null);
       } catch (err: unknown) {
-        setError(getErrorMessage(err, t("instances.failedToLoad")));
+        if (activePage.current && request === metaRequest.current) setError(getErrorMessage(err, t("instances.failedToLoad")));
       } finally {
-        if (!options?.background) {
-          setLoading(false);
-        }
+        metaInFlight.current = false;
+        if (activePage.current && request === metaRequest.current) setLoading(false);
       }
     },
-    [t],
+    [t, userId, returnToInventory],
   );
 
   const fetchExternalAccess = useCallback(async (targetInstanceId: number) => {
+    if (!activePage.current) return;
     try {
       const result = await instanceService.getExternalAccess(targetInstanceId);
+      if (!activePage.current) return;
       const access = result.external_access ?? null;
       setExternalAccess(access);
       setExternalShareURL(
@@ -532,8 +594,10 @@ const InstanceDetailPage: React.FC = () => {
   }, []);
 
   const fetchRuntimeDetails = useCallback(async (targetInstanceId: number) => {
+    if (!activePage.current) return;
     try {
       const data = await instanceService.getRuntimeDetails(targetInstanceId);
+      if (!activePage.current) return;
       setRuntimeDetails(data);
       setRuntimeError(null);
     } catch (err: unknown) {
@@ -554,9 +618,9 @@ const InstanceDetailPage: React.FC = () => {
       setLoading(false);
       return;
     }
-    void fetchMeta(instanceId);
+    void fetchMeta(instanceId, { background: !!preparedInstance });
     void fetchExternalAccess(instanceId);
-  }, [fetchExternalAccess, fetchMeta, instanceId, t]);
+  }, [fetchExternalAccess, fetchMeta, instanceId, preparedInstance, t]);
 
   useEffect(() => {
     if (!instanceId || Number.isNaN(instanceId)) {
@@ -620,31 +684,6 @@ const InstanceDetailPage: React.FC = () => {
     status?.status,
   ]);
 
-  useEffect(() => {
-    if (!restartMenuOpen) {
-      return;
-    }
-    const handlePointerDown = (event: MouseEvent) => {
-      if (
-        restartMenuRef.current &&
-        !restartMenuRef.current.contains(event.target as Node)
-      ) {
-        setRestartMenuOpen(false);
-      }
-    };
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setRestartMenuOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handlePointerDown);
-    document.addEventListener("keydown", handleKeyDown);
-    return () => {
-      document.removeEventListener("mousedown", handlePointerDown);
-      document.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [restartMenuOpen]);
-
   const isDedicatedInstance = useMemo(
     () =>
       Boolean(
@@ -678,126 +717,26 @@ const InstanceDetailPage: React.FC = () => {
   }, [fetchRuntimeDetails, instanceId, isDedicatedInstance]);
 
   useEffect(() => {
-    if (isDedicatedInstance) {
-      return;
-    }
-
-    const bottomExpanded = skillPanelExpanded || sessionPanelExpanded;
-    bottomPanelExpandedRef.current = bottomExpanded;
-
-    // Freeze workspace height while any bottom panel is expanded — avoid ResizeObserver races.
-    if (bottomExpanded) {
-      return;
-    }
-
+    if (isDedicatedInstance) return;
     const syncWorkspaceHeight = () => {
-      if (bottomPanelExpandedRef.current) {
-        return;
-      }
-
       const root = liteRootRef.current;
       const header = liteHeaderRef.current;
-      const bottom = liteBottomRef.current;
-      if (!root || !header) {
-        return;
-      }
-
-      const parent = root.parentElement;
-      if (!parent) {
-        return;
-      }
-
-      let bottomReserve =
-        collapsedBottomHeightPx ?? LITE_COLLAPSED_BOTTOM_FALLBACK_PX;
-      if (bottom) {
-        const measuredBottom = bottom.offsetHeight;
-        if (
-          measuredBottom > 0 &&
-          measuredBottom <= LITE_COLLAPSED_BOTTOM_MAX_PX
-        ) {
-          bottomReserve = measuredBottom;
-          setCollapsedBottomHeightPx(measuredBottom);
-        }
-      }
-
-      const parentStyle = window.getComputedStyle(parent);
-      const padY =
-        (Number.parseFloat(parentStyle.paddingTop) || 0) +
-        (Number.parseFloat(parentStyle.paddingBottom) || 0);
-      const nextHeight =
-        parent.clientHeight -
-        padY -
-        header.offsetHeight -
-        bottomReserve -
-        LITE_ROOT_GAP_TOTAL_PX;
-      if (nextHeight > 0) {
-        setWorkspaceHeightPx(nextHeight);
-      }
+      const parent = root?.parentElement;
+      if (!root || !header || !parent) return;
+      const style = window.getComputedStyle(parent);
+      const padding = (Number.parseFloat(style.paddingTop) || 0) + (Number.parseFloat(style.paddingBottom) || 0);
+      const gap = Number.parseFloat(window.getComputedStyle(root).rowGap) || 0;
+      const height = parent.clientHeight - padding - header.offsetHeight - gap;
+      if (height > 0) setWorkspaceHeightPx(height);
     };
-
     syncWorkspaceHeight();
     const observer = new ResizeObserver(syncWorkspaceHeight);
     const parent = liteRootRef.current?.parentElement;
-    if (parent) {
-      observer.observe(parent);
-    }
-    if (liteHeaderRef.current) {
-      observer.observe(liteHeaderRef.current);
-    }
+    if (parent) observer.observe(parent);
+    if (liteHeaderRef.current) observer.observe(liteHeaderRef.current);
     window.addEventListener("resize", syncWorkspaceHeight);
-
-    return () => {
-      observer.disconnect();
-      window.removeEventListener("resize", syncWorkspaceHeight);
-    };
-  }, [
-    collapsedBottomHeightPx,
-    instance?.id,
-    isDedicatedInstance,
-    sessionPanelExpanded,
-    skillPanelExpanded,
-  ]);
-
-  useEffect(() => {
-    const nextSkillExpanded = readPanelExpanded("skills", instanceId);
-    const nextSessionExpanded = readPanelExpanded("session-usage", instanceId);
-    setSkillPanelExpanded(nextSkillExpanded);
-    setSessionPanelExpanded(nextSessionExpanded);
-  }, [instanceId]);
-
-  const bottomPanelExpanded = skillPanelExpanded || sessionPanelExpanded;
-  bottomPanelExpandedRef.current = bottomPanelExpanded;
-
-  const pinWorkspaceHeightBeforeExpand = useCallback(() => {
-    const section = workspaceSectionRef.current;
-    if (!section) {
-      return;
-    }
-    const nextHeight = section.getBoundingClientRect().height;
-    if (nextHeight > 0) {
-      setWorkspaceHeightPx(nextHeight);
-    }
-  }, []);
-
-  const handleSkillPanelExpandedChange = useCallback(
-    (expanded: boolean) => {
-      if (expanded) {
-        pinWorkspaceHeightBeforeExpand();
-      }
-      setSkillPanelExpanded(expanded);
-    },
-    [pinWorkspaceHeightBeforeExpand],
-  );
-
-  const handleSessionPanelExpandedChange = useCallback(
-    (expanded: boolean) => {
-      if (expanded) {
-        pinWorkspaceHeightBeforeExpand();
-      }
-      setSessionPanelExpanded(expanded);
-    },
-    [pinWorkspaceHeightBeforeExpand],
-  );
+    return () => { observer.disconnect(); window.removeEventListener("resize", syncWorkspaceHeight); };
+  }, [instance?.id, isDedicatedInstance]);
 
   const availability = useMemo<InstanceAvailability>(() => {
     if (status?.availability) {
@@ -818,6 +757,7 @@ const InstanceDetailPage: React.FC = () => {
 
     try {
       setActionLoading(action);
+      if (action === "start") setWakeError(null);
       if (action === "restart") {
         showRestartNotice(t("instances.restartInProgress"));
       } else {
@@ -832,18 +772,23 @@ const InstanceDetailPage: React.FC = () => {
           break;
         case "restart":
           await instanceService.restartInstance(instance.id);
-          markRestartSubmitted(t("instances.restartSubmitted"));
+          if (activePage.current) markRestartSubmitted(t("instances.restartSubmitted"));
           break;
         case "delete":
           await instanceService.deleteInstance(instance.id);
+          if (!activePage.current) return;
           setShowDeleteDialog(false);
-          navigate(listReturnTo);
+          returnToInventory(instance.id);
           return;
       }
       await fetchMeta(instance.id, { background: true });
     } catch (err: unknown) {
       dismissRestartNotice();
-      alert(getErrorMessage(err, t("instances.failedToLoad")));
+      if (activePage.current) {
+        if (action === "start" && getInstanceDisplayStatus(instance.status, instance.stopped_reason) === "auto_sleep") {
+          setWakeError({ generation: instance.runtime_generation, message: getErrorMessage(err, t("instances.wakeFailed")) });
+        } else alert(getErrorMessage(err, t("instances.failedToLoad")));
+      }
     } finally {
       setActionLoading(null);
     }
@@ -962,7 +907,6 @@ const InstanceDetailPage: React.FC = () => {
     if (!instance) {
       return;
     }
-    setRestartMenuOpen(false);
     setRestartEnvironmentError(null);
     setRestartEnvironmentNames([]);
     setShowRestartEnvironmentDialog(true);
@@ -1136,168 +1080,62 @@ const InstanceDetailPage: React.FC = () => {
     }
   };
 
-  if (loading) {
+  if (!allowBrowserInstance(instanceId)) return null;
+
+  if (loading || (instance !== null && instance.id !== instanceId)) {
     return (
-      <UserLayout title={t("instances.details")}>
+      <>
         <div className="flex h-64 items-center justify-center text-sm text-slate-500">
           {t("common.loading")}
         </div>
-      </UserLayout>
+      </>
     );
   }
 
   if (error || !instance) {
     return (
-      <UserLayout title={t("instances.details")}>
+      <>
         <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           {error || t("instances.instanceNotFound")}
         </div>
-      </UserLayout>
+      </>
     );
   }
 
-  const renderHeaderSection = (actionAccessory?: React.ReactNode) => (
-    <div className="flex shrink-0 flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-      <div className="min-w-0">
-        <Link
-          to={listReturnTo}
-          className="mb-3 inline-flex items-center gap-2 text-sm font-medium text-slate-500 hover:text-slate-950"
-        >
-          <ArrowLeft className="h-4 w-4" />
-          {t("instances.back")}
-        </Link>
-        <div className="flex flex-wrap items-center gap-3">
-          <h1 className="truncate text-2xl font-semibold text-slate-950">
-            {instance.name}
-          </h1>
-          <span
-            className={`inline-flex rounded-md border px-2 py-1 text-xs font-medium ${availabilityClass(
-              availability,
-            )}`}
-          >
-            {availabilityLabel(availability)}
-          </span>
-        </div>
-        <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm text-slate-500">
-          <span>{formatInstanceType(instance.type)}</span>
-          <span>Mode {instance.instance_mode === "pro" ? "Pro" : "Lite"}</span>
-          <span>Runtime {instance.runtime_type}</span>
-          {instance.type === "opencode" && <RuntimeGovernanceBadge instanceId={instance.id} />}
-          <span>
-            {formatBytes(
-              status?.workspace_usage_bytes ?? instance.workspace_usage_bytes,
-            )}
-          </span>
-          <span>{formatDateTime(instance.updated_at, locale)}</span>
-          {instance.type === "opencode" && <RuntimeMaintenancePanel key={instance.id} instanceId={instance.id} />}
-        </div>
-      </div>
+  const frameTitle = (listControls: React.ReactNode) => <div className="cm-instance-frame-identity">
+    <InstanceNameEditor key={instance.id} instance={instance} onRenamed={(targetId,name)=>{metaRequest.current++;setInstance(current=>current?.id===targetId?{...current,name}:current);}} />
+    <InstanceLifecycleStatus status={status?.status || instance.status} stoppedReason={instance.stopped_reason} />
+    {listControls}
+  </div>;
 
-      <div className="flex flex-col items-start gap-2 lg:items-end">
-        <div className="flex flex-wrap justify-start gap-2 lg:justify-end">
-          {actionAccessory}
-          {instance.status === "running" ? (
-            <button
-              type="button"
-              className="app-button-secondary"
-              onClick={() => void handleAction("stop")}
-              disabled={actionLoading !== null}
-            >
-              <Square className="h-4 w-4" />
-              {t("common.stop")}
-            </button>
-          ) : instance.status === "stopped" ? (
-            <button
-              type="button"
-              className="app-button-primary"
-              onClick={() => void handleAction("start")}
-              disabled={actionLoading !== null}
-            >
-              <Play className="h-4 w-4" />
-              {t("common.start")}
-            </button>
-          ) : null}
-          <div ref={restartMenuRef} className="relative inline-flex">
-            <button
-              type="button"
-              className="app-button-secondary rounded-r-none"
-              onClick={() => {
-                setRestartMenuOpen(false);
-                void handleAction("restart");
-              }}
-              disabled={
-                actionLoading !== null ||
-                instance.status === "deleting"
-              }
-            >
-              <RotateCw className="h-4 w-4" />
-              {t("common.restart")}
-            </button>
-            <button
-              type="button"
-              aria-label={t("instances.restartMenuLabel")}
-              aria-haspopup="menu"
-              aria-expanded={restartMenuOpen}
-              className="app-button-secondary -ml-px rounded-l-none px-2"
-              onClick={() => setRestartMenuOpen((open) => !open)}
-              disabled={
-                actionLoading !== null ||
-                instance.status === "deleting"
-              }
-            >
-              <ChevronDown
-                className={`h-4 w-4 transition-transform ${
-                  restartMenuOpen ? "rotate-180" : ""
-                }`}
-              />
-            </button>
-            {restartMenuOpen && (
-              <div
-                role="menu"
-                className="absolute right-0 top-full z-30 mt-2 w-72 rounded-lg border border-slate-200 bg-white p-1.5 shadow-lg"
-              >
-                <button
-                  type="button"
-                  role="menuitem"
-                  className="flex w-full items-start gap-3 rounded-md px-3 py-2.5 text-left transition hover:bg-slate-50"
-                  onClick={openRestartEnvironmentDialog}
-                >
-                  <RotateCw className="mt-0.5 h-4 w-4 shrink-0 text-indigo-600" />
-                  <span>
-                    <span className="block text-sm font-medium text-slate-900">
-                      {t("instances.restartWithEnvironment")}
-                    </span>
-                    <span className="mt-0.5 block text-xs leading-5 text-slate-500">
-                      {t("instances.restartWithEnvironmentHint")}
-                    </span>
-                  </span>
-                </button>
-              </div>
-            )}
-          </div>
-          <button
-            type="button"
-            className="app-button-secondary border-red-200 text-red-700 hover:border-red-300 hover:bg-red-50 hover:text-red-800"
-            onClick={() => setShowDeleteDialog(true)}
-            disabled={actionLoading !== null || instance.status === "deleting"}
-          >
-            <Trash2 className="h-4 w-4" />
-            {t("common.delete")}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
+  const renderFrameActions = () => <>
+    {shareLinkControl}
+    {["opencode", "openclaw", "hermes", "deepseek-harness"].includes(instance.type) && <ModelCatalogSyncBadge instanceId={instance.id} generation={instance.runtime_generation ?? 0} status={instance.status} />}
+    {instance.type === "openclaw" && <RuntimeShutdownAuditPanel key={`shutdown-${instance.id}`} instanceId={instance.id} />}
+    <InstanceSkillsDialog key={instance.id} instance={instance} onRuntimeDetailsChange={setRuntimeDetails} iconOnly />
+    <ActionMenu label={t("instances.runtimeManagement")} icon={<Settings2 size={16} />} disabled={actionLoading !== null} items={[
+            ...(instance.status === "running" ? [{ id: "stop", label: t("common.stop"), onSelect: () => void handleAction("stop") }]
+              : instance.status === "stopped" ? [{ id: "start", label: t("common.start"), onSelect: () => void handleAction("start") }] : []),
+            { id: "restart", label: t("common.restart"), disabled: instance.status === "deleting", onSelect: () => void handleAction("restart") },
+            { id: "restart-environment", label: t("instances.restartWithEnvironment"), disabled: instance.status === "deleting", onSelect: openRestartEnvironmentDialog },
+            { id: "delete", label: t("common.delete"), destructive: true, disabled: instance.status === "deleting", onSelect: () => setShowDeleteDialog(true) },
+
+    ]} />
+  </>;
 
   const shareLinkControl = instance.runtime_type.toLowerCase() !== "shell" && (
     <div className="relative">
       <button
         type="button"
+        ref={shareTriggerRef}
         data-share-enabled={externalAccess?.enabled ? "true" : "false"}
         data-share-auth={
           externalAccess?.enabled ? externalAccess.auth_mode : "disabled"
         }
-        className={`app-button-secondary ${
+        aria-label="Share Link"
+        title="Share Link"
+        aria-expanded={externalAccessPanelOpen}
+        className={`cm-icon-button ${
           externalAccess?.enabled
             ? "border-emerald-200 bg-emerald-50 text-emerald-700 hover:border-emerald-300 hover:bg-emerald-100 hover:text-emerald-800"
             : ""
@@ -1306,28 +1144,14 @@ const InstanceDetailPage: React.FC = () => {
         onClick={() => setExternalAccessPanelOpen((open) => !open)}
       >
         <ExternalLink className="h-4 w-4" />
-        Share Link
-        {externalAccess?.enabled && (
-          <span
-            className="ml-1 inline-flex h-5 min-w-5 items-center justify-center rounded bg-white/80 px-1.5 py-0.5 text-[11px] font-semibold"
-            title={
-              externalAccess.auth_mode === "password"
-                ? "Key authentication enabled"
-                : "Share link enabled"
-            }
-          >
-            {externalAccess.auth_mode === "password" ? (
-              <KeyRound className="h-3.5 w-3.5" aria-hidden="true" />
-            ) : (
-              "On"
-            )}
-          </span>
-        )}
       </button>
       {externalAccessPanelOpen && (
         <div
+          ref={sharePanelRef}
+          popover="auto"
+          onToggle={event => { if (event.newState === "closed") setExternalAccessPanelOpen(false); }}
           data-panel="share-link-popover"
-          className="absolute right-0 top-full z-20 mt-2 w-[min(92vw,34rem)] rounded-lg border border-slate-200 bg-white p-4 text-left shadow-lg"
+          className="fixed inset-auto m-0 w-[min(92vw,34rem)] overflow-y-auto rounded-lg border border-slate-200 bg-white p-4 text-left shadow-lg"
         >
           <div className="mb-3 flex items-center justify-between gap-3">
             <div className="min-w-0">
@@ -1589,22 +1413,25 @@ const InstanceDetailPage: React.FC = () => {
     </div>
   );
 
+  const sharedWorkbenchState=(workbenchScope ? workbenchViews[workbenchScope] : undefined)??restoredWorkbench.state;
+  const sleepingContent = getInstanceDisplayStatus(status?.status ?? instance.status, instance.stopped_reason) === "auto_sleep"
+    ? <InstanceSleepingState type={instance.type} waking={actionLoading === "start"} disabled={actionLoading !== null}
+        error={wakeError?.generation === instance.runtime_generation ? wakeError?.message ?? null : null}
+        onWake={() => void handleAction("start")} />
+    : undefined;
+
   const renderLiteWorkspace = () => {
     const pinnedWorkspaceHeight = workspaceHeightPx;
 
     return (
       <div
         ref={liteRootRef}
-        className={`flex min-h-0 flex-1 flex-col gap-2 ${
-          bottomPanelExpanded ? "" : "overflow-hidden"
-        }`}
+        className={`${workspaceVisible&&supportsWorkspace(instance)?"wb-instance-stack":""} flex min-h-0 flex-1 flex-col gap-2 overflow-hidden`}
       >
         <div ref={liteHeaderRef} className="flex shrink-0 flex-col gap-2">
-          {renderHeaderSection(shareLinkControl)}
           {renderActionMessage()}
         </div>
         <section
-          ref={workspaceSectionRef}
           style={
             pinnedWorkspaceHeight
               ? {
@@ -1614,52 +1441,42 @@ const InstanceDetailPage: React.FC = () => {
                 }
               : { minHeight: 420, flex: 1 }
           }
-          className={`grid shrink-0 grid-cols-1 grid-rows-[minmax(0,1fr)] gap-4 overflow-hidden min-h-[420px] ${workspaceVisible ? "xl:grid-cols-[minmax(0,1fr)_minmax(360px,28rem)]" : "xl:grid-cols-1"}`}
+          className="wb-instance-section min-h-0 shrink-0 overflow-hidden"
         >
-          <div className="h-full min-h-0 min-w-0">
+          <InstanceWorkspaceSplit key={instance.id} instance={instance} visible={workspaceVisible && supportsWorkspace(instance)} left={listControls => (
+          <div className="wb-instance-agent h-full min-h-0 min-w-0">
             <InstanceServiceFrame
               instanceId={instance.id}
+              runtimeGeneration={instance.runtime_generation ?? 0}
+              onOpenWorkbenchPreview={handleNativePreview}
+              headerTitle={frameTitle(listControls)}
+              headerActions={renderFrameActions()}
+              showModelHint={false}
               instanceName={instance.name}
               instanceType={instance.type}
               instanceMode={instance.instance_mode}
               availability={availability}
+              unavailableContent={sleepingContent}
               reloadToken={serviceFrameReloadToken}
-              openCodeInitialDirectory={openCodeInitialDirectory}
               workspaceVisible={supportsWorkspace(instance) ? workspaceVisible : undefined}
               onWorkspaceVisibilityChange={supportsWorkspace(instance) ? setWorkspaceVisible : undefined}
             />
           </div>
-          {workspaceVisible &&
-            (supportsWorkspace(instance) ? (
-              <div className="h-full min-h-0 min-w-0">
-                <WorkspaceFileManager
-                  instanceId={instance.id}
-                  initialPath={
-                    instance.type === "opencode" &&
-                    instance.instance_mode === "lite"
-                      ? "starter"
-                      : undefined
-                  }
-                />
-              </div>
-            ) : (
-              <div className="cm-surface flex h-full min-h-[420px] items-center justify-center text-sm text-slate-500">
-                No workspace
-              </div>
-            ))}
+          )} right={supportsWorkspace(instance) ? (
+            <div className={`wb-instance-tools h-full min-h-0 min-w-0 ${workspaceVisible ? "" : "hidden"}`}>
+              <InstanceWorkbench
+                key={workbenchScope}
+                sharedState={sharedWorkbenchState}
+                onWorkbenchEvent={onWorkbenchEvent}
+                instanceId={instance.id}
+                runtimeGeneration={instance.runtime_generation ?? 0}
+                isRunning={instance.status === "running"}
+                visible={workspaceVisible}
+              />
+            </div>
+          ) : null} />
         </section>
-        <div ref={liteBottomRef} className="flex shrink-0 flex-col gap-2">
-          <InstanceSkillHubPanel
-            instance={instance}
-            onRuntimeDetailsChange={setRuntimeDetails}
-            onPanelExpandedChange={handleSkillPanelExpandedChange}
-          />
-          <InstanceSessionUsagePanel
-            instanceId={instance.id}
-            instanceType={instance.type}
-            onPanelExpandedChange={handleSessionPanelExpandedChange}
-          />
-        </div>
+
       </div>
     );
   };
@@ -1725,45 +1542,47 @@ const InstanceDetailPage: React.FC = () => {
 
   const renderProWorkspace = () => (
     <div className="flex flex-col gap-4">
-      {renderHeaderSection(shareLinkControl)}
       {renderActionMessage()}
       <section
         data-layout="pro-desktop-workspace"
-        className={`grid items-start gap-4 ${workspaceVisible ? "xl:grid-cols-[minmax(0,7fr)_minmax(380px,3fr)]" : "xl:grid-cols-1"}`}
+        className="min-w-0 h-[clamp(520px,calc(100vh-10rem),760px)]"
       >
-        <div className="h-[clamp(520px,calc(100vh-10rem),760px)] min-w-0 overflow-hidden">
+          <InstanceWorkspaceSplit key={instance.id} instance={instance} visible={workspaceVisible && supportsWorkspace(instance)} left={listControls => (
+        <div className="wb-instance-agent h-full min-h-0 min-w-0 overflow-hidden">
           <InstanceServiceFrame
             instanceId={instance.id}
+            runtimeGeneration={instance.runtime_generation ?? 0}
+            onOpenWorkbenchPreview={handleNativePreview}
+            headerTitle={frameTitle(listControls)}
+            headerActions={renderFrameActions()}
+            showModelHint={false}
             instanceName={instance.name}
             instanceType={instance.type}
             instanceMode={instance.instance_mode}
             availability={availability}
+            unavailableContent={sleepingContent}
             reloadToken={serviceFrameReloadToken}
             workspaceVisible={supportsWorkspace(instance) ? workspaceVisible : undefined}
             onWorkspaceVisibilityChange={supportsWorkspace(instance) ? setWorkspaceVisible : undefined}
           />
         </div>
 
-        {workspaceVisible &&
-          (supportsWorkspace(instance) ? (
-            <div className="h-[clamp(520px,calc(100vh-10rem),760px)] min-w-0 overflow-hidden">
-              <WorkspaceFileManager
-                instanceId={instance.id}
-                initialPath="/config"
-                onSelectDirectory={
-                  instance.type === "opencode" &&
-                  instance.instance_mode === "pro"
-                    ? handleSelectOpenCodeProject
-                    : undefined
-                }
-                selectingDirectory={actionLoading !== null}
-              />
-            </div>
-          ) : (
-            <div className="cm-surface flex h-[clamp(520px,calc(100vh-10rem),760px)] min-w-0 items-center justify-center text-sm text-slate-500">
-              No workspace
-            </div>
-          ))}
+          )} right={supportsWorkspace(instance) ? (
+          <div className={`wb-instance-tools h-full min-h-0 min-w-0 overflow-hidden ${workspaceVisible ? "" : "hidden"}`}>
+            <InstanceWorkbench
+              key={workbenchScope}
+              sharedState={sharedWorkbenchState}
+              onWorkbenchEvent={onWorkbenchEvent}
+              instanceId={instance.id}
+              runtimeGeneration={instance.runtime_generation ?? 0}
+              isRunning={instance.status === "running"}
+              visible={workspaceVisible}
+              initialPath="/config"
+              onSelectDirectory={instance.type === "opencode" && instance.instance_mode === "pro" ? handleSelectOpenCodeProject : undefined}
+              selectingDirectory={actionLoading !== null}
+            />
+          </div>
+        ) : null} />
       </section>
 
       {(instance.runtime_type || "desktop") === "desktop" && (
@@ -1840,11 +1659,6 @@ const InstanceDetailPage: React.FC = () => {
         </section>
         )}
 
-      <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(280px,22rem)]">
-        <InstanceSkillHubPanel
-          instance={instance}
-          onRuntimeDetailsChange={setRuntimeDetails}
-        />
 
         <section
           data-section="runtime-overview"
@@ -1895,12 +1709,6 @@ const InstanceDetailPage: React.FC = () => {
             ))}
           </div>
         </section>
-      </section>
-
-      <InstanceSessionUsagePanel
-        instanceId={instance.id}
-        instanceType={instance.type}
-      />
 
       <section className="cm-surface px-4 py-4">
         <div className="mb-3 flex items-center justify-between gap-3">
@@ -1954,13 +1762,7 @@ const InstanceDetailPage: React.FC = () => {
   );
 
   return (
-    <UserLayout
-      title={isDedicatedInstance ? instance.name : undefined}
-      fillHeight={!isDedicatedInstance}
-      scrollableMain={
-        !isDedicatedInstance && (skillPanelExpanded || sessionPanelExpanded)
-      }
-    >
+    <>
       {instance.type==='openclaw'&&instance.instance_mode==='lite'&&<UpgradeRecoveryActions instanceId={instance.id} onRecovered={()=>void fetchMeta(instance.id,{background:true})}/>}
       <ConfirmDialog
         open={externalResetTarget !== null}
@@ -2024,7 +1826,7 @@ const InstanceDetailPage: React.FC = () => {
       />
 
       {isDedicatedInstance ? renderProWorkspace() : renderLiteWorkspace()}
-    </UserLayout>
+    </>
   );
 };
 
@@ -2064,4 +1866,9 @@ function Metric({
   );
 }
 
-export default InstanceDetailPage;
+export default function AccountInstanceDetailPage() {
+  const userId = useAuthStore(auth => auth.isAuthenticated ? auth.user?.id : undefined);
+  const { id } = useParams<{ id: string }>();
+  const { t } = useI18n();
+  return userId ? <UserLayout title={t("nav.myInstances")} fillHeight scrollableMain><InstanceDetailPage key={`${userId}:${id}`} /></UserLayout> : null;
+}

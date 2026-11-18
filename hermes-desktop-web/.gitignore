@@ -1,4 +1,5 @@
 node_modules/
+.npm-review-cache/
 .upstream/
 dist/
 *.tsbuildinfo

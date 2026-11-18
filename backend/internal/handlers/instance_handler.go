@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"clawreef/internal/browserorigin"
 	"clawreef/internal/models"
 	"clawreef/internal/repository"
 	"clawreef/internal/services"
@@ -261,6 +262,8 @@ type CreateInstanceRequest struct {
 }
 
 type BatchCreateLiteInstanceTemplate struct {
+	Owner                *string                      `json:"owner,omitempty" binding:"omitempty,max=128"`
+	Description          *string                      `json:"description,omitempty"`
 	Type                 string                       `json:"type,omitempty"`
 	CPUCores             float64                      `json:"cpu_cores,omitempty"`
 	MemoryGB             int                          `json:"memory_gb,omitempty"`
@@ -338,6 +341,7 @@ type ListInstancesRequest struct {
 	InstanceMode string `form:"instance_mode,omitempty"`
 	Availability string `form:"availability,omitempty"`
 	Status       string `form:"status,omitempty"`
+	AutoSleep    *bool  `form:"auto_sleep"`
 }
 
 // ListInstances lists instances owned by the current user (workspace view).
@@ -372,6 +376,11 @@ func (h *InstanceHandler) ListInstances(c *gin.Context) {
 		return
 	}
 
+	if req.AutoSleep != nil && strings.ToLower(strings.TrimSpace(req.Status)) != "stopped" {
+		utils.ValidationError(c, fmt.Errorf("auto_sleep requires status=stopped"))
+		return
+	}
+
 	// Calculate offset
 	offset := (req.Page - 1) * req.Limit
 
@@ -386,6 +395,7 @@ func (h *InstanceHandler) ListInstances(c *gin.Context) {
 			InstanceMode: req.InstanceMode,
 			Availability: req.Availability,
 			Status:       req.Status,
+			AutoSleep:    req.AutoSleep,
 		}, offset, req.Limit)
 	} else {
 		instances, total, err = h.instanceService.GetByUserID(userID.(int), offset, req.Limit)
@@ -478,6 +488,7 @@ func (h *InstanceHandler) CreateInstance(c *gin.Context) {
 		utils.HandleError(c, err)
 		return
 	}
+	c.Header("X-ClawManager-Created-Instance", strconv.Itoa(instance.ID))
 
 	skillIDs, err := h.resolveCreateInstanceSkillIDs(userID.(int), req)
 	if err != nil {
@@ -673,6 +684,8 @@ func buildLiteBatchCreateRequests(req BatchCreateLiteInstancesRequest) ([]servic
 
 	template := CreateInstanceRequest{}
 	if req.Template != nil {
+		template.Owner = req.Template.Owner
+		template.Description = req.Template.Description
 		template.Type = req.Template.Type
 		template.CPUCores = req.Template.CPUCores
 		template.MemoryGB = req.Template.MemoryGB
@@ -818,20 +831,44 @@ func (h *InstanceHandler) BatchDeleteLiteInstances(c *gin.Context) {
 		Requested: len(instances),
 		Results:   make([]BatchDeleteLiteInstanceResult, 0, len(instances)),
 	}
-	for _, instance := range instances {
-		result := BatchDeleteLiteInstanceResult{
+	// One retry budget covers the whole batch; busy entries cannot multiply it.
+	deleteCtx, cancel := context.WithTimeout(c.Request.Context(), 3*time.Second)
+	defer cancel()
+	pending := make([]int, 0, len(instances))
+	for idx, instance := range instances {
+		response.Results = append(response.Results, BatchDeleteLiteInstanceResult{
 			InstanceID: instance.ID,
 			Name:       instance.Name,
 			Status:     "deleting",
+		})
+		pending = append(pending, idx)
+	}
+	for len(pending) > 0 {
+		retry := make([]int, 0, len(pending))
+		for _, idx := range pending {
+			result := &response.Results[idx]
+			err := h.deleteLiteBatchInstance(deleteCtx, result.InstanceID)
+			if errors.Is(err, models.ErrInstanceLifecycleLockBusy) {
+				retry = append(retry, idx)
+				continue
+			}
+			if err != nil {
+				result.Status = "failed"
+				result.Error = err.Error()
+				response.Failed++
+			} else {
+				response.Deleted++
+			}
 		}
-		if err := h.instanceService.Delete(instance.ID); err != nil {
-			result.Status = "failed"
-			result.Error = err.Error()
-			response.Failed++
-		} else {
-			response.Deleted++
+		pending = retry
+		if len(pending) == 0 {
+			break
 		}
-		response.Results = append(response.Results, result)
+		// Try every entry before waiting on scheduler lifecycle locks.
+		select {
+		case <-deleteCtx.Done():
+		case <-time.After(50 * time.Millisecond):
+		}
 	}
 
 	status := http.StatusAccepted
@@ -839,6 +876,16 @@ func (h *InstanceHandler) BatchDeleteLiteInstances(c *gin.Context) {
 		status = http.StatusMultiStatus
 	}
 	utils.Success(c, status, "Lite instances batch delete started", response)
+}
+
+func (h *InstanceHandler) deleteLiteBatchInstance(ctx context.Context, id int) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if queue, ok := h.instanceService.(interface{ QueueDelete(int) error }); ok {
+		return queue.QueueDelete(id)
+	}
+	return h.instanceService.Delete(id)
 }
 
 func isLiteInstance(instance *models.Instance) bool {
@@ -966,7 +1013,11 @@ func (h *InstanceHandler) DeleteInstance(c *gin.Context) {
 		utils.Error(c, http.StatusForbidden, "Access denied")
 		return
 	}
-	if err := h.instanceService.Delete(id); err != nil {
+	deleteInstance := h.instanceService.Delete
+	if queue, ok := h.instanceService.(interface{ QueueDelete(int) error }); ok {
+		deleteInstance = queue.QueueDelete
+	}
+	if err := deleteInstance(id); err != nil {
 		utils.HandleError(c, err)
 		return
 	}
@@ -1084,6 +1135,10 @@ func (h *InstanceHandler) RestartInstance(c *gin.Context) {
 	}
 
 	if err := h.instanceService.RestartWithEnvironment(id, req.EnvironmentOverrides, req.EnvironmentOverrideRemovals); err != nil {
+		if errors.Is(err, services.ErrInstanceRestartPending) {
+			utils.Success(c, http.StatusAccepted, "Instance restart is awaiting confirmed shutdown", nil)
+			return
+		}
 		if errors.Is(err, services.ErrInvalidEnvironmentOverrides) {
 			utils.Error(c, http.StatusBadRequest, err.Error())
 			return
@@ -1092,7 +1147,7 @@ func (h *InstanceHandler) RestartInstance(c *gin.Context) {
 		return
 	}
 
-	utils.Success(c, http.StatusOK, "Instance restarted successfully", nil)
+	utils.Success(c, http.StatusOK, "Instance restart submitted", nil)
 }
 
 // GetInstanceEnvironmentOverrides returns only configured variable names.
@@ -1206,6 +1261,7 @@ func buildUserSafeInstanceStatus(instance *models.Instance, status *services.Ins
 	if agentType, ok := services.NormalizeV2RuntimeType(instance.Type); ok && (strings.EqualFold(strings.TrimSpace(instance.RuntimeType), "gateway") || strings.EqualFold(strings.TrimSpace(instance.InstanceMode), "lite")) {
 		payload["agent_type"] = agentType
 		payload["workspace_usage_bytes"] = instance.WorkspaceUsageBytes
+		payload["workspace_usage_observed_at"] = instance.WorkspaceUsageObservedAt
 	}
 	return payload
 }
@@ -1260,6 +1316,20 @@ func (h *InstanceHandler) GetRuntimeDetails(c *gin.Context) {
 	}
 
 	utils.Success(c, http.StatusOK, "Instance runtime details retrieved successfully", response)
+}
+
+func (h *InstanceHandler) GetModelCatalogSync(c *gin.Context) {
+	_, instance, ok := h.resolveOwnedInstance(c)
+	if !ok {
+		return
+	}
+	status := &services.InstanceModelCatalogSyncStatus{State: "unknown", Reason: "not_reported"}
+	if reader, ok := h.instanceService.(interface {
+		ModelCatalogSyncStatus(context.Context, *models.Instance) *services.InstanceModelCatalogSyncStatus
+	}); ok {
+		status = reader.ModelCatalogSyncStatus(c.Request.Context(), instance)
+	}
+	utils.Success(c, http.StatusOK, "Startup model catalog observation", status)
 }
 
 type SessionUsageQueryRequest struct {
@@ -1570,10 +1640,10 @@ func (h *InstanceHandler) GenerateAccessToken(c *gin.Context) {
 	}
 
 	// Generate proxy entry URL. The actual Service remains internal-only.
-	accessURL := h.proxyService.GetProxyURLForInstance(instance, "")
+	accessURL, err := h.proxyService.GetProxyURLForInstanceWithError(instance, "")
 
-	if accessURL == "" {
-		utils.Error(c, http.StatusServiceUnavailable, "Unable to generate access URL")
+	if err != nil || accessURL == "" {
+		instanceAccessURLFailure(c, err, instance)
 		return
 	}
 
@@ -1613,14 +1683,18 @@ func (h *InstanceHandler) GenerateAccessToken(c *gin.Context) {
 		true,
 	)
 
-	proxyURL := h.proxyService.GetProxyURLForInstance(instance, token.Token)
+	proxyURL, err := h.proxyService.GetProxyURLForInstanceWithError(instance, token.Token)
+	if err != nil {
+		instanceAccessURLFailure(c, err, instance)
+		return
+	}
 
 	// Dedicated runtime origins cannot reuse the HttpOnly cookie set on the
 	// ClawManager origin. Their first navigation must carry the short-lived
 	// token so the dedicated origin can validate it and promote it to its own
 	// origin-scoped cookie. Same-origin proxy URLs continue to use the clean,
 	// token-free entry URL.
-	response := map[string]interface{}{
+	response := gin.H{
 		"token":                    token.Token,
 		"access_url":               browserAccessEntryURL(accessURL, proxyURL),
 		"proxy_url":                proxyURL,
@@ -1629,7 +1703,23 @@ func (h *InstanceHandler) GenerateAccessToken(c *gin.Context) {
 		"desktop_upstream_present": upstream != "",
 	}
 
-	utils.Success(c, http.StatusOK, "Access token generated successfully", response)
+	utils.Success(c, http.StatusOK, "Access token generated successfully", h.browserOriginMetadata(instance, response))
+}
+
+func (h *InstanceHandler) SetBrowserOrigins(reg *browserorigin.Registry) {
+	h.proxyService.SetBrowserOrigins(reg)
+}
+
+func (h *InstanceHandler) browserOriginMetadata(instance *models.Instance, response gin.H) gin.H {
+	reg := h.proxyService.BrowserOrigins()
+	runtimeType, managed := services.NormalizeV2RuntimeType(instance.Type)
+	mode, _ := services.NormalizeInstanceMode(instance.InstanceMode)
+	if reg != nil && managed && (strings.EqualFold(strings.TrimSpace(instance.RuntimeType), "gateway") || mode == services.InstanceModeLite) &&
+		(runtimeType == services.RuntimeTypeOpenCode || runtimeType == services.RuntimeTypeDeepSeekHarness) {
+		response["browser_origin_mode"] = "chrome-single-host"
+		response["manager_origin"] = reg.ManagerOrigin()
+	}
+	return response
 }
 
 func browserAccessEntryURL(accessURL, proxyURL string) string {
@@ -1768,7 +1858,7 @@ func (h *InstanceHandler) proxyAccessToken(c *gin.Context, id int) (string, bool
 	original := originalInstanceProxyRequest(c)
 	queryToken := strings.TrimSpace(original.URL.Query().Get("token"))
 	if queryToken == "" && isDedicatedAccessRefreshPath(c, id) {
-		queryToken = strings.TrimSpace(c.GetHeader(dedicatedAccessRefreshHeader))
+		queryToken = strings.TrimSpace(original.Header.Get(dedicatedAccessRefreshHeader))
 	}
 	// A freshly issued ClawManager token must be allowed to replace an expired
 	// dedicated-origin cookie. Runtime applications can also own a `token`
@@ -1842,7 +1932,11 @@ func (h *InstanceHandler) promoteProxyAccessToken(c *gin.Context, id int, queryT
 			true,
 		)
 	}
-	if dedicatedOrigin && originRuntimeType == services.RuntimeTypeOpenCode &&
+	if dedicatedOrigin && browserorigin.IsNativeContext(c.Request.Context()) && !isDedicatedAccessRefreshPath(c, id) &&
+		browserorigin.ServeBootstrapDocument(c.Writer, c.Request, dedicatedRuntimeCleanLocation(originalInstanceProxyRequest(c).URL, id, queryToken)) {
+		return "", false
+	}
+	if dedicatedOrigin && !isDedicatedAccessRefreshPath(c, id) && originRuntimeType == services.RuntimeTypeOpenCode &&
 		(c.Request.Method == http.MethodGet || c.Request.Method == http.MethodHead) {
 		c.Redirect(http.StatusTemporaryRedirect, dedicatedRuntimeCleanLocation(originalInstanceProxyRequest(c).URL, id, queryToken))
 		return "", false
@@ -1888,6 +1982,12 @@ func dedicatedRuntimeCleanLocation(requestURL *url.URL, instanceID int, accessTo
 func (h *InstanceHandler) validCurrentExternalSession(c *gin.Context, accessToken *services.AccessToken) bool {
 	if accessToken == nil {
 		return false
+	}
+	if browserorigin.IsNativeContext(c.Request.Context()) {
+		runtimeType, managed := services.NormalizeV2RuntimeType(accessToken.InstanceType)
+		if !managed || runtimeType != c.GetHeader(services.DedicatedRuntimeOriginHeader) {
+			return false
+		}
 	}
 	if strings.TrimSpace(accessToken.SessionBinding) == "" {
 		return true
@@ -1936,6 +2036,10 @@ func isDedicatedIEIRuntimeOrigin(c *gin.Context, accessToken *services.AccessTok
 	if !originManaged || !instanceManaged || originRuntimeType != instanceRuntimeType ||
 		(originRuntimeType != services.RuntimeTypeOpenCode && originRuntimeType != services.RuntimeTypeDeepSeekHarness) {
 		return false
+	}
+
+	if browserorigin.IsNativeContext(c.Request.Context()) {
+		return true
 	}
 
 	host := strings.TrimSpace(c.Request.Host)
@@ -2617,7 +2721,11 @@ func (h *InstanceHandler) OpenShortExternalAccess(c *gin.Context) {
 		canonicalAccessURL = instanceToken.AccessURL
 	} else {
 		setShortExternalAccessCookies(c, instance.ID, code, token, int(time.Hour.Seconds()))
-		canonicalAccessURL = h.externalAccessEntryURL(instance)
+		canonicalAccessURL, err = h.externalAccessEntryURL(instance)
+		if err != nil {
+			instanceAccessURLFailure(c, err, instance)
+			return
+		}
 	}
 
 	originalPath := c.Request.URL.Path
@@ -2686,7 +2794,11 @@ func (h *InstanceHandler) GetSharedInstanceSession(c *gin.Context) {
 	if !ok {
 		return
 	}
-	proxyURL := h.proxyService.GetProxyURLForInstance(instance, instanceToken.Token)
+	proxyURL, err := h.proxyService.GetProxyURLForInstanceWithError(instance, instanceToken.Token)
+	if err != nil {
+		instanceAccessURLFailure(c, err, instance)
+		return
+	}
 	accessURL := browserAccessEntryURL(instanceToken.AccessURL, proxyURL)
 	sessionExpiresAt := instanceToken.ExpiresAt
 	if isSharedHermesDesktopInstance(instance) {
@@ -2733,23 +2845,25 @@ func (h *InstanceHandler) GetSharedInstanceSession(c *gin.Context) {
 		workspaceRoot = "/config"
 	}
 
-	utils.Success(c, http.StatusOK, "Shared instance session created", gin.H{
+	utils.Success(c, http.StatusOK, "Shared instance session created", h.browserOriginMetadata(instance, gin.H{
 		"instance": gin.H{
-			"id":            instance.ID,
-			"name":          instance.Name,
-			"type":          instance.Type,
-			"status":        instance.Status,
-			"instance_mode": instance.InstanceMode,
-			"runtime_type":  instance.RuntimeType,
+			"id":                 instance.ID,
+			"name":               instance.Name,
+			"type":               instance.Type,
+			"status":             instance.Status,
+			"instance_mode":      instance.InstanceMode,
+			"runtime_type":       instance.RuntimeType,
+			"runtime_generation": instance.RuntimeGeneration,
 		},
 		"access_url":          accessURL,
 		"session_expires_at":  sessionExpiresAt,
 		"share_expires_at":    access.ExpiresAt,
 		"workspace_access":    workspaceAccess,
+		"workbench_scope":     services.SharedWorkbenchScope(code, access),
 		"workspace_available": workspaceAvailable,
 		"workspace_root":      workspaceRoot,
 		"csrf_token":          sharedExternalAccessCSRFToken(code, instanceToken.Token),
-	})
+	}))
 }
 
 func bearerToken(header string) string {
@@ -2805,13 +2919,25 @@ func (h *InstanceHandler) requireExternalAccessInstance(c *gin.Context, access *
 }
 
 func (h *InstanceHandler) issueShortExternalAccessToken(c *gin.Context, instance *models.Instance, code string, access *models.InstanceExternalAccess) (*services.AccessToken, bool) {
-	accessURL := h.externalAccessEntryURL(instance)
-	if accessURL == "" {
-		utils.Error(c, http.StatusServiceUnavailable, "Unable to generate access URL")
+	accessURL, err := h.externalAccessEntryURL(instance)
+	if err != nil || accessURL == "" {
+		instanceAccessURLFailure(c, err, instance)
 		return nil, false
 	}
 	targetPort := h.proxyService.GetTargetPortForInstance(instance)
 	upstream, _ := h.desktopAccessUpstream(c, instance, targetPort)
+	// Opening another tab must retain the existing CSRF proof until renewal is due.
+	// Recheck all routing/owner fields before reusing a signed share session.
+	if cookie, cookieErr := c.Cookie(shortExternalAccessCookieName(code)); cookieErr == nil {
+		existing, tokenErr := h.accessService.ValidateToken(cookie)
+		if tokenErr == nil && existing.InstanceID == instance.ID && existing.UserID == instance.UserID &&
+			existing.InstanceType == instance.Type && existing.AccessURL == accessURL && existing.Upstream == upstream &&
+			existing.TargetPort == targetPort && existing.SessionBinding == sharedExternalAccessSessionBinding(code, access) &&
+			time.Until(existing.ExpiresAt) > 5*time.Minute {
+			setShortExternalAccessCookies(c, instance.ID, code, existing.Token, int(time.Until(existing.ExpiresAt).Seconds()))
+			return existing, true
+		}
+	}
 	instanceToken, err := h.accessService.GenerateBoundToken(
 		instance.UserID,
 		instance.ID,
@@ -2830,15 +2956,18 @@ func (h *InstanceHandler) issueShortExternalAccessToken(c *gin.Context, instance
 	return instanceToken, true
 }
 
-func (h *InstanceHandler) externalAccessEntryURL(instance *models.Instance) string {
+func (h *InstanceHandler) externalAccessEntryURL(instance *models.Instance) (string, error) {
 	if h == nil || h.proxyService == nil || instance == nil {
-		return ""
+		return "", nil
 	}
-	accessURL := h.proxyService.GetProxyURLForInstance(instance, "")
+	accessURL, err := h.proxyService.GetProxyURLForInstanceWithError(instance, "")
+	if err != nil {
+		return "", err
+	}
 	if accessURL == "" && isSharedHermesDesktopInstance(instance) {
-		return sharedHermesDesktopEntryURL(instance.ID)
+		return sharedHermesDesktopEntryURL(instance.ID), nil
 	}
-	return accessURL
+	return accessURL, nil
 }
 
 func (h *InstanceHandler) validShortLinkAccessToken(c *gin.Context, code string, access *models.InstanceExternalAccess) string {

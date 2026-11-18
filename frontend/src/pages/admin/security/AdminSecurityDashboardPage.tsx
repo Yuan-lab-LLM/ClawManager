@@ -51,11 +51,11 @@ const AdminSecurityDashboardPage: React.FC = () => {
   const failedCount = skills.filter((item) => item.scan_status === 'failed').length;
 
   const riskBands = [
-    { label: t('securityCenter.risks.safe'), count: safeCount, color: '#139a74', text: 'text-[#177245]' },
-    { label: t('securityCenter.risks.low'), count: lowCount, color: '#d4a11f', text: 'text-[#986200]' },
-    { label: t('securityCenter.risks.medium'), count: summary.mediumRisk, color: '#df7a1c', text: 'text-[#b45309]' },
-    { label: t('securityCenter.risks.high'), count: summary.highRisk, color: '#c33b31', text: 'text-[#b42318]' },
-    { label: t('securityCenter.status.pending'), count: pendingCount, color: '#4d6b89', text: 'text-[#556070]' },
+    { label: t('securityCenter.risks.safe'), count: safeCount, color: '#139a74', text: 'text-[var(--cm-success)]' },
+    { label: t('securityCenter.risks.low'), count: lowCount, color: '#d4a11f', text: 'text-[var(--cm-warning)]' },
+    { label: t('securityCenter.risks.medium'), count: summary.mediumRisk, color: '#df7a1c', text: 'text-[var(--cm-warning)]' },
+    { label: t('securityCenter.risks.high'), count: summary.highRisk, color: '#c33b31', text: 'text-[var(--cm-error)]' },
+    { label: t('securityCenter.status.pending'), count: pendingCount, color: '#4d6b89', text: 'text-[var(--cm-muted)]' },
   ];
   const maxRiskCount = Math.max(...riskBands.map((item) => item.count), 1);
 
@@ -82,18 +82,13 @@ const AdminSecurityDashboardPage: React.FC = () => {
     <SecurityCenterShell summary={summary}>
       <div className="space-y-6">
         {error ? (
-          <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
+          <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
         ) : null}
 
-        <section className="rounded-[28px] border border-[#eadfd8] bg-white p-6 shadow-[0_24px_60px_-42px_rgba(72,44,24,0.35)]">
+        <section className="rounded-lg border border-[var(--cm-border)] bg-white p-6 shadow-none">
           <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[#b46c50]">{t('securityCenter.nav.dashboard')}</p>
-              <h1 className="mt-2 text-3xl font-semibold text-[#171212]">{t('securityCenter.dashboard.title')}</h1>
-              <p className="mt-2 max-w-3xl text-sm leading-6 text-[#6f6661]">
-                {t('securityCenter.dashboard.subtitle')}
-              </p>
-              <p className="mt-2 text-sm font-medium text-[#7d5744]">
+              <p className="mt-2 text-sm font-medium text-[var(--cm-muted)]">
                 {t('securityCenter.dashboard.activeMode', {
                   mode: t(`securityCenter.scanModes.${scanModeLabel(config?.active_mode || config?.default_mode || 'quick')}`),
                 })}
@@ -129,15 +124,15 @@ const AdminSecurityDashboardPage: React.FC = () => {
 
         <section className="grid grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
           <div className="space-y-6">
-            <div className="rounded-[28px] border border-[#eadfd8] bg-white p-6 shadow-[0_24px_60px_-42px_rgba(72,44,24,0.35)]">
-              <div className="grid grid-cols-1 gap-4 lg:grid-cols-[220px_repeat(4,minmax(0,1fr))]">
-                <div className="rounded-[24px] border border-[#d9edf3] bg-[radial-gradient(circle_at_top,#e8f8ff_0%,#f6fcff_62%,#ffffff_100%)] p-5">
-                  <div className="text-xs font-semibold uppercase tracking-[0.16em] text-[#1980a1]">{t('securityCenter.dashboard.coverage')}</div>
-                  <div className="mt-4 flex items-center gap-4">
+            <div className="rounded-lg border border-[var(--cm-border)] bg-white p-6 shadow-none">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div className="min-w-0 rounded-lg border border-[var(--cm-border-subtle)] bg-[var(--cm-surface)] p-5 sm:col-span-2">
+                  <div className="text-xs font-semibold tracking-normal text-[#1980a1]">{t('securityCenter.dashboard.coverage')}</div>
+                  <div className="mt-4 flex flex-wrap items-center gap-4">
                     <CoverageDonut ratio={scannedRatio} progress={scannedProgress} />
-                    <div className="min-w-0">
-                      <div className="text-sm font-semibold text-[#171212]">{summary.completed}/{summary.total}</div>
-                      <div className="mt-1 text-xs leading-5 text-[#6f6661]">{t('securityCenter.dashboard.coverageDesc')}</div>
+                    <div className="min-w-[160px] flex-1">
+                      <div className="text-sm font-semibold text-[var(--cm-ink)]">{summary.completed}/{summary.total}</div>
+                      <div className="mt-1 text-xs leading-5 text-[var(--cm-muted)]">{t('securityCenter.dashboard.coverageDesc')}</div>
                     </div>
                   </div>
                 </div>
@@ -147,14 +142,13 @@ const AdminSecurityDashboardPage: React.FC = () => {
                 <MiniMetric title={t('securityCenter.status.pending')} value={pendingCount} subtitle={t('securityCenter.dashboard.pendingSubtitle')} tone="slate" />
                 <MiniMetric title={t('securityCenter.status.failed')} value={failedCount} subtitle={t('securityCenter.dashboard.failedSubtitle')} tone="orange" />
               </div>
-              <div className="mt-5 grid grid-cols-1 items-start gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
-                <div className="rounded-[24px] border border-[#efe1d8] bg-[#fffaf7] p-5">
+              <div className="mt-5 grid grid-cols-1 items-start gap-4">
+                <div className="rounded-lg border border-[var(--cm-border-subtle)] bg-[var(--cm-subtle)] p-5">
                   <div className="flex items-center justify-between gap-3">
                     <div>
-                      <div className="text-xs font-semibold uppercase tracking-[0.16em] text-[#b46c50]">{t('securityCenter.dashboard.riskDistribution')}</div>
-                      <div className="mt-2 text-base font-semibold text-[#171212]">{t('securityCenter.dashboard.riskDistributionTitle')}</div>
+                      <div className="mt-2 text-base font-semibold text-[var(--cm-ink)]">{t('securityCenter.dashboard.riskDistributionTitle')}</div>
                     </div>
-                    <div className="text-xs text-[#8f8681]">{t('securityCenter.dashboard.groupedByRisk')}</div>
+                    <div className="text-xs text-[var(--cm-muted)]">{t('securityCenter.dashboard.groupedByRisk')}</div>
                   </div>
                   <div className="mt-5 space-y-4">
                   {riskBands.map((item) => {
@@ -164,10 +158,10 @@ const AdminSecurityDashboardPage: React.FC = () => {
                     return (
                       <div key={`compact-${item.label}`}>
                           <div className="mb-2 flex items-center justify-between gap-3">
-                            <div className="text-xs font-semibold uppercase tracking-[0.14em] text-[#6f6661]">{item.label}</div>
+                            <div className="text-xs font-semibold tracking-normal text-[var(--cm-muted)]">{item.label}</div>
                             <div className={`text-sm font-semibold ${item.text}`}>{item.count}</div>
                           </div>
-                          <div className="h-3 overflow-hidden rounded-full bg-[#eef1f3]">
+                          <div className="h-3 overflow-hidden rounded-full bg-[var(--cm-border-subtle)]">
                             <div className="h-full rounded-full" style={{ width, backgroundColor: item.color }} />
                           </div>
                         </div>
@@ -175,30 +169,29 @@ const AdminSecurityDashboardPage: React.FC = () => {
                     })}
                   </div>
                 </div>
-                <div className="rounded-[24px] border border-[#efe1d8] bg-[#fffaf7] p-5">
+                <div className="rounded-lg border border-[var(--cm-border-subtle)] bg-[var(--cm-subtle)] p-5">
                   <div className="flex items-center justify-between gap-3">
                     <div>
-                      <div className="text-xs font-semibold uppercase tracking-[0.16em] text-[#b46c50]">{t('securityCenter.dashboard.hotAssets')}</div>
-                      <div className="mt-2 text-base font-semibold text-[#171212]">{t('securityCenter.dashboard.hotAssetsTitle')}</div>
+                      <div className="mt-2 text-base font-semibold text-[var(--cm-ink)]">{t('securityCenter.dashboard.hotAssetsTitle')}</div>
                     </div>
-                    <div className="text-xs text-[#8f8681]">Top 5</div>
+                    <div className="text-xs text-[var(--cm-muted)]">Top 5</div>
                   </div>
                   <div className="mt-5 space-y-3">
                     {hotAssets.length === 0 ? (
-                      <div className="text-sm text-[#8f8681]">{t('securityCenter.dashboard.noAssetUsage')}</div>
+                      <div className="text-sm text-[var(--cm-muted)]">{t('securityCenter.dashboard.noAssetUsage')}</div>
                     ) : (
                       hotAssets.map((item, index) => (
-                        <div key={`compact-hot-${item.id}`} className="flex items-center gap-4 rounded-2xl border border-[#eadfd8] bg-white px-4 py-3">
-                          <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-[#f3e7df] text-sm font-semibold text-[#7d5744]">
+                        <div key={`compact-hot-${item.id}`} className="flex flex-wrap items-center gap-3 rounded-lg border border-[var(--cm-border)] bg-white px-4 py-3">
+                          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[var(--cm-border-subtle)] text-sm font-semibold text-[var(--cm-muted)]">
                             {index + 1}
                           </div>
-                          <div className="min-w-0 flex-1">
-                            <div className="truncate font-medium text-[#171212]">{item.name}</div>
-                            <div className="mt-1 truncate text-xs text-[#8f8681]">{item.skill_key}</div>
+                          <div className="min-w-[120px] flex-1 break-words">
+                            <div className="font-medium text-[var(--cm-ink)] [overflow-wrap:anywhere]">{item.name}</div>
+                            <div className="mt-1 text-xs text-[var(--cm-muted)] [overflow-wrap:anywhere]">{item.skill_key}</div>
                           </div>
-                          <div className="text-right">
-                            <div className="text-base font-semibold text-[#171212]">{item.instance_count}</div>
-                            <div className="text-[11px] uppercase tracking-[0.14em] text-[#8f8681]">{t('securityCenter.dashboard.instances')}</div>
+                          <div className="shrink-0 text-right">
+                            <div className="text-base font-semibold text-[var(--cm-ink)]">{item.instance_count}</div>
+                            <div className="text-xs tracking-normal text-[var(--cm-muted)]">{t('securityCenter.dashboard.instances')}</div>
                           </div>
                         </div>
                       ))
@@ -208,11 +201,11 @@ const AdminSecurityDashboardPage: React.FC = () => {
               </div>
             </div>
 
-            <section className="rounded-[28px] border border-[#eadfd8] bg-white p-6 shadow-[0_24px_60px_-42px_rgba(72,44,24,0.35)]">
+            <section className="rounded-lg border border-[var(--cm-border)] bg-white p-6 shadow-none">
               <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                 <div>
-                  <h2 className="text-lg font-semibold text-[#171212]">{t('securityCenter.dashboard.assetListTitle')}</h2>
-                  <p className="mt-1 text-sm text-[#8f8681]">{t('securityCenter.dashboard.assetListDesc')}</p>
+                  <h2 className="text-base leading-[22px] font-semibold text-[var(--cm-ink)]">{t('securityCenter.dashboard.assetListTitle')}</h2>
+                  <p className="mt-1 text-sm text-[var(--cm-muted)]">{t('securityCenter.dashboard.assetListDesc')}</p>
                 </div>
                 <input
                   value={search}
@@ -227,13 +220,13 @@ const AdminSecurityDashboardPage: React.FC = () => {
 
               <div className="mt-5 overflow-x-auto">
                 {loading ? (
-                  <div className="py-12 text-center text-[#8f8681]">{t('securityCenter.dashboard.loadingAssets')}</div>
+                  <div className="py-12 text-center text-[var(--cm-muted)]">{t('securityCenter.dashboard.loadingAssets')}</div>
                 ) : filteredSkills.length === 0 ? (
-                  <div className="py-12 text-center text-[#8f8681]">{t('securityCenter.dashboard.noMatchingAssets')}</div>
+                  <div className="py-12 text-center text-[var(--cm-muted)]">{t('securityCenter.dashboard.noMatchingAssets')}</div>
                 ) : (
                   <>
-                    <table className="min-w-full divide-y divide-[#f3e7df] text-sm">
-                      <thead className="bg-[#fff8f5] text-left text-xs font-semibold uppercase tracking-[0.14em] text-[#8f8681]">
+                    <table className="min-w-full divide-y divide-[var(--cm-border-subtle)] text-sm">
+                      <thead className="bg-[var(--cm-subtle)] text-left text-xs font-semibold tracking-normal text-[var(--cm-muted)]">
                         <tr>
                           <th className="px-4 py-3">{t('securityCenter.dashboard.columns.asset')}</th>
                           <th className="px-4 py-3">{t('securityCenter.dashboard.columns.user')}</th>
@@ -244,25 +237,25 @@ const AdminSecurityDashboardPage: React.FC = () => {
                           <th className="px-4 py-3">{t('securityCenter.dashboard.columns.instances')}</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-[#f5ebe5]">
+                      <tbody className="divide-y divide-[var(--cm-border-subtle)]">
                         {paginatedSkills.map((item) => (
-                          <tr key={item.id} className="transition hover:bg-[#fffaf7]">
+                          <tr key={item.id} className="transition hover:bg-[var(--cm-subtle)]">
                             <td className="px-4 py-3">
-                              <div className="font-medium text-[#171212]">{item.name}</div>
-                              <div className="mt-1 text-xs text-[#8f8681]">{item.skill_key}</div>
+                              <div className="font-medium text-[var(--cm-ink)]">{item.name}</div>
+                              <div className="mt-1 text-xs text-[var(--cm-muted)]">{item.skill_key}</div>
                             </td>
-                            <td className="px-4 py-3 text-[#5f5957]">#{item.user_id}</td>
+                            <td className="px-4 py-3 text-[var(--cm-text)]">#{item.user_id}</td>
                             <td className="px-4 py-3"><Badge tone={item.source_type === 'uploaded' ? 'amber' : 'slate'}>{t(`securityCenter.sources.${sourceLabel(item.source_type)}`)}</Badge></td>
                             <td className="px-4 py-3"><Badge tone={scanStatusTone(item.scan_status)}>{t(`securityCenter.scanStatus.${scanStatusLabel(item.scan_status)}`)}</Badge></td>
                             <td className="px-4 py-3"><Badge tone={riskTone(item.risk_level)}>{t(`securityCenter.risks.${riskLabel(item.risk_level)}`)}</Badge></td>
-                            <td className="px-4 py-3 text-[#5f5957]">{item.last_scanned_at ? formatDateTime(item.last_scanned_at, locale) : t('securityCenter.dashboard.notScanned')}</td>
-                            <td className="px-4 py-3 text-[#5f5957]">{item.instance_count}</td>
+                            <td className="px-4 py-3 text-[var(--cm-text)]">{item.last_scanned_at ? formatDateTime(item.last_scanned_at, locale) : t('securityCenter.dashboard.notScanned')}</td>
+                            <td className="px-4 py-3 text-[var(--cm-text)]">{item.instance_count}</td>
                           </tr>
                         ))}
                       </tbody>
                     </table>
-                    <div className="mt-4 flex flex-col gap-3 border-t border-[#f3e7df] pt-4 sm:flex-row sm:items-center sm:justify-between">
-                      <div className="text-sm text-[#8f8681]">
+                    <div className="mt-4 flex flex-col gap-3 border-t border-[var(--cm-border-subtle)] pt-4 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="text-sm text-[var(--cm-muted)]">
                         {t('securityCenter.pagination.summary', {
                           pageSize,
                           from: (currentPage - 1) * pageSize + 1,
@@ -278,7 +271,7 @@ const AdminSecurityDashboardPage: React.FC = () => {
                         >
                           {t('securityCenter.pagination.prev')}
                         </button>
-                        <div className="min-w-[88px] text-center text-sm font-medium text-[#5f5957]">
+                        <div className="min-w-[88px] text-center text-sm font-medium text-[var(--cm-text)]">
                           {currentPage} / {totalPages}
                         </div>
                         <button
@@ -297,12 +290,11 @@ const AdminSecurityDashboardPage: React.FC = () => {
             </section>
           </div>
 
-          <div className="rounded-[28px] border border-[#eadfd8] bg-white p-6 shadow-[0_24px_60px_-42px_rgba(72,44,24,0.35)]">
-            <div className="text-xs font-semibold uppercase tracking-[0.16em] text-[#b46c50]">{t('securityCenter.dashboard.scannerStatus')}</div>
-            <div className="mt-2 text-lg font-semibold text-[#171212]">{t('securityCenter.dashboard.scannerAvailability')}</div>
-            <div className="mt-4 rounded-2xl border border-[#efe1d8] bg-[#fffaf7] p-4">
+          <div className="rounded-lg border border-[var(--cm-border)] bg-white p-6 shadow-none">
+            <div className="mt-2 text-base leading-[22px] font-semibold text-[var(--cm-ink)]">{t('securityCenter.dashboard.scannerAvailability')}</div>
+            <div className="mt-4 rounded-lg border border-[var(--cm-border-subtle)] bg-[var(--cm-subtle)] p-4">
               <div className="flex items-center justify-between gap-3">
-                <div className="font-medium text-[#171212]">{config?.scanner_status.status_label || t('securityCenter.dashboard.notEnabled')}</div>
+                <div className="font-medium text-[var(--cm-ink)]">{config?.scanner_status.status_label || t('securityCenter.dashboard.notEnabled')}</div>
                 <Badge tone={config?.scanner_status.connected ? 'green' : 'slate'}>
                   {config?.scanner_status.connected ? t('securityCenter.dashboard.connected') : t('securityCenter.dashboard.disconnected')}
                 </Badge>
@@ -311,61 +303,57 @@ const AdminSecurityDashboardPage: React.FC = () => {
                 {(config?.scanner_status.available_capabilities ?? []).map((item) => (
                   <span
                     key={item}
-                    className="inline-flex rounded-full border border-[#d9e0e7] bg-[#f6f8fb] px-3 py-1 text-xs font-semibold text-[#556070]"
+                    className="inline-flex rounded-full border border-[var(--cm-border)] bg-[var(--cm-subtle)] px-3 py-1 text-xs font-semibold text-[var(--cm-muted)]"
                   >
                     {item}
                   </span>
                 ))}
               </div>
-              <div className="mt-3 text-sm leading-6 text-[#6f6661]">
+              <div className="mt-3 text-sm leading-5 text-[var(--cm-muted)]">
                 {config?.scanner_status.llm_enabled
                   ? t('securityCenter.dashboard.scannerLlmEnabled')
                   : t('securityCenter.dashboard.scannerLlmDisabled')}
               </div>
             </div>
-
-            <div className="mt-6 text-xs font-semibold uppercase tracking-[0.16em] text-[#b46c50]">{t('securityCenter.dashboard.alertZone')}</div>
-            <div className="mt-2 text-lg font-semibold text-[#171212]">{t('securityCenter.dashboard.alertTitle')}</div>
+            <div className="mt-2 text-base leading-[22px] font-semibold text-[var(--cm-ink)]">{t('securityCenter.dashboard.alertTitle')}</div>
             <div className="mt-4 space-y-3">
               {warningAssets.length === 0 ? (
-                <div className="rounded-2xl border border-[#d7ecd9] bg-[#f4fcf5] px-4 py-4 text-sm leading-6 text-[#177245]">
+                <div className="rounded-lg border border-[#d7ecd9] bg-[var(--cm-success-background)] px-4 py-4 text-sm leading-5 text-[var(--cm-success)]">
                   {t('securityCenter.dashboard.noWarnings')}
                 </div>
               ) : (
                 warningAssets.map((item) => (
-                  <div key={item.id} className="rounded-2xl border border-[#f1d9d9] bg-[#fff7f5] px-4 py-4">
+                  <div key={item.id} className="rounded-lg border border-[#f1d9d9] bg-[var(--cm-error-background)] px-4 py-4">
                     <div className="flex items-center justify-between gap-3">
-                      <div className="font-medium text-[#171212]">{item.name}</div>
+                      <div className="font-medium text-[var(--cm-ink)]">{item.name}</div>
                       <Badge tone={riskTone(item.risk_level)}>{t(`securityCenter.risks.${riskLabel(item.risk_level)}`)}</Badge>
                     </div>
-                    <div className="mt-2 text-sm leading-6 text-[#6f6661]">
+                    <div className="mt-2 text-sm leading-5 text-[var(--cm-muted)]">
                       {item.risk_reason || t('securityCenter.dashboard.warningFallback')}
                     </div>
                   </div>
                 ))
               )}
             </div>
-
-            <div className="mt-6 text-xs font-semibold uppercase tracking-[0.16em] text-[#b46c50]">{t('securityCenter.dashboard.recentScans')}</div>
-            <div className="mt-2 text-lg font-semibold text-[#171212]">{t('securityCenter.dashboard.recentScansTitle')}</div>
+            <div className="mt-2 text-base leading-[22px] font-semibold text-[var(--cm-ink)]">{t('securityCenter.dashboard.recentScansTitle')}</div>
             <div className="mt-4 space-y-3">
               {recentJobs.length === 0 ? (
-                <div className="rounded-2xl border border-dashed border-[#eadfd8] px-4 py-5 text-sm text-[#8f8681]">
+                <div className="rounded-lg border border-dashed border-[var(--cm-border)] px-4 py-5 text-sm text-[var(--cm-muted)]">
                   {t('securityCenter.dashboard.noScanJobs')}
                 </div>
               ) : (
                 recentJobs.map((job) => (
-                  <div key={job.id} className="rounded-2xl border border-[#efe1d8] bg-[#fffaf7] px-4 py-4">
+                  <div key={job.id} className="rounded-lg border border-[var(--cm-border-subtle)] bg-[var(--cm-subtle)] px-4 py-4">
                     <div className="flex items-center justify-between gap-3">
                       <div className="min-w-0">
-                        <div className="truncate font-medium text-[#171212]">
+                        <div className="truncate font-medium text-[var(--cm-ink)]">
                           {t('securityCenter.dashboard.jobTitle', {
                             scope: t(`securityCenter.scanScopes.${scanScopeLabel(job.scan_scope)}`),
                             mode: t(`securityCenter.scanModes.${scanModeLabel(job.scan_mode)}`),
                             id: job.id,
                           })}
                         </div>
-                        <div className="mt-1 text-xs text-[#8f8681]">
+                        <div className="mt-1 text-xs text-[var(--cm-muted)]">
                           {job.completed_items}/{job.total_items} · {formatDateTime(job.created_at, locale)}
                         </div>
                       </div>
@@ -397,16 +385,16 @@ function MiniMetric({
 }) {
   const colorClass =
     tone === 'green'
-      ? 'border-[#cfe8d7] bg-[#f4fcf7] text-[#177245]'
+      ? 'border-[#cfe8d7] bg-[var(--cm-success-background)] text-[var(--cm-success)]'
       : tone === 'red'
-        ? 'border-[#f0d1d1] bg-[#fff6f5] text-[#b42318]'
+        ? 'border-[#f0d1d1] bg-[var(--cm-error-background)] text-[var(--cm-error)]'
         : tone === 'orange'
-          ? 'border-[#f1ddbf] bg-[#fff8ed] text-[#b45309]'
-          : 'border-[#dde5ec] bg-[#f7fafc] text-[#556070]';
+          ? 'border-[#f1ddbf] bg-[var(--cm-warning-background)] text-[var(--cm-warning)]'
+          : 'border-[#dde5ec] bg-[var(--cm-subtle)] text-[var(--cm-muted)]';
 
   return (
-    <div className={`rounded-[24px] border p-5 ${colorClass}`}>
-      <div className="text-[11px] font-semibold uppercase tracking-[0.16em]">{title}</div>
+    <div className={`rounded-lg border p-5 ${colorClass}`}>
+      <div className="text-xs font-semibold tracking-normal">{title}</div>
       <div className="mt-3 text-3xl font-semibold">{value}</div>
       <div className="mt-2 text-xs leading-5 opacity-80">{subtitle}</div>
     </div>
@@ -436,7 +424,7 @@ function CoverageDonut({ ratio, progress }: { ratio: number; progress: number })
         />
       </svg>
       <div className="absolute inset-0 flex items-center justify-center">
-        <div className="flex h-16 w-16 flex-col items-center justify-center rounded-full bg-white shadow-[0_8px_18px_-14px_rgba(23,134,177,0.45)]">
+        <div className="flex h-16 w-16 flex-col items-center justify-center rounded-full bg-white shadow-none">
           <div className="text-xl font-semibold text-[#156b8b]">{ratio}%</div>
         </div>
       </div>
@@ -446,9 +434,9 @@ function CoverageDonut({ ratio, progress }: { ratio: number; progress: number })
 
 function StatCard({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-2xl border border-[#f1e2d9] bg-white px-4 py-3">
-      <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#b46c50]">{label}</div>
-      <div className="mt-2 text-2xl font-semibold text-[#171212]">{value}</div>
+    <div className="rounded-lg border border-[var(--cm-border-subtle)] bg-white px-4 py-3">
+      <div className="text-xs font-semibold tracking-normal text-[var(--cm-muted)]">{label}</div>
+      <div className="mt-2 text-2xl font-semibold text-[var(--cm-ink)]">{value}</div>
     </div>
   );
 }

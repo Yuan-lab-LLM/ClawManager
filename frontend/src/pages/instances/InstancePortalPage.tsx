@@ -20,6 +20,7 @@ import {
   type InstanceSessionUsageSummary,
 } from "../../types/instance";
 import { useI18n } from "../../contexts/I18nContext";
+import { getInstanceDisplayStatus } from "../../lib/instanceStatus";
 
 const PORTAL_RUNTIME_POLL_INTERVAL_MS = 10000;
 const PORTAL_RUNTIME_BURST_POLL_INTERVAL_MS = 2500;
@@ -262,6 +263,7 @@ const InstancePortalPage: React.FC = () => {
     frameUrl: embedUrl,
     checkingCertificate,
     certificateConfirmationRequired,
+    certificateOrigin,
     confirmCertificate,
   } = useRuntimeCertificateTrust(
     accessEmbedUrl,
@@ -463,24 +465,24 @@ const InstancePortalPage: React.FC = () => {
       <div className="space-y-6">
         <div className="flex h-[calc(100vh-160px)] min-h-0 gap-4">
           <aside className="app-panel flex w-full max-w-[320px] flex-col">
-            <div className="border-b border-[#f1e7e1] px-5 py-4">
-              <h2 className="text-sm font-semibold uppercase tracking-[0.14em] text-[#8f8681]">
+            <div className="border-b border-[var(--cm-border)] px-5 py-4">
+              <h2 className="text-sm font-semibold uppercase tracking-[0.14em] text-[var(--cm-muted)]">
                 {t("instances.portalWorkspace")}
               </h2>
             </div>
             <div className="flex-1 overflow-y-auto">
               {loading ? (
-                <div className="p-6 text-sm text-[#8f8681]">
+                <div className="p-6 text-sm text-[var(--cm-muted)]">
                   {t("common.loading")}
                 </div>
               ) : error ? (
                 <div className="p-6 text-sm text-red-600">{error}</div>
               ) : instances.length === 0 ? (
-                <div className="p-6 text-sm text-[#8f8681]">
+                <div className="p-6 text-sm text-[var(--cm-muted)]">
                   {t("instances.noInstances")}
                 </div>
               ) : (
-                <ul className="divide-y divide-[#f5ebe5]">
+                <ul className="divide-y divide-[var(--cm-border)]">
                   {instances.map((instance) => {
                     const isSelected = instance.id === selectedId;
                     const isRunning = instance.status === "running";
@@ -497,7 +499,7 @@ const InstancePortalPage: React.FC = () => {
                             setSelectedId(instance.id);
                           }}
                           className={`flex w-full items-start gap-3 px-5 py-4 text-left transition-colors ${
-                            isSelected ? "bg-[#fff7f3]" : "hover:bg-[#fffaf7]"
+                            isSelected ? "bg-[var(--cm-selected)]" : "hover:bg-[var(--cm-subtle)]"
                           }`}
                         >
                           <span
@@ -507,12 +509,12 @@ const InstancePortalPage: React.FC = () => {
                             <div className="flex items-center justify-between gap-3">
                               <div className="flex min-w-0 items-center gap-2">
                                 <p
-                                  className={`truncate text-sm font-semibold ${isSelected ? "text-[#dc2626]" : "text-[#171212]"}`}
+                                  className={`truncate text-sm font-semibold ${isSelected ? "text-[#dc2626]" : "text-[var(--cm-ink)]"}`}
                                 >
                                   {instance.name}
                                 </p>
                                 <span
-                                  className={`inline-flex shrink-0 rounded-md border px-1.5 py-0.5 text-[10px] font-semibold ${modeClass(
+                                  className={`inline-flex shrink-0 rounded-md border px-1.5 py-0.5 text-xs font-semibold ${modeClass(
                                     instance.instance_mode,
                                   )}`}
                                 >
@@ -520,19 +522,19 @@ const InstancePortalPage: React.FC = () => {
                                 </span>
                               </div>
                               <span
-                                className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                                className={`rounded-full px-2 py-0.5 text-xs font-medium ${
                                   isRunning
                                     ? "bg-green-100 text-green-800"
-                                    : "bg-[#f7ece6] text-[#8f5b4b]"
+                                    : "bg-[var(--cm-subtle)] text-[#8f5b4b]"
                                 }`}
                               >
-                                {t(`status.${instance.status}`)}
+                                {t(`status.${getInstanceDisplayStatus(instance.status, instance.stopped_reason)}`)}
                               </span>
                             </div>
-                            <p className="mt-1 text-xs text-[#8f8681]">
+                            <p className="mt-1 text-xs text-[var(--cm-muted)]">
                               {formatInstanceType(instance.type)} {instance.os_version}
                             </p>
-                            <p className="mt-2 text-xs text-[#8f8681]">
+                            <p className="mt-2 text-xs text-[var(--cm-muted)]">
                               {instance.cpu_cores} {t("common.cpu")} /{" "}
                               {instance.memory_gb} GB / {instance.disk_gb} GB
                             </p>
@@ -563,8 +565,8 @@ const InstancePortalPage: React.FC = () => {
             >
               <section
                 ref={frameShellRef}
-                className={`flex h-full min-w-0 flex-col overflow-hidden border border-[#1f2937] bg-[#111827] shadow-[0_30px_90px_-56px_rgba(17,24,39,0.9)] ${
-                  isFullscreen ? "rounded-none" : isProPortal ? "rounded-[30px]" : "rounded-lg"
+                className={`flex h-full min-w-0 flex-col overflow-hidden border border-[#1f2937] bg-[#111827] shadow-sm ${
+                  isFullscreen ? "rounded-none" : isProPortal ? "rounded-lg" : "rounded-lg"
                 }`}
               >
             <div className="flex items-center justify-between border-b border-[#2b3443] bg-[#182131] px-4 py-3 text-white">
@@ -697,7 +699,7 @@ const InstancePortalPage: React.FC = () => {
               ) : selectedInstance &&
                 selectedInstance.status === "running" &&
                 !isShellPortal ? (
-                <div className="relative flex h-full items-center justify-center bg-[radial-gradient(circle_at_top,rgba(59,130,246,0.18),transparent_26%),linear-gradient(180deg,#111827_0%,#0f172a_100%)] px-8 text-center">
+                <div className="relative flex h-full items-center justify-center bg-[#111827] px-8 text-center">
                   {canShowRuntimeOverlay && (
                     <OpenClawDesktopOverlay
                       gatewayStatus={
@@ -712,7 +714,6 @@ const InstancePortalPage: React.FC = () => {
                     <button
                       type="button"
                       onClick={retryAccess}
-                      onPointerUp={retryAccess}
                       disabled={accessLoading || checkingCertificate}
                       aria-label={
                         certificateConfirmationRequired
@@ -740,11 +741,11 @@ const InstancePortalPage: React.FC = () => {
                         ? t("instances.certificateConfirmationRequired")
                         : t("instances.readyToAccess")}
                     </h3>
-                    <p className="mt-2 max-w-md text-sm leading-6 text-[#b7c1cf]">
+                    <p className="mt-2 max-w-md break-words text-sm leading-6 text-[#b7c1cf]">
                       {checkingCertificate
                         ? t("instances.checkingCertificate")
                         : certificateConfirmationRequired
-                          ? t("instances.certificateConfirmationDescription")
+                          ? t("instances.certificateConfirmationDescription", { origin: certificateOrigin })
                           : accessLoading
                         ? t("instances.generatingToken")
                         : accessError ||
@@ -752,7 +753,7 @@ const InstancePortalPage: React.FC = () => {
                             name: selectedInstance.name,
                           })}
                     </p>
-                    <p className="mt-4 text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">
+                    <p className="mt-4 text-xs font-semibold text-[#b7c1cf]">
                       {checkingCertificate
                         ? t("instances.checkingCertificate")
                         : certificateConfirmationRequired

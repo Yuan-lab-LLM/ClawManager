@@ -1,5 +1,20 @@
 (function (scope) {
   "use strict";
+  // OpenCode's offline worker can cache an old document, bypassing the
+  // authenticated proxy and its instance-scoped bootstrap. It also fails to
+  // register on local self-signed HTTPS origins and stalls the entry page.
+  // The managed UI is online-only, so keep registration inert.
+  try {
+    if (navigator.serviceWorker) {
+      navigator.serviceWorker.getRegistrations().then(function (registrations) {
+        registrations.forEach(function (registration) { registration.unregister(); });
+      }).catch(function () {});
+      Object.defineProperty(navigator.serviceWorker, "register", {
+        configurable: true,
+        value: function () { return Promise.resolve({}); }
+      });
+    }
+  } catch (_) {}
   if (window.__clawmanagerOpenCodeStorageScope === scope) return;
   var prefix = "clawmanager-opencode:" + scope + ":";
 

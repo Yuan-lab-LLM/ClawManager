@@ -110,13 +110,15 @@ type RuntimeUpgradeUnavailable struct {
 }
 
 type OpenClawTargetClassification struct {
-	Strategy       string
-	ImageRef       string
-	ImageDigest    string
-	RuntimeVersion string
-	Protocol       string
-	EmptyPoolReset bool
-	SourceImages   map[string]string
+	ColdSuccessor      *RuntimeColdSuccessorProof
+	WaitingInstanceIDs []int
+	Strategy           string
+	ImageRef           string
+	ImageDigest        string
+	RuntimeVersion     string
+	Protocol           string
+	EmptyPoolReset     bool
+	SourceImages       map[string]string
 }
 
 type RuntimeUpgradeDetails struct {
@@ -145,29 +147,30 @@ func newRuntimeUpgradeDetails(rollout *models.RuntimeRollout, items []models.Run
 }
 
 type runtimeUpgradeCandidate struct {
-	InstanceID        int
-	UserID            int
-	InstanceStatus    string
-	RuntimeGeneration int
-	RuntimePodID      *int64
-	GatewayID         string
-	Generation        int
-	BindingState      string
-	WorkspacePath     string
-	TeamID            *int
-	TeamMemberID      *int
-	MemberKey         string
-	Role              string
-	RuntimeType       string
-	Availability      string
-	MemberStatus      string
-	SourceVersion     string
-	SourcePodUID      string
-	SourceDeployment  string
-	SourceImageDigest string
-	AgentEndpoint     string
-	Capabilities      []string
-	Blockers          []string
+	InstanceID          int
+	UserID              int
+	InstanceStatus      string
+	RuntimeGeneration   int
+	RuntimePodID        *int64
+	GatewayID           string
+	Generation          int
+	BindingState        string
+	WorkspacePath       string
+	TeamID              *int
+	TeamMemberID        *int
+	MemberKey           string
+	Role                string
+	RuntimeType         string
+	Availability        string
+	MemberStatus        string
+	SourceVersionImages []string
+	SourceVersion       string
+	SourcePodUID        string
+	SourceDeployment    string
+	SourceImageDigest   string
+	AgentEndpoint       string
+	Capabilities        []string
+	Blockers            []string
 }
 
 type runtimeWorkspaceInventory struct {
@@ -187,6 +190,7 @@ type RuntimeUpgradeService struct {
 	bindings         repository.InstanceRuntimeBindingRepository
 	agent            RuntimeAgentClient
 	workspaceRoot    string
+	nfsIOProfile     string
 	redisURL         string
 	teamMaintenance  TeamUpgradeMaintenanceController
 	deployments      RuntimeDeploymentInventoryProvider
@@ -299,6 +303,15 @@ func (s *RuntimeUpgradeService) Preflight(ctx context.Context, req RuntimeUpgrad
 	if err != nil {
 		return nil, err
 	}
+	var sourceDeploymentProofs []k8s.RuntimeRolloutTarget
+	if source, ok := s.deployments.(interface {
+		RuntimeUpgradeSourceProofs(context.Context, string, map[string]string) ([]k8s.RuntimeRolloutTarget, error)
+	}); ok && req.RecoveryMode == "" && req.UpgradeLabRunID == nil {
+		sourceDeploymentProofs, err = source.RuntimeUpgradeSourceProofs(ctx, RuntimeTypeOpenClaw, sourceImages)
+		if err != nil {
+			return nil, err
+		}
+	}
 	result.Warnings = append(result.Warnings, warnings...)
 	result.Blockers = append(result.Blockers, blockers...)
 	digest := imageDigestFromReference(target)
@@ -352,25 +365,33 @@ func (s *RuntimeUpgradeService) Preflight(ctx context.Context, req RuntimeUpgrad
 		return nil, err
 	}
 	planFingerprint := runtimeUpgradeFingerprint(target, candidates, sourceImages)
+	stoppedSourceEvidence := map[int]any{}
+	for _, candidate := range candidates {
+		if len(candidate.SourceVersionImages) > 0 {
+			stoppedSourceEvidence[candidate.InstanceID] = map[string]any{"runtime_version": candidate.SourceVersion, "immutable_source_images": candidate.SourceVersionImages}
+		}
+	}
 	preflightSummary, _ := json.Marshal(map[string]any{
-		"strategy":                   result.Strategy,
-		"target_runtime_version":     result.TargetRuntimeVersion,
-		"target_upgrade_protocol":    result.TargetUpgradeProtocol,
-		"passed":                     len(result.Blockers) == 0,
-		"blockers":                   result.Blockers,
-		"warnings":                   result.Warnings,
-		"instance_count":             result.InstanceCount,
-		"team_count":                 result.TeamCount,
-		"openclaw_team_member_count": result.OpenClawTeamMemberCount,
-		"hermes_team_member_count":   result.HermesTeamMemberCount,
-		"upgrade_lab_run_id":         req.UpgradeLabRunID,
-		"candidate_instance_ids":     normalizedPositiveIDs(req.CandidateInstanceIDs),
-		"exclude_instance_ids":       normalizedPositiveIDs(req.ExcludeInstanceIDs),
-		"isolated":                   result.Isolated,
-		"recovery_mode":              req.RecoveryMode,
-		"recovery_parent_id":         req.RecoveryParentID,
-		"recovery_request_hash":      req.RecoveryRequestHash,
-		"execution":                  defaultRuntimeUpgradeExecutionPolicy(),
+		"source_deployment_proofs":        sourceDeploymentProofs,
+		"stopped_source_version_evidence": stoppedSourceEvidence,
+		"strategy":                        result.Strategy,
+		"target_runtime_version":          result.TargetRuntimeVersion,
+		"target_upgrade_protocol":         result.TargetUpgradeProtocol,
+		"passed":                          len(result.Blockers) == 0,
+		"blockers":                        result.Blockers,
+		"warnings":                        result.Warnings,
+		"instance_count":                  result.InstanceCount,
+		"team_count":                      result.TeamCount,
+		"openclaw_team_member_count":      result.OpenClawTeamMemberCount,
+		"hermes_team_member_count":        result.HermesTeamMemberCount,
+		"upgrade_lab_run_id":              req.UpgradeLabRunID,
+		"candidate_instance_ids":          normalizedPositiveIDs(req.CandidateInstanceIDs),
+		"exclude_instance_ids":            normalizedPositiveIDs(req.ExcludeInstanceIDs),
+		"isolated":                        result.Isolated,
+		"recovery_mode":                   req.RecoveryMode,
+		"recovery_parent_id":              req.RecoveryParentID,
+		"recovery_request_hash":           req.RecoveryRequestHash,
+		"execution":                       defaultRuntimeUpgradeExecutionPolicy(),
 	})
 	sourceImagesJSON, _ := json.Marshal(sourceImages)
 	requiredJSON, _ := json.Marshal(result.RequiredCapabilities)
@@ -479,10 +500,15 @@ func (s *RuntimeUpgradeService) ConfirmPreflight(ctx context.Context, preflightI
 		return nil, err
 	}
 	defer release()
+	confirmationAttempted := false
 	err = s.sess.TxContext(ctx, func(tx db.Session) error {
+		if err := repository.CheckRuntimeManagementRolloutAdmission(ctx, tx, rollout.RuntimeType); err != nil {
+			return err
+		}
 		if err := s.lockUpgradeScope(ctx, tx, rollout.ID); err != nil {
 			return err
 		}
+		confirmationAttempted = true
 		result, err := tx.SQL().ExecContext(ctx, `UPDATE runtime_rollouts SET status = 'pending', started_by = ?, updated_at = ? WHERE id = ? AND status = 'preflight_passed'`, actor, time.Now().UTC(), rollout.ID)
 		if err != nil {
 			return err
@@ -491,9 +517,15 @@ func (s *RuntimeUpgradeService) ConfirmPreflight(ctx context.Context, preflightI
 		if err != nil || affected != 1 {
 			return fmt.Errorf("runtime upgrade preflight was already consumed")
 		}
+		if err := repository.ConsumeRuntimeRolloutPreparation(ctx, tx, rollout.ID); err != nil {
+			return err
+		}
 		return insertRuntimeUpgradeAudit(ctx, tx, &rollout.ID, actor, "confirm", "preflight", "accepted", map[string]any{"preflight_id": preflightID, "plan_fingerprint": *rollout.PlanFingerprint})
 	}, nil)
 	if err != nil {
+		if confirmationAttempted {
+			return nil, fmt.Errorf("%w: rollout %d: %v", ErrRuntimeUpgradeCommitUncertain, rollout.ID, err)
+		}
 		return nil, err
 	}
 	rollout.Status = "pending"
@@ -2178,7 +2210,7 @@ func (s *RuntimeUpgradeService) ValidateInstanceDeletion(ctx context.Context, in
 	if count > 0 {
 		return fmt.Errorf("instance %d is held by an active data-safe runtime rollout", instanceID)
 	}
-	return nil
+	return repository.CheckRuntimeOrphanLifecycleGuard(ctx, s.sess, instanceID)
 }
 
 // ValidateEmptyOpenClawPoolReset proves that the ordinary OpenClaw Lite pool
@@ -2186,116 +2218,6 @@ func (s *RuntimeUpgradeService) ValidateInstanceDeletion(ctx context.Context, in
 // rejoin the pre-8.1 rolling path. Upgrade-lab deployments are intentionally
 // excluded because they are isolated by their Kubernetes ownership labels.
 // The rollout row itself is excluded during the execution-time recheck.
-func (s *RuntimeUpgradeService) ValidateEmptyOpenClawPoolReset(ctx context.Context, excludeRolloutID int64) error {
-	if s == nil || s.sess == nil || s.pods == nil || s.bindings == nil || s.rollouts == nil || s.deployments == nil {
-		return fmt.Errorf("empty OpenClaw pool reset safety dependencies are unavailable")
-	}
-	var blockers []string
-	var instanceCount int
-	var firstInstance sql.NullInt64
-	row, err := s.sess.SQL().QueryRowContext(ctx, `
-		SELECT COUNT(*), MIN(i.id)
-		FROM instances i
-		WHERE LOWER(TRIM(i.type)) = 'openclaw'
-		  AND (CASE
-		    WHEN LOWER(TRIM(i.instance_mode)) IN ('lite','pro') THEN LOWER(TRIM(i.instance_mode))
-		    WHEN LOWER(TRIM(i.runtime_type)) = 'gateway' THEN 'lite'
-		    ELSE 'pro'
-		  END) = 'lite'
-		  AND LOWER(TRIM(COALESCE(i.description, ''))) NOT LIKE 'openclaw-upgrade-lab:%'
-	`)
-	if err != nil {
-		return fmt.Errorf("inspect ordinary OpenClaw Lite instances: %w", err)
-	}
-	if err := row.Scan(&instanceCount, &firstInstance); err != nil {
-		return fmt.Errorf("inspect ordinary OpenClaw Lite instances: %w", err)
-	}
-	if instanceCount > 0 {
-		blockers = append(blockers, fmt.Sprintf("%d ordinary OpenClaw Lite instance record(s) remain (first instance %d)", instanceCount, firstInstance.Int64))
-	}
-
-	var memberCount int
-	var firstMember sql.NullInt64
-	row, err = s.sess.SQL().QueryRowContext(ctx, `
-		SELECT COUNT(*), MIN(tm.id)
-		FROM team_members tm
-		JOIN instances i ON i.id = tm.instance_id
-		WHERE tm.status NOT IN ('deleted','deleting')
-		  AND LOWER(TRIM(COALESCE(tm.runtime_type, 'openclaw'))) = 'openclaw'
-		  AND LOWER(TRIM(i.type)) = 'openclaw'
-		  AND (CASE
-		    WHEN LOWER(TRIM(i.instance_mode)) IN ('lite','pro') THEN LOWER(TRIM(i.instance_mode))
-		    WHEN LOWER(TRIM(i.runtime_type)) = 'gateway' THEN 'lite'
-		    ELSE 'pro'
-		  END) = 'lite'
-		  AND LOWER(TRIM(COALESCE(i.description, ''))) NOT LIKE 'openclaw-upgrade-lab:%'
-	`)
-	if err != nil {
-		return fmt.Errorf("inspect OpenClaw Team references: %w", err)
-	}
-	if err := row.Scan(&memberCount, &firstMember); err != nil {
-		return fmt.Errorf("inspect OpenClaw Team references: %w", err)
-	}
-	if memberCount > 0 {
-		blockers = append(blockers, fmt.Sprintf("%d active Team member reference(s) remain (first member %d)", memberCount, firstMember.Int64))
-	}
-
-	activeRollouts, err := s.rollouts.ListActive(ctx, RuntimeTypeOpenClaw)
-	if err != nil {
-		return fmt.Errorf("inspect active OpenClaw rollouts: %w", err)
-	}
-	for _, rollout := range activeRollouts {
-		if rollout.ID == excludeRolloutID || runtimeUpgradeScopeFromRollout(&rollout).UpgradeLabRunID != nil {
-			continue
-		}
-		blockers = append(blockers, fmt.Sprintf("OpenClaw rollout %d is still %s", rollout.ID, strings.TrimSpace(rollout.Status)))
-	}
-
-	livePods, err := s.deployments.RuntimeDeploymentPods(ctx, RuntimeTypeOpenClaw)
-	if err != nil {
-		return fmt.Errorf("inspect live OpenClaw deployments for empty reset: %w", err)
-	}
-	liveOrdinaryPods := map[string]models.RuntimePod{}
-	for _, pod := range livePods {
-		if !runtimePodEligibleForOrdinaryScheduling(pod) {
-			continue
-		}
-		liveOrdinaryPods[runtimePodIdentity(pod)] = pod
-	}
-	if len(liveOrdinaryPods) == 0 {
-		blockers = append(blockers, "no active ordinary OpenClaw Runtime pod is available for an image-only reset")
-	}
-	reportedPods, err := s.pods.List(ctx, RuntimeTypeOpenClaw)
-	if err != nil {
-		return fmt.Errorf("inspect Runtime Agent reports for empty reset: %w", err)
-	}
-	reportedByIdentity := make(map[string]models.RuntimePod, len(reportedPods))
-	for _, pod := range reportedPods {
-		reportedByIdentity[runtimePodIdentity(pod)] = pod
-	}
-	for identity, livePod := range liveOrdinaryPods {
-		reported, ok := reportedByIdentity[identity]
-		if !ok || reported.LastSeenAt == nil || time.Since(reported.LastSeenAt.UTC()) > 2*time.Minute {
-			blockers = append(blockers, fmt.Sprintf("Runtime pod %s has no current agent report", strings.TrimSpace(livePod.PodName)))
-			continue
-		}
-		if reported.UsedSlots != 0 {
-			blockers = append(blockers, fmt.Sprintf("Runtime pod %s still reports %d used gateway slot(s)", strings.TrimSpace(livePod.PodName), reported.UsedSlots))
-		}
-		bindings, bindingErr := s.bindings.ListByRuntimePodID(ctx, reported.ID)
-		if bindingErr != nil {
-			return fmt.Errorf("inspect Runtime pod %s bindings: %w", strings.TrimSpace(livePod.PodName), bindingErr)
-		}
-		if len(bindings) > 0 {
-			blockers = append(blockers, fmt.Sprintf("Runtime pod %s still has %d gateway binding(s)", strings.TrimSpace(livePod.PodName), len(bindings)))
-		}
-	}
-	blockers = uniqueSortedStrings(blockers)
-	if len(blockers) > 0 {
-		return errors.New(strings.Join(blockers, "; "))
-	}
-	return nil
-}
 
 func (s *RuntimeUpgradeService) inspectCandidates(ctx context.Context, scope runtimeUpgradeScope) ([]runtimeUpgradeCandidate, map[string]string, []string, []string, error) {
 	pods, err := s.pods.List(ctx, RuntimeTypeOpenClaw)
@@ -2448,10 +2370,10 @@ func (s *RuntimeUpgradeService) inspectCandidates(ctx context.Context, scope run
 				}
 			}
 		}
-		if !podID.Valid && candidate.InstanceStatus != "stopped" && !(candidate.InstanceStatus == "error" && scope.allowsRecovery(instanceID)) {
+		if !podID.Valid && candidate.InstanceStatus != "stopped" && !((candidate.InstanceStatus == "error" || candidate.InstanceStatus == "creating") && scope.allowsRecovery(instanceID) && scope.RecoveryParentID > 0) {
 			blockers = append(blockers, fmt.Sprintf("instance %d is %s without a Runtime binding; wait for runtime reconciliation before upgrading", instanceID, candidate.InstanceStatus))
 		}
-		if !podID.Valid && candidate.InstanceStatus == "error" && scope.allowsRecovery(instanceID) && scope.RecoveryParentID > 0 {
+		if !podID.Valid && (candidate.InstanceStatus == "error" || candidate.InstanceStatus == "creating") && scope.allowsRecovery(instanceID) && scope.RecoveryParentID > 0 {
 			prior, err := s.recoveryStoppedSource(ctx, scope.RecoveryParentID, instanceID, runtimeGeneration)
 			if err != nil {
 				blockers = append(blockers, err.Error())
@@ -2518,6 +2440,9 @@ func (s *RuntimeUpgradeService) inspectCandidates(ctx context.Context, scope run
 		if image := liveImages[key]; image != "" {
 			sourceImages[key] = image
 		}
+	}
+	if err := s.fillStoppedSourceVersions(ctx, candidates, sourceImages, liveImages, pods, inspectOpenClawRegistryImage); err != nil {
+		blockers = append(blockers, err.Error())
 	}
 	if len(sourceImages) == 0 {
 		sourceImages = fallbackSourceImages
@@ -2670,7 +2595,7 @@ func (s *RuntimeUpgradeService) inspectTeamConsistency(ctx context.Context, team
 			return 0, nil, err
 		}
 		leaderCount := 0
-		openClawLeaderCount := 0
+		compatibleLeaderCount := 0
 		for rows.Next() {
 			var id int
 			var runtimeType, role, availability, status string
@@ -2680,22 +2605,22 @@ func (s *RuntimeUpgradeService) inspectTeamConsistency(ctx context.Context, team
 			}
 			if isTeamLeaderRole(role) {
 				leaderCount++
-				if strings.EqualFold(runtimeType, RuntimeTypeOpenClaw) {
-					openClawLeaderCount++
+				if strings.EqualFold(runtimeType, RuntimeTypeOpenClaw) || strings.EqualFold(runtimeType, RuntimeTypeOpenCode) {
+					compatibleLeaderCount++
 				}
 			}
 			if strings.EqualFold(runtimeType, RuntimeTypeHermes) {
 				hermesCount++
-				if strings.EqualFold(availability, models.TeamMemberAvailabilityBusy) || strings.EqualFold(status, models.TeamMemberStatusBusy) {
-					blockers = append(blockers, fmt.Sprintf("Team %d Hermes member %d is busy", teamID, id))
-				}
+			}
+			if strings.EqualFold(availability, models.TeamMemberAvailabilityBusy) || strings.EqualFold(status, models.TeamMemberStatusBusy) {
+				blockers = append(blockers, fmt.Sprintf("Team %d %s member %d is busy", teamID, runtimeType, id))
 			}
 		}
 		rows.Close()
 		if leaderCount != 1 {
 			blockers = append(blockers, fmt.Sprintf("Team %d must have exactly one Leader", teamID))
-		} else if openClawLeaderCount != 1 {
-			blockers = append(blockers, fmt.Sprintf("Team %d Leader must remain an OpenClaw intermediary", teamID))
+		} else if compatibleLeaderCount != 1 {
+			blockers = append(blockers, fmt.Sprintf("Team %d Leader must be an OpenClaw or supported OpenCode intermediary", teamID))
 		}
 	}
 	return hermesCount, blockers, nil
@@ -2708,6 +2633,9 @@ func (s *RuntimeUpgradeService) inspectTeamConsistency(ctx context.Context, team
 // risk a second writer.
 func (s *RuntimeUpgradeService) stopCandidateGateway(ctx context.Context, candidate runtimeUpgradeCandidate) (bool, error) {
 	if candidate.GatewayID == "" {
+		if requiresConfirmedGatewayStop(s.agent) && (candidate.RuntimePodID != nil || strings.TrimSpace(candidate.BindingState) != "") {
+			return false, fmt.Errorf("bound runtime gateway identity is required to confirm source stop")
+		}
 		if candidate.RuntimePodID != nil && candidate.BindingState != "running" {
 			return true, s.bindings.DeleteByInstanceIDAndReleaseSlot(ctx, candidate.InstanceID, *candidate.RuntimePodID)
 		}
@@ -2717,6 +2645,10 @@ func (s *RuntimeUpgradeService) stopCandidateGateway(ctx context.Context, candid
 		return false, fmt.Errorf("running gateway cannot be stopped because its Runtime Agent is unavailable")
 	}
 	deleteErr := s.agent.DeleteGateway(ctx, candidate.AgentEndpoint, candidate.GatewayID)
+	strictStop := requiresConfirmedGatewayStop(s.agent)
+	if strictStop && deleteErr != nil {
+		return false, fmt.Errorf("runtime gateway teardown is not confirmed: %w", deleteErr)
+	}
 	reader, canConfirm := s.agent.(gatewayStateReader)
 	confirmed := errors.Is(deleteErr, ErrRuntimeAgentNotFound)
 	// A 7.1 source agent may return a stop conflict after its process watcher
@@ -2724,7 +2656,7 @@ func (s *RuntimeUpgradeService) stopCandidateGateway(ctx context.Context, candid
 	// state whenever Delete reported an error, even if the legacy capability
 	// report predates openclaw.gateway.stop-confirm.  New agents retain the
 	// stricter confirmation on every stop.
-	if canConfirm && (deleteErr != nil || containsString(candidate.Capabilities, "openclaw.gateway.stop-confirm")) {
+	if !strictStop && canConfirm && (deleteErr != nil || containsString(candidate.Capabilities, "openclaw.gateway.stop-confirm")) {
 		var confirmErr error
 		confirmed, confirmErr = waitForGatewayStopped(ctx, reader, candidate.AgentEndpoint, candidate.GatewayID, 5*time.Second)
 		if !confirmed {
@@ -2763,6 +2695,13 @@ func (s *RuntimeUpgradeService) stopCandidateGateway(ctx context.Context, candid
 		}
 	}
 	return true, nil
+}
+
+// Slot clients only return a successful DeleteGateway after a matching process
+// teardown receipt. Missing records are ambiguous and cannot replace that proof.
+func requiresConfirmedGatewayStop(client RuntimeAgentClient) bool {
+	policy, ok := client.(interface{ RequiresConfirmedGatewayStop() bool })
+	return ok && policy.RequiresConfirmedGatewayStop()
 }
 
 type gatewayStateReader interface {
@@ -3402,17 +3341,27 @@ func (s *RuntimeUpgradeService) ClassifyOpenClawTarget(ctx context.Context, targ
 		}
 	}
 	if len(sourceImages) == 0 {
-		return nil, fmt.Errorf("no current OpenClaw deployment image is available to authorize the target registry")
+		return s.classifyColdSuccessor(ctx, target)
 	}
 	// With no ordinary Lite instances, Team references, Gateway occupancy,
 	// bindings or active rollout, this is an image-only operation. Version and
 	// migration-contract metadata are not needed because no user state moves.
-	emptyPoolReset := s.ValidateEmptyOpenClawPoolReset(ctx, 0) == nil
+	assessment, err := s.assessOpenClawPoolSwitch(ctx, 0)
+	if err != nil {
+		return nil, fmt.Errorf("inspect OpenClaw pool state: %w", err)
+	}
+	emptyPoolReset := assessment.Eligible
 	classification, err := inspectOpenClawRegistryImage(ctx, target, sourceImages, emptyPoolReset)
 	if err != nil {
 		return nil, err
 	}
+	// Scoped data-safe recoveries retain their existing overlap checks at
+	// confirmation. Only ordinary shared-pool changes serialize globally.
+	if assessment.Busy && classification.Strategy != RuntimeUpgradeStrategyOpenClawDataSafe {
+		return nil, fmt.Errorf("%s，请查看当前操作进度", assessment.Reason)
+	}
 	classification.SourceImages = sourceImages
+	classification.WaitingInstanceIDs = assessment.Waiting
 	if emptyPoolReset {
 		if len(sourceImagePinErrors) > 0 {
 			keys := make([]string, 0, len(sourceImagePinErrors))
@@ -3551,6 +3500,9 @@ func inspectOpenClawRegistryImage(ctx context.Context, target string, sourceImag
 		if ok {
 			env[key] = value
 		}
+	}
+	if err := validateOpenClawServingImage(env); err != nil {
+		return nil, err
 	}
 	runtimeType := strings.TrimSpace(config.Config.Labels["io.clawmanager.runtime.type"])
 	if runtimeType == "" {
@@ -3815,14 +3767,16 @@ func immutableRuntimeImage(imageRef, digest string) (string, error) {
 
 func runtimeUpgradeFingerprint(target string, candidates []runtimeUpgradeCandidate, sourceImages map[string]string) string {
 	type fingerprintCandidate struct {
-		InstanceID int
-		UserID     int
-		Workspace  string
-		TeamID     int
-		Member     string
-		Role       string
-		Generation int
-		Binding    string
+		InstanceID                                                   int
+		UserID                                                       int
+		Workspace                                                    string
+		TeamID                                                       int
+		Member                                                       string
+		Role                                                         string
+		Generation                                                   int
+		Binding                                                      string
+		SourceVersion                                                string
+		SourcePodUID, SourceDeployment, SourceImageDigest, GatewayID string
 	}
 	values := make([]fingerprintCandidate, 0, len(candidates))
 	for _, candidate := range candidates {
@@ -3830,7 +3784,7 @@ func runtimeUpgradeFingerprint(target string, candidates []runtimeUpgradeCandida
 		if candidate.TeamID != nil {
 			teamID = *candidate.TeamID
 		}
-		values = append(values, fingerprintCandidate{candidate.InstanceID, candidate.UserID, filepath.Clean(candidate.WorkspacePath), teamID, candidate.MemberKey, candidate.Role, candidate.Generation, candidate.BindingState})
+		values = append(values, fingerprintCandidate{candidate.InstanceID, candidate.UserID, filepath.Clean(candidate.WorkspacePath), teamID, candidate.MemberKey, candidate.Role, candidate.Generation, candidate.BindingState, candidate.SourceVersion, candidate.SourcePodUID, candidate.SourceDeployment, candidate.SourceImageDigest, candidate.GatewayID})
 	}
 	sort.Slice(values, func(i, j int) bool { return values[i].InstanceID < values[j].InstanceID })
 	payload, _ := json.Marshal(map[string]any{"target": strings.TrimSpace(target), "candidates": values, "sources": sourceImages})

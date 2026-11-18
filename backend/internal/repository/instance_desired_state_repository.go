@@ -40,6 +40,11 @@ func (r *instanceDesiredStateRepository) Create(state *models.InstanceDesiredSta
 		return fmt.Errorf("invalid instance desired state")
 	}
 	return (&instanceRepository{r.sess}).withUnfencedInstance(context.Background(), state.InstanceID, func(tx *instanceRepository) error {
+		if state.DesiredPowerState == "running" {
+			if err := checkInstanceAutoStopMutation(context.Background(), tx.sess, state.InstanceID); err != nil {
+				return err
+			}
+		}
 		return (&instanceDesiredStateRepository{tx.sess}).create(state)
 	})
 }
@@ -61,6 +66,11 @@ func (r *instanceDesiredStateRepository) Update(state *models.InstanceDesiredSta
 		return fmt.Errorf("invalid instance desired state")
 	}
 	return (&instanceRepository{r.sess}).withUnfencedInstance(context.Background(), state.InstanceID, func(tx *instanceRepository) error {
+		if state.DesiredPowerState == "running" {
+			if err := checkInstanceAutoStopMutation(context.Background(), tx.sess, state.InstanceID); err != nil {
+				return err
+			}
+		}
 		store := &instanceDesiredStateRepository{tx.sess}
 		current, err := store.GetByInstanceID(state.InstanceID)
 		if err != nil {

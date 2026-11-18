@@ -5,9 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
+
+	"clawreef/internal/models"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -17,6 +20,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/apimachinery/pkg/util/version"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/util/retry"
@@ -49,25 +53,48 @@ type RuntimeDeploymentSpec struct {
 	TrustedProxyCIDRs     string
 	ControlUIOrigin       string
 	HermesDesktopWeb      bool
+	// Zero preserves the existing process-pool deployment contract.
+	SlotCount            int
+	SlotAppArmorProfile  string
+	SlotResources        corev1.ResourceRequirements
+	PodResources         *corev1.ResourceRequirements
+	PodUserNamespaces    bool
+	SandboxProfile       string
+	NetworkIsolation     bool
+	AgentTokenSecretName string
 }
 
 type RuntimeDeploymentPod struct {
-	RuntimeType       string
-	Namespace         string
-	DeploymentName    string
-	PodName           string
-	PodUID            string
-	PodIP             *string
-	NodeName          *string
-	ImageRef          string
-	ImageDigest       string
-	State             string
-	PoolRole          string
-	PoolPurpose       string
-	UpgradeID         string
-	SourceDeployment  string
-	SchedulingEnabled *bool
-	DesiredReplicas   int32
+	SandboxProfile                string       `json:"-"`
+	ReadyGatewayPorts             map[int]bool `json:"-"`
+	RuntimeType                   string
+	Namespace                     string
+	DeploymentName                string
+	PodName                       string
+	PodUID                        string
+	PodIP                         *string
+	NodeName                      *string
+	ImageRef                      string
+	ImageDigest                   string
+	State                         string
+	PoolRole                      string
+	PoolPurpose                   string
+	UpgradeID                     string
+	SourceDeployment              string
+	SchedulingEnabled             *bool
+	DesiredReplicas               int32
+	Capacity                      int
+	CPUMillisRequest              *int64
+	MemoryBytesRequest            *int64
+	CoordinatorCPUMillisRequest   *int64
+	CoordinatorMemoryBytesRequest *int64
+	CPUMillisLimit                *int64
+	MemoryBytesLimit              *int64
+	StorageClass                  string
+	Slots                         []models.RuntimeSlot
+	WorkspaceStorageIdentity      string
+	CoordinatorCPUMillis          *int64
+	CoordinatorMemoryBytes        *int64
 }
 
 type RuntimeDeploymentRef struct {
@@ -117,6 +144,12 @@ func (s *runtimeDeploymentService) EnsureUpgradeLabPool(ctx context.Context, nam
 	}
 	deployments := s.client.AppsV1().Deployments(namespace)
 	if existing, err := deployments.Get(ctx, name, metav1.GetOptions{}); err == nil {
+		if err := rejectRuntimeReceiptClone(existing); err != nil {
+			return err
+		}
+		if err := s.checkRuntimeReceiptCloneSource(ctx, namespace, templateName, existing.Labels["clawmanager.io/runtime-type"]); err != nil {
+			return err
+		}
 		if existing.Labels[upgradeLabPurposeLabel] != upgradeLabPurposeValue || existing.Labels[upgradeLabRunLabel] != runID {
 			return fmt.Errorf("deployment %s/%s is not owned by upgrade lab run %s", namespace, name, runID)
 		}
@@ -130,6 +163,9 @@ func (s *runtimeDeploymentService) EnsureUpgradeLabPool(ctx context.Context, nam
 	template, err := deployments.Get(ctx, templateName, metav1.GetOptions{})
 	if err != nil {
 		return fmt.Errorf("get upgrade lab template deployment %s/%s: %w", namespace, templateName, err)
+	}
+	if err := rejectRuntimeReceiptClone(template); err != nil {
+		return err
 	}
 	target := template.DeepCopy()
 	target.TypeMeta = metav1.TypeMeta{}
@@ -147,7 +183,10 @@ func (s *runtimeDeploymentService) EnsureUpgradeLabPool(ctx context.Context, nam
 	}
 	target.Spec.Selector = &metav1.LabelSelector{MatchLabels: copyStringMap(selector)}
 	target.Spec.Replicas = &replicas
-	target.Spec.Template.Labels = copyStringMap(selector)
+	target.Spec.Template.Labels = copyStringMap(template.Spec.Template.Labels)
+	for key, value := range selector {
+		target.Spec.Template.Labels[key] = value
+	}
 	target.Spec.Template.Labels["clawmanager.io/pool-role"] = "upgrade-lab"
 	target.Spec.Strategy = appsv1.DeploymentStrategy{Type: appsv1.RecreateDeploymentStrategyType}
 	target.Spec.Template.Spec.TopologySpreadConstraints = []corev1.TopologySpreadConstraint{{MaxSkew: 1, TopologyKey: "kubernetes.io/hostname", WhenUnsatisfiable: corev1.ScheduleAnyway, LabelSelector: &metav1.LabelSelector{MatchLabels: copyStringMap(selector)}}}
@@ -169,6 +208,8 @@ func (s *runtimeDeploymentService) EnsureUpgradeLabPool(ctx context.Context, nam
 	upsertEnvVar(container, "CLAWMANAGER_RUNTIME_IMAGE_DIGEST", runtimeImageDigest(image))
 	upsertEnvVar(container, "CLAWMANAGER_RUNTIME_UPGRADE_ID", runID)
 	container.ReadinessProbe = nil
+	setRuntimeSlotTLSReadiness(container)
+	syncRuntimeSlotImageAndIdentity(target, container)
 	if _, err := deployments.Create(ctx, target, metav1.CreateOptions{}); err != nil {
 		return fmt.Errorf("create upgrade lab pool %s/%s: %w", namespace, name, err)
 	}
@@ -221,6 +262,10 @@ func (s *runtimeDeploymentService) waitForUpgradeLabPoolGone(ctx context.Context
 }
 
 func (s *runtimeDeploymentService) EnsureUpgradePool(ctx context.Context, namespace, sourceName, targetName, image, upgradeID string) error {
+	return s.ensureUpgradePool(ctx, namespace, sourceName, targetName, image, upgradeID, nil)
+}
+
+func (s *runtimeDeploymentService) ensureUpgradePool(ctx context.Context, namespace, sourceName, targetName, image, upgradeID string, cold *runtimeColdClone) error {
 	if s == nil || s.client == nil {
 		return fmt.Errorf("k8s client not initialized")
 	}
@@ -232,6 +277,15 @@ func (s *runtimeDeploymentService) EnsureUpgradePool(ctx context.Context, namesp
 	}
 	deployments := s.client.AppsV1().Deployments(namespace)
 	if existing, err := deployments.Get(ctx, targetName, metav1.GetOptions{}); err == nil {
+		if err := rejectRuntimeReceiptClone(existing); err != nil {
+			return err
+		}
+		if err := s.checkRuntimeReceiptCloneSource(ctx, namespace, sourceName, existing.Labels["clawmanager.io/runtime-type"]); err != nil {
+			return err
+		}
+		if cold != nil {
+			return s.verifyColdSuccessorTemplate(ctx, existing, cold.Source, cold.Hash, cold.Operation, upgradeID)
+		}
 		if runtimeContainerImage(existing.Spec.Template.Spec.Containers) != strings.TrimSpace(image) || existing.Labels["clawmanager.io/upgrade-id"] != upgradeID || existing.Labels["clawmanager.io/source-deployment"] != sourceName {
 			return fmt.Errorf("existing upgrade pool %s/%s does not match rollout", namespace, targetName)
 		}
@@ -243,9 +297,37 @@ func (s *runtimeDeploymentService) EnsureUpgradePool(ctx context.Context, namesp
 	if err != nil {
 		return fmt.Errorf("get source runtime deployment %s/%s: %w", namespace, sourceName, err)
 	}
+	if cold != nil {
+		actual, verifyErr := s.inspectRetiredRuntimePoolSnapshot(ctx, cold.Source, cold.Operation, source)
+		if verifyErr != nil {
+			return verifyErr
+		}
+		if actual != cold.Hash {
+			return fmt.Errorf("cold source changed before cloning")
+		}
+	}
+	target, err := buildUpgradeRuntimePool(source, namespace, sourceName, targetName, image, upgradeID, cold)
+	if err != nil {
+		return err
+	}
+	if _, err := deployments.Create(ctx, target, metav1.CreateOptions{}); err != nil {
+		return fmt.Errorf("create upgrade runtime pool %s/%s: %w", namespace, targetName, err)
+	}
+	return nil
+}
+
+func buildUpgradeRuntimePool(source *appsv1.Deployment, namespace, sourceName, targetName, image, upgradeID string, cold *runtimeColdClone) (*appsv1.Deployment, error) {
+	if err := rejectRuntimeReceiptClone(source); err != nil {
+		return nil, err
+	}
 	target := source.DeepCopy()
 	target.TypeMeta = metav1.TypeMeta{}
 	target.ObjectMeta = metav1.ObjectMeta{Name: targetName, Namespace: namespace, Labels: map[string]string{}}
+	if cold != nil {
+		one := int32(1)
+		target.Spec.Replicas = &one
+		target.Annotations = map[string]string{coldSourceUIDAnnotation: cold.Source.UID, coldSourceHashAnnotation: cold.Hash}
+	}
 	for key, value := range source.Labels {
 		target.Labels[key] = value
 	}
@@ -259,9 +341,7 @@ func (s *runtimeDeploymentService) EnsureUpgradePool(ctx context.Context, namesp
 	if target.Spec.Template.Labels == nil {
 		target.Spec.Template.Labels = map[string]string{}
 	}
-	for key := range target.Spec.Template.Labels {
-		delete(target.Spec.Template.Labels, key)
-	}
+	// Preserve source protocol, security and admission labels; update identity below.
 	for key, value := range selector {
 		target.Spec.Template.Labels[key] = value
 	}
@@ -277,7 +357,7 @@ func (s *runtimeDeploymentService) EnsureUpgradePool(ctx context.Context, namesp
 		}
 	}
 	if containerIndex < 0 {
-		return fmt.Errorf("source runtime deployment %s/%s has no runtime container", namespace, sourceName)
+		return nil, fmt.Errorf("source runtime deployment %s/%s has no runtime container", namespace, sourceName)
 	}
 	container := &target.Spec.Template.Spec.Containers[containerIndex]
 	container.Image = strings.TrimSpace(image)
@@ -287,10 +367,9 @@ func (s *runtimeDeploymentService) EnsureUpgradePool(ctx context.Context, namesp
 	upsertEnvVar(container, "CLAWMANAGER_RUNTIME_IMAGE_DIGEST", runtimeImageDigest(image))
 	upsertEnvVar(container, "CLAWMANAGER_RUNTIME_UPGRADE_ID", upgradeID)
 	container.ReadinessProbe = &corev1.Probe{ProbeHandler: corev1.ProbeHandler{HTTPGet: &corev1.HTTPGetAction{Path: "/readyz", Port: intstr.FromString("agent"), Scheme: corev1.URISchemeHTTP}}, InitialDelaySeconds: 1, PeriodSeconds: 2, TimeoutSeconds: 1, FailureThreshold: 3, SuccessThreshold: 1}
-	if _, err := deployments.Create(ctx, target, metav1.CreateOptions{}); err != nil {
-		return fmt.Errorf("create upgrade runtime pool %s/%s: %w", namespace, targetName, err)
-	}
-	return nil
+	setRuntimeSlotTLSReadiness(container)
+	syncRuntimeSlotImageAndIdentity(target, container)
+	return target, nil
 }
 
 func (s *runtimeDeploymentService) SetUpgradePoolActive(ctx context.Context, namespace, sourceName, targetName, upgradeID string, active bool) error {
@@ -320,6 +399,18 @@ func (s *runtimeDeploymentService) setUpgradePoolActive(ctx context.Context, nam
 			deployment, err := deployments.Get(ctx, name, metav1.GetOptions{})
 			if err != nil {
 				return err
+			}
+			if active && value == "true" {
+				if err := rejectRuntimeReceiptClone(deployment); err != nil {
+					return err
+				}
+				source, err := deployments.Get(ctx, sourceName, metav1.GetOptions{})
+				if err != nil {
+					return err
+				}
+				if err := rejectRuntimeReceiptClone(source); err != nil {
+					return err
+				}
 			}
 			if validateTarget && (deployment.Labels[runtimePoolRoleLabel] != "upgrade-target" || deployment.Labels[runtimeUpgradeIDLabel] != upgradeID || deployment.Labels[runtimeSourceLabel] != sourceName) {
 				return fmt.Errorf("deployment %s/%s is not upgrade target %s for source %s", namespace, name, upgradeID, sourceName)
@@ -402,7 +493,7 @@ func BuildRuntimeDeployment(spec RuntimeDeploymentSpec) *appsv1.Deployment {
 	gatewayPortEnd := runtimeGatewayPortValue(spec.GatewayPortEnd, defaultGatewayPortEnd)
 	env := buildRuntimeAgentEnv(spec, workspaceMountPath, gatewayPortStart, gatewayPortEnd)
 
-	return &appsv1.Deployment{
+	deployment := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      spec.Name,
 			Namespace: spec.Namespace,
@@ -453,6 +544,10 @@ func BuildRuntimeDeployment(spec RuntimeDeploymentSpec) *appsv1.Deployment {
 			},
 		},
 	}
+	if spec.SlotCount > 0 {
+		configureRuntimeSlots(deployment, spec, gatewayPortStart)
+	}
+	return deployment
 }
 
 func runtimeWorkspaceVolumeSource(spec RuntimeDeploymentSpec) corev1.VolumeSource {
@@ -552,8 +647,25 @@ func (s *runtimeDeploymentService) Ensure(ctx context.Context, spec RuntimeDeplo
 	if s == nil || s.client == nil {
 		return fmt.Errorf("k8s client not initialized")
 	}
+	if spec.SlotCount < 0 {
+		return fmt.Errorf("runtime slot count cannot be negative")
+	}
+	if spec.SlotCount > 0 {
+		if err := s.validateRuntimePodCapabilities(spec); err != nil {
+			return err
+		}
+		if strings.TrimSpace(spec.AgentTokenSecretName) == "" {
+			return fmt.Errorf("container slots require an agent credential Secret")
+		}
+		if err := s.validateRuntimeSlotStorage(ctx, spec); err != nil {
+			return err
+		}
+	}
 
 	desired := BuildRuntimeDeployment(spec)
+	if err := s.prepareRuntimeReceiptStorage(ctx, desired); err != nil {
+		return err
+	}
 	if spec.RuntimeType == "hermes" && spec.HermesDesktopWeb {
 		container := &desired.Spec.Template.Spec.Containers[0]
 		upsertEnvVar(container, "CLAWMANAGER_CONTROL_UI_ORIGIN", spec.ControlUIOrigin)
@@ -565,6 +677,7 @@ func (s *runtimeDeploymentService) Ensure(ctx context.Context, spec RuntimeDeplo
 			upsertEnvVar(container, key, value)
 		}
 	}
+	syncRuntimeSlotImageAndIdentity(desired, &desired.Spec.Template.Spec.Containers[0])
 	deployments := s.client.AppsV1().Deployments(spec.Namespace)
 	existing, err := deployments.Get(ctx, spec.Name, metav1.GetOptions{})
 	if errors.IsNotFound(err) {
@@ -578,8 +691,25 @@ func (s *runtimeDeploymentService) Ensure(ctx context.Context, spec RuntimeDeplo
 		return fmt.Errorf("failed to get runtime deployment %s/%s: %w", spec.Namespace, spec.Name, err)
 	}
 
+	if (existing.Spec.Template.Labels["clawmanager.io/runtime-protocol"] == "container-slots-v1") != (spec.SlotCount > 0) {
+		return fmt.Errorf("runtime deployment %s/%s protocol change requires explicit migration", spec.Namespace, spec.Name)
+	}
+
 	if !reflect.DeepEqual(existing.Spec.Selector, desired.Spec.Selector) {
 		return fmt.Errorf("runtime deployment %s/%s selector mismatch; delete and recreate the deployment to change immutable selector", spec.Namespace, spec.Name)
+	}
+	if existing.Labels[RuntimeScaleInOperationLabel] != "" {
+		return fmt.Errorf("Runtime scale-in is active; Deployment updates are fenced")
+	}
+	if hasRuntimeReceiptStorage(existing) {
+		// Validate the old layout too: a freshly generated template must not
+		// silently turn an old subPath/shared mount into a different directory.
+		if err := s.prepareRuntimeReceiptStorage(ctx, existing.DeepCopy()); err != nil {
+			return err
+		}
+	}
+	if err := validateRuntimeReceiptTransition(existing, desired); err != nil {
+		return err
 	}
 
 	updated := existing.DeepCopy()
@@ -597,10 +727,48 @@ func (s *runtimeDeploymentService) Ensure(ctx context.Context, spec RuntimeDeplo
 		updated.Spec.Template.Labels[key] = value
 	}
 	updated.Spec.Template.Spec = desired.Spec.Template.Spec
+	if hasRuntimeReceiptStorage(desired) {
+		if updated.Spec.Template.Annotations == nil {
+			updated.Spec.Template.Annotations = map[string]string{}
+		}
+		for key, value := range desired.Spec.Template.Annotations {
+			updated.Spec.Template.Annotations[key] = value
+		}
+		updated.Spec.Strategy = desired.Spec.Strategy
+	}
 
 	_, err = deployments.Update(ctx, updated, metav1.UpdateOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to update runtime deployment %s/%s: %w", spec.Namespace, spec.Name, err)
+	}
+	return nil
+}
+
+func (s *runtimeDeploymentService) validateRuntimePodCapabilities(spec RuntimeDeploymentSpec) error {
+	rootless := spec.SandboxProfile == RuntimeNFSRootlessProfile
+	if spec.SandboxProfile != "" && !rootless {
+		return fmt.Errorf("unknown runtime sandbox profile %q", spec.SandboxProfile)
+	}
+	if rootless && (spec.PodUserNamespaces || !spec.NetworkIsolation || spec.SlotCount < 1) {
+		return fmt.Errorf("NFS rootless runtime requires isolated container slots without Pod user namespaces")
+	}
+	if spec.NetworkIsolation && ((!rootless && !spec.PodUserNamespaces) || spec.SlotCount < 1 || spec.SlotCount > 256) {
+		return fmt.Errorf("network-isolated runtime requires configured slots and Pod user namespaces")
+	}
+	if spec.PodResources == nil && !spec.PodUserNamespaces {
+		return nil
+	}
+	server, err := s.client.Discovery().ServerVersion()
+	if err != nil {
+		return fmt.Errorf("discover runtime resource support: %w", err)
+	}
+	minimum := "1.33.0"
+	if spec.PodResources != nil {
+		minimum = "1.34.0"
+	}
+	actual, err := version.ParseGeneric(server.GitVersion)
+	if err != nil || !actual.AtLeast(version.MustParseGeneric(minimum)) {
+		return fmt.Errorf("runtime Pod resources/user namespaces require Kubernetes >= %s (server %s)", minimum, server.GitVersion)
 	}
 	return nil
 }
@@ -611,11 +779,30 @@ func (s *runtimeDeploymentService) Scale(ctx context.Context, namespace, name st
 	}
 
 	deployments := s.client.AppsV1().Deployments(namespace)
-	patch, err := json.Marshal(map[string]interface{}{
+	current, err := deployments.Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("inspect runtime before scaling: %w", err)
+	}
+	if hasRuntimeReceiptStorage(current) && replicas > 0 {
+		if replicas > 1 {
+			return fmt.Errorf("runtime receipt storage currently supports zero or one Pod")
+		}
+		if err := s.prepareRuntimeReceiptStorage(ctx, current.DeepCopy()); err != nil {
+			return err
+		}
+	}
+	if current.Labels[RuntimeScaleInOperationLabel] != "" {
+		return fmt.Errorf("Runtime scale-in is active; replica changes are fenced")
+	}
+	patchBody := map[string]interface{}{
 		"spec": map[string]interface{}{
 			"replicas": replicas,
 		},
-	})
+	}
+	if current.ResourceVersion != "" {
+		patchBody["metadata"] = map[string]interface{}{"resourceVersion": current.ResourceVersion}
+	}
+	patch, err := json.Marshal(patchBody)
 	if err != nil {
 		return fmt.Errorf("failed to build runtime deployment scale patch %s/%s: %w", namespace, name, err)
 	}
@@ -629,7 +816,7 @@ func (s *runtimeDeploymentService) RolloutImage(ctx context.Context, namespace, 
 	return s.rolloutImage(ctx, namespace, name, image, upgradeID, maxUnavailable, maxSurge, false)
 }
 
-func (s *runtimeDeploymentService) rolloutImage(ctx context.Context, namespace, name, image, upgradeID string, maxUnavailable, maxSurge int, hermesWeb bool) error {
+func (s *runtimeDeploymentService) rolloutImage(ctx context.Context, namespace, name, image, upgradeID string, maxUnavailable, maxSurge int, hermesWeb bool, expectedUID ...string) error {
 	if s == nil || s.client == nil {
 		return fmt.Errorf("k8s client not initialized")
 	}
@@ -646,6 +833,9 @@ func (s *runtimeDeploymentService) rolloutImage(ctx context.Context, namespace, 
 		}
 
 		updated := existing.DeepCopy()
+		if len(expectedUID) > 0 && string(existing.UID) != expectedUID[0] {
+			return fmt.Errorf("runtime deployment identity changed")
+		}
 		containerIndex := -1
 		for index, container := range updated.Spec.Template.Spec.Containers {
 			if container.Name == "runtime" {
@@ -703,10 +893,21 @@ func (s *runtimeDeploymentService) rolloutImage(ctx context.Context, namespace, 
 			}
 		}
 
+		setRuntimeSlotTLSReadiness(container)
+
+		syncRuntimeSlotImageAndIdentity(updated, container)
 		updated.Spec.Strategy.Type = appsv1.RollingUpdateDeploymentStrategyType
 		updated.Spec.Strategy.RollingUpdate = &appsv1.RollingUpdateDeployment{
 			MaxUnavailable: intOrStringPtr(nonNegativeRolloutInt(maxUnavailable)),
 			MaxSurge:       intOrStringPtr(positiveRolloutInt(maxSurge)),
+		}
+		if upgradeID != "" {
+			if err := rejectRuntimeReceiptClone(existing); err != nil {
+				return err
+			}
+		}
+		if err := s.prepareRuntimeReceiptStorage(ctx, updated); err != nil {
+			return err
 		}
 
 		_, err = deployments.Update(ctx, updated, metav1.UpdateOptions{})
@@ -738,6 +939,8 @@ func (s *runtimeDeploymentService) ListPods(ctx context.Context, namespace, runt
 	}
 
 	var pods []RuntimeDeploymentPod
+	var podList *corev1.PodList
+	claims := make(map[string]*corev1.PersistentVolumeClaim)
 	for _, deployment := range deploymentList.Items {
 		deploymentRuntimeType := strings.ToLower(strings.TrimSpace(deployment.Labels["clawmanager.io/runtime-type"]))
 		if deploymentRuntimeType == "" {
@@ -751,11 +954,25 @@ func (s *runtimeDeploymentService) ListPods(ctx context.Context, namespace, runt
 		if deployment.Spec.Replicas != nil && *deployment.Spec.Replicas == 0 && deployment.Status.Replicas == 0 {
 			continue
 		}
-		deploymentPods, err := s.listDeploymentPods(ctx, &deployment)
+		selector, err := runtimeDeploymentPodSelector(&deployment)
 		if err != nil {
 			return nil, err
 		}
-		pods = append(pods, deploymentPods...)
+		// One fresh namespace snapshot avoids a request per pool. Pod labels
+		// need not include runtime-type, so apply each exact selector locally.
+		if podList == nil {
+			podList, err = s.client.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{})
+			if err != nil {
+				return nil, fmt.Errorf("failed to list runtime deployment pods %s/%s: %w", namespace, deployment.Name, err)
+			}
+		}
+		var selected []corev1.Pod
+		for _, pod := range podList.Items {
+			if pod.Namespace == deployment.Namespace && selector.Matches(labels.Set(pod.Labels)) {
+				selected = append(selected, pod)
+			}
+		}
+		pods = append(pods, s.renderDeploymentPods(ctx, &deployment, selected, claims)...)
 	}
 	return pods, nil
 }
@@ -796,7 +1013,7 @@ func (s *runtimeDeploymentService) ListDeploymentPods(ctx context.Context, refs 
 	return pods, nil
 }
 
-func (s *runtimeDeploymentService) listDeploymentPods(ctx context.Context, deployment *appsv1.Deployment) ([]RuntimeDeploymentPod, error) {
+func runtimeDeploymentPodSelector(deployment *appsv1.Deployment) (labels.Selector, error) {
 	if deployment == nil || deployment.Spec.Selector == nil {
 		if deployment == nil {
 			return nil, fmt.Errorf("runtime deployment is required")
@@ -807,10 +1024,23 @@ func (s *runtimeDeploymentService) listDeploymentPods(ctx context.Context, deplo
 	if err != nil {
 		return nil, fmt.Errorf("runtime deployment %s/%s has invalid selector: %w", deployment.Namespace, deployment.Name, err)
 	}
+	return selector, nil
+}
+
+func (s *runtimeDeploymentService) listDeploymentPods(ctx context.Context, deployment *appsv1.Deployment) ([]RuntimeDeploymentPod, error) {
+	selector, err := runtimeDeploymentPodSelector(deployment)
+	if err != nil {
+		return nil, err
+	}
 	podList, err := s.client.CoreV1().Pods(deployment.Namespace).List(ctx, metav1.ListOptions{LabelSelector: selector.String()})
 	if err != nil {
 		return nil, fmt.Errorf("failed to list runtime deployment pods %s/%s: %w", deployment.Namespace, deployment.Name, err)
 	}
+	return s.renderDeploymentPods(ctx, deployment, podList.Items, make(map[string]*corev1.PersistentVolumeClaim)), nil
+}
+
+// claims belongs to one inventory request; never reuse storage identity across snapshots.
+func (s *runtimeDeploymentService) renderDeploymentPods(ctx context.Context, deployment *appsv1.Deployment, pods []corev1.Pod, claims map[string]*corev1.PersistentVolumeClaim) []RuntimeDeploymentPod {
 	deploymentRuntimeType := strings.ToLower(strings.TrimSpace(deployment.Labels["clawmanager.io/runtime-type"]))
 	deploymentImage := runtimeContainerImage(deployment.Spec.Template.Spec.Containers)
 	var schedulingEnabled *bool
@@ -819,12 +1049,12 @@ func (s *runtimeDeploymentService) listDeploymentPods(ctx context.Context, deplo
 			schedulingEnabled = &parsed
 		}
 	}
-	result := make([]RuntimeDeploymentPod, 0, len(podList.Items))
+	result := make([]RuntimeDeploymentPod, 0, len(pods))
 	desiredReplicas := int32(0)
 	if deployment.Spec.Replicas != nil {
 		desiredReplicas = *deployment.Spec.Replicas
 	}
-	for _, pod := range podList.Items {
+	for _, pod := range pods {
 		if pod.DeletionTimestamp != nil || pod.Status.Phase == corev1.PodFailed || pod.Status.Phase == corev1.PodSucceeded {
 			continue
 		}
@@ -850,8 +1080,268 @@ func (s *runtimeDeploymentService) listDeploymentPods(ctx context.Context, deplo
 			SchedulingEnabled: schedulingEnabled,
 			DesiredReplicas:   desiredReplicas,
 		})
+		inventory := &result[len(result)-1]
+		inventory.Slots = runtimePodSlots(pod)
+		inventory.SandboxProfile = pod.Labels["clawmanager.io/sandbox-profile"]
+		if inventory.SandboxProfile == RuntimeNFSRootlessProfile {
+			inventory.ReadyGatewayPorts = make(map[int]bool)
+			for _, slot := range inventory.Slots {
+				if slot.GatewayPort != nil && RuntimeAssignmentReady(&pod, *slot.GatewayPort, runtimeSlotPortBlock(deploymentRuntimeType)) {
+					inventory.ReadyGatewayPorts[*slot.GatewayPort] = true
+				}
+			}
+		}
+		inventory.Capacity = len(inventory.Slots)
+		inventory.CPUMillisLimit, inventory.MemoryBytesLimit = runtimePodLimits(pod)
+		inventory.CPUMillisRequest, inventory.MemoryBytesRequest = runtimePodRequests(pod)
+		inventory.CoordinatorCPUMillisRequest, inventory.CoordinatorMemoryBytesRequest = runtimeCoordinatorRequests(pod)
+		inventory.CoordinatorCPUMillis, inventory.CoordinatorMemoryBytes = runtimeCoordinatorReservation(pod)
+		var workspaceClaim *corev1.PersistentVolumeClaim
+		for _, volume := range pod.Spec.Volumes {
+			if volume.Name != runtimeWorkspaceVolume {
+				continue
+			}
+			if volume.NFS != nil {
+				inventory.StorageClass = "nfs"
+				break
+			}
+			if volume.PersistentVolumeClaim != nil {
+				key := pod.Namespace + "/" + volume.PersistentVolumeClaim.ClaimName
+				claim, found := claims[key]
+				if !found {
+					var err error
+					claim, err = s.client.CoreV1().PersistentVolumeClaims(pod.Namespace).Get(ctx, volume.PersistentVolumeClaim.ClaimName, metav1.GetOptions{})
+					if err != nil {
+						claim = nil
+					}
+					claims[key] = claim
+				}
+				workspaceClaim = claim
+				if claim != nil && claim.Spec.StorageClassName != nil {
+					inventory.StorageClass = *claim.Spec.StorageClassName
+				}
+			}
+		}
+		inventory.WorkspaceStorageIdentity = runtimeWorkspaceStorageIdentity(pod, workspaceClaim)
 	}
-	return result, nil
+	return result
+}
+
+func runtimeWorkspaceStorageIdentity(pod corev1.Pod, claim *corev1.PersistentVolumeClaim) string {
+	var backing string
+	for _, volume := range pod.Spec.Volumes {
+		if volume.Name != runtimeWorkspaceVolume {
+			continue
+		}
+		switch {
+		case volume.PersistentVolumeClaim != nil:
+			if claim == nil || volume.PersistentVolumeClaim.ReadOnly {
+				return ""
+			}
+			backing = fmt.Sprintf("pvc:%s/%s:%s:%s", pod.Namespace, volume.PersistentVolumeClaim.ClaimName, claim.UID, claim.Spec.VolumeName)
+		case volume.NFS != nil:
+			if volume.NFS.ReadOnly || volume.NFS.Server == "" || volume.NFS.Path == "" {
+				return ""
+			}
+			backing = "nfs:" + volume.NFS.Server + ":" + volume.NFS.Path
+		default:
+			return ""
+		}
+	}
+	if backing == "" {
+		return ""
+	}
+	mounts := make([]string, 0)
+	for _, container := range pod.Spec.Containers {
+		if container.Name != "runtime" && !strings.HasPrefix(container.Name, "slot-") {
+			continue
+		}
+		found := false
+		for _, mount := range container.VolumeMounts {
+			if mount.Name != runtimeWorkspaceVolume {
+				continue
+			}
+			if mount.SubPathExpr != "" || mount.MountPath == "" || mount.ReadOnly {
+				return ""
+			}
+			data, _ := json.Marshal([]any{container.Name, mount.MountPath, mount.SubPath, mount.ReadOnly})
+			mounts = append(mounts, string(data))
+			found = true
+		}
+		if !found {
+			return ""
+		}
+	}
+	if len(mounts) == 0 {
+		return ""
+	}
+	sort.Strings(mounts)
+	data, _ := json.Marshal([]any{backing, mounts})
+	return string(data)
+}
+
+// Runtime admission must use the guarantees already reserved for every fixed
+// slot, including idle ones. Child hard limits may exceed their shared Pod cap.
+func runtimePodRequests(pod corev1.Pod) (*int64, *int64) {
+	var cpu, memory int64
+	for _, container := range pod.Spec.Containers {
+		cpu += container.Resources.Requests.Cpu().MilliValue()
+		memory += container.Resources.Requests.Memory().Value()
+	}
+	if pod.Spec.Resources != nil {
+		if quantity, ok := pod.Spec.Resources.Requests[corev1.ResourceCPU]; ok {
+			cpu = quantity.MilliValue()
+		}
+		if quantity, ok := pod.Spec.Resources.Requests[corev1.ResourceMemory]; ok {
+			memory = quantity.Value()
+		}
+	}
+	return &cpu, &memory
+}
+
+func runtimeCoordinatorRequests(pod corev1.Pod) (*int64, *int64) {
+	var cpu, memory int64
+	for _, container := range pod.Spec.Containers {
+		if strings.HasPrefix(container.Name, "slot-") {
+			continue
+		}
+		cpu += container.Resources.Requests.Cpu().MilliValue()
+		memory += container.Resources.Requests.Memory().Value()
+	}
+	return &cpu, &memory
+}
+
+func runtimeCoordinatorReservation(pod corev1.Pod) (*int64, *int64) {
+	var cpu, memory int64
+	cpuKnown, memoryKnown := true, true
+	for _, container := range pod.Spec.Containers {
+		if strings.HasPrefix(container.Name, "slot-") {
+			continue
+		}
+		if quantity, ok := container.Resources.Limits[corev1.ResourceCPU]; ok {
+			cpu += quantity.MilliValue()
+		} else if quantity, ok := container.Resources.Requests[corev1.ResourceCPU]; ok {
+			cpu += quantity.MilliValue()
+		} else {
+			cpuKnown = false
+		}
+		if quantity, ok := container.Resources.Limits[corev1.ResourceMemory]; ok {
+			memory += quantity.Value()
+		} else if quantity, ok := container.Resources.Requests[corev1.ResourceMemory]; ok {
+			memory += quantity.Value()
+		} else {
+			memoryKnown = false
+		}
+	}
+	var cpuReservation, memoryReservation *int64
+	if cpuKnown {
+		cpuReservation = &cpu
+	}
+	if memoryKnown {
+		memoryReservation = &memory
+	}
+	return cpuReservation, memoryReservation
+}
+
+func runtimePodSlots(pod corev1.Pod) []models.RuntimeSlot {
+	slots := make([]models.RuntimeSlot, 0)
+	for _, container := range pod.Spec.Containers {
+		if !strings.HasPrefix(container.Name, "slot-") {
+			continue
+		}
+		index, err := strconv.Atoi(strings.TrimPrefix(container.Name, "slot-"))
+		if err != nil || index < 0 {
+			continue
+		}
+		slot := models.RuntimeSlot{Index: index + 1, ContainerName: container.Name, State: "unknown"}
+		cpuRequest, memoryRequest := container.Resources.Requests.Cpu().MilliValue(), container.Resources.Requests.Memory().Value()
+		slot.CPUMillisRequest, slot.MemoryBytesRequest = &cpuRequest, &memoryRequest
+		if quantity, ok := container.Resources.Limits[corev1.ResourceCPU]; ok {
+			value := quantity.MilliValue()
+			slot.CPUMillisLimit = &value
+		}
+		if quantity, ok := container.Resources.Limits[corev1.ResourceMemory]; ok {
+			value := quantity.Value()
+			slot.MemoryBytesLimit = &value
+		}
+		for _, env := range container.Env {
+			if env.Name == "RUNTIME_GATEWAY_PORT_START" {
+				if port, err := strconv.Atoi(env.Value); err == nil && port > 0 {
+					slot.GatewayPort = &port
+				}
+			}
+		}
+		for _, status := range pod.Status.ContainerStatuses {
+			if status.Name != container.Name {
+				continue
+			}
+			slot.Ready, slot.RestartCount = status.Ready, status.RestartCount
+			switch {
+			case status.State.Running != nil:
+				slot.State = "running"
+			case status.State.Waiting != nil:
+				slot.State, slot.Reason = "waiting", status.State.Waiting.Reason
+			case status.State.Terminated != nil:
+				slot.State, slot.Reason = "terminated", status.State.Terminated.Reason
+			}
+			break
+		}
+		slots = append(slots, slot)
+	}
+	sort.Slice(slots, func(i, j int) bool { return slots[i].Index < slots[j].Index })
+	return slots
+}
+
+// ListRuntimePodEvents uses the Kubernetes API; runtime containers are never executed.
+func (s *runtimeDeploymentService) ListRuntimePodEvents(ctx context.Context, namespace, podName string) ([]corev1.Event, error) {
+	if s == nil || s.client == nil {
+		return nil, fmt.Errorf("k8s client not initialized")
+	}
+	list, err := s.client.CoreV1().Events(namespace).List(ctx, metav1.ListOptions{FieldSelector: "involvedObject.kind=Pod,involvedObject.name=" + podName})
+	if err != nil {
+		return nil, err
+	}
+	events := make([]corev1.Event, 0, len(list.Items))
+	for _, event := range list.Items {
+		if event.InvolvedObject.Kind == "Pod" && event.InvolvedObject.Name == podName {
+			events = append(events, event)
+		}
+	}
+	sort.Slice(events, func(i, j int) bool { return events[i].LastTimestamp.Before(&events[j].LastTimestamp) })
+	return events, nil
+}
+
+func runtimePodLimits(pod corev1.Pod) (*int64, *int64) {
+	var cpu, memory int64
+	cpuKnown, memoryKnown := len(pod.Spec.Containers) > 0, len(pod.Spec.Containers) > 0
+	for _, container := range pod.Spec.Containers {
+		if quantity, ok := container.Resources.Limits[corev1.ResourceCPU]; ok {
+			cpu += quantity.MilliValue()
+		} else {
+			cpuKnown = false
+		}
+		if quantity, ok := container.Resources.Limits[corev1.ResourceMemory]; ok {
+			memory += quantity.Value()
+		} else {
+			memoryKnown = false
+		}
+	}
+	if pod.Spec.Resources != nil {
+		if quantity, ok := pod.Spec.Resources.Limits[corev1.ResourceCPU]; ok {
+			cpu, cpuKnown = quantity.MilliValue(), true
+		}
+		if quantity, ok := pod.Spec.Resources.Limits[corev1.ResourceMemory]; ok {
+			memory, memoryKnown = quantity.Value(), true
+		}
+	}
+	var cpuLimit, memoryLimit *int64
+	if cpuKnown {
+		cpuLimit = &cpu
+	}
+	if memoryKnown {
+		memoryLimit = &memory
+	}
+	return cpuLimit, memoryLimit
 }
 
 func runtimeContainerImageID(statuses []corev1.ContainerStatus) string {

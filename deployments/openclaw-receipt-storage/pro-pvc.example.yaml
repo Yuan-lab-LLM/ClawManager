@@ -1,0 +1,21 @@
+# Example only. Replace namespace, identity labels, and storageClassName.
+# Requires a CSI driver supporting ReadWriteOncePod. Do not use a workspace PVC.
+# The runtime requires an empty, root-owned 0755 filesystem root on first use.
+# No ownerReference: application rollout must not garbage-collect receipts.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: receipts-42
+  namespace: clawmanager-user-7
+  labels:
+    clawmanager.io/storage-purpose: task-receipts
+    instance-id: "42"
+    user-id: "7"
+spec:
+  accessModes:
+    - ReadWriteOncePod
+  volumeMode: Filesystem
+  storageClassName: REPLACE_WITH_RWOP_CSI_STORAGE_CLASS
+  resources:
+    requests:
+      storage: 1Gi

@@ -48,7 +48,7 @@ func (h *AIGatewayHandler) ListModels(c *gin.Context) {
 		return
 	}
 	lister, ok := h.service.(interface {
-		ListAvailableModelsForUser(int, []string) ([]aigateway.AvailableModel, error)
+		ListSDKModelsForUser(int, []string) ([]aigateway.AvailableModel, error)
 	})
 	if !ok {
 		utils.Error(c, http.StatusServiceUnavailable, "Model authorization unavailable")
@@ -58,15 +58,21 @@ func (h *AIGatewayHandler) ListModels(c *gin.Context) {
 	if value, exists := c.Get("gatewayAllowedModelGroups"); exists {
 		groups, _ = value.([]string)
 	}
-	items, err := lister.ListAvailableModelsForUser(userID, groups)
+	items, err := lister.ListSDKModelsForUser(userID, groups)
 	if err != nil {
 		utils.HandleError(c, err)
 		return
 	}
 
-	utils.Success(c, http.StatusOK, "Available gateway models retrieved successfully", gin.H{
-		"items": items,
-	})
+	entries := make([]gin.H, 0, len(items))
+	for _, item := range items {
+		id := item.DisplayName
+		if item.ID == 0 {
+			id = "auto"
+		}
+		entries = append(entries, gin.H{"id": id, "object": "model", "created": 0, "owned_by": item.Provider})
+	}
+	c.JSON(http.StatusOK, gin.H{"object": "list", "data": entries})
 }
 
 // ChatCompletions proxies a governed chat completion request.
@@ -103,13 +109,6 @@ func (h *AIGatewayHandler) ChatCompletions(c *gin.Context) {
 	}
 	applyGatewayAllowedModelGroups(c, &req)
 	h.applyGatewayBudgetContext(c, &req)
-	lease, ok := h.acquireGatewayKeyLease(c, &req)
-	if !ok {
-		return
-	}
-	h.attachGatewayUsageFinalizer(&req, lease)
-	defer h.releaseGatewayKeyLease(lease)
-	defer h.releaseGatewayBudget(&req)
 	gatewayAuthType, _ := c.Get("gatewayAuthType")
 	instanceType, _ := c.Get("instanceType")
 	aigateway.ApplyManagedInstanceSessionDefaults(
@@ -142,6 +141,19 @@ func (h *AIGatewayHandler) ChatCompletions(c *gin.Context) {
 		utils.Error(c, http.StatusForbidden, "Gateway token metadata does not match request")
 		return
 	}
+
+	finishActivity, ok := h.admitGatewayModelActivity(c, &req, true)
+	if !ok {
+		return
+	}
+	defer finishActivity()
+	lease, ok := h.acquireGatewayKeyLease(c, &req)
+	if !ok {
+		return
+	}
+	h.attachGatewayUsageFinalizer(&req, lease)
+	defer h.releaseGatewayKeyLease(lease)
+	defer h.releaseGatewayBudget(&req)
 
 	if req.Stream {
 		traceID, err := h.service.StreamChatCompletions(c.Request.Context(), userID.(int), req, c.Writer)
@@ -333,4 +345,40 @@ func stringValue(raw interface{}) string {
 		return ""
 	}
 	return strings.TrimSpace(value)
+}
+
+func (h *AIGatewayHandler) admitGatewayModelActivity(c *gin.Context, req *aigateway.ChatCompletionRequest, chat bool) (func(), bool) {
+	noop := func() {}
+	if chat {
+		if err := aigateway.NormalizeVisionRequest(req); err != nil {
+			utils.HandleError(c, err)
+			return noop, false
+		}
+		if err := aigateway.NormalizeGenerationLimits(req); err != nil {
+			utils.ValidationError(c, err)
+			return noop, false
+		}
+		if strings.TrimSpace(req.Model) == "" || len(req.Messages) == 0 {
+			utils.Error(c, http.StatusBadRequest, "model and messages are required")
+			return noop, false
+		}
+	}
+	userID, ok := gatewayUserID(c)
+	if !ok {
+		utils.Error(c, http.StatusUnauthorized, "Unauthorized")
+		return noop, false
+	}
+	scoped, ok := h.service.(interface {
+		BeginModelActivityScope(context.Context, int, aigateway.ChatCompletionRequest) (context.Context, func(), error)
+	})
+	if !ok {
+		return noop, true
+	}
+	ctx, finish, err := scoped.BeginModelActivityScope(c.Request.Context(), userID, *req)
+	if err != nil {
+		utils.HandleError(c, err)
+		return noop, false
+	}
+	c.Request = c.Request.WithContext(ctx)
+	return finish, true
 }

@@ -1,0 +1,36 @@
+{
+  "release": "uiux2-admin-conversation-20261116-975f7fef4e95",
+  "built_on": "10.130.81.54",
+  "image": "clawmanager.local/clawmanager@sha256:18c6467429512ea242518209e48ac44ef36d5985e5aa75c2c0a6a05358baca44",
+  "previous_image": "clawmanager.local/clawmanager@sha256:024ce2d96c7e36b3b0eaa933ada47047abb2407bc1e60c9726664b204fc44a24",
+  "namespace": "clawmanager-system",
+  "deployment": "clawmanager-app",
+  "ready_replicas": 1,
+  "pods": [
+    {
+      "name": "clawmanager-app-74474f67d7-gl7gf",
+      "uid": "784d0874-82e8-468a-b8a7-3d1aeb450438",
+      "imageID": "clawmanager.local/clawmanager@sha256:18c6467429512ea242518209e48ac44ef36d5985e5aa75c2c0a6a05358baca44",
+      "digest": "sha256:18c6467429512ea242518209e48ac44ef36d5985e5aa75c2c0a6a05358baca44",
+      "status_image": "clawmanager.local/clawmanager:uiux2-admin-conversation-20261116-975f7fef4e95"
+    }
+  ],
+  "backend_binary_verified": true,
+  "helpers_and_other_binaries_unchanged": true,
+  "other_images_unchanged": true,
+  "other_deployment_specs_uids_generations_unchanged": true,
+  "browser_node_ports": {
+    "first": 31600,
+    "last": 31727,
+    "count": 128,
+    "target_port": 8444,
+    "ready_endpoints": [
+      {
+        "addresses": [
+          "10.244.235.203"
+        ],
+        "pod": "clawmanager-app-74474f67d7-gl7gf"
+      }
+    ]
+  }
+}

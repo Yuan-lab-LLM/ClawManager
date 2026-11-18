@@ -44,11 +44,15 @@ for (const marker of [
   'credentials: "omit"',
   'referrerPolicy: "no-referrer"',
   "window.sessionStorage",
-  "window.location.assign(target.trustUrl)",
+  'window.open(target.trustUrl, "_blank", "noopener,noreferrer")',
   'window.addEventListener("pageshow"',
+  'window.addEventListener("focus"',
+  'document.addEventListener("visibilitychange"',
 ]) {
   assert(trustHookSource.includes(marker), `Runtime certificate trust hook missing: ${marker}`);
 }
+
+assert(!trustHookSource.includes("window.location.assign"), "A failed probe must never navigate the CM page away.");
 
 assert(
   trustHookSource.includes("new URL(CERTIFICATE_TRUST_PATH, parsed.origin)") &&
@@ -101,8 +105,15 @@ for (const endpoint of [
 }
 
 assert(
-  nginxSource.split("window.setTimeout(function(){window.history.back();},150);").length - 1 === 2,
-  "Both runtime origins must automatically return to ClawManager after browser confirmation.",
+  !nginxSource.includes("window.history.back()") &&
+    nginxSource.split("Close this tab and return to ClawManager.").length - 1 === 2,
+  "Both runtime confirmation pages must explain returning from the new tab without automatic navigation.",
 );
+
+assert(!portalSource.includes("onPointerUp={retryAccess}"), "A portal click must not open confirmation twice.");
+
+for (const source of [serviceFrameSource, portalSource, sharedInstanceSource, ieiInstanceSource]) {
+  assert(source.includes("certificateOrigin"), "Certificate confirmation must identify the runtime origin.");
+}
 
 console.log("Runtime certificate confirmation contract is valid.");

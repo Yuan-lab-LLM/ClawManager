@@ -68,6 +68,7 @@ func (c *CoreClient) Forward(ginContext *gin.Context, principal Principal) error
 		}
 	}
 	path := ginContext.Request.URL.Path
+	fileTransfer := ownerTeamFileTransfer(ginContext)
 	const publicPrefix = "/api/northbound/v1"
 	if !strings.HasPrefix(path, publicPrefix) {
 		return apiError(404, "NOT_FOUND", "Not found", nil)
@@ -77,21 +78,28 @@ func (c *CoreClient) Forward(ginContext *gin.Context, principal Principal) error
 	target.Path = strings.TrimRight(c.baseURL.Path, "/") + internalPath
 	target.RawQuery = ginContext.Request.URL.RawQuery
 
-	body, err := io.ReadAll(ginContext.Request.Body)
-	if err != nil {
-		return apiError(400, "INVALID_REQUEST", "Unable to read request", err)
+	var requestBody io.Reader = ginContext.Request.Body
+	if !fileTransfer {
+		body, err := io.ReadAll(ginContext.Request.Body)
+		if err != nil {
+			return apiError(400, "INVALID_REQUEST", "Unable to read request", err)
+		}
+		requestBody = bytes.NewReader(body)
 	}
 	requestID := requestIDFromContext(ginContext)
 	internalToken, err := issueInternalToken(c.internalSecret, principal, requestID)
 	if err != nil {
 		return err
 	}
-	request, err := http.NewRequestWithContext(ginContext.Request.Context(), ginContext.Request.Method, target.String(), bytes.NewReader(body))
+	request, err := http.NewRequestWithContext(ginContext.Request.Context(), ginContext.Request.Method, target.String(), requestBody)
 	if err != nil {
 		return err
 	}
 	request.Header.Set("Authorization", "Bearer "+internalToken)
 	request.Header.Set("Content-Type", "application/json")
+	if fileTransfer {
+		request.Header.Set("Content-Type", ginContext.GetHeader("Content-Type"))
+	}
 	request.Header.Set("X-Request-ID", requestID)
 	if key := strings.TrimSpace(ginContext.GetHeader("Idempotency-Key")); key != "" {
 		request.Header.Set("Idempotency-Key", key)
@@ -101,9 +109,24 @@ func (c *CoreClient) Forward(ginContext *gin.Context, principal Principal) error
 		return apiError(503, "DEPENDENCY_UNAVAILABLE", "Northbound Core is unavailable", err)
 	}
 	defer response.Body.Close()
-	responseBody, err := io.ReadAll(io.LimitReader(response.Body, 2<<20))
+	if fileTransfer && ginContext.Request.Method == http.MethodGet && response.StatusCode == http.StatusOK {
+		headers := map[string]string{"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"}
+		if value := response.Header.Get("Content-Disposition"); value != "" {
+			headers["Content-Disposition"] = value
+		}
+		ginContext.DataFromReader(response.StatusCode, response.ContentLength, response.Header.Get("Content-Type"), response.Body, headers)
+		return nil
+	}
+	responseLimit := int64(2 << 20)
+	if ownerTeamTextSave(ginContext) || strings.HasSuffix(ginContext.FullPath(), "/teams/:id/workspace/text") || strings.HasSuffix(ginContext.FullPath(), "/teams/:id/workspace/preview") {
+		responseLimit = 8 << 20
+	}
+	responseBody, err := io.ReadAll(io.LimitReader(response.Body, responseLimit+1))
 	if err != nil {
 		return apiError(503, "DEPENDENCY_UNAVAILABLE", "Invalid response from Northbound Core", err)
+	}
+	if int64(len(responseBody)) > responseLimit {
+		return apiError(502, "RESPONSE_TOO_LARGE", "Response exceeds the bounded JSON transport limit", nil)
 	}
 	for _, header := range []string{"Content-Type", "Location", "Idempotent-Replayed", "Retry-After", "Cache-Control"} {
 		if value := response.Header.Get(header); value != "" {
@@ -237,11 +260,28 @@ func validRequestID(value string) bool {
 
 func BodyLimit(maxBytes int64) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		limit := maxBytes
+		if ownerTeamFileTransfer(c) && c.Request.Method == http.MethodPost {
+			limit = 64 << 20
+		}
+		if ownerTeamTextSave(c) {
+			limit = 8 << 20
+		}
 		if c.Request.Body != nil {
-			c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBytes)
+			c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, limit)
 		}
 		c.Next()
 	}
+}
+
+func ownerTeamFileTransfer(c *gin.Context) bool {
+	path := c.FullPath()
+	allowed := strings.HasPrefix(path, "/api/northbound/v1/teams/:id/workspace/") || strings.HasPrefix(path, "/internal/northbound/v1/teams/:id/workspace/")
+	return allowed && (c.Request.Method == http.MethodPost && strings.HasSuffix(path, "/upload") || c.Request.Method == http.MethodGet && strings.HasSuffix(path, "/download"))
+}
+func ownerTeamTextSave(c *gin.Context) bool {
+	path := c.FullPath()
+	return c.Request.Method == http.MethodPut && (path == "/api/northbound/v1/teams/:id/workspace/text" || path == "/internal/northbound/v1/teams/:id/workspace/text")
 }
 
 // RejectSuspiciousRequest closes common path/header normalization gaps before
@@ -332,6 +372,18 @@ func RegisterGatewayRoutes(router *gin.Engine, auth *AuthHandler, core *CoreClie
 
 	resources := api.Group("")
 	resources.Use(auth.Middleware())
+	for _, route := range OwnerTeamRoutes {
+		route := route
+		guard := RequireScope(route.Scope)
+		if route.Scope == "" {
+			guard = RequireAnyScope(ScopeTeamsCreate, ScopeTeamsRead, ScopeTeamsManage, ScopeTeamsDelete, ScopeTeamTemplatesGenerate, ScopeTeamTemplatesWrite)
+		}
+		resources.Handle(route.Method, route.Path, guard, RateLimit(queryLimiter, func(c *gin.Context) string { return strconv.Itoa(currentPrincipal(c).UserID) }), func(c *gin.Context) {
+			if err := core.Forward(c, *currentPrincipal(c)); err != nil {
+				writeError(c, err)
+			}
+		})
+	}
 	createRate := RateLimit(createLimiter, func(c *gin.Context) string {
 		principal := currentPrincipal(c)
 		if principal == nil {
@@ -448,7 +500,7 @@ func RegisterGatewayRoutes(router *gin.Engine, auth *AuthHandler, core *CoreClie
 			writeError(c, err)
 		}
 	})
-	resources.GET("/operations/:id", RequireAnyScope(ScopeLiteCreate, ScopeLiteRead, ScopeProCreate, ScopeProRead, ScopeLiteRestart, ScopeLiteReset, ScopeLiteDelete, ScopeProRestart, ScopeProReset, ScopeProDelete), queryRateLimit, func(c *gin.Context) {
+	resources.GET("/operations/:id", RequireAnyScope(ScopeLiteCreate, ScopeLiteRead, ScopeProCreate, ScopeProRead, ScopeLiteRestart, ScopeLiteReset, ScopeLiteDelete, ScopeProRestart, ScopeProReset, ScopeProDelete, ScopeTeamsCreate, ScopeTeamsDelete, ScopeTeamsManage, ScopeTeamTemplatesGenerate), queryRateLimit, func(c *gin.Context) {
 		if err := core.Forward(c, *currentPrincipal(c)); err != nil {
 			writeError(c, err)
 		}

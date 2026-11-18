@@ -46,5 +46,12 @@ func (h *IEISystemHandler) GetDashboard(c *gin.Context) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Owner statistics temporarily unavailable"})
 		return
 	}
+	if store, ok := h.dashboard.(*ownerrecords.Store); ok {
+		// Add request-local calendar facts without mutating the shared snapshot.
+		copy := *data
+		data = &copy
+		data.Visits, err = store.OwnerVisitCalendar(ctx, session.Email, time.Now())
+		data.VisitsUnavailable = err != nil
+	}
 	c.JSON(http.StatusOK, gin.H{"data": data})
 }

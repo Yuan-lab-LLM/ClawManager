@@ -9,11 +9,11 @@ import (
 func TestGatewayVisionInjectionUsesOwnerScopeAndExplicitChoices(t *testing.T) {
 	yes, no := true, false
 	s := &instanceService{llmModelRepo: &stubLLMModelRepository{active: []models.LLMModel{
-		{ID: 1, DisplayName: "vision-private", ProviderType: models.ProviderTypeLocal, IsActive: true, VisionSupportOverride: &yes, VisibilityScope: "selected_users", AllowedUserIDs: []int{1}},
-		{ID: 2, DisplayName: "disabled", IsActive: true, SupportsVision: true, CapabilitySource: "provider_metadata", VisionSupportOverride: &no},
-		{ID: 3, DisplayName: "unknown", IsActive: true},
-		{ID: 4, DisplayName: "unsupported-transport", ProviderType: models.ProviderTypeGoogle, IsActive: true, VisionSupportOverride: &yes},
-		{ID: 5, DisplayName: "image-only", ModelKind: models.ModelKindImage, ProviderType: models.ProviderTypeLocal, IsActive: true, VisionSupportOverride: &yes, ImageGenerationEnabled: true},
+		{ID: 1, DisplayName: "vision-private", ProviderModelName: "org/vision-private", ProviderType: models.ProviderTypeLocal, IsActive: true, VisionSupportOverride: &yes, VisibilityScope: "selected_users", AllowedUserIDs: []int{1}},
+		{ID: 2, DisplayName: "disabled", ProviderModelName: "disabled", IsActive: true, SupportsVision: true, CapabilitySource: "provider_metadata", VisionSupportOverride: &no},
+		{ID: 3, DisplayName: "unknown", ProviderModelName: "unknown", IsActive: true},
+		{ID: 4, DisplayName: "unsupported-transport", ProviderModelName: "unsupported-transport", ProviderType: models.ProviderTypeGoogle, IsActive: true, VisionSupportOverride: &yes},
+		{ID: 5, DisplayName: "image-only", ProviderModelName: "image-only", ModelKind: models.ModelKindImage, ProviderType: models.ProviderTypeLocal, IsActive: true, VisionSupportOverride: &yes, ImageGenerationEnabled: true},
 	}}}
 	for _, owner := range []int{1, 2} {
 		injection, err := s.resolveGatewayModelInjection(owner)
@@ -27,9 +27,12 @@ func TestGatewayVisionInjectionUsesOwnerScopeAndExplicitChoices(t *testing.T) {
 		if got["auto"] != (owner == 1) || got["disabled"] || got["unknown"] || got["unsupported-transport"] {
 			t.Fatalf("owner %d: %#v", owner, got)
 		}
-		_, visible := got["vision-private"]
+		_, visible := got["org/vision-private"]
 		if visible != (owner == 1) {
 			t.Fatal("hidden model leaked into capability map")
+		}
+		if _, displayLeaked := got["vision-private"]; displayLeaked {
+			t.Fatal("UI display label entered runtime capability map")
 		}
 		if _, exists := got["image-only"]; exists {
 			t.Fatal("image model advertised as vision chat")

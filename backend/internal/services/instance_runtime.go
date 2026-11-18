@@ -276,20 +276,27 @@ func defaultImagePullPolicy() string {
 	return "IfNotPresent"
 }
 
+// defaultSystemNamespace keeps all generated internal service URLs and proxy
+// exclusions on the same control-plane namespace. Explicit names stay exact.
+func defaultSystemNamespace() string {
+	if namespace := strings.TrimSpace(os.Getenv("CLAWMANAGER_SYSTEM_NAMESPACE")); namespace != "" {
+		return namespace
+	}
+	if client := k8s.GetClient(); client != nil {
+		return client.GetSystemNamespace()
+	}
+	if namespace := strings.TrimSpace(os.Getenv("K8S_NAMESPACE")); namespace != "" {
+		return k8s.ResolveSystemNamespace(namespace)
+	}
+	return ""
+}
+
 func defaultEgressProxyURL() (string, bool) {
 	if override := strings.TrimSpace(os.Getenv("CLAWMANAGER_EGRESS_PROXY_URL")); override != "" {
 		return override, true
 	}
 
-	client := k8s.GetClient()
-	var systemNamespace string
-	if overrideNamespace := strings.TrimSpace(os.Getenv("CLAWMANAGER_SYSTEM_NAMESPACE")); overrideNamespace != "" {
-		systemNamespace = overrideNamespace
-	} else if client != nil {
-		systemNamespace = fmt.Sprintf("%s-system", client.Namespace)
-	} else if baseNamespace := strings.TrimSpace(os.Getenv("K8S_NAMESPACE")); baseNamespace != "" {
-		systemNamespace = fmt.Sprintf("%s-system", baseNamespace)
-	}
+	systemNamespace := defaultSystemNamespace()
 
 	if strings.TrimSpace(systemNamespace) == "" {
 		return "", false
@@ -335,14 +342,7 @@ func defaultGatewayBaseURL() (string, bool) {
 		return override, true
 	}
 
-	systemNamespace := strings.TrimSpace(os.Getenv("CLAWMANAGER_SYSTEM_NAMESPACE"))
-	if systemNamespace == "" {
-		if client := k8s.GetClient(); client != nil {
-			systemNamespace = client.GetSystemNamespace()
-		} else if baseNamespace := strings.TrimSpace(os.Getenv("K8S_NAMESPACE")); baseNamespace != "" {
-			systemNamespace = fmt.Sprintf("%s-system", baseNamespace)
-		}
-	}
+	systemNamespace := defaultSystemNamespace()
 	if systemNamespace == "" {
 		return "", false
 	}
@@ -371,14 +371,7 @@ func defaultAgentControlBaseURL() (string, bool) {
 		return override, true
 	}
 
-	systemNamespace := strings.TrimSpace(os.Getenv("CLAWMANAGER_SYSTEM_NAMESPACE"))
-	if systemNamespace == "" {
-		if client := k8s.GetClient(); client != nil {
-			systemNamespace = client.GetSystemNamespace()
-		} else if baseNamespace := strings.TrimSpace(os.Getenv("K8S_NAMESPACE")); baseNamespace != "" {
-			systemNamespace = fmt.Sprintf("%s-system", baseNamespace)
-		}
-	}
+	systemNamespace := defaultSystemNamespace()
 	if systemNamespace == "" {
 		return "", false
 	}
@@ -411,14 +404,7 @@ func defaultNoProxyList() string {
 		return override
 	}
 
-	systemNamespace := strings.TrimSpace(os.Getenv("CLAWMANAGER_SYSTEM_NAMESPACE"))
-	if systemNamespace == "" {
-		if client := k8s.GetClient(); client != nil {
-			systemNamespace = fmt.Sprintf("%s-system", client.Namespace)
-		} else if baseNamespace := strings.TrimSpace(os.Getenv("K8S_NAMESPACE")); baseNamespace != "" {
-			systemNamespace = fmt.Sprintf("%s-system", baseNamespace)
-		}
-	}
+	systemNamespace := defaultSystemNamespace()
 
 	serviceNames := []string{
 		"localhost",

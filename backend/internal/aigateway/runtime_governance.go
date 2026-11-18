@@ -78,13 +78,36 @@ func (s *service) RuntimeCatalog(userID int, groups []string) ([]models.RuntimeC
 	if len(allowed) == 0 {
 		return []models.RuntimeCatalogModel{}, nil
 	}
+	aliases := map[int][]string{}
+	if reader, ok := s.modelRepo.(repository.RuntimeModelAliasCatalog); ok {
+		ids := make([]int, 0, len(allowed))
+		for _, m := range allowed {
+			ids = append(ids, m.ID)
+		}
+		aliases, err = reader.RuntimeModelAliases(ids)
+		if err != nil {
+			// A failed history read is not evidence that old session models vanished.
+			return nil, fmt.Errorf("runtime model alias catalog unavailable: %w", err)
+		}
+	}
 	minimum := allowed[0].ContextWindowTokens
+	providerRefs := map[int][]models.RuntimeProviderRef{}
+	if reader, ok := s.modelRepo.(repository.RuntimeProviderRefCatalog); ok {
+		ids := make([]int, 0, len(allowed))
+		for _, m := range allowed {
+			ids = append(ids, m.ID)
+		}
+		providerRefs, err = reader.RuntimeProviderRefs(ids)
+		if err != nil {
+			return nil, fmt.Errorf("runtime provider references unavailable: %w", err)
+		}
+	}
 	for _, m := range allowed {
 		if m.ContextWindowTokens < minimum {
 			minimum = m.ContextWindowTokens
 		}
 	}
-	result := []models.RuntimeCatalogModel{{ID: "auto", ContextWindow: minimum, Tools: true}}
+	result := []models.RuntimeCatalogModel{{ID: "auto", ContextWindow: minimum, Tools: true, ProviderRefs: []models.RuntimeProviderRef{{ProviderID: "auto", ModelID: "auto"}}}}
 	for _, model := range allowed {
 		result[0].Vision = result[0].Vision || models.LLMVisionInputAvailable(&model)
 	}
@@ -112,7 +135,17 @@ func (s *service) RuntimeCatalog(userID int, groups []string) ([]models.RuntimeC
 				}
 			}
 		}
-		result = append(result, models.RuntimeCatalogModel{ID: name, ContextWindow: window, Reasoning: m.SupportsReasoning && m.ReasoningEnabled, Tools: tools, Vision: models.LLMVisionInputAvailable(&m)})
+		legacyNameUnavailable := false
+		if _, authoritative := s.modelRepo.(repository.RuntimeModelAliasCatalog); authoritative && m.RuntimeModelID != "" {
+			legacyNameUnavailable = true
+			for _, alias := range aliases[m.ID] {
+				if strings.EqualFold(strings.TrimSpace(alias), name) {
+					legacyNameUnavailable = false
+					break
+				}
+			}
+		}
+		result = append(result, models.RuntimeCatalogModel{ID: name, StableID: m.RuntimeModelID, LegacyNameUnavailable: legacyNameUnavailable, Aliases: aliases[m.ID], ProviderRefs: providerRefs[m.ID], ContextWindow: window, Reasoning: m.SupportsReasoning && m.ReasoningEnabled, ReasoningControl: m.ReasoningControl, Tools: tools, Vision: models.LLMVisionInputAvailable(&m)})
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
 	return result, nil

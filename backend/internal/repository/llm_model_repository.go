@@ -1,8 +1,6 @@
 package repository
 
 import (
-	"fmt"
-	"strings"
 	"time"
 
 	"clawreef/internal/models"
@@ -24,91 +22,10 @@ type llmModelRepository struct {
 	sess db.Session
 }
 
-// NewLLMModelRepository creates a new model repository and ensures its table exists.
+// NewLLMModelRepository creates a new model repository (schema is owned by embedded migrations).
 func NewLLMModelRepository(sess db.Session) LLMModelRepository {
 	repo := &llmModelRepository{sess: sess}
-	repo.ensureTable()
 	return repo
-}
-
-func (r *llmModelRepository) ensureTable() {
-	const query = `
-CREATE TABLE IF NOT EXISTS llm_models (
-  id INT AUTO_INCREMENT PRIMARY KEY,
-  display_name VARCHAR(255) NOT NULL UNIQUE,
-  description TEXT NULL,
-  provider_type VARCHAR(100) NOT NULL,
-  protocol_type VARCHAR(100) NULL,
-	  model_group VARCHAR(100) NOT NULL,
-	  deployment_priority INT NOT NULL DEFAULT 100,
-	  max_concurrent_requests INT NOT NULL DEFAULT 0,
-	  context_window_tokens INT NOT NULL DEFAULT 0,
-	  quality_tier INT NOT NULL DEFAULT 0,
-  base_url VARCHAR(500) NOT NULL,
-  provider_model_name VARCHAR(255) NOT NULL,
-  provider_models_json TEXT NULL,
-  reasoning_enabled BOOLEAN NOT NULL DEFAULT FALSE,
-  api_key TEXT NULL,
-  api_key_secret_ref VARCHAR(255) NULL,
-  is_secure BOOLEAN NOT NULL DEFAULT FALSE,
-  is_active BOOLEAN NOT NULL DEFAULT TRUE,
-  input_price DECIMAL(18,8) NOT NULL DEFAULT 0,
-  output_price DECIMAL(18,8) NOT NULL DEFAULT 0,
-  currency VARCHAR(16) NOT NULL DEFAULT 'USD',
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  INDEX idx_llm_models_provider_type (provider_type),
-  INDEX idx_llm_models_is_active (is_active),
-  INDEX idx_llm_models_is_secure (is_secure)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-`
-
-	if _, err := r.sess.SQL().Exec(query); err != nil {
-		panic(fmt.Errorf("failed to ensure llm_models table: %w", err))
-	}
-
-	const alterProtocolTypeQuery = `
-ALTER TABLE llm_models
-  ADD COLUMN protocol_type VARCHAR(100) NULL AFTER provider_type;
-`
-
-	if _, err := r.sess.SQL().Exec(alterProtocolTypeQuery); err != nil {
-		if !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
-			panic(fmt.Errorf("failed to ensure llm_models protocol_type column: %w", err))
-		}
-	}
-
-	const backfillProtocolTypeQuery = `
-UPDATE llm_models
-SET protocol_type = CASE
-  WHEN LOWER(TRIM(provider_type)) = 'local' THEN 'openai-compatible'
-  WHEN LOWER(TRIM(provider_type)) = 'openai' THEN 'openai'
-  WHEN LOWER(TRIM(provider_type)) = 'anthropic' THEN 'anthropic'
-  WHEN LOWER(TRIM(provider_type)) = 'google' THEN 'google'
-  WHEN LOWER(TRIM(provider_type)) = 'azure-openai' THEN 'azure-openai'
-  ELSE 'openai-compatible'
-END
-WHERE protocol_type IS NULL OR TRIM(protocol_type) = '';
-`
-
-	if _, err := r.sess.SQL().Exec(backfillProtocolTypeQuery); err != nil {
-		panic(fmt.Errorf("failed to ensure llm_models protocol_type column: %w", err))
-	}
-
-	const alterReasoningEnabledQuery = `
-ALTER TABLE llm_models
-  ADD COLUMN reasoning_enabled BOOLEAN NOT NULL DEFAULT FALSE AFTER provider_model_name;
-`
-	if _, err := r.sess.SQL().Exec(alterReasoningEnabledQuery); err != nil {
-		if !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
-			panic(fmt.Errorf("failed to ensure llm_models reasoning_enabled column: %w", err))
-		}
-	}
-
-	// Model-group, routing-capacity, context-window and quality-tier schema
-	// changes are owned by embedded migrations 049 and 053-056. Do not repeat
-	// ALTER/UPDATE statements here: repository construction happens on every
-	// process start and otherwise takes unnecessary metadata locks.
 }
 
 func (r *llmModelRepository) readModels(cond db.Cond, order bool) ([]models.LLMModel, error) {
@@ -178,13 +95,13 @@ func (r *llmModelRepository) GetByDisplayName(name string) (*models.LLMModel, er
 func (r *llmModelRepository) Save(model *models.LLMModel) error {
 	err := r.sess.Tx(func(sess db.Session) error {
 		if model.ID != 0 {
-			row, err := sess.SQL().QueryRow("SELECT visibility_scope, access_policy_version FROM llm_models WHERE id = ? FOR UPDATE", model.ID)
+			row, err := sess.SQL().QueryRow("SELECT visibility_scope, access_policy_version, runtime_model_id FROM llm_models WHERE id = ? FOR UPDATE", model.ID)
 			if err != nil {
 				return err
 			}
 			var scope string
 			var version int
-			if err := row.Scan(&scope, &version); err != nil {
+			if err := row.Scan(&scope, &version, &model.RuntimeModelID); err != nil {
 				return err
 			}
 			if model.UpdateAccessPolicy {
@@ -207,6 +124,11 @@ func (r *llmModelRepository) Save(model *models.LLMModel) error {
 				}
 			}
 		} else {
+			identity, err := newRuntimeModelID()
+			if err != nil {
+				return err
+			}
+			model.RuntimeModelID = identity
 			model.AccessPolicyVersion = 1
 			if model.VisibilityScope == "" {
 				model.VisibilityScope = models.ModelVisibilityAll
@@ -246,6 +168,12 @@ func (r *llmModelRepository) Save(model *models.LLMModel) error {
 					}
 				}
 			}
+		}
+		if err := reserveRuntimeModelAliases(sess, model); err != nil {
+			return err
+		}
+		if err := reserveRuntimeProviderRef(sess, model); err != nil {
+			return err
 		}
 		return revokeUnauthorizedTasks(sess, model.ID)
 	})

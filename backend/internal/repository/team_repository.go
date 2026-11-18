@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -68,7 +69,8 @@ type PendingTeamDeletionRepository interface {
 }
 
 type teamRepository struct {
-	sess db.Session
+	sess            db.Session
+	nfsWriterFences bool
 }
 
 func NewTeamRepository(sess db.Session) TeamRepository {
@@ -76,6 +78,12 @@ func NewTeamRepository(sess db.Session) TeamRepository {
 }
 
 func (r *teamRepository) CreateTeam(team *models.Team) error {
+	if team.ResourceScope == "" {
+		team.ResourceScope = models.TeamScopeCM
+	}
+	if err := team.ValidateScope(); err != nil {
+		return err
+	}
 	ensureTimestamps(&team.CreatedAt, &team.UpdatedAt)
 	res, err := r.sess.Collection("teams").Insert(team)
 	if err != nil {
@@ -91,10 +99,30 @@ func (r *teamRepository) CreateTeam(team *models.Team) error {
 }
 
 func (r *teamRepository) UpdateTeam(team *models.Team) error {
+	if r.nfsWriterFences {
+		return r.withNFSTeamRows([]int{team.ID}, func(tx *teamRepository) error {
+			previous, err := tx.GetTeamByID(team.ID)
+			if err != nil {
+				return err
+			}
+			if previous == nil {
+				return models.ErrRuntimeUpgradeConflict
+			}
+			if teamStorageIdentityChanged(previous, team) {
+				if err = requireNoTeamWorkspaceWrites(context.Background(), tx.sess, team.ID); err != nil {
+					return err
+				}
+			}
+			return tx.UpdateTeam(team)
+		})
+	}
 	if team.UpdatedAt.IsZero() {
 		team.UpdatedAt = time.Now().UTC()
 	}
-	if err := r.sess.Collection("teams").Find(db.Cond{"id": team.ID}).Update(team); err != nil {
+	// Only the contextual monotonic protection transition may write this marker.
+	update := *team
+	update.PreviewSecurityProfile = ""
+	if err := r.sess.Collection("teams").Find(db.Cond{"id": team.ID}).Update(&update); err != nil {
 		return fmt.Errorf("failed to update team: %w", err)
 	}
 	return nil
@@ -135,7 +163,7 @@ func (r *teamRepository) ListTeamsByUserID(userID int, offset, limit int) ([]mod
 		limit = 20
 	}
 	var teams []models.Team
-	if err := r.sess.Collection("teams").Find(db.Cond{"user_id": userID}).OrderBy("-created_at", "-id").Offset(offset).Limit(limit).All(&teams); err != nil {
+	if err := r.sess.Collection("teams").Find(db.Cond{"user_id": userID, "resource_scope": models.TeamScopeCM}).OrderBy("-created_at", "-id").Offset(offset).Limit(limit).All(&teams); err != nil {
 		return nil, fmt.Errorf("failed to list teams: %w", err)
 	}
 	return teams, nil
@@ -162,7 +190,7 @@ func (r *teamRepository) ListTeamsByStatus(status string) ([]models.Team, error)
 }
 
 func (r *teamRepository) CountTeamsByUserID(userID int) (int, error) {
-	count, err := r.sess.Collection("teams").Find(db.Cond{"user_id": userID}).Count()
+	count, err := r.sess.Collection("teams").Find(db.Cond{"user_id": userID, "resource_scope": models.TeamScopeCM}).Count()
 	if err != nil {
 		return 0, fmt.Errorf("failed to count teams: %w", err)
 	}
@@ -170,6 +198,14 @@ func (r *teamRepository) CountTeamsByUserID(userID int) (int, error) {
 }
 
 func (r *teamRepository) CreateMember(member *models.TeamMember) error {
+	if r.nfsWriterFences {
+		return r.withNFSTeamRows([]int{member.TeamID}, func(tx *teamRepository) error {
+			if err := requireNoTeamWorkspaceWrites(context.Background(), tx.sess, member.TeamID); err != nil {
+				return err
+			}
+			return tx.CreateMember(member)
+		})
+	}
 	ensureTimestamps(&member.CreatedAt, &member.UpdatedAt)
 	res, err := r.sess.Collection("team_members").Insert(member)
 	if err != nil {
@@ -182,6 +218,32 @@ func (r *teamRepository) CreateMember(member *models.TeamMember) error {
 }
 
 func (r *teamRepository) UpdateMember(member *models.TeamMember) error {
+	if r.nfsWriterFences {
+		previous, err := r.GetMemberByID(member.ID)
+		if err != nil {
+			return err
+		}
+		if previous == nil {
+			return models.ErrRuntimeUpgradeConflict
+		}
+		return r.withNFSTeamRows([]int{previous.TeamID, member.TeamID}, func(tx *teamRepository) error {
+			current, err := tx.GetMemberByID(member.ID)
+			if err != nil {
+				return err
+			}
+			if current == nil || current.TeamID != previous.TeamID {
+				return models.ErrRuntimeUpgradeConflict
+			}
+			if teamMemberIdentityChanged(current, member) {
+				for _, id := range []int{current.TeamID, member.TeamID} {
+					if err = requireNoTeamWorkspaceWrites(context.Background(), tx.sess, id); err != nil {
+						return err
+					}
+				}
+			}
+			return tx.UpdateMember(member)
+		})
+	}
 	if member.UpdatedAt.IsZero() {
 		member.UpdatedAt = time.Now().UTC()
 	}
@@ -258,15 +320,20 @@ func (r *teamRepository) ListMembersByTeamID(teamID int) ([]models.TeamMember, e
 }
 
 func (r *teamRepository) CreateTask(task *models.TeamTask) error {
-	ensureTimestamps(&task.CreatedAt, &task.UpdatedAt)
-	res, err := r.sess.Collection("team_tasks").Insert(task)
-	if err != nil {
-		return fmt.Errorf("failed to create team task: %w", err)
-	}
-	if id, ok := res.ID().(int64); ok {
-		task.ID = int(id)
-	}
-	return nil
+	return r.sess.Tx(func(sess db.Session) error {
+		if err := RequireTeamRunning(context.Background(), sess, task.TeamID); err != nil {
+			return err
+		}
+		ensureTimestamps(&task.CreatedAt, &task.UpdatedAt)
+		res, err := sess.Collection("team_tasks").Insert(task)
+		if err != nil {
+			return err
+		}
+		if id, ok := res.ID().(int64); ok {
+			task.ID = int(id)
+		}
+		return nil
+	})
 }
 
 func (r *teamRepository) UpdateTask(task *models.TeamTask) error {
@@ -885,4 +952,75 @@ func (r *teamRepository) ListWorkItemsByTeamID(teamID int, limit int) ([]models.
 		return nil, fmt.Errorf("failed to list team work items by team: %w", err)
 	}
 	return items, nil
+}
+
+func (r *teamRepository) ListActiveTeamTasksAfterID(after, limit int) ([]models.TeamTask, error) {
+	var rows []models.TeamTask
+	err := r.sess.Collection("team_tasks").Find(db.Cond{"id >": after, "status IN": []string{"pending", "dispatched", "running", "waiting"}}).OrderBy("id").Limit(limit).All(&rows)
+	return rows, err
+}
+func (r *teamRepository) ListRootMonitorEvents(taskID, limit int) ([]models.TeamEvent, error) {
+	var rows []models.TeamEvent
+	err := r.sess.Collection("team_events").Find(db.Cond{"task_id": taskID}).OrderBy("-id").Limit(limit).All(&rows)
+	return rows, err
+}
+func (r *teamRepository) ListMonitorWorkItems(teamID int) ([]models.TeamWorkItem, error) {
+	var rows []models.TeamWorkItem
+	err := r.sess.SQL().Select("w.*").From("team_work_items w").Join("team_tasks t").On("w.root_task_id = t.id").Where("w.team_id = ? AND t.status IN ('pending','dispatched','running','waiting')", teamID).OrderBy("w.id").All(&rows)
+	return rows, err
+}
+
+// Result metadata, delivery history, workflow version and the notification/ACK
+// intent commit together; a lost reply can safely observe this same record.
+func (r *teamRepository) CommitTeamDelivery(item *models.TeamWorkItem, event *models.TeamEvent, outbox *models.TeamEventOutbox, task *models.TeamTask, expected int64, observations []*models.TeamEvent, extra ...*models.TeamEventOutbox) error {
+	return r.sess.Tx(func(sess db.Session) error {
+		var version int64
+		var status string
+		row, err := sess.SQL().QueryRow("SELECT ledger_version,status FROM team_tasks WHERE id=? FOR UPDATE", task.ID)
+		if err != nil {
+			return err
+		}
+		if err = row.Scan(&version, &status); err != nil {
+			return err
+		}
+		if version != expected || status != task.Status {
+			return fmt.Errorf("delivery ledger changed; retry original projection")
+		}
+		tx := &teamRepository{sess: sess}
+		if err := tx.UpsertWorkItem(item); err != nil {
+			return err
+		}
+		if event.EventType == "member_result_updated" && item.ReviewRequired {
+			// A correction changes accepted content without changing work identity.
+			// An old review of that content cannot authorize the replacement.
+			if err := tx.InvalidateWorkItemReview(item.ID, time.Now().UTC()); err != nil {
+				return err
+			}
+			item.ValidatedRevision = nil
+		}
+		if err := tx.CreateEvent(event); err != nil && !errors.Is(err, ErrDuplicateTeamEvent) {
+			return err
+		}
+		for _, observation := range observations {
+			if err := tx.CreateEvent(observation); err != nil && !errors.Is(err, ErrDuplicateTeamEvent) {
+				return err
+			}
+		}
+		if err := tx.UpdateTask(task); err != nil {
+			return err
+		}
+		if outbox != nil {
+			if err := tx.CreateEventOutbox(outbox); err != nil {
+				return err
+			}
+		}
+		for _, o := range extra {
+			if o != nil {
+				if err := tx.CreateEventOutbox(o); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	})
 }

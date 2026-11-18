@@ -117,7 +117,8 @@ func TestRuntimeProtocolStatusDoesNotClaimStaleRuntimeIsGoverned(t *testing.T) {
 		want  string
 	}{
 		{"legacy", nil, "legacy"},
-		{"fresh", &models.RuntimeProtocolState{Protocol: 1, OwnerUserID: 7, Generation: 3, ReportedAt: time.Now().UTC(), CapabilitiesJSON: "[]"}, "governed"},
+		{"fresh", &models.RuntimeProtocolState{Protocol: 1, OwnerUserID: 7, Generation: 3, RuntimeVersion: "2.0.27", AdapterVersion: "cm.1", ReportedAt: time.Now().UTC(), CapabilitiesJSON: `["task_identity","turn_cancel","cancel_receipt","live_catalog"]`}, "governed"},
+		{"fresh but incomplete", &models.RuntimeProtocolState{Protocol: 1, OwnerUserID: 7, Generation: 3, ReportedAt: time.Now().UTC(), CapabilitiesJSON: "[]"}, "awaiting_runtime"},
 		{"previous generation", &models.RuntimeProtocolState{Protocol: 1, OwnerUserID: 7, Generation: 2, ReportedAt: time.Now().UTC(), CapabilitiesJSON: "[]"}, "awaiting_runtime"},
 		{"previous owner", &models.RuntimeProtocolState{Protocol: 1, OwnerUserID: 9, Generation: 3, ReportedAt: time.Now().UTC(), CapabilitiesJSON: "[]"}, "awaiting_runtime"},
 		{"stale", &models.RuntimeProtocolState{Protocol: 1, OwnerUserID: 7, Generation: 3, ReportedAt: time.Now().Add(-time.Minute), CapabilitiesJSON: "[]"}, "awaiting_runtime"},
@@ -133,13 +134,32 @@ func TestRuntimeProtocolStatusDoesNotClaimStaleRuntimeIsGoverned(t *testing.T) {
 			h.Status(c)
 			var body struct {
 				Data struct {
-					Mode string `json:"mode"`
+					Mode                 string `json:"mode"`
+					Reason               string `json:"reason"`
+					TaskIdentityRequired bool   `json:"task_identity_required"`
 				} `json:"data"`
 			}
 			if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil || w.Code != 200 || body.Data.Mode != tc.want {
 				t.Fatalf("%s %v", w.Body.String(), err)
 			}
+			if body.Data.Reason == "" || body.Data.TaskIdentityRequired != (tc.state != nil) || w.Header().Get("Cache-Control") != "no-store" {
+				t.Fatalf("status reason/enforcement/cache mismatch: %s", w.Body.String())
+			}
 		})
+	}
+}
+
+func TestRuntimeProtocolStatusMalformedCapabilitiesIsNotLegacy(t *testing.T) {
+	store := &protocolTestStore{state: &models.RuntimeProtocolState{Protocol: 1, CapabilitiesJSON: `{"not":"an array"}`}}
+	h := NewRuntimeProtocolHandler(store, protocolInstanceStore{instance: &models.Instance{ID: 8, UserID: 7}})
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("GET", "/", nil)
+	c.Params = gin.Params{{Key: "id", Value: "8"}}
+	c.Set("userID", 7)
+	h.Status(c)
+	if w.Code != 503 || strings.Contains(w.Body.String(), `"mode":"legacy"`) {
+		t.Fatalf("bad state was treated as legacy: %s", w.Body.String())
 	}
 }
 

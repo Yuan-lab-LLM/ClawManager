@@ -38,70 +38,10 @@ type modelInvocationRepository struct {
 	sess db.Session
 }
 
-// NewModelInvocationRepository creates a new invocation repository and ensures its table exists.
+// NewModelInvocationRepository creates a new invocation repository (schema is owned by embedded migrations).
 func NewModelInvocationRepository(sess db.Session) ModelInvocationRepository {
 	repo := &modelInvocationRepository{sess: sess}
-	repo.ensureTable()
 	return repo
-}
-
-func (r *modelInvocationRepository) ensureTable() {
-	const query = `
-CREATE TABLE IF NOT EXISTS model_invocations (
-  id INT AUTO_INCREMENT PRIMARY KEY,
-  trace_id VARCHAR(100) NOT NULL,
-  session_id VARCHAR(100) NULL,
-  request_id VARCHAR(100) NOT NULL,
-  user_id INT NULL,
-  instance_id INT NULL,
-  instance_mode VARCHAR(16) NULL,
-  runtime_type VARCHAR(32) NULL,
-  gateway_id VARCHAR(128) NULL,
-  runtime_pod_id BIGINT NULL,
-  gateway_key_id BIGINT NULL,
-  model_id INT NULL,
-  provider_type VARCHAR(100) NOT NULL,
-  requested_model VARCHAR(255) NOT NULL,
-  actual_provider_model VARCHAR(255) NOT NULL,
-  traffic_class VARCHAR(50) NOT NULL,
-  request_payload LONGTEXT NULL,
-  response_payload LONGTEXT NULL,
-  prompt_tokens INT NOT NULL DEFAULT 0,
-  completion_tokens INT NOT NULL DEFAULT 0,
-  total_tokens INT NOT NULL DEFAULT 0,
-  cached_tokens INT NULL,
-  reasoning_tokens INT NULL,
-  latency_ms INT NULL,
-  ttft_ms INT NULL,
-  generation_ms INT NULL,
-  tokens_per_second DECIMAL(12,4) NULL,
-  attempt_no INT NOT NULL DEFAULT 1,
-  is_streaming BOOLEAN NOT NULL DEFAULT FALSE,
-  status VARCHAR(50) NOT NULL,
-  error_message TEXT NULL,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  completed_at TIMESTAMP NULL,
-  INDEX idx_model_invocations_trace_id (trace_id),
-  INDEX idx_model_invocations_request_id (request_id),
-  INDEX idx_model_invocations_user_id (user_id),
-  INDEX idx_model_invocations_instance_id (instance_id),
-  INDEX idx_model_invocations_gateway_id (gateway_id),
-  INDEX idx_model_invocations_gateway_key_id (gateway_key_id),
-  INDEX idx_model_invocations_model_id (model_id),
-  INDEX idx_model_invocations_status (status),
-  INDEX idx_model_invocations_created_at (created_at)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-`
-
-	if _, err := r.sess.SQL().Exec(query); err != nil {
-		panic(fmt.Errorf("failed to ensure model_invocations table: %w", err))
-	}
-	if _, err := r.sess.SQL().Exec("ALTER TABLE model_invocations ADD INDEX idx_model_invocations_session_id (session_id)"); err != nil && !isDuplicateIndexError(err) {
-		panic(fmt.Errorf("failed to ensure session index on model_invocations: %w", err))
-	}
-	// TTFT/generation/TPS/attempt columns are installed by migration 056.
-	// Re-running ALTER TABLE here on every startup would create avoidable
-	// metadata locking on the hottest observability table.
 }
 
 func (r *modelInvocationRepository) Create(invocation *models.ModelInvocation) error {

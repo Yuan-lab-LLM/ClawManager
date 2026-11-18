@@ -1,15 +1,18 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { AtSign, ChevronDown, Send, X } from 'lucide-react';
+import { useI18n } from '../../contexts/I18nContext';
+import { beforePageRefresh } from '../PageVersionNotice';
 import type { TeamMember } from '../../types/team';
 import TeamBadge from './TeamBadge';
 import { memberIcon } from '../../lib/teamIcons';
 import './team-task-composer.css';
 
-export default function TeamTaskComposer({ members, leaderKey, targetKey, onTargetChange, value, onChange, sending, error, reference, onClearReference, onSubmit }: {
+export default function TeamTaskComposer({ members, leaderKey, targetKey, onTargetChange, value, onChange, sending, disabled, error, reference, onClearReference, onSubmit }: {
   members: TeamMember[]; leaderKey?: string; targetKey: string; onTargetChange: (key: string) => void;
-  value: string; onChange: (value: string) => void; sending: boolean; error: string | null;
+  value: string; onChange: (value: string) => void; sending: boolean; disabled?: boolean; error: string | null;
   reference?: { id?: number; title: string }; onClearReference: () => void; onSubmit: (event: React.FormEvent) => void;
 }) {
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [index, setIndex] = useState(0);
@@ -17,6 +20,11 @@ export default function TeamTaskComposer({ members, leaderKey, targetKey, onTarg
   const input = useRef<HTMLTextAreaElement>(null);
   const query = useRef<HTMLInputElement>(null);
   const listId = useId();
+  useEffect(() => {
+    const guard = (event: Event) => { if (value.trim() || sending) event.preventDefault(); };
+    window.addEventListener(beforePageRefresh, guard);
+    return () => window.removeEventListener(beforePageRefresh, guard);
+  }, [value, sending]);
   const leader = members.find(member => member.member_key === leaderKey) || members.find(member => ['leader', 'team-leader'].includes(member.role));
   const selected = members.find(member => member.member_key === targetKey) || (!targetKey ? leader : undefined);
   const single = !!selected && selected.id !== leader?.id;
@@ -47,22 +55,22 @@ export default function TeamTaskComposer({ members, leaderKey, targetKey, onTarg
   };
   return <div className="team-task-composer" data-single-member={single}>
     {error && <div className="team-composer-error" role="alert">{error}</div>}
-    <form ref={root} onSubmit={onSubmit} aria-label="发送团队任务">
+    <form ref={root} onSubmit={onSubmit} aria-label={t("teams.send")}>
       <div className="team-composer-context">
-        <button type="button" className="team-recipient-trigger" disabled={sending} aria-label="选择任务执行成员" aria-expanded={open} aria-controls={listId} onClick={() => { setOpen(current => !current); setSearch(''); setIndex(0); }}>
+        <button type="button" className="team-recipient-trigger" disabled={sending || disabled} aria-label={t("teams.chooseMember")} aria-expanded={open} aria-controls={listId} onClick={() => { setOpen(current => !current); setSearch(''); setIndex(0); }}>
           {selected ? <TeamBadge iconKey={memberIcon(selected)} size="workflow" /> : <AtSign size={17} />}
-          <strong>@{selected?.display_name || (targetKey ? '成员已失效' : 'Leader')}</strong><span>{single ? '单成员' : '团队协作'}</span><ChevronDown size={14} />
+          <strong>@{selected?.display_name || (targetKey ? t('teams.unavailable') : 'Leader')}</strong><span>{t(single ? 'teams.single' : 'teams.collaboration')}</span><ChevronDown size={14} />
         </button>
-        {single && reference && <span className="team-reference-chip" title={reference.title}><span>参考：{reference.title}</span><button type="button" aria-label="移除参考任务" disabled={sending} onClick={onClearReference}><X size={14}/></button></span>}
+        {single && reference && <span className="team-reference-chip" title={reference.title}><span>{t("teams.reference", { title: reference.title })}</span><button type="button" aria-label={t("teams.clearReference")} disabled={sending || disabled} onClick={onClearReference}><X size={14}/></button></span>}
         {open && <div className="team-recipient-popover" onKeyDown={keyboard}>
-          <input ref={query} value={search} onChange={event => { setSearch(event.target.value); setIndex(0); }} placeholder="搜索成员…" aria-label="搜索任务执行成员" role="combobox" aria-expanded="true" aria-controls={listId} aria-activedescendant={options.length ? `${listId}-${options[activeIndex].id}` : undefined} />
-          <div id={listId} role="listbox" aria-label="任务执行成员">{options.map((member, optionIndex) => <button type="button" role="option" id={`${listId}-${member.id}`} key={member.id} aria-selected={selected?.id === member.id} data-highlighted={activeIndex === optionIndex} onMouseEnter={() => setIndex(optionIndex)} onClick={() => select(member)}>
-            <TeamBadge iconKey={memberIcon(member)} size="workflow" /><span className="team-recipient-details"><strong>{member.display_name}</strong><small>{member.member_key} · {member.id === leader?.id ? 'Leader / 团队协作' : 'Worker / 单成员'}</small></span><em>{member.status === 'busy' ? '忙碌' : member.status === 'offline' ? '离线' : member.status === 'failed' ? '异常' : '成员'}</em>
-          </button>)}{options.length === 0 && <p>没有匹配的成员</p>}</div>
+          <input ref={query} value={search} onChange={event => { setSearch(event.target.value); setIndex(0); }} placeholder={t("teams.searchMembers")} aria-label={t("teams.searchTaskMembers")} role="combobox" aria-expanded="true" aria-controls={listId} aria-activedescendant={options.length ? `${listId}-${options[activeIndex].id}` : undefined} />
+          <div id={listId} role="listbox" aria-label={t("teams.taskMembers")}>{options.map((member, optionIndex) => <button type="button" role="option" id={`${listId}-${member.id}`} key={member.id} aria-selected={selected?.id === member.id} data-highlighted={activeIndex === optionIndex} onMouseEnter={() => setIndex(optionIndex)} onClick={() => select(member)}>
+            <TeamBadge iconKey={memberIcon(member)} size="workflow" /><span className="team-recipient-details"><strong>{member.display_name}</strong><small>{member.member_key} · {member.id === leader?.id ? `Leader / ${t('teams.collaboration')}` : `Worker / ${t('teams.single')}`}</small></span><em>{t(member.status === 'busy' ? 'teams.busy' : member.status === 'offline' ? 'teams.offline' : member.status === 'failed' ? 'teams.failed' : 'teams.member')}</em>
+          </button>)}{options.length === 0 && <p>{t("teams.noMembers")}</p>}</div>
         </div>}
       </div>
       <div className="team-composer-input-row">
-        <textarea ref={input} value={value} disabled={sending} aria-label="任务内容" rows={1} placeholder={single ? '让这位成员回答，或继续修改之前的产物…' : '发送任务，输入 @ 选择成员…'}
+        <textarea ref={input} value={value} disabled={sending || disabled} aria-label={t("teams.taskContent")} rows={1} placeholder={t(single ? 'teams.singlePlaceholder' : 'teams.teamPlaceholder')}
           onChange={event => {
             const next = event.target.value;
             if (next === '@' && !value) { setOpen(true); setSearch(''); setIndex(0); return; }
@@ -74,9 +82,9 @@ export default function TeamTaskComposer({ members, leaderKey, targetKey, onTarg
             if (event.key === '@' && !event.nativeEvent.isComposing && (cursor === 0 || /\s/.test(value[cursor - 1] || ''))) {
               event.preventDefault(); setOpen(true); setSearch(''); setIndex(0); return;
             }
-            if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && event.keyCode !== 229) { event.preventDefault(); if (!sending) event.currentTarget.form?.requestSubmit(); }
+            if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && event.keyCode !== 229) { event.preventDefault(); if (!sending && !disabled) event.currentTarget.form?.requestSubmit(); }
           }} />
-        <button type="submit" className="team-composer-send" disabled={sending || !value.trim() || !selected} aria-label="发送任务" title="发送任务">{sending ? <span className="team-composer-spinner" /> : <Send size={18}/>}</button>
+        <button type="submit" className="team-composer-send" disabled={sending || disabled || !value.trim() || !selected} aria-label={t("teams.send")} title={t("teams.send")}>{sending ? <span className="team-composer-spinner" /> : <Send size={18}/>}</button>
       </div>
     </form>
   </div>;

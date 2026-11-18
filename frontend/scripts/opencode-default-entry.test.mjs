@@ -20,14 +20,26 @@ assert.ok(
 assert.ok(
   !detailPage.includes("OpenCodeFirstRunGuide") &&
     !service.includes("getOpenCodeFirstRun") &&
-    detailPage.includes('return `${workspacePath.replace(/\\/+$/gu, "")}/starter`;'),
-  "The instance page must use starter directly without loading onboarding state.",
+    !detailPage.includes('? "starter"'),
+  "The workspace browser must not force OpenCode Lite into a managed starter directory.",
 );
 assert.ok(
-  serviceFrame.includes("openCodeNewSessionUrl") &&
-    serviceFrame.includes("${directorySlug}/session") &&
-    detailPage.includes("openCodeInitialDirectory={openCodeInitialDirectory}"),
-  "OpenCode Lite must enter starter's blank session route.",
+  !serviceFrame.includes("openCodeNewSessionUrl") &&
+    !serviceFrame.includes("encodeOpenCodeDirectory") &&
+    !serviceFrame.includes("openCodeInitialDirectory") &&
+    !detailPage.includes("openCodeInitialDirectory"),
+  "Opening OpenCode must not force a directory-scoped blank session route.",
+);
+assert.ok(
+  serviceFrame.includes("let src = embedUrl;") &&
+    serviceFrame.includes("setPreparedFrame({ instanceId, embedUrl, src });") &&
+    serviceFrame.includes("src={frameSrc}"),
+  "The service frame must preserve the runtime's normal web entry URL.",
+);
+assert.ok(
+  !serviceFrame.includes("InstanceShellTerminal") &&
+    serviceFrame.includes("<iframe"),
+  "OpenCode must remain a web interface without a terminal fallback.",
 );
 
 console.log("OpenCode default entry frontend checks passed.");

@@ -58,3 +58,21 @@ func TestHermesWebTrustRejectsCrossTenantAndWildcard(t *testing.T) {
 		}
 	}
 }
+
+func TestHermesWebTrustDiscoversControlPlaneDuringColdStart(t *testing.T) {
+	endpoints := &corev1.Endpoints{ObjectMeta: metav1.ObjectMeta{Name: "manager", Namespace: "tenant"}, Subsets: []corev1.EndpointSubset{{NotReadyAddresses: []corev1.EndpointAddress{
+		{IP: "10.1.2.3", TargetRef: &corev1.ObjectReference{Kind: "Pod", Namespace: "tenant", Name: "app"}},
+		{IP: "10.1.2.4", TargetRef: &corev1.ObjectReference{Kind: "Pod", Namespace: "other", Name: "app"}},
+		{IP: "10.1.2.5"},
+		{IP: "10.1.2.6", TargetRef: &corev1.ObjectReference{Kind: "Service", Namespace: "tenant", Name: "app"}},
+		{IP: "invalid", TargetRef: &corev1.ObjectReference{Kind: "Pod", Namespace: "tenant", Name: "app"}},
+	}}}}
+	s := &runtimeDeploymentService{client: fake.NewSimpleClientset(endpoints)}
+	env, err := s.hermesWebEnvironment(context.Background(), "tenant", corev1.Container{Env: []corev1.EnvVar{{Name: "CLAWMANAGER_BACKEND_URL", Value: "http://manager.tenant.svc.cluster.local:9001"}}})
+	if err != nil {
+		t.Fatalf("cold-start Service Pod identity must not depend on HTTP readiness: %v", err)
+	}
+	if env["CLAWMANAGER_TRUSTED_PROXY_CIDRS"] != "10.1.2.3" {
+		t.Fatalf("unexpected cold-start proxy identities: %v", env)
+	}
+}

@@ -18,6 +18,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"clawreef/internal/backupgate"
 	"clawreef/internal/models"
 	"clawreef/internal/repository"
 	"clawreef/internal/services/k8s"
@@ -47,8 +48,6 @@ type InstanceService interface {
 	ForceSyncInstance(instanceID int) error
 }
 
-const OpenCodeDefaultProjectRelativePath = "starter"
-
 // InstanceOwnerService is the owner-scoped listing capability used by the
 // northbound API and its authenticated portal page.
 type InstanceOwnerService interface {
@@ -74,6 +73,9 @@ type InstanceQueryService interface {
 func (s *instanceService) ValidateCreateRequests(userID int, requests []CreateInstanceRequest) error {
 	if len(requests) == 0 {
 		return nil
+	}
+	if err := s.ValidateTeamRuntimeRequests(requests); err != nil {
+		return err
 	}
 	for idx := range requests {
 		requests[idx].Name = strings.TrimSpace(requests[idx].Name)
@@ -271,42 +273,53 @@ type UpdateInstanceRequest struct {
 
 // InstanceStatus holds the status of an instance
 type InstanceStatus struct {
-	InstanceID          int        `json:"instance_id"`
-	Status              string     `json:"status"`
-	Availability        string     `json:"availability,omitempty"`
-	AgentType           string     `json:"agent_type,omitempty"`
-	WorkspaceUsageBytes int64      `json:"workspace_usage_bytes,omitempty"`
-	PodName             *string    `json:"pod_name,omitempty"`
-	PodNamespace        *string    `json:"pod_namespace,omitempty"`
-	PodIP               *string    `json:"pod_ip,omitempty"`
-	PodStatus           string     `json:"pod_status,omitempty"`
-	CreatedAt           time.Time  `json:"created_at"`
-	StartedAt           *time.Time `json:"started_at,omitempty"`
+	InstanceID               int        `json:"instance_id"`
+	Status                   string     `json:"status"`
+	Availability             string     `json:"availability,omitempty"`
+	AgentType                string     `json:"agent_type,omitempty"`
+	WorkspaceUsageBytes      int64      `json:"workspace_usage_bytes"`
+	WorkspaceUsageObservedAt *time.Time `json:"workspace_usage_observed_at"`
+	PodName                  *string    `json:"pod_name,omitempty"`
+	PodNamespace             *string    `json:"pod_namespace,omitempty"`
+	PodIP                    *string    `json:"pod_ip,omitempty"`
+	PodStatus                string     `json:"pod_status,omitempty"`
+	CreatedAt                time.Time  `json:"created_at"`
+	StartedAt                *time.Time `json:"started_at,omitempty"`
 }
 
 // instanceService implements InstanceService
 type instanceService struct {
-	instanceRepo          repository.InstanceRepository
-	quotaRepo             repository.QuotaRepository
-	llmModelRepo          repository.LLMModelRepository
-	gatewayKeyRepo        repository.GatewayKeyRepository
-	expandedModelCatalog  ExpandedLLMModelCatalog
-	openClawConfigService OpenClawConfigService
-	allowPrivilegedPods   bool
-	runtimePodRepo        repository.RuntimePodRepository
-	bindingRepo           repository.InstanceRuntimeBindingRepository
-	agentClient           RuntimeAgentClient
-	runtimeUpgradeGuard   RuntimeUpgradeDeletionGuard
-	resourceCleanup       func(context.Context, int) error
-	workspaceRoot         string
-	podService            *k8s.PodService
-	deploymentService     *k8s.InstanceDeploymentService
-	pvcService            *k8s.PVCService
-	serviceService        *k8s.ServiceService
-	networkPolicyService  *k8s.NetworkPolicyService
-	secretService         *k8s.SecretService
-	deletionMu            sync.Mutex
-	deletionsInFlight     map[int]struct{}
+	autoStopRepo           *repository.InstanceAutoStopRepository
+	ownerTeamMutationGuard func(instanceID int, action string, teamID int) error
+	instanceRepo           repository.InstanceRepository
+	quotaRepo              repository.QuotaRepository
+	llmModelRepo           repository.LLMModelRepository
+	gatewayKeyRepo         repository.GatewayKeyRepository
+	expandedModelCatalog   ExpandedLLMModelCatalog
+	openClawConfigService  OpenClawConfigService
+	allowPrivilegedPods    bool
+	runtimePodRepo         repository.RuntimePodRepository
+	bindingRepo            repository.InstanceRuntimeBindingRepository
+	agentClient            RuntimeAgentClient
+	runtimeUpgradeGuard    RuntimeUpgradeDeletionGuard
+	runtimeSlotRechecker   func(int64)
+	resourceCleanup        func(context.Context, int) error
+	workspaceRoot          string
+	runtimeSandboxProfile  string
+	workspaceWrites        repository.WorkspaceWriteRepository
+	podService             *k8s.PodService
+	deploymentService      *k8s.InstanceDeploymentService
+	pvcService             *k8s.PVCService
+	serviceService         *k8s.ServiceService
+	networkPolicyService   *k8s.NetworkPolicyService
+	secretService          *k8s.SecretService
+	deletionMu             sync.Mutex
+	deletionsInFlight      map[int]struct{}
+}
+
+// SetRuntimeSlotRechecker installs the scheduler's non-blocking source audit request.
+func (s *instanceService) SetRuntimeSlotRechecker(recheck func(int64)) {
+	s.runtimeSlotRechecker = recheck
 }
 
 const (
@@ -1040,7 +1053,7 @@ func (s *instanceService) createV2Instance(ctx context.Context, userID int, req 
 		}
 	}
 
-	workspacePath, err := ensureRuntimeWorkspaceDirectories(workspaceRoot, runtimeType, userID, instance.ID)
+	workspacePath, err := s.allocateRuntimeWorkspace(workspaceRoot, runtimeType, userID, instance.ID)
 	if err != nil {
 		_ = s.instanceRepo.Delete(instance.ID)
 		return nil, fmt.Errorf("failed to create instance workspace: %w", err)
@@ -1056,6 +1069,17 @@ func (s *instanceService) createV2Instance(ctx context.Context, userID int, req 
 }
 
 // GetByID gets an instance by ID
+// GetByProvisioningOperationID reconciles a lost create response without
+// creating another instance. The caller still verifies owner and parent Team.
+func (s *instanceService) GetByProvisioningOperationID(id string) (*models.Instance, error) {
+	if repo, ok := s.instanceRepo.(interface {
+		GetByProvisioningOperationID(string) (*models.Instance, error)
+	}); ok {
+		return repo.GetByProvisioningOperationID(id)
+	}
+	return nil, fmt.Errorf("provisioning lookup unavailable")
+}
+
 func (s *instanceService) GetByID(id int) (*models.Instance, error) {
 	instance, err := s.instanceRepo.GetByID(id)
 	if err != nil {
@@ -1250,6 +1274,11 @@ func hydrateInstanceDesktopStreamProfile(instance *models.Instance) {
 
 // Start starts an instance
 func (s *instanceService) Start(instanceID int) error {
+	if s.ownerTeamMutationGuard != nil {
+		if err := s.ownerTeamMutationGuard(instanceID, "start", 0); err != nil {
+			return err
+		}
+	}
 	release, err := s.acquireLifecycleOperation(instanceID)
 	if err != nil {
 		return err
@@ -1259,12 +1288,7 @@ func (s *instanceService) Start(instanceID int) error {
 }
 
 func (s *instanceService) startWithUpgradeGuard(instanceID int) error {
-	if guard, ok := s.runtimeUpgradeGuard.(interface {
-		WithInstanceMutation(context.Context, int, func() error) error
-	}); ok {
-		return guard.WithInstanceMutation(context.Background(), instanceID, func() error { return s.startInstance(instanceID) })
-	}
-	return s.startInstance(instanceID)
+	return s.withRuntimeUpgradeMutation(instanceID, func() error { return s.startInstance(instanceID) })
 }
 func (s *instanceService) startInstance(instanceID int) error {
 	ctx := context.Background()
@@ -1289,10 +1313,42 @@ func (s *instanceService) startInstance(instanceID int) error {
 		if err := s.validateInstanceStartConfiguration(ctx, instance); err != nil {
 			return err
 		}
-		if err := s.prepareV2InstanceStart(ctx, instance); err != nil {
+		if s.autoStopRepo != nil && instance.InstanceMode == "lite" {
+			a, err := s.autoStopRepo.GetActivity(ctx, instance.ID)
+			if err != nil {
+				return err
+			}
+			if a != nil && a.StopOperationID != "" {
+				return models.ErrInstanceStopping
+			}
+			if a != nil && a.StoppedReason == "idle_timeout" {
+				if err = s.verifyOriginalWorkspace(ctx, runtimeType, instance); err != nil {
+					return err
+				}
+			}
+			if err = s.autoStopRepo.BeginManualStart(ctx, instance.ID, time.Now().UTC().Add(120*time.Second)); err != nil {
+				return err
+			}
+		}
+		if resumed, err := s.resumeUnpublishedV2Start(ctx, instance, runtimeType); resumed || err != nil {
+			if err != nil && s.autoStopRepo != nil {
+				_ = s.autoStopRepo.ClearStartDeadline(ctx, instance.ID)
+			}
 			return err
 		}
-		return s.startV2Instance(ctx, instance, runtimeType)
+		if err := s.prepareV2InstanceStart(ctx, instance); err != nil {
+			if s.autoStopRepo != nil {
+				_ = s.autoStopRepo.ClearStartDeadline(ctx, instance.ID)
+			}
+			return err
+		}
+		if err := s.startV2Instance(ctx, instance, runtimeType); err != nil {
+			if s.autoStopRepo != nil {
+				_ = s.autoStopRepo.ClearStartDeadline(ctx, instance.ID)
+			}
+			return err
+		}
+		return nil
 	}
 
 	if _, err := s.ensureGatewayToken(instance); err != nil {
@@ -1649,7 +1705,18 @@ func (s *instanceService) buildGatewayEnvReadOnly(instance *models.Instance) (ma
 
 	modelInjection, err := s.resolveGatewayModelInjection(instance.UserID)
 	if err != nil {
-		return nil, err
+		// Preserve access to an existing instance's UI/history when its complete
+		// authorized catalog is empty. Never apply this fallback to storage errors.
+		switch strings.ToLower(strings.TrimSpace(instance.Type)) {
+		case "opencode", "openclaw", RuntimeTypeHermes, RuntimeTypeDeepSeekHarness:
+			if instance.ID > 0 && errors.Is(err, ErrModelConfigurationRequired) {
+				modelInjection = &gatewayModelInjection{modelsJSON: "[]", providerModelsJSON: "[]", contextWindowsJSON: "{}", visionJSON: "{}", reasoningJSON: "{}", reasoningControlJSON: "{}"}
+			} else {
+				return nil, err
+			}
+		default:
+			return nil, err
+		}
 	}
 
 	token := strings.TrimSpace(*instance.AccessToken)
@@ -1686,11 +1753,21 @@ func (s *instanceService) buildGatewayEnvReadOnly(instance *models.Instance) (ma
 		// credentials as env references ensures the generated file does not embed
 		// a user-managed provider or a direct external API key.
 		env["OPENCODE_CONFIG_CONTENT"] = configContent
-		if strings.EqualFold(strings.TrimSpace(instance.InstanceMode), InstanceModeLite) {
-			env["CLAWMANAGER_DEFAULT_PROJECT_RELATIVE_PATH"] = OpenCodeDefaultProjectRelativePath
-			if instance.WorkspacePath != nil && strings.TrimSpace(*instance.WorkspacePath) != "" {
-				env["CLAWMANAGER_DEFAULT_PROJECT_PATH"] = path.Join(strings.TrimSpace(*instance.WorkspacePath), OpenCodeDefaultProjectRelativePath)
-			}
+	}
+	if strings.EqualFold(strings.TrimSpace(instance.Type), "openclaw") || strings.EqualFold(strings.TrimSpace(instance.Type), RuntimeTypeHermes) || strings.EqualFold(strings.TrimSpace(instance.Type), RuntimeTypeDeepSeekHarness) {
+		// Additive contract: older runtime images ignore it. Updated images
+		// consult the owner-authorized catalog before restoring managed refs.
+		env["CLAWMANAGER_MODEL_REFERENCE_PROTOCOL"] = "1"
+	}
+	switch strings.ToLower(strings.TrimSpace(instance.Type)) {
+	case "opencode", "openclaw", RuntimeTypeHermes, RuntimeTypeDeepSeekHarness:
+		env["CLAWMANAGER_MODEL_CATALOG_SYNC"] = "1"
+		catalog, err := s.buildStartupModelCatalog(instance, token)
+		if err != nil {
+			return nil, err
+		}
+		if catalog != "" {
+			env["CLAWMANAGER_MODEL_CATALOG_JSON"] = catalog
 		}
 	}
 	return env, nil
@@ -2026,9 +2103,14 @@ func (s *instanceService) resolveGatewayModelInjection(ownerID int) (*gatewayMod
 	modelRepo := repository.ForModelUser(s.llmModelRepo, ownerID)
 	items, err := modelRepo.ListActive()
 	if err != nil {
+		if errors.Is(err, models.ErrModelUnavailable) {
+			return nil, ErrModelConfigurationRequired
+		}
 		return nil, fmt.Errorf("failed to list active models: %w", err)
 	}
-	items = models.ChatModels(items)
+	// Expand only the persisted catalog after owner visibility filtering.
+	// Upstream discovery is not an authorization source.
+	items = models.ChatModels(models.ExpandLLMModelCatalog(items))
 	if len(items) == 0 {
 		return nil, ErrModelConfigurationRequired
 	}
@@ -2043,9 +2125,12 @@ func (s *instanceService) resolveGatewayModelInjection(ownerID int) (*gatewayMod
 	reasoningControlForInjection := map[string]string{"auto": models.ReasoningControlNone}
 	contextWindowsForInjection := make(map[string]int, len(items)+1)
 	contextWindowsForInjection["auto"] = safeContextWindow(items)
+	modelsByRealName := make(map[string][]models.LLMModel)
 	modelsByGroup := make(map[string][]models.LLMModel)
 	groupNames := make(map[string]string)
 	for _, item := range items {
+		name := strings.TrimSpace(item.ProviderModelName)
+		modelsByRealName[name] = append(modelsByRealName[name], item)
 		group := strings.TrimSpace(item.ModelGroup)
 		if group == "" {
 			continue
@@ -2064,33 +2149,41 @@ func (s *instanceService) resolveGatewayModelInjection(ownerID int) (*gatewayMod
 	}
 
 	for _, item := range items {
-		displayName := strings.TrimSpace(item.DisplayName)
-		if displayName == "" {
-			displayName = strings.TrimSpace(item.ProviderModelName)
-		}
-		if displayName == "" {
+		modelName := strings.TrimSpace(item.ProviderModelName)
+		if modelName == "" || strings.EqualFold(modelName, "auto") {
 			continue
 		}
 
-		normalizedName := strings.ToLower(displayName)
+		normalizedName := modelName
 		if _, exists := seen[normalizedName]; exists {
 			continue
 		}
 		seen[normalizedName] = struct{}{}
-		modelsForInjection = append(modelsForInjection, displayName)
-		providerRefs = append(providerRefs, modelCatalogProviderName(item)+"/"+displayName)
-		models.PopulateLLMReasoningCapability(&item)
-		reasoningForInjection[displayName] = item.SupportsReasoning && item.ReasoningEnabled
-		qualifiedName := modelCatalogProviderName(item) + "/" + displayName
-		reasoningForInjection[qualifiedName] = reasoningForInjection[displayName]
-		visionForInjection[displayName] = models.LLMVisionInputAvailable(&item)
-		reasoningControlForInjection[displayName] = item.ReasoningControl
-		reasoningControlForInjection[qualifiedName] = item.ReasoningControl
-		contextWindow := item.ContextWindowTokens
-		if normalizedGroup := strings.ToLower(strings.TrimSpace(item.ModelGroup)); normalizedGroup != "" {
-			contextWindow = safeContextWindow(modelsByGroup[normalizedGroup])
+		modelsForInjection = append(modelsForInjection, modelName)
+		qualifiedName := "clawmanager/" + modelName
+		providerRefs = append(providerRefs, qualifiedName)
+		// One runtime ID may route through several deployments. Advertise only
+		// capabilities and context supported by every deployment of that ID.
+		reasoning, vision := true, true
+		control := ""
+		deployments := modelsByRealName[normalizedName]
+		for i, deployment := range deployments {
+			models.PopulateLLMReasoningCapability(&deployment)
+			reasoning = reasoning && deployment.SupportsReasoning && deployment.ReasoningEnabled
+			vision = vision && models.LLMVisionInputAvailable(&deployment)
+			if i == 0 {
+				control = deployment.ReasoningControl
+			} else if control != deployment.ReasoningControl {
+				control = models.ReasoningControlNone
+				reasoning = false
+			}
 		}
-		contextWindowsForInjection[displayName] = contextWindow
+		for _, name := range []string{modelName, qualifiedName} {
+			reasoningForInjection[name] = reasoning
+			visionForInjection[name] = vision
+			reasoningControlForInjection[name] = control
+			contextWindowsForInjection[name] = safeContextWindow(deployments)
+		}
 	}
 
 	rawModels, err := json.Marshal(modelsForInjection)
@@ -2216,8 +2309,65 @@ func (s *instanceService) prepareV2InstanceStart(ctx context.Context, instance *
 }
 
 func (s *instanceService) stopV2Instance(ctx context.Context, instance *models.Instance) error {
+	return s.stopV2InstanceForKind(ctx, instance, "manual")
+}
+
+func (s *instanceService) stopV2InstanceForKind(ctx context.Context, instance *models.Instance, kind string) error {
+	if s.autoStopRepo != nil && instance.InstanceMode == "lite" {
+		input := models.InstanceIdleStopOperation{Kind: kind, InstanceID: instance.ID, UserID: instance.UserID, Generation: instance.RuntimeGeneration}
+		if instance.WorkspacePath != nil {
+			input.WorkspacePath = *instance.WorkspacePath
+		}
+		if s.bindingRepo == nil {
+			return fmt.Errorf("runtime binding repository unavailable")
+		}
+		b, err := s.bindingRepo.GetByInstanceID(ctx, instance.ID)
+		if err != nil {
+			return err
+		}
+		if b != nil {
+			if b.Generation != instance.RuntimeGeneration || s.runtimePodRepo == nil {
+				return fmt.Errorf("runtime binding identity mismatch")
+			}
+			pod, err := s.runtimePodRepo.GetByID(ctx, b.RuntimePodID)
+			if err != nil {
+				return err
+			}
+			if pod == nil || pod.PodUID == nil || *pod.PodUID == "" || pod.AgentEndpoint == nil || *pod.AgentEndpoint == "" {
+				return fmt.Errorf("runtime source identity unavailable")
+			}
+			input.RuntimePodID = b.RuntimePodID
+			input.GatewayID = b.GatewayID
+			input.PodUID = *pod.PodUID
+			input.Endpoint = *pod.AgentEndpoint
+			if client, ok := s.agentClient.(*slotRuntimeAgentClient); ok && client.kube != nil {
+				input.StorageIdentity, err = k8s.ResolveRuntimePersistentStorage(ctx, client.kube, pod.Namespace, pod.PodName, *pod.PodUID, b.WorkspacePath)
+				if err != nil {
+					return fmt.Errorf("verify manual stop persistent workspace: %w", err)
+				}
+			} else if instance.RuntimeSecurityProfile == RuntimeSecurityProfile {
+				return fmt.Errorf("protected manual stop persistent storage verifier unavailable")
+			}
+		}
+		op, err := s.autoStopRepo.BeginManualStop(ctx, input)
+		if err != nil {
+			return err
+		}
+		if current, e := s.instanceRepo.GetByID(instance.ID); e == nil && current != nil {
+			GetHub().BroadcastInstanceStatus(current.UserID, current)
+		}
+		if err = s.resumeManualStop(ctx, *op); err != nil {
+			op.ErrorMessage = err.Error()
+			_ = s.autoStopRepo.FailStop(ctx, *op)
+			if kind == "restart" {
+				return ErrInstanceRestartPending
+			}
+			return err
+		}
+		return nil
+	}
 	if err := s.instanceRepo.UpdateRuntimeState(ctx, instance.ID, "stopped", instance.RuntimeGeneration, nil); err != nil {
-		return fmt.Errorf("failed to mark v2 instance stopped: %w", err)
+		return err
 	}
 	now := time.Now()
 	instance.Status = "stopped"
@@ -2230,6 +2380,58 @@ func (s *instanceService) stopV2Instance(ctx context.Context, instance *models.I
 	return s.cleanupV2GatewayBinding(ctx, instance)
 }
 
+func (s *instanceService) resumeManualStop(ctx context.Context, op models.InstanceIdleStopOperation) error {
+	ctx, cancel := s.cancelStopWhenDeleting(ctx, op.InstanceID)
+	defer cancel()
+	b, err := s.bindingRepo.GetByInstanceID(ctx, op.InstanceID)
+	if err != nil {
+		return err
+	}
+	if b != nil {
+		if b.RuntimePodID != op.RuntimePodID || b.Generation != op.Generation || b.GatewayID != op.GatewayID {
+			return fmt.Errorf("manual stop source binding changed")
+		}
+		pod, err := s.runtimePodRepo.GetByID(ctx, op.RuntimePodID)
+		if err != nil {
+			return err
+		}
+		if pod == nil || pod.PodUID == nil || *pod.PodUID != op.PodUID || pod.AgentEndpoint == nil || *pod.AgentEndpoint != op.Endpoint {
+			return fmt.Errorf("manual stop source Pod identity changed")
+		}
+		if op.Phase != "teardown_confirmed" {
+			if s.agentClient == nil {
+				return fmt.Errorf("runtime agent unavailable")
+			}
+			if err = s.agentClient.DeleteGateway(ctx, op.Endpoint, op.GatewayID); err != nil {
+				return err
+			}
+			if err = s.autoStopRepo.ConfirmTeardown(ctx, op); err != nil {
+				return err
+			}
+		}
+		if err = s.bindingRepo.DeleteByInstanceIDAndReleaseSlot(ctx, op.InstanceID, op.RuntimePodID); err != nil {
+			return err
+		}
+		if s.runtimeSlotRechecker != nil {
+			s.runtimeSlotRechecker(op.RuntimePodID)
+		}
+	} else if op.Phase != "teardown_confirmed" {
+		if op.RuntimePodID != 0 {
+			return fmt.Errorf("manual stop binding disappeared without durable teardown proof")
+		}
+		if err = s.autoStopRepo.ConfirmTeardown(ctx, op); err != nil {
+			return err
+		}
+	}
+	if err = s.autoStopRepo.CompleteManualStop(ctx, op); err != nil {
+		return err
+	}
+	if i, e := s.instanceRepo.GetByID(op.InstanceID); e == nil && i != nil {
+		GetHub().BroadcastInstanceStatus(i.UserID, i)
+	}
+	return nil
+}
+
 func (s *instanceService) deleteV2Instance(ctx context.Context, instance *models.Instance) error {
 	if instance.Status != "deleting" {
 		now := time.Now()
@@ -2239,6 +2441,10 @@ func (s *instanceService) deleteV2Instance(ctx context.Context, instance *models
 			return fmt.Errorf("failed to mark v2 instance as deleting: %w", err)
 		}
 		GetHub().BroadcastInstanceStatus(instance.UserID, instance)
+	}
+
+	if err := s.preflightUnboundGatewayCleanup(ctx, instance); err != nil {
+		return err
 	}
 
 	if s.resourceCleanup != nil {
@@ -2257,25 +2463,53 @@ func (s *instanceService) deleteV2Instance(ctx context.Context, instance *models
 }
 
 func (s *instanceService) cleanupV2GatewayBinding(ctx context.Context, instance *models.Instance) error {
+	if s.autoStopRepo != nil && instance.InstanceMode == "lite" && instance.Status != "deleting" {
+		a, err := s.autoStopRepo.GetActivity(ctx, instance.ID)
+		if err != nil {
+			return err
+		}
+		if a != nil && a.StopOperationID != "" {
+			return models.ErrInstanceStopping
+		}
+	}
 	if s.bindingRepo == nil {
-		return nil
+		return fmt.Errorf("Runtime binding inventory is unavailable for cleanup")
+	}
+	if err := s.requireGatewayCleanupProofCapabilities(); err != nil {
+		return err
 	}
 	binding, err := s.bindingRepo.GetByInstanceID(ctx, instance.ID)
 	if err != nil {
 		return fmt.Errorf("failed to get v2 runtime binding: %w", err)
 	}
 	if binding == nil {
-		return nil
+		return s.verifyUnboundGatewayCleanup(ctx, instance)
 	}
 
+	strictStop := requiresConfirmedGatewayStop(s.agentClient)
+	if strictStop && (s.runtimePodRepo == nil || strings.TrimSpace(binding.GatewayID) == "") {
+		return fmt.Errorf("runtime source identity is required to confirm v2 gateway cleanup")
+	}
 	if s.runtimePodRepo != nil {
 		pod, podErr := s.runtimePodRepo.GetByID(ctx, binding.RuntimePodID)
 		if podErr != nil {
 			return fmt.Errorf("failed to get runtime pod %d for v2 cleanup: %w", binding.RuntimePodID, podErr)
 		} else if pod == nil {
 			return fmt.Errorf("runtime pod %d is not available for v2 cleanup", binding.RuntimePodID)
+		} else if strictStop && (pod.AgentEndpoint == nil || strings.TrimSpace(*pod.AgentEndpoint) == "") {
+			return fmt.Errorf("runtime source endpoint is required to confirm v2 gateway cleanup")
 		} else if pod != nil && pod.AgentEndpoint != nil && strings.TrimSpace(*pod.AgentEndpoint) != "" && s.agentClient != nil && binding.GatewayID != "" {
-			if err := s.agentClient.DeleteGateway(ctx, strings.TrimSpace(*pod.AgentEndpoint), binding.GatewayID); err != nil && !errors.Is(err, ErrRuntimeAgentNotFound) {
+			deleteGateway := s.agentClient.DeleteGateway
+			if instance.Status == "deleting" {
+				if force, ok := s.agentClient.(interface {
+					ForceDeleteGateway(context.Context, string, string) error
+				}); ok {
+					deleteGateway = force.ForceDeleteGateway
+				} else if strictStop {
+					return fmt.Errorf("runtime force-delete capability is unavailable")
+				}
+			}
+			if err := deleteGateway(ctx, strings.TrimSpace(*pod.AgentEndpoint), binding.GatewayID); err != nil && (requiresConfirmedGatewayStop(s.agentClient) || !errors.Is(err, ErrRuntimeAgentNotFound)) {
 				return fmt.Errorf("failed to delete v2 gateway: %w", err)
 			}
 		}
@@ -2284,14 +2518,17 @@ func (s *instanceService) cleanupV2GatewayBinding(ctx context.Context, instance 
 	if err := s.bindingRepo.DeleteByInstanceIDAndReleaseSlot(ctx, instance.ID, binding.RuntimePodID); err != nil {
 		return fmt.Errorf("failed to delete v2 runtime binding and release slot: %w", err)
 	}
-	return nil
+	if s.runtimeSlotRechecker != nil {
+		s.runtimeSlotRechecker(binding.RuntimePodID)
+	}
+	return s.verifyUnboundGatewayCleanup(ctx, instance)
 }
 
 func (s *instanceService) ensureV2Workspace(ctx context.Context, instance *models.Instance, runtimeType string) error {
 	if instance.WorkspacePath != nil && strings.TrimSpace(*instance.WorkspacePath) != "" {
 		return nil
 	}
-	workspacePath, err := ensureRuntimeWorkspaceDirectories(s.runtimeWorkspaceRoot(), runtimeType, instance.UserID, instance.ID)
+	workspacePath, err := s.allocateRuntimeWorkspace(s.runtimeWorkspaceRoot(), runtimeType, instance.UserID, instance.ID)
 	if err != nil {
 		return fmt.Errorf("failed to create instance workspace: %w", err)
 	}
@@ -2325,6 +2562,11 @@ func ensureRuntimeWorkspaceDirectories(root, runtimeType string, userID, instanc
 
 // Stop stops an instance
 func (s *instanceService) Stop(instanceID int) error {
+	if s.ownerTeamMutationGuard != nil {
+		if err := s.ownerTeamMutationGuard(instanceID, "stop", 0); err != nil {
+			return err
+		}
+	}
 	release, err := s.acquireLifecycleOperation(instanceID)
 	if err != nil {
 		return err
@@ -2334,12 +2576,7 @@ func (s *instanceService) Stop(instanceID int) error {
 }
 
 func (s *instanceService) stopWithUpgradeGuard(instanceID int) error {
-	if guard, ok := s.runtimeUpgradeGuard.(interface {
-		WithInstanceMutation(context.Context, int, func() error) error
-	}); ok {
-		return guard.WithInstanceMutation(context.Background(), instanceID, func() error { return s.stopInstance(instanceID) })
-	}
-	return s.stopInstance(instanceID)
+	return s.withRuntimeUpgradeMutation(instanceID, func() error { return s.stopInstance(instanceID) })
 }
 func (s *instanceService) stopInstance(instanceID int) error {
 	ctx := context.Background()
@@ -2399,6 +2636,11 @@ func (s *instanceService) stopInstance(instanceID int) error {
 
 // Restart restarts an instance
 func (s *instanceService) Restart(instanceID int) error {
+	if s.ownerTeamMutationGuard != nil {
+		if err := s.ownerTeamMutationGuard(instanceID, "restart", 0); err != nil {
+			return err
+		}
+	}
 	release, err := s.acquireLifecycleOperation(instanceID)
 	if err != nil {
 		return err
@@ -2410,6 +2652,18 @@ func (s *instanceService) Restart(instanceID int) error {
 // Combine the upstream OpenClaw recovery fence with the instance lifecycle
 // lock held by callers, without reacquiring either lock inside Stop/Start.
 func (s *instanceService) withRuntimeUpgradeMutation(instanceID int, run func() error) error {
+	mutation := run
+	run = func() error {
+		instance, err := s.instanceRepo.GetByID(instanceID)
+		if err != nil {
+			return err
+		}
+		// Accepted deletion remains terminal while its background worker waits.
+		if instance != nil && instance.Status == "deleting" {
+			return models.ErrInstanceStopping
+		}
+		return mutation()
+	}
 	if guard, ok := s.runtimeUpgradeGuard.(interface {
 		WithInstanceMutation(context.Context, int, func() error) error
 	}); ok {
@@ -2433,9 +2687,26 @@ func (s *instanceService) restartInstance(instanceID int) error {
 
 	_, isV2 := v2RuntimeTypeForInstance(instance)
 	waitForDesktopPods := !isV2 && instanceUsesDesktopRuntime(instance)
+	nativeStop := isV2 && s.autoStopRepo != nil && instance.InstanceMode == "lite"
+	if nativeStop {
+		if instance.Status != "running" && instance.Status != "stopped" && instance.Status != "error" {
+			return fmt.Errorf("instance changed during restart preparation; retry after the current operation")
+		}
+		if op, err := s.autoStopRepo.RestartFollowup(ctx, instanceID); err != nil {
+			return err
+		} else if op != nil {
+			return s.resumeRestartFollowup(ctx, instanceID)
+		}
+		// The durable stop fence rejects stale reporters without changing the
+		// source generation. Start allocates a new generation only after proof.
+		if err := s.stopV2InstanceForKind(ctx, instance, "restart"); err != nil {
+			return err
+		}
+		return s.resumeRestartFollowup(ctx, instanceID)
+	}
 
 	if isV2 {
-		// Fence heartbeats/scheduler snapshots from the old gateway before Stop.
+		// Fence heartbeats/scheduler snapshots from the old gateway before Start.
 		// Otherwise a late "running" update can resurrect the stopped generation
 		// and make Start reject the restart as "already running". No workspace
 		// contents are changed; Start allocates the next running generation.
@@ -2456,8 +2727,17 @@ func (s *instanceService) restartInstance(instanceID int) error {
 			return fmt.Errorf("failed to fence previous runtime generation: %w", err)
 		}
 	}
-	if err := s.stopInstance(instanceID); err != nil {
-		return fmt.Errorf("failed to stop instance: %w", err)
+	if isV2 {
+		if recovery, ok := s.instanceRepo.(repository.InstanceRuntimeRecoveryRepository); ok {
+			if err := recovery.ResetRuntimeRecovery(ctx, instanceID); err != nil {
+				return fmt.Errorf("reset explicit restart recovery budget: %w", err)
+			}
+		}
+	}
+	if !nativeStop {
+		if err := s.stopInstance(instanceID); err != nil {
+			return fmt.Errorf("failed to stop instance: %w", err)
+		}
 	}
 
 	if waitForDesktopPods {
@@ -2524,6 +2804,33 @@ func factoryResetString(value string) *string { return &value }
 // workspace contents, runtime-local configuration, tokens and snapshots are
 // never copied from the source.
 func (s *instanceService) CreateResetReplacement(sourceInstanceID int, operationID string) (*models.Instance, error) {
+	var replacement *models.Instance
+	err := s.withReplacementResetMutation(sourceInstanceID, func() error {
+		var err error
+		replacement, err = s.createResetReplacement(sourceInstanceID, operationID)
+		return err
+	})
+	return replacement, err
+}
+
+// Replacement reset workers use these methods directly rather than Reset.
+// Share its lifecycle/workspace boundary so an already queued worker cannot
+// provision, promote, or erase a source reserved by orphan recovery.
+func (s *instanceService) withReplacementResetMutation(instanceID int, run func() error) error {
+	release, err := s.acquireLifecycleOperation(instanceID)
+	if err != nil {
+		return err
+	}
+	defer release()
+	return s.withRuntimeUpgradeMutation(instanceID, run)
+}
+
+func (s *instanceService) createResetReplacement(sourceInstanceID int, operationID string) (*models.Instance, error) {
+	if s.ownerTeamMutationGuard != nil {
+		if err := s.ownerTeamMutationGuard(sourceInstanceID, "reset", 0); err != nil {
+			return nil, err
+		}
+	}
 	source, err := s.GetByID(sourceInstanceID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load factory-reset source: %w", err)
@@ -2594,6 +2901,11 @@ func resetReplacementCreateRequest(source *models.Instance, operationID string) 
 // legacy UI Delete method it never reports success after merely scheduling a
 // best-effort background cleanup.
 func (s *instanceService) DeletePermanently(instanceID int) error {
+	if s.ownerTeamMutationGuard != nil {
+		if err := s.ownerTeamMutationGuard(instanceID, "delete", 0); err != nil {
+			return err
+		}
+	}
 	instance, err := s.instanceRepo.GetByID(instanceID)
 	if err != nil {
 		return fmt.Errorf("failed to get instance for permanent deletion: %w", err)
@@ -2608,6 +2920,17 @@ func (s *instanceService) DeletePermanently(instanceID int) error {
 // replacement before attempting destructive cleanup. Cleanup failure therefore
 // cannot take the newly delivered instance away from the user.
 func (s *instanceService) FinalizeResetReplacement(sourceInstanceID, replacementInstanceID int) (bool, string, error) {
+	var pending bool
+	var warning string
+	err := s.withReplacementResetMutation(sourceInstanceID, func() error {
+		var err error
+		pending, warning, err = s.finalizeResetReplacement(sourceInstanceID, replacementInstanceID)
+		return err
+	})
+	return pending, warning, err
+}
+
+func (s *instanceService) finalizeResetReplacement(sourceInstanceID, replacementInstanceID int) (bool, string, error) {
 	ctx := context.Background()
 	if err := s.ValidateDelete(sourceInstanceID); err != nil {
 		return false, "", err
@@ -2696,6 +3019,10 @@ func (s *instanceService) FinalizeResetReplacement(sourceInstanceID, replacement
 // DiscardResetReplacement is used only before owner cutover. The source is not
 // touched even when cleanup of a failed staging instance needs admin follow-up.
 func (s *instanceService) DiscardResetReplacement(replacementInstanceID int) error {
+	return s.withReplacementResetMutation(replacementInstanceID, func() error { return s.discardResetReplacement(replacementInstanceID) })
+}
+
+func (s *instanceService) discardResetReplacement(replacementInstanceID int) error {
 	ctx := context.Background()
 	if err := s.ValidateDelete(replacementInstanceID); err != nil {
 		return err
@@ -2725,11 +3052,21 @@ func (s *instanceService) cleanupResetSource(ctx context.Context, instance *mode
 	if err := s.ValidateDelete(instance.ID); err != nil {
 		return err
 	}
+	if err := s.preflightUnboundGatewayCleanup(ctx, instance); err != nil {
+		return err
+	}
+
+	if s.runtimeSandboxProfile == k8s.RuntimeNFSRootlessProfile && s.resourceCleanup != nil {
+		if err := s.resourceCleanup(ctx, instance.ID); err != nil {
+			return err
+		}
+	}
+
 	if runtimeType, ok := v2RuntimeTypeForInstance(instance); ok {
 		if err := s.cleanupV2GatewayBinding(ctx, instance); err != nil {
 			return err
 		}
-		if err := s.eraseV2Workspace(instance, runtimeType); err != nil {
+		if err := s.eraseV2WorkspaceContext(ctx, instance, runtimeType); err != nil {
 			return err
 		}
 	} else {
@@ -2796,6 +3133,16 @@ type InstanceLifecycleFailureService interface {
 // workspace and clears instance-local runtime state. Callers must obtain an
 // explicit data-loss confirmation before invoking this service.
 func (s *instanceService) Reset(instanceID int) error {
+	if s.ownerTeamMutationGuard != nil {
+		if err := s.ownerTeamMutationGuard(instanceID, "reset", 0); err != nil {
+			return err
+		}
+	}
+	release, err := s.acquireLifecycleOperation(instanceID)
+	if err != nil {
+		return err
+	}
+	defer release()
 	ctx := context.Background()
 	instance, err := s.instanceRepo.GetByID(instanceID)
 	if err != nil {
@@ -2804,6 +3151,9 @@ func (s *instanceService) Reset(instanceID int) error {
 	if instance == nil {
 		return fmt.Errorf("instance not found")
 	}
+	if instance.Status == "deleting" {
+		return models.ErrInstanceStopping
+	}
 	if err := s.ValidateDelete(instanceID); err != nil {
 		return err
 	}
@@ -2811,6 +3161,16 @@ func (s *instanceService) Reset(instanceID int) error {
 	if runtimeType, ok := v2RuntimeTypeForInstance(instance); ok {
 		if err := s.claimReset(instanceID); err != nil {
 			return err
+		}
+		if err := s.preflightUnboundGatewayCleanup(ctx, instance); err != nil {
+			s.markResetError(instanceID)
+			return err
+		}
+		if s.runtimeSandboxProfile == k8s.RuntimeNFSRootlessProfile && s.resourceCleanup != nil {
+			if err := s.resourceCleanup(ctx, instance.ID); err != nil {
+				s.markResetError(instanceID)
+				return err
+			}
 		}
 		if err := s.cleanupV2GatewayBinding(ctx, instance); err != nil {
 			s.markResetError(instanceID)
@@ -2828,7 +3188,7 @@ func (s *instanceService) Reset(instanceID int) error {
 			s.markResetError(instanceID)
 			return err
 		}
-		if err := s.Start(instanceID); err != nil {
+		if err := s.startWithUpgradeGuard(instanceID); err != nil {
 			s.markResetError(instanceID)
 			return fmt.Errorf("failed to create fresh Lite runtime: %w", err)
 		}
@@ -2914,7 +3274,7 @@ func (s *instanceService) Reset(instanceID int) error {
 		s.markResetError(instanceID)
 		return err
 	}
-	if err := s.Start(instanceID); err != nil {
+	if err := s.startWithUpgradeGuard(instanceID); err != nil {
 		s.markResetError(instanceID)
 		return fmt.Errorf("failed to create fresh Pro runtime: %w", err)
 	}
@@ -2927,7 +3287,7 @@ func (s *instanceService) resetV2Workspace(instance *models.Instance, runtimeTyp
 	}
 	root := filepath.Clean(s.runtimeWorkspaceRoot())
 	expected := filepath.Clean(RuntimeWorkspacePathWithRoot(root, runtimeType, instance.UserID, instance.ID))
-	created, err := ensureRuntimeWorkspaceDirectories(root, runtimeType, instance.UserID, instance.ID)
+	created, err := s.allocateRuntimeWorkspace(root, runtimeType, instance.UserID, instance.ID)
 	if err != nil {
 		return fmt.Errorf("failed to create fresh Lite workspace: %w", err)
 	}
@@ -2938,6 +3298,13 @@ func (s *instanceService) resetV2Workspace(instance *models.Instance, runtimeTyp
 }
 
 func (s *instanceService) eraseV2Workspace(instance *models.Instance, runtimeType string) error {
+	return s.eraseV2WorkspaceContext(context.Background(), instance, runtimeType)
+}
+
+func (s *instanceService) eraseV2WorkspaceContext(ctx context.Context, instance *models.Instance, runtimeType string) error {
+	if s.runtimeSandboxProfile == k8s.RuntimeNFSRootlessProfile {
+		return EraseNFSInstanceWorkspace(ctx, s.runtimeWorkspaceRoot(), runtimeType, instance, s.workspaceWrites)
+	}
 	if instance == nil || instance.WorkspacePath == nil {
 		return fmt.Errorf("Lite workspace path is missing")
 	}
@@ -3070,6 +3437,11 @@ func (s *instanceService) GetEnvironmentOverrideNames(instanceID int) ([]string,
 // the source of truth and allows a failed restart to be retried with the same
 // desired configuration.
 func (s *instanceService) RestartWithEnvironment(instanceID int, environmentOverrides map[string]string, environmentOverrideRemovals []string) error {
+	if s.ownerTeamMutationGuard != nil {
+		if err := s.ownerTeamMutationGuard(instanceID, "restart", 0); err != nil {
+			return err
+		}
+	}
 	release, err := s.acquireLifecycleOperation(instanceID)
 	if err != nil {
 		return err
@@ -3141,12 +3513,36 @@ func (s *instanceService) restartInstanceWithEnvironment(instanceID int, environ
 
 // Delete starts deleting an instance and all associated K8s resources.
 func (s *instanceService) Delete(instanceID int) error {
-	release, err := s.acquireLifecycleOperation(instanceID)
-	if err != nil {
+	return s.deleteForTeam(instanceID, 0)
+}
+
+func (s *instanceService) SetOwnerTeamMutationGuard(guard func(int, string, int) error) {
+	s.ownerTeamMutationGuard = guard
+}
+func (s *instanceService) DeleteForOwnerTeam(teamID, instanceID int) error {
+	return s.deleteForTeam(instanceID, teamID)
+}
+func (s *instanceService) deleteForTeam(instanceID, teamID int) error {
+	if _, err := s.prepareDeletion(instanceID, teamID); err != nil {
 		return err
 	}
-	defer release()
-	return s.deleteInstance(instanceID)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	for {
+		release, err := acquireInstanceLifecycleOperation(ctx, s.instanceRepo, instanceID)
+		if err == nil {
+			defer release()
+			return s.deleteInstance(instanceID)
+		}
+		if !errors.Is(err, models.ErrInstanceLifecycleLockBusy) {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
 }
 
 func (s *instanceService) deleteInstance(instanceID int) error {
@@ -3211,6 +3607,8 @@ func (s *instanceService) scheduleLegacyDeletion(userID, instanceID int) {
 		return
 	}
 	go func() {
+		instanceDeletionWorkers <- struct{}{}
+		defer func() { <-instanceDeletionWorkers }()
 		defer s.finishDeletion(instanceID)
 		s.completeDeletion(userID, instanceID)
 	}()
@@ -3288,12 +3686,17 @@ func (s *instanceService) ValidateDelete(instanceID int) error {
 
 func (s *instanceService) completeDeletion(userID, instanceID int) {
 	ctx := context.Background()
+	release, gateErr := backupgate.HoldWorkUnit(ctx, "instance.delete")
+	if gateErr != nil {
+		return
+	}
+	defer release()
 	// The API returns before this worker runs. Reacquire the lifecycle guard.
 	deadline := time.Now().Add(30 * time.Second)
-	var release func()
+	var lifecycleRelease func()
 	for {
 		var err error
-		release, err = s.acquireLifecycleOperation(instanceID)
+		lifecycleRelease, err = s.acquireLifecycleOperation(instanceID)
 		if err == nil {
 			break
 		}
@@ -3303,9 +3706,25 @@ func (s *instanceService) completeDeletion(userID, instanceID int) {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	defer release()
+	defer lifecycleRelease()
 	instance, err := s.instanceRepo.GetByID(instanceID)
 	if err != nil || instance == nil || instance.UserID != userID || instance.Status != "deleting" {
+		return
+	}
+	if err := s.ValidateDelete(instanceID); err != nil {
+		fmt.Printf("Deletion of instance %d deferred: %v\n", instanceID, err)
+		return
+	}
+	if s.ownerTeamMutationGuard != nil {
+		if err := s.ownerTeamMutationGuard(instanceID, "delete", 0); err != nil {
+			fmt.Printf("Deletion of instance %d deferred: %v\n", instanceID, err)
+			return
+		}
+	}
+	if _, native := v2RuntimeTypeForInstance(instance); native {
+		if err := s.deleteV2Instance(ctx, instance); err != nil {
+			fmt.Printf("Native deletion of instance %d deferred: %v\n", instanceID, err)
+		}
 		return
 	}
 
@@ -3586,13 +4005,14 @@ func (s *instanceService) GetInstanceStatus(instanceID int) (*InstanceStatus, er
 
 	if runtimeType, ok := v2RuntimeTypeForInstance(instance); ok {
 		return &InstanceStatus{
-			InstanceID:          instance.ID,
-			Status:              instance.Status,
-			Availability:        s.v2InstanceAvailability(ctx, instance),
-			AgentType:           runtimeType,
-			WorkspaceUsageBytes: instance.WorkspaceUsageBytes,
-			CreatedAt:           instance.CreatedAt,
-			StartedAt:           instance.StartedAt,
+			InstanceID:               instance.ID,
+			Status:                   instance.Status,
+			Availability:             s.v2InstanceAvailability(ctx, instance),
+			AgentType:                runtimeType,
+			WorkspaceUsageBytes:      instance.WorkspaceUsageBytes,
+			WorkspaceUsageObservedAt: instance.WorkspaceUsageObservedAt,
+			CreatedAt:                instance.CreatedAt,
+			StartedAt:                instance.StartedAt,
 		}, nil
 	}
 

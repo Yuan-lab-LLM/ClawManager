@@ -69,7 +69,7 @@ const CostsPage: React.FC = () => {
         )}
 
         {loading || !overview ? (
-          <section className="app-panel px-6 py-12 text-sm text-[#8f8681]">
+          <section className="app-panel px-6 py-12 text-sm text-[var(--cm-muted)]">
             {t('costsPage.loading')}
           </section>
         ) : (
@@ -99,11 +99,11 @@ const CostsPage: React.FC = () => {
             </section>
 
             <section className="app-panel overflow-hidden">
-              <div className="border-b border-[#f1e7e1] px-5 py-5">
+              <div className="border-b border-[var(--cm-border)] px-5 py-5">
                 <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
                   <div>
-                    <h3 className="text-lg font-semibold text-[#171212]">{t('costsPage.recentRecords')}</h3>
-                    <p className="mt-1 text-sm text-[#8f8681]">
+                    <h3 className="text-lg font-semibold text-[var(--cm-ink)]">{t('costsPage.recentRecords')}</h3>
+                    <p className="mt-1 text-sm text-[var(--cm-muted)]">
                       {t('costsPage.recentRecordsSubtitle')}
                     </p>
                   </div>
@@ -136,55 +136,55 @@ const CostsPage: React.FC = () => {
               </div>
 
               <div className="overflow-x-auto">
-                <table className="min-w-full divide-y divide-[#f1e7e1]">
-                  <thead className="bg-[#fcfaf8]">
+                <table className="min-w-full divide-y divide-[var(--cm-border)]">
+                  <thead className="bg-[var(--cm-subtle)]">
                     <tr>
-                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.12em] text-[#8f8681]">{t('costsPage.trace')}</th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.12em] text-[#8f8681]">{t('costsPage.user')}</th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.12em] text-[#8f8681]">{t('costsPage.instance')}</th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.12em] text-[#8f8681]">{t('costsPage.model')}</th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.12em] text-[#8f8681]">{t('costsPage.tokens')}</th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.12em] text-[#8f8681]">{t('costsPage.spend')}</th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.12em] text-[#8f8681]">{t('costsPage.recorded')}</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.12em] text-[var(--cm-muted)]">{t('costsPage.trace')}</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.12em] text-[var(--cm-muted)]">{t('costsPage.user')}</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.12em] text-[var(--cm-muted)]">{t('costsPage.instance')}</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.12em] text-[var(--cm-muted)]">{t('costsPage.model')}</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.12em] text-[var(--cm-muted)]">{t('costsPage.tokens')}</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.12em] text-[var(--cm-muted)]">{t('costsPage.spend')}</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.12em] text-[var(--cm-muted)]">{t('costsPage.recorded')}</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-[#f7efe9]">
+                  <tbody className="divide-y divide-[var(--cm-border)]">
                     {overview.recent_records.map((record) => (
                       <tr
                         key={record.id}
-                        className="cursor-pointer transition-colors hover:bg-[#fffaf7]"
+                        className="cursor-pointer transition-colors hover:bg-[var(--cm-subtle)]"
                         onClick={() => navigate(`/admin/ai-audit?trace=${encodeURIComponent(record.trace_id)}`)}
                       >
-                        <td className="px-4 py-4 text-sm text-[#171212]">
+                        <td className="px-4 py-4 text-sm text-[var(--cm-ink)]">
                           <Link
                             to={`/admin/ai-audit?trace=${encodeURIComponent(record.trace_id)}`}
-                            className="font-medium text-[#b46c50] hover:text-[#171212] hover:underline"
+                            className="font-medium text-[var(--cm-muted)] hover:text-[var(--cm-ink)] hover:underline"
                             onClick={(event: React.MouseEvent) => event.stopPropagation()}
                           >
                             {record.trace_id}
                           </Link>
                         </td>
-                        <td className="px-4 py-4 text-sm text-[#171212]">{record.username || '-'}</td>
-                        <td className="px-4 py-4 text-sm text-[#171212]">
+                        <td className="px-4 py-4 text-sm text-[var(--cm-ink)]">{record.username || '-'}</td>
+                        <td className="px-4 py-4 text-sm text-[var(--cm-ink)]">
                           <div>{record.instance_name || '-'}</div>
                           {record.instance_id && (
-                            <div className="mt-1 text-xs text-[#8f8681]">{t('costsPage.instanceId', { id: record.instance_id })}</div>
+                            <div className="mt-1 text-xs text-[var(--cm-muted)]">{t('costsPage.instanceId', { id: record.instance_id })}</div>
                           )}
                         </td>
                         <td className="px-4 py-4">
-                          <div className="font-medium text-[#171212]">{record.model_name}</div>
-                          <div className="mt-1 text-xs text-[#8f8681]">{record.provider_type}</div>
+                          <div className="font-medium text-[var(--cm-ink)]">{record.model_name}</div>
+                          <div className="mt-1 text-xs text-[var(--cm-muted)]">{record.provider_type}</div>
                         </td>
-                        <td className="px-4 py-4 text-sm text-[#171212]">{record.total_tokens.toLocaleString()}</td>
-                        <td className="px-4 py-4 text-sm text-[#171212]">
+                        <td className="px-4 py-4 text-sm text-[var(--cm-ink)]">{record.total_tokens.toLocaleString()}</td>
+                        <td className="px-4 py-4 text-sm text-[var(--cm-ink)]">
                           <div>{record.estimated_cost.toFixed(8)} {record.currency}</div>
-                          <div className="mt-1 text-xs text-[#8f8681]">{t('costsPage.internalValue', { value: record.internal_cost.toFixed(8), currency: record.currency })}</div>
+                          <div className="mt-1 text-xs text-[var(--cm-muted)]">{t('costsPage.internalValue', { value: record.internal_cost.toFixed(8), currency: record.currency })}</div>
                         </td>
-                        <td className="px-4 py-4 text-sm text-[#8f8681]">
+                        <td className="px-4 py-4 text-sm text-[var(--cm-muted)]">
                           <div>{new Date(record.recorded_at).toLocaleString()}</div>
                           <Link
                             to={`/admin/ai-audit?trace=${encodeURIComponent(record.trace_id)}`}
-                            className="mt-1 inline-flex text-xs font-medium text-[#b46c50] hover:text-[#171212] hover:underline"
+                            className="mt-1 inline-flex text-xs font-medium text-[var(--cm-muted)] hover:text-[var(--cm-ink)] hover:underline"
                             onClick={(event: React.MouseEvent) => event.stopPropagation()}
                           >
                             {t('costsPage.openInAudit')}
@@ -196,7 +196,7 @@ const CostsPage: React.FC = () => {
                 </table>
               </div>
 
-              <div className="flex flex-col gap-3 border-t border-[#f1e7e1] px-5 py-4 text-sm text-[#8f8681] sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex flex-col gap-3 border-t border-[var(--cm-border)] px-5 py-4 text-sm text-[var(--cm-muted)] sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   {t('costsPage.showing', {
                     from: (overview.page - 1) * overview.limit + 1,
@@ -251,30 +251,30 @@ const AggregateTableCard: React.FC<{
 
   return (
   <section className="app-panel overflow-hidden">
-    <div className="border-b border-[#f1e7e1] px-5 py-4">
-      <h3 className="text-lg font-semibold text-[#171212]">{title}</h3>
-      <p className="mt-1 text-sm text-[#8f8681]">{subtitle}</p>
+    <div className="border-b border-[var(--cm-border)] px-5 py-4">
+      <h3 className="text-lg font-semibold text-[var(--cm-ink)]">{title}</h3>
+      <p className="mt-1 text-sm text-[var(--cm-muted)]">{subtitle}</p>
     </div>
     <div className="overflow-x-auto">
-      <table className="min-w-full divide-y divide-[#f1e7e1]">
-        <thead className="bg-[#fcfaf8]">
+      <table className="min-w-full divide-y divide-[var(--cm-border)]">
+        <thead className="bg-[var(--cm-subtle)]">
           <tr>
-            <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.12em] text-[#8f8681]">{t('costsPage.name')}</th>
-            <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.12em] text-[#8f8681]">{t('costsPage.tokens')}</th>
-            <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.12em] text-[#8f8681]">{t('costsPage.estimated')}</th>
-            <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.12em] text-[#8f8681]">{t('costsPage.internal')}</th>
+            <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.12em] text-[var(--cm-muted)]">{t('costsPage.name')}</th>
+            <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.12em] text-[var(--cm-muted)]">{t('costsPage.tokens')}</th>
+            <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.12em] text-[var(--cm-muted)]">{t('costsPage.estimated')}</th>
+            <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.12em] text-[var(--cm-muted)]">{t('costsPage.internal')}</th>
           </tr>
         </thead>
-        <tbody className="divide-y divide-[#f7efe9]">
+        <tbody className="divide-y divide-[var(--cm-border)]">
           {safeRows.map((row) => (
-            <tr key={`${row.label}-${row.meta || ''}`} className="hover:bg-[#fffaf7]">
-              <td className="px-4 py-4 text-sm text-[#171212]">
+            <tr key={`${row.label}-${row.meta || ''}`} className="hover:bg-[var(--cm-subtle)]">
+              <td className="px-4 py-4 text-sm text-[var(--cm-ink)]">
                 <div className="font-medium">{row.label}</div>
-                {row.meta && <div className="mt-1 text-xs text-[#8f8681]">{row.meta}</div>}
+                {row.meta && <div className="mt-1 text-xs text-[var(--cm-muted)]">{row.meta}</div>}
               </td>
-              <td className="px-4 py-4 text-sm text-[#171212]">{row.total_tokens.toLocaleString()}</td>
-              <td className="px-4 py-4 text-sm text-[#171212]">{row.estimated_cost.toFixed(8)} {currency}</td>
-              <td className="px-4 py-4 text-sm text-[#171212]">{row.internal_cost.toFixed(8)} {currency}</td>
+              <td className="px-4 py-4 text-sm text-[var(--cm-ink)]">{row.total_tokens.toLocaleString()}</td>
+              <td className="px-4 py-4 text-sm text-[var(--cm-ink)]">{row.estimated_cost.toFixed(8)} {currency}</td>
+              <td className="px-4 py-4 text-sm text-[var(--cm-ink)]">{row.internal_cost.toFixed(8)} {currency}</td>
             </tr>
           ))}
         </tbody>
@@ -290,10 +290,10 @@ const MetricCard: React.FC<{
   note: string;
   highlight?: boolean;
 }> = ({ label, value, note, highlight }) => (
-  <div className={`rounded-2xl border px-5 py-5 ${highlight ? 'border-[#f0c9bc] bg-[linear-gradient(135deg,#fff4ee_0%,#fffaf8_100%)]' : 'border-[#eadfd8] bg-white'}`}>
-    <div className="text-xs font-semibold uppercase tracking-[0.14em] text-[#8f8681]">{label}</div>
-    <div className="mt-4 text-3xl font-semibold tracking-[-0.05em] text-[#171212]">{value}</div>
-    <div className="mt-2 text-sm text-[#8f8681]">{note}</div>
+  <div className={`rounded-2xl border px-5 py-5 ${highlight ? 'border-[#f0c9bc] bg-[var(--cm-subtle)]' : 'border-[var(--cm-border)] bg-white'}`}>
+    <div className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--cm-muted)]">{label}</div>
+    <div className="mt-4 text-3xl font-semibold tracking-[-0.05em] text-[var(--cm-ink)]">{value}</div>
+    <div className="mt-2 text-sm text-[var(--cm-muted)]">{note}</div>
   </div>
 );
 
@@ -327,18 +327,18 @@ const TrendCard: React.FC<{
     <section className="app-panel p-5">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <div className="text-xs font-semibold uppercase tracking-[0.14em] text-[#8f8681]">{t('costsPage.dailyTrend')}</div>
-          <h3 className="mt-2 text-xl font-semibold text-[#171212]">{t('costsPage.lastSevenDays')}</h3>
-          <p className="mt-1 text-sm text-[#8f8681]">{t('costsPage.dailyTrendSubtitle')}</p>
+          <div className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--cm-muted)]">{t('costsPage.dailyTrend')}</div>
+          <h3 className="mt-2 text-xl font-semibold text-[var(--cm-ink)]">{t('costsPage.lastSevenDays')}</h3>
+          <p className="mt-1 text-sm text-[var(--cm-muted)]">{t('costsPage.dailyTrendSubtitle')}</p>
         </div>
-        <div className="rounded-full border border-[#eadfd8] bg-[#fffaf7] px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-[#b46c50]">
+        <div className="rounded-full border border-[var(--cm-border)] bg-[var(--cm-subtle)] px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-[var(--cm-muted)]">
           {t('costsPage.sevenDayView')}
         </div>
       </div>
 
-      <div className="mt-5 rounded-2xl border border-[#f1e7e1] bg-[#fffaf7] p-4">
+      <div className="mt-5 rounded-2xl border border-[var(--cm-border)] bg-[var(--cm-subtle)] p-4">
         {safePoints.length === 0 ? (
-          <div className="text-sm text-[#8f8681]">{t('costsPage.noTrendData')}</div>
+          <div className="text-sm text-[var(--cm-muted)]">{t('costsPage.noTrendData')}</div>
         ) : (
           <>
             <svg viewBox={`0 0 ${chartWidth} ${chartHeight}`} className="h-64 w-full">
@@ -359,10 +359,10 @@ const TrendCard: React.FC<{
 
             <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
               {safePoints.map((point) => (
-                <div key={point.day} className="rounded-xl border border-[#f1e7e1] bg-white px-3 py-3">
-                  <div className="text-xs font-semibold uppercase tracking-[0.12em] text-[#8f8681]">{point.day.slice(5)}</div>
-                  <div className="mt-2 text-sm font-semibold text-[#171212]">{point.estimated_cost.toFixed(6)} {currency}</div>
-                  <div className="mt-1 text-xs text-[#8f8681]">{point.total_tokens.toLocaleString()} tokens</div>
+                <div key={point.day} className="rounded-xl border border-[var(--cm-border)] bg-white px-3 py-3">
+                  <div className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--cm-muted)]">{point.day.slice(5)}</div>
+                  <div className="mt-2 text-sm font-semibold text-[var(--cm-ink)]">{point.estimated_cost.toFixed(6)} {currency}</div>
+                  <div className="mt-1 text-xs text-[var(--cm-muted)]">{point.total_tokens.toLocaleString()} tokens</div>
                 </div>
               ))}
             </div>

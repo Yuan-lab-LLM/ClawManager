@@ -1,3 +1,4 @@
+import { customTemplateCreationError, TEAM_CREATION_NOTICE } from '../../lib/teamCreationPolicy';
 import React, { useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
@@ -137,20 +138,12 @@ const CustomTeamTemplatesPage: React.FC = () => {
   const rename = async () => {
     if (!selected || !nameDraft.trim()) return;
     try {
-      setBusy("rename");
-      setError(null);
-      applyUpdated(
-        await customTeamTemplateService.rename(
-          selected.id,
-          nameDraft.trim(),
-          selected.revision,
-        ),
-      );
-    } catch (err) {
-      setError(errorMessage(err));
-    } finally {
-      setBusy(null);
-    }
+      setBusy("rename"); setError(null);
+      const updated = await customTeamTemplateService.rename(selected.id, nameDraft.trim(), selected.revision);
+      applyUpdated(updated, { syncEditor: false });
+      setNameDraft(updated.name);
+    } catch (err) { setError(errorMessage(err)); }
+    finally { setBusy(null); }
   };
 
   const reviseTeam = async () => {
@@ -301,7 +294,7 @@ const CustomTeamTemplatesPage: React.FC = () => {
         )}
 
         <section className="app-panel overflow-hidden">
-          <div className="border-b border-[#f1e5df] bg-gradient-to-r from-indigo-50/80 to-white px-6 py-5">
+          <div className="border-b border-[var(--cm-border)] bg-[var(--cm-subtle)] px-6 py-5">
             <div className="flex items-start gap-3">
               <div className="rounded-xl bg-white p-2 text-indigo-600 shadow-sm">
                 <Sparkles size={20} />
@@ -322,7 +315,7 @@ const CustomTeamTemplatesPage: React.FC = () => {
                 onChange={(event) => setIntent(event.target.value)}
                 rows={3}
                 placeholder="例如：持续跟踪竞品、分析用户反馈，并每周输出产品决策建议"
-                className="mt-1 block w-full rounded-xl border border-[#eadfd8] px-3 py-2 text-sm focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-200"
+                className="mt-1 block w-full rounded-xl border border-[var(--cm-border)] px-3 py-2 text-sm focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-200"
               />
             </label>
             <MemberCountSelect value={memberCount} onChange={setMemberCount} />
@@ -352,7 +345,7 @@ const CustomTeamTemplatesPage: React.FC = () => {
               {loading ? (
                 <p className="px-2 py-6 text-sm text-gray-500">加载中...</p>
               ) : templates.length === 0 ? (
-                <p className="rounded-xl border border-dashed border-[#eadfd8] px-3 py-8 text-center text-sm text-gray-500">
+                <p className="rounded-xl border border-dashed border-[var(--cm-border)] px-3 py-8 text-center text-sm text-gray-500">
                   还没有自定义 Team
                 </p>
               ) : (
@@ -364,7 +357,7 @@ const CustomTeamTemplatesPage: React.FC = () => {
                     className={`w-full rounded-xl border px-3 py-3 text-left transition ${
                       selectedId === template.id
                         ? "border-indigo-300 bg-indigo-50 shadow-sm"
-                        : "border-transparent bg-white hover:border-[#eadfd8] hover:bg-[#fffaf6]"
+                        : "border-transparent bg-white hover:border-[var(--cm-border)] hover:bg-[var(--cm-subtle)]"
                     }`}
                   >
                     <div className="truncate font-medium text-gray-900">{template.name}</div>
@@ -393,16 +386,16 @@ const CustomTeamTemplatesPage: React.FC = () => {
                       {editorChanged ? " · 有未应用的整体修改" : ""}
                     </div>
                   </div>
-                  <Link
+                  {customTemplateCreationError(selected) ? <span role="alert" className="text-sm text-red-600">{customTemplateCreationError(selected)}</span> : <Link
                     to={`/teams/new?template=custom-${selected.id}`}
                     className="app-button-primary inline-flex items-center gap-2"
                   >
                     使用此模板创建 Team <ArrowRight size={16} />
-                  </Link>
+                  </Link>}
                 </section>
 
                 <section className="app-panel overflow-hidden">
-                  <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[#f1e5df] px-6 py-5">
+                  <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[var(--cm-border)] px-6 py-5">
                     <div>
                       <h2 className="text-lg font-semibold text-gray-900">整体设置</h2>
                       <p className="mt-1 text-sm text-gray-500">
@@ -426,7 +419,7 @@ const CustomTeamTemplatesPage: React.FC = () => {
                         <input
                           value={nameDraft}
                           onChange={(event) => setNameDraft(event.target.value)}
-                          className="min-w-0 flex-1 rounded-xl border border-[#eadfd8] px-3 py-2 text-sm"
+                          className="min-w-0 flex-1 rounded-xl border border-[var(--cm-border)] px-3 py-2 text-sm"
                         />
                         <button
                           type="button"
@@ -438,7 +431,7 @@ const CustomTeamTemplatesPage: React.FC = () => {
                           onClick={() => void rename()}
                           className="app-button-secondary inline-flex items-center gap-2 disabled:opacity-50"
                         >
-                          <Save size={15} /> 仅保存名称
+                          <Save size={15} /> 保存名称
                         </button>
                       </div>
                     </label>
@@ -451,7 +444,7 @@ const CustomTeamTemplatesPage: React.FC = () => {
                           onChange={(event) => setIntentDraft(event.target.value)}
                           rows={4}
                           placeholder="描述整个 Team 的目标、工作方式和预期交付"
-                          className="mt-1 block w-full rounded-xl border border-[#eadfd8] px-3 py-2 text-sm focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-200"
+                          className="mt-1 block w-full rounded-xl border border-[var(--cm-border)] px-3 py-2 text-sm focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-200"
                         />
                       </label>
                       <MemberCountSelect
@@ -460,12 +453,12 @@ const CustomTeamTemplatesPage: React.FC = () => {
                       />
                     </div>
 
-                    <div className="rounded-xl bg-[#faf8f6] px-4 py-3 text-sm text-gray-600">
+                    <div className="rounded-xl bg-[var(--cm-subtle)] px-4 py-3 text-sm text-gray-600">
                       <span className="font-medium text-gray-800">当前团队摘要：</span>
                       {selected.spec.summary}
                     </div>
 
-                    <div className="flex flex-wrap items-center gap-3 border-t border-[#f1e5df] pt-5">
+                    <div className="flex flex-wrap items-center gap-3 border-t border-[var(--cm-border)] pt-5">
                       <button
                         type="button"
                         disabled={Boolean(busy)}
@@ -473,7 +466,7 @@ const CustomTeamTemplatesPage: React.FC = () => {
                         className="app-button-primary inline-flex items-center gap-2 disabled:opacity-50"
                       >
                         <Sparkles size={16} />
-                        {busy === "revise-team" ? "整体调整中..." : "按新目标更新 Team"}
+                        {busy === "revise-team" ? "整体调整中..." : "按目标更新模板"}
                       </button>
                       <button
                         type="button"
@@ -483,7 +476,7 @@ const CustomTeamTemplatesPage: React.FC = () => {
                         title={editorChanged ? "请先应用整体修改" : undefined}
                       >
                         <RefreshCw size={15} />
-                        {busy === "regenerate-all" ? "重新生成中..." : "重新生成整个 Team"}
+                        {busy === "regenerate-all" ? "重新生成中..." : "重新生成整套模板"}
                       </button>
                       <p className="text-xs text-gray-500">
                         使用已保存的意图和人数重建全部成员；单个成员的职责调整请在下方进行。
@@ -497,7 +490,7 @@ const CustomTeamTemplatesPage: React.FC = () => {
                     <div>
                       <h2 className="text-lg font-semibold text-gray-900">成员职责</h2>
                       <p className="mt-1 text-sm text-gray-500">
-                        默认收起便于浏览；展开成员后可用自然语言单独细化延展职责。
+                        {TEAM_CREATION_NOTICE} Runtime 在使用模板创建时选择。
                       </p>
                     </div>
                     <span className="text-sm text-gray-500">共 {selected.spec.members.length} 人</span>
@@ -519,7 +512,7 @@ const CustomTeamTemplatesPage: React.FC = () => {
                             }))
                           }
                           aria-expanded={open}
-                          className="flex min-w-0 flex-1 items-center justify-between gap-4 rounded-lg text-left hover:bg-[#fffaf6]"
+                          className="flex min-w-0 flex-1 items-center justify-between gap-4 rounded-lg text-left hover:bg-[var(--cm-subtle)]"
                         >
                           <div className="min-w-0">
                             <div className="flex flex-wrap items-center gap-2">
@@ -543,7 +536,7 @@ const CustomTeamTemplatesPage: React.FC = () => {
                         </div>
 
                         {open && (
-                          <div className="border-t border-[#f1e5df] bg-white px-5 py-5">
+                          <div className="border-t border-[var(--cm-border)] bg-white px-5 py-5">
                             <div className="grid gap-3 lg:grid-cols-2">
                               <RoleSection title="使命" values={[member.mission]} />
                               <RoleSection title="核心职责" values={member.responsibilities} />
@@ -646,7 +639,7 @@ function MemberCountSelect({
       <select
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className="mt-1 block w-full rounded-xl border border-[#eadfd8] bg-white px-3 py-2 text-sm"
+        className="mt-1 block w-full rounded-xl border border-[var(--cm-border)] bg-white px-3 py-2 text-sm"
       >
         <option value="">系统自动分配</option>
         {MEMBER_COUNTS.map((count) => (
@@ -662,7 +655,7 @@ function MemberCountSelect({
 function RoleSection({ title, values }: { title: string; values: string[] }) {
   const clean = values.filter(Boolean);
   return (
-    <div className="rounded-xl border border-[#f1e5df] bg-[#fcfbfa] p-4">
+    <div className="rounded-xl border border-[var(--cm-border)] bg-[#fcfbfa] p-4">
       <h3 className="text-sm font-semibold text-gray-900">{title}</h3>
       {clean.length === 0 ? (
         <p className="mt-2 text-sm text-gray-400">未设置</p>

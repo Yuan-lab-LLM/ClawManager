@@ -20,11 +20,42 @@ func NewTeamHandler(teamService services.TeamService) *TeamHandler {
 	return &TeamHandler{teamService: teamService}
 }
 
+// ResourceScopeGuard is applied to every legacy CM Team route, including files
+// and history. Owner Teams use their separate authenticated adapter.
+func (h *TeamHandler) ResourceScopeGuard(c *gin.Context) {
+	if c.Param("id") == "" {
+		c.Next()
+		return
+	}
+	id, valid := parseTeamID(c)
+	if !valid {
+		c.Abort()
+		return
+	}
+	userID, ok := c.Get("userID")
+	checker, capable := h.teamService.(interface{ CheckCMTeam(int, int) error })
+	if !ok || !capable {
+		utils.Error(c, http.StatusNotFound, "Team not found")
+		c.Abort()
+		return
+	}
+	if err := checker.CheckCMTeam(userID.(int), id); err != nil {
+		utils.HandleError(c, err)
+		c.Abort()
+		return
+	}
+	c.Next()
+}
+
 func (h *TeamHandler) CreateTeam(c *gin.Context) {
 	userID, _ := c.Get("userID")
 	var req services.CreateTeamRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		utils.ValidationError(c, err)
+		return
+	}
+	if err := services.ValidateNewTeamRequest(req); err != nil {
+		utils.Error(c, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
 	team, err := h.teamService.CreateTeam(userID.(int), req)
@@ -256,17 +287,13 @@ func (h *TeamHandler) DeleteTeam(c *gin.Context) {
 }
 
 func (h *TeamHandler) DeleteMember(c *gin.Context) {
-	userID, _ := c.Get("userID")
-	teamID, ok := parseTeamID(c)
+	_, ok := parseTeamID(c)
 	if !ok {
 		return
 	}
-	memberID := c.Param("memberID")
-	if err := h.teamService.DeleteMember(userID.(int), teamID, memberID); err != nil {
-		utils.HandleError(c, err)
-		return
-	}
-	utils.Success(c, http.StatusOK, "Team member deleted successfully", gin.H{"member_id": memberID})
+	// Authentication and ownership are enforced by ResourceScopeGuard. Keep the
+	// route for old clients, but never enter the destructive engine from here.
+	c.JSON(http.StatusConflict, gin.H{"success": false, "error": services.TeamMemberRemovalUnsupportedMessage, "error_code": services.TeamMemberRemovalUnsupportedCode})
 }
 
 func parseTeamID(c *gin.Context) (int, bool) {
@@ -288,4 +315,27 @@ func parseOptionalIntQuery(c *gin.Context, key string) int {
 		return 0
 	}
 	return value
+}
+
+func (h *TeamHandler) Power(c *gin.Context) {
+	user, _ := c.Get("userID")
+	id, ok := parseTeamID(c)
+	if !ok {
+		return
+	}
+	control, ok := h.teamService.(services.TeamLifecycleControl)
+	if !ok {
+		utils.Error(c, 503, "团队启停服务未就绪")
+		return
+	}
+	target := "running"
+	if strings.HasSuffix(c.FullPath(), "/stop") {
+		target = "stopped"
+	}
+	result, err := control.RequestTeamPower(c.Request.Context(), user.(int), id, target)
+	if err != nil {
+		utils.Error(c, 409, err.Error())
+		return
+	}
+	utils.Success(c, 202, "团队启停操作已受理", result)
 }

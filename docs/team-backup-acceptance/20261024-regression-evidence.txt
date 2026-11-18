@@ -1,0 +1,61 @@
+===== backend-test-all.log =====
+?   	clawreef/cmd/fixpassword	[no test files]
+?   	clawreef/cmd/initdb	[no test files]
+?   	clawreef/cmd/northbound-gateway	[no test files]
+?   	clawreef/cmd/server	[no test files]
+?   	clawreef/cmd/system-backup-controller	[no test files]
+ok  	clawreef/internal/aigateway	3.357s
+ok  	clawreef/internal/buildinfo	1.831s
+ok  	clawreef/internal/config	1.468s
+ok  	clawreef/internal/db	3.517s
+ok  	clawreef/internal/egresspolicy	1.470s
+ok  	clawreef/internal/handlers	3.590s
+?   	clawreef/internal/heartbeat	[no test files]
+?   	clawreef/internal/middleware	[no test files]
+ok  	clawreef/internal/models	1.615s
+ok  	clawreef/internal/nbkeys	2.169s
+ok  	clawreef/internal/northbound	3.571s
+ok  	clawreef/internal/ownerrecords	3.398s
+ok  	clawreef/internal/repository	3.108s
+ok  	clawreef/internal/services	16.013s
+ok  	clawreef/internal/services/k8s	9.207s
+?   	clawreef/internal/services/leader	[no test files]
+ok  	clawreef/internal/systembackup	218.711s
+ok  	clawreef/internal/systembackup/team	1.742s
+ok  	clawreef/internal/teampresentation	1.806s
+ok  	clawreef/internal/teamtemplate	3.333s
+ok  	clawreef/internal/utils	2.169s
+
+===== backup-regression-final.log =====
+ok  	clawreef/internal/systembackup	322.118s
+ok  	clawreef/internal/systembackup/team	1.384s
+ok  	clawreef/internal/backupgate	2.554s
+ok  	clawreef/internal/handlers	1.843s
+ok  	clawreef/internal/db	1.005s
+ok  	clawreef/cmd/system-backup-artifact	1.367s
+?   	clawreef/cmd/system-backup-controller	[no test files]
+
+===== application-gate-test.log =====
+ok  	clawreef/internal/systembackup	15.438s
+
+===== streaming-full-schema.log =====
+ok  	clawreef/internal/systembackup	47.937s
+
+===== hermes-contract-regression-after.log =====
+Redis Team: failed to publish reply: projection interrupted
+Redis Team: shared workspace is unusable: Team shared directory is unusable: C:\Users\HANXIN~1\AppData\Local\Temp\tmpsc4rsq9c\team (path is not a directory; uid=0 gid=0 mode=0o666; euid=-1 egid=-1 groups=)
+----------------------------------------------------------------------
+Ran 55 tests in 7.966s
+
+OK
+
+===== hermes-maintenance-after.log =====
+test_maintenance_stops_new_dispatch_and_resumes_pending (test_backup_maintenance.BackupMaintenanceTests) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 4.084s
+
+OK
+
+===== openclaw-maintenance-after.log =====
+PASS: batch maintenance pause and pending resume

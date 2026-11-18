@@ -32,7 +32,7 @@ export default function RuntimeMaintenancePanel({ instanceId }: { instanceId: nu
           ]);
           if (!cancelled && ticket === sequence.current) {
             setState(value);
-            setSupported(protocol.mode === "governed" && protocol.capabilities.includes("maintenance_drain"));
+            setSupported(value.manual_controls_available === true && protocol.mode === "governed" && protocol.capabilities.includes("maintenance_drain"));
             setError("");
           }
         } catch {

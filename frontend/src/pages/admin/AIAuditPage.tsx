@@ -42,7 +42,7 @@ function renderCodeBlock(content?: string) {
       </>
     );
   } catch {
-    return <span className="whitespace-pre-wrap break-words text-[#f7f4f2]">{content}</span>;
+    return <span className="whitespace-pre-wrap break-words text-[#abb2bf]">{content}</span>;
   }
 }
 
@@ -100,13 +100,13 @@ function flowKindTone(kind: string) {
     case 'user_message':
       return 'bg-[#eef7ff] text-[#356a9f] border-[#d9e8f8]';
     case 'llm_call':
-      return 'bg-[#fff3ec] text-[#b46c50] border-[#f3d7ca]';
+      return 'bg-[var(--cm-selected)] text-[var(--cm-muted)] border-[var(--cm-border)]';
     case 'tool_call':
       return 'bg-[#f6f0ff] text-[#6f4ea5] border-[#e3d7f4]';
     case 'tool_output':
       return 'bg-[#eefbf2] text-[#2f7a45] border-[#d2ecd9]';
     default:
-      return 'bg-[#f5f1ec] text-[#6d645f] border-[#eadfd8]';
+      return 'bg-[var(--cm-subtle)] text-[var(--cm-text)] border-[var(--cm-border)]';
   }
 }
 
@@ -244,9 +244,9 @@ function statusTone(status?: string) {
       return 'border-[#cfe6d8] bg-[#eefaf2] text-[#246b3f]';
     case 'failed':
     case 'error':
-      return 'border-[#f2c8c5] bg-[#fff1f0] text-[#b23b32]';
+      return 'border-[var(--cm-border)] bg-[var(--cm-subtle)] text-[#b23b32]';
     case 'blocked':
-      return 'border-[#f4ddbf] bg-[#fff7e9] text-[#9f5e16]';
+      return 'border-[#f4ddbf] bg-[var(--cm-subtle)] text-[#9f5e16]';
     default:
       return 'border-[#d9e8f8] bg-[#eef7ff] text-[#356a9f]';
   }
@@ -333,9 +333,9 @@ function severityTone(severity?: string) {
   switch ((severity ?? '').toLowerCase()) {
     case 'critical':
     case 'high':
-      return 'border-[#f2c8c5] bg-[#fff1f0] text-[#b23b32]';
+      return 'border-[var(--cm-border)] bg-[var(--cm-subtle)] text-[#b23b32]';
     case 'medium':
-      return 'border-[#f4ddbf] bg-[#fff7e9] text-[#9f5e16]';
+      return 'border-[#f4ddbf] bg-[var(--cm-subtle)] text-[#9f5e16]';
     case 'low':
       return 'border-[#cfe6d8] bg-[#eefaf2] text-[#246b3f]';
     default:
@@ -725,7 +725,7 @@ const AIAuditPage: React.FC = () => {
 
   const renderPagination = () => (
     !loading && listState.total > 0 && (
-      <div className="flex items-center justify-between gap-3 border-t border-[#f1e7e1] px-4 py-4 text-xs text-[#8f8681] sm:px-5 sm:text-sm">
+      <div className="flex items-center justify-between gap-3 border-t border-[var(--cm-border)] px-4 py-4 text-xs text-[var(--cm-muted)] sm:px-5 sm:text-sm">
         <div className="truncate">
           {t('admin.pageSummary', { page, total: totalPages })}
         </div>
@@ -758,14 +758,14 @@ const AIAuditPage: React.FC = () => {
 
     return (
       <div className="mt-6 space-y-6 transition-all duration-300 ease-out">
-        <div className="overflow-hidden rounded-[28px] border border-[#eadfd8] bg-[linear-gradient(135deg,#fff7f1_0%,#fffdfb_55%,#fffaf5_100%)] shadow-[0_34px_90px_-70px_rgba(96,58,24,0.55)]">
-          <div className="border-b border-[#efe3db] px-5 py-5 sm:px-6">
+        <div className="overflow-hidden rounded-lg border border-[var(--cm-border)] bg-[var(--cm-subtle)] shadow-sm">
+          <div className="border-b border-[var(--cm-border)] px-5 py-5 sm:px-6">
             <div className="flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
               <div className="min-w-0 flex-1">
-                <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#b46c50]">{t('aiAuditPage.trace')}</div>
+                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--cm-muted)]">{t('aiAuditPage.trace')}</div>
                 <div className="mt-3 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                   <div className="min-w-0">
-                    <div className="break-all text-[1.55rem] font-semibold tracking-[-0.04em] text-[#171212]">
+                    <div className="break-all text-[1.55rem] font-semibold tracking-[-0.04em] text-[var(--cm-ink)]">
                       {selectedTrace.trace_id}
                     </div>
                     <div className="mt-4 flex flex-wrap gap-2">
@@ -779,7 +779,7 @@ const AIAuditPage: React.FC = () => {
                     <button
                       type="button"
                       onClick={() => void copyTrace(selectedTrace.trace_id)}
-                      className="app-button-secondary shrink-0 border-[#d9ccc4] bg-white/90 text-[#171212] shadow-sm"
+                      className="app-button-secondary shrink-0 border-[var(--cm-border)] bg-white/90 text-[var(--cm-ink)] shadow-sm"
                     >
                       {copyState === selectedTrace.trace_id ? t('aiAuditPage.copied') : t('aiAuditPage.copyTraceId')}
                     </button>
@@ -787,10 +787,10 @@ const AIAuditPage: React.FC = () => {
                 </div>
               </div>
               <div className="grid gap-3 sm:grid-cols-2 xl:w-[380px]">
-                <div className="rounded-2xl border border-[#eadfd8] bg-white/88 p-4">
+                <div className="rounded-2xl border border-[var(--cm-border)] bg-white/88 p-4">
                   <TimestampStack label={t('common.createdAt')} value={traceSummary.startedAt} locale={locale} />
                 </div>
-                <div className="rounded-2xl border border-[#eadfd8] bg-white/88 p-4">
+                <div className="rounded-2xl border border-[var(--cm-border)] bg-white/88 p-4">
                   <TimestampStack label={t('common.lastUpdated')} value={traceSummary.latestAt} locale={locale} />
                 </div>
               </div>
@@ -859,14 +859,14 @@ const AIAuditPage: React.FC = () => {
           stickyFriendly
         >
           {selectedTrace.flow_nodes.length === 0 ? (
-            <div className="text-sm text-[#8f8681]">{t('aiAuditPage.noFlowNodes')}</div>
+            <div className="text-sm text-[var(--cm-muted)]">{t('aiAuditPage.noFlowNodes')}</div>
           ) : (
             <div className="grid gap-5 xl:grid-cols-[228px_minmax(0,1fr)]">
               <aside className="self-start xl:sticky xl:top-6">
-                <div className="flex max-h-[calc(100vh-3rem)] flex-col overflow-hidden rounded-[24px] border border-[#efe3db] bg-[#fcfaf8] shadow-[0_24px_60px_-52px_rgba(88,54,24,0.4)]">
-                  <div className="border-b border-[#f1e7e1] px-4 py-4">
-                    <div className="text-sm font-semibold text-[#171212]">{t('aiAuditPage.flowMinimap')}</div>
-                    <p className="mt-1 text-xs leading-5 text-[#8f8681]">{t('aiAuditPage.flowMinimapSubtitle')}</p>
+                <div className="flex max-h-[calc(100vh-3rem)] flex-col overflow-hidden rounded-lg border border-[var(--cm-border)] bg-[var(--cm-subtle)] shadow-sm">
+                  <div className="border-b border-[var(--cm-border)] px-4 py-4">
+                    <div className="text-sm font-semibold text-[var(--cm-ink)]">{t('aiAuditPage.flowMinimap')}</div>
+                    <p className="mt-1 text-xs leading-5 text-[var(--cm-muted)]">{t('aiAuditPage.flowMinimapSubtitle')}</p>
                   </div>
                   <div ref={minimapScrollRef} className="min-h-0 overflow-auto p-2.5">
                     <div className="space-y-1.5">
@@ -887,22 +887,22 @@ const AIAuditPage: React.FC = () => {
                             }}
                             type="button"
                             onClick={() => jumpToFlowNode(node.id)}
-                            className={`w-full rounded-[18px] border px-2.5 py-2 text-left transition ${
+                            className={`w-full rounded-lg border px-2.5 py-2 text-left transition ${
                               isActive
-                                ? 'border-[#ef6b4a] bg-[#fff3ec] shadow-[0_18px_42px_-32px_rgba(180,108,80,0.55)]'
-                                : 'border-transparent bg-white hover:border-[#eadfd8] hover:bg-[#fffaf7]'
+                                ? 'border-[#ef6b4a] bg-[var(--cm-selected)] shadow-sm'
+                                : 'border-transparent bg-white hover:border-[var(--cm-border)] hover:bg-[var(--cm-subtle)]'
                             }`}
                           >
                             <div className="flex items-start gap-2.5">
-                              <span className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-[10px] font-semibold ${flowKindTone(node.kind)}`}>
+                              <span className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-xs font-semibold ${flowKindTone(node.kind)}`}>
                                 {index + 1}
                               </span>
                               <div className="min-w-0">
-                                <div className="truncate text-[13px] font-semibold leading-5 text-[#171212]">
+                                <div className="truncate text-[13px] font-semibold leading-5 text-[var(--cm-ink)]">
                                   {node.title || flowKindLabel(node.kind, t)}
                                 </div>
-                                <div className="mt-0.5 text-[10px] text-[#7a6d66]">{flowKindLabel(node.kind, t)}</div>
-                                <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-[#9a8f89]">
+                                <div className="mt-0.5 text-xs text-[var(--cm-text)]">{flowKindLabel(node.kind, t)}</div>
+                                <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-[var(--cm-muted)]">
                                   <span>{formatRelativeTimestamp(node.created_at, locale)}</span>
                                   <span>{durationLabel}</span>
                                 </div>
@@ -932,11 +932,11 @@ const AIAuditPage: React.FC = () => {
                     className="relative scroll-mt-28 pl-8"
                   >
                     {index < selectedTrace.flow_nodes.length - 1 && (
-                      <div className="absolute left-[13px] top-8 h-[calc(100%-0.75rem)] w-px bg-[#eadfd8]" />
+                      <div className="absolute left-[13px] top-8 h-[calc(100%-0.75rem)] w-px bg-[var(--cm-subtle)]" />
                     )}
                     <div className={`absolute left-0 top-4 h-7 w-7 rounded-full border shadow-sm ${flowKindTone(node.kind)}`} />
-                    <div className={`rounded-[24px] border bg-[#fffaf7] p-4 shadow-[0_24px_60px_-52px_rgba(88,54,24,0.45)] transition ${
-                      node.id === activeFlowNodeId ? 'border-[#ef6b4a]' : 'border-[#efe3db]'
+                    <div className={`rounded-lg border bg-[var(--cm-subtle)] p-4 shadow-sm transition ${
+                      node.id === activeFlowNodeId ? 'border-[#ef6b4a]' : 'border-[var(--cm-border)]'
                     }`}>
                       <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
                         <div className="min-w-0 flex-1">
@@ -950,13 +950,13 @@ const AIAuditPage: React.FC = () => {
                               </span>
                             )}
                           </div>
-                          <div className="mt-3 text-base font-semibold text-[#171212]">
+                          <div className="mt-3 text-base font-semibold text-[var(--cm-ink)]">
                             {node.title || flowKindLabel(node.kind, t)}
                           </div>
                           {node.summary && (
-                            <div className="mt-2 text-sm leading-6 text-[#5f5957]">{node.summary}</div>
+                            <div className="mt-2 text-sm leading-6 text-[var(--cm-text)]">{node.summary}</div>
                           )}
-                          <div className="mt-4 flex flex-wrap gap-2 text-xs text-[#7a6d66]">
+                          <div className="mt-4 flex flex-wrap gap-2 text-xs text-[var(--cm-text)]">
                             {flowNodeDurationMap[node.id] != null && (
                               <MetaPill tone="soft">{formatDuration(flowNodeDurationMap[node.id])}</MetaPill>
                             )}
@@ -976,21 +976,21 @@ const AIAuditPage: React.FC = () => {
                       {(node.input_payload || node.output_payload) && (
                         <div className="mt-4 grid gap-4 xl:grid-cols-2">
                           {node.input_payload && (
-                            <div className="rounded-2xl border border-[#eadfd8] bg-white p-4">
-                              <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#8f8681]">
+                            <div className="rounded-2xl border border-[var(--cm-border)] bg-white p-4">
+                              <div className="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-[var(--cm-muted)]">
                                 {t('aiAuditPage.nodeInput')}
                               </div>
-                              <pre className="max-h-80 overflow-auto rounded-xl bg-[#171212] p-3 text-[11px] leading-5">
+                              <pre className="max-h-80 overflow-auto rounded-xl bg-[#171212] p-3 text-xs leading-5 text-[#abb2bf]">
                                 {renderCodeBlock(node.input_payload)}
                               </pre>
                             </div>
                           )}
                           {node.output_payload && (
-                            <div className="rounded-2xl border border-[#eadfd8] bg-white p-4">
-                              <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#8f8681]">
+                            <div className="rounded-2xl border border-[var(--cm-border)] bg-white p-4">
+                              <div className="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-[var(--cm-muted)]">
                                 {t('aiAuditPage.nodeOutput')}
                               </div>
-                              <pre className="max-h-80 overflow-auto rounded-xl bg-[#171212] p-3 text-[11px] leading-5">
+                              <pre className="max-h-80 overflow-auto rounded-xl bg-[#171212] p-3 text-xs leading-5 text-[#abb2bf]">
                                 {renderCodeBlock(node.output_payload)}
                               </pre>
                             </div>
@@ -1010,11 +1010,11 @@ const AIAuditPage: React.FC = () => {
           badge={formatNumberValue(selectedTrace.cost_records.length, locale)}
         >
           {selectedTrace.cost_records.length === 0 ? (
-            <div className="text-sm text-[#8f8681]">{t('aiAuditPage.noCostRecords')}</div>
+            <div className="text-sm text-[var(--cm-muted)]">{t('aiAuditPage.noCostRecords')}</div>
           ) : (
             <div className="space-y-4">
               {selectedTrace.cost_records.map((record) => (
-                <div key={record.id} className="rounded-[24px] border border-[#efe3db] bg-[#fffaf7] p-4 shadow-[0_24px_60px_-52px_rgba(88,54,24,0.45)]">
+                <div key={record.id} className="rounded-lg border border-[var(--cm-border)] bg-[var(--cm-subtle)] p-4 shadow-sm">
                   <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
@@ -1022,8 +1022,8 @@ const AIAuditPage: React.FC = () => {
                         {record.username && <MetaPill>{record.username}</MetaPill>}
                         {record.instance_name && <MetaPill tone="soft">{record.instance_name}</MetaPill>}
                       </div>
-                      <div className="mt-3 text-lg font-semibold text-[#171212]">{record.model_name}</div>
-                      <div className="mt-2 text-sm text-[#7a6d66]">{selectedTrace.trace_id}</div>
+                      <div className="mt-3 text-lg font-semibold text-[var(--cm-ink)]">{record.model_name}</div>
+                      <div className="mt-2 text-sm text-[var(--cm-text)]">{selectedTrace.trace_id}</div>
                     </div>
                     <div className="xl:w-[220px]">
                       <TimestampStack value={record.recorded_at} locale={locale} align="right" />
@@ -1067,11 +1067,11 @@ const AIAuditPage: React.FC = () => {
           badge={formatNumberValue(selectedTrace.risk_hits.length, locale)}
         >
           {selectedTrace.risk_hits.length === 0 ? (
-            <div className="text-sm text-[#8f8681]">{t('aiAuditPage.noRiskHits')}</div>
+            <div className="text-sm text-[var(--cm-muted)]">{t('aiAuditPage.noRiskHits')}</div>
           ) : (
             <div className="space-y-3">
               {selectedTrace.risk_hits.map((hit) => (
-                <div key={hit.id} className="rounded-2xl border border-[#f1e7e1] bg-[#fffaf7] p-4">
+                <div key={hit.id} className="rounded-2xl border border-[var(--cm-border)] bg-[var(--cm-subtle)] p-4">
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
@@ -1080,8 +1080,8 @@ const AIAuditPage: React.FC = () => {
                         </span>
                         <MetaPill tone="info">{hit.action}</MetaPill>
                       </div>
-                      <div className="mt-3 text-base font-semibold text-[#171212]">{hit.rule_name}</div>
-                      <div className="mt-2 text-sm leading-6 text-[#5f5957]">{hit.match_summary}</div>
+                      <div className="mt-3 text-base font-semibold text-[var(--cm-ink)]">{hit.rule_name}</div>
+                      <div className="mt-2 text-sm leading-6 text-[var(--cm-text)]">{hit.match_summary}</div>
                     </div>
                     <div className="sm:w-[220px]">
                       <TimestampStack value={hit.created_at} locale={locale} align="right" />
@@ -1101,12 +1101,7 @@ const AIAuditPage: React.FC = () => {
     <AdminLayout title={t('nav.aiAudit')}>
       <div className="space-y-6">
         <section className={`app-panel p-6 ${isSplitView ? 'overflow-visible' : ''}`}>
-          <div>
-            <h2 className="text-xl font-semibold text-[#171212]">{t('aiAuditPage.title')}</h2>
-            <p className="mt-1 text-sm text-[#8f8681]">
-              {t('aiAuditPage.subtitle')}
-            </p>
-          </div>
+
 
           {error && (
             <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-red-700">
@@ -1123,12 +1118,12 @@ const AIAuditPage: React.FC = () => {
             </div>
           )}
 
-          <div className={`mt-6 rounded-2xl border border-[#eadfd8] bg-white ${isSplitView ? 'overflow-visible' : 'overflow-hidden'}`}>
-            <div className="border-b border-[#f1e7e1] px-4 py-4 sm:px-5">
+          <div className={`mt-6 rounded-2xl border border-[var(--cm-border)] bg-white ${isSplitView ? 'overflow-visible' : 'overflow-hidden'}`}>
+            <div className="border-b border-[var(--cm-border)] px-4 py-4 sm:px-5">
               <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
                 <div>
-                  <h3 className="text-lg font-semibold text-[#171212]">{t('aiAuditPage.traceTable')}</h3>
-                  <p className="mt-1 text-sm text-[#8f8681]">
+                  <h3 className="text-lg font-semibold text-[var(--cm-ink)]">{t('aiAuditPage.traceTable')}</h3>
+                  <p className="mt-1 text-sm text-[var(--cm-muted)]">
                     {t('aiAuditPage.traceTableSubtitle')}
                   </p>
                 </div>
@@ -1175,17 +1170,17 @@ const AIAuditPage: React.FC = () => {
             </div>
 
             {loading ? (
-              <div className="px-5 py-6 text-sm text-[#8f8681]">{t('aiAuditPage.loading')}</div>
+              <div className="px-5 py-6 text-sm text-[var(--cm-muted)]">{t('aiAuditPage.loading')}</div>
             ) : listState.items.length === 0 ? (
-              <div className="px-5 py-6 text-sm text-[#8f8681]">{t('aiAuditPage.empty')}</div>
+              <div className="px-5 py-6 text-sm text-[var(--cm-muted)]">{t('aiAuditPage.empty')}</div>
             ) : isSplitView ? (
               <div className="grid gap-0 xl:grid-cols-[320px_minmax(0,1fr)]">
-                <div className="border-b border-[#f1e7e1] bg-[#fcfaf8] xl:border-b-0 xl:border-r">
-                  <div className="border-b border-[#f1e7e1] px-5 py-4">
-                    <div className="text-sm font-semibold text-[#171212]">{t('aiAuditPage.trace')}</div>
-                    <div className="mt-1 text-xs text-[#8f8681]">{t('aiAuditPage.traceTableSubtitle')}</div>
+                <div className="border-b border-[var(--cm-border)] bg-[var(--cm-subtle)] xl:border-b-0 xl:border-r">
+                  <div className="border-b border-[var(--cm-border)] px-5 py-4">
+                    <div className="text-sm font-semibold text-[var(--cm-ink)]">{t('aiAuditPage.trace')}</div>
+                    <div className="mt-1 text-xs text-[var(--cm-muted)]">{t('aiAuditPage.traceTableSubtitle')}</div>
                   </div>
-                  <div className="divide-y divide-[#f7efe9]">
+                  <div className="divide-y divide-[var(--cm-border)]">
                     {listState.items.map((item) => {
                       const isActive = selectedTraceId === item.trace_id || loadingTraceId === item.trace_id;
                       return (
@@ -1194,12 +1189,12 @@ const AIAuditPage: React.FC = () => {
                           type="button"
                           onClick={() => void loadTraceDetail(item.trace_id)}
                           className={`flex w-full flex-col gap-2 px-5 py-4 text-left transition ${
-                            isActive ? 'bg-[#fff3ec]' : 'hover:bg-[#fffaf7]'
+                            isActive ? 'bg-[var(--cm-selected)]' : 'hover:bg-[var(--cm-subtle)]'
                           }`}
                         >
-                          <div className="truncate text-sm font-medium text-[#171212]">{item.trace_id}</div>
-                          <div className="text-xs font-medium text-[#5f5957]">{formatRelativeTimestamp(item.created_at, locale)}</div>
-                          <div className="text-[11px] text-[#9a8f89]">{formatAbsoluteTimestamp(item.created_at, locale)}</div>
+                          <div className="truncate text-sm font-medium text-[var(--cm-ink)]">{item.trace_id}</div>
+                          <div className="text-xs font-medium text-[var(--cm-text)]">{formatRelativeTimestamp(item.created_at, locale)}</div>
+                          <div className="text-xs text-[var(--cm-muted)]">{formatAbsoluteTimestamp(item.created_at, locale)}</div>
                         </button>
                       );
                     })}
@@ -1208,23 +1203,23 @@ const AIAuditPage: React.FC = () => {
                 </div>
 
                 <div
-                  className={`min-w-0 bg-[#fffdfb] px-4 py-5 transition-all duration-300 ease-out sm:px-5 xl:px-6 ${
+                  className={`min-w-0 bg-[var(--cm-subtle)] px-4 py-5 transition-all duration-300 ease-out sm:px-5 xl:px-6 ${
                     isDetailVisible ? 'opacity-100' : 'pointer-events-none translate-x-4 opacity-0'
                   }`}
                 >
-                  <div className="flex items-center justify-between gap-3 border-b border-[#f1e7e1] pb-4">
+                  <div className="flex items-center justify-between gap-3 border-b border-[var(--cm-border)] pb-4">
                     <div>
-                      <h3 className="text-lg font-semibold text-[#171212]">{t('aiAuditPage.detailTitle')}</h3>
-                      <p className="mt-1 text-sm text-[#8f8681]">
+                      <h3 className="text-lg font-semibold text-[var(--cm-ink)]">{t('aiAuditPage.detailTitle')}</h3>
+                      <p className="mt-1 text-sm text-[var(--cm-muted)]">
                         {t('aiAuditPage.detailSubtitle')}
                       </p>
                     </div>
                     <div className="flex items-center gap-3">
-                      {detailLoading && <div className="text-sm text-[#8f8681]">{t('aiAuditPage.detailLoading')}</div>}
+                      {detailLoading && <div className="text-sm text-[var(--cm-muted)]">{t('aiAuditPage.detailLoading')}</div>}
                       <button
                         type="button"
                         onClick={clearSelectedTrace}
-                        className="app-button-secondary border-[#d9ccc4] bg-white text-[#171212] shadow-sm"
+                        className="app-button-secondary border-[var(--cm-border)] bg-white text-[var(--cm-ink)] shadow-sm"
                       >
                         {t('common.close')}
                       </button>
@@ -1234,7 +1229,7 @@ const AIAuditPage: React.FC = () => {
                   {selectedTrace ? (
                     renderTraceDetailContent()
                   ) : (
-                    <div className="mt-6 rounded-2xl border border-dashed border-[#eadfd8] bg-white px-5 py-8 text-sm text-[#8f8681]">
+                    <div className="mt-6 rounded-2xl border border-dashed border-[var(--cm-border)] bg-white px-5 py-8 text-sm text-[var(--cm-muted)]">
                       {t('aiAuditPage.detailLoading')}
                     </div>
                   )}
@@ -1243,19 +1238,19 @@ const AIAuditPage: React.FC = () => {
             ) : (
               <>
                 <div className="overflow-x-auto">
-                  <table className="min-w-full divide-y divide-[#f1e7e1]">
-                    <thead className="bg-[#fcfaf8]">
+                  <table className="min-w-full divide-y divide-[var(--cm-border)]">
+                    <thead className="bg-[var(--cm-subtle)]">
                       <tr>
-                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.12em] text-[#8f8681]">{t('aiAuditPage.trace')}</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.12em] text-[#8f8681]">{t('aiAuditPage.user')}</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.12em] text-[#8f8681]">{t('aiAuditPage.requested')}</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.12em] text-[#8f8681]">{t('aiAuditPage.providerResult')}</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.12em] text-[#8f8681]">{t('aiAuditPage.usage')}</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.12em] text-[#8f8681]">{t('common.status')}</th>
-                        <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-[0.12em] text-[#8f8681]">{t('aiAuditPage.action')}</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.12em] text-[var(--cm-muted)]">{t('aiAuditPage.trace')}</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.12em] text-[var(--cm-muted)]">{t('aiAuditPage.user')}</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.12em] text-[var(--cm-muted)]">{t('aiAuditPage.requested')}</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.12em] text-[var(--cm-muted)]">{t('aiAuditPage.providerResult')}</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.12em] text-[var(--cm-muted)]">{t('aiAuditPage.usage')}</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.12em] text-[var(--cm-muted)]">{t('common.status')}</th>
+                        <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-[0.12em] text-[var(--cm-muted)]">{t('aiAuditPage.action')}</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-[#f7efe9]">
+                    <tbody className="divide-y divide-[var(--cm-border)]">
                       {listState.items.map((item) => (
                         (() => {
                           const normalizedStatus = normalizeAuditStatus(item.status);
@@ -1264,35 +1259,35 @@ const AIAuditPage: React.FC = () => {
                           return (
                             <tr
                               key={`${item.trace_id}-${item.request_id}`}
-                              className={`${selectedTraceId === item.trace_id ? 'bg-[#fff3ec]' : 'hover:bg-[#fffaf7]'}`}
+                              className={`${selectedTraceId === item.trace_id ? 'bg-[var(--cm-selected)]' : 'hover:bg-[var(--cm-subtle)]'}`}
                             >
                               <td className="px-4 py-4 align-top">
                                 <div className="flex items-center gap-2">
-                                  <div className="font-medium text-[#171212]">{item.trace_id}</div>
+                                  <div className="font-medium text-[var(--cm-ink)]">{item.trace_id}</div>
                                   <button
                                     type="button"
                                     onClick={() => void copyTrace(item.trace_id)}
-                                    className="rounded-full border border-[#eadfd8] bg-white px-2 py-1 text-[11px] text-[#8f8681] hover:text-[#171212]"
+                                    className="rounded-full border border-[var(--cm-border)] bg-white px-2 py-1 text-xs text-[var(--cm-muted)] hover:text-[var(--cm-ink)]"
                                   >
                                     {copyState === item.trace_id ? t('aiAuditPage.copied') : t('aiAuditPage.copy')}
                                   </button>
                                 </div>
-                                <div className="mt-1 text-xs font-medium text-[#5f5957]">{formatRelativeTimestamp(item.created_at, locale)}</div>
-                                <div className="mt-1 text-[11px] text-[#9a8f89]">{formatAbsoluteTimestamp(item.created_at, locale)}</div>
+                                <div className="mt-1 text-xs font-medium text-[var(--cm-text)]">{formatRelativeTimestamp(item.created_at, locale)}</div>
+                                <div className="mt-1 text-xs text-[var(--cm-muted)]">{formatAbsoluteTimestamp(item.created_at, locale)}</div>
                               </td>
                               <td className="px-4 py-4 align-top">
-                                <div className="font-medium text-[#171212]">{item.username || '-'}</div>
-                                <div className="mt-1 text-xs text-[#8f8681]">{item.request_id}</div>
+                                <div className="font-medium text-[var(--cm-ink)]">{item.username || '-'}</div>
+                                <div className="mt-1 text-xs text-[var(--cm-muted)]">{item.request_id}</div>
                               </td>
                               <td className="px-4 py-4 align-top">
-                                <div className="font-medium text-[#171212]">{item.requested_model}</div>
-                                <div className="mt-1 text-xs text-[#8f8681]">{item.provider_type}</div>
+                                <div className="font-medium text-[var(--cm-ink)]">{item.requested_model}</div>
+                                <div className="mt-1 text-xs text-[var(--cm-muted)]">{item.provider_type}</div>
                               </td>
                               <td className="px-4 py-4 align-top">
-                                <div className="font-medium text-[#171212]">{item.actual_provider_model}</div>
-                                <div className="mt-1 text-xs text-[#8f8681]">{item.latency_ms ? `${item.latency_ms} ms` : t('aiAuditPage.noLatency')}</div>
+                                <div className="font-medium text-[var(--cm-ink)]">{item.actual_provider_model}</div>
+                                <div className="mt-1 text-xs text-[var(--cm-muted)]">{item.latency_ms ? `${item.latency_ms} ms` : t('aiAuditPage.noLatency')}</div>
                                 {(item.ttft_ms != null || item.tokens_per_second != null) && (
-                                  <div className="mt-1 text-[11px] text-[#9a8f89]">
+                                  <div className="mt-1 text-xs text-[var(--cm-muted)]">
                                     {item.ttft_ms != null ? `TTFT ${item.ttft_ms} ms` : 'TTFT -'}
                                     {' · '}
                                     {item.tokens_per_second != null ? `${item.tokens_per_second.toFixed(1)} tok/s` : '- tok/s'}
@@ -1309,8 +1304,8 @@ const AIAuditPage: React.FC = () => {
                                 )}
                               </td>
                               <td className="px-4 py-4 align-top">
-                                <div className="font-medium text-[#171212]">{item.total_tokens} tokens</div>
-                                <div className="mt-1 text-xs text-[#8f8681]">
+                                <div className="font-medium text-[var(--cm-ink)]">{item.total_tokens} tokens</div>
+                                <div className="mt-1 text-xs text-[var(--cm-muted)]">
                                   {item.prompt_tokens} in / {item.completion_tokens} out
                                 </div>
                               </td>
@@ -1356,12 +1351,12 @@ const TimestampStack: React.FC<{
   return (
     <div className={isRightAligned ? 'text-left sm:text-right' : 'text-left'}>
       {label && (
-        <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#b09d93]">{label}</div>
+        <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--cm-muted)]">{label}</div>
       )}
-      <div className={label ? 'mt-2 text-sm font-semibold text-[#171212]' : 'text-sm font-semibold text-[#171212]'}>
+      <div className={label ? 'mt-2 text-sm font-semibold text-[var(--cm-ink)]' : 'text-sm font-semibold text-[var(--cm-ink)]'}>
         {formatRelativeTimestamp(value, locale)}
       </div>
-      <div className="mt-1 text-xs text-[#8f8681]">{formatAbsoluteTimestamp(value, locale)}</div>
+      <div className="mt-1 text-xs text-[var(--cm-muted)]">{formatAbsoluteTimestamp(value, locale)}</div>
     </div>
   );
 };
@@ -1374,14 +1369,14 @@ const TraceSection: React.FC<{
   children: React.ReactNode;
 }> = ({ title, subtitle, badge, stickyFriendly = false, children }) => {
   return (
-    <section className={`${stickyFriendly ? 'overflow-visible' : 'overflow-hidden'} rounded-[28px] border border-[#eadfd8] bg-white shadow-[0_26px_72px_-60px_rgba(85,52,26,0.45)]`}>
-      <div className="flex flex-col gap-3 border-b border-[#f1e7e1] px-5 py-5 sm:flex-row sm:items-start sm:justify-between sm:px-6">
+    <section className={`${stickyFriendly ? 'overflow-visible' : 'overflow-hidden'} rounded-lg border border-[var(--cm-border)] bg-white shadow-sm`}>
+      <div className="flex flex-col gap-3 border-b border-[var(--cm-border)] px-5 py-5 sm:flex-row sm:items-start sm:justify-between sm:px-6">
         <div>
-          <h3 className="text-lg font-semibold text-[#171212]">{title}</h3>
-          {subtitle && <p className="mt-1 text-sm text-[#8f8681]">{subtitle}</p>}
+          <h3 className="text-lg font-semibold text-[var(--cm-ink)]">{title}</h3>
+          {subtitle && <p className="mt-1 text-sm text-[var(--cm-muted)]">{subtitle}</p>}
         </div>
         {badge && (
-          <span className="inline-flex items-center rounded-full border border-[#eadfd8] bg-[#fffaf7] px-3 py-1 text-xs font-semibold text-[#7a6d66]">
+          <span className="inline-flex items-center rounded-full border border-[var(--cm-border)] bg-[var(--cm-subtle)] px-3 py-1 text-xs font-semibold text-[var(--cm-text)]">
             {badge}
           </span>
         )}
@@ -1398,8 +1393,8 @@ const MetaPill: React.FC<{
   const toneClass = tone === 'info'
     ? 'border-[#d9e8f8] bg-[#eef7ff] text-[#356a9f]'
     : tone === 'soft'
-      ? 'border-[#eadfd8] bg-white text-[#7a6d66]'
-      : 'border-[#f4ddbf] bg-[#fff7e9] text-[#9f5e16]';
+      ? 'border-[var(--cm-border)] bg-white text-[var(--cm-text)]'
+      : 'border-[#f4ddbf] bg-[var(--cm-subtle)] text-[#9f5e16]';
 
   return (
     <span className={`inline-flex max-w-full items-center rounded-full border px-2.5 py-1 text-xs font-medium ${toneClass}`}>
@@ -1415,22 +1410,22 @@ const DetailMetricCard: React.FC<{
   tone?: 'neutral' | 'warm' | 'slate' | 'sunset' | 'gold' | 'emerald';
 }> = ({ label, value, hint, tone = 'neutral' }) => {
   const toneClass = tone === 'warm'
-    ? 'border-[#f4ddbf] bg-[#fff8ee]'
+    ? 'border-[#f4ddbf] bg-[var(--cm-subtle)]'
     : tone === 'slate'
       ? 'border-[#d9e8f8] bg-[#f5fafe]'
       : tone === 'sunset'
-        ? 'border-[#f0d8cc] bg-[#fff3ec]'
+        ? 'border-[var(--cm-border)] bg-[var(--cm-selected)]'
         : tone === 'gold'
-          ? 'border-[#f1e0b6] bg-[#fff9e9]'
+          ? 'border-[#f1e0b6] bg-[var(--cm-subtle)]'
           : tone === 'emerald'
             ? 'border-[#d3ead8] bg-[#f3fff6]'
-            : 'border-[#eadfd8] bg-white';
+            : 'border-[var(--cm-border)] bg-white';
 
   return (
     <div className={`rounded-2xl border px-4 py-4 ${toneClass}`}>
-      <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#8f8681]">{label}</div>
-      <div className="mt-3 break-words text-xl font-semibold tracking-[-0.03em] text-[#171212]">{value}</div>
-      {hint && <div className="mt-2 text-xs text-[#7a6d66]">{hint}</div>}
+      <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--cm-muted)]">{label}</div>
+      <div className="mt-3 break-words text-xl font-semibold tracking-[-0.03em] text-[var(--cm-ink)]">{value}</div>
+      {hint && <div className="mt-2 text-xs text-[var(--cm-text)]">{hint}</div>}
     </div>
   );
 };
@@ -1445,12 +1440,12 @@ const SummaryCard: React.FC<{
       ? 'border-amber-200 bg-amber-50'
       : tone === 'red'
         ? 'border-red-200 bg-red-50'
-        : 'border-[#eadfd8] bg-white';
+        : 'border-[var(--cm-border)] bg-white';
 
   return (
     <div className={`rounded-2xl border px-4 py-4 ${toneClass}`}>
-      <div className="text-xs font-semibold uppercase tracking-[0.14em] text-[#8f8681]">{label}</div>
-      <div className="mt-3 text-2xl font-semibold tracking-[-0.04em] text-[#171212]">{value}</div>
+      <div className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--cm-muted)]">{label}</div>
+      <div className="mt-3 text-2xl font-semibold tracking-[-0.04em] text-[var(--cm-ink)]">{value}</div>
     </div>
   );
 };

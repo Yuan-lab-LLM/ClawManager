@@ -20,33 +20,10 @@ type chatSessionRepository struct {
 	sess db.Session
 }
 
-// NewChatSessionRepository creates a new chat session repository and ensures its table exists.
+// NewChatSessionRepository creates a new chat session repository (schema is owned by embedded migrations).
 func NewChatSessionRepository(sess db.Session) ChatSessionRepository {
 	repo := &chatSessionRepository{sess: sess}
-	repo.ensureTable()
 	return repo
-}
-
-func (r *chatSessionRepository) ensureTable() {
-	const query = `
-CREATE TABLE IF NOT EXISTS chat_sessions (
-  id INT AUTO_INCREMENT PRIMARY KEY,
-  session_id VARCHAR(100) NOT NULL UNIQUE,
-  user_id INT NULL,
-  instance_id INT NULL,
-  title VARCHAR(255) NULL,
-  last_trace_id VARCHAR(100) NULL,
-  started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  last_activity_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  INDEX idx_chat_sessions_user_id (user_id),
-  INDEX idx_chat_sessions_instance_id (instance_id),
-  INDEX idx_chat_sessions_last_activity_at (last_activity_at)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-`
-
-	if _, err := r.sess.SQL().Exec(query); err != nil {
-		panic(fmt.Errorf("failed to ensure chat_sessions table: %w", err))
-	}
 }
 
 func (r *chatSessionRepository) GetBySessionID(sessionID string) (*models.ChatSession, error) {

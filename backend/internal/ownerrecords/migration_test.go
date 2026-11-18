@@ -133,7 +133,7 @@ func TestOwnerMigrationMySQL(t *testing.T) {
 	for _, statement := range []string{
 		`CREATE TABLE instances (id BIGINT PRIMARY KEY,user_id BIGINT,owner VARCHAR(128),type VARCHAR(32),instance_mode VARCHAR(16))`,
 		`INSERT INTO instances VALUES (800,20,'real-owner@example.com','openclaw','lite')`,
-		`CREATE TABLE model_invocations (id BIGINT PRIMARY KEY,instance_id BIGINT,session_id VARCHAR(255),status VARCHAR(32),created_at DATETIME(6),prompt_tokens BIGINT,completion_tokens BIGINT,total_tokens BIGINT)`,
+		`CREATE TABLE model_invocations (id BIGINT PRIMARY KEY,instance_id BIGINT,session_id VARCHAR(255),status VARCHAR(32),created_at DATETIME(6),prompt_tokens BIGINT,completion_tokens BIGINT,total_tokens BIGINT, KEY idx_model_invocations_created_at(created_at), KEY idx_model_invocations_instance_session(instance_id,session_id,created_at))`,
 		`INSERT INTO model_invocations VALUES (801,800,'stable-session','completed',UTC_TIMESTAMP(6),3,7,10)`,
 	} {
 		if _, err = db.SQL().Exec(statement); err != nil {
@@ -226,7 +226,7 @@ func TestOwnerMigrationMySQL(t *testing.T) {
 	if err = os.WriteFile(filepath.Join(directory, "session.jsonl"), []byte(fixture), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = db.SQL().Exec(`ALTER TABLE instances ADD workspace_path TEXT, ADD access_token VARCHAR(255)`); err != nil {
+	if _, err = db.SQL().Exec(`ALTER TABLE instances ADD workspace_path TEXT, ADD access_token VARCHAR(255), ADD runtime_generation INT NOT NULL DEFAULT 1`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = db.SQL().Exec(`INSERT INTO instances (id,user_id,owner,type,instance_mode,workspace_path) VALUES (901,22,'native@example.com','openclaw','lite',?)`, workspace); err != nil {
@@ -256,6 +256,9 @@ func TestOwnerMigrationMySQL(t *testing.T) {
 	verifyBufferedActivity(t, store)
 	verifyGrowthV4(t, store)
 	verifySourceRollup(t, store)
+	verifyScanScheduling(t, store)
+	verifyCalendarAndReportIsolation(t, store)
+	verifySyncAdmin(t, store)
 }
 
 func verifyRecentQuestionCache(t *testing.T, s *Store, workspace, path string) {

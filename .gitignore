@@ -73,6 +73,7 @@ Thumbs.db
 /docs/deployment-storage-remediation-plan.zh-CN.md
 
 # Local API / debug artifacts (do not commit)
+/.deploy/
 /_*.json
 /_*.txt
 /_test_*.js
@@ -92,12 +93,14 @@ Thumbs.db
 
 .codex-logs/
 .codex-temp/
+.codex-tmp/
 .cache/
 .VSCodeCounter/
 .superpowers/
 dev_docs/
 devplan.md
 AGENTS.md
+!/AGENTS.md
 TASK_BREAKDOWN.md
 dev_progress.md
 /progress.md

@@ -34,6 +34,9 @@ func (r *instanceCommandRepository) Create(command *models.InstanceCommand) erro
 		return fmt.Errorf("invalid instance command")
 	}
 	return (&instanceRepository{r.sess}).withUnfencedInstance(context.Background(), command.InstanceID, func(tx *instanceRepository) error {
+		if err := checkInstanceAutoStopMutation(context.Background(), tx.sess, command.InstanceID); err != nil {
+			return err
+		}
 		return (&instanceCommandRepository{tx.sess}).create(command)
 	})
 }
@@ -68,6 +71,9 @@ func (r *instanceCommandRepository) Update(command *models.InstanceCommand) erro
 		}
 		terminal := command.Status == "succeeded" || command.Status == "failed"
 		if !terminal {
+			if err := checkInstanceAutoStopMutation(context.Background(), tx.sess, command.InstanceID); err != nil {
+				return err
+			}
 			if err := checkRuntimeUpgrade(context.Background(), tx.sess, command.InstanceID); err != nil {
 				return err
 			}

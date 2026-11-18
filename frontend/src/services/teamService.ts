@@ -13,6 +13,9 @@ import type {
 } from "../types/team";
 
 export const teamService = {
+  startTeam: async (id: number): Promise<import('../types/team').TeamRuntimeState> => (await api.post(`/teams/${id}/start`)).data.data,
+  stopTeam: async (id: number): Promise<import('../types/team').TeamRuntimeState> => (await api.post(`/teams/${id}/stop`)).data.data,
+
   listTeams: async (
     page: number = 1,
     limit: number = 20,

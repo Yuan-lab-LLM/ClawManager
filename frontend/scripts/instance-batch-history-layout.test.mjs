@@ -22,12 +22,12 @@ test('submitting opens history; unfinished work remains signposted when collapse
   assert.match(component, /setSelected\(response.data.data.batch_id\);\s*setHistoryExpanded\(true\)/);
   assert.match(component, /batches.some\(unfinished\)/);
   // Collapse must not become a condition that disables background polling.
-  assert.match(component, /\}, \[refresh\]\);/);
+  assert.match(component, /\}, \[refresh(?:, t)?\]\);/);
   assert.doesNotMatch(component, /if\s*\(!historyExpanded\)\s*return/);
 });
 
 test('selection count, confirmation limits and actual progress are explicit', () => {
-  assert.match(component, /已选中 \{selectedIds.length\} 个实例（含跨页选择）/);
+  assert.match(component, /t\("instances.selectedCount", \{count: selectedIds.length\}\)/);
   assert.match(component, /本次共选中 \$\{selectedIds.length\} 个 Lite 实例/);
   assert.match(component, /最多同时执行 5 个，两类操作合计最多 10 个/);
   assert.match(component, /detail.counts.active \|\| 0/);

@@ -8,7 +8,7 @@ import (
 )
 
 var northboundSectionFields = map[string][]string{
-	"access":  {"api_enabled"},
+	"access":  {"api_enabled", "owner_teams_enabled", "owner_team_creation_user_id"},
 	"callers": {"require_explicit_callers"},
 	"traffic": {"challenge_ttl_seconds", "access_token_ttl_seconds", "refresh_token_ttl_seconds", "core_request_timeout_seconds", "challenge_rate_per_minute", "login_rate_per_minute", "account_login_rate_per_minute", "create_rate_per_minute", "query_rate_per_minute", "share_rate_per_minute", "max_pending_operations", "operation_tick_milliseconds", "operation_lease_seconds", "operation_max_attempts"},
 	"runtime": {"allowed_lite_types", "allowed_pro_types", "lite_cpu_cores", "lite_memory_gb", "lite_disk_gb", "pro_cpu_cores", "pro_memory_gb", "pro_disk_gb"},

@@ -22,7 +22,7 @@ func TestRuntimeFailureMySQLContract(t *testing.T) {
 			t.Fatal("invalid localhost port")
 		}
 	}
-	url := mysql.ConnectionURL{Host: "127.0.0.1:" + port, User: "root", Database: "mysql", Options: map[string]string{"parseTime": "true"}}
+	url := mysql.ConnectionURL{Host: "127.0.0.1:" + port, User: "root", Password: os.Getenv("TEST_RUNTIME_MYSQL_PASSWORD"), Database: "mysql", Options: map[string]string{"parseTime": "true"}}
 	root, err := mysql.Open(url)
 	if err != nil {
 		t.Fatal(err)
@@ -48,13 +48,19 @@ func TestRuntimeFailureMySQLContract(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	migration, err := os.ReadFile("../db/migrations/069_add_instance_runtime_error_code.sql")
-	if err != nil {
+	for _, file := range []string{"069_add_instance_runtime_error_code.sql", "066_add_runtime_upgrade_fence.sql"} {
+		migration, err := os.ReadFile("../db/migrations/" + file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := sess.SQL().Exec(string(migration)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := sess.SQL().Exec("ALTER TABLE instances ADD instance_mode VARCHAR(16) NOT NULL DEFAULT 'pro', ADD started_at DATETIME(6) NULL"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := sess.SQL().Exec(string(migration)); err != nil {
-		t.Fatal(err)
-	}
+	applyIdleStopFixtureSchema(t, sess)
 	r := &instanceRepository{sess: sess}
 	ctx := context.Background()
 	if claimed, err := r.FenceRuntimeRestart(ctx, 89, 8); err != nil || claimed {

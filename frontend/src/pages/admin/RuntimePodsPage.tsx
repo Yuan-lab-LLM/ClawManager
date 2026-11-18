@@ -1,362 +1,357 @@
-import React, { useCallback, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Eye, Pause, RefreshCw, Server } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ChevronLeft, ChevronRight } from "lucide-react";
+import ExpandableSearch from "../../components/ExpandableSearch";
+import FilterSelect from "../../components/FilterSelect";
+import ActionMenu from "../../components/ActionMenu";
 import AdminLayout from "../../components/AdminLayout";
 import { useI18n } from "../../contexts/I18nContext";
 import { useRuntimeAdminWebSocket } from "../../hooks/useWebSocket";
 import { runtimePoolService } from "../../services/runtimePoolService";
 import { formatInstanceType } from "../../types/instance";
-import type { RuntimePod, RuntimeType } from "../../types/runtimePool";
+import type { RuntimePod, RuntimePodSummary } from "../../types/runtimePool";
+import {
+  isSchedulable,
+  canManageScheduling,
+  canManageSlot,
+  canEvictPod,
+  recoveryInstanceIds,
+  runtimeError,
+  summarizePod,
+} from "../../lib/runtimeManagement";
+import RuntimePodDetails from "./RuntimePodDetails";
+import RuntimeActions from "./RuntimeActions";
+import RuntimeRecoveryDialog from "./RuntimeRecoveryDialog";
+import RuntimeMaintenanceDialog from "./RuntimeMaintenanceDialog";
+import RuntimeBalanceDialog from "./RuntimeBalanceDialog";
+import RuntimeAutoStopDialog from "./RuntimeAutoStopDialog";
+import {
+  buttonClass,
+  primaryClass,
+  ErrorMessage,
+  Legend,
+  Metric,
+  SlotOverview,
+  RuntimeDialog,
+} from "./RuntimeManagementUI";
+import "../../styles/runtime-pods.css";
 
-type RuntimeFilter = "all" | RuntimeType;
+type Dialog = {
+  kind: "schedule" | "evict" | "events" | "history" | "maintenance" | "balance" | "auto-stop" | "recovery";
+  pod?: RuntimePod;
+  ids?: number[];
+  evictionMode?: "recovery" | "orphan-recovery";
+  verifiedRecoveryIds?: number[];
+  retryOperationId?: string;
+};
+const types = ["all", "openclaw", "hermes", "opencode", "deepseek-harness"];
+const emptySummary: Partial<RuntimePodSummary> = {};
 
-const FILTERS: Array<{ value: RuntimeFilter; labelKey?: string; label?: string }> = [
-  { value: "all", labelKey: "common.all" },
-  { value: "openclaw", label: "OpenClaw" },
-  { value: "hermes", label: "Hermes" },
-  { value: "opencode", label: "OpenCode" },
-  { value: "deepseek-harness", label: "DeepSeek Harness" },
-];
-
-function formatBytes(value: number) {
-  if (!Number.isFinite(value) || value <= 0) {
-    return "0 B";
-  }
-  const units = ["B", "KB", "MB", "GB", "TB"];
-  let size = value;
-  let unitIndex = 0;
-  while (size >= 1024 && unitIndex < units.length - 1) {
-    size /= 1024;
-    unitIndex += 1;
-  }
-  return `${size.toFixed(size >= 10 || unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
-}
-
-function stateClass(pod: RuntimePod) {
-  if (pod.draining || pod.state === "draining") {
-    return "border-amber-200 bg-amber-50 text-amber-700";
-  }
-  if (pod.state === "ready") {
-    return "border-emerald-200 bg-emerald-50 text-emerald-700";
-  }
-  if (pod.state === "unhealthy") {
-    return "border-red-200 bg-red-50 text-red-700";
-  }
-  return "border-slate-200 bg-slate-50 text-slate-600";
-}
-
-function slotPercent(pod: RuntimePod) {
-  if (!pod.capacity) {
-    return 0;
-  }
-  return Math.min(100, Math.max(0, Math.round((pod.used_slots / pod.capacity) * 100)));
-}
-
-function Metric({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <div className="text-xs font-medium uppercase tracking-normal text-slate-500">{label}</div>
-      <div className="mt-1 truncate text-sm font-medium text-slate-950">{value}</div>
-    </div>
-  );
-}
-
-function getErrorMessage(err: unknown, fallback: string) {
-  const responseError = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
-  if (responseError) {
-    return responseError;
-  }
-  return err instanceof Error ? err.message : fallback;
-}
-
-const RuntimePodsPage: React.FC = () => {
+export default function RuntimePodsPage() {
   const { t } = useI18n();
-  const queryClient = useQueryClient();
-  const [filter, setFilter] = useState<RuntimeFilter>("all");
+  const client = useQueryClient();
+  const [filter, setFilter] = useState("all");
+  const [node, setNode] = useState("all");
+  const [scheduling, setScheduling] = useState("all");
+  const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [page, setPage] = useState(1);
   const [selectedPod, setSelectedPod] = useState<RuntimePod | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
-  const [drainingPodId, setDrainingPodId] = useState<number | null>(null);
-
-  const podsQuery = useQuery({
-    queryKey: ["runtime-pods", filter],
-    queryFn: () => runtimePoolService.listPods(filter === "all" ? undefined : filter),
+  const [dialog, setDialog] = useState<Dialog | null>(null);
+  const [actionError, setActionError] = useState<string>();
+  const [busyPod, setBusyPod] = useState<number>();
+  const filterDetails = useRef<HTMLDetailsElement>(null);
+  useEffect(() => {
+    const media = matchMedia("(max-width: 1100px)");
+    const sync = () => {if (filterDetails.current) filterDetails.current.open = !media.matches;};
+    const outside = (event: PointerEvent) => {if (media.matches && filterDetails.current && !filterDetails.current.contains(event.target as Node)) filterDetails.current.open = false;};
+    sync();media.addEventListener("change",sync);document.addEventListener("pointerdown",outside);
+    return () => {media.removeEventListener("change",sync);document.removeEventListener("pointerdown",outside);};
+  }, [selectedPod]);
+  const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (search.trim() === debouncedSearch) return;
+    const timer = setTimeout(() => {
+      setDebouncedSearch(search.trim());
+      setPage(1);
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [search, debouncedSearch]);
+  const params = {
+    page, page_size: 16, runtime_type: filter, node, scheduling, search: debouncedSearch,
+  };
+  const query = useQuery({
+    queryKey: ["runtime-pods", "page", params],
+    queryFn: ({ signal }) => runtimePoolService.listPodsPage(params, signal),
+    enabled: !selectedPod,
+    placeholderData: keepPreviousData,
     refetchInterval: 3000,
+    refetchIntervalInBackground: true,
+    refetchOnWindowFocus: "always",
+    refetchOnReconnect: "always",
   });
-  const canQuerySelectedGateways = Boolean(
-    selectedPod && selectedPod.agent_reported !== false && selectedPod.id > 0,
+  const needsFullInventory = !!selectedPod || (!!dialog && dialog.kind !== "maintenance" && dialog.kind !== "balance" && dialog.kind !== "auto-stop");
+  const fullQuery = useQuery({
+    queryKey: ["runtime-pods", "all"],
+    queryFn: ({ signal }) => runtimePoolService.listPods(undefined, signal),
+    enabled: needsFullInventory,
+    refetchInterval: 3000,
+    refetchIntervalInBackground: true,
+    refetchOnWindowFocus: "always",
+    refetchOnReconnect: "always",
+  });
+  const refresh = useCallback(() => {
+    if (refreshTimer.current !== null) return;
+    refreshTimer.current = setTimeout(() => {
+      refreshTimer.current = null;
+      void client.invalidateQueries({ queryKey: ["runtime-pods"] }, { cancelRefetch: false });
+      void client.invalidateQueries({ queryKey: ["runtime-scheduling"] }, { cancelRefetch: false });
+    }, 300);
+  }, [client]);
+  useEffect(() => () => {
+    if (refreshTimer.current !== null) clearTimeout(refreshTimer.current);
+  }, []);
+  const { isConnected } = useRuntimeAdminWebSocket(refresh);
+  useEffect(() => {
+    if (isConnected) refresh();
+  }, [isConnected, refresh]);
+  const pods = query.data?.pods ?? [];
+  const summary = query.data?.summary ?? emptySummary;
+  const metricValue = (value?: number) => value ?? t("runtimePods.unknown");
+  const pages = Math.max(1, query.data?.pagination.total_pages ?? 1);
+  if (query.data && !query.isPlaceholderData && page > pages) setPage(pages);
+  const actionPods = fullQuery.data ?? pods;
+  const inventoryConfirmed = fullQuery.isSuccess && !fullQuery.isFetching;
+  const activePod =
+    selectedPod &&
+    (actionPods.find(
+      (pod) =>
+        pod.namespace === selectedPod.namespace &&
+        pod.pod_name === selectedPod.pod_name,
+    ) ?? (inventoryConfirmed ? null : selectedPod));
+  if (selectedPod && inventoryConfirmed && !activePod) setSelectedPod(null);
+  const dialogPod = dialog?.pod && (
+    actionPods.find((pod) => pod.id === dialog.pod!.id) ??
+    (dialog.evictionMode === "recovery" && dialog.verifiedRecoveryIds?.length ? dialog.pod : inventoryConfirmed ? undefined : dialog.pod)
   );
-
-  const gatewaysQuery = useQuery({
-    queryKey: ["runtime-pod-gateways", selectedPod?.id],
-    queryFn: () => runtimePoolService.listGateways(selectedPod?.id ?? 0),
-    enabled: canQuerySelectedGateways,
-    refetchInterval: canQuerySelectedGateways ? 3000 : false,
-  });
-
-  const invalidateRuntimePods = useCallback(() => {
-    void queryClient.invalidateQueries({ queryKey: ["runtime-pods"] });
-    if (selectedPod && selectedPod.agent_reported !== false && selectedPod.id > 0) {
-      void queryClient.invalidateQueries({ queryKey: ["runtime-pod-gateways", selectedPod.id] });
-    }
-  }, [queryClient, selectedPod]);
-
-  const { isConnected } = useRuntimeAdminWebSocket(invalidateRuntimePods);
-
-  const drainPod = async (pod: RuntimePod) => {
-    if (pod.agent_reported === false || pod.id <= 0) {
-      return;
-    }
+  if (dialog?.pod && inventoryConfirmed && !dialogPod) setDialog(null);
+  const selectRuntimePod = (pod: RuntimePod) => setSelectedPod(pod);
+  const toggleScheduling = async (pod: RuntimePod) => {
     try {
-      setActionError(null);
-      setDrainingPodId(pod.id);
-      await runtimePoolService.drainPod(pod.id);
-      await queryClient.invalidateQueries({ queryKey: ["runtime-pods"] });
-    } catch (err: unknown) {
-      setActionError(getErrorMessage(err, t("runtimePods.drainFailed")));
+      setActionError(undefined);
+      setBusyPod(pod.id);
+      await runtimePoolService.setScheduling(
+        pod.id,
+        pod.scheduling_enabled === false || !!pod.scheduling_paused,
+      );
+      refresh();
+    } catch (err) {
+      setActionError(runtimeError(err));
     } finally {
-      setDrainingPodId(null);
+      setBusyPod(undefined);
     }
   };
-
-  const selectRuntimePod = (pod: RuntimePod) => {
-    setSelectedPod(pod);
-  };
-
-  const handleRuntimePodCardKeyDown = (
-    event: React.KeyboardEvent<HTMLElement>,
-    pod: RuntimePod,
-  ) => {
-    if (event.key !== "Enter" && event.key !== " ") {
-      return;
-    }
-    event.preventDefault();
-    selectRuntimePod(pod);
-  };
-
-  const pods = podsQuery.data ?? [];
-
+  const openSchedule = (pod?: RuntimePod, ids?: number[]) =>
+    setDialog({ kind: "schedule", pod, ids });
   return (
-    <AdminLayout title={t('runtimePods.title')}>
-      <div className="space-y-4">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="inline-flex rounded-md border border-slate-200 bg-white p-1">
-            {FILTERS.map((item) => (
-              <button
-                key={item.value}
-                type="button"
-                onClick={() => setFilter(item.value)}
-                className={`rounded px-3 py-1.5 text-sm font-medium ${
-                  filter === item.value
-                    ? "bg-slate-900 text-white"
-                    : "text-slate-600 hover:bg-slate-100 hover:text-slate-950"
-                }`}
-              >
-                {item.labelKey ? t(item.labelKey) : item.label}
-              </button>
-            ))}
-          </div>
-
-          <div className="flex items-center gap-2 text-sm text-slate-500">
-            <span
-              className={`h-2 w-2 rounded-full ${isConnected ? "bg-emerald-500" : "bg-slate-300"}`}
-            />
+    <AdminLayout title={t("runtimePods.title")} fullHeight={!activePod}>
+      <div className={activePod ? "space-y-4" : "runtime-overview"}>
+        {actionError && <ErrorMessage>{actionError}</ErrorMessage>}
+        {query.isError && (
+          <ErrorMessage>
+            {t("runtimePods.loadFailed")}: {runtimeError(query.error)}{" "}
             <button
               type="button"
-              className="cm-icon-button"
-              title={t("common.refresh")}
-              onClick={() => void podsQuery.refetch()}
+              className="ml-2 underline"
+              onClick={() => void query.refetch()}
             >
-              <RefreshCw className={`h-4 w-4 ${podsQuery.isFetching ? "animate-spin" : ""}`} />
+              {t("runtimePods.retry")}
             </button>
-          </div>
-        </div>
-
-        {actionError && (
-          <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-            {actionError}
-          </div>
+          </ErrorMessage>
         )}
-
-        {podsQuery.isLoading ? (
-          <section className="cm-surface px-4 py-10 text-center text-sm text-slate-500">
-            {t("runtimePods.loading")}
-          </section>
-        ) : pods.length === 0 ? (
-          <section className="cm-surface px-4 py-10 text-center text-sm text-slate-500">
-            {t("runtimePods.empty")}
-          </section>
+        {activePod && fullQuery.isError && <ErrorMessage>{runtimeError(fullQuery.error)}</ErrorMessage>}
+        {activePod ? (
+          <RuntimePodDetails
+            key={activePod.pod_name}
+            pod={activePod}
+            onBack={() => setSelectedPod(null)}
+            onSchedule={(ids) => openSchedule(activePod, ids)}
+            onRecovery={(ids) => setDialog({ kind: "evict", pod: activePod, ids, evictionMode: ids?.length || recoveryInstanceIds(activePod).length ? "recovery" : "orphan-recovery" })}
+            onPause={() => void toggleScheduling(activePod)}
+            onEvents={() => setDialog({ kind: "events", pod: activePod })}
+            busy={busyPod === activePod.id}
+          />
         ) : (
-          <section className="grid gap-3 lg:grid-cols-2">
-            {pods.map((pod) => {
-              const percent = slotPercent(pod);
-              const isSelected = selectedPod?.id === pod.id;
-              return (
-                <article
-                  key={pod.id}
-                  role="button"
-                  tabIndex={0}
-                  aria-pressed={isSelected}
-                  onClick={() => selectRuntimePod(pod)}
-                  onKeyDown={(event) => handleRuntimePodCardKeyDown(event, pod)}
-                  className={`cm-surface cursor-pointer p-4 transition hover:border-slate-300 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 ${
-                    isSelected ? "border-slate-900 shadow-md" : ""
-                  }`}
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex min-w-0 items-start gap-3">
-                      <span className="mt-1 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-slate-100 text-slate-500">
-                        <Server className="h-4 w-4" />
-                      </span>
-                      <div className="min-w-0">
-                        <h2 className="truncate text-sm font-semibold text-slate-950">
-                          {pod.pod_name}
-                        </h2>
-                        <p className="mt-1 truncate text-xs text-slate-500">
-                          {pod.node_name || "-"} / {pod.pod_ip || "-"}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="flex shrink-0 items-center gap-2">
-                      <span
-                        className={`inline-flex rounded-md border px-2 py-1 text-xs font-medium ${stateClass(pod)}`}
-                      >
-                        {pod.draining ? "draining" : pod.state}
-                      </span>
-                      <button
-                        type="button"
-                        className="cm-icon-button"
-                        title={t("runtimePods.gateways")}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          selectRuntimePod(pod);
-                        }}
-                      >
-                        <Eye className="h-4 w-4" />
-                      </button>
-                      <button
-                        type="button"
-                        className="cm-icon-button"
-                        title={t("runtimePods.drain")}
-                        disabled={
-                          pod.agent_reported === false ||
-                          pod.id <= 0 ||
-                          drainingPodId === pod.id ||
-                          pod.draining
-                        }
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          void drainPod(pod);
-                        }}
-                      >
-                        <Pause className="h-4 w-4" />
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="mt-4 flex items-center justify-between gap-4">
-                    <div>
-                      <div className="text-xs font-medium uppercase tracking-normal text-slate-500">
-                        {t("runtimePods.typeLabel")}
-                      </div>
-                      <div className="mt-1 text-sm font-medium text-slate-950">
-                        {formatInstanceType(pod.runtime_type)}
-                      </div>
-                    </div>
-                    <div className="min-w-[128px] text-right">
-                      <div className="text-xs font-medium uppercase tracking-normal text-slate-500">
-                        {t("runtimePods.slotsLabel")}
-                      </div>
-                      <div className="mt-1 text-sm font-medium text-slate-950">
-                        {pod.used_slots} / {pod.capacity}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="mt-3 h-2 overflow-hidden rounded bg-slate-100">
-                    <div className="h-full rounded bg-slate-900" style={{ width: `${percent}%` }} />
-                  </div>
-
-                  <div className="mt-4 grid grid-cols-2 gap-4">
-                    <Metric label={t("common.cpu")} value={`${(pod.cpu_millis_used / 1000).toFixed(2)} cores`} />
-                    <Metric label={t("common.memory")} value={formatBytes(pod.memory_bytes_used)} />
-                    <Metric label={t("common.disk")} value={formatBytes(pod.disk_bytes_used)} />
-                    <Metric
-                      label={t("runtimePods.networkLabel")}
-                      value={`${formatBytes(pod.network_rx_bytes)} / ${formatBytes(pod.network_tx_bytes)}`}
-                    />
-                  </div>
-
-                  <div className="mt-4 border-t border-slate-100 pt-3 text-xs text-slate-500">
-                    {t("runtimePods.lastSeen", {
-                      time: pod.last_seen_at ? new Date(pod.last_seen_at).toLocaleString() : "-",
-                    })}
-                  </div>
-                </article>
-              );
-            })}
-          </section>
-        )}
-
-        {selectedPod && (
-          <section className="cm-surface overflow-hidden">
-            <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
-              <div>
-                <h2 className="text-base font-semibold text-slate-950">{selectedPod.pod_name}</h2>
-                <p className="text-sm text-slate-500">
-                  {t("runtimePods.gatewayCount", { count: gatewaysQuery.data?.length ?? 0 })}
-                </p>
+          <>
+            <div className="runtime-metrics">
+              <Metric
+                compact
+                label={t("runtimePods.online")}
+                value={`${metricValue(summary.online)} / ${metricValue(summary.pods)}`}
+                detail={`${metricValue(summary.schedulable)} ${t("runtimePods.enabled")}`}
+              />
+              <Metric
+                compact
+                label={t("runtimePods.agentReady")}
+                value={`${metricValue(summary.ready)} / ${metricValue(summary.capacity)}`}
+                detail={`${t("runtimePods.ready")} ${metricValue(summary.ready)} · ${t("runtimePods.unavailable")} ${metricValue(summary.unavailable)} · ${t("runtimePods.unknown")} ${metricValue(summary.unknown)}`}
+                warning={(summary.unavailable ?? 0) > 0 || (summary.unknown ?? 0) > 0}
+              />
+              <Metric
+                compact
+                label={t("runtimePods.cardBound")}
+                value={`${metricValue(summary.bound_instances)} / ${metricValue(summary.capacity)}`}
+                detail={`${t("runtimePods.occupied")} ${metricValue(summary.occupied)} · ${metricValue(summary.running)} ${t("runtimePods.running")} · ${metricValue(summary.starting)} ${t("runtimePods.starting")} · ${metricValue(summary.migrating)} ${t("runtimePods.migrating")} · ${metricValue(summary.error)} ${t("runtimePods.error")}`}
+              />
+              <Metric
+                compact
+                label={t("runtimePods.incoming")}
+                value={metricValue(summary.available)}
+                detail={`${t("runtimePods.idle")} ${metricValue(summary.idle)} · ${t("runtimePods.releasing")} ${metricValue(summary.releasing)} · ${t("runtimePods.unknown")} ${metricValue(summary.unknown)}`}
+              />
+            </div>
+            <div className="runtime-toolbar">
+              <div className="runtime-filter-controls">
+                <ExpandableSearch label={t("runtimePods.search")} placeholder={t("runtimePods.search")} value={search} onChange={setSearch} />
+                <details ref={filterDetails} className="runtime-filters" open onKeyDown={event => {
+                  if (event.key === "Escape" && matchMedia("(max-width: 1100px)").matches) {
+                    event.preventDefault();event.stopPropagation();event.currentTarget.open = false;event.currentTarget.querySelector("summary")?.focus();
+                  }
+                }}><summary className="app-button-secondary">{t("instances.filters")}</summary><div className="runtime-filter-fields">
+                <FilterSelect label={t("runtimePods.runtimeType")} value={filter} options={types.map(value => ({value, label: value === "all" ? t("common.all") : formatInstanceType(value)}))} onChange={value => {setFilter(value); setPage(1);}} />
+                <FilterSelect label={t("runtimePods.allNodes")} value={node} options={[{value:"all",label:t("runtimePods.allNodes")}, ...(query.data?.nodes ?? []).map(value => ({value,label:value}))]} onChange={value => {setNode(value);setPage(1);}} />
+                <FilterSelect label={t("runtimePods.allScheduling")} value={scheduling} options={[{value:"all",label:t("runtimePods.allScheduling")},{value:"enabled",label:t("runtimePods.enabled")},{value:"disabled",label:t("runtimePods.disabled")}]} onChange={value => {setScheduling(value);setPage(1);}} />
+                </div></details>
               </div>
-              <button
-                type="button"
-                className="app-button-secondary"
-                onClick={() => setSelectedPod(null)}
-              >
-                {t("common.close")}
-              </button>
+              <div className="runtime-toolbar-actions flex-wrap">
+                <button
+                  type="button"
+                  className={`${primaryClass} !px-2 !py-1.5`}
+                  disabled={!(summary.bound_instances ?? summary.occupied)}
+                  onClick={() => openSchedule()}
+                >
+                  {t("runtimePods.batch")}
+                </button>
+                <ActionMenu label={t("runtimePods.cardActions")} items={[
+                  {id:"recovery",label:t("runtimePods.recoveryTitle"),onSelect:() => setDialog({kind:"recovery"})},
+                  {id:"auto-stop",label:t("autoStop.title"),onSelect:() => setDialog({kind:"auto-stop"})},
+                  {id:"balance",label:t("runtimePods.balance"),onSelect:() => setDialog({kind:"balance"})},
+                  {id:"history",label:t("runtimePods.history"),onSelect:() => setDialog({kind:"history"})},
+                  {id:"maintenance",label:t("runtimePods.maintenance"),onSelect:() => setDialog({kind:"maintenance"})},
+                ]} />
+              </div>
             </div>
-            <div className="divide-y divide-slate-100">
-              {gatewaysQuery.isLoading ? (
-                <div className="px-4 py-8 text-center text-sm text-slate-500">
-                  {t("runtimePods.loading")}
-                </div>
-              ) : (gatewaysQuery.data ?? []).length === 0 ? (
-                <div className="px-4 py-8 text-center text-sm text-slate-500">
-                  {t("runtimePods.noGateways")}
-                </div>
-              ) : (
-                (gatewaysQuery.data ?? []).map((gateway) => (
-                  <div
-                    key={gateway.id}
-                    className="grid gap-3 px-4 py-3 text-sm md:grid-cols-[minmax(0,1fr)_88px_96px_96px_160px]"
-                    >
-                    <div className="min-w-0">
-                      <div className="font-medium text-slate-950">
-                        {t("runtimePods.instanceGateway", { id: gateway.instance_id })}
-                      </div>
-                      <div className="truncate font-mono text-xs text-slate-500">
-                        {gateway.gateway_id || "-"}
-                      </div>
-                    </div>
-                    <Metric label={t("runtimePods.portLabel")} value={String(gateway.gateway_port)} />
-                    <Metric label={t("runtimePods.stateLabel")} value={gateway.state} />
-                    <Metric label={t("runtimePods.generationLabel")} value={String(gateway.generation)} />
-                    <Metric
-                      label={t("runtimePods.lastHealthLabel")}
-                      value={
-                        gateway.last_health_at
-                          ? new Date(gateway.last_health_at).toLocaleString()
-                          : "-"
-                      }
-                    />
-                  </div>
-                ))
-              )}
+            <div className="runtime-inventory-status">
+              <Legend compact />
             </div>
-          </section>
+            <section className="runtime-inventory-panel cm-surface">
+            {query.isLoading ? (
+              <div className="p-10 text-center text-sm text-slate-500">
+                {t("runtimePods.loading")}
+              </div>
+            ) : pods.length === 0 ? (
+              <div className="p-10 text-center text-sm text-slate-500">
+                {t(
+                  summary.pods ? "runtimePods.noMatching" : "runtimePods.empty",
+                )}
+              </div>
+            ) : (
+            <div className="runtime-table-scroll">
+              <table className="runtime-table" aria-label={t("runtimePods.title")} aria-busy={query.isFetching}>
+                <thead><tr>{["runtimeName", "node", "typeLabel", "status", "capacity", "cardActions"].map(key => <th key={key} scope="col">{t(`runtimePods.${key}`)}</th>)}</tr></thead>
+                <tbody>{pods.map(pod => {
+                  const counts = summarizePod(pod);
+                  const reported = pod.agent_reported !== false && !!pod.slots?.length;
+                  const complete = reported && pod.slots!.length >= pod.capacity && pod.slots!.every(slot => slot.state !== "unknown");
+                  const onlineState = pod.agent_reported === false ? "unknown" : ["ready", "draining"].includes(pod.state) ? "onlineState" : ["unhealthy", "deleted", "offline"].includes(pod.state) ? "offline" : "unknown";
+                  const paused = pod.scheduling_enabled === false || !!pod.scheduling_paused;
+                  const canOperate = pod.id > 0 && pod.agent_reported !== false;
+                  return <tr key={`${pod.namespace}/${pod.pod_name}`}>
+                    <td><button type="button" className="runtime-name" title={`${pod.namespace}/${pod.pod_name}`} onClick={() => selectRuntimePod(pod)}>{pod.pod_name}</button></td>
+                    <td title={`${pod.node_name || t("runtimePods.unknown")} / ${pod.pod_ip || "—"}`}>{pod.node_name || t("runtimePods.unknown")}</td>
+                    <td>{formatInstanceType(pod.runtime_type)}</td>
+                    <td><span className={`runtime-status runtime-status-${onlineState === "onlineState" ? "ready" : onlineState}`}>{t(`runtimePods.${onlineState}`)}</span><span className="runtime-scheduling"> · {t(`runtimePods.${isSchedulable(pod) ? "enabled" : "disabled"}`)}</span></td>
+                    <td><div className="runtime-capacity-cell">
+                      <SlotOverview pod={pod} />
+                      <span className="runtime-slot-count" title={`${t("runtimePods.agentReady")}: ${complete ? counts.ready : t("runtimePods.unknown")} · ${t("runtimePods.incoming")}: ${complete && pod.bindings_reported !== false ? counts.available : t("runtimePods.unknown")}`}>
+                        {t("runtimePods.cardBound")} {metricValue(counts.bound)} / {pod.capacity}
+                      </span>
+                    </div></td>
+                    <td><div className="runtime-row-actions">
+                      <button type="button" className="runtime-view" aria-label={t("runtimePods.viewAgents", {count:pod.capacity})} onClick={() => selectRuntimePod(pod)}>{t("runtimePods.cardView")}</button>
+                      <ActionMenu label={`${t("runtimePods.cardActions")}: ${pod.pod_name}`} items={[
+                        {id:"events",label:t("runtimePods.events"),disabled:!canOperate,onSelect:() => setDialog({kind:"events",pod})},
+                        {id:"recovery",label:t("runtimePods.faultRecovery"),disabled:pod.id <= 0 || !pod.pod_uid,onSelect:() => setDialog({kind:"evict",pod,evictionMode:recoveryInstanceIds(pod).length ? "recovery" : "orphan-recovery"})},
+                        {id:"evict",label:t("runtimePods.evict"),disabled:!canEvictPod(pod),destructive:true,onSelect:() => setDialog({kind:"evict",pod})},
+                        {id:"pause",label:t(`runtimePods.${paused ? "resume" : "pause"}`),disabled:!canManageScheduling(pod) || busyPod === pod.id,onSelect:() => void toggleScheduling(pod)},
+                        {id:"manual",label:t("runtimePods.manual"),disabled:!canOperate || !pod.slots?.some(canManageSlot),onSelect:() => openSchedule(pod)},
+                      ]} />
+                    </div></td>
+                  </tr>;
+                })}</tbody>
+              </table>
+            </div>
+            )}
+            <div className="runtime-pagination">
+              <span>{t("runtimePods.podCount", {count:query.data?.pagination.total ?? t("runtimePods.unknown"), shown:query.data ? pods.length : t("runtimePods.unknown")})}</span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  className={`${buttonClass} !px-2 !py-1`}
+                  aria-label={t("runtimePods.previous")}
+                  disabled={page <= 1 || query.isPlaceholderData}
+                  onClick={() => setPage(page - 1)}
+                >
+                  <ChevronLeft className="h-3 w-3" />
+                </button>
+                <span className="text-xs tabular-nums text-slate-600">
+                  {page} / {pages}
+                </span>
+                <button
+                  type="button"
+                  className={`${buttonClass} !px-2 !py-1`}
+                  aria-label={t("runtimePods.next")}
+                  disabled={page >= pages || query.isPlaceholderData}
+                  onClick={() => setPage(page + 1)}
+                >
+                  <ChevronRight className="h-3 w-3" />
+                </button>
+              </div>
+            </div>
+            </section>
+          </>
+        )}
+        {dialog?.kind === "recovery" ? (
+ <RuntimeRecoveryDialog pods={actionPods} onEvict={(pod, ids, verifiedRecoveryIds) => setDialog({ kind: "evict", pod, ids, verifiedRecoveryIds, evictionMode: "recovery" })} onClose={() => setDialog(null)} onChanged={refresh} />
+ ) : dialog?.kind === "auto-stop" ? (
+          <RuntimeAutoStopDialog onClose={() => setDialog(null)} />
+        ) : dialog?.kind === "maintenance" ? (
+          <RuntimeMaintenanceDialog onClose={() => setDialog(null)} onChanged={refresh} onViewScheduling={() => setDialog({ kind: "history" })} />
+        ) : dialog?.kind === "balance" ? (
+          <RuntimeBalanceDialog onClose={() => setDialog(null)} onSubmitted={() => { refresh(); setDialog({ kind: "history" }); }} />
+        ) : dialog && needsFullInventory && !fullQuery.data ? (
+          <RuntimeDialog title={t(`runtimePods.${dialog.kind === "history" ? "history" : dialog.kind === "evict" ? "evictTitle" : "manual"}`)} onClose={() => setDialog(null)}>
+            {fullQuery.isError ? <ErrorMessage>{runtimeError(fullQuery.error)} <button type="button" onClick={() => void fullQuery.refetch({ cancelRefetch: false })}>{t("runtimePods.retry")}</button></ErrorMessage> : <p role="status">{t("runtimePods.loading")}</p>}
+          </RuntimeDialog>
+        ) : dialog && (
+          <RuntimeActions
+            key={`${dialog.kind}-${dialog.pod?.id ?? "all"}`}
+            kind={dialog.kind}
+            pod={dialogPod}
+            initialIds={dialog.ids}
+            verifiedRecoveryIds={dialog.verifiedRecoveryIds}
+            initialEvictionMode={dialog.evictionMode}
+            retryOperationId={dialog.retryOperationId}
+            pods={actionPods}
+            onClose={() => setDialog(null)}
+            onRetry={(ids, retryOperationId) => setDialog({ kind: "schedule", ids, retryOperationId })}
+            onSubmitted={() => {
+              refresh();
+              setDialog({ kind: "history" });
+            }}
+          />
         )}
       </div>
     </AdminLayout>
   );
-};
-
-export default RuntimePodsPage;
+}

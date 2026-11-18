@@ -56,6 +56,18 @@ api.interceptors.response.use(
   (response) => response,
   async (error: AxiosError) => {
     const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean };
+
+    // A backup strong-auth challenge requires a separate recent MFA proof.
+    // Refreshing the ordinary session cannot satisfy it and may log out a
+    // correctly authenticated administrator instead of showing the challenge.
+    const responseCode = (error.response?.data as { code?: string } | undefined)?.code;
+    if (
+      error.response?.status === 401 &&
+      originalRequest?.url?.startsWith('/admin/system-backup/') &&
+      typeof responseCode === 'string' && responseCode.startsWith('strong_auth_')
+    ) {
+      return Promise.reject(error);
+    }
     
     // If error is not 401 or request is already retried, reject
     if (
@@ -79,6 +91,7 @@ api.interceptors.response.use(
     if (isRefreshing) {
       return new Promise((resolve) => {
         subscribeTokenRefresh((newToken: string) => {
+          originalRequest._retry = true;
           originalRequest.headers.Authorization = `Bearer ${newToken}`;
           resolve(api(originalRequest));
         });

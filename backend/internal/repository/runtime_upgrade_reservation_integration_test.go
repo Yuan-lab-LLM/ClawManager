@@ -26,7 +26,7 @@ func upgradeMySQL(t *testing.T) db.Session {
 			t.Fatal("invalid port")
 		}
 	}
-	u := mysql.ConnectionURL{Host: "127.0.0.1:" + port, User: "root", Database: "mysql", Options: map[string]string{"parseTime": "true"}}
+	u := mysql.ConnectionURL{Host: "127.0.0.1:" + port, User: "root", Password: os.Getenv("TEST_RUNTIME_MYSQL_PASSWORD"), Database: "mysql", Options: map[string]string{"parseTime": "true"}}
 	root, err := mysql.Open(u)
 	if err != nil {
 		t.Fatal(err)
@@ -61,7 +61,7 @@ func upgradeMySQL(t *testing.T) db.Session {
 	}
 	base := read("023_add_runtime_pool_v2.sql")
 	base = base[strings.Index(base, "CREATE TABLE IF NOT EXISTS runtime_pods"):strings.Index(base, "CREATE TABLE IF NOT EXISTS workspace_file_audits")]
-	for _, schema := range []string{base, read("058_add_openclaw_runtime_upgrade_safety.sql"), read("061_persist_runtime_upgrade_source_identity.sql"), read("070_add_upgrade_restart_attempts.sql"), read("074_add_upgrade_recovery_key.sql")} {
+	for _, schema := range []string{base, read("058_add_openclaw_runtime_upgrade_safety.sql"), read("061_persist_runtime_upgrade_source_identity.sql"), read("070_add_upgrade_restart_attempts.sql"), read("074_add_upgrade_recovery_key.sql"), read("079_add_runtime_management.sql"), read("080_add_runtime_pod_deletion_intents.sql"), read("105_add_runtime_observations.sql")} {
 		for _, query := range strings.Split(schema, ";") {
 			if strings.TrimSpace(query) != "" {
 				exec(query)
@@ -127,11 +127,14 @@ func TestUpgradeReservationMySQLContract(t *testing.T) {
 		}
 		exec(tc.restore)
 	}
-	exec(`INSERT INTO runtime_rollouts (id,runtime_type,target_image_ref,status) VALUES (124,'openclaw','other','running')`)
-	if _, err := bindings.ReserveUpgradeGateway(ctx, req); !errors.Is(err, ErrUpgradeReservationDenied) {
-		t.Fatalf("competing rollout accepted: %v", err)
+	exec(`INSERT INTO runtime_rollouts (id,runtime_type,target_image_ref,status) VALUES (122,'openclaw','earlier','pending')`)
+	if _, err := bindings.ReserveUpgradeGateway(ctx, req); !errors.Is(err, ErrUpgradeCapacityPending) {
+		t.Fatalf("earlier queued rollout must cause a bounded wait, not isolation: %v", err)
 	}
-	exec("UPDATE runtime_rollouts SET status='completed' WHERE id=124")
+	exec("UPDATE runtime_rollouts SET status='completed' WHERE id=122")
+	// A later accepted recovery must not deadlock the head of the queue,
+	// including running rows admitted by older controllers.
+	exec(`INSERT INTO runtime_rollouts (id,runtime_type,target_image_ref,status) VALUES (124,'openclaw','later','running')`)
 	// Real deployed old Agent omits UID. Only exact Kubernetes-observed
 	// identity may fill this gap; never treat NULL as a wildcard.
 	exec("UPDATE runtime_pods SET pod_uid=NULL WHERE id=307")

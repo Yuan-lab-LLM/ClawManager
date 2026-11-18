@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -19,13 +20,14 @@ type AgentStateReportRequest struct {
 }
 
 type AgentRuntimePayload struct {
-	OpenClawStatus          string  `json:"openclaw_status"`
-	OpenClawPID             *int    `json:"openclaw_pid,omitempty"`
-	OpenClawVersion         string  `json:"openclaw_version"`
-	CurrentConfigRevisionID *int    `json:"current_config_revision_id,omitempty"`
-	LLMConfigFingerprint    *string `json:"llm_config_fingerprint,omitempty"`
-	LLMConfigStatus         *string `json:"llm_config_status,omitempty"`
-	LLMProviderBaseURL      *string `json:"llm_provider_base_url,omitempty"`
+	ShutdownObservation     *models.RuntimeShutdownObservation `json:"shutdown_observation,omitempty"`
+	OpenClawStatus          string                             `json:"openclaw_status"`
+	OpenClawPID             *int                               `json:"openclaw_pid,omitempty"`
+	OpenClawVersion         string                             `json:"openclaw_version"`
+	CurrentConfigRevisionID *int                               `json:"current_config_revision_id,omitempty"`
+	LLMConfigFingerprint    *string                            `json:"llm_config_fingerprint,omitempty"`
+	LLMConfigStatus         *string                            `json:"llm_config_status,omitempty"`
+	LLMProviderBaseURL      *string                            `json:"llm_provider_base_url,omitempty"`
 }
 
 type InstanceRuntimeStatusPayload struct {
@@ -50,17 +52,22 @@ type InstanceRuntimeStatusService interface {
 }
 
 type instanceRuntimeStatusService struct {
+	shutdownAudits   repository.RuntimeShutdownAuditRepository
 	runtimeRepo      repository.InstanceRuntimeStatusRepository
 	agentRepo        repository.InstanceAgentRepository
 	desiredStateRepo repository.InstanceDesiredStateRepository
 }
 
-func NewInstanceRuntimeStatusService(runtimeRepo repository.InstanceRuntimeStatusRepository, agentRepo repository.InstanceAgentRepository, desiredStateRepo repository.InstanceDesiredStateRepository) InstanceRuntimeStatusService {
-	return &instanceRuntimeStatusService{
+func NewInstanceRuntimeStatusService(runtimeRepo repository.InstanceRuntimeStatusRepository, agentRepo repository.InstanceAgentRepository, desiredStateRepo repository.InstanceDesiredStateRepository, audits ...repository.RuntimeShutdownAuditRepository) InstanceRuntimeStatusService {
+	s := &instanceRuntimeStatusService{
 		runtimeRepo:      runtimeRepo,
 		agentRepo:        agentRepo,
 		desiredStateRepo: desiredStateRepo,
 	}
+	if len(audits) > 0 {
+		s.shutdownAudits = audits[0]
+	}
+	return s
 }
 
 func (s *instanceRuntimeStatusService) Report(session *AgentSession, req AgentStateReportRequest, clientIP string) error {
@@ -69,6 +76,9 @@ func (s *instanceRuntimeStatusService) Report(session *AgentSession, req AgentSt
 	}
 	if strings.TrimSpace(req.AgentID) != session.Agent.AgentID {
 		return fmt.Errorf("agent id does not match session")
+	}
+	if err := s.recordShutdownObservation(session, req.Runtime.ShutdownObservation); err != nil {
+		return err
 	}
 
 	status, err := s.getOrCreate(session.Instance.ID)
@@ -115,6 +125,27 @@ func (s *instanceRuntimeStatusService) Report(session *AgentSession, req AgentSt
 		return err
 	}
 
+	return nil
+}
+
+func (s *instanceRuntimeStatusService) recordShutdownObservation(session *AgentSession, observation *models.RuntimeShutdownObservation) error {
+	if observation == nil {
+		return nil
+	} // Older agents do not invent new proof.
+	if session == nil || session.Agent == nil || session.Instance == nil || session.Agent.InstanceID != session.Instance.ID || observation.Generation != session.Instance.RuntimeGeneration {
+		return models.ErrModelUnavailable
+	}
+	if err := observation.Validate(); err != nil {
+		return err
+	}
+	if s.shutdownAudits == nil {
+		return models.ErrShutdownAuditUnavailable
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := s.shutdownAudits.Record(ctx, session.Instance.ID, session.Instance.UserID, "pro_agent", *observation); err != nil {
+		return models.ErrShutdownAuditUnavailable
+	}
 	return nil
 }
 

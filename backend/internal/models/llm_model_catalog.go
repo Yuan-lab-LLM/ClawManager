@@ -80,6 +80,18 @@ func ExpandLLMModelCatalog(configured []LLMModel) []LLMModel {
 
 		for _, providerModel := range providerModels {
 			item := configuredModel
+			// Keep the approved provider identity when the display name becomes
+			// a concrete model id. Consumers also use this to distinguish a
+			// saved catalog selection from the legacy provider default alias.
+			if strings.TrimSpace(item.CatalogProviderName) == "" {
+				item.CatalogProviderName = strings.TrimSpace(configuredModel.DisplayName)
+				if item.CatalogProviderName == "" {
+					item.CatalogProviderName = configuredModel.ProviderType
+				}
+				if item.CatalogProviderName == "" {
+					item.CatalogProviderName = "provider"
+				}
+			}
 			item.ProviderModelName = providerModel.ID
 			item.DisplayName = providerModel.ID
 			if modelIDCounts[strings.ToLower(providerModel.ID)] > 1 {
@@ -116,7 +128,7 @@ func normalizeLLMProviderModels(providerModels []LLMProviderModel) []LLMProvider
 		if id == "" {
 			continue
 		}
-		key := strings.ToLower(id)
+		key := id
 		if _, exists := seen[key]; exists {
 			continue
 		}
@@ -132,7 +144,7 @@ func normalizeLLMProviderModels(providerModels []LLMProviderModel) []LLMProvider
 
 func containsLLMProviderModel(providerModels []LLMProviderModel, id string) bool {
 	for _, providerModel := range providerModels {
-		if strings.EqualFold(providerModel.ID, id) {
+		if providerModel.ID == id {
 			return true
 		}
 	}

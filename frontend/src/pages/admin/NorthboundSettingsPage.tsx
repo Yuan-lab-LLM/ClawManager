@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Download, Network, RefreshCw, Save, ShieldCheck, TriangleAlert } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import NorthboundAPIKeysPanel from './NorthboundAPIKeysPanel';
+import OwnerPortalAdminPanel from './OwnerPortalAdminPanel';
 import AdminLayout from '../../components/AdminLayout';
 import { northboundSettingsService, type NorthboundCallerPolicy, type NorthboundOverview, type NorthboundSettings } from '../../services/northboundSettingsService';
 import { userService } from '../../services/userService';
@@ -15,9 +16,10 @@ const categories = [
  {id:'traffic',label:'Token 与流控',note:'认证周期与请求保护'},
  {id:'runtime',label:'实例创建策略',note:'运行时与资源默认值'},
  {id:'audit',label:'操作审计',note:'追踪配置变更'},
+ {id:'portal',label:'门户统计',note:'用户统计、同步记录与工作日期'},
 ];
 const sectionFields: Record<string, (keyof NorthboundSettings)[]> = {
- access:['api_enabled'], callers:['require_explicit_callers'],
+ access:['api_enabled','owner_teams_enabled','owner_team_creation_user_id'], callers:['require_explicit_callers'],
  traffic:['challenge_ttl_seconds','access_token_ttl_seconds','refresh_token_ttl_seconds','core_request_timeout_seconds','challenge_rate_per_minute','login_rate_per_minute','account_login_rate_per_minute','create_rate_per_minute','query_rate_per_minute','share_rate_per_minute','max_pending_operations','operation_tick_milliseconds','operation_lease_seconds','operation_max_attempts'],
  runtime:['allowed_lite_types','allowed_pro_types','lite_cpu_cores','lite_memory_gb','lite_disk_gb','pro_cpu_cores','pro_memory_gb','pro_disk_gb'],
 };
@@ -26,7 +28,7 @@ const runtimes = [
   { value: 'opencode', label: 'OpenCode' }, { value: 'deepseek-harness', label: 'DeepSeek Harness' },
 ];
 const proRuntimes = runtimes;
-const scopes = ['lite-instances:create', 'lite-instances:read', 'lite-instances:restart', 'lite-instances:reset', 'lite-instances:delete', 'pro-instances:create', 'pro-instances:read', 'pro-instances:restart', 'pro-instances:reset', 'pro-instances:delete', 'lite-instances:share-link:manage', 'lite-instances:share-link:reset', 'owners:usage:read'];
+const scopes = ['lite-instances:create', 'lite-instances:read', 'lite-instances:restart', 'lite-instances:reset', 'lite-instances:delete', 'pro-instances:create', 'pro-instances:read', 'pro-instances:restart', 'pro-instances:reset', 'pro-instances:delete', 'lite-instances:share-link:manage', 'lite-instances:share-link:reset', 'owners:usage:read','teams:read','teams:create','teams:manage','teams:delete','teams:tasks:read','teams:tasks:write','teams:files:read','teams:files:write','team-templates:read','team-templates:write','team-templates:generate'];
 
 function errorMessage(error: unknown) {
   const message = (error as { response?: { data?: { error?: string } } })?.response?.data?.error;
@@ -59,6 +61,7 @@ const NorthboundSettingsPage: React.FC = () => {
   const [params, setParams] = useSearchParams();
   const section = categories.some(c=>c.id===params.get('section')) ? params.get('section')! : 'access';
   const [keyDirty,setKeyDirty] = useState(false);
+  const [portalDirty,setPortalDirty] = useState(false);
   const onKeyDirty = useCallback((value:boolean)=>setKeyDirty(value),[]);
   const [callerDirty,setCallerDirty] = useState(false);
   const [keyCount,setKeyCount] = useState<number|null>(null);
@@ -76,7 +79,7 @@ const NorthboundSettingsPage: React.FC = () => {
   const [error, setError] = useState('');
 
   const settingsDirty = !!settings && !!overview && Object.values(sectionFields).flat().some(k=>JSON.stringify(settings[k])!==JSON.stringify(overview.settings[k]));
-  const dirty = settingsDirty || keyDirty || callerDirty || (!!overview && nodePort !== (overview.cluster.external_node_port || overview.settings.external_node_port || 32343));
+  const dirty = settingsDirty || keyDirty || portalDirty || callerDirty || (!!overview && nodePort !== (overview.cluster.external_node_port || overview.settings.external_node_port || 32343));
   useEffect(()=>{const handler=(e:BeforeUnloadEvent)=>{if(dirty){e.preventDefault();e.returnValue=''}};window.addEventListener('beforeunload',handler);return()=>window.removeEventListener('beforeunload',handler)},[dirty]);
   useEffect(()=>{const handler=(e:MouseEvent)=>{const link=(e.target as HTMLElement).closest('a');if(dirty && link && link.getAttribute('href') && !window.confirm('存在未保存修改，确认离开？')){e.preventDefault();e.stopPropagation()}};document.addEventListener('click',handler,true);return()=>document.removeEventListener('click',handler,true)},[dirty]);
   const load = async () => {
@@ -168,13 +171,15 @@ const NorthboundSettingsPage: React.FC = () => {
 
         <div className="grid items-start gap-5 lg:grid-cols-[220px_minmax(0,1fr)]">
           <nav aria-label="北向设置分类" className="flex gap-2 overflow-x-auto rounded-2xl border border-slate-200 bg-white p-3 shadow-sm lg:sticky lg:top-5 lg:flex-col">
-            {categories.map(c=><button key={c.id} aria-current={section===c.id?'page':undefined} onClick={()=>{setParams({section:c.id});setMessage('');setError('')}} className={`shrink-0 rounded-xl border px-4 py-3 text-left transition ${section===c.id?'border-red-100 bg-red-50 text-red-700':'border-transparent text-slate-600 hover:bg-slate-50'}`}><span className="block text-sm font-semibold">{c.label}</span><span className="mt-1 hidden text-xs opacity-70 lg:block">{c.note}</span></button>)}
+            {categories.map(c=><button key={c.id} aria-current={section===c.id?'page':undefined} onClick={()=>{if(portalDirty&&!window.confirm('离开将丢弃当前日历预览，是否继续？'))return;setPortalDirty(false);setParams({section:c.id});setMessage('');setError('')}} className={`shrink-0 rounded-xl border px-4 py-3 text-left transition ${section===c.id?'border-red-100 bg-red-50 text-red-700':'border-transparent text-slate-600 hover:bg-slate-50'}`}><span className="block text-sm font-semibold">{c.label}</span><span className="mt-1 hidden text-xs opacity-70 lg:block">{c.note}</span></button>)}
           </nav>
           <div className="min-w-0 space-y-5 rounded-2xl border border-slate-200 bg-white/60 p-4 md:p-6">
             <div className="border-b border-slate-200 pb-4"><h2 className="text-xl font-semibold text-slate-900">{categories.find(c=>c.id===section)?.label}</h2><p className="mt-1 text-sm text-slate-500">{categories.find(c=>c.id===section)?.note} · 各区域独立保存，不覆盖其他设置</p></div>
+            {section==='portal'&&<OwnerPortalAdminPanel onDirty={setPortalDirty}/>}
             <div className={section==='keys'?'':'hidden'}><NorthboundAPIKeysPanel users={users} callers={overview.callers} scopes={scopes} onDirty={onKeyDirty}/></div>
 
         {section==='access' && <section className="grid gap-4 lg:grid-cols-3">
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 lg:col-span-3"><h2 className="font-semibold">北向团队空间</h2><label className="mt-3 flex items-center gap-3 text-sm"><input type="checkbox" checked={settings.owner_teams_enabled} onChange={e=>update('owner_teams_enabled',e.target.checked)}/>启用带 owner 的北向 Team</label><p className="my-3 text-sm text-slate-500">Owner 自动取门户登录用户，与下方后台账号不是同一概念。后台账号仅承载成员资源、额度和镜像策略；关闭入口不会停止已有团队执行。</p><label className="text-sm">新建 Team 使用哪个后台账号的配额<select className="ml-3 rounded-lg border border-slate-200 px-3 py-2" value={settings.owner_team_creation_user_id} onChange={e=>update('owner_team_creation_user_id',Number(e.target.value))}><option value={0}>尚未配置（禁止门户新建）</option>{users.map(u=><option key={u.id} value={u.id}>{u.username} · {u.email}</option>)}</select></label></div>
           <div className="rounded-2xl border border-slate-200 bg-white p-5 lg:col-span-2">
             <div className="flex items-center justify-between gap-4"><div><h2 className="font-semibold">北向 API 状态</h2><p className="mt-1 text-sm text-slate-500">关闭后仅北向 API 返回 503，Gateway 仍保持健康，普通门户和已有 Runtime 不停止。</p></div><button type="button" onClick={() => update('api_enabled', !settings.api_enabled)} className={`relative h-7 w-12 rounded-full transition ${settings.api_enabled ? 'bg-emerald-500' : 'bg-slate-300'}`}><span className={`absolute top-1 h-5 w-5 rounded-full bg-white transition ${settings.api_enabled ? 'left-6' : 'left-1'}`} /></button></div>
           </div>

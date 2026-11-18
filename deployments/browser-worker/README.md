@@ -27,13 +27,22 @@ Each instance gets a cryptographically random 256-bit credential in a Kubernetes
 Secret. Chromium's GUI, VNC and raw CDP listen only on loopback. The relay requires
 instance-specific Basic authentication for **both** HTTP and WebSocket requests:
 the backend authenticates GUI requests after checking the user's scoped cookie;
-OpenClaw uses a credential-bearing CDP URL in its private `openclaw.json`. Never
-copy that URL into PRs, logs, screenshots or shared configuration exports.
+legacy OpenClaw uses a credential-bearing CDP URL in its private `openclaw.json`.
+Protected Lite instances use the local managed-services endpoint instead: the
+backend injects the Worker key and rewrites discovery WebSocket addresses.
+Never copy legacy credential-bearing URLs into logs or configuration exports.
 
 A per-worker ingress NetworkPolicy admits only the backend's `app=clawmanager-app`
 pods on relay port 5801 and OpenClaw runtime pods on relay port 9222. CDP still
 requires its instance credential, because multiple Lite instances share runtime
 pods. A NetworkPolicy-capable CNI is required for the network-isolation layer.
+Protected Workers admit backend ingress on both relay ports and send all web
+traffic through a trusted loopback proxy and the backend Worker egress listener.
+Their CNI policy allows only that backend listener and cluster DNS; Chromium
+proxy overrides cannot grant direct internet or cluster access. Worker credentials
+are bound to the current runtime generation and Pod UID, and existing tunnels
+are rechecked every five seconds. A matching policy, observed rollout and pinned
+ready Worker Pod are required before backend credential injection.
 Custom installations must preserve these pod labels. Policy source namespaces
 come from `POD_NAMESPACE` and `RUNTIME_NAMESPACE`, falling back to the Kubernetes
 client's system namespace; a namespace selector and pod selector are both required.
@@ -65,14 +74,22 @@ options are rejected before creating an instance record.
 
 ### Build, publish, and configure (operator workflow)
 
-From the repository root, substitute a registry path you control:
+Run builds on the build server. The relay now reuses the shared agent network
+broker, so its build context must contain the sibling `ClawManager` and
+`AgentsRuntime` repositories. From their shared parent, substitute a registry
+path you control:
 
 ```sh
-docker build -t <registry>/<owner>/browser-worker:0.2.0 deployments/browser-worker
-docker build -f deployments/browser-worker/Dockerfile.cdp-proxy -t <registry>/<owner>/browser-worker-relay:0.2.0 deployments/browser-worker
+docker build -t <registry>/<owner>/browser-worker:0.2.0 ClawManager/deployments/browser-worker
+docker build -f ClawManager/deployments/browser-worker/Dockerfile.cdp-proxy -t <registry>/<owner>/browser-worker-relay:0.2.0 .
 docker push <registry>/<owner>/browser-worker:0.2.0
 docker push <registry>/<owner>/browser-worker-relay:0.2.0
 ```
+
+CI checks out both repositories. `AGENTS_RUNTIME_REF` selects the matching
+shared-agent revision (default `container`); private checkouts use the
+`AGENTS_RUNTIME_READ_TOKEN` repository secret. Publish the matching shared-agent
+revision before running that workflow.
 
 Configure the ClawManager **backend** Deployment with:
 

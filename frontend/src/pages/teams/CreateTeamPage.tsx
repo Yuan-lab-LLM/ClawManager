@@ -1,3 +1,4 @@
+import { customTemplateCreationError, teamMemberCreationError, teamRuntimeOptions, teamRuntimeLabel, TEAM_CREATION_NOTICE } from '../../lib/teamCreationPolicy';
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import OpenClawConfigPlanSection, {
@@ -47,6 +48,7 @@ const memberTemplateFromCustom = (
   template: CustomTeamTemplate,
 ): TeamMemberTemplate => ({
   id: `custom-${template.id}`,
+  creationError: customTemplateCreationError(template),
   name: template.name,
   teamName: template.name,
   description: template.spec.summary,
@@ -192,8 +194,8 @@ const draftFromTemplateMember = (
 
   const runtimeType: RuntimeType = isLeader
     ? LEADER_RUNTIME_TYPE
-    : templateMember.runtimeType === "hermes"
-      ? "hermes"
+    : templateMember.runtimeType === "hermes" || templateMember.runtimeType === "opencode" || templateMember.runtimeType === "deepseek-harness"
+      ? templateMember.runtimeType
       : "openclaw";
 
   return defaultMember({
@@ -353,10 +355,12 @@ const CreateTeamPage: React.FC = () => {
   );
   const selectedHermesImage = defaultHermesMemberImages[0];
   const hermesLiteImage = selectedHermesImage?.image || "";
+  const dshLiteImage = images.find(item => item.instance_type === "deepseek-harness" && item.is_enabled !== false && normalizedImageRuntimeType(item) === "gateway")?.image || "";
+  const openCodeLiteImage = images.find(item => item.instance_type === "opencode" && item.is_enabled !== false && normalizedImageRuntimeType(item) === "gateway")?.image || "";
   const imageForRuntime = useCallback(
-    (runtimeType: RuntimeType) =>
-      runtimeType === "hermes" ? hermesLiteImage : openClawLiteImage,
-    [hermesLiteImage, openClawLiteImage],
+    (runtimeType: RuntimeType, mode: InstanceMode = "lite") =>
+      mode !== "lite" ? "" : runtimeType === "hermes" ? hermesLiteImage : runtimeType === "opencode" ? openCodeLiteImage : runtimeType === "deepseek-harness" ? dshLiteImage : openClawLiteImage,
+    [hermesLiteImage, openClawLiteImage, openCodeLiteImage, dshLiteImage],
   );
 
   useEffect(() => {
@@ -409,7 +413,7 @@ const CreateTeamPage: React.FC = () => {
   const updateWorkerRuntime = (memberDraftId: string, runtimeType: RuntimeType) => {
     setMembers((current) =>
       current.map((member) => {
-        if (member.id !== memberDraftId || member.isLeader) {
+        if (member.id !== memberDraftId || (member.isLeader && runtimeType !== "openclaw")) {
           return member;
         }
         return {
@@ -531,7 +535,7 @@ const CreateTeamPage: React.FC = () => {
       memberId: normalizedMemberId,
       displayName: member.name.trim() || normalizedMemberId,
       role: effectiveMemberRole(member),
-      runtimeType: member.isLeader ? LEADER_RUNTIME_TYPE : member.runtimeType,
+      runtimeType: member.runtimeType,
       isLeader: member.isLeader,
     });
     const merged = {
@@ -554,10 +558,11 @@ const CreateTeamPage: React.FC = () => {
   );
 
   const validationError = useMemo(() => {
+    if (selectedTemplate?.creationError) return selectedTemplate.creationError;
     if (!name.trim()) {
       return "Team 名称不能为空";
     }
-    if (!openClawLiteImage) {
+    if (!openClawLiteImage && members.some(member => member.runtimeType === "openclaw")) {
       return loadingImages
         ? "正在加载 OpenClaw Lite 镜像"
         : "没有可用的 OpenClaw Lite 镜像";
@@ -578,20 +583,17 @@ const CreateTeamPage: React.FC = () => {
         return `成员 ID 重复：${memberId}`;
       }
       memberIds.add(memberId);
-      if (member.isLeader && member.runtimeType !== LEADER_RUNTIME_TYPE) {
-        return "Leader 必须使用 OpenClaw Lite";
-      }
-      if (!imageForRuntime(member.runtimeType)) {
-        return member.runtimeType === "hermes"
-          ? "没有可用的 Hermes Lite 镜像"
-          : "没有可用的 OpenClaw Lite 镜像";
+      const policyError = teamMemberCreationError(member);
+      if (policyError) return policyError;
+      if (!imageForRuntime(member.runtimeType, member.instanceMode)) {
+        return `没有可用的 ${member.runtimeType} ${member.instanceMode} 镜像`;
       }
       if (member.cpuCores <= 0 || member.memoryGb <= 0 || member.diskGb <= 0) {
         return `成员 ${memberId} 的资源规格无效`;
       }
     }
     return null;
-  }, [imageForRuntime, loadingImages, members, name, openClawLiteImage]);
+  }, [imageForRuntime, loadingImages, members, name, openClawLiteImage, selectedTemplate]);
 
   const environmentDraft = buildEnvironmentOverridesPayload();
   const openClawPlanInvalid =
@@ -643,14 +645,14 @@ const CreateTeamPage: React.FC = () => {
       members: members.map((member) => {
         const normalizedMemberId = normalizeMemberId(member.memberId);
         const memberDescription = effectiveMemberDescription(member);
-        const runtimeType = member.isLeader ? LEADER_RUNTIME_TYPE : member.runtimeType;
+        const runtimeType = member.runtimeType;
         return {
           member_id: normalizedMemberId,
           name: displayNameForMember(member),
           icon_key: resolveTeamIcon({leader:member.isLeader,iconKey:member.iconKey,override:member.iconOverride,profileKey:member.agentProfileKey,role:effectiveMemberRole(member),name:displayNameForMember(member),tags:member.roleProfile?.capability_tags}),
           role: effectiveMemberRole(member),
-          mode: FIXED_INSTANCE_MODE,
-          instance_mode: FIXED_INSTANCE_MODE,
+          mode: member.instanceMode,
+          instance_mode: member.instanceMode,
           runtime_type: runtimeType,
           description: memberDescription || undefined,
           is_leader: member.isLeader,
@@ -659,13 +661,13 @@ const CreateTeamPage: React.FC = () => {
           disk_gb: member.diskGb,
           gpu_enabled: false,
           gpu_count: 0,
-          image_registry: imageForRuntime(runtimeType),
+          image_registry: imageForRuntime(runtimeType, member.instanceMode),
           environment_overrides: buildMemberEnvironmentOverrides(
             member,
             normalizedMemberId,
           ),
           role_profile: member.roleProfile,
-          openclaw_config_plan: openClawConfigPlan,
+          openclaw_config_plan: runtimeType === "openclaw" ? openClawConfigPlan : undefined,
         };
       }),
     };
@@ -701,7 +703,7 @@ const CreateTeamPage: React.FC = () => {
                     成员公共注入
                   </h2>
                   <p className="mt-1 text-sm text-gray-500">
-                    这些环境变量和 OpenClaw 配置会应用到本次创建的所有 Team 成员。
+                    环境变量应用到所有成员；OpenClaw 专用配置仅应用到 OpenClaw 成员。
                   </p>
                 </div>
                 <span className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-600">
@@ -709,7 +711,7 @@ const CreateTeamPage: React.FC = () => {
                 </span>
               </div>
 
-              <div className="mt-5 border-t border-[#f1e5df] pt-5">
+              <div className="mt-5 border-t border-[var(--cm-border)] pt-5">
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <h3 className="text-sm font-semibold text-gray-900">
@@ -722,7 +724,7 @@ const CreateTeamPage: React.FC = () => {
                   <button
                     type="button"
                     onClick={addEnvironmentRow}
-                    className="inline-flex items-center justify-center rounded-xl border border-[#eadfd8] bg-white px-3 py-2 text-sm font-medium text-[#5f5957] hover:bg-[#fff8f5]"
+                    className="inline-flex items-center justify-center rounded-xl border border-[var(--cm-border)] bg-white px-3 py-2 text-sm font-medium text-[var(--cm-text)] hover:bg-[var(--cm-subtle)]"
                   >
                     添加变量
                   </button>
@@ -730,7 +732,7 @@ const CreateTeamPage: React.FC = () => {
 
                 <div className="mt-4 space-y-3">
                   {environmentRows.length === 0 ? (
-                    <div className="rounded-xl border border-dashed border-[#eadfd8] bg-white px-4 py-3 text-sm text-gray-500">
+                    <div className="rounded-xl border border-dashed border-[var(--cm-border)] bg-white px-4 py-3 text-sm text-gray-500">
                       暂无额外环境变量。
                     </div>
                   ) : (
@@ -747,7 +749,7 @@ const CreateTeamPage: React.FC = () => {
                             })
                           }
                           placeholder="ENV_NAME"
-                          className="rounded-xl border border-[#eadfd8] px-3 py-2 text-sm focus:border-[#ef4444] focus:outline-none focus:ring-1 focus:ring-[#f3d2c2]"
+                          className="rounded-xl border border-[var(--cm-border)] px-3 py-2 text-sm focus:border-[var(--cm-primary)] focus:outline-none focus:ring-1 focus:ring-[#f3d2c2]"
                         />
                         <input
                           value={row.value}
@@ -757,7 +759,7 @@ const CreateTeamPage: React.FC = () => {
                             })
                           }
                           placeholder="value"
-                          className="rounded-xl border border-[#eadfd8] px-3 py-2 text-sm focus:border-[#ef4444] focus:outline-none focus:ring-1 focus:ring-[#f3d2c2]"
+                          className="rounded-xl border border-[var(--cm-border)] px-3 py-2 text-sm focus:border-[var(--cm-primary)] focus:outline-none focus:ring-1 focus:ring-[#f3d2c2]"
                         />
                         <button
                           type="button"
@@ -777,7 +779,7 @@ const CreateTeamPage: React.FC = () => {
                 </div>
               </div>
 
-              <div className="mt-6 border-t border-[#f1e5df] pt-5">
+              <div className="mt-6 border-t border-[var(--cm-border)] pt-5">
                 <h3 className="text-sm font-semibold text-gray-900">
                   OpenClaw 配置
                 </h3>
@@ -850,14 +852,14 @@ const CreateTeamPage: React.FC = () => {
                     value={name}
                     onChange={(event) => setName(event.target.value)}
                     placeholder="research-team"
-                    className="mt-1 block w-full rounded-xl border border-[#eadfd8] px-3 py-2 text-sm focus:border-[#ef4444] focus:outline-none focus:ring-1 focus:ring-[#f3d2c2]"
+                    className="mt-1 block w-full rounded-xl border border-[var(--cm-border)] px-3 py-2 text-sm focus:border-[var(--cm-primary)] focus:outline-none focus:ring-1 focus:ring-[#f3d2c2]"
                   />
                 </label>
                 <label className="block">
                   <span className="text-sm font-medium text-gray-700">
                     共享存储
                   </span>
-                  <div className="mt-1 flex rounded-xl border border-[#eadfd8] bg-white">
+                  <div className="mt-1 flex rounded-xl border border-[var(--cm-border)] bg-white">
                     <input
                       type="number"
                       min={1}
@@ -867,7 +869,7 @@ const CreateTeamPage: React.FC = () => {
                       }
                       className="min-w-0 flex-1 rounded-l-xl border-0 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-[#f3d2c2]"
                     />
-                    <span className="flex items-center rounded-r-xl border-l border-[#eadfd8] bg-gray-50 px-3 text-sm text-gray-500">
+                    <span className="flex items-center rounded-r-xl border-l border-[var(--cm-border)] bg-gray-50 px-3 text-sm text-gray-500">
                       GiB
                     </span>
                   </div>
@@ -876,7 +878,7 @@ const CreateTeamPage: React.FC = () => {
                   <span className="text-sm font-medium text-gray-700">
                     协作模式
                   </span>
-                  <div className="mt-1 rounded-xl border border-[#eadfd8] bg-gray-50 px-3 py-2 text-sm text-gray-700">
+                  <div className="mt-1 rounded-xl border border-[var(--cm-border)] bg-gray-50 px-3 py-2 text-sm text-gray-700">
                     {communicationModeOption.label}
                   </div>
                   <p className="mt-1 text-xs text-gray-500">
@@ -888,7 +890,7 @@ const CreateTeamPage: React.FC = () => {
                   <select
                     value={selectedTemplate?.id || ""}
                     onChange={(event) => applyTemplate(event.target.value)}
-                    className="mt-1 block w-full rounded-xl border border-[#eadfd8] bg-white px-3 py-2 text-sm focus:border-[#ef4444] focus:outline-none focus:ring-1 focus:ring-[#f3d2c2]"
+                    className="mt-1 block w-full rounded-xl border border-[var(--cm-border)] bg-white px-3 py-2 text-sm focus:border-[var(--cm-primary)] focus:outline-none focus:ring-1 focus:ring-[#f3d2c2]"
                   >
                     {memberTemplates.map((template) => (
                       <option key={template.id} value={template.id}>
@@ -901,7 +903,7 @@ const CreateTeamPage: React.FC = () => {
               </div>
 
               {selectedTemplate && (
-                <div className="mt-4 rounded-xl border border-[#eadfd8] bg-[#fffaf6] px-4 py-3 text-sm">
+                <div className="mt-4 rounded-xl border border-[var(--cm-border)] bg-[var(--cm-subtle)] px-4 py-3 text-sm">
                   <div className="font-medium text-gray-900">
                     {getTemplateDisplayName(selectedTemplate)}
                   </div>
@@ -911,15 +913,16 @@ const CreateTeamPage: React.FC = () => {
                 </div>
               )}
 
-              <div className="mt-5 overflow-hidden rounded-xl border border-[#eadfd8]">
-                <div className="hidden grid-cols-[minmax(110px,0.8fr)_minmax(130px,0.9fr)_minmax(190px,1.15fr)_minmax(140px,0.9fr)_minmax(260px,1.7fr)] gap-3 border-b border-[#eadfd8] bg-gray-50 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 lg:grid">
+              <p className="mt-3 text-xs text-gray-500">{TEAM_CREATION_NOTICE}</p>
+              <div className="mt-5 overflow-hidden rounded-xl border border-[var(--cm-border)]">
+                <div className="hidden grid-cols-[minmax(110px,0.8fr)_minmax(130px,0.9fr)_minmax(190px,1.15fr)_minmax(140px,0.9fr)_minmax(260px,1.7fr)] gap-3 border-b border-[var(--cm-border)] bg-gray-50 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 lg:grid">
                   <div>成员 ID</div>
                   <div>显示名称</div>
                   <div>运行时</div>
                   <div>角色模板</div>
                   <div>角色解释</div>
                 </div>
-                <div className="divide-y divide-[#eadfd8] bg-white">
+                <div className="divide-y divide-[var(--cm-border)] bg-white">
                   {members.map((member) => (
                     <div
                       key={member.id}
@@ -949,51 +952,12 @@ const CreateTeamPage: React.FC = () => {
                         <div className="text-xs font-medium text-gray-500 lg:hidden">
                           运行时
                         </div>
-                        {member.isLeader ? (
-                          <div className="inline-flex rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700">
-                            OpenClaw Lite
-                          </div>
-                        ) : (
-                          <div
-                            className="inline-flex rounded-lg border border-[#eadfd8] bg-gray-50 p-0.5"
-                            role="group"
-                            aria-label={`${member.memberId} 运行时`}
-                          >
-                            {(["openclaw", "hermes"] as RuntimeType[]).map(
-                              (runtimeType) => {
-                                const selected = member.runtimeType === runtimeType;
-                                const unavailable =
-                                  runtimeType === "hermes" && !hermesLiteImage;
-                                return (
-                                  <button
-                                    key={runtimeType}
-                                    type="button"
-                                    disabled={unavailable}
-                                    title={
-                                      unavailable
-                                        ? "未配置可用的 Hermes Lite 镜像"
-                                        : undefined
-                                    }
-                                    onClick={() =>
-                                      updateWorkerRuntime(member.id, runtimeType)
-                                    }
-                                    className={`rounded-md px-2.5 py-1 text-xs font-medium transition ${
-                                      selected
-                                        ? runtimeType === "hermes"
-                                          ? "bg-violet-600 text-white shadow-sm"
-                                          : "bg-emerald-600 text-white shadow-sm"
-                                        : "text-gray-600 hover:bg-white"
-                                    } disabled:cursor-not-allowed disabled:opacity-40`}
-                                  >
-                                    {runtimeType === "hermes"
-                                      ? "Hermes Lite"
-                                      : "OpenClaw Lite"}
-                                  </button>
-                                );
-                              },
-                            )}
-                          </div>
-                        )}
+                        <div className="flex flex-wrap gap-2">
+                          {member.isLeader ? <span className="rounded-lg border border-[var(--cm-border)] bg-gray-50 px-3 py-1.5 text-xs">OpenClaw Lite · 固定 Leader</span> : <select aria-label={`${member.memberId} 运行时`} value={member.runtimeType} onChange={event => updateWorkerRuntime(member.id, event.target.value as RuntimeType)} disabled={submitting} className="rounded-lg border border-[var(--cm-border)] bg-white px-3 py-1.5 text-xs">
+                            {teamRuntimeOptions(false).map(type => <option key={type} value={type} disabled={!imageForRuntime(type)}>{`${teamRuntimeLabel(type)} Lite`}{!imageForRuntime(type) ? "（镜像未配置）" : ""}</option>)}
+                          </select>}
+
+                        </div>
                       </div>
                       <div>
                         <div className="text-xs font-medium text-gray-500 lg:hidden">
@@ -1044,11 +1008,7 @@ const CreateTeamPage: React.FC = () => {
                 <SummaryRow
                   label="运行方式"
                   value={
-                    members.some(
-                      (member) => !member.isLeader && member.runtimeType === "hermes",
-                    )
-                      ? "OpenClaw Leader + 混合 Lite Worker"
-                      : "OpenClaw Lite"
+                    [...new Set(members.map(member => `${teamRuntimeLabel(member.runtimeType)} ${member.instanceMode === "pro" ? "Pro" : "Lite"}`))].join(" + ")
                   }
                 />
                 <SummaryRow
@@ -1060,8 +1020,8 @@ const CreateTeamPage: React.FC = () => {
                   value={`${sharedStorageGb || 0} GiB`}
                 />
                 <SummaryRow
-                  label="默认镜像"
-                  value={selectedImage?.display_name || selectedImage?.image || "无"}
+                  label="成员镜像"
+                  value={[...new Set(members.map(member => { const image = imageForRuntime(member.runtimeType, member.instanceMode); return images.find(item => item.image === image)?.display_name || image || "无"; }))].join("；")}
                 />
                 {members.some(
                   (member) => !member.isLeader && member.runtimeType === "hermes",

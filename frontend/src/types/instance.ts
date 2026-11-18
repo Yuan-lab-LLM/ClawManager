@@ -1,8 +1,23 @@
 import type { OpenClawConfigPlan } from "./openclawConfig";
 import type { InstanceSkill } from "./skill";
 
+export interface RuntimeShutdownAuditHistory {
+  diagnostic_only: true;
+  generation: number;
+  next_before_id: number;
+  items: Array<{
+    id: number;
+    generation: number;
+    claim_id: string;
+    outcome: "cleanup_unconfirmed" | "cleanup_confirmed_release_unconfirmed" | "cleanup_confirmed_release_observed";
+    source: "pro_agent" | "lite_agent";
+    received_at: string;
+  }>;
+}
+
 export interface RuntimeGovernanceStatus {
   mode: "legacy" | "governed" | "awaiting_runtime";
+  reason?: "not_enrolled" | "connected" | "unsupported_protocol" | "owner_changed" | "generation_changed" | "runtime_not_running" | "report_clock_skew" | "report_expired" | "invalid_report";
   task_identity_required: boolean;
   capabilities: string[];
   report: {
@@ -14,7 +29,19 @@ export interface RuntimeGovernanceStatus {
   } | null;
 }
 
-export interface Instance {
+export interface InstanceAutoStopActivity {
+  defaults_policy_version?: string;
+  defaults_policy_status?: string;
+
+  last_gateway_activity_at?: string;
+  monitoring_since?: string;
+  auto_stop_disabled?: boolean;
+  stopped_reason?: "manual" | "idle_timeout";
+  auto_stop_blocker?: string;
+  auto_stop_phase?: string;
+}
+
+export interface Instance extends InstanceAutoStopActivity {
   id: number;
   user_id: number;
   owner?: string;
@@ -37,6 +64,7 @@ export interface Instance {
   runtime_variant?: "linux" | "windows";
   instance_mode: "lite" | "pro";
   status: "creating" | "running" | "stopped" | "error" | "deleting";
+  availability?: InstanceAvailability;
   cpu_cores: number;
   memory_gb: number;
   disk_gb: number;
@@ -51,6 +79,7 @@ export interface Instance {
   mount_path: string;
   workspace_path?: string;
   workspace_usage_bytes?: number;
+  workspace_usage_observed_at?: string | null;
   runtime_generation?: number;
   runtime_error_message?: string;
   runtime_error_code?: string;
@@ -104,6 +133,7 @@ export interface InstanceStatus {
   availability?: InstanceAvailability;
   agent_type?: V2InstanceType;
   workspace_usage_bytes?: number;
+  workspace_usage_observed_at?: string | null;
   pod_name?: string;
   pod_namespace?: string;
   pod_ip?: string;
@@ -330,6 +360,8 @@ export interface InstanceListFilters {
   type?: string;
   instance_mode?: "lite" | "pro";
   availability?: InstanceAvailability;
+  status?: Instance["status"];
+  auto_sleep?: boolean;
 }
 
 export interface InstanceSummary {
@@ -535,6 +567,7 @@ export interface InstanceLLMGovernanceStatus {
 }
 
 export interface RuntimeMaintenanceStatus {
+  manual_controls_available?: boolean;
   draining: boolean;
   drained: boolean;
   automatic_upgrade_available: false;
@@ -578,3 +611,4 @@ export const PRESET_CONFIGS = {
 };
 
 export const DEFAULT_LITE_DISK_GB = 5;
+export const MINIMUM_PRO_DISK_GB = 10;

@@ -1,0 +1,133 @@
+{
+  "release": "uiux2-admin-conversation-20261116-975f7fef4e95",
+  "results": [
+    {
+      "case": "recorded conversation count and nonzero hourly curve",
+      "status": "PASS",
+      "total": 8,
+      "hourlySum": 8,
+      "scope": "Gateway user turns with successful model responses; includes intermediate tool responses; same-trace retries deduplicated."
+    },
+    {
+      "case": "live API totals and actual resources",
+      "status": "PASS",
+      "users": 1,
+      "instances": 36,
+      "tokens": 507352,
+      "conversations": 8,
+      "conversationsCoverage": "partial",
+      "runtimePods": 4,
+      "measured": [
+        "cpu",
+        "memory",
+        "disk"
+      ]
+    },
+    {
+      "case": "admin endpoint rejects unauthenticated request",
+      "status": "PASS"
+    },
+    {
+      "case": "deployed overview layout and controls",
+      "width": 2560,
+      "height": 1271,
+      "status": "PASS",
+      "singleScreen": true,
+      "groupsAligned": true,
+      "measuredGauges": 3,
+      "nodeDetails": true,
+      "errors": []
+    },
+    {
+      "case": "deployed overview layout and controls",
+      "width": 1920,
+      "height": 720,
+      "status": "PASS",
+      "singleScreen": true,
+      "groupsAligned": true,
+      "measuredGauges": 3,
+      "nodeDetails": true,
+      "errors": []
+    },
+    {
+      "case": "deployed overview layout and controls",
+      "width": 1440,
+      "height": 900,
+      "status": "PASS",
+      "singleScreen": true,
+      "groupsAligned": true,
+      "measuredGauges": 3,
+      "nodeDetails": true,
+      "errors": []
+    },
+    {
+      "case": "deployed overview layout and controls",
+      "width": 1280,
+      "height": 720,
+      "status": "PASS",
+      "singleScreen": true,
+      "groupsAligned": true,
+      "measuredGauges": 3,
+      "nodeDetails": true,
+      "errors": []
+    },
+    {
+      "case": "deployed overview layout and controls",
+      "width": 768,
+      "height": 900,
+      "status": "PASS",
+      "singleScreen": false,
+      "groupsAligned": true,
+      "measuredGauges": 3,
+      "nodeDetails": true,
+      "errors": []
+    },
+    {
+      "case": "deployed overview layout and controls",
+      "width": 390,
+      "height": 900,
+      "status": "PASS",
+      "singleScreen": false,
+      "groupsAligned": true,
+      "measuredGauges": 3,
+      "nodeDetails": true,
+      "errors": []
+    },
+    {
+      "case": "deployed additional languages",
+      "status": "PASS",
+      "locales": [
+        "en",
+        "ja",
+        "ko",
+        "de"
+      ]
+    },
+    {
+      "case": "unchanged native browser application",
+      "type": "opencode",
+      "id": 256,
+      "status": "PASS",
+      "frame": {
+        "origin": "https://10.130.81.54:31617",
+        "path": "/new-session",
+        "textLength": 75,
+        "controls": 9
+      },
+      "errors": []
+    },
+    {
+      "case": "unchanged native browser application",
+      "type": "deepseek-harness",
+      "id": 264,
+      "status": "PASS",
+      "frame": {
+        "origin": "https://10.130.81.54:31609",
+        "path": "/",
+        "textLength": 69,
+        "controls": 8
+      },
+      "errors": []
+    }
+  ]
+}

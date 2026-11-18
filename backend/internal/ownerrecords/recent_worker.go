@@ -2,64 +2,91 @@ package ownerrecords
 
 import (
 	"context"
+	"errors"
 	"log"
+	"time"
 )
 
-// Presentation excerpts have their own bounded scan. They must not depend on
-// post-epoch question accounting or on a new model invocation being present.
-// Fingerprints are hints only; restarting a worker safely checks the source again.
+// Stable excerpts survive quiet days; bounded schedules prioritize active users.
 func (s *Store) scanRecentQuestions(ctx context.Context, after uint64, fingerprints map[uint64]string) (uint64, error) {
 	if s.HistoryRoot == "" {
 		return 0, nil
 	}
-	rows, err := s.Session.SQL().QueryContext(ctx, `SELECT id,COALESCE(workspace_path,''),user_id,LOWER(TRIM(owner)),type,SHA2(CONCAT(COALESCE(workspace_path,''),'|',COALESCE(access_token,'')),256) FROM instances WHERE id>? AND owner IS NOT NULL AND TRIM(owner)<>'' AND LOWER(TRIM(owner)) NOT IN ('factory-reset-staging@clawmanager.local','admin@clawmanager.local') AND instance_mode='lite' AND type IN ('openclaw','hermes','opencode','deepseek-harness') ORDER BY id LIMIT 20`, after)
-	if err != nil {
-		return after, err
-	}
-	type item struct {
-		identity   Identity
-		workspace  string
-		generation string
-	}
-	var items []item
-	for rows.Next() {
-		var v item
-		if err = rows.Scan(&v.identity.Instance, &v.workspace, &v.identity.Scope, &v.identity.Owner, &v.identity.Runtime, &v.generation); err != nil {
-			rows.Close()
-			return after, err
-		}
-		v.identity.Mode = "lite"
-		items = append(items, v)
-	}
-	err = rows.Err()
-	rows.Close()
-	if err != nil {
-		return after, err
+	startedBatch, processed := time.Now(), 0
+	items, selectionErr := s.scheduledScans(ctx, "recent")
+	recordSyncSelected(ctx, "recent", len(items))
+	defer func() {
+		s.observeScanCost("recent", processed, startedBatch)
+		log.Printf("owner scan batch lane=recent selected=%d processed=%d elapsed_ms=%d budget_exhausted=%t", len(items), processed, time.Since(startedBatch).Milliseconds(), !scanHasBudget(ctx))
+	}()
+	if ctx.Err() != nil {
+		return after, ctx.Err()
 	}
 	if len(items) == 0 {
-		return 0, nil
+		return after, selectionErr
 	}
-	for _, v := range items {
-		if ctx.Err() != nil {
-			return after, ctx.Err()
+	var err error
+	for _, item := range items {
+		work, cancel, admitted := scanItemContext(ctx)
+		if !admitted {
+			return after, errors.Join(selectionErr, errSyncYield)
 		}
-		after = v.identity.Instance
-		fingerprint, e := historyFingerprint(ctx, s.HistoryRoot, v.workspace, v.identity)
-		if e == nil && fingerprints[after] == fingerprint+v.generation {
-			continue
-		}
-		if e = s.cacheRecentQuestion(ctx, v.identity, v.workspace); e != nil {
-			log.Printf("owner recent question deferred: %T", e)
-			continue
-		}
-		if fingerprint != "" {
-			if verified, e := historyFingerprint(ctx, s.HistoryRoot, v.workspace, v.identity); e == nil && verified == fingerprint {
-				if len(fingerprints) >= 4096 {
-					clear(fingerprints)
-				}
-				fingerprints[after] = fingerprint + v.generation
+		started := time.Now()
+		var captureErr error
+		work, captureErr = s.captureScanRuntime(work, &item)
+		if captureErr != nil {
+			cancel()
+			if e := s.finishScanCheckpoint(ctx, "recent", item, started, captureErr); e != nil {
+				return after, e
 			}
+			processed++
+			continue
+		}
+		cacheGeneration := scanReadGeneration(item)
+		previous := ""
+		if value := fingerprints[item.identity.Instance]; len(value) > len(cacheGeneration) && value[len(value)-len(cacheGeneration):] == cacheGeneration {
+			previous = value[:len(value)-len(cacheGeneration)]
+		}
+		var cutoff time.Time
+		var read historyReadResponse
+		epoch, e := s.analyticsEpoch(work)
+		err = e
+		if epoch != nil {
+			cutoff = epoch.Start
+		}
+		if e == nil && item.identity.Runtime == "openclaw" {
+			// Reuse only history already acknowledged by the full fact worker.
+			// Recent excerpts must not acknowledge previously unseen archives.
+			work, _, e = s.openClawColdProgress(work, item)
+			err = e
+		}
+		if e == nil && item.identity.Runtime == "deepseek-harness" {
+			work, _, e = s.dshProgress(work, item)
+			err = e
+		}
+		if e == nil {
+			read, err = s.inspectNative(work, item, true, cutoff, previous)
+		}
+		item.unchanged = err == nil && read.Unchanged
+		if !read.Unchanged && (err == nil || usablePartial(err)) {
+			err = s.saveRecentQuestions(work, item.identity, item.workspace, time.Now().UTC(), read.Questions, err)
+		}
+		if err == nil && read.Fingerprint != "" {
+			if len(fingerprints) >= 4096 {
+				clear(fingerprints)
+			}
+			fingerprints[item.identity.Instance] = read.Fingerprint + cacheGeneration
+		}
+		err = s.checkScanAbsence(work, &item, err)
+		cancel()
+		if e := s.finishScanCheckpoint(ctx, "recent", item, started, err); e != nil {
+			return after, e
+		}
+		after = item.identity.Instance
+		processed++
+		if errors.Is(err, errReaderBusy) {
+			return after, errors.Join(selectionErr, errReaderBusy)
 		}
 	}
-	return after, nil
+	return after, selectionErr
 }

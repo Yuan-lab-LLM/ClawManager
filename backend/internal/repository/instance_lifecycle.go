@@ -24,6 +24,11 @@ func (r *instanceRepository) AcquireLifecycleLock(ctx context.Context, id int) (
 		release()
 		return nil, err
 	}
+	if err := CheckRuntimeOrphanLifecycleGuard(ctx, r.sess, id); err != nil {
+		release()
+		return nil, err
+	}
+
 	return release, nil
 }
 
@@ -50,7 +55,7 @@ func (r *instanceRepository) acquireLifecycleLock(ctx context.Context, id int) (
 	if !acquired.Valid || acquired.Int64 != 1 {
 		_ = conn.Close()
 		if acquired.Valid && acquired.Int64 == 0 {
-			return nil, models.ErrInstanceOperationInProgress
+			return nil, models.ErrInstanceLifecycleLockBusy
 		}
 		return nil, fmt.Errorf("instance lifecycle lock returned no result")
 	}

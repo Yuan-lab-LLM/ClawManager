@@ -38,6 +38,7 @@ const PROTOCOL_TYPE_LABELS: Record<string, string> = {
 
 interface EditableModel extends LLMModel {
   local_id: string;
+  selected_template?: ProviderTemplate;
   isNew?: boolean;
   isEditing?: boolean;
   saving?: boolean;
@@ -52,6 +53,7 @@ interface EditableModel extends LLMModel {
 
 type EditableModelSnapshot = Pick<
   EditableModel,
+  | 'selected_template'
   | 'visibility_scope'
   | 'allowed_user_ids'
   | 'access_policy_version'
@@ -93,6 +95,7 @@ type EditableModelSnapshot = Pick<
 >;
 
 const captureSnapshot = (card: EditableModel): EditableModelSnapshot => ({
+  selected_template: card.selected_template,
   visibility_scope: card.visibility_scope,
   allowed_user_ids: [...(card.allowed_user_ids ?? [])],
   access_policy_version: card.access_policy_version,
@@ -251,17 +254,16 @@ function buildCurrentTemplate(card: Pick<EditableModel, 'provider_type' | 'proto
 }
 
 function getTemplateOptions(card: EditableModel, currentLabel: string) {
-  const matchedTemplate = findProviderTemplate(card.provider_type, card.base_url);
-  if (matchedTemplate) {
+  const selectedTemplate = getSelectedTemplate(card, currentLabel);
+  if (!selectedTemplate || BUILTIN_PROVIDER_TEMPLATES.some((template) => template.id === selectedTemplate.id)) {
     return BUILTIN_PROVIDER_TEMPLATES;
   }
-
-  const currentTemplate = buildCurrentTemplate(card, currentLabel);
-  return currentTemplate ? [currentTemplate, ...BUILTIN_PROVIDER_TEMPLATES] : BUILTIN_PROVIDER_TEMPLATES;
+  return [selectedTemplate, ...BUILTIN_PROVIDER_TEMPLATES];
 }
 
 function getSelectedTemplate(card: EditableModel, currentLabel: string) {
   return (
+    card.selected_template ??
     findProviderTemplate(card.provider_type, card.base_url) ??
     buildCurrentTemplate(card, currentLabel)
   );
@@ -276,7 +278,7 @@ const TEMPLATE_ICON_META: Record<string, { src: string; glyph: string; className
   anthropic: {
     src: '/vendor-icons/anthropic.svg',
     glyph: 'AN',
-    className: 'border-[#efd8c8] bg-[#fff5ed] text-[#8a4b2b]',
+    className: 'border-[var(--cm-border)] bg-[var(--cm-subtle)] text-[#8a4b2b]',
   },
   openrouter: {
     src: '/vendor-icons/openrouter.ico',
@@ -306,12 +308,12 @@ const TEMPLATE_ICON_META: Record<string, { src: string; glyph: string; className
   dashscope: {
     src: '/vendor-icons/dashscope.png',
     glyph: 'QW',
-    className: 'border-[#f0ddbf] bg-[#fff8ea] text-[#9b6a11]',
+    className: 'border-[#f0ddbf] bg-[var(--cm-subtle)] text-[#9b6a11]',
   },
   ark: {
     src: '/vendor-icons/ark.png',
     glyph: 'DB',
-    className: 'border-[#f5d5cc] bg-[#fff3ef] text-[#b14d2c]',
+    className: 'border-[var(--cm-border)] bg-[var(--cm-subtle)] text-[#b14d2c]',
   },
   groq: {
     src: '/vendor-icons/groq.ico',
@@ -326,7 +328,7 @@ const TEMPLATE_ICON_META: Record<string, { src: string; glyph: string; className
   fireworks: {
     src: '/vendor-icons/fireworks.ico',
     glyph: 'FW',
-    className: 'border-[#f6d6c4] bg-[#fff2ea] text-[#c05621]',
+    className: 'border-[#f6d6c4] bg-[var(--cm-subtle)] text-[#c05621]',
   },
   xai: {
     src: '/vendor-icons/xai.ico',
@@ -346,22 +348,22 @@ const TEMPLATE_ICON_META: Record<string, { src: string; glyph: string; className
   minimax: {
     src: '/vendor-icons/minimax.ico',
     glyph: 'MM',
-    className: 'border-[#f1ddd4] bg-[#fff5f0] text-[#af5f3d]',
+    className: 'border-[var(--cm-border)] bg-[var(--cm-subtle)] text-[var(--cm-muted)]',
   },
   'minimax-anthropic': {
     src: '/vendor-icons/minimax.ico',
     glyph: 'MM',
-    className: 'border-[#f1ddd4] bg-[#fff5f0] text-[#af5f3d]',
+    className: 'border-[var(--cm-border)] bg-[var(--cm-subtle)] text-[var(--cm-muted)]',
   },
   'minimax-cn': {
     src: '/vendor-icons/minimax.ico',
     glyph: 'MM',
-    className: 'border-[#f1ddd4] bg-[#fff5f0] text-[#af5f3d]',
+    className: 'border-[var(--cm-border)] bg-[var(--cm-subtle)] text-[var(--cm-muted)]',
   },
   'minimax-cn-anthropic': {
     src: '/vendor-icons/minimax.ico',
     glyph: 'MM',
-    className: 'border-[#f1ddd4] bg-[#fff5f0] text-[#af5f3d]',
+    className: 'border-[var(--cm-border)] bg-[var(--cm-subtle)] text-[var(--cm-muted)]',
   },
   ollama: {
     src: '/vendor-icons/local-internal.svg',
@@ -375,7 +377,7 @@ function resolveTemplateIconMeta(template?: ProviderTemplate) {
     return {
       src: '/vendor-icons/custom-endpoint.svg',
       glyph: 'AI',
-      className: 'border-[#eadfd8] bg-white text-[#7c5a4d]',
+      className: 'border-[var(--cm-border)] bg-white text-[var(--cm-text)]',
     };
   }
 
@@ -383,14 +385,14 @@ function resolveTemplateIconMeta(template?: ProviderTemplate) {
     return {
       src: '/vendor-icons/custom-endpoint.svg',
       glyph: 'CU',
-      className: 'border-[#eadfd8] bg-[#fff7f3] text-[#7c5a4d]',
+      className: 'border-[var(--cm-border)] bg-[var(--cm-selected)] text-[var(--cm-text)]',
     };
   }
 
   return TEMPLATE_ICON_META[template.id] ?? {
     src: '/vendor-icons/custom-endpoint.svg',
     glyph: template.label.slice(0, 2).toUpperCase(),
-    className: 'border-[#eadfd8] bg-white text-[#7c5a4d]',
+    className: 'border-[var(--cm-border)] bg-white text-[var(--cm-text)]',
   };
 }
 
@@ -403,7 +405,7 @@ const VendorTemplateIcon: React.FC<VendorTemplateIconProps> = ({ template, size 
   const meta = resolveTemplateIconMeta(template);
   const [imageFailed, setImageFailed] = useState(false);
   const sizeClass = size === 'sm'
-    ? 'h-6 w-6 rounded-lg text-[11px]'
+    ? 'h-6 w-6 rounded-lg text-xs'
     : 'h-11 w-11 rounded-2xl text-xs';
 
   useEffect(() => {
@@ -507,7 +509,7 @@ const ProviderTemplatePicker: React.FC<ProviderTemplatePickerProps> = ({
           {selectedTemplate ? (
             <div className="min-w-0 flex flex-wrap items-center gap-2">
               <span className="text-sm font-semibold text-gray-900">{selectedTemplate.label}</span>
-              <span className="rounded-full border border-[#eadfd8] bg-[#fff7f3] px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.12em] text-[#8f5a47]">
+              <span className="rounded-full border border-[var(--cm-border)] bg-[var(--cm-selected)] px-2.5 py-1 text-xs font-medium uppercase tracking-[0.12em] text-[var(--cm-muted)]">
                 {getTypeLabel(selectedTemplate.providerType)}
               </span>
             </div>
@@ -519,15 +521,15 @@ const ProviderTemplatePicker: React.FC<ProviderTemplatePickerProps> = ({
           viewBox="0 0 20 20"
           fill="none"
           aria-hidden="true"
-          className={`h-5 w-5 shrink-0 text-[#8f5a47] transition-transform ${open ? 'rotate-180' : ''}`}
+          className={`h-5 w-5 shrink-0 text-[var(--cm-muted)] transition-transform ${open ? 'rotate-180' : ''}`}
         >
           <path d="M5 7.5 10 12.5 15 7.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       </button>
 
       {open && (
-        <div className="absolute left-0 right-0 z-20 mt-2 overflow-hidden rounded-[26px] border border-[#ead8cf] bg-white shadow-[0_30px_60px_-36px_rgba(72,44,24,0.45)]">
-          <div className="border-b border-[#f1e3db] p-3">
+        <div className="absolute left-0 right-0 z-20 mt-2 overflow-hidden rounded-lg border border-[var(--cm-border)] bg-white shadow-sm">
+          <div className="border-b border-[var(--cm-border)] p-3">
             <input
               type="text"
               value={query}
@@ -552,10 +554,10 @@ const ProviderTemplatePicker: React.FC<ProviderTemplatePickerProps> = ({
                       onSelect(template);
                       setOpen(false);
                     }}
-                    className={`w-full rounded-[22px] px-4 py-3 text-left transition-colors ${
+                    className={`w-full rounded-lg px-4 py-3 text-left transition-colors ${
                       isActive
-                        ? 'bg-[#fff2eb] text-[#7c3f28]'
-                        : 'text-gray-700 hover:bg-[#fff8f4]'
+                        ? 'bg-[var(--cm-subtle)] text-[#7c3f28]'
+                        : 'text-gray-700 hover:bg-[var(--cm-subtle)]'
                     }`}
                   >
                     <div className="flex items-start gap-3">
@@ -563,7 +565,7 @@ const ProviderTemplatePicker: React.FC<ProviderTemplatePickerProps> = ({
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center justify-between gap-3">
                           <span className="text-sm font-semibold">{template.label}</span>
-                          <span className="rounded-full border border-[#eadfd8] bg-white px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.12em] text-[#8f5a47]">
+                          <span className="rounded-full border border-[var(--cm-border)] bg-white px-2.5 py-1 text-xs font-medium uppercase tracking-[0.12em] text-[var(--cm-muted)]">
                             {getTypeLabel(template.providerType)}
                           </span>
                         </div>
@@ -674,6 +676,13 @@ const ModelManagementPage: React.FC = () => {
       }
 
       const next = { ...card, ...patch, error: patch.error ?? card.error };
+      // Template identity is a draft choice, not a live URL lookup. Preserve it
+      // while editing the address, including temporarily clearing the field.
+      if (Object.prototype.hasOwnProperty.call(patch, 'provider_type') && !Object.prototype.hasOwnProperty.call(patch, 'selected_template')) {
+        next.selected_template = undefined;
+      } else if (Object.prototype.hasOwnProperty.call(patch, 'base_url') && !Object.prototype.hasOwnProperty.call(patch, 'selected_template')) {
+        next.selected_template = getSelectedTemplate(card, t('modelManagementPage.currentVendorTemplate'));
+      }
       if (
         Object.prototype.hasOwnProperty.call(patch, 'provider_type') ||
         Object.prototype.hasOwnProperty.call(patch, 'protocol_type') ||
@@ -683,7 +692,9 @@ const ModelManagementPage: React.FC = () => {
       ) {
         next.discovery_error = null;
         next.discovery_key = undefined;
-        next.discovered_models = [];
+        if (!Object.prototype.hasOwnProperty.call(patch, 'discovered_models')) {
+          next.discovered_models = [];
+        }
         next.plan_excluded_ids = [];
         next.discovering = false;
         if (
@@ -691,7 +702,9 @@ const ModelManagementPage: React.FC = () => {
           Object.prototype.hasOwnProperty.call(patch, 'protocol_type') ||
           Object.prototype.hasOwnProperty.call(patch, 'base_url')
         ) {
-          next.provider_model_name = '';
+          if (!Object.prototype.hasOwnProperty.call(patch, 'provider_model_name')) {
+            next.provider_model_name = '';
+          }
           next.reasoning_control_mode = '';
           next.reasoning_enabled = false;
           if (next.isNew) {
@@ -1134,14 +1147,9 @@ const ModelManagementPage: React.FC = () => {
   return (
     <AdminLayout title={t('nav.models')}>
       <div className="space-y-6">
-        <section className="app-panel p-6">
+        <section className="app-panel p-4">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <h2 className="text-xl font-semibold text-gray-900">{t('modelManagementPage.title')}</h2>
-              <p className="mt-1 text-sm text-gray-500">
-                {t('modelManagementPage.subtitle')}
-              </p>
-            </div>
+
             <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
@@ -1200,7 +1208,7 @@ const ModelManagementPage: React.FC = () => {
                     key={card.local_id}
                     ref={newCardRef}
                     disabled={Boolean(card.saving || bulkSaving)}
-                    className="min-w-0 self-start rounded-[26px] border border-[#ead8cf] bg-[rgba(255,248,245,0.84)] p-5 shadow-[0_18px_42px_-34px_rgba(72,44,24,0.42)]"
+                    className="min-w-0 self-start rounded-lg border border-[var(--cm-border)] bg-[var(--cm-subtle)] p-5 shadow-sm"
                   >
                     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                       <div>
@@ -1212,11 +1220,17 @@ const ModelManagementPage: React.FC = () => {
                           searchPlaceholder={t('modelManagementPage.vendorTemplateSearchPlaceholder')}
                           emptyText={t('modelManagementPage.vendorTemplateEmpty')}
                           getTypeLabel={getProviderTypeLabel}
-                          onSelect={(template) => updateCard(card.local_id, {
-                            provider_type: template.providerType,
-                            protocol_type: resolveProviderProtocolType(template.providerType, template.protocolType),
-                            base_url: template.baseUrl,
-                          })}
+                          onSelect={(template) => {
+                            const suggestedModels = template.suggestedModels ?? [];
+                            updateCard(card.local_id, {
+                              selected_template: template,
+                              provider_type: template.providerType,
+                              protocol_type: resolveProviderProtocolType(template.providerType, template.protocolType),
+                              base_url: template.baseUrl,
+                              provider_model_name: card.provider_model_name.trim() || suggestedModels[0] || '',
+                              discovered_models: suggestedModels.map((id) => ({ id, display_name: id })),
+                            });
+                          }}
                         />
                       </div>
                       <div>
@@ -1258,7 +1272,7 @@ const ModelManagementPage: React.FC = () => {
                       </div>
                     </div>
 
-                    <details className="mt-3 rounded-xl border border-[#ead8cf] bg-white/60 p-3 text-xs text-gray-600">
+                    <details className="mt-3 rounded-xl border border-[var(--cm-border)] bg-white/60 p-3 text-xs text-gray-600">
                       <summary className="cursor-pointer font-medium">
                         {t('modelManagementPage.advancedCredentials')}
                         {card.api_key_secret_ref?.trim() && <span className="ml-2 text-sky-700">{t('modelManagementPage.secretRefConfigured')}</span>}
@@ -1298,9 +1312,9 @@ const ModelManagementPage: React.FC = () => {
                         min="0"
                         max="2147483647"
                         step="1"
-                        value={card.context_window_tokens ?? 0}
+                        value={card.context_window_tokens ?? ''}
                         onChange={(event) => updateCard(card.local_id, {
-                          context_window_tokens: Number.parseInt(event.target.value, 10) || 0,
+                          context_window_tokens: event.target.value === '' ? undefined : Number.parseInt(event.target.value, 10),
                         })}
                         className="app-input mt-1 block w-full"
                         placeholder={t('modelManagementPage.contextWindowPlaceholder')}
@@ -1401,7 +1415,7 @@ const ModelManagementPage: React.FC = () => {
                             {t('modelManagementPage.secure')}
                           </span>
                         )}
-                        <span className={`rounded-full px-2.5 py-1 ${card.is_active ? 'border border-[#d9ead3] bg-[#f3fff0] text-[#2f6b2f]' : 'border border-[#eadfd8] bg-white text-[#7b6f6a]'}`}>
+                        <span className={`rounded-full px-2.5 py-1 ${card.is_active ? 'border border-[#d9ead3] bg-[#f3fff0] text-[#2f6b2f]' : 'border border-[var(--cm-border)] bg-white text-[var(--cm-text)]'}`}>
                           {card.is_active ? t('modelManagementPage.active') : t('modelManagementPage.inactive')}
                         </span>
                       </div>
@@ -1443,7 +1457,7 @@ const ModelManagementPage: React.FC = () => {
           )}
 
           {!loading && models.length === 0 && (
-            <div className="mt-6 rounded-[24px] border border-dashed border-[#ead8cf] bg-[rgba(255,248,245,0.72)] px-6 py-10 text-center text-sm text-gray-500">
+            <div className="mt-6 rounded-lg border border-dashed border-[var(--cm-border)] bg-[var(--cm-subtle)] px-6 py-10 text-center text-sm text-gray-500">
               {t('modelManagementPage.empty')}
             </div>
           )}

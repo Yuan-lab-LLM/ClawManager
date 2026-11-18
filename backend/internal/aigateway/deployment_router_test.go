@@ -2,6 +2,7 @@ package aigateway
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"testing"
@@ -89,16 +90,32 @@ func TestAutoDeploymentRoutingExcludesCooldownDeployment(t *testing.T) {
 
 func TestAutoDeploymentRoutingDoesNotTrustExpiredPerformanceSamples(t *testing.T) {
 	prepared, candidates := deploymentRoutingFixture()
+	audit := &stubAuditEventService{}
 	old := time.Now().UTC().Add(-deploymentHealthSampleTTL - time.Minute).UnixMilli()
 	now := time.Now().UTC().UnixMilli()
-	gateway := &service{deploymentStore: &routingDeploymentStore{snapshots: map[int]services.GatewayDeploymentSnapshot{
+	gateway := &service{auditEventService: audit, deploymentStore: &routingDeploymentStore{snapshots: map[int]services.GatewayDeploymentSnapshot{
 		1: {DeploymentID: 1, State: "healthy", EWMATTFTMs: 1, EWMALatencyMs: 1, EWMATokensPerSecond: 10000, Samples: 20, LastSuccessMs: old},
 		2: {DeploymentID: 2, State: "healthy", EWMATTFTMs: 400, EWMALatencyMs: 2000, EWMATokensPerSecond: 40, Samples: 20, LastSuccessMs: now},
 	}}}
 
 	ordered := gateway.orderAutoDeployments(t.Context(), prepared, candidates)
-	if ordered[0].ID != 2 {
-		t.Fatalf("expired performance sample remained authoritative: %#v", ordered)
+	if len(ordered) != 2 || len(audit.events) != 1 || audit.events[0].Details == nil {
+		t.Fatal("routing candidates or score audit missing")
+	}
+	// An expired deployment may legitimately receive the bounded exploration
+	// traffic. Assert its stale measurements are discarded, not which deployment
+	// the wall-clock-dependent exploration bucket happens to choose.
+	var details deploymentRoutingDetails
+	if err := json.Unmarshal([]byte(*audit.events[0].Details), &details); err != nil {
+		t.Fatal(err)
+	}
+	scores := map[int]deploymentRouteScore{}
+	for _, score := range details.Candidates {
+		scores[score.DeploymentID] = score
+	}
+	expired, fresh := scores[1], scores[2]
+	if expired.State != "unknown" || expired.EWMATTFTMs != 0 || expired.EWMALatencyMs != 0 || expired.EWMATokensPerSecond != 0 || expired.Score <= fresh.Score || fresh.State != "healthy" {
+		t.Fatalf("expired performance sample remained authoritative: %#v", details)
 	}
 }
 
