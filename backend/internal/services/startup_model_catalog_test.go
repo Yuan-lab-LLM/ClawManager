@@ -3,9 +3,20 @@ package services
 import (
 	"clawreef/internal/models"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 )
+
+func TestStartupModelCatalogRejectsMissingOwner(t *testing.T) {
+	for _, instance := range []*models.Instance{nil, {UserID: 0}, {UserID: -1}} {
+		s := &instanceService{llmModelRepo: &stubLLMModelRepository{}}
+		raw, err := s.buildStartupModelCatalog(instance, "test-token")
+		if !errors.Is(err, models.ErrModelUnavailable) || raw != "" {
+			t.Fatalf("invalid owner became an authoritative empty catalog: %q %v", raw, err)
+		}
+	}
+}
 
 func TestStartupModelCatalogIsOwnerScopedAndContainsNoCredentials(t *testing.T) {
 	s := &instanceService{llmModelRepo: &stubLLMModelRepository{active: []models.LLMModel{

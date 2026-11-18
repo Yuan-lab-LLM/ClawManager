@@ -61,7 +61,8 @@ jobs:
 
   opencode-browser:
     name: OpenCode browser onboarding
-    runs-on: ubuntu-latest
+    # Keep the runner within the locked Playwright release's supported OS set.
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: e2e

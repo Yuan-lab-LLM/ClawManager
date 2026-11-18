@@ -15,6 +15,9 @@ import (
 // isolated Pod's local model proxy/network namespace has been created. It is
 // rebuilt on every start and never contains upstream credentials or URLs.
 func (s *instanceService) buildStartupModelCatalog(instance *models.Instance, token string) (string, error) {
+	if instance == nil || instance.UserID <= 0 {
+		return "", models.ErrModelUnavailable
+	}
 	items, err := repository.ForModelUser(s.llmModelRepo, instance.UserID).ListActive()
 	if errors.Is(err, models.ErrModelUnavailable) {
 		items = []models.LLMModel{}

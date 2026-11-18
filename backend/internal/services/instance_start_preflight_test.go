@@ -54,6 +54,24 @@ func TestStartMissingModelsDoesNotCleanupExistingBinding(t *testing.T) {
 	}
 }
 
+func TestExistingCredentialPreflightPreservesAuthoritativeEmptyCatalog(t *testing.T) {
+	t.Setenv("CLAWMANAGER_LLM_GATEWAY_BASE_URL", "http://manager.test")
+	for _, kind := range []string{"openclaw", "hermes", "opencode", "deepseek-harness"} {
+		t.Run(kind, func(t *testing.T) {
+			token := "existing-instance-credential"
+			instance := models.Instance{ID: 89, UserID: 45, Type: kind, RuntimeType: "gateway", InstanceMode: "lite", Status: "running", RuntimeGeneration: 8, AccessToken: &token}
+			before := instance
+			s := &instanceService{llmModelRepo: &stubLLMModelRepository{}}
+			if err := s.validateInstanceStartConfiguration(t.Context(), &instance); err != nil {
+				t.Fatalf("existing UI/history startup blocked by empty catalog: %v", err)
+			}
+			if !reflect.DeepEqual(before, instance) {
+				t.Fatal("read-only preflight mutated the existing instance")
+			}
+		})
+	}
+}
+
 type forbidPoolLookup struct{ fakeRuntimePodRepo }
 
 func (*forbidPoolLookup) ListSchedulable(context.Context, string) ([]models.RuntimePod, error) {

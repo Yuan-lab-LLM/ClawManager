@@ -2096,6 +2096,9 @@ chown -R 1000:1000 "$target" || true`,
 }
 
 func (s *instanceService) resolveGatewayModelInjection(ownerID int) (*gatewayModelInjection, error) {
+	if ownerID <= 0 {
+		return nil, models.ErrModelUnavailable
+	}
 	if s.llmModelRepo == nil {
 		return nil, fmt.Errorf("llm model repository not configured")
 	}
