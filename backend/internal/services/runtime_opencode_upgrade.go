@@ -18,9 +18,11 @@ const openCodeNativeRevision = "a105350812f05f914c768e468559dbd6bd508d8e"
 const openCodeNativeBinarySHA256 = "bcebc898d22419417b8dbec0f5e3f00f5b67b5a38c1de37c77c699d0e31fe0dd"
 const openCodeNativeJournalSHA256 = "2ef42ffb09410c0f91535d25fce5b4107c46ee3fd7a4725e521c197ad4f5949c"
 const openCodeNativeProtocol = "opencode-preserve-v1"
+const openCodeScopedPayloadCapability = "opencode.scoped-payload-grants-v1"
+const openCodeScopedPayloadMissing = "OpenCode target lacks " + openCodeScopedPayloadCapability
 const openCodeLegacyImage = "clawmanager.local/opencode-lite@sha256:7ba6888e43480496704a10d9a496b1398863515166acab5c544ccc9c9d91ed31"
 
-var openCodeUpgradeCapabilities = []string{"opencode.native-preserve-v1", "opencode.workspace.writer-lease", "opencode.session-continuity-v1", "opencode.runtime-standby-v1", "opencode.native-payload-poduid-v1"}
+var openCodeUpgradeCapabilities = []string{"opencode.native-preserve-v1", "opencode.workspace.writer-lease", "opencode.session-continuity-v1", "opencode.runtime-standby-v1", "opencode.native-payload-poduid-v1", openCodeScopedPayloadCapability}
 
 type openCodeNativeContract struct {
 	Version       string `json:"version"`

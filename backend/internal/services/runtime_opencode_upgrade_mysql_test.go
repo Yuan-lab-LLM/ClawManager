@@ -109,22 +109,23 @@ func (d *openCodeFlowDeployments) OpenCodeUpgradeSourceRetired(_ context.Context
 type openCodeFlowAgent struct {
 	*fakeRuntimeAgentClient
 	RuntimeUpgradeAgentClient
-	d                     *openCodeFlowDeployments
-	idleCalls             int
-	idleErr               error
-	sourceStopped         bool
-	stopErr               error
-	badCapsule            bool
-	loseMigrationResponse bool
-	nativeRequests        map[string]bool
-	migrations, creates   int
-	states                map[string]*RuntimeAgentGatewayState
-	currentAssignment     k8s.RuntimeAssignment
-	assignmentState       string
-	targetFails           bool
-	restoreRequest        RuntimeAgentWorkspaceRequest
-	badRestore            bool
-	releaseCalls          int
+	d                                *openCodeFlowDeployments
+	idleCalls                        int
+	idleErr                          error
+	sourceStopped                    bool
+	stopErr                          error
+	badCapsule                       bool
+	loseMigrationResponse            bool
+	nativeRequests                   map[string]bool
+	migrations, creates              int
+	states                           map[string]*RuntimeAgentGatewayState
+	currentAssignment                k8s.RuntimeAssignment
+	assignmentState                  string
+	targetFails                      bool
+	restoreRequest                   RuntimeAgentWorkspaceRequest
+	badRestore                       bool
+	releaseCalls                     int
+	compatibilityCalls, acquireCalls int
 }
 
 func (a *openCodeFlowAgent) RequiresConfirmedGatewayStop() bool { return true }
@@ -280,6 +281,7 @@ func (a *openCodeFlowAgent) DeleteGateway(_ context.Context, endpoint, id string
 	return nil
 }
 func (a *openCodeFlowAgent) PreflightUpgradeCompatibility(_ context.Context, _ string, req RuntimeAgentWorkspaceRequest) (*RuntimeAgentUpgradeCompatibility, error) {
+	a.compatibilityCalls++
 	if !a.sourceStopped {
 		return nil, errors.New("native read before source C1")
 	}
@@ -287,6 +289,7 @@ func (a *openCodeFlowAgent) PreflightUpgradeCompatibility(_ context.Context, _ s
 	return &RuntimeAgentUpgradeCompatibility{InstanceID: req.InstanceID, RolloutID: req.RolloutID, Generation: req.Generation, ConfigBytes: 100, SessionBytes: 1024, StateBytes: 2048, AvailableBytes: 1 << 20, CheckedAt: time.Date(2026, 11, 19, 0, 0, 0, 0, time.UTC), Status: "compatible", ConfigOriginalSHA256: digest, ConfigTargetSHA256: digest, ProbeOutputSHA256: digest, ConfigValidated: true, DoctorValidated: true, SessionDryRunValid: true}, nil
 }
 func (a *openCodeFlowAgent) AcquireWriterLease(context.Context, string, RuntimeAgentWriterLeaseRequest) error {
+	a.acquireCalls++
 	return nil
 }
 func (a *openCodeFlowAgent) ReleaseWriterLease(context.Context, string, RuntimeAgentWriterLeaseRequest) error {
@@ -740,23 +743,77 @@ func (a *openCodeFlowAgent) openCodeActivateUpgrade(ctx context.Context, pod mod
 	return a.ActivateUpgrade(ctx, stringValue(pod.AgentEndpoint), id)
 }
 
-func TestOpenCodeNativeMySQLOldFourCapabilityTargetCannotStopSource(t *testing.T) {
+func TestOpenCodeNativeMySQLOldCapabilityTargetCannotStopSource(t *testing.T) {
+	for _, active := range []bool{false, true} {
+		for _, count := range []int{4, 5} {
+			t.Run(fmt.Sprintf("active=%v/caps=%d", active, count), func(t *testing.T) {
+				fixture := openCodeControllerFixture
+				if active {
+					fixture = openCodeActiveControllerFixture
+				}
+				sess, s, r, a := fixture(t)
+				ctx := context.Background()
+				if err := s.advanceOpenCodeUpgrade(ctx, r); err != nil {
+					t.Fatal(err)
+				}
+				caps := []string{"opencode.native-preserve-v1", "opencode.workspace.writer-lease", "opencode.session-continuity-v1", "opencode.runtime-standby-v1", "opencode.native-payload-poduid-v1"}
+				raw, _ := json.Marshal(caps[:count])
+				if _, err := sess.SQL().ExecContext(ctx, `UPDATE runtime_pods SET capabilities_json=? WHERE id=2`, string(raw)); err != nil {
+					t.Fatal(err)
+				}
+				current, _ := s.rolloutRepo.GetByID(ctx, r.ID)
+				err := s.advanceOpenCodeUpgrade(ctx, current)
+				missing := "opencode.native-payload-poduid-v1"
+				if count == 5 {
+					missing = "opencode.scoped-payload-grants-v1"
+				}
+				if err == nil || !strings.Contains(err.Error(), missing) {
+					t.Fatalf("old target accepted: err=%v", err)
+				}
+				if a.sourceStopped || a.creates != 0 || a.migrations != 0 || a.compatibilityCalls != 0 || a.acquireCalls != 0 || a.d.activated != 0 {
+					t.Fatal("old target reached source stop/native lease/execution")
+				}
+				if active {
+					var fences int
+					row, _ := sess.SQL().QueryRow(`SELECT COUNT(*) FROM instance_workspace_write_fences`)
+					if err := row.Scan(&fences); err != nil || fences != 0 {
+						t.Fatalf("source fenced before capability admission: %d %v", fences, err)
+					}
+				}
+				latest, _ := s.rolloutRepo.GetByID(ctx, r.ID)
+				if latest.Status != "running" || !s.upgrade.InstanceBlocked(ctx, RuntimeTypeOpenCode, 7) {
+					t.Fatal("capability refusal lost active type protection")
+				}
+			})
+		}
+	}
+}
+
+func TestOpenCodeNativeMySQLRechecksScopedCapabilityBeforeQuiesce(t *testing.T) {
 	sess, s, r, a := openCodeActiveControllerFixture(t)
 	ctx := context.Background()
-	if err := s.advanceOpenCodeUpgrade(ctx, r); err != nil {
-		t.Fatal(err)
+	for i := 0; i < 2; i++ {
+		current, _ := s.rolloutRepo.GetByID(ctx, r.ID)
+		if err := s.advanceOpenCodeUpgrade(ctx, current); err != nil {
+			t.Fatal(err)
+		}
 	}
-	oldCaps := []string{"opencode.native-preserve-v1", "opencode.workspace.writer-lease", "opencode.session-continuity-v1", "opencode.runtime-standby-v1"}
-	raw, _ := json.Marshal(oldCaps)
-	if _, err := sess.SQL().ExecContext(ctx, `UPDATE runtime_pods SET capabilities_json=? WHERE id=2`, string(raw)); err != nil {
+	old := []string{"opencode.native-preserve-v1", "opencode.workspace.writer-lease", "opencode.session-continuity-v1", "opencode.runtime-standby-v1", "opencode.native-payload-poduid-v1"}
+	raw, _ := json.Marshal(old)
+	if _, err := sess.SQL().Exec(`UPDATE runtime_pods SET capabilities_json=? WHERE id=2`, string(raw)); err != nil {
 		t.Fatal(err)
 	}
 	current, _ := s.rolloutRepo.GetByID(ctx, r.ID)
-	if err := s.advanceOpenCodeUpgrade(ctx, current); err == nil {
-		t.Fatal("old ENV-only native capability contract was accepted")
+	if err := s.advanceOpenCodeUpgrade(ctx, current); err == nil || !strings.Contains(err.Error(), "opencode.scoped-payload-grants-v1") {
+		t.Fatalf("post-freeze old capability accepted: %v", err)
 	}
-	if a.sourceStopped || a.creates != 0 || a.migrations != 0 {
-		t.Fatal("old target contract touched source execution")
+	var fences int
+	row, _ := sess.SQL().QueryRow(`SELECT COUNT(*) FROM instance_workspace_write_fences`)
+	if err := row.Scan(&fences); err != nil || fences != 0 {
+		t.Fatalf("source fenced before capability recheck: %d %v", fences, err)
+	}
+	if a.sourceStopped || a.compatibilityCalls != 0 || a.acquireCalls != 0 || a.migrations != 0 {
+		t.Fatal("capability regression reached stop/native maintenance")
 	}
 }
 
@@ -786,5 +843,79 @@ func TestOpenCodeNativeMySQLRechecksTargetSchedulingAndLineageAfterStandby(t *te
 	}
 	if a.sourceStopped || a.creates != 0 || a.migrations != 0 {
 		t.Fatal("metadata drift reached source stop or native writes")
+	}
+}
+
+func TestOpenCodeNativeMySQLCapabilityRecheckRetainsExactPhysicalAndRegistrationIdentity(t *testing.T) {
+	for _, drift := range []string{"missing-registration-uid", "wrong-registration-id", "physical-image"} {
+		t.Run(drift, func(t *testing.T) {
+			sess, s, r, a := openCodeActiveControllerFixture(t)
+			ctx := context.Background()
+			for i := 0; i < 2; i++ {
+				current, _ := s.rolloutRepo.GetByID(ctx, r.ID)
+				if err := s.advanceOpenCodeUpgrade(ctx, current); err != nil {
+					t.Fatal(err)
+				}
+			}
+			switch drift {
+			case "missing-registration-uid":
+				if _, err := sess.SQL().Exec(`UPDATE runtime_pods SET pod_uid=NULL WHERE id=2`); err != nil {
+					t.Fatal(err)
+				}
+			case "wrong-registration-id":
+				if _, err := sess.SQL().Exec(`UPDATE runtime_pods SET id=3 WHERE id=2`); err != nil {
+					t.Fatal(err)
+				}
+			case "physical-image":
+				for i := range a.d.pods {
+					if a.d.pods[i].PodName == "target-pod" {
+						a.d.pods[i].ImageRef = "registry/changed@sha256:" + strings.Repeat("b", 64)
+						a.d.pods[i].ImageDigest = imageDigestFromReference(a.d.pods[i].ImageRef)
+					}
+				}
+			}
+			current, _ := s.rolloutRepo.GetByID(ctx, r.ID)
+			if err := s.advanceOpenCodeUpgrade(ctx, current); err == nil {
+				t.Fatal("unproven current target registration/physical image admitted")
+			}
+			var fences int
+			row, _ := sess.SQL().QueryRow(`SELECT COUNT(*) FROM instance_workspace_write_fences`)
+			if err := row.Scan(&fences); err != nil || fences != 0 {
+				t.Fatalf("target drift fenced source: %d %v", fences, err)
+			}
+			if a.sourceStopped || a.compatibilityCalls != 0 || a.acquireCalls != 0 || a.migrations != 0 {
+				t.Fatal("target drift caused source/native mutations")
+			}
+		})
+	}
+}
+
+func TestOpenCodeNativeMySQLSuccessfulCheckpointClearsOnlyResolvedCapabilityRefusal(t *testing.T) {
+	for _, message := range []string{"OpenCode target lacks opencode.scoped-payload-grants-v1", "unrelated native error remains recorded"} {
+		t.Run(message, func(t *testing.T) {
+			sess, s, r, _ := openCodeActiveControllerFixture(t)
+			ctx := context.Background()
+			for i := 0; i < 2; i++ {
+				current, _ := s.rolloutRepo.GetByID(ctx, r.ID)
+				if err := s.advanceOpenCodeUpgrade(ctx, current); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err := sess.SQL().Exec(`UPDATE runtime_rollouts SET error_message=? WHERE id=?`, message, r.ID); err != nil {
+				t.Fatal(err)
+			}
+			current, _ := s.rolloutRepo.GetByID(ctx, r.ID)
+			if err := s.advanceOpenCodeUpgrade(ctx, current); err != nil {
+				t.Fatal(err)
+			}
+			latest, _ := s.rolloutRepo.GetByID(ctx, r.ID)
+			expected := message
+			if strings.Contains(message, "opencode.scoped-payload-grants-v1") {
+				expected = ""
+			}
+			if stringValue(latest.ErrorMessage) != expected || latest.Status != "running" || !s.upgrade.InstanceBlocked(ctx, RuntimeTypeOpenCode, 7) {
+				t.Fatalf("checkpoint lost accurate refusal/protection: %+v", latest)
+			}
+		})
 	}
 }

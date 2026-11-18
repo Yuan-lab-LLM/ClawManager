@@ -470,6 +470,11 @@ func (s *RuntimeScheduler) saveOpenCodePlan(ctx context.Context, r *models.Runti
 	}).CompareAndSavePoolCheckpoint(ctx, r.ID, p.raw, string(raw))
 	if err == nil {
 		p.raw = string(raw)
+		// Successful protected progress supersedes only this exact admission
+		// refusal. Preserve all other errors, status, guards and immutable results.
+		if stringValue(r.ErrorMessage) == openCodeScopedPayloadMissing {
+			_, err = s.upgrade.sess.SQL().ExecContext(ctx, `UPDATE runtime_rollouts r JOIN runtime_rollout_checkpoints c ON c.rollout_id=r.id SET r.error_message=NULL,r.updated_at=UTC_TIMESTAMP(6) WHERE r.id=? AND r.status IN ('pending','running') AND BINARY c.state_json=BINARY ? AND r.error_message=?`, r.ID, p.raw, openCodeScopedPayloadMissing)
+		}
 	}
 	return err
 }
@@ -609,13 +614,8 @@ func (s *RuntimeScheduler) advanceOpenCodeUpgrade(ctx context.Context, r *models
 				if pod.Namespace != target.Namespace || pod.DeploymentName != target.Name || !runtimePodMatchesImage(pod, r.TargetImageRef) {
 					continue
 				}
-				if stringValue(pod.AgentProtocolVersion) != openCodeNativeProtocol {
-					return fmt.Errorf("OpenCode standby protocol does not match frozen native contract")
-				}
-				for _, cap := range openCodeUpgradeCapabilities {
-					if !containsString(pod.Capabilities(), cap) {
-						return fmt.Errorf("OpenCode standby lacks %s", cap)
-					}
+				if err := validateOpenCodeTargetCapabilities(pod); err != nil {
+					return err
 				}
 				ready, e := backend.ColdRuntimeStandbyReady(ctx, target, stringValue(pod.PodUID))
 				if e != nil {
@@ -1037,20 +1037,49 @@ func (s *RuntimeScheduler) setOpenCodePhase(ctx context.Context, r *models.Runti
 	return nil
 }
 
+// Source legacy Agents require C1 only; this contract applies exclusively to
+// the target, before quiesce and again before every protected maintenance step.
+func validateOpenCodeTargetCapabilities(pod models.RuntimePod) error {
+	if stringValue(pod.AgentProtocolVersion) != openCodeNativeProtocol {
+		return fmt.Errorf("OpenCode target protocol does not match frozen native contract")
+	}
+	for _, capability := range openCodeUpgradeCapabilities {
+		if !containsString(pod.Capabilities(), capability) {
+			return fmt.Errorf("OpenCode target lacks %s", capability)
+		}
+	}
+	return nil
+}
+
 func (s *RuntimeScheduler) verifyFrozenOpenCodeTargetPods(ctx context.Context, p *openCodeUpgradePlan) error {
 	live, err := s.RuntimeDeploymentPods(ctx, RuntimeTypeOpenCode)
 	if err != nil {
 		return err
 	}
+	reported, err := s.podRepo.List(ctx, RuntimeTypeOpenCode)
+	if err != nil {
+		return err
+	}
+	verifiedReports := upgradePodsWithLiveIdentity(reported, live)
 	for _, expected := range p.Targets {
 		found := false
-		for _, actual := range live {
-			if actual.Namespace == expected.Namespace && actual.PodName == expected.PodName && actual.DeploymentName == expected.DeploymentName && stringValue(actual.KubernetesPodUID) == stringValue(expected.PodUID) && stringValue(actual.PodIP) == stringValue(expected.PodIP) && runtimePodMatchesImage(actual, p.TargetImage) {
+		for _, physical := range live {
+			if physical.Namespace != expected.Namespace || physical.PodName != expected.PodName || physical.DeploymentName != expected.DeploymentName || stringValue(physical.KubernetesPodUID) != stringValue(expected.PodUID) || stringValue(physical.PodIP) != stringValue(expected.PodIP) || !runtimePodMatchesImage(physical, p.TargetImage) {
+				continue
+			}
+			for _, actual := range verifiedReports {
+				// Native maintenance never inherits the legacy nil-UID fallback.
+				if actual.ID != expected.ID || actual.ID <= 0 || stringValue(actual.PodUID) == "" || stringValue(actual.PodUID) != stringValue(expected.PodUID) || actual.Namespace != physical.Namespace || actual.PodName != physical.PodName || actual.DeploymentName != physical.DeploymentName || stringValue(actual.PodIP) != stringValue(expected.PodIP) || !runtimePodMatchesImage(actual, p.TargetImage) {
+					continue
+				}
+				if err := validateOpenCodeTargetCapabilities(actual); err != nil {
+					return err
+				}
 				found = true
 			}
 		}
 		if !found {
-			return fmt.Errorf("OpenCode frozen target Pod UID/IP/image changed; original operation remains protected")
+			return fmt.Errorf("OpenCode frozen target Pod UID/registration/IP/image changed; original operation remains protected")
 		}
 	}
 	return nil

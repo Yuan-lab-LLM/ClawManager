@@ -79,3 +79,31 @@ func TestOpenCodeNativeViewKeepsHistoricalErrorScopedToObservation(t *testing.T)
 		})
 	}
 }
+
+func TestOpenCodeNativeViewRecordsScopedCapabilityRefusalAndHoldsTypeGuard(t *testing.T) {
+	data, err := os.ReadFile("testdata/opencode_rollout14_preserve.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, stage := range []string{"standby_ready", "quiesce", "preserve"} {
+		t.Run(stage, func(t *testing.T) {
+			var p openCodeUpgradePlan
+			if err := json.Unmarshal(data, &p); err != nil {
+				t.Fatal(err)
+			}
+			p.Stage = stage
+			raw, _ := json.Marshal(p)
+			repo := &checkpointRepo{raw: string(raw)}
+			preflight := string(data)
+			message := "OpenCode target lacks opencode.scoped-payload-grants-v1"
+			r := &models.RuntimeRollout{ID: 14, RuntimeType: RuntimeTypeOpenCode, Status: "running", PreflightJSON: &preflight, ErrorMessage: &message}
+			v, err := LoadOpenCodeUpgradeOperation(context.Background(), repo, r)
+			if err != nil || !v.Blocked || !v.ProtectionHeld || v.BlockedReason != "required_target_capability_missing" || v.ErrorMessage != message || v.ErrorScope != "last_recorded_controller_error_not_revalidated" {
+				t.Fatalf("capability hold not observable: %+v err=%v", v, err)
+			}
+			if repo.raw != string(raw) || len(repo.statuses) != 0 {
+				t.Fatal("capability view changed operation protection")
+			}
+		})
+	}
+}

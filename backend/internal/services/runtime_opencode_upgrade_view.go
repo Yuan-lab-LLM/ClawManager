@@ -93,5 +93,10 @@ func LoadOpenCodeUpgradeOperation(ctx context.Context, repo any, r *models.Runti
 		v.BlockedReason = "native_payload_trust_rejected"
 		v.Message = "CM 最后记录了原生兼容性拒绝；实例已有停止证明记录，尚无迁移备份。操作仍受 Runtime 类型保护，请勿重提或清除保护。"
 	}
+	if v.ProtectionHeld && v.ErrorMessage == openCodeScopedPayloadMissing {
+		v.Blocked = true
+		v.BlockedReason = "required_target_capability_missing"
+		v.Message = "CM 最后记录目标缺少必需的安全维护能力；操作仍受 Runtime 类型保护。阶段与实例状态按记录展示，请勿重提或清除保护。"
+	}
 	return v, nil
 }
