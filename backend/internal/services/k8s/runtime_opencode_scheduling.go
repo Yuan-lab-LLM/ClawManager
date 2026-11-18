@@ -55,7 +55,7 @@ func (s *runtimeDeploymentService) openCodeSchedulingPair(ctx context.Context, s
 	case "retire", "verify":
 		valid = a == "false" && b == "true"
 	case "rollback_retire":
-		valid = (a == initial || a == "false" || a == "true") && (b == "false" || b == "true")
+		valid = (a == initial || a == "false" || a == "true") && (b == "false" || b == "true") && !(a == "false" && b == "false")
 	case "rollback_verify":
 		valid = a == "true" && b == "false"
 	}

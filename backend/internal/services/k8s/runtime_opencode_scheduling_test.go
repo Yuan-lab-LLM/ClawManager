@@ -142,3 +142,36 @@ func TestOpenCodeSchedulingRevalidatesTargetLineageBeforeEveryWrite(t *testing.T
 		})
 	}
 }
+
+func TestOpenCodeSchedulingRollbackRejectsBothDisabledWithoutWriting(t *testing.T) {
+	ctx := context.Background()
+	service, client, source, target := openCodeSchedulingFixture(t)
+	for _, name := range []string{source.Target.Name, target.Target.Name} {
+		actual, err := client.AppsV1().Deployments("tenant").Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		actual.Labels[runtimeSchedulingLabel] = "false"
+		if _, err = client.AppsV1().Deployments("tenant").Update(ctx, actual, metav1.UpdateOptions{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	client.ClearActions()
+	if err := service.SetOpenCodeUpgradePoolActive(ctx, source, target, "41", false); err == nil {
+		t.Fatal("rollback reopened an independently disabled source")
+	}
+	for _, action := range client.Actions() {
+		if action.GetVerb() == "update" || action.GetVerb() == "patch" {
+			t.Fatal("rollback wrote after impossible double-disabled scheduling state")
+		}
+	}
+	for _, name := range []string{source.Target.Name, target.Target.Name} {
+		actual, err := client.AppsV1().Deployments("tenant").Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if actual.Labels[runtimeSchedulingLabel] != "false" {
+			t.Fatal("rollback changed original disabled scheduling")
+		}
+	}
+}
