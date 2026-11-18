@@ -816,7 +816,9 @@ func (s *RuntimeManagementService) Process(ctx context.Context) error {
 		return err
 	}
 	var id, raw, kind string
-	rows, err := s.sess.SQL().QueryContext(ctx, `SELECT id,kind,request_json FROM runtime_management_operations WHERE status='pending' ORDER BY CASE WHEN kind='slot_reset' THEN updated_at ELSE created_at END,created_at LIMIT 1`)
+	// Every resumed attempt yields to operations that have waited longer. A stuck
+	// recovery must not monopolize the worker or starve another Runtime type.
+	rows, err := s.sess.SQL().QueryContext(ctx, `SELECT id,kind,request_json FROM runtime_management_operations WHERE status='pending' ORDER BY updated_at,created_at,id LIMIT 1`)
 	if err != nil {
 		return err
 	}
