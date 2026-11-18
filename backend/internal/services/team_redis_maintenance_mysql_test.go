@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -64,6 +65,7 @@ func TestDurableTeamDispatchRetryAfterRedisBeforeSQLDoesNotDuplicate(t *testing.
 	b, _ := capacityRedisFixture(t)
 	cleanupMaintenanceTeam(t, b, team.ID)
 	task.Status = "pending"
+	task.MessageID = "dispatch-fault"
 	if err := repo.UpdateTask(task); err != nil {
 		t.Fatal(err)
 	}
@@ -88,9 +90,93 @@ func TestDurableTeamDispatchRetryAfterRedisBeforeSQLDoesNotDuplicate(t *testing.
 	if n, err := b.doRaw(context.Background(), "XLEN", out.Destination); err != nil || n != int64(1) {
 		t.Fatal("durable retry duplicated accepted work", n, err)
 	}
+	entries, err := b.XRevRange(t.Context(), out.Destination, 1)
+	if err != nil || len(entries) != 1 || entries[0].Fields["task_id"] != fmt.Sprint(task.ID) {
+		t.Fatalf("legacy numeric dispatch wire identity changed: %v %v", entries, err)
+	}
 	got, err := repo.GetTaskByID(task.ID)
 	if err != nil || got.Status != "dispatched" || got.RedisStreamID == nil {
 		t.Fatal("task dispatch not recovered", got, err)
+	}
+}
+
+func TestDurableTeamDispatchKeepsCanonicalWireIDAndFencesTaskScope(t *testing.T) {
+	_, repo, team, task, _ := projectionMySQL(t)
+	b, _ := capacityRedisFixture(t)
+	cleanupMaintenanceTeam(t, b, team.ID)
+	task.Status = models.TeamTaskStatusPending
+	if err := repo.UpdateTask(task); err != nil {
+		t.Fatal(err)
+	}
+	foreign := &models.Team{UserID: team.UserID, Name: "other-team", Status: "running", CommunicationMode: "leader_mediated", RedisEventsLastID: "0-0"}
+	if err := repo.CreateTeam(foreign); err != nil {
+		t.Fatal(err)
+	}
+	cleanupMaintenanceTeam(t, b, foreign.ID)
+	member := &models.TeamMember{TeamID: foreign.ID, UserID: foreign.UserID, MemberKey: "leader", DisplayName: "Foreign", Role: "leader", RuntimeType: "openclaw", InstanceMode: "lite", Status: "idle", Availability: "idle"}
+	if err := repo.CreateMember(member); err != nil {
+		t.Fatal(err)
+	}
+	foreignTask := &models.TeamTask{TeamID: foreign.ID, TargetMemberID: member.ID, MessageID: task.MessageID, Status: models.TeamTaskStatusPending, WorkflowState: "planning", PayloadJSON: "{}"}
+	if err := repo.CreateTask(foreignTask); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := t.Context()
+	destination := teamInboxKey(team.ID, "leader")
+	canonical := fmt.Sprintf("team-%d-task-%d", team.ID, task.ID)
+	s := &teamService{repo: repo}
+	outbox := func(taskRef, messageID, stream string) *models.TeamEventOutbox {
+		return &models.TeamEventOutbox{
+			TeamID: team.ID, SourceEventID: "dispatch:" + messageID, Destination: stream, MessageID: messageID,
+			PayloadJSON: fmt.Sprintf(`{"taskId":%s,"to":"leader","messageId":%q}`, taskRef, messageID),
+		}
+	}
+	for _, test := range []struct {
+		name, taskRef, messageID, stream string
+	}{
+		{"foreign-reference", strconv.Quote(fmt.Sprintf("team-%d-task-%d", foreign.ID, task.ID)), task.MessageID, destination},
+		{"foreign-task", strconv.Quote(fmt.Sprintf("team-%d-task-%d", team.ID, foreignTask.ID)), task.MessageID, destination},
+		{"malformed", strconv.Quote(canonical + "-extra"), task.MessageID, destination},
+		{"wrong-message", strconv.Quote(canonical), "other-message", destination},
+		{"foreign-destination", strconv.Quote(canonical), task.MessageID, teamInboxKey(foreign.ID, "leader")},
+		{"fractional-number", fmt.Sprintf("%d.75", task.ID), task.MessageID, destination},
+		{"exponent-number", fmt.Sprintf("%de0", task.ID), task.MessageID, destination},
+		{"signed-canonical", strconv.Quote(fmt.Sprintf("team-%d-task-+%d", team.ID, task.ID)), task.MessageID, destination},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if err := s.deliverTeamEventOutbox(team, b, outbox(test.taskRef, test.messageID, test.stream)); err == nil {
+				t.Fatal("invalid dispatch scope accepted")
+			}
+			entries, err := b.XRevRange(ctx, test.stream, 2)
+			if err != nil || len(entries) != 0 {
+				t.Fatalf("invalid dispatch wrote %d stream entries: %v", len(entries), err)
+			}
+		})
+	}
+	t.Run("missing-outbox-message", func(t *testing.T) {
+		missing := outbox(strconv.Quote(canonical), task.MessageID, destination)
+		missing.MessageID = ""
+		if err := s.deliverTeamEventOutbox(team, b, missing); err == nil {
+			t.Fatal("dispatch accepted a payload-supplied receipt identity")
+		}
+		if entries, err := b.XRevRange(ctx, destination, 1); err != nil || len(entries) != 0 {
+			t.Fatalf("invalid dispatch wrote %d stream entries: %v", len(entries), err)
+		}
+	})
+	positive := outbox(strconv.Quote(canonical), task.MessageID, destination)
+	for range 2 {
+		if err := s.deliverTeamEventOutbox(team, b, positive); err != nil {
+			t.Fatal(err)
+		}
+	}
+	entries, err := b.XRevRange(ctx, destination, 2)
+	if err != nil || len(entries) != 1 || entries[0].Fields["task_id"] != canonical {
+		t.Fatalf("canonical dispatch wire identity or replay was changed: %v %v", entries, err)
+	}
+	saved, err := repo.GetTaskByID(task.ID)
+	if err != nil || saved == nil || saved.Status != models.TeamTaskStatusDispatched || saved.RedisStreamID == nil || *saved.RedisStreamID != entries[0].ID {
+		t.Fatalf("SQL dispatch did not use the Redis receipt: %+v %v", saved, err)
 	}
 }
 

@@ -4098,15 +4098,26 @@ func (s *teamService) deliverTeamEventOutbox(team *models.Team, bus *redisBus, o
 	if outbox.Destination == teamProjectionCommandDestination {
 		return s.deliverProjectionCommand(context.Background(), team, bus, outbox)
 	}
+	dispatchRepo, durable := s.repo.(repository.TeamDispatchOutboxRepository)
+	dispatch := durable && strings.HasPrefix(outbox.SourceEventID, "dispatch:")
 	payload := map[string]interface{}{}
-	if err := json.Unmarshal([]byte(outbox.PayloadJSON), &payload); err != nil {
+	decoder := json.NewDecoder(strings.NewReader(outbox.PayloadJSON))
+	if dispatch {
+		// Preserve numeric spelling until the SQL task identity has been validated.
+		decoder.UseNumber()
+	}
+	if err := decoder.Decode(&payload); err != nil {
 		return fmt.Errorf("decode Team outbox payload %d: %w", outbox.ID, err)
 	}
+	if _, err := decoder.Token(); err != io.EOF {
+		return fmt.Errorf("decode Team outbox payload %d: unexpected trailing content", outbox.ID)
+	}
+	wireMessageID := eventString(payload, "messageId", "message_id")
 	messageID := strings.TrimSpace(outbox.MessageID)
 	if messageID == "" {
-		messageID = eventString(payload, "messageId", "message_id")
+		messageID = wireMessageID
 	}
-	if strings.EqualFold(eventString(payload, "event", "type"), "completion_ack") {
+	if !dispatch && strings.EqualFold(eventString(payload, "event", "type"), "completion_ack") {
 		completionID := eventString(payload, "completionId", "completion_id")
 		attemptID := eventString(payload, "attemptId", "attempt_id")
 		if completionID == "" || attemptID == "" {
@@ -4126,16 +4137,30 @@ func (s *teamService) deliverTeamEventOutbox(team *models.Team, bus *redisBus, o
 	if taskID := eventString(payload, "taskId", "task_id", "rootTaskId", "root_task_id"); taskID != "" {
 		fields["task_id"] = taskID
 	}
+	var dispatchTaskID int
+	if dispatch {
+		rawID := strings.TrimPrefix(fields["task_id"], fmt.Sprintf("team-%d-task-", team.ID))
+		taskID, parseErr := strconv.Atoi(rawID)
+		destinationTeamID, validDestination := teamRedisID(outbox.Destination)
+		if parseErr != nil || taskID <= 0 || strconv.Itoa(taskID) != rawID || outbox.TeamID != team.ID || !validDestination || destinationTeamID != team.ID {
+			return fmt.Errorf("dispatch outbox lacks task identity for Team %d", team.ID)
+		}
+		if messageID == "" || outbox.MessageID != messageID || outbox.SourceEventID != "dispatch:"+messageID || (wireMessageID != "" && wireMessageID != messageID) {
+			return fmt.Errorf("dispatch outbox message identity does not match its payload")
+		}
+		task, err := s.repo.GetTaskByID(taskID)
+		if err != nil {
+			return err
+		}
+		if task == nil || task.TeamID != team.ID || task.MessageID != messageID {
+			return fmt.Errorf("dispatch outbox task does not match its Team and message")
+		}
+		dispatchTaskID = taskID
+	}
 	receipt := teamCapacityPrefix(team.ID) + "receipt:" + repository.TeamOutboxReceiptIdentity(team.ID, outbox.Destination, outbox.MessageID)
 	streamID, err := bus.xAddReliableOnce(context.Background(), outbox.Destination, fields, receipt)
-	if err == nil && strings.HasPrefix(outbox.SourceEventID, "dispatch:") {
-		if durable, ok := s.repo.(repository.TeamDispatchOutboxRepository); ok {
-			if taskID, parseErr := strconv.Atoi(fields["task_id"]); parseErr == nil {
-				err = durable.MarkTeamDispatchSent(taskID, streamID, time.Now().UTC())
-			} else {
-				return fmt.Errorf("dispatch outbox lacks task identity")
-			}
-		}
+	if err == nil && dispatchTaskID > 0 {
+		return dispatchRepo.MarkTeamDispatchSent(dispatchTaskID, streamID, time.Now().UTC())
 	}
 	return err
 }
