@@ -1,7 +1,6 @@
 package services
 
 import (
-	"clawreef/internal/models"
 	"clawreef/internal/repository"
 	"clawreef/internal/services/k8s"
 	"context"
@@ -41,9 +40,6 @@ func (s *RuntimeManagementService) PrepareRollout(ctx context.Context, runtimeTy
 	rt, ok := NormalizeV2RuntimeType(runtimeType)
 	if !ok {
 		return nil, errors.New("unsupported Runtime type")
-	}
-	if rt == RuntimeTypeOpenCode {
-		return nil, models.ErrOpenCodeSafeUpgradeRequired
 	}
 	if s == nil || s.sess == nil || s.scheduler == nil {
 		return nil, errors.New("Runtime upgrade preparation unavailable")

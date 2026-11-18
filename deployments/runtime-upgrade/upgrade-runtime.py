@@ -188,6 +188,8 @@ def deliver(api, args, state, path):
     if state["stage"] not in ("prepared", "preflight_ready"):
         raise Stop("submission outcome unknown or blocked; inspect --history; never delete state to retry")
     body = {"runtime_type": args.runtime_type, "target_image_ref": args.target_image, "batch_size": args.batch_size, "max_unavailable": 0 if state.get("preflight_id") else 1, "auto_rollback": True, "preparation_id": state["preparation_id"]}
+    if args.runtime_type == "opencode":
+        body["strategy"] = "opencode_native_preserve_v1"
     if state.get("preflight_id"):
         body["preflight_id"] = state["preflight_id"]
     state["stage"] = "submitting"
@@ -221,8 +223,6 @@ def main():
     url = urllib.parse.urlsplit(args.api_url)
     if url.username or url.password or url.query or url.fragment or not url.hostname or (url.scheme != "https" and not (url.scheme == "http" and url.hostname in ("127.0.0.1", "::1", "localhost"))):
         raise Stop("use an HTTPS API URL without credentials/query/fragment; HTTP allowed only on loopback")
-    if args.runtime_type == "opencode" and not args.history and not args.operation_id:
-        raise Stop("OpenCode safe upgrade is not supported by CM; refusing unsafe rolling upgrade")
     if not args.history and (not args.target_image or not re.fullmatch(r"[^\s@]+@sha256:[0-9a-f]{64}", args.target_image)):
         raise Stop("target image must use an immutable repository@sha256 digest")
     if any(not (0 < value < float("inf")) for value in (args.timeout, args.request_timeout, args.poll_interval)) or args.batch_size <= 0 or (args.operation_id is not None and args.operation_id <= 0):

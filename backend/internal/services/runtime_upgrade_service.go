@@ -2120,6 +2120,21 @@ func runtimeDeploymentPodsFor(ctx context.Context, provider RuntimeDeploymentInv
 }
 
 func (s *RuntimeUpgradeService) InstanceBlocked(ctx context.Context, runtimeType string, instanceID int) bool {
+	if runtimeType == RuntimeTypeOpenCode {
+		if s == nil || s.sess == nil {
+			return true
+		}
+		var count int
+		row, err := s.sess.SQL().QueryRowContext(ctx, `SELECT COUNT(*) FROM runtime_rollouts WHERE runtime_type='opencode' AND status IN ('pending','running')`)
+		if err != nil {
+			return true
+		}
+		if err = row.Scan(&count); err != nil {
+			return true
+		}
+		return count != 0
+	}
+
 	normalized, ok := NormalizeV2RuntimeType(runtimeType)
 	if !ok || normalized != RuntimeTypeOpenClaw {
 		return false

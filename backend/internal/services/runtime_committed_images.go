@@ -38,7 +38,7 @@ const runtimeCommittedDefaultPredicate = `r.status='finished' AND COALESCE(JSON_
 
 func LoadCommittedRuntimeImages(ctx context.Context, sess db.Session) (*RuntimeCommittedImages, error) {
 	result := &RuntimeCommittedImages{Images: map[string]string{}}
-	rows, err := sess.SQL().QueryContext(ctx, `SELECT r.id,r.runtime_type,r.target_image_ref,r.preflight_id,r.preflight_json,r.source_images_json,COALESCE(c.state_json,'') FROM runtime_rollouts r LEFT JOIN runtime_rollout_checkpoints c ON c.rollout_id=r.id WHERE r.runtime_type IN ('openclaw','hermes','deepseek-harness') AND `+runtimeCommittedDefaultPredicate+` ORDER BY r.id DESC`)
+	rows, err := sess.SQL().QueryContext(ctx, `SELECT r.id,r.runtime_type,r.target_image_ref,r.preflight_id,r.preflight_json,r.source_images_json,COALESCE(c.state_json,'') FROM runtime_rollouts r LEFT JOIN runtime_rollout_checkpoints c ON c.rollout_id=r.id WHERE r.runtime_type IN ('openclaw','hermes','deepseek-harness','opencode') AND `+runtimeCommittedDefaultPredicate+` ORDER BY r.id DESC`)
 	if err != nil {
 		return nil, fmt.Errorf("load committed Runtime images: %w", err)
 	}
@@ -51,6 +51,9 @@ func LoadCommittedRuntimeImages(ctx context.Context, sess db.Session) (*RuntimeC
 		var checkpoint string
 		if err = rows.Scan(&r.ID, &r.RuntimeType, &r.TargetImageRef, &r.PreflightID, &r.PreflightJSON, &r.SourceImagesJSON, &checkpoint); err != nil {
 			return nil, err
+		}
+		if r.RuntimeType == RuntimeTypeOpenCode && !isOpenCodeNativeRollout(&r) {
+			continue
 		}
 		if !seenTypes[r.RuntimeType] {
 			seenTypes[r.RuntimeType] = true
@@ -66,9 +69,10 @@ func LoadCommittedRuntimeImages(ctx context.Context, sess db.Session) (*RuntimeC
 			continue
 		}
 		// Only OpenClaw successor flows retain an intentionally different source.
-		if r.RuntimeType != RuntimeTypeOpenClaw {
+		if r.RuntimeType != RuntimeTypeOpenClaw && r.RuntimeType != RuntimeTypeOpenCode {
 			continue
 		}
+
 		var plan struct {
 			Sources []k8s.RuntimeRolloutTarget `json:"source_deployment_proofs"`
 		}
@@ -117,7 +121,23 @@ func LoadCommittedRuntimeImages(ctx context.Context, sess db.Session) (*RuntimeC
 			if source.Namespace == "" || source.Name == "" || sources[key] != source.Image {
 				return nil, fmt.Errorf("committed rollout %d source proof is incomplete", r.ID)
 			}
-			allowServing, proofErr := committedIsolatedSourceBindings(ctx, sess, r.ID, source)
+			allowServing := false
+			var proofErr error
+			if r.RuntimeType == RuntimeTypeOpenCode {
+				var occupied int
+				row, e := sess.SQL().QueryRowContext(ctx, `SELECT COUNT(*) FROM instance_runtime_bindings b JOIN runtime_pods p ON p.id=b.runtime_pod_id WHERE p.namespace=? AND p.deployment_name=?`, source.Namespace, source.Name)
+				if e != nil {
+					return nil, e
+				}
+				if e = row.Scan(&occupied); e != nil {
+					return nil, e
+				}
+				if occupied != 0 {
+					return nil, fmt.Errorf("committed OpenCode source has unexpected bindings")
+				}
+			} else {
+				allowServing, proofErr = committedIsolatedSourceBindings(ctx, sess, r.ID, source)
+			}
 			if proofErr != nil {
 				return nil, proofErr
 			}
@@ -160,6 +180,9 @@ func committedIsolatedSourceBindings(ctx context.Context, sess db.Session, rollo
 }
 
 func (images *RuntimeCommittedImages) Apply(cfg config.RuntimePoolConfig) config.RuntimePoolConfig {
+	if image := images.Images[RuntimeTypeOpenCode]; image != "" {
+		cfg.OpenCodeImage = image
+	}
 	if image := images.Images[RuntimeTypeOpenClaw]; image != "" {
 		cfg.OpenClawImage = image
 	}

@@ -166,10 +166,22 @@ class DeliveryTest(unittest.TestCase):
         self.assertIn("empty_pool_reset", result.stdout)
         self.assertNotIn("preflight_id", self.calls[3][2])
 
-    def test_opencode_rejected_without_mutation(self):
+    def test_opencode_submits_only_native_preserve_strategy(self):
         self.runtime = "opencode"
+        result = self.run_cli("--timeout", "2")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        bodies = [body for method, path, body in self.calls if method == "POST" and not path.endswith("/prepare")]
+        self.assertEqual(len(bodies), 1)
+        self.assertEqual(bodies[0]["strategy"], "opencode_native_preserve_v1")
+        self.assertTrue(bodies[0]["auto_rollback"])
+
+    def test_opencode_lost_submission_never_reposts(self):
+        self.runtime = "opencode"
+        self.drop_create = True
         self.assertNotEqual(self.run_cli().returncode, 0)
-        self.assertEqual(self.calls, [])
+        self.assertNotEqual(self.run_cli().returncode, 0)
+        self.assertEqual(sum(method == "POST" for method, _, _ in self.calls), 2)
+        self.assertEqual(json.loads(self.state.read_text())["stage"], "submitting")
 
     def test_tag_rejected_before_network(self):
         self.assertNotEqual(self.run_cli("--target-image", "registry.example/runtime:latest").returncode, 0)

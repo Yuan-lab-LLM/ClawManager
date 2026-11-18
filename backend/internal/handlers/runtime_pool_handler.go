@@ -36,6 +36,7 @@ const (
 )
 
 type startRuntimeRolloutRequest struct {
+	Strategy       string `json:"strategy,omitempty"`
 	PreparationID  string `json:"preparation_id,omitempty"`
 	RuntimeType    string `json:"runtime_type" binding:"required"`
 	TargetImageRef string `json:"target_image_ref" binding:"required"`
@@ -256,7 +257,7 @@ func (h *RuntimePoolHandler) StartRollout(c *gin.Context) {
 		return
 	}
 	targetImage := strings.TrimSpace(req.TargetImageRef)
-	if runtimeType == "opencode" {
+	if runtimeType == services.RuntimeTypeOpenCode && req.Strategy != services.RuntimeUpgradeStrategyOpenCodePreserve {
 		utils.Error(c, http.StatusConflict, models.ErrOpenCodeSafeUpgradeRequired.Error())
 		return
 	}
@@ -283,6 +284,25 @@ func (h *RuntimePoolHandler) StartRollout(c *gin.Context) {
 		maxUnavailable = 1
 	}
 	startedBy := currentUserIDPtr(c)
+	if runtimeType == services.RuntimeTypeOpenCode {
+		if h.scheduler == nil {
+			utils.Error(c, http.StatusServiceUnavailable, "OpenCode native upgrade controller is unavailable")
+			return
+		}
+		rollout, err := h.scheduler.SubmitOpenCodeUpgrade(c.Request.Context(), targetImage, startedBy)
+		if err != nil {
+			code := http.StatusConflict
+			if errors.Is(err, services.ErrRuntimeUpgradeCommitUncertain) {
+				code = http.StatusInternalServerError
+			}
+			utils.Error(c, code, err.Error())
+			return
+		}
+		h.publish(c.Request.Context(), "runtime_rollout", map[string]any{"rollout_id": rollout.ID, "runtime_type": rollout.RuntimeType, "status": rollout.Status})
+		utils.Success(c, http.StatusCreated, "OpenCode native preservation upgrade created", gin.H{"rollout": rollout, "strategy": services.RuntimeUpgradeStrategyOpenCodePreserve})
+		return
+	}
+
 	rolloutPhase := "requested"
 	var sourceImagesJSON *string
 	var targetImageDigest *string

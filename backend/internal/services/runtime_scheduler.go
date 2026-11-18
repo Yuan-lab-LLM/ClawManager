@@ -287,7 +287,10 @@ func (s *RuntimeScheduler) StartRollout(ctx context.Context, rolloutID int64) er
 	}
 	// The legacy rollout changes a shared Deployment before migrating its
 	// instances. It is not a data-preserving OpenCode upgrade path.
-	if rollout.RuntimeType == "opencode" {
+	if rollout.RuntimeType == RuntimeTypeOpenCode {
+		if isOpenCodeNativeRollout(rollout) {
+			return s.advanceOpenCodeUpgrade(ctx, rollout)
+		}
 		message := models.ErrOpenCodeSafeUpgradeRequired.Error()
 		if err := s.rolloutRepo.UpdateStatus(ctx, rollout.ID, "error", nil, nil, &message); err != nil {
 			return err
@@ -1043,6 +1046,12 @@ func runtimeDeploymentFallbackState(k8sState string) string {
 }
 
 func (s *RuntimeScheduler) finishRolloutIfReady(ctx context.Context, rollout models.RuntimeRollout) error {
+	if rollout.RuntimeType == RuntimeTypeOpenCode {
+		if !isOpenCodeNativeRollout(&rollout) {
+			return models.ErrOpenCodeSafeUpgradeRequired
+		}
+		return s.advanceOpenCodeUpgrade(ctx, &rollout)
+	}
 	if s == nil || s.podRepo == nil || s.rolloutRepo == nil {
 		return nil
 	}
@@ -2421,7 +2430,7 @@ type runtimeGatewayStart struct {
 // rollouts use this path, so a standby target never needs to be exposed to the
 // ordinary scheduler before postflight has committed the rollout.
 func (s *RuntimeScheduler) EnsureUpgradeGateway(ctx context.Context, rollout *models.RuntimeRollout, instanceID int, targetPods []models.RuntimePod) error {
-	if s == nil || rollout == nil || rollout.RuntimeType != RuntimeTypeOpenClaw || rollout.PreflightID == nil {
+	if s == nil || rollout == nil || (rollout.RuntimeType != RuntimeTypeOpenClaw && !isOpenCodeNativeRollout(rollout)) || rollout.PreflightID == nil {
 		return fmt.Errorf("data-safe OpenClaw rollout is required")
 	}
 	if s.instanceRepo == nil || s.podRepo == nil || s.bindingRepo == nil || s.agentClient == nil {
@@ -2438,12 +2447,12 @@ func (s *RuntimeScheduler) EnsureUpgradeGateway(ctx context.Context, rollout *mo
 		return fmt.Errorf("upgrade instance %d not found", instanceID)
 	}
 	runtimeType, ok := schedulerRuntimeType(*instance)
-	if !ok || runtimeType != RuntimeTypeOpenClaw {
+	if !ok || runtimeType != rollout.RuntimeType {
 		return fmt.Errorf("upgrade instance %d is not OpenClaw Lite", instanceID)
 	}
 	targetByID := make(map[int64]models.RuntimePod, len(targetPods))
 	for _, pod := range targetPods {
-		if pod.RuntimeType == RuntimeTypeOpenClaw && pod.State == "ready" && !pod.Draining && runtimePodMatchesImage(pod, rollout.TargetImageRef) {
+		if pod.RuntimeType == rollout.RuntimeType && pod.State == "ready" && !pod.Draining && runtimePodMatchesImage(pod, rollout.TargetImageRef) {
 			targetByID[pod.ID] = pod
 		}
 	}
@@ -2456,6 +2465,12 @@ func (s *RuntimeScheduler) EnsureUpgradeGateway(ctx context.Context, rollout *mo
 		if targetPod, expected := targetByID[binding.RuntimePodID]; expected && binding.Generation == instance.RuntimeGeneration {
 			lifecycle := NormalizeRuntimeGatewayLifecycle(binding.State, binding.ErrorMessage)
 			if lifecycle.Running {
+				if runtimeType == RuntimeTypeOpenCode {
+					if s.upgrade == nil || s.upgrade.sess == nil {
+						return fmt.Errorf("OpenCode native acknowledgment unavailable")
+					}
+					return repository.CommitOpenCodeUpgradeGatewayStart(ctx, s.upgrade.sess, rollout.ID, instance.ID, instance.RuntimeGeneration, binding.WorkspacePath, "running", binding.GatewayID, binding.GatewayPID)
+				}
 				return nil
 			}
 			if lifecycle.BindingState != RuntimeGatewayBindingError && lifecycle.BindingState != RuntimeGatewayBindingStopped && lifecycle.BindingState != RuntimeGatewayBindingCreating {
@@ -2480,10 +2495,16 @@ func (s *RuntimeScheduler) EnsureUpgradeGateway(ctx context.Context, rollout *mo
 					return repository.ErrUpgradeReservationDenied
 				}
 				if state != nil && NormalizeRuntimeGatewayLifecycle(state.State, nil).Running {
+					if runtimeType == RuntimeTypeOpenCode {
+						return repository.CommitOpenCodeUpgradeGatewayStart(ctx, s.upgrade.sess, rollout.ID, instance.ID, instance.RuntimeGeneration, binding.WorkspacePath, "running", binding.GatewayID, binding.GatewayPID)
+					}
 					return s.bindingRepo.UpdateState(ctx, instanceID, instance.RuntimeGeneration, "running", nil)
 				}
 				if state != nil && NormalizeRuntimeGatewayLifecycle(state.State, nil).BindingState == RuntimeGatewayBindingCreating {
 					return errRuntimeGatewayStartPending
+				}
+				if runtimeType == RuntimeTypeOpenCode {
+					return errOpenCodeTargetExecutionFailed
 				}
 				if deleteErr := s.agentClient.DeleteGateway(ctx, endpoint, binding.GatewayID); deleteErr != nil && (requiresConfirmedGatewayStop(s.agentClient) || !errors.Is(deleteErr, ErrRuntimeAgentNotFound)) {
 					return fmt.Errorf("stop failed target gateway for instance %d: %w", instanceID, deleteErr)

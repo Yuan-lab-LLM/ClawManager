@@ -176,7 +176,12 @@ func TestUpgradeConvergenceMySQLGroupAndDeadline(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	sess.SQL().Exec(`UPDATE runtime_upgrade_items SET team_id=7,state='prepared' WHERE rollout_id=?`, p.Rollout.ID)
+	if _, e = sess.SQL().Exec(`INSERT INTO teams(id) VALUES(7)`); e != nil {
+		t.Fatal(e)
+	}
+	if _, e = sess.SQL().Exec(`UPDATE runtime_upgrade_items SET team_id=7,state='prepared' WHERE rollout_id=?`, p.Rollout.ID); e != nil {
+		t.Fatal(e)
+	}
 	items, _ := u.listUpgradeItems(ctx, p.Rollout.ID)
 	if e = u.runConvergentUpgradeItems(ctx, p.Rollout, "compatibility_check", items, 1, func(context.Context, int) error { return fmt.Errorf("%w: custom plugin", ErrRuntimeAgentConflict) }); e != nil {
 		t.Fatal(e)

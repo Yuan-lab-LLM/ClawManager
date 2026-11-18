@@ -52,6 +52,39 @@ func runtimeDefaultScaleTargets(namespace, runtimeType string, rollouts []models
 		base = "deepseek-harness-runtime"
 	}
 	targets := []k8s.RuntimePodScaleTarget{{RuntimeType: runtimeType, Namespace: namespace, DeploymentName: base, ApprovalSource: "canonical-default"}}
+	if runtimeType == RuntimeTypeOpenCode {
+		ordered := append([]models.RuntimeRollout(nil), rollouts...)
+		sort.Slice(ordered, func(i, j int) bool { return ordered[i].ID < ordered[j].ID })
+		canonical := map[string]bool{base: true}
+		for _, r := range ordered {
+			if r.RuntimeType != runtimeType || r.Status != "finished" {
+				continue
+			}
+			if !isOpenCodeNativeRollout(&r) {
+				continue
+			}
+			if r.PlanFingerprint == nil || r.PreflightID == nil {
+				return nil, fmt.Errorf("OpenCode default has no committed native preservation proof")
+			}
+			var sources map[string]string
+			if json.Unmarshal([]byte(stringValue(r.SourceImagesJSON)), &sources) != nil || len(sources) == 0 {
+				return nil, fmt.Errorf("OpenCode default source scope is missing")
+			}
+			next := []k8s.RuntimePodScaleTarget{}
+			for key := range sources {
+				parts := strings.SplitN(key, "/", 2)
+				if len(parts) != 2 || parts[0] != namespace || !canonical[parts[1]] {
+					return nil, fmt.Errorf("OpenCode default source lineage changed")
+				}
+				next = append(next, k8s.RuntimePodScaleTarget{RuntimeType: runtimeType, Namespace: namespace, DeploymentName: runtimeUpgradeTargetDeploymentName(parts[1], r.ID), UpgradeID: strconv.FormatInt(r.ID, 10), SourceDeployment: parts[1], ImageRef: r.TargetImageRef, ApprovalSource: "opencode-native:" + *r.PlanFingerprint})
+			}
+			for _, target := range next {
+				canonical[target.DeploymentName] = true
+			}
+			targets = next
+		}
+		return targets, nil
+	}
 	if runtimeType != RuntimeTypeOpenClaw {
 		// Hermes and DeepSeek Harness commit their default in-place image
 		// deliveries without changing Deployment UID. Pin the latest eligible
@@ -129,12 +162,12 @@ const (
 
 func runtimeScaleDefaultRollouts(ctx context.Context, sess db.Session, runtimeType string) ([]models.RuntimeRollout, error) {
 	switch runtimeType {
-	case RuntimeTypeOpenClaw, RuntimeTypeHermes, RuntimeTypeDeepSeekHarness:
+	case RuntimeTypeOpenClaw, RuntimeTypeHermes, RuntimeTypeDeepSeekHarness, RuntimeTypeOpenCode:
 	default:
 		return nil, nil
 	}
 	query := `SELECT r.id,r.runtime_type,r.status,r.phase,r.target_image_ref,r.preflight_id,r.preflight_json,r.source_images_json,r.plan_fingerprint FROM runtime_rollouts r WHERE r.runtime_type=? AND ` + runtimeCommittedDefaultPredicate + ` ORDER BY r.id DESC`
-	if runtimeType != RuntimeTypeOpenClaw {
+	if runtimeType != RuntimeTypeOpenClaw && runtimeType != RuntimeTypeOpenCode {
 		query += " LIMIT 1"
 	}
 	rows, err := sess.SQL().QueryContext(ctx, query, runtimeType)
