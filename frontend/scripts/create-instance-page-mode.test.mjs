@@ -1,102 +1,28 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import path from "node:path";
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { createAgentTypes, defaultCreateImage } from '../src/lib/instanceCreation.ts';
 
-const scriptDir = path.dirname(fileURLToPath(import.meta.url));
-const sourcePath = path.resolve(
-  scriptDir,
-  "../src/pages/instances/CreateInstancePage.tsx",
-);
-const source = readFileSync(sourcePath, "utf8");
-const instanceTypeSource = readFileSync(
-  path.resolve(scriptDir, "../src/types/instance.ts"),
-  "utf8",
-);
+const source = readFileSync(new URL('../src/pages/instances/CreateInstancePage.tsx', import.meta.url), 'utf8');
+const instanceTypes = readFileSync(new URL('../src/types/instance.ts', import.meta.url), 'utf8');
 
-function sectionBetween(startMarker, endMarker) {
-  const start = source.indexOf(startMarker);
-  const end = source.indexOf(endMarker, start + startMarker.length);
-  if (start === -1 || end === -1 || end <= start) {
-    throw new Error(`Unable to locate section: ${startMarker}`);
-  }
-  return source.slice(start, end);
+const form = source.slice(source.indexOf('className="cm-create"'));
+assert.match(form, /role="radiogroup" aria-label=\{c\('mode'\)\}/, 'Lite and Pro are selectable in the creation form');
+assert.match(form, /\(\['lite','pro'\] as const\)\.map/);
+assert.match(form, /role="switch"[^>]+disabled=\{pro\}/, 'Batch creation is restricted to Lite');
+assert.match(source, /if \(next === 'pro'\) setBatch\(false\)/, 'Switching to Pro clears a Lite batch');
+assert.match(form, /\{pro && <section[^>]+><h2>\{t\('instances\.resourceConfiguration'\)\}/, 'Dedicated resources are Pro-only');
+assert.match(form, /\{pro && canImport && <details/, 'Initial configuration is Pro-only');
+assert.match(source, /inventory\.length \+ requested > quota\.max_instances \|\| \(pro &&/, 'Dedicated quota is only counted for Pro');
+assert.match(source, /image_registry: image\.image/, 'Creation uses the configured default image');
+
+for (const historicalType of ['workbuddy', 'codex', 'claude-code']) {
+  assert.ok(instanceTypes.includes(`id: "${historicalType}"`), 'Historical runtime types remain renderable');
+  assert.ok(!createAgentTypes.some(type => type.id === historicalType), 'Historical runtimes are not offered for new creation');
 }
+assert.ok(createAgentTypes.some(type => type.id === 'opencode'));
+const lite = { instance_type: 'opencode', runtime_type: 'gateway', image: 'lite-default' };
+const pro = { instance_type: 'opencode', runtime_type: 'desktop', image: 'pro-default' };
+assert.equal(defaultCreateImage([lite, pro], 'opencode', 'lite'), lite);
+assert.equal(defaultCreateImage([lite, pro], 'opencode', 'pro'), pro);
 
-function assert(condition, message) {
-  if (!condition) {
-    throw new Error(message);
-  }
-}
-
-const stepOne = sectionBetween(
-  "{/* Step 1: Basic Information */}",
-  "{/* Step 2: Select Type */}",
-);
-const stepTwo = sectionBetween(
-  "{/* Step 2: Select Type */}",
-  "{/* Step 3: Configuration */}",
-);
-const stepThree = source.slice(source.indexOf("{/* Step 3: Configuration */}"));
-
-assert(
-  /id:\s*"lite"/.test(source) && /id:\s*"pro"/.test(source),
-  "Create instance page must define Lite and Pro mode options.",
-);
-assert(
-  stepOne.includes("renderInstanceModeSelector()"),
-  "Lite/Pro selector must be visible in step 1.",
-);
-assert(
-  !stepTwo.includes("renderInstanceModeSelector()"),
-  "Lite/Pro selector should not be hidden behind step 2.",
-);
-assert(
-  source.includes('const usesDedicatedResources = selectedMode === "pro";'),
-  "Create page must distinguish Pro-only dedicated resource controls.",
-);
-assert(
-  source.includes('const showRuntimeImageSelector = selectedMode === "pro";'),
-  "Runtime image selector visibility must be controlled by Pro mode only.",
-);
-assert(
-  stepTwo.includes("{showRuntimeImageSelector && ("),
-  "Step 2 runtime image selector must be hidden for Lite mode.",
-);
-assert(
-  stepThree.includes("{usesDedicatedResources && ("),
-  "Step 3 resource controls must be hidden for Lite mode.",
-);
-assert(
-  stepThree.includes("{showRuntimeImageSelector && ("),
-  "Step 3 summary must hide runtime image details for Lite mode.",
-);
-assert(
-  source.includes("...(usesDedicatedResources"),
-  "Quota validation must include CPU/memory/storage/GPU only for Pro mode.",
-);
-assert(
-  instanceTypeSource.includes('id: "codex"') &&
-    instanceTypeSource.includes('id: "claude-code"') &&
-    source.includes('"workbuddy"') &&
-    source.includes('"codex"') &&
-    source.includes('"claude-code"') &&
-    source.includes("HIDDEN_TEAM_INSTANCE_TYPE_IDS") &&
-    source.includes("!HIDDEN_TEAM_INSTANCE_TYPE_IDS.has(item.instance_type)"),
-  "Historical runtime types must remain renderable while the team distribution filters them from every create source.",
-);
-const proOnlyTypes = sectionBetween(
-  "const isProOnlyInstanceType",
-  "const ",
-);
-assert(
-  proOnlyTypes.includes('type === "codex"') &&
-    proOnlyTypes.includes('type === "claude-code"'),
-  "Historical Codex and Claude Code records must retain their Pro classification.",
-);
-assert(
-  !source.includes("isLiteOnlyInstanceType") &&
-    source.includes('selectedMode === "pro" || !isProOnlyInstanceType(item.id)'),
-  "Create page must expose OpenCode in both Lite and Pro modes.",
-);
-
-console.log("Create instance mode selector placement is valid.");
+console.log('Single-page creation preserves Lite/Pro modes, batch limits and configured default images.');

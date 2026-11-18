@@ -1,6 +1,7 @@
 package services
 
 import (
+	"clawreef/internal/models"
 	"clawreef/internal/repository"
 	"clawreef/internal/runtimeauth"
 	"context"
@@ -25,7 +26,31 @@ func (s *BrowserWorkerService) VerifyNoBrowserWriterHistory(ctx context.Context,
 	if instance == nil || instance.UserID != id.UserID || instance.Type != RuntimeTypeOpenCode || instance.InstanceMode != InstanceModeLite || normalizeInstanceRuntimeType(instance.RuntimeType) != RuntimeBackendGateway || browserWorkerSupportedInstance(instance) {
 		return fmt.Errorf("stopped-source recovery currently requires OpenCode Lite without browser admission")
 	}
-	if stringValue(instance.WorkspacePath) != RuntimeWorkspacePathWithRoot(s.client.WorkspaceRoot, RuntimeTypeOpenCode, id.UserID, id.InstanceID) {
+	return s.verifyNoBrowserWriterHistory(ctx, id, instance, false)
+}
+
+// The reset controller holds the instance lifecycle lock and has fenced the exact
+// source publication. An unbound or older source has no authority over the
+// browser registry for the current instance.
+func (s *BrowserWorkerService) CleanupSlotResetExternalWriter(ctx context.Context, id runtimeauth.Identity, exactCurrentBinding bool) error {
+	if s == nil || s.repo == nil || s.instances == nil || s.client == nil || s.client.Clientset == nil || id.InstanceID <= 0 || id.UserID <= 0 || id.Generation <= 0 || id.PodUID == "" {
+		return fmt.Errorf("slot reset external writer authority unavailable")
+	}
+	instance, err := s.instances.GetByID(id.InstanceID)
+	if err != nil {
+		return err
+	}
+	if instance == nil || instance.ID != id.InstanceID || instance.UserID != id.UserID || instance.RuntimeGeneration < id.Generation || instance.InstanceMode != InstanceModeLite || !isSchedulerManagedV2Instance(*instance) || stringValue(instance.WorkspacePath) != RuntimeWorkspacePathWithRoot(s.client.WorkspaceRoot, instance.Type, id.UserID, id.InstanceID) {
+		return fmt.Errorf("slot reset external writer owner, profile or workspace changed")
+	}
+	if exactCurrentBinding && instance.RuntimeGeneration == id.Generation {
+		return s.DeleteForInstance(ctx, id.InstanceID)
+	}
+	return s.verifyNoBrowserWriterHistory(ctx, id, instance, true)
+}
+
+func (s *BrowserWorkerService) verifyNoBrowserWriterHistory(ctx context.Context, id runtimeauth.Identity, instance *models.Instance, checkNetworkPolicies bool) error {
+	if stringValue(instance.WorkspacePath) != RuntimeWorkspacePathWithRoot(s.client.WorkspaceRoot, instance.Type, id.UserID, id.InstanceID) {
 		return fmt.Errorf("recovery requires the canonical standalone instance workspace")
 	}
 	if strings.Contains(strings.ToUpper(stringValue(instance.EnvironmentOverridesJSON)), "CLAWMANAGER_TEAM_") {
@@ -35,7 +60,7 @@ func (s *BrowserWorkerService) VerifyNoBrowserWriterHistory(ctx context.Context,
 	if !ok {
 		return fmt.Errorf("standalone workspace authority unavailable")
 	}
-	if err = isolation.VerifyRecoveryWorkspaceIsolation(ctx, id.InstanceID); err != nil {
+	if err := isolation.VerifyRecoveryWorkspaceIsolation(ctx, id.InstanceID); err != nil {
 		return err
 	}
 	config, err := s.repo.Get(id.InstanceID)
@@ -166,6 +191,17 @@ func (s *BrowserWorkerService) VerifyNoBrowserWriterHistory(ctx context.Context,
 	for _, r := range services.Items {
 		if owned(r.ObjectMeta) {
 			return reject()
+		}
+	}
+	if checkNetworkPolicies {
+		policies, err := kube.NetworkingV1().NetworkPolicies("").List(ctx, metav1.ListOptions{})
+		if err != nil {
+			return err
+		}
+		for _, r := range policies.Items {
+			if owned(r.ObjectMeta) {
+				return reject()
+			}
 		}
 	}
 	secrets, err := kube.CoreV1().Secrets("").List(ctx, metav1.ListOptions{})

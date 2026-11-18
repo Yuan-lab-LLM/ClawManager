@@ -23,6 +23,7 @@ import type {
   RuntimeSchedulingRequest,
   RuntimeType,
 } from "../../types/runtimePool";
+import { RuntimeSlotResetProgress } from "./RuntimeSlotResetDialog";
 import {
   buttonClass,
   primaryClass,
@@ -717,7 +718,7 @@ export default function RuntimeActions({
               >
                 <div className="flex flex-wrap justify-between gap-2 text-xs">
                   <span className="font-medium">
-                    {t(`runtimePods.${operation.kind || "operation"}`)}{" "}
+                    {t(operation.kind === "slot_reset" ? "slotReset.title" : `runtimePods.${operation.kind || "operation"}`)}{" "}
                     <span className="font-mono text-slate-400">
                       {operation.id.replace(/^runtime_mgmt_/, "").slice(0, 8)}
                     </span>
@@ -733,7 +734,7 @@ export default function RuntimeActions({
                     ? new Date(operation.created_at).toLocaleString()
                     : ""}
                 </p>
-                {operation.phase && <p className="mt-2 text-xs text-slate-600">{t("runtimePods.recoveryPhase")}: {operation.phase}</p>}
+                {operation.phase && operation.kind !== "slot_reset" && <p className="mt-2 text-xs text-slate-600">{t("runtimePods.recoveryPhase")}: {operation.phase}</p>}
                 {operation.error_message && <ErrorMessage>{operation.error_message}</ErrorMessage>}
                 {["processing", "needs_attention"].includes(operation.status) && <button type="button" className={`${buttonClass} mt-3`} disabled={busy || operation.retry_requested} onClick={() => void retryOperation(operation.id)}>{t(operation.retry_requested ? "runtimePods.recoveryQueued" : "runtimePods.recoveryContinue")}</button>}
                 <div className="mt-3 divide-y divide-slate-100">
@@ -742,18 +743,19 @@ export default function RuntimeActions({
                       key={item.instance_id}
                       className="flex flex-wrap justify-between gap-2 py-2 text-xs"
                     >
-                      <span>{item.orphan_recovery ? `Pod #${item.source_pod_id}` : `#${item.instance_id}`}</span>
-                      <span className="text-slate-500">
+                      <span>{item.slot_reset ? `Pod #${item.source_pod_id} · ${item.slot_reset.slot}` : item.orphan_recovery ? `Pod #${item.source_pod_id}` : `#${item.instance_id}`}</span>
+                      {!item.slot_reset && <span className="text-slate-500">
                         {t(`runtimePods.${item.state}`)}
-                      </span>
+                      </span>}
+                      {item.slot_reset && <RuntimeSlotResetProgress journal={item.slot_reset} status={operation.status} />}
                       {item.orphan_recovery?.phase && <p className="w-full break-words text-slate-600">{t("runtimePods.recoveryPhase")}: {item.orphan_recovery.phase}</p>}
                       {item.recovery?.phase && <p className="w-full break-words text-slate-600">{t("runtimePods.recoveryPhase")}: {item.recovery.phase}</p>}
-                      {item.error_message && (
+                      {item.error_message && item.error_message !== item.slot_reset?.error_message && (
                         <p className="w-full break-words leading-5 text-red-600">
                           {item.error_message}
                         </p>
                       )}
-                      {item.state === "failed" && !item.recovery && (
+                      {item.state === "failed" && !item.recovery && !item.slot_reset && (
                         instances.some(
                           (current) =>
                             current.slot.instance_id === item.instance_id,
@@ -769,7 +771,7 @@ export default function RuntimeActions({
                     </div>
                   ))}
                 </div>
-                {(operation.items?.some((item) => item.recovery || item.orphan_recovery)
+                {operation.kind !== "slot_reset" && (operation.items?.some((item) => item.recovery || item.orphan_recovery)
                   ? ["pending", "processing", "needs_attention"].includes(operation.status) && operation.items.every((item) => (item.recovery?.phase ?? item.orphan_recovery?.phase) === "planned")
                   : ["pending", "processing"].includes(operation.status) ||
                     (operation.kind === "scale_in" && ["starting", "needs_attention"].includes(operation.status))) && (

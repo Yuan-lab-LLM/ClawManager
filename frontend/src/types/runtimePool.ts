@@ -231,12 +231,50 @@ export interface RuntimeSchedulingRequest {
   target_slot?: number;
 }
 
+export interface RuntimeSlotResetRequest {
+  source_pod_uid: string;
+  source_container_id: string;
+  scope_fingerprint: string;
+  request_id: string;
+}
+
+type RuntimeSlotRecoveryAction = "reschedule" | "preserve_current" | "none";
+
+export interface RuntimeSlotResetPreflight {
+  allowed: boolean;
+  blockers?: string[];
+  runtime_type?: RuntimeType;
+  pod_uid?: string;
+  pod_name?: string;
+  node_name?: string;
+  slot?: string;
+  container_id?: string;
+  scope_fingerprint?: string;
+  instance_id?: number;
+  generation?: number;
+  current_pod_id?: number;
+  current_slot?: string;
+  recovery_action?: RuntimeSlotRecoveryAction;
+}
+
+export interface RuntimeSlotResetJournal {
+  slot: string;
+  pod_uid: string;
+  container_id: string;
+  instance_id?: number;
+  phase: "planned" | "stopping" | "source_stopped" | "committed" | "waiting_worker" | "released";
+  recovery_action?: RuntimeSlotRecoveryAction;
+  recovery_state?: "pending" | "starting" | "running" | "preserve_current" | "none";
+  error_message?: string;
+}
+
 export interface RuntimeSchedulingItem {
   source_pod_uid?: string;
   source_generation?: number;
   source_gateway_id?: string;
   orphan_recovery?: { phase: string; receipt?: Record<string, unknown> };
   recovery?: { phase: string; scope: Record<string, unknown>; receipt?: Record<string, unknown> };
+  slot_reset?: RuntimeSlotResetJournal;
   instance_id: number;
   source_pod_id?: number;
   target_pod_id?: number;

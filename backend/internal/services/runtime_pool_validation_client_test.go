@@ -106,7 +106,7 @@ func TestNativeValidationUsesProtectedSupervisorWithoutBusinessPublication(t *te
 	}}}
 	client := NewSlotRuntimeAgentClientWithHTTPClient(strings.Repeat("c", 32), kube, "runtime", httpClient).(*slotRuntimeAgentClient)
 	client.security = &RuntimeSecurityAuthority{key: []byte(strings.Repeat("k", 32))}
-	client.assignmentAdmission = func(context.Context, string, string, int, int, func() error) error {
+	client.assignmentAdmission = func(context.Context, string, string, int, int, int, func() error) error {
 		t.Fatal("validation entered business SQL admission")
 		return nil
 	}

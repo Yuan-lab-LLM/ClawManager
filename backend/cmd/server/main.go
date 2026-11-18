@@ -306,6 +306,9 @@ func main() {
 	services.ConfigureRuntimeUpgradeNFSIO(runtimeUpgradeService, cfg.Runtime.SandboxProfile)
 	browserWorkerService := services.NewBrowserWorkerService(browserWorkerRepo, instanceRepo, k8s.GetClient())
 	if cfg.Runtime.ContainerSlots > 0 {
+		if err := services.ConfigureSlotResetExternalWriterCleanup(runtimeAgentClient, browserWorkerService.CleanupSlotResetExternalWriter); err != nil {
+			log.Fatal("Failed to configure slot reset external writer authority")
+		}
 		if err := services.ConfigureSlotExternalWriterAbsence(runtimeAgentClient, browserWorkerService.VerifyNoBrowserWriterHistory); err != nil {
 			log.Fatal("Failed to configure external Runtime writer absence authority")
 		}
@@ -793,6 +796,7 @@ func main() {
 	runtimePoolHandler.SetUpgradeService(runtimeUpgradeService)
 	runtimeManagementService := services.NewRuntimeManagementService(database, runtimeScheduler, northboundRepo)
 	runtimeManagementHandler := handlers.NewRuntimeManagementHandler(runtimeManagementService)
+	runtimeSlotResetHandler := handlers.NewRuntimeSlotResetHandler(runtimeManagementService)
 	runtimePodMaintenanceHandler := handlers.NewRuntimePodMaintenanceHandler(services.NewRuntimePodMaintenanceService(database, runtimeScheduler))
 	workbuddyPrewarmController := k8s.NewWorkbuddyPrewarmController()
 
@@ -1159,9 +1163,11 @@ func main() {
 			adminRuntime.GET("/runtime-pods/:id/events", runtimePoolHandler.GetPodEvents)
 			adminRuntime.POST("/runtime-pods/:id/scheduling", runtimeManagementHandler.Scheduling)
 			adminRuntime.POST("/runtime-pods/:id/evict", runtimeManagementHandler.Evict)
+			adminRuntime.POST("/runtime-pods/:id/slots/:slot/reset/preflight", runtimeSlotResetHandler.Preflight)
+			adminRuntime.POST("/runtime-pods/:id/slots/:slot/reset", runtimeSlotResetHandler.Submit)
 			adminRuntime.POST("/runtime-scheduling/preflight", runtimeManagementHandler.Preflight)
 			adminRuntime.POST("/runtime-scheduling", runtimeManagementHandler.Submit)
-			adminRuntime.GET("/runtime-scheduling", runtimeManagementHandler.History)
+			adminRuntime.GET("/runtime-scheduling", runtimeSlotResetHandler.History(runtimeManagementHandler.History))
 			adminRuntime.POST("/runtime-balance/plan", runtimeManagementHandler.BalancePlan)
 			adminRuntime.POST("/runtime-balance", runtimeManagementHandler.Balance)
 			adminRuntime.POST("/runtime-scheduling/:id/cancel", runtimeManagementHandler.Cancel)

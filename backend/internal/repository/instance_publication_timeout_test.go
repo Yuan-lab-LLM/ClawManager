@@ -21,7 +21,7 @@ func TestRuntimePublicationTimeoutCASMySQL(t *testing.T) {
 			if _, err := r.sess.SQL().Exec(`UPDATE instances SET status='creating',runtime_generation=1,runtime_security_profile='isolated-network-v1',created_at=?,updated_at=NOW(),runtime_error_code=NULL,runtime_error_message=NULL WHERE id=7`, origin); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := r.sess.SQL().Exec(`INSERT INTO instance_runtime_bindings VALUES(7,9,'pending-7-1',1,'creating')`); err != nil {
+			if _, err := r.sess.SQL().Exec(`INSERT INTO instance_runtime_bindings VALUES(7,9,'pending-7-1',1,'creating',20000)`); err != nil {
 				t.Fatal(err)
 			}
 			switch scenario {

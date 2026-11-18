@@ -4,13 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"testing"
+	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	ktesting "k8s.io/client-go/testing"
 )
 
@@ -20,7 +23,7 @@ func TestDefaultRuntimeScaleInheritsDeploymentAndAddsCount(t *testing.T) {
 	d.ResourceVersion = "7"
 	replicas := int32(3)
 	d.Spec.Replicas = &replicas
-	d.Spec.Template.Annotations = map[string]string{"keep": "exact"}
+	d.Spec.Template.Annotations["keep"] = "exact"
 	if _, err := kube.AppsV1().Deployments("ns").Update(ctx, d, metav1.UpdateOptions{}); err != nil {
 		t.Fatal(err)
 	}
@@ -194,5 +197,121 @@ func TestDefaultRuntimeScaleCASFencesConcurrentControllerChanges(t *testing.T) {
 				t.Fatalf("unsafe CAS result replicas=%d writes=%d", *current.Spec.Replicas, writes)
 			}
 		})
+	}
+}
+
+func TestRuntimeScaleAppArmorEquivalence(t *testing.T) {
+	ctx := context.Background()
+	for _, scenario := range []string{"api-materialized", "typed-only", "different-profile", "different-security", "live-annotation-changed"} {
+		t.Run(scenario, func(t *testing.T) {
+			svc, kube, d, p := maintenanceSourceFixture()
+			p = p.DeepCopy()
+			replicas := int32(1)
+			d.Spec.Replicas = &replicas
+			d.Status.Replicas, d.Status.UpdatedReplicas, d.Status.ReadyReplicas = replicas, replicas, replicas
+			d.ResourceVersion = "7"
+			key := "container.apparmor.security.beta.kubernetes.io/slot-0"
+			d.Spec.Template.Annotations = map[string]string{key: "unconfined"}
+			p.Annotations = map[string]string{key: "unconfined"}
+			d.Spec.Template.Spec.Containers[1].SecurityContext = &corev1.SecurityContext{}
+			p.Spec.Containers[1].SecurityContext = &corev1.SecurityContext{AppArmorProfile: &corev1.AppArmorProfile{Type: corev1.AppArmorProfileTypeUnconfined}}
+			switch scenario {
+			case "typed-only":
+				delete(p.Annotations, key)
+			case "different-profile":
+				p.Spec.Containers[1].SecurityContext.AppArmorProfile.Type = corev1.AppArmorProfileTypeRuntimeDefault
+			case "different-security":
+				p.Spec.Containers[1].SecurityContext.RunAsUser = func() *int64 { value := int64(42); return &value }()
+			case "live-annotation-changed":
+				p.Annotations[key] = "runtime/default"
+			}
+			if _, err := kube.AppsV1().Deployments(d.Namespace).Update(ctx, d, metav1.UpdateOptions{}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := kube.CoreV1().Pods(p.Namespace).Update(ctx, p, metav1.UpdateOptions{}); err != nil {
+				t.Fatal(err)
+			}
+			target := RuntimePodScaleTarget{RuntimeType: "openclaw", Namespace: p.Namespace, DeploymentName: d.Name, PodName: p.Name, PodUID: string(p.UID)}
+			snapshot, err := svc.InspectRuntimeScale(ctx, target)
+			want := scenario == "api-materialized" || scenario == "typed-only"
+			if (err == nil) != want {
+				t.Fatalf("native source validation: accepted=%v want=%v err=%v", err == nil, want, err)
+			}
+			if want {
+				if pods, err := svc.InspectRuntimeScaleInPods(ctx, target, snapshot); err != nil || len(pods) != 1 {
+					t.Fatalf("scale-in preflight rejected equivalent API shape: %+v %v", pods, err)
+				}
+			}
+		})
+	}
+}
+
+func TestRuntimeScaleOutLargeMembershipKeepsAnnotationBounded(t *testing.T) {
+	ctx := context.Background()
+	svc, kube, d, p := maintenanceSourceFixture()
+	d.ResourceVersion = "71"
+	replicas := int32(10000)
+	d.Spec.Replicas = &replicas
+	d.Spec.Template.Labels["capacity-fixture"] = "yes"
+	d.Spec.Selector = &metav1.LabelSelector{MatchLabels: map[string]string{"capacity-fixture": "yes"}}
+	deployments := kube.AppsV1().Deployments(d.Namespace)
+	if _, err := deployments.Update(ctx, d, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	replicaSets := kube.AppsV1().ReplicaSets(d.Namespace)
+	rs, err := replicaSets.Get(ctx, "rs", metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rs.Labels = d.Spec.Template.Labels
+	rs.Spec.Template = *d.Spec.Template.DeepCopy()
+	if _, err := replicaSets.Update(ctx, rs, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	snapshot := &RuntimePodScaleSnapshot{
+		Option:          RuntimePodScaleOption{DeploymentUID: string(d.UID), Replicas: replicas},
+		ResourceVersion: d.ResourceVersion, ApprovalDigest: "approved",
+		ExpansionWriteID: "00000000-0000-0000-0000-000000000001",
+	}
+	patch, err := runtimeExpansionPatch(snapshot, 10001, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(patch) > 1024 {
+		t.Fatalf("a 10,000-Pod baseline needs %d bytes in the controller patch", len(patch))
+	}
+	scaled, err := deployments.Patch(ctx, d.Name, types.JSONPatchType, patch, metav1.PatchOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	uids := make([]string, 10000)
+	for i := range uids {
+		uids[i] = fmt.Sprintf("10000000-0000-0000-0000-%012d", i)
+	}
+	podAPI := kube.CoreV1().Pods(d.Namespace)
+	timestamp := metav1.NewTime(time.Now().UTC())
+	for name, uid := range map[string]string{"preexisting": uids[len(uids)-1], "created": "new-attempt-pod"} {
+		pod := p.DeepCopy()
+		pod.Name, pod.UID = name, types.UID(uid)
+		pod.Labels, pod.CreationTimestamp = d.Spec.Template.Labels, timestamp
+		pod.Status.Phase = corev1.PodPending
+		if _, err := podAPI.Create(ctx, pod, metav1.CreateOptions{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	snapshot.Option.Replicas = 10001
+	snapshot.expansion = scaled.Annotations[runtimeExpansionAnnotation]
+	target := RuntimePodScaleTarget{Namespace: d.Namespace, DeploymentName: d.Name}
+	unknown, err := svc.InspectRuntimeExpansion(ctx, target, snapshot)
+	if err != nil || len(unknown.StartingPodUIDs) != 0 {
+		t.Fatalf("startup credited without the matching membership: %+v %v", unknown.StartingPodUIDs, err)
+	}
+	snapshot.ExpansionBaseline = &RuntimeExpansionBaseline{ID: snapshot.ExpansionWriteID, PodUIDs: uids}
+	observed, err := svc.InspectRuntimeExpansion(ctx, target, snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, found := observed.StartingPodUIDs["new-attempt-pod"]; !found || len(observed.StartingPodUIDs) != 1 {
+		t.Fatalf("same-second startup was not isolated by membership: %+v", observed.StartingPodUIDs)
 	}
 }

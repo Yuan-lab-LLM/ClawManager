@@ -12,6 +12,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"net"
+	"slices"
 	"strings"
 	"time"
 )
@@ -25,6 +26,12 @@ func VerifyRuntimeFaultSourceTemplate(ctx context.Context, client kubernetes.Int
 // The source volume, original bound PVC/PV and current retained mount must agree.
 // The helper must not resolve a recycled claim name to a different filesystem.
 func RuntimeFaultStorageIdentity(ctx context.Context, client kubernetes.Interface, pod *corev1.Pod, root string, before time.Time) (string, error) {
+	return runtimeFaultStorageIdentity(ctx, client, pod, root, before, nil, "")
+}
+
+// A reset may finish a writer Job while its original PVC is Terminating. Its
+// own already-held finalizer keeps that specific UID and binding in place.
+func runtimeFaultStorageIdentity(ctx context.Context, client kubernetes.Interface, pod *corev1.Pod, root string, before time.Time, pin *RuntimeSlotResetClaim, operationID string) (string, error) {
 	if pod == nil || pod.Namespace == "" {
 		return "", fmt.Errorf("source storage identity missing")
 	}
@@ -45,8 +52,14 @@ func RuntimeFaultStorageIdentity(ctx context.Context, client kubernetes.Interfac
 			return "", err
 		}
 	}
-	if claim == nil || claim.UID == "" || claim.DeletionTimestamp != nil || claim.Status.Phase != corev1.ClaimBound || claim.Spec.VolumeName == "" {
+	if claim == nil || claim.UID == "" || claim.Status.Phase != corev1.ClaimBound || claim.Spec.VolumeName == "" {
 		return "", fmt.Errorf("original workspace PVC is not bound")
+	}
+	if pin != nil && (pin.Namespace != claim.Namespace || pin.Name != claim.Name || pin.UID != string(claim.UID) || !slices.Contains(claim.Finalizers, slotResetFinalizer(operationID))) {
+		return "", fmt.Errorf("slot reset PVC protection is missing")
+	}
+	if claim.DeletionTimestamp != nil && pin == nil {
+		return "", fmt.Errorf("original workspace PVC is being deleted")
 	}
 	if !before.IsZero() && (claim.CreationTimestamp.IsZero() || claim.CreationTimestamp.Time.After(before)) {
 		return "", fmt.Errorf("workspace PVC was replaced after the source")

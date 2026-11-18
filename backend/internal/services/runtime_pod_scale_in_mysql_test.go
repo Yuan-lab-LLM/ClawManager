@@ -281,7 +281,7 @@ func TestScaleInMySQLSourceFenceBlocksPreclaimedBindingPublication(t *testing.T)
 	}
 	uid := "hermes-runtime-pod-uid"
 	published := false
-	err := repository.WithRuntimePodAssignmentAdmission(ctx, sess, models.RuntimePod{Namespace: "runtime", PodName: "hermes-runtime-pod", PodUID: &uid, DeploymentName: "hermes-runtime", RuntimeType: "hermes"}, 51, 1, func() error { published = true; return nil })
+	err := repository.WithRuntimePodAssignmentAdmission(ctx, sess, models.RuntimePod{Namespace: "runtime", PodName: "hermes-runtime-pod", PodUID: &uid, DeploymentName: "hermes-runtime", RuntimeType: "hermes"}, 51, 1, 20000, func() error { published = true; return nil })
 	if err == nil || published || !strings.Contains(err.Error(), "scale-in source") {
 		t.Fatalf("late publication passed: %v %v", published, err)
 	}

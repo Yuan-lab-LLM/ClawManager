@@ -32,9 +32,13 @@ func IsImmutableRuntimeImage(image string) bool {
 	return err == nil
 }
 
+// Only completed deliveries change the default. Validation and recovery
+// operations can finish without superseding a committed image.
+const runtimeCommittedDefaultPredicate = `r.status='finished' AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(r.preflight_json,'$.recovery_mode')),'')='' AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(r.preflight_json,'$.upgrade_lab_run_id')),'null')='null'`
+
 func LoadCommittedRuntimeImages(ctx context.Context, sess db.Session) (*RuntimeCommittedImages, error) {
 	result := &RuntimeCommittedImages{Images: map[string]string{}}
-	rows, err := sess.SQL().QueryContext(ctx, `SELECT r.id,r.runtime_type,r.target_image_ref,r.preflight_id,r.preflight_json,r.source_images_json,COALESCE(c.state_json,'') FROM runtime_rollouts r LEFT JOIN runtime_rollout_checkpoints c ON c.rollout_id=r.id WHERE r.status='finished' AND r.runtime_type IN ('openclaw','hermes','deepseek-harness') AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(r.preflight_json,'$.recovery_mode')),'')='' AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(r.preflight_json,'$.upgrade_lab_run_id')),'null')='null' ORDER BY r.id DESC`)
+	rows, err := sess.SQL().QueryContext(ctx, `SELECT r.id,r.runtime_type,r.target_image_ref,r.preflight_id,r.preflight_json,r.source_images_json,COALESCE(c.state_json,'') FROM runtime_rollouts r LEFT JOIN runtime_rollout_checkpoints c ON c.rollout_id=r.id WHERE r.runtime_type IN ('openclaw','hermes','deepseek-harness') AND `+runtimeCommittedDefaultPredicate+` ORDER BY r.id DESC`)
 	if err != nil {
 		return nil, fmt.Errorf("load committed Runtime images: %w", err)
 	}

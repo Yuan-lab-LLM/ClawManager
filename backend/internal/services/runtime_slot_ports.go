@@ -54,14 +54,14 @@ func (c *slotRuntimeAgentClient) inspectReservedGatewayPorts(ctx context.Context
 	// waiting for the periodic cursor. Unknown ports and incomplete proofs retain
 	// their exclusions; this grants no authority to stop owners or release bindings.
 	changed, complete := false, true
+	var observationErr error
+	verified := 0
 	for _, observation := range observations {
 		if observation.Err != nil {
-			if requireCapacityProof {
-				// Unknown/legacy proof reserves the port defensively, but cannot
-				// justify expanding another replica of the same pool.
-				return nil, fmt.Errorf("runtime capacity proof unavailable: %w", observation.Err)
-			}
 			complete = false
+			observationErr = observation.Err
+		} else {
+			verified++
 		}
 		if observation.free() {
 			if _, exists := quarantine.Ports[observation.Port]; exists {
@@ -69,6 +69,9 @@ func (c *slotRuntimeAgentClient) inspectReservedGatewayPorts(ctx context.Context
 				changed = true
 			}
 		}
+	}
+	if requireCapacityProof && verified == 0 {
+		return nil, fmt.Errorf("runtime capacity proof unavailable: %w", observationErr)
 	}
 	if complete && quarantine.PodError != "" {
 		quarantine.PodError = ""

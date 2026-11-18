@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useId, useRef, type ReactNode } from "react";
 import { X } from "lucide-react";
 import { useI18n } from "../../contexts/I18nContext";
 import {
@@ -191,6 +191,8 @@ export function RuntimeDialog({
   footer,
   wide = false,
   closeOnBackdrop = true,
+  fluent = false,
+  busy = false,
 }: {
   title: string;
   children: ReactNode;
@@ -198,8 +200,11 @@ export function RuntimeDialog({
   footer?: ReactNode;
   wide?: boolean;
   closeOnBackdrop?: boolean;
+  fluent?: boolean;
+  busy?: boolean;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
+  const titleId = useId();
   const backdropPointer = useRef(false);
   const { t } = useI18n();
   useEffect(() => {
@@ -214,8 +219,9 @@ export function RuntimeDialog({
   return (
     <dialog
       ref={ref}
-      aria-labelledby="runtime-dialog-title"
-      onCancel={(event) => { event.preventDefault(); onClose(); }}
+      aria-labelledby={titleId}
+      aria-busy={busy}
+      onCancel={(event) => { event.preventDefault(); if (!busy) onClose(); }}
       onPointerDown={(event) => {
         const bounds = event.currentTarget.getBoundingClientRect();
         backdropPointer.current = event.target === event.currentTarget &&
@@ -224,26 +230,29 @@ export function RuntimeDialog({
       onClick={(event) => {
         const bounds = event.currentTarget.getBoundingClientRect();
         const outside = event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom;
-        if (closeOnBackdrop && backdropPointer.current && event.target === event.currentTarget && outside) onClose();
+        if (!busy && closeOnBackdrop && backdropPointer.current && event.target === event.currentTarget && outside) onClose();
         backdropPointer.current = false;
       }}
-      className={`m-auto max-h-[90dvh] ${wide ? "w-[min(95vw,880px)]" : "w-[min(95vw,640px)]"} overflow-hidden rounded-md border border-slate-200 bg-white p-0 text-slate-800 shadow-lg backdrop:bg-slate-950/40 open:flex open:flex-col`}
+      className={`m-auto max-h-[90dvh] ${wide ? "w-[min(95vw,880px)]" : "w-[min(95vw,640px)]"} overflow-hidden border p-0 open:flex open:flex-col ${fluent
+        ? "fixed inset-0 rounded-[var(--cm-radius-dialog)] border-[var(--cm-border)] bg-[var(--cm-surface)] text-[var(--cm-text)] shadow-[var(--cm-shadow-64)] backdrop:bg-[var(--cm-overlay)]"
+        : "rounded-md border-slate-200 bg-white text-slate-800 shadow-lg backdrop:bg-slate-950/40"}`}
     >
-      <div className="flex shrink-0 items-center justify-between border-b border-slate-100 px-4 py-3 sm:px-6">
-        <h2 id="runtime-dialog-title" className="text-sm font-semibold">
+      <div className={`flex shrink-0 items-center justify-between border-b px-4 py-3 sm:px-6 ${fluent ? "border-[var(--cm-border-subtle)]" : "border-slate-100"}`}>
+        <h2 id={titleId} className={fluent ? "text-base font-semibold text-[var(--cm-ink)]" : "text-sm font-semibold"}>
           {title}
         </h2>
         <button
           type="button"
           onClick={onClose}
+          disabled={busy}
           aria-label={t("runtimePods.close")}
-          className="rounded p-1 hover:bg-slate-100"
+          className={fluent ? "cm-icon-button" : "rounded p-1 hover:bg-slate-100"}
         >
           <X className="h-5 w-5" />
         </button>
       </div>
       <div className="min-h-0 space-y-5 overflow-y-auto overscroll-contain p-4 sm:p-6">{children}</div>
-      {footer && <div className="flex shrink-0 items-center justify-end gap-2 border-t border-slate-100 bg-white px-4 py-3 sm:px-6">{footer}</div>}
+      {footer && <div className={`flex shrink-0 items-center justify-end gap-2 border-t px-4 py-3 sm:px-6 ${fluent ? "flex-wrap border-[var(--cm-border-subtle)] max-sm:[&_button]:min-h-11" : "border-slate-100 bg-white"}`}>{footer}</div>}
     </dialog>
   );
 }

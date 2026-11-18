@@ -91,7 +91,7 @@ func runtimeSecurityMySQL(t *testing.T) *instanceRepository {
 	if _, err = sess.SQL().Exec("CREATE TABLE instances (" + strings.Join(columns, ",") + ")"); err != nil {
 		t.Fatal(err)
 	}
-	for _, file := range []string{"077_add_runtime_security_profile.sql", "066_add_runtime_upgrade_fence.sql"} {
+	for _, file := range []string{"077_add_runtime_security_profile.sql", "066_add_runtime_upgrade_fence.sql", "125_add_runtime_slot_reset_requests.sql"} {
 		migration, err := os.ReadFile("../db/migrations/" + file)
 		if err != nil {
 			t.Fatal(err)

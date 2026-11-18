@@ -79,7 +79,7 @@ func FenceRuntimePodDeletion(ctx context.Context, tx db.Session, namespace, name
 // Serializes publication with deletion admission. Every real publication needs
 // its existing SQL generation binding (the durable reservation); an unregistered Pod cannot
 // publish a writer while a pending controller is being removed.
-func WithRuntimePodAssignmentAdmission(ctx context.Context, sess db.Session, actual models.RuntimePod, instanceID, generation int, publish func() error) error {
+func WithRuntimePodAssignmentAdmission(ctx context.Context, sess db.Session, actual models.RuntimePod, instanceID, generation, port int, publish func() error) error {
 	if actual.PodUID == nil || *actual.PodUID == "" || actual.Namespace == "" || actual.PodName == "" || actual.DeploymentName == "" || actual.RuntimeType == "" {
 		return fmt.Errorf("verified native controller identity required")
 	}
@@ -113,7 +113,7 @@ func WithRuntimePodAssignmentAdmission(ctx context.Context, sess db.Session, act
 			return err
 		}
 		var bound int
-		row, err = tx.SQL().QueryRowContext(ctx, "SELECT COUNT(*) FROM instance_runtime_bindings WHERE runtime_pod_id=? AND instance_id=? AND generation=?", id, instanceID, generation)
+		row, err = tx.SQL().QueryRowContext(ctx, "SELECT COUNT(*) FROM instance_runtime_bindings WHERE runtime_pod_id=? AND instance_id=? AND generation=? AND gateway_port=?", id, instanceID, generation, port)
 		if err == nil {
 			err = row.Scan(&bound)
 		}
@@ -152,6 +152,12 @@ func WithRuntimePodAssignmentAdmission(ctx context.Context, sess db.Session, act
 		}
 		if err = checkAutoStopRuntimeState(ctx, tx, instanceID, "creating", generation); err != nil {
 			return err
+		}
+		binding := models.InstanceRuntimeBinding{RuntimePodID: id, GatewayPort: port, InstanceID: instanceID, Generation: generation, GatewayID: fmt.Sprintf("gw-%d-%d", instanceID, generation)}
+		if blocked, err := slotResetBlocksBinding(ctx, tx, &binding, false); err != nil {
+			return err
+		} else if blocked {
+			return fmt.Errorf("%w: Pod %d, port %d", ErrRuntimeSlotResetFenced, id, port)
 		}
 		return publish()
 	}, nil)

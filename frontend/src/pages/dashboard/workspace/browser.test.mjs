@@ -2,9 +2,13 @@
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import fs from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
+import { createServer } from 'vite';
 const require = createRequire(process.env.WORKSPACE_E2E_PACKAGE || '/root/cm-uiux08-20261111/source-e737ca5040e637f271ea5f394ca35aeac985ab98/e2e/package.json');
 const { chromium } = require('playwright');
-const base = process.env.WORKSPACE_URL || 'http://127.0.0.1:9422';
+const server = process.env.WORKSPACE_URL ? null : await createServer({
+ root:fileURLToPath(new URL('../../../..', import.meta.url)), server:{host:'127.0.0.1', port:0},
+});
 const out = process.env.WORKSPACE_SCREENSHOTS || '/root/cm-workspace-20261112/frontend-task/screenshots';
 await fs.mkdir(out, {recursive:true});
 const states=['busy','idle','sleeping','offline','running','starting','unknown','failed'];
@@ -14,8 +18,11 @@ function payload(range='7d') {
  const coverage=Object.fromEntries(['recent','instances','tasks','usage','costs','capacity','observations','activity'].map(key=>[key,{status:key==='observations'?'partial':'ready'}]));
  return {range,timezone:'Asia/Shanghai',as_of:'2026-11-12T03:00:00Z',window:{start:'2026-11-06T00:00:00Z',end:'2026-11-12T03:00:00Z',previous_start:'2026-10-30T00:00:00Z',previous_end:'2026-11-05T03:00:00Z'},instances:agents,instances_total:8,instances_truncated:false,tasks:[task(1,'failed'),task(2,'succeeded'),task(3,'running')],tasks_truncated:false,state_counts:Object.fromEntries(states.map(state=>[state,1])),usage:{total_tokens:range==='today'?77:1200,prompt_tokens:900,completion_tokens:300,invocation_count:12,previous_tokens:1000,currencies:[{currency:'USD',amount:.000001,previous_amount:null,estimated:true,complete:false,recorded_calls:2},{currency:'private-credit',amount:2,previous_amount:1,estimated:false,complete:true,recorded_calls:10}]},usage_history:[0,100,null,300,0,500,300].map((tokens,i)=>({at:`2026-11-${String(i+6).padStart(2,'0')}T00:00:00Z`,tokens,calls:tokens===null?null:i,costs:{USD:tokens===null?null:.0000001*i,'private-credit':tokens===null?null:i*.1}})),agent_usage:[{instance_id:41,tokens:800,costs:{USD:.000001}},{instance_id:0,tokens:400,costs:{'private-credit':2}}],capacity:{eligible_slots:null,runtimes:[{type:'hermes',available:null}],allocated_cpu:16,allocated_memory_gb:32,allocated_storage_gb:80,max_instances:10,max_cpu:32,max_memory_gb:64,max_storage_gb:100},observations:[null,0,null,1].map((n,i)=>({at:`2026-11-${String(i+8).padStart(2, '0')}T00:00:00Z`,...Object.fromEntries(states.map(state=>[state,n])),total:n===null?null:8,allocated_cpu:n===null?null:16,allocated_memory_gb:n===null?null:32,max_cpu:n===null?null:32,max_memory_gb:n===null?null:64,eligible_slots:null})),activity:Array.from({length:365},(_,i)=>({date:new Date(Date.UTC(2025,10,13+i)).toISOString().slice(0,10),events:i%8===0?3:0,calls:i%8===0?2:0,tasks:i%8===0?1:0,tokens:0,observed:i>200})),coverage};
 }
-const browser=await chromium.launch({executablePath:'/opt/google/chrome/chrome',headless:true,args:['--no-sandbox']});
+let browser;
 try {
+ await server?.listen();
+ const base=process.env.WORKSPACE_URL || `http://127.0.0.1:${server.httpServer.address().port}`;
+ browser=await chromium.launch({executablePath:process.env.WORKSPACE_BROWSER_EXECUTABLE || '/opt/google/chrome/chrome',headless:true,args:['--no-sandbox']});
  const page=await browser.newPage({viewport:{width:1440,height:900}});
  page.setDefaultTimeout(12000);
  const errors=[];const writes=[];let mode='normal';let delay=0;let userID=71;let workspaceCalls=0;
@@ -277,4 +284,7 @@ try {
  assert.deepEqual(writes,[]);assert.deepEqual(errors,[]);
  console.log('PASS real /dashboard Router/Auth; recent Agents; three panels; pins max/cancel/empty/reload/stopped href; acknowledgement; gaps/keyboard; latest range; stale/retry; Portal absent/Console/language; 4 viewports; 5 locales; reduced motion; empty; zero API writes');
  }
-} finally {await browser.close();}
+} finally {
+ await browser?.close();
+ await server?.close();
+}

@@ -14,7 +14,7 @@ func manualStartIntentRepository(t *testing.T, runtimeType string) (*instanceRep
 	for _, query := range []string{
 		`ALTER TABLE instance_desired_state ADD id INT AUTO_INCREMENT UNIQUE,ADD desired_config_revision_id INT NULL,ADD desired_runtime_action VARCHAR(50) NULL,ADD updated_by INT NULL`,
 		`CREATE TABLE runtime_pods (id BIGINT PRIMARY KEY,pod_uid VARCHAR(64),namespace VARCHAR(64),pod_name VARCHAR(64),deployment_name VARCHAR(64),runtime_type VARCHAR(32))`,
-		`CREATE TABLE instance_runtime_bindings (instance_id INT PRIMARY KEY,runtime_pod_id BIGINT,gateway_id VARCHAR(128),generation INT,state VARCHAR(32))`,
+		`CREATE TABLE instance_runtime_bindings (instance_id INT PRIMARY KEY,runtime_pod_id BIGINT,gateway_id VARCHAR(128),generation INT,state VARCHAR(32),gateway_port INT)`,
 		`CREATE TABLE runtime_management_admission_lock (id INT PRIMARY KEY,revision INT)`,
 		`INSERT INTO runtime_management_admission_lock VALUES (1,0)`,
 		`CREATE TABLE runtime_management_operations (id VARCHAR(64) PRIMARY KEY,kind VARCHAR(32),status VARCHAR(32),request_json JSON)`,
@@ -84,11 +84,11 @@ func TestManualStartIntentMySQLCompletedStopAllowsPublication(t *testing.T) {
 			if err = r.UpdateRuntimeState(ctx, 7, "creating", 3, nil); err != nil {
 				t.Fatal(err)
 			}
-			if _, err = r.sess.SQL().Exec(`INSERT INTO instance_runtime_bindings VALUES(7,9,'gw-7-3',3,'creating')`); err != nil {
+			if _, err = r.sess.SQL().Exec(`INSERT INTO instance_runtime_bindings VALUES(7,9,'gw-7-3',3,'creating',20000)`); err != nil {
 				t.Fatal(err)
 			}
 			published := false
-			err = WithRuntimePodAssignmentAdmission(ctx, r.sess, pod, 7, 3, func() error { published = true; return nil })
+			err = WithRuntimePodAssignmentAdmission(ctx, r.sess, pod, 7, 3, 20000, func() error { published = true; return nil })
 			if err != nil || !published {
 				t.Fatalf("explicit Start could not publish: published=%v err=%v", published, err)
 			}
@@ -162,7 +162,7 @@ func TestManualStartIntentMySQLNewerDesiredStopWinsBeforePublication(t *testing.
 	if err := r.UpdateRuntimeState(ctx, 7, "creating", 3, nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.sess.SQL().Exec(`INSERT INTO instance_runtime_bindings VALUES(7,9,'gw-7-3',3,'creating')`); err != nil {
+	if _, err := r.sess.SQL().Exec(`INSERT INTO instance_runtime_bindings VALUES(7,9,'gw-7-3',3,'creating',20000)`); err != nil {
 		t.Fatal(err)
 	}
 	desired := NewInstanceDesiredStateRepository(r.sess)
@@ -182,7 +182,7 @@ func TestManualStartIntentMySQLNewerDesiredStopWinsBeforePublication(t *testing.
 		t.Fatal(err)
 	}
 	published := false
-	err = WithRuntimePodAssignmentAdmission(ctx, r.sess, pod, 7, 3, func() error { published = true; return nil })
+	err = WithRuntimePodAssignmentAdmission(ctx, r.sess, pod, 7, 3, 20000, func() error { published = true; return nil })
 	if published || !errors.Is(err, models.ErrInstanceStopping) {
 		t.Fatalf("newer committed Stop lost: published=%v err=%v", published, err)
 	}
@@ -201,7 +201,7 @@ func TestManualStartIntentMySQLIdleStopAllowsPublication(t *testing.T) {
 		`CREATE TABLE gateway_runtime_tasks(instance_id INT,generation INT,finished BOOLEAN)`,
 		`UPDATE instances SET status='running',started_at=UTC_TIMESTAMP()-INTERVAL 2 DAY WHERE id=7`,
 		`UPDATE instance_model_activity SET monitoring_since=UTC_TIMESTAMP()-INTERVAL 2 DAY WHERE instance_id=7`,
-		`INSERT INTO instance_runtime_bindings VALUES(7,9,'gw-7-2',2,'running')`,
+		`INSERT INTO instance_runtime_bindings VALUES(7,9,'gw-7-2',2,'running',20000)`,
 	} {
 		if _, err := r.sess.SQL().Exec(query); err != nil {
 			t.Fatal(err)
@@ -239,11 +239,11 @@ func TestManualStartIntentMySQLIdleStopAllowsPublication(t *testing.T) {
 	if err = r.UpdateRuntimeState(ctx, 7, "creating", 3, nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = r.sess.SQL().Exec(`INSERT INTO instance_runtime_bindings VALUES(7,9,'gw-7-3',3,'creating')`); err != nil {
+	if _, err = r.sess.SQL().Exec(`INSERT INTO instance_runtime_bindings VALUES(7,9,'gw-7-3',3,'creating',20000)`); err != nil {
 		t.Fatal(err)
 	}
 	published := false
-	err = WithRuntimePodAssignmentAdmission(ctx, r.sess, pod, 7, 3, func() error { published = true; return nil })
+	err = WithRuntimePodAssignmentAdmission(ctx, r.sess, pod, 7, 3, 20000, func() error { published = true; return nil })
 	if err != nil || !published {
 		t.Fatalf("Start after idle Stop could not publish: published=%v err=%v", published, err)
 	}

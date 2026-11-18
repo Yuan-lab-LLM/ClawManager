@@ -76,6 +76,11 @@ func (r *instanceRuntimeBindingRepository) Create(ctx context.Context, binding *
 		if err := CheckRuntimePodBindingAdmission(ctx, tx, binding.RuntimePodID); err != nil {
 			return err
 		}
+		if blocked, err := slotResetBlocksBinding(ctx, tx, binding, false); err != nil {
+			return err
+		} else if blocked {
+			return fmt.Errorf("%w: Pod %d, port %d", ErrRuntimeSlotResetFenced, binding.RuntimePodID, binding.GatewayPort)
+		}
 		return (&instanceRuntimeBindingRepository{tx}).create(ctx, binding)
 	}, nil)
 }
@@ -133,6 +138,9 @@ func (r *instanceRuntimeBindingRepository) reconcileReportedGateway(ctx context.
 			return err
 		}
 		if err := CheckRuntimePodBindingAdmission(ctx, tx, binding.RuntimePodID); err != nil {
+			return err
+		}
+		if blocked, err := slotResetBlocksBinding(ctx, tx, binding, requiredPendingUserID == 0); err != nil || blocked {
 			return err
 		}
 		if (status != "error" && status != "creating") || generation != expectedInstanceGeneration {

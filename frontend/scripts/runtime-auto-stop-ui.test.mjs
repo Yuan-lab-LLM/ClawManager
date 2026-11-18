@@ -29,6 +29,7 @@ function setup({ settings = initialSettings, activity, update, keepRunning, isEr
     if (name.endsWith('/runtimePoolService')) return { runtimePoolService: service };
     if (name.endsWith('/runtimeManagement')) return { runtimeError: error => error.message };
     if (name.endsWith('/runtimeAutoStop')) return autoStop;
+    if (name === '../../components/FilterSelect') return { default: 'filter-select' };
     if (name === './RuntimeManagementUI') return { RuntimeDialog: 'dialog', ErrorMessage: 'error' };
     return require(name);
   } });
@@ -132,16 +133,16 @@ test('Lite presentation exposes reason, activity and blockers without offering a
 
 test('seconds API values load exact units and independent dropdown choices save exact durations', async () => {
   const ui = setup({ settings: { ...initialSettings, check_interval_seconds: 1, idle_timeout_seconds: 61 } });
-  const selects = () => ui.nodes().filter(node => node.type === 'select');
+  const selects = () => ui.nodes().filter(node => node.type === 'filter-select');
   assert.equal(ui.inputs()[1].props.value, '1');
   assert.equal(ui.inputs()[2].props.value, '61');
   assert.equal(selects()[0].props.value, 'second');
   assert.equal(selects()[1].props.value, 'second');
-  assert.deepEqual(Array.from(selects()[0].props.children, node => node.props.value), ['second', 'minute', 'hour', 'day']);
-  assert.equal(selects()[0].props['aria-label'], 'autoStop.checkIntervalUnit');
+  assert.deepEqual(Array.from(selects()[0].props.options, option => option.value), ['second', 'minute', 'hour', 'day']);
+  assert.equal(selects()[0].props.label, 'autoStop.checkIntervalUnit');
   for (const [unit, multiplier] of [['second', 1], ['minute', 60], ['hour', 3600], ['day', 86400]]) {
-    selects()[0].props.onChange({ target: { value: unit } }); ui.render();
-    selects()[1].props.onChange({ target: { value: 'minute' } }); ui.render();
+    selects()[0].props.onChange(unit); ui.render();
+    selects()[1].props.onChange('minute'); ui.render();
     ui.inputs()[1].props.onChange({ target: { value: '3' } }); ui.render();
     ui.inputs()[2].props.onChange({ target: { value: '7' } }); ui.render();
     ui.submit(); await ui.flush();
@@ -156,7 +157,7 @@ test('seconds API values load exact units and independent dropdown choices save 
 
 test('effective legacy test timings are shown as minutes instead of saved day labels', () => {
   const ui = setup({ settings: { ...initialSettings, check_interval_seconds: 60, idle_timeout_seconds: 300 } });
-  const selects = ui.nodes().filter(node => node.type === 'select');
+  const selects = ui.nodes().filter(node => node.type === 'filter-select');
   assert.equal(ui.inputs()[1].props.value, '1');
   assert.equal(ui.inputs()[2].props.value, '5');
   assert.equal(selects[0].props.value, 'minute');

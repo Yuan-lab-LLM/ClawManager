@@ -1,6 +1,7 @@
 import { instanceCreateTranslations } from "./instanceCreateI18n";
 import { teamTranslations } from "./teamI18n";
 import { workbenchTranslations } from "./workbenchI18n";
+import { runtimeSlotResetTranslations } from "./runtimeSlotResetI18n";
 export type Locale = "en" | "zh" | "ja" | "ko" | "de";
 
 import { hermesDesktopTranslations } from "./hermesDesktopI18n";
@@ -11337,6 +11338,7 @@ for (const locale of Object.keys(teamTranslations) as Locale[]) {
 }
 
 for (const locale of Object.keys(instanceCreateTranslations) as Locale[]) translations[locale].instanceCreate = instanceCreateTranslations[locale];
+for (const locale of Object.keys(runtimeSlotResetTranslations) as Locale[]) translations[locale].slotReset = runtimeSlotResetTranslations[locale];
 
 export function translate(locale: Locale, key: string): string | undefined {
   const segments = key.split(".");

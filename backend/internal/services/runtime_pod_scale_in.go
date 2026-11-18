@@ -222,7 +222,7 @@ func (s *RuntimeManagementService) scaleInPlan(ctx context.Context, req RuntimeP
 		return block(err)
 	}
 	maintenance := &RuntimePodMaintenanceService{sess: s.sess, scheduler: s.scheduler}
-	target, snapshot, err := maintenance.defaultScaleSnapshot(ctx, s.sess, kube, req.RuntimeType)
+	target, snapshot, err := maintenance.defaultScaleSnapshot(ctx, s.sess, kube, req.RuntimeType, scaleHealthySource)
 	if err != nil {
 		return block(err)
 	}

@@ -141,6 +141,11 @@ func (r *instanceRuntimeBindingRepository) ReserveUpgradeGateway(ctx context.Con
 			if existing.RuntimePodID != pod.ID || existing.Generation != req.Generation || existing.WorkspacePath != req.WorkspacePath {
 				return ErrUpgradeReservationDenied
 			}
+			if blocked, err := slotResetBlocksBinding(ctx, tx, &existing, false); err != nil {
+				return err
+			} else if blocked {
+				return ErrUpgradeCapacityPending
+			}
 			binding = &existing // no second capacity claim or attempt
 			return nil
 		}
@@ -167,6 +172,7 @@ func (r *instanceRuntimeBindingRepository) ReserveUpgradeGateway(ctx context.Con
 		if used >= pod.Capacity {
 			return ErrUpgradeCapacityPending
 		}
+		candidate := models.InstanceRuntimeBinding{InstanceID: req.InstanceID, RuntimePodID: pod.ID, Generation: req.Generation, GatewayID: fmt.Sprintf("pending-%d-%d", req.InstanceID, req.Generation)}
 		port := 0
 		for p := req.PortStart; p+req.PortBlockSize-1 <= req.PortEnd; p += req.PortBlockSize {
 			free := true
@@ -177,6 +183,12 @@ func (r *instanceRuntimeBindingRepository) ReserveUpgradeGateway(ctx context.Con
 				}
 			}
 			if free {
+				candidate.GatewayPort = p
+				if blocked, err := slotResetBlocksBinding(ctx, tx, &candidate, false); err != nil {
+					return err
+				} else if blocked {
+					continue
+				}
 				port = p
 				break
 			}

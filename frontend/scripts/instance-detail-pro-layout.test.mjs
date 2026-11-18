@@ -15,6 +15,8 @@ const skillPanelSource = readFileSync(
   path.resolve(scriptDir, "../src/components/InstanceSkillHubPanel.tsx"),
   "utf8",
 );
+const skillDialogSource = readFileSync(new URL("../src/components/InstanceSkillsDialog.tsx", import.meta.url), "utf8");
+const splitSource = readFileSync(new URL("../src/components/InstanceWorkspaceSplit.tsx", import.meta.url), "utf8");
 
 function assert(condition, message) {
   if (!condition) {
@@ -34,8 +36,8 @@ for (const label of ["Runtime Overview", "Runtime Events"]) {
 }
 
 assert(
-  detailSource.includes("<InstanceSkillHubPanel"),
-  "Pro instance detail section missing: InstanceSkillHubPanel",
+  detailSource.includes("<InstanceSkillsDialog") && skillDialogSource.includes("<InstanceSkillHubPanel"),
+  "The instance Skills action must open the actual instance skill panel.",
 );
 
 assert(
@@ -73,8 +75,9 @@ const proRender = sliceBetween(
 );
 
 assert(
-  proRender.includes("shareLinkControl"),
-  "Pro instance detail must place Share Link with the primary instance action buttons.",
+  proRender.includes("headerActions={renderFrameActions()}") &&
+    /const renderFrameActions[^]*?\{shareLinkControl\}[^]*?<InstanceSkillsDialog/.test(detailSource),
+  "Pro instance detail must place Share Link and Skills with the primary instance action buttons.",
 );
 
 assert(
@@ -91,8 +94,8 @@ assert(
 
 assert(
   proRender.includes('data-section="runtime-overview"') &&
-    proRender.indexOf("<InstanceSkillHubPanel") < proRender.indexOf("Runtime Overview"),
-  "Instance Skills must render before the compact Runtime Overview card.",
+    proRender.indexOf("headerActions={renderFrameActions()}") < proRender.indexOf("Runtime Overview"),
+  "The instance toolbar must precede the compact Runtime Overview card.",
 );
 
 assert(
@@ -120,10 +123,11 @@ assert(
 );
 
 assert(
-  proRender.includes("xl:grid-cols-[minmax(0,7fr)_minmax(380px,3fr)]") &&
-    proRender.includes('workspaceVisible ? "xl:grid-cols-[minmax(0,7fr)_minmax(380px,3fr)]" : "xl:grid-cols-1"') &&
-    proRender.includes("supportsWorkspace(instance) ?"),
-  "Expanded Pro desktop and workspace browser must remain side by side at a stable 70/30 ratio.",
+  proRender.includes("<InstanceWorkspaceSplit") &&
+    proRender.includes("visible={workspaceVisible && supportsWorkspace(instance)}") &&
+    splitSource.includes("return {list:12,tools:20,showList:true}") &&
+    splitSource.includes("const agentShare=100-list-tools"),
+  "Pro desktop must use the shared adjustable three-pane workspace at a default 12/68/20 split.",
 );
 
 const liteRender = sliceBetween(
@@ -135,13 +139,16 @@ const liteRender = sliceBetween(
 assert(
   liteRender.includes("workspaceVisible={supportsWorkspace(instance) ? workspaceVisible : undefined}") &&
     liteRender.includes("onWorkspaceVisibilityChange={supportsWorkspace(instance) ? setWorkspaceVisible : undefined}") &&
-    liteRender.includes('workspaceVisible ? "xl:grid-cols-[minmax(0,1fr)_minmax(360px,28rem)]" : "xl:grid-cols-1"'),
+    liteRender.includes("<InstanceWorkspaceSplit") &&
+    liteRender.includes("visible={workspaceVisible && supportsWorkspace(instance)}") &&
+    splitSource.includes("hidden={!visible}"),
   "Lite instance detail must keep the workspace visible by default and expand the service frame when hidden.",
 );
 
 assert(
   !proRender.includes("aspect-video") &&
-    proRender.split("h-[clamp(520px,calc(100vh-10rem),760px)]").length >= 3,
+    proRender.includes("h-[clamp(520px,calc(100vh-10rem),760px)]") &&
+    proRender.includes("wb-instance-tools h-full min-h-0 min-w-0"),
   "Pro desktop and workspace browser must share a bounded height so aspect ratio cannot force cross-column overlap.",
 );
 

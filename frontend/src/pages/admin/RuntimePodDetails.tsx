@@ -11,7 +11,7 @@ import {
   canManageScheduling,
   canManageSlot,
 } from "../../lib/runtimeManagement";
-import type { RuntimePod } from "../../types/runtimePool";
+import type { RuntimePod, RuntimeSlot } from "../../types/runtimePool";
 import {
   buttonClass,
   primaryClass,
@@ -29,6 +29,7 @@ export default function RuntimePodDetails({
   onPause,
   onEvents,
   onRecovery,
+  onResetSlot,
   busy,
 }: {
   pod: RuntimePod;
@@ -37,6 +38,7 @@ export default function RuntimePodDetails({
   onPause: () => void;
   onEvents: () => void;
   onRecovery?: (ids?: number[]) => void;
+  onResetSlot?: (slot: RuntimeSlot) => void;
   busy: boolean;
 }) {
   const { t } = useI18n();
@@ -187,7 +189,7 @@ export default function RuntimePodDetails({
                 chosen.reason ||
                 t(`runtimePods.${slotState(chosen)}`)}
             </span>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <button type="button" className={buttonClass} onClick={onEvents}>
                 {t("runtimePods.events")}
               </button>
@@ -199,6 +201,12 @@ export default function RuntimePodDetails({
                   onClick={() => onSchedule([chosen.instance_id!])}
                 >
                   {t("runtimePods.manual")}
+                </button>
+              )}
+              {onResetSlot && /^slot-(0|[1-9][0-9]*)$/.test(chosen.container_name) && (
+                <button type="button" className={`${buttonClass} text-[var(--cm-error)]`}
+                  data-testid="runtime-slot-reset-action" onClick={() => onResetSlot(chosen)}>
+                  {t("slotReset.title")}
                 </button>
               )}
             </div>

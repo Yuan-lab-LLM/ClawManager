@@ -61,7 +61,7 @@ func upgradeMySQL(t *testing.T) db.Session {
 	}
 	base := read("023_add_runtime_pool_v2.sql")
 	base = base[strings.Index(base, "CREATE TABLE IF NOT EXISTS runtime_pods"):strings.Index(base, "CREATE TABLE IF NOT EXISTS workspace_file_audits")]
-	for _, schema := range []string{base, read("058_add_openclaw_runtime_upgrade_safety.sql"), read("061_persist_runtime_upgrade_source_identity.sql"), read("070_add_upgrade_restart_attempts.sql"), read("074_add_upgrade_recovery_key.sql"), read("079_add_runtime_management.sql"), read("080_add_runtime_pod_deletion_intents.sql"), read("105_add_runtime_observations.sql")} {
+	for _, schema := range []string{base, read("058_add_openclaw_runtime_upgrade_safety.sql"), read("061_persist_runtime_upgrade_source_identity.sql"), read("070_add_upgrade_restart_attempts.sql"), read("074_add_upgrade_recovery_key.sql"), read("079_add_runtime_management.sql"), read("080_add_runtime_pod_deletion_intents.sql"), read("105_add_runtime_observations.sql"), read("125_add_runtime_slot_reset_requests.sql")} {
 		for _, query := range strings.Split(schema, ";") {
 			if strings.TrimSpace(query) != "" {
 				exec(query)
@@ -94,6 +94,15 @@ func TestUpgradeReservationMySQLContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	req := UpgradeGatewayReservation{RolloutID: 123, InstanceID: 481, Generation: 2, Pod: *pod, WorkspacePath: "/workspaces/481", PortStart: 19000, PortEnd: 19100, PortBlockSize: 3}
+	// A concurrent recovery must retain the selected physical port even when
+	// this specialized reservation uses its own allocator.
+	exec("INSERT INTO runtime_slot_reset_requests(request_id,operation_id,source_pod_id,pod_uid,slot,gateway_port,active,created_at) VALUES('r','o',307,'uid123','slot-0',19000,1,NOW(6))")
+	resetOnlyPort := req
+	resetOnlyPort.PortEnd = resetOnlyPort.PortStart + resetOnlyPort.PortBlockSize - 1
+	if _, err := bindings.ReserveUpgradeGateway(ctx, resetOnlyPort); !errors.Is(err, ErrUpgradeCapacityPending) {
+		t.Fatalf("upgrade used reset port: %v", err)
+	}
+	exec("UPDATE runtime_slot_reset_requests SET active=NULL")
 	if ok, err := pods.TryClaimSlot(ctx, 307); err != nil || ok {
 		t.Fatalf("ordinary scheduling bypassed fence: %v %v", ok, err)
 	}

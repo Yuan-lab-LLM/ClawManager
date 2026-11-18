@@ -5,6 +5,7 @@ import ExpandableSearch from "../../components/ExpandableSearch";
 import FilterSelect from "../../components/FilterSelect";
 import ActionMenu from "../../components/ActionMenu";
 import AdminLayout from "../../components/AdminLayout";
+import { useAuth } from "../../contexts/AuthContext";
 import { useI18n } from "../../contexts/I18nContext";
 import { useRuntimeAdminWebSocket } from "../../hooks/useWebSocket";
 import { runtimePoolService } from "../../services/runtimePoolService";
@@ -25,6 +26,7 @@ import RuntimeRecoveryDialog from "./RuntimeRecoveryDialog";
 import RuntimeMaintenanceDialog from "./RuntimeMaintenanceDialog";
 import RuntimeBalanceDialog from "./RuntimeBalanceDialog";
 import RuntimeAutoStopDialog from "./RuntimeAutoStopDialog";
+import RuntimeSlotResetDialog, { slotResetSource, type RuntimeSlotResetSource } from "./RuntimeSlotResetDialog";
 import {
   buttonClass,
   primaryClass,
@@ -49,6 +51,7 @@ const emptySummary: Partial<RuntimePodSummary> = {};
 
 export default function RuntimePodsPage() {
   const { t } = useI18n();
+  const { user } = useAuth();
   const client = useQueryClient();
   const [filter, setFilter] = useState("all");
   const [node, setNode] = useState("all");
@@ -58,6 +61,7 @@ export default function RuntimePodsPage() {
   const [page, setPage] = useState(1);
   const [selectedPod, setSelectedPod] = useState<RuntimePod | null>(null);
   const [dialog, setDialog] = useState<Dialog | null>(null);
+  const [resetSource, setResetSource] = useState<(RuntimeSlotResetSource & { invalidated?: true }) | null>(null);
   const [actionError, setActionError] = useState<string>();
   const [busyPod, setBusyPod] = useState<number>();
   const filterDetails = useRef<HTMLDetailsElement>(null);
@@ -130,6 +134,12 @@ export default function RuntimePodsPage() {
         pod.pod_name === selectedPod.pod_name,
     ) ?? (inventoryConfirmed ? null : selectedPod));
   if (selectedPod && inventoryConfirmed && !activePod) setSelectedPod(null);
+  const liveResetSlot = activePod?.slots?.find((slot) => slot.container_name === resetSource?.slot);
+  const liveResetSource = activePod && liveResetSlot ? slotResetSource(activePod, liveResetSlot) : undefined;
+  if (resetSource && !resetSource.invalidated && (!liveResetSource || liveResetSource.podId !== resetSource.podId ||
+    liveResetSource.podUID !== resetSource.podUID || liveResetSource.observedIdentity !== resetSource.observedIdentity)) {
+    setResetSource({ ...resetSource, invalidated: true });
+  }
   const dialogPod = dialog?.pod && (
     actionPods.find((pod) => pod.id === dialog.pod!.id) ??
     (dialog.evictionMode === "recovery" && dialog.verifiedRecoveryIds?.length ? dialog.pod : inventoryConfirmed ? undefined : dialog.pod)
@@ -177,6 +187,7 @@ export default function RuntimePodsPage() {
             onBack={() => setSelectedPod(null)}
             onSchedule={(ids) => openSchedule(activePod, ids)}
             onRecovery={(ids) => setDialog({ kind: "evict", pod: activePod, ids, evictionMode: ids?.length || recoveryInstanceIds(activePod).length ? "recovery" : "orphan-recovery" })}
+            onResetSlot={user?.role === "admin" ? (slot) => setResetSource(slotResetSource(activePod, slot)) : undefined}
             onPause={() => void toggleScheduling(activePod)}
             onEvents={() => setDialog({ kind: "events", pod: activePod })}
             busy={busyPod === activePod.id}
@@ -320,6 +331,20 @@ export default function RuntimePodsPage() {
             </div>
             </section>
           </>
+        )}
+        {resetSource && user?.role === "admin" && (
+          <RuntimeSlotResetDialog
+            key={user.id}
+            accountId={user.id}
+            source={resetSource}
+            sourceChanged={!!resetSource.invalidated}
+            onClose={() => setResetSource(null)}
+            onChanged={refresh}
+            onHistory={() => {
+              setResetSource(null);
+              setDialog({ kind: "history" });
+            }}
+          />
         )}
         {dialog?.kind === "recovery" ? (
  <RuntimeRecoveryDialog pods={actionPods} onEvict={(pod, ids, verifiedRecoveryIds) => setDialog({ kind: "evict", pod, ids, verifiedRecoveryIds, evictionMode: "recovery" })} onClose={() => setDialog(null)} onChanged={refresh} />
