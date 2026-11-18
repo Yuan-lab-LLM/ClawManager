@@ -291,11 +291,7 @@ func (s *RuntimeScheduler) StartRollout(ctx context.Context, rolloutID int64) er
 		if isOpenCodeNativeRollout(rollout) {
 			return s.advanceOpenCodeUpgrade(ctx, rollout)
 		}
-		message := models.ErrOpenCodeSafeUpgradeRequired.Error()
-		if err := s.rolloutRepo.UpdateStatus(ctx, rollout.ID, "error", nil, nil, &message); err != nil {
-			return err
-		}
-		return models.ErrOpenCodeSafeUpgradeRequired
+		return s.rejectLegacyOpenCodeRollout(ctx, *rollout)
 	}
 	if rollout.Status != "pending" {
 		return nil
@@ -1045,10 +1041,50 @@ func runtimeDeploymentFallbackState(k8sState string) string {
 	}
 }
 
+// Only an identifiable legacy request can leave the active queue on refusal.
+// Corrupt or future strategy metadata may own native maintenance protections;
+// reject those requests without changing their status or recovery evidence.
+func (s *RuntimeScheduler) rejectLegacyOpenCodeRollout(ctx context.Context, rollout models.RuntimeRollout) error {
+	refusal := models.ErrOpenCodeSafeUpgradeRequired
+	if (rollout.Status != "pending" && rollout.Status != "running") || rollout.PreflightID != nil || rollout.PlanFingerprint != nil {
+		return refusal
+	}
+	switch rollout.Phase {
+	case "", "requested", "image_rollout":
+	default:
+		return refusal
+	}
+	if rollout.PreflightJSON != nil && strings.TrimSpace(*rollout.PreflightJSON) != "" {
+		var plan map[string]json.RawMessage
+		if json.Unmarshal([]byte(*rollout.PreflightJSON), &plan) != nil || plan == nil {
+			return refusal
+		}
+		for key, raw := range plan {
+			switch strings.ToLower(key) {
+			case "kind", "operation":
+				return refusal
+			case "strategy":
+				var strategy string
+				if string(raw) == "null" || json.Unmarshal(raw, &strategy) != nil || strategy != "" {
+					return refusal
+				}
+			}
+		}
+	}
+	if s == nil || s.rolloutRepo == nil {
+		return refusal
+	}
+	now, message := time.Now().UTC(), refusal.Error()
+	if err := s.rolloutRepo.UpdateStatus(ctx, rollout.ID, "error", rollout.StartedAt, &now, &message); err != nil {
+		return errors.Join(refusal, err)
+	}
+	return refusal
+}
+
 func (s *RuntimeScheduler) finishRolloutIfReady(ctx context.Context, rollout models.RuntimeRollout) error {
 	if rollout.RuntimeType == RuntimeTypeOpenCode {
 		if !isOpenCodeNativeRollout(&rollout) {
-			return models.ErrOpenCodeSafeUpgradeRequired
+			return s.rejectLegacyOpenCodeRollout(ctx, rollout)
 		}
 		return s.advanceOpenCodeUpgrade(ctx, &rollout)
 	}

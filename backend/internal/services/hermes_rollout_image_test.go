@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -69,11 +70,19 @@ func TestLegacyRolloutMissingAgentHasDeadline(t *testing.T) {
 			start := time.Now().Add(-16 * time.Minute)
 			r := models.RuntimeRollout{ID: 1, RuntimeType: runtimeType, TargetImageRef: "registry/image:tag", Status: "running", StartedAt: &start}
 			repo.rollouts[1] = &r
-			if err := s.finishRolloutIfReady(context.Background(), r); err != nil {
+			err := s.finishRolloutIfReady(context.Background(), r)
+			if runtimeType == RuntimeTypeOpenCode {
+				if !errors.Is(err, models.ErrOpenCodeSafeUpgradeRequired) {
+					t.Fatalf("unsafe OpenCode completion error = %v", err)
+				}
+			} else if err != nil {
 				t.Fatal(err)
 			}
 			if len(repo.statuses) != 1 || repo.statuses[0].status != "error" {
 				t.Fatalf("not terminated: %+v", repo.statuses)
+			}
+			if runtimeType == RuntimeTypeOpenCode && (repo.statuses[0].finishedAt == nil || repo.statuses[0].message == nil || *repo.statuses[0].message != models.ErrOpenCodeSafeUpgradeRequired.Error()) {
+				t.Fatalf("unsafe OpenCode has no terminal refusal: %+v", repo.statuses)
 			}
 		})
 	}

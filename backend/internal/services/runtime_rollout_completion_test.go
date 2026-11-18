@@ -219,7 +219,19 @@ func TestLiveCompletionLegacyRuntimeTypes(t *testing.T) {
 				p.RuntimeType = kind
 			}
 			dep.pods[0].RuntimeType = kind
-			if err := s.finishRolloutIfReady(context.Background(), *r); err != nil {
+			before, _ := json.Marshal(dep.targets)
+			err := s.finishRolloutIfReady(context.Background(), *r)
+			if kind == RuntimeTypeOpenCode {
+				if !errors.Is(err, models.ErrOpenCodeSafeUpgradeRequired) || len(repo.statuses) != 1 || repo.statuses[0].status != "error" || repo.statuses[0].finishedAt == nil {
+					t.Fatalf("unsafe OpenCode was not terminally refused: err=%v statuses=%+v", err, repo.statuses)
+				}
+				after, _ := json.Marshal(dep.targets)
+				if string(before) != string(after) || len(dep.rolloutImageCalls) != 0 || dep.scaleCalls != 0 || repo.raw != "" {
+					t.Fatal("unsafe OpenCode refusal changed deployment/default proof or checkpoint")
+				}
+				return
+			}
+			if err != nil {
 				t.Fatal(err)
 			}
 			if len(repo.statuses) != 1 || repo.statuses[0].status != "finished" {
@@ -283,5 +295,94 @@ func TestPoolCompletionIgnoresRemovedHistoricalRegistration(t *testing.T) {
 	}
 	if len(s.podRepo.(*fakeRuntimePodRepo).pods) != 2 {
 		t.Fatal("completion deleted historical registration")
+	}
+}
+
+// Damaged/future native plans cannot be classified as harmless legacy requests.
+// Keep their active status and all maintenance protections for operator review.
+func TestLiveCompletionUncertainOpenCodeStrategyRemainsProtected(t *testing.T) {
+	for _, entry := range []string{"start", "finish"} {
+		t.Run(entry, func(t *testing.T) {
+			for _, raw := range []string{`{`, `null`, `[]`, `{"strategy":"opencode_native_preserve_v2"}`, `{"strategy":123}`, `{"strategy":null}`} {
+				t.Run(raw, func(t *testing.T) {
+					s, repo, dep, r := completionFixture(t)
+					r.RuntimeType, r.PreflightJSON = RuntimeTypeOpenCode, &raw
+					r.Phase = "requested"
+					before := repo.raw
+					var err error
+					if entry == "start" {
+						err = s.StartRollout(context.Background(), r.ID)
+					} else {
+						err = s.finishRolloutIfReady(context.Background(), *r)
+					}
+					if !errors.Is(err, models.ErrOpenCodeSafeUpgradeRequired) {
+						t.Fatal(err)
+					}
+					if len(repo.statuses) != 0 || repo.raw != before || len(dep.rolloutImageCalls) != 0 || dep.scaleCalls != 0 {
+						t.Fatalf("uncertain OpenCode plan changed protection/runtime: %+v", repo.statuses)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestLiveCompletionExplicitLegacyOpenCodeCannotPublishDefault(t *testing.T) {
+	for _, raw := range []string{"", `{}`, `{"strategy":""}`, `{"batch_size":1}`} {
+		t.Run(raw, func(t *testing.T) {
+			s, repo, dep, r := completionFixture(t)
+			r.RuntimeType, r.PreflightJSON = RuntimeTypeOpenCode, &raw
+			r.Phase = "requested"
+			before := repo.raw
+			if err := s.finishRolloutIfReady(context.Background(), *r); !errors.Is(err, models.ErrOpenCodeSafeUpgradeRequired) {
+				t.Fatal(err)
+			}
+			if len(repo.statuses) != 1 || repo.statuses[0].status != "error" || repo.statuses[0].finishedAt == nil || repo.statuses[0].startedAt != r.StartedAt || repo.raw != before || len(dep.rolloutImageCalls) != 0 || dep.scaleCalls != 0 {
+				t.Fatalf("legacy OpenCode changed runtime/default proof or did not terminate: %+v", repo.statuses)
+			}
+		})
+	}
+}
+
+func TestLiveCompletionDamagedNativeOpenCodeKeepsActiveBarrier(t *testing.T) {
+	for _, entry := range []string{"start", "finish"} {
+		for _, marker := range []string{"kind", "operation", "phase", "gateway-restart", "preflight", "fingerprint", "strategy-case", "terminal"} {
+			t.Run(entry+"/"+marker, func(t *testing.T) {
+				s, repo, dep, r := completionFixture(t)
+				raw := `{}`
+				r.RuntimeType, r.Phase, r.PreflightJSON = RuntimeTypeOpenCode, "requested", &raw
+				switch marker {
+				case "kind":
+					raw = `{"kind":"opencode-native-preserve"}`
+				case "operation":
+					raw = `{"operation":"opencode-upgrade-126"}`
+				case "phase":
+					r.Phase = "opencode_native_preserve"
+				case "gateway-restart":
+					r.Phase = "gateway_restart"
+				case "preflight":
+					r.PreflightID = ptrString("native-freeze")
+				case "fingerprint":
+					r.PlanFingerprint = ptrString(strings.Repeat("a", 64))
+				case "strategy-case":
+					raw = `{"Strategy":"future"}`
+				case "terminal":
+					r.Status = "finished"
+				}
+				before := repo.raw
+				var err error
+				if entry == "start" {
+					err = s.StartRollout(context.Background(), r.ID)
+				} else {
+					err = s.finishRolloutIfReady(context.Background(), *r)
+				}
+				if !errors.Is(err, models.ErrOpenCodeSafeUpgradeRequired) {
+					t.Fatal(err)
+				}
+				if len(repo.statuses) != 0 || repo.raw != before || len(dep.rolloutImageCalls) != 0 || dep.scaleCalls != 0 {
+					t.Fatalf("native/history protection changed: %+v", repo.statuses)
+				}
+			})
+		}
 	}
 }
