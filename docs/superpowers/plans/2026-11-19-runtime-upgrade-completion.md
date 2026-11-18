@@ -13,7 +13,8 @@
 - 所有构建和运行测试在 10.130.81.54；本地仅源码、文档、格式检查与传输。
 - 清数据许可仅覆盖 OpenClaw/Hermes 测试数据；OpenCode 保留、DSH 不扰动。
 - 原 AgentsRuntime 工作区不改；使用现有 `.worktrees/AgentsRuntime-database`。
-- 原生支持 2.0.27/revision 1f4d07a4a519185955ae8ab2ea3607805509e386、同 migration journal；未知来源拒绝。
+- 原生支持实际运行的 1.18.13/revision a105350812f05f914c768e468559dbd6bd508d8e、同精确 38 项 migration journal 与原二进制；未知来源拒绝。
+- OpenCode 保留升级首版一次处理当前单副本、八槽位池；不把这项升级范围当成系统实例规模或普通扩容的上限。
 - 不伪造 SQL/物理回执、不清未知保护、不把旧失败记录改为成功。
 
 ## Task 1：管理任务公平轮转和双类型更新
@@ -22,11 +23,11 @@
 
 **Interfaces:** 保留 Process(context.Context) error 和各 operation 既有 journal；操作仍由选主及 owner_token CAS 串行处理。
 
-- [ ] 实库测试创建旧 Hermes recovery 与新 OpenClaw 准备；持有旧实例锁，使旧任务需要重试，断言新类型可以推进。54 运行 RED。
-- [ ] 对 resumable pending 按更新时间公平轮转，并验证并发认领和重启不扩大权限；54 运行 GREEN 与 management 回归。
-- [ ] 独立提交精确改动；构建及发布对应 CM 修复，保留全部运行配置。
-- [ ] 原 OpenClaw CLI 同状态继续准备和发布，验证实际镜像及 capability。
-- [ ] Hermes 原恢复任务仅按正常 Retry 继续；消费已存在真实 helper 回执，正常完成实例 242 删除，再原生升级。若还有持锁路径，补定位和回归后修复。
+- [x] 实库测试创建旧 Hermes recovery 与新 OpenClaw 准备；持有旧实例锁，使旧任务需要重试，断言新类型可以推进。54 运行 RED。
+- [x] 对 resumable pending 按更新时间公平轮转，并验证并发认领和重启不扩大权限；54 运行 GREEN 与 management 回归。
+- [x] 独立提交精确改动；构建及发布对应 CM 修复，保留全部运行配置。
+- [x] 原 OpenClaw CLI 同状态继续准备和发布，验证实际镜像及 capability。
+- [x] Hermes 原恢复任务仅按正常 Retry 继续；消费已存在真实 helper 回执，正常完成实例 242 删除，再原生升级。原操作正常完成，未绕过回执或写库。
 
 ## Task 2：OpenCode 原生 preserve adapter
 
@@ -34,7 +35,7 @@
 
 **Interfaces:** 实现 gateway.RuntimeUpgradeProvider、ScopedNativeUpgradeProvider；复用 WorkspaceUpgradeRequest 和既有 compatibility/migration/restore results。ProtocolVersion=opencode-preserve-v1，SessionStore=sqlite；能力 opencode.native-preserve-v1、opencode.workspace.writer-lease、opencode.session-continuity-v1、opencode.runtime-standby-v1。
 
-- [ ] 在 54 以真实 SQLite WAL 和 v2 表建立失败用例；未知 journal、损坏 DB、路径覆盖、跨身份均拒绝。
+- [ ] 在 54 以真实 SQLite WAL 和六张原生历史表建立失败用例；未知 journal、损坏 DB、路径覆盖、跨身份均拒绝。
 - [ ] compatibility 只读源固定路径，写私有验证 receipt；migrate 保留 DB/WAL/SHM/固定状态，在 capsule 副本做完整 backup 与 catalog 验证。
 - [ ] status 重验 capsule，恢复同身份幂等；restore 保留新增历史，故障/中断保留 displaced 文件和待核实状态。
 - [ ] 54 运行 OpenCode 模块、共用 Agent 相关回归和实际 UID/NFS 维护容器验证；提交原生代码，记录精确文件 hash。
