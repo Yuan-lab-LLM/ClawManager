@@ -285,6 +285,10 @@ func (h *RuntimePoolHandler) StartRollout(c *gin.Context) {
 	}
 	startedBy := currentUserIDPtr(c)
 	if runtimeType == services.RuntimeTypeOpenCode {
+		if req.MaxUnavailable != 0 || req.BatchSize < 0 || req.BatchSize > 1 {
+			utils.Error(c, http.StatusBadRequest, "OpenCode native preservation uses whole-pool maintenance; omit max_unavailable and use batch_size=1")
+			return
+		}
 		if h.scheduler == nil {
 			utils.Error(c, http.StatusServiceUnavailable, "OpenCode native upgrade controller is unavailable")
 			return
@@ -299,7 +303,7 @@ func (h *RuntimePoolHandler) StartRollout(c *gin.Context) {
 			return
 		}
 		h.publish(c.Request.Context(), "runtime_rollout", map[string]any{"rollout_id": rollout.ID, "runtime_type": rollout.RuntimeType, "status": rollout.Status})
-		utils.Success(c, http.StatusCreated, "OpenCode native preservation upgrade created", gin.H{"rollout": rollout, "strategy": services.RuntimeUpgradeStrategyOpenCodePreserve})
+		utils.Success(c, http.StatusCreated, "OpenCode native preservation upgrade created", gin.H{"rollout": rollout, "strategy": services.RuntimeUpgradeStrategyOpenCodePreserve, "availability_mode": "pool_maintenance", "planned_unavailable_instances": rollout.MaxUnavailable})
 		return
 	}
 

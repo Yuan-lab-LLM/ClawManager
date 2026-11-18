@@ -29,3 +29,21 @@ func TestRuntimePoolOpenCodeNativeStrategyRequiresDedicatedController(t *testing
 		})
 	}
 }
+
+func TestRuntimePoolOpenCodeRejectsUnsupportedOnlineAvailabilityParameters(t *testing.T) {
+	for _, parameters := range []string{`"max_unavailable":1`, `"batch_size":2`} {
+		t.Run(parameters, func(t *testing.T) {
+			repo := &runtimePoolHandlerRolloutRepo{}
+			handler := NewRuntimePoolHandler(&runtimePoolHandlerPodRepo{}, &runtimePoolHandlerBindingRepo{}, repo, nil, &runtimePoolHandlerEvents{})
+			router := runtimePoolHandlerRouter(1, "admin", handler)
+			body := `{"runtime_type":"opencode","strategy":"opencode_native_preserve_v1","target_image_ref":"registry.example/opencode@sha256:` + strings.Repeat("a", 64) + `",` + parameters + `}`
+			request := httptest.NewRequest(http.MethodPost, "/api/v1/admin/runtime-rollouts", bytes.NewBufferString(body))
+			request.Header.Set("Content-Type", "application/json")
+			response := httptest.NewRecorder()
+			router.ServeHTTP(response, request)
+			if response.Code != http.StatusBadRequest || repo.created != nil {
+				t.Fatalf("status=%d generic rollout=%+v", response.Code, repo.created)
+			}
+		})
+	}
+}

@@ -174,6 +174,7 @@ class DeliveryTest(unittest.TestCase):
         self.assertEqual(len(bodies), 1)
         self.assertEqual(bodies[0]["strategy"], "opencode_native_preserve_v1")
         self.assertTrue(bodies[0]["auto_rollback"])
+        self.assertEqual(bodies[0]["max_unavailable"], 0)
 
     def test_opencode_lost_submission_never_reposts(self):
         self.runtime = "opencode"

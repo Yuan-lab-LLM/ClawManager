@@ -226,8 +226,8 @@ func (s *RuntimeScheduler) advanceOpenCodeRollback(ctx context.Context, r *model
 		}
 		p.Stage = "rollback_retire"
 	case "rollback_retire":
-		for _, source := range p.Sources {
-			if err := s.deployments.SetUpgradePoolActive(ctx, source.Target.Namespace, source.Target.Name, runtimeUpgradeTargetDeploymentName(source.Target.Name, r.ID), id, false); err != nil {
+		for index, source := range p.Sources {
+			if err := backend.SetOpenCodeUpgradePoolActive(ctx, source, p.TargetProofs[index], id, false); err != nil {
 				return err
 			}
 		}

@@ -41,6 +41,7 @@ type openCodeUpgradeInstance struct {
 }
 type openCodeUpgradePlan struct {
 	TargetImage            string                       `json:"target_image"`
+	PlannedUnavailable     int                          `json:"planned_unavailable_instances"`
 	Kind                   string                       `json:"kind"`
 	Version                int                          `json:"version"`
 	Strategy               string                       `json:"strategy"`
@@ -284,6 +285,7 @@ func (s *RuntimeScheduler) SubmitOpenCodeUpgrade(ctx context.Context, target str
 			}
 		}
 	}
+	p.PlannedUnavailable = openCodePlannedUnavailability(p.Instances)
 	nonce, err := randomUpgradeID()
 	if err != nil {
 		return nil, err
@@ -300,7 +302,7 @@ func (s *RuntimeScheduler) SubmitOpenCodeUpgrade(ctx context.Context, target str
 	capsRaw, _ := json.Marshal(openCodeUpgradeCapabilities)
 	capsString := string(capsRaw)
 	digest := imageDigestFromReference(target)
-	r := &models.RuntimeRollout{RuntimeType: RuntimeTypeOpenCode, TargetImageRef: target, TargetImageDigest: &digest, SourceImagesJSON: &sourceString, PlanFingerprint: &fingerprint, PreflightID: &nonce, PreflightJSON: &rawString, RequiredCapabilitiesJSON: &capsString, Status: "pending", Phase: "opencode_native_preserve", BatchSize: 1, MaxUnavailable: 1, AutoRollback: true, StartedBy: actor}
+	r := &models.RuntimeRollout{RuntimeType: RuntimeTypeOpenCode, TargetImageRef: target, TargetImageDigest: &digest, SourceImagesJSON: &sourceString, PlanFingerprint: &fingerprint, PreflightID: &nonce, PreflightJSON: &rawString, RequiredCapabilitiesJSON: &capsString, Status: "pending", Phase: "opencode_native_preserve", BatchSize: 1, MaxUnavailable: p.PlannedUnavailable, AutoRollback: true, StartedBy: actor}
 	attempted := false
 	err = s.upgrade.sess.TxContext(ctx, func(tx db.Session) error {
 		if e := repository.LockRuntimeOrphanLifecycleAdmission(ctx, tx); e != nil {
@@ -533,6 +535,16 @@ func (s *RuntimeScheduler) advanceOpenCodeUpgrade(ctx context.Context, r *models
 		}
 		if err = backend.ValidateOpenCodeUpgradeSource(ctx, proof); err != nil {
 			return err
+		}
+	}
+	if len(p.TargetProofs) > 0 {
+		if len(p.TargetProofs) != len(p.Sources) {
+			return fmt.Errorf("OpenCode scheduling proof inventory is incomplete")
+		}
+		for i, source := range p.Sources {
+			if err = backend.ValidateOpenCodeUpgradeScheduling(ctx, source, p.TargetProofs[i], fmt.Sprintf("%d", r.ID), p.Stage); err != nil {
+				return err
+			}
 		}
 	}
 	if len(p.Targets) > 0 && p.Stage != "rollback_retire" && p.Stage != "rollback_verify" {
@@ -799,8 +811,8 @@ func (s *RuntimeScheduler) advanceOpenCodeUpgrade(ctx context.Context, r *models
 		}
 		p.Stage = "switch"
 	case "switch":
-		for _, source := range p.Sources {
-			if err = s.deployments.SetUpgradePoolActive(ctx, source.Target.Namespace, source.Target.Name, runtimeUpgradeTargetDeploymentName(source.Target.Name, r.ID), id, true); err != nil {
+		for index, source := range p.Sources {
+			if err = backend.SetOpenCodeUpgradePoolActive(ctx, source, p.TargetProofs[index], id, true); err != nil {
 				return err
 			}
 		}
@@ -1042,4 +1054,14 @@ func (s *RuntimeScheduler) verifyFrozenOpenCodeTargetPods(ctx context.Context, p
 		}
 	}
 	return nil
+}
+
+func openCodePlannedUnavailability(instances []openCodeUpgradeInstance) int {
+	count := 0
+	for _, instance := range instances {
+		if instance.Status == "running" {
+			count++
+		}
+	}
+	return count
 }

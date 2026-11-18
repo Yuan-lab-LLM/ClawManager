@@ -739,3 +739,52 @@ func (a *openCodeFlowAgent) openCodeActivateUpgrade(ctx context.Context, pod mod
 	}
 	return a.ActivateUpgrade(ctx, stringValue(pod.AgentEndpoint), id)
 }
+
+func TestOpenCodeNativeMySQLOldFourCapabilityTargetCannotStopSource(t *testing.T) {
+	sess, s, r, a := openCodeActiveControllerFixture(t)
+	ctx := context.Background()
+	if err := s.advanceOpenCodeUpgrade(ctx, r); err != nil {
+		t.Fatal(err)
+	}
+	oldCaps := []string{"opencode.native-preserve-v1", "opencode.workspace.writer-lease", "opencode.session-continuity-v1", "opencode.runtime-standby-v1"}
+	raw, _ := json.Marshal(oldCaps)
+	if _, err := sess.SQL().ExecContext(ctx, `UPDATE runtime_pods SET capabilities_json=? WHERE id=2`, string(raw)); err != nil {
+		t.Fatal(err)
+	}
+	current, _ := s.rolloutRepo.GetByID(ctx, r.ID)
+	if err := s.advanceOpenCodeUpgrade(ctx, current); err == nil {
+		t.Fatal("old ENV-only native capability contract was accepted")
+	}
+	if a.sourceStopped || a.creates != 0 || a.migrations != 0 {
+		t.Fatal("old target contract touched source execution")
+	}
+}
+
+func (d *openCodeFlowDeployments) ValidateOpenCodeUpgradeScheduling(context.Context, *k8s.OpenCodeUpgradeSource, *k8s.OpenCodeUpgradeSource, string, string) error {
+	return d.targetErr
+}
+func (d *openCodeFlowDeployments) SetOpenCodeUpgradePoolActive(ctx context.Context, source, target *k8s.OpenCodeUpgradeSource, operation string, active bool) error {
+	if d.targetErr != nil {
+		return d.targetErr
+	}
+	return d.SetUpgradePoolActive(ctx, source.Target.Namespace, source.Target.Name, target.Target.Name, operation, active)
+}
+
+func TestOpenCodeNativeMySQLRechecksTargetSchedulingAndLineageAfterStandby(t *testing.T) {
+	_, s, r, a := openCodeActiveControllerFixture(t)
+	ctx := context.Background()
+	for i := 0; i < 2; i++ {
+		current, _ := s.rolloutRepo.GetByID(ctx, r.ID)
+		if err := s.advanceOpenCodeUpgrade(ctx, current); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a.d.targetErr = errors.New("target scheduling or source lineage changed after frozen standby")
+	current, _ := s.rolloutRepo.GetByID(ctx, r.ID)
+	if err := s.advanceOpenCodeUpgrade(ctx, current); err == nil {
+		t.Fatal("post-standby target metadata drift was accepted")
+	}
+	if a.sourceStopped || a.creates != 0 || a.migrations != 0 {
+		t.Fatal("metadata drift reached source stop or native writes")
+	}
+}

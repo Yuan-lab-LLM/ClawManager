@@ -183,3 +183,12 @@ func TestOpenCodeActivateHTTPBindsFrozenUIDAndPreservesLegacyBody(t *testing.T) 
 		t.Fatal("replacement UID reached activation HTTP")
 	}
 }
+
+func TestOpenCodePlannedMaintenanceCountsAllFrozenRunningInstances(t *testing.T) {
+	if actual := openCodePlannedUnavailability([]openCodeUpgradeInstance{{Status: "running"}, {Status: "stopped"}, {Status: "running"}}); actual != 2 {
+		t.Fatalf("planned unavailable=%d", actual)
+	}
+	if actual := openCodePlannedUnavailability(nil); actual != 0 {
+		t.Fatal(actual)
+	}
+}

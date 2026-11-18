@@ -187,7 +187,7 @@ def deliver(api, args, state, path):
         save(path, state)
     if state["stage"] not in ("prepared", "preflight_ready"):
         raise Stop("submission outcome unknown or blocked; inspect --history; never delete state to retry")
-    body = {"runtime_type": args.runtime_type, "target_image_ref": args.target_image, "batch_size": args.batch_size, "max_unavailable": 0 if state.get("preflight_id") else 1, "auto_rollback": True, "preparation_id": state["preparation_id"]}
+    body = {"runtime_type": args.runtime_type, "target_image_ref": args.target_image, "batch_size": args.batch_size, "max_unavailable": 0 if state.get("preflight_id") or args.runtime_type == "opencode" else 1, "auto_rollback": True, "preparation_id": state["preparation_id"]}
     if args.runtime_type == "opencode":
         body["strategy"] = "opencode_native_preserve_v1"
     if state.get("preflight_id"):
@@ -227,6 +227,8 @@ def main():
         raise Stop("target image must use an immutable repository@sha256 digest")
     if any(not (0 < value < float("inf")) for value in (args.timeout, args.request_timeout, args.poll_interval)) or args.batch_size <= 0 or (args.operation_id is not None and args.operation_id <= 0):
         raise Stop("timeouts, interval, batch size and operation ID must be positive")
+    if args.runtime_type == "opencode" and args.batch_size != 1 and not args.history and not args.operation_id:
+        raise Stop("OpenCode native preservation uses whole-pool maintenance and requires --batch-size 1")
     token_file = args.token_file or os.environ.get("CM_TOKEN_FILE")
     token = Path(token_file).read_text().strip() if token_file else os.environ.get("CM_TOKEN", "").strip()
     if not token or any(character.isspace() for character in token):

@@ -20,7 +20,7 @@ const openCodeNativeJournalSHA256 = "2ef42ffb09410c0f91535d25fce5b4107c46ee3fd7a
 const openCodeNativeProtocol = "opencode-preserve-v1"
 const openCodeLegacyImage = "clawmanager.local/opencode-lite@sha256:7ba6888e43480496704a10d9a496b1398863515166acab5c544ccc9c9d91ed31"
 
-var openCodeUpgradeCapabilities = []string{"opencode.native-preserve-v1", "opencode.workspace.writer-lease", "opencode.session-continuity-v1", "opencode.runtime-standby-v1"}
+var openCodeUpgradeCapabilities = []string{"opencode.native-preserve-v1", "opencode.workspace.writer-lease", "opencode.session-continuity-v1", "opencode.runtime-standby-v1", "opencode.native-payload-poduid-v1"}
 
 type openCodeNativeContract struct {
 	Version       string `json:"version"`

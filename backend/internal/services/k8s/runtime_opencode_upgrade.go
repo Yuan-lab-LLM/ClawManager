@@ -22,6 +22,7 @@ import (
 type OpenCodeUpgradeSource struct {
 	Spec            appsv1.DeploymentSpec  `json:"spec"`
 	Labels          map[string]string      `json:"labels"`
+	Annotations     map[string]string      `json:"annotations,omitempty"`
 	PodUIDs         []string               `json:"pod_uids"`
 	Target          RuntimeRolloutTarget   `json:"target"`
 	Template        corev1.PodTemplateSpec `json:"template"`
@@ -30,6 +31,8 @@ type OpenCodeUpgradeSource struct {
 	Replicas        int32                  `json:"replicas"`
 }
 type OpenCodeUpgradeDeploymentService interface {
+	ValidateOpenCodeUpgradeScheduling(context.Context, *OpenCodeUpgradeSource, *OpenCodeUpgradeSource, string, string) error
+	SetOpenCodeUpgradePoolActive(context.Context, *OpenCodeUpgradeSource, *OpenCodeUpgradeSource, string, bool) error
 	EnsureOpenCodeUpgradePool(context.Context, *OpenCodeUpgradeSource, string, string, string) (RuntimeRolloutTarget, error)
 	ValidateOpenCodeUpgradeTarget(context.Context, *OpenCodeUpgradeSource, RuntimeRolloutTarget, string) error
 	CaptureOpenCodeUpgradeSource(context.Context, RuntimeRolloutTarget) (*OpenCodeUpgradeSource, error)
@@ -92,7 +95,7 @@ func (s *runtimeDeploymentService) CaptureOpenCodeUpgradeSource(ctx context.Cont
 		return nil, err
 	}
 	sum := sha256.Sum256(raw)
-	return &OpenCodeUpgradeSource{Spec: *d.Spec.DeepCopy(), Labels: copyStringMap(d.Labels), PodUIDs: podUIDs, Target: t, Template: *d.Spec.Template.DeepCopy(), TemplateSHA256: hex.EncodeToString(sum[:]), StorageIdentity: storage, Replicas: *d.Spec.Replicas}, nil
+	return &OpenCodeUpgradeSource{Spec: *d.Spec.DeepCopy(), Labels: copyStringMap(d.Labels), Annotations: copyStringMap(d.Annotations), PodUIDs: podUIDs, Target: t, Template: *d.Spec.Template.DeepCopy(), TemplateSHA256: hex.EncodeToString(sum[:]), StorageIdentity: storage, Replicas: *d.Spec.Replicas}, nil
 }
 func (s *runtimeDeploymentService) ValidateOpenCodeUpgradeSource(ctx context.Context, p *OpenCodeUpgradeSource) error {
 	if p == nil {
@@ -137,6 +140,9 @@ func (s *runtimeDeploymentService) RetireOpenCodeUpgradeSource(ctx context.Conte
 		if err = s.ValidateOpenCodeUpgradeSource(ctx, p); err != nil {
 			return err
 		}
+		if err = s.validateOpenCodeSchedulingIdentity(ctx, d, p, ""); err != nil {
+			return err
+		}
 		if d.Labels[runtimeSchedulingLabel] != "false" {
 			return fmt.Errorf("OpenCode source remains schedulable")
 		}
@@ -178,7 +184,7 @@ func (s *runtimeDeploymentService) validateOpenCodeRetiredSource(ctx context.Con
 	if storage != p.StorageIdentity {
 		return fmt.Errorf("OpenCode retired source storage changed")
 	}
-	return nil
+	return s.validateOpenCodeSchedulingIdentity(ctx, d, p, operation)
 }
 func (s *runtimeDeploymentService) OpenCodeUpgradeSourceRetired(ctx context.Context, p *OpenCodeUpgradeSource, operation string) (bool, error) {
 	d, err := s.client.AppsV1().Deployments(p.Target.Namespace).Get(ctx, p.Target.Name, metav1.GetOptions{})
