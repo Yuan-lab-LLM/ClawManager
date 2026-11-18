@@ -127,6 +127,14 @@ func (h *RuntimePoolHandler) GetRollout(c *gin.Context) {
 		utils.Error(c, http.StatusNotFound, "runtime rollout not found")
 		return
 	}
+	native, err := services.LoadOpenCodeUpgradeOperation(c.Request.Context(), h.rolloutRepo, details.Rollout)
+	if err != nil {
+		utils.HandleError(c, err)
+		return
+	}
+	if native != nil {
+		details.Execution = nil
+	}
 	progress, err := services.LoadRuntimePoolProgress(c.Request.Context(), h.rolloutRepo, id)
 	if err != nil {
 		utils.HandleError(c, err)
@@ -141,7 +149,7 @@ func (h *RuntimePoolHandler) GetRollout(c *gin.Context) {
 		details.Execution = nil
 	}
 	utils.Success(c, http.StatusOK, "Runtime rollout retrieved successfully", gin.H{
-		"rollout": details.Rollout, "items": details.Items, "audits": details.Audits, "pool_progress": progress, "pool_operation": operation, "execution": details.Execution,
+		"rollout": details.Rollout, "items": details.Items, "audits": details.Audits, "pool_progress": progress, "pool_operation": operation, "execution": details.Execution, "native_operation": native,
 	})
 }
 

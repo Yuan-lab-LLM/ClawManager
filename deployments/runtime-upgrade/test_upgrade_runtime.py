@@ -20,6 +20,8 @@ class DeliveryTest(unittest.TestCase):
         self.state = Path(self.tmp.name) / "operation.json"
         self.calls = []
         self.statuses = ["finished"]
+        self.operation_id = 41
+        self.native_operation = None
         self.strategy = "legacy_rolling"
         self.passed = True
         self.conflict = False
@@ -47,10 +49,12 @@ class DeliveryTest(unittest.TestCase):
                 if self.headers.get("Authorization") != "Bearer " + TOKEN:
                     self.send_error(401)
                     return
-                rollout = {"id": 41, "runtime_type": test.runtime, "target_image_ref": IMAGE, "status": test.statuses[0], "phase": "verify"}
+                rollout = {"id": test.operation_id, "runtime_type": test.runtime, "target_image_ref": IMAGE, "status": test.statuses[0], "phase": "verify"}
                 if len(test.statuses) > 1 and self.command == "GET":
                     test.statuses.pop(0)
                 data = {"rollout": rollout}
+                if test.native_operation is not None:
+                    data["native_operation"] = test.native_operation
                 status = 200
                 preparation = {"id": "prep-31", "kind": "rollout_wake", "runtime_type": test.runtime, "status": test.preparation_status, "phase": "wake"}
                 if self.path.endswith("/prepare"):
@@ -97,7 +101,7 @@ class DeliveryTest(unittest.TestCase):
         self.tmp.cleanup()
 
     def run_cli(self, *extra):
-        result = subprocess.run([sys.executable, str(SCRIPT), "--api-url", self.api, "--runtime-type", self.runtime, "--target-image", IMAGE, "--state-file", str(self.state), "--poll-interval", "0.01", "--timeout", "0.12", *extra], env=dict(os.environ, CM_TOKEN=TOKEN), capture_output=True, text=True)
+        result = subprocess.run([sys.executable, str(SCRIPT), "--api-url", self.api, "--runtime-type", self.runtime, "--target-image", IMAGE, "--state-file", str(self.state), "--poll-interval", "0.01", "--timeout", "2", *extra], env=dict(os.environ, CM_TOKEN=TOKEN), capture_output=True, text=True)
         self.assertNotIn(TOKEN, result.stdout + result.stderr)
         return result
 
@@ -120,8 +124,10 @@ class DeliveryTest(unittest.TestCase):
         self.assertTrue(all(method == "GET" for method, _, _ in self.calls))
 
     def test_timeout_preserves_operation(self):
+        # The fixture keeps the known rollout running; leave enough setup
+        # budget for preparation, durable ID saves and polling under build load.
         self.statuses = ["running"]
-        result = self.run_cli()
+        result = self.run_cli("--timeout", "0.5")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("timeout", result.stderr)
         self.assertEqual(json.loads(self.state.read_text())["operation_id"], 41)
@@ -206,7 +212,7 @@ class DeliveryTest(unittest.TestCase):
 
     def test_preparation_timeout_resume_does_not_prepare_twice(self):
         self.preparation_status = "starting"
-        self.assertNotEqual(self.run_cli().returncode, 0)
+        self.assertNotEqual(self.run_cli("--timeout", "0.5").returncode, 0)
         self.preparation_status = "completed"
         self.assertEqual(self.run_cli().returncode, 0)
         self.assertEqual(sum(path.endswith("/prepare") for _, path, _ in self.calls), 1)
@@ -217,7 +223,7 @@ class DeliveryTest(unittest.TestCase):
 
     def test_processing_preparation_is_polled_until_timeout(self):
         self.preparation_status = "processing"
-        result = self.run_cli()
+        result = self.run_cli("--timeout", "0.5")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("timeout", result.stderr)
 
@@ -252,6 +258,50 @@ class DeliveryTest(unittest.TestCase):
         self.drop_preparation = False
         self.assertEqual(self.run_cli("--preparation-id", "prep-31").returncode, 0)
         self.assertEqual(sum(path.endswith("/prepare") for _, path, _ in self.calls), 1)
+
+    def test_opencode_native_block_stops_and_keeps_original_operation_14(self):
+        self.runtime = "opencode"
+        self.operation_id = 14
+        self.statuses = ["running"]
+        self.native_operation = {"kind":"opencode-native-preserve", "rollout_id":14, "stage":"preserve", "blocked":True, "protection_held":True, "error_message":TOKEN, "instances":[{"instance_id":395,"state":"quiesced"},{"instance_id":396,"state":"quiesced"}]}
+        for index in range(2):
+            before = list(self.calls)
+            result = self.run_cli("--timeout","2")
+            self.assertNotEqual(result.returncode,0)
+            self.assertIn('"status": "blocked"',result.stdout)
+            self.assertIn('"operation_id": 14',result.stdout)
+            self.assertIn('"native_stage": "preserve"',result.stdout)
+            self.assertIn('"protection_held": true',result.stdout)
+            self.assertIn("protection remains held",result.stderr)
+            saved=json.loads(self.state.read_text())
+            self.assertEqual((saved["stage"],saved["operation_id"]),("observing",14))
+            if index:self.assertTrue(all(m=="GET" for m,_,_ in self.calls[len(before):]))
+        self.assertEqual(sum(m=="POST" for m,_,_ in self.calls),2)
+
+    def test_opencode_native_initial_empty_targets_can_finish(self):
+        self.runtime="opencode"
+        self.native_operation={"kind":"opencode-native-preserve","rollout_id":41,"stage":"standby","blocked":False,"protection_held":True,"targets":[]}
+        self.assertEqual(self.run_cli().returncode,0)
+
+    def test_opencode_known_id_native_block_never_submits(self):
+        self.runtime="opencode"
+        self.operation_id=14
+        self.statuses=["running"]
+        self.native_operation={"kind":"opencode-native-preserve","rollout_id":14,"stage":"preserve","blocked":True,"protection_held":True}
+        result=self.run_cli("--operation-id","14","--timeout","2")
+        self.assertNotEqual(result.returncode,0)
+        self.assertIn('"status": "blocked"',result.stdout)
+        self.assertTrue(self.calls and all(m=="GET" for m,_,_ in self.calls))
+        self.assertEqual(json.loads(self.state.read_text())["operation_id"],14)
+
+    def test_opencode_native_view_identity_mismatch_stops_read_only(self):
+        self.runtime="opencode"
+        self.operation_id=14
+        self.native_operation={"kind":"opencode-native-preserve","rollout_id":15,"stage":"preserve","blocked":True,"protection_held":True}
+        result=self.run_cli("--operation-id","14")
+        self.assertNotEqual(result.returncode,0)
+        self.assertIn("native operation identity mismatch",result.stderr)
+        self.assertTrue(all(m=="GET" for m,_,_ in self.calls))
 
 
 if __name__ == "__main__":

@@ -129,8 +129,23 @@ def preparation(api, args, state, path):
 
 def poll(api, args, state):
     while True:
-        rollout = api.request(ROLLOUTS + "/" + str(state["operation_id"])).get("rollout")
+        result = api.request(ROLLOUTS + "/" + str(state["operation_id"]))
+        rollout = result.get("rollout")
         rollout_identity(rollout, args, state["operation_id"])
+        native = result.get("native_operation")
+        if args.runtime_type == "opencode" and native is not None:
+            if not isinstance(native, dict) or native.get("kind") != "opencode-native-preserve" or type(native.get("rollout_id")) is not int or native["rollout_id"] != state["operation_id"]:
+                raise Stop("native operation identity mismatch")
+            if native.get("blocked") is True:
+                # Do not echo arbitrary API errors/stages: they may contain secrets.
+                stage = native.get("stage")
+                if stage not in ("standby", "standby_ready", "quiesce", "preserve", "activate", "restart", "switch", "retire", "verify", "rollback_stop", "rollback_restore", "rollback_restart", "rollback_retire", "rollback_verify"):
+                    stage = "unknown"
+                held = native.get("protection_held") is True
+                emit(operation_id=state["operation_id"], status="blocked", native_stage=stage, protection_held=held)
+                if held:
+                    raise Stop("native maintenance reports a block; CM protection remains held; inspect this operation without resubmitting")
+                raise Stop("native maintenance reports a block; inspect this operation without resubmitting")
         status = rollout.get("status")
         emit(operation_id=state["operation_id"], status=status)
         if status == "finished":

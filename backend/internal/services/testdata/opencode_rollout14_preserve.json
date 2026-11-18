@@ -1,0 +1,13 @@
+{
+  "kind": "opencode-native-preserve",
+  "version": 1,
+  "strategy": "opencode_native_preserve_v1",
+  "stage": "preserve",
+  "target_image": "clawmanager.local/opencode-lite@sha256:3b5793e4fdb1c6a83ba6d4e2928bc0da6a84096a84039587b2144c69d7c410bd",
+  "target_controllers": [{"Namespace":"clawmanager-system","Name":"opencode-runtime-u14","UID":"b0e149af-494f-47d8-8686-0810e9fde1e9","Image":"clawmanager.local/opencode-lite@sha256:3b5793e4fdb1c6a83ba6d4e2928bc0da6a84096a84039587b2144c69d7c410bd","Ready":false,"Upgrade":true}],
+  "targets": [{"id":71,"runtime_type":"opencode","namespace":"clawmanager-system","deployment_name":"opencode-runtime-u14","pod_name":"opencode-runtime-u14-fixture","pod_uid":"91fcf4b2-ffc9-42a7-af95-00ae38aba9cc","image_ref":"clawmanager.local/opencode-lite@sha256:3b5793e4fdb1c6a83ba6d4e2928bc0da6a84096a84039587b2144c69d7c410bd"}],
+  "instances": [
+    {"id":395,"owner":1,"generation":1,"status":"running","state":"quiesced","workspace":"private-workspace-do-not-return","assignment":{"environment":{"PRIVATE_SECRET":"fixture-private-do-not-return"}},"stop_proof":{"fixture_redacted":true}},
+    {"id":396,"owner":1,"generation":1,"status":"running","state":"quiesced","stop_proof":{"fixture_redacted":true}}
+  ]
+}

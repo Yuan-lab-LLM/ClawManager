@@ -36,6 +36,11 @@ Runtime 控制操作按类型隔离：其他类型的升级、缩容、恢复或
 
 旧 Agent 仅需提供现有 C1 容器停止证明。CM 冻结来源 UID、Pod、模板和持久存储，创建不可调度的目标 standby，逐实例关闭平台写入并确认旧容器及外部 writer 退出，再由目标维护 sandbox 创建、复核 UID 私有原生 capsule。备份范围只含固定原生 DB/WAL/SHM、配置和状态；项目目录不遍历、不复制。`compatible`、`validated`、完整状态摘要、session catalog、`DataPreserved` 和可回滚证明缺一不可。未知维护结果保留同操作 lease、写入 fence 和 checkpoint；按原 ID 续接，不能重提新操作或清除保护。
 
+
+查询 `GET /admin/runtime-rollouts/:id` 时，原生进度位于独立的 `native_operation`，初始尚无目标 Pod 的阶段同样返回 200。该视图只展示记录的阶段、控制器/Pod 身份、逐实例 `state` 及 `has_stop_proof`/`has_capsule`，不返回原始维护请求、凭据、workspace 路径或证明内容。`protection_held` 的范围明确为 SQL 中本操作仍为 pending/running 时的 Runtime 类型保护，不代表重新核验了写入 fence 或原生 lease；`error_message` 是 CM 最后记录的错误，并带有未重新验证的 `error_scope`。SQL `running` 不能作为业务进程仍在运行的证明，应查看逐实例维护记录。
+
+对记录在 preserve 阶段、实例均已 quiesced 且无 capsule 的确定 payload 信任拒绝，视图返回 `blocked=true`，同时保留 SQL running 及所有保护。CLI 输出同一操作 ID、受控阶段和保护标志后非零停止，不回显原生错误体，不修改该 ID 的观察状态或重新提交。原生兼容性在生成完整 capsule 之前被拒绝时，当前没有可直接调用的安全 abort/retarget 入口；已有回滚要求完整 capsule，不能通过改目标镜像、替换失败回执、取消操作或清除保护来绕过。
+
 目标激活后仅恢复被冻结的原期望状态和预期 generation；原来停止的实例继续停止。完成验证后，CM 在确认来源无 binding、无物理 writer 后按 UID/模板/存储 CAS 将来源副本降到零，保留其模板、持久卷和 capsule；等待旧 Pod 实际退出，再提交 `finished` 及后续默认放置。再次升级已停止实例时，必须保留其原始 C1 身份，并通过已完成升级的 capsule、当前控制器 UID 和相同存储续接来源证明。
 
 目标执行明确失败后的恢复仍属于同一操作：先确认目标 writer C1 退出，再用 `preserve_session_sqlite=true` 验证当前历史保留；目标执行为 N+1 时，恢复请求携带当前 generation N+1 和原 capsule 的 `resume_generation=N`。只有 `restored` 与独立 status 都确认配置、状态和当前 session 保留，才允许在原镜像以新 generation 恢复。恢复成功记录 `error` 与 `rollback_status=restored`，目标不成为默认镜像；缺少证明时保持保护。

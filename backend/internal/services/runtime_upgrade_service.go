@@ -547,6 +547,9 @@ func (s *RuntimeUpgradeService) Details(ctx context.Context, rolloutID int64) (*
 		return nil, err
 	}
 	details := newRuntimeUpgradeDetails(rollout, items, audits)
+	if isOpenCodeNativeRollout(rollout) {
+		return details, nil
+	}
 	policy := runtimeUpgradePodPolicy(rollout, nil)
 	expectedTargets, targetErr := rolloutExpectedTargetDeployments(rollout)
 	if pods, err := s.pods.List(ctx, RuntimeTypeOpenClaw); err == nil && targetErr == nil {
