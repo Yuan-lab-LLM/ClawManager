@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from '../contexts/AuthContext';
 import { useI18n } from '../contexts/I18nContext';
@@ -8,75 +8,79 @@ import LoginPage from '../pages/auth/LoginPage';
 import RegisterPage from '../pages/auth/RegisterPage';
 
 // Dashboard Pages
-import UserDashboard from '../pages/dashboard/UserDashboard';
-import AdminDashboard from '../pages/admin/AdminDashboard';
+const UserDashboard = lazy(() => import('../pages/dashboard/UserDashboard'));
+const AdminDashboard = lazy(() => import('../pages/admin/AdminDashboard'));
 
 // Admin Pages
-import UserManagementPage from '../pages/admin/UserManagementPage';
-import InstanceManagementPage from '../pages/admin/InstanceManagementPage';
-import AIGatewayPage from '../pages/admin/AIGatewayPage';
-import AIAuditPage from '../pages/admin/AIAuditPage';
-import CostsPage from '../pages/admin/CostsPage';
-import SessionUsageOverviewPage from '../pages/admin/SessionUsageOverviewPage';
-import AdminSecurityDashboardPage from '../pages/admin/security/AdminSecurityDashboardPage';
-import AdminSecurityReportsPage from '../pages/admin/security/AdminSecurityReportsPage';
-import AdminSecurityScannerConfigPage from '../pages/admin/security/AdminSecurityScannerConfigPage';
-import RiskRulesPage from '../pages/admin/RiskRulesPage';
-import ModelManagementPage from '../pages/admin/ModelManagementPage';
-import SystemSettingsPage from '../pages/admin/SystemSettingsPage';
-import BackupsPage from '../pages/admin/backups/TeamDataBackupsPage';
-import NorthboundSettingsPage from '../pages/admin/NorthboundSettingsPage';
-import RuntimePodsPage from '../pages/admin/RuntimePodsPage';
-import UserSettingsPage from '../pages/settings/UserSettingsPage';
-import OpenClawConfigCenterPage from '../pages/openclaw/OpenClawConfigCenterPage';
-import SecplaneInputDetectionPage from '../pages/admin/secplane/InputDetectionPage';
-import SecplaneSecureClawPage from '../pages/admin/secplane/SecureClawPage';
-import SecurityProtectionPage from '../pages/admin/secplane/SecurityProtectionPage';
-import SecurityEventsPage from '../pages/admin/secplane/SecurityEventsPage';
-import RuntimeSecurityCategoryPage from '../pages/admin/secplane/runtime/RuntimeSecurityCategoryPage';
-import InputSurfacePage from '../pages/admin/secplane/runtime/InputSurfacePage';
-import StateSurfacePage from '../pages/admin/secplane/runtime/StateSurfacePage';
-import DecisionSurfacePage from '../pages/admin/secplane/runtime/DecisionSurfacePage';
-import OutputSurfacePage from '../pages/admin/secplane/runtime/OutputSurfacePage';
-import AssetProtectionPage from '../pages/admin/secplane/runtime/AssetProtectionPage';
-import CategoryPage from '../pages/admin/protection/CategoryPage';
-import AuditPage from '../pages/admin/protection/scenarios/AuditPage';
-import ApprovalPage from '../pages/admin/protection/scenarios/ApprovalPage';
-import OutboundPage from '../pages/admin/protection/scenarios/OutboundPage';
-import EgressPrivateExceptionPage from '../pages/admin/protection/scenarios/EgressPrivateExceptionPage';
-import ContainerPage from '../pages/admin/protection/scenarios/ContainerPage';
-import PolicyPage from '../pages/admin/protection/scenarios/PolicyPage';
-import BreakerPage from '../pages/admin/protection/scenarios/BreakerPage';
-import HostHardeningPage from '../pages/admin/protection/scenarios/HostHardeningPage';
-import CollaborationGovernancePage from '../pages/admin/protection/scenarios/CollaborationGovernancePage';
-import CollaborationQuotaPage from '../pages/admin/protection/scenarios/CollaborationQuotaPage';
+const UserManagementPage = lazy(() => import('../pages/admin/UserManagementPage'));
+const InstanceManagementPage = lazy(() => import('../pages/admin/InstanceManagementPage'));
+const AIGatewayPage = lazy(() => import('../pages/admin/AIGatewayPage'));
+const AIAuditPage = lazy(() => import('../pages/admin/AIAuditPage'));
+const CostsPage = lazy(() => import('../pages/admin/CostsPage'));
+const SessionUsageOverviewPage = lazy(() => import('../pages/admin/SessionUsageOverviewPage'));
+const AdminSecurityDashboardPage = lazy(() => import('../pages/admin/security/AdminSecurityDashboardPage'));
+const AdminSecurityReportsPage = lazy(() => import('../pages/admin/security/AdminSecurityReportsPage'));
+const AdminSecurityScannerConfigPage = lazy(() => import('../pages/admin/security/AdminSecurityScannerConfigPage'));
+const RiskRulesPage = lazy(() => import('../pages/admin/RiskRulesPage'));
+const ModelManagementPage = lazy(() => import('../pages/admin/ModelManagementPage'));
+const SystemSettingsPage = lazy(() => import('../pages/admin/SystemSettingsPage'));
+const BackupsPage = lazy(() => import('../pages/admin/backups/TeamDataBackupsPage'));
+const NorthboundSettingsPage = lazy(() => import('../pages/admin/NorthboundSettingsPage'));
+const RuntimePodsPage = lazy(() => import('../pages/admin/RuntimePodsPage'));
+const UserSettingsPage = lazy(() => import('../pages/settings/UserSettingsPage'));
+const OpenClawConfigCenterPage = lazy(() => import('../pages/openclaw/OpenClawConfigCenterPage'));
+const SecplaneInputDetectionPage = lazy(() => import('../pages/admin/secplane/InputDetectionPage'));
+const SecplaneSecureClawPage = lazy(() => import('../pages/admin/secplane/SecureClawPage'));
+const SecurityProtectionPage = lazy(() => import('../pages/admin/secplane/SecurityProtectionPage'));
+const SecurityEventsPage = lazy(() => import('../pages/admin/secplane/SecurityEventsPage'));
+const RuntimeSecurityCategoryPage = lazy(() => import('../pages/admin/secplane/runtime/RuntimeSecurityCategoryPage'));
+const InputSurfacePage = lazy(() => import('../pages/admin/secplane/runtime/InputSurfacePage'));
+const StateSurfacePage = lazy(() => import('../pages/admin/secplane/runtime/StateSurfacePage'));
+const DecisionSurfacePage = lazy(() => import('../pages/admin/secplane/runtime/DecisionSurfacePage'));
+const OutputSurfacePage = lazy(() => import('../pages/admin/secplane/runtime/OutputSurfacePage'));
+const AssetProtectionPage = lazy(() => import('../pages/admin/secplane/runtime/AssetProtectionPage'));
+const CategoryPage = lazy(() => import('../pages/admin/protection/CategoryPage'));
+const AuditPage = lazy(() => import('../pages/admin/protection/scenarios/AuditPage'));
+const ApprovalPage = lazy(() => import('../pages/admin/protection/scenarios/ApprovalPage'));
+const OutboundPage = lazy(() => import('../pages/admin/protection/scenarios/OutboundPage'));
+const EgressPrivateExceptionPage = lazy(() => import('../pages/admin/protection/scenarios/EgressPrivateExceptionPage'));
+const ContainerPage = lazy(() => import('../pages/admin/protection/scenarios/ContainerPage'));
+const PolicyPage = lazy(() => import('../pages/admin/protection/scenarios/PolicyPage'));
+const BreakerPage = lazy(() => import('../pages/admin/protection/scenarios/BreakerPage'));
+const HostHardeningPage = lazy(() => import('../pages/admin/protection/scenarios/HostHardeningPage'));
+const CollaborationGovernancePage = lazy(() => import('../pages/admin/protection/scenarios/CollaborationGovernancePage'));
+const CollaborationQuotaPage = lazy(() => import('../pages/admin/protection/scenarios/CollaborationQuotaPage'));
 
 // Instance Pages
-import InstanceWorkspaceEntry from '../pages/instances/InstanceWorkspaceEntry';
-import CreateInstancePage from '../pages/instances/CreateInstancePage';
-import InstanceDetailPage from '../pages/instances/InstanceDetailPage';
-import InstancePortalPage from '../pages/instances/InstancePortalPage';
-import SharedInstancePage from '../pages/instances/SharedInstancePage';
-import IEISystemListInstancesPage from '../pages/instances/IEISystemListInstancesPage';
-import IEISystemInstancePage from '../pages/instances/IEISystemInstancePage';
-import TeamListPage from '../pages/teams/TeamListPage';
-import CreateTeamPage from '../pages/teams/CreateTeamPage';
-import CustomTeamTemplatesPage from '../pages/teams/CustomTeamTemplatesPage';
-import TeamDetailPage from '../pages/teams/TeamDetailPage';
-import IEISystemTeamPage from '../pages/teams/IEISystemTeamPage';
-import SkillHubPage from '../pages/skill-hub/SkillHubPage';
+const InstanceWorkspaceEntry = lazy(() => import('../pages/instances/InstanceWorkspaceEntry'));
+const CreateInstancePage = lazy(() => import('../pages/instances/CreateInstancePage'));
+const InstanceDetailPage = lazy(() => import('../pages/instances/InstanceDetailPage'));
+const InstancePortalPage = lazy(() => import('../pages/instances/InstancePortalPage'));
+const SharedInstancePage = lazy(() => import('../pages/instances/SharedInstancePage'));
+const IEISystemListInstancesPage = lazy(() => import('../pages/instances/IEISystemListInstancesPage'));
+const IEISystemInstancePage = lazy(() => import('../pages/instances/IEISystemInstancePage'));
+const TeamListPage = lazy(() => import('../pages/teams/TeamListPage'));
+const CreateTeamPage = lazy(() => import('../pages/teams/CreateTeamPage'));
+const CustomTeamTemplatesPage = lazy(() => import('../pages/teams/CustomTeamTemplatesPage'));
+const TeamDetailPage = lazy(() => import('../pages/teams/TeamDetailPage'));
+const IEISystemTeamPage = lazy(() => import('../pages/teams/IEISystemTeamPage'));
+const SkillHubPage = lazy(() => import('../pages/skill-hub/SkillHubPage'));
+
+function RouteLoading() {
+  const { t } = useI18n();
+  return (
+    <div className="min-h-screen flex items-center justify-center" role="status">
+      <div className="text-lg">{t('common.loading')}</div>
+    </div>
+  );
+}
 
 // Protected Route Component
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { isAuthenticated, isLoading } = useAuth();
-  const { t } = useI18n();
 
   if (isLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-lg">{t('common.loading')}</div>
-      </div>
-    );
+    return <RouteLoading />;
   }
 
   if (!isAuthenticated) {
@@ -89,14 +93,9 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
 // Admin Route Component
 const AdminRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { isAuthenticated, isLoading, user } = useAuth();
-  const { t } = useI18n();
 
   if (isLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-lg">{t('common.loading')}</div>
-      </div>
-    );
+    return <RouteLoading />;
   }
 
   if (!isAuthenticated) {
@@ -113,14 +112,9 @@ const AdminRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
 // Public Route Component (redirects to dashboard if already authenticated)
 const PublicRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { isAuthenticated, isLoading, user } = useAuth();
-  const { t } = useI18n();
 
   if (isLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-lg">{t('common.loading')}</div>
-      </div>
-    );
+    return <RouteLoading />;
   }
 
   if (isAuthenticated) {
@@ -137,14 +131,9 @@ const PublicRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
 // Dashboard Redirect Component
 const DashboardRedirect: React.FC = () => {
   const { user, isLoading } = useAuth();
-  const { t } = useI18n();
 
   if (isLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-lg">{t('common.loading')}</div>
-      </div>
-    );
+    return <RouteLoading />;
   }
 
   if (user?.role === 'admin') {
@@ -521,7 +510,9 @@ function Router() {
   return (
     <BrowserRouter>
       <AuthProvider>
-        <AppRoutes />
+        <Suspense fallback={<RouteLoading />}>
+          <AppRoutes />
+        </Suspense>
       </AuthProvider>
     </BrowserRouter>
   );
