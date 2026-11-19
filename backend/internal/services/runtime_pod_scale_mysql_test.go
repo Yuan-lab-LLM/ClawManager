@@ -32,6 +32,9 @@ import (
 func runtimeScaleMySQLFixture(t *testing.T, runtimeType string, names ...string) (db.Session, *RuntimePodMaintenanceService, *fake.Clientset) {
 	t.Helper()
 	sess := runtimeManagementMySQLDB(t)
+	if _, err := sess.SQL().Exec("ALTER TABLE instances ADD COLUMN description TEXT NULL"); err != nil {
+		t.Fatal(err)
+	}
 	for _, file := range []string{"124_runtime_scale_approvals.sql", "068_add_runtime_rollout_checkpoints.sql"} {
 		migration, err := os.ReadFile("../db/migrations/" + file)
 		if err != nil {
@@ -386,6 +389,50 @@ func TestDefaultRuntimeScaleMySQLPinsCommittedColdDeploymentUID(t *testing.T) {
 	}
 }
 
+func seedRuntimeScaleDemand(t *testing.T, sess db.Session, count int) {
+	t.Helper()
+	for i := range count {
+		if _, err := sess.SQL().Exec(`INSERT INTO instances(id,user_id,type,runtime_type,instance_mode,status,runtime_generation,workspace_path,updated_at)
+			VALUES(?,1,'hermes','gateway','lite','creating',1,'/workspace',NOW(6))`, i+17); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestDefaultRuntimeScaleMySQLDiscardsStaleDemand(t *testing.T) {
+	ctx := context.Background()
+	sess, service, kube := runtimeScaleMySQLFixture(t, "hermes", "hermes-runtime")
+	if _, err := service.ScaleOptions(ctx); err != nil {
+		t.Fatal(err)
+	}
+	seedRuntimeScaleDemand(t, sess, 3)
+	if _, err := sess.SQL().Exec("UPDATE instances SET status='deleting' WHERE id=17"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sess.SQL().Exec("UPDATE instances SET status='running' WHERE id=18"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sess.SQL().Exec("UPDATE instances SET description='openclaw-upgrade-lab:fixture' WHERE id=19"); err != nil {
+		t.Fatal(err)
+	}
+	pods := kube.CoreV1().Pods("runtime")
+	pod, err := pods.Get(ctx, "hermes-runtime-pod", metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pod.Status.Phase, pod.Status.Conditions = corev1.PodUnknown, nil
+	if _, err = pods.UpdateStatus(ctx, pod, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if scaled, err := service.scheduler.scaleOutIfBacklogExceedsCapacity(ctx, "hermes", 1); err != nil || scaled {
+		t.Fatalf("a departed instance triggered expansion: scaled=%v err=%v", scaled, err)
+	}
+	d, err := kube.AppsV1().Deployments("runtime").Get(ctx, "hermes-runtime", metav1.GetOptions{})
+	if err != nil || *d.Spec.Replicas != 2 {
+		t.Fatalf("stale demand changed the desired replicas: deployment=%v err=%v", d, err)
+	}
+}
+
 func TestDefaultRuntimeScaleMySQLApprovedPoolSurvivesUnknownPods(t *testing.T) {
 	ctx := context.Background()
 	for _, scenario := range []string{"manual", "automatic", "automatic-create", "unapproved", "uid", "image", "mount", "resources", "security", "protocol", "storage", "source"} {
@@ -441,6 +488,7 @@ func TestDefaultRuntimeScaleMySQLApprovedPoolSurvivesUnknownPods(t *testing.T) {
 			if _, err := kube.AppsV1().Deployments("runtime").Update(ctx, d, metav1.UpdateOptions{}); err != nil {
 				t.Fatal(err)
 			}
+			seedRuntimeScaleDemand(t, sess, 1)
 			// Reconstruct the service to exercise persistent configuration proof.
 			service = NewRuntimePodMaintenanceService(sess, service.scheduler)
 			if scenario == "automatic-create" {
@@ -482,6 +530,7 @@ func TestDefaultRuntimeScaleMySQLApprovedPoolSurvivesUnknownPods(t *testing.T) {
 func TestDefaultRuntimeScaleMySQLBoundsUnverifiedStartup(t *testing.T) {
 	ctx := context.Background()
 	sess, service, kube := runtimeScaleMySQLFixture(t, "hermes", "hermes-runtime")
+	seedRuntimeScaleDemand(t, sess, 100)
 	scheduler := service.scheduler
 	options, err := service.ScaleOptions(ctx)
 	if err != nil || len(options.Items) != 1 {
@@ -746,6 +795,7 @@ func TestDefaultRuntimeScaleMySQLRetryBudgetRequiresUsableNewPod(t *testing.T) {
 	for _, worker := range []string{"quarantined", "running"} {
 		t.Run(worker, func(t *testing.T) {
 			sess, service, kube := runtimeScaleMySQLFixture(t, "hermes", "hermes-runtime")
+			seedRuntimeScaleDemand(t, sess, 100)
 			const name = "hermes-runtime"
 			options, err := service.ScaleOptions(ctx)
 			if err != nil || len(options.Items) != 1 {

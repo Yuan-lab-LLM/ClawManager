@@ -200,6 +200,7 @@ func (s *RuntimeScheduler) Start(ctx context.Context) {
 		go s.runProxyPolicyRenewal(ctx)
 	}
 	go s.runRuntimeOperations(ctx)
+	go s.runIdleRuntimePools(ctx)
 	go func() {
 		ticker := time.NewTicker(s.tick)
 		defer ticker.Stop()
@@ -1594,20 +1595,10 @@ func runtimePodsAlreadyAtImage(pods []models.RuntimePod, runtimeType, targetImag
 func (s *RuntimeScheduler) reconcileIfLeader(ctx context.Context) {
 	release, gateErr := backupgate.HoldWorkUnit(ctx, "runtime.scheduler")
 	if gateErr != nil {
-		if s.management != nil {
-			s.management.idlePodSince = nil
-		}
 		return
 	}
 	defer release()
 	if s.leader != nil && !s.leader.IsLeader(ctx) {
-		// A renewal CAS conflict is not a leadership transfer. Preserve the
-		// observation only when the API still confirms our unexpired lease;
-		// no scheduling work runs without a successful renewal.
-		observer, ok := s.leader.(interface{ HoldsLease(context.Context) bool })
-		if s.management != nil && (!ok || !observer.HoldsLease(ctx)) {
-			s.management.idlePodSince = nil
-		}
 		return
 	}
 	if err := s.reconcile(ctx); err != nil {
@@ -1621,9 +1612,6 @@ func (s *RuntimeScheduler) reconcile(ctx context.Context) error {
 	}
 	s.refreshRuntimeScaleApprovals(ctx, time.Now().UTC())
 	var errs []error
-	if err := s.slotAudit.Reconcile(ctx, s); err != nil {
-		errs = append(errs, err)
-	}
 	creating, err := s.schedulerInstanceBatch(ctx, true)
 	if err != nil {
 		errs = append(errs, err)
@@ -1640,11 +1628,6 @@ func (s *RuntimeScheduler) reconcile(ctx context.Context) error {
 		}
 		for _, instance := range desired {
 			errs = append(errs, s.reconcileDesiredInstance(ctx, instance)...)
-		}
-	}
-	if s.management != nil {
-		if err := s.management.reconcileIdleRuntimePools(ctx, time.Now().UTC()); err != nil {
-			errs = append(errs, err)
 		}
 	}
 	return errors.Join(errs...)

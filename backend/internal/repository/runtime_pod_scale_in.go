@@ -11,7 +11,12 @@ import (
 // Caller holds LockRuntimeManagementAdmission for mutation/publication paths.
 func CheckRuntimePodScaleInAdmission(ctx context.Context, tx db.Session, podID int64) error {
 	var count int
-	row, err := tx.SQL().QueryRowContext(ctx, `SELECT COUNT(*) FROM runtime_management_operations WHERE kind='scale_in' AND status NOT IN ('completed','failed','cancelled') AND JSON_CONTAINS(JSON_EXTRACT(request_json,'$.plan.source_pods'),JSON_OBJECT('id',?))`, podID)
+	row, err := tx.SQL().QueryRowContext(ctx, `SELECT COUNT(*) FROM runtime_management_operations op
+		WHERE op.kind='scale_in' AND op.status NOT IN ('completed','failed','cancelled') AND (
+			JSON_CONTAINS(JSON_EXTRACT(op.request_json,'$.plan.source_pods'),JSON_OBJECT('id',?)) OR
+			EXISTS (SELECT 1 FROM runtime_pods p WHERE p.id=? AND p.pod_uid<>''
+				AND JSON_CONTAINS(JSON_EXTRACT(op.request_json,'$.protection.source_pods'),JSON_OBJECT('pod_uid',p.pod_uid)))
+		)`, podID, podID)
 	if err == nil {
 		err = row.Scan(&count)
 	}

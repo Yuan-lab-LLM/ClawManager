@@ -386,6 +386,9 @@ func (s *RuntimeManagementService) submitScaleInJournal(ctx context.Context, jou
 			if err := s.idlePoolDemandAdmission(ctx, tx, journal.Plan.SourcePods); err != nil {
 				return err
 			}
+			if err := idleUnscheduledReplicaAdmission(ctx, tx, journal); err != nil {
+				return err
+			}
 			if err := repository.CheckRuntimePodDeletionIntent(ctx, tx, journal.Target.Namespace, journal.Target.DeploymentName); err != nil {
 				return err
 			}

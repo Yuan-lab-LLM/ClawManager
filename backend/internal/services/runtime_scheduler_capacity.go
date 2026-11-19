@@ -311,17 +311,21 @@ func (s *RuntimeScheduler) reconcileApprovedExpansion(ctx context.Context, runti
 	var floor int32
 	var unconfirmedWrite error
 	err = maintenance.createAdmission(ctx, runtimeType, func(tx db.Session) error {
+		latestDemand, err := repository.CountRuntimeSlotDemand(ctx, tx, runtimeType)
+		if err != nil {
+			return err
+		}
+		demand = min(demand, latestDemand)
+		if runtimeCapacityDeficit(demand, capacity.verifiedFree, 0) == 0 {
+			return nil
+		}
 		var snapshot *k8s.RuntimePodScaleSnapshot
-		var err error
 		target, snapshot, err = maintenance.defaultScaleSnapshot(ctx, tx, kube, runtimeType, scaleRequireApproval)
 		if err != nil {
 			return err
 		}
 		if snapshot.ApprovalDigest != preview.ApprovalDigest || snapshot.ExpansionAttemptID() != preview.ExpansionAttemptID() || snapshot.Option.Replicas != preview.Option.Replicas {
 			return k8s.ErrRuntimeScaleOutPending
-		}
-		if runtimeCapacityDeficit(demand, capacity.verifiedFree, 0) == 0 {
-			return nil
 		}
 		startup, err := inspectRuntimeExpansion(ctx, tx, approvalKube, target, snapshot)
 		if err != nil {
