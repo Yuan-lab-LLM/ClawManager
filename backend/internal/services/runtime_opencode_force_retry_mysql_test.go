@@ -18,10 +18,18 @@ type forceFlowBackend struct {
 	zeroCalls, replaceCalls, probeCalls int
 	oldGone                             bool
 	probeErr                            error
+	loseScale                           bool
 }
 
+func (d *forceFlowBackend) ObserveOpenCodeForceTargetZero(context.Context, *k8s.OpenCodeUpgradeSource, *k8s.OpenCodeUpgradeSource, string, string) (bool, error) {
+	return d.zeroCalls > 0, nil
+}
 func (d *forceFlowBackend) ScaleOpenCodeForceTargetZero(context.Context, *k8s.OpenCodeUpgradeSource, *k8s.OpenCodeUpgradeSource, string, string) error {
 	d.zeroCalls++
+	if d.loseScale {
+		d.loseScale = false
+		return context.DeadlineExceeded
+	}
 	return nil
 }
 func (d *forceFlowBackend) ObserveOpenCodeForceTarget(_ context.Context, _, old *k8s.OpenCodeUpgradeSource, image, op, request string) (bool, error) {
@@ -69,9 +77,16 @@ func (d *forceFlowBackend) InspectOpenCodeForceLeaseAbsence(context.Context, *k8
 
 type forceFlowAgent struct {
 	*openCodeFlowAgent
-	proofErr error
+	proofErr    error
+	inactiveErr error
 }
 
+func (a *forceFlowAgent) openCodeForceInactiveTarget(ctx context.Context, pod models.RuntimePod, _ json.RawMessage) error {
+	if a.inactiveErr != nil {
+		return a.inactiveErr
+	}
+	return a.openCodePoolIdle(ctx, pod)
+}
 func (a *forceFlowAgent) openCodeForceReadOnlySourceProof(context.Context, k8s.RuntimeAssignment, json.RawMessage) error {
 	return a.proofErr
 }
@@ -364,5 +379,33 @@ func TestOpenCodeForceRetryMySQLControllerContentionDoesNotOverwriteRecordedErro
 	}
 	if b.zeroCalls != 0 || a.acquireCalls != 0 || a.migrations != 0 {
 		t.Fatal("contending tick performed work")
+	}
+}
+
+func TestOpenCodeForceRetryMySQLLostZeroReplyDoesNotReinspectGoneTargetOrResubmitZero(t *testing.T) {
+	_, s, r, a, b := openCodeForceFixture(t)
+	ctx := context.Background()
+	image := "clawmanager.local/opencode-lite@sha256:" + strings.Repeat("b", 64)
+	pf, err := s.PreflightOpenCodeForceRetry(ctx, r.ID, image)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.ConfirmOpenCodeForceRetry(ctx, r.ID, OpenCodeForceRetryRequest{TargetImageRef: image, Force: true, RequestID: "81e247de-ef46-41ad-853e-0bb20524303e", Fingerprint: pf.Fingerprint}, 1); err != nil {
+		t.Fatal(err)
+	}
+	b.loseScale = true
+	current, _ := s.rolloutRepo.GetByID(ctx, r.ID)
+	if err = s.advanceOpenCodeUpgrade(ctx, current); err != context.DeadlineExceeded {
+		t.Fatal("unknown zero not held", err)
+	}
+	a.inactiveErr = errors.New("old target endpoint gone")
+	current, _ = s.rolloutRepo.GetByID(ctx, r.ID)
+	if err = s.advanceOpenCodeUpgrade(ctx, current); err != nil {
+		t.Fatal("committed zero required old endpoint", err)
+	}
+	current, _ = s.rolloutRepo.GetByID(ctx, r.ID)
+	p, err := s.loadOpenCodePlan(ctx, current)
+	if err != nil || p.Stage != "force_replace" || b.zeroCalls != 1 || a.acquireCalls != 0 {
+		t.Fatal(p, err, b.zeroCalls, a.acquireCalls)
 	}
 }

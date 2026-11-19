@@ -21,7 +21,7 @@ type forceRetryHandlerFixture struct {
 func (f *forceRetryHandlerFixture) PreflightOpenCodeForceRetry(context.Context, int64, string) (*services.OpenCodeForceRetryPreflight, error) {
 	f.preflights++
 	if f.failure {
-		return nil, models.ErrRuntimeUpgradeConflict
+		return nil, errors.New("private native error TOKEN")
 	}
 	return &services.OpenCodeForceRetryPreflight{RolloutID: 14, Allowed: true, Fingerprint: strings.Repeat("a", 64)}, nil
 }
@@ -69,5 +69,21 @@ func TestOpenCodeForceRetryHandlerExplicitAdminContract(t *testing.T) {
 				t.Fatal("explicit actor/force lost")
 			}
 		})
+	}
+}
+
+func TestOpenCodeForcePreflightHandlerReportsOnlyFixedStage(t *testing.T) {
+	h := NewRuntimePoolHandler(nil, nil, nil, nil, nil)
+	h.forceRetry = &forceRetryHandlerFixture{failure: true}
+	r := gin.New()
+	r.Use(func(c *gin.Context) { c.Set("userRole", "admin"); c.Set("userID", 1); c.Next() })
+	r.POST("/force/:id", h.PreflightOpenCodeForceRetry)
+	body := `{"target_image_ref":"clawmanager.local/opencode-lite@sha256:` + strings.Repeat("a", 64) + `"}`
+	w := httptest.NewRecorder()
+	request := httptest.NewRequest("POST", "/force/14", strings.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, request)
+	if w.Code != 409 || !strings.Contains(w.Body.String(), "at operation") || strings.Contains(w.Body.String(), "TOKEN") {
+		t.Fatal(w.Code, w.Body.String())
 	}
 }

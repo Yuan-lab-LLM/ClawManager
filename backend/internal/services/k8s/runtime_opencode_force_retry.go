@@ -16,6 +16,7 @@ import (
 const openCodeForceRequestAnnotation = "clawmanager.io/opencode-force-request"
 
 type OpenCodeForceTargetService interface {
+	ObserveOpenCodeForceTargetZero(context.Context, *OpenCodeUpgradeSource, *OpenCodeUpgradeSource, string, string) (bool, error)
 	ObserveOpenCodeForceTarget(context.Context, *OpenCodeUpgradeSource, *OpenCodeUpgradeSource, string, string, string) (bool, error)
 	ScaleOpenCodeForceTargetZero(context.Context, *OpenCodeUpgradeSource, *OpenCodeUpgradeSource, string, string) error
 	OpenCodeForceOldPodsGone(context.Context, *OpenCodeUpgradeSource, string) (bool, error)
@@ -246,4 +247,23 @@ func (s *runtimeDeploymentService) ObserveOpenCodeForceTarget(ctx context.Contex
 		return false, err
 	}
 	return s.openCodeForceFrozenPodsGone(ctx, old)
+}
+
+// Distinguish a first zero submission from an already committed zero before
+// re-observing an endpoint that may legitimately have disappeared.
+func (s *runtimeDeploymentService) ObserveOpenCodeForceTargetZero(ctx context.Context, source, old *OpenCodeUpgradeSource, operation, request string) (bool, error) {
+	if err := s.validateOpenCodeForceSource(ctx, source, old, operation); err != nil {
+		return false, err
+	}
+	d, err := s.client.AppsV1().Deployments(old.Target.Namespace).Get(ctx, old.Target.Name, metav1.GetOptions{})
+	if err != nil {
+		return false, err
+	}
+	if d.Spec.Replicas != nil && *d.Spec.Replicas == 0 {
+		spec := old.Spec.DeepCopy()
+		zero := int32(0)
+		spec.Replicas = &zero
+		return true, s.validateOpenCodeForceTarget(ctx, d, old, *spec, request)
+	}
+	return false, s.validateOpenCodeForceTarget(ctx, d, old, old.Spec, "")
 }

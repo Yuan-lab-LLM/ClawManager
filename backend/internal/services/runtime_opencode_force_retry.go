@@ -81,13 +81,21 @@ func (s *RuntimeScheduler) PreflightOpenCodeForceRetry(ctx context.Context, id i
 // All observations precede the audit transaction. Neither preflight nor
 // confirmation dispatches native work or changes a Kubernetes object.
 func (s *RuntimeScheduler) inspectOpenCodeForceRetry(ctx context.Context, r *models.RuntimeRollout, p *openCodeUpgradePlan, image string) (*OpenCodeForceRetryPreflight, json.RawMessage, string, error) {
+	stage := "operation"
+	pf, native, lease, err := s.inspectOpenCodeForceRetryChecks(ctx, r, p, image, &stage)
+	if err != nil {
+		return nil, nil, "", &OpenCodeForcePreflightError{stage: stage, cause: err}
+	}
+	return pf, native, lease, nil
+}
+func (s *RuntimeScheduler) inspectOpenCodeForceRetryChecks(ctx context.Context, r *models.RuntimeRollout, p *openCodeUpgradePlan, image string, stage *string) (*OpenCodeForceRetryPreflight, json.RawMessage, string, error) {
 	refuse := func(msg string) (*OpenCodeForceRetryPreflight, json.RawMessage, string, error) {
 		return nil, nil, "", forceRetryConflict(msg)
 	}
 	if r.Status != "running" || p.Stage != "preserve" || p.ForceRetry != nil || len(p.Sources) != 1 || len(p.TargetProofs) != 1 || len(p.Targets) != 1 || len(p.TargetControllers) != 1 || len(p.Instances) == 0 || !IsImmutableRuntimeImage(image) || image == r.TargetImageRef {
 		return refuse("OpenCode force retry requires the original pre-capsule preserved operation")
 	}
-	backend, client, err := s.openCodeUpgradeDependencies()
+	backend, _, err := s.openCodeUpgradeDependencies()
 	if err != nil {
 		return nil, nil, "", err
 	}
@@ -102,6 +110,7 @@ func (s *RuntimeScheduler) inspectOpenCodeForceRetry(ctx context.Context, r *mod
 	if _, ok = s.deployments.(k8s.OpenCodeForceTargetService); !ok {
 		return refuse("OpenCode exact force target CAS unavailable")
 	}
+	*stage = "source_controller"
 	if err = backend.ValidateOpenCodeUpgradeSource(ctx, p.Sources[0]); err != nil {
 		return nil, nil, "", err
 	}
@@ -117,15 +126,15 @@ func (s *RuntimeScheduler) inspectOpenCodeForceRetry(ctx context.Context, r *mod
 	if p.TargetControllers[0] != p.TargetProofs[0].Target || p.TargetProofs[0].Target.Image != r.TargetImageRef || p.TargetProofs[0].StorageIdentity != p.Sources[0].StorageIdentity {
 		return refuse("OpenCode frozen target controller/storage differs")
 	}
+	*stage = "old_target_slots"
 	if err = s.verifyOpenCodeForceOldPods(ctx, p); err != nil {
 		return nil, nil, "", err
 	}
-	if err = client.openCodePoolIdle(ctx, p.Targets[0]); err != nil {
-		return nil, nil, "", err
-	}
+	*stage = "operation"
 	if err = s.verifyOpenCodeForceSQL(ctx, r, p, true); err != nil {
 		return nil, nil, "", err
 	}
+	*stage = "source_stop"
 	ids := []int{}
 	for _, item := range p.Instances {
 		if item.State != "quiesced" || len(item.StopProof) == 0 || item.Compatibility != nil || item.Capsule != nil || item.Restore != nil || item.RollbackState != "" || item.HistoricalStop {
@@ -136,14 +145,25 @@ func (s *RuntimeScheduler) inspectOpenCodeForceRetry(ctx context.Context, r *mod
 		}
 		ids = append(ids, item.ID)
 	}
+	*stage = "native_receipt"
 	native, err := evidence.openCodeForceNativeEvidence(ctx, r.ID, p.Instances, p.Targets[0])
 	if err != nil {
 		return nil, nil, "", err
 	}
+	*stage = "old_target_slots"
+	inactive, ok := s.agentClient.(openCodeForceInactiveClient)
+	if !ok {
+		return refuse("OpenCode inactive target observation unavailable")
+	}
+	if err = inactive.openCodeForceInactiveTarget(ctx, p.Targets[0], native); err != nil {
+		return nil, nil, "", err
+	}
+	*stage = "lease_absence"
 	lease, err := probe.InspectOpenCodeForceLeaseAbsence(ctx, p.TargetProofs[0], p.Targets[0], ids)
 	if err != nil {
 		return nil, nil, "", err
 	}
+	*stage = "image_contract"
 	sources := map[string]string{p.Sources[0].Target.Name: p.Sources[0].Target.Image}
 	inspect := s.ocForceInspect
 	if inspect == nil {
@@ -380,8 +400,32 @@ func (s *RuntimeScheduler) advanceOpenCodeForceRetry(ctx context.Context, r *mod
 	op := strconv.FormatInt(r.ID, 10)
 	switch p.Stage {
 	case "force_zero":
-		if err := force.ScaleOpenCodeForceTargetZero(ctx, p.Sources[0], a.OldTarget, op, a.RequestID); err != nil {
+		alreadyZero, err := force.ObserveOpenCodeForceTargetZero(ctx, p.Sources[0], a.OldTarget, op, a.RequestID)
+		if err != nil {
 			return err
+		}
+		if !alreadyZero {
+			oldPlan := *p
+			oldPlan.TargetImage = a.OldImage
+			oldPlan.Targets = a.OldPods
+			oldPlan.TargetProofs = []*k8s.OpenCodeUpgradeSource{a.OldTarget}
+			if err = s.verifyOpenCodeForceOldPods(ctx, &oldPlan); err != nil {
+				return err
+			}
+			inactive, ok := s.agentClient.(openCodeForceInactiveClient)
+			if !ok {
+				return forceRetryConflict("OpenCode inactive target observation unavailable")
+			}
+			if err = inactive.openCodeForceInactiveTarget(ctx, a.OldPods[0], a.NativeEvidence); err != nil {
+				return err
+			}
+			if err = s.probeOpenCodeForceLeases(ctx, &oldPlan); err != nil {
+				return err
+			}
+
+			if err := force.ScaleOpenCodeForceTargetZero(ctx, p.Sources[0], a.OldTarget, op, a.RequestID); err != nil {
+				return err
+			}
 		}
 		p.Stage = "force_replace"
 	case "force_replace":

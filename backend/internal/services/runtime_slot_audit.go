@@ -34,6 +34,9 @@ type runtimeSlotAuditOwner struct {
 	State       string `json:"state"`
 }
 type runtimeSlotAuditSnapshot struct {
+	// The legacy Native wire omits false. Force retirement rejects true; this
+	// field alone grants no writer/filesystem absence or generic idle permission.
+	NFSWriterOwned         bool                   `json:"nfs_writer_owned,omitempty"`
 	Digest                 string                 `json:"digest"`
 	PodUID                 string                 `json:"pod_uid"`
 	WorkerEpoch            string                 `json:"worker_epoch"`

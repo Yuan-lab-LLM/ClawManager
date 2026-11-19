@@ -61,7 +61,7 @@ func (h *RuntimePoolHandler) PreflightOpenCodeForceRetry(c *gin.Context) {
 	}
 	pf, err := svc.PreflightOpenCodeForceRetry(c.Request.Context(), id, req.Target)
 	if err != nil {
-		utils.Error(c, 409, "OpenCode force preflight refused; operation remains protected")
+		utils.Error(c, 409, "OpenCode force preflight refused at "+services.OpenCodeForcePreflightStage(err)+"; operation remains protected")
 		return
 	}
 	utils.Success(c, http.StatusOK, "OpenCode force preflight verified", pf)
