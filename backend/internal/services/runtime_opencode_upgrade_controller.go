@@ -40,6 +40,7 @@ type openCodeUpgradeInstance struct {
 	Capsule                *RuntimeAgentSessionSQLiteMigration `json:"capsule,omitempty"`
 }
 type openCodeUpgradePlan struct {
+	ForceRetry             *openCodeForceAttempt        `json:"force_retry,omitempty"`
 	TargetImage            string                       `json:"target_image"`
 	PlannedUnavailable     int                          `json:"planned_unavailable_instances"`
 	Kind                   string                       `json:"kind"`
@@ -470,18 +471,19 @@ func (s *RuntimeScheduler) saveOpenCodePlan(ctx context.Context, r *models.Runti
 	}).CompareAndSavePoolCheckpoint(ctx, r.ID, p.raw, string(raw))
 	if err == nil {
 		p.raw = string(raw)
-		// Successful protected progress supersedes only this exact admission
-		// refusal. Preserve all other errors, status, guards and immutable results.
-		if stringValue(r.ErrorMessage) == openCodeScopedPayloadMissing {
-			_, err = s.upgrade.sess.SQL().ExecContext(ctx, `UPDATE runtime_rollouts r JOIN runtime_rollout_checkpoints c ON c.rollout_id=r.id SET r.error_message=NULL,r.updated_at=UTC_TIMESTAMP(6) WHERE r.id=? AND r.status IN ('pending','running') AND BINARY c.state_json=BINARY ? AND r.error_message=?`, r.ID, p.raw, openCodeScopedPayloadMissing)
+		// Successful progress supersedes the captured prior refusal only at
+		// this exact active checkpoint/phase. Guards and immutable results stay.
+		if stringValue(r.ErrorMessage) == openCodeScopedPayloadMissing || p.ForceRetry != nil && r.Phase == "opencode_force_retry" && stringValue(r.ErrorMessage) != "" {
+			_, err = s.upgrade.sess.SQL().ExecContext(ctx, `UPDATE runtime_rollouts r JOIN runtime_rollout_checkpoints c ON c.rollout_id=r.id SET r.error_message=NULL,r.updated_at=UTC_TIMESTAMP(6) WHERE r.id=? AND r.status IN ('pending','running') AND BINARY c.state_json=BINARY ? AND r.phase=? AND BINARY r.error_message=BINARY ?`, r.ID, p.raw, r.Phase, stringValue(r.ErrorMessage))
 		}
 	}
 	return err
 }
 func (s *RuntimeScheduler) advanceOpenCodeUpgrade(ctx context.Context, r *models.RuntimeRollout) (advanceErr error) {
+	var observedCheckpoint string
 	defer func() {
-		if advanceErr != nil && s != nil && s.upgrade != nil && s.upgrade.sess != nil && ctx.Err() == nil {
-			_, _ = s.upgrade.sess.SQL().ExecContext(ctx, `UPDATE runtime_rollouts SET error_message=?,updated_at=UTC_TIMESTAMP(6) WHERE id=? AND status IN ('pending','running')`, advanceErr.Error(), r.ID)
+		if advanceErr != nil && observedCheckpoint != "" && s != nil && s.upgrade != nil && s.upgrade.sess != nil && ctx.Err() == nil {
+			_, _ = s.upgrade.sess.SQL().ExecContext(ctx, `UPDATE runtime_rollouts r JOIN runtime_rollout_checkpoints c ON c.rollout_id=r.id SET r.error_message=?,r.updated_at=UTC_TIMESTAMP(6) WHERE r.id=? AND r.status IN ('pending','running') AND r.phase=? AND BINARY c.state_json=BINARY ?`, advanceErr.Error(), r.ID, r.Phase, observedCheckpoint)
 		}
 	}()
 
@@ -509,6 +511,7 @@ func (s *RuntimeScheduler) advanceOpenCodeUpgrade(ctx context.Context, r *models
 	if err != nil {
 		return err
 	}
+	observedCheckpoint = p.raw
 	active, err := s.rolloutRepo.ListActive(ctx, RuntimeTypeOpenCode)
 	if err != nil {
 		return err
@@ -533,6 +536,9 @@ func (s *RuntimeScheduler) advanceOpenCodeUpgrade(ctx context.Context, r *models
 		if err = backend.ValidateOpenCodeUpgradeSource(ctx, source); err != nil {
 			return err
 		}
+	}
+	if strings.HasPrefix(p.Stage, "force_") {
+		return s.advanceOpenCodeForceRetry(ctx, r, p, backend)
 	}
 	for _, proof := range p.TargetProofs {
 		if p.Stage == "rollback_retire" || p.Stage == "rollback_verify" {
@@ -692,6 +698,11 @@ func (s *RuntimeScheduler) advanceOpenCodeUpgrade(ctx context.Context, r *models
 			}
 			item.Compatibility = compat
 			lease := RuntimeAgentWriterLeaseRequest{RuntimeAgentWorkspaceRequest: request, Token: request.LeaseToken, TTLSeconds: 3600}
+			if p.ForceRetry != nil {
+				if e = s.probeOpenCodeForceLeases(ctx, p); e != nil {
+					return e
+				}
+			}
 			if e = upgrade.AcquireWriterLease(ctx, stringValue(target.AgentEndpoint), lease); e != nil {
 				return e
 			}

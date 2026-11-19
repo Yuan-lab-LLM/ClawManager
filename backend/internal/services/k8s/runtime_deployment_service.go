@@ -23,6 +23,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/version"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/util/retry"
 )
 
@@ -445,11 +446,17 @@ func (s *runtimeDeploymentService) DeleteUpgradePool(ctx context.Context, namesp
 }
 
 type runtimeDeploymentService struct {
-	client kubernetes.Interface
+	client         kubernetes.Interface
+	execConfig     *rest.Config
+	forceProbeExec func(context.Context, *corev1.Pod, []string) ([]byte, error)
 }
 
-func NewRuntimeDeploymentService(client kubernetes.Interface) RuntimeDeploymentService {
-	return &runtimeDeploymentService{client: client}
+func NewRuntimeDeploymentService(client kubernetes.Interface, execConfig ...*rest.Config) RuntimeDeploymentService {
+	s := &runtimeDeploymentService{client: client}
+	if len(execConfig) == 1 {
+		s.execConfig = execConfig[0]
+	}
+	return s
 }
 
 func BuildRuntimeDeployment(spec RuntimeDeploymentSpec) *appsv1.Deployment {

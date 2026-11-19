@@ -64,7 +64,7 @@ func TestRuntimePoolOpenCodeNativeReadViewAllPhasesMySQL(t *testing.T) {
 	h.SetUpgradeService(svc)
 	router := runtimePoolHandlerRouter(1, "admin", h)
 	router.GET("/api/v1/admin/runtime-rollouts/:id", h.GetRollout)
-	stages := []string{"standby", "standby_ready", "quiesce", "preserve", "activate", "restart", "switch", "retire", "verify", "rollback_stop", "rollback_restore", "rollback_restart", "rollback_retire", "rollback_verify"}
+	stages := []string{"standby", "standby_ready", "quiesce", "preserve", "activate", "restart", "switch", "retire", "verify", "rollback_stop", "rollback_restore", "rollback_restart", "rollback_retire", "rollback_verify", "force_zero", "force_replace", "force_ready"}
 	for _, stage := range stages {
 		t.Run(stage, func(t *testing.T) {
 			var p map[string]any
@@ -72,7 +72,10 @@ func TestRuntimePoolOpenCodeNativeReadViewAllPhasesMySQL(t *testing.T) {
 				t.Fatal(err)
 			}
 			p["stage"] = stage
-			if stage == "standby" {
+			if strings.HasPrefix(stage, "force_") {
+				p["force_retry"] = map[string]any{"audit_id": 1, "request_id": "81e247de-ef46-41ad-853e-0bb20524303e", "actor_user_id": 1, "old_target_image_ref": base["target_image"], "target_image_ref": base["target_image"], "native_evidence": "fixture-private-do-not-return", "lease_evidence": "fixture-private-do-not-return"}
+			}
+			if stage == "standby" || strings.HasPrefix(stage, "force_") {
 				p["targets"] = []any{}
 				p["target_controllers"] = []any{}
 			}
@@ -113,7 +116,13 @@ func TestRuntimePoolOpenCodeNativeReadViewAllPhasesMySQL(t *testing.T) {
 			if envelope.Data.PoolProgress != nil || envelope.Data.PoolOperation != nil || envelope.Data.Execution != nil {
 				t.Fatal("native read view borrowed generic/OpenClaw execution policy")
 			}
-			if stage != "standby" {
+			if strings.HasPrefix(stage, "force_") {
+				attempt, ok := v["force_retry"].(map[string]any)
+				if !ok || attempt["confirmed"] != true || attempt["request_id"] != "81e247de-ef46-41ad-853e-0bb20524303e" || attempt["stage"] != stage {
+					t.Fatalf("lost force observation: %+v", v)
+				}
+			}
+			if stage != "standby" && !strings.HasPrefix(stage, "force_") {
 				targets, ok := v["targets"].([]any)
 				if !ok || len(targets) != 1 || targets[0].(map[string]any)["pod_uid"] != "91fcf4b2-ffc9-42a7-af95-00ae38aba9cc" {
 					t.Fatalf("lost actual target identity: %+v", v)

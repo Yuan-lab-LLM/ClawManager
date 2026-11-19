@@ -727,7 +727,7 @@ func main() {
 			log.Printf("runtime scheduler disabled: k8s client is unavailable")
 		} else {
 			runtimeLeader := services.NewRuntimeLeaderService(k8sClient.Clientset, cfg.Runtime.Namespace, cfg.Runtime.BackendReplicaID)
-			runtimeDeployments := k8s.NewRuntimeDeploymentService(k8sClient.Clientset)
+			runtimeDeployments := k8s.NewRuntimeDeploymentService(k8sClient.Clientset, k8sClient.Config)
 			runtimeSchedulerOptions := []services.RuntimeSchedulerOption{
 				services.WithRuntimeSchedulerWorkspaceRoot(cfg.Runtime.WorkspaceRoot),
 				services.WithRuntimeSchedulerAutoStopRepository(autoStopRepo),
@@ -1176,6 +1176,8 @@ func main() {
 			adminRuntime.POST("/runtime-rollouts/prepare", runtimeManagementHandler.PrepareRollout)
 			adminRuntime.POST("/runtime-rollouts", runtimePoolHandler.StartRollout)
 			adminRuntime.POST("/runtime-rollouts/preflight", runtimePoolHandler.PreflightOpenClawRollout)
+			adminRuntime.POST("/runtime-rollouts/:id/force-retry/preflight", runtimePoolHandler.PreflightOpenCodeForceRetry)
+			adminRuntime.POST("/runtime-rollouts/:id/force-retry", runtimePoolHandler.ConfirmOpenCodeForceRetry)
 			adminRuntime.GET("/runtime-rollouts/:id", runtimePoolHandler.GetRollout)
 			adminRuntime.GET("/runtime-rollouts", runtimePoolHandler.ListRollouts)
 		}

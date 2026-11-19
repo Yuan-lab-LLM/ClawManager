@@ -25,20 +25,21 @@ import (
 )
 
 type RuntimeScheduler struct {
-	autoStopRepo *repository.InstanceAutoStopRepository
-	management   *RuntimeManagementService
-	instanceRepo repository.InstanceRepository
-	podRepo      repository.RuntimePodRepository
-	bindingRepo  repository.InstanceRuntimeBindingRepository
-	rolloutRepo  repository.RuntimeRolloutRepository
-	agentClient  RuntimeAgentClient
-	events       RuntimeEventService
-	leader       RuntimeLeaderService
-	deployments  k8s.RuntimeDeploymentService
-	envBuilder   RuntimeGatewayEnvBuilder
-	upgrade      *RuntimeUpgradeService
-	proxyPolicy  *RuntimeProxyPolicyCoordinator
-	tick         time.Duration
+	ocForceInspect func(context.Context, string, map[string]string) (openCodeNativeContract, error)
+	autoStopRepo   *repository.InstanceAutoStopRepository
+	management     *RuntimeManagementService
+	instanceRepo   repository.InstanceRepository
+	podRepo        repository.RuntimePodRepository
+	bindingRepo    repository.InstanceRuntimeBindingRepository
+	rolloutRepo    repository.RuntimeRolloutRepository
+	agentClient    RuntimeAgentClient
+	events         RuntimeEventService
+	leader         RuntimeLeaderService
+	deployments    k8s.RuntimeDeploymentService
+	envBuilder     RuntimeGatewayEnvBuilder
+	upgrade        *RuntimeUpgradeService
+	proxyPolicy    *RuntimeProxyPolicyCoordinator
+	tick           time.Duration
 
 	workspaceRoot             string
 	runtimeNamespace          string

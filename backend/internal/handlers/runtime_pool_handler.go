@@ -21,6 +21,7 @@ import (
 )
 
 type RuntimePoolHandler struct {
+	forceRetry         openCodeForceRetryService
 	podRepo            repository.RuntimePodRepository
 	bindingRepo        repository.InstanceRuntimeBindingRepository
 	rolloutRepo        repository.RuntimeRolloutRepository

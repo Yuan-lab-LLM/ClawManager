@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"clawreef/internal/models"
 )
@@ -12,6 +13,7 @@ import (
 // These are recorded checkpoint identities, not a fresh native or Kubernetes
 // observation. Never serialize the maintenance plan, assignments or raw proofs.
 type OpenCodeUpgradeOperationView struct {
+	ForceRetry        *OpenCodeForceRetryView         `json:"force_retry,omitempty"`
 	Kind              string                          `json:"kind"`
 	RolloutID         int64                           `json:"rollout_id"`
 	Stage             string                          `json:"stage"`
@@ -25,6 +27,15 @@ type OpenCodeUpgradeOperationView struct {
 	TargetControllers []OpenCodeUpgradeControllerView `json:"target_controllers"`
 	Targets           []OpenCodeUpgradePodView        `json:"targets"`
 	Instances         []OpenCodeUpgradeInstanceView   `json:"instances"`
+}
+type OpenCodeForceRetryView struct {
+	RequestID         string    `json:"request_id"`
+	ActorUserID       int       `json:"actor_user_id"`
+	OldTargetImageRef string    `json:"old_target_image_ref"`
+	TargetImageRef    string    `json:"target_image_ref"`
+	Stage             string    `json:"stage"`
+	Confirmed         bool      `json:"confirmed"`
+	StartedAt         time.Time `json:"started_at"`
 }
 type OpenCodeUpgradeControllerView struct {
 	Namespace      string `json:"namespace"`
@@ -70,6 +81,9 @@ func LoadOpenCodeUpgradeOperation(ctx context.Context, repo any, r *models.Runti
 		return nil, fmt.Errorf("invalid OpenCode native checkpoint")
 	}
 	v := &OpenCodeUpgradeOperationView{Kind: p.Kind, RolloutID: r.ID, Stage: p.Stage, ProtectionHeld: r.Status == "pending" || r.Status == "running", ProtectionScope: "active_runtime_type_guard", Message: "原生维护阶段及逐项状态来自持久记录；此读取不会推进升级。", TargetControllers: []OpenCodeUpgradeControllerView{}, Targets: []OpenCodeUpgradePodView{}, Instances: []OpenCodeUpgradeInstanceView{}}
+	if a := p.ForceRetry; a != nil {
+		v.ForceRetry = &OpenCodeForceRetryView{RequestID: a.RequestID, ActorUserID: a.ActorUserID, OldTargetImageRef: a.OldImage, TargetImageRef: a.NewImage, Stage: p.Stage, Confirmed: a.AuditID > 0, StartedAt: a.StartedAt}
+	}
 	v.ErrorMessage = strings.TrimSpace(stringValue(r.ErrorMessage))
 	if v.ErrorMessage != "" {
 		v.ErrorScope = "last_recorded_controller_error_not_revalidated"
@@ -97,6 +111,11 @@ func LoadOpenCodeUpgradeOperation(ctx context.Context, repo any, r *models.Runti
 		v.Blocked = true
 		v.BlockedReason = "required_target_capability_missing"
 		v.Message = "CM 最后记录目标缺少必需的安全维护能力；操作仍受 Runtime 类型保护。阶段与实例状态按记录展示，请勿重提或清除保护。"
+	}
+	if v.ProtectionHeld && p.ForceRetry != nil && (strings.HasPrefix(p.Stage, "force_") || p.Stage == "preserve" && allQuiesced) && v.ErrorMessage != "" {
+		v.Blocked = true
+		v.BlockedReason = "force_retry_observation_refused"
+		v.Message = "CM 最后记录 force retry 阶段无法确认安全条件；原操作及数据保护仍保留，请只观察此操作。"
 	}
 	return v, nil
 }
